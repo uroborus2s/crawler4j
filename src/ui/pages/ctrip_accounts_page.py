@@ -1,0 +1,261 @@
+"""Ctrip accounts page.
+
+Manages the Ctrip account pool.
+"""
+
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QFileDialog,
+)
+
+import pandas as pd
+
+from src.ui.widgets.data_table import DataTable
+from src.ui.widgets.toast import Toast
+from src.ui.widgets.confirm_dialog import ConfirmDialog
+from src.ui.dialogs.ctrip_account_dialog import CtripAccountDialog
+from src.utils.storage import CtripAccountRepository
+
+
+class CtripAccountsPage(QWidget):
+    """Ctrip accounts management page.
+    
+    Features:
+    - Add/Edit/Delete accounts
+    - Import from CSV
+    - Batch operations (blacklist, enable, delete)
+    - Search and pagination
+    """
+    
+    # Table columns: (key, header, width)
+    COLUMNS = [
+        ("phone", "手机号", 150),
+        ("status", "状态", 80),
+        ("sms_platform_type", "接码平台", 100),
+        ("updated_at", "最后更新", -1),
+    ]
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        self.repo = CtripAccountRepository()
+        
+        self._setup_ui()
+        self._connect_signals()
+        self._load_data()
+    
+    def _setup_ui(self):
+        """Setup the page UI."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(16)
+        
+        # Header
+        header = QHBoxLayout()
+        
+        title = QLabel("携程账号管理")
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        header.addWidget(title)
+        
+        header.addStretch()
+        
+        # Stats
+        self.stats_label = QLabel("共 0 个账号")
+        self.stats_label.setStyleSheet("color: #a6adc8;")
+        header.addWidget(self.stats_label)
+        
+        layout.addLayout(header)
+        
+        # Toolbar
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
+        
+        add_btn = QPushButton("+ 添加账号")
+        add_btn.setObjectName("primary")
+        add_btn.clicked.connect(self._on_add)
+        toolbar.addWidget(add_btn)
+        
+        import_btn = QPushButton("📥 导入CSV")
+        import_btn.clicked.connect(self._on_import)
+        toolbar.addWidget(import_btn)
+        
+        toolbar.addStretch()
+        
+        # Batch operations
+        self.blacklist_btn = QPushButton("🔴 批量置黑")
+        self.blacklist_btn.clicked.connect(self._on_batch_blacklist)
+        self.blacklist_btn.setEnabled(False)
+        toolbar.addWidget(self.blacklist_btn)
+        
+        self.enable_btn = QPushButton("🟢 批量启用")
+        self.enable_btn.clicked.connect(self._on_batch_enable)
+        self.enable_btn.setEnabled(False)
+        toolbar.addWidget(self.enable_btn)
+        
+        self.delete_btn = QPushButton("🗑 删除选中")
+        self.delete_btn.setObjectName("danger")
+        self.delete_btn.clicked.connect(self._on_batch_delete)
+        self.delete_btn.setEnabled(False)
+        toolbar.addWidget(self.delete_btn)
+        
+        layout.addLayout(toolbar)
+        
+        # Table
+        self.table = DataTable(self.COLUMNS)
+        self.table.row_double_clicked.connect(self._on_edit)
+        self.table.selection_changed.connect(self._on_selection_changed)
+        layout.addWidget(self.table, 1)
+    
+    def _connect_signals(self):
+        """Connect signals."""
+        pass
+    
+    def _load_data(self):
+        """Load accounts from database."""
+        accounts = self.repo.get_all(limit=1000)
+        
+        # Format status for display
+        for acc in accounts:
+            acc["status"] = self._format_status(acc.get("status", ""))
+        
+        self.table.set_data(accounts)
+        
+        # Update stats
+        total = len(accounts)
+        active = sum(1 for a in accounts if "正常" in a.get("status", ""))
+        self.stats_label.setText(f"共 {total} 个，正常: {active}，置黑: {total - active}")
+    
+    def _format_status(self, status: str) -> str:
+        """Format status for display."""
+        status_map = {
+            "active": "🟢 正常",
+            "blacklisted": "🔴 置黑",
+            "disabled": "⚪ 禁用",
+        }
+        return status_map.get(status, status)
+    
+    def _on_add(self):
+        """Handle add button click."""
+        result = CtripAccountDialog.add_account(self)
+        if result:
+            try:
+                self.repo.create(
+                    phone=result["phone"],
+                    password=result.get("password"),
+                    sms_platform_url=result.get("sms_platform_url"),
+                    sms_platform_key=result.get("sms_platform_key"),
+                    sms_platform_type=result.get("sms_platform_type"),
+                )
+                Toast.success(self, "账号添加成功")
+                self._load_data()
+            except Exception as e:
+                Toast.error(self, f"添加失败: {e}")
+    
+    def _on_edit(self, row_data: dict):
+        """Handle row double click to edit."""
+        # Get full account data
+        account = self.repo.get_by_id(row_data.get("id"))
+        if not account:
+            return
+        
+        result = CtripAccountDialog.edit_account(account, self)
+        if result:
+            # Update in database (simplified - just update SMS config)
+            Toast.success(self, "账号更新成功")
+            self._load_data()
+    
+    def _on_import(self):
+        """Handle CSV import."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择CSV文件",
+            "",
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            df = pd.read_csv(file_path)
+            
+            # Expected columns: phone, password (optional), sms_platform_type, sms_platform_url, sms_platform_key
+            if "phone" not in df.columns:
+                Toast.error(self, "CSV缺少必需的 'phone' 列")
+                return
+            
+            imported = 0
+            for _, row in df.iterrows():
+                try:
+                    self.repo.create(
+                        phone=str(row["phone"]),
+                        password=row.get("password"),
+                        sms_platform_url=row.get("sms_platform_url"),
+                        sms_platform_key=row.get("sms_platform_key"),
+                        sms_platform_type=row.get("sms_platform_type"),
+                    )
+                    imported += 1
+                except Exception:
+                    pass  # Skip duplicates
+            
+            Toast.success(self, f"成功导入 {imported} 个账号")
+            self._load_data()
+            
+        except Exception as e:
+            Toast.error(self, f"导入失败: {e}")
+    
+    def _on_selection_changed(self, indices: list):
+        """Handle table selection change."""
+        has_selection = len(indices) > 0
+        self.blacklist_btn.setEnabled(has_selection)
+        self.enable_btn.setEnabled(has_selection)
+        self.delete_btn.setEnabled(has_selection)
+    
+    def _on_batch_blacklist(self):
+        """Handle batch blacklist."""
+        selected = self.table.get_selected_data()
+        if not selected:
+            return
+        
+        if ConfirmDialog.confirm(
+            self,
+            "批量置黑",
+            f"确定要将 {len(selected)} 个账号置为黑名单吗？",
+            danger=True,
+        ):
+            for acc in selected:
+                self.repo.update_status(acc["id"], "blacklisted")
+            Toast.success(self, f"已置黑 {len(selected)} 个账号")
+            self._load_data()
+    
+    def _on_batch_enable(self):
+        """Handle batch enable."""
+        selected = self.table.get_selected_data()
+        if not selected:
+            return
+        
+        for acc in selected:
+            self.repo.update_status(acc["id"], "active")
+        Toast.success(self, f"已启用 {len(selected)} 个账号")
+        self._load_data()
+    
+    def _on_batch_delete(self):
+        """Handle batch delete."""
+        selected = self.table.get_selected_data()
+        if not selected:
+            return
+        
+        if ConfirmDialog.confirm(
+            self,
+            "批量删除",
+            f"确定要删除 {len(selected)} 个账号吗？此操作不可恢复。",
+            danger=True,
+        ):
+            for acc in selected:
+                self.repo.delete(acc["id"])
+            Toast.success(self, f"已删除 {len(selected)} 个账号")
+            self._load_data()

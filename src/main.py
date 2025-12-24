@@ -31,10 +31,26 @@ def main():
     # Create main window
     window = MainWindow()
     
-    # Replace dashboard placeholder with real page
+    # Instantiate all pages
+    from src.ui.pages.ctrip_accounts_page import CtripAccountsPage
+    from src.ui.pages.labor_accounts_page import LaborAccountsPage
+    from src.ui.pages.environments_page import EnvironmentsPage
+    from src.ui.pages.settings_page import SettingsPage
+
     dashboard = DashboardPage()
-    dashboard.add_demo_data()  # Add demo data for testing
-    window.set_page(0, dashboard)
+    dashboard.add_demo_data()
+    
+    ctrip_page = CtripAccountsPage()
+    labor_page = LaborAccountsPage()
+    env_page = EnvironmentsPage()
+    settings_page = SettingsPage()
+
+    # Add pages to window (order must match Sidebar.NAV_ITEMS)
+    window.add_page(dashboard)
+    window.add_page(ctrip_page)
+    window.add_page(labor_page)
+    window.add_page(env_page)
+    window.add_page(settings_page)
     
     # Show window
     window.show()

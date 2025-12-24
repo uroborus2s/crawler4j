@@ -5,14 +5,11 @@ Provides the main application window with sidebar navigation and content area.
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
     QHBoxLayout,
-    QVBoxLayout,
     QStackedWidget,
-    QLabel,
 )
 
 from src.ui.widgets.sidebar import Sidebar
@@ -76,25 +73,24 @@ class MainWindow(QMainWindow):
         self.status_widget = StatusBarWidget()
         self.setStatusBar(self.status_widget)
         
-        # Placeholder pages (will be replaced with real pages)
-        self._add_placeholder_pages()
+        # We will add real pages in main.py
     
     def _add_placeholder_pages(self):
-        """Add placeholder pages for testing."""
-        pages = ["控制台", "携程账号", "劳保账号", "环境管理", "设置"]
-        for name in pages:
-            page = QWidget()
-            layout = QVBoxLayout(page)
-            label = QLabel(f"{name} 页面")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet("font-size: 24px; color: #a6adc8;")
-            layout.addWidget(label)
-            self.content_stack.addWidget(page)
+        """No longer used as we add real pages in main.py."""
+        pass
     
     def _connect_signals(self):
         """Connect sidebar navigation signals."""
         self.sidebar.page_changed.connect(self.content_stack.setCurrentIndex)
     
+    def add_page(self, widget: QWidget):
+        """Add a page to the content stack.
+        
+        Args:
+            widget: Page widget to add.
+        """
+        self.content_stack.addWidget(widget)
+
     def set_page(self, index: int, widget: QWidget):
         """Replace a page in the content stack.
         
