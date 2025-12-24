@@ -1,50 +1,36 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+SYNC IMPACT REPORT
+Version change: 0.0.0 -> 1.0.0
+Modified principles:
+- [NEW] 代码质量 (Code Quality)
+- [NEW] 测试标准 (Testing Standards)
+- [NEW] 用户体验一致性 (UX Consistency)
+- [NEW] 性能要求 (Performance Requirements)
+Added sections: Governance
+Templates requiring updates: None
+-->
+# Crawler4j 项目宪章
 
-## Core Principles
+## 核心原则
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### 一、代码质量
+**简洁至上 (KISS)**。代码必须保持清晰、可读且易于维护。坚决避免过度工程化和不必要的防御性设计。立足于第一性原理剖析问题，不盲从惯例。任何引入的复杂性都必须有明确且令人信服的正当理由。
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### 二、测试标准
+**测试驱动 (Test-First)**。采用渐进式开发，先思考测试用例。核心逻辑必须有单元测试覆盖，关键业务路径必须有集成测试保障。事实为本，若有谬误，通过测试快速发现并修正。
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### 三、用户体验一致性
+**直观流畅**。在所有功能模块中保持一致的交互逻辑和视觉语言。设计必须以用户为中心，确保操作符合直觉，并提供即时、明确的系统反馈。
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### 四、性能要求
+**高效响应**。性能不是可选项，而是核心特性。系统应追求极速响应，优化资源消耗。避免无谓的计算开销和网络请求，确保在受限环境下依然保持流畅。
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+## 治理
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+### 修订与执行
+本宪章确立了项目的工程价值观。
+1. **最高准则**：代码审查（CR）和技术方案设计（RFC）必须以此为基准。
+2. **修订流程**：任何对原则的修改或解释需提交正式提案，并经核心团队批准。
+3. **版本控制**：遵循语义化版本规范管理宪章更新。
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
-
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
-
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
-
-## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
-
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
-
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2025-12-24 | **Last Amended**: 2025-12-24
