@@ -3,7 +3,7 @@
 The main control console for managing automation tasks.
 """
 
-from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -21,7 +21,9 @@ from PyQt6.QtWidgets import (
 
 from src.ui.widgets.log_viewer import LogViewer
 from src.ui.widgets.toast import Toast
-from src.core.events import event_bus, EventType
+from src.core.events import event_bus
+from src.core.scheduler import Scheduler
+from src.utils.storage import EnvironmentRepository
 from src.utils.logger import logger
 
 
@@ -43,11 +45,14 @@ class DashboardPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         
+        self.scheduler = Scheduler()
+        self.env_repo = EnvironmentRepository()
         self._is_running = False
-        self._environments: list[dict] = []
+        self._scheduler_task = None
         
         self._setup_ui()
         self._connect_signals()
+        self._load_data()
     
     def _setup_ui(self):
         """Setup the dashboard UI."""
@@ -79,12 +84,13 @@ class DashboardPage(QWidget):
         
         control_layout.addStretch()
         
-        # Concurrency selector
+        # Concurrency selector (Sync with current config)
+        from src.config import config
         control_layout.addWidget(QLabel("并发:"))
         self.concurrency_combo = QComboBox()
         for i in range(1, 21):
             self.concurrency_combo.addItem(str(i), i)
-        self.concurrency_combo.setCurrentText("10")
+        self.concurrency_combo.setCurrentText(str(config.concurrency_limit))
         self.concurrency_combo.setMinimumWidth(70)
         control_layout.addWidget(self.concurrency_combo)
         
@@ -122,7 +128,7 @@ class DashboardPage(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         self.env_table.setColumnWidth(3, 100)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.env_table.setColumnWidth(4, 80)
+        self.env_table.setColumnWidth(4, 90)
         
         env_layout.addWidget(self.env_table)
         splitter.addWidget(env_group)
@@ -149,110 +155,51 @@ class DashboardPage(QWidget):
         # Connect logger
         logger.signals.log_added.connect(self.log_viewer.add_log)
         
-        # Connect event bus
-        event_bus.scheduler_status_changed.connect(self._on_scheduler_status)
-        event_bus.environment_status_changed.connect(self._on_env_status)
+        # Connect event bus for live updates
+        event_bus.environment_status_changed.connect(self._on_env_status_changed)
+        event_bus.labor_stats_updated.connect(lambda _: self._load_data())
     
-    def _on_start(self):
-        """Handle start button click."""
-        self._is_running = True
-        self._update_button_states()
+    def _load_data(self):
+        """Load environmental data from repository."""
+        envs = self.env_repo.get_all(limit=100)
         
-        # Emit event
-        event_bus.emit(EventType.SCHEDULER_STARTED)
+        # Map to display format
+        from src.utils.storage import CtripAccountRepository, LaborAccountRepository
+        ctrip_repo = CtripAccountRepository()
+        labor_repo = LaborAccountRepository()
         
-        # Log
-        logger.info("调度器已启动")
-        Toast.success(self, "任务已启动")
-    
-    def _on_stop(self):
-        """Handle stop button click."""
-        self._is_running = False
-        self._update_button_states()
-        
-        # Emit event
-        event_bus.emit(EventType.SCHEDULER_STOPPED)
-        
-        # Log
-        logger.info("调度器已停止")
-        Toast.info(self, "任务已停止")
-    
-    def _on_reset(self):
-        """Handle reset button click."""
-        # Clear logs
-        self.log_viewer.clear()
-        
-        # Log
-        logger.info("统计数据已重置")
-        Toast.info(self, "统计已重置")
-    
-    def _on_concurrency_changed(self, index: int):
-        """Handle concurrency change."""
-        value = self.concurrency_combo.itemData(index)
-        event_bus.emit(EventType.CONCURRENCY_CHANGED, {"value": value})
-        logger.info(f"并发数已调整为 {value}")
-    
-    def _update_button_states(self):
-        """Update button enabled states."""
-        self.start_btn.setEnabled(not self._is_running)
-        self.stop_btn.setEnabled(self._is_running)
-        
-        if self._is_running:
-            self.start_btn.setText("⏳ 运行中...")
-        else:
-            self.start_btn.setText("▶ 开始任务")
-    
-    @pyqtSlot(bool)
-    def _on_scheduler_status(self, is_running: bool):
-        """Handle scheduler status change from event bus."""
-        self._is_running = is_running
-        self._update_button_states()
-    
-    @pyqtSlot(int, str)
-    def _on_env_status(self, env_id: int, status: str):
-        """Handle environment status change from event bus."""
-        self._refresh_env_table()
-    
-    def set_environments(self, environments: list[dict]):
-        """Set the environment list data.
-        
-        Args:
-            environments: List of environment dicts with keys:
-                id, ctrip_phone, labor_phone, status, progress
-        """
-        self._environments = environments
-        self._refresh_env_table()
-    
-    def _refresh_env_table(self):
-        """Refresh the environment table display."""
-        self.env_table.setRowCount(len(self._environments))
-        
+        self.env_table.setRowCount(len(envs))
         running_count = 0
-        for row, env in enumerate(self._environments):
+        
+        for row, env in enumerate(envs):
+            # Fetch phone numbers
+            ctrip = ctrip_repo.get_by_id(env["ctrip_account_id"])
+            labor = labor_repo.get_by_id(env["labor_account_id"])
+            
             # ID
-            self.env_table.setItem(row, 0, QTableWidgetItem(f"ENV-{env.get('id', '')}"))
+            self.env_table.setItem(row, 0, QTableWidgetItem(f"ENV-{env['id']}"))
             
-            # Ctrip phone
-            self.env_table.setItem(row, 1, QTableWidgetItem(env.get("ctrip_phone", "")))
+            # Phone numbers (masked)
+            ctrip_phone = ctrip["phone"] if ctrip else "-"
+            if len(ctrip_phone) > 7:
+                ctrip_phone = f"{ctrip_phone[:3]}****{ctrip_phone[-4:]}"
+            self.env_table.setItem(row, 1, QTableWidgetItem(ctrip_phone))
+            self.env_table.setItem(row, 2, QTableWidgetItem(labor["phone"] if labor else "-"))
             
-            # Labor phone
-            self.env_table.setItem(row, 2, QTableWidgetItem(env.get("labor_phone", "")))
-            
-            # Status with color
+            # Status
             status = env.get("status", "idle")
             status_display = self._get_status_display(status)
-            status_item = QTableWidgetItem(status_display)
-            self.env_table.setItem(row, 3, status_item)
+            self.env_table.setItem(row, 3, QTableWidgetItem(status_display))
             
-            # Progress
-            self.env_table.setItem(row, 4, QTableWidgetItem(env.get("progress", "0/0")))
+            # Progress (tasks completed / total)
+            completed = labor.get("completed_count", 0) if labor else 0
+            self.env_table.setItem(row, 4, QTableWidgetItem(f"{completed} done"))
             
             if status == "running":
                 running_count += 1
-        
-        # Update stats
-        self.env_stats.setText(f"共 {len(self._environments)} 个环境，运行中: {running_count}")
-    
+                
+        self.env_stats.setText(f"共 {len(envs)} 个环境，运行中: {running_count}")
+
     def _get_status_display(self, status: str) -> str:
         """Get display string for status."""
         status_map = {
@@ -265,16 +212,63 @@ class DashboardPage(QWidget):
         }
         return status_map.get(status, status)
     
-    def add_demo_data(self):
-        """Add demo data for testing."""
-        demo_envs = [
-            {"id": 1, "ctrip_phone": "138****1234", "labor_phone": "user001", "status": "running", "progress": "3/5"},
-            {"id": 2, "ctrip_phone": "139****5678", "labor_phone": "user002", "status": "searching", "progress": "4/5"},
-            {"id": 3, "ctrip_phone": "137****9012", "labor_phone": "user003", "status": "logging_in", "progress": "1/5"},
-        ]
-        self.set_environments(demo_envs)
+    def _on_start(self):
+        """Handle start button click."""
+        if self._is_running:
+            return
+            
+        import asyncio
+        loop = asyncio.get_event_loop()
+        self._scheduler_task = loop.create_task(self.scheduler.start())
         
-        # Add demo logs
-        logger.info("环境 ENV-1 开始携程搜索，关键词: 北京酒店", environment_id=1)
-        logger.info("环境 ENV-2 提交答案成功，题目ID: 12345", environment_id=2)
-        logger.warning("环境 ENV-3 登录验证码触发，正在接码...", environment_id=3)
+        self._is_running = True
+        self._update_button_states()
+        logger.info("任务调度器已开启")
+        Toast.success(self, "自动化任务已开始")
+    
+    def _on_stop(self):
+        """Handle stop button click."""
+        if not self._is_running:
+            return
+            
+        self.scheduler.stop()
+        self._is_running = False
+        self._update_button_states()
+        logger.info("正在停止所有任务...")
+        Toast.info(self, "正在停止任务...")
+    
+    def _on_reset(self):
+        """Handle reset button click."""
+        self.log_viewer.clear()
+        # Potential: reset all environment statuses in DB if crashed?
+        # For now just UI clear
+        logger.info("控制台日志面板已清空")
+        Toast.info(self, "日志已清空")
+    
+    def _on_concurrency_changed(self, index: int):
+        """Handle concurrency change."""
+        value = self.concurrency_combo.itemData(index)
+        from src.config import config
+        config.concurrency_limit = value
+        logger.info(f"核心调整：最大并发数已设为 {value}")
+    
+    def _update_button_states(self):
+        """Update button enabled states."""
+        self.start_btn.setEnabled(not self._is_running)
+        self.stop_btn.setEnabled(self._is_running)
+        
+        if self._is_running:
+            self.start_btn.setText("⏳ 运行中")
+            self.start_btn.setStyleSheet("background-color: #45475a;") # Dull it
+        else:
+            self.start_btn.setText("▶ 开始任务")
+            self.start_btn.setStyleSheet("") # Restore primary success color
+
+    def _on_env_status_changed(self, data: dict):
+        """Slot for environment status changes."""
+        # For now, full reload is safest to maintain sync with Repo
+        self._load_data()
+
+    def add_demo_data(self):
+        """No longer used as we load real data from DB."""
+        pass
