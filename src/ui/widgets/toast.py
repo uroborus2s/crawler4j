@@ -3,8 +3,9 @@
 Provides brief, non-intrusive notifications.
 """
 
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt6.QtWidgets import QWidget, QLabel, QHBoxLayout, QGraphicsOpacityEffect
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
+from PyQt6.QtGui import QPainter
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QStyle, QStyleOption, QWidget
 
 
 class Toast(QWidget):
@@ -13,6 +14,15 @@ class Toast(QWidget):
     Usage:
         toast = Toast.show_message(parent, "Operation successful!", "success")
     """
+    
+    def paintEvent(self, event):
+        """Override paintEvent to support stylesheets on custom QWidget."""
+        opt = QStyleOption()
+        opt.initFrom(self)
+        p = QPainter(self)
+        style = self.style()
+        if style:
+            style.drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, p, self)
     
     # Style presets
     STYLES = {
@@ -66,6 +76,15 @@ class Toast(QWidget):
         
         # Setup animation
         self._setup_animation()
+        
+        # Add shadow
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(Qt.GlobalColor.black)
+        self.setGraphicsEffect(shadow)
     
     def _setup_ui(self, message: str, style: dict):
         """Setup the toast UI."""
@@ -75,30 +94,37 @@ class Toast(QWidget):
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
         
         # Icon
         icon = QLabel(style["icon"])
-        icon.setStyleSheet("font-size: 16px;")
+        icon.setStyleSheet("font-size: 20px; background: transparent; color: white;")
         layout.addWidget(icon)
         
         # Message
         label = QLabel(message)
+        # Use white for better contrast on colored backgrounds
+        text_color = "#ffffff" if style['bg'] != "#313244" else "#cdd6f4"
+            
         label.setStyleSheet(f"""
-            color: {style['text']};
-            font-size: 13px;
-            font-weight: 500;
+            color: {text_color};
+            font-size: 14px;
+            font-weight: 600;
+            background: transparent;
         """)
         layout.addWidget(label)
         
-        # Container style
+        # Container style - explicitly target the widget instance
+        self.setObjectName("ToastWidget")
         self.setStyleSheet(f"""
-            Toast {{
+            #ToastWidget {{
                 background-color: {style['bg']};
-                border-radius: 8px;
+                border-radius: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.2);
             }}
         """)
         
@@ -106,11 +132,9 @@ class Toast(QWidget):
     
     def _setup_animation(self):
         """Setup fade animation."""
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        
-        # Fade out animation
-        self.fade_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
+        # Note: GraphicsEffect (shadow) and PropertyAnimation (opacity) conflict on same widget
+        # We handle fade by window opacity property instead of effect
+        self.fade_animation = QPropertyAnimation(self, b"windowOpacity")
         self.fade_animation.setDuration(300)
         self.fade_animation.setStartValue(1.0)
         self.fade_animation.setEndValue(0.0)
@@ -122,8 +146,9 @@ class Toast(QWidget):
         self.show()
         
         # Position at top-right of parent
-        if self.parent():
-            parent_rect = self.parent().rect()
+        parent = self.parent()
+        if parent and isinstance(parent, QWidget):
+            parent_rect = parent.rect()
             x = parent_rect.width() - self.width() - 20
             y = 20
             self.move(x, y)

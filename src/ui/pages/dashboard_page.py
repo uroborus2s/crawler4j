@@ -5,26 +5,26 @@ The main control console for managing automation tasks.
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QGroupBox,
-    QPushButton,
+    QAbstractItemView,
     QComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
     QLabel,
+    QPushButton,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
-    QHeaderView,
-    QSplitter,
-    QAbstractItemView,
+    QVBoxLayout,
+    QWidget,
 )
 
+from src.core.events import get_event_bus
+from src.core.scheduler import Scheduler
 from src.ui.widgets.log_viewer import LogViewer
 from src.ui.widgets.toast import Toast
-from src.core.events import event_bus
-from src.core.scheduler import Scheduler
-from src.utils.storage import EnvironmentRepository
 from src.utils.logger import logger
+from src.utils.storage import EnvironmentRepository
 
 
 class DashboardPage(QWidget):
@@ -144,7 +144,7 @@ class DashboardPage(QWidget):
         splitter.setSizes([300, 200])
         
         layout.addWidget(splitter, 1)
-    
+
     def _connect_signals(self):
         """Connect signals and slots."""
         self.start_btn.clicked.connect(self._on_start)
@@ -156,8 +156,9 @@ class DashboardPage(QWidget):
         logger.signals.log_added.connect(self.log_viewer.add_log)
         
         # Connect event bus for live updates
-        event_bus.environment_status_changed.connect(self._on_env_status_changed)
-        event_bus.labor_stats_updated.connect(lambda _: self._load_data())
+        bus = get_event_bus()
+        bus.environment_status_changed.connect(self._on_env_status_changed)
+        bus.labor_stats_updated.connect(lambda _: self._load_data())
     
     def _load_data(self):
         """Load environmental data from repository."""

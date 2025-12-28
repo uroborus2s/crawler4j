@@ -86,22 +86,11 @@ class EventBus(QObject):
     environment_status_changed = pyqtSignal(int, str)  # env_id, status
     scheduler_status_changed = pyqtSignal(bool)  # is_running
     stats_updated = pyqtSignal(dict)  # stats dict
+    labor_stats_updated = pyqtSignal(dict)  # data dict
     
-    _instance: "EventBus | None" = None
-    
-    def __new__(cls):
-        """Singleton pattern."""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
     
     def __init__(self):
-        if self._initialized:
-            return
-        
         super().__init__()
-        self._initialized = True
     
     def emit(self, event_type: EventType, data: Any = None, source: str | None = None):
         """Emit an event.
@@ -129,8 +118,18 @@ class EventBus(QObject):
             is_running = event.type == EventType.SCHEDULER_STARTED
             self.scheduler_status_changed.emit(is_running)
         elif event.type == EventType.LABOR_STATS_UPDATED:
-            self.stats_updated.emit(event.data or {})
+            data = event.data or {}
+            self.stats_updated.emit(data)
+            self.labor_stats_updated.emit(data)
 
 
-# Global event bus instance
-event_bus = EventBus()
+
+# Global event bus instance (Lazy initialized)
+_event_bus_instance: EventBus | None = None
+
+def get_event_bus() -> EventBus:
+    """Get the global event bus instance."""
+    global _event_bus_instance
+    if _event_bus_instance is None:
+        _event_bus_instance = EventBus()
+    return _event_bus_instance

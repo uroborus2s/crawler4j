@@ -8,6 +8,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('src/ui/styles/dark_theme.qss', 'src/ui/styles'),
+        ('src/assets/icon.png', 'src/assets'),
     ],
     hiddenimports=[
         'PyQt6.sip',
@@ -41,7 +42,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='src/ui/styles/icon.ico' if os.path.exists('src/ui/styles/icon.ico') else None,
+    icon='src/assets/icon.png',
 )
 coll = COLLECT(
     exe,

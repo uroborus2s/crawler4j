@@ -130,6 +130,26 @@ class Config:
     def default_sms_key(self, value: str) -> None:
         self._set("default_sms_key", value)
     
+    # Custom path settings
+    
+    @property
+    def bitbrowser_path(self) -> str:
+        """Custom path for BitBrowser."""
+        return self._get("bitbrowser_path", "")
+    
+    @bitbrowser_path.setter
+    def bitbrowser_path(self, value: str) -> None:
+        self._set("bitbrowser_path", value)
+        
+    @property
+    def virtualbrowser_path(self) -> str:
+        """Custom path for VirtualBrowser."""
+        return self._get("virtualbrowser_path", "")
+    
+    @virtualbrowser_path.setter
+    def virtualbrowser_path(self, value: str) -> None:
+        self._set("virtualbrowser_path", value)
+
     def to_dict(self) -> dict[str, Any]:
         """Get all settings as a dictionary."""
         return {
@@ -141,6 +161,8 @@ class Config:
             "default_sms_platform": self.default_sms_platform,
             "default_sms_url": self.default_sms_url,
             "default_sms_key": self.default_sms_key,
+            "bitbrowser_path": self.bitbrowser_path,
+            "virtualbrowser_path": self.virtualbrowser_path,
         }
 
 
