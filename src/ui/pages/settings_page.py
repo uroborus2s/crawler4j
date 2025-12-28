@@ -3,23 +3,30 @@
 Global application settings.
 """
 
+import platform
+from pathlib import Path
+
+from PyQt6.QtCore import QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QGroupBox,
-    QFormLayout,
-    QLineEdit,
-    QComboBox,
-    QSpinBox,
-    QPushButton,
-    QLabel,
-    QRadioButton,
     QButtonGroup,
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QRadioButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
 from src.config import config
 from src.core.browser_detector import BrowserDetector
+from src.ui.widgets.confirm_dialog import ConfirmDialog
 from src.ui.widgets.toast import Toast
 
 
@@ -70,6 +77,19 @@ class SettingsPage(QWidget):
         self.install_status = QLabel("检测中...")
         type_layout.addWidget(self.install_status)
         
+        # Manual path select
+        path_layout = QHBoxLayout()
+        path_layout.addWidget(QLabel("安装路径:"))
+        self.path_display = QLabel("未设置 (自动检测)")
+        self.path_display.setStyleSheet("color: #a6adc8; font-style: italic;")
+        path_layout.addWidget(self.path_display, 1)
+        
+        self.browse_btn = QPushButton("手动选择...")
+        self.browse_btn.setMinimumWidth(100)
+        self.browse_btn.clicked.connect(self._on_browse_path)
+        path_layout.addWidget(self.browse_btn)
+        
+        browser_layout.addLayout(path_layout)
         browser_layout.addLayout(type_layout)
         
         # API URL
@@ -90,21 +110,25 @@ class SettingsPage(QWidget):
         task_group = QGroupBox("任务设置")
         task_layout = QFormLayout(task_group)
         task_layout.setSpacing(12)
+        task_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         
         self.concurrency_spin = QSpinBox()
         self.concurrency_spin.setRange(1, 20)
         self.concurrency_spin.setValue(10)
+        self.concurrency_spin.setMinimumWidth(100)
         task_layout.addRow("最大并发数:", self.concurrency_spin)
         
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(1, 60)
         self.interval_spin.setValue(5)
         self.interval_spin.setSuffix(" 秒")
+        self.interval_spin.setMinimumWidth(100)
         task_layout.addRow("任务间隔:", self.interval_spin)
         
         self.retry_spin = QSpinBox()
         self.retry_spin.setRange(0, 5)
         self.retry_spin.setValue(3)
+        self.retry_spin.setMinimumWidth(100)
         task_layout.addRow("失败重试次数:", self.retry_spin)
         
         layout.addWidget(task_group)
@@ -117,15 +141,18 @@ class SettingsPage(QWidget):
         self.sms_platform_combo = QComboBox()
         self.sms_platform_combo.addItems(["", "平台A", "平台B", "平台C"])
         self.sms_platform_combo.setEditable(True)
+        self.sms_platform_combo.setMinimumWidth(250)
         sms_layout.addRow("默认平台:", self.sms_platform_combo)
         
         self.sms_url_input = QLineEdit()
         self.sms_url_input.setPlaceholderText("http://api.example.com/sms")
+        self.sms_url_input.setMinimumWidth(250)
         sms_layout.addRow("默认 API URL:", self.sms_url_input)
         
         self.sms_key_input = QLineEdit()
         self.sms_key_input.setPlaceholderText("API Key")
         self.sms_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.sms_key_input.setMinimumWidth(250)
         sms_layout.addRow("默认 API Key:", self.sms_key_input)
         
         layout.addWidget(sms_group)
@@ -170,17 +197,58 @@ class SettingsPage(QWidget):
         self.sms_url_input.setText(config.default_sms_url)
         self.sms_key_input.setText(config.default_sms_key)
         
-        # Check browser installation
+        # Check browser installation and update path display
+        self._update_path_display()
         self._check_browser_install()
     
     def _on_browser_type_changed(self):
         """Handle browser type change."""
+        self._update_path_display()
         self._check_browser_install()
     
+    def _update_path_display(self):
+        """Update the manual path display based on selected browser type."""
+        browser_type = "virtualbrowser" if self.virtual_radio.isChecked() else "bitbrowser"
+        manual_path = config.virtualbrowser_path if browser_type == "virtualbrowser" else config.bitbrowser_path
+        
+        if manual_path:
+            self.path_display.setText(manual_path)
+            self.path_display.setStyleSheet("color: #cdd6f4; font-style: normal;")
+        else:
+            self.path_display.setText("未设置 (自动检测)")
+            self.path_display.setStyleSheet("color: #a6adc8; font-style: italic;")
+    
+    def _on_browse_path(self):
+        """Manually select browser installation path."""
+        browser_type = "virtualbrowser" if self.virtual_radio.isChecked() else "bitbrowser"
+        file_filter = "Applications (*.app)" if platform.system() == "Darwin" else "Executable (*.exe)"
+        
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"选择 {browser_type} 安装位置",
+            "/Applications" if platform.system() == "Darwin" else "C:/Program Files",
+            file_filter
+        )
+        
+        if path:
+            if browser_type == "bitbrowser":
+                config.bitbrowser_path = path
+            else:
+                config.virtualbrowser_path = path
+            
+            self._update_path_display()
+            self._check_browser_install()
+
     def _check_browser_install(self):
         """Check if selected browser is installed."""
         browser_type = "virtualbrowser" if self.virtual_radio.isChecked() else "bitbrowser"
-        is_installed = BrowserDetector.is_installed(browser_type)
+        
+        # Check manual path first
+        manual_path = self.path_display.text()
+        if manual_path != "未设置 (自动检测)" and Path(manual_path).exists():
+            is_installed = True
+        else:
+            is_installed = BrowserDetector.is_installed(browser_type)
         
         if is_installed:
             self.install_status.setText("🟢 已安装")
@@ -208,7 +276,31 @@ class SettingsPage(QWidget):
         if success:
             Toast.success(self, "连接成功")
         else:
-            Toast.error(self, "连接失败，请检查浏览器是否运行")
+            # Determine path for auto-launch
+            browser_type = "virtualbrowser" if self.virtual_radio.isChecked() else "bitbrowser"
+            
+            # 1. Try manual path from config
+            launch_path = config.virtualbrowser_path if browser_type == "virtualbrowser" else config.bitbrowser_path
+            
+            # 2. If no manual path, try auto-detection
+            if not launch_path or not Path(launch_path).exists():
+                detected_path = BrowserDetector.get_installation_path(browser_type)
+                if detected_path:
+                    launch_path = str(detected_path)
+            
+            if launch_path and Path(launch_path).exists():
+                if ConfirmDialog.confirm(
+                    self,
+                    "连接失败",
+                    f"未检测到 {browser_type} API 服务。\n是否尝试启动客户端？\n路径: {launch_path}",
+                ):
+                    try:
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(launch_path))
+                        Toast.info(self, "正在启动客户端，请稍候再试...")
+                    except Exception as e:
+                        Toast.error(self, f"启动失败: {str(e)}")
+            else:
+                Toast.error(self, "连接失败，无法在标准位置找到应用，请手动设置安装路径。")
     
     def _save_settings(self):
         """Save all settings."""

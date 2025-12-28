@@ -6,15 +6,15 @@ Manages the background execution of tasks across multiple environments.
 import asyncio
 from typing import Dict
 
-from src.core.account_manager import AccountManager
-from src.core.task_orchestrator import TaskOrchestrator
 from src.automation.driver import AutomationDriver
-from src.core.models.ctrip_account import CtripAccount
-from src.core.models.labor_account import LaborAccount
-from src.core.models.environment import Environment
-from src.core.events import event_bus, EventType
-from src.utils.logger import logger
 from src.config import config
+from src.core.account_manager import AccountManager
+from src.core.events import EventType, get_event_bus
+from src.core.models.ctrip_account import CtripAccount
+from src.core.models.environment import Environment
+from src.core.models.labor_account import LaborAccount
+from src.core.task_orchestrator import TaskOrchestrator
+from src.utils.logger import logger
 from src.utils.storage import CtripAccountRepository, LaborAccountRepository
 
 
@@ -78,11 +78,12 @@ class Scheduler:
     async def _run_environment(self, env: Environment):
         """Run the automation loop for a specific environment."""
         env_id = env.id
+        bus = get_event_bus()
         
         try:
             # Mark running in DB
             self.account_manager.start_environment(env_id)
-            event_bus.emit(EventType.ENVIRONMENT_STATUS_CHANGED, {"env_id": env_id, "status": "running"})
+            bus.emit(EventType.ENVIRONMENT_STATUS_CHANGED, {"env_id": env_id, "status": "running"})
             
             # Get full account models
             ctrip_data = self.ctrip_repo.get_by_id(env.ctrip_account_id)
@@ -105,7 +106,7 @@ class Scheduler:
                     if success:
                         # Update stats
                         self.account_manager.update_labor_stats(labor.id, completed=1, approved=1)
-                        event_bus.emit(EventType.LABOR_STATS_UPDATED, {"id": labor.id})
+                        bus.emit(EventType.LABOR_STATS_UPDATED, {"id": labor.id})
                     else:
                         # Logic for failure
                         logger.warning(f"环境 ENV-{env_id} 任务轮询未完成，重试中...")
@@ -125,11 +126,11 @@ class Scheduler:
             logger.info(f"环境 ENV-{env_id} 任务被取消")
         except Exception as e:
             logger.error(f"环境 ENV-{env_id} 运行崩溃: {e}")
-            event_bus.emit(EventType.ENVIRONMENT_STATUS_CHANGED, {"env_id": env_id, "status": "error"})
+            bus.emit(EventType.ENVIRONMENT_STATUS_CHANGED, {"env_id": env_id, "status": "error"})
         finally:
             # Cleanup
             self.account_manager.stop_environment(env_id)
-            event_bus.emit(EventType.ENVIRONMENT_STATUS_CHANGED, {"env_id": env_id, "status": "idle"})
+            bus.emit(EventType.ENVIRONMENT_STATUS_CHANGED, {"env_id": env_id, "status": "idle"})
             if env_id in self._active_tasks:
                 del self._active_tasks[env_id]
             logger.info(f"结束任务环境: ENV-{env_id}")

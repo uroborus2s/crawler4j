@@ -3,8 +3,8 @@
 Handles fetching verification codes from SMS platforms.
 """
 
-import re
 import asyncio
+import re
 import time
 from typing import Optional
 
@@ -31,7 +31,7 @@ class SMSReceiver:
         self.platform_type = platform_type
         self.phone = phone
 
-    async def get_code(self, timeout: int = 60, interval: int = 5) -> Optional[str]:
+    async def get_code(self, timeout: int = 120, interval: int = 5) -> Optional[str]:
         """Poll the SMS platform for a verification code.
         
         Args:
@@ -41,35 +41,67 @@ class SMSReceiver:
         Returns:
             Verification code if found, None otherwise.
         """
-        logger.info(f"开始获取验证码: {self.phone} (超时: {timeout}s)")
+        logger.info(f"开始获取验证码: {self.phone} (平台: {self.platform_type}, 超时: {timeout}s)")
         
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                # Generic pattern for SMS platforms
-                # Usually: GET /api?token=LINK&phone=PHONE&action=getCode
-                url = self.base_url
-                params = {
-                    "token": self.api_key,
-                    "phone": self.phone,
-                    "action": "getMessage" # Placeholder action
-                }
+                if self.platform_type == "haoma":
+                    # HaoMa platform implementation
+                    # Usually: GET /api/handler?action=getSms&token=TOKEN&item_id=ITEM_ID&mobile=PHONE
+                    # Note: This is a heuristic implementation based on common patterns.
+                    # Ideally we need the 'item_id' (project ID) as well, but here we assume it's pre-configured or part of the config.
+                    # For now, we assume the base_url includes the endpoint path.
+                    
+                    # Example HaoMa API structure:
+                    # http://api.haoma.com/sms/?token=KEY&sid=PROJECT_ID&phone=PHONE
+                    
+                    url = self.base_url
+                    params = {
+                        "token": self.api_key,
+                        "phone": self.phone,
+                        # "sid": "PROJECT_ID" # TODO: Pass project/item ID if needed
+                    }
+                    
+                    # If the user put the full request URL in sms_platform_url, we just use it.
+                    # Otherwise we might need to append logic.
+                    
+                else:
+                    # Generic pattern for other SMS platforms
+                    url = self.base_url
+                    params = {
+                        "token": self.api_key,
+                        "phone": self.phone,
+                        "action": "getMessage" 
+                    }
                 
-                # Note: Real implementation would switch based on platform_type
                 response = await asyncio.to_thread(
                     requests.get, url, params=params, timeout=10
                 )
                 
                 if response.status_code == 200:
                     text = response.text
-                    logger.debug(f"短信平台响应: {text}")
+                    # logger.debug(f"短信平台响应: {text}")
                     
-                    # Extract 4-6 digit code
-                    match = re.search(r"(\d{4,6})", text)
-                    if match:
-                        code = match.group(1)
-                        logger.info(f"成功获取验证码: {code}")
-                        return code
+                    # HaoMa success usually starts with "success|" or similar, or just the message
+                    # But often it returns "Message|Content"
+                    
+                    if "未获取" in text or "等待" in text or "0" == text:
+                        pass # Continue waiting
+                    else:
+                        # Attempt to find 4-6 digit code
+                        # Handle HaoMa specific "1|message" format if exists
+                        content = text
+                        if "|" in text:
+                            parts = text.split("|")
+                            if len(parts) > 1 and len(parts[0]) < 5: # likely status code
+                                content = parts[1]
+                                
+                        match = re.search(r"(\d{4,6})", content)
+                        if match:
+                            code = match.group(1)
+                            logger.info(f"成功获取验证码: {code}")
+                            return code
                 
             except Exception as e:
                 logger.warning(f"获取验证码请求失败: {e}")

@@ -21,9 +21,12 @@ class CtripAccount:
     
     Attributes:
         id: Unique identifier.
-        phone: Login phone number.
+        country_code: Country code for phone number (default +86).
+        phone_number: Login phone number.
         password: Login password (optional if using SMS).
         status: Account status (active/blacklisted/disabled).
+        consecutive_task_count: Number of consecutive tasks before break.
+        task_interval_max: Maximum interval between tasks (minutes).
         sms_platform_url: SMS verification platform API URL.
         sms_platform_key: SMS verification platform API key.
         sms_platform_type: SMS platform type identifier.
@@ -31,10 +34,13 @@ class CtripAccount:
         updated_at: Last update timestamp.
     """
     
-    phone: str
+    phone_number: str
     id: int | None = None
+    country_code: str = "+86"
     password: str | None = None
     status: AccountStatus = AccountStatus.ACTIVE
+    consecutive_task_count: int = 5
+    task_interval_max: int = 15
     sms_platform_url: str | None = None
     sms_platform_key: str | None = None
     sms_platform_type: str | None = None
@@ -50,9 +56,12 @@ class CtripAccount:
         
         return cls(
             id=data.get("id"),
-            phone=data["phone"],
+            country_code=data.get("country_code", "+86"),
+            phone_number=data.get("phone_number", data.get("phone", "")),
             password=data.get("password"),
             status=status,
+            consecutive_task_count=data.get("consecutive_task_count", 5),
+            task_interval_max=data.get("task_interval_max", 15),
             sms_platform_url=data.get("sms_platform_url"),
             sms_platform_key=data.get("sms_platform_key"),
             sms_platform_type=data.get("sms_platform_type"),
@@ -64,9 +73,12 @@ class CtripAccount:
         """Convert to dictionary."""
         return {
             "id": self.id,
-            "phone": self.phone,
+            "country_code": self.country_code,
+            "phone_number": self.phone_number,
             "password": self.password,
             "status": self.status.value if isinstance(self.status, AccountStatus) else self.status,
+            "consecutive_task_count": self.consecutive_task_count,
+            "task_interval_max": self.task_interval_max,
             "sms_platform_url": self.sms_platform_url,
             "sms_platform_key": self.sms_platform_key,
             "sms_platform_type": self.sms_platform_type,
@@ -75,11 +87,17 @@ class CtripAccount:
         }
     
     @property
+    def full_phone(self) -> str:
+        """Return full phone with country code."""
+        return f"{self.country_code}{self.phone_number}"
+    
+    @property
     def masked_phone(self) -> str:
         """Return masked phone number for display."""
-        if len(self.phone) >= 7:
-            return f"{self.phone[:3]}****{self.phone[-4:]}"
-        return self.phone
+        phone = self.phone_number
+        if len(phone) >= 7:
+            return f"{self.country_code}{phone[:3]}****{phone[-4:]}"
+        return f"{self.country_code}{phone}"
     
     @property
     def is_active(self) -> bool:

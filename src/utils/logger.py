@@ -13,6 +13,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 class LogLevel(str, Enum):
     """Log level enumeration."""
+    DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
@@ -129,6 +130,10 @@ class AppLogger:
             except Exception as e:
                 self._python_logger.error(f"Failed to persist log: {e}")
     
+    def debug(self, message: str, environment_id: int | None = None):
+        """Log debug message."""
+        self._log(message, LogLevel.DEBUG, environment_id)
+
     def info(self, message: str, environment_id: int | None = None):
         """Log info message."""
         self._log(message, LogLevel.INFO, environment_id)

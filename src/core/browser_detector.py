@@ -19,20 +19,23 @@ class BrowserDetector:
             "darwin": [
                 "/Applications/BitBrowser.app",
                 Path.home() / "Applications/BitBrowser.app",
+                Path.home() / "Library/Application Support/BitBrowser/BitBrowser.app",
             ],
             "windows": [
                 Path.home() / "AppData/Local/BitBrowser",
+                Path.home() / "AppData/Roaming/BitBrowser",
                 Path("C:/Program Files/BitBrowser"),
-                Path("C:/Program Files (x86)/BitBrowser"),
             ],
         },
         "virtualbrowser": {
             "darwin": [
                 "/Applications/VirtualBrowser.app",
                 Path.home() / "Applications/VirtualBrowser.app",
+                Path.home() / "Library/Application Support/VirtualBrowser/VirtualBrowser.app",
             ],
             "windows": [
                 Path.home() / "AppData/Local/VirtualBrowser",
+                Path.home() / "AppData/Roaming/VirtualBrowser",
                 Path("C:/Program Files/VirtualBrowser"),
             ],
         },

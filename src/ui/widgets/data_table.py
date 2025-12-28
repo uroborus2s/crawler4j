@@ -6,17 +6,17 @@ A reusable table widget with pagination, search, and sorting.
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QAbstractItemView,
+    QComboBox,
     QHBoxLayout,
-    QTableWidget,
-    QTableWidgetItem,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QPushButton,
-    QLabel,
-    QComboBox,
-    QAbstractItemView,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 
@@ -136,6 +136,10 @@ class DataTable(QWidget):
         self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
     
+    def set_row_height(self, height: int):
+        """Set the height of all rows."""
+        self.table.verticalHeader().setDefaultSectionSize(height)
+    
     def set_data(self, data: list[dict]):
         """Set the table data.
         
@@ -172,6 +176,26 @@ class DataTable(QWidget):
         self.table.setRowCount(len(page_data))
         for row_idx, row_data in enumerate(page_data):
             for col_idx, (key, _, _) in enumerate(self.columns):
+                # Check for special render key in column definition? 
+                # Or just check if key is a callable function in row_data? (No, mixing data and view logic)
+                # Better: DataTable constructor accepts renderers.
+                # BUT for now, let's allow 'actions' key to return a widget or a factory?
+                # Simplify: if value is QWidget, setCellWidget. But we can't put QWidget in data list easily.
+                
+                # Let's rely on EnvironmentsPage to modify the table AFTER signal?
+                # No, best is to allow columns definition to have a renderer.
+                # Since I didn't change constructor signature, I'll check if key is 'actions'.
+                
+                if key == "actions" and "actions_renderer" in row_data:
+                    # Expecting a factory/widget here is tricky with JSON data logic.
+                    # Hack: The row_data['actions_renderer'] is a callable (self, row_data) -> QWidget
+                    renderer = row_data["actions_renderer"]
+                    if callable(renderer):
+                        widget = renderer(row_data)
+                        if widget:
+                            self.table.setCellWidget(row_idx, col_idx, widget)
+                            continue
+                            
                 value = row_data.get(key, "")
                 item = QTableWidgetItem(str(value))
                 self.table.setItem(row_idx, col_idx, item)

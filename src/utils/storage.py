@@ -53,7 +53,7 @@ class BaseRepository:
         results = self._execute(query, params)
         return results[0] if results else None
     
-    def _execute_write(self, query: str, params: tuple = ()) -> int:
+    def _execute_write(self, query: str, params: tuple = ()) -> Any:
         """Execute a write query and return lastrowid."""
         with get_connection(self.db_path) as conn:
             cursor = conn.execute(query, params)
@@ -100,18 +100,21 @@ class CtripAccountRepository(BaseRepository):
     
     def create(
         self,
-        phone: str,
+        phone_number: str,
+        country_code: str = "+86",
         password: str | None = None,
         sms_platform_url: str | None = None,
         sms_platform_key: str | None = None,
         sms_platform_type: str | None = None,
+        consecutive_task_count: int = 5,
+        task_interval_max: int = 15,
     ) -> int:
         """Create a new Ctrip account."""
         return self._execute_write(
             """INSERT INTO ctrip_accounts 
-               (phone, password, sms_platform_url, sms_platform_key, sms_platform_type)
-               VALUES (?, ?, ?, ?, ?)""",
-            (phone, password, sms_platform_url, sms_platform_key, sms_platform_type)
+               (country_code, phone_number, password, sms_platform_url, sms_platform_key, sms_platform_type, consecutive_task_count, task_interval_max)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (country_code, phone_number, password, sms_platform_url, sms_platform_key, sms_platform_type, consecutive_task_count, task_interval_max)
         )
     
     def update_status(self, id: int, status: str) -> bool:
@@ -133,10 +136,11 @@ class CtripAccountRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
     
-    def get_by_phone(self, phone: str) -> dict | None:
+    def get_by_phone(self, phone_number: str, country_code: str = "+86") -> dict | None:
         """Get account by phone number."""
         row = self._execute_one(
-            "SELECT * FROM ctrip_accounts WHERE phone = ?", (phone,)
+            "SELECT * FROM ctrip_accounts WHERE country_code = ? AND phone_number = ?", 
+            (country_code, phone_number)
         )
         return dict(row) if row else None
 
@@ -184,6 +188,94 @@ class LaborAccountRepository(BaseRepository):
                WHERE la.status = 'active' AND e.id IS NULL"""
         )
         return [dict(row) for row in rows]
+    
+    def get_least_bound(self) -> dict | None:
+        """Get active labor account with least bind_count.
+        
+        Returns:
+            The account with minimum bind_count, or None if no active accounts.
+        """
+        row = self._execute_one(
+            """SELECT * FROM labor_accounts 
+               WHERE status = 'active' 
+               ORDER BY bind_count ASC, RANDOM()
+               LIMIT 1"""
+        )
+        return dict(row) if row else None
+    
+    def increment_bind_count(self, id: int) -> bool:
+        """Increment bind_count for an account."""
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE labor_accounts SET bind_count = bind_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def decrement_bind_count(self, id: int) -> bool:
+        """Decrement bind_count for an account (minimum 0)."""
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE labor_accounts SET bind_count = MAX(0, bind_count - 1), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+
+class ProxyIPRepository(BaseRepository):
+    """Repository for proxy_ips table."""
+    
+    table_name = "proxy_ips"
+    
+    def create(
+        self,
+        ip: str,
+        port: str,
+        user: str | None = None,
+        password: str | None = None,
+        protocol: str = "http",
+    ) -> int:
+        """Add a new Proxy IP."""
+        return self._execute_write(
+            """INSERT INTO proxy_ips (ip, port, user, password, protocol)
+               VALUES (?, ?, ?, ?, ?)""",
+            (ip, port, user, password, protocol)
+        )
+    
+    def get_least_used(self) -> dict | None:
+        """Get active proxy IP with least usage count (random selection)."""
+        # Selection strategy: status active, min usage, random among ties
+        row = self._execute_one(
+            """SELECT * FROM proxy_ips 
+               WHERE status = 'active' 
+               AND usage_count = (SELECT MIN(usage_count) FROM proxy_ips WHERE status = 'active')
+               ORDER BY RANDOM()
+               LIMIT 1"""
+        )
+        return dict(row) if row else None
+        
+    def increment_usage(self, id: int) -> bool:
+        """Increment usage count for an IP."""
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE proxy_ips SET usage_count = usage_count + 1 WHERE id = ?",
+                (id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def decrement_usage(self, id: int) -> bool:
+        """Decrement usage count for an IP."""
+        with get_connection(self.db_path) as conn:
+            # Prevent negative count just in case
+            cursor = conn.execute(
+                "UPDATE proxy_ips SET usage_count = MAX(0, usage_count - 1) WHERE id = ?",
+                (id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
 
 class EnvironmentRepository(BaseRepository):
@@ -193,25 +285,64 @@ class EnvironmentRepository(BaseRepository):
     
     def create(
         self,
-        ctrip_account_id: int,
-        labor_account_id: int,
+        ctrip_account_id: int | None,
+        labor_account_id: int | None,
         browser_profile_id: str,
+        browser_type: str = "bitbrowser",
+        proxy_ip_id: int | None = None,
     ) -> int:
         """Create a new environment."""
         return self._execute_write(
             """INSERT INTO environments 
-               (ctrip_account_id, labor_account_id, browser_profile_id)
-               VALUES (?, ?, ?)""",
-            (ctrip_account_id, labor_account_id, browser_profile_id)
+               (ctrip_account_id, labor_account_id, browser_profile_id, browser_type, proxy_ip_id)
+               VALUES (?, ?, ?, ?, ?)""",
+            (ctrip_account_id, labor_account_id, browser_profile_id, browser_type, proxy_ip_id)
         )
     
-    def update_status(self, id: int, status: str) -> bool:
-        """Update environment status."""
+    
+    def update_status(self, id: int, status: str, last_run_at: str | None = None) -> bool:
+        """Update environment status and optionally last_run_at."""
+        query = "UPDATE environments SET status = ?"
+        params = [status]
+        
+        if last_run_at:
+            query += ", last_run_at = ?"
+            params.append(last_run_at)
+            
+        query += " WHERE id = ?"
+        params.append(id)
+        
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(query, tuple(params))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_connection_info(self, id: int, ws_endpoint: str | None, http_endpoint: str | None, pid: str | None) -> bool:
+        """Update browser connection info."""
         with get_connection(self.db_path) as conn:
             cursor = conn.execute(
-                "UPDATE environments SET status = ? WHERE id = ?",
-                (status, id)
+                """UPDATE environments 
+                   SET ws_endpoint = ?, http_endpoint = ?, pid = ?
+                   WHERE id = ?""",
+                (ws_endpoint, http_endpoint, pid, id)
             )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update(self, id: int, data: dict) -> bool:
+        """Generic update environment fields."""
+        if not data:
+            return False
+            
+        columns = list(data.keys())
+        set_clause = ", ".join([f"{col} = ?" for col in columns])
+        values = list(data.values())
+        values.append(id)
+        
+        query = f"UPDATE environments SET {set_clause} WHERE id = ?"
+        
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(query, tuple(values))
             conn.commit()
             return cursor.rowcount > 0
     
@@ -250,6 +381,36 @@ class TaskLogRepository(BaseRepository):
         return self._execute_write(
             "INSERT INTO task_logs (environment_id, level, message) VALUES (?, ?, ?)",
             (environment_id, level, message)
+        )
+    
+    def log_operation(
+        self,
+        environment_id: int,
+        operation_type: str,
+        operation_details: dict,
+        level: str = "INFO",
+        message: str | None = None,
+    ) -> int:
+        """Log an operation with structured details.
+        
+        Args:
+            environment_id: The environment this operation belongs to.
+            operation_type: Type of operation (e.g., 'openEnvironment', 'login', 'task').
+            operation_details: Dictionary with operation details (will be JSON serialized).
+            level: Log level (INFO, WARNING, ERROR, DEBUG).
+            message: Optional human-readable message.
+        
+        Returns:
+            ID of the created log entry.
+        """
+        import json
+        details_json = json.dumps(operation_details, ensure_ascii=False)
+        
+        return self._execute_write(
+            """INSERT INTO task_logs 
+               (environment_id, level, message, operation_type, operation_details) 
+               VALUES (?, ?, ?, ?, ?)""",
+            (environment_id, level, message or f"Operation: {operation_type}", operation_type, details_json)
         )
     
     def get_recent(self, limit: int = 100, level: str | None = None) -> list[dict]:
