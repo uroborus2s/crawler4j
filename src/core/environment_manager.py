@@ -86,13 +86,9 @@ class EnvironmentManager:
             logger.warning("没有可用的携程账号")
             return None
         
-        # === Step 2: 分配劳保账号 ===
-        labor_account = self._assign_labor_account(params.labor_account_id, auto_assign)
-        if not labor_account:
-            logger.warning("没有可用的劳保账号")
-            return None
+        # 注意：劳保账号不在创建环境时分配，而是在运行时动态获取
         
-        # === Step 3: 分配代理IP（可选）===
+        # === Step 2: 分配代理IP（可选）===
         proxy_ip_id = params.proxy_ip_id
         proxy_config = params.proxy_config
         
@@ -108,7 +104,7 @@ class EnvironmentManager:
                     "pass": proxy_data.get("password"),
                 }
         
-        # === Step 4: 创建远程浏览器配置 ===
+        # === Step 3: 创建远程浏览器配置 ===
         try:
             profile_name = params.name or f"Auto_{ctrip_account.phone_number[-4:]}"
             remark = params.remark or f"Created by Crawler4j [Ctrip: {ctrip_account.phone_number}]"
@@ -128,46 +124,41 @@ class EnvironmentManager:
             logger.error(f"创建浏览器配置失败: {e}")
             return None
         
-        # === Step 5: 更新使用计数 ===
+        # === Step 4: 更新使用计数 ===
         try:
             if proxy_ip_id:
                 self.proxy_repo.increment_usage(proxy_ip_id)
             
-            if labor_account.id:
-                self.labor_repo.increment_bind_count(labor_account.id)
-            
-            # === Step 6: 保存本地环境记录 ===
+            # === Step 5: 保存本地环境记录 ===
             env_id = self.env_repo.create(
                 ctrip_account_id=ctrip_account.id,
-                labor_account_id=labor_account.id,
+                labor_account_id=None,  # 劳保账号在运行时动态分配
                 browser_profile_id=profile_id,
                 browser_type=config.browser_type,
                 proxy_ip_id=proxy_ip_id,
                 daily_open_limit=params.daily_open_limit,
             )
             
-            # === Step 7: 更新携程账号状态 ===
+            # === Step 6: 更新携程账号状态 ===
             if ctrip_account.id:
                 self.ctrip_repo.update_status(ctrip_account.id, "active")
             
             logger.info(
-                f"✅ 环境创建成功: ENV-{env_id} "
-                f"(携程: {ctrip_account.phone_number}, 劳保: {labor_account.phone})"
+                f"✅ 环境创建成功: ENV-{env_id} (携程: {ctrip_account.phone_number})"
             )
             
-            # === Step 8: 发送事件通知 ===
+            # === Step 7: 发送事件通知 ===
             from src.core.events import EventType, get_event_bus
             bus = get_event_bus()
             bus.emit(EventType.ENVIRONMENT_CREATED, {
                 "env_id": env_id,
                 "ctrip_phone": ctrip_account.phone_number,
-                "labor_phone": labor_account.phone,
             })
             
             return Environment(
                 id=env_id,
                 ctrip_account_id=ctrip_account.id,
-                labor_account_id=labor_account.id,
+                labor_account_id=None,  # 劳保账号在运行时动态分配
                 browser_profile_id=profile_id,
                 status=EnvironmentStatus.IDLE,
             )

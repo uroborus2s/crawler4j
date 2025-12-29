@@ -1,9 +1,10 @@
 """任务运行器模块。
 
 封装调度器使用的环境执行包装器，负责：
-1. 锁定劳保账号
-2. 调用统一工作函数
-3. 更新统计并释放锁
+1. 调用统一工作函数
+2. 更新环境状态
+
+注意：劳保账号的锁定/释放已移至 workflow_executor 内部处理。
 """
 
 from dataclasses import dataclass
@@ -17,10 +18,7 @@ from src.core.workflow_executor import (
     execute_environment_workflow,
 )
 from src.utils.logger import logger
-from src.utils.storage import (
-    EnvironmentRepository,
-    LaborAccountRepository,
-)
+from src.utils.storage import EnvironmentRepository
 
 if TYPE_CHECKING:
     from src.core.models.environment import Environment
@@ -48,9 +46,11 @@ class TaskRunner:
     """调度器的任务执行包装器。
     
     职责:
-    1. 锁定劳保账号（确保互斥）
-    2. 调用统一工作函数
-    3. 更新统计并释放锁
+    1. 调用统一工作函数
+    2. 更新环境状态
+    3. 发送统计事件
+    
+    注意：劳保账号的锁定/释放在 workflow_executor 内部处理。
     """
     
     def __init__(self, environment: "Environment"):
@@ -61,7 +61,6 @@ class TaskRunner:
         """
         self.env = environment
         self.env_repo = EnvironmentRepository()
-        self.labor_repo = LaborAccountRepository()
         self.bus = get_event_bus()
         
         self._cancelled = False
@@ -77,7 +76,6 @@ class TaskRunner:
             TaskResult 包含执行结果
         """
         env_id = self.env.id
-        labor_id = self.env.labor_account_id
         
         if not env_id:
             return TaskResult(
@@ -88,34 +86,22 @@ class TaskRunner:
         logger.info(f"🚀 TaskRunner 启动: ENV-{env_id}")
         
         try:
-            # 1. 尝试锁定劳保账号
-            if labor_id and not self.labor_repo.lock_account(labor_id, env_id):
-                logger.warning(f"劳保账号 ID-{labor_id} 已被其他环境占用")
-                return TaskResult(
-                    result_type=TaskResultType.ERROR,
-                    message=f"劳保账号 ID-{labor_id} 已被其他环境占用"
-                )
-            
-            if labor_id:
-                logger.info(f"🔒 已锁定劳保账号: ID-{labor_id}")
-            
-            # 2. 更新环境状态
+            # 1. 更新环境状态
             self.env_repo.update_status(env_id, "running")
             
-            # 3. 调用统一工作函数（无 input_callback = 自动模式）
+            # 2. 调用统一工作函数（劳保账号锁定/释放在内部处理）
             workflow_result = await execute_environment_workflow(
                 environment=self.env,
                 input_callback=None,  # 自动模式
             )
             
-            # 4. 转换结果类型
+            # 3. 转换结果类型
             result = self._convert_result(workflow_result)
             
-            # 5. 更新统计
-            if workflow_result.tasks_completed > 0 and labor_id:
-                self.labor_repo.update_stats(labor_id, completed=workflow_result.tasks_completed)
+            # 4. 发送统计事件
+            if workflow_result.tasks_completed > 0 and workflow_result.labor_account_id:
                 self.bus.emit(EventType.LABOR_STATS_UPDATED, {
-                    "id": labor_id,
+                    "id": workflow_result.labor_account_id,
                     "completed": workflow_result.tasks_completed
                 })
             
@@ -128,12 +114,7 @@ class TaskRunner:
                 message=str(e)
             )
         finally:
-            # 6. 释放锁定
-            if labor_id and env_id:
-                self.labor_repo.unlock_account(labor_id, env_id)
-                logger.info(f"🔓 已释放劳保账号: ID-{labor_id}")
-            
-            # 7. 更新环境状态
+            # 5. 更新环境状态
             if env_id:
                 self.env_repo.update_status(env_id, "idle")
     
@@ -146,6 +127,7 @@ class TaskRunner:
             WorkflowResultType.LABOR_LOGIN_FAILED: TaskResultType.FAILED,
             WorkflowResultType.TASK_FAILED: TaskResultType.FAILED,
             WorkflowResultType.MANUAL_SMS_AUTO_MODE: TaskResultType.FAILED,
+            WorkflowResultType.NO_LABOR_ACCOUNT: TaskResultType.ERROR,
             WorkflowResultType.ACCOUNT_ERROR: TaskResultType.ERROR,
             WorkflowResultType.BROWSER_ERROR: TaskResultType.ERROR,
             WorkflowResultType.ERROR: TaskResultType.ERROR,
