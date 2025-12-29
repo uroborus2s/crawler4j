@@ -116,7 +116,9 @@ class DataRefreshThread(QThread):
                     if ctrip_id:
                         ctrip_account = self.ctrip_repo.get_by_id(ctrip_id)
                         if ctrip_account: 
-                            ctrip_phone = self._mask_phone(ctrip_account["phone"])
+                            code = ctrip_account.get("country_code", "+86")
+                            num = ctrip_account.get("phone_number", "")
+                            ctrip_phone = self._mask_phone(f"{code}{num}")
                         
                     labor_id = local.get("labor_account_id")
                     if labor_id:

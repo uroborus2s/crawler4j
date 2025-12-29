@@ -45,22 +45,31 @@ class LaborLoginWorkflow(BaseWorkflow):
     async def is_logged_in(self) -> bool:
         """检查是否已登录。
         
-        通过检测页面URL或特定元素判断登录状态。
+        通过访问受保护的主页 (HOME_URL) 并检测是否重定向至登录页来判定。
         
         Returns:
             True if logged in, False otherwise.
         """
         try:
-            current_url = self.page.url
+            # 尝试访问主页
+            await self.page.goto(self.HOME_URL, wait_until="domcontentloaded", timeout=15000)
+            await asyncio.sleep(0.8) # 等待潜在的 JS 重定向
             
-            # 1. URL 检查：如果不在登录页，可能已登录
-            if "login" not in current_url.lower():
-                # 进一步验证：检查做题页面特有元素
-                if await self.is_visible(f"text={self.DAILY_OUTPUT_TEXT}", timeout=2000):
-                    return True
-                    
-            # 2. 检查是否有"选择城市"按钮（做题页面标识）
+            current_url = self.page.url
+            # 如果当前 URL 包含 login 关键子，说明被重定向回登录页了
+            if "login" in current_url.lower():
+                logger.debug(f"访问主页后被重定向至: {current_url}, 判定为未登录")
+                return False
+                
+            # 辅助验证：检查页面是否有特定文本或按钮
+            if await self.is_visible(f"text={self.DAILY_OUTPUT_TEXT}", timeout=3000):
+                return True
+            
             if await self.is_visible("button:has-text('选择城市')", timeout=2000):
+                return True
+            
+            # 兜底判断：如果 URL 确实处于主页模式
+            if "mark" in current_url.lower():
                 return True
                 
             return False
@@ -84,11 +93,7 @@ class LaborLoginWorkflow(BaseWorkflow):
             return False
     
     async def navigate_to_task_page(self) -> bool:
-        """导航到做题页面。
-        
-        Returns:
-            True if navigation successful.
-        """
+        """导航到做题页面。"""
         try:
             await self.page.goto(self.HOME_URL, wait_until="domcontentloaded")
             await asyncio.sleep(1)
@@ -96,6 +101,18 @@ class LaborLoginWorkflow(BaseWorkflow):
         except Exception as e:
             logger.error(f"导航到做题页失败: {e}")
             return False
+
+    async def clear_session(self):
+        """清除当前会话（Cookies 和 LocalStorage）。
+        
+        用于切换账号前确保彻底登出。
+        """
+        try:
+            await self.page.context.clear_cookies()
+            await self.page.evaluate("() => { localStorage.clear(); sessionStorage.clear(); }")
+            logger.info("已清空浏览器会话状态")
+        except Exception as e:
+            logger.warning(f"清空会话状态失败: {e}")
     
     async def login(self, account: LaborAccount) -> bool:
         """执行登录流程。

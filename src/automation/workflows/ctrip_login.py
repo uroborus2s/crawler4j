@@ -534,7 +534,7 @@ class CtripLoginWorkflow(BaseWorkflow):
         cookies = await self.page.context.cookies()
         # Ctrip auth cookie is usually 'cticket' or 'Union' or 'UID'
         # Heuristic check
-        has_auth = any(c['name'] == 'cticket' for c in cookies)
+        has_auth = any(c.get('name') == 'cticket' for c in cookies)
         if has_auth:
              return True
              

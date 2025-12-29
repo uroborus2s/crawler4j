@@ -3,21 +3,20 @@
 Manages the Ctrip account pool.
 """
 
+import pandas as pd
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QLabel,
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-import pandas as pd
-
+from src.ui.dialogs.ctrip_account_dialog import CtripAccountDialog
+from src.ui.widgets.confirm_dialog import ConfirmDialog
 from src.ui.widgets.data_table import DataTable
 from src.ui.widgets.toast import Toast
-from src.ui.widgets.confirm_dialog import ConfirmDialog
-from src.ui.dialogs.ctrip_account_dialog import CtripAccountDialog
 from src.utils.storage import CtripAccountRepository
 
 
@@ -33,7 +32,8 @@ class CtripAccountsPage(QWidget):
     
     # Table columns: (key, header, width)
     COLUMNS = [
-        ("phone", "手机号", 150),
+        ("country_code", "区号", 60),
+        ("phone_number", "手机号", 150),
         ("status", "状态", 80),
         ("sms_platform_type", "接码平台", 100),
         ("updated_at", "最后更新", -1),
@@ -144,7 +144,8 @@ class CtripAccountsPage(QWidget):
         if result:
             try:
                 self.repo.create(
-                    phone=result["phone"],
+                    country_code=result.get("country_code", "+86"),
+                    phone_number=result["phone_number"],
                     password=result.get("password"),
                     sms_platform_url=result.get("sms_platform_url"),
                     sms_platform_key=result.get("sms_platform_key"),
@@ -158,7 +159,10 @@ class CtripAccountsPage(QWidget):
     def _on_edit(self, row_data: dict):
         """Handle row double click to edit."""
         # Get full account data
-        account = self.repo.get_by_id(row_data.get("id"))
+        account_id = row_data.get("id")
+        if account_id is None:
+            return
+        account = self.repo.get_by_id(int(account_id))
         if not account:
             return
         
@@ -184,15 +188,16 @@ class CtripAccountsPage(QWidget):
             df = pd.read_csv(file_path)
             
             # Expected columns: phone, password (optional), sms_platform_type, sms_platform_url, sms_platform_key
-            if "phone" not in df.columns:
-                Toast.error(self, "CSV缺少必需的 'phone' 列")
+            if "phone" not in df.columns and "phone_number" not in df.columns:
+                Toast.error(self, "CSV缺少必需的 'phone' 或 'phone_number' 列")
                 return
             
             imported = 0
             for _, row in df.iterrows():
                 try:
                     self.repo.create(
-                        phone=str(row["phone"]),
+                        country_code=str(row.get("country_code", "+86")),
+                        phone_number=str(row.get("phone_number", row.get("phone", ""))),
                         password=row.get("password"),
                         sms_platform_url=row.get("sms_platform_url"),
                         sms_platform_key=row.get("sms_platform_key"),

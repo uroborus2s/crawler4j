@@ -7,9 +7,6 @@ Directly fills the captured JSON data into the submission form.
 import asyncio
 import json
 import random
-from typing import Any
-
-from playwright.async_api import Page
 
 from src.automation.workflows.base import BaseWorkflow
 from src.utils.logger import logger
@@ -194,20 +191,35 @@ class LaborSubmitWorkflow(BaseWorkflow):
             logger.debug(f"关闭弹窗异常: {e}")
             return closed_count
     
-    async def submit_result(self, data: dict | str) -> bool:
-        """提交任务结果。
-        
-        完整流程：
-        1. 将数据填入文本框
-        2. 点击提交按钮
-        3. 处理确认弹窗
-        
-        Args:
-            data: 从携程采集的原始 JSON 数据
+    async def submit_not_found(self) -> bool:
+        """提交“搜索不到”结果。"""
+        logger.info("正在提交：搜索不到")
+        try:
+            # 1. 查找原因下拉框或按钮
+            # (假设页面有特定按钮或下拉选项，根据实际 UI 调整选择器)
+            # 这里先点击提交，看是否弹出原因选择
+            if not await self._click_submit():
+                return False
             
-        Returns:
-            True if submission successful.
-        """
+            await asyncio.sleep(1)
+            # 处理可能的选项弹窗
+            reason_opt = self.page.locator("text='搜索不到', .adm-picker-view-item:has-text('搜索不到')")
+            if await reason_opt.count() > 0:
+                await reason_opt.first.click()
+                await asyncio.sleep(0.5)
+                # 点击确定
+                await self._close_all_popups("确定")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"提交搜索不到失败: {e}")
+            return False
+
+    async def submit_result(self, data: dict | str | None) -> bool:
+        """提交任务结果。"""
+        if data is None:
+            return await self.submit_not_found()
+            
         logger.info("开始提交任务结果...")
         
         try:
