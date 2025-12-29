@@ -6,7 +6,6 @@ Handles login to the Labor (劳保保) platform at frontend.lobaobao97.com.
 import asyncio
 import random
 
-from playwright.async_api import Page
 
 from src.automation.workflows.base import BaseWorkflow
 from src.core.models.labor_account import LaborAccount

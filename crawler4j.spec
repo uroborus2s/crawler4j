@@ -14,6 +14,10 @@ a = Analysis(
         'PyQt6.sip',
         'playwright',
         'pandas',
+        'ddddocr',
+        'cv2',
+        'numpy',
+        'sqlite3',
     ],
     hookspath=[],
     hooksconfig={},
@@ -36,7 +40,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # Set to True if you want a console window
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -55,4 +59,26 @@ coll = COLLECT(
     name='Crawler4j',
 )
 
+import sys
+from src.__version__ import VERSION
+
+is_mac = sys.platform == 'darwin'
+
+if is_mac:
+    app = BUNDLE(
+        coll,
+        name='Crawler4j.app',
+        icon='src/assets/icon.png',
+        bundle_identifier='com.crawler4j.app',
+        version=VERSION
+    )
+
 import os
+import shutil
+
+# Post-build: Copy Playwright browsers if needed (instructions for user)
+# Or handle versioning as needed
+
+app_name = 'Crawler4j'
+if os.path.exists('dist'):
+    print(f"Build completed! Application is in dist/{app_name}")

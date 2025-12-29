@@ -138,10 +138,6 @@ class CaptchaSolver:
                 mask = np.zeros_like(gray)
                 cv2.drawContours(mask, [contour], -1, 255, -1)
                 
-                # ROI mean brightness
-                roi = gray[y:y+h, x:x+w]
-                # roi_mean = np.mean(roi) # Unused
-                
                 # Score based on dimensions and position
                 # Ideal square-ish shape
                 aspect_ratio = float(w)/h

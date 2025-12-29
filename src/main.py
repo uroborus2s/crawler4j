@@ -3,13 +3,16 @@
 Launches the Crawler4j GUI application.
 """
 
+import asyncio
 import sys
 from pathlib import Path
 
+import qasync
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
+from src.__version__ import VERSION
 from src.ui.main_window import MainWindow
 from src.ui.pages.ctrip_accounts_page import CtripAccountsPage
 from src.ui.pages.dashboard_page import DashboardPage
@@ -17,6 +20,7 @@ from src.ui.pages.environments_page import EnvironmentsPage
 from src.ui.pages.labor_accounts_page import LaborAccountsPage
 from src.ui.pages.settings_page import SettingsPage
 from src.utils.init_db import init_database
+from src.utils.paths import get_resource_path
 
 
 def main():
@@ -32,18 +36,21 @@ def main():
     # Create application
     app = QApplication(sys.argv)
     app.setApplicationName("Crawler4j")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion(VERSION)
         
     # Set app icon
-    icon_path = Path(__file__).parent / "assets" / "icon.png"
-    if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
+    icon_path = get_resource_path("src/assets/icon.png")
+    if Path(icon_path).exists():
+        app.setWindowIcon(QIcon(icon_path))
+    
+    # Create asyncio event loop integrated with Qt
+    loop = qasync.QEventLoop(app)
+    asyncio.set_event_loop(loop)
     
     # Create main window
     window = MainWindow()
     
     dashboard = DashboardPage()
-    dashboard.add_demo_data()
     
     ctrip_page = CtripAccountsPage()
     labor_page = LaborAccountsPage()
@@ -60,8 +67,9 @@ def main():
     # Show window
     window.show()
     
-    # Run event loop
-    sys.exit(app.exec())
+    # Run integrated Qt + asyncio event loop
+    with loop:
+        loop.run_forever()
 
 
 if __name__ == "__main__":

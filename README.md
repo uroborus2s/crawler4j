@@ -39,9 +39,18 @@ crawler4j/
 └── crawler.db           # 本地数据存储（SQLite）
 ```
 
-## ⚙️ 安装与运行
+## 💻 系统要求
 
-### 1. 前置要求
+### 操作系统支持
+- **Windows**: Windows 10 或更高版本 (64-bit)。
+- **macOS**: **macOS 13.3 (Ventura) 或更高版本**。
+    - *原因*：本项目依赖的 `numpy` (2.4+) 和 `onnxruntime` (ddddocr 核心) 需要 C++17 以及较新的 Accelerate 框架支持，旧版 macOS 会导致符号缺失（Symbol not found）并闪退。
+- **Linux**: Ubuntu 20.04 或更高版本（需安装 libX11 等 GUI 相关库）。
+
+### 硬件要求
+- 推荐使用内存 8GB 或以上，以确保 Playwright 浏览器多开流畅。
+
+## ⚙️ 安装与运行
 确保已安装 [uv](https://github.com/astral-sh/uv)，这是本项目推荐的包管理工具。
 
 ### 2. 初始化环境
@@ -63,6 +72,27 @@ uv run start
 # 或者直接运行 main.py
 uv run python -m src.main
 ```
+
+## 📦 项目打包
+
+本项目使用 PyInstaller 进行打包，建议通过 `uv run` 执行以确保依赖环境正确。
+
+### 1. 安装打包工具
+```bash
+uv add --dev pyinstaller
+```
+
+### 2. 执行打包命令
+在不同平台上运行相同的命令：
+```bash
+uv run pyinstaller crawler4j.spec --clean
+```
+
+- **macOS**: 将在 `dist/` 目录下生成 `Crawler4j.app`。
+- **Windows**: 将在 `dist/` 目录下生成 `Crawler4j/` 文件夹（包含 `Crawler4j.exe`）。
+
+> [!NOTE]
+> 为确保打包后的程序正常运行，请确保已安装 Playwright 浏览器（`uv run playwright install chromium`）。
 
 ## ⚖️ 免责声明
 本工具仅供学习和研究自动化技术使用。请在使用过程中严格遵守相关平台的政策、法律法规。开发者不对任何因不当使用该工具而导致的违规或损失负责。

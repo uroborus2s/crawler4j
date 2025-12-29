@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.browser_api import BrowserAPI
 from src.ui.widgets.confirm_dialog import ConfirmDialog
 from src.ui.widgets.data_table import DataTable
 from src.ui.widgets.toast import Toast
@@ -302,15 +301,20 @@ class EnvironmentsPage(QWidget):
 
     def _on_create(self):
         """Handle environment creation."""
-        from src.config import config
+        from src.core.environment_manager import (
+            CreateEnvironmentParams,
+            EnvironmentManager,
+        )
         from src.ui.dialogs.create_env_dialog import CreateEnvDialog
         
         result = CreateEnvDialog.create_env(self)
         if not result:
             return
 
-        # Handle Auto Proxy
+        # 构建创建参数
         proxy_ip_id = None
+        proxy_config = None
+        
         if result.get("proxy_mode") == "auto":
             least_used = self.proxy_repo.get_least_used()
             if not least_used:
@@ -318,65 +322,44 @@ class EnvironmentsPage(QWidget):
                 return
             
             proxy_ip_id = least_used["id"]
-            # Use this IP for browser profile creation
-            result["proxy_config"] = {
+            proxy_config = {
                 "type": least_used["protocol"],
                 "host": least_used["ip"],
                 "port": least_used["port"],
                 "user": least_used["user"],
                 "pass": least_used["password"]
             }
-            
+        
+        params = CreateEnvironmentParams(
+            name=result.get("name"),
+            ctrip_account_id=result.get("ctrip_account_id"),
+            labor_account_id=result.get("labor_account_id"),
+            proxy_ip_id=proxy_ip_id,
+            proxy_config=proxy_config or result.get("proxy_config"),
+            fingerprint_config=result.get("fingerprint_config"),
+            group_id=result.get("group_id"),
+            daily_open_limit=result.get("daily_open_limit", 0),
+            remark=f"Created by Crawler4j [{result.get('platform', 'Ctrip')}]",
+        )
+        
         try:
-            # 1. Create Remote Browser Profile
-            # Extract fields
-            platform = result.get("platform", "Ctrip")
-            limit = result.get("daily_open_limit", 0)
+            manager = EnvironmentManager()
+            env = manager.create_environment(params)
             
-            final_remark = f"Created by Crawler4j [{platform}]"
-            if limit > 0:
-                final_remark += f" (Limit: {limit}/day)"
-            
-            profile_id = BrowserAPI.create_profile(
-                name=result["name"],
-                remark=final_remark,
-                proxy=result.get("proxy_config"),
-                fingerprint=result.get("fingerprint_config"),
-                group_id=result.get("group_id")
-            )
-            
-            # 2. Assign IP Usage if applicable
-            if proxy_ip_id:
-                self.proxy_repo.increment_usage(proxy_ip_id)
-            
-            # 3. Save Local
-            self.env_repo.create(
-                ctrip_account_id=result["ctrip_account_id"],
-                labor_account_id=result["labor_account_id"],
-                browser_profile_id=profile_id,
-                browser_type=config.browser_type,
-                proxy_ip_id=proxy_ip_id,
-                daily_open_limit=limit
-            )
-            
-            # 4. Update Ctrip Account Status -> ACTIVE
-            ctrip_id = result["ctrip_account_id"]
-            if ctrip_id:
-                self.ctrip_repo.update_status(ctrip_id, "active")
-            
-            Toast.success(self, "环境创建并绑定成功")
-            self._load_data()
-            
+            if env:
+                Toast.success(self, "环境创建并绑定成功")
+                self._load_data()
+            else:
+                Toast.error(self, "环境创建失败")
+                
         except Exception as e:
-            # Rollback IP usage if it was assigned but creation failed (simple effort)
-            if proxy_ip_id:
-                    self.proxy_repo.decrement_usage(proxy_ip_id)
             Toast.error(self, f"环境创建失败: {e}")
             
     def _on_delete_env(self, item: dict):
         """Handle deletion strategy."""
+        from src.core.environment_manager import DestroyReason, EnvironmentManager
+        
         sys_type = item["system_type"]
-        pid = item["id"]
         
         if sys_type == "无":
             Toast.warning(self, "非系统创建环境，不可删除")
@@ -388,72 +371,21 @@ class EnvironmentsPage(QWidget):
         try:
             local_env = item.get("raw_local")
             
-            # 1. crawler4j System: Delete Remote + Local
-            if sys_type == "crawler4j系统":
-                # Delete remote
-                if not BrowserAPI.delete_profile(pid):
-                    raise RuntimeError("浏览器接口删除失败")
-                
-                # Release IP usage
-                if local_env and local_env.get("proxy_ip_id"):
-                    self.proxy_repo.decrement_usage(local_env["proxy_ip_id"])
-                
-                # Release labor account bind count
-                if local_env and local_env.get("labor_account_id"):
-                    self.labor_repo.decrement_bind_count(local_env["labor_account_id"])
-                
-                # Restore ctrip account status
-                if local_env and local_env.get("ctrip_account_id"):
-                    self._restore_ctrip_account_status(local_env["ctrip_account_id"])
-                    
-                # Delete local
-                if local_env:
-                    self.env_repo.delete(local_env["id"])
+            if not local_env or not local_env.get("id"):
+                Toast.error(self, "无法获取环境信息")
+                return
             
-            # 2. error: Delete Local Only (Remote doesn't exist)
-            elif sys_type == "error":
-                # Release IP usage
-                if local_env and local_env.get("proxy_ip_id"):
-                    self.proxy_repo.decrement_usage(local_env["proxy_ip_id"])
-                
-                # Release labor account bind count
-                if local_env and local_env.get("labor_account_id"):
-                    self.labor_repo.decrement_bind_count(local_env["labor_account_id"])
-                
-                # Restore ctrip account status
-                if local_env and local_env.get("ctrip_account_id"):
-                    self._restore_ctrip_account_status(local_env["ctrip_account_id"])
-                    
-                if local_env:
-                    self.env_repo.delete(local_env["id"])
+            manager = EnvironmentManager()
+            reason = DestroyReason.ERROR if sys_type == "error" else DestroyReason.MANUAL
             
-            Toast.success(self, "删除成功")
-            self._load_data()
+            if manager.destroy_environment(local_env["id"], reason):
+                Toast.success(self, "删除成功")
+                self._load_data()
+            else:
+                Toast.error(self, "删除失败")
             
         except Exception as e:
             Toast.error(self, f"删除失败: {e}")
-    
-    def _restore_ctrip_account_status(self, ctrip_account_id: int):
-        """根据账号配置恢复状态。
-        
-        - manual + manual -> idle
-        - 其他情况 -> blacklisted
-        """
-        try:
-            acc = self.ctrip_repo.get_by_id(ctrip_account_id)
-            if not acc:
-                return
-            
-            acc_type = acc.get("account_type", "manual")
-            sms_type = acc.get("sms_verify_type", acc.get("sms_platform_type", "manual"))
-            
-            if acc_type == "manual" and sms_type == "manual":
-                self.ctrip_repo.update_status(ctrip_account_id, "idle")
-            else:
-                self.ctrip_repo.update_status(ctrip_account_id, "blacklisted")
-        except Exception as e:
-            from src.utils.logger import logger
-            logger.warning(f"恢复携程账号状态失败: {e}")
 
     def _on_open_browser(self, item: dict):
         """Open browser and trigger auto-login if bound."""

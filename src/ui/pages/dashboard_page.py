@@ -3,6 +3,8 @@
 The main control console for managing automation tasks.
 """
 
+import asyncio
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -19,12 +21,17 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.config import config
 from src.core.events import get_event_bus
 from src.core.scheduler import Scheduler
 from src.ui.widgets.log_viewer import LogViewer
 from src.ui.widgets.toast import Toast
 from src.utils.logger import logger
-from src.utils.storage import EnvironmentRepository
+from src.utils.storage import (
+    CtripAccountRepository,
+    EnvironmentRepository,
+    LaborAccountRepository,
+)
 
 
 class DashboardPage(QWidget):
@@ -85,7 +92,6 @@ class DashboardPage(QWidget):
         control_layout.addStretch()
         
         # Concurrency selector (Sync with current config)
-        from src.config import config
         control_layout.addWidget(QLabel("并发:"))
         self.concurrency_combo = QComboBox()
         for i in range(1, 21):
@@ -117,18 +123,22 @@ class DashboardPage(QWidget):
         self.env_table.setAlternatingRowColors(True)
         self.env_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.env_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.env_table.verticalHeader().setVisible(False)
+        
+        v_header = self.env_table.verticalHeader()
+        if v_header:
+            v_header.setVisible(False)
         
         # Column widths
         header = self.env_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.env_table.setColumnWidth(0, 80)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.env_table.setColumnWidth(3, 100)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.env_table.setColumnWidth(4, 90)
+        if header:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            self.env_table.setColumnWidth(0, 80)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+            self.env_table.setColumnWidth(3, 100)
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+            self.env_table.setColumnWidth(4, 90)
         
         env_layout.addWidget(self.env_table)
         splitter.addWidget(env_group)
@@ -165,7 +175,6 @@ class DashboardPage(QWidget):
         envs = self.env_repo.get_all(limit=100)
         
         # Map to display format
-        from src.utils.storage import CtripAccountRepository, LaborAccountRepository
         ctrip_repo = CtripAccountRepository()
         labor_repo = LaborAccountRepository()
         
@@ -221,10 +230,9 @@ class DashboardPage(QWidget):
         """Handle start button click."""
         if self._is_running:
             return
-            
-        import asyncio
-        loop = asyncio.get_event_loop()
-        self._scheduler_task = loop.create_task(self.scheduler.start())
+        
+        # Create task in the integrated qasync event loop
+        self._scheduler_task = asyncio.create_task(self.scheduler.start())
         
         self._is_running = True
         self._update_button_states()
@@ -253,7 +261,6 @@ class DashboardPage(QWidget):
     def _on_concurrency_changed(self, index: int):
         """Handle concurrency change."""
         value = self.concurrency_combo.itemData(index)
-        from src.config import config
         config.concurrency_limit = value
         logger.info(f"核心调整：最大并发数已设为 {value}")
     
@@ -273,7 +280,3 @@ class DashboardPage(QWidget):
         """Slot for environment status changes."""
         # For now, full reload is safest to maintain sync with Repo
         self._load_data()
-
-    def add_demo_data(self):
-        """No longer used as we load real data from DB."""
-        pass
