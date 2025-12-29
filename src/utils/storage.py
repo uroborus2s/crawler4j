@@ -172,6 +172,55 @@ class CtripAccountRepository(BaseRepository):
             (country_code, phone_number)
         )
         return dict(row) if row else None
+    
+    def set_registered_at(self, id: int) -> bool:
+        """设置账号注册时间为当前时间（仅在 registered_at 为空时）。"""
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """UPDATE ctrip_accounts 
+                   SET registered_at = CURRENT_TIMESTAMP 
+                   WHERE id = ? AND registered_at IS NULL""",
+                (id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def is_cooldown_passed(self, id: int, cooldown_days: int = 2) -> bool:
+        """检查账号是否已过冷却期。
+        
+        Args:
+            id: 账号 ID
+            cooldown_days: 冷却天数，默认 2 天
+            
+        Returns:
+            True 如果已过冷却期或非 API 账号，False 如果仍在冷却期
+        """
+        row = self._execute_one(
+            "SELECT account_type, registered_at FROM ctrip_accounts WHERE id = ?",
+            (id,)
+        )
+        if not row:
+            return False
+        
+        account_type = row["account_type"]
+        registered_at = row["registered_at"]
+        
+        # 非 API 账号无冷却期
+        if account_type != "api":
+            return True
+        
+        # API 账号未注册过，冷却期未开始
+        if not registered_at:
+            return False
+        
+        # 检查是否已过冷却期
+        from datetime import datetime, timedelta
+        try:
+            reg_time = datetime.fromisoformat(registered_at.replace("Z", "+00:00"))
+            cooldown_end = reg_time + timedelta(days=cooldown_days)
+            return datetime.now(reg_time.tzinfo) >= cooldown_end
+        except Exception:
+            return False
 
 
 class LaborAccountRepository(BaseRepository):
@@ -517,6 +566,18 @@ class EnvironmentRepository(BaseRepository):
                    SET ws_endpoint = ?, http_endpoint = ?, pid = ?
                    WHERE id = ?""",
                 (ws_endpoint, http_endpoint, pid, id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def update_ctrip_login_at(self, id: int) -> bool:
+        """更新携程登录时间为当前时间（仅在 ctrip_login_at 为空时）。"""
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """UPDATE environments 
+                   SET ctrip_login_at = CURRENT_TIMESTAMP 
+                   WHERE id = ? AND ctrip_login_at IS NULL""",
+                (id,)
             )
             conn.commit()
             return cursor.rowcount > 0

@@ -46,6 +46,7 @@ class WorkflowResultType(Enum):
     MANUAL_SMS_AUTO_MODE = auto()  # 手动接码账号在自动模式下
     ACCOUNT_ERROR = auto()  # 账号数据无效
     NO_LABOR_ACCOUNT = auto()  # 无可用劳保账号
+    API_FIRST_LOGIN = auto()  # API账号首次登录，需要冷却期
     ERROR = auto()
 
 
@@ -190,6 +191,36 @@ def _acquire_labor_account(env_id: int | None) -> tuple[LaborAccount | None, int
     return None, None
 
 
+async def _handle_ctrip_login_success(
+    env_id: int | None,
+    ctrip_account: CtripAccount,
+) -> bool:
+    """处理携程登录成功后的记录。
+    
+    Args:
+        env_id: 环境 ID
+        ctrip_account: 携程账号
+        
+    Returns:
+        True 如果是首次登录，False 如果不是
+    """
+    env_repo = EnvironmentRepository()
+    ctrip_repo = CtripAccountRepository()
+    
+    is_first_login = False
+    
+    # 记录环境的携程登录时间
+    if env_id:
+        is_first_login = env_repo.update_ctrip_login_at(env_id)
+    
+    # 如果是 API 账号且首次登录，记录注册时间
+    if is_first_login and ctrip_account.account_type == "api" and ctrip_account.id:
+        ctrip_repo.set_registered_at(ctrip_account.id)
+        logger.info(f"📝 记录 API 账号注册时间: ID-{ctrip_account.id}")
+    
+    return is_first_login
+
+
 async def _run_automation(
     ws_endpoint: str,
     ctrip_account: CtripAccount,
@@ -241,6 +272,20 @@ async def _run_automation(
                     message="携程登录失败"
                 ), None
             logger.info(f"[ENV-{env_id}] ✅ 携程登录成功")
+            
+            # 🔴 关键逻辑：记录登录时间并检查是否需要冷却期
+            is_first_login = await _handle_ctrip_login_success(
+                env_id=env_id,
+                ctrip_account=ctrip_account,
+            )
+            
+            if is_first_login and ctrip_account.account_type == "api":
+                # API 账号首次登录，需要冷却期，立即终止
+                logger.warning(f"[ENV-{env_id}] 🕐 API账号首次登录，需要2天冷却期，终止环境")
+                return WorkflowResult(
+                    result_type=WorkflowResultType.API_FIRST_LOGIN,
+                    message="API账号首次登录，需要2天冷却期"
+                ), None
         else:
             logger.info(f"[ENV-{env_id}] ✅ 携程已登录，跳过")
         
