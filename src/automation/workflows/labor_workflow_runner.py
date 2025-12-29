@@ -214,6 +214,16 @@ class LaborWorkflowRunner:
                 elapsed = asyncio.get_event_loop().time() - start_time
                 logger.info(f"✅ 做题循环完成，用时: {elapsed:.1f}秒")
                 
+                # 同步到数据库
+                if self.current_labor_account and self.current_labor_account.id:
+                    try:
+                        self.labor_repo.update_stats(
+                            id=self.current_labor_account.id, 
+                            completed=1
+                        )
+                    except Exception as db_e:
+                        logger.warning(f"更新数据库统计失败: {db_e}")
+
                 self.stats["completed"] += 1
                 self.stats["total_time"] += elapsed
                 return True
@@ -249,6 +259,7 @@ class LaborWorkflowRunner:
         self._running = True
         self._stop_requested = False
         self.current_labor_account = labor_account
+        self.stats["completed"] = 0 # 重置单次运行统计
         task_count = 0
         
         try:
@@ -286,9 +297,20 @@ class LaborWorkflowRunner:
                 
                 # 3. 提交结果
                 # hotel_data 为 None 时 submit_result 会尝试提交“搜索不到”
-                await self.submit_workflow.submit_result(hotel_data)
-                
-                task_count += 1
+                if await self.submit_workflow.submit_result(hotel_data):
+                    # 同步到数据库
+                    if self.current_labor_account and self.current_labor_account.id:
+                        try:
+                            self.labor_repo.update_stats(
+                                id=self.current_labor_account.id, 
+                                completed=1
+                            )
+                        except Exception as db_e:
+                            logger.warning(f"更新数据库统计失败: {db_e}")
+                    
+                    task_count += 1
+                else:
+                    logger.warning("任务提交失败，跳过本次计数")
                 self.stats["completed"] = task_count
                 
                 if task_count < max_tasks:

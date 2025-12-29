@@ -10,9 +10,23 @@ from enum import Enum
 
 class AccountStatus(str, Enum):
     """Account status enumeration."""
-    ACTIVE = "active"
-    BLACKLISTED = "blacklisted"
-    DISABLED = "disabled"
+    IDLE = "idle"              # 空闲，可绑定
+    ACTIVE = "active"          # 已绑定，待运行
+    RUNNING = "running"        # 运行中
+    BLACKLISTED = "blacklisted"  # 黑名单
+    DISABLED = "disabled"      # 禁用
+
+
+class AccountType(str, Enum):
+    """账号创建类型。"""
+    MANUAL = "manual"   # 手动创建
+    API = "api"         # API 自动创建
+
+
+class SmsVerifyType(str, Enum):
+    """短信验证类型。"""
+    MANUAL = "manual"   # 手动接码
+    AUTO = "auto"       # 自动接码平台
 
 
 @dataclass
@@ -24,12 +38,14 @@ class CtripAccount:
         country_code: Country code for phone number (default +86).
         phone_number: Login phone number.
         password: Login password (optional if using SMS).
-        status: Account status (active/blacklisted/disabled).
+        status: Account status (idle/active/running/blacklisted/disabled).
+        account_type: Account creation type (manual/api).
+        sms_verify_type: SMS verification method (manual/auto).
         consecutive_task_count: Number of consecutive tasks before break.
         task_interval_max: Maximum interval between tasks (minutes).
         sms_platform_url: SMS verification platform API URL.
         sms_platform_key: SMS verification platform API key.
-        sms_platform_type: SMS platform type identifier.
+        sms_platform_type: Legacy field, replaced by sms_verify_type.
         created_at: Account creation timestamp.
         updated_at: Last update timestamp.
     """
@@ -38,21 +54,41 @@ class CtripAccount:
     id: int | None = None
     country_code: str = "+86"
     password: str | None = None
-    status: AccountStatus = AccountStatus.ACTIVE
+    status: AccountStatus = AccountStatus.IDLE
+    account_type: AccountType = AccountType.MANUAL
+    sms_verify_type: SmsVerifyType = SmsVerifyType.MANUAL
     consecutive_task_count: int = 5
     task_interval_max: int = 15
     sms_platform_url: str | None = None
     sms_platform_key: str | None = None
-    sms_platform_type: str | None = None
+    sms_platform_type: str | None = None  # 兑容旧字段
     created_at: datetime | None = None
     updated_at: datetime | None = None
     
     @classmethod
     def from_dict(cls, data: dict) -> "CtripAccount":
         """Create instance from dictionary."""
-        status = data.get("status", "active")
+        status = data.get("status", "idle")
         if isinstance(status, str):
-            status = AccountStatus(status)
+            try:
+                status = AccountStatus(status)
+            except ValueError:
+                status = AccountStatus.IDLE
+        
+        account_type = data.get("account_type", "manual")
+        if isinstance(account_type, str):
+            try:
+                account_type = AccountType(account_type)
+            except ValueError:
+                account_type = AccountType.MANUAL
+        
+        # sms_verify_type 优先继承旧的 sms_platform_type 语义
+        sms_verify_type = data.get("sms_verify_type") or data.get("sms_platform_type") or "manual"
+        if isinstance(sms_verify_type, str):
+            if sms_verify_type in ("manual", "auto"):
+                sms_verify_type = SmsVerifyType(sms_verify_type)
+            else:
+                sms_verify_type = SmsVerifyType.MANUAL
         
         return cls(
             id=data.get("id"),
@@ -60,6 +96,8 @@ class CtripAccount:
             phone_number=data.get("phone_number", data.get("phone", "")),
             password=data.get("password"),
             status=status,
+            account_type=account_type,
+            sms_verify_type=sms_verify_type,
             consecutive_task_count=data.get("consecutive_task_count", 5),
             task_interval_max=data.get("task_interval_max", 15),
             sms_platform_url=data.get("sms_platform_url"),
@@ -77,6 +115,8 @@ class CtripAccount:
             "phone_number": self.phone_number,
             "password": self.password,
             "status": self.status.value if isinstance(self.status, AccountStatus) else self.status,
+            "account_type": self.account_type.value if isinstance(self.account_type, AccountType) else self.account_type,
+            "sms_verify_type": self.sms_verify_type.value if isinstance(self.sms_verify_type, SmsVerifyType) else self.sms_verify_type,
             "consecutive_task_count": self.consecutive_task_count,
             "task_interval_max": self.task_interval_max,
             "sms_platform_url": self.sms_platform_url,

@@ -78,7 +78,29 @@ class CtripAccountDialog(QDialog):
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         form.addRow("密码:", self.password_input)
         
-        # SMS Platform Type
+        # Account Type
+        self.account_type_combo = QComboBox()
+        self.account_type_combo.addItems(["manual", "api"])
+        form.addRow("账号类型:", self.account_type_combo)
+        
+        # SMS Verify Type
+        self.sms_verify_combo = QComboBox()
+        self.sms_verify_combo.addItems(["manual", "auto"])
+        form.addRow("接码模式:", self.sms_verify_combo)
+        
+        # Consecutive Task Count
+        self.task_count_input = QLineEdit()
+        self.task_count_input.setPlaceholderText("15")
+        self.task_count_input.setText("15")
+        form.addRow("连续任务数:", self.task_count_input)
+        
+        # Task Interval Max
+        self.interval_input = QLineEdit()
+        self.interval_input.setPlaceholderText("2")
+        self.interval_input.setText("2")
+        form.addRow("任务间隔上限(分):", self.interval_input)
+        
+        # SMS Platform Type (legacy, for auto mode)
         self.sms_type_combo = QComboBox()
         self.sms_type_combo.addItems(["", "平台A", "平台B", "平台C"])
         self.sms_type_combo.setEditable(True)
@@ -133,12 +155,28 @@ class CtripAccountDialog(QDialog):
             self.phone_number_input.setText(self.account.get("phone_number", ""))
             self.password_input.setText(self.account.get("password", ""))
             
-            sms_type = self.account.get("sms_platform_type", "")
-            idx = self.sms_type_combo.findText(sms_type)
+            # Account Type
+            acc_type = self.account.get("account_type", "manual")
+            idx = self.account_type_combo.findText(acc_type)
+            if idx >= 0:
+                self.account_type_combo.setCurrentIndex(idx)
+            
+            # SMS Verify Type
+            sms_type = self.account.get("sms_verify_type", "manual")
+            idx = self.sms_verify_combo.findText(sms_type)
+            if idx >= 0:
+                self.sms_verify_combo.setCurrentIndex(idx)
+            
+            # Task config
+            self.task_count_input.setText(str(self.account.get("consecutive_task_count", 5)))
+            self.interval_input.setText(str(self.account.get("task_interval_max", 15)))
+            
+            sms_platform = self.account.get("sms_platform_type", "")
+            idx = self.sms_type_combo.findText(sms_platform)
             if idx >= 0:
                 self.sms_type_combo.setCurrentIndex(idx)
             else:
-                self.sms_type_combo.setCurrentText(sms_type)
+                self.sms_type_combo.setCurrentText(sms_platform)
             
             self.sms_url_input.setText(self.account.get("sms_platform_url", ""))
             self.sms_key_input.setText(self.account.get("sms_platform_key", ""))
@@ -151,11 +189,26 @@ class CtripAccountDialog(QDialog):
             self._show_error("手机号不能为空")
             return
         
+        # Validate task count
+        try:
+            task_count = int(self.task_count_input.text().strip() or "5")
+        except ValueError:
+            task_count = 5
+        
+        try:
+            interval_max = int(self.interval_input.text().strip() or "15")
+        except ValueError:
+            interval_max = 15
+        
         # Collect data
         self.result_data = {
             "country_code": self.country_code_combo.currentText().strip(),
             "phone_number": phone_number,
             "password": self.password_input.text(),
+            "account_type": self.account_type_combo.currentText(),
+            "sms_verify_type": self.sms_verify_combo.currentText(),
+            "consecutive_task_count": task_count,
+            "task_interval_max": interval_max,
             "sms_platform_type": self.sms_type_combo.currentText(),
             "sms_platform_url": self.sms_url_input.text().strip(),
             "sms_platform_key": self.sms_key_input.text().strip(),

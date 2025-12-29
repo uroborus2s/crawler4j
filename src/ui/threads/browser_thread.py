@@ -4,6 +4,7 @@ Handles opening the browser via API and executing auto-login automation.
 """
 
 import asyncio
+import re
 
 from playwright.async_api import async_playwright
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -136,6 +137,17 @@ class BrowserLauncherThread(QThread):
                 
                 # ========== Step 1: 携程登录 ==========
                 logger.info("=== 步骤1: 携程登录 ===")
+                
+                # 先导航到携程首页，确保在携程域名下进行登录检测
+                logger.info("导航到携程首页...")
+                try:
+                    await page.goto("https://www.ctrip.com/", wait_until="domcontentloaded", timeout=30000)
+                except Exception as nav_e:
+                    logger.warning(f"导航到携程首页超时，继续尝试: {nav_e}")
+                
+                import asyncio
+                await asyncio.sleep(1)
+                
                 ctrip_workflow = CtripLoginWorkflow(page)
                 
                 if await ctrip_workflow.is_logged_in():
@@ -152,7 +164,6 @@ class BrowserLauncherThread(QThread):
                         # Find or Create Account in DB
                         all_accounts = self.ctrip_repo.get_all()
                         # Parse login_phone to extract country_code and phone_number
-                        import re
                         match = re.match(r"(\+\d+)(.*)", login_phone)
                         if match:
                             cc, pn = match.group(1), match.group(2)
@@ -206,6 +217,8 @@ class BrowserLauncherThread(QThread):
                     logger.info("所有连续任务已完成，正在关闭浏览器...")
                     from src.core.browser_api import BrowserAPI
                     BrowserAPI.close_browser(self.profile_id)
+                    if self.env_id:
+                        self.env_repo.update_status(self.env_id, "idle")
                 else:
                     # Detach (不关闭浏览器，保持会话)
                     browser.contexts[0]  # Keep reference

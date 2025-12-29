@@ -301,7 +301,7 @@ class EnvironmentsPage(QWidget):
         ProxyManagerDialog(self).exec()
 
     def _on_create(self):
-        """Handle environment creation with optional Auto Proxy."""
+        """Handle environment creation."""
         from src.config import config
         from src.ui.dialogs.create_env_dialog import CreateEnvDialog
         
@@ -329,9 +329,17 @@ class EnvironmentsPage(QWidget):
             
         try:
             # 1. Create Remote Browser Profile
+            # Extract fields
+            platform = result.get("platform", "Ctrip")
+            limit = result.get("daily_open_limit", 0)
+            
+            final_remark = f"Created by Crawler4j [{platform}]"
+            if limit > 0:
+                final_remark += f" (Limit: {limit}/day)"
+            
             profile_id = BrowserAPI.create_profile(
                 name=result["name"],
-                remark="Auto-created by Crawler4j",
+                remark=final_remark,
                 proxy=result.get("proxy_config"),
                 fingerprint=result.get("fingerprint_config"),
                 group_id=result.get("group_id")
@@ -347,8 +355,15 @@ class EnvironmentsPage(QWidget):
                 labor_account_id=result["labor_account_id"],
                 browser_profile_id=profile_id,
                 browser_type=config.browser_type,
-                proxy_ip_id=proxy_ip_id
+                proxy_ip_id=proxy_ip_id,
+                daily_open_limit=limit
             )
+            
+            # 4. Update Ctrip Account Status -> ACTIVE
+            ctrip_id = result["ctrip_account_id"]
+            if ctrip_id:
+                self.ctrip_repo.update_status(ctrip_id, "active")
+            
             Toast.success(self, "环境创建并绑定成功")
             self._load_data()
             
@@ -371,6 +386,8 @@ class EnvironmentsPage(QWidget):
             return
 
         try:
+            local_env = item.get("raw_local")
+            
             # 1. crawler4j System: Delete Remote + Local
             if sys_type == "crawler4j系统":
                 # Delete remote
@@ -378,13 +395,16 @@ class EnvironmentsPage(QWidget):
                     raise RuntimeError("浏览器接口删除失败")
                 
                 # Release IP usage
-                local_env = item["raw_local"]
                 if local_env and local_env.get("proxy_ip_id"):
                     self.proxy_repo.decrement_usage(local_env["proxy_ip_id"])
                 
                 # Release labor account bind count
                 if local_env and local_env.get("labor_account_id"):
                     self.labor_repo.decrement_bind_count(local_env["labor_account_id"])
+                
+                # Restore ctrip account status
+                if local_env and local_env.get("ctrip_account_id"):
+                    self._restore_ctrip_account_status(local_env["ctrip_account_id"])
                     
                 # Delete local
                 if local_env:
@@ -393,13 +413,16 @@ class EnvironmentsPage(QWidget):
             # 2. error: Delete Local Only (Remote doesn't exist)
             elif sys_type == "error":
                 # Release IP usage
-                local_env = item["raw_local"]
                 if local_env and local_env.get("proxy_ip_id"):
                     self.proxy_repo.decrement_usage(local_env["proxy_ip_id"])
                 
                 # Release labor account bind count
                 if local_env and local_env.get("labor_account_id"):
                     self.labor_repo.decrement_bind_count(local_env["labor_account_id"])
+                
+                # Restore ctrip account status
+                if local_env and local_env.get("ctrip_account_id"):
+                    self._restore_ctrip_account_status(local_env["ctrip_account_id"])
                     
                 if local_env:
                     self.env_repo.delete(local_env["id"])
@@ -409,6 +432,28 @@ class EnvironmentsPage(QWidget):
             
         except Exception as e:
             Toast.error(self, f"删除失败: {e}")
+    
+    def _restore_ctrip_account_status(self, ctrip_account_id: int):
+        """根据账号配置恢复状态。
+        
+        - manual + manual -> idle
+        - 其他情况 -> blacklisted
+        """
+        try:
+            acc = self.ctrip_repo.get_by_id(ctrip_account_id)
+            if not acc:
+                return
+            
+            acc_type = acc.get("account_type", "manual")
+            sms_type = acc.get("sms_verify_type", acc.get("sms_platform_type", "manual"))
+            
+            if acc_type == "manual" and sms_type == "manual":
+                self.ctrip_repo.update_status(ctrip_account_id, "idle")
+            else:
+                self.ctrip_repo.update_status(ctrip_account_id, "blacklisted")
+        except Exception as e:
+            from src.utils.logger import logger
+            logger.warning(f"恢复携程账号状态失败: {e}")
 
     def _on_open_browser(self, item: dict):
         """Open browser and trigger auto-login if bound."""
@@ -417,6 +462,16 @@ class EnvironmentsPage(QWidget):
         ctrip_id = local_env.get("ctrip_account_id") if local_env else None
         labor_id = local_env.get("labor_account_id") if local_env else None
         env_id = local_env.get("id") if local_env else None
+        
+        # 1. 每日打开限制检查
+        if env_id:
+            if not self.env_repo.check_and_increment_daily_usage(env_id):
+                Toast.error(self, "今日打开次数已达上限")
+                return
+            
+            # Update status to running locally
+            from datetime import datetime
+            self.env_repo.update_status(env_id, "running", datetime.now().isoformat())
         
         # Disable button to prevent double click
         btn = self.sender()

@@ -219,7 +219,7 @@ class CtripSearchWorkflow(BaseWorkflow):
             except Exception as final_e:
                 logger.error(f"直接点击也失败: {final_e}")
 
-    async def _select_calendar_date(self, date_str: str):
+    async def _select_calendar_date(self, date_str: str, max_retries: int = 5):
         """在日历组件中选择指定日期。
         
         基于携程日历 HTML 解析：
@@ -227,51 +227,69 @@ class CtripSearchWorkflow(BaseWorkflow):
         - 内容: div.tipWrapper (含有 aria-label="2025年12月30日...")
         - 禁用: td 的 class 包含 is-disable
         """
-        try:
-            import re
-            
-            # 解析目标日期
-            match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', date_str)
-            if not match:
-                logger.warning(f"无法解析日期格式: {date_str}")
-                return False
-            
-            year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
-            
-            # 构建 aria-label 匹配前缀 (例如 "2025年12月30日")
-            target_label_prefix = f"{year}年{month}月{day}日"
-            
-            # 1. 直接通过 aria-label 定位 tipWrapper
-            # 增加 :visible 过滤并取第一个 (.first)，防止 Strict mode violation (多面板冲突)
-            target_tip = self.page.locator(f"div.tipWrapper[aria-label^='{target_label_prefix}']:visible").first
-            
-            if await target_tip.count() > 0:
-                # 获取父级 td 检查是否禁用
-                parent_td = target_tip.locator("xpath=..") 
-                
-                cell_class = await parent_td.get_attribute("class") or ""
-                aria_disabled = await parent_td.get_attribute("aria-disabled")
-                
-                if "is-disable" in cell_class or aria_disabled == "true":
-                    logger.debug(f"日期 {date_str} 在 UI 上显示为禁用，跳过")
-                else:
-                    # 拟人移动并点击
-                    logger.info(f"📍 命中日期: {target_label_prefix}")
-                    await self._move_to_element_and_click(target_tip)
-                    await asyncio.sleep(random.uniform(0.3, 0.6))
-                    return True
-            
-            # 2. 如果当前面板没找到，尝试导航月份
-            logger.debug(f"当前面板未查获日期 {date_str}，尝试滚动/翻页")
-            if await self._navigate_to_month(year, month):
-                # 递归重试
-                return await self._select_calendar_date(date_str)
-            
+        import re
+        
+        # 解析目标日期
+        match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', date_str)
+        if not match:
+            logger.warning(f"无法解析日期格式: {date_str}")
             return False
+        
+        year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        target_label_prefix = f"{year}年{month}月{day}日"
+        
+        for attempt in range(max_retries):
+            try:
+                # 等待日历面板稳定加载
+                await asyncio.sleep(0.5)
                 
-        except Exception as e:
-            logger.warning(f"日历操作异常: {e}")
-            return False
+                # 确保日历面板可见
+                calendar = self.page.locator("div.c-calendar[role='application']:not(.is-hide)")
+                if await calendar.count() == 0:
+                    logger.debug(f"日历面板不可见，等待...")
+                    try:
+                        await calendar.first.wait_for(state="visible", timeout=3000)
+                    except Exception:
+                        pass
+                
+                # 1. 直接通过 aria-label 定位 tipWrapper
+                target_tip = self.page.locator(f"div.tipWrapper[aria-label^='{target_label_prefix}']:visible").first
+                
+                if await target_tip.count() > 0:
+                    # 获取父级 td 检查是否禁用
+                    parent_td = target_tip.locator("xpath=..") 
+                    
+                    cell_class = await parent_td.get_attribute("class") or ""
+                    aria_disabled = await parent_td.get_attribute("aria-disabled")
+                    
+                    if "is-disable" in cell_class or aria_disabled == "true":
+                        logger.debug(f"日期 {date_str} 在 UI 上显示为禁用，跳过")
+                        return False
+                    else:
+                        # 拟人移动并点击
+                        logger.info(f"📍 命中日期: {target_label_prefix}")
+                        await self._move_to_element_and_click(target_tip)
+                        await asyncio.sleep(random.uniform(0.3, 0.6))
+                        return True
+                
+                # 2. 如果当前面板没找到，先导航到目标月份
+                logger.debug(f"尝试 {attempt + 1}/{max_retries}: 当前面板未找到日期 {date_str}")
+                
+                if attempt < max_retries - 1:
+                    navigated = await self._navigate_to_month(year, month)
+                    if not navigated:
+                        # 导航失败，等待后重试
+                        await asyncio.sleep(1.0)
+                    else:
+                        # 导航成功，等待日历刷新
+                        await asyncio.sleep(0.8)
+                        
+            except Exception as e:
+                logger.debug(f"日期选择尝试 {attempt + 1} 失败: {e}")
+                await asyncio.sleep(0.5)
+        
+        logger.warning(f"日期选择失败，超过最大重试次数: {date_str}")
+        return False
 
     async def _navigate_to_month(self, target_year: int, target_month: int):
         """导航日历到目标月份。"""
@@ -473,8 +491,14 @@ class CtripSearchWorkflow(BaseWorkflow):
             # ========== 日期选择操作 ==========
             logger.info(f"正在详情页修改日期: {task.checkin} ~ {task.checkout}")
             
-            # 模拟用户浏览详情页
+            # 模拟用户浏览详情页，并等待页面完全加载
             await self._simulate_human_browsing(duration=random.uniform(1.0, 2.0))
+            
+            # 等待页面网络请求稳定
+            try:
+                await self.page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                logger.debug("等待页面加载超时，继续操作")
             
             # 查找日期选择器（基于截图中的 UI 结构）
             date_selector = self.page.locator(
@@ -482,36 +506,49 @@ class CtripSearchWorkflow(BaseWorkflow):
             )
             
             if await date_selector.count() > 0:
+                # 滚动到日期选择器可见
+                await date_selector.first.scroll_into_view_if_needed()
+                await asyncio.sleep(0.5)
+                
                 # 点击日期选择器打开日历
                 await self._move_to_element_and_click(date_selector)
-                await asyncio.sleep(random.uniform(0.8, 1.5))
+                await asyncio.sleep(random.uniform(1.0, 1.8))
                 
-                # 定义日历弹窗：优先查没有 is-hide 类的，或者物理可见的
+                # 定义日历弹窗：优先查没有 is-hide 类的
                 calendar_popup = self.page.locator("div.c-calendar[role='application']:not(.is-hide)")
 
                 try:
-                    await calendar_popup.first.wait_for(state="visible", timeout=5000)
+                    await calendar_popup.first.wait_for(state="visible", timeout=8000)
                     logger.debug("日历弹窗已显现")
+                    # 额外等待日历内容渲染完成
+                    await asyncio.sleep(0.8)
                 except Exception:
                     # 后备：检查是否元素存在但只是 class 还没变
                     exists = await self.page.locator("div.c-calendar[role='application']").count() > 0
                     if exists:
                         logger.debug("日历元素存在但可能仍带有隐藏属性，尝试继续...")
+                        await asyncio.sleep(1.0)  # 额外等待
                     else:
                         logger.warning("日历弹窗未找到或未弹出")
                 
                 # 选择入住日期
-                await self._select_calendar_date(task.checkin)
-                await asyncio.sleep(random.uniform(0.3, 0.6))
+                checkin_ok = await self._select_calendar_date(task.checkin)
+                if checkin_ok:
+                    await asyncio.sleep(random.uniform(0.5, 0.8))
                 
                 # 选择离店日期
-                await self._select_calendar_date(task.checkout)
-                await asyncio.sleep(random.uniform(0.5, 1.0))
+                checkout_ok = await self._select_calendar_date(task.checkout)
+                if checkout_ok:
+                    await asyncio.sleep(random.uniform(0.5, 1.0))
+                
+                if not checkin_ok or not checkout_ok:
+                    logger.warning("日历选择未完成，尝试 JS 注入方式")
+                    await self._inject_dates_via_js(task.checkin, task.checkout)
                 
             else:
                 logger.warning("未找到日期选择器，尝试 JS 注入方式")
                 await self._inject_dates_via_js(task.checkin, task.checkout)
-                # JS 注入后可能需要手动触发一下搜索，或者靠页面监听 change 事件
+                # JS 注入后可能需要手动触发一下搜索
                 await asyncio.sleep(random.uniform(1.0, 2.0))
             
             # ========== 数据拦截 ==========
