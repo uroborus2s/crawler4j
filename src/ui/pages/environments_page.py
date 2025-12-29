@@ -59,6 +59,12 @@ class EnvironmentsPage(QWidget):
         self._setup_ui()
         self.table.set_row_height(48)
         
+        # 监听事件
+        from src.core.events import get_event_bus
+        bus = get_event_bus()
+        bus.environment_created.connect(lambda _: self._load_data())
+        bus.environment_status_changed.connect(lambda _env_id, _status: self._load_data())
+        
         # Initial full sync on app start with cleanup
         self._load_data(sync=True, cleanup=True)
         

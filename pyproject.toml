@@ -12,6 +12,7 @@ dependencies = [
     "ddddocr>=1.4.11",
     "numpy>=2.4.0",
     "qasync>=0.28.0",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]

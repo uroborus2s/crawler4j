@@ -84,6 +84,7 @@ class EventBus(QObject):
     # Specific typed signals for common events
     log_added = pyqtSignal(str, str, int)  # message, level, env_id
     environment_status_changed = pyqtSignal(int, str)  # env_id, status
+    environment_created = pyqtSignal(dict)  # env_data
     scheduler_status_changed = pyqtSignal(bool)  # is_running
     stats_updated = pyqtSignal(dict)  # stats dict
     labor_stats_updated = pyqtSignal(dict)  # data dict
@@ -114,6 +115,9 @@ class EventBus(QObject):
                 data.get("env_id", 0),
                 data.get("status", "unknown"),
             )
+        elif event.type == EventType.ENVIRONMENT_CREATED:
+            data = event.data or {}
+            self.environment_created.emit(data)
         elif event.type in (EventType.SCHEDULER_STARTED, EventType.SCHEDULER_STOPPED):
             is_running = event.type == EventType.SCHEDULER_STARTED
             self.scheduler_status_changed.emit(is_running)

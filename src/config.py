@@ -149,6 +149,44 @@ class Config:
     @virtualbrowser_path.setter
     def virtualbrowser_path(self, value: str) -> None:
         self._set("virtualbrowser_path", value)
+    
+    # SMS Platform settings (接码平台)
+    
+    @property
+    def sms_platform_host(self) -> str:
+        """接码平台域名，格式如 3.112.30.233:8000"""
+        return self._get("sms_platform_host", "")
+    
+    @sms_platform_host.setter
+    def sms_platform_host(self, value: str) -> None:
+        self._set("sms_platform_host", value)
+    
+    @property
+    def sms_platform_username(self) -> str:
+        """接码平台用户名。"""
+        return self._get("sms_platform_username", "")
+    
+    @sms_platform_username.setter
+    def sms_platform_username(self, value: str) -> None:
+        self._set("sms_platform_username", value)
+    
+    @property
+    def sms_platform_password(self) -> str:
+        """接码平台密码。"""
+        return self._get("sms_platform_password", "")
+    
+    @sms_platform_password.setter
+    def sms_platform_password(self, value: str) -> None:
+        self._set("sms_platform_password", value)
+    
+    @property
+    def sms_platform_product_id(self) -> str:
+        """接码平台项目ID。"""
+        return self._get("sms_platform_product_id", "")
+    
+    @sms_platform_product_id.setter
+    def sms_platform_product_id(self, value: str) -> None:
+        self._set("sms_platform_product_id", value)
 
     def to_dict(self) -> dict[str, Any]:
         """Get all settings as a dictionary."""
@@ -163,6 +201,10 @@ class Config:
             "default_sms_key": self.default_sms_key,
             "bitbrowser_path": self.bitbrowser_path,
             "virtualbrowser_path": self.virtualbrowser_path,
+            "sms_platform_host": self.sms_platform_host,
+            "sms_platform_username": self.sms_platform_username,
+            "sms_platform_password": self.sms_platform_password,
+            "sms_platform_product_id": self.sms_platform_product_id,
         }
 
 
