@@ -7,7 +7,6 @@ Uses Playwright route interception for reliable data capture.
 import asyncio
 import json
 import random
-from typing import Any, Dict
 
 from playwright.async_api import Page, Route
 

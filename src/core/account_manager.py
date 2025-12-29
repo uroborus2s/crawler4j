@@ -4,12 +4,14 @@ Handles scheduling logic for Ctrip and Labor account pools.
 """
 
 from src.core.models.ctrip_account import CtripAccount
-from src.core.models.labor_account import LaborAccount
 from src.core.models.environment import Environment, EnvironmentStatus
+from src.core.models.labor_account import LaborAccount
+from src.utils.logger import logger
 from src.utils.storage import (
     CtripAccountRepository,
-    LaborAccountRepository,
     EnvironmentRepository,
+    LaborAccountRepository,
+    ProxyIPRepository,
 )
 
 
@@ -28,6 +30,76 @@ class AccountManager:
         self.ctrip_repo = CtripAccountRepository()
         self.labor_repo = LaborAccountRepository()
         self.env_repo = EnvironmentRepository()
+        self.proxy_repo = ProxyIPRepository()
+    
+    # ==================== 调度器方法 ====================
+    
+    def get_idle_environment(self) -> Environment | None:
+        """获取一个空闲且有效的环境。
+        
+        优先返回已存在的空闲环境，账号状态必须为 active。
+        
+        Returns:
+            Environment if found, None otherwise.
+        """
+        idle_envs = self.env_repo.get_idle()
+        
+        for env_data in idle_envs:
+            # 验证关联的携程账号是否有效
+            ctrip_id = env_data.get("ctrip_account_id")
+            if ctrip_id:
+                ctrip_data = self.ctrip_repo.get_by_id(ctrip_id)
+                if ctrip_data and ctrip_data.get("status") == "active":
+                    return Environment.from_dict(env_data)
+        
+        return None
+    
+    def create_environment_auto(self) -> Environment | None:
+        """自动创建新环境。
+        
+        委托给 EnvironmentManager 执行统一创建流程。
+        
+        Returns:
+            New Environment if successful, None otherwise.
+        """
+        from src.core.environment_manager import EnvironmentManager
+        
+        manager = EnvironmentManager()
+        return manager.create_environment(auto_assign=True)
+    
+    def cleanup_environment(self, env_id: int) -> bool:
+        """清理环境连接信息，将状态设为 idle。
+        
+        Args:
+            env_id: Environment ID.
+            
+        Returns:
+            True if successful.
+        """
+        try:
+            self.env_repo.update_connection_info(env_id, None, None, None)
+            return self.env_repo.update_status(env_id, "idle")
+        except Exception as e:
+            logger.error(f"清理环境失败: {e}")
+            return False
+    
+    def handle_blacklisted_account(self, ctrip_account_id: int) -> bool:
+        """处理被封的携程账号。
+        
+        委托给 EnvironmentManager 执行统一销毁流程。
+        
+        Args:
+            ctrip_account_id: Ctrip account ID.
+            
+        Returns:
+            True if successful.
+        """
+        from src.core.environment_manager import DestroyReason, EnvironmentManager
+        
+        manager = EnvironmentManager()
+        return manager.destroy_by_ctrip_account(ctrip_account_id, DestroyReason.BLACKLISTED)
+    
+    # ==================== 原有方法 ====================
     
     def get_next_environment(self) -> Environment | None:
         """Get the next available environment for task execution.
@@ -172,3 +244,4 @@ class AccountManager:
     def get_active_labor_count(self) -> int:
         """Get count of active Labor accounts."""
         return self.labor_repo.count("status = 'active'")
+

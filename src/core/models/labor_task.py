@@ -3,7 +3,7 @@
 Represents a task claimed from the Labor platform.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
 
 

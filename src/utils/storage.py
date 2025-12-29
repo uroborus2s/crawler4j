@@ -251,6 +251,124 @@ class LaborAccountRepository(BaseRepository):
             )
             conn.commit()
             return cursor.rowcount > 0
+    
+    # ==================== 互斥锁定方法 ====================
+    
+    def lock_account(self, labor_id: int, env_id: int) -> bool:
+        """原子锁定劳保账号。
+        
+        仅当账号未被锁定时成功。使用条件 UPDATE 实现原子操作。
+        
+        Args:
+            labor_id: 劳保账号 ID
+            env_id: 环境 ID
+            
+        Returns:
+            True if locked successfully, False if already locked.
+        """
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """UPDATE labor_accounts 
+                   SET locked_by_env_id = ?, locked_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND locked_by_env_id IS NULL""",
+                (env_id, labor_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def unlock_account(self, labor_id: int, env_id: int) -> bool:
+        """释放劳保账号锁定。
+        
+        仅释放由指定环境锁定的账号（安全释放）。
+        
+        Args:
+            labor_id: 劳保账号 ID
+            env_id: 持有锁的环境 ID
+            
+        Returns:
+            True if unlocked successfully.
+        """
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """UPDATE labor_accounts 
+                   SET locked_by_env_id = NULL, locked_at = NULL
+                   WHERE id = ? AND locked_by_env_id = ?""",
+                (labor_id, env_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def get_available_account(self) -> dict | None:
+        """获取未锁定且绑定次数最少的活跃账号。
+        
+        Returns:
+            未锁定的活跃账号，优先选择 bind_count 最小的。
+        """
+        row = self._execute_one(
+            """SELECT * FROM labor_accounts 
+               WHERE status = 'active' AND locked_by_env_id IS NULL
+               ORDER BY bind_count ASC, RANDOM()
+               LIMIT 1"""
+        )
+        return dict(row) if row else None
+    
+    def force_unlock_by_env(self, env_id: int) -> int:
+        """强制释放某环境的所有账号锁定。
+        
+        用于环境异常退出后的清理。
+        
+        Args:
+            env_id: 环境 ID
+            
+        Returns:
+            释放的账号数量。
+        """
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """UPDATE labor_accounts 
+                   SET locked_by_env_id = NULL, locked_at = NULL 
+                   WHERE locked_by_env_id = ?""",
+                (env_id,)
+            )
+            conn.commit()
+            return cursor.rowcount
+    
+    def cleanup_stale_locks(self, timeout_minutes: int = 30) -> int:
+        """清理超时的旧锁。
+        
+        释放锁定时间超过指定分钟数的账号。
+        
+        Args:
+            timeout_minutes: 锁定超时时间（分钟）
+            
+        Returns:
+            释放的账号数量。
+        """
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """UPDATE labor_accounts 
+                   SET locked_by_env_id = NULL, locked_at = NULL 
+                   WHERE locked_by_env_id IS NOT NULL 
+                   AND datetime(locked_at, '+' || ? || ' minutes') < datetime('now')""",
+                (timeout_minutes,)
+            )
+            conn.commit()
+            return cursor.rowcount
+    
+    def is_locked(self, labor_id: int) -> bool:
+        """检查账号是否被锁定。"""
+        row = self._execute_one(
+            "SELECT locked_by_env_id FROM labor_accounts WHERE id = ?",
+            (labor_id,)
+        )
+        return row is not None and row["locked_by_env_id"] is not None
+    
+    def get_active(self) -> list[dict]:
+        """Get all active labor accounts."""
+        rows = self._execute(
+            "SELECT * FROM labor_accounts WHERE status = 'active'"
+        )
+        return [dict(row) for row in rows]
 
 
 class ProxyIPRepository(BaseRepository):

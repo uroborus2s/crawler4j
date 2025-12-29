@@ -189,7 +189,9 @@ class CreateEnvDialog(QDialog):
         self.ctrip_combo = QComboBox()
         self.ctrip_combo.setEditable(True)  # Enable searching
         self.ctrip_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.ctrip_combo.lineEdit().setPlaceholderText("请选择账号")
+        le = self.ctrip_combo.lineEdit()
+        if le:
+            le.setPlaceholderText("请选择账号")
         basic_layout.addRow("用户名", self.ctrip_combo)
         
         # 每日最大打开次数
@@ -337,7 +339,9 @@ class CreateEnvDialog(QDialog):
             
             # Reset selection and text
             self.ctrip_combo.setCurrentIndex(-1)
-            self.ctrip_combo.lineEdit().setPlaceholderText("请选择账号")
+            le = self.ctrip_combo.lineEdit()
+            if le:
+                le.setPlaceholderText("请选择账号")
             self.ctrip_combo.setEnabled(True)
 
     def _on_proxy_type_changed(self, btn_id):

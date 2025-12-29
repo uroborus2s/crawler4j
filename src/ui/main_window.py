@@ -3,13 +3,13 @@
 Provides the main application window with sidebar navigation and content area.
 """
 
-from pathlib import Path
+import os
 
 from PyQt6.QtWidgets import (
-    QMainWindow,
-    QWidget,
     QHBoxLayout,
+    QMainWindow,
     QStackedWidget,
+    QWidget,
 )
 
 from src.ui.widgets.sidebar import Sidebar
@@ -31,7 +31,8 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🤖 自动化爬虫 GUI")
+        from src.__version__ import VERSION
+        self.setWindowTitle(f"🤖 自动化爬虫 GUI (v{VERSION})")
         self.setMinimumSize(1200, 800)
         
         # Apply dark theme
@@ -45,8 +46,9 @@ class MainWindow(QMainWindow):
     
     def _load_stylesheet(self):
         """Load the dark theme stylesheet."""
-        style_path = Path(__file__).parent / "styles" / "dark_theme.qss"
-        if style_path.exists():
+        from src.utils.paths import get_resource_path
+        style_path = get_resource_path("src/ui/styles/dark_theme.qss")
+        if os.path.exists(style_path):
             with open(style_path, "r", encoding="utf-8") as f:
                 self.setStyleSheet(f.read())
     
@@ -74,10 +76,6 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_widget)
         
         # We will add real pages in main.py
-    
-    def _add_placeholder_pages(self):
-        """No longer used as we add real pages in main.py."""
-        pass
     
     def _connect_signals(self):
         """Connect sidebar navigation signals."""
