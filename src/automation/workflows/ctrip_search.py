@@ -7,9 +7,9 @@ Uses Playwright route interception for reliable data capture.
 import asyncio
 import json
 import random
-from typing import Optional
+from typing import Any, Dict
 
-from playwright.async_api import Page, Response, Route
+from playwright.async_api import Page, Route
 
 from src.automation.workflows.base import BaseWorkflow
 from src.core.models.labor_task import LaborTask
@@ -163,6 +163,196 @@ class CtripSearchWorkflow(BaseWorkflow):
             await asyncio.sleep(random.uniform(0.3, 0.8))
         
         logger.debug(f"人工浏览模拟完成，持续 {duration:.1f} 秒")
+
+    async def _human_type(self, text: str, min_delay: float = 0.03, max_delay: float = 0.12):
+        """模拟人类打字行为。
+        
+        包括随机延迟、偶尔的快速连击和停顿。
+        """
+        for i, char in enumerate(text):
+            await self.page.keyboard.type(char)
+            
+            # 基础延迟
+            base_delay = random.uniform(min_delay, max_delay)
+            
+            # 模拟思考停顿（约10%概率）
+            if random.random() < 0.10:
+                base_delay += random.uniform(0.2, 0.5)
+            
+            # 模拟连击加速（约25%概率，尤其是连续英文字母）
+            if random.random() < 0.25 and i > 0:
+                base_delay *= 0.5
+            
+            await asyncio.sleep(base_delay)
+
+    async def _move_to_element_and_click(self, locator):
+        """使用贝塞尔曲线移动到元素并点击。"""
+        try:
+            # 1. 确保元素可见并滚动到视图中
+            await locator.first.scroll_into_view_if_needed()
+            await locator.first.wait_for(state="visible", timeout=5000)
+            
+            # 2. 获取元素相对于视口（Viewport）的位置
+            box = await locator.first.bounding_box()
+            if not box:
+                logger.warning("无法获取元素边界框，使用原生点击")
+                await locator.first.click()
+                return
+            
+            # 目标点：元素中心 + 小随机偏移
+            target_x = box['x'] + box['width'] / 2 + random.uniform(-5, 5)
+            target_y = box['y'] + box['height'] / 2 + random.uniform(-3, 3)
+            
+            # 3. 贝塞尔曲线平滑移动
+            await self._human_move(target_x, target_y, steps=random.randint(12, 18))
+            
+            # 4. 瞬准停顿，模拟点击前的精准对准
+            await asyncio.sleep(random.uniform(0.1, 0.25))
+            
+            # 5. 执行点击（使用视口坐标）
+            await self.page.mouse.click(target_x, target_y)
+            
+        except Exception as e:
+            logger.warning(f"类人移动点击失败，尝试直接点击: {e}")
+            try:
+                await locator.first.click(timeout=3000)
+            except Exception as final_e:
+                logger.error(f"直接点击也失败: {final_e}")
+
+    async def _select_calendar_date(self, date_str: str):
+        """在日历组件中选择指定日期。
+        
+        基于携程日历 HTML 解析：
+        - 容器: td[role="gridcell"]
+        - 内容: div.tipWrapper (含有 aria-label="2025年12月30日...")
+        - 禁用: td 的 class 包含 is-disable
+        """
+        try:
+            import re
+            
+            # 解析目标日期
+            match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', date_str)
+            if not match:
+                logger.warning(f"无法解析日期格式: {date_str}")
+                return False
+            
+            year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            
+            # 构建 aria-label 匹配前缀 (例如 "2025年12月30日")
+            target_label_prefix = f"{year}年{month}月{day}日"
+            
+            # 1. 直接通过 aria-label 定位 tipWrapper
+            # 增加 :visible 过滤并取第一个 (.first)，防止 Strict mode violation (多面板冲突)
+            target_tip = self.page.locator(f"div.tipWrapper[aria-label^='{target_label_prefix}']:visible").first
+            
+            if await target_tip.count() > 0:
+                # 获取父级 td 检查是否禁用
+                parent_td = target_tip.locator("xpath=..") 
+                
+                cell_class = await parent_td.get_attribute("class") or ""
+                aria_disabled = await parent_td.get_attribute("aria-disabled")
+                
+                if "is-disable" in cell_class or aria_disabled == "true":
+                    logger.debug(f"日期 {date_str} 在 UI 上显示为禁用，跳过")
+                else:
+                    # 拟人移动并点击
+                    logger.info(f"📍 命中日期: {target_label_prefix}")
+                    await self._move_to_element_and_click(target_tip)
+                    await asyncio.sleep(random.uniform(0.3, 0.6))
+                    return True
+            
+            # 2. 如果当前面板没找到，尝试导航月份
+            logger.debug(f"当前面板未查获日期 {date_str}，尝试滚动/翻页")
+            if await self._navigate_to_month(year, month):
+                # 递归重试
+                return await self._select_calendar_date(date_str)
+            
+            return False
+                
+        except Exception as e:
+            logger.warning(f"日历操作异常: {e}")
+            return False
+
+    async def _navigate_to_month(self, target_year: int, target_month: int):
+        """导航日历到目标月份。"""
+        try:
+            import re
+            
+            # 导航按钮
+            next_btn = self.page.locator("span.c-calendar-icon-next-mon").first
+            prev_btn = self.page.locator("span.c-calendar-icon-prev-mon").first
+            
+            # 安全阈值
+            for _ in range(12): 
+                # 获取展示的所有月份标题
+                month_headers = self.page.locator("header.c-calendar-month__title h2")
+                titles = await month_headers.all_inner_texts()
+                
+                found_target = False
+                current_max_total = 0
+                
+                for title in titles:
+                    m = re.search(r'(\d{4})年(\d{1,2})月', title)
+                    if m:
+                        y, m_val = int(m.group(1)), int(m.group(2))
+                        current_max_total = max(current_max_total, y * 12 + m_val)
+                        if y == target_year and m_val == target_month:
+                            found_target = True
+                            break
+                
+                if found_target:
+                    logger.debug(f"已定位到目标月份: {target_year}-{target_month}")
+                    return True
+                
+                # 判断翻页方向
+                target_total = target_year * 12 + target_month
+                if target_total > current_max_total:
+                    if await next_btn.is_visible() and not await next_btn.get_attribute("class") or "" == "is-disable":
+                        await self._move_to_element_and_click(next_btn)
+                    else:
+                        break
+                else:
+                    if await prev_btn.is_visible() and not await prev_btn.get_attribute("class") or "" == "is-disable":
+                        await self._move_to_element_and_click(prev_btn)
+                    else:
+                        break
+                
+                await asyncio.sleep(random.uniform(0.5, 1.0))
+            
+            return False
+        except Exception as e:
+            logger.debug(f"月份翻页失败: {e}")
+            return False
+
+
+    async def _inject_dates_via_js(self, checkin: str, checkout: str):
+        """通过 JS 注入方式设置日期。
+        
+        当无法通过 UI 操作日历时的后备方案。
+        """
+        try:
+            await self.page.evaluate("""(dates) => {
+                const inInput = document.querySelector('#checkIn') || 
+                                document.querySelector('[class*="checkIn"]') ||
+                                document.querySelector('.checkin-date input');
+                const outInput = document.querySelector('#checkOut') || 
+                                 document.querySelector('[class*="checkOut"]') ||
+                                 document.querySelector('.checkout-date input');
+                if(inInput) { 
+                    inInput.value = dates.checkin; 
+                    inInput.dispatchEvent(new Event('input', { bubbles: true })); 
+                    inInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                if(outInput) { 
+                    outInput.value = dates.checkout; 
+                    outInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    outInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }""", {"checkin": checkin, "checkout": checkout})
+            logger.debug(f"JS 注入日期完成: {checkin} ~ {checkout}")
+        except Exception as e:
+            logger.warning(f"JS 注入日期失败: {e}")
+
     
     # ==================== 核心搜索方法 ====================
     
@@ -196,74 +386,165 @@ class CtripSearchWorkflow(BaseWorkflow):
         
         return False
     
-    async def search_hotel(self, task: LaborTask) -> dict | None:
-        """执行酒店搜索并获取房型数据。
+    async def search_and_capture(self, task: LaborTask) -> dict | None:
+        """从首页开始搜索酒店并采集数据。
         
-        完整流程：
-        1. 设置 API 响应拦截器
-        2. 导航到酒店详情页
-        3. 模拟人工浏览行为（触发 API 请求）
-        4. 等待并返回捕获的数据
-        
-        Args:
-            task: 包含酒店信息的任务对象
-            
-        Returns:
-            捕获的 API 响应数据（JSON 对象），失败返回 None
+        流程：
+        1. 开启新标签页
+        2. 进入携程首页
+        3. 在搜索框输入酒店名称并回车
+        4. 检查搜索结果，进入酒店详情页
+        5. 在详情页修改日期，拦截数据
         """
-        if not task.hotel_id:
-            logger.error("任务缺少酒店ID，无法执行搜索")
-            return None
-        
-        # 重置捕获数据
-        self.captured_data = None
+        original_page = self.page
+        new_pages = []
         
         try:
-            # 1. 设置路由拦截
+            # 1. 开启新标签页
+            logger.info("开启新标签页进入携程首页...")
+            new_page = await self.page.context.new_page()
+            new_pages.append(new_page)
+            self.page = new_page # 临时切换工作页
+            
+            # 2. 设置路由拦截（在新页面上）
             await self._setup_route_handler()
             
-            # 2. 构建并导航到酒店页面
-            url = self._build_hotel_url(task)
-            logger.info(f"导航到携程酒店页面: {url}")
+            # 3. 进入首页
+            await self.page.goto("https://www.ctrip.com/", wait_until="networkidle", timeout=60000)
+            await asyncio.sleep(random.uniform(1.0, 2.0))
             
-            await self.page.goto(url, wait_until="domcontentloaded")
+            # 4. 模拟用户初次进入页面的浏览行为
+            logger.debug("模拟用户浏览首页...")
+            await self._simulate_human_browsing(duration=random.uniform(1.5, 3.0))
             
-            # 3. 等待页面基本加载
-            await asyncio.sleep(random.uniform(1.5, 2.5))
+            # 5. 查找搜索框
+            search_input = self.page.locator("input#_allSearchKeyword, input[placeholder*='搜索任何旅游相关']")
+            if await search_input.count() == 0:
+                logger.error("未找到搜索输入框，退出")
+                return None
             
-            # 4. 检查是否是 404 页面
-            if await self._is_404_page():
-                logger.warning("酒店页面返回 404")
-                return {"error": "404", "message": "Hotel not found"}
+            # 6. 使用贝塞尔曲线移动到搜索框并点击
+            logger.debug("移动到搜索框...")
+            await self._move_to_element_and_click(search_input)
+            await asyncio.sleep(random.uniform(0.3, 0.6))
             
-            # 5. 模拟人工浏览行为（这会触发 API 请求）
-            logger.info("模拟人工浏览行为...")
-            await self._simulate_human_browsing(duration=random.uniform(4, 7))
+            # 7. 模拟用户思考后开始输入
+            await asyncio.sleep(random.uniform(0.5, 1.2))
+            logger.info(f"🔍 正在输入搜索关键词: {task.hotel_name}")
+            await self._human_type(task.hotel_name)
             
-            # 6. 等待数据捕获
-            if await self._wait_for_data_capture(timeout=15):
-                logger.info("✅ 酒店数据采集成功")
-                return self.captured_data
+            # 8. 输入完成后停顿，模拟用户确认
+            await asyncio.sleep(random.uniform(0.4, 0.8))
+            
+            # 9. 点击搜索按钮，等待新标签页（酒店详情页）打开
+            logger.info("点击搜索，等待酒店详情页打开...")
+            search_button = self.page.locator("#search_button_global, .pc_home-search")
+            try:
+                async with self.page.expect_popup(timeout=30000) as popup_info:
+                    if await search_button.count() > 0:
+                        await self._move_to_element_and_click(search_button)
+                    else:
+                        logger.warning("未找到搜索按钮，尝试使用回车键")
+                        await self.page.keyboard.press("Enter")
+                detail_page = await popup_info.value
+                new_pages.append(detail_page)
+                self.page = detail_page
+                
+                # 等待详情页完全加载
+                await self.page.wait_for_load_state("domcontentloaded")
+                await asyncio.sleep(random.uniform(1.5, 2.5))
+                
+                # 验证页面 URL（正则匹配详情页格式）
+                current_url = self.page.url
+                import re
+                if re.match(r'https://hotels\.ctrip\.com/hotels/\d+\.html\?cityid=\d+', current_url):
+                    logger.info(f"✅ 已进入酒店详情页: {current_url[:80]}...")
+                else:
+                    logger.warning(f"页面 URL 非预期格式: {current_url[:80]}")
+                
+                # 对详情页设置路由拦截
+                self._route_handler_set = False
+                await self._setup_route_handler()
+                
+            except Exception as e:
+                logger.error(f"等待酒店详情页超时或失败: {e}")
+                return None
+            
+            # ========== 日期选择操作 ==========
+            logger.info(f"正在详情页修改日期: {task.checkin} ~ {task.checkout}")
+            
+            # 模拟用户浏览详情页
+            await self._simulate_human_browsing(duration=random.uniform(1.0, 2.0))
+            
+            # 查找日期选择器（基于截图中的 UI 结构）
+            date_selector = self.page.locator(
+                "div.calendar_middle__tPMkN.calendarRelavtive__pWLcx"
+            )
+            
+            if await date_selector.count() > 0:
+                # 点击日期选择器打开日历
+                await self._move_to_element_and_click(date_selector)
+                await asyncio.sleep(random.uniform(0.8, 1.5))
+                
+                # 定义日历弹窗：优先查没有 is-hide 类的，或者物理可见的
+                calendar_popup = self.page.locator("div.c-calendar[role='application']:not(.is-hide)")
+
+                try:
+                    await calendar_popup.first.wait_for(state="visible", timeout=5000)
+                    logger.debug("日历弹窗已显现")
+                except Exception:
+                    # 后备：检查是否元素存在但只是 class 还没变
+                    exists = await self.page.locator("div.c-calendar[role='application']").count() > 0
+                    if exists:
+                        logger.debug("日历元素存在但可能仍带有隐藏属性，尝试继续...")
+                    else:
+                        logger.warning("日历弹窗未找到或未弹出")
+                
+                # 选择入住日期
+                await self._select_calendar_date(task.checkin)
+                await asyncio.sleep(random.uniform(0.3, 0.6))
+                
+                # 选择离店日期
+                await self._select_calendar_date(task.checkout)
+                await asyncio.sleep(random.uniform(0.5, 1.0))
+                
             else:
-                logger.warning("等待 API 响应超时")
-                
-                # 尝试再次滚动触发
-                logger.info("尝试再次滚动触发 API 请求...")
-                await self._human_scroll(delta_y=500)
-                await asyncio.sleep(3)
-                
-                if self.captured_data:
+                logger.warning("未找到日期选择器，尝试 JS 注入方式")
+                await self._inject_dates_via_js(task.checkin, task.checkout)
+                # JS 注入后可能需要手动触发一下搜索，或者靠页面监听 change 事件
+                await asyncio.sleep(random.uniform(1.0, 2.0))
+            
+            # ========== 数据拦截 ==========
+            logger.info("📡 等待 getHotelRoomListInland 接口响应...")
+            captured = await self._wait_for_data_capture(timeout=25.0)
+            
+            if captured and self.captured_data:
+                # 验证数据完整性
+                if isinstance(self.captured_data, dict):
+                    logger.info(f"✅ 成功捕获房型数据，数据键: {list(self.captured_data.keys())[:5]}")
                     return self.captured_data
-                
+                else:
+                    logger.warning("捕获的数据格式非预期")
+                    return None
+            else:
+                logger.warning("采集超时，未截获到房型数据")
                 return None
             
         except Exception as e:
-            logger.error(f"酒店搜索异常: {e}")
+            logger.error(f"搜索与采集异常: {e}")
             return None
-        
         finally:
-            # 清理路由处理器（可选，保留可以复用）
-            pass
+            # 6. 清理新标签页并还原 self.page
+            for p in new_pages:
+                try:
+                    if not p.is_closed():
+                        await p.close()
+                except Exception:
+                    pass
+            self.page = original_page
+            self._route_handler_set = False # 重置拦截标记
+            self.captured_data = None
+            logger.info("已清理携程标签页并重置状态")
     
     async def _is_404_page(self) -> bool:
         """检查是否是 404 页面。

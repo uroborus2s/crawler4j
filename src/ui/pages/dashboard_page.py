@@ -181,10 +181,14 @@ class DashboardPage(QWidget):
             self.env_table.setItem(row, 0, QTableWidgetItem(f"ENV-{env['id']}"))
             
             # Phone numbers (masked)
-            ctrip_phone = ctrip["phone"] if ctrip else "-"
-            if len(ctrip_phone) > 7:
-                ctrip_phone = f"{ctrip_phone[:3]}****{ctrip_phone[-4:]}"
-            self.env_table.setItem(row, 1, QTableWidgetItem(ctrip_phone))
+            if ctrip:
+                ctrip_phone = f"{ctrip.get('country_code', '+86')} {ctrip.get('phone_number', '')}"
+                if len(ctrip.get('phone_number', '')) >= 7:
+                    ctrip_phone = f"{ctrip.get('country_code', '+86')} {ctrip.get('phone_number', '')[:3]}****{ctrip.get('phone_number', '')[-4:]}"
+                self.env_table.setItem(row, 1, QTableWidgetItem(ctrip_phone))
+            else:
+                self.env_table.setItem(row, 1, QTableWidgetItem("-"))
+            
             self.env_table.setItem(row, 2, QTableWidgetItem(labor["phone"] if labor else "-"))
             
             # Status

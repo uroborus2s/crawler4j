@@ -8,7 +8,7 @@ Orchestrates the complete labor task workflow:
 """
 
 import asyncio
-from typing import List, Optional
+from typing import List
 
 from playwright.async_api import BrowserContext, Page
 
@@ -16,9 +16,11 @@ from src.automation.workflows.ctrip_search import CtripSearchWorkflow
 from src.automation.workflows.labor_claim_task import LaborClaimTaskWorkflow
 from src.automation.workflows.labor_login import LaborLoginWorkflow
 from src.automation.workflows.labor_submit import LaborSubmitWorkflow
+from src.core.models.ctrip_account import CtripAccount
 from src.core.models.labor_account import LaborAccount
 from src.core.models.labor_task import LaborTask, TaskState
 from src.utils.logger import logger
+from src.utils.storage import LaborAccountRepository
 
 
 class LaborWorkflowRunner:
@@ -42,6 +44,10 @@ class LaborWorkflowRunner:
         self.claim_workflow = LaborClaimTaskWorkflow(page)
         self.search_workflow = CtripSearchWorkflow(page)
         self.submit_workflow = LaborSubmitWorkflow(page)
+        self.labor_repo = LaborAccountRepository()
+        
+        # 记录当前使用的劳保账号
+        self.current_labor_account: LaborAccount | None = None
         
         # 运行状态
         self._running = False
@@ -106,6 +112,38 @@ class LaborWorkflowRunner:
         except Exception as e:
             logger.debug(f"切换页面失败: {e}")
     
+    async def _rotate_labor_account(self) -> LaborAccount | None:
+        """从数据库中寻找下一个可用的劳保账号。
+        
+        排除当前正在使用的账号。
+        """
+        try:
+            accounts = self.labor_repo.get_all(limit=50)
+            active_accounts = [
+                LaborAccount.from_dict(a) for a in accounts 
+                if a.get("status") == "active"
+            ]
+            
+            # 过滤掉当前的账号
+            others = [
+                acc for acc in active_accounts 
+                if self.current_labor_account is None or acc.phone != self.current_labor_account.phone
+            ]
+            
+            if not others:
+                logger.warning("数据库中没有其他可用的活跃劳保账号")
+                return None
+            
+            # 随机选择一个不同的账号
+            import random
+            next_acc = random.choice(others)
+            logger.info(f"🔄 准备切换至新账号: {next_acc.phone}")
+            return next_acc
+            
+        except Exception as e:
+            logger.error(f"寻找备选账号异常: {e}")
+            return None
+
     # ==================== 核心工作流方法 ====================
     
     async def run_single_cycle(
@@ -147,8 +185,7 @@ class LaborWorkflowRunner:
             # 2. 领取任务
             logger.info("[Step 2/4] 领取任务...")
             task = await self.claim_workflow.claim_task(
-                max_attempts=3,
-                preferred_cities=preferred_cities
+                max_attempts=3
             )
             
             if not task.is_complete:
@@ -161,31 +198,13 @@ class LaborWorkflowRunner:
             # 3. 采集携程数据
             logger.info("[Step 3/4] 采集携程数据...")
             
-            # 打开新页面进行采集
-            ctrip_page = await self._open_ctrip_page(task)
-            if not ctrip_page:
-                logger.error("打开携程页面失败")
-                self.stats["failed"] += 1
-                return False
+            # 直接使用自带的 search_workflow，它内部会处理首页搜索
+            hotel_data = await self.search_workflow.search_and_capture(task)
             
-            # 使用新页面的搜索工作流
-            ctrip_search = CtripSearchWorkflow(ctrip_page)
-            hotel_data = await ctrip_search.search_hotel(task)
+            if hotel_data is None:
+                logger.warning("携程数据采集为空，尝试提交'搜索不到'")
             
-            if not hotel_data:
-                logger.error("携程数据采集失败")
-                # 关闭携程页面
-                await self._close_ctrip_page(ctrip_page)
-                self.stats["failed"] += 1
-                return False
-            
-            logger.info(f"成功采集数据，键数量: {len(hotel_data)}")
-            
-            # 关闭携程页面
-            await self._close_ctrip_page(ctrip_page)
-            ctrip_page = None
-            
-            # 切换回劳保页面
+            # 使用现有页面（或 search_and_capture 内部打开的页面）回到劳保页面
             await self._switch_to_labor_page()
             await asyncio.sleep(1.5)
             
@@ -213,49 +232,78 @@ class LaborWorkflowRunner:
             if ctrip_page:
                 await self._close_ctrip_page(ctrip_page)
     
-    async def run_continuous(
+    async def run_auto_tasks(
         self,
         labor_account: LaborAccount,
-        max_tasks: int = 0,
-        interval_seconds: float = 3.0,
-        preferred_cities: List[str] | None = None,
+        ctrip_account: CtripAccount,
     ):
-        """连续执行做题循环。
+        """执行自动化做题任务。
         
-        Args:
-            labor_account: 劳保账号信息
-            max_tasks: 最大任务数（0表示无限制）
-            interval_seconds: 任务间隔时间（秒）
-            preferred_cities: 优先城市列表
+        读取配置并循环执行：领题 -> 搜索 -> 提交。
         """
-        logger.info(f"开始连续做题模式（最大任务: {max_tasks or '无限'}）")
+        max_tasks = ctrip_account.consecutive_task_count
+        interval_max = ctrip_account.task_interval_max
+        
+        logger.info(f"🚀 开始自动化做题任务 (目标: {max_tasks}个, 最大间隔: {interval_max}分)")
         
         self._running = True
         self._stop_requested = False
+        self.current_labor_account = labor_account
         task_count = 0
         
         try:
-            while not self._stop_requested:
-                # 检查任务数限制
-                if max_tasks > 0 and task_count >= max_tasks:
-                    logger.info(f"已达到最大任务数 {max_tasks}，停止")
+            while not self._stop_requested and task_count < max_tasks:
+                # 0. 确保已登录（针对切号后的首个任务）
+                if not await self.login_workflow.ensure_logged_in(self.current_labor_account):
+                    logger.error(f"劳保账号 {self.current_labor_account.phone} 登录失败")
                     break
+
+                # 1. 领题
+                logger.info(f"--- 正在执行第 {task_count + 1} / {max_tasks} 个任务 (账号: {self.current_labor_account.phone}) ---")
+                task = await self.claim_workflow.claim_task(max_attempts=3)
                 
-                # 执行一次循环
-                success = await self.run_single_cycle(labor_account, preferred_cities)
+                if not task.is_complete:
+                    if task.state == TaskState.NO_TASK:
+                        logger.warning("当前账号无题可做，尝试切换账号...")
+                        next_acc = await self._rotate_labor_account()
+                        if next_acc:
+                            self.current_labor_account = next_acc
+                            # 切号时先清空会话，再进入登录页
+                            await self.login_workflow.clear_session()
+                            await self.login_workflow.navigate_to_login()
+                            await asyncio.sleep(1)
+                            continue # 重新执行循环起始点的登录和领题
+                        else:
+                            logger.error("无法切换账号，结束流程")
+                            break
+                    else:
+                        logger.warning(f"领题异常，状态: {task.state}，结束流程")
+                        break
+                
+                # 2. 携程搜索与采集
+                logger.info(f"采集目标: {task.hotel_name}")
+                hotel_data = await self.search_workflow.search_and_capture(task)
+                
+                # 3. 提交结果
+                # hotel_data 为 None 时 submit_result 会尝试提交“搜索不到”
+                await self.submit_workflow.submit_result(hotel_data)
+                
                 task_count += 1
+                self.stats["completed"] = task_count
                 
-                if not success:
-                    logger.warning(f"任务 {task_count} 执行失败")
-                
-                # 间隔等待
-                if not self._stop_requested:
-                    logger.info(f"等待 {interval_seconds} 秒后继续...")
-                    await asyncio.sleep(interval_seconds)
-                    
-        except Exception as e:
-            logger.error(f"连续执行异常: {e}")
-        
+                if task_count < max_tasks:
+                    import random
+                    wait_mins = random.uniform(1, interval_max)
+                    logger.info(f"☕️ 任务完成，随机等待 {wait_mins:.1f} 分钟后继续...")
+                    for _ in range(int(wait_mins * 60)):
+                        if self._stop_requested:
+                            break
+                        await asyncio.sleep(1)
+            
+            logger.info(f"✅ 自动化流程执行完毕，共完成 {task_count} 个任务")
+                        
+        except Exception:
+            logger.error("自动化执行异常")
         finally:
             self._running = False
             self._log_stats()

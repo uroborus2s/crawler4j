@@ -5,14 +5,14 @@ Dialog for adding/editing Ctrip accounts.
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QFormLayout,
-    QLineEdit,
     QComboBox,
-    QPushButton,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
 )
 
 
@@ -58,10 +58,19 @@ class CtripAccountDialog(QDialog):
         form.setSpacing(12)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         
-        # Phone
-        self.phone_input = QLineEdit()
-        self.phone_input.setPlaceholderText("请输入手机号")
-        form.addRow("手机号:", self.phone_input)
+        # Phone (Layout)
+        phone_layout = QHBoxLayout()
+        self.country_code_combo = QComboBox()
+        self.country_code_combo.addItems(["+86", "+852", "+853", "+886", "+1"])
+        self.country_code_combo.setEditable(True)
+        self.country_code_combo.setFixedWidth(80)
+        phone_layout.addWidget(self.country_code_combo)
+        
+        self.phone_number_input = QLineEdit()
+        self.phone_number_input.setPlaceholderText("请输入手机号")
+        phone_layout.addWidget(self.phone_number_input)
+        
+        form.addRow("手机号:", phone_layout)
         
         # Password
         self.password_input = QLineEdit()
@@ -114,7 +123,14 @@ class CtripAccountDialog(QDialog):
     def _populate_data(self):
         """Populate form with existing account data."""
         if self.account:
-            self.phone_input.setText(self.account.get("phone", ""))
+            code = self.account.get("country_code", "+86")
+            idx = self.country_code_combo.findText(code)
+            if idx >= 0:
+                self.country_code_combo.setCurrentIndex(idx)
+            else:
+                self.country_code_combo.setCurrentText(code)
+                
+            self.phone_number_input.setText(self.account.get("phone_number", ""))
             self.password_input.setText(self.account.get("password", ""))
             
             sms_type = self.account.get("sms_platform_type", "")
@@ -130,18 +146,15 @@ class CtripAccountDialog(QDialog):
     def _on_save(self):
         """Handle save button click."""
         # Validate
-        phone = self.phone_input.text().strip()
-        if not phone:
+        phone_number = self.phone_number_input.text().strip()
+        if not phone_number:
             self._show_error("手机号不能为空")
-            return
-        
-        if len(phone) < 11:
-            self._show_error("请输入有效的手机号")
             return
         
         # Collect data
         self.result_data = {
-            "phone": phone,
+            "country_code": self.country_code_combo.currentText().strip(),
+            "phone_number": phone_number,
             "password": self.password_input.text(),
             "sms_platform_type": self.sms_type_combo.currentText(),
             "sms_platform_url": self.sms_url_input.text().strip(),

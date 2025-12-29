@@ -10,6 +10,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from src.automation.workflows.ctrip_login import CtripLoginWorkflow
 from src.automation.workflows.labor_login import LaborLoginWorkflow
+from src.automation.workflows.labor_workflow_runner import LaborWorkflowRunner
 from src.core.browser_api import BrowserAPI
 from src.core.models.ctrip_account import CtripAccount
 from src.core.models.labor_account import LaborAccount
@@ -194,9 +195,21 @@ class BrowserLauncherThread(QThread):
                 else:
                     logger.info("未配置劳保账号，跳过劳保登录")
                 
-                # Detach (不关闭浏览器，保持会话)
-                browser.contexts[0]  # Keep reference
-                logger.info("自动化流程完成，浏览器保持运行")
+                # ========== Step 3: 开始自动化做题 ==========
+                if ctrip_account and labor_account:
+                    logger.info("=== 步骤3: 开始自动化做题流程 ===")
+                    
+                    runner = LaborWorkflowRunner(page)
+                    await runner.run_auto_tasks(labor_account, ctrip_account)
+                    
+                    # 任务完成，关闭浏览器（按需求 cleanup）
+                    logger.info("所有连续任务已完成，正在关闭浏览器...")
+                    from src.core.browser_api import BrowserAPI
+                    BrowserAPI.close_browser(self.profile_id)
+                else:
+                    # Detach (不关闭浏览器，保持会话)
+                    browser.contexts[0]  # Keep reference
+                    logger.info("自动化流程完成，浏览器保持运行")
                 
             except Exception as e:
                 logger.error(f"自动化执行出错: {e}")
