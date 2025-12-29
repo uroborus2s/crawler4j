@@ -9,29 +9,22 @@ import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from src.core.models.ctrip_account import CtripAccount
 from src.core.models.environment import Environment
-from src.core.models.labor_account import LaborAccount
 from src.core.workflow_executor import (
     WorkflowResultType,
     execute_environment_workflow,
 )
 from src.utils.logger import logger
-from src.utils.storage import (
-    CtripAccountRepository,
-    EnvironmentRepository,
-    LaborAccountRepository,
-)
+from src.utils.storage import EnvironmentRepository
 
 
 class BrowserLauncherThread(QThread):
     """手动启动环境的线程。
     
     职责:
-    1. 加载环境和账号数据
-    2. 智能绑定劳保账号（如未绑定）
-    3. 调用统一工作函数（支持 input_callback）
-    4. 发射完成信号
+    1. 加载环境数据
+    2. 调用统一工作函数（支持 input_callback）
+    3. 发射完成信号
     """
     
     finished_signal = pyqtSignal(bool, str)  # success, message
@@ -50,8 +43,6 @@ class BrowserLauncherThread(QThread):
         self.labor_account_id = labor_account_id
         self.env_id = env_id
         
-        self.ctrip_repo = CtripAccountRepository()
-        self.labor_repo = LaborAccountRepository()
         self.env_repo = EnvironmentRepository()
     
     def get_user_input(self, title: str, label: str, default: str = "", text: str = "") -> str | None:
@@ -69,34 +60,19 @@ class BrowserLauncherThread(QThread):
     def run(self):
         """执行线程主逻辑。"""
         try:
-            # 1. 加载环境和账号数据
-            env, ctrip_account, labor_account = self._load_data()
+            # 1. 加载/构建环境对象
+            env = self._load_environment()
             
             if not env:
                 self.finished_signal.emit(False, "无法加载环境数据")
                 return
             
-            if not ctrip_account:
-                logger.warning("携程账号不存在，将尝试手动输入模式")
-                # 创建空账号对象用于手动输入
-                ctrip_account = CtripAccount(
-                    id=None,
-                    country_code="+86",
-                    phone_number="",
-                )
+            logger.info(f"准备执行自动化: ENV-{env.id or 'temp'}")
             
-            if not labor_account:
-                self.finished_signal.emit(False, "无可用的劳保账号")
-                return
-            
-            logger.info(f"准备执行自动化: 携程={ctrip_account.phone_number}, 劳保={labor_account.phone}")
-            
-            # 2. 调用统一工作函数
+            # 2. 调用统一工作函数（手动模式带 input_callback）
             result = asyncio.run(
                 execute_environment_workflow(
                     environment=env,
-                    ctrip_account=ctrip_account,
-                    labor_account=labor_account,
                     input_callback=self.get_user_input,  # 支持手动输入
                 )
             )
@@ -119,53 +95,19 @@ class BrowserLauncherThread(QThread):
                 self.env_repo.update_status(self.env_id, "error")
             self.finished_signal.emit(False, str(e))
     
-    def _load_data(self) -> tuple[Environment | None, CtripAccount | None, LaborAccount | None]:
-        """加载环境和账号数据。"""
-        env = None
-        ctrip_account = None
-        labor_account = None
-        
-        # 加载环境
+    def _load_environment(self) -> Environment | None:
+        """加载或构建环境对象。"""
+        # 有 env_id：从数据库加载
         if self.env_id:
             env_data = self.env_repo.get_by_id(self.env_id)
             if env_data:
-                env = Environment.from_dict(env_data)
-                # 使用环境关联的账号 ID
-                if not self.ctrip_account_id:
-                    self.ctrip_account_id = env_data.get("ctrip_account_id")
-                if not self.labor_account_id:
-                    self.labor_account_id = env_data.get("labor_account_id")
-        else:
-            # 无环境 ID，创建临时环境对象
-            env = Environment(
-                id=None,
-                ctrip_account_id=self.ctrip_account_id,
-                labor_account_id=self.labor_account_id,
-                browser_profile_id=self.profile_id,
-            )
+                return Environment.from_dict(env_data)
+            return None
         
-        # 加载携程账号
-        if self.ctrip_account_id:
-            acc_data = self.ctrip_repo.get_by_id(self.ctrip_account_id)
-            if acc_data:
-                ctrip_account = CtripAccount(**acc_data)
-        
-        # 加载劳保账号
-        if self.labor_account_id:
-            labor_data = self.labor_repo.get_by_id(self.labor_account_id)
-            if labor_data:
-                labor_account = LaborAccount.from_dict(labor_data)
-        
-        # 智能绑定：如果未绑定劳保账号，自动选择绑定次数最少的账号
-        if not labor_account and self.env_id:
-            least_bound = self.labor_repo.get_least_bound()
-            if least_bound:
-                # 绑定到环境并增加计数
-                self.env_repo.update(self.env_id, {"labor_account_id": least_bound["id"]})
-                self.labor_repo.increment_bind_count(least_bound["id"])
-                labor_account = LaborAccount.from_dict(least_bound)
-                logger.info(f"✅ 自动绑定劳保账号: {labor_account.phone}")
-            else:
-                logger.warning("没有可用的劳保账号进行自动绑定")
-        
-        return env, ctrip_account, labor_account
+        # 无 env_id：创建临时环境对象
+        return Environment(
+            id=None,
+            ctrip_account_id=self.ctrip_account_id,
+            labor_account_id=self.labor_account_id,
+            browser_profile_id=self.profile_id,
+        )
