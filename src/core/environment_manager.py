@@ -189,20 +189,83 @@ class EnvironmentManager:
         ctrip_id: int | None, 
         auto_assign: bool
     ) -> CtripAccount | None:
-        """分配携程账号。"""
+        """分配携程账号。
+        
+        优先级：
+        1. 手动指定的账号
+        2. 现有未绑定的 active 账号
+        3. 通过接码平台取号创建新账号
+        """
         if ctrip_id:
             # 手动指定
             data = self.ctrip_repo.get_by_id(ctrip_id)
             return CtripAccount.from_dict(data) if data else None
         
         if auto_assign:
-            # 自动分配：查找未绑定环境的 active 账号
+            # 优先使用现有账号：查找未绑定环境的 active 账号
             for acc_data in self.ctrip_repo.get_active():
                 existing = self.env_repo.get_by_ctrip_account(acc_data["id"])
                 if not existing:
                     return CtripAccount.from_dict(acc_data)
+            
+            # 没有现有账号，尝试通过接码平台取号
+            return self._create_ctrip_account_from_sms_platform()
         
         return None
+    
+    def _create_ctrip_account_from_sms_platform(self) -> CtripAccount | None:
+        """通过接码平台取号创建新携程账号。"""
+        import asyncio
+
+        from src.utils.sms_platform import create_sms_client_from_config
+        
+        client = create_sms_client_from_config()
+        if not client:
+            logger.debug("接码平台未配置，无法自动创建账号")
+            return None
+        
+        try:
+            # 同步调用异步取号
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                phone = loop.run_until_complete(client.get_phone())
+            finally:
+                loop.close()
+            
+            if not phone:
+                logger.warning("接码平台取号失败")
+                return None
+            
+            logger.info(f"✅ 接码平台取号成功: {phone}")
+            
+            # 创建携程账号记录
+            from src.config import config
+            account_id = self.ctrip_repo.create(
+                country_code="+86",
+                phone_number=phone,
+                password=None,
+                account_type="api",  # API接码类型
+                sms_verify_type="api",
+                sms_platform_type=config.sms_platform_host,
+                sms_platform_url=f"http://{config.sms_platform_host}",
+                sms_platform_key=config.sms_platform_product_id,
+            )
+            
+            logger.info(f"✅ 创建携程账号记录: ID-{account_id}")
+            
+            return CtripAccount(
+                id=account_id,
+                country_code="+86",
+                phone_number=phone,
+                account_type="api",
+                sms_verify_type="api",
+            )
+            
+        except Exception as e:
+            logger.error(f"接码平台创建账号失败: {e}")
+            return None
+
     
     def _assign_labor_account(
         self, 
