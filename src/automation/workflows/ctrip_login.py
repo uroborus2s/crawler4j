@@ -385,6 +385,46 @@ class CtripLoginWorkflow(BaseWorkflow):
         except Exception as e:
             logger.error(f"处理验证码异常: {e}")
             return False
+    
+    async def _get_code_from_sms_platform(self, account: CtripAccount, phone: str) -> str | None:
+        """通过接码平台取码（3分钟超时）。
+        
+        Args:
+            account: 携程账号（包含平台配置）
+            phone: 手机号
+            
+        Returns:
+            验证码字符串，失败返回 None
+        """
+        from src.config import config
+        from src.utils.sms_platform import SMSPlatformClient, SMSPlatformConfig
+        
+        # 从配置或账号获取平台信息
+        host = config.sms_platform_host
+        username = config.sms_platform_username
+        password = config.sms_platform_password
+        product_id = config.sms_platform_product_id
+        
+        if not all([host, username, password, product_id]):
+            logger.error("接码平台配置不完整")
+            return None
+        
+        client = SMSPlatformClient(SMSPlatformConfig(
+            host=host,
+            username=username,
+            password=password,
+            product_id=product_id,
+        ))
+        
+        logger.info(f"📱 正在从接码平台获取验证码 (手机号: {phone})...")
+        code = await client.get_code(phone, timeout=180)  # 3分钟超时
+        
+        if code:
+            logger.info(f"✅ 接码平台取码成功: {code}")
+        else:
+            logger.error("❌ 接码平台取码失败或超时")
+        
+        return code
 
     async def login(self, account: CtripAccount | None = None, input_callback: Optional[Callable] = None) -> str | None:
         """
@@ -448,10 +488,18 @@ class CtripLoginWorkflow(BaseWorkflow):
                     await asyncio.sleep(1)
                     continue
 
-                # 5. Wait for SMS / Input
-                logger.info("等待输入验证码...")
+                # 5. 获取验证码
+                logger.info("等待获取验证码...")
                 code = None
-                if input_callback:
+                
+                # 检查是否为接码平台账号
+                sms_type = getattr(account, 'sms_verify_type', 'manual') if account else 'manual'
+                
+                if sms_type == "api" and account:
+                    # 接码平台账号：自动取码
+                    code = await self._get_code_from_sms_platform(account, current_phone)
+                elif input_callback:
+                    # 手动账号：使用回调
                     code = input_callback("输入验证码", f"已发送短信至 {current_cc}{current_phone}，请输入验证码:", default="")
                 
                 if not code:
