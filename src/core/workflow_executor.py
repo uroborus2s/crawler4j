@@ -2,6 +2,13 @@
 
 封装完整的 登录 -> 领题 -> 做题 -> 交题 流程，
 供手动启动和自动调度器共同调用。
+
+职责：
+1. 加载账号数据
+2. 打开浏览器
+3. 判断接码类型（自动模式下手动接码账号将终止）
+4. 执行携程登录 -> 劳保登录 -> 任务循环
+5. 关闭浏览器
 """
 
 import asyncio
@@ -19,7 +26,11 @@ from src.core.models.ctrip_account import CtripAccount
 from src.core.models.environment import Environment
 from src.core.models.labor_account import LaborAccount
 from src.utils.logger import logger
-from src.utils.storage import EnvironmentRepository
+from src.utils.storage import (
+    CtripAccountRepository,
+    EnvironmentRepository,
+    LaborAccountRepository,
+)
 
 
 class WorkflowResultType(Enum):
@@ -30,6 +41,8 @@ class WorkflowResultType(Enum):
     NO_TASK = auto()
     TASK_FAILED = auto()
     BROWSER_ERROR = auto()
+    MANUAL_SMS_AUTO_MODE = auto()  # 手动接码账号在自动模式下
+    ACCOUNT_ERROR = auto()  # 账号数据无效
     ERROR = auto()
 
 
@@ -44,19 +57,15 @@ class WorkflowResult:
 
 async def execute_environment_workflow(
     environment: Environment,
-    ctrip_account: CtripAccount,
-    labor_account: LaborAccount,
     input_callback: Callable | None = None,
 ) -> WorkflowResult:
     """执行环境的完整工作流程。
     
-    流程: 连接浏览器 → 携程登录 → 劳保登录 → 循环做题
+    流程: 加载账号 → 连接浏览器 → 携程登录 → 劳保登录 → 循环做题
     
     Args:
-        environment: 目标环境
-        ctrip_account: 携程账号
-        labor_account: 劳保账号
-        input_callback: 输入回调（用于手动模式的验证码等）
+        environment: 目标环境（包含 ctrip_account_id, labor_account_id）
+        input_callback: 输入回调（用于手动模式的验证码等），None 表示自动模式
         
     Returns:
         WorkflowResult 包含执行结果
@@ -64,13 +73,31 @@ async def execute_environment_workflow(
     profile_id = environment.browser_profile_id
     env_id = environment.id
     env_repo = EnvironmentRepository()
+    is_auto_mode = input_callback is None
     
-    logger.info(f"[ENV-{env_id}] 开始执行工作流")
+    logger.info(f"[ENV-{env_id}] 开始执行工作流 (模式: {'自动' if is_auto_mode else '手动'})")
+    
+    # === Step 1: 加载账号 ===
+    ctrip_account = _load_ctrip_account(environment.ctrip_account_id)
+    labor_account = _load_labor_account(environment.labor_account_id)
+    
+    if not ctrip_account:
+        return WorkflowResult(
+            result_type=WorkflowResultType.ACCOUNT_ERROR,
+            message="携程账号数据无效"
+        )
+    
+    if not labor_account:
+        return WorkflowResult(
+            result_type=WorkflowResultType.ACCOUNT_ERROR,
+            message="劳保账号数据无效"
+        )
+    
     logger.info(f"  携程账号: {ctrip_account.phone_number}")
     logger.info(f"  劳保账号: {labor_account.phone}")
     
     try:
-        # 1. 打开浏览器
+        # === Step 2: 打开浏览器 ===
         logger.info(f"[ENV-{env_id}] 正在打开浏览器...")
         conn_info = BrowserAPI.open_browser(profile_id)
         ws_endpoint = conn_info.get("ws_endpoint")
@@ -86,9 +113,14 @@ async def execute_environment_workflow(
         if env_id:
             env_repo.update_connection_info(env_id, ws_endpoint, http_endpoint, None)
         
-        # 2. 连接并执行自动化
+        # === Step 3: 执行自动化 ===
         result = await _run_automation(
-            ws_endpoint, ctrip_account, labor_account, input_callback, env_id
+            ws_endpoint=ws_endpoint,
+            ctrip_account=ctrip_account,
+            labor_account=labor_account,
+            input_callback=input_callback,
+            env_id=env_id,
+            is_auto_mode=is_auto_mode,
         )
         
         return result
@@ -100,7 +132,7 @@ async def execute_environment_workflow(
             message=str(e)
         )
     finally:
-        # 3. 关闭浏览器
+        # === Step 4: 关闭浏览器 ===
         try:
             logger.info(f"[ENV-{env_id}] 正在关闭浏览器...")
             BrowserAPI.close_browser(profile_id)
@@ -112,12 +144,41 @@ async def execute_environment_workflow(
             env_repo.update_connection_info(env_id, None, None, None)
 
 
+def _load_ctrip_account(account_id: int | None) -> CtripAccount | None:
+    """从数据库加载携程账号。"""
+    if not account_id:
+        return None
+    try:
+        repo = CtripAccountRepository()
+        acc_data = repo.get_by_id(account_id)
+        if acc_data:
+            return CtripAccount(**acc_data)
+    except Exception as e:
+        logger.error(f"加载携程账号失败: {e}")
+    return None
+
+
+def _load_labor_account(account_id: int | None) -> LaborAccount | None:
+    """从数据库加载劳保账号。"""
+    if not account_id:
+        return None
+    try:
+        repo = LaborAccountRepository()
+        acc_data = repo.get_by_id(account_id)
+        if acc_data:
+            return LaborAccount.from_dict(acc_data)
+    except Exception as e:
+        logger.error(f"加载劳保账号失败: {e}")
+    return None
+
+
 async def _run_automation(
     ws_endpoint: str,
     ctrip_account: CtripAccount,
     labor_account: LaborAccount,
     input_callback: Callable | None,
     env_id: int | None,
+    is_auto_mode: bool,
 ) -> WorkflowResult:
     """执行自动化流程。"""
     async with async_playwright() as p:
@@ -140,10 +201,18 @@ async def _run_automation(
         await asyncio.sleep(1)
         
         if not await ctrip_workflow.is_logged_in():
-            if input_callback is None:
-                # 自动模式：无法处理验证码，记录警告但继续尝试
-                logger.warning("携程未登录，自动模式可能无法完成登录")
+            # 🔴 关键逻辑：检查接码类型
+            sms_type = ctrip_account.sms_verify_type or "manual"
             
+            if is_auto_mode and sms_type == "manual":
+                # 自动模式 + 手动接码账号 = 无法登录，终止环境
+                logger.warning(f"[ENV-{env_id}] ❌ 手动接码账号不支持自动模式，终止环境")
+                return WorkflowResult(
+                    result_type=WorkflowResultType.MANUAL_SMS_AUTO_MODE,
+                    message="手动接码账号不支持自动模式，请使用手动启动"
+                )
+            
+            # 执行登录
             login_result = await ctrip_workflow.login(ctrip_account, input_callback=input_callback)
             if not login_result:
                 return WorkflowResult(
