@@ -103,6 +103,9 @@ class CtripAccountRepository(BaseRepository):
         phone_number: str,
         country_code: str = "+86",
         password: str | None = None,
+        status: str = "idle",
+        account_type: str = "manual",
+        sms_verify_type: str = "manual",
         sms_platform_url: str | None = None,
         sms_platform_key: str | None = None,
         sms_platform_type: str | None = None,
@@ -112,10 +115,29 @@ class CtripAccountRepository(BaseRepository):
         """Create a new Ctrip account."""
         return self._execute_write(
             """INSERT INTO ctrip_accounts 
-               (country_code, phone_number, password, sms_platform_url, sms_platform_key, sms_platform_type, consecutive_task_count, task_interval_max)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (country_code, phone_number, password, sms_platform_url, sms_platform_key, sms_platform_type, consecutive_task_count, task_interval_max)
+               (country_code, phone_number, password, status, account_type, sms_verify_type, 
+                sms_platform_url, sms_platform_key, sms_platform_type, consecutive_task_count, task_interval_max)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (country_code, phone_number, password, status, account_type, sms_verify_type,
+             sms_platform_url, sms_platform_key, sms_platform_type, consecutive_task_count, task_interval_max)
         )
+    
+    def update(self, id: int, data: dict) -> bool:
+        """更新账号字段。"""
+        if not data:
+            return False
+        columns = list(data.keys())
+        set_clause = ", ".join([f"{col} = ?" for col in columns])
+        values = list(data.values())
+        values.append(id)
+        
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                f"UPDATE ctrip_accounts SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                tuple(values)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
     
     def update_status(self, id: int, status: str) -> bool:
         """Update account status."""
@@ -128,6 +150,13 @@ class CtripAccountRepository(BaseRepository):
             )
             conn.commit()
             return cursor.rowcount > 0
+    
+    def get_idle(self) -> list[dict]:
+        """获取所有空闲（可绑定）的账号。"""
+        rows = self._execute(
+            "SELECT * FROM ctrip_accounts WHERE status = 'idle'"
+        )
+        return [dict(row) for row in rows]
     
     def get_active(self) -> list[dict]:
         """Get all active accounts."""
@@ -290,14 +319,59 @@ class EnvironmentRepository(BaseRepository):
         browser_profile_id: str,
         browser_type: str = "bitbrowser",
         proxy_ip_id: int | None = None,
+        daily_open_limit: int = 0,
     ) -> int:
         """Create a new environment."""
         return self._execute_write(
             """INSERT INTO environments 
-               (ctrip_account_id, labor_account_id, browser_profile_id, browser_type, proxy_ip_id)
-               VALUES (?, ?, ?, ?, ?)""",
-            (ctrip_account_id, labor_account_id, browser_profile_id, browser_type, proxy_ip_id)
+               (ctrip_account_id, labor_account_id, browser_profile_id, browser_type, proxy_ip_id, daily_open_limit)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (ctrip_account_id, labor_account_id, browser_profile_id, browser_type, proxy_ip_id, daily_open_limit)
         )
+    
+    def check_and_increment_daily_usage(self, env_id: int) -> bool:
+        """Check if environment can be opened based on daily limit logic.
+        
+        Logic:
+        1. If last_open_date != today: reset count to 0, update date.
+        2. If limit > 0 and count >= limit: return False.
+        3. Increment count.
+        4. Return True.
+        """
+        from datetime import date
+        today = date.today().isoformat()
+        
+        with get_connection(self.db_path) as conn:
+            # 1. Get current stats
+            row = conn.execute(
+                "SELECT daily_open_limit, daily_open_count, last_open_date FROM environments WHERE id = ?",
+                (env_id,)
+            ).fetchone()
+            
+            if not row:
+                return False
+                
+            limit = row["daily_open_limit"] or 0
+            count = row["daily_open_count"] or 0
+            last_date = row["last_open_date"]
+            
+            # 2. Reset if needed
+            if last_date != today:
+                count = 0
+                
+            # 3. Check limit
+            if limit > 0 and count >= limit:
+                return False
+                
+            # 4. Increment and Update
+            conn.execute(
+                """UPDATE environments 
+                   SET daily_open_count = ?, last_open_date = ? 
+                   WHERE id = ?""",
+                (count + 1, today, env_id)
+            )
+            conn.commit()
+            return True
     
     
     def update_status(self, id: int, status: str, last_run_at: str | None = None) -> bool:

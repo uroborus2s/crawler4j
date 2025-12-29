@@ -3,21 +3,20 @@
 Manages the Labor platform account pool.
 """
 
+import pandas as pd
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QLabel,
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-import pandas as pd
-
+from src.ui.dialogs.labor_account_dialog import LaborAccountDialog
+from src.ui.widgets.confirm_dialog import ConfirmDialog
 from src.ui.widgets.data_table import DataTable
 from src.ui.widgets.toast import Toast
-from src.ui.widgets.confirm_dialog import ConfirmDialog
-from src.ui.dialogs.labor_account_dialog import LaborAccountDialog
 from src.utils.storage import LaborAccountRepository
 
 
@@ -33,6 +32,7 @@ class LaborAccountsPage(QWidget):
     COLUMNS = [
         ("phone", "账号", 150),
         ("status", "状态", 80),
+        ("bind_count", "绑定数", 60),
         ("completed_count", "完成", 60),
         ("discarded_count", "废弃", 60),
         ("approved_count", "通过", 60),

@@ -37,16 +37,19 @@ class DataTable(QWidget):
         self,
         columns: list[tuple[str, str, int]],  # (key, header, width)
         parent=None,
+        action_callback=None,
     ):
         """Initialize the data table.
         
         Args:
             columns: List of (key, header_text, width) tuples.
             parent: Parent widget.
+            action_callback: Callback for action column clicks (row_data, action_name).
         """
         super().__init__(parent)
         
         self.columns = columns
+        self.action_callback = action_callback
         self._data: list[dict] = []
         self._filtered_data: list[dict] = []
         self._page = 0
@@ -186,6 +189,12 @@ class DataTable(QWidget):
                 # No, best is to allow columns definition to have a renderer.
                 # Since I didn't change constructor signature, I'll check if key is 'actions'.
                 
+                # 处理操作列
+                if key == "_actions" and self.action_callback:
+                    action_widget = self._create_action_widget(row_data)
+                    self.table.setCellWidget(row_idx, col_idx, action_widget)
+                    continue
+                
                 if key == "actions" and "actions_renderer" in row_data:
                     # Expecting a factory/widget here is tricky with JSON data logic.
                     # Hack: The row_data['actions_renderer'] is a callable (self, row_data) -> QWidget
@@ -268,3 +277,23 @@ class DataTable(QWidget):
     def refresh(self):
         """Refresh the table display."""
         self._refresh_table()
+    
+    def _create_action_widget(self, row_data: dict) -> QWidget:
+        """创建操作列按钮容器。"""
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
+        
+        edit_btn = QPushButton("编辑")
+        edit_btn.setMaximumHeight(24)
+        edit_btn.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+        edit_btn.clicked.connect(lambda checked, rd=row_data: self._on_action_triggered(rd, "edit"))
+        layout.addWidget(edit_btn)
+        
+        return container
+    
+    def _on_action_triggered(self, row_data: dict, action: str):
+        """触发操作回调。"""
+        if self.action_callback:
+            self.action_callback(row_data, action)

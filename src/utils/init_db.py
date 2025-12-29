@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS ctrip_accounts (
     country_code TEXT DEFAULT '+86',
     phone_number TEXT NOT NULL,
     password TEXT,
-    status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blacklisted', 'disabled')),
+    status TEXT DEFAULT 'idle' CHECK(status IN ('idle', 'active', 'running', 'blacklisted', 'disabled')),
+    account_type TEXT DEFAULT 'manual' CHECK(account_type IN ('manual', 'api')),
+    sms_verify_type TEXT DEFAULT 'manual' CHECK(sms_verify_type IN ('manual', 'auto')),
     sms_platform_url TEXT,
     sms_platform_key TEXT,
     sms_platform_type TEXT,
@@ -280,7 +282,68 @@ def migrate_db(db_path: Path | None = None) -> None:
         if "task_interval_max" not in ctrip_columns:
             cursor.execute("ALTER TABLE ctrip_accounts ADD COLUMN task_interval_max INTEGER DEFAULT 15")
             updated = True
+        if "account_type" not in ctrip_columns:
+            print("Migrating: Adding account_type to ctrip_accounts...")
+            cursor.execute("ALTER TABLE ctrip_accounts ADD COLUMN account_type TEXT DEFAULT 'manual'")
+            updated = True
+        if "sms_verify_type" not in ctrip_columns:
+            print("Migrating: Adding sms_verify_type to ctrip_accounts...")
+            cursor.execute("ALTER TABLE ctrip_accounts ADD COLUMN sms_verify_type TEXT DEFAULT 'manual'")
+            updated = True
         
+        # Check if CHECK constraint needs updating (old constraint doesn't include 'idle', 'running')
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='ctrip_accounts'")
+        table_sql = cursor.fetchone()
+        if table_sql and "status IN ('active', 'blacklisted', 'disabled')" in (table_sql[0] or ""):
+            print("Migrating: Rebuilding ctrip_accounts with new status CHECK constraint...")
+            
+            cursor.executescript("""
+                CREATE TABLE ctrip_accounts_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    country_code TEXT DEFAULT '+86',
+                    phone_number TEXT NOT NULL,
+                    password TEXT,
+                    status TEXT DEFAULT 'idle' CHECK(status IN ('idle', 'active', 'running', 'blacklisted', 'disabled')),
+                    account_type TEXT DEFAULT 'manual' CHECK(account_type IN ('manual', 'api')),
+                    sms_verify_type TEXT DEFAULT 'manual' CHECK(sms_verify_type IN ('manual', 'auto')),
+                    sms_platform_url TEXT,
+                    sms_platform_key TEXT,
+                    sms_platform_type TEXT,
+                    consecutive_task_count INTEGER DEFAULT 5,
+                    task_interval_max INTEGER DEFAULT 15,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(country_code, phone_number)
+                );
+                
+                INSERT INTO ctrip_accounts_new 
+                SELECT id, country_code, phone_number, password, 
+                       CASE WHEN status = 'active' THEN 'idle' ELSE status END,
+                       COALESCE(account_type, 'manual'),
+                       COALESCE(sms_verify_type, 'manual'),
+                       sms_platform_url, sms_platform_key, sms_platform_type,
+                       consecutive_task_count, task_interval_max, created_at, updated_at
+                FROM ctrip_accounts;
+                
+                DROP TABLE ctrip_accounts;
+                ALTER TABLE ctrip_accounts_new RENAME TO ctrip_accounts;
+                CREATE INDEX IF NOT EXISTS idx_ctrip_status ON ctrip_accounts(status);
+            """)
+            updated = True
+            print("✅ ctrip_accounts CHECK constraint updated")
+        
+        # Update status values: 'active' -> 'idle' for unbound accounts
+        cursor.execute("""
+            UPDATE ctrip_accounts SET status = 'idle' 
+            WHERE status = 'active' 
+            AND id NOT IN (SELECT ctrip_account_id FROM environments WHERE ctrip_account_id IS NOT NULL)
+        """)
+        if cursor.rowcount > 0:
+            print(f"Migrating: Updated {cursor.rowcount} ctrip accounts to 'idle' status")
+            updated = True
+        
+
+
         # 4. Update task_logs table with new columns
         cursor.execute("PRAGMA table_info(task_logs)")
         log_columns = [c[1] for c in cursor.fetchall()]

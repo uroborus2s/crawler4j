@@ -32,11 +32,16 @@ class CtripAccountsPage(QWidget):
     
     # Table columns: (key, header, width)
     COLUMNS = [
-        ("country_code", "区号", 60),
-        ("phone_number", "手机号", 150),
+        ("country_code", "区号", 50),
+        ("phone_number", "手机号", 120),
         ("status", "状态", 80),
-        ("sms_platform_type", "接码平台", 100),
-        ("updated_at", "最后更新", -1),
+        ("account_type", "类型", 50),
+        ("sms_verify_type", "接码", 50),
+        ("consecutive_task_count", "连续任务", 70),
+        ("task_interval_max", "间隔上限", 70),
+        ("sms_platform_type", "接码平台", 80),
+        ("updated_at", "最后更新", 140),
+        ("_actions", "操作", 80),
     ]
     
     def __init__(self, parent=None):
@@ -105,10 +110,15 @@ class CtripAccountsPage(QWidget):
         layout.addLayout(toolbar)
         
         # Table
-        self.table = DataTable(self.COLUMNS)
+        self.table = DataTable(self.COLUMNS, action_callback=self._on_action_click)
         self.table.row_double_clicked.connect(self._on_edit)
         self.table.selection_changed.connect(self._on_selection_changed)
         layout.addWidget(self.table, 1)
+    
+    def _on_action_click(self, row_data: dict, action: str):
+        """处理操作列按钮点击。"""
+        if action == "edit":
+            self._on_edit(row_data)
     
     def _connect_signals(self):
         """Connect signals."""
@@ -121,22 +131,34 @@ class CtripAccountsPage(QWidget):
         # Format status for display
         for acc in accounts:
             acc["status"] = self._format_status(acc.get("status", ""))
+            acc["account_type"] = self._format_type(acc.get("account_type", "manual"))
+            acc["sms_verify_type"] = self._format_sms_type(acc.get("sms_verify_type", "manual"))
         
         self.table.set_data(accounts)
         
         # Update stats
         total = len(accounts)
-        active = sum(1 for a in accounts if "正常" in a.get("status", ""))
-        self.stats_label.setText(f"共 {total} 个，正常: {active}，置黑: {total - active}")
+        idle = sum(1 for a in accounts if "空闲" in a.get("status", ""))
+        self.stats_label.setText(f"共 {total} 个，空闲: {idle}，其他: {total - idle}")
     
     def _format_status(self, status: str) -> str:
         """Format status for display."""
         status_map = {
-            "active": "🟢 正常",
+            "idle": "⚪ 空闲",
+            "active": "🟢 已绑定",
+            "running": "🟡 运行中",
             "blacklisted": "🔴 置黑",
-            "disabled": "⚪ 禁用",
+            "disabled": "⚫ 禁用",
         }
         return status_map.get(status, status)
+    
+    def _format_type(self, acc_type: str) -> str:
+        """格式化账号类型。"""
+        return "手动" if acc_type == "manual" else "API"
+    
+    def _format_sms_type(self, sms_type: str) -> str:
+        """格式化接码模式。"""
+        return "手动" if sms_type == "manual" else "自动"
     
     def _on_add(self):
         """Handle add button click."""
@@ -147,6 +169,10 @@ class CtripAccountsPage(QWidget):
                     country_code=result.get("country_code", "+86"),
                     phone_number=result["phone_number"],
                     password=result.get("password"),
+                    account_type=result.get("account_type", "manual"),
+                    sms_verify_type=result.get("sms_verify_type", "manual"),
+                    consecutive_task_count=result.get("consecutive_task_count", 15),
+                    task_interval_max=result.get("task_interval_max", 2),
                     sms_platform_url=result.get("sms_platform_url"),
                     sms_platform_key=result.get("sms_platform_key"),
                     sms_platform_type=result.get("sms_platform_type"),
@@ -168,9 +194,24 @@ class CtripAccountsPage(QWidget):
         
         result = CtripAccountDialog.edit_account(account, self)
         if result:
-            # Update in database (simplified - just update SMS config)
-            Toast.success(self, "账号更新成功")
-            self._load_data()
+            # Update in database
+            try:
+                self.repo.update(int(account_id), {
+                    "country_code": result.get("country_code", "+86"),
+                    "phone_number": result["phone_number"],
+                    "password": result.get("password"),
+                    "account_type": result.get("account_type", "manual"),
+                    "sms_verify_type": result.get("sms_verify_type", "manual"),
+                    "consecutive_task_count": result.get("consecutive_task_count", 5),
+                    "task_interval_max": result.get("task_interval_max", 15),
+                    "sms_platform_type": result.get("sms_platform_type"),
+                    "sms_platform_url": result.get("sms_platform_url"),
+                    "sms_platform_key": result.get("sms_platform_key"),
+                })
+                Toast.success(self, "账号更新成功")
+                self._load_data()
+            except Exception as e:
+                Toast.error(self, f"更新失败: {e}")
     
     def _on_import(self):
         """Handle CSV import."""

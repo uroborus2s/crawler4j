@@ -115,6 +115,7 @@ class LaborClaimTaskWorkflow(BaseWorkflow):
 
             if checkin and checkout and hotel_name:
                 logger.info(f"📍 发现待处理任务: {hotel_name} ({checkin} 至 {checkout})")
+                await self.screenshot("labor_task_detected")
                 return LaborTask(
                     hotel_name=hotel_name,
                     checkin=checkin,
@@ -134,20 +135,56 @@ class LaborClaimTaskWorkflow(BaseWorkflow):
                 return False
             
             await self.page.click(self.SELECT_CITY_BUTTON)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.8)
             
-            city_items = await self.page.query_selector_all(self.CITY_LIST_ITEM)
+            # 等待城市列表弹窗出现
+            popup = self.page.locator(".adm-popup-body")
+            try:
+                await popup.wait_for(state="visible", timeout=3000)
+            except Exception:
+                logger.warning("城市选择弹窗未出现")
+                return False
+            
+            # 查找所有城市列表项
+            city_items = await self.page.query_selector_all("a.adm-check-list-item")
             for item in city_items:
-                content = await item.query_selector(self.CITY_CONTENT)
+                content = await item.query_selector(".adm-list-item-content-main")
                 if content:
                     text = await content.inner_text()
-                    if "暂无题目" not in text:
-                        city_name = text.strip()
+                    # 跳过"暂无题目"的城市
+                    if "暂无题目" in text:
+                        continue
+                    
+                    city_name = text.strip()
+                    logger.info(f"✅ 选择有题城市: {city_name}")
+                    
+                    # 尝试点击城市项，最多重试3次
+                    for click_attempt in range(3):
                         await item.click()
-                        logger.info(f"✅ 选择有题城市: {city_name}")
-                        await asyncio.sleep(0.5)
-                        await self._close_popup()
+                        await asyncio.sleep(0.8)
+                        
+                        # 检查弹窗是否已关闭
+                        try:
+                            # 等待弹窗消失
+                            await popup.wait_for(state="hidden", timeout=2000)
+                            logger.debug("城市选择成功，弹窗已关闭")
+                            return True
+                        except Exception:
+                            # 弹窗还在，可能点击没成功，重试
+                            logger.debug(f"点击城市尝试 {click_attempt + 1} 失败，重试...")
+                            continue
+                    
+                    # 3次都失败，尝试强制关闭弹窗
+                    await self._close_popup()
+                    await asyncio.sleep(0.5)
+                    
+                    # 检查是否终于关闭了
+                    mask = self.page.locator(".adm-mask")
+                    if not (await mask.count() > 0 and await mask.first.is_visible()):
                         return True
+                    
+                    logger.warning("城市选择后弹窗未正常关闭")
+                    return False
             
             logger.warning("所有城市均暂无题目")
             await self._close_popup()
@@ -157,13 +194,52 @@ class LaborClaimTaskWorkflow(BaseWorkflow):
             await self._close_popup()
             return False
 
+
     async def _close_popup(self):
-        """关闭弹窗遮罩。"""
+        """关闭弹窗遮罩，确保完全关闭。"""
+        max_attempts = 5
+        
+        for attempt in range(max_attempts):
+            try:
+                # 检查遮罩是否存在
+                mask = self.page.locator(".adm-mask")
+                popup = self.page.locator(".adm-popup")
+                
+                mask_visible = await mask.count() > 0 and await mask.first.is_visible()
+                popup_visible = await popup.count() > 0 and await popup.first.is_visible()
+                
+                if not mask_visible and not popup_visible:
+                    logger.debug("弹窗已关闭")
+                    return
+                
+                # 方法1：点击遮罩层
+                if mask_visible:
+                    try:
+                        await mask.first.click(force=True)  # force=True 强制点击
+                        await asyncio.sleep(0.5)
+                        continue
+                    except Exception:
+                        pass
+                
+                # 方法2：按 ESC 键
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+                
+                # 方法3：点击页面空白区域
+                try:
+                    await self.page.mouse.click(10, 10)
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+                
+            except Exception as e:
+                logger.debug(f"关闭弹窗尝试 {attempt + 1} 失败: {e}")
+        
+        # 最后检查并警告
         try:
-            mask = self.page.locator(self.POPUP_MASK)
-            if await mask.is_visible():
-                await mask.click()
-                await asyncio.sleep(0.5)
+            mask = self.page.locator(".adm-mask")
+            if await mask.count() > 0 and await mask.first.is_visible():
+                logger.warning("弹窗遮罩仍然存在，可能影响后续操作")
         except Exception:
             pass
 
@@ -196,6 +272,7 @@ class LaborClaimTaskWorkflow(BaseWorkflow):
                 await asyncio.sleep(0.2)
                 task = await self.get_existing_task()
                 if task.is_complete:
+                    await self.screenshot("labor_task_claimed_success")
                     return task
             
             await asyncio.sleep(2)
