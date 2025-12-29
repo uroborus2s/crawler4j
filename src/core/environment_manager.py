@@ -155,6 +155,15 @@ class EnvironmentManager:
                 f"(携程: {ctrip_account.phone_number}, 劳保: {labor_account.phone})"
             )
             
+            # === Step 8: 发送事件通知 ===
+            from src.core.events import EventType, get_event_bus
+            bus = get_event_bus()
+            bus.emit(EventType.ENVIRONMENT_CREATED, {
+                "env_id": env_id,
+                "ctrip_phone": ctrip_account.phone_number,
+                "labor_phone": labor_account.phone,
+            })
+            
             return Environment(
                 id=env_id,
                 ctrip_account_id=ctrip_account.id,
