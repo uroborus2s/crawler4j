@@ -86,6 +86,15 @@ async def execute_environment_workflow(
     
     logger.info(f"[ENV-{env_id}] 开始执行工作流 (模式: {'自动' if is_auto_mode else '手动'})")
     
+    # === Step 0: 每日启动次数检查 ===
+    if env_id:
+        if not env_repo.check_and_increment_daily_usage(env_id):
+            logger.warning(f"[ENV-{env_id}] ❌ 今日启动次数已达上限")
+            return WorkflowResult(
+                result_type=WorkflowResultType.ERROR,
+                message="今日启动次数已达上限"
+            )
+    
     # === Step 1: 加载携程账号 ===
     ctrip_account = _load_ctrip_account(environment.ctrip_account_id)
     
