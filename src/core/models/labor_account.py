@@ -10,6 +10,7 @@ from enum import Enum
 
 class AccountStatus(str, Enum):
     """Account status enumeration."""
+
     ACTIVE = "active"
     BLACKLISTED = "blacklisted"
     DISABLED = "disabled"
@@ -18,7 +19,7 @@ class AccountStatus(str, Enum):
 @dataclass
 class LaborAccount:
     """Labor platform account model.
-    
+
     Attributes:
         id: Unique identifier.
         phone: Login phone number/username.
@@ -31,7 +32,7 @@ class LaborAccount:
         created_at: Account creation timestamp.
         updated_at: Last update timestamp.
     """
-    
+
     phone: str
     password: str
     id: int | None = None
@@ -42,14 +43,14 @@ class LaborAccount:
     rejected_count: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "LaborAccount":
         """Create instance from dictionary."""
         status = data.get("status", "active")
         if isinstance(status, str):
             status = AccountStatus(status)
-        
+
         return cls(
             id=data.get("id"),
             phone=data["phone"],
@@ -62,14 +63,16 @@ class LaborAccount:
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
         )
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
             "id": self.id,
             "phone": self.phone,
             "password": self.password,
-            "status": self.status.value if isinstance(self.status, AccountStatus) else self.status,
+            "status": self.status.value
+            if isinstance(self.status, AccountStatus)
+            else self.status,
             "completed_count": self.completed_count,
             "discarded_count": self.discarded_count,
             "approved_count": self.approved_count,
@@ -77,19 +80,19 @@ class LaborAccount:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
-    
+
     @property
     def total_tasks(self) -> int:
         """Total number of tasks processed."""
         return self.completed_count + self.discarded_count
-    
+
     @property
     def success_rate(self) -> float:
         """Calculate success rate (approved / completed)."""
         if self.completed_count == 0:
             return 0.0
         return self.approved_count / self.completed_count
-    
+
     @property
     def is_active(self) -> bool:
         """Check if account is active."""

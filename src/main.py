@@ -24,34 +24,33 @@ from src.utils.paths import get_resource_path
 
 
 def main():
-
     # Initialize database
     init_database()
-    
+
     # Enable high DPI scaling (must be before QApplication)
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
-    
+
     # Create application
     app = QApplication(sys.argv)
     app.setApplicationName("Crawler4j")
     app.setApplicationVersion(VERSION)
-        
+
     # Set app icon
     icon_path = get_resource_path("src/assets/icon.png")
     if Path(icon_path).exists():
         app.setWindowIcon(QIcon(icon_path))
-    
+
     # Create asyncio event loop integrated with Qt
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
-    
+
     # Create main window
     window = MainWindow()
-    
+
     dashboard = DashboardPage()
-    
+
     ctrip_page = CtripAccountsPage()
     labor_page = LaborAccountsPage()
     env_page = EnvironmentsPage()
@@ -63,10 +62,10 @@ def main():
     window.add_page(labor_page)
     window.add_page(env_page)
     window.add_page(settings_page)
-    
+
     # Show window
     window.show()
-    
+
     # Run integrated Qt + asyncio event loop
     with loop:
         loop.run_forever()

@@ -92,6 +92,11 @@ QGroupBox::title {
     color: #cdd6f4;
 }
 
+/* QGroupBox 内的表单标签透明背景 */
+QGroupBox QLabel {
+    background-color: transparent;
+}
+
 /* ===== Buttons ===== */
 QPushButton {
     background-color: #45475a;
