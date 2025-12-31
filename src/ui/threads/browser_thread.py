@@ -9,6 +9,7 @@ import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from src.core.events import EventType, get_event_bus
 from src.core.models.environment import Environment
 from src.core.workflow_executor import (
     WorkflowResultType,
@@ -20,16 +21,16 @@ from src.utils.storage import EnvironmentRepository
 
 class BrowserLauncherThread(QThread):
     """手动启动环境的线程。
-    
+
     职责:
     1. 加载环境数据
     2. 调用统一工作函数（支持 input_callback）
     3. 发射完成信号
     """
-    
+
     finished_signal = pyqtSignal(bool, str)  # success, message
     input_signal = pyqtSignal(dict, object)  # container, event
-    
+
     def __init__(
         self,
         profile_id: str,
@@ -42,33 +43,40 @@ class BrowserLauncherThread(QThread):
         self.ctrip_account_id = ctrip_account_id
         self.labor_account_id = labor_account_id
         self.env_id = env_id
-        
+
         self.env_repo = EnvironmentRepository()
-    
-    def get_user_input(self, title: str, label: str, default: str = "", text: str = "") -> str | None:
+
+    def get_user_input(
+        self, title: str, label: str, default: str = "", text: str = ""
+    ) -> str | None:
         """请求 UI 线程安全的用户输入。"""
         event = threading.Event()
-        
+
         display_text = text if text else default
-        container = {"title": title, "label": label, "text": display_text, "value": None}
-        
+        container = {
+            "title": title,
+            "label": label,
+            "text": display_text,
+            "value": None,
+        }
+
         self.input_signal.emit(container, event)
         event.wait()  # 阻塞直到 UI 响应
-        
+
         return container.get("value")
-    
+
     def run(self):
         """执行线程主逻辑。"""
         try:
             # 1. 加载/构建环境对象
             env = self._load_environment()
-            
+
             if not env:
                 self.finished_signal.emit(False, "无法加载环境数据")
                 return
-            
+
             logger.info(f"准备执行自动化: ENV-{env.id or 'temp'}")
-            
+
             # 2. 调用统一工作函数（手动模式带 input_callback）
             result = asyncio.run(
                 execute_environment_workflow(
@@ -76,25 +84,43 @@ class BrowserLauncherThread(QThread):
                     input_callback=self.get_user_input,  # 支持手动输入
                 )
             )
-            
+
             # 3. 处理结果
             success = result.result_type in (
                 WorkflowResultType.SUCCESS,
                 WorkflowResultType.NO_TASK,
             )
-            
-            # 4. 更新环境状态
+
+            # 根据结果类型生成用户友好的消息
+            if result.result_type == WorkflowResultType.NETWORK_ERROR:
+                message = f"网络异常: {result.message}，请检查代理设置"
+            elif result.result_type == WorkflowResultType.BROWSER_ERROR:
+                message = f"浏览器错误: {result.message}"
+            else:
+                message = result.message
+
+            # 4. 更新环境状态并发送事件
             if self.env_id:
                 self.env_repo.update_status(self.env_id, "idle")
-            
-            self.finished_signal.emit(success, result.message)
-            
+                bus = get_event_bus()
+                bus.emit(
+                    EventType.ENVIRONMENT_STATUS_CHANGED,
+                    {"env_id": self.env_id, "status": "idle"},
+                )
+
+            self.finished_signal.emit(success, message)
+
         except Exception as e:
             logger.error(f"浏览器启动或自动化失败: {e}")
             if self.env_id:
                 self.env_repo.update_status(self.env_id, "error")
+                bus = get_event_bus()
+                bus.emit(
+                    EventType.ENVIRONMENT_STATUS_CHANGED,
+                    {"env_id": self.env_id, "status": "error"},
+                )
             self.finished_signal.emit(False, str(e))
-    
+
     def _load_environment(self) -> Environment | None:
         """加载或构建环境对象。"""
         # 有 env_id：从数据库加载
@@ -103,7 +129,7 @@ class BrowserLauncherThread(QThread):
             if env_data:
                 return Environment.from_dict(env_data)
             return None
-        
+
         # 无 env_id：创建临时环境对象
         return Environment(
             id=None,

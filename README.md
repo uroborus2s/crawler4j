@@ -98,5 +98,8 @@ uv run pyinstaller crawler4j.spec --clean
 > [!NOTE]
 > 为确保打包后的程序正常运行，请确保已安装 Playwright 浏览器（`uv run playwright install chromium`）。
 
+## 项目资源
+ip： http://www.canghaiip.com
+hlevel  hang20687
 ## ⚖️ 免责声明
 本工具仅供学习和研究自动化技术使用。请在使用过程中严格遵守相关平台的政策、法律法规。开发者不对任何因不当使用该工具而导致的违规或损失负责。

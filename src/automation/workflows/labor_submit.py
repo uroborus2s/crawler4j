@@ -14,10 +14,10 @@ from src.utils.logger import logger
 
 class LaborSubmitWorkflow(BaseWorkflow):
     """Workflow for submitting task results to the Labor platform (劳保保).
-    
+
     直接将从携程采集的原始 JSON 数据填入劳保平台的文本框并提交。
     """
-    
+
     # DOM 选择器 (基于 content.js 分析)
     TEXT_AREA = "textarea.adm-text-area-element"
     TEXT_AREA_CONTAINER = ".adm-text-area"
@@ -26,10 +26,10 @@ class LaborSubmitWorkflow(BaseWorkflow):
     CANCEL_BUTTON = "button:has-text('取消')"
     POPUP_CONTAINER = ".adm-center-popup-wrap"
     SUCCESS_INDICATOR = "text='完成', text='成功', text='提交成功'"
-    
+
     async def _find_visible_textarea(self):
         """查找可见的文本框。
-        
+
         Returns:
             文本框元素，未找到返回 None
         """
@@ -38,48 +38,48 @@ class LaborSubmitWorkflow(BaseWorkflow):
             textarea = self.page.locator(self.TEXT_AREA)
             if await textarea.count() > 0 and await textarea.first.is_visible():
                 return await textarea.first.element_handle()
-            
+
             # 备用：通过容器查找
             container = self.page.locator(self.TEXT_AREA_CONTAINER)
             if await container.count() > 0 and await container.first.is_visible():
                 return await container.first.locator("textarea").element_handle()
-            
+
             return None
         except Exception:
             return None
-    
+
     async def _fill_data(self, data: dict | str) -> bool:
         """将数据填入文本框。
-        
+
         Args:
             data: 要填入的数据（字典或 JSON 字符串）
-            
+
         Returns:
             True if filled successfully.
         """
         try:
             # 转换为 JSON 字符串（使用紧凑格式减少大小）
             if isinstance(data, dict):
-                json_str = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+                json_str = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
             else:
                 json_str = str(data)
-            
+
             logger.info(f"准备填入数据，大小: {len(json_str)} bytes")
-            
+
             # 查找文本框
             textarea = await self._find_visible_textarea()
             if not textarea:
                 logger.error("未找到可见的文本框")
                 return False
-            
+
             # 点击聚焦
             await textarea.click()
             await asyncio.sleep(0.1)
-            
+
             # 清空文本框
             await textarea.fill("")
             await asyncio.sleep(0.1)
-            
+
             # 根据数据大小选择填入方式
             if len(json_str) > 5000:
                 # 大数据量：使用剪贴板粘贴方式
@@ -91,23 +91,23 @@ class LaborSubmitWorkflow(BaseWorkflow):
                 # 小数据量：直接填入
                 await textarea.fill(json_str)
                 success = True
-            
+
             if not success:
                 return False
-            
+
             # 触发 input 和 change 事件（确保表单识别到变化）
             await textarea.dispatch_event("input")
             await textarea.dispatch_event("change")
             await asyncio.sleep(0.2)
-            
+
             logger.info("数据已填入文本框")
             await self.screenshot("labor_data_filled")
             return True
-            
+
         except Exception as e:
             logger.error(f"填入数据失败: {e}")
             return False
-    
+
     async def _fill_via_clipboard(self, textarea, json_str: str) -> bool:
         """通过剪贴板粘贴方式填入数据。"""
         try:
@@ -116,31 +116,34 @@ class LaborSubmitWorkflow(BaseWorkflow):
             await asyncio.sleep(0.1)
             await self.page.keyboard.press("Meta+a")  # 全选
             await asyncio.sleep(0.1)
-            
+
             # 使用 Playwright 的 type 方法直接输入（更可靠）
             # 因为 clipboard API 在某些浏览器上下文中受限
             await textarea.type(json_str, delay=0)
             await asyncio.sleep(0.2)
-            
+
             # 检查是否填入成功
             value = await textarea.evaluate("el => el.value")
             if len(value) > 0:
                 logger.info(f"通过 type 方法填入成功，长度: {len(value)}")
                 return True
-            
+
             return False
         except Exception as e:
             logger.debug(f"type 方法填入失败: {e}")
             return False
-    
-    async def _fill_in_chunks(self, textarea, json_str: str, chunk_size: int = 5000) -> bool:
+
+    async def _fill_in_chunks(
+        self, textarea, json_str: str, chunk_size: int = 5000
+    ) -> bool:
         """分块输入数据，兼容 React 组件。"""
         try:
             logger.info(f"使用 JavaScript 设置值，总长度: {len(json_str)}")
-            
+
             # 对于 React 组件，需要使用 native setter 并触发 React 的合成事件
             # 这是因为 React 会覆盖 input/change 事件
-            fill_result = await textarea.evaluate("""
+            fill_result = await textarea.evaluate(
+                """
                 (el, value) => {
                     // 使用原生 setter 设置值
                     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
@@ -157,49 +160,51 @@ class LaborSubmitWorkflow(BaseWorkflow):
                     
                     return el.value.length;
                 }
-            """, json_str)
-            
+            """,
+                json_str,
+            )
+
             await asyncio.sleep(0.3)
-            
+
             # 验证填入是否成功
             if fill_result and fill_result >= len(json_str) * 0.9:  # 允许 10% 误差
                 logger.info(f"通过 React 兼容方式设置值成功，长度: {fill_result}")
                 return True
-            
+
             # 备用方案：使用 Playwright 原生 fill
             logger.debug("JavaScript 方式失败，尝试 Playwright fill")
             await textarea.fill(json_str)
             await asyncio.sleep(0.2)
-            
+
             value = await textarea.evaluate("el => el.value")
             if len(value) >= len(json_str) * 0.9:
                 logger.info(f"通过 Playwright fill 成功，长度: {len(value)}")
                 return True
-            
+
             # 最后备用：分块 type 输入
             logger.debug("fill 方式失败，尝试分块 type 输入")
             await textarea.click()
             await self.page.keyboard.press("Meta+a")  # 全选清空
             await asyncio.sleep(0.1)
-            
+
             for i in range(0, len(json_str), chunk_size):
-                chunk = json_str[i:i + chunk_size]
+                chunk = json_str[i : i + chunk_size]
                 await textarea.type(chunk, delay=0)
                 if i + chunk_size < len(json_str):
                     await asyncio.sleep(0.02)  # 每块之间短暂等待
-            
+
             await asyncio.sleep(0.2)
             value = await textarea.evaluate("el => el.value")
             logger.info(f"分块输入完成，长度: {len(value)}")
             return len(value) > 0
-            
+
         except Exception as e:
             logger.error(f"填入数据失败: {e}")
             return False
 
     async def _click_submit(self) -> bool:
         """点击提交按钮。
-        
+
         Returns:
             True if clicked successfully.
         """
@@ -212,104 +217,104 @@ class LaborSubmitWorkflow(BaseWorkflow):
                     if is_disabled:
                         logger.warning("提交按钮处于禁用状态")
                         return False
-                    
+
                     await asyncio.sleep(random.uniform(0.2, 0.5))
                     await submit_btn.click()
                     logger.info("点击提交按钮")
                     return True
-            
+
             logger.warning("未找到提交按钮")
             return False
-            
+
         except Exception as e:
             logger.error(f"点击提交按钮失败: {e}")
             return False
-    
+
     async def _handle_confirm_popup(self) -> bool:
         """处理提交后的确认弹窗。
-        
+
         Returns:
             True if confirmation handled successfully.
         """
         try:
             await asyncio.sleep(1.2)
-            
+
             # 查找弹窗中的确定按钮
             popups = await self.page.query_selector_all(self.POPUP_CONTAINER)
-            
+
             for popup in popups:
                 if not await popup.is_visible():
                     continue
-                
+
                 # 在弹窗内查找确定按钮
                 buttons = await popup.query_selector_all("button")
                 for button in buttons:
                     text = await button.inner_text()
                     if "确定" in text.strip():
                         await button.click()
-                        logger.info("点击确认弹窗\"确定\"按钮")
+                        logger.info('点击确认弹窗"确定"按钮')
                         return True
-            
+
             # 备用方案：直接查找页面上的确定按钮
             if await self.is_visible(self.CONFIRM_BUTTON, timeout=2000):
                 await self.page.click(self.CONFIRM_BUTTON)
                 logger.info("点击确认按钮")
                 return True
-            
+
             logger.warning("未找到确认弹窗")
             return False
-            
+
         except Exception as e:
             logger.error(f"处理确认弹窗失败: {e}")
             return False
-    
+
     async def _close_all_popups(self, button_text: str = "确定") -> int:
         """关闭所有弹窗。
-        
+
         基于 content.js findPageCloseAllPopups() 分析。
-        
+
         Args:
             button_text: 优先点击的按钮文本
-            
+
         Returns:
             关闭的弹窗数量
         """
         closed_count = 0
-        
+
         try:
             popups = await self.page.query_selector_all(self.POPUP_CONTAINER)
-            
+
             for popup in popups:
                 if not await popup.is_visible():
                     continue
-                
+
                 buttons = await popup.query_selector_all("button")
                 target_button = None
-                
+
                 # 查找目标按钮
                 for button in buttons:
                     span = await button.query_selector("span")
                     if span:
                         text = await span.inner_text()
                         text = text.replace(" ", "").strip()
-                        
+
                         if text == button_text:
                             target_button = button
                             break
                         elif text in ["确定", "取消"] and not target_button:
                             target_button = button
-                
+
                 if target_button:
                     await target_button.click()
                     closed_count += 1
                     await asyncio.sleep(0.3)
-            
+
             return closed_count
-            
+
         except Exception as e:
             logger.debug(f"关闭弹窗异常: {e}")
             return closed_count
-    
+
     async def submit_not_found(self) -> bool:
         """提交“搜索不到”结果。"""
         logger.info("正在提交：搜索不到")
@@ -319,10 +324,12 @@ class LaborSubmitWorkflow(BaseWorkflow):
             # 这里先点击提交，看是否弹出原因选择
             if not await self._click_submit():
                 return False
-            
+
             await asyncio.sleep(1)
             # 处理可能的选项弹窗
-            reason_opt = self.page.locator("text='搜索不到', .adm-picker-view-item:has-text('搜索不到')")
+            reason_opt = self.page.locator(
+                "text='搜索不到', .adm-picker-view-item:has-text('搜索不到')"
+            )
             if await reason_opt.count() > 0:
                 await reason_opt.first.click()
                 await asyncio.sleep(0.5)
@@ -344,21 +351,21 @@ class LaborSubmitWorkflow(BaseWorkflow):
 
         if data is None:
             return await self.submit_not_found()
-            
+
         logger.info("开始提交任务结果...")
-        
+
         try:
             # 1. 检查是否有未处理的弹窗
             await self._close_all_popups("确定")
             await asyncio.sleep(0.5)
-            
+
             # 2. 填入数据
             if not await self._fill_data(data):
                 return False
-            
+
             # 3. 等待一下再提交（模拟人类行为）
             await asyncio.sleep(random.uniform(0.2, 0.5))
-            
+
             # 4. 点击提交
             if not await self._click_submit():
                 # 提交按钮可能禁用，尝试再次填入数据
@@ -367,14 +374,14 @@ class LaborSubmitWorkflow(BaseWorkflow):
                 if textarea:
                     await textarea.dispatch_event("input")
                     await asyncio.sleep(0.5)
-                    
+
                     if not await self._click_submit():
                         return False
-            
+
             # 5. 处理确认弹窗
             await asyncio.sleep(1.2)
             confirm_count = await self._close_all_popups("确定")
-            
+
             # 6. 验证提交结果 (通过检测页面上的成功提示)
             try:
                 # 等待一会儿看是否有成功提示
@@ -394,18 +401,18 @@ class LaborSubmitWorkflow(BaseWorkflow):
                     if not submit_btn or await submit_btn.is_disabled():
                         return True
                     return False
-                
+
         except Exception as e:
             logger.error(f"提交任务异常: {e}")
             await self.screenshot("labor_submit_error")
             return False
-    
+
     async def check_and_submit_pending(self) -> bool:
         """检查是否有待提交的数据，如有则尝试补充提交。
-        
+
         基于 content.js executeSupplementSubmit() 分析。
         用于处理页面刷新后残留的未提交数据。
-        
+
         Returns:
             True if pending data was submitted.
         """
@@ -413,25 +420,25 @@ class LaborSubmitWorkflow(BaseWorkflow):
             textarea = await self._find_visible_textarea()
             if not textarea:
                 return False
-            
+
             content = await textarea.input_value()
             if not content:
                 return False
-            
+
             # 检查是否是有效的 JSON
             try:
                 json.loads(content)
             except json.JSONDecodeError:
                 return False
-            
+
             # 检查提交按钮状态
             submit_btn = await self.page.query_selector(self.SUBMIT_BUTTON)
             if submit_btn and not await submit_btn.is_disabled():
                 logger.info("检测到待提交数据，执行补充提交")
                 return await self.submit_result(content)
-            
+
             return False
-            
+
         except Exception as e:
             logger.debug(f"检查待提交数据失败: {e}")
             return False

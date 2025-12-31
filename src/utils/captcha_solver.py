@@ -11,7 +11,9 @@ class CaptchaSolver:
     """滑块验证码识别器 - ddddocr 方案"""
 
     @staticmethod
-    def solve_slider(background_bytes: bytes, slider_bytes: bytes | None = None, debug: bool = False) -> tuple[int, int]:
+    def solve_slider(
+        background_bytes: bytes, slider_bytes: bytes | None = None, debug: bool = False
+    ) -> tuple[int, int]:
         """
         识别滑块缺口位置。
 
@@ -34,18 +36,24 @@ class CaptchaSolver:
             if slider_bytes:
                 # simple_target=True 表示滑块图片是简单的（如透明背景的小图）
                 # 注意：ddddocr 1.4.x 的 slide_match 参数顺序通常是 (target_bytes, background_bytes, simple_target=True)
-                res = det.slide_match(slider_bytes, background_bytes, simple_target=True)
+                res = det.slide_match(
+                    slider_bytes, background_bytes, simple_target=True
+                )
 
                 # res format: {'target': [x1, y1, x2, y2]} where x1 is the left edge (gap position)
-                if res and 'target' in res:
-                    x1, y1, x2, y2 = res['target']
+                if res and "target" in res:
+                    x1, y1, x2, y2 = res["target"]
                     # 返回缺口中心 X 坐标
                     center_x = (x1 + x2) // 2
 
                     if debug:
-                        logger.debug(f"ddddocr result: {res}, center_x={center_x}, gap_width={x2-x1}")
+                        logger.debug(
+                            f"ddddocr result: {res}, center_x={center_x}, gap_width={x2 - x1}"
+                        )
             else:
-                logger.warning("No slider image provided for ddddocr slide_match. Using OpenCV fallback.")
+                logger.warning(
+                    "No slider image provided for ddddocr slide_match. Using OpenCV fallback."
+                )
                 return CaptchaSolver._detect_gap_opencv(background_bytes, debug)
 
             # ddddocr 成功（或失败但继续）后的处理
@@ -55,9 +63,9 @@ class CaptchaSolver:
             if img is None:
                 logger.error("Failed to decode background image")
                 return 0, 0
-                
+
             img_h, img_w = img.shape[:2]
-            
+
             # 保存调试图片
             if debug:
                 try:
@@ -75,9 +83,13 @@ class CaptchaSolver:
                         # 绘制预估缺口区域（假设宽度 90px，中心在 center_x）
                         gap_w = 90
                         left_x = center_x - gap_w // 2
-                        cv2.rectangle(img, (left_x, 0), (left_x + gap_w, img_h), (0, 255, 0), 1)
+                        cv2.rectangle(
+                            img, (left_x, 0), (left_x + gap_w, img_h), (0, 255, 0), 1
+                        )
                         cv2.imwrite(f"captcha_debug_{timestamp}_result.png", img)
-                        logger.debug(f"Saved debug images with prefix: captcha_debug_{timestamp}_")
+                        logger.debug(
+                            f"Saved debug images with prefix: captcha_debug_{timestamp}_"
+                        )
                 except Exception as e:
                     logger.debug(f"Failed to save debug images: {e}")
 
@@ -88,7 +100,9 @@ class CaptchaSolver:
             return 0, 0
 
     @staticmethod
-    def _detect_gap_opencv(background_bytes: bytes, debug: bool = False) -> tuple[int, int]:
+    def _detect_gap_opencv(
+        background_bytes: bytes, debug: bool = False
+    ) -> tuple[int, int]:
         """
         OpenCV fallback for detecting gap in background image
         """
@@ -97,54 +111,56 @@ class CaptchaSolver:
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             if img is None:
                 return 0, 0
-            
+
             img_h, img_w = img.shape[:2]
-            
+
             # Convert to grayscale
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            
+
             # Image enhancement
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             gray = clahe.apply(gray)
-            
+
             # Gaussian blur to reduce noise
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            
+
             # Canny edge detection
             edges = cv2.Canny(blurred, 50, 150)
-            
+
             # Find contours
-            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
+            contours, _ = cv2.findContours(
+                edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+
             candidates = []
-            
+
             # Search area restrictions
             min_x = int(img_w * 0.15)
             max_x = int(img_w * 0.90)
-            
+
             for contour in contours:
                 x, y, w, h = cv2.boundingRect(contour)
-                
+
                 # Filter by size (gap is usually around 40-60px)
                 if not (30 <= w <= 80 and 30 <= h <= 80):
                     continue
-                    
+
                 # Filter by position
                 if x < min_x or x + w > max_x:
                     continue
-                    
+
                 # Calculate brightness difference
                 # Gap usually darker or different texture
                 mask = np.zeros_like(gray)
                 cv2.drawContours(mask, [contour], -1, 255, -1)
-                
+
                 # Score based on dimensions and position
                 # Ideal square-ish shape
-                aspect_ratio = float(w)/h
+                aspect_ratio = float(w) / h
                 shape_score = 1.0 - abs(aspect_ratio - 1.0)
-                
+
                 candidates.append((x, y, w, h, shape_score))
-                
+
             if candidates:
                 # Sort by shape score (index 4)
                 candidates.sort(key=lambda c: c[4], reverse=True)
@@ -152,10 +168,10 @@ class CaptchaSolver:
                 best_y = candidates[0][1]
                 best_w = candidates[0][2]
                 best_h = candidates[0][3]
-                
+
                 # Calculate center
                 center_x = best_x + best_w // 2
-                
+
                 if debug:
                     logger.debug(f"OpenCV fallback candidates top 3: {candidates[:3]}")
                     try:
@@ -165,15 +181,88 @@ class CaptchaSolver:
                         pt2 = (int(best_x + best_w), int(best_y + best_h))
                         cv2.rectangle(img, pt1, pt2, (0, 255, 0), 2)
                         # Draw center line
-                        cv2.line(img, (int(center_x), 0), (int(center_x), img_h), (0, 0, 255), 2)
-                        cv2.imwrite(f"captcha_debug_{timestamp}_opencv_fallback.png", img)
+                        cv2.line(
+                            img,
+                            (int(center_x), 0),
+                            (int(center_x), img_h),
+                            (0, 0, 255),
+                            2,
+                        )
+                        cv2.imwrite(
+                            f"captcha_debug_{timestamp}_opencv_fallback.png", img
+                        )
                     except Exception as e:
                         logger.warning(f"Failed to draw debug rect: {e}")
-                
+
                 return center_x, img_w
-                
+
             return 0, img_w
-            
+
+            return 0, img_w
+
         except Exception as e:
             logger.error(f"OpenCV fallback failed: {e}")
             return 0, 0
+
+    @staticmethod
+    def solve_click(
+        background_bytes: bytes, prompt_bytes: bytes | None = None, debug: bool = False
+    ) -> list[tuple[int, int]]:
+        """
+        识别点选验证码图标位置。
+
+        Args:
+            background_bytes: 背景大图
+            prompt_bytes: 提示图（可选，用于匹配顺序）
+            debug: 调试模式
+
+        Returns:
+            [(x, y), ...] 点击坐标列表
+        """
+        try:
+            # 初始化 det=True 开启目标检测
+            det = ddddocr.DdddOcr(det=True, show_ad=False)
+
+            # 1. 识别背景图中的所有目标
+            # ddddocr detection 返回格式: [[x1, y1, x2, y2, label], ...]
+            poses = det.detection(background_bytes)
+
+            points = []
+            if poses:
+                for box in poses:
+                    x1, y1, x2, y2 = box
+                    center_x = (x1 + x2) // 2
+                    center_y = (y1 + y2) // 2
+                    points.append((center_x, center_y))
+
+            # 如果提供了提示图，理想情况下应该进行相似度匹配排序
+            # 但基础版 ddddocr 不支持 prompt matching
+            # 这里简单按照从左到右或根据 detection original order 返回
+            # 实际应用通常需要训练专门的 Siamese Network 或使用高级 API
+
+            if debug:
+                try:
+                    timestamp = int(time.time() * 1000)
+                    nparr = np.frombuffer(background_bytes, np.uint8)
+                    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    if img is not None:
+                        for i, (cx, cy) in enumerate(points):
+                            cv2.circle(img, (cx, cy), 5, (0, 0, 255), -1)
+                            cv2.putText(
+                                img,
+                                str(i + 1),
+                                (cx, cy),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.5,
+                                (255, 0, 0),
+                                1,
+                            )
+                        cv2.imwrite(f"captcha_click_debug_{timestamp}.png", img)
+                except Exception as e:
+                    logger.warning(f"Failed to save click debug image: {e}")
+
+            return points
+
+        except Exception as e:
+            logger.error(f"Click captcha solving failed: {e}")
+            return []

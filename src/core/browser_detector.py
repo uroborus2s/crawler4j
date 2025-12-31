@@ -12,7 +12,7 @@ import requests
 
 class BrowserDetector:
     """Detects fingerprint browser installation and connectivity."""
-    
+
     # Common installation paths
     PATHS = {
         "bitbrowser": {
@@ -31,7 +31,8 @@ class BrowserDetector:
             "darwin": [
                 "/Applications/VirtualBrowser.app",
                 Path.home() / "Applications/VirtualBrowser.app",
-                Path.home() / "Library/Application Support/VirtualBrowser/VirtualBrowser.app",
+                Path.home()
+                / "Library/Application Support/VirtualBrowser/VirtualBrowser.app",
             ],
             "windows": [
                 Path.home() / "AppData/Local/VirtualBrowser",
@@ -40,13 +41,13 @@ class BrowserDetector:
             ],
         },
     }
-    
+
     # Default API ports
     DEFAULT_PORTS = {
         "bitbrowser": 54345,
         "virtualbrowser": 54346,
     }
-    
+
     @classmethod
     def get_system(cls) -> str:
         """Get current operating system."""
@@ -56,36 +57,38 @@ class BrowserDetector:
         elif system == "windows":
             return "windows"
         return "linux"
-    
+
     @classmethod
     def is_installed(cls, browser_type: str) -> bool:
         """Check if browser is installed.
-        
+
         Args:
             browser_type: 'bitbrowser' or 'virtualbrowser'
-            
+
         Returns:
             True if installed.
         """
         system = cls.get_system()
         paths = cls.PATHS.get(browser_type, {}).get(system, [])
-        
+
         for path in paths:
             path = Path(path)
             if path.exists():
                 return True
-        
+
         # Also check if process is running
         return cls._is_process_running(browser_type)
-    
+
     @classmethod
     def _is_process_running(cls, browser_type: str) -> bool:
         """Check if browser process is running."""
         system = cls.get_system()
-        
+
         try:
             if system == "darwin":
-                process_name = "BitBrowser" if browser_type == "bitbrowser" else "VirtualBrowser"
+                process_name = (
+                    "BitBrowser" if browser_type == "bitbrowser" else "VirtualBrowser"
+                )
                 result = subprocess.run(
                     ["pgrep", "-f", process_name],
                     capture_output=True,
@@ -93,7 +96,11 @@ class BrowserDetector:
                 )
                 return result.returncode == 0
             elif system == "windows":
-                process_name = "BitBrowser.exe" if browser_type == "bitbrowser" else "VirtualBrowser.exe"
+                process_name = (
+                    "BitBrowser.exe"
+                    if browser_type == "bitbrowser"
+                    else "VirtualBrowser.exe"
+                )
                 result = subprocess.run(
                     ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
                     capture_output=True,
@@ -102,16 +109,16 @@ class BrowserDetector:
                 return process_name.lower() in result.stdout.decode().lower()
         except Exception:
             pass
-        
+
         return False
-    
+
     @classmethod
     def test_api_connection(cls, url: str) -> bool:
         """Test connection to browser API.
-        
+
         Args:
             url: API base URL (e.g., http://127.0.0.1:54345)
-            
+
         Returns:
             True if connection successful.
         """
@@ -131,38 +138,38 @@ class BrowserDetector:
                 pass
         except Exception:
             pass
-        
+
         return False
-    
+
     @classmethod
     def get_default_api_url(cls, browser_type: str) -> str:
         """Get default API URL for browser type.
-        
+
         Args:
             browser_type: 'bitbrowser' or 'virtualbrowser'
-            
+
         Returns:
             Default API URL.
         """
         port = cls.DEFAULT_PORTS.get(browser_type, 54345)
         return f"http://127.0.0.1:{port}"
-    
+
     @classmethod
     def get_installation_path(cls, browser_type: str) -> Path | None:
         """Get installation path if browser is installed.
-        
+
         Args:
             browser_type: Browser type.
-            
+
         Returns:
             Path if found, None otherwise.
         """
         system = cls.get_system()
         paths = cls.PATHS.get(browser_type, {}).get(system, [])
-        
+
         for path in paths:
             path = Path(path)
             if path.exists():
                 return path
-        
+
         return None

@@ -130,15 +130,15 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('lock_timeout_minutes', '30'
 
 def init_database(db_path: Path | None = None) -> None:
     """Initialize the database with the schema.
-    
+
     This is called automatically when the application starts and no database exists.
-    
+
     Args:
         db_path: Path to the database file. Defaults to DB_PATH.
     """
     path = db_path or DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     conn = sqlite3.connect(path)
     try:
         conn.executescript(SCHEMA)
