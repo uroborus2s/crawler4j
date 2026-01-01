@@ -32,7 +32,7 @@ class LaborAccountsPage(QWidget):
     COLUMNS = [
         ("phone", "账号", 150),
         ("status", "状态", 80),
-        ("bind_count", "绑定数", 60),
+        ("locked_at", "锁定时间", 100),
         ("completed_count", "完成", 60),
         ("discarded_count", "废弃", 60),
         ("approved_count", "通过", 60),
@@ -141,7 +141,11 @@ class LaborAccountsPage(QWidget):
 
     def _on_edit(self, row_data: dict):
         """Handle row double click to edit."""
-        account = self.repo.get_by_id(row_data.get("id"))
+        account_id = row_data.get("id")
+        if not account_id:
+            return
+            
+        account = self.repo.get_by_id(int(account_id))
         if not account:
             return
 

@@ -166,8 +166,8 @@ class EnvironmentManager:
 
             return Environment(
                 id=env_id,
-                ctrip_account_id=ctrip_account.id,
-                labor_account_id=None,  # 劳保账号在运行时动态分配
+                ctrip_account_id=ctrip_account.id or 0,
+                labor_account_id=0,  # 劳保账号在运行时动态分配
                 browser_profile_id=profile_id,
                 status=EnvironmentStatus.IDLE,
             )
@@ -193,7 +193,7 @@ class EnvironmentManager:
 
         调度器应使用此方法以支持异步接码平台调用。
         """
-        from src.config import config
+        # No import needed here anymore
 
         params = params or CreateEnvironmentParams()
 
@@ -205,8 +205,114 @@ class EnvironmentManager:
             logger.warning("没有可用的携程账号")
             return None
 
-        # === Step 2-7: 复用同步创建逻辑 ===
-        return self._create_environment_with_account(params, ctrip_account, auto_assign)
+        # === Step 2-7: Re-use logic but asynchronous
+        return await self._create_environment_with_account_async(params, ctrip_account, auto_assign)
+
+    async def _create_environment_with_account_async(
+        self,
+        params: CreateEnvironmentParams,
+        ctrip_account: CtripAccount,
+        auto_assign: bool,
+    ) -> Environment | None:
+        """使用已分配的携程账号创建环境（异步非阻塞版本）。"""
+        from src.config import config
+        from src.core.events import EventType, get_event_bus
+        from src.utils.async_utils import run_blocking
+
+        proxy_ip_id = params.proxy_ip_id
+        proxy_config = params.proxy_config
+
+        if auto_assign and not proxy_ip_id:
+            # DB read - fast enough to run in thread or even sync if WAL is on, 
+            # but let's be safe and put it in thread if it were complex. 
+            # get_least_used is a simple query.
+            # For strictness:
+            proxy_data = await run_blocking(self.proxy_repo.get_least_used)
+            if proxy_data:
+                proxy_ip_id = proxy_data["id"]
+                proxy_config = {
+                    "type": proxy_data.get("protocol", "http"),
+                    "host": proxy_data["ip"],
+                    "port": proxy_data["port"],
+                    "user": proxy_data.get("user"),
+                    "pass": proxy_data.get("password"),
+                }
+
+        try:
+            profile_name = params.name or f"Auto_{ctrip_account.phone_number[-4:]}"
+            remark = (
+                params.remark
+                or f"Created by Crawler4j [Ctrip: {ctrip_account.phone_number}]"
+            )
+            fingerprint = params.fingerprint_config or FingerprintGenerator.generate()
+
+            # True Async Call
+            profile_id = await BrowserAPI.create_profile_async(
+                name=profile_name,
+                remark=remark,
+                proxy=proxy_config,
+                fingerprint=fingerprint,
+                group_id=params.group_id,
+            )
+
+            logger.info(f"✅ 创建浏览器配置 (Async): {profile_id}")
+
+        except Exception as e:
+            logger.error(f"创建浏览器配置失败: {e}")
+            return None
+
+        try:
+            # BLOCKING DB CALLS -> Wrapped
+            def _save_env_record():
+                if proxy_ip_id:
+                    self.proxy_repo.increment_usage(proxy_ip_id)
+
+                eid = self.env_repo.create(
+                    ctrip_account_id=ctrip_account.id,
+                    labor_account_id=None,
+                    browser_profile_id=profile_id,
+                    browser_type=config.browser_type,
+                    proxy_ip_id=proxy_ip_id,
+                    daily_open_limit=params.daily_open_limit,
+                )
+                if ctrip_account.id:
+                    self.ctrip_repo.update_status(ctrip_account.id, "active")
+                return eid
+
+            env_id = await run_blocking(_save_env_record)
+
+            logger.info(
+                f"✅ 环境创建成功: ENV-{env_id} (携程: {ctrip_account.phone_number})"
+            )
+
+            # Event emission is thread-safe in PyQt usually if connected via slots,
+            # but here we are in a thread? No, run_blocking returns to main loop.
+            # We are back in the main loop here!
+            bus = get_event_bus()
+            bus.emit(
+                EventType.ENVIRONMENT_CREATED,
+                {"env_id": env_id, "ctrip_phone": ctrip_account.phone_number},
+            )
+
+            return Environment(
+                id=env_id,
+                ctrip_account_id=ctrip_account.id or 0,
+                labor_account_id=0,
+                browser_profile_id=profile_id,
+                status=EnvironmentStatus.IDLE,
+            )
+
+        except Exception as e:
+            logger.error(f"保存环境记录失败: {e}")
+            # Rollback
+            try:
+                await BrowserAPI.delete_profile_async(profile_id)
+            except Exception:
+                pass
+            if proxy_ip_id:
+                # Fire and forget rollback or await? Await to be safe
+                await run_blocking(self.proxy_repo.decrement_usage, proxy_ip_id)
+            return None
 
     def _create_environment_with_account(
         self,
@@ -284,8 +390,8 @@ class EnvironmentManager:
 
             return Environment(
                 id=env_id,
-                ctrip_account_id=ctrip_account.id,
-                labor_account_id=None,
+                ctrip_account_id=ctrip_account.id or 0,
+                labor_account_id=0,
                 browser_profile_id=profile_id,
                 status=EnvironmentStatus.IDLE,
             )
@@ -379,7 +485,25 @@ class EnvironmentManager:
 
     async def _create_ctrip_account_from_sms_platform_async(self) -> CtripAccount | None:
         """通过接码平台取号创建新携程账号（异步版本）。"""
+        from src.config import config
+        from src.core.events import EventType, get_event_bus
         from src.utils.sms_platform import create_sms_client_from_config
+        from src.utils.storage import SettingsRepository
+
+        # 1. 检查每日限制
+        settings_repo = SettingsRepository()
+        current_count = settings_repo.get_sms_creation_count_today()
+        limit = config.daily_auto_env_creation_limit
+
+        if current_count >= limit:
+            logger.warning(f"今日接码创建环境已达上限 ({current_count}/{limit})")
+            
+            # 发送通知事件
+            get_event_bus().emit(
+                EventType.SMS_CREATION_LIMIT_REACHED, 
+                {"current": current_count, "limit": limit}
+            )
+            return None
 
         client = create_sms_client_from_config()
         if not client:
@@ -394,6 +518,9 @@ class EnvironmentManager:
                 return None
 
             logger.info(f"✅ 接码平台取号成功: {phone}")
+
+            # 增加计数
+            settings_repo.increment_sms_creation_count()
 
             from src.config import config
 
@@ -414,8 +541,8 @@ class EnvironmentManager:
                 id=account_id,
                 country_code="+86",
                 phone_number=phone,
-                account_type="api",
-                sms_verify_type="api",
+                account_type="api", # type: ignore
+                sms_verify_type="api", # type: ignore
             )
 
         except Exception as e:

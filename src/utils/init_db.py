@@ -141,7 +141,12 @@ def init_database(db_path: Path | None = None) -> None:
 
     conn = sqlite3.connect(path)
     try:
+        # Enable WAL mode for concurrency
+        conn.execute("PRAGMA journal_mode=WAL;")
         conn.executescript(SCHEMA)
         conn.commit()
+    except Exception as e:
+        print(f"Database initialization error: {e}")
+        # If WAL fails, we proceed (might be unsupported on some FS), but print error
     finally:
         conn.close()

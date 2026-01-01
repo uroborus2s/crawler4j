@@ -206,7 +206,9 @@ class DataTable(QWidget):
                             continue
 
                 value = row_data.get(key, "")
-                item = QTableWidgetItem(str(value))
+                str_val = str(value)
+                item = QTableWidgetItem(str_val)
+                item.setToolTip(str_val)  # Always set tooltip to show full content
                 self.table.setItem(row_idx, col_idx, item)
 
         # Update pagination info

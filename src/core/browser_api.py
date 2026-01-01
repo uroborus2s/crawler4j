@@ -8,10 +8,164 @@ from typing import Any
 import requests
 
 from src.config import config
+from src.utils.http_client import AsyncHttpClient
 
 
 class BrowserAPI:
     """Interface for fingerprint browser local APIs."""
+
+    # ==================== Async Methods (aiohttp) ====================
+
+    @classmethod
+    async def open_browser_async(cls, profile_id: str) -> dict[str, Any]:
+        """Open a browser profile asynchronously."""
+        browser_type = config.browser_type
+        base_url = config.browser_api_url.rstrip("/")
+
+        if browser_type == "bitbrowser":
+            url = f"{base_url}/browser/open"
+            payload = {"id": profile_id}
+        else:
+            url = f"{base_url}/api/v1/browser/start"
+            payload = {"profileId": profile_id}
+
+        try:
+            data = await AsyncHttpClient.post(url, json=payload)
+            
+            if browser_type == "bitbrowser":
+                if data.get("success"):
+                    return {
+                        "ws_endpoint": data["data"]["ws"],
+                        "http_endpoint": data["data"]["http"],
+                        "driver_path": data["data"]["driver"],
+                    }
+            else:
+                if data.get("code") == 0:
+                    return {
+                        "ws_endpoint": data["data"]["ws"],
+                        "http_endpoint": data["data"]["http"],
+                    }
+
+            error_msg = data.get("msg") or data.get("message") or "Unknown error"
+            raise RuntimeError(f"Failed to open browser: {error_msg}")
+        except Exception as e:
+            if isinstance(e, RuntimeError):
+                raise
+            raise RuntimeError(f"Browser API connection error: {e}")
+
+    @classmethod
+    async def close_browser_async(cls, profile_id: str) -> bool:
+        """Close a browser profile asynchronously."""
+        browser_type = config.browser_type
+        base_url = config.browser_api_url.rstrip("/")
+
+        if browser_type == "bitbrowser":
+            url = f"{base_url}/browser/close"
+            payload = {"id": profile_id}
+        else:
+            url = f"{base_url}/api/v1/browser/stop"
+            payload = {"profileId": profile_id}
+
+        try:
+            data = await AsyncHttpClient.post(url, json=payload)
+            return (
+                data.get("success")
+                if browser_type == "bitbrowser"
+                else data.get("code") == 0
+            )
+        except Exception:
+            return False
+
+    @classmethod
+    async def create_profile_async(
+        cls,
+        name: str,
+        remark: str = "",
+        proxy: dict[str, Any] | None = None,
+        fingerprint: dict[str, Any] | None = None,
+        group_id: str | None = None,
+    ) -> str:
+        """Create a new browser profile asynchronously."""
+        browser_type = config.browser_type
+        base_url = config.browser_api_url.rstrip("/")
+        real_proxy: dict[str, Any] = proxy or {"type": "noproxy"}
+        real_fingerprint: dict[str, Any] = fingerprint or {}
+
+        if browser_type == "bitbrowser":
+            url = f"{base_url}/browser/update"
+            payload = cls._build_bitbrowser_payload(
+                name, remark, group_id, real_proxy, real_fingerprint
+            )
+        else:
+            url = f"{base_url}/api/v1/browser/add"
+            # Re-implement payload building for virtualbrowser or abstract it? 
+            # For now, duplicate logic to keep it simple self-contained or call shared
+            # Ideally we extract "build_payload" but it's mixed in the sync method.
+            # Let's verify if we can extract it. 
+            # The sync method creates it inline. I will duplicate for safety/speed now.
+            payload: dict[str, Any] = {
+                "name": name,
+                "notes": remark,
+                "groupId": group_id,
+            }
+            if real_proxy.get("type", "noproxy") != "noproxy":
+                payload["proxy"] = {
+                    "type": real_proxy.get("type"),
+                    "host": real_proxy.get("host"),
+                    "port": real_proxy.get("port"),
+                    "username": real_proxy.get("user"),
+                    "password": real_proxy.get("pass"),
+                }
+
+            fp_config_vb: dict[str, Any] = {}
+            if real_fingerprint.get("os"):
+                fp_config_vb["os"] = real_fingerprint["os"]
+            if real_fingerprint.get("user_agent"):
+                fp_config_vb["userAgent"] = real_fingerprint["user_agent"]
+            if fp_config_vb:
+                payload["fingerprint"] = fp_config_vb
+
+        try:
+            data = await AsyncHttpClient.post(url, json=payload)
+            
+            if browser_type == "bitbrowser":
+                if data.get("success"):
+                    return data["data"]["id"]
+            else:
+                if data.get("code") == 0:
+                    return data["data"]["id"]
+
+            error_msg = data.get("msg") or data.get("message") or str(data)
+            raise RuntimeError(f"Failed to create profile: {error_msg}")
+        except Exception as e:
+            if isinstance(e, RuntimeError):
+                raise
+            raise RuntimeError(f"Browser API error: {e}")
+
+    @classmethod
+    async def delete_profile_async(cls, profile_id: str) -> bool:
+        """Delete a browser profile asynchronously."""
+        browser_type = config.browser_type
+        base_url = config.browser_api_url.rstrip("/")
+
+        if browser_type == "bitbrowser":
+            url = f"{base_url}/browser/delete"
+            payload = {"id": profile_id}
+        else:
+            url = f"{base_url}/api/v1/profile/delete"
+            payload = {"profileId": profile_id}
+
+        try:
+            data = await AsyncHttpClient.post(url, json=payload)
+            return (
+                data.get("success")
+                if browser_type == "bitbrowser"
+                else data.get("code") == 0
+            )
+        except Exception:
+            return False
+            
+    # ==================== Sync Methods (requests) ====================
 
     @classmethod
     def open_browser(cls, profile_id: str) -> dict[str, Any]:
@@ -29,7 +183,7 @@ class BrowserAPI:
         try:
             # Bypass system proxies for local API calls
             response = requests.post(
-                url, json=payload, timeout=60, proxies={"http": None, "https": None}
+                url, json=payload, timeout=5, proxies={"http": None, "https": None} # type: ignore # type: ignore
             )
             data = response.json()
 
@@ -69,7 +223,7 @@ class BrowserAPI:
 
         try:
             response = requests.post(
-                url, json=payload, timeout=60, proxies={"http": None, "https": None}
+                url, json=payload, timeout=60, proxies={"http": None, "https": None} # type: ignore
             )
             data = response.json()
             return (
@@ -229,7 +383,7 @@ class BrowserAPI:
 
         try:
             response = requests.post(
-                url, json=payload, timeout=60, proxies={"http": None, "https": None}
+                url, json=payload, timeout=10, proxies={"http": None, "https": None} # type: ignore
             )
             try:
                 data = response.json()
@@ -253,8 +407,12 @@ class BrowserAPI:
     @classmethod
     def list_profiles(
         cls, page_num: int = 1, page_size: int = 10, name: str = ""
-    ) -> dict[str, Any]:
-        """List browser profiles from the browser API."""
+    ) -> dict[str, Any] | None:
+        """List browser profiles from the browser API.
+        
+        Returns:
+            dict with total and list, or None if connection fails.
+        """
         browser_type = config.browser_type
         base_url = config.browser_api_url.rstrip("/")
 
@@ -267,7 +425,7 @@ class BrowserAPI:
 
         try:
             response = requests.post(
-                url, json=payload, timeout=60, proxies={"http": None, "https": None}
+                url, json=payload, timeout=5, proxies={"http": None, "https": None} # type: ignore
             )
             data = response.json()
 
@@ -283,7 +441,7 @@ class BrowserAPI:
             return {"total": total, "list": profiles}
         except Exception as e:
             print(f"Error listing profiles: {e}")
-            return {"total": 0, "list": []}
+            return None
 
     @classmethod
     def delete_profile(cls, profile_id: str) -> bool:
@@ -300,7 +458,7 @@ class BrowserAPI:
 
         try:
             response = requests.post(
-                url, json=payload, timeout=60, proxies={"http": None, "https": None}
+                url, json=payload, timeout=60, proxies={"http": None, "https": None} # type: ignore
             )
             data = response.json()
             return (

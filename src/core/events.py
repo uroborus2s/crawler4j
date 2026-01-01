@@ -23,6 +23,7 @@ class EventType(Enum):
     ENVIRONMENT_STOPPED = auto()
     ENVIRONMENT_ERROR = auto()
     ENVIRONMENT_STATUS_CHANGED = auto()
+    SMS_CREATION_LIMIT_REACHED = auto()
 
     # Task events
     TASK_STARTED = auto()
@@ -39,7 +40,8 @@ class EventType(Enum):
     LABOR_STATS_UPDATED = auto()
 
     # Settings events
-    SETTINGS_CHANGED = auto()
+    SETTINGS_CHANGED = auto()  # General settings change
+    SETTINGS_UPDATED = auto()  # Specific setting update event (key, value)
     BROWSER_TYPE_CHANGED = auto()
     CONCURRENCY_CHANGED = auto()
 
