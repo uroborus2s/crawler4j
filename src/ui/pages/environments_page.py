@@ -32,15 +32,15 @@ class EnvironmentsPage(QWidget):
     """
 
     COLUMNS = [
-        ("seq", "序号", 50),
-        ("name", "名称", 150),
-        ("group", "分组", 100),
-        ("proxy_ip", "代理IP", 120),
-        ("system_type", "类型", 120),
-        ("local_status", "账号占用", 100),
-        ("browser_status", "状态", 80),
-        ("created_at", "创建时间", 150),
-        ("actions", "操作账户", 150),
+        ("name", "名称", 120),
+        ("ctrip_account", "账号", 140),
+        ("proxy_ip", "代理IP", 110),
+        ("browser_status", "状态", 70),
+        ("last_open", "最后启用", 100),
+        ("last_active", "最后登录", 150),
+        ("daily_usage", "当日", 50),
+        ("max_usage", "最大", 50),
+        ("actions", "操作", 140),
     ]
 
     def __init__(self, parent=None):

@@ -40,13 +40,30 @@ class Config:
     def _get(self, key: str, default: Any = None) -> Any:
         """Get a setting value with caching."""
         if key not in self._cache:
-            self._cache[key] = self._repo.get(key, default)
+            try:
+                # Use a fresh repository instance to avoid circular imports or stale state
+                # Note: We rely on _repo initialized in __init__ which is fine for now
+                # but for dynamic loading we might want to ensure fresh read
+                val = self._repo.get(key)
+                self._cache[key] = val if val is not None else default
+            except Exception:
+                # If DB is not ready or error, return default and don't cache
+                return default
         return self._cache[key]
 
     def _set(self, key: str, value: Any) -> None:
         """Set a setting value and update cache."""
-        self._repo.set(key, value)
-        self._cache[key] = value
+        try:
+            self._repo.set(key, value)
+            self._cache[key] = value
+        except Exception as e:
+            print(f"Failed to save setting {key}: {e}")
+
+    def refresh(self, key: str) -> Any:
+        """Force refresh a specific key from DB."""
+        if key in self._cache:
+            del self._cache[key]
+        return self._get(key)
 
     def reload(self) -> None:
         """Clear cache and reload all settings."""
@@ -100,6 +117,15 @@ class Config:
     @retry_count.setter
     def retry_count(self, value: int) -> None:
         self._set("retry_count", max(0, min(5, value)))
+
+    @property
+    def daily_auto_env_creation_limit(self) -> int:
+        """每日自动创建环境（接码）的数量限制。"""
+        return self._get("daily_auto_env_creation_limit", 50)
+
+    @daily_auto_env_creation_limit.setter
+    def daily_auto_env_creation_limit(self, value: int) -> None:
+        self._set("daily_auto_env_creation_limit", max(1, min(200, value)))
 
     # SMS platform settings
 

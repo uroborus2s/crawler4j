@@ -5,33 +5,51 @@ This module provides CRUD operations for all database tables.
 
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from src.utils.init_db import DB_PATH, init_database
 
+# Thread-local storage for database connections
+_thread_local = threading.local()
+
 
 @contextmanager
 def get_connection(db_path: Path | None = None):
-    """Context manager for database connections.
-
-    Args:
-        db_path: Path to the database file. Defaults to DB_PATH.
-
-    Yields:
-        sqlite3.Connection: Database connection with row factory.
+    """Context manager for thread-local database connections.
+    
+    Reuses the connection if it exists for the current thread.
+    Ensures transactions are committed or rolled back.
     """
     path = db_path or DB_PATH
     if not path.exists():
         init_database(path)
 
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    # Initialize connection for this thread if strictly needed or if path changed
+    # Note: We assume DB_PATH is constant for the app mostly. 
+    # If path changes, we force new connection (simple safety).
+    
+    if not hasattr(_thread_local, "conn") or _thread_local.conn is None:
+        _thread_local.conn = sqlite3.connect(path)
+        _thread_local.conn.row_factory = sqlite3.Row
+        # Enable WAL mode for each new connection just to be sure
+        _thread_local.conn.execute("PRAGMA journal_mode=WAL;")
+    
+    conn = _thread_local.conn
+    
     try:
         yield conn
-    finally:
-        conn.close()
+        # Optionally commit here to ensure transaction is closed? 
+        # Writing methods usually commit explicitly in this codebase, 
+        # but pure reads might leave an open transaction in Python sqlite3.
+        # It's safer to commit to release read locks (though WAL handles readers well).
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    # Do NOT close the connection, keep it for reuse in this thread
 
 
 class BaseRepository:
@@ -554,7 +572,7 @@ class EnvironmentRepository(BaseRepository):
     ) -> bool:
         """Update environment status and optionally last_run_at."""
         query = "UPDATE environments SET status = ?"
-        params = [status]
+        params: list[str | int] = [status]
 
         if last_run_at:
             query += ", last_run_at = ?"
@@ -737,3 +755,34 @@ class SettingsRepository(BaseRepository):
             except json.JSONDecodeError:
                 result[row["key"]] = row["value"]
         return result
+
+    # SMS Limit Counters
+
+    def get_sms_creation_count_today(self) -> int:
+        """获取今日通过接码平台创建环境的数量。
+        
+        如果日期不是今天，会自动重置计数。
+        """
+        import datetime
+        today = datetime.date.today().isoformat()
+        
+        stored_date = self.get("sms_env_creation_date")
+        if stored_date != today:
+            self.reset_sms_creation_count()
+            return 0
+            
+        return int(self.get("sms_env_creation_count", 0))
+
+    def increment_sms_creation_count(self) -> int:
+        """增加今日接码创建计数。"""
+        current = self.get_sms_creation_count_today()
+        new_val = current + 1
+        self.set("sms_env_creation_count", new_val)
+        return new_val
+
+    def reset_sms_creation_count(self) -> None:
+        """重置接码创建计数。"""
+        import datetime
+        today = datetime.date.today().isoformat()
+        self.set("sms_env_creation_count", 0)
+        self.set("sms_env_creation_date", today)

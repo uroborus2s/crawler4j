@@ -171,6 +171,33 @@ class DashboardPage(QWidget):
         bus = get_event_bus()
         bus.environment_status_changed.connect(self._on_env_status_changed)
         bus.labor_stats_updated.connect(lambda _: self._load_data())
+        
+        # Connect unlimited signal (using generic listener for custom events)
+        bus.event_emitted.connect(self._on_event_emitted)
+
+    def _on_event_emitted(self, event):
+        """Handle generic events."""
+        from src.core.events import EventType
+        
+        if event.type == EventType.SMS_CREATION_LIMIT_REACHED:
+            data = event.data or {}
+            current = data.get("current", 0)
+            limit = data.get("limit", 0)
+            
+            Toast.warning(
+                self, 
+                f"今日接码创建环境已达上限 ({current}/{limit})\n请降低并发数或等待明日重置"
+            )
+            logger.warning(f"接码创建限制触发: {current}/{limit}")
+            
+        elif event.type == EventType.SETTINGS_UPDATED:
+            data = event.data or {}
+            if "concurrency_limit" in data:
+                # Update combo without triggering signal
+                new_val = int(data["concurrency_limit"])
+                self.concurrency_combo.blockSignals(True)
+                self.concurrency_combo.setCurrentText(str(new_val))
+                self.concurrency_combo.blockSignals(False)
 
     def _load_data(self):
         """Load environmental data from repository."""
@@ -269,6 +296,13 @@ class DashboardPage(QWidget):
         value = self.concurrency_combo.itemData(index)
         config.concurrency_limit = value
         logger.info(f"核心调整：最大并发数已设为 {value}")
+        
+        # Emit update event to sync with Settings Page
+        from src.core.events import EventType, get_event_bus
+        get_event_bus().emit(
+            EventType.SETTINGS_UPDATED, 
+            {"concurrency_limit": value, "source": "dashboard"}
+        )
 
     def _update_button_states(self):
         """Update button enabled states."""

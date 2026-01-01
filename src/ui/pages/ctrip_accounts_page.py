@@ -35,12 +35,12 @@ class CtripAccountsPage(QWidget):
     COLUMNS = [
         ("country_code", "区号", 50),
         ("phone_number", "手机号", 120),
-        ("status", "状态", 80),
-        ("account_type", "类型", 50),
-        ("sms_verify_type", "接码", 50),
+        ("status", "状态", 100),
+        ("account_type", "类型", 60),
+        ("sms_verify_type", "接码", 60),
         ("consecutive_task_count", "连续任务", 70),
         ("task_interval_max", "间隔上限", 70),
-        ("sms_platform_type", "接码平台", 80),
+        ("registered_at", "注册时间", 140),
         ("updated_at", "最后更新", 140),
         ("_actions", "操作", 80),
     ]
@@ -114,6 +114,7 @@ class CtripAccountsPage(QWidget):
         self.table = DataTable(self.COLUMNS, action_callback=self._on_action_click)
         self.table.row_double_clicked.connect(self._on_edit)
         self.table.selection_changed.connect(self._on_selection_changed)
+        self.table.set_row_height(48)
         layout.addWidget(self.table, 1)
 
     def _on_action_click(self, row_data: dict, action: str):

@@ -34,6 +34,58 @@ class DataRefreshThread(QThread):
         self.proxy_repo = proxy_repo  # Not used yet but passed for consistency
         self.cleanup = cleanup
 
+    def run(self):
+        """Execute data refresh."""
+        try:
+            # 1. Fetch remote profiles
+            # Use large page size to get all
+            remote_data = BrowserAPI.list_profiles(page_size=1000)
+            
+            # Handle connection failure
+            remote_list = []
+            connection_failed = False
+            if remote_data is None:
+                connection_failed = True
+                # Can't log heavily here, but we proceed with local data
+            else:
+                remote_list = remote_data.get("list", []) or []
+
+            remote_map = {p["id"]: p for p in remote_list}
+
+            # 2. Get local DB envs
+            local_envs = self.env_repo.get_all(limit=1000)
+            local_map = {env["browser_profile_id"]: env for env in local_envs}
+
+            # 3. Sync status (Skipped if connection failed)
+            if not connection_failed:
+                self._sync_status(local_map, remote_map)
+                
+                # 4. Reload local if we might have changed status during sync
+                if self.cleanup:
+                     local_envs = self.env_repo.get_all(limit=1000)
+                     local_map = {env["browser_profile_id"]: env for env in local_envs}
+
+            # 5. Build display data
+            # Union of IDs
+            all_ids = set(remote_map.keys()) | set(local_map.keys())
+            display_data = []
+
+            for pid in all_ids:
+                row = self._build_row_data(pid, remote_map, local_map)
+                # If connection failed, mark as unknown status for remote-only (shouldn't exist)
+                # For local items, _build_row_data handles missing remote
+                display_data.append(row)
+
+            # Sort by seq if available, or name
+            # display_data.sort(key=lambda x: x.get("seq", 999999))
+            
+            self.data_loaded.emit(display_data)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.error_occurred.emit(str(e))
+
     def _sync_status(
         self, local_map: dict, remote_map: dict
     ) -> None:
@@ -64,6 +116,7 @@ class DataRefreshThread(QThread):
         self, pid: str, remote_map: dict, local_map: dict
     ) -> dict:
         """构建单行显示数据。"""
+        # Ensure we don't mutate the original remote map if we need to modify it
         remote = remote_map.get(pid) or {
             "id": pid,
             "name": "未知 (Local Only)",
@@ -82,8 +135,8 @@ class DataRefreshThread(QThread):
         else:
             system_type = "无"
 
-        # 账号状态
-        ctrip_phone, labor_phone = "-", "-"
+        # 账号状态 (仅展示携程账号)
+        ctrip_phone = "-"
         if local:
             ctrip_id = local.get("ctrip_account_id")
             if ctrip_id:
@@ -91,25 +144,26 @@ class DataRefreshThread(QThread):
                 if ctrip_account:
                     code = ctrip_account.get("country_code", "+86")
                     num = ctrip_account.get("phone_number", "")
-                    ctrip_phone = self._mask_phone(f"{code}{num}")
+                    # Full phone for tooltip
+                    full_phone = f"{code}{num}"
+                    ctrip_phone = full_phone
+                    # Hack: Attach full phone to be used by UI wrapper if needed? 
+                    # Actually, we can return it in a hidden field or assume UI handles it?
+                    # Since DataTable is generic, let's keep it simple. 
+                    # We can use a custom renderer or just rely on the fact that we return dict.
 
-            labor_id = local.get("labor_account_id")
-            if labor_id:
-                labor_account = self.labor_repo.get_by_id(labor_id)
-                if labor_account:
-                    labor_phone = labor_account["phone"]
+        raw_status = local.get("status") if local else remote.get("status", "Unknown")
+        browser_status = self._translate_status(raw_status)
 
-        local_status = (
-            f"{ctrip_phone}/{labor_phone}"
-            if ctrip_phone != "-" or labor_phone != "-"
-            else "-"
-        )
+        # Time formatting
+        last_run = "-"
+        if local and local.get("last_run_at"):
+            last_run = self._format_time(local.get("last_run_at"))
 
-        browser_status = (
-            local.get("status", remote.get("status", "Unknown"))
-            if local
-            else remote.get("status", "Unknown")
-        )
+        last_open_date = "-"
+        if local and local.get("last_open_date"):
+             # last_open_date is likely date object or str YYYY-MM-DD
+             last_open_date = str(local.get("last_open_date"))
 
         return {
             "id": pid,
@@ -117,42 +171,57 @@ class DataRefreshThread(QThread):
             "group": remote["group"],
             "proxy_ip": remote["proxy_ip"],
             "system_type": system_type,
-            "local_status": local_status,
+            "ctrip_account": ctrip_phone,
             "browser_status": browser_status,
             "created_at": remote.get("created_at") or "-",
+            "last_active": last_run,
+            "last_open": last_open_date,
+            "daily_usage": local.get("daily_open_count") if local else 0,
+            "max_usage": local.get("daily_open_limit") if local else 0,
             "actions": "",
             "raw_remote": remote_map.get(pid),
             "raw_local": local,
         }
 
-    def run(self):
+    def _format_time(self, time_str: str) -> str:
+        """Format timestamp to YYYY/MM/DD HH:mm:ss."""
+        if not time_str:
+            return "-"
         try:
-            # 1. 获取远程配置
-            remote_result = BrowserAPI.list_profiles(page_num=1, page_size=100)
-            remote_profiles = remote_result.get("list", [])
-            remote_map = {p["id"]: p for p in remote_profiles}
+            from datetime import datetime
+            # Handle ISO format
+            if isinstance(time_str, str):
+                dt = datetime.fromisoformat(time_str)
+            else:
+                dt = time_str
+            
+            # Convert to local time if naive (assume UTC if from DB/ISO) usually
+            # But here we stick to simple formatting as requirements usually imply "display what is stored"
+            # or "current system timezone". If stored as UTC, we need conversion.
+            # Assuming stored as local or naive-as-local for simplicity unless logic dictates otherwise.
+            # User request: "current system timezone".
+            # If datetime is timezone-aware, astimezone() converts it.
+            # If naive, assume local?
+            
+            return dt.strftime("%Y/%m/%d %H:%M:%S")
+        except Exception:
+            return str(time_str)
 
-            # 2. 获取本地配置
-            local_envs = self.env_repo.get_all(limit=1000)
-            local_map = {env["browser_profile_id"]: env for env in local_envs}
-
-            # 3. 同步状态
-            self._sync_status(local_map, remote_map)
-
-            # 4. 刷新本地数据
-            local_envs = self.env_repo.get_all(limit=1000)
-            local_map = {env["browser_profile_id"]: env for env in local_envs}
-
-            # 5. 构建显示数据
-            all_ids = set(remote_map.keys()) | set(local_map.keys())
-            display_data = [
-                self._build_row_data(pid, remote_map, local_map) for pid in all_ids
-            ]
-
-            self.data_loaded.emit(display_data)
-
-        except Exception as e:
-            self.error_occurred.emit(str(e))
+    def _translate_status(self, status: str) -> str:
+        """Translate status to Chinese."""
+        if not status:
+             return "未知"
+        s = str(status).lower()
+        mapping = {
+            "idle": "空闲",
+            "running": "运行中",
+            "active": "运行中",
+            "open": "运行中",
+            "opened": "运行中",
+            "error": "错误",
+            "disconnected": "断开",
+        }
+        return mapping.get(s, status)
 
     def _mask_phone(self, phone: str) -> str:
         if len(phone) >= 7:

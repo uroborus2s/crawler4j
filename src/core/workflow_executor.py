@@ -27,6 +27,7 @@ from src.core.browser_api import BrowserAPI
 from src.core.models.ctrip_account import CtripAccount
 from src.core.models.environment import Environment
 from src.core.models.labor_account import LaborAccount
+from src.utils.async_utils import run_blocking
 from src.utils.logger import logger
 from src.utils.storage import (
     CtripAccountRepository,
@@ -94,14 +95,17 @@ async def execute_environment_workflow(
     try:
         # === Step 0: 每日启动次数检查 ===
         if env_id:
-            if not env_repo.check_and_increment_daily_usage(env_id):
+            # BLOCKING DB -> Wrapped
+            can_open = await run_blocking(env_repo.check_and_increment_daily_usage, env_id)
+            if not can_open:
                 logger.warning(f"[ENV-{env_id}] ❌ 今日启动次数已达上限")
                 return WorkflowResult(
                     result_type=WorkflowResultType.ERROR, message="今日启动次数已达上限"
                 )
 
         # === Step 1: 加载携程账号 ===
-        ctrip_account = _load_ctrip_account(environment.ctrip_account_id)
+        # BLOCKING DB -> Wrapped
+        ctrip_account = await run_blocking(_load_ctrip_account, environment.ctrip_account_id)
 
         if not ctrip_account:
             return WorkflowResult(
@@ -112,7 +116,9 @@ async def execute_environment_workflow(
 
         # === Step 2: 打开浏览器 ===
         logger.info(f"[ENV-{env_id}] 正在打开浏览器...")
-        conn_info = BrowserAPI.open_browser(profile_id)
+        # BLOCKING NETWORK -> Async (aiohttp)
+        conn_info = await BrowserAPI.open_browser_async(profile_id)
+        
         ws_endpoint = conn_info.get("ws_endpoint")
         http_endpoint = conn_info.get("http_endpoint")
 
@@ -124,7 +130,10 @@ async def execute_environment_workflow(
 
         # 更新环境连接信息
         if env_id:
-            env_repo.update_connection_info(env_id, ws_endpoint, http_endpoint, None)
+            # BLOCKING DB -> Wrapped
+            await run_blocking(
+                env_repo.update_connection_info, env_id, ws_endpoint, http_endpoint, None
+            )
 
         # === Step 3: 执行自动化（包括动态获取劳保账号）===
         result, locked_labor_id = await _run_automation(
@@ -137,7 +146,10 @@ async def execute_environment_workflow(
 
         # 更新统计
         if result.tasks_completed > 0 and locked_labor_id:
-            labor_repo.update_stats(locked_labor_id, completed=result.tasks_completed)
+            # BLOCKING DB -> Wrapped
+            await run_blocking(
+                labor_repo.update_stats, locked_labor_id, completed=result.tasks_completed
+            )
 
         return result
 
@@ -147,22 +159,27 @@ async def execute_environment_workflow(
     finally:
         # === Step 4: 释放劳保账号锁定 ===
         if locked_labor_id and env_id:
-            labor_repo.unlock_account(locked_labor_id, env_id)
+            # BLOCKING DB -> Wrapped
+            await run_blocking(labor_repo.unlock_account, locked_labor_id, env_id)
             logger.info(f"🔓 已释放劳保账号: ID-{locked_labor_id}")
 
         # === Step 5: 关闭浏览器 ===
         try:
             logger.info(f"[ENV-{env_id}] 正在关闭浏览器...")
-            BrowserAPI.close_browser(profile_id)
+            # BLOCKING NETWORK -> Async (aiohttp)
+            await BrowserAPI.close_browser_async(profile_id)
         except Exception as e:
             logger.warning(f"关闭浏览器失败: {e}")
 
         # === Step 6: 清理环境状态 ===
         if env_id:
             # 清理连接信息
-            env_repo.update_connection_info(env_id, None, None, None)
+            # BLOCKING DB -> Wrapped (Combined or separate calls)
+            # Actually update_connection_info and update_status are fast, but let's be consistent
+            await run_blocking(env_repo.update_connection_info, env_id, None, None, None)
+            
             # 确保状态设为 idle（无论是正常完成还是异常退出）
-            env_repo.update_status(env_id, "idle")
+            await run_blocking(env_repo.update_status, env_id, "idle")
             logger.debug(f"[ENV-{env_id}] 环境状态已设为 idle")
 
 
@@ -321,7 +338,9 @@ async def _run_automation(
             logger.info(f"[ENV-{env_id}] ✅ 携程登录成功")
 
             # 🔴 关键逻辑：记录登录时间并检查是否需要冷却期
-            is_first_login = await _handle_ctrip_login_success(
+            # BLOCKING DB -> Wrapped
+            is_first_login = await run_blocking(
+                _handle_ctrip_login_success,
                 env_id=env_id,
                 ctrip_account=ctrip_account,
             )
@@ -340,7 +359,8 @@ async def _run_automation(
 
         # === Step 2: 动态获取劳保账号 ===
         logger.info(f"[ENV-{env_id}] === 步骤2: 获取劳保账号 ===")
-        labor_account, locked_labor_id = _acquire_labor_account(env_id)
+        # BLOCKING DB (Complex) -> Wrapped whole function
+        labor_account, locked_labor_id = await run_blocking(_acquire_labor_account, env_id)
 
         if not labor_account:
             return WorkflowResult(
