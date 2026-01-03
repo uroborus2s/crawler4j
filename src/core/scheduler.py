@@ -13,7 +13,11 @@ from src.core.events import EventType, get_event_bus
 from src.core.models.environment import Environment
 from src.core.task_runner import TaskResult, TaskResultType, TaskRunner
 from src.utils.logger import logger
-from src.utils.storage import LaborAccountRepository
+from src.utils.storage import (
+    CtripAccountRepository,
+    EnvironmentRepository,
+    LaborAccountRepository,
+)
 
 
 class TaskScheduler:
@@ -61,8 +65,8 @@ class TaskScheduler:
             logger.warning("调度器已在运行中")
             return
 
-        # 启动时清理旧锁
-        self._cleanup_stale_locks()
+        # 启动时执行强力清理，恢复因崩溃导致的残留状态
+        self._startup_cleanup()
 
         self._running = True
         self._stop_event.clear()
@@ -326,13 +330,31 @@ class TaskScheduler:
         config.reload()
         return config.task_interval
 
-    def _cleanup_stale_locks(self) -> None:
-        """清理超时的劳保账号锁定。
-
-        在调度器启动时调用，释放可能因异常退出导致的残留锁。
+    def _startup_cleanup(self) -> None:
+        """应用启动时的深度清理。
+        
+        用于恢复因程序异常退出导致的：
+        1. 劳保账号残留锁定
+        2. 环境状态卡在 running
         """
         try:
-            # 从设置读取超时时间，默认 5 分钟
+            # 1. 强制解锁所有劳保账号
+            unlocked = self.labor_repo.force_unlock_all()
+            if unlocked > 0:
+                logger.info(f"🔓 启动清理：强制释放了 {unlocked} 个劳保账号锁定")
+
+            # 2. 重置所有非空闲环境为 idle
+            env_repo = EnvironmentRepository()
+            reset = env_repo.reset_all_to_idle()
+            if reset > 0:
+                logger.info(f"🔄 启动清理：重置了 {reset} 个环境状态为空闲")
+
+        except Exception as e:
+            logger.warning(f"启动清理失败: {e}")
+
+    def _cleanup_stale_locks(self) -> None:
+        """清理超时的劳保账号锁定（由主循环定期调用或启动时作为备选）。"""
+        try:
             from src.utils.storage import SettingsRepository
 
             settings = SettingsRepository()
@@ -340,7 +362,7 @@ class TaskScheduler:
 
             released = self.labor_repo.cleanup_stale_locks(timeout)
             if released > 0:
-                logger.info(f"🔓 清理了 {released} 个超时的劳保账号锁定")
+                logger.info(f"🔓 定期清理：释放了 {released} 个超时的劳保账号锁定")
         except Exception as e:
             logger.warning(f"清理旧锁失败: {e}")
 

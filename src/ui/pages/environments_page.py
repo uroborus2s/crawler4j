@@ -187,7 +187,7 @@ class EnvironmentsPage(QWidget):
                     background-color: #ecfdf5; 
                     color: #059669;
                     border: 1px solid #a7f3d0;
-                    border_radius: 4px;
+                    border-radius: 4px;
                     padding: 4px 8px;
                     font-weight: 500;
                     font-size: 13px;
@@ -207,7 +207,7 @@ class EnvironmentsPage(QWidget):
                     background-color: #2563eb;
                     color: #ffffff;
                     border: none;
-                    border_radius: 4px;
+                    border-radius: 4px;
                     padding: 4px 8px;
                     font-weight: 500;
                     font-size: 13px;
@@ -231,7 +231,7 @@ class EnvironmentsPage(QWidget):
             QPushButton {
                 background-color: transparent;
                 border: 1px solid #e2e8f0;
-                border_radius: 4px;
+                border-radius: 4px;
                 color: #64748b;
                 font-size: 16px;
                 font-weight: bold;
@@ -250,12 +250,12 @@ class EnvironmentsPage(QWidget):
             QMenu {
                 background-color: white;
                 border: 1px solid #e2e8f0;
-                border_radius: 6px;
+                border-radius: 6px;
                 padding: 4px;
             }
             QMenu::item {
                 padding: 6px 24px 6px 12px;
-                border_radius: 4px;
+                border-radius: 4px;
                 color: #334155;
             }
             QMenu::item:selected {
