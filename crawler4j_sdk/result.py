@@ -1,7 +1,6 @@
 """TaskResult - 任务执行结果。"""
 
 from dataclasses import dataclass, field
-from typing import Any
 
 
 @dataclass

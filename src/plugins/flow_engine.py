@@ -5,7 +5,6 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any
 
 from src.core.events import EventType, get_event_bus
 from src.plugins.models import (
@@ -205,7 +204,7 @@ class TaskFlowEngine:
     async def _run_legacy_ctrip_workflow(self, ctx: TaskContext) -> TaskResult:
         """运行现有携程工作流（兼容层）"""
         from src.automation.workflows.labor_workflow_runner import LaborWorkflowRunner
-        from src.core.workflow_executor import WorkflowResultType
+
 
         try:
             # 获取必要的账号信息
