@@ -1,11 +1,15 @@
 """脚本管理器 - 管理任务脚本的加载和重载。"""
 
 from pathlib import Path
-from typing import Type
+from typing import TYPE_CHECKING, Type
 
-from crawler4j_sdk import TaskScript
+from crawler4j_sdk import TaskFlow, TaskScript
+from crawler4j_sdk.result import TaskResult
 from src.plugins.script_executor import ScriptExecutor
 from src.utils.logger import logger
+
+if TYPE_CHECKING:
+    from crawler4j_sdk.context import TaskContext
 
 
 class ScriptManager:
@@ -15,6 +19,7 @@ class ScriptManager:
     1. 管理脚本目录
     2. 加载所有脚本
     3. 提供重载功能
+    4. 执行脚本和工作流
     """
     
     _instance: "ScriptManager | None" = None
@@ -31,6 +36,7 @@ class ScriptManager:
         
         self._executor = ScriptExecutor()
         self._scripts: dict[str, Type[TaskScript]] = {}
+        self._workflows: dict[str, Type[TaskFlow]] = {}
         self._script_paths: dict[str, Path] = {}  # name -> path 映射
         self._directories: list[Path] = []
         self._initialized = True
@@ -81,12 +87,13 @@ class ScriptManager:
         """
         count = 0
         self._scripts.clear()
+        self._workflows.clear()
         self._script_paths.clear()
         
         for directory in self._directories:
             count += self._load_directory(directory)
         
-        logger.info(f"📦 共加载 {count} 个脚本")
+        logger.info(f"📦 共加载 {count} 个脚本/工作流")
         return count
     
     def _load_directory(self, directory: Path) -> int:
@@ -102,7 +109,12 @@ class ScriptManager:
                 script_class = self._executor.load_script(script_file)
                 name = script_class.name or script_file.stem
                 
-                self._scripts[name] = script_class
+                # 区分TaskScript和TaskFlow
+                if issubclass(script_class, TaskFlow):
+                    self._workflows[name] = script_class
+                else:
+                    self._scripts[name] = script_class
+                
                 self._script_paths[name] = script_file
                 count += 1
                 
@@ -137,7 +149,12 @@ class ScriptManager:
         
         try:
             script_class = self._executor.load_script(script_path)
-            self._scripts[name] = script_class
+            
+            if issubclass(script_class, TaskFlow):
+                self._workflows[name] = script_class
+            else:
+                self._scripts[name] = script_class
+            
             logger.info(f"🔄 重载脚本: {name}")
             return True
         except Exception as e:
@@ -154,6 +171,10 @@ class ScriptManager:
             TaskScript子类或None
         """
         return self._scripts.get(name)
+    
+    def get_workflow(self, name: str) -> Type[TaskFlow] | None:
+        """获取工作流类"""
+        return self._workflows.get(name)
     
     def get_all_scripts(self) -> dict[str, Type[TaskScript]]:
         """获取所有已加载的脚本"""
@@ -174,6 +195,61 @@ class ScriptManager:
                 "path": str(self._script_paths.get(name, "")),
             })
         return result
+    
+    # === 脚本执行 ===
+    
+    async def run_task(self, name: str, ctx: "TaskContext") -> TaskResult:
+        """执行单个任务脚本
+        
+        Args:
+            name: 脚本名称
+            ctx: 任务上下文
+            
+        Returns:
+            TaskResult
+        """
+        script_class = self.get_script(name)
+        if not script_class:
+            logger.error(f"脚本不存在: {name}")
+            return TaskResult.fail(message=f"脚本不存在: {name}")
+        
+        # 注入子任务执行器
+        ctx._subtask_executor = self._subtask_executor
+        
+        try:
+            script = script_class()
+            return await script.execute(ctx)
+        except Exception as e:
+            logger.error(f"执行脚本 {name} 失败: {e}")
+            return TaskResult.fail(message=str(e))
+    
+    async def run_workflow(self, name: str, ctx: "TaskContext") -> None:
+        """执行复合工作流
+        
+        Args:
+            name: 工作流名称
+            ctx: 任务上下文
+        """
+        workflow_class = self.get_workflow(name)
+        if not workflow_class:
+            logger.error(f"工作流不存在: {name}")
+            return
+        
+        # 注入子任务执行器
+        ctx._subtask_executor = self._subtask_executor
+        
+        workflow = workflow_class()
+        
+        try:
+            await workflow.run(ctx)
+            await workflow.on_complete(ctx)
+        except Exception as e:
+            logger.error(f"工作流 {name} 异常: {e}")
+            await workflow.on_error(ctx, e)
+    
+    async def _subtask_executor(self, name: str, ctx: "TaskContext") -> TaskResult:
+        """子任务执行器（注入到ctx）"""
+        return await self.run_task(name, ctx)
 
 
 # 全局单例
@@ -186,3 +262,4 @@ def get_script_manager() -> ScriptManager:
     if _script_manager is None:
         _script_manager = ScriptManager()
     return _script_manager
+

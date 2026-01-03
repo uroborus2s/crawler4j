@@ -4,6 +4,7 @@
 - 任务模板和配置管理
 - 任务流编排
 - 环境生命周期Hooks
+- 动态任务脚本
 """
 
 from src.plugins.flow_engine import ExecutionOptions, TaskFlowEngine
@@ -29,6 +30,7 @@ from src.plugins.repositories import (
     TaskFlowRepository,
     TaskTemplateRepository,
 )
+from src.plugins.script_manager import ScriptManager, get_script_manager
 
 __all__ = [
     # 数据模型
@@ -55,4 +57,8 @@ __all__ = [
     "get_hooks_manager",
     "TaskFlowEngine",
     "ExecutionOptions",
+    # 脚本管理
+    "ScriptManager",
+    "get_script_manager",
 ]
+
