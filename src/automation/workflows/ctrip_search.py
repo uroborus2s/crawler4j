@@ -740,9 +740,7 @@ class CtripSearchWorkflow(BaseWorkflow):
 
                     if self.claim_workflow:
                         # 调用废弃题目逻辑
-                        discard_success = await self.claim_workflow.discard_task(
-                            reason_text="携程搜索结果不匹配"
-                        )
+                        discard_success = await self.claim_workflow.discard_task()
                         if discard_success:
                             logger.info("✅ 废弃题目成功，将重新领取新题目")
                         else:

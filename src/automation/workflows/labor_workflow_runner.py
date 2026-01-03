@@ -213,7 +213,7 @@ class LaborWorkflowRunner:
                     # 搜索失败或搜索不到 -> 废弃题目并重新领题
                     reason = "携程搜索失败" if hotel_data is None else "携程搜索不到该酒店"
                     logger.warning(f"❌ {reason}，执行废弃流程...")
-                    if await self.claim_workflow.discard_task(reason_text=reason):
+                    if await self.claim_workflow.discard_task():
                         logger.info("✅ 废弃成功，继续领取下一题")
                         # 更新废弃统计
                         if self.current_labor_account and self.current_labor_account.id:

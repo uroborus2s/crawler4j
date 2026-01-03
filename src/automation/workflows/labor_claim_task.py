@@ -140,72 +140,173 @@ class LaborClaimTaskWorkflow(BaseWorkflow):
             return LaborTask(state=TaskState.NO_TASK)
 
     async def select_any_city_with_tasks(self) -> bool:
-        """轮询所有城市，选择第一个有题目的城市。"""
+        """轮询所有城市，选择第一个有题目的城市。如果点击失败则尝试下一个城市。"""
         try:
             if not await self.is_visible(self.SELECT_CITY_BUTTON):
                 return False
 
             await self.page.click(self.SELECT_CITY_BUTTON)
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(1.0)
 
             # 等待城市列表弹窗出现
             popup = self.page.locator(".adm-popup-body")
             try:
-                await popup.wait_for(state="visible", timeout=3000)
+                await popup.wait_for(state="visible", timeout=5000)
             except Exception:
                 logger.warning("城市选择弹窗未出现")
                 return False
 
-            # 查找所有城市列表项
-            city_items = await self.page.query_selector_all("a.adm-check-list-item")
-            for item in city_items:
-                content = await item.query_selector(".adm-list-item-content-main")
-                if content:
+            # 使用 Locator 而不是 ElementHandle，更稳定
+            city_items = self.page.locator("a.adm-check-list-item")
+            count = await city_items.count()
+            logger.debug(f"找到 {count} 个城市选项")
+
+            # 收集所有有题目的城市
+            valid_cities = []
+            for i in range(count):
+                item = city_items.nth(i)
+                content = item.locator(".adm-list-item-content-main")
+
+                if await content.count() > 0:
                     text = await content.inner_text()
                     # 跳过"暂无题目"的城市
-                    if "暂无题目" in text:
-                        continue
+                    if "暂无题目" not in text:
+                        valid_cities.append((i, text.strip()))
 
-                    city_name = text.strip()
-                    logger.info(f"✅ 选择有题城市: {city_name}")
+            if not valid_cities:
+                logger.warning("所有城市均暂无题目")
+                await self._close_popup()
+                return False
 
-                    # 尝试点击城市项，最多重试3次
-                    for click_attempt in range(3):
-                        await item.click()
-                        await asyncio.sleep(0.8)
+            logger.info(f"找到 {len(valid_cities)} 个有题目的城市: {[c[1] for c in valid_cities]}")
 
-                        # 检查弹窗是否已关闭
-                        try:
-                            # 等待弹窗消失
-                            await popup.wait_for(state="hidden", timeout=2000)
-                            logger.debug("城市选择成功，弹窗已关闭")
-                            return True
-                        except Exception:
-                            # 弹窗还在，可能点击没成功，重试
-                            logger.debug(
-                                f"点击城市尝试 {click_attempt + 1} 失败，重试..."
-                            )
-                            continue
+            # 依次尝试每个有题目的城市
+            for city_index, city_name in valid_cities:
+                logger.info(f"🔄 尝试选择城市: {city_name}")
 
-                    # 3次都失败，尝试强制关闭弹窗
-                    await self._close_popup()
-                    await asyncio.sleep(0.5)
+                # 尝试点击该城市
+                click_success = await self._try_click_city(city_items.nth(city_index), city_name, popup)
 
-                    # 检查是否终于关闭了
-                    mask = self.page.locator(".adm-mask")
-                    if not (await mask.count() > 0 and await mask.first.is_visible()):
-                        return True
+                if click_success:
+                    logger.info(f"✅ 成功选择城市: {city_name}")
+                    return True
+                else:
+                    logger.warning(f"❌ 点击城市 {city_name} 失败，尝试下一个城市...")
+                    # 确保弹窗仍然打开，以便选择下一个城市
+                    await self._ensure_popup_open(popup)
 
-                    logger.warning("城市选择后弹窗未正常关闭")
-                    return False
-
-            logger.warning("所有城市均暂无题目")
+            # 所有城市都点击失败
+            logger.warning("所有有题目的城市都点击失败")
             await self._close_popup()
             return False
+
         except Exception as e:
             logger.error(f"轮询城市失败: {e}")
             await self._close_popup()
             return False
+
+    async def _try_click_city(self, item, city_name: str, popup) -> bool:
+        """尝试点击指定城市项，返回是否成功。"""
+        # 尝试点击城市项，最多重试3次
+        for click_attempt in range(3):
+            try:
+                # 确保元素可见并滚动到视图
+                await item.scroll_into_view_if_needed()
+                await asyncio.sleep(0.3)
+
+                # 使用 force=True 强制点击，绕过可能的遮挡
+                await item.click(force=True, timeout=3000)
+                await asyncio.sleep(1.0)
+
+                # 检查弹窗是否已关闭
+                if await self._is_popup_closed(popup):
+                    return True
+
+                logger.debug(f"点击城市尝试 {click_attempt + 1} 失败，弹窗仍可见，重试...")
+
+            except Exception as e:
+                logger.debug(f"点击城市尝试 {click_attempt + 1} 异常: {e}")
+
+        # 3次都失败，尝试用 JavaScript 直接触发点击
+        logger.debug("常规点击失败，尝试 JavaScript 点击...")
+        try:
+            # 使用 JS 点击当前城市项
+            city_keyword = city_name.split()[0] if city_name else ""
+            await self.page.evaluate(f"""
+                () => {{
+                    const items = document.querySelectorAll('a.adm-check-list-item');
+                    for (const item of items) {{
+                        const content = item.querySelector('.adm-list-item-content-main');
+                        if (content && content.innerText.includes('{city_keyword}')) {{
+                            item.click();
+                            break;
+                        }}
+                    }}
+                }}
+            """)
+            await asyncio.sleep(1.5)
+
+            if await self._is_popup_closed(popup):
+                return True
+
+        except Exception as e:
+            logger.debug(f"JavaScript 点击失败: {e}")
+
+        return False
+
+    async def _is_popup_closed(self, popup) -> bool:
+        """检查弹窗是否已关闭（多种判断方式）。"""
+        # 方式1：检查 popup-body 是否隐藏
+        try:
+            await popup.wait_for(state="hidden", timeout=2000)
+            return True
+        except Exception:
+            pass
+
+        # 方式2：检查 mask 是否消失
+        mask = self.page.locator(".adm-mask")
+        if await mask.count() == 0 or not await mask.first.is_visible():
+            return True
+
+        # 方式3：检查 popup 的 display 样式
+        try:
+            is_hidden = await self.page.evaluate("""
+                () => {
+                    const popup = document.querySelector('.adm-popup-body');
+                    if (!popup) return true;
+                    const style = window.getComputedStyle(popup);
+                    return style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
+                }
+            """)
+            if is_hidden:
+                return True
+        except Exception:
+            pass
+
+        return False
+
+    async def _ensure_popup_open(self, popup):
+        """确保弹窗仍然打开，如果关闭则重新打开。"""
+        try:
+            # 检查弹窗是否仍然可见
+            if await popup.count() > 0 and await popup.first.is_visible():
+                return  # 弹窗仍然打开
+
+            # 弹窗已关闭，需要重新打开
+            logger.debug("弹窗已关闭，重新打开城市选择...")
+            await asyncio.sleep(0.5)
+
+            if await self.is_visible(self.SELECT_CITY_BUTTON):
+                await self.page.click(self.SELECT_CITY_BUTTON)
+                await asyncio.sleep(1.0)
+
+                try:
+                    await popup.wait_for(state="visible", timeout=3000)
+                except Exception:
+                    logger.warning("重新打开城市选择弹窗失败")
+
+        except Exception as e:
+            logger.debug(f"确保弹窗打开时发生异常: {e}")
 
     async def _close_popup(self):
         """关闭弹窗遮罩，确保完全关闭。"""
