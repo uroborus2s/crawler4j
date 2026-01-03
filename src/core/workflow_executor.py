@@ -26,6 +26,8 @@ from src.core.browser_api import BrowserAPI
 from src.core.models.ctrip_account import CtripAccount
 from src.core.models.environment import Environment
 from src.core.models.labor_account import LaborAccount
+from src.plugins.hooks import get_hooks_manager
+from src.plugins.models import HookType
 from src.utils.async_utils import run_blocking
 from src.utils.logger import logger
 from src.utils.storage import (
@@ -92,6 +94,12 @@ async def execute_environment_workflow(
     )
 
     try:
+        # === Hook: before_start ===
+        hooks_manager = get_hooks_manager()
+        await hooks_manager.execute(
+            HookType.BEFORE_START, env_id, {"env_id": env_id, "is_auto_mode": is_auto_mode}
+        )
+
         # === Step 0: 每日启动次数检查 ===
         if env_id:
             # BLOCKING DB -> Wrapped
@@ -180,6 +188,11 @@ async def execute_environment_workflow(
             # 确保状态设为 idle（无论是正常完成还是异常退出）
             await run_blocking(env_repo.update_status, env_id, "idle")
             logger.debug(f"[ENV-{env_id}] 环境状态已设为 idle")
+
+        # === Hook: after_stop ===
+        await hooks_manager.execute(
+            HookType.AFTER_STOP, env_id, {"env_id": env_id}
+        )
 
 
 def _load_ctrip_account(account_id: int | None) -> CtripAccount | None:

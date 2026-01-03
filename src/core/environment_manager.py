@@ -11,6 +11,8 @@ from src.core.browser_api import BrowserAPI
 from src.core.models.ctrip_account import CtripAccount
 from src.core.models.environment import Environment, EnvironmentStatus
 from src.core.models.labor_account import LaborAccount
+from src.plugins.hooks import get_hooks_manager
+from src.plugins.models import HookType
 from src.utils.fingerprint_generator import FingerprintGenerator
 from src.utils.logger import logger
 from src.utils.storage import (
@@ -61,6 +63,7 @@ class EnvironmentManager:
         self.ctrip_repo = CtripAccountRepository()
         self.labor_repo = LaborAccountRepository()
         self.proxy_repo = ProxyIPRepository()
+        self.hooks_manager = get_hooks_manager()
 
     # ==================== 创建环境 ====================
 
@@ -193,9 +196,12 @@ class EnvironmentManager:
 
         调度器应使用此方法以支持异步接码平台调用。
         """
-        # No import needed here anymore
-
         params = params or CreateEnvironmentParams()
+
+        # === Hook: before_create ===
+        await self.hooks_manager.execute(
+            HookType.BEFORE_CREATE, None, {"params": params.__dict__}
+        )
 
         # === Step 1: 异步分配携程账号（支持接码平台）===
         ctrip_account = await self._assign_ctrip_account_async(
@@ -206,7 +212,15 @@ class EnvironmentManager:
             return None
 
         # === Step 2-7: Re-use logic but asynchronous
-        return await self._create_environment_with_account_async(params, ctrip_account, auto_assign)
+        env = await self._create_environment_with_account_async(params, ctrip_account, auto_assign)
+
+        # === Hook: after_create ===
+        if env:
+            await self.hooks_manager.execute(
+                HookType.AFTER_CREATE, env.id, {"env_id": env.id}
+            )
+
+        return env
 
     async def _create_environment_with_account_async(
         self,
