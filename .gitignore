@@ -118,3 +118,7 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Project specific
+/*.html
+/screenshots/
