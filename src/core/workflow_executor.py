@@ -22,7 +22,6 @@ from playwright.async_api import async_playwright
 
 from src.automation.workflows.ctrip_login import CtripLoginWorkflow
 from src.automation.workflows.labor_login import LaborLoginWorkflow
-from src.automation.workflows.labor_workflow_runner import LaborWorkflowRunner
 from src.core.browser_api import BrowserAPI
 from src.core.models.ctrip_account import CtripAccount
 from src.core.models.environment import Environment
@@ -389,8 +388,10 @@ async def _run_automation(
 
             # === Step 4: 执行任务循环 ===
             logger.info(f"[ENV-{env_id}] === 步骤4: 开始自动化做题 ===")
+            # 延迟导入以避免循环导入
+            from src.automation.workflows.labor_workflow_runner import LaborWorkflowRunner
             runner = LaborWorkflowRunner(page)
-            await runner.run_auto_tasks(labor_account, ctrip_account)
+            await runner.run_auto_tasks(labor_account, ctrip_account, env_id=env_id)
 
             completed = runner.stats.get("completed", 0)
 

@@ -397,3 +397,127 @@ class LaborClaimTaskWorkflow(BaseWorkflow):
             return False
         except Exception:
             return False
+
+    async def discard_task(self, reason_text: str = "") -> bool:
+        """废弃当前题目。
+
+        流程：
+        1. 点击"废弃"按钮
+        2. 在废弃弹窗中点击"废弃原因"选择器
+        3. 在底部选择器中选择第一个可用原因并点击"确定"
+        4. 可选填写补充说明
+        5. 点击"提交"按钮完成废弃
+
+        Args:
+            reason_text: 可选的额外补充说明
+
+        Returns:
+            True if discard successful
+        """
+        try:
+            logger.info("🗑️ 开始废弃当前题目...")
+
+            # Step 1: 点击废弃按钮
+            abandon_btn = self.page.locator(self.ABANDON_BUTTON)
+            if not await abandon_btn.is_visible():
+                logger.warning("废弃按钮不可见")
+                return False
+
+            await abandon_btn.click()
+            await asyncio.sleep(1.0)
+            logger.debug("已点击废弃按钮")
+
+            # Step 2: 等待废弃弹窗出现
+            discard_dialog = self.page.locator(".adm-center-popup-body.adm-dialog-body")
+            try:
+                await discard_dialog.wait_for(state="visible", timeout=5000)
+            except Exception:
+                logger.warning("废弃弹窗未出现")
+                return False
+
+            # Step 3: 点击"废弃原因"选择器打开底部选择器
+            reason_selector = self.page.locator(
+                ".adm-form-item-label:has-text('废弃原因')"
+            ).locator("xpath=ancestor::a[contains(@class, 'adm-list-item')]")
+
+            if await reason_selector.count() == 0:
+                # 备选选择器
+                reason_selector = self.page.locator(
+                    "a.adm-list-item:has(.adm-form-item-label:has-text('废弃原因'))"
+                )
+
+            if await reason_selector.count() > 0:
+                await reason_selector.first.click()
+                await asyncio.sleep(0.8)
+                logger.debug("已点击废弃原因选择器")
+            else:
+                logger.warning("未找到废弃原因选择器")
+                return False
+
+            # Step 4: 等待底部 Picker 弹出并选择原因
+            picker = self.page.locator(".adm-picker")
+            try:
+                await picker.wait_for(state="visible", timeout=3000)
+            except Exception:
+                logger.warning("废弃原因选择器未弹出")
+                # 尝试继续，可能已经有默认选项
+
+            # 选择器中滚动选择第一个原因（通常已经默认选中）
+            # 直接点击"确定"按钮
+            picker_confirm = self.page.locator(
+                ".adm-picker-header-button:has-text('确定')"
+            )
+            if await picker_confirm.count() > 0:
+                await picker_confirm.first.click()
+                await asyncio.sleep(0.5)
+                logger.debug("已选择废弃原因并确定")
+            else:
+                # 尝试其他确定按钮
+                confirm_btn = self.page.locator("a.adm-picker-header-button").last
+                if await confirm_btn.count() > 0:
+                    await confirm_btn.click()
+                    await asyncio.sleep(0.5)
+
+            # Step 5: 填写补充说明（可选）
+            if reason_text:
+                extra_input = self.page.locator("input#extra")
+                if await extra_input.count() > 0:
+                    await extra_input.fill(reason_text)
+                    await asyncio.sleep(0.3)
+                    logger.debug(f"已填写补充说明: {reason_text}")
+
+            # Step 6: 点击"提交"按钮完成废弃
+            submit_btn = self.page.locator(
+                ".adm-dialog-button:has-text('提交')"
+            )
+            if await submit_btn.count() == 0:
+                submit_btn = self.page.locator(
+                    ".adm-dialog-footer button:has-text('提交')"
+                )
+
+            if await submit_btn.count() > 0:
+                await submit_btn.first.click()
+                await asyncio.sleep(1.5)
+                logger.info("✅ 废弃题目提交成功")
+            else:
+                logger.warning("未找到提交按钮")
+                return False
+
+            # Step 7: 处理可能的成功提示弹窗
+            await asyncio.sleep(0.5)
+            success_popup = self.page.locator(".adm-toast, .adm-dialog")
+            if await success_popup.count() > 0:
+                # 点击确定关闭弹窗
+                ok_btn = self.page.locator("button:has-text('确定'), button:has-text('知道了')")
+                if await ok_btn.count() > 0 and await ok_btn.first.is_visible():
+                    await ok_btn.first.click()
+                    await asyncio.sleep(0.5)
+
+            logger.info("🗑️ 题目废弃流程完成")
+            return True
+
+        except Exception as e:
+            logger.error(f"废弃题目失败: {e}")
+            # 尝试关闭可能残留的弹窗
+            await self._close_popup()
+            return False
