@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -32,6 +33,7 @@ from src.plugins import (
     TaskTemplate,
     TaskTemplateRepository,
 )
+from src.plugins.script_manager import get_script_manager
 from src.ui.widgets.toast import Toast
 
 
@@ -62,6 +64,16 @@ class TaskConfigPage(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         header.addWidget(title)
         header.addStretch()
+        
+        # 脚本目录管理按钮
+        add_dir_btn = QPushButton("📁 添加脚本目录")
+        add_dir_btn.clicked.connect(self._on_add_script_dir)
+        header.addWidget(add_dir_btn)
+        
+        # 重载按钮
+        reload_btn = QPushButton("🔄 重载脚本")
+        reload_btn.clicked.connect(self._on_reload_scripts)
+        header.addWidget(reload_btn)
         
         # 刷新按钮
         refresh_btn = QPushButton("🔄 刷新")
@@ -245,6 +257,28 @@ class TaskConfigPage(QWidget):
             self._config_repo.delete(config.id)
             Toast.success(self, "配置已删除")
             self._load_data()
+
+    def _on_add_script_dir(self):
+        """添加脚本目录。"""
+        dir_path = QFileDialog.getExistingDirectory(
+            self,
+            "选择脚本目录",
+            "",
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if dir_path:
+            manager = get_script_manager()
+            if manager.add_directory(dir_path):
+                count = manager.load_all()
+                Toast.success(self, f"已添加目录并加载 {count} 个脚本")
+            else:
+                Toast.warning(self, "目录已存在或无效")
+
+    def _on_reload_scripts(self):
+        """重载所有脚本。"""
+        manager = get_script_manager()
+        count = manager.reload_all()
+        Toast.success(self, f"已重载 {count} 个脚本")
 
 
 class TaskConfigDialog(QDialog):
