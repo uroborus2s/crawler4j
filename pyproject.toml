@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 start = "src.main:main"
+crawler4j = "src.cli.commands:main"
 
 [dependency-groups]
 dev = [
