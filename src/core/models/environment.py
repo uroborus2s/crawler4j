@@ -24,6 +24,7 @@ class Environment:
     - One Ctrip account
     - One Labor account
     - One browser profile (fingerprint browser)
+    - One workflow (task chain)
 
     This binding is persistent - when reopening the environment,
     both platforms should remain logged in.
@@ -33,6 +34,7 @@ class Environment:
         ctrip_account_id: Associated Ctrip account ID.
         labor_account_id: Associated Labor account ID.
         browser_profile_id: Browser profile ID from BitBrowser/VirtualBrowser.
+        workflow_id: Bound workflow (format: "module:workflow_name").
         status: Environment status (idle/running/error).
         daily_open_limit: Maximum opens per day (0 = unlimited).
         daily_open_count: Opens today.
@@ -45,6 +47,7 @@ class Environment:
     labor_account_id: int
     browser_profile_id: str
     id: int | None = None
+    workflow_id: str | None = None  # 格式: "module:workflow"
     status: EnvironmentStatus = EnvironmentStatus.IDLE
     daily_open_limit: int = 0
     daily_open_count: int = 0
@@ -68,6 +71,7 @@ class Environment:
             ctrip_account_id=data["ctrip_account_id"],
             labor_account_id=data["labor_account_id"],
             browser_profile_id=data["browser_profile_id"],
+            workflow_id=data.get("workflow_id"),
             status=status,
             daily_open_limit=data.get("daily_open_limit", 0),
             daily_open_count=data.get("daily_open_count", 0),
@@ -83,6 +87,7 @@ class Environment:
             "ctrip_account_id": self.ctrip_account_id,
             "labor_account_id": self.labor_account_id,
             "browser_profile_id": self.browser_profile_id,
+            "workflow_id": self.workflow_id,
             "status": self.status.value
             if isinstance(self.status, EnvironmentStatus)
             else self.status,
@@ -94,6 +99,17 @@ class Environment:
             "last_run_at": self.last_run_at,
             "created_at": self.created_at,
         }
+    
+    def get_module_workflow(self) -> tuple[str, str] | None:
+        """解析workflow_id获取模块和任务链名称
+        
+        Returns:
+            (module_name, workflow_name) 或 None
+        """
+        if not self.workflow_id or ":" not in self.workflow_id:
+            return None
+        parts = self.workflow_id.split(":", 1)
+        return (parts[0], parts[1])
 
     @property
     def is_idle(self) -> bool:

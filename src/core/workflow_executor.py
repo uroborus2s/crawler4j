@@ -425,3 +425,129 @@ async def _run_automation(
                 message=f"自动化异常: {e}",
                 labor_account_id=locked_labor_id,
             ), locked_labor_id
+
+
+async def execute_module_workflow(
+    environment: Environment,
+    input_callback: Callable | None = None,
+) -> WorkflowResult:
+    """执行环境绑定的模块任务链。
+    
+    如果环境设置了 workflow_id，则执行对应的模块任务链。
+    否则回退到默认的 execute_environment_workflow。
+    
+    Args:
+        environment: 目标环境
+        input_callback: 输入回调
+        
+    Returns:
+        WorkflowResult
+    """
+    # 检查是否绑定了任务链
+    module_workflow = environment.get_module_workflow()
+    
+    if not module_workflow:
+        logger.info(f"[ENV-{environment.id}] 未绑定任务链，使用默认工作流")
+        return await execute_environment_workflow(environment, input_callback)
+    
+    module_name, workflow_name = module_workflow
+    logger.info(f"[ENV-{environment.id}] 执行模块任务链: {module_name}:{workflow_name}")
+    
+    # 加载模块
+    from crawler4j_sdk.context import CtripAccountInfo, LaborAccountInfo, TaskContext
+    from src.plugins.module_loader import get_module_loader
+    
+    loader = get_module_loader()
+    loader.scan_modules("modules")
+    
+    module = loader.get_module(module_name)
+    if not module:
+        logger.error(f"模块不存在: {module_name}")
+        return WorkflowResult(
+            result_type=WorkflowResultType.ERROR,
+            message=f"模块不存在: {module_name}"
+        )
+    
+    workflow_class = module.get_workflow(workflow_name)
+    if not workflow_class:
+        logger.error(f"任务链不存在: {workflow_name}")
+        return WorkflowResult(
+            result_type=WorkflowResultType.ERROR,
+            message=f"任务链不存在: {workflow_name}"
+        )
+    
+    # 加载账号信息
+    ctrip_account = await run_blocking(_load_ctrip_account, environment.ctrip_account_id)
+    if not ctrip_account:
+        return WorkflowResult(
+            result_type=WorkflowResultType.ACCOUNT_ERROR,
+            message="携程账号数据无效"
+        )
+    
+    # 打开浏览器
+    conn_info = await BrowserAPI.open_browser_async(environment.browser_profile_id)
+    ws_endpoint = conn_info.get("ws_endpoint")
+    
+    if not ws_endpoint:
+        return WorkflowResult(
+            result_type=WorkflowResultType.BROWSER_ERROR,
+            message="无法获取浏览器 WebSocket 端点"
+        )
+    
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.connect_over_cdp(ws_endpoint)
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = context.pages[0] if context.pages else await context.new_page()
+            
+            # 构建 TaskContext
+            ctx = TaskContext(
+                env_id=environment.id or 0,
+                task_name=workflow_name,
+                config=module.get_workflow_config(workflow_name),
+                page=page,
+                context=context,
+                ctrip_account=CtripAccountInfo(
+                    id=ctrip_account.id or 0,
+                    phone_number=ctrip_account.phone_number,
+                    country_code=ctrip_account.country_code,
+                ),
+                input_callback=input_callback,
+            )
+            
+            # 注入子任务执行器
+            from src.plugins.script_manager import get_script_manager
+            manager = get_script_manager()
+            
+            # 加载模块中的子任务
+            tasks_dir = module.info.path / "tasks"
+            if tasks_dir.exists():
+                manager.add_directory(tasks_dir)
+                manager.load_all()
+            
+            ctx._subtask_executor = manager._subtask_executor
+            
+            # 执行任务链
+            workflow = workflow_class()
+            await workflow.run(ctx)
+            
+            completed = ctx.state.get("completed_tasks", 0)
+            
+            return WorkflowResult(
+                result_type=WorkflowResultType.SUCCESS,
+                tasks_completed=completed,
+                message=f"任务链 {workflow_name} 完成"
+            )
+            
+    except Exception as e:
+        logger.error(f"[ENV-{environment.id}] 模块任务链执行异常: {e}")
+        return WorkflowResult(
+            result_type=WorkflowResultType.ERROR,
+            message=str(e)
+        )
+    finally:
+        try:
+            await BrowserAPI.close_browser_async(environment.browser_profile_id)
+        except Exception:
+            pass
+
