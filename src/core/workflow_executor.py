@@ -274,6 +274,10 @@ async def _run_automation(
 
         page.set_default_timeout(30000)
         page.set_default_navigation_timeout(60000)
+        
+        # 检查黑号
+
+        # 获取注册时间
 
         # === Step 0: 网络连通性检测 ===
         logger.info(f"[ENV-{env_id}] === 步骤0: 网络检测 ===")
@@ -374,28 +378,36 @@ async def _run_automation(
         logger.info(f"[ENV-{env_id}] === 步骤3: 劳保登录 ===")
         labor_workflow = LaborLoginWorkflow(page)
 
-        if not await labor_workflow.ensure_logged_in(labor_account):
+        try:
+            if not await labor_workflow.ensure_logged_in(labor_account):
+                return WorkflowResult(
+                    result_type=WorkflowResultType.LABOR_LOGIN_FAILED,
+                    message=f"劳保登录失败: {labor_account.phone}",
+                    labor_account_id=locked_labor_id,
+                ), locked_labor_id
+            logger.info(f"[ENV-{env_id}] ✅ 劳保登录成功: {labor_account.phone}")
+
+            # === Step 4: 执行任务循环 ===
+            logger.info(f"[ENV-{env_id}] === 步骤4: 开始自动化做题 ===")
+            runner = LaborWorkflowRunner(page)
+            await runner.run_auto_tasks(labor_account, ctrip_account)
+
+            completed = runner.stats.get("completed", 0)
+
+            logger.info(f"[ENV-{env_id}] ✅ 工作流完成，共完成 {completed} 个任务")
+
             return WorkflowResult(
-                result_type=WorkflowResultType.LABOR_LOGIN_FAILED,
-                message=f"劳保登录失败: {labor_account.phone}",
+                result_type=WorkflowResultType.SUCCESS
+                if completed > 0
+                else WorkflowResultType.NO_TASK,
+                tasks_completed=completed,
+                message=f"完成 {completed} 个任务",
                 labor_account_id=locked_labor_id,
             ), locked_labor_id
-        logger.info(f"[ENV-{env_id}] ✅ 劳保登录成功: {labor_account.phone}")
-
-        # === Step 4: 执行任务循环 ===
-        logger.info(f"[ENV-{env_id}] === 步骤4: 开始自动化做题 ===")
-        runner = LaborWorkflowRunner(page)
-        await runner.run_auto_tasks(labor_account, ctrip_account)
-
-        completed = runner.stats.get("completed", 0)
-
-        logger.info(f"[ENV-{env_id}] ✅ 工作流完成，共完成 {completed} 个任务")
-
-        return WorkflowResult(
-            result_type=WorkflowResultType.SUCCESS
-            if completed > 0
-            else WorkflowResultType.NO_TASK,
-            tasks_completed=completed,
-            message=f"完成 {completed} 个任务",
-            labor_account_id=locked_labor_id,
-        ), locked_labor_id
+        except Exception as e:
+            logger.error(f"[ENV-{env_id}] 自动化执行过程中出现异常: {e}")
+            return WorkflowResult(
+                result_type=WorkflowResultType.ERROR,
+                message=f"自动化异常: {e}",
+                labor_account_id=locked_labor_id,
+            ), locked_labor_id

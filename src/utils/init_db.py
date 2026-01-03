@@ -144,6 +144,22 @@ def init_database(db_path: Path | None = None) -> None:
         # Enable WAL mode for concurrency
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.executescript(SCHEMA)
+        
+        # 🟢 Proactive Startup Recovery: 重置所有不一致的状态
+        # 1. 重置所有环境状态为 idle，并清理残留的连接信息
+        conn.execute("""
+            UPDATE environments 
+            SET status = 'idle', ws_endpoint = NULL, http_endpoint = NULL, pid = NULL 
+            WHERE status != 'idle'
+        """)
+        
+        # 2. 释放所有劳保账号的锁定
+        conn.execute("""
+            UPDATE labor_accounts 
+            SET locked_by_env_id = NULL, locked_at = NULL 
+            WHERE locked_by_env_id IS NOT NULL
+        """)
+        
         conn.commit()
     except Exception as e:
         print(f"Database initialization error: {e}")

@@ -456,7 +456,7 @@ class CtripSearchWorkflow(BaseWorkflow):
 
         search_button = self.page.locator("#search_button_global, .pc_home-search")
         try:
-            async with self.page.expect_popup(timeout=30000) as popup_info:
+            async with self.page.expect_popup(timeout=60000) as popup_info:
                 if await search_button.count() > 0:
                     await self._move_to_element_and_click(search_button)
                 else:
@@ -466,15 +466,8 @@ class CtripSearchWorkflow(BaseWorkflow):
             detail_page = await popup_info.value
             await detail_page.wait_for_load_state("domcontentloaded")
             await asyncio.sleep(random.uniform(1.5, 2.5))
-
-            if re.match(
-                r"https://hotels\.ctrip\.com/hotels/\d+\.html\?cityid=\d+",
-                detail_page.url,
-            ):
-                logger.info(f"✅ 已进入酒店详情页: {detail_page.url[:80]}...")
-            else:
-                logger.warning(f"页面 URL 非预期格式: {detail_page.url[:80]}")
-
+            
+            # 这里只做基本的页面获取，URL 检查放在 search_and_capture 里的重试逻辑中统一处理
             return detail_page
 
         except Exception as e:
@@ -533,71 +526,125 @@ class CtripSearchWorkflow(BaseWorkflow):
 
         return True
 
-    async def search_and_capture(self, task: LaborTask) -> dict | None:
-        """从首页搜索酒店并采集数据。"""
+    async def search_and_capture(self, task: LaborTask) -> dict | str | None:
+        """从首页搜索酒店并采集数据。
+        包含重试机制：
+        1. 首页搜索失败 -> 刷新重试
+        2. 进详情页失败 -> 刷新重试
+        3. 采集超时 -> 刷新重试
+        4. URL 不匹配详情页格式 -> 视为搜索不到（直接提交）
+        """
+        import re
+        max_retries = 3
+        # 增加超时时间 (用户请求 3)
+        capture_timeout = 45.0 
+
         original_page = self.page
-        new_pages = []
+        
+        # 详情页正则
+        detail_url_pattern = re.compile(r"https://hotels\.ctrip\.com/hotels/\d+\.html\?cityid=\d+")
 
-        try:
-            # 1. 开启新标签页
-            logger.info("开启新标签页进入携程首页...")
-            new_page = await self.page.context.new_page()
-            new_pages.append(new_page)
-            self.page = new_page
+        for attempt in range(max_retries):
+            new_pages = []
+            try:
+                logger.info(f"🔄 开始第 {attempt + 1}/{max_retries} 次搜索尝试: {task.hotel_name}")
+                
+                # 1. 开启新标签页
+                new_page = await self.page.context.new_page()
+                new_pages.append(new_page)
+                self.page = new_page
 
-            # 2. 设置路由拦截
-            await self._setup_route_handler()
+                # 2. 设置路由拦截
+                await self._setup_route_handler()
 
-            # 3. 执行首页搜索
-            if not await self._perform_homepage_search(task.hotel_name):
-                return None
+                # 3. 执行首页搜索
+                if not await self._perform_homepage_search(task.hotel_name):
+                    logger.warning("首页搜索失败，准备重试...")
+                    await self._cleanup_pages(new_pages)
+                    self.page = original_page
+                    continue
 
-            # 4. 导航到详情页
-            logger.info("点击搜索，等待酒店详情页打开...")
-            detail_page = await self._navigate_to_detail_page()
-            if not detail_page:
-                return None
+                # 4. 导航到详情页
+                logger.info("点击搜索，等待酒店详情页打开...")
+                detail_page = await self._navigate_to_detail_page()
+                
+                if not detail_page:
+                    logger.warning("进入详情页失败，准备重试...")
+                    await self._cleanup_pages(new_pages)
+                    self.page = original_page
+                    continue
 
-            new_pages.append(detail_page)
-            self.page = detail_page
-            self._route_handler_set = False
-            await self._setup_route_handler()
+                new_pages.append(detail_page)
+                self.page = detail_page
+                self._route_handler_set = False
+                await self._setup_route_handler()
 
-            # 5. 选择日期
-            logger.info(f"正在详情页修改日期: {task.checkin} ~ {task.checkout}")
-            await self._select_dates_on_detail_page(task.checkin, task.checkout)
+                # Check 4: URL 格式检查 (用户核心需求)
+                current_url = detail_page.url
+                if not detail_url_pattern.match(current_url) and "hotels/list" not in current_url:
+                     # 如果既不是详情页也不是明确的列表页，可能是不确定的中间态，但也视为搜索不到?
+                     # 或者用户之前的逻辑是: if regex match -> success, elif list -> not found, else -> warning.
+                     # 现在的逻辑统一为: 只要不匹配 regex 且不是预期内的其他情况，都视为搜索不到?
+                     # 让我们恢复用户之前请求的逻辑: regex 匹配 -> 继续. List -> 搜索不到.
+                     pass
 
-            # 6. 等待数据捕获
-            logger.info("📡 等待 getHotelRoomListInland 接口响应...")
-            captured = await self._wait_for_data_capture(timeout=25.0)
+                if not detail_url_pattern.match(current_url):
+                    logger.warning(f"页面URL不匹配详情页格式 ({current_url[:100]})，视为搜索不到")
+                    logger.info("搜索不到，模拟浏览后关闭...")
+                    await self._simulate_human_browsing(duration=random.uniform(1.0, 3.5))
+                    await self._cleanup_pages(new_pages)
+                    self.page = original_page
+                    return "搜索不到"
 
-            if captured and self.captured_data:
-                if isinstance(self.captured_data, dict):
-                    logger.info(
-                        f"✅ 成功捕获房型数据，数据键: {list(self.captured_data.keys())[:5]}"
-                    )
-                    return self.captured_data
-                logger.warning("捕获的数据格式非预期")
-            else:
-                logger.warning("采集超时，未截获到房型数据")
 
-            return None
+                # 5. 选择日期
+                logger.info(f"正在详情页修改日期: {task.checkin} ~ {task.checkout}")
+                await self._select_dates_on_detail_page(task.checkin, task.checkout)
 
-        except Exception as e:
-            logger.error(f"搜索与采集异常: {e}")
-            return None
+                # 6. 等待数据捕获
+                logger.info(f"📡 等待 getHotelRoomListInland 接口响应 (超时: {capture_timeout}s)...")
+                captured = await self._wait_for_data_capture(timeout=capture_timeout)
 
-        finally:
-            for p in new_pages:
-                try:
-                    if not p.is_closed():
-                        await p.close()
-                except Exception:
-                    pass
+                if captured and self.captured_data:
+                    if isinstance(self.captured_data, dict):
+                        logger.info(
+                            f"✅ 成功捕获房型数据，尝试: {attempt+1}"
+                        )
+                        logger.info("采集成功，模拟浏览后关闭...")
+                        await self._simulate_human_browsing(duration=random.uniform(2.5, 4.5))
+                        await self._cleanup_pages(new_pages)
+                        self.page = original_page
+                        return self.captured_data
+                    logger.warning("捕获的数据格式非预期")
+                else:
+                    logger.warning("采集超时，准备重试...")
+
+            except Exception as e:
+                logger.error(f"搜索尝试 {attempt+1} 异常: {e}")
+            
+            # 本次尝试失败，清理并重试
+            await self._cleanup_pages(new_pages)
             self.page = original_page
             self._route_handler_set = False
             self.captured_data = None
-            logger.info("已清理携程标签页并重置状态")
+            
+            if attempt < max_retries - 1:
+                wait_time = random.uniform(2, 4)
+                logger.info(f"等待 {wait_time:.1f} 秒后进行下一次尝试...")
+                await asyncio.sleep(wait_time)
+
+        logger.error("❌ 所有重试均失败")
+        # Retry exhausted -> Return None to let runner handle it (skip task)
+        return None
+
+    async def _cleanup_pages(self, pages: list[Page]):
+        """清理临时页面列表。"""
+        for p in pages:
+            try:
+                if not p.is_closed():
+                    await p.close()
+            except Exception:
+                pass
 
     async def _is_404_page(self) -> bool:
         """检查是否是 404 页面。

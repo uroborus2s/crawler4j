@@ -76,20 +76,16 @@ class LaborSubmitWorkflow(BaseWorkflow):
             await textarea.click()
             await asyncio.sleep(0.1)
 
-            # 清空文本框
-            await textarea.fill("")
-            await asyncio.sleep(0.1)
-
-            # 根据数据大小选择填入方式
-            if len(json_str) > 5000:
-                # 大数据量：使用剪贴板粘贴方式
-                success = await self._fill_via_clipboard(textarea, json_str)
-                if not success:
-                    # 备用方案：分块输入
-                    success = await self._fill_in_chunks(textarea, json_str)
-            else:
-                # 小数据量：直接填入
-                await textarea.fill(json_str)
+            # 优化策略：优先使用 JS 注入（最快），兼容 React
+            # 原有的 logic 针对 >5000 使用 slowly type (fake clipboard) 是导致慢的原因
+            # _fill_smart 内部实际上包含了 (JS Setter -> Playwright Fill -> Chunked Type) 的完整降级策略
+            success = await self._fill_smart(textarea, json_str)
+            
+            if not success:
+               # 如果都失败了，最后尝试一次清空 + 原生 fill (虽然 _fill_smart 已经试过 fill)
+                logger.warning("智能填入失败，尝试兜底 fill 方法")
+                await textarea.fill("")
+                await textarea.fill(json_str) 
                 success = True
 
             if not success:
@@ -101,42 +97,18 @@ class LaborSubmitWorkflow(BaseWorkflow):
             await asyncio.sleep(0.2)
 
             logger.info("数据已填入文本框")
-            await self.screenshot("labor_data_filled")
+            # 减少截图频率，仅在 debug 开启时截图，或者依靠 success 截图
+            # await self.screenshot("labor_data_filled") 
             return True
 
         except Exception as e:
             logger.error(f"填入数据失败: {e}")
             return False
 
-    async def _fill_via_clipboard(self, textarea, json_str: str) -> bool:
-        """通过剪贴板粘贴方式填入数据。"""
-        try:
-            # 聚焦并全选（清空旧内容）
-            await textarea.focus()
-            await asyncio.sleep(0.1)
-            await self.page.keyboard.press("Meta+a")  # 全选
-            await asyncio.sleep(0.1)
-
-            # 使用 Playwright 的 type 方法直接输入（更可靠）
-            # 因为 clipboard API 在某些浏览器上下文中受限
-            await textarea.type(json_str, delay=0)
-            await asyncio.sleep(0.2)
-
-            # 检查是否填入成功
-            value = await textarea.evaluate("el => el.value")
-            if len(value) > 0:
-                logger.info(f"通过 type 方法填入成功，长度: {len(value)}")
-                return True
-
-            return False
-        except Exception as e:
-            logger.debug(f"type 方法填入失败: {e}")
-            return False
-
-    async def _fill_in_chunks(
+    async def _fill_smart(
         self, textarea, json_str: str, chunk_size: int = 5000
     ) -> bool:
-        """分块输入数据，兼容 React 组件。"""
+        """智能填入数据，优先使用 JS 注入，兼容 React 组件。"""
         try:
             logger.info(f"使用 JavaScript 设置值，总长度: {len(json_str)}")
 
@@ -350,7 +322,8 @@ class LaborSubmitWorkflow(BaseWorkflow):
             pass
 
         if data is None:
-            return await self.submit_not_found()
+            logger.info("数据为空，默认提交 '搜索不到'")
+            data = "搜索不到"
 
         logger.info("开始提交任务结果...")
 

@@ -6,6 +6,7 @@ Fetches status from browser API and local DB in background to avoid UI freeze.
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src.core.browser_api import BrowserAPI
+from src.utils.logger import logger
 from src.utils.storage import (
     CtripAccountRepository,
     EnvironmentRepository,
@@ -107,10 +108,23 @@ class DataRefreshThread(QThread):
             env_id = local_env["id"]
 
             if is_remote_running:
+                # 远程还在跑，本地可能是 running 或 idle (错位)
+                # 或者是 cleanup 模式要求全部关闭
                 BrowserAPI.close_browser(pid)
                 self.env_repo.update_status(env_id, "idle")
                 self.env_repo.update_connection_info(env_id, None, None, None)
                 remote_profile["status"] = "Closed (Cleanup)"
+                logger.info(f"Cleanup: Closed running browser for ENV-{env_id}")
+            elif local_env.get("status") in ["running", "active"]:
+                # 远程已经关了，但本地还显示运行中 (程序崩溃残留)
+                self.env_repo.update_status(env_id, "idle")
+                self.env_repo.update_connection_info(env_id, None, None, None)
+                # 🔴 重要：同时释放劳保账号锁定
+                if self.labor_repo:
+                    released = self.labor_repo.force_unlock_by_env(env_id)
+                    if released > 0:
+                        logger.info(f"Cleanup: Released {released} labor account locks for ENV-{env_id}")
+                logger.info(f"Cleanup: Reset stale local status for ENV-{env_id}")
 
     def _build_row_data(
         self, pid: str, remote_map: dict, local_map: dict

@@ -439,6 +439,18 @@ class LaborAccountRepository(BaseRepository):
         rows = self._execute("SELECT * FROM labor_accounts WHERE status = 'active'")
         return [dict(row) for row in rows]
 
+    def force_unlock_all(self) -> int:
+        """强制释放所有账号锁定。
+        
+        仅在程序启动时调用，用于清理上次运行留下的残留锁定。
+        """
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE labor_accounts SET locked_by_env_id = NULL, locked_at = NULL WHERE locked_by_env_id IS NOT NULL"
+            )
+            conn.commit()
+            return cursor.rowcount
+
 
 class ProxyIPRepository(BaseRepository):
     """Repository for proxy_ips table."""
@@ -648,6 +660,20 @@ class EnvironmentRepository(BaseRepository):
     def get_running_count(self) -> int:
         """Get count of running environments."""
         return self.count("status = 'running'")
+
+    def reset_all_to_idle(self) -> int:
+        """重置所有环境为 idle 状态。
+        
+        并清理连接信息，仅在启动时调用。
+        """
+        with get_connection(self.db_path) as conn:
+            cursor = conn.execute(
+                """UPDATE environments 
+                   SET status = 'idle', ws_endpoint = NULL, http_endpoint = NULL, pid = NULL 
+                   WHERE status != 'idle'"""
+            )
+            conn.commit()
+            return cursor.rowcount
 
 
 class TaskLogRepository(BaseRepository):
