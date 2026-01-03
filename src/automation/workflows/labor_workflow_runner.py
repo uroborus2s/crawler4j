@@ -45,7 +45,8 @@ class LaborWorkflowRunner:
         # 初始化各工作流模块
         self.login_workflow = LaborLoginWorkflow(page)
         self.claim_workflow = LaborClaimTaskWorkflow(page)
-        self.search_workflow = CtripSearchWorkflow(page)
+        # 传递 claim_workflow 给 search_workflow，用于匹配失败时废弃题目
+        self.search_workflow = CtripSearchWorkflow(page, claim_workflow=self.claim_workflow)
         self.submit_workflow = LaborSubmitWorkflow(page)
         self.labor_repo = LaborAccountRepository()
 
@@ -195,7 +196,20 @@ class LaborWorkflowRunner:
                 # 3. 根据搜索结果决定处理方式
                 submit_success = False
 
-                if hotel_data is None or hotel_data == "搜索不到":
+                if hotel_data == "废弃重领":
+                    # 酒店名称匹配失败，已在 search_workflow 中完成废弃
+                    # 更新废弃统计后继续领取下一题
+                    logger.info("酒店匹配验证失败，已废弃题目，继续领取下一题...")
+                    if self.current_labor_account and self.current_labor_account.id:
+                        try:
+                            self.labor_repo.update_stats(
+                                id=self.current_labor_account.id, discarded=1
+                            )
+                        except Exception as db_e:
+                            logger.warning(f"更新废弃统计失败: {db_e}")
+                    continue  # 直接进入下一轮循环领取新题目
+
+                elif hotel_data is None or hotel_data == "搜索不到":
                     # 搜索失败或搜索不到 -> 废弃题目并重新领题
                     reason = "携程搜索失败" if hotel_data is None else "携程搜索不到该酒店"
                     logger.warning(f"❌ {reason}，执行废弃流程...")

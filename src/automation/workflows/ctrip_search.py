@@ -7,12 +7,17 @@ Uses Playwright route interception for reliable data capture.
 import asyncio
 import json
 import random
+from typing import TYPE_CHECKING
 
 from playwright.async_api import Page, Route
 
 from src.automation.workflows.base import BaseWorkflow
 from src.core.models.labor_task import LaborTask
+from src.utils.hotel_matcher import HotelMatcher, HotelMatch
 from src.utils.logger import logger
+
+if TYPE_CHECKING:
+    from src.automation.workflows.labor_claim_task import LaborClaimTaskWorkflow
 
 
 class CtripSearchWorkflow(BaseWorkflow):
@@ -28,12 +33,19 @@ class CtripSearchWorkflow(BaseWorkflow):
     # 拦截 URL 模式
     INTERCEPT_PATTERN = "**/*getHotelRoomListInland*"
 
-    def __init__(self, page: Page):
+    # 搜索 API 拦截模式 (用于验证搜索结果)
+    SEARCH_API_PATTERN = "**/*restapi/soa2/30668/search*"
+    SEARCH_API_KEYWORD = "restapi/soa2/30668/search"
+
+    def __init__(self, page: Page, claim_workflow: "LaborClaimTaskWorkflow | None" = None):
         super().__init__(page)
         self.captured_data: dict | None = None
+        self.search_result_data: dict | None = None  # 搜索 API 响应数据
         self._route_handler_set = False
+        self._search_route_handler_set = False
         self._last_mouse_pos = (0, 0)
         self.account_blacklisted = False  # 账号被封标志位
+        self.claim_workflow = claim_workflow  # 用于废弃题目
 
     async def _setup_route_handler(self):
         """设置路由拦截器，捕获酒店房型 API 响应。
@@ -91,6 +103,48 @@ class CtripSearchWorkflow(BaseWorkflow):
                 self._route_handler_set = False
             except Exception as e:
                 logger.debug(f"移除路由处理器失败: {e}")
+
+    async def _setup_search_route_handler(self):
+        """设置搜索 API 路由拦截器，用于验证搜索结果。
+
+        拦截 https://m.ctrip.com/restapi/soa2/30668/search API 响应，
+        获取酒店列表数据用于名称匹配验证。
+        """
+        if self._search_route_handler_set:
+            return
+
+        async def handle_search_route(route: Route):
+            """拦截并记录搜索 API 响应。"""
+            try:
+                response = await route.fetch()
+                body = await response.body()
+
+                if self.SEARCH_API_KEYWORD in route.request.url:
+                    try:
+                        data = json.loads(body.decode("utf-8"))
+                        self.search_result_data = data
+                        logger.info(f"✅ 捕获到搜索API响应，大小: {len(body)} bytes")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"搜索 API 响应 JSON 解析失败: {e}")
+
+                await route.fulfill(response=response)
+
+            except Exception as e:
+                logger.error(f"搜索路由处理异常: {e}")
+                await route.continue_()
+
+        await self.page.route(self.SEARCH_API_PATTERN, handle_search_route)
+        self._search_route_handler_set = True
+        logger.debug("已设置搜索 API 响应拦截器")
+
+    async def _remove_search_route_handler(self):
+        """移除搜索 API 路由拦截器。"""
+        if self._search_route_handler_set:
+            try:
+                await self.page.unroute(self.SEARCH_API_PATTERN)
+                self._search_route_handler_set = False
+            except Exception as e:
+                logger.debug(f"移除搜索路由处理器失败: {e}")
 
     # ==================== 人工行为模拟方法 ====================
     # 复用自 ctrip_login.py 中已验证的方法
@@ -464,8 +518,6 @@ class CtripSearchWorkflow(BaseWorkflow):
 
     async def _navigate_to_detail_page(self) -> Page | None:
         """点击搜索按钮并等待详情页打开。"""
-        import re
-
         search_button = self.page.locator("#search_button_global, .pc_home-search")
         try:
             async with self.page.expect_popup(timeout=60000) as popup_info:
@@ -538,36 +590,120 @@ class CtripSearchWorkflow(BaseWorkflow):
 
         return True
 
+    async def _verify_search_result(
+        self,
+        task: LaborTask,
+        similarity_threshold: float = 0.90
+    ) -> HotelMatch | None:
+        """验证搜索结果中是否有匹配的酒店。
+
+        从捕获的搜索 API 响应中提取酒店列表，
+        使用4级匹配策略验证酒店名称相似度。
+
+        Args:
+            task: 任务信息，包含目标酒店名称和城市
+            similarity_threshold: 相似度阈值，默认 0.90 (90%)
+
+        Returns:
+            匹配到的酒店信息，如无匹配返回 None
+        """
+        if not self.search_result_data:
+            logger.warning("未捕获到搜索 API 响应数据")
+            return None
+
+        try:
+            # 解析搜索结果中的酒店列表
+            # 根据 content.js 分析，API 返回格式为 {data: [...]}
+            data = self.search_result_data.get('data', [])
+
+            if not isinstance(data, list):
+                logger.warning("搜索结果格式非预期")
+                return None
+
+            # 过滤酒店类型的结果
+            hotels = [item for item in data if item.get('type') == 'hotel']
+
+            if not hotels:
+                logger.warning("搜索结果中无酒店数据")
+                return None
+
+            logger.info(f"搜索结果包含 {len(hotels)} 个酒店")
+
+            # 使用匹配器验证
+            match = HotelMatcher.match_hotels(
+                hotels=hotels,
+                keyword=task.hotel_name,
+                city_name=task.city_name,
+                similarity_threshold=similarity_threshold
+            )
+
+            if match:
+                logger.info(
+                    f"✅ 酒店匹配成功: {match.hotel_name} "
+                    f"(相似度: {match.similarity:.2%}, 类型: {match.match_type})"
+                )
+            else:
+                logger.warning(
+                    f"❌ 未找到匹配酒店 (阈值: {similarity_threshold:.0%})"
+                )
+
+            return match
+
+        except Exception as e:
+            logger.error(f"验证搜索结果异常: {e}")
+            return None
+
+    async def _wait_for_search_result(self, timeout: float = 10.0) -> bool:
+        """等待搜索 API 响应捕获完成。
+
+        Args:
+            timeout: 最大等待时间（秒）
+
+        Returns:
+            True if search result captured within timeout.
+        """
+        start_time = asyncio.get_event_loop().time()
+        check_interval = 0.3
+
+        while asyncio.get_event_loop().time() - start_time < timeout:
+            if self.search_result_data is not None:
+                return True
+            await asyncio.sleep(check_interval)
+
+        return False
+
     async def search_and_capture(self, task: LaborTask) -> dict | str | None:
         """从首页搜索酒店并采集数据。
-        包含重试机制：
-        1. 首页搜索失败 -> 刷新重试
-        2. 进详情页失败 -> 刷新重试
-        3. 采集超时 -> 刷新重试
-        4. URL 不匹配详情页格式 -> 视为搜索不到（直接提交）
+
+        包含酒店名称匹配验证和重试机制：
+        1. 首页搜索 -> 拦截搜索 API 响应
+        2. 验证酒店名称相似度 (>=90%)
+        3. 如不匹配 -> 废弃题目并返回 None
+        4. 如匹配 -> 进入详情页采集数据
+        5. URL 不匹配详情页格式 -> 视为搜索不到（直接提交）
         """
         import re
         max_retries = 3
-        # 增加超时时间 (用户请求 3)
-        capture_timeout = 45.0 
+        capture_timeout = 45.0
+        similarity_threshold = 0.85  # 90% 相似度阈值
 
         original_page = self.page
-        
-        # 详情页正则
         detail_url_pattern = re.compile(r"https://hotels\.ctrip\.com/hotels/\d+\.html\?cityid=\d+")
 
         for attempt in range(max_retries):
             new_pages = []
             try:
                 logger.info(f"🔄 开始第 {attempt + 1}/{max_retries} 次搜索尝试: {task.hotel_name}")
-                
+
                 # 1. 开启新标签页
                 new_page = await self.page.context.new_page()
                 new_pages.append(new_page)
                 self.page = new_page
 
-                # 2. 设置路由拦截
+                # 2. 设置路由拦截（同时拦截搜索 API 和房型 API）
                 await self._setup_route_handler()
+                await self._setup_search_route_handler()
+                self.search_result_data = None  # 重置搜索结果
 
                 # 3. 执行首页搜索
                 if not await self._perform_homepage_search(task.hotel_name):
@@ -576,53 +712,83 @@ class CtripSearchWorkflow(BaseWorkflow):
                     self.page = original_page
                     continue
 
-                # 4. 导航到详情页
-                logger.info("点击搜索，等待酒店详情页打开...")
+                # 4. 点击搜索并等待详情页打开（同时搜索 API 会被触发）
+                logger.info("点击搜索，等待搜索结果...")
                 detail_page = await self._navigate_to_detail_page()
-                
+
+                # 注意：点击搜索后详情页会自动打开（popup），需要将其加入待清理列表
+                if detail_page:
+                    new_pages.append(detail_page)
+
+                # 等待搜索 API 响应（最多等待10秒）
+                await self._wait_for_search_result(timeout=10.0)
+
+                # 5. 验证酒店名称匹配度
+                match_result = await self._verify_search_result(
+                    task, similarity_threshold=similarity_threshold
+                )
+
+                if not match_result:
+                    # 未匹配到符合条件的酒店 -> 直接关闭所有页面，废弃题目
+                    logger.warning(f"搜索结果中未找到匹配酒店 (相似度 >= {similarity_threshold:.0%})")
+                    logger.info("🗑️ 不匹配，关闭携程页面并执行废弃题目流程...")
+
+                    # 先关闭携程页面（包括详情页和首页）
+                    await self._simulate_human_browsing(duration=random.uniform(0.5, 1.5))
+                    await self._cleanup_pages(new_pages)
+                    self.page = original_page
+
+                    if self.claim_workflow:
+                        # 调用废弃题目逻辑
+                        discard_success = await self.claim_workflow.discard_task(
+                            reason_text="携程搜索结果不匹配"
+                        )
+                        if discard_success:
+                            logger.info("✅ 废弃题目成功，将重新领取新题目")
+                        else:
+                            logger.warning("废弃题目失败")
+
+                        # 返回特殊标记，让调用方知道需要重新领题
+                        return "废弃重领"
+                    else:
+                        # 无 claim_workflow，按原逻辑返回 None
+                        return None
+
+                # 匹配成功，继续后续流程
+                logger.info(f"酒店匹配验证通过，继续采集流程...")
+
                 if not detail_page:
                     logger.warning("进入详情页失败，准备重试...")
                     await self._cleanup_pages(new_pages)
                     self.page = original_page
                     continue
 
-                new_pages.append(detail_page)
+                # 设置当前页面为详情页，继续后续采集
                 self.page = detail_page
                 self._route_handler_set = False
+                self._search_route_handler_set = False
                 await self._setup_route_handler()
 
-                # Check 4: URL 格式检查 (用户核心需求)
+                # URL 格式检查
                 current_url = detail_page.url
-                if not detail_url_pattern.match(current_url) and "hotels/list" not in current_url:
-                     # 如果既不是详情页也不是明确的列表页，可能是不确定的中间态，但也视为搜索不到?
-                     # 或者用户之前的逻辑是: if regex match -> success, elif list -> not found, else -> warning.
-                     # 现在的逻辑统一为: 只要不匹配 regex 且不是预期内的其他情况，都视为搜索不到?
-                     # 让我们恢复用户之前请求的逻辑: regex 匹配 -> 继续. List -> 搜索不到.
-                     pass
-
                 if not detail_url_pattern.match(current_url):
                     logger.warning(f"页面URL不匹配详情页格式 ({current_url[:100]})，视为搜索不到")
-                    logger.info("搜索不到，模拟浏览后关闭...")
                     await self._simulate_human_browsing(duration=random.uniform(1.0, 3.5))
                     await self._cleanup_pages(new_pages)
                     self.page = original_page
                     return "搜索不到"
 
-
-                # 5. 选择日期
+                # 6. 选择日期
                 logger.info(f"正在详情页修改日期: {task.checkin} ~ {task.checkout}")
                 await self._select_dates_on_detail_page(task.checkin, task.checkout)
 
-                # 6. 等待数据捕获
+                # 7. 等待数据捕获
                 logger.info(f"📡 等待 getHotelRoomListInland 接口响应 (超时: {capture_timeout}s)...")
                 captured = await self._wait_for_data_capture(timeout=capture_timeout)
 
                 if captured and self.captured_data:
                     if isinstance(self.captured_data, dict):
-                        logger.info(
-                            f"✅ 成功捕获房型数据，尝试: {attempt+1}"
-                        )
-                        logger.info("采集成功，模拟浏览后关闭...")
+                        logger.info(f"✅ 成功捕获房型数据，尝试: {attempt+1}")
                         await self._simulate_human_browsing(duration=random.uniform(2.5, 4.5))
                         await self._cleanup_pages(new_pages)
                         self.page = original_page
@@ -633,20 +799,21 @@ class CtripSearchWorkflow(BaseWorkflow):
 
             except Exception as e:
                 logger.error(f"搜索尝试 {attempt+1} 异常: {e}")
-            
+
             # 本次尝试失败，清理并重试
             await self._cleanup_pages(new_pages)
             self.page = original_page
             self._route_handler_set = False
+            self._search_route_handler_set = False
             self.captured_data = None
-            
+            self.search_result_data = None
+
             if attempt < max_retries - 1:
                 wait_time = random.uniform(2, 4)
                 logger.info(f"等待 {wait_time:.1f} 秒后进行下一次尝试...")
                 await asyncio.sleep(wait_time)
 
         logger.error("❌ 所有重试均失败")
-        # Retry exhausted -> Return None to let runner handle it (skip task)
         return None
 
     async def _cleanup_pages(self, pages: list[Page]):
