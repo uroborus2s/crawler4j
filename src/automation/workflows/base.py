@@ -47,12 +47,34 @@ class BaseWorkflow:
             return False
 
     async def screenshot(self, name: str):
-        """Take a screenshot for debugging."""
+        """Take a screenshot for debugging.
+
+        注意: 截图功能仅用于调试，生产环境中可禁用或跳过。
+        """
+        # 生产环境中跳过截图，避免文件系统错误
+        import os
+        if os.environ.get("DISABLE_SCREENSHOTS", "").lower() in ("1", "true", "yes"):
+            logger.debug(f"截图已禁用，跳过: {name}")
+            return
+
         try:
             from pathlib import Path
+            import tempfile
 
-            path = Path("screenshots")
-            path.mkdir(exist_ok=True)
+            # 优先使用临时目录，避免只读文件系统问题
+            screenshots_dir = os.environ.get("SCREENSHOTS_DIR")
+            if screenshots_dir:
+                path = Path(screenshots_dir)
+            else:
+                # 尝试在当前目录创建，失败则使用临时目录
+                path = Path("screenshots")
+                try:
+                    path.mkdir(exist_ok=True)
+                except OSError:
+                    path = Path(tempfile.gettempdir()) / "crawler_screenshots"
+                    path.mkdir(exist_ok=True)
+
             await self.page.screenshot(path=str(path / f"{name}.png"))
+            logger.debug(f"截图已保存: {path / f'{name}.png'}")
         except Exception as e:
-            logger.warning(f"截图失败: {e}")
+            logger.debug(f"截图跳过: {e}")
