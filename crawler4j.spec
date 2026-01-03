@@ -7,6 +7,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
+        ('modules', 'modules'),  # 内置模块
         ('src/ui/styles/dark_theme.qss', 'src/ui/styles'),
         ('src/assets/icon.png', 'src/assets'),
     ],

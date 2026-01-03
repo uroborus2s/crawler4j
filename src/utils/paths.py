@@ -3,6 +3,11 @@ import sys
 from pathlib import Path
 
 
+def is_frozen() -> bool:
+    """判断是否为打包后的环境"""
+    return getattr(sys, 'frozen', False)
+
+
 def get_resource_path(relative_path: str) -> str:
     """Get absolute path to resource, works for dev and for PyInstaller bundle.
 
@@ -42,3 +47,24 @@ def get_app_data_dir() -> Path:
 def get_db_path() -> Path:
     """Get the database path in the application data directory."""
     return get_app_data_dir() / "crawler.db"
+
+
+def get_builtin_modules_path() -> Path:
+    """获取内置模块目录
+    
+    内置模块随应用打包分发，位于：
+    - 打包后: _MEIPASS/modules
+    - 开发时: 项目根目录/modules
+    """
+    return Path(get_resource_path("modules"))
+
+
+def get_user_modules_path() -> Path:
+    """获取用户模块目录
+    
+    用户安装的外部模块存放位置。
+    """
+    modules_dir = get_app_data_dir() / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+    return modules_dir
+
