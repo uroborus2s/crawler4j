@@ -3,14 +3,14 @@
 Provides left-side navigation for the main window.
 """
 
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QPushButton,
     QLabel,
-    QSpacerItem,
+    QPushButton,
     QSizePolicy,
+    QSpacerItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 
@@ -29,7 +29,9 @@ class Sidebar(QWidget):
         ("✈️", "携程账号", 1),
         ("👷", "劳保账号", 2),
         ("🌐", "环境管理", 3),
-        ("⚙️", "设置", 4),
+        ("📋", "任务配置", 4),
+        ("🔗", "任务编排", 5),
+        ("⚙️", "设置", 6),
     ]
 
     def __init__(self, parent=None):

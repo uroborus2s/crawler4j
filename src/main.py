@@ -19,6 +19,8 @@ from src.ui.pages.dashboard_page import DashboardPage
 from src.ui.pages.environments_page import EnvironmentsPage
 from src.ui.pages.labor_accounts_page import LaborAccountsPage
 from src.ui.pages.settings_page import SettingsPage
+from src.ui.pages.task_config_page import TaskConfigPage
+from src.ui.pages.task_flow_page import TaskFlowPage
 from src.utils.init_db import init_database
 from src.utils.paths import get_resource_path
 
@@ -50,10 +52,11 @@ def main():
     window = MainWindow()
 
     dashboard = DashboardPage()
-
     ctrip_page = CtripAccountsPage()
     labor_page = LaborAccountsPage()
     env_page = EnvironmentsPage()
+    task_config_page = TaskConfigPage()
+    task_flow_page = TaskFlowPage()
     settings_page = SettingsPage()
 
     # Add pages to window (order must match Sidebar.NAV_ITEMS)
@@ -61,6 +64,8 @@ def main():
     window.add_page(ctrip_page)
     window.add_page(labor_page)
     window.add_page(env_page)
+    window.add_page(task_config_page)
+    window.add_page(task_flow_page)
     window.add_page(settings_page)
 
     # Show window
