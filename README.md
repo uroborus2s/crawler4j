@@ -76,17 +76,31 @@ uv run python -m src.main
 
 ## 任务脚本开发指南
 
-### 1. 创建脚本
+### 1. 创建脚本项目
+
+只需安装了 `uv`，无需克隆本项目即可开始开发：
 
 ```bash
-# 一键创建脚本
-uv run crawler4j new-script my_task
+# 全局快速初始化（推荐）
+uvx crawler4j-sdk init my_scripts
 
-# 初始化独立项目（团队协作）
-uv run crawler4j init-project my_scripts
+# 或者在现有项目中安装 SDK 后使用
+uv run crawler4j init my_scripts
 ```
 
-### 2. 脚本结构
+### 2. 创建脚本任务
+
+在项目目录下，使用交互式命令创建：
+
+```bash
+# 交互式引导创建（推荐）
+uv run crawler4j add
+
+# 快速非交互式创建
+uv run crawler4j new my_task
+```
+
+### 3. 脚本结构
 
 ```python
 from crawler4j_sdk import TaskScript, TaskContext, TaskResult
@@ -120,7 +134,7 @@ class MyTask(TaskScript):
         await ctx.screenshot("error")
 ```
 
-### 3. SDK API
+### 4. SDK API
 
 #### TaskContext 属性
 
@@ -149,36 +163,31 @@ TaskResult.ok(tasks_completed=1, message="成功")
 TaskResult.fail(message="失败", error="详情")
 ```
 
-### 4. 调试脚本
+### 5. 调试脚本
 
-1. 修改 `scripts/debug_runner.py` 中的 `SCRIPT_NAME`
-2. VSCode 按 F5 启动调试
-3. 可设置断点、单步执行
+1. 在脚本项目根目录下找到 `debug_runner.py`
+2. 修改其中的 `SCRIPT_NAME` 为你的脚本文件名（如 `my_task`）
+3. 在 VSCode 中按 F5 启动调试
 
-### 5. 部署脚本
+### 6. 部署脚本
 
-1. 运行应用
-2. 「任务配置」→「📁 添加脚本目录」
-3. 选择脚本目录
+1. 启动 Crawler4j 主应用
+2. 进入「任务配置」页面 → 点击「📁 添加脚本目录」
+3. 选择你的脚本项目下的 `tasks/` 目录
 4. 点击「🔄 重载脚本」
 
 ---
 
-## CLI 命令
+## CLI 命令参考
 
-```bash
-# 创建新脚本
-uv run crawler4j new-script <name> [-o 输出目录]
+Crawler4j CLI 工具现已集成在 SDK 中，支持全局 (`uvx`) 和项目内 (`uv run`) 执行。
 
-# 初始化独立项目
-uv run crawler4j init-project <name>
-
-# 重载脚本
-uv run crawler4j reload-scripts
-
-# 列出已加载脚本
-uv run crawler4j list-scripts
-```
+| 命令 | 完整示例 | 说明 |
+|------|----------|------|
+| **init** | `uvx crawler4j-sdk init <name>` | 初始化一个新的脚本项目 |
+| **add** | `uv run crawler4j add` | 交互式创建一个新任务脚本 |
+| **new** | `uv run crawler4j new <name>` | 快速创建一个新任务脚本（非交互） |
+| **list** | `uv run crawler4j list` | 列出当前项目下的所有脚本 |
 
 ---
 
@@ -189,42 +198,39 @@ uv run crawler4j list-scripts
 ```
 crawler4j/
 ├── src/
-│   ├── automation/workflows/   # 平台工作流
-│   ├── core/                   # 核心业务
-│   ├── plugins/                # 插件系统
-│   ├── ui/                     # GUI组件
-│   ├── cli/                    # CLI工具
+│   ├── automation/      # 自动化核心逻辑
+│   ├── core/            # 核心业务
+│   ├── plugins/         # 插件系统（脚本管理等）
+│   ├── ui/              # GUI页面
 │   └── main.py
-├── crawler4j_sdk/              # SDK包
-├── scripts/tasks/              # 任务脚本
+├── crawler4j_sdk/       # SDK 源码与 CLI 实现
+│   └── cli/             # 命令行工具实现
+├── scripts/tasks/       # 框架内置任务脚本
 └── pyproject.toml
 ```
 
-### 开发环境
+### 开发环境配置
 
 ```bash
-# 安装开发依赖
+# 1. 安装开发依赖
 uv sync --group dev
 
-# 运行测试
+# 2. 运行测试
 uv run pytest
 
-# 代码检查
-uv run ruff check src/
+# 3. 代码检查
+uv run ruff check .
 ```
 
 ### 打包发布
 
-#### 打包应用
+#### 打包 GUI 应用
 
 ```bash
 uv run pyinstaller crawler4j.spec --clean
 ```
 
-- macOS: `dist/Crawler4j.app`
-- Windows: `dist/Crawler4j/Crawler4j.exe`
-
-#### 发布SDK到PyPI
+#### 发布 SDK
 
 ```bash
 cd crawler4j_sdk
@@ -232,12 +238,14 @@ uv build
 uv publish
 ```
 
-### 提交代码
+### 分支管理与提交
+
+本仓库启用 `feature/task-plugin-system` 分支进行功能迭代。提交请遵循以下建议：
 
 ```bash
 git add -A
-git commit -m "feat: 功能描述"
-git push origin feature/xxx
+git commit -m "feat: [功能模块] 简短描述"
+git push origin feature/task-plugin-system
 ```
 
 ---
@@ -247,6 +255,6 @@ git push origin feature/xxx
 > [!CAUTION]
 > 本工具仅供学习和研究自动化技术使用。请遵守相关平台政策和法律法规。
 
-- 数据存储在本地SQLite数据库 `crawler.db`
+- 数据存储在本地 SQLite 数据库 `crawler.db`
 - 定期清理日志和浏览器配置
-- 遵守目标网站 `robots.txt` 规则
+- 尊重并遵守目标网站的 `robots.txt` 规则
