@@ -48,23 +48,26 @@ class LaborSubmitWorkflow(BaseWorkflow):
         except Exception:
             return None
 
-    async def _fill_data(self, data: dict | str) -> bool:
+    async def _fill_data(self, data: dict) -> bool:
         """将数据填入文本框。
 
         Args:
-            data: 要填入的数据（字典或 JSON 字符串）
+            data: 要填入的数据（必须是字典类型）
 
         Returns:
             True if filled successfully.
         """
         try:
-            # 转换为 JSON 字符串（使用紧凑格式减少大小）
-            if isinstance(data, dict):
-                json_str = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-            else:
-                json_str = str(data)
+            # 验证数据类型：只接受 dict 类型
+            if not isinstance(data, dict):
+                logger.error(f"❌ 数据类型错误: 期望 dict，实际为 {type(data).__name__}")
+                return False
 
-            logger.info(f"准备填入数据，大小: {len(json_str)} bytes")
+            # 转换为 JSON 字符串（使用紧凑格式减少大小）
+            json_str = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            original_length = len(json_str)
+
+            logger.info(f"准备填入数据，大小: {original_length} bytes")
 
             # 查找文本框
             textarea = await self._find_visible_textarea()
@@ -77,15 +80,13 @@ class LaborSubmitWorkflow(BaseWorkflow):
             await asyncio.sleep(0.1)
 
             # 优化策略：优先使用 JS 注入（最快），兼容 React
-            # 原有的 logic 针对 >5000 使用 slowly type (fake clipboard) 是导致慢的原因
-            # _fill_smart 内部实际上包含了 (JS Setter -> Playwright Fill -> Chunked Type) 的完整降级策略
             success = await self._fill_smart(textarea, json_str)
-            
+
             if not success:
-               # 如果都失败了，最后尝试一次清空 + 原生 fill (虽然 _fill_smart 已经试过 fill)
+                # 如果都失败了，最后尝试一次清空 + 原生 fill
                 logger.warning("智能填入失败，尝试兜底 fill 方法")
                 await textarea.fill("")
-                await textarea.fill(json_str) 
+                await textarea.fill(json_str)
                 success = True
 
             if not success:
@@ -96,24 +97,63 @@ class LaborSubmitWorkflow(BaseWorkflow):
             await textarea.dispatch_event("change")
             await asyncio.sleep(0.2)
 
-            logger.info("数据已填入文本框")
-            # 减少截图频率，仅在 debug 开启时截图，或者依靠 success 截图
-            # await self.screenshot("labor_data_filled") 
+            # 验证填入数据的完整性
+            filled_value = await textarea.evaluate("el => el.value")
+            if not await self._validate_filled_json(filled_value, original_length):
+                logger.error("❌ 填入数据验证失败，数据不完整或格式错误")
+                return False
+
+            logger.info("✅ 数据已填入文本框并验证通过")
             return True
 
         except Exception as e:
             logger.error(f"填入数据失败: {e}")
             return False
 
+    async def _validate_filled_json(self, filled_value: str, original_length: int) -> bool:
+        """验证填入的 JSON 数据是否完整有效。
+
+        Args:
+            filled_value: 从 textarea 读取的值
+            original_length: 原始 JSON 字符串长度
+
+        Returns:
+            True if JSON is valid and complete.
+        """
+        try:
+            # 1. 长度检查：必须达到原始长度的 99%（几乎完全匹配）
+            if len(filled_value) < original_length * 0.99:
+                logger.warning(
+                    f"数据长度不足: 填入 {len(filled_value)}, 原始 {original_length}, "
+                    f"完成率 {len(filled_value) / original_length * 100:.1f}%"
+                )
+                return False
+
+            # 2. JSON 格式验证：尝试解析
+            json.loads(filled_value)
+            logger.debug("JSON 格式验证通过")
+            return True
+
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON 格式验证失败: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"数据验证异常: {e}")
+            return False
+
     async def _fill_smart(
         self, textarea, json_str: str, chunk_size: int = 5000
     ) -> bool:
-        """智能填入数据，优先使用 JS 注入，兼容 React 组件。"""
-        try:
-            logger.info(f"使用 JavaScript 设置值，总长度: {len(json_str)}")
+        """智能填入数据，优先使用 JS 注入，兼容 React 组件。
 
-            # 对于 React 组件，需要使用 native setter 并触发 React 的合成事件
-            # 这是因为 React 会覆盖 input/change 事件
+        注意：此方法仅负责填入数据，完整性验证由 _fill_data 方法的
+        _validate_filled_json 统一处理。
+        """
+        try:
+            expected_length = len(json_str)
+            logger.info(f"使用 JavaScript 设置值，总长度: {expected_length}")
+
+            # 方法1: React 兼容的 native setter 方式
             fill_result = await textarea.evaluate(
                 """
                 (el, value) => {
@@ -122,14 +162,14 @@ class LaborSubmitWorkflow(BaseWorkflow):
                         window.HTMLTextAreaElement.prototype, 'value'
                     ).set;
                     nativeInputValueSetter.call(el, value);
-                    
+
                     // 触发 React 合成事件
                     const inputEvent = new Event('input', { bubbles: true, cancelable: true });
                     el.dispatchEvent(inputEvent);
-                    
+
                     const changeEvent = new Event('change', { bubbles: true, cancelable: true });
                     el.dispatchEvent(changeEvent);
-                    
+
                     return el.value.length;
                 }
             """,
@@ -138,22 +178,30 @@ class LaborSubmitWorkflow(BaseWorkflow):
 
             await asyncio.sleep(0.3)
 
-            # 验证填入是否成功
-            if fill_result and fill_result >= len(json_str) * 0.9:  # 允许 10% 误差
+            # 严格验证：必须完全匹配长度
+            if fill_result and fill_result == expected_length:
                 logger.info(f"通过 React 兼容方式设置值成功，长度: {fill_result}")
                 return True
+            elif fill_result:
+                logger.warning(
+                    f"JS 方式长度不匹配: 期望 {expected_length}, 实际 {fill_result}"
+                )
 
-            # 备用方案：使用 Playwright 原生 fill
+            # 方法2: Playwright 原生 fill
             logger.debug("JavaScript 方式失败，尝试 Playwright fill")
             await textarea.fill(json_str)
             await asyncio.sleep(0.2)
 
             value = await textarea.evaluate("el => el.value")
-            if len(value) >= len(json_str) * 0.9:
+            if len(value) == expected_length:
                 logger.info(f"通过 Playwright fill 成功，长度: {len(value)}")
                 return True
+            elif len(value) > 0:
+                logger.warning(
+                    f"Playwright fill 长度不匹配: 期望 {expected_length}, 实际 {len(value)}"
+                )
 
-            # 最后备用：分块 type 输入
+            # 方法3: 分块 type 输入（最后手段）
             logger.debug("fill 方式失败，尝试分块 type 输入")
             await textarea.click()
             await self.page.keyboard.press("Meta+a")  # 全选清空
@@ -167,8 +215,10 @@ class LaborSubmitWorkflow(BaseWorkflow):
 
             await asyncio.sleep(0.2)
             value = await textarea.evaluate("el => el.value")
-            logger.info(f"分块输入完成，长度: {len(value)}")
-            return len(value) > 0
+            logger.info(f"分块输入完成，长度: {len(value)} (期望: {expected_length})")
+
+            # 分块输入允许略微误差（可能有编码问题），但仍需达到 99%
+            return len(value) >= expected_length * 0.99
 
         except Exception as e:
             logger.error(f"填入数据失败: {e}")
@@ -313,17 +363,25 @@ class LaborSubmitWorkflow(BaseWorkflow):
             logger.error(f"提交搜索不到失败: {e}")
             return False
 
-    async def submit_result(self, data: dict | str | None) -> bool:
-        """提交任务结果。"""
+    async def submit_result(self, data: dict) -> bool:
+        """提交任务结果。
+
+        Args:
+            data: 必须是有效的 dict 类型数据（从携程 API 捕获的原始数据）
+
+        Returns:
+            True if submission successful.
+        """
         # 0. 确保页面处于前台
         try:
             await self.page.bring_to_front()
         except Exception:
             pass
 
-        if data is None:
-            logger.info("数据为空，默认提交 '搜索不到'")
-            data = "搜索不到"
+        # 严格验证：只接受 dict 类型
+        if not isinstance(data, dict):
+            logger.error(f"❌ submit_result 只接受 dict 类型数据，收到: {type(data).__name__}")
+            return False
 
         logger.info("开始提交任务结果...")
 
@@ -332,8 +390,9 @@ class LaborSubmitWorkflow(BaseWorkflow):
             await self._close_all_popups("确定")
             await asyncio.sleep(0.5)
 
-            # 2. 填入数据
+            # 2. 填入数据（内部会验证 JSON 完整性）
             if not await self._fill_data(data):
+                logger.error("❌ 数据填入失败，取消提交")
                 return False
 
             # 3. 等待一下再提交（模拟人类行为）

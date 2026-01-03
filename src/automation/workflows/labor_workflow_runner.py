@@ -195,10 +195,11 @@ class LaborWorkflowRunner:
                 # 3. 根据搜索结果决定处理方式
                 submit_success = False
 
-                if hotel_data is None:
-                    # 完全搜索失败 -> 废弃题目并重新领题
-                    logger.warning("❌ 搜索完全失败，执行废弃流程...")
-                    if await self.claim_workflow.discard_task(reason_text="携程搜索失败"):
+                if hotel_data is None or hotel_data == "搜索不到":
+                    # 搜索失败或搜索不到 -> 废弃题目并重新领题
+                    reason = "携程搜索失败" if hotel_data is None else "携程搜索不到该酒店"
+                    logger.warning(f"❌ {reason}，执行废弃流程...")
+                    if await self.claim_workflow.discard_task(reason_text=reason):
                         logger.info("✅ 废弃成功，继续领取下一题")
                         # 更新废弃统计
                         if self.current_labor_account and self.current_labor_account.id:
@@ -210,15 +211,16 @@ class LaborWorkflowRunner:
                                 logger.warning(f"更新废弃统计失败: {db_e}")
                         continue  # 跳过本次提交，直接进入下一轮循环
                     else:
-                        logger.error("废弃失败，尝试继续...")
+                        logger.error("废弃失败，跳过本次任务...")
+                        continue  # 废弃失败也跳过，避免提交无效数据
 
-                elif hotel_data == "搜索不到":
-                    # URL 不匹配详情页 -> 提交"搜索不到"
-                    logger.info("📝 提交搜索不到结果...")
-                    submit_success = await self.submit_workflow.submit_not_found()
-                else:
+                elif isinstance(hotel_data, dict):
                     # 正常数据 -> 提交结果
                     submit_success = await self.submit_workflow.submit_result(hotel_data)
+                else:
+                    # 未知数据类型，跳过
+                    logger.error(f"❌ 未知的数据类型: {type(hotel_data)}，跳过本次任务")
+                    continue
 
                 if submit_success:
                     # 同步到数据库
