@@ -33,6 +33,7 @@ class CtripSearchWorkflow(BaseWorkflow):
         self.captured_data: dict | None = None
         self._route_handler_set = False
         self._last_mouse_pos = (0, 0)
+        self.account_blacklisted = False  # 账号被封标志位
 
     async def _setup_route_handler(self):
         """设置路由拦截器，捕获酒店房型 API 响应。
@@ -53,8 +54,19 @@ class CtripSearchWorkflow(BaseWorkflow):
                 # 检查是否是目标 API
                 if self.TARGET_API_KEYWORD in route.request.url:
                     try:
-                        self.captured_data = json.loads(body.decode("utf-8"))
-                        logger.info(f"✅ 捕获到酒店房型数据，大小: {len(body)} bytes")
+                        data = json.loads(body.decode("utf-8"))
+                        self.captured_data = data
+
+                        # 检测账号被封 (htlSpiderActionErrorCode: 203)
+                        if isinstance(data, dict):
+                            error_code = data.get("data", {}).get("htlSpiderActionErrorCode")
+                            if error_code == 203:
+                                logger.error("🚫 检测到 htlSpiderActionErrorCode: 203，携程账号被封！")
+                                self.account_blacklisted = True
+                            else:
+                                logger.info(f"✅ 捕获到酒店房型数据，大小: {len(body)} bytes")
+                        else:
+                            logger.info(f"✅ 捕获到酒店房型数据，大小: {len(body)} bytes")
                     except json.JSONDecodeError as e:
                         logger.warning(f"API 响应 JSON 解析失败: {e}")
 
@@ -696,3 +708,12 @@ class CtripSearchWorkflow(BaseWorkflow):
     def clear_captured_data(self):
         """清除捕获的数据。"""
         self.captured_data = None
+        self.account_blacklisted = False
+
+    def is_account_blacklisted(self) -> bool:
+        """检查是否检测到账号被封。
+
+        Returns:
+            True if htlSpiderActionErrorCode: 203 was detected
+        """
+        return self.account_blacklisted

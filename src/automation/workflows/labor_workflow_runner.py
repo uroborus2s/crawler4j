@@ -19,7 +19,11 @@ from src.core.models.ctrip_account import CtripAccount
 from src.core.models.labor_account import LaborAccount
 from src.core.models.labor_task import LaborTask, TaskState
 from src.utils.logger import logger
-from src.utils.storage import LaborAccountRepository
+from src.utils.storage import (
+    CtripAccountRepository,
+    EnvironmentRepository,
+    LaborAccountRepository,
+)
 
 
 class LaborWorkflowRunner:
@@ -131,10 +135,12 @@ class LaborWorkflowRunner:
         self,
         labor_account: LaborAccount,
         ctrip_account: CtripAccount,
+        env_id: int | None = None,
     ):
         """执行自动化做题任务。
 
         读取配置并循环执行：领题 -> 搜索 -> 提交。
+        支持搜索失败时废弃题目并重新领题，以及账号被封时的处理。
         """
         max_tasks = ctrip_account.consecutive_task_count
         interval_max = ctrip_account.task_interval_max
@@ -180,9 +186,41 @@ class LaborWorkflowRunner:
                 logger.info(f"采集目标: {task.hotel_name}")
                 hotel_data = await self.search_workflow.search_and_capture(task)
 
-                # 3. 提交结果
-                # hotel_data 为 None 时 submit_result 会尝试提交“搜索不到”
-                if await self.submit_workflow.submit_result(hotel_data):
+                # 2.5 检查账号被封
+                if self.search_workflow.is_account_blacklisted():
+                    logger.error("🚫 携程账号被封，停止任务并处理...")
+                    await self._handle_account_blacklisted(ctrip_account, env_id)
+                    break  # 退出主循环
+
+                # 3. 根据搜索结果决定处理方式
+                submit_success = False
+
+                if hotel_data is None:
+                    # 完全搜索失败 -> 废弃题目并重新领题
+                    logger.warning("❌ 搜索完全失败，执行废弃流程...")
+                    if await self.claim_workflow.discard_task(reason_text="携程搜索失败"):
+                        logger.info("✅ 废弃成功，继续领取下一题")
+                        # 更新废弃统计
+                        if self.current_labor_account and self.current_labor_account.id:
+                            try:
+                                self.labor_repo.update_stats(
+                                    id=self.current_labor_account.id, discarded=1
+                                )
+                            except Exception as db_e:
+                                logger.warning(f"更新废弃统计失败: {db_e}")
+                        continue  # 跳过本次提交，直接进入下一轮循环
+                    else:
+                        logger.error("废弃失败，尝试继续...")
+
+                elif hotel_data == "搜索不到":
+                    # URL 不匹配详情页 -> 提交"搜索不到"
+                    logger.info("📝 提交搜索不到结果...")
+                    submit_success = await self.submit_workflow.submit_not_found()
+                else:
+                    # 正常数据 -> 提交结果
+                    submit_success = await self.submit_workflow.submit_result(hotel_data)
+
+                if submit_success:
                     # 同步到数据库
                     if self.current_labor_account and self.current_labor_account.id:
                         try:
@@ -214,6 +252,41 @@ class LaborWorkflowRunner:
         finally:
             self._running = False
             self._log_stats()
+
+    async def _handle_account_blacklisted(
+        self, ctrip_account: CtripAccount, env_id: int | None
+    ):
+        """处理携程账号被封。
+
+        1. 不提交当前劳保答案
+        2. 将携程账号状态设为 blacklisted
+        3. 将环境状态设为 error（不删除环境）
+        4. 关闭浏览器会话
+        5. 记录日志
+        """
+        try:
+            logger.warning(f"携程账号 {ctrip_account.phone_number} 被封，开始处理...")
+
+            # 更新携程账号状态为 blacklisted
+            ctrip_repo = CtripAccountRepository()
+            if ctrip_account.id:
+                ctrip_repo.update_status(ctrip_account.id, "blacklisted")
+                logger.info(f"携程账号 ID-{ctrip_account.id} 已标记为 blacklisted")
+
+            # 更新环境状态为 error（不删除环境）
+            if env_id:
+                env_repo = EnvironmentRepository()
+                env_repo.update_status(env_id, "error")
+                logger.info(f"环境 ENV-{env_id} 已标记为 error")
+
+            logger.info("✅ 账号被封处理完成")
+
+        except Exception as e:
+            logger.error(f"处理账号被封失败: {e}")
+        finally:
+            # 关闭浏览器会话
+            await self._close_environment()
+
 
     def request_stop(self):
         """请求停止连续执行。"""
