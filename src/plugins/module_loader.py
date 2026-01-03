@@ -1,6 +1,7 @@
 """模块加载器
 
 负责扫描、加载和管理任务模块。
+支持内置模块（随应用分发）和外部模块（用户安装）。
 """
 
 import shutil
@@ -19,15 +20,20 @@ from src.utils.logger import logger
 if TYPE_CHECKING:
     from crawler4j_sdk import TaskFlow, TaskScript
 
+# 默认内置模块目录（相对于项目根目录）
+BUILTIN_MODULES_DIR = "modules"
+# 默认外部模块目录（用户安装）
+EXTERNAL_MODULES_DIR = "user_modules"
+
 
 class ModuleLoader:
     """模块加载器
     
     职责：
-    1. 扫描 modules/ 目录下的所有模块
-    2. 验证模块结构完整性
-    3. 加载模块元信息和配置
-    4. 安装外部模块（zip/git）
+    1. 加载内置模块（随应用分发）
+    2. 加载外部模块（用户安装）
+    3. 验证模块结构完整性
+    4. 安装/卸载外部模块
     """
     
     _instance: "ModuleLoader | None" = None
@@ -43,55 +49,84 @@ class ModuleLoader:
             return
         
         self._modules: dict[str, Module] = {}
-        self._base_path: Path | None = None
+        self._builtin_path: Path | None = None  # 内置模块目录
+        self._external_path: Path | None = None  # 外部模块目录
         self._executor = ScriptExecutor()
         self._initialized = True
     
-    def set_base_path(self, path: str | Path) -> None:
-        """设置模块根目录"""
-        self._base_path = Path(path)
-        self._base_path.mkdir(parents=True, exist_ok=True)
-    
-    def scan_modules(self, base_path: str | Path | None = None) -> list[ModuleInfo]:
-        """扫描并加载所有模块
+    def set_paths(
+        self,
+        builtin_path: str | Path | None = None,
+        external_path: str | Path | None = None,
+    ) -> None:
+        """设置模块目录路径
         
         Args:
-            base_path: 模块根目录，默认使用已设置的路径
-            
+            builtin_path: 内置模块目录（随应用分发）
+            external_path: 外部模块目录（用户安装）
+        """
+        if builtin_path:
+            self._builtin_path = Path(builtin_path)
+        if external_path:
+            self._external_path = Path(external_path)
+            self._external_path.mkdir(parents=True, exist_ok=True)
+    
+    def set_base_path(self, path: str | Path) -> None:
+        """设置外部模块目录（兼容旧API）"""
+        self._external_path = Path(path)
+        self._external_path.mkdir(parents=True, exist_ok=True)
+    
+    def scan_all_modules(self) -> list[ModuleInfo]:
+        """扫描并加载所有模块（内置 + 外部）
+        
         Returns:
             模块信息列表
         """
-        if base_path:
-            self.set_base_path(base_path)
-        
-        if not self._base_path or not self._base_path.exists():
-            logger.warning("模块目录不存在")
-            return []
-        
         self._modules.clear()
         loaded = []
         
-        for module_dir in self._base_path.iterdir():
+        # 1. 先加载内置模块
+        if self._builtin_path and self._builtin_path.exists():
+            builtin = self._scan_directory(self._builtin_path, is_builtin=True)
+            loaded.extend(builtin)
+        
+        # 2. 再加载外部模块（同名模块会覆盖内置）
+        if self._external_path and self._external_path.exists():
+            external = self._scan_directory(self._external_path, is_builtin=False)
+            loaded.extend(external)
+        
+        logger.info(f"📦 共加载 {len(self._modules)} 个模块")
+        return loaded
+    
+    def scan_modules(self, base_path: str | Path | None = None) -> list[ModuleInfo]:
+        """扫描并加载模块（兼容旧API）"""
+        if base_path:
+            self._external_path = Path(base_path)
+        return self.scan_all_modules()
+    
+    def _scan_directory(self, directory: Path, is_builtin: bool) -> list[ModuleInfo]:
+        """扫描单个目录"""
+        loaded = []
+        source_label = "内置" if is_builtin else "外部"
+        
+        for module_dir in directory.iterdir():
             if not module_dir.is_dir():
                 continue
-            
-            # 跳过以下划线或点开头的目录
             if module_dir.name.startswith(("_", ".")):
                 continue
             
             try:
-                module = self._load_module_from_dir(module_dir)
+                module = self._load_module_from_dir(module_dir, is_builtin=is_builtin)
                 if module:
                     self._modules[module.info.name] = module
                     loaded.append(module.info)
-                    logger.info(f"✅ 加载模块: {module.info.display_name} ({module.info.name})")
+                    logger.info(f"✅ [{source_label}] 加载模块: {module.info.display_name}")
             except Exception as e:
                 logger.error(f"❌ 加载模块失败 [{module_dir.name}]: {e}")
         
-        logger.info(f"📦 共加载 {len(loaded)} 个模块")
         return loaded
     
-    def _load_module_from_dir(self, module_dir: Path) -> Module | None:
+    def _load_module_from_dir(self, module_dir: Path, is_builtin: bool = False) -> Module | None:
         """从目录加载模块"""
         # 检查 module.yaml
         yaml_path = module_dir / "module.yaml"
@@ -201,7 +236,7 @@ class ModuleLoader:
         Returns:
             是否成功
         """
-        if not self._base_path:
+        if not self._external_path:
             logger.error("未设置模块目录")
             return False
         
@@ -238,7 +273,10 @@ class ModuleLoader:
                 info = self._parse_module_yaml(yaml_files[0])
                 
                 # 复制到模块目录
-                target = self._base_path / info.name
+                if not self._external_path:
+                    logger.error("未设置外部模块目录")
+                    return False
+                target = self._external_path / info.name
                 if target.exists():
                     shutil.rmtree(target)
                 shutil.copytree(module_root, target)
@@ -274,7 +312,10 @@ class ModuleLoader:
                 info = self._parse_module_yaml(yaml_path)
                 
                 # 复制到模块目录
-                target = self._base_path / info.name
+                if not self._external_path:
+                    logger.error("未设置外部模块目录")
+                    return False
+                target = self._external_path / info.name
                 if target.exists():
                     shutil.rmtree(target)
                 
@@ -300,7 +341,10 @@ class ModuleLoader:
         
         try:
             info = self._parse_module_yaml(yaml_path)
-            target = self._base_path / info.name
+            if not self._external_path:
+                logger.error("未设置外部模块目录")
+                return False
+            target = self._external_path / info.name
             
             if target.exists():
                 shutil.rmtree(target)
