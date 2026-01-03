@@ -207,7 +207,7 @@ class HotelMatcher:
         hotels: list[dict],
         keyword: str,
         city_name: str | None = None,
-        similarity_threshold: float = 0.90
+        similarity_threshold: float = 0.85
     ) -> HotelMatch | None:
         """在酒店列表中查找匹配的酒店。
 
@@ -221,18 +221,21 @@ class HotelMatcher:
             hotels: 酒店列表，每个酒店需包含 'word'/'hotelName', 'id'/'hotelId', 'cityName' 等字段
             keyword: 搜索关键词（酒店名称）
             city_name: 目标城市名称（可选）
-            similarity_threshold: 相似度阈值，默认 0.90 (90%)
+            similarity_threshold: 相似度阈值，默认 0.85 (85%)
 
         Returns:
             匹配到的酒店信息，如无匹配返回 None
         """
         if not hotels:
+            logger.debug("酒店列表为空")
             return None
 
         # 预处理关键词
         keyword_half = cls.to_half_width(keyword)
         keyword_main = cls.extract_main_name(keyword_half)
         keyword_branch = keyword_half.replace(keyword_main, '').strip()
+
+        logger.debug(f"匹配关键词: '{keyword}' -> 主体: '{keyword_main}', 分店: '{keyword_branch}'")
 
         # 标准化城市名称
         normalized_city = cls.to_half_width(city_name).strip().lower() if city_name else None

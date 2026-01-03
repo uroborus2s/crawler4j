@@ -33,14 +33,18 @@ class CtripSearchWorkflow(BaseWorkflow):
     # 拦截 URL 模式
     INTERCEPT_PATTERN = "**/*getHotelRoomListInland*"
 
-    # 搜索 API 拦截模式 (用于验证搜索结果)
-    SEARCH_API_PATTERN = "**/*restapi/soa2/30668/search*"
-    SEARCH_API_KEYWORD = "restapi/soa2/30668/search"
+    # 搜索 API 拦截模式 (支持两种 API 端点)
+    # POST 方法: https://m.ctrip.com/restapi/soa2/30668/search
+    # GET 方法: https://m.ctrip.com/restapi/soa2/26872/search
+    SEARCH_API_PATTERN = "**/*restapi/soa2/*/search*"
+    SEARCH_API_POST_KEYWORD = "restapi/soa2/30668/search"  # POST 方法
+    SEARCH_API_GET_KEYWORD = "restapi/soa2/26872/search"   # GET 方法
 
     def __init__(self, page: Page, claim_workflow: "LaborClaimTaskWorkflow | None" = None):
         super().__init__(page)
         self.captured_data: dict | None = None
         self.search_result_data: dict | None = None  # 搜索 API 响应数据
+        self.search_api_method: str | None = None    # 记录使用的 API 方法 (GET/POST)
         self._route_handler_set = False
         self._search_route_handler_set = False
         self._last_mouse_pos = (0, 0)
@@ -107,7 +111,9 @@ class CtripSearchWorkflow(BaseWorkflow):
     async def _setup_search_route_handler(self):
         """设置搜索 API 路由拦截器，用于验证搜索结果。
 
-        拦截 https://m.ctrip.com/restapi/soa2/30668/search API 响应，
+        拦截两种 API 端点：
+        - POST: https://m.ctrip.com/restapi/soa2/30668/search
+        - GET: https://m.ctrip.com/restapi/soa2/26872/search
         获取酒店列表数据用于名称匹配验证。
         """
         if self._search_route_handler_set:
@@ -116,16 +122,34 @@ class CtripSearchWorkflow(BaseWorkflow):
         async def handle_search_route(route: Route):
             """拦截并记录搜索 API 响应。"""
             try:
+                request_url = route.request.url
+
+                # 检查是否是目标搜索 API
+                is_post_api = self.SEARCH_API_POST_KEYWORD in request_url
+                is_get_api = self.SEARCH_API_GET_KEYWORD in request_url
+
+                if not (is_post_api or is_get_api):
+                    # 不是目标 API，直接放行
+                    await route.continue_()
+                    return
+
                 response = await route.fetch()
                 body = await response.body()
 
-                if self.SEARCH_API_KEYWORD in route.request.url:
-                    try:
-                        data = json.loads(body.decode("utf-8"))
-                        self.search_result_data = data
-                        logger.info(f"✅ 捕获到搜索API响应，大小: {len(body)} bytes")
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"搜索 API 响应 JSON 解析失败: {e}")
+                try:
+                    data = json.loads(body.decode("utf-8"))
+                    self.search_result_data = data
+
+                    # 记录使用的 API 方法
+                    if is_post_api:
+                        self.search_api_method = "POST"
+                        logger.info(f"✅ 捕获到搜索API响应 (POST 30668)，大小: {len(body)} bytes")
+                    else:
+                        self.search_api_method = "GET"
+                        logger.info(f"✅ 捕获到搜索API响应 (GET 26872)，大小: {len(body)} bytes")
+
+                except json.JSONDecodeError as e:
+                    logger.warning(f"搜索 API 响应 JSON 解析失败: {e}")
 
                 await route.fulfill(response=response)
 
@@ -135,7 +159,7 @@ class CtripSearchWorkflow(BaseWorkflow):
 
         await self.page.route(self.SEARCH_API_PATTERN, handle_search_route)
         self._search_route_handler_set = True
-        logger.debug("已设置搜索 API 响应拦截器")
+        logger.debug("已设置搜索 API 响应拦截器 (支持 30668/POST 和 26872/GET)")
 
     async def _remove_search_route_handler(self):
         """移除搜索 API 路由拦截器。"""
@@ -593,16 +617,20 @@ class CtripSearchWorkflow(BaseWorkflow):
     async def _verify_search_result(
         self,
         task: LaborTask,
-        similarity_threshold: float = 0.90
+        similarity_threshold: float = 0.85
     ) -> HotelMatch | None:
         """验证搜索结果中是否有匹配的酒店。
 
         从捕获的搜索 API 响应中提取酒店列表，
         使用4级匹配策略验证酒店名称相似度。
 
+        支持两种 API 返回格式：
+        - GET 方法 (26872/search): result.Response.searchResults 数组，type='Hotel'
+        - POST 方法 (30668/search): result.data 数组，type='hotel'
+
         Args:
             task: 任务信息，包含目标酒店名称和城市
-            similarity_threshold: 相似度阈值，默认 0.90 (90%)
+            similarity_threshold: 相似度阈值，默认 0.85 (85%)
 
         Returns:
             匹配到的酒店信息，如无匹配返回 None
@@ -612,22 +640,39 @@ class CtripSearchWorkflow(BaseWorkflow):
             return None
 
         try:
-            # 解析搜索结果中的酒店列表
-            # 根据 content.js 分析，API 返回格式为 {data: [...]}
-            data = self.search_result_data.get('data', [])
+            hotels = []
+            is_get_method = self.search_api_method == "GET"
 
-            if not isinstance(data, list):
-                logger.warning("搜索结果格式非预期")
-                return None
+            if is_get_method:
+                # GET 方法 (26872/search): Response.searchResults
+                response = self.search_result_data.get('Response', {})
+                search_results = response.get('searchResults', [])
 
-            # 过滤酒店类型的结果
-            hotels = [item for item in data if item.get('type') == 'hotel']
+                if not isinstance(search_results, list):
+                    logger.warning("GET API 搜索结果格式非预期")
+                    return None
+
+                # 过滤酒店类型 (type='Hotel'，注意大写 H)
+                hotels = [item for item in search_results if item.get('type') == 'Hotel']
+                logger.debug(f"GET API: 从 {len(search_results)} 个结果中过滤出 {len(hotels)} 个酒店")
+
+            else:
+                # POST 方法 (30668/search): data 数组
+                data = self.search_result_data.get('data', [])
+
+                if not isinstance(data, list):
+                    logger.warning("POST API 搜索结果格式非预期")
+                    return None
+
+                # 过滤酒店类型 (type='hotel'，注意小写 h)
+                hotels = [item for item in data if item.get('type') == 'hotel']
+                logger.debug(f"POST API: 从 {len(data)} 个结果中过滤出 {len(hotels)} 个酒店")
 
             if not hotels:
                 logger.warning("搜索结果中无酒店数据")
                 return None
 
-            logger.info(f"搜索结果包含 {len(hotels)} 个酒店")
+            logger.info(f"搜索结果包含 {len(hotels)} 个酒店 (API: {self.search_api_method or 'Unknown'})")
 
             # 使用匹配器验证
             match = HotelMatcher.match_hotels(
@@ -704,6 +749,7 @@ class CtripSearchWorkflow(BaseWorkflow):
                 await self._setup_route_handler()
                 await self._setup_search_route_handler()
                 self.search_result_data = None  # 重置搜索结果
+                self.search_api_method = None   # 重置 API 方法
 
                 # 3. 执行首页搜索
                 if not await self._perform_homepage_search(task.hotel_name):
@@ -793,7 +839,16 @@ class CtripSearchWorkflow(BaseWorkflow):
                         return self.captured_data
                     logger.warning("捕获的数据格式非预期")
                 else:
-                    logger.warning("采集超时，准备重试...")
+                    # API 拦截失败，尝试页面兜底方案
+                    logger.warning("API 拦截超时，尝试页面兜底提取...")
+                    fallback_data = await self._extract_hotel_info_from_page()
+                    if fallback_data:
+                        logger.info(f"✅ 页面兜底成功，尝试: {attempt+1}")
+                        await self._simulate_human_browsing(duration=random.uniform(2.5, 4.5))
+                        await self._cleanup_pages(new_pages)
+                        self.page = original_page
+                        return fallback_data
+                    logger.warning("页面兜底也失败，准备重试...")
 
             except Exception as e:
                 logger.error(f"搜索尝试 {attempt+1} 异常: {e}")
@@ -805,6 +860,7 @@ class CtripSearchWorkflow(BaseWorkflow):
             self._search_route_handler_set = False
             self.captured_data = None
             self.search_result_data = None
+            self.search_api_method = None
 
             if attempt < max_retries - 1:
                 wait_time = random.uniform(2, 4)
@@ -813,6 +869,69 @@ class CtripSearchWorkflow(BaseWorkflow):
 
         logger.error("❌ 所有重试均失败")
         return None
+
+    async def _extract_hotel_info_from_page(self) -> dict | None:
+        """从详情页 HTML 提取酒店信息（API 拦截失败时的兜底方案）。
+
+        当 getHotelRoomListInland API 拦截失败时，尝试从页面 DOM 提取基本信息。
+
+        Returns:
+            包含酒店基本信息的字典，如提取失败返回 None
+        """
+        try:
+            # 等待页面加载完成
+            await self.page.wait_for_load_state("domcontentloaded", timeout=5000)
+
+            # 尝试从页面提取酒店名称
+            hotel_name = None
+            hotel_id = None
+
+            # 方法1: 从 URL 提取酒店 ID
+            current_url = self.page.url
+            import re
+            id_match = re.search(r'/hotels/(\d+)\.html', current_url)
+            if id_match:
+                hotel_id = int(id_match.group(1))
+                logger.debug(f"从 URL 提取酒店 ID: {hotel_id}")
+
+            # 方法2: 从页面标题提取酒店名称
+            title_element = await self.page.query_selector("h1.hotel-name, .hotel-title, [class*='hotelName']")
+            if title_element:
+                hotel_name = await title_element.inner_text()
+                hotel_name = hotel_name.strip() if hotel_name else None
+                logger.debug(f"从页面提取酒店名称: {hotel_name}")
+
+            # 方法3: 从 meta 标签提取
+            if not hotel_name:
+                meta_title = await self.page.query_selector("meta[property='og:title']")
+                if meta_title:
+                    content = await meta_title.get_attribute("content")
+                    if content:
+                        hotel_name = content.split("-")[0].strip()
+
+            # 方法4: 从 document.title 提取
+            if not hotel_name:
+                page_title = await self.page.title()
+                if page_title:
+                    # 携程标题格式通常是 "酒店名称-携程酒店"
+                    hotel_name = page_title.split("-")[0].strip()
+
+            if hotel_name and hotel_id:
+                logger.info(f"🔄 页面兜底提取成功: {hotel_name} (ID: {hotel_id})")
+                return {
+                    "data": {
+                        "hotelId": hotel_id,
+                        "hotelName": hotel_name,
+                        "source": "page_fallback"
+                    }
+                }
+
+            logger.warning("页面兜底提取失败: 无法获取酒店名称或 ID")
+            return None
+
+        except Exception as e:
+            logger.error(f"页面兜底提取异常: {e}")
+            return None
 
     async def _cleanup_pages(self, pages: list[Page]):
         """清理临时页面列表。"""
