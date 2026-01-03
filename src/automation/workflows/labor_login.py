@@ -145,7 +145,6 @@ class LaborLoginWorkflow(BaseWorkflow):
                 )
             except Exception:
                 logger.error("登录表单加载超时")
-                await self.screenshot("labor_login_form_timeout")
                 return False
 
             # 4. 清空并输入账号
@@ -174,7 +173,6 @@ class LaborLoginWorkflow(BaseWorkflow):
 
             # 登录失败
             logger.error(f"劳保平台登录失败: {account.phone}")
-            await self.screenshot(f"labor_login_fail_{account.phone}")
 
             # 检查是否有错误提示
             error_msg = await self._get_error_message()
@@ -185,7 +183,6 @@ class LaborLoginWorkflow(BaseWorkflow):
 
         except Exception as e:
             logger.error(f"劳保平台登录异常: {e}")
-            await self.screenshot(f"labor_login_error_{account.phone}")
             return False
 
     async def _get_error_message(self) -> str | None:

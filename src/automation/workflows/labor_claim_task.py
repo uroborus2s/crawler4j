@@ -126,7 +126,6 @@ class LaborClaimTaskWorkflow(BaseWorkflow):
                 logger.info(
                     f"📍 发现待处理任务: {hotel_name} ({checkin} 至 {checkout})"
                 )
-                await self.screenshot("labor_task_detected")
                 return LaborTask(
                     hotel_name=hotel_name,
                     checkin=checkin,
@@ -445,7 +444,6 @@ class LaborClaimTaskWorkflow(BaseWorkflow):
                     task = await self.get_existing_task()
                     if task.is_complete:
                         logger.info(f"✅ 成功领取任务: {task.hotel_name}")
-                        await self.screenshot("labor_task_claimed_success")
                         return task
 
             # 5. 无题或领题失败，检查是否需要重试

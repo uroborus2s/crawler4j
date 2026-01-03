@@ -420,7 +420,6 @@ class LaborSubmitWorkflow(BaseWorkflow):
                 success_msg = self.page.locator(self.SUCCESS_INDICATOR)
                 await success_msg.first.wait_for(state="visible", timeout=5000)
                 logger.info("✅ 检测到成功提示，任务提交确认")
-                await self.screenshot("labor_submit_success")
                 return True
             except Exception:
                 if confirm_count > 0:
@@ -436,7 +435,6 @@ class LaborSubmitWorkflow(BaseWorkflow):
 
         except Exception as e:
             logger.error(f"提交任务异常: {e}")
-            await self.screenshot("labor_submit_error")
             return False
 
     async def check_and_submit_pending(self) -> bool:
