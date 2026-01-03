@@ -1,0 +1,23 @@
+name: ctrip
+display_name: 携程任务
+description: 携程平台相关的所有任务（做题、上号等）
+version: 1.0.0
+author: crawler4j
+
+# 模块默认配置
+config:
+  max_retries: 3
+  task_interval: [60, 180]
+  similarity_threshold: 0.85
+
+# 任务链列表（可绑定环境）
+workflows:
+  - name: labor_workflow
+    display_name: 劳保做题
+    description: 完整的劳保做题流程（登录-领题-搜索-提交）
+    config:
+      max_tasks: 10
+
+  - name: login_workflow
+    display_name: 携程上号
+    description: 仅执行携程登录流程
