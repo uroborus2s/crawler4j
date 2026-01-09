@@ -13,17 +13,13 @@ echo "📦 构建完成。准备上传..."
 
 # 默认配置，可修改或通过环境变量传入
 REMOTE_HOST=${DEPLOY_HOST:-"db.whzhsc.cn"}
+REMOTE_USER=${DEPLOY_USER:-"root"}
 REMOTE_DIR=${DEPLOY_DIR:-"/var/www/crawler"}
 
 echo "📤 上传到 $REMOTE_HOST:$REMOTE_DIR ..."
-# 使用 rsync 进行增量同步（比 scp 更高效），如果没有 rsync 则回退到 scp
-if command -v rsync &> /dev/null; then
-    # -a: archive mode, -v: verbose, -z: compress, --delete: 删除目标端多余文件
-    rsync -avz --delete site/ "$REMOTE_HOST:$REMOTE_DIR"
-else
-    echo "⚠️ 未找到 rsync，使用 scp... (建议安装 rsync 以提高速度)"
-    scp -r site/* "$REMOTE_HOST:$REMOTE_DIR"
-fi
+# 强制使用 scp，避免远程服务器未安装 rsync 导致的错误
+echo "使用 scp 上传..."
+scp -r site/* "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}"
 
 echo "✅ 部署完成！"
 echo "🌐 访问地址: http://crawler.urobrous.cn"
