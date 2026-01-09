@@ -1,0 +1,58 @@
+site_name: Crawler4j 文档
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.indexes
+    - content.code.copy
+    - content.action.edit
+    - navigation.sections
+    - navigation.expand
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: 切换到暗色模式
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: 切换到亮色模式
+
+nav:
+  - 🏠 概览 (Home):
+    - 简介 & 架构理念: index.md
+    - 快速开始: getting-started.md
+  - 📘 用户指南 (User Guide):
+    - 部署 Crawler4j: user-guide/deployment.md
+    - 配置文件说明: user-guide/configuration.md
+    - 任务调度与监控: user-guide/dashboard-usage.md
+  - 🧩 插件开发手册 (Plugin Dev):
+    - 插件系统设计: plugin-dev/plugin-system.md
+    - 编写你的第一个爬虫: plugin-dev/tutorial-crawler.md
+    - 编写监控模块: plugin-dev/tutorial-monitor.md
+  - ⚙️ SDK 参考 (SDK Reference):
+    - Core: sdk/core.md
+    - Context: sdk/context.md
+    - Utils: sdk/utils.md
+  - 🛠️ 内核开发 (Kernel Dev):
+    - 实施计划与路线图: kernel-dev/roadmap.md
+    - 需求规格: kernel-dev/requirements.md
+    - 内部架构设计: kernel-dev/internals.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format

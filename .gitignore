@@ -122,3 +122,4 @@ htmlcov/
 # Project specific
 /*.html
 /screenshots/
+site/

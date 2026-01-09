@@ -21,20 +21,30 @@ class HttpClient:
     提供简化的HTTP请求方法。
     """
     
-    async def get(self, url: str, **kwargs) -> dict:
-        """发送GET请求"""
+    async def get(self, url: str, **kwargs: Any) -> dict:
+        """发送GET请求
+
+        Args:
+            url (str): 请求URL
+            **kwargs (Any): 传递给 session.get 的额外参数
+        """
         import aiohttp
         async with aiohttp.ClientSession() as session:
             async with session.get(url, **kwargs) as resp:
                 return await resp.json()
     
-    async def post(self, url: str, data: dict | None = None, **kwargs) -> dict:
-        """发送POST请求"""
+    async def post(self, url: str, data: dict | None = None, **kwargs: Any) -> dict:
+        """发送POST请求
+
+        Args:
+            url (str): 请求URL
+            data (dict | None): JSON数据
+            **kwargs (Any): 传递给 session.post 的额外参数
+        """
         import aiohttp
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=data, **kwargs) as resp:
                 return await resp.json()
-
 
 @dataclass
 class CtripAccountInfo:
@@ -170,15 +180,15 @@ class TaskContext:
         self._stop_requested = True
         self.logger.info("已请求停止工作流")
     
-    async def run_subtask(self, task_name: str, **kwargs) -> Any:
+    async def run_subtask(self, task_name: str, **kwargs: Any) -> Any:
         """执行子任务
         
         在复合任务中调用其他原子任务。
         子任务共享同一个 ctx.state。
         
         Args:
-            task_name: 子任务名称
-            **kwargs: 传递给子任务的额外参数（会合并到 ctx.state）
+            task_name (str): 子任务名称
+            **kwargs (Any): 传递给子任务的额外参数（会合并到 ctx.state）
             
         Returns:
             子任务的返回值（TaskResult.data）
