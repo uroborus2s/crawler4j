@@ -39,9 +39,69 @@ nav:
     - Context: sdk/context.md
     - Utils: sdk/utils.md
   - 🛠️ 内核开发 (Kernel Dev):
-    - 实施计划与路线图: kernel-dev/roadmap.md
-    - 需求规格: kernel-dev/requirements.md
-    - 内部架构设计: kernel-dev/internals.md
+    - 需求与功能规格 (SRS):
+      - 总览: srs/index.md
+      - 01 文档控制信息: srs/01-document-control.md
+      - 02 项目需求概述: srs/02-project-overview.md
+      - 03 需求分析: srs/03-requirements-analysis.md
+      - 04 架构设计: srs/04-architecture.md
+      - 05 Framework Core:
+        - 概览: srs/05-framework-core/index.md
+        - 5.1 模块管理系统: srs/05-framework-core/05-1-module-management.md
+        - 5.2 运行环境管理: srs/05-framework-core/05-2-runtime-environment-management.md
+        - 5.3 任务策略管理: srs/05-framework-core/05-3-task-strategy-management.md
+        - 5.4 自动化任务管理: srs/05-framework-core/05-4-automation-task-management.md
+        - 5.5 UI Host & 微前端: srs/05-framework-core/05-5-ui-host-microfrontend.md
+        - 5.6 横切关注点: srs/05-framework-core/05-6-crosscutting.md
+        - 5.7 测试与验收标准: srs/05-framework-core/05-7-testing-acceptance.md
+        - 5.8 发布与运维: srs/05-framework-core/05-8-operations-release.md
+        - 5.9 Core 附录: srs/05-framework-core/05-9-appendix.md
+      - 06 SDK:
+        - 概览: srs/06-sdk/index.md
+        - 6.1 TaskScript: srs/06-sdk/06-1-taskscript.md
+        - 6.2 TaskFlow: srs/06-sdk/06-2-taskflow.md
+        - 6.3 TaskContext: srs/06-sdk/06-3-taskcontext.md
+        - 6.4 TaskResult: srs/06-sdk/06-4-taskresult.md
+        - 6.5 CLI: srs/06-sdk/06-5-cli.md
+        - 6.6 数据模型: srs/06-sdk/06-6-data-model.md
+        - 6.7 错误处理: srs/06-sdk/06-7-error-reliability.md
+        - 6.8 NFR: srs/06-sdk/06-8-nfr.md
+        - 6.9 SDK 附录: srs/06-sdk/06-9-testing-ops-appendix.md
+      - 07 Modules:
+        - 概览: srs/07-modules/index.md
+        - 7.1 通用规范: srs/07-modules/07-1-general-spec.md
+        - 7.2 模块模板: srs/07-modules/07-2-module-template.md
+        - 7.3 Ctrip 模块: srs/07-modules/07-3-ctrip.md
+        - 7.4 其他模块: srs/07-modules/07-4-others.md
+        - 7.5 Modules 附录: srs/07-modules/07-5-appendix.md
+      - 附录:
+        - 总览: srs/appendix/index.md
+        - A 术语表: srs/appendix/A-glossary.md
+        - B 错误码: srs/appendix/B-error-codes.md
+        - C 配置项: srs/appendix/C-config-index.md
+        - D 追溯矩阵: srs/appendix/D-traceability-matrix.md
+        - E 图表索引: srs/appendix/E-diagram-index.md
+        - F 迁移指南: srs/appendix/F-compat-migration.md
+    - 技术方案设计 (Technical Design):
+      - 总览: design/index.md
+      - 01 总体架构设计: design/01-general-architecture.md
+      - 核心模块设计:
+        - Module-01 运行环境管理: design/module-01-runtime-environment.md
+        - Module-02 任务策略管理: design/module-02-task-strategy.md
+        - Module-03 模块管理系统: design/module-03-module-management.md
+        - Module-04 数据持久化层: design/module-04-data-persistence.md
+        - Module-05 SDK核心契约: design/module-05-sdk.md
+        - Module-06 UI宿主与扩展: design/module-06-ui-host.md
+    - 测试设计 (Test Design):
+      - 总览: test/index.md
+      - 01 综合测试设计: test/01-comprehensive-test-design.md
+      - 分模块详细设计:
+        - TS-01 运行环境管理: test/test-01-rem.md
+        - TS-02 任务策略管理: test/test-02-tsm.md
+        - TS-03 模块管理系统: test/test-03-mms.md
+        - TS-04 数据持久化层: test/test-04-persistence.md
+        - TS-05 SDK核心契约: test/test-05-sdk.md
+        - TS-06 UI宿主与扩展: test/test-06-ui.md
 
 plugins:
   - search

@@ -1,18 +1,9 @@
-"""Core module exports."""
+"""Crawler4j Core - Framework 核心层。
 
-from src.core.account_manager import AccountManager
-from src.core.events import EventBus, EventType, get_event_bus
-from src.core.scheduler import Scheduler, TaskScheduler
-from src.core.task_runner import TaskResult, TaskResultType, TaskRunner
-
-__all__ = [
-    "AccountManager",
-    "EventBus",
-    "EventType",
-    "get_event_bus",
-    "Scheduler",
-    "TaskScheduler",
-    "TaskResult",
-    "TaskResultType",
-    "TaskRunner",
-]
+Core 子系统包含：
+    - persistence: 数据持久化层
+    - rem: 运行环境管理 (Runtime Environment Management)
+    - tsm: 任务策略管理 (Task Strategy Management)
+    - mms: 模块管理系统 (Module Management System)
+    - atm: 自动化任务管理 (Automation Task Management)
+"""
