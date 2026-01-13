@@ -383,20 +383,6 @@ class SettingsPage(QWidget):
         layout.addWidget(title)
         layout.addSpacing(16)
 
-        
-        
-        # 并发组
-        concurrency_group = QGroupBox("并发")
-        concurrency_group.setStyleSheet(self._group_style())
-        form2 = QFormLayout(concurrency_group)
-
-        self.max_concurrency_spin = QSpinBox()
-        self.max_concurrency_spin.setRange(1, 20)
-        self.max_concurrency_spin.setValue(4)
-        form2.addRow("最大并发任务数:", self.max_concurrency_spin)
-
-        layout.addWidget(concurrency_group)
-
         # 日志组
         log_group = QGroupBox("日志")
         log_group.setStyleSheet(self._group_style())
@@ -640,7 +626,6 @@ class SettingsPage(QWidget):
 
         # Resources
         # from src.utils.paths import get_app_data_dir (Moved to top)
-        self.max_concurrency_spin.setValue(prefs.get(PreferenceKey.MAX_CONCURRENCY, 4))
         self._set_combo_value(self.log_level_combo, prefs.get(PreferenceKey.LOG_LEVEL, "INFO"))
         self.log_retention_spin.setValue(prefs.get(PreferenceKey.LOG_RETENTION, 14))
 
@@ -689,9 +674,6 @@ class SettingsPage(QWidget):
         )
 
         # Resources
-        self.max_concurrency_spin.valueChanged.connect(
-            lambda v: self._save_preference(PreferenceKey.MAX_CONCURRENCY, v)
-        )
         self.log_level_combo.currentIndexChanged.connect(
             lambda: self._save_preference(PreferenceKey.LOG_LEVEL, self._get_combo_value(self.log_level_combo))
         )

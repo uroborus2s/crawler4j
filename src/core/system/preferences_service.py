@@ -31,7 +31,7 @@ class PreferenceKey(str, Enum):
     HTTP_PROXY = "network.http_proxy"
 
     # Resources
-    MAX_CONCURRENCY = "resources.max_concurrency"
+    # (Removed MAX_CONCURRENCY, delegated to strategy)
 
     # Browser
     BITBROWSER_PORT = "browser.bitbrowser.port"
@@ -54,7 +54,6 @@ PREFERENCE_DEFAULTS: dict[PreferenceKey, Any] = {
     PreferenceKey.MINIMIZE_ON_START: False,
     PreferenceKey.PROXY_MODE: "system",
     PreferenceKey.HTTP_PROXY: "",
-    PreferenceKey.MAX_CONCURRENCY: 4,
     PreferenceKey.BITBROWSER_PORT: 54345,
     PreferenceKey.BITBROWSER_PATH: "",
     PreferenceKey.VIRTUALBROWSER_PORT: 9022,
