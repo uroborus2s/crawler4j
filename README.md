@@ -9,76 +9,62 @@
 
 ## 📚 文档
 
-完整文档请访问：**[Crawler4j Documentation](https://uroborus2s.github.io/crawler4j/)**
+详细文档请访问：**[https://clawler.uroborus.cn](https://clawler.uroborus.cn)**
 
 | 文档 | 说明 |
 |------|------|
-| [快速开始](https://uroborus2s.github.io/crawler4j/getting-started/) | 5 分钟上手指南 |
-| [用户指南](https://uroborus2s.github.io/crawler4j/user-guide/deployment/) | 部署、配置、使用 |
-| [插件开发](https://uroborus2s.github.io/crawler4j/plugin-dev/plugin-system/) | 编写自定义模块 |
-| [SDK 参考](https://uroborus2s.github.io/crawler4j/sdk/core/) | API 文档 |
-| [SRS 规格](https://uroborus2s.github.io/crawler4j/srs/) | 系统需求与功能规格 |
+| [快速开始](https://clawler.uroborus.cn/getting-started/) | 下载安装与首次运行 |
+| [用户指南](https://clawler.uroborus.cn/user-guide/configuration/) | 配置策略与部署 |
+| [插件开发](https://clawler.uroborus.cn/plugin-dev/tutorial-crawler/) | 编写自定义爬虫 |
+| [SDK 参考](https://clawler.uroborus.cn/user-guide/sdk/api/) | API 与 CLI 手册 |
 
 ---
 
 ## 🏗️ 架构概览
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Modules (业务插件)                       │
-│   携程模块 / 劳务模块 / 自定义模块...                           │
-├─────────────────────────────────────────────────────────────┤
-│                         SDK 契约层                            │
-│   TaskScript / TaskFlow / TaskContext / TaskResult           │
-├─────────────────────────────────────────────────────────────┤
-│                     Framework Core (微内核)                   │
-│   MMS(模块管理) | REM(环境管理) | TSM(策略管理) | ATM(任务管理)  │
-└─────────────────────────────────────────────────────────────┘
-```
+Crawler4j 采用 **Core + Modules** 架构，将基础设施与业务逻辑分离。
 
-### 核心技术栈
-
-| 组件 | 技术 |
-|------|------|
-| **语言** | Python 3.12+ |
-| **界面** | PyQt6 |
-| **自动化** | Playwright (Async) |
-| **指纹浏览器** | BitBrowser / VirtualBrowser |
-| **包管理** | uv |
+```mermaid
+graph TD
+    User[用户] --> UI[桌面客户端 (Core)]
+    UI --> TSM[策略管理 TSM]
+    TSM --> ATM[任务管理 ATM]
+    ATM --> REM[环境管理 REM]
+    
+    subgraph Plugins [业务插件]
+        P1[携程机票]
+        P2[数据监控]
+    end
+    
+    REM -.->|SDK 契约| Plugins
+```
 
 ---
 
 ## 🚀 快速开始
 
-### 环境要求
+### 方式一：下载安装包 (推荐)
 
-- Python 3.12+
-- [uv](https://github.com/astral-sh/uv) 包管理器
+对于最终用户，无需安装 Python 环境，直接下载编译好的二进制文件：
 
-### 安装
+*   **Windows**: 下载 `.exe` 绿色包
+*   **macOS**: 下载 `.dmg` 镜像
+*   **Linux**: 下载二进制文件
+
+👉 [前往发布页下载](https://github.com/uroborus2s/crawler4j/releases)
+
+### 方式二：从源码运行 (开发者)
 
 ```bash
-# 克隆仓库
+# 1. 克隆代码
 git clone https://github.com/uroborus2s/crawler4j.git
 cd crawler4j
 
-# 安装依赖
-uv sync --group dev
+# 2. 安装依赖 (使用 uv)
+uv sync
 
-# 安装浏览器
-uv run playwright install chromium
-```
-
-### 启动应用
-
-```bash
+# 3. 启动应用
 uv run python -m src.ui.app
-```
-
-### 运行测试
-
-```bash
-uv run pytest
 ```
 
 ---
@@ -87,65 +73,36 @@ uv run pytest
 
 ```
 crawler4j/
-├── src/
-│   ├── core/                 # Framework Core (微内核)
-│   │   ├── persistence/      # 数据持久化
-│   │   ├── rem/              # 运行环境管理 (含 UI)
-│   │   ├── tsm/              # 任务策略管理 (含 UI)
-│   │   ├── mms/              # 模块管理系统 (含 UI)
-│   │   ├── atm/              # 自动化任务管理 (含 UI)
-│   │   └── settings/         # 系统设置 (含 UI)
-│   ├── ui/                   # UI Host (容器层)
-│   │   ├── shell.py          # 全局布局
-│   │   ├── app.py            # 应用入口
-│   │   ├── core/             # Core-UI 集成
-│   │   └── components/       # 公共组件
-│   └── utils/                # 工具函数
-├── crawler4j_sdk/            # SDK 开发工具包
-├── modules/                  # 业务模块
-├── docs/                     # 文档源文件
-│   ├── srs/                  # 需求规格说明书
-│   ├── design/               # 技术方案设计
-│   └── test/                 # 测试设计
-└── tests/                    # 测试用例
+├── src/                      # Core 内核源码
+├── crawler4j_sdk/            # SDK 源码 (独立包)
+├── modules/                  # 内置业务模块
+├── docs/                     # 文档源文件 (MkDocs)
+├── dist/                     # 构建产物 (.exe/.whl)
+└── pyproject.toml            # 项目配置
 ```
 
 ---
 
-## 🔧 开发
+## 🔧 开发者指南
 
-### 代码检查
-
-```bash
-uv run ruff check .
-uv run ruff format .
-```
-
-### 构建文档
+### 构建发行版
 
 ```bash
-uv run mkdocs serve    # 本地预览
-uv run mkdocs build    # 构建静态文件
+# 构建 .exe/.app
+uv run pyinstaller crawler4j.spec
+
+# 构建 Python Wheel
+uv build
 ```
 
----
+### 调试 SDK
 
-## 📖 SDK 快速示例
-
-```python
-from crawler4j_sdk import TaskScript, TaskContext, TaskResult
-
-class LoginTask(TaskScript):
-    name = "login_task"
-    display_name = "登录任务"
-    
-    async def execute(self, ctx: TaskContext) -> TaskResult:
-        await ctx.page.goto("https://example.com/login")
-        await ctx.page.fill("#username", ctx.config.get("username"))
-        return TaskResult.ok(data={"status": "logged_in"})
+```bash
+# 本地运行 CLI
+uv run python -m crawler4j_sdk.cli.commands --help
 ```
 
-详细 SDK 文档请参阅 [SDK 参考](https://uroborus2s.github.io/crawler4j/sdk/core/)。
+详细内容请查阅 [开发者文档](https://clawler.uroborus.cn/user-guide/build-release/)。
 
 ---
 

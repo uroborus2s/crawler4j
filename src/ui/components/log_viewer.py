@@ -4,18 +4,18 @@ Displays real-time logs with filtering and auto-scroll.
 """
 
 from PyQt6.QtCore import pyqtSlot
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPlainTextEdit,
-    QComboBox,
-    QPushButton,
-    QLabel,
-)
 from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
-from src.utils.logger import LogEntry, LogLevel
+from src.core.foundation.logging import LogEntry, LogLevel
 
 
 class LogViewer(QWidget):

@@ -1,6 +1,6 @@
-"""Async HTTP Client module.
+"""网络工具 (HTTP/Network Utils)。
 
-Provides a shared aiohttp.ClientSession for the application.
+基础 HTTP 客户端封装，提供共享的 aiohttp ClientSession。
 """
 
 import asyncio
@@ -8,19 +8,21 @@ from typing import Any, Optional
 
 import aiohttp
 
-from src.utils.logger import logger
+# 使用 Foundation 内部的 logger
+from src.core.foundation.logging import logger
 
 
 class AsyncHttpClient:
+    """异步 HTTP 客户端。"""
+    
     _session: Optional[aiohttp.ClientSession] = None
     
     @classmethod
     async def get_session(cls) -> aiohttp.ClientSession:
-        """Get or create the shared ClientSession."""
+        """获取或创建共享的 ClientSession。"""
         current_loop = asyncio.get_running_loop()
         
         if cls._session is not None:
-            # Note: access internal loop is not ideal but standard way for aiohttp session binding check
             session_loop = getattr(cls._session, "_loop", None)
             if session_loop != current_loop:
                 logger.debug("AsyncHttpClient: Loop mismatch detected, recreating session")
@@ -34,14 +36,13 @@ class AsyncHttpClient:
             cls._session = aiohttp.ClientSession(
                 timeout=timeout, 
                 connector=connector,
-                # Trust env proxy settings or bypass them explicitly in requests
                 trust_env=False 
             )
         return cls._session
 
     @classmethod
     async def close(cls):
-        """Close the shared session."""
+        """关闭共享会话。"""
         if cls._session and not cls._session.closed:
             await cls._session.close()
             cls._session = None
@@ -49,21 +50,21 @@ class AsyncHttpClient:
 
     @classmethod
     async def get(cls, url: str, **kwargs) -> Any:
-        """Helper for GET request."""
+        """GET 请求。"""
         session = await cls.get_session()
         async with session.get(url, **kwargs) as response:
             return await cls._handle_response(response)
 
     @classmethod
     async def post(cls, url: str, json: dict | None = None, **kwargs) -> Any:
-        """Helper for POST request."""
+        """POST 请求。"""
         session = await cls.get_session()
         async with session.post(url, json=json, **kwargs) as response:
             return await cls._handle_response(response)
 
     @staticmethod
     async def _handle_response(response: aiohttp.ClientResponse) -> Any:
-        """Handle response and parse JSON."""
+        """处理响应并解析 JSON。"""
         try:
             if response.content_type == 'application/json':
                 return await response.json()

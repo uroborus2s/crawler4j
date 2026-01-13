@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 
+from src.core.foundation.logging import logger
 from src.core.mms.models import (
     ModuleInfo,
     ModuleManifest,
@@ -21,7 +22,6 @@ from src.core.mms.models import (
     ModuleStatus,
     ModuleValidationError,
 )
-from src.utils.logger import logger
 from src.utils.paths import get_builtin_modules_path, get_user_modules_path
 
 # SDK 版本（用于兼容性校验）

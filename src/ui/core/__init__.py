@@ -1,11 +1,18 @@
-"""UI Core 集成模块。
+"""UI Host 集成模块。
 
-提供 UI 与 Core 的集成能力：
-    - CommandChannel: UI → Core 命令通道
-    - EventBus: Core → UI 事件总线
-    - CoreAdapter: Core 适配器
+提供 UI Host 层与 Core 层的集成能力：
+- SignalBridge (CoreAdapter): UI ↔ Core 信号桥梁
+- CommandChannel: UI → Core 命令通道
+
+注意：EventBus 现在位于 Foundation 层 (src.core.foundation)
 """
 
+from src.core.foundation import (
+    Event,
+    EventBus,
+    EventType,
+    get_event_bus,
+)
 from src.ui.core.adapter import (
     CoreAdapter,
     get_core_adapter,
@@ -16,12 +23,10 @@ from src.ui.core.command_channel import (
     CoreCommands,
     get_command_channel,
 )
-from src.ui.core.event_bus import (
-    Event,
-    EventBus,
-    EventType,
-    get_event_bus,
-)
+
+# 为兼容性保留别名
+SignalBridge = CoreAdapter
+get_signal_bridge = get_core_adapter
 
 __all__ = [
     # 命令通道
@@ -29,12 +34,14 @@ __all__ = [
     "CommandResponse",
     "CoreCommands",
     "get_command_channel",
-    # 事件总线
+    # 事件总线 (从 Foundation 重导出)
     "EventBus",
     "Event",
     "EventType",
     "get_event_bus",
-    # 适配器
+    # Signal Bridge (适配器)
     "CoreAdapter",
     "get_core_adapter",
+    "SignalBridge",  # 别名
+    "get_signal_bridge",  # 别名
 ]

@@ -11,6 +11,7 @@ import json
 import time
 from typing import Callable
 
+from src.core.foundation.logging import logger
 from src.core.persistence.database import STATE_DB, get_connection
 from src.core.rem.models import (
     Environment,
@@ -20,7 +21,6 @@ from src.core.rem.models import (
     EnvStatus,
     EnvUnavailableError,
 )
-from src.utils.logger import logger
 
 
 class EnvPool:

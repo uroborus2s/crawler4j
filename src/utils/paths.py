@@ -43,12 +43,6 @@ def get_app_data_dir() -> Path:
     app_dir.mkdir(parents=True, exist_ok=True)
     return app_dir
 
-
-def get_db_path() -> Path:
-    """Get the database path in the application data directory."""
-    return get_app_data_dir() / "crawler.db"
-
-
 def get_builtin_modules_path() -> Path:
     """获取内置模块目录
     
@@ -67,4 +61,11 @@ def get_user_modules_path() -> Path:
     modules_dir = get_app_data_dir() / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
     return modules_dir
+
+
+def get_config_dir() -> Path:
+    """获取配置存储目录。"""
+    config_dir = get_app_data_dir() / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
 

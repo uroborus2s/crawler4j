@@ -1,11 +1,10 @@
-"""Core-UI 事件总线。
+"""事件总线 (Event Bus)。
 
 规格参考: docs/srs/05-framework-core/05-5-ui-host-microfrontend.md (5.5.3.3)
 
-Core → UI 事件总线用于承载：
-    - task_run 生命周期事件
-    - module_registry 变更事件
-    - env 事件
+进程内事件总线，实现模块间及层级间的解耦通信：
+- Core → UI 事件传递
+- 支持按 EventType / module_name / task_run_id 过滤订阅
 """
 
 import time

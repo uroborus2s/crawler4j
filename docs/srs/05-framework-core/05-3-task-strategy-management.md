@@ -1,190 +1,131 @@
-# 5.3 任务策略管理系统 (Task Strategy Management)
+# 5.3 任务策略管理 (TSM)
 
-## 5.3.1 需求概述
+## 5.3.1 定义
+TSM (Task Strategy Management) 是框架的**智能决策中枢**。它从"简单的配置容器"升级为"动态规则引擎"，负责解决**用什么跑 (Resource)**、**不够怎么办 (Scaling)**、**运行时异常怎么办 (Resilience)** 以及 **用完怎么处理 (Teardown)** 四大核心问题。
 
-任务策略管理 (TSM) 是 Crawler4j 的“大脑前额叶”，它不执行具体业务，而是通过定义一系列**规则 (Policy)** 即时决策“谁先跑”、“用什么资源跑”、“失败了怎么办”。
+TSM 不直接管理基础设施，而是通过**策略 (Policy)** 指挥 REM (资源管理) 和 MMS (模块执行) 协同工作。
 
-### 核心解惑
-针对系统设计的四个关键问题：
-1. **可编辑性**: 只有**策略 (Strategy/Policy)** 是可编辑的配置实体，而非硬编码逻辑。
-2. **格式**: 采用 **YAML** 作为持久化与交互格式，支持热加载。
-3. **解释逻辑**: Core 在任务提交 (`submit`) 和资源分配 (`allocate`) 两个切面解释策略。
-4. **环境自动化**: 策略中的 **Provisioning Profile** 定义了“在何种条件下自动创建何种环境”。
+### 核心价值
+1. **弹性伸缩**: 从静态资源分配转变为按需动态供给，支持削峰填谷。
+2. **精细化调度**: 基于标签 (Label) 和表达式 (Expression) 的多维资源匹配。
+3. **故障自愈**: 自动隔离不健康环境，提供任务级和环境级双重容错。
+4. **生命周期管理**: 不仅仅是开关，更包含状态保持 (KeepAlive)、回收 (Recycle) 和销毁 (Destroy) 的智能决策。
 
 ---
 
-## 5.3.2 策略模型设计 (The Strategy Model)
+## 5.3.2 策略模型设计 (V2)
 
-我们定义 `EvolutionaryStrategy` 为核心配置对象，它包含四个维度的控制规则。
+### 1. 资源选择策略 (Resource Selector)
+解决 **"找到最合适的环境"**。
+- **环境类型 (Type)**: 基础过滤 (e.g. `chrome`, `android`).
+- **标签匹配 (Match Labels)**: 硬性约束 (e.g. `region: cn`, `isp: telecom`).
+- **表达式筛选 (Match Expressions)**: 动态逻辑 (e.g. `cookies.health > 0.8`, `uptime < 2h`).
+- **排序策略 (Ranking)**: 
+    - `FIFO`: 优先使用最早空闲的环境 (减少冷启动).
+    - `BestFit`: 优先使用健康度最高的环境.
+    - `Random`: 有意随机化以分散风险.
 
-### 1. 策略结构定义 (YAML Schema)
+### 2. 弹性伸缩策略 (Scaling Policy)
+解决 **"资源不足时的决策"**。
+- **模式 (Mode)**:
+    - `Strict`: 严格模式。资源不足则排队/报错，不自动创建。适用于人工维护的稀缺资源。
+    - `Elastic`: 弹性模式。自动调用 REM 创建新环境。
+- **阈值 (Limits)**: `min_idle` (最小空闲/预热), `max_concurrency` (最大并发).
+- **初始化 (Init Workflow)**: 新环境创建后，自动执行的初始化任务 (如自动登录、注入 Cookies).
+
+### 3. 执行与容错策略 (Execution & Resilience)
+解决 **"运行时的稳定性"**。
+- **任务级重试**: 业务报错 (如验证码) 是否重试？
+- **环境级重试**: 环境崩溃或不健康时，是否更换环境重试？
+- **超时控制**: 细分 `wait_timeout` (等资源), `init_timeout` (初始化), `exec_timeout` (业务执行).
+
+### 4. 生命周期清理策略 (Teardown Policy)
+解决 **"任务结束后的环境处置"**。
+- **触发条件**: 区分 `OnSuccess` 和 `OnFailure`.
+- **处置动作**:
+    - `Destroy`: 彻底销毁 (一次性环境).
+    - `Recycle`: 清理会话后放回池中 (高复用).
+    - `Hibernate`: 挂起进程 (省资源但保活).
+    - `KeepAlive`: 保持现场 (用于排查问题).
+
+---
+
+## 5.3.3 数据结构 (YAML Schema)
 
 ```yaml
-# strategy_default.yaml (默认策略)
-metadata:
-  name: "default_conservative"
-  version: "1.0"
+id: "strategy_ctrip_hotel_detail_elastic"
+name: "携程酒店详情抓取-弹性策略"
+description: "优先复用高健康度账号，不足时自动注册新环境"
 
-# [A] 并发控制 (Concurrency & Quota)
-concurrency:
-  global_max: 10            # 全局最大并发 10
-  group_buckets:            # 分组桶
-    "module:ctrip": 2       # ctrip 模块最多 2 个
-    "priority:high": 5      # 高优任务预留 5 个
+# 1. 资源选择
+selector:
+  env_type: "chrome"
+  match_labels:
+    region: "cn"
+  match_expressions:
+    - "status == 'active'"
+    - "cookies.health >= 80"
+  sort_strategy: "best_fit"
+  wait_timeout: 30
 
-# [B] 资源供应 (Resource Provisioning) -> 回答如何选择/创建环境
-provisioning:
-  mode: "hybrid"            # static(仅池化) | dynamic(仅新建) | hybrid(优先池化，不足新建)
-  auto_create_limit: 5      # 允许动态创建的最大数量
-  reuse_policy: "clean"     # dirty(直接复用) | clean(清理后复用) | ephemeral(用完销毁)
-  environment_template:     # 新建环境时的模板参数
-    browser_type: "chromium"
-    headless: true
+# 2. 弹性伸缩
+scaling:
+  mode: "elastic"       # strict | elastic
+  max_concurrency: 50
+  min_idle: 5           # 保持 5 个预热环境
+  init_workflow: "ctrip/login_flow"  # 新环境自动登录
+  creation_timeout: 180
 
-# [C] 调度优先级 (Scheduling)
-scheduling:
-  default_priority: 100
-  timeout_seconds: 300      # 排队超时
+# 3. 目标执行
+execution:
+  module: "ctrip"
+  workflow: "collect_hotel_detail"
+  timeout: 300
 
-# [D] 可靠性 (Reliability)
-reliability:
-  max_retries: 3
-  backoff_strategy: "exponential" # fixed | exponential
-  backoff_factor: 2.0
+# 4. 容错控制
+retry:
+  max_attempts: 3
+  retry_on_condition: ["CaptchaError", "NetworkTimeout"]
+  new_env_on_retry: true  # 失败换环境
+
+# 5. 清理策略
+teardown:
+  on_success: "recycle"     # 成功则回收复用
+  on_failure: "keep_alive"  # 失败则保留现场
 ```
-
-### 2. 策略生效范围 (Scope)
-Core 支持三级策略覆盖，优先级由高到低：
-1. **Task Level**: 提交任务时 `ctx.run(strategy_override=...)` 指定（最高优）。
-2. **Module Level**: `module.yaml` 中定义的默认策略。
-3. **Global Level**: 系统全局默认策略 (`config/strategies/*.yaml`)。
 
 ---
 
-## 5.3.3 核心解释逻辑 (Core Interpretation Details)
+## 5.3.4 运行时逻辑
 
-Core 通过 `AdmissionController` (准入) 和 `ResourceMatcher` (撮合) 两个组件来解释上述策略。
+TSM 编排器 (Orchestrator) 的执行流：
 
-### 流程图：从提交到执行
-
-```mermaid
-graph TD
-    Submit[任务提交] --> LoadPolicy[加载合并策略]
-    LoadPolicy --> AdmissionCheck{准入检查}
-    
-    subgraph Concurrency Check
-    AdmissionCheck -- 检查配额 --> CheckGlobal{全局满?}
-    AdmissionCheck -- 检查配额 --> CheckModule{模块满?}
-    end
-    
-    CheckGlobal -- No --> Provisioning[资源供应阶段]
-    CheckGlobal -- Yes --> Queue[进入排队]
-    
-    Provisioning --> SearchPool{1. 查找空闲环境}
-    SearchPool -- Found --> Assign[分配环境]
-    SearchPool -- None --> CheckAutoCreate{2. 允许自动创建?}
-    
-    CheckAutoCreate -- Yes & QuotaOK --> SpawnEnv[3. 调用 RuntimeHub 创建新环境]
-    CheckAutoCreate -- No --> Queue
-    
-    SpawnEnv --> Assign
-    Assign --> Execute[绑定上下文执行]
-```
-
-### 关键决策点说明
-
-#### 1. 准入检查 (Interpretation of [A] Concurrency)
-- Core 读取 `concurrency.group_buckets`。
-- 如果 `current_running(ctrip) >= 2`，则直接将任务放入 `PENDING` 队列，状态设为 `QUEUED_BY_QUOTA`。
-- **UI 表现**: 用户能看到任务在排队，提示“Waiting for quota: module:ctrip”。
-
-#### 2. 资源供应 (Interpretation of [B] Provisioning) - 重点回答环境创建
-当任务通过准入后，Core 需要给它一个 `Environment`。
-- **场景一：利用存量 (pool)**
-  - 根据任务 tags (如 `requires: "login_state"`) 在池中寻找匹配的 IDLE 环境。
-- **场景二：自动创建 (auto-create)**
-  - 条件：池中无匹配环境 AND `provisioning.mode` 为 `dynamic/hybrid` AND 未达到 `auto_create_limit`。
-  - 动作：Core 调用 `RuntimeHub.create_environment(template)`。
-  - **模板来源**: 策略中的 `environment_template` 字段决定了是创建 Headless Chrome 还是连接指纹浏览器。
-- **场景三：资源不足**
-  - 条件：池中无环境 且 无法创建（达上限）。
-  - 动作：任务回退到队列，状态 `WAITING_FOR_RESOURCE`。
+1. **Find Resource**: 根据 `selector` 向 REM 查询候选环境。
+2. **Analysis**:
+    - 若有候选 -> 按 `sort_strategy` 选一个 -> `Lease` (租用)。
+    - 若无候选 -> 检查 `scaling.mode`。
+3. **Scaling (Elastic)**:
+    - 检查 Quota < `max_concurrency` ?
+    - 调用 REM `Provision` 创建新环境。
+    - 调用 MMS `Execute` 运行 `init_workflow`。
+    - 初始化成功 -> `Lease`。
+4. **Execute**:
+    - 在租用的环境中运行目标 `workflow`。
+5. **Handle Result**:
+    - **Success**: 执行 `teardown.on_success` 动作 (如 Recycle)。
+    - **Failure**: 
+        - 检查 `retry` 策略。若可重试 -> (可能换环境) -> Goto Step 1/4。
+        - 不可重试 -> 执行 `teardown.on_failure` 动作 (如 KeepAlive)。
 
 ---
 
-## 5.3.4 功能需求分解
+## 5.3.5 接口定义
 
-### FR-TSM-001 策略编辑器 (Strategy Editor)
-- **功能**: 提供 JSON/YAML 可视化编辑器。
-- **验证**: 保存时校验 Schema 完整性（如 `backoff_factor` 必须大于 1）。
-- **热更**: 修改 Global 策略后，无需重启 Core，新提交的任务立即生效。
-
-### FR-TSM-002 环境自动化配置 (Environment Automator)
-- **功能**: 将策略中的 `environment_template` 翻译为具体的 `BrowserContext` 创建参数。
-- **参数映射**:
-  - `browser_type: chromium` -> `playwright.chromium.launch()`
-  - `proxy: auto` -> 自动向代理池申请 IP
-
-### FR-TSM-003 动态配额桶 (Dynamic Buckets)
-- **功能**: 支持基于表达式的配额。
-- **示例**: "所有 `tag:vip` 的任务独占 5 个并发槽位"。
-
-## 5.3.5 接口设计
-
-### 策略对象 (Python Prototype)
+### Python 原型
 
 ```python
-from pydantic import BaseModel
-
-class ConcurrencyConfig(BaseModel):
-    global_max: int
-    group_buckets: dict[str, int]
-
-class ProvisioningConfig(BaseModel):
-    mode: str = "hybrid" # dynamic, static, hybrid
-    auto_create_limit: int = 5
-    environment_template: dict = {}
-
-class StrategyProfile(BaseModel):
-    name: str
-    concurrency: ConcurrencyConfig
-    provisioning: ProvisioningConfig
-    # ...
+class StrategyOrchestrator:
+    async def execute(self, strategy: TaskStrategy, task_input: dict):
+        # 核心编排逻辑
+        pass
 ```
-
-## 5.3.6 交互设计 (Interaction Design)
-
-为满足不同层次用户需求，策略编辑器采用 **双模式 (Dual Mode)** 设计。
-
-### 1. 编辑模式
-用户可在界面右上角切换视图：
-
-- **可视化模式 (Visual Form)**: 
-    - 适用场景: 修改常见参数 (并发数、超时时间)。
-    - 交互: 表单、滑块、下拉框。
-    - 实现: UI Host 解析策略 Schema，自动生成表单。
-
-- **源码模式 (Source Code / YAML)**: 
-    - 适用场景: 批量复制策略、使用高级表达式 (如 `module:ctrip: 2`)。
-    - 交互: 嵌入式代码编辑器 (QScintilla)，支持 YAML 语法高亮与实时校验。
-    - 联动: 编辑器内容变更时，失去焦点即尝试解析并更新 Visual Form；反之亦然。
-
-### 2. 典型界面布局
-```
-+-------------------------------------------------------+
-|  Strategy: Default Conservative             [Save]    |
-+--------------------------+----------------------------+
-|  [Form View] | [YAML View]|                           |
-|                          |  concurrency:              |
-|  Global Max: [ 10 ]      |    global_max: 10          |
-|                          |    group_buckets:          |
-|  Group Quotas:           |      priority:high: 5      |
-|   + [High] : [ 5 ]       |                            |
-|   + [Add..]              |  provisioning:             |
-|                          |    mode: hybrid            |
-+--------------------------+----------------------------+
-```
-
-### 3. 校验反馈
-- **即时校验**: YAML 模式下，若格式错误，行号处显示红点。
-- **逻辑校验**: 保存时，若 `min > max` 或引用了不存在的模板，弹出 Toast 警告。

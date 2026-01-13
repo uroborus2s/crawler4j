@@ -1,0 +1,9 @@
+# ctrip 策略配置
+
+reliability:
+  max_retries: 3
+  backoff_factor: 2.0
+
+scheduling:
+  default_priority: 100
+  timeout_seconds: 300

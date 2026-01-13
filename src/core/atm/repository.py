@@ -12,8 +12,8 @@ import json
 from typing import Any
 
 from src.core.atm.models import TaskInstance, TaskResult, TaskStatus
+from src.core.foundation.logging import logger
 from src.core.persistence.database import STATE_DB, get_connection
-from src.utils.logger import logger
 
 
 class TaskRepository:

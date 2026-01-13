@@ -52,6 +52,30 @@ class WorkflowInfo:
 
 
 @dataclass
+class NavItemInfo:
+    """模块导航项信息。
+    
+    模块可声明自己的侧边栏导航项。
+    """
+    icon: str = "📦"  # 导航图标 (emoji 或图标名)
+    label: str = ""   # 导航标签
+    path: str = ""    # 路由路径 (默认为模块名)
+
+
+@dataclass
+class DetailMenuItem:
+    """模块详情页自定义菜单项。
+    
+    模块可在详情页左侧二级导航中添加自定义菜单。
+    固定菜单（基本信息、任务链）由 Core 提供，无需声明。
+    """
+    id: str           # 菜单唯一 ID
+    icon: str = "📋"  # 菜单图标
+    label: str = ""   # 显示标签
+    entry: str = ""   # 入口类名 (模块内的 Widget 类，如 "ui:AccountConfigPage")
+
+
+@dataclass
 class UIExtensionInfo:
     """UI 扩展信息。
     
@@ -64,6 +88,8 @@ class UIExtensionInfo:
     entry: str = ""  # 入口文件或配置
     trusted: bool = False  # 是否受信
     available: bool = True  # 是否可用
+    nav_item: NavItemInfo | None = None  # 模块导航项 (可选，已弃用)
+    detail_menu: list[DetailMenuItem] = field(default_factory=list)  # 详情页自定义菜单
 
 
 @dataclass
@@ -122,9 +148,30 @@ class ModuleManifest:
             ))
         
         ui_data = data.get("ui_extension", {})
+        nav_data = ui_data.get("nav_item")
+        nav_item = None
+        if nav_data:
+            nav_item = NavItemInfo(
+                icon=nav_data.get("icon", "📦"),
+                label=nav_data.get("label", ""),
+                path=nav_data.get("path", ""),
+            )
+        
+        # 解析详情页自定义菜单
+        detail_menu = []
+        for item in ui_data.get("detail_menu", []):
+            detail_menu.append(DetailMenuItem(
+                id=item.get("id", ""),
+                icon=item.get("icon", "📋"),
+                label=item.get("label", ""),
+                entry=item.get("entry", ""),
+            ))
+        
         ui_extension = UIExtensionInfo(
             type=ui_data.get("type", "none"),
             entry=ui_data.get("entry", ""),
+            nav_item=nav_item,
+            detail_menu=detail_menu,
         )
         
         return cls(

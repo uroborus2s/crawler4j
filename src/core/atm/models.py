@@ -28,6 +28,7 @@ class TaskStatus(StrEnum):
     FAILED = "failed"          # 执行失败
     CANCELLED = "cancelled"    # 已取消
     INTERRUPTED = "interrupted"  # 中断（崩溃恢复用）
+    SUSPENDED = "suspended"  # 已挂起（模块禁用时）
 
 
 @dataclass

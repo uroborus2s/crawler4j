@@ -1,6 +1,9 @@
-"""Logger module.
+"""日志系统 (Logging System)。
 
-Provides timestamped logging with Qt signal integration.
+统一日志门面，负责日志的分级、输出与信号集成：
+- 与 Python logging 模块集成
+- 提供 Qt 信号用于 UI 实时显示
+- 支持日志持久化回调
 """
 
 import logging
@@ -12,7 +15,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 
 class LogLevel(str, Enum):
-    """Log level enumeration."""
+    """日志级别枚举。"""
 
     DEBUG = "DEBUG"
     INFO = "INFO"
@@ -21,7 +24,7 @@ class LogLevel(str, Enum):
 
 
 class LogEntry:
-    """Represents a single log entry."""
+    """日志条目。"""
 
     def __init__(
         self,
@@ -36,13 +39,13 @@ class LogEntry:
         self.timestamp = timestamp or datetime.now()
 
     def __str__(self) -> str:
-        """Format log entry for display."""
+        """格式化日志条目用于显示。"""
         time_str = self.timestamp.strftime("%H:%M:%S")
         env_str = f"ENV-{self.environment_id}" if self.environment_id else "SYSTEM"
         return f"{time_str} [{self.level.value}] {env_str}: {self.message}"
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for storage."""
+        """转换为字典用于存储。"""
         return {
             "message": self.message,
             "level": self.level.value,
@@ -52,13 +55,13 @@ class LogEntry:
 
 
 class LogSignals(QObject):
-    """Qt signals for log events."""
+    """日志事件的 Qt 信号。"""
 
     log_added = pyqtSignal(object)  # LogEntry
 
 
 class AppLogger:
-    """Application logger with Qt signal support.
+    """应用日志器，支持 Qt 信号。
 
     Usage:
         logger = AppLogger()
@@ -69,7 +72,7 @@ class AppLogger:
     _instance: "AppLogger | None" = None
 
     def __new__(cls):
-        """Singleton pattern."""
+        """单例模式。"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
@@ -84,12 +87,12 @@ class AppLogger:
         self._max_entries = 1000
         self._storage_callback: Callable[[LogEntry], None] | None = None
 
-        # Also setup Python logging
+        # 设置 Python logging
         self._setup_python_logging()
         self._initialized = True
 
     def _setup_python_logging(self):
-        """Setup Python logging module."""
+        """设置 Python logging 模块。"""
         self._python_logger = logging.getLogger("crawler4j")
         self._python_logger.setLevel(logging.DEBUG)
 
@@ -100,7 +103,7 @@ class AppLogger:
         self._python_logger.addHandler(handler)
 
     def set_storage_callback(self, callback: Callable[[LogEntry], None]):
-        """Set callback for persisting logs to database."""
+        """设置日志持久化回调。"""
         self._storage_callback = callback
 
     def _log(
@@ -109,22 +112,22 @@ class AppLogger:
         level: LogLevel,
         environment_id: int | None = None,
     ):
-        """Internal log method."""
+        """内部日志方法。"""
         entry = LogEntry(message, level, environment_id)
 
-        # Store in memory
+        # 内存存储
         self._entries.append(entry)
         if len(self._entries) > self._max_entries:
             self._entries = self._entries[-self._max_entries :]
 
-        # Emit Qt signal
+        # 发送 Qt 信号
         self.signals.log_added.emit(entry)
 
         # Python logging
         log_func = getattr(self._python_logger, level.value.lower())
         log_func(str(entry))
 
-        # Persist to database if callback set
+        # 持久化回调
         if self._storage_callback:
             try:
                 self._storage_callback(entry)
@@ -132,19 +135,19 @@ class AppLogger:
                 self._python_logger.error(f"Failed to persist log: {e}")
 
     def debug(self, message: str, environment_id: int | None = None):
-        """Log debug message."""
+        """记录 DEBUG 级别日志。"""
         self._log(message, LogLevel.DEBUG, environment_id)
 
     def info(self, message: str, environment_id: int | None = None):
-        """Log info message."""
+        """记录 INFO 级别日志。"""
         self._log(message, LogLevel.INFO, environment_id)
 
     def warning(self, message: str, environment_id: int | None = None):
-        """Log warning message."""
+        """记录 WARNING 级别日志。"""
         self._log(message, LogLevel.WARNING, environment_id)
 
     def error(self, message: str, environment_id: int | None = None):
-        """Log error message."""
+        """记录 ERROR 级别日志。"""
         self._log(message, LogLevel.ERROR, environment_id)
 
     def get_entries(
@@ -152,14 +155,14 @@ class AppLogger:
         limit: int = 100,
         level: LogLevel | None = None,
     ) -> list[LogEntry]:
-        """Get recent log entries.
+        """获取最近的日志条目。
 
         Args:
-            limit: Maximum number of entries to return.
-            level: Filter by log level.
+            limit: 最大返回条目数。
+            level: 按级别过滤。
 
         Returns:
-            List of log entries, newest first.
+            日志条目列表，最新的在前。
         """
         entries = self._entries[-limit:]
         if level:
@@ -167,5 +170,39 @@ class AppLogger:
         return list(reversed(entries))
 
 
-# Global logger instance
+# 全局日志器实例
 logger = AppLogger()
+
+
+def setup_file_logging(log_dir: str | None = None):
+    """设置文件日志记录。
+    
+    Args:
+        log_dir: 日志目录路径。如果不提供，则不开启文件日志。
+    """
+    if not log_dir:
+        return
+
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+
+    log_path = Path(log_dir)
+    log_path.mkdir(parents=True, exist_ok=True)
+    
+    log_file = log_path / "crawler4j.log"
+    
+    # 10MB per file, max 5 backups
+    handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=10*1024*1024, 
+        backupCount=5, 
+        encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    handler.setLevel(logging.INFO)
+    
+    # Add to python logger
+    logger._python_logger.addHandler(handler)
+    logger.info(f"File logging initialized: {log_file}")

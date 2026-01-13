@@ -4,7 +4,7 @@ import cv2
 import ddddocr
 import numpy as np
 
-from src.utils.logger import logger
+from src.core.foundation.logging import logger
 
 
 class CaptchaSolver:

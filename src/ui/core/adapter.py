@@ -11,10 +11,10 @@ from typing import Any
 from src.core.atm import TaskRequest, TaskStatus, get_task_service
 
 # Core 模块导入
+from src.core.foundation import Event, EventBus, EventType, get_event_bus
 from src.core.mms import get_module_registry
 from src.core.persistence import get_config_store, init_database
 from src.ui.core.command_channel import CommandChannel, CoreCommands, get_command_channel
-from src.ui.core.event_bus import Event, EventBus, EventType, get_event_bus
 
 
 class CoreAdapter:

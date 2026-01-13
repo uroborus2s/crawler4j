@@ -21,8 +21,9 @@ from src.core.atm.models import (
 )
 from src.core.atm.repository import TaskRepository, get_task_repository
 from src.core.atm.runner import TaskRunner, get_task_runner
-from src.core.tsm import TaskSubmission, get_admission_controller
-from src.utils.logger import logger
+from src.core.foundation.event_bus import Event, EventType, get_event_bus
+from src.core.foundation.logging import logger
+from src.core.tsm import get_orchestrator
 
 
 class TaskService:
@@ -40,10 +41,49 @@ class TaskService:
         """初始化任务服务。"""
         self._repository = repository or get_task_repository()
         self._runner = runner or get_task_runner()
-        self._admission = get_admission_controller()
+        self._orchestrator = get_orchestrator()
         self._pending_queue: asyncio.Queue[TaskInstance] = asyncio.Queue()
         self._script_loader: Callable[[str, str], Any] | None = None
         self._context_factory: Callable[[TaskInstance], Any] | None = None
+        
+        # 订阅模块禁用事件
+        get_event_bus().subscribe(EventType.MODULE_DISABLED, self._on_module_disabled)
+        get_event_bus().subscribe(EventType.MODULE_ENABLED, self._on_module_enabled)
+    
+    def _on_module_disabled(self, event: Event) -> None:
+        """处理模块禁用事件：挂起依赖该模块的任务。"""
+        module_name = event.data.get("module_name", "")
+        if not module_name:
+            return
+        
+        suspended_count = 0
+        for status in [TaskStatus.PENDING, TaskStatus.QUEUED]:
+            tasks = self._repository.list_by_status(status)
+            for task in tasks:
+                if task.module == module_name:
+                    task.status = TaskStatus.SUSPENDED
+                    self._repository.save(task)
+                    suspended_count += 1
+        
+        if suspended_count > 0:
+            logger.info(f"[ATM] 模块 {module_name} 已禁用，{suspended_count} 个任务已挂起")
+    
+    def _on_module_enabled(self, event: Event) -> None:
+        """处理模块启用事件：恢复挂起的任务。"""
+        module_name = event.data.get("module_name", "")
+        if not module_name:
+            return
+        
+        resumed_count = 0
+        tasks = self._repository.list_by_status(TaskStatus.SUSPENDED)
+        for task in tasks:
+            if task.module == module_name:
+                task.status = TaskStatus.PENDING
+                self._repository.save(task)
+                resumed_count += 1
+        
+        if resumed_count > 0:
+            logger.info(f"[ATM] 模块 {module_name} 已启用，{resumed_count} 个任务已恢复")
     
     def configure(
         self,

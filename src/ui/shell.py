@@ -1,13 +1,12 @@
 """UI Shell - 全局布局容器。
 
 提供：
-    - 顶栏 (标题 + 状态)
+    - 顶栏 (标题 + 状态指示)
     - 侧边栏 (导航)
     - 内容区 (动态加载 Core 子系统 UI)
-    - 状态栏
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -20,12 +19,100 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.atm import TaskStatus, get_task_service
+
+
+class StatusIndicator(QFrame):
+    """顶栏状态指示器。"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+        self._setup_timer()
+    
+    def _setup_ui(self):
+        self.setFixedHeight(48)
+        self.setStyleSheet("""
+            StatusIndicator {
+                background: rgba(30, 30, 40, 0.95);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+        """)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 0, 20, 0)
+        
+        # 标题
+        title = QLabel("🕷️ Crawler4j")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
+        layout.addWidget(title)
+        
+        layout.addStretch()
+        
+        # 状态指示
+        self.running_label = QLabel("⏳ 0 运行中")
+        self.running_label.setStyleSheet("color: #facc15; font-size: 13px; padding: 0 12px;")
+        layout.addWidget(self.running_label)
+        
+        self.env_label = QLabel("🖥️ 0 环境")
+        self.env_label.setStyleSheet("color: #4ade80; font-size: 13px; padding: 0 12px;")
+        layout.addWidget(self.env_label)
+        
+        self.module_label = QLabel("📦 0 模块")
+        self.module_label.setStyleSheet("color: #60a5fa; font-size: 13px; padding: 0 12px;")
+        layout.addWidget(self.module_label)
+        
+        # 版本号显示
+        from src.core.system.version_service import get_current_version
+        self.version_label = QLabel(f"v{get_current_version()}")
+        self.version_label.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 12px;
+            padding: 0 12px;
+        """)
+        self.version_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.version_label.setToolTip("点击查看版本信息")
+        self.version_label.mousePressEvent = self._on_version_clicked
+        layout.addWidget(self.version_label)
+    
+    def _setup_timer(self):
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._refresh_status)
+        self._timer.start(3000)  # 每 3 秒刷新
+    
+    def _refresh_status(self):
+        try:
+            # 任务统计
+            service = get_task_service()
+            tasks = service.list_recent(50)
+            running = sum(1 for t in tasks if t.status == TaskStatus.RUNNING)
+            self.running_label.setText(f"⏳ {running} 运行中")
+            
+            # 模块统计
+            from src.core.mms import get_module_registry
+            registry = get_module_registry()
+            modules = registry.list_modules()
+            self.module_label.setText(f"📦 {len(modules)} 模块")
+        except Exception:
+            pass
+    
+    def _on_version_clicked(self, ev):
+        """版本号点击事件。"""
+        from src.core.system.ui import AboutDialog
+        dialog = AboutDialog(self.window())
+        dialog.exec()
+
 
 class Sidebar(QFrame):
-    """侧边栏导航。"""
+    """侧边栏导航。
     
-    nav_changed = pyqtSignal(str)  # 导航变更信号
+    仅包含 Core 系统功能的固定导航项。
+    模块配置入口在"模块管理"页面的模块详情中。
+    """
     
+    nav_changed = pyqtSignal(str)
+    
+    # Core 系统导航项
     NAV_ITEMS = [
         ("dashboard", "📊 仪表盘"),
         ("tasks", "📋 任务监控"),
@@ -49,18 +136,8 @@ class Sidebar(QFrame):
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 16, 0, 0)
         layout.setSpacing(0)
-        
-        # Logo
-        logo = QLabel("🕷️ Crawler4j")
-        logo.setStyleSheet("""
-            padding: 20px;
-            font-size: 18px;
-            font-weight: bold;
-            color: white;
-        """)
-        layout.addWidget(logo)
         
         # 导航列表
         self.nav_list = QListWidget()
@@ -70,7 +147,7 @@ class Sidebar(QFrame):
                 border: none;
             }
             QListWidget::item {
-                padding: 12px 20px;
+                padding: 14px 20px;
                 color: rgba(255, 255, 255, 0.7);
             }
             QListWidget::item:hover {
@@ -122,30 +199,43 @@ class Shell(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         
-        layout = QHBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # 顶栏状态
+        self.status_bar = StatusIndicator()
+        main_layout.addWidget(self.status_bar)
+        
+        # 主内容区
+        content_area = QWidget()
+        content_layout = QHBoxLayout(content_area)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
         
         # 侧边栏
         self.sidebar = Sidebar()
         self.sidebar.nav_changed.connect(self._on_nav_changed)
-        layout.addWidget(self.sidebar)
+        content_layout.addWidget(self.sidebar)
         
-        # 内容区
+        # 内容栈
         self.content_stack = QStackedWidget()
         self.content_stack.setStyleSheet("""
             QStackedWidget {
                 background-color: #1a1a24;
             }
         """)
-        layout.addWidget(self.content_stack)
+        content_layout.addWidget(self.content_stack)
+        
+        main_layout.addWidget(content_area)
     
     def _register_pages(self):
         """注册 Core 子系统页面。"""
         self._pages = {}
         
-        # 仪表盘 (占位)
-        self._add_page("dashboard", self._create_placeholder("仪表盘"))
+        # 仪表盘 - Dashboard
+        from src.ui.dashboard import DashboardPage
+        self._add_page("dashboard", DashboardPage())
         
         # 任务监控 - ATM UI
         from src.core.atm.ui import TaskListWidget
@@ -157,29 +247,30 @@ class Shell(QMainWindow):
         
         # 模块管理 - MMS UI
         from src.core.mms.ui import ModuleListWidget
-        self._add_page("modules", ModuleListWidget())
+        from src.core.mms.ui.module_detail_page import ModuleDetailPage
         
-        # 策略配置 - TSM UI
-        from src.core.tsm.ui import StrategyEditorPage
-        self._add_page("strategy", StrategyEditorPage())
+        modules_page = ModuleListWidget()
+        self._add_page("modules", modules_page)
         
-        # 系统设置 - Settings UI
-        from src.core.settings.ui import SettingsPage
+        # 模块详情页
+        self.module_detail_page = ModuleDetailPage()
+        self._add_page("module_detail", self.module_detail_page)
+        
+        # 连接信号: 列表页 → 详情页
+        modules_page.open_detail.connect(self._open_module_detail)
+        self.module_detail_page.back_requested.connect(self._back_to_modules)
+        
+        # 策略配置 - TSM UI (策略列表)
+        from src.core.tsm.ui import StrategyListWidget
+        self._add_page("strategy", StrategyListWidget())
+        
+        # 系统设置 - System UI
+        from src.core.system.ui import SettingsPage
         self._add_page("settings", SettingsPage())
     
     def _add_page(self, page_id: str, widget: QWidget):
         self._pages[page_id] = widget
         self.content_stack.addWidget(widget)
-    
-    def _create_placeholder(self, title: str) -> QWidget:
-        """创建占位页面。"""
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        label = QLabel(title)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("font-size: 24px; color: white;")
-        layout.addWidget(label)
-        return page
     
     def _on_nav_changed(self, nav_id: str):
         """导航变更处理。"""
@@ -190,3 +281,13 @@ class Shell(QMainWindow):
             # 如果页面有 load_data 方法，调用它
             if hasattr(widget, "load_data"):
                 widget.load_data()
+    
+    def _open_module_detail(self, module):
+        """打开模块详情页。"""
+        self.module_detail_page.set_module(module)
+        self.content_stack.setCurrentWidget(self.module_detail_page)
+    
+    def _back_to_modules(self):
+        """返回模块列表页。"""
+        if "modules" in self._pages:
+            self.content_stack.setCurrentWidget(self._pages["modules"])

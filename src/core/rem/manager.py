@@ -12,6 +12,7 @@ EnvironmentManager 是 REM 的统一入口，提供：
 import asyncio
 import time
 
+from src.core.foundation.logging import logger
 from src.core.rem.models import (
     EnvCleanupFailedError,
     Environment,
@@ -24,7 +25,6 @@ from src.core.rem.models import (
 )
 from src.core.rem.pool import EnvPool, LeaseManager
 from src.core.rem.provider import BaseProvider, get_provider, register_provider
-from src.utils.logger import logger
 
 
 class EnvironmentManager:

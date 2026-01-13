@@ -1,6 +1,6 @@
 """任务列表组件。
 
-显示任务执行状态和历史。
+显示任务执行状态和历史，支持停止/重试操作。
 """
 
 from datetime import datetime
@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QTableWidget,
@@ -27,7 +28,7 @@ class TaskListWidget(QWidget):
     
     task_selected = pyqtSignal(str)
     
-    COLUMNS = ["ID", "模块", "任务", "状态", "创建时间", "耗时"]
+    COLUMNS = ["ID", "模块", "任务", "状态", "创建时间", "耗时", "操作"]
     STATUS_COLORS = {
         TaskStatus.PENDING: "#60a5fa",
         TaskStatus.QUEUED: "#a78bfa",
@@ -64,6 +65,21 @@ class TaskListWidget(QWidget):
         header.addWidget(title)
         header.addStretch()
         
+        self.create_btn = QPushButton("+ 新建任务")
+        self.create_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(74, 222, 128, 0.8);
+                color: black;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: rgba(74, 222, 128, 1); }
+        """)
+        self.create_btn.clicked.connect(self._on_create_task)
+        header.addWidget(self.create_btn)
+
         self.refresh_btn = QPushButton("🔄 刷新")
         self.refresh_btn.setStyleSheet("""
             QPushButton {
@@ -101,7 +117,11 @@ class TaskListWidget(QWidget):
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header_view = self.table.horizontalHeader()
+        if header_view:
+            header_view.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            header_view.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(6, 120)
         self.table.setAlternatingRowColors(True)
         self.table.cellClicked.connect(self._on_cell_clicked)
         self.table.setStyleSheet("""
@@ -207,6 +227,28 @@ class TaskListWidget(QWidget):
             else:
                 self.table.setItem(row, 5, QTableWidgetItem("-"))
             
+            # 操作按钮
+            action_widget = QWidget()
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(4, 2, 4, 2)
+            action_layout.setSpacing(4)
+            
+            if task.status in {TaskStatus.RUNNING, TaskStatus.PENDING, TaskStatus.QUEUED}:
+                stop_btn = QPushButton("⏹ 停止")
+                stop_btn.setStyleSheet("background: #f87171; color: white; border: none; padding: 4px 8px; border-radius: 2px;")
+                stop_btn.clicked.connect(lambda _, tid=task.id: self._stop_task(tid))
+                action_layout.addWidget(stop_btn)
+            elif task.status == TaskStatus.FAILED:
+                retry_btn = QPushButton("🔄 重试")
+                retry_btn.setStyleSheet("background: #60a5fa; color: white; border: none; padding: 4px 8px; border-radius: 2px;")
+                retry_btn.clicked.connect(lambda _, tid=task.id: self._retry_task(tid))
+                action_layout.addWidget(retry_btn)
+            else:
+                # 已完成/已取消
+                action_layout.addWidget(QLabel("-"))
+            
+            self.table.setCellWidget(row, 6, action_widget)
+            
             if task.status == TaskStatus.RUNNING:
                 running += 1
         
@@ -219,6 +261,20 @@ class TaskListWidget(QWidget):
         
         self.prev_btn.setEnabled(self._page > 0)
         self.next_btn.setEnabled(self._page < total_pages - 1)
+    
+    def _stop_task(self, task_id: str):
+        """停止任务。"""
+        try:
+            service = get_task_service()
+            service.stop(task_id)
+            self.load_data()
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"停止失败: {e}")
+    
+    def _retry_task(self, task_id: str):
+        """重试任务。"""
+        # TODO: 实现重试逻辑
+        QMessageBox.information(self, "提示", f"重试功能开发中: {task_id[:8]}...")
     
     def _prev_page(self):
         if self._page > 0:
@@ -244,3 +300,15 @@ class TaskListWidget(QWidget):
         if id_item:
             task_id = id_item.data(Qt.ItemDataRole.UserRole)
             self.task_selected.emit(task_id)
+
+    def _on_create_task(self):
+        """新建任务。"""
+        from src.core.atm.ui.task_create_dialog import TaskCreateDialog
+
+        dialog = TaskCreateDialog(parent=self)
+        if dialog.exec() == dialog.DialogCode.Accepted:
+            data = dialog.get_task_data()
+            # TODO: 创建任务并保存
+            from src.core.foundation.logging import logger
+            logger.info(f"[ATM] 新建任务: {data['name']}, 策略: {data['strategy_id']}")
+            self.load_data()

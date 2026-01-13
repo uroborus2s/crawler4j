@@ -12,14 +12,16 @@ import shutil
 import zipfile
 from pathlib import Path
 
+from src.core.foundation.event_bus import Event, EventType, get_event_bus
+from src.core.foundation.logging import logger
 from src.core.mms.models import (
     ModuleInfo,
+    ModuleManifest,
     ModuleSource,
     ModuleStatus,
     WorkflowInfo,
 )
 from src.core.mms.scanner import ModuleScanner, get_module_scanner
-from src.utils.logger import logger
 from src.utils.paths import get_app_data_dir
 
 
@@ -102,6 +104,69 @@ class ModuleRegistry:
         
         logger.info(f"[MMS] 刷新完成: +{len(added)} -{len(removed)}")
         return summary
+    
+    # === 安装预览 ===
+    
+    def validate_source(self, source: str | Path) -> tuple[ModuleManifest, list[str]]:
+        """校验模块源并返回预览信息（不执行安装）。
+        
+        用于安装前预览模块信息，供用户确认后再安装。
+        
+        Args:
+            source: 模块源路径（目录或 .zip 文件）
+        
+        Returns:
+            (manifest, warnings) - 模块清单和警告列表
+        
+        Raises:
+            ModuleInstallError: 校验失败
+        """
+        import tempfile
+        
+        source_path = Path(source)
+        
+        if not source_path.exists():
+            raise ModuleInstallError(f"源路径不存在: {source}")
+        
+        temp_dir = None
+        try:
+            if source_path.suffix == ".zip":
+                # 解压到临时目录进行校验
+                temp_dir = tempfile.mkdtemp(prefix="mms_validate_")
+                temp_path = Path(temp_dir)
+                
+                with zipfile.ZipFile(source_path, 'r') as zf:
+                    # 安全检查
+                    for member in zf.namelist():
+                        if member.startswith('/') or '..' in member:
+                            raise ModuleInstallError(f"检测到路径穿越攻击: {member}")
+                    
+                    # 获取根目录
+                    root_dirs = {name.split('/')[0] for name in zf.namelist() if '/' in name}
+                    if len(root_dirs) != 1:
+                        raise ModuleInstallError("ZIP 包结构无效，应仅包含一个根目录")
+                    
+                    module_name = root_dirs.pop()
+                    zf.extractall(temp_path)
+                    module_path = temp_path / module_name
+            else:
+                module_path = source_path
+            
+            # 解析并校验 manifest
+            manifest = self._scanner.parse_manifest(module_path)
+            warnings = self._scanner.validate(manifest, module_path)
+            
+            # 检查是否已安装同名模块
+            existing = self.get_module(manifest.name)
+            if existing:
+                warnings.append(f"将覆盖已安装的模块 '{manifest.name}' (v{existing.manifest.version})")
+            
+            return manifest, warnings
+            
+        finally:
+            # 清理临时目录
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
     
     # === 安装/卸载 ===
     
@@ -257,6 +322,14 @@ class ModuleRegistry:
         
         module.status = ModuleStatus.ENABLED
         logger.info(f"[MMS] 已启用: {module_name}")
+        
+        # 发布事件
+        get_event_bus().publish(Event(
+            type=EventType.MODULE_ENABLED,
+            module_name=module_name,
+            data={"module_name": module_name}
+        ))
+        
         return True
     
     def disable_module(self, module_name: str) -> bool:
@@ -267,6 +340,14 @@ class ModuleRegistry:
         
         module.status = ModuleStatus.DISABLED
         logger.info(f"[MMS] 已禁用: {module_name}")
+        
+        # 发布事件，通知 ATM 挂起相关任务
+        get_event_bus().publish(Event(
+            type=EventType.MODULE_DISABLED,
+            module_name=module_name,
+            data={"module_name": module_name}
+        ))
+        
         return True
 
 

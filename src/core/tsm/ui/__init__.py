@@ -1,5 +1,14 @@
-"""TSM UI 模块 - 任务策略管理界面。"""
+"""TSM UI 模块。
 
-from src.core.tsm.ui.strategy_editor import StrategyEditorPage
+导出:
+    - StrategyListWidget: 策略列表页面
+    - StrategyDetailDialog: 策略详情编辑弹窗
+"""
 
-__all__ = ["StrategyEditorPage"]
+from src.core.tsm.ui.strategy_detail_dialog import StrategyDetailDialog
+from src.core.tsm.ui.strategy_list_widget import StrategyListWidget
+
+__all__ = [
+    "StrategyListWidget",
+    "StrategyDetailDialog",
+]

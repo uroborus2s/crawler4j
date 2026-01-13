@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "携程模块配置",
+  "description": "携程任务模块的运行参数配置",
+  "properties": {
+    "max_retries": {
+      "type": "integer",
+      "title": "最大重试次数",
+      "description": "任务失败后的最大重试次数",
+      "default": 3,
+      "minimum": 0,
+      "maximum": 10
+    },
+    "task_interval_min": {
+      "type": "integer",
+      "title": "任务间隔(最小)",
+      "description": "两次任务之间的最小间隔时间(秒)",
+      "default": 60,
+      "minimum": 10,
+      "maximum": 600
+    },
+    "task_interval_max": {
+      "type": "integer",
+      "title": "任务间隔(最大)",
+      "description": "两次任务之间的最大间隔时间(秒)",
+      "default": 180,
+      "minimum": 30,
+      "maximum": 1800
+    },
+    "similarity_threshold": {
+      "type": "number",
+      "title": "相似度阈值",
+      "description": "答案匹配的相似度阈值 (0-1)",
+      "default": 0.85,
+      "minimum": 0.5,
+      "maximum": 1.0
+    },
+    "auto_submit": {
+      "type": "boolean",
+      "title": "自动提交",
+      "description": "达到阈值后是否自动提交答案",
+      "default": true
+    }
+  }
+}

@@ -50,57 +50,10 @@ class ConfigStore:
         key = f"module:{module_name}:config"
         return self._set_config(key, config)
     
-    # === 全局设置 ===
-    
-    def get_setting(self, key: str, default: Any = None) -> Any:
-        """获取全局设置。
-        
-        Args:
-            key: 设置键名。
-            default: 默认值。
-        
-        Returns:
-            设置值或默认值。
-        """
-        with get_connection(CONFIG_DB) as conn:
-            cursor = conn.execute(
-                "SELECT value FROM settings WHERE key = ?",
-                (key,)
-            )
-            row = cursor.fetchone()
-            
-            if row:
-                try:
-                    return json.loads(row["value"])
-                except json.JSONDecodeError:
-                    return row["value"]
-            return default
-    
-    def set_setting(self, key: str, value: Any) -> bool:
-        """设置全局设置。
-        
-        Args:
-            key: 设置键名。
-            value: 设置值。
-        
-        Returns:
-            是否设置成功。
-        """
-        now = int(time.time())
-        value_json = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
-        
-        with get_connection(CONFIG_DB) as conn:
-            conn.execute(
-                """
-                INSERT INTO settings (key, value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    updated_at = excluded.updated_at
-                """,
-                (key, value_json, now)
-            )
-        return True
+    # === 全局设置 (已废弃/移除) ===
+    # 注意: 系统配置现在统一存储在 module:system:config 中，
+    # 不再使用单独的 settings 表。相关的 get_setting/set_setting 方法已移除。
+
     
     # === 私有方法 ===
     

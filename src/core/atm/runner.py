@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from src.core.atm.models import TaskExecutionError, TaskInstance, TaskResult, TaskStatus
 from src.core.atm.repository import TaskRepository, get_task_repository
-from src.utils.logger import logger
+from src.core.foundation.logging import logger
 
 
 class TaskRunner:

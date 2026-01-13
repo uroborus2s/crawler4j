@@ -4,6 +4,24 @@ description: 携程平台相关的所有任务（做题、上号等）
 version: 1.0.0
 author: crawler4j
 
+# UI 扩展配置
+ui_extension:
+  type: declarative
+  entry: config_schema.json
+  nav_item:
+    icon: "✈️"
+    label: "携程配置"
+  # 详情页自定义菜单
+  detail_menu:
+    - id: accounts
+      icon: "👤"
+      label: "账号管理"
+      entry: "ui:AccountConfigPage"
+    - id: stats
+      icon: "📊"
+      label: "运行统计"
+      entry: "ui:StatsPage"
+
 # 模块默认配置
 config:
   max_retries: 3

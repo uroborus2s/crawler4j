@@ -39,29 +39,26 @@ graph TD
         Shell[Main Shell Window]
         Dashboard[Dashboard & Monitor]
         ModuleLoaderUI[Module UI Loader]
-        StrategyEditor[Strategy Editor (Dual)]
+        StrategyEditor["Strategy Editor (Dual)"]
     end
 
     subgraph "Layer 2: Framework Core (Micro-kernel)"
-        EventBus[Event Bus (Pub/Sub)]
+        direction TB
+        MMS["MMS (Module Mgmt)"]
+        TSM["TSM (Task Strategy)"]
+        ATM["ATM (Automation Task)"]
+        REM["REM (Runtime Env)"]
         
-        subgraph "Task Governance"
-            Scheduler[Task Scheduler]
-            Admission[Admission Controller]
-            Matcher[Resource Matcher]
+        subgraph "SysCap (System Capabilities)"
+            UpdateService["Update Service"]
+            VersionService["Version Service"]
+            Preferences["Preferences"]
         end
         
-        subgraph "Runtime Management"
-            EnvMgr[Environment Manager]
-            EnvPool[Environment Pool]
-            Cleaner[Garbage Collector]
-        end
-        
-        subgraph "Services"
-            ModuleManager[Module Manager]
-            Persistence[State Persistence]
-            Logger[Logging Service]
-        end
+        %% Core Dependencies
+        MMS --> TSM
+        TSM --> ATM
+        ATM --> REM
     end
 
     subgraph "Layer 3: SDK (Contract Layer)"
@@ -79,31 +76,28 @@ graph TD
     end
 
     %% Dependencies
-    Shell --> Scheduler
-    Shell --> ModuleManager
+    %% Dependencies
+    Shell --> MMS
+    Shell --> TSM
     Shell --> EventBus
     
-    Scheduler --> EventBus
-    Scheduler --> EnvMgr
+    TSM --> EventBus
+    TSM --> REM
     
-    EnvMgr --> ExtProviders
+    REM --> ExtProviders
     Persistence --> DB
     
-    Layer 3: SDK (Contract Layer) -.-> Layer 2: Framework Core (Micro-kernel) : Implemented By
+
 ```
 
 ### 3.2 核心子系统详解
 
 #### 1. Framework Core (微内核)
-- **Task Strategy Management (TSM)**: 负责任务的“准入”与“撮合”。
-    - `Admission Controller`: 基于策略（并发限制/优先级）决定任务是立即执行还是排队。
-    - `Resource Matcher`: 负责为任务匹配或创建合适的 Execution Environment。
-- **Runtime Environment Management (REM)**: 负责“环境”的生命周期。
-    - 管理环境池（Pool），处理环境的创建（Create）、分配（Lease）、回收（Release/GC）。
-    - 适配多种 Provider（Playwright, Hub, Local）。
-- **Module Management**:
-    - 负责扫描、验证、加载“标准模块包”。
-    - 维护模块的配置快照与版本控制。
+- **Module Management System (MMS)**: 负责模块全生命周期管理（扫描、加载、校验、版本）。
+- **Task Strategy Management (TSM)**: 负责任务的“准入”与“撮合”（优先级、并发控制）。
+- **Automation Task Management (ATM)**: 负责任务执行生命周期（上下文注入、异常处理）。
+- **Runtime Environment Management (REM)**: 负责“环境”的生命周期（池化、分配、回收）。
+- **System Capabilities (SysCap)**: 提供 OTA 升级、版本管理、偏好设置等基础能力。
 
 #### 2. SDK (契约层)
 - 定义 Module 与 Core 交互的唯一标准。

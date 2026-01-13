@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from playwright.async_api import Page
 
-from src.utils.logger import logger
+from src.core.foundation.logging import logger
 
 
 @dataclass
