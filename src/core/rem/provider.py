@@ -213,3 +213,138 @@ def get_provider(name: str) -> BaseProvider | None:
 def list_providers() -> list[str]:
     """列出所有已注册的提供者。"""
     return list(_providers.keys())
+
+
+class BitBrowserProvider(BaseProvider):
+    """BitBrowser 指纹浏览器提供者。"""
+
+    name = "bitbrowser"
+    kind = EnvKind.BROWSER
+
+    async def create(self, config: dict[str, Any] | None = None) -> Environment:
+        """创建 BitBrowser 环境。"""
+        from playwright.async_api import async_playwright
+
+        from src.core.foundation.logging import logger
+        from src.core.rem.models import Environment, EnvStatus
+        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
+
+        #读取配置
+        prefs = get_preferences_service()
+        port = prefs.get(PreferenceKey.BITBROWSER_PORT, 54345)
+        path = prefs.get(PreferenceKey.BITBROWSER_PATH, "")
+
+        logger.info(f"Connecting to BitBrowser at port {port} (Path: {path})")
+
+        # 启动 Playwright
+        playwright = await async_playwright().start()
+
+        try:
+            # 连接到已打开的浏览器 (CDP)
+            # 真实场景可能需要先通过 API 启动浏览器窗口获取调试端口
+            # 这里简化为直接连接配置的端口
+            browser = await playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+            
+            # 获取默认上下文
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = context.pages[0] if context.pages else await context.new_page()
+
+            return Environment(
+                kind=EnvKind.BROWSER,
+                provider=self.name,
+                status=EnvStatus.READY,
+                labels={"browser": "bitbrowser", "port": str(port)},
+                capabilities={"page", "cookies", "fingerprint"},
+                handle={
+                    "playwright": playwright,
+                    "browser": browser,
+                    "context": context,
+                    "page": page,
+                },
+            )
+        except Exception as e:
+            await playwright.stop()
+            raise RuntimeError(f"Failed to connect to BitBrowser: {e}")
+
+    async def reset(self, env: Environment) -> bool:
+        # BitBrowser 通常不需要重置，或者通过 API 重置
+        return True
+
+    async def health_check(self, env: Environment) -> bool:
+        return True
+
+    async def destroy(self, env: Environment) -> None:
+        # 释放连接但不关闭浏览器进程
+        handle = env.handle
+        if handle:
+            if handle.get("browser"):
+                await handle["browser"].close()
+            if handle.get("playwright"):
+                await handle["playwright"].stop()
+
+
+class VirtualBrowserProvider(BaseProvider):
+    """VirtualBrowser 指纹浏览器提供者。"""
+
+    name = "virtualbrowser"
+    kind = EnvKind.BROWSER
+
+    async def create(self, config: dict[str, Any] | None = None) -> Environment:
+        """创建 VirtualBrowser 环境。"""
+        from playwright.async_api import async_playwright
+
+        from src.core.foundation.logging import logger
+        from src.core.rem.models import Environment, EnvStatus
+        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
+
+        # 读取配置
+        prefs = get_preferences_service()
+        port = prefs.get(PreferenceKey.VIRTUALBROWSER_PORT, 9022)
+        path = prefs.get(PreferenceKey.VIRTUALBROWSER_PATH, "")
+        api_key = prefs.get(PreferenceKey.VIRTUALBROWSER_API_KEY, "")
+
+        logger.info(f"Connecting to VirtualBrowser at port {port} (Path: {path}, API Key present: {bool(api_key)})")
+
+        playwright = await async_playwright().start()
+
+        try:
+            browser = await playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = context.pages[0] if context.pages else await context.new_page()
+
+            return Environment(
+                kind=EnvKind.BROWSER,
+                provider=self.name,
+                status=EnvStatus.READY,
+                labels={"browser": "virtualbrowser", "port": str(port)},
+                capabilities={"page", "cookies", "fingerprint"},
+                handle={
+                    "playwright": playwright,
+                    "browser": browser,
+                    "context": context,
+                    "page": page,
+                },
+            )
+        except Exception as e:
+            await playwright.stop()
+            raise RuntimeError(f"Failed to connect to VirtualBrowser: {e}")
+
+    async def reset(self, env: Environment) -> bool:
+        return True
+
+    async def health_check(self, env: Environment) -> bool:
+        return True
+
+    async def destroy(self, env: Environment) -> None:
+        handle = env.handle
+        if handle:
+            if handle.get("browser"):
+                await handle["browser"].close()
+            if handle.get("playwright"):
+                await handle["playwright"].stop()
+
+# 注册默认提供者
+register_provider(PlaywrightProvider())
+register_provider(BitBrowserProvider())
+register_provider(VirtualBrowserProvider())
+

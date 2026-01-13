@@ -174,16 +174,22 @@ class AppLogger:
 logger = AppLogger()
 
 
-def setup_file_logging(log_dir: str | None = None):
+def setup_file_logging(
+    log_dir: str | None = None,
+    level: str = "INFO",
+    retention_days: int = 14
+):
     """设置文件日志记录。
     
     Args:
         log_dir: 日志目录路径。如果不提供，则不开启文件日志。
+        level: 日志级别 (DEBUG, INFO, WARNING, ERROR).
+        retention_days: 日志保留天数.
     """
     if not log_dir:
         return
 
-    from logging.handlers import RotatingFileHandler
+    from logging.handlers import TimedRotatingFileHandler
     from pathlib import Path
 
     log_path = Path(log_dir)
@@ -191,18 +197,27 @@ def setup_file_logging(log_dir: str | None = None):
     
     log_file = log_path / "crawler4j.log"
     
-    # 10MB per file, max 5 backups
-    handler = RotatingFileHandler(
-        log_file, 
-        maxBytes=10*1024*1024, 
-        backupCount=5, 
+    # 按天滚动，保留 retention_days 天
+    handler = TimedRotatingFileHandler(
+        log_file,
+        when="midnight",
+        interval=1,
+        backupCount=retention_days,
         encoding="utf-8"
     )
+    
     handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     )
-    handler.setLevel(logging.INFO)
+    
+    # 设置级别
+    log_level = getattr(logging, level.upper(), logging.INFO)
+    handler.setLevel(log_level)
+    
+    # 同时调整 logger 自身的级别，确保 handler 能接收到
+    logger._python_logger.setLevel(min(logger._python_logger.level, log_level))
     
     # Add to python logger
     logger._python_logger.addHandler(handler)
-    logger.info(f"File logging initialized: {log_file}")
+    logger.info(f"File logging initialized: {log_file} (Level={level}, Retention={retention_days} days)")
+
