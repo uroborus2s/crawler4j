@@ -117,6 +117,8 @@ class ScalingPolicy(BaseModel):
     min_idle: int = Field(default=0, ge=0, description="保持最小空闲实例数(预热)")
     init_workflow: Optional[str] = Field(default=None, description="新环境初始化工作流(e.g., login)")
     creation_timeout: int = Field(default=120, ge=0, description="创建新环境超时(秒)")
+    # [新增] 环境创建参数 (Proxy, Fingerprint etc.)
+    creation_params: Dict[str, Any] = Field(default_factory=dict, description="环境创建参数(IP, 指纹等)")
 
 
 class ExecutionContext(BaseModel):
@@ -124,6 +126,10 @@ class ExecutionContext(BaseModel):
     module: str
     workflow: str = "default"
     params: Dict[str, Any] = Field(default_factory=dict)
+    
+    # [新增] 并发度，默认为 1
+    concurrency: int = Field(default=1, ge=1, description="并发执行实例数")
+    
     timeout: int = Field(default=600, ge=0, description="执行超时(秒)")
 
 

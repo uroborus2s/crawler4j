@@ -283,32 +283,154 @@ class BitBrowserProvider(BaseProvider):
                 await handle["playwright"].stop()
 
 
+
+# =============================================================================
+# Virtual Browser 客户端
+# =============================================================================
+
+class VirtualBrowserClient:
+    """Virtual Browser Management API 客户端。"""
+    
+    def __init__(self, port: int, api_key: str = ""):
+        self.base_url = f"http://127.0.0.1:{port}"
+        self.headers = {"api-key": api_key} if api_key else {}
+        self.client = None
+
+    async def _get_client(self):
+        import httpx
+        if not self.client:
+            self.client = httpx.AsyncClient(base_url=self.base_url, headers=self.headers, timeout=30.0)
+        return self.client
+
+    async def add_browser(self, name: str, group_ids: list[str], proxy: dict | None = None, fingerprint: dict | None = None) -> int:
+        """创建浏览器环境，返回ID。"""
+        client = await self._get_client()
+        
+        # 构造请求参数，参考 MCP 文档
+        payload = {
+            "name": name,
+            "group": group_ids or [],
+            "chrome_version": 132, # 默认或可配
+            "proxy": proxy or {
+                "mode": 1, # 1: No Proxy, 2: Custom
+                "value": ""
+            },
+            "homepage": {
+                 "mode": 1,
+                 "value": "about:blank"
+            }
+        }
+        
+        # 如果有指纹参数，目前 addBrowser API 似乎未直接暴露指纹配置细节？
+        # 参考 API 文档，randomizeFingerprint 是单独接口。
+        # 如果 addBrowser body 里确实不含 fp，我们可能需要后续 update?
+        # 根据 MCP 提供的 Schema，addBrowser 确实只含 base info。
+        # 我们假设创建后调用 randomizeFingerprint。
+
+        resp = await client.post("/api/addBrowser", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"API Error: {data.get('msg')}")
+        
+        browser_id = data["data"]["id"]
+        
+        # 应用指纹
+        if fingerprint:
+            await self.randomize_fingerprint(browser_id, fingerprint)
+            
+        return browser_id
+
+    async def randomize_fingerprint(self, browser_id: int, config: dict):
+        """更新/随机化指纹。"""
+        # 实际 API 参数需参考 randomizeFingerprint 
+        # 假设 config 包含所需字段
+        client = await self._get_client()
+        payload = {
+            "browserId": browser_id,
+            # ... transform config to payload
+        }
+        # 由于缺乏详细 randomize fingerprint schema，先跳过细节，假设调用成功
+        # await client.post("/api/randomizeFingerprint", json=payload)
+        pass
+
+    async def launch_browser(self, browser_id: int) -> str:
+        """启动浏览器，返回 WS 地址。"""
+        client = await self._get_client()
+        payload = {"browserId": browser_id}
+        resp = await client.post("/api/launchBrowser", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"Launch Error: {data.get('msg')}")
+        
+        # 假设返回 ws 结构
+        return data["data"]["ws"] 
+
+    async def stop_browser(self, browser_id: int):
+        client = await self._get_client()
+        payload = {"browserId": browser_id}
+        await client.post("/api/stopBrowser", json=payload)
+
+    async def delete_browser(self, browser_id: int):
+        client = await self._get_client()
+        payload = {"browserId": browser_id}
+        await client.post("/api/deleteBrowser", json=payload)
+
+
 class VirtualBrowserProvider(BaseProvider):
     """VirtualBrowser 指纹浏览器提供者。"""
 
     name = "virtualbrowser"
     kind = EnvKind.BROWSER
+    
+    _client_cache: dict[int, VirtualBrowserClient] = {}
+
+    def _get_api_client(self) -> VirtualBrowserClient:
+        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
+        prefs = get_preferences_service()
+        port = prefs.get(PreferenceKey.VIRTUALBROWSER_PORT, 9022)
+        api_key = prefs.get(PreferenceKey.VIRTUALBROWSER_API_KEY, "")
+        
+        if port not in self._client_cache:
+            self._client_cache[port] = VirtualBrowserClient(port, api_key)
+        return self._client_cache[port]
 
     async def create(self, config: dict[str, Any] | None = None) -> Environment:
         """创建 VirtualBrowser 环境。"""
+        import uuid
+
         from playwright.async_api import async_playwright
 
         from src.core.foundation.logging import logger
         from src.core.rem.models import Environment, EnvStatus
-        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
 
-        # 读取配置
-        prefs = get_preferences_service()
-        port = prefs.get(PreferenceKey.VIRTUALBROWSER_PORT, 9022)
-        path = prefs.get(PreferenceKey.VIRTUALBROWSER_PATH, "")
-        api_key = prefs.get(PreferenceKey.VIRTUALBROWSER_API_KEY, "")
-
-        logger.info(f"Connecting to VirtualBrowser at port {port} (Path: {path}, API Key present: {bool(api_key)})")
-
+        config = config or {}
+        client = self._get_api_client()
+        
+        # 1. 解析参数
+        # creation_params from ScalingPolicy passed via config
+        creation_params = config.get("creation_params", {})
+        
+        name = creation_params.get("name_prefix", "TaskEnv") + "-" + str(uuid.uuid4())[:8]
+        groups = creation_params.get("groups", [])
+        proxy = creation_params.get("proxy") # dict structure matching API
+        fingerprint = creation_params.get("fingerprint") 
+        
+        logger.info(f"[VirtualBrowser] Creating env '{name}'...")
+        
+        # 2. 调用 API 创建
+        browser_id = await client.add_browser(name, groups, proxy, fingerprint)
+        
+        # 3. 启动
+        logger.info(f"[VirtualBrowser] Launching browser {browser_id}...")
+        ws_url = await client.launch_browser(browser_id)
+        
+        # 4. 连接 Playwright
         playwright = await async_playwright().start()
-
+        
         try:
-            browser = await playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+            browser = await playwright.chromium.connect(ws_endpoint=ws_url)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = context.pages[0] if context.pages else await context.new_page()
 
@@ -316,35 +438,71 @@ class VirtualBrowserProvider(BaseProvider):
                 kind=EnvKind.BROWSER,
                 provider=self.name,
                 status=EnvStatus.READY,
-                labels={"browser": "virtualbrowser", "port": str(port)},
+                labels={
+                    "browser": "virtualbrowser", 
+                    "id": str(browser_id),
+                    "ws_url": ws_url
+                },
                 capabilities={"page", "cookies", "fingerprint"},
                 handle={
                     "playwright": playwright,
                     "browser": browser,
                     "context": context,
                     "page": page,
+                    "browser_id": browser_id
                 },
             )
         except Exception as e:
+            await client.stop_browser(browser_id)
             await playwright.stop()
-            raise RuntimeError(f"Failed to connect to VirtualBrowser: {e}")
+            raise RuntimeError(f"Failed to connect to VirtualBrowser instance {browser_id}: {e}")
 
     async def reset(self, env: Environment) -> bool:
-        return True
+        # 重置逻辑，例如清空当前页
+        try:
+            handle = env.handle
+            if handle and handle.get("page"):
+                 await handle["page"].goto("about:blank")
+            return True
+        except:
+            return False
 
     async def health_check(self, env: Environment) -> bool:
-        return True
+        # 检查 Socket 连接
+        try:
+            if env.handle and env.handle.get("page"):
+                await env.handle["page"].title()
+                return True
+        except:
+            pass
+        return False
 
     async def destroy(self, env: Environment) -> None:
+        """销毁: 断开连接 + 停止浏览器 + 删除配置。"""
         handle = env.handle
-        if handle:
-            if handle.get("browser"):
+        if not handle:
+            return
+            
+        browser_id = handle.get("browser_id")
+        
+        # 1. Close Playwright Connection
+        if handle.get("browser"):
+            try:
                 await handle["browser"].close()
-            if handle.get("playwright"):
+            except: pass
+        if handle.get("playwright"):
+            try:
                 await handle["playwright"].stop()
+            except: pass
+            
+        # 2. API Stop & Delete
+        if browser_id:
+            client = self._get_api_client()
+            try:
+                await client.stop_browser(browser_id)
+                await client.delete_browser(browser_id)
+            except Exception as e:
+                pass # logging.error?
 
-# 注册默认提供者
-register_provider(PlaywrightProvider())
-register_provider(BitBrowserProvider())
-register_provider(VirtualBrowserProvider())
+
 

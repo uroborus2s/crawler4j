@@ -61,6 +61,7 @@ class AutomationTask:
             "strategy_id": self.strategy_id,
             "cron_expression": self.cron_expression,
             "default_params": self.default_params,
+            "max_executions": self.max_executions,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -73,6 +74,7 @@ class AutomationTask:
             strategy_id=data.get("strategy_id", ""),
             cron_expression=data.get("cron_expression"),
             default_params=data.get("default_params", {}),
+            max_executions=data.get("max_executions"),
             created_at=data.get("created_at", int(time.time())),
             updated_at=data.get("updated_at", int(time.time())),
         )

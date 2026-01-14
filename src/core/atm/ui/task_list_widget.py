@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.atm.models import AutomationTask, TaskStatus
 from src.core.atm.service import get_task_service
+from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.ui.components.table import SkyTableWidget
 
 
@@ -57,10 +58,33 @@ class TaskListWidget(QWidget):
         self._page_size = 20
         self._setup_ui()
         
-        # 自动刷新定时器
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._auto_refresh)
-        self._timer.start(5000)  # 5秒刷新一次
+        self._setup_ui()
+        
+        # 初始加载 (Delay to ensure loop is running)
+        QTimer.singleShot(0, self.load_data)
+        
+        # 订阅事件
+        bus = get_event_bus()
+        bus.subscribe(EventType.TASK_CONFIG_CREATED, self._on_task_changed)
+        bus.subscribe(EventType.TASK_CONFIG_DELETED, self._on_task_changed)
+        bus.subscribe(EventType.TASK_STARTED, self._on_task_changed)
+        bus.subscribe(EventType.TASK_FINISHED, self._on_task_changed)
+        bus.subscribe(EventType.TASK_FAILED, self._on_task_changed)
+        bus.subscribe(EventType.TASK_CANCELLED, self._on_task_changed)
+
+    def _on_task_changed(self, event: Event):
+        """事件回调：刷新列表。"""
+        # EventBus is thread-safe (emits signal), but we need to ensure we run on UI thread?
+        # EventBus.event_emitted connects to _dispatch. 
+        # But _dispatch runs in the thread that emitted the signal? 
+        # Wait, if EventBus emits pyqtSignal, the slot connected to it runs in the thread of the receiver (load_data is on QWidget which is main thread).
+        # Ah, EventBus subscribers are callbacks. 
+        # If EventBus.event_emitted is connected to _dispatch, and _dispatch calls handlers directly.
+        # If 'event_emitted' is emitted from background thread, and EventBus lives in Main Thread, then _dispatch runs in Main Thread (QueuedConnection).
+        # Yes, EventBus is QObject.
+        # We need to make sure `load_data` is safe to call.
+        # load_data calls `asyncio.create_task`, which is safe if loop is running.
+        self.load_data()
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -157,28 +181,37 @@ class TaskListWidget(QWidget):
         layout.addLayout(pagination)
     
     def load_data(self):
-        """加载任务数据。"""
+        """加载任务数据 (Async wrapper)。"""
+        asyncio.create_task(self._load_data_async())
+
+    async def _load_data_async(self):
+        """异步加载数据。"""
         self._show_loading(True)
         self.error_label.hide()
         
         try:
             service = get_task_service()
-            self._tasks = service.list_tasks()  # 获取配置列表
-            self._render_page()
+            self._tasks = await service.list_tasks()  # async await
+            await self._render_page()
         except Exception as e:
-            self._show_loading(False)
             self.error_label.setText(f"❌ 加载失败: {e}")
             self.error_label.show()
-            return
-        
-        self._show_loading(False)
+        finally:
+             self._show_loading(False)
+             
+    def closeEvent(self, event):
+        """清理资源。"""
+        # Unsubscribe
+        bus = get_event_bus()
+        bus.unsubscribe(EventType.TASK_CONFIG_CREATED, self._on_task_changed)
+        bus.unsubscribe(EventType.TASK_CONFIG_DELETED, self._on_task_changed)
+        bus.unsubscribe(EventType.TASK_STARTED, self._on_task_changed)
+        bus.unsubscribe(EventType.TASK_FINISHED, self._on_task_changed)
+        bus.unsubscribe(EventType.TASK_FAILED, self._on_task_changed)
+        bus.unsubscribe(EventType.TASK_CANCELLED, self._on_task_changed)
+        super().closeEvent(event)
 
-    def _auto_refresh(self):
-        """自动刷新数据（静默模式）。"""
-        if self.isVisible():
-            self.load_data()
-
-    def _render_page(self):
+    async def _render_page(self):
         """渲染当前页。"""
         self.table.setRowCount(0)
         service = get_task_service()
@@ -194,7 +227,7 @@ class TaskListWidget(QWidget):
             self.table.insertRow(row)
             
             # Fetch last run info
-            last_run = service.get_last_run(task.id)
+            last_run = await service.get_last_run(task.id)
             status = last_run.status if last_run else TaskStatus.IDLE
             
             # 1. 任务名称
@@ -308,21 +341,29 @@ class TaskListWidget(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            if get_task_service().delete_task(task_id):
-                self.load_data()
-            else:
-                QMessageBox.warning(self, "错误", "删除失败")
+            asyncio.create_task(self._async_delete_task(task_id))
+
+    async def _async_delete_task(self, task_id: str):
+        try:
+            success = await get_task_service().delete_task(task_id)
+            if not success:
+               # QMessageBox from async context might be tricky if not on main thread? 
+               # asyncio loop runs on main thread with qasync, so it is safe.
+               QMessageBox.warning(self, "错误", "删除失败")
+            # load_data is triggered by event bus
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"删除异常: {e}")
 
     def _prev_page(self):
         if self._page > 0:
             self._page -= 1
-            self._render_page()
+            asyncio.create_task(self._render_page())
     
     def _next_page(self):
         total_pages = (len(self._tasks) + self._page_size - 1) // self._page_size
         if self._page < total_pages - 1:
             self._page += 1
-            self._render_page()
+            asyncio.create_task(self._render_page())
     
     def _show_loading(self, show: bool):
         if show:
@@ -333,8 +374,20 @@ class TaskListWidget(QWidget):
             self.refresh_btn.setEnabled(True)
     
     def _on_cell_clicked(self, row: int, col: int):
-        # 选中行逻辑
-        pass
+        # 忽略操作列
+        if col == 6:
+            return
+            
+        # 获取任务ID
+        name_item = self.table.item(row, 0)
+        if not name_item:
+            return
+        task_id = name_item.data(Qt.ItemDataRole.UserRole)
+        
+        # 打开详情
+        from src.core.atm.ui.task_detail_dialog import TaskDetailDialog
+        dialog = TaskDetailDialog(task_id, parent=self)
+        dialog.exec()
 
     def _on_create_task(self):
         """新建任务。"""
@@ -343,13 +396,16 @@ class TaskListWidget(QWidget):
         dialog = TaskCreateDialog(parent=self)
         if dialog.exec() == dialog.DialogCode.Accepted:
             data = dialog.get_task_data()
-            try:
-                get_task_service().create_task(
-                    name=data['name'], 
-                    strategy_id=data['strategy_id'],
-                    cron=data.get('cron')
-                )
-                self.load_data()
-            except Exception as e:
-                QMessageBox.critical(self, "创建失败", str(e))
+            asyncio.create_task(self._async_create_task(data))
+
+    async def _async_create_task(self, data):
+        try:
+            await get_task_service().create_task(
+                name=data['name'], 
+                strategy_id=data['strategy_id'],
+                cron=data.get('cron')
+            )
+            # No need to manual refresh, EventBus will trigger it
+        except Exception as e:
+            QMessageBox.critical(self, "创建失败", str(e))
 

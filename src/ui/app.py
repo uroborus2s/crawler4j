@@ -40,15 +40,28 @@ def main():
         app.setWindowIcon(QIcon(str(icon_path)))
     
     # 创建主窗口
-    window = Shell()
+    try:
+        import asyncio
+
+        import qasync
+    except ImportError:
+        print("Error: qasync is required but not installed.")
+        sys.exit(1)
+
+    # Setup qasync loop
+    loop = qasync.QEventLoop(app)
+    asyncio.set_event_loop(loop)
     
-    if prefs.get(PreferenceKey.MINIMIZE_ON_START, False):
-        window.showMinimized()
-    else:
-        window.show()
-    
-    # 运行事件循环
-    sys.exit(app.exec())
+    with loop:
+        window = Shell()
+        
+        if prefs.get(PreferenceKey.MINIMIZE_ON_START, False):
+            window.showMinimized()
+        else:
+            window.show()
+        
+        # 运行事件循环
+        loop.run_forever()
 
 
 if __name__ == "__main__":

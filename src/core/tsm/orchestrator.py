@@ -106,38 +106,82 @@ class StrategyOrchestrator:
         self,
         strategy: TaskStrategy,
         log_callback: LogCallback | None = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> OrchestratorResult:
         """执行策略编排。
         
         目前简化为单实例执行 (针对 Task V2 逻辑)。
         未来可扩展为多实例并发 (Orchestrator 调度多个 Worker)。
+
+        Args:
+            strategy: 策略配置
+            log_callback: 日志回调
+            cancel_event: 取消信号 (由调用者控制生命周期)
         """
         if not self._rem or not self._mms:
             raise RuntimeError("Orchestrator 依赖未注入")
 
-        self._cancel_event = asyncio.Event()
+        # 使用传入的 event 或创建临时的 (无法外部取消)
+        cancellation = cancel_event or asyncio.Event()
+        
         started_at = int(time.time())
         
-        # 为了兼容 V1 接口，这里只跑一个实例用于验证 V2 逻辑
-        # 实际生产应循环 strategy.concurrency 或 scaling 配置
+        # Determine concurrency
+        concurrency = strategy.execution.concurrency if strategy.execution else 1
         
-        instance_result = await self._run_logic_v2(strategy, "task-001", log_callback)
+        logger.info(f"[TSM] Executing strategy {strategy.id} with concurrency={concurrency}")
+
+        # Create tasks
+        tasks = []
+        for i in range(concurrency):
+            # Unique ID for each instance task (e.g. task-001-0, task-001-1)
+            # Since execute interface doesn't take task_id, we generate one or use strategy.id?
+            # Existing code passed "task-001".
+            sub_task_id = f"task-{started_at}-{i}"
+            tasks.append(
+                asyncio.create_task(
+                    self._run_logic_v2(strategy, sub_task_id, log_callback, cancellation)
+                )
+            )
+            
+        # Wait for all
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        instance_results: list[InstanceResult] = []
+        for res in results:
+            if isinstance(res, InstanceResult):
+                instance_results.append(res)
+            else:
+                logger.error(f"[TSM] Instance crashed: {res}")
+                instance_results.append(InstanceResult(
+                    env_id="CRASH", success=False, error=str(res), 
+                    started_at=started_at, ended_at=int(time.time())
+                ))
         
         ended_at = int(time.time())
+        
+        # Aggregation
+        total = len(instance_results)
+        succeeded = sum(1 for r in instance_results if r.success)
+        failed = total - succeeded
+        
+        # Strategy success definition: All success? Or partial?
+        overall_success = (failed == 0)
+        
         return OrchestratorResult(
             strategy_id=strategy.id,
-            success=instance_result.success,
-            total_instances=1,
-            succeeded_instances=1 if instance_result.success else 0,
-            failed_instances=0 if instance_result.success else 1,
-            results=[instance_result],
+            success=overall_success,
+            total_instances=total,
+            succeeded_instances=succeeded,
+            failed_instances=failed,
+            results=instance_results,
             started_at=started_at,
             ended_at=ended_at,
         )
 
-    async def cancel(self):
-        if self._cancel_event:
-            self._cancel_event.set()
+    # Global cancel removed to prevent concurrency bugs.
+    # Callers must maintain their own cancel_event passed to execute().
 
     # --- V2 Core Logic ---
 
@@ -146,6 +190,7 @@ class StrategyOrchestrator:
         strategy: TaskStrategy,
         task_id: str,
         cb: LogCallback | None,
+        cancel_event: asyncio.Event,
     ) -> InstanceResult:
         """执行 V2 核心逻辑流: Find -> Scale -> Exec -> Retry -> Teardown"""
         
@@ -170,16 +215,36 @@ class StrategyOrchestrator:
                 if strategy.execution:
                     self._log(cb, env_id, "INFO", f"执行任务: {strategy.execution.workflow}")
                     
-                    # 带有超时控制
-                    result = await asyncio.wait_for(
+                    # 带有超时控制和取消支持
+                    exec_task = asyncio.create_task(
                         self._mms.execute(
                             strategy.execution.module,
                             strategy.execution.workflow,
                             env_id,
                             strategy.execution.params
-                        ),
+                        )
+                    )
+                    
+                    # Wait for execution OR cancellation OR timeout
+                    # Timeout logic is inside strategy, or we use asyncio.wait
+                    # Combined wait:
+                    done, pending = await asyncio.wait(
+                        [exec_task, asyncio.create_task(cancel_event.wait())],
+                        return_when=asyncio.FIRST_COMPLETED,
                         timeout=strategy.execution.timeout
                     )
+
+                    if exec_task in done:
+                        # Execution finished (success or fail)
+                        result = exec_task.result()
+                    else:
+                        # Timeout or Cancelled
+                        if cancel_event.is_set():
+                            exec_task.cancel()
+                            raise asyncio.CancelledError("Task cancelled by user")
+                        else:
+                            exec_task.cancel()
+                            raise TimeoutError(f"Execution timed out after {strategy.execution.timeout}s")
                     
                     # 3. 成功清理
                     await self._handle_teardown(
@@ -216,6 +281,10 @@ class StrategyOrchestrator:
                 if attempt >= max_attempts:
                     break
                 
+                if cancel_event.is_set():
+                    self._log(cb, "SYSTEM", "WARN", "任务已取消")
+                    break
+
                 # 等待重试间隔
                 await asyncio.sleep(2)
 
