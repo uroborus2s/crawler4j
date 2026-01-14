@@ -6,7 +6,6 @@ Displays real-time logs with filtering and auto-scroll.
 from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -16,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.foundation.logging import LogEntry, LogLevel
+from src.ui.components.combo_box import StyledComboBox as QComboBox
 
 
 class LogViewer(QWidget):

@@ -13,20 +13,24 @@
     - 优化 UI 布局，加长输入框
 """
 
-from typing import cast
+
+
+import uuid
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
-    QComboBox,
     QDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
@@ -39,7 +43,6 @@ from src.core.mms import get_module_registry
 from src.core.tsm import (
     EnvType,
     ExecutionContext,
-    MatchGroup,
     ResourceSelector,
     RetryPolicy,
     ScalingMode,
@@ -50,15 +53,20 @@ from src.core.tsm import (
     TeardownPolicy,
 )
 from src.core.tsm.ui.rule_builder import RuleBuilder
+from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
 
 class WorkflowSelector(QWidget):
     """工作流选择组合控件 (Module + Workflow)。"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, show_module=True, show_none_option=False):
         super().__init__(parent)
+        self._show_module = show_module
+        self._show_none_option = show_none_option
         self._setup_ui()
-        self._load_modules()
+        if show_module:
+            self._load_modules()
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
@@ -83,26 +91,45 @@ class WorkflowSelector(QWidget):
         # 工作流下拉框
         self.workflow_combo = QComboBox()
         self.workflow_combo.setPlaceholderText("选择工作流")
-        self.workflow_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Match "Scaling Mode" combo box behavior (Preferred instead of Expanding)
+        self.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.workflow_combo)
+        
+        if not self._show_module:
+            self.module_combo.hide()
+            self.spacer.hide()
 
     def set_module_filter(self, module_name: str | None):
-        """设置模块过滤器。如果设置，隐藏模块选择框并只显示该模块的工作流。"""
-        self._filter_module = module_name
-        has_filter = bool(module_name)
-        self.module_combo.setVisible(not has_filter)
-        self.spacer.setVisible(not has_filter)
+        """设置模块过滤器。"""
+        # Capture current selection to restore if possible
+        current_wf = self.workflow_combo.currentText()
         
-        if module_name:
-            # Force module selection
-            index = self.module_combo.findText(module_name)
-            if index >= 0:
-                self.module_combo.setCurrentIndex(index)
-            # Reload workflows immediately
-            self._on_module_changed(module_name)
+        self._filter_module = module_name
+        
+        if self._show_module:
+            has_filter = bool(module_name)
+            self.module_combo.setVisible(not has_filter)
+            self.spacer.setVisible(not has_filter)
+            
+            if module_name:
+                # Force module selection
+                index = self.module_combo.findText(module_name)
+                if index >= 0:
+                    self.module_combo.setCurrentIndex(index)
+                self._on_module_changed(module_name)
+            else:
+                if self.module_combo.count() > 0:
+                    self.module_combo.setCurrentIndex(0)
         else:
-            if self.module_combo.count() > 0:
-                self.module_combo.setCurrentIndex(0)
+            # Pure workflow mode: just load workflows for this module
+             self._on_module_changed(module_name)
+
+        # Attempt to restore selection
+        if current_wf:
+            idx = self.workflow_combo.findText(current_wf)
+            if idx >= 0:
+                self.workflow_combo.setCurrentIndex(idx)
+            # Else: workflow not valid for new module, let it be cleared
 
     def _load_modules(self):
         try:
@@ -121,6 +148,10 @@ class WorkflowSelector(QWidget):
 
     def _on_module_changed(self, module_name):
         self.workflow_combo.clear()
+        
+        if self._show_none_option:
+            self.workflow_combo.addItem("不执行 (None)", "")
+
         if not module_name:
             return
             
@@ -142,43 +173,123 @@ class WorkflowSelector(QWidget):
 
     def get_value(self) -> tuple[str, str]:
         """返回 (module, workflow)"""
-        return self.module_combo.currentText(), self.workflow_combo.currentText()
+        # If in hidden mode, maybe module combo isn't updated if set_module_filter passed a name but combo wasn't populated?
+        # Actually in hidden mode we don't populate module_combo usually? 
+        # Wait, set_module_filter in hidden mode just calls _on_module_changed.
+        # But get_value reads module_combo.currentText().
+        # We need to store the current module in a variable if hidden.
+        
+        wf = self.workflow_combo.currentText()
+        # Handle "不执行 (None)" which has empty data if we used addItem(text, userData)
+        # But wait, addItem("不执行", "") sets user data to "".
+        # currentText() returns the visible text "不执行".
+        # We should use currentData() if available, or check text.
+        
+        # Actually in _on_module_changed:
+        # self.workflow_combo.addItem("不执行 (None)", "") 
+        # self.workflow_combo.addItem(wf.name) <- this implies no user data was set for workflows, only text.
+        # So for normal workflows, data is None. For None option, data is "".
+        
+        # Let's standardize:
+        # For workflows, let's use text value. for None, data is "" or we check text prefix.
+        
+        current_data = self.workflow_combo.currentData()
+        if current_data == "":
+             wf = ""
+        
+        if not self._show_module:
+            return getattr(self, "_filter_module", "") or "", wf
+            
+        return self.module_combo.currentText(), wf
 
     def set_value(self, module: str, workflow: str):
-        index = self.module_combo.findText(module)
-        if index >= 0:
-            self.module_combo.setCurrentIndex(index)
-            # workflow triggers update, but async delay might be needed? 
-            # Direct/sync update is fine here as data is local
-            wf_index = self.workflow_combo.findText(workflow)
-            if wf_index >= 0:
-                self.workflow_combo.setCurrentIndex(wf_index)
+        if self._show_module:
+            index = self.module_combo.findText(module)
+            if index >= 0:
+                self.module_combo.setCurrentIndex(index)
         else:
-             # Handle custom text if not in list? For now just set
-             pass
+            # In hidden mode, we assume external filter sets the module context
+            pass
+            # Or should we allow set_value to override filter? 
+            # User workflow: Select Global Module -> Init Workflow updates list.
+            # _load_strategy: Sets Global Module -> Filter updates -> Then sets Init Workflow value.
+            # So we just need to set workflow.
+            pass
+            
+        # Common: find workflow
+        # Need to ensure items are loaded first? 
+        # _on_module_changed loads items.
+        # So we just find workflow text.
+        wf_index = self.workflow_combo.findText(workflow)
+        if wf_index >= 0:
+            self.workflow_combo.setCurrentIndex(wf_index)
+        else:
+            # Maybe not loaded yet or custom?
+            if workflow:
+                 self.workflow_combo.addItem(workflow)
+                 self.workflow_combo.setCurrentText(workflow)
+
+
+# 排序策略显示映射 (CN)
+SELECTION_STRATEGY_MAP = {
+    SelectionStrategy.RANDOM: "随机选择 (Random)",
+    SelectionStrategy.FIFO: "最早空闲 (FIFO)",
+    SelectionStrategy.LIFO: "最近使用 (LIFO)",
+    SelectionStrategy.BEST_FIT: "最佳匹配 (Best Fit)",
+}
+
+# 伸缩模式显示映射 (CN)
+SCALING_MODE_MAP = {
+    ScalingMode.STRICT: "严格模式 (Strict) - 仅现有资源",
+    ScalingMode.ELASTIC: "弹性模式 (Elastic) - 允许自动创建",
+}
+
+# 清理动作显示映射 (CN)
+TEARDOWN_ACTION_MAP = {
+    TeardownAction.DESTROY: "销毁 (Destroy)",
+    TeardownAction.RECYCLE: "回收复用 (Recycle)",
+    TeardownAction.HIBERNATE: "休眠 (Hibernate)",
+    TeardownAction.KEEP_ALIVE: "保持运行 (Keep Alive)",
+}
 
 
 class StrategyDetailDialog(QDialog):
     """策略详情编辑弹窗 (V2)。"""
 
-    def __init__(self, strategy: TaskStrategy | None = None, parent=None):
+    def __init__(self, strategy: TaskStrategy | None = None, parent=None, read_only: bool = False):
         super().__init__(parent)
         self._strategy = strategy or TaskStrategy(
-            id="new_strategy",
-            name="New Strategy",
-            selector=ResourceSelector(env_type=EnvType.CHROME),
+            id=uuid.uuid4().hex,
+            name="",
+            selector=ResourceSelector(env_type=EnvType.CHROME, match_rules=None),
         )
         self._is_new = strategy is None
+        self._read_only = read_only
         self._setup_ui()
         self._load_strategy()
+        
+        if self._read_only:
+             self._set_read_only()
 
     def _setup_ui(self):
         self.setWindowTitle("新建策略" if self._is_new else "编辑策略")
-        self.resize(800, 700) # Increased size
+        
+        # Responsive sizing (50% width, 90% height of screen)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geo = screen.availableGeometry()
+            w = int(screen_geo.width() * 0.5)
+            h = int(screen_geo.height() * 0.95)
+        else:
+            # Fallback for headless or special cases
+            w, h = 800, 700
+            
+        self.resize(w, h)
+        
         self.setStyleSheet("""
             QDialog { background: rgb(30, 30, 40); }
             QLabel { color: rgba(255, 255, 255, 0.9); font-size: 13px; }
-            QLineEdit, QSpinBox, QComboBox, QPlainTextEdit {
+            QLineEdit, QSpinBox, QPlainTextEdit {
                 background: rgba(40, 40, 50, 0.9);
                 color: white;
                 border: 1px solid rgba(255, 255, 255, 0.15);
@@ -187,7 +298,7 @@ class StrategyDetailDialog(QDialog):
                 min-height: 25px;
                 min-width: 280px;
             }
-            QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus {
+            QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {
                 border-color: #6366f1;
                 background: rgba(50, 50, 60, 1);
             }
@@ -216,56 +327,10 @@ class StrategyDetailDialog(QDialog):
             QTabBar::tab:selected { background: #6366f1; color: white; font-weight: bold; }
             QTabBar::tab:hover { background: rgba(255, 255, 255, 0.1); }
             
-            QComboBox QAbstractItemView {
-                background: rgb(40, 40, 50);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                selection-background-color: #6366f1;
-                selection-color: white;
-                outline: none;
-                padding: 4px;
-            }
-            QComboBox QAbstractItemView::item {
-                min_height: 30px; /* Increase item height */
-                padding: 5px 10px;
-                font-size: 14px; /* Larger font */
-                border-radius: 4px; /* Rounded highlight */
-                margin-bottom: 2px;
-            }
-            QComboBox QAbstractItemView::item:hover {
-                background: rgba(255, 255, 255, 0.1);
-            }
-            QComboBox QAbstractItemView::item:selected {
-                background: #6366f1;
-            }
-
-            /* QSpinBox Buttons Styling */
-            QSpinBox::up-button, QSpinBox::down-button {
-                width: 24px;
-                background: rgba(255, 255, 255, 0.05);
-                border-left: 1px solid rgba(255, 255, 255, 0.1);
-            }
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-                background: rgba(255, 255, 255, 0.15);
-            }
-            QSpinBox::up-button {
-                border-top-right-radius: 4px;
-                margin-bottom: 0px;
-            }
-            QSpinBox::down-button {
-                border-bottom-right-radius: 4px;
-                margin-top: 0px;
-            }
-            QSpinBox::up-arrow {
-                image: url(src/ui/assets/arrow_up.svg);
-                width: 14px;
-                height: 14px;
-            }
-            QSpinBox::down-arrow {
-                image: url(src/ui/assets/arrow_down.svg);
-                width: 14px;
-                height: 14px;
-            }
+            /* StyledComboBox handles its own styling, removed duplicated QComboBox CSS here */
+            /* StyledSpinBox handles its own styling, removed duplicated QSpinBox CSS here */
         """)
+
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -328,8 +393,38 @@ class StrategyDetailDialog(QDialog):
         
         btn_layout.addWidget(cancel_btn)
         btn_layout.addWidget(save_btn)
+        
+        if self._read_only:
+             save_btn.hide()
+             cancel_btn.setText("关闭")
 
         layout.addLayout(btn_layout)
+
+    def _set_read_only(self):
+        """设置只读模式。"""
+        # Disable all input widgets
+        for widget in self.findChildren((QLineEdit, QPlainTextEdit, QSpinBox, QCheckBox, QComboBox)):
+             # QComboBox and QCheckBox use setEnabled
+             if isinstance(widget, (QComboBox, QCheckBox)):
+                 widget.setEnabled(False)
+             elif isinstance(widget, (QLineEdit, QPlainTextEdit, QSpinBox)):
+                 widget.setReadOnly(True)
+        
+        # Helper to disable WorkflowSelectors
+        # We need to explicitly call setEnabled on them because they are complex widgets
+        # Or better, let's implement set_read_only on WorkflowSelector if they are custom
+        # But for now, let's just find them by type if we can, or manually access them.
+        # findChildren might not find them if they are wrapped.
+        
+        self.init_workflow_selector.setEnabled(False)
+        self.exec_workflow_selector.setEnabled(False)
+        self.td_success_wf.setEnabled(False)
+        self.td_failure_wf.setEnabled(False)
+        self.td_timeout_wf.setEnabled(False)
+        
+        # Rule builder?
+        # self.rule_mode_btn.setEnabled(False)
+        pass
 
     def _setup_form_tabs(self):
         self.tab_basic = QWidget()
@@ -344,9 +439,13 @@ class StrategyDetailDialog(QDialog):
         self._setup_execution_tab(self.tab_exec)
         self.form_tabs.addTab(self.tab_exec, "执行配置")
         
+        self.tab_retry = QWidget()
+        self._setup_retry_tab(self.tab_retry)
+        self.form_tabs.addTab(self.tab_retry, "容错策略")
+
         self.tab_teardown = QWidget()
         self._setup_teardown_tab(self.tab_teardown)
-        self.form_tabs.addTab(self.tab_teardown, "容错与清理")
+        self.form_tabs.addTab(self.tab_teardown, "清理策略")
 
     def _create_form_layout(self, parent):
         form = QFormLayout(parent)
@@ -359,12 +458,42 @@ class StrategyDetailDialog(QDialog):
         return form
 
     def _setup_basic_tab(self, parent):
-        layout = QVBoxLayout(parent)
+        # Master Layout for Tab (contains ScrollArea)
+        main_layout = QVBoxLayout(parent)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Scroll Area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        # Scrollable Content Widget
+        content_widget = QWidget()
+        content_widget.setStyleSheet("background: transparent;")
+        
+        # Original Layout (applied to content_widget)
+        layout = QVBoxLayout(content_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
         
         # 基础信息
         basic_group = QGroupBox("基础信息")
         form = self._create_form_layout(basic_group)
         
+        self.id_edit = QLineEdit()
+        self.id_edit.setReadOnly(True)
+        self.id_edit.setStyleSheet("color: #888; background: #2a2a2a;")
+        form.addRow("策略 ID:", self.id_edit)
+
+        # 基础信息
+        basic_group = QGroupBox("基础信息")
+        form = self._create_form_layout(basic_group)
+        
+        self.id_edit = QLineEdit()
+        self.id_edit.setReadOnly(True)
+        self.id_edit.setStyleSheet("color: #888; background: #2a2a2a;")
+        form.addRow("策略 ID:", self.id_edit)
+
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("策略名称")
         form.addRow("策略名称:", self.name_edit)
@@ -373,8 +502,6 @@ class StrategyDetailDialog(QDialog):
         self.desc_edit.setPlaceholderText("简要描述策略用途")
         form.addRow("描述:", self.desc_edit)
         
-        form.addRow("描述:", self.desc_edit)
-
         # 全局模块选择
         self.module_link_combo = QComboBox()
         self.module_link_combo.setPlaceholderText("选择关联模块 (可选)")
@@ -418,7 +545,8 @@ class StrategyDetailDialog(QDialog):
         # ---------------------
         
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems([s.value for s in SelectionStrategy])
+        for s in SelectionStrategy:
+            self.sort_combo.addItem(SELECTION_STRATEGY_MAP.get(s, s.value), s)
         form.addRow("排序策略:", self.sort_combo)
         
         self.wait_timeout_spin = QSpinBox()
@@ -451,6 +579,7 @@ class StrategyDetailDialog(QDialog):
         # 1. Visual Builder
         self.rule_builder = RuleBuilder()
         self.rule_stack.addWidget(self.rule_builder)
+        self.rule_stack.setCurrentWidget(self.rule_builder)
         
         # 2. Raw Text (Legacy/Advanced)
         self.exprs_edit = QPlainTextEdit()
@@ -471,6 +600,10 @@ class StrategyDetailDialog(QDialog):
 
         layout.addWidget(match_group)
         layout.addStretch()
+        
+        # Finalize Scroll Area
+        scroll.setWidget(content_widget)
+        main_layout.addWidget(scroll)
 
     def _setup_scaling_tab(self, parent):
         layout = QVBoxLayout(parent)
@@ -479,7 +612,10 @@ class StrategyDetailDialog(QDialog):
         form = self._create_form_layout(scale_group)
         
         self.scale_mode_combo = QComboBox()
-        self.scale_mode_combo.addItems([m.value for m in ScalingMode])
+        # Use SCALING_MODE_MAP for display
+        for m in ScalingMode:
+             self.scale_mode_combo.addItem(SCALING_MODE_MAP.get(m, m.value), m)
+        self.scale_mode_combo.currentIndexChanged.connect(self._on_scale_mode_changed)
         form.addRow("伸缩模式:", self.scale_mode_combo)
         
         self.max_concurrency_spin = QSpinBox()
@@ -495,12 +631,22 @@ class StrategyDetailDialog(QDialog):
         self.creation_timeout_spin.setSuffix(" s")
         form.addRow("创建超时:", self.creation_timeout_spin)
 
-        # 初始化工作流 (使用 Selector)
-        self.init_workflow_selector = WorkflowSelector()
-        form.addRow("初始化工作流:", self.init_workflow_selector)
+        # 初始化工作流 (使用 Selector, hide module selection)
+        self.init_workflow_selector = WorkflowSelector(show_module=False)
+        self.init_workflow_selector.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        
+        # Capture label and field to toggle visibility
+        self.init_wf_label = QLabel("创建环境:")
+        form.addRow(self.init_wf_label, self.init_workflow_selector)
         
         layout.addWidget(scale_group)
         layout.addStretch()
+
+    def _on_scale_mode_changed(self, index):
+        mode = self.scale_mode_combo.currentData()
+        is_elastic = (mode == ScalingMode.ELASTIC)
+        self.init_wf_label.setVisible(is_elastic)
+        self.init_workflow_selector.setVisible(is_elastic)
 
     def _setup_execution_tab(self, parent):
         layout = QVBoxLayout(parent)
@@ -508,8 +654,9 @@ class StrategyDetailDialog(QDialog):
         exec_group = QGroupBox("执行目标 (Execution Context)")
         form = self._create_form_layout(exec_group)
         
-        # 目标 (使用 Selector)
-        self.exec_workflow_selector = WorkflowSelector()
+        # 目标 (使用 Selector, keep module selection hidden)
+        self.exec_workflow_selector = WorkflowSelector(show_module=False)
+        self.exec_workflow_selector.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         form.addRow("执行目标:", self.exec_workflow_selector)
         
         self.exec_timeout_spin = QSpinBox()
@@ -520,7 +667,7 @@ class StrategyDetailDialog(QDialog):
         layout.addWidget(exec_group)
         layout.addStretch()
 
-    def _setup_teardown_tab(self, parent):
+    def _setup_retry_tab(self, parent):
         layout = QVBoxLayout(parent)
         
         retry_group = QGroupBox("重试策略 (Retry Policy)")
@@ -535,21 +682,67 @@ class StrategyDetailDialog(QDialog):
         form.addRow("", self.new_env_check)
         
         layout.addWidget(retry_group)
+        layout.addStretch()
+
+    def _setup_teardown_tab(self, parent):
+        layout = QVBoxLayout(parent)
         
         teardown_group = QGroupBox("清理策略 (Teardown Policy)")
-        form = self._create_form_layout(teardown_group)
+        # Use GridLayout or Nested VBox for better control
+        # Structure:
+        # Label
+        # [Action Combo] [Workflow Selector]
         
+        form_layout = QVBoxLayout(teardown_group)
+        form_layout.setSpacing(12)
+        
+        # Helper to create a row
+        def create_row(label_text, combo, workflow_selector):
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            
+            lbl = QLabel(label_text)
+            lbl.setFixedWidth(80) # Fixed width for label alignment
+            row_layout.addWidget(lbl)
+            
+            combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            row_layout.addWidget(combo, 1) # Action takes available space
+            
+            # Workflow selector needs to be compact or integrated. 
+            # WorkflowSelector is a Widget with a layout. 
+            # We need to make sure it fits nicely.
+            workflow_selector.workflow_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            row_layout.addWidget(workflow_selector, 2) # Workflow takes more space
+            
+            form_layout.addWidget(row_widget)
+
+        # Success
         self.td_success_combo = QComboBox()
-        self.td_success_combo.addItems([t.value for t in TeardownAction])
-        form.addRow("任务成功时:", self.td_success_combo)
+        for t in TeardownAction:
+            self.td_success_combo.addItem(TEARDOWN_ACTION_MAP.get(t, t.value), t)
         
+        self.td_success_wf = WorkflowSelector(show_module=False, show_none_option=True)
+        self.td_success_wf.workflow_combo.setPlaceholderText("执行工作流 (可选)")
+        create_row("任务成功时:", self.td_success_combo, self.td_success_wf)
+        
+        # Failure
         self.td_failure_combo = QComboBox()
-        self.td_failure_combo.addItems([t.value for t in TeardownAction])
-        form.addRow("任务失败时:", self.td_failure_combo)
-        
+        for t in TeardownAction:
+            self.td_failure_combo.addItem(TEARDOWN_ACTION_MAP.get(t, t.value), t)
+            
+        self.td_failure_wf = WorkflowSelector(show_module=False, show_none_option=True)
+        self.td_failure_wf.workflow_combo.setPlaceholderText("执行工作流 (可选)")
+        create_row("任务失败时:", self.td_failure_combo, self.td_failure_wf)
+
+        # Timeout
         self.td_timeout_combo = QComboBox()
-        self.td_timeout_combo.addItems([t.value for t in TeardownAction])
-        form.addRow("任务超时时:", self.td_timeout_combo)
+        for t in TeardownAction:
+            self.td_timeout_combo.addItem(TEARDOWN_ACTION_MAP.get(t, t.value), t)
+            
+        self.td_timeout_wf = WorkflowSelector(show_module=False, show_none_option=True)
+        self.td_timeout_wf.workflow_combo.setPlaceholderText("执行工作流 (可选)")
+        create_row("任务超时时:", self.td_timeout_combo, self.td_timeout_wf)
         
         layout.addWidget(teardown_group)
         layout.addStretch()
@@ -559,6 +752,10 @@ class StrategyDetailDialog(QDialog):
         mod_val = self.module_link_combo.currentData() # name or empty
         self.init_workflow_selector.set_module_filter(mod_val)
         self.exec_workflow_selector.set_module_filter(mod_val)
+        # Filter teardown selectors
+        self.td_success_wf.set_module_filter(mod_val)
+        self.td_failure_wf.set_module_filter(mod_val)
+        self.td_timeout_wf.set_module_filter(mod_val)
 
     def _create_yaml_widget(self) -> QWidget:
         widget = QWidget()
@@ -596,7 +793,9 @@ class StrategyDetailDialog(QDialog):
 
     def _load_strategy(self):
         s = self._strategy
-        # ... (Previous code)
+        self.id_edit.setText(s.id)
+        self.name_edit.setText(s.name)
+        self.desc_edit.setText(s.description)
         
         # Resource Logic
         etype = s.selector.env_type
@@ -613,7 +812,15 @@ class StrategyDetailDialog(QDialog):
         else: # Debug
             self.env_category_combo.setCurrentIndex(3)
 
-        self.sort_combo.setCurrentText(s.selector.sort_strategy.value)
+        # Set sort strategy by data
+        idx = self.sort_combo.findData(s.selector.sort_strategy)
+        if idx >= 0:
+            self.sort_combo.setCurrentIndex(idx)
+        else:
+            # Fallback for old strategy (by text)
+            idx_text = self.sort_combo.findText(s.selector.sort_strategy.value)
+            self.sort_combo.setCurrentIndex(idx_text if idx_text >= 0 else 0)
+
         self.wait_timeout_spin.setValue(s.selector.wait_timeout)
         
         labels_txt = "\n".join([f"{k}: {v}" for k, v in s.selector.match_labels.items()])
@@ -637,7 +844,16 @@ class StrategyDetailDialog(QDialog):
             self.rule_mode_btn.setChecked(bool(s.selector.match_expressions))
 
         # Scaling
-        self.scale_mode_combo.setCurrentText(s.scaling.mode.value)
+        # Safe Enum setting using data
+        idx = self.scale_mode_combo.findData(s.scaling.mode)
+        if idx >= 0:
+            self.scale_mode_combo.setCurrentIndex(idx)
+        else:
+            self.scale_mode_combo.setCurrentText(s.scaling.mode.value)
+            
+        # Trigger visibility update
+        self._on_scale_mode_changed(self.scale_mode_combo.currentIndex())
+            
         self.max_concurrency_spin.setValue(s.scaling.max_concurrency)
         self.min_idle_spin.setValue(s.scaling.min_idle)
         self.creation_timeout_spin.setValue(s.scaling.creation_timeout)
@@ -649,24 +865,48 @@ class StrategyDetailDialog(QDialog):
             self.init_workflow_selector.set_value(mod, wf)
         
         # Execution
+        # 1. Infer Global Module FIRST (to prepopulate selectors)
+        if s.execution and s.execution.module:
+            idx = self.module_link_combo.findData(s.execution.module)
+            if idx >= 0:
+                    self.module_link_combo.setCurrentIndex(idx)
+            else:
+                # Manually set filter if not in global list (e.g. hidden module)
+                self.exec_workflow_selector.set_module_filter(s.execution.module)
+                self.init_workflow_selector.set_module_filter(s.execution.module)
+
+        # 2. Then set values
         if s.execution:
             self.exec_workflow_selector.set_value(s.execution.module, s.execution.workflow)
             self.exec_timeout_spin.setValue(s.execution.timeout)
-            
-            # Infer Global Module from existing execution if not set
-            if s.execution.module:
-                idx = self.module_link_combo.findData(s.execution.module)
-                if idx >= 0:
-                     self.module_link_combo.setCurrentIndex(idx)
-
+ 
             
         # Retry & Teardown
         self.max_attempts_spin.setValue(s.retry.max_attempts)
         self.new_env_check.setChecked(s.retry.new_env_on_retry)
         
-        self.td_success_combo.setCurrentText(s.teardown.on_success.value)
-        self.td_failure_combo.setCurrentText(s.teardown.on_failure.value)
-        self.td_timeout_combo.setCurrentText(s.teardown.on_timeout.value)
+        # Teardown Actions & Workflows
+        for combo, val in [
+            (self.td_success_combo, s.teardown.on_success),
+            (self.td_failure_combo, s.teardown.on_failure),
+            (self.td_timeout_combo, s.teardown.on_timeout)
+        ]:
+            idx = combo.findData(val)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            else:
+                 combo.setCurrentText(val.value)
+                 
+        # Helper to load workflow string "mod/wf"
+        def load_wf(selector, value):
+            if value and "/" in value:
+                m, w = value.split("/", 1)
+                selector.set_value(m, w)
+        
+        load_wf(self.td_success_wf, s.teardown.success_workflow)
+        load_wf(self.td_failure_wf, s.teardown.failure_workflow)
+        load_wf(self.td_timeout_wf, s.teardown.timeout_workflow)
+
 
     def _build_strategy_from_form(self) -> TaskStrategy:
         # Resource EnvType Logic
@@ -697,14 +937,20 @@ class StrategyDetailDialog(QDialog):
             match_rules = self.rule_builder.get_rule_group()
         else:
             # Raw Text
-            match_exprs = [l.strip() for l in self.exprs_edit.toPlainText().splitlines() if l.strip()]
+            match_exprs = [line.strip() for line in self.exprs_edit.toPlainText().splitlines() if line.strip()]
         
+        # Get sort strategy from data (Enum)
+        sort_strategy = self.sort_combo.currentData()
+        if not sort_strategy:
+             # Fallback if somehow missing
+             sort_strategy = SelectionStrategy.FIFO
+
         selector = ResourceSelector(
             env_type=env_type,
             match_labels=labels,
             match_expressions=match_exprs,
             match_rules=match_rules,
-            sort_strategy=SelectionStrategy(self.sort_combo.currentText()),
+            sort_strategy=sort_strategy,
             wait_timeout=self.wait_timeout_spin.value(),
         )
         
@@ -713,7 +959,7 @@ class StrategyDetailDialog(QDialog):
         init_workflow_str = f"{imod}/{iwf}" if imod and iwf else None
 
         scaling = ScalingPolicy(
-            mode=ScalingMode(self.scale_mode_combo.currentText()),
+            mode=self.scale_mode_combo.currentData() or ScalingMode.STRICT,
             max_concurrency=self.max_concurrency_spin.value(),
             min_idle=self.min_idle_spin.value(),
             creation_timeout=self.creation_timeout_spin.value(),
@@ -735,10 +981,20 @@ class StrategyDetailDialog(QDialog):
             new_env_on_retry=self.new_env_check.isChecked(),
         )
         
+        # Helper get workflow str
+        def get_wf_str(selector):
+            m, w = selector.get_value()
+            return f"{m}/{w}" if m and w else None
+
         teardown = TeardownPolicy(
-            on_success=TeardownAction(self.td_success_combo.currentText()),
-            on_failure=TeardownAction(self.td_failure_combo.currentText()),
-            on_timeout=TeardownAction(self.td_timeout_combo.currentText()),
+            on_success=self.td_success_combo.currentData() or TeardownAction.DESTROY,
+            success_workflow=get_wf_str(self.td_success_wf),
+            
+            on_failure=self.td_failure_combo.currentData() or TeardownAction.DESTROY,
+            failure_workflow=get_wf_str(self.td_failure_wf),
+            
+            on_timeout=self.td_timeout_combo.currentData() or TeardownAction.DESTROY,
+            timeout_workflow=get_wf_str(self.td_timeout_wf),
         )
         
         return TaskStrategy(
@@ -762,17 +1018,30 @@ class StrategyDetailDialog(QDialog):
     def _yaml_to_form(self):
         try:
             yaml_str = self.yaml_editor.toPlainText()
-            if not yaml_str.strip(): return
+            if not yaml_str.strip():
+                return
             self._strategy = TaskStrategy.from_yaml(yaml_str)
             self._load_strategy()
         except Exception:
             pass
 
     def _on_save(self):
+        # Validation
+        if self.stack.currentIndex() == 0: # Only check form mode (yaml mode builds from form anyway if switched back, or we check yaml)
+            name = self.name_edit.text().strip()
+            if not name:
+                QMessageBox.warning(self, "校验失败", "策略名称不能为空，请输入有效的名称。")
+                return
+
         if self.stack.currentIndex() == 1:
             self._yaml_to_form()
+            # Re-validate after parsing yaml
+            if not self._strategy.name:
+                 QMessageBox.warning(self, "校验失败", "策略名称不能为空 (YAML 中缺失 name)。")
+                 return
         else:
             self._strategy = self._build_strategy_from_form()
+            
         self.accept()
 
     def get_strategy(self) -> TaskStrategy:

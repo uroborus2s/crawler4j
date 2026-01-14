@@ -17,7 +17,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 from pydantic import BaseModel, Field
@@ -51,6 +51,7 @@ class TeardownAction(str, Enum):
     RECYCLE = "recycle"   # 软重置后复用
     HIBERNATE = "hibernate"
     KEEP_ALIVE = "keep_alive"
+    NONE = "none"         # 不执行任何动作
 
 # --- Rule Engine Enums ---
 
@@ -103,7 +104,7 @@ class ResourceSelector(BaseModel):
     match_expressions: List[str] = Field(default_factory=list, description="简单逻辑表达式")
     
     # 新的 AST 规则树 (Advanced Mode)
-    match_rules: Optional[MatchGroup] = Field(None, description="结构化匹配规则树")
+    match_rules: Optional[MatchGroup] = Field(default=None, description="结构化匹配规则树")
     
     sort_strategy: SelectionStrategy = Field(default=SelectionStrategy.FIFO)
     wait_timeout: int = Field(default=60, ge=0, description="等待资源的超时时间(秒)")
@@ -114,7 +115,7 @@ class ScalingPolicy(BaseModel):
     mode: ScalingMode = Field(default=ScalingMode.STRICT)
     max_concurrency: int = Field(default=1, ge=1, description="最大并发/实例数")
     min_idle: int = Field(default=0, ge=0, description="保持最小空闲实例数(预热)")
-    init_workflow: Optional[str] = Field(None, description="新环境初始化工作流(e.g., login)")
+    init_workflow: Optional[str] = Field(default=None, description="新环境初始化工作流(e.g., login)")
     creation_timeout: int = Field(default=120, ge=0, description="创建新环境超时(秒)")
 
 
@@ -136,8 +137,13 @@ class RetryPolicy(BaseModel):
 class TeardownPolicy(BaseModel):
     """生命周期清理策略。解决'任务结束后的处置'。"""
     on_success: TeardownAction = Field(default=TeardownAction.RECYCLE)
+    success_workflow: Optional[str] = Field(default=None, description="成功后执行的工作流")
+    
     on_failure: TeardownAction = Field(default=TeardownAction.KEEP_ALIVE)
+    failure_workflow: Optional[str] = Field(default=None, description="失败后执行的工作流")
+    
     on_timeout: TeardownAction = Field(default=TeardownAction.DESTROY)
+    timeout_workflow: Optional[str] = Field(default=None, description="超时后执行的工作流")
 
 
 # =============================================================================
@@ -147,23 +153,23 @@ class TeardownPolicy(BaseModel):
 class TaskStrategy(BaseModel):
     """TSM 核心策略定义 (V2)。"""
     id: str = Field(..., min_length=1)
-    name: str = Field(..., min_length=1)
+    name: str = Field(default="")
     description: str = ""
 
     # 1. 资源选择
     selector: ResourceSelector
 
     # 2. 弹性伸缩
-    scaling: ScalingPolicy = Field(default_factory=ScalingPolicy)
+    scaling: ScalingPolicy = Field(default_factory=lambda: ScalingPolicy())
 
     # 3. 目标执行
     execution: Optional[ExecutionContext] = None
 
     # 4. 容错控制
-    retry: RetryPolicy = Field(default_factory=RetryPolicy)
+    retry: RetryPolicy = Field(default_factory=lambda: RetryPolicy())
 
     # 5. 清理策略
-    teardown: TeardownPolicy = Field(default_factory=TeardownPolicy)
+    teardown: TeardownPolicy = Field(default_factory=lambda: TeardownPolicy())
 
     def to_yaml(self) -> str:
         """转换为 YAML 字符串。"""

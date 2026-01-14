@@ -3,226 +3,190 @@
 规格参考: docs/srs/05-framework-core/05-4-automation-task-management.md (5.4.5)
 
 提供统一的任务操作接口：
-    - submit_task: 提交任务
-    - stop_task: 停止任务
-    - get_task: 获取任务
-    - list_tasks: 列出任务
+    - create_task: 创建任务配置
+    - run_task: 触发任务执行 (Delegate to TSM)
+    - list_tasks: 列出任务配置
+    - get_task_run: 获取执行记录
 """
 
 import asyncio
-from typing import Any, Callable
+import copy
+from typing import Any
 
 from src.core.atm.models import (
-    TaskInstance,
+    AutomationTask,
     TaskNotFoundError,
-    TaskRequest,
-    TaskResult,
+    TaskRun,
     TaskStatus,
 )
 from src.core.atm.repository import TaskRepository, get_task_repository
-from src.core.atm.runner import TaskRunner, get_task_runner
-from src.core.foundation.event_bus import Event, EventType, get_event_bus
+
+# from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
-from src.core.tsm import get_orchestrator
+from src.core.tsm import get_orchestrator, get_strategy_loader
 
 
 class TaskService:
     """任务服务。
     
-    规格 5.4.5 ITaskService:
-        - submit_task, stop_task, get_task, list_tasks
+    ATM 的核心控制器。负责：
+    1. 管理任务配置 (AutomationTask)
+    2. 触发任务执行 (调用 TSM Orchestrator)
+    3. 记录任务运行历史 (TaskRun)
     """
     
-    def __init__(
-        self,
-        repository: TaskRepository | None = None,
-        runner: TaskRunner | None = None,
-    ):
-        """初始化任务服务。"""
+    def __init__(self, repository: TaskRepository | None = None):
         self._repository = repository or get_task_repository()
-        self._runner = runner or get_task_runner()
         self._orchestrator = get_orchestrator()
-        self._pending_queue: asyncio.Queue[TaskInstance] = asyncio.Queue()
-        self._script_loader: Callable[[str, str], Any] | None = None
-        self._context_factory: Callable[[TaskInstance], Any] | None = None
+        self._loader = get_strategy_loader()
         
-        # 订阅模块禁用事件
-        get_event_bus().subscribe(EventType.MODULE_DISABLED, self._on_module_disabled)
-        get_event_bus().subscribe(EventType.MODULE_ENABLED, self._on_module_enabled)
-    
-    def _on_module_disabled(self, event: Event) -> None:
-        """处理模块禁用事件：挂起依赖该模块的任务。"""
-        module_name = event.data.get("module_name", "")
-        if not module_name:
-            return
+        # 订阅模块禁用事件 (To be implemented properly with new model)
+        # get_event_bus().subscribe(EventType.MODULE_DISABLED, self._on_module_disabled)
+
+    # === Task Configuration Management ===
+
+    def create_task(self, name: str, strategy_id: str, cron: str | None = None, default_params: dict | None = None) -> str:
+        """创建新任务配置。"""
+        # 验证策略是否存在
+        strategy = self._loader.get(strategy_id)
+        if not strategy:
+            raise ValueError(f"Strategy not found: {strategy_id}")
+
+        task = AutomationTask(
+            name=name,
+            strategy_id=strategy_id,
+            cron_expression=cron,
+            default_params=default_params or {},
+        )
+        self._repository.save_task(task)
+        logger.info(f"[ATM] Created task: {task.name} ({task.id})")
+        return task.id
+
+    def list_tasks(self) -> list[AutomationTask]:
+        """列出所有任务配置。"""
+        return self._repository.list_tasks()
+
+    def get_task(self, task_id: str) -> AutomationTask | None:
+        """获取任务配置。"""
+        return self._repository.get_task(task_id)
+
+    def delete_task(self, task_id: str) -> bool:
+        """删除任务配置。"""
+        # TODO: 是否级联删除运行历史？目前暂不需要。
+        return self._repository.delete_task(task_id)
+
+    # === Task Execution Management ===
+
+    async def run_task(self, task_id: str, params_override: dict | None = None) -> str:
+        """触发任务执行 (立即运行)。
         
-        suspended_count = 0
-        for status in [TaskStatus.PENDING, TaskStatus.QUEUED]:
-            tasks = self._repository.list_by_status(status)
-            for task in tasks:
-                if task.module == module_name:
-                    task.status = TaskStatus.SUSPENDED
-                    self._repository.save(task)
-                    suspended_count += 1
-        
-        if suspended_count > 0:
-            logger.info(f"[ATM] 模块 {module_name} 已禁用，{suspended_count} 个任务已挂起")
-    
-    def _on_module_enabled(self, event: Event) -> None:
-        """处理模块启用事件：恢复挂起的任务。"""
-        module_name = event.data.get("module_name", "")
-        if not module_name:
-            return
-        
-        resumed_count = 0
-        tasks = self._repository.list_by_status(TaskStatus.SUSPENDED)
-        for task in tasks:
-            if task.module == module_name:
-                task.status = TaskStatus.PENDING
-                self._repository.save(task)
-                resumed_count += 1
-        
-        if resumed_count > 0:
-            logger.info(f"[ATM] 模块 {module_name} 已启用，{resumed_count} 个任务已恢复")
-    
-    def configure(
-        self,
-        script_loader: Callable[[str, str], Any],
-        context_factory: Callable[[TaskInstance], Any],
-    ) -> None:
-        """配置脚本加载器和上下文工厂。
-        
-        Args:
-            script_loader: (module, name) -> TaskScript
-            context_factory: (task) -> TaskContext
+        Flow:
+        1. 获取任务配置
+        2. 获取关联策略
+        3. 创建 TaskRun 记录 (Starting)
+        4. 调用 TSM 编排执行
+        5. 更新 TaskRun 结果
         """
-        self._script_loader = script_loader
-        self._context_factory = context_factory
-    
-    async def submit(self, request: TaskRequest) -> TaskInstance:
-        """提交任务。
+        # 1. 获取配置
+        task_config = self.get_task(task_id)
+        if not task_config:
+            raise TaskNotFoundError(f"Task not found: {task_id}")
+
+        # 2. 获取策略
+        strategy = self._loader.get(task_config.strategy_id)
+        if not strategy:
+            raise RuntimeError(f"Strategy {task_config.strategy_id} missing for task {task_id}")
+
+        # 准备执行参数 (Default + Override)
+        final_params = task_config.default_params.copy()
+        if params_override:
+            final_params.update(params_override)
+
+        # 3. 创建运行记录
+        run = TaskRun(
+            task_id=task_id,
+            status=TaskStatus.STARTING,
+            trigger_type="manual",  # TODO: 区分 cron/manual
+        )
+        self._repository.save_run(run)
+
+        # 4. 准备策略副本 (避免修改原始策略)
+        # 覆盖策略中的 execution params
+        strategy_copy = copy.deepcopy(strategy)
+        if strategy_copy.execution:
+            strategy_copy.execution.params.update(final_params)
         
-        规格 5.4.3 FR-ATM-001:
-            1. 生成唯一 task_id
-            2. 加载对应模块配置
-            3. 绑定初始状态 PENDING
+        # 异步执行 (Fire and Forget or Wait? ATM usually fires)
+        # 但为了简单，这里可能是 await，或者 spawn task. 
+        # TSM Orchestrator 目前是 async execute.
+        # 我们应该 wrap process 避免阻塞 API 调用者? 
+        # 也可以直接 await 并返回结果 (如果调用者期望同步等待)
+        # 设计文档 implied 异步触发。这里我们使用 asyncio.create_task 后台运行。
         
-        Args:
-            request: 任务请求
+        asyncio.create_task(self._execute_process(run, strategy_copy))
         
-        Returns:
-            任务实例
-        """
-        # 创建任务实例
-        task = TaskInstance.from_request(request)
-        
-        # 保存到仓库
-        self._repository.save(task)
-        
-        logger.info(f"[ATM] 任务已提交: {task.id[:8]}... ({task.module}/{task.name})")
-        
-        # 入队
-        task.enqueue()
-        self._repository.save(task)
-        
-        # 加入待处理队列
-        await self._pending_queue.put(task)
-        
-        return task
-    
-    async def stop(self, task_id: str, force: bool = False) -> bool:
-        """停止任务。
-        
-        Args:
-            task_id: 任务ID
-            force: 是否强制停止
-        
-        Returns:
-            是否停止成功
-        """
-        task = self._repository.get(task_id)
-        if not task:
-            raise TaskNotFoundError(f"任务不存在: {task_id}")
-        
-        if task.status == TaskStatus.RUNNING:
-            success = await self._runner.stop(task_id, force)
-            if success:
-                task.cancel()
-                self._repository.save(task)
-            return success
-        
-        if task.status in {TaskStatus.PENDING, TaskStatus.QUEUED}:
-            task.cancel()
-            self._repository.save(task)
-            return True
-        
-        return False
-    
-    def get(self, task_id: str) -> TaskInstance | None:
-        """获取任务。"""
-        return self._repository.get(task_id)
-    
-    def list_by_status(self, status: TaskStatus) -> list[TaskInstance]:
-        """按状态列出任务。"""
-        return self._repository.list_by_status(status)
-    
-    def list_recent(self, limit: int = 50) -> list[TaskInstance]:
-        """列出最近的任务。"""
-        return self._repository.list_recent(limit)
-    
-    async def execute(self, task: TaskInstance) -> TaskResult:
-        """执行单个任务。
-        
-        通常由调度器调用。
-        """
-        if not self._script_loader or not self._context_factory:
-            raise RuntimeError("TaskService 未配置 script_loader 和 context_factory")
-        
-        # 更新状态为运行中
-        task.start()
-        self._repository.save(task)
-        
-        logger.info(f"[ATM] 任务开始执行: {task.id[:8]}...")
-        
+        return run.id
+
+    async def _execute_process(self, run: TaskRun, strategy: Any):
+        """后台执行过程。"""
         try:
-            # 执行任务
-            result = await self._runner.run(
-                task,
-                self._script_loader,
-                self._context_factory,
-            )
+            run.start()
+            self._repository.save_run(run)
+            logger.info(f"[ATM] TaskRun started: {run.id} (Task: {run.task_id})")
+
+            # 调用编排器
+            # TSM Execute returns OrchestratorResult
+            result = await self._orchestrator.execute(strategy)
             
             # 更新状态
-            if result.success:
-                task.succeed(result)
-            else:
-                task.fail(result.message)
+            run.env_id = result.results[0].env_id if result.results else None
             
-            self._repository.save(task)
-            
-            logger.info(f"[ATM] 任务完成: {task.id[:8]}... success={result.success}")
-            
-            return result
+            # 聚合结果
+            msg = f"Completed ({result.succeeded_instances}/{result.total_instances})"
+            run.finish(success=result.success, message=msg)
             
         except Exception as e:
-            task.fail(str(e))
-            self._repository.save(task)
-            logger.error(f"[ATM] 任务异常: {task.id[:8]}... {e}")
-            return TaskResult(success=False, message=str(e))
+            logger.error(f"[ATM] Execution failed for run {run.id}: {e}")
+            run.finish(success=False, message=str(e))
+        finally:
+            self._repository.save_run(run)
+
+    async def stop_run(self, run_id: str) -> bool:
+        """停止指定的运行实例。"""
+        run = self._repository.get_run(run_id)
+        if not run:
+            return False
+            
+        if run.status == TaskStatus.RUNNING:
+            # TSM Orchestrator Cancel currently cancels GLOBAL execution?
+            # Orchestrator needs to support cancelling specific strategy/run?
+            # 现在的 Orchestrator 是简单的单例模式，execute 是实例方法。
+            # 如果并发执行，我们需要 Orchestrator 返回 control handle 或者它内部管理。
+            # 暂时调用全局 cancel (Limit of current TSM impl)
+            await self._orchestrator.cancel()
+            
+            run.cancel()
+            self._repository.save_run(run)
+            return True
+        return False
     
-    async def recover(self) -> list[TaskInstance]:
-        """恢复中断的任务。"""
-        return self._repository.recover_interrupted()
-    
-    def get_stats(self) -> dict[str, int]:
-        """获取任务统计。"""
-        return {
-            "pending": self._repository.count_by_status(TaskStatus.PENDING),
-            "queued": self._repository.count_by_status(TaskStatus.QUEUED),
-            "running": self._runner.get_running_count(),
-            "succeeded": self._repository.count_by_status(TaskStatus.SUCCEEDED),
-            "failed": self._repository.count_by_status(TaskStatus.FAILED),
-        }
+    async def stop_task(self, task_id: str) -> bool:
+        """停止任务的当前运行实例（如果有）。"""
+        last_run = self.get_last_run(task_id)
+        if last_run and last_run.status == TaskStatus.RUNNING:
+            return await self.stop_run(last_run.id)
+        return False
+
+    # === Query Methods ===
+
+    def get_run(self, run_id: str) -> TaskRun | None:
+        return self._repository.get_run(run_id)
+
+    def list_runs(self, limit: int = 50) -> list[TaskRun]:
+        return self._repository.list_recent_runs(limit)
+
+    def get_last_run(self, task_id: str) -> TaskRun | None:
+        return self._repository.get_last_run(task_id)
 
 
 # 全局单例

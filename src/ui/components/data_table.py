@@ -6,7 +6,6 @@ A reusable table widget with pagination, search, and sorting.
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -17,6 +16,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from src.ui.components.combo_box import StyledComboBox as QComboBox
 
 
 class DataTable(QWidget):

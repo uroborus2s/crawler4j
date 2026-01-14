@@ -18,7 +18,6 @@ from typing import Any, Optional
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -26,14 +25,12 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListView,  # [NEW]
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QSpinBox,
     QStackedWidget,
-    QTabWidget,  # [NEW]
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -44,6 +41,8 @@ from src.core.system.preferences_service import (
 )
 from src.core.system.ui.about_dialog import AboutDialog
 from src.core.system.version_service import get_version_service
+from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
 
 class SettingsPage(QWidget):
@@ -486,41 +485,18 @@ class SettingsPage(QWidget):
             QLabel, QCheckBox {
                 color: rgba(255, 255, 255, 0.8);
             }
-            QComboBox, QLineEdit, QSpinBox {
+            QLineEdit, QSpinBox {
                 background: rgba(255, 255, 255, 0.1);
                 padding: 0px 10px;
                 color: white;
                 min-width: 160px;  /* 增加最小宽度 */
                 min-height: 24px;
             }
-            QComboBox:hover, QLineEdit:hover, QSpinBox:hover {
+            QLineEdit:hover, QSpinBox:hover {
                 border-color: rgba(99, 102, 241, 0.5);
             }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d38;
-                selection-background-color: rgba(99, 102, 241, 0.3);
-                outline: none;
-                padding: 4px;
-                border-radius: 4px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2d2d38;
-                selection-background-color: rgba(99, 102, 241, 0.3);
-                outline: none;
-                padding: 4px;
-                border-radius: 4px;
-                color: white; /* 确保未选中的文字是白色 */
-            }
-            QComboBox QAbstractItemView::item {
-                margin: 4px 0;
-                color: white; /* 确保未选中的文字是白色 */
-            }
-            QComboBox QAbstractItemView::item:selected {
-                background-color: rgba(99, 102, 241, 0.3);
-                color: white;
-                font-weight: bold;
-                border-radius: 4px;
-            }
+            
+            /* StyledComboBox styling is handled by the component itself */
         """
 
     def _btn_style(self) -> str:
@@ -555,12 +531,12 @@ class SettingsPage(QWidget):
 
     def _populate_combo(self, combo: QComboBox, items: list[tuple[str, str]]):
         """填充下拉框 (data, display_text)。"""
-        combo.setView(QListView())  # Fix for proper styling on macOS
+        # combo.setView(QListView())  # Handled by StyledComboBox
         combo.clear()
         for data, text in items:
             combo.addItem(text, data)
-        # 固定高度修复显示问题
-        combo.setStyleSheet(combo.styleSheet() + "QComboBox { min-height: 28px; }")
+        # 固定高度修复显示问题 - Handled by StyledComboBox min-height
+        # combo.setStyleSheet(combo.styleSheet() + "QComboBox { min-height: 28px; }")
 
     def _set_combo_value(self, combo: QComboBox, value: Any):
         """根据内部值选中下拉项。"""

@@ -6,18 +6,13 @@
     - RuleRowWidget: 单行条件编辑器
 """
 
-from typing import Optional, Union
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QComboBox,
     QFrame,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
@@ -31,6 +26,7 @@ from src.core.tsm import (
     MatchGroup,
     ValueType,
 )
+from src.ui.components.combo_box import StyledComboBox as QComboBox
 
 
 class RuleRowWidget(QFrame):
@@ -73,8 +69,8 @@ class RuleRowWidget(QFrame):
         # Reset min-width from parent dialog to avoid layout breaking
         self.setStyleSheet("""
             QLineEdit { min-width: 100px; }
-            QComboBox { min-width: 60px; }
         """)
+        self.setMinimumHeight(40) # Give plenty of vertical space for inputs and borders
         
         self._current_type = ValueType.STATIC
 
@@ -102,8 +98,21 @@ class RuleRowWidget(QFrame):
         # 5. Delete
         self.del_btn = QToolButton()
         self.del_btn.setText("✕")
-        self.del_btn.setStyleSheet("color: #ef4444; border: none;")
+        self.del_btn.setFixedSize(28, 28)
         self.del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.del_btn.setStyleSheet("""
+            QToolButton {
+                color: #ef4444;
+                border: none;
+                font-size: 16px;
+                font-weight: bold;
+                background: transparent;
+            }
+            QToolButton:hover {
+                background: rgba(239, 68, 68, 0.1);
+                border-radius: 14px;
+            }
+        """)
         # Connected by parent
         layout.addWidget(self.del_btn)
 
@@ -147,17 +156,23 @@ class RuleRowWidget(QFrame):
     def get_data(self) -> MatchCondition:
         val = ""
         idx = self.value_stack.currentIndex()
-        if idx == 0: val = self.val_static.text()
-        elif idx == 1: val = self.val_field.currentText()
-        elif idx == 2: val = self.val_param.text()
+        if idx == 0: 
+            val = self.val_static.text()
+        elif idx == 1: 
+            val = self.val_field.currentText()
+        elif idx == 2: 
+            val = self.val_param.text()
         
         # Simple type inference for static?
         # For now keep as string, backend handles type cast if needed
         # Or try parse int/bool
         if self._current_type == ValueType.STATIC:
-            if val.lower() == "true": val = True
-            elif val.lower() == "false": val = False
-            elif val.isdigit(): val = int(val)
+            if val.lower() == "true": 
+                val = True
+            elif val.lower() == "false": 
+                val = False
+            elif val.isdigit(): 
+                val = int(val)
         
         return MatchCondition(
             field=self.field_edit.text(),
@@ -169,6 +184,7 @@ class RuleRowWidget(QFrame):
 
 class RuleGroupWidget(QFrame):
     """递归规则组容器。"""
+    changed = pyqtSignal() # Notify height changes to parent
 
     def __init__(self, group: MatchGroup | None = None, parent=None, level=0):
         super().__init__(parent)
@@ -189,8 +205,8 @@ class RuleGroupWidget(QFrame):
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8) # More breathing room
+        layout.setSpacing(10) # Distinct separation between rules
 
         # 1. Header
         header = QHBoxLayout()
@@ -211,20 +227,63 @@ class RuleGroupWidget(QFrame):
         header.addStretch()
         
         # Actions
-        add_rule_btn = QToolButton()
-        add_rule_btn.setText("+ Rule")
+        add_rule_btn = QPushButton("+ Rule")
+        add_rule_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_rule_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #a5b4fc;
+                border: 1px solid rgba(165, 180, 252, 0.3);
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: rgba(165, 180, 252, 0.1);
+                border-color: #a5b4fc;
+            }
+        """)
         add_rule_btn.clicked.connect(self._add_rule)
         header.addWidget(add_rule_btn)
         
-        add_group_btn = QToolButton()
-        add_group_btn.setText("+ Group")
+        add_group_btn = QPushButton("+ Group")
+        add_group_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_group_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #fca5a5;
+                border: 1px solid rgba(252, 165, 165, 0.3);
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: rgba(252, 165, 165, 0.1);
+                border-color: #fca5a5;
+            }
+        """)
         add_group_btn.clicked.connect(self._add_group)
         header.addWidget(add_group_btn)
         
         if self._level > 0:
             del_group_btn = QToolButton()
-            del_group_btn.setText("✕ Group")
-            del_group_btn.setStyleSheet("color: #ef4444;")
+            del_group_btn.setText("✕")
+            del_group_btn.setToolTip("Delete Group")
+            del_group_btn.setFixedSize(28, 28)
+            del_group_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            del_group_btn.setStyleSheet("""
+                QToolButton {
+                    color: #ef4444;
+                    border: none;
+                    background: transparent;
+                    font-weight: bold;
+                    font-size: 16px;
+                }
+                QToolButton:hover {
+                    background: rgba(239, 68, 68, 0.1);
+                    border-radius: 14px;
+                }
+            """)
             del_group_btn.clicked.connect(self._delete_self)
             header.addWidget(del_group_btn)
             
@@ -243,20 +302,23 @@ class RuleGroupWidget(QFrame):
         else:
             self.logic_btn.setText("AND")
 
-    def _add_rule(self, condition: MatchCondition = None):
+    def _add_rule(self, condition: MatchCondition | None = None):
         row = RuleRowWidget(condition)
         row.del_btn.clicked.connect(lambda: self._remove_child(row))
         self.children_layout.addWidget(row)
         self._widgets.append(row)
+        self.changed.emit()
 
-    def _add_group(self, group: MatchGroup = None):
+    def _add_group(self, group: MatchGroup | None = None):
         widget = RuleGroupWidget(group, level=self._level + 1)
         # connect delete signal logic...
         # Since RuleGroupWidget doesn't emit signal effectively, we pass a callback or use closure
         # Or better: monkeypatch delete
         widget._delete_self = lambda: self._remove_child(widget)
+        widget.changed.connect(self.changed.emit) # Propagate
         self.children_layout.addWidget(widget)
         self._widgets.append(widget)
+        self.changed.emit()
 
     def _delete_self(self):
         # Override by parent to remove from layout
@@ -266,6 +328,7 @@ class RuleGroupWidget(QFrame):
         widget.deleteLater()
         if widget in self._widgets:
             self._widgets.remove(widget)
+        self.changed.emit()
 
     def _load_data(self, group: MatchGroup):
         self.logic_btn.setChecked(group.logic == LogicOp.OR)
@@ -294,24 +357,36 @@ class RuleBuilder(QWidget):
     def __init__(self, group: MatchGroup | None = None, parent=None):
         super().__init__(parent)
         self._root_group = group or MatchGroup(logic=LogicOp.AND, conditions=[])
+        self.setMinimumHeight(80) # A safe base height
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # Scroll Area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("background: transparent; border: none;")
-        
-        self.container = QWidget()
         self.root_widget = RuleGroupWidget(self._root_group)
+        self.root_widget.changed.connect(self._update_geometry)
+        layout.addWidget(self.root_widget)
+        layout.addStretch()
         
-        vbox = QVBoxLayout(self.container)
-        vbox.addWidget(self.root_widget)
-        vbox.addStretch()
+        # Initial trigger
+        self._update_geometry()
+
+    def _update_geometry(self):
+        """Force the widget to grow based on its actual content size."""
+        if self.root_widget.layout():
+            self.root_widget.layout().activate()
         
-        scroll.setWidget(self.container)
-        layout.addWidget(scroll)
+        hint = self.root_widget.sizeHint().height()
+        new_h = max(hint + 50, 150) # Very generous buffer to prevent any cutting off
+        
+        # Use setMinimumHeight to FORCE the parent layout (like QScrollArea) 
+        # to respect the needed space.
+        self.setMinimumHeight(new_h)
+        self.updateGeometry() # Notify layout system
+        
+        # If we have a parent that needs immediate update
+        p = self.parentWidget()
+        if p:
+            p.updateGeometry()
 
     def get_rule_group(self) -> MatchGroup:
         return self.root_widget.get_data()

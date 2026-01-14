@@ -8,7 +8,6 @@ import asyncio
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -26,6 +25,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.rem import EnvKind, EnvStatus
 from src.core.rem.pool import EnvPool
+from src.ui.components.combo_box import StyledComboBox as QComboBox
 
 
 class CreateEnvDialog(QDialog):

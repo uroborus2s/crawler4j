@@ -80,9 +80,8 @@ class StrategyListWidget(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(1, 80)
         self.table.setColumnWidth(3, 100)
-        self.table.setColumnWidth(4, 150)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setAlternatingRowColors(True)
+        self.table.setColumnWidth(4, 220)
+        self.table.verticalHeader().setDefaultSectionSize(50)  # Ensure rows are tall enough for buttons
         self.table.setStyleSheet("""
             QTableWidget {
                 background: rgba(30, 30, 40, 0.9);
@@ -92,10 +91,20 @@ class StrategyListWidget(QWidget):
             }
             QTableWidget::item { padding: 8px; }
             QTableWidget::item:selected { background: rgba(99, 102, 241, 0.5); }
+            QHeaderView {
+                background: transparent;
+                border: none;
+            }
             QHeaderView::section {
                 background: rgba(50, 50, 60, 0.9);
                 color: rgba(255, 255, 255, 0.8);
                 padding: 10px;
+                border: none;
+                border-right: 1px solid rgba(255, 255, 255, 0.05);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            }
+            QTableCornerButton::section {
+                background: rgba(50, 50, 60, 0.9);
                 border: none;
             }
         """)
@@ -141,6 +150,20 @@ class StrategyListWidget(QWidget):
             action_layout.setContentsMargins(4, 4, 4, 4)
             action_layout.setSpacing(8)
 
+            view_btn = QPushButton("查看")
+            view_btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(100, 116, 139, 0.8);
+                    color: white;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover { background: rgba(100, 116, 139, 1); }
+            """)
+            view_btn.clicked.connect(lambda checked, sid=strategy.id: self._on_view(sid))
+            action_layout.addWidget(view_btn)
+
             edit_btn = QPushButton("编辑")
             edit_btn.setStyleSheet("""
                 QPushButton {
@@ -152,8 +175,8 @@ class StrategyListWidget(QWidget):
                 }
                 QPushButton:hover { background: rgba(59, 130, 246, 1); }
             """)
-            edit_btn.clicked.connect(lambda checked, sid=strategy.id: self._on_edit(sid))
             action_layout.addWidget(edit_btn)
+            edit_btn.clicked.connect(lambda checked, sid=strategy.id: self._on_edit(sid))
 
             delete_btn = QPushButton("删除")
             delete_btn.setStyleSheet("""
@@ -170,6 +193,18 @@ class StrategyListWidget(QWidget):
             action_layout.addWidget(delete_btn)
 
             self.table.setCellWidget(row, 4, action_widget)
+
+    def _on_view(self, strategy_id: str):
+        """查看策略。"""
+        from src.core.tsm.ui.strategy_detail_dialog import StrategyDetailDialog
+
+        # 查找策略
+        strategy = next((s for s in self._strategies if s.id == strategy_id), None)
+        if not strategy:
+            return
+
+        dialog = StrategyDetailDialog(strategy=strategy, parent=self, read_only=True)
+        dialog.exec()
 
     def _on_create(self):
         """新建策略。"""

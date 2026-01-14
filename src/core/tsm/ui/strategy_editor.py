@@ -6,9 +6,7 @@
 """
 
 import yaml
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -23,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.persistence import get_config_store
+from src.ui.components.combo_box import StyledComboBox as QComboBox
 
 
 class StrategyEditorPage(QWidget):

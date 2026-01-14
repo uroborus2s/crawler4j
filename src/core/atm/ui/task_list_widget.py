@@ -1,11 +1,12 @@
 """任务列表组件。
 
-显示任务执行状态和历史，支持停止/重试操作。
+显示任务配置及其运行状态，支持 创建/运行/停止/刷新 操作。
 """
 
+import asyncio
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -20,7 +21,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.atm import TaskStatus, get_task_service
+from src.core.atm.models import AutomationTask, TaskStatus
+from src.core.atm.service import get_task_service
 
 
 class TaskListWidget(QWidget):
@@ -28,18 +30,19 @@ class TaskListWidget(QWidget):
     
     task_selected = pyqtSignal(str)
     
-    COLUMNS = ["ID", "模块", "任务", "状态", "创建时间", "耗时", "操作"]
+    COLUMNS = ["任务名称", "策略ID", "Cron", "最后运行时间", "耗时", "状态", "操作"]
     STATUS_COLORS = {
-        TaskStatus.PENDING: "#60a5fa",
-        TaskStatus.QUEUED: "#a78bfa",
+        TaskStatus.IDLE: "#9ca3af",
+        TaskStatus.STARTING: "#60a5fa",
         TaskStatus.RUNNING: "#facc15",
         TaskStatus.SUCCEEDED: "#4ade80",
         TaskStatus.FAILED: "#f87171",
         TaskStatus.CANCELLED: "#9ca3af",
+        TaskStatus.INTERRUPTED: "#fca5a5",
     }
     STATUS_TEXT = {
-        TaskStatus.PENDING: "等待中",
-        TaskStatus.QUEUED: "排队中",
+        TaskStatus.IDLE: "空闲",
+        TaskStatus.STARTING: "启动中",
         TaskStatus.RUNNING: "运行中",
         TaskStatus.SUCCEEDED: "成功",
         TaskStatus.FAILED: "失败",
@@ -49,10 +52,15 @@ class TaskListWidget(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._tasks = []
+        self._tasks: list[AutomationTask] = []
         self._page = 0
         self._page_size = 20
         self._setup_ui()
+        
+        # 自动刷新定时器
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._auto_refresh)
+        self._timer.start(5000)  # 5秒刷新一次
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -121,7 +129,7 @@ class TaskListWidget(QWidget):
         if header_view:
             header_view.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             header_view.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(6, 120)
+            self.table.setColumnWidth(6, 180)  # 操作列宽一点
         self.table.setAlternatingRowColors(True)
         self.table.cellClicked.connect(self._on_cell_clicked)
         self.table.setStyleSheet("""
@@ -173,7 +181,7 @@ class TaskListWidget(QWidget):
         
         try:
             service = get_task_service()
-            self._tasks = service.list_recent(100)
+            self._tasks = service.list_tasks()  # 获取配置列表
             self._render_page()
         except Exception as e:
             self._show_loading(False)
@@ -182,100 +190,147 @@ class TaskListWidget(QWidget):
             return
         
         self._show_loading(False)
-    
+
+    def _auto_refresh(self):
+        """自动刷新数据（静默模式）。"""
+        if self.isVisible():
+            self.load_data()
+
     def _render_page(self):
         """渲染当前页。"""
         self.table.setRowCount(0)
+        service = get_task_service()
         
         start = self._page * self._page_size
         end = start + self._page_size
         page_tasks = self._tasks[start:end]
         
-        running = 0
+        running_count = 0
+        
         for task in page_tasks:
             row = self.table.rowCount()
             self.table.insertRow(row)
             
-            # ID
-            id_item = QTableWidgetItem(task.id[:8] + "...")
-            id_item.setData(Qt.ItemDataRole.UserRole, task.id)
-            self.table.setItem(row, 0, id_item)
+            # Fetch last run info
+            last_run = service.get_last_run(task.id)
+            status = last_run.status if last_run else TaskStatus.IDLE
             
-            # 模块
-            self.table.setItem(row, 1, QTableWidgetItem(task.module))
+            # 1. 任务名称
+            name_item = QTableWidgetItem(task.name)
+            name_item.setData(Qt.ItemDataRole.UserRole, task.id)
+            self.table.setItem(row, 0, name_item)
             
-            # 任务名
-            self.table.setItem(row, 2, QTableWidgetItem(task.name))
+            # 2. 策略ID
+            self.table.setItem(row, 1, QTableWidgetItem(task.strategy_id))
             
-            # 状态
-            status_text = self.STATUS_TEXT.get(task.status, task.status.value)
+            # 3. Cron
+            self.table.setItem(row, 2, QTableWidgetItem(task.cron_expression or "-"))
+            
+            # 4. 最后运行时间 & 5. 耗时
+            start_time_str = "-"
+            duration_str = "-"
+            
+            if last_run and last_run.start_time:
+                start_dt = datetime.fromtimestamp(last_run.start_time)
+                start_time_str = start_dt.strftime("%m-%d %H:%M:%S")
+                
+                if last_run.end_time:
+                    duration = last_run.end_time - last_run.start_time
+                    duration_str = f"{duration}s"
+                elif status == TaskStatus.RUNNING:
+                    duration = int(datetime.now().timestamp() - last_run.start_time)
+                    duration_str = f"{duration}s..."
+            
+            self.table.setItem(row, 3, QTableWidgetItem(start_time_str))
+            self.table.setItem(row, 4, QTableWidgetItem(duration_str))
+            
+            # 6. 状态
+            status_text = self.STATUS_TEXT.get(status, status.value)
             status_item = QTableWidgetItem(status_text)
-            if task.status in self.STATUS_COLORS:
-                status_item.setForeground(QColor(self.STATUS_COLORS[task.status]))
-            self.table.setItem(row, 3, status_item)
+            if status in self.STATUS_COLORS:
+                status_item.setForeground(QColor(self.STATUS_COLORS[status]))
+            self.table.setItem(row, 5, status_item)
             
-            # 创建时间
-            created = datetime.fromtimestamp(task.created_at).strftime("%H:%M:%S")
-            self.table.setItem(row, 4, QTableWidgetItem(created))
-            
-            # 耗时
-            if task.started_at and task.ended_at:
-                duration = task.ended_at - task.started_at
-                self.table.setItem(row, 5, QTableWidgetItem(f"{duration}s"))
-            elif task.started_at:
-                self.table.setItem(row, 5, QTableWidgetItem("运行中..."))
-            else:
-                self.table.setItem(row, 5, QTableWidgetItem("-"))
-            
-            # 操作按钮
+            # 7. 操作按钮
             action_widget = QWidget()
             action_layout = QHBoxLayout(action_widget)
             action_layout.setContentsMargins(4, 2, 4, 2)
-            action_layout.setSpacing(4)
+            action_layout.setSpacing(8)
             
-            if task.status in {TaskStatus.RUNNING, TaskStatus.PENDING, TaskStatus.QUEUED}:
+            if status == TaskStatus.RUNNING:
+                # 运行中 -> 显示"停止"
                 stop_btn = QPushButton("⏹ 停止")
-                stop_btn.setStyleSheet("background: #f87171; color: white; border: none; padding: 4px 8px; border-radius: 2px;")
+                stop_btn.setStyleSheet("background: #f87171; color: white; border: none; padding: 4px 10px; border-radius: 4px;")
                 stop_btn.clicked.connect(lambda _, tid=task.id: self._stop_task(tid))
                 action_layout.addWidget(stop_btn)
-            elif task.status == TaskStatus.FAILED:
-                retry_btn = QPushButton("🔄 重试")
-                retry_btn.setStyleSheet("background: #60a5fa; color: white; border: none; padding: 4px 8px; border-radius: 2px;")
-                retry_btn.clicked.connect(lambda _, tid=task.id: self._retry_task(tid))
-                action_layout.addWidget(retry_btn)
+                running_count += 1
             else:
-                # 已完成/已取消
-                action_layout.addWidget(QLabel("-"))
+                # 空闲/完成 -> 显示"运行"
+                run_btn = QPushButton("▶ 运行")
+                run_btn.setStyleSheet("background: #60a5fa; color: white; border: none; padding: 4px 10px; border-radius: 4px;")
+                run_btn.clicked.connect(lambda _, tid=task.id: self._run_task(tid))
+                action_layout.addWidget(run_btn)
             
+            # 删除按钮 (总是显示)
+            del_btn = QPushButton("🗑")
+            del_btn.setStyleSheet("background: transparent; color: #9ca3af; border: 1px solid #4b5563; padding: 4px 8px; border-radius: 4px;")
+            del_btn.clicked.connect(lambda _, tid=task.id: self._delete_task(tid))
+            action_layout.addWidget(del_btn)
+            
+            action_layout.addStretch()
             self.table.setCellWidget(row, 6, action_widget)
-            
-            if task.status == TaskStatus.RUNNING:
-                running += 1
         
         # 更新统计和分页
         total = len(self._tasks)
         total_pages = max(1, (total + self._page_size - 1) // self._page_size)
         
-        self.stats_label.setText(f"共 {total} 个任务，{running} 个运行中")
+        self.stats_label.setText(f"共 {total} 个任务配置，{running_count} 个正在运行")
         self.page_label.setText(f"第 {self._page + 1} / {total_pages} 页")
         
         self.prev_btn.setEnabled(self._page > 0)
         self.next_btn.setEnabled(self._page < total_pages - 1)
     
+    def _run_task(self, task_id: str):
+        """触发任务。"""
+        try:
+            # get_task_service().run_and_wait(task_id) # async wrap?
+            # PyQt cannot await directly. Use asyncio.create_task helper or fire-and-forget
+            # Service run_task is async.
+            # Convert to sync call for UI button
+            asyncio.create_task(self._async_run_task(task_id))
+            self.load_data() # Optimistic update
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"启动失败: {e}")
+
+    async def _async_run_task(self, task_id: str):
+        try:
+            await get_task_service().run_task(task_id)
+            # 刷新UI (需要在主线程? PyQt signals are thread-safe)
+            # self.load_data() -> this is usually safe if called from async task on same loop
+        except Exception as e:
+            print(f"Run Error: {e}") # TODO: Log properly
+
     def _stop_task(self, task_id: str):
         """停止任务。"""
         try:
-            service = get_task_service()
-            service.stop(task_id)
-            self.load_data()
+            asyncio.create_task(get_task_service().stop_task(task_id))
+            # self.load_data() # Refresh will happen by timer or user
         except Exception as e:
             QMessageBox.warning(self, "错误", f"停止失败: {e}")
-    
-    def _retry_task(self, task_id: str):
-        """重试任务。"""
-        # TODO: 实现重试逻辑
-        QMessageBox.information(self, "提示", f"重试功能开发中: {task_id[:8]}...")
-    
+
+    def _delete_task(self, task_id: str):
+        """删除任务。"""
+        reply = QMessageBox.question(
+            self, "确认删除", 
+            "确定要删除该任务吗？执行历史可能会保留。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            if get_task_service().delete_task(task_id):
+                self.load_data()
+            else:
+                QMessageBox.warning(self, "错误", "删除失败")
+
     def _prev_page(self):
         if self._page > 0:
             self._page -= 1
@@ -296,10 +351,8 @@ class TaskListWidget(QWidget):
             self.refresh_btn.setEnabled(True)
     
     def _on_cell_clicked(self, row: int, col: int):
-        id_item = self.table.item(row, 0)
-        if id_item:
-            task_id = id_item.data(Qt.ItemDataRole.UserRole)
-            self.task_selected.emit(task_id)
+        # 选中行逻辑
+        pass
 
     def _on_create_task(self):
         """新建任务。"""
@@ -308,7 +361,13 @@ class TaskListWidget(QWidget):
         dialog = TaskCreateDialog(parent=self)
         if dialog.exec() == dialog.DialogCode.Accepted:
             data = dialog.get_task_data()
-            # TODO: 创建任务并保存
-            from src.core.foundation.logging import logger
-            logger.info(f"[ATM] 新建任务: {data['name']}, 策略: {data['strategy_id']}")
-            self.load_data()
+            try:
+                get_task_service().create_task(
+                    name=data['name'], 
+                    strategy_id=data['strategy_id'],
+                    cron=data.get('cron')
+                )
+                self.load_data()
+            except Exception as e:
+                QMessageBox.critical(self, "创建失败", str(e))
+

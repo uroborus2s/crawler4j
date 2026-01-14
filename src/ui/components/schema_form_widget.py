@@ -9,7 +9,6 @@ from typing import Any
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
@@ -22,6 +21,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from src.ui.components.combo_box import StyledComboBox as QComboBox
 
 
 class SchemaFormWidget(QWidget):
@@ -184,7 +185,7 @@ class SchemaFormWidget(QWidget):
     def _input_style(self) -> str:
         """输入控件样式。"""
         return """
-            QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+            QLineEdit, QSpinBox, QDoubleSpinBox {
                 background: rgba(0, 0, 0, 0.3);
                 color: white;
                 border: 1px solid rgba(255,255,255,0.2);
@@ -192,7 +193,7 @@ class SchemaFormWidget(QWidget):
                 padding: 8px;
                 min-width: 200px;
             }
-            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
                 border-color: rgba(99, 102, 241, 0.8);
             }
         """

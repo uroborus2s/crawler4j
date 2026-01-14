@@ -9,7 +9,6 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -20,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.tsm import TaskStrategy, get_strategy_loader
+from src.ui.components.combo_box import StyledComboBox as QComboBox
 
 
 class TaskCreateDialog(QDialog):
@@ -40,7 +40,7 @@ class TaskCreateDialog(QDialog):
                 background: rgb(30, 30, 40);
             }
             QLabel { color: white; }
-            QLineEdit, QComboBox {
+            QLineEdit {
                 background: rgba(50, 50, 60, 0.9);
                 color: white;
                 border: 1px solid rgba(255, 255, 255, 0.2);
@@ -139,7 +139,7 @@ class TaskCreateDialog(QDialog):
 
         self.strategy_combo.clear()
         for strategy in self._strategies:
-            display_name = f"{strategy.name} ({strategy.concurrency.instances} 并发)"
+            display_name = f"{strategy.name} ({strategy.scaling.max_concurrency} 并发)"
             self.strategy_combo.addItem(display_name, strategy.id)
 
         if not self._strategies:
@@ -158,10 +158,10 @@ class TaskCreateDialog(QDialog):
 
         # 预览信息
         lines = []
-        lines.append(f"环境: {strategy.environment.type.value}")
+        lines.append(f"环境: {strategy.selector.env_type.value}")
         if strategy.execution:
             lines.append(f"执行: {strategy.execution.module}/{strategy.execution.workflow or 'default'}")
-        lines.append(f"超时: {strategy.concurrency.timeout_seconds}s")
+            lines.append(f"超时: {strategy.execution.timeout}s")
         self.strategy_preview.setText(" | ".join(lines))
 
     def _on_cron_toggle(self, state: int):
