@@ -7,6 +7,7 @@
     - 任务运行历史 (TaskRun) 的 CRUD
 """
 
+import asyncio
 import json
 from typing import Any
 
@@ -22,6 +23,10 @@ class TaskRepository:
     管理 `automation_tasks` 和 `task_runs` 两张表。
     """
     
+    async def _run_async(self, func, *args):
+        """Run synchronous DB operation in thread pool."""
+        return await asyncio.get_running_loop().run_in_executor(None, func, *args)
+
     def __init__(self):
         self._ensure_tables()
 
@@ -59,122 +64,141 @@ class TaskRepository:
 
     # === AutomationTask Methods ===
     
-    def save_task(self, task: AutomationTask) -> None:
+    async def save_task(self, task: AutomationTask) -> None:
         """保存任务配置。"""
-        with get_connection(STATE_DB) as conn:
-            conn.execute(
-                """
-                INSERT INTO automation_tasks (id, name, strategy_id, cron_expression, default_params, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
-                    strategy_id = excluded.strategy_id,
-                    cron_expression = excluded.cron_expression,
-                    default_params = excluded.default_params,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    task.id,
-                    task.name,
-                    task.strategy_id,
-                    task.cron_expression,
-                    json.dumps(task.default_params, ensure_ascii=False),
-                    task.created_at,
-                    task.updated_at,
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO automation_tasks (id, name, strategy_id, cron_expression, default_params, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        name = excluded.name,
+                        strategy_id = excluded.strategy_id,
+                        cron_expression = excluded.cron_expression,
+                        default_params = excluded.default_params,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        task.id,
+                        task.name,
+                        task.strategy_id,
+                        task.cron_expression,
+                        json.dumps(task.default_params, ensure_ascii=False),
+                        task.created_at,
+                        task.updated_at,
+                    )
                 )
-            )
+        await self._run_async(_do)
 
-    def get_task(self, task_id: str) -> AutomationTask | None:
+    async def get_task(self, task_id: str) -> AutomationTask | None:
         """获取任务配置。"""
-        with get_connection(STATE_DB) as conn:
-            cursor = conn.execute("SELECT * FROM automation_tasks WHERE id = ?", (task_id,))
-            row = cursor.fetchone()
-            if row:
-                return self._row_to_automation_task(row)
-            return None
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute("SELECT * FROM automation_tasks WHERE id = ?", (task_id,))
+                row = cursor.fetchone()
+                if row:
+                    return self._row_to_automation_task(row)
+                return None
+        return await self._run_async(_do)
 
-    def list_tasks(self) -> list[AutomationTask]:
+    async def list_tasks(self) -> list[AutomationTask]:
         """列出所有任务配置。"""
-        with get_connection(STATE_DB) as conn:
-            cursor = conn.execute("SELECT * FROM automation_tasks ORDER BY created_at DESC")
-            return [self._row_to_automation_task(row) for row in cursor.fetchall()]
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute("SELECT * FROM automation_tasks ORDER BY created_at DESC")
+                return [self._row_to_automation_task(row) for row in cursor.fetchall()]
+        return await self._run_async(_do)
 
-    def delete_task(self, task_id: str) -> bool:
+    async def delete_task(self, task_id: str) -> bool:
         """删除任务配置。"""
-        with get_connection(STATE_DB) as conn:
-            cursor = conn.execute("DELETE FROM automation_tasks WHERE id = ?", (task_id,))
-            return cursor.rowcount > 0
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute("DELETE FROM automation_tasks WHERE id = ?", (task_id,))
+                return cursor.rowcount > 0
+        return await self._run_async(_do)
 
     # === TaskRun Methods ===
 
-    def save_run(self, run: TaskRun) -> None:
+    async def save_run(self, run: TaskRun) -> None:
         """保存运行记录。"""
-        with get_connection(STATE_DB) as conn:
-            conn.execute(
-                """
-                INSERT INTO task_runs (id, task_id, status, trigger_type, env_id, result, error, start_time, end_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    status = excluded.status,
-                    env_id = excluded.env_id,
-                    result = excluded.result,
-                    error = excluded.error,
-                    start_time = excluded.start_time,
-                    end_time = excluded.end_time
-                """,
-                (
-                    run.id,
-                    run.task_id,
-                    run.status.value,
-                    run.trigger_type,
-                    run.env_id,
-                    json.dumps(run.result.to_dict(), ensure_ascii=False) if run.result else None,
-                    run.error,
-                    run.start_time,
-                    run.end_time,
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO task_runs (id, task_id, status, trigger_type, env_id, result, error, start_time, end_time)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        status = excluded.status,
+                        env_id = excluded.env_id,
+                        result = excluded.result,
+                        error = excluded.error,
+                        start_time = excluded.start_time,
+                        end_time = excluded.end_time
+                    """,
+                    (
+                        run.id,
+                        run.task_id,
+                        run.status.value,
+                        run.trigger_type,
+                        run.env_id,
+                        json.dumps(run.result.to_dict(), ensure_ascii=False) if run.result else None,
+                        run.error,
+                        run.start_time,
+                        run.end_time,
+                    )
                 )
-            )
+        await self._run_async(_do)
 
-    def get_run(self, run_id: str) -> TaskRun | None:
+    async def get_run(self, run_id: str) -> TaskRun | None:
         """获取运行记录。"""
-        with get_connection(STATE_DB) as conn:
-            cursor = conn.execute("SELECT * FROM task_runs WHERE id = ?", (run_id,))
-            row = cursor.fetchone()
-            if row:
-                return self._row_to_task_run(row)
-            return None
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute("SELECT * FROM task_runs WHERE id = ?", (run_id,))
+                row = cursor.fetchone()
+                if row:
+                    return self._row_to_task_run(row)
+                return None
+        return await self._run_async(_do)
 
-    def list_runs_by_task(self, task_id: str, limit: int = 50) -> list[TaskRun]:
+    async def list_runs_by_task(self, task_id: str, limit: int = 50) -> list[TaskRun]:
         """获取指定任务的运行历史。"""
-        with get_connection(STATE_DB) as conn:
-            cursor = conn.execute(
-                "SELECT * FROM task_runs WHERE task_id = ? ORDER BY start_time DESC LIMIT ?",
-                (task_id, limit)
-            )
-            return [self._row_to_task_run(row) for row in cursor.fetchall()]
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute(
+                    "SELECT * FROM task_runs WHERE task_id = ? ORDER BY start_time DESC LIMIT ?",
+                    (task_id, limit)
+                )
+                return [self._row_to_task_run(row) for row in cursor.fetchall()]
+        return await self._run_async(_do)
 
     
-    def list_runs_by_status(self, status: TaskStatus) -> list[TaskRun]:
+    async def list_runs_by_status(self, status: TaskStatus) -> list[TaskRun]:
         """按状态列出运行记录。"""
-        with get_connection(STATE_DB) as conn:
-            cursor = conn.execute(
-                "SELECT * FROM task_runs WHERE status = ?",
-                (status.value,)
-            )
-            return [self._row_to_task_run(row) for row in cursor.fetchall()]
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute(
+                    "SELECT * FROM task_runs WHERE status = ?",
+                    (status.value,)
+                )
+                return [self._row_to_task_run(row) for row in cursor.fetchall()]
+        return await self._run_async(_do)
 
-    def list_recent_runs(self, limit: int = 50) -> list[TaskRun]:
+    async def list_recent_runs(self, limit: int = 50) -> list[TaskRun]:
         """获取最近的所有运行记录。"""
-        with get_connection(STATE_DB) as conn:
-            cursor = conn.execute(
-                "SELECT * FROM task_runs ORDER BY start_time DESC LIMIT ?",
-                (limit,)
-            )
-            return [self._row_to_task_run(row) for row in cursor.fetchall()]
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute(
+                    "SELECT * FROM task_runs ORDER BY start_time DESC LIMIT ?",
+                    (limit,)
+                )
+                return [self._row_to_task_run(row) for row in cursor.fetchall()]
+        return await self._run_async(_do)
     
-    def get_last_run(self, task_id: str) -> TaskRun | None:
+    async def get_last_run(self, task_id: str) -> TaskRun | None:
         """获取任务的最后一次运行记录。"""
-        runs = self.list_runs_by_task(task_id, limit=1)
+        # list_runs_by_task is now async
+        runs = await self.list_runs_by_task(task_id, limit=1)
         return runs[0] if runs else None
 
     # === Helpers ===

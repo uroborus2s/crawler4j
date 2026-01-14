@@ -26,6 +26,11 @@ class EventType(StrEnum):
     TASK_FAILED = "task.failed"
     TASK_CANCELLED = "task.cancelled"
     
+    # 任务配置事件
+    TASK_CONFIG_CREATED = "task.config.created"
+    TASK_CONFIG_UPDATED = "task.config.updated"
+    TASK_CONFIG_DELETED = "task.config.deleted"
+    
     # 模块事件
     MODULE_INSTALLED = "module.installed"
     MODULE_UNINSTALLED = "module.uninstalled"

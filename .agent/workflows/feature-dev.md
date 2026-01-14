@@ -1,28 +1,23 @@
 ---
-description: 将多个角色串联起来的“指挥棒”
+description: 新需求开发 (Feature Development)
 ---
 
-# Workflow: Feature Development Cycle
+**触发条件**: 用户提出新功能开发请求。
 
-## Trigger
-User says: "开发一个新功能..."
+**阶段一：需求分析与文档更新 (角色: @首席架构师)**
+1. **分析需求**: 理解用户目标，检查 `docs/srs/` (需求规格说明书) 是否需要更新。
+2. **更新文档**: 在编写代码前，先在 `docs/design/` 下创建或更新设计文档，定义 API 接口和数据结构。
+3. **提交方案**: 向用户展示设计方案，获得批准后继续。
 
-## Steps
-1. **Phase 1: Design (Arch-Reviewer)**
-   - 分析需求，更新 `docs/srs/`。
-   - 检查是否需要修改 SDK 契约。
+**阶段二：代码实现 (角色: @核心开发工程师)**
+1. **创建结构**: 根据项目模块化规范，在 `src/` 或 `modules/` 中创建文件。
+2. **编写逻辑**: 实现核心业务逻辑，确保包含完善的类型注解。
+3. **开发UI**: 如果涉及界面，在 `src/ui/` 中实现对应的组件（遵循 PyQt/PySide 规范）。
 
-2. **Phase 2: Contract (SDK-Maintainer)**
-   - 如果 Phase 1 指出需要 SDK 变更，先修改 SDK 并发布版本。
-   - 更新 `docs/sdk/api.md`。
+**阶段三：测试与验证 (角色: @测试专家)**
+1. **编写测试**: 在 `tests/unit/` 下编写对应的单元测试。
+2. **执行测试**: 运行 `pytest` 确保新功能通过，且不破坏现有功能。
 
-3. **Phase 3: Implementation (Kernel/Plugin/UI)**
-   - 根据功能归属，切换到对应角色进行编码。
-   - **Constraint**: 必须遵守 `.agent/rules/crawler4j-rules.md` 中的依赖红线。
-
-4. **Phase 4: Verification (Skills)**
-   - 运行 `uv run pytest`。
-   - 如果是插件，调用 `@run-plugin-debug` 进行验证。
-
-5. **Phase 5: Documentation**
-   - 更新 `README.md` 或 `docs/user-guide`。
+**阶段四：提交交付**
+1. 检查代码格式 (Black/Isort)。
+2. 输出最终的修改文件列表，准备提交。
