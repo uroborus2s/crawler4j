@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -23,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.atm.models import AutomationTask, TaskStatus
 from src.core.atm.service import get_task_service
+from src.ui.components.table import SkyTableWidget
 
 
 class TaskListWidget(QWidget):
@@ -120,33 +120,15 @@ class TaskListWidget(QWidget):
         layout.addWidget(self.error_label)
         
         # 表格
-        self.table = QTableWidget()
+        self.table = SkyTableWidget()
         self.table.setColumnCount(len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         header_view = self.table.horizontalHeader()
         if header_view:
             header_view.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             header_view.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(6, 180)  # 操作列宽一点
-        self.table.setAlternatingRowColors(True)
         self.table.cellClicked.connect(self._on_cell_clicked)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: rgba(30, 30, 40, 0.8);
-                color: white;
-                border: none;
-                gridline-color: rgba(255, 255, 255, 0.1);
-            }
-            QTableWidget::item { padding: 8px; }
-            QHeaderView::section {
-                background-color: rgba(50, 50, 60, 0.9);
-                color: white;
-                padding: 10px;
-                border: none;
-            }
-        """)
         
         layout.addWidget(self.table)
         

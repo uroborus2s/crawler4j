@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -23,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.foundation.logging import logger
 from src.core.tsm import TaskStrategy, get_strategy_loader
+from src.ui.components.table import SkyTableWidget
 
 
 class StrategyListWidget(QWidget):
@@ -70,7 +70,7 @@ class StrategyListWidget(QWidget):
         layout.addLayout(header)
 
         # 策略表格
-        self.table = QTableWidget()
+        self.table = SkyTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(["名称", "并发数", "执行目标", "环境类型", "操作"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -81,34 +81,8 @@ class StrategyListWidget(QWidget):
         self.table.setColumnWidth(1, 80)
         self.table.setColumnWidth(3, 100)
         self.table.setColumnWidth(4, 220)
-        self.table.verticalHeader().setDefaultSectionSize(50)  # Ensure rows are tall enough for buttons
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background: rgba(30, 30, 40, 0.9);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 8px;
-                color: white;
-            }
-            QTableWidget::item { padding: 8px; }
-            QTableWidget::item:selected { background: rgba(99, 102, 241, 0.5); }
-            QHeaderView {
-                background: transparent;
-                border: none;
-            }
-            QHeaderView::section {
-                background: rgba(50, 50, 60, 0.9);
-                color: rgba(255, 255, 255, 0.8);
-                padding: 10px;
-                border: none;
-                border-right: 1px solid rgba(255, 255, 255, 0.05);
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            }
-            QTableCornerButton::section {
-                background: rgba(50, 50, 60, 0.9);
-                border: none;
-            }
-        """)
-
+        # self.table.verticalHeader().setDefaultSectionSize(50)  # Inherited from SkyTableWidget
+        
         layout.addWidget(self.table)
 
     def _load_strategies(self):
