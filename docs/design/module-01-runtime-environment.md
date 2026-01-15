@@ -14,54 +14,88 @@
 classDiagram
     class EnvironmentManager {
         -pool: EnvPool
-        -providers: Map[str, SchemaProvider]
-        +register_provider(kind, provider)
-        +acquire(request: Requirements) -> EnvLease
-        +release(lease: EnvLease)
-        +run_gc()
+        -lease_manager: LeaseManager
+        +startup()
+        +shutdown()
+        +acquire(requirement: EnvRequirement) EnvLease
+        +release(lease: EnvLease, dirty: bool)
+        +create_env(provider_name: str, config: dict) Environment
+        +destroy_env(env_id: str) bool
+        +get_env(env_id: str) Environment
+        +list_envs() list[Environment]
+        +run_gc() int
     }
 
     class EnvPool {
-        -slots: Map[str, Environment]
-        -waiting_queue: PriorityQueue
-        -audit_log: List
-        +match_and_lease(req) -> Environment
-        +return_to_pool(env)
+        -_envs: dict[str, Environment]
+        -_max_instances: int
+        +add(env: Environment)
+        +remove(env_id: str)
+        +get(env_id: str) Environment
+        +find_available(requirement) Environment
+        +update_status(env_id, status)
+        +list_all() list[Environment]
+        +can_create() bool
+    }
+
+    class LeaseManager {
+        -_pool: EnvPool
+        -_leases: dict[str, EnvLease]
+        +acquire(env, task_run_id, timeout) EnvLease
+        +release(lease, token) Environment
+        +list_expired() list[EnvLease]
     }
 
     class BaseProvider {
         <<Abstract>>
-        +create(config) -> Environment
-        +health_check(env) -> bool
-        +reset(env)
+        +name: str
+        +kind: EnvKind
+        +create(config) Environment
+        +reset(env) bool
+        +health_check(env) bool
         +destroy(env)
     }
 
     class PlaywrightProvider {
-        -playwright_instance
-        +create() 
-        +reset(env: Page)
+        +name = "playwright_local"
+        +create(config) Environment
+    }
+
+    class BitBrowserProvider {
+        +name = "bitbrowser"
+        +create(config) Environment
+    }
+
+    class VirtualBrowserProvider {
+        +name = "virtualbrowser"
+        +create(config) Environment
     }
 
     class Environment {
         +id: str
         +kind: EnvKind
+        +provider: str
         +status: EnvStatus
-        +metadata: dict
-        +handle: Any (Process/Context)
-        +lease_info: LeaseRecord
+        +labels: dict
+        +capabilities: set
+        +handle: Any
     }
 
     class EnvLease {
-        +lease_id: str
-        +env: Environment
+        +id: str
+        +env_id: str
+        +task_run_id: str
         +token: str
-        +verify_token()
+        +is_expired() bool
     }
 
     EnvironmentManager --> EnvPool
-    EnvironmentManager --> BaseProvider
+    EnvironmentManager --> LeaseManager
+    EnvironmentManager ..> BaseProvider : uses
+    LeaseManager --> EnvPool
     BaseProvider <|-- PlaywrightProvider
+    BaseProvider <|-- BitBrowserProvider
+    BaseProvider <|-- VirtualBrowserProvider
     EnvPool o-- Environment
 ```
 
@@ -112,32 +146,50 @@ class EnvLease(BaseModel):
 ```python
 class EnvironmentManager:
     async def startup(self):
-        """初始化，启动 GC task，加载 providers"""
+        """初始化，启动 GC task，从数据库恢复环境状态"""
         pass
 
-    async def register_provider(self, kind: str, provider: BaseProvider):
-        """注册具体实现，如 BrowserProvider"""
+    async def shutdown(self):
+        """关闭管理器，释放所有环境"""
         pass
 
-    async def acquire_env(self, request: EnvRequirement) -> EnvLease:
+    async def acquire(self, requirement: EnvRequirement) -> EnvLease:
         """
-        核心方法：
-        1. 检查 Pool 中是否有匹配的 READY 环境 (tags匹配)
-        2. 若有 -> 锁定状态 -> 返回 Lease
-        3. 若无 -> 检查配额 -> 调用 Provider.create() -> 入池 -> 返回 Lease
-        4. 若无且满 -> 抛出 EnvBusyError 或入队等待
+        租用环境（供调度器调用）：
+        1. 在 READY 实例中查找匹配项
+        2. 若无匹配，调用 Provider.create() 创建
+        3. 发放租约，将实例置为 BUSY
         """
         pass
 
-    async def release_env(self, lease: EnvLease, dirty: bool = False):
+    async def release(self, lease: EnvLease, dirty: bool = False) -> bool:
         """
-        核心方法：
+        释放环境：
         1. 验证 token
-        2. 将 Environment 状态置为 CLEANING
-        3. 调用 Provider.reset(env) (如关闭 Page, 清除 Cookies)
-        4. 健康检查 Check
-        5. 成功 -> 置为 READY; 失败/Dirty -> 置为 UNHEALTHY/DEAD
+        2. 调用 Provider.reset() 清理
+        3. 健康检查 Provider.health_check()
+        4. 成功 -> READY; 失败/dirty -> UNHEALTHY
         """
+        pass
+
+    async def create_env(self, provider_name: str, config: dict | None = None) -> Environment:
+        """直接创建环境（供 UI 调用）"""
+        pass
+
+    async def destroy_env(self, env_id: str) -> bool:
+        """直接销毁环境（供 UI 调用）"""
+        pass
+
+    async def get_env(self, env_id: str) -> Environment | None:
+        """获取环境实例"""
+        pass
+
+    async def list_envs(self) -> list[Environment]:
+        """列出所有环境"""
+        pass
+
+    async def run_gc(self) -> int:
+        """手动触发垃圾回收，返回回收数量"""
         pass
 ```
 
@@ -176,19 +228,60 @@ class BaseProvider(ABC):
 
 用于记录当前所有受管环境的状态。系统启动时需扫描此表，将 `BUSY` 状态的环境标记为“崩溃残留”并执行清理。
 
-| 字段名 | 类型 | 约束 | 不可空 | 描述 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | VARCHAR(64) | PK | Y | 环境唯一 ID (UUID) |
-| `kind` | VARCHAR(32) | | Y | browser / http |
-| `provider` | VARCHAR(64) | | Y | 提供者标识 |
-| `status` | VARCHAR(32) | | Y | mapping to EnvStatus |
-| `lease_id` | VARCHAR(64) | INDEX | N | 当前租约 ID (若 BUSY) |
-| `task_run_id` | VARCHAR(64)| INDEX | N | 关联的任务运行 ID |
-| `created_at` | BIGINT | | Y | 创建时间戳 |
-| `updated_at` | BIGINT | | Y | 最后状态变更时间 |
-| `meta_json` | TEXT | | N | JSON 存储 capabilities 和 tags |
+| 字段名 | 类型 | 约束 | 描述 |
+| :--- | :--- | :--- | :--- |
+| `id` | TEXT | PK | 环境唯一 ID (UUID) |
+| `kind` | TEXT | NOT NULL | browser / http / desktop |
+| `provider` | TEXT | NOT NULL | 提供者标识 |
+| `status` | TEXT | NOT NULL | EnvStatus |
+| `external_id` | TEXT | INDEX | 外部系统环境 ID |
+| `lease_id` | TEXT | INDEX | 当前租约 ID |
+| `task_run_id` | TEXT | INDEX | 关联的任务运行 ID |
+| `last_used_at` | INTEGER | INDEX | 最后使用时间戳 |
+| `daily_usage_count` | INTEGER | DEFAULT 0 | 当天使用次数 |
+| `daily_usage_date` | TEXT | | 使用统计日期 |
+| `proxy_config_json` | TEXT | | 代理配置 JSON |
+| `fingerprint_config_json` | TEXT | | 指纹配置 JSON |
+| `created_at` | INTEGER | NOT NULL | 创建时间戳 |
+| `updated_at` | INTEGER | NOT NULL | 状态变更时间 |
+| `meta_json` | TEXT | | capabilities/labels |
 
-### 3.2 SQL 定义
+### 3.2 `ip_pools` 表
+
+| 字段名 | 类型 | 约束 | 描述 |
+| :--- | :--- | :--- | :--- |
+| `id` | TEXT | PK | IP 池 ID |
+| `name` | TEXT | NOT NULL | 池名称 |
+| `provider` | TEXT | NOT NULL | 提供商 |
+| `config_json` | TEXT | | 配置 |
+| `created_at` | INTEGER | NOT NULL | 创建时间 |
+| `updated_at` | INTEGER | NOT NULL | 更新时间 |
+
+### 3.3 `ip_entries` 表
+
+| 字段名 | 类型 | 约束 | 描述 |
+| :--- | :--- | :--- | :--- |
+| `id` | TEXT | PK | 条目 ID |
+| `pool_id` | TEXT | FK, INDEX | 所属 IP 池 |
+| `address` | TEXT | NOT NULL | IP 地址 |
+| `protocol` | TEXT | NOT NULL | http/socks5 |
+| `port` | INTEGER | NOT NULL | 端口 |
+| `username` | TEXT | | 用户名 |
+| `password` | TEXT | | 密码 |
+| `bound_count` | INTEGER | DEFAULT 0 | 绑定的环境数量 |
+| `safety_score` | INTEGER | DEFAULT 100 | 安全度评分 (0-100) |
+| `expires_at` | INTEGER | | 过期时间戳 |
+| `created_at` | INTEGER | NOT NULL | 创建时间 |
+
+### 3.4 `env_ip_bindings` 表
+
+| 字段名 | 类型 | 约束 | 描述 |
+| :--- | :--- | :--- | :--- |
+| `env_id` | TEXT | PK, FK | 环境 ID |
+| `ip_id` | TEXT | FK, INDEX | IP 条目 ID |
+| `bound_at` | INTEGER | NOT NULL | 绑定时间 |
+
+### 3.5 SQL 定义
 
 ```sql
 CREATE TABLE environments (
@@ -196,15 +289,57 @@ CREATE TABLE environments (
     kind TEXT NOT NULL,
     provider TEXT NOT NULL,
     status TEXT NOT NULL,
+    external_id TEXT,
     lease_id TEXT,
     task_run_id TEXT,
+    last_used_at INTEGER,
+    daily_usage_count INTEGER DEFAULT 0,
+    daily_usage_date TEXT,
+    proxy_config_json TEXT,
+    fingerprint_config_json TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    meta_json TEXT -- {"browser": "chromium", "proxy": "..."}
+    meta_json TEXT
 );
 
 CREATE INDEX idx_env_status ON environments(status);
-CREATE INDEX idx_env_task ON environments(task_run_id);
+CREATE INDEX idx_env_external ON environments(external_id);
+CREATE INDEX idx_env_last_used ON environments(last_used_at);
+
+CREATE TABLE ip_pools (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    strategy TEXT DEFAULT 'least_bound',
+    config_json TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE ip_entries (
+    id TEXT PRIMARY KEY,
+    pool_id TEXT NOT NULL REFERENCES ip_pools(id) ON DELETE CASCADE,
+    address TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    username TEXT,
+    password TEXT,
+    bound_count INTEGER DEFAULT 0,
+    safety_score INTEGER DEFAULT 100,
+    expires_at INTEGER,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_ip_pool ON ip_entries(pool_id);
+CREATE INDEX idx_ip_bound ON ip_entries(bound_count);
+
+CREATE TABLE env_ip_bindings (
+    env_id TEXT PRIMARY KEY REFERENCES environments(id) ON DELETE CASCADE,
+    ip_id TEXT NOT NULL REFERENCES ip_entries(id) ON DELETE CASCADE,
+    bound_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_binding_ip ON env_ip_bindings(ip_id);
 ```
 
 ---
@@ -219,14 +354,13 @@ stateDiagram-v2
     CREATING --> READY : Provider.create() success
     CREATING --> DEAD : create failed
 
-    READY --> BUSY : acquire_env()
-    BUSY --> CLEANING : release_env()
+    READY --> BUSY : acquire()
+    BUSY --> READY : release() + reset() + health_check() OK
+    BUSY --> UNHEALTHY : reset/check failed or dirty=true
     
-    CLEANING --> READY : reset() success & health check OK
-    CLEANING --> UNHEALTHY : reset/check failed
-    
-    UNHEALTHY --> TERMINATING : gc()
-    TERMINATING --> DEAD : destroy() success
+    UNHEALTHY --> TERMINATING : run_gc()
+    READY --> TERMINATING : destroy_env()
+    TERMINATING --> DEAD : Provider.destroy() success
     DEAD --> [*]
 ```
 
@@ -248,3 +382,316 @@ stateDiagram-v2
 后台协程 `_gc_loop` 每隔 60s 运行一次：
 1. 扫描 `UNHEALTHY` 和 `DEAD` 状态的环境，执行物理销毁（如果尚未销毁），并从 DB 删除记录。
 2. 扫描 `READY` 状态但 `idle_time > max_idle_ttl` 的环境，执行缩容逻辑（Scale Down），销毁以释放系统资源。
+
+---
+
+## 5. 增强设计 (Enhanced Features)
+
+### 5.1 环境统计字段
+
+为支持策略多条件匹配，Environment 新增以下统计字段：
+
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| `last_used_at` | int | 最后使用时间戳 |
+| `daily_usage_count` | int | 当天使用次数 |
+| `daily_usage_date` | str | 统计日期 (YYYY-MM-DD) |
+
+#### 5.1.1 使用次数计算与清零
+
+**计算逻辑**：每次使用环境时调用，自动检测日期变化并清零。
+
+```python
+def increment_usage(env: Environment) -> None:
+    """增加使用次数，跨日自动清零。"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    if env.daily_usage_date != today:
+        # 跨日清零
+        env.daily_usage_date = today
+        env.daily_usage_count = 1
+    else:
+        env.daily_usage_count += 1
+    env.last_used_at = int(time.time())
+```
+
+**清零时机**：
+1. **惰性清零（推荐）**：在 `acquire()` 时检测日期，若跨日则重置为 1（上述逻辑）
+2. **主动清零（可选）**：GC 循环中检测并批量清零
+
+```python
+async def reset_daily_usage_if_needed(pool: EnvPool) -> int:
+    """GC 中批量清零过期的日使用统计。"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    count = 0
+    for env in await pool.list_all():
+        if env.daily_usage_date and env.daily_usage_date != today:
+            env.daily_usage_count = 0
+            env.daily_usage_date = today
+            count += 1
+    return count
+```
+
+### 5.2 IP 池管理
+
+#### 5.2.1 关系模型
+
+**一个 IP 可绑定多个环境**（一对多关系）：
+
+```mermaid
+erDiagram
+    IP_ENTRIES ||--o{ ENV_IP_BINDINGS : "1:N"
+    ENVIRONMENTS ||--o{ ENV_IP_BINDINGS : "1:1"
+    
+    IP_ENTRIES {
+        text id PK
+        text pool_id FK
+        text address
+        int bound_count "绑定的环境数"
+        int safety_score "安全度评分"
+        int expires_at "过期时间戳"
+    }
+    
+    ENV_IP_BINDINGS {
+        text env_id FK
+        text ip_id FK
+        int bound_at "绑定时间"
+    }
+```
+
+#### 5.2.2 类图
+
+```mermaid
+classDiagram
+    class IPEntry {
+        +id: str
+        +address: str
+        +protocol: str
+        +port: int
+        +bound_count: int
+        +safety_score: int
+        +expires_at: int
+    }
+    
+    class IPPool {
+        +id: str
+        +name: str
+        +strategy: IPStrategy
+        +select_ip(exclude_ids) IPEntry
+    }
+    
+    class IPPoolManager {
+        +bind_ip(env_id, pool_id) IPEntry
+        +unbind_ip(env_id)
+        +get_bound_ip(env_id) IPEntry
+    }
+    
+    IPPool o-- IPEntry
+    IPPoolManager o-- IPPool
+```
+
+#### 5.2.3 IP 分配策略
+
+```python
+class IPStrategy(StrEnum):
+    LEAST_BOUND = "least_bound"      # 最少绑定数量（负载均衡）
+    HIGHEST_SAFETY = "highest_safety" # 最高安全度评分
+    LONGEST_TTL = "longest_ttl"       # 最长有效期
+    SYSTEM_PROXY = "system_proxy"     # 使用系统代理
+    NONE = "none"                     # 不使用代理
+```
+
+**策略实现**：
+
+```python
+async def select_ip(pool: IPPool, exclude_ids: set[str] = None) -> IPEntry | None:
+    """根据策略选择 IP。"""
+    candidates = [ip for ip in pool.entries if ip.id not in (exclude_ids or set())]
+    
+    if not candidates:
+        return None
+    
+    match pool.strategy:
+        case IPStrategy.LEAST_BOUND:
+            # 选择绑定数量最少的 IP
+            return min(candidates, key=lambda ip: ip.bound_count)
+        
+        case IPStrategy.HIGHEST_SAFETY:
+            # 选择安全度最高的 IP
+            return max(candidates, key=lambda ip: ip.safety_score)
+        
+        case IPStrategy.LONGEST_TTL:
+            # 选择离过期时间最远的 IP
+            now = int(time.time())
+            valid = [ip for ip in candidates if ip.expires_at > now]
+            return max(valid, key=lambda ip: ip.expires_at) if valid else None
+        
+        case IPStrategy.SYSTEM_PROXY:
+            # 返回特殊标记，使用系统代理
+            return IPEntry(id="system", address="system://proxy")
+        
+        case IPStrategy.NONE:
+            return None
+```
+
+#### 5.2.4 代理配置模式
+
+```python
+class ProxyMode(StrEnum):
+    NONE = "none"           # 无代理
+    STATIC = "static"       # 固定代理地址
+    POOL = "pool"           # 从 IP 池自动分配
+    SYSTEM = "system"       # 使用系统代理
+```
+
+#### 5.2.5 IP 生命周期
+
+| 字段 | 默认值 | 说明 |
+|:---|:---|:---|
+| `expires_at` | 创建时间 + 30天 | IP 过期时间 |
+| `safety_score` | 100 | 安全度评分（0-100，检测到风险时降低） |
+| `bound_count` | 0 | 当前绑定的环境数量 |
+
+**自动解绑**：环境销毁时自动调用 `unbind_ip(env_id)` 减少 `bound_count`。
+
+### 5.3 外部状态同步
+
+#### 5.3.1 问题场景
+
+| 场景 | 问题 | 解决方案 |
+|:---|:---|:---|
+| 外部手动关闭浏览器 | 程序状态仍为 BUSY | 心跳检测 |
+| 程序崩溃 | 外部环境仍在运行 | 启动时同步 |
+| 外部删除环境 | 程序环境失效 | 定期校验 |
+
+#### 5.3.2 同步策略
+
+```mermaid
+stateDiagram-v2
+    [*] --> Polling: startup
+    Polling --> SyncCheck: every 30s
+    SyncCheck --> UpdateLocal: state changed
+    SyncCheck --> Polling: no change
+    UpdateLocal --> Polling: continue
+```
+
+### 5.4 指纹配置抽象
+
+统一 BitBrowser/VirtualBrowser 指纹接口：
+
+```python
+class FingerprintProvider(Protocol):
+    async def randomize(self, env_id: str) -> bool:
+        """随机化指纹。"""
+        ...
+    
+    async def get_fingerprint(self, env_id: str) -> dict:
+        """获取当前指纹配置。"""
+        ...
+    
+    async def update_fingerprint(self, env_id: str, config: dict) -> bool:
+        """更新指纹配置。"""
+        ...
+```
+
+| 字段 | BitBrowser | VirtualBrowser |
+|:---|:---|:---|
+| User-Agent | ✅ | ✅ |
+| 分辨率 | ✅ | ✅ |
+| 时区 | ✅ | ✅ |
+| WebGL | ✅ | ✅ |
+| Canvas | ✅ | ✅ |
+
+### 5.5 IP 池管理 UI
+
+#### 5.5.1 界面结构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  环境管理器                                                │
+├─────────────────────────────────────────────────────────────┤
+│  [环境列表] [IP池管理]                        ← Tab 切换    │
+├─────────────────────────────────────────────────────────────┤
+│  IP 池列表                    [+新建池] [刷新]              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ 名称      │ 策略       │ IP数量 │ 在用 │ 操作        │  │
+│  ├──────────────────────────────────────────────────────┤  │
+│  │ 默认池    │ 最少绑定   │ 10     │ 3    │ [编辑][删除]│  │
+│  │ 高安全池  │ 最高安全度 │ 5      │ 1    │ [编辑][删除]│  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                             │
+│  选中池: 默认池                   [+添加IP] [批量导入]      │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ IP地址         │ 端口 │ 绑定数 │ 安全度 │ 过期    │  │
+│  ├──────────────────────────────────────────────────────┤  │
+│  │ 192.168.1.1    │ 8080 │ 2      │ 100    │ 30天后  │  │
+│  │ 10.0.0.5       │ 1080 │ 1      │ 85     │ 15天后  │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### 5.5.2 功能组件
+
+| 组件 | 功能 |
+|:---|:---|
+| `IPPoolTab` | IP 池管理主页面（Tab 页） |
+| `IPPoolListWidget` | IP 池列表 |
+| `IPEntryTableWidget` | IP 条目表格 |
+| `AddPoolDialog` | 新建 IP 池对话框 |
+| `AddIPDialog` | 单个添加 IP 对话框 |
+| `BatchImportDialog` | 批量导入 IP 对话框 |
+
+#### 5.5.3 单个添加 IP 对话框
+
+```
+┌─────────────────────────────────────┐
+│  添加 IP                        [X] │
+├─────────────────────────────────────┤
+│  IP 地址:    [________________]     │
+│  端口:       [____]                 │
+│  协议:       [HTTP ▼]               │
+│  用户名:     [________________]     │
+│  密码:       [________________]     │
+│  过期天数:   [30] 天                │
+│                                     │
+│         [取消]     [确定]           │
+└─────────────────────────────────────┘
+```
+
+#### 5.5.4 批量导入对话框
+
+支持格式：
+- 每行一个 IP，格式：`ip:port` 或 `ip:port:user:pass`
+- 支持从剪贴板粘贴或文件导入
+
+```
+┌───────────────────────────────────────────────┐
+│  批量导入 IP                              [X] │
+├───────────────────────────────────────────────┤
+│  协议:  [HTTP ▼]    过期天数: [30] 天         │
+│                                               │
+│  ┌─────────────────────────────────────────┐  │
+│  │ 每行一个 IP，格式:                      │  │
+│  │ ip:port 或 ip:port:user:pass            │  │
+│  │                                         │  │
+│  │ 192.168.1.1:8080                        │  │
+│  │ 10.0.0.5:1080:admin:123456              │  │
+│  │ ...                                     │  │
+│  └─────────────────────────────────────────┘  │
+│                                               │
+│  [从文件导入...]   解析到: 0 条               │
+│                                               │
+│            [取消]     [导入]                  │
+└───────────────────────────────────────────────┘
+```
+
+#### 5.5.5 文件结构
+
+```
+src/core/rem/ui/
+├── __init__.py
+├── env_list_widget.py      # 现有环境列表
+├── env_settings_page.py    # 现有设置页
+├── ip_pool_tab.py          # [新增] IP 池管理主页
+├── ip_pool_dialogs.py      # [新增] IP 池相关对话框
+└── ip_entry_table.py       # [新增] IP 条目表格组件
+```

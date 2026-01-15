@@ -57,15 +57,25 @@ EnvMgr 推荐拆分为三层：
   - `env_id`：环境实例唯一标识
   - `kind`：环境类型
   - `provider`：提供者标识
+  - `external_id`：外部系统环境 ID（用于状态同步）
   - `labels`：静态标签（例如 browser=chromium、os=mac）
   - `capabilities`：能力集合（例如 page/http/files）
   - `state`：CREATING | READY | BUSY | PAUSED | UNHEALTHY | TERMINATING | DEAD
+  - `last_used_at`：最后使用时间戳（用于策略匹配）
+  - `daily_usage_count`：当天使用次数（用于策略匹配）
+  - `proxy_config`：代理配置（静态代理或 IP 池）
+  - `fingerprint_config`：指纹配置（Provider 特定）
 - `EnvLease`（MUST）：
   - `lease_id`
   - `env_id`
   - `task_run_id`
   - `acquired_at`
   - `expires_at?`（可选，用于强制回收）
+- `IPPool`（SHOULD）：
+  - `pool_id`：IP 池唯一标识
+  - `name`：池名称
+  - `provider`：提供商（local/api）
+  - `entries`：IP 条目列表
 
 与执行侧的关联：TaskContext 中应携带租约信息（至少 env_id/lease_id/kind/capabilities），用于日志与诊断串联。
 

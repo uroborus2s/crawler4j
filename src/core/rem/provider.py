@@ -82,6 +82,20 @@ class BaseProvider(ABC):
             env: 环境实例
         """
         pass
+    
+    async def is_running(self, env: Environment) -> bool:
+        """检查环境是否仍在运行（用于外部状态同步）。
+        
+        默认实现返回 True。指纹浏览器 Provider 应覆盖此方法，
+        调用外部 API 检查环境实际状态。
+        
+        Args:
+            env: 环境实例
+        
+        Returns:
+            是否仍在运行
+        """
+        return True
 
 
 class PlaywrightProvider(BaseProvider):
@@ -505,4 +519,22 @@ class VirtualBrowserProvider(BaseProvider):
                 pass # logging.error?
 
 
+# =============================================================================
+# Provider 初始化
+# =============================================================================
 
+def init_providers() -> None:
+    """初始化并注册所有内置 Provider。
+    
+    此函数会注册以下 Provider：
+        - playwright_local: Playwright 本地浏览器
+        - bitbrowser: BitBrowser 指纹浏览器
+        - virtualbrowser: VirtualBrowser 指纹浏览器
+    """
+    register_provider(PlaywrightProvider())
+    register_provider(BitBrowserProvider())
+    register_provider(VirtualBrowserProvider())
+
+
+# 模块加载时自动注册
+init_providers()

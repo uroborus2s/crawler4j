@@ -241,9 +241,9 @@ class Shell(QMainWindow):
         from src.core.atm.ui import TaskListWidget
         self._add_page("tasks", TaskListWidget())
         
-        # 环境管理 - REM UI
-        from src.core.rem.ui import EnvListWidget
-        self._add_page("environments", EnvListWidget())
+        # 环境管理 - REM UI (包含环境列表和 IP 池 Tab)
+        from src.core.rem.ui import EnvManagerPage
+        self._add_page("environments", EnvManagerPage())
         
         # 模块管理 - MMS UI
         from src.core.mms.ui import ModuleListWidget

@@ -120,14 +120,29 @@ class EnvPool:
     def _persist_env(self, env: Environment) -> None:
         """持久化环境到数据库。"""
         with get_connection(STATE_DB) as conn:
+            # 序列化配置为 JSON
+            proxy_config_json = json.dumps(env.proxy_config.to_dict()) if env.proxy_config else None
+            fingerprint_config_json = json.dumps(env.fingerprint_config.to_dict()) if env.fingerprint_config else None
+            
             conn.execute(
                 """
-                INSERT INTO environments (id, kind, provider, status, lease_id, task_run_id, capabilities, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO environments (
+                    id, kind, provider, status, external_id, lease_id, task_run_id,
+                    last_used_at, daily_usage_count, daily_usage_date,
+                    proxy_config_json, fingerprint_config_json,
+                    capabilities, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     status = excluded.status,
+                    external_id = excluded.external_id,
                     lease_id = excluded.lease_id,
                     task_run_id = excluded.task_run_id,
+                    last_used_at = excluded.last_used_at,
+                    daily_usage_count = excluded.daily_usage_count,
+                    daily_usage_date = excluded.daily_usage_date,
+                    proxy_config_json = excluded.proxy_config_json,
+                    fingerprint_config_json = excluded.fingerprint_config_json,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -135,8 +150,14 @@ class EnvPool:
                     env.kind.value,
                     env.provider,
                     env.status.value,
+                    env.external_id,
                     env.lease_id,
                     env.task_run_id,
+                    env.last_used_at,
+                    env.daily_usage_count,
+                    env.daily_usage_date,
+                    proxy_config_json,
+                    fingerprint_config_json,
                     json.dumps({"labels": env.labels, "capabilities": list(env.capabilities)}),
                     env.created_at,
                     env.updated_at,
@@ -150,19 +171,37 @@ class EnvPool:
     
     async def load_from_db(self) -> None:
         """从数据库加载环境（用于崩溃恢复）。"""
+        from src.core.rem.models import FingerprintConfig, ProxyConfig
+        
         with get_connection(STATE_DB) as conn:
             cursor = conn.execute("SELECT * FROM environments")
             for row in cursor.fetchall():
                 meta = json.loads(row["capabilities"]) if row["capabilities"] else {}
+                
+                # 反序列化配置
+                proxy_config = None
+                if row.get("proxy_config_json"):
+                    proxy_config = ProxyConfig.from_dict(json.loads(row["proxy_config_json"]))
+                
+                fingerprint_config = None
+                if row.get("fingerprint_config_json"):
+                    fingerprint_config = FingerprintConfig.from_dict(json.loads(row["fingerprint_config_json"]))
+                
                 env = Environment(
                     id=row["id"],
                     kind=EnvKind(row["kind"]),
                     provider=row["provider"],
                     status=EnvStatus(row["status"]),
+                    external_id=row.get("external_id"),
                     labels=meta.get("labels", {}),
                     capabilities=set(meta.get("capabilities", [])),
                     lease_id=row["lease_id"],
                     task_run_id=row["task_run_id"],
+                    last_used_at=row.get("last_used_at"),
+                    daily_usage_count=row.get("daily_usage_count", 0),
+                    daily_usage_date=row.get("daily_usage_date", ""),
+                    proxy_config=proxy_config,
+                    fingerprint_config=fingerprint_config,
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],
                 )

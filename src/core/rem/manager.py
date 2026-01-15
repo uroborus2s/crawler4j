@@ -227,13 +227,67 @@ class EnvironmentManager:
         """
         return await self._gc_once()
     
+    async def create_env(
+        self,
+        provider_name: str,
+        config: dict | None = None,
+    ) -> Environment:
+        """直接创建环境（供 UI 调用）。
+        
+        Args:
+            provider_name: Provider 名称
+            config: 创建配置（如 IP、指纹等）
+        
+        Returns:
+            创建的环境实例
+        
+        Raises:
+            EnvUnavailableError: Provider 不存在或达到配额
+        """
+        if not self.pool.can_create():
+            raise EnvUnavailableError(
+                "达到配额上限",
+                stage="CREATE",
+                hint="请先销毁其他环境"
+            )
+        
+        provider = get_provider(provider_name)
+        if not provider:
+            raise EnvUnavailableError(
+                f"Provider 未注册: {provider_name}",
+                stage="CREATE",
+                hint="请检查 Provider 配置"
+            )
+        
+        return await self._create_env(provider, config)
+    
+    async def destroy_env(self, env_id: str) -> bool:
+        """直接销毁环境（供 UI 调用）。
+        
+        Args:
+            env_id: 环境 ID
+        
+        Returns:
+            是否销毁成功
+        """
+        env = await self.pool.get(env_id)
+        if not env:
+            return False
+        
+        await self._destroy_env(env)
+        return True
+    
     # === 私有方法 ===
     
-    async def _create_env(self, provider: BaseProvider) -> Environment:
+    async def _create_env(
+        self,
+        provider: BaseProvider,
+        config: dict | None = None,
+    ) -> Environment:
         """创建环境。"""
         logger.info(f"[REM] 创建环境: provider={provider.name}")
         
-        env = await provider.create()
+        env = await provider.create(config)
         await self.pool.add(env)
         
         logger.info(f"[REM] 环境创建完成: id={env.id[:8]}...")

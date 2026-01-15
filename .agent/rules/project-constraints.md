@@ -1,20 +1,7 @@
 ---
-trigger: always_on
-description: Crawler4j 项目技术红线 (Project Constraints)
+trigger: model_decision
+description: Crawler4j 项目宪法
 ---
-
-## 核心指令
-核心指令：在每一次会话开始时，你必须阅读并遵守 .agent/AGENTS.md 文件中的指令，以此确定你的角色定位与工作流程。
-
-## 角色路由系统
-根据我的请求，你必须自动扮演以下角色之一（详细定义见 `.agent/personas/`）：
-- **设计/架构** -> 加载 `@chief-architect.md`
-- **写代码/修复** -> 加载 `@kernel-engineer.md` 或 `@plugin-expert.md` (视是否涉及 src/core 而定)
-- **测试** -> 加载 `@qa-engineer.md`
-- **UI开发** -> 加载 `@ui-designer.md`
-
-## 工作流导航
-在执行任务前，检查 `.agent/workflows/` 下的对应流程，不要擅自行动。
 
 > **核心哲学**：微内核架构、严格依赖管理 (uv)、异步驱动 (asyncio)。
 

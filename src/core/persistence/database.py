@@ -129,14 +129,60 @@ def _init_state_db() -> None:
                 kind TEXT NOT NULL,
                 provider TEXT NOT NULL,
                 status TEXT NOT NULL,
+                external_id TEXT,
                 lease_id TEXT,
                 task_run_id TEXT,
+                last_used_at INTEGER,
+                daily_usage_count INTEGER DEFAULT 0,
+                daily_usage_date TEXT,
+                proxy_config_json TEXT,
+                fingerprint_config_json TEXT,
                 capabilities TEXT,
                 created_at INTEGER DEFAULT (strftime('%s', 'now')),
                 updated_at INTEGER DEFAULT (strftime('%s', 'now'))
             );
             
             CREATE INDEX IF NOT EXISTS idx_env_status ON environments(status);
+            CREATE INDEX IF NOT EXISTS idx_env_external ON environments(external_id);
+            CREATE INDEX IF NOT EXISTS idx_env_last_used ON environments(last_used_at);
+            
+            -- IP 池表
+            CREATE TABLE IF NOT EXISTS ip_pools (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                strategy TEXT DEFAULT 'least_bound',
+                config_json TEXT,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+            );
+            
+            -- IP 条目表
+            CREATE TABLE IF NOT EXISTS ip_entries (
+                id TEXT PRIMARY KEY,
+                pool_id TEXT NOT NULL REFERENCES ip_pools(id) ON DELETE CASCADE,
+                address TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                username TEXT,
+                password TEXT,
+                bound_count INTEGER DEFAULT 0,
+                safety_score INTEGER DEFAULT 100,
+                expires_at INTEGER,
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_ip_pool ON ip_entries(pool_id);
+            CREATE INDEX IF NOT EXISTS idx_ip_bound ON ip_entries(bound_count);
+            
+            -- 环境-IP 绑定表
+            CREATE TABLE IF NOT EXISTS env_ip_bindings (
+                env_id TEXT PRIMARY KEY REFERENCES environments(id) ON DELETE CASCADE,
+                ip_id TEXT NOT NULL REFERENCES ip_entries(id) ON DELETE CASCADE,
+                bound_at INTEGER NOT NULL
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_binding_ip ON env_ip_bindings(ip_id);
             
             -- 任务表（ATM）
             CREATE TABLE IF NOT EXISTS tasks (
