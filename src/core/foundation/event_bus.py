@@ -41,7 +41,7 @@ class EventType(StrEnum):
     
     # 环境事件
     ENV_POOL_SATURATED = "env.pool_saturated"
-    ENV_UNHEALTHY = "env.unhealthy"
+    ENV_ERROR = "env.error"
     ENV_CREATED = "env.created"
     ENV_DESTROYED = "env.destroyed"
 

@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.persistence import get_config_store
+from src.core.persistence import get_kv_store
 
 
 class EnvSettingsPage(QWidget):
@@ -73,16 +73,16 @@ class EnvSettingsPage(QWidget):
     
     def _load_settings(self):
         """加载设置。"""
-        store = get_config_store()
-        config = store.get_module_config("rem")
+        kv = get_kv_store()
+        config = kv.get("module:rem:config") or {}
         
         self.max_env_spin.setValue(config.get("max_instances", 10))
         self.idle_timeout_spin.setValue(config.get("idle_timeout", 300))
     
     def _save_settings(self):
         """保存设置。"""
-        store = get_config_store()
-        store.set_module_config("rem", {
+        kv = get_kv_store()
+        kv.set("module:rem:config", {
             "max_instances": self.max_env_spin.value(),
             "idle_timeout": self.idle_timeout_spin.value(),
         })

@@ -1,306 +1,315 @@
-"""Data table widget.
+"""高级数据表格组件 (SkyDataTable)。
 
-A reusable table widget with pagination, search, and sorting.
+包装了 SkyTableWidget，提供统一的：
+- 搜索栏
+- 分页控件
+- 加载状态
+- 操作栏
+- 统一样式
+
+Usage:
+    table = SkyDataTable(
+        columns=[("name", "名称", -1), ("status", "状态", 100)]
+    )
+    table.set_data(data_list)
+    table.search_changed.connect(on_search)
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QProgressBar,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.table import SkyTableWidget
 
 
-class DataTable(QWidget):
-    """Reusable data table with pagination and search.
+class SkyDataTable(QWidget):
+    """带搜索和分页的高级数据表格。"""
 
-    Signals:
-        row_clicked: Emitted when a row is clicked, with row data dict.
-        row_double_clicked: Emitted when a row is double-clicked.
-        selection_changed: Emitted when selection changes, with selected row indices.
-    """
+    # 信号
+    search_changed = pyqtSignal(str)   # 搜索文本改变
+    page_changed = pyqtSignal(int)     # 页码改变
+    refresh_requested = pyqtSignal()   # 请求刷新
+    
+    # 转发 table 信号
+    cell_clicked = pyqtSignal(int, int)
 
-    row_clicked = pyqtSignal(dict)
-    row_double_clicked = pyqtSignal(dict)
-    selection_changed = pyqtSignal(list)
-
-    def __init__(
-        self,
-        columns: list[tuple[str, str, int]],  # (key, header, width)
-        parent=None,
-        action_callback=None,
-    ):
-        """Initialize the data table.
-
+    def __init__(self, columns: list[tuple[str, str, int | None]] = None, parent=None):
+        """初始化。
+        
         Args:
-            columns: List of (key, header_text, width) tuples.
-            parent: Parent widget.
-            action_callback: Callback for action column clicks (row_data, action_name).
+            columns: 列定义列表 [(key, label, width), ...] width=-1 for stretch
+            parent: 父组件
         """
         super().__init__(parent)
-
-        self.columns = columns
-        self.action_callback = action_callback
-        self._data: list[dict] = []
-        self._filtered_data: list[dict] = []
+        self._columns = columns or []
+        self._data = []        # 所有数据 (原始)
+        self._display_data = [] #当前页显示的数据
+        self._filtered_data = [] # 搜索过滤后的数据
+        
         self._page = 0
         self._page_size = 20
         self._search_text = ""
-
+        
         self._setup_ui()
-        self._connect_signals()
 
     def _setup_ui(self):
-        """Setup the table UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(12)
 
-        # Toolbar
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
-
-        # Search input
+        # 1. 工具栏 (Toolbar)
+        self.toolbar = QHBoxLayout()
+        self.toolbar.setSpacing(12)
+        
+        # 搜索框
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 搜索...")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                background: rgba(30, 41, 59, 0.8);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+                padding: 6px 12px;
+                color: white;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border: 1px solid rgba(99, 102, 241, 0.6);
+            }
+        """)
+        self.search_input.textChanged.connect(self._on_search_changed)
         self.search_input.setMaximumWidth(250)
-        toolbar.addWidget(self.search_input)
+        self.toolbar.addWidget(self.search_input)
+        
+        # 弹性空间，用于插入自定义按钮
+        self.toolbar.addStretch()
+        
+        # 刷新按钮 (默认隐藏，由外部决定是否添加)
+        # self.refresh_btn = QPushButton("🔄")
+        
+        layout.addLayout(self.toolbar)
 
-        toolbar.addStretch()
+        # 2. 进度条
+        self.loading_bar = QProgressBar()
+        self.loading_bar.setFixedHeight(2)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setStyleSheet("""
+            QProgressBar {
+                background: transparent;
+                border: none;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1, stop:1 #a855f7);
+            }
+        """)
+        self.loading_bar.hide()
+        layout.addWidget(self.loading_bar)
 
-        # Page size selector
-        self.page_size_combo = QComboBox()
-        self.page_size_combo.addItems(["20", "50", "100"])
-        self.page_size_combo.setMaximumWidth(80)
-        toolbar.addWidget(QLabel("每页:"))
-        toolbar.addWidget(self.page_size_combo)
-
-        layout.addLayout(toolbar)
-
-        # Table
-        self.table = QTableWidget()
-        self.table.setColumnCount(len(self.columns))
-        self.table.setHorizontalHeaderLabels([col[1] for col in self.columns])
-        self.table.setAlternatingRowColors(True)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-
-        # Set column widths
-        header = self.table.horizontalHeader()
-        for i, (_, _, width) in enumerate(self.columns):
-            if width == -1:
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            else:
-                self.table.setColumnWidth(i, width)
-
+        # 3. 表格主体
+        self.table = SkyTableWidget()
+        if self._columns:
+            self._setup_columns()
+            
+        self.table.cellClicked.connect(self.cell_clicked)
         layout.addWidget(self.table)
-
-        # Pagination
-        pagination = QHBoxLayout()
-        pagination.setSpacing(8)
-
+        
+        # 4. 分页栏
+        self.pagination_layout = QHBoxLayout()
+        self.pagination_layout.setContentsMargins(0, 4, 0, 0)
+        
+        # 统计信息
         self.info_label = QLabel("共 0 条")
-        pagination.addWidget(self.info_label)
-
-        pagination.addStretch()
-
-        self.prev_btn = QPushButton("◀ 上一页")
-        self.prev_btn.setMaximumWidth(100)
-        pagination.addWidget(self.prev_btn)
-
-        self.page_label = QLabel("1 / 1")
-        self.page_label.setMinimumWidth(60)
-        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pagination.addWidget(self.page_label)
-
-        self.next_btn = QPushButton("下一页 ▶")
-        self.next_btn.setMaximumWidth(100)
-        pagination.addWidget(self.next_btn)
-
-        layout.addLayout(pagination)
-
-    def _connect_signals(self):
-        """Connect internal signals."""
-        self.search_input.textChanged.connect(self._on_search)
-        self.page_size_combo.currentTextChanged.connect(self._on_page_size_change)
+        self.info_label.setStyleSheet("color: rgba(255, 255, 255, 0.5); font-size: 12px;")
+        self.pagination_layout.addWidget(self.info_label)
+        
+        self.pagination_layout.addStretch()
+        
+        # 分页控件
+        self.prev_btn = QPushButton("◀")
+        self.prev_btn.setFixedSize(32, 32)
         self.prev_btn.clicked.connect(self._prev_page)
+        self._style_page_btn(self.prev_btn)
+        self.pagination_layout.addWidget(self.prev_btn)
+        
+        self.page_label = QLabel("1 / 1")
+        self.page_label.setStyleSheet("color: rgba(255, 255, 255, 0.8); font-weight: bold; padding: 0 8px;")
+        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.page_label.setMinimumWidth(60)
+        self.pagination_layout.addWidget(self.page_label)
+        
+        self.next_btn = QPushButton("▶")
+        self.next_btn.setFixedSize(32, 32)
         self.next_btn.clicked.connect(self._next_page)
-        self.table.cellClicked.connect(self._on_row_clicked)
-        self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
-        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self._style_page_btn(self.next_btn)
+        self.pagination_layout.addWidget(self.next_btn)
+        
+        layout.addLayout(self.pagination_layout)
 
-    def set_row_height(self, height: int):
-        """Set the height of all rows."""
-        self.table.verticalHeader().setDefaultSectionSize(height)
+    def _setup_columns(self):
+        self.table.setColumnCount(len(self._columns))
+        labels = [col[1] for col in self._columns]
+        self.table.setHorizontalHeaderLabels(labels)
+        
+        header = self.table.horizontalHeader()
+        if header:
+            for i, (_, _, width) in enumerate(self._columns):
+                if width == -1 or width is None:
+                    header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+                else:
+                    # Interactive 模式允许用户拖动调整列宽
+                    header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+                    self.table.setColumnWidth(i, width)
 
-    def set_data(self, data: list[dict]):
-        """Set the table data.
+    def _style_page_btn(self, btn: QPushButton):
+        btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(30, 41, 59, 0.5);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background: rgba(99, 102, 241, 0.3);
+                border-color: rgba(99, 102, 241, 0.5);
+            }
+            QPushButton:disabled {
+                background: transparent;
+                color: rgba(255, 255, 255, 0.1);
+                border-color: rgba(255, 255, 255, 0.05);
+            }
+        """)
 
+    # --- Public API ---
+
+    def set_loading(self, loading: bool):
+        """设置加载状态。"""
+        if loading:
+            self.loading_bar.setMaximum(0) # Marquee mode
+            self.loading_bar.show()
+            self.table.setEnabled(False)
+        else:
+            self.loading_bar.hide()
+            self.table.setEnabled(True)
+
+    def set_data(self, data: list):
+        """设置数据并刷新。
+        
         Args:
-            data: List of dictionaries, each representing a row.
+            data: 数据列表 (dict 或 object)
         """
         self._data = data
-        self._apply_filter()
-
-    def _apply_filter(self):
-        """Apply search filter and refresh display."""
-        if self._search_text:
-            search_lower = self._search_text.lower()
-            self._filtered_data = [
-                row
-                for row in self._data
-                if any(search_lower in str(v).lower() for v in row.values())
-            ]
-        else:
-            self._filtered_data = self._data.copy()
-
-        self._page = 0
-        self._refresh_table()
-
-    def _refresh_table(self):
-        """Refresh the table display."""
-        # Calculate pagination
-        total = len(self._filtered_data)
-        total_pages = max(1, (total + self._page_size - 1) // self._page_size)
-        start = self._page * self._page_size
-        end = min(start + self._page_size, total)
-        page_data = self._filtered_data[start:end]
-
-        # Update table
-        self.table.setRowCount(len(page_data))
-        for row_idx, row_data in enumerate(page_data):
-            for col_idx, (key, _, _) in enumerate(self.columns):
-                # Check for special render key in column definition?
-                # Or just check if key is a callable function in row_data? (No, mixing data and view logic)
-                # Better: DataTable constructor accepts renderers.
-                # BUT for now, let's allow 'actions' key to return a widget or a factory?
-                # Simplify: if value is QWidget, setCellWidget. But we can't put QWidget in data list easily.
-
-                # Let's rely on EnvironmentsPage to modify the table AFTER signal?
-                # No, best is to allow columns definition to have a renderer.
-                # Since I didn't change constructor signature, I'll check if key is 'actions'.
-
-                # 处理操作列
-                if key == "_actions" and self.action_callback:
-                    action_widget = self._create_action_widget(row_data)
-                    self.table.setCellWidget(row_idx, col_idx, action_widget)
-                    continue
-
-                if key == "actions" and "actions_renderer" in row_data:
-                    # Expecting a factory/widget here is tricky with JSON data logic.
-                    # Hack: The row_data['actions_renderer'] is a callable (self, row_data) -> QWidget
-                    renderer = row_data["actions_renderer"]
-                    if callable(renderer):
-                        widget = renderer(row_data)
-                        if widget:
-                            self.table.setCellWidget(row_idx, col_idx, widget)
-                            continue
-
-                value = row_data.get(key, "")
-                str_val = str(value)
-                item = QTableWidgetItem(str_val)
-                item.setToolTip(str_val)  # Always set tooltip to show full content
-                self.table.setItem(row_idx, col_idx, item)
-
-        # Update pagination info
-        self.info_label.setText(f"共 {total} 条")
-        self.page_label.setText(f"{self._page + 1} / {total_pages}")
-        self.prev_btn.setEnabled(self._page > 0)
-        self.next_btn.setEnabled(self._page < total_pages - 1)
-
-    def _on_search(self, text: str):
-        """Handle search input change."""
-        self._search_text = text
-        self._apply_filter()
-
-    def _on_page_size_change(self, text: str):
-        """Handle page size change."""
-        self._page_size = int(text)
-        self._page = 0
-        self._refresh_table()
-
-    def _prev_page(self):
-        """Go to previous page."""
-        if self._page > 0:
-            self._page -= 1
-            self._refresh_table()
-
-    def _next_page(self):
-        """Go to next page."""
-        total_pages = max(
-            1, (len(self._filtered_data) + self._page_size - 1) // self._page_size
-        )
-        if self._page < total_pages - 1:
-            self._page += 1
-            self._refresh_table()
-
-    def _on_row_clicked(self, row: int, col: int):
-        """Handle row click."""
-        row_data = self._get_row_data(row)
-        if row_data:
-            self.row_clicked.emit(row_data)
-
-    def _on_row_double_clicked(self, row: int, col: int):
-        """Handle row double click."""
-        row_data = self._get_row_data(row)
-        if row_data:
-            self.row_double_clicked.emit(row_data)
-
-    def _on_selection_changed(self):
-        """Handle selection change."""
-        selected = self.table.selectionModel().selectedRows()
-        indices = [idx.row() for idx in selected]
-        self.selection_changed.emit(indices)
-
-    def _get_row_data(self, row: int) -> dict | None:
-        """Get data for a specific row."""
-        start = self._page * self._page_size
-        data_idx = start + row
-        if 0 <= data_idx < len(self._filtered_data):
-            return self._filtered_data[data_idx]
-        return None
-
-    def get_selected_data(self) -> list[dict]:
-        """Get data for all selected rows."""
-        selected = []
-        for idx in self.table.selectionModel().selectedRows():
-            row_data = self._get_row_data(idx.row())
-            if row_data:
-                selected.append(row_data)
-        return selected
+        self._apply_filter_and_paging()
 
     def refresh(self):
-        """Refresh the table display."""
-        self._refresh_table()
+        """手动刷新当前显示。"""
+        self._apply_filter_and_paging()
 
-    def _create_action_widget(self, row_data: dict) -> QWidget:
-        """创建操作列按钮容器。"""
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
+    def add_widget_to_toolbar(self, widget: QWidget):
+        """向工具栏添加自定义控件 (例如新建按钮)。"""
+        # 插入到 stretch 之前 (index - 2 目前是 search, stretch)
+        # 实际上我们希望 search 在左，Custom Action 在右
+        # Toolbar layout: [Search Input] [Stretch] [Custom Actions...]
+        self.toolbar.addWidget(widget)
 
-        edit_btn = QPushButton("编辑")
-        edit_btn.setMaximumHeight(24)
-        edit_btn.setStyleSheet("font-size: 11px; padding: 2px 8px;")
-        edit_btn.clicked.connect(
-            lambda checked, rd=row_data: self._on_action_triggered(rd, "edit")
-        )
-        layout.addWidget(edit_btn)
+    # --- Internal Logic ---
 
-        return container
+    def _on_search_changed(self, text: str):
+        self._search_text = text.strip().lower()
+        self._page = 0
+        self._apply_filter_and_paging()
+        self.search_changed.emit(text)
 
-    def _on_action_triggered(self, row_data: dict, action: str):
-        """触发操作回调。"""
-        if self.action_callback:
-            self.action_callback(row_data, action)
+    def _apply_filter_and_paging(self):
+        # 1. Client-side Filtering
+        if not self._search_text:
+            self._filtered_data = self._data
+        else:
+            self._filtered_data = []
+            for item in self._data:
+                # Naive generic search: verify against all values if dict, or __str__
+                param_str = ""
+                if isinstance(item, dict):
+                    param_str = " ".join([str(v) for v in item.values()])
+                else:
+                    # Try to search common attrs? Or just str(item)
+                    # For objects, maybe we rely on __str__ or specific fields
+                    # Let's try explicit attributes if object
+                    try:
+                        param_str = f"{getattr(item, 'name', '')} {getattr(item, 'id', '')} {str(item)}"
+                    except:
+                        param_str = str(item)
+                
+                if self._search_text in param_str.lower():
+                    self._filtered_data.append(item)
+
+        # 2. Pagination
+        total = len(self._filtered_data)
+        total_pages = max(1, (total + self._page_size - 1) // self._page_size)
+        
+        # Ensure page range
+        # self._page is 0-indexed
+        if self._page >= total_pages:
+            self._page = total_pages - 1
+        if self._page < 0:
+            self._page = 0
+            
+        start = self._page * self._page_size
+        end = start + self._page_size
+        self._display_data = self._filtered_data[start:end]
+
+        # 3. Update UI Controls
+        self.prev_btn.setEnabled(self._page > 0)
+        self.next_btn.setEnabled(self._page < total_pages - 1)
+        self.page_label.setText(f"{self._page + 1} / {total_pages}")
+        self.info_label.setText(f"共 {total} 条")
+
+        # 4. Render Table
+        self._render_table()
+
+    def set_render_callback(self, callback):
+        """设置行渲染回调函数。
+        
+        Args:
+            callback: (row_index: int, data_item: Any, table: SkyTableWidget) -> None
+        """
+        self._render_callback = callback
+
+    def _render_table(self):
+        """渲染表格。"""
+        if not hasattr(self, '_render_callback') or not self._render_callback:
+            return
+
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(self._display_data))
+        
+        for i, item in enumerate(self._display_data):
+            self._render_callback(i, item, self.table)
+    
+    def item(self, row: int, column: int) -> QTableWidgetItem | None:
+        """获取单元格项 (代理)。"""
+        return self.table.item(row, column)
+
+    def rowCount(self) -> int:
+        """获取行数 (代理)。"""
+        return self.table.rowCount()
+
+    def _prev_page(self):
+        if self._page > 0:
+            self._page -= 1
+            self._apply_filter_and_paging()
+            self.page_changed.emit(self._page)
+            
+    def _next_page(self):
+        self._page += 1
+        self._apply_filter_and_paging()
+        self.page_changed.emit(self._page)

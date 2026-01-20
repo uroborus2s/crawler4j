@@ -20,22 +20,40 @@ classDiagram
         +acquire(requirement: EnvRequirement) EnvLease
         +release(lease: EnvLease, dirty: bool)
         +create_env(provider_name: str, config: dict) Environment
-        +destroy_env(env_id: str) bool
-        +get_env(env_id: str) Environment
+        +destroy_env(env_id: int) bool
+        +start_env(env_id: int) bool
+        +stop_env(env_id: int) bool
+        +pause_env(env_id: int) bool
+        +resume_env(env_id: int) bool
+        +update_env(env_id, name, proxy_value, ...) bool
+        +sync_all() int
+        +get_env(env_id: int) Environment
         +list_envs() list[Environment]
         +run_gc() int
+        +health_check(env_id: int) bool
+        -_destroy_env(env: Environment)
+        -_remove_env_record(env_id: int)
+        -_recover_crashed()
+        -_gc_loop()
+        -_orchestrate_lifecycle(env, action) bool
+        -_provider_operation(provider, env, action) bool
     }
 
     class EnvPool {
-        -_envs: dict[str, Environment]
+        -_environments: dict[int, Environment]
         -_max_instances: int
+        -_lock: asyncio.Lock
         +add(env: Environment)
-        +remove(env_id: str)
-        +get(env_id: str) Environment
+        +remove(env_id: int) Environment
+        +get(env_id: int) Environment
         +find_available(requirement) Environment
         +update_status(env_id, status)
         +list_all() list[Environment]
+        +list_by_status(status) list[Environment]
         +can_create() bool
+        +load_from_db()
+        -_persist_env(env) int
+        -_delete_env(env_id)
     }
 
     class LeaseManager {
@@ -44,56 +62,79 @@ classDiagram
         +acquire(env, task_run_id, timeout) EnvLease
         +release(lease, token) Environment
         +list_expired() list[EnvLease]
+        +count_active() int
     }
 
     class BaseProvider {
         <<Abstract>>
         +name: str
         +kind: EnvKind
-        +create(config) Environment
-        +reset(env) bool
-        +health_check(env) bool
-        +destroy(env)
-    }
-
-    class PlaywrightProvider {
-        +name = "playwright_local"
-        +create(config) Environment
+        +create(config)* Environment
+        +reset(env)* bool
+        +health_check(env)* bool
+        +destroy(env)*
+        +open(env)* bool
+        +connect(env)* bool
+        +close(env)* bool
+        +is_window_open(env)* bool
+        +is_running(env)* bool
+        +exists(env)* bool
+        +update(env, config)* bool
     }
 
     class BitBrowserProvider {
         +name = "bitbrowser"
         +create(config) Environment
+        +open(env) bool
+        +connect(env) bool
+        +close(env) bool
+        +is_window_open(env) bool
+        +is_running(env) bool
     }
 
     class VirtualBrowserProvider {
         +name = "virtualbrowser"
         +create(config) Environment
+        +open(env) bool
+        +connect(env) bool
+        +close(env) bool
+        +is_window_open(env) bool
+        +is_running(env) bool
     }
 
     class Environment {
-        +id: str
+        +id: int
+        +name: str
         +kind: EnvKind
         +provider: str
         +status: EnvStatus
-        +labels: dict
+        +external_id: str
         +capabilities: set
         +handle: Any
+        +proxy_config: ProxyConfig
     }
 
     class EnvLease {
         +id: str
-        +env_id: str
+        +env_id: int
         +task_run_id: str
         +token: str
+        +expires_at: int
         +is_expired() bool
+    }
+
+    class IPPoolManager {
+        +bind_ip(env_id, pool_id) IPEntry
+        +unbind_ip(env_id) bool
+        +get_bound_ip(env_id) IPEntry
     }
 
     EnvironmentManager --> EnvPool
     EnvironmentManager --> LeaseManager
+    EnvironmentManager --> IPPoolManager
     EnvironmentManager ..> BaseProvider : uses
     LeaseManager --> EnvPool
-    BaseProvider <|-- PlaywrightProvider
+    EnvPool --> "remove()" IPPoolManager : unbind_ip
     BaseProvider <|-- BitBrowserProvider
     BaseProvider <|-- VirtualBrowserProvider
     EnvPool o-- Environment

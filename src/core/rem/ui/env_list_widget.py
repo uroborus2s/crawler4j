@@ -4,6 +4,8 @@
 """
 
 import asyncio
+from dataclasses import dataclass
+from typing import Any
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -12,19 +14,18 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from src.core.rem import EnvKind, EnvStatus
+from src.core.rem import EnvKind, EnvStatus, PostCreateAction
+from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.pool import EnvPool
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 
@@ -38,7 +39,7 @@ class CreateEnvDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("创建环境")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         
         # 应用深色主题样式
         self.setStyleSheet("""
@@ -90,6 +91,18 @@ class CreateEnvDialog(QDialog):
                 background-color: #89b4fa;
                 color: #1e1e2e;
             }
+            QGroupBox {
+                border: 1px solid #45475a;
+                border-radius: 6px;
+                margin-top: 12px;
+                padding-top: 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 0 5px;
+                color: #bac2de;
+            }
         """)
         
         self._setup_ui()
@@ -97,46 +110,109 @@ class CreateEnvDialog(QDialog):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         
-        form = QFormLayout()
+        self.form = QFormLayout()
+        # 保持默认对齐 (通常是 AlignRight)，不要强制 AlignLeft
         
+        # A. 基本配置
         # 环境类型
         self.kind_combo = QComboBox()
         for kind in EnvKind:
             self.kind_combo.addItem(kind.value, kind)
-        form.addRow("环境类型:", self.kind_combo)
+        self.form.addRow("环境类型:", self.kind_combo)
         
         # Provider 选择
         self.provider_combo = QComboBox()
         self.provider_combo.addItems(["playwright_local", "bitbrowser", "virtualbrowser"])
         self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
-        form.addRow("Provider:", self.provider_combo)
-        
-        layout.addLayout(form)
-        
-        # 指纹浏览器专用配置区
-        self.fingerprint_group = QWidget()
-        fp_layout = QFormLayout(self.fingerprint_group)
-        fp_layout.setContentsMargins(0, 10, 0, 0)
-        
-        # 代理配置
-        self.proxy_input = QLineEdit()
-        self.proxy_input.setPlaceholderText("如: socks5://127.0.0.1:1080 或留空")
-        fp_layout.addRow("代理地址:", self.proxy_input)
-        
-        # 指纹模式
-        self.fingerprint_combo = QComboBox()
-        self.fingerprint_combo.addItems(["随机生成", "自定义"])
-        fp_layout.addRow("指纹模式:", self.fingerprint_combo)
+        self.form.addRow("Provider:", self.provider_combo)
         
         # 环境名称
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("可选，留空则自动生成")
-        fp_layout.addRow("环境名称:", self.name_input)
+        self.form.addRow("环境名称:", self.name_input)
         
-        layout.addWidget(self.fingerprint_group)
-        self.fingerprint_group.hide()  # 默认隐藏
+        # 创建动作
+        from src.core.rem.models import PostCreateAction
+        self.post_action_combo = QComboBox()
+        self.post_action_combo.addItem("默认 (TEST: 启动检查)", PostCreateAction.TEST)
+        self.post_action_combo.addItem("仅创建 (NONE)", PostCreateAction.NONE)
+        self.post_action_combo.addItem("执行工作流 (WORKFLOW)", PostCreateAction.WORKFLOW)
+        self.post_action_combo.currentIndexChanged.connect(self._on_post_action_changed)
+        self.form.addRow("创建后动作:", self.post_action_combo)
         
-        # 按钮
+        # 工作流选择 - 级联: 先选模块，再选工作流 (同一行)
+        from PyQt6.QtWidgets import QHBoxLayout, QWidget
+
+        from src.core.mms.registry import get_module_registry
+        
+        self.module_combo = QComboBox()
+        self.module_combo.addItem("请选择模块...", "")
+        registry = get_module_registry()
+        for mod in registry.get_enabled_modules():
+            self.module_combo.addItem(mod.manifest.display_name or mod.name, mod.name)
+        self.module_combo.currentIndexChanged.connect(self._on_module_changed)
+        
+        self.workflow_combo = QComboBox()
+        self.workflow_combo.addItem("请先选择模块", "")
+        
+        # 组合到一行
+        self.workflow_row = QWidget()
+        workflow_layout = QHBoxLayout(self.workflow_row)
+        workflow_layout.setContentsMargins(0, 0, 0, 0)
+        workflow_layout.addWidget(self.module_combo)
+        workflow_layout.addWidget(self.workflow_combo)
+        self.form.addRow("工作流:", self.workflow_row)
+        
+        # B. 代理配置 (由 Provider 决定显隐)
+        
+        # 1. 代理模式
+        from src.core.rem.models import ProxyMode
+        self.proxy_mode_combo = QComboBox()
+        self.proxy_mode_combo.addItem("不使用代理", ProxyMode.NONE)
+        self.proxy_mode_combo.addItem("自定义代理 (自动/手动)", "custom") 
+        self.proxy_mode_combo.addItem("使用系统代理", ProxyMode.SYSTEM)
+        self.proxy_mode_combo.currentIndexChanged.connect(self._on_proxy_mode_changed)
+        self.form.addRow("代理模式:", self.proxy_mode_combo)
+        
+        # 2. 自定义代理详细设置
+        # 直接使用主布局以保证 Input 对齐，通过 Label 空格缩进体现层级
+        
+        # 2.1 来源选择
+        self.proxy_source_combo = QComboBox()
+        self.proxy_source_combo.addItem("自动获取 (从 IP 池)", "pool")
+        self.proxy_source_combo.addItem("手动输入", "manual")
+        self.proxy_source_combo.currentIndexChanged.connect(self._on_proxy_source_changed)
+        
+        # 2.1 来源选择
+        self.proxy_source_combo = QComboBox()
+        self.proxy_source_combo.addItem("自动获取 (从 IP 池)", "pool")
+        self.proxy_source_combo.addItem("手动输入", "manual")
+        self.proxy_source_combo.currentIndexChanged.connect(self._on_proxy_source_changed)
+        
+        self.form.addRow("代理来源:", self.proxy_source_combo)
+        
+        # 2.1.1 IP 池选择 (仅当 source=pool 时显示)
+        self.pool_combo = QComboBox()
+        # 加载 IP 池列表
+        pool_manager = get_ip_pool_manager()
+        pools = pool_manager.list_pools()
+        for pool in pools:
+            self.pool_combo.addItem(f"{pool.name} ({pool.id[:8]})", pool.id)
+            
+        if not pools:
+            self.pool_combo.addItem("无可用 IP 池", "")
+            self.pool_combo.setEnabled(False)
+            
+        self.form.addRow("选择 IP 池:", self.pool_combo)
+        
+        # 2.2 手动输入框
+        self.proxy_manual_input = QLineEdit()
+        self.proxy_manual_input.setPlaceholderText("socks5://user:pass@host:port")
+        self.form.addRow("代理地址:", self.proxy_manual_input)
+        
+        layout.addLayout(self.form)
+        
+        # 按钮区
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -146,37 +222,150 @@ class CreateEnvDialog(QDialog):
         
         # 初始化显示状态
         self._on_provider_changed(self.provider_combo.currentText())
+        self._on_post_action_changed(0)
+        
+    def _on_post_action_changed(self, index: int):
+        """Action 变更处理。"""
+        action = self.post_action_combo.currentData()
+        show_workflow = (action == PostCreateAction.WORKFLOW)
+        self._set_row_visible(self.workflow_row, show_workflow)
+        self.adjustSize()
+    
+    def _on_module_changed(self, index: int):
+        """模块变更时更新工作流列表。"""
+        from src.core.mms.registry import get_module_registry
+        
+        module_name = self.module_combo.currentData()
+        self.workflow_combo.clear()
+        
+        if not module_name:
+            self.workflow_combo.addItem("请先选择模块", "")
+            return
+        
+        registry = get_module_registry()
+        workflows = registry.get_workflows(module_name)
+        if workflows:
+            for wf in workflows:
+                # 构建完整模块路径
+                full_path = f"{module_name}.workflows.{wf.name}"
+                display_name = wf.display_name or wf.name
+                self.workflow_combo.addItem(display_name, full_path)
+        else:
+            self.workflow_combo.addItem("无可用工作流", "")
+        
+    def _set_row_visible(self, widget: QWidget, visible: bool):
+        """设置 Form 行的显隐 (包括标签)。"""
+        label = self.form.labelForField(widget)
+        if label:
+            label.setVisible(visible)
+        widget.setVisible(visible)
     
     def _on_provider_changed(self, provider: str):
         """Provider 变更时切换配置显示。"""
-        show_fp = provider in self.FINGERPRINT_PROVIDERS
-        self.fingerprint_group.setVisible(show_fp)
+        is_fp_browser = provider in self.FINGERPRINT_PROVIDERS
+        
+        # 显隐代理模式行
+        self._set_row_visible(self.proxy_mode_combo, is_fp_browser)
+        
+        # 更新自定义区域显隐 (依赖于 mode 和 provider)
+        if is_fp_browser:
+            self._on_proxy_mode_changed(self.proxy_mode_combo.currentIndex())
+        else:
+            self._set_row_visible(self.proxy_source_combo, False)
+            self._set_row_visible(self.proxy_manual_input, False)
+            
         self.adjustSize()
     
-    def get_values(self) -> tuple[EnvKind, str, dict]:
+    def _on_proxy_mode_changed(self, index: int):
+        """代理模式变更逻辑。"""
+        # 如果当前根本不显示代理组 (Provider 不支持)，则不处理
+        if not self.proxy_mode_combo.isVisible():
+             self._set_row_visible(self.proxy_source_combo, False)
+             self._set_row_visible(self.proxy_manual_input, False)
+             return
+
+        mode = self.proxy_mode_combo.currentData()
+        
+        # 只有在自定义模式下才显示详细配置
+        show_custom_opts = (mode == "custom")
+        self._set_row_visible(self.proxy_source_combo, show_custom_opts)
+        
+        if show_custom_opts:
+            self._on_proxy_source_changed(self.proxy_source_combo.currentIndex())
+        else:
+            self._set_row_visible(self.proxy_manual_input, False)
+        
+        self.adjustSize()
+
+    def _on_proxy_source_changed(self, index: int):
+        """代理来源变更逻辑。"""
+        source = self.proxy_source_combo.currentData()
+        
+        # 只有在 source combo 可见时才处理 input 显隐
+        if self.proxy_source_combo.isVisible():
+            self._set_row_visible(self.pool_combo, source == "pool")
+            self._set_row_visible(self.proxy_manual_input, source == "manual")
+
+    def get_values(self) -> tuple[EnvKind, str, dict, PostCreateAction, str | None]:
         """获取对话框输入值。
         
         Returns:
-            (环境类型, Provider名称, 配置字典)
+            (环境类型, Provider名称, 配置字典, PostCreateAction, WorkflowModule)
         """
+        from src.core.rem.models import PostCreateAction, ProxyMode
+        
         config = {}
         provider = self.provider_combo.currentText()
         
+        # Post Action
+        post_action = self.post_action_combo.currentData()
+        workflow_module = self.workflow_combo.currentData() if post_action == PostCreateAction.WORKFLOW else None
+        
+        config = {}
+        provider = self.provider_combo.currentText()
+        
+        # 处理名称
+        name = self.name_input.text().strip()
+        if name:
+            config["creation_params"] = {"name_prefix": name}
+        
         if provider in self.FINGERPRINT_PROVIDERS:
-            proxy_text = self.proxy_input.text().strip()
-            if proxy_text:
-                config["proxy"] = {"mode": 2, "value": proxy_text}
+            # 1. 代理配置
+            proxy_mode_enum = self.proxy_mode_combo.currentData()
             
-            name = self.name_input.text().strip()
-            if name:
-                config["creation_params"] = {"name_prefix": name}
+            proxy_conf = {}
             
-            # 指纹模式: 随机生成时无需额外配置
+            if proxy_mode_enum == ProxyMode.NONE:
+                proxy_conf = {"mode": ProxyMode.NONE}
+                
+            elif proxy_mode_enum == ProxyMode.SYSTEM:
+                proxy_conf = {"mode": ProxyMode.SYSTEM}
+                
+            else: # Custom ("custom")
+                source = self.proxy_source_combo.currentData()
+                if source == "pool":
+                    pool_id = self.pool_combo.currentData()
+                    proxy_conf = {
+                        "mode": ProxyMode.POOL,
+                        "pool_id": pool_id
+                    }
+                else: # manual
+                    raw_val = self.proxy_manual_input.text().strip()
+                    proxy_conf = {
+                        "mode": ProxyMode.STATIC,
+                        "static_value": raw_val
+                    }
+            
+            config["proxy"] = proxy_conf
+            
+            # 2. 指纹配置 (去除输入，默认为随机或由Provider处理)
         
         return (
             self.kind_combo.currentData(),
             provider,
             config,
+            post_action,
+            workflow_module,
         )
 
 
@@ -186,14 +375,23 @@ class DataLoaderThread(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
     
-    def __init__(self, pool: EnvPool):
+    def __init__(self, pool: EnvPool, run_gc: bool = False):
         super().__init__()
         self._pool = pool
+        self._run_gc = run_gc
     
     def run(self):
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            
+            # 仅在需要时执行 GC
+            if self._run_gc:
+                from src.core.rem.manager import get_environment_manager
+                manager = get_environment_manager()
+                loop.run_until_complete(manager.run_gc())
+
+            # 使用共享的 pool，无需重新加载
             envs = loop.run_until_complete(self._pool.list_all())
             loop.close()
             self.finished.emit(envs)
@@ -221,10 +419,17 @@ class EnvWorkerThread(QThread):
             manager = get_environment_manager()
             
             if self._action == "create":
+                # Ensure provider name is a string
+                provider_obj = self._kwargs["provider"]
+                provider_name = provider_obj.name if hasattr(provider_obj, "name") else str(provider_obj)
+                
                 env = loop.run_until_complete(
                     manager.create_env(
-                        self._kwargs["provider"],
-                        self._kwargs.get("config"),
+                        provider_name=provider_name,
+                        config=self._kwargs.get("config"),
+                        requirement=self._kwargs.get("requirement"),
+                        post_action=self._kwargs.get("post_action"),
+                        workflow_module=self._kwargs.get("workflow_module"),
                     )
                 )
                 self.finished.emit(env)
@@ -233,28 +438,56 @@ class EnvWorkerThread(QThread):
                     manager.destroy_env(self._kwargs["env_id"])
                 )
                 self.finished.emit(success)
+            elif self._action == "start":
+                success = loop.run_until_complete(
+                    manager.start_env(self._kwargs["env_id"])
+                )
+                self.finished.emit(success)
+            elif self._action == "stop":
+                success = loop.run_until_complete(
+                    manager.stop_env(self._kwargs["env_id"])
+                )
+                self.finished.emit(success)
+            elif self._action == "pause":
+                success = loop.run_until_complete(
+                    manager.pause_env(self._kwargs["env_id"])
+                )
+                self.finished.emit(success)
+            elif self._action == "resume":
+                success = loop.run_until_complete(
+                    manager.resume_env(self._kwargs["env_id"])
+                )
+                self.finished.emit(success)
             
             loop.close()
         except Exception as e:
             self.error.emit(str(e))
 
 
+@dataclass
+class EnvDisplayItem:
+    """环境显示项包装。"""
+    raw: Any # EnvInfo
+    display_status_text: str
+
 class EnvListWidget(QWidget):
     """环境列表组件。"""
     
     env_selected = pyqtSignal(str)
     
-    COLUMNS = ["ID", "类型", "Provider", "状态", "任务", "操作"]
+    COLUMNS = ["ID", "名称", "类型", "Provider", "状态", "任务", "操作"]
     STATUS_COLORS = {
         EnvStatus.READY: "#4ade80",
         EnvStatus.BUSY: "#facc15",
-        EnvStatus.UNHEALTHY: "#f87171",
+        EnvStatus.RUNNING: "#22c55e",  # 运行中 - 绿色
+        EnvStatus.ERROR: "#f87171",
         EnvStatus.CREATING: "#60a5fa",
     }
     STATUS_TEXT = {
         EnvStatus.READY: "就绪",
-        EnvStatus.BUSY: "忙碌",
-        EnvStatus.UNHEALTHY: "异常",
+        EnvStatus.BUSY: "启动中",      # 窗口已开启，尚未连接
+        EnvStatus.RUNNING: "运行中",   # 已连接 Playwright
+        EnvStatus.ERROR: "错误",
         EnvStatus.CREATING: "创建中",
         EnvStatus.PAUSED: "暂停",
         EnvStatus.TERMINATING: "终止中",
@@ -263,7 +496,10 @@ class EnvListWidget(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._pool = EnvPool()
+        # 使用全局 EnvironmentManager 的共享 pool 实例
+        from src.core.rem.manager import get_environment_manager
+        self._manager = get_environment_manager()
+        self._pool = self._manager.pool
         self._loader_thread = None
         self._setup_ui()
     
@@ -293,25 +529,26 @@ class EnvListWidget(QWidget):
         self.create_btn.clicked.connect(self._create_env)
         header.addWidget(self.create_btn)
         
-        self.refresh_btn = QPushButton("🔄 刷新")
+        self.refresh_btn = QPushButton("🔄")
+        self.refresh_btn.setFixedSize(32, 32)
         self.refresh_btn.setStyleSheet("""
             QPushButton {
                 background: rgba(99, 102, 241, 0.8);
                 color: white;
                 border: none;
-                padding: 8px 16px;
                 border-radius: 4px;
+                font-size: 16px;
             }
             QPushButton:hover { background: rgba(99, 102, 241, 1); }
             QPushButton:disabled { background: rgba(99, 102, 241, 0.3); }
         """)
-        self.refresh_btn.clicked.connect(self.load_data)
+        self.refresh_btn.clicked.connect(lambda: self.load_data(run_gc=True))
         header.addWidget(self.refresh_btn)
         
         layout.addLayout(header)
         
         # Loading 指示器
-        self.loading_bar = QProgressBar()
+        self.loading_bar = QProgressBar() # Keep for legacy methods if any, but SkyDataTable has its own
         self.loading_bar.setMaximum(0)
         self.loading_bar.setTextVisible(False)
         self.loading_bar.setFixedHeight(3)
@@ -324,35 +561,21 @@ class EnvListWidget(QWidget):
         self.error_label.hide()
         layout.addWidget(self.error_label)
         
-        # 表格
-        self.table = QTableWidget()
-        self.table.setColumnCount(len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(self.COLUMNS)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        header_view = self.table.horizontalHeader()
-        if header_view:
-            header_view.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            header_view.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(5, 100)
-        self.table.setAlternatingRowColors(True)
-        self.table.cellClicked.connect(self._on_cell_clicked)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: rgba(30, 30, 40, 0.8);
-                color: white;
-                border: none;
-                gridline-color: rgba(255, 255, 255, 0.1);
-            }
-            QTableWidget::item { padding: 8px; }
-            QHeaderView::section {
-                background-color: rgba(50, 50, 60, 0.9);
-                color: white;
-                padding: 10px;
-                border: none;
-            }
-        """)
+        # 表格 (SkyDataTable)
+        from src.ui.components.data_table import SkyDataTable
         
+        columns = [
+            ("id", "ID", 120),
+            ("name", "名称", 160),
+            ("kind", "类型", 100),
+            ("provider", "节点类型", 110),
+            ("status", "状态", 90),
+            ("task", "任务", 160),
+            ("actions", "操作", None),
+        ]
+        
+        self.table = SkyDataTable(columns=columns)
+        self.table.set_render_callback(self._render_row)
         layout.addWidget(self.table)
         
         # 统计栏
@@ -360,74 +583,175 @@ class EnvListWidget(QWidget):
         self.stats_label.setStyleSheet("color: rgba(255, 255, 255, 0.7);")
         layout.addWidget(self.stats_label)
     
-    def load_data(self):
+    def load_data(self, run_gc: bool = False):
         """加载环境数据。"""
-        self._show_loading(True)
+        self.table.set_loading(True)
         self.error_label.hide()
         self.refresh_btn.setEnabled(False)
         
-        self._loader_thread = DataLoaderThread(self._pool)
+        self._loader_thread = DataLoaderThread(self._pool, run_gc=run_gc)
         self._loader_thread.finished.connect(self._on_data_loaded)
         self._loader_thread.error.connect(self._on_load_error)
         self._loader_thread.start()
     
     def _on_data_loaded(self, envs: list):
         """数据加载完成。"""
-        self._show_loading(False)
+        self.table.set_loading(False)
         self.refresh_btn.setEnabled(True)
-        
-        self.table.setRowCount(0)
         
         ready_count = 0
         busy_count = 0
         
+        display_items = []
         for env in envs:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            
-            # ID
-            id_item = QTableWidgetItem(env.id[:8] + "...")
-            id_item.setData(Qt.ItemDataRole.UserRole, env.id)
-            self.table.setItem(row, 0, id_item)
-            
-            # 类型
-            self.table.setItem(row, 1, QTableWidgetItem(env.kind.value))
-            
-            # Provider
-            self.table.setItem(row, 2, QTableWidgetItem(env.provider))
-            
-            # 状态
-            status_text = self.STATUS_TEXT.get(env.status, env.status.value)
-            status_item = QTableWidgetItem(status_text)
-            if env.status in self.STATUS_COLORS:
-                status_item.setForeground(QColor(self.STATUS_COLORS[env.status]))
-            self.table.setItem(row, 3, status_item)
-            
-            # 任务
-            task_id = env.task_run_id[:8] + "..." if env.task_run_id else "-"
-            self.table.setItem(row, 4, QTableWidgetItem(task_id))
-            
-            # 操作按钮
-            action_widget = QWidget()
-            action_layout = QHBoxLayout(action_widget)
-            action_layout.setContentsMargins(4, 2, 4, 2)
-            
-            if env.status in {EnvStatus.READY, EnvStatus.UNHEALTHY}:
-                destroy_btn = QPushButton("🗑️ 销毁")
-                destroy_btn.setStyleSheet("background: #f87171; color: white; border: none; padding: 4px 8px; border-radius: 2px;")
-                destroy_btn.clicked.connect(lambda _, eid=env.id: self._destroy_env(eid))
-                action_layout.addWidget(destroy_btn)
-            else:
-                action_layout.addWidget(QLabel("-"))
-            
-            self.table.setCellWidget(row, 5, action_widget)
+            status_text = self.STATUS_TEXT.get(env.status, str(env.status.value))
+            display_items.append(EnvDisplayItem(
+                raw=env,
+                display_status_text=str(status_text)
+            ))
             
             if env.status == EnvStatus.READY:
                 ready_count += 1
             elif env.status == EnvStatus.BUSY:
                 busy_count += 1
-        
+                
+        self.table.set_data(display_items)
+        self._display_items = display_items  # 保存引用供编辑对话框使用
         self._update_stats(len(envs), ready_count, busy_count)
+        
+    def _render_row(self, row: int, item: EnvDisplayItem, table):
+        """渲染单行。"""
+        env = item.raw
+        
+        # 0: ID
+        id_item = QTableWidgetItem(str(env.id))
+        id_item.setData(Qt.ItemDataRole.UserRole, env.id)
+        table.setItem(row, 0, id_item)
+        
+        # 1: 名称
+        name_text = env.name if env.name else "-"
+        table.setItem(row, 1, QTableWidgetItem(name_text))
+        
+        # 2: 类型
+        table.setItem(row, 2, QTableWidgetItem(env.kind.value))
+        
+        # 3: Provider
+        table.setItem(row, 3, QTableWidgetItem(env.provider))
+        
+        # 4: 状态
+        status_text = item.display_status_text
+        status_item = QTableWidgetItem(status_text)
+        if env.status in self.STATUS_COLORS:
+            status_item.setForeground(QColor(self.STATUS_COLORS[env.status]))
+        table.setItem(row, 4, status_item)
+        
+        # 5: 任务
+        task_id = env.task_run_id[:8] + "..." if env.task_run_id else "-"
+        table.setItem(row, 5, QTableWidgetItem(task_id))
+        
+        # 6: 操作按钮
+        action_widget = self._create_action_widget(env)
+        table.setCellWidget(row, 6, action_widget)
+        
+    def _create_action_widget(self, env) -> QWidget:
+        """创建操作按钮组。
+        
+        按钮布局:
+        - READY: [▶运行] [⏸暂停] [✏编辑] [🗑销毁]
+        - BUSY: [⏹停止]
+        - PAUSED: [▶启动] [✏编辑] [🗑销毁]
+        """
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(6)
+        
+        btn_style = """
+            QPushButton {
+                padding: 4px 8px;
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+                min-width: 24px;
+                min-height: 24px;
+            }
+            QPushButton:hover { opacity: 0.85; }
+        """
+                
+        if env.status == EnvStatus.READY:
+            # [▶运行]
+            run_btn = QPushButton("▶")
+            run_btn.setToolTip("运行")
+            run_btn.setStyleSheet(btn_style + "QPushButton { background: #4ade80; color: black; }")
+            run_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            run_btn.clicked.connect(lambda _, eid=env.id: self._start_env(eid))
+            layout.addWidget(run_btn)
+            
+            # [⏸暂停]
+            pause_btn = QPushButton("⏸")
+            pause_btn.setToolTip("暂停")
+            pause_btn.setStyleSheet(btn_style + "QPushButton { background: #facc15; color: black; }")
+            pause_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            pause_btn.clicked.connect(lambda _, eid=env.id: self._pause_env(eid))
+            layout.addWidget(pause_btn)
+            
+            # [✏编辑]
+            edit_btn = QPushButton("✏")
+            edit_btn.setToolTip("编辑")
+            edit_btn.setStyleSheet(btn_style + "QPushButton { background: #60a5fa; color: white; }")
+            edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            edit_btn.clicked.connect(lambda _, eid=env.id: self._edit_env(eid))
+            layout.addWidget(edit_btn)
+            
+            # [🗑销毁]
+            destroy_btn = QPushButton("🗑")
+            destroy_btn.setToolTip("销毁")
+            destroy_btn.setStyleSheet(btn_style + "QPushButton { background: #f87171; color: white; }")
+            destroy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            destroy_btn.clicked.connect(lambda _, eid=env.id: self._destroy_env(eid))
+            layout.addWidget(destroy_btn)
+            
+        elif env.status == EnvStatus.BUSY:
+            # [⏹停止]
+            stop_btn = QPushButton("⏹ 停止")
+            stop_btn.setStyleSheet(btn_style + "QPushButton { background: #f87171; color: white; }")
+            stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            stop_btn.clicked.connect(lambda _, eid=env.id: self._stop_env(eid))
+            layout.addWidget(stop_btn)
+            
+        elif env.status == EnvStatus.PAUSED:
+            # [▶启动]
+            resume_btn = QPushButton("▶")
+            resume_btn.setToolTip("启动")
+            resume_btn.setStyleSheet(btn_style + "QPushButton { background: #4ade80; color: black; }")
+            resume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            resume_btn.clicked.connect(lambda _, eid=env.id: self._resume_env(eid))
+            layout.addWidget(resume_btn)
+            
+            # [✏编辑]
+            edit_btn = QPushButton("✏")
+            edit_btn.setToolTip("编辑")
+            edit_btn.setStyleSheet(btn_style + "QPushButton { background: #60a5fa; color: white; }")
+            edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            edit_btn.clicked.connect(lambda _, eid=env.id: self._edit_env(eid))
+            layout.addWidget(edit_btn)
+            
+            # [🗑销毁]
+            destroy_btn = QPushButton("🗑")
+            destroy_btn.setToolTip("销毁")
+            destroy_btn.setStyleSheet(btn_style + "QPushButton { background: #f87171; color: white; }")
+            destroy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            destroy_btn.clicked.connect(lambda _, eid=env.id: self._destroy_env(eid))
+            layout.addWidget(destroy_btn)
+            
+        else:
+            # 其他状态：无操作
+            label = QLabel("-")
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(label)
+            
+        layout.addStretch()
+        return widget
     
     def _on_load_error(self, error: str):
         """加载出错。"""
@@ -440,15 +764,25 @@ class EnvListWidget(QWidget):
         """创建环境。"""
         dialog = CreateEnvDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            kind, provider, config = dialog.get_values()
+            kind, provider, config, post_action, workflow_module = dialog.get_values()
             
             self.create_btn.setEnabled(False)
             self._show_loading(True)
+            
+            # Construct EnvRequirement to pass proxy_config correctly
+            from src.core.rem.models import EnvRequirement, ProxyConfig
+            
+            requirement = EnvRequirement(kind=kind)
+            if "proxy" in config:
+                requirement.proxy_config = ProxyConfig.from_dict(config["proxy"])
             
             self._worker = EnvWorkerThread(
                 action="create",
                 provider=provider,
                 config=config,
+                requirement=requirement,
+                post_action=post_action,
+                workflow_module=workflow_module,
             )
             self._worker.finished.connect(self._on_create_finished)
             self._worker.error.connect(self._on_worker_error)
@@ -458,7 +792,7 @@ class EnvListWidget(QWidget):
         """创建完成。"""
         self._show_loading(False)
         self.create_btn.setEnabled(True)
-        QMessageBox.information(self, "成功", f"环境创建成功: {env.id[:8]}...")
+        QMessageBox.information(self, "成功", f"环境创建成功: {env.id}")
         self.load_data()
     
     def _on_worker_error(self, error: str):
@@ -471,7 +805,7 @@ class EnvListWidget(QWidget):
     def _destroy_env(self, env_id: str):
         """销毁环境。"""
         reply = QMessageBox.question(
-            self, "确认", f"确定要销毁环境 {env_id[:8]}... ?",
+            self, "确认", f"确定要销毁环境 {env_id} ?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -492,6 +826,69 @@ class EnvListWidget(QWidget):
             QMessageBox.information(self, "成功", "环境已销毁")
         else:
             QMessageBox.warning(self, "警告", "环境不存在或已被销毁")
+        self.load_data()
+    
+    def _start_env(self, env_id: str):
+        """启动环境（打开窗口）。"""
+        self._show_loading(True)
+        self._worker = EnvWorkerThread(action="start", env_id=env_id)
+        self._worker.finished.connect(self._on_action_finished)
+        self._worker.error.connect(self._on_worker_error)
+        self._worker.start()
+    
+    def _stop_env(self, env_id: str):
+        """停止环境（关闭窗口）。"""
+        self._show_loading(True)
+        self._worker = EnvWorkerThread(action="stop", env_id=env_id)
+        self._worker.finished.connect(self._on_action_finished)
+        self._worker.error.connect(self._on_worker_error)
+        self._worker.start()
+    
+    def _pause_env(self, env_id: str):
+        """暂停环境。"""
+        self._show_loading(True)
+        self._worker = EnvWorkerThread(action="pause", env_id=env_id)
+        self._worker.finished.connect(self._on_action_finished)
+        self._worker.error.connect(self._on_worker_error)
+        self._worker.start()
+    
+    def _resume_env(self, env_id: str):
+        """恢复环境。"""
+        self._show_loading(True)
+        self._worker = EnvWorkerThread(action="resume", env_id=env_id)
+        self._worker.finished.connect(self._on_action_finished)
+        self._worker.error.connect(self._on_worker_error)
+        self._worker.start()
+    
+    def _edit_env(self, env_id: str):
+        """编辑环境（弹出对话框）。"""
+        from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+        
+        # 从表格数据中查找环境
+        env = None
+        for i in range(self.table.rowCount()):
+            id_item = self.table.item(i, 0)
+            if id_item and id_item.data(Qt.ItemDataRole.UserRole) == env_id:
+                # 从 display_items 获取原始环境对象
+                items = getattr(self, "_display_items", [])
+                if i < len(items):
+                    env = items[i].raw
+                break
+        
+        if not env:
+            # 如果找不到，从 pool 异步加载
+            QMessageBox.warning(self, "错误", f"未找到环境: {env_id}...")
+            return
+        
+        dialog = EditEnvDialog(env, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.load_data()  # 刷新列表
+    
+    def _on_action_finished(self, success: bool):
+        """通用操作完成回调。"""
+        self._show_loading(False)
+        if not success:
+            QMessageBox.warning(self, "警告", "操作失败")
         self.load_data()
     
     def _show_loading(self, show: bool):

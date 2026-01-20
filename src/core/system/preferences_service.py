@@ -43,6 +43,9 @@ class PreferenceKey(str, Enum):
     # Logging
     LOG_LEVEL = "logging.level"
     LOG_RETENTION = "logging.retention_days"
+    
+    # REM (Runtime Environment Manager)
+    ENV_MAX_INSTANCES = "rem.max_instances"
 
 
 # 默认值映射
@@ -56,11 +59,12 @@ PREFERENCE_DEFAULTS: dict[PreferenceKey, Any] = {
     PreferenceKey.HTTP_PROXY: "",
     PreferenceKey.BITBROWSER_PORT: 54345,
     PreferenceKey.BITBROWSER_PATH: "",
-    PreferenceKey.VIRTUALBROWSER_PORT: 9022,
+    PreferenceKey.VIRTUALBROWSER_PORT: 9002,
     PreferenceKey.VIRTUALBROWSER_PATH: "",
     PreferenceKey.VIRTUALBROWSER_API_KEY: "",
     PreferenceKey.LOG_LEVEL: "INFO",
-    PreferenceKey.LOG_RETENTION: 14,
+    PreferenceKey.LOG_RETENTION: 29,
+    PreferenceKey.ENV_MAX_INSTANCES: 50,
 }
 
 # 需要重启才能生效的配置
@@ -93,12 +97,14 @@ class PreferencesService(QObject):
         Returns:
             配置值
         """
+        import json
+        
         key_str = key.value if isinstance(key, PreferenceKey) else key
 
-        # 从存储获取
-        config = self._store.get_module_config("system")
-        if key_str in config:
-            return config[key_str]
+        # 从 settings 表获取
+        value_str = self._store.get_setting(key_str)
+        if value_str is not None:
+            return json.loads(value_str)
 
         # 回退到默认值
         if default is not None:
@@ -119,12 +125,13 @@ class PreferencesService(QObject):
         Returns:
             True 如果需要重启生效
         """
+        import json
+        
         key_str = key.value if isinstance(key, PreferenceKey) else key
+        value_str = json.dumps(value, ensure_ascii=False)
 
-        # 更新存储
-        config = self._store.get_module_config("system")
-        config[key_str] = value
-        self._store.set_module_config("system", config)
+        # 更新 settings 表
+        self._store.set_setting(key_str, value_str)
 
         # 判断是否需要重启
         requires_restart = (
@@ -138,21 +145,25 @@ class PreferencesService(QObject):
 
     def get_all(self) -> dict[str, Any]:
         """获取所有配置。"""
-        config = self._store.get_module_config("system")
+        import json
+        
+        # 从 settings 表获取所有值
+        stored = self._store.get_all_settings()
 
         # 合并默认值
         result = {}
         for key in PreferenceKey:
-            result[key.value] = config.get(
-                key.value, PREFERENCE_DEFAULTS.get(key)
-            )
+            if key.value in stored:
+                result[key.value] = json.loads(stored[key.value])
+            else:
+                result[key.value] = PREFERENCE_DEFAULTS.get(key)
 
         return result
 
     def reset_to_defaults(self) -> None:
         """重置为默认值。"""
-        defaults = {k.value: v for k, v in PREFERENCE_DEFAULTS.items()}
-        self._store.set_module_config("system", defaults)
+        for key, value in PREFERENCE_DEFAULTS.items():
+            self.set(key, value)
 
 
 # 单例

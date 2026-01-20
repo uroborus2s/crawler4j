@@ -6,17 +6,13 @@
     - IPPoolTab: IP 池管理主页面
 """
 
-import time
-
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
     QSplitter,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -24,7 +20,7 @@ from PyQt6.QtWidgets import (
 from src.core.foundation.logging import logger
 from src.core.rem.ip_pool import IPPool, IPStrategy, get_ip_pool_manager
 from src.core.rem.ui.ip_pool_dialogs import AddIPDialog, AddPoolDialog, BatchImportDialog
-from src.ui.components.table import SkyTableWidget
+from src.ui.components.data_table import SkyDataTable
 
 
 class IPPoolWorkerThread(QThread):
@@ -47,7 +43,7 @@ class IPPoolWorkerThread(QThread):
             manager = get_ip_pool_manager()
             
             if self._action == "load":
-                result = loop.run_until_complete(manager.startup())
+                # 应用启动时已调用 manager.startup()，无需重复调用
                 pools = manager.list_pools()
                 self.finished.emit(pools)
             elif self._action == "add_pool":
@@ -91,8 +87,21 @@ class IPPoolWorkerThread(QThread):
 class IPPoolTab(QWidget):
     """IP 池管理主页面。"""
     
-    POOL_COLUMNS = ["名称", "策略", "IP数量", "在用", "操作"]
-    ENTRY_COLUMNS = ["IP地址", "端口", "绑定数", "安全度", "过期时间", "操作"]
+    POOL_COLUMNS = [
+        ("name", "名称", 220),
+        ("strategy", "策略", 220),
+        ("ip_count", "IP数量", 160),
+        ("in_use", "在用", 120),
+        ("actions", "操作", None),
+    ]
+    ENTRY_COLUMNS = [
+        ("address", "IP地址", 180),
+        ("port", "端口", 120),
+        ("bound_count", "绑定数", 100),
+        ("safety_score", "安全度", 100),
+        ("expires", "过期时间", 220),
+        ("actions", "操作", None),
+    ]
     
     STRATEGY_NAMES = {
         IPStrategy.LEAST_BOUND: "最少绑定",
@@ -172,11 +181,9 @@ class IPPoolTab(QWidget):
         pool_layout.addLayout(pool_toolbar)
         
         # 池列表表格
-        self.pool_table = SkyTableWidget()
-        self.pool_table.setColumnCount(len(self.POOL_COLUMNS))
-        self.pool_table.setHorizontalHeaderLabels(self.POOL_COLUMNS)
-        self.pool_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.pool_table.cellClicked.connect(self._on_pool_selected)
+        self.pool_table = SkyDataTable(columns=self.POOL_COLUMNS)
+        self.pool_table.set_render_callback(self._render_pool_row)
+        self.pool_table.cell_clicked.connect(self._on_pool_selected)
         pool_layout.addWidget(self.pool_table)
         
         splitter.addWidget(pool_widget)
@@ -205,10 +212,8 @@ class IPPoolTab(QWidget):
         entry_layout.addLayout(entry_toolbar)
         
         # 条目列表表格
-        self.entry_table = SkyTableWidget()
-        self.entry_table.setColumnCount(len(self.ENTRY_COLUMNS))
-        self.entry_table.setHorizontalHeaderLabels(self.ENTRY_COLUMNS)
-        self.entry_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.entry_table = SkyDataTable(columns=self.ENTRY_COLUMNS)
+        self.entry_table.set_render_callback(self._render_entry_row)
         entry_layout.addWidget(self.entry_table)
         
         splitter.addWidget(entry_widget)
@@ -224,32 +229,34 @@ class IPPoolTab(QWidget):
     
     def _on_pools_loaded(self, pools: list[IPPool]) -> None:
         """池列表加载完成。"""
-        self.pool_table.setRowCount(len(pools))
+        self._pools = pools
+        self.pool_table.set_data(pools)
+    
+    def _render_pool_row(self, row: int, pool: IPPool, table) -> None:
+        """渲染池表格行。"""
+        from PyQt6.QtWidgets import QTableWidgetItem
         
-        for row, pool in enumerate(pools):
-            # 名称
-            self.pool_table.setItem(row, 0, QTableWidgetItem(pool.name))
-            
-            # 策略
-            strategy_name = self.STRATEGY_NAMES.get(pool.strategy, str(pool.strategy))
-            self.pool_table.setItem(row, 1, QTableWidgetItem(strategy_name))
-            
-            # IP 数量
-            self.pool_table.setItem(row, 2, QTableWidgetItem(str(len(pool.entries))))
-            
-            # 在用数量
-            in_use = sum(1 for e in pool.entries if e.bound_count > 0)
-            self.pool_table.setItem(row, 3, QTableWidgetItem(str(in_use)))
-            
-            # 操作按钮
-            delete_btn = QPushButton("删除")
-            delete_btn.setObjectName("danger")
-            delete_btn.setProperty("pool_id", pool.id)
-            delete_btn.clicked.connect(lambda checked, pid=pool.id: self._delete_pool(pid))
-            self.pool_table.setCellWidget(row, 4, delete_btn)
-            
-            # 存储 pool 对象
-            self.pool_table.item(row, 0).setData(Qt.ItemDataRole.UserRole, pool)
+        # 名称 (同时存储 pool 对象)
+        item_name = QTableWidgetItem(pool.name)
+        item_name.setData(Qt.ItemDataRole.UserRole, pool)
+        table.setItem(row, 0, item_name)
+        
+        # 策略
+        strategy_name = self.STRATEGY_NAMES.get(pool.strategy, str(pool.strategy))
+        table.setItem(row, 1, QTableWidgetItem(strategy_name))
+        
+        # IP 数量
+        table.setItem(row, 2, QTableWidgetItem(str(len(pool.entries))))
+        
+        # 在用数量
+        in_use = sum(1 for e in pool.entries if e.bound_count > 0)
+        table.setItem(row, 3, QTableWidgetItem(str(in_use)))
+        
+        # 操作按钮
+        delete_btn = QPushButton("删除")
+        delete_btn.setObjectName("danger")
+        delete_btn.clicked.connect(lambda _, pid=pool.id: self._delete_pool(pid))
+        table.setCellWidget(row, 4, delete_btn)
     
     def _on_pool_selected(self, row: int, col: int) -> None:
         """池被选中。"""
@@ -257,38 +264,55 @@ class IPPoolTab(QWidget):
         if item:
             pool = item.data(Qt.ItemDataRole.UserRole)
             self._current_pool = pool
-            self._update_entry_table(pool)
+            self.entry_table.set_data(pool.entries)
             self.add_ip_btn.setEnabled(True)
             self.batch_import_btn.setEnabled(True)
             self.entry_title.setText(f"IP 条目 - {pool.name}")
     
-    def _update_entry_table(self, pool: IPPool) -> None:
-        """更新 IP 条目表格。"""
-        self.entry_table.setRowCount(len(pool.entries))
+    def _render_entry_row(self, row: int, entry, table) -> None:
+        """渲染 IP 条目行。"""
+        from datetime import datetime
         
-        for row, entry in enumerate(pool.entries):
-            # IP 地址
-            self.entry_table.setItem(row, 0, QTableWidgetItem(entry.address))
-            
-            # 端口
-            self.entry_table.setItem(row, 1, QTableWidgetItem(str(entry.port)))
-            
-            # 绑定数
-            self.entry_table.setItem(row, 2, QTableWidgetItem(str(entry.bound_count)))
-            
-            # 安全度
-            self.entry_table.setItem(row, 3, QTableWidgetItem(str(entry.safety_score)))
-            
-            # 过期时间
-            if entry.expires_at:
-                days_left = (entry.expires_at - int(time.time())) // (24 * 60 * 60)
-                expire_text = f"{days_left}天后" if days_left > 0 else "已过期"
-            else:
-                expire_text = "永久"
-            self.entry_table.setItem(row, 4, QTableWidgetItem(expire_text))
-            
-            # 操作（暂时留空）
-            self.entry_table.setItem(row, 5, QTableWidgetItem(""))
+        from PyQt6.QtWidgets import QHBoxLayout, QTableWidgetItem, QWidget
+        
+        # IP 地址
+        table.setItem(row, 0, QTableWidgetItem(entry.address))
+        
+        # 端口
+        table.setItem(row, 1, QTableWidgetItem(str(entry.port)))
+        
+        # 绑定数
+        table.setItem(row, 2, QTableWidgetItem(str(entry.bound_count)))
+        
+        # 安全度
+        table.setItem(row, 3, QTableWidgetItem(str(entry.safety_score)))
+        
+        # 过期时间 - 显示具体日期时间
+        if entry.expires_at:
+            expire_dt = datetime.fromtimestamp(entry.expires_at)
+            expire_text = expire_dt.strftime("%Y-%m-%d %H:%M")
+        else:
+            expire_text = "永久"
+        table.setItem(row, 4, QTableWidgetItem(expire_text))
+        
+        # 操作按钮
+        actions_widget = QWidget()
+        actions_layout = QHBoxLayout(actions_widget)
+        actions_layout.setContentsMargins(4, 2, 4, 2)
+        actions_layout.setSpacing(6)
+        
+        edit_btn = QPushButton("编辑")
+        edit_btn.setFixedWidth(80)
+        edit_btn.clicked.connect(lambda _, eid=entry.id: self._edit_entry(eid))
+        actions_layout.addWidget(edit_btn)
+        
+        delete_btn = QPushButton("删除")
+        delete_btn.setObjectName("danger")
+        delete_btn.setFixedWidth(80)
+        delete_btn.clicked.connect(lambda _, eid=entry.id: self._delete_entry(eid))
+        actions_layout.addWidget(delete_btn)
+        
+        table.setCellWidget(row, 5, actions_widget)
     
     def _add_pool(self) -> None:
         """添加 IP 池。"""
@@ -352,8 +376,67 @@ class IPPoolTab(QWidget):
             pool = manager.get_pool(self._current_pool.id)
             if pool:
                 self._current_pool = pool
-                self._update_entry_table(pool)
+                self.entry_table.set_data(pool.entries)
     
     def _on_error(self, error: str) -> None:
         """错误处理。"""
         QMessageBox.warning(self, "错误", error)
+    
+    def _edit_entry(self, entry_id: str) -> None:
+        """编辑 IP 条目。"""
+        if not self._current_pool:
+            return
+        
+        # 查找 entry
+        entry = self._current_pool.get_entry(entry_id)
+        if not entry:
+            QMessageBox.warning(self, "错误", "未找到该 IP 条目")
+            return
+        
+        # 弹出编辑对话框（复用添加对话框）
+        dialog = AddIPDialog(self._current_pool.id, self)
+        dialog.setWindowTitle("编辑 IP")
+        # 填充现有值
+        dialog.address_input.setText(entry.address)
+        dialog.port_input.setValue(entry.port)  # QSpinBox 使用 setValue
+        dialog.protocol_combo.setCurrentText(entry.protocol)
+        if entry.username:
+            dialog.username_input.setText(entry.username)
+        if entry.password:
+            dialog.password_input.setText(entry.password)
+        
+        if dialog.exec():
+            # 更新 entry
+            new_entry = dialog.get_values()
+            entry.address = new_entry.address
+            entry.port = new_entry.port
+            entry.protocol = new_entry.protocol
+            entry.username = new_entry.username
+            entry.password = new_entry.password
+            entry.expires_at = new_entry.expires_at
+            
+            # 持久化
+            manager = get_ip_pool_manager()
+            manager._persist_entry(entry)
+            self._refresh_current_pool()
+    
+    def _delete_entry(self, entry_id: str) -> None:
+        """删除 IP 条目。"""
+        if not self._current_pool:
+            return
+        
+        result = QMessageBox.question(
+            self,
+            "确认删除",
+            "确定要删除此 IP 条目吗？",
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            # 从池中移除
+            self._current_pool.remove_entry(entry_id)
+            
+            # 从数据库删除
+            from src.core.persistence.database import STATE_DB, get_connection
+            with get_connection(STATE_DB) as conn:
+                conn.execute("DELETE FROM ip_entries WHERE id = ?", (entry_id,))
+            
+            self._refresh_current_pool()

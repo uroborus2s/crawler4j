@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.persistence import get_config_store
+from src.core.persistence import get_kv_store
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 
 
@@ -276,8 +276,8 @@ class StrategyEditorPage(QWidget):
     
     def _load_settings(self):
         """加载策略配置。"""
-        store = get_config_store()
-        config = store.get_module_config("tsm")
+        kv = get_kv_store()
+        config = kv.get("module:tsm:config") or {}
         
         self.global_max_spin.setValue(config.get("global_max", 10))
         self.mode_combo.setCurrentText(config.get("mode", "hybrid"))
@@ -292,8 +292,8 @@ class StrategyEditorPage(QWidget):
         if self.stack.currentIndex() == 1:
             self._yaml_to_form()
         
-        store = get_config_store()
-        store.set_module_config("tsm", {
+        kv = get_kv_store()
+        kv.set("module:tsm:config", {
             "global_max": self.global_max_spin.value(),
             "mode": self.mode_combo.currentText(),
             "reuse_policy": self.reuse_combo.currentText(),

@@ -3,17 +3,17 @@
 全屏表格显示模块列表，点击详情按钮进入模块详情页。
 """
 
+from dataclasses import dataclass
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -22,6 +22,14 @@ from PyQt6.QtWidgets import (
 from src.core.mms import ModuleSource, ModuleStatus, get_module_registry
 from src.core.mms.models import ModuleInfo
 from src.core.mms.ui.install_preview_dialog import InstallPreviewDialog
+from src.ui.components.data_table import SkyDataTable
+
+
+@dataclass
+class ModuleDisplayItem:
+    """模块显示项包装。"""
+    raw: ModuleInfo
+    display_name_str: str
 
 
 class ModuleListWidget(QWidget):
@@ -29,6 +37,8 @@ class ModuleListWidget(QWidget):
     
     全屏展示模块表格，点击"详情"跳转到详情页。
     """
+    
+    open_detail = pyqtSignal(object)  # 打开详情页信号 (ModuleInfo)
     
     open_detail = pyqtSignal(object)  # 打开详情页信号 (ModuleInfo)
     
@@ -107,50 +117,18 @@ class ModuleListWidget(QWidget):
         self.error_label.hide()
         layout.addWidget(self.error_label)
         
-        # 表格
-        self.table = QTableWidget()
-        self.table.setColumnCount(len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(self.COLUMNS)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        # 表格 (SkyDataTable)
         
-        # 隐藏垂直表头
-        vh = self.table.verticalHeader()
-        if vh:
-            vh.hide()
+        columns = [
+            ("name", "名称", 160),
+            ("display_name", "显示名", 260),
+            ("version", "版本", 120),
+            ("status", "状态", 120),
+            ("actions", "操作", None),
+        ]
         
-        header_view = self.table.horizontalHeader()
-        if header_view:
-            header_view.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            header_view.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(4, 180)
-        
-        self.table.setAlternatingRowColors(True)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: rgba(30, 30, 40, 0.8);
-                color: white;
-                border: none;
-                gridline-color: rgba(255, 255, 255, 0.1);
-            }
-            QTableWidget::item { 
-                padding: 8px;
-            }
-            QHeaderView::section {
-                background-color: rgba(50, 50, 60, 0.9);
-                color: white;
-                padding: 10px;
-                border: none;
-            }
-            QTableCornerButton::section {
-                background-color: rgba(50, 50, 60, 0.9);
-                border: none;
-            }
-            QHeaderView {
-                background-color: transparent;
-            }
-        """)
-        
+        self.table = SkyDataTable(columns=columns)
+        self.table.set_render_callback(self._render_row)
         layout.addWidget(self.table)
         
         # 统计
@@ -158,65 +136,71 @@ class ModuleListWidget(QWidget):
         self.stats_label.setStyleSheet("color: rgba(255, 255, 255, 0.7);")
         layout.addWidget(self.stats_label)
     
+    # Removed ModuleDisplayItem and ModuleListWidget redefinition to merge class body
+    # ... (keeps existing)
+
     def load_data(self):
         """加载模块数据。"""
-        self.loading_bar.show()
+        self.table.set_loading(True)
         self.error_label.hide()
         
         try:
             registry = get_module_registry()
             modules = registry.list_modules()
             self._modules = modules
-            self._render_modules(modules)
+            
+            display_items = []
+            for m in modules:
+                display_name = m.manifest.display_name or m.name
+                display_items.append(ModuleDisplayItem(
+                    raw=m,
+                    display_name_str=display_name
+                ))
+            
+            self.table.set_data(display_items)
+            
         except Exception as e:
-            self.loading_bar.hide()
+            self.table.set_loading(False)
             self.error_label.setText(f"❌ 加载失败: {e}")
             self.error_label.show()
             return
         
-        self.loading_bar.hide()
+        self.table.set_loading(False)
     
-    def _render_modules(self, modules: list[ModuleInfo]):
-        """渲染模块列表。"""
-        self.table.setRowCount(0)
+    def _render_row(self, row: int, item: ModuleDisplayItem, table):
+        """渲染模块行。"""
+        module = item.raw
+        table.setRowHeight(row, 52)
         
-        # 垂直表头样式在 setStyleSheet 中处理
-        if self.table.verticalHeader():
-            self.table.verticalHeader().show()
+        # 0. 名称
+        name_item = QTableWidgetItem(module.name)
+        name_item.setData(Qt.ItemDataRole.UserRole, module)  # 存储模块对象
+        table.setItem(row, 0, name_item)
         
-        enabled_count = 0
-        for module in modules:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setRowHeight(row, 52)
-            
-            # 名称
-            name_item = QTableWidgetItem(module.name)
-            name_item.setData(Qt.ItemDataRole.UserRole, module)  # 存储模块对象
-            self.table.setItem(row, 0, name_item)
-            
-            # 显示名
-            display = module.manifest.display_name or module.name
-            self.table.setItem(row, 1, QTableWidgetItem(display))
-            
-            # 版本
-            self.table.setItem(row, 2, QTableWidgetItem(module.manifest.version))
-            
-            # 状态
-            status_text = self.STATUS_TEXT.get(module.status, module.status.value)
-            status_item = QTableWidgetItem(status_text)
-            if module.status in self.STATUS_COLORS:
-                status_item.setForeground(QColor(self.STATUS_COLORS[module.status]))
-            self.table.setItem(row, 3, status_item)
-            
-            # 操作按钮
-            action_widget = self._create_action_widget(module)
-            self.table.setCellWidget(row, 4, action_widget)
-            
-            if module.status == ModuleStatus.ENABLED:
-                enabled_count += 1
+        # 1. 显示名
+        table.setItem(row, 1, QTableWidgetItem(item.display_name_str))
         
-        self.stats_label.setText(f"共 {len(modules)} 个模块，{enabled_count} 个启用")
+        # 2. 版本
+        table.setItem(row, 2, QTableWidgetItem(module.manifest.version))
+        
+        # 3. 状态
+        status_text = self.STATUS_TEXT.get(module.status, module.status.value)
+        status_item = QTableWidgetItem(status_text)
+        if module.status in self.STATUS_COLORS:
+            status_item.setForeground(QColor(self.STATUS_COLORS[module.status]))
+        table.setItem(row, 3, status_item)
+        
+        # 4. 操作按钮
+        action_widget = self._create_action_widget(module)
+        table.setCellWidget(row, 4, action_widget)
+        
+        # 更新统计 (在 render_callback 中做统计不合适，应该在 load_data 后或 set_data 时做)
+        # SkyDataTable 已经在底部栏显示总数。我们这里的 stats_label 有点多余。
+        # 但我们想显示 "启用数"。
+        # 可以在 load_data 中一次性统计。
+        
+        # enabled_count = sum(1 for m in self._modules if m.status == ModuleStatus.ENABLED)
+        # self.stats_label.setText(f"共 {len(self._modules)} 个模块，{enabled_count} 个启用")
     
     def _create_action_widget(self, module: ModuleInfo) -> QWidget:
         """创建操作按钮组。"""

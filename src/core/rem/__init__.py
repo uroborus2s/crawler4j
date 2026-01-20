@@ -7,7 +7,7 @@
     - EnvKind, EnvStatus, ProxyMode: 枚举
     - ProxyConfig, FingerprintConfig: 配置类
     - EnvironmentManager, get_environment_manager: 环境管理器
-    - BaseProvider, PlaywrightProvider: Provider
+    - BaseProvider: Provider
     - IPPool, IPEntry, IPPoolManager: IP 池管理
     - ExternalSyncManager: 外部状态同步
     - FingerprintProvider: 指纹配置协议
@@ -27,13 +27,15 @@ from src.core.rem.models import (
     EnvUnavailableError,
     EnvUnhealthyError,
     FingerprintConfig,
+    PostCreateAction,
     ProxyConfig,
     ProxyMode,
 )
 from src.core.rem.pool import EnvPool, LeaseManager
 from src.core.rem.provider import (
     BaseProvider,
-    PlaywrightProvider,
+    BitBrowserProvider,
+    VirtualBrowserProvider,
     get_provider,
     list_providers,
     register_provider,
@@ -48,6 +50,7 @@ __all__ = [
     # 枚举
     "EnvKind",
     "EnvStatus",
+    "PostCreateAction",
     "ProxyMode",
     "IPStrategy",
     # 配置类
@@ -61,7 +64,8 @@ __all__ = [
     "FingerprintNotSupportedError",
     # Provider
     "BaseProvider",
-    "PlaywrightProvider",
+    "BitBrowserProvider",
+    "VirtualBrowserProvider",
     "register_provider",
     "get_provider",
     "list_providers",

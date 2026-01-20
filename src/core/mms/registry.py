@@ -57,6 +57,14 @@ class ModuleRegistry:
         if self._loaded and not force:
             return
         
+        import sys
+        
+        # 注入用户模块父目录到 Python 搜索路径，确保 modules 包可被 import
+        user_data_path = str(get_app_data_dir())
+        if user_data_path not in sys.path:
+            sys.path.insert(0, user_data_path)
+            logger.info(f"[MMS] 已注入模块搜索路径: {user_data_path}")
+
         self._modules.clear()
         
         # 发现并加载模块

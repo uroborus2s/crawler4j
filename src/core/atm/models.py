@@ -51,6 +51,7 @@ class AutomationTask:
     strategy_id: str = ""
     cron_expression: str | None = None
     default_params: dict[str, Any] = field(default_factory=dict)
+    max_executions: int | None = None  # 最大执行次数 (None = 不限)
     created_at: int = field(default_factory=lambda: int(time.time()))
     updated_at: int = field(default_factory=lambda: int(time.time()))
 

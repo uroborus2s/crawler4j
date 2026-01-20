@@ -53,6 +53,18 @@ def main():
     asyncio.set_event_loop(loop)
     
     with loop:
+        # 初始化核心服务
+        from src.core.rem.manager import get_environment_manager
+        
+        # 环境管理器启动（加载数据库、同步状态、启动 GC）
+        # EnvironmentManager.startup 内部会自动初始化并启动 IPPoolManager
+        env_manager = get_environment_manager()
+        loop.run_until_complete(env_manager.startup())
+        
+        # TSM Orchestrator 依赖注入（必须在 REM 启动之后）
+        from src.core.tsm.adapters import configure_orchestrator
+        configure_orchestrator()
+        
         window = Shell()
         
         if prefs.get(PreferenceKey.MINIMIZE_ON_START, False):

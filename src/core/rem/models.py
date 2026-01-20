@@ -31,13 +31,19 @@ class EnvKind(StrEnum):
 class EnvStatus(StrEnum):
     """环境状态。
     
-    规格 5.2.3.2: CREATING | READY | BUSY | PAUSED | UNHEALTHY | TERMINATING | DEAD
+    状态机：
+    - CREATING → READY (成功) / DEAD (失败)
+    - READY → BUSY (打开窗口) / PAUSED (暂停) / DEAD (销毁)
+    - BUSY → RUNNING (连接) / READY (关闭)
+    - RUNNING → BUSY (断开连接) / READY (关闭窗口)
+    - PAUSED → READY (恢复) / DEAD (销毁)
     """
     CREATING = "creating"
     READY = "ready"
-    BUSY = "busy"
+    BUSY = "busy"           # 窗口已打开，尚未连接
+    RUNNING = "running"     # 已连接，正在运行
     PAUSED = "paused"
-    UNHEALTHY = "unhealthy"
+    ERROR = "error"         # 错误状态
     TERMINATING = "terminating"
     DEAD = "dead"
 
@@ -51,6 +57,13 @@ class ProxyMode(StrEnum):
     STATIC = "static"       # 固定代理地址
     POOL = "pool"           # 从 IP 池自动分配
     SYSTEM = "system"       # 使用系统代理
+
+
+class PostCreateAction(StrEnum):
+    """环境创建后的操作。"""
+    NONE = "none"           # 仅创建记录，不启动
+    TEST = "test"           # 启动并验证连接（默认）
+    WORKFLOW = "workflow"   # 启动并执行指定工作流
 
 
 @dataclass
@@ -116,6 +129,28 @@ class FingerprintConfig:
 
 
 @dataclass
+class EnvMetadataEntry:
+    """环境元数据条目（动态扩展字段）。
+    
+    Attributes:
+        env_id: 环境 ID
+        namespace: 命名空间（通常为 module_name）
+        key: 字段名
+        value: 字段值（任意类型，存储时 JSON 编码）
+        value_type: 类型提示 (string|int|float|bool|json)
+        created_at: 创建时间戳
+        updated_at: 更新时间戳
+    """
+    env_id: str
+    namespace: str
+    key: str
+    value: Any = None
+    value_type: str = "string"
+    created_at: int = field(default_factory=lambda: int(time.time()))
+    updated_at: int = field(default_factory=lambda: int(time.time()))
+
+
+@dataclass
 class Environment:
     """环境实例。
     
@@ -133,7 +168,6 @@ class Environment:
         provider: 提供者标识 (如 "playwright_local", "fingerprint_browser")
         status: 当前状态
         external_id: 外部系统环境 ID（用于状态同步）
-        labels: 静态标签 (如 {"browser": "chromium", "os": "mac"})
         capabilities: 能力集合 (如 {"page", "cookies", "screenshot"})
         handle: 物理句柄 (内存对象，不序列化)
         lease_id: 当前租约ID (若 BUSY)
@@ -142,16 +176,15 @@ class Environment:
         daily_usage_count: 当天使用次数
         daily_usage_date: 使用统计日期 (YYYY-MM-DD)
         proxy_config: 代理配置
-        fingerprint_config: 指纹配置
         created_at: 创建时间戳
         updated_at: 最后更新时间戳
     """
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    id: int = 0  # 由数据库自增分配
+    name: str = ""  # 环境名称，格式 env-YYYYMMDD-序号
     kind: EnvKind = EnvKind.BROWSER
     provider: str = ""
     status: EnvStatus = EnvStatus.CREATING
     external_id: str | None = None
-    labels: dict[str, str] = field(default_factory=dict)
     capabilities: set[str] = field(default_factory=set)
     handle: Any = field(default=None, repr=False)
     lease_id: str | None = None
@@ -162,7 +195,6 @@ class Environment:
     daily_usage_date: str = ""
     # 配置字段
     proxy_config: ProxyConfig | None = None
-    fingerprint_config: FingerprintConfig | None = None
     # 时间戳
     created_at: int = field(default_factory=lambda: int(time.time()))
     updated_at: int = field(default_factory=lambda: int(time.time()))
@@ -187,7 +219,6 @@ class Environment:
             "provider": self.provider,
             "status": self.status.value,
             "external_id": self.external_id,
-            "labels": self.labels,
             "capabilities": list(self.capabilities),
             "lease_id": self.lease_id,
             "task_run_id": self.task_run_id,
@@ -195,7 +226,6 @@ class Environment:
             "daily_usage_count": self.daily_usage_count,
             "daily_usage_date": self.daily_usage_date,
             "proxy_config": self.proxy_config.to_dict() if self.proxy_config else None,
-            "fingerprint_config": self.fingerprint_config.to_dict() if self.fingerprint_config else None,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -207,17 +237,12 @@ class Environment:
         if data.get("proxy_config"):
             proxy_config = ProxyConfig.from_dict(data["proxy_config"])
         
-        fingerprint_config = None
-        if data.get("fingerprint_config"):
-            fingerprint_config = FingerprintConfig.from_dict(data["fingerprint_config"])
-        
         return cls(
             id=data["id"],
             kind=EnvKind(data["kind"]),
             provider=data["provider"],
             status=EnvStatus(data["status"]),
             external_id=data.get("external_id"),
-            labels=data.get("labels", {}),
             capabilities=set(data.get("capabilities", [])),
             lease_id=data.get("lease_id"),
             task_run_id=data.get("task_run_id"),
@@ -225,7 +250,6 @@ class Environment:
             daily_usage_count=data.get("daily_usage_count", 0),
             daily_usage_date=data.get("daily_usage_date", ""),
             proxy_config=proxy_config,
-            fingerprint_config=fingerprint_config,
             created_at=data.get("created_at", int(time.time())),
             updated_at=data.get("updated_at", int(time.time())),
         )
@@ -251,7 +275,7 @@ class EnvLease:
         token: 验证令牌（防止越权释放）
     """
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    env_id: str = ""
+    env_id: int = 0
     task_run_id: str = ""
     acquired_at: int = field(default_factory=lambda: int(time.time()))
     expires_at: int | None = None
@@ -280,6 +304,7 @@ class EnvRequirement:
     kind: EnvKind = EnvKind.BROWSER
     capabilities: set[str] = field(default_factory=set)
     labels: dict[str, str] = field(default_factory=dict)
+    proxy_config: ProxyConfig | None = None  # 允许创建时指定代理
     task_run_id: str = ""
     timeout: int = 60
     
@@ -292,11 +317,6 @@ class EnvRequirement:
         # 能力匹配（需求的能力必须是环境能力的子集）
         if not self.capabilities.issubset(env.capabilities):
             return False
-        
-        # 标签匹配
-        for key, value in self.labels.items():
-            if env.labels.get(key) != value:
-                return False
         
         return True
 

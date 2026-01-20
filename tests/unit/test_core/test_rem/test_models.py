@@ -23,7 +23,6 @@ class TestEnvironment:
         assert env.id is not None
         assert env.kind == EnvKind.BROWSER
         assert env.status == EnvStatus.CREATING
-        assert env.labels == {}
         assert env.capabilities == set()
     
     def test_to_dict(self):
@@ -31,7 +30,6 @@ class TestEnvironment:
         env = Environment(
             kind=EnvKind.HTTP,
             provider="test_provider",
-            labels={"key": "value"},
             capabilities={"request", "response"},
         )
         
@@ -39,7 +37,6 @@ class TestEnvironment:
         
         assert data["kind"] == "http"
         assert data["provider"] == "test_provider"
-        assert data["labels"] == {"key": "value"}
         assert set(data["capabilities"]) == {"request", "response"}
     
     def test_from_dict(self):
@@ -49,7 +46,6 @@ class TestEnvironment:
             "kind": "browser",
             "provider": "playwright",
             "status": "ready",
-            "labels": {"browser": "chromium"},
             "capabilities": ["page", "cookies"],
             "created_at": 1234567890,
             "updated_at": 1234567890,
@@ -132,32 +128,6 @@ class TestEnvRequirement:
         env = Environment(
             kind=EnvKind.BROWSER,
             capabilities={"page", "cookies"},
-        )
-        
-        assert req.matches(env) is False
-    
-    def test_matches_labels(self):
-        """测试标签匹配。"""
-        req = EnvRequirement(
-            kind=EnvKind.BROWSER,
-            labels={"browser": "chromium"},
-        )
-        env = Environment(
-            kind=EnvKind.BROWSER,
-            labels={"browser": "chromium", "os": "mac"},
-        )
-        
-        assert req.matches(env) is True
-    
-    def test_matches_labels_mismatch(self):
-        """测试标签不匹配。"""
-        req = EnvRequirement(
-            kind=EnvKind.BROWSER,
-            labels={"browser": "firefox"},
-        )
-        env = Environment(
-            kind=EnvKind.BROWSER,
-            labels={"browser": "chromium"},
         )
         
         assert req.matches(env) is False

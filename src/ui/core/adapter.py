@@ -13,7 +13,7 @@ from src.core.atm import TaskRequest, TaskStatus, get_task_service
 # Core 模块导入
 from src.core.foundation import Event, EventBus, EventType, get_event_bus
 from src.core.mms import get_module_registry
-from src.core.persistence import get_config_store, init_database
+from src.core.persistence import get_kv_store, init_database
 from src.ui.core.command_channel import CommandChannel, CoreCommands, get_command_channel
 
 
@@ -120,14 +120,15 @@ class CoreAdapter:
         self._channel.register(CoreCommands.CONFIG_SET, self._cmd_config_set)
     
     def _cmd_config_get(self, module_name: str, key: str) -> Any:
-        store = get_config_store()
-        return store.get_module_config(module_name).get(key)
+        kv = get_kv_store()
+        config = kv.get(f"module:{module_name}:config") or {}
+        return config.get(key)
     
     def _cmd_config_set(self, module_name: str, key: str, value: Any) -> bool:
-        store = get_config_store()
-        config = store.get_module_config(module_name)
+        kv = get_kv_store()
+        config = kv.get(f"module:{module_name}:config") or {}
         config[key] = value
-        store.set_module_config(module_name, config)
+        kv.set(f"module:{module_name}:config", config)
         return True
 
 

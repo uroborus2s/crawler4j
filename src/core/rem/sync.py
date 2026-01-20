@@ -119,7 +119,7 @@ class ExternalSyncManager:
                     logger.warning(
                         f"[Sync] 环境外部已停止: id={env.id[:8]}... external={env.external_id}"
                     )
-                    await self._pool.update_status(env.id, EnvStatus.UNHEALTHY)
+                    await self._pool.update_status(env.id, EnvStatus.ERROR)
                     changed_count += 1
                     
                 elif env.status == EnvStatus.READY and not is_running:

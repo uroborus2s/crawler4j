@@ -7,11 +7,12 @@
     - 新建/编辑/删除策略
 """
 
+from dataclasses import dataclass
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -21,11 +22,26 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.foundation.logging import logger
-from src.core.tsm import TaskStrategy, get_strategy_loader
-from src.ui.components.table import SkyTableWidget
+from src.core.tsm import StrategyLoader, TaskStrategy, get_strategy_loader
+from src.ui.components.data_table import SkyDataTable
+
+
+@dataclass
+class StrategyDisplayItem:
+    """策略显示项包装。"""
+    raw: TaskStrategy
+    display_name: str
+    display_concurrency: int
+    display_target: str
+    display_env: str
 
 
 class StrategyListWidget(QWidget):
+    # ... (header omitted, target keeps class def)
+
+    # Note: I need to insert StrategyDisplayItem BEFORE StrategyListWidget.
+    # But replace_file_content works on ranges.
+    # I will do 2 replaces: one to add class, one to use it.
     """策略列表页面。
 
     显示所有策略，支持 CRUD 操作。
@@ -47,7 +63,7 @@ class StrategyListWidget(QWidget):
         # 标题栏
         header = QHBoxLayout()
         title = QLabel("策略管理")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: white;")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
         header.addWidget(title)
         header.addStretch()
 
@@ -69,104 +85,115 @@ class StrategyListWidget(QWidget):
 
         layout.addLayout(header)
 
-        # 策略表格
-        self.table = SkyTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["名称", "并发数", "执行目标", "环境类型", "操作"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(3, 100)
-        self.table.setColumnWidth(4, 220)
-        # self.table.verticalHeader().setDefaultSectionSize(50)  # Inherited from SkyTableWidget
+        # 策略表格 (SkyDataTable)
         
+        columns = [
+            ("name", "名称", -1),
+            ("concurrency", "并发数", 80),
+            ("target", "执行目标", -1),
+            ("env", "环境类型", 100),
+            ("actions", "操作", 220),
+        ]
+        
+        self.table = SkyDataTable(columns=columns)
+        self.table.set_render_callback(self._render_row)
         layout.addWidget(self.table)
 
     def _load_strategies(self):
         """加载策略列表。"""
         loader = get_strategy_loader()
         self._strategies = loader.list_all()
-        self._refresh_table()
-
-    def _refresh_table(self):
-        """刷新表格显示。"""
-        self.table.setRowCount(len(self._strategies))
-
-        for row, strategy in enumerate(self._strategies):
-            # 名称
-            name_item = QTableWidgetItem(strategy.name or strategy.id[:8])
-            name_item.setData(Qt.ItemDataRole.UserRole, strategy.id)
-            self.table.setItem(row, 0, name_item)
-
-            # 并发数
-            concurrency_item = QTableWidgetItem(str(strategy.scaling.max_concurrency))
-            concurrency_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 1, concurrency_item)
-
-            # 执行目标
-            if strategy.execution:
-                target = f"{strategy.execution.module}/{strategy.execution.workflow or 'default'}"
+        # 为每行准备显示数据以便搜索
+        display_data = []
+        for s in self._strategies:
+             # 执行目标字符串处理
+            if s.execution:
+                target = f"{s.execution.module}/{s.execution.workflow or 'default'}"
             else:
                 target = "-"
-            self.table.setItem(row, 2, QTableWidgetItem(target))
+            
+            display_data.append(StrategyDisplayItem(
+                raw=s,
+                display_name=s.name or s.id[:8],
+                display_concurrency=s.scaling.max_concurrency,
+                display_target=target,
+                display_env=s.selector.env_type.value
+            ))
+            
+        self.table.set_data(display_data)
 
-            # 环境类型
-            env_item = QTableWidgetItem(strategy.selector.env_type.value)
-            env_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 3, env_item)
+    def _render_row(self, row: int, item: StrategyDisplayItem, table):
+        """渲染单行。"""
+        strategy = item.raw
+        
+        # 名称
+        name_item = QTableWidgetItem(item.display_name)
+        name_item.setData(Qt.ItemDataRole.UserRole, strategy.id)
+        table.setItem(row, 0, name_item)
 
-            # 操作按钮
-            action_widget = QWidget()
-            action_layout = QHBoxLayout(action_widget)
-            action_layout.setContentsMargins(4, 4, 4, 4)
-            action_layout.setSpacing(8)
+        # 并发数
+        concurrency_item = QTableWidgetItem(str(item.display_concurrency))
+        concurrency_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        table.setItem(row, 1, concurrency_item)
 
-            view_btn = QPushButton("查看")
-            view_btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(100, 116, 139, 0.8);
-                    color: white;
-                    border: none;
-                    padding: 6px 12px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover { background: rgba(100, 116, 139, 1); }
-            """)
-            view_btn.clicked.connect(lambda checked, sid=strategy.id: self._on_view(sid))
-            action_layout.addWidget(view_btn)
+        # 执行目标
+        target = item.display_target
+        table.setItem(row, 2, QTableWidgetItem(target))
 
-            edit_btn = QPushButton("编辑")
-            edit_btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(59, 130, 246, 0.8);
-                    color: white;
-                    border: none;
-                    padding: 6px 12px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover { background: rgba(59, 130, 246, 1); }
-            """)
-            action_layout.addWidget(edit_btn)
-            edit_btn.clicked.connect(lambda checked, sid=strategy.id: self._on_edit(sid))
+        # 环境类型
+        env_item = QTableWidgetItem(item.display_env)
+        env_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        table.setItem(row, 3, env_item)
 
-            delete_btn = QPushButton("删除")
-            delete_btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(239, 68, 68, 0.8);
-                    color: white;
-                    border: none;
-                    padding: 6px 12px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover { background: rgba(239, 68, 68, 1); }
-            """)
-            delete_btn.clicked.connect(lambda checked, sid=strategy.id: self._on_delete(sid))
-            action_layout.addWidget(delete_btn)
+        # 操作按钮
+        action_widget = QWidget()
+        action_layout = QHBoxLayout(action_widget)
+        action_layout.setContentsMargins(4, 4, 4, 4)
+        action_layout.setSpacing(8)
 
-            self.table.setCellWidget(row, 4, action_widget)
+        view_btn = QPushButton("查看")
+        view_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(100, 116, 139, 0.8);
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background: rgba(100, 116, 139, 1); }
+        """)
+        view_btn.clicked.connect(lambda checked, sid=strategy.id: self._on_view(sid))
+        action_layout.addWidget(view_btn)
+
+        edit_btn = QPushButton("编辑")
+        edit_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(59, 130, 246, 0.8);
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background: rgba(59, 130, 246, 1); }
+        """)
+        action_layout.addWidget(edit_btn)
+        edit_btn.clicked.connect(lambda checked, sid=strategy.id: self._on_edit(sid))
+
+        delete_btn = QPushButton("删除")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(239, 68, 68, 0.8);
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background: rgba(239, 68, 68, 1); }
+        """)
+        delete_btn.clicked.connect(lambda checked, sid=strategy.id: self._on_delete(sid))
+        action_layout.addWidget(delete_btn)
+
+        table.setCellWidget(row, 4, action_widget)
 
     def _on_view(self, strategy_id: str):
         """查看策略。"""
@@ -189,9 +216,9 @@ class StrategyListWidget(QWidget):
             strategy = dialog.get_strategy()
             loader = get_strategy_loader()
             loader.save(strategy)
-            self._strategies.append(strategy)
-            self._refresh_table()
+            
             logger.info(f"[TSM] 新建策略: {strategy.name}")
+            self._load_strategies() # Reload to refresh
 
     def _on_edit(self, strategy_id: str):
         """编辑策略。"""
@@ -207,13 +234,9 @@ class StrategyListWidget(QWidget):
             updated_strategy = dialog.get_strategy()
             loader = get_strategy_loader()
             loader.save(updated_strategy)
-            # 更新列表
-            for i, s in enumerate(self._strategies):
-                if s.id == strategy_id:
-                    self._strategies[i] = updated_strategy
-                    break
-            self._refresh_table()
+            
             logger.info(f"[TSM] 更新策略: {updated_strategy.name}")
+            self._load_strategies()
 
     def _on_delete(self, strategy_id: str):
         """删除策略。"""
@@ -231,9 +254,8 @@ class StrategyListWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             loader = get_strategy_loader()
             loader.delete(strategy_id)
-            self._strategies = [s for s in self._strategies if s.id != strategy_id]
-            self._refresh_table()
             logger.info(f"[TSM] 删除策略: {strategy.name}")
+            self._load_strategies()
 
     def get_strategies(self) -> list[TaskStrategy]:
         """获取策略列表 (供 ATM 使用)。"""

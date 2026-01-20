@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
 from src.core.atm import TaskStatus, get_task_service
 from src.core.mms import ModuleStatus, get_module_registry
 from src.core.rem import EnvStatus
-from src.core.rem.pool import EnvPool
 
 
 class StatCard(QFrame):
@@ -86,7 +85,6 @@ class DashboardPage(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._pool = EnvPool()
         self._setup_ui()
         self._setup_timer()
     
@@ -226,8 +224,10 @@ class DashboardPage(QWidget):
     def _load_env_stats(self):
         """加载环境统计。"""
         try:
-            # 同步获取（简化处理）
-            envs = list(self._pool._environments.values())
+            from src.core.rem.manager import get_environment_manager
+            manager = get_environment_manager()
+            # 同步访问内存中的环境列表
+            envs = list(manager.pool._environments.values())
             
             ready = sum(1 for e in envs if e.status == EnvStatus.READY)
             busy = sum(1 for e in envs if e.status == EnvStatus.BUSY)

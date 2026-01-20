@@ -47,8 +47,8 @@ class ModuleScanner:
             self.scan_paths = scan_paths
         else:
             self.scan_paths = [
-                get_builtin_modules_path(),
                 get_user_modules_path(),
+                get_builtin_modules_path(),
             ]
     
     def discover(self) -> list[tuple[Path, ModuleSource]]:

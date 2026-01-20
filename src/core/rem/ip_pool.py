@@ -204,7 +204,7 @@ class IPPoolManager:
     def __init__(self) -> None:
         """初始化 IP 池管理器。"""
         self._pools: dict[str, IPPool] = {}
-        self._env_bindings: dict[str, str] = {}  # env_id -> ip_id
+        self._env_bindings: dict[int, str] = {}  # env_id -> ip_id
     
     async def startup(self) -> None:
         """启动管理器，从数据库加载数据。"""
@@ -247,7 +247,7 @@ class IPPoolManager:
         """列出所有 IP 池。"""
         return list(self._pools.values())
     
-    async def bind_ip(self, env_id: str, pool_id: str) -> IPEntry | None:
+    async def bind_ip(self, env_id: int, pool_id: str) -> IPEntry | None:
         """为环境绑定 IP。
         
         Args:
@@ -257,6 +257,9 @@ class IPPoolManager:
         Returns:
             绑定的 IP 条目，若无可用则返回 None
         """
+        # 安全性: 先尝试解绑旧 IP，防止计数器泄漏
+        await self.unbind_ip(env_id)
+
         pool = self._pools.get(pool_id)
         if not pool:
             logger.warning(f"[IPPool] 池不存在: {pool_id}")
@@ -270,14 +273,14 @@ class IPPoolManager:
         
         # 更新绑定
         ip.bound_count += 1
-        self._env_bindings[env_id] = ip.id
-        self._persist_binding(env_id, ip.id)
+        self._env_bindings[int(env_id)] = ip.id
+        self._persist_binding(int(env_id), ip.id)
         self._persist_entry(ip)
         
-        logger.info(f"[IPPool] 绑定 IP: env={env_id[:8]}... ip={ip.address}")
+        logger.info(f"[IPPool] 绑定 IP成功: env={env_id} ip={ip.address} (new_count={ip.bound_count})")
         return ip
     
-    async def unbind_ip(self, env_id: str) -> bool:
+    async def unbind_ip(self, env_id: int) -> bool:
         """解绑环境的 IP。
         
         Args:
@@ -286,23 +289,38 @@ class IPPoolManager:
         Returns:
             是否解绑成功
         """
-        ip_id = self._env_bindings.pop(env_id, None)
+        try:
+            eid = int(env_id)
+        except (ValueError, TypeError):
+            return False
+
+        ip_id = self._env_bindings.pop(eid, None)
+        if not ip_id:
+            # 兼容性处理：尝试作为字符串查一次（处理历史遗留数据）
+            # 由于 dict[int, str] 类型限制，这里使用 type ignore
+            ip_id = self._env_bindings.pop(str(eid), None)  # type: ignore
+        
         if not ip_id:
             return False
         
         # 查找并更新 IP
+        found = False
         for pool in self._pools.values():
             ip = pool.get_entry(ip_id)
             if ip:
                 ip.bound_count = max(0, ip.bound_count - 1)
                 self._persist_entry(ip)
+                found = True
+                logger.info(f"[IPPool] 解绑 IP 成功: env={env_id} ip={ip.address} (new_count={ip.bound_count})")
                 break
         
-        self._delete_binding(env_id)
-        logger.info(f"[IPPool] 解绑 IP: env={env_id[:8]}...")
+        self._delete_binding(eid)
+        if not found:
+            logger.warning(f"[IPPool] 解绑 IP 时未找到对应的 IP 条目: id={ip_id}")
+            
         return True
     
-    def get_bound_ip(self, env_id: str) -> IPEntry | None:
+    def get_bound_ip(self, env_id: int) -> IPEntry | None:
         """获取环境绑定的 IP。"""
         ip_id = self._env_bindings.get(env_id)
         if not ip_id:
@@ -372,7 +390,7 @@ class IPPoolManager:
                 )
             )
     
-    def _persist_binding(self, env_id: str, ip_id: str) -> None:
+    def _persist_binding(self, env_id: int, ip_id: str) -> None:
         """持久化绑定关系。"""
         with get_connection(STATE_DB) as conn:
             conn.execute(
@@ -386,7 +404,7 @@ class IPPoolManager:
                 (env_id, ip_id, int(time.time()))
             )
     
-    def _delete_binding(self, env_id: str) -> None:
+    def _delete_binding(self, env_id: int) -> None:
         """删除绑定关系。"""
         with get_connection(STATE_DB) as conn:
             conn.execute("DELETE FROM env_ip_bindings WHERE env_id = ?", (env_id,))
@@ -417,11 +435,11 @@ class IPPoolManager:
                     address=row["address"],
                     protocol=row["protocol"],
                     port=row["port"],
-                    username=row.get("username"),
-                    password=row.get("password"),
-                    bound_count=row.get("bound_count", 0),
-                    safety_score=row.get("safety_score", 100),
-                    expires_at=row.get("expires_at"),
+                    username=row["username"],
+                    password=row["password"],
+                    bound_count=row["bound_count"] if row["bound_count"] is not None else 0,
+                    safety_score=row["safety_score"] if row["safety_score"] is not None else 100,
+                    expires_at=row["expires_at"],
                     created_at=row["created_at"],
                 )
                 pool = self._pools.get(entry.pool_id)
@@ -431,7 +449,13 @@ class IPPoolManager:
             # 加载绑定
             cursor = conn.execute("SELECT * FROM env_ip_bindings")
             for row in cursor.fetchall():
-                self._env_bindings[row["env_id"]] = row["ip_id"]
+                try:
+                    # 强制转换为 int，因为数据库 schema 中 env_id 被定义为了 TEXT
+                    eid = int(row["env_id"])
+                    self._env_bindings[eid] = row["ip_id"]
+                except (ValueError, TypeError):
+                    # 如果实在转不动（非预期情况），保留原样
+                    self._env_bindings[row["env_id"]] = row["ip_id"]  # type: ignore
 
 
 # 全局单例

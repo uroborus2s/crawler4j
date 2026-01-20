@@ -9,7 +9,7 @@ LeaseManager 为任务运行发放租约，处理超时与异常兜底。
 import asyncio
 import json
 import time
-from typing import Callable
+from typing import Any
 
 from src.core.foundation.logging import logger
 from src.core.persistence.database import STATE_DB, get_connection
@@ -19,7 +19,6 @@ from src.core.rem.models import (
     EnvLease,
     EnvRequirement,
     EnvStatus,
-    EnvUnavailableError,
 )
 
 
@@ -37,7 +36,7 @@ class EnvPool:
     
     def __init__(
         self,
-        max_instances: int = 10,
+        max_instances: int,
         max_leases_per_kind: dict[EnvKind, int] | None = None,
     ):
         """初始化环境池。
@@ -50,24 +49,44 @@ class EnvPool:
         self.max_leases_per_kind = max_leases_per_kind or {}
         
         # 内存中的环境列表
-        self._environments: dict[str, Environment] = {}
+        self._environments: dict[int, Environment] = {}
         self._lock = asyncio.Lock()
     
     async def add(self, env: Environment) -> None:
-        """添加环境到池中。"""
+        """添加环境到池中。
+        
+        注意：对于新环境 (id=0)，先持久化获取真实 id，再添加到缓存，
+        避免缓存中出现 key=0 的孤儿条目。
+        """
         async with self._lock:
-            self._environments[env.id] = env
+            old_id = env.id
+            env.updated_at = int(time.time())
+            # 先持久化（可能分配新 id）
             self._persist_env(env)
+            # 如果 id 变化了（新环境），确保缓存使用正确的 key
+            if old_id != env.id and old_id in self._environments:
+                del self._environments[old_id]
+            self._environments[env.id] = env
     
-    async def remove(self, env_id: str) -> Environment | None:
-        """从池中移除环境。"""
+    async def remove(self, env_id: int) -> Environment | None:
+        """从池中移除环境。
+        
+        统一处理：解绑 IP + 删除数据库记录。
+        """
+        from src.core.rem.ip_pool import get_ip_pool_manager
+        
         async with self._lock:
             env = self._environments.pop(env_id, None)
             if env:
+                # 统一解绑 IP（无论删除原因）
+                try:
+                    await get_ip_pool_manager().unbind_ip(env_id)
+                except Exception:
+                    pass  # 忽略解绑失败，确保删除流程继续
                 self._delete_env(env_id)
             return env
     
-    async def get(self, env_id: str) -> Environment | None:
+    async def get(self, env_id: int) -> Environment | None:
         """获取环境实例。"""
         return self._environments.get(env_id)
     
@@ -86,7 +105,7 @@ class EnvPool:
                     return env
             return None
     
-    async def update_status(self, env_id: str, status: EnvStatus) -> None:
+    async def update_status(self, env_id: int, status: EnvStatus) -> None:
         """更新环境状态。"""
         async with self._lock:
             env = self._environments.get(env_id)
@@ -117,61 +136,90 @@ class EnvPool:
     
     # === 持久化方法 ===
     
-    def _persist_env(self, env: Environment) -> None:
-        """持久化环境到数据库。"""
+    def _persist_env(self, env: Environment) -> int:
+        """持久化环境到数据库。
+        
+        Returns:
+            分配的环境 ID（新环境为自增值，已有环境返回原 ID）
+        """
         with get_connection(STATE_DB) as conn:
             # 序列化配置为 JSON
             proxy_config_json = json.dumps(env.proxy_config.to_dict()) if env.proxy_config else None
-            fingerprint_config_json = json.dumps(env.fingerprint_config.to_dict()) if env.fingerprint_config else None
             
-            conn.execute(
-                """
-                INSERT INTO environments (
-                    id, kind, provider, status, external_id, lease_id, task_run_id,
-                    last_used_at, daily_usage_count, daily_usage_date,
-                    proxy_config_json, fingerprint_config_json,
-                    capabilities, created_at, updated_at
+            if env.id == 0:
+                # 新环境：INSERT 并获取自增 ID
+                cursor = conn.execute(
+                    """
+                    INSERT INTO environments (
+                        name, kind, provider, status, external_id, lease_id, task_run_id,
+                        last_used_at, daily_usage_count, daily_usage_date,
+                        proxy_config_json,
+                        capabilities, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        env.name,
+                        env.kind.value,
+                        env.provider,
+                        env.status.value,
+                        env.external_id,
+                        env.lease_id,
+                        env.task_run_id,
+                        env.last_used_at,
+                        env.daily_usage_count,
+                        env.daily_usage_date,
+                        proxy_config_json,
+                        json.dumps({"capabilities": list(env.capabilities)}),
+                        env.created_at,
+                        env.updated_at,
+                    )
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    status = excluded.status,
-                    external_id = excluded.external_id,
-                    lease_id = excluded.lease_id,
-                    task_run_id = excluded.task_run_id,
-                    last_used_at = excluded.last_used_at,
-                    daily_usage_count = excluded.daily_usage_count,
-                    daily_usage_date = excluded.daily_usage_date,
-                    proxy_config_json = excluded.proxy_config_json,
-                    fingerprint_config_json = excluded.fingerprint_config_json,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    env.id,
-                    env.kind.value,
-                    env.provider,
-                    env.status.value,
-                    env.external_id,
-                    env.lease_id,
-                    env.task_run_id,
-                    env.last_used_at,
-                    env.daily_usage_count,
-                    env.daily_usage_date,
-                    proxy_config_json,
-                    fingerprint_config_json,
-                    json.dumps({"labels": env.labels, "capabilities": list(env.capabilities)}),
-                    env.created_at,
-                    env.updated_at,
+                env.id = cursor.lastrowid or 0
+                return env.id
+            else:
+                # 已有环境：UPDATE
+                conn.execute(
+                    """
+                    UPDATE environments SET
+                        name = ?,
+                        status = ?,
+                        external_id = ?,
+                        lease_id = ?,
+                        task_run_id = ?,
+                        last_used_at = ?,
+                        daily_usage_count = ?,
+                        daily_usage_date = ?,
+                        proxy_config_json = ?,
+                        capabilities = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        env.name,
+                        env.status.value,
+                        env.external_id,
+                        env.lease_id,
+                        env.task_run_id,
+                        env.last_used_at,
+                        env.daily_usage_count,
+                        env.daily_usage_date,
+                        proxy_config_json,
+                        json.dumps({"capabilities": list(env.capabilities)}),
+                        env.updated_at,
+                        env.id,
+                    )
                 )
-            )
+                return env.id
     
-    def _delete_env(self, env_id: str) -> None:
+    def _delete_env(self, env_id: int) -> None:
         """从数据库删除环境。"""
         with get_connection(STATE_DB) as conn:
             conn.execute("DELETE FROM environments WHERE id = ?", (env_id,))
     
     async def load_from_db(self) -> None:
         """从数据库加载环境（用于崩溃恢复）。"""
-        from src.core.rem.models import FingerprintConfig, ProxyConfig
+        from src.core.rem.models import ProxyConfig
         
         with get_connection(STATE_DB) as conn:
             cursor = conn.execute("SELECT * FROM environments")
@@ -180,32 +228,134 @@ class EnvPool:
                 
                 # 反序列化配置
                 proxy_config = None
-                if row.get("proxy_config_json"):
+                if row["proxy_config_json"]:
                     proxy_config = ProxyConfig.from_dict(json.loads(row["proxy_config_json"]))
-                
-                fingerprint_config = None
-                if row.get("fingerprint_config_json"):
-                    fingerprint_config = FingerprintConfig.from_dict(json.loads(row["fingerprint_config_json"]))
                 
                 env = Environment(
                     id=row["id"],
+                    name=row["name"] if "name" in row.keys() else "",
                     kind=EnvKind(row["kind"]),
                     provider=row["provider"],
                     status=EnvStatus(row["status"]),
-                    external_id=row.get("external_id"),
-                    labels=meta.get("labels", {}),
+                    external_id=row["external_id"],
                     capabilities=set(meta.get("capabilities", [])),
                     lease_id=row["lease_id"],
                     task_run_id=row["task_run_id"],
-                    last_used_at=row.get("last_used_at"),
-                    daily_usage_count=row.get("daily_usage_count", 0),
-                    daily_usage_date=row.get("daily_usage_date", ""),
+                    last_used_at=row["last_used_at"],
+                    daily_usage_count=row["daily_usage_count"] or 0,
+                    daily_usage_date=row["daily_usage_date"] or "",
                     proxy_config=proxy_config,
-                    fingerprint_config=fingerprint_config,
                     created_at=row["created_at"],
-                    updated_at=row["updated_at"],
                 )
+                
+                # 重建 handle：从 external_id 恢复 browser_id
+                if row["external_id"]:
+                    try:
+                        browser_id = int(row["external_id"])
+                        env.handle = {"browser_id": browser_id}
+                    except (ValueError, TypeError):
+                        # external_id 不是数字（如 Playwright 本地模式）
+                        env.handle = {"browser_id": row["external_id"]}
+                
                 self._environments[env.id] = env
+    # === Metadata 操作 ===
+    
+    def get_metadata(self, env_id: int, namespace: str, key: str) -> Any:
+        """获取元数据值。"""
+        with get_connection(STATE_DB) as conn:
+            cursor = conn.execute(
+                "SELECT value, value_type FROM env_metadata WHERE env_id = ? AND namespace = ? AND key = ?",
+                (env_id, namespace, key)
+            )
+            row = cursor.fetchone()
+            if row:
+                return self._decode_value(row["value"], row["value_type"])
+            return None
+    
+    def set_metadata(
+        self,
+        env_id: int,
+        namespace: str,
+        key: str,
+        value: Any,
+        value_type: str = "string",
+    ) -> bool:
+        """设置元数据值。"""
+        encoded_value = self._encode_value(value)
+        now = int(time.time())
+        with get_connection(STATE_DB) as conn:
+            conn.execute(
+                """
+                INSERT INTO env_metadata (env_id, namespace, key, value, value_type, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(env_id, namespace, key) DO UPDATE SET
+                    value = excluded.value,
+                    value_type = excluded.value_type,
+                    updated_at = excluded.updated_at
+                """,
+                (env_id, namespace, key, encoded_value, value_type, now, now)
+            )
+        return True
+    
+    def list_metadata(self, env_id: int, namespace: str | None = None) -> dict[str, Any]:
+        """列出元数据。"""
+        with get_connection(STATE_DB) as conn:
+            if namespace:
+                cursor = conn.execute(
+                    "SELECT key, value, value_type FROM env_metadata WHERE env_id = ? AND namespace = ?",
+                    (env_id, namespace)
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT namespace, key, value, value_type FROM env_metadata WHERE env_id = ?",
+                    (env_id,)
+                )
+            
+            result = {}
+            for row in cursor.fetchall():
+                if namespace:
+                    result[row["key"]] = self._decode_value(row["value"], row["value_type"])
+                else:
+                    ns = row["namespace"]
+                    if ns not in result:
+                        result[ns] = {}
+                    result[ns][row["key"]] = self._decode_value(row["value"], row["value_type"])
+            return result
+    
+    def delete_metadata(self, env_id: int, namespace: str, key: str | None = None) -> int:
+        """删除元数据，返回删除条数。"""
+        with get_connection(STATE_DB) as conn:
+            if key:
+                cursor = conn.execute(
+                    "DELETE FROM env_metadata WHERE env_id = ? AND namespace = ? AND key = ?",
+                    (env_id, namespace, key)
+                )
+            else:
+                cursor = conn.execute(
+                    "DELETE FROM env_metadata WHERE env_id = ? AND namespace = ?",
+                    (env_id, namespace)
+                )
+            return cursor.rowcount
+    
+    def _encode_value(self, value: Any) -> str:
+        """编码值为 JSON 字符串。"""
+        return json.dumps(value, ensure_ascii=False)
+    
+    def _decode_value(self, value: str, value_type: str) -> Any:
+        """解码 JSON 字符串为原始类型。"""
+        if value is None:
+            return None
+        try:
+            decoded = json.loads(value)
+            if value_type == "int":
+                return int(decoded)
+            elif value_type == "float":
+                return float(decoded)
+            elif value_type == "bool":
+                return bool(decoded)
+            return decoded
+        except (json.JSONDecodeError, ValueError):
+            return value
 
 
 class LeaseManager:
@@ -261,7 +411,7 @@ class LeaseManager:
             self.pool._persist_env(env)
             self._leases[lease.id] = lease
             
-            logger.info(f"[REM] 租约分配: lease={lease.id[:8]}... env={env.id[:8]}... task={task_run_id[:8]}...")
+            logger.info(f"[REM] 租约分配: lease={lease.id[:8]}... env={env.name[:8]}... task={task_run_id[:8]}...")
             
             return lease
     
@@ -278,7 +428,7 @@ class LeaseManager:
         async with self._lock:
             # 验证令牌
             if lease.token != token:
-                logger.warning(f"[REM] 租约释放失败: token 不匹配")
+                logger.warning("[REM] 租约释放失败: token 不匹配")
                 return None
             
             # 获取环境
@@ -295,7 +445,7 @@ class LeaseManager:
             # 移除租约
             self._leases.pop(lease.id, None)
             
-            logger.info(f"[REM] 租约释放: lease={lease.id[:8]}... env={env.id[:8]}...")
+            logger.info(f"[REM] 租约释放: lease={lease.id[:8]}... env={env.name[:8]}...")
             
             return env
     

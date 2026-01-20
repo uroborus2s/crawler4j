@@ -125,7 +125,8 @@ def _init_state_db() -> None:
             
             -- 环境表（REM）
             CREATE TABLE IF NOT EXISTS environments (
-                id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
                 kind TEXT NOT NULL,
                 provider TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -136,7 +137,6 @@ def _init_state_db() -> None:
                 daily_usage_count INTEGER DEFAULT 0,
                 daily_usage_date TEXT,
                 proxy_config_json TEXT,
-                fingerprint_config_json TEXT,
                 capabilities TEXT,
                 created_at INTEGER DEFAULT (strftime('%s', 'now')),
                 updated_at INTEGER DEFAULT (strftime('%s', 'now'))
@@ -202,6 +202,23 @@ def _init_state_db() -> None:
             
             CREATE INDEX IF NOT EXISTS idx_task_status ON tasks(status);
             CREATE INDEX IF NOT EXISTS idx_task_module ON tasks(module);
+            
+            -- 环境元数据表（动态扩展字段）
+            CREATE TABLE IF NOT EXISTS env_metadata (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                env_id TEXT NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+                namespace TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                value_type TEXT DEFAULT 'string',
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                
+                UNIQUE(env_id, namespace, key)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_meta_env ON env_metadata(env_id);
+            CREATE INDEX IF NOT EXISTS idx_meta_ns_key ON env_metadata(namespace, key);
         """)
 
 
