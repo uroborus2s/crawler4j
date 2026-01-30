@@ -711,7 +711,7 @@ class EnvListWidget(QWidget):
             destroy_btn.clicked.connect(lambda _, eid=env.id: self._destroy_env(eid))
             layout.addWidget(destroy_btn)
             
-        elif env.status == EnvStatus.BUSY:
+        elif env.status in (EnvStatus.RUNNING,EnvStatus.BUSY):
             # [⏹停止]
             stop_btn = QPushButton("⏹ 停止")
             stop_btn.setStyleSheet(btn_style + "QPushButton { background: #f87171; color: white; }")

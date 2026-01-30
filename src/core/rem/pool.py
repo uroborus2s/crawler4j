@@ -13,6 +13,7 @@ from typing import Any
 
 from src.core.foundation.logging import logger
 from src.core.persistence.database import STATE_DB, get_connection
+from src.core.rem.handle import BrowserHandle
 from src.core.rem.models import (
     Environment,
     EnvKind,
@@ -251,15 +252,14 @@ class EnvPool:
                 # 重建 handle：从 external_id 恢复 browser_id
                 if row["external_id"]:
                     try:
-                        browser_id = int(row["external_id"])
-                        env.handle = {"browser_id": browser_id}
+                        browser_id = row["external_id"]
+                        env.handle = BrowserHandle(browser_id=browser_id)
                     except (ValueError, TypeError):
                         # external_id 不是数字（如 Playwright 本地模式）
-                        env.handle = {"browser_id": row["external_id"]}
-                
+                        env.handle = BrowserHandle(browser_id=row["external_id"])
                 self._environments[env.id] = env
-    # === Metadata 操作 ===
     
+    # === Metadata 操作 ===
     def get_metadata(self, env_id: int, namespace: str, key: str) -> Any:
         """获取元数据值。"""
         with get_connection(STATE_DB) as conn:

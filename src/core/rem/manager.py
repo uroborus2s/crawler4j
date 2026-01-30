@@ -843,7 +843,7 @@ class EnvironmentManager:
             if not provider:
                 logger.error(f"[REM] 未找到 Provider: {env.provider}")
                 await self.destroy_env(env.id)
-            elif env.status == EnvStatus.CREATING or not await provider.exists(env):
+            elif env.status == EnvStatus.CREATING or env.status == EnvStatus.DEAD:
                 # 创建中的环境视为失败，需要同步关闭并删除
                 logger.warning(f"[REM] 发现未完成创建的环境: id={env.id}")
                 await self.destroy_env(env.id)
@@ -869,7 +869,6 @@ class EnvironmentManager:
                 count = count + 1 
             elif not await provider.exists(env):
                 logger.warning(f"[REM] 发现不存在的环境: id={env.id}")
-                await self.destroy_env(env.id)
                 count = count + 1 
                 logger.info(f"[REM] 已删除不存在的环境记录: id={env.id}")
             elif env.status == EnvStatus.CREATING or env.status == EnvStatus.DEAD:

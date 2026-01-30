@@ -117,7 +117,7 @@ class ExternalSyncManager:
                 if env.status == EnvStatus.BUSY and not is_running:
                     # 外部已停止但本地仍为 BUSY
                     logger.warning(
-                        f"[Sync] 环境外部已停止: id={env.id[:8]}... external={env.external_id}"
+                        f"[Sync] 环境外部已停止: id={env.id}... external={env.external_id}"
                     )
                     await self._pool.update_status(env.id, EnvStatus.ERROR)
                     changed_count += 1
@@ -125,13 +125,13 @@ class ExternalSyncManager:
                 elif env.status == EnvStatus.READY and not is_running:
                     # READY 状态但外部已停止
                     logger.warning(
-                        f"[Sync] 环境外部不存在: id={env.id[:8]}... external={env.external_id}"
+                        f"[Sync] 环境外部不存在: id={env.id}... external={env.external_id}"
                     )
                     await self._pool.update_status(env.id, EnvStatus.DEAD)
                     changed_count += 1
                     
             except Exception as e:
-                logger.error(f"[Sync] 检查环境状态失败: id={env.id[:8]}... error={e}")
+                logger.error(f"[Sync] 检查环境状态失败: id={env.id}... error={e}")
         
         return changed_count
     

@@ -6,6 +6,7 @@
     - Environment, EnvLease, EnvRequirement: 数据模型
     - EnvKind, EnvStatus, ProxyMode: 枚举
     - ProxyConfig, FingerprintConfig: 配置类
+    - BrowserHandle: 浏览器句柄抽象
     - EnvironmentManager, get_environment_manager: 环境管理器
     - BaseProvider: Provider
     - IPPool, IPEntry, IPPoolManager: IP 池管理

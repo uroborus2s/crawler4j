@@ -49,21 +49,21 @@ class EditEnvWorker(QThread):
             
             if self._action == "update_proxy":
                 success = loop.run_until_complete(
-                    manager.update_proxy(self._env_id, self._proxy_value or "")
+                    manager.update_env(self._env_id)
                 )
                 msg = "代理已更新" if success else "更新失败"
                 self.finished.emit(success, msg)
                 
             elif self._action == "refresh_proxy":
                 success = loop.run_until_complete(
-                    manager.refresh_proxy(self._env_id)
+                    manager.update_env(self._env_id)
                 )
                 msg = "IP 已刷新" if success else "刷新失败（无可用 IP 池）"
                 self.finished.emit(success, msg)
                 
             elif self._action == "refresh_fingerprint":
                 success = loop.run_until_complete(
-                    manager.refresh_fingerprint(self._env_id)
+                    manager.update_env(self._env_id)
                 )
                 msg = "指纹已刷新" if success else "刷新失败"
                 self.finished.emit(success, msg)

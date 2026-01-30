@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from src.core.rem.handle import BrowserHandle
+
 
 class EnvKind(StrEnum):
     """环境类型。
@@ -186,7 +188,7 @@ class Environment:
     status: EnvStatus = EnvStatus.CREATING
     external_id: str | None = None
     capabilities: set[str] = field(default_factory=set)
-    handle: Any = field(default=None, repr=False)
+    handle: BrowserHandle | None = None # BrowserHandle | None
     lease_id: str | None = None
     task_run_id: str | None = None
     # 统计字段
@@ -199,6 +201,17 @@ class Environment:
     created_at: int = field(default_factory=lambda: int(time.time()))
     updated_at: int = field(default_factory=lambda: int(time.time()))
     
+    def __post_init__(self):
+        """初始化后处理：确保 handle 类型正确。"""
+        if self.handle and isinstance(self.handle, dict):
+            # 兼容旧数据：从 dict 恢复 BrowserHandle
+            try:
+                browser_id = str(self.handle.get("browser_id", ""))
+                ws_url = self.handle.get("ws_url", "")
+                self.handle = BrowserHandle(browser_id=browser_id, ws_url=ws_url)
+            except Exception:
+                pass
+
     def increment_usage(self) -> None:
         """增加使用次数，跨日自动清零。"""
         from datetime import datetime

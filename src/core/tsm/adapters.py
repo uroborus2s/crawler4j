@@ -94,18 +94,89 @@ class MMSAdapter:
     ) -> dict[str, Any]:
         """执行模块任务。
         
-        TODO: 这里需要实现真正的模块执行逻辑。
-        目前返回模拟成功结果。
+        Args:
+            module: 模块名称
+            task: 工作流名称
+            env_id: 环境 ID
+            params: 任务参数
+            
+        Returns:
+            执行结果字典
         """
+        import importlib
+        
+        from crawler4j_sdk import TaskContext
+        from src.core.rem.manager import get_environment_manager
+        
         logger.info(f"[TSM Adapter] Executing {module}::{task} on env {env_id}")
         
-        # TODO: 实际调用 workflow 执行器
-        # module_info = self._mms.get_module(module)
-        # if module_info:
-        #     workflow = self._find_workflow(module_info, task)
-        #     return await workflow.execute(env_id, params)
+        # 1. 获取模块信息
+        module_info = self._mms.get_module(module)
+        if not module_info:
+            return {"success": False, "error": f"Module not found: {module}"}
         
-        return {"success": True, "message": f"Executed {module}::{task}"}
+        # 2. 查找工作流
+        workflow_info = None
+        for wf in module_info.manifest.workflows:
+            if wf.name == task:
+                workflow_info = wf
+                break
+        
+        if not workflow_info:
+            return {"success": False, "error": f"Workflow not found: {task}"}
+        
+        # 3. 获取环境和 Page
+        rem = get_environment_manager()
+        env = await rem.get_env(int(env_id))
+        if not env:
+            return {"success": False, "error": f"Environment not found: {env_id}"}
+        
+        # 提取 Page（使用 BrowserHandle）
+        page = None
+        context = None
+        if env.handle:
+            page = env.handle.page
+            context = env.handle.context
+        
+        if not page:
+            return {"success": False, "error": f"Environment not connected: {env_id}"}
+        
+        # 4. 动态导入工作流类
+        try:
+            # entry_class 格式: "workflows.labor_workflow:StandardLaborWorkflow"
+            entry = workflow_info.entry_class
+            if ":" in entry:
+                module_path, class_name = entry.split(":", 1)
+            else:
+                # 默认格式: 假设类名与工作流名一致
+                module_path = entry
+                class_name = task.title().replace("_", "")
+            
+            # 构造完整模块路径
+            full_module_path = f"modules.{module}.{module_path}"
+            mod = importlib.import_module(full_module_path)
+            workflow_class = getattr(mod, class_name)
+        except (ImportError, AttributeError) as e:
+            return {"success": False, "error": f"Failed to import workflow: {e}"}
+        
+        # 5. 构造 TaskContext
+        ctx = TaskContext(
+            env_id=int(env_id),
+            task_name=task,
+            config=params,
+            page=page,
+            context=context,
+        )
+        
+        # 6. 执行工作流
+        try:
+            workflow_instance = workflow_class()
+            await workflow_instance.run(ctx)
+            logger.info(f"[TSM Adapter] Workflow {module}::{task} completed")
+            return {"success": True, "message": f"Executed {module}::{task}"}
+        except Exception as e:
+            logger.error(f"[TSM Adapter] Workflow execution failed: {e}")
+            return {"success": False, "error": str(e)}
 
 
 def configure_orchestrator():

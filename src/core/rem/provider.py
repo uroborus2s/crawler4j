@@ -8,6 +8,7 @@ Provider 层面向具体技术栈，负责实际 spawn/keepalive/kill/healthchec
 from abc import ABC, abstractmethod
 from typing import Any
 
+from src.core.rem.handle import BrowserHandle
 from src.core.rem.models import Environment, EnvKind
 
 
@@ -121,23 +122,18 @@ class BaseProvider(ABC):
             是否连接成功
         """
         return True
-    
-    @abstractmethod
+
     async def disconnect(self, env: Environment) -> bool:
-        """断开自动化连接（RUNNING → BUSY）。
+        """断开 Playwright 连接（保持窗口打开）。"""    
+        handle = env.handle
+        if not handle:
+            return True
+                
+        # 使用 safe_close 关闭连接
+        await handle.safe_close()
         
-        与 close 的区别：
-        - disconnect: 仅断开 Playwright 连接，窗口保持打开
-        - close: 关闭整个窗口
-        
-        Args:
-            env: 环境实例
-            
-        Returns:
-            是否断开成功
-        """
         return True
-    
+        
     @abstractmethod
     async def close(self, env: Environment) -> bool:
         """关闭环境窗口（用于 BUSY → READY，不删除配置）。
@@ -267,11 +263,7 @@ class PlaywrightProvider(BaseProvider):
     async def connect(self, env: Environment) -> bool:
         """建立自动化连接。"""
         return True
-    
-    async def disconnect(self, env: Environment) -> bool:
-        """断开连接。"""
-        return True
-    
+        
     async def close(self, env: Environment) -> bool:
         """关闭窗口。"""
         return True
@@ -551,9 +543,7 @@ class BitBrowserProvider(BaseProvider):
             status=EnvStatus.READY,
             external_id=str(browser_id),
             capabilities={"page", "cookies", "fingerprint"},
-            handle={
-                "browser_id": browser_id
-            },
+            handle=BrowserHandle(browser_id=str(browser_id)),
             proxy_config=final_proxy_config
         )
 
@@ -562,9 +552,9 @@ class BitBrowserProvider(BaseProvider):
             handle = env.handle
             if not handle:
                 return False
-            page = handle.get("page")
-            if page:
-                await page.evaluate("() => true")
+            # 简单检查 handle.page 是否存在且连接正常
+            if handle.page and not handle.page.is_closed():
+                await handle.page.evaluate("() => true")
                 return True
             return False
         except Exception:
@@ -573,46 +563,42 @@ class BitBrowserProvider(BaseProvider):
     async def destroy(self, env: Environment) -> None:
         """销毁 BitBrowser 环境。"""
         from src.core.foundation.logging import logger
-
-        if not await self.exists(env):
-            return
         
         handle = env.handle
         if not handle:
             return
+
+        if not await self.exists(env):
+            return
+            
+        browser_id = handle.browser_id
         
-        browser_id = handle.get("browser_id")
-        
-        if handle.get("browser"):
-            try:
-                await handle["browser"].close()
-            except Exception:
-                pass
-        if handle.get("playwright"):
-            try:
-                await handle["playwright"].stop()
-            except Exception:
-                pass
+        # 使用 safe_close 关闭连接
+        await handle.safe_close()
         
         if browser_id:
             try:
-                if await self.exists(env):
-                    client = self._get_api_client()
-                    await client.delete_browser(browser_id)
+                # 注意：这里 self.exists 可能会因为连接关闭而失败吗？
+                # exists 使用 API，与 internal connection 无关。
+                # 但 destroy 逻辑通常是先 delete API resource。
+                client = self._get_api_client()
+                await client.delete_browser(browser_id) # API expects ID
                 logger.info(f"[BitBrowser] Closed browser {browser_id}")
             except Exception as e:
                 logger.warning(f"[BitBrowser] Failed to close browser {browser_id}: {e}")
     
+
+
     async def open(self, env: Environment) -> bool:
         """打开 BitBrowser 窗口。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
-        
-        if not browser_id:
+        handle = env.handle
+        if not handle:
             logger.error("[BitBrowser] No browser_id found for open operation")
             return False
+        
+        browser_id = handle.browser_id
         
         # 安全检查：窗口是否已打开
         if await self.is_window_open(env):
@@ -625,8 +611,7 @@ class BitBrowserProvider(BaseProvider):
             logger.info(f"[BitBrowser] Opened browser {browser_id}, ws: {ws_url[:50]}...")
             
             # 仅存储 ws_url，不连接 Playwright
-            handle["ws_url"] = ws_url
-            env.handle = handle
+            handle.ws_url = ws_url
             return True
         except Exception as e:
             logger.error(f"[BitBrowser] Failed to open browser {browser_id}: {e}")
@@ -634,143 +619,94 @@ class BitBrowserProvider(BaseProvider):
 
     async def connect(self, env: Environment) -> bool:
         """连接 Playwright。"""
-        from playwright.async_api import async_playwright
-
         from src.core.foundation.logging import logger
 
-        handle = env.handle or {}
-        ws_url = handle.get("ws_url")
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            logger.error("[BitBrowser] Cannot connect: No handle")
+            return False
+        
+        ws_url = handle.ws_url
+        browser_id = handle.browser_id
 
         if not ws_url:
             logger.error("[BitBrowser] Cannot connect: No ws_url in handle")
             return False
 
-        try:
-            playwright = await async_playwright().start()
-            browser = await playwright.chromium.connect_over_cdp(ws_url)
-            context = browser.contexts[0] if browser.contexts else await browser.new_context()
-            page = context.pages[0] if context.pages else await context.new_page()
-
-            handle.update({
-                "playwright": playwright,
-                "browser": browser,
-                "context": context,
-                "page": page,
-            })
-            env.handle = handle
+        # 使用 BrowserHandle 的 safe_connect 方法
+        result = await handle.safe_connect()
+        if result:
             logger.info(f"[BitBrowser] Connected Playwright to browser {browser_id}")
-            return True
-        except Exception as e:
-            logger.error(f"[BitBrowser] Failed to connect Playwright: {e}")
-            if 'playwright' in locals():
-                await playwright.stop()
-            return False
+        return result
     
-    async def disconnect(self, env: Environment) -> bool:
-        """断开 Playwright 连接（保持窗口打开）。"""
-        from src.core.foundation.logging import logger
-        
-        handle = env.handle or {}
-        browser = handle.get("browser")
-        playwright = handle.get("playwright")
-        browser_id = handle.get("browser_id", "")
-        
-        try:
-            if browser:
-                await browser.close()
-            if playwright:
-                await playwright.stop()
-            
-            # 清理 handle 中的连接对象，保留 browser_id
-            env.handle = {"browser_id": browser_id, "ws_url": handle.get("ws_url")}
-            logger.info(f"[BitBrowser] Disconnected Playwright from browser {browser_id}")
-            return True
-        except Exception as e:
-            logger.warning(f"[BitBrowser] Failed to disconnect: {e}")
-            return False
-    
+
     async def close(self, env: Environment) -> bool:
         """关闭 BitBrowser 窗口（不删除配置）。"""
         from src.core.foundation.logging import logger
+        from src.core.rem.handle import BrowserHandle
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        client = self._get_api_client()
+        if not await self.is_window_open(env):
+            logger.info(f"[BitBrowser] 窗口已关闭，跳过关闭: id={env.id}")
+            return True
         
-        # 关闭 Playwright 连接
-        if handle.get("browser"):
-            try:
-                await handle["browser"].close()
-            except Exception:
-                pass
-        if handle.get("playwright"):
-            try:
-                await handle["playwright"].stop()
-            except Exception:
-                pass
+        handle = env.handle
+        if not handle:
+            return True
+        
+        browser_id = handle.browser_id
+        
+        # 使用 safe_close 关闭 Playwright 连接
+        await handle.safe_close()
         
         # 关闭浏览器窗口
         if browser_id:
             try:
-                client = self._get_api_client()
-                if await self.is_window_open(env):
-                    await client.close_browser(browser_id)
+                await client.close_browser(browser_id)
                 logger.info(f"[BitBrowser] Closed window {browser_id}")
             except Exception as e:
                 logger.warning(f"[BitBrowser] Failed to close window {browser_id}: {e}")
         
-        # 清除 handle 中的连接信息，保留 browser_id
-        env.handle = {"browser_id": browser_id}
+        # 重置 handle，保留 browser_id
+        env.handle = BrowserHandle(browser_id=browser_id)
         return True
     
     async def is_window_open(self, env: Environment) -> bool:
-        """检查 BitBrowser 窗口是否已打开。
-        
-        使用 /browser/pids API 查询窗口状态。
-        """
+        """检查 BitBrowser 窗口是否已打开。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            return False
         
+        browser_id = handle.browser_id
         if not browser_id:
             return False
         
         try:
             client = self._get_api_client()
             pids = await client.get_browser_pids([browser_id])
-            # 如果 browser_id 在返回结果中，说明窗口已打开
             return browser_id in pids
         except Exception as e:
             logger.warning(f"[BitBrowser] 检查窗口状态失败: {e}")
             return False
 
     async def is_running(self, env: Environment) -> bool:
-        """检查 Playwright 连接是否存在。
-        
-        与 is_window_open 的区别：
-        - is_window_open: 外部浏览器窗口是否打开（通过 API 查询）
-        - is_running: Playwright 自动化连接是否存在且有效
-        """
-        handle = env.handle or {}
-        browser = handle.get("browser")
-        if not browser:
+        """检查 Playwright 连接是否存在。"""
+        handle = env.handle
+        if not handle:
             return False
-        try:
-            return browser.is_connected()
-        except Exception:
-            return False
+        return handle.is_connected()
 
     async def exists(self, env: Environment) -> bool:
-        """检查 BitBrowser 环境是否存在。
-        
-        使用 /browser/detail API 检查浏览器窗口是否存在。
-        """
+        """检查 BitBrowser 环境是否存在。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            return False
         
+        browser_id = handle.browser_id
         if not browser_id:
             return False
         
@@ -783,21 +719,16 @@ class BitBrowserProvider(BaseProvider):
             return False
     
     async def update(self, env: Environment, config: dict) -> bool:
-        """更新 BitBrowser 环境配置。
-        
-        Args:
-            env: 环境实例
-            config: 更新配置（name, proxy, fingerprint 等）
-        
-        Returns:
-            是否更新成功
-        """
+        """更新 BitBrowser 环境配置。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            return False
         
+        browser_id = handle.browser_id
         if not browser_id:
+
             return False
         
         try:
@@ -820,8 +751,11 @@ class BitBrowserProvider(BaseProvider):
         """重置环境状态：保留扩展数据，删除窗口缓存 + 导航到空白页。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            return False
+        
+        browser_id = handle.browser_id
         
         if not browser_id:
             return False
@@ -1122,6 +1056,8 @@ class VirtualBrowserProvider(BaseProvider):
             self._client_config = current_config
         return self._client_cache
 
+
+
     async def create(self, config: dict[str, Any] | None = None) -> Environment:
         """创建 VirtualBrowser 环境。"""
         import uuid
@@ -1183,6 +1119,8 @@ class VirtualBrowserProvider(BaseProvider):
             from src.core.rem.models import ProxyConfig
             final_proxy_config = ProxyConfig.from_dict(config["proxy"])
         
+        from src.core.rem.handle import BrowserHandle
+        
         return Environment(
             # id 使用默认值 0，由 Manager 覆盖为数据库自增 ID
             name=name,
@@ -1192,18 +1130,18 @@ class VirtualBrowserProvider(BaseProvider):
             external_id=str(browser_id),  # 持久化 browser_id
             capabilities={"page", "cookies", "fingerprint"},
             proxy_config=final_proxy_config,
-            handle={
-                "browser_id": browser_id,
-            },
+            handle=BrowserHandle(browser_id=str(browser_id)),
         )
 
     async def reset(self, env: Environment) -> bool:
         """重置环境状态：清除数据 + 导航到空白页。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            return False
         
+        browser_id = handle.browser_id
         if not browser_id:
             return False
         
@@ -1216,8 +1154,8 @@ class VirtualBrowserProvider(BaseProvider):
             logger.info(f"[VirtualBrowser] 已清除环境数据: id={browser_id}")
             
             # 2. 导航到空白页
-            if handle.get("page"):
-                await handle["page"].goto("about:blank")
+            if handle.page:
+                await handle.page.goto("about:blank")
             
             return True
         except Exception as e:
@@ -1228,8 +1166,11 @@ class VirtualBrowserProvider(BaseProvider):
         """健康检查：结合 Playwright 连接状态和外部 API 状态。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            return False
+        
+        browser_id = handle.browser_id
         
         # 1. 检查外部 API 状态
         if browser_id:
@@ -1245,8 +1186,8 @@ class VirtualBrowserProvider(BaseProvider):
         
         # 2. 检查 Playwright 连接
         try:
-            if handle.get("page"):
-                await handle["page"].title()
+            if handle.page:
+                await handle.page.title()
                 return True
         except Exception as e:
             logger.warning(f"[VirtualBrowser] 健康检查失败: Playwright 连接异常 {e}")
@@ -1260,31 +1201,19 @@ class VirtualBrowserProvider(BaseProvider):
         handle = env.handle
         if not handle:
             return
-
-        if not await self.exists(env):
-            return
             
-        browser_id = handle.get("browser_id")
+        browser_id = handle.browser_id
         
-        # 1. Close Playwright Connection
-        if handle.get("browser"):
-            try:
-                await handle["browser"].close()
-            except Exception as e:
-                logger.debug(f"[VirtualBrowser] 关闭 Playwright browser 失败: {e}")
-        if handle.get("playwright"):
-            try:
-                await handle["playwright"].stop()
-            except Exception as e:
-                logger.debug(f"[VirtualBrowser] 停止 Playwright 失败: {e}")
+        # 1. 使用 safe_close 关闭 Playwright 连接
+        await handle.safe_close()
             
         # 2. API Stop & Delete
         if browser_id:
             client = self._get_api_client()
             try:
                 if await self.is_window_open(env):
-                    await client.stop_browser(browser_id)
-                await client.delete_browser(browser_id)
+                    await client.stop_browser(int(browser_id))
+                await client.delete_browser(int(browser_id))
                 logger.info(f"[VirtualBrowser] 环境已销毁: id={browser_id}")
             except Exception as e:
                 logger.warning(f"[VirtualBrowser] API 销毁环境失败: {e}")
@@ -1292,9 +1221,14 @@ class VirtualBrowserProvider(BaseProvider):
     async def open(self, env: Environment) -> bool:
         """打开 VirtualBrowser 窗口。"""
         from src.core.foundation.logging import logger
+        from src.core.rem.handle import BrowserHandle
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id") or 0
+        handle = env.handle
+        if not handle:
+            handle = BrowserHandle()
+            env.handle = handle
+        
+        browser_id = handle.browser_id
         
         if not browser_id:
             logger.error("[VirtualBrowser] No browser_id found for open operation")
@@ -1306,13 +1240,13 @@ class VirtualBrowserProvider(BaseProvider):
             return True
         
         try:
+            browser_id_int = int(browser_id)
             client = self._get_api_client()
-            ws_url = await client.launch_browser(browser_id)
+            ws_url = await client.launch_browser(browser_id_int)
             logger.info(f"[VirtualBrowser] Opened browser {browser_id}")
             
-            # 仅存储 ws_url，不连接 Playwright
-            handle["ws_url"] = ws_url
-            env.handle = handle
+            # 存储 ws_url 到 BrowserHandle
+            handle.ws_url = ws_url
             return True
         except Exception as e:
             logger.error(f"[VirtualBrowser] Failed to open browser {browser_id}: {e}")
@@ -1320,104 +1254,56 @@ class VirtualBrowserProvider(BaseProvider):
 
     async def connect(self, env: Environment) -> bool:
         """连接 Playwright。"""
-        from playwright.async_api import async_playwright
-
         from src.core.foundation.logging import logger
 
-        handle = env.handle or {}
-        ws_url = handle.get("ws_url")
-        browser_id = handle.get("browser_id")
-
-        if not ws_url:
-            logger.error("[VirtualBrowser] Cannot connect: No ws_url in handle")
+        handle = env.handle
+        if not handle:
+            logger.error("[VirtualBrowser] Cannot connect: No handle")
             return False
-
-        try:
-            playwright = await async_playwright().start()
-            browser = await playwright.chromium.connect_over_cdp(ws_url)
-            context = browser.contexts[0] if browser.contexts else await browser.new_context()
-            page = context.pages[0] if context.pages else await context.new_page()
-
-            handle.update({
-                "playwright": playwright,
-                "browser": browser,
-                "context": context,
-                "page": page,
-            })
-            env.handle = handle
-            logger.info(f"[VirtualBrowser] Connected Playwright to browser {browser_id}")
-            return True
-        except Exception as e:
-            logger.error(f"[VirtualBrowser] Failed to connect Playwright: {e}")
-            if 'playwright' in locals():
-                await playwright.stop()
-            return False
-    
-    async def disconnect(self, env: Environment) -> bool:
-        """断开 Playwright 连接（保持窗口打开）。"""
-        from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser = handle.get("browser")
-        playwright = handle.get("playwright")
-        browser_id = handle.get("browser_id", "")
+        # 使用 BrowserHandle 的 safe_connect 方法
+        result = await handle.safe_connect()
+        if result:
+            logger.info(f"[VirtualBrowser] Connected Playwright to browser {handle.browser_id}")
+        return result
         
-        try:
-            if browser:
-                await browser.close()
-            if playwright:
-                await playwright.stop()
-            
-            # 清理 handle 中的连接对象，保留 browser_id
-            env.handle = {"browser_id": browser_id, "ws_url": handle.get("ws_url")}
-            logger.info(f"[VirtualBrowser] Disconnected Playwright from browser {browser_id}")
-            return True
-        except Exception as e:
-            logger.warning(f"[VirtualBrowser] Failed to disconnect: {e}")
-            return False
-    
     async def close(self, env: Environment) -> bool:
         """关闭 VirtualBrowser 窗口（不删除配置）。"""
         from src.core.foundation.logging import logger
+        from src.core.rem.handle import BrowserHandle
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id") or 0
+        handle = env.handle
+        if not handle:
+            return True
         
-        # 关闭 Playwright 连接
-        if handle.get("browser"):
-            try:
-                await handle["browser"].close()
-            except Exception:
-                pass
-        if handle.get("playwright"):
-            try:
-                await handle["playwright"].stop()
-            except Exception:
-                pass
+        browser_id = handle.browser_id
+        
+        # 使用 safe_close 关闭 Playwright 连接
+        await handle.safe_close()
         
         # 关闭浏览器窗口
         if browser_id:
             try:
+                browser_id_int = int(browser_id)
                 client = self._get_api_client()
-                await client.stop_browser(browser_id)
+                await client.stop_browser(browser_id_int)
                 logger.info(f"[VirtualBrowser] Closed window {browser_id}")
             except Exception as e:
                 logger.warning(f"[VirtualBrowser] Failed to close window {browser_id}: {e}")
         
-        # 清除 handle 中的连接信息，保留 browser_id
-        env.handle = {"browser_id": browser_id}
+        # 重置 handle，保留 browser_id
+        env.handle = BrowserHandle(browser_id=browser_id)
         return True
     
     async def is_window_open(self, env: Environment) -> bool:
-        """检查 VirtualBrowser 窗口是否已打开。
-        
-        使用 API 查询窗口运行状态，而非仅检查内存 handle。
-        """
+        """检查 VirtualBrowser 窗口是否已打开。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            return False
         
+        browser_id = handle.browser_id
         if not browser_id:
             return False
         
@@ -1432,31 +1318,21 @@ class VirtualBrowserProvider(BaseProvider):
             return False
 
     async def is_running(self, env: Environment) -> bool:
-        """检查 Playwright 连接是否存在。
-        
-        与 is_window_open 的区别：
-        - is_window_open: 外部浏览器窗口是否打开（通过 API 查询）
-        - is_running: Playwright 自动化连接是否存在且有效
-        """
-        handle = env.handle or {}
-        browser = handle.get("browser")
-        if not browser:
+        """检查 Playwright 连接是否存在。"""
+        handle = env.handle
+        if not handle:
             return False
-        try:
-            return browser.is_connected()
-        except Exception:
-            return False
+        return handle.is_connected()
 
     async def exists(self, env: Environment) -> bool:
-        """检查 VirtualBrowser 环境是否存在。
-        
-        使用 /api/getBrowserFullParameters API 检查环境是否存在。
-        """
+        """检查 VirtualBrowser 环境是否存在。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            return False
         
+        browser_id = handle.browser_id
         if not browser_id:
             return False
         
@@ -1470,19 +1346,42 @@ class VirtualBrowserProvider(BaseProvider):
             return False
     
     async def update(self, env: Environment, config: dict) -> bool:
-        """更新 VirtualBrowser 环境配置。
-        
-        Args:
-            env: 环境实例
-            config: 更新配置（name, proxy, randomize_fingerprint 等）
-        
-        Returns:
-            是否更新成功
-        """
+        """更新 VirtualBrowser 环境配置。"""
         from src.core.foundation.logging import logger
         
-        handle = env.handle or {}
-        browser_id = handle.get("browser_id")
+        handle = env.handle
+        if not handle:
+            return False
+        
+        browser_id = handle.browser_id
+        if not browser_id:
+            return False
+        
+        try:
+            browser_id_int = int(browser_id)
+            client = self._get_api_client()
+            
+            # 处理刷新指纹的特殊情况
+            api_config = dict(config)
+            should_randomize = api_config.pop("randomize_fingerprint", False)
+            
+            # 如果有其他配置项，先更新
+            if api_config:
+                success = await client.update_browser(browser_id_int, api_config)
+                if not success:
+                    logger.error(f"[VirtualBrowser] 更新环境失败: id={browser_id}")
+                    return False
+            
+            # 如果需要刷新指纹
+            if should_randomize:
+                await client.randomize_fingerprint(browser_id_int, {})
+                logger.info(f"[VirtualBrowser] 指纹已刷新: id={browser_id}")
+            
+            logger.info(f"[VirtualBrowser] 更新环境成功: id={browser_id}")
+            return True
+        except Exception as e:
+            logger.error(f"[VirtualBrowser] 更新环境失败: {e}")
+            return False
         
         if not browser_id:
             return False
