@@ -11,12 +11,121 @@ BrowserHandle 是 Core 层内部使用的抽象，用于：
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from src.core.foundation.logging import logger
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser, BrowserContext, Page, Playwright
+
+
+class PlaywrightManager:
+    """全局 Playwright 单例管理器（引用计数）。
+    
+    设计原理：
+    - Playwright 驱动进程可以同时管理多个浏览器连接
+    - 指纹浏览器已经在外部运行，Playwright 只是通过 CDP 连接
+    - 共享单例避免每个环境启动独立的 Node 进程
+    
+    Usage:
+        # 获取实例（引用计数 +1）
+        playwright = await PlaywrightManager.acquire()
+        browser = await playwright.chromium.connect_over_cdp(ws_url)
+        
+        # 释放引用（计数 -1，归零时关闭）
+        await PlaywrightManager.release()
+    """
+    
+    _instance: ClassVar["Playwright | None"] = None
+    _ref_count: ClassVar[int] = 0
+    _lock: ClassVar[asyncio.Lock | None] = None
+    
+    @classmethod
+    def _get_lock(cls) -> asyncio.Lock:
+        """延迟创建锁（避免在模块加载时创建）。"""
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+        return cls._lock
+    
+    @classmethod
+    async def acquire(cls) -> "Playwright":
+        """获取 Playwright 实例（引用计数 +1）。
+        
+        如果现有实例已崩溃，会自动重建。
+        
+        Returns:
+            Playwright 实例
+            
+        Raises:
+            RuntimeError: 启动 Playwright 失败
+        """
+        from playwright.async_api import async_playwright
+        
+        async with cls._get_lock():
+            # 检查现有实例是否健康
+            if cls._instance is not None:
+                if not cls._is_instance_healthy():
+                    logger.warning("[PlaywrightManager] 检测到 Playwright 实例已崩溃，正在重建...")
+                    cls._instance = None
+                    # 注意：崩溃时不重置引用计数，因为现有连接可能仍需要重连
+            
+            # 创建新实例（首次或崩溃后重建）
+            if cls._instance is None:
+                logger.info("[PlaywrightManager] 启动 Playwright 驱动进程...")
+                cls._instance = await async_playwright().start()
+                logger.info("[PlaywrightManager] Playwright 驱动进程已启动")
+            
+            cls._ref_count += 1
+            logger.debug(f"[PlaywrightManager] 引用计数: {cls._ref_count}")
+            return cls._instance
+    
+    @classmethod
+    def _is_instance_healthy(cls) -> bool:
+        """检查 Playwright 实例是否健康。
+        
+        通过访问内部属性来判断进程是否存活。
+        """
+        if cls._instance is None:
+            return False
+        try:
+            # 尝试访问 chromium 属性，如果进程已死会抛异常
+            _ = cls._instance.chromium
+            return True
+        except Exception:
+            return False
+    
+    @classmethod
+    async def release(cls) -> None:
+        """释放引用（计数 -1，归零时关闭）。"""
+        async with cls._get_lock():
+            if cls._ref_count > 0:
+                cls._ref_count -= 1
+                logger.debug(f"[PlaywrightManager] 引用计数: {cls._ref_count}")
+            
+            if cls._ref_count <= 0 and cls._instance is not None:
+                logger.info("[PlaywrightManager] 关闭 Playwright 驱动进程...")
+                try:
+                    await cls._instance.stop()
+                except Exception as e:
+                    logger.warning(f"[PlaywrightManager] 关闭时出错: {e}")
+                finally:
+                    cls._instance = None
+                    cls._ref_count = 0
+                logger.info("[PlaywrightManager] Playwright 驱动进程已关闭")
+    
+    @classmethod
+    async def force_shutdown(cls) -> None:
+        """强制关闭（应用退出时调用）。"""
+        async with cls._get_lock():
+            if cls._instance is not None:
+                logger.info("[PlaywrightManager] 强制关闭 Playwright...")
+                try:
+                    await cls._instance.stop()
+                except Exception:
+                    pass
+                finally:
+                    cls._instance = None
+                    cls._ref_count = 0
 
 
 @dataclass
@@ -32,10 +141,10 @@ class BrowserHandle:
     ws_url: str = ""
     
     # 运行时对象（不序列化）
-    _playwright: "Playwright | None" = field(default=None, repr=False)
     _browser: "Browser | None" = field(default=None, repr=False)
     _context: "BrowserContext | None" = field(default=None, repr=False)
     _page: "Page | None" = field(default=None, repr=False)
+    _has_playwright_ref: bool = field(default=False, repr=False)  # 是否持有 Playwright 引用
     
     @property
     def page(self) -> "Page | None":
@@ -62,19 +171,18 @@ class BrowserHandle:
             return False
     
     async def safe_connect(self) -> bool:
-        """安全连接到浏览器。
+        """安全连接到浏览器（使用共享 Playwright 单例）。
         
-        Args:
-            ws_url: WebSocket 连接地址
-            
         Returns:
             是否连接成功
         """
-        from playwright.async_api import async_playwright
-        
         try:
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.connect_over_cdp(self.ws_url)
+            # 获取共享的 Playwright 实例
+            playwright = await PlaywrightManager.acquire()
+            self._has_playwright_ref = True
+            
+            # 连接到外部浏览器
+            self._browser = await playwright.chromium.connect_over_cdp(self.ws_url)
             
             # 获取或创建 context 和 page
             self._context = (
@@ -87,15 +195,8 @@ class BrowserHandle:
                 if self._context.pages 
                 else await self._context.new_page()
             )
-            try:
-                # 测试执行简单指令
-                page= await self._context.new_page()
-                await page.goto("https://www.baidu.com")
-                await page.close()
-            except Exception as e:
-                logger.error(f"关闭页面超时或失败，可能是连接已断开，直接丢弃引用：${e}")
             
-            logger.info(f"[BrowserHandle] Connected to {self.ws_url}...")
+            logger.info(f"[BrowserHandle] Connected to {self.ws_url[:50]}...")
             return True
             
         except Exception as e:
@@ -105,32 +206,30 @@ class BrowserHandle:
     
     async def safe_close(self) -> None:
         """安全关闭连接（忽略异常）。"""
+        # 1. 关闭浏览器连接
         if self._browser:
-            if not self._browser.is_connected() :
-                logger.info("浏览器已断开，停止操作")
-                return
-            try:
-                if self._context:
-                    await self._context.close()
-                await asyncio.wait_for(self._browser.close(), timeout=2.0)
-            except Exception as e:
-                logger.error(f"关闭context失败，可能是连接已断开，直接丢弃引用：${e}")
-            try:
-                if self._browser:
-                    await self._browser.close()
-            except Exception as e:
-                logger.error(f"关闭brower失败，可能是连接已断开，直接丢弃引用：${e}")
-            finally:
-                self._context = None
-                self._browser = None
+            if not self._browser.is_connected():
+                logger.info("[BrowserHandle] 浏览器已断开，跳过关闭")
+            else:
+                try:
+                    if self._context:
+                        await self._context.close()
+                except Exception as e:
+                    logger.warning(f"[BrowserHandle] 关闭 context 失败: {e}")
+                
+                try:
+                    await asyncio.wait_for(self._browser.close(), timeout=2.0)
+                except Exception as e:
+                    logger.warning(f"[BrowserHandle] 关闭 browser 失败: {e}")
+            
+            self._context = None
+            self._browser = None
         
-        if self._playwright:
-            try:
-                await self._playwright.stop()
-            except Exception:
-                pass
-            finally:
-                self._playwright = None
+        # 2. 释放 Playwright 引用
+        if self._has_playwright_ref:
+            await PlaywrightManager.release()
+            self._has_playwright_ref = False
+        
         logger.info(f"[BrowserHandle] Closed connection for {self.browser_id}")
     
     async def execute_script(self, script: str, **kwargs: Any) -> Any:

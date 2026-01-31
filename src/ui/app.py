@@ -74,6 +74,10 @@ def main():
         
         # 运行事件循环
         loop.run_forever()
+        
+        # 应用退出时清理资源
+        from src.core.rem.handle import PlaywrightManager
+        loop.run_until_complete(PlaywrightManager.force_shutdown())
 
 
 if __name__ == "__main__":
