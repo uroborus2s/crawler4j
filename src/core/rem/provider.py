@@ -922,28 +922,40 @@ class VirtualBrowserClient:
         
         # 兼容不同版本的 API 返回
         result_data = data.get("data", {})
+        
+        # 优先使用 API 直接返回的 ws 地址
         if "ws" in result_data:
             return result_data["ws"]
         
+        # 从 debuggingPort 获取真正的 WebSocket 地址
         port = result_data.get("debuggingPort")
         if port:
-            logger.info(f"[VirtualBrowser] 尝试从端口 {port} 获取 WebSocket 地址...")
-            # try:
-            #     # 访问 /json/version 获取真正的 WS 地址
-            #     async with httpx.AsyncClient(timeout=10.0) as fetcher:
-            #         version_resp = await fetcher.get(f"http://localhost:{port}/json/version")
-            #         version_resp.raise_for_status()
-            #         version_data = version_resp.json()
-            #         ws_url = version_data.get("webSocketDebuggerUrl")
-            #         ws_url = ws_url.replace("localhost", "127.0.0.1")
-            #         if ws_url:
-            #             logger.info(f"[VirtualBrowser] 成功获取 WS 地址: {ws_url}")
-            #             return ws_url
-            # except Exception as e:
-            #     logger.warning(f"[VirtualBrowser] 无法通过端口 {port} 获取 WS 地址: {e}")
+            logger.info(f"[VirtualBrowser] 从端口 {port} 获取 WebSocket 地址...")
             
-            # 回退方案: 如果获取失败，仍然返回端口形式的连接地址
-            return f"http://localhost:{port}"
+            # 浏览器启动需要时间，重试几次
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    # 访问 Chrome DevTools 端点获取真正的 WS 地址
+                    async with httpx.AsyncClient(timeout=10.0) as fetcher:
+                        version_resp = await fetcher.get(f"http://127.0.0.1:{port}/json/version")
+                        version_resp.raise_for_status()
+                        version_data = version_resp.json()
+                        ws_url = version_data.get("webSocketDebuggerUrl")
+                        if ws_url:
+                            # 确保使用 127.0.0.1 而非 localhost（避免 IPv6 问题）
+                            ws_url = ws_url.replace("localhost", "127.0.0.1")
+                            logger.info(f"[VirtualBrowser] 成功获取 WS 地址: {ws_url}")
+                            return ws_url
+                except Exception as e:
+                    logger.warning(f"[VirtualBrowser] 尝试 {attempt + 1}/{max_retries} 获取 WS 地址失败: {e}")
+                    if attempt < max_retries - 1:
+                        import asyncio
+                        await asyncio.sleep(0.5)  # 等待浏览器完全启动
+            
+            # 所有重试失败，回退到 HTTP 端点（connect_over_cdp 也支持）
+            logger.warning("[VirtualBrowser] 无法获取 WS 地址，使用 HTTP 端点")
+            return f"http://127.0.0.1:{port}"
         
         raise KeyError(f"Missing 'ws' or 'debuggingPort' in API response: {result_data}")
     
