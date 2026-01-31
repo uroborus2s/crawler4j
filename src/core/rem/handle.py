@@ -51,8 +51,6 @@ class PlaywrightManager:
     async def acquire(cls) -> "Playwright":
         """获取 Playwright 实例（引用计数 +1）。
         
-        如果现有实例已崩溃，会自动重建。
-        
         Returns:
             Playwright 实例
             
@@ -62,37 +60,15 @@ class PlaywrightManager:
         from playwright.async_api import async_playwright
         
         async with cls._get_lock():
-            # 检查现有实例是否健康
-            if cls._instance is not None:
-                if not cls._is_instance_healthy():
-                    logger.warning("[PlaywrightManager] 检测到 Playwright 实例已崩溃，正在重建...")
-                    cls._instance = None
-                    # 注意：崩溃时不重置引用计数，因为现有连接可能仍需要重连
-            
-            # 创建新实例（首次或崩溃后重建）
+            # 创建新实例（仅首次）
             if cls._instance is None:
                 logger.info("[PlaywrightManager] 启动 Playwright 驱动进程...")
                 cls._instance = await async_playwright().start()
                 logger.info("[PlaywrightManager] Playwright 驱动进程已启动")
             
             cls._ref_count += 1
-            logger.debug(f"[PlaywrightManager] 引用计数: {cls._ref_count}")
+            logger.info(f"[PlaywrightManager] acquire 完成, 引用计数: {cls._ref_count}")
             return cls._instance
-    
-    @classmethod
-    def _is_instance_healthy(cls) -> bool:
-        """检查 Playwright 实例是否健康。
-        
-        通过访问内部属性来判断进程是否存活。
-        """
-        if cls._instance is None:
-            return False
-        try:
-            # 尝试访问 chromium 属性，如果进程已死会抛异常
-            _ = cls._instance.chromium
-            return True
-        except Exception:
-            return False
     
     @classmethod
     async def release(cls) -> None:
@@ -100,7 +76,7 @@ class PlaywrightManager:
         async with cls._get_lock():
             if cls._ref_count > 0:
                 cls._ref_count -= 1
-                logger.debug(f"[PlaywrightManager] 引用计数: {cls._ref_count}")
+                logger.info(f"[PlaywrightManager] release 完成, 引用计数: {cls._ref_count}")
             
             if cls._ref_count <= 0 and cls._instance is not None:
                 logger.info("[PlaywrightManager] 关闭 Playwright 驱动进程...")
@@ -196,6 +172,10 @@ class BrowserHandle:
                 else await self._context.new_page()
             )
             
+            page=await self._context.new_page()
+            await page.goto("https://baidu.com")
+            await page.close()
+
             logger.info(f"[BrowserHandle] Connected to {self.ws_url[:50]}...")
             return True
             
@@ -216,7 +196,10 @@ class BrowserHandle:
         if self._browser:
             try:
                 # 检查连接状态（注意：is_connected 本身也可能抛异常）
-                if self._browser.is_connected():
+                if self._browser.is_connected() and self._context:
+                    page=await self._context.new_page()
+                    await page.goto("https://baidu.com")
+                    await page.close()
                     await asyncio.wait_for(self._browser.close(), timeout=2.0)
                     logger.info(f"[BrowserHandle] Browser 连接已关闭: {browser_id}")
                 else:
