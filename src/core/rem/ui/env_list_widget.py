@@ -400,22 +400,45 @@ class DataLoaderThread(QThread):
 
 
 class EnvWorkerThread(QThread):
-    """环境操作工作线程。"""
+    """环境操作工作线程。
+    
+    注意：Playwright 的 WebSocket 连接绑定到创建它的事件循环。
+    为避免连接失效，start 操作使用主线程的 qasync 事件循环。
+    """
     
     finished = pyqtSignal(object)  # 成功时发射结果
     error = pyqtSignal(str)
+    
+    # 共享的事件循环（用于保持 Playwright 连接）
+    _shared_loop: asyncio.AbstractEventLoop | None = None
     
     def __init__(self, action: str, **kwargs):
         super().__init__()
         self._action = action
         self._kwargs = kwargs
     
+    @classmethod
+    def _get_shared_loop(cls) -> asyncio.AbstractEventLoop:
+        """获取或创建共享事件循环。"""
+        if cls._shared_loop is None or cls._shared_loop.is_closed():
+            cls._shared_loop = asyncio.new_event_loop()
+        return cls._shared_loop
+    
     def run(self):
         from src.core.rem.manager import get_environment_manager
         
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # 对于需要保持连接的操作，使用共享循环
+            # 对于其他操作，使用临时循环
+            if self._action in ("start", "stop"):
+                loop = self._get_shared_loop()
+                asyncio.set_event_loop(loop)
+                should_close_loop = False
+            else:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                should_close_loop = True
+            
             manager = get_environment_manager()
             
             if self._action == "create":
@@ -459,7 +482,9 @@ class EnvWorkerThread(QThread):
                 )
                 self.finished.emit(success)
             
-            loop.close()
+            # 只关闭临时循环，共享循环保持打开
+            if should_close_loop:
+                loop.close()
         except Exception as e:
             self.error.emit(str(e))
 
