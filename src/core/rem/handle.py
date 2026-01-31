@@ -182,7 +182,7 @@ class BrowserHandle:
             self._has_playwright_ref = True
             
             # 连接到外部浏览器
-            self._browser = await playwright.chromium.connect_over_cdp(self.ws_url)
+            self._browser = await playwright.chromium.connect_over_cdp(self.ws_url,timeout=300000)
             
             # 获取或创建 context 和 page
             self._context = (
@@ -205,32 +205,38 @@ class BrowserHandle:
             return False
     
     async def safe_close(self) -> None:
-        """安全关闭连接（忽略异常）。"""
+        """安全关闭连接（忽略异常）。
+        
+        注意：此方法保证幂等，多次调用不会有副作用。
+        即使底层连接已断开，也会正确清理资源。
+        """
+        browser_id = self.browser_id  # 保存用于日志
+        
         # 1. 关闭浏览器连接
         if self._browser:
-            if not self._browser.is_connected():
-                logger.info("[BrowserHandle] 浏览器已断开，跳过关闭")
-            else:
-                try:
-                    if self._context:
-                        await self._context.close()
-                except Exception as e:
-                    logger.warning(f"[BrowserHandle] 关闭 context 失败: {e}")
-                
-                try:
+            try:
+                # 检查连接状态（注意：is_connected 本身也可能抛异常）
+                if self._browser.is_connected():
                     await asyncio.wait_for(self._browser.close(), timeout=2.0)
-                except Exception as e:
-                    logger.warning(f"[BrowserHandle] 关闭 browser 失败: {e}")
-            
-            self._context = None
-            self._browser = None
+                    logger.info(f"[BrowserHandle] Browser 连接已关闭: {browser_id}")
+                else:
+                    logger.info(f"[BrowserHandle] Browser 连接已断开，跳过关闭: {browser_id}")
+            except asyncio.TimeoutError:
+                logger.warning(f"[BrowserHandle] 关闭 browser 超时: {browser_id}")
+            except Exception as e:
+                # 捕获所有异常，包括 "'NoneType' object has no attribute 'send'"
+                logger.warning(f"[BrowserHandle] 关闭 browser 失败 (已忽略): {e}")
+            finally:
+                # 无论如何都置空资源（避免后续重复操作）
+                self._page = None
+                self._context = None
+                self._browser = None
         
         # 2. 释放 Playwright 引用
         if self._has_playwright_ref:
             await PlaywrightManager.release()
             self._has_playwright_ref = False
-        
-        logger.info(f"[BrowserHandle] Closed connection for {self.browser_id}")
+            logger.debug(f"[BrowserHandle] Playwright 引用已释放: {browser_id}")
     
     async def execute_script(self, script: str, **kwargs: Any) -> Any:
         """在 Page 上安全执行 JavaScript 脚本。
