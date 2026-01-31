@@ -87,8 +87,15 @@ class BrowserHandle:
                 if self._context.pages 
                 else await self._context.new_page()
             )
+            try:
+                # 测试执行简单指令
+                page= await self._context.new_page()
+                await page.goto("https://www.baidu.com")
+                await page.close()
+            except Exception as e:
+                logger.error(f"关闭页面超时或失败，可能是连接已断开，直接丢弃引用：${e}")
             
-            logger.info(f"[BrowserHandle] Connected to {self.ws_url[:50]}...")
+            logger.info(f"[BrowserHandle] Connected to {self.ws_url}...")
             return True
             
         except Exception as e:
@@ -102,24 +109,20 @@ class BrowserHandle:
             if not self._browser.is_connected() :
                 logger.info("浏览器已断开，停止操作")
                 return
-            context = self._browser.contexts[0]
-            # 很多时候连接瞬间 pages 是空的，需要等待一下
-            if not context.pages:
-                logger.info("页面列表为空，等待新页面...")
-                # 等待第一个页面出现（不要自己 new_page，那样没有指纹）
-                page = await context.wait_for_event("page")
-            else:
-                page = context.pages[0]
             try:
-                # 测试执行简单指令
-                title = await page.title()
-                logger.info(f"   当前标题: {title}")
-                await page.goto("https://www.baidu.com")
-                # 给所有指令设限，如果 2秒 没反应，直接当作断开了处理
-                await asyncio.wait_for(page.close(), timeout=2.0)
+                if self._context:
+                    await self._context.close()
+                await asyncio.wait_for(self._browser.close(), timeout=2.0)
             except Exception as e:
-                logger.error("关闭页面超时或失败，可能是连接已断开，直接丢弃引用")
-            self._browser = None
+                logger.error(f"关闭context失败，可能是连接已断开，直接丢弃引用：${e}")
+            try:
+                if self._browser:
+                    await self._browser.close()
+            except Exception as e:
+                logger.error(f"关闭brower失败，可能是连接已断开，直接丢弃引用：${e}")
+            finally:
+                self._context = None
+                self._browser = None
         
         if self._playwright:
             try:
@@ -128,9 +131,6 @@ class BrowserHandle:
                 pass
             finally:
                 self._playwright = None
-        
-        self._context = None
-        self._page = None
         logger.info(f"[BrowserHandle] Closed connection for {self.browser_id}")
     
     async def execute_script(self, script: str, **kwargs: Any) -> Any:
@@ -150,13 +150,7 @@ class BrowserHandle:
             raise RuntimeError("Page 未连接，无法执行脚本")
         return await self._page.evaluate(script, **kwargs)
     
-    def clear_runtime_objects(self) -> None:
-        """清除运行时对象（不关闭连接）。"""
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
-    
+
     def to_dict(self) -> dict[str, str]:
         """序列化为字典（仅持久化字段）。"""
         return {

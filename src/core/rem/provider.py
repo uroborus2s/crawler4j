@@ -928,19 +928,19 @@ class VirtualBrowserClient:
         port = result_data.get("debuggingPort")
         if port:
             logger.info(f"[VirtualBrowser] 尝试从端口 {port} 获取 WebSocket 地址...")
-            try:
-                # 访问 /json/version 获取真正的 WS 地址
-                async with httpx.AsyncClient(timeout=10.0) as fetcher:
-                    version_resp = await fetcher.get(f"http://localhost:{port}/json/version")
-                    version_resp.raise_for_status()
-                    version_data = version_resp.json()
-                    ws_url = version_data.get("webSocketDebuggerUrl")
-                    ws_url = ws_url.replace("localhost", "127.0.0.1")
-                    if ws_url:
-                        logger.info(f"[VirtualBrowser] 成功获取 WS 地址: {ws_url}")
-                        return ws_url
-            except Exception as e:
-                logger.warning(f"[VirtualBrowser] 无法通过端口 {port} 获取 WS 地址: {e}")
+            # try:
+            #     # 访问 /json/version 获取真正的 WS 地址
+            #     async with httpx.AsyncClient(timeout=10.0) as fetcher:
+            #         version_resp = await fetcher.get(f"http://localhost:{port}/json/version")
+            #         version_resp.raise_for_status()
+            #         version_data = version_resp.json()
+            #         ws_url = version_data.get("webSocketDebuggerUrl")
+            #         ws_url = ws_url.replace("localhost", "127.0.0.1")
+            #         if ws_url:
+            #             logger.info(f"[VirtualBrowser] 成功获取 WS 地址: {ws_url}")
+            #             return ws_url
+            # except Exception as e:
+            #     logger.warning(f"[VirtualBrowser] 无法通过端口 {port} 获取 WS 地址: {e}")
             
             # 回退方案: 如果获取失败，仍然返回端口形式的连接地址
             return f"http://localhost:{port}"
@@ -1278,12 +1278,13 @@ class VirtualBrowserProvider(BaseProvider):
         
         browser_id = handle.browser_id
         
-        # 使用 safe_close 关闭 Playwright 连接
-        await handle.safe_close()
+        
         
         # 关闭浏览器窗口
         if browser_id:
             try:
+                # 使用 safe_close 关闭 Playwright 连接
+                await handle.safe_close()
                 browser_id_int = int(browser_id)
                 client = self._get_api_client()
                 await client.stop_browser(browser_id_int)
