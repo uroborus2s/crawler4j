@@ -910,10 +910,12 @@ class EnvListWidget(QWidget):
             self.load_data()  # 刷新列表
     
     def _on_action_finished(self, success: bool):
-        """通用操作完成回调。"""
+        """通用操作完成回调。
+        
+        注意: 失败时错误信息由 Shell 通过 Toast 显示，
+        详见 ENV_OPERATION_FAILED 事件处理。
+        """
         self._show_loading(False)
-        if not success:
-            QMessageBox.warning(self, "警告", "操作失败")
         self.load_data()
     
     def _show_loading(self, show: bool):

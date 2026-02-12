@@ -546,14 +546,25 @@ class EnvironmentManager:
         
         Returns:
             是否操作成功
+            
+        Note:
+            失败时自动恢复原状态，并通过事件总线发送错误通知。
         """
         provider = get_provider(env.provider)
         if not provider:
             return False
+        
+        # 保存原始状态，用于失败时恢复
+        original_status = env.status
+        
         try:
             if action == "open":
                 await self.pool.update_status(env.id, EnvStatus.BUSY)
                 result = await provider.open(env)
+                if not result:
+                    # 失败：恢复原状态
+                    await self.pool.update_status(env.id, original_status)
+                    self._emit_error(env, "open", "外部软件启动失败，请检查软件是否安装或路径配置是否正确")
                 return result
             elif action == "connect":
                 result = await provider.connect(env)
@@ -562,14 +573,22 @@ class EnvironmentManager:
                     env.increment_usage()
                     await self.pool.update_status(env.id, EnvStatus.RUNNING)
                     await self.pool.add(env)
+                else:
+                    # 失败：恢复原状态（open 成功后 connect 失败）
+                    await self.pool.update_status(env.id, original_status)
+                    self._emit_error(env, "connect", "Playwright 连接失败")
                 return result
             elif action == "disconnect":
                 await self.pool.update_status(env.id, EnvStatus.BUSY)
                 result = await provider.disconnect(env)
+                if not result:
+                    await self.pool.update_status(env.id, original_status)
                 return result
             elif action == "close":
                 await self.pool.update_status(env.id, EnvStatus.READY)
                 result = await provider.close(env)
+                if not result:
+                    await self.pool.update_status(env.id, original_status)
                 return result
             elif action == "pause":
                 await self.pool.update_status(env.id, EnvStatus.PAUSED)
@@ -591,7 +610,26 @@ class EnvironmentManager:
                 return False
         except Exception as e:
             logger.warning(f"[REM] Provider 操作失败: action={action}, error={e}")
+            # 异常时恢复原状态
+            await self.pool.update_status(env.id, original_status)
+            self._emit_error(env, action, str(e))
             return False
+    
+    def _emit_error(self, env: Environment, action: str, message: str) -> None:
+        """发送错误事件供 UI 层监听。"""
+        from src.core.foundation.event_bus import Event, EventType, get_event_bus
+
+        
+        get_event_bus().publish(Event(
+            type=EventType.ENV_OPERATION_FAILED,
+            data={
+                "env_id": env.id,
+                "env_name": env.name,
+                "action": action,
+                "message": message,
+            }
+        ))
+
     
         
     async def _bind_ip_if_needed(self, env: Environment, pool_id: str) -> bool:

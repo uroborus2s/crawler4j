@@ -184,6 +184,29 @@ class Shell(QMainWindow):
         self._setup_window()
         self._setup_ui()
         self._register_pages()
+        self._subscribe_events()
+    
+    def _subscribe_events(self):
+        """订阅全局事件。"""
+        from src.core.foundation.event_bus import EventType, get_event_bus
+        
+        bus = get_event_bus()
+        bus.subscribe(EventType.ENV_OPERATION_FAILED, self._on_env_operation_failed)
+    
+    def _on_env_operation_failed(self, event):
+        """处理环境操作失败事件。"""
+        from src.ui.components.toast import Toast
+        
+        message = event.data.get("message", "操作失败")
+        env_name = event.data.get("env_name", "")
+        
+        if env_name:
+            display_msg = f"[{env_name}] {message}"
+        else:
+            display_msg = message
+        
+        Toast.error(self, display_msg)
+
     
     def _setup_window(self):
         self.setWindowTitle("Crawler4j")

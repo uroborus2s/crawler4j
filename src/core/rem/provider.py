@@ -591,7 +591,28 @@ class BitBrowserProvider(BaseProvider):
 
     async def open(self, env: Environment) -> bool:
         """打开 BitBrowser 窗口。"""
+        from src.core.foundation.event_bus import Event, EventType, get_event_bus
         from src.core.foundation.logging import logger
+        from src.core.system.external_app_service import ExternalApp, get_external_app_service
+        
+        # 确保外部软件运行
+        app_service = get_external_app_service()
+        result = await app_service.ensure_running(ExternalApp.BITBROWSER)
+        if not result.success:
+            logger.error(f"[BitBrowser] {result.error_message}")
+            # 发送错误事件供 UI 显示
+            get_event_bus().publish(Event(
+                type=EventType.ENV_OPERATION_FAILED,
+                data={
+                    "env_id": env.id,
+                    "env_name": env.name,
+                    "action": "open",
+                    "error_code": result.error_code,
+                    "message": result.error_message,
+                }
+            ))
+            return False
+
         
         handle = env.handle
         if not handle:
@@ -1232,8 +1253,29 @@ class VirtualBrowserProvider(BaseProvider):
     
     async def open(self, env: Environment) -> bool:
         """打开 VirtualBrowser 窗口。"""
+        from src.core.foundation.event_bus import Event, EventType, get_event_bus
         from src.core.foundation.logging import logger
         from src.core.rem.handle import BrowserHandle
+        from src.core.system.external_app_service import ExternalApp, get_external_app_service
+        
+        # 确保外部软件运行
+        app_service = get_external_app_service()
+        result = await app_service.ensure_running(ExternalApp.VIRTUALBROWSER)
+        if not result.success:
+            logger.error(f"[VirtualBrowser] {result.error_message}")
+            # 发送错误事件供 UI 显示
+            get_event_bus().publish(Event(
+                type=EventType.ENV_OPERATION_FAILED,
+                data={
+                    "env_id": env.id,
+                    "env_name": env.name,
+                    "action": "open",
+                    "error_code": result.error_code,
+                    "message": result.error_message,
+                }
+            ))
+            return False
+
         
         handle = env.handle
         if not handle:
