@@ -171,10 +171,6 @@ class BrowserHandle:
                 if self._context.pages 
                 else await self._context.new_page()
             )
-            
-            page=await self._context.new_page()
-            await page.goto("https://baidu.com")
-            await page.close()
 
             logger.info(f"[BrowserHandle] Connected to {self.ws_url[:50]}...")
             return True
@@ -196,10 +192,7 @@ class BrowserHandle:
         if self._browser:
             try:
                 # 检查连接状态（注意：is_connected 本身也可能抛异常）
-                if self._browser.is_connected() and self._context:
-                    page=await self._context.new_page()
-                    await page.goto("https://baidu.com")
-                    await page.close()
+                if self._browser.is_connected():
                     await asyncio.wait_for(self._browser.close(), timeout=2.0)
                     logger.info(f"[BrowserHandle] Browser 连接已关闭: {browser_id}")
                 else:

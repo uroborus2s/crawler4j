@@ -22,7 +22,6 @@ from PyQt6.QtWidgets import (
 from src.core.atm.models import AutomationTask, TaskStatus
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
-from src.ui.components.data_table import SkyDataTable
 
 
 @dataclass
@@ -141,7 +140,7 @@ class TaskListWidget(QWidget):
         columns = [
             ("name", "任务名称", -1),
             ("strategy_id", "策略ID", 100),
-            ("cron", "Cron", 100),
+            ("trigger", "触发规则", 120),
             ("last_run", "最后运行时间", 140),
             ("duration", "耗时", 80),
             ("status", "状态", 80),
@@ -221,8 +220,18 @@ class TaskListWidget(QWidget):
         # 1. 策略ID
         table.setItem(row, 1, QTableWidgetItem(task.strategy_id))
         
-        # 2. Cron
-        table.setItem(row, 2, QTableWidgetItem(task.cron_expression or "-"))
+        # 2. Trigger
+        trigger_text = "-"
+        if task.trigger_config:
+            tc = task.trigger_config
+            if tc.type == "cron":
+                trigger_text = f"Cron: {tc.cron_expr}"
+            elif tc.type == "interval":
+                trigger_text = f"每 {tc.interval_seconds}s"
+            elif tc.type == "random":
+                trigger_text = f"{tc.interval_seconds}s ±{tc.random_range}s"
+            
+        table.setItem(row, 2, QTableWidgetItem(trigger_text))
         
         # 3. 最后运行时间
         table.setItem(row, 3, QTableWidgetItem(item.display_last_run))
@@ -348,7 +357,7 @@ class TaskListWidget(QWidget):
             await get_task_service().create_task(
                 name=data['name'], 
                 strategy_id=data['strategy_id'],
-                cron=data.get('cron')
+                trigger_config=data.get('trigger_config')
             )
             # No need to manual refresh, EventBus will trigger it
         except Exception as e:

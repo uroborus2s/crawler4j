@@ -12,7 +12,40 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Optional
+
+
+class TriggerType(StrEnum):
+    """触发器类型。"""
+    CRON = "cron"
+    INTERVAL = "interval"
+    RANDOM = "random"
+
+
+@dataclass
+class TriggerConfig:
+    """触发器配置。"""
+    type: TriggerType = TriggerType.CRON
+    cron_expr: str | None = None          # For CRON
+    interval_seconds: int | None = None   # For INTERVAL / RANDOM
+    random_range: int | None = None       # For RANDOM (jitter +/- seconds)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type.value,
+            "cron_expr": self.cron_expr,
+            "interval_seconds": self.interval_seconds,
+            "random_range": self.random_range,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TriggerConfig":
+        return cls(
+            type=TriggerType(data.get("type", "cron")),
+            cron_expr=data.get("cron_expr"),
+            interval_seconds=data.get("interval_seconds"),
+            random_range=data.get("random_range"),
+        )
 
 
 class TaskStatus(StrEnum):
@@ -49,9 +82,8 @@ class AutomationTask:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
     strategy_id: str = ""
-    cron_expression: str | None = None
+    trigger_config: TriggerConfig | None = None
     default_params: dict[str, Any] = field(default_factory=dict)
-    max_executions: int | None = None  # 最大执行次数 (None = 不限)
     created_at: int = field(default_factory=lambda: int(time.time()))
     updated_at: int = field(default_factory=lambda: int(time.time()))
 
@@ -60,9 +92,8 @@ class AutomationTask:
             "id": self.id,
             "name": self.name,
             "strategy_id": self.strategy_id,
-            "cron_expression": self.cron_expression,
+            "trigger_config": self.trigger_config.to_dict() if self.trigger_config else None,
             "default_params": self.default_params,
-            "max_executions": self.max_executions,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -73,9 +104,8 @@ class AutomationTask:
             id=data.get("id", str(uuid.uuid4())),
             name=data.get("name", ""),
             strategy_id=data.get("strategy_id", ""),
-            cron_expression=data.get("cron_expression"),
+            trigger_config=TriggerConfig.from_dict(data["trigger_config"]) if data.get("trigger_config") else None,
             default_params=data.get("default_params", {}),
-            max_executions=data.get("max_executions"),
             created_at=data.get("created_at", int(time.time())),
             updated_at=data.get("updated_at", int(time.time())),
         )

@@ -11,7 +11,7 @@ import asyncio
 import json
 from typing import Any
 
-from src.core.atm.models import AutomationTask, TaskResult, TaskRun, TaskStatus
+from src.core.atm.models import AutomationTask, TaskResult, TaskRun, TaskStatus, TriggerConfig
 
 # from src.core.foundation.logging import logger  # Removed unused import
 from src.core.persistence.database import STATE_DB, get_connection
@@ -39,12 +39,18 @@ class TaskRepository:
                     id TEXT PRIMARY KEY,
                     name TEXT,
                     strategy_id TEXT,
-                    cron_expression TEXT,
+                    trigger_config TEXT,
                     default_params TEXT,
                     created_at INTEGER,
                     updated_at INTEGER
                 )
             """)
+            
+            # Auto-migration (Simple check-and-add)
+            try:
+                conn.execute("ALTER TABLE automation_tasks ADD COLUMN trigger_config TEXT")
+            except Exception:
+                pass # Already exists or other issue (sqlite doesn't have IF NOT EXISTS for column)
             
             # 2. 任务运行表
             conn.execute("""
@@ -70,12 +76,12 @@ class TaskRepository:
             with get_connection(STATE_DB) as conn:
                 conn.execute(
                     """
-                    INSERT INTO automation_tasks (id, name, strategy_id, cron_expression, default_params, created_at, updated_at)
+                    INSERT INTO automation_tasks (id, name, strategy_id, trigger_config, default_params, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         strategy_id = excluded.strategy_id,
-                        cron_expression = excluded.cron_expression,
+                        trigger_config = excluded.trigger_config,
                         default_params = excluded.default_params,
                         updated_at = excluded.updated_at
                     """,
@@ -83,7 +89,7 @@ class TaskRepository:
                         task.id,
                         task.name,
                         task.strategy_id,
-                        task.cron_expression,
+                        json.dumps(task.trigger_config.to_dict(), ensure_ascii=False) if task.trigger_config else None,
                         json.dumps(task.default_params, ensure_ascii=False),
                         task.created_at,
                         task.updated_at,
@@ -206,11 +212,18 @@ class TaskRepository:
     def _row_to_automation_task(self, row: Any) -> AutomationTask:
         params_data = row["default_params"]
         params = json.loads(params_data) if params_data else {}
+        
+        if "trigger_config" in row.keys():
+             trigger_data = row["trigger_config"]
+             trigger_config = TriggerConfig.from_dict(json.loads(trigger_data)) if trigger_data else None
+        else:
+             trigger_config = None
+
         return AutomationTask(
             id=row["id"],
             name=row["name"],
             strategy_id=row["strategy_id"],
-            cron_expression=row["cron_expression"],
+            trigger_config=trigger_config,
             default_params=params,
             created_at=row["created_at"],
             updated_at=row["updated_at"],

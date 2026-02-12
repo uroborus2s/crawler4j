@@ -15,12 +15,15 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from src.core.atm.models import (
     AutomationTask,
     TaskNotFoundError,
     TaskRun,
     TaskStatus,
+    TriggerConfig,
+    TriggerType,
 )
 from src.core.atm.repository import TaskRepository, get_task_repository
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
@@ -45,8 +48,7 @@ class TaskService:
         self._scheduler = AsyncIOScheduler()
         self._started = False
         
-        # 订阅模块禁用事件 (To be implemented properly with new model)
-        # get_event_bus().subscribe(EventType.MODULE_DISABLED, self._on_module_disabled)
+        self._started = False
 
     async def start(self):
         """启动 ATM 服务 (恢复状态、启动调度器)。"""
@@ -86,7 +88,7 @@ class TaskService:
         """加载已有的 Cron 任务到调度器。"""
         tasks = await self.list_tasks()
         for task in tasks:
-            if task.cron_expression:
+            if task.trigger_config:
                 self._add_scheduler_job(task)
 
     def _add_scheduler_job(self, task: AutomationTask):
@@ -96,29 +98,58 @@ class TaskService:
             if self._scheduler.get_job(task.id):
                 self._scheduler.remove_job(task.id)
             
-            # Use standard cron trigger
-            trigger = CronTrigger.from_crontab(task.cron_expression)
+            trigger = None
             
-            self._scheduler.add_job(
-                self._run_task_job,
-                trigger=trigger,
-                id=task.id,
-                name=task.name,
-                args=[task.id],
-                replace_existing=True
-            )
-            logger.info(f"[ATM] Scheduled task {task.name} ({task.cron_expression})")
+            # 1. 优先使用 trigger_config
+            if task.trigger_config:
+                if task.trigger_config.type == TriggerType.CRON:
+                    if task.trigger_config.cron_expr:
+                        trigger = CronTrigger.from_crontab(task.trigger_config.cron_expr)
+                
+                elif task.trigger_config.type == TriggerType.INTERVAL:
+                    if task.trigger_config.interval_seconds:
+                        trigger = IntervalTrigger(seconds=task.trigger_config.interval_seconds)
+                        
+                elif task.trigger_config.type == TriggerType.RANDOM:
+                    if task.trigger_config.interval_seconds:
+                        # random_range treated as jitter
+                        jitter = task.trigger_config.random_range or 0
+                        trigger = IntervalTrigger(
+                            seconds=task.trigger_config.interval_seconds,
+                            jitter=jitter
+                        )
+
+
+
+            if trigger:
+                self._scheduler.add_job(
+                    self._run_task_job,
+                    trigger=trigger,
+                    id=task.id,
+                    name=task.name,
+                    args=[task.id],
+                    replace_existing=True
+                )
+                desc = f"{task.trigger_config.type.value}" if task.trigger_config else "cron"
+                logger.info(f"[ATM] Scheduled task {task.name} (Type: {desc})")
+                
         except Exception as e:
             logger.error(f"[ATM] Failed to schedule task {task.name}: {e}")
 
     async def _run_task_job(self, task_id: str):
         """调度器回调 wrapper (因为 run_task 是 async)。"""
         # APScheduler AsyncIOScheduler 支持 async func
-        await self.run_task(task_id, params_override={"trigger": "cron"})
+        await self.run_task(task_id, params_override={"trigger": "schedule"})
 
     # === Task Configuration Management ===
 
-    async def create_task(self, name: str, strategy_id: str, cron: str | None = None, default_params: dict | None = None, max_executions: int | None = None) -> str:
+    async def create_task(
+        self, 
+        name: str, 
+        strategy_id: str, 
+        trigger_config: TriggerConfig | None = None,
+        default_params: dict | None = None, 
+    ) -> str:
         """创建新任务配置。"""
         # 验证策略是否存在
         strategy = self._loader.get(strategy_id)
@@ -128,14 +159,13 @@ class TaskService:
         task = AutomationTask(
             name=name,
             strategy_id=strategy_id,
-            cron_expression=cron,
+            trigger_config=trigger_config,
             default_params=default_params or {},
-            max_executions=max_executions,
         )
         await self._repository.save_task(task)
         
         # 更新调度
-        if task.cron_expression:
+        if task.trigger_config:
             self._add_scheduler_job(task)
             
         logger.info(f"[ATM] Created task: {task.name} ({task.id})")
@@ -214,21 +244,6 @@ class TaskService:
         ))
         asyncio.create_task(self._execute_process(run, strategy_copy, cancel_event))
         
-        # --- Lifecycle Management ---
-        if task_config.max_executions is not None:
-            task_config.max_executions -= 1
-            if task_config.max_executions <= 0:
-                logger.info(f"[ATM] Task {task_id} reached max executions. Disabling schedule.")
-                task_config.max_executions = 0
-                task_config.cron_expression = None # Disable schedule
-                # Remove from scheduler
-                if self._scheduler.get_job(task_id):
-                    self._scheduler.remove_job(task_id)
-                
-                get_event_bus().publish(Event(type=EventType.TASK_CONFIG_UPDATED, data={"task_id": task_id, "changes": "lifecycle_end"}))
-            
-            await self._repository.save_task(task_config)
-
         return run.id
 
     async def _execute_process(self, run: TaskRun, strategy: Any, cancel_event: asyncio.Event):

@@ -19,7 +19,6 @@ from src.utils.paths import get_app_data_dir
 # 数据库文件
 CONFIG_DB = "config.db"
 STATE_DB = "state.db"
-DATA_DB = "data.db"
 
 # 线程本地存储
 _thread_local = threading.local()
@@ -84,7 +83,6 @@ def init_database() -> None:
     """
     _init_config_db()
     _init_state_db()
-    _init_data_db()
 
 
 def _init_config_db() -> None:
@@ -184,24 +182,6 @@ def _init_state_db() -> None:
             
             CREATE INDEX IF NOT EXISTS idx_binding_ip ON env_ip_bindings(ip_id);
             
-            -- 任务表（ATM）
-            CREATE TABLE IF NOT EXISTS tasks (
-                id TEXT PRIMARY KEY,
-                module TEXT NOT NULL,
-                workflow TEXT,
-                name TEXT NOT NULL,
-                status TEXT NOT NULL,
-                params TEXT,
-                result TEXT,
-                error TEXT,
-                env_id TEXT,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                started_at INTEGER,
-                ended_at INTEGER
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_task_status ON tasks(status);
-            CREATE INDEX IF NOT EXISTS idx_task_module ON tasks(module);
             
             -- 环境元数据表（动态扩展字段）
             CREATE TABLE IF NOT EXISTS env_metadata (
@@ -222,17 +202,3 @@ def _init_state_db() -> None:
         """)
 
 
-def _init_data_db() -> None:
-    """初始化业务数据库。"""
-    with get_connection(DATA_DB) as conn:
-        conn.executescript("""
-            -- 数据集合表（Schema-less）
-            CREATE TABLE IF NOT EXISTS collections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                collection TEXT NOT NULL,
-                data TEXT NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now'))
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_collection_name ON collections(collection);
-        """)

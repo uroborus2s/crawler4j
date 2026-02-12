@@ -12,7 +12,6 @@
 from src.core.persistence.config_store import ConfigStore, get_config_store
 from src.core.persistence.database import (
     CONFIG_DB,
-    DATA_DB,
     STATE_DB,
     get_connection,
     get_db_path,
@@ -27,7 +26,6 @@ __all__ = [
     "get_db_path",
     "CONFIG_DB",
     "STATE_DB",
-    "DATA_DB",
     # KV Store
     "KVStore",
     "get_kv_store",
