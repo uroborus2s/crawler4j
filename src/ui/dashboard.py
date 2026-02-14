@@ -6,6 +6,8 @@
     - 模块概览
 """
 
+import asyncio
+
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
     QFrame,
@@ -17,7 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.atm import TaskStatus, get_task_service
+from src.core.atm import JobState, get_task_service
 from src.core.mms import ModuleStatus, get_module_registry
 from src.core.rem import EnvStatus
 
@@ -37,7 +39,7 @@ class StatCard(QFrame):
         self._setup_ui(title, value, subtitle, color)
     
     def _setup_ui(self, title: str, value: str, subtitle: str, color: str):
-        self.setStyleSheet("""
+        self.setStyleSheet(f"""
             StatCard {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                     stop:0 rgba(99, 102, 241, 0.2),
@@ -121,14 +123,14 @@ class DashboardPage(QWidget):
         cards_grid = QGridLayout()
         cards_grid.setSpacing(16)
         
-        # 任务统计
-        self.running_card = StatCard("运行中任务", "0", "正在执行", "#facc15")
+        # 任务 (Job) 统计
+        self.running_card = StatCard("活跃作业", "0", "正在运行", "#facc15")
         cards_grid.addWidget(self.running_card, 0, 0)
         
-        self.completed_card = StatCard("已完成任务", "0", "今日完成", "#4ade80")
+        self.completed_card = StatCard("已完成作业", "0", "Batch Completed", "#4ade80")
         cards_grid.addWidget(self.completed_card, 0, 1)
         
-        self.failed_card = StatCard("失败任务", "0", "需要关注", "#f87171")
+        self.failed_card = StatCard("异常作业", "0", "需要关注", "#f87171")
         cards_grid.addWidget(self.failed_card, 0, 2)
         
         # 环境统计
@@ -201,23 +203,27 @@ class DashboardPage(QWidget):
     
     def load_data(self):
         """加载统计数据。"""
-        self._load_task_stats()
+        # Async load requires qasync loop or fire & forget
+        asyncio.create_task(self._load_data_async())
+
+    async def _load_data_async(self):
         self._load_env_stats()
         self._load_module_stats()
+        await self._load_job_stats()
     
-    def _load_task_stats(self):
-        """加载任务统计。"""
+    async def _load_job_stats(self):
+        """加载作业统计。"""
         try:
             service = get_task_service()
-            tasks = service.list_recent(100)
+            jobs = await service.list_jobs()
             
-            running = sum(1 for t in tasks if t.status == TaskStatus.RUNNING)
-            completed = sum(1 for t in tasks if t.status == TaskStatus.SUCCEEDED)
-            failed = sum(1 for t in tasks if t.status == TaskStatus.FAILED)
+            active = sum(1 for j in jobs if j.state == JobState.ACTIVE)
+            completed = sum(1 for j in jobs if j.state == JobState.COMPLETED)
+            error = sum(1 for j in jobs if j.state == JobState.ERROR)
             
-            self.running_card.set_value(str(running))
+            self.running_card.set_value(str(active))
             self.completed_card.set_value(str(completed))
-            self.failed_card.set_value(str(failed))
+            self.failed_card.set_value(str(error))
         except Exception:
             pass
     

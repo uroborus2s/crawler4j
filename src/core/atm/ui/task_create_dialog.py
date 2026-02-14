@@ -1,9 +1,11 @@
-"""新建任务弹窗。
+"""新建任务(Job)弹窗。
 
-提供创建自动化任务的界面，支持：
-    - 任务名称输入
-    - 策略选择下拉框
-    - Cron 定时配置 (可选)
+提供创建作业的界面，支持：
+    - 作业名称
+    - 作业类型 (Batch/Service)
+    - 策略选择
+    - 并发数配置
+    - 触发器配置
 """
 
 from PyQt6.QtWidgets import (
@@ -11,46 +13,41 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
-    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from src.core.atm.models import TriggerConfig, TriggerType
-from src.core.tsm import TaskStrategy, get_strategy_loader
+from src.core.atm.models import Job, JobType, TriggerType
+from src.core.tsm import get_strategy_loader
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
+from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
 
 class TaskCreateDialog(QDialog):
-    """新建任务弹窗。"""
+    """新建作业弹窗。"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, job: Job | None = None):
         super().__init__(parent)
-        self._strategies: list[TaskStrategy] = []
+        self._strategies = []
         self._selected_strategy_id: str = ""
+        self._job = job  # Existing job for editing
         self._setup_ui()
         self._load_strategies()
+        
+        if self._job:
+             self._init_form_data()
 
     def _setup_ui(self):
-        self.setWindowTitle("新建自动化任务")
-        self.setMinimumSize(450, 350)
+        self.setWindowTitle("新建任务 (Job)")
+        self.setMinimumSize(500, 450)
         self.setStyleSheet("""
             QDialog {
                 background: rgb(30, 30, 40);
             }
             QLabel { color: white; }
-            QLineEdit {
-                background: rgba(50, 50, 60, 0.9);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 4px;
-                padding: 10px;
-                min-width: 250px;
-            }
-            QCheckBox { color: white; }
         """)
 
         layout = QVBoxLayout(self)
@@ -58,20 +55,29 @@ class TaskCreateDialog(QDialog):
         layout.setSpacing(20)
 
         # 标题
-        title = QLabel("新建自动化任务")
+        title_text = "编辑任务 (Job)" if self._job else "新建任务 (Job)"
+        title = QLabel(title_text)
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
         layout.addWidget(title)
 
         # 表单
         form = QFormLayout()
         form.setSpacing(16)
+        # label alignment
+        # label alignment
 
-        # 任务名称
+        # 1. 任务名称
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("例如: 每日抢票任务")
+        self.name_edit.setPlaceholderText("例如: 每日数据采集")
         form.addRow("任务名称:", self.name_edit)
 
-        # 策略选择
+        # 2. 作业类型
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("批处理 (Batch)", JobType.BATCH.value)
+        self.type_combo.addItem("常驻服务 (Service)", JobType.SERVICE.value)
+        form.addRow("作业类型:", self.type_combo)
+
+        # 3. 策略选择
         self.strategy_combo = QComboBox()
         self.strategy_combo.setMinimumWidth(250)
         form.addRow("选择策略:", self.strategy_combo)
@@ -81,20 +87,27 @@ class TaskCreateDialog(QDialog):
         self.strategy_preview.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 12px;")
         self.strategy_preview.setWordWrap(True)
         form.addRow("", self.strategy_preview)
+        
+        # 4. 并发配置
+        self.concurrency_spin = QSpinBox()
+        self.concurrency_spin.setRange(1, 100)
+        self.concurrency_spin.setValue(1)
+        self.concurrency_spin.setSuffix(" 个实例")
+        form.addRow("目标并发:", self.concurrency_spin)
 
-        # 触发方式
+        # 5. 触发方式
         self.trigger_combo = QComboBox()
-        self.trigger_combo.addItem("手动执行", "manual")
+        self.trigger_combo.addItem("手动触发", "manual")
         self.trigger_combo.addItem("Cron 定时", TriggerType.CRON.value)
-        self.trigger_combo.addItem("固定间隔", TriggerType.INTERVAL.value)
-        self.trigger_combo.addItem("随机间隔", TriggerType.RANDOM.value)
+        # Service type acts as "Always On" if manual+active, so Trigger mainly for Batch or scheduled restart?
+        # For simplicity, keep options.
         self.trigger_combo.currentIndexChanged.connect(self._on_trigger_changed)
         form.addRow("触发方式:", self.trigger_combo)
 
         # 触发参数 (Stacked)
         self.trigger_stack = QStackedWidget()
         
-        # page 0: manual (empty)
+        # page 0: manual
         self.trigger_stack.addWidget(QWidget())
         
         # page 1: cron
@@ -105,36 +118,6 @@ class TaskCreateDialog(QDialog):
         self.cron_edit.setPlaceholderText("0 8 * * *")
         layout_cron.addRow("Cron 表达式:", self.cron_edit)
         self.trigger_stack.addWidget(page_cron)
-        
-        # page 2: interval
-        page_interval = QWidget()
-        layout_interval = QFormLayout(page_interval)
-        layout_interval.setContentsMargins(0, 0, 0, 0)
-        self.interval_spin = QSpinBox()
-        self.interval_spin.setRange(1, 86400 * 30) # 1s to 30 days
-        self.interval_spin.setValue(60)
-        self.interval_spin.setSuffix(" 秒")
-        layout_interval.addRow("执行间隔:", self.interval_spin)
-        self.trigger_stack.addWidget(page_interval)
-        
-        # page 3: random
-        page_random = QWidget()
-        layout_random = QFormLayout(page_random)
-        layout_random.setContentsMargins(0, 0, 0, 0)
-        
-        self.rand_interval_spin = QSpinBox()
-        self.rand_interval_spin.setRange(1, 86400 * 30)
-        self.rand_interval_spin.setValue(60)
-        self.rand_interval_spin.setSuffix(" 秒")
-        layout_random.addRow("基准间隔:", self.rand_interval_spin)
-        
-        self.rand_jitter_spin = QSpinBox()
-        self.rand_jitter_spin.setRange(1, 3600)
-        self.rand_jitter_spin.setValue(10)
-        self.rand_jitter_spin.setSuffix(" 秒")
-        layout_random.addRow("随机浮动(±):", self.rand_jitter_spin)
-        
-        self.trigger_stack.addWidget(page_random)
         
         layout.addLayout(form)
         layout.addWidget(self.trigger_stack)
@@ -158,7 +141,7 @@ class TaskCreateDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
-        create_btn = QPushButton("创建")
+        create_btn = QPushButton("保存" if self._job else "创建")
         create_btn.setStyleSheet("""
             QPushButton {
                 background: rgba(99, 102, 241, 0.9);
@@ -178,6 +161,33 @@ class TaskCreateDialog(QDialog):
         # 监听策略选择变化
         self.strategy_combo.currentIndexChanged.connect(self._on_strategy_changed)
 
+    def _init_form_data(self):
+        """初始化表单数据 (编辑模式)。"""
+        job = self._job
+        self.setWindowTitle(f"编辑任务: {job.name}")
+        
+        self.name_edit.setText(job.name)
+        
+        # Type
+        index = self.type_combo.findData(job.type.value)
+        if index >= 0:
+            self.type_combo.setCurrentIndex(index)
+            
+        # Strategy (will be set in _load_strategies or after)
+        # We need to set it after loading strategies.
+        
+        # Concurrency
+        self.concurrency_spin.setValue(job.concurrency_target)
+        
+        # Trigger
+        if job.trigger.type == TriggerType.CRON:
+            idx = self.trigger_combo.findData(TriggerType.CRON.value)
+            self.trigger_combo.setCurrentIndex(idx)
+            self.cron_edit.setText(job.trigger.cron_expr or "")
+        else:
+            idx = self.trigger_combo.findData("manual")
+            self.trigger_combo.setCurrentIndex(idx)
+
     def _load_strategies(self):
         """加载策略列表。"""
         loader = get_strategy_loader()
@@ -185,12 +195,19 @@ class TaskCreateDialog(QDialog):
 
         self.strategy_combo.clear()
         for strategy in self._strategies:
-            display_name = f"{strategy.name} ({strategy.scaling.max_concurrency} 并发)"
+            # 策略本身有 max_concurrency，但 V2 中由 Job 控制
+            display_name = f"{strategy.name}"
             self.strategy_combo.addItem(display_name, strategy.id)
 
         if not self._strategies:
             self.strategy_combo.addItem("-- 暂无策略，请先创建 --", "")
             self.strategy_preview.setText("⚠️ 请先在『策略管理』中创建策略")
+            
+        # If editing, select the current strategy
+        if self._job:
+            index = self.strategy_combo.findData(self._job.strategy_id)
+            if index >= 0:
+                self.strategy_combo.setCurrentIndex(index)
 
     def _on_strategy_changed(self, index: int):
         """策略选择变化。"""
@@ -206,14 +223,10 @@ class TaskCreateDialog(QDialog):
         lines = []
         lines.append(f"环境: {strategy.selector.env_type.value}")
         if strategy.execution:
-            lines.append(f"执行: {strategy.execution.module}/{strategy.execution.workflow or 'default'}")
-            lines.append(f"超时: {strategy.execution.timeout}s")
+            lines.append(f"执行: {strategy.execution.module}")
         self.strategy_preview.setText(" | ".join(lines))
 
     def _on_trigger_changed(self, index: int):
-        """触发方式切换。"""
-        # manual=0, cron=1, interval=2, random=3
-        # StackedWidget index matches combo index logic
         self.trigger_stack.setCurrentIndex(index)
 
     def _on_create(self):
@@ -227,30 +240,23 @@ class TaskCreateDialog(QDialog):
 
         self.accept()
 
-    def get_task_data(self) -> dict:
-        """获取任务创建数据。"""
+    def get_job_data(self) -> dict:
+        """获取 Job 创建数据。"""
         trigger_type_val = self.trigger_combo.currentData()
-        trigger_config = None
+        trigger_config = {}
         
         if trigger_type_val == TriggerType.CRON.value:
-            trigger_config = TriggerConfig(
-                type=TriggerType.CRON,
-                cron_expr=self.cron_edit.text().strip()
-            )
-        elif trigger_type_val == TriggerType.INTERVAL.value:
-            trigger_config = TriggerConfig(
-                type=TriggerType.INTERVAL,
-                interval_seconds=self.interval_spin.value()
-            )
-        elif trigger_type_val == TriggerType.RANDOM.value:
-             trigger_config = TriggerConfig(
-                type=TriggerType.RANDOM,
-                interval_seconds=self.rand_interval_spin.value(),
-                random_range=self.rand_jitter_spin.value()
-            )
+            trigger_config = {
+                "type": TriggerType.CRON.value,
+                "cron_expr": self.cron_edit.text().strip()
+            }
+        else:
+            trigger_config = {"type": "manual"}
 
         return {
             "name": self.name_edit.text().strip(),
             "strategy_id": self._selected_strategy_id,
+            "job_type": self.type_combo.currentData(),
+            "concurrency": self.concurrency_spin.value(),
             "trigger_config": trigger_config,
         }

@@ -1,6 +1,6 @@
-"""任务详情对话框。
+"""作业(Job)详情对话框。
 
-显示任务配置信息及运行历史（日志、结果）。
+显示作业配置信息及下属任务(Task)列表。
 """
 
 import asyncio
@@ -13,9 +13,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMessageBox,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QTabWidget,
     QTextEdit,
@@ -23,19 +21,19 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.atm.models import AutomationTask, TaskRun, TaskStatus
+from src.core.atm.models import Job, Task, TaskStatus
 from src.core.atm.service import get_task_service
 from src.ui.components.table import SkyTableWidget
 
 
-class TaskDetailDialog(QDialog):
-    """任务详情对话框。"""
+class JobDetailDialog(QDialog):
+    """作业详情对话框。"""
     
-    def __init__(self, task_id: str, parent=None):
+    def __init__(self, job_id: str, parent=None):
         super().__init__(parent)
-        self.task_id = task_id
-        self.setWindowTitle("任务详情")
-        self.resize(900, 600)
+        self.job_id = job_id
+        self.setWindowTitle("作业详情 (V2)")
+        self.resize(1000, 700)
         self.setModal(True)
         
         self._setup_ui()
@@ -46,11 +44,11 @@ class TaskDetailDialog(QDialog):
         
         # 顶部信息栏
         info_layout = QHBoxLayout()
-        self.name_label = QLabel("任务名称: Loading...")
+        self.name_label = QLabel("作业名称: Loading...")
         self.name_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         info_layout.addWidget(self.name_label)
         
-        self.id_label = QLabel(f"ID: {self.task_id}")
+        self.id_label = QLabel(f"ID: {self.job_id}")
         self.id_label.setStyleSheet("color: gray;")
         info_layout.addWidget(self.id_label)
         
@@ -61,19 +59,19 @@ class TaskDetailDialog(QDialog):
         
         layout.addLayout(info_layout)
         
-        # 选项卡：运行历史 | 任务配置
+        # 选项卡
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
         
-        # Tab 1: 运行历史
-        self.history_tab = QWidget()
-        self._setup_history_tab()
-        self.tabs.addTab(self.history_tab, "运行历史")
+        # Tab 1: 任务列表
+        self.tasks_tab = QWidget()
+        self._setup_tasks_tab()
+        self.tabs.addTab(self.tasks_tab, "任务实例 (Tasks)")
         
-        # Tab 2: 配置 (Read-only for now)
+        # Tab 2: 作业配置
         self.config_tab = QWidget()
         self._setup_config_tab()
-        self.tabs.addTab(self.config_tab, "配置信息")
+        self.tabs.addTab(self.config_tab, "作业配置")
         
         # 底部按钮
         btn_layout = QHBoxLayout()
@@ -83,25 +81,30 @@ class TaskDetailDialog(QDialog):
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
 
-    def _setup_history_tab(self):
-        layout = QVBoxLayout(self.history_tab)
+    def _setup_tasks_tab(self):
+        layout = QVBoxLayout(self.tasks_tab)
         
-        # History Table
-        self.run_table = SkyTableWidget()
-        columns = ["运行ID", "状态", "开始时间", "耗时", "环境ID", "结果摘要"]
-        self.run_table.setColumnCount(len(columns))
-        self.run_table.setHorizontalHeaderLabels(columns)
-        self.run_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.run_table.cellClicked.connect(self._on_run_selected)
+        # Refresh Btn
+        refresh_btn = QPushButton("🔄 刷新列表")
+        refresh_btn.clicked.connect(lambda: self._load_data())
+        layout.addWidget(refresh_btn)
+
+        # Task Table
+        self.task_table = SkyTableWidget()
+        columns = ["Task ID", "状态", "环境ID", "环境租约", "开始时间", "结束时间", "结果/错误"]
+        self.task_table.setColumnCount(len(columns))
+        self.task_table.setHorizontalHeaderLabels(columns)
+        self.task_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.task_table.cellClicked.connect(self._on_task_selected)
         
-        layout.addWidget(self.run_table, stretch=1)
+        layout.addWidget(self.task_table, stretch=1)
         
-        # Run Details (Log/Error)
-        layout.addWidget(QLabel("选中运行详情:"))
-        self.run_detail_text = QTextEdit()
-        self.run_detail_text.setReadOnly(True)
-        self.run_detail_text.setPlaceholderText("点击上方记录查看详情...")
-        layout.addWidget(self.run_detail_text, stretch=1)
+        # Task Details
+        layout.addWidget(QLabel("选中任务详情:"))
+        self.task_detail_text = QTextEdit()
+        self.task_detail_text.setReadOnly(True)
+        self.task_detail_text.setPlaceholderText("点击上方任务查看详情...")
+        layout.addWidget(self.task_detail_text, stretch=1)
 
     def _setup_config_tab(self):
         layout = QVBoxLayout(self.config_tab)
@@ -115,70 +118,74 @@ class TaskDetailDialog(QDialog):
     async def _load_data_async(self):
         try:
             service = get_task_service()
-            task = await service.get_task(self.task_id)
-            if not task:
-                self.name_label.setText("任务不存在")
+            job = await service.get_job(self.job_id)
+            if not job:
+                self.name_label.setText("作业不存在")
                 return
             
-            self._update_info(task)
+            self._update_info(job)
             
-            runs = await service.list_task_runs(self.task_id, limit=50)
-            self._render_history(runs)
+            tasks = await service.list_tasks(self.job_id)
+            # Sort by created_at desc
+            tasks.sort(key=lambda x: x.created_at, reverse=True)
+            self._render_tasks(tasks)
         except Exception as e:
             self.name_label.setText(f"Error: {e}")
 
-    def _render_history(self, runs: list[TaskRun]):
-        self.run_table.setRowCount(0)
-        for run in runs:
-            row = self.run_table.rowCount()
-            self.run_table.insertRow(row)
+    def _render_tasks(self, tasks: list[Task]):
+        self.task_table.setRowCount(0)
+        for task in tasks:
+            row = self.task_table.rowCount()
+            self.task_table.insertRow(row)
             
-            # IDs
-            id_item = QTableWidgetItem(run.id[:8])
-            id_item.setData(Qt.ItemDataRole.UserRole, run.id)
-            self.run_table.setItem(row, 0, id_item)
+            # ID
+            id_item = QTableWidgetItem(task.id[:8])
+            id_item.setData(Qt.ItemDataRole.UserRole, task) # Meta data store task object
+            self.task_table.setItem(row, 0, id_item)
             
             # Status
-            status_item = QTableWidgetItem(run.status.value)
-            # Simple color mapping could be added here
-            self.run_table.setItem(row, 1, status_item)
-            
-            # Time
-            start_str = datetime.fromtimestamp(run.start_time).strftime("%m-%d %H:%M:%S")
-            self.run_table.setItem(row, 2, QTableWidgetItem(start_str))
-            
-            # Duration
-            duration = "-"
-            if run.end_time:
-                duration = f"{run.end_time - run.start_time}s"
-            self.run_table.setItem(row, 3, QTableWidgetItem(duration))
+            self.task_table.setItem(row, 1, QTableWidgetItem(task.status.value))
             
             # Env
-            self.run_table.setItem(row, 4, QTableWidgetItem(str(run.env_id or "-")))
+            self.task_table.setItem(row, 2, QTableWidgetItem(str(task.env_id or "-")))
+            
+            # Lease
+            self.task_table.setItem(row, 3, QTableWidgetItem(str(task.lease_id or "-")[:8]))
+            
+            # Start
+            start_str = "-"
+            if task.started_at:
+                start_str = datetime.fromtimestamp(task.started_at).strftime("%H:%M:%S")
+            self.task_table.setItem(row, 4, QTableWidgetItem(start_str))
+            
+            # End
+            end_str = "-"
+            if task.finished_at:
+                end_str = datetime.fromtimestamp(task.finished_at).strftime("%H:%M:%S")
+            self.task_table.setItem(row, 5, QTableWidgetItem(end_str))
             
             # Result
-            res = "Success" if run.result and run.result.success else ("Failed" if run.error else "-")
-            self.run_table.setItem(row, 5, QTableWidgetItem(res))
+            msg = task.message or task.error or "-"
+            self.task_table.setItem(row, 6, QTableWidgetItem(msg))
 
-    def _update_info(self, task: AutomationTask):
-        self.name_label.setText(f"任务名称: {task.name}")
-        max_runs = str(task.max_executions) if task.max_executions is not None else "∞"
-        self.strategy_label.setText(f"策略: {task.strategy_id} | Cron: {task.cron_expression or '无'} | 剩余次数: {max_runs}")
-        self.config_text.setText(f"Defaults: {task.default_params}")
+    def _update_info(self, job: Job):
+        self.name_label.setText(f"作业名称: {job.name}")
+        self.strategy_label.setText(f"策略: {job.strategy_id} | 并发: {job.concurrency_target}")
+        
+        info = f"Type: {job.type.value}\n"
+        info += f"Trigger: {job.trigger}\n"
+        info += f"Params: {job.params}\n"
+        info += f"Created: {datetime.fromtimestamp(job.created_at)}\n"
+        self.config_text.setText(info)
     
-    def _on_run_selected(self, row, col):
-        run_id = self.run_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        asyncio.create_task(self._load_run_detail(run_id))
-
-    async def _load_run_detail(self, run_id):
-        try:
-            service = get_task_service()
-            run = await service.get_run(run_id)
-            if run:
-                details = f"ID: {run.id}\nStatus: {run.status.value}\n"
-                details += f"Trigger: {run.trigger_type}\n"
-                details += f"Error: {run.error}\n" if run.error else ""
-                details += f"Result: {run.result}\n" if run.result else ""
-                self.run_detail_text.setText(details)
-        except Exception as e:
-            self.run_detail_text.setText(str(e))
+    def _on_task_selected(self, row, col):
+        item = self.task_table.item(row, 0)
+        task = item.data(Qt.ItemDataRole.UserRole)
+        if task:
+            details = f"Task ID: {task.id}\n"
+            details += f"Status: {task.status.value}\n"
+            details += f"Environment: {task.env_id}\n"
+            details += f"Lease: {task.lease_id}\n"
+            details += f"Message: {task.message}\n"
+            details += f"Error: {task.error}\n"
+            self.task_detail_text.setText(details)

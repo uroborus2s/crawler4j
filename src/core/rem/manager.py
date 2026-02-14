@@ -119,6 +119,7 @@ class EnvironmentManager:
         # 2. 无可用环境则尝试创建
         if not env:
             if not self.pool.can_create():
+                from src.core.rem.models import EnvUnavailableError
                 raise EnvUnavailableError(
                     "无可用环境且达到配额上限",
                     stage="ACQUIRE",
@@ -127,6 +128,7 @@ class EnvironmentManager:
             
             provider = get_provider(default_provider)
             if not provider:
+                from src.core.rem.models import EnvUnavailableError
                 raise EnvUnavailableError(
                     f"Provider 未注册: {default_provider}",
                     stage="CREATE",
@@ -143,6 +145,17 @@ class EnvironmentManager:
         )
         
         return lease
+
+    async def acquire_atomic(
+        self,
+        requirement: EnvRequirement,
+        timeout: int = 60,
+    ) -> EnvLease:
+        """原子申请环境租约 (V2 Mode).
+        
+        直接通过 DB 锁抢占环境，适用于高并发场景。
+        """
+        return await self.lease_manager.acquire_atomic(requirement, timeout)
     
     async def reset(self, env: Environment) -> None:
         """重置环境。"""

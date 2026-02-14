@@ -2,7 +2,6 @@
 
 核心组件:
     - TaskStrategy: V2 策略模型
-    - StrategyOrchestrator: 策略编排器
     - StrategyLoader: 策略加载器
 """
 
@@ -31,12 +30,6 @@ from src.core.tsm.models import (
     TeardownPolicy,
     ValueType,
 )
-from src.core.tsm.orchestrator import (
-    LogCallback,
-    LogEntry,
-    StrategyOrchestrator,
-    get_orchestrator,
-)
 
 __all__ = [
     # V2 策略模型
@@ -63,9 +56,4 @@ __all__ = [
     "StrategyLoader",
     "get_strategy_loader",
     "init_strategy_loader",
-    # 编排器
-    "StrategyOrchestrator",
-    "get_orchestrator",
-    "LogEntry",
-    "LogCallback",
 ]

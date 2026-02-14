@@ -9,6 +9,7 @@ LeaseManager 为任务运行发放租约，处理超时与异常兜底。
 import asyncio
 import json
 import time
+import uuid
 from typing import Any
 
 from src.core.foundation.logging import logger
@@ -390,7 +391,17 @@ class LeaseManager:
         Returns:
             环境租约
         """
+        from src.core.rem.models import EnvUnavailableError
+
         async with self._lock:
+            # 状态守卫: 拒绝非 READY 环境，防止并发竞争导致重复 lease
+            if env.status != EnvStatus.READY:
+                raise EnvUnavailableError(
+                    f"环境 {env.id} 已被占用 (status={env.status.value})",
+                    stage="LEASE",
+                    hint="请等待环境释放或选择其他环境",
+                )
+            
             now = int(time.time())
             expires_at = now + timeout if timeout else None
             
@@ -414,6 +425,93 @@ class LeaseManager:
             logger.info(f"[REM] 租约分配: lease={lease.id[:8]}... env={env.name[:8]}... task={task_run_id[:8]}...")
             
             return lease
+
+    async def acquire_atomic(
+        self,
+        requirement: EnvRequirement,
+        timeout: int = 60,
+    ) -> EnvLease:
+        """Atomic acquire using DB transaction to prevent race conditions."""
+        loop = asyncio.get_running_loop()
+        
+        def _execute_atomic_lease():
+            with get_connection(STATE_DB) as conn:
+                # SQLite IMMEDIATE transaction to lock DB for writing
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    # 1. Find available env
+                    cursor = conn.execute(
+                        """
+                        SELECT id, name, status, kind FROM environments 
+                        WHERE status = ? AND kind = ? 
+                        ORDER BY last_used_at ASC 
+                        LIMIT 1
+                        """,
+                        (EnvStatus.READY.value, requirement.kind.value)
+                    )
+                    row = cursor.fetchone()
+                    if not row:
+                        return None
+                    
+                    env_id = row["id"]
+                    now = int(time.time())
+                    expires_at = now + timeout if timeout else None
+                    lease_id = str(uuid.uuid4())
+                    
+                    # 2. Update env status
+                    conn.execute(
+                        """
+                        UPDATE environments 
+                        SET status = ?, lease_id = ?, task_run_id = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (EnvStatus.BUSY.value, lease_id, requirement.task_run_id, now, env_id)
+                    )
+                    
+                    conn.commit()
+                    
+                    return {
+                        "env_id": env_id,
+                        "lease_id": lease_id,
+                        "acquired_at": now,
+                        "expires_at": expires_at,
+                        "env_name": row["name"]
+                    }
+                except Exception as e:
+                    conn.rollback()
+                    raise e
+
+        # Run SQL in thread
+        result = await loop.run_in_executor(None, _execute_atomic_lease)
+        
+        if not result:
+            from src.core.rem.models import EnvUnavailableError
+            raise EnvUnavailableError(
+                f"无可用环境 (kind={requirement.kind})",
+                stage="LEASE_ATOMIC"
+            )
+
+        # 3. Update In-Memory Cache (EnvPool)
+        # 必须更新缓存，否则后续 get_env 会读到旧状态
+        # 注意：这里可能存在微小的 Race，但因为我们是"权威源->缓存"的单向更新，且持有 lease_id，风险可控。
+        env = await self.pool.get(result["env_id"])
+        if env:
+            env.status = EnvStatus.BUSY
+            env.lease_id = result["lease_id"]
+            env.task_run_id = requirement.task_run_id
+            env.updated_at = result["acquired_at"]
+        
+        # 4. Return Lease Object
+        lease = EnvLease(
+            id=result["lease_id"],
+            env_id=result["env_id"],
+            task_run_id=requirement.task_run_id,
+            acquired_at=result["acquired_at"],
+            expires_at=result["expires_at"]
+        )
+        self._leases[lease.id] = lease
+        logger.info(f"[REM] Atomic Lease: lease={lease.id[:8]}... env={result['env_name']}... task={requirement.task_run_id[:8]}...")
+        return lease
     
     async def release(self, lease: EnvLease, token: str) -> Environment | None:
         """释放租约。

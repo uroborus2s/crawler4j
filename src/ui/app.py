@@ -61,9 +61,6 @@ def main():
         env_manager = get_environment_manager()
         loop.run_until_complete(env_manager.startup())
         
-        # TSM Orchestrator 依赖注入（必须在 REM 启动之后）
-        from src.core.tsm.adapters import configure_orchestrator
-        configure_orchestrator()
         
         window = Shell()
         

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from src.core.tsm.models import StrategyProfile
+from src.core.tsm.models import TaskStrategy
 
 
 class AdmissionResult(StrEnum):
@@ -29,8 +29,8 @@ class AdmissionDecision:
     Attributes:
         result: 准入结果
         reason: 原因说明
-        wait_hint: 等待提示（如 "Waiting for quota: module:ctrip"）
-        priority: 队列优先级（用于排队时确定顺序）
+        wait_hint: 等待提示
+        priority: 队列优先级
     """
     result: AdmissionResult
     reason: str = ""
@@ -52,7 +52,7 @@ class TaskSubmission:
     task_id: str
     module_name: str
     workflow_name: str = ""
-    tags: dict[str, str] = None
+    tags: dict[str, str] | None = None
     priority: int | None = None
     
     def __post_init__(self):
@@ -61,9 +61,9 @@ class TaskSubmission:
 
 
 class AdmissionController:
-    """准入控制器。
+    """准入控制器 (V2)。
     
-    规格 5.3.3: 通过 AdmissionController 解释并发配额策略。
+    基于 TaskStrategy 的 ScalingPolicy 检查并发配额。
     
     Usage:
         controller = AdmissionController()
@@ -77,130 +77,54 @@ class AdmissionController:
     def check(
         self,
         submission: TaskSubmission,
-        strategy: StrategyProfile,
+        strategy: TaskStrategy,
         running_tasks: list[dict[str, Any]],
     ) -> AdmissionDecision:
         """检查任务是否可以准入执行。
         
-        规格 5.3.3 准入检查：
-            1. 检查全局并发配额
-            2. 检查分组配额（模块、优先级等）
+        检查逻辑：
+            1. 检查最大并发配额（来自 strategy.scaling.max_concurrency）
+            2. 检查同模块并发（从运行任务中统计）
         
         Args:
             submission: 任务提交请求
-            strategy: 策略配置
+            strategy: V2 策略配置
             running_tasks: 当前运行中的任务列表
         
         Returns:
             准入决策
         """
-        concurrency = strategy.concurrency
-        priority = submission.priority or strategy.scheduling.default_priority
+        max_concurrency = strategy.scaling.max_concurrency
         
         # 1. 检查全局并发
-        if len(running_tasks) >= concurrency.global_max:
+        if len(running_tasks) >= max_concurrency:
             return AdmissionDecision(
                 result=AdmissionResult.QUEUED,
                 reason="global_quota_exceeded",
-                wait_hint=f"全局并发已满 ({len(running_tasks)}/{concurrency.global_max})",
-                priority=priority,
+                wait_hint=f"并发已满 ({len(running_tasks)}/{max_concurrency})",
+                priority=submission.priority or 100,
             )
         
-        # 2. 检查分组配额（只检查当前任务所匹配的桶）
-        for bucket_key, bucket_limit in concurrency.group_buckets.items():
-            # 先判断当前提交的任务是否匹配该配额桶
-            if not self._submission_matches_bucket_key(submission, bucket_key):
-                continue  # 当前任务不匹配该桶，跳过检查
-            
-            matching_count = self._count_matching_tasks(bucket_key, running_tasks, submission)
-            
-            if matching_count >= bucket_limit:
+        # 2. 检查同模块并发（同一模块的任务数不应超过 max_concurrency）
+        if submission.module_name:
+            module_running = sum(
+                1 for t in running_tasks
+                if t.get("module") == submission.module_name
+            )
+            if module_running >= max_concurrency:
                 return AdmissionDecision(
                     result=AdmissionResult.QUEUED,
-                    reason="bucket_quota_exceeded",
-                    wait_hint=f"配额已满: {bucket_key} ({matching_count}/{bucket_limit})",
-                    priority=priority,
+                    reason="module_quota_exceeded",
+                    wait_hint=f"模块并发已满: {submission.module_name} ({module_running}/{max_concurrency})",
+                    priority=submission.priority or 100,
                 )
         
         # 3. 通过准入
         return AdmissionDecision(
             result=AdmissionResult.ADMITTED,
             reason="ok",
-            priority=priority,
+            priority=submission.priority or 100,
         )
-    
-    def _count_matching_tasks(
-        self,
-        bucket_key: str,
-        running_tasks: list[dict[str, Any]],
-        submission: TaskSubmission,
-    ) -> int:
-        """统计匹配配额桶的任务数量。
-        
-        配额桶格式: "key:value"
-            - "module:ctrip" -> 匹配模块名
-            - "priority:high" -> 匹配优先级标签
-            - "tag:vip" -> 匹配任务标签
-        """
-        if ":" not in bucket_key:
-            return 0
-        
-        key_type, key_value = bucket_key.split(":", 1)
-        count = 0
-        
-        for task in running_tasks:
-            if self._task_matches_bucket(task, key_type, key_value):
-                count += 1
-        
-        return count
-    
-    def _task_matches_bucket(
-        self,
-        task: dict[str, Any],
-        key_type: str,
-        key_value: str,
-    ) -> bool:
-        """检查运行中的任务是否匹配配额桶。"""
-        if key_type == "module":
-            return task.get("module") == key_value
-        elif key_type == "priority":
-            # 假设 priority:high 表示优先级 >= 200
-            if key_value == "high":
-                return task.get("priority", 100) >= 200
-            elif key_value == "low":
-                return task.get("priority", 100) < 100
-        elif key_type == "tag":
-            tags = task.get("tags", {})
-            return key_value in tags or tags.get(key_value) is not None
-        
-        return False
-    
-    def _submission_matches_bucket_key(
-        self,
-        submission: TaskSubmission,
-        bucket_key: str,
-    ) -> bool:
-        """检查提交的任务是否匹配配额桶。
-        
-        例如: "module:ctrip" 只匹配 module_name="ctrip" 的任务
-        """
-        if ":" not in bucket_key:
-            return False
-        
-        key_type, key_value = bucket_key.split(":", 1)
-        
-        if key_type == "module":
-            return submission.module_name == key_value
-        elif key_type == "priority":
-            priority = submission.priority or 100
-            if key_value == "high":
-                return priority >= 200
-            elif key_value == "low":
-                return priority < 100
-        elif key_type == "tag":
-            return key_value in submission.tags
-        
-        return False
 
 
 # 全局单例
