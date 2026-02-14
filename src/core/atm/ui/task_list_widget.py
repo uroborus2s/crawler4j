@@ -140,6 +140,7 @@ class TaskListWidget(QWidget):
 
         self.table = SkyDataTable(columns=columns_config)
         self.table.set_render_callback(self._render_row)
+        self.table.cell_clicked.connect(self._on_cell_clicked)
         layout.addWidget(self.table)
 
     def load_data(self):
