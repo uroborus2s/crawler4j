@@ -3,9 +3,11 @@
 import pytest
 
 from src.core.mms.models import (
+    DetailMenuItem,
     ModuleManifest,
     ModuleSource,
     ModuleStatus,
+    UIExtensionInfo,
     WorkflowInfo,
 )
 from src.core.mms.scanner import ModuleScanner
@@ -26,6 +28,18 @@ class TestModuleManifest:
                     "display_name": "登录流程",
                 }
             ],
+            "ui_extension": {
+                "type": "micro_app",
+                "entry": "ui:AccountConfigPage",
+                "trusted": True,
+                "detail_menu": [
+                    {
+                        "id": "accounts",
+                        "label": "账号管理",
+                        "entry": "ui:AccountConfigPage",
+                    }
+                ],
+            },
         }
         
         manifest = ModuleManifest.from_dict(data)
@@ -34,18 +48,29 @@ class TestModuleManifest:
         assert manifest.version == "1.0.0"
         assert len(manifest.workflows) == 1
         assert manifest.workflows[0].name == "login_flow"
+        assert manifest.ui_extension.type == "micro_app"
+        assert manifest.ui_extension.trusted is True
+        assert manifest.ui_extension.detail_menu[0].entry == "ui:AccountConfigPage"
     
     def test_to_dict(self):
         """测试序列化。"""
         manifest = ModuleManifest(
             name="test_module",
             workflows=[WorkflowInfo(name="flow1")],
+            ui_extension=UIExtensionInfo(
+                type="micro_app",
+                entry="ui:AccountConfigPage",
+                trusted=True,
+                detail_menu=[DetailMenuItem(id="accounts", entry="ui:AccountConfigPage")],
+            ),
         )
         
         data = manifest.to_dict()
         
         assert data["name"] == "test_module"
         assert len(data["workflows"]) == 1
+        assert data["ui_extension"]["trusted"] is True
+        assert data["ui_extension"]["detail_menu"][0]["entry"] == "ui:AccountConfigPage"
 
 
 class TestModuleScanner:

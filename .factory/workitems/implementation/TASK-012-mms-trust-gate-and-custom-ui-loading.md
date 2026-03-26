@@ -1,6 +1,6 @@
 # TASK-012 补齐 MMS trust gate 与自定义页面加载
 
-- 状态：OPEN
+- 状态：DONE
 - 类型：TASK
 - 优先级：P1
 - 估算：1.0 人/天
@@ -19,3 +19,10 @@
 - `core:data_table:*` 之外的受支持入口至少有一条真实加载链路
 - 对 trust gate 与降级行为存在回归测试
 - 文档与实现保持一致
+
+## 完成说明
+
+- 已新增 `src/core/mms/ui_loader.py`，统一处理 trust gate、allowlist 与自定义页面加载
+- `detail_menu.entry: ui:SomePage` 已在 `ui_extension.type = micro_app` 下进入真实加载链路
+- `ModuleDetailPage` 对未受信、缺少页面类或加载异常的情况都已降级为可解释的占位页
+- 已补充 `tests/unit/test_core/test_mms/test_module_detail_page.py` 回归测试

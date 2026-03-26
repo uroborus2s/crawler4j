@@ -42,13 +42,13 @@
 ## 4. 当前不建议直接发布的原因
 
 - 当前根应用版本仍是未发布开发版 `0.1.2.dev20260326`
-- MMS 高阶合规能力仍有后续治理项
+- `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 
 ## 5. 下一版发布前必须满足
 
 - 按 [版本治理规则](version-governance.md) 将根应用从开发版切到正式版本
 - 更新 Git tag 与 release notes
-- 评估并关闭剩余治理项（当前为 `CR-003`）
+- 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
 
 ## 6. 变更记录

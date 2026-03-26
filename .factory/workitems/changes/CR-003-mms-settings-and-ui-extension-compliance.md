@@ -1,6 +1,6 @@
 # CR-003 补齐 MMS settings store 与 UI 扩展合规实现
 
-- 状态：OPEN
+- 状态：DONE
 - 类型：CR
 - 优先级：P1
 - 估算：1.5 人/天
@@ -23,8 +23,14 @@
 
 ## 当前进展
 
-- 已完成：settings store、工作流级导出、模块启停持久化、卸载时的 settings 清理策略
-- 剩余范围：trust gate / allowlist、受信代码型 UI 扩展装载、自定义页面真实加载与降级
+- 已完成：settings store、工作流级导出、模块启停持久化、trust gate / allowlist、受信代码型 UI 扩展装载、自定义页面真实加载与降级
+- 剩余范围：无
+
+## 完成说明
+
+- `TASK-011` 已补齐 settings store、工作流导出与模块状态持久化
+- `TASK-012` 已补齐 trust gate、allowlist 与 `ui:SomePage` 自定义页面加载
+- 当前 MMS 与 UI Host 已不再停留在“仅占位页”的状态，未通过 trust gate 或加载失败时会安全降级
 
 ## 完成判定
 

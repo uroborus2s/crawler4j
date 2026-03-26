@@ -48,7 +48,7 @@ Maintainer
 - Modules 应优先依赖 SDK / Contracts 暴露的稳定契约
 - Core 负责治理与编排，不负责业务语义
 - SDK 应保持可独立发布，不应反向绑死 Core 内部实现
-- 当前仍存在一处未闭环偏差：MMS 已补齐 settings store 与模块状态持久化，但 UI trust gate / 自定义页面加载仍只完成了部分设计目标
+- 当前仍存在一处未闭环偏差：真实业务站点 E2E 尚未回放，发布层面的最终确认仍需单独完成
 ## 4. 当前最重要的架构事实
 
 - Root package 的真实桌面入口已经迁移到 `src/ui/app.py`
@@ -66,8 +66,7 @@ Maintainer
 ### `ARCH-002` 模块高阶能力仍未闭环
 
 - `ctrip labor_workflow` 已恢复基础运行时兼容，但真实站点 E2E 仍需验证
-- MMS 的 settings store、工作流导出与模块状态持久化已落地
-- MMS 的模块自定义 UI 加载和 trust gate 仍未达成完整设计目标
+- MMS 的 settings store、工作流导出、模块状态持久化、trust gate 与自定义页面加载已落地
 
 ### `ARCH-003` 版本规则已收口
 

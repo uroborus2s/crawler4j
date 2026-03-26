@@ -33,22 +33,18 @@
 - `BUG-004`：`_install_from_zip()` 已改为临时目录校验 + 备份旧目录 + 原子替换，回归测试已覆盖旧文件不残留。
 - `BUG-005`：`hybrid` 已从策略模型与编辑器中移除，并补充了对应回归测试。
 
-### 3.2 `CR-003` MMS 的 settings store 与 UI 扩展合规实现仍未闭环
+### 3.2 `CR-003` 已在本轮关闭
 
-- 严重级别：P1
-- 设计影响：MMS 已补齐 settings store 与模块状态持久化，但 UI 加载与 trust gate 仍未闭环
-- 证据：
-  - `src/core/mms/settings_store.py` 已提供模块级/工作流级 settings、导出与模块状态持久化
-  - `src/core/mms/registry.py` 已在 reload/install/uninstall 路径中应用模块状态持久化
-  - `src/core/mms/ui/module_detail_page.py` 对自定义模块页面仍停留在 `TODO` 和占位页；除 `core:data_table:*` 外不会真正加载模块提供的 UI
-  - 当前代码中没有看到 `trusted` / allowlist / 白名单门控被实际执行
-- 结论：MMS 已具备配置基础设施，但 UI Host 仍未达到 SRS/设计对受信 micro-app 装载的完整要求
+- `src/core/mms/settings_store.py` 已提供模块级/工作流级 settings、导出与模块状态持久化
+- `src/core/mms/ui_loader.py` 已补齐 trust gate / allowlist / 降级策略
+- `src/core/mms/ui/module_detail_page.py` 已支持 `ui:SomePage` 的真实加载，不再只停留在占位页
+- `tests/unit/test_core/test_mms/test_module_detail_page.py` 已覆盖 DevLink 放行、外部模块默认拒绝、allowlist 放行和加载失败降级
 
 ## 4. 当前验证结果摘要
 
 | 项目 | 结果 | 说明 |
 |---|---|---|
-| `uv run pytest -q` | 通过 | `184 passed` |
+| `uv run pytest -q` | 通过 | `188 passed` |
 | Docs markdown tree | 通过 | `docs/` 已统一为单一 Markdown 文档树 |
 | `uv run ruff check .` | 通过 | 维护范围代码与常规自动化测试已通过；历史人工脚本不计入默认 gate |
 | `uv run python scripts/smoke_test_ui.py` | 通过 | `QApplication` 与 `Shell` 初始化均成功 |
@@ -62,5 +58,5 @@
 ## 6. 结论
 
 - `TASK-008` 的目标已完成：当前仓库已有可回溯的“已满足 / 未满足 / 风险”清单。
-- 项目仍处于 `IMPLEMENTATION`，当前主要剩余差距集中在 MMS 高阶合规能力。
-- `TASK-011` 已完成，后续如继续推进，应直接执行 `TASK-012`。
+- 项目仍处于 `IMPLEMENTATION`，当前主要剩余差距已收敛到真实站点 E2E 与发布收口。
+- `CR-003` 已关闭；如继续推进，更适合转向 `ctrip` 真实站点回放或 release prep。

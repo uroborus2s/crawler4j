@@ -10,7 +10,7 @@
     "tests": {
       "command": "uv run pytest -q",
       "result": "passed",
-      "details": "184 passed on 2026-03-26 after completing TASK-011 and rerunning the full suite"
+      "details": "188 passed on 2026-03-26 after completing TASK-012 and rerunning the full suite"
     },
     "docs": {
       "command": "Review docs/ markdown tree",
@@ -71,6 +71,11 @@
       "command": "uv run pytest tests/unit/test_core/test_mms/test_settings_store.py -q",
       "result": "passed",
       "details": "4 passed on 2026-03-26 covering module/workflow settings export, legacy KV fallback, persisted module status, and uninstall cleanup policy"
+    },
+    "mms_custom_ui_tests": {
+      "command": "uv run pytest tests/unit/test_core/test_mms/test_module_detail_page.py tests/unit/test_core/test_mms/test_mms.py -q",
+      "result": "passed",
+      "details": "14 passed on 2026-03-26 covering DevLink trust, external-module blocking, allowlist override, and custom-page load fallback"
     }
   },
   "versions": {
@@ -85,9 +90,7 @@
     "declared_root_script": "uv run start",
     "sdk_cli_entry": "uv run python -m crawler4j_sdk.cli.commands --help"
   },
-  "known_risks": [
-    "CR-003"
-  ],
+  "known_risks": [],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/role-charter.project.md",

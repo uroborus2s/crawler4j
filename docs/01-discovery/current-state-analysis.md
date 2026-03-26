@@ -23,8 +23,9 @@ crawler4j 当前是一个由 5 个主要部分组成的 Python 项目：
 
 | 领域 | 状态 | 证据 |
 |---|---|---|
-| 自动化测试 | 通过 | `uv run pytest -q` -> `184 passed` |
+| 自动化测试 | 通过 | `uv run pytest -q` -> `188 passed` |
 | MMS settings store 基础能力 | 通过 | 模块级/工作流级 settings、导出与模块启停状态持久化已落地并有单测覆盖 |
+| MMS 自定义页面 trust gate | 通过 | `ui:*` 页面已支持受信加载，外部模块默认拒绝，allowlist 命中后可真实装载 |
 | 文档体系 | 通过 | `docs/` 已统一为 Markdown 文档树，不再依赖静态站构建 |
 | 根脚本入口 | 通过 | `uv sync` 后 `.venv/bin/start` 已导入 `src.ui.app:main` |
 | UI smoke | 通过 | `uv run python scripts/smoke_test_ui.py` 通过 |
@@ -38,7 +39,6 @@ crawler4j 当前是一个由 5 个主要部分组成的 Python 项目：
 | 领域 | 状态 | 证据 | 影响 |
 |---|---|---|---|
 | 模块完整业务 E2E | 未验证 | 当前只验证了 `labor_workflow` 已进入真实执行链，不再因兼容缺失而退化 | 真实站点闭环仍需后续专门回放 |
-| MMS UI trust gate / 自定义页面装载 | 不完整 | settings store 与模块状态持久化已补齐，但模块自定义页面真实加载和 micro-app trust gate 仍未完成 | 模块管理与 UI Host 仍差最后一段受信装载闭环 |
 | 历史人工脚本治理 | 已划清边界 | `uv run ruff check .` 已通过；`manual/debug/verify/analyze` 脚本已移出默认 gate | 历史脚本仍可保留，但不再阻塞默认质量门 |
 
 ## 4. 版本与发布状态
@@ -69,7 +69,7 @@ crawler4j 当前是一个由 5 个主要部分组成的 Python 项目：
 
 ## 6. 当前真实结论
 
-该项目不是“无法运行的废旧仓库”，而是“核心结构、外部模块安装链路、自动化测试、文档体系、版本治理、默认质量门和 MMS settings store 基础能力都已经收敛，但 UI trust gate 仍未闭环”的历史项目。  
+该项目不是“无法运行的废旧仓库”，而是“核心结构、外部模块安装链路、自动化测试、文档体系、版本治理、默认质量门和 MMS 高阶能力都已经基本收敛，只剩真实站点 E2E 与正式发布收口”的历史项目。  
 因此最合适的工厂接入姿势不是从零开始，而是：
 
 1. 先把真实状态压实为文档和工作项

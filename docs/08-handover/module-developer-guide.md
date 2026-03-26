@@ -359,13 +359,18 @@ ui_extension:
   已实现。Core 会把 `config_schema.json` 渲染成配置表单。
 - `detail_menu.entry: core:data_table:<view_id>`
   已实现。Core 会创建通用数据表页面。
+- `detail_menu.entry: ui:SomePage`
+  已实现，但必须同时满足：
+  1. `ui_extension.type: micro_app`
+  2. 模块来源是 `DevLink` / 内置来源，或模块名命中系统 allowlist `mms.ui.allowlist`
+  3. 模块内存在 `ui.py`，且导出了对应的 `QWidget` 类
 
 ### 10.2 当前不要作为交付主路径
 
-- `detail_menu.entry: ui:SomePage`
-  现在只会显示占位内容，不能当成正式模块 UI 扩展方案。
-- `type: micro_app`
-  还没有完整运行链，不适合当前模块交付。
+- 未通过 trust gate 的外部 `micro_app`
+  现在会被明确拒绝并降级为说明页，不会被宿主直接执行。
+- 复杂页面框架或任意前端应用嵌入
+  当前仍没有浏览器容器级 micro-frontend 运行时，适合当前交付的是 `ui.py` 中的受控 `QWidget` 页面。
 
 ## 11. 开发调试的真实链路
 

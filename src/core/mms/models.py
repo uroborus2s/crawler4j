@@ -142,6 +142,26 @@ class ModuleManifest:
             "ui_extension": {
                 "type": self.ui_extension.type,
                 "entry": self.ui_extension.entry,
+                "trusted": self.ui_extension.trusted,
+                "available": self.ui_extension.available,
+                "nav_item": (
+                    {
+                        "icon": self.ui_extension.nav_item.icon,
+                        "label": self.ui_extension.nav_item.label,
+                        "path": self.ui_extension.nav_item.path,
+                    }
+                    if self.ui_extension.nav_item
+                    else None
+                ),
+                "detail_menu": [
+                    {
+                        "id": item.id,
+                        "icon": item.icon,
+                        "label": item.label,
+                        "entry": item.entry,
+                    }
+                    for item in self.ui_extension.detail_menu
+                ],
             },
             "config_schema": self.config_schema,
         }
@@ -182,6 +202,8 @@ class ModuleManifest:
         ui_extension = UIExtensionInfo(
             type=ui_data.get("type", "none"),
             entry=ui_data.get("entry", ""),
+            trusted=bool(ui_data.get("trusted", False)),
+            available=bool(ui_data.get("available", True)),
             nav_item=nav_item,
             detail_menu=detail_menu,
         )

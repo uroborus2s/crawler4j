@@ -7,13 +7,13 @@
 - 当前模式：Default
 - 技术画像：自定义技术画像
 - 技术栈：Python 3.12 + uv + PyQt6 + Playwright + SQLAlchemy + PyInstaller
-- 活跃工作项：2
+- 活跃工作项：0
 - 阻塞项：0
 - 开放风险：1
 - 最近发布包：无
 - 最近交接包：无
 - 最近快照：无
-- 备注：默认质量门已通过；CR-003 已拆成 TASK-011/TASK-012，当前聚焦 TASK-012
+- 备注：默认质量门已通过；CR-003 已关闭，当前更适合进入真实站点 E2E 或发布收口
 
 ## AI 最小读取顺序
 
@@ -44,11 +44,11 @@
 ## 当前推荐动作
 
 - 继续保持 `uv run pytest -q`、`uv run ruff check .` 和 UI smoke 作为默认质量门
-- 继续执行 `TASK-012`，补齐 UI trust gate 与自定义页面加载
+- 评估 `ctrip` 真实站点 E2E 回放与发布收口顺序
 - 正式发布前按 `docs/06-release/version-governance.md` 执行切版与复验
 
 ## 当前关键工作项
 
-- `TASK-012-mms-trust-gate-and-custom-ui-loading` TASK-012 补齐 MMS trust gate 与自定义页面加载 | 状态：OPEN | 负责人：未知
+- `TASK-012-mms-trust-gate-and-custom-ui-loading` TASK-012 补齐 MMS trust gate 与自定义页面加载 | 状态：DONE | 负责人：未知
 - `TASK-011-mms-settings-store-and-module-state-persistence` TASK-011 建立 MMS settings store 与模块状态持久化 | 状态：DONE | 负责人：未知
 - `TASK-010-optimize-module-developer-guide-for-external-authors` TASK-010 重做模块开发者指南 | 状态：DONE | 负责人：未知

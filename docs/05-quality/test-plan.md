@@ -28,7 +28,7 @@
 
 | 测试项 | 结果 | 备注 |
 |---|---|---|
-| `TC-001` `uv run pytest -q` | 通过 | 184 passed |
+| `TC-001` `uv run pytest -q` | 通过 | 188 passed |
 | `TC-002` 根包 / SDK / Contracts build | 通过 | 当前仅证明可构建，不等于可运行 |
 | `TC-003` `uv sync` + `.venv/bin/start` | 通过 | root script 已对齐 `src.ui.app:main` |
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | headless UI smoke 通过 |

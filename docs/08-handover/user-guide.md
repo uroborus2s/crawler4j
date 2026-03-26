@@ -39,7 +39,7 @@ uv run python -m crawler4j_sdk.cli.commands --help
 
 - 模块开发者指南已经完成当前轮优化，可直接用于外部模块作者开发、调试与安装验收
 - `TASK-005` 已完成；当前默认质量门与文档导航规则见 `docs/05-quality/quality-gates.md`
-- 当前剩余主要治理项是 `CR-003`
+- 当前下一步更适合转向 `ctrip` 真实站点 E2E 回放或发布收口
 
 ## 5. 变更记录
 

@@ -13,7 +13,7 @@
 
 ## 证据
 
-- `uv run pytest -q` 现已通过：`184 passed`
+- `uv run pytest -q` 现已通过：`188 passed`
 - `uv run python scripts/smoke_test_ui.py` 现已通过
 - `tests/conftest.py` 已补充 Qt 运行时探测逻辑，避免环境不稳定时直接把全量回归打崩
 

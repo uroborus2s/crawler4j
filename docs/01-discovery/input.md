@@ -34,7 +34,7 @@
 
 | 命令 | 日期 | 结果 | 备注 |
 |---|---|---|---|
-| `uv run pytest -q` | 2026-03-26 | 通过 | `184 passed in 5.23s` |
+| `uv run pytest -q` | 2026-03-26 | 通过 | `188 passed in 5.21s` |
 | `uv run ruff check .` | 2026-03-26 | 通过 | 默认 gate 已收敛到维护范围；历史 `manual/debug/verify/analyze` 脚本不再计入阻塞 |
 | `uv build --out-dir /tmp/crawler4j-build-check` | 2026-03-26 | 通过 | 根包 wheel/sdist 可产出 |
 | `uv sync` + `.venv/bin/start` 检查 | 2026-03-26 | 通过 | 已生成 `from src.ui.app import main` 的 root script |

@@ -21,6 +21,11 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.mms.models import ModuleInfo, ModuleSource
+from src.core.mms.ui_loader import (
+    ModuleUIAccessDenied,
+    ModuleUILoadError,
+    get_module_custom_page_loader,
+)
 
 
 class ModuleDetailPage(QWidget):
@@ -43,6 +48,7 @@ class ModuleDetailPage(QWidget):
         super().__init__(parent)
         self._module: ModuleInfo | None = None
         self._menu_pages: dict[str, QWidget] = {}
+        self._custom_page_loader = get_module_custom_page_loader()
         self._setup_ui()
     
     def _setup_ui(self):
@@ -521,8 +527,14 @@ scheduling:
 
             return ModuleDataTablePage(self._module.name, view_id)
 
-        # TODO: 使用 importlib 动态加载模块提供的 Widget
-        # 暂时显示占位页
+        try:
+            return self._custom_page_loader.load_widget(self._module, menu_item.entry)
+        except ModuleUIAccessDenied as exc:
+            return self._create_custom_page_placeholder(menu_item, "未通过 trust gate", str(exc))
+        except ModuleUILoadError as exc:
+            return self._create_custom_page_placeholder(menu_item, "模块 UI 加载失败", str(exc))
+
+    def _create_custom_page_placeholder(self, menu_item, title: str, message: str) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -532,10 +544,16 @@ scheduling:
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon)
         
-        label = QLabel(f"{menu_item.label}\n\n(自定义页面: {menu_item.entry})")
-        label.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 14px;")
+        label = QLabel(f"{menu_item.label}\n\n{title}")
+        label.setStyleSheet("color: rgba(255,255,255,0.75); font-size: 14px;")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label)
+
+        detail = QLabel(f"{message}\n\n入口: {menu_item.entry}")
+        detail.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 12px;")
+        detail.setWordWrap(True)
+        detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(detail)
         
         return page
     
