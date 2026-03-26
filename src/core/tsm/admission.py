@@ -1,11 +1,6 @@
 """准入控制器。
 
-规格参考: docs/srs/05-framework-core/05-3-task-strategy-management.md (5.3.3)
-
-AdmissionController 负责：
-    - 并发配额检查
-    - 决定任务是否可以立即执行
-    - 不满足条件时返回排队原因
+最新方案中并发由 Job 控制，策略侧不再维护并发配额。
 """
 
 from dataclasses import dataclass
@@ -63,7 +58,7 @@ class TaskSubmission:
 class AdmissionController:
     """准入控制器 (V2)。
     
-    基于 TaskStrategy 的 ScalingPolicy 检查并发配额。
+    策略层仅负责资源与执行配置，准入默认放行。
     
     Usage:
         controller = AdmissionController()
@@ -80,50 +75,12 @@ class AdmissionController:
         strategy: TaskStrategy,
         running_tasks: list[dict[str, Any]],
     ) -> AdmissionDecision:
-        """检查任务是否可以准入执行。
-        
-        检查逻辑：
-            1. 检查最大并发配额（来自 strategy.scaling.max_concurrency）
-            2. 检查同模块并发（从运行任务中统计）
-        
-        Args:
-            submission: 任务提交请求
-            strategy: V2 策略配置
-            running_tasks: 当前运行中的任务列表
-        
-        Returns:
-            准入决策
-        """
-        max_concurrency = strategy.scaling.max_concurrency
-        
-        # 1. 检查全局并发
-        if len(running_tasks) >= max_concurrency:
-            return AdmissionDecision(
-                result=AdmissionResult.QUEUED,
-                reason="global_quota_exceeded",
-                wait_hint=f"并发已满 ({len(running_tasks)}/{max_concurrency})",
-                priority=submission.priority or 100,
-            )
-        
-        # 2. 检查同模块并发（同一模块的任务数不应超过 max_concurrency）
-        if submission.module_name:
-            module_running = sum(
-                1 for t in running_tasks
-                if t.get("module") == submission.module_name
-            )
-            if module_running >= max_concurrency:
-                return AdmissionDecision(
-                    result=AdmissionResult.QUEUED,
-                    reason="module_quota_exceeded",
-                    wait_hint=f"模块并发已满: {submission.module_name} ({module_running}/{max_concurrency})",
-                    priority=submission.priority or 100,
-                )
-        
-        # 3. 通过准入
+        """检查任务是否可以准入执行。"""
+        _ = (submission, strategy, running_tasks)
         return AdmissionDecision(
             result=AdmissionResult.ADMITTED,
             reason="ok",
-            priority=submission.priority or 100,
+            priority=100,
         )
 
 

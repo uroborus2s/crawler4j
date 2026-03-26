@@ -7,7 +7,7 @@
     - 类属性: name, display_name, description, default_config
     - 方法: execute, on_init, on_error, on_cleanup
 
-参考规格: docs/srs/06-sdk/06-1-taskscript.md
+参考规格: docs/02-requirements/reference-srs/06-sdk/06-1-taskscript.md
 """
 
 from abc import ABC, abstractmethod

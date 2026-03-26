@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 from src.core.atm import JobState, get_task_service
 from src.core.mms import ModuleStatus, get_module_registry
 from src.core.rem import EnvStatus
+from src.ui.components.log_console import LogConsoleWidget
 
 
 class StatCard(QFrame):
@@ -39,7 +40,7 @@ class StatCard(QFrame):
         self._setup_ui(title, value, subtitle, color)
     
     def _setup_ui(self, title: str, value: str, subtitle: str, color: str):
-        self.setStyleSheet(f"""
+        self.setStyleSheet("""
             StatCard {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                     stop:0 rgba(99, 102, 241, 0.2),
@@ -146,54 +147,15 @@ class DashboardPage(QWidget):
         
         layout.addLayout(cards_grid)
         
-        # 快速操作区
-        actions_frame = QFrame()
-        actions_frame.setStyleSheet("""
-            QFrame {
-                background: rgba(30, 30, 40, 0.8);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 12px;
-            }
-        """)
-        actions_layout = QVBoxLayout(actions_frame)
-        actions_layout.setContentsMargins(20, 20, 20, 20)
+        # 实时日志区域
+        layout.addSpacing(20)
+        log_title = QLabel("📋 系统实时日志")
+        log_title.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
+        layout.addWidget(log_title)
         
-        actions_title = QLabel("⚡ 快速操作")
-        actions_title.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
-        actions_layout.addWidget(actions_title)
-        
-        actions_btns = QHBoxLayout()
-        actions_btns.setSpacing(12)
-        
-        btn_style = """
-            QPushButton {
-                background: rgba(255, 255, 255, 0.1);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                padding: 12px 24px;
-                border-radius: 8px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.2);
-            }
-        """
-        
-        refresh_modules_btn = QPushButton("🔄 刷新模块")
-        refresh_modules_btn.setStyleSheet(btn_style)
-        refresh_modules_btn.clicked.connect(self._refresh_modules)
-        actions_btns.addWidget(refresh_modules_btn)
-        
-        view_logs_btn = QPushButton("📋 查看日志")
-        view_logs_btn.setStyleSheet(btn_style)
-        actions_btns.addWidget(view_logs_btn)
-        
-        actions_btns.addStretch()
-        actions_layout.addLayout(actions_btns)
-        
-        layout.addWidget(actions_frame)
-        
-        layout.addStretch()
+        self.log_console = LogConsoleWidget()
+        # 全局模式，不设置 filtered_task_id
+        layout.addWidget(self.log_console, stretch=1)
     
     def _setup_timer(self):
         """设置自动刷新定时器。"""

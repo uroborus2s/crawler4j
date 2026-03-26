@@ -1,6 +1,6 @@
 """环境管理器 - 统一门面。
 
-规格参考: docs/srs/05-framework-core/05-2-runtime-environment-management.md
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-2-runtime-environment-management.md
 
 EnvironmentManager 是 REM 的统一入口，提供：
     - acquire: 申请环境租约
@@ -167,6 +167,9 @@ class EnvironmentManager:
                 await provider.close(env)
             except Exception as e:
                 logger.warning(f"[REM] 关闭窗口失败: {e}")
+        # 清空租约绑定，避免 READY 状态残留旧 lease/task 标记。
+        env.lease_id = None
+        env.task_run_id = None
         await self.pool.update_status(env.id, EnvStatus.READY)
         logger.info(f"[REM] 环境已重置: id={env.id}")
     
@@ -246,6 +249,7 @@ class EnvironmentManager:
         requirement: EnvRequirement | None = None,
         post_action: Any = "test",
         workflow_module: str | None = None,
+        ensure_runtime: bool = True,
     ) -> Environment:
         """从 UI 创建环境。
         
@@ -271,6 +275,9 @@ class EnvironmentManager:
                 stage="CREATE",
                 hint="请检查 Provider 配置"
             )
+
+        if ensure_runtime:
+            await self.ensure_provider_runtime(provider_name)
             
         final_config = config or {}
         if env_name:
@@ -288,6 +295,10 @@ class EnvironmentManager:
             post_action=action_enum,
             workflow_module=workflow_module
         )
+
+    async def ensure_provider_runtime(self, provider_name: str) -> None:
+        """确保指定 Provider 的外部运行时已就绪（按需启动）。"""
+        await self._ensure_external_provider_ready(provider_name)
     
     async def destroy_env(self, env_id: int) -> bool:
         """直接销毁环境（供 UI 调用）。
@@ -676,6 +687,37 @@ class EnvironmentManager:
         
         return False
     
+    async def _ensure_external_provider_ready(self, provider_name: str) -> None:
+        """确保外部指纹浏览器软件已启动且 API 就绪。"""
+        from src.core.system.external_app_service import ExternalApp, get_external_app_service
+
+        app: ExternalApp | None = None
+        if provider_name == "bitbrowser":
+            app = ExternalApp.BITBROWSER
+        elif provider_name == "virtualbrowser":
+            app = ExternalApp.VIRTUALBROWSER
+
+        if app is None:
+            return
+
+        app_service = get_external_app_service()
+        result = await app_service.ensure_running(app)
+        if not result.success:
+            raise EnvUnavailableError(
+                result.error_message or f"{app.value} 启动失败",
+                stage="CREATE",
+                hint="请检查外部浏览器路径、端口和启动状态",
+            )
+
+        # 防止“进程存在但 API 尚未可用”导致 create 阶段出现 502。
+        ready = await app_service.wait_until_ready(app, timeout=30)
+        if not ready:
+            raise EnvUnavailableError(
+                f"{app.value} API 未就绪",
+                stage="CREATE",
+                hint="请检查外部浏览器启动日志并确认 API 端口可访问",
+            )
+    
     
     # === 原有私有方法 ===
     async def _create_env(
@@ -920,6 +962,7 @@ class EnvironmentManager:
                 count = count + 1 
             elif not await provider.exists(env):
                 logger.warning(f"[REM] 发现不存在的环境: id={env.id}")
+                await self.destroy_env(env.id)
                 count = count + 1 
                 logger.info(f"[REM] 已删除不存在的环境记录: id={env.id}")
             elif env.status == EnvStatus.CREATING or env.status == EnvStatus.DEAD:

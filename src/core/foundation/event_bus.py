@@ -1,6 +1,6 @@
 """事件总线 (Event Bus)。
 
-规格参考: docs/srs/05-framework-core/05-5-ui-host-microfrontend.md (5.5.3.3)
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-5-ui-host-microfrontend.md (5.5.3.3)
 
 进程内事件总线，实现模块间及层级间的解耦通信：
 - Core → UI 事件传递

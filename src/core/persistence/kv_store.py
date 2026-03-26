@@ -1,6 +1,6 @@
 """KV Store 键值存储（支持 TTL）。
 
-规格参考: docs/srs/05-framework-core/05-9-data-persistence.md (5.9.3)
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-9-data-persistence.md (5.9.3)
 
 提供运行时状态的键值存储能力，支持过期时间。
 适用于: Cookies, Tokens, Session, 增量游标等。

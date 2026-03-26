@@ -1,12 +1,8 @@
 """MMS 数据模型单元测试。"""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
 import pytest
 
 from src.core.mms.models import (
-    ModuleInfo,
     ModuleManifest,
     ModuleSource,
     ModuleStatus,

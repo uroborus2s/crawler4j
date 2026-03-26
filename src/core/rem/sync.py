@@ -1,6 +1,6 @@
 """外部状态同步模块。
 
-设计参考: docs/design/module-01-runtime-environment.md §5.3
+设计参考: docs/03-solution/reference-design/module-01-runtime-environment.md §5.3
 
 提供外部指纹浏览器服务的状态同步功能：
     - ExternalSyncManager: 外部状态同步管理器

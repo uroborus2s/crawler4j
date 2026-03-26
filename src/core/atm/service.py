@@ -5,11 +5,14 @@ ATM 的统一门面，负责作业(Job)的管理和查询。
 """
 
 import asyncio
-from typing import Any, List
+import time
+from typing import List
 
-from src.core.atm.controller import JobController, get_job_controller
-from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig
-from src.core.atm.repository import TaskRepository, get_task_repository
+from apscheduler.triggers.cron import CronTrigger
+
+from src.core.atm.controller import get_job_controller
+from src.core.atm.models import Job, JobState, JobType, Task, TriggerConfig, TriggerType
+from src.core.atm.repository import get_task_repository
 from src.core.foundation.logging import logger
 
 
@@ -20,6 +23,27 @@ class TaskService:
         self._repo = get_task_repository()
         self._controller = get_job_controller()
         self._started = False
+
+    @staticmethod
+    def _normalize_trigger(job_type: JobType, trigger_config: dict | TriggerConfig | None) -> TriggerConfig:
+        """根据 Job 模式规范化触发器配置。"""
+        trigger = (
+            trigger_config
+            if isinstance(trigger_config, TriggerConfig)
+            else TriggerConfig(**(trigger_config or {}))
+        )
+
+        if job_type == JobType.SERVICE:
+            return TriggerConfig(type=TriggerType.MANUAL, cron_expr=None)
+
+        if trigger.type != TriggerType.CRON or not trigger.cron_expr:
+            raise ValueError("定时批次作业必须配置有效的 Cron 表达式")
+        try:
+            CronTrigger.from_crontab(trigger.cron_expr)
+        except ValueError as e:
+            raise ValueError(f"定时批次作业 Cron 表达式无效: {e}") from e
+
+        return trigger
 
     async def start(self):
         """启动 ATM 服务 (Controller)。"""
@@ -48,12 +72,12 @@ class TaskService:
     ) -> str:
         """创建新作业。"""
         # TODO: Validate strategy_id with MMS/Loader
-        
-        trigger = TriggerConfig(**(trigger_config or {}))
+        job_type_enum = JobType(job_type)
+        trigger = self._normalize_trigger(job_type_enum, trigger_config)
         
         job = Job(
             name=name,
-            type=JobType(job_type),
+            type=job_type_enum,
             strategy_id=strategy_id,
             trigger=trigger,
             params=params or {},
@@ -92,16 +116,15 @@ class TaskService:
         if concurrency is not None:
             job.concurrency_target = concurrency
 
-        job.updated_at = int(asyncio.get_running_loop().time()) # Or simple time.time()
-        import time
+        job.trigger = self._normalize_trigger(job.type, job.trigger)
+
         job.updated_at = int(time.time())
 
         await self._repo.save_job(job)
         
-        # 如果作业是活跃的，虽然不需要立即重启，但他会在下一次 reconcile 时生效
-        # 为了即时性，可以触发一次 reconcile
+        # 触发该 Job 的一次定向调和，保证配置即时生效
         if job.state == JobState.ACTIVE:
-             asyncio.create_task(self._controller.reconcile())
+            asyncio.create_task(self._controller.reconcile_job(job.id))
 
         logger.info(f"[ATM] Updated job: {job.id}")
         return True
@@ -119,11 +142,20 @@ class TaskService:
         job = await self._repo.get_job(job_id)
         if not job:
             return False
+
+        # 启动作业前按策略检查运行时依赖（如指纹浏览器）是否就绪。
+        if job.strategy_id:
+            try:
+                await self._controller.ensure_job_runtime_ready(job.id)
+            except Exception as e:
+                logger.error(f"[ATM] Job start blocked by runtime precheck ({job.id}): {e}")
+                return False
         
         job.state = JobState.ACTIVE
         await self._repo.save_job(job)
-        # 立即尝试一次调度 (Optional optimization)
-        asyncio.create_task(self._controller.reconcile())
+        await self._controller.request_job_resume(job.id)
+        # 立即触发该 Job 的一次定向调和
+        asyncio.create_task(self._controller.reconcile_job(job.id))
         logger.info(f"[ATM] Job active: {job.id}")
         return True
 
@@ -135,6 +167,7 @@ class TaskService:
         
         job.state = JobState.PAUSED
         await self._repo.save_job(job)
+        await self._controller.request_job_stop(job.id)
         logger.info(f"[ATM] Job paused: {job.id}")
         return True
 

@@ -1,5 +1,5 @@
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QVBoxLayout
+from PyQt6.QtWidgets import QFrame, QGraphicsDropShadowEffect
 
 from src.ui.theme.styles import StyleSheets
 

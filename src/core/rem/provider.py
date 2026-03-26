@@ -1,6 +1,6 @@
 """环境提供者抽象层。
 
-规格参考: docs/srs/05-framework-core/05-2-runtime-environment-management.md (5.2.3.1)
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-2-runtime-environment-management.md (5.2.3.1)
 
 Provider 层面向具体技术栈，负责实际 spawn/keepalive/kill/healthcheck。
 """
@@ -314,6 +314,7 @@ class BitBrowserClient:
         name: str,
         group_id: str | None = None,
         proxy: dict | None = None,
+        fingerprint: dict | None = None,
     ) -> str:
         """创建浏览器窗口，返回窗口 ID。"""
         client = await self._get_client()
@@ -322,7 +323,7 @@ class BitBrowserClient:
             "name": name,
             "proxyMethod": 2,  # 必须设置: 2=自定义, 3=提取IP
             "proxyType": "noproxy",  # 默认直连
-            "browserFingerPrint": {
+            "browserFingerPrint": fingerprint or {
                 "coreVersion": "130",
                 "ostype": "PC",
                 "os": "Win32",
@@ -526,10 +527,19 @@ class BitBrowserProvider(BaseProvider):
                 logger.warning(f"[BitBrowser] Failed to parse proxy '{raw_val}': {e}")
                 bit_proxy = {"type": "noproxy"}
         
-        # 注意: POOL 模式的 IP 绑定由 Manager 层处理，Provider 不参与
+        # 3. 提取额外创建参数 (params)
+        # creation_params = config.get("config", {})  # Unused
+        
+        group_id = config.get("group_id")
+        fingerprint = config.get("fingerprint")
 
         logger.info(f"[BitBrowser] Creating env '{name}' with proxy mode {proxy_mode}...")
-        browser_id = await client.create_browser(name, proxy=bit_proxy)
+        browser_id = await client.create_browser(
+            name, 
+            proxy=bit_proxy,
+            group_id=group_id,
+            fingerprint=fingerprint
+        )
         logger.info(f"[BitBrowser] Created browser {browser_id}")
         
         if not config.get("launch", True):
@@ -591,27 +601,7 @@ class BitBrowserProvider(BaseProvider):
 
     async def open(self, env: Environment) -> bool:
         """打开 BitBrowser 窗口。"""
-        from src.core.foundation.event_bus import Event, EventType, get_event_bus
         from src.core.foundation.logging import logger
-        from src.core.system.external_app_service import ExternalApp, get_external_app_service
-        
-        # 确保外部软件运行
-        app_service = get_external_app_service()
-        result = await app_service.ensure_running(ExternalApp.BITBROWSER)
-        if not result.success:
-            logger.error(f"[BitBrowser] {result.error_message}")
-            # 发送错误事件供 UI 显示
-            get_event_bus().publish(Event(
-                type=EventType.ENV_OPERATION_FAILED,
-                data={
-                    "env_id": env.id,
-                    "env_name": env.name,
-                    "action": "open",
-                    "error_code": result.error_code,
-                    "message": result.error_message,
-                }
-            ))
-            return False
 
         
         handle = env.handle
@@ -862,9 +852,9 @@ class VirtualBrowserClient:
         """
         client = await self._get_client()
         
-        # 构造默认代理参数（完整字段）
+        # 构造默认代理参数（无代理）
         default_proxy = {
-            "mode": 2,          # 1: No Proxy, 2: Custom
+            "mode": 1,          # 1: No Proxy, 2: Custom
             "value": "",        # 完整代理字符串（备用）
             "protocol": "",     # socks5/http 等
             "host": "",
@@ -873,10 +863,28 @@ class VirtualBrowserClient:
             "pass": "",
             "API": "",          # 动态代理 API 地址
         }
-        
-        # 合并传入的代理参数
+
+        # 兼容不同来源的代理字段，并自动判断 mode
         if proxy:
-            default_proxy.update(proxy)
+            normalized_proxy = dict(proxy)
+
+            if "type" in normalized_proxy and "protocol" not in normalized_proxy:
+                normalized_proxy["protocol"] = normalized_proxy.pop("type")
+            if "username" in normalized_proxy and "user" not in normalized_proxy:
+                normalized_proxy["user"] = normalized_proxy.pop("username")
+            if "password" in normalized_proxy and "pass" not in normalized_proxy:
+                normalized_proxy["pass"] = normalized_proxy.pop("password")
+
+            if "protocol" in normalized_proxy and isinstance(normalized_proxy["protocol"], str):
+                normalized_proxy["protocol"] = normalized_proxy["protocol"].lower()
+
+            default_proxy.update(normalized_proxy)
+
+            has_custom_proxy = any(
+                bool(default_proxy.get(k))
+                for k in ("host", "port", "value", "API")
+            )
+            default_proxy["mode"] = 2 if has_custom_proxy else 1
         
         # 构造请求参数
         payload = {
@@ -1253,28 +1261,8 @@ class VirtualBrowserProvider(BaseProvider):
     
     async def open(self, env: Environment) -> bool:
         """打开 VirtualBrowser 窗口。"""
-        from src.core.foundation.event_bus import Event, EventType, get_event_bus
         from src.core.foundation.logging import logger
         from src.core.rem.handle import BrowserHandle
-        from src.core.system.external_app_service import ExternalApp, get_external_app_service
-        
-        # 确保外部软件运行
-        app_service = get_external_app_service()
-        result = await app_service.ensure_running(ExternalApp.VIRTUALBROWSER)
-        if not result.success:
-            logger.error(f"[VirtualBrowser] {result.error_message}")
-            # 发送错误事件供 UI 显示
-            get_event_bus().publish(Event(
-                type=EventType.ENV_OPERATION_FAILED,
-                data={
-                    "env_id": env.id,
-                    "env_name": env.name,
-                    "action": "open",
-                    "error_code": result.error_code,
-                    "message": result.error_message,
-                }
-            ))
-            return False
 
         
         handle = env.handle

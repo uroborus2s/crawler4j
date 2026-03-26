@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.mms.models import ModuleInfo
+from src.core.mms.models import ModuleInfo, ModuleSource
 
 
 class ModuleDetailPage(QWidget):
@@ -33,8 +33,7 @@ class ModuleDetailPage(QWidget):
     
     back_requested = pyqtSignal()  # 返回列表页信号
     
-    # 固定菜单项
-    FIXED_MENU = [
+    BASE_MENU = [
         ("info", "📋", "基本信息"),
         ("workflows", "⚡", "任务链"),
         ("strategy", "⚙️", "策略配置"),
@@ -117,7 +116,7 @@ class ModuleDetailPage(QWidget):
         self.status_label = QLabel()
         self.status_label.setStyleSheet("font-size: 13px;")
         layout.addWidget(self.status_label)
-        
+
         return header
     
     def _create_sidebar(self) -> QFrame:
@@ -184,7 +183,6 @@ class ModuleDetailPage(QWidget):
         text = status_text.get(module.status.value, module.status.value)
         self.status_label.setText(text)
         self.status_label.setStyleSheet(f"font-size: 13px; color: {color};")
-        
         # 重建菜单
         self._build_menu()
         
@@ -204,7 +202,7 @@ class ModuleDetailPage(QWidget):
             widget.deleteLater()
         
         # 固定菜单
-        for menu_id, icon, label in self.FIXED_MENU:
+        for menu_id, icon, label in self.BASE_MENU:
             item = QListWidgetItem(f"{icon} {label}")
             item.setData(Qt.ItemDataRole.UserRole, menu_id)
             self.menu_list.addItem(item)
@@ -278,7 +276,14 @@ class ModuleDetailPage(QWidget):
         info_items = [
             ("版本", manifest.version),
             ("作者", manifest.author or "未知"),
-            ("来源", "内置" if self._module.source.value == "builtin" else "外部"),
+            (
+                "来源",
+                "内置"
+                if self._module.source == ModuleSource.BUILTIN
+                else "开发链接"
+                if self._module.source == ModuleSource.DEV_LINK
+                else "外部",
+            ),
             ("SDK 版本", manifest.sdk_version_range),
         ]
         
@@ -309,6 +314,30 @@ class ModuleDetailPage(QWidget):
             row.addStretch()
             
             card_layout.addLayout(row)
+
+        if self._module.source == ModuleSource.DEV_LINK:
+            notice = QLabel(
+                "当前模块来自开发链接，可用于 ATM 里的任务调试。"
+                "移除开发链接后会回退到正式模块（如果存在）。"
+            )
+            notice.setWordWrap(True)
+            notice.setStyleSheet("color: rgba(255,255,255,0.72); font-size: 13px;")
+            card_layout.addWidget(notice)
+
+            remove_btn = QPushButton("移除开发链接")
+            remove_btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(248, 113, 113, 0.85);
+                    color: white;
+                    border: none;
+                    padding: 8px 14px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background: rgba(248, 113, 113, 1); }
+            """)
+            remove_btn.clicked.connect(self._remove_dev_link)
+            card_layout.addWidget(remove_btn)
         
         layout.addWidget(info_card)
         layout.addStretch()
@@ -361,19 +390,7 @@ class ModuleDetailPage(QWidget):
             title.setStyleSheet("color: white; font-size: 15px; font-weight: bold;")
             title_row.addWidget(title)
             title_row.addStretch()
-            
-            run_btn = QPushButton("▶ 运行")
-            run_btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(74, 222, 128, 0.3);
-                    color: #4ade80;
-                    border: none;
-                    padding: 6px 12px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover { background: rgba(74, 222, 128, 0.5); }
-            """)
-            title_row.addWidget(run_btn)
+
             card_layout.addLayout(title_row)
             
             # 描述
@@ -390,7 +407,7 @@ class ModuleDetailPage(QWidget):
         layout.addWidget(scroll)
         
         return page
-    
+
     def _create_strategy_page(self) -> QWidget:
         """创建策略配置页面（YAML 编辑器）。"""
         page = QWidget()
@@ -492,6 +509,18 @@ scheduling:
     
     def _create_custom_page(self, menu_item) -> QWidget:
         """创建自定义页面（动态加载模块 UI）。"""
+        if not self._module:
+            return QWidget()
+
+        if isinstance(menu_item.entry, str) and menu_item.entry.startswith("core:data_table:"):
+            view_id = menu_item.entry.split(":", 2)[-1].strip()
+            if not view_id:
+                view_id = menu_item.id
+
+            from src.core.mms.ui.module_data_table_page import ModuleDataTablePage
+
+            return ModuleDataTablePage(self._module.name, view_id)
+
         # TODO: 使用 importlib 动态加载模块提供的 Widget
         # 暂时显示占位页
         page = QWidget()
@@ -525,3 +554,44 @@ scheduling:
         
         if menu_id in self._menu_pages:
             self.content_stack.setCurrentWidget(self._menu_pages[menu_id])
+
+    def _select_menu(self, menu_id: str):
+        for row in range(self.menu_list.count()):
+            item = self.menu_list.item(row)
+            if item and item.data(Qt.ItemDataRole.UserRole) == menu_id:
+                self.menu_list.setCurrentRow(row)
+                break
+
+    def _remove_dev_link(self):
+        if not self._module or self._module.source != ModuleSource.DEV_LINK:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "移除开发链接",
+            f"确定要移除开发模块 '{self._module.name}' 的开发链接吗？\n本地源码目录不会被删除。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        from src.core.mms import get_module_registry
+
+        registry = get_module_registry()
+        if not registry.remove_dev_link(self._module.name):
+            QMessageBox.warning(self, "移除失败", f"未找到开发链接: {self._module.name}")
+            return
+
+        fallback = registry.get_module(self._module.name)
+        if fallback:
+            self.set_module(fallback)
+            source_text = "内置模块" if fallback.source == ModuleSource.BUILTIN else "正式安装模块"
+            QMessageBox.information(
+                self,
+                "已切换",
+                f"已移除开发链接，当前已回退到 {source_text}: {fallback.name}",
+            )
+            return
+
+        QMessageBox.information(self, "已移除", f"已移除开发链接: {self._module.name}")
+        self.back_requested.emit()

@@ -1,6 +1,6 @@
 """ATM 持久化层 (V2)。
 
-规格参考: docs/design/task-engine-v2.md
+规格参考: docs/03-solution/reference-design/task-engine-v2.md
 
 负责:
     - Job (作业配置) CRUD
@@ -9,12 +9,11 @@
 """
 
 import asyncio
-import enum
 import json
 import time
-from typing import Any, List, Optional, Tuple
+from typing import Any, List
 
-from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig, TriggerType
+from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig
 from src.core.persistence.database import STATE_DB, get_connection
 
 
@@ -124,9 +123,9 @@ class TaskRepository:
     async def delete_job(self, job_id: str) -> None:
         def _do():
             with get_connection(STATE_DB) as conn:
-                conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
-                # 级联删除 tasks? 暂时保留历史，或者手动清理
+                # tasks.job_id -> jobs.id 存在外键约束，先删 task 再删 job
                 conn.execute("DELETE FROM tasks WHERE job_id = ?", (job_id,))
+                conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         await self._run_async(_do)
 
     # =========================================================================
@@ -195,6 +194,39 @@ class TaskRepository:
                 )
                 return [self._row_to_task(row) for row in cursor.fetchall()]
         return await self._run_async(_do)
+
+    async def get_running_tasks(self) -> List[Task]:
+        """获取所有处于 PENDING/RUNNING 状态的任务（重启恢复用）。"""
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute(
+                    "SELECT * FROM tasks WHERE status IN (?, ?)",
+                    (TaskStatus.PENDING.value, TaskStatus.RUNNING.value),
+                )
+                return [self._row_to_task(row) for row in cursor.fetchall()]
+        return await self._run_async(_do)
+        
+    async def mark_tasks_failed(self, task_ids: List[str], error_message: str) -> None:
+        """批量将任务标记为 FAILED。"""
+        if not task_ids:
+            return
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                placeholders = ",".join("?" for _ in task_ids)
+                now = int(time.time())
+                
+                # Combine dynamic status and task IDs for parameterized execution
+                params = [TaskStatus.FAILED.value, error_message, now] + task_ids
+                
+                conn.execute(
+                    f"""
+                    UPDATE tasks 
+                    SET status = ?, error = ?, finished_at = ?
+                    WHERE id IN ({placeholders})
+                    """,
+                    params
+                )
+        await self._run_async(_do)
 
     # =========================================================================
     # Helpers

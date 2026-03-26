@@ -246,7 +246,7 @@ class SkyDataTable(QWidget):
                     # Let's try explicit attributes if object
                     try:
                         param_str = f"{getattr(item, 'name', '')} {getattr(item, 'id', '')} {str(item)}"
-                    except:
+                    except Exception:
                         param_str = str(item)
                 
                 if self._search_text in param_str.lower():

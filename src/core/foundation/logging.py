@@ -13,6 +13,9 @@ from typing import Callable
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from src.core.foundation.context import current_task_id
+from src.core.foundation.event_bus import Event, EventType, get_event_bus
+
 
 class LogLevel(str, Enum):
     """日志级别枚举。"""
@@ -31,18 +34,21 @@ class LogEntry:
         message: str,
         level: LogLevel = LogLevel.INFO,
         environment_id: int | None = None,
+        task_id: str | None = None,
         timestamp: datetime | None = None,
     ):
         self.message = message
         self.level = level
         self.environment_id = environment_id
+        self.task_id = task_id
         self.timestamp = timestamp or datetime.now()
 
     def __str__(self) -> str:
         """格式化日志条目用于显示。"""
         time_str = self.timestamp.strftime("%H:%M:%S")
         env_str = f"ENV-{self.environment_id}" if self.environment_id else "SYSTEM"
-        return f"{time_str} [{self.level.value}] {env_str}: {self.message}"
+        task_str = f" [Task:{self.task_id[:8]}]" if self.task_id else ""
+        return f"{time_str} [{self.level.value}] {env_str}{task_str}: {self.message}"
 
     def to_dict(self) -> dict:
         """转换为字典用于存储。"""
@@ -50,6 +56,7 @@ class LogEntry:
             "message": self.message,
             "level": self.level.value,
             "environment_id": self.environment_id,
+            "task_id": self.task_id,
             "created_at": self.timestamp.isoformat(),
         }
 
@@ -113,7 +120,10 @@ class AppLogger:
         environment_id: int | None = None,
     ):
         """内部日志方法。"""
-        entry = LogEntry(message, level, environment_id)
+        # 自动获取当前 Task Context
+        task_id = current_task_id.get()
+        
+        entry = LogEntry(message, level, environment_id, task_id=task_id)
 
         # 内存存储
         self._entries.append(entry)
@@ -122,6 +132,19 @@ class AppLogger:
 
         # 发送 Qt 信号
         self.signals.log_added.emit(entry)
+
+        # 发送 EventBus 事件 (如果不死循环)
+        # 注意: EventBus 内部如有日志，可能会死循环。需确保 EventBus 不在发布时打大量日志。
+        if task_id:
+             try:
+                 bus = get_event_bus()
+                 bus.publish(Event(
+                     type=EventType.TASK_LOG,
+                     data=entry.to_dict(),
+                     task_run_id=task_id
+                 ))
+             except Exception:
+                 pass
 
         # Python logging
         log_func = getattr(self._python_logger, level.value.lower())

@@ -1,6 +1,6 @@
 """IP 池管理模块。
 
-设计参考: docs/design/module-01-runtime-environment.md §5.2
+设计参考: docs/03-solution/reference-design/module-01-runtime-environment.md §5.2
 
 提供 IP 池的管理功能：
     - IPEntry: IP 条目数据类

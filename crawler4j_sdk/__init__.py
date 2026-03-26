@@ -1,7 +1,7 @@
 """Crawler4j SDK - 任务脚本开发工具包。
 
-本包提供 Crawler4j 任务脚本的开发契约和工具。
-SDK 是 Modules 与 Core/Runtime 之间的唯一契约边界。
+本包提供 Crawler4j 任务脚本开发工具。
+稳定契约类型由 crawler4j-contracts 提供，SDK 对其进行聚合导出。
 
 稳定导出 (Stable API - 同 MAJOR 版本内冻结):
     - TaskScript: 原子任务基类
@@ -14,7 +14,9 @@ SDK 是 Modules 与 Core/Runtime 之间的唯一契约边界。
     - extensions 模块: 业务特定扩展类型
 
 安装:
-    pip install crawler4j-sdk
+    uv tool install crawler4j-sdk
+    # 或一次性运行
+    uvx --from crawler4j-sdk crawler4j --help
 
 快速开始:
     >>> from crawler4j_sdk import TaskScript, TaskContext, TaskResult
@@ -28,20 +30,26 @@ SDK 是 Modules 与 Core/Runtime 之间的唯一契约边界。
     ...         return TaskResult.ok(message="完成")
 
 CLI 命令:
-    crawler4j init <project_name>  # 初始化项目
-    crawler4j add [name]           # 创建脚本
-    crawler4j list                 # 列出脚本
+    crawler4j init-model <module_name>  # 初始化完整模块项目
+    crawler4j add [name]                # 在模块目录中创建脚本
+    crawler4j list                      # 在模块目录中列出脚本
 
-参考文档: docs/srs/06-sdk/
+参考文档: docs/02-requirements/reference-srs/06-sdk/
 """
 
 from crawler4j_sdk.base import TaskScript
-from crawler4j_sdk.context import TaskContext
 from crawler4j_sdk.db import DataService
-from crawler4j_sdk.result import TaskResult
 from crawler4j_sdk.workflow import TaskFlow
+from crawler4j_contracts import (
+    DatabaseCapability,
+    EnvOpsCapability,
+    IPPoolCapability,
+    TaskContext,
+    TaskResult,
+    UICapability,
+)
 
-__version__ = "1.0.0"
+__version__ = "1.0.2"
 
 # 稳定导出列表（同 MAJOR 版本内冻结）
 __all__ = [
@@ -51,4 +59,8 @@ __all__ = [
     "TaskContext",
     "TaskResult",
     "DataService",
+    "DatabaseCapability",
+    "IPPoolCapability",
+    "EnvOpsCapability",
+    "UICapability",
 ]

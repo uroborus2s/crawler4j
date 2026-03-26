@@ -7,8 +7,7 @@
     - 子任务调用测试
 """
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -193,11 +192,31 @@ class TestTaskContextSubtask:
         """验证子任务参数合并到 state。"""
         basic_context.logger = MagicMock()
         basic_context._subtask_executor = AsyncMock(return_value=TaskResult.ok())
-        
+
         await basic_context.run_subtask("sub_task", param1="value1", param2=123)
-        
+
         assert basic_context.state["param1"] == "value1"
         assert basic_context.state["param2"] == 123
+
+    @pytest.mark.asyncio
+    async def test_run_subtask_returns_true_for_success_without_payload(self, basic_context: TaskContext):
+        """验证成功但无 data 时返回 True，便于工作流按布尔语义判断。"""
+        basic_context.logger = MagicMock()
+        basic_context._subtask_executor = AsyncMock(return_value=TaskResult.ok())
+
+        result = await basic_context.run_subtask("sub_task")
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_run_subtask_returns_false_for_failed_result(self, basic_context: TaskContext):
+        """验证失败结果返回 False。"""
+        basic_context.logger = MagicMock()
+        basic_context._subtask_executor = AsyncMock(return_value=TaskResult.fail(message="failed"))
+
+        result = await basic_context.run_subtask("sub_task")
+
+        assert result is False
 
 
 # === 状态共享测试 ===

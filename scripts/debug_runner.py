@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from playwright.async_api import async_playwright
 
-from crawler4j_sdk import TaskContext, TaskResult, TaskScript
+from crawler4j_sdk import TaskContext, TaskScript
 from crawler4j_sdk.context import CtripAccountInfo, HttpClient, LaborAccountInfo
 
 # ==================== 配置区 ====================
@@ -104,7 +104,7 @@ async def main():
             await instance.on_cleanup(ctx)
             
             print("\n" + "=" * 50)
-            print(f"✅ 执行完成!")
+            print("✅ 执行完成!")
             print(f"   成功: {result.success}")
             print(f"   任务数: {result.tasks_completed}")
             print(f"   消息: {result.message}")

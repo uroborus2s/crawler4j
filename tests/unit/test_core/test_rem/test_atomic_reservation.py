@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.rem.manager import EnvironmentManager
-from src.core.rem.models import Environment, EnvKind, EnvStatus
+from src.core.rem.models import EnvKind, EnvStatus
 
 
 @pytest.mark.asyncio

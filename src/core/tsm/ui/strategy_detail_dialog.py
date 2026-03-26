@@ -1,21 +1,10 @@
-"""策略详情编辑弹窗 (V2)。
-
-支持 Tab 页式布局编辑 V2 策略模型：
-    - 基础信息
-    - 资源选择 (Selector)
-    - 弹性伸缩 (Scaling)
-    - 执行目标 (Execution)
-    - 容错与清理 (Retry & Teardown)
-
-特性更新:
-    - 支持指纹浏览器 (BitBrowser/VirtualBrowser) 分级选择
-    - 支持从 MMS 模块中动态加载工作流列表
-    - 优化 UI 布局，加长输入框
-"""
+"""策略详情编辑弹窗 (V2)."""
 
 
 
 import uuid
+
+import yaml
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -32,7 +21,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSpinBox,
     QStackedWidget,
     QTabWidget,
     QVBoxLayout,
@@ -41,12 +29,13 @@ from PyQt6.QtWidgets import (
 
 from src.core.mms import get_module_registry
 from src.core.tsm import (
+    AcquisitionMode,
+    CreationLifecycle,
     EnvType,
     ExecutionContext,
-    ResourceSelector,
+    MatchConfig,
+    ResourceConfig,
     RetryPolicy,
-    ScalingMode,
-    ScalingPolicy,
     SelectionStrategy,
     TaskStrategy,
     TeardownAction,
@@ -238,12 +227,6 @@ SELECTION_STRATEGY_MAP = {
     SelectionStrategy.BEST_FIT: "最佳匹配 (Best Fit)",
 }
 
-# 伸缩模式显示映射 (CN)
-SCALING_MODE_MAP = {
-    ScalingMode.STRICT: "严格模式 (Strict) - 仅现有资源",
-    ScalingMode.ELASTIC: "弹性模式 (Elastic) - 允许自动创建",
-}
-
 # 清理动作显示映射 (CN)
 TEARDOWN_ACTION_MAP = {
     TeardownAction.DESTROY: "销毁 (Destroy)",
@@ -261,7 +244,7 @@ class StrategyDetailDialog(QDialog):
         self._strategy = strategy or TaskStrategy(
             id=uuid.uuid4().hex,
             name="",
-            selector=ResourceSelector(env_type=EnvType.CHROME, match_rules=None),
+            resource=ResourceConfig(),
         )
         self._is_new = strategy is None
         self._read_only = read_only
@@ -416,7 +399,6 @@ class StrategyDetailDialog(QDialog):
         # But for now, let's just find them by type if we can, or manually access them.
         # findChildren might not find them if they are wrapped.
         
-        self.init_workflow_selector.setEnabled(False)
         self.exec_workflow_selector.setEnabled(False)
         self.td_success_wf.setEnabled(False)
         self.td_failure_wf.setEnabled(False)
@@ -431,9 +413,9 @@ class StrategyDetailDialog(QDialog):
         self._setup_basic_tab(self.tab_basic)
         self.form_tabs.addTab(self.tab_basic, "基础与资源")
 
-        self.tab_scaling = QWidget()
-        self._setup_scaling_tab(self.tab_scaling)
-        self.form_tabs.addTab(self.tab_scaling, "弹性伸缩")
+        self.tab_acquisition = QWidget()
+        self._setup_acquisition_tab(self.tab_acquisition)
+        self.form_tabs.addTab(self.tab_acquisition, "获取与创建")
 
         self.tab_exec = QWidget()
         self._setup_execution_tab(self.tab_exec)
@@ -583,7 +565,7 @@ class StrategyDetailDialog(QDialog):
         
         # 2. Raw Text (Legacy/Advanced)
         self.exprs_edit = QPlainTextEdit()
-        self.exprs_edit.setPlaceholderText("e.g. cookies.health > 80 (One per line, legacy)")
+        self.exprs_edit.setPlaceholderText("e.g. cookies.health > 80 (one expression per line)")
         self.exprs_edit.setMinimumHeight(150)
         self.rule_stack.addWidget(self.exprs_edit)
         
@@ -605,48 +587,29 @@ class StrategyDetailDialog(QDialog):
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
 
-    def _setup_scaling_tab(self, parent):
+    def _setup_acquisition_tab(self, parent):
         layout = QVBoxLayout(parent)
         
-        scale_group = QGroupBox("弹性策略 (Scaling Policy)")
-        form = self._create_form_layout(scale_group)
-        
-        self.scale_mode_combo = QComboBox()
-        # Use SCALING_MODE_MAP for display
-        for m in ScalingMode:
-             self.scale_mode_combo.addItem(SCALING_MODE_MAP.get(m, m.value), m)
-        self.scale_mode_combo.currentIndexChanged.connect(self._on_scale_mode_changed)
-        form.addRow("伸缩模式:", self.scale_mode_combo)
-        
-        self.max_concurrency_spin = QSpinBox()
-        self.max_concurrency_spin.setRange(1, 1000)
-        form.addRow("最大并发:", self.max_concurrency_spin)
-        
-        self.min_idle_spin = QSpinBox()
-        self.min_idle_spin.setRange(0, 100)
-        form.addRow("预热空闲:", self.min_idle_spin)
-        
-        self.creation_timeout_spin = QSpinBox()
-        self.creation_timeout_spin.setRange(0, 3600)
-        self.creation_timeout_spin.setSuffix(" s")
-        form.addRow("创建超时:", self.creation_timeout_spin)
+        acq_group = QGroupBox("资源获取策略")
+        form = self._create_form_layout(acq_group)
 
-        # 初始化工作流 (使用 Selector, hide module selection)
-        self.init_workflow_selector = WorkflowSelector(show_module=False)
-        self.init_workflow_selector.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        
-        # Capture label and field to toggle visibility
-        self.init_wf_label = QLabel("创建环境:")
-        form.addRow(self.init_wf_label, self.init_workflow_selector)
-        
-        layout.addWidget(scale_group)
+        self.acquisition_mode_combo = QComboBox()
+        self.acquisition_mode_combo.addItem("仅查找复用 (match)", AcquisitionMode.MATCH)
+        self.acquisition_mode_combo.addItem("仅创建新环境 (create)", AcquisitionMode.CREATE)
+        form.addRow("获取模式:", self.acquisition_mode_combo)
+
+        self.creation_lifecycle_combo = QComboBox()
+        self.creation_lifecycle_combo.addItem("任务完成即销毁 (ephemeral)", CreationLifecycle.EPHEMERAL)
+        self.creation_lifecycle_combo.addItem("保留复用 (persistent)", CreationLifecycle.PERSISTENT)
+        form.addRow("创建生命周期:", self.creation_lifecycle_combo)
+
+        self.creation_params_edit = QPlainTextEdit()
+        self.creation_params_edit.setPlaceholderText("YAML/JSON，例如:\nproxy:\n  protocol: SOCKS5\nfingerprint:\n  randomize_all: true")
+        self.creation_params_edit.setMinimumHeight(220)
+        form.addRow("创建参数:", self.creation_params_edit)
+
+        layout.addWidget(acq_group)
         layout.addStretch()
-
-    def _on_scale_mode_changed(self, index):
-        mode = self.scale_mode_combo.currentData()
-        is_elastic = (mode == ScalingMode.ELASTIC)
-        self.init_wf_label.setVisible(is_elastic)
-        self.init_workflow_selector.setVisible(is_elastic)
 
     def _setup_execution_tab(self, parent):
         layout = QVBoxLayout(parent)
@@ -663,6 +626,10 @@ class StrategyDetailDialog(QDialog):
         self.exec_timeout_spin.setRange(0, 7200)
         self.exec_timeout_spin.setSuffix(" s")
         form.addRow("最大执行时长:", self.exec_timeout_spin)
+
+        self.hooks_module_edit = QLineEdit()
+        self.hooks_module_edit.setPlaceholderText("留空则复用执行模块，例如 ctrip 或 ctrip.tasks.claim_task")
+        form.addRow("Hooks 模块:", self.hooks_module_edit)
         
         layout.addWidget(exec_group)
         layout.addStretch()
@@ -750,7 +717,6 @@ class StrategyDetailDialog(QDialog):
     def _on_global_module_changed(self, module_name):
         # Filter other selectors
         mod_val = self.module_link_combo.currentData() # name or empty
-        self.init_workflow_selector.set_module_filter(mod_val)
         self.exec_workflow_selector.set_module_filter(mod_val)
         # Filter teardown selectors
         self.td_success_wf.set_module_filter(mod_val)
@@ -798,7 +764,7 @@ class StrategyDetailDialog(QDialog):
         self.desc_edit.setText(s.description)
         
         # Resource Logic
-        etype = s.selector.env_type
+        etype = s.resource.acquisition.selector.env_type
         if etype == EnvType.CHROME:
             self.env_category_combo.setCurrentIndex(0)
         elif etype == EnvType.ANDROID:
@@ -813,17 +779,16 @@ class StrategyDetailDialog(QDialog):
             self.env_category_combo.setCurrentIndex(3)
 
         # Set sort strategy by data
-        idx = self.sort_combo.findData(s.selector.sort_strategy)
+        idx = self.sort_combo.findData(s.resource.acquisition.selector.sort_strategy)
         if idx >= 0:
             self.sort_combo.setCurrentIndex(idx)
         else:
-            # Fallback for old strategy (by text)
-            idx_text = self.sort_combo.findText(s.selector.sort_strategy.value)
+            idx_text = self.sort_combo.findText(s.resource.acquisition.selector.sort_strategy.value)
             self.sort_combo.setCurrentIndex(idx_text if idx_text >= 0 else 0)
 
-        self.wait_timeout_spin.setValue(s.selector.wait_timeout)
+        self.wait_timeout_spin.setValue(s.resource.acquisition.selector.wait_timeout)
         
-        labels_txt = "\n".join([f"{k}: {v}" for k, v in s.selector.match_labels.items()])
+        labels_txt = "\n".join([f"{k}: {v}" for k, v in s.resource.acquisition.selector.tags.items()])
         self.labels_edit.setPlainText(labels_txt)
         
         # Load Match Rules (New AST)
@@ -831,38 +796,32 @@ class StrategyDetailDialog(QDialog):
         # Since RuleBuilder currently only takes data in init, we might need a setter
         # For simplicity in this interaction, let's assume RuleBuilder recreates root widget internally or we rebuild it
         # Actually our RuleBuilder only supports init, let's replace it
-        if s.selector.match_rules:
+        if s.resource.acquisition.selector.match_rules:
             self.rule_stack.removeWidget(self.rule_builder)
-            self.rule_builder = RuleBuilder(s.selector.match_rules)
+            self.rule_builder = RuleBuilder(s.resource.acquisition.selector.match_rules)
             self.rule_stack.insertWidget(0, self.rule_builder)
             self.rule_stack.setCurrentIndex(0)
             self.rule_mode_btn.setChecked(False)
         else:
-            # Fallback to expressions
-            self.exprs_edit.setPlainText("\n".join(s.selector.match_expressions))
-            self.rule_stack.setCurrentIndex(1 if s.selector.match_expressions else 0)
-            self.rule_mode_btn.setChecked(bool(s.selector.match_expressions))
+            self.exprs_edit.setPlainText("\n".join(s.resource.acquisition.selector.match_expressions))
+            self.rule_stack.setCurrentIndex(1 if s.resource.acquisition.selector.match_expressions else 0)
+            self.rule_mode_btn.setChecked(bool(s.resource.acquisition.selector.match_expressions))
 
-        # Scaling
-        # Safe Enum setting using data
-        idx = self.scale_mode_combo.findData(s.scaling.mode)
+        idx = self.acquisition_mode_combo.findData(s.resource.acquisition.mode)
         if idx >= 0:
-            self.scale_mode_combo.setCurrentIndex(idx)
+            self.acquisition_mode_combo.setCurrentIndex(idx)
+
+        idx = self.creation_lifecycle_combo.findData(s.resource.acquisition.creation.lifecycle)
+        if idx >= 0:
+            self.creation_lifecycle_combo.setCurrentIndex(idx)
+
+        creation_params = s.resource.acquisition.creation.params
+        if creation_params:
+            self.creation_params_edit.setPlainText(
+                yaml.safe_dump(creation_params, allow_unicode=True, sort_keys=False).strip()
+            )
         else:
-            self.scale_mode_combo.setCurrentText(s.scaling.mode.value)
-            
-        # Trigger visibility update
-        self._on_scale_mode_changed(self.scale_mode_combo.currentIndex())
-            
-        self.max_concurrency_spin.setValue(s.scaling.max_concurrency)
-        self.min_idle_spin.setValue(s.scaling.min_idle)
-        self.creation_timeout_spin.setValue(s.scaling.creation_timeout)
-        
-        # Scale Init Workflow (Parsing "module/workflow")
-        init_wf = s.scaling.init_workflow or ""
-        if "/" in init_wf:
-            mod, wf = init_wf.split("/", 1)
-            self.init_workflow_selector.set_value(mod, wf)
+            self.creation_params_edit.clear()
         
         # Execution
         # 1. Infer Global Module FIRST (to prepopulate selectors)
@@ -873,12 +832,12 @@ class StrategyDetailDialog(QDialog):
             else:
                 # Manually set filter if not in global list (e.g. hidden module)
                 self.exec_workflow_selector.set_module_filter(s.execution.module)
-                self.init_workflow_selector.set_module_filter(s.execution.module)
 
         # 2. Then set values
         if s.execution:
             self.exec_workflow_selector.set_value(s.execution.module, s.execution.workflow)
             self.exec_timeout_spin.setValue(s.execution.timeout)
+            self.hooks_module_edit.setText(s.execution.hooks_module or "")
  
             
         # Retry & Teardown
@@ -945,25 +904,33 @@ class StrategyDetailDialog(QDialog):
              # Fallback if somehow missing
              sort_strategy = SelectionStrategy.FIFO
 
-        selector = ResourceSelector(
-            env_type=env_type,
-            match_labels=labels,
-            match_expressions=match_exprs,
-            match_rules=match_rules,
-            sort_strategy=sort_strategy,
-            wait_timeout=self.wait_timeout_spin.value(),
-        )
-        
-        # Init workflow
-        imod, iwf = self.init_workflow_selector.get_value()
-        init_workflow_str = f"{imod}/{iwf}" if imod and iwf else None
+        creation_params = {}
+        raw_creation_params = self.creation_params_edit.toPlainText().strip()
+        if raw_creation_params:
+            parsed = yaml.safe_load(raw_creation_params)
+            if parsed is None:
+                parsed = {}
+            if not isinstance(parsed, dict):
+                raise ValueError("创建参数必须是对象结构（YAML/JSON map）")
+            creation_params = parsed
 
-        scaling = ScalingPolicy(
-            mode=self.scale_mode_combo.currentData() or ScalingMode.STRICT,
-            max_concurrency=self.max_concurrency_spin.value(),
-            min_idle=self.min_idle_spin.value(),
-            creation_timeout=self.creation_timeout_spin.value(),
-            init_workflow=init_workflow_str,
+        resource = ResourceConfig(
+            provider=("bitbrowser" if env_type == EnvType.BIT_BROWSER else "virtualbrowser" if env_type == EnvType.VIRTUAL_BROWSER else "playwright_local"),
+            acquisition={
+                "mode": self.acquisition_mode_combo.currentData(),
+                "selector": MatchConfig(
+                    env_type=env_type,
+                    tags=labels,
+                    match_expressions=match_exprs,
+                    match_rules=match_rules,
+                    sort_strategy=sort_strategy,
+                    wait_timeout=self.wait_timeout_spin.value(),
+                ),
+                "creation": {
+                    "lifecycle": self.creation_lifecycle_combo.currentData(),
+                    "params": creation_params,
+                },
+            },
         )
         
         # Execution
@@ -973,6 +940,7 @@ class StrategyDetailDialog(QDialog):
             execution = ExecutionContext(
                 module=emod,
                 workflow=ewf or "default",
+                hooks_module=self.hooks_module_edit.text().strip(),
                 timeout=self.exec_timeout_spin.value(),
             )
             
@@ -1001,8 +969,7 @@ class StrategyDetailDialog(QDialog):
             id=self._strategy.id,
             name=self.name_edit.text().strip() or "Unnamed",
             description=self.desc_edit.text().strip(),
-            selector=selector,
-            scaling=scaling,
+            resource=resource,
             execution=execution,
             retry=retry,
             teardown=teardown,

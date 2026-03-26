@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -73,9 +74,10 @@ class TaskCreateDialog(QDialog):
 
         # 2. 作业类型
         self.type_combo = QComboBox()
-        self.type_combo.addItem("批处理 (Batch)", JobType.BATCH.value)
-        self.type_combo.addItem("常驻服务 (Service)", JobType.SERVICE.value)
-        form.addRow("作业类型:", self.type_combo)
+        self.type_combo.addItem("定时批次", JobType.BATCH.value)
+        self.type_combo.addItem("持续保活", JobType.SERVICE.value)
+        self.type_combo.currentIndexChanged.connect(self._on_job_type_changed)
+        form.addRow("作业模式:", self.type_combo)
 
         # 3. 策略选择
         self.strategy_combo = QComboBox()
@@ -99,10 +101,13 @@ class TaskCreateDialog(QDialog):
         self.trigger_combo = QComboBox()
         self.trigger_combo.addItem("手动触发", "manual")
         self.trigger_combo.addItem("Cron 定时", TriggerType.CRON.value)
-        # Service type acts as "Always On" if manual+active, so Trigger mainly for Batch or scheduled restart?
-        # For simplicity, keep options.
         self.trigger_combo.currentIndexChanged.connect(self._on_trigger_changed)
         form.addRow("触发方式:", self.trigger_combo)
+
+        self.trigger_hint = QLabel()
+        self.trigger_hint.setWordWrap(True)
+        self.trigger_hint.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 12px;")
+        form.addRow("", self.trigger_hint)
 
         # 触发参数 (Stacked)
         self.trigger_stack = QStackedWidget()
@@ -160,6 +165,7 @@ class TaskCreateDialog(QDialog):
 
         # 监听策略选择变化
         self.strategy_combo.currentIndexChanged.connect(self._on_strategy_changed)
+        self._on_job_type_changed(self.type_combo.currentIndex())
 
     def _init_form_data(self):
         """初始化表单数据 (编辑模式)。"""
@@ -180,13 +186,9 @@ class TaskCreateDialog(QDialog):
         self.concurrency_spin.setValue(job.concurrency_target)
         
         # Trigger
+        self._on_job_type_changed(self.type_combo.currentIndex())
         if job.trigger.type == TriggerType.CRON:
-            idx = self.trigger_combo.findData(TriggerType.CRON.value)
-            self.trigger_combo.setCurrentIndex(idx)
             self.cron_edit.setText(job.trigger.cron_expr or "")
-        else:
-            idx = self.trigger_combo.findData("manual")
-            self.trigger_combo.setCurrentIndex(idx)
 
     def _load_strategies(self):
         """加载策略列表。"""
@@ -195,7 +197,6 @@ class TaskCreateDialog(QDialog):
 
         self.strategy_combo.clear()
         for strategy in self._strategies:
-            # 策略本身有 max_concurrency，但 V2 中由 Job 控制
             display_name = f"{strategy.name}"
             self.strategy_combo.addItem(display_name, strategy.id)
 
@@ -221,13 +222,35 @@ class TaskCreateDialog(QDialog):
 
         # 预览信息
         lines = []
-        lines.append(f"环境: {strategy.selector.env_type.value}")
+        lines.append(f"环境: {strategy.resource.acquisition.selector.env_type.value}")
         if strategy.execution:
             lines.append(f"执行: {strategy.execution.module}")
+            if strategy.execution.hooks_module:
+                lines.append(f"Hooks: {strategy.execution.hooks_module}")
         self.strategy_preview.setText(" | ".join(lines))
 
     def _on_trigger_changed(self, index: int):
         self.trigger_stack.setCurrentIndex(index)
+
+    def _on_job_type_changed(self, index: int):
+        job_type = self.type_combo.currentData()
+        is_batch = job_type == JobType.BATCH.value
+
+        trigger_value = TriggerType.CRON.value if is_batch else TriggerType.MANUAL.value
+        trigger_index = self.trigger_combo.findData(trigger_value)
+        if trigger_index >= 0:
+            self.trigger_combo.blockSignals(True)
+            self.trigger_combo.setCurrentIndex(trigger_index)
+            self.trigger_combo.blockSignals(False)
+
+        self.trigger_combo.setEnabled(False)
+        self._on_trigger_changed(trigger_index if trigger_index >= 0 else 0)
+        self.cron_edit.setEnabled(is_batch)
+
+        if is_batch:
+            self.trigger_hint.setText("定时批次模式会在 Cron 命中时一次性启动 N 个任务；若上一批仍在运行，本次触发将跳过。")
+        else:
+            self.trigger_hint.setText("持续保活模式会在你点击启动后持续维持 N 个运行中的任务，直到点击暂停。")
 
     def _on_create(self):
         """创建任务。"""
@@ -238,25 +261,28 @@ class TaskCreateDialog(QDialog):
         if not self._selected_strategy_id:
             return
 
+        if self.type_combo.currentData() == JobType.BATCH.value and not self.cron_edit.text().strip():
+            QMessageBox.warning(self, "配置不完整", "定时批次模式必须填写 Cron 表达式。")
+            self.cron_edit.setFocus()
+            return
+
         self.accept()
 
     def get_job_data(self) -> dict:
         """获取 Job 创建数据。"""
-        trigger_type_val = self.trigger_combo.currentData()
-        trigger_config = {}
-        
-        if trigger_type_val == TriggerType.CRON.value:
+        job_type = self.type_combo.currentData()
+        if job_type == JobType.BATCH.value:
             trigger_config = {
                 "type": TriggerType.CRON.value,
                 "cron_expr": self.cron_edit.text().strip()
             }
         else:
-            trigger_config = {"type": "manual"}
+            trigger_config = {"type": TriggerType.MANUAL.value}
 
         return {
             "name": self.name_edit.text().strip(),
             "strategy_id": self._selected_strategy_id,
-            "job_type": self.type_combo.currentData(),
+            "job_type": job_type,
             "concurrency": self.concurrency_spin.value(),
             "trigger_config": trigger_config,
         }

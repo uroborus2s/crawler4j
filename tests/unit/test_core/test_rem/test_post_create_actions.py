@@ -3,8 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.rem.manager import EnvironmentManager
-from src.core.rem.models import Environment, EnvKind, EnvStatus, PostCreateAction
+from src.core.rem.models import Environment, EnvKind, EnvStatus, EnvUnavailableError, PostCreateAction
 from src.core.rem.provider import BaseProvider, register_provider
+from src.core.system.external_app_service import AppLaunchResult, ExternalApp
 
 
 class MockProvider(BaseProvider):
@@ -68,6 +69,7 @@ class MockProvider(BaseProvider):
         
     async def update(self, env: Environment, config: dict) -> bool:
         return True
+
 
 @pytest.fixture
 def mock_pool():
@@ -153,3 +155,42 @@ async def test_create_env_workflow_action(manager):
         
         # Verify closed
         assert provider.close_called
+
+
+@pytest.mark.asyncio
+async def test_ensure_provider_runtime_for_virtualbrowser(manager):
+    app_service = MagicMock()
+    app_service.ensure_running = AsyncMock(return_value=AppLaunchResult(success=True))
+    app_service.wait_until_ready = AsyncMock(return_value=True)
+
+    with patch(
+        "src.core.system.external_app_service.get_external_app_service",
+        return_value=app_service,
+    ):
+        await manager.ensure_provider_runtime("virtualbrowser")
+
+    app_service.ensure_running.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER)
+    app_service.wait_until_ready.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER, timeout=30)
+
+
+@pytest.mark.asyncio
+async def test_ensure_provider_runtime_fails_when_external_app_not_ready(manager):
+    app_service = MagicMock()
+    app_service.ensure_running = AsyncMock(
+        return_value=AppLaunchResult(
+            success=False,
+            error_code="PATH_NOT_CONFIGURED",
+            error_message="VirtualBrowser 安装路径未配置",
+        )
+    )
+    app_service.wait_until_ready = AsyncMock(return_value=False)
+
+    with patch(
+        "src.core.system.external_app_service.get_external_app_service",
+        return_value=app_service,
+    ):
+        with pytest.raises(EnvUnavailableError, match="安装路径未配置"):
+            await manager.ensure_provider_runtime("virtualbrowser")
+
+    app_service.ensure_running.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER)
+    app_service.wait_until_ready.assert_not_awaited()

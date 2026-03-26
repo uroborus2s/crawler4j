@@ -1,6 +1,6 @@
 """指纹配置抽象模块。
 
-设计参考: docs/design/module-01-runtime-environment.md §5.4
+设计参考: docs/03-solution/reference-design/module-01-runtime-environment.md §5.4
 
 提供指纹浏览器配置的统一抽象：
     - FingerprintProvider: 指纹配置协议

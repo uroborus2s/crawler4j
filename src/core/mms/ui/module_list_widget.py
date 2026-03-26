@@ -86,6 +86,21 @@ class ModuleListWidget(QWidget):
         """)
         self.install_btn.clicked.connect(self._install_module)
         header.addWidget(self.install_btn)
+
+        self.dev_link_btn = QPushButton("🔗 添加开发模块")
+        self.dev_link_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(245, 158, 11, 0.85);
+                color: black;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: rgba(245, 158, 11, 1); }
+        """)
+        self.dev_link_btn.clicked.connect(self._register_dev_link)
+        header.addWidget(self.dev_link_btn)
         
         self.refresh_btn = QPushButton("🔄 刷新")
         self.refresh_btn.setStyleSheet("""
@@ -98,7 +113,7 @@ class ModuleListWidget(QWidget):
             }
             QPushButton:hover { background: rgba(99, 102, 241, 1); }
         """)
-        self.refresh_btn.clicked.connect(self.load_data)
+        self.refresh_btn.clicked.connect(lambda: self.load_data(force_refresh=True))
         header.addWidget(self.refresh_btn)
         
         layout.addLayout(header)
@@ -139,13 +154,15 @@ class ModuleListWidget(QWidget):
     # Removed ModuleDisplayItem and ModuleListWidget redefinition to merge class body
     # ... (keeps existing)
 
-    def load_data(self):
+    def load_data(self, *, force_refresh: bool = False):
         """加载模块数据。"""
         self.table.set_loading(True)
         self.error_label.hide()
         
         try:
             registry = get_module_registry()
+            if force_refresh:
+                registry.refresh()
             modules = registry.list_modules()
             self._modules = modules
             
@@ -239,6 +256,22 @@ class ModuleListWidget(QWidget):
         layout.addWidget(toggle_btn)
         
         # 卸载按钮 (仅外部模块)
+        if module.source == ModuleSource.DEV_LINK:
+            remove_btn = QPushButton("移除开发链接")
+            remove_btn.setToolTip("移除开发链接，不删除本地源码")
+            remove_btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(248, 113, 113, 0.85);
+                    color: white;
+                    border: none;
+                    padding: 5px 10px;
+                    border-radius: 3px;
+                }
+                QPushButton:hover { background: rgba(248, 113, 113, 1); }
+            """)
+            remove_btn.clicked.connect(lambda _, n=module.name: self._remove_dev_link(n))
+            layout.addWidget(remove_btn)
+
         if module.source == ModuleSource.EXTERNAL:
             uninstall_btn = QPushButton("🗑️")
             uninstall_btn.setToolTip("卸载模块")
@@ -271,9 +304,28 @@ class ModuleListWidget(QWidget):
         try:
             module_info = registry.install(path)
             QMessageBox.information(self, "成功", f"已安装模块: {module_info.name}")
-            self.load_data()
+            self.load_data(force_refresh=True)
         except Exception as e:
             QMessageBox.warning(self, "安装失败", str(e))
+
+    def _register_dev_link(self):
+        """注册开发链接模块。"""
+        path = QFileDialog.getExistingDirectory(self, "选择开发模块目录")
+        if not path:
+            return
+
+        registry = get_module_registry()
+
+        try:
+            module_info = registry.register_dev_link(path)
+            message = (
+                f"已添加开发模块: {module_info.name}\n"
+                "当前模块来源会切换为“开发链接”，可在 ATM 中发起任务调试。"
+            )
+            QMessageBox.information(self, "成功", message)
+            self.load_data(force_refresh=True)
+        except Exception as e:
+            QMessageBox.warning(self, "添加开发模块失败", str(e))
     
     def _uninstall_module(self, name: str):
         """卸载模块。"""
@@ -289,16 +341,48 @@ class ModuleListWidget(QWidget):
             registry = get_module_registry()
             registry.uninstall(name)
             QMessageBox.information(self, "成功", f"已卸载模块: {name}")
-            self.load_data()
+            self.load_data(force_refresh=True)
         except Exception as e:
             QMessageBox.warning(self, "卸载失败", str(e))
+
+    def _remove_dev_link(self, name: str):
+        """移除开发模块链接。"""
+        reply = QMessageBox.question(
+            self,
+            "确认移除",
+            f"确定要移除开发模块 '{name}' 的开发链接吗？\n本地源码目录不会被删除。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            registry = get_module_registry()
+            removed = registry.remove_dev_link(name)
+            if not removed:
+                QMessageBox.warning(self, "移除失败", f"未找到开发链接: {name}")
+                return
+
+            fallback = registry.get_module(name)
+            if fallback:
+                source_label = "内置模块" if fallback.source == ModuleSource.BUILTIN else "正式安装模块"
+                QMessageBox.information(
+                    self,
+                    "已切换",
+                    f"已移除开发链接，当前已回退到 {source_label}: {name}",
+                )
+            else:
+                QMessageBox.information(self, "已移除", f"已移除开发链接: {name}")
+            self.load_data(force_refresh=True)
+        except Exception as e:
+            QMessageBox.warning(self, "移除失败", str(e))
     
     def _enable_module(self, name: str):
         """启用模块。"""
         try:
             registry = get_module_registry()
             registry.enable_module(name)
-            self.load_data()
+            self.load_data(force_refresh=True)
         except Exception as e:
             QMessageBox.warning(self, "启用失败", str(e))
     
@@ -307,6 +391,6 @@ class ModuleListWidget(QWidget):
         try:
             registry = get_module_registry()
             registry.disable_module(name)
-            self.load_data()
+            self.load_data(force_refresh=True)
         except Exception as e:
             QMessageBox.warning(self, "禁用失败", str(e))

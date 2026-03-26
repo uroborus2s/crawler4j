@@ -1,6 +1,6 @@
 """运行环境管理 (Runtime Environment Management)。
 
-规格参考: docs/srs/05-framework-core/05-2-runtime-environment-management.md
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-2-runtime-environment-management.md
 
 导出:
     - Environment, EnvLease, EnvRequirement: 数据模型

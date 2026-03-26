@@ -1,5 +1,4 @@
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel
 
 from src.ui.theme.palette import Palette
 from src.ui.widgets.glass_card import GlassCard

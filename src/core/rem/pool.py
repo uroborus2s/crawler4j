@@ -1,6 +1,6 @@
 """环境池与租约管理。
 
-规格参考: docs/srs/05-framework-core/05-2-runtime-environment-management.md (5.2.3.1)
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-2-runtime-environment-management.md (5.2.3.1)
 
 Pool 层维护实例池与状态机，负责挑选可用实例、并发控制与回收策略。
 LeaseManager 为任务运行发放租约，处理超时与异常兜底。

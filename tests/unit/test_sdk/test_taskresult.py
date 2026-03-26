@@ -7,9 +7,6 @@
 """
 
 import json
-from typing import Any
-
-import pytest
 
 from crawler4j_sdk import TaskResult
 

@@ -294,10 +294,9 @@ class ModuleDetailPanel(QFrame):
     
     def _update_config(self, module):
         """更新配置编辑器。"""
-        from src.core.persistence import get_kv_store
-        
-        kv = get_kv_store()
-        config = kv.get(f"module:{module.name}:config")
+        from src.core.mms.settings_store import get_module_settings_store
+
+        config = get_module_settings_store().read_module_settings(module.name)
         
         # 如果没有保存的配置，使用 manifest 中的默认值
         if not config:
@@ -316,9 +315,9 @@ class ModuleDetailPanel(QFrame):
             config_text = self.config_editor.toPlainText()
             config = json.loads(config_text)
             
-            from src.core.persistence import get_kv_store
-            kv = get_kv_store()
-            kv.set(f"module:{self._module.name}:config", config)
+            from src.core.mms.settings_store import get_module_settings_store
+
+            get_module_settings_store().write_module_settings(self._module.name, config)
             
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.information(self, "成功", "配置已保存")

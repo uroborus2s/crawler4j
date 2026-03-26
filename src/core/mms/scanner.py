@@ -1,6 +1,6 @@
 """模块扫描器与解析器。
 
-规格参考: docs/srs/05-framework-core/05-1-module-management.md (5.1.4.1, 5.1.4.2)
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-1-module-management.md (5.1.4.1, 5.1.4.2)
 
 负责：
     - 模块发现：扫描受控目录发现候选模块
@@ -9,8 +9,6 @@
 """
 
 from pathlib import Path
-from typing import Any
-
 import yaml
 
 from src.core.foundation.logging import logger
@@ -25,7 +23,7 @@ from src.core.mms.models import (
 from src.utils.paths import get_builtin_modules_path, get_user_modules_path
 
 # SDK 版本（用于兼容性校验）
-CURRENT_SDK_VERSION = "1.0.0"
+CURRENT_SDK_VERSION = "1.0.2"
 
 # 忽略的目录
 IGNORED_DIRS = {"__pycache__", ".git", ".venv", "node_modules"}
@@ -209,7 +207,13 @@ class ModuleScanner:
         
         return 0
     
-    def load_module(self, module_path: Path, source: ModuleSource) -> ModuleInfo:
+    def load_module(
+        self,
+        module_path: Path,
+        source: ModuleSource,
+        *,
+        name_hint: str = "",
+    ) -> ModuleInfo:
         """加载单个模块。
         
         Args:
@@ -239,8 +243,8 @@ class ModuleScanner:
             
             # 创建无效模块条目
             return ModuleInfo(
-                name=module_path.name,
-                manifest=ModuleManifest(name=module_path.name),
+                name=name_hint or module_path.name,
+                manifest=ModuleManifest(name=name_hint or module_path.name),
                 source=source,
                 status=ModuleStatus.INVALID,
                 path=module_path,

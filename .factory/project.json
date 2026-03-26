@@ -1,0 +1,98 @@
+{
+  "project_name": "crawler4j",
+  "project_type": "historical-python-desktop-automation-platform",
+  "language": "python",
+  "package_manager": "uv",
+  "baseline_date": "2026-03-26",
+  "current_stage": "IMPLEMENTATION",
+  "recommended_next_stage": "IMPLEMENTATION",
+  "validated_commands": {
+    "tests": {
+      "command": "uv run pytest -q",
+      "result": "passed",
+      "details": "184 passed on 2026-03-26 after completing TASK-011 and rerunning the full suite"
+    },
+    "docs": {
+      "command": "Review docs/ markdown tree",
+      "result": "passed",
+      "details": "docs/ has been unified into a single markdown tree; MkDocs static-site responsibility removed from this repo"
+    },
+    "lint": {
+      "command": "uv run ruff check .",
+      "result": "passed",
+      "details": "Maintained code and regular automated tests pass; historical manual/debug/verify/analyze scripts are explicitly excluded from the default lint gate"
+    },
+    "root_build": {
+      "command": "uv build --out-dir /tmp/crawler4j-build-check",
+      "result": "passed",
+      "details": "wheel/sdist produced successfully for crawler4j-0.1.2.dev20260326"
+    },
+    "sdk_build": {
+      "command": "cd crawler4j_sdk && uv build --out-dir /tmp/crawler4j-sdk-build-check",
+      "result": "passed",
+      "details": "wheel/sdist produced successfully"
+    },
+    "contracts_build": {
+      "command": "cd crawler4j_contracts && uv build --out-dir /tmp/crawler4j-contracts-build-check",
+      "result": "passed",
+      "details": "wheel/sdist produced successfully"
+    },
+    "sdk_cli_help": {
+      "command": "uv run python -m crawler4j_sdk.cli.commands --help",
+      "result": "passed",
+      "details": "CLI help rendered successfully"
+    },
+    "root_script_entry": {
+      "command": "uv sync && inspect .venv/bin/start",
+      "result": "passed",
+      "details": "Installed root script now imports src.ui.app:main"
+    },
+    "ui_smoke": {
+      "command": "uv run python scripts/smoke_test_ui.py",
+      "result": "passed",
+      "details": "Smoke passed on 2026-03-26; QApplication, Shell import, and Shell instantiation succeeded"
+    },
+    "pyinstaller_bundle": {
+      "command": "uv run pyinstaller --noconfirm --clean --distpath /tmp/crawler4j-pyinstaller-dist --workpath /tmp/crawler4j-pyinstaller-build crawler4j.spec",
+      "result": "passed",
+      "details": "PyInstaller build completed successfully into /tmp"
+    },
+    "external_packaged_module_smoke": {
+      "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
+      "result": "passed",
+      "details": "Packaged external module install now loads from the installed app-data path and removes conflicting dev links"
+    },
+    "ctrip_labor_packaged_smoke": {
+      "command": "Install ctrip packaged module and run labor_workflow in isolated app-data dir",
+      "result": "passed",
+      "details": "legacy automation compatibility imports are restored; packaged labor_workflow no longer degrades because src.automation is missing"
+    },
+    "mms_settings_store_tests": {
+      "command": "uv run pytest tests/unit/test_core/test_mms/test_settings_store.py -q",
+      "result": "passed",
+      "details": "4 passed on 2026-03-26 covering module/workflow settings export, legacy KV fallback, persisted module status, and uninstall cleanup policy"
+    }
+  },
+  "versions": {
+    "root_pyproject": "0.1.2.dev20260326",
+    "runtime": "0.1.2.dev20260326",
+    "git_tag_latest": "v0.1.1",
+    "sdk": "1.0.2",
+    "contracts": "1.0.1"
+  },
+  "entrypoints": {
+    "actual_ui_entry": "uv run python -m src.ui.app",
+    "declared_root_script": "uv run start",
+    "sdk_cli_entry": "uv run python -m crawler4j_sdk.cli.commands --help"
+  },
+  "known_risks": [
+    "CR-003"
+  ],
+  "compressed_entry_docs": [
+    "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",
+    "/Users/uroborus/PythonProject/crawler4j/.factory/memory/role-charter.project.md",
+    "/Users/uroborus/PythonProject/crawler4j/.factory/memory/doc-map.md"
+  ],
+  "last_project_compress_at": "2026-03-26 10:45:42",
+  "last_project_compress_owner": "项目协调者"
+}

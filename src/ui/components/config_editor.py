@@ -1,5 +1,5 @@
-from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtWidgets import QFrame, QLabel, QPlainTextEdit, QVBoxLayout
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import QFrame, QPlainTextEdit, QVBoxLayout
 
 from src.ui.theme.palette import Palette
 from src.ui.utils.syntax_highlighter import YamlHighlighter

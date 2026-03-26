@@ -1,7 +1,6 @@
 """UI 应用入口。"""
 
 import sys
-from pathlib import Path
 
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
@@ -13,7 +12,7 @@ from src.core.system.preferences_service import (
     get_preferences_service,
 )
 from src.ui.shell import Shell
-from src.utils.paths import get_app_data_dir
+from src.utils.paths import get_app_data_dir, get_resource_path
 
 
 def main():
@@ -35,9 +34,9 @@ def main():
     app.setApplicationName("Crawler4j")
     
     # 设置应用图标
-    icon_path = Path(__file__).parent / "assets" / "icon.jpg"
-    if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
+    icon_path = get_resource_path("src/ui/assets/icon.jpg")
+    if icon_path:
+        app.setWindowIcon(QIcon(icon_path))
     
     # 创建主窗口
     try:
@@ -61,6 +60,11 @@ def main():
         env_manager = get_environment_manager()
         loop.run_until_complete(env_manager.startup())
         
+        # ATM 任务引擎启动（Cron 调度 + 事件驱动补并发 + 崩溃自检）
+        from src.core.atm.service import get_task_service
+        task_service = get_task_service()
+        loop.run_until_complete(task_service.start())
+        
         
         window = Shell()
         
@@ -73,6 +77,12 @@ def main():
         loop.run_forever()
         
         # 应用退出时清理资源
+        # 1. 优雅退出 ATM 控制循环，等待正在执行的任务完成
+        loop.run_until_complete(task_service.stop())
+        # 2. 停止调试 worker
+        from src.core.debug.service import get_debug_service
+        loop.run_until_complete(get_debug_service().shutdown())
+        # 2. 关闭 Playwright 进程
         from src.core.rem.handle import PlaywrightManager
         loop.run_until_complete(PlaywrightManager.force_shutdown())
 

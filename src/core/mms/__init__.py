@@ -1,6 +1,6 @@
 """模块管理系统 (Module Management System)。
 
-规格参考: docs/srs/05-framework-core/05-1-module-management.md
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-1-module-management.md
 
 导出:
     - ModuleInfo, ModuleManifest, etc.: 数据模型
@@ -8,7 +8,9 @@
     - ModuleRegistry: 模块注册表
 """
 
+from src.core.mms.dev_links import DevModuleLinkStore, get_dev_module_link_store
 from src.core.mms.models import (
+    DevModuleLink,
     ModuleDiscoveryError,
     ModuleError,
     ModuleInfo,
@@ -25,6 +27,7 @@ from src.core.mms.registry import (
     ModuleRegistry,
     get_module_registry,
 )
+from src.core.mms.settings_store import ModuleSettingsStore, get_module_settings_store
 from src.core.mms.scanner import (
     CURRENT_SDK_VERSION,
     ModuleScanner,
@@ -38,6 +41,7 @@ __all__ = [
     "ModuleSource",
     "ModuleStatus",
     "WorkflowInfo",
+    "DevModuleLink",
     "UIExtensionInfo",
     # 错误
     "ModuleError",
@@ -52,4 +56,8 @@ __all__ = [
     # 注册表
     "ModuleRegistry",
     "get_module_registry",
+    "ModuleSettingsStore",
+    "get_module_settings_store",
+    "DevModuleLinkStore",
+    "get_dev_module_link_store",
 ]

@@ -1,6 +1,6 @@
 """自动化任务管理 (Automation Task Management) V2.
 
-规格参考: docs/design/task-engine-v2.md
+规格参考: docs/03-solution/reference-design/task-engine-v2.md
 
 导出:
     - Job, Task: 核心实体

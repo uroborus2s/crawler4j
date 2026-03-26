@@ -1,13 +1,12 @@
 """Core-UI 命令通道。
 
-规格参考: docs/srs/05-framework-core/05-5-ui-host-microfrontend.md (5.5.3.2)
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-5-ui-host-microfrontend.md (5.5.3.2)
 
 UI → Core 的交互通过"命令通道"完成：
     - 幂等与可重试
     - 统一错误结构
 """
 
-import asyncio
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -106,8 +105,6 @@ class CommandChannel(QObject):
             命令响应
         """
         params = params or {}
-        correlation_id = str(uuid.uuid4())[:8]
-        
         handler = self._handlers.get(command)
         if not handler:
             return CommandResponse.error(

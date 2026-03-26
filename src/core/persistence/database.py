@@ -1,6 +1,6 @@
 """数据库连接管理。
 
-规格参考: docs/srs/05-framework-core/05-9-data-persistence.md
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-9-data-persistence.md
 
 存储分层:
     - config.db: 配置数据（读多写少）
@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
-from src.utils.paths import get_app_data_dir
+from src.utils import paths
 
 # 数据库文件
 CONFIG_DB = "config.db"
@@ -33,7 +33,7 @@ def get_db_path(db_name: str) -> Path:
     Returns:
         数据库文件绝对路径。
     """
-    data_dir = get_app_data_dir()
+    data_dir = paths.get_app_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / db_name
 
@@ -59,7 +59,16 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
     
     # 获取或创建线程本地连接
     conn_key = f"conn_{db_name}"
+    conn_path_key = f"{conn_key}_path"
     conn = getattr(_thread_local, conn_key, None)
+    conn_path = getattr(_thread_local, conn_path_key, None)
+
+    if conn is not None and conn_path != str(db_path):
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn = None
     
     if conn is None:
         conn = sqlite3.connect(str(db_path), check_same_thread=False)
@@ -67,6 +76,7 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         setattr(_thread_local, conn_key, conn)
+        setattr(_thread_local, conn_path_key, str(db_path))
     
     try:
         yield conn
@@ -200,5 +210,3 @@ def _init_state_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_meta_env ON env_metadata(env_id);
             CREATE INDEX IF NOT EXISTS idx_meta_ns_key ON env_metadata(namespace, key);
         """)
-
-

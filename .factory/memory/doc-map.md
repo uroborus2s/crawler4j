@@ -1,0 +1,105 @@
+# 文档压缩映射
+
+## 读取规则
+
+- 人类文档保留为正式说明层。
+- AI 默认先读压缩文档与 summary，再按需回看正式文档。
+
+## 映射表
+
+- `docs/00-governance/project-charter.md` -> `.factory/memory/runtime-brief.md`
+- `docs/01-discovery/current-state-analysis.md` -> `.factory/memory/runtime-brief.md`
+- `docs/01-discovery/input.md` -> `.factory/memory/runtime-brief.md`
+- `docs/02-requirements/prd.md` -> `.factory/memory/prd.summary.md`, `.factory/memory/requirements-verification.summary.md`
+- `docs/02-requirements/requirements-analysis.md` -> `.factory/memory/requirements-verification.summary.md`
+- `docs/02-requirements/requirements-verification.md` -> `.factory/memory/runtime-brief.md`
+- `docs/03-solution/api-design.md` -> `.factory/memory/api.summary.md`
+- `docs/03-solution/module-boundaries.md` -> `.factory/memory/runtime-brief.md`
+- `docs/03-solution/system-architecture.md` -> `.factory/memory/architecture.summary.md`
+- `docs/03-solution/technical-selection.md` -> `.factory/memory/tech-stack.summary.md`
+- `docs/04-delivery/implementation-plan.md` -> `.factory/memory/runtime-brief.md`
+- `docs/04-delivery/task-breakdown.md` -> `.factory/memory/runtime-brief.md`
+- `docs/04-delivery/wbs.md` -> `.factory/memory/runtime-brief.md`
+- `docs/05-quality/test-plan.md` -> `.factory/memory/tests.summary.md`
+- `docs/06-release/release-notes.md` -> `.factory/memory/runtime-brief.md`
+- `docs/07-operations/deployment-guide.md` -> `.factory/memory/runtime-brief.md`
+- `docs/08-handover/user-guide.md` -> `.factory/memory/runtime-brief.md`
+- `docs/architecture/ui_components_guide.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/01-general-architecture.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/design-job-task-engine.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/design-strategy-config-v2.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/model-debug-session.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/module-01-runtime-environment.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/module-02-task-strategy.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/module-03-module-management.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/module-04-data-persistence.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/module-05-sdk.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/module-06-ui-host.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/optimization_report_atm.md` -> `.factory/memory/runtime-brief.md`
+- `docs/design/task-engine-v2.md` -> `.factory/memory/runtime-brief.md`
+- `docs/getting-started.md` -> `.factory/memory/runtime-brief.md`
+- `docs/index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/plugin-dev/model-development-guide.md` -> `.factory/memory/runtime-brief.md`
+- `docs/sdk/context.md` -> `.factory/memory/runtime-brief.md`
+- `docs/sdk/core.md` -> `.factory/memory/runtime-brief.md`
+- `docs/sdk/utils.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/01-document-control.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/02-project-overview.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/03-requirements-analysis.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/04-architecture.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-1-module-management.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-10-system-capabilities.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-2-runtime-environment-management.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-3-task-strategy-management.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-4-automation-task-management.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-5-ui-host-microfrontend.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-6-crosscutting.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-7-testing-acceptance.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-8-operations-release.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-9-appendix.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/05-9-data-persistence.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/05-framework-core/index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/06-1-taskscript.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/06-2-taskflow.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/06-3-taskcontext.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/06-4-taskresult.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/06-5-cli.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/06-6-data-model.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/06-7-error-reliability.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/06-8-nfr.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/06-9-testing-ops-appendix.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/06-sdk/index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/07-modules/07-1-general-spec.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/07-modules/07-2-module-template.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/07-modules/07-3-ctrip.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/07-modules/07-4-others.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/07-modules/07-5-appendix.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/07-modules/index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/appendix/A-glossary.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/appendix/B-error-codes.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/appendix/C-config-index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/appendix/D-traceability-matrix.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/appendix/E-diagram-index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/appendix/F-compat-migration.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/appendix/index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/templates/api-contract.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/templates/data-contract.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/templates/feature.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/templates/index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/templates/module.md` -> `.factory/memory/runtime-brief.md`
+- `docs/srs/templates/usecase.md` -> `.factory/memory/runtime-brief.md`
+- `docs/test/01-comprehensive-test-design.md` -> `.factory/memory/runtime-brief.md`
+- `docs/test/index.md` -> `.factory/memory/runtime-brief.md`
+- `docs/test/test-01-rem.md` -> `.factory/memory/runtime-brief.md`
+- `docs/test/test-02-tsm.md` -> `.factory/memory/runtime-brief.md`
+- `docs/test/test-03-mms.md` -> `.factory/memory/runtime-brief.md`
+- `docs/test/test-04-persistence.md` -> `.factory/memory/runtime-brief.md`
+- `docs/test/test-05-sdk.md` -> `.factory/memory/runtime-brief.md`
+- `docs/test/test-06-ui.md` -> `.factory/memory/runtime-brief.md`
+- `docs/traceability/requirements-matrix.md` -> `.factory/memory/traceability.summary.md`, `.factory/memory/graph/traceability.json`
+- `docs/user-guide/build-release.md` -> `.factory/memory/runtime-brief.md`
+- `docs/user-guide/configuration.md` -> `.factory/memory/runtime-brief.md`
+- `docs/user-guide/dashboard-usage.md` -> `.factory/memory/runtime-brief.md`
+- `docs/user-guide/deployment.md` -> `.factory/memory/runtime-brief.md`

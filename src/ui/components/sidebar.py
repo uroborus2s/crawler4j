@@ -1,5 +1,4 @@
-from PyQt6.QtCore import QSize, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QPushButton, QSizePolicy, QSpacerItem, QVBoxLayout, QWidget
 
 from src.ui.theme.styles import StyleSheets

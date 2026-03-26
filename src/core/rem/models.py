@@ -1,6 +1,6 @@
 """REM 数据模型定义。
 
-规格参考: docs/srs/05-framework-core/05-2-runtime-environment-management.md
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-2-runtime-environment-management.md
 
 定义环境管理的核心数据实体：
     - EnvKind: 环境类型

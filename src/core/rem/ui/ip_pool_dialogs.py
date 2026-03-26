@@ -1,6 +1,6 @@
 """IP 池管理对话框。
 
-设计参考: docs/design/module-01-runtime-environment.md §5.5
+设计参考: docs/03-solution/reference-design/module-01-runtime-environment.md §5.5
 
 提供 IP 池相关的对话框：
     - AddPoolDialog: 新建 IP 池对话框

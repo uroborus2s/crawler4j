@@ -1,6 +1,6 @@
 """IP 池管理主页面。
 
-设计参考: docs/design/module-01-runtime-environment.md §5.5
+设计参考: docs/03-solution/reference-design/module-01-runtime-environment.md §5.5
 
 提供 IP 池管理的主 Tab 页面：
     - IPPoolTab: IP 池管理主页面

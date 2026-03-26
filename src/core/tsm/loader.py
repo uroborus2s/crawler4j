@@ -8,8 +8,6 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import yaml
-
 from src.core.foundation.logging import logger
 from src.core.tsm.models import TaskStrategy
 from src.utils.paths import get_config_dir

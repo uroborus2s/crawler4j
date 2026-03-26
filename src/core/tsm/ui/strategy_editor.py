@@ -135,8 +135,8 @@ class StrategyEditorPage(QWidget):
         provisioning_layout = QFormLayout(provisioning_group)
         
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["static", "dynamic", "hybrid"])
-        self.mode_combo.setCurrentText("hybrid")
+        self.mode_combo.addItems(["static", "dynamic"])
+        self.mode_combo.setCurrentText("dynamic")
         provisioning_layout.addRow("供应模式:", self.mode_combo)
         
         self.reuse_combo = QComboBox()
@@ -254,7 +254,7 @@ class StrategyEditorPage(QWidget):
             self.global_max_spin.setValue(concurrency.get("global_max", 10))
             
             provisioning = data.get("provisioning", {})
-            self.mode_combo.setCurrentText(provisioning.get("mode", "hybrid"))
+            self.mode_combo.setCurrentText(provisioning.get("mode", "dynamic"))
             self.reuse_combo.setCurrentText(provisioning.get("reuse_policy", "clean"))
             self.auto_create_spin.setValue(provisioning.get("auto_create_limit", 5))
             
@@ -280,7 +280,7 @@ class StrategyEditorPage(QWidget):
         config = kv.get("module:tsm:config") or {}
         
         self.global_max_spin.setValue(config.get("global_max", 10))
-        self.mode_combo.setCurrentText(config.get("mode", "hybrid"))
+        self.mode_combo.setCurrentText(config.get("mode", "dynamic"))
         self.reuse_combo.setCurrentText(config.get("reuse_policy", "clean"))
         self.auto_create_spin.setValue(config.get("auto_create_limit", 5))
         self.max_retries_spin.setValue(config.get("max_retries", 3))

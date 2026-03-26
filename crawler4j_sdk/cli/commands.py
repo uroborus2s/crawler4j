@@ -1,124 +1,309 @@
-"""CLI命令实现
+"""CLI commands for module scaffolding."""
 
-提供脚本开发相关的命令行工具。
-支持全局执行（uvx）和项目内执行（uv run）。
-"""
+from __future__ import annotations
 
 import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 from crawler4j_sdk.cli.templates import (
-    DEBUG_RUNNER,
-    PROJECT_PYPROJECT,
-    PROJECT_README,
+    CONFIG_SCHEMA_TEMPLATE,
+    MODEL_MANIFEST_TEMPLATE,
+    MODEL_MODULE_INIT,
+    MODEL_PROJECT_PYPROJECT,
+    MODEL_PROJECT_README,
+    MODEL_UI_SECTION,
     SCRIPT_TEMPLATE,
+    WORKFLOW_TEMPLATE,
 )
 
 
 def to_class_name(name: str) -> str:
-    """将脚本名转换为类名"""
+    """Convert a task name to a TaskScript class name."""
     parts = name.replace("-", "_").split("_")
     return "".join(word.capitalize() for word in parts) + "Task"
 
 
+def to_workflow_class_name(name: str) -> str:
+    """Convert a workflow name to a TaskFlow class name."""
+    parts = name.replace("-", "_").split("_")
+    return "".join(word.capitalize() for word in parts) + "Workflow"
+
+
 def to_display_name(name: str) -> str:
-    """将脚本名转换为显示名"""
+    """Convert an identifier to a human-readable display name."""
     return name.replace("_", " ").replace("-", " ").title()
 
 
-def find_tasks_dir() -> Path:
-    """查找tasks目录"""
-    cwd = Path.cwd()
-    
-    # 优先查找 tasks/
-    if (cwd / "tasks").is_dir():
-        return cwd / "tasks"
-    
-    # 查找 scripts/tasks/
-    if (cwd / "scripts" / "tasks").is_dir():
-        return cwd / "scripts" / "tasks"
-    
-    # 默认创建 tasks/
-    return cwd / "tasks"
+def is_valid_module_name(name: str) -> bool:
+    """Validate a model/module package name."""
+    return bool(name) and name.isidentifier() and name == name.lower()
 
 
-def cmd_init(args):
-    """初始化脚本项目"""
-    project_name = args.name
-    output_dir = Path(args.output) if args.output else Path.cwd() / project_name
+def is_valid_python_file_stem(name: str) -> bool:
+    """Validate names that must map to importable Python modules."""
+    return is_valid_module_name(name)
 
+
+def _write_text(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+
+
+def _ensure_package_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    init_file = path / "__init__.py"
+    if not init_file.exists():
+        _write_text(init_file, "")
+
+
+def find_module_root(start: Path | None = None) -> Path | None:
+    """Find the nearest module root containing module.yaml."""
+    current = (start or Path.cwd()).resolve()
+    search_roots = [current, *current.parents]
+
+    for candidate in search_roots:
+        if (candidate / "module.yaml").is_file():
+            return candidate
+    return None
+
+
+def require_module_root(start: Path | None = None) -> Path | None:
+    """Require the current working tree to be a module project."""
+    module_root = find_module_root(start)
+    if module_root:
+        return module_root
+
+    print("❌ 当前目录不在 model 项目中，找不到 module.yaml")
+    print("   请先执行 `crawler4j init-model <module_name>` 创建完整模块项目")
+    return None
+
+
+def find_tasks_dir(start: Path | None = None) -> Path:
+    """Find the tasks directory for the nearest module project."""
+    module_root = find_module_root(start)
+    if module_root:
+        return module_root / "tasks"
+    return (start or Path.cwd()).resolve() / "tasks"
+
+
+def find_workflows_dir(start: Path | None = None) -> Path:
+    """Find the most suitable workflows directory."""
+    module_root = find_module_root(start)
+    if module_root:
+        return module_root / "workflows"
+    return (start or Path.cwd()).resolve() / "workflows"
+
+
+def load_manifest(module_root: Path) -> dict[str, Any]:
+    """Load module.yaml as a mutable dictionary."""
+    manifest_path = module_root / "module.yaml"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"找不到 module.yaml: {manifest_path}")
+
+    with manifest_path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    if not isinstance(data, dict):
+        raise ValueError("module.yaml 顶层必须是对象")
+    return data
+
+
+def save_manifest(module_root: Path, manifest: dict[str, Any]) -> None:
+    """Persist module.yaml while keeping key order stable."""
+    manifest_path = module_root / "module.yaml"
+    with manifest_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(
+            manifest,
+            f,
+            allow_unicode=True,
+            sort_keys=False,
+        )
+
+
+def ensure_ui_extension(
+    manifest: dict[str, Any],
+    *,
+    display_name: str,
+    entry: str = "config_schema.json",
+) -> None:
+    """Ensure manifest includes a declarative UI extension."""
+    ui_extension = dict(manifest.get("ui_extension") or {})
+    ui_extension["type"] = "declarative"
+    ui_extension["entry"] = entry
+
+    nav_item = dict(ui_extension.get("nav_item") or {})
+    nav_item.setdefault("icon", "🧩")
+    nav_item.setdefault("label", f"{display_name}配置")
+    ui_extension["nav_item"] = nav_item
+    manifest["ui_extension"] = ui_extension
+
+
+def upsert_workflow_manifest_entry(
+    manifest: dict[str, Any],
+    *,
+    name: str,
+    display_name: str,
+    description: str,
+    force: bool = False,
+) -> None:
+    """Append or replace a workflow declaration in module.yaml."""
+    workflows = list(manifest.get("workflows") or [])
+
+    new_entry = {
+        "name": name,
+        "display_name": display_name,
+        "description": description,
+    }
+
+    for index, workflow in enumerate(workflows):
+        if workflow.get("name") != name:
+            continue
+        if not force:
+            raise ValueError(f"module.yaml 中已存在工作流声明: {name}")
+        workflows[index] = new_entry
+        manifest["workflows"] = workflows
+        return
+
+    workflows.append(new_entry)
+    manifest["workflows"] = workflows
+
+
+def _run_uv_sync(output_dir: Path) -> None:
+    print("📦 安装依赖...")
+    try:
+        subprocess.run(["uv", "sync"], cwd=str(output_dir), check=True)
+        print("✅ 依赖安装完成")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print(f"⚠️ 自动安装失败，请手动运行: cd {output_dir} && uv sync")
+
+
+def cmd_init_model(args) -> int:
+    """Initialize a complete model/module project."""
+    module_name = args.name.strip()
+    if not is_valid_module_name(module_name):
+        print("❌ model 名称必须是小写 Python 包名，只能包含字母、数字和下划线")
+        print("   例如: demo_model")
+        return 1
+
+    workflow_name = (args.workflow_name or "main_workflow").strip()
+    if not is_valid_python_file_stem(workflow_name):
+        print("❌ 工作流名称必须是小写 Python 标识符，只能包含字母、数字和下划线")
+        print("   例如: main_workflow")
+        return 1
+
+    output_dir = Path(args.output) if args.output else Path.cwd() / module_name
     if output_dir.exists() and not args.force:
         print(f"❌ 目录已存在: {output_dir}")
         print("   使用 --force 覆盖")
         return 1
 
-    # 创建目录结构
+    display_name = to_display_name(module_name)
+    description = f"{display_name} 模块"
+    workflow_display_name = to_display_name(workflow_name)
+    workflow_description = f"{display_name} 的默认工作流"
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    tasks_dir = output_dir / "tasks"
-    tasks_dir.mkdir(exist_ok=True)
+    _ensure_package_dir(output_dir / "tasks")
+    _ensure_package_dir(output_dir / "workflows")
 
-    # 创建 pyproject.toml
-    pyproject = output_dir / "pyproject.toml"
-    pyproject.write_text(
-        PROJECT_PYPROJECT.format(project_name=project_name),
-        encoding="utf-8"
+    _write_text(
+        output_dir / "pyproject.toml",
+        MODEL_PROJECT_PYPROJECT.format(
+            project_name=module_name,
+            display_name=display_name,
+        ),
     )
-
-    # 创建 README.md
-    readme = output_dir / "README.md"
-    readme.write_text(
-        PROJECT_README.format(project_name=project_name),
-        encoding="utf-8"
+    _write_text(
+        output_dir / "README.md",
+        MODEL_PROJECT_README.format(display_name=display_name),
     )
-
-    # 创建 debug_runner.py
-    debug_runner = output_dir / "debug_runner.py"
-    debug_runner.write_text(DEBUG_RUNNER, encoding="utf-8")
-
-    # 创建示例脚本
-    example_script = tasks_dir / "example_task.py"
-    example_script.write_text(
+    _write_text(
+        output_dir / "__init__.py",
+        MODEL_MODULE_INIT.format(
+            display_name=display_name,
+            default_workflow=workflow_name,
+            module_name=module_name,
+        ),
+    )
+    _write_text(
+        output_dir / "module.yaml",
+        MODEL_MANIFEST_TEMPLATE.format(
+            module_name=module_name,
+            display_name=display_name,
+            description=description,
+            workflow_name=workflow_name,
+            workflow_display_name=workflow_display_name,
+            workflow_description=workflow_description,
+            ui_section="" if args.no_ui else MODEL_UI_SECTION.format(display_name=display_name),
+        ),
+    )
+    _write_text(
+        output_dir / "tasks" / "example_task.py",
         SCRIPT_TEMPLATE.format(
             name="example_task",
             class_name="ExampleTask",
             display_name="示例任务",
-            description="这是一个示例任务脚本",
+            description="打开一个页面并采集标题。",
         ),
-        encoding="utf-8"
+    )
+    _write_text(
+        output_dir / "workflows" / f"{workflow_name}.py",
+        WORKFLOW_TEMPLATE.format(
+            name=workflow_name,
+            class_name=to_workflow_class_name(workflow_name),
+            display_name=workflow_display_name,
+            description=workflow_description,
+        ),
     )
 
-    print(f"✅ 初始化项目: {output_dir}")
+    if not args.no_ui:
+        _write_text(
+            output_dir / "config_schema.json",
+            CONFIG_SCHEMA_TEMPLATE.format(
+                title=f"{display_name} 配置",
+                description=f"{display_name} 的运行参数配置",
+                workflow_name=workflow_name,
+            ),
+        )
+
+    print(f"✅ 初始化 model 项目: {output_dir}")
     print(f"   {output_dir}/")
-    print(f"   ├── pyproject.toml")
-    print(f"   ├── README.md")
-    print(f"   ├── debug_runner.py")
-    print(f"   └── tasks/")
-    print(f"       └── example_task.py")
+    print("   ├── __init__.py")
+    print("   ├── module.yaml")
+    if not args.no_ui:
+        print("   ├── config_schema.json")
+    print("   ├── tasks/")
+    print("   │   └── example_task.py")
+    print("   └── workflows/")
+    print(f"       └── {workflow_name}.py")
     print()
 
-    # 询问是否安装依赖
     if not args.no_install:
-        print("📦 安装依赖...")
-        try:
-            subprocess.run(["uv", "sync"], cwd=str(output_dir), check=True)
-            print("✅ 依赖安装完成")
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            print("⚠️ 自动安装失败，请手动运行: cd {} && uv sync".format(output_dir))
+        _run_uv_sync(output_dir)
 
     print()
     print("下一步:")
-    print(f"   cd {project_name}")
-    print("   uv run crawler4j add  # 创建新脚本")
+    print(f"   cd {output_dir.name}")
+    if args.no_install:
+        print("   uv sync                  # 安装项目依赖（含 crawler4j-sdk）")
+    print("   uv run crawler4j add            # 创建新任务")
+    print("   uv run crawler4j add-workflow   # 创建新工作流")
+    print("   uv run crawler4j add-ui         # 生成/补齐配置 UI")
+    print("   在应用中把该目录注册/扫描为模块后，可在 ATM 中对相关作业发起“任务调试”")
     return 0
 
 
-def cmd_add(args):
-    """交互式创建脚本"""
-    tasks_dir = find_tasks_dir()
+def cmd_add(args) -> int:
+    """Interactively create a task script."""
+    module_root = require_module_root()
+    if not module_root:
+        return 1
+    tasks_dir = find_tasks_dir(module_root)
 
-    # 交互式获取信息
     if args.name:
         name = args.name
     else:
@@ -127,9 +312,9 @@ def cmd_add(args):
             print("❌ 脚本名称不能为空")
             return 1
 
-    # 验证名称格式
-    if not name.replace("_", "").replace("-", "").isalnum():
-        print("❌ 脚本名称只能包含字母、数字、下划线和连字符")
+    if not is_valid_python_file_stem(name):
+        print("❌ 任务名称必须是小写 Python 标识符")
+        print("   例如: fetch_homepage")
         return 1
 
     display_name = input(f"显示名称 [{to_display_name(name)}]: ").strip()
@@ -140,23 +325,27 @@ def cmd_add(args):
     if not description:
         description = "TODO: 添加描述"
 
-    # 创建目录和文件
     tasks_dir.mkdir(parents=True, exist_ok=True)
-    filepath = tasks_dir / f"{name}.py"
+    init_file = tasks_dir / "__init__.py"
+    if not init_file.exists():
+        _write_text(init_file, "")
 
+    filepath = tasks_dir / f"{name}.py"
     if filepath.exists() and not args.force:
         print(f"❌ 文件已存在: {filepath}")
         print("   使用 --force 覆盖")
         return 1
 
-    content = SCRIPT_TEMPLATE.format(
-        name=name,
-        class_name=to_class_name(name),
-        display_name=display_name,
-        description=description,
+    _write_text(
+        filepath,
+        SCRIPT_TEMPLATE.format(
+            name=name,
+            class_name=to_class_name(name),
+            display_name=display_name,
+            description=description,
+        ),
     )
 
-    filepath.write_text(content, encoding="utf-8")
     print()
     print(f"✅ 创建脚本: {filepath}")
     print(f"   类名: {to_class_name(name)}")
@@ -164,17 +353,18 @@ def cmd_add(args):
     return 0
 
 
-def cmd_list(args):
-    """列出脚本"""
-    tasks_dir = find_tasks_dir()
+def cmd_list(args) -> int:
+    """List task scripts in the current project."""
+    module_root = require_module_root()
+    if not module_root:
+        return 1
+    tasks_dir = find_tasks_dir(module_root)
 
     if not tasks_dir.exists():
         print("暂无脚本目录")
         return 0
 
-    scripts = list(tasks_dir.glob("*.py"))
-    scripts = [s for s in scripts if not s.name.startswith("_")]
-
+    scripts = [s for s in tasks_dir.glob("*.py") if not s.name.startswith("_")]
     if not scripts:
         print("暂无脚本")
         return 0
@@ -187,10 +377,18 @@ def cmd_list(args):
     return 0
 
 
-def cmd_new(args):
-    """创建脚本（非交互式）"""
-    tasks_dir = find_tasks_dir()
+def cmd_new(args) -> int:
+    """Create a task script non-interactively."""
+    module_root = require_module_root()
+    if not module_root:
+        return 1
+    tasks_dir = find_tasks_dir(module_root)
     name = args.name
+
+    if not is_valid_python_file_stem(name):
+        print("❌ 任务名称必须是小写 Python 标识符")
+        print("   例如: fetch_homepage")
+        return 1
 
     filepath = tasks_dir / f"{name}.py"
     if filepath.exists() and not args.force:
@@ -199,66 +397,163 @@ def cmd_new(args):
         return 1
 
     tasks_dir.mkdir(parents=True, exist_ok=True)
+    init_file = tasks_dir / "__init__.py"
+    if not init_file.exists():
+        _write_text(init_file, "")
 
-    content = SCRIPT_TEMPLATE.format(
-        name=name,
-        class_name=to_class_name(name),
-        display_name=to_display_name(name),
-        description="TODO: 添加描述",
+    _write_text(
+        filepath,
+        SCRIPT_TEMPLATE.format(
+            name=name,
+            class_name=to_class_name(name),
+            display_name=to_display_name(name),
+            description="TODO: 添加描述",
+        ),
     )
-
-    filepath.write_text(content, encoding="utf-8")
     print(f"✅ 创建脚本: {filepath}")
     return 0
 
 
-def main():
-    """CLI主入口"""
+def cmd_add_workflow(args) -> int:
+    """Create a workflow file and register it in module.yaml."""
+    module_root = find_module_root()
+    if not module_root:
+        print("❌ 当前目录不在 model 项目中，找不到 module.yaml")
+        return 1
+
+    name = args.name.strip()
+    if not is_valid_python_file_stem(name):
+        print("❌ 工作流名称必须是小写 Python 标识符")
+        print("   例如: sync_orders")
+        return 1
+
+    display_name = (args.display_name or to_display_name(name)).strip()
+    description = (args.description or f"{display_name} 工作流").strip()
+
+    workflows_dir = find_workflows_dir(module_root)
+    _ensure_package_dir(workflows_dir)
+    filepath = workflows_dir / f"{name}.py"
+    if filepath.exists() and not args.force:
+        print(f"❌ 文件已存在: {filepath}")
+        print("   使用 --force 覆盖")
+        return 1
+
+    _write_text(
+        filepath,
+        WORKFLOW_TEMPLATE.format(
+            name=name,
+            class_name=to_workflow_class_name(name),
+            display_name=display_name,
+            description=description,
+        ),
+    )
+
+    manifest = load_manifest(module_root)
+    try:
+        upsert_workflow_manifest_entry(
+            manifest,
+            name=name,
+            display_name=display_name,
+            description=description,
+            force=args.force,
+        )
+    except ValueError as error:
+        print(f"❌ {error}")
+        return 1
+
+    save_manifest(module_root, manifest)
+    print(f"✅ 创建工作流: {filepath}")
+    print("✅ 已更新 module.yaml")
+    return 0
+
+
+def cmd_add_ui(args) -> int:
+    """Create or repair a declarative UI config for a module project."""
+    module_root = find_module_root()
+    if not module_root:
+        print("❌ 当前目录不在 model 项目中，找不到 module.yaml")
+        return 1
+
+    manifest = load_manifest(module_root)
+    module_name = manifest.get("name") or module_root.name
+    display_name = manifest.get("display_name") or to_display_name(module_name)
+    workflow_name = "main_workflow"
+    workflows = manifest.get("workflows") or []
+    if workflows:
+        workflow_name = workflows[0].get("name") or workflow_name
+
+    title = (args.title or f"{display_name} 配置").strip()
+    description = (args.description or f"{display_name} 的运行参数配置").strip()
+
+    config_path = module_root / "config_schema.json"
+    if config_path.exists() and not args.force:
+        print(f"ℹ️ 已存在配置 Schema，保留现有文件: {config_path}")
+    else:
+        _write_text(
+            config_path,
+            CONFIG_SCHEMA_TEMPLATE.format(
+                title=title,
+                description=description,
+                workflow_name=workflow_name,
+            ),
+        )
+        print(f"✅ 创建配置 UI: {config_path}")
+
+    ensure_ui_extension(manifest, display_name=display_name, entry="config_schema.json")
+    save_manifest(module_root, manifest)
+    print("✅ 已更新 module.yaml")
+    return 0
+
+
+def main() -> int:
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
         prog="crawler4j",
-        description="Crawler4j 任务脚本开发工具",
+        description="Crawler4j model 开发工具",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
 
-    # init 命令
-    init_parser = subparsers.add_parser(
-        "init",
-        help="初始化脚本项目",
+    init_model_parser = subparsers.add_parser("init-model", help="初始化完整 model 项目")
+    init_model_parser.add_argument("name", help="model / 模块名称（小写包名）")
+    init_model_parser.add_argument("-o", "--output", help="输出目录")
+    init_model_parser.add_argument("-f", "--force", action="store_true", help="强制覆盖")
+    init_model_parser.add_argument("--no-install", action="store_true", help="不自动安装依赖")
+    init_model_parser.add_argument(
+        "--workflow-name",
+        default="main_workflow",
+        help="默认工作流名称",
     )
-    init_parser.add_argument("name", help="项目名称")
-    init_parser.add_argument("-o", "--output", help="输出目录")
-    init_parser.add_argument("-f", "--force", action="store_true", help="强制覆盖")
-    init_parser.add_argument("--no-install", action="store_true", help="不自动安装依赖")
-    init_parser.set_defaults(func=cmd_init)
+    init_model_parser.add_argument("--no-ui", action="store_true", help="不生成配置 UI")
+    init_model_parser.set_defaults(func=cmd_init_model)
 
-    # add 命令（交互式）
-    add_parser = subparsers.add_parser(
-        "add",
-        help="交互式创建脚本",
-    )
-    add_parser.add_argument("name", nargs="?", help="脚本名称（可选，不填则交互式输入）")
+    add_parser = subparsers.add_parser("add", help="在当前 model 项目中交互式创建任务脚本")
+    add_parser.add_argument("name", nargs="?", help="任务脚本名称（可选，不填则交互式输入）")
     add_parser.add_argument("-f", "--force", action="store_true", help="强制覆盖")
     add_parser.set_defaults(func=cmd_add)
 
-    # new 命令（非交互式，兼容旧命令）
-    new_parser = subparsers.add_parser(
-        "new",
-        help="快速创建脚本（非交互式）",
-    )
-    new_parser.add_argument("name", help="脚本名称")
+    new_parser = subparsers.add_parser("new", help="在当前 model 项目中快速创建任务脚本")
+    new_parser.add_argument("name", help="任务脚本名称")
     new_parser.add_argument("-f", "--force", action="store_true", help="强制覆盖")
     new_parser.set_defaults(func=cmd_new)
 
-    # list 命令
-    list_parser = subparsers.add_parser(
-        "list",
-        help="列出脚本",
-    )
+    list_parser = subparsers.add_parser("list", help="列出当前 model 项目中的任务脚本")
     list_parser.set_defaults(func=cmd_list)
 
-    args = parser.parse_args()
+    workflow_parser = subparsers.add_parser("add-workflow", help="创建工作流模板并更新 module.yaml")
+    workflow_parser.add_argument("name", help="工作流名称")
+    workflow_parser.add_argument("--display-name", help="工作流显示名称")
+    workflow_parser.add_argument("--description", help="工作流描述")
+    workflow_parser.add_argument("-f", "--force", action="store_true", help="强制覆盖")
+    workflow_parser.set_defaults(func=cmd_add_workflow)
 
+    ui_parser = subparsers.add_parser("add-ui", help="创建或补齐 declarative UI 配置")
+    ui_parser.add_argument("--title", help="UI 标题")
+    ui_parser.add_argument("--description", help="UI 描述")
+    ui_parser.add_argument("-f", "--force", action="store_true", help="强制覆盖配置文件")
+    ui_parser.set_defaults(func=cmd_add_ui)
+
+    args = parser.parse_args()
     if not args.command:
         parser.print_help()
         return 0

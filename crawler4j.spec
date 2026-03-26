@@ -1,24 +1,32 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
+
 block_cipher = None
+PROJECT_ROOT = Path(globals().get("SPECPATH", Path.cwd())).resolve()
+APP_ENTRY = PROJECT_ROOT / "src" / "ui" / "app.py"
+UI_STYLE = PROJECT_ROOT / "src" / "ui" / "styles" / "dark_theme.qss"
+UI_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "icon.jpg"
+MODULES_DIR = PROJECT_ROOT / "modules"
 
 a = Analysis(
-    ['src/main.py'],
-    pathex=[],
+    [str(APP_ENTRY)],
+    pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=[
-        ('modules', 'modules'),  # 内置模块
-        ('src/ui/styles/dark_theme.qss', 'src/ui/styles'),
-        ('src/assets/icon.png', 'src/assets'),
+        (str(MODULES_DIR), "modules"),  # 内置模块
+        (str(UI_STYLE), "src/ui/styles"),
+        (str(UI_ICON), "src/ui/assets"),
     ],
     hiddenimports=[
-        'PyQt6.sip',
-        'playwright',
-        'pandas',
-        'ddddocr',
-        'cv2',
-        'numpy',
-        'sqlite3',
+        "PyQt6.sip",
+        "playwright",
+        "pandas",
+        "ddddocr",
+        "cv2",
+        "numpy",
+        "sqlite3",
     ],
     hookspath=[],
     hooksconfig={},
@@ -47,7 +55,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='src/assets/icon.png',
 )
 coll = COLLECT(
     exe,
@@ -57,21 +64,20 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='Crawler4j',
+    name="Crawler4j",
 )
 
 import sys
 from src.__version__ import VERSION
 
-is_mac = sys.platform == 'darwin'
+is_mac = sys.platform == "darwin"
 
 if is_mac:
     app = BUNDLE(
         coll,
-        name='Crawler4j.app',
-        icon='src/assets/icon.png',
-        bundle_identifier='com.crawler4j.app',
-        version=VERSION
+        name="Crawler4j.app",
+        bundle_identifier="com.crawler4j.app",
+        version=VERSION,
     )
 
 import os
@@ -80,6 +86,6 @@ import shutil
 # Post-build: Copy Playwright browsers if needed (instructions for user)
 # Or handle versioning as needed
 
-app_name = 'Crawler4j'
-if os.path.exists('dist'):
+app_name = "Crawler4j"
+if os.path.exists("dist"):
     print(f"Build completed! Application is in dist/{app_name}")

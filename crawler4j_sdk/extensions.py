@@ -7,7 +7,7 @@
     本模块中的类型可能在 MINOR 版本中发生破坏性变化。
     通用脚本只应依赖 crawler4j_sdk 主模块导出的稳定类型。
 
-参考规格: docs/srs/06-sdk/index.md (6.0.4.2 Non-stable)
+参考规格: docs/02-requirements/reference-srs/06-sdk/index.md (6.0.4.2 Non-stable)
 """
 
 from dataclasses import dataclass

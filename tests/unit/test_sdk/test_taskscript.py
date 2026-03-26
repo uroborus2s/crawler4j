@@ -7,8 +7,7 @@
     - TC_SDK_002: run 方法签名检查
 """
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 

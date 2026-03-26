@@ -5,7 +5,6 @@
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -20,6 +19,8 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.atm.models import Job, JobState, JobType
+from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
+from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event
 from src.core.tsm.loader import get_strategy_loader
@@ -55,13 +56,15 @@ class TaskListWidget(QWidget):
     }
 
     TYPE_TEXT = {
-        JobType.BATCH: "批处理",
-        JobType.SERVICE: "常驻服务",
+        JobType.BATCH: "定时批次",
+        JobType.SERVICE: "持续保活",
     }
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._jobs: list[Job] = []
+        self._load_seq = 0
+        self._load_task: asyncio.Task | None = None
 
         self._setup_ui()
 
@@ -75,6 +78,16 @@ class TaskListWidget(QWidget):
     def _on_task_changed(self, event: Event):
         """事件回调：刷新列表。"""
         self.load_data()
+
+    @staticmethod
+    def _normalize_state(state: JobState | str) -> JobState:
+        if isinstance(state, JobState):
+            return state
+        try:
+            return JobState(str(state))
+        except Exception:
+            # 非法状态值默认按暂停处理，避免 UI 动作错乱
+            return JobState.PAUSED
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -145,21 +158,31 @@ class TaskListWidget(QWidget):
 
     def load_data(self):
         """加载数据。"""
-        asyncio.create_task(self._load_data_async())
+        self._load_seq += 1
+        seq = self._load_seq
+        if self._load_task and not self._load_task.done():
+            self._load_task.cancel()
+        self._load_task = asyncio.create_task(self._load_data_async(seq))
 
-    async def _load_data_async(self):
+    async def _load_data_async(self, seq: int):
         """异步加载数据。"""
         self.table.set_loading(True)
         self.error_label.hide()
 
         try:
             service = get_task_service()
-            self._jobs = await service.list_jobs()
+            jobs = await service.list_jobs()
+            if seq != self._load_seq:
+                return
+
+            self._jobs = jobs
 
             display_items = []
             for job in self._jobs:
-                status_text = self.STATUS_TEXT.get(job.state, job.state.value)
-                status_color = self.STATUS_COLORS.get(job.state, "#9ca3af")
+                state = self._normalize_state(job.state)
+                job.state = state
+                status_text = self.STATUS_TEXT.get(state, state.value)
+                status_color = self.STATUS_COLORS.get(state, "#9ca3af")
                 
                 display_items.append(JobDisplayItem(
                     raw=job,
@@ -168,12 +191,15 @@ class TaskListWidget(QWidget):
                 ))
 
             self.table.set_data(display_items)
+        except asyncio.CancelledError:
+            return
 
         except Exception as e:
             self.error_label.setText(f"❌ 加载失败: {e}")
             self.error_label.show()
         finally:
-            self.table.set_loading(False)
+            if seq == self._load_seq:
+                self.table.set_loading(False)
 
     def _render_row(self, row: int, item: JobDisplayItem, table):
         """渲染单行。"""
@@ -202,9 +228,12 @@ class TaskListWidget(QWidget):
         table.setItem(row, 3, QTableWidgetItem(str(job.concurrency_target)))
 
         # 4. Trigger
-        trigger_text = job.trigger.type.value
-        if job.trigger.cron_expr:
-            trigger_text += f" ({job.trigger.cron_expr})"
+        if job.type == JobType.BATCH and job.trigger.cron_expr:
+            trigger_text = f"Cron ({job.trigger.cron_expr})"
+        elif job.type == JobType.BATCH:
+            trigger_text = "等待 Cron 配置"
+        else:
+            trigger_text = "启动后持续保活"
         table.setItem(row, 4, QTableWidgetItem(trigger_text))
 
         # 5. 状态
@@ -218,7 +247,8 @@ class TaskListWidget(QWidget):
         action_layout.setContentsMargins(4, 2, 4, 2)
         action_layout.setSpacing(8)
 
-        if job.state == JobState.ACTIVE:
+        state = self._normalize_state(job.state)
+        if state == JobState.ACTIVE:
             # 运行中 -> 显示"暂停"
             stop_btn = QPushButton("⏸ 暂停")
             stop_btn.setStyleSheet("background: #fb923c; color: white; border: none; padding: 4px 10px; border-radius: 4px;")
@@ -230,6 +260,15 @@ class TaskListWidget(QWidget):
             run_btn.setStyleSheet("background: #60a5fa; color: white; border: none; padding: 4px 10px; border-radius: 4px;")
             run_btn.clicked.connect(lambda _, jid=job.id: self._start_job(jid))
             action_layout.addWidget(run_btn)
+
+        debug_target = self._resolve_debug_target(job)
+        if debug_target and debug_target.module.source == ModuleSource.DEV_LINK:
+            debug_btn = QPushButton("🐞 调试")
+            debug_btn.setStyleSheet(
+                "background: rgba(245, 158, 11, 0.88); color: black; border: none; padding: 4px 10px; border-radius: 4px;"
+            )
+            debug_btn.clicked.connect(lambda _, jid=job.id: self._open_debug_dialog(jid))
+            action_layout.addWidget(debug_btn)
 
         # 编辑按钮
         edit_btn = QPushButton("✏️")
@@ -270,8 +309,10 @@ class TaskListWidget(QWidget):
                 await service.pause_job(job_id)
             elif op == "delete":
                 await service.delete_job(job_id)
-            
-            self.load_data()
+
+            # 操作完成后立即拉取最新状态，确保按钮与数据库一致
+            self._load_seq += 1
+            await self._load_data_async(self._load_seq)
         except Exception as e:
             QMessageBox.warning(self, "操作失败", str(e))
 
@@ -315,6 +356,32 @@ class TaskListWidget(QWidget):
             self.load_data()
         except Exception as e:
             QMessageBox.critical(self, "创建失败", str(e))
+
+    def _resolve_debug_target(self, job: Job) -> JobDebugTarget | None:
+        try:
+            return resolve_job_debug_target(job)
+        except Exception:
+            return None
+
+    def _open_debug_dialog(self, job_id: str):
+        job = next((j for j in self._jobs if j.id == job_id), None)
+        if not job:
+            return
+
+        debug_target = self._resolve_debug_target(job)
+        if not debug_target or debug_target.module.source != ModuleSource.DEV_LINK:
+            QMessageBox.information(self, "不可调试", "当前作业对应的不是开发链接模块，无法进入 IDE 调试。")
+            return
+
+        from src.core.atm.ui.task_debug_dialog import JobDebugDialog
+
+        dialog = JobDebugDialog(
+            job,
+            debug_target.strategy,
+            debug_target.module,
+            parent=self,
+        )
+        dialog.exec()
     
     def _on_cell_clicked(self, row: int, col: int):
         # 忽略操作列

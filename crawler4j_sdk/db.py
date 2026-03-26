@@ -7,7 +7,7 @@
     - DataService 聚合类
     - 子服务 Protocol: AccountService, StorageService, TaskRecordService
 
-参考规格: docs/srs/06-sdk/06-6-data-model.md
+参考规格: docs/02-requirements/reference-srs/06-sdk/06-6-data-model.md
 """
 
 from dataclasses import dataclass

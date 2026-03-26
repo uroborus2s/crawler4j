@@ -8,13 +8,14 @@
 
 from typing import Any
 
-from src.core.atm import TaskRequest, TaskStatus, get_task_service
+from src.core.atm import TaskRequest, get_task_service
 
 # Core 模块导入
-from src.core.foundation import Event, EventBus, EventType, get_event_bus
+from src.core.foundation import Event, EventType, get_event_bus
 from src.core.mms import get_module_registry
-from src.core.persistence import get_kv_store, init_database
-from src.ui.core.command_channel import CommandChannel, CoreCommands, get_command_channel
+from src.core.mms.settings_store import get_module_settings_store
+from src.core.persistence import init_database
+from src.ui.core.command_channel import CoreCommands, get_command_channel
 
 
 class CoreAdapter:
@@ -120,16 +121,14 @@ class CoreAdapter:
         self._channel.register(CoreCommands.CONFIG_SET, self._cmd_config_set)
     
     def _cmd_config_get(self, module_name: str, key: str) -> Any:
-        kv = get_kv_store()
-        config = kv.get(f"module:{module_name}:config") or {}
+        config = get_module_settings_store().read_module_settings(module_name)
         return config.get(key)
     
     def _cmd_config_set(self, module_name: str, key: str, value: Any) -> bool:
-        kv = get_kv_store()
-        config = kv.get(f"module:{module_name}:config") or {}
+        store = get_module_settings_store()
+        config = store.read_module_settings(module_name)
         config[key] = value
-        kv.set(f"module:{module_name}:config", config)
-        return True
+        return store.write_module_settings(module_name, config)
 
 
 # 全局单例

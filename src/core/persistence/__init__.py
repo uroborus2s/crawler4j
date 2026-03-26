@@ -1,6 +1,6 @@
 """数据持久化层。
 
-规格参考: docs/srs/05-framework-core/05-9-data-persistence.md
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-9-data-persistence.md
 
 导出:
     - init_database: 初始化数据库

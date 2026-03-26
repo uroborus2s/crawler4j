@@ -6,8 +6,7 @@
     - 子任务调用测试
 """
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 

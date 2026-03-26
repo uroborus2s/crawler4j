@@ -4,6 +4,7 @@ import sys
 
 # Enable tracebacks on segfaults
 faulthandler.enable()
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # Add project root to path
 sys.path.append(os.getcwd())
@@ -12,9 +13,7 @@ def test_ui_instantiation():
     print("Initializing QApplication...")
     try:
         from PyQt6.QtWidgets import QApplication
-        # Use minimal platform for headless if possible, but offscreen is standard for CI
-        # For local run we just want to init it.
-        app = QApplication(sys.argv)
+        qt_app = QApplication(sys.argv)
     except Exception as e:
         print(f"FAILED to init QApplication: {e}")
         return 1
@@ -31,6 +30,8 @@ def test_ui_instantiation():
     print("Instantiating Shell...")
     try:
         window = Shell()
+        window.close()
+        qt_app.quit()
         print("Shell instantiated successfully.")
         
         # Verify pages are loaded

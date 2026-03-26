@@ -2,10 +2,25 @@
 
 任务脚本开发工具包（Software Development Kit）。
 
-## 安装
+## 使用 CLI 的两种方式
+
+方式 1：安装后长期使用
 
 ```bash
-pip install crawler4j-sdk
+uv tool install crawler4j-sdk
+crawler4j --help
+```
+
+方式 2：不安装，直接一次性运行
+
+```bash
+uvx --from crawler4j-sdk crawler4j --help
+```
+
+如果你已经创建了 model 项目，并且项目目录里执行过 `uv sync`，由于项目依赖中包含 `crawler4j-sdk`，也可以在项目内使用：
+
+```bash
+uv run crawler4j --help
 ```
 
 ## 快速开始
@@ -75,18 +90,26 @@ on_init(ctx) → execute(ctx) → on_cleanup(ctx)
 ## CLI 命令
 
 ```bash
-# 初始化项目
-crawler4j init my_project
+# 初始化完整 model 项目
+uvx --from crawler4j-sdk crawler4j init-model my_model
 
-# 创建脚本（交互式）
-crawler4j add
+# 进入模块目录并安装依赖后，创建任务脚本（交互式）
+uv run crawler4j add
 
-# 创建脚本（快速）
-crawler4j new my_task
+# 进入模块目录后，创建任务脚本（快速）
+uv run crawler4j new my_task
 
-# 列出脚本
-crawler4j list
+# 进入模块目录后，列出任务脚本
+uv run crawler4j list
+
+# 创建工作流并写入 module.yaml
+uv run crawler4j add-workflow sync_orders
+
+# 创建/补齐 declarative UI
+uv run crawler4j add-ui
 ```
+
+调试主路径已经收敛到 Core 调试会话。CLI 不再生成 `debug_runner.py`。
 
 ## 工作流示例
 

@@ -1,6 +1,6 @@
 """策略列表页面。
 
-规格参考: docs/srs/05-framework-core/05-3-task-strategy-management.md
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-3-task-strategy-management.md
 
 提供策略的 CRUD 操作界面：
     - 策略列表表格
@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.foundation.logging import logger
-from src.core.tsm import StrategyLoader, TaskStrategy, get_strategy_loader
+from src.core.tsm import TaskStrategy, get_strategy_loader
 from src.ui.components.data_table import SkyDataTable
 
 
@@ -31,17 +31,12 @@ class StrategyDisplayItem:
     """策略显示项包装。"""
     raw: TaskStrategy
     display_name: str
-    display_concurrency: int
+    display_mode: str
     display_target: str
     display_env: str
 
 
 class StrategyListWidget(QWidget):
-    # ... (header omitted, target keeps class def)
-
-    # Note: I need to insert StrategyDisplayItem BEFORE StrategyListWidget.
-    # But replace_file_content works on ranges.
-    # I will do 2 replaces: one to add class, one to use it.
     """策略列表页面。
 
     显示所有策略，支持 CRUD 操作。
@@ -89,7 +84,7 @@ class StrategyListWidget(QWidget):
         
         columns = [
             ("name", "名称", -1),
-            ("concurrency", "并发数", 80),
+            ("mode", "获取模式", 100),
             ("target", "执行目标", -1),
             ("env", "环境类型", 100),
             ("actions", "操作", 220),
@@ -115,9 +110,9 @@ class StrategyListWidget(QWidget):
             display_data.append(StrategyDisplayItem(
                 raw=s,
                 display_name=s.name or s.id[:8],
-                display_concurrency=s.scaling.max_concurrency,
+                display_mode=s.resource.acquisition.mode.value,
                 display_target=target,
-                display_env=s.selector.env_type.value
+                display_env=s.resource.acquisition.selector.env_type.value,
             ))
             
         self.table.set_data(display_data)
@@ -131,10 +126,10 @@ class StrategyListWidget(QWidget):
         name_item.setData(Qt.ItemDataRole.UserRole, strategy.id)
         table.setItem(row, 0, name_item)
 
-        # 并发数
-        concurrency_item = QTableWidgetItem(str(item.display_concurrency))
-        concurrency_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        table.setItem(row, 1, concurrency_item)
+        # 获取模式
+        mode_item = QTableWidgetItem(item.display_mode)
+        mode_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        table.setItem(row, 1, mode_item)
 
         # 执行目标
         target = item.display_target

@@ -2,21 +2,19 @@
 
 **Crawler4j** 是一个基于 Python 的自动化监控与任务执行平台，采用**微内核 + SDK + 插件**架构，支持动态加载和并发执行自动化任务。
 
-[![Documentation](https://img.shields.io/badge/docs-mkdocs-blue)](https://uroborus2s.github.io/crawler4j/)
 [![Python](https://img.shields.io/badge/python-3.12+-green)](https://www.python.org/)
 
 ---
 
 ## 📚 文档
 
-详细文档请访问：**[https://clawler.uroborus.cn](https://clawler.uroborus.cn)**
+详细文档已统一收敛到仓库内的 `docs/` Markdown 体系。
 
 | 文档 | 说明 |
 |------|------|
-| [快速开始](https://clawler.uroborus.cn/getting-started/) | 下载安装与首次运行 |
-| [用户指南](https://clawler.uroborus.cn/user-guide/configuration/) | 配置策略与部署 |
-| [插件开发](https://clawler.uroborus.cn/plugin-dev/tutorial-crawler/) | 编写自定义爬虫 |
-| [SDK 参考](https://clawler.uroborus.cn/user-guide/sdk/api/) | API 与 CLI 手册 |
+| [快速开始](docs/08-handover/getting-started.md) | 下载安装与首次运行 |
+| [接手与日常使用指南](docs/08-handover/user-guide.md) | 配置、运行与接手顺序 |
+| [模块开发指南](docs/08-handover/module-developer-guide.md) | 从创建模块项目到 DevLink 调试和 zip 安装验收 |
 
 ---
 
@@ -75,8 +73,8 @@ uv run python -m src.ui.app
 crawler4j/
 ├── src/                      # Core 内核源码
 ├── crawler4j_sdk/            # SDK 源码 (独立包)
-├── modules/                  # 内置业务模块
-├── docs/                     # 文档源文件 (MkDocs)
+├── modules/                  # 内置模块占位说明
+├── docs/                     # 仓库内 Markdown 文档体系
 ├── dist/                     # 构建产物 (.exe/.whl)
 └── pyproject.toml            # 项目配置
 ```
@@ -95,14 +93,20 @@ uv run pyinstaller crawler4j.spec
 uv build
 ```
 
-### 调试 SDK
+### CLI 与模块开发
 
 ```bash
-# 本地运行 CLI
-uv run python -m crawler4j_sdk.cli.commands --help
+# 方式 1：安装 SDK CLI
+uv tool install crawler4j-sdk
+
+# 直接使用
+crawler4j --help
+
+# 方式 2：不安装，直接使用已发布 CLI
+uvx --from crawler4j-sdk crawler4j --help
 ```
 
-详细内容请查阅 [开发者文档](https://clawler.uroborus.cn/user-guide/build-release/)。
+详细内容请查阅 [部署与运行说明](docs/07-operations/deployment-guide.md)。
 
 ---
 

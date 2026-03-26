@@ -2,8 +2,6 @@
 
 import time
 
-import pytest
-
 from src.core.rem.models import (
     Environment,
     EnvKind,

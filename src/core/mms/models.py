@@ -1,6 +1,6 @@
 """MMS 数据模型定义。
 
-规格参考: docs/srs/05-framework-core/05-1-module-management.md
+规格参考: docs/02-requirements/reference-srs/05-framework-core/05-1-module-management.md
 
 定义模块管理的核心数据实体：
     - ModuleStatus: 模块状态
@@ -36,9 +36,21 @@ class ModuleSource(StrEnum):
     规格 5.1.3.3:
         - builtin: 内置模块
         - external: 外部安装模块
+        - dev_link: 本地开发链接模块
     """
     BUILTIN = "builtin"
     EXTERNAL = "external"
+    DEV_LINK = "dev_link"
+
+
+@dataclass
+class DevModuleLink:
+    """本地开发模块链接。"""
+
+    module_name: str
+    source_path: str
+    created_at: int = 0
+    updated_at: int = 0
 
 
 @dataclass

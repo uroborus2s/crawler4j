@@ -7,7 +7,6 @@ import asyncio
 from datetime import datetime
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -21,17 +20,27 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.atm.models import Job, Task, TaskStatus
+from src.core.atm.models import Job, Task
+from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
+from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
+from src.ui.components.log_console import LogConsoleWidget
 from src.ui.components.table import SkyTableWidget
 
 
 class JobDetailDialog(QDialog):
     """作业详情对话框。"""
+
+    TYPE_TEXT = {
+        "batch": "定时批次",
+        "service": "持续保活",
+    }
     
     def __init__(self, job_id: str, parent=None):
         super().__init__(parent)
         self.job_id = job_id
+        self._job: Job | None = None
+        self._debug_target: JobDebugTarget | None = None
         self.setWindowTitle("作业详情 (V2)")
         self.resize(1000, 700)
         self.setModal(True)
@@ -40,6 +49,32 @@ class JobDetailDialog(QDialog):
         self._load_data()
         
     def _setup_ui(self):
+        # Force Dark Mode
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1a1b26;
+                color: #c0caf5;
+            }
+            QLabel {
+                color: #c0caf5;
+            }
+            QTabWidget::pane {
+                border: 1px solid #414868;
+                background: #1a1b26;
+            }
+            QTabBar::tab {
+                background: #24283b;
+                color: #a9b1d6;
+                padding: 8px 12px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background: #414868;
+                color: #ffffff;
+            }
+        """)
+
         layout = QVBoxLayout(self)
         
         # 顶部信息栏
@@ -56,6 +91,23 @@ class JobDetailDialog(QDialog):
         
         self.strategy_label = QLabel("策略: -")
         info_layout.addWidget(self.strategy_label)
+
+        self.debug_btn = QPushButton("🐞 调试任务")
+        self.debug_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(245, 158, 11, 0.88);
+                color: black;
+                border: none;
+                padding: 8px 14px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: rgba(245, 158, 11, 1); }
+            QPushButton:disabled { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.4); }
+        """)
+        self.debug_btn.clicked.connect(self._open_debug_dialog)
+        self.debug_btn.hide()
+        info_layout.addWidget(self.debug_btn)
         
         layout.addLayout(info_layout)
         
@@ -97,14 +149,12 @@ class JobDetailDialog(QDialog):
         self.task_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.task_table.cellClicked.connect(self._on_task_selected)
         
-        layout.addWidget(self.task_table, stretch=1)
+        layout.addWidget(self.task_table, stretch=2)
         
-        # Task Details
-        layout.addWidget(QLabel("选中任务详情:"))
-        self.task_detail_text = QTextEdit()
-        self.task_detail_text.setReadOnly(True)
-        self.task_detail_text.setPlaceholderText("点击上方任务查看详情...")
-        layout.addWidget(self.task_detail_text, stretch=1)
+        # Task Details (Log Console)
+        layout.addWidget(QLabel("任务日志:"))
+        self.log_console = LogConsoleWidget()
+        layout.addWidget(self.log_console, stretch=1)
 
     def _setup_config_tab(self):
         layout = QVBoxLayout(self.config_tab)
@@ -122,8 +172,9 @@ class JobDetailDialog(QDialog):
             if not job:
                 self.name_label.setText("作业不存在")
                 return
-            
+            self._job = job
             self._update_info(job)
+            self._update_debug_target(job)
             
             tasks = await service.list_tasks(self.job_id)
             # Sort by created_at desc
@@ -171,21 +222,53 @@ class JobDetailDialog(QDialog):
     def _update_info(self, job: Job):
         self.name_label.setText(f"作业名称: {job.name}")
         self.strategy_label.setText(f"策略: {job.strategy_id} | 并发: {job.concurrency_target}")
-        
-        info = f"Type: {job.type.value}\n"
-        info += f"Trigger: {job.trigger}\n"
+
+        trigger_text = "启动后持续保活"
+        if job.type.value == "batch":
+            trigger_text = job.trigger.cron_expr or "未配置 Cron"
+
+        info = f"模式: {self.TYPE_TEXT.get(job.type.value, job.type.value)}\n"
+        info += f"触发: {trigger_text}\n"
         info += f"Params: {job.params}\n"
         info += f"Created: {datetime.fromtimestamp(job.created_at)}\n"
         self.config_text.setText(info)
+
+    def _update_debug_target(self, job: Job) -> None:
+        try:
+            target = resolve_job_debug_target(job)
+        except Exception:
+            target = None
+
+        if target and target.module.source == ModuleSource.DEV_LINK:
+            self._debug_target = target
+            self.debug_btn.show()
+            self.debug_btn.setEnabled(True)
+            self.debug_btn.setToolTip(f"打开任务调试: {target.module.name}/{target.workflow}")
+            return
+
+        self._debug_target = None
+        self.debug_btn.hide()
     
     def _on_task_selected(self, row, col):
         item = self.task_table.item(row, 0)
         task = item.data(Qt.ItemDataRole.UserRole)
         if task:
-            details = f"Task ID: {task.id}\n"
-            details += f"Status: {task.status.value}\n"
-            details += f"Environment: {task.env_id}\n"
-            details += f"Lease: {task.lease_id}\n"
-            details += f"Message: {task.message}\n"
-            details += f"Error: {task.error}\n"
-            self.task_detail_text.setText(details)
+            # Set filter for log console
+            self.log_console.set_filter(task.id)
+            
+            # Optional: Display other details in a separate label or header if needed
+            # For now, we focus on logs as requested.
+
+    def _open_debug_dialog(self):
+        if not self._job or not self._debug_target or self._debug_target.module.source != ModuleSource.DEV_LINK:
+            return
+
+        from src.core.atm.ui.task_debug_dialog import JobDebugDialog
+
+        dialog = JobDebugDialog(
+            self._job,
+            self._debug_target.strategy,
+            self._debug_target.module,
+            parent=self,
+        )
+        dialog.exec()

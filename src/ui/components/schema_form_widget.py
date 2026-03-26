@@ -277,19 +277,17 @@ class SchemaFormWidget(QWidget):
     
     def _save_config(self):
         """保存配置。"""
-        from src.core.persistence import get_kv_store
+        from src.core.mms.settings_store import get_module_settings_store
         
         values = self.get_values()
-        kv = get_kv_store()
-        kv.set(f"module:{self._module.name}:config", values)
+        get_module_settings_store().write_module_settings(self._module.name, values)
         self.config_changed.emit(values)
     
     def load_data(self):
         """加载已保存的配置。"""
-        from src.core.persistence import get_kv_store
+        from src.core.mms.settings_store import get_module_settings_store
         
-        kv = get_kv_store()
-        saved = kv.get(f"module:{self._module.name}:config") or {}
+        saved = get_module_settings_store().read_module_settings(self._module.name)
         
         for name, value in saved.items():
             widget = self._fields.get(name)

@@ -1,6 +1,6 @@
 """ATM 数据模型定义 (V2)。
 
-规格参考: docs/design/task-engine-v2.md
+规格参考: docs/03-solution/reference-design/task-engine-v2.md
 
 定义核心实体:
     - Job: 作业定义 (期望状态)
@@ -8,11 +8,10 @@
 """
 
 import enum
-import json
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 # =============================================================================
 # Enums

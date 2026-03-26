@@ -1,6 +1,6 @@
 """环境管理页面（Tab 容器）。
 
-设计参考: docs/design/module-01-runtime-environment.md §5.5
+设计参考: docs/03-solution/reference-design/module-01-runtime-environment.md §5.5
 
 将环境列表和 IP 池管理整合为 Tab 页面：
     - EnvManagerPage: 环境管理主页面（Tab 容器）

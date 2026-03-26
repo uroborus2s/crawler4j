@@ -1,7 +1,7 @@
 """版本管理服务。
 
 提供版本查询与兼容性校验能力：
-- 语义化版本解析 (SemVer)
+- 工作区版本查询
 - 版本约束校验
 - 构建信息获取
 """
@@ -22,7 +22,7 @@ class BuildInfo:
     """构建信息。
 
     Attributes:
-        version: 语义化版本号 (e.g., "1.0.0")
+        version: 当前工作区版本号 (e.g., "1.0.0", "1.0.1.dev20260326")
         commit_hash: Git 提交哈希 (短)
         build_time: 构建时间 (ISO 8601 格式，可选)
     """
@@ -46,18 +46,17 @@ class VersionService:
     - 校验版本兼容性约束
     """
 
-    # SemVer 正则：Major.Minor.Patch(-prerelease)?(+build)?
-    SEMVER_PATTERN = re.compile(
-        r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
-        r"(?:-(?P<prerelease>[\da-zA-Z\-]+(?:\.[\da-zA-Z\-]+)*))?"
-        r"(?:\+(?P<build>[\da-zA-Z\-]+(?:\.[\da-zA-Z\-]+)*))?$"
+    # 统一只比较 major.minor.patch，兼容当前仓库历史遗留的 SemVer 风格
+    # 与根项目当前采用的 PEP 440 dev 版本风格。
+    BASE_VERSION_PATTERN = re.compile(
+        r"^v?(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
     )
 
     def get_current_version(self) -> str:
         """获取当前版本号。
 
         Returns:
-            语义化版本字符串，如 "0.2.0"
+            当前工作区版本字符串
         """
         return VERSION
 
@@ -120,8 +119,15 @@ class VersionService:
         return current == required
 
     def _parse_version(self, version_str: str) -> Optional[tuple[int, int, int]]:
-        """解析版本字符串为元组。"""
-        match = self.SEMVER_PATTERN.match(version_str.strip())
+        """解析版本字符串为元组。
+
+        当前实现只提取 major.minor.patch 基础版本位，允许：
+        - `0.1.2`
+        - `0.1.2.dev20260326`
+        - `0.2.0-rc.20260112`
+        - `v0.1.1`
+        """
+        match = self.BASE_VERSION_PATTERN.match(version_str.strip())
         if not match:
             return None
         return (
