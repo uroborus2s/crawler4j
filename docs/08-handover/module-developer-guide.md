@@ -12,7 +12,7 @@
 ## 1. 先记住这 8 个真实事实
 
 1. CLI 命令名仍然叫 `init-model`，但它生成的是当前正式支持的“模块项目”。
-2. 当前已发布 SDK 版本是 `1.0.2`，Contracts 版本是 `1.0.1`。
+2. 当前已发布 SDK 版本是 `1.0.3`，Contracts 版本是 `1.0.1`。
 3. Core 运行模块时看的是 `module.yaml` 和模块根 `__init__.py`，不是 wheel 元数据。
 4. 当前应用内正式安装只支持 `zip` 包，不支持把 `.whl` 直接装进模块管理。
 5. 不管是 `DevLink` 调试还是安装后的正式运行，模块代码最终都运行在 `crawler4j` 自己的 Python 环境里。
@@ -29,23 +29,35 @@
 长期使用：
 
 ```bash
-uv tool install crawler4j-sdk==1.0.2
+uv tool install crawler4j-sdk==1.0.3
 crawler4j --help
 ```
 
 一次性使用：
 
 ```bash
-uvx --from crawler4j-sdk==1.0.2 crawler4j --help
+uvx --from crawler4j-sdk==1.0.3 crawler4j --help
 ```
 
 ### 2.2 创建模块项目
 
 ```bash
-uvx --from crawler4j-sdk==1.0.2 crawler4j init-model hotel_demo --no-install
+uvx --from crawler4j-sdk==1.0.3 crawler4j init-model hotel_demo
 cd hotel_demo
-uv sync
 uv run crawler4j list
+```
+
+当前 `init-model` 默认会：
+
+1. 进入一轮初始化向导
+2. 生成 `.gitignore` 与 `.python-version`
+3. 自动执行 `git init`
+4. 自动执行 `uv sync`
+
+如果你在脚本或 CI 中使用它，可以改成：
+
+```bash
+uvx --from crawler4j-sdk==1.0.3 crawler4j init-model hotel_demo --defaults --no-git --no-install
 ```
 
 ### 2.3 继续补任务、工作流、配置 UI
@@ -111,6 +123,8 @@ init-model
 ```text
 hotel_demo/
 ├── __init__.py
+├── .gitignore
+├── .python-version
 ├── pyproject.toml
 ├── README.md
 ├── module.yaml
@@ -137,6 +151,10 @@ hotel_demo/
   声明式配置 UI。
 - `pyproject.toml`
   只负责模块项目自己的开发环境，不负责应用内安装。
+- `.gitignore`
+  Python / uv 项目的默认忽略规则，初始化时自动生成。
+- `.python-version`
+  当前模块项目默认使用的 Python 版本，初始化时自动生成。
 
 ### 4.2 命名建议
 
@@ -149,7 +167,7 @@ hotel_demo/
 ```yaml
 name: hotel_demo
 version: 1.0.0
-sdk_version_range: ">=1.0.2"
+sdk_version_range: ">=1.0.3"
 ```
 
 ## 5. 你真正要实现的契约
@@ -308,7 +326,7 @@ version: 1.0.0
 display_name: Hotel Demo
 description: 示例模块
 author: crawler4j
-sdk_version_range: ">=1.0.2"
+sdk_version_range: ">=1.0.3"
 
 ui_extension:
   type: declarative
@@ -332,7 +350,7 @@ workflows:
 
 注意：
 
-- 扫描器当前的兼容性判断实现是简化版，主要可靠支持 `>=1.0.2` 这类格式
+- 扫描器当前的兼容性判断实现是简化版，主要可靠支持 `>=1.0.3` 这类格式
 - 复杂表达式即使能写，也不建议作为当前交付口径
 
 ## 10. 配置 UI 现在支持到什么程度
@@ -494,7 +512,7 @@ uv run python -m zipfile -c hotel_demo-1.0.0.zip hotel_demo
 
 在你把模块交给别人之前，至少完成下面 8 项：
 
-1. `uvx --from crawler4j-sdk==1.0.2 crawler4j init-model ...` 能重新回放
+1. `uvx --from crawler4j-sdk==1.0.3 crawler4j init-model ...` 能重新回放
 2. 模块目录里有 `module.yaml`、`__init__.py`、`tasks/`、`workflows/`
 3. `uv run crawler4j list` 能列出任务
 4. 模块能被应用注册成 `DevLink`

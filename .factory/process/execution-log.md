@@ -19,3 +19,4 @@
 | 2026-03-26 | Completed `TASK-005`: fixed maintained-scope lint findings, excluded historical manual/debug/verify/analyze scripts from the default Ruff gate, and wrote down the quality-gate/navigation baseline | Completed |
 | 2026-03-26 | Split `CR-003` into `TASK-011` / `TASK-012`, completed the settings-store and module-state persistence slice, and left trust-gate/custom-page loading as the next implementation step | Completed |
 | 2026-03-26 | Completed `TASK-012` and closed `CR-003`: added trust-gate/allowlist enforcement, real `ui:*` page loading, and safe degradation for blocked or failed module UI | Completed |
+| 2026-03-26 | Upgraded `crawler4j-sdk init-model` into a full interactive bootstrap flow: it now collects initial configuration, writes `.gitignore` / `.python-version`, and auto-runs `git init` + `uv sync` by default | Completed |

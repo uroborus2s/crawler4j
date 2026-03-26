@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ import yaml
 
 from crawler4j_sdk.cli.templates import (
     CONFIG_SCHEMA_TEMPLATE,
+    MODEL_GITIGNORE_TEMPLATE,
     MODEL_MANIFEST_TEMPLATE,
     MODEL_MODULE_INIT,
     MODEL_PROJECT_PYPROJECT,
@@ -20,6 +22,23 @@ from crawler4j_sdk.cli.templates import (
     SCRIPT_TEMPLATE,
     WORKFLOW_TEMPLATE,
 )
+
+DEFAULT_PYTHON_VERSION = "3.12"
+
+
+@dataclass(slots=True)
+class InitModelConfig:
+    module_name: str
+    output_dir: Path
+    display_name: str
+    description: str
+    workflow_name: str
+    workflow_display_name: str
+    workflow_description: str
+    python_version: str
+    include_ui: bool
+    init_git: bool
+    auto_install: bool
 
 
 def to_class_name(name: str) -> str:
@@ -172,13 +191,113 @@ def upsert_workflow_manifest_entry(
     manifest["workflows"] = workflows
 
 
-def _run_uv_sync(output_dir: Path) -> None:
+def _prompt_text(prompt: str, default: str) -> str:
+    answer = input(f"{prompt} [{default}]: ").strip()
+    return answer or default
+
+
+def _prompt_bool(prompt: str, default: bool) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    while True:
+        answer = input(f"{prompt} [{suffix}]: ").strip().lower()
+        if not answer:
+            return default
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"n", "no"}:
+            return False
+        print("⚠️ 请输入 y 或 n，或直接回车接受默认值。")
+
+
+def _build_init_model_config(args, module_name: str) -> InitModelConfig:
+    default_output_dir = Path(args.output).expanduser() if args.output else Path.cwd() / module_name
+    default_display_name = (args.display_name or to_display_name(module_name)).strip()
+    default_workflow_name = (args.workflow_name or "main_workflow").strip()
+    default_workflow_display_name = (
+        (args.workflow_display_name or to_display_name(default_workflow_name)).strip()
+    )
+    default_description = (args.description or f"{default_display_name} 模块").strip()
+    default_workflow_description = (
+        (args.workflow_description or f"{default_display_name} 的默认工作流").strip()
+    )
+    default_python_version = (args.python_version or DEFAULT_PYTHON_VERSION).strip()
+    default_include_ui = not args.no_ui
+    default_init_git = not args.no_git
+    default_auto_install = not args.no_install
+
+    if getattr(args, "defaults", False):
+        return InitModelConfig(
+            module_name=module_name,
+            output_dir=default_output_dir,
+            display_name=default_display_name,
+            description=default_description,
+            workflow_name=default_workflow_name,
+            workflow_display_name=default_workflow_display_name,
+            workflow_description=default_workflow_description,
+            python_version=default_python_version,
+            include_ui=default_include_ui,
+            init_git=default_init_git,
+            auto_install=default_auto_install,
+        )
+
+    print("🧭 进入 model 初始化向导，直接回车即可接受默认值。")
+    output_dir = Path(_prompt_text("输出目录", str(default_output_dir))).expanduser()
+    display_name = _prompt_text("模块显示名称", default_display_name)
+    description = _prompt_text("模块描述", default_description)
+    workflow_name = _prompt_text("默认工作流名称", default_workflow_name)
+    workflow_display_name = _prompt_text(
+        "工作流显示名称",
+        args.workflow_display_name or to_display_name(workflow_name),
+    )
+    workflow_description = _prompt_text(
+        "工作流描述",
+        args.workflow_description or f"{display_name} 的默认工作流",
+    )
+    python_version = _prompt_text("Python 版本", default_python_version)
+    include_ui = _prompt_bool("生成配置 UI", default_include_ui)
+    init_git = _prompt_bool("初始化 Git 仓库", default_init_git)
+    auto_install = _prompt_bool("自动执行 uv sync", default_auto_install)
+
+    return InitModelConfig(
+        module_name=module_name,
+        output_dir=output_dir,
+        display_name=display_name,
+        description=description,
+        workflow_name=workflow_name,
+        workflow_display_name=workflow_display_name,
+        workflow_description=workflow_description,
+        python_version=python_version,
+        include_ui=include_ui,
+        init_git=init_git,
+        auto_install=auto_install,
+    )
+
+
+def _run_git_init(output_dir: Path) -> bool:
+    git_dir = output_dir / ".git"
+    if git_dir.exists():
+        print("ℹ️ Git 仓库已存在，跳过 git init")
+        return True
+
+    print("🧱 初始化 Git 仓库...")
+    try:
+        subprocess.run(["git", "init"], cwd=str(output_dir), check=True)
+        print("✅ Git 仓库初始化完成")
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print(f"❌ Git 初始化失败，请手动运行: cd {output_dir} && git init")
+        return False
+
+
+def _run_uv_sync(output_dir: Path) -> bool:
     print("📦 安装依赖...")
     try:
         subprocess.run(["uv", "sync"], cwd=str(output_dir), check=True)
         print("✅ 依赖安装完成")
+        return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print(f"⚠️ 自动安装失败，请手动运行: cd {output_dir} && uv sync")
+        print(f"❌ 自动安装失败，请手动运行: cd {output_dir} && uv sync")
+        return False
 
 
 def cmd_init_model(args) -> int:
@@ -189,60 +308,56 @@ def cmd_init_model(args) -> int:
         print("   例如: demo_model")
         return 1
 
-    workflow_name = (args.workflow_name or "main_workflow").strip()
-    if not is_valid_python_file_stem(workflow_name):
+    config = _build_init_model_config(args, module_name)
+
+    if not is_valid_python_file_stem(config.workflow_name):
         print("❌ 工作流名称必须是小写 Python 标识符，只能包含字母、数字和下划线")
         print("   例如: main_workflow")
         return 1
 
-    output_dir = Path(args.output) if args.output else Path.cwd() / module_name
-    if output_dir.exists() and not args.force:
-        print(f"❌ 目录已存在: {output_dir}")
+    if config.output_dir.exists() and not args.force:
+        print(f"❌ 目录已存在: {config.output_dir}")
         print("   使用 --force 覆盖")
         return 1
 
-    display_name = to_display_name(module_name)
-    description = f"{display_name} 模块"
-    workflow_display_name = to_display_name(workflow_name)
-    workflow_description = f"{display_name} 的默认工作流"
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _ensure_package_dir(output_dir / "tasks")
-    _ensure_package_dir(output_dir / "workflows")
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_package_dir(config.output_dir / "tasks")
+    _ensure_package_dir(config.output_dir / "workflows")
 
     _write_text(
-        output_dir / "pyproject.toml",
+        config.output_dir / "pyproject.toml",
         MODEL_PROJECT_PYPROJECT.format(
             project_name=module_name,
-            display_name=display_name,
+            display_name=config.display_name,
+            python_version=config.python_version,
         ),
     )
     _write_text(
-        output_dir / "README.md",
-        MODEL_PROJECT_README.format(display_name=display_name),
+        config.output_dir / "README.md",
+        MODEL_PROJECT_README.format(display_name=config.display_name),
     )
     _write_text(
-        output_dir / "__init__.py",
+        config.output_dir / "__init__.py",
         MODEL_MODULE_INIT.format(
-            display_name=display_name,
-            default_workflow=workflow_name,
+            display_name=config.display_name,
+            default_workflow=config.workflow_name,
             module_name=module_name,
         ),
     )
     _write_text(
-        output_dir / "module.yaml",
+        config.output_dir / "module.yaml",
         MODEL_MANIFEST_TEMPLATE.format(
             module_name=module_name,
-            display_name=display_name,
-            description=description,
-            workflow_name=workflow_name,
-            workflow_display_name=workflow_display_name,
-            workflow_description=workflow_description,
-            ui_section="" if args.no_ui else MODEL_UI_SECTION.format(display_name=display_name),
+            display_name=config.display_name,
+            description=config.description,
+            workflow_name=config.workflow_name,
+            workflow_display_name=config.workflow_display_name,
+            workflow_description=config.workflow_description,
+            ui_section="" if not config.include_ui else MODEL_UI_SECTION.format(display_name=config.display_name),
         ),
     )
     _write_text(
-        output_dir / "tasks" / "example_task.py",
+        config.output_dir / "tasks" / "example_task.py",
         SCRIPT_TEMPLATE.format(
             name="example_task",
             class_name="ExampleTask",
@@ -251,48 +366,58 @@ def cmd_init_model(args) -> int:
         ),
     )
     _write_text(
-        output_dir / "workflows" / f"{workflow_name}.py",
+        config.output_dir / "workflows" / f"{config.workflow_name}.py",
         WORKFLOW_TEMPLATE.format(
-            name=workflow_name,
-            class_name=to_workflow_class_name(workflow_name),
-            display_name=workflow_display_name,
-            description=workflow_description,
+            name=config.workflow_name,
+            class_name=to_workflow_class_name(config.workflow_name),
+            display_name=config.workflow_display_name,
+            description=config.workflow_description,
         ),
     )
+    _write_text(config.output_dir / ".gitignore", MODEL_GITIGNORE_TEMPLATE)
+    _write_text(config.output_dir / ".python-version", f"{config.python_version}\n")
 
-    if not args.no_ui:
+    if config.include_ui:
         _write_text(
-            output_dir / "config_schema.json",
+            config.output_dir / "config_schema.json",
             CONFIG_SCHEMA_TEMPLATE.format(
-                title=f"{display_name} 配置",
-                description=f"{display_name} 的运行参数配置",
-                workflow_name=workflow_name,
+                title=f"{config.display_name} 配置",
+                description=f"{config.display_name} 的运行参数配置",
+                workflow_name=config.workflow_name,
             ),
         )
 
-    print(f"✅ 初始化 model 项目: {output_dir}")
-    print(f"   {output_dir}/")
+    print(f"✅ 初始化 model 项目: {config.output_dir}")
+    print(f"   {config.output_dir}/")
     print("   ├── __init__.py")
+    print("   ├── .gitignore")
+    print("   ├── .python-version")
     print("   ├── module.yaml")
-    if not args.no_ui:
+    if config.include_ui:
         print("   ├── config_schema.json")
     print("   ├── tasks/")
     print("   │   └── example_task.py")
     print("   └── workflows/")
-    print(f"       └── {workflow_name}.py")
+    print(f"       └── {config.workflow_name}.py")
     print()
 
-    if not args.no_install:
-        _run_uv_sync(output_dir)
+    if config.init_git and not _run_git_init(config.output_dir):
+        return 1
+
+    if config.auto_install and not _run_uv_sync(config.output_dir):
+        return 1
 
     print()
     print("下一步:")
-    print(f"   cd {output_dir.name}")
-    if args.no_install:
+    print(f"   cd {config.output_dir.name}")
+    if not config.init_git:
+        print("   git init                 # 初始化 Git 仓库")
+    if not config.auto_install:
         print("   uv sync                  # 安装项目依赖（含 crawler4j-sdk）")
     print("   uv run crawler4j add            # 创建新任务")
     print("   uv run crawler4j add-workflow   # 创建新工作流")
-    print("   uv run crawler4j add-ui         # 生成/补齐配置 UI")
+    if config.include_ui:
+        print("   uv run crawler4j add-ui         # 生成/补齐配置 UI")
     print("   在应用中把该目录注册/扫描为模块后，可在 ATM 中对相关作业发起“任务调试”")
     return 0
 
@@ -518,12 +643,19 @@ def main() -> int:
     init_model_parser.add_argument("name", help="model / 模块名称（小写包名）")
     init_model_parser.add_argument("-o", "--output", help="输出目录")
     init_model_parser.add_argument("-f", "--force", action="store_true", help="强制覆盖")
+    init_model_parser.add_argument("--defaults", action="store_true", help="使用命令行参数与默认值，不进入交互向导")
     init_model_parser.add_argument("--no-install", action="store_true", help="不自动安装依赖")
+    init_model_parser.add_argument("--no-git", action="store_true", help="不自动初始化 Git 仓库")
     init_model_parser.add_argument(
         "--workflow-name",
         default="main_workflow",
         help="默认工作流名称",
     )
+    init_model_parser.add_argument("--display-name", help="模块显示名称")
+    init_model_parser.add_argument("--description", help="模块描述")
+    init_model_parser.add_argument("--workflow-display-name", help="工作流显示名称")
+    init_model_parser.add_argument("--workflow-description", help="工作流描述")
+    init_model_parser.add_argument("--python-version", default=DEFAULT_PYTHON_VERSION, help="写入 .python-version 的 Python 版本")
     init_model_parser.add_argument("--no-ui", action="store_true", help="不生成配置 UI")
     init_model_parser.set_defaults(func=cmd_init_model)
 

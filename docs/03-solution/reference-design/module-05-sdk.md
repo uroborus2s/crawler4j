@@ -147,15 +147,19 @@ SDK 提供 `crawler4j` 命令行工具，帮助快速开始。
 
 ### 3.1 `init-model` 命令
 `crawler4j init-model my_project`
+*   默认进入初始化向导，收集模块显示名、描述、工作流名、是否生成 UI、是否自动初始化 Git/依赖等初始参数。
 *   创建当前标准模块目录结构：
     ```text
     my_project/
+    ├── .gitignore
+    ├── .python-version
     ├── __init__.py        # 模块入口与 run/hooks
     ├── module.yaml        # Manifest
     ├── config_schema.json # 声明式配置 UI（可选）
     ├── workflows/         # 存放 TaskFlow
     └── tasks/             # 存放 TaskScript
     ```
+*   默认追加执行 `git init` 与 `uv sync`，让项目创建完即可直接进入开发。
 
 ### 3.2 模块扩展命令
 当前实现还支持以下脚手架扩展命令：

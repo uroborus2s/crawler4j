@@ -50,14 +50,14 @@ crawler4j 当前是一个由 5 个主要部分组成的 Python 项目：
 | 根项目 `pyproject.toml` | `0.1.2.dev20260326` |
 | 运行时 `src/__version__.py` | `0.1.2.dev20260326` |
 | 最近正式 Git tag | `v0.1.1` |
-| SDK | `1.0.2` |
+| SDK | `1.0.3` |
 | Contracts | `1.0.1` |
 
 ### 4.2 最新已知发布结果
 
 - 最新已知正式 Git tag 为 `v0.1.1`，Tag 时间为 2026-01-03。
 - 根仓库中保留了 `dist/Crawler4j.app`、`dist/Crawler4j/`、`build/crawler4j/` 等历史打包产物。
-- SDK 与 Contracts 的 `dist/` 中保留了 `1.0.0`、`1.0.1`、`1.0.2` 等历史产物。
+- SDK 与 Contracts 的 `dist/` 中保留了 `1.0.0`、`1.0.1`、`1.0.2`、`1.0.3` 等历史产物。
 - 当前工作区版本已统一为 `0.1.2.dev20260326`，并明确表示它领先于最新正式 tag `v0.1.1`。
 
 ## 5. 文档状态

@@ -123,3 +123,6 @@ htmlcov/
 /*.html
 /screenshots/
 site/
+
+.tmphome
+.VSCodeCounter

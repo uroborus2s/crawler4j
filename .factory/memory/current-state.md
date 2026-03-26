@@ -28,6 +28,7 @@
 - `uv run pytest -q` 与 `uv run python scripts/smoke_test_ui.py` 当前均已恢复通过
 - `uv run ruff check .` 当前已通过；默认 gate 不再把历史 `manual/debug/verify/analyze` 脚本计入阻塞范围
 - 当前模块开发者指南已按外部作者真实链路重写，覆盖脚手架、DevLink 调试、zip 安装验收与运行时依赖约束
+- `crawler4j-sdk` 的 `init-model` 现已默认进入初始化向导，并自动生成 `.gitignore`、`.python-version`、执行 `git init` 与 `uv sync`
 - 当前版本治理已收口：根应用工作区版本与运行时镜像统一为 `0.1.2.dev20260326`，最近正式发布为 `v0.1.1`
 - `CR-003` 已关闭：MMS settings store、模块状态持久化、trust gate 与自定义页面加载均已落地
 - 当前编号任务主线已完成，下一步更适合转向真实站点 E2E 回放或发布收口

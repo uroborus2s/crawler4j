@@ -30,11 +30,22 @@ def _run_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     target = tmp_path / "demo_model"
 
-    init_result = _run_cli("init-model", "demo_model", "--output", str(target), "--no-install", cwd=REPO_ROOT)
+    init_result = _run_cli(
+        "init-model",
+        "demo_model",
+        "--output",
+        str(target),
+        "--defaults",
+        "--no-install",
+        "--no-git",
+        cwd=REPO_ROOT,
+    )
     assert init_result.returncode == 0, init_result.stderr
     assert (target / "__init__.py").exists()
     assert (target / "module.yaml").exists()
     assert (target / "config_schema.json").exists()
+    assert (target / ".gitignore").exists()
+    assert (target / ".python-version").exists()
     assert not (target / "debug_runner.py").exists()
 
     new_result = _run_cli("new", "extra_task", cwd=target)

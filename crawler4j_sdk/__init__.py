@@ -49,7 +49,7 @@ from crawler4j_contracts import (
     UICapability,
 )
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 # 稳定导出列表（同 MAJOR 版本内冻结）
 __all__ = [

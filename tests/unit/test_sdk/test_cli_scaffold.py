@@ -41,7 +41,14 @@ def model_args(tmp_path: Path) -> Namespace:
         output=str(target),
         force=False,
         no_install=True,
+        no_git=True,
         workflow_name="main_workflow",
+        display_name=None,
+        description=None,
+        workflow_display_name=None,
+        workflow_description=None,
+        python_version="3.12",
+        defaults=True,
         no_ui=False,
     )
 
@@ -56,6 +63,8 @@ class TestModelScaffoldInit:
         assert (target / "__init__.py").exists()
         assert (target / "module.yaml").exists()
         assert (target / "config_schema.json").exists()
+        assert (target / ".gitignore").exists()
+        assert (target / ".python-version").exists()
         assert (target / "tasks" / "__init__.py").exists()
         assert (target / "tasks" / "example_task.py").exists()
         assert (target / "workflows" / "__init__.py").exists()
@@ -93,6 +102,75 @@ class TestModelScaffoldInit:
         assert "scripts" not in pyproject["project"]
         assert all("playwright" not in dependency for dependency in dependencies)
         assert any("crawler4j-sdk" in dependency for dependency in dependencies)
+
+    def test_init_model_defaults_mode_does_not_prompt(self, model_args: Namespace, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("builtins.input", lambda _: pytest.fail("defaults 模式不应触发交互输入"))
+
+        result = commands.cmd_init_model(model_args)
+
+        assert result == 0
+
+    def test_init_model_interactive_wizard_runs_git_init_and_uv_sync(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        target = tmp_path / "ctrip_model"
+        args = Namespace(
+            name="ctrip_model",
+            output=str(target),
+            force=False,
+            no_install=False,
+            no_git=False,
+            workflow_name="main_workflow",
+            display_name=None,
+            description=None,
+            workflow_display_name=None,
+            workflow_description=None,
+            python_version="3.12",
+            defaults=False,
+            no_ui=False,
+        )
+
+        answers = iter(
+            [
+                "",
+                "携程",
+                "携程任务模块",
+                "login_workflow",
+                "登录工作流",
+                "登录与探测工作流",
+                "",
+                "",
+                "",
+                "",
+            ]
+        )
+        monkeypatch.setattr("builtins.input", lambda _="": next(answers))
+
+        calls: list[tuple[list[str], str]] = []
+
+        def fake_run(cmd: list[str], cwd: str | None = None, check: bool = False):
+            calls.append((cmd, cwd or ""))
+            return None
+
+        monkeypatch.setattr(commands.subprocess, "run", fake_run)
+
+        result = commands.cmd_init_model(args)
+
+        assert result == 0
+        manifest = _read_manifest(target)
+        assert manifest["display_name"] == "携程"
+        assert manifest["description"] == "携程任务模块"
+        assert manifest["workflows"][0]["name"] == "login_workflow"
+        assert manifest["workflows"][0]["display_name"] == "登录工作流"
+        assert manifest["workflows"][0]["description"] == "登录与探测工作流"
+        assert (target / ".gitignore").exists()
+        assert (target / ".python-version").read_text(encoding="utf-8").strip() == "3.12"
+        assert calls == [
+            (["git", "init"], str(target)),
+            (["uv", "sync"], str(target)),
+        ]
 
     def test_legacy_init_command_is_no_longer_supported(self, monkeypatch: pytest.MonkeyPatch, capsys):
         monkeypatch.setattr(sys, "argv", ["crawler4j", "init", "demo_project"])

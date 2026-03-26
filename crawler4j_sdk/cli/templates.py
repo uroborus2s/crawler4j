@@ -51,13 +51,26 @@ class {class_name}(TaskScript):
             await ctx.screenshot("error_{name}")
 '''
 
+MODEL_GITIGNORE_TEMPLATE = '''.DS_Store
+.idea/
+.vscode/
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+'''
+
 MODEL_PROJECT_PYPROJECT = '''[project]
 name = "{project_name}"
 version = "0.1.0"
 description = "{display_name} 模块项目"
-requires-python = ">=3.12"
+requires-python = ">={python_version}"
 dependencies = [
-    "crawler4j-sdk>=1.0.2",
+    "crawler4j-sdk>=1.0.3",
 ]
 
 [build-system]
@@ -77,11 +90,13 @@ MODEL_PROJECT_README = '''# {display_name}
 - `workflows/` 工作流
 - `config_schema.json` 配置 UI
 
-## 安装
+默认情况下，`init-model` 已经完成以下动作：
 
-```bash
-uv sync
-```
+- 生成 `.gitignore`
+- 初始化 Git 仓库
+- 执行 `uv sync`
+
+如果你在创建时显式跳过了安装或 Git 初始化，再手动补一次即可。
 
 ## 常用命令
 

@@ -109,6 +109,15 @@ uv run crawler4j add-workflow sync_orders
 uv run crawler4j add-ui
 ```
 
+`init-model` 默认会进入一轮初始化向导，并在创建后自动：
+
+- 生成 `.gitignore`
+- 生成 `.python-version`
+- 执行 `git init`
+- 执行 `uv sync`
+
+如果你在 CI 或脚本里使用 CLI，可以加 `--defaults` 跳过交互；如需跳过自动初始化动作，可额外使用 `--no-git` 或 `--no-install`。
+
 调试主路径已经收敛到 Core 调试会话。CLI 不再生成 `debug_runner.py`。
 
 ## 工作流示例

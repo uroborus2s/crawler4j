@@ -57,8 +57,8 @@ uv build
 构建完成后，会生成：
 *   `crawler4j_contracts/dist/crawler4j_contracts-1.0.1-py3-none-any.whl`
 *   `crawler4j_contracts/dist/crawler4j_contracts-1.0.1.tar.gz`
-*   `crawler4j_sdk/dist/crawler4j_sdk-1.0.2-py3-none-any.whl`
-*   `crawler4j_sdk/dist/crawler4j_sdk-1.0.2.tar.gz`
+*   `crawler4j_sdk/dist/crawler4j_sdk-1.0.3-py3-none-any.whl`
+*   `crawler4j_sdk/dist/crawler4j_sdk-1.0.3.tar.gz`
 
 ### 2. 发布到 PyPI
 将构建好的两个包都发布到 PyPI 仓库。
@@ -102,9 +102,12 @@ uvx --from crawler4j-sdk crawler4j --help
 
 # 或先安装为本地工具，再长期使用
 uv tool install crawler4j-sdk
-crawler4j init-model my_test_project --no-install
+crawler4j init-model my_test_project
 
-# 如果项目目录里已经执行过 uv sync，也可以在项目内使用
+# 如果你在脚本或 CI 中调用，也可以使用非交互模式
+uvx --from crawler4j-sdk crawler4j init-model my_test_project --defaults --no-git --no-install
+
+# 项目创建完成后，也可以在项目内使用
 cd my_test_project
 uv run crawler4j --help
 ```
