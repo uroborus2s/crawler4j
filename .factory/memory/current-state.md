@@ -19,7 +19,7 @@
 
 - 任务：TASK-010-optimize-module-developer-guide-for-external-authors、TASK-011-mms-settings-store-and-module-state-persistence、TASK-012-mms-trust-gate-and-custom-ui-loading
 - 变更：CR-001-version-and-release-governance-alignment、CR-002-quality-gate-and-docs-navigation-alignment、CR-003-mms-settings-and-ui-extension-compliance
-- 文档：已通过山海工枢 `factory-docs-index-refresh` 重建 `docs/index.md`；根索引现负责全站目录树与页面权限，子目录 `index.md` 仅保留正文概览
+- 文档：根 `docs/index.md` 现按“项目过程文档 / Model 开发指南”两大入口组织正文层，旧专题已迁入 `docs/archive/`；`docs/08-handover/module-developer-guide/` 已扩写为面向小白开发者的目录化主指南
 - 缺陷：BUG-003-pyqt-runtime-blocked-by-system-policy、BUG-004-zip-upgrade-leaves-stale-files、BUG-005-hybrid-acquisition-mode-declared-but-rejected
 
 ## 下一步建议

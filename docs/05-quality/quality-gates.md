@@ -1,13 +1,13 @@
 # 质量门与文档导航规则
 
-**项目名称：** 蛛行演略（crawler4j）  
-**文档状态：** 已批准  
-**负责人：** 当前仓库维护者  
-**主要读者：** Tech Lead | Dev | QA | 发布负责人  
-**上游输入：** `docs/04-delivery/implementation-plan.md` | `.factory/workitems/implementation/TASK-005-normalize-lint-and-docs-gates.md`  
-**下游输出：** `.factory/process/quality-check-report.md` | `docs/traceability/document-index.md`  
-**关联 ID：** `TASK-005`, `CR-002`, `REQ-005`, `NFR-003`  
-**最后更新：** 2026-03-26  
+**项目名称：** 蛛行演略（crawler4j）
+**文档状态：** 已批准
+**负责人：** 当前仓库维护者
+**主要读者：** Tech Lead | Dev | QA | 发布负责人
+**上游输入：** `docs/04-delivery/implementation-plan.md` | `.factory/workitems/implementation/TASK-005-normalize-lint-and-docs-gates.md`
+**下游输出：** `.factory/process/quality-check-report.md` | `docs/traceability/document-index.md`
+**关联 ID：** `TASK-005`, `CR-002`, `REQ-005`, `NFR-003`
+**最后更新：** 2026-03-28
 
 ## 1. 目标
 
@@ -46,10 +46,13 @@
 
 ## 4. 文档导航规则
 
-- `docs/00-governance/` 到 `docs/09-evolution/` 与 `docs/traceability/` 是当前正式人类文档体系
+- `docs/index.md` 只暴露三个入口层：`项目过程文档`、`Model 开发指南`、`历史归档`
+- `docs/project-process/index.md` 是 Core 维护者入口；模块作者入口是 `docs/08-handover/module-developer-guide/index.md`
+- `docs/00-governance/` 到 `docs/07-operations/`、`docs/09-evolution/` 与 `docs/traceability/` 仍是当前正式正文层
+- `docs/archive/` 是历史参考层，不是默认事实入口
 - 任何包含 Markdown 页面的人类文档目录，都必须提供自己的 `index.md`
 - `.obsidian/` 和纯资产目录不属于正式文档入口要求范围
-- `reference-*` 子目录属于同一棵文档树中的详细参考层，不是平行控制面
+- `docs/08-handover/index.md` 与 `docs/08-handover/user-guide.md` 只保留跨角色接手职责，不再承载旧 Quick Start 或旧用户说明
 - 冲突时，以代码、已验证命令结果和当前编号文档为准
 - `.factory/` 记录工厂控制面状态；`docs/` 负责面向人的正式说明
 

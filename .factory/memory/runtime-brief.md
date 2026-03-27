@@ -13,7 +13,7 @@
 - 最近发布包：无
 - 最近交接包：无
 - 最近快照：无
-- 备注：refresh-after-clearing-pinned-version-command；已通过山海工枢 `factory-docs-index-refresh` 刷新 `docs/index.md` 与目录概览页
+- 备注：refresh-after-clearing-pinned-version-command；已通过山海工枢 `factory-docs-index-refresh` 刷新 `docs/index.md` 与目录概览页；当前文档入口已拆分为 `项目过程文档` 与 `Model 开发指南`
 
 ## AI 最小读取顺序
 
@@ -26,10 +26,11 @@
 
 ## 当前阶段核心文档
 
+- `docs/project-process/index.md`
 - `docs/04-delivery/implementation-plan.md`
 - `docs/03-solution/technical-selection.md`
+- `docs/03-solution/system-architecture.md`
 - `docs/03-solution/api-design.md`
-- `docs/03-solution/backend-design.md`
 
 ## 必守规则
 

@@ -54,12 +54,12 @@
 
 ### 6.9.3.2 错误码索引
 
-- 统一错误码规则见 6.7；全局错误码索引见：`docs/02-requirements/reference-srs/appendix/B-error-codes.md`
+- 统一错误码规则见 6.7；全局错误码索引见：`docs/archive/reference-srs/appendix/B-error-codes.md`
 
 ### 6.9.3.3 配置项索引
 
-- 全局配置项索引见：`docs/02-requirements/reference-srs/appendix/C-config-index.md`
+- 全局配置项索引见：`docs/archive/reference-srs/appendix/C-config-index.md`
 
 ### 6.9.3.4 追溯
 
-- 需求追溯矩阵见：`docs/02-requirements/reference-srs/appendix/D-traceability-matrix.md`
+- 需求追溯矩阵见：`docs/archive/reference-srs/appendix/D-traceability-matrix.md`

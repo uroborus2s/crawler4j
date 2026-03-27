@@ -93,7 +93,7 @@ TaskScript 的稳定契约包括：
 
 本节用于为具体 TaskScript（如 `claim_task`、`login`）编写功能级规格。
 
-- 建议模板：`docs/02-requirements/reference-srs/templates/feature.md` / `docs/02-requirements/reference-srs/templates/usecase.md`
+- 建议模板：`docs/archive/reference-srs/templates/feature.md` / `docs/archive/reference-srs/templates/usecase.md`
 - 每个 TaskScript 至少给出：输入（ctx.config 关键项）/输出（TaskResult.data）/失败场景/可重试建议/验收标准。
 
 ### 6.1.4 任务上下文 (TaskContext)

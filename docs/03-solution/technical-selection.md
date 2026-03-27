@@ -54,7 +54,7 @@
 ## 设计/开发/Gate 同步要求
 
 - 进入 IMPLEMENTATION 前，解决方案架构师、后端工程师和前端工程师必须先阅读本文件。
-- 技术选型、模块清单或后台范围变化后，同步更新 `module-boundaries.md`、`backend-design.md`、`api-design.md`、`test-plan.md`、`deployment-guide.md`、`user-guide.md` 和 `.factory/memory/tech-stack.summary.md`。
+- 技术选型、模块清单或后台范围变化后，同步更新 `system-architecture.md`、`module-boundaries.md`、`api-design.md`、`test-plan.md`、`deployment-guide.md`、`docs/project-process/core-maintainer-guide.md`、`docs/08-handover/module-developer-guide/index.md`、`docs/08-handover/user-guide.md` 和 `.factory/memory/tech-stack.summary.md`。
 - 任何涉及该技术画像的 TASK/CR/BUG 在创建或变更时，都应在关联项或说明中引用相关设计条目。
 - PR 评审时需检查代码实现、依赖安装、后台范围和文档同步是否与本文件一致。
 

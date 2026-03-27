@@ -1,5 +1,8 @@
 # 变更摘要
 
+## 文档演进
+- `DOC-module-guide-directory-expansion` 模块开发指南已从单文件重构为目录化章节主指南，并按“小白开发者”视角补齐概念、上手、结构、开发、调试、交付与排错说明 | 状态：DONE | 关联：`TASK-010`
+
 ## 需求变更
 - `CR-001-version-and-release-governance-alignment` CR-001 统一版本与发布治理 | 状态：DONE | 关联：无
 - `CR-002-quality-gate-and-docs-navigation-alignment` CR-002 收敛质量门与文档导航策略 | 状态：DONE | 关联：无

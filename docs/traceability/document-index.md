@@ -1,91 +1,86 @@
 # 文档索引
 
-**项目名称：** 蛛行演略（crawler4j）  
-**负责人：** 当前仓库维护者  
-**最后更新：** 2026-03-27  
+**项目名称：** 蛛行演略（crawler4j）
+**负责人：** 当前仓库维护者
+**最后更新：** 2026-03-28
 
-## 1. 当前正式文档树
+## 1. 当前正式文档结构
 
-当前正式的人类文档体系由 `docs/index.md` 统领，按阶段组织为 `00-governance/` 到 `09-evolution/`，并由 `traceability/` 负责入口映射与追踪。
+当前正式的人类文档分成两个主要阅读面，外加一个历史归档层：
 
-| 目录 | 目录入口 | 作用 | 主要读者 |
-|---|---|---|---|
-| `docs/00-governance/` | [index.md](../00-governance/index.md) | 项目边界、治理规则 | 管理者 / Tech Lead |
-| `docs/01-discovery/` | [index.md](../01-discovery/index.md) | 输入证据、现状分析、旧文档审计 | 架构 / 开发 / QA |
-| `docs/02-requirements/` | [index.md](../02-requirements/index.md) | 当前需求、分析、校验 | 产品 / 架构 / 开发 / QA |
-| `docs/03-solution/` | [index.md](../03-solution/index.md) | 当前架构、边界、接口和设计规则 | 架构 / 开发 |
-| `docs/04-delivery/` | [index.md](../04-delivery/index.md) | 实施计划、任务拆解、WBS | Tech Lead / Dev / QA |
-| `docs/05-quality/` | [index.md](../05-quality/index.md) | 测试计划、质量门、一致性审查 | QA / Dev / 发布负责人 |
-| `docs/06-release/` | [index.md](../06-release/index.md) | 发布说明、版本治理 | 发布负责人 / Tech Lead |
-| `docs/07-operations/` | [index.md](../07-operations/index.md) | 部署与运行说明 | 运维 / Dev |
-| `docs/08-handover/` | [index.md](../08-handover/index.md) | 接手、使用、模块开发 | 新维护者 / 外部模块开发者 |
-| `docs/09-evolution/` | [index.md](../09-evolution/index.md) | 流程与文档演进入口 | Tech Lead / 文档维护者 |
-| `docs/traceability/` | [index.md](index.md) | 文档入口映射与需求追踪 | 架构 / QA / 文档维护者 |
-
-说明：
-
-- 当前所有包含 Markdown 页面的人类文档目录都已经补齐 `index.md`。
-- `docs/.obsidian/` 和纯资产目录不属于正式文档树，不纳入目录入口要求。
-
-## 2. 当前主入口文档
-
-| 当前文档 | 作用 | 主要读者 |
+| 入口 | 作用 | 主要读者 |
 |---|---|---|
-| `docs/index.md` | 文档总入口与阅读路径 | 全体维护者 |
-| `docs/01-discovery/current-state-analysis.md` | 当前真实状态 | 全体维护者 |
-| `docs/03-solution/system-architecture.md` | 系统结构总览 | 架构 / 开发 |
-| `docs/04-delivery/task-breakdown.md` | 当前任务主线 | Tech Lead / Dev / QA |
-| `docs/05-quality/quality-gates.md` | 默认质量门与文档导航规则 | Dev / QA / 发布负责人 |
-| `docs/06-release/version-governance.md` | 当前版本规则 | 发布负责人 / Tech Lead |
-| `docs/07-operations/deployment-guide.md` | 部署与运行说明 | 运维 / Dev |
-| `docs/08-handover/module-developer-guide.md` | 外部模块开发主入口 | 外部模块开发者 / Dev |
-| `docs/traceability/requirements-matrix.md` | 需求追踪 | 架构 / QA |
+| `docs/project-process/` | Core 团队的过程文档入口 | Core 维护者 / 开发 / QA / 发布 |
+| `docs/model-development/` | 模块开发独立入口 | 外部模块开发者 / 做模块集成的 Core 成员 |
+| `docs/archive/` | 历史参考层，不作为默认事实入口 | 需要追溯旧设计和旧说明的读者 |
 
-## 3. 参考层映射
+## 2. 项目过程文档目录
 
-| 参考层目录/文件 | 当前承接位置 | 当前状态 |
+| 目录/文档 | 作用 | 主要读者 |
 |---|---|---|
-| `docs/02-requirements/reference-srs/` | `docs/02-requirements/` + `docs/03-solution/` | 保留为旧 SRS 参考层 |
-| `docs/03-solution/reference-design/` | `docs/03-solution/` | 保留为设计参考层 |
-| `docs/03-solution/reference-architecture/` | `docs/03-solution/system-architecture.md` | 保留为补充架构层 |
-| `docs/03-solution/reference-sdk/` | `docs/03-solution/api-design.md` | 保留为 SDK 补充说明层 |
-| `docs/05-quality/reference-tests/` | `docs/05-quality/test-plan.md` | 保留为测试参考层 |
-| `docs/08-handover/reference-user-guide/` | `docs/06-release/` + `docs/07-operations/` + `docs/08-handover/` | 保留为用户说明参考层 |
-| `docs/08-handover/reference-module-dev/` | `docs/08-handover/module-developer-guide.md` | 仅保留截图资产与历史辅助说明 |
+| `docs/project-process/index.md` | Core 阅读路径与维护边界 | Core 维护者 |
+| `docs/project-process/core-maintainer-guide.md` | 接手、日常维护、同步规则 | Core 维护者 / 新成员 |
+| `docs/00-governance/` | 项目边界、治理规则 | 管理者 / Tech Lead |
+| `docs/01-discovery/` | 输入证据、现状分析、旧文档收敛策略 | 架构 / 开发 / QA |
+| `docs/02-requirements/` | 当前需求、分析、校验 | 产品 / 架构 / 开发 / QA |
+| `docs/03-solution/` | 当前架构、模块边界、接口契约和工程规则 | 架构 / 开发 |
+| `docs/04-delivery/` | 实施计划、任务拆解、执行节奏 | Tech Lead / Dev / QA |
+| `docs/05-quality/` | 测试计划、质量门、一致性审查 | QA / Dev / 发布 |
+| `docs/06-release/` | 发布说明、版本治理 | 发布负责人 / Tech Lead |
+| `docs/07-operations/` | 部署与运行说明 | 运维 / Dev |
+| `docs/08-handover/index.md`、`docs/08-handover/user-guide.md` | 跨角色接手入口 | 新维护者 / 协作者 |
+| `docs/09-evolution/` | 演进与复盘入口 | 文档维护者 / Tech Lead |
+| `docs/traceability/` | 文档索引与需求追踪 | 架构 / QA / 文档维护者 |
 
-## 4. 阅读顺序建议
+## 3. Model 开发指南目录
 
-### 新接手维护者
+| 目录/文档 | 作用 |
+|---|---|
+| `docs/model-development/index.md` | 模块开发独立入口与阅读路径 |
+| `docs/08-handover/module-developer-guide/index.md` | 模块开发总览 |
+| `docs/08-handover/module-developer-guide/01-concepts/` | 系统地图与真实约束 |
+| `docs/08-handover/module-developer-guide/02-quickstart/` | 环境准备与首个模块 |
+| `docs/08-handover/module-developer-guide/03-project-structure/` | 结构、入口与 `module.yaml` |
+| `docs/08-handover/module-developer-guide/04-development/` | TaskScript、Workflow、CLI 与 UI |
+| `docs/08-handover/module-developer-guide/05-debugging/` | DevLink 与调试链路 |
+| `docs/08-handover/module-developer-guide/06-delivery/` | zip 安装与验收清单 |
+| `docs/08-handover/module-developer-guide/07-troubleshooting/` | 常见坑位与排错 |
+
+## 4. 历史归档映射
+
+| 历史归档 | 当前承接位置 |
+|---|---|
+| `docs/archive/reference-srs/` | `docs/02-requirements/` + `docs/03-solution/` |
+| `docs/archive/reference-design/` | `docs/03-solution/` |
+| `docs/archive/reference-architecture/` | `docs/03-solution/system-architecture.md` |
+| `docs/archive/reference-sdk/` | `docs/03-solution/api-design.md` + 模块开发指南 |
+| `docs/archive/reference-tests/` | `docs/05-quality/test-plan.md` |
+| `docs/archive/reference-user-guide/` | `docs/06-release/` + `docs/07-operations/` + `docs/08-handover/user-guide.md` |
+| `docs/archive/reference-module-dev/` | `docs/model-development/index.md` |
+
+## 5. 推荐阅读路径
+
+### Core 维护者
 
 1. [文档中心](../index.md)
-2. [当前真实状态分析](../01-discovery/current-state-analysis.md)
-3. [系统架构](../03-solution/system-architecture.md)
-4. [任务分解](../04-delivery/task-breakdown.md)
-5. [部署与运行说明](../07-operations/deployment-guide.md)
+2. [项目过程文档总览](../project-process/index.md)
+3. [Core 接手与日常维护](../project-process/core-maintainer-guide.md)
+4. [当前真实状态分析](../01-discovery/current-state-analysis.md)
+5. [系统架构](../03-solution/system-architecture.md)
+6. [实施方案](../04-delivery/implementation-plan.md)
+7. [质量门与文档导航规则](../05-quality/quality-gates.md)
 
-### 架构 / 开发
+### 模块开发者
 
-1. [需求目录](../02-requirements/index.md)
-2. [方案目录](../03-solution/index.md)
-3. [交付目录](../04-delivery/index.md)
-4. 按需回读 `reference-srs/`、`reference-design/` 和 `reference-sdk/`
+1. [Model 开发指南入口](../model-development/index.md)
+2. [模块开发指南总览](../08-handover/module-developer-guide/index.md)
+3. [01 概念与约束](../08-handover/module-developer-guide/01-concepts/index.md)
+4. [02 快速开始](../08-handover/module-developer-guide/02-quickstart/index.md)
+5. [05 调试](../08-handover/module-developer-guide/05-debugging/index.md)
+6. [06 交付与验收](../08-handover/module-developer-guide/06-delivery/index.md)
 
-### QA / 发布
+## 6. 维护规则
 
-1. [质量目录](../05-quality/index.md)
-2. [发布目录](../06-release/index.md)
-3. [运行目录](../07-operations/index.md)
-4. 按需回读 `reference-tests/` 与 `reference-user-guide/`
-
-## 5. 维护规则
-
-- 文档目录有新增、删除或移动时，先更新所属目录 `index.md`，再更新本文件。
-- 当前编号文档优先；参考层仅用于补充历史细节。
-- 冲突时，以代码、可重复验证结果和当前编号文档为准。
-
-## 6. 变更记录
-
-| 日期 | 变更内容 | 变更人 |
-|---|---|---|
-| 2026-03-27 | 补齐阶段目录与参考层目录入口页，重写文档索引为当前真实文档树 | Codex |
-| 2026-03-26 | 建立当前文档索引与旧专题映射 | Codex |
+- 根 `docs/index.md` 必须维持“项目过程文档 / Model 开发指南 / 历史归档”三层入口。
+- 任何新增、删除或移动页面，都要先更新所属目录 `index.md`，再更新本文件。
+- 当前事实优先级高于历史归档；归档只用于补充背景与追溯旧结论。

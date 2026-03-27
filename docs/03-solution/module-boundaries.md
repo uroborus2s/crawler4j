@@ -29,19 +29,21 @@
 | 依赖 | Playwright, SQLAlchemy, APScheduler |
 | 不负责 | 模块业务逻辑本身 |
 
-## `MOD-003` Builtin Modules
+## `MOD-003` External Modules & Runtime Surface
 
 | 项目 | 内容 |
 |---|---|
-| 目录 | `modules/` |
-| 职责 | 提供 builtin module 的 `module.yaml`、task script、workflow、hooks |
+| 目录 | `modules/README.md`（仓内占位）、`<app-data>/modules`（正式安装）、DevLink 源码目录（开发调试） |
+| 职责 | 定义模块根目录、`module.yaml`、根 `__init__.py`、任务、工作流与 UI 扩展的运行边界 |
 | 对外接口 | `run(context)` 与模块 hooks |
 | 依赖 | `crawler4j_sdk`, Core runtime |
 | 不负责 | Core 基础设施、SDK 公共契约 |
 
-当前边界风险：
+当前边界事实：
 
-- `modules/ctrip` 已进入新模块形态，但仍包含对旧 `src.automation.*` 的耦合引用。
+- 仓库不再保留 builtin business modules，`modules/` 仅保留占位说明。
+- 正式安装模块位于应用数据目录，开发调试模块通过 DevLink 指向源码目录。
+- 模块项目自己的 `pyproject.toml` 不会被宿主应用自动安装到运行时环境中。
 
 ## `MOD-004` SDK 与 Contracts
 
@@ -51,7 +53,7 @@
 | 职责 | 提供 TaskScript / TaskFlow / TaskContext / TaskResult 等开发契约与 CLI |
 | 对外接口 | `crawler4j` CLI, Python 包 API |
 | 依赖 | `crawler4j-contracts`, aiohttp, pyyaml |
-| 不负责 | Root app UI、内置模块业务流程 |
+| 不负责 | Root app UI、宿主运行时治理与模块业务语义 |
 
 ## `MOD-005` Docs 与 Release Surface
 

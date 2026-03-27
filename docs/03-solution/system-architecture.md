@@ -16,7 +16,7 @@ User
   -> PyQt Desktop Shell (`src/ui`)
     -> Core Services (`src/core`)
       -> ATM / TSM / MMS / REM / Persistence / Debug / System
-        -> Builtin Modules (`modules/*`)
+        -> External Modules (`<app-data>/modules`, `DevLink`)
           -> SDK Contracts (`crawler4j_sdk`, `crawler4j_contracts`)
 
 Maintainer
@@ -30,7 +30,7 @@ Maintainer
 1. UI Host：桌面外壳、导航、日志与调试入口
 2. Framework Core：MMS / TSM / ATM / REM / Persistence / Debug / System
 3. SDK / Contracts：模块开发与运行时契约
-4. Modules：业务模块与外部开发项目
+4. Modules：外部安装模块与本地 DevLink 模块项目
 
 ## 2. 核心运行链
 
@@ -43,12 +43,14 @@ Maintainer
 
 ## 3. 依赖方向与边界
 
-结合旧 `docs/02-requirements/reference-srs/04-architecture.md` 与当前代码，当前边界可归纳为：
+结合旧 `docs/archive/reference-srs/04-architecture.md` 与当前代码，当前边界可归纳为：
 
 - Modules 应优先依赖 SDK / Contracts 暴露的稳定契约
 - Core 负责治理与编排，不负责业务语义
 - SDK 应保持可独立发布，不应反向绑死 Core 内部实现
+- 仓内 `modules/` 当前只保留占位说明；真实模块发现来自应用数据目录和开发链接
 - 当前仍存在一处未闭环偏差：真实业务站点 E2E 尚未回放，发布层面的最终确认仍需单独完成
+
 ## 4. 当前最重要的架构事实
 
 - Root package 的真实桌面入口已经迁移到 `src/ui/app.py`
@@ -77,10 +79,10 @@ Maintainer
 
 ## 6. 参考深度文档
 
-- 旧 SRS：`docs/02-requirements/reference-srs/`
-- 旧技术设计：`docs/03-solution/reference-design/`
-- 旧测试设计：`docs/05-quality/reference-tests/`
-- SDK 细节：`docs/03-solution/reference-sdk/`
+- 旧 SRS：`docs/archive/reference-srs/`
+- 旧技术设计：`docs/archive/reference-design/`
+- 旧测试设计：`docs/archive/reference-tests/`
+- SDK 细节：`docs/archive/reference-sdk/`
 
 这些文档在需要深挖某一模块时按需读取，不作为当前阶段的唯一事实源。
 

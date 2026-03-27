@@ -1,18 +1,18 @@
 # 设计与实现一致性审查
 
-**项目名称：** 蛛行演略（crawler4j）  
-**文档状态：** 已批准  
-**负责人：** 当前仓库维护者  
-**主要读者：** Tech Lead | Dev | QA | 发布负责人  
-**上游输入：** `docs/03-solution/reference-design/` | `docs/02-requirements/reference-srs/` | 当前代码 | 当前命令验证结果  
-**下游输出：** `.factory/workitems/` | `.factory/memory/current-state.md`  
-**关联 ID：** `TASK-008`, `TASK-003`, `TASK-009`, `CR-003`  
-**最后更新：** 2026-03-26  
+**项目名称：** 蛛行演略（crawler4j）
+**文档状态：** 已批准
+**负责人：** 当前仓库维护者
+**主要读者：** Tech Lead | Dev | QA | 发布负责人
+**上游输入：** `docs/archive/reference-design/` | `docs/archive/reference-srs/` | 当前代码 | 当前命令验证结果
+**下游输出：** `.factory/workitems/` | `.factory/memory/current-state.md`
+**关联 ID：** `TASK-008`, `TASK-003`, `TASK-009`, `CR-003`
+**最后更新：** 2026-03-26
 
 ## 1. 审查范围与方法
 
 - 审查范围：MMS、ATM/Task Engine、Debug Session、模块外部安装链路、质量门。
-- 对照输入：`docs/02-requirements/reference-srs/05-framework-core/05-1-module-management.md`、`docs/03-solution/reference-design/module-03-module-management.md`、`docs/03-solution/reference-design/design-strategy-config-v2.md`、`docs/03-solution/reference-design/model-debug-session.md`、`docs/03-solution/reference-design/design-job-task-engine.md`。
+- 对照输入：`docs/archive/reference-srs/05-framework-core/05-1-module-management.md`、`docs/archive/reference-design/module-03-module-management.md`、`docs/archive/reference-design/design-strategy-config-v2.md`、`docs/archive/reference-design/model-debug-session.md`、`docs/archive/reference-design/design-job-task-engine.md`。
 - 证据来源：源码静态核对、`uv` 命令验证、隔离 smoke、现有单测与集成测试文件。
 
 ## 2. 已满足或基本满足的设计点

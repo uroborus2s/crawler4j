@@ -1,13 +1,13 @@
 # 部署与运行说明
 
-**项目名称：** 蛛行演略（crawler4j）  
-**文档状态：** 已批准  
-**负责人：** 当前仓库维护者  
-**主要读者：** 维护者 | 发布负责人 | Dev  
-**上游输入：** `docs/03-solution/technical-selection.md` | 本地验证结果  
-**下游输出：** `docs/08-handover/user-guide.md` | 后续运维文档  
-**关联 ID：** `OPS-001`, `OPS-002`, `OPS-003`, `REQ-001`, `REQ-003`, `REQ-004`  
-**最后更新：** 2026-03-26  
+**项目名称：** 蛛行演略（crawler4j）
+**文档状态：** 已批准
+**负责人：** 当前仓库维护者
+**主要读者：** 维护者 | 发布负责人 | Dev
+**上游输入：** `docs/03-solution/technical-selection.md` | 本地验证结果
+**下游输出：** `docs/project-process/core-maintainer-guide.md` | `docs/08-handover/user-guide.md` | 后续运维文档
+**关联 ID：** `OPS-001`, `OPS-002`, `OPS-003`, `REQ-001`, `REQ-003`, `REQ-004`
+**最后更新：** 2026-03-26
 
 ## 1. 环境准备
 

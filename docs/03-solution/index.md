@@ -8,6 +8,8 @@
 2. 系统架构
 3. 模块边界
 4. 接口与契约设计
-5. reference architecture
-6. reference design
-7. reference sdk
+
+补充说明：
+
+- 旧架构设计、旧 SDK 说明和专题设计稿已移动到 `docs/archive/`。
+- 当前方案解释默认只看本目录；需要追历史细节时再按需回读归档。

@@ -59,13 +59,13 @@
 
 当前正式测试结论以本文件为准。旧专题测试设计继续保留为详细参考：
 
-- `docs/05-quality/reference-tests/01-comprehensive-test-design.md`
-- `docs/05-quality/reference-tests/test-01-rem.md`
-- `docs/05-quality/reference-tests/test-02-tsm.md`
-- `docs/05-quality/reference-tests/test-03-mms.md`
-- `docs/05-quality/reference-tests/test-04-persistence.md`
-- `docs/05-quality/reference-tests/test-05-sdk.md`
-- `docs/05-quality/reference-tests/test-06-ui.md`
+- `docs/archive/reference-tests/01-comprehensive-test-design.md`
+- `docs/archive/reference-tests/test-01-rem.md`
+- `docs/archive/reference-tests/test-02-tsm.md`
+- `docs/archive/reference-tests/test-03-mms.md`
+- `docs/archive/reference-tests/test-04-persistence.md`
+- `docs/archive/reference-tests/test-05-sdk.md`
+- `docs/archive/reference-tests/test-06-ui.md`
 
 当旧测试设计与当前代码或当前验证结果冲突时，以当前代码、已验证命令和本文件为准。
 

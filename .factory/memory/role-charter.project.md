@@ -13,12 +13,12 @@
 
 ### backend-engineer
 - 负责：后端代码、测试、PR
-- 优先读取：technical-selection.md、backend-design.md、api-design.md、TASK-*
+- 优先读取：technical-selection.md、system-architecture.md、module-boundaries.md、api-design.md、TASK-*
 - 交付要求：只改自己负责的产物，并在交接时说明输入、输出、未决问题、下一步。
 
 ### frontend-engineer
 - 负责：前端代码、测试、PR
-- 优先读取：technical-selection.md、ux-ui-design.md、api-design.md、TASK-*
+- 优先读取：technical-selection.md、system-architecture.md、api-design.md、TASK-*
 - 交付要求：只改自己负责的产物，并在交接时说明输入、输出、未决问题、下一步。
 
 ### documentation-librarian

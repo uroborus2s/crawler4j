@@ -68,5 +68,5 @@ TaskFlow 的核心能力拆解：
 
 对于具体工作流（如 `ctrip_crawl`），建议在 Modules 章节按模板编写：
 
-- 模板：`docs/02-requirements/reference-srs/templates/feature.md`
+- 模板：`docs/archive/reference-srs/templates/feature.md`
 - 必备内容：工作流图（可用 mermaid）、子任务清单、循环/终止条件、失败分支与重试策略、可恢复点（如有）。

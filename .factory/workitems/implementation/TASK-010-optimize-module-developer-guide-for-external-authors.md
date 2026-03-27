@@ -18,6 +18,7 @@
 
 ## 完成情况
 
-- 已重写 `docs/08-handover/module-developer-guide.md`，按外部模块作者真实工作流重组为“脚手架 -> 契约 -> DevLink 调试 -> zip 安装验收”
+- 已重写 `docs/08-handover/module-developer-guide/`，按外部模块作者真实工作流重组为“脚手架 -> 契约 -> DevLink 调试 -> zip 安装验收”
+- 已补充 `docs/model-development/index.md` 作为独立阅读入口，避免与 Core 项目过程文档混读
 - 已明确当前真实约束：应用内正式安装只支持 zip，模块项目依赖不会被宿主应用自动安装，只有 `DevLink` 作业允许 IDE 调试
 - 已以当前仓库真实链路为依据补齐脚手架命令、模块入口契约、调试入口条件、打包结构与验收清单

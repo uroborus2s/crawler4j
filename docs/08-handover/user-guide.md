@@ -1,48 +1,43 @@
-# 接手与日常使用指南
+# 接手入口
 
-**项目名称：** 蛛行演略（crawler4j）  
-**文档状态：** 已批准  
-**负责人：** 当前仓库维护者  
-**主要读者：** 新维护者 | 开发 | QA  
-**上游输入：** `docs/07-operations/deployment-guide.md` | `.factory/memory/project-index.md`  
-**下游输出：** 后续交接文档与管理员手册  
-**关联 ID：** `DOC-001`, `DOC-002`, `REQ-005`  
-**最后更新：** 2026-03-26  
+**项目名称：** 蛛行演略（crawler4j）
+**文档状态：** 已批准
+**负责人：** 当前仓库维护者
+**主要读者：** 新维护者 | Core 开发 | 模块开发者
+**上游输入：** `docs/project-process/core-maintainer-guide.md` | `docs/08-handover/module-developer-guide/index.md`
+**下游输出：** 后续交接文档与角色阅读路径
+**关联 ID：** `DOC-001`, `DOC-002`, `REQ-005`
+**最后更新：** 2026-03-28
 
-## 1. 先看什么
+## 1. 你应该去哪里
 
-1. `AGENTS.md` 或 `GEMINI.md`
-2. `.factory/project.json`
-3. `.factory/memory/current-state.md`
-4. `docs/01-discovery/current-state-analysis.md`
-5. `docs/04-delivery/task-breakdown.md`
+### Core 维护者
 
-## 2. 常用命令
+请先读：
 
-```bash
-uv sync
-uv run start
-uv run pytest -q
-uv run python -m src.ui.app
-uv run python -m crawler4j_sdk.cli.commands --help
-```
+1. [项目过程文档总览](../project-process/index.md)
+2. [Core 接手与日常维护](../project-process/core-maintainer-guide.md)
+3. [当前真实状态分析](../01-discovery/current-state-analysis.md)
+4. [实施方案](../04-delivery/implementation-plan.md)
+5. [质量门与文档导航规则](../05-quality/quality-gates.md)
 
-## 3. 你当前最该记住的事实
+### 模块开发者
 
-- 测试、UI smoke、root/sdk/contracts build 都能通过
-- 根应用 `start` 脚本与打包 spec 已修复
-- `ctrip` 模块完整工作流已恢复基础运行时兼容，但真实站点 E2E 仍待单独回放
-- 根应用工作区版本、运行时镜像与最近正式 tag 的关系已经统一并写入发布文档
-- 当前工厂阶段是 `IMPLEMENTATION`
+请直接读 [Model 开发指南入口](../model-development/index.md)。
 
-## 4. 下一步怎么推进
+### 需要旧用户 / 运维说明的人
 
-- 模块开发者指南已经完成当前轮优化，可直接用于外部模块作者开发、调试与安装验收
-- `TASK-005` 已完成；当前默认质量门与文档导航规则见 `docs/05-quality/quality-gates.md`
-- 当前下一步更适合转向 `ctrip` 真实站点 E2E 回放或发布收口
+旧 Quick Start、旧配置说明、旧部署说明已迁入 [历史归档](../archive/reference-user-guide/index.md)。
 
-## 5. 变更记录
+## 2. 当前结构说明
+
+- Core 团队的正式过程文档已经集中到 `docs/project-process/` 作为入口。
+- 模块开发主指南通过 `docs/model-development/index.md` 独立暴露，章节正文仍承载于 `docs/08-handover/module-developer-guide/`。
+- 历史参考统一放在 `docs/archive/`，不再作为默认事实入口。
+
+## 3. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-03-28 | 改为跨角色接手入口，并将 Core 过程文档与模块开发指南拆分 | Codex |
 | 2026-03-26 | 初始接手指南 | Codex |

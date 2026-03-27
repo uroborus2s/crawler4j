@@ -62,8 +62,9 @@
 
 ## 5. 文档状态
 
-- 当前 `docs/` 已重组为单一 Markdown 文档体系。
-- 历史 SRS、设计、测试、用户指南、SDK 与模块开发文档，已并入编号目录下的 `reference-*` 子目录。
+- 当前 `docs/` 已重组为单一 Markdown 文档体系，并在阅读入口上拆为“项目过程文档”和“Model 开发指南”两大部分。
+- 当前编号文档、`docs/project-process/index.md`、`docs/model-development/index.md` 和 `docs/traceability/` 共同构成正式入口。
+- 历史 SRS、设计、测试、用户指南、SDK 与模块开发辅助资料已移动到 `docs/archive/`。
 - 本仓不再承担独立静态文档站构建职责。
 - 旧文档仍比代码更全，但并非所有内容都可以直接视为当前事实源，需要以代码和本地验证结果校正。
 

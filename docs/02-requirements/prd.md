@@ -59,10 +59,10 @@
 
 - 优先级：P0
 - 描述：MMS、ATM、REM、TSM 必须能按模块契约运行任务与工作流。
-- 用户故事：作为最终使用者，我希望内置模块可以执行其声明的工作流，以便完成自动化任务。
+- 用户故事：作为最终使用者或模块作者，我希望外部安装模块或 DevLink 模块可以执行其声明的工作流，以便完成自动化任务与真实调试。
 - 前置条件：模块目录包含 `module.yaml` 与对应实现
 - 业务规则：模块不应依赖已删除的旧路径
-- 依赖项：`modules/`, `src/core/mms/`, `src/core/atm/`
+- 依赖项：`modules/README.md`, `src/core/mms/`, `src/core/atm/`, `src/core/debug/`
 - 排除范围：不要求本次新增模块
 
 验收标准：
@@ -93,7 +93,7 @@
 - 用户故事：作为发布负责人，我希望所有发布信号一致，以便能判断当前到底发布了什么。
 - 前置条件：存在统一的版本事实源与 release 说明
 - 业务规则：构建成功不等于可运行，必须补充入口和 smoke 验证
-- 依赖项：`pyproject.toml`, `src/__version__.py`, Git tag, `docs/08-handover/reference-user-guide/build-release.md`
+- 依赖项：`pyproject.toml`, `src/__version__.py`, Git tag, `docs/06-release/version-governance.md`, `docs/06-release/release-notes.md`
 - 排除范围：不要求本次直接上线新版本
 
 验收标准：
@@ -132,8 +132,8 @@
 
 ### `NFR-003` 质量门
 
-- 指标：`pytest`、文档构建、构建产物验证应稳定通过
-- 约束：lint 需收敛为可执行规则，不能长期漂移
+- 指标：`pytest`、文档入口核对、构建产物验证应稳定通过
+- 约束：lint 与文档导航都需收敛为可执行规则，不能长期漂移
 - 验证方式：`uv run pytest -q`, `uv run python scripts/smoke_test_ui.py`, `uv run ruff check .`
 
 ### `NFR-004` 可维护性
@@ -154,7 +154,7 @@
 ### 风险
 
 - 根项目发布入口失真，当前 wheel 可构建但脚本不可运行
-- `ctrip` 完整业务工作流尚未从旧 `src.automation.*` 依赖中迁移完毕
+- `ctrip` 真实站点完整业务 E2E 尚未回放
 - 现有 lint 失败表明代码与脚本质量边界没有稳定定义
 
 ### 假设

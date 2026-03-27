@@ -7,4 +7,8 @@
 1. 产品需求文档（PRD）
 2. 需求分析
 3. 需求校验
-4. reference srs
+
+补充说明：
+
+- 历史 SRS 细节已移动到 `docs/archive/reference-srs/`。
+- 当前需求事实默认以本目录和代码实现为准。
