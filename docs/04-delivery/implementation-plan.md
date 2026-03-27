@@ -1,6 +1,6 @@
 # 实施方案
 
-**项目名称：** crawler4j  
+**项目名称：** 蛛行演略（crawler4j）  
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 技术负责人 | 开发 | QA | 发布负责人  
@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | Wave 1 | `TASK-002` | `BUG-001` | 统一入口与打包 smoke | 已完成：root script、UI smoke、PyInstaller build 已对齐 |
 | Wave 2 | `TASK-006` | 文档专题树审计 | 统一当前人类文档入口 | 已完成：文档地图与旧专题定位已明确 |
-| Wave 3 | `TASK-007` | `/Users/uroborus/PythonProject/ctrip_crawler`、`BUG-002`、`TASK-003` 相关事实 | 内置模块外部化与外部安装模块模式切换 | 已完成：Core 可通过外部安装链路发现并运行目标模块，不再保留重复内置实现 |
+| Wave 3 | `TASK-007` | 外部 ctrip 模块项目、`BUG-002`、`TASK-003` 相关事实 | 内置模块外部化与外部安装模块模式切换 | 已完成：Core 可通过外部安装链路发现并运行目标模块，不再保留重复内置实现 |
 | Wave 4 | `TASK-008` | 当前设计文档、代码、测试结果 | 设计实现一致性审查清单 | 已完成：`docs/05-quality/design-implementation-audit.md` 与新增缺陷/变更项已建立 |
 | Wave 5 | `TASK-009` | 当前 `docs/` 事实源 | 文档统一到单一 Markdown 树，并移除 MkDocs 职责 | 根 `docs/` 仅保留编号体系与参考分区，仓库不再包含 MkDocs 配置 |
 | Wave 6 | `TASK-010` | 外部模块开发链路、统一后的文档结构 | 外部模块开发者指南 | 已完成：指南已收敛到 DevLink 调试、zip 安装验收和真实运行约束 |

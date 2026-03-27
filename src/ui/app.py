@@ -31,7 +31,7 @@ def main():
     
     # 创建应用
     app = QApplication(sys.argv)
-    app.setApplicationName("Crawler4j")
+    app.setApplicationName("蛛行演略 · crawler4j")
     
     # 设置应用图标
     icon_path = get_resource_path("src/ui/assets/icon.jpg")

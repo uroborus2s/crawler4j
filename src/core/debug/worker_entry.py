@@ -129,7 +129,7 @@ async def main_async(config_path: str) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Crawler4j debug worker")
+    parser = argparse.ArgumentParser(description="蛛行演略（crawler4j） debug worker")
     parser.add_argument("config_path")
     args = parser.parse_args()
     raise SystemExit(asyncio.run(main_async(args.config_path)))

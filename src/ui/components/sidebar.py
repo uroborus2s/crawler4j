@@ -22,7 +22,7 @@ class Sidebar(QWidget):
         
         # --- Logo Area ---
         # (Placeholder for now)
-        logo_btn = QPushButton("✨ Crawler4j")
+        logo_btn = QPushButton("✨ 蛛行演略 · crawler4j")
         logo_btn.setStyleSheet("font-size: 18px; font-weight: bold; color: white; border: none; text-align: left; padding-left: 15px;")
         layout.addWidget(logo_btn)
         

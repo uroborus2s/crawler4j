@@ -48,7 +48,7 @@ class AboutDialog(QDialog):
 
     def _setup_window(self):
         """配置窗口属性。"""
-        self.setWindowTitle("关于 Crawler4j")
+        self.setWindowTitle("关于 蛛行演略")
         self.setMinimumSize(self.DIALOG_MIN_WIDTH, self.DIALOG_MIN_HEIGHT)
         self.setModal(True)
         self.setStyleSheet("""
@@ -92,7 +92,7 @@ class AboutDialog(QDialog):
         layout.addWidget(icon_container)
 
         # 应用名称
-        name_label = QLabel("🕷️ Crawler4j")
+        name_label = QLabel("🕷️ 蛛行演略 · crawler4j")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(name_label)
@@ -131,7 +131,7 @@ class AboutDialog(QDialog):
         layout.addStretch()
 
         # 版权信息
-        copyright_label = QLabel("© 2024-2026 Crawler4j Project")
+        copyright_label = QLabel("© 2024-2026 蛛行演略（crawler4j）项目组")
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         copyright_label.setStyleSheet("font-size: 12px; color: rgba(255, 255, 255, 0.5);")
         layout.addWidget(copyright_label)

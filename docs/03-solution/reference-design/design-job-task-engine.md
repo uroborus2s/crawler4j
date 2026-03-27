@@ -161,11 +161,11 @@ sequenceDiagram
 
 ### 5.2 UI 关闭与系统关机断电的影响
 
- Crawler4j 采用 **C/S 分离架构 (UI Host - Core Engine)** 配合 **SQLite ACID 级状态持久化**：
+ 蛛行演略（crawler4j）采用 **C/S 分离架构 (UI Host - Core Engine)** 配合 **SQLite ACID 级状态持久化**：
 
 ### 5.2 UI 关闭与系统关机断电的影响
 
- Crawler4j 采用 **C/S 分离架构 (UI Host - Core Engine)** 配合 **SQLite ACID 级状态持久化**：
+ 蛛行演略（crawler4j）采用 **C/S 分离架构 (UI Host - Core Engine)** 配合 **SQLite ACID 级状态持久化**：
 
 #### 场景 1：正常关闭 UI 界面 (Graceful Shutdown)
 根据爬虫业务特性，绝大多数采集任务应当是**明确的单次批处理生命周期**（而不是无限驻留的服务）。

@@ -2,7 +2,7 @@
 
 ## 1. 模块功能概述 (Module Overview)
 
-**模块管理系统 (Module Management System, MMS)** 负责管理 Crawler4j 生态中“业务插件 (Modules)”的全生命周期。其核心职责是将文件系统上的 **“标准模块包”** 加载为运行时可用的 **Registry Entry**，并提供配置管理、版本验证以及 UI 扩展的索引服务。它充当了系统内核 (Core) 与业务扩展 (Modules) 之间的“海关”，确保只有合法、兼容的模块才能进入系统。
+**模块管理系统 (Module Management System, MMS)** 负责管理蛛行演略（crawler4j）生态中“业务插件 (Modules)”的全生命周期。其核心职责是将文件系统上的 **“标准模块包”** 加载为运行时可用的 **Registry Entry**，并提供配置管理、版本验证以及 UI 扩展的索引服务。它充当了系统内核 (Core) 与业务扩展 (Modules) 之间的“海关”，确保只有合法、兼容的模块才能进入系统。
 
 ---
 

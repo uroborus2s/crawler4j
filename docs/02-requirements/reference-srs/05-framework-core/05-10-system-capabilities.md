@@ -24,7 +24,7 @@ Core 在加载模块时，MUST 校验模块声明的依赖版本：
 ### 4. UI 交互设计 (UI Design)
 - **全局显示 (Global Display)**:
   - **状态栏 (Status Bar)**: 主窗口底部右侧常驻显示当前版本号 `vX.Y.Z`。鼠标悬停提示 "Click to check for updates"。
-  - **标题栏 (Title Bar)**: (可选) 应用名称后跟随版本号，如 `Crawler4j v1.0.0`。
+  - **标题栏 (Title Bar)**: (可选) 应用名称后跟随版本号，如 `蛛行演略 · crawler4j v1.0.0`。
 
 - **关于弹窗 (About Dialog)**:
   - **布局**: 居中模态对话框（Modal）。
@@ -77,7 +77,7 @@ Framework Core 内置 OTA (Over-The-Air) 升级能力，确保用户能及时获
 
 - **重启确认 (Restart Confirmation)**:
   - **触发**: 下载完成且校验成功 (Verified) 后。
-  - **提示**: "Update is ready to install. Crawler4j helps to restart to apply changes."
+  - **提示**: "Update is ready to install. 蛛行演略 · crawler4j helps to restart to apply changes."
   - **操作**: [Restart & Install] (默认焦点)。
 
 ## 5.10.3 基础偏好设置 (Basic Preferences)

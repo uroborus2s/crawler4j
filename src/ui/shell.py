@@ -43,7 +43,7 @@ class StatusIndicator(QFrame):
         layout.setContentsMargins(20, 0, 20, 0)
         
         # 标题
-        title = QLabel("🕷️ Crawler4j")
+        title = QLabel("🕷️ 蛛行演略 · crawler4j")
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
         layout.addWidget(title)
         
@@ -209,7 +209,7 @@ class Shell(QMainWindow):
 
     
     def _setup_window(self):
-        self.setWindowTitle("Crawler4j")
+        self.setWindowTitle("蛛行演略 · crawler4j")
         self.setMinimumSize(1200, 800)
         self.setStyleSheet("""
             QMainWindow {

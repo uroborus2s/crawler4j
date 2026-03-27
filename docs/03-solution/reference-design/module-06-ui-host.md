@@ -2,7 +2,7 @@
 
 ## 1. 模块功能概述 (Module Overview)
 
-**UI Host** 是 Crawler4j 的桌面端主程序，基于 **PyQt6** 构建。它不仅是 Core 的管理控制台，更是一个**微前端容器 (Micro-frontend Host)**。它提供统一的 Shell（导航/菜单/状态栏），并根据模块定义动态加载“声明式 UI”或“编程式 Widget”，实现业务与界面的解耦。
+**UI Host** 是蛛行演略（crawler4j）的桌面端主程序，基于 **PyQt6** 构建。它不仅是 Core 的管理控制台，更是一个**微前端容器 (Micro-frontend Host)**。它提供统一的 Shell（导航/菜单/状态栏），并根据模块定义动态加载“声明式 UI”或“编程式 Widget”，实现业务与界面的解耦。
 
 ---
 

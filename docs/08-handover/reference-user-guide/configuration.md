@@ -1,6 +1,6 @@
 # 策略配置详解 (Configuration)
 
-Crawler4j 的核心强大之处在于其灵活的 **TSM (Task Strategy Management)** 系统。通过配置不同的策略 (`TaskStrategy`)，您可以控制任务在何时、何地以及如何运行。
+蛛行演略（crawler4j）的核心强大之处在于其灵活的 **TSM (Task Strategy Management)** 系统。通过配置不同的策略 (`TaskStrategy`)，您可以控制任务在何时、何地以及如何运行。
 
 ## 📝 策略模型概览
 

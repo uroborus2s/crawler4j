@@ -10,5 +10,17 @@
   状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
 - `TASK-005-normalize-lint-and-docs-gates` TASK-005 收敛 lint 与 docs gate
   状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
+- `TASK-006-unify-legacy-docs-into-current-human-doc-system` TASK-006 统一旧文档到当前人类文档体系
+  状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
+- `TASK-007-externalize-builtin-modules-and-switch-to-dev-link-mode` TASK-007 删除内部组件并切换到外部安装模块模式
+  状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
+- `TASK-008-audit-design-vs-implementation-and-list-gaps` TASK-008 审查设计与开发实现的一致性并输出问题清单
+  状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
+- `TASK-009-unify-docs-and-remove-mkdocs` TASK-009 统一 `docs/` 文档体系并移除 MkDocs 静态站职责
+  状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
 - `TASK-010-optimize-module-developer-guide-for-external-authors` TASK-010 重做模块开发者指南
+  状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
+- `TASK-011-mms-settings-store-and-module-state-persistence` TASK-011 建立 MMS settings store 与模块状态持久化
+  状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
+- `TASK-012-mms-trust-gate-and-custom-ui-loading` TASK-012 补齐 MMS trust gate 与自定义页面加载
   状态：DONE | 负责人：未知 | 预估：未知 | 关联：无

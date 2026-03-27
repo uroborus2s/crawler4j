@@ -2,7 +2,7 @@
 
 ## 3.1 用户角色与场景分析 (User Roles & Scenarios)
 
-在对系统功能进行拆解前，我们首先明确 Crawler4j 的三类核心用户及其关键诉求。
+在对系统功能进行拆解前，我们首先明确蛛行演略（crawler4j）的三类核心用户及其关键诉求。
 
 | 用户角色 | 典型称谓 | 核心诉求 | 典型场景 |
 | :--- | :--- | :--- | :--- |
@@ -109,14 +109,14 @@ graph TD
 
 ## 3.5 交互设计与详细视觉规格 (Detailed UI/UX Specifications)
 
-本节详细定义 Crawler4j 桌面端应用的每一个核心界面、交互逻辑与视觉反馈。设计原则为**信息密度适中、操作直观、状态透明**。界面语言强制为**中文**。
+本节详细定义蛛行演略（crawler4j）桌面端应用的每一个核心界面、交互逻辑与视觉反馈。设计原则为**信息密度适中、操作直观、状态透明**。界面语言强制为**中文**。
 
 ### 3.5.1 全局框架 (Global Shell)
 
 #### [布局设计]
 ```
 +----------------------------------------------------------------------------------+
-| [Logo] Crawler4j     [全局搜索: 任务ID/模块名...]      [帮助] [通知(2)] [用户]   |
+| [Logo] 蛛行演略 · crawler4j     [全局搜索: 任务ID/模块名...]      [帮助] [通知(2)] [用户]   |
 +----------------------+-----------------------------------------------------------+
 | [侧边栏导航]         | [面包屑: 首页 > 任务管理 > 任务详情 T-20260101-001]       |
 |                      |                                                           |
@@ -379,7 +379,7 @@ graph TD
 #### [UI-02] 用户登录页 (Login)
 *   **布局**: 左右分栏。左侧为插画/Banner，右侧为登录表单。
 *   **表单元素**:
-    1.  `Header`: "欢迎使用 Crawler4j"。
+    1.  `Header`: "欢迎使用蛛行演略（crawler4j）"。
     2.  `UsernameInput`: 输入框，Placeholder="请输入用户名/邮箱"，图标: User。
     3.  `PasswordInput`: 密码框，Placeholder="请输入密码"，图标: Lock，右侧附带 `EyeIcon` (显/隐密码)。
     4.  `RememberMeCheckbox`: 复选框 "记住我"。
@@ -500,13 +500,13 @@ graph TD
 #### [UI-17] 关于页面
 *   **Center Content**:
     - 大型 Logo。
-    - 此处显示版本号 "Crawler4j v1.0.0"。
+    - 此处显示版本号 "蛛行演略 · crawler4j v1.0.0"。
     - `CheckUpdateBtn`: [ 检查更新 ] -> "当前已是最新版本"。
 *   **Links**:
     - [官方文档](https://docs.crawler4j.org)
     - [GitHub 仓库](https://github.com/uroborus/crawler4j)
     - [报告问题](mailto:support@crawler4j.org)
-*   **Footer**: "Copyright © 2026 Crawler4j Team. All Rights Reserved."
+*   **Footer**: "Copyright © 2026 蛛行演略（crawler4j）Team. All Rights Reserved."
 
 ---
 

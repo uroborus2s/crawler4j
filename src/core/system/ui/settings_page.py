@@ -436,7 +436,7 @@ class SettingsPage(QWidget):
         service = get_version_service()
         build_info = service.get_build_info()
 
-        name_label = QLabel("🕷️ Crawler4j")
+        name_label = QLabel("🕷️ 蛛行演略 · crawler4j")
         name_label.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
         card_layout.addWidget(name_label)
 
@@ -704,4 +704,3 @@ class SettingsPage(QWidget):
 
         if requires_restart:
             self.restart_bar.show()
-

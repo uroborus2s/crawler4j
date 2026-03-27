@@ -1,6 +1,6 @@
-# Crawler4j
+# 蛛行演略（crawler4j）
 
-**Crawler4j** 是一个基于 Python 的自动化监控与任务执行平台，采用**微内核 + SDK + 插件**架构，支持动态加载和并发执行自动化任务。
+**蛛行演略**（英文名：`crawler4j`）是一个基于 Python 的自动化监控与任务执行平台，采用**微内核 + SDK + 插件**架构，支持动态加载和并发执行自动化任务。
 
 [![Python](https://img.shields.io/badge/python-3.12+-green)](https://www.python.org/)
 
@@ -20,7 +20,7 @@
 
 ## 🏗️ 架构概览
 
-Crawler4j 采用 **Core + Modules** 架构，将基础设施与业务逻辑分离。
+蛛行演略（crawler4j）采用 **Core + Modules** 架构，将基础设施与业务逻辑分离。
 
 ```mermaid
 graph TD

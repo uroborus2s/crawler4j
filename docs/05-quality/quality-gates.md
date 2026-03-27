@@ -1,6 +1,6 @@
 # 质量门与文档导航规则
 
-**项目名称：** crawler4j  
+**项目名称：** 蛛行演略（crawler4j）  
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** Tech Lead | Dev | QA | 发布负责人  
@@ -46,7 +46,9 @@
 
 ## 4. 文档导航规则
 
-- `docs/00-governance/` 到 `docs/08-handover/` 与 `docs/traceability/` 是当前正式人类文档体系
+- `docs/00-governance/` 到 `docs/09-evolution/` 与 `docs/traceability/` 是当前正式人类文档体系
+- 任何包含 Markdown 页面的人类文档目录，都必须提供自己的 `index.md`
+- `.obsidian/` 和纯资产目录不属于正式文档入口要求范围
 - `reference-*` 子目录属于同一棵文档树中的详细参考层，不是平行控制面
 - 冲突时，以代码、已验证命令结果和当前编号文档为准
 - `.factory/` 记录工厂控制面状态；`docs/` 负责面向人的正式说明

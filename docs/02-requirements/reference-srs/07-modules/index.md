@@ -1,11 +1,11 @@
-# 第 7 章 系统三：Modules（任务模块体系）
+# 07 modules概览
 
-## 7.1 需求概述
+本目录收纳与“07 modules”相关的页面和子目录。
 
-- 每个模块自包含前端-服务-存储栈；仅通过 SDK 与 Core 交互
+建议阅读顺序：
 
-## 7.2 章节导航
-
-- 模块通用规范
-- 模块模板
-- 内置业务模块（Ctrip 等）
+1. 7.1 模块通用规范 (General Module Specification)
+2. 7.2 模块规格说明书模板 (Module Specification Template)
+3. 7.3 Ctrip 模块 (Ctrip Module)
+4. 7.4 其他模块（预留）
+5. 7.5 Modules 附录

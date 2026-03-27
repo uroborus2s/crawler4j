@@ -1,34 +1,31 @@
 # 当前状态
 
-- 当前模式：Default
+- 当前模式：未知
 - 当前阶段：IMPLEMENTATION
-- 活跃任务：0
-- 活跃变更：0
-- 活跃缺陷：0
+- 活跃任务：12
+- 活跃变更：3
+- 活跃缺陷：5
 - 活跃 PR：0
 
 - 角色目录总数：9
-- 当前阶段主要角色：项目协调者、需求分析师、解决方案架构师、UX/UI 设计师、后端工程师、前端工程师、测试工程师、发布经理、文档与记忆管理员
+- 当前阶段主要角色：项目协调者、后端工程师、前端工程师、测试工程师、文档与记忆管理员
 
-- 当前技术画像：自定义技术画像
-- 技术画像预设：custom
-- 关键工程规则数：0
+- 当前技术画像：Crawler4j Model 项目画像
+- 技术画像预设：crawler4j-model
+- 关键工程规则数：5
 - 设计交付物数：0
 
 ## 最近条目
 
-- 任务：`TASK-011`、`TASK-012` 已完成
-- 变更：当前无活跃变更，`CR-003` 已关闭
-- 缺陷：无当前活跃缺陷，已收敛为治理项与后续增强项
+- 任务：TASK-010-optimize-module-developer-guide-for-external-authors、TASK-011-mms-settings-store-and-module-state-persistence、TASK-012-mms-trust-gate-and-custom-ui-loading
+- 变更：CR-001-version-and-release-governance-alignment、CR-002-quality-gate-and-docs-navigation-alignment、CR-003-mms-settings-and-ui-extension-compliance
+- 文档：已通过山海工枢 `factory-docs-index-refresh` 重建 `docs/index.md`；根索引现负责全站目录树与页面权限，子目录 `index.md` 仅保留正文概览
+- 缺陷：BUG-003-pyqt-runtime-blocked-by-system-policy、BUG-004-zip-upgrade-leaves-stale-files、BUG-005-hybrid-acquisition-mode-declared-but-rejected
 
 ## 下一步建议
 
-- `TASK-005` 已完成，当前默认质量门已具备可复验规则
-- 当前 `docs/` 已是单一 Markdown 文档树，不再依赖 MkDocs 或外部文档中心
-- `uv run pytest -q` 与 `uv run python scripts/smoke_test_ui.py` 当前均已恢复通过
-- `uv run ruff check .` 当前已通过；默认 gate 不再把历史 `manual/debug/verify/analyze` 脚本计入阻塞范围
-- 当前模块开发者指南已按外部作者真实链路重写，覆盖脚手架、DevLink 调试、zip 安装验收与运行时依赖约束
-- `crawler4j-sdk` 的 `init-model` 现已默认进入初始化向导，并自动生成 `.gitignore`、`.python-version`、执行 `git init` 与 `uv sync`
-- 当前版本治理已收口：根应用工作区版本与运行时镜像统一为 `0.1.2.dev20260326`，最近正式发布为 `v0.1.1`
-- `CR-003` 已关闭：MMS settings store、模块状态持久化、trust gate 与自定义页面加载均已落地
-- 当前编号任务主线已完成，下一步更适合转向真实站点 E2E 回放或发布收口
+- 检查任务人天估算是否真实合理，仅在必要时再细化到 0.5 人天精度
+- 若进入设计或实施阶段，先确认 `docs/03-solution/technical-selection.md` 已明确框架、模块、后台范围和编码规则
+- 若 UX/UI 需要可视化评审，优先登记真实设计交付物而不是只写文字
+- 若工作项进入收尾，确认关联 PR 已完成评审并合并
+- 阶段切换前先更新正式文档，再刷新 `/.factory/memory/` 压缩记忆

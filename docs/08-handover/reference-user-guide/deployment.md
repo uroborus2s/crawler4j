@@ -3,7 +3,7 @@
 > 本文档当前保留为旧专题详细参考。
 > 其中涉及 MkDocs 文档站的命令已失效，当前仓库仅保留 `docs/` Markdown 文档树。
 
-本节介绍如何将 Crawler4j 构建为可分发的安装包（.whl, .exe, .app）。
+本节介绍如何将蛛行演略（crawler4j）构建为可分发的安装包（.whl, .exe, .app）。
 
 ## 📦 Python 包构建 (.whl)
 

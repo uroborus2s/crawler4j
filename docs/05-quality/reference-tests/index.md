@@ -1,11 +1,13 @@
-# 测试设计 (Test Design)
+# reference tests概览
 
-> 本目录现在定位为“旧专题详细参考层”。
-> 当前正式测试入口请优先阅读：
-> [测试计划](../05-quality/test-plan.md) 与
-> [文档索引](../traceability/document-index.md)。
+本目录收纳与“reference tests”相关的页面和子目录。
 
-此处存放整体测试策略、测试计划与自动化测试架构文档.
+建议阅读顺序：
 
-## 索引
-- 暂无文档
+1. 综合测试设计文档 (Comprehensive Test Design Document)
+2. 测试设计文档：[Module-01] 运行时环境管理 (REM)
+3. 测试设计文档：[Module-02] 任务策略管理 (TSM)
+4. 测试设计文档：[Module-03] 模块管理系统 (MMS)
+5. 测试设计文档：[Module-04] 数据持久化层 (Persistence)
+6. 测试设计文档：[Module-05] SDK 核心契约 (SDK)
+7. 测试设计文档：[Module-06] UI 宿主程序 (UI Host)

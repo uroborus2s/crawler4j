@@ -2,7 +2,7 @@
 
 ## 2.1 背景与问题域
 
-Crawler4j 面向“桌面端自动化任务运行平台（Automation Runtime）”场景：
+蛛行演略（crawler4j）面向“桌面端自动化任务运行平台（Automation Runtime）”场景：
 
 - 系统需要在本地/桌面端稳定运行多个自动化任务（TaskScript）与工作流（TaskFlow），并提供 GUI/CLI 的可观测与可运维能力。
 - 任务执行依赖“执行环境（Execution Environment）”，执行环境 **不局限于浏览器**：

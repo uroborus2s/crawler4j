@@ -1,73 +1,80 @@
 # 技术选型与工程规则
 
-**项目名称：** crawler4j  
-**负责人：** 当前仓库维护者  
-**主要读者：** 架构 | 开发 | QA | 维护者  
-**上游输入：** `docs/02-requirements/prd.md` | `docs/02-requirements/requirements-analysis.md`  
-**下游输出：** `system-architecture.md` | `module-boundaries.md` | `api-design.md` | `docs/05-quality/test-plan.md`  
-**最后更新：** 2026-03-26  
+- 文档状态：就绪
+- 当前阶段：DESIGN
+- 最近更新：2026-03-28 00:47:22
+- 负责人：AI 软件工厂
+- 技术画像：Crawler4j Model 项目画像
+- 技术栈：python + crawler4j sdk cli + model/module project
+- 预设：crawler4j-model
+- 备注：移除固定版本并清理旧预设命令
 
-## 1. 技术画像摘要
+## 技术画像摘要
 
-- 语言：Python 3.12
-- 项目管理：`uv`
-- 构建后端：Hatchling
-- GUI：PyQt6 + qasync
-- 浏览器自动化：Playwright
-- 网络与异步：aiohttp, httpx, asyncio
-- 数据：SQLAlchemy, Alembic, SQLite 风格持久化
-- 调度：APScheduler
-- 文档：仓库内 Markdown 文档树
-- 打包：PyInstaller
-- 测试：pytest, pytest-asyncio, pytest-qt
-- Lint：ruff
+适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml` 契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。
 
-## 2. 选型目标
+## 必须落地的项目范围
 
-- 维持桌面端可交付的自动化运行平台
-- 保持 SDK 与 Contracts 作为独立可分发子包
-- 统一使用 `uv` 执行安装、测试、构建与文档命令
-- 在不重写系统的前提下，先把当前运行链路校正到可验证状态
+- Crawler4j 标准模块项目
+- Crawler4j Core 模块开发与验证
 
-## 3. 必选模块
+## 必装/必选模块
 
-- Core 桌面应用：`src/`
-- 外部模块安装位：运行时应用数据目录中的外部 zip 模块
-- SDK：`crawler4j_sdk/`
-- Contracts：`crawler4j_contracts/`
-- 工厂控制面：`.factory/`
+- Python 3.12+
+- uv
+- crawler4j-sdk CLI
+- module.yaml
+- TaskScript / TaskFlow
+- DevLink / ATM 调试链路
 
-## 4. 工程规则
+## 编码与工程规则
 
-- 所有 Python 命令统一通过 `uv` 运行。
-- 当前真实 UI 入口为 `src.ui.app:main`；在 `BUG-001` 关闭前，不得把 `pyproject.toml` 的 `start` 脚本视为事实源。
-- 当前版本治理已按 `docs/06-release/version-governance.md` 收口；不得再把 Git tag、工作区版本和子包版本混为同一条版本线。
-- `pytest`、默认 `ruff` gate、UI smoke、源码 build 已纳入当前基线验证；详细规则见 `docs/05-quality/quality-gates.md`。
-- 仓库内已不再保留真实内置业务模块；对 `ctrip` 的功能性改动应优先落在外部模块仓与兼容运行时上。
+- 创建或补齐模块骨架时优先使用 `crawler4j init-model`、`crawler4j new`、`crawler4j add-workflow`、`crawler4j add-ui`，不要先手写脚手架。
+- 模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。
+- 新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。
+- 调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。
+- 改动 SDK CLI、模板、模块契约或 Core 集成行为时，同时更新模块开发文档与回归测试。
 
-## 5. 当前推荐命令
+## 管理后台要求
 
-```bash
-uv sync
-uv run pytest -q
-uv build --out-dir /tmp/crawler4j-build-check
-cd crawler4j_sdk && uv build --out-dir /tmp/crawler4j-sdk-build-check
-cd crawler4j_contracts && uv build --out-dir /tmp/crawler4j-contracts-build-check
-uv run python -m crawler4j_sdk.cli.commands --help
-uv run python -m src.ui.app
-```
+- 若当前项目不需要后台，请明确说明。
 
-## 6. 同步要求
+## 强制技能
 
-- 进入实现前必须先读本文件与 `.factory/memory/current-state.md`
-- 技术栈、入口、版本、质量门发生变化时，必须同步更新：
-  - `docs/03-solution/`
-  - `docs/05-quality/test-plan.md`
-  - `docs/06-release/release-notes.md`
-  - `.factory/memory/tech-stack.summary.md`
+- crawler4j-model-project
+- python-uv-project
+- tdd-workflow
 
-## 7. 变更记录
+## 初始化与安装动作
 
-| 日期 | 变更内容 | 变更人 |
-|---|---|---|
-| 2026-03-26 | 基于当前仓库事实建立技术画像 | Codex |
+- 优先执行 `uvx --from crawler4j-sdk crawler4j init-model <module_name>` 创建模块项目，默认使用 PyPI 最新发布版本；脚本化场景加 `--defaults --no-git --no-install`。
+- 进入模块项目后优先执行 `uv run crawler4j new <task_name>`、`uv run crawler4j add-workflow <workflow_name>`、`uv run crawler4j add-ui`。
+- 在 crawler4j Core 源码仓验证本地 CLI 时，优先执行 `uv run python -m crawler4j_sdk.cli.commands --help`。
+
+## 设计/开发/Gate 同步要求
+
+- 进入 IMPLEMENTATION 前，解决方案架构师、后端工程师和前端工程师必须先阅读本文件。
+- 技术选型、模块清单或后台范围变化后，同步更新 `module-boundaries.md`、`backend-design.md`、`api-design.md`、`test-plan.md`、`deployment-guide.md`、`user-guide.md` 和 `.factory/memory/tech-stack.summary.md`。
+- 任何涉及该技术画像的 TASK/CR/BUG 在创建或变更时，都应在关联项或说明中引用相关设计条目。
+- PR 评审时需检查代码实现、依赖安装、后台范围和文档同步是否与本文件一致。
+
+## 参考资料
+
+- skills/crawler4j-model-project/SKILL.md
+- skills/crawler4j-model-project/references/cli-workflow.md
+- skills/crawler4j-model-project/references/module-structure.md
+- skills/crawler4j-model-project/references/core-integration.md
+
+## 角色强制技能
+
+- solution-architect：crawler4j-model-project、python-uv-project
+- backend-engineer：crawler4j-model-project、python-uv-project、tdd-workflow
+- frontend-engineer：crawler4j-model-project
+- qa-engineer：crawler4j-model-project、python-uv-project、tdd-workflow
+
+## 版本记录
+
+- 2026-03-28 00:29:23: `Crawler4j Model 项目画像` | 负责人：AI 软件工厂 | 备注：启用 crawler4j model 专用 skill
+- 2026-03-28 00:36:15: `Crawler4j Model 项目画像` | 负责人：AI 软件工厂 | 备注：修复预设合并后补写强制 skill
+- 2026-03-28 00:42:01: `Crawler4j Model 项目画像` | 负责人：AI 软件工厂 | 备注：改为默认使用 PyPI 最新 crawler4j-sdk
+- 2026-03-28 00:47:22: `Crawler4j Model 项目画像` | 负责人：AI 软件工厂 | 备注：移除固定版本并清理旧预设命令

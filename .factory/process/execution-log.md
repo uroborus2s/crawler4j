@@ -20,3 +20,15 @@
 | 2026-03-26 | Split `CR-003` into `TASK-011` / `TASK-012`, completed the settings-store and module-state persistence slice, and left trust-gate/custom-page loading as the next implementation step | Completed |
 | 2026-03-26 | Completed `TASK-012` and closed `CR-003`: added trust-gate/allowlist enforcement, real `ui:*` page loading, and safe degradation for blocked or failed module UI | Completed |
 | 2026-03-26 | Upgraded `crawler4j-sdk init-model` into a full interactive bootstrap flow: it now collects initial configuration, writes `.gitignore` / `.python-version`, and auto-runs `git init` + `uv sync` by default | Completed |
+| 2026-03-27 | Audited `docs/` against the software-factory structure, added missing stage/reference directory index pages, introduced `docs/09-evolution/`, and refreshed the document index and `.factory` doc map | Completed |
+| 2026-03-27 | Filled missing `.factory/memory/motivation-state.md` and `.factory/memory/autonomy-rules.md`, and refreshed project/role compressed entry files to match the current implementation stage | Completed |
+- 2026-03-27: 刷新 docs-stratego 目录索引，负责人：Codex。
+- 2026-03-28: 更新技术画像 `Crawler4j Model 项目画像`，负责人：AI 软件工厂。
+- 2026-03-28: 生成项目压缩入口文档并刷新 `AGENTS.md` / `GEMINI.md`，负责人：AI 软件工厂，备注：enable-crawler4j-model-skill。
+- 2026-03-28: 更新技术画像 `Crawler4j Model 项目画像`，负责人：AI 软件工厂。
+- 2026-03-28: 生成项目压缩入口文档并刷新 `AGENTS.md` / `GEMINI.md`，负责人：AI 软件工厂，备注：refresh-after-crawler4j-skill-merge-fix。
+- 2026-03-28: 生成项目压缩入口文档并刷新 `AGENTS.md` / `GEMINI.md`，负责人：AI 软件工厂，备注：refresh-after-unpinning-crawler4j-sdk。
+- 2026-03-28: 更新技术画像 `Crawler4j Model 项目画像`，负责人：AI 软件工厂。
+- 2026-03-28: 生成项目压缩入口文档并刷新 `AGENTS.md` / `GEMINI.md`，负责人：AI 软件工厂，备注：refresh-after-clearing-pinned-version-command。
+- 2026-03-28: 更新技术画像 `Crawler4j Model 项目画像`，负责人：AI 软件工厂。
+- 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。

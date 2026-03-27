@@ -3,9 +3,9 @@
 > 本文档当前保留为旧专题详细参考。
 > 其中涉及 MkDocs 文档站的内容仅作为历史记录保留，当前仓库已移除静态文档站职责。
 > 当前正式发布与运行入口请优先阅读：
-> [发布说明](../06-release/release-notes.md)、
-> [部署与运行说明](../07-operations/deployment-guide.md)、
-> [文档索引](../traceability/document-index.md)。
+> [发布说明](../../06-release/release-notes.md)、
+> [部署与运行说明](../../07-operations/deployment-guide.md)、
+> [文档索引](../../traceability/document-index.md)。
 
 本指南面向**核心开发者**和**运维人员**，详细介绍 Core 应用、SDK 开发包以及历史发布流程中的构建做法。
 
