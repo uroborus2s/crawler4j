@@ -18,7 +18,7 @@
    - `.factory/memory/`
 2. 文档类变更至少同步：
    - 对应目录 `index.md`
-   - `docs/traceability/document-index.md`
+   - `docs/04-project-development/10-traceability/document-index.md`
    - 相关 `.factory/memory/` 状态或映射文件
 
 ## 校验规则

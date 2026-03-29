@@ -32,3 +32,9 @@
 - 2026-03-28: 生成项目压缩入口文档并刷新 `AGENTS.md` / `GEMINI.md`，负责人：AI 软件工厂，备注：refresh-after-clearing-pinned-version-command。
 - 2026-03-28: 更新技术画像 `Crawler4j Model 项目画像`，负责人：AI 软件工厂。
 - 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。
+- 2026-03-28: 完成 docs 结构重构迁移，负责人：Codex。
+- 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。
+- 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。
+- 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。
+- 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。
+- 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。

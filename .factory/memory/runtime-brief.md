@@ -1,6 +1,6 @@
 # 项目压缩运行卡
 
-- 生成时间：2026-03-28 00:47:19
+- 生成时间：2026-03-28 18:01:44
 - 负责人：AI 软件工厂
 - 项目：crawler4j
 - 当前阶段：IMPLEMENTATION
@@ -13,7 +13,7 @@
 - 最近发布包：无
 - 最近交接包：无
 - 最近快照：无
-- 备注：refresh-after-clearing-pinned-version-command；已通过山海工枢 `factory-docs-index-refresh` 刷新 `docs/index.md` 与目录概览页；当前文档入口已拆分为 `项目过程文档` 与 `Model 开发指南`
+- 备注：refresh-after-clearing-pinned-version-command；已完成 docs 四大模块结构迁移并刷新 `docs/index.md` 与目录概览页；`docs/project-process/` 与 `docs/model-development/` 已退出正式入口；第三部分开发者指南各级概览页标题已统一为中文
 
 ## AI 最小读取顺序
 
@@ -26,11 +26,13 @@
 
 ## 当前阶段核心文档
 
-- `docs/project-process/index.md`
-- `docs/04-delivery/implementation-plan.md`
-- `docs/03-solution/technical-selection.md`
-- `docs/03-solution/system-architecture.md`
-- `docs/03-solution/api-design.md`
+- `docs/01-getting-started/document-map.md`
+- `docs/03-developer-guide/index.md`
+- `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md`
+- `docs/04-project-development/05-development-process/implementation-plan.md`
+- `docs/04-project-development/04-design/technical-selection.md`
+- `docs/04-project-development/04-design/system-architecture.md`
+- `docs/04-project-development/04-design/api-design.md`
 
 ## 必守规则
 
@@ -39,7 +41,7 @@
 - 任何已接受变更都要同步代码、文档、测试、`.factory/memory/`。
 - 遇到阻塞、空转或质量漂移时，优先执行 `factory-dispatch recovery`。
 - 发现问题时优先做模式级修复，再把有效做法沉淀到 `evolution-baseline.md`。
-- 实现前优先读取 `docs/03-solution/technical-selection.md`。
+- 实现前优先读取 `docs/04-project-development/04-design/technical-selection.md`。
 - 任务单位是人天，最小精度 0.5，但不是默认拆分步长。
 
 ## 当前推荐动作

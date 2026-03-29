@@ -126,4 +126,5 @@ site/
 
 .tmphome
 .VSCodeCounter
-docs/.obsidian/
+**/.obsidian/
+.vault-nickname
