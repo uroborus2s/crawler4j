@@ -2,7 +2,7 @@
 
 **项目名称：** 蛛行演略（crawler4j）
 **负责人：** 当前仓库维护者
-**最后更新：** 2026-03-28
+**最后更新：** 2026-03-30
 
 ## 1. 当前正式文档结构
 
@@ -10,8 +10,8 @@
 
 | 模块 | 作用 | 主要读者 |
 |---|---|---|
-| `docs/01-getting-started/` | 项目概览、文档地图和入门路径 | 新维护者 / 协作者 |
-| `docs/02-user-guide/` | 接手入口和协作者说明 | 新维护者 / 协作者 |
+| `docs/01-getting-started/` | 项目概览、快速开始、文档地图和入门路径 | 新维护者 / 协作者 |
+| `docs/02-user-guide/` | 接手入口、安装、配置和使用说明 | 新维护者 / 协作者 |
 | `docs/03-developer-guide/` | 开发者指南；在本项目中即 module 开发指南 | 模块开发者 / 做模块集成的 Core 成员 |
 | `docs/04-project-development/` | 治理、需求、设计、计划、测试、发布、运维和追踪等正式内部文档 | Tech Lead / Dev / QA / 发布 |
 
@@ -20,8 +20,13 @@
 | 目录/文档 | 作用 | 主要读者 |
 |---|---|---|
 | `docs/index.md` | 全站目录树、页面路径和访问权限的唯一声明入口 | 全体协作者 |
+| `docs/01-getting-started/project-overview.md` | 说明项目定位、当前组成与进入方式 | 新维护者 / 协作者 |
+| `docs/01-getting-started/quick-start.md` | 提供最小启动步骤、常用命令和继续阅读路径 | 新维护者 / 协作者 |
 | `docs/01-getting-started/document-map.md` | 四大模块职责边界与推荐阅读顺序 | 新维护者 / 协作者 |
 | `docs/02-user-guide/user-guide.md` | 跨角色接手入口 | 新维护者 / 协作者 |
+| `docs/02-user-guide/installation.md` | 宿主安装方式、应用数据目录与安装校验 | 宿主使用者 / 协作者 |
+| `docs/02-user-guide/configuration.md` | 系统设置、模块设置与执行配置说明 | 宿主使用者 / 协作者 |
+| `docs/02-user-guide/usage.md` | 页面导航、正式安装与 DevLink 使用路径 | 宿主使用者 / 协作者 |
 | `docs/03-developer-guide/index.md` | 开发者指南总览；即 module 开发指南入口 | 模块开发者 |
 | `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md` | Core 接手、日常维护与同步规则 | Core 维护者 / 新成员 |
 | `docs/04-project-development/02-discovery/` | 输入证据、现状分析、旧文档收敛策略 | 架构 / 开发 / QA |
