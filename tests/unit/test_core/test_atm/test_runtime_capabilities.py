@@ -48,6 +48,17 @@ def test_db_capability_records_and_lock_are_generic(monkeypatch):
     assert third is True
 
 
+def test_db_capability_state_roundtrip(monkeypatch):
+    fake_kv = _FakeKV()
+    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
+
+    caps = build_runtime_capabilities("ctrip")
+
+    assert caps.db.set_state("ctrip:cursor", {"page": 2}, ttl=60) is True
+    assert caps.db.get_state("ctrip:cursor") == {"page": 2}
+    assert caps.db.exists_state("ctrip:cursor") is True
+
+
 def test_ip_pool_capability_picks_proxy_by_criteria(monkeypatch):
     pool = IPPool(id="p1", name="pool-1")
     pool.entries = [

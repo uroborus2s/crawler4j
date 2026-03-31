@@ -20,7 +20,7 @@
 ```bash
 python3 --version
 uv --version
-uvx --from crawler4j-sdk==1.0.3 crawler4j --help
+uvx --from crawler4j-sdk crawler4j --help
 ```
 
 如果这三个命令里有任何一个失败，请先不要往后走。对新手来说，最省时间的方式是：先把环境问题解决掉，再开始看模块开发步骤。
@@ -28,14 +28,14 @@ uvx --from crawler4j-sdk==1.0.3 crawler4j --help
 如果你打算长期开发模块，也可以把 CLI 装成工具：
 
 ```bash
-uv tool install crawler4j-sdk==1.0.3
+uv tool install crawler4j-sdk
 crawler4j --help
 ```
 
 如果你只想一次性使用，继续用 `uvx` 即可：
 
 ```bash
-uvx --from crawler4j-sdk==1.0.3 crawler4j --help
+uvx --from crawler4j-sdk crawler4j --help
 ```
 
 ## 三种常见调用方式
@@ -47,7 +47,7 @@ uvx --from crawler4j-sdk==1.0.3 crawler4j --help
 适合第一次体验或临时脚手架。
 
 ```bash
-uvx --from crawler4j-sdk==1.0.3 crawler4j init-model hotel_demo
+uvx --from crawler4j-sdk crawler4j init-model hotel_demo
 ```
 
 ### 方式 2：安装成全局工具
@@ -55,7 +55,7 @@ uvx --from crawler4j-sdk==1.0.3 crawler4j init-model hotel_demo
 适合长期维护多个模块项目。
 
 ```bash
-uv tool install crawler4j-sdk==1.0.3
+uv tool install crawler4j-sdk
 crawler4j init-model hotel_demo
 ```
 

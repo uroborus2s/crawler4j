@@ -8,10 +8,13 @@
     - TaskFlow: 工作流编排基类
     - TaskContext: 任务执行上下文
     - TaskResult: 任务结果模型
-    - DataService: 数据服务聚合类
+    - DatabaseCapability: Core 注入的数据能力接口
 
 非稳定扩展 (Non-stable):
     - extensions 模块: 业务特定扩展类型
+
+兼容导出 (Compatibility Alias):
+    - DataService: `TaskContext.db` 的历史命名，当前等价于最小数据能力接口
 
 安装:
     uv tool install crawler4j-sdk
@@ -58,9 +61,10 @@ __all__ = [
     "TaskFlow",
     "TaskContext",
     "TaskResult",
-    "DataService",
     "DatabaseCapability",
     "IPPoolCapability",
     "EnvOpsCapability",
     "UICapability",
+    # 兼容导出
+    "DataService",
 ]

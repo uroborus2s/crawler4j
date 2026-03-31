@@ -64,7 +64,9 @@ class MyTask(TaskScript):
 | `TaskFlow` | 工作流编排基类 |
 | `TaskContext` | 任务执行上下文 |
 | `TaskResult` | 任务结果模型 |
-| `DataService` | 数据服务聚合 |
+| `DatabaseCapability` | Core 注入的数据能力接口 |
+
+`DataService` 仍然保留为兼容命名，但新模块代码不应再把它理解成 `accounts / storage / tasks` 聚合服务。
 
 ### TaskScript 生命周期
 
@@ -86,6 +88,24 @@ on_init(ctx) → execute(ctx) → on_cleanup(ctx)
 | `ctx.run_subtask()` | 调用子任务 |
 | `ctx.should_stop()` | 检查停止标志 |
 | `ctx.screenshot()` | 截图 |
+| `ctx.db` | 模块数据查询/写入、轻量状态、幂等锁 |
+
+### `ctx.db` 当前真实边界
+
+当前模块只应通过 Core 注入的 `ctx.db` 使用数据能力，不应直接连接宿主数据库，也不应假设存在 ORM Session 或原生 SQLite 连接。
+
+稳定支持的方法只有：
+
+- `list_records(dataset)`
+- `replace_records(dataset, records)`
+- `acquire_lock(scope, key, ttl, owner=None)`
+- `release_lock(scope, key)`
+- `is_locked(scope, key)`
+- `get_state(key)`
+- `set_state(key, value, ttl=None)`
+- `exists_state(key)`
+
+如果你看到历史资料里出现 `ctx.db.storage`、`ctx.db.accounts` 或 `ctx.db.tasks`，请以当前代码和 `TaskContext.db` 的真实接口为准。
 
 ## CLI 命令
 

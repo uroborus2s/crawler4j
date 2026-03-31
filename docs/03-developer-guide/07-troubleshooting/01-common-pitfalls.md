@@ -144,6 +144,35 @@ module.yaml.name
 
 这六个点里只要有一个不一致，运行链就会断。
 
+## 11. 我想直接连宿主数据库，或者继续用旧 `DataService` 写法
+
+先停下来。当前正式约束不是这样。
+
+现在模块里真正稳定可用的数据接口只有 `ctx.db`，而且能力面只覆盖：
+
+1. 数据集查询
+2. 数据集写入
+3. 轻量状态
+4. 幂等锁
+
+如果你遇到的现象是：
+
+- 想拿 SQLite 连接但拿不到
+- 想写 `ctx.db.storage.state`
+- 想用 `ctx.db.accounts` / `ctx.db.tasks`
+
+那优先判断这是不是踩到了旧口径，而不是继续往业务代码里加私有适配。
+
+### 正确处理方式
+
+优先改成下面这组当前正式接口：
+
+- `ctx.db.list_records(...)`
+- `ctx.db.replace_records(...)`
+- `ctx.db.get_state(...)`
+- `ctx.db.set_state(...)`
+- `ctx.db.acquire_lock(...)`
+
 ## 最后给小白的一条建议
 
 排错时，尽量按“从外到内”的顺序查：

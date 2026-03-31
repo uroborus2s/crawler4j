@@ -126,3 +126,20 @@ sdk_version_range: ">=1.0.3"
 > 这是我代码写错了，还是我碰到了当前系统的既有限制？
 
 如果答案是后者，就不要用改业务代码的方式去“硬撞”它。应该先回到这页，确认自己是不是踩到了这里列出的约束。
+
+## 11. 模块的数据能力只能来自 `ctx.db`
+
+当前模块开发有一个明确工程边界：
+
+- 模块只能使用 Core 注入到 `TaskContext.db` 上的数据能力
+- 不能直接连接宿主数据库
+- 不能假设宿主会提供 ORM Session、原生 SQLite 连接或私有仓储对象
+
+当前正式支持的数据能力只包括：
+
+1. 数据集查询：`list_records(dataset)`
+2. 数据集写入：`replace_records(dataset, records)`
+3. 轻量状态：`get_state` / `set_state` / `exists_state`
+4. 幂等锁：`acquire_lock` / `release_lock` / `is_locked`
+
+如果你看到旧资料里还有 `DataService`、`ctx.db.storage`、`ctx.db.accounts` 这类说法，请优先以当前 `TaskContext.db` 的真实接口为准。对新模块来说，不要继续沿用旧抽象。

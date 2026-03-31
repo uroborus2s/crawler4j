@@ -141,6 +141,23 @@ ui_extension:
 
 可以把它理解成“宿主已经帮你准备好的一个标准表格页”，你只需要声明入口，不需要自己从头画页面。
 
+这条能力通常和下面这组调用一起出现：
+
+```python
+if ctx.ui is not None:
+    ctx.ui.declare_data_table("accounts", {
+        "title": "账号管理",
+        "dataset": "accounts",
+        "columns": ["id", "phone_number", "status"],
+    })
+
+if ctx.db is not None:
+    rows = ctx.db.list_records("accounts")
+    ctx.db.replace_records("accounts", rows)
+```
+
+也就是说，`core:data_table:<view_id>` 负责页面入口声明，真正的数据仍然来自 Core 注入的 `ctx.db`。
+
 ### 代码型 UI 页面
 
 ```yaml

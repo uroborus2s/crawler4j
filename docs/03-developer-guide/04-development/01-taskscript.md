@@ -104,6 +104,44 @@ class FetchHotelsTask(TaskScript):
 
 其它能力等你已经把主链跑通后再扩展，不要一开始就把所有接口都用上。
 
+## 写任务脚本时，数据能力应该怎么用
+
+如果你的任务脚本需要读写模块数据，不要自己去连数据库。
+当前正确做法只有一个：通过 Core 注入的 `ctx.db` 使用最小数据能力。
+
+也就是说，当前模块里允许依赖的数据能力只有：
+
+- `list_records(dataset)`：查询模块数据集
+- `replace_records(dataset, records)`：回写整个数据集
+- `get_state` / `set_state` / `exists_state`：保存轻量运行状态
+- `acquire_lock` / `release_lock` / `is_locked`：做幂等锁
+
+### 一个最小示例
+
+```python
+if ctx.db is not None:
+    records = ctx.db.list_records("orders")
+    cursor = ctx.db.get_state("hotel_demo:orders:cursor") or {"page": 1}
+
+    if ctx.db.acquire_lock("orders", "sync", ttl=60):
+        try:
+            records.append({"id": "o-1", "status": "new"})
+            ctx.db.replace_records("orders", records)
+            ctx.db.set_state("hotel_demo:orders:cursor", {"page": cursor["page"] + 1}, ttl=3600)
+        finally:
+            ctx.db.release_lock("orders", "sync")
+```
+
+### 为什么这里强调自己带命名空间
+
+当前 `get_state()` / `set_state()` 使用的是轻量状态键。
+为了避免不同模块或不同任务把键名撞在一起，建议你自己带上模块前缀，例如：
+
+- `hotel_demo:orders:cursor`
+- `ctrip:login:cookies`
+
+比起只写 `cursor`、`cookies` 这种泛名，前者更稳。
+
 ## 什么时候返回失败，什么时候抛异常
 
 建议遵守下面的分工：

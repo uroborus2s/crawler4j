@@ -52,6 +52,17 @@
 
 用于模块数据、运行态状态和简单互斥锁。
 
+这里有一个非常重要的边界：
+
+> 对模块开发者来说，`ctx.db` 就是当前正式的数据接口。不要绕过它直接连接宿主数据库。
+
+换句话说，当前模块开发能依赖的数据能力只有这一个最小面，不要继续假设：
+
+- ORM Session
+- 原生 SQLite 连接
+- 私有 Repository / DAO
+- 历史 `ctx.db.storage` / `ctx.db.accounts` / `ctx.db.tasks` 聚合对象
+
 | 方法 | 用途 |
 |---|---|
 | `list_records(dataset)` | 读取模块数据集 |
@@ -115,6 +126,41 @@ if ctx.ui is not None:
 ```
 
 不要写成“我觉得宿主应该有这个能力，所以直接调”。
+
+### `ctx.db` 最推荐的使用方式
+
+如果你准备在模块里用数据能力，建议默认遵守下面 3 条：
+
+1. 数据集名保持稳定，例如 `accounts`、`orders`、`tasks`
+2. 状态键自己带模块前缀，例如 `hotel_demo:orders:cursor`
+3. 写操作尽量幂等，先拿锁再写
+
+一个更接近真实开发的写法如下：
+
+```python
+if ctx.db is not None:
+    state_key = "hotel_demo:orders:cursor"
+    cursor = ctx.db.get_state(state_key) or {"page": 1}
+
+    if ctx.db.acquire_lock("orders", "sync", ttl=60, owner={"task": ctx.task_name}):
+        try:
+            records = ctx.db.list_records("orders")
+            records.append({"id": "o-1", "status": "pending"})
+            ctx.db.replace_records("orders", records)
+            ctx.db.set_state(state_key, {"page": cursor["page"] + 1}, ttl=3600)
+        finally:
+            ctx.db.release_lock("orders", "sync")
+```
+
+### 当前不建议怎么做
+
+不要把下面这些做法当成正式开发方式：
+
+- 在模块里直接 `import sqlite3` 去连宿主数据库
+- 从宿主代码里偷拿内部存储对象
+- 沿用历史资料里 `ctx.db.storage.state` 这类旧聚合写法
+
+这些写法要么不是当前稳定契约，要么会让模块和宿主内部实现强耦合。
 
 ## `run_subtask()` 的真实语义
 
