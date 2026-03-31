@@ -160,25 +160,59 @@ if ctx.db is not None:
 也就是说，`core:data_table:<view_id>` 负责页面入口声明，真正的数据仍然来自 Core 注入的 `ctx.db`。
 如果你的旧模块还在用 `ctx.db.accounts`、`ctx.db.tasks` 这类历史写法，先改到 `ctx.db` 最小接口，再继续接数据表页面。
 
-### 代码型 UI 页面
+### 代码型 UI 页面 (Micro App)
+
+当声明式 UI 无法满足需求（如需要实时图表、复杂的拖拽交互）时，你可以使用 `micro_app` 模式。
 
 ```yaml
 ui_extension:
   type: micro_app
   detail_menu:
-    - id: custom
-      icon: "🧩"
-      label: "自定义页"
-      entry: "ui:AccountConfigPage"
+    - id: dashboard
+      icon: "📊"
+      label: "实时面板"
+      entry: "ui:DashboardPage"
 ```
 
-要让这条路径真正工作，还必须同时满足：
+#### 1. 实现契约
+要在模块中实现代码型 UI，你必须在模块根目录创建 `ui.py`，并导出一个继承自 `QWidget` 的类：
 
-1. 模块里存在 `ui.py`
-2. `ui.py` 导出了对应的 `QWidget` 类
-3. 模块来源是 `DevLink` / 内置来源，或者模块名命中 `mms.ui.allowlist`
+```python
+# ui.py
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
-第一次开发模块时，如果你还没有把任务脚本、工作流和调试链路跑稳，不建议立刻走这条路径。
+class DashboardPage(QWidget):
+    def __init__(self, ctx, parent=None):
+        super().__init__(parent)
+        self.ctx = ctx  # Core 注入的 TaskContext
+
+        layout = QVBoxLayout(self)
+        self.label = QLabel("正在连接实时数据...")
+        layout.addWidget(self.label)
+
+    def refresh_data(self):
+        # 利用 ctx.db 读取最新状态并更新 UI
+        stats = self.ctx.db.get_state("sync_stats")
+        self.label.setText(f"已同步: {stats.get('count', 0)}")
+```
+
+#### 2. 注意事项
+*   **线程安全**：UI 在宿主主线程运行，耗时操作必须通过 `QThread` 或异步方式处理，严禁阻塞 UI 线程。
+*   **上下文共享**：UI 拿到的 `ctx` 与任务脚本拿到的 `ctx` 共享同一个后端存储，因此可以通过 `ctx.db` 实现 UI 与后台任务的准实时通信。
+
+---
+
+## 模块发布前自检清单 (Release Checklist)
+
+在打包 `.zip` 提交给用户或安装到正式环境前，请依次确认以下 6 项：
+
+1. **[ ] 目录契约**：模块目录名、`module.yaml.name` 和包名（`__init__.py` 所在目录）必须完全一致。
+2. **[ ] 版本范围**：`module.yaml` 中的 `sdk_version_range` 必须设置为 `>=2.0.0`。
+3. **[ ] 依赖孤立**：确保所有第三方库已在 `pyproject.toml` 中声明，且没有硬编码任何本地绝对路径。
+4. **[ ] 接口合规**：代码中已彻底删除 `DataService`、`ctx.db.storage` 等 1.x 时代的旧接口。
+5. **[ ] 停止响应**：长循环任务中是否已调用 `ctx.should_stop()` 检查停止信号？
+6. **[ ] 离线验证**：在未联网环境下，模块的基础导入逻辑（`import` 部分）是否能正常通过？
+
 
 ## 第一次开发模块时该怎么选
 
