@@ -89,6 +89,12 @@ mkdocs:
             - title: 4.4 Core 提供的能力清单
               path: 03-developer-guide/04-development/04-core-capabilities.md
               access: public
+            - title: 4.5 Core 注入能力 API 参考
+              path: 03-developer-guide/04-development/05-api-reference.md
+              access: public
+            - title: 4.6 模块开发最佳实践
+              path: 03-developer-guide/04-development/06-best-practices.md
+              access: public
         - title: 05 调试
           children:
             - title: 概览

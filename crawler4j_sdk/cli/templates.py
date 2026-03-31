@@ -83,83 +83,125 @@ packages = ["."]
 
 MODEL_PROJECT_README = '''# {display_name}
 
-这是一个完整的 Crawler4j 模块项目，包含：
+这是一个规范化的 Crawler4j 模块项目，采用分层架构设计：
 
-- `module.yaml` 模块清单
-- `tasks/` 任务脚本
-- `workflows/` 工作流
-- `config_schema.json` 配置 UI
-
-默认情况下，`init-model` 已经完成以下动作：
-
-- 生成 `.gitignore`
-- 初始化 Git 仓库
-- 执行 `uv sync`
-
-如果你在创建时显式跳过了安装或 Git 初始化，再手动补一次即可。
+- `module.yaml`: 模块清单与能力声明。
+- `tasks/`: [任务层] 原子操作脚本，负责具体页面交互或数据采集。
+- `workflows/`: [编排层] 业务逻辑流，负责串联多个任务。
+- `ui/`: [界面层] 包含 `config_schema.json` (声明式) 和代码型 UI 组件。
+- `data/`: [数据层] 包含数据模型定义 (`models.py`) 和 Schema。
 
 ## 常用命令
 
 ```bash
 # 创建任务脚本
-uv run crawler4j add
+uv run crawler4j add <name>
 
 # 创建工作流
-uv run crawler4j add-workflow sync_orders
+uv run crawler4j add-workflow <name>
 
-# 创建/补齐配置 UI
-uv run crawler4j add-ui
+# 创建数据模型
+uv run crawler4j add-data <name>
+
+# 创建代码型 UI 页面
+uv run crawler4j add-ui --type code
 ```
 
 ## 调试
 
-CLI 不再生成 `debug_runner.py`。当前调试主路径是由 Core 发起真实调试会话，再让 IDE 附加。
+在应用中把该目录注册为“开发链接”模块后，可在 ATM 中对关联作业发起任务调试。
+'''
 
-当模块已经被应用扫描，或已经注册为开发链接模块后，可以在 ATM 中对关联作业发起任务调试：
+MODEL_DATA_MODELS_TEMPLATE = '''"""数据模型: {display_name}
 
-1. 在 `任务监控` 里找到对应作业，点击 `🐞 调试`
-2. 确认调试参数
-3. 点击 `生成 VS Code 配置`
-4. 点击 `开始调试` 后，再从 VS Code 执行 `Attach to Crawler4j`
+{description}
+"""
+
+from typing import Any, Optional
+from pydantic import BaseModel, Field
+
+
+class {class_name}(BaseModel):
+    """{display_name} 模型"""
+    id: str = Field(..., description="唯一标识")
+    name: Optional[str] = Field(None, description="显示名称")
+    data: dict[str, Any] = Field(default_factory=dict, description="原始数据")
+'''
+
+MODEL_UI_PAGES_TEMPLATE = '''"""界面组件: {display_name}
+
+{description}
+"""
+
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
+from crawler4j_sdk import TaskContext
+
+
+class {class_name}(QWidget):
+    """{display_name} 页面"""
+
+    def __init__(self, ctx: TaskContext, parent=None):
+        super().__init__(parent)
+        self.ctx = ctx
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        self.label = QLabel(f"欢迎使用 {self.__class__.__name__}")
+        self.btn = QPushButton("刷新数据")
+        self.btn.clicked.connect(self.on_refresh)
+        
+        layout.addWidget(self.label)
+        layout.addWidget(self.btn)
+
+    def on_refresh(self):
+        self.ctx.logger.info("UI 请求刷新数据")
+        # 实现具体逻辑
 '''
 
 MODEL_MODULE_INIT = '''"""{display_name} 模块入口。"""
 
-from importlib import import_module
+import importlib
 from pathlib import Path
 from pkgutil import iter_modules
+from typing import Type, Dict
 
 from crawler4j_sdk import TaskContext, TaskFlow, TaskResult, TaskScript
 
 
 PACKAGE_ROOT = Path(__file__).parent
+MODULE_NAME = __name__
 DEFAULT_WORKFLOW = "{default_workflow}"
 
 
-def _load_registry(subpackage: str, base_cls: type) -> dict[str, type]:
-    registry: dict[str, type] = {{}}
+def _load_registry(subpackage: str, base_cls: type) -> Dict[str, type]:
+    registry: Dict[str, type] = {{}}
     package_dir = PACKAGE_ROOT / subpackage
     if not package_dir.exists():
         return registry
 
-    package_name = f"{{__name__}}.{{subpackage}}"
+    full_package_name = f"{{MODULE_NAME}}.{{subpackage}}"
     for module_info in iter_modules([str(package_dir)]):
         if module_info.name.startswith("_"):
             continue
-        module = import_module(f"{{package_name}}.{{module_info.name}}")
-        for attr_name in dir(module):
-            candidate = getattr(module, attr_name)
-            if isinstance(candidate, type) and issubclass(candidate, base_cls) and candidate is not base_cls:
-                key = getattr(candidate, "name", "") or module_info.name
-                registry[key] = candidate
+        try:
+            module = importlib.import_module(f"{{full_package_name}}.{{module_info.name}}")
+            for attr_name in dir(module):
+                candidate = getattr(module, attr_name)
+                if isinstance(candidate, type) and issubclass(candidate, base_cls) and candidate is not base_cls:
+                    key = getattr(candidate, "name", "") or module_info.name
+                    registry[key] = candidate
+        except Exception:
+            continue
     return registry
 
 
-TASK_SCRIPTS: dict[str, type[TaskScript]] = _load_registry("tasks", TaskScript)
-WORKFLOWS: dict[str, type[TaskFlow]] = _load_registry("workflows", TaskFlow)
+# 自动发现组件
+TASK_SCRIPTS: Dict[str, Type[TaskScript]] = _load_registry("tasks", TaskScript)
+WORKFLOWS: Dict[str, Type[TaskFlow]] = _load_registry("workflows", TaskFlow)
 
 
-async def _run_task_script(script_cls: type[TaskScript], ctx: TaskContext) -> TaskResult:
+async def _run_task_script(script_cls: Type[TaskScript], ctx: TaskContext) -> TaskResult:
     script = script_cls()
     await script.on_init(ctx)
     try:
@@ -175,7 +217,7 @@ async def _run_task_script(script_cls: type[TaskScript], ctx: TaskContext) -> Ta
     return TaskResult.ok(data=result)
 
 
-async def _run_task_flow(flow_cls: type[TaskFlow], ctx: TaskContext) -> TaskResult:
+async def _run_task_flow(flow_cls: Type[TaskFlow], ctx: TaskContext) -> TaskResult:
     flow = flow_cls()
     try:
         await flow.run(ctx)
@@ -188,11 +230,12 @@ async def _run_task_flow(flow_cls: type[TaskFlow], ctx: TaskContext) -> TaskResu
 
 async def _subtask_executor(task_name: str, ctx: TaskContext) -> TaskResult:
     if task_name not in TASK_SCRIPTS:
-        raise ValueError(f"Unknown subtask: {{task_name}}")
+        raise ValueError(f"未知子任务: {{task_name}}")
     return await _run_task_script(TASK_SCRIPTS[task_name], ctx)
 
 
 async def run(context: TaskContext) -> TaskResult:
+    """模块执行入口。"""
     workflow_name = context.get_config("workflow", DEFAULT_WORKFLOW)
 
     if workflow_name in WORKFLOWS:
@@ -203,52 +246,27 @@ async def run(context: TaskContext) -> TaskResult:
         return await _run_task_script(TASK_SCRIPTS[workflow_name], context)
 
     if DEFAULT_WORKFLOW and DEFAULT_WORKFLOW in WORKFLOWS:
-        context.logger.warning(
-            f"[{module_name}] Unknown workflow '{{workflow_name}}', fallback to '{{DEFAULT_WORKFLOW}}'."
-        )
         context._subtask_executor = _subtask_executor
         return await _run_task_flow(WORKFLOWS[DEFAULT_WORKFLOW], context)
 
-    raise ValueError(f"Unknown workflow or task: {{workflow_name}}")
+    raise ValueError(f"未找到对应的工作流或任务: {{workflow_name}}")
 
+
+# --- 生命周期 Hooks ---
 
 async def prepare_env(context: TaskContext):
-    creation_params = dict(context.get_config("creation_params", {{}}) or {{}})
-    if not creation_params:
-        return None
-    return {{"creation_params": creation_params}}
+    """环境准备 Hook。"""
+    return None
 
 
 async def init_env(context: TaskContext):
-    start_url = context.get_config("start_url")
-    if context.page and start_url:
-        await context.page.goto(start_url, wait_until="domcontentloaded")
-        context.logger.info(f"[{module_name}] init_env opened: {{start_url}}")
-
-
-async def before_run(context: TaskContext):
-    context.logger.info(f"[{module_name}] before_run")
-
-
-async def on_success(context: TaskContext, result):
-    context.logger.info(f"[{module_name}] on_success: {{result}}")
-
-
-async def on_failure(context: TaskContext, error: Exception):
-    context.logger.error(f"[{module_name}] on_failure: {{error}}")
-    if context.page:
-        try:
-            await context.screenshot("{module_name}_failure")
-        except Exception:
-            pass
-
-
-async def on_timeout(context: TaskContext):
-    context.logger.warning(f"[{module_name}] on_timeout")
+    """环境初始化 Hook。"""
+    pass
 
 
 async def on_cleanup(context: TaskContext):
-    context.logger.info(f"[{module_name}] on_cleanup")
+    """清理 Hook。"""
+    pass
 '''
 
 MODEL_MANIFEST_TEMPLATE = '''name: {module_name}
@@ -265,7 +283,7 @@ sdk_version_range: ">=2.0.0"
 
 MODEL_UI_SECTION = '''ui_extension:
   type: declarative
-  entry: config_schema.json
+  entry: ui/config_schema.json
   nav_item:
     icon: "🧩"
     label: "{display_name}配置"

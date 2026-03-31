@@ -56,9 +56,14 @@
 3. [01 概念与约束](../../03-developer-guide/01-concepts/index.md)
 4. [02 快速开始](../../03-developer-guide/02-quickstart/index.md)
 5. [3.2 `module.yaml` 清单契约](../../03-developer-guide/03-project-structure/02-module-manifest.md)
-6. [4.4 Core 提供的能力清单](../../03-developer-guide/04-development/04-core-capabilities.md)
-7. [05 调试](../../03-developer-guide/05-debugging/index.md)
-8. [06 交付与验收](../../03-developer-guide/06-delivery/index.md)
+6. [4.1 编写 TaskScript](../../03-developer-guide/04-development/01-taskscript.md)
+7. [4.2 编写 Workflow](../../03-developer-guide/04-development/02-workflow.md)
+8. [4.3 CLI 命令与 UI 配置](../../03-developer-guide/04-development/03-cli-and-ui.md)
+9. [4.4 Core 能力清单](../../03-developer-guide/04-development/04-core-capabilities.md)
+10. [4.5 Core 注入能力 API 参考](../../03-developer-guide/04-development/05-api-reference.md)
+11. [4.6 模块开发最佳实践](../../03-developer-guide/04-development/06-best-practices.md)
+12. [05 调试](../../03-developer-guide/05-debugging/index.md)
+13. [06 交付与验收](../../03-developer-guide/06-delivery/index.md)
 
 ## 4. 维护规则
 
