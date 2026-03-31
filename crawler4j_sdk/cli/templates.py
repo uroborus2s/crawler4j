@@ -70,7 +70,7 @@ version = "0.1.0"
 description = "{display_name} 模块项目"
 requires-python = ">={python_version}"
 dependencies = [
-    "crawler4j-sdk>=1.0.3",
+    "crawler4j-sdk>=2.0.0,<3.0.0",
 ]
 
 [build-system]
@@ -256,7 +256,7 @@ version: 1.0.0
 display_name: {display_name}
 description: {description}
 author: crawler4j
-sdk_version_range: ">=1.0.0"
+sdk_version_range: ">=2.0.0"
 {ui_section}workflows:
   - name: {workflow_name}
     display_name: {workflow_display_name}

@@ -115,7 +115,7 @@ class ModuleManifest:
     display_name: str = ""
     description: str = ""
     author: str = ""
-    sdk_version_range: str = ">=1.0.0"
+    sdk_version_range: str = ">=2.0.0"
     workflows: list[WorkflowInfo] = field(default_factory=list)
     ui_extension: UIExtensionInfo = field(default_factory=UIExtensionInfo)
     config_schema: dict[str, Any] = field(default_factory=dict)
@@ -214,7 +214,7 @@ class ModuleManifest:
             display_name=data.get("display_name", ""),
             description=data.get("description", ""),
             author=data.get("author", ""),
-            sdk_version_range=data.get("sdk_version_range", ">=1.0.0"),
+            sdk_version_range=data.get("sdk_version_range", ">=2.0.0"),
             workflows=workflows,
             ui_extension=ui_extension,
             config_schema=data.get("config_schema", {}),

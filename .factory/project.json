@@ -84,7 +84,7 @@
     "root_pyproject": "0.1.2.dev20260326",
     "runtime": "0.1.2.dev20260326",
     "git_tag_latest": "v0.1.1",
-    "sdk": "1.0.3",
+    "sdk": "2.0.0",
     "contracts": "1.0.1"
   },
   "entrypoints": {

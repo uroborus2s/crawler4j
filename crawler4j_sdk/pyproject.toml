@@ -1,6 +1,6 @@
 [project]
 name = "crawler4j-sdk"
-version = "1.0.3"
+version = "2.0.0"
 description = "Crawler4j Task Script SDK - 用于开发任务脚本的开发工具包"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,7 +23,6 @@ only-include = [
     "base.py",
     "cli",
     "context.py",
-    "db.py",
     "extensions.py",
     "py.typed",
     "result.py",

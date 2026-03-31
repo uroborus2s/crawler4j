@@ -10,11 +10,13 @@
     - TaskResult: 任务结果模型
     - DatabaseCapability: Core 注入的数据能力接口
 
+2.0.0 起的破坏性变更:
+    - 删除 DataService 兼容命名
+    - 删除旧的 `ctx.db.storage / accounts / tasks` 文档口径
+    - 模块必须直接使用 `TaskContext.db` 和 `DatabaseCapability`
+
 非稳定扩展 (Non-stable):
     - extensions 模块: 业务特定扩展类型
-
-兼容导出 (Compatibility Alias):
-    - DataService: `TaskContext.db` 的历史命名，当前等价于最小数据能力接口
 
 安装:
     uv tool install crawler4j-sdk
@@ -41,7 +43,6 @@ CLI 命令:
 """
 
 from crawler4j_sdk.base import TaskScript
-from crawler4j_sdk.db import DataService
 from crawler4j_sdk.workflow import TaskFlow
 from crawler4j_contracts import (
     DatabaseCapability,
@@ -52,7 +53,7 @@ from crawler4j_contracts import (
     UICapability,
 )
 
-__version__ = "1.0.3"
+__version__ = "2.0.0"
 
 # 稳定导出列表（同 MAJOR 版本内冻结）
 __all__ = [
@@ -65,6 +66,4 @@ __all__ = [
     "IPPoolCapability",
     "EnvOpsCapability",
     "UICapability",
-    # 兼容导出
-    "DataService",
 ]

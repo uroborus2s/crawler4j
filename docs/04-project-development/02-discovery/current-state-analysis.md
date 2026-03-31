@@ -7,7 +7,7 @@
 **上游输入：** `input.md` | 当前仓库代码与构建结果  
 **下游输出：** `docs/04-project-development/03-requirements/` | `.factory/memory/current-state.md` | 首批工作项  
 **关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `RISK-001`, `RISK-002`, `RISK-003`  
-**最后更新：** 2026-03-26  
+**最后更新：** 2026-03-31  
 
 ## 1. 项目形态
 
@@ -50,7 +50,7 @@
 | 根项目 `pyproject.toml` | `0.1.2.dev20260326` |
 | 运行时 `src/__version__.py` | `0.1.2.dev20260326` |
 | 最近正式 Git tag | `v0.1.1` |
-| SDK | `1.0.3` |
+| SDK | `2.0.0` |
 | Contracts | `1.0.1` |
 
 ### 4.2 最新已知发布结果
@@ -58,6 +58,7 @@
 - 最新已知正式 Git tag 为 `v0.1.1`，Tag 时间为 2026-01-03。
 - 根仓库中保留了 `dist/Crawler4j.app`、`dist/Crawler4j/`、`build/crawler4j/` 等历史打包产物。
 - SDK 与 Contracts 的 `dist/` 中保留了 `1.0.0`、`1.0.1`、`1.0.2`、`1.0.3` 等历史产物。
+- 当前 SDK 代码口径已经提升到 `2.0.0`，并删除了 `DataService` 兼容层；旧模块需要直接升级到 `ctx.db` 最小数据接口。
 - 当前工作区版本已统一为 `0.1.2.dev20260326`，并明确表示它领先于最新正式 tag `v0.1.1`。
 
 ## 5. 文档状态

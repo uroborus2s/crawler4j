@@ -79,7 +79,7 @@ Core 扫描与加载模块时，关键依据是：
 扫描器现在对版本范围的兼容性判断是简化实现，最可靠的是：
 
 ```yaml
-sdk_version_range: ">=1.0.3"
+sdk_version_range: ">=2.0.0"
 ```
 
 复杂表达式即使写出来，也不建议当成当前交付口径。
@@ -143,3 +143,12 @@ sdk_version_range: ">=1.0.3"
 4. 幂等锁：`acquire_lock` / `release_lock` / `is_locked`
 
 如果你看到旧资料里还有 `DataService`、`ctx.db.storage`、`ctx.db.accounts` 这类说法，请优先以当前 `TaskContext.db` 的真实接口为准。对新模块来说，不要继续沿用旧抽象。
+
+`crawler4j-sdk 2.0.0` 起，SDK 不再保留这些兼容名。
+
+如果你在维护旧模块，升级时要直接完成下面这些替换：
+
+1. 删除 `from crawler4j_sdk import DataService`
+2. 如需类型标注，改用 `DatabaseCapability`
+3. 把 `ctx.db.storage` / `ctx.db.accounts` / `ctx.db.tasks` 改成 `ctx.db` 最小接口
+4. 把 `module.yaml` 里的 `sdk_version_range` 更新到 `>=2.0.0`

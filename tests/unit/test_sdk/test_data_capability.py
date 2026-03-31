@@ -1,6 +1,9 @@
-"""SDK 数据能力契约测试。"""
+"""SDK 数据能力导出与契约测试。"""
 
-from crawler4j_sdk import DataService, DatabaseCapability, TaskContext
+import pytest
+
+import crawler4j_sdk
+from crawler4j_sdk import DatabaseCapability, TaskContext
 
 
 class _FakeDB:
@@ -44,17 +47,23 @@ class _FakeDB:
         return key in self._state
 
 
-def test_dataservice_is_compatibility_name_for_current_db_contract():
+def test_sdk_exports_database_capability_without_legacy_dataservice():
     fake_db = _FakeDB()
 
-    assert isinstance(fake_db, DataService)
     assert isinstance(fake_db, DatabaseCapability)
+    assert hasattr(crawler4j_sdk, "DatabaseCapability")
+    assert not hasattr(crawler4j_sdk, "DataService")
 
     ctx = TaskContext(env_id=1, task_name="demo", db=fake_db)
     assert ctx.db is fake_db
 
 
-def test_dataservice_supports_records_state_and_lock_roundtrip():
+def test_importing_removed_dataservice_raises_import_error():
+    with pytest.raises(ImportError):
+        exec("from crawler4j_sdk import DataService", {})
+
+
+def test_database_capability_supports_records_state_and_lock_roundtrip():
     fake_db = _FakeDB()
 
     assert fake_db.replace_records("orders", [{"id": "o-1"}]) is True

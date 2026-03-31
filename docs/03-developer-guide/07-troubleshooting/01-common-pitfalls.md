@@ -144,7 +144,7 @@ module.yaml.name
 
 这六个点里只要有一个不一致，运行链就会断。
 
-## 11. 我想直接连宿主数据库，或者继续用旧 `DataService` 写法
+## 11. 我想直接连宿主数据库，或者旧模块还在用已删除的 `DataService` 写法
 
 先停下来。当前正式约束不是这样。
 
@@ -172,6 +172,11 @@ module.yaml.name
 - `ctx.db.get_state(...)`
 - `ctx.db.set_state(...)`
 - `ctx.db.acquire_lock(...)`
+
+如果你在升级旧模块，再补两步：
+
+1. 删除 `DataService` 导入，必要时改成 `DatabaseCapability`
+2. 把 `module.yaml.sdk_version_range` 改成 `>=2.0.0`
 
 ## 最后给小白的一条建议
 

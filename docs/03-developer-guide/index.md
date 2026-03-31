@@ -1,6 +1,7 @@
 # 开发者指南概览
 
 本目录收纳 module 开发、调试、交付与排错等面向开发者的正式指南内容。
+当前内容以 `crawler4j-sdk 2.x` 为准，旧 `DataService` 和 `ctx.db.storage / accounts / tasks` 写法已移除；维护旧模块时，需要先按各章节要求完成升级。
 
 建议阅读顺序：
 

@@ -13,6 +13,7 @@ uv run crawler4j add-ui
 ```
 
 各命令的真实作用如下。
+当前 CLI 生成的新模块项目默认面向 `crawler4j-sdk 2.x`：模块项目依赖会落到 2.x，`module.yaml.sdk_version_range` 也会从 `>=2.0.0` 起步。
 
 如果你是第一次接触这些命令，可以把它们理解成“在标准模块项目上继续补结构的工具”，而不是“随便在哪个目录都能用的通用命令”。
 
@@ -157,6 +158,7 @@ if ctx.db is not None:
 ```
 
 也就是说，`core:data_table:<view_id>` 负责页面入口声明，真正的数据仍然来自 Core 注入的 `ctx.db`。
+如果你的旧模块还在用 `ctx.db.accounts`、`ctx.db.tasks` 这类历史写法，先改到 `ctx.db` 最小接口，再继续接数据表页面。
 
 ### 代码型 UI 页面
 

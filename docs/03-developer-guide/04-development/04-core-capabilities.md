@@ -61,7 +61,7 @@
 - ORM Session
 - 原生 SQLite 连接
 - 私有 Repository / DAO
-- 历史 `ctx.db.storage` / `ctx.db.accounts` / `ctx.db.tasks` 聚合对象
+- 已删除的历史 `ctx.db.storage` / `ctx.db.accounts` / `ctx.db.tasks` 聚合对象
 
 | 方法 | 用途 |
 |---|---|
@@ -73,6 +73,15 @@
 | `get_state(key)` | 读取运行态状态 |
 | `set_state(key, value, ttl=None)` | 写入运行态状态 |
 | `exists_state(key)` | 判断状态键是否存在 |
+
+### 从旧模块升级到当前口径时要直接替换什么
+
+当前没有兼容过渡层。升级旧模块时，直接按下面方式改：
+
+1. 删除 `DataService` 导入，类型标注改成 `DatabaseCapability` 或直接依赖 `ctx.db`
+2. 把 `ctx.db.storage.state` 改成 `get_state()` / `set_state()`
+3. 把历史账号、任务等聚合对象改成 `list_records()` / `replace_records()`
+4. 停止直接连接宿主数据库
 
 ### `ctx.ip_pool`
 

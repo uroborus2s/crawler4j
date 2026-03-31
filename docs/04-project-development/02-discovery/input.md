@@ -7,7 +7,7 @@
 **上游输入：** 当前仓库事实  
 **下游输出：** `current-state-analysis.md` | `prd.md` | `.factory/memory/current-state.md`  
 **关联 ID：** `BIZ-001`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`  
-**最后更新：** 2026-03-26  
+**最后更新：** 2026-03-31  
 
 ## 1. 盘点范围
 
@@ -25,7 +25,7 @@
 | 运行时代码 | `src/ui/app.py` | 实际 UI 启动入口在 `src.ui.app:main` |
 | 运行时版本 | `src/__version__.py` | 运行时版本镜像为 `0.1.2.dev20260326` |
 | 历史发布 | Git tag `v0.1.1` | 最新已知正式标签日期为 2026-01-03 |
-| SDK 包 | `crawler4j_sdk/pyproject.toml` | SDK 当前版本为 `1.0.3` |
+| SDK 包 | `crawler4j_sdk/pyproject.toml` | SDK 当前版本为 `2.0.0`，并已移除 `DataService` 兼容层 |
 | Contracts 包 | `crawler4j_contracts/pyproject.toml` | Contracts 当前版本为 `1.0.1` |
 | 文档体系 | `docs/` | 现已统一为仓库内 Markdown 文档树，不再依赖静态站构建 |
 | 模块运行时 | `src/automation/workflows/*`, `src/core/models/*` | 兼容层已恢复，`labor_workflow` 不再因旧导入缺失而退化 |

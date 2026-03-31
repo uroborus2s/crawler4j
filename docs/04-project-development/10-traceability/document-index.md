@@ -2,7 +2,7 @@
 
 **项目名称：** 蛛行演略（crawler4j）
 **负责人：** 当前仓库维护者
-**最后更新：** 2026-03-30
+**最后更新：** 2026-03-31
 
 ## 1. 当前正式文档结构
 
@@ -55,9 +55,10 @@
 2. [开发者指南总览](../../03-developer-guide/index.md)
 3. [01 概念与约束](../../03-developer-guide/01-concepts/index.md)
 4. [02 快速开始](../../03-developer-guide/02-quickstart/index.md)
-5. [4.4 Core 提供的能力清单](../../03-developer-guide/04-development/04-core-capabilities.md)
-6. [05 调试](../../03-developer-guide/05-debugging/index.md)
-7. [06 交付与验收](../../03-developer-guide/06-delivery/index.md)
+5. [3.2 `module.yaml` 清单契约](../../03-developer-guide/03-project-structure/02-module-manifest.md)
+6. [4.4 Core 提供的能力清单](../../03-developer-guide/04-development/04-core-capabilities.md)
+7. [05 调试](../../03-developer-guide/05-debugging/index.md)
+8. [06 交付与验收](../../03-developer-guide/06-delivery/index.md)
 
 ## 4. 维护规则
 

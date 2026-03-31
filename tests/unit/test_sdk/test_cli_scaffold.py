@@ -74,6 +74,7 @@ class TestModelScaffoldInit:
 
         manifest = _read_manifest(target)
         assert manifest["name"] == "demo_model"
+        assert manifest["sdk_version_range"] == ">=2.0.0"
         assert manifest["ui_extension"]["type"] == "declarative"
         assert manifest["ui_extension"]["entry"] == "config_schema.json"
         assert manifest["workflows"][0]["name"] == "main_workflow"
@@ -101,7 +102,7 @@ class TestModelScaffoldInit:
         dependencies = pyproject["project"]["dependencies"]
         assert "scripts" not in pyproject["project"]
         assert all("playwright" not in dependency for dependency in dependencies)
-        assert any("crawler4j-sdk" in dependency for dependency in dependencies)
+        assert "crawler4j-sdk>=2.0.0,<3.0.0" in dependencies
 
     def test_init_model_defaults_mode_does_not_prompt(self, model_args: Namespace, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr("builtins.input", lambda _: pytest.fail("defaults 模式不应触发交互输入"))

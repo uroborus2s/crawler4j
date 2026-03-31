@@ -13,7 +13,7 @@
 - 最近发布包：无
 - 最近交接包：无
 - 最近快照：无
-- 备注：refresh-after-clearing-pinned-version-command；已完成 docs 四大模块结构迁移并刷新 `docs/index.md` 与目录概览页；`docs/project-process/` 与 `docs/model-development/` 已退出正式入口；第三部分开发者指南各级概览页标题已统一为中文；已补齐 `docs/01-getting-started/` 与 `docs/02-user-guide/` 的占位说明页；已收口 SDK 数据能力口径，明确模块只能使用 Core 注入的 `ctx.db` 最小接口
+- 备注：refresh-after-clearing-pinned-version-command；已完成 docs 四大模块结构迁移并刷新 `docs/index.md` 与目录概览页；`docs/project-process/` 与 `docs/model-development/` 已退出正式入口；第三部分开发者指南各级概览页标题已统一为中文；已补齐 `docs/01-getting-started/` 与 `docs/02-user-guide/` 的占位说明页；SDK 当前代码口径已提升到 `2.0.0`，删除 `DataService` 兼容层，并明确模块只能使用 Core 注入的 `ctx.db` 最小接口
 
 ## AI 最小读取顺序
 

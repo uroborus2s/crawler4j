@@ -66,7 +66,16 @@ class MyTask(TaskScript):
 | `TaskResult` | 任务结果模型 |
 | `DatabaseCapability` | Core 注入的数据能力接口 |
 
-`DataService` 仍然保留为兼容命名，但新模块代码不应再把它理解成 `accounts / storage / tasks` 聚合服务。
+## 2.0.0 升级要求
+
+`crawler4j-sdk 2.0.0` 起，SDK 不再保留任何仅用于兼容旧模块的导出。
+
+升级现有模块时，至少完成下面 4 件事：
+
+- 删除 `from crawler4j_sdk import DataService`
+- 如需类型标注，改用 `DatabaseCapability`
+- 把 `ctx.db.storage`、`ctx.db.accounts`、`ctx.db.tasks` 改成 `ctx.db` 的最小能力接口
+- 停止直接连接宿主数据库，只通过 Core 注入的 `ctx.db` 读写数据
 
 ### TaskScript 生命周期
 
@@ -106,6 +115,7 @@ on_init(ctx) → execute(ctx) → on_cleanup(ctx)
 - `exists_state(key)`
 
 如果你看到历史资料里出现 `ctx.db.storage`、`ctx.db.accounts` 或 `ctx.db.tasks`，请以当前代码和 `TaskContext.db` 的真实接口为准。
+这些旧写法在 SDK 2.0.0 起不再作为兼容接口保留。
 
 ## CLI 命令
 

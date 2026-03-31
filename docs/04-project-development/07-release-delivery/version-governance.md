@@ -7,7 +7,7 @@
 **上游输入：** `pyproject.toml` | `src/__version__.py` | Git tag | 子包 `pyproject.toml`  
 **下游输出：** `release-notes.md` | `deployment-guide.md` | `.factory/project.json`  
 **关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `NFR-002`  
-**最后更新：** 2026-03-26  
+**最后更新：** 2026-03-31  
 
 ## 1. 规则
 
@@ -27,7 +27,7 @@
 | 根应用工作区版本 | `0.1.2.dev20260326` | 当前仓库 HEAD 的未发布开发版 |
 | 根应用运行时版本 | `0.1.2.dev20260326` | 与根 `pyproject.toml` 镜像一致 |
 | 最近正式发布 tag | `v0.1.1` | 最新已知正式发布 |
-| SDK | `1.0.3` | 当前已发布版本 |
+| SDK | `2.0.0` | 当前工作区 SDK 版本；该版本移除了 `DataService` 兼容层 |
 | Contracts | `1.0.1` | 当前已发布版本 |
 
 ## 3. 为什么这样定义
@@ -52,3 +52,4 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-03-26 | 建立根应用 / 运行时 / tag / SDK / Contracts 的统一版本治理规则 | Codex |
+| 2026-03-31 | SDK 当前口径提升到 `2.0.0`，移除 `DataService` 兼容层 | Codex |

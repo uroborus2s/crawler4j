@@ -108,6 +108,7 @@ class FetchHotelsTask(TaskScript):
 
 如果你的任务脚本需要读写模块数据，不要自己去连数据库。
 当前正确做法只有一个：通过 Core 注入的 `ctx.db` 使用最小数据能力。
+`crawler4j-sdk 2.0.0` 起，SDK 不再提供 `DataService` 兼容名，也不再保留旧聚合对象写法。
 
 也就是说，当前模块里允许依赖的数据能力只有：
 
@@ -141,6 +142,14 @@ if ctx.db is not None:
 - `ctrip:login:cookies`
 
 比起只写 `cursor`、`cookies` 这种泛名，前者更稳。
+
+### 从旧模块升级时先改什么
+
+如果你接手的是旧模块，先做下面这组直接替换，再继续写业务逻辑：
+
+1. 删除 `DataService` 导入
+2. 把 `ctx.db.storage.state` 改成 `ctx.db.get_state()` / `set_state()`
+3. 把旧账号、任务等聚合入口改成 `list_records()` / `replace_records()`
 
 ## 什么时候返回失败，什么时候抛异常
 

@@ -4,10 +4,12 @@
 
 本页默认你已经完成上一页的环境准备。
 
+本页以下示例以 `crawler4j-sdk 2.x` 为准；如果你在维护 1.x 时期的旧模块，先完成数据接口升级，再继续走新脚手架流程。
+
 ## 第 1 步：创建模块项目
 
 ```bash
-uvx --from crawler4j-sdk==1.0.3 crawler4j init-model hotel_demo
+uvx --from crawler4j-sdk crawler4j init-model hotel_demo
 cd hotel_demo
 ```
 
@@ -23,8 +25,14 @@ cd hotel_demo
 如果你是在脚本或 CI 中使用它，可以改成非交互方式：
 
 ```bash
-uvx --from crawler4j-sdk==1.0.3 crawler4j init-model hotel_demo --defaults --no-git --no-install
+uvx --from crawler4j-sdk crawler4j init-model hotel_demo --defaults --no-git --no-install
 ```
+
+如果你是在把旧模块升到当前口径，再继续下面步骤前先确认：
+
+1. 已删除 `DataService` 导入
+2. 已把旧 `ctx.db.storage / accounts / tasks` 写法改成 `ctx.db` 最小接口
+3. 已把 `module.yaml.sdk_version_range` 改到 `>=2.0.0`
 
 ### 这一步做完后你应该看到什么
 

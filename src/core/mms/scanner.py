@@ -23,7 +23,7 @@ from src.core.mms.models import (
 from src.utils.paths import get_builtin_modules_path, get_user_modules_path
 
 # SDK 版本（用于兼容性校验）
-CURRENT_SDK_VERSION = "1.0.3"
+CURRENT_SDK_VERSION = "2.0.0"
 
 # 忽略的目录
 IGNORED_DIRS = {"__pycache__", ".git", ".venv", "node_modules"}
