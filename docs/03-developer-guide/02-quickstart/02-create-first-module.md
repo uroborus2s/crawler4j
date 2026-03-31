@@ -49,25 +49,45 @@ uvx --from crawler4j-sdk crawler4j init-model hotel_demo --defaults --no-git --n
 ```bash
 uv run crawler4j new fetch_hotels
 uv run crawler4j add-workflow sync_hotels
-uv run crawler4j add-ui
-uv run crawler4j list
 ```
 
-执行完成后，至少应看到：
+## 第 2.5 步：编写你的第一个业务逻辑
 
-- `tasks/fetch_hotels.py`
-- `workflows/sync_hotels.py`
-- `config_schema.json`
-- `module.yaml` 里已经有工作流声明和 `ui_extension`
+打开 `tasks/fetch_hotels.py`，你会看到脚手架生成的模板。将其修改为以下符合 **SDK 2.0.0** 规范的简化示例：
 
-### 为什么这里要额外再补一个任务和一个工作流
+```python
+from crawler4j_sdk import TaskScript, TaskResult
 
-因为新手第一次看模板时，最容易分不清：
+class FetchHotelsTask(TaskScript):
+    """抓取酒店列表任务示例"""
+    
+    async def execute(self, ctx):
+        ctx.logger.info("开始模拟抓取酒店数据...")
+        
+        # 1. 从配置获取参数 (来自 module.yaml 或 UI 输入)
+        city = ctx.get_config("city", "shanghai")
+        
+        # 2. 模拟采集数据
+        hotels = [
+            {"id": "h1", "name": f"{city} 示例酒店 A", "price": 500},
+            {"id": "h2", "name": f"{city} 示例酒店 B", "price": 800},
+        ]
+        
+        # 3. 保存到模块数据集 (SDK 2.0.0 标准用法)
+        # 注意：不再使用 ctx.db.storage，直接使用 ctx.db
+        ctx.db.replace_records("hotels", hotels)
+        
+        # 4. 记录当前抓取状态（如下次翻页游标）
+        ctx.db.set_state("last_sync_time", "2026-03-31")
+        
+        ctx.logger.info(f"成功抓取并保存 {len(hotels)} 条记录")
+        return TaskResult(success=True, message=f"已同步 {city} 的酒店")
+```
 
-- 模板里自带的内容
-- 自己新增的内容
-
-你手动再补一组 `fetch_hotels` 和 `sync_hotels`，会更容易理解 CLI 到底帮你做了什么。
+### 这一步的关键认知
+- **导入**：只从 `crawler4j_sdk` 导入必要类，不再有 `DataService`。
+- **数据操作**：直接使用 `ctx.db.replace_records` 和 `ctx.db.set_state`。
+- **配置**：使用 `ctx.get_config` 安全获取外部输入。
 
 ## 第 3 步：确认模块目录结构
 
