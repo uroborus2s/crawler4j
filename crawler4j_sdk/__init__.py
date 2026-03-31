@@ -44,6 +44,7 @@ CLI 命令:
 
 from crawler4j_sdk.base import TaskScript
 from crawler4j_sdk.workflow import TaskFlow
+from crawler4j_sdk.assembler import ModuleAssembler
 from crawler4j_contracts import (
     DatabaseCapability,
     EnvOpsCapability,
@@ -53,13 +54,14 @@ from crawler4j_contracts import (
     UICapability,
 )
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 # 稳定导出列表（同 MAJOR 版本内冻结）
 __all__ = [
     # 核心契约类型
     "TaskScript",
     "TaskFlow",
+    "ModuleAssembler",
     "TaskContext",
     "TaskResult",
     "DatabaseCapability",

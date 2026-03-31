@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`  
-**最后更新：** 2026-03-26  
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`  
+**最后更新：** 2026-03-31  
 
 ## `API-001` Root App Entry Contract
 
@@ -24,10 +24,14 @@
 | 项目 | 内容 |
 |---|---|
 | Manifest 文件 | `module.yaml` |
+| 宿主入口文件 | 模块根 `__init__.py` |
 | 必需入口 | `run(context)` |
 | 可选 hooks | `prepare_env`, `init_env`, `before_run`, `on_success`, `on_failure`, `on_timeout`, `on_cleanup` |
-| 当前风险 | 真实站点 E2E 仍未覆盖，MMS 高阶设置与 UI 扩展能力尚未完全闭环 |
-| 关联项 | `TASK-003`, `CR-003` |
+| 计划演进 | 根 `__init__.py` 收敛为稳定薄壳，默认入口组装逻辑由 SDK helper 提供 |
+| 默认工作流解析 | `context.config.workflow` -> `module_runtime.DEFAULT_WORKFLOW` -> `module.yaml.workflows[0].name` |
+| 升级策略 | 旧模块统一按最新模板重新初始化；不再为旧式完整 `__init__.py` 模板提供兼容承诺 |
+| 当前风险 | 真实站点 E2E 仍未覆盖；`REQ-006` 尚未进入实现，当前模板仍内联调度逻辑且升级路径未落地 |
+| 关联项 | `TASK-003`, `TASK-013` |
 
 ## `API-003` SDK / Contracts Package Contract
 
@@ -36,8 +40,9 @@
 | SDK 包名 | `crawler4j-sdk` |
 | Contracts 包名 | `crawler4j-contracts` |
 | CLI 入口 | `crawler4j_sdk.cli.commands:main` |
-| 当前状态 | 本地 build 成功，help 可运行 |
-| 关联项 | `REQ-003` |
+| 计划扩展 | 新增统一模块入口组装 helper，例如 `crawler4j_sdk.module_entry.export_entrypoints(...)` |
+| 当前状态 | 本地 build 成功，help 可运行；模块入口自动托管与重初始化支持待 `TASK-013` 实现 |
+| 关联项 | `REQ-003`, `REQ-006` |
 
 ## `API-004` Release Metadata Contract
 
@@ -61,3 +66,4 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-03-26 | 初始接口与契约设计摘要 | Codex |
+| 2026-03-31 | 增补模块根入口自动托管的契约演进设计 | Codex |

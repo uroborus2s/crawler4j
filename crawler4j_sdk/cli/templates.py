@@ -178,7 +178,7 @@ class {class_name}(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        self.label = QLabel(f"欢迎使用 {self.__class__.__name__}")
+        self.label = QLabel(f"欢迎使用 {{self.__class__.__name__}}")
         self.btn = QPushButton("刷新数据")
         self.btn.clicked.connect(self.on_refresh)
         
@@ -190,113 +190,91 @@ class {class_name}(QWidget):
         # 实现具体逻辑
 '''
 
-MODEL_MODULE_INIT = '''"""{display_name} 模块入口。"""
+MODEL_MODULE_INIT = '''"""{display_name} 模块入口。
 
-import importlib
+本文件由 SDK 自动托管，不建议手动修改。
+如需扩展运行时逻辑（Hooks、自定义发现等），请在同级目录创建 `module_runtime.py`。
+"""
+
 from pathlib import Path
-from pkgutil import iter_modules
-from typing import Type, Dict
+from crawler4j_sdk import ModuleAssembler, TaskContext, TaskResult
 
-from crawler4j_sdk import TaskContext, TaskFlow, TaskResult, TaskScript
-
-
-PACKAGE_ROOT = Path(__file__).parent
-MODULE_NAME = __name__
-DEFAULT_WORKFLOW = "{default_workflow}"
-
-
-def _load_registry(subpackage: str, base_cls: type) -> Dict[str, type]:
-    registry: Dict[str, type] = {{}}
-    package_dir = PACKAGE_ROOT / subpackage
-    if not package_dir.exists():
-        return registry
-
-    full_package_name = f"{{MODULE_NAME}}.{{subpackage}}"
-    for module_info in iter_modules([str(package_dir)]):
-        if module_info.name.startswith("_"):
-            continue
-        try:
-            module = importlib.import_module(f"{{full_package_name}}.{{module_info.name}}")
-            for attr_name in dir(module):
-                candidate = getattr(module, attr_name)
-                if isinstance(candidate, type) and issubclass(candidate, base_cls) and candidate is not base_cls:
-                    key = getattr(candidate, "name", "") or module_info.name
-                    registry[key] = candidate
-        except Exception:
-            continue
-    return registry
-
-
-# 自动发现组件
-TASK_SCRIPTS: Dict[str, Type[TaskScript]] = _load_registry("tasks", TaskScript)
-WORKFLOWS: Dict[str, Type[TaskFlow]] = _load_registry("workflows", TaskFlow)
-
-
-async def _run_task_script(script_cls: Type[TaskScript], ctx: TaskContext) -> TaskResult:
-    script = script_cls()
-    await script.on_init(ctx)
-    try:
-        result = await script.execute(ctx)
-    except Exception as error:
-        await script.on_error(ctx, error)
-        raise
-    finally:
-        await script.on_cleanup(ctx)
-
-    if isinstance(result, TaskResult):
-        return result
-    return TaskResult.ok(data=result)
-
-
-async def _run_task_flow(flow_cls: Type[TaskFlow], ctx: TaskContext) -> TaskResult:
-    flow = flow_cls()
-    try:
-        await flow.run(ctx)
-        await flow.on_complete(ctx)
-    except Exception as error:
-        await flow.on_error(ctx, error)
-        raise
-    return TaskResult.ok(data=dict(ctx.state))
-
-
-async def _subtask_executor(task_name: str, ctx: TaskContext) -> TaskResult:
-    if task_name not in TASK_SCRIPTS:
-        raise ValueError(f"未知子任务: {{task_name}}")
-    return await _run_task_script(TASK_SCRIPTS[task_name], ctx)
+# 初始化模块组装器
+assembler = ModuleAssembler(
+    package_root=Path(__file__).parent,
+    module_name=__name__,
+)
 
 
 async def run(context: TaskContext) -> TaskResult:
-    """模块执行入口。"""
-    workflow_name = context.get_config("workflow", DEFAULT_WORKFLOW)
-
-    if workflow_name in WORKFLOWS:
-        context._subtask_executor = _subtask_executor
-        return await _run_task_flow(WORKFLOWS[workflow_name], context)
-
-    if workflow_name in TASK_SCRIPTS:
-        return await _run_task_script(TASK_SCRIPTS[workflow_name], context)
-
-    if DEFAULT_WORKFLOW and DEFAULT_WORKFLOW in WORKFLOWS:
-        context._subtask_executor = _subtask_executor
-        return await _run_task_flow(WORKFLOWS[DEFAULT_WORKFLOW], context)
-
-    raise ValueError(f"未找到对应的工作流或任务: {{workflow_name}}")
+    """模块执行入口，由 Core 调用。"""
+    return await assembler.run(context)
 
 
-# --- 生命周期 Hooks ---
+# --- 自动导出的生命周期 Hooks (由 Core 调用) ---
+
+async def prepare_env(context, *args):
+    hook = assembler.get_hook("prepare_env")
+    return await hook(context, *args) if hook else None
+
+
+async def init_env(context, *args):
+    hook = assembler.get_hook("init_env")
+    return await hook(context, *args) if hook else None
+
+
+async def before_run(context, *args):
+    hook = assembler.get_hook("before_run")
+    return await hook(context, *args) if hook else None
+
+
+async def on_success(context, *args):
+    hook = assembler.get_hook("on_success")
+    return await hook(context, *args) if hook else None
+
+
+async def on_failure(context, *args):
+    hook = assembler.get_hook("on_failure")
+    return await hook(context, *args) if hook else None
+
+
+async def on_timeout(context, *args):
+    hook = assembler.get_hook("on_timeout")
+    return await hook(context, *args) if hook else None
+
+
+async def on_cleanup(context, *args):
+    hook = assembler.get_hook("on_cleanup")
+    return await hook(context, *args) if hook else None
+'''
+
+MODEL_RUNTIME_TEMPLATE = '''"""{display_name} 模块自定义运行时扩展。
+
+本文件为可选文件，用于存放模块级的生命周期 Hooks、手动注册组件或覆盖默认行为。
+"""
+
+from crawler4j_sdk import TaskContext
+
+# 默认工作流覆盖 (可选)
+# DEFAULT_WORKFLOW = "my_custom_workflow"
+
+# 手动注册/覆盖组件 (可选)
+# TASK_SCRIPTS = {{}}
+# WORKFLOWS = {{}}
+
 
 async def prepare_env(context: TaskContext):
-    """环境准备 Hook。"""
-    return None
+    """环境准备 Hook (在执行任何任务前调用)。"""
+    pass
 
 
 async def init_env(context: TaskContext):
-    """环境初始化 Hook。"""
+    """环境初始化 Hook (在环境准备后、任务执行前调用)。"""
     pass
 
 
 async def on_cleanup(context: TaskContext):
-    """清理 Hook。"""
+    """清理 Hook (任务执行完成后总是调用)。"""
     pass
 '''
 

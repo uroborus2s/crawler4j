@@ -6,8 +6,8 @@
 **主要读者：** QA | 开发 | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
-**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `NFR-003`  
-**最后更新：** 2026-03-26  
+**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `NFR-003`  
+**最后更新：** 2026-03-31  
 
 ## 1. 测试目标
 
@@ -41,6 +41,7 @@
 |---|---|---|
 | `REQ-001` / `RISK-001` | 根应用入口与打包入口一致 | root script 检查 + UI smoke + PyInstaller smoke |
 | `REQ-002` / `RISK-002` | `ctrip labor_workflow` 完整路径 | 模块运行时测试 + 依赖导入验证 |
+| `REQ-006` / `RISK-004` | 模块根入口自动托管与重初始化路径 | 新脚手架 shim import + helper 分发测试 + 重初始化产物测试 |
 | `REQ-004` / `RISK-003` | 版本与 release 口径一致 | 元数据对照检查 |
 | `NFR-003` | lint 质量门清晰 | `uv run ruff check .` 达成约定范围 |
 
@@ -48,6 +49,15 @@
 
 - 没有覆盖 `ctrip labor_workflow` 真实站点 E2E 验证
 - 历史人工调试脚本仍未统一重构为正式自动化测试
+- 尚未覆盖模块根 `__init__.py` 稳定薄壳、重初始化产物与可选 `module_runtime.py` 覆盖测试
+
+## 5.1 `REQ-006` 计划补充测试
+
+| 测试 ID | 目标 | 计划验证方式 |
+|---|---|---|
+| `TC-007` | 新脚手架根 `__init__.py` 为固定薄壳且可导入 | CLI scaffold test + import smoke |
+| `TC-008` | 可选 `module_runtime.py` 可覆盖默认运行逻辑与 hooks | 单元测试 |
+| `TC-009` | 旧模块按最新模板重新初始化后可导入并运行默认入口 | CLI scaffold test + runtime smoke |
 
 ## 6. 出口条件
 
@@ -66,3 +76,4 @@
 | 2026-03-26 | 基于当前仓库事实建立测试计划 | Codex |
 | 2026-03-28 | 删除旧测试专题引用，改为当前测试计划单一事实源 | Codex |
 | 2026-03-26 | 补充默认 lint gate 规则，并登记 `TASK-005` 完成状态 | Codex |
+| 2026-03-31 | 新增 `REQ-006` 的计划测试覆盖项 `TC-007` 至 `TC-009` | Codex |

@@ -17,6 +17,7 @@ from crawler4j_sdk.cli.templates import (
     MODEL_GITIGNORE_TEMPLATE,
     MODEL_MANIFEST_TEMPLATE,
     MODEL_MODULE_INIT,
+    MODEL_RUNTIME_TEMPLATE,
     MODEL_PROJECT_PYPROJECT,
     MODEL_PROJECT_README,
     MODEL_TEST_TASK_TEMPLATE,
@@ -157,8 +158,10 @@ def cmd_init_model(args) -> int:
     ))
     _write_text(output_dir / "README.md", MODEL_PROJECT_README.format(display_name=display_name))
     _write_text(output_dir / "__init__.py", MODEL_MODULE_INIT.format(
-        display_name=display_name, default_workflow=wf_name
+        display_name=display_name
     ))
+    # module_runtime.py is optional and skipped by default to keep the root clean
+    
     _write_text(output_dir / "module.yaml", MODEL_MANIFEST_TEMPLATE.format(
         module_name=module_name, display_name=display_name, description=f"{display_name} 模块",
         workflow_name=wf_name, workflow_display_name=to_display_name(wf_name),
@@ -206,6 +209,27 @@ def cmd_add(args) -> int:
     return 0
 
 
+def cmd_new(args) -> int:
+    """Alias for cmd_add."""
+    return cmd_add(args)
+
+
+def cmd_list(args) -> int:
+    """List all task scripts in the module."""
+    module_root = require_module_root()
+    tasks_dir = module_root / "tasks"
+    print(f"📋 模块 {module_root.name} 中的任务脚本：")
+    found = False
+    for item in tasks_dir.glob("*.py"):
+        if item.name.startswith("_"):
+            continue
+        print(f"  - {item.stem}")
+        found = True
+    if not found:
+        print("  (无)")
+    return 0
+
+
 def cmd_add_workflow(args) -> int:
     module_root = require_module_root()
     name = args.name
@@ -235,8 +259,9 @@ def cmd_add_data(args) -> int:
 
 def cmd_add_ui(args) -> int:
     module_root = require_module_root()
-    if args.type == "code":
-        name = args.name or "dashboard"
+    ui_type = getattr(args, "type", "declarative")
+    if ui_type == "code":
+        name = getattr(args, "name", "dashboard") or "dashboard"
         _write_text(module_root / "ui" / f"{name}.py", MODEL_UI_PAGES_TEMPLATE.format(
             display_name=to_display_name(name), description="UI 页面", class_name=f"{to_class_name(name)}Page"
         ))
@@ -297,11 +322,19 @@ def main() -> int:
     init_p.add_argument("--workflow-name")
     init_p.add_argument("--display-name")
     init_p.add_argument("--python-version", default=DEFAULT_PYTHON_VERSION)
+    init_p.add_argument("--defaults", action="store_true", help="使用默认值，不进行交互")
     init_p.set_defaults(func=cmd_init_model)
 
     add_p = subparsers.add_parser("add", help="创建任务脚本")
     add_p.add_argument("name")
     add_p.set_defaults(func=cmd_add)
+
+    new_p = subparsers.add_parser("new", help="创建任务脚本 (add 的别名)")
+    new_p.add_argument("name")
+    new_p.set_defaults(func=cmd_new)
+
+    list_p = subparsers.add_parser("list", help="列出模块中的任务脚本")
+    list_p.set_defaults(func=cmd_list)
 
     wf_p = subparsers.add_parser("add-workflow", help="创建工作流")
     wf_p.add_argument("name")

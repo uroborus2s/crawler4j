@@ -24,3 +24,5 @@
   状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
 - `TASK-012-mms-trust-gate-and-custom-ui-loading` TASK-012 补齐 MMS trust gate 与自定义页面加载
   状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
+- `TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler` TASK-013 统一模块根入口为最新托管方案并要求模块重新初始化
+  状态：DONE | 负责人：Gemini | 预估：1.5 人/天 | 关联：`REQ-003`, `REQ-006`, `NFR-004`

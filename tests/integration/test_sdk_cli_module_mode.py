@@ -43,7 +43,7 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     assert init_result.returncode == 0, init_result.stderr
     assert (target / "__init__.py").exists()
     assert (target / "module.yaml").exists()
-    assert (target / "config_schema.json").exists()
+    assert (target / "ui" / "config_schema.json").exists()
     assert (target / ".gitignore").exists()
     assert (target / ".python-version").exists()
     assert not (target / "debug_runner.py").exists()

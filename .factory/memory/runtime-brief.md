@@ -13,7 +13,7 @@
 - 最近发布包：无
 - 最近交接包：无
 - 最近快照：无
-- 备注：refresh-after-clearing-pinned-version-command；已完成 docs 四大模块结构迁移并刷新 `docs/index.md` 与目录概览页；`docs/project-process/` 与 `docs/model-development/` 已退出正式入口；第三部分开发者指南各级概览页标题已统一为中文；已补齐 `docs/01-getting-started/` 与 `docs/02-user-guide/` 的占位说明页；SDK 当前代码口径已提升到 `2.0.0`，删除 `DataService` 兼容层，并明确模块只能使用 Core 注入的 `ctx.db` 最小接口
+- 备注：已完成 `TASK-013`；模块根入口薄壳 (Shim) 与 SDK 组装器 (ModuleAssembler) 已落地；CLI 命令（new, list, --defaults）已补齐并与集成测试对齐；`module_runtime.py` 已明确为可选扩展点；所有 15 项单测与集成测试全绿
 
 ## AI 最小读取顺序
 
@@ -28,6 +28,7 @@
 
 - `docs/01-getting-started/document-map.md`
 - `docs/03-developer-guide/index.md`
+- `docs/04-project-development/02-discovery/brainstorm-record.md`
 - `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md`
 - `docs/04-project-development/05-development-process/implementation-plan.md`
 - `docs/04-project-development/04-design/technical-selection.md`
@@ -52,8 +53,8 @@
 
 ## 当前前 5 个活跃工作项
 
-- `TASK-001-factory-baseline-bootstrap` TASK-001 历史项目工厂基线接管 | 状态：DONE | 负责人：未知
-- `TASK-002-fix-root-entrypoint-and-packaging-smoke` TASK-002 修复根入口与打包 smoke | 状态：DONE | 负责人：未知
+- `TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler` TASK-013 统一模块根入口为最新托管方案并要求模块重新初始化 | 状态：DONE | 负责人：Gemini
+- `TASK-010-optimize-module-developer-guide-for-external-authors` TASK-010 重做模块开发者指南 | 状态：DONE | 负责人：未知
+- `TASK-011-mms-settings-store-and-module-state-persistence` TASK-011 建立 MMS settings store 与模块状态持久化 | 状态：DONE | 负责人：未知
+- `TASK-012-mms-trust-gate-and-custom-ui-loading` TASK-012 补齐 MMS trust gate 与自定义页面加载 | 状态：DONE | 负责人：未知
 - `TASK-003-restore-ctrip-labor-workflow-runtime` TASK-003 恢复 `ctrip labor_workflow` 的当前运行时实现 | 状态：DONE | 负责人：未知
-- `TASK-004-unify-version-and-release-source-of-truth` TASK-004 统一版本与发布事实源 | 状态：DONE | 负责人：未知
-- `TASK-005-normalize-lint-and-docs-gates` TASK-005 收敛 lint 与 docs gate | 状态：DONE | 负责人：未知

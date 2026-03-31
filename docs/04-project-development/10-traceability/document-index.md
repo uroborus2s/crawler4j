@@ -30,6 +30,7 @@
 | `docs/03-developer-guide/index.md` | 开发者指南总览；即 module 开发指南入口 | 模块开发者 |
 | `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md` | Core 接手、日常维护与同步规则 | Core 维护者 / 新成员 |
 | `docs/04-project-development/02-discovery/` | 输入证据、现状分析、旧文档收敛策略 | 架构 / 开发 / QA |
+| `docs/04-project-development/02-discovery/brainstorm-record.md` | 模块根入口自动托管的方案对比与推荐结论 | 架构 / 开发 |
 | `docs/04-project-development/04-design/` | 当前架构、模块边界、接口契约和工程规则 | 架构 / 开发 |
 | `docs/04-project-development/05-development-process/` | 当前实施计划与交付边界 | Tech Lead / Dev / QA |
 | `docs/04-project-development/06-testing-verification/` | 测试计划、质量门、一致性审查 | QA / Dev / 发布 |
@@ -45,9 +46,10 @@
 2. [文档地图](../../01-getting-started/document-map.md)
 3. [Core 接手与日常维护](../08-operations-maintenance/core-maintainer-guide.md)
 4. [当前真实状态分析](../02-discovery/current-state-analysis.md)
-5. [系统架构](../04-design/system-architecture.md)
-6. [实施方案](../05-development-process/implementation-plan.md)
-7. [质量门与文档导航规则](../06-testing-verification/quality-gates.md)
+5. [模块根入口自动托管头脑风暴记录](../02-discovery/brainstorm-record.md)
+6. [系统架构](../04-design/system-architecture.md)
+7. [实施方案](../05-development-process/implementation-plan.md)
+8. [质量门与文档导航规则](../06-testing-verification/quality-gates.md)
 
 ### 模块开发者
 

@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 发布负责人  
 **上游输入：** `prd.md` | `requirements-analysis.md` | 本地验证结果  
 **下游输出：** `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/` | `.factory/process/stage-check-report.md`  
-**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`  
-**最后更新：** 2026-03-26  
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`  
+**最后更新：** 2026-03-31  
 
 ## 1. 校验清单
 
@@ -20,6 +20,7 @@
 | `REQ-002` | 完整 labor_workflow 是否已脱离旧依赖 | 通过 | 兼容路径已恢复，打包模块 smoke 确认不再因旧导入缺失而退化 |
 | `REQ-003` | SDK / Contracts 是否可本地 build | 通过 | 子包 build 成功 |
 | `REQ-003` | SDK CLI 是否可运行帮助页 | 通过 | `uv run python -m crawler4j_sdk.cli.commands --help` |
+| `REQ-006` | 模块根入口是否已收敛为工具托管的稳定薄壳 | 通过 | `ModuleAssembler` 与 `Shim` 落地，经 `test_assembler.py` 与 `test_cli_scaffold.py` 验证通过 |
 | `REQ-004` | 发布链路版本信号是否一致 | 通过 | 根应用工作区版本、运行时镜像、最近正式 tag 与 release 文档关系已明确 |
 | `REQ-005` | 工厂控制面是否已补齐 | 通过 | 本次已新增 `AGENTS.md`、`GEMINI.md`、`.factory/`、编号文档 |
 | `NFR-001` | 是否统一使用 `uv` | 通过 | 现有运行方式与本次验证均基于 `uv` |
@@ -34,6 +35,7 @@
 - 基于当前仓库事实重建 requirements / solution / delivery 最小文档包
 - 明确首批工作项
 - 明确当前已验证能力与未关闭风险
+- `REQ-006` 模块入口薄壳化已完成实现与验证
 
 ### 未满足
 
@@ -42,8 +44,7 @@
 ## 3. 建议结论
 
 - 当前项目已进入软件工厂 `IMPLEMENTATION`
-- 不建议直接把当前状态标记为 `RELEASE` 或 `MAINTENANCE`
-- 下一步更适合安排真实站点 E2E 或发布收口波次
+- `TASK-013` 已关闭，建议进入下一波次 E2E 验证或发布收口
 
 ## 4. 变更记录
 
@@ -51,3 +52,5 @@
 |---|---|---|
 | 2026-03-26 | 初始需求校验结论 | Codex |
 | 2026-03-26 | 同步 `TASK-005` 完成后的质量门结论 | Codex |
+| 2026-03-31 | 新增 `REQ-006` 待实现校验项与 `TASK-013` 设计状态 | Codex |
+| 2026-03-31 | 同步 `TASK-013` 完成后的验证结论 | Gemini |
