@@ -11,7 +11,7 @@
 | `REQ-001` | 桌面 Core 可启动且入口一致 | `docs/04-project-development/04-design/system-architecture.md` | `MOD-001`, `MOD-005` | `API-001` | `TASK-002` | `TC-004` | Verified locally |
 | `REQ-002` | 模块可执行目标工作流 | `docs/04-project-development/04-design/module-boundaries.md` | `MOD-002`, `MOD-003` | `API-002` | `TASK-003` | `tests/unit/test_core/test_mms/test_ctrip_runtime.py` | Runtime restored; E2E pending |
 | `REQ-003` | SDK / Contracts / CLI 可用 | `docs/04-project-development/04-design/api-design.md` | `MOD-004` | `API-003` | 保持中 | SDK/Contracts build, CLI help | Verified locally |
-| `REQ-006` | 模块根入口应可由工具托管 | `docs/04-project-development/04-design/module-boundaries.md`, `docs/04-project-development/04-design/api-design.md` | `MOD-003`, `MOD-004` | `API-002`, `API-003` | `TASK-013` | `TC-007`, `TC-008`, `TC-009` | Planned |
+| `REQ-006` | 模块根入口应可由工具托管 | `docs/04-project-development/04-design/module-boundaries.md`, `docs/04-project-development/04-design/api-design.md` | `MOD-003`, `MOD-004` | `API-002`, `API-003` | `TASK-013` | `TC-007`, `TC-008`, `TC-009` | Verified locally |
 | `REQ-004` | 发布与文档链路可追溯 | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/07-release-delivery/version-governance.md` | `MOD-005` | `API-004` | `TASK-004` | build + metadata checks | Version governance aligned locally |
 | `REQ-005` | 软件工厂治理基线存在 | 全部编号文档 | `MOD-005` | `API-004` | `TASK-001`, `TASK-005` | 文档与 `.factory/` 存在性检查 | Baseline created |
 
@@ -38,7 +38,6 @@
 | ID | 问题 | 缺失环节 | 负责人 | 计划时间 |
 |---|---|---|---|---|
 | `RISK-002` | `ctrip` 真实站点 E2E 尚未回放 | 线上行为验证 | 待分配 | 后续验证波次 |
-| `RISK-004` | 模块根入口自动托管尚未落地 | SDK helper、脚手架切换与重初始化路径 | 待分配 | 待 `TASK-013` 确认后排期 |
 
 ## 5. 已关闭治理项
 
@@ -55,3 +54,4 @@
 | 2026-03-26 | 标记 `CR-002` 关闭，并保留 `CR-003` 为当前未闭环项 | Codex |
 | 2026-03-26 | 标记 `CR-003` 关闭，并将剩余关注点收敛到真实站点 E2E | Codex |
 | 2026-03-31 | 新增 `REQ-006` / `TASK-013` / `RISK-004` 的追踪关系 | Codex |
+| 2026-03-31 | 关闭 `RISK-004`，同步 `REQ-006` 为本地已验证 | Codex |

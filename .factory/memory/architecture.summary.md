@@ -11,9 +11,9 @@ Current architecture facts:
 - Builtin business modules have been removed; `modules/` is now a placeholder, while real modules come from installed packages or DevLink source directories.
 - Module projects run inside the host runtime, not their own virtualenv.
 
-Planned architecture evolution:
+Current module entry architecture:
 
-- `REQ-006` proposes keeping root `__init__.py` as the host entrypoint, but shrinking it to a stable shim.
-- Default task/workflow discovery and module entry assembly should move into an SDK helper.
-- Module-specific overrides should move into an optional `module_runtime.py` instead of continuing to live in root `__init__.py`.
+- `REQ-006` keeps root `__init__.py` as the host entrypoint, but shrinks it to a stable shim.
+- Default task/workflow discovery and module entry assembly now live in `crawler4j_sdk.assembler.ModuleAssembler`.
+- Module-specific overrides live in an optional `module_runtime.py` instead of root `__init__.py`.
 - Old modules are not a compatibility target for the new contract; upgrades should rebuild the module skeleton from the latest template.

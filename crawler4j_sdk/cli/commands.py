@@ -7,7 +7,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -17,7 +17,6 @@ from crawler4j_sdk.cli.templates import (
     MODEL_GITIGNORE_TEMPLATE,
     MODEL_MANIFEST_TEMPLATE,
     MODEL_MODULE_INIT,
-    MODEL_RUNTIME_TEMPLATE,
     MODEL_PROJECT_PYPROJECT,
     MODEL_PROJECT_README,
     MODEL_TEST_TASK_TEMPLATE,
@@ -195,7 +194,7 @@ def cmd_init_model(args) -> int:
         _run_uv_sync(output_dir)
 
     print(f"✅ 初始化规范化 model 项目: {output_dir}")
-    print(f"   已包含分层结构: Tasks, Workflows, Data, UI, Utils, Tests")
+    print("   已包含分层结构: Tasks, Workflows, Data, UI, Utils, Tests")
     return 0
 
 
@@ -287,24 +286,27 @@ def cmd_check(args) -> int:
     print(f"🔍 正在自检模块: {module_root.name}")
     manifest = load_manifest(module_root)
     errors = []
-    
+
     # 1. 验证元数据
-    if not manifest.get("name"): errors.append("缺失 name 字段")
-    if not manifest.get("workflows"): errors.append("未定义 workflows")
-    
+    if not manifest.get("name"):
+        errors.append("缺失 name 字段")
+    if not manifest.get("workflows"):
+        errors.append("未定义 workflows")
+
     # 2. 验证物理目录
     for sub in ["tasks", "workflows", "data", "ui"]:
         if not (module_root / sub).exists():
             errors.append(f"缺少关键目录: {sub}/")
-            
+
     # 3. 验证入口
     if not (module_root / "__init__.py").exists():
         errors.append("缺少根 __init__.py")
-        
+
     if errors:
-        for err in errors: print(f"  - ❌ {err}")
+        for err in errors:
+            print(f"  - ❌ {err}")
         return 1
-    
+
     print("✅ 模块结构验证通过！")
     return 0
 

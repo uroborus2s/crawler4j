@@ -9,7 +9,7 @@ import inspect
 import logging
 from pathlib import Path
 from pkgutil import iter_modules
-from typing import Any, Callable, Dict, Optional, Type, Union
+from typing import Callable, Dict, Optional, Type
 
 import yaml
 

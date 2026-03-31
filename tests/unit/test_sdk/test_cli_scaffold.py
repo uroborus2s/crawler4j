@@ -70,6 +70,7 @@ class TestModelScaffoldInit:
         assert (target / "workflows" / "__init__.py").exists()
         assert (target / "workflows" / "main_workflow.py").exists()
         assert (target / "pyproject.toml").exists()
+        assert not (target / "module_runtime.py").exists()
 
         manifest = _read_manifest(target)
         assert manifest["name"] == "demo_model"

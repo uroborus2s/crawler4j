@@ -49,15 +49,14 @@
 
 - 没有覆盖 `ctrip labor_workflow` 真实站点 E2E 验证
 - 历史人工调试脚本仍未统一重构为正式自动化测试
-- 尚未覆盖模块根 `__init__.py` 稳定薄壳、重初始化产物与可选 `module_runtime.py` 覆盖测试
 
-## 5.1 `REQ-006` 计划补充测试
+## 5.1 `REQ-006` 已完成覆盖
 
-| 测试 ID | 目标 | 计划验证方式 |
+| 测试 ID | 目标 | 当前验证方式 |
 |---|---|---|
-| `TC-007` | 新脚手架根 `__init__.py` 为固定薄壳且可导入 | CLI scaffold test + import smoke |
-| `TC-008` | 可选 `module_runtime.py` 可覆盖默认运行逻辑与 hooks | 单元测试 |
-| `TC-009` | 旧模块按最新模板重新初始化后可导入并运行默认入口 | CLI scaffold test + runtime smoke |
+| `TC-007` | 新脚手架根 `__init__.py` 为固定薄壳且可导入 | `tests/unit/test_sdk/test_cli_scaffold.py` + CLI help smoke |
+| `TC-008` | 可选 `module_runtime.py` 可覆盖默认运行逻辑与 hooks | `tests/unit/test_sdk/test_assembler.py` |
+| `TC-009` | 旧模块按最新模板重新初始化后可导入并运行默认入口 | `tests/integration/test_sdk_cli_module_mode.py` |
 
 ## 6. 出口条件
 
@@ -77,3 +76,4 @@
 | 2026-03-28 | 删除旧测试专题引用，改为当前测试计划单一事实源 | Codex |
 | 2026-03-26 | 补充默认 lint gate 规则，并登记 `TASK-005` 完成状态 | Codex |
 | 2026-03-31 | 新增 `REQ-006` 的计划测试覆盖项 `TC-007` 至 `TC-009` | Codex |
+| 2026-03-31 | 同步 `REQ-006` 的已实现测试覆盖与当前缺口 | Codex |

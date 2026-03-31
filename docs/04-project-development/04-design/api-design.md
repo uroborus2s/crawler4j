@@ -27,10 +27,10 @@
 | 宿主入口文件 | 模块根 `__init__.py` |
 | 必需入口 | `run(context)` |
 | 可选 hooks | `prepare_env`, `init_env`, `before_run`, `on_success`, `on_failure`, `on_timeout`, `on_cleanup` |
-| 计划演进 | 根 `__init__.py` 收敛为稳定薄壳，默认入口组装逻辑由 SDK helper 提供 |
+| 当前实现 | 根 `__init__.py` 已收敛为稳定薄壳，默认入口组装逻辑由 `ModuleAssembler` 提供 |
 | 默认工作流解析 | `context.config.workflow` -> `module_runtime.DEFAULT_WORKFLOW` -> `module.yaml.workflows[0].name` |
 | 升级策略 | 旧模块统一按最新模板重新初始化；不再为旧式完整 `__init__.py` 模板提供兼容承诺 |
-| 当前风险 | 真实站点 E2E 仍未覆盖；`REQ-006` 尚未进入实现，当前模板仍内联调度逻辑且升级路径未落地 |
+| 当前风险 | 真实站点 E2E 仍未覆盖；动态加载的模块扩展点仍需依赖回归测试保持稳定 |
 | 关联项 | `TASK-003`, `TASK-013` |
 
 ## `API-003` SDK / Contracts Package Contract
@@ -40,8 +40,8 @@
 | SDK 包名 | `crawler4j-sdk` |
 | Contracts 包名 | `crawler4j-contracts` |
 | CLI 入口 | `crawler4j_sdk.cli.commands:main` |
-| 计划扩展 | 新增统一模块入口组装 helper，例如 `crawler4j_sdk.module_entry.export_entrypoints(...)` |
-| 当前状态 | 本地 build 成功，help 可运行；模块入口自动托管与重初始化支持待 `TASK-013` 实现 |
+| 当前能力 | `ModuleAssembler` 已作为统一模块入口组装 helper 落地；CLI 已支持 `init-model --defaults`、`new` 与 `list` |
+| 当前状态 | 本地 build 成功，help 可运行；模块入口自动托管、重初始化路径与集成测试已完成 |
 | 关联项 | `REQ-003`, `REQ-006` |
 
 ## `API-004` Release Metadata Contract

@@ -1,6 +1,6 @@
 [project]
 name = "crawler4j-sdk"
-version = "2.1.0"
+version = "2.1.1"
 description = "Crawler4j Task Script SDK - 用于开发任务脚本的开发工具包"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,6 +20,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 only-include = [
     "__init__.py",
+    "assembler.py",
     "base.py",
     "cli",
     "context.py",

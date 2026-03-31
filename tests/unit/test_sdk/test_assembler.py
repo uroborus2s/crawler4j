@@ -1,16 +1,11 @@
 import pytest
-import shutil
-import sys
 import logging
+import sys
 import yaml
-from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock
 
 from crawler4j_sdk.assembler import ModuleAssembler
-from crawler4j_sdk.base import TaskScript
-from crawler4j_sdk.workflow import TaskFlow
 from crawler4j_sdk.context import TaskContext
-from crawler4j_sdk.result import TaskResult
 
 @pytest.fixture
 def temp_module(tmp_path):

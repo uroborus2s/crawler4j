@@ -46,6 +46,7 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     assert (target / "ui" / "config_schema.json").exists()
     assert (target / ".gitignore").exists()
     assert (target / ".python-version").exists()
+    assert not (target / "module_runtime.py").exists()
     assert not (target / "debug_runner.py").exists()
 
     new_result = _run_cli("new", "extra_task", cwd=target)
