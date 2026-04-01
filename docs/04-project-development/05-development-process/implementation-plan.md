@@ -4,10 +4,10 @@
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 技术负责人 | 开发 | QA | 发布负责人  
-**上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | `task-breakdown.md`  
-**下游输出：** `.factory/workitems/` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/07-release-delivery/release-notes.md`  
-**关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`  
-**最后更新：** 2026-03-31  
+**上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | 当前文档治理缺口审计  
+**下游输出：** `docs/04-project-development/05-development-process/execution-log.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/07-release-delivery/release-notes.md`  
+**关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`  
+**最后更新：** 2026-04-02  
 
 ## 1. 实施目标
 
@@ -29,6 +29,7 @@
 | Wave 8 | `TASK-011` | `CR-003` 首块能力 | MMS settings store 与模块状态持久化 | 已完成：模块/工作流 settings、导出与启停状态持久化已落地 |
 | Wave 9 | `TASK-012` | `TASK-011`、`CR-003` 剩余范围 | UI trust gate 与自定义页面加载 | 已完成：受信来源/allowlist 门控、真实 `ui:*` 页面加载与降级路径已落地 |
 | Wave 10 | `TASK-013` | `docs/04-project-development/02-discovery/brainstorm-record.md`、`module-boundaries.md`、`api-design.md` | 模块根入口稳定薄壳、SDK 统一组装器与模块重初始化路径 | 已完成：ModuleAssembler 与 Shim 已落地，单测与集成测试 100% 通过 |
+| Wave 11 | `TASK-014` ~ `TASK-020` | 文档规范审计、根导航覆盖检查、最小文档包缺口 | 生产级文档入口收口、缺失正式页补齐、索引与 memory 同步 | 进行中：以四大模块结构为单一入口，补齐发布/运维/追踪关键页 |
 
 ## 3. 风险与应对
 
@@ -49,16 +50,29 @@
 - Wave 6 已完成：已按真实模块作者视角重做开发、调试、测试与打包说明
 - Wave 10 已完成：ModuleAssembler 与 Shim 落地并经全量测试验证
 
-## 5. 阶段建议
+## 5. 文档治理整改任务表
+
+| 任务 | 目标 | 主要产物 | 验收标准 | 优先级 | 状态 |
+|---|---|---|---|---|---|
+| `TASK-014` | 收口根导航与角色快读入口 | `docs/index.md`、`docs/01-getting-started/document-map.md` | 根导航覆盖正式页面，四类读者都有明确入口 | P0 | 已完成 |
+| `TASK-015` | 重构开发者/维护者入口页 | `docs/03-developer-guide/index.md`、`docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md`、`docs/02-user-guide/user-guide.md` | 每个入口页都说明“谁看、看什么、下一步去哪” | P0 | 已完成 |
+| `TASK-016` | 补齐过程控制文档骨架 | `software-development-process.md`、`execution-log.md` | 过程规则和执行事实分离，且都可独立交接 | P1 | 已完成 |
+| `TASK-017` | 补齐发布与交付文档骨架 | `acceptance-checklist.md`、`delivery-package.md` | 发布前检查、交付物清单和阻塞项可快速判断 | P1 | 已完成 |
+| `TASK-018` | 补齐运维与管理员文档骨架 | `operations-runbook.md`、`admin-guide.md` | 管理员、维护者和运维读者职责分离 | P1 | 已完成 |
+| `TASK-019` | 补齐追踪与索引同步 | `interface-matrix.md`、`document-index.md`、`.factory/memory/doc-map.md` | 文档索引、接口矩阵和 memory 映射一致 | P1 | 已完成 |
+| `TASK-020` | 治理演进与结构验证收口 | `skill-evolution-plan.md`、结构校验记录 | 空壳页清理完毕，根导航覆盖与链接检查通过 | P1 | 已完成 |
+
+## 6. 阶段建议
 
 - 当前登记阶段：`IMPLEMENTATION`
-- 当前活动波次：Wave 10 已完成，建议进入下一波次 E2E 验证或发布收口
-- 当前首项：按优先级继续真实站点 E2E 回放 / 发布收口
+- 当前活动波次：Wave 11 文档治理整改已完成，建议回到真实站点 E2E 验证或发布收口
+- 当前首项：按优先级继续真实站点 E2E 回放 / 发布收口，并在正式发布前复用新增验收与交付文档
 
-## 6. 变更记录
+## 7. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-02 | 新增 Wave 11 文档治理整改波次，并补写任务表 | Codex |
 | 2026-03-26 | 建立首批实施计划 | Codex |
 | 2026-03-26 | 标记 Wave 3 / Wave 4 完成，并纳入设计一致性审查结果 | Codex |
 | 2026-03-26 | 标记 Wave 6 完成，模块开发者指南按真实外部开发链路重做 | Codex |

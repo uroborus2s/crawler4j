@@ -1,7 +1,17 @@
 # 开发过程文档概览
 
-本目录收纳实施计划、任务拆分、执行节奏和交付组织材料。
+本目录回答三件事：按什么流程推进、当前计划是什么、最近到底执行了什么。
 
-- 本页是该目录的正文首页，用于说明范围、读者和维护边界。
-- 目录树、页面路径和访问级别统一由根 `docs/index.md` 声明，这里不重复维护页面清单。
-- 本目录下的 Markdown 页面、契约文件和资源文件应随内容变更一起演进。
+## 关键页面
+
+| 页面 | 作用 |
+|---|---|
+| `software-development-process.md` | 固定开发、PR、Gate 和文档同步规则 |
+| `implementation-plan.md` | 当前波次、任务表和阶段建议 |
+| `execution-log.md` | 已执行事项、输入输出和完成证据 |
+
+## 建议阅读顺序
+
+1. 先读 [软件开发流程](software-development-process.md)。
+2. 再看 [实施方案](implementation-plan.md)。
+3. 最后用 [执行记录](execution-log.md) 跟踪最近变更。

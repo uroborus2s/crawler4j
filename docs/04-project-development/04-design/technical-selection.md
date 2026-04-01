@@ -1,13 +1,19 @@
 # 技术选型与工程规则
 
-- 文档状态：就绪
-- 当前阶段：DESIGN
-- 最近更新：2026-03-28 00:47:22
-- 负责人：AI 软件工厂
-- 技术画像：Crawler4j Model 项目画像
-- 技术栈：python + crawler4j sdk cli + model/module project
-- 预设：crawler4j-model
-- 备注：移除固定版本并清理旧预设命令
+**项目名称：** 蛛行演略（crawler4j）
+**文档状态：** 已批准
+**负责人：** AI 软件工厂
+**主要读者：** 架构 | 开发 | QA | 模块维护者
+**上游输入：** `docs/04-project-development/01-governance/project-charter.md` | `docs/04-project-development/03-requirements/prd.md` | `crawler4j-model` 技术画像
+**下游输出：** `system-architecture.md` | `module-boundaries.md` | `api-design.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
+**关联 ID：** `REQ-003`, `REQ-006`, `NFR-001`, `NFR-003`
+**最后更新：** 2026-04-02
+
+**当前阶段：** DESIGN
+**技术画像：** Crawler4j Model 项目画像
+**技术栈：** python + crawler4j sdk cli + model/module project
+**预设：** crawler4j-model
+**备注：** 移除固定版本并清理旧预设命令
 
 ## 技术画像摘要
 

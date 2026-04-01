@@ -1,0 +1,47 @@
+# 验收检查清单
+
+**项目名称：** 蛛行演略（crawler4j）
+**文档状态：** 草稿
+**负责人：** 当前仓库维护者
+**主要读者：** 发布负责人 | QA | Tech Lead
+**上游输入：** `version-governance.md` | `release-notes.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
+**下游输出：** `delivery-package.md` | 发布决策 | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
+**关联 ID：** `REL-003`, `REL-004`, `TASK-017`, `NFR-003`
+**最后更新：** 2026-04-02
+
+## 1. 使用范围
+
+本清单用于判断“当前工作区是否可以进入正式发布或交付阶段”。它不是测试计划的替代，而是发布前的最终 Gate。
+
+## 2. 发布前最小检查项
+
+| 类别 | 检查项 | 证据 | 当前基线状态 |
+|---|---|---|---|
+| 版本 | 根 `pyproject.toml`、`src/__version__.py` 和发布目标版本一致 | `version-governance.md` | 待正式切版 |
+| 版本 | 当前工作区版本、最近正式 tag、SDK/Contracts 版本口径清楚 | `release-notes.md` | 已具备 |
+| 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备 |
+| 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备 |
+| 运行 | `uv run python scripts/smoke_test_ui.py` 通过 | `test-plan.md` | 已具备 |
+| 构建 | Root / SDK / Contracts build 通过 | `test-plan.md` | 已具备 |
+| 业务 | `ctrip` 真实站点 E2E 完成并记录结果 | 真实环境验证记录 | 阻塞 |
+| 文档 | 根导航、文档索引、memory 映射同步完成 | `docs/index.md`、`document-index.md`、`.factory/memory/doc-map.md` | 已具备 |
+| 运维 | 部署说明、运行手册、管理员指南可独立阅读 | `deployment-guide.md`、`operations-runbook.md`、`admin-guide.md` | 已具备 |
+| 交付 | 交付包内容、签收对象和阻塞项清楚 | `delivery-package.md` | 待正式发布 |
+
+## 3. 放行规则
+
+- 有任何一项标记为“阻塞”，不得进入正式发布。
+- 标记为“待正式切版”或“待正式发布”的项，只有在本次发布确实覆盖对应动作时才能关闭。
+- 如果本次只是内部验证或文档收口，可记录为“未触发发布”，但不能伪装成已放行。
+
+## 4. 当前阻塞项
+
+1. `ctrip` 真实站点 E2E 仍未回放。
+2. 根应用正式版本切换和 Git tag 尚未执行。
+3. 交付包还没有绑定具体发布批次。
+
+## 5. 变更记录
+
+| 日期 | 变更内容 | 变更人 |
+|---|---|---|
+| 2026-04-02 | 新增正式验收检查清单，并登记当前基线状态 | Codex |

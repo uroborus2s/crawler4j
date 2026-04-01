@@ -1,8 +1,13 @@
 # 文档索引
 
 **项目名称：** 蛛行演略（crawler4j）
+**文档状态：** 已批准
 **负责人：** 当前仓库维护者
-**最后更新：** 2026-03-31
+**主要读者：** 新维护者 | 模块开发者 | Tech Lead | QA | 发布负责人 | 运维
+**上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
+**下游输出：** `docs/01-getting-started/document-map.md` | `.factory/memory/doc-map.md` | 角色阅读路径
+**关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
+**最后更新：** 2026-04-02
 
 ## 1. 当前正式文档结构
 
@@ -11,65 +16,51 @@
 | 模块 | 作用 | 主要读者 |
 |---|---|---|
 | `docs/01-getting-started/` | 项目概览、快速开始、文档地图和入门路径 | 新维护者 / 协作者 |
-| `docs/02-user-guide/` | 接手入口、安装、配置和使用说明 | 新维护者 / 协作者 |
+| `docs/02-user-guide/` | 接手入口、安装、配置、使用说明和管理员指南 | 宿主使用者 / 管理员 / 协作者 |
 | `docs/03-developer-guide/` | 开发者指南；在本项目中即 module 开发指南 | 模块开发者 / 做模块集成的 Core 成员 |
 | `docs/04-project-development/` | 治理、需求、设计、计划、测试、发布、运维和追踪等正式内部文档 | Tech Lead / Dev / QA / 发布 |
 
-## 2. 关键入口
+## 2. 按角色快速阅读
 
-| 目录/文档 | 作用 | 主要读者 |
-|---|---|---|
-| `docs/index.md` | 全站目录树、页面路径和访问权限的唯一声明入口 | 全体协作者 |
-| `docs/01-getting-started/project-overview.md` | 说明项目定位、当前组成与进入方式 | 新维护者 / 协作者 |
-| `docs/01-getting-started/quick-start.md` | 提供最小启动步骤、常用命令和继续阅读路径 | 新维护者 / 协作者 |
-| `docs/01-getting-started/document-map.md` | 四大模块职责边界与推荐阅读顺序 | 新维护者 / 协作者 |
-| `docs/02-user-guide/user-guide.md` | 跨角色接手入口 | 新维护者 / 协作者 |
-| `docs/02-user-guide/installation.md` | 宿主安装方式、应用数据目录与安装校验 | 宿主使用者 / 协作者 |
-| `docs/02-user-guide/configuration.md` | 系统设置、模块设置与执行配置说明 | 宿主使用者 / 协作者 |
-| `docs/02-user-guide/usage.md` | 页面导航、正式安装与 DevLink 使用路径 | 宿主使用者 / 协作者 |
-| `docs/03-developer-guide/index.md` | 开发者指南总览；即 module 开发指南入口 | 模块开发者 |
-| `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md` | Core 接手、日常维护与同步规则 | Core 维护者 / 新成员 |
-| `docs/04-project-development/02-discovery/` | 输入证据、现状分析、旧文档收敛策略 | 架构 / 开发 / QA |
-| `docs/04-project-development/02-discovery/brainstorm-record.md` | 模块根入口自动托管的方案对比与推荐结论 | 架构 / 开发 |
-| `docs/04-project-development/04-design/` | 当前架构、模块边界、接口契约和工程规则 | 架构 / 开发 |
-| `docs/04-project-development/05-development-process/` | 当前实施计划与交付边界 | Tech Lead / Dev / QA |
-| `docs/04-project-development/06-testing-verification/` | 测试计划、质量门、一致性审查 | QA / Dev / 发布 |
-| `docs/04-project-development/07-release-delivery/` | 发布说明、版本治理 | 发布负责人 / Tech Lead |
-| `docs/04-project-development/08-operations-maintenance/` | 部署与运行说明 | 运维 / Dev |
-| `docs/04-project-development/10-traceability/` | 文档索引与需求追踪 | 架构 / QA / 文档维护者 |
+### 新维护者
 
-## 3. 推荐阅读路径
-
-### Core 维护者
-
-1. [文档中心](../index.md)
+1. [根入口](../../index.md)
 2. [文档地图](../../01-getting-started/document-map.md)
-3. [Core 接手与日常维护](../08-operations-maintenance/core-maintainer-guide.md)
-4. [当前真实状态分析](../02-discovery/current-state-analysis.md)
-5. [模块根入口自动托管头脑风暴记录](../02-discovery/brainstorm-record.md)
-6. [系统架构](../04-design/system-architecture.md)
-7. [实施方案](../05-development-process/implementation-plan.md)
-8. [质量门与文档导航规则](../06-testing-verification/quality-gates.md)
+3. [接手入口](../../02-user-guide/user-guide.md)
+4. [Core 接手与日常维护](../08-operations-maintenance/core-maintainer-guide.md)
+5. [当前真实状态分析](../02-discovery/current-state-analysis.md)
+6. [实施方案](../05-development-process/implementation-plan.md)
 
 ### 模块开发者
 
-1. [接手入口](../../02-user-guide/user-guide.md)
-2. [开发者指南总览](../../03-developer-guide/index.md)
-3. [01 概念与约束](../../03-developer-guide/01-concepts/index.md)
-4. [02 快速开始](../../03-developer-guide/02-quickstart/index.md)
-5. [3.2 `module.yaml` 清单契约](../../03-developer-guide/03-project-structure/02-module-manifest.md)
-6. [4.1 编写 TaskScript](../../03-developer-guide/04-development/01-taskscript.md)
-7. [4.2 编写 Workflow](../../03-developer-guide/04-development/02-workflow.md)
-8. [4.3 CLI 命令与 UI 配置](../../03-developer-guide/04-development/03-cli-and-ui.md)
-9. [4.4 Core 能力清单](../../03-developer-guide/04-development/04-core-capabilities.md)
-10. [4.5 Core 注入能力 API 参考](../../03-developer-guide/04-development/05-api-reference.md)
-11. [4.6 模块开发最佳实践](../../03-developer-guide/04-development/06-best-practices.md)
-12. [05 调试](../../03-developer-guide/05-debugging/index.md)
-13. [06 交付与验收](../../03-developer-guide/06-delivery/index.md)
+1. [开发者指南总览](../../03-developer-guide/index.md)
+2. [01 概念与约束](../../03-developer-guide/01-concepts/index.md)
+3. [02 快速开始](../../03-developer-guide/02-quickstart/index.md)
+4. [03 项目结构与契约](../../03-developer-guide/03-project-structure/index.md)
+5. [04 模块开发](../../03-developer-guide/04-development/index.md)
+6. [06 交付与验收](../../03-developer-guide/06-delivery/index.md)
+
+### 发布 / 运维
+
+1. [发布与交付概览](../07-release-delivery/index.md)
+2. [验收检查清单](../07-release-delivery/acceptance-checklist.md)
+3. [交付包清单](../07-release-delivery/delivery-package.md)
+4. [部署与运行说明](../08-operations-maintenance/deployment-guide.md)
+5. [运行手册](../08-operations-maintenance/operations-runbook.md)
+
+## 3. 阶段文档入口
+
+| 阶段 | 关键入口 | 作用 |
+|---|---|---|
+| 治理与调研 | `01-governance/`、`02-discovery/` | 说明背景、范围、风险和现状证据 |
+| 需求与设计 | `03-requirements/`、`04-design/` | 说明为什么做、怎么设计、接口和边界是什么 |
+| 实施与验证 | `05-development-process/`、`06-testing-verification/` | 说明如何推进、怎么验证、最近执行了什么 |
+| 发布与运维 | `07-release-delivery/`、`08-operations-maintenance/` | 说明什么时候能发、如何交付、如何运行和接手 |
+| 追踪与演进 | `09-evolution/`、`10-traceability/` | 说明模式级改进、需求覆盖和接口责任 |
 
 ## 4. 维护规则
 
-- 根 `docs/index.md` 只维护四大模块的目录树、页面路径和访问权限。
-- 任何新增、删除或移动页面，都要先执行 `factory-dispatch docs-index-refresh --project "."`，再更新本文件和 `.factory/memory/doc-map.md`。
+- 根 `docs/index.md` 是唯一的全站导航源；本文件负责“入口解释”和“按角色索引”，不重复维护整棵页面树。
+- 任何新增、删除或移动页面，都要同步更新根 `docs/index.md`、本文件和 `.factory/memory/doc-map.md`。
 - `docs/project-process/` 与 `docs/model-development/` 不再作为正式入口保留。
 - 当前事实以代码、当前文档和可重复验证结果为准。

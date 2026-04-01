@@ -5,10 +5,22 @@
 **负责人：** 当前仓库维护者
 **主要读者：** Core 维护者 | 开发 | QA
 **上游输入：** `src/ui/app.py` | `src/core/` | `crawler4j_sdk/` | `.factory/project.json`
-**下游输出：** 各阶段过程文档 | `.factory/memory/`
-**最后更新：** 2026-03-28
+**下游输出：** 各阶段过程文档 | `deployment-guide.md` | `operations-runbook.md` | `.factory/memory/`
+**关联 ID：** `OPS-003`, `DOC-105`, `REQ-005`
+**最后更新：** 2026-04-02
 
-## 1. 先记住这 8 个当前事实
+## 1. 第一小时阅读包
+
+1. [接手入口](../../02-user-guide/user-guide.md)
+2. [当前真实状态分析](../02-discovery/current-state-analysis.md)
+3. [技术选型与工程规则](../04-design/technical-selection.md)
+4. [系统架构](../04-design/system-architecture.md)
+5. [模块边界](../04-design/module-boundaries.md)
+6. [实施方案](../05-development-process/implementation-plan.md)
+7. [执行记录](../05-development-process/execution-log.md)
+8. [运行手册](operations-runbook.md)
+
+## 2. 先记住这 8 个当前事实
 
 1. 根应用真实入口是 `src.ui.app:main`，`uv run start` 与它一致。
 2. 应用启动链会初始化数据库、日志、REM、ATM，再创建 `Shell`。
@@ -19,7 +31,7 @@
 7. 当前默认质量门仍以 `uv run pytest -q`、`uv run ruff check .`、UI smoke、build 验证为主。
 8. 当前最大剩余风险不是文档，而是 `ctrip` 真实站点 E2E 仍未回放。
 
-## 2. 日常开发最常用命令
+## 3. 日常开发最常用命令
 
 ```bash
 uv sync
@@ -32,7 +44,7 @@ uv run python -m crawler4j_sdk.cli.commands --help
 uv build --out-dir /tmp/crawler4j-build-check
 ```
 
-## 3. 改动某块代码时要同步什么
+## 4. 改动某块代码时要同步什么
 
 | 改动区域 | 至少同步这些文档 |
 |---|---|
@@ -42,13 +54,23 @@ uv build --out-dir /tmp/crawler4j-build-check
 | 文档结构、导航、过程规则 | `docs/index.md`、`docs/01-getting-started/document-map.md`、`docs/04-project-development/10-traceability/document-index.md`、`docs/04-project-development/06-testing-verification/quality-gates.md` |
 | 版本、发布、构建 | `docs/04-project-development/07-release-delivery/version-governance.md`、`docs/04-project-development/07-release-delivery/release-notes.md`、`docs/04-project-development/08-operations-maintenance/deployment-guide.md` |
 
-## 4. 当前文档使用边界
+## 5. 遇到不同问题先看哪里
+
+| 问题 | 优先文档 |
+|---|---|
+| 入口、模块加载或架构边界不清楚 | `system-architecture.md`、`module-boundaries.md` |
+| 模块开发链路或 CLI 行为有疑问 | `docs/03-developer-guide/index.md`、`api-design.md` |
+| 部署、发布或交付前检查 | `deployment-guide.md`、`acceptance-checklist.md`、`delivery-package.md` |
+| 日常巡检、故障分级和恢复动作 | `operations-runbook.md` |
+
+## 6. 当前文档使用边界
 
 - 要理解 Core 当前事实，优先读 `docs/01-getting-started/document-map.md` 与 `docs/04-project-development/`。
 - 要理解模块作者如何创建、调试和交付模块，先读 `docs/03-developer-guide/index.md`，再按需进入对应章节。
 - 不再回读旧归档正文，也不再使用 `docs/project-process/` 或 `docs/model-development/` 作为正式入口。
 
-## 5. 当前风险与注意事项
+## 7. 当前风险与注意事项
 
 - 工作区可能处于多人并行编辑状态；只收口你负责的文档面，不顺手覆盖别人正在整理的章节。
 - `backend-design.md` 已不再是当前事实入口，涉及 Core 实现时以 `system-architecture.md`、`module-boundaries.md` 和当前代码为准。
+- 发布和运维动作优先复用新增的验收、交付和运行文档，不再把检查项散落在聊天记录或临时清单里。

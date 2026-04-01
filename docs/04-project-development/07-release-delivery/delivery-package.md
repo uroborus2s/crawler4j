@@ -1,0 +1,46 @@
+# 交付包清单
+
+**项目名称：** 蛛行演略（crawler4j）
+**文档状态：** 草稿
+**负责人：** 当前仓库维护者
+**主要读者：** 发布负责人 | 交付方 | 运维 | 管理员
+**上游输入：** `acceptance-checklist.md` | `release-notes.md` | `version-governance.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
+**下游输出：** 交付签收 | `docs/02-user-guide/admin-guide.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
+**关联 ID：** `REL-005`, `REL-006`, `TASK-017`, `REQ-004`
+**最后更新：** 2026-04-02
+
+## 1. 用途
+
+本文件定义一次正式交付至少要包含哪些内容，避免“代码能跑，但交付对象拿不到完整材料”。
+
+## 2. 交付包最小内容
+
+| 类别 | 必需内容 | 说明 |
+|---|---|---|
+| 版本与说明 | `release-notes.md` | 说明本次交付范围、版本和已知限制 |
+| 验收材料 | `acceptance-checklist.md` | 说明当前是否满足发布 Gate |
+| 运行材料 | `deployment-guide.md`、`operations-runbook.md` | 说明怎么部署、巡检和处理故障 |
+| 管理材料 | `admin-guide.md` | 说明管理员/实施者怎么接手环境和模块 |
+| 产物 | Root 正式发布产物、必要时的 SDK / Contracts 产物 | 具体名称和路径按本次发布补齐 |
+| 版本事实 | 目标版本号、对应 Git tag、SDK / Contracts 版本 | 与 `version-governance.md` 保持一致 |
+
+## 3. 当前基线可复用情况
+
+| 项目 | 当前状态 | 说明 |
+|---|---|---|
+| 发布说明基线 | 已具备 | 已能区分当前工作区和最近正式发布 |
+| 验收清单模板 | 已具备 | 可直接用于下一次正式发布 Gate |
+| 部署与运行文档 | 已具备 | 部署说明、运行手册、管理员指南已补齐 |
+| 正式交付产物 | 待发布时补齐 | 当前仅完成本地构建验证，不等于已形成正式发布物 |
+
+## 4. 使用规则
+
+- 每一次正式交付都应原地更新本文件，不创建 `delivery-package-v2.md`。
+- 如果本次不交付 SDK / Contracts，必须显式写明“不包含”的原因。
+- 如果交付对象不是 Core 维护者，而是现场实施或运维团队，必须同时附带管理员和运行文档。
+
+## 5. 变更记录
+
+| 日期 | 变更内容 | 变更人 |
+|---|---|---|
+| 2026-04-02 | 新增正式交付包清单并登记当前基线可复用材料 | Codex |

@@ -5,9 +5,9 @@
 **负责人：** 当前仓库维护者
 **主要读者：** 维护者 | 发布负责人 | Dev
 **上游输入：** `docs/04-project-development/04-design/technical-selection.md` | 本地验证结果
-**下游输出：** `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md` | `docs/02-user-guide/user-guide.md` | 后续运维文档
+**下游输出：** `docs/04-project-development/08-operations-maintenance/operations-runbook.md` | `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md` | `docs/02-user-guide/user-guide.md` | `docs/02-user-guide/admin-guide.md`
 **关联 ID：** `OPS-001`, `OPS-002`, `OPS-003`, `REQ-001`, `REQ-003`, `REQ-004`
-**最后更新：** 2026-03-26
+**最后更新：** 2026-04-02
 
 ## 1. 环境准备
 
@@ -69,5 +69,6 @@ uv run python -m crawler4j_sdk.cli.commands --help
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-02 | 下游输出补齐到运行手册和管理员指南 | Codex |
 | 2026-03-28 | 同步四大模块结构下的上下游文档路径 | Codex |
 | 2026-03-26 | 初始部署与运行说明 | Codex |

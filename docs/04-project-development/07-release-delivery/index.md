@@ -1,7 +1,19 @@
 # 发布与交付概览
 
-本目录收纳验收、发布、交付和回滚相关文档。
+本目录面向发布负责人、QA 和交付方，回答“能不能发、发什么、交给谁、还缺什么”。
 
-- 本页是该目录的正文首页，用于说明范围、读者和维护边界。
-- 目录树、页面路径和访问级别统一由根 `docs/index.md` 声明，这里不重复维护页面清单。
-- 本目录下的 Markdown 页面、契约文件和资源文件应随内容变更一起演进。
+## 关键页面
+
+| 页面 | 作用 |
+|---|---|
+| `acceptance-checklist.md` | 发布前 Gate 检查和阻塞项判断 |
+| `release-notes.md` | 当前工作区与最近正式发布的差异说明 |
+| `delivery-package.md` | 交付物清单、交付条件和签收边界 |
+| `version-governance.md` | 根应用、SDK、Contracts 和 Git tag 的版本规则 |
+
+## 建议阅读顺序
+
+1. 先看 [版本治理规则](version-governance.md)。
+2. 再看 [发布说明](release-notes.md)。
+3. 发布前执行 [验收检查清单](acceptance-checklist.md)。
+4. 对外或跨团队交付时补齐 [交付包清单](delivery-package.md)。

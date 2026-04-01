@@ -1,8 +1,13 @@
 # 需求追踪矩阵
 
 **项目名称：** 蛛行演略（crawler4j）  
+**文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
-**最后更新：** 2026-03-31  
+**主要读者：** 架构 | 开发 | QA | 发布负责人 | 运维  
+**上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | `docs/04-project-development/06-testing-verification/test-plan.md`  
+**下游输出：** `docs/04-project-development/07-release-delivery/acceptance-checklist.md` | `docs/04-project-development/07-release-delivery/release-notes.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`  
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`  
+**最后更新：** 2026-04-02  
 
 ## 1. 需求到设计/实施/测试映射
 

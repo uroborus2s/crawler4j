@@ -19,7 +19,7 @@
 
 - 任务：TASK-011-mms-settings-store-and-module-state-persistence、TASK-012-mms-trust-gate-and-custom-ui-loading、TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler
 - 变更：CR-001-version-and-release-governance-alignment、CR-002-quality-gate-and-docs-navigation-alignment、CR-003-mms-settings-and-ui-extension-compliance
-- 文档：根 `docs/index.md` 已收敛为四大模块目录树；第一部分 `docs/01-getting-started/` 已补齐项目概览与快速开始；第二部分 `docs/02-user-guide/` 已补齐安装/配置/使用说明；第三部分 `docs/03-developer-guide/` 已直接作为 module 开发指南，且各级概览页标题已统一为中文，并已把“模块只能使用 Core 注入的 `ctx.db` 最小数据能力”和“SDK 2.0.0 已删除 DataService 兼容层，旧模块必须升级”融入概念约束、快速开始、清单契约、TaskScript、CLI/UI、Core 能力与排错章节；Core 维护入口位于 `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md`；`REQ-006` / `TASK-013` 已完成实现、测试与文档收口
+- 文档：根 `docs/index.md` 已补全四大模块目录树和 `docs/03-developer-guide/` 正式导航；第二部分 `docs/02-user-guide/` 已拆分出 `admin-guide.md`；第五部分 `docs/04-project-development/05-development-process/` 已补齐 `execution-log.md`；第七、八部分已补齐 `acceptance-checklist.md`、`delivery-package.md`、`operations-runbook.md`；`interface-matrix.md`、`software-development-process.md`、`skill-evolution-plan.md` 已从占位页重写为正式文档；`REQ-006` / `TASK-013` 已完成实现、测试与文档收口
 - 缺陷：BUG-003-pyqt-runtime-blocked-by-system-policy、BUG-004-zip-upgrade-leaves-stale-files、BUG-005-hybrid-acquisition-mode-declared-but-rejected
 
 ## 下一步建议
