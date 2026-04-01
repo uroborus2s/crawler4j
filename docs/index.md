@@ -127,6 +127,9 @@ mkdocs:
               access: private
         - title: 08 迁移指南
           children:
+            - title: 概览
+              path: 03-developer-guide/08-migration/index.md
+              access: private
             - title: Shim 迁移
               path: 03-developer-guide/08-migration/01-shim-migration.md
               access: private
@@ -276,14 +279,14 @@ mkdocs:
 
 # crawler4j
 
-这是 `crawler4j` 的正式项目文档源。AI 软件工厂在项目仓库内直接维护这些文档，`docs-stratego` 通过 Git 子模块或等价的仓级挂载方式聚合展示，但不反向改写源文档。
+这是 `crawler4j` 的正式项目文档源。AI 软件工厂 在项目仓库内直接维护这些文档，`docs-stratego`  通过 Git 子模块或等价的仓级挂载方式聚合展示，但不反向改写源文档。
 
 ## 四大模块
 
 | 模块 | 回答的问题 | 主要读者 |
 |---|---|---|
 | `docs/01-getting-started/` | 这是什么项目、文档怎么读、从哪里开始 | 新维护者 / 协作者 |
-| `docs/02-user-guide/` | 如何安装、配置、使用和管理宿主应用 | 宿主使用者 / 管理员 / 协作者 |
+| `docs/02-user-guide/` | 如何安装、配置、使用 和管理宿主应用 | 宿主使用者 / 管理员 / 协作者 |
 | `docs/03-developer-guide/` | 如何开发、调试、交付和迁移模块 | 模块开发者 / Core 集成人员 |
 | `docs/04-project-development/` | 项目如何治理、设计、实施、验证、发布、运维和追踪 | Tech Lead / Dev / QA / Release / Ops |
 
@@ -323,8 +326,8 @@ mkdocs:
 
 ## 维护规则
 
-- 只有根 `docs/index.md` 声明全站 `mkdocs.nav`、页面路径和页面权限。
-- 子目录 `index.md` 只作为正文首页和资源权限锚点，不再承担导航声明职责。
-- 页面、图片和附件跟随所属目录维护；资源文件放在当前目录或当前目录的 `assets/` 下。
+- 只有根 `docs/index.md` 声明全站 `mkdocs.nav` 、页面路径和页面权限。
+- 子目录 `index.md` 只作为正文首页和资源权限锚 点，不再承担导航声明职责。
+- 页面、图片和附件跟随所属目录维护；资源文件放 在当前目录或当前目录的 `assets/` 下。
 - 仓内链接统一使用相对路径，不写机器绝对路径。
 - 新增、删除或移动 Markdown 页面后，同步刷新根 `docs/index.md` 的目录树、`docs/04-project-development/10-traceability/document-index.md` 和 `.factory/memory/doc-map.md`。
