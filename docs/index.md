@@ -34,94 +34,6 @@ mkdocs:
         - title: 使用说明
           path: 02-user-guide/usage.md
           access: public
-    - title: 开发者指南
-      children:
-        - title: 概览
-          path: 03-developer-guide/index.md
-          access: public
-        - title: 01 概念与约束
-          children:
-            - title: 概览
-              path: 03-developer-guide/01-concepts/index.md
-              access: public
-            - title: 1.1 系统地图与术语
-              path: 03-developer-guide/01-concepts/01-system-map.md
-              access: public
-            - title: 1.2 当前真实约束
-              path: 03-developer-guide/01-concepts/02-real-constraints.md
-              access: public
-        - title: 02 快速开始
-          children:
-            - title: 概览
-              path: 03-developer-guide/02-quickstart/index.md
-              access: public
-            - title: 2.1 开发前准备
-              path: 03-developer-guide/02-quickstart/01-environment-setup.md
-              access: public
-            - title: 2.2 创建第一个模块
-              path: 03-developer-guide/02-quickstart/02-create-first-module.md
-              access: public
-        - title: 03 项目结构与契约
-          children:
-            - title: 概览
-              path: 03-developer-guide/03-project-structure/index.md
-              access: public
-            - title: 3.1 目录结构与入口
-              path: 03-developer-guide/03-project-structure/01-layout-and-entrypoints.md
-              access: public
-            - title: 3.2 `module.yaml` 清单契约
-              path: 03-developer-guide/03-project-structure/02-module-manifest.md
-              access: public
-        - title: 04 模块开发
-          children:
-            - title: 概览
-              path: 03-developer-guide/04-development/index.md
-              access: public
-            - title: 4.1 编写 TaskScript
-              path: 03-developer-guide/04-development/01-taskscript.md
-              access: public
-            - title: 4.2 编写 Workflow
-              path: 03-developer-guide/04-development/02-workflow.md
-              access: public
-            - title: 4.3 CLI 命令与 UI 配置
-              path: 03-developer-guide/04-development/03-cli-and-ui.md
-              access: public
-            - title: 4.4 Core 提供的能力清单
-              path: 03-developer-guide/04-development/04-core-capabilities.md
-              access: public
-            - title: 4.5 Core 注入能力 API 参考
-              path: 03-developer-guide/04-development/05-api-reference.md
-              access: public
-            - title: 4.6 模块开发最佳实践
-              path: 03-developer-guide/04-development/06-best-practices.md
-              access: public
-        - title: 05 调试
-          children:
-            - title: 概览
-              path: 03-developer-guide/05-debugging/index.md
-              access: public
-            - title: 5.1 DevLink 与真实调试链路
-              path: 03-developer-guide/05-debugging/01-devlink-and-debug.md
-              access: public
-        - title: 06 交付与验收
-          children:
-            - title: 概览
-              path: 03-developer-guide/06-delivery/index.md
-              access: public
-            - title: 6.1 zip 打包与正式安装
-              path: 03-developer-guide/06-delivery/01-zip-installation.md
-              access: public
-            - title: 6.2 最小验收清单
-              path: 03-developer-guide/06-delivery/02-acceptance-checklist.md
-              access: public
-        - title: 07 排错
-          children:
-            - title: 概览
-              path: 03-developer-guide/07-troubleshooting/index.md
-              access: public
-            - title: 7.1 常见问题与坑位
-              path: 03-developer-guide/07-troubleshooting/01-common-pitfalls.md
-              access: public
     - title: 项目开发文档（内）
       children:
         - title: 概览
@@ -148,6 +60,9 @@ mkdocs:
               access: private
             - title: 旧文档审计与收敛策略
               path: 04-project-development/02-discovery/legacy-doc-audit.md
+              access: private
+            - title: 头脑风暴记录：模块根 `__init__.py` 自动托管改造
+              path: 04-project-development/02-discovery/brainstorm-record.md
               access: private
         - title: 需求
           children:

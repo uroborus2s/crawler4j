@@ -2,8 +2,7 @@
   "public_include": [
     "docs/index.md",
     "docs/01-getting-started/**",
-    "docs/02-user-guide/**",
-    "docs/03-developer-guide/**"
+    "docs/02-user-guide/**"
   ],
   "private_include": [
     "docs/**",

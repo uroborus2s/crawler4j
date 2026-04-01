@@ -38,3 +38,4 @@
 - 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。
 - 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。
 - 2026-03-28: 刷新 docs-stratego 目录索引，负责人：Codex。
+- 2026-04-01: 升级 docs 到最新源文档标准，负责人：文档管理员。
