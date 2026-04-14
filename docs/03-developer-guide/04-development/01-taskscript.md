@@ -86,7 +86,7 @@ class FetchHotelsTask(TaskScript):
 | `ctx.state` | 与工作流共享状态 |
 | `ctx.screenshot()` | 截图取证 |
 | `ctx.should_stop()` | 检查停止标志 |
-| `ctx.db` / `ctx.ip_pool` / `ctx.env_ops` / `ctx.ui` | 宿主注入的能力接口 |
+| `ctx.tools` | 宿主注入的统一工具入口 |
 
 如果你想看完整、正式的能力面，而不是只看“最常用的那几个”，请直接读：
 
@@ -107,30 +107,35 @@ class FetchHotelsTask(TaskScript):
 ## 写任务脚本时，数据能力应该怎么用
 
 如果你的任务脚本需要读写模块数据，不要自己去连数据库。
-当前正确做法只有一个：通过 Core 注入的 `ctx.db` 使用最小数据能力。
-`crawler4j-sdk 2.0.0` 起，SDK 不再提供 `DataService` 兼容名，也不再保留旧聚合对象写法。
+当前正确做法只有一个：通过 Core 注入的 `ctx.tools.call(...)` 使用正式工具。
+`crawler4j-sdk 1.1.0` 起，模块侧统一通过 `TaskContext.tools` 访问宿主扩展能力。
 
 也就是说，当前模块里允许依赖的数据能力只有：
 
-- `list_records(dataset)`：查询模块数据集
-- `replace_records(dataset, records)`：回写整个数据集
-- `get_state` / `set_state` / `exists_state`：保存轻量运行状态
-- `acquire_lock` / `release_lock` / `is_locked`：做幂等锁
+- `db.list_records`
+- `db.replace_records`
+- `db.get_state` / `db.set_state` / `db.exists_state`
+- `db.acquire_lock` / `db.release_lock` / `db.is_locked`
 
 ### 一个最小示例
 
 ```python
-if ctx.db is not None:
-    records = ctx.db.list_records("orders")
-    cursor = ctx.db.get_state("hotel_demo:orders:cursor") or {"page": 1}
+if ctx.tools and ctx.tools.has_tool("db.list_records"):
+    records = ctx.tools.call("db.list_records", dataset="orders")
+    cursor = ctx.tools.call("db.get_state", key="hotel_demo:orders:cursor") or {"page": 1}
 
-    if ctx.db.acquire_lock("orders", "sync", ttl=60):
+    if ctx.tools.call("db.acquire_lock", scope="orders", key="sync", ttl=60):
         try:
             records.append({"id": "o-1", "status": "new"})
-            ctx.db.replace_records("orders", records)
-            ctx.db.set_state("hotel_demo:orders:cursor", {"page": cursor["page"] + 1}, ttl=3600)
+            ctx.tools.call("db.replace_records", dataset="orders", records=records)
+            ctx.tools.call(
+                "db.set_state",
+                key="hotel_demo:orders:cursor",
+                value={"page": cursor["page"] + 1},
+                ttl=3600,
+            )
         finally:
-            ctx.db.release_lock("orders", "sync")
+            ctx.tools.call("db.release_lock", scope="orders", key="sync")
 ```
 
 ### 为什么这里强调自己带命名空间
@@ -148,8 +153,8 @@ if ctx.db is not None:
 如果你接手的是旧模块，先做下面这组直接替换，再继续写业务逻辑：
 
 1. 删除 `DataService` 导入
-2. 把 `ctx.db.storage.state` 改成 `ctx.db.get_state()` / `set_state()`
-3. 把旧账号、任务等聚合入口改成 `list_records()` / `replace_records()`
+2. 把历史 `ctx.db.*` 调用改成 `ctx.tools.call("db.*", ...)`
+3. 把旧账号、任务等聚合入口改成 `db.list_records` / `db.replace_records`
 
 ## 什么时候返回失败，什么时候抛异常
 

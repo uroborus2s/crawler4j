@@ -4,7 +4,7 @@
 **文档状态：** 已批准
 **负责人：** 当前仓库维护者
 **主要读者：** Core 维护者 | 开发 | QA
-**上游输入：** `src/ui/app.py` | `src/core/` | `crawler4j_sdk/` | `.factory/project.json`
+**上游输入：** `packages/crawler4j/src/ui/app.py` | `packages/crawler4j/src/core/` | `packages/crawler4j-sdk/` | `.factory/project.json`
 **下游输出：** 各阶段过程文档 | `deployment-guide.md` | `operations-runbook.md` | `.factory/memory/`
 **关联 ID：** `OPS-003`, `DOC-105`, `REQ-005`
 **最后更新：** 2026-04-02
@@ -22,26 +22,25 @@
 
 ## 2. 先记住这 8 个当前事实
 
-1. 根应用真实入口是 `src.ui.app:main`，`uv run start` 与它一致。
+1. 根应用真实入口是 `src.ui.app:main`，当前从 workspace 根通过 `uv run python -m src.ui.app` 启动。
 2. 应用启动链会初始化数据库、日志、REM、ATM，再创建 `Shell`。
-3. `modules/` 现在只是占位目录；真实模块来自应用数据目录下的安装包或 DevLink。
+3. `packages/crawler4j/modules/` 现在只是占位目录；真实模块来自应用数据目录下的安装包或 DevLink。
 4. `ModuleRegistry` 支持扫描 builtin、external、dev link 三类来源，但正式交付链仍以 zip 安装验收为准。
 5. 调试会话只允许针对 `ModuleSource.DEV_LINK` 模块创建。
-6. `crawler4j_sdk` 和 `crawler4j_contracts` 已独立成包，CLI 入口是 `crawler4j_sdk.cli.commands:main`。
+6. `crawler4j-sdk` 和 `crawler4j-contracts` 已独立成包，CLI 入口是 `crawler4j_sdk.cli.commands:main`。
 7. 当前默认质量门仍以 `uv run pytest -q`、`uv run ruff check .`、UI smoke、build 验证为主。
 8. 当前最大剩余风险不是文档，而是 `ctrip` 真实站点 E2E 仍未回放。
 
 ## 3. 日常开发最常用命令
 
 ```bash
-uv sync
-uv run start
+uv sync --all-packages
 uv run python -m src.ui.app
 uv run pytest -q
 uv run ruff check .
 uv run python scripts/smoke_test_ui.py
 uv run python -m crawler4j_sdk.cli.commands --help
-uv build --out-dir /tmp/crawler4j-build-check
+uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
 ```
 
 ## 4. 改动某块代码时要同步什么

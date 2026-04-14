@@ -8,7 +8,7 @@ version: 1.0.0
 display_name: Hotel Demo
 description: 示例模块
 author: crawler4j
-sdk_version_range: ">=2.0.0"
+sdk_version_range: ">=1.1.0"
 
 ui_extension:
   type: declarative
@@ -60,7 +60,7 @@ workflows:
 SDK 兼容范围。当前扫描器最稳定支持的是简单的 `>=x.y.z` 格式，因此建议写成：
 
 ```yaml
-sdk_version_range: ">=2.0.0"
+sdk_version_range: ">=1.1.0"
 ```
 
 第一次开发模块时，照着这个格式写就够了。不要把版本范围写成一大串复杂表达式，然后再猜宿主到底怎么判断兼容。
@@ -120,7 +120,7 @@ entry: config_schema.json
 第一次开发模块时，优先遵守下面这组约束：
 
 1. 目录名、包名、`module.yaml.name` 保持一致
-2. `sdk_version_range` 用简单的 `>=2.0.0`
+2. `sdk_version_range` 用简单的 `>=1.1.0`
 3. 每加一个工作流，都同步更新 `module.yaml`
 4. 不要把复杂 UI 声明、实验性字段和历史遗留字段一起塞进去
 

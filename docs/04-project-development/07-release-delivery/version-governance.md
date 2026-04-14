@@ -4,15 +4,15 @@
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 发布负责人 | Tech Lead | Dev | QA  
-**上游输入：** `pyproject.toml` | `src/__version__.py` | Git tag | 子包 `pyproject.toml`  
+**上游输入：** `packages/crawler4j/pyproject.toml` | Git tag | 子包 `pyproject.toml`  
 **下游输出：** `release-notes.md` | `deployment-guide.md` | `.factory/project.json`  
 **关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `NFR-002`  
 **最后更新：** 2026-03-31  
 
 ## 1. 规则
 
-1. 根应用当前工作区版本以根 `pyproject.toml` 的 `[project].version` 为唯一事实源。
-2. `src/__version__.py` 必须与根 `pyproject.toml` 完全一致，只作为运行时显示镜像。
+1. 根应用当前工作区版本以 `packages/crawler4j/pyproject.toml` 的 `[project].version` 为唯一事实源。
+2. 运行时版本显示必须由代码读取根应用包元数据，不再维护独立的 `__version__.py` 镜像文件。
 3. Git tag 只表示最近一次正式发布，可以落后于当前工作区版本。
 4. `crawler4j-sdk` 与 `crawler4j-contracts` 是独立版本线，不要求与根应用版本号相同。
 5. 发布说明必须同时区分：
@@ -24,11 +24,11 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用工作区版本 | `0.1.2.dev20260326` | 当前仓库 HEAD 的未发布开发版 |
-| 根应用运行时版本 | `0.1.2.dev20260326` | 与根 `pyproject.toml` 镜像一致 |
+| 根应用包版本 | `0.1.2.dev20260326` | 当前仓库 HEAD 的未发布开发版 |
+| 根应用运行时版本 | `0.1.2.dev20260326` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.1.1` | 最新已知正式发布 |
-| SDK | `2.0.0` | 当前工作区 SDK 版本；该版本移除了 `DataService` 兼容层 |
-| Contracts | `1.0.1` | 当前已发布版本 |
+| SDK | `1.1.0` | 当前工作区 SDK 版本；该版本统一切到 `TaskContext.tools` 扩展入口 |
+| Contracts | `1.1.0` | 当前工作区 Contracts 版本；承载统一 `tools` 契约 |
 
 ## 3. 为什么这样定义
 
@@ -40,7 +40,7 @@
 
 在下一次正式发布根应用前，至少完成：
 
-1. 将根 `pyproject.toml` 与 `src/__version__.py` 从开发版切到目标正式版本
+1. 将 `packages/crawler4j/pyproject.toml` 从开发版切到目标正式版本
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
@@ -53,3 +53,4 @@
 |---|---|---|
 | 2026-03-26 | 建立根应用 / 运行时 / tag / SDK / Contracts 的统一版本治理规则 | Codex |
 | 2026-03-31 | SDK 当前口径提升到 `2.0.0`，移除 `DataService` 兼容层 | Codex |
+| 2026-04-15 | SDK `1.1.0` / Contracts `1.1.0` 当前口径统一收敛到 `TaskContext.tools` | Codex |

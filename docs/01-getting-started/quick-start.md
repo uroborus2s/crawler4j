@@ -16,8 +16,8 @@
 如果你已经拿到源码仓库，当前最短启动路径是：
 
 ```bash
-uv sync
-uv run start
+uv sync --all-packages
+uv run python -m src.ui.app
 ```
 
 如果你需要显式从 Python 模块入口启动，也可以执行：
@@ -56,13 +56,12 @@ uv run pytest -q
 ## 5. 当前最常用命令
 
 ```bash
-uv sync
-uv run start
+uv sync --all-packages
 uv run python -m src.ui.app
 uv run pytest -q
 uv run ruff check .
 uv run python scripts/smoke_test_ui.py
-uv build --out-dir /tmp/crawler4j-build-check
+uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
 uv run python -m crawler4j_sdk.cli.commands --help
 ```
 

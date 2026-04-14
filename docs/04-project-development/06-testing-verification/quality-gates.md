@@ -22,18 +22,18 @@
 | 单元/集成测试 | `uv run pytest -q` | 验证当前维护范围内的核心能力、SDK 契约和集成链路 |
 | Lint | `uv run ruff check .` | 对维护范围内代码执行静态检查 |
 | UI smoke | `uv run python scripts/smoke_test_ui.py` | 验证桌面入口最小可运行链路 |
-| 根应用构建 | `uv build --out-dir /tmp/crawler4j-build-check` | 验证根包可产出 wheel/sdist |
-| SDK / Contracts 构建 | `cd crawler4j_sdk && uv build` / `cd crawler4j_contracts && uv build` | 验证外部分发物可构建 |
+| 根应用构建 | `uv build --package crawler4j --out-dir /tmp/crawler4j-build-check` | 验证根应用包可产出 wheel/sdist |
+| SDK / Contracts 构建 | `uv build --package crawler4j-sdk` / `uv build --package crawler4j-contracts` | 验证外部分发物可构建 |
 
 ## 3. Ruff 范围规则
 
 当前默认 `ruff` gate 覆盖：
 
-- `src/`
-- `crawler4j_sdk/`
-- `crawler4j_contracts/`
-- `scripts/` 中仍作为维护资产的脚本
-- `tests/unit/`、`tests/integration/` 中的常规自动化测试
+- `packages/crawler4j/src/`
+- `packages/crawler4j-sdk/`
+- `packages/crawler4j-contracts/`
+- 仓库根 `scripts/` 中仍作为维护资产的开发/验证脚本
+- `packages/crawler4j/tests/unit/`、`packages/crawler4j/tests/integration/` 中的常规自动化测试
 
 当前默认 `ruff` gate 不覆盖以下历史人工辅助脚本：
 

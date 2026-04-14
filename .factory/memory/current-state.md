@@ -19,7 +19,7 @@
 
 - 任务：TASK-011-mms-settings-store-and-module-state-persistence、TASK-012-mms-trust-gate-and-custom-ui-loading、TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler
 - 变更：CR-001-version-and-release-governance-alignment、CR-002-quality-gate-and-docs-navigation-alignment、CR-003-mms-settings-and-ui-extension-compliance
-- 文档：根 `docs/index.md` 已补全四大模块目录树和 `docs/03-developer-guide/` 正式导航；第二部分 `docs/02-user-guide/` 已拆分出 `admin-guide.md`；第五部分 `docs/04-project-development/05-development-process/` 已补齐 `execution-log.md`；第七、八部分已补齐 `acceptance-checklist.md`、`delivery-package.md`、`operations-runbook.md`；`interface-matrix.md`、`software-development-process.md`、`skill-evolution-plan.md` 已从占位页重写为正式文档；`REQ-006` / `TASK-013` 已完成实现、测试与文档收口；`core:data_table` 的 `declare_ui` / create/update handler 契约与 DevLink 调试刷新语义已同步到正式文档；ATM 已收敛到“任务直接配置 RunProfile”的单入口，侧边栏和内部 `TSM` 依赖均已删除
+- 文档：根 `docs/index.md` 已补全四大模块目录树和 `docs/03-developer-guide/` 正式导航；第二部分 `docs/02-user-guide/` 已拆分出 `admin-guide.md`；第五部分 `docs/04-project-development/05-development-process/` 已补齐 `execution-log.md`；第七、八部分已补齐 `acceptance-checklist.md`、`delivery-package.md`、`operations-runbook.md`；`interface-matrix.md`、`software-development-process.md`、`skill-evolution-plan.md` 已从占位页重写为正式文档；`REQ-006` / `TASK-013` 已完成实现、测试与文档收口；`core:data_table` 的 `declare_ui` / create/update handler 契约与 DevLink 调试刷新语义已同步到正式文档；ATM 已收敛到“任务直接配置 RunProfile”的单入口，侧边栏和内部 `TSM` 依赖均已删除；`TaskContext` 的宿主扩展能力已统一收敛到 `ctx.tools.call(...)`
 - 缺陷：BUG-003-pyqt-runtime-blocked-by-system-policy、BUG-004-zip-upgrade-leaves-stale-files、BUG-005-hybrid-acquisition-mode-declared-but-rejected
 
 ## 下一步建议

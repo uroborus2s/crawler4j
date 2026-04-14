@@ -148,7 +148,7 @@ module.yaml.name
 
 先停下来。当前正式约束不是这样。
 
-现在模块里真正稳定可用的数据接口只有 `ctx.db`，而且能力面只覆盖：
+现在模块里真正稳定可用的数据接口只有 `ctx.tools.call("db.*", ...)`，而且能力面只覆盖：
 
 1. 数据集查询
 2. 数据集写入
@@ -167,16 +167,16 @@ module.yaml.name
 
 优先改成下面这组当前正式接口：
 
-- `ctx.db.list_records(...)`
-- `ctx.db.replace_records(...)`
-- `ctx.db.get_state(...)`
-- `ctx.db.set_state(...)`
-- `ctx.db.acquire_lock(...)`
+- `ctx.tools.call("db.list_records", ...)`
+- `ctx.tools.call("db.replace_records", ...)`
+- `ctx.tools.call("db.get_state", ...)`
+- `ctx.tools.call("db.set_state", ...)`
+- `ctx.tools.call("db.acquire_lock", ...)`
 
 如果你在升级旧模块，再补两步：
 
-1. 删除 `DataService` 导入，必要时改成 `DatabaseCapability`
-2. 把 `module.yaml.sdk_version_range` 改成 `>=2.0.0`
+1. 删除 `DataService` 导入和专用 `ctx.db` 依赖
+2. 把 `module.yaml.sdk_version_range` 改成 `>=1.1.0`
 
 ## 最后给小白的一条建议
 

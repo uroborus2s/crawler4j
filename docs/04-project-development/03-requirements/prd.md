@@ -47,9 +47,9 @@
 - 优先级：P0
 - 描述：系统必须提供可验证的桌面应用入口，完成数据库、日志、核心服务和 UI 壳的初始化。
 - 用户故事：作为维护者，我希望应用入口与发布配置一致，以便能可靠启动和打包桌面应用。
-- 前置条件：Python 3.12、依赖已通过 `uv sync` 安装
+- 前置条件：Python 3.12、依赖已通过 `uv sync --all-packages` 安装
 - 业务规则：入口路径、脚本声明、打包规格必须保持一致
-- 依赖项：`src/ui/app.py`, `pyproject.toml`, `crawler4j.spec`
+- 依赖项：`packages/crawler4j/src/ui/app.py`, `packages/crawler4j/pyproject.toml`, `packages/crawler4j/crawler4j.spec`
 - 排除范围：本次不引入新的 GUI 功能
 
 验收标准：
@@ -64,22 +64,22 @@
 - 用户故事：作为最终使用者或模块作者，我希望外部安装模块或 DevLink 模块可以执行其声明的工作流，以便完成自动化任务与真实调试。
 - 前置条件：模块目录包含 `module.yaml` 与对应实现
 - 业务规则：模块不应依赖已删除的旧路径
-- 依赖项：`modules/README.md`, `src/core/mms/`, `src/core/atm/`, `src/core/debug/`
+- 依赖项：`packages/crawler4j/modules/README.md`, `packages/crawler4j/src/core/mms/`, `packages/crawler4j/src/core/atm/`, `packages/crawler4j/src/core/debug/`
 - 排除范围：不要求本次新增模块
 
 验收标准：
 
 - [ ] `UAT-003` `ctrip` 登录工作流可执行
-- [ ] `UAT-004` `ctrip labor_workflow` 不再依赖 `src.automation.*`
+- [x] `UAT-004` `ctrip labor_workflow` 不再依赖 `src.automation.*`
 
 ### `REQ-003` 项目必须提供可用的 SDK / Contracts / CLI 开发链路
 
 - 优先级：P1
 - 描述：SDK 与 Contracts 必须可构建，CLI 必须可以展示帮助并生成模块脚手架。
 - 用户故事：作为模块开发者，我希望 SDK 与 CLI 可靠，以便我能创建或维护模块项目。
-- 前置条件：`crawler4j_sdk/` 与 `crawler4j_contracts/` 可独立构建
+- 前置条件：`packages/crawler4j-sdk/` 与 `packages/crawler4j-contracts/` 可独立构建
 - 业务规则：SDK 版本与 Contracts 兼容范围需明确
-- 依赖项：子包 `pyproject.toml`, `crawler4j_sdk/cli/commands.py`
+- 依赖项：子包 `pyproject.toml`, `packages/crawler4j-sdk/src/cli/commands.py`
 - 排除范围：不要求本次发布到外部仓库
 
 验收标准：
@@ -95,7 +95,7 @@
 - 用户故事：作为模块开发者，我希望模块根入口由工具托管，以便我在新增任务、工作流或调整默认运行方式时，不需要再手改根 `__init__.py`。
 - 前置条件：模块目录仍包含 `module.yaml` 与根 `__init__.py`
 - 业务规则：必须保持当前 Core 仍通过根 `__init__.py` 加载模块；旧模块升级路径统一为按最新方式重新初始化，不再为旧模板提供兼容承诺
-- 依赖项：`crawler4j_sdk/cli/templates.py`, `crawler4j_sdk/cli/commands.py`, `src/core/mms/service.py`, 模块开发者指南
+- 依赖项：`packages/crawler4j-sdk/src/cli/templates.py`, `packages/crawler4j-sdk/src/cli/commands.py`, `packages/crawler4j/src/core/mms/service.py`, 模块开发者指南
 - 排除范围：本轮不要求保留旧式完整 `__init__.py` 模板；不要求 Core 改为直接按 manifest 入口加载
 
 验收标准：
@@ -112,12 +112,12 @@
 - 用户故事：作为发布负责人，我希望所有发布信号一致，以便能判断当前到底发布了什么。
 - 前置条件：存在统一的版本事实源与 release 说明
 - 业务规则：构建成功不等于可运行，必须补充入口和 smoke 验证
-- 依赖项：`pyproject.toml`, `src/__version__.py`, Git tag, `docs/04-project-development/07-release-delivery/version-governance.md`, `docs/04-project-development/07-release-delivery/release-notes.md`
+- 依赖项：`packages/crawler4j/pyproject.toml`, `packages/crawler4j/src/core/system/version_service.py`, Git tag, `docs/04-project-development/07-release-delivery/version-governance.md`, `docs/04-project-development/07-release-delivery/release-notes.md`
 - 排除范围：不要求本次直接上线新版本
 
 验收标准：
 
-- [x] `UAT-008` 根版本与运行时版本一致，且 release notes 明确区分当前工作区版本与最近正式 tag
+- [x] `UAT-008` 根版本由 `packages/crawler4j/pyproject.toml` 单点声明，且 release notes 明确区分当前工作区版本与最近正式 tag
 - [x] `UAT-009` 发布说明明确区分 app / sdk / contracts
 
 ### `REQ-005` 项目必须在软件工厂内有可持续推进的治理基线

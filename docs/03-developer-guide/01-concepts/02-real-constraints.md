@@ -79,7 +79,7 @@ Core 扫描与加载模块时，关键依据是：
 扫描器现在对版本范围的兼容性判断是简化实现，最可靠的是：
 
 ```yaml
-sdk_version_range: ">=2.0.0"
+sdk_version_range: ">=1.1.0"
 ```
 
 复杂表达式即使写出来，也不建议当成当前交付口径。
@@ -127,28 +127,28 @@ sdk_version_range: ">=2.0.0"
 
 如果答案是后者，就不要用改业务代码的方式去“硬撞”它。应该先回到这页，确认自己是不是踩到了这里列出的约束。
 
-## 11. 模块的数据能力只能来自 `ctx.db`
+## 11. 模块的宿主扩展能力只能来自 `ctx.tools`
 
 当前模块开发有一个明确工程边界：
 
-- 模块只能使用 Core 注入到 `TaskContext.db` 上的数据能力
+- 模块只能使用 Core 注入到 `TaskContext.tools` 上的正式工具
 - 不能直接连接宿主数据库
 - 不能假设宿主会提供 ORM Session、原生 SQLite 连接或私有仓储对象
 
 当前正式支持的数据能力只包括：
 
-1. 数据集查询：`list_records(dataset)`
-2. 数据集写入：`replace_records(dataset, records)`
-3. 轻量状态：`get_state` / `set_state` / `exists_state`
-4. 幂等锁：`acquire_lock` / `release_lock` / `is_locked`
+1. 数据集查询：`db.list_records`
+2. 数据集写入：`db.replace_records`
+3. 轻量状态：`db.get_state` / `db.set_state` / `db.exists_state`
+4. 幂等锁：`db.acquire_lock` / `db.release_lock` / `db.is_locked`
 
-如果你看到旧资料里还有 `DataService`、`ctx.db.storage`、`ctx.db.accounts` 这类说法，请优先以当前 `TaskContext.db` 的真实接口为准。对新模块来说，不要继续沿用旧抽象。
+如果你看到旧资料里还有 `DataService`、`ctx.db.storage`、`ctx.db.accounts` 这类说法，请优先以当前 `TaskContext.tools` 的真实接口为准。对新模块来说，不要继续沿用旧抽象。
 
-`crawler4j-sdk 2.0.0` 起，SDK 不再保留这些兼容名。
+`crawler4j-sdk 1.1.0` 起，模块侧统一通过 `ctx.tools.call(...)` 访问这些能力。
 
 如果你在维护旧模块，升级时要直接完成下面这些替换：
 
 1. 删除 `from crawler4j_sdk import DataService`
-2. 如需类型标注，改用 `DatabaseCapability`
-3. 把 `ctx.db.storage` / `ctx.db.accounts` / `ctx.db.tasks` 改成 `ctx.db` 最小接口
-4. 把 `module.yaml` 里的 `sdk_version_range` 更新到 `>=2.0.0`
+2. 把历史 `ctx.db.*` 调用改成 `ctx.tools.call("db.*", ...)`
+3. 把 `ctx.db.storage` / `ctx.db.accounts` / `ctx.db.tasks` 改成 `db.*` 工具调用
+4. 把 `module.yaml` 里的 `sdk_version_range` 更新到 `>=1.1.0`

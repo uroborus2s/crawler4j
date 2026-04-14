@@ -1,118 +1,54 @@
-# 蛛行演略（crawler4j）
+# crawler4j Monorepo
 
-**蛛行演略**（英文名：`crawler4j`）是一个基于 Python 的自动化监控与任务执行平台，采用**微内核 + SDK + 插件**架构，支持动态加载和并发执行自动化任务。
+`crawler4j` 现在按 `uv` workspace 的 monorepo 组织。仓库根目录只负责开发编排、统一锁文件、文档和发布动作，真正的可发布项目全部位于 `packages/`。
 
-[![Python](https://img.shields.io/badge/python-3.12+-green)](https://www.python.org/)
+## Workspace Layout
 
----
-
-## 📚 文档
-
-详细文档已统一收敛到仓库内的 `docs/` Markdown 体系。
-
-| 文档 | 说明 |
-|------|------|
-| [快速开始](docs/08-handover/getting-started.md) | 下载安装与首次运行 |
-| [接手与日常使用指南](docs/08-handover/user-guide.md) | 配置、运行与接手顺序 |
-| [模块开发指南](docs/08-handover/module-developer-guide.md) | 从创建模块项目到 DevLink 调试和 zip 安装验收 |
-
----
-
-## 🏗️ 架构概览
-
-蛛行演略（crawler4j）采用 **Core + Modules** 架构，将基础设施与业务逻辑分离。
-
-```mermaid
-graph TD
-    User[用户] --> UI[桌面客户端 (Core)]
-    UI --> ATM[任务管理 ATM]
-    ATM --> RP[任务运行配置 RunProfile]
-    ATM --> REM[环境管理 REM]
-    
-    subgraph Plugins [业务插件]
-        P1[携程机票]
-        P2[数据监控]
-    end
-    
-    REM -.->|SDK 契约| Plugins
-    RP -.->|执行目标/资源配置| Plugins
-```
-
----
-
-## 🚀 快速开始
-
-### 方式一：下载安装包 (推荐)
-
-对于最终用户，无需安装 Python 环境，直接下载编译好的二进制文件：
-
-*   **Windows**: 下载 `.exe` 绿色包
-*   **macOS**: 下载 `.dmg` 镜像
-*   **Linux**: 下载二进制文件
-
-👉 [前往发布页下载](https://github.com/uroborus2s/crawler4j/releases)
-
-### 方式二：从源码运行 (开发者)
-
-```bash
-# 1. 克隆代码
-git clone https://github.com/uroborus2s/crawler4j.git
-cd crawler4j
-
-# 2. 安装依赖 (使用 uv)
-uv sync
-
-# 3. 启动应用
-uv run python -m src.ui.app
-```
-
----
-
-## 📁 项目结构
-
-```
+```text
 crawler4j/
-├── src/                      # Core 内核源码
-├── crawler4j_sdk/            # SDK 源码 (独立包)
-├── modules/                  # 内置模块占位说明
-├── docs/                     # 仓库内 Markdown 文档体系
-├── dist/                     # 构建产物 (.exe/.whl)
-└── pyproject.toml            # 项目配置
+├── packages/
+│   ├── crawler4j/            # 桌面应用与 Core 运行时
+│   ├── crawler4j-sdk/        # SDK 与 CLI
+│   └── crawler4j-contracts/  # Core / SDK 共享契约
+├── scripts/                  # workspace 级开发/验证脚本
+├── docs/                     # 正式文档
+├── .factory/                 # 工厂记忆与工作项
+├── pyproject.toml            # workspace 开发环境
+└── uv.lock                   # 全仓统一锁文件
 ```
 
----
-
-## 🔧 开发者指南
-
-### 构建发行版
+## Common Commands
 
 ```bash
-# 构建 .exe/.app
-uv run pyinstaller crawler4j.spec
+# 同步整个 workspace（默认包含 dev 组）
+uv sync --all-packages
 
-# 构建 Python Wheel
-uv build
+# 启动桌面应用
+uv run python -m src.ui.app
+
+# 运行主程序自动化测试
+uv run pytest packages/crawler4j/tests -q
+
+# 运行默认 lint
+uv run ruff check .
+
+# UI smoke
+uv run python scripts/smoke_test_ui.py
+
+# 构建三个包
+uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
+uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check
+uv build --package crawler4j-contracts --out-dir /tmp/crawler4j-contracts-build-check
+
+# PyInstaller 打包桌面应用
+uv run pyinstaller packages/crawler4j/crawler4j.spec
 ```
 
-### CLI 与模块开发
+## Packages
 
-```bash
-# 方式 1：安装 SDK CLI
-uv tool install crawler4j-sdk
+- `packages/crawler4j`: 桌面应用、Core 运行时、内置模块与打包脚本
+- `packages/crawler4j-sdk`: 模块开发 SDK 与 `crawler4j` CLI
+- `packages/crawler4j-contracts`: Core / SDK 共用的稳定契约
+- `scripts/`: workspace 级维护脚本，例如 UI smoke、数据库初始化、图标生成和历史调试辅助
 
-# 直接使用
-crawler4j --help
-
-# 方式 2：不安装，直接使用已发布 CLI
-uvx --from crawler4j-sdk crawler4j --help
-```
-
-详细内容请查阅 [部署与运行说明](docs/07-operations/deployment-guide.md)。
-
----
-
-## ⚠️ 免责声明
-
-> [!CAUTION]
-> 本项目及所含工具仅供技术研究与学习使用。使用者应严格遵守目标网站的 Robots 协议及相关法律法规。
-> 作者不对使用本工具产生的任何后果负责。
+详细背景和操作说明以仓库根目录 `docs/` 为准。

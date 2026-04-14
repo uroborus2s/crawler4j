@@ -19,10 +19,10 @@
 | 层次 | 目标 | 责任方 | 当前方式 |
 |---|---|---|---|
 | 单元测试 | 核心服务、SDK 契约、部分模块运行时 | Dev / QA | `uv run pytest -q` |
-| 集成测试 | 调试会话、模块加载、CLI 场景 | Dev / QA | `tests/integration/` |
+| 集成测试 | 调试会话、模块加载、CLI 场景 | Dev / QA | `packages/crawler4j/tests/integration/` |
 | 静态检查 | 维护范围代码风格与低级错误 | Dev / QA | `uv run ruff check .`（按 `quality-gates.md` 的维护范围规则执行） |
-| 构建验证 | 确认包可以产出 wheel/sdist | Dev / Release | `uv build` 与子包 build |
-| 入口 / 打包 smoke | 确认根应用入口与桌面打包可运行 | Dev / Release | root script 检查 + headless UI smoke + PyInstaller build |
+| 构建验证 | 确认包可以产出 wheel/sdist | Dev / Release | `uv build --package ...` |
+| 入口 / 打包 smoke | 确认根应用入口与桌面打包可运行 | Dev / Release | workspace 入口检查 + headless UI smoke + PyInstaller build |
 
 ## 3. 当前已知结果
 
@@ -30,11 +30,11 @@
 |---|---|---|
 | `TC-001` `uv run pytest -q` | 通过 | 188 passed |
 | `TC-002` 根包 / SDK / Contracts build | 通过 | 当前仅证明可构建，不等于可运行 |
-| `TC-003` `uv sync` + `.venv/bin/start` | 通过 | root script 已对齐 `src.ui.app:main` |
+| `TC-003` `uv sync --all-packages` + `uv run python -m src.ui.app` | 通过 | workspace 根可直接启动应用包里的真实入口 |
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | headless UI smoke 通过 |
 | `TC-005` PyInstaller build | 通过 | 修正后的 spec 成功构建到 `/tmp/crawler4j-pyinstaller-dist` |
 | `TC-006` `uv run ruff check .` | 通过 | 已明确排除历史 `manual/debug/verify/analyze` 脚本 |
-| `TC-010` `uv run pytest tests/unit/test_core/test_mms/test_module_data_table_page.py tests/unit/test_core/test_mms/test_ctrip_account_ui_smoke.py -q` | 通过 | 2026-04-08 覆盖 `declare_ui` 刷新、`create_handler` / `update_handler` 路由、DevLink 页面上下文与 `ctrip` 账号管理 smoke |
+| `TC-010` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_ctrip_account_ui_smoke.py -q` | 通过 | 2026-04-08 覆盖 `declare_ui` 刷新、`create_handler` / `update_handler` 路由、DevLink 页面上下文与 `ctrip` 账号管理 smoke |
 
 ## 4. 重点覆盖项
 
@@ -56,9 +56,9 @@
 
 | 测试 ID | 目标 | 当前验证方式 |
 |---|---|---|
-| `TC-007` | 新脚手架根 `__init__.py` 为固定薄壳且可导入 | `tests/unit/test_sdk/test_cli_scaffold.py` + CLI help smoke |
-| `TC-008` | 可选 `module_runtime.py` 可覆盖默认运行逻辑与 hooks | `tests/unit/test_sdk/test_assembler.py` |
-| `TC-009` | 旧模块按最新模板重新初始化后可导入并运行默认入口 | `tests/integration/test_sdk_cli_module_mode.py` |
+| `TC-007` | 新脚手架根 `__init__.py` 为固定薄壳且可导入 | `packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py` + CLI help smoke |
+| `TC-008` | 可选 `module_runtime.py` 可覆盖默认运行逻辑与 hooks | `packages/crawler4j/tests/unit/test_sdk/test_assembler.py` |
+| `TC-009` | 旧模块按最新模板重新初始化后可导入并运行默认入口 | `packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py` |
 
 ## 6. 出口条件
 

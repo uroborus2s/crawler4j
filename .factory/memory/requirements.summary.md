@@ -7,7 +7,7 @@
 - `REQ-003`: SDK, Contracts, and CLI must remain buildable and usable | Priority: P1 | Status: VERIFIED
   Constraint: local build and CLI help must remain stable.
 - `REQ-004`: Release metadata and docs must align to a single version truth | Priority: P0 | Status: VERIFIED
-  Constraint: root version, runtime mirror, and release notes must not drift.
+  Constraint: app `pyproject.toml`, runtime version service, and release notes must not drift.
 - `REQ-005`: Project must operate inside the software-factory lifecycle with tracked workitems | Priority: P0 | Status: VERIFIED
   Constraint: code, docs, tests, and `.factory/memory/` must stay synchronized.
 - `REQ-006`: Module root entry should be tool-managed and no longer require manual `__init__.py` maintenance | Priority: P1 | Status: VERIFIED

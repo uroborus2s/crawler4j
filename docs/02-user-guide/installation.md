@@ -20,8 +20,8 @@
 ### 步骤
 
 ```bash
-uv sync
-uv run start
+uv sync --all-packages
+uv run python -m src.ui.app
 ```
 
 如果你需要显式使用模块入口，也可以执行：
@@ -79,6 +79,6 @@ uv run python scripts/smoke_test_ui.py
 
 ## 6. 安装时最常见的误判
 
-- 看到仓库里的 `modules/` 目录，不代表模块已经“安装到宿主”。
+- 看到仓库里的 `packages/crawler4j/modules/` 目录，不代表模块已经“安装到宿主”。
 - 模块项目自己的虚拟环境安装成功，不代表宿主应用已经具备相同依赖。
 - 能 `uv build` 出 wheel，不代表宿主正式安装链路已经打通；正式模块交付仍以 zip 安装为准。

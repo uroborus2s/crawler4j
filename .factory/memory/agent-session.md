@@ -17,7 +17,10 @@
 - Real UI entrypoint is `src.ui.app:main`
 - Root script `start` now points to `src.ui.app:main`
 - `crawler4j.spec` now targets the real UI entrypoint and packaged icon asset
-- `modules/ctrip` still imports removed `src.automation.*` modules in task scripts
+- Legacy `src.automation.*` compatibility package has been removed; module runtime is expected to use MMS + ModuleAssembler only
+- Host `src/utils` no longer carries `ctrip` business helpers; those implementations now live in `ctrip_crawler`
+- Host source tree no longer carries business models or business smoke scripts; `src/core/models` and residual `src/automation` cache directories have been removed
+- SDK no longer carries business-specific `extensions.py`; debug/db helper scripts now use only current framework contracts
 
 ## Follow-Up
 

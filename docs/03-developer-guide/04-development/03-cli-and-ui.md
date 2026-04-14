@@ -13,7 +13,7 @@ uv run crawler4j add-ui
 ```
 
 各命令的真实作用如下。
-当前 CLI 生成的新模块项目默认面向 `crawler4j-sdk 2.x`：模块项目依赖会落到 2.x，`module.yaml.sdk_version_range` 也会从 `>=2.0.0` 起步。
+当前 CLI 生成的新模块项目默认面向 `crawler4j-sdk 1.1.x`：模块项目依赖会落到 `>=1.1.0,<3.0.0`，`module.yaml.sdk_version_range` 也会从 `>=1.1.0` 起步。
 
 如果你是第一次接触这些命令，可以把它们理解成“在标准模块项目上继续补结构的工具”，而不是“随便在哪个目录都能用的通用命令”。
 
@@ -145,20 +145,20 @@ ui_extension:
 这条能力通常和下面这组调用一起出现：
 
 ```python
-if ctx.ui is not None:
-    ctx.ui.declare_data_table("accounts", {
+if ctx.tools and ctx.tools.has_tool("ui.declare_data_table"):
+    ctx.tools.call("ui.declare_data_table", view_id="accounts", schema={
         "title": "账号管理",
         "dataset": "accounts",
         "columns": ["id", "phone_number", "status"],
     })
 
-if ctx.db is not None:
-    rows = ctx.db.list_records("accounts")
-    ctx.db.replace_records("accounts", rows)
+if ctx.tools and ctx.tools.has_tool("db.list_records"):
+    rows = ctx.tools.call("db.list_records", dataset="accounts")
+    ctx.tools.call("db.replace_records", dataset="accounts", records=rows)
 ```
 
-也就是说，`core:data_table:<view_id>` 负责页面入口声明，真正的数据仍然来自 Core 注入的 `ctx.db`。
-如果你的旧模块还在用 `ctx.db.accounts`、`ctx.db.tasks` 这类历史写法，先改到 `ctx.db` 最小接口，再继续接数据表页面。
+也就是说，`core:data_table:<view_id>` 负责页面入口声明，真正的数据仍然来自 Core 注入的 `ctx.tools`。
+如果你的旧模块还在用 `ctx.db.accounts`、`ctx.db.tasks` 这类历史写法，先改到 `ctx.tools.call("db.*", ...)` 再继续接数据表页面。
 
 从当前实现开始，宿主在打开或刷新 `core:data_table:<view_id>` 页面时，会先同步调用模块根入口导出的 `declare_ui(context)` 来刷新 schema。
 如果 schema 中声明了 `create_handler`、`update_handler`，通用页的“新增 / 编辑”会继续路由到同名同步 hook。
@@ -197,14 +197,14 @@ class DashboardPage(QWidget):
         layout.addWidget(self.label)
 
     def refresh_data(self):
-        # 利用 ctx.db 读取最新状态并更新 UI
-        stats = self.ctx.db.get_state("sync_stats")
+        # 利用 ctx.tools 读取最新状态并更新 UI
+        stats = self.ctx.tools.call("db.get_state", key="sync_stats") or {}
         self.label.setText(f"已同步: {stats.get('count', 0)}")
 ```
 
 #### 2. 注意事项
 *   **线程安全**：UI 在宿主主线程运行，耗时操作必须通过 `QThread` 或异步方式处理，严禁阻塞 UI 线程。
-*   **上下文共享**：UI 拿到的 `ctx` 与任务脚本拿到的 `ctx` 共享同一个后端存储，因此可以通过 `ctx.db` 实现 UI 与后台任务的准实时通信。
+*   **上下文共享**：UI 拿到的 `ctx` 与任务脚本拿到的 `ctx` 共享同一个后端存储，因此可以通过 `ctx.tools.call("db.*", ...)` 实现 UI 与后台任务的准实时通信。
 
 ---
 
@@ -213,9 +213,9 @@ class DashboardPage(QWidget):
 在打包 `.zip` 提交给用户或安装到正式环境前，请依次确认以下 6 项：
 
 1. **[ ] 目录契约**：模块目录名、`module.yaml.name` 和包名（`__init__.py` 所在目录）必须完全一致。
-2. **[ ] 版本范围**：`module.yaml` 中的 `sdk_version_range` 必须设置为 `>=2.0.0`。
+2. **[ ] 版本范围**：`module.yaml` 中的 `sdk_version_range` 必须设置为 `>=1.1.0`。
 3. **[ ] 依赖孤立**：确保所有第三方库已在 `pyproject.toml` 中声明，且没有硬编码任何本地绝对路径。
-4. **[ ] 接口合规**：代码中已彻底删除 `DataService`、`ctx.db.storage` 等 1.x 时代的旧接口。
+4. **[ ] 接口合规**：代码中已彻底删除 `DataService`、`ctx.db.storage` 和直接依赖 `ctx.db` 字段的旧接口。
 5. **[ ] 停止响应**：长循环任务中是否已调用 `ctx.should_stop()` 检查停止信号？
 6. **[ ] 离线验证**：在未联网环境下，模块的基础导入逻辑（`import` 部分）是否能正常通过？
 

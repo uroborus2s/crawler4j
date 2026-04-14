@@ -12,7 +12,7 @@
 ## 1. 环境准备
 
 ```bash
-uv sync
+uv sync --all-packages
 ```
 
 要求：
@@ -25,14 +25,13 @@ uv sync
 ### 桌面应用
 
 ```bash
-uv run start
 uv run python -m src.ui.app
 ```
 
 说明：
 
-- `uv run start` 现在是根项目的声明启动方式
-- `uv run python -m src.ui.app` 仍可作为显式调试入口
+- workspace 根通过 `uv run python -m src.ui.app` 直接启动 `packages/crawler4j` 中的真实入口
+- 若需要打包，PyInstaller 规格位于 `packages/crawler4j/crawler4j.spec`
 
 ### 测试
 
@@ -43,9 +42,9 @@ uv run pytest -q
 ### Root / SDK / Contracts build
 
 ```bash
-uv build --out-dir /tmp/crawler4j-build-check
-cd crawler4j_sdk && uv build --out-dir /tmp/crawler4j-sdk-build-check
-cd crawler4j_contracts && uv build --out-dir /tmp/crawler4j-contracts-build-check
+uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
+uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check
+uv build --package crawler4j-contracts --out-dir /tmp/crawler4j-contracts-build-check
 ```
 
 ### SDK CLI

@@ -14,7 +14,7 @@
 本目录只解决“如何开发、调试、交付和迁移模块”这件事。
 它不重复解释项目治理、发布流程和运维职责，这些内容统一回到 `docs/04-project-development/`。
 
-当前内容以 `crawler4j-sdk 2.x` 为准，旧 `DataService` 和 `ctx.db.storage / accounts / tasks` 写法已移除；维护旧模块时，需要先按迁移章节完成升级判断。
+当前内容以 `crawler4j-sdk 1.1.x` 为准，模块侧统一通过 `ctx.tools.call(...)` 访问宿主扩展能力；旧 `DataService`、`ctx.db.storage / accounts / tasks` 和专用 `ctx.db` 字段写法都已移除。
 当前 `core:data_table:<view_id>` 页面也已进入正式契约：宿主会在页面刷新时重新执行模块根导出的 `declare_ui`，并可继续路由 `create_handler` / `update_handler` 到模块本地同步 hook。
 
 ## 2. 第一天阅读包

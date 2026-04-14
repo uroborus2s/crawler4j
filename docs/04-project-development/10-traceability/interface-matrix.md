@@ -13,10 +13,10 @@
 
 | 接口 ID | 契约内容 | 提供方 | 消费方 | 版本 / 来源 | 验证方式 | 运维责任 |
 |---|---|---|---|---|---|---|
-| `API-001` | Root App Entry Contract | Root app metadata | 维护者 / 打包流程 | 根 `pyproject.toml`、`src.ui.app:main` | root script 检查、UI smoke、PyInstaller build | Core 维护者 |
+| `API-001` | Root App Entry Contract | Root app metadata | 维护者 / 打包流程 | `packages/crawler4j/pyproject.toml`、`src.ui.app:main` | workspace 入口检查、UI smoke、PyInstaller build | Core 维护者 |
 | `API-002` | Module Runtime Contract | Core + Module runtime | 最终用户 / 模块维护者 | `module.yaml`、模块根 `__init__.py`、`ModuleAssembler` | 单元/集成测试、关键工作流验证；真实站点 E2E 仍待完成 | Core 维护者 |
-| `API-003` | SDK / Contracts Package Contract | `crawler4j_sdk`、`crawler4j_contracts` | 模块开发者 | 子包 `pyproject.toml`、CLI 入口 | build、CLI help、脚手架测试 | SDK / Core 维护者 |
-| `API-004` | Release Metadata Contract | Release metadata | 发布负责人 / 维护者 | 根 `pyproject.toml`、`src/__version__.py`、Git tag、子包版本 | 版本对照检查、release notes 校验 | 发布负责人 |
+| `API-003` | SDK / Contracts Package Contract | `crawler4j_sdk`、`crawler4j_contracts` | 模块开发者 | `packages/crawler4j-sdk/pyproject.toml`、`packages/crawler4j-contracts/pyproject.toml`、CLI 入口 | build、CLI help、脚手架测试 | SDK / Core 维护者 |
+| `API-004` | Release Metadata Contract | Release metadata | 发布负责人 / 维护者 | `packages/crawler4j/pyproject.toml`、运行时版本服务、Git tag、子包版本 | 版本对照检查、release notes 校验 | 发布负责人 |
 
 ## 2. 当前接口风险
 
