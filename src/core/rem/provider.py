@@ -74,7 +74,7 @@ class BaseProvider(ABC):
         pass
     
     @abstractmethod
-    async def destroy(self, env: Environment) -> None:
+    async def destroy(self, env: Environment) -> bool:
         """销毁环境。
         
         释放物理资源（如 kill 进程）。
@@ -252,9 +252,9 @@ class PlaywrightProvider(BaseProvider):
         """健康检查。"""
         return True
     
-    async def destroy(self, env: Environment) -> None:
+    async def destroy(self, env: Environment) -> bool:
         """销毁本地环境。"""
-        pass
+        return True
     
     async def open(self, env: Environment) -> bool:
         """打开本地浏览器。"""
@@ -375,11 +375,16 @@ class BitBrowserClient:
         payload = {"id": browser_id}
         await client.post("/browser/close", json=payload)
     
-    async def delete_browser(self, browser_id: str) -> None:
+    async def delete_browser(self, browser_id: str) -> bool:
         """删除浏览器窗口。"""
         client = await self._get_client()
         payload = {"id": browser_id}
-        await client.post("/browser/delete", json=payload)
+        resp = await client.post("/browser/delete", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"BitBrowser Delete Error: {data.get('msg')}")
+        return True
     
     async def get_browser_pids(self, browser_ids: list[str]) -> dict[str, int]:
         """查询浏览器窗口的进程 ID。
@@ -570,32 +575,35 @@ class BitBrowserProvider(BaseProvider):
         except Exception:
             return False
 
-    async def destroy(self, env: Environment) -> None:
+    async def destroy(self, env: Environment) -> bool:
         """销毁 BitBrowser 环境。"""
         from src.core.foundation.logging import logger
         
         handle = env.handle
-        if not handle:
-            return
+        browser_id = handle.browser_id if handle and handle.browser_id else env.external_id
+        if not browser_id:
+            return False
+
+        # 使用 safe_close 关闭连接
+        if handle:
+            await handle.safe_close()
+        else:
+            env.handle = BrowserHandle(browser_id=str(browser_id))
 
         if not await self.exists(env):
-            return
-            
-        browser_id = handle.browser_id
+            return True
         
-        # 使用 safe_close 关闭连接
-        await handle.safe_close()
-        
-        if browser_id:
-            try:
-                # 注意：这里 self.exists 可能会因为连接关闭而失败吗？
-                # exists 使用 API，与 internal connection 无关。
-                # 但 destroy 逻辑通常是先 delete API resource。
-                client = self._get_api_client()
-                await client.delete_browser(browser_id) # API expects ID
-                logger.info(f"[BitBrowser] Closed browser {browser_id}")
-            except Exception as e:
-                logger.warning(f"[BitBrowser] Failed to close browser {browser_id}: {e}")
+        try:
+            client = self._get_api_client()
+            await client.delete_browser(str(browser_id))
+            if await self.exists(env):
+                logger.warning(f"[BitBrowser] 浏览器删除后仍存在: id={browser_id}")
+                return False
+            logger.info(f"[BitBrowser] Closed browser {browser_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"[BitBrowser] Failed to close browser {browser_id}: {e}")
+            return False
     
 
 
@@ -993,10 +1001,15 @@ class VirtualBrowserClient:
         payload = {"id": browser_id}
         await client.post("/api/stopBrowser", json=payload)
 
-    async def delete_browser(self, browser_id: int):
+    async def delete_browser(self, browser_id: int) -> bool:
         client = await self._get_client()
         payload = {"id": browser_id}
-        await client.post("/api/deleteBrowser", json=payload)
+        resp = await client.post("/api/deleteBrowser", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError(f"VirtualBrowser Delete Error: {data.get('msg')}")
+        return True
     
     async def delete_browser_data(self, browser_id: int) -> bool:
         """删除浏览器环境数据（Cookies、缓存等）。
@@ -1235,29 +1248,38 @@ class VirtualBrowserProvider(BaseProvider):
         
         return False
 
-    async def destroy(self, env: Environment) -> None:
+    async def destroy(self, env: Environment) -> bool:
         """销毁: 断开连接 + 停止浏览器 + 删除配置。"""
         from src.core.foundation.logging import logger
         
         handle = env.handle
-        if not handle:
-            return
-            
-        browser_id = handle.browser_id
+        browser_id = handle.browser_id if handle and handle.browser_id else env.external_id
+        if not browser_id:
+            return False
         
         # 1. 使用 safe_close 关闭 Playwright 连接
-        await handle.safe_close()
-            
+        if handle:
+            await handle.safe_close()
+        else:
+            env.handle = BrowserHandle(browser_id=str(browser_id))
+
+        if not await self.exists(env):
+            return True
+
         # 2. API Stop & Delete
-        if browser_id:
-            client = self._get_api_client()
-            try:
-                if await self.is_window_open(env):
-                    await client.stop_browser(int(browser_id))
-                await client.delete_browser(int(browser_id))
-                logger.info(f"[VirtualBrowser] 环境已销毁: id={browser_id}")
-            except Exception as e:
-                logger.warning(f"[VirtualBrowser] API 销毁环境失败: {e}")
+        client = self._get_api_client()
+        try:
+            if await self.is_window_open(env):
+                await client.stop_browser(int(browser_id))
+            await client.delete_browser(int(browser_id))
+            if await self.exists(env):
+                logger.warning(f"[VirtualBrowser] 删除后环境仍存在: id={browser_id}")
+                return False
+            logger.info(f"[VirtualBrowser] 环境已销毁: id={browser_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"[VirtualBrowser] API 销毁环境失败: {e}")
+            return False
     
     async def open(self, env: Environment) -> bool:
         """打开 VirtualBrowser 窗口。"""

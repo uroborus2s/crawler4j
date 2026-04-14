@@ -25,6 +25,47 @@ from src.core.rem.models import (
 from src.core.rem.pool import EnvPool, LeaseManager
 from src.core.rem.provider import BaseProvider, get_provider
 
+FINGERPRINT_BROWSER_PROVIDERS = {"bitbrowser", "virtualbrowser"}
+
+
+def _get_env_name_prefix(now: datetime | None = None) -> str:
+    """构造当天环境名称前缀。"""
+    current = now or datetime.now()
+    return f"env-{current.strftime('%Y%m%d')}-"
+
+
+def _get_next_env_name(existing_names: list[str], now: datetime | None = None) -> str:
+    """基于现有名称计算下一个默认环境名。"""
+    prefix = _get_env_name_prefix(now)
+    prefix_len = len(prefix)
+    max_seq = 0
+
+    for name in existing_names:
+        if len(name) <= prefix_len:
+            continue
+        try:
+            seq = int(name[prefix_len:])
+        except ValueError:
+            continue
+        if seq > max_seq:
+            max_seq = seq
+
+    return f"{prefix}{max_seq + 1}"
+
+
+def peek_next_env_name(now: datetime | None = None) -> str:
+    """读取当前数据库状态下的下一个默认环境名。"""
+    prefix = _get_env_name_prefix(now)
+
+    with get_connection(STATE_DB) as conn:
+        cursor = conn.execute(
+            "SELECT name FROM environments WHERE name LIKE ?",
+            (f"{prefix}%",),
+        )
+        existing_names = [row[0] for row in cursor.fetchall()]
+
+    return _get_next_env_name(existing_names, now)
+
 
 class EnvironmentManager:
     """环境管理器。
@@ -314,16 +355,26 @@ class EnvironmentManager:
             return False
 
         logger.info(f"[REM] 销毁环境: id={env.id}")
-        
+
+        previous_status = env.status
         await self.pool.update_status(env.id, EnvStatus.TERMINATING)
-        
+
         provider = get_provider(env.provider)
         if provider:
             try:
-                await provider.destroy(env)
+                if provider.name in FINGERPRINT_BROWSER_PROVIDERS:
+                    await self.ensure_provider_runtime(provider.name)
+
+                destroyed = await provider.destroy(env)
+                if destroyed is False:
+                    logger.warning(f"[REM] 外部环境删除未成功，保留数据库记录: id={env.id}")
+                    await self.pool.update_status(env.id, previous_status)
+                    return False
             except Exception as e:
                 logger.warning(f"[REM] 环境销毁失败: {e}")
-        
+                await self.pool.update_status(env.id, previous_status)
+                return False
+
         await self.pool.remove(env.id)
         logger.info(f"[REM] 环境已销毁: id={env.id}")        
         return True
@@ -871,9 +922,8 @@ class EnvironmentManager:
         Returns:
             已持久化的 Environment 对象 (带 id)
         """
-        
-        today = datetime.now().strftime("%Y%m%d")
-        prefix = f"env-{today}-"
+        now = datetime.now()
+        prefix = _get_env_name_prefix(now)
         
         with get_connection(STATE_DB) as conn:
             # 1. 查找所有匹配前缀的名称
@@ -884,18 +934,7 @@ class EnvironmentManager:
             existing_names = [row[0] for row in cursor.fetchall()]
 
             # 2. 计算最大序列号
-            max_seq = 0
-            prefix_len = len(prefix)
-            for name in existing_names:
-                if len(name) > prefix_len:
-                    try:
-                        seq = int(name[prefix_len:])
-                        if seq > max_seq:
-                            max_seq = seq
-                    except ValueError:
-                        continue # 忽略后缀非数字的名称
-            
-            new_name = f"{prefix}{max_seq + 1}"
+            new_name = _get_next_env_name(existing_names, now)
             
             # 3. 创建并持久化占位对象
             env = Environment(

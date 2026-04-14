@@ -7,7 +7,7 @@
 **上游输入：** `docs/02-user-guide/user-guide.md` | `docs/04-project-development/04-design/technical-selection.md` | `docs/04-project-development/04-design/api-design.md`
 **下游输出：** `docs/03-developer-guide/*` | `docs/04-project-development/06-testing-verification/test-plan.md`
 **关联 ID：** `DOC-104`, `REQ-003`, `REQ-006`
-**最后更新：** 2026-04-02
+**最后更新：** 2026-04-08
 
 ## 1. 本目录解决什么问题
 
@@ -15,6 +15,7 @@
 它不重复解释项目治理、发布流程和运维职责，这些内容统一回到 `docs/04-project-development/`。
 
 当前内容以 `crawler4j-sdk 2.x` 为准，旧 `DataService` 和 `ctx.db.storage / accounts / tasks` 写法已移除；维护旧模块时，需要先按迁移章节完成升级判断。
+当前 `core:data_table:<view_id>` 页面也已进入正式契约：宿主会在页面刷新时重新执行模块根导出的 `declare_ui`，并可继续路由 `create_handler` / `update_handler` 到模块本地同步 hook。
 
 ## 2. 第一天阅读包
 

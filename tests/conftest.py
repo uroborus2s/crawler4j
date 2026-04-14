@@ -10,8 +10,11 @@ import pytest
 
 QT_BOUND_TESTS = {
     "tests/unit/test_core/test_atm/test_task_debug_dialog.py",
+    "tests/unit/test_core/test_mms/test_ctrip_account_ui_smoke.py",
     "tests/unit/test_core/test_mms/test_module_detail_page.py",
+    "tests/unit/test_core/test_mms/test_module_data_table_page.py",
     "tests/unit/test_core/test_mms/test_module_list_widget.py",
+    "tests/unit/test_core/test_rem/test_env_list_widget.py",
 }
 
 

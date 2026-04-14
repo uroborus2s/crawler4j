@@ -10,6 +10,7 @@ Current architecture facts:
 
 - Builtin business modules have been removed; `modules/` is now a placeholder, while real modules come from installed packages or DevLink source directories.
 - Module projects run inside the host runtime, not their own virtualenv.
+- `src/core/mms/ui/module_data_table_page.py` now builds a UI-side `TaskContext` from module settings and reloads DevLink local hooks on refresh, so host data-table pages can replay `declare_ui` and local CRUD handlers during module debugging.
 
 Current module entry architecture:
 

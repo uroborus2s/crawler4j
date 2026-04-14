@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/document-map.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-04-02
+**最后更新：** 2026-04-08
 
 ## 1. 当前正式文档结构
 
@@ -64,3 +64,7 @@
 - 任何新增、删除或移动页面，都要同步更新根 `docs/index.md`、本文件和 `.factory/memory/doc-map.md`。
 - `docs/project-process/` 与 `docs/model-development/` 不再作为正式入口保留。
 - 当前事实以代码、当前文档和可重复验证结果为准。
+
+## 5. 最近同步
+
+- 2026-04-08：`docs/03-developer-guide/04-development/03-cli-and-ui.md`、`docs/03-developer-guide/05-debugging/01-devlink-and-debug.md` 与 `docs/04-project-development/06-testing-verification/test-plan.md` 已同步 `core:data_table` 的 `declare_ui` / `create_handler` / `update_handler` 契约和 DevLink 调试刷新事实。

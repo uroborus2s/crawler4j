@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from crawler4j_contracts import TaskContext
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -21,6 +23,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.atm.runtime_capabilities import CoreDatabaseCapabilityImpl, CoreUICapabilityImpl
+from src.core.mms.models import ModuleSource
+from src.core.mms.service import get_module_service
+from src.core.mms.settings_store import get_module_settings_store
 from src.core.persistence import get_kv_store
 from src.ui.components.table import SkyTableWidget
 
@@ -187,9 +193,11 @@ class ModuleDataTablePage(QWidget):
         self._module_name = module_name
         self._view_id = view_id
         self._kv = get_kv_store()
+        self._mms = get_module_service()
 
         self._schema: dict[str, Any] = {}
         self._records: list[dict[str, Any]] = []
+        self._columns_by_key: dict[str, dict[str, Any]] = {}
         self._visible_columns: list[dict[str, Any]] = []
 
         self._setup_ui()
@@ -261,7 +269,34 @@ class ModuleDataTablePage(QWidget):
         self.delete_btn.clicked.connect(self._on_delete)
         self.refresh_btn.clicked.connect(self.refresh)
 
+    def _build_task_context(self) -> TaskContext:
+        config = get_module_settings_store().read_module_settings(self._module_name)
+        module = self._mms.registry.get_module(self._module_name)
+        if module and module.source == ModuleSource.DEV_LINK:
+            config = {
+                **config,
+                "devel_mode": True,
+            }
+        return TaskContext(
+            env_id=0,
+            task_name=self._module_name,
+            config=config,
+            db=CoreDatabaseCapabilityImpl(self._module_name),
+            ui=CoreUICapabilityImpl(self._module_name),
+        )
+
+    def _call_module_handler(self, handler_name: str, *args: Any) -> Any:
+        context = self._build_task_context()
+        return self._mms.call_local_hook(self._module_name, handler_name, context, *args)
+
+    def _schema_handler(self, key: str) -> str:
+        raw = self._schema.get(key)
+        if not isinstance(raw, str):
+            return ""
+        return raw.strip()
+
     def _load_schema(self):
+        self._call_module_handler("declare_ui")
         schema = self._kv.get(self._meta_key()) or {}
         if not isinstance(schema, dict):
             schema = {}
@@ -281,7 +316,25 @@ class ModuleDataTablePage(QWidget):
                 continue
             normalized_cols.append(dict(col))
 
-        self._visible_columns = normalized_cols
+        self._columns_by_key = {
+            str(col.get("key")): col
+            for col in normalized_cols
+        }
+
+        display_fields = schema.get("display_fields")
+        if isinstance(display_fields, list) and display_fields:
+            self._visible_columns = [
+                self._columns_by_key[field]
+                for field in display_fields
+                if isinstance(field, str) and field in self._columns_by_key
+            ]
+            return
+
+        self._visible_columns = [
+            col
+            for col in normalized_cols
+            if col.get("visible", True) is not False
+        ]
 
     def _load_records(self):
         self._records = _normalize_records(self._kv.get(self._dataset_key()) or [])
@@ -304,6 +357,24 @@ class ModuleDataTablePage(QWidget):
         if self._records:
             return [{"key": k, "label": k} for k in self._records[0].keys()]
         return [{"key": self._primary_key(), "label": self._primary_key()}]
+
+    def _form_columns(self, *, mode: str) -> list[dict[str, Any]]:
+        schema_key = "create_fields" if mode == "create" else "update_fields"
+        declared_fields = self._schema.get(schema_key)
+        if isinstance(declared_fields, list) and declared_fields:
+            columns = [
+                self._columns_by_key[field]
+                for field in declared_fields
+                if isinstance(field, str) and field in self._columns_by_key
+            ]
+            if columns:
+                return columns
+
+        return [
+            dict(col)
+            for col in self._effective_columns()
+            if not col.get("readonly", False)
+        ]
 
     def _render(self):
         columns = self._effective_columns()
@@ -331,7 +402,17 @@ class ModuleDataTablePage(QWidget):
                 self.table.setItem(row_index, len(columns), locked_item)
 
     def refresh(self):
-        self._load_schema()
+        try:
+            self._load_schema()
+            self.tip_label.setText("视图由模块声明并由 Core 通用页面渲染。")
+        except Exception as exc:
+            self._schema = {}
+            self._records = []
+            self._visible_columns = []
+            self.title_label.setText(str(self._view_id))
+            self.tip_label.setText(f"视图声明失败: {exc}")
+            self._render()
+            return
         self._load_records()
         self._render()
 
@@ -353,7 +434,12 @@ class ModuleDataTablePage(QWidget):
         return True, ""
 
     def _on_add(self):
-        columns = self._effective_columns()
+        create_handler = self._schema_handler("create_handler")
+        if create_handler:
+            columns = self._form_columns(mode="create")
+        else:
+            columns = self._effective_columns()
+
         dialog = _RecordEditDialog(columns, parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -362,6 +448,15 @@ class ModuleDataTablePage(QWidget):
         ok, message = self._validate_required(payload, columns)
         if not ok:
             QMessageBox.warning(self, "校验失败", message)
+            return
+
+        if create_handler:
+            try:
+                self._call_module_handler(create_handler, payload)
+            except Exception as exc:
+                QMessageBox.warning(self, "新增失败", str(exc))
+                return
+            self.refresh()
             return
 
         pk = self._primary_key()
@@ -386,7 +481,12 @@ class ModuleDataTablePage(QWidget):
             return
 
         old = dict(self._records[row_index])
-        columns = self._effective_columns()
+        update_handler = self._schema_handler("update_handler")
+        if update_handler:
+            columns = self._form_columns(mode="update")
+        else:
+            columns = self._effective_columns()
+
         dialog = _RecordEditDialog(columns, old, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -395,6 +495,20 @@ class ModuleDataTablePage(QWidget):
         ok, message = self._validate_required(payload, columns)
         if not ok:
             QMessageBox.warning(self, "校验失败", message)
+            return
+
+        if update_handler:
+            pk = self._primary_key()
+            pk_value = str(old.get(pk, "")).strip()
+            if not pk_value:
+                QMessageBox.warning(self, "编辑失败", f"{pk} 不能为空")
+                return
+            try:
+                self._call_module_handler(update_handler, pk_value, payload)
+            except Exception as exc:
+                QMessageBox.warning(self, "编辑失败", str(exc))
+                return
+            self.refresh()
             return
 
         pk = self._primary_key()

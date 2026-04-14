@@ -30,6 +30,13 @@ from src.core.rem.pool import EnvPool
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 
 
+def get_create_env_default_name() -> str:
+    """读取创建环境表单默认展示的环境名。"""
+    from src.core.rem.manager import peek_next_env_name
+
+    return peek_next_env_name()
+
+
 class CreateEnvDialog(QDialog):
     """创建环境对话框。"""
     
@@ -38,6 +45,7 @@ class CreateEnvDialog(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._suggested_name = ""
         self.setWindowTitle("创建环境")
         self.setMinimumWidth(450)
         
@@ -128,7 +136,7 @@ class CreateEnvDialog(QDialog):
         
         # 环境名称
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("可选，留空则自动生成")
+        self.name_input.setPlaceholderText("默认使用自动创建名称，可修改")
         self.form.addRow("环境名称:", self.name_input)
         
         # 创建动作
@@ -221,8 +229,15 @@ class CreateEnvDialog(QDialog):
         layout.addWidget(buttons)
         
         # 初始化显示状态
+        self._sync_suggested_name()
         self._on_provider_changed(self.provider_combo.currentText())
         self._on_post_action_changed(0)
+
+    def _sync_suggested_name(self):
+        """同步当前默认环境名到输入框展示。"""
+        self._suggested_name = get_create_env_default_name()
+        self.name_input.setText(self._suggested_name)
+        self.name_input.setCursorPosition(len(self._suggested_name))
         
     def _on_post_action_changed(self, index: int):
         """Action 变更处理。"""
@@ -326,8 +341,8 @@ class CreateEnvDialog(QDialog):
         
         # 处理名称
         name = self.name_input.text().strip()
-        if name:
-            config["creation_params"] = {"name_prefix": name}
+        if name and name != self._suggested_name:
+            config["env_name"] = name
         
         if provider in self.FINGERPRINT_PROVIDERS:
             # 1. 代理配置
@@ -850,7 +865,11 @@ class EnvListWidget(QWidget):
         if success:
             QMessageBox.information(self, "成功", "环境已销毁")
         else:
-            QMessageBox.warning(self, "警告", "环境不存在或已被销毁")
+            QMessageBox.warning(
+                self,
+                "警告",
+                "环境销毁失败，数据库记录已保留。请检查指纹浏览器连接后重试。",
+            )
         self.load_data()
     
     def _start_env(self, env_id: str):

@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | 当前文档治理缺口审计  
 **下游输出：** `docs/04-project-development/05-development-process/execution-log.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/07-release-delivery/release-notes.md`  
 **关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`  
-**最后更新：** 2026-04-02  
+**最后更新：** 2026-04-08
 
 ## 1. 实施目标
 
@@ -49,6 +49,7 @@
 - Wave 5 额外需要验证 `docs/` 已完成单树重组，且仓库不再依赖 MkDocs
 - Wave 6 已完成：已按真实模块作者视角重做开发、调试、测试与打包说明
 - Wave 10 已完成：ModuleAssembler 与 Shim 落地并经全量测试验证
+- Wave 9 后续回归已补强：`core:data_table` 页面会在刷新时重放 `declare_ui`，并验证 `create_handler` / `update_handler` 与 DevLink 调试上下文
 
 ## 5. 文档治理整改任务表
 
@@ -72,6 +73,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-08 | 补强 Wave 9 的 `core:data_table` 声明刷新、CRUD hook 与 DevLink 调试回路验证 | Codex |
 | 2026-04-02 | 新增 Wave 11 文档治理整改波次，并补写任务表 | Codex |
 | 2026-03-26 | 建立首批实施计划 | Codex |
 | 2026-03-26 | 标记 Wave 3 / Wave 4 完成，并纳入设计一致性审查结果 | Codex |

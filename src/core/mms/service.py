@@ -124,6 +124,21 @@ class ModuleService:
             return await hook(context, *args)
         return hook(context, *args)
 
+    def call_local_hook(self, module_name: str, hook_name: str, context: TaskContext, *args) -> Any:
+        """在同步调用方中执行本地模块 hook。"""
+        module = self._load_module(module_name, context)
+        if not hasattr(module, hook_name):
+            logger.debug(f"[MMS] Hook not implemented: {module_name}.{hook_name}")
+            return None
+
+        hook = getattr(module, hook_name)
+        logger.info(f"[MMS] Executing local hook: {module_name}.{hook_name}")
+        if inspect.iscoroutinefunction(hook):
+            raise RuntimeError(
+                f"Module hook '{module_name}.{hook_name}' is async and cannot be executed from a sync caller"
+            )
+        return hook(context, *args)
+
 
 # Global Singleton
 _service: ModuleService | None = None

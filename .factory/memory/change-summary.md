@@ -15,3 +15,5 @@
 - `BUG-003-pyqt-runtime-blocked-by-system-policy` BUG-003 PyQt6 运行时当前被系统策略阻断，导致 UI 与 `pytest-qt` 不可用 | 状态：DONE | 关联：无
 - `BUG-004-zip-upgrade-leaves-stale-files` BUG-004 模块 ZIP 升级会残留旧文件，未满足原子升级/回滚要求 | 状态：DONE | 关联：无
 - `BUG-005-hybrid-acquisition-mode-declared-but-rejected` BUG-005 `hybrid` 资源获取模式已暴露给用户，但运行时明确拒绝 | 状态：DONE | 关联：无
+- `BUG-006-rem-destroy-keeps-db-only-after-fingerprint-delete-succeeds` BUG-006 REM 销毁指纹浏览器环境时，先确认外部浏览器 API 可用，并且仅在外部环境删除成功后再删除本地数据库记录 | 状态：DONE | 关联：`tests/unit/test_core/test_rem/test_destroy_env.py`
+- REM 创建环境对话框现在会预填系统建议名称，并且只在用户实际修改后通过 `env_name` 提交自定义名称；默认显示名不再误写入 `creation_params.name_prefix` | 状态：DONE | 关联：`tests/unit/test_core/test_rem/test_env_list_widget.py`

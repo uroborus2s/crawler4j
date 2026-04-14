@@ -7,7 +7,7 @@
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
 **关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`  
-**最后更新：** 2026-03-31  
+**最后更新：** 2026-04-08
 
 ## `API-001` Root App Entry Contract
 
@@ -29,6 +29,8 @@
 | 可选 hooks | `prepare_env`, `init_env`, `before_run`, `on_success`, `on_failure`, `on_timeout`, `on_cleanup` |
 | 当前实现 | 根 `__init__.py` 已收敛为稳定薄壳，默认入口组装逻辑由 `ModuleAssembler` 提供 |
 | 默认工作流解析 | `context.config.workflow` -> `module_runtime.DEFAULT_WORKFLOW` -> `module.yaml.workflows[0].name` |
+| `core:data_table` UI 契约 | 页面创建/刷新时先同步调用根模块 `declare_ui(context)`；若 schema 声明 `create_handler` / `update_handler`，通用页新增/编辑继续路由到同名同步本地 hook |
+| DevLink 调试语义 | 模块来源为 `DevLink` 时，详情页数据表刷新会以 `devel_mode=true` 重建本地 hook 上下文，便于联调最新 UI 声明 |
 | 升级策略 | 旧模块统一按最新模板重新初始化；不再为旧式完整 `__init__.py` 模板提供兼容承诺 |
 | 当前风险 | 真实站点 E2E 仍未覆盖；动态加载的模块扩展点仍需依赖回归测试保持稳定 |
 | 关联项 | `TASK-003`, `TASK-013` |
@@ -67,3 +69,4 @@
 |---|---|---|
 | 2026-03-26 | 初始接口与契约设计摘要 | Codex |
 | 2026-03-31 | 增补模块根入口自动托管的契约演进设计 | Codex |
+| 2026-04-08 | 补记 `core:data_table` 的本地 UI hook 契约与 DevLink 刷新调试语义 | Codex |

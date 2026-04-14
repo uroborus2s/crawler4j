@@ -160,6 +160,12 @@ if ctx.db is not None:
 也就是说，`core:data_table:<view_id>` 负责页面入口声明，真正的数据仍然来自 Core 注入的 `ctx.db`。
 如果你的旧模块还在用 `ctx.db.accounts`、`ctx.db.tasks` 这类历史写法，先改到 `ctx.db` 最小接口，再继续接数据表页面。
 
+从当前实现开始，宿主在打开或刷新 `core:data_table:<view_id>` 页面时，会先同步调用模块根入口导出的 `declare_ui(context)` 来刷新 schema。
+如果 schema 中声明了 `create_handler`、`update_handler`，通用页的“新增 / 编辑”会继续路由到同名同步 hook。
+推荐做法仍然是让根 `__init__.py` 只做薄壳转发，真实逻辑放在 `module_runtime.py`。
+
+如果当前模块来源是 `DevLink`，详情页点击“刷新”时会以 `devel_mode=true` 重新加载本地 hook，便于联调数据表 schema 和 CRUD 行为。
+
 ### 代码型 UI 页面 (Micro App)
 
 当声明式 UI 无法满足需求（如需要实时图表、复杂的拖拽交互）时，你可以使用 `micro_app` 模式。
