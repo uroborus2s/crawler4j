@@ -2,7 +2,7 @@
 
 ## 先建立一张正确的地图
 
-开发 `crawler4j` 模块时，你面对的不是单一 Python 包，而是一条“CLI 脚手架 -> 模块项目 -> 宿主 Core -> 策略与作业 -> 调试/安装验收”的完整链路。
+开发 `crawler4j` 模块时，你面对的不是单一 Python 包，而是一条“CLI 脚手架 -> 模块项目 -> 宿主 Core -> 作业运行配置 -> 调试/安装验收”的完整链路。
 
 先记住下面这些角色：
 
@@ -13,8 +13,7 @@
 | `module.yaml` | 模块根目录 | 模块清单，声明名称、版本、工作流、UI 扩展 |
 | 模块根 `__init__.py` | 模块根目录 | Core 最终导入的运行入口 |
 | Core / 桌面应用 | `crawler4j` 主程序 | 扫描、加载、调试、安装和执行模块 |
-| Strategy | 宿主策略配置 | 决定运行哪个模块、哪个工作流、带什么参数 |
-| Job / ATM | 自动化任务管理 | 让真实作业运行或进入调试 |
+| Job / ATM | 自动化任务管理 | 决定什么时候跑、跑几个、并持有运行配置 |
 | DevLink | 模块管理中的开发链接 | 把本地源码目录接进 Core |
 | zip 安装包 | 正式交付物 | 给宿主应用做正式安装与验收 |
 
@@ -25,7 +24,7 @@
 - `crawler4j-sdk` CLI：帮你生成和补齐模块项目骨架
 - 模块项目：你真正写代码的地方
 - 宿主 `crawler4j`：真正执行你模块的地方
-- Strategy / Job / ATM：告诉宿主“运行哪个模块、哪个工作流、带什么参数”
+- Job / ATM：告诉宿主“什么时候跑、运行哪个模块、哪个工作流、带什么参数”
 - DevLink：开发模式下，把宿主临时指向你的本地源码目录
 - zip：正式交付时，把你的模块以安装包形式交给宿主
 
@@ -52,7 +51,7 @@
 -> 用 CLI 生成/补齐脚手架
 -> 得到一个包含 module.yaml 的模块目录
 -> 通过 DevLink 或 zip 让 Core 看到这个目录
--> 策略把 execution.module / execution.workflow 指向这个模块
+-> 作业运行配置把 execution.module / execution.workflow 指向这个模块
 -> ATM / DebugService 发起真实执行
 -> ExecutionRunner 调用模块 hooks、TaskFlow、TaskScript
 ```
@@ -62,7 +61,7 @@
 - `module.yaml.name`
 - 根 `__init__.py` 暴露的 `run(context)` 和可选 hooks
 - `workflows[*].name`
-- 策略里的 `execution.module` 与 `execution.workflow`
+- 作业运行配置里的 `execution.module` 与 `execution.workflow`
 
 换句话说，新手最应该优先保证的不是“代码很多”，而是这四个点都写对。
 
@@ -75,7 +74,7 @@
 3. 你在 `workflows/` 里写工作流
 4. 你把工作流信息写进 `module.yaml`
 5. 你把模块注册成 `DevLink`
-6. 你在宿主策略里填写 `execution.module` 和 `execution.workflow`
+6. 你在任务运行配置里填写 `execution.module` 和 `execution.workflow`
 7. 你在 ATM 里调试或运行
 8. 你打 zip 做正式安装验收
 
@@ -121,7 +120,7 @@ ui.py
 
 也不够。CLI 只能保证你获得了一个比较标准的起点，不保证：
 
-- 策略已经写对
+- 任务运行配置已经写对
 - 宿主已经识别它
 - 调试链路已经通
 - 正式安装已经没问题

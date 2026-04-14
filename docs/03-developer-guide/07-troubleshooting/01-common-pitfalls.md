@@ -50,7 +50,7 @@ uv sync
 按下面顺序排查：
 
 1. 模块来源是不是 `DevLink`
-2. 作业是不是绑定了策略
+2. 作业是不是已经保存运行模板
 3. `execution.module` 是不是 `module.yaml.name`
 4. 你是不是刚安装了同名 zip，导致 DevLink 被移除
 
@@ -58,12 +58,12 @@ uv sync
 
 先不要急着改 IDE 配置。如果入口按钮都没出现，问题通常还没到 IDE 这一步。
 
-## 5. 我写了工作流文件，但策略里选不到
+## 5. 我写了工作流文件，但运行配置里选不到
 
 常见原因有两个：
 
 1. 你只创建了 Python 文件，没有同步写入 `module.yaml.workflows`
-2. 工作流名字和策略里的 `execution.workflow` 不一致
+2. 工作流名字和运行配置里的 `execution.workflow` 不一致
 
 ### 最稳的避免方式
 
@@ -95,11 +95,11 @@ uv run python -m zipfile -c hotel_demo-1.0.0.zip hotel_demo
 ## 7. 我已经安装了 zip，为什么还是在跑本地源码
 
 先回模块管理页看来源。  
-当前设计下，同名正式安装通常会清掉 DevLink；如果你仍然看到源码行为，优先确认是否刷新了模块列表，以及策略最终解析到的模块来源是什么。
+当前设计下，同名正式安装通常会清掉 DevLink；如果你仍然看到源码行为，优先确认是否刷新了模块列表，以及当前任务运行配置最终解析到的模块来源是什么。
 
 ### 一个常见误会
 
-很多人会把“我改了源码，行为还在变”误判成“宿主还在跑 DevLink”。实际上也可能是你并没有确认当前策略最终指向哪个来源，所以还是要回来源和策略上核对。
+很多人会把“我改了源码，行为还在变”误判成“宿主还在跑 DevLink”。实际上也可能是你并没有确认当前运行配置最终指向哪个来源，所以还是要回来源和任务配置上核对。
 
 ## 8. 我写了代码型 UI 页面，但应用里只看到降级页
 
@@ -136,9 +136,9 @@ uv run python -m zipfile -c hotel_demo-1.0.0.zip hotel_demo
 ```text
 module.yaml.name
 -> DevLink / 正式安装来源
--> strategy.execution.module
--> strategy.execution.workflow
--> 作业绑定策略
+-> job.run_profile.execution.module
+-> job.run_profile.execution.workflow
+-> 作业保存运行模板
 -> ATM 触发执行
 ```
 
@@ -184,7 +184,7 @@ module.yaml.name
 
 1. 目录和清单对不对
 2. 模块来源对不对
-3. 策略字段对不对
+3. 运行模板字段对不对
 4. 调试入口有没有出现
 5. 最后才看具体 Python 业务逻辑
 

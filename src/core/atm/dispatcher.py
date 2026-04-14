@@ -11,6 +11,7 @@ import asyncio
 import time
 import traceback
 
+from src.core.atm.job_runtime import resolve_job_run_profile
 from src.core.atm.execution_runner import (
     ExecutionRequest,
     ExecutionRunner,
@@ -119,42 +120,36 @@ class TaskDispatcher:
 
     async def _run_logic(self, task: Task, job: Job):
         """核心执行逻辑。"""
-        # 0. 加载策略
-        from src.core.tsm import get_strategy_loader
-        loader = get_strategy_loader()
-        strategy = loader.get(job.strategy_id)
-        if not strategy:
-            raise ValueError(f"Strategy {job.strategy_id} not found")
+        run_profile = resolve_job_run_profile(job)
         
         if self._is_stop_requested(job.id):
             raise TaskStopRequested("Job paused before task started")
 
-        if not strategy or not strategy.execution:
-            raise ValueError(f"Strategy {job.strategy_id} missing execution config")
+        if not run_profile.execution:
+            raise ValueError(f"Job {job.id} missing run_profile.execution")
 
-        module_name = strategy.execution.module
+        module_name = run_profile.execution.module
         if not module_name:
             raise ValueError("Execution module name is empty. Cannot dispatch task.")
 
-        params = {**strategy.execution.params, **job.params}
-        params["workflow"] = strategy.execution.workflow
+        params = {**run_profile.execution.params, **job.params}
+        params["workflow"] = run_profile.execution.workflow
 
         request = ExecutionRequest(
             task=task,
             module_name=module_name,
-            hooks_module=strategy.execution.hooks_module or module_name,
+            hooks_module=run_profile.execution.hooks_module or module_name,
             params=params,
             state={
                 "job_id": job.id,
                 "task_id": task.id,
-                "strategy_id": job.strategy_id,
             },
-            provider_name=strategy.resource.provider,
-            acquisition_mode=strategy.resource.acquisition.mode,
-            selector_wait_timeout=strategy.resource.acquisition.selector.wait_timeout,
-            creation_params=dict(strategy.resource.acquisition.creation.params),
-            creation_lifecycle=strategy.resource.acquisition.creation.lifecycle,
-            execution_timeout=strategy.execution.timeout,
+            provider_name=run_profile.resource.provider,
+            acquisition_mode=run_profile.resource.acquisition.mode,
+            selector_wait_timeout=run_profile.resource.acquisition.selector.wait_timeout,
+            creation_params=dict(run_profile.resource.acquisition.creation.params),
+            creation_lifecycle=run_profile.resource.acquisition.creation.lifecycle,
+            execution_timeout=run_profile.execution.timeout,
         )
 
         runner = ExecutionRunner(rem=self.rem, mms=self.mms)

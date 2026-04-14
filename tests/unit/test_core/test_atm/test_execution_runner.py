@@ -6,7 +6,7 @@ import pytest
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.atm.models import Task, TaskStatus
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
-from src.core.tsm.models import AcquisitionMode, CreationLifecycle
+from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 
 
 def _build_env() -> tuple[Environment, EnvLease]:
@@ -36,7 +36,6 @@ def _build_request(
         state={
             "job_id": "job-21",
             "task_id": "task-21",
-            "strategy_id": "hooked-strategy",
         },
         provider_name="virtualbrowser",
         acquisition_mode=mode,

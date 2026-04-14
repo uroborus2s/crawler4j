@@ -67,8 +67,8 @@ Core 扫描与加载模块时，关键依据是：
 当前调试能力的前提不是“你本地有源码”，而是：
 
 1. 模块已经注册成 `DevLink`
-2. 作业已经绑定策略
-3. 策略中的 `execution.module` 解析到该 `DevLink` 模块
+2. 作业已经配置运行模板
+3. 运行模板中的 `execution.module` 解析到该 `DevLink` 模块
 
 只有这样 ATM 才会显示 `🐞 调试`，`DebugService` 才会继续往下创建会话。
 

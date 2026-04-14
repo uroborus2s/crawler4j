@@ -1,9 +1,7 @@
-"""TSM 数据模型 (V2).
+"""ATM 运行配置模型。"""
 
-最新方案仅保留 resource/execution/retry/teardown 四类策略配置。
-"""
+from __future__ import annotations
 
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
@@ -127,12 +125,9 @@ class TeardownPolicy(BaseModel):
     timeout_workflow: Optional[str] = Field(default=None)
 
 
-class TaskStrategy(BaseModel):
+class RunProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(..., min_length=1)
-    name: str = Field(default="")
-    description: str = ""
     resource: ResourceConfig = Field(default_factory=ResourceConfig)
     execution: Optional[ExecutionContext] = None
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
@@ -142,41 +137,6 @@ class TaskStrategy(BaseModel):
         return yaml.dump(self.model_dump(mode="json"), allow_unicode=True, sort_keys=False)
 
     @classmethod
-    def from_yaml(cls, yaml_content: str) -> "TaskStrategy":
+    def from_yaml(cls, yaml_content: str) -> "RunProfile":
         data = yaml.safe_load(yaml_content)
         return cls(**data)
-
-
-DEFAULT_STRATEGY = TaskStrategy(
-    id="default",
-    name="Default Strategy",
-    resource=ResourceConfig(
-        provider="playwright_local",
-        acquisition=AcquisitionConfig(
-            mode=AcquisitionMode.MATCH,
-            selector=MatchConfig(env_type=EnvType.DEBUG_DUMMY),
-        ),
-    ),
-)
-
-
-@dataclass
-class InstanceResult:
-    env_id: str
-    success: bool
-    message: str = ""
-    error: str = ""
-    started_at: int = 0
-    ended_at: int = 0
-
-
-@dataclass
-class OrchestratorResult:
-    strategy_id: str
-    success: bool
-    total_instances: int
-    succeeded_instances: int
-    failed_instances: int
-    results: List[InstanceResult] = field(default_factory=list)
-    started_at: int = 0
-    ended_at: int = 0

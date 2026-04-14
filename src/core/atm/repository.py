@@ -14,6 +14,7 @@ import time
 from typing import Any, List
 
 from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig
+from src.core.atm.run_profile import RunProfile
 from src.core.persistence.database import STATE_DB, get_connection
 
 
@@ -35,7 +36,7 @@ class TaskRepository:
                     id TEXT PRIMARY KEY,
                     name TEXT,
                     type TEXT,
-                    strategy_id TEXT,
+                    run_profile_json TEXT,
                     trigger_config TEXT,
                     concurrency_target INTEGER,
                     params TEXT,
@@ -44,6 +45,12 @@ class TaskRepository:
                     updated_at INTEGER
                 )
             """)
+            existing_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+            }
+            if "run_profile_json" not in existing_columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN run_profile_json TEXT")
             
             # 2. Tasks 表 (因 SQLite 无 FOR UPDATE SKIP LOCKED，需依赖单线程写入或应用层锁保证安全)
             # 但在此架构中，Task 创建通常由 Controller 发起，写入量尚可接受。
@@ -76,12 +83,12 @@ class TaskRepository:
             with get_connection(STATE_DB) as conn:
                 conn.execute(
                     """
-                    INSERT INTO jobs (id, name, type, strategy_id, trigger_config, concurrency_target, params, state, created_at, updated_at)
+                    INSERT INTO jobs (id, name, type, run_profile_json, trigger_config, concurrency_target, params, state, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         type = excluded.type,
-                        strategy_id = excluded.strategy_id,
+                        run_profile_json = excluded.run_profile_json,
                         trigger_config = excluded.trigger_config,
                         concurrency_target = excluded.concurrency_target,
                         params = excluded.params,
@@ -89,7 +96,8 @@ class TaskRepository:
                         updated_at = excluded.updated_at
                     """,
                     (
-                        job.id, item_or_empty(job.name), job.type.value, job.strategy_id,
+                        job.id, item_or_empty(job.name), job.type.value,
+                        json.dumps(job.run_profile.model_dump(mode="json"), ensure_ascii=False) if job.run_profile else "",
                         json.dumps(job.trigger.to_dict()), job.concurrency_target,
                         json.dumps(job.params), job.state.value,
                         job.created_at, job.updated_at
@@ -101,7 +109,7 @@ class TaskRepository:
         def _do():
             with get_connection(STATE_DB) as conn:
                 row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                return self._row_to_job(row) if row else None
+                return self._row_to_job(conn, row) if row else None
         return await self._run_async(_do)
 
     async def list_jobs(self) -> List[Job]:
@@ -109,7 +117,7 @@ class TaskRepository:
             with get_connection(STATE_DB) as conn:
                 # 默认按创建时间倒序
                 cursor = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC")
-                return [self._row_to_job(row) for row in cursor.fetchall()]
+                return [self._row_to_job(conn, row) for row in cursor.fetchall()]
         return await self._run_async(_do)
     
     async def list_active_jobs(self) -> List[Job]:
@@ -117,7 +125,7 @@ class TaskRepository:
         def _do():
             with get_connection(STATE_DB) as conn:
                 cursor = conn.execute("SELECT * FROM jobs WHERE state = ?", (JobState.ACTIVE.value,))
-                return [self._row_to_job(row) for row in cursor.fetchall()]
+                return [self._row_to_job(conn, row) for row in cursor.fetchall()]
         return await self._run_async(_do)
 
     async def delete_job(self, job_id: str) -> None:
@@ -232,13 +240,19 @@ class TaskRepository:
     # Helpers
     # =========================================================================
 
-    def _row_to_job(self, row: Any) -> Job:
+    def _row_to_job(self, conn: Any, row: Any) -> Job:
         trigger_data = json.loads(row["trigger_config"]) if row["trigger_config"] else {}
+        run_profile_data = (
+            json.loads(row["run_profile_json"])
+            if "run_profile_json" in row.keys() and row["run_profile_json"]
+            else None
+        )
+
         return Job(
             id=row["id"],
             name=row["name"],
             type=JobType(row["type"]),
-            strategy_id=row["strategy_id"],
+            run_profile=RunProfile.model_validate(run_profile_data) if run_profile_data else None,
             trigger=TriggerConfig.from_dict(trigger_data),
             concurrency_target=row["concurrency_target"],
             params=json.loads(row["params"]) if row["params"] else {},

@@ -25,8 +25,8 @@
 ```mermaid
 graph TD
     User[用户] --> UI[桌面客户端 (Core)]
-    UI --> TSM[策略管理 TSM]
-    TSM --> ATM[任务管理 ATM]
+    UI --> ATM[任务管理 ATM]
+    ATM --> RP[任务运行配置 RunProfile]
     ATM --> REM[环境管理 REM]
     
     subgraph Plugins [业务插件]
@@ -35,6 +35,7 @@ graph TD
     end
     
     REM -.->|SDK 契约| Plugins
+    RP -.->|执行目标/资源配置| Plugins
 ```
 
 ---

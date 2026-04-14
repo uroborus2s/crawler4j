@@ -49,7 +49,7 @@ uv build --out-dir /tmp/crawler4j-build-check
 | 改动区域 | 至少同步这些文档 |
 |---|---|
 | 应用入口、启动链、桌面壳层 | `docs/04-project-development/04-design/system-architecture.md`、`docs/04-project-development/04-design/api-design.md`、`docs/04-project-development/08-operations-maintenance/deployment-guide.md` |
-| Core 服务边界（ATM/MMS/REM/TSM/Debug/Persistence/System） | `docs/04-project-development/04-design/system-architecture.md`、`docs/04-project-development/04-design/module-boundaries.md`、`docs/04-project-development/06-testing-verification/test-plan.md` |
+| Core 服务边界（ATM/MMS/REM/RunProfile/Debug/Persistence/System） | `docs/04-project-development/04-design/system-architecture.md`、`docs/04-project-development/04-design/module-boundaries.md`、`docs/04-project-development/06-testing-verification/test-plan.md` |
 | SDK CLI、模板、模块契约 | `docs/04-project-development/04-design/technical-selection.md`、`docs/03-developer-guide/index.md`、`docs/04-project-development/06-testing-verification/test-plan.md` |
 | 文档结构、导航、过程规则 | `docs/index.md`、`docs/01-getting-started/document-map.md`、`docs/04-project-development/10-traceability/document-index.md`、`docs/04-project-development/06-testing-verification/quality-gates.md` |
 | 版本、发布、构建 | `docs/04-project-development/07-release-delivery/version-governance.md`、`docs/04-project-development/07-release-delivery/release-notes.md`、`docs/04-project-development/08-operations-maintenance/deployment-guide.md` |

@@ -18,12 +18,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.atm.job_runtime import describe_job_runtime
 from src.core.atm.models import Job, JobState, JobType
 from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event
-from src.core.tsm.loader import get_strategy_loader
 
 
 @dataclass
@@ -39,7 +39,7 @@ class TaskListWidget(QWidget):
 
     task_selected = pyqtSignal(str)
 
-    COLUMNS = ["作业名称", "类型", "策略ID", "目标并发", "触发规则", "状态", "操作"]
+    COLUMNS = ["作业名称", "类型", "运行配置", "目标并发", "触发规则", "状态", "操作"]
     
     STATUS_COLORS = {
         JobState.ACTIVE: "#facc15",    # Yellow
@@ -144,7 +144,7 @@ class TaskListWidget(QWidget):
         columns_config = [
             ("name", "作业名称", -1),
             ("type", "类型", 100),
-            ("strategy", "策略名称", 120),
+            ("runtime", "运行配置", 140),
             ("concurrency", "目标并发", 80),
             ("trigger", "触发规则", 120),
             ("status", "状态", 80),
@@ -214,15 +214,11 @@ class TaskListWidget(QWidget):
         type_str = self.TYPE_TEXT.get(job.type, job.type.value)
         table.setItem(row, 1, QTableWidgetItem(type_str))
 
-        # 2. 策略
-        strategy_text = job.strategy_id
-        strategy = get_strategy_loader().get(job.strategy_id)
-        if strategy:
-            strategy_text = strategy.name
-        
-        strategy_item = QTableWidgetItem(strategy_text)
-        strategy_item.setToolTip(f"ID: {job.strategy_id}")
-        table.setItem(row, 2, strategy_item)
+        # 2. 运行配置
+        runtime_text, runtime_tooltip = describe_job_runtime(job)
+        runtime_item = QTableWidgetItem(runtime_text)
+        runtime_item.setToolTip(runtime_tooltip)
+        table.setItem(row, 2, runtime_item)
         
         # 3. 并发
         table.setItem(row, 3, QTableWidgetItem(str(job.concurrency_target)))
@@ -333,11 +329,6 @@ class TaskListWidget(QWidget):
         try:
             # Pop job_type if present and map to job_type arg if needed, 
             # or just pass data if keys match.
-            # Service.update_job args: job_id, name, job_type, trigger_config, strategy_id, params, concurrency
-            
-            # Map 'job_type' key from dialog to 'job_type' arg in service
-            # Dialog returns 'job_type', Service expects 'job_type'.
-            
             await get_task_service().update_job(job_id, **data)
             self.load_data()
         except Exception as e:
@@ -377,7 +368,7 @@ class TaskListWidget(QWidget):
 
         dialog = JobDebugDialog(
             job,
-            debug_target.strategy,
+            debug_target.run_profile,
             debug_target.module,
             parent=self,
         )

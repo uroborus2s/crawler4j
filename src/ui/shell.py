@@ -118,7 +118,6 @@ class Sidebar(QFrame):
         ("tasks", "📋 任务监控"),
         ("environments", "🖥️ 环境管理"),
         ("modules", "📦 模块管理"),
-        ("strategy", "⚙️ 策略配置"),
         ("settings", "🔧 系统设置"),
     ]
     
@@ -282,10 +281,6 @@ class Shell(QMainWindow):
         # 连接信号: 列表页 → 详情页
         modules_page.open_detail.connect(self._open_module_detail)
         self.module_detail_page.back_requested.connect(self._back_to_modules)
-        
-        # 策略配置 - TSM UI (策略列表)
-        from src.core.tsm.ui import StrategyListWidget
-        self._add_page("strategy", StrategyListWidget())
         
         # 系统设置 - System UI
         from src.core.system.ui import SettingsPage

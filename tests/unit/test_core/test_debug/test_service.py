@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from src.core.atm.models import Job
-from src.core.tsm.models import (
+from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
     CreationConfig,
@@ -15,7 +15,7 @@ from src.core.tsm.models import (
     ExecutionContext,
     MatchConfig,
     ResourceConfig,
-    TaskStrategy,
+    RunProfile,
 )
 
 
@@ -85,27 +85,16 @@ def _make_registry(module_path: Path, *, source=None):
     return SimpleNamespace(get_module=lambda name: module_info if name == "demo_module" else None)
 
 
-def _make_job() -> Job:
-    return Job(
-        id="job-1",
-        name="Demo Job",
-        strategy_id="strategy.demo",
-        params={"city": "Shanghai"},
-    )
-
-
-def _make_strategy() -> TaskStrategy:
-    return TaskStrategy(
-        id="strategy.demo",
-        name="Demo Strategy",
+def _make_run_profile(*, wait_timeout: int = 90, lifecycle: CreationLifecycle = CreationLifecycle.EPHEMERAL, params: dict | None = None, timeout: int = 180) -> RunProfile:
+    return RunProfile(
         resource=ResourceConfig(
             provider="virtualbrowser",
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.CREATE,
-                selector=MatchConfig(wait_timeout=90),
+                selector=MatchConfig(wait_timeout=wait_timeout),
                 creation=CreationConfig(
-                    lifecycle=CreationLifecycle.EPHEMERAL,
-                    params={"region": "cn"},
+                    lifecycle=lifecycle,
+                    params=params or {"region": "cn"},
                 ),
             ),
         ),
@@ -113,9 +102,42 @@ def _make_strategy() -> TaskStrategy:
             module="demo_module",
             workflow="repair",
             hooks_module="demo_module.hooks",
-            params={"lang": "zh-CN"},
-            timeout=180,
+            params={"lang": "zh-CN"} if params is None else {"lang": "en-US"},
+            timeout=timeout,
         ),
+    )
+
+
+def _make_job() -> Job:
+    return Job(
+        id="job-1",
+        name="Demo Job",
+        run_profile=_make_run_profile(),
+        params={"city": "Shanghai"},
+    )
+
+
+def _make_inline_job() -> Job:
+    return Job(
+        id="job-inline",
+        name="Inline Job",
+        run_profile=_make_run_profile(
+            wait_timeout=45,
+            lifecycle=CreationLifecycle.PERSISTENT,
+            params={"region": "sg"},
+            timeout=300,
+        ).model_copy(
+            update={
+                "execution": ExecutionContext(
+                    module="demo_module",
+                    workflow="repair",
+                    hooks_module="demo_module.hooks",
+                    params={"lang": "en-US"},
+                    timeout=300,
+                )
+            }
+        ),
+        params={"city": "Singapore"},
     )
 
 
@@ -131,20 +153,16 @@ async def test_debug_service_tracks_worker_events_and_logs(monkeypatch, temp_dat
         return worker
 
     job = _make_job()
-    strategy = _make_strategy()
     service = DebugService(
         registry=_make_registry(temp_data_dir / "demo_module"),
         task_service=SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None),
-        strategy_loader=SimpleNamespace(get=lambda strategy_id: strategy if strategy_id == job.strategy_id else None),
         stop_timeout=0.01,
     )
 
     monkeypatch.setattr("src.core.debug.service.create_subprocess_exec", fake_exec)
     monkeypatch.setattr(service, "_allocate_attach_port", lambda host, port: port)
 
-    session = await service.create_session(
-        DebugSessionRequest(job_id=job.id)
-    )
+    session = await service.create_session(DebugSessionRequest(job_id=job.id))
     await service.start_session(session.id)
 
     worker.stdout.feed_line(
@@ -192,7 +210,7 @@ async def test_debug_service_tracks_worker_events_and_logs(monkeypatch, temp_dat
 
     payload = json.loads(service.get_session_file(session.id).read_text(encoding="utf-8"))
     assert payload["job_id"] == job.id
-    assert payload["strategy_id"] == job.strategy_id
+    assert "strategy_id" not in payload
     assert payload["module_name"] == "demo_module"
     assert payload["workflow"] == "repair"
     assert payload["hooks_module"] == "demo_module.hooks"
@@ -215,20 +233,16 @@ async def test_debug_service_can_stop_and_restart_session(monkeypatch, temp_data
         return workers.pop(0)
 
     job = _make_job()
-    strategy = _make_strategy()
     service = DebugService(
         registry=_make_registry(temp_data_dir / "demo_module"),
         task_service=SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None),
-        strategy_loader=SimpleNamespace(get=lambda strategy_id: strategy if strategy_id == job.strategy_id else None),
         stop_timeout=0.01,
     )
 
     monkeypatch.setattr("src.core.debug.service.create_subprocess_exec", fake_exec)
     monkeypatch.setattr(service, "_allocate_attach_port", lambda host, port: port)
 
-    session = await service.create_session(
-        DebugSessionRequest(job_id=job.id)
-    )
+    session = await service.create_session(DebugSessionRequest(job_id=job.id))
     await service.start_session(session.id)
 
     first_worker = service._processes[session.id]
@@ -266,17 +280,58 @@ async def test_debug_service_can_stop_and_restart_session(monkeypatch, temp_data
 
 
 @pytest.mark.asyncio
+async def test_debug_service_supports_inline_run_profile(monkeypatch, temp_data_dir):
+    from src.core.debug.models import DebugSessionRequest, DebugSessionState
+    from src.core.debug.protocol import encode_debug_event
+    from src.core.debug.service import DebugService
+
+    worker = _FakeProcess(pid=5555)
+
+    async def fake_exec(*args, **kwargs):
+        return worker
+
+    job = _make_inline_job()
+    service = DebugService(
+        registry=_make_registry(temp_data_dir / "demo_module"),
+        task_service=SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None),
+        stop_timeout=0.01,
+    )
+
+    monkeypatch.setattr("src.core.debug.service.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(service, "_allocate_attach_port", lambda host, port: port)
+
+    session = await service.create_session(DebugSessionRequest(job_id=job.id))
+    await service.start_session(session.id)
+
+    worker.stdout.feed_line(
+        encode_debug_event({"type": "state", "state": DebugSessionState.SUCCEEDED.value, "env_id": "31"}) + "\n"
+    )
+    worker.finish(0)
+
+    await asyncio.sleep(0.05)
+
+    payload = json.loads(service.get_session_file(session.id).read_text(encoding="utf-8"))
+    assert payload["job_id"] == job.id
+    assert "strategy_id" not in payload
+    assert payload["module_name"] == "demo_module"
+    assert payload["workflow"] == "repair"
+    assert payload["provider"] == "virtualbrowser"
+    assert payload["wait_timeout"] == 45
+    assert payload["timeout"] == 300
+    assert payload["params"] == {"lang": "en-US", "city": "Singapore"}
+    assert payload["creation_params"] == {"region": "sg"}
+
+
+@pytest.mark.asyncio
 async def test_debug_service_rejects_non_dev_link_modules(temp_data_dir):
     from src.core.debug.models import DebugSessionRequest
     from src.core.debug.service import DebugService
     from src.core.mms.models import ModuleSource
 
     job = _make_job()
-    strategy = _make_strategy()
     service = DebugService(
         registry=_make_registry(temp_data_dir / "modules" / "demo_module", source=ModuleSource.EXTERNAL),
         task_service=SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None),
-        strategy_loader=SimpleNamespace(get=lambda strategy_id: strategy if strategy_id == job.strategy_id else None),
     )
 
     with pytest.raises(ValueError, match="开发链接"):

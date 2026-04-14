@@ -2,6 +2,7 @@ import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -10,6 +11,23 @@ from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, Trigge
 from src.core.atm.repository import TaskRepository
 from src.core.atm.service import TaskService
 from src.core.foundation.event_bus import Event, EventType
+from src.core.atm.run_profile import (
+    AcquisitionConfig,
+    AcquisitionMode,
+    ExecutionContext,
+    MatchConfig,
+    ResourceConfig,
+    RunProfile,
+)
+
+
+@pytest.fixture
+def temp_state_dir(tmp_path):
+    with patch("src.utils.paths.get_app_data_dir", return_value=tmp_path):
+        from src.core.persistence.database import init_database
+
+        init_database()
+        yield tmp_path
 
 
 @pytest.mark.asyncio
@@ -129,6 +147,16 @@ async def test_start_job_triggers_targeted_reconcile():
         name="service",
         type=JobType.SERVICE,
         state=JobState.PAUSED,
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                provider="virtualbrowser",
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.MATCH,
+                    selector=MatchConfig(wait_timeout=60),
+                ),
+            ),
+            execution=ExecutionContext(module="demo_module", workflow="repair"),
+        ),
         concurrency_target=2,
     )
     service._repo = SimpleNamespace(get_job=AsyncMock(return_value=job), save_job=AsyncMock())
@@ -156,7 +184,16 @@ async def test_start_job_blocks_when_runtime_precheck_fails():
         name="service",
         type=JobType.SERVICE,
         state=JobState.PAUSED,
-        strategy_id="strategy-1",
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                provider="virtualbrowser",
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.MATCH,
+                    selector=MatchConfig(wait_timeout=60),
+                ),
+            ),
+            execution=ExecutionContext(module="demo_module", workflow="repair"),
+        ),
         concurrency_target=2,
     )
     service._repo = SimpleNamespace(get_job=AsyncMock(return_value=job), save_job=AsyncMock())
@@ -180,12 +217,22 @@ async def test_create_service_job_forces_manual_trigger():
     service = TaskService()
     saved_jobs = []
     service._repo = SimpleNamespace(save_job=AsyncMock(side_effect=lambda job: saved_jobs.append(job)))
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            provider="virtualbrowser",
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.MATCH,
+                selector=MatchConfig(wait_timeout=60),
+            ),
+        ),
+        execution=ExecutionContext(module="demo_module", workflow="repair"),
+    )
 
     await service.create_job(
         name="service-job",
         job_type=JobType.SERVICE.value,
         trigger_config={"type": TriggerType.CRON.value, "cron_expr": "*/5 * * * *"},
-        strategy_id="strategy-1",
+        run_profile=run_profile,
         concurrency=2,
     )
 
@@ -198,13 +245,23 @@ async def test_create_service_job_forces_manual_trigger():
 async def test_create_batch_job_requires_valid_cron():
     service = TaskService()
     service._repo = SimpleNamespace(save_job=AsyncMock())
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            provider="virtualbrowser",
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.MATCH,
+                selector=MatchConfig(wait_timeout=60),
+            ),
+        ),
+        execution=ExecutionContext(module="demo_module", workflow="repair"),
+    )
 
     with pytest.raises(ValueError, match="Cron"):
         await service.create_job(
             name="batch-job",
             job_type=JobType.BATCH.value,
             trigger_config={"type": TriggerType.MANUAL.value},
-            strategy_id="strategy-1",
+            run_profile=run_profile,
             concurrency=2,
         )
 
@@ -213,9 +270,68 @@ async def test_create_batch_job_requires_valid_cron():
             name="batch-job-invalid",
             job_type=JobType.BATCH.value,
             trigger_config={"type": TriggerType.CRON.value, "cron_expr": "invalid-cron"},
-            strategy_id="strategy-1",
+            run_profile=run_profile,
             concurrency=2,
         )
+
+
+@pytest.mark.asyncio
+async def test_create_job_accepts_inline_run_profile():
+    service = TaskService()
+    saved_jobs = []
+    service._repo = SimpleNamespace(save_job=AsyncMock(side_effect=lambda job: saved_jobs.append(job)))
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            provider="virtualbrowser",
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.MATCH,
+                selector=MatchConfig(wait_timeout=90),
+            ),
+        ),
+        execution=ExecutionContext(module="demo_module", workflow="repair"),
+    )
+
+    await service.create_job(
+        name="inline-job",
+        job_type=JobType.BATCH.value,
+        trigger_config={"type": TriggerType.CRON.value, "cron_expr": "0 * * * *"},
+        run_profile=run_profile,
+        concurrency=2,
+    )
+
+    assert len(saved_jobs) == 1
+    assert saved_jobs[0].run_profile == run_profile
+
+
+@pytest.mark.asyncio
+async def test_repository_roundtrip_preserves_run_profile_snapshot(temp_state_dir):
+    repo = TaskRepository()
+    repo._run_async = AsyncMock(side_effect=lambda func, *args: func(*args))
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            provider="virtualbrowser",
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.MATCH,
+                selector=MatchConfig(wait_timeout=75),
+            ),
+        ),
+        execution=ExecutionContext(module="demo_module", workflow="repair"),
+    )
+    job = Job(
+        id="job-inline",
+        name="inline",
+        type=JobType.BATCH,
+        trigger=TriggerConfig(type=TriggerType.CRON, cron_expr="0 * * * *"),
+        run_profile=run_profile,
+    )
+
+    await repo.save_job(job)
+    loaded = await repo.get_job(job.id)
+
+    assert loaded is not None
+    assert loaded.run_profile == run_profile
 
 
 @pytest.mark.asyncio

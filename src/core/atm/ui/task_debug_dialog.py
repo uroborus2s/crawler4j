@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from src.core.atm.job_runtime import describe_job_runtime
 from src.core.atm.models import Job
 from src.core.debug.models import DebugSession, DebugSessionRequest, DebugSessionState
 from src.core.debug.resolver import JobDebugTarget
@@ -29,16 +30,16 @@ from src.core.debug.service import DebugService, get_debug_service
 from src.core.debug.vscode import ensure_vscode_attach_config
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo
-from src.core.tsm.models import TaskStrategy
+from src.core.atm.run_profile import RunProfile
 
 
 class JobDebugDialog(QDialog):
-    """基于 Job + Strategy 的任务调试对话框。"""
+    """基于 Job + RunProfile 的任务调试对话框。"""
 
     def __init__(
         self,
         job: Job,
-        strategy: TaskStrategy,
+        run_profile: RunProfile,
         module: ModuleInfo,
         *,
         debug_service: DebugService | None = None,
@@ -46,23 +47,24 @@ class JobDebugDialog(QDialog):
     ):
         super().__init__(parent)
         self._job = job
-        self._strategy = strategy
+        self._run_profile = run_profile
         self._module = module
         self._service = debug_service or get_debug_service()
         self._current_session_id: str | None = None
         self._refresh_in_flight = False
+        self._runtime_label, self._runtime_tooltip = describe_job_runtime(job)
         self._target = JobDebugTarget(
             job=job,
-            strategy=strategy,
+            run_profile=run_profile,
             module=module,
-            workflow=strategy.execution.workflow if strategy.execution else "default",
-            hooks_module=(strategy.execution.hooks_module if strategy.execution else "") or module.name,
+            workflow=run_profile.execution.workflow if run_profile.execution else "default",
+            hooks_module=(run_profile.execution.hooks_module if run_profile.execution else "") or module.name,
             params={
-                **((strategy.execution.params if strategy.execution else {}) or {}),
+                **((run_profile.execution.params if run_profile.execution else {}) or {}),
                 **(job.params or {}),
             },
-            timeout=strategy.execution.timeout if strategy.execution else 0,
-            wait_timeout=strategy.resource.acquisition.selector.wait_timeout,
+            timeout=run_profile.execution.timeout if run_profile.execution else 0,
+            wait_timeout=run_profile.resource.acquisition.selector.wait_timeout,
         )
         self.setWindowTitle(f"任务调试 - {job.name}")
         self.resize(1100, 820)
@@ -135,11 +137,11 @@ class JobDebugDialog(QDialog):
         summary_layout.setVerticalSpacing(8)
         summary_items = [
             ("作业 ID", self._job.id),
-            ("策略 ID", self._job.strategy_id),
+            ("运行配置", self._runtime_label),
             ("模块", self._target.module.name),
             ("工作流", self._target.workflow or "default"),
-            ("Provider", self._strategy.resource.provider),
-            ("获取模式", self._strategy.resource.acquisition.mode.value),
+            ("Provider", self._run_profile.resource.provider),
+            ("获取模式", self._run_profile.resource.acquisition.mode.value),
         ]
         for idx, (label_text, value_text) in enumerate(summary_items):
             row = idx // 2
@@ -147,6 +149,8 @@ class JobDebugDialog(QDialog):
             summary_layout.addWidget(QLabel(label_text), row, col)
             value = QLabel(str(value_text))
             value.setStyleSheet("color: rgba(255,255,255,0.78);")
+            if label_text == "运行配置":
+                value.setToolTip(self._runtime_tooltip)
             summary_layout.addWidget(value, row, col + 1)
         layout.addWidget(summary_card)
 

@@ -11,6 +11,7 @@ import time
 from asyncio.subprocess import PIPE, create_subprocess_exec
 from pathlib import Path
 
+from src.core.atm.run_profile import CreationLifecycle
 from src.core.debug.models import (
     FINAL_DEBUG_STATES,
     DebugSession,
@@ -26,8 +27,6 @@ from src.core.debug.resolver import resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.mms.registry import ModuleRegistry, get_module_registry
 from src.core.atm.service import TaskService, get_task_service
-from src.core.tsm.loader import StrategyLoader, get_strategy_loader
-from src.core.tsm.models import CreationLifecycle
 from src.utils.paths import get_app_data_dir
 
 
@@ -40,7 +39,6 @@ class DebugService:
         repo: DebugSessionRepository | None = None,
         registry: ModuleRegistry | None = None,
         task_service: TaskService | None = None,
-        strategy_loader: StrategyLoader | None = None,
         worker_module: str = "src.core.debug.worker_entry",
         python_executable: str | None = None,
         stop_timeout: float = 5.0,
@@ -48,7 +46,6 @@ class DebugService:
         self.repo = repo or get_debug_session_repository()
         self.registry = registry or get_module_registry()
         self.task_service = task_service or get_task_service()
-        self.strategy_loader = strategy_loader or get_strategy_loader()
         self._worker_module = worker_module
         self._python_executable = python_executable or sys.executable
         self._stop_timeout = stop_timeout
@@ -68,7 +65,6 @@ class DebugService:
 
         target = resolve_job_debug_target(
             job,
-            strategy_loader=self.strategy_loader,
             registry=self.registry,
         )
         if target.module.source != ModuleSource.DEV_LINK:
@@ -77,17 +73,16 @@ class DebugService:
         session = DebugSession(
             job_id=job.id,
             job_name=job.name,
-            strategy_id=job.strategy_id,
             module_name=target.module.name,
             source_path=str(target.module.path),
             workflow=target.workflow,
             params=dict(request.params) if request.params else dict(target.params),
             hooks_module=target.hooks_module,
-            provider=target.strategy.resource.provider,
-            acquisition_mode=target.strategy.resource.acquisition.mode,
-            creation_params=dict(target.strategy.resource.acquisition.creation.params),
+            provider=target.run_profile.resource.provider,
+            acquisition_mode=target.run_profile.resource.acquisition.mode,
+            creation_params=dict(target.run_profile.resource.acquisition.creation.params),
             creation_lifecycle=(
-                target.strategy.resource.acquisition.creation.lifecycle
+                target.run_profile.resource.acquisition.creation.lifecycle
                 if not request.keep_environment
                 else CreationLifecycle.PERSISTENT
             ),

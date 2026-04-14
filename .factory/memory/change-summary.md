@@ -6,7 +6,8 @@
 ## 需求变更
 - `CR-001-version-and-release-governance-alignment` CR-001 统一版本与发布治理 | 状态：DONE | 关联：无
 - `CR-002-quality-gate-and-docs-navigation-alignment` CR-002 收敛质量门与文档导航策略 | 状态：DONE | 关联：无
-- `CR-003-mms-settings-and-ui-extension-compliance` CR-003 补齐 MMS settings store 与 UI 扩展合规实现 | 状态：DONE | 关联：无
+- `CR-003-mms-settings-and-ui-extension-compliance` CR-003 补齐 MMS settings store 与 UI 扩展合规实现 | 状态：DONE | 关联：无 | 追加回归：`core:data_table` 刷新重放 `declare_ui`，并覆盖 create/update handler 与 DevLink 调试回路
+- ATM RunProfile 收敛：ATM 已切换为“任务直接持有 RunProfile”，任务创建页与主导航移除策略概念，`TSM` 包与兼容壳已删除 | 状态：DONE | 关联：ATM / Debug UI 重构
 
 ## 缺陷修复
 - `BUG-001-root-entrypoint-and-pyinstaller-spec-drift` BUG-001 根入口与 PyInstaller 规格漂移 | 状态：DONE | 关联：无

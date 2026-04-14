@@ -50,10 +50,12 @@ get_module_registry().register_dev_link("/abs/path/to/hotel_demo")
 
 当前并不是“有源码就能调试”，而是必须同时满足：
 
-1. 作业已经绑定策略
-2. 策略里有 `execution.module`
+1. 作业已经具备运行配置
+2. 运行配置里有 `execution.module`
 3. `execution.module` 能解析到一个有效模块
 4. 该模块来源是 `DevLink`
+
+当前 UI 下，这份运行配置直接保存在作业里。
 
 只要最后一条不成立，`DebugService` 就会拒绝进入调试会话创建。
 
@@ -69,14 +71,14 @@ get_module_registry().register_dev_link("/abs/path/to/hotel_demo")
 
 这个推断不成立。“能看到”只说明被扫描或加载到了；“能调试”还要求它来自 `DevLink`。
 
-## 策略里最关键的两个字段
+## 运行配置里最关键的两个字段
 
 至少要保证下面两个值正确：
 
 - `execution.module = module.yaml.name`
 - `execution.workflow = 想执行的工作流名`
 
-如果你的模块名是 `hotel_demo`，但策略里写成了 `Hotel Demo`、目录显示名或 zip 文件名，调试目标解析会直接失败。
+如果你的模块名是 `hotel_demo`，但运行配置里写成了 `Hotel Demo`、目录显示名或 zip 文件名，调试目标解析会直接失败。
 
 ### 一个记忆方法
 
@@ -92,7 +94,7 @@ get_module_registry().register_dev_link("/abs/path/to/hotel_demo")
 现在的调试链已经是宿主真实执行链，不是简化版模拟器：
 
 ```text
-ATM 作业 / 策略
+ATM 作业运行配置
 -> DebugService
 -> DebugWorker
 -> debugpy
@@ -110,12 +112,15 @@ ATM 作业 / 策略
 
 这也是为什么当前调试更有价值：你不是在调一个脱离宿主的简化脚本，而是在调接近正式运行的真实执行链。
 
+对于 `core:data_table:<view_id>` 这类宿主通用页面，详情页点击“刷新”会重新执行模块根导出的 `declare_ui`。
+如果来源是 `DevLink`，宿主会强制重载本地同步 hook，因此联调 schema、`create_handler`、`update_handler` 时不必每次都重新打包 zip。
+
 ## 一次完整调试的推荐步骤
 
 1. 在模块管理中注册 DevLink
 2. 确认模块来源显示为“开发链接”
-3. 在策略里设置 `execution.module` 和 `execution.workflow`
-4. 创建或选择绑定该策略的作业
+3. 在任务运行配置里设置 `execution.module` 和 `execution.workflow`
+4. 创建或选择对应作业
 5. 在 ATM 中点击 `🐞 调试`
 6. 生成调试配置并让 IDE 附加到 `debugpy`
 7. 从断点观察 `ctx.config`、`ctx.state`、`ctx.page`
@@ -131,7 +136,7 @@ ATM 作业 / 策略
 
 这 4 个点能帮你快速判断：
 
-- 问题是在策略参数
+- 问题是在运行配置参数
 - 还是在工作流状态
 - 还是在页面执行环境
 
@@ -140,7 +145,7 @@ ATM 作业 / 策略
 最常见的原因有四类：
 
 1. 模块没有注册成 `DevLink`
-2. 作业没有绑定策略
+2. 作业没有保存有效运行模板
 3. `execution.module` 不是 `module.yaml.name`
 4. 你装了同名 zip，DevLink 已被正式安装替换
 
@@ -157,8 +162,8 @@ ATM 作业 / 策略
 先回头核对：
 
 1. 模块来源
-2. 策略字段
-3. 作业绑定关系
+2. 运行配置字段
+3. 作业里是否已经保存了有效运行配置
 4. 调试入口是否出现在正确作业上
 
 对小白来说，这个排查顺序通常比直接改代码更有效。

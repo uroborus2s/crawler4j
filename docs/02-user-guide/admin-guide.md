@@ -30,7 +30,7 @@
 2. 通过 `📥 安装模块` 安装 zip。
 3. 确认模块来源显示为正式安装模块。
 4. 打开模块详情补齐配置。
-5. 到 `⚙️ 策略配置` 中配置 `execution.module` 和 `execution.workflow`。
+5. 到 `📋 任务监控` 中创建任务并配置运行模板里的 `execution.module` 和 `execution.workflow`。
 
 ### DevLink 模块
 

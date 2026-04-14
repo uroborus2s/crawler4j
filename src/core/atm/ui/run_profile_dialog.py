@@ -1,8 +1,4 @@
-"""策略详情编辑弹窗 (V2)."""
-
-
-
-import uuid
+"""运行模板编辑弹窗。"""
 
 import yaml
 
@@ -28,20 +24,20 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.mms import get_module_registry
-from src.core.tsm import (
+from src.core.atm.run_profile import (
     AcquisitionMode,
     CreationLifecycle,
     EnvType,
     ExecutionContext,
     MatchConfig,
+    RunProfile,
     ResourceConfig,
     RetryPolicy,
     SelectionStrategy,
-    TaskStrategy,
     TeardownAction,
     TeardownPolicy,
 )
-from src.core.tsm.ui.rule_builder import RuleBuilder
+from src.core.atm.ui.rule_builder import RuleBuilder
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
@@ -201,7 +197,7 @@ class WorkflowSelector(QWidget):
             pass
             # Or should we allow set_value to override filter? 
             # User workflow: Select Global Module -> Init Workflow updates list.
-            # _load_strategy: Sets Global Module -> Filter updates -> Then sets Init Workflow value.
+            # _load_run_profile: Sets Global Module -> Filter updates -> Then sets Init Workflow value.
             # So we just need to set workflow.
             pass
             
@@ -236,26 +232,22 @@ TEARDOWN_ACTION_MAP = {
 }
 
 
-class StrategyDetailDialog(QDialog):
-    """策略详情编辑弹窗 (V2)。"""
+class RunProfileDialog(QDialog):
+    """运行模板编辑弹窗。"""
 
-    def __init__(self, strategy: TaskStrategy | None = None, parent=None, read_only: bool = False):
+    def __init__(self, run_profile: RunProfile | None = None, parent=None, read_only: bool = False):
         super().__init__(parent)
-        self._strategy = strategy or TaskStrategy(
-            id=uuid.uuid4().hex,
-            name="",
-            resource=ResourceConfig(),
-        )
-        self._is_new = strategy is None
+        self._run_profile = run_profile or RunProfile(resource=ResourceConfig())
+        self._is_new = run_profile is None
         self._read_only = read_only
         self._setup_ui()
-        self._load_strategy()
+        self._load_run_profile()
         
         if self._read_only:
              self._set_read_only()
 
     def _setup_ui(self):
-        self.setWindowTitle("新建策略" if self._is_new else "编辑策略")
+        self.setWindowTitle("配置运行模板")
         
         # Responsive sizing (50% width, 90% height of screen)
         screen = QApplication.primaryScreen()
@@ -369,7 +361,7 @@ class StrategyDetailDialog(QDialog):
         cancel_btn.setStyleSheet("background: rgba(255,255,255,0.1); border:none; color:white; border-radius:4px;")
         cancel_btn.clicked.connect(self.reject)
         
-        save_btn = QPushButton("保存策略")
+        save_btn = QPushButton("保存运行模板")
         save_btn.setFixedSize(100, 32)
         save_btn.setStyleSheet("background: #10b981; border:none; color:white; font-weight:bold; border-radius:4px;")
         save_btn.clicked.connect(self._on_save)
@@ -423,7 +415,7 @@ class StrategyDetailDialog(QDialog):
         
         self.tab_retry = QWidget()
         self._setup_retry_tab(self.tab_retry)
-        self.form_tabs.addTab(self.tab_retry, "容错策略")
+        self.form_tabs.addTab(self.tab_retry, "重试策略")
 
         self.tab_teardown = QWidget()
         self._setup_teardown_tab(self.tab_teardown)
@@ -458,31 +450,8 @@ class StrategyDetailDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
         
-        # 基础信息
         basic_group = QGroupBox("基础信息")
         form = self._create_form_layout(basic_group)
-        
-        self.id_edit = QLineEdit()
-        self.id_edit.setReadOnly(True)
-        self.id_edit.setStyleSheet("color: #888; background: #2a2a2a;")
-        form.addRow("策略 ID:", self.id_edit)
-
-        # 基础信息
-        basic_group = QGroupBox("基础信息")
-        form = self._create_form_layout(basic_group)
-        
-        self.id_edit = QLineEdit()
-        self.id_edit.setReadOnly(True)
-        self.id_edit.setStyleSheet("color: #888; background: #2a2a2a;")
-        form.addRow("策略 ID:", self.id_edit)
-
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("策略名称")
-        form.addRow("策略名称:", self.name_edit)
-        
-        self.desc_edit = QLineEdit()
-        self.desc_edit.setPlaceholderText("简要描述策略用途")
-        form.addRow("描述:", self.desc_edit)
         
         # 全局模块选择
         self.module_link_combo = QComboBox()
@@ -491,7 +460,7 @@ class StrategyDetailDialog(QDialog):
         # Load modules
         try:
             registry = get_module_registry()
-            self.module_link_combo.addItem("通用策略 (无特定模块)", "")
+            self.module_link_combo.addItem("通用运行模板 (无特定模块)", "")
             for m in registry.list_modules():
                 self.module_link_combo.addItem(m.name, m.name)
         except Exception:
@@ -757,11 +726,8 @@ class StrategyDetailDialog(QDialog):
             self.rule_mode_btn.setText("Switch to Raw Text")
             self.rule_stack.setCurrentIndex(0)
 
-    def _load_strategy(self):
-        s = self._strategy
-        self.id_edit.setText(s.id)
-        self.name_edit.setText(s.name)
-        self.desc_edit.setText(s.description)
+    def _load_run_profile(self):
+        s = self._run_profile
         
         # Resource Logic
         etype = s.resource.acquisition.selector.env_type
@@ -867,7 +833,7 @@ class StrategyDetailDialog(QDialog):
         load_wf(self.td_timeout_wf, s.teardown.timeout_workflow)
 
 
-    def _build_strategy_from_form(self) -> TaskStrategy:
+    def _build_run_profile_from_form(self) -> RunProfile:
         # Resource EnvType Logic
         cat_idx = self.env_category_combo.currentIndex()
         if cat_idx == 0:
@@ -965,10 +931,7 @@ class StrategyDetailDialog(QDialog):
             timeout_workflow=get_wf_str(self.td_timeout_wf),
         )
         
-        return TaskStrategy(
-            id=self._strategy.id,
-            name=self.name_edit.text().strip() or "Unnamed",
-            description=self.desc_edit.text().strip(),
+        return RunProfile(
             resource=resource,
             execution=execution,
             retry=retry,
@@ -977,7 +940,7 @@ class StrategyDetailDialog(QDialog):
 
     def _form_to_yaml(self):
         try:
-            s = self._build_strategy_from_form()
+            s = self._build_run_profile_from_form()
             self.yaml_editor.setPlainText(s.to_yaml())
         except Exception as e:
             self.yaml_editor.setPlainText(f"# Error building YAML: {e}")
@@ -987,29 +950,18 @@ class StrategyDetailDialog(QDialog):
             yaml_str = self.yaml_editor.toPlainText()
             if not yaml_str.strip():
                 return
-            self._strategy = TaskStrategy.from_yaml(yaml_str)
-            self._load_strategy()
+            self._run_profile = RunProfile.from_yaml(yaml_str)
+            self._load_run_profile()
         except Exception:
             pass
 
     def _on_save(self):
-        # Validation
-        if self.stack.currentIndex() == 0: # Only check form mode (yaml mode builds from form anyway if switched back, or we check yaml)
-            name = self.name_edit.text().strip()
-            if not name:
-                QMessageBox.warning(self, "校验失败", "策略名称不能为空，请输入有效的名称。")
-                return
-
         if self.stack.currentIndex() == 1:
             self._yaml_to_form()
-            # Re-validate after parsing yaml
-            if not self._strategy.name:
-                 QMessageBox.warning(self, "校验失败", "策略名称不能为空 (YAML 中缺失 name)。")
-                 return
         else:
-            self._strategy = self._build_strategy_from_form()
+            self._run_profile = self._build_run_profile_from_form()
             
         self.accept()
 
-    def get_strategy(self) -> TaskStrategy:
-        return self._strategy
+    def get_run_profile(self) -> RunProfile:
+        return self._run_profile

@@ -12,6 +12,7 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from src.core.atm.job_runtime import resolve_job_run_profile
 from src.core.atm.dispatcher import get_task_dispatcher
 from src.core.atm.models import Job, JobState, JobType, TriggerType
 from src.core.atm.repository import get_task_repository
@@ -74,23 +75,16 @@ class JobController:
             self.dispatcher.clear_stop_for_job(job_id)
 
     async def ensure_job_runtime_ready(self, job_id: str):
-        """按 Job 策略检查外部运行时依赖（如指纹浏览器）是否就绪。"""
+        """按 Job 运行配置检查外部运行时依赖（如指纹浏览器）是否就绪。"""
         job = await self.repo.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} not found")
         await self._ensure_runtime_for_job(job)
 
     async def _ensure_runtime_for_job(self, job: Job):
-        if not job.strategy_id:
-            return
+        run_profile = resolve_job_run_profile(job)
 
-        from src.core.tsm import get_strategy_loader
-        loader = get_strategy_loader()
-        strategy = loader.get(job.strategy_id)
-        if not strategy:
-            raise ValueError(f"Strategy {job.strategy_id} not found")
-
-        provider_name = strategy.resource.provider if strategy.resource else ""
+        provider_name = run_profile.resource.provider if run_profile.resource else ""
         if not provider_name:
             return
 

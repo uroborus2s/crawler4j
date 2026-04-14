@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from src.core.tsm.models import AcquisitionMode, CreationLifecycle
+from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 
 
 class DebugSessionState(StrEnum):
@@ -46,7 +46,6 @@ class DebugSession:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     job_id: str = ""
     job_name: str = ""
-    strategy_id: str = ""
     module_name: str = ""
     source_path: str = ""
     workflow: str = "default"
@@ -88,7 +87,6 @@ class DebugSession:
             "id": self.id,
             "job_id": self.job_id,
             "job_name": self.job_name,
-            "strategy_id": self.strategy_id,
             "module_name": self.module_name,
             "source_path": self.source_path,
             "workflow": self.workflow,

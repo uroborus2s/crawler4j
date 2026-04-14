@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.atm.job_runtime import describe_job_runtime, resolve_job_run_profile
 from src.core.atm.models import Job, Task
 from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
@@ -89,8 +90,8 @@ class JobDetailDialog(QDialog):
         
         info_layout.addStretch()
         
-        self.strategy_label = QLabel("策略: -")
-        info_layout.addWidget(self.strategy_label)
+        self.runtime_label = QLabel("运行配置: -")
+        info_layout.addWidget(self.runtime_label)
 
         self.debug_btn = QPushButton("🐞 调试任务")
         self.debug_btn.setStyleSheet("""
@@ -220,14 +221,31 @@ class JobDetailDialog(QDialog):
             self.task_table.setItem(row, 6, QTableWidgetItem(msg))
 
     def _update_info(self, job: Job):
+        runtime_text, runtime_tooltip = describe_job_runtime(job)
         self.name_label.setText(f"作业名称: {job.name}")
-        self.strategy_label.setText(f"策略: {job.strategy_id} | 并发: {job.concurrency_target}")
+        self.runtime_label.setText(f"运行配置: {runtime_text} | 并发: {job.concurrency_target}")
+        self.runtime_label.setToolTip(runtime_tooltip)
 
         trigger_text = "启动后持续保活"
         if job.type.value == "batch":
             trigger_text = job.trigger.cron_expr or "未配置 Cron"
 
+        try:
+            run_profile = resolve_job_run_profile(job)
+            execution_text = (
+                f"{run_profile.execution.module}/{run_profile.execution.workflow or 'default'}"
+                if run_profile.execution and run_profile.execution.module
+                else "-"
+            )
+            provider_text = run_profile.resource.provider if run_profile.resource else "-"
+        except Exception:
+            execution_text = "-"
+            provider_text = "-"
+
         info = f"模式: {self.TYPE_TEXT.get(job.type.value, job.type.value)}\n"
+        info += f"运行配置: {runtime_text}\n"
+        info += f"执行目标: {execution_text}\n"
+        info += f"Provider: {provider_text}\n"
         info += f"触发: {trigger_text}\n"
         info += f"Params: {job.params}\n"
         info += f"Created: {datetime.fromtimestamp(job.created_at)}\n"
@@ -267,7 +285,7 @@ class JobDetailDialog(QDialog):
 
         dialog = JobDebugDialog(
             self._job,
-            self._debug_target.strategy,
+            self._debug_target.run_profile,
             self._debug_target.module,
             parent=self,
         )

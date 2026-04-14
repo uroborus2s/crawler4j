@@ -13,6 +13,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
+from src.core.atm.run_profile import RunProfile
+
 # =============================================================================
 # Enums
 # =============================================================================
@@ -76,13 +78,13 @@ class Job:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
     type: JobType = JobType.BATCH
-    strategy_id: str = ""  # 关联的策略模板 ID
+    run_profile: RunProfile | None = None
     
     # 调度配置
     trigger: TriggerConfig = field(default_factory=TriggerConfig)
     concurrency_target: int = 1  # 期望并发数
     
-    # 运行时参数 (覆盖 Strategy 默认值)
+    # 运行时参数 (覆盖 RunProfile 默认值)
     params: Dict[str, Any] = field(default_factory=dict)
     
     # 状态
@@ -91,6 +93,16 @@ class Job:
     # 元数据
     created_at: int = field(default_factory=lambda: int(time.time()))
     updated_at: int = field(default_factory=lambda: int(time.time()))
+
+    def __post_init__(self):
+        if isinstance(self.type, str):
+            self.type = JobType(self.type)
+        if isinstance(self.trigger, dict):
+            self.trigger = TriggerConfig.from_dict(self.trigger)
+        if isinstance(self.state, str):
+            self.state = JobState(self.state)
+        if isinstance(self.run_profile, dict):
+            self.run_profile = RunProfile.model_validate(self.run_profile)
 
 @dataclass
 class Task:

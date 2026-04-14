@@ -5,15 +5,20 @@ import pytest
 
 from src.core.atm.dispatcher import TaskDispatcher
 from src.core.atm.models import Job, Task, TaskStatus
+from src.core.atm.run_profile import (
+    AcquisitionConfig,
+    AcquisitionMode,
+    EnvType,
+    ExecutionContext,
+    MatchConfig,
+    RunProfile,
+)
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
-from src.core.tsm.models import AcquisitionMode, ExecutionContext, TaskStrategy, EnvType
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_matches_existing_env_for_match_strategy(monkeypatch):
-    strategy = TaskStrategy(
-        id="match-vb",
-        name="match-vb",
+async def test_dispatcher_matches_existing_env_for_run_profile(monkeypatch):
+    run_profile = RunProfile(
         resource={
             "provider": "virtualbrowser",
             "acquisition": {
@@ -35,13 +40,11 @@ async def test_dispatcher_matches_existing_env_for_match_strategy(monkeypatch):
     )
     lease = EnvLease(id="lease-1", env_id=env.id, task_run_id="task-1", token="token-1")
 
-    loader = SimpleNamespace(get=lambda strategy_id: strategy)
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
         call_hook=AsyncMock(return_value=None),
     )
 
-    monkeypatch.setattr("src.core.tsm.get_strategy_loader", lambda: loader)
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
     dispatcher = TaskDispatcher()
@@ -57,7 +60,7 @@ async def test_dispatcher_matches_existing_env_for_match_strategy(monkeypatch):
     )
 
     task = Task(id="task-1", job_id="job-1")
-    job = Job(id="job-1", name="job", strategy_id=strategy.id)
+    job = Job(id="job-1", name="job", run_profile=run_profile)
 
     await dispatcher._run_logic(task, job)
 
@@ -66,3 +69,16 @@ async def test_dispatcher_matches_existing_env_for_match_strategy(monkeypatch):
     dispatcher.rem.start_env.assert_awaited_once_with(env.id)
     module_service.run_module.assert_awaited_once()
     assert task.status == TaskStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_requires_run_profile():
+    dispatcher = TaskDispatcher()
+    dispatcher.repo = SimpleNamespace(save_task=AsyncMock())
+    dispatcher.rem = SimpleNamespace()
+
+    task = Task(id="task-inline", job_id="job-inline")
+    job = Job(id="job-inline", name="job-inline")
+
+    with pytest.raises(ValueError, match="missing run_profile"):
+        await dispatcher._run_logic(task, job)

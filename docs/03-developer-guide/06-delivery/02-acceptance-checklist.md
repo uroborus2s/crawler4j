@@ -18,8 +18,8 @@
 ## 调试阶段检查
 
 1. 模块能被注册成 `DevLink`
-2. 策略中的 `execution.module` 正确指向 `module.yaml.name`
-3. 策略中的 `execution.workflow` 正确指向目标工作流
+2. 作业运行模板中的 `execution.module` 正确指向 `module.yaml.name`
+3. 作业运行模板中的 `execution.workflow` 正确指向目标工作流
 4. ATM 中能看到 `🐞 调试`
 5. IDE 能附加到 `debugpy` 并命中断点
 

@@ -99,7 +99,7 @@ hotel_demo/
 module.yaml.name = hotel_demo
 ```
 
-这样在 DevLink、策略配置、调试、安装和错误排查时最不容易出错。
+这样在 DevLink、任务运行配置、调试、安装和错误排查时最不容易出错。
 
 ## 第一次开发模块时，哪些文件最不能随便动
 

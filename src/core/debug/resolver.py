@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from src.core.atm.job_runtime import resolve_job_run_profile
+from src.core.atm.run_profile import RunProfile
 from src.core.atm.models import Job
 from src.core.mms.models import ModuleInfo
 from src.core.mms.registry import ModuleRegistry, get_module_registry
-from src.core.tsm.loader import StrategyLoader, get_strategy_loader
-from src.core.tsm.models import TaskStrategy
 
 
 @dataclass
 class JobDebugTarget:
     job: Job
-    strategy: TaskStrategy
+    run_profile: RunProfile
     module: ModuleInfo
     workflow: str
     hooks_module: str
@@ -26,33 +26,29 @@ class JobDebugTarget:
 def resolve_job_debug_target(
     job: Job,
     *,
-    strategy_loader: StrategyLoader | None = None,
     registry: ModuleRegistry | None = None,
 ) -> JobDebugTarget:
-    loader = strategy_loader or get_strategy_loader()
     module_registry = registry or get_module_registry()
 
-    strategy = loader.get(job.strategy_id)
-    if not strategy:
-        raise ValueError(f"Strategy {job.strategy_id} not found")
-    if not strategy.execution:
-        raise ValueError(f"Strategy {job.strategy_id} missing execution config")
-    if not strategy.execution.module:
-        raise ValueError(f"Strategy {job.strategy_id} missing execution.module")
+    run_profile = resolve_job_run_profile(job)
+    if not run_profile.execution:
+        raise ValueError(f"Job {job.id} missing run_profile.execution")
+    if not run_profile.execution.module:
+        raise ValueError(f"Job {job.id} missing run_profile.execution.module")
 
-    module = module_registry.get_module(strategy.execution.module)
+    module = module_registry.get_module(run_profile.execution.module)
     if not module:
-        raise ValueError(f"Module '{strategy.execution.module}' not found")
+        raise ValueError(f"Module '{run_profile.execution.module}' not found")
     if not module.path:
-        raise ValueError(f"Module '{strategy.execution.module}' has no valid path")
+        raise ValueError(f"Module '{run_profile.execution.module}' has no valid path")
 
     return JobDebugTarget(
         job=job,
-        strategy=strategy,
+        run_profile=run_profile,
         module=module,
-        workflow=strategy.execution.workflow or "default",
-        hooks_module=strategy.execution.hooks_module or strategy.execution.module,
-        params={**strategy.execution.params, **job.params},
-        timeout=strategy.execution.timeout,
-        wait_timeout=strategy.resource.acquisition.selector.wait_timeout,
+        workflow=run_profile.execution.workflow or "default",
+        hooks_module=run_profile.execution.hooks_module or run_profile.execution.module,
+        params={**run_profile.execution.params, **job.params},
+        timeout=run_profile.execution.timeout,
+        wait_timeout=run_profile.resource.acquisition.selector.wait_timeout,
     )

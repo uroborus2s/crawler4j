@@ -15,7 +15,8 @@
 User
   -> PyQt Desktop Shell (`src/ui`)
     -> Core Services (`src/core`)
-      -> ATM / TSM / MMS / REM / Persistence / Debug / System
+      -> ATM / MMS / REM / Persistence / Debug / System
+        -> Job RunProfile (`src/core/atm/run_profile.py`)
         -> External Modules (`<app-data>/modules`, `DevLink`)
           -> SDK Contracts (`crawler4j_sdk`, `crawler4j_contracts`)
 
@@ -28,7 +29,7 @@ Maintainer
 结合当前代码与现行文档，当前可以把系统理解为四个稳定层次：
 
 1. UI Host：桌面外壳、导航、日志与调试入口
-2. Framework Core：MMS / TSM / ATM / REM / Persistence / Debug / System
+2. Framework Core：MMS / ATM / REM / Persistence / Debug / System + Job RunProfile
 3. SDK / Contracts：模块开发与运行时契约
 4. Modules：外部安装模块与本地 DevLink 模块项目
 

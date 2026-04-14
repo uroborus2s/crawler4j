@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
+from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 from src.core.debug.models import DebugSessionState
 from src.core.debug.protocol import encode_debug_event
 from src.core.persistence import init_database
 from src.core.rem.manager import get_environment_manager
-from src.core.tsm.models import AcquisitionMode, CreationLifecycle
 
 
 def _emit_event(payload: dict[str, Any]) -> None:
@@ -98,7 +98,6 @@ async def main_async(config_path: str) -> int:
             "debug_session_id": payload["id"],
             "job_id": payload.get("job_id", ""),
             "task_id": payload["id"],
-            "strategy_id": payload.get("strategy_id", ""),
         },
         provider_name=payload.get("provider") or "playwright_local",
         acquisition_mode=AcquisitionMode(payload.get("acquisition_mode", AcquisitionMode.CREATE.value)),

@@ -17,7 +17,7 @@ from src.core.foundation.logging import logger
 from src.core.mms.service import ModuleService, get_module_service
 from src.core.rem.manager import EnvironmentManager, get_environment_manager
 from src.core.rem.models import EnvKind, EnvRequirement
-from src.core.tsm.models import AcquisitionMode, CreationLifecycle
+from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 
 TaskUpdateCallback = Callable[[Task], Awaitable[None]]
 StopRequestedCallback = Callable[[], bool]

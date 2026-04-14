@@ -248,12 +248,7 @@ async def _wait_for_session_state(debug_service, session_id: str, states: set, t
 @pytest.mark.asyncio
 async def test_task_debug_session_hits_model_breakpoint(tmp_path, monkeypatch):
     from src.core.atm.service import TaskService
-    from src.core.debug.models import DebugSessionRequest, DebugSessionState
-    from src.core.debug.service import DebugService
-    from src.core.mms.registry import ModuleRegistry
-    from src.core.persistence import init_database
-    from src.core.tsm.loader import StrategyLoader
-    from src.core.tsm.models import (
+    from src.core.atm.run_profile import (
         AcquisitionConfig,
         AcquisitionMode,
         CreationConfig,
@@ -261,8 +256,12 @@ async def test_task_debug_session_hits_model_breakpoint(tmp_path, monkeypatch):
         ExecutionContext,
         MatchConfig,
         ResourceConfig,
-        TaskStrategy,
+        RunProfile,
     )
+    from src.core.debug.models import DebugSessionRequest, DebugSessionState
+    from src.core.debug.service import DebugService
+    from src.core.mms.registry import ModuleRegistry
+    from src.core.persistence import init_database
 
     home_dir = tmp_path / "home"
     home_dir.mkdir(parents=True)
@@ -275,11 +274,7 @@ async def test_task_debug_session_hits_model_breakpoint(tmp_path, monkeypatch):
     registry = ModuleRegistry()
     registry.register_dev_link(module_dir)
 
-    strategies_dir = home_dir / "Library" / "Application Support" / "Crawler4j" / "config" / "strategies"
-    strategy_loader = StrategyLoader(strategies_dir)
-    strategy = TaskStrategy(
-        id="debug.e2e.ctrip",
-        name="debug e2e ctrip",
+    run_profile = RunProfile(
         resource=ResourceConfig(
             provider="playwright_local",
             acquisition=AcquisitionConfig(
@@ -299,20 +294,18 @@ async def test_task_debug_session_hits_model_breakpoint(tmp_path, monkeypatch):
             timeout=60,
         ),
     )
-    strategy_loader.save(strategy)
 
     task_service = TaskService()
     job_id = await task_service.create_job(
         name="Debug E2E Ctrip",
         job_type="service",
-        strategy_id=strategy.id,
+        run_profile=run_profile,
         params={"start_url": "about:blank"},
     )
 
     debug_service = DebugService(
         registry=registry,
         task_service=task_service,
-        strategy_loader=strategy_loader,
     )
 
     session = None

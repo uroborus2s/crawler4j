@@ -6,9 +6,7 @@ from types import SimpleNamespace
 from PyQt6.QtWidgets import QApplication
 
 from src.core.atm.models import Job
-from src.core.debug.models import DebugSession, DebugSessionRequest, DebugSessionState
-from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
-from src.core.tsm.models import (
+from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
     CreationConfig,
@@ -16,23 +14,23 @@ from src.core.tsm.models import (
     ExecutionContext,
     MatchConfig,
     ResourceConfig,
-    TaskStrategy,
+    RunProfile,
 )
+from src.core.debug.models import DebugSession, DebugSessionRequest, DebugSessionState
+from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
 
 
 def _make_job() -> Job:
     return Job(
         id="job-1",
         name="Demo Job",
-        strategy_id="strategy.demo",
+        run_profile=_make_run_profile(),
         params={"city": "Shanghai"},
     )
 
 
-def _make_strategy() -> TaskStrategy:
-    return TaskStrategy(
-        id="strategy.demo",
-        name="Demo Strategy",
+def _make_run_profile() -> RunProfile:
+    return RunProfile(
         resource=ResourceConfig(
             provider="virtualbrowser",
             acquisition=AcquisitionConfig(
@@ -70,7 +68,7 @@ def test_job_debug_dialog_builds_request_from_form(qtbot, tmp_path):
 
     page = JobDebugDialog(
         _make_job(),
-        _make_strategy(),
+        _make_run_profile(),
         _make_module(tmp_path),
         debug_service=SimpleNamespace(),
     )
@@ -100,7 +98,7 @@ def test_job_debug_dialog_copies_attach_address(qtbot, tmp_path):
 
     page = JobDebugDialog(
         _make_job(),
-        _make_strategy(),
+        _make_run_profile(),
         _make_module(tmp_path),
         debug_service=SimpleNamespace(),
     )
@@ -109,7 +107,6 @@ def test_job_debug_dialog_copies_attach_address(qtbot, tmp_path):
     session = DebugSession(
         job_id="job-1",
         job_name="Demo Job",
-        strategy_id="strategy.demo",
         module_name="demo_module",
         source_path=str(tmp_path / "demo_module"),
         workflow="repair",
@@ -128,7 +125,7 @@ def test_job_debug_dialog_run_async_skips_when_no_event_loop(qtbot, tmp_path, mo
 
     page = JobDebugDialog(
         _make_job(),
-        _make_strategy(),
+        _make_run_profile(),
         _make_module(tmp_path),
         debug_service=SimpleNamespace(),
     )

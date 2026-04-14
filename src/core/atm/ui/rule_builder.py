@@ -1,4 +1,4 @@
-"""TSM 可视化规则构建器 (UI)。
+"""运行模板可视化规则构建器。
 
 实现基于 AST 的递归规则编辑器:
     - RuleBuilder: 主入口
@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.tsm import (
+from src.core.atm.run_profile import (
     ComparisonOp,
     LogicOp,
     MatchCondition,

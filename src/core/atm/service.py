@@ -10,10 +10,15 @@ from typing import List
 
 from apscheduler.triggers.cron import CronTrigger
 
+from src.core.atm.job_runtime import resolve_job_run_profile
+from src.core.atm.run_profile import RunProfile
 from src.core.atm.controller import get_job_controller
 from src.core.atm.models import Job, JobState, JobType, Task, TriggerConfig, TriggerType
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.logging import logger
+
+
+_UNSET = object()
 
 
 class TaskService:
@@ -45,6 +50,20 @@ class TaskService:
 
         return trigger
 
+    @staticmethod
+    def _normalize_run_profile(run_profile: RunProfile | dict | None) -> RunProfile | None:
+        if run_profile is None:
+            return None
+        if isinstance(run_profile, RunProfile):
+            return run_profile
+        return RunProfile.model_validate(run_profile)
+
+    @staticmethod
+    def _validate_runtime_source(run_profile: RunProfile | None) -> None:
+        if run_profile:
+            return
+        raise ValueError("作业必须配置运行模板")
+
     async def start(self):
         """启动 ATM 服务 (Controller)。"""
         if self._started:
@@ -66,19 +85,20 @@ class TaskService:
         name: str,
         job_type: str = JobType.BATCH,
         trigger_config: dict | None = None,
-        strategy_id: str = "",
+        run_profile: RunProfile | dict | None = None,
         params: dict | None = None,
         concurrency: int = 1,
     ) -> str:
         """创建新作业。"""
-        # TODO: Validate strategy_id with MMS/Loader
         job_type_enum = JobType(job_type)
         trigger = self._normalize_trigger(job_type_enum, trigger_config)
+        run_profile_model = self._normalize_run_profile(run_profile)
+        self._validate_runtime_source(run_profile_model)
         
         job = Job(
             name=name,
             type=job_type_enum,
-            strategy_id=strategy_id,
+            run_profile=run_profile_model,
             trigger=trigger,
             params=params or {},
             concurrency_target=concurrency,
@@ -94,7 +114,7 @@ class TaskService:
         name: str | None = None,
         job_type: str | None = None,
         trigger_config: dict | None = None,
-        strategy_id: str | None = None,
+        run_profile: RunProfile | dict | None | object = _UNSET,
         params: dict | None = None,
         concurrency: int | None = None,
     ) -> bool:
@@ -107,8 +127,8 @@ class TaskService:
             job.name = name
         if job_type is not None:
             job.type = JobType(job_type)
-        if strategy_id is not None:
-            job.strategy_id = strategy_id
+        if run_profile is not _UNSET:
+            job.run_profile = self._normalize_run_profile(run_profile)
         if trigger_config is not None:
             job.trigger = TriggerConfig(**trigger_config)
         if params is not None:
@@ -117,6 +137,7 @@ class TaskService:
             job.concurrency_target = concurrency
 
         job.trigger = self._normalize_trigger(job.type, job.trigger)
+        self._validate_runtime_source(job.run_profile)
 
         job.updated_at = int(time.time())
 
@@ -143,13 +164,12 @@ class TaskService:
         if not job:
             return False
 
-        # 启动作业前按策略检查运行时依赖（如指纹浏览器）是否就绪。
-        if job.strategy_id:
-            try:
-                await self._controller.ensure_job_runtime_ready(job.id)
-            except Exception as e:
-                logger.error(f"[ATM] Job start blocked by runtime precheck ({job.id}): {e}")
-                return False
+        try:
+            resolve_job_run_profile(job)
+            await self._controller.ensure_job_runtime_ready(job.id)
+        except Exception as e:
+            logger.error(f"[ATM] Job start blocked by runtime precheck ({job.id}): {e}")
+            return False
         
         job.state = JobState.ACTIVE
         await self._repo.save_job(job)

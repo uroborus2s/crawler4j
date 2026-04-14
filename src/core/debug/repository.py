@@ -24,7 +24,6 @@ class DebugSessionRepository:
                     id TEXT PRIMARY KEY,
                     job_id TEXT NOT NULL DEFAULT '',
                     job_name TEXT NOT NULL DEFAULT '',
-                    strategy_id TEXT NOT NULL DEFAULT '',
                     module_name TEXT NOT NULL,
                     source_path TEXT NOT NULL,
                     workflow TEXT NOT NULL,
@@ -58,7 +57,6 @@ class DebugSessionRepository:
             migrations = {
                 "job_id": "ALTER TABLE debug_sessions ADD COLUMN job_id TEXT NOT NULL DEFAULT ''",
                 "job_name": "ALTER TABLE debug_sessions ADD COLUMN job_name TEXT NOT NULL DEFAULT ''",
-                "strategy_id": "ALTER TABLE debug_sessions ADD COLUMN strategy_id TEXT NOT NULL DEFAULT ''",
                 "creation_lifecycle": (
                     "ALTER TABLE debug_sessions ADD COLUMN creation_lifecycle TEXT NOT NULL DEFAULT 'ephemeral'"
                 ),
@@ -74,15 +72,14 @@ class DebugSessionRepository:
                 conn.execute(
                     """
                     INSERT INTO debug_sessions (
-                        id, job_id, job_name, strategy_id, module_name, source_path, workflow, params_json, hooks_module,
+                        id, job_id, job_name, module_name, source_path, workflow, params_json, hooks_module,
                         provider, acquisition_mode, creation_params_json, creation_lifecycle, wait_timeout, timeout,
                         attach_host, attach_port, wait_for_attach, stop_on_entry, keep_environment,
                         state, worker_pid, env_id, created_at, started_at, finished_at, last_error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         job_id = excluded.job_id,
                         job_name = excluded.job_name,
-                        strategy_id = excluded.strategy_id,
                         module_name = excluded.module_name,
                         source_path = excluded.source_path,
                         workflow = excluded.workflow,
@@ -110,7 +107,6 @@ class DebugSessionRepository:
                         session.id,
                         session.job_id,
                         session.job_name,
-                        session.strategy_id,
                         session.module_name,
                         session.source_path,
                         session.workflow,
@@ -167,7 +163,6 @@ class DebugSessionRepository:
             id=row["id"],
             job_id=row["job_id"] or "",
             job_name=row["job_name"] or "",
-            strategy_id=row["strategy_id"] or "",
             module_name=row["module_name"],
             source_path=row["source_path"],
             workflow=row["workflow"],

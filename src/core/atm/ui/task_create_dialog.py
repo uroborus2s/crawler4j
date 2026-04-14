@@ -1,12 +1,4 @@
-"""新建任务(Job)弹窗。
-
-提供创建作业的界面，支持：
-    - 作业名称
-    - 作业类型 (Batch/Service)
-    - 策略选择
-    - 并发数配置
-    - 触发器配置
-"""
+"""新建任务(Job)弹窗。"""
 
 from PyQt6.QtWidgets import (
     QDialog,
@@ -21,7 +13,8 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.atm.models import Job, JobType, TriggerType
-from src.core.tsm import get_strategy_loader
+from src.core.atm.run_profile import RunProfile
+from src.core.atm.ui.run_profile_dialog import RunProfileDialog
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
@@ -32,14 +25,12 @@ class TaskCreateDialog(QDialog):
 
     def __init__(self, parent=None, job: Job | None = None):
         super().__init__(parent)
-        self._strategies = []
-        self._selected_strategy_id: str = ""
+        self._inline_run_profile: RunProfile | None = None
         self._job = job  # Existing job for editing
         self._setup_ui()
-        self._load_strategies()
         
         if self._job:
-             self._init_form_data()
+            self._init_form_data()
 
     def _setup_ui(self):
         self.setWindowTitle("新建任务 (Job)")
@@ -79,16 +70,33 @@ class TaskCreateDialog(QDialog):
         self.type_combo.currentIndexChanged.connect(self._on_job_type_changed)
         form.addRow("作业模式:", self.type_combo)
 
-        # 3. 策略选择
-        self.strategy_combo = QComboBox()
-        self.strategy_combo.setMinimumWidth(250)
-        form.addRow("选择策略:", self.strategy_combo)
+        # 3. 运行配置
+        inline_page = QWidget()
+        inline_layout = QVBoxLayout(inline_page)
+        inline_layout.setContentsMargins(0, 0, 0, 0)
+        inline_layout.setSpacing(8)
 
-        # 策略预览
-        self.strategy_preview = QLabel()
-        self.strategy_preview.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 12px;")
-        self.strategy_preview.setWordWrap(True)
-        form.addRow("", self.strategy_preview)
+        self.inline_preview = QLabel("尚未配置运行模板。")
+        self.inline_preview.setStyleSheet("color: rgba(255, 255, 255, 0.7); font-size: 12px;")
+        self.inline_preview.setWordWrap(True)
+        inline_layout.addWidget(self.inline_preview)
+
+        self.inline_config_btn = QPushButton("配置运行模板")
+        self.inline_config_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(99, 102, 241, 0.8);
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: rgba(99, 102, 241, 1); }
+        """)
+        self.inline_config_btn.clicked.connect(self._edit_inline_run_profile)
+        inline_layout.addWidget(self.inline_config_btn)
+
+        form.addRow("运行配置:", inline_page)
         
         # 4. 并发配置
         self.concurrency_spin = QSpinBox()
@@ -163,8 +171,6 @@ class TaskCreateDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
-        # 监听策略选择变化
-        self.strategy_combo.currentIndexChanged.connect(self._on_strategy_changed)
         self._on_job_type_changed(self.type_combo.currentIndex())
 
     def _init_form_data(self):
@@ -179,9 +185,10 @@ class TaskCreateDialog(QDialog):
         if index >= 0:
             self.type_combo.setCurrentIndex(index)
             
-        # Strategy (will be set in _load_strategies or after)
-        # We need to set it after loading strategies.
-        
+        if job.run_profile:
+            self._inline_run_profile = job.run_profile
+        self._update_inline_preview()
+            
         # Concurrency
         self.concurrency_spin.setValue(job.concurrency_target)
         
@@ -190,44 +197,31 @@ class TaskCreateDialog(QDialog):
         if job.trigger.type == TriggerType.CRON:
             self.cron_edit.setText(job.trigger.cron_expr or "")
 
-    def _load_strategies(self):
-        """加载策略列表。"""
-        loader = get_strategy_loader()
-        self._strategies = loader.list_all()
-
-        self.strategy_combo.clear()
-        for strategy in self._strategies:
-            display_name = f"{strategy.name}"
-            self.strategy_combo.addItem(display_name, strategy.id)
-
-        if not self._strategies:
-            self.strategy_combo.addItem("-- 暂无策略，请先创建 --", "")
-            self.strategy_preview.setText("⚠️ 请先在『策略管理』中创建策略")
-            
-        # If editing, select the current strategy
-        if self._job:
-            index = self.strategy_combo.findData(self._job.strategy_id)
-            if index >= 0:
-                self.strategy_combo.setCurrentIndex(index)
-
-    def _on_strategy_changed(self, index: int):
-        """策略选择变化。"""
-        if index < 0 or index >= len(self._strategies):
-            self._selected_strategy_id = ""
-            self.strategy_preview.setText("")
+    def _edit_inline_run_profile(self):
+        dialog = RunProfileDialog(run_profile=self._inline_run_profile, parent=self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
             return
 
-        strategy = self._strategies[index]
-        self._selected_strategy_id = strategy.id
+        self._inline_run_profile = dialog.get_run_profile()
+        self._update_inline_preview()
 
-        # 预览信息
-        lines = []
-        lines.append(f"环境: {strategy.resource.acquisition.selector.env_type.value}")
-        if strategy.execution:
-            lines.append(f"执行: {strategy.execution.module}")
-            if strategy.execution.hooks_module:
-                lines.append(f"Hooks: {strategy.execution.hooks_module}")
-        self.strategy_preview.setText(" | ".join(lines))
+    def _update_inline_preview(self):
+        run_profile = self._inline_run_profile
+        if not run_profile:
+            self.inline_preview.setText("尚未配置运行模板。点击下方按钮开始配置。")
+            self.inline_config_btn.setText("配置运行模板")
+            return
+
+        lines = [
+            f"Provider: {run_profile.resource.provider}",
+            f"环境: {run_profile.resource.acquisition.selector.env_type.value}",
+        ]
+        if run_profile.execution:
+            lines.append(f"执行: {run_profile.execution.module}/{run_profile.execution.workflow or 'default'}")
+            if run_profile.execution.hooks_module:
+                lines.append(f"Hooks: {run_profile.execution.hooks_module}")
+        self.inline_preview.setText(" | ".join(lines))
+        self.inline_config_btn.setText("重新编辑运行模板")
 
     def _on_trigger_changed(self, index: int):
         self.trigger_stack.setCurrentIndex(index)
@@ -258,7 +252,8 @@ class TaskCreateDialog(QDialog):
             self.name_edit.setFocus()
             return
 
-        if not self._selected_strategy_id:
+        if not self._inline_run_profile:
+            QMessageBox.warning(self, "配置不完整", "请先配置任务运行模板。")
             return
 
         if self.type_combo.currentData() == JobType.BATCH.value and not self.cron_edit.text().strip():
@@ -281,7 +276,7 @@ class TaskCreateDialog(QDialog):
 
         return {
             "name": self.name_edit.text().strip(),
-            "strategy_id": self._selected_strategy_id,
+            "run_profile": self._inline_run_profile.model_dump(mode="json") if self._inline_run_profile else None,
             "job_type": job_type,
             "concurrency": self.concurrency_spin.value(),
             "trigger_config": trigger_config,

@@ -5,9 +5,7 @@ import pytest
 
 from src.core.atm.dispatcher import TaskDispatcher
 from src.core.atm.models import Job, Task, TaskStatus
-from src.core.foundation.event_bus import EventType
-from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
-from src.core.tsm.models import (
+from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
     CreationConfig,
@@ -15,14 +13,14 @@ from src.core.tsm.models import (
     ExecutionContext,
     MatchConfig,
     ResourceConfig,
-    TaskStrategy,
+    RunProfile,
 )
+from src.core.foundation.event_bus import EventType
+from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 
 
-def _build_strategy(timeout: int = 0) -> TaskStrategy:
-    return TaskStrategy(
-        id="hooked-strategy",
-        name="hooked-strategy",
+def _build_run_profile(timeout: int = 0) -> RunProfile:
+    return RunProfile(
         resource=ResourceConfig(
             provider="virtualbrowser",
             acquisition=AcquisitionConfig(
@@ -70,10 +68,8 @@ def _build_dispatcher(env: Environment, lease: EnvLease) -> TaskDispatcher:
 
 @pytest.mark.asyncio
 async def test_dispatcher_calls_success_hooks_and_merges_prepare_env(monkeypatch):
-    strategy = _build_strategy()
+    run_profile = _build_run_profile()
     env, lease = _build_env()
-
-    loader = SimpleNamespace(get=lambda strategy_id: strategy)
     module_service = SimpleNamespace(run_module=AsyncMock(return_value={"status": "ok"}))
 
     async def hook(module_name, hook_name, context, *args):
@@ -82,13 +78,11 @@ async def test_dispatcher_calls_success_hooks_and_merges_prepare_env(monkeypatch
         return None
 
     module_service.call_hook = AsyncMock(side_effect=hook)
-
-    monkeypatch.setattr("src.core.tsm.get_strategy_loader", lambda: loader)
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
     dispatcher = _build_dispatcher(env, lease)
     task = Task(id="task-21", job_id="job-21")
-    job = Job(id="job-21", name="job", strategy_id=strategy.id)
+    job = Job(id="job-21", name="job", run_profile=run_profile)
 
     await dispatcher._run_logic(task, job)
 
@@ -105,21 +99,18 @@ async def test_dispatcher_calls_success_hooks_and_merges_prepare_env(monkeypatch
 
 @pytest.mark.asyncio
 async def test_dispatcher_calls_failure_and_cleanup_hooks_on_error(monkeypatch):
-    strategy = _build_strategy()
+    run_profile = _build_run_profile()
     env, lease = _build_env()
-
-    loader = SimpleNamespace(get=lambda strategy_id: strategy)
     module_service = SimpleNamespace(
         run_module=AsyncMock(side_effect=RuntimeError("boom")),
         call_hook=AsyncMock(return_value=None),
     )
 
-    monkeypatch.setattr("src.core.tsm.get_strategy_loader", lambda: loader)
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
     dispatcher = _build_dispatcher(env, lease)
     task = Task(id="task-21", job_id="job-21")
-    job = Job(id="job-21", name="job", strategy_id=strategy.id)
+    job = Job(id="job-21", name="job", run_profile=run_profile)
 
     await dispatcher._run_logic(task, job)
 
@@ -131,10 +122,8 @@ async def test_dispatcher_calls_failure_and_cleanup_hooks_on_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_dispatcher_calls_timeout_and_cleanup_hooks_on_timeout(monkeypatch):
-    strategy = _build_strategy(timeout=1)
+    run_profile = _build_run_profile(timeout=1)
     env, lease = _build_env()
-
-    loader = SimpleNamespace(get=lambda strategy_id: strategy)
 
     async def slow_run(module_name, context):
         await context.wait(1.2)
@@ -145,12 +134,11 @@ async def test_dispatcher_calls_timeout_and_cleanup_hooks_on_timeout(monkeypatch
         call_hook=AsyncMock(return_value=None),
     )
 
-    monkeypatch.setattr("src.core.tsm.get_strategy_loader", lambda: loader)
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
     dispatcher = _build_dispatcher(env, lease)
     task = Task(id="task-21", job_id="job-21")
-    job = Job(id="job-21", name="job", strategy_id=strategy.id)
+    job = Job(id="job-21", name="job", run_profile=run_profile)
 
     await dispatcher._run_logic(task, job)
 
@@ -162,23 +150,20 @@ async def test_dispatcher_calls_timeout_and_cleanup_hooks_on_timeout(monkeypatch
 
 @pytest.mark.asyncio
 async def test_dispatcher_cleans_up_created_env_when_acquisition_fails(monkeypatch):
-    strategy = _build_strategy()
+    run_profile = _build_run_profile()
     env, lease = _build_env()
-
-    loader = SimpleNamespace(get=lambda strategy_id: strategy)
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value={"status": "ok"}),
         call_hook=AsyncMock(return_value=None),
     )
 
-    monkeypatch.setattr("src.core.tsm.get_strategy_loader", lambda: loader)
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
     dispatcher = _build_dispatcher(env, lease)
     dispatcher.rem.start_env = AsyncMock(return_value=False)
 
     task = Task(id="task-21", job_id="job-21")
-    job = Job(id="job-21", name="job", strategy_id=strategy.id)
+    job = Job(id="job-21", name="job", run_profile=run_profile)
 
     await dispatcher._run_logic(task, job)
 
