@@ -45,3 +45,18 @@ unknown_extra_field: demo
 
     with pytest.raises(Exception):
         RunProfile.from_yaml(invalid_yaml)
+
+
+def test_run_profile_rejects_removed_retry_field():
+    invalid_yaml = """
+resource:
+  provider: virtualbrowser
+execution:
+  module: demo_module
+  workflow: repair
+retry:
+  max_attempts: 2
+"""
+
+    with pytest.raises(Exception):
+        RunProfile.from_yaml(invalid_yaml)

@@ -751,7 +751,12 @@ class EnvironmentManager:
 
     
         
-    async def _bind_ip_if_needed(self, env: Environment, pool_id: str) -> bool:
+    async def _bind_ip_if_needed(
+        self,
+        env: Environment,
+        pool_id: str,
+        bind_strategy: str | None = None,
+    ) -> bool:
         """IP 绑定（如果需要）。
         
         Args:
@@ -770,12 +775,13 @@ class EnvironmentManager:
         await pool_manager.unbind_ip(env.id)
         
         # 绑定新 IP
-        ip = await pool_manager.bind_ip(env.id, pool_id)
+        ip = await pool_manager.bind_ip(env.id, pool_id, bind_strategy)
         if ip:
             if env.proxy_config is None:
                 env.proxy_config = ProxyConfig(mode=ProxyMode.POOL)
             env.proxy_config.mode = ProxyMode.POOL
             env.proxy_config.pool_id = pool_id
+            env.proxy_config.bind_strategy = bind_strategy
             env.proxy_config.current_ip = ip.address
             logger.info(f"[REM] IP 已绑定: id={env.id} ip={ip.address}")
             return True
@@ -865,8 +871,13 @@ class EnvironmentManager:
             if proxy_config and proxy_config.mode == ProxyMode.POOL and proxy_config.pool_id:
                 from src.core.rem.ip_pool import get_ip_pool_manager
                 ip_manager = get_ip_pool_manager()
-                ip = await ip_manager.bind_ip(env_id, proxy_config.pool_id)
+                ip = await ip_manager.bind_ip(
+                    env_id,
+                    proxy_config.pool_id,
+                    proxy_config.bind_strategy,
+                )
                 if ip:
+                    proxy_config.bind_strategy = proxy_config.bind_strategy or "least_bound"
                     proxy_config.current_ip = ip.address
                     # 生成静态代理字符串供 Provider 使用
                     auth = f"{ip.username}:{ip.password}@" if ip.username else ""

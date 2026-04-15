@@ -8,6 +8,7 @@
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -215,6 +216,13 @@ class Shell(QMainWindow):
                 background-color: #0f0f14;
             }
         """)
+
+        screen = QApplication.primaryScreen()
+        if screen:
+            available = screen.availableGeometry()
+            default_width = min(available.width(), 1420)
+            default_height = min(available.height(), self.minimumHeight())
+            self.resize(default_width, default_height)
     
     def _setup_ui(self):
         # 中央容器

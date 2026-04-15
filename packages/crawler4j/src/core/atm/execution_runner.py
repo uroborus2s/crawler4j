@@ -53,7 +53,7 @@ class ExecutionRequest:
     match_config: MatchConfig | None = None
     selector_wait_timeout: int = 60
     creation_params: dict[str, Any] = field(default_factory=dict)
-    creation_lifecycle: CreationLifecycle = CreationLifecycle.EPHEMERAL
+    creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
     execution_timeout: int = 0
     runtime_capabilities: RuntimeCapabilities | None = None
 
@@ -71,7 +71,7 @@ class ExecutionResult:
     prepare_result: dict[str, Any] | None = None
     signal: TaskSignal | None = None
     hooks_module: str = ""
-    creation_lifecycle: CreationLifecycle = CreationLifecycle.EPHEMERAL
+    creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
 
 
 class ExecutionRunner:
@@ -110,6 +110,7 @@ class ExecutionRunner:
             env_id=0,
             task_name=module_name,
             config=request.params.copy(),
+            logger=logger,
             tools=runtime_caps.tools,
             state=dict(request.state),
         )
@@ -217,6 +218,7 @@ class ExecutionRunner:
                 config=request.params.copy(),
                 page=page,
                 context=browser_ctx,
+                logger=logger,
                 tools=runtime_caps.tools,
                 state=dict(request.state),
             )
@@ -435,6 +437,7 @@ class ExecutionRunner:
         return ProxyConfig(
             mode=mode,
             pool_id=raw_proxy.get("pool_id"),
+            bind_strategy=raw_proxy.get("bind_strategy"),
             static_value=raw_proxy.get("static_value"),
             current_ip=raw_proxy.get("current_ip"),
         )
@@ -459,10 +462,12 @@ class ExecutionRunner:
 
         if env_created and env_id is not None:
             try:
-                await self.rem.destroy_env(int(env_id))
-            except Exception as destroy_error:
+                env = await self.rem.get_env(int(env_id))
+                if env:
+                    await self.rem.reset(env)
+            except Exception as reset_error:
                 logger.error(
-                    f"[ATM] Task {task.id} failed to destroy created env during acquisition error: {destroy_error}"
+                    f"[ATM] Task {task.id} failed to reset created env during acquisition error: {reset_error}"
                 )
 
         if isinstance(error, TaskStopRequested):
@@ -605,11 +610,10 @@ class ExecutionRunner:
 
     def _default_env_action(
         self,
-        env_created: bool,
-        creation_lifecycle: CreationLifecycle,
+        _env_created: bool,
+        _creation_lifecycle: CreationLifecycle,
     ) -> EnvAction:
-        if env_created and creation_lifecycle == CreationLifecycle.EPHEMERAL:
-            return EnvAction.DESTROY
+        # 默认仅关闭并回收环境；显式 DESTROY 信号才允许删除。
         return EnvAction.RECYCLE
 
     async def _apply_env_action(

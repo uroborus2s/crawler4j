@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-04-15
+**最后更新：** 2026-04-16
 
 ## 1. 用途与记录规则
 
@@ -45,6 +45,19 @@
 | 2026-04-15 | 收敛 ATM 生命周期：删除 TaskScript/TaskFlow 私有 hooks，引入 `TaskSignal` 与 `WAITING_CONFIRMATION`，移除运行模板清理策略 UI | Codex |
 | 2026-04-15 | 准备 SDK / Contracts `1.1.1` 发布口径；更新脚手架默认版本范围并固化 `on_cleanup` 终态规则 | Codex |
 | 2026-04-15 | 按方案 A 落地 ATM 手动批次任务：新增 `BATCH + MANUAL` 的“执行一次”模式，并补任务创建页/列表页交互与回归测试 | Codex |
+| 2026-04-15 | 按方案 A 收敛运行模板资源配置：拆成“创建环境 / 选择环境”，并让 provider / 匹配规则真正进入 REM 选环境链路 | Codex |
+| 2026-04-15 | 继续收敛运行模板创建环境页：将执行脚本选择并入基础信息区，按 VirtualBrowser 现有交互重做指纹参数表单，补官方 `addBrowser` 指纹参数透传与 IP 池绑定策略下发，并移除 `retry`；随后补齐浏览器版本下拉、默认 `145`、内核自动匹配，以及 UA 的默认 / 自定义 / 随机交互 | Codex |
+| 2026-04-15 | 继续收敛 VirtualBrowser 指纹配置交互：将 `Canvas` / `WebGL 图像` / `WebGL 元数据` / `WebGPU` / `AudioContext` / `ClientRects` / `Speech Voices` 改为按钮式模式切换，并补 `WebGL 厂商` / `渲染` 的选项式输入与 UI 单测 | Codex |
+| 2026-04-15 | 修复 VirtualBrowser 长文本下拉框宽度：`WebGL 厂商` / `渲染` 现在会按内容自动扩宽控件本身和弹出列表，并补 UI 单测 | Codex |
+| 2026-04-15 | 调整运行模板弹窗宽度：默认宽度从屏幕的 `50%` 提升到 `60%`，即比原来增大 `20%`，并补 UI 单测锁定尺寸口径 | Codex |
+| 2026-04-15 | 修复 `Do Not Track` / `硬件加速` 开关 UI：替换成自绘滑动开关，修正深色主题下的滑块缺失问题，并补交互单测 | Codex |
+| 2026-04-16 | 修复任务创建页“运行配置”更新按钮被压缩的问题：改为按文案计算最小宽度并左对齐放置，避免“重新编辑运行模板”被挤压，并补 UI 单测 | Codex |
+| 2026-04-15 | 微调 VirtualBrowser 创建默认值：新建创建环境时默认开启“创建后随机化指纹”，UA 默认回填为自定义随机值，并加高 UA 编辑框以完整显示内容 | Codex |
+| 2026-04-15 | 继续对齐截图交互：将 `设备名称` / `MAC地址` / `SSL` / `端口扫描保护` / `启动参数` 改成分段按钮，将 `Do Not Track` / `硬件加速` 改成开关，并把新建默认值收敛到 `AudioContext` / `ClientRects` / `Speech Voices=随机`、`内存=8GB`、设备名与 MAC 默认自定义随机值 | Codex |
+| 2026-04-15 | 修复运行模板执行脚本下拉：界面优先展示工作流 `display_name`，保存与运行仍保持 `workflow.name` 契约，并补 UI 单测 | Codex |
+| 2026-04-15 | 修复运行模板执行脚本模块下拉空白项：移除空默认选项，改为 placeholder 未选中态，并补 UI 单测 | Codex |
+| 2026-04-16 | 调整应用启动默认宽度与任务监控操作列：主窗口默认宽度改为 `1420px`，任务监控“操作”列放宽到 `240px`，避免按钮文案被截断，并补 UI 单测 | Codex |
+| 2026-04-16 | 优化 ATM 手动批次“执行一次”交互：点击后列表立即显示“执行中”并禁用按钮，直到任务终态与环境回收完成后才恢复可执行，并补 UI/服务回归测试 | Codex |
 
 ## 5. 2026-04-15 缺陷修复记录
 
@@ -55,6 +68,9 @@
 | 2026-04-15 | REM 创建成功反馈收敛 | 用户要求创建成功后不弹窗，只刷新运行环境列表 | `packages/crawler4j/src/core/rem/ui/env_list_widget.py`、对应 UI 单测、执行记录与 `.factory/memory/` 摘要 | 已完成 |
 | 2026-04-15 | ATM hooks / 信号系统重构 | 用户要求统一为 ATM hooks，删除脚本/工作流私有 hooks，并用统一信号承接清理环境、等待人工确认等流程动作 | `packages/crawler4j-contracts/src/signal.py`、`packages/crawler4j-sdk/src/{base,workflow,assembler,context,signal}.py`、`packages/crawler4j/src/core/atm/{execution_runner,dispatcher,service,run_profile,ui/run_profile_dialog}.py`、相关单测与开发文档 | 已完成 |
 | 2026-04-15 | ATM 手动批次模式落地 | 用户确认采用方案 A：不新增 JobType，而是在 `BATCH` 下增加 `MANUAL` 触发，UI 提供“执行一次”入口 | `packages/crawler4j/src/core/atm/{service.py,ui/task_create_dialog.py,ui/task_list_widget.py,ui/task_detail_dialog.py}`、`packages/crawler4j/tests/unit/test_core/test_atm/{test_job_modes.py,test_task_create_dialog.py,test_task_list_widget.py}`、用户/管理员说明与 `.factory/memory/` | 已完成 |
+| 2026-04-15 | 运行模板资源配置收敛 | 用户要求把运行模板资源页简化为“创建环境 / 选择环境”两条路径，并删除无效参数 | `packages/crawler4j/src/core/atm/{dispatcher.py,execution_runner.py,job_runtime.py,ui/run_profile_dialog.py,ui/task_create_dialog.py}`、`packages/crawler4j/src/core/rem/{models.py,pool.py,provider.py}`、相关 ATM/REM 单测、用户说明与 `.factory/memory/` | 已完成 |
+| 2026-04-15 | 运行模板创建环境页二次收口 | 用户要求删除失败重试、把基础信息和执行脚本选择合并，并按 VirtualBrowser 现有交互页重做指纹参数配置 | `packages/crawler4j/src/core/atm/{run_profile.py,ui/run_profile_dialog.py,ui/task_create_dialog.py}`、`packages/crawler4j/src/core/atm/execution_runner.py`、`packages/crawler4j/src/core/rem/{models.py,ip_pool.py,manager.py,provider.py}`、相关 ATM/REM 单测、用户说明与 `.factory/memory/` | 已完成 |
+| 2026-04-16 | ATM 模块日志可见性修复 | 用户反馈“执行一次”后携程手动登录脚本看起来没有执行；本地 `crawler4j.log` 已确认执行链进入 `ctrip.run(...)` 但模块 `ctx.logger` 日志未进入主日志 | `packages/crawler4j/src/core/atm/execution_runner.py`、`packages/crawler4j/src/core/mms/ui/module_data_table_page.py`、`packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py`、`.factory/memory/current-state.md` | 已完成 |
 
 ### 结论
 

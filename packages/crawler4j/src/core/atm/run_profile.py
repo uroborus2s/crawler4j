@@ -69,7 +69,7 @@ class CreationLifecycle(str, Enum):
 
 
 class CreationConfig(BaseModel):
-    lifecycle: CreationLifecycle = Field(default=CreationLifecycle.EPHEMERAL)
+    lifecycle: CreationLifecycle = Field(default=CreationLifecycle.PERSISTENT)
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -102,18 +102,11 @@ class ExecutionContext(BaseModel):
     timeout: int = Field(default=600, ge=0)
 
 
-class RetryPolicy(BaseModel):
-    max_attempts: int = Field(default=1, ge=1)
-    retry_on_condition: List[str] = Field(default_factory=list)
-    new_env_on_retry: bool = Field(default=True)
-
-
 class RunProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     resource: ResourceConfig = Field(default_factory=ResourceConfig)
     execution: Optional[ExecutionContext] = None
-    retry: RetryPolicy = Field(default_factory=RetryPolicy)
 
     @model_validator(mode="before")
     @classmethod

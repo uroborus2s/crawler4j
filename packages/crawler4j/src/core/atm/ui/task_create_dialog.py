@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.atm.models import Job, JobType, TriggerType
-from src.core.atm.run_profile import RunProfile
+from src.core.atm.run_profile import AcquisitionMode, RunProfile
 from src.core.atm.ui.run_profile_dialog import RunProfileDialog
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
@@ -93,8 +93,15 @@ class TaskCreateDialog(QDialog):
             }
             QPushButton:hover { background: rgba(99, 102, 241, 1); }
         """)
+        self.inline_config_btn.setMinimumHeight(36)
         self.inline_config_btn.clicked.connect(self._edit_inline_run_profile)
-        inline_layout.addWidget(self.inline_config_btn)
+        inline_btn_row = QHBoxLayout()
+        inline_btn_row.setContentsMargins(0, 0, 0, 0)
+        inline_btn_row.setSpacing(0)
+        inline_btn_row.addWidget(self.inline_config_btn)
+        inline_btn_row.addStretch()
+        inline_layout.addLayout(inline_btn_row)
+        self._sync_inline_config_button_width()
 
         form.addRow("运行配置:", inline_page)
         
@@ -214,18 +221,27 @@ class TaskCreateDialog(QDialog):
         if not run_profile:
             self.inline_preview.setText("尚未配置运行模板。点击下方按钮开始配置。")
             self.inline_config_btn.setText("配置运行模板")
+            self._sync_inline_config_button_width()
             return
 
+        acquisition_mode = run_profile.resource.acquisition.mode
+        mode_text = "创建环境" if acquisition_mode == AcquisitionMode.CREATE else "选择环境"
         lines = [
+            f"方式: {mode_text}",
             f"Provider: {run_profile.resource.provider}",
-            f"环境: {run_profile.resource.acquisition.selector.env_type.value}",
         ]
+        if acquisition_mode == AcquisitionMode.CREATE:
+            lines.append(f"环境: {run_profile.resource.acquisition.selector.env_type.value}")
         if run_profile.execution:
             lines.append(f"执行: {run_profile.execution.module}/{run_profile.execution.workflow or 'default'}")
-            if run_profile.execution.hooks_module:
-                lines.append(f"Hooks: {run_profile.execution.hooks_module}")
         self.inline_preview.setText(" | ".join(lines))
         self.inline_config_btn.setText("重新编辑运行模板")
+        self._sync_inline_config_button_width()
+
+    def _sync_inline_config_button_width(self) -> None:
+        text = self.inline_config_btn.text().strip()
+        content_width = self.inline_config_btn.fontMetrics().horizontalAdvance(text)
+        self.inline_config_btn.setMinimumWidth(max(220, content_width + 48))
 
     def _on_trigger_changed(self, index: int):
         del index

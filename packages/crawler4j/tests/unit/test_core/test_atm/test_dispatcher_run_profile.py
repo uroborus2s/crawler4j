@@ -6,7 +6,6 @@ import pytest
 from src.core.atm.dispatcher import TaskDispatcher
 from src.core.atm.models import Job, Task, TaskStatus
 from src.core.atm.run_profile import (
-    AcquisitionConfig,
     AcquisitionMode,
     ComparisonOp,
     EnvType,
@@ -14,7 +13,6 @@ from src.core.atm.run_profile import (
     LogicOp,
     MatchCondition,
     MatchGroup,
-    MatchConfig,
     RunProfile,
 )
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus

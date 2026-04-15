@@ -74,6 +74,7 @@ class ProxyConfig:
     """
     mode: ProxyMode = ProxyMode.NONE
     pool_id: str | None = None
+    bind_strategy: str | None = None
     static_value: str | None = None
     current_ip: str | None = None
     
@@ -82,6 +83,7 @@ class ProxyConfig:
         return {
             "mode": self.mode.value,
             "pool_id": self.pool_id,
+            "bind_strategy": self.bind_strategy,
             "static_value": self.static_value,
             "current_ip": self.current_ip,
         }
@@ -92,6 +94,7 @@ class ProxyConfig:
         return cls(
             mode=ProxyMode(data.get("mode", "none")),
             pool_id=data.get("pool_id"),
+            bind_strategy=data.get("bind_strategy"),
             static_value=data.get("static_value"),
             current_ip=data.get("current_ip"),
         )

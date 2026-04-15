@@ -131,7 +131,11 @@ class IPPool:
     created_at: int = field(default_factory=lambda: int(time.time()))
     updated_at: int = field(default_factory=lambda: int(time.time()))
     
-    def select_ip(self, exclude_ids: set[str] | None = None) -> IPEntry | None:
+    def select_ip(
+        self,
+        exclude_ids: set[str] | None = None,
+        strategy: IPStrategy | str | None = None,
+    ) -> IPEntry | None:
         """根据策略选择 IP。
         
         Args:
@@ -149,7 +153,14 @@ class IPPool:
         if not candidates:
             return None
         
-        match self.strategy:
+        selected_strategy = self.strategy
+        if strategy:
+            try:
+                selected_strategy = IPStrategy(strategy)
+            except ValueError:
+                logger.warning(f"[IPPool] 未知的 IP 绑定策略，回退到池默认策略: {strategy}")
+
+        match selected_strategy:
             case IPStrategy.LEAST_BOUND:
                 return min(candidates, key=lambda ip: ip.bound_count)
             
@@ -247,7 +258,12 @@ class IPPoolManager:
         """列出所有 IP 池。"""
         return list(self._pools.values())
     
-    async def bind_ip(self, env_id: int, pool_id: str) -> IPEntry | None:
+    async def bind_ip(
+        self,
+        env_id: int,
+        pool_id: str,
+        strategy: str | IPStrategy | None = None,
+    ) -> IPEntry | None:
         """为环境绑定 IP。
         
         Args:
@@ -266,7 +282,7 @@ class IPPoolManager:
             return None
         
         # 选择 IP
-        ip = pool.select_ip()
+        ip = pool.select_ip(strategy=strategy)
         if not ip:
             logger.warning(f"[IPPool] 无可用 IP: pool={pool_id}")
             return None

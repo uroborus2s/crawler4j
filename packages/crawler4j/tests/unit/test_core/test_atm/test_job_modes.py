@@ -140,6 +140,17 @@ async def test_pause_job_requests_stop_for_service_tasks():
 
 
 @pytest.mark.asyncio
+async def test_service_counts_active_tasks():
+    service = TaskService()
+    service._repo = SimpleNamespace(count_active_tasks=AsyncMock(return_value=2))
+
+    count = await service.count_active_tasks("job-manual")
+
+    assert count == 2
+    service._repo.count_active_tasks.assert_awaited_once_with("job-manual")
+
+
+@pytest.mark.asyncio
 async def test_start_job_triggers_targeted_reconcile():
     service = TaskService()
     job = Job(
@@ -594,18 +605,23 @@ async def test_recover_zombies_marks_pending_and_running_tasks_failed(monkeypatc
     controller = JobController()
     pending = Task(id="task-pending", job_id="job-1", status=TaskStatus.PENDING)
     running = Task(id="task-running", job_id="job-1", status=TaskStatus.RUNNING, env_id="42")
+    env = SimpleNamespace(id=42)
 
     controller.repo = SimpleNamespace(
         get_running_tasks=AsyncMock(return_value=[pending, running]),
         mark_tasks_failed=AsyncMock(),
     )
 
-    rem = SimpleNamespace(destroy_env=AsyncMock(return_value=True))
+    rem = SimpleNamespace(
+        get_env=AsyncMock(return_value=env),
+        reset=AsyncMock(return_value=None),
+    )
     monkeypatch.setattr("src.core.rem.manager.get_environment_manager", lambda: rem)
 
     await controller._recover_zombies()
 
-    rem.destroy_env.assert_awaited_once_with(42)
+    rem.get_env.assert_awaited_once_with(42)
+    rem.reset.assert_awaited_once_with(env)
     controller.repo.mark_tasks_failed.assert_awaited_once()
     failed_ids, reason = controller.repo.mark_tasks_failed.await_args.args
     assert set(failed_ids) == {"task-pending", "task-running"}

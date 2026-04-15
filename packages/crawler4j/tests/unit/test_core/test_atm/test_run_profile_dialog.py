@@ -1,10 +1,20 @@
+import re
 from types import SimpleNamespace
 
+import pytest
+
 from src.core.atm.run_profile import (
+    AcquisitionConfig,
     AcquisitionMode,
     ComparisonOp,
+    CreationConfig,
+    CreationLifecycle,
+    ExecutionContext,
+    MatchConfig,
     LogicOp,
     MatchCondition,
+    ResourceConfig,
+    RunProfile,
 )
 
 
@@ -15,8 +25,8 @@ def _patch_dialog_dependencies(monkeypatch):
         name="demo_module",
         manifest=SimpleNamespace(
             workflows=[
-                SimpleNamespace(name="repair"),
-                SimpleNamespace(name="collect"),
+                SimpleNamespace(name="repair", display_name="修复流程"),
+                SimpleNamespace(name="collect", display_name=""),
             ]
         ),
     )
@@ -43,25 +53,137 @@ def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
     dialog = RunProfileDialog()
     qtbot.addWidget(dialog)
 
-    dialog.module_link_combo.setCurrentIndex(dialog.module_link_combo.findData("demo_module"))
+    assert dialog.form_tabs.count() == 1
+
+    dialog.script_selector.set_value("demo_module", "repair")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.CREATE))
     dialog.resource_provider_combo.setCurrentText("virtualbrowser")
-    dialog.fingerprint_params_edit.setPlainText("randomize_all: true")
+    dialog.browser_version_combo.setCurrentText("144")
+    dialog.randomize_fingerprint_check.setChecked(True)
+    dialog.ua_custom_btn.click()
+    dialog.ua_value_edit.setPlainText("Mozilla/5.0 Test")
+    dialog._set_sec_ch_ua_mode("custom")
+    dialog._sec_ch_ua_rows[0].brand_edit.setText("Chromium")
+    dialog._sec_ch_ua_rows[0].version_edit.setText("144")
+    dialog._sec_ch_ua_rows[1].brand_edit.setText("Not=A?Brand")
+    dialog._sec_ch_ua_rows[1].version_edit.setText("99")
+    dialog.language_follow_ip_check.setChecked(False)
+    dialog.timezone_follow_ip_check.setChecked(False)
+    language_index = dialog._find_combo_index(
+        dialog.language_combo,
+        lambda data: isinstance(data, dict) and data.get("language") == "en-US",
+    )
+    dialog.language_combo.setCurrentIndex(language_index)
+    timezone_index = dialog._find_combo_index(
+        dialog.timezone_combo,
+        lambda data: isinstance(data, dict) and data.get("utc") == "Asia/Hong_Kong",
+    )
+    dialog.timezone_combo.setCurrentIndex(timezone_index)
+    dialog._set_combo_value(dialog.fonts_mode_combo, "random")
+    dialog._set_combo_value(dialog.screen_mode_combo, "custom")
+    dialog._set_screen_resolution((1920, 1080))
+    dialog._set_combo_value(dialog.canvas_mode_combo, "random")
+    dialog._set_combo_value(dialog.webgl_mode_combo, "custom")
+    dialog.webgl_vendor_combo.setCurrentText("Google Inc. (Intel Inc.)")
+    dialog.webgl_renderer_combo.setCurrentText(
+        "ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics OpenGL Engine (1x6x8 (fused) LP, OpenGL 4.1)"
+    )
+    dialog._set_combo_value(dialog.webgpu_mode_combo, "based_on_webgl")
     dialog.ip_binding_combo.setCurrentText("从 IP 池绑定")
-    dialog.exec_workflow_selector.set_value("demo_module", "repair")
+    dialog.ip_pool_strategy_combo.setCurrentText("最少绑定数")
 
     profile = dialog._build_run_profile_from_form()
 
     assert profile.resource.acquisition.mode == AcquisitionMode.CREATE
     assert profile.resource.provider == "virtualbrowser"
-    assert profile.resource.acquisition.creation.params["fingerprint"]["randomize_all"] is True
+    assert profile.resource.acquisition.creation.lifecycle == CreationLifecycle.PERSISTENT
+    virtualbrowser = profile.resource.acquisition.creation.params["virtualbrowser"]
+    assert virtualbrowser["chrome_version"] == 144
+    assert virtualbrowser["__randomize_fingerprint__"] is True
+    assert virtualbrowser["fonts"] == {"mode": 1}
+    assert virtualbrowser["canvas"] == {"mode": 1}
+    assert virtualbrowser["webgl-img"] == {"mode": 1}
+    assert "ua" not in virtualbrowser
+    assert "device-name" not in virtualbrowser
+    assert "mac" not in virtualbrowser
+    assert virtualbrowser["sec-ch-ua"]["value"] == '"Chromium";v="144", "Not=A?Brand";v="99"'
+    assert virtualbrowser["webgl"] == {
+        "mode": 1,
+        "vendor": "Google Inc. (Intel Inc.)",
+        "render": "ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics OpenGL Engine (1x6x8 (fused) LP, OpenGL 4.1)",
+    }
+    assert virtualbrowser["media"] == {"mode": 1}
+    assert virtualbrowser["ua-language"] == {
+        "mode": 1,
+        "language": "en-US",
+        "value": "en-US,en",
+    }
+    assert virtualbrowser["time-zone"] == {
+        "mode": 1,
+        "zone": "(UTC+08:00) Asia/Hong_Kong",
+        "utc": "Asia/Hong_Kong",
+        "locale": "en-US",
+        "value": 8,
+    }
+    assert virtualbrowser["screen"] == {
+        "mode": 1,
+        "width": 1920,
+        "height": 1080,
+        "_value": "1920 x 1080",
+    }
     assert profile.resource.acquisition.creation.params["proxy"] == {
         "mode": "pool",
         "pool_id": "pool-1",
+        "bind_strategy": "least_bound",
     }
     assert profile.execution is not None
     assert profile.execution.module == "demo_module"
     assert profile.execution.workflow == "repair"
+
+
+def test_run_profile_dialog_requires_script_selection(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    with pytest.raises(ValueError, match="请选择执行脚本"):
+        dialog._build_run_profile_from_form()
+
+
+def test_run_profile_dialog_script_selector_shows_display_name_but_returns_name(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("demo_module", "repair")
+
+    assert dialog.script_selector.workflow_combo.currentText() == "修复流程"
+    assert dialog.script_selector.get_value() == ("demo_module", "repair")
+
+    dialog.script_selector.set_value("demo_module", "collect")
+
+    assert dialog.script_selector.workflow_combo.currentText() == "collect"
+    assert dialog.script_selector.get_value() == ("demo_module", "collect")
+
+
+def test_run_profile_dialog_script_selector_has_no_blank_module_option(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.script_selector.module_combo.count() == 1
+    assert dialog.script_selector.module_combo.itemText(0) == "demo_module"
+    assert dialog.script_selector.module_combo.currentIndex() == -1
+    assert dialog.script_selector.get_value() == ("", "")
 
 
 def test_run_profile_dialog_builds_match_mode_profile(qtbot, monkeypatch):
@@ -72,6 +194,7 @@ def test_run_profile_dialog_builds_match_mode_profile(qtbot, monkeypatch):
     dialog = RunProfileDialog()
     qtbot.addWidget(dialog)
 
+    dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.MATCH))
     dialog.resource_provider_combo.setCurrentText("bitbrowser")
     dialog.match_mode_combo.setCurrentIndex(dialog.match_mode_combo.findData(LogicOp.OR))
@@ -92,3 +215,320 @@ def test_run_profile_dialog_builds_match_mode_profile(qtbot, monkeypatch):
         "provider",
         "name",
     ]
+
+
+def test_run_profile_dialog_randomizes_user_agent_with_selected_version(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.browser_version_combo.setCurrentText("146")
+    dialog.ua_random_btn.click()
+
+    assert dialog.ua_custom_btn.isChecked()
+    assert "Chrome/146.0.0.0" in dialog.ua_value_edit.toPlainText()
+
+
+def test_run_profile_dialog_uses_segmented_controls_for_virtualbrowser_modes(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog, SegmentedOptionControl
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog.webrtc_mode_combo, SegmentedOptionControl)
+    assert isinstance(dialog.location_permission_combo, SegmentedOptionControl)
+    assert isinstance(dialog.screen_mode_combo, SegmentedOptionControl)
+    assert isinstance(dialog.fonts_mode_combo, SegmentedOptionControl)
+
+    dialog.screen_mode_combo.set_current_data("custom", emit_change=True)
+    assert dialog.screen_mode_combo.currentData() == "custom"
+    assert dialog.screen_resolution_combo.isHidden() is False
+
+
+def test_run_profile_dialog_uses_toggle_switch_for_boolean_fields(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog, ToggleSwitch
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog.dnt_check, ToggleSwitch)
+    assert isinstance(dialog.hardware_accel_check, ToggleSwitch)
+    assert dialog.dnt_check.width() == 54
+    assert dialog.dnt_check.height() == 30
+
+
+def test_run_profile_dialog_toggle_switch_click_updates_state(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.dnt_check.isChecked() is False
+    assert dialog.hardware_accel_check.isChecked() is True
+
+    dialog.dnt_check.click()
+    dialog.hardware_accel_check.click()
+
+    assert dialog.dnt_check.isChecked() is True
+    assert dialog.hardware_accel_check.isChecked() is False
+
+
+def test_run_profile_dialog_defaults_new_create_mode_to_random_fingerprint(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.wait(50)
+
+    assert dialog.randomize_fingerprint_check.isChecked() is True
+    assert dialog.ua_custom_btn.isChecked() is True
+    assert dialog.ua_value_edit.height() >= 156
+    assert "Chrome/145.0.0.0" in dialog.ua_value_edit.toPlainText()
+    assert dialog.audio_context_mode_combo.currentData() == "random"
+    assert dialog.client_rects_mode_combo.currentData() == "random"
+    assert dialog.speech_voices_mode_combo.currentData() == "random"
+    assert dialog.fonts_mode_combo.currentData() == "random"
+    assert dialog.canvas_mode_combo.currentData() == "random"
+    assert dialog.webgl_image_mode_combo.currentData() == "random"
+    assert dialog.cpu_value_spin.value() == 4
+    assert dialog.memory_value_spin.value() == 8
+    assert dialog.device_name_mode_combo.currentData() == "custom"
+    assert re.fullmatch(r"[A-Z0-9]{18}", dialog.device_name_edit.text())
+    assert not dialog.device_name_input_widget.isHidden()
+    assert dialog.mac_mode_combo.currentData() == "custom"
+    assert dialog.mac_value_edit.text()
+    assert not dialog.mac_input_widget.isHidden()
+    assert dialog.dnt_check.isChecked() is False
+    assert dialog.ssl_mode_combo.currentData() == "disabled"
+    assert dialog.port_scan_protect_mode_combo.currentData() == "disabled"
+    assert dialog.port_scan_whitelist_edit.isHidden()
+    assert dialog.hardware_accel_check.isChecked() is True
+    assert dialog.launch_args_mode_combo.currentData() == "default"
+    assert dialog.launch_args_edit.isHidden()
+
+    dialog.script_selector.set_value("demo_module", "repair")
+    profile = dialog._build_run_profile_from_form()
+    virtualbrowser = profile.resource.acquisition.creation.params["virtualbrowser"]
+    assert virtualbrowser["__randomize_fingerprint__"] is True
+    assert virtualbrowser["fonts"] == {"mode": 1}
+    assert virtualbrowser["canvas"] == {"mode": 1}
+    assert virtualbrowser["webgl-img"] == {"mode": 1}
+    assert virtualbrowser["audio-context"] == {"mode": 1}
+    assert virtualbrowser["client-rects"] == {"mode": 1}
+    assert virtualbrowser["speech_voices"] == {"mode": 1}
+    assert virtualbrowser["memory"] == {"mode": 1, "value": 8}
+    assert "ua" not in virtualbrowser
+    assert "device-name" not in virtualbrowser
+    assert "mac" not in virtualbrowser
+    assert "__randomize_after_create__" not in virtualbrowser
+    assert "dnt" not in virtualbrowser
+    assert "ssl" not in virtualbrowser
+    assert "port-scan" not in virtualbrowser
+    assert "gpu" not in virtualbrowser
+    assert "launchArgs" not in virtualbrowser
+
+
+def test_run_profile_dialog_loads_virtualbrowser_dropdown_values(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            provider="virtualbrowser",
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.CREATE,
+                selector=MatchConfig(wait_timeout=60),
+                creation=CreationConfig(
+                    lifecycle=CreationLifecycle.EPHEMERAL,
+                    params={
+                        "virtualbrowser": {
+                            "chrome_version": 145,
+                            "sec-ch-ua": {
+                                "mode": 1,
+                                "value": '"Chromium";v="145", "Not=A?Brand";v="99"',
+                            },
+                            "ua-language": {
+                                "mode": 1,
+                                "language": "en-US",
+                                "value": "en-US,en",
+                            },
+                            "time-zone": {
+                                "mode": 1,
+                                "zone": "(UTC+08:00) Asia/Hong_Kong",
+                                "utc": "Asia/Hong_Kong",
+                                "locale": "en-US",
+                                "value": 8,
+                            },
+                            "screen": {
+                                "mode": 1,
+                                "width": 1920,
+                                "height": 1080,
+                                "_value": "1920 x 1080",
+                            },
+                            "webgl": {
+                                "mode": 1,
+                                "vendor": "Google Inc. (Intel Inc.)",
+                                "render": "ANGLE (Intel Inc., Intel(R) UHD Graphics 630, OpenGL 4.1)",
+                            },
+                            "fonts": {"mode": 1},
+                            "canvas": {"mode": 1},
+                            "webgl-img": {"mode": 1},
+                            "media": {"mode": 1},
+                            "audio-context": {"mode": 1},
+                            "client-rects": {"mode": 1},
+                            "speech_voices": {"mode": 1},
+                            "memory": {"mode": 1, "value": 8},
+                            "__randomize_fingerprint__": True,
+                            "device-name": {"mode": 1, "value": "A1B2C3D4E55F7A9C2"},
+                            "mac": {"mode": 1, "value": "26-F6-CD-8F-DE-93"},
+                            "dnt": {"mode": 1, "value": 1},
+                            "ssl": {"mode": 1},
+                            "port-scan": {"mode": 1, "value": ["22", "443"]},
+                            "launchArgs": {"mode": 1, "value": "--disable-gpu"},
+                            "gpu": {"mode": 1, "value": 0},
+                        }
+                    },
+                ),
+            ),
+        ),
+        execution=ExecutionContext(module="demo_module", workflow="repair"),
+    )
+
+    dialog = RunProfileDialog(run_profile=run_profile)
+    qtbot.addWidget(dialog)
+
+    assert dialog.sec_ch_ua_custom_btn.isChecked()
+    assert len(dialog._sec_ch_ua_rows) == 2
+    assert dialog._sec_ch_ua_rows[0].brand_edit.text() == "Chromium"
+    assert dialog._sec_ch_ua_rows[0].version_edit.text() == "145"
+    assert dialog.language_follow_ip_check.isChecked() is False
+    assert dialog.timezone_follow_ip_check.isChecked() is False
+    assert dialog.language_combo.currentData()["language"] == "en-US"
+    assert dialog.timezone_combo.currentData()["utc"] == "Asia/Hong_Kong"
+    assert dialog.screen_mode_combo.currentData() == "custom"
+    assert dialog.screen_resolution_combo.currentData() == (1920, 1080)
+    assert dialog.webgl_mode_combo.currentData() == "custom"
+    assert dialog.webgl_vendor_combo.currentText() == "Google Inc. (Intel Inc.)"
+    assert dialog.webgl_renderer_combo.currentText() == "ANGLE (Intel Inc., Intel(R) UHD Graphics 630, OpenGL 4.1)"
+    assert dialog.webgpu_mode_combo.currentData() == "based_on_webgl"
+    assert dialog.fonts_mode_combo.currentData() == "random"
+    assert dialog.canvas_mode_combo.currentData() == "random"
+    assert dialog.webgl_image_mode_combo.currentData() == "random"
+    assert dialog.audio_context_mode_combo.currentData() == "random"
+    assert dialog.client_rects_mode_combo.currentData() == "random"
+    assert dialog.speech_voices_mode_combo.currentData() == "random"
+    assert dialog.memory_value_spin.value() == 8
+    assert dialog.randomize_fingerprint_check.isChecked() is True
+    assert dialog.device_name_mode_combo.currentData() == "custom"
+    assert dialog.device_name_edit.text() == "A1B2C3D4E55F7A9C2"
+    assert dialog.mac_mode_combo.currentData() == "custom"
+    assert dialog.mac_value_edit.text() == "26-F6-CD-8F-DE-93"
+    assert dialog.dnt_check.isChecked() is True
+    assert dialog.ssl_mode_combo.currentData() == "enabled"
+    assert dialog.port_scan_protect_mode_combo.currentData() == "enabled"
+    assert dialog.port_scan_whitelist_edit.text() == "22,443"
+    assert dialog.hardware_accel_check.isChecked() is False
+    assert dialog.launch_args_mode_combo.currentData() == "custom"
+    assert dialog.launch_args_edit.toPlainText() == "--disable-gpu"
+
+
+def test_run_profile_dialog_shows_webgl_vendor_and_renderer_only_in_custom_mode(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.webgl_vendor_combo.isHidden()
+    assert dialog.webgl_renderer_combo.isHidden()
+
+    dialog._set_combo_value(dialog.webgl_mode_combo, "custom")
+    dialog._sync_virtualbrowser_field_visibility()
+
+    assert not dialog.webgl_vendor_combo.isHidden()
+    assert not dialog.webgl_renderer_combo.isHidden()
+
+
+def test_run_profile_dialog_expands_webgl_renderer_dropdown_width(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog._set_combo_value(dialog.webgl_mode_combo, "custom")
+    dialog.webgl_vendor_combo.setCurrentText("Google Inc. (Intel Inc.)")
+    dialog._refresh_webgl_renderer_options()
+
+    assert dialog.webgl_renderer_combo.minimumWidth() >= 420
+    assert dialog.webgl_renderer_combo.view().minimumWidth() >= 760
+
+
+def test_run_profile_dialog_ignores_legacy_randomize_after_create_flag(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            provider="virtualbrowser",
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.CREATE,
+                selector=MatchConfig(wait_timeout=60),
+                creation=CreationConfig(
+                    lifecycle=CreationLifecycle.EPHEMERAL,
+                    params={
+                        "virtualbrowser": {
+                            "__randomize_after_create__": True,
+                            "chrome_version": 145,
+                        }
+                    },
+                ),
+            ),
+        ),
+        execution=ExecutionContext(module="demo_module", workflow="repair"),
+    )
+
+    dialog = RunProfileDialog(run_profile=run_profile)
+    qtbot.addWidget(dialog)
+
+    assert dialog.randomize_fingerprint_check.isChecked() is False
+    assert dialog.ua_default_btn.isChecked() is True
+    assert dialog.fonts_mode_combo.currentData() == "default"
+    assert dialog.canvas_mode_combo.currentData() == "default"
+    assert dialog.webgl_image_mode_combo.currentData() == "default"
+    assert dialog.audio_context_mode_combo.currentData() == "default"
+    assert dialog.client_rects_mode_combo.currentData() == "default"
+    assert dialog.speech_voices_mode_combo.currentData() == "default"
+
+
+def test_run_profile_dialog_uses_60_percent_screen_width(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    import src.core.atm.ui.run_profile_dialog as dialog_module
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    fake_geometry = SimpleNamespace(width=lambda: 2000, height=lambda: 1000)
+    fake_screen = SimpleNamespace(availableGeometry=lambda: fake_geometry)
+    monkeypatch.setattr(dialog_module.QApplication, "primaryScreen", lambda: fake_screen)
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.width() == 1200
+    assert dialog.height() == 950

@@ -64,6 +64,24 @@ def test_task_create_dialog_initializes_inline_job_mode(qtbot):
     assert data["trigger_config"]["type"] == TriggerType.CRON.value
 
 
+def test_task_create_dialog_keeps_inline_config_button_wide_enough(qtbot):
+    from src.core.atm.ui.task_create_dialog import TaskCreateDialog
+
+    dialog = TaskCreateDialog()
+    qtbot.addWidget(dialog)
+    dialog._inline_run_profile = _make_run_profile()
+    dialog._update_inline_preview()
+
+    expected_min_width = max(
+        220,
+        dialog.inline_config_btn.fontMetrics().horizontalAdvance("重新编辑运行模板") + 48,
+    )
+
+    assert dialog.inline_config_btn.text() == "重新编辑运行模板"
+    assert dialog.inline_config_btn.minimumWidth() >= expected_min_width
+    assert dialog.inline_config_btn.minimumHeight() == 36
+
+
 def test_task_create_dialog_supports_manual_batch_trigger(qtbot):
     from src.core.atm.ui.task_create_dialog import TaskCreateDialog
 

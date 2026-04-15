@@ -65,6 +65,26 @@ class TestEnvironment:
         assert env.capabilities == {"page", "cookies"}
 
 
+class TestProxyConfig:
+    """测试 ProxyConfig。"""
+
+    def test_to_dict_and_from_dict_preserve_bind_strategy(self):
+        proxy = ProxyConfig(
+            mode=ProxyMode.POOL,
+            pool_id="pool-1",
+            bind_strategy="least_bound",
+            static_value="socks5://1.2.3.4:1080",
+            current_ip="1.2.3.4",
+        )
+
+        data = proxy.to_dict()
+        restored = ProxyConfig.from_dict(data)
+
+        assert data["bind_strategy"] == "least_bound"
+        assert restored.bind_strategy == "least_bound"
+        assert restored.pool_id == "pool-1"
+
+
 class TestEnvLease:
     """测试 EnvLease 数据模型。"""
     

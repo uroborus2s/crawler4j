@@ -99,7 +99,8 @@ async def test_create_env_with_pool_proxy(mock_pool, mock_ip_manager):
         # Prepare Proxy Config
         proxy_config = ProxyConfig(
             mode=ProxyMode.POOL,
-            pool_id="test_pool"
+            pool_id="test_pool",
+            bind_strategy="least_bound",
         )
         
         # Execute
@@ -109,7 +110,7 @@ async def test_create_env_with_pool_proxy(mock_pool, mock_ip_manager):
         
         # Verify
         # 1. IP Manager called
-        mock_ip_manager.bind_ip.assert_called_once_with(env.id, "test_pool")
+        mock_ip_manager.bind_ip.assert_called_once_with(env.id, "test_pool", "least_bound")
         
         # 2. Provider config received correct proxy
         provider_config = provider.last_config

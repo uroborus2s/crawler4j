@@ -1,5 +1,6 @@
 import pytest
 
+import src.core.rem.provider as provider_module
 from src.core.rem.provider import VirtualBrowserClient
 
 
@@ -20,10 +21,12 @@ class _DummyHttpClient:
         self.last_path = None
         self.last_payload = None
         self._response_data = response_data
+        self.calls: list[tuple[str, dict]] = []
 
     async def post(self, path, json):
         self.last_path = path
         self.last_payload = json
+        self.calls.append((path, json))
         return _DummyResponse(json, response_data=self._response_data)
 
 
@@ -73,6 +76,107 @@ async def test_add_browser_uses_canonical_proxy_keys_and_enables_custom_mode():
     assert proxy["protocol"] == "socks5"
     assert proxy["user"] == "u"
     assert proxy["pass"] == "p"
+
+
+@pytest.mark.asyncio
+async def test_add_browser_materializes_randomize_fingerprint_template(monkeypatch):
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient()
+
+    async def _fake_get_client():
+        return dummy
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        provider_module,
+        "materialize_virtualbrowser_fingerprint",
+        lambda fingerprint, *, default_chrome_version: (
+            144,
+            {
+                "ua": {"mode": 1, "value": "Mozilla/5.0 Random"},
+                "device-name": {"mode": 1, "value": "Q7M2P9X4K3A1B5C6D"},
+                "mac": {"mode": 1, "value": "02-76-66-51-39-C9"},
+                "fonts": {"mode": 1},
+            },
+        ),
+    )
+
+    await client.add_browser(
+        name="env-c",
+        group_ids=["g1"],
+        fingerprint={
+            "chrome_version": 144,
+            "__randomize_fingerprint__": True,
+        },
+    )
+
+    assert dummy.calls == [
+        (
+            "/api/addBrowser",
+            {
+                "name": "env-c",
+                "group": ["g1"],
+                "chrome_version": 144,
+                "proxy": {
+                    "mode": 1,
+                    "value": "",
+                    "protocol": "",
+                    "host": "",
+                    "port": "",
+                    "user": "",
+                    "pass": "",
+                    "API": "",
+                },
+                "ua": {"mode": 1, "value": "Mozilla/5.0 Random"},
+                "device-name": {"mode": 1, "value": "Q7M2P9X4K3A1B5C6D"},
+                "mac": {"mode": 1, "value": "02-76-66-51-39-C9"},
+                "fonts": {"mode": 1},
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_add_browser_strips_legacy_randomize_marker_without_compat_behavior():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient()
+
+    async def _fake_get_client():
+        return dummy
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+
+    await client.add_browser(
+        name="env-d",
+        group_ids=["g1"],
+        fingerprint={
+            "chrome_version": 145,
+            "__randomize_after_create__": True,
+            "fonts": {"mode": 1},
+        },
+    )
+
+    assert dummy.calls == [
+        (
+            "/api/addBrowser",
+            {
+                "name": "env-d",
+                "group": ["g1"],
+                "chrome_version": 145,
+                "proxy": {
+                    "mode": 1,
+                    "value": "",
+                    "protocol": "",
+                    "host": "",
+                    "port": "",
+                    "user": "",
+                    "pass": "",
+                    "API": "",
+                },
+                "fonts": {"mode": 1},
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio

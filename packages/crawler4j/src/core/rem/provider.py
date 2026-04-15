@@ -10,6 +10,10 @@ from typing import Any
 
 from src.core.rem.handle import BrowserHandle
 from src.core.rem.models import Environment, EnvKind
+from src.core.rem.virtualbrowser_fingerprint import materialize_virtualbrowser_fingerprint
+
+VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS = tuple(range(146, 138, -1))
+VIRTUALBROWSER_DEFAULT_CHROME_VERSION = 145
 
 
 def _normalize_cdp_endpoint(value: Any) -> str | None:
@@ -890,7 +894,13 @@ class VirtualBrowserClient:
             self.client = httpx.AsyncClient(base_url=self.base_url, headers=self.headers, timeout=30.0)
         return self.client
 
-    async def add_browser(self, name: str, group_ids: list[str], proxy: dict | None = None, fingerprint: dict | None = None) -> int:
+    async def add_browser(
+        self,
+        name: str,
+        group_ids: list[str],
+        proxy: dict | None = None,
+        fingerprint: dict | None = None,
+    ) -> int:
         """创建浏览器环境，返回ID。
         
         Args:
@@ -899,7 +909,8 @@ class VirtualBrowserClient:
             proxy: 代理配置，支持以下格式：
                 - {"mode": 1} 无代理
                 - {"mode": 2, "protocol": "socks5", "host": "...", "port": "...", "user": "...", "pass": "..."}
-            fingerprint: 指纹配置（创建后调用 randomizeFingerprint）
+            fingerprint: 指纹模板。会在创建前展开为本次创建真正下发的指纹参数，
+                不再支持 post-create 的兼容随机化链路。
         
         Returns:
             环境 ID
@@ -932,19 +943,21 @@ class VirtualBrowserClient:
             )
             default_proxy["mode"] = 2 if has_custom_proxy else 1
         
+        chrome_version, fingerprint_payload = materialize_virtualbrowser_fingerprint(
+            fingerprint,
+            default_chrome_version=VIRTUALBROWSER_DEFAULT_CHROME_VERSION,
+        )
+
         # 构造请求参数
         payload = {
             "name": name,
             "group": group_ids or [],
-            "chrome_version": 132,
+            "chrome_version": chrome_version,
             "proxy": default_proxy,
         }
-        
-        # 如果有指纹参数，目前 addBrowser API 似乎未直接暴露指纹配置细节？
-        # 参考 API 文档，randomizeFingerprint 是单独接口。
-        # 如果 addBrowser body 里确实不含 fp，我们可能需要后续 update?
-        # 根据 MCP 提供的 Schema，addBrowser 确实只含 base info。
-        # 我们假设创建后调用 randomizeFingerprint。
+
+        for key, value in fingerprint_payload.items():
+            payload[key] = value
 
         resp = await client.post("/api/addBrowser", json=payload)
         resp.raise_for_status()
@@ -952,13 +965,7 @@ class VirtualBrowserClient:
         if not data.get("success"):
             raise RuntimeError(f"API Error: {data.get('msg')}")
         
-        browser_id = data["data"]["id"]
-        
-        # 应用指纹
-        if fingerprint:
-            await self.randomize_fingerprint(browser_id, fingerprint)
-            
-        return browser_id
+        return data["data"]["id"]
 
     async def randomize_fingerprint(self, browser_id: int, config: dict | None = None) -> bool:
         """更新/随机化指纹。
@@ -1156,7 +1163,10 @@ class VirtualBrowserProvider(BaseProvider):
             except Exception as e:
                 logger.warning(f"[VirtualBrowser] Failed to parse proxy '{raw_val}': {e}")
         
-        fingerprint = creation_params.get("fingerprint") 
+        fingerprint = (
+            creation_params.get("virtualbrowser")
+            or creation_params.get("fingerprint")
+        )
         
         logger.info(f"[VirtualBrowser] Creating env '{name}'...")
         

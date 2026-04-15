@@ -23,7 +23,7 @@ from src.core.atm.models import Job, JobState, JobType, TriggerType
 from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
-from src.core.foundation.event_bus import Event
+from src.core.foundation.event_bus import Event, EventType, get_event_bus
 
 
 @dataclass
@@ -32,12 +32,21 @@ class JobDisplayItem:
     raw: Job
     display_status_text: str
     display_status_color: str
+    active_task_count: int = 0
 
 
 class TaskListWidget(QWidget):
     """任务(Job)列表组件。"""
 
     task_selected = pyqtSignal(str)
+    REFRESH_EVENTS = (
+        EventType.TASK_FINISHED,
+        EventType.TASK_FAILED,
+        EventType.TASK_CANCELLED,
+        EventType.TASK_CONFIG_CREATED,
+        EventType.TASK_CONFIG_UPDATED,
+        EventType.TASK_CONFIG_DELETED,
+    )
 
     COLUMNS = ["作业名称", "类型", "运行配置", "目标并发", "触发规则", "状态", "操作"]
     
@@ -65,19 +74,40 @@ class TaskListWidget(QWidget):
         self._jobs: list[Job] = []
         self._load_seq = 0
         self._load_task: asyncio.Task | None = None
+        self._pending_run_once_job_ids: set[str] = set()
+        self._run_once_requesting_job_ids: set[str] = set()
 
         self._setup_ui()
+        self._subscribe_events()
+        self.destroyed.connect(lambda *_args: self._unsubscribe_events())
 
         # 初始加载 (Delay to ensure loop is running)
         QTimer.singleShot(0, self.load_data)
 
-        # 订阅事件 (TODO: Add JOB events)
-        # bus = get_event_bus()
-        # bus.subscribe(EventType.TASK_CONFIG_CREATED, self._on_task_changed)
-
     def _on_task_changed(self, event: Event):
         """事件回调：刷新列表。"""
         self.load_data()
+
+    def _subscribe_events(self):
+        bus = get_event_bus()
+        for event_type in self.REFRESH_EVENTS:
+            bus.subscribe(event_type, self._on_task_changed)
+
+    def _unsubscribe_events(self):
+        bus = get_event_bus()
+        for event_type in self.REFRESH_EVENTS:
+            bus.unsubscribe(event_type, self._on_task_changed)
+
+    @staticmethod
+    def _is_manual_batch_job(job: Job) -> bool:
+        return job.type == JobType.BATCH and job.trigger.type == TriggerType.MANUAL
+
+    def _is_run_once_busy(self, job_id: str, active_task_count: int = 0) -> bool:
+        return job_id in self._pending_run_once_job_ids or active_task_count > 0
+
+    def _release_run_once_lock(self, job_id: str):
+        self._pending_run_once_job_ids.discard(job_id)
+        self._run_once_requesting_job_ids.discard(job_id)
 
     @staticmethod
     def _normalize_state(state: JobState | str) -> JobState:
@@ -148,7 +178,7 @@ class TaskListWidget(QWidget):
             ("concurrency", "目标并发", 80),
             ("trigger", "触发规则", 120),
             ("status", "状态", 80),
-            ("actions", "操作", 180),
+            ("actions", "操作", 240),
         ]
 
         self.table = SkyDataTable(columns=columns_config)
@@ -176,18 +206,46 @@ class TaskListWidget(QWidget):
                 return
 
             self._jobs = jobs
+            manual_jobs = [job for job in jobs if self._is_manual_batch_job(job)]
+            active_task_counts: dict[str, int] = {}
+            if manual_jobs:
+                counts = await asyncio.gather(
+                    *(service.count_active_tasks(job.id) for job in manual_jobs)
+                )
+                active_task_counts = {
+                    job.id: count for job, count in zip(manual_jobs, counts, strict=False)
+                }
+                if seq != self._load_seq:
+                    return
 
             display_items = []
             for job in self._jobs:
                 state = self._normalize_state(job.state)
                 job.state = state
-                status_text = self.STATUS_TEXT.get(state, state.value)
-                status_color = self.STATUS_COLORS.get(state, "#9ca3af")
+                active_task_count = active_task_counts.get(job.id, 0)
+                if (
+                    job.id in self._pending_run_once_job_ids
+                    and active_task_count == 0
+                    and job.id not in self._run_once_requesting_job_ids
+                ):
+                    self._pending_run_once_job_ids.discard(job.id)
+
+                is_run_once_busy = self._is_manual_batch_job(job) and self._is_run_once_busy(
+                    job.id,
+                    active_task_count,
+                )
+                if is_run_once_busy:
+                    status_text = "执行中"
+                    status_color = self.STATUS_COLORS[JobState.ACTIVE]
+                else:
+                    status_text = self.STATUS_TEXT.get(state, state.value)
+                    status_color = self.STATUS_COLORS.get(state, "#9ca3af")
                 
                 display_items.append(JobDisplayItem(
                     raw=job,
                     display_status_text=status_text,
-                    display_status_color=status_color
+                    display_status_color=status_color,
+                    active_task_count=active_task_count,
                 ))
 
             self.table.set_data(display_items)
@@ -224,7 +282,11 @@ class TaskListWidget(QWidget):
         table.setItem(row, 3, QTableWidgetItem(str(job.concurrency_target)))
 
         # 4. Trigger
-        is_manual_batch = job.type == JobType.BATCH and job.trigger.type == TriggerType.MANUAL
+        is_manual_batch = self._is_manual_batch_job(job)
+        is_manual_batch_busy = is_manual_batch and self._is_run_once_busy(
+            job.id,
+            item.active_task_count,
+        )
         if is_manual_batch:
             trigger_text = "手动执行一次"
         elif job.type == JobType.BATCH and job.trigger.cron_expr:
@@ -247,10 +309,18 @@ class TaskListWidget(QWidget):
         action_layout.setSpacing(8)
 
         state = self._normalize_state(job.state)
-        if is_manual_batch and state != JobState.ACTIVE:
-            run_btn = QPushButton("▶ 执行一次")
-            run_btn.setStyleSheet("background: #60a5fa; color: white; border: none; padding: 4px 10px; border-radius: 4px;")
-            run_btn.clicked.connect(lambda _, jid=job.id: self._run_job_once(jid))
+        if is_manual_batch:
+            run_btn = QPushButton("⏳ 执行中" if is_manual_batch_busy else "▶ 执行一次")
+            run_btn.setEnabled(not is_manual_batch_busy)
+            if is_manual_batch_busy:
+                run_btn.setToolTip("当前批次仍在执行或等待环境回收完成。")
+            run_btn.setStyleSheet(
+                "background: #6b7280; color: rgba(255, 255, 255, 0.75); border: none; padding: 4px 10px; border-radius: 4px;"
+                if is_manual_batch_busy
+                else "background: #60a5fa; color: white; border: none; padding: 4px 10px; border-radius: 4px;"
+            )
+            if not is_manual_batch_busy:
+                run_btn.clicked.connect(lambda _, jid=job.id: self._run_job_once(jid))
             action_layout.addWidget(run_btn)
         elif state == JobState.ACTIVE:
             # 运行中 -> 显示"暂停"
@@ -296,6 +366,11 @@ class TaskListWidget(QWidget):
         asyncio.create_task(self._async_op(job_id, "pause"))
 
     def _run_job_once(self, job_id: str):
+        if job_id in self._pending_run_once_job_ids:
+            return
+        self._pending_run_once_job_ids.add(job_id)
+        self._run_once_requesting_job_ids.add(job_id)
+        self.table.refresh()
         asyncio.create_task(self._async_op(job_id, "run_once"))
 
     def _delete_job(self, job_id: str):
@@ -328,12 +403,20 @@ class TaskListWidget(QWidget):
                     "delete": "删除失败，请稍后重试。",
                 }.get(op, "操作失败")
                 raise RuntimeError(action_text)
-
-            # 操作完成后立即拉取最新状态，确保按钮与数据库一致
-            self._load_seq += 1
-            await self._load_data_async(self._load_seq)
         except Exception as e:
+            if op == "run_once":
+                self._release_run_once_lock(job_id)
+                self.table.refresh()
+                self.load_data()
             QMessageBox.warning(self, "操作失败", str(e))
+            return
+
+        if op == "run_once":
+            self._run_once_requesting_job_ids.discard(job_id)
+
+        # 操作完成后立即拉取最新状态，确保按钮与数据库一致
+        self._load_seq += 1
+        await self._load_data_async(self._load_seq)
 
     def _edit_job(self, job_id: str):
         """编辑作业。"""

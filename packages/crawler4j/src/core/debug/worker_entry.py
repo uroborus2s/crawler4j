@@ -103,7 +103,7 @@ async def main_async(config_path: str) -> int:
         acquisition_mode=AcquisitionMode(payload.get("acquisition_mode", AcquisitionMode.CREATE.value)),
         creation_params=dict(payload.get("creation_params") or {}),
         creation_lifecycle=CreationLifecycle(
-            payload.get("creation_lifecycle", CreationLifecycle.EPHEMERAL.value)
+            payload.get("creation_lifecycle", CreationLifecycle.PERSISTENT.value)
         ),
         selector_wait_timeout=int(payload.get("wait_timeout", 60)),
         execution_timeout=int(payload.get("timeout", 0)),

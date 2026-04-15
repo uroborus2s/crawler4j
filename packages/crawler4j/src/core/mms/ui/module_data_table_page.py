@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.atm.runtime_capabilities import build_runtime_capabilities
+from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleSource
 from src.core.mms.service import get_module_service
 from src.core.mms.settings_store import get_module_settings_store
@@ -281,6 +282,7 @@ class ModuleDataTablePage(QWidget):
             env_id=0,
             task_name=self._module_name,
             config=config,
+            logger=logger,
             tools=build_runtime_capabilities(self._module_name).tools,
         )
 

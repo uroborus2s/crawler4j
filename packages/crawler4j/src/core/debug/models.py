@@ -54,7 +54,7 @@ class DebugSession:
     provider: str = "playwright_local"
     acquisition_mode: AcquisitionMode = AcquisitionMode.CREATE
     creation_params: dict[str, Any] = field(default_factory=dict)
-    creation_lifecycle: CreationLifecycle = CreationLifecycle.EPHEMERAL
+    creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
     wait_timeout: int = 60
     timeout: int = 0
     attach_host: str = "127.0.0.1"

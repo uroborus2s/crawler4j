@@ -7,6 +7,7 @@ from crawler4j_contracts import EnvAction, TaskResult, TaskSignal
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
+from src.core.foundation.logging import logger as app_logger
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 from src.core.rem.models import ProxyMode
 
@@ -28,7 +29,7 @@ def _build_request(
     *,
     mode: AcquisitionMode = AcquisitionMode.CREATE,
     timeout: int = 0,
-    lifecycle: CreationLifecycle = CreationLifecycle.EPHEMERAL,
+    lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT,
 ) -> ExecutionRequest:
     return ExecutionRequest(
         task=Task(id="task-21", job_id="job-21"),
@@ -55,6 +56,7 @@ def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[Ex
         lease_manager=SimpleNamespace(acquire=AsyncMock(return_value=lease)),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=env),
+        reset=AsyncMock(return_value=None),
         release=AsyncMock(return_value=True),
         release_keep_alive=AsyncMock(return_value=True),
         destroy_env=AsyncMock(return_value=True),
@@ -100,11 +102,40 @@ async def test_execution_runner_calls_success_hooks_and_merges_prepare_env():
     assert request.task.env_id == str(env.id)
     assert contexts
     assert contexts[0].config["workflow"] == "default"
+    assert contexts[0].logger is app_logger
     assert contexts[0].tools is not None
     assert module_service.call_hook.await_args_list[0].args[2].tools is not None
-    rem.release_keep_alive.assert_awaited_once_with(lease)
-    rem.release.assert_not_awaited()
-    rem.destroy_env.assert_awaited_once_with(env.id)
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_routes_module_logs_through_app_logger():
+    request = _build_request()
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(
+            side_effect=lambda _module_name, context: context.logger.info("[test] module log") or TaskResult.ok()
+        ),
+        call_hook=AsyncMock(
+            side_effect=lambda _module_name, hook_name, context, *args: (
+                context.logger.info("[test] before_run log") if hook_name == "before_run" else None
+            )
+        ),
+    )
+    runner, _rem = _build_runner(env, lease, module_service)
+
+    old_entries = list(app_logger._entries)
+    app_logger._entries = []
+    try:
+        await runner.run(request)
+        messages = [entry.message for entry in app_logger.get_entries(limit=20)]
+    finally:
+        app_logger._entries = old_entries
+
+    assert "[test] before_run log" in messages
+    assert "[test] module log" in messages
 
 
 @pytest.mark.asyncio
@@ -129,9 +160,9 @@ async def test_execution_runner_calls_failure_and_cleanup_hooks_on_error():
     assert updates == [TaskStatus.RUNNING, TaskStatus.FAILED]
     assert request.task.status == TaskStatus.FAILED
     assert "boom" in request.task.error
-    rem.release_keep_alive.assert_awaited_once_with(lease)
-    rem.release.assert_not_awaited()
-    rem.destroy_env.assert_awaited_once_with(env.id)
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -155,9 +186,9 @@ async def test_execution_runner_calls_timeout_and_cleanup_hooks_on_timeout():
     assert hook_names == ["prepare_env", "init_env", "before_run", "on_timeout", "on_cleanup"]
     assert request.task.status == TaskStatus.FAILED
     assert "Timeout" in request.task.error
-    rem.release_keep_alive.assert_awaited_once_with(lease)
-    rem.release.assert_not_awaited()
-    rem.destroy_env.assert_awaited_once_with(env.id)
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -174,8 +205,10 @@ async def test_execution_runner_cleans_up_created_env_when_acquisition_fails():
     await runner.run(request)
 
     assert request.task.status == TaskStatus.FAILED
+    rem.get_env.assert_awaited_once_with(env.id)
+    rem.reset.assert_awaited_once_with(env)
     rem.release.assert_not_awaited()
-    rem.destroy_env.assert_awaited_once_with(env.id)
+    rem.destroy_env.assert_not_awaited()
     module_service.run_module.assert_not_awaited()
 
 
@@ -214,8 +247,9 @@ async def test_execution_runner_marks_task_failed_for_taskresult_fail():
 
     assert request.task.status == TaskStatus.FAILED
     assert request.task.error == "black_account"
-    rem.release_keep_alive.assert_awaited_once_with(lease)
-    rem.destroy_env.assert_awaited_once_with(env.id)
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -268,13 +302,33 @@ async def test_execution_runner_exposes_env_action_to_cleanup_hook():
 
     assert cleanup_env_actions == [
         {
-            "action": "destroy",
+            "action": "recycle",
             "env_id": env.id,
             "success": True,
-            "released": True,
-            "destroyed": True,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_destroys_env_only_when_signal_requests_it():
+    request = _build_request()
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(
+            return_value=TaskResult.ok(
+                message="ok",
+                signal=TaskSignal.succeed(message="ok", env_action=EnvAction.DESTROY),
+            )
+        ),
+        call_hook=AsyncMock(return_value=None),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    rem.release.assert_not_awaited()
+    rem.release_keep_alive.assert_awaited_once_with(lease)
+    rem.destroy_env.assert_awaited_once_with(env.id)
 
 
 @pytest.mark.asyncio

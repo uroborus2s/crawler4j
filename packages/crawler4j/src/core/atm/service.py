@@ -165,6 +165,10 @@ class TaskService:
         """获取作业详情。"""
         return await self._repo.get_job(job_id)
 
+    async def count_active_tasks(self, job_id: str) -> int:
+        """统计作业当前仍在执行生命周期内的任务数。"""
+        return await self._repo.count_active_tasks(job_id)
+
     async def run_job_once(self, job_id: str) -> bool:
         """立即执行一次手动批次作业，不改变作业的长期调度状态。"""
         job = await self._repo.get_job(job_id)
