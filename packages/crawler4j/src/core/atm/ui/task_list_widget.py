@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.atm.job_runtime import describe_job_runtime
-from src.core.atm.models import Job, JobState, JobType
+from src.core.atm.models import Job, JobState, JobType, TriggerType
 from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
@@ -56,7 +56,7 @@ class TaskListWidget(QWidget):
     }
 
     TYPE_TEXT = {
-        JobType.BATCH: "定时批次",
+        JobType.BATCH: "批次任务",
         JobType.SERVICE: "持续保活",
     }
 
@@ -224,12 +224,15 @@ class TaskListWidget(QWidget):
         table.setItem(row, 3, QTableWidgetItem(str(job.concurrency_target)))
 
         # 4. Trigger
-        if job.type == JobType.BATCH and job.trigger.cron_expr:
+        is_manual_batch = job.type == JobType.BATCH and job.trigger.type == TriggerType.MANUAL
+        if is_manual_batch:
+            trigger_text = "手动执行一次"
+        elif job.type == JobType.BATCH and job.trigger.cron_expr:
             trigger_text = f"Cron ({job.trigger.cron_expr})"
         elif job.type == JobType.BATCH:
-            trigger_text = "等待 Cron 配置"
+            trigger_text = "Cron 配置缺失"
         else:
-            trigger_text = "启动后持续保活"
+            trigger_text = "手动启动后持续保活"
         table.setItem(row, 4, QTableWidgetItem(trigger_text))
 
         # 5. 状态
@@ -244,7 +247,12 @@ class TaskListWidget(QWidget):
         action_layout.setSpacing(8)
 
         state = self._normalize_state(job.state)
-        if state == JobState.ACTIVE:
+        if is_manual_batch and state != JobState.ACTIVE:
+            run_btn = QPushButton("▶ 执行一次")
+            run_btn.setStyleSheet("background: #60a5fa; color: white; border: none; padding: 4px 10px; border-radius: 4px;")
+            run_btn.clicked.connect(lambda _, jid=job.id: self._run_job_once(jid))
+            action_layout.addWidget(run_btn)
+        elif state == JobState.ACTIVE:
             # 运行中 -> 显示"暂停"
             stop_btn = QPushButton("⏸ 暂停")
             stop_btn.setStyleSheet("background: #fb923c; color: white; border: none; padding: 4px 10px; border-radius: 4px;")
@@ -287,6 +295,9 @@ class TaskListWidget(QWidget):
     def _pause_job(self, job_id: str):
         asyncio.create_task(self._async_op(job_id, "pause"))
 
+    def _run_job_once(self, job_id: str):
+        asyncio.create_task(self._async_op(job_id, "run_once"))
+
     def _delete_job(self, job_id: str):
         reply = QMessageBox.question(
             self, "确认删除",
@@ -299,12 +310,24 @@ class TaskListWidget(QWidget):
     async def _async_op(self, job_id: str, op: str):
         service = get_task_service()
         try:
+            success = True
             if op == "start":
-                await service.start_job(job_id)
+                success = await service.start_job(job_id)
             elif op == "pause":
-                await service.pause_job(job_id)
+                success = await service.pause_job(job_id)
+            elif op == "run_once":
+                success = await service.run_job_once(job_id)
             elif op == "delete":
-                await service.delete_job(job_id)
+                success = await service.delete_job(job_id)
+
+            if not success:
+                action_text = {
+                    "start": "启动失败，请检查运行模板和当前任务状态。",
+                    "pause": "暂停失败，请稍后重试。",
+                    "run_once": "执行失败，请确认当前没有未结束的批次任务且运行模板可用。",
+                    "delete": "删除失败，请稍后重试。",
+                }.get(op, "操作失败")
+                raise RuntimeError(action_text)
 
             # 操作完成后立即拉取最新状态，确保按钮与数据库一致
             self._load_seq += 1

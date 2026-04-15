@@ -33,8 +33,6 @@ from src.core.atm.run_profile import (
     ResourceConfig,
     RetryPolicy,
     SelectionStrategy,
-    TeardownAction,
-    TeardownPolicy,
 )
 from src.core.atm.ui.rule_builder import RuleBuilder
 from src.ui.components.combo_box import StyledComboBox as QComboBox
@@ -222,15 +220,6 @@ SELECTION_STRATEGY_MAP = {
     SelectionStrategy.BEST_FIT: "最佳匹配 (Best Fit)",
 }
 
-# 清理动作显示映射 (CN)
-TEARDOWN_ACTION_MAP = {
-    TeardownAction.DESTROY: "销毁 (Destroy)",
-    TeardownAction.RECYCLE: "回收复用 (Recycle)",
-    TeardownAction.HIBERNATE: "休眠 (Hibernate)",
-    TeardownAction.KEEP_ALIVE: "保持运行 (Keep Alive)",
-}
-
-
 class RunProfileDialog(QDialog):
     """运行模板编辑弹窗。"""
 
@@ -391,9 +380,6 @@ class RunProfileDialog(QDialog):
         # findChildren might not find them if they are wrapped.
         
         self.exec_workflow_selector.setEnabled(False)
-        self.td_success_wf.setEnabled(False)
-        self.td_failure_wf.setEnabled(False)
-        self.td_timeout_wf.setEnabled(False)
         
         # Rule builder?
         # self.rule_mode_btn.setEnabled(False)
@@ -415,10 +401,6 @@ class RunProfileDialog(QDialog):
         self.tab_retry = QWidget()
         self._setup_retry_tab(self.tab_retry)
         self.form_tabs.addTab(self.tab_retry, "重试策略")
-
-        self.tab_teardown = QWidget()
-        self._setup_teardown_tab(self.tab_teardown)
-        self.form_tabs.addTab(self.tab_teardown, "清理策略")
 
     def _create_form_layout(self, parent):
         form = QFormLayout(parent)
@@ -619,77 +601,10 @@ class RunProfileDialog(QDialog):
         layout.addWidget(retry_group)
         layout.addStretch()
 
-    def _setup_teardown_tab(self, parent):
-        layout = QVBoxLayout(parent)
-        
-        teardown_group = QGroupBox("清理策略 (Teardown Policy)")
-        # Use GridLayout or Nested VBox for better control
-        # Structure:
-        # Label
-        # [Action Combo] [Workflow Selector]
-        
-        form_layout = QVBoxLayout(teardown_group)
-        form_layout.setSpacing(12)
-        
-        # Helper to create a row
-        def create_row(label_text, combo, workflow_selector):
-            row_widget = QWidget()
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            
-            lbl = QLabel(label_text)
-            lbl.setFixedWidth(80) # Fixed width for label alignment
-            row_layout.addWidget(lbl)
-            
-            combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            row_layout.addWidget(combo, 1) # Action takes available space
-            
-            # Workflow selector needs to be compact or integrated. 
-            # WorkflowSelector is a Widget with a layout. 
-            # We need to make sure it fits nicely.
-            workflow_selector.workflow_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            row_layout.addWidget(workflow_selector, 2) # Workflow takes more space
-            
-            form_layout.addWidget(row_widget)
-
-        # Success
-        self.td_success_combo = QComboBox()
-        for t in TeardownAction:
-            self.td_success_combo.addItem(TEARDOWN_ACTION_MAP.get(t, t.value), t)
-        
-        self.td_success_wf = WorkflowSelector(show_module=False, show_none_option=True)
-        self.td_success_wf.workflow_combo.setPlaceholderText("执行工作流 (可选)")
-        create_row("任务成功时:", self.td_success_combo, self.td_success_wf)
-        
-        # Failure
-        self.td_failure_combo = QComboBox()
-        for t in TeardownAction:
-            self.td_failure_combo.addItem(TEARDOWN_ACTION_MAP.get(t, t.value), t)
-            
-        self.td_failure_wf = WorkflowSelector(show_module=False, show_none_option=True)
-        self.td_failure_wf.workflow_combo.setPlaceholderText("执行工作流 (可选)")
-        create_row("任务失败时:", self.td_failure_combo, self.td_failure_wf)
-
-        # Timeout
-        self.td_timeout_combo = QComboBox()
-        for t in TeardownAction:
-            self.td_timeout_combo.addItem(TEARDOWN_ACTION_MAP.get(t, t.value), t)
-            
-        self.td_timeout_wf = WorkflowSelector(show_module=False, show_none_option=True)
-        self.td_timeout_wf.workflow_combo.setPlaceholderText("执行工作流 (可选)")
-        create_row("任务超时时:", self.td_timeout_combo, self.td_timeout_wf)
-        
-        layout.addWidget(teardown_group)
-        layout.addStretch()
-
     def _on_global_module_changed(self, module_name):
         # Filter other selectors
         mod_val = self.module_link_combo.currentData() # name or empty
         self.exec_workflow_selector.set_module_filter(mod_val)
-        # Filter teardown selectors
-        self.td_success_wf.set_module_filter(mod_val)
-        self.td_failure_wf.set_module_filter(mod_val)
-        self.td_timeout_wf.set_module_filter(mod_val)
 
     def _create_yaml_widget(self) -> QWidget:
         widget = QWidget()
@@ -805,31 +720,9 @@ class RunProfileDialog(QDialog):
             self.hooks_module_edit.setText(s.execution.hooks_module or "")
  
             
-        # Retry & Teardown
+        # Retry
         self.max_attempts_spin.setValue(s.retry.max_attempts)
         self.new_env_check.setChecked(s.retry.new_env_on_retry)
-        
-        # Teardown Actions & Workflows
-        for combo, val in [
-            (self.td_success_combo, s.teardown.on_success),
-            (self.td_failure_combo, s.teardown.on_failure),
-            (self.td_timeout_combo, s.teardown.on_timeout)
-        ]:
-            idx = combo.findData(val)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
-            else:
-                 combo.setCurrentText(val.value)
-                 
-        # Helper to load workflow string "mod/wf"
-        def load_wf(selector, value):
-            if value and "/" in value:
-                m, w = value.split("/", 1)
-                selector.set_value(m, w)
-        
-        load_wf(self.td_success_wf, s.teardown.success_workflow)
-        load_wf(self.td_failure_wf, s.teardown.failure_workflow)
-        load_wf(self.td_timeout_wf, s.teardown.timeout_workflow)
 
 
     def _build_run_profile_from_form(self) -> RunProfile:
@@ -914,27 +807,10 @@ class RunProfileDialog(QDialog):
             new_env_on_retry=self.new_env_check.isChecked(),
         )
         
-        # Helper get workflow str
-        def get_wf_str(selector):
-            m, w = selector.get_value()
-            return f"{m}/{w}" if m and w else None
-
-        teardown = TeardownPolicy(
-            on_success=self.td_success_combo.currentData() or TeardownAction.DESTROY,
-            success_workflow=get_wf_str(self.td_success_wf),
-            
-            on_failure=self.td_failure_combo.currentData() or TeardownAction.DESTROY,
-            failure_workflow=get_wf_str(self.td_failure_wf),
-            
-            on_timeout=self.td_timeout_combo.currentData() or TeardownAction.DESTROY,
-            timeout_workflow=get_wf_str(self.td_timeout_wf),
-        )
-        
         return RunProfile(
             resource=resource,
             execution=execution,
             retry=retry,
-            teardown=teardown,
         )
 
     def _form_to_yaml(self):

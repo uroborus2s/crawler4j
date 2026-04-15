@@ -101,7 +101,7 @@ class TestModelScaffoldInit:
         dependencies = pyproject["project"]["dependencies"]
         assert "scripts" not in pyproject["project"]
         assert all("playwright" not in dependency for dependency in dependencies)
-        assert "crawler4j-sdk>=1.1.0,<2.0.0" in dependencies
+        assert "crawler4j-sdk>=1.1.1,<2.0.0" in dependencies
 
     def test_init_model_interactive_wizard_runs_git_init_and_uv_sync(
         self,

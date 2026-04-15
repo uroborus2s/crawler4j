@@ -85,8 +85,8 @@
     "app_package_pyproject": "0.1.2.dev20260326",
     "runtime": "0.1.2.dev20260326",
     "git_tag_latest": "v0.1.1",
-    "sdk": "1.1.0",
-    "contracts": "1.1.0"
+    "sdk": "1.1.1",
+    "contracts": "1.1.1"
   },
   "entrypoints": {
     "actual_ui_entry": "uv run python -m src.ui.app",

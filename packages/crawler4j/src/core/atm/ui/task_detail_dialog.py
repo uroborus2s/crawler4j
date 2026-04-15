@@ -33,7 +33,7 @@ class JobDetailDialog(QDialog):
     """作业详情对话框。"""
 
     TYPE_TEXT = {
-        "batch": "定时批次",
+        "batch": "批次任务",
         "service": "持续保活",
     }
     
@@ -226,9 +226,12 @@ class JobDetailDialog(QDialog):
         self.runtime_label.setText(f"运行配置: {runtime_text} | 并发: {job.concurrency_target}")
         self.runtime_label.setToolTip(runtime_tooltip)
 
-        trigger_text = "启动后持续保活"
+        trigger_text = "手动启动后持续保活"
         if job.type.value == "batch":
-            trigger_text = job.trigger.cron_expr or "未配置 Cron"
+            if job.trigger.type.value == "manual":
+                trigger_text = "手动执行一次"
+            else:
+                trigger_text = f"Cron ({job.trigger.cron_expr})" if job.trigger.cron_expr else "未配置 Cron"
 
         try:
             run_profile = resolve_job_run_profile(job)

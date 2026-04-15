@@ -9,12 +9,13 @@ class _FakeTools:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     def has_tool(self, tool_name: str) -> bool:
-        return tool_name in {"db.list_records", "captcha.match_slider"}
+        return tool_name in {"db.list_records", "captcha.match_slider", "env.set_proxy"}
 
     def list_tools(self) -> list[ToolSpec]:
         return [
             ToolSpec(name="captcha.match_slider", description="识别滑块验证码缺口位置"),
             ToolSpec(name="db.list_records", description="读取模块数据集"),
+            ToolSpec(name="env.set_proxy", description="为当前环境设置代理", is_async=True),
         ]
 
     def call(self, tool_name: str, /, **kwargs):
@@ -53,10 +54,17 @@ def test_tools_capability_calls_core_extensions():
     fake_tools = _FakeTools()
 
     assert fake_tools.has_tool("db.list_records") is True
-    assert [tool.name for tool in fake_tools.list_tools()] == [
+    specs = fake_tools.list_tools()
+    assert [tool.name for tool in specs] == [
         "captcha.match_slider",
         "db.list_records",
+        "env.set_proxy",
     ]
+    assert {tool.name: tool.is_async for tool in specs} == {
+        "captcha.match_slider": False,
+        "db.list_records": False,
+        "env.set_proxy": True,
+    }
 
     ctx = TaskContext(env_id=1, task_name="demo", tools=fake_tools)
     result = ctx.tools.call("db.list_records", dataset="orders")

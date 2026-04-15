@@ -116,30 +116,27 @@ class ModuleAssembler:
             except Exception as e:
                 logger.warning(f"Failed to load runtime extensions: {e}")
 
-    async def _run_task_script(self, script_cls: Type[TaskScript], ctx: TaskContext) -> TaskResult:
-        script = script_cls()
-        await script.on_init(ctx)
-        try:
-            result = await script.execute(ctx)
-        except Exception as error:
-            await script.on_error(ctx, error)
-            raise
-        finally:
-            await script.on_cleanup(ctx)
-
+    @staticmethod
+    def _normalize_result_payload(result: object) -> TaskResult:
         if isinstance(result, TaskResult):
             return result
-        return TaskResult.ok(data=result)
+        if result is None:
+            return TaskResult.ok()
+        if isinstance(result, dict):
+            return TaskResult.ok(data=result)
+        return TaskResult.ok(data={"value": result})
+
+    async def _run_task_script(self, script_cls: Type[TaskScript], ctx: TaskContext) -> TaskResult:
+        script = script_cls()
+        result = await script.execute(ctx)
+        return self._normalize_result_payload(result)
 
     async def _run_task_flow(self, flow_cls: Type[TaskFlow], ctx: TaskContext) -> TaskResult:
         flow = flow_cls()
-        try:
-            await flow.run(ctx)
-            await flow.on_complete(ctx)
-        except Exception as error:
-            await flow.on_error(ctx, error)
-            raise
-        return TaskResult.ok(data=dict(ctx.state))
+        result = await flow.run(ctx)
+        if result is None:
+            return TaskResult.ok(data=dict(ctx.state))
+        return self._normalize_result_payload(result)
 
     async def _subtask_executor(self, task_name: str, ctx: TaskContext) -> TaskResult:
         if task_name not in self.task_scripts:

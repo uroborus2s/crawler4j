@@ -13,7 +13,7 @@ uv run crawler4j add-ui
 ```
 
 各命令的真实作用如下。
-当前 CLI 生成的新模块项目默认面向 `crawler4j-sdk 1.1.x`：模块项目依赖会落到 `>=1.1.0,<3.0.0`，`module.yaml.sdk_version_range` 也会从 `>=1.1.0` 起步。
+当前 CLI 生成的新模块项目默认面向 `crawler4j-sdk 1.1.x`：模块项目依赖会落到 `>=1.1.1,<2.0.0`，`module.yaml.sdk_version_range` 也会从 `>=1.1.1` 起步。
 
 如果你是第一次接触这些命令，可以把它们理解成“在标准模块项目上继续补结构的工具”，而不是“随便在哪个目录都能用的通用命令”。
 
@@ -213,7 +213,7 @@ class DashboardPage(QWidget):
 在打包 `.zip` 提交给用户或安装到正式环境前，请依次确认以下 6 项：
 
 1. **[ ] 目录契约**：模块目录名、`module.yaml.name` 和包名（`__init__.py` 所在目录）必须完全一致。
-2. **[ ] 版本范围**：`module.yaml` 中的 `sdk_version_range` 必须设置为 `>=1.1.0`。
+2. **[ ] 版本范围**：`module.yaml` 中的 `sdk_version_range` 必须设置为 `>=1.1.1`。
 3. **[ ] 依赖孤立**：确保所有第三方库已在 `pyproject.toml` 中声明，且没有硬编码任何本地绝对路径。
 4. **[ ] 接口合规**：代码中已彻底删除 `DataService`、`ctx.db.storage` 和直接依赖 `ctx.db` 字段的旧接口。
 5. **[ ] 停止响应**：长循环任务中是否已调用 `ctx.should_stop()` 检查停止信号？

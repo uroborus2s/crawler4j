@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from crawler4j_contracts import EnvAction, TaskResult, TaskSignal
 
 from src.core.atm.dispatcher import TaskDispatcher
 from src.core.atm.models import Job, Task, TaskStatus
@@ -57,10 +58,14 @@ def _build_dispatcher(env: Environment, lease: EnvLease) -> TaskDispatcher:
     dispatcher.repo = SimpleNamespace(save_task=AsyncMock())
     dispatcher.rem = SimpleNamespace(
         create_env=AsyncMock(return_value=env),
-        lease_manager=SimpleNamespace(acquire=AsyncMock(return_value=lease)),
+        lease_manager=SimpleNamespace(
+            acquire=AsyncMock(return_value=lease),
+            get_lease=AsyncMock(return_value=lease),
+        ),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=env),
         release=AsyncMock(return_value=True),
+        release_keep_alive=AsyncMock(return_value=True),
         destroy_env=AsyncMock(return_value=True),
     )
     return dispatcher
@@ -91,6 +96,7 @@ async def test_dispatcher_calls_success_hooks_and_merges_prepare_env(monkeypatch
     create_config = dispatcher.rem.create_env.await_args.kwargs["config"]
     assert create_config["creation_params"]["groups"] == ["default"]
     assert create_config["creation_params"]["fingerprint"]["randomize_all"] is True
+    dispatcher.rem.start_env.assert_not_awaited()
 
     hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
     assert hook_names == ["prepare_env", "init_env", "before_run", "on_success", "on_cleanup"]
@@ -160,7 +166,7 @@ async def test_dispatcher_cleans_up_created_env_when_acquisition_fails(monkeypat
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
     dispatcher = _build_dispatcher(env, lease)
-    dispatcher.rem.start_env = AsyncMock(return_value=False)
+    dispatcher.rem.lease_manager.acquire = AsyncMock(side_effect=RuntimeError("lease failed"))
 
     task = Task(id="task-21", job_id="job-21")
     job = Job(id="job-21", name="job", run_profile=run_profile)
@@ -168,9 +174,71 @@ async def test_dispatcher_cleans_up_created_env_when_acquisition_fails(monkeypat
     await dispatcher._run_logic(task, job)
 
     assert task.status == TaskStatus.FAILED
-    dispatcher.rem.release.assert_awaited_once_with(lease)
+    dispatcher.rem.release.assert_not_awaited()
     dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
     module_service.run_module.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_confirms_waiting_task_and_runs_cleanup(monkeypatch):
+    run_profile = _build_run_profile()
+    env, lease = _build_env()
+    cleanup_env_actions: list[dict[str, object]] = []
+
+    async def hook(module_name, hook_name, context, *args):
+        if hook_name == "on_cleanup":
+            cleanup_env_actions.append(dict(context.runtime.get("env_action") or {}))
+        return None
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(
+            return_value=TaskResult.ok(
+                message="等待用户确认",
+                signal=TaskSignal.wait_for_confirmation(
+                    message="等待用户确认",
+                    env_action=EnvAction.KEEP_ALIVE,
+                ),
+            )
+        ),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+
+    monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
+
+    dispatcher = _build_dispatcher(env, lease)
+    task = Task(id="task-21", job_id="job-21")
+    dispatcher.repo.get_task = AsyncMock(return_value=task)
+    job = Job(id="job-21", name="job", run_profile=run_profile)
+
+    await dispatcher._run_logic(task, job)
+
+    assert task.status == TaskStatus.WAITING_CONFIRMATION
+    assert task.id in dispatcher._waiting_tasks
+    dispatcher.rem.release.assert_not_awaited()
+    dispatcher.rem.release_keep_alive.assert_not_awaited()
+    dispatcher.rem.destroy_env.assert_not_awaited()
+
+    confirmed = await dispatcher.confirm_task(task.id, success=False, message="黑号")
+
+    assert confirmed is True
+    assert task.status == TaskStatus.FAILED
+    assert task.error == "黑号"
+    assert task.id not in dispatcher._waiting_tasks
+    dispatcher.rem.lease_manager.get_lease.assert_awaited_once_with(lease.id)
+    dispatcher.rem.release_keep_alive.assert_awaited_once_with(lease)
+    dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
+    assert cleanup_env_actions == [
+        {
+            "action": "destroy",
+            "env_id": env.id,
+            "success": True,
+            "released": True,
+            "destroyed": True,
+        }
+    ]
+
+    hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
+    assert hook_names == ["prepare_env", "init_env", "before_run", "on_failure", "on_cleanup"]
 
 
 def test_dispatcher_publish_task_terminal_event(monkeypatch):

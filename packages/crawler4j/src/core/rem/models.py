@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from src.core.atm.run_profile import ComparisonOp, LogicOp, MatchCondition, MatchGroup
 from src.core.rem.handle import BrowserHandle
 
 
@@ -59,13 +60,6 @@ class ProxyMode(StrEnum):
     STATIC = "static"       # 固定代理地址
     POOL = "pool"           # 从 IP 池自动分配
     SYSTEM = "system"       # 使用系统代理
-
-
-class PostCreateAction(StrEnum):
-    """环境创建后的操作。"""
-    NONE = "none"           # 仅创建记录，不启动
-    TEST = "test"           # 启动并验证连接（默认）
-    WORKFLOW = "workflow"   # 启动并执行指定工作流
 
 
 @dataclass
@@ -306,6 +300,8 @@ class EnvRequirement:
     kind: EnvKind = EnvKind.BROWSER
     capabilities: set[str] = field(default_factory=set)
     labels: dict[str, str] = field(default_factory=dict)
+    provider: str = ""
+    match_rules: MatchGroup | None = None
     proxy_config: ProxyConfig | None = None  # 允许创建时指定代理
     task_run_id: str = ""
     timeout: int = 60
@@ -319,8 +315,101 @@ class EnvRequirement:
         # 能力匹配（需求的能力必须是环境能力的子集）
         if not self.capabilities.issubset(env.capabilities):
             return False
+
+        if self.provider and env.provider != self.provider:
+            return False
+
+        if self.match_rules and not self._match_group(self.match_rules, env):
+            return False
         
         return True
+
+    def _match_group(self, group: MatchGroup, env: Environment) -> bool:
+        if not group.conditions:
+            return True
+
+        results: list[bool] = []
+        for condition in group.conditions:
+            if isinstance(condition, MatchGroup):
+                results.append(self._match_group(condition, env))
+            else:
+                results.append(self._match_condition(condition, env))
+
+        if group.logic == LogicOp.OR:
+            return any(results)
+        return all(results)
+
+    def _match_condition(self, condition: MatchCondition, env: Environment) -> bool:
+        actual = self._resolve_field(env, condition.field)
+        expected = condition.value
+        op = condition.op
+
+        if op == ComparisonOp.EQ:
+            return actual == expected
+        if op == ComparisonOp.NEQ:
+            return actual != expected
+        if op == ComparisonOp.CONTAINS:
+            if actual is None:
+                return False
+            if isinstance(actual, (list, tuple, set)):
+                return expected in actual
+            return str(expected) in str(actual)
+        if op == ComparisonOp.IN:
+            if isinstance(expected, str):
+                expected_values = [part.strip() for part in expected.split(",") if part.strip()]
+                return str(actual) in expected_values
+            if isinstance(expected, (list, tuple, set)):
+                return actual in expected
+            return False
+
+        left_num = self._coerce_number(actual)
+        right_num = self._coerce_number(expected)
+        if left_num is None or right_num is None:
+            return False
+        if op == ComparisonOp.GT:
+            return left_num > right_num
+        if op == ComparisonOp.GTE:
+            return left_num >= right_num
+        if op == ComparisonOp.LT:
+            return left_num < right_num
+        if op == ComparisonOp.LTE:
+            return left_num <= right_num
+        return False
+
+    def _resolve_field(self, env: Environment, field_path: str) -> Any:
+        if not field_path:
+            return None
+
+        mapping: dict[str, Any] = {
+            "id": env.id,
+            "name": env.name,
+            "provider": env.provider,
+            "status": env.status.value if env.status else None,
+            "kind": env.kind.value if env.kind else None,
+            "external_id": env.external_id,
+            "capabilities": list(env.capabilities),
+            "proxy": env.proxy_config.to_dict() if env.proxy_config else None,
+        }
+
+        current: Any = mapping
+        for part in field_path.split("."):
+            if current is None:
+                return None
+            if isinstance(current, dict):
+                current = current.get(part)
+            else:
+                current = getattr(current, part, None)
+        return current
+
+    def _coerce_number(self, value: Any) -> float | None:
+        if isinstance(value, bool):
+            return 1.0 if value else 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        try:
+            return float(str(value))
+        except (TypeError, ValueError):
+            return None
 
 
 class EnvError(Exception):

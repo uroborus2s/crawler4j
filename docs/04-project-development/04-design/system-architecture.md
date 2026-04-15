@@ -36,11 +36,11 @@ Maintainer
 ## 2. 核心运行链
 
 1. `src.ui.app:main` 初始化数据库、日志、事件循环与核心服务；其源码位于 `packages/crawler4j/src/ui/app.py`
-2. REM 管理运行环境与浏览器资源
-3. ATM 负责任务调度、派发与执行
+2. REM 管理运行环境生命周期与浏览器资源，负责 create/open/connect/stop/destroy，不负责任务工作流编排
+3. ATM 负责任务调度、派发、生命周期 hooks 与任务终态收口
 4. MMS 负责发现、解析、校验和执行模块
-5. 模块通过 `crawler4j_sdk` 暴露任务、工作流与 hooks
-6. Contracts 负责 Core 与 SDK 共享数据结构，模块侧通过 `TaskContext.tools` 访问 Core 扩展能力
+5. 模块通过 `crawler4j_sdk` 暴露任务、工作流，并通过 `TaskSignal` 向 ATM 请求流程动作
+6. Contracts 负责 Core 与 SDK 共享数据结构，模块侧通过 `TaskContext.tools` 访问 Core 扩展能力，通过 `TaskContext.runtime` 读取运行态信息
 
 ## 3. 依赖方向与边界
 
@@ -57,6 +57,8 @@ Maintainer
 - Root app package 的真实桌面入口位于 `packages/crawler4j/src/ui/app.py`
 - `packages/crawler4j-sdk` 与 `packages/crawler4j-contracts` 已经具备独立包形态
 - `TaskContext` 的宿主扩展能力已收敛到 `ctx.tools.call("<namespace>.<action>", **kwargs)` 单入口
+- 模块生命周期 hooks 已收敛到 ATM 调度的 `module_runtime.py`；`TaskScript` / `TaskFlow` 本身只保留单入口方法
+- `TaskSignal` 已成为模块到 ATM 的正式流程控制通道；等待人工确认、失败后销毁环境等行为不再通过散落回调或 UI 清理策略表达
 - 外部模块运行时已收敛到 MMS + ModuleAssembler 单一执行链，不再保留 `src.automation.*` 旧兼容包
 - 宿主源码已不再承载业务辅助逻辑或业务模型；酒店匹配、短信平台与本地验证码回退逻辑以模块自带实现为准
 - 当前事实以当前代码和验证结果为准，不再保留并行的旧设计正文
@@ -91,3 +93,4 @@ Maintainer
 | 2026-03-26 | 基于当前仓库事实重建总体架构摘要 | Codex |
 | 2026-03-26 | 吸收旧总体架构/SRS 的层次与边界结论 | Codex |
 | 2026-04-15 | 补记 `TaskContext.tools` 统一工具接口已成为宿主扩展单入口 | Codex |
+| 2026-04-15 | 补记 ATM hooks / `TaskSignal` / `WAITING_CONFIRMATION` 已成为正式任务生命周期链 | Codex |

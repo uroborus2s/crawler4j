@@ -1,4 +1,4 @@
-# 4.5 Core 注入能力 API 参考 (SDK 1.1.0)
+# 4.5 Core 注入能力 API 参考 (SDK 1.1.1)
 
 本页提供 `TaskContext.tools` 的完整 API 参考。这是模块与宿主 (Core) 交互的唯一官方扩展通道。
 
@@ -7,7 +7,7 @@
 | 方法 | 说明 |
 |---|---|
 | `has_tool(name)` | 检查某个工具是否存在 |
-| `list_tools()` | 列出当前可用工具及其说明 |
+| `list_tools()` | 列出当前可用工具元数据；每项都是 `ToolSpec(name, description, is_async)` |
 | `call(name, **kwargs)` | 调用 Core 工具；异步工具返回 awaitable，需要 `await` |
 
 ---
@@ -85,20 +85,77 @@ await ctx.tools.call("env.set_proxy", env_id=ctx.env_id, proxy_value="http://127
 |---|---|
 | `get_config(key, default=None)` | 安全获取模块配置（来自 `module.yaml` 或 UI 输入）。 |
 | `logger.info(msg)` | 模块专用日志，由 Core 统一收集并在控制台/UI 展示。 |
-| `wait(seconds)` | 异步等待，支持框架级停止请求检测。 |
+| `wait(seconds)` | 纯异步等待；不会自动提前响应停止请求。 |
 | `screenshot(name)` | 捕获当前浏览器快照并自动保存至指定目录。 |
 | `should_stop()` | 检查宿主是否发出了停止信号，长循环任务应主动检测。 |
+| `emit_signal(signal)` | 向 ATM 发出结构化流程信号。 |
+
+`TaskContext` 还提供 `ctx.runtime: dict[str, Any]`，用于暴露 ATM 写入的运行态元数据，例如：
+
+- `final_status`
+- `task_error`
+- `task_result`
+- `task_signal`
+- `env_action`
+
+规则：
+
+- `on_cleanup` 会在环境动作之后执行
+- `on_cleanup` 本身不代表环境一定已经被删除
+- 是否删除环境应以 `ctx.runtime["env_action"]` 为准
 
 ---
 
-## 8. 标准返回类型 `TaskResult`
+## 8. `TaskSignal`
 
 ```python
-from crawler4j_sdk import TaskResult
+from crawler4j_sdk import EnvAction, TaskSignal
+
+TaskSignal.fail(
+    message="检测到黑号",
+    error="black_account",
+    env_action=EnvAction.DESTROY,
+)
+
+TaskSignal.wait_for_confirmation(
+    message="请人工确认结果",
+    env_action=EnvAction.KEEP_ALIVE,
+    payload={"review_type": "account"},
+)
+```
+
+当前正式动作：
+
+- `succeed`
+- `fail`
+- `cancel`
+- `wait_for_confirmation`
+
+`wait_for_confirmation` 会让任务停在 `WAITING_CONFIRMATION`；ATM 暂不执行终态 hooks 或环境清理，直到后续确认成功或失败。
+
+---
+
+## 9. 标准返回类型 `TaskResult`
+
+```python
+from crawler4j_sdk import EnvAction, TaskResult, TaskSignal
 
 # 成功
 return TaskResult(success=True, message="完成", data={"count": 10})
 
 # 失败
 return TaskResult(success=False, message="登录失败")
+
+# 携带流程信号
+return TaskResult.fail(
+    message="检测到黑号",
+    error="black_account",
+    signal=TaskSignal.fail(
+        message="检测到黑号",
+        error="black_account",
+        env_action=EnvAction.DESTROY,
+    ),
+)
 ```
+
+`TaskResult.signal` 是模块把流程控制权交给 ATM 的正式方式。不要把“销毁环境”“等待确认”之类的控制语义塞进随意的 `data` 字段里。

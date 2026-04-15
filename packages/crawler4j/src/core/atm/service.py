@@ -41,12 +41,14 @@ class TaskService:
         if job_type == JobType.SERVICE:
             return TriggerConfig(type=TriggerType.MANUAL, cron_expr=None)
 
+        if trigger.type == TriggerType.MANUAL:
+            return TriggerConfig(type=TriggerType.MANUAL, cron_expr=None)
         if trigger.type != TriggerType.CRON or not trigger.cron_expr:
-            raise ValueError("定时批次作业必须配置有效的 Cron 表达式")
+            raise ValueError("批次作业必须配置为执行一次或有效的 Cron 表达式")
         try:
             CronTrigger.from_crontab(trigger.cron_expr)
         except ValueError as e:
-            raise ValueError(f"定时批次作业 Cron 表达式无效: {e}") from e
+            raise ValueError(f"批次作业 Cron 表达式无效: {e}") from e
 
         return trigger
 
@@ -122,6 +124,7 @@ class TaskService:
         job = await self._repo.get_job(job_id)
         if not job:
             return False
+        previous_state = job.state
 
         if name is not None:
             job.name = name
@@ -138,13 +141,17 @@ class TaskService:
 
         job.trigger = self._normalize_trigger(job.type, job.trigger)
         self._validate_runtime_source(job.run_profile)
+        if job.type == JobType.BATCH and job.trigger.type == TriggerType.MANUAL:
+            job.state = JobState.PAUSED
 
         job.updated_at = int(time.time())
 
         await self._repo.save_job(job)
-        
-        # 触发该 Job 的一次定向调和，保证配置即时生效
-        if job.state == JobState.ACTIVE:
+
+        if previous_state == JobState.ACTIVE and job.state != JobState.ACTIVE:
+            await self._controller.request_job_stop(job.id)
+        elif job.state == JobState.ACTIVE:
+            # 触发该 Job 的一次定向调和，保证配置即时生效
             asyncio.create_task(self._controller.reconcile_job(job.id))
 
         logger.info(f"[ATM] Updated job: {job.id}")
@@ -158,11 +165,40 @@ class TaskService:
         """获取作业详情。"""
         return await self._repo.get_job(job_id)
 
+    async def run_job_once(self, job_id: str) -> bool:
+        """立即执行一次手动批次作业，不改变作业的长期调度状态。"""
+        job = await self._repo.get_job(job_id)
+        if not job:
+            return False
+        if job.type != JobType.BATCH or job.trigger.type != TriggerType.MANUAL:
+            raise ValueError("只有“执行一次”模式的批次任务支持手动执行。")
+
+        try:
+            resolve_job_run_profile(job)
+            await self._controller.ensure_job_runtime_ready(job.id)
+        except Exception as e:
+            logger.error(f"[ATM] Run-once blocked by runtime precheck ({job.id}): {e}")
+            return False
+
+        current_count = await self._repo.count_active_tasks(job.id)
+        if current_count > 0:
+            logger.info(
+                f"[ATM] Job {job.id} run-once ignored because {current_count} tasks are still active"
+            )
+            return False
+
+        logger.info(f"[ATM] Job run once: {job.id} (concurrency={job.concurrency_target})")
+        for _ in range(job.concurrency_target):
+            await self._controller.dispatcher.dispatch(job)
+        return True
+
     async def start_job(self, job_id: str) -> bool:
         """启动/激活作业。"""
         job = await self._repo.get_job(job_id)
         if not job:
             return False
+        if job.type == JobType.BATCH and job.trigger.type == TriggerType.MANUAL:
+            return await self.run_job_once(job_id)
 
         try:
             resolve_job_run_profile(job)
@@ -206,6 +242,14 @@ class TaskService:
     async def get_task(self, task_id: str) -> Task | None:
         """获取任务实例详情。"""
         return await self._repo.get_task(task_id)
+
+    async def confirm_task_success(self, task_id: str, message: str = "") -> bool:
+        """确认等待人工确认的任务成功完成。"""
+        return await self._controller.dispatcher.confirm_task(task_id, success=True, message=message)
+
+    async def confirm_task_failure(self, task_id: str, message: str = "") -> bool:
+        """确认等待人工确认的任务失败。"""
+        return await self._controller.dispatcher.confirm_task(task_id, success=False, message=message)
 
 
 # Global Singleton

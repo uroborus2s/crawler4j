@@ -176,7 +176,7 @@ module.yaml.name
 如果你在升级旧模块，再补两步：
 
 1. 删除 `DataService` 导入和专用 `ctx.db` 依赖
-2. 把 `module.yaml.sdk_version_range` 改成 `>=1.1.0`
+2. 把 `module.yaml.sdk_version_range` 改成 `>=1.1.1`
 
 ## 最后给小白的一条建议
 

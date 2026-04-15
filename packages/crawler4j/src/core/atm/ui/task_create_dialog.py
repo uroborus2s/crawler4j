@@ -65,7 +65,7 @@ class TaskCreateDialog(QDialog):
 
         # 2. 作业类型
         self.type_combo = QComboBox()
-        self.type_combo.addItem("定时批次", JobType.BATCH.value)
+        self.type_combo.addItem("批次任务", JobType.BATCH.value)
         self.type_combo.addItem("持续保活", JobType.SERVICE.value)
         self.type_combo.currentIndexChanged.connect(self._on_job_type_changed)
         form.addRow("作业模式:", self.type_combo)
@@ -107,7 +107,7 @@ class TaskCreateDialog(QDialog):
 
         # 5. 触发方式
         self.trigger_combo = QComboBox()
-        self.trigger_combo.addItem("手动触发", "manual")
+        self.trigger_combo.addItem("执行一次", TriggerType.MANUAL.value)
         self.trigger_combo.addItem("Cron 定时", TriggerType.CRON.value)
         self.trigger_combo.currentIndexChanged.connect(self._on_trigger_changed)
         form.addRow("触发方式:", self.trigger_combo)
@@ -194,8 +194,12 @@ class TaskCreateDialog(QDialog):
         
         # Trigger
         self._on_job_type_changed(self.type_combo.currentIndex())
+        trigger_index = self.trigger_combo.findData(job.trigger.type.value)
+        if trigger_index >= 0:
+            self.trigger_combo.setCurrentIndex(trigger_index)
         if job.trigger.type == TriggerType.CRON:
             self.cron_edit.setText(job.trigger.cron_expr or "")
+        self._on_trigger_changed(self.trigger_combo.currentIndex())
 
     def _edit_inline_run_profile(self):
         dialog = RunProfileDialog(run_profile=self._inline_run_profile, parent=self)
@@ -224,27 +228,49 @@ class TaskCreateDialog(QDialog):
         self.inline_config_btn.setText("重新编辑运行模板")
 
     def _on_trigger_changed(self, index: int):
-        self.trigger_stack.setCurrentIndex(index)
+        del index
+        is_cron = self.trigger_combo.currentData() == TriggerType.CRON.value
+        self.trigger_stack.setCurrentIndex(1 if is_cron else 0)
+        is_batch = self.type_combo.currentData() == JobType.BATCH.value
+        self.cron_edit.setEnabled(is_batch and is_cron)
+        self._update_trigger_hint()
+
+    def _update_trigger_hint(self):
+        is_batch = self.type_combo.currentData() == JobType.BATCH.value
+        if not is_batch:
+            self.trigger_hint.setText("持续保活模式会在你点击启动后持续维持 N 个运行中的任务，直到点击暂停。")
+            return
+
+        if self.trigger_combo.currentData() == TriggerType.CRON.value:
+            self.trigger_hint.setText("Cron 批次模式会在 Cron 命中时一次性启动 N 个任务；若上一批仍在运行，本次触发将跳过。")
+            return
+
+        self.trigger_hint.setText("执行一次模式会在你点击按钮后立刻启动一批任务；若上一批仍在运行，本次触发不会再次发起。")
 
     def _on_job_type_changed(self, index: int):
+        del index
         job_type = self.type_combo.currentData()
         is_batch = job_type == JobType.BATCH.value
 
-        trigger_value = TriggerType.CRON.value if is_batch else TriggerType.MANUAL.value
-        trigger_index = self.trigger_combo.findData(trigger_value)
-        if trigger_index >= 0:
-            self.trigger_combo.blockSignals(True)
-            self.trigger_combo.setCurrentIndex(trigger_index)
-            self.trigger_combo.blockSignals(False)
-
-        self.trigger_combo.setEnabled(False)
-        self._on_trigger_changed(trigger_index if trigger_index >= 0 else 0)
-        self.cron_edit.setEnabled(is_batch)
+        self.trigger_combo.setItemText(0, "执行一次" if is_batch else "手动启动")
 
         if is_batch:
-            self.trigger_hint.setText("定时批次模式会在 Cron 命中时一次性启动 N 个任务；若上一批仍在运行，本次触发将跳过。")
+            self.trigger_combo.setEnabled(True)
+            trigger_value = self.trigger_combo.currentData() or TriggerType.MANUAL.value
+            if trigger_value not in {TriggerType.MANUAL.value, TriggerType.CRON.value}:
+                trigger_value = TriggerType.MANUAL.value
         else:
-            self.trigger_hint.setText("持续保活模式会在你点击启动后持续维持 N 个运行中的任务，直到点击暂停。")
+            trigger_value = TriggerType.MANUAL.value
+            self.trigger_combo.setEnabled(False)
+
+        trigger_index = self.trigger_combo.findData(trigger_value)
+        if trigger_index < 0:
+            trigger_index = 0
+
+        self.trigger_combo.blockSignals(True)
+        self.trigger_combo.setCurrentIndex(trigger_index)
+        self.trigger_combo.blockSignals(False)
+        self._on_trigger_changed(trigger_index)
 
     def _on_create(self):
         """创建任务。"""
@@ -256,8 +282,12 @@ class TaskCreateDialog(QDialog):
             QMessageBox.warning(self, "配置不完整", "请先配置任务运行模板。")
             return
 
-        if self.type_combo.currentData() == JobType.BATCH.value and not self.cron_edit.text().strip():
-            QMessageBox.warning(self, "配置不完整", "定时批次模式必须填写 Cron 表达式。")
+        if (
+            self.type_combo.currentData() == JobType.BATCH.value
+            and self.trigger_combo.currentData() == TriggerType.CRON.value
+            and not self.cron_edit.text().strip()
+        ):
+            QMessageBox.warning(self, "配置不完整", "Cron 批次模式必须填写 Cron 表达式。")
             self.cron_edit.setFocus()
             return
 
@@ -266,7 +296,8 @@ class TaskCreateDialog(QDialog):
     def get_job_data(self) -> dict:
         """获取 Job 创建数据。"""
         job_type = self.type_combo.currentData()
-        if job_type == JobType.BATCH.value:
+        trigger_type = self.trigger_combo.currentData()
+        if job_type == JobType.BATCH.value and trigger_type == TriggerType.CRON.value:
             trigger_config = {
                 "type": TriggerType.CRON.value,
                 "cron_expr": self.cron_edit.text().strip()

@@ -32,7 +32,7 @@ uvx --from crawler4j-sdk crawler4j init-model hotel_demo --defaults --no-git --n
 
 1. 已删除 `DataService` 导入
 2. 已把旧 `ctx.db.storage / accounts / tasks` 写法改成 `ctx.tools.call("db.*", ...)`
-3. 已把 `module.yaml.sdk_version_range` 改到 `>=1.1.0`
+3. 已把 `module.yaml.sdk_version_range` 改到 `>=1.1.1`
 
 ### 这一步做完后你应该看到什么
 
@@ -53,7 +53,7 @@ uv run crawler4j add-workflow sync_hotels
 
 ## 第 2.5 步：编写你的第一个业务逻辑
 
-打开 `tasks/fetch_hotels.py`，你会看到脚手架生成的模板。将其修改为以下符合 **SDK 1.1.0** 规范的简化示例：
+打开 `tasks/fetch_hotels.py`，你会看到脚手架生成的模板。将其修改为以下符合 **SDK 1.1.1** 规范的简化示例：
 
 ```python
 from crawler4j_sdk import TaskScript, TaskResult
@@ -73,7 +73,7 @@ class FetchHotelsTask(TaskScript):
             {"id": "h2", "name": f"{city} 示例酒店 B", "price": 800},
         ]
         
-        # 3. 保存到模块数据集 (SDK 1.1.0 标准用法)
+        # 3. 保存到模块数据集 (SDK 1.1.1 标准用法)
         ctx.tools.call("db.replace_records", dataset="hotels", records=hotels)
 
         # 4. 记录当前抓取状态（如下次翻页游标）

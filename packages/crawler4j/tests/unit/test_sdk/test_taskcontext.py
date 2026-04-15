@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from crawler4j_sdk import TaskContext, TaskResult, ToolSpec, ToolsCapability
+from crawler4j_sdk import EnvAction, TaskContext, TaskResult, TaskSignal, ToolSpec, ToolsCapability
 
 # === 测试夹具 ===
 
@@ -51,6 +51,7 @@ class TestTaskContextInjection:
         assert basic_context.task_name == "test_task"
         assert isinstance(basic_context.config, dict)
         assert isinstance(basic_context.state, dict)
+        assert isinstance(basic_context.runtime, dict)
         assert isinstance(basic_context.captured_data, list)
     
     def test_logger_injection(self, basic_context: TaskContext):
@@ -179,6 +180,36 @@ class TestTaskContextStopControl:
         basic_context.request_stop()
         
         assert basic_context.should_stop() is True
+
+
+class TestTaskContextSignals:
+    """测试任务信号。"""
+
+    def test_emit_signal_requires_allowed_phase(self, basic_context: TaskContext):
+        with pytest.raises(RuntimeError, match="当前阶段不允许发出任务信号"):
+            basic_context.emit_signal(TaskSignal.fail(message="失败"))
+
+    def test_emit_signal_records_runtime_payload(self, basic_context: TaskContext):
+        basic_context.set_signal_phase("run_module")
+
+        signal = TaskSignal.wait_for_confirmation(
+            message="等待人工确认",
+            payload={"ticket_id": "T-1"},
+            env_action=EnvAction.KEEP_ALIVE,
+        )
+        basic_context.emit_signal(signal)
+
+        assert basic_context.get_signal() == signal
+        assert basic_context.runtime["task_signal"]["action"] == "wait_for_confirmation"
+
+    def test_clear_signal_removes_pending_signal(self, basic_context: TaskContext):
+        basic_context.set_signal_phase("before_run")
+        basic_context.emit_signal(TaskSignal.succeed(message="完成"))
+
+        basic_context.clear_signal()
+
+        assert basic_context.get_signal() is None
+        assert "task_signal" not in basic_context.runtime
 
 
 # === 子任务调用测试 ===

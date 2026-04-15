@@ -12,6 +12,49 @@ from src.core.rem.handle import BrowserHandle
 from src.core.rem.models import Environment, EnvKind
 
 
+def _normalize_cdp_endpoint(value: Any) -> str | None:
+    """把各类浏览器调试返回值归一为 Playwright 可接受的 CDP 入口。"""
+    if value is None:
+        return None
+
+    if isinstance(value, int):
+        return f"http://localhost:{value}"
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    if text.startswith(("ws://", "wss://", "http://", "https://")):
+        return text
+
+    if text.isdigit():
+        return f"http://localhost:{text}"
+
+    if ":" in text:
+        return f"http://{text}"
+
+    return None
+
+
+def _extract_cdp_endpoint(payload: dict[str, Any]) -> str | None:
+    """从不同宿主 API 返回结构中提取 CDP 入口。"""
+    for key in (
+        "ws",
+        "wsUrl",
+        "ws_url",
+        "webSocketDebuggerUrl",
+        "debuggingPort",
+        "debugPort",
+        "remoteDebuggingPort",
+        "port",
+    ):
+        if key in payload:
+            endpoint = _normalize_cdp_endpoint(payload.get(key))
+            if endpoint:
+                return endpoint
+    return None
+
+
 class BaseProvider(ABC):
     """环境提供者抽象基类。
     
@@ -363,7 +406,7 @@ class BitBrowserClient:
             raise RuntimeError(f"BitBrowser Open Error: {data.get('msg')}")
         
         result_data = data.get("data", {})
-        ws_url = result_data.get("ws")
+        ws_url = _extract_cdp_endpoint(result_data)
         if not ws_url:
             raise KeyError(f"Missing 'ws' in BitBrowser API response: {result_data}")
         
@@ -496,6 +539,7 @@ class BitBrowserProvider(BaseProvider):
 
         config = config or {}
         client = self._get_api_client()
+        creation_params = config.get("creation_params", {})
         
         # 使用 Manager 传入的 env_name（必须）
         name = config.get("env_name")
@@ -505,7 +549,7 @@ class BitBrowserProvider(BaseProvider):
             logger.warning("[BitBrowser] env_name not provided, using generated name")
         
         # 解析代理配置（仅 STATIC 和 NONE/SYSTEM）
-        proxy_data = config.get("proxy", {})
+        proxy_data = config.get("proxy") or creation_params.get("proxy") or {}
         proxy_mode = ProxyMode(proxy_data.get("mode", ProxyMode.NONE))
         
         bit_proxy = {"type": "noproxy"}  # 默认无代理
@@ -535,8 +579,10 @@ class BitBrowserProvider(BaseProvider):
         # 3. 提取额外创建参数 (params)
         # creation_params = config.get("config", {})  # Unused
         
-        group_id = config.get("group_id")
-        fingerprint = config.get("fingerprint")
+        group_id = config.get("group_id") or creation_params.get("group_id")
+        if not group_id and isinstance(creation_params.get("groups"), list) and creation_params["groups"]:
+            group_id = creation_params["groups"][0]
+        fingerprint = config.get("fingerprint") or creation_params.get("fingerprint")
 
         logger.info(f"[BitBrowser] Creating env '{name}' with proxy mode {proxy_mode}...")
         browser_id = await client.create_browser(
@@ -947,7 +993,7 @@ class VirtualBrowserClient:
         
         result_data = data.get("data", {})
 
-        ws_url = result_data.get("ws")
+        ws_url = _extract_cdp_endpoint(result_data)
         if not ws_url:
             raise KeyError(f"Missing 'ws' in VirtualBrowser API response: {result_data}")
         return ws_url

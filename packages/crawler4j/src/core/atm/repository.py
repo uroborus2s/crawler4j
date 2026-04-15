@@ -182,12 +182,17 @@ class TaskRepository:
         return await self._run_async(_do)
 
     async def count_active_tasks(self, job_id: str) -> int:
-        """统计某 Job 的活跃任务数 (PENDING + RUNNING)。"""
+        """统计某 Job 的活跃任务数。"""
         def _do():
             with get_connection(STATE_DB) as conn:
                 cursor = conn.execute(
-                    "SELECT COUNT(*) FROM tasks WHERE job_id = ? AND status IN (?, ?)",
-                    (job_id, TaskStatus.PENDING.value, TaskStatus.RUNNING.value)
+                    "SELECT COUNT(*) FROM tasks WHERE job_id = ? AND status IN (?, ?, ?)",
+                    (
+                        job_id,
+                        TaskStatus.PENDING.value,
+                        TaskStatus.RUNNING.value,
+                        TaskStatus.WAITING_CONFIRMATION.value,
+                    )
                 )
                 return cursor.fetchone()[0]
         return await self._run_async(_do)
@@ -197,19 +202,29 @@ class TaskRepository:
         def _do():
             with get_connection(STATE_DB) as conn:
                 cursor = conn.execute(
-                    "SELECT * FROM tasks WHERE job_id = ? AND status IN (?, ?) ORDER BY created_at ASC LIMIT ?",
-                    (job_id, TaskStatus.PENDING.value, TaskStatus.RUNNING.value, limit)
+                    "SELECT * FROM tasks WHERE job_id = ? AND status IN (?, ?, ?) ORDER BY created_at ASC LIMIT ?",
+                    (
+                        job_id,
+                        TaskStatus.PENDING.value,
+                        TaskStatus.RUNNING.value,
+                        TaskStatus.WAITING_CONFIRMATION.value,
+                        limit,
+                    )
                 )
                 return [self._row_to_task(row) for row in cursor.fetchall()]
         return await self._run_async(_do)
 
     async def get_running_tasks(self) -> List[Task]:
-        """获取所有处于 PENDING/RUNNING 状态的任务（重启恢复用）。"""
+        """获取所有处于未终态的任务（重启恢复用）。"""
         def _do():
             with get_connection(STATE_DB) as conn:
                 cursor = conn.execute(
-                    "SELECT * FROM tasks WHERE status IN (?, ?)",
-                    (TaskStatus.PENDING.value, TaskStatus.RUNNING.value),
+                    "SELECT * FROM tasks WHERE status IN (?, ?, ?)",
+                    (
+                        TaskStatus.PENDING.value,
+                        TaskStatus.RUNNING.value,
+                        TaskStatus.WAITING_CONFIRMATION.value,
+                    ),
                 )
                 return [self._row_to_task(row) for row in cursor.fetchall()]
         return await self._run_async(_do)

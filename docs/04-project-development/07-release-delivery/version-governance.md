@@ -7,7 +7,7 @@
 **上游输入：** `packages/crawler4j/pyproject.toml` | Git tag | 子包 `pyproject.toml`  
 **下游输出：** `release-notes.md` | `deployment-guide.md` | `.factory/project.json`  
 **关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `NFR-002`  
-**最后更新：** 2026-03-31  
+**最后更新：** 2026-04-15  
 
 ## 1. 规则
 
@@ -27,8 +27,8 @@
 | 根应用包版本 | `0.1.2.dev20260326` | 当前仓库 HEAD 的未发布开发版 |
 | 根应用运行时版本 | `0.1.2.dev20260326` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.1.1` | 最新已知正式发布 |
-| SDK | `1.1.0` | 当前工作区 SDK 版本；该版本统一切到 `TaskContext.tools` 扩展入口 |
-| Contracts | `1.1.0` | 当前工作区 Contracts 版本；承载统一 `tools` 契约 |
+| SDK | `1.1.1` | 当前工作区 SDK 版本；删除 `TaskFlow` / `TaskScript` 私有 callbacks，统一收敛到 ATM hooks + `TaskSignal` |
+| Contracts | `1.1.1` | 当前工作区 Contracts 版本；新增 `TaskSignal` / `EnvAction`，补充 `TaskContext.runtime` 与信号契约 |
 
 ## 3. 为什么这样定义
 
@@ -54,3 +54,4 @@
 | 2026-03-26 | 建立根应用 / 运行时 / tag / SDK / Contracts 的统一版本治理规则 | Codex |
 | 2026-03-31 | SDK 当前口径提升到 `2.0.0`，移除 `DataService` 兼容层 | Codex |
 | 2026-04-15 | SDK `1.1.0` / Contracts `1.1.0` 当前口径统一收敛到 `TaskContext.tools` | Codex |
+| 2026-04-15 | SDK / Contracts 当前工作区版本提升到 `1.1.1`，纳入 ATM hooks + `TaskSignal` 口径；注意该补丁版包含公开 API 删除风险 | Codex |

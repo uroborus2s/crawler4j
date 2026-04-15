@@ -15,7 +15,8 @@
 
 - 类属性：`name`、`display_name`、`description`
 - 方法：`run(ctx)`
-- 可选 hooks：`on_error(ctx, error)`、`on_complete(ctx)`
+
+`TaskFlow` 类本身不再提供官方 hooks。工作流层只有一个稳定入口 `run(ctx)`；模块级生命周期仍由 ATM 在 `module_runtime.py` 中调度。
 
 如果你是第一次看 `TaskFlow`，可以把它理解成“一个用 Python 写的流程编排器”。它主要负责决定：
 
@@ -42,6 +43,8 @@ class SyncHotelsWorkflow(TaskFlow):
         if not result:
             raise RuntimeError("fetch_hotels 执行失败")
 ```
+
+如果工作流内部需要做错误分支、收尾动作或阶段性回滚，请直接在 `run()` 里写清楚 `try / except / finally`，而不是再给 `TaskFlow` 维护第二套回调系统。
 
 写完以后，别忘了把它声明进 `module.yaml`：
 
@@ -129,6 +132,40 @@ while not ctx.should_stop():
 - 其它维护者更容易接手
 - 调试时更容易快速定位卡住位置
 - 出问题时更容易知道失败发生在哪一段
+
+## 工作流怎样让 ATM 接管流程动作
+
+`TaskFlow` 的职责是编排业务步骤，不是直接操作运行环境。如果流程里需要：
+
+- 等待用户确认
+- 明确标记成功 / 失败 / 取消
+- 指定任务结束后的环境动作
+
+请返回带 `signal` 的 `TaskResult`，或者在 `run()` 内部调用 `ctx.emit_signal(...)`。
+
+```python
+from crawler4j_sdk import EnvAction, TaskFlow, TaskResult, TaskSignal
+
+
+class ManualReviewWorkflow(TaskFlow):
+    name = "manual_review"
+
+    async def run(self, ctx):
+        suspect = await ctx.run_subtask("check_account")
+        if suspect:
+            return TaskResult.ok(
+                message="等待人工确认",
+                signal=TaskSignal.wait_for_confirmation(
+                    message="请人工确认账号状态",
+                    env_action=EnvAction.KEEP_ALIVE,
+                    payload={"review_type": "account"},
+                ),
+            )
+
+        return TaskResult.ok(message="无需人工确认")
+```
+
+`WAIT_FOR_CONFIRMATION` 会让任务停在 `WAITING_CONFIRMATION`，ATM 暂不执行终态 hooks 和环境清理；直到外部确认成功或失败后，ATM 才继续进入 `on_success` / `on_failure`、环境动作以及最终 `on_cleanup`。
 
 ## 推荐开发顺序
 

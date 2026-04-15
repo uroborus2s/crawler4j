@@ -9,5 +9,5 @@
 2. 4.2 编写 Workflow
 3. 4.3 CLI 命令与 UI 配置
 4. 4.4 Core 提供的能力清单
-5. [4.5 Core 注入能力 API 参考 (SDK 1.1.0)](05-api-reference.md)
+5. [4.5 Core 注入能力 API 参考 (SDK 1.1.1)](05-api-reference.md)
 6. [4.6 模块开发最佳实践](06-best-practices.md)

@@ -28,6 +28,7 @@
 | `ctx.logger` | `logging.Logger` | 日志能力 |
 | `ctx.http` | `HttpClient` | HTTP 请求能力 |
 | `ctx.state` | `dict[str, Any]` | 任务 / 工作流共享状态 |
+| `ctx.runtime` | `dict[str, Any]` | ATM 写入的运行态元数据，如最终状态、环境动作结果 |
 | `ctx.captured_data` | `list[Any]` | 运行过程收集的数据 |
 | `ctx.tools` | `ToolsCapability \| None` | 宿主注入的统一工具入口 |
 
@@ -41,6 +42,7 @@
 | `ctx.should_stop()` | `bool` | 检查停止标志 |
 | `ctx.request_stop()` | `None` | 请求停止工作流 |
 | `await ctx.run_subtask(task_name, **kwargs)` | `Any` | 调用子任务 |
+| `ctx.emit_signal(signal)` | `None` | 向 ATM 发出结构化流程信号 |
 
 ## `ctx.tools` 怎么用
 
@@ -49,7 +51,7 @@
 你可以做三件事：
 
 1. `ctx.tools.has_tool(name)`：判断工具是否存在
-2. `ctx.tools.list_tools()`：枚举当前可用工具及其描述
+2. `ctx.tools.list_tools()`：枚举当前可用工具元数据（`name` / `description` / `is_async`）
 3. `ctx.tools.call(name, **kwargs)`：调用工具
 
 最稳妥的调用方式是先判断，再执行：
@@ -74,6 +76,49 @@ if ctx.tools and ctx.tools.has_tool("captcha.match_slider"):
 ```
 
 不要写成“我觉得宿主应该有这个能力，所以直接调”。
+
+如果你是通过 `list_tools()` 动态发现能力，而不是手写固定工具名，要额外看 `ToolSpec.is_async`：
+
+```python
+if ctx.tools:
+    tools = {spec.name: spec for spec in ctx.tools.list_tools()}
+    proxy_tool = tools.get("env.set_proxy")
+    if proxy_tool and proxy_tool.is_async:
+        await ctx.tools.call("env.set_proxy", env_id=ctx.env_id, proxy_value="http://127.0.0.1:8888")
+```
+
+## `TaskSignal` 怎么用
+
+`TaskSignal` 是模块通知 ATM 做流程动作的正式通道。它解决的是：
+
+- 任务成功 / 失败 / 取消的显式判定
+- “等待人工确认”这类暂停态
+- 任务结束后的环境动作（`recycle` / `keep_alive` / `destroy`）
+
+模块可以两种方式发信号：
+
+1. 在 `TaskScript.execute()` / `TaskFlow.run()` 返回带 `signal` 的 `TaskResult`
+2. 在 `module_runtime.py` 的 `init_env`、`before_run`，或运行主体里调用 `ctx.emit_signal(...)`
+
+当前正式动作有：
+
+| 动作 | 含义 |
+|---|---|
+| `TaskSignal.succeed(...)` | 明确把任务标记为成功 |
+| `TaskSignal.fail(...)` | 明确把任务标记为失败 |
+| `TaskSignal.cancel(...)` | 明确把任务标记为取消 |
+| `TaskSignal.wait_for_confirmation(...)` | 把任务停在 `WAITING_CONFIRMATION`，等待外部确认 |
+
+边界也要记清楚：
+
+- 模块发信号是为了“告诉 ATM 做什么”，不是为了直接控制 REM
+- `WAIT_FOR_CONFIRMATION` 当前只允许 `keep_alive` 语义来保留环境
+- `on_cleanup` 在环境动作之后执行，因此模块如果要根据“环境是否真的被删除”做数据自清理，应读取 `ctx.runtime["env_action"]`
+
+正式规则补充如下：
+
+- `on_cleanup` 是终态清理 hook，不是环境删除专用 hook
+- 它的触发条件是“任务进入终态且已建立 `TaskContext`”，不是“环境动作为 destroy”
 
 ## 当前内置工具清单
 

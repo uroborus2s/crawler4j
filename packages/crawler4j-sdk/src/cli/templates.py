@@ -44,11 +44,6 @@ class {class_name}(TaskScript):
             data=result,
         )
 
-    async def on_error(self, ctx: TaskContext, error: Exception) -> None:
-        """错误处理。"""
-        ctx.logger.error(f"任务出错: {{error}}")
-        if ctx.page:
-            await ctx.screenshot("error_{name}")
 '''
 
 MODEL_GITIGNORE_TEMPLATE = '''.DS_Store
@@ -70,7 +65,7 @@ version = "0.1.0"
 description = "{display_name} 模块项目"
 requires-python = ">={python_version}"
 dependencies = [
-    "crawler4j-sdk>=1.1.0,<2.0.0",
+    "crawler4j-sdk>=1.1.1,<2.0.0",
 ]
 
 [build-system]
@@ -250,10 +245,10 @@ async def on_cleanup(context, *args):
 
 MODEL_RUNTIME_TEMPLATE = '''"""{display_name} 模块自定义运行时扩展。
 
-本文件为可选文件，用于存放模块级的生命周期 Hooks、手动注册组件或覆盖默认行为。
+本文件为可选文件，用于存放模块级 ATM 生命周期 Hooks、手动注册组件或覆盖默认行为。
 """
 
-from crawler4j_sdk import TaskContext
+from crawler4j_sdk import TaskContext, TaskResult
 
 # 默认工作流覆盖 (可选)
 # DEFAULT_WORKFLOW = "my_custom_workflow"
@@ -273,8 +268,31 @@ async def init_env(context: TaskContext):
     pass
 
 
+async def before_run(context: TaskContext):
+    """主执行前 Hook (在模块 run 之前调用)。"""
+    pass
+
+
+async def on_success(context: TaskContext, result: TaskResult):
+    """成功 Hook。"""
+    pass
+
+
+async def on_failure(context: TaskContext, error: Exception):
+    """失败 Hook。"""
+    pass
+
+
+async def on_timeout(context: TaskContext):
+    """超时 Hook。"""
+    pass
+
+
 async def on_cleanup(context: TaskContext):
-    """清理 Hook (任务执行完成后总是调用)。"""
+    """最终清理 Hook。
+
+    注意：该 Hook 在 ATM 执行完环境动作后触发，适合做模块内部数据收尾。
+    """
     pass
 '''
 
@@ -283,7 +301,7 @@ version: 1.0.0
 display_name: {display_name}
 description: {description}
 author: crawler4j
-sdk_version_range: ">=1.1.0"
+sdk_version_range: ">=1.1.1"
 {ui_section}workflows:
   - name: {workflow_name}
     display_name: {workflow_display_name}

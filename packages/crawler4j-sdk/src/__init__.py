@@ -13,17 +13,20 @@ from crawler4j_contracts import (
     ClickCaptchaDebugInfo,
     ClickCaptchaMatchResult,
     ClickCaptchaOrderedTarget,
+    EnvAction,
     ImageInput,
     Point,
     SliderCaptchaDebugInfo,
     SliderCaptchaMatchResult,
     TaskContext,
     TaskResult,
+    TaskSignal,
+    TaskSignalAction,
     ToolSpec,
     ToolsCapability,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 # 稳定导出列表（同 MAJOR 版本内冻结）
 __all__ = [
@@ -33,6 +36,9 @@ __all__ = [
     "ModuleAssembler",
     "TaskContext",
     "TaskResult",
+    "TaskSignal",
+    "TaskSignalAction",
+    "EnvAction",
     "ImageInput",
     "BBox",
     "Point",

@@ -1,10 +1,4 @@
-"""TaskFlow 单元测试。
-
-测试用例覆盖:
-    - 工作流编排测试
-    - 生命周期回调测试
-    - 子任务调用测试
-"""
+"""TaskFlow 单元测试。"""
 
 from unittest.mock import MagicMock
 
@@ -46,8 +40,8 @@ class TestTaskFlowContract:
         with pytest.raises(TypeError):
             IncompleteFlow()  # type: ignore
     
-    def test_optional_hooks_have_default_implementation(self):
-        """验证可选钩子有默认实现。"""
+    def test_taskflow_has_single_run_entry(self):
+        """验证 TaskFlow 仅暴露主编排入口。"""
         class MinimalFlow(TaskFlow):
             name = "minimal"
             
@@ -55,15 +49,14 @@ class TestTaskFlowContract:
                 pass
         
         flow = MinimalFlow()
-        
-        # 可选钩子应该可以不覆盖
-        assert hasattr(flow, "on_error")
-        assert hasattr(flow, "on_complete")
+        assert hasattr(flow, "run")
+        assert not hasattr(flow, "on_error")
+        assert not hasattr(flow, "on_complete")
 
 
-class TestTaskFlowLifecycle:
-    """测试 TaskFlow 生命周期。"""
-    
+class TestTaskFlowExecution:
+    """测试 TaskFlow 执行。"""
+
     @pytest.mark.asyncio
     async def test_run_execution(self, mock_context: TaskContext):
         """验证 run 方法执行。"""
@@ -80,61 +73,6 @@ class TestTaskFlowLifecycle:
         await flow.run(mock_context)
         
         assert run_called
-    
-    @pytest.mark.asyncio
-    async def test_on_complete_called_on_success(self, mock_context: TaskContext):
-        """验证成功时调用 on_complete。"""
-        complete_called = False
-        
-        class SuccessFlow(TaskFlow):
-            name = "success"
-            
-            async def run(self, ctx: TaskContext) -> None:
-                pass
-            
-            async def on_complete(self, ctx: TaskContext) -> None:
-                nonlocal complete_called
-                complete_called = True
-        
-        flow = SuccessFlow()
-        
-        # 模拟运行时执行流程
-        try:
-            await flow.run(mock_context)
-            await flow.on_complete(mock_context)
-        except Exception as e:
-            await flow.on_error(mock_context, e)
-        
-        assert complete_called
-    
-    @pytest.mark.asyncio
-    async def test_on_error_called_on_failure(self, mock_context: TaskContext):
-        """验证失败时调用 on_error。"""
-        error_called = False
-        captured_error = None
-        
-        class FailureFlow(TaskFlow):
-            name = "failure"
-            
-            async def run(self, ctx: TaskContext) -> None:
-                raise ValueError("模拟错误")
-            
-            async def on_error(self, ctx: TaskContext, error: Exception) -> None:
-                nonlocal error_called, captured_error
-                error_called = True
-                captured_error = error
-        
-        flow = FailureFlow()
-        
-        # 模拟运行时执行流程
-        try:
-            await flow.run(mock_context)
-        except ValueError as e:
-            await flow.on_error(mock_context, e)
-        
-        assert error_called
-        assert isinstance(captured_error, ValueError)
-        assert str(captured_error) == "模拟错误"
 
 
 class TestTaskFlowSubtaskIntegration:

@@ -12,6 +12,7 @@ BrowserHandle 是 Core 层内部使用的抽象，用于：
 import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.parse import urlsplit, urlunsplit
 
 from src.core.foundation.logging import logger
 
@@ -145,6 +146,122 @@ class BrowserHandle:
             return self._browser.is_connected()
         except Exception:
             return False
+
+    @staticmethod
+    def _normalize_cdp_http_path(path: str) -> str:
+        """把 CDP HTTP URL 规范化为 Playwright 可接受的路径。"""
+        normalized = path.rstrip("/")
+        if normalized in {"", "/", "/json", "/json/version", "/json/list"}:
+            return ""
+        return path
+
+    @staticmethod
+    def _candidate_cdp_endpoints(endpoint: str) -> list[str]:
+        """为同一个浏览器生成一组可尝试的 CDP 入口。"""
+        candidates: list[str] = []
+        
+        def _append(candidate: str | None) -> None:
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
+        parts = urlsplit(endpoint)
+        if parts.scheme in {"http", "https"}:
+            normalized_path = BrowserHandle._normalize_cdp_http_path(parts.path)
+            netlocs = [parts.netloc]
+            if parts.hostname == "127.0.0.1":
+                netlocs.append(f"localhost:{parts.port}" if parts.port else "localhost")
+            elif parts.hostname == "localhost":
+                netlocs.append(f"127.0.0.1:{parts.port}" if parts.port else "127.0.0.1")
+
+            for netloc in netlocs:
+                http_endpoint = urlunsplit((parts.scheme, netloc, normalized_path, "", ""))
+                _append(http_endpoint)
+            return candidates
+
+        _append(endpoint)
+
+        return candidates
+
+    @staticmethod
+    def _extract_websocket_debugger_url(payload: Any) -> str | None:
+        """从 DevTools JSON 响应中提取真实 WebSocket 调试地址。"""
+        if isinstance(payload, dict):
+            value = payload.get("webSocketDebuggerUrl")
+            if isinstance(value, str) and value.startswith(("ws://", "wss://")):
+                return value
+
+            nested = payload.get("data")
+            if nested is not None:
+                return BrowserHandle._extract_websocket_debugger_url(nested)
+
+        if isinstance(payload, list):
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") not in {None, "browser"}:
+                    continue
+                value = item.get("webSocketDebuggerUrl")
+                if isinstance(value, str) and value.startswith(("ws://", "wss://")):
+                    return value
+
+        return None
+
+    @staticmethod
+    async def _probe_websocket_debugger_url(endpoint: str) -> str | None:
+        """主动探测 DevTools HTTP 入口，绕过 Playwright 对 `/json/version/` 的兼容性问题。"""
+        parts = urlsplit(endpoint)
+        if parts.scheme not in {"http", "https"}:
+            return None
+
+        normalized_path = BrowserHandle._normalize_cdp_http_path(parts.path).rstrip("/")
+        probe_paths = [
+            f"{normalized_path}/json/version" if normalized_path else "/json/version",
+            f"{normalized_path}/json/list" if normalized_path else "/json/list",
+        ]
+
+        import httpx
+
+        timeout = httpx.Timeout(2.0, connect=1.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            for probe_path in probe_paths:
+                probe_url = urlunsplit((parts.scheme, parts.netloc, probe_path, "", ""))
+                try:
+                    response = await client.get(probe_url)
+                    response.raise_for_status()
+                    payload = response.json()
+                except Exception:
+                    continue
+
+                resolved = BrowserHandle._extract_websocket_debugger_url(payload)
+                if resolved:
+                    return resolved
+
+        return None
+
+    @staticmethod
+    async def _build_connect_candidates(raw_candidates: list[str]) -> list[str]:
+        """按优先级生成可直连的 Playwright 目标。"""
+        candidates: list[str] = []
+        http_fallbacks: list[str] = []
+
+        def _append(candidate: str | None) -> None:
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
+        for endpoint in raw_candidates:
+            if urlsplit(endpoint).scheme not in {"http", "https"}:
+                _append(endpoint)
+                continue
+
+            resolved = await BrowserHandle._probe_websocket_debugger_url(endpoint)
+            if resolved:
+                _append(resolved)
+            http_fallbacks.append(endpoint)
+
+        for endpoint in http_fallbacks:
+            _append(endpoint)
+
+        return candidates
     
     async def safe_connect(self) -> bool:
         """安全连接到浏览器（使用共享 Playwright 单例）。
@@ -152,28 +269,67 @@ class BrowserHandle:
         Returns:
             是否连接成功
         """
+        if not self.ws_url:
+            logger.error(f"[BrowserHandle] Missing ws_url for browser {self.browser_id}")
+            return False
+
         try:
             # 获取共享的 Playwright 实例
             playwright = await PlaywrightManager.acquire()
             self._has_playwright_ref = True
-            
-            # 连接到外部浏览器
-            self._browser = await playwright.chromium.connect_over_cdp(self.ws_url,timeout=300000)
-            
-            # 获取或创建 context 和 page
-            self._context = (
-                self._browser.contexts[0] 
-                if self._browser.contexts 
-                else await self._browser.new_context()
-            )
-            self._page = (
-                self._context.pages[0] 
-                if self._context.pages 
-                else await self._context.new_page()
-            )
+            last_error: Exception | None = None
+            raw_candidates = self._candidate_cdp_endpoints(self.ws_url)
+            attempt_count = max(8, len(raw_candidates) * 6)
+            attempt = 0
+            cycle = 0
 
-            logger.info(f"[BrowserHandle] Connected to {self.ws_url[:50]}...")
-            return True
+            while attempt < attempt_count:
+                candidates = await self._build_connect_candidates(raw_candidates)
+                if not candidates:
+                    candidates = list(raw_candidates)
+
+                for endpoint in candidates:
+                    if attempt >= attempt_count:
+                        break
+
+                    attempt += 1
+                    try:
+                        # 指纹浏览器在 open 后可能需要短暂时间才会暴露稳定的 CDP 端点。
+                        self._browser = await playwright.chromium.connect_over_cdp(
+                            endpoint,
+                            timeout=300000,
+                        )
+
+                        # 获取或创建 context 和 page
+                        self._context = (
+                            self._browser.contexts[0]
+                            if self._browser.contexts
+                            else await self._browser.new_context()
+                        )
+                        self._page = (
+                            self._context.pages[0]
+                            if self._context.pages
+                            else await self._context.new_page()
+                        )
+
+                        logger.info(f"[BrowserHandle] Connected to {endpoint[:50]}...")
+                        return True
+                    except Exception as e:
+                        last_error = e
+                        self._page = None
+                        self._context = None
+                        self._browser = None
+                        if attempt < attempt_count:
+                            delay = min(0.5 + cycle * 0.25, 1.5)
+                            logger.warning(
+                                f"[BrowserHandle] Connect attempt {attempt}/{attempt_count} failed via {endpoint}, retrying in {delay:.2f}s: {e}"
+                            )
+                            await asyncio.sleep(delay)
+
+                cycle += 1
+
+            if last_error:
+                raise last_error
             
         except Exception as e:
             logger.error(f"[BrowserHandle] Failed to connect: {e}")

@@ -12,7 +12,6 @@ import time
 from datetime import datetime
 from typing import Any
 
-from crawler4j_contracts import TaskContext
 from src.core.foundation.logging import logger
 from src.core.persistence.database import STATE_DB, get_connection
 from src.core.rem.ip_pool import get_ip_pool_manager
@@ -66,22 +65,6 @@ def peek_next_env_name(now: datetime | None = None) -> str:
         existing_names = [row[0] for row in cursor.fetchall()]
 
     return _get_next_env_name(existing_names, now)
-
-
-def build_runtime_capabilities(task_name: str):
-    """延迟导入运行时能力构建器，避免模块级循环依赖。"""
-    from src.core.atm.runtime_capabilities import build_runtime_capabilities as _build_runtime_capabilities
-
-    return _build_runtime_capabilities(task_name)
-
-
-def get_module_service():
-    """延迟导入模块服务，避免模块级循环依赖。"""
-    from src.core.mms.service import get_module_service as _get_module_service
-
-    return _get_module_service()
-
-
 class EnvironmentManager:
     """环境管理器。
     
@@ -250,6 +233,15 @@ class EnvironmentManager:
             return False
         await self.reset(env)
         return True
+
+    async def release_keep_alive(self, lease: EnvLease) -> bool:
+        """释放租约但保持环境当前运行状态。"""
+        env = await self.lease_manager.release(lease, lease.token)
+        if not env:
+            return False
+        await self.pool.update_status(env.id, env.status)
+        logger.info(f"[REM] 环境租约已释放并保持状态: id={env.id}, status={env.status.value}")
+        return True
     
     async def get_env(self, env_id: int) -> Environment | None:
         """获取环境实例。"""
@@ -303,19 +295,15 @@ class EnvironmentManager:
         env_name: str | None = None,
         config: dict | None = None,
         requirement: EnvRequirement | None = None,
-        post_action: Any = "test",
-        workflow_module: str | None = None,
         ensure_runtime: bool = True,
     ) -> Environment:
-        """从 UI 创建环境。
+        """创建并启动环境，直到 Playwright 可用。
         
         Args:
             provider_name: Provider 名称
             env_name: 环境名称
             config: 配置
             requirement: 要求
-            post_action: 创建后操作
-            workflow_module: 工作流模块
         """
         if not self.pool.can_create():
             raise EnvUnavailableError(
@@ -340,16 +328,11 @@ class EnvironmentManager:
             final_config["env_name"] = env_name
 
         proxy_config = requirement.proxy_config if requirement else None
-        
-        from src.core.rem.models import PostCreateAction
-        action_enum = PostCreateAction(post_action)
 
         return await self._create_env(
             provider, 
             final_config, 
             proxy_config=proxy_config,
-            post_action=action_enum,
-            workflow_module=workflow_module
         )
 
     async def ensure_provider_runtime(self, provider_name: str) -> None:
@@ -406,6 +389,12 @@ class EnvironmentManager:
         env = await self.pool.get(env_id)
         if not env:
             return False
+        if env.status == EnvStatus.RUNNING:
+            return True
+        if env.provider in FINGERPRINT_BROWSER_PROVIDERS:
+            await self.ensure_provider_runtime(env.provider)
+        if env.status == EnvStatus.BUSY:
+            return await self._provider_operation(env, "connect")
         if await self._provider_operation(env, "open"):
             return await self._provider_operation(env, "connect")
         return False    
@@ -664,9 +653,13 @@ class EnvironmentManager:
                     await self.pool.update_status(env.id, EnvStatus.RUNNING)
                     await self.pool.add(env)
                 else:
-                    # 失败：恢复原状态（open 成功后 connect 失败）
-                    await self.pool.update_status(env.id, original_status)
-                    self._emit_error(env, "connect", "Playwright 连接失败")
+                    await self._handle_connect_failure(
+                        env,
+                        provider,
+                        original_status,
+                        "Playwright 连接失败",
+                        preserve_window=kwargs.get("preserve_window_on_connect_failure", True),
+                    )
                 return result
             elif action == "disconnect":
                 await self.pool.update_status(env.id, EnvStatus.BUSY)
@@ -700,10 +693,46 @@ class EnvironmentManager:
                 return False
         except Exception as e:
             logger.warning(f"[REM] Provider 操作失败: action={action}, error={e}")
-            # 异常时恢复原状态
-            await self.pool.update_status(env.id, original_status)
-            self._emit_error(env, action, str(e))
+            if action == "connect":
+                await self._handle_connect_failure(
+                    env,
+                    provider,
+                    original_status,
+                    str(e),
+                    preserve_window=kwargs.get("preserve_window_on_connect_failure", True),
+                )
+            else:
+                # 异常时恢复原状态
+                await self.pool.update_status(env.id, original_status)
+                self._emit_error(env, action, str(e))
             return False
+
+    async def _handle_connect_failure(
+        self,
+        env: Environment,
+        provider: BaseProvider,
+        original_status: EnvStatus,
+        message: str,
+        *,
+        preserve_window: bool = True,
+    ) -> None:
+        """处理 connect 失败时的状态回写。
+
+        如果窗口实际上已经打开，则保留 `BUSY`，避免 UI 回退成 `READY`。
+        """
+        target_status = original_status
+        error_message = message
+
+        if preserve_window:
+            try:
+                if await provider.is_window_open(env):
+                    target_status = EnvStatus.BUSY
+                    error_message = f"{message}，但浏览器窗口已打开"
+            except Exception as e:
+                logger.warning(f"[REM] 检查 connect 失败后的窗口状态失败: {e}")
+
+        await self.pool.update_status(env.id, target_status)
+        self._emit_error(env, "connect", error_message)
     
     def _emit_error(self, env: Environment, action: str, message: str) -> None:
         """发送错误事件供 UI 层监听。"""
@@ -791,23 +820,20 @@ class EnvironmentManager:
         provider: BaseProvider,
         config: dict | None = None,
         proxy_config: Any | None = None,  # ProxyConfig
-        post_action: Any = "test",
-        workflow_module: str | None = None,
     ) -> Environment:
-        """创建环境。
+        """创建环境并保持为可运行状态。
         
         流程：
             1. 生成环境名称和 ID
             2. 创建占位环境并持久化
             3. 处理代理绑定（如有）
-            4. 调用 Provider 创建 (根据 post_action 决定是否启动)
-            5. (Optional) 执行工作流
-            6. (Optional) 关闭窗口
-            7. 设置状态为 READY
+            4. 调用 Provider 创建
+            5. 打开窗口并连接 Playwright
+            6. 成功后保持 RUNNING
         """
-        from src.core.rem.models import PostCreateAction, ProxyMode
+        from src.core.rem.models import ProxyMode
         
-        logger.info(f"[REM] 创建环境: provider={provider.name} action={post_action}")
+        logger.info(f"[REM] 创建环境: provider={provider.name}")
         
         if config and config.get("env_name"):
             # 用户指定名称
@@ -878,30 +904,25 @@ class EnvironmentManager:
             await self.pool.add(env) # update because add was called with skeleton
             
             logger.info(f"[REM] 环境创建成功: id={env_id} external_id={env.external_id}")
-            
-            # 6. 处理 Post-Create Action
-            should_launch = (post_action != PostCreateAction.NONE)
-            
-            if should_launch:
-                logger.info(f"[REM] 执行 Post-Create Action: {post_action}")
-                
-                # 6.1 Open Window
-                if await self._provider_operation( env, "open"):
-                    # 6.2 Connect Playwright
-                    if await self._provider_operation( env, "connect"):
-                        try:
-                            # 6.3 Execute Workflow (if any)
-                            if post_action == PostCreateAction.WORKFLOW and workflow_module:
-                                logger.info(f"[REM] 执行初始化工作流: {workflow_module}")
-                                await self._run_post_create_workflow(env, workflow_module)
-                        finally:
-                            # 6.4 Close Window (TEST/WORKFLOW 结束后均关闭)
-                            await self._provider_operation( env, "close")
-                    else:
-                        logger.warning(f"[REM] Post-Create Connect 失败: id={env_id}")
-                        await self._provider_operation( env, "close")
-                else:
-                    logger.warning(f"[REM] Post-Create Open 失败: id={env_id}")
+
+            if not await self._provider_operation(env, "open"):
+                raise EnvUnavailableError(
+                    "环境创建后启动失败",
+                    stage="CREATE",
+                    hint="请检查外部浏览器路径、启动状态和 Provider 配置",
+                )
+
+            if not await self._provider_operation(
+                env,
+                "connect",
+                preserve_window_on_connect_failure=False,
+            ):
+                await self._provider_operation(env, "close")
+                raise EnvUnavailableError(
+                    "Playwright 连接失败",
+                    stage="CREATE",
+                    hint="请检查浏览器调试入口和 Playwright 连接状态",
+                )
 
             return env
             
@@ -911,41 +932,6 @@ class EnvironmentManager:
             await self.destroy_env(env_id)
             raise
 
-    async def _run_post_create_workflow(self, env: Environment, workflow_module: str) -> None:
-        """在手动创建环境后执行模块工作流。"""
-        if ".workflows." not in workflow_module:
-            logger.error(f"[REM] 无法识别工作流模块路径: {workflow_module}")
-            return
-
-        module_name, workflow_name = workflow_module.split(".workflows.", 1)
-        runtime_caps = build_runtime_capabilities(module_name)
-        task_context = TaskContext(
-            env_id=env.id,
-            task_name=module_name,
-            config={"workflow": workflow_name},
-            page=env.handle.page if env.handle else None,
-            context=env.handle.context if env.handle else None,
-            tools=runtime_caps.tools,
-        )
-
-        module_service = get_module_service()
-
-        try:
-            await module_service.call_hook(module_name, "init_env", task_context)
-            await module_service.call_hook(module_name, "before_run", task_context)
-            result = await module_service.run_module(module_name, task_context)
-            await module_service.call_hook(module_name, "on_success", task_context, result)
-            logger.info(f"[REM] 工作流执行完成: {workflow_module}")
-        except Exception as e:
-            logger.error(f"[REM] 工作流执行出错: {workflow_module} error={e}")
-        finally:
-            try:
-                await module_service.call_hook(module_name, "on_cleanup", task_context)
-            except Exception as cleanup_error:
-                logger.error(
-                    f"[REM] 工作流清理出错: {workflow_module} error={cleanup_error}"
-                )
-    
     async def _reserve_env_placeholder(
         self, 
         kind: Any, # EnvKind

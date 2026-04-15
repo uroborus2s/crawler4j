@@ -41,6 +41,7 @@ class TaskStatus(str, enum.Enum):
     """任务运行状态。"""
     PENDING = "pending"      # 等待资源 (排队中)
     RUNNING = "running"      # 执行中
+    WAITING_CONFIRMATION = "waiting_confirmation"  # 等待人工确认
     SUCCEEDED = "succeeded"  # 成功
     FAILED = "failed"        # 失败
     CANCELLED = "cancelled"  # 取消

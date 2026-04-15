@@ -9,14 +9,17 @@
 
 - 类属性：`name`、`display_name`、`description`、`default_config`
 - 方法：`execute(ctx)`
-- 可选 hooks：`on_init(ctx)`、`on_error(ctx, error)`、`on_cleanup(ctx)`
 
-生命周期顺序如下：
+`TaskScript` 类本身已经不再承载官方生命周期 hooks。
+模块级生命周期统一由 ATM 在 `module_runtime.py` 中调度：
 
 ```text
-on_init
+prepare_env
+-> init_env
+-> before_run
 -> execute
--> on_error（仅异常时）
+-> on_success / on_failure / on_timeout
+-> ATM env action
 -> on_cleanup
 ```
 
@@ -27,6 +30,8 @@ on_init
 - 输出：`TaskResult`
 
 它不是“整个业务流程”，只是整个流程中的一个最小步骤。
+
+如果任务脚本内部需要前后置、异常兜底或局部清理，请直接在 `execute()` 里用正常 Python 控制流处理，例如 `try / except / finally`。不要再给 `TaskScript` 类补一套私有 hooks。
 
 ## 最小可运行示例
 
@@ -59,6 +64,55 @@ class FetchHotelsTask(TaskScript):
             data={"url": ctx.page.url, "title": title},
         )
 ```
+
+## 任务脚本怎样控制 ATM 流程
+
+任务脚本只负责业务逻辑；如果需要让 ATM 接手流程动作，例如：
+
+- 标记任务失败
+- 等待人工确认
+- 指定任务结束后销毁运行环境
+
+请通过 `TaskSignal` 表达，而不是直接调用 REM。
+
+```python
+from crawler4j_sdk import EnvAction, TaskResult, TaskScript, TaskSignal
+
+
+class CheckAccountTask(TaskScript):
+    name = "check_account"
+
+    async def execute(self, ctx):
+        is_black = True
+        if is_black:
+            signal = TaskSignal.fail(
+                message="检测到黑号",
+                error="black_account",
+                reason="risk_control",
+                env_action=EnvAction.DESTROY,
+            )
+            return TaskResult.fail(
+                message="检测到黑号",
+                error="black_account",
+                signal=signal,
+            )
+
+        return TaskResult.ok(message="账号正常")
+```
+
+如果是 `module_runtime.py` 的 `init_env` / `before_run` 阶段，也可以直接调用 `ctx.emit_signal(...)`。当前正式允许发信号的阶段只有：
+
+- `init_env`
+- `before_run`
+- `run_module`（也就是 `TaskScript.execute()` / `TaskFlow.run()` 内部）
+
+`on_cleanup` 会在 ATM 完成环境动作之后执行，模块可以从 `ctx.runtime["env_action"]` 读取最终动作结果。如果你只是想在“环境已经销毁之后”做模块数据自清理，不需要额外增加一个 `env_deleted` hook。
+
+这里固定一条规则：
+
+- `on_cleanup` 不要求环境一定被删除
+- 只要任务已经进入终态并且模块执行上下文已建立，ATM 就会调用它
+- 需要区分 `destroy` / `recycle` / `keep_alive` 时，统一读取 `ctx.runtime["env_action"]`
 
 ## 第一次看这个示例时，应该怎么看
 
@@ -108,7 +162,7 @@ class FetchHotelsTask(TaskScript):
 
 如果你的任务脚本需要读写模块数据，不要自己去连数据库。
 当前正确做法只有一个：通过 Core 注入的 `ctx.tools.call(...)` 使用正式工具。
-`crawler4j-sdk 1.1.0` 起，模块侧统一通过 `TaskContext.tools` 访问宿主扩展能力。
+`crawler4j-sdk 1.1.1` 起，模块侧统一通过 `TaskContext.tools` 访问宿主扩展能力。
 
 也就是说，当前模块里允许依赖的数据能力只有：
 

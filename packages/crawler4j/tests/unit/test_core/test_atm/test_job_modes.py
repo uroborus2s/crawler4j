@@ -242,9 +242,10 @@ async def test_create_service_job_forces_manual_trigger():
 
 
 @pytest.mark.asyncio
-async def test_create_batch_job_requires_valid_cron():
+async def test_create_batch_job_accepts_manual_or_valid_cron():
     service = TaskService()
-    service._repo = SimpleNamespace(save_job=AsyncMock())
+    saved_jobs = []
+    service._repo = SimpleNamespace(save_job=AsyncMock(side_effect=lambda job: saved_jobs.append(job)))
     run_profile = RunProfile(
         resource=ResourceConfig(
             provider="virtualbrowser",
@@ -256,14 +257,17 @@ async def test_create_batch_job_requires_valid_cron():
         execution=ExecutionContext(module="demo_module", workflow="repair"),
     )
 
-    with pytest.raises(ValueError, match="Cron"):
-        await service.create_job(
-            name="batch-job",
-            job_type=JobType.BATCH.value,
-            trigger_config={"type": TriggerType.MANUAL.value},
-            run_profile=run_profile,
-            concurrency=2,
-        )
+    await service.create_job(
+        name="batch-job-manual",
+        job_type=JobType.BATCH.value,
+        trigger_config={"type": TriggerType.MANUAL.value},
+        run_profile=run_profile,
+        concurrency=2,
+    )
+
+    assert len(saved_jobs) == 1
+    assert saved_jobs[0].trigger.type == TriggerType.MANUAL
+    assert saved_jobs[0].trigger.cron_expr is None
 
     with pytest.raises(ValueError, match="Cron"):
         await service.create_job(
@@ -302,6 +306,168 @@ async def test_create_job_accepts_inline_run_profile():
 
     assert len(saved_jobs) == 1
     assert saved_jobs[0].run_profile == run_profile
+
+
+@pytest.mark.asyncio
+async def test_run_job_once_dispatches_manual_batch_without_activating_job():
+    service = TaskService()
+    job = Job(
+        id="batch-manual-job",
+        name="manual-batch",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                provider="virtualbrowser",
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.MATCH,
+                    selector=MatchConfig(wait_timeout=60),
+                ),
+            ),
+            execution=ExecutionContext(module="demo_module", workflow="repair"),
+        ),
+        concurrency_target=3,
+    )
+    service._repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        save_job=AsyncMock(),
+        count_active_tasks=AsyncMock(return_value=0),
+    )
+    service._controller = SimpleNamespace(
+        ensure_job_runtime_ready=AsyncMock(),
+        dispatcher=SimpleNamespace(dispatch=AsyncMock()),
+    )
+
+    result = await service.run_job_once(job.id)
+
+    assert result is True
+    assert job.state == JobState.PAUSED
+    service._repo.save_job.assert_not_awaited()
+    service._controller.ensure_job_runtime_ready.assert_awaited_once_with(job.id)
+    assert service._controller.dispatcher.dispatch.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_start_job_runs_manual_batch_once():
+    service = TaskService()
+    job = Job(
+        id="batch-manual-job",
+        name="manual-batch",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                provider="virtualbrowser",
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.MATCH,
+                    selector=MatchConfig(wait_timeout=60),
+                ),
+            ),
+            execution=ExecutionContext(module="demo_module", workflow="repair"),
+        ),
+        concurrency_target=2,
+    )
+    service._repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        save_job=AsyncMock(),
+        count_active_tasks=AsyncMock(return_value=0),
+    )
+    service._controller = SimpleNamespace(
+        ensure_job_runtime_ready=AsyncMock(),
+        dispatcher=SimpleNamespace(dispatch=AsyncMock()),
+        request_job_resume=AsyncMock(),
+        reconcile_job=AsyncMock(),
+    )
+
+    result = await service.start_job(job.id)
+
+    assert result is True
+    assert job.state == JobState.PAUSED
+    service._repo.save_job.assert_not_awaited()
+    service._controller.request_job_resume.assert_not_awaited()
+    service._controller.reconcile_job.assert_not_awaited()
+    assert service._controller.dispatcher.dispatch.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_job_once_blocks_when_previous_batch_still_running():
+    service = TaskService()
+    job = Job(
+        id="batch-manual-job",
+        name="manual-batch",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                provider="virtualbrowser",
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.MATCH,
+                    selector=MatchConfig(wait_timeout=60),
+                ),
+            ),
+            execution=ExecutionContext(module="demo_module", workflow="repair"),
+        ),
+        concurrency_target=2,
+    )
+    service._repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        save_job=AsyncMock(),
+        count_active_tasks=AsyncMock(return_value=1),
+    )
+    service._controller = SimpleNamespace(
+        ensure_job_runtime_ready=AsyncMock(),
+        dispatcher=SimpleNamespace(dispatch=AsyncMock()),
+    )
+
+    result = await service.run_job_once(job.id)
+
+    assert result is False
+    service._repo.save_job.assert_not_awaited()
+    service._controller.dispatcher.dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_job_switches_manual_batch_to_paused_and_requests_stop():
+    service = TaskService()
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                provider="virtualbrowser",
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.MATCH,
+                    selector=MatchConfig(wait_timeout=60),
+                ),
+            ),
+            execution=ExecutionContext(module="demo_module", workflow="repair"),
+        ),
+        concurrency_target=2,
+    )
+    service._repo = SimpleNamespace(get_job=AsyncMock(return_value=job), save_job=AsyncMock())
+    service._controller = SimpleNamespace(
+        request_job_stop=AsyncMock(),
+        reconcile_job=AsyncMock(),
+    )
+
+    result = await service.update_job(
+        job.id,
+        job_type=JobType.BATCH.value,
+        trigger_config={"type": TriggerType.MANUAL.value},
+    )
+
+    assert result is True
+    assert job.type == JobType.BATCH
+    assert job.trigger.type == TriggerType.MANUAL
+    assert job.state == JobState.PAUSED
+    service._controller.request_job_stop.assert_awaited_once_with(job.id)
+    service._controller.reconcile_job.assert_not_awaited()
 
 
 @pytest.mark.asyncio

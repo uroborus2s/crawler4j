@@ -64,7 +64,7 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
 
     with (target / "module.yaml").open("r", encoding="utf-8") as f:
         manifest = yaml.safe_load(f)
-    assert manifest["sdk_version_range"] == ">=1.1.0"
+    assert manifest["sdk_version_range"] == ">=1.1.1"
     workflow_names = [item["name"] for item in manifest["workflows"]]
     assert "main_workflow" in workflow_names
     assert "repair_orders" in workflow_names

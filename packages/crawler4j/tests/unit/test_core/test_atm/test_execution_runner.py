@@ -3,10 +3,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from crawler4j_contracts import EnvAction, TaskResult, TaskSignal
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.atm.models import Task, TaskStatus
-from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
+from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
+from src.core.rem.models import ProxyMode
 
 
 def _build_env() -> tuple[Environment, EnvLease]:
@@ -54,6 +56,7 @@ def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[Ex
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=env),
         release=AsyncMock(return_value=True),
+        release_keep_alive=AsyncMock(return_value=True),
         destroy_env=AsyncMock(return_value=True),
     )
     return ExecutionRunner(rem=rem, mms=module_service), rem
@@ -88,6 +91,7 @@ async def test_execution_runner_calls_success_hooks_and_merges_prepare_env():
     create_config = rem.create_env.await_args.kwargs["config"]
     assert create_config["creation_params"]["groups"] == ["default"]
     assert create_config["creation_params"]["fingerprint"]["randomize_all"] is True
+    rem.start_env.assert_not_awaited()
 
     hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
     assert hook_names == ["prepare_env", "init_env", "before_run", "on_success", "on_cleanup"]
@@ -98,7 +102,8 @@ async def test_execution_runner_calls_success_hooks_and_merges_prepare_env():
     assert contexts[0].config["workflow"] == "default"
     assert contexts[0].tools is not None
     assert module_service.call_hook.await_args_list[0].args[2].tools is not None
-    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_awaited_once_with(lease)
+    rem.release.assert_not_awaited()
     rem.destroy_env.assert_awaited_once_with(env.id)
 
 
@@ -124,7 +129,8 @@ async def test_execution_runner_calls_failure_and_cleanup_hooks_on_error():
     assert updates == [TaskStatus.RUNNING, TaskStatus.FAILED]
     assert request.task.status == TaskStatus.FAILED
     assert "boom" in request.task.error
-    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_awaited_once_with(lease)
+    rem.release.assert_not_awaited()
     rem.destroy_env.assert_awaited_once_with(env.id)
 
 
@@ -149,7 +155,8 @@ async def test_execution_runner_calls_timeout_and_cleanup_hooks_on_timeout():
     assert hook_names == ["prepare_env", "init_env", "before_run", "on_timeout", "on_cleanup"]
     assert request.task.status == TaskStatus.FAILED
     assert "Timeout" in request.task.error
-    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_awaited_once_with(lease)
+    rem.release.assert_not_awaited()
     rem.destroy_env.assert_awaited_once_with(env.id)
 
 
@@ -162,12 +169,12 @@ async def test_execution_runner_cleans_up_created_env_when_acquisition_fails():
         call_hook=AsyncMock(return_value=None),
     )
     runner, rem = _build_runner(env, lease, module_service)
-    rem.start_env = AsyncMock(return_value=False)
+    rem.lease_manager.acquire = AsyncMock(side_effect=RuntimeError("lease failed"))
 
     await runner.run(request)
 
     assert request.task.status == TaskStatus.FAILED
-    rem.release.assert_awaited_once_with(lease)
+    rem.release.assert_not_awaited()
     rem.destroy_env.assert_awaited_once_with(env.id)
     module_service.run_module.assert_not_awaited()
 
@@ -191,3 +198,103 @@ async def test_execution_runner_reuses_existing_env_for_match_mode():
     rem.release.assert_awaited_once_with(lease)
     rem.destroy_env.assert_not_awaited()
     assert request.task.status == TaskStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_marks_task_failed_for_taskresult_fail():
+    request = _build_request()
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.fail(message="black", error="black_account")),
+        call_hook=AsyncMock(return_value=None),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    assert request.task.status == TaskStatus.FAILED
+    assert request.task.error == "black_account"
+    rem.release_keep_alive.assert_awaited_once_with(lease)
+    rem.destroy_env.assert_awaited_once_with(env.id)
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_wait_signal_keeps_task_waiting_confirmation():
+    request = _build_request()
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(
+            return_value=TaskResult.ok(
+                message="等待确认",
+                signal=TaskSignal.wait_for_confirmation(
+                    message="等待确认",
+                    env_action=EnvAction.KEEP_ALIVE,
+                ),
+            )
+        ),
+        call_hook=AsyncMock(return_value=None),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    execution_result = await runner.run(request)
+
+    assert request.task.status == TaskStatus.WAITING_CONFIRMATION
+    assert request.task.finished_at is None
+    rem.release.assert_not_awaited()
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
+    assert execution_result.signal is not None
+    assert execution_result.signal.action.value == "wait_for_confirmation"
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_exposes_env_action_to_cleanup_hook():
+    request = _build_request()
+    env, lease = _build_env()
+    cleanup_env_actions: list[dict[str, object]] = []
+
+    async def hook(module_name, hook_name, context, *args):
+        if hook_name == "on_cleanup":
+            cleanup_env_actions.append(dict(context.runtime.get("env_action") or {}))
+        return None
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+    runner, _ = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    assert cleanup_env_actions == [
+        {
+            "action": "destroy",
+            "env_id": env.id,
+            "success": True,
+            "released": True,
+            "destroyed": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_promotes_proxy_binding_from_creation_params():
+    request = _build_request()
+    request.creation_params = {
+        "groups": ["default"],
+        "proxy": {"mode": ProxyMode.POOL.value, "pool_id": "pool-1"},
+    }
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value={"status": "ok"}),
+        call_hook=AsyncMock(return_value=None),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    create_kwargs = rem.create_env.await_args.kwargs
+    assert create_kwargs["config"]["creation_params"] == {"groups": ["default"]}
+    assert create_kwargs["requirement"].proxy_config is not None
+    assert create_kwargs["requirement"].proxy_config.mode == ProxyMode.POOL
+    assert create_kwargs["requirement"].proxy_config.pool_id == "pool-1"

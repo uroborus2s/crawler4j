@@ -15,9 +15,13 @@ from crawler4j_contracts.context import (
     ToolSpec,
     ToolsCapability,
 )
+from crawler4j_contracts.signal import EnvAction, TaskSignal, TaskSignalAction
 
 __all__ = [
     "TaskContext",
+    "TaskSignal",
+    "TaskSignalAction",
+    "EnvAction",
     "HttpClient",
     "DefaultHttpClient",
     "ImageInput",

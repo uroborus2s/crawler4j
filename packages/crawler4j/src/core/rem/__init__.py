@@ -28,7 +28,6 @@ from src.core.rem.models import (
     EnvUnavailableError,
     EnvUnhealthyError,
     FingerprintConfig,
-    PostCreateAction,
     ProxyConfig,
     ProxyMode,
 )
@@ -51,7 +50,6 @@ __all__ = [
     # 枚举
     "EnvKind",
     "EnvStatus",
-    "PostCreateAction",
     "ProxyMode",
     "IPStrategy",
     # 配置类

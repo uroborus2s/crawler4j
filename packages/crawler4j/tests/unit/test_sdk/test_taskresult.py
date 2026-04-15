@@ -8,7 +8,7 @@
 
 import json
 
-from crawler4j_sdk import TaskResult
+from crawler4j_sdk import EnvAction, TaskResult, TaskSignal
 
 
 class TestTaskResultOk:
@@ -36,6 +36,15 @@ class TestTaskResultOk:
         assert result.tasks_completed == 5
         assert result.message == "处理完成"
         assert result.data == {"processed": 5}
+
+    def test_ok_can_carry_signal(self):
+        signal = TaskSignal.wait_for_confirmation(
+            message="等待人工确认",
+            env_action=EnvAction.KEEP_ALIVE,
+        )
+        result = TaskResult.ok(message="暂停等待", signal=signal)
+
+        assert result.signal == signal
     
     def test_ok_with_kwargs(self):
         """验证 kwargs 合并到 data。"""
@@ -87,6 +96,16 @@ class TestTaskResultFail:
         assert result.data["error_code"] == "SDK-AUTH-TOKEN-EXPIRED"
         assert result.data["retryable"] is True
 
+    def test_fail_can_carry_signal(self):
+        signal = TaskSignal.fail(
+            message="黑号",
+            reason="black_account",
+            env_action=EnvAction.DESTROY,
+        )
+        result = TaskResult.fail(message="失败", signal=signal)
+
+        assert result.signal == signal
+
 
 class TestTaskResultSerialization:
     """测试 TaskResult 序列化。"""
@@ -107,6 +126,7 @@ class TestTaskResultSerialization:
         assert d["message"] == "完成"
         assert d["data"] == {"key": "value"}
         assert d["error"] is None
+        assert d["signal"] is None
     
     def test_to_dict_json_serializable(self):
         """验证 to_dict 结果可 JSON 序列化。"""
@@ -156,7 +176,12 @@ class TestTaskResultSerialization:
         original = TaskResult.fail(
             message="错误",
             error="详细错误信息",
-            error_code="SDK-ERR-001"
+            error_code="SDK-ERR-001",
+            signal=TaskSignal.fail(
+                message="黑号",
+                reason="black_account",
+                env_action=EnvAction.DESTROY,
+            ),
         )
         
         # 序列化
@@ -169,6 +194,7 @@ class TestTaskResultSerialization:
         assert restored.message == original.message
         assert restored.error == original.error
         assert restored.data == original.data
+        assert restored.signal == original.signal
 
 
 class TestTaskResultFields:

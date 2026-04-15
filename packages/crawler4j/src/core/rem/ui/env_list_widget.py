@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.rem import EnvKind, EnvStatus, PostCreateAction
+from src.core.rem import EnvKind, EnvStatus
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.pool import EnvPool
 from src.ui.components.combo_box import StyledComboBox as QComboBox
@@ -140,38 +140,6 @@ class CreateEnvDialog(QDialog):
         self.name_input.setPlaceholderText("默认使用自动创建名称，可修改")
         self.form.addRow("环境名称:", self.name_input)
         
-        # 创建动作
-        from src.core.rem.models import PostCreateAction
-        self.post_action_combo = QComboBox()
-        self.post_action_combo.addItem("默认 (TEST: 启动检查)", PostCreateAction.TEST)
-        self.post_action_combo.addItem("仅创建 (NONE)", PostCreateAction.NONE)
-        self.post_action_combo.addItem("执行工作流 (WORKFLOW)", PostCreateAction.WORKFLOW)
-        self.post_action_combo.currentIndexChanged.connect(self._on_post_action_changed)
-        self.form.addRow("创建后动作:", self.post_action_combo)
-        
-        # 工作流选择 - 级联: 先选模块，再选工作流 (同一行)
-        from PyQt6.QtWidgets import QHBoxLayout, QWidget
-
-        from src.core.mms.registry import get_module_registry
-        
-        self.module_combo = QComboBox()
-        self.module_combo.addItem("请选择模块...", "")
-        registry = get_module_registry()
-        for mod in registry.get_enabled_modules():
-            self.module_combo.addItem(mod.manifest.display_name or mod.name, mod.name)
-        self.module_combo.currentIndexChanged.connect(self._on_module_changed)
-        
-        self.workflow_combo = QComboBox()
-        self.workflow_combo.addItem("请先选择模块", "")
-        
-        # 组合到一行
-        self.workflow_row = QWidget()
-        workflow_layout = QHBoxLayout(self.workflow_row)
-        workflow_layout.setContentsMargins(0, 0, 0, 0)
-        workflow_layout.addWidget(self.module_combo)
-        workflow_layout.addWidget(self.workflow_combo)
-        self.form.addRow("工作流:", self.workflow_row)
-        
         # B. 代理配置 (由 Provider 决定显隐)
         
         # 1. 代理模式
@@ -232,42 +200,12 @@ class CreateEnvDialog(QDialog):
         # 初始化显示状态
         self._sync_suggested_name()
         self._on_provider_changed(self.provider_combo.currentText())
-        self._on_post_action_changed(0)
 
     def _sync_suggested_name(self):
         """同步当前默认环境名到输入框展示。"""
         self._suggested_name = get_create_env_default_name()
         self.name_input.setText(self._suggested_name)
         self.name_input.setCursorPosition(len(self._suggested_name))
-        
-    def _on_post_action_changed(self, index: int):
-        """Action 变更处理。"""
-        action = self.post_action_combo.currentData()
-        show_workflow = (action == PostCreateAction.WORKFLOW)
-        self._set_row_visible(self.workflow_row, show_workflow)
-        self.adjustSize()
-    
-    def _on_module_changed(self, index: int):
-        """模块变更时更新工作流列表。"""
-        from src.core.mms.registry import get_module_registry
-        
-        module_name = self.module_combo.currentData()
-        self.workflow_combo.clear()
-        
-        if not module_name:
-            self.workflow_combo.addItem("请先选择模块", "")
-            return
-        
-        registry = get_module_registry()
-        workflows = registry.get_workflows(module_name)
-        if workflows:
-            for wf in workflows:
-                # 构建完整模块路径
-                full_path = f"{module_name}.workflows.{wf.name}"
-                display_name = wf.display_name or wf.name
-                self.workflow_combo.addItem(display_name, full_path)
-        else:
-            self.workflow_combo.addItem("无可用工作流", "")
         
     def _set_row_visible(self, widget: QWidget, visible: bool):
         """设置 Form 行的显隐 (包括标签)。"""
@@ -322,20 +260,13 @@ class CreateEnvDialog(QDialog):
             self._set_row_visible(self.pool_combo, source == "pool")
             self._set_row_visible(self.proxy_manual_input, source == "manual")
 
-    def get_values(self) -> tuple[EnvKind, str, dict, PostCreateAction, str | None]:
+    def get_values(self) -> tuple[EnvKind, str, dict]:
         """获取对话框输入值。
         
         Returns:
-            (环境类型, Provider名称, 配置字典, PostCreateAction, WorkflowModule)
+            (环境类型, Provider名称, 配置字典)
         """
-        from src.core.rem.models import PostCreateAction, ProxyMode
-        
-        config = {}
-        provider = self.provider_combo.currentText()
-        
-        # Post Action
-        post_action = self.post_action_combo.currentData()
-        workflow_module = self.workflow_combo.currentData() if post_action == PostCreateAction.WORKFLOW else None
+        from src.core.rem.models import ProxyMode
         
         config = {}
         provider = self.provider_combo.currentText()
@@ -380,8 +311,6 @@ class CreateEnvDialog(QDialog):
             self.kind_combo.currentData(),
             provider,
             config,
-            post_action,
-            workflow_module,
         )
 
 
@@ -467,8 +396,6 @@ class EnvWorkerThread(QThread):
                         provider_name=provider_name,
                         config=self._kwargs.get("config"),
                         requirement=self._kwargs.get("requirement"),
-                        post_action=self._kwargs.get("post_action"),
-                        workflow_module=self._kwargs.get("workflow_module"),
                     )
                 )
                 self.finished.emit(env)
@@ -805,7 +732,7 @@ class EnvListWidget(QWidget):
         """创建环境。"""
         dialog = CreateEnvDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            kind, provider, config, post_action, workflow_module = dialog.get_values()
+            kind, provider, config = dialog.get_values()
             
             self.create_btn.setEnabled(False)
             self._show_loading(True)
@@ -822,8 +749,6 @@ class EnvListWidget(QWidget):
                 provider=provider,
                 config=config,
                 requirement=requirement,
-                post_action=post_action,
-                workflow_module=workflow_module,
             )
             self._worker.finished.connect(self._on_create_finished)
             self._worker.error.connect(self._on_worker_error)
@@ -833,7 +758,6 @@ class EnvListWidget(QWidget):
         """创建完成。"""
         self._show_loading(False)
         self.create_btn.setEnabled(True)
-        QMessageBox.information(self, "成功", f"环境创建成功: {env.id}")
         self.load_data()
     
     def _on_worker_error(self, error: str):

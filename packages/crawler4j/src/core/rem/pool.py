@@ -21,6 +21,7 @@ from src.core.rem.models import (
     EnvLease,
     EnvRequirement,
     EnvStatus,
+    ProxyConfig,
 )
 
 
@@ -394,8 +395,8 @@ class LeaseManager:
         from src.core.rem.models import EnvUnavailableError
 
         async with self._lock:
-            # 状态守卫: 拒绝非 READY 环境，防止并发竞争导致重复 lease
-            if env.status != EnvStatus.READY:
+            # 状态守卫: 只允许未租赁的 READY/RUNNING 环境发放 lease。
+            if env.lease_id or env.status not in {EnvStatus.READY, EnvStatus.RUNNING}:
                 raise EnvUnavailableError(
                     f"环境 {env.id} 已被占用 (status={env.status.value})",
                     stage="LEASE",
@@ -412,8 +413,9 @@ class LeaseManager:
                 expires_at=expires_at,
             )
             
-            # 更新环境状态
-            env.status = EnvStatus.BUSY
+            # 已连接环境保持 RUNNING；未启动环境在租赁后进入 BUSY。
+            if env.status == EnvStatus.READY:
+                env.status = EnvStatus.BUSY
             env.lease_id = lease.id
             env.task_run_id = task_run_id
             env.updated_at = now
@@ -442,14 +444,34 @@ class LeaseManager:
                     # 1. Find available env
                     cursor = conn.execute(
                         """
-                        SELECT id, name, status, kind FROM environments 
+                        SELECT id, name, status, kind, provider, external_id, capabilities, proxy_config_json
+                        FROM environments 
                         WHERE status = ? AND kind = ? 
-                        ORDER BY last_used_at ASC 
-                        LIMIT 1
+                        ORDER BY last_used_at ASC
                         """,
                         (EnvStatus.READY.value, requirement.kind.value)
                     )
-                    row = cursor.fetchone()
+                    row = None
+                    for candidate in cursor.fetchall():
+                        proxy_config = None
+                        if candidate["proxy_config_json"]:
+                            proxy_config = ProxyConfig.from_dict(json.loads(candidate["proxy_config_json"]))
+
+                        meta = json.loads(candidate["capabilities"]) if candidate["capabilities"] else {}
+                        env = Environment(
+                            id=candidate["id"],
+                            name=candidate["name"] or "",
+                            kind=EnvKind(candidate["kind"]),
+                            provider=candidate["provider"] or "",
+                            status=EnvStatus(candidate["status"]),
+                            external_id=candidate["external_id"],
+                            capabilities=set(meta.get("capabilities", [])),
+                            proxy_config=proxy_config,
+                        )
+                        if requirement.matches(env):
+                            row = candidate
+                            break
+
                     if not row:
                         return None
                     

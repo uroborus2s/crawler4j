@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from crawler4j_contracts import TaskContext
+from crawler4j_contracts import EnvAction, TaskContext, TaskResult, TaskSignal, TaskSignalAction
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.runtime_capabilities import (
     RuntimeCapabilities,
@@ -16,8 +16,8 @@ from src.core.atm.runtime_capabilities import (
 from src.core.foundation.logging import logger
 from src.core.mms.service import ModuleService, get_module_service
 from src.core.rem.manager import EnvironmentManager, get_environment_manager
-from src.core.rem.models import EnvKind, EnvRequirement
-from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
+from src.core.rem.models import EnvKind, EnvLease, EnvRequirement, ProxyConfig, ProxyMode
+from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle, MatchConfig
 
 TaskUpdateCallback = Callable[[Task], Awaitable[None]]
 StopRequestedCallback = Callable[[], bool]
@@ -50,6 +50,7 @@ class ExecutionRequest:
     state: dict[str, Any] = field(default_factory=dict)
     provider_name: str = ""
     acquisition_mode: AcquisitionMode = AcquisitionMode.MATCH
+    match_config: MatchConfig | None = None
     selector_wait_timeout: int = 60
     creation_params: dict[str, Any] = field(default_factory=dict)
     creation_lifecycle: CreationLifecycle = CreationLifecycle.EPHEMERAL
@@ -63,10 +64,14 @@ class ExecutionResult:
 
     task: Task
     task_context: TaskContext | None = None
-    result: Any = None
+    result: TaskResult | None = None
     env_id: int | None = None
     env_created: bool = False
+    env_lease_id: str | None = None
     prepare_result: dict[str, Any] | None = None
+    signal: TaskSignal | None = None
+    hooks_module: str = ""
+    creation_lifecycle: CreationLifecycle = CreationLifecycle.EPHEMERAL
 
 
 class ExecutionRunner:
@@ -120,7 +125,8 @@ class ExecutionRunner:
         env_id = None
         env_created = False
         task_context = None
-        result = None
+        result: TaskResult | None = None
+        signal: TaskSignal | None = None
 
         try:
             self._ensure_not_stopped(is_stop_requested)
@@ -131,6 +137,8 @@ class ExecutionRunner:
                 req = EnvRequirement(
                     task_run_id=task.id,
                     kind=EnvKind.BROWSER,
+                    provider=request.provider_name,
+                    match_rules=request.match_config.match_rules if request.match_config else None,
                     timeout=wait_timeout,
                 )
                 env_lease = await self.rem.acquire_atomic(req, timeout=req.timeout)
@@ -142,6 +150,7 @@ class ExecutionRunner:
                     request.creation_params,
                     prepare_creation_params,
                 )
+                proxy_config = self._extract_proxy_config(merged_creation_params)
                 create_params = {
                     "creation_params": merged_creation_params,
                     "env_name": f"task-{task.id}-{int(time.time())}",
@@ -150,7 +159,7 @@ class ExecutionRunner:
                     provider_name=request.provider_name,
                     env_name=create_params["env_name"],
                     config=create_params,
-                    post_action="none",
+                    requirement=EnvRequirement(proxy_config=proxy_config) if proxy_config else None,
                     ensure_runtime=False,
                 )
                 env_id = env.id
@@ -170,7 +179,7 @@ class ExecutionRunner:
             task.status = TaskStatus.RUNNING
             await self._publish_task_update(task, on_task_update)
 
-            if not await self.rem.start_env(env_id):
+            if not env_created and not await self.rem.start_env(env_id):
                 raise RuntimeError(f"Failed to start env {env_id}")
 
             self._ensure_not_stopped(is_stop_requested)
@@ -187,7 +196,10 @@ class ExecutionRunner:
                 task=task,
                 env_id=env_id,
                 env_created=env_created,
+                env_lease_id=env_lease.id if env_lease else None,
                 prepare_result=prepare_result,
+                hooks_module=hooks_module,
+                creation_lifecycle=request.creation_lifecycle,
             )
 
         try:
@@ -208,61 +220,128 @@ class ExecutionRunner:
                 tools=runtime_caps.tools,
                 state=dict(request.state),
             )
+            task_context.runtime.update(
+                {
+                    "module_name": module_name,
+                    "hooks_module": hooks_module,
+                    "env_created": env_created,
+                    "creation_lifecycle": request.creation_lifecycle.value,
+                }
+            )
             if on_context_ready:
                 on_context_ready(task_context)
 
-            await self.mms.call_hook(hooks_module, "init_env", task_context)
-            await self.mms.call_hook(hooks_module, "before_run", task_context)
-
-            if request.execution_timeout and request.execution_timeout > 0:
-                result = await asyncio.wait_for(
-                    self.mms.run_module(module_name, task_context),
-                    timeout=request.execution_timeout,
-                )
+            await self._call_hook_with_signal_phase(hooks_module, "init_env", task_context)
+            signal = self._resolve_task_signal(task_context, None)
+            if signal:
+                result = self._signal_to_task_result(signal)
+                self._apply_signal_outcome(task, signal, result)
             else:
-                result = await self.mms.run_module(module_name, task_context)
+                await self._call_hook_with_signal_phase(hooks_module, "before_run", task_context)
+                signal = self._resolve_task_signal(task_context, None)
+                if signal:
+                    result = self._signal_to_task_result(signal)
+                    self._apply_signal_outcome(task, signal, result)
 
-            if task_context.should_stop() or self._is_stop_requested(is_stop_requested):
-                raise TaskStopRequested("Job paused during execution")
+            if task.status == TaskStatus.RUNNING:
+                task_context.set_signal_phase("run_module")
+                try:
+                    if request.execution_timeout and request.execution_timeout > 0:
+                        raw_result = await asyncio.wait_for(
+                            self.mms.run_module(module_name, task_context),
+                            timeout=request.execution_timeout,
+                        )
+                    else:
+                        raw_result = await self.mms.run_module(module_name, task_context)
+                finally:
+                    task_context.set_signal_phase(None)
 
-            task.message = str(result)
-            task.status = TaskStatus.SUCCEEDED
-            await self.mms.call_hook(hooks_module, "on_success", task_context, result)
+                if task_context.should_stop() or self._is_stop_requested(is_stop_requested):
+                    raise TaskStopRequested("Job paused during execution")
+
+                result = self._normalize_task_result(raw_result)
+                signal = self._resolve_task_signal(task_context, result)
+                if signal:
+                    self._apply_signal_outcome(task, signal, result)
+                elif result.success:
+                    task.message = result.message or str(result.data or raw_result)
+                    task.error = ""
+                    task.status = TaskStatus.SUCCEEDED
+                else:
+                    task.message = result.message
+                    task.error = result.error or result.message
+                    task.status = TaskStatus.FAILED
+
+            self._record_runtime_outcome(task_context, task, result, signal)
+
+            if task.status == TaskStatus.WAITING_CONFIRMATION:
+                await self._publish_task_update(task, on_task_update)
+                return ExecutionResult(
+                    task=task,
+                    task_context=task_context,
+                    result=result,
+                    env_id=env_id,
+                    env_created=env_created,
+                    env_lease_id=env_lease.id if env_lease else None,
+                    prepare_result=prepare_result,
+                    signal=signal,
+                    hooks_module=hooks_module,
+                    creation_lifecycle=request.creation_lifecycle,
+                )
+
+            if task.status == TaskStatus.SUCCEEDED:
+                await self._call_terminal_hook(hooks_module, "on_success", task_context, result)
+            elif task.status == TaskStatus.FAILED:
+                failure = self._build_failure_exception(task.error or "Task failed")
+                await self._call_terminal_hook(hooks_module, "on_failure", task_context, failure)
         except asyncio.TimeoutError:
             logger.error(f"[ATM] Task {task.id} execution timed out")
             task.error = f"Execution Timeout: {request.execution_timeout}s"
+            task.message = ""
             task.status = TaskStatus.FAILED
             if task_context:
-                await self.mms.call_hook(hooks_module, "on_timeout", task_context)
+                task_context.runtime["final_status"] = task.status.value
+                task_context.runtime["task_error"] = task.error
+                await self._call_terminal_hook(hooks_module, "on_timeout", task_context)
         except TaskStopRequested as e:
             logger.info(f"[ATM] Task {task.id} cancelled: {e}")
             task.error = str(e)
+            task.message = ""
             task.status = TaskStatus.CANCELLED
         except Exception as e:
             logger.error(f"[ATM] Task {task.id} execution failed: {e}")
             task.error = f"Execution Error: {str(e)}"
+            task.message = ""
             task.status = TaskStatus.FAILED
             if task_context:
-                await self.mms.call_hook(hooks_module, "on_failure", task_context, e)
-        finally:
-            task.finished_at = int(time.time())
+                task_context.runtime["final_status"] = task.status.value
+                task_context.runtime["task_error"] = task.error
+                await self._call_terminal_hook(hooks_module, "on_failure", task_context, e)
 
+        task.finished_at = int(time.time())
+
+        if task_context:
+            task_context.runtime["final_status"] = task.status.value
+            task_context.runtime["task_error"] = task.error
+
+        if env_lease:
+            resolved_env_action = (
+                signal.env_action
+                if signal and signal.env_action is not None
+                else self._default_env_action(env_created, request.creation_lifecycle)
+            )
+            env_action_info = await self._apply_env_action(
+                env_lease=env_lease,
+                env_action=resolved_env_action,
+                env_id=int(task.env_id) if task.env_id else None,
+            )
             if task_context:
-                try:
-                    await self.mms.call_hook(hooks_module, "on_cleanup", task_context)
-                except Exception as e:
-                    logger.error(f"[ATM] Task {task.id} cleanup hook failed: {e}")
+                task_context.runtime["env_action"] = env_action_info
 
-            if env_lease:
-                try:
-                    await self.rem.release(env_lease)
-                    if env_created and request.creation_lifecycle == CreationLifecycle.EPHEMERAL:
-                        logger.info(f"[ATM] Teardown: Destroying ephemeral env {env_id}")
-                        await self.rem.destroy_env(int(task.env_id))
-                except Exception as e:
-                    logger.error(f"[ATM] Failed to release/destroy env {task.env_id}: {e}")
+        if task_context:
+            await self._call_cleanup_hook(hooks_module, task_context)
 
-            await self._publish_task_update(task, on_task_update)
+        await self._publish_task_update(task, on_task_update)
 
         return ExecutionResult(
             task=task,
@@ -270,7 +349,94 @@ class ExecutionRunner:
             result=result,
             env_id=env_id,
             env_created=env_created,
+            env_lease_id=env_lease.id if env_lease else None,
             prepare_result=prepare_result,
+            signal=signal,
+            hooks_module=hooks_module,
+            creation_lifecycle=request.creation_lifecycle,
+        )
+
+    async def finalize_waiting(
+        self,
+        *,
+        task: Task,
+        task_context: TaskContext,
+        hooks_module: str,
+        env_lease: EnvLease | None,
+        env_created: bool,
+        creation_lifecycle: CreationLifecycle,
+        confirmed: bool,
+        confirmation_message: str = "",
+        on_task_update: TaskUpdateCallback | None = None,
+    ) -> ExecutionResult:
+        """完成等待人工确认的任务。"""
+
+        if task.status != TaskStatus.WAITING_CONFIRMATION:
+            raise ValueError(f"Task {task.id} is not waiting for confirmation")
+
+        if confirmed:
+            result = TaskResult.ok(message=confirmation_message or task.message or "人工确认成功")
+            task.status = TaskStatus.SUCCEEDED
+            task.message = result.message
+            task.error = ""
+            await self._call_terminal_hook(hooks_module, "on_success", task_context, result)
+        else:
+            result = TaskResult.fail(
+                message=confirmation_message or task.message or "人工确认失败",
+                error=confirmation_message or "user_confirmation_failed",
+            )
+            task.status = TaskStatus.FAILED
+            task.message = result.message
+            task.error = result.error or result.message
+            await self._call_terminal_hook(
+                hooks_module,
+                "on_failure",
+                task_context,
+                self._build_failure_exception(task.error or "Task confirmation failed"),
+            )
+
+        task.finished_at = int(time.time())
+        self._record_runtime_outcome(task_context, task, result, None)
+
+        if env_lease:
+            env_action_info = await self._apply_env_action(
+                env_lease=env_lease,
+                env_action=self._default_env_action(env_created, creation_lifecycle),
+                env_id=int(task.env_id) if task.env_id else None,
+            )
+            task_context.runtime["env_action"] = env_action_info
+
+        await self._call_cleanup_hook(hooks_module, task_context)
+        await self._publish_task_update(task, on_task_update)
+
+        return ExecutionResult(
+            task=task,
+            task_context=task_context,
+            result=result,
+            env_id=int(task.env_id) if task.env_id else None,
+            env_created=env_created,
+            env_lease_id=env_lease.id if env_lease else None,
+            signal=None,
+            hooks_module=hooks_module,
+            creation_lifecycle=creation_lifecycle,
+        )
+
+    def _extract_proxy_config(self, creation_params: dict[str, Any]) -> ProxyConfig | None:
+        raw_proxy = creation_params.pop("proxy", None)
+        if not isinstance(raw_proxy, dict):
+            return None
+
+        mode_raw = raw_proxy.get("mode", ProxyMode.NONE.value)
+        try:
+            mode = ProxyMode(mode_raw)
+        except ValueError:
+            mode = ProxyMode.NONE
+
+        return ProxyConfig(
+            mode=mode,
+            pool_id=raw_proxy.get("pool_id"),
+            static_value=raw_proxy.get("static_value"),
+            current_ip=raw_proxy.get("current_ip"),
         )
 
     async def _cleanup_failed_acquisition(
@@ -326,3 +492,154 @@ class ExecutionRunner:
         if not callback:
             return False
         return bool(callback())
+
+    async def _call_hook_with_signal_phase(
+        self,
+        hooks_module: str,
+        hook_name: str,
+        task_context: TaskContext,
+        *args: Any,
+    ) -> Any:
+        task_context.set_signal_phase(hook_name)
+        try:
+            return await self.mms.call_hook(hooks_module, hook_name, task_context, *args)
+        finally:
+            task_context.set_signal_phase(None)
+
+    async def _call_terminal_hook(
+        self,
+        hooks_module: str,
+        hook_name: str,
+        task_context: TaskContext,
+        *args: Any,
+    ) -> None:
+        try:
+            await self.mms.call_hook(hooks_module, hook_name, task_context, *args)
+        except Exception as e:
+            logger.error(f"[ATM] Task {task_context.task_name} terminal hook {hook_name} failed: {e}")
+
+    async def _call_cleanup_hook(self, hooks_module: str, task_context: TaskContext) -> None:
+        try:
+            await self.mms.call_hook(hooks_module, "on_cleanup", task_context)
+        except Exception as e:
+            logger.error(f"[ATM] Task {task_context.task_name} cleanup hook failed: {e}")
+
+    def _normalize_task_result(self, result: Any) -> TaskResult:
+        if isinstance(result, TaskResult):
+            return result
+        if result is None:
+            return TaskResult.ok()
+        if isinstance(result, dict):
+            return TaskResult.ok(message=str(result), data=result)
+        return TaskResult.ok(message=str(result), data={"value": result})
+
+    def _resolve_task_signal(
+        self,
+        task_context: TaskContext,
+        task_result: TaskResult | None,
+    ) -> TaskSignal | None:
+        emitted_signal = task_context.get_signal()
+        result_signal = task_result.signal if task_result else None
+        if emitted_signal and result_signal and emitted_signal != result_signal:
+            raise ValueError("TaskContext.emit_signal 与 TaskResult.signal 同时存在且不一致")
+        task_context.clear_signal()
+        return result_signal or emitted_signal
+
+    def _signal_to_task_result(self, signal: TaskSignal) -> TaskResult:
+        if signal.action == TaskSignalAction.FAIL:
+            return TaskResult.fail(
+                message=signal.message or "任务失败",
+                error=signal.error,
+                data=dict(signal.payload),
+                signal=signal,
+            )
+        return TaskResult.ok(
+            message=signal.message or "任务完成",
+            data=dict(signal.payload),
+            signal=signal,
+        )
+
+    def _apply_signal_outcome(
+        self,
+        task: Task,
+        signal: TaskSignal,
+        result: TaskResult,
+    ) -> None:
+        task.message = signal.message or result.message
+        if signal.action == TaskSignalAction.SUCCEED:
+            task.error = ""
+            task.status = TaskStatus.SUCCEEDED
+            return
+        if signal.action == TaskSignalAction.FAIL:
+            task.error = signal.error or result.error or signal.message or result.message
+            task.status = TaskStatus.FAILED
+            return
+        if signal.action == TaskSignalAction.CANCEL:
+            task.error = signal.error or signal.message or ""
+            task.status = TaskStatus.CANCELLED
+            return
+        if signal.action == TaskSignalAction.WAIT_FOR_CONFIRMATION:
+            if signal.env_action not in {None, EnvAction.KEEP_ALIVE}:
+                raise ValueError("wait_for_confirmation 信号仅支持 keep_alive 环境语义")
+            task.error = ""
+            task.status = TaskStatus.WAITING_CONFIRMATION
+            return
+        raise ValueError(f"Unsupported task signal action: {signal.action}")
+
+    def _record_runtime_outcome(
+        self,
+        task_context: TaskContext,
+        task: Task,
+        result: TaskResult | None,
+        signal: TaskSignal | None,
+    ) -> None:
+        task_context.runtime["final_status"] = task.status.value
+        task_context.runtime["task_error"] = task.error
+        if result:
+            task_context.runtime["task_result"] = result.to_dict()
+        if signal:
+            task_context.runtime["task_signal"] = signal.to_dict()
+
+    def _build_failure_exception(self, message: str) -> Exception:
+        return RuntimeError(message)
+
+    def _default_env_action(
+        self,
+        env_created: bool,
+        creation_lifecycle: CreationLifecycle,
+    ) -> EnvAction:
+        if env_created and creation_lifecycle == CreationLifecycle.EPHEMERAL:
+            return EnvAction.DESTROY
+        return EnvAction.RECYCLE
+
+    async def _apply_env_action(
+        self,
+        *,
+        env_lease: EnvLease,
+        env_action: EnvAction,
+        env_id: int | None,
+    ) -> dict[str, Any]:
+        info = {
+            "action": env_action.value,
+            "env_id": env_id,
+            "success": False,
+        }
+        try:
+            if env_action == EnvAction.RECYCLE:
+                info["success"] = await self.rem.release(env_lease)
+                return info
+            if env_action == EnvAction.KEEP_ALIVE:
+                info["success"] = await self.rem.release_keep_alive(env_lease)
+                return info
+            if env_action == EnvAction.DESTROY:
+                released = await self.rem.release_keep_alive(env_lease)
+                destroyed = released and bool(env_id is not None) and await self.rem.destroy_env(int(env_id))
+                info["success"] = released and destroyed
+                info["released"] = released
+                info["destroyed"] = destroyed
+                return info
+        except Exception as e:
+            logger.error(f"[ATM] Failed to apply env action {env_action.value} for env {env_id}: {e}")
+            info["error"] = str(e)
+            return info
+        raise ValueError(f"Unsupported env action: {env_action}")

@@ -29,6 +29,7 @@
 | 可选 hooks | `prepare_env`, `init_env`, `before_run`, `on_success`, `on_failure`, `on_timeout`, `on_cleanup` |
 | 当前实现 | 根 `__init__.py` 已收敛为稳定薄壳，默认入口组装逻辑由 `ModuleAssembler` 提供 |
 | Core 扩展入口 | `context.tools.call("<namespace>.<action>", **kwargs)` |
+| 生命周期规则 | `on_cleanup` 是终态清理 hook；只要任务已建立 `TaskContext` 并进入终态就会执行，不以环境是否 `destroy` 为前提；环境动作结果通过 `context.runtime["env_action"]` 暴露 |
 | 默认工作流解析 | `context.config.workflow` -> `module_runtime.DEFAULT_WORKFLOW` -> `module.yaml.workflows[0].name` |
 | `core:data_table` UI 契约 | 页面创建/刷新时先同步调用根模块 `declare_ui(context)`；若 schema 声明 `create_handler` / `update_handler`，通用页新增/编辑继续路由到同名同步本地 hook |
 | DevLink 调试语义 | 模块来源为 `DevLink` 时，详情页数据表刷新会以 `devel_mode=true` 重建本地 hook 上下文，便于联调最新 UI 声明 |
@@ -43,7 +44,7 @@
 | SDK 包名 | `crawler4j-sdk` |
 | Contracts 包名 | `crawler4j-contracts` |
 | CLI 入口 | `crawler4j_sdk.cli.commands:main` |
-| 当前能力 | `ModuleAssembler` 已作为统一模块入口组装 helper 落地；`TaskContext` 已收敛为 `tools` 统一扩展入口；CLI 已支持 `init-model --defaults`、`new` 与 `list` |
+| 当前能力 | `ModuleAssembler` 已作为统一模块入口组装 helper 落地；`TaskContext` 已收敛为 `tools` 统一扩展入口；`TaskSignal` 已成为模块到 ATM 的正式流程信号；CLI 已支持 `init-model --defaults`、`new` 与 `list` |
 | 当前状态 | 本地 build 成功，help 可运行；模块入口自动托管、重初始化路径与集成测试已完成 |
 | 关联项 | `REQ-003`, `REQ-006` |
 
@@ -72,3 +73,4 @@
 | 2026-03-31 | 增补模块根入口自动托管的契约演进设计 | Codex |
 | 2026-04-08 | 补记 `core:data_table` 的本地 UI hook 契约与 DevLink 刷新调试语义 | Codex |
 | 2026-04-15 | 将 Core 扩展能力收敛到 `TaskContext.tools` 统一工具接口 | Codex |
+| 2026-04-15 | 固化 `on_cleanup` 终态规则，并补记 `TaskSignal` 为正式流程信号 | Codex |

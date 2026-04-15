@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class EnvType(str, Enum):
@@ -22,14 +22,6 @@ class SelectionStrategy(str, Enum):
     FIFO = "fifo"
     LIFO = "lifo"
     BEST_FIT = "best_fit"
-
-
-class TeardownAction(str, Enum):
-    DESTROY = "destroy"
-    RECYCLE = "recycle"
-    HIBERNATE = "hibernate"
-    KEEP_ALIVE = "keep_alive"
-    NONE = "none"
 
 
 class LogicOp(str, Enum):
@@ -116,22 +108,21 @@ class RetryPolicy(BaseModel):
     new_env_on_retry: bool = Field(default=True)
 
 
-class TeardownPolicy(BaseModel):
-    on_success: TeardownAction = Field(default=TeardownAction.RECYCLE)
-    success_workflow: Optional[str] = Field(default=None)
-    on_failure: TeardownAction = Field(default=TeardownAction.KEEP_ALIVE)
-    failure_workflow: Optional[str] = Field(default=None)
-    on_timeout: TeardownAction = Field(default=TeardownAction.DESTROY)
-    timeout_workflow: Optional[str] = Field(default=None)
-
-
 class RunProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     resource: ResourceConfig = Field(default_factory=ResourceConfig)
     execution: Optional[ExecutionContext] = None
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
-    teardown: TeardownPolicy = Field(default_factory=TeardownPolicy)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_teardown(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "teardown" in data:
+            cleaned = dict(data)
+            cleaned.pop("teardown", None)
+            return cleaned
+        return data
 
     def to_yaml(self) -> str:
         return yaml.dump(self.model_dump(mode="json"), allow_unicode=True, sort_keys=False)

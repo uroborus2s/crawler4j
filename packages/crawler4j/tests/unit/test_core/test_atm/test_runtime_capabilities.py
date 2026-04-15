@@ -47,8 +47,11 @@ def test_runtime_tools_register_expected_surface():
     assert caps.tools.has_tool("captcha.match_slider") is True
     assert caps.tools.has_tool("captcha.match_click_targets") is True
 
-    tool_names = [spec.name for spec in caps.tools.list_tools()]
+    specs = caps.tools.list_tools()
+    tool_names = [spec.name for spec in specs]
     assert tool_names == sorted(tool_names)
+    assert {spec.name: spec.is_async for spec in specs}["env.set_proxy"] is True
+    assert {spec.name: spec.is_async for spec in specs}["db.list_records"] is False
 
 
 def test_db_tools_records_and_lock_are_generic(monkeypatch):

@@ -60,8 +60,11 @@ class MyTask(TaskScript):
 | `TaskFlow` | 工作流编排基类 |
 | `TaskContext` | 任务执行上下文 |
 | `TaskResult` | 任务结果模型 |
+| `TaskSignal` | 模块通知 ATM 的流程控制信号 |
+| `TaskSignalAction` | `TaskSignal` 的动作枚举 |
+| `EnvAction` | 任务结束后 ATM 对运行环境执行的动作 |
 | `ToolsCapability` | Core 注入的统一工具入口 |
-| `ToolSpec` | Core 工具声明元数据 |
+| `ToolSpec` | Core 工具声明元数据（`name` / `description` / `is_async`） |
 
 ### TaskContext 常用能力
 
@@ -72,9 +75,11 @@ class MyTask(TaskScript):
 | `ctx.http` | HTTP 客户端 |
 | `ctx.config` | 任务配置 |
 | `ctx.state` | 共享状态 |
+| `ctx.runtime` | ATM 写入的运行态元数据 |
 | `ctx.run_subtask()` | 调用子任务 |
 | `ctx.should_stop()` | 检查停止标志 |
 | `ctx.screenshot()` | 截图 |
+| `ctx.emit_signal()` | 向 ATM 发出流程控制信号 |
 | `ctx.tools` | 宿主注入的统一扩展工具入口 |
 
 ## Core 工具能力边界
@@ -102,6 +107,12 @@ class MyTask(TaskScript):
 
 - `ctx.tools.has_tool(name)`
 - `ctx.tools.list_tools()`
+
+`ctx.tools.list_tools()` 返回的每一项都是 `ToolSpec`，其中：
+
+- `name` 是工具名
+- `description` 是工具描述
+- `is_async` 表示这个工具是否需要 `await ctx.tools.call(...)`
 
 不要在模块里直接连接宿主数据库，也不要假设存在 ORM Session、原生 SQLite 连接或其他私有存储对象。
 
@@ -177,6 +188,38 @@ class MyWorkflow(TaskFlow):
             ctx.state["phase"] = "process"
             await ctx.run_subtask("process", task=task)
 ```
+
+## 运行期控制信号
+
+模块如果需要让 ATM 接管流程动作，例如等待人工确认或在失败后销毁环境，应通过 `TaskSignal`，而不是直接操作宿主运行环境。
+
+```python
+from crawler4j_sdk import EnvAction, TaskResult, TaskSignal
+
+
+return TaskResult.fail(
+    message="检测到黑号",
+    error="black_account",
+    signal=TaskSignal.fail(
+        message="检测到黑号",
+        error="black_account",
+        env_action=EnvAction.DESTROY,
+    ),
+)
+```
+
+当前 `TaskScript` / `TaskFlow` 自身只有一个稳定入口方法：`execute(ctx)` 或 `run(ctx)`。
+模块级生命周期统一在 `module_runtime.py` 中实现：
+
+- `prepare_env`
+- `init_env`
+- `before_run`
+- `on_success`
+- `on_failure`
+- `on_timeout`
+- `on_cleanup`
+
+`on_cleanup` 发生在 ATM 完成环境动作之后。如果模块需要在环境已删除后清理自己的数据，应在 `on_cleanup` 中读取 `ctx.runtime["env_action"]`，而不是再增加一套额外的“环境删除 hook”。
 
 ## 版本兼容
 
