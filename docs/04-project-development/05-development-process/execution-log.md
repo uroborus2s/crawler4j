@@ -6,7 +6,7 @@
 **主要读者：** Tech Lead | 开发 | QA | 发布负责人
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
-**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`
+**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `CR-004`, `CR-005`, `BUG-013`
 **最后更新：** 2026-04-16
 
 ## 1. 用途与记录规则
@@ -58,6 +58,12 @@
 | 2026-04-15 | 修复运行模板执行脚本模块下拉空白项：移除空默认选项，改为 placeholder 未选中态，并补 UI 单测 | Codex |
 | 2026-04-16 | 调整应用启动默认宽度与任务监控操作列：主窗口默认宽度改为 `1420px`，任务监控“操作”列放宽到 `240px`，避免按钮文案被截断，并补 UI 单测 | Codex |
 | 2026-04-16 | 优化 ATM 手动批次“执行一次”交互：点击后列表立即显示“执行中”并禁用按钮，直到任务终态与环境回收完成后才恢复可执行，并补 UI/服务回归测试 | Codex |
+| 2026-04-16 | 收敛 ATM 环境回收语义：任务完成、创建失败与僵尸任务恢复均只关闭并回收环境，不再自动删除；只有模块显式发送 `EnvAction.DESTROY` 时才执行环境销毁，并同步新默认生命周期与回归测试 | Codex |
+| 2026-04-16 | 移除运行模板中的“生命周期”兼容控件：前端不再展示任何环境删除策略入口，保存运行模板时固定写入非自动删除语义，并补 UI 回归测试 | Codex |
+| 2026-04-16 | 收敛 REM 命名语义：将 `EnvironmentManager.reset()` 更名为 `recycle_env()`，明确其仅执行关窗回收和任务解绑，不表示清空浏览器持久数据，并补 ATM 回归测试 | Codex |
+| 2026-04-16 | 完成 `TASK-021` / `CR-004`：为 `TaskSignal.wait_for_confirmation` 增加任务 signal 持久化、`task.signal` 事件和 ATM 详情页结构化确认面板，客户端可按 `payload.confirmation` 展示字段并调用既有确认服务完成任务收尾 | Codex |
+| 2026-04-16 | 调整模块自定义数据列表横向滚动表现：隐藏底部横向滚动条，但保留触控板/滚轮横向滑动能力，并补 `ModuleDataTablePage` 回归断言锁定滚动策略 | Codex |
+| 2026-04-16 | 完成 `BUG-013` / `CR-005`：`ModuleAssembler` 发现 `tasks/` / `workflows/` import 失败时改为输出异常上下文与 traceback，并在命中失败条目时向运行时回传 discovery hint；ATM 普通执行 `DevLink` 模块时也会显式开启一次性 reload，无需重启主客户端即可吃到最新源码 | Codex |
 
 ## 5. 2026-04-15 缺陷修复记录
 

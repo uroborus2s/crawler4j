@@ -83,7 +83,32 @@ class CheckAccountTask(TaskScript):
     name = "check_account"
 
     async def execute(self, ctx):
-        is_black = True
+        need_manual_review = True
+        if need_manual_review:
+            signal = TaskSignal.wait_for_confirmation(
+                message="等待人工复核",
+                reason="risk_control",
+                env_action=EnvAction.KEEP_ALIVE,
+                payload={
+                    "review_type": "account",
+                    "confirmation": {
+                        "title": "账号复核",
+                        "description": "请确认该账号是否允许继续执行。",
+                        "fields": [
+                            {"label": "账号", "value": "demo-account"},
+                            {"label": "风险等级", "value": "high"},
+                        ],
+                        "confirm_text": "确认放行",
+                        "reject_text": "确认拦截",
+                    },
+                },
+            )
+            return TaskResult.ok(
+                message="等待人工复核",
+                signal=signal,
+            )
+
+        is_black = False
         if is_black:
             signal = TaskSignal.fail(
                 message="检测到黑号",
@@ -113,6 +138,7 @@ class CheckAccountTask(TaskScript):
 - `on_cleanup` 不要求环境一定被删除
 - 只要任务已经进入终态并且模块执行上下文已建立，ATM 就会调用它
 - 需要区分 `destroy` / `recycle` / `keep_alive` 时，统一读取 `ctx.runtime["env_action"]`
+- 需要客户端弹出结构化确认面板时，统一把展示协议写入 `TaskSignal.wait_for_confirmation(..., payload={"confirmation": ...})`
 
 ## 第一次看这个示例时，应该怎么看
 

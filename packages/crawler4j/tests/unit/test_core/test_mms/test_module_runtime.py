@@ -1,3 +1,5 @@
+import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -100,3 +102,46 @@ async def test_module_service_loads_package_from_path_when_manifest_name_differs
 
     assert result.success is True
     assert result.data["module"] == "demo_module"
+
+
+def test_module_service_reloads_dev_module_once_per_context(tmp_path):
+    module_name = "reloadable_module"
+    module_dir = tmp_path / module_name
+    module_dir.mkdir()
+
+    def write_module(version: int) -> None:
+        (module_dir / "__init__.py").write_text(
+            f"VERSION = {version}\n",
+            encoding="utf-8",
+        )
+
+    write_module(1)
+
+    service = ModuleService()
+    service.registry = SimpleNamespace(
+        get_module=lambda name: ModuleInfo(
+            name=module_name,
+            manifest=ModuleManifest(name=module_name),
+            path=module_dir,
+        )
+    )
+
+    try:
+        context_a = TaskContext(env_id=0, task_name=module_name, config={"devel_mode": True})
+        module_v1 = service._load_module(module_name, context_a)
+        assert module_v1.VERSION == 1
+
+        time.sleep(1.1)
+        write_module(2)
+
+        module_same_context = service._load_module(module_name, context_a)
+        assert module_same_context is module_v1
+        assert module_same_context.VERSION == 1
+
+        context_b = TaskContext(env_id=0, task_name=module_name, config={"devel_mode": True})
+        module_v2 = service._load_module(module_name, context_b)
+        assert module_v2.VERSION == 2
+    finally:
+        for loaded_name in list(sys.modules):
+            if loaded_name == module_name or loaded_name.startswith(f"{module_name}."):
+                sys.modules.pop(loaded_name, None)

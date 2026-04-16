@@ -186,3 +186,29 @@ def test_shim_hook_delegation(temp_module):
     # We can't easily import the dynamically generated shim in unit test without more complex setup,
     # but we've verified the logic above.
     pass
+
+
+@pytest.mark.asyncio
+async def test_assembler_logs_import_failure_and_surfaces_discovery_hint(temp_module, caplog):
+    broken_task_code = """
+import definitely_missing_dep
+from crawler4j_sdk import TaskScript
+
+class BrokenTask(TaskScript):
+    name = "broken"
+"""
+    (temp_module / "tasks" / "broken.py").write_text(broken_task_code)
+    (temp_module / "tasks" / "__init__.py").touch()
+
+    with caplog.at_level(logging.ERROR):
+        assembler = ModuleAssembler(temp_module, "test_module", default_workflow="broken")
+
+    assert "broken" not in assembler.task_scripts
+    assert "test_module.tasks.broken" in caplog.text
+    assert "definitely_missing_dep" in caplog.text
+
+    ctx = create_mock_context()
+    ctx.get_config.return_value = "broken"
+
+    with pytest.raises(ValueError, match="definitely_missing_dep"):
+        await assembler.run(ctx)

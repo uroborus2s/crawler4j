@@ -121,6 +121,7 @@ class Task:
     # 执行结果
     message: str = ""
     error: str = ""
+    signal: Dict[str, Any] | None = None
     
     # 时间戳
     created_at: int = field(default_factory=lambda: int(time.time()))

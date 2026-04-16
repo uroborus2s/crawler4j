@@ -25,6 +25,7 @@ from src.core.atm.repository import get_task_repository
 from src.core.foundation.context import current_task_id
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
+from src.core.mms.models import ModuleSource
 from src.core.rem.manager import get_environment_manager
 
 @dataclass
@@ -147,6 +148,8 @@ class TaskDispatcher:
 
         params = {**run_profile.execution.params, **job.params}
         params["workflow"] = run_profile.execution.workflow
+        if self._is_dev_link_module(module_name):
+            params["devel_mode"] = True
 
         request = ExecutionRequest(
             task=task,
@@ -183,6 +186,15 @@ class TaskDispatcher:
     def _is_stop_requested(self, job_id: str) -> bool:
         return job_id in self._job_stop_requests
 
+    def _is_dev_link_module(self, module_name: str) -> bool:
+        registry = getattr(self.mms, "registry", None)
+        if not registry or not hasattr(registry, "get_module"):
+            return False
+
+        module_root = module_name.split(".")[0]
+        module = registry.get_module(module_name) or registry.get_module(module_root)
+        return bool(module and getattr(module, "source", None) == ModuleSource.DEV_LINK)
+
     def _cleanup_runtime_refs(self, task_id: str, preserve_waiting: bool = False):
         self._task_loops.pop(task_id, None)
         if preserve_waiting:
@@ -202,6 +214,7 @@ class TaskDispatcher:
             env_created=execution_result.env_created,
             creation_lifecycle=execution_result.creation_lifecycle,
         )
+        self._publish_task_signal_event(execution_result.task)
 
     async def confirm_task(self, task_id: str, *, success: bool, message: str = "") -> bool:
         task = await self.repo.get_task(task_id)
@@ -252,6 +265,26 @@ class TaskDispatcher:
                     "status": task.status.value,
                     "env_id": task.env_id,
                     "error": task.error,
+                },
+            )
+        )
+
+    def _publish_task_signal_event(self, task: Task) -> None:
+        if not task.signal:
+            return
+        get_event_bus().publish(
+            Event(
+                type=EventType.TASK_SIGNAL,
+                task_run_id=task.id,
+                data={
+                    "task_id": task.id,
+                    "job_id": task.job_id,
+                    "status": task.status.value,
+                    "env_id": task.env_id,
+                    "lease_id": task.lease_id,
+                    "message": task.message,
+                    "error": task.error,
+                    "signal": task.signal,
                 },
             )
         )

@@ -464,10 +464,10 @@ class ExecutionRunner:
             try:
                 env = await self.rem.get_env(int(env_id))
                 if env:
-                    await self.rem.reset(env)
+                    await self.rem.recycle_env(env)
             except Exception as reset_error:
                 logger.error(
-                    f"[ATM] Task {task.id} failed to reset created env during acquisition error: {reset_error}"
+                    f"[ATM] Task {task.id} failed to recycle created env during acquisition error: {reset_error}"
                 )
 
         if isinstance(error, TaskStopRequested):
@@ -570,6 +570,7 @@ class ExecutionRunner:
         signal: TaskSignal,
         result: TaskResult,
     ) -> None:
+        task.signal = signal.to_dict()
         task.message = signal.message or result.message
         if signal.action == TaskSignalAction.SUCCEED:
             task.error = ""
@@ -598,6 +599,10 @@ class ExecutionRunner:
         result: TaskResult | None,
         signal: TaskSignal | None,
     ) -> None:
+        if signal:
+            task.signal = signal.to_dict()
+        elif task.status != TaskStatus.WAITING_CONFIRMATION:
+            task.signal = None
         task_context.runtime["final_status"] = task.status.value
         task_context.runtime["task_error"] = task.error
         if result:

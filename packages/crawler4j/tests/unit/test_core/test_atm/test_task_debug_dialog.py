@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QScrollArea
 
 from src.core.atm.models import Job
 from src.core.atm.run_profile import (
@@ -118,6 +118,30 @@ def test_job_debug_dialog_copies_attach_address(qtbot, tmp_path):
     page.copy_attach_address()
 
     assert QApplication.clipboard().text() == "127.0.0.1:5678"
+
+
+def test_job_debug_dialog_uses_dark_theme_controls(qtbot, tmp_path):
+    from src.core.atm.ui.task_debug_dialog import JobDebugDialog
+    from src.ui.components.spin_box import StyledSpinBox
+
+    page = JobDebugDialog(
+        _make_job(),
+        _make_run_profile(),
+        _make_module(tmp_path),
+        debug_service=SimpleNamespace(),
+    )
+    qtbot.addWidget(page)
+
+    assert isinstance(page.attach_port_spin, StyledSpinBox)
+    assert isinstance(page.timeout_spin, StyledSpinBox)
+    assert isinstance(page.scroll_area, QScrollArea)
+    assert page.scroll_area.widgetResizable() is True
+    assert "#1a1b26" in page.styleSheet()
+    assert "QCheckBox::indicator" in page.styleSheet()
+    assert page.close_btn.text() == "关闭"
+    screen = page.screen() or QApplication.primaryScreen()
+    if screen is not None:
+        assert page.maximumHeight() <= screen.availableGeometry().height()
 
 
 def test_job_debug_dialog_run_async_skips_when_no_event_loop(qtbot, tmp_path, monkeypatch):

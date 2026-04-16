@@ -8,6 +8,7 @@ from crawler4j_contracts import TaskContext
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -259,6 +260,8 @@ class ModuleDataTablePage(QWidget):
 
         self.table = SkyTableWidget()
         self.table.verticalHeader().setDefaultSectionSize(42)
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(self.table)
 
         self.tip_label = QLabel("视图由模块在 hooks 中声明，Core 仅提供通用渲染与基础存储。")

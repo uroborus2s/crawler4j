@@ -6,8 +6,8 @@
 **主要读者：** QA | 开发 | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
-**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `NFR-003`
-**最后更新：** 2026-04-08
+**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `BUG-013`, `CR-005`, `NFR-003`
+**最后更新：** 2026-04-16
 
 ## 1. 测试目标
 
@@ -35,6 +35,8 @@
 | `TC-005` PyInstaller build | 通过 | 修正后的 spec 成功构建到 `/tmp/crawler4j-pyinstaller-dist` |
 | `TC-006` `uv run ruff check .` | 通过 | 已明确排除历史 `manual/debug/verify/analyze` 脚本 |
 | `TC-010` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_ctrip_account_ui_smoke.py -q` | 通过 | 2026-04-08 覆盖 `declare_ui` 刷新、`create_handler` / `update_handler` 路由、DevLink 页面上下文与 `ctrip` 账号管理 smoke |
+| `TC-011` `uv run pytest packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py packages/crawler4j/tests/unit/test_core/test_atm/test_dispatcher_hooks.py packages/crawler4j/tests/unit/test_core/test_atm/test_job_modes.py packages/crawler4j/tests/unit/test_core/test_atm/test_task_detail_dialog.py -q` | 通过 | 2026-04-16 覆盖等待确认信号持久化、`task.signal` 事件、结构化确认面板与客户端确认回调 |
+| `TC-012` `uv run pytest packages/crawler4j/tests/unit/test_sdk/test_assembler.py packages/crawler4j/tests/unit/test_core/test_atm/test_dispatcher_hooks.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_runtime.py -q` | 通过 | 2026-04-16 覆盖 `ModuleAssembler` 导入错误可见性、DevLink 普通执行 reload 注入，以及同一执行上下文只 reload 一次 |
 
 ## 4. 重点覆盖项
 
@@ -43,7 +45,9 @@
 | `REQ-001` / `RISK-001` | 根应用入口与打包入口一致 | root script 检查 + UI smoke + PyInstaller smoke |
 | `REQ-002` / `RISK-002` | `ctrip labor_workflow` 完整路径 | 模块运行时测试 + 依赖导入验证 |
 | `REQ-006` / `RISK-004` | 模块根入口自动托管与重初始化路径 | 新脚手架 shim import + helper 分发测试 + 重初始化产物测试 |
+| `REQ-007` / ATM 人工复核闭环 | 等待确认信号持久化、结构化确认面板、确认服务回调 | ATM 单测 + Qt 对话框单测 |
 | `CR-003` / 模块 UI 调试回归 | `core:data_table` 页面声明刷新、模块本地 CRUD hook 与 DevLink 调试重载 | MMS 单测 + `ctrip` 账号管理 smoke |
+| `BUG-013` / `CR-005` | 发现错误可见、DevLink 普通执行热更新 | SDK 单测 + ATM/MMS 单测 |
 | `REQ-004` / `RISK-003` | 版本与 release 口径一致 | 元数据对照检查 |
 | `NFR-003` | lint 质量门清晰 | `uv run ruff check .` 达成约定范围 |
 
@@ -74,6 +78,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-16 | 新增 `TC-012`，覆盖 `ModuleAssembler` 导入错误可见性与 DevLink 普通执行 reload 语义 | Codex |
+| 2026-04-16 | 新增 `TC-011`，覆盖 `TaskSignal.wait_for_confirmation` 的 signal 持久化、结构化确认面板与客户端确认回调 | Codex |
 | 2026-04-08 | 新增 `TC-010`，同步 `core:data_table` 的本地 UI hook / DevLink 回归覆盖 | Codex |
 | 2026-03-26 | 基于当前仓库事实建立测试计划 | Codex |
 | 2026-03-28 | 删除旧测试专题引用，改为当前测试计划单一事实源 | Codex |

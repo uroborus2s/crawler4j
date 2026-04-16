@@ -196,8 +196,8 @@ class EnvironmentManager:
         """
         return await self.lease_manager.acquire_atomic(requirement, timeout)
     
-    async def reset(self, env: Environment) -> None:
-        """重置环境。"""
+    async def recycle_env(self, env: Environment) -> None:
+        """关闭窗口并回收到 READY，不清理浏览器持久数据。"""
     
         provider = get_provider(env.provider)
         # 关闭窗口
@@ -210,7 +210,7 @@ class EnvironmentManager:
         env.lease_id = None
         env.task_run_id = None
         await self.pool.update_status(env.id, EnvStatus.READY)
-        logger.info(f"[REM] 环境已重置: id={env.id}")
+        logger.info(f"[REM] 环境已回收: id={env.id}")
     
     async def release(self, lease: EnvLease, dirty: bool = False) -> bool:
         """释放环境租约。
@@ -231,7 +231,7 @@ class EnvironmentManager:
         env = await self.lease_manager.release(lease, lease.token)
         if not env:
             return False
-        await self.reset(env)
+        await self.recycle_env(env)
         return True
 
     async def release_keep_alive(self, lease: EnvLease) -> bool:
@@ -1004,7 +1004,7 @@ class EnvironmentManager:
         
         规格 5.2.3.3 Fail-safe:
             - CREATING 状态的环境：调用 Provider 关闭/销毁后删除记录
-            - BUSY 状态的环境：检查窗口状态，优先尝试软清理（reset），失败则置为 DEAD
+            - BUSY 状态的环境：检查窗口状态，优先尝试软回收（recycle_env），失败则置为 DEAD
         """
         for env in await self.pool.list_all():
             provider = get_provider(env.provider)
@@ -1019,7 +1019,7 @@ class EnvironmentManager:
             elif env.status in {EnvStatus.BUSY, EnvStatus.RUNNING}:
                 # 用户规范：崩溃时运行中的环境，重启后恢复为 READY
                 logger.warning(f"[REM] 发现崩溃时运行中的环境: id={env.id}")
-                await self.reset(env)
+                await self.recycle_env(env)
         
     async def _gc_once(self) -> int:
         """执行一次 GC。
@@ -1049,12 +1049,12 @@ class EnvironmentManager:
                 # 用户规范：崩溃时运行中的环境，重启后恢复为 READY
                 if not await provider.is_window_open(env):
                     logger.warning(f"[REM] 发现运行中崩溃的环境: id={env.id}")
-                    await self.reset(env)
+                    await self.recycle_env(env)
                     count = count + 1
             elif env.status == EnvStatus.READY:
                 if await provider.is_window_open(env):
                     logger.warning(f"[REM] 发现状态不一致的环境: id={env.id}")
-                    await self.reset(env)
+                    await self.recycle_env(env)
                     count = count + 1
         if count > 0:
             logger.info(f"[REM] GC 完成: 回收 {count} 个环境")

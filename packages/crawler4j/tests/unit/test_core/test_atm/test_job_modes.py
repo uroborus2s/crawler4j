@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from unittest.mock import patch
 
 import pytest
+from crawler4j_contracts import EnvAction, TaskSignal
 
 from src.core.atm.controller import JobController
 from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig, TriggerType
@@ -512,6 +513,38 @@ async def test_repository_roundtrip_preserves_run_profile_snapshot(temp_state_di
 
 
 @pytest.mark.asyncio
+async def test_repository_roundtrip_preserves_task_signal(temp_state_dir):
+    repo = TaskRepository()
+    repo._run_async = AsyncMock(side_effect=lambda func, *args: func(*args))
+
+    job = Job(id="job-inline", name="inline")
+    await repo.save_job(job)
+
+    task = Task(
+        id="task-inline",
+        job_id="job-inline",
+        status=TaskStatus.WAITING_CONFIRMATION,
+        message="等待人工确认",
+        signal=TaskSignal.wait_for_confirmation(
+            message="等待人工确认",
+            env_action=EnvAction.KEEP_ALIVE,
+            payload={
+                "confirmation": {
+                    "title": "账号复核",
+                    "fields": [{"label": "账号", "value": "demo-account"}],
+                }
+            },
+        ).to_dict(),
+    )
+
+    await repo.save_task(task)
+    loaded = await repo.get_task(task.id)
+
+    assert loaded is not None
+    assert loaded.signal == task.signal
+
+
+@pytest.mark.asyncio
 async def test_repository_delete_job_removes_tasks_before_job(monkeypatch):
     statements = []
 
@@ -614,14 +647,14 @@ async def test_recover_zombies_marks_pending_and_running_tasks_failed(monkeypatc
 
     rem = SimpleNamespace(
         get_env=AsyncMock(return_value=env),
-        reset=AsyncMock(return_value=None),
+        recycle_env=AsyncMock(return_value=None),
     )
     monkeypatch.setattr("src.core.rem.manager.get_environment_manager", lambda: rem)
 
     await controller._recover_zombies()
 
     rem.get_env.assert_awaited_once_with(42)
-    rem.reset.assert_awaited_once_with(env)
+    rem.recycle_env.assert_awaited_once_with(env)
     controller.repo.mark_tasks_failed.assert_awaited_once()
     failed_ids, reason = controller.repo.mark_tasks_failed.await_args.args
     assert set(failed_ids) == {"task-pending", "task-running"}

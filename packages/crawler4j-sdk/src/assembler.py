@@ -30,6 +30,7 @@ class ModuleAssembler:
         self.default_workflow = default_workflow
         self.task_scripts: Dict[str, Type[TaskScript]] = {}
         self.workflows: Dict[str, Type[TaskFlow]] = {}
+        self.discovery_errors: Dict[str, str] = {}
 
         # Hooks that can be overridden by module_runtime.py
         self.hooks: Dict[str, Callable] = {}
@@ -62,18 +63,25 @@ class ModuleAssembler:
         for module_info in iter_modules([str(package_dir)]):
             if module_info.name.startswith("_"):
                 continue
+            import_target = f"{full_package_name}.{module_info.name}"
             try:
-                module = importlib.import_module(f"{full_package_name}.{module_info.name}")
+                module = importlib.import_module(import_target)
                 for attr_name in dir(module):
                     candidate = getattr(module, attr_name)
                     if (
                         inspect.isclass(candidate)
                         and issubclass(candidate, base_cls)
                         and candidate is not base_cls
-                    ):
+                        ):
                         key = getattr(candidate, "name", "") or module_info.name
                         registry[key] = candidate
-            except Exception:
+            except Exception as exc:
+                error_message = (
+                    f"Failed to import {import_target} during {subpackage} discovery: "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+                self.discovery_errors[module_info.name] = error_message
+                logger.exception(error_message)
                 continue
         return registry
 
@@ -114,7 +122,7 @@ class ModuleAssembler:
                     self.workflows.update(getattr(runtime_module, "WORKFLOWS"))
 
             except Exception as e:
-                logger.warning(f"Failed to load runtime extensions: {e}")
+                logger.exception(f"Failed to load runtime extensions: {e}")
 
     @staticmethod
     def _normalize_result_payload(result: object) -> TaskResult:
@@ -153,6 +161,10 @@ class ModuleAssembler:
 
         if workflow_name in self.task_scripts:
             return await self._run_task_script(self.task_scripts[workflow_name], context)
+
+        discovery_error = self.discovery_errors.get(workflow_name)
+        if discovery_error:
+            raise ValueError(f"Workflow or task not found: {workflow_name}. {discovery_error}")
 
         raise ValueError(f"Workflow or task not found: {workflow_name}")
 

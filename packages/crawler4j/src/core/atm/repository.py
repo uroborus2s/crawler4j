@@ -63,12 +63,19 @@ class TaskRepository:
                     lease_id TEXT,
                     result TEXT,
                     error TEXT,
+                    signal_json TEXT,
                     created_at INTEGER,
                     started_at INTEGER,
                     finished_at INTEGER,
                     FOREIGN KEY(job_id) REFERENCES jobs(id)
                 )
             """)
+            task_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(tasks)").fetchall()
+            }
+            if "signal_json" not in task_columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN signal_json TEXT")
             
             # 索引优化 (用于 Controller 查询)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_job_status ON tasks(job_id, status)")
@@ -145,20 +152,21 @@ class TaskRepository:
             with get_connection(STATE_DB) as conn:
                 conn.execute(
                     """
-                    INSERT INTO tasks (id, job_id, status, env_id, lease_id, result, error, created_at, started_at, finished_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO tasks (id, job_id, status, env_id, lease_id, result, error, signal_json, created_at, started_at, finished_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         status = excluded.status,
                         env_id = excluded.env_id,
                         lease_id = excluded.lease_id,
                         result = excluded.result,
                         error = excluded.error,
+                        signal_json = excluded.signal_json,
                         started_at = excluded.started_at,
                         finished_at = excluded.finished_at
                     """,
                     (
                         task.id, task.job_id, task.status.value, task.env_id, task.lease_id,
-                        task.message, task.error,
+                        task.message, task.error, json.dumps(task.signal, ensure_ascii=False) if task.signal else "",
                         task.created_at, task.started_at, task.finished_at
                     )
                 )
@@ -244,7 +252,7 @@ class TaskRepository:
                 conn.execute(
                     f"""
                     UPDATE tasks 
-                    SET status = ?, error = ?, finished_at = ?
+                    SET status = ?, error = ?, signal_json = '', finished_at = ?
                     WHERE id IN ({placeholders})
                     """,
                     params
@@ -285,6 +293,7 @@ class TaskRepository:
             lease_id=row["lease_id"],
             message=row["result"] or "",
             error=row["error"] or "",
+            signal=json.loads(row["signal_json"]) if "signal_json" in row.keys() and row["signal_json"] else None,
             created_at=row["created_at"],
             started_at=row["started_at"],
             finished_at=row["finished_at"]

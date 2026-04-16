@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,7 @@ from src.core.atm.run_profile import (
     RunProfile,
 )
 from src.core.foundation.event_bus import EventType
+from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 
 
@@ -64,6 +66,7 @@ def _build_dispatcher(env: Environment, lease: EnvLease) -> TaskDispatcher:
         ),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=env),
+        recycle_env=AsyncMock(return_value=None),
         release=AsyncMock(return_value=True),
         release_keep_alive=AsyncMock(return_value=True),
         destroy_env=AsyncMock(return_value=True),
@@ -175,7 +178,8 @@ async def test_dispatcher_cleans_up_created_env_when_acquisition_fails(monkeypat
 
     assert task.status == TaskStatus.FAILED
     dispatcher.rem.release.assert_not_awaited()
-    dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
+    dispatcher.rem.recycle_env.assert_awaited_once_with(env)
+    dispatcher.rem.destroy_env.assert_not_awaited()
     module_service.run_module.assert_not_awaited()
 
 
@@ -225,15 +229,14 @@ async def test_dispatcher_confirms_waiting_task_and_runs_cleanup(monkeypatch):
     assert task.error == "黑号"
     assert task.id not in dispatcher._waiting_tasks
     dispatcher.rem.lease_manager.get_lease.assert_awaited_once_with(lease.id)
-    dispatcher.rem.release_keep_alive.assert_awaited_once_with(lease)
-    dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
+    dispatcher.rem.release.assert_awaited_once_with(lease)
+    dispatcher.rem.release_keep_alive.assert_not_awaited()
+    dispatcher.rem.destroy_env.assert_not_awaited()
     assert cleanup_env_actions == [
         {
-            "action": "destroy",
+            "action": "recycle",
             "env_id": env.id,
             "success": True,
-            "released": True,
-            "destroyed": True,
         }
     ]
 
@@ -268,8 +271,79 @@ def test_dispatcher_publish_task_terminal_event(monkeypatch):
     assert third_event.type == EventType.TASK_CANCELLED
 
 
+def test_dispatcher_publish_waiting_confirmation_signal_event(monkeypatch):
+    dispatcher = TaskDispatcher()
+    publish = MagicMock()
+    monkeypatch.setattr("src.core.atm.dispatcher.get_event_bus", lambda: SimpleNamespace(publish=publish))
+
+    signal = TaskSignal.wait_for_confirmation(
+        message="等待人工确认",
+        env_action=EnvAction.KEEP_ALIVE,
+        payload={
+            "confirmation": {
+                "title": "账号复核",
+                "fields": [{"label": "账号", "value": "demo-account"}],
+            }
+        },
+    ).to_dict()
+    dispatcher._publish_task_signal_event(
+        Task(
+            id="task-wait-1",
+            job_id="job-1",
+            status=TaskStatus.WAITING_CONFIRMATION,
+            message="等待人工确认",
+            signal=signal,
+        )
+    )
+
+    event = publish.call_args.args[0]
+    assert event.type == EventType.TASK_SIGNAL
+    assert event.task_run_id == "task-wait-1"
+    assert event.data["job_id"] == "job-1"
+    assert event.data["signal"]["payload"]["confirmation"]["title"] == "账号复核"
+
+
 def test_dispatcher_clear_stop_for_job():
     dispatcher = TaskDispatcher()
     dispatcher._job_stop_requests.add("job-1")
     dispatcher.clear_stop_for_job("job-1")
     assert "job-1" not in dispatcher._job_stop_requests
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_marks_dev_link_tasks_for_reload(monkeypatch):
+    run_profile = _build_run_profile()
+    env, lease = _build_env()
+    seen_configs: list[dict[str, object]] = []
+    module_info = ModuleInfo(
+        name="example_module",
+        manifest=ModuleManifest(name="example_module"),
+        source=ModuleSource.DEV_LINK,
+        path=Path("/tmp/example_module"),
+    )
+
+    async def hook(module_name, hook_name, context, *args):
+        seen_configs.append(dict(context.config))
+        return None
+
+    async def run_module(module_name, context):
+        seen_configs.append(dict(context.config))
+        return {"status": "ok"}
+
+    module_service = SimpleNamespace(
+        registry=SimpleNamespace(get_module=lambda module_name: module_info),
+        run_module=AsyncMock(side_effect=run_module),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+
+    monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
+
+    dispatcher = _build_dispatcher(env, lease)
+    task = Task(id="task-dev-link", job_id="job-dev-link")
+    job = Job(id="job-dev-link", name="job", run_profile=run_profile)
+
+    await dispatcher._run_logic(task, job)
+
+    assert task.status == TaskStatus.SUCCEEDED
+    assert seen_configs
+    assert all(config["devel_mode"] is True for config in seen_configs)

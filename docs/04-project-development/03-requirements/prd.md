@@ -6,8 +6,8 @@
 **主要读者：** 开发 | QA | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/02-discovery/input.md` | `docs/04-project-development/02-discovery/current-state-analysis.md` | `docs/04-project-development/01-governance/project-charter.md`  
 **下游输出：** `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/` | `docs/04-project-development/06-testing-verification/test-plan.md`  
-**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`  
-**最后更新：** 2026-03-31  
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`  
+**最后更新：** 2026-04-16  
 
 ## 1. 背景与目标
 
@@ -105,6 +105,26 @@
 - [ ] `UAT-014` 模块级自定义 hooks 或默认工作流可在独立文件中声明，而不是必须写在根 `__init__.py`
 - [ ] `UAT-015` 模块升级说明明确要求按最新模板重新初始化，而不是继续维护旧式根入口
 
+### `REQ-007` ATM 必须能够根据信号展示结构化确认内容并等待客户端确认
+
+- 优先级：P1
+- 描述：当模块通过 `TaskSignal.wait_for_confirmation(...)` 发出等待确认信号时，Core 必须持久化该信号，桌面客户端必须能够读取并展示结构化确认内容，并在用户确认成功或失败后继续完成任务终态处理。
+- 用户故事：作为 ATM 使用者，我希望当模块要求人工复核时，客户端能直接弹出带结构化信息的确认面板，以便我不需要翻日志或读原始 JSON 就能做出确认。
+- 前置条件：模块已发出 `wait_for_confirmation` 信号，且 `payload` 可选包含结构化展示说明。
+- 业务规则：
+  - `wait_for_confirmation` 仍只允许 `keep_alive` 语义保留环境，等待期间不进入终态 hooks。
+  - `payload.confirmation` 作为正式 UI 展示协议，至少支持 `title`、`description`、`fields`、`confirm_text`、`reject_text`。
+  - 若模块未提供 `payload.confirmation`，客户端应回退为展示 `message` 和原始 payload 的键值内容。
+  - 用户确认成功或失败后，ATM 继续走既有 `confirm_task_success/confirm_task_failure` 链路，不新增第二套确认入口。
+- 依赖项：`packages/crawler4j/src/core/atm/{execution_runner,dispatcher,repository,ui/task_detail_dialog.py}`、`packages/crawler4j/src/core/foundation/event_bus.py`
+- 排除范围：本轮不实现跨进程/重启后的等待确认恢复执行；不扩展为任意自定义表单提交通道。
+
+验收标准：
+
+- [x] `UAT-016` `TaskSignal.wait_for_confirmation` 的结构化内容可随任务状态一起持久化并重新读取
+- [x] `UAT-017` ATM 详情页在收到等待确认信号时会弹出结构化确认面板
+- [x] `UAT-018` 用户在确认面板中选择成功或失败后，会调用既有确认服务完成任务收尾
+
 ### `REQ-004` 项目必须具备可追溯的发布与文档链路
 
 - 优先级：P0
@@ -196,3 +216,4 @@
 |---|---|---|---|
 | v1.0 | 2026-03-26 | 基于当前仓库真实状态重建工厂 PRD |  |
 | v1.1 | 2026-03-31 | 新增 `REQ-006`，登记模块根入口自动托管的最小改造需求 |  |
+| v1.2 | 2026-04-16 | 新增 `REQ-007`，登记信号驱动的结构化确认面板与客户端确认闭环 | `CR-004` |

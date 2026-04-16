@@ -40,6 +40,7 @@ class TaskListWidget(QWidget):
 
     task_selected = pyqtSignal(str)
     REFRESH_EVENTS = (
+        EventType.TASK_SIGNAL,
         EventType.TASK_FINISHED,
         EventType.TASK_FAILED,
         EventType.TASK_CANCELLED,

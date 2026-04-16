@@ -108,7 +108,7 @@ class JobController:
                 try:
                     env = await rem.get_env(int(task.env_id))
                     if env:
-                        await rem.reset(env)
+                        await rem.recycle_env(env)
                 except Exception as e:
                     logger.warning(f"[ATM] Failed to clean up leaked env {task.env_id} for zombie task {task.id}: {e}")
                     

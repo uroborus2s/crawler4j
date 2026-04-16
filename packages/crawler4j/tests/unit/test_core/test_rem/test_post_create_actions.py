@@ -158,6 +158,7 @@ async def test_stop_env_closes_running_environment_and_returns_ready(manager, mo
     mock_pool.update_status.assert_awaited_with(env.id, EnvStatus.READY)
 
 
+
 @pytest.mark.asyncio
 async def test_ensure_provider_runtime_for_virtualbrowser(manager):
     app_service = MagicMock()

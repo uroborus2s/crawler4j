@@ -25,6 +25,21 @@ class ModuleService:
             if loaded_name == module_name or loaded_name.startswith(prefix):
                 sys.modules.pop(loaded_name, None)
 
+    def _should_force_reload(self, module_name: str, context: TaskContext | None = None) -> bool:
+        if not context or not context.config.get("devel_mode", False):
+            return False
+
+        reloaded_modules = context.runtime.get("_reloaded_modules")
+        if not isinstance(reloaded_modules, dict):
+            reloaded_modules = {}
+            context.runtime["_reloaded_modules"] = reloaded_modules
+
+        if reloaded_modules.get(module_name):
+            return False
+
+        reloaded_modules[module_name] = True
+        return True
+
     def _load_root_module_from_path(
         self,
         module_name: str,
@@ -70,7 +85,7 @@ class ModuleService:
         if not module_info.path:
             raise ValueError(f"Module '{module_name}' has no valid path")
 
-        force_reload = bool(context and context.config.get("devel_mode", False))
+        force_reload = self._should_force_reload(module_info.name, context)
         root_module = self._load_root_module_from_path(
             module_info.name,
             Path(module_info.path),

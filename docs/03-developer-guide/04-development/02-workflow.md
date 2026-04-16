@@ -158,14 +158,26 @@ class ManualReviewWorkflow(TaskFlow):
                 signal=TaskSignal.wait_for_confirmation(
                     message="请人工确认账号状态",
                     env_action=EnvAction.KEEP_ALIVE,
-                    payload={"review_type": "account"},
+                    payload={
+                        "review_type": "account",
+                        "confirmation": {
+                            "title": "账号复核",
+                            "description": "请确认该账号是否允许继续执行。",
+                            "fields": [
+                                {"label": "账号", "value": "demo-account"},
+                                {"label": "风险等级", "value": "high"},
+                            ],
+                            "confirm_text": "确认放行",
+                            "reject_text": "确认拦截",
+                        },
+                    },
                 ),
             )
 
         return TaskResult.ok(message="无需人工确认")
 ```
 
-`WAIT_FOR_CONFIRMATION` 会让任务停在 `WAITING_CONFIRMATION`，ATM 暂不执行终态 hooks 和环境清理；直到外部确认成功或失败后，ATM 才继续进入 `on_success` / `on_failure`、环境动作以及最终 `on_cleanup`。
+`WAIT_FOR_CONFIRMATION` 会让任务停在 `WAITING_CONFIRMATION`，ATM 暂不执行终态 hooks 和环境清理；直到外部确认成功或失败后，ATM 才继续进入 `on_success` / `on_failure`、环境动作以及最终 `on_cleanup`。如果你希望桌面客户端直接弹出结构化确认面板，请把展示协议写进 `payload.confirmation`。
 
 ## 推荐开发顺序
 

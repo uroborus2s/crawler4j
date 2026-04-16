@@ -56,7 +56,7 @@ def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[Ex
         lease_manager=SimpleNamespace(acquire=AsyncMock(return_value=lease)),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=env),
-        reset=AsyncMock(return_value=None),
+        recycle_env=AsyncMock(return_value=None),
         release=AsyncMock(return_value=True),
         release_keep_alive=AsyncMock(return_value=True),
         destroy_env=AsyncMock(return_value=True),
@@ -206,7 +206,7 @@ async def test_execution_runner_cleans_up_created_env_when_acquisition_fails():
 
     assert request.task.status == TaskStatus.FAILED
     rem.get_env.assert_awaited_once_with(env.id)
-    rem.reset.assert_awaited_once_with(env)
+    rem.recycle_env.assert_awaited_once_with(env)
     rem.release.assert_not_awaited()
     rem.destroy_env.assert_not_awaited()
     module_service.run_module.assert_not_awaited()
@@ -256,14 +256,24 @@ async def test_execution_runner_marks_task_failed_for_taskresult_fail():
 async def test_execution_runner_wait_signal_keeps_task_waiting_confirmation():
     request = _build_request()
     env, lease = _build_env()
+    wait_signal = TaskSignal.wait_for_confirmation(
+        message="等待确认",
+        env_action=EnvAction.KEEP_ALIVE,
+        payload={
+            "confirmation": {
+                "title": "账号复核",
+                "fields": [
+                    {"label": "账号", "value": "demo-account"},
+                    {"label": "风险等级", "value": "high"},
+                ],
+            }
+        },
+    )
     module_service = SimpleNamespace(
         run_module=AsyncMock(
             return_value=TaskResult.ok(
                 message="等待确认",
-                signal=TaskSignal.wait_for_confirmation(
-                    message="等待确认",
-                    env_action=EnvAction.KEEP_ALIVE,
-                ),
+                signal=wait_signal,
             )
         ),
         call_hook=AsyncMock(return_value=None),
@@ -279,6 +289,7 @@ async def test_execution_runner_wait_signal_keeps_task_waiting_confirmation():
     rem.destroy_env.assert_not_awaited()
     assert execution_result.signal is not None
     assert execution_result.signal.action.value == "wait_for_confirmation"
+    assert request.task.signal == wait_signal.to_dict()
 
 
 @pytest.mark.asyncio

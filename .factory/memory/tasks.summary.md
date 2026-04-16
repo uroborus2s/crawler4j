@@ -26,3 +26,5 @@
   状态：DONE | 负责人：未知 | 预估：未知 | 关联：无
 - `TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler` TASK-013 统一模块根入口为最新托管方案并要求模块重新初始化
   状态：DONE | 负责人：Gemini | 预估：1.5 人/天 | 关联：`REQ-003`, `REQ-006`, `NFR-004`
+- `TASK-021-add-signal-driven-confirmation-panel` TASK-021 建立 ATM 信号驱动的结构化确认面板与客户端确认闭环
+  状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`REQ-007`, `CR-004`

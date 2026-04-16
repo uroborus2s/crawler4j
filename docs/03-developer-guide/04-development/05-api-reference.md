@@ -120,7 +120,19 @@ TaskSignal.fail(
 TaskSignal.wait_for_confirmation(
     message="请人工确认结果",
     env_action=EnvAction.KEEP_ALIVE,
-    payload={"review_type": "account"},
+    payload={
+        "review_type": "account",
+        "confirmation": {
+            "title": "账号复核",
+            "description": "请确认该账号是否允许继续执行。",
+            "fields": [
+                {"label": "账号", "value": "demo-account"},
+                {"label": "风险等级", "value": "high"},
+            ],
+            "confirm_text": "确认放行",
+            "reject_text": "确认拦截",
+        },
+    },
 )
 ```
 
@@ -132,6 +144,16 @@ TaskSignal.wait_for_confirmation(
 - `wait_for_confirmation`
 
 `wait_for_confirmation` 会让任务停在 `WAITING_CONFIRMATION`；ATM 暂不执行终态 hooks 或环境清理，直到后续确认成功或失败。
+
+如果你希望 ATM 客户端自动弹出结构化确认面板，请把 UI 描述写在 `payload.confirmation` 中。当前正式支持：
+
+- `title`
+- `description`
+- `fields`：`[{ "label": "...", "value": "..." }]`
+- `confirm_text`
+- `reject_text`
+
+若不提供这组字段，客户端会退回展示 `message` 与 payload 键值。
 
 ---
 

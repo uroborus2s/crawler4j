@@ -141,6 +141,17 @@ def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
     assert profile.execution.workflow == "repair"
 
 
+def test_run_profile_dialog_removes_creation_lifecycle_control(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert hasattr(dialog, "creation_lifecycle_combo") is False
+
+
 def test_run_profile_dialog_requires_script_selection(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 

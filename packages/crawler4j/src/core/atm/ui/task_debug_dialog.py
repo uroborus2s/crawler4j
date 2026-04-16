@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
-    QSpinBox,
+    QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
 )
@@ -31,6 +32,7 @@ from src.core.debug.vscode import ensure_vscode_attach_config
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo
 from src.core.atm.run_profile import RunProfile
+from src.ui.components.spin_box import StyledSpinBox
 
 
 class JobDebugDialog(QDialog):
@@ -67,13 +69,69 @@ class JobDebugDialog(QDialog):
             wait_timeout=run_profile.resource.acquisition.selector.wait_timeout,
         )
         self.setWindowTitle(f"任务调试 - {job.name}")
-        self.resize(1100, 820)
         self._setup_ui()
+        self._fit_to_screen()
         self._load_defaults()
         self._setup_polling()
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        self.setStyleSheet(
+            """
+            QDialog {
+                background-color: #1a1b26;
+                color: #e5e7eb;
+            }
+            QLabel {
+                color: #e5e7eb;
+                background: transparent;
+            }
+            QCheckBox {
+                color: rgba(255, 255, 255, 0.82);
+                background: transparent;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 1px solid rgba(255, 255, 255, 0.18);
+                background: rgba(255, 255, 255, 0.06);
+            }
+            QCheckBox::indicator:hover {
+                border-color: rgba(99, 102, 241, 0.7);
+                background: rgba(255, 255, 255, 0.1);
+            }
+            QCheckBox::indicator:checked {
+                background: rgba(99, 102, 241, 0.95);
+                border-color: rgba(99, 102, 241, 0.95);
+            }
+            QPushButton {
+                background: rgba(255, 255, 255, 0.08);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                padding: 8px 14px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.14);
+            }
+            """
+        )
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        root_layout.addWidget(self.scroll_area, 1)
+
+        content = QFrame(self.scroll_area)
+        content.setStyleSheet("QFrame { background: transparent; }")
+        self.scroll_area.setWidget(content)
+
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
 
@@ -169,11 +227,11 @@ class JobDebugDialog(QDialog):
         form.setContentsMargins(16, 16, 16, 16)
         form.setSpacing(12)
 
-        self.attach_port_spin = QSpinBox()
+        self.attach_port_spin = StyledSpinBox()
         self.attach_port_spin.setRange(1, 65535)
         self.attach_port_spin.setValue(5678)
 
-        self.timeout_spin = QSpinBox()
+        self.timeout_spin = StyledSpinBox()
         self.timeout_spin.setRange(0, 24 * 60 * 60)
         self.timeout_spin.setSuffix(" s")
 
@@ -249,7 +307,8 @@ class JobDebugDialog(QDialog):
 
         self.logs_view = QTextEdit()
         self.logs_view.setReadOnly(True)
-        self.logs_view.setMinimumHeight(220)
+        self.logs_view.setMinimumHeight(160)
+        self.logs_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.logs_view.setStyleSheet(
             """
             QTextEdit {
@@ -263,14 +322,18 @@ class JobDebugDialog(QDialog):
             }
             """
         )
-        layout.addWidget(self.logs_view)
+        layout.addWidget(self.logs_view, 1)
 
-        close_row = QHBoxLayout()
-        close_row.addStretch()
-        close_btn = QPushButton("关闭")
-        close_btn.clicked.connect(self.accept)
-        close_row.addWidget(close_btn)
-        layout.addLayout(close_row)
+        footer = QFrame(self)
+        footer.setStyleSheet("QFrame { background: transparent; }")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(20, 0, 20, 20)
+        footer_layout.setSpacing(12)
+        footer_layout.addStretch()
+        self.close_btn = QPushButton("关闭")
+        self.close_btn.clicked.connect(self.accept)
+        footer_layout.addWidget(self.close_btn)
+        root_layout.addWidget(footer)
 
         self.start_btn.clicked.connect(lambda: self._run_async(self._start_debug()))
         self.restart_btn.clicked.connect(lambda: self._run_async(self._restart_debug()))
@@ -417,3 +480,18 @@ class JobDebugDialog(QDialog):
             coro.close()
             return
         loop.create_task(coro)
+
+    def _fit_to_screen(self) -> None:
+        screen = self.screen() or QApplication.primaryScreen()
+        if not screen:
+            self.resize(1100, 820)
+            return
+
+        available = screen.availableGeometry()
+        max_width = min(available.width(), max(640, available.width() - 48))
+        max_height = min(available.height(), max(480, available.height() - 48))
+        target_width = min(1100, max_width)
+        target_height = min(820, max_height)
+
+        self.setMaximumSize(max_width, max_height)
+        self.resize(target_width, target_height)

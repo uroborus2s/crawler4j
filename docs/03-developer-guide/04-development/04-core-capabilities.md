@@ -113,7 +113,20 @@ if ctx.tools:
 
 - 模块发信号是为了“告诉 ATM 做什么”，不是为了直接控制 REM
 - `WAIT_FOR_CONFIRMATION` 当前只允许 `keep_alive` 语义来保留环境
+- 如果你想让客户端弹出结构化确认面板，请把展示协议写进 `payload.confirmation`
 - `on_cleanup` 在环境动作之后执行，因此模块如果要根据“环境是否真的被删除”做数据自清理，应读取 `ctx.runtime["env_action"]`
+
+当前 `payload.confirmation` 的最小正式协议是：
+
+| 字段 | 类型 | 用途 |
+|---|---|---|
+| `title` | `str` | 面板标题 |
+| `description` | `str` | 面板说明文案 |
+| `fields` | `list[dict]` | 结构化字段列表，每项至少包含 `label` 和 `value` |
+| `confirm_text` | `str` | 成功确认按钮文案 |
+| `reject_text` | `str` | 失败确认按钮文案 |
+
+如果模块没有提供 `payload.confirmation`，客户端会回退成展示 `message` 和 payload 的键值内容。
 
 正式规则补充如下：
 

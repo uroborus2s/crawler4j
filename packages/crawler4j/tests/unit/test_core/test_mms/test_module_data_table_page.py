@@ -3,7 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from PyQt6.QtWidgets import QDialog
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QAbstractItemView, QDialog
 
 from src.core.mms.models import ModuleSource
 from src.core.persistence import get_kv_store
@@ -67,6 +68,9 @@ def test_module_data_table_page_declares_schema_and_renders_display_fields(qtbot
 
     page = ModuleDataTablePage("demo_module", "accounts")
     qtbot.addWidget(page)
+
+    assert page.table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert page.table.horizontalScrollMode() == QAbstractItemView.ScrollMode.ScrollPerPixel
 
     headers = [page.table.horizontalHeaderItem(index).text() for index in range(page.table.columnCount())]
     assert headers == ["手机号", "账号状态", "更新时间", "占用中"]

@@ -671,10 +671,6 @@ class RunProfileDialog(QDialog):
         self.wait_timeout_spin.setRange(0, 3600)
         self.wait_timeout_spin.setValue(60)
 
-        self.creation_lifecycle_combo = QComboBox()
-        self.creation_lifecycle_combo.addItem("任务完成后关闭环境", CreationLifecycle.PERSISTENT)
-        self.creation_lifecycle_combo.addItem("兼容旧模板值（不再自动删除）", CreationLifecycle.EPHEMERAL)
-
         self.tab_basic = QWidget()
         self._setup_basic_tab(self.tab_basic)
         self.form_tabs.addTab(self.tab_basic, "运行配置")
@@ -2077,9 +2073,6 @@ class RunProfileDialog(QDialog):
             self.resource_provider_combo.setCurrentIndex(provider_index)
 
         self.wait_timeout_spin.setValue(s.resource.acquisition.selector.wait_timeout)
-        lifecycle_index = self.creation_lifecycle_combo.findData(s.resource.acquisition.creation.lifecycle)
-        if lifecycle_index >= 0:
-            self.creation_lifecycle_combo.setCurrentIndex(lifecycle_index)
 
         creation_params = s.resource.acquisition.creation.params
         provider = s.resource.provider
