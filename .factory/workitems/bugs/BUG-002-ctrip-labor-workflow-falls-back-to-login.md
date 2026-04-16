@@ -20,8 +20,9 @@
 
 ## 证据
 
-- 已恢复 `src.automation.workflows.*`、`src.core.models.*` 与 `src.utils.hotel_matcher` 的兼容路径
-- 打包模块隔离 smoke 现已确认：`labor_workflow` 不再因为缺少 `src.automation` 而退化
+- 旧 `src.automation.workflows.*` 兼容包已删除，模块执行统一走 MMS + ModuleAssembler 正式链路
+- 宿主中重复的 `src.utils.hotel_matcher` 等 `ctrip` 业务辅助代码已移除，相关逻辑由 `ctrip_crawler` 模块自带实现承载
+- 打包模块隔离 smoke 现已确认：`labor_workflow` 不再因为缺少旧宿主导入而退化
 
 ## 影响
 

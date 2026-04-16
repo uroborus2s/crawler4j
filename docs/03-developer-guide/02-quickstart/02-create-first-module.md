@@ -4,7 +4,7 @@
 
 本页默认你已经完成上一页的环境准备。
 
-本页以下示例以 `crawler4j-sdk 2.x` 为准；如果你在维护 1.x 时期的旧模块，先完成数据接口升级，再继续走新脚手架流程。
+本页以下示例以 `crawler4j-sdk 1.1.x` 为准；如果你在维护 1.x 或 2.x 时期的旧模块，先完成工具接口升级，再继续走新脚手架流程。
 
 ## 第 1 步：创建模块项目
 
@@ -31,8 +31,8 @@ uvx --from crawler4j-sdk crawler4j init-model hotel_demo --defaults --no-git --n
 如果你是在把旧模块升到当前口径，再继续下面步骤前先确认：
 
 1. 已删除 `DataService` 导入
-2. 已把旧 `ctx.db.storage / accounts / tasks` 写法改成 `ctx.db` 最小接口
-3. 已把 `module.yaml.sdk_version_range` 改到 `>=2.0.0`
+2. 已把旧 `ctx.db.storage / accounts / tasks` 写法改成 `ctx.tools.call("db.*", ...)`
+3. 已把 `module.yaml.sdk_version_range` 改到 `>=1.1.1`
 
 ### 这一步做完后你应该看到什么
 
@@ -53,7 +53,7 @@ uv run crawler4j add-workflow sync_hotels
 
 ## 第 2.5 步：编写你的第一个业务逻辑
 
-打开 `tasks/fetch_hotels.py`，你会看到脚手架生成的模板。将其修改为以下符合 **SDK 2.0.0** 规范的简化示例：
+打开 `tasks/fetch_hotels.py`，你会看到脚手架生成的模板。将其修改为以下符合 **SDK 1.1.1** 规范的简化示例：
 
 ```python
 from crawler4j_sdk import TaskScript, TaskResult
@@ -73,12 +73,11 @@ class FetchHotelsTask(TaskScript):
             {"id": "h2", "name": f"{city} 示例酒店 B", "price": 800},
         ]
         
-        # 3. 保存到模块数据集 (SDK 2.0.0 标准用法)
-        # 注意：不再使用 ctx.db.storage，直接使用 ctx.db
-        ctx.db.replace_records("hotels", hotels)
-        
+        # 3. 保存到模块数据集 (SDK 1.1.1 标准用法)
+        ctx.tools.call("db.replace_records", dataset="hotels", records=hotels)
+
         # 4. 记录当前抓取状态（如下次翻页游标）
-        ctx.db.set_state("last_sync_time", "2026-03-31")
+        ctx.tools.call("db.set_state", key="last_sync_time", value="2026-03-31")
         
         ctx.logger.info(f"成功抓取并保存 {len(hotels)} 条记录")
         return TaskResult(success=True, message=f"已同步 {city} 的酒店")
@@ -86,7 +85,7 @@ class FetchHotelsTask(TaskScript):
 
 ### 这一步的关键认知
 - **导入**：只从 `crawler4j_sdk` 导入必要类，不再有 `DataService`。
-- **数据操作**：直接使用 `ctx.db.replace_records` 和 `ctx.db.set_state`。
+- **数据操作**：通过 `ctx.tools.call("db.*", ...)` 访问正式数据能力。
 - **配置**：使用 `ctx.get_config` 安全获取外部输入。
 
 ## 第 3 步：确认模块目录结构

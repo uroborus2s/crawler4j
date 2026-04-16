@@ -7,7 +7,7 @@
 **上游输入：** Git tag | `docs/04-project-development/02-discovery/current-state-analysis.md` | 本地构建结果  
 **下游输出：** 后续正式 release notes | `delivery-package.md`（待需要时补齐）  
 **关联 ID：** `REL-001`, `REL-002`, `BUG-001`, `CR-001`  
-**最后更新：** 2026-03-31  
+**最后更新：** 2026-04-15  
 
 ## 1. 最新已知正式发布
 
@@ -22,10 +22,11 @@
 - 当前工作区根应用版本：`0.1.2.dev20260326`
 - 当前运行时版本：`0.1.2.dev20260326`
 - 最近正式发布 tag：`v0.1.1`
-- SDK 当前版本：`2.0.0`
-- Contracts 当前版本：`1.0.1`
+- SDK 当前版本：`1.1.1`
+- Contracts 当前版本：`1.1.1`
 - 当前工作区已明确区分“未发布开发版”和“最近正式发布”
-- SDK 当前口径已删除 `DataService` 兼容层，旧模块需要升级到 `ctx.db` 最小数据接口
+- SDK 当前口径已收敛到 `TaskContext.tools` 统一工具接口，模块侧不再使用专用 `ctx.db` / `ctx.captcha` 字段
+- 当前工作区已进一步收敛到“ATM hooks + `TaskSignal`”单一生命周期链；`TaskFlow.on_complete/on_error` 与 `TaskScript` 私有 callbacks 已删除
 
 ## 3. 2026-03-26 本地验证结论
 
@@ -59,3 +60,5 @@
 | 2026-03-26 | 建立基线 release notes | Codex |
 | 2026-03-26 | 按统一版本规则区分当前工作区版本与最近正式发布 | Codex |
 | 2026-03-31 | 记录 SDK `2.0.0` 破坏性升级和模块数据接口升级要求 | Codex |
+| 2026-04-15 | 记录 SDK `1.1.0` / Contracts `1.1.0` 的统一 `ctx.tools` 重构 | Codex |
+| 2026-04-15 | 将 SDK / Contracts 当前工作区版本提升到 `1.1.1`，记录 ATM hooks + `TaskSignal` 生命周期收敛；注意该补丁版含破坏性 API 删除风险 | Codex |

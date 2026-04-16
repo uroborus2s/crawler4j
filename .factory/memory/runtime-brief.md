@@ -10,10 +10,10 @@
 - 活跃工作项：20
 - 阻塞项：0
 - 开放风险：0
-- 最近发布包：无
+- 最近发布包：`crawler4j-sdk 1.1.1`、`crawler4j-contracts 1.1.1`
 - 最近交接包：无
 - 最近快照：无
-- 备注：已完成 `TASK-013`；模块根入口薄壳 (Shim) 与 SDK 组装器 (ModuleAssembler) 已落地；CLI 命令（new, list, --defaults）已补齐并与集成测试对齐；`module_runtime.py` 已明确为可选扩展点；`core:data_table` 现会在刷新时重放 `declare_ui` 并支持本地 create/update hook，DevLink 页面刷新可重载最新同步 hook；ATM 已收敛为“任务直接持有 RunProfile”模型，`TSM` 与 `strategy_id` 兼容层已删除；39 项 ATM/Debug/UI 定向单测与 1 项调试 E2E 于 2026-04-14 通过
+- 备注：已完成 `TASK-013`；模块根入口薄壳 (Shim) 与 SDK 组装器 (ModuleAssembler) 已落地；CLI 命令（new, list, --defaults）已补齐并与集成测试对齐；`module_runtime.py` 已明确为可选扩展点；`core:data_table` 现会在刷新时重放 `declare_ui` 并支持本地 create/update hook，DevLink 页面刷新可重载最新同步 hook；ATM 已收敛为“任务直接持有 RunProfile”模型，`TSM` 与 `strategy_id` 兼容层已删除；39 项 ATM/Debug/UI 定向单测与 1 项调试 E2E 于 2026-04-14 通过；`crawler4j-sdk` / `crawler4j-contracts` `1.1.1` 已发布到 PyPI；ATM Job 创建页现已支持“批次任务 + 执行一次 / Cron”双模式
 
 ## AI 最小读取顺序
 

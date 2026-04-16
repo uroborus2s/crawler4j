@@ -13,17 +13,17 @@
 
 | 项目 | 内容 |
 |---|---|
-| 目录 | `src/ui/`, `src/__version__.py` |
+| 目录 | `packages/crawler4j/src/ui/`, `packages/crawler4j/pyproject.toml` |
 | 职责 | 应用入口、主窗口、UI 组件、用户操作壳层 |
 | 对外接口 | `src.ui.app:main` |
-| 依赖 | `src/core/`, PyQt6, qasync |
+| 依赖 | `packages/crawler4j/src/core/`, PyQt6, qasync |
 | 不负责 | 业务模块实现、外部模块脚手架、SDK 分发 |
 
 ## `MOD-002` Core Runtime Services
 
 | 项目 | 内容 |
 |---|---|
-| 目录 | `src/core/` |
+| 目录 | `packages/crawler4j/src/core/` |
 | 职责 | 调度、模块管理、环境管理、持久化、调试、系统服务 |
 | 对外接口 | 内部 Python API，由 UI 与模块运行时调用 |
 | 依赖 | Playwright, SQLAlchemy, APScheduler |
@@ -33,7 +33,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 目录 | `modules/README.md`（仓内占位）、`<app-data>/modules`（正式安装）、DevLink 源码目录（开发调试） |
+| 目录 | `packages/crawler4j/modules/README.md`（仓内占位）、`<app-data>/modules`（正式安装）、DevLink 源码目录（开发调试） |
 | 职责 | 定义模块根目录、`module.yaml`、根 `__init__.py`、任务、工作流与 UI 扩展的运行边界 |
 | 对外接口 | `run(context)` 与模块 hooks |
 | 依赖 | `crawler4j_sdk`, Core runtime |
@@ -41,7 +41,7 @@
 
 当前边界事实：
 
-- 仓库不再保留 builtin business modules，`modules/` 仅保留占位说明。
+- 仓库不再保留 builtin business modules，`packages/crawler4j/modules/` 仅保留占位说明。
 - 正式安装模块位于应用数据目录，开发调试模块通过 DevLink 指向源码目录。
 - 模块项目自己的 `pyproject.toml` 不会被宿主应用自动安装到运行时环境中。
 
@@ -56,8 +56,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 目录 | `crawler4j_sdk/`, `crawler4j_contracts/` |
-| 职责 | 提供 TaskScript / TaskFlow / TaskContext / TaskResult 等开发契约与 CLI |
+| 目录 | `packages/crawler4j-sdk/`, `packages/crawler4j-contracts/` |
+| 职责 | 提供 TaskScript / TaskFlow / TaskContext / TaskResult / ToolsCapability 等开发契约与 CLI |
 | 对外接口 | `crawler4j` CLI, Python 包 API |
 | 依赖 | `crawler4j-contracts`, aiohttp, pyyaml |
 | 不负责 | Root app UI、宿主运行时治理与模块业务语义 |
@@ -66,7 +66,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 目录 | `docs/`, `crawler4j.spec`, `dist/`, `build/` |
+| 目录 | `docs/`, `packages/crawler4j/crawler4j.spec`, `dist/`, `build/` |
 | 职责 | Markdown 文档、打包说明、历史发布产物、发布元信息 |
 | 对外接口 | wheel/sdist, app bundle, markdown docs |
 | 依赖 | PyInstaller, package metadata |

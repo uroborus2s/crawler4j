@@ -114,6 +114,21 @@ ATM 作业运行配置
 
 对于 `core:data_table:<view_id>` 这类宿主通用页面，详情页点击“刷新”会重新执行模块根导出的 `declare_ui`。
 如果来源是 `DevLink`，宿主会强制重载本地同步 hook，因此联调 schema、`create_handler`、`update_handler` 时不必每次都重新打包 zip。
+现在普通 ATM “执行一次”也会对 `DevLink` 模块显式开启一次性 reload。
+这意味着你改完 `tasks/*.py`、`workflows/*.py` 或 `module_runtime.py` 后，下一次普通执行会吃到最新源码，而不必先重启主客户端。
+
+## 如果执行时报 “Workflow or task not found”
+
+先不要马上怀疑运行配置坏了。
+
+现在 `ModuleAssembler` 在发现 `tasks/` / `workflows/` 时，如果某个模块 import 失败，会把失败的 import 目标、异常类型和 traceback 打进主日志。
+如果当前请求的工作流/任务正好命中了那个失败条目，运行时错误里也会带上 discovery hint。
+
+排查顺序建议是：
+
+1. 先看 `execution.module` 和 `execution.workflow` 是否仍然指向 `module.yaml.name` / `workflows[*].name`
+2. 再看主日志里是否存在对应 `tasks.*` 或 `workflows.*` 的 import failure
+3. 最后才去怀疑宿主缓存或 Core 配置问题
 
 ## 一次完整调试的推荐步骤
 

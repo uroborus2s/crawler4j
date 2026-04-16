@@ -7,7 +7,7 @@
 **上游输入：** `installation.md` | `configuration.md` | `usage.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** 现场交接说明 | `docs/04-project-development/07-release-delivery/acceptance-checklist.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `DOC-107`, `OPS-006`, `TASK-018`, `REQ-005`
-**最后更新：** 2026-04-02
+**最后更新：** 2026-04-15
 
 ## 1. 你的职责边界
 
@@ -30,7 +30,7 @@
 2. 通过 `📥 安装模块` 安装 zip。
 3. 确认模块来源显示为正式安装模块。
 4. 打开模块详情补齐配置。
-5. 到 `📋 任务监控` 中创建任务并配置运行模板里的 `execution.module` 和 `execution.workflow`。
+5. 到 `📋 任务监控` 中创建任务，配置运行模板里的 `execution.module` 和 `execution.workflow`，并按业务选择 `批次任务`（执行一次 / Cron）或 `持续保活`。
 
 ### DevLink 模块
 
@@ -44,7 +44,7 @@
 |---|---|
 | 系统设置 | 网络、浏览器、日志级别和日志保留天数 |
 | 模块设置 | 模块配置表单是否可打开和保存 |
-| 执行配置 | `execution.module` 必须等于 `module.yaml.name`，`execution.workflow` 必须等于目标工作流名 |
+| 执行配置 | `execution.module` 必须等于 `module.yaml.name`，`execution.workflow` 必须等于目标工作流名，并且任务模式要与业务语义一致：单次人工发起选 `批次任务 + 执行一次`，定时批量执行选 `批次任务 + Cron`，常驻补齐并发选 `持续保活` |
 
 注意：
 
@@ -68,3 +68,4 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-04-02 | 新增管理员指南并拆分管理员与普通使用者阅读路径 | Codex |
+| 2026-04-15 | 补充 ATM 任务模式说明，明确 `批次任务` 支持“执行一次 / Cron”，`持续保活` 保持手动启动 | Codex |

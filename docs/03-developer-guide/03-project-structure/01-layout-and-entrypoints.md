@@ -58,7 +58,7 @@ hotel_demo/
 ### 2. 自定义运行时 (`module_runtime.py`)
 如果你需要扩展模块级逻辑，应使用 `module_runtime.py`。支持的扩展点包括：
 
-- **生命周期 Hooks:** `prepare_env`, `init_env`, `on_cleanup`
+- **生命周期 Hooks:** `prepare_env`, `init_env`, `before_run`, `on_success`, `on_failure`, `on_timeout`, `on_cleanup`
 - **默认工作流覆盖:** `DEFAULT_WORKFLOW`
 - **手动注册组件:** `TASK_SCRIPTS`, `WORKFLOWS`
 
@@ -67,22 +67,26 @@ hotel_demo/
 ```text
 module_runtime.prepare_env
 -> module_runtime.init_env
+-> module_runtime.before_run
 -> assembler (discovery & dispatch)
 -> workflow.run / task.execute
+-> module_runtime.on_success / on_failure / on_timeout
+-> ATM env action
 -> module_runtime.on_cleanup
 ```
 
-### 3. 任务脚本生命周期
-如果执行到了 `TaskScript`，其内部生命周期保持不变：
+其中有两个边界需要记住：
 
-```text
-on_init
--> execute
--> on_error（仅异常时）
--> on_cleanup
-```
+- `TaskScript` / `TaskFlow` 本身只有单一入口方法：`execute(ctx)` 或 `run(ctx)`
+- `on_cleanup` 发生在 ATM 完成环境动作之后；模块可以通过 `ctx.runtime["env_action"]` 判断环境最终是 `recycle`、`keep_alive` 还是 `destroy`
 
-理解这两层生命周期非常重要。模块级 hooks 现在统一在 `module_runtime.py` 中定义，`TaskScript` hooks 则在具体的任务脚本类中定义。
+如果模块需要影响 ATM 的后续流程，例如销毁环境、等待人工确认、直接标记失败，应通过 `TaskSignal` 发信号给 ATM，而不是让脚本或工作流直接操作 REM。
+
+这里固定一条正式规则：
+
+- `on_cleanup` 是任务终态清理 hook，不是环境删除 hook
+- 只要任务已经建立 `TaskContext` 并进入终态，ATM 都会执行 `on_cleanup`
+- 是否真的删除了环境，必须通过 `ctx.runtime["env_action"]` 判断，不能靠 `on_cleanup` 是否被调用来判断
 
 ## 命名建议
 

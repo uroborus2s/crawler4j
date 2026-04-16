@@ -4,7 +4,7 @@
 **文档状态：** 草稿  
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
-**上游输入：** 用户关于模块根 `__init__.py` 是否应由工具维护的讨论 | `docs/03-developer-guide/03-project-structure/01-layout-and-entrypoints.md` | `crawler4j_sdk/cli/templates.py` | `src/core/mms/service.py`  
+**上游输入：** 用户关于模块根 `__init__.py` 是否应由工具维护的讨论 | `docs/03-developer-guide/03-project-structure/01-layout-and-entrypoints.md` | `packages/crawler4j-sdk/src/cli/templates.py` | `packages/crawler4j/src/core/mms/service.py`  
 **下游输出：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/03-requirements/requirements-analysis.md` | `docs/04-project-development/04-design/module-boundaries.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md` | `.factory/workitems/implementation/TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler.md`  
 **关联 ID：** `REQ-003`, `REQ-006`, `TASK-013`  
 **最后更新：** 2026-03-31  

@@ -17,7 +17,7 @@
 
 | 类别 | 检查项 | 证据 | 当前基线状态 |
 |---|---|---|---|
-| 版本 | 根 `pyproject.toml`、`src/__version__.py` 和发布目标版本一致 | `version-governance.md` | 待正式切版 |
+| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 待正式切版 |
 | 版本 | 当前工作区版本、最近正式 tag、SDK/Contracts 版本口径清楚 | `release-notes.md` | 已具备 |
 | 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备 |
 | 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备 |

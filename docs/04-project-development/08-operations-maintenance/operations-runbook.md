@@ -19,7 +19,7 @@
 
 | 检查项 | 期望结果 | 失败时先看哪里 |
 |---|---|---|
-| 宿主应用可启动 | `uv run start` 或打包产物可打开 | `deployment-guide.md`、UI smoke 结果 |
+| 宿主应用可启动 | `uv run python -m src.ui.app` 或打包产物可打开 | `deployment-guide.md`、UI smoke 结果 |
 | 应用数据目录存在 | `config.db`、`state.db`、`logs/`、`modules/` 已创建 | `installation.md` |
 | 模块列表正常 | `📦 模块管理` 可打开，来源和状态可识别 | `usage.md`、`admin-guide.md` |
 | 配置可保存 | `🔧 系统设置` 与模块设置能写入 `config.db` | `configuration.md` |
@@ -29,7 +29,7 @@
 
 | 故障信号 | 第一判断 | 第一动作 |
 |---|---|---|
-| 应用打不开 | 入口或依赖环境异常 | 重新执行 `uv sync`，再跑 `uv run python scripts/smoke_test_ui.py` |
+| 应用打不开 | 入口或依赖环境异常 | 重新执行 `uv sync --all-packages`，再跑 `uv run python scripts/smoke_test_ui.py` |
 | 模块能看到但跑不起来 | 执行配置或模块来源错误 | 核对 `execution.module`、`execution.workflow`、模块来源 |
 | `🐞 调试` 按钮不出现 | 不是 DevLink 或策略未绑定 | 先检查 DevLink 来源和策略配置 |
 | 正式安装模块与本地源码冲突 | 同名 DevLink 未按预期切换 | 在 `📦 模块管理` 里确认来源是否已变为正式安装模块 |
@@ -39,8 +39,8 @@
 
 ### 启动故障
 
-1. 执行 `uv sync`。
-2. 执行 `uv run start`。
+1. 执行 `uv sync --all-packages`。
+2. 执行 `uv run python -m src.ui.app`。
 3. 若仍失败，执行 `uv run python scripts/smoke_test_ui.py`。
 4. 检查应用数据目录下的 `logs/`，再决定是否升级给 Core 维护者。
 

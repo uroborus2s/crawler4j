@@ -4,7 +4,7 @@
 
 ## 1. 数据存储选型：Records vs. State
 
-新手最容易混淆 `ctx.db.replace_records` 和 `ctx.db.set_state`。请遵循以下准则：
+新手最容易混淆 `db.replace_records` 和 `db.set_state`。请遵循以下准则：
 
 | 维度 | 数据集 (Records) | 运行时状态 (State) |
 |---|---|---|
@@ -27,12 +27,12 @@
 lock_scope = "account_sync"
 lock_key = ctx.get_config("account_id")
 
-if ctx.db.acquire_lock(lock_scope, lock_key, ttl=300):
+if ctx.tools.call("db.acquire_lock", scope=lock_scope, key=lock_key, ttl=300):
     try:
         # 执行关键逻辑
         do_sensitive_work()
     finally:
-        ctx.db.release_lock(lock_scope, lock_key)
+        ctx.tools.call("db.release_lock", scope=lock_scope, key=lock_key)
 else:
     ctx.logger.warning(f"账号 {lock_key} 正在同步中，跳过本次执行")
 ```
@@ -51,7 +51,7 @@ async def execute(self, ctx):
     for page in range(1, 100):
         if ctx.should_stop():
             ctx.logger.info("检测到停止信号，正在保存进度...")
-            ctx.db.set_state("resume_page", page)
+            ctx.tools.call("db.set_state", key="resume_page", value=page)
             break
         
         await self.crawl_page(page)

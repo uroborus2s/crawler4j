@@ -4,20 +4,20 @@
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | 开发 | QA | 维护者  
-**上游输入：** `technical-selection.md` | 现有 `src/`, `modules/`, `crawler4j_sdk/`, `crawler4j_contracts/`  
+**上游输入：** `technical-selection.md` | 现有 `packages/crawler4j/`, `packages/crawler4j-sdk/`, `packages/crawler4j-contracts/`  
 **下游输出：** `module-boundaries.md` | `api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **关联 ID：** `MOD-001`, `MOD-002`, `MOD-003`, `MOD-004`, `MOD-005`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`  
-**最后更新：** 2026-03-26  
+**最后更新：** 2026-04-15  
 
 ## 1. 总体结构
 
 ```text
 User
-  -> PyQt Desktop Shell (`src/ui`)
-    -> Core Services (`src/core`)
+  -> PyQt Desktop Shell (`packages/crawler4j/src/ui`)
+    -> Core Services (`packages/crawler4j/src/core`)
       -> ATM / MMS / REM / Persistence / Debug / System
-        -> Job RunProfile (`src/core/atm/run_profile.py`)
-        -> External Modules (`<app-data>/modules`, `DevLink`)
+        -> Job RunProfile (`packages/crawler4j/src/core/atm/run_profile.py`)
+        -> External Modules (`<app-data>/modules`, `DevLink`, `packages/crawler4j/modules/`)
           -> SDK Contracts (`crawler4j_sdk`, `crawler4j_contracts`)
 
 Maintainer
@@ -35,12 +35,12 @@ Maintainer
 
 ## 2. 核心运行链
 
-1. `src.ui.app:main` 初始化数据库、日志、事件循环与核心服务
-2. REM 管理运行环境与浏览器资源
-3. ATM 负责任务调度、派发与执行
+1. `src.ui.app:main` 初始化数据库、日志、事件循环与核心服务；其源码位于 `packages/crawler4j/src/ui/app.py`
+2. REM 管理运行环境生命周期与浏览器资源，负责 create/open/connect/stop/destroy，不负责任务工作流编排
+3. ATM 负责任务调度、派发、生命周期 hooks 与任务终态收口
 4. MMS 负责发现、解析、校验和执行模块
-5. 模块通过 `crawler4j_sdk` 暴露任务、工作流与 hooks
-6. Contracts 负责 Core 与 SDK 共享数据结构
+5. 模块通过 `crawler4j_sdk` 暴露任务、工作流，并通过 `TaskSignal` 向 ATM 请求流程动作
+6. Contracts 负责 Core 与 SDK 共享数据结构，模块侧通过 `TaskContext.tools` 访问 Core 扩展能力，通过 `TaskContext.runtime` 读取运行态信息
 
 ## 3. 依赖方向与边界
 
@@ -54,9 +54,13 @@ Maintainer
 
 ## 4. 当前最重要的架构事实
 
-- Root package 的真实桌面入口已经迁移到 `src/ui/app.py`
-- `crawler4j_sdk` 与 `crawler4j_contracts` 已经具备独立包形态
-- 外部 `ctrip` 模块已恢复基础兼容运行时，不再因旧导入缺失直接退化
+- Root app package 的真实桌面入口位于 `packages/crawler4j/src/ui/app.py`
+- `packages/crawler4j-sdk` 与 `packages/crawler4j-contracts` 已经具备独立包形态
+- `TaskContext` 的宿主扩展能力已收敛到 `ctx.tools.call("<namespace>.<action>", **kwargs)` 单入口
+- 模块生命周期 hooks 已收敛到 ATM 调度的 `module_runtime.py`；`TaskScript` / `TaskFlow` 本身只保留单入口方法
+- `TaskSignal` 已成为模块到 ATM 的正式流程控制通道；等待人工确认、失败后销毁环境等行为不再通过散落回调或 UI 清理策略表达
+- 外部模块运行时已收敛到 MMS + ModuleAssembler 单一执行链，不再保留 `src.automation.*` 旧兼容包
+- 宿主源码已不再承载业务辅助逻辑或业务模型；酒店匹配、短信平台与本地验证码回退逻辑以模块自带实现为准
 - 当前事实以当前代码和验证结果为准，不再保留并行的旧设计正文
 
 ## 5. 架构偏差与技术债
@@ -68,13 +72,13 @@ Maintainer
 
 ### `ARCH-002` 模块高阶能力仍未闭环
 
-- `ctrip labor_workflow` 已恢复基础运行时兼容，但真实站点 E2E 仍需验证
+- `ctrip labor_workflow` 已脱离旧兼容包并回到正式运行时链路，但真实站点 E2E 仍需验证
 - MMS 的 settings store、工作流导出、模块状态持久化、trust gate 与自定义页面加载已落地
 
 ### `ARCH-003` 版本规则已收口
 
-- 根应用工作区版本以根 `pyproject.toml` 为事实源
-- `src/__version__.py` 只做运行时镜像
+- 根应用版本以 `packages/crawler4j/pyproject.toml` 为事实源
+- 运行时代码通过包元数据或 `packages/crawler4j/pyproject.toml` 读取当前版本
 - Git tag 只表示最近正式发布
 - SDK / Contracts 保持独立版本线
 
@@ -88,3 +92,5 @@ Maintainer
 |---|---|---|
 | 2026-03-26 | 基于当前仓库事实重建总体架构摘要 | Codex |
 | 2026-03-26 | 吸收旧总体架构/SRS 的层次与边界结论 | Codex |
+| 2026-04-15 | 补记 `TaskContext.tools` 统一工具接口已成为宿主扩展单入口 | Codex |
+| 2026-04-15 | 补记 ATM hooks / `TaskSignal` / `WAITING_CONFIRMATION` 已成为正式任务生命周期链 | Codex |

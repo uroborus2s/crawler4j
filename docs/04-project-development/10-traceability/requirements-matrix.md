@@ -14,7 +14,7 @@
 | 需求 ID | 需求摘要 | 设计文档 | 模块 | 接口 | 任务 | 测试 | 发布状态 |
 |---|---|---|---|---|---|---|---|
 | `REQ-001` | 桌面 Core 可启动且入口一致 | `docs/04-project-development/04-design/system-architecture.md` | `MOD-001`, `MOD-005` | `API-001` | `TASK-002` | `TC-004` | Verified locally |
-| `REQ-002` | 模块可执行目标工作流 | `docs/04-project-development/04-design/module-boundaries.md` | `MOD-002`, `MOD-003` | `API-002` | `TASK-003` | `tests/unit/test_core/test_mms/test_ctrip_runtime.py` | Runtime restored; E2E pending |
+| `REQ-002` | 模块可执行目标工作流 | `docs/04-project-development/04-design/module-boundaries.md` | `MOD-002`, `MOD-003` | `API-002` | `TASK-003` | `tests/unit/test_core/test_mms/test_removed_runtime_surface.py` | Runtime restored; E2E pending |
 | `REQ-003` | SDK / Contracts / CLI 可用 | `docs/04-project-development/04-design/api-design.md` | `MOD-004` | `API-003` | 保持中 | SDK/Contracts build, CLI help | Verified locally |
 | `REQ-006` | 模块根入口应可由工具托管 | `docs/04-project-development/04-design/module-boundaries.md`, `docs/04-project-development/04-design/api-design.md` | `MOD-003`, `MOD-004` | `API-002`, `API-003` | `TASK-013` | `TC-007`, `TC-008`, `TC-009` | Verified locally |
 | `REQ-004` | 发布与文档链路可追溯 | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/07-release-delivery/version-governance.md` | `MOD-005` | `API-004` | `TASK-004` | build + metadata checks | Version governance aligned locally |

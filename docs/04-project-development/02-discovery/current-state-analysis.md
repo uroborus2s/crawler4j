@@ -11,12 +11,12 @@
 
 ## 1. 项目形态
 
-蛛行演略（crawler4j）当前是一个由 5 个主要部分组成的 Python 项目：
+蛛行演略（crawler4j）当前是一个由 5 个主要部分组成的 Python monorepo：
 
-1. 根项目 `src/`：PyQt6 桌面应用与核心运行时
-2. `modules/`：当前仅保留占位说明，真实业务模块已切到外部安装包模式
-3. `crawler4j_sdk/`：面向模块作者的 SDK 与 CLI
-4. `crawler4j_contracts/`：Core 与 SDK 的共享契约
+1. `packages/crawler4j/`：PyQt6 桌面应用与核心运行时
+2. `packages/crawler4j/modules/`：当前仅保留占位说明，真实业务模块已切到外部安装包模式
+3. `packages/crawler4j-sdk/`：面向模块作者的 SDK 与 CLI
+4. `packages/crawler4j-contracts/`：Core 与 SDK 的共享契约
 5. `docs/`：统一后的 Markdown 文档树，仅保留当前正式文档
 
 ## 2. 已验证的能力
@@ -27,12 +27,13 @@
 | MMS settings store 基础能力 | 通过 | 模块级/工作流级 settings、导出与模块启停状态持久化已落地并有单测覆盖 |
 | MMS 自定义页面 trust gate | 通过 | `ui:*` 页面已支持受信加载，外部模块默认拒绝，allowlist 命中后可真实装载 |
 | 文档体系 | 通过 | `docs/` 已统一为 Markdown 文档树，不再依赖静态站构建 |
-| 根脚本入口 | 通过 | `uv sync` 后 `.venv/bin/start` 已导入 `src.ui.app:main` |
+| 应用入口 | 通过 | workspace 根通过 `uv run python -m src.ui.app` 启动 `packages/crawler4j` 中的真实入口 |
 | UI smoke | 通过 | `uv run python scripts/smoke_test_ui.py` 通过 |
 | 外部模块安装链路 | 通过 | 已验证外部 zip 包可被安装到应用受控目录并被 Core 加载 |
 | `ctrip` 登录工作流 | 通过 | 外部安装包链路下 `login_workflow` 可运行 |
-| `ctrip` 完整 labor 工作流 | 基础恢复 | 已恢复旧兼容导入，不再因缺少 `src.automation.*` 直接 fallback |
-| 版本治理 | 已收口 | 根应用工作区版本与运行时镜像已统一为 `0.1.2.dev20260326`，并与最新正式 tag `v0.1.1` 明确分层 |
+| `ctrip` 完整 labor 工作流 | 主链收敛 | 旧 `src.automation.*` 兼容包已删除；当前只保留 MMS + ModuleAssembler 正式执行链 |
+| 宿主 / 模块职责边界 | 已收口 | 宿主源码已移除 `src/utils` 业务辅助代码、`src/core/models` 业务模型与历史 smoke/verify 脚本；相关逻辑由模块侧独立承载并经测试验证 |
+| 版本治理 | 已收口 | 根应用工作区版本由 `packages/crawler4j/pyproject.toml` 单点声明，运行时版本服务与最新正式 tag `v0.1.1` 已明确分层 |
 
 ## 3. 已验证的缺口
 
@@ -47,18 +48,18 @@
 
 | 来源 | 值 |
 |---|---|
-| 根项目 `pyproject.toml` | `0.1.2.dev20260326` |
-| 运行时 `src/__version__.py` | `0.1.2.dev20260326` |
+| 应用包 `packages/crawler4j/pyproject.toml` | `0.1.2.dev20260326` |
+| 运行时版本服务 | 从 `packages/crawler4j/pyproject.toml` 或已安装包元数据读取 |
 | 最近正式 Git tag | `v0.1.1` |
-| SDK | `2.0.0` |
-| Contracts | `1.0.1` |
+| SDK | `1.1.0` |
+| Contracts | `1.1.0` |
 
 ### 4.2 最新已知发布结果
 
 - 最新已知正式 Git tag 为 `v0.1.1`，Tag 时间为 2026-01-03。
 - 根仓库中保留了 `dist/Crawler4j.app`、`dist/Crawler4j/`、`build/crawler4j/` 等历史打包产物。
 - SDK 与 Contracts 的 `dist/` 中保留了 `1.0.0`、`1.0.1`、`1.0.2`、`1.0.3` 等历史产物。
-- 当前 SDK 代码口径已经提升到 `2.0.0`，并删除了 `DataService` 兼容层；旧模块需要直接升级到 `ctx.db` 最小数据接口。
+- 当前 SDK 代码口径已经提升到 `1.1.0`，并将宿主扩展能力收敛到 `TaskContext.tools`；旧模块需要升级到 `ctx.tools.call(...)` 统一接口。
 - 当前工作区版本已统一为 `0.1.2.dev20260326`，并明确表示它领先于最新正式 tag `v0.1.1`。
 
 ## 5. 文档状态

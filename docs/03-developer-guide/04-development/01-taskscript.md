@@ -9,14 +9,17 @@
 
 - 类属性：`name`、`display_name`、`description`、`default_config`
 - 方法：`execute(ctx)`
-- 可选 hooks：`on_init(ctx)`、`on_error(ctx, error)`、`on_cleanup(ctx)`
 
-生命周期顺序如下：
+`TaskScript` 类本身已经不再承载官方生命周期 hooks。
+模块级生命周期统一由 ATM 在 `module_runtime.py` 中调度：
 
 ```text
-on_init
+prepare_env
+-> init_env
+-> before_run
 -> execute
--> on_error（仅异常时）
+-> on_success / on_failure / on_timeout
+-> ATM env action
 -> on_cleanup
 ```
 
@@ -27,6 +30,8 @@ on_init
 - 输出：`TaskResult`
 
 它不是“整个业务流程”，只是整个流程中的一个最小步骤。
+
+如果任务脚本内部需要前后置、异常兜底或局部清理，请直接在 `execute()` 里用正常 Python 控制流处理，例如 `try / except / finally`。不要再给 `TaskScript` 类补一套私有 hooks。
 
 ## 最小可运行示例
 
@@ -60,6 +65,81 @@ class FetchHotelsTask(TaskScript):
         )
 ```
 
+## 任务脚本怎样控制 ATM 流程
+
+任务脚本只负责业务逻辑；如果需要让 ATM 接手流程动作，例如：
+
+- 标记任务失败
+- 等待人工确认
+- 指定任务结束后销毁运行环境
+
+请通过 `TaskSignal` 表达，而不是直接调用 REM。
+
+```python
+from crawler4j_sdk import EnvAction, TaskResult, TaskScript, TaskSignal
+
+
+class CheckAccountTask(TaskScript):
+    name = "check_account"
+
+    async def execute(self, ctx):
+        need_manual_review = True
+        if need_manual_review:
+            signal = TaskSignal.wait_for_confirmation(
+                message="等待人工复核",
+                reason="risk_control",
+                env_action=EnvAction.KEEP_ALIVE,
+                payload={
+                    "review_type": "account",
+                    "confirmation": {
+                        "title": "账号复核",
+                        "description": "请确认该账号是否允许继续执行。",
+                        "fields": [
+                            {"label": "账号", "value": "demo-account"},
+                            {"label": "风险等级", "value": "high"},
+                        ],
+                        "confirm_text": "确认放行",
+                        "reject_text": "确认拦截",
+                    },
+                },
+            )
+            return TaskResult.ok(
+                message="等待人工复核",
+                signal=signal,
+            )
+
+        is_black = False
+        if is_black:
+            signal = TaskSignal.fail(
+                message="检测到黑号",
+                error="black_account",
+                reason="risk_control",
+                env_action=EnvAction.DESTROY,
+            )
+            return TaskResult.fail(
+                message="检测到黑号",
+                error="black_account",
+                signal=signal,
+            )
+
+        return TaskResult.ok(message="账号正常")
+```
+
+如果是 `module_runtime.py` 的 `init_env` / `before_run` 阶段，也可以直接调用 `ctx.emit_signal(...)`。当前正式允许发信号的阶段只有：
+
+- `init_env`
+- `before_run`
+- `run_module`（也就是 `TaskScript.execute()` / `TaskFlow.run()` 内部）
+
+`on_cleanup` 会在 ATM 完成环境动作之后执行，模块可以从 `ctx.runtime["env_action"]` 读取最终动作结果。如果你只是想在“环境已经销毁之后”做模块数据自清理，不需要额外增加一个 `env_deleted` hook。
+
+这里固定一条规则：
+
+- `on_cleanup` 不要求环境一定被删除
+- 只要任务已经进入终态并且模块执行上下文已建立，ATM 就会调用它
+- 需要区分 `destroy` / `recycle` / `keep_alive` 时，统一读取 `ctx.runtime["env_action"]`
+- 需要客户端弹出结构化确认面板时，统一把展示协议写入 `TaskSignal.wait_for_confirmation(..., payload={"confirmation": ...})`
+
 ## 第一次看这个示例时，应该怎么看
 
 不要急着一行一行抄。先看结构：
@@ -86,7 +166,7 @@ class FetchHotelsTask(TaskScript):
 | `ctx.state` | 与工作流共享状态 |
 | `ctx.screenshot()` | 截图取证 |
 | `ctx.should_stop()` | 检查停止标志 |
-| `ctx.db` / `ctx.ip_pool` / `ctx.env_ops` / `ctx.ui` | 宿主注入的能力接口 |
+| `ctx.tools` | 宿主注入的统一工具入口 |
 
 如果你想看完整、正式的能力面，而不是只看“最常用的那几个”，请直接读：
 
@@ -107,30 +187,35 @@ class FetchHotelsTask(TaskScript):
 ## 写任务脚本时，数据能力应该怎么用
 
 如果你的任务脚本需要读写模块数据，不要自己去连数据库。
-当前正确做法只有一个：通过 Core 注入的 `ctx.db` 使用最小数据能力。
-`crawler4j-sdk 2.0.0` 起，SDK 不再提供 `DataService` 兼容名，也不再保留旧聚合对象写法。
+当前正确做法只有一个：通过 Core 注入的 `ctx.tools.call(...)` 使用正式工具。
+`crawler4j-sdk 1.1.1` 起，模块侧统一通过 `TaskContext.tools` 访问宿主扩展能力。
 
 也就是说，当前模块里允许依赖的数据能力只有：
 
-- `list_records(dataset)`：查询模块数据集
-- `replace_records(dataset, records)`：回写整个数据集
-- `get_state` / `set_state` / `exists_state`：保存轻量运行状态
-- `acquire_lock` / `release_lock` / `is_locked`：做幂等锁
+- `db.list_records`
+- `db.replace_records`
+- `db.get_state` / `db.set_state` / `db.exists_state`
+- `db.acquire_lock` / `db.release_lock` / `db.is_locked`
 
 ### 一个最小示例
 
 ```python
-if ctx.db is not None:
-    records = ctx.db.list_records("orders")
-    cursor = ctx.db.get_state("hotel_demo:orders:cursor") or {"page": 1}
+if ctx.tools and ctx.tools.has_tool("db.list_records"):
+    records = ctx.tools.call("db.list_records", dataset="orders")
+    cursor = ctx.tools.call("db.get_state", key="hotel_demo:orders:cursor") or {"page": 1}
 
-    if ctx.db.acquire_lock("orders", "sync", ttl=60):
+    if ctx.tools.call("db.acquire_lock", scope="orders", key="sync", ttl=60):
         try:
             records.append({"id": "o-1", "status": "new"})
-            ctx.db.replace_records("orders", records)
-            ctx.db.set_state("hotel_demo:orders:cursor", {"page": cursor["page"] + 1}, ttl=3600)
+            ctx.tools.call("db.replace_records", dataset="orders", records=records)
+            ctx.tools.call(
+                "db.set_state",
+                key="hotel_demo:orders:cursor",
+                value={"page": cursor["page"] + 1},
+                ttl=3600,
+            )
         finally:
-            ctx.db.release_lock("orders", "sync")
+            ctx.tools.call("db.release_lock", scope="orders", key="sync")
 ```
 
 ### 为什么这里强调自己带命名空间
@@ -148,8 +233,8 @@ if ctx.db is not None:
 如果你接手的是旧模块，先做下面这组直接替换，再继续写业务逻辑：
 
 1. 删除 `DataService` 导入
-2. 把 `ctx.db.storage.state` 改成 `ctx.db.get_state()` / `set_state()`
-3. 把旧账号、任务等聚合入口改成 `list_records()` / `replace_records()`
+2. 把历史 `ctx.db.*` 调用改成 `ctx.tools.call("db.*", ...)`
+3. 把旧账号、任务等聚合入口改成 `db.list_records` / `db.replace_records`
 
 ## 什么时候返回失败，什么时候抛异常
 

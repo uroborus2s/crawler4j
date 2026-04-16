@@ -67,4 +67,5 @@
 
 ## 5. 最近同步
 
+- 2026-04-15：`packages/crawler4j-sdk/README.md`、`docs/03-developer-guide/04-development/01-taskscript.md`、`04-core-capabilities.md`、`05-api-reference.md` 与相关设计文档已同步 `TaskContext.tools` 统一工具接口。
 - 2026-04-08：`docs/03-developer-guide/04-development/03-cli-and-ui.md`、`docs/03-developer-guide/05-debugging/01-devlink-and-debug.md` 与 `docs/04-project-development/06-testing-verification/test-plan.md` 已同步 `core:data_table` 的 `declare_ui` / `create_handler` / `update_handler` 契约和 DevLink 调试刷新事实。

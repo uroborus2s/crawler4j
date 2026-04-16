@@ -1,31 +1,14 @@
 [project]
-name = "crawler4j"
-version = "0.1.2.dev20260326"
-description = "Add your description here"
+name = "crawler4j-workspace"
+version = "0.0.0"
+description = "Development workspace for the crawler4j monorepo"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "crawler4j-contracts>=1.0.0,<2.0.0",
-    "pandas>=2.3.3",
-    "playwright>=1.57.0",
-    "pyqt6>=6.10.1",
-    "requests>=2.32.5",
-    "ddddocr>=1.4.11",
-    "numpy>=2.4.0",
-    "qasync>=0.28.0",
-    "httpx>=0.28.1",
-    "aiohttp>=3.13.2",
-    "watchdog>=4.0.0",
-    "sqlalchemy>=2.0.45",
-    "pydantic>=2.12.5",
-    "alembic>=1.17.2",
-    "apscheduler>=3.11.2",
-    "pyyaml>=6.0.3",
-    "debugpy>=1.8.17",
+    "crawler4j",
+    "crawler4j-sdk",
+    "crawler4j-contracts",
 ]
-
-[project.scripts]
-start = "src.ui.app:main"
 
 [dependency-groups]
 dev = [
@@ -36,20 +19,25 @@ dev = [
     "ruff>=0.14.10",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.uv.sources]
+crawler4j = { workspace = true }
+crawler4j-sdk = { workspace = true }
+crawler4j-contracts = { workspace = true }
 
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
+[tool.uv.workspace]
+members = ["packages/*"]
 
 [tool.ruff]
 line-length = 120
+src = [
+    "packages/*",
+    "packages/*/src",
+]
 extend-exclude = [
-    "tests/analyze_*.py",
-    "tests/debug_*.py",
-    "tests/manual_*.py",
-    "tests/verify_*.py",
+    "packages/*/tests/analyze_*.py",
+    "packages/*/tests/debug_*.py",
+    "packages/*/tests/manual_*.py",
+    "packages/*/tests/verify_*.py",
 ]
 
 [tool.ruff.lint]
