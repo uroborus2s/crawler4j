@@ -12,8 +12,8 @@ from src.core.atm.run_profile import (
     AcquisitionMode,
     CreationConfig,
     CreationLifecycle,
+    EnvType,
     ExecutionContext,
-    MatchConfig,
     ResourceConfig,
     RunProfile,
 )
@@ -88,10 +88,11 @@ def _make_registry(module_path: Path, *, source=None):
 def _make_run_profile(*, wait_timeout: int = 90, lifecycle: CreationLifecycle = CreationLifecycle.EPHEMERAL, params: dict | None = None, timeout: int = 180) -> RunProfile:
     return RunProfile(
         resource=ResourceConfig(
-            provider="virtualbrowser",
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.CREATE,
-                selector=MatchConfig(wait_timeout=wait_timeout),
+                provider="virtualbrowser",
+                env_type=EnvType.VIRTUAL_BROWSER,
+                wait_timeout=wait_timeout,
                 creation=CreationConfig(
                     lifecycle=lifecycle,
                     params=params or {"region": "cn"},

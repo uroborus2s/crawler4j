@@ -16,7 +16,6 @@ from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
     ExecutionContext,
-    MatchConfig,
     ResourceConfig,
     RunProfile,
 )
@@ -29,6 +28,19 @@ def temp_state_dir(tmp_path):
 
         init_database()
         yield tmp_path
+
+
+def _build_select_run_profile(wait_timeout: int = 60) -> RunProfile:
+    return RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                selector_name="random_ready",
+                wait_timeout=wait_timeout,
+            ),
+        ),
+        execution=ExecutionContext(module="demo_module", workflow="repair"),
+    )
 
 
 @pytest.mark.asyncio
@@ -159,16 +171,7 @@ async def test_start_job_triggers_targeted_reconcile():
         name="service",
         type=JobType.SERVICE,
         state=JobState.PAUSED,
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                provider="virtualbrowser",
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.MATCH,
-                    selector=MatchConfig(wait_timeout=60),
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
+        run_profile=_build_select_run_profile(),
         concurrency_target=2,
     )
     service._repo = SimpleNamespace(get_job=AsyncMock(return_value=job), save_job=AsyncMock())
@@ -196,16 +199,7 @@ async def test_start_job_blocks_when_runtime_precheck_fails():
         name="service",
         type=JobType.SERVICE,
         state=JobState.PAUSED,
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                provider="virtualbrowser",
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.MATCH,
-                    selector=MatchConfig(wait_timeout=60),
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
+        run_profile=_build_select_run_profile(),
         concurrency_target=2,
     )
     service._repo = SimpleNamespace(get_job=AsyncMock(return_value=job), save_job=AsyncMock())
@@ -229,16 +223,7 @@ async def test_create_service_job_forces_manual_trigger():
     service = TaskService()
     saved_jobs = []
     service._repo = SimpleNamespace(save_job=AsyncMock(side_effect=lambda job: saved_jobs.append(job)))
-    run_profile = RunProfile(
-        resource=ResourceConfig(
-            provider="virtualbrowser",
-            acquisition=AcquisitionConfig(
-                mode=AcquisitionMode.MATCH,
-                selector=MatchConfig(wait_timeout=60),
-            ),
-        ),
-        execution=ExecutionContext(module="demo_module", workflow="repair"),
-    )
+    run_profile = _build_select_run_profile()
 
     await service.create_job(
         name="service-job",
@@ -258,16 +243,7 @@ async def test_create_batch_job_accepts_manual_or_valid_cron():
     service = TaskService()
     saved_jobs = []
     service._repo = SimpleNamespace(save_job=AsyncMock(side_effect=lambda job: saved_jobs.append(job)))
-    run_profile = RunProfile(
-        resource=ResourceConfig(
-            provider="virtualbrowser",
-            acquisition=AcquisitionConfig(
-                mode=AcquisitionMode.MATCH,
-                selector=MatchConfig(wait_timeout=60),
-            ),
-        ),
-        execution=ExecutionContext(module="demo_module", workflow="repair"),
-    )
+    run_profile = _build_select_run_profile()
 
     await service.create_job(
         name="batch-job-manual",
@@ -297,16 +273,7 @@ async def test_create_job_accepts_inline_run_profile():
     saved_jobs = []
     service._repo = SimpleNamespace(save_job=AsyncMock(side_effect=lambda job: saved_jobs.append(job)))
 
-    run_profile = RunProfile(
-        resource=ResourceConfig(
-            provider="virtualbrowser",
-            acquisition=AcquisitionConfig(
-                mode=AcquisitionMode.MATCH,
-                selector=MatchConfig(wait_timeout=90),
-            ),
-        ),
-        execution=ExecutionContext(module="demo_module", workflow="repair"),
-    )
+    run_profile = _build_select_run_profile(wait_timeout=90)
 
     await service.create_job(
         name="inline-job",
@@ -329,16 +296,7 @@ async def test_run_job_once_dispatches_manual_batch_without_activating_job():
         type=JobType.BATCH,
         state=JobState.PAUSED,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                provider="virtualbrowser",
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.MATCH,
-                    selector=MatchConfig(wait_timeout=60),
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
+        run_profile=_build_select_run_profile(),
         concurrency_target=3,
     )
     service._repo = SimpleNamespace(
@@ -369,16 +327,7 @@ async def test_start_job_runs_manual_batch_once():
         type=JobType.BATCH,
         state=JobState.PAUSED,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                provider="virtualbrowser",
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.MATCH,
-                    selector=MatchConfig(wait_timeout=60),
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
+        run_profile=_build_select_run_profile(),
         concurrency_target=2,
     )
     service._repo = SimpleNamespace(
@@ -412,16 +361,7 @@ async def test_run_job_once_blocks_when_previous_batch_still_running():
         type=JobType.BATCH,
         state=JobState.PAUSED,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                provider="virtualbrowser",
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.MATCH,
-                    selector=MatchConfig(wait_timeout=60),
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
+        run_profile=_build_select_run_profile(),
         concurrency_target=2,
     )
     service._repo = SimpleNamespace(
@@ -450,16 +390,7 @@ async def test_update_job_switches_manual_batch_to_paused_and_requests_stop():
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                provider="virtualbrowser",
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.MATCH,
-                    selector=MatchConfig(wait_timeout=60),
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
+        run_profile=_build_select_run_profile(),
         concurrency_target=2,
     )
     service._repo = SimpleNamespace(get_job=AsyncMock(return_value=job), save_job=AsyncMock())
@@ -487,16 +418,7 @@ async def test_repository_roundtrip_preserves_run_profile_snapshot(temp_state_di
     repo = TaskRepository()
     repo._run_async = AsyncMock(side_effect=lambda func, *args: func(*args))
 
-    run_profile = RunProfile(
-        resource=ResourceConfig(
-            provider="virtualbrowser",
-            acquisition=AcquisitionConfig(
-                mode=AcquisitionMode.MATCH,
-                selector=MatchConfig(wait_timeout=75),
-            ),
-        ),
-        execution=ExecutionContext(module="demo_module", workflow="repair"),
-    )
+    run_profile = _build_select_run_profile(wait_timeout=75)
     job = Job(
         id="job-inline",
         name="inline",

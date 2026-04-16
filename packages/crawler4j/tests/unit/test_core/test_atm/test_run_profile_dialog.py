@@ -6,13 +6,10 @@ import pytest
 from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
-    ComparisonOp,
     CreationConfig,
     CreationLifecycle,
     ExecutionContext,
-    MatchConfig,
-    LogicOp,
-    MatchCondition,
+    EnvType,
     ResourceConfig,
     RunProfile,
 )
@@ -42,6 +39,28 @@ def _patch_dialog_dependencies(monkeypatch):
         dialog_module,
         "get_ip_pool_manager",
         lambda: SimpleNamespace(list_pools=lambda: [pool]),
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "get_module_service",
+        lambda: SimpleNamespace(
+            list_env_selectors=lambda module_name: [
+                SimpleNamespace(
+                    name="return_none",
+                    display_name="返回 None",
+                    description="占位选择器",
+                    returns_none=True,
+                ),
+                SimpleNamespace(
+                    name="random_ready",
+                    display_name="随机选择就绪环境",
+                    description="随机选择已就绪环境",
+                    returns_none=False,
+                ),
+            ]
+            if module_name == "demo_module"
+            else []
+        ),
     )
 
 
@@ -95,7 +114,8 @@ def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
     profile = dialog._build_run_profile_from_form()
 
     assert profile.resource.acquisition.mode == AcquisitionMode.CREATE
-    assert profile.resource.provider == "virtualbrowser"
+    assert profile.resource.acquisition.provider == "virtualbrowser"
+    assert profile.resource.acquisition.env_type == EnvType.VIRTUAL_BROWSER
     assert profile.resource.acquisition.creation.lifecycle == CreationLifecycle.PERSISTENT
     virtualbrowser = profile.resource.acquisition.creation.params["virtualbrowser"]
     assert virtualbrowser["chrome_version"] == 144
@@ -197,7 +217,7 @@ def test_run_profile_dialog_script_selector_has_no_blank_module_option(qtbot, mo
     assert dialog.script_selector.get_value() == ("", "")
 
 
-def test_run_profile_dialog_builds_match_mode_profile(qtbot, monkeypatch):
+def test_run_profile_dialog_builds_select_mode_profile(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -206,26 +226,31 @@ def test_run_profile_dialog_builds_match_mode_profile(qtbot, monkeypatch):
     qtbot.addWidget(dialog)
 
     dialog.script_selector.set_value("demo_module", "collect")
-    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.MATCH))
-    dialog.resource_provider_combo.setCurrentText("bitbrowser")
-    dialog.match_mode_combo.setCurrentIndex(dialog.match_mode_combo.findData(LogicOp.OR))
-    dialog.rule_builder.root_widget._add_rule(
-        MatchCondition(field="provider", op=ComparisonOp.EQ, value="bitbrowser")
-    )
-    dialog.rule_builder.root_widget._add_rule(
-        MatchCondition(field="name", op=ComparisonOp.CONTAINS, value="shared")
-    )
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("random_ready"))
 
     profile = dialog._build_run_profile_from_form()
 
-    assert profile.resource.acquisition.mode == AcquisitionMode.MATCH
-    assert profile.resource.provider == "bitbrowser"
-    assert profile.resource.acquisition.selector.match_rules is not None
-    assert profile.resource.acquisition.selector.match_rules.logic == LogicOp.OR
-    assert [condition.field for condition in profile.resource.acquisition.selector.match_rules.conditions] == [
-        "provider",
-        "name",
-    ]
+    assert profile.resource.acquisition.mode == AcquisitionMode.SELECT
+    assert profile.resource.acquisition.selector_name == "random_ready"
+    assert profile.resource.acquisition.provider == ""
+    assert profile.resource.acquisition.wait_timeout == 60
+
+
+def test_run_profile_dialog_warns_when_selector_returns_none(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("demo_module", "collect")
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("return_none"))
+
+    assert dialog.selector_none_hint.isHidden() is False
+    assert "返回了 none" in dialog.selector_none_hint.text()
 
 
 def test_run_profile_dialog_randomizes_user_agent_with_selected_version(qtbot, monkeypatch):
@@ -358,10 +383,11 @@ def test_run_profile_dialog_loads_virtualbrowser_dropdown_values(qtbot, monkeypa
 
     run_profile = RunProfile(
         resource=ResourceConfig(
-            provider="virtualbrowser",
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.CREATE,
-                selector=MatchConfig(wait_timeout=60),
+                provider="virtualbrowser",
+                env_type=EnvType.VIRTUAL_BROWSER,
+                wait_timeout=60,
                 creation=CreationConfig(
                     lifecycle=CreationLifecycle.EPHEMERAL,
                     params={
@@ -497,10 +523,11 @@ def test_run_profile_dialog_ignores_legacy_randomize_after_create_flag(qtbot, mo
 
     run_profile = RunProfile(
         resource=ResourceConfig(
-            provider="virtualbrowser",
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.CREATE,
-                selector=MatchConfig(wait_timeout=60),
+                provider="virtualbrowser",
+                env_type=EnvType.VIRTUAL_BROWSER,
+                wait_timeout=60,
                 creation=CreationConfig(
                     lifecycle=CreationLifecycle.EPHEMERAL,
                     params={

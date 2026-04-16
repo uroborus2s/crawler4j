@@ -6,6 +6,7 @@ from crawler4j_contracts.context import (
     ClickCaptchaMatchResult,
     ClickCaptchaOrderedTarget,
     DefaultHttpClient,
+    EnvCandidate,
     HttpClient,
     ImageInput,
     Point,
@@ -34,4 +35,5 @@ __all__ = [
     "ClickCaptchaDebugInfo",
     "ClickCaptchaOrderedTarget",
     "ClickCaptchaMatchResult",
+    "EnvCandidate",
 ]

@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.mms import get_module_registry
+from src.core.mms.service import get_module_service
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.provider import (
     VIRTUALBROWSER_DEFAULT_CHROME_VERSION,
@@ -44,13 +45,9 @@ from src.core.atm.run_profile import (
     CreationLifecycle,
     EnvType,
     ExecutionContext,
-    LogicOp,
-    MatchConfig,
     RunProfile,
     ResourceConfig,
-    SelectionStrategy,
 )
-from src.core.atm.ui.rule_builder import RuleBuilder
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
@@ -215,14 +212,6 @@ class WorkflowSelector(QWidget):
                 self.workflow_combo.addItem(workflow, workflow)
                 self.workflow_combo.setCurrentIndex(self.workflow_combo.count() - 1)
 
-
-# 排序策略显示映射 (CN)
-SELECTION_STRATEGY_MAP = {
-    SelectionStrategy.RANDOM: "随机选择 (Random)",
-    SelectionStrategy.FIFO: "最早空闲 (FIFO)",
-    SelectionStrategy.LIFO: "最近使用 (LIFO)",
-    SelectionStrategy.BEST_FIT: "最佳匹配 (Best Fit)",
-}
 
 VIRTUALBROWSER_LANGUAGE_OPTIONS = (
     {"label": "英语", "language": "en-US", "value": "en-US,en"},
@@ -657,20 +646,16 @@ class RunProfileDialog(QDialog):
     def _default_run_profile(self) -> RunProfile:
         return RunProfile(
             resource=ResourceConfig(
-                provider="virtualbrowser",
                 acquisition=AcquisitionConfig(
                     mode=AcquisitionMode.CREATE,
-                    selector=MatchConfig(env_type=EnvType.VIRTUAL_BROWSER),
+                    provider="virtualbrowser",
+                    env_type=EnvType.VIRTUAL_BROWSER,
                     creation=CreationConfig(lifecycle=CreationLifecycle.PERSISTENT),
                 ),
             )
         )
 
     def _setup_form_tabs(self):
-        self.wait_timeout_spin = QSpinBox()
-        self.wait_timeout_spin.setRange(0, 3600)
-        self.wait_timeout_spin.setValue(60)
-
         self.tab_basic = QWidget()
         self._setup_basic_tab(self.tab_basic)
         self.form_tabs.addTab(self.tab_basic, "运行配置")
@@ -1460,7 +1445,7 @@ class RunProfileDialog(QDialog):
 
         self.resource_mode_combo = QComboBox()
         self.resource_mode_combo.addItem("创建环境", AcquisitionMode.CREATE)
-        self.resource_mode_combo.addItem("选择环境", AcquisitionMode.MATCH)
+        self.resource_mode_combo.addItem("选择环境", AcquisitionMode.SELECT)
         self.resource_mode_combo.currentIndexChanged.connect(self._on_resource_mode_changed)
         self.resource_form.addRow("运行方式:", self.resource_mode_combo)
 
@@ -1473,6 +1458,10 @@ class RunProfileDialog(QDialog):
         self.create_env_type_combo.addItem("指纹浏览器", EnvType.VIRTUAL_BROWSER)
         self.create_env_type_combo.currentIndexChanged.connect(self._on_create_env_type_changed)
         self.resource_form.addRow("环境类型:", self.create_env_type_combo)
+
+        self.wait_timeout_spin = QSpinBox()
+        self.wait_timeout_spin.setRange(0, 3600)
+        self.wait_timeout_spin.setValue(60)
 
         self.resource_mode_stack = QStackedWidget()
 
@@ -1533,28 +1522,44 @@ class RunProfileDialog(QDialog):
 
         self.resource_mode_stack.addWidget(create_widget)
 
-        match_widget = QWidget()
-        match_layout = QVBoxLayout(match_widget)
-        match_layout.setContentsMargins(0, 0, 0, 0)
-        match_layout.setSpacing(12)
+        select_widget = QWidget()
+        select_layout = QVBoxLayout(select_widget)
+        select_layout.setContentsMargins(0, 0, 0, 0)
+        select_layout.setSpacing(12)
 
-        match_form_widget = QWidget()
-        self.match_form = self._create_form_layout(match_form_widget)
-        self.match_mode_combo = QComboBox()
-        self.match_mode_combo.addItem("全部满足", LogicOp.AND)
-        self.match_mode_combo.addItem("任一满足", LogicOp.OR)
-        self.match_form.addRow("匹配模式:", self.match_mode_combo)
-        match_layout.addWidget(match_form_widget)
+        select_form_widget = QWidget()
+        self.select_form = self._create_form_layout(select_form_widget)
 
-        self.rule_builder = RuleBuilder()
-        match_layout.addWidget(self.rule_builder)
+        self.selector_name_combo = QComboBox()
+        self.selector_name_combo.setPlaceholderText("选择环境回调函数")
+        self.selector_name_combo.currentIndexChanged.connect(self._on_selector_name_changed)
+        self.select_form.addRow("回调函数:", self.selector_name_combo)
+        self.select_form.addRow(
+            "等待超时:",
+            self._wrap_widget_with_suffix(self.wait_timeout_spin, "秒"),
+        )
+        select_layout.addWidget(select_form_widget)
 
-        match_hint = QLabel("支持字段：provider、name、status、external_id、proxy.mode、proxy.current_ip")
-        match_hint.setWordWrap(True)
-        match_layout.addWidget(match_hint)
+        self.selector_none_hint = QLabel("当前环境选择回调函数返回了 none，运行时会直接失败。")
+        self.selector_none_hint.setWordWrap(True)
+        self.selector_none_hint.setStyleSheet("color: #f59e0b;")
+        self.selector_none_hint.hide()
+        select_layout.addWidget(self.selector_none_hint)
 
-        self.resource_mode_stack.addWidget(match_widget)
-        self.resource_form.addRow("匹配/创建:", self.resource_mode_stack)
+        self.selector_empty_hint = QLabel("当前模块未声明可用的环境选择回调函数。")
+        self.selector_empty_hint.setWordWrap(True)
+        self.selector_empty_hint.setStyleSheet("color: rgba(255, 255, 255, 0.6);")
+        self.selector_empty_hint.hide()
+        select_layout.addWidget(self.selector_empty_hint)
+
+        select_desc = QLabel("模块通过回调函数接收全部就绪环境候选集，并返回目标环境 ID。")
+        select_desc.setWordWrap(True)
+        select_desc.setStyleSheet("color: rgba(255, 255, 255, 0.72);")
+        select_layout.addWidget(select_desc)
+        select_layout.addStretch()
+
+        self.resource_mode_stack.addWidget(select_widget)
+        self.resource_form.addRow("模式配置:", self.resource_mode_stack)
 
         layout.addWidget(sel_group)
         layout.addStretch()
@@ -1564,6 +1569,9 @@ class RunProfileDialog(QDialog):
 
         self._load_ip_pools()
         self._load_provider_options("virtualbrowser")
+        self.script_selector.module_combo.currentTextChanged.connect(self._on_script_module_changed)
+        self._selector_infos: dict[str, object] = {}
+        self._load_selector_options()
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
     def _set_row_visible(self, widget: QWidget, visible: bool):
@@ -1912,16 +1920,13 @@ class RunProfileDialog(QDialog):
 
     def _load_provider_options(self, preferred: str | None = None):
         current = preferred or self.resource_provider_combo.currentText() or "virtualbrowser"
-        create_mode = self.resource_mode_combo.currentData() == AcquisitionMode.CREATE
         create_env_type = self.create_env_type_combo.currentData()
 
         options: list[str]
-        if create_mode and create_env_type == EnvType.CHROME:
+        if create_env_type == EnvType.CHROME:
             options = ["playwright_local"]
-        elif create_mode:
-            options = ["virtualbrowser", "bitbrowser"]
         else:
-            options = ["virtualbrowser", "bitbrowser", "playwright_local"]
+            options = ["virtualbrowser", "bitbrowser"]
 
         self.resource_provider_combo.blockSignals(True)
         self.resource_provider_combo.clear()
@@ -1953,6 +1958,7 @@ class RunProfileDialog(QDialog):
         del index
         create_mode = self.resource_mode_combo.currentData() == AcquisitionMode.CREATE
         self.resource_mode_stack.setCurrentIndex(0 if create_mode else 1)
+        self._set_row_visible(self.resource_provider_combo, create_mode)
         self._set_row_visible(self.create_env_type_combo, create_mode)
         self._load_provider_options()
         self._sync_create_fields()
@@ -1998,6 +2004,53 @@ class RunProfileDialog(QDialog):
         self._set_row_visible(self.ip_pool_strategy_combo, strategy == "pool")
         self._set_row_visible(self.manual_proxy_edit, strategy == "static")
 
+    def _current_script_module_name(self) -> str:
+        module_name, _workflow_name = self.script_selector.get_value()
+        if module_name:
+            return module_name
+        return self.script_selector.module_combo.currentText().strip()
+
+    def _load_selector_options(self, preferred: str | None = None) -> None:
+        module_name = self._current_script_module_name()
+        selectors = []
+        if module_name:
+            try:
+                selectors = list(get_module_service().list_env_selectors(module_name))
+            except Exception:
+                selectors = []
+
+        self._selector_infos = {selector.name: selector for selector in selectors}
+
+        self.selector_name_combo.blockSignals(True)
+        self.selector_name_combo.clear()
+        for selector in selectors:
+            label = selector.display_name or selector.name
+            self.selector_name_combo.addItem(label, selector.name)
+
+        if preferred:
+            index = self.selector_name_combo.findData(preferred)
+            self.selector_name_combo.setCurrentIndex(index if index >= 0 else -1)
+        else:
+            self.selector_name_combo.setCurrentIndex(-1)
+        self.selector_name_combo.blockSignals(False)
+
+        has_selectors = bool(selectors)
+        self.selector_empty_hint.setVisible(bool(module_name) and not has_selectors)
+        self._update_selector_none_hint()
+
+    def _update_selector_none_hint(self) -> None:
+        selector_name = self.selector_name_combo.currentData()
+        info = self._selector_infos.get(selector_name) if isinstance(selector_name, str) else None
+        self.selector_none_hint.setVisible(bool(info and getattr(info, "returns_none", False)))
+
+    def _on_script_module_changed(self, _module_name: str) -> None:
+        previous = self.selector_name_combo.currentData()
+        preferred = previous if isinstance(previous, str) else None
+        self._load_selector_options(preferred=preferred)
+
+    def _on_selector_name_changed(self, _index: int) -> None:
+        self._update_selector_none_hint()
+
     def _create_yaml_widget(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -2017,14 +2070,6 @@ class RunProfileDialog(QDialog):
             self.stack.setCurrentIndex(1)
             self.form_btn.setChecked(False)
             self.yaml_btn.setChecked(True)
-
-    def _replace_rule_builder(self, group=None):
-        match_widget = self.resource_mode_stack.widget(1)
-        match_layout = match_widget.layout()
-        old_builder = self.rule_builder
-        self.rule_builder = RuleBuilder(group)
-        match_layout.replaceWidget(old_builder, self.rule_builder)
-        old_builder.deleteLater()
 
     def _provider_to_env_type(self, provider: str) -> EnvType:
         if provider == "bitbrowser":
@@ -2057,30 +2102,34 @@ class RunProfileDialog(QDialog):
 
     def _load_run_profile(self):
         s = self._run_profile
+        acquisition = s.resource.acquisition
 
-        mode_index = self.resource_mode_combo.findData(s.resource.acquisition.mode)
+        mode_index = self.resource_mode_combo.findData(acquisition.mode)
         if mode_index >= 0:
             self.resource_mode_combo.setCurrentIndex(mode_index)
 
-        create_env_type = EnvType.CHROME if s.resource.provider == "playwright_local" else EnvType.VIRTUAL_BROWSER
+        if acquisition.provider == "playwright_local" or acquisition.env_type == EnvType.CHROME:
+            create_env_type = EnvType.CHROME
+        else:
+            create_env_type = EnvType.VIRTUAL_BROWSER
         type_index = self.create_env_type_combo.findData(create_env_type)
         if type_index >= 0:
             self.create_env_type_combo.setCurrentIndex(type_index)
-        self._load_provider_options(s.resource.provider)
+        self._load_provider_options(acquisition.provider or "virtualbrowser")
 
-        provider_index = self.resource_provider_combo.findText(s.resource.provider)
+        provider_index = self.resource_provider_combo.findText(acquisition.provider)
         if provider_index >= 0:
             self.resource_provider_combo.setCurrentIndex(provider_index)
 
-        self.wait_timeout_spin.setValue(s.resource.acquisition.selector.wait_timeout)
+        self.wait_timeout_spin.setValue(acquisition.wait_timeout)
 
-        creation_params = s.resource.acquisition.creation.params
-        provider = s.resource.provider
+        creation_params = acquisition.creation.params
+        provider = acquisition.provider
         provider_params = creation_params.get("virtualbrowser") if provider == "virtualbrowser" else {}
         if not isinstance(provider_params, dict):
             provider_params = {}
         self._load_virtualbrowser_params(provider_params)
-        if not provider_params:
+        if acquisition.mode == AcquisitionMode.CREATE and not provider_params:
             self._apply_new_virtualbrowser_defaults()
 
         proxy_params = creation_params.get("proxy", {}) if isinstance(creation_params.get("proxy"), dict) else {}
@@ -2093,16 +2142,15 @@ class RunProfileDialog(QDialog):
             self.ip_pool_strategy_combo.setCurrentIndex(bind_strategy_index)
         self.manual_proxy_edit.setText(str(proxy_params.get("static_value", "")))
 
-        match_rules = s.resource.acquisition.selector.match_rules
-        self._replace_rule_builder(match_rules)
-        if match_rules:
-            mode_index = self.match_mode_combo.findData(match_rules.logic)
-            self.match_mode_combo.setCurrentIndex(mode_index if mode_index >= 0 else 0)
-        else:
-            self.match_mode_combo.setCurrentIndex(self.match_mode_combo.findData(LogicOp.AND))
-
         if s.execution and s.execution.module:
             self.script_selector.set_value(s.execution.module, s.execution.workflow)
+        self._load_selector_options(acquisition.selector_name or None)
+
+        selector_index = self.selector_name_combo.findData(acquisition.selector_name)
+        if selector_index >= 0:
+            self.selector_name_combo.setCurrentIndex(selector_index)
+        elif acquisition.mode == AcquisitionMode.SELECT:
+            self.selector_name_combo.setCurrentIndex(-1)
 
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
@@ -2111,9 +2159,8 @@ class RunProfileDialog(QDialog):
         acquisition_mode = self.resource_mode_combo.currentData()
         provider = self.resource_provider_combo.currentText().strip() or "virtualbrowser"
         env_type = self._provider_to_env_type(provider)
-
         creation_params: dict = {}
-        match_rules = None
+        selector_name = ""
 
         if acquisition_mode == AcquisitionMode.CREATE and env_type in {EnvType.BIT_BROWSER, EnvType.VIRTUAL_BROWSER}:
             provider_params = self._build_virtualbrowser_params() if provider == "virtualbrowser" else {}
@@ -2127,27 +2174,26 @@ class RunProfileDialog(QDialog):
             if proxy_config:
                 creation_params["proxy"] = proxy_config
 
-        if acquisition_mode == AcquisitionMode.MATCH:
-            match_rules = self.rule_builder.get_rule_group()
-            match_rules.logic = self.match_mode_combo.currentData()
-            if not match_rules.conditions:
-                match_rules = None
+        if acquisition_mode == AcquisitionMode.SELECT:
+            selector_data = self.selector_name_combo.currentData()
+            selector_name = selector_data.strip() if isinstance(selector_data, str) else ""
+            if not selector_name:
+                raise ValueError("请选择环境选择回调函数")
+            provider = ""
+            env_type = EnvType.VIRTUAL_BROWSER
 
         resource = ResourceConfig(
-            provider=provider,
-            acquisition={
-                "mode": acquisition_mode,
-                "selector": MatchConfig(
-                    env_type=env_type,
-                    match_rules=match_rules,
-                    sort_strategy=SelectionStrategy.FIFO,
-                    wait_timeout=self.wait_timeout_spin.value(),
+            acquisition=AcquisitionConfig(
+                mode=acquisition_mode,
+                provider=provider,
+                env_type=env_type,
+                selector_name=selector_name,
+                wait_timeout=self.wait_timeout_spin.value(),
+                creation=CreationConfig(
+                    lifecycle=CreationLifecycle.PERSISTENT,
+                    params=creation_params,
                 ),
-                "creation": {
-                    "lifecycle": CreationLifecycle.PERSISTENT,
-                    "params": creation_params,
-                },
-            },
+            ),
         )
         
         module_name, workflow_name = self.script_selector.get_value()

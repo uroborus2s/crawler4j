@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.atm.job_runtime import describe_job_runtime
 from src.core.atm.models import Job
+from src.core.atm.run_profile import AcquisitionMode
 from src.core.debug.models import DebugSession, DebugSessionRequest, DebugSessionState
 from src.core.debug.resolver import JobDebugTarget
 from src.core.debug.service import DebugService, get_debug_service
@@ -66,7 +67,7 @@ class JobDebugDialog(QDialog):
                 **(job.params or {}),
             },
             timeout=run_profile.execution.timeout if run_profile.execution else 0,
-            wait_timeout=run_profile.resource.acquisition.selector.wait_timeout,
+            wait_timeout=run_profile.resource.acquisition.wait_timeout,
         )
         self.setWindowTitle(f"任务调试 - {job.name}")
         self._setup_ui()
@@ -198,7 +199,12 @@ class JobDebugDialog(QDialog):
             ("运行配置", self._runtime_label),
             ("模块", self._target.module.name),
             ("工作流", self._target.workflow or "default"),
-            ("Provider", self._run_profile.resource.provider),
+            (
+                "资源",
+                self._run_profile.resource.acquisition.provider
+                if self._run_profile.resource.acquisition.mode == AcquisitionMode.CREATE
+                else self._run_profile.resource.acquisition.selector_name or "-",
+            ),
             ("获取模式", self._run_profile.resource.acquisition.mode.value),
         ]
         for idx, (label_text, value_text) in enumerate(summary_items):

@@ -111,6 +111,19 @@ class ClickCaptchaMatchResult:
     debug: ClickCaptchaDebugInfo | None = None
 
 
+@dataclass(frozen=True)
+class EnvCandidate:
+    """模块环境选择器可见的环境候选。"""
+
+    env_id: int
+    name: str
+    provider: str
+    status: str
+    external_id: str | None = None
+    capabilities: tuple[str, ...] = field(default_factory=tuple)
+    proxy: dict[str, Any] | None = None
+
+
 class DefaultHttpClient:
     """默认 HTTP 客户端实现，基于 aiohttp。"""
 

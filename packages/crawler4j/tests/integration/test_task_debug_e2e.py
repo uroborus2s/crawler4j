@@ -254,7 +254,7 @@ async def test_task_debug_session_hits_module_breakpoint(tmp_path, monkeypatch):
         CreationConfig,
         CreationLifecycle,
         ExecutionContext,
-        MatchConfig,
+        EnvType,
         ResourceConfig,
         RunProfile,
     )
@@ -276,10 +276,11 @@ async def test_task_debug_session_hits_module_breakpoint(tmp_path, monkeypatch):
 
     run_profile = RunProfile(
         resource=ResourceConfig(
-            provider="playwright_local",
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.CREATE,
-                selector=MatchConfig(wait_timeout=30),
+                provider="playwright_local",
+                env_type=EnvType.CHROME,
+                wait_timeout=30,
                 creation=CreationConfig(lifecycle=CreationLifecycle.EPHEMERAL, params={}),
             ),
         ),

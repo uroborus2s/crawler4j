@@ -78,7 +78,8 @@ class DebugService:
             workflow=target.workflow,
             params=dict(request.params) if request.params else dict(target.params),
             hooks_module=target.hooks_module,
-            provider=target.run_profile.resource.provider,
+            provider=target.run_profile.resource.acquisition.provider,
+            selector_name=target.run_profile.resource.acquisition.selector_name,
             acquisition_mode=target.run_profile.resource.acquisition.mode,
             creation_params=dict(target.run_profile.resource.acquisition.creation.params),
             creation_lifecycle=(

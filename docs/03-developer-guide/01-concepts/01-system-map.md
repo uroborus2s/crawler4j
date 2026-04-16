@@ -59,7 +59,7 @@
 这条链路里，真正影响运行结果的关键节点只有几个：
 
 - `module.yaml.name`
-- 根 `__init__.py` 暴露的 `run(context)` 和可选 hooks
+- 根 `__init__.py` 暴露的 `run(context)`，以及标准 `module_runtime.py` 中声明的 hooks / 环境选择器
 - `workflows[*].name`
 - 作业运行配置里的 `execution.module` 与 `execution.workflow`
 

@@ -13,13 +13,13 @@
 旧模块（SDK < 2.1.0）必须按照以下步骤迁移到最新结构：
 
 ### 1. 重新生成根 `__init__.py`
-将你的根 `__init__.py` 内容替换为以下固定代码（或使用 `crawler4j init-model` 重新生成）：
+将你的根 `__init__.py` 内容替换为最新模板（推荐直接使用 `crawler4j init-model` 重新生成，而不是手抄旧片段）。当前正式模板除了 `run` 以外，还会导出 `select_env` 与标准 lifecycle hooks：
 
 ```python
 """模块入口。
 
 本文件由 SDK 自动托管，不建议手动修改。
-如需扩展运行时逻辑（Hooks、自定义发现等），请在同级目录创建 `module_runtime.py`。
+模块级运行时逻辑统一放在同级目录的标准文件 `module_runtime.py` 中。
 """
 
 from pathlib import Path
@@ -75,4 +75,4 @@ A: 不建议修改。现在的 `run` 函数只是调用 `assembler.run(context)`
 A: 是的。SDK 2.1.0 不再承诺兼容旧版手工维护的 `__init__.py` 逻辑。为了长期的维护性，请务必完成迁移。
 
 ### Q: `module_runtime.py` 是必须的吗？
-A: 不是。如果你的模块只是简单的任务和工作流发现，不需要任何特殊 Hooks，可以不创建此文件。
+A: 是。现在它是标准模块文件，脚手架默认会生成。即使你暂时不写自定义 hooks，也需要保留该文件，因为 ATM 的“选择环境”模式依赖它声明 `@env_selector(...)` 回调。

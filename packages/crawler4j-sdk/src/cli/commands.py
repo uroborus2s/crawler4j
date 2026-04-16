@@ -19,6 +19,7 @@ from crawler4j_sdk.cli.templates import (
     MODEL_MODULE_INIT,
     MODEL_PROJECT_PYPROJECT,
     MODEL_PROJECT_README,
+    MODEL_RUNTIME_TEMPLATE,
     MODEL_TEST_TASK_TEMPLATE,
     MODEL_UI_PAGES_TEMPLATE,
     MODEL_UI_SECTION,
@@ -159,7 +160,9 @@ def cmd_init_model(args) -> int:
     _write_text(output_dir / "__init__.py", MODEL_MODULE_INIT.format(
         display_name=display_name
     ))
-    # module_runtime.py is optional and skipped by default to keep the root clean
+    _write_text(output_dir / "module_runtime.py", MODEL_RUNTIME_TEMPLATE.format(
+        display_name=display_name
+    ))
     
     _write_text(output_dir / "module.yaml", MODEL_MANIFEST_TEMPLATE.format(
         module_name=module_name, display_name=display_name, description=f"{display_name} 模块",

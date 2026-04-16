@@ -16,9 +16,14 @@ def describe_job_runtime(
 
     module_name = run_profile.execution.module if run_profile.execution and run_profile.execution.module else "-"
     workflow_name = run_profile.execution.workflow if run_profile.execution and run_profile.execution.workflow else "default"
-    provider_name = run_profile.resource.provider if run_profile.resource else "-"
-    mode_text = "创建环境" if run_profile.resource.acquisition.mode == AcquisitionMode.CREATE else "选择环境"
-    return ("运行模板", f"{module_name}/{workflow_name} | {mode_text} | Provider: {provider_name}")
+    acquisition = run_profile.resource.acquisition
+    if acquisition.mode == AcquisitionMode.CREATE:
+        mode_text = "创建环境"
+        detail = f"Provider: {acquisition.provider}"
+    else:
+        mode_text = "选择环境"
+        detail = f"选择器: {acquisition.selector_name or '-'}"
+    return ("运行模板", f"{module_name}/{workflow_name} | {mode_text} | {detail}")
 
 
 def resolve_job_run_profile(job: Job) -> RunProfile:

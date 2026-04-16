@@ -8,11 +8,13 @@ TaskFlow 与 ModuleAssembler 等开发入口。
 from crawler4j_sdk.base import TaskScript
 from crawler4j_sdk.workflow import TaskFlow
 from crawler4j_sdk.assembler import ModuleAssembler
+from crawler4j_sdk.env_selector import EnvSelectorInfo, env_selector
 from crawler4j_contracts import (
     BBox,
     ClickCaptchaDebugInfo,
     ClickCaptchaMatchResult,
     ClickCaptchaOrderedTarget,
+    EnvCandidate,
     EnvAction,
     ImageInput,
     Point,
@@ -34,6 +36,8 @@ __all__ = [
     "TaskScript",
     "TaskFlow",
     "ModuleAssembler",
+    "env_selector",
+    "EnvSelectorInfo",
     "TaskContext",
     "TaskResult",
     "TaskSignal",
@@ -49,4 +53,5 @@ __all__ = [
     "ClickCaptchaDebugInfo",
     "ClickCaptchaOrderedTarget",
     "ClickCaptchaMatchResult",
+    "EnvCandidate",
 ]

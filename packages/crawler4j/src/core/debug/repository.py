@@ -30,6 +30,7 @@ class DebugSessionRepository:
                     params_json TEXT NOT NULL,
                     hooks_module TEXT NOT NULL,
                     provider TEXT NOT NULL,
+                    selector_name TEXT NOT NULL DEFAULT '',
                     acquisition_mode TEXT NOT NULL,
                     creation_params_json TEXT NOT NULL,
                     creation_lifecycle TEXT NOT NULL DEFAULT 'ephemeral',
@@ -60,6 +61,7 @@ class DebugSessionRepository:
                 "creation_lifecycle": (
                     "ALTER TABLE debug_sessions ADD COLUMN creation_lifecycle TEXT NOT NULL DEFAULT 'ephemeral'"
                 ),
+                "selector_name": "ALTER TABLE debug_sessions ADD COLUMN selector_name TEXT NOT NULL DEFAULT ''",
             }
             for column, sql in migrations.items():
                 if column not in existing_columns:
@@ -73,10 +75,10 @@ class DebugSessionRepository:
                     """
                     INSERT INTO debug_sessions (
                         id, job_id, job_name, module_name, source_path, workflow, params_json, hooks_module,
-                        provider, acquisition_mode, creation_params_json, creation_lifecycle, wait_timeout, timeout,
+                        provider, selector_name, acquisition_mode, creation_params_json, creation_lifecycle, wait_timeout, timeout,
                         attach_host, attach_port, wait_for_attach, stop_on_entry, keep_environment,
                         state, worker_pid, env_id, created_at, started_at, finished_at, last_error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         job_id = excluded.job_id,
                         job_name = excluded.job_name,
@@ -86,6 +88,7 @@ class DebugSessionRepository:
                         params_json = excluded.params_json,
                         hooks_module = excluded.hooks_module,
                         provider = excluded.provider,
+                        selector_name = excluded.selector_name,
                         acquisition_mode = excluded.acquisition_mode,
                         creation_params_json = excluded.creation_params_json,
                         creation_lifecycle = excluded.creation_lifecycle,
@@ -113,6 +116,7 @@ class DebugSessionRepository:
                         json.dumps(session.params, ensure_ascii=False),
                         session.hooks_module,
                         session.provider,
+                        session.selector_name,
                         session.acquisition_mode.value,
                         json.dumps(session.creation_params, ensure_ascii=False),
                         session.creation_lifecycle.value,
@@ -169,6 +173,7 @@ class DebugSessionRepository:
             params=json.loads(row["params_json"]) if row["params_json"] else {},
             hooks_module=row["hooks_module"],
             provider=row["provider"],
+            selector_name=row["selector_name"] or "",
             acquisition_mode=row["acquisition_mode"],
             creation_params=json.loads(row["creation_params_json"]) if row["creation_params_json"] else {},
             creation_lifecycle=row["creation_lifecycle"] or "ephemeral",

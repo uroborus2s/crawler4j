@@ -26,8 +26,10 @@
 | Manifest 文件 | `module.yaml` |
 | 宿主入口文件 | 模块根 `__init__.py` |
 | 必需入口 | `run(context)` |
+| 标准运行时文件 | `module_runtime.py` |
 | 可选 hooks | `prepare_env`, `init_env`, `before_run`, `on_success`, `on_failure`, `on_timeout`, `on_cleanup` |
-| 当前实现 | 根 `__init__.py` 已收敛为稳定薄壳，默认入口组装逻辑由 `ModuleAssembler` 提供 |
+| 环境选择器 | 通过 `@env_selector(...)` 在 `module_runtime.py` 中声明，供 ATM “选择环境”模式调用 |
+| 当前实现 | 根 `__init__.py` 已收敛为稳定薄壳，默认入口组装逻辑由 `ModuleAssembler` 提供；选择环境不再接受规则树，只接受模块回调 |
 | Core 扩展入口 | `context.tools.call("<namespace>.<action>", **kwargs)` |
 | 生命周期规则 | `on_cleanup` 是终态清理 hook；只要任务已建立 `TaskContext` 并进入终态就会执行，不以环境是否 `destroy` 为前提；环境动作结果通过 `context.runtime["env_action"]` 暴露 |
 | 默认工作流解析 | `context.config.workflow` -> `module_runtime.DEFAULT_WORKFLOW` -> `module.yaml.workflows[0].name` |

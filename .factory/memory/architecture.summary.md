@@ -16,5 +16,5 @@ Current module entry architecture:
 
 - `REQ-006` keeps root `__init__.py` as the host entrypoint, but shrinks it to a stable shim.
 - Default task/workflow discovery and module entry assembly now live in `crawler4j_sdk.assembler.ModuleAssembler`.
-- Module-specific overrides live in an optional `module_runtime.py` instead of root `__init__.py`.
+- Module-specific runtime logic now lives in standard `module_runtime.py`, including lifecycle hooks and `@env_selector(...)` callbacks for ATM environment selection.
 - Old modules are not a compatibility target for the new contract; upgrades should rebuild the module skeleton from the latest template.

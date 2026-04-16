@@ -15,6 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 from src.core.atm.job_runtime import resolve_job_run_profile
 from src.core.atm.dispatcher import get_task_dispatcher
 from src.core.atm.models import Job, JobState, JobType, TriggerType
+from src.core.atm.run_profile import AcquisitionMode
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
@@ -84,7 +85,10 @@ class JobController:
     async def _ensure_runtime_for_job(self, job: Job):
         run_profile = resolve_job_run_profile(job)
 
-        provider_name = run_profile.resource.provider if run_profile.resource else ""
+        if run_profile.resource.acquisition.mode != AcquisitionMode.CREATE:
+            return
+
+        provider_name = run_profile.resource.acquisition.provider if run_profile.resource else ""
         if not provider_name:
             return
 

@@ -209,15 +209,21 @@ return TaskResult.fail(
 ```
 
 当前 `TaskScript` / `TaskFlow` 自身只有一个稳定入口方法：`execute(ctx)` 或 `run(ctx)`。
-模块级生命周期统一在 `module_runtime.py` 中实现：
+`module_runtime.py` 现在是标准模块文件，不再是可选扩展点。模块级生命周期统一在其中实现：
 
 - `prepare_env`
+- `@env_selector(...)` 声明环境选择回调，供 ATM 的“选择环境”模式调用
 - `init_env`
 - `before_run`
 - `on_success`
 - `on_failure`
 - `on_timeout`
 - `on_cleanup`
+
+脚手架默认会生成两个示例环境选择器：
+
+- `return_none`：占位选择器，固定返回 `None`，用于提醒开发者必须替换成真实逻辑
+- `random_ready`：从当前 `ready` 候选环境里随机选择一个
 
 `on_cleanup` 发生在 ATM 完成环境动作之后。如果模块需要在环境已删除后清理自己的数据，应在 `on_cleanup` 中读取 `ctx.runtime["env_action"]`，而不是再增加一套额外的“环境删除 hook”。
 

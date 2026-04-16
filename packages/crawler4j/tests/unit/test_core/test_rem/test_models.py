@@ -2,12 +2,6 @@
 
 import time
 
-from src.core.atm.run_profile import (
-    ComparisonOp,
-    LogicOp,
-    MatchCondition,
-    MatchGroup,
-)
 from src.core.rem.models import (
     Environment,
     EnvKind,
@@ -171,45 +165,3 @@ class TestEnvRequirement:
         env = Environment(kind=EnvKind.BROWSER, provider="bitbrowser", status=EnvStatus.READY)
 
         assert req.matches(env) is False
-
-    def test_matches_rule_group_against_environment_fields(self):
-        """测试规则组可匹配环境字段。"""
-        req = EnvRequirement(
-            kind=EnvKind.BROWSER,
-            match_rules=MatchGroup(
-                logic=LogicOp.AND,
-                conditions=[
-                    MatchCondition(field="provider", op=ComparisonOp.EQ, value="virtualbrowser"),
-                    MatchCondition(field="proxy.current_ip", op=ComparisonOp.CONTAINS, value="1.2.3"),
-                ],
-            ),
-        )
-        env = Environment(
-            kind=EnvKind.BROWSER,
-            provider="virtualbrowser",
-            status=EnvStatus.READY,
-            proxy_config=ProxyConfig(mode=ProxyMode.POOL, current_ip="1.2.3.4"),
-        )
-
-        assert req.matches(env) is True
-
-    def test_matches_rule_group_with_or_logic(self):
-        """测试 OR 规则支持任一满足。"""
-        req = EnvRequirement(
-            kind=EnvKind.BROWSER,
-            match_rules=MatchGroup(
-                logic=LogicOp.OR,
-                conditions=[
-                    MatchCondition(field="provider", op=ComparisonOp.EQ, value="bitbrowser"),
-                    MatchCondition(field="name", op=ComparisonOp.CONTAINS, value="shared"),
-                ],
-            ),
-        )
-        env = Environment(
-            kind=EnvKind.BROWSER,
-            name="shared-env-1",
-            provider="virtualbrowser",
-            status=EnvStatus.READY,
-        )
-
-        assert req.matches(env) is True

@@ -11,8 +11,8 @@ from src.core.atm.run_profile import (
     AcquisitionMode,
     CreationConfig,
     CreationLifecycle,
+    EnvType,
     ExecutionContext,
-    MatchConfig,
     ResourceConfig,
     RunProfile,
 )
@@ -32,10 +32,11 @@ def _make_job() -> Job:
 def _make_run_profile() -> RunProfile:
     return RunProfile(
         resource=ResourceConfig(
-            provider="virtualbrowser",
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.CREATE,
-                selector=MatchConfig(wait_timeout=90),
+                provider="virtualbrowser",
+                env_type=EnvType.VIRTUAL_BROWSER,
+                wait_timeout=90,
                 creation=CreationConfig(
                     lifecycle=CreationLifecycle.EPHEMERAL,
                     params={"region": "cn"},

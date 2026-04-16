@@ -69,8 +69,8 @@ class TestModelScaffoldInit:
         assert (target / "tasks" / "example_task.py").exists()
         assert (target / "workflows" / "__init__.py").exists()
         assert (target / "workflows" / "main_workflow.py").exists()
+        assert (target / "module_runtime.py").exists()
         assert (target / "pyproject.toml").exists()
-        assert not (target / "module_runtime.py").exists()
 
         manifest = _read_manifest(target)
         assert manifest["name"] == "demo_model"
@@ -86,8 +86,13 @@ class TestModelScaffoldInit:
 
         assert hasattr(module, "run")
         assert hasattr(module, "prepare_env")
+        assert hasattr(module, "select_env")
         assert "example_task" in module.assembler.task_scripts
         assert "main_workflow" in module.assembler.workflows
+        assert [selector.name for selector in module.assembler.list_env_selectors()] == [
+            "random_ready",
+            "return_none",
+        ]
 
     def test_init_model_generated_pyproject_does_not_duplicate_cli_or_playwright_dependency(self, model_args: Namespace):
         target = Path(model_args.output)

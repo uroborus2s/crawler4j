@@ -50,5 +50,5 @@ def resolve_job_debug_target(
         hooks_module=run_profile.execution.hooks_module or run_profile.execution.module,
         params={**run_profile.execution.params, **job.params},
         timeout=run_profile.execution.timeout,
-        wait_timeout=run_profile.resource.acquisition.selector.wait_timeout,
+        wait_timeout=run_profile.resource.acquisition.wait_timeout,
     )

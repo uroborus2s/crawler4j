@@ -2,8 +2,8 @@ from src.core.atm.models import Job, TriggerConfig, TriggerType
 from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
+    EnvType,
     ExecutionContext,
-    MatchConfig,
     ResourceConfig,
     RunProfile,
 )
@@ -12,10 +12,11 @@ from src.core.atm.run_profile import (
 def _make_run_profile() -> RunProfile:
     return RunProfile(
         resource=ResourceConfig(
-            provider="virtualbrowser",
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.CREATE,
-                selector=MatchConfig(wait_timeout=45),
+                provider="virtualbrowser",
+                env_type=EnvType.VIRTUAL_BROWSER,
+                wait_timeout=45,
             ),
         ),
         execution=ExecutionContext(

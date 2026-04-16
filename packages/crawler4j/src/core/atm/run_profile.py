@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -17,49 +17,8 @@ class EnvType(str, Enum):
     DEBUG_DUMMY = "debug_dummy"
 
 
-class SelectionStrategy(str, Enum):
-    RANDOM = "random"
-    FIFO = "fifo"
-    LIFO = "lifo"
-    BEST_FIT = "best_fit"
-
-
-class LogicOp(str, Enum):
-    AND = "AND"
-    OR = "OR"
-
-
-class ComparisonOp(str, Enum):
-    EQ = "=="
-    NEQ = "!="
-    GT = ">"
-    LT = "<"
-    GTE = ">="
-    LTE = "<="
-    CONTAINS = "contains"
-    IN = "in"
-
-
-class ValueType(str, Enum):
-    STATIC = "static"
-    FIELD = "field"
-    PARAM = "param"
-
-
-class MatchCondition(BaseModel):
-    field: str
-    op: ComparisonOp
-    value: Any
-    value_type: ValueType = ValueType.STATIC
-
-
-class MatchGroup(BaseModel):
-    logic: LogicOp
-    conditions: List[Union["MatchGroup", MatchCondition]] = Field(default_factory=list)
-
-
 class AcquisitionMode(str, Enum):
-    MATCH = "match"
+    SELECT = "select"
     CREATE = "create"
 
 
@@ -73,24 +32,24 @@ class CreationConfig(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
-class MatchConfig(BaseModel):
-    tags: Dict[str, str] = Field(default_factory=dict)
-    status: str = Field(default="ready")
-    sort_strategy: SelectionStrategy = Field(default=SelectionStrategy.FIFO)
-    wait_timeout: int = Field(default=60, ge=0)
-    env_type: EnvType = Field(default=EnvType.CHROME)
-    match_expressions: List[str] = Field(default_factory=list)
-    match_rules: Optional[MatchGroup] = Field(default=None)
-
-
 class AcquisitionConfig(BaseModel):
-    mode: AcquisitionMode = Field(default=AcquisitionMode.MATCH)
-    selector: MatchConfig = Field(default_factory=MatchConfig)
+    mode: AcquisitionMode = Field(default=AcquisitionMode.CREATE)
+    provider: str = Field(default="virtualbrowser")
+    env_type: EnvType = Field(default=EnvType.VIRTUAL_BROWSER)
+    selector_name: str = Field(default="")
+    wait_timeout: int = Field(default=60, ge=0)
     creation: CreationConfig = Field(default_factory=CreationConfig)
+
+    @model_validator(mode="after")
+    def _validate_mode_specific_fields(self) -> "AcquisitionConfig":
+        if self.mode == AcquisitionMode.SELECT and not self.selector_name.strip():
+            raise ValueError("selector_name is required when acquisition.mode=select")
+        if self.mode == AcquisitionMode.CREATE and not self.provider.strip():
+            raise ValueError("provider is required when acquisition.mode=create")
+        return self
 
 
 class ResourceConfig(BaseModel):
-    provider: str = Field(default="playwright_local")
     acquisition: AcquisitionConfig = Field(default_factory=AcquisitionConfig)
 
 
@@ -107,15 +66,6 @@ class RunProfile(BaseModel):
 
     resource: ResourceConfig = Field(default_factory=ResourceConfig)
     execution: Optional[ExecutionContext] = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_legacy_teardown(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "teardown" in data:
-            cleaned = dict(data)
-            cleaned.pop("teardown", None)
-            return cleaned
-        return data
 
     def to_yaml(self) -> str:
         return yaml.dump(self.model_dump(mode="json"), allow_unicode=True, sort_keys=False)

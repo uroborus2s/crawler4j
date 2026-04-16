@@ -9,12 +9,13 @@ import inspect
 import logging
 from pathlib import Path
 from pkgutil import iter_modules
-from typing import Callable, Dict, Optional, Type
+from typing import Any, Callable, Dict, Optional, Type
 
 import yaml
 
 from crawler4j_sdk.base import TaskScript
 from crawler4j_sdk.context import TaskContext
+from crawler4j_sdk.env_selector import EnvSelectorInfo, get_env_selector_info, invoke_env_selector
 from crawler4j_sdk.result import TaskResult
 from crawler4j_sdk.workflow import TaskFlow
 
@@ -34,6 +35,8 @@ class ModuleAssembler:
 
         # Hooks that can be overridden by module_runtime.py
         self.hooks: Dict[str, Callable] = {}
+        self.env_selectors: Dict[str, Callable] = {}
+        self.env_selector_infos: Dict[str, EnvSelectorInfo] = {}
 
         self._load_manifest()
         self._discover()
@@ -121,6 +124,14 @@ class ModuleAssembler:
                 if hasattr(runtime_module, "WORKFLOWS"):
                     self.workflows.update(getattr(runtime_module, "WORKFLOWS"))
 
+                for attr_name in dir(runtime_module):
+                    candidate = getattr(runtime_module, attr_name)
+                    info = get_env_selector_info(candidate)
+                    if not info:
+                        continue
+                    self.env_selectors[info.name] = candidate
+                    self.env_selector_infos[info.name] = info
+
             except Exception as e:
                 logger.exception(f"Failed to load runtime extensions: {e}")
 
@@ -171,3 +182,25 @@ class ModuleAssembler:
     def get_hook(self, name: str) -> Optional[Callable]:
         """Get a registered hook by name."""
         return self.hooks.get(name)
+
+    def get_env_selector(self, name: str) -> Optional[Callable]:
+        """Get a registered env selector callback by name."""
+        return self.env_selectors.get(name)
+
+    def list_env_selectors(self) -> list[EnvSelectorInfo]:
+        """List registered env selectors in stable name order."""
+        return [
+            self.env_selector_infos[name]
+            for name in sorted(self.env_selector_infos)
+        ]
+
+    async def run_env_selector(
+        self,
+        name: str,
+        context: TaskContext,
+        candidates: list[Any],
+    ) -> Any:
+        selector = self.get_env_selector(name)
+        if not selector:
+            raise ValueError(f"Env selector not found: {name}")
+        return await invoke_env_selector(selector, context, candidates)

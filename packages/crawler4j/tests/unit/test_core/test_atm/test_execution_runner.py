@@ -53,6 +53,7 @@ def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[Ex
     rem = SimpleNamespace(
         acquire_atomic=AsyncMock(return_value=lease),
         create_env=AsyncMock(return_value=env),
+        list_envs=AsyncMock(return_value=[env]),
         lease_manager=SimpleNamespace(acquire=AsyncMock(return_value=lease)),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=env),
@@ -213,18 +214,26 @@ async def test_execution_runner_cleans_up_created_env_when_acquisition_fails():
 
 
 @pytest.mark.asyncio
-async def test_execution_runner_reuses_existing_env_for_match_mode():
-    request = _build_request(mode=AcquisitionMode.MATCH, lifecycle=CreationLifecycle.PERSISTENT)
+async def test_execution_runner_selects_existing_env_via_callback():
+    request = _build_request(mode=AcquisitionMode.SELECT, lifecycle=CreationLifecycle.PERSISTENT)
+    request.selector_name = "random_ready"
     env, lease = _build_env()
+
+    async def hook(module_name, hook_name, context, *args):
+        if hook_name == "select_env":
+            return env.id
+        return None
+
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(return_value=None),
+        call_hook=AsyncMock(side_effect=hook),
     )
     runner, rem = _build_runner(env, lease, module_service)
 
     await runner.run(request)
 
-    rem.acquire_atomic.assert_awaited_once()
+    rem.list_envs.assert_awaited_once()
+    rem.lease_manager.acquire.assert_awaited_once_with(env, request.task.id, timeout=60)
     rem.create_env.assert_not_awaited()
     rem.start_env.assert_awaited_once_with(env.id)
     module_service.run_module.assert_awaited_once()

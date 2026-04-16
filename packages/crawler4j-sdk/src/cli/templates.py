@@ -188,11 +188,11 @@ class {class_name}(QWidget):
 MODEL_MODULE_INIT = '''"""{display_name} 模块入口。
 
 本文件由 SDK 自动托管，不建议手动修改。
-如需扩展运行时逻辑（Hooks、自定义发现等），请在同级目录创建 `module_runtime.py`。
+模块运行时扩展统一放在同级目录的 `module_runtime.py`。
 """
 
 from pathlib import Path
-from crawler4j_sdk import ModuleAssembler, TaskContext, TaskResult
+from crawler4j_sdk import EnvCandidate, ModuleAssembler, TaskContext, TaskResult
 
 # 初始化模块组装器
 assembler = ModuleAssembler(
@@ -223,6 +223,10 @@ async def before_run(context, *args):
     return await hook(context, *args) if hook else None
 
 
+async def select_env(context: TaskContext, candidates: list[EnvCandidate], selector_name: str):
+    return await assembler.run_env_selector(selector_name, context, candidates)
+
+
 async def on_success(context, *args):
     hook = assembler.get_hook("on_success")
     return await hook(context, *args) if hook else None
@@ -245,10 +249,12 @@ async def on_cleanup(context, *args):
 
 MODEL_RUNTIME_TEMPLATE = '''"""{display_name} 模块自定义运行时扩展。
 
-本文件为可选文件，用于存放模块级 ATM 生命周期 Hooks、手动注册组件或覆盖默认行为。
+本文件现在是模块标准组成部分，用于声明环境选择器、生命周期 Hooks、手动注册组件或覆盖默认行为。
 """
 
-from crawler4j_sdk import TaskContext, TaskResult
+import random
+
+from crawler4j_sdk import EnvCandidate, TaskContext, TaskResult, env_selector
 
 # 默认工作流覆盖 (可选)
 # DEFAULT_WORKFLOW = "my_custom_workflow"
@@ -256,6 +262,30 @@ from crawler4j_sdk import TaskContext, TaskResult
 # 手动注册/覆盖组件 (可选)
 # TASK_SCRIPTS = {{}}
 # WORKFLOWS = {{}}
+
+
+@env_selector(
+    name="return_none",
+    display_name="返回 None",
+    description="占位选择器，默认直接返回 None。",
+    returns_none=True,
+)
+def return_none_selector(context: TaskContext, candidates: list[EnvCandidate]):
+    """占位环境选择器。"""
+    return None
+
+
+@env_selector(
+    name="random_ready",
+    display_name="随机选择就绪环境",
+    description="从当前 ready 候选里随机挑选一个环境。",
+)
+def random_ready_selector(context: TaskContext, candidates: list[EnvCandidate]):
+    """示例环境选择器。"""
+    ready_candidates = [candidate for candidate in candidates if candidate.status == "ready"]
+    if not ready_candidates:
+        return None
+    return random.choice(ready_candidates).env_id
 
 
 async def prepare_env(context: TaskContext):

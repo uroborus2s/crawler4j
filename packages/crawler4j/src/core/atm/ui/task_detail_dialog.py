@@ -252,15 +252,18 @@ class JobDetailDialog(QDialog):
                 if run_profile.execution and run_profile.execution.module
                 else "-"
             )
-            provider_text = run_profile.resource.provider if run_profile.resource else "-"
+            if run_profile.resource.acquisition.mode.value == "create":
+                resource_text = f"Provider: {run_profile.resource.acquisition.provider}"
+            else:
+                resource_text = f"选择器: {run_profile.resource.acquisition.selector_name or '-'}"
         except Exception:
             execution_text = "-"
-            provider_text = "-"
+            resource_text = "-"
 
         info = f"模式: {self.TYPE_TEXT.get(job.type.value, job.type.value)}\n"
         info += f"运行配置: {runtime_text}\n"
         info += f"执行目标: {execution_text}\n"
-        info += f"Provider: {provider_text}\n"
+        info += f"资源: {resource_text}\n"
         info += f"触发: {trigger_text}\n"
         info += f"Params: {job.params}\n"
         info += f"Created: {datetime.fromtimestamp(job.created_at)}\n"

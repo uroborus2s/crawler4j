@@ -43,7 +43,7 @@
 
 - 根 `__init__.py` 已固定为托管薄壳，运行时组装逻辑收敛到 SDK 的 `ModuleAssembler`。
 - 默认工作流解析顺序已经稳定为 `context.config.workflow -> module_runtime.DEFAULT_WORKFLOW -> module.yaml.workflows[0].name`。
-- `module_runtime.py` 已明确为可选扩展点，默认脚手架不会生成该文件，只有模块需要自定义 hooks 或手动注册时才创建。
+- `module_runtime.py` 已收敛为标准模块文件，默认脚手架会生成；环境选择能力通过其中的 `@env_selector(...)` 回调声明，ATM“选择环境”模式不再接受规则树。
 - 本轮不再把“兼容旧模块模板”作为目标，旧模块升级路径统一为按最新脚手架重新初始化。
 
 ### `REQ-007`

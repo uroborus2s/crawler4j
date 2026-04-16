@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from crawler4j_sdk import EnvSelectorInfo
 from crawler4j_contracts import TaskContext, TaskResult
 from src.core.foundation.logging import logger
 from src.core.mms.registry import get_module_registry
@@ -153,6 +154,14 @@ class ModuleService:
                 f"Module hook '{module_name}.{hook_name}' is async and cannot be executed from a sync caller"
             )
         return hook(context, *args)
+
+    def list_env_selectors(self, module_name: str) -> list[EnvSelectorInfo]:
+        """列出模块声明的环境选择器。"""
+        module = self._load_module(module_name)
+        assembler = getattr(module, "assembler", None)
+        if not assembler or not hasattr(assembler, "list_env_selectors"):
+            return []
+        return list(assembler.list_env_selectors())
 
 
 # Global Singleton

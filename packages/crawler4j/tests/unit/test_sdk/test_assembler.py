@@ -143,6 +143,37 @@ TASK_SCRIPTS = {"overridden_task": OverriddenTask}
     assert result.success is True
     assert result.data == {"status": "overridden"}
 
+
+@pytest.mark.asyncio
+async def test_assembler_discovers_env_selectors(temp_module):
+    runtime_code = """
+from crawler4j_sdk import env_selector
+
+@env_selector("return_none", display_name="返回 None", returns_none=True)
+async def return_none_selector(context, candidates):
+    return None
+
+@env_selector("random_ready", display_name="随机选择就绪环境")
+async def random_ready_selector(context, candidates):
+    return candidates[0].env_id if candidates else None
+"""
+    (temp_module / "module_runtime.py").write_text(runtime_code)
+
+    assembler = ModuleAssembler(temp_module, "test_module", default_workflow="noop")
+
+    selectors = assembler.list_env_selectors()
+
+    assert [selector.name for selector in selectors] == ["random_ready", "return_none"]
+    assert selectors[1].returns_none is True
+
+    ctx = create_mock_context()
+    chosen = await assembler.run_env_selector(
+        "random_ready",
+        ctx,
+        [MagicMock(env_id=23)],
+    )
+    assert chosen == 23
+
 @pytest.mark.asyncio
 async def test_assembler_manifest_loading(temp_module):
     # Create module.yaml

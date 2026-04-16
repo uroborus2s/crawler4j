@@ -226,12 +226,12 @@ class TaskCreateDialog(QDialog):
 
         acquisition_mode = run_profile.resource.acquisition.mode
         mode_text = "创建环境" if acquisition_mode == AcquisitionMode.CREATE else "选择环境"
-        lines = [
-            f"方式: {mode_text}",
-            f"Provider: {run_profile.resource.provider}",
-        ]
+        lines = [f"方式: {mode_text}"]
         if acquisition_mode == AcquisitionMode.CREATE:
-            lines.append(f"环境: {run_profile.resource.acquisition.selector.env_type.value}")
+            lines.append(f"Provider: {run_profile.resource.acquisition.provider}")
+            lines.append(f"环境: {run_profile.resource.acquisition.env_type.value}")
+        else:
+            lines.append(f"选择器: {run_profile.resource.acquisition.selector_name or '-'}")
         if run_profile.execution:
             lines.append(f"执行: {run_profile.execution.module}/{run_profile.execution.workflow or 'default'}")
         self.inline_preview.setText(" | ".join(lines))

@@ -5,28 +5,18 @@ import pytest
 
 from src.core.atm.dispatcher import TaskDispatcher
 from src.core.atm.models import Job, Task, TaskStatus
-from src.core.atm.run_profile import (
-    AcquisitionMode,
-    ComparisonOp,
-    EnvType,
-    ExecutionContext,
-    LogicOp,
-    MatchCondition,
-    MatchGroup,
-    RunProfile,
-)
+from src.core.atm.run_profile import AcquisitionMode, ExecutionContext, RunProfile
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_matches_existing_env_for_run_profile(monkeypatch):
+async def test_dispatcher_selects_existing_env_for_run_profile(monkeypatch):
     run_profile = RunProfile(
         resource={
-            "provider": "virtualbrowser",
             "acquisition": {
-                "mode": AcquisitionMode.MATCH,
-                "selector": {"env_type": EnvType.VIRTUAL_BROWSER, "wait_timeout": 60},
-                "creation": {"params": {"fingerprint": {"randomize_all": True}}},
+                "mode": AcquisitionMode.SELECT,
+                "selector_name": "random_ready",
+                "wait_timeout": 60,
             },
         },
         execution=ExecutionContext(module="demo.module"),
@@ -42,9 +32,14 @@ async def test_dispatcher_matches_existing_env_for_run_profile(monkeypatch):
     )
     lease = EnvLease(id="lease-1", env_id=env.id, task_run_id="task-1", token="token-1")
 
+    async def hook(module_name, hook_name, context, *args):
+        if hook_name == "select_env":
+            return env.id
+        return None
+
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(return_value=None),
+        call_hook=AsyncMock(side_effect=hook),
     )
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
@@ -52,8 +47,8 @@ async def test_dispatcher_matches_existing_env_for_run_profile(monkeypatch):
     dispatcher = TaskDispatcher()
     dispatcher.repo = SimpleNamespace(save_task=AsyncMock())
     dispatcher.rem = SimpleNamespace(
-        acquire_atomic=AsyncMock(return_value=lease),
         create_env=AsyncMock(return_value=env),
+        list_envs=AsyncMock(return_value=[env]),
         lease_manager=SimpleNamespace(acquire=AsyncMock(return_value=lease)),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=env),
@@ -67,7 +62,8 @@ async def test_dispatcher_matches_existing_env_for_run_profile(monkeypatch):
 
     await dispatcher._run_logic(task, job)
 
-    dispatcher.rem.acquire_atomic.assert_awaited_once()
+    dispatcher.rem.list_envs.assert_awaited_once()
+    dispatcher.rem.lease_manager.acquire.assert_awaited_once_with(env, task.id, timeout=60)
     dispatcher.rem.create_env.assert_not_awaited()
     dispatcher.rem.start_env.assert_awaited_once_with(env.id)
     module_service.run_module.assert_awaited_once()
@@ -75,22 +71,13 @@ async def test_dispatcher_matches_existing_env_for_run_profile(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_passes_provider_and_rules_to_match_requirement(monkeypatch):
+async def test_dispatcher_passes_selector_name_to_module_callback(monkeypatch):
     run_profile = RunProfile(
         resource={
-            "provider": "bitbrowser",
             "acquisition": {
-                "mode": AcquisitionMode.MATCH,
-                "selector": {
-                    "env_type": EnvType.BIT_BROWSER,
-                    "wait_timeout": 45,
-                    "match_rules": MatchGroup(
-                        logic=LogicOp.AND,
-                        conditions=[
-                            MatchCondition(field="provider", op=ComparisonOp.EQ, value="bitbrowser"),
-                        ],
-                    ),
-                },
+                "mode": AcquisitionMode.SELECT,
+                "selector_name": "return_none",
+                "wait_timeout": 45,
             },
         },
         execution=ExecutionContext(module="demo.module"),
@@ -104,11 +91,17 @@ async def test_dispatcher_passes_provider_and_rules_to_match_requirement(monkeyp
         status=EnvStatus.READY,
         external_id="18",
     )
-    lease = EnvLease(id="lease-18", env_id=env.id, task_run_id="task-18", token="token-18")
+
+    async def hook(module_name, hook_name, context, *args):
+        if hook_name == "select_env":
+            assert args[1] == "return_none"
+            assert args[0][0].env_id == env.id
+            return None
+        return None
 
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(return_value=None),
+        call_hook=AsyncMock(side_effect=hook),
     )
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
@@ -116,9 +109,9 @@ async def test_dispatcher_passes_provider_and_rules_to_match_requirement(monkeyp
     dispatcher = TaskDispatcher()
     dispatcher.repo = SimpleNamespace(save_task=AsyncMock())
     dispatcher.rem = SimpleNamespace(
-        acquire_atomic=AsyncMock(return_value=lease),
         create_env=AsyncMock(return_value=env),
-        lease_manager=SimpleNamespace(acquire=AsyncMock(return_value=lease)),
+        list_envs=AsyncMock(return_value=[env]),
+        lease_manager=SimpleNamespace(acquire=AsyncMock()),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=env),
         release=AsyncMock(return_value=True),
@@ -131,11 +124,11 @@ async def test_dispatcher_passes_provider_and_rules_to_match_requirement(monkeyp
 
     await dispatcher._run_logic(task, job)
 
-    requirement = dispatcher.rem.acquire_atomic.await_args.args[0]
-    assert requirement.provider == "bitbrowser"
-    assert requirement.timeout == 45
-    assert requirement.match_rules is not None
-    assert requirement.match_rules.conditions[0].field == "provider"
+    select_call = next(call for call in module_service.call_hook.await_args_list if call.args[1] == "select_env")
+    assert select_call.args[4] == "return_none"
+    dispatcher.rem.lease_manager.acquire.assert_not_awaited()
+    assert task.status == TaskStatus.FAILED
+    assert "返回了 none" in (task.error or "")
 
 
 @pytest.mark.asyncio

@@ -3,20 +3,22 @@ import pytest
 from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
+    CreationConfig,
+    CreationLifecycle,
+    EnvType,
     ExecutionContext,
-    MatchConfig,
     ResourceConfig,
     RunProfile,
 )
 
 
-def test_run_profile_serialization_roundtrip():
+def test_run_profile_serialization_roundtrip_for_select_mode():
     run_profile = RunProfile(
         resource=ResourceConfig(
-            provider="virtualbrowser",
             acquisition=AcquisitionConfig(
-                mode=AcquisitionMode.MATCH,
-                selector=MatchConfig(wait_timeout=120),
+                mode=AcquisitionMode.SELECT,
+                selector_name="random_ready",
+                wait_timeout=120,
             ),
         ),
         execution=ExecutionContext(
@@ -33,10 +35,37 @@ def test_run_profile_serialization_roundtrip():
     assert loaded == run_profile
 
 
+def test_run_profile_serialization_roundtrip_for_create_mode():
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.CREATE,
+                provider="virtualbrowser",
+                env_type=EnvType.VIRTUAL_BROWSER,
+                wait_timeout=60,
+                creation=CreationConfig(
+                    lifecycle=CreationLifecycle.PERSISTENT,
+                    params={"virtualbrowser": {"chrome_version": 145}},
+                ),
+            ),
+        ),
+        execution=ExecutionContext(
+            module="demo_module",
+            workflow="repair",
+        ),
+    )
+
+    loaded = RunProfile.from_yaml(run_profile.to_yaml())
+
+    assert loaded == run_profile
+
+
 def test_run_profile_rejects_unknown_fields():
     invalid_yaml = """
 resource:
-  provider: virtualbrowser
+  acquisition:
+    mode: select
+    selector_name: random_ready
 execution:
   module: demo_module
   workflow: repair
@@ -50,12 +79,30 @@ unknown_extra_field: demo
 def test_run_profile_rejects_removed_retry_field():
     invalid_yaml = """
 resource:
-  provider: virtualbrowser
+  acquisition:
+    mode: select
+    selector_name: random_ready
 execution:
   module: demo_module
   workflow: repair
 retry:
   max_attempts: 2
+"""
+
+    with pytest.raises(Exception):
+        RunProfile.from_yaml(invalid_yaml)
+
+
+def test_run_profile_rejects_removed_match_selector_fields():
+    invalid_yaml = """
+resource:
+  acquisition:
+    mode: match
+    selector:
+      wait_timeout: 60
+execution:
+  module: demo_module
+  workflow: repair
 """
 
     with pytest.raises(Exception):

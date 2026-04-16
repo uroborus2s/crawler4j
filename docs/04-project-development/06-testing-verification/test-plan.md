@@ -61,7 +61,7 @@
 | 测试 ID | 目标 | 当前验证方式 |
 |---|---|---|
 | `TC-007` | 新脚手架根 `__init__.py` 为固定薄壳且可导入 | `packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py` + CLI help smoke |
-| `TC-008` | 可选 `module_runtime.py` 可覆盖默认运行逻辑与 hooks | `packages/crawler4j/tests/unit/test_sdk/test_assembler.py` |
+| `TC-008` | 标准 `module_runtime.py` 可承载 lifecycle hooks 与 `@env_selector(...)` 环境选择器，并覆盖默认运行逻辑 | `packages/crawler4j/tests/unit/test_sdk/test_assembler.py` |
 | `TC-009` | 旧模块按最新模板重新初始化后可导入并运行默认入口 | `packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py` |
 
 ## 6. 出口条件

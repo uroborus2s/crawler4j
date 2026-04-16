@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from crawler4j_contracts import EnvAction, TaskContext, TaskResult, TaskSignal, TaskSignalAction
+from crawler4j_contracts import EnvAction, EnvCandidate, TaskContext, TaskResult, TaskSignal, TaskSignalAction
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.runtime_capabilities import (
     RuntimeCapabilities,
@@ -16,8 +16,8 @@ from src.core.atm.runtime_capabilities import (
 from src.core.foundation.logging import logger
 from src.core.mms.service import ModuleService, get_module_service
 from src.core.rem.manager import EnvironmentManager, get_environment_manager
-from src.core.rem.models import EnvKind, EnvLease, EnvRequirement, ProxyConfig, ProxyMode
-from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle, MatchConfig
+from src.core.rem.models import Environment, EnvKind, EnvLease, EnvRequirement, EnvStatus, ProxyConfig, ProxyMode
+from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 
 TaskUpdateCallback = Callable[[Task], Awaitable[None]]
 StopRequestedCallback = Callable[[], bool]
@@ -49,8 +49,8 @@ class ExecutionRequest:
     params: dict[str, Any] = field(default_factory=dict)
     state: dict[str, Any] = field(default_factory=dict)
     provider_name: str = ""
-    acquisition_mode: AcquisitionMode = AcquisitionMode.MATCH
-    match_config: MatchConfig | None = None
+    selector_name: str = ""
+    acquisition_mode: AcquisitionMode = AcquisitionMode.SELECT
     selector_wait_timeout: int = 60
     creation_params: dict[str, Any] = field(default_factory=dict)
     creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
@@ -121,6 +121,7 @@ class ExecutionRunner:
 
         prepare_result = dict(prepare_result_raw or {})
         prepare_creation_params = prepare_result.get("creation_params", {})
+        prepare_context.runtime["env_selector_name"] = request.selector_name
 
         env_lease = None
         env_id = None
@@ -134,18 +135,28 @@ class ExecutionRunner:
 
             wait_timeout = int(prepare_result.get("wait_timeout", request.selector_wait_timeout))
 
-            if request.acquisition_mode == AcquisitionMode.MATCH:
-                req = EnvRequirement(
-                    task_run_id=task.id,
-                    kind=EnvKind.BROWSER,
-                    provider=request.provider_name,
-                    match_rules=request.match_config.match_rules if request.match_config else None,
-                    timeout=wait_timeout,
+            if request.acquisition_mode == AcquisitionMode.SELECT:
+                candidates = await self._list_ready_env_candidates()
+                selected_env_id = await self.mms.call_hook(
+                    hooks_module,
+                    "select_env",
+                    prepare_context,
+                    candidates,
+                    request.selector_name,
                 )
-                env_lease = await self.rem.acquire_atomic(req, timeout=req.timeout)
+                if selected_env_id is None:
+                    raise RuntimeError(f"环境选择回调函数返回了 none: {request.selector_name}")
+
+                env = await self.rem.get_env(int(selected_env_id))
+                if not env:
+                    raise RuntimeError(f"环境选择回调函数返回了不存在的环境: {selected_env_id}")
+
+                env_lease = await self.rem.lease_manager.acquire(env, task.id, timeout=wait_timeout)
                 env_id = int(env_lease.env_id)
                 task.lease_id = env_lease.id
-                logger.info(f"[ATM] Task {task.id} acquired existing env {env_id}")
+                logger.info(
+                    f"[ATM] Task {task.id} selected env {env_id} by selector {request.selector_name}"
+                )
             elif request.acquisition_mode == AcquisitionMode.CREATE:
                 merged_creation_params = _deep_merge_dict(
                     request.creation_params,
@@ -172,7 +183,7 @@ class ExecutionRunner:
             else:
                 raise ValueError(
                     f"Unsupported acquisition mode for ATM runtime: {request.acquisition_mode.value}. "
-                    "Only 'create' and 'match' are supported."
+                    "Only 'create' and 'select' are supported."
                 )
 
             task.env_id = str(env_id)
@@ -440,6 +451,26 @@ class ExecutionRunner:
             bind_strategy=raw_proxy.get("bind_strategy"),
             static_value=raw_proxy.get("static_value"),
             current_ip=raw_proxy.get("current_ip"),
+        )
+
+    async def _list_ready_env_candidates(self) -> list[EnvCandidate]:
+        environments = await self.rem.list_envs()
+        candidates: list[EnvCandidate] = []
+        for env in environments:
+            if env.kind != EnvKind.BROWSER or env.status != EnvStatus.READY:
+                continue
+            candidates.append(self._to_env_candidate(env))
+        return candidates
+
+    def _to_env_candidate(self, env: Environment) -> EnvCandidate:
+        return EnvCandidate(
+            env_id=int(env.id),
+            name=env.name,
+            provider=env.provider,
+            status=env.status.value if env.status else "",
+            external_id=env.external_id,
+            capabilities=tuple(sorted(env.capabilities)),
+            proxy=env.proxy_config.to_dict() if env.proxy_config else None,
         )
 
     async def _cleanup_failed_acquisition(

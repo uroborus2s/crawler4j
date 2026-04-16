@@ -30,6 +30,9 @@ def test_sdk_exports_expected_stable_surface():
         "ClickCaptchaDebugInfo",
         "ClickCaptchaMatchResult",
         "ClickCaptchaOrderedTarget",
+        "EnvAction",
+        "EnvCandidate",
+        "EnvSelectorInfo",
         "ImageInput",
         "ModuleAssembler",
         "Point",
@@ -38,9 +41,12 @@ def test_sdk_exports_expected_stable_surface():
         "TaskContext",
         "TaskFlow",
         "TaskResult",
+        "TaskSignal",
+        "TaskSignalAction",
         "TaskScript",
         "ToolSpec",
         "ToolsCapability",
+        "env_selector",
     }
 
     assert isinstance(fake_tools, ToolsCapability)

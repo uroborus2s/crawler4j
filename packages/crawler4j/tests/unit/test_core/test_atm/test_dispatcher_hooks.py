@@ -13,7 +13,6 @@ from src.core.atm.run_profile import (
     CreationConfig,
     EnvType,
     ExecutionContext,
-    MatchConfig,
     ResourceConfig,
     RunProfile,
 )
@@ -25,10 +24,10 @@ from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 def _build_run_profile(timeout: int = 0) -> RunProfile:
     return RunProfile(
         resource=ResourceConfig(
-            provider="virtualbrowser",
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.CREATE,
-                selector=MatchConfig(env_type=EnvType.VIRTUAL_BROWSER),
+                provider="virtualbrowser",
+                env_type=EnvType.VIRTUAL_BROWSER,
                 creation=CreationConfig(params={"groups": ["default"]}),
             ),
         ),
