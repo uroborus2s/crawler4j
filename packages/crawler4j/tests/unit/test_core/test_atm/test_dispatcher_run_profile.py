@@ -9,6 +9,15 @@ from src.core.atm.run_profile import AcquisitionMode, ExecutionContext, RunProfi
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 
 
+@pytest.fixture(autouse=True)
+def temp_data_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    from src.core.persistence.database import init_database
+
+    init_database()
+    yield tmp_path
+
+
 @pytest.mark.asyncio
 async def test_dispatcher_selects_existing_env_for_run_profile(monkeypatch):
     run_profile = RunProfile(

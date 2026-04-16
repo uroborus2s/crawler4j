@@ -26,6 +26,8 @@ def temp_module(tmp_path):
 
 def create_mock_context():
     ctx = MagicMock(spec=TaskContext)
+    ctx.runtime = {}
+    ctx.config = {}
     ctx.get_config.return_value = None
     ctx.state = {}
     ctx.logger = logging.getLogger("test")
@@ -66,7 +68,7 @@ class MyFlow(TaskFlow):
 
     # 4. Run
     ctx = create_mock_context()
-    ctx.get_config.return_value = "my_flow"
+    ctx.runtime["workflow"] = "my_flow"
     
     result = await assembler.run(ctx)
     assert result.success is True
@@ -105,7 +107,7 @@ class SimpleTask(TaskScript):
     assembler = ModuleAssembler(temp_module, "test_module", default_workflow="simple")
     
     ctx = create_mock_context()
-    ctx.get_config.return_value = "simple"
+    ctx.runtime["workflow"] = "simple"
     
     # Test internal calling (though it's not strictly what run() does anymore, 
     # we can check get_hook)
@@ -142,6 +144,43 @@ TASK_SCRIPTS = {"overridden_task": OverriddenTask}
     result = await assembler.run(ctx)
     assert result.success is True
     assert result.data == {"status": "overridden"}
+
+
+@pytest.mark.asyncio
+async def test_assembler_ignores_legacy_config_workflow_field(temp_module):
+    flow_default_code = """
+from crawler4j_sdk import TaskFlow, TaskResult
+
+class DefaultFlow(TaskFlow):
+    name = "default_flow"
+    async def run(self, ctx):
+        return TaskResult.ok(data={"workflow": "default"})
+"""
+    flow_runtime_code = """
+from crawler4j_sdk import TaskFlow, TaskResult
+
+class LegacyConfigFlow(TaskFlow):
+    name = "legacy_config_flow"
+    async def run(self, ctx):
+        return TaskResult.ok(data={"workflow": "legacy_config"})
+"""
+    (temp_module / "workflows" / "default_flow.py").write_text(flow_default_code)
+    (temp_module / "workflows" / "legacy_config_flow.py").write_text(flow_runtime_code)
+    (temp_module / "workflows" / "__init__.py").touch()
+
+    assembler = ModuleAssembler(temp_module, "test_module", default_workflow="default_flow")
+
+    ctx = TaskContext(
+        env_id=1,
+        task_name="test_task",
+        config={"workflow": "legacy_config_flow"},
+        runtime={},
+    )
+
+    result = await assembler.run(ctx)
+
+    assert result.success is True
+    assert result.data == {"workflow": "default"}
 
 
 @pytest.mark.asyncio

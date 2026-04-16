@@ -162,7 +162,8 @@ class CheckAccountTask(TaskScript):
 | `ctx.context` | Playwright BrowserContext |
 | `ctx.logger` | 打日志 |
 | `ctx.http` | 发 HTTP 请求 |
-| `ctx.config` / `ctx.get_config()` | 读运行参数 |
+| `ctx.config` / `ctx.get_config()` | 读模块持久配置 |
+| `ctx.runtime` | 读当前执行态输入与元数据 |
 | `ctx.state` | 与工作流共享状态 |
 | `ctx.screenshot()` | 截图取证 |
 | `ctx.should_stop()` | 检查停止标志 |
@@ -184,11 +185,16 @@ class CheckAccountTask(TaskScript):
 
 其它能力等你已经把主链跑通后再扩展，不要一开始就把所有接口都用上。
 
+这里补一条当前正式边界：
+
+- 模块级/工作流级持久配置，走 `ctx.get_config()`
+- 执行期输入，例如 `workflow`、`execution_params`、`job_params`、`devel_mode`、`creation_params`，统一走 `ctx.runtime`
+
 ## 写任务脚本时，数据能力应该怎么用
 
 如果你的任务脚本需要读写模块数据，不要自己去连数据库。
 当前正确做法只有一个：通过 Core 注入的 `ctx.tools.call(...)` 使用正式工具。
-`crawler4j-sdk 1.1.1` 起，模块侧统一通过 `TaskContext.tools` 访问宿主扩展能力。
+`crawler4j-sdk 1.2.0` 起，模块侧统一通过 `TaskContext.tools` 访问宿主扩展能力。
 
 也就是说，当前模块里允许依赖的数据能力只有：
 
@@ -276,7 +282,7 @@ if ctx.tools and ctx.tools.has_tool("db.list_records"):
 第一次写任务脚本时，优先遵守下面几条：
 
 1. 每个任务脚本只做一件事
-2. 需要参数时优先从 `ctx.get_config()` 读取
+2. 需要稳定的模块参数时优先从 `ctx.get_config()` 读取；一次性运行参数从 `ctx.runtime` 读取
 3. 遇到异常场景时尽量截图
 4. 不要把复杂编排逻辑塞进单个任务脚本
 

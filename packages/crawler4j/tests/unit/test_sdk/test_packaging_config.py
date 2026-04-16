@@ -49,6 +49,7 @@ def test_sdk_cli_package_exports_console_script_without_playwright_runtime_depen
 
     assert scripts["crawler4j"] == "crawler4j_sdk.cli.commands:main"
     assert all("playwright" not in dependency for dependency in dependencies)
+    assert "crawler4j-contracts>=1.2.0,<2.0.0" in dependencies
 
 
 def test_sdk_runtime_version_matches_publish_metadata():
@@ -74,10 +75,12 @@ def test_contracts_runtime_version_matches_publish_metadata():
 
 def test_root_app_package_does_not_reexport_sdk_cli_command():
     pyproject = _load_pyproject(APP_ROOT / "pyproject.toml")
+    dependencies = pyproject["project"]["dependencies"]
     scripts = pyproject["project"]["scripts"]
 
     assert scripts["start"] == "src.ui.app:main"
     assert "crawler4j" not in scripts
+    assert "crawler4j-contracts>=1.2.0" in dependencies
 
 
 def test_workspace_root_declares_packages_workspace_members():

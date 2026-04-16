@@ -72,7 +72,7 @@
     "mms_settings_store_tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_settings_store.py -q",
       "result": "passed",
-      "details": "4 passed on 2026-03-26 covering module/workflow settings export, legacy KV fallback, persisted module status, and uninstall cleanup policy"
+      "details": "4 passed on 2026-03-26 covering module/workflow settings export, removed legacy KV ignore semantics, persisted module status, and uninstall cleanup policy"
     },
     "mms_custom_ui_tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py -q",
@@ -85,8 +85,8 @@
     "app_package_pyproject": "0.1.2.dev20260326",
     "runtime": "0.1.2.dev20260326",
     "git_tag_latest": "v0.1.1",
-    "sdk": "1.1.1",
-    "contracts": "1.1.1"
+    "sdk": "1.2.0",
+    "contracts": "1.2.0"
   },
   "entrypoints": {
     "actual_ui_entry": "uv run python -m src.ui.app",

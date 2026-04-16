@@ -108,8 +108,8 @@ uv run python -m zipfile -c hotel_demo-1.0.0.zip hotel_demo
 
 1. `ui_extension.type` 是否为 `micro_app`
 2. `detail_menu.entry` 是否写成 `ui:YourWidget`
-3. 模块里是否存在 `ui.py`
-4. `ui.py` 是否导出了对应的 `QWidget` 类
+3. 模块里是否存在 `ui.py` 或 `ui/__init__.py`
+4. 对应模块是否导出了目标 `QWidget` 类
 5. 模块来源是否为 `DevLink` / 内置，或是否已命中 `mms.ui.allowlist`
 
 ### 对小白的建议
@@ -176,7 +176,7 @@ module.yaml.name
 如果你在升级旧模块，再补两步：
 
 1. 删除 `DataService` 导入和专用 `ctx.db` 依赖
-2. 把 `module.yaml.sdk_version_range` 改成 `>=1.1.1`
+2. 把 `module.yaml.sdk_version_range` 改成 `>=1.2.0`
 
 ## 最后给小白的一条建议
 

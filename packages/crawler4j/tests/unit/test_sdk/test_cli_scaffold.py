@@ -62,7 +62,6 @@ class TestModelScaffoldInit:
         assert result == 0
         assert (target / "__init__.py").exists()
         assert (target / "module.yaml").exists()
-        assert (target / "ui" / "config_schema.json").exists()
         assert (target / ".gitignore").exists()
         assert (target / ".python-version").exists()
         assert (target / "tasks" / "__init__.py").exists()
@@ -74,8 +73,7 @@ class TestModelScaffoldInit:
 
         manifest = _read_manifest(target)
         assert manifest["name"] == "demo_model"
-        assert manifest["ui_extension"]["type"] == "declarative"
-        assert manifest["ui_extension"]["entry"] == "ui/config_schema.json"
+        assert "ui_extension" not in manifest
         assert manifest["workflows"][0]["name"] == "main_workflow"
 
     def test_init_model_generates_importable_module_package(self, model_args: Namespace):
@@ -106,7 +104,7 @@ class TestModelScaffoldInit:
         dependencies = pyproject["project"]["dependencies"]
         assert "scripts" not in pyproject["project"]
         assert all("playwright" not in dependency for dependency in dependencies)
-        assert "crawler4j-sdk>=1.1.1,<2.0.0" in dependencies
+        assert "crawler4j-sdk>=1.2.0,<2.0.0" in dependencies
 
     def test_init_model_interactive_wizard_runs_git_init_and_uv_sync(
         self,
@@ -204,10 +202,11 @@ class TestModelScaffoldExtensions:
 
         assert result == 0
         assert (target / "ui" / "dashboard.py").exists()
+        assert (target / "ui" / "__init__.py").read_text(encoding="utf-8").strip() == "from .dashboard import DashboardPage"
 
         manifest = _read_manifest(target)
         assert manifest["ui_extension"]["type"] == "micro_app"
-        assert manifest["ui_extension"]["entry"] == "ui.dashboard:DashboardPage"
+        assert manifest["ui_extension"]["entry"] == "ui:DashboardPage"
 
     def test_add_requires_model_project_context(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
         monkeypatch.chdir(tmp_path)

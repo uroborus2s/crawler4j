@@ -146,16 +146,21 @@ class TaskDispatcher:
         if not module_name:
             raise ValueError("Execution module name is empty. Cannot dispatch task.")
 
-        params = {**run_profile.execution.params, **job.params}
-        params["workflow"] = run_profile.execution.workflow
-        if self._is_dev_link_module(module_name):
-            params["devel_mode"] = True
+        execution_params = dict(run_profile.execution.params)
+        job_params = dict(job.params)
+        runtime_params = {**execution_params, **job_params}
+        workflow_name = run_profile.execution.workflow or "default"
+        is_dev_link = self._is_dev_link_module(module_name)
 
         request = ExecutionRequest(
             task=task,
             module_name=module_name,
             hooks_module=run_profile.execution.hooks_module or module_name,
-            params=params,
+            workflow_name=workflow_name,
+            execution_params=execution_params,
+            job_params=job_params,
+            runtime_params=runtime_params,
+            devel_mode=is_dev_link,
             state={
                 "job_id": job.id,
                 "task_id": task.id,

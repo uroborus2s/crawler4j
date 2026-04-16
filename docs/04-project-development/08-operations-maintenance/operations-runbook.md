@@ -31,7 +31,7 @@
 |---|---|---|
 | 应用打不开 | 入口或依赖环境异常 | 重新执行 `uv sync --all-packages`，再跑 `uv run python scripts/smoke_test_ui.py` |
 | 模块能看到但跑不起来 | 执行配置或模块来源错误 | 核对 `execution.module`、`execution.workflow`、模块来源 |
-| `🐞 调试` 按钮不出现 | 不是 DevLink 或策略未绑定 | 先检查 DevLink 来源和策略配置 |
+| `🐞 调试` 按钮不出现 | 不是 DevLink 或运行模板未绑定 | 先检查 DevLink 来源和运行模板 |
 | 正式安装模块与本地源码冲突 | 同名 DevLink 未按预期切换 | 在 `📦 模块管理` 里确认来源是否已变为正式安装模块 |
 | 发布口径不清楚 | 版本、tag 和文档不同步 | 回到 `version-governance.md` 和 `release-notes.md` |
 
@@ -47,7 +47,7 @@
 ### 模块运行故障
 
 1. 打开 `📦 模块管理` 确认模块来源和状态。
-2. 打开 `⚙️ 策略配置` 核对 `execution.module` 与 `execution.workflow`。
+2. 打开任务运行模板，核对 `execution.module` 与 `execution.workflow`。
 3. 若是 DevLink 联调问题，回到开发者指南的调试章节。
 4. 若是正式安装链路问题，按管理员指南重走 zip 安装与验收路径。
 

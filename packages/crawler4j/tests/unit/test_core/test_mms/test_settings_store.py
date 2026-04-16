@@ -70,8 +70,84 @@ def test_settings_store_returns_empty_module_settings_without_persisted_record(t
     assert store.read_module_settings("demo_module") == {}
 
 
+def test_settings_store_persists_flattened_entries_in_module_config_table(temp_data_dir):
+    from src.core.mms.settings_store import ModuleSettingsStore
+    from src.core.persistence.database import CONFIG_DB, get_connection
+
+    store = ModuleSettingsStore()
+    store.write_module_settings(
+        "demo_module",
+        {
+            "auth": {"login_url": "https://example.com", "headless": False},
+            "accounts": [{"id": "u1"}],
+        },
+    )
+
+    with get_connection(CONFIG_DB) as conn:
+        rows = conn.execute(
+            """
+            SELECT scope_type, scope_name, key_path, value_json
+            FROM module_config_entries
+            WHERE module_name = ?
+            ORDER BY scope_type, scope_name, key_path
+            """,
+            ("demo_module",),
+        ).fetchall()
+
+    assert [(row["scope_type"], row["scope_name"], row["key_path"], row["value_json"]) for row in rows] == [
+        ("module", "", "accounts", '[{"id": "u1"}]'),
+        ("module", "", "auth.headless", "false"),
+        ("module", "", "auth.login_url", '"https://example.com"'),
+    ]
+
+
+def test_settings_store_ignores_legacy_configs_rows(temp_data_dir):
+    from src.core.mms.settings_store import ModuleSettingsStore
+    from src.core.persistence.database import CONFIG_DB, get_connection
+
+    with get_connection(CONFIG_DB) as conn:
+        conn.execute(
+            """
+            INSERT INTO configs (key, value, created_at, updated_at)
+            VALUES (?, ?, 1, 1)
+            """,
+            (
+                "mms:module_settings:demo_module",
+                '{"auth": {"login_url": "https://legacy.example.com"}}',
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO configs (key, value, created_at, updated_at)
+            VALUES (?, ?, 1, 1)
+            """,
+            (
+                "mms:workflow_settings:demo_module:login",
+                '{"auth": {"headless": true}}',
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO configs (key, value, created_at, updated_at)
+            VALUES (?, ?, 1, 1)
+            """,
+            (
+                "mms:module_status:demo_module",
+                '"disabled"',
+            ),
+        )
+
+    store = ModuleSettingsStore()
+
+    assert store.read_module_settings("demo_module") == {}
+    assert store.read_workflow_settings("demo_module", "login") == {}
+    assert store.build_task_config("demo_module", "login") == {}
+    assert store.get_module_status("demo_module") is None
+
+
 def test_registry_persists_module_status_across_reload(temp_data_dir):
     from src.core.mms.settings_store import ModuleSettingsStore
+    from src.core.persistence.database import CONFIG_DB, get_connection
 
     scan_root = temp_data_dir / "scan_root"
     _write_module(scan_root)
@@ -93,6 +169,21 @@ def test_registry_persists_module_status_across_reload(temp_data_dir):
     )
     assert reloaded.get_module("demo_module").status == ModuleStatus.DISABLED
 
+    with get_connection(CONFIG_DB) as conn:
+        rows = conn.execute(
+            """
+            SELECT scope_type, key_path, value_json
+            FROM module_config_entries
+            WHERE module_name = ?
+            ORDER BY scope_type, key_path
+            """,
+            ("demo_module",),
+        ).fetchall()
+
+    assert [(row["scope_type"], row["key_path"], row["value_json"]) for row in rows] == [
+        ("module_status", "status", '"disabled"'),
+    ]
+
     assert reloaded.enable_module("demo_module") is True
     enabled_again = ModuleRegistry(
         scanner=ModuleScanner(scan_paths=[scan_root]),
@@ -104,12 +195,20 @@ def test_registry_persists_module_status_across_reload(temp_data_dir):
 
 def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
     from src.core.mms.settings_store import ModuleSettingsStore
+    from src.core.persistence import get_kv_store
+    from src.core.persistence.module_data_store import ModuleDataStore
 
     scan_root = temp_data_dir / "scan_root"
     _write_module(scan_root)
     store = ModuleSettingsStore()
+    data_store = ModuleDataStore()
+    kv = get_kv_store()
     store.write_module_settings("demo_module", {"api_key": "secret"})
     store.write_workflow_settings("demo_module", "login", {"headless": False})
+    data_store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
+    data_store.write_data_table_schema("demo_module", "accounts", {"title": "账号管理", "dataset": "accounts"})
+    kv.set("module:demo_module:dataset:legacy_accounts", [{"id": "legacy"}])
+    kv.set("module:demo_module:ui:data_table:legacy_accounts", {"title": "旧账号"})
 
     registry = ModuleRegistry(
         scanner=ModuleScanner(scan_paths=[scan_root]),
@@ -118,10 +217,16 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
     )
     assert registry.uninstall("demo_module") is True
     assert store.export_module_settings("demo_module") == {"module": {}, "workflows": {}}
+    assert data_store.read_dataset("demo_module", "accounts") == []
+    assert data_store.read_data_table_schema("demo_module", "accounts") == {}
+    assert kv.get("module:demo_module:dataset:legacy_accounts") is None
+    assert kv.get("module:demo_module:ui:data_table:legacy_accounts") is None
 
     _write_module(scan_root)
     store.write_module_settings("demo_module", {"api_key": "secret"})
     store.write_workflow_settings("demo_module", "login", {"headless": False})
+    data_store.write_dataset("demo_module", "accounts", [{"id": "u2"}])
+    data_store.write_data_table_schema("demo_module", "accounts", {"title": "账号管理", "dataset": "accounts"})
     registry = ModuleRegistry(
         scanner=ModuleScanner(scan_paths=[scan_root]),
         dev_link_store=_FakeDevLinkStore(),
@@ -133,3 +238,5 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
         "module": {"api_key": "secret"},
         "workflows": {"login": {"headless": False}},
     }
+    assert data_store.read_dataset("demo_module", "accounts") == []
+    assert data_store.read_data_table_schema("demo_module", "accounts") == {}

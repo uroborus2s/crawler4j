@@ -27,7 +27,7 @@ class ModuleService:
                 sys.modules.pop(loaded_name, None)
 
     def _should_force_reload(self, module_name: str, context: TaskContext | None = None) -> bool:
-        if not context or not context.config.get("devel_mode", False):
+        if not context or not context.runtime.get("devel_mode", False):
             return False
 
         reloaded_modules = context.runtime.get("_reloaded_modules")

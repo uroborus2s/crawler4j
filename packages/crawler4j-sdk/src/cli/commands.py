@@ -12,7 +12,6 @@ from typing import Any
 import yaml
 
 from crawler4j_sdk.cli.templates import (
-    CONFIG_SCHEMA_TEMPLATE,
     MODEL_DATA_MODELS_TEMPLATE,
     MODEL_GITIGNORE_TEMPLATE,
     MODEL_MANIFEST_TEMPLATE,
@@ -22,7 +21,6 @@ from crawler4j_sdk.cli.templates import (
     MODEL_RUNTIME_TEMPLATE,
     MODEL_TEST_TASK_TEMPLATE,
     MODEL_UI_PAGES_TEMPLATE,
-    MODEL_UI_SECTION,
     MODEL_UTILS_HELPER_TEMPLATE,
     SCRIPT_TEMPLATE,
     WORKFLOW_TEMPLATE,
@@ -76,6 +74,19 @@ def _ensure_package_dir(path: Path) -> None:
     init_file = path / "__init__.py"
     if not init_file.exists():
         _write_text(init_file, "")
+
+
+def _ensure_package_export(init_file: Path, module_name: str, symbol_name: str) -> None:
+    """Ensure package __init__ re-exports a generated symbol."""
+    export_line = f"from .{module_name} import {symbol_name}\n"
+    content = init_file.read_text(encoding="utf-8") if init_file.exists() else ""
+    if export_line in content:
+        return
+
+    if content and not content.endswith("\n"):
+        content += "\n"
+    content += export_line
+    _write_text(init_file, content)
 
 
 def find_module_root(start: Path | None = None) -> Path | None:
@@ -168,7 +179,6 @@ def cmd_init_model(args) -> int:
         module_name=module_name, display_name=display_name, description=f"{display_name} 模块",
         workflow_name=wf_name, workflow_display_name=to_display_name(wf_name),
         workflow_description="默认工作流",
-        ui_section=MODEL_UI_SECTION.format(display_name=display_name),
     ))
     
     # 3. 写入初始代码模板
@@ -184,9 +194,6 @@ def cmd_init_model(args) -> int:
     ))
     _write_text(output_dir / "utils" / "helpers.py", MODEL_UTILS_HELPER_TEMPLATE)
     _write_text(output_dir / "tests" / "test_tasks.py", MODEL_TEST_TASK_TEMPLATE)
-    _write_text(output_dir / "ui" / "config_schema.json", CONFIG_SCHEMA_TEMPLATE.format(
-        title=f"{display_name} 配置", description="参数配置", workflow_name=wf_name
-    ))
     
     _write_text(output_dir / ".gitignore", MODEL_GITIGNORE_TEMPLATE)
     _write_text(output_dir / ".python-version", f"{args.python_version}\n")
@@ -261,21 +268,19 @@ def cmd_add_data(args) -> int:
 
 def cmd_add_ui(args) -> int:
     module_root = require_module_root()
-    ui_type = getattr(args, "type", "declarative")
-    if ui_type == "code":
-        name = getattr(args, "name", "dashboard") or "dashboard"
-        _write_text(module_root / "ui" / f"{name}.py", MODEL_UI_PAGES_TEMPLATE.format(
-            display_name=to_display_name(name), description="UI 页面", class_name=f"{to_class_name(name)}Page"
-        ))
-        manifest = load_manifest(module_root)
-        ui_ext = manifest.get("ui_extension", {})
-        ui_ext["type"] = "micro_app"
-        ui_ext["entry"] = f"ui.{name}:{to_class_name(name)}Page"
-        manifest["ui_extension"] = ui_ext
-        save_manifest(module_root, manifest)
-        print(f"✅ 创建代码 UI: ui/{name}.py 并更新清单为 micro_app")
-    else:
-        print("ℹ️ 声明式配置 ui/config_schema.json 已默认存在。")
+    name = getattr(args, "name", "dashboard") or "dashboard"
+    class_name = f"{to_class_name(name)}Page"
+    _write_text(module_root / "ui" / f"{name}.py", MODEL_UI_PAGES_TEMPLATE.format(
+        display_name=to_display_name(name), description="UI 页面", class_name=class_name
+    ))
+    _ensure_package_export(module_root / "ui" / "__init__.py", name, class_name)
+    manifest = load_manifest(module_root)
+    ui_ext = manifest.get("ui_extension", {})
+    ui_ext["type"] = "micro_app"
+    ui_ext["entry"] = f"ui:{class_name}"
+    manifest["ui_extension"] = ui_ext
+    save_manifest(module_root, manifest)
+    print(f"✅ 创建代码 UI: ui/{name}.py 并更新清单为 micro_app")
     return 0
 
 
@@ -349,9 +354,9 @@ def main() -> int:
     data_p.add_argument("name")
     data_p.set_defaults(func=cmd_add_data)
 
-    ui_p = subparsers.add_parser("add-ui", help="创建 UI 组件")
+    ui_p = subparsers.add_parser("add-ui", help="创建代码型 UI 页面")
     ui_p.add_argument("name", nargs="?")
-    ui_p.add_argument("--type", choices=["declarative", "code"], default="declarative")
+    ui_p.add_argument("--type", choices=["code"], default="code")
     ui_p.set_defaults(func=cmd_add_ui)
 
     check_p = subparsers.add_parser("check", help="自检模块规范性")

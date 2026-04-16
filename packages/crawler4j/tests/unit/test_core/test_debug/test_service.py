@@ -218,6 +218,8 @@ async def test_debug_service_tracks_worker_events_and_logs(monkeypatch, temp_dat
     assert payload["provider"] == "virtualbrowser"
     assert payload["wait_timeout"] == 90
     assert payload["timeout"] == 180
+    assert payload["execution_params"] == {"lang": "zh-CN"}
+    assert payload["job_params"] == {"city": "Shanghai"}
     assert payload["params"] == {"lang": "zh-CN", "city": "Shanghai"}
     assert payload["creation_params"] == {"region": "cn"}
 
@@ -319,6 +321,8 @@ async def test_debug_service_supports_inline_run_profile(monkeypatch, temp_data_
     assert payload["provider"] == "virtualbrowser"
     assert payload["wait_timeout"] == 45
     assert payload["timeout"] == 300
+    assert payload["execution_params"] == {"lang": "en-US"}
+    assert payload["job_params"] == {"city": "Singapore"}
     assert payload["params"] == {"lang": "en-US", "city": "Singapore"}
     assert payload["creation_params"] == {"region": "sg"}
 

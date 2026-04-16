@@ -19,6 +19,7 @@ from src.utils import paths
 # 数据库文件
 CONFIG_DB = "config.db"
 STATE_DB = "state.db"
+DATA_DB = "data.db"
 
 # 线程本地存储
 _thread_local = threading.local()
@@ -93,6 +94,7 @@ def init_database() -> None:
     """
     _init_config_db()
     _init_state_db()
+    _init_data_db()
 
 
 def _init_config_db() -> None:
@@ -106,6 +108,22 @@ def _init_config_db() -> None:
                 created_at INTEGER DEFAULT (strftime('%s', 'now')),
                 updated_at INTEGER DEFAULT (strftime('%s', 'now'))
             );
+
+            -- 模块配置条目表（按模块/工作流 + key_path 扁平化存储）
+            CREATE TABLE IF NOT EXISTS module_config_entries (
+                module_name TEXT NOT NULL,
+                scope_type TEXT NOT NULL,
+                scope_name TEXT NOT NULL DEFAULT '',
+                key_path TEXT NOT NULL,
+                value_json TEXT NOT NULL,
+                value_type TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (module_name, scope_type, scope_name, key_path)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_module_config_scope
+            ON module_config_entries(module_name, scope_type, scope_name);
             
             -- 设置表（系统设置）
             CREATE TABLE IF NOT EXISTS settings (
@@ -209,4 +227,36 @@ def _init_state_db() -> None:
             
             CREATE INDEX IF NOT EXISTS idx_meta_env ON env_metadata(env_id);
             CREATE INDEX IF NOT EXISTS idx_meta_ns_key ON env_metadata(namespace, key);
+        """)
+
+
+def _init_data_db() -> None:
+    """初始化业务数据数据库。"""
+    with get_connection(DATA_DB) as conn:
+        conn.executescript("""
+            -- 模块数据集（当前按 module + dataset 聚合存储）
+            CREATE TABLE IF NOT EXISTS module_datasets (
+                module_name TEXT NOT NULL,
+                dataset_name TEXT NOT NULL,
+                records_json TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (module_name, dataset_name)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_module_datasets_module
+            ON module_datasets(module_name);
+
+            -- 模块数据表视图元数据
+            CREATE TABLE IF NOT EXISTS module_data_table_views (
+                module_name TEXT NOT NULL,
+                view_id TEXT NOT NULL,
+                schema_json TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (module_name, view_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_module_data_views_module
+            ON module_data_table_views(module_name);
         """)

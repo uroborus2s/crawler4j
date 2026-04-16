@@ -92,12 +92,11 @@ class UIExtensionInfo:
     """UI 扩展信息。
     
     规格 5.1.3.3:
-        - declarative: 声明式 UI (YAML/JSON)
         - micro_app: 代码型 UI
         - none: 无 UI 扩展
     """
-    type: str = "none"  # declarative | micro_app | none
-    entry: str = ""  # 入口文件或配置
+    type: str = "none"  # micro_app | none
+    entry: str = ""  # 入口类声明，如 "ui:AccountConfigPage"
     trusted: bool = False  # 是否受信
     available: bool = True  # 是否可用
     nav_item: NavItemInfo | None = None  # 模块导航项 (可选，已弃用)
@@ -118,7 +117,6 @@ class ModuleManifest:
     sdk_version_range: str = ">=2.0.0"
     workflows: list[WorkflowInfo] = field(default_factory=list)
     ui_extension: UIExtensionInfo = field(default_factory=UIExtensionInfo)
-    config_schema: dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典。"""
@@ -163,7 +161,6 @@ class ModuleManifest:
                     for item in self.ui_extension.detail_menu
                 ],
             },
-            "config_schema": self.config_schema,
         }
     
     @classmethod
@@ -217,7 +214,6 @@ class ModuleManifest:
             sdk_version_range=data.get("sdk_version_range", ">=2.0.0"),
             workflows=workflows,
             ui_extension=ui_extension,
-            config_schema=data.get("config_schema", {}),
         )
 
 

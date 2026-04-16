@@ -73,7 +73,7 @@ class TaskScript(ABC):
         方法应完成一次完整的业务动作并返回结构化结果。
         
         Args:
-            ctx: 任务执行上下文，提供 page、config、logger、storage 等能力。
+            ctx: 任务执行上下文，提供 page、config、runtime、logger、tools 等能力。
                  脚本应只通过 ctx 获取框架能力，不得直接耦合 Core 内部对象。
         
         Returns:

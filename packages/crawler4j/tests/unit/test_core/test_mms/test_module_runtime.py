@@ -17,7 +17,7 @@ def _write_module_package(module_dir: Path, name: str) -> None:
         "def run(context):\n"
         f"    return TaskResult.ok(message='ok', module='{name}')\n\n"
         "def prepare_env(context):\n"
-        "    creation_params = context.get_config('creation_params')\n"
+        "    creation_params = context.runtime.get('creation_params')\n"
         "    if not creation_params:\n"
         "        return None\n"
         "    return {'creation_params': creation_params}\n",
@@ -63,7 +63,7 @@ async def test_module_service_calls_optional_hook(tmp_path):
     ctx = TaskContext(
         env_id=0,
         task_name="example_module",
-        config={"creation_params": {"name_prefix": "hooked"}},
+        runtime={"creation_params": {"name_prefix": "hooked"}},
     )
 
     result = await service.call_hook("example_module", "prepare_env", ctx)
@@ -127,7 +127,7 @@ def test_module_service_reloads_dev_module_once_per_context(tmp_path):
     )
 
     try:
-        context_a = TaskContext(env_id=0, task_name=module_name, config={"devel_mode": True})
+        context_a = TaskContext(env_id=0, task_name=module_name, runtime={"devel_mode": True})
         module_v1 = service._load_module(module_name, context_a)
         assert module_v1.VERSION == 1
 
@@ -138,7 +138,7 @@ def test_module_service_reloads_dev_module_once_per_context(tmp_path):
         assert module_same_context is module_v1
         assert module_same_context.VERSION == 1
 
-        context_b = TaskContext(env_id=0, task_name=module_name, config={"devel_mode": True})
+        context_b = TaskContext(env_id=0, task_name=module_name, runtime={"devel_mode": True})
         module_v2 = service._load_module(module_name, context_b)
         assert module_v2.VERSION == 2
     finally:

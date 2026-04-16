@@ -93,7 +93,11 @@ async def main_async(config_path: str) -> int:
         task=Task(id=payload["id"], job_id=payload.get("job_id", f"debug:{payload['id']}")),
         module_name=payload["module_name"],
         hooks_module=payload.get("hooks_module") or payload["module_name"],
-        params={**(payload.get("params") or {}), "workflow": payload.get("workflow") or "default"},
+        workflow_name=payload.get("workflow") or "default",
+        execution_params=dict(payload.get("execution_params") or {}),
+        job_params=dict(payload.get("job_params") or {}),
+        runtime_params=dict(payload.get("params") or {}),
+        devel_mode=bool(payload.get("devel_mode", True)),
         state={
             "debug_session_id": payload["id"],
             "job_id": payload.get("job_id", ""),

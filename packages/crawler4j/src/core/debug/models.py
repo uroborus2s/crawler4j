@@ -49,6 +49,8 @@ class DebugSession:
     module_name: str = ""
     source_path: str = ""
     workflow: str = "default"
+    execution_params: dict[str, Any] = field(default_factory=dict)
+    job_params: dict[str, Any] = field(default_factory=dict)
     params: dict[str, Any] = field(default_factory=dict)
     hooks_module: str = ""
     provider: str = "playwright_local"
@@ -91,6 +93,8 @@ class DebugSession:
             "module_name": self.module_name,
             "source_path": self.source_path,
             "workflow": self.workflow,
+            "execution_params": self.execution_params,
+            "job_params": self.job_params,
             "params": self.params,
             "hooks_module": self.hooks_module,
             "provider": self.provider,

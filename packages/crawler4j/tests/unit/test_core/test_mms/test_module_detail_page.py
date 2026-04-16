@@ -130,3 +130,40 @@ def test_module_detail_page_gracefully_degrades_when_custom_page_load_fails(qtbo
     custom_page = page._menu_pages["custom"]
     texts = [label.text() for label in custom_page.findChildren(QLabel)]
     assert any("加载失败" in text or "MissingPage" in text for text in texts)
+
+
+def test_module_detail_page_exposes_config_page_and_persists_module_and_workflow_settings(qtbot, tmp_path):
+    from src.core.mms.settings_store import ModuleSettingsStore
+
+    store = ModuleSettingsStore()
+    store.write_module_settings("demo_module", {"base_url": "https://example.com"})
+    store.write_workflow_settings("demo_module", "default", {"headless": False})
+
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    with patch("PyQt6.QtWidgets.QMessageBox.information"), patch("PyQt6.QtWidgets.QMessageBox.warning"):
+        page.set_module(_make_module(tmp_path, source=ModuleSource.DEV_LINK))
+
+        menu_texts = [page.menu_list.item(i).text() for i in range(page.menu_list.count())]
+        assert any("配置" in text for text in menu_texts)
+
+        config_page = page._menu_pages["config"]
+        assert '"base_url": "https://example.com"' in config_page.module_config_editor.toPlainText()
+        assert '"headless": false' in config_page.workflow_config_editor.toPlainText()
+
+        config_page.module_config_editor.setPlainText('{"base_url": "https://new.example.com", "retry": 3}')
+        config_page._save_module_config()
+
+        config_page.workflow_selector.setCurrentIndex(0)
+        config_page.workflow_config_editor.setPlainText('{"headless": true, "region": "cn"}')
+        config_page._save_workflow_config()
+
+    assert store.read_module_settings("demo_module") == {
+        "base_url": "https://new.example.com",
+        "retry": 3,
+    }
+    assert store.read_workflow_settings("demo_module", "default") == {
+        "headless": True,
+        "region": "cn",
+    }

@@ -3,7 +3,7 @@
 规格参考: docs/02-requirements/reference-srs/05-framework-core/05-9-data-persistence.md (5.9.2)
 
 提供系统设置的读写能力，使用 settings 表（一 key 一 value）。
-模块配置已迁移到 kv_store。
+模块配置请使用 `module_config_entries`（通过 `ModuleSettingsStore` 访问）。
 """
 
 import time
@@ -15,7 +15,7 @@ class ConfigStore:
     """配置存储服务。
     
     仅管理系统设置（settings 表）。
-    模块配置请使用 kv_store。
+    模块配置请使用 ModuleSettingsStore。
     
     Example:
         >>> config = ConfigStore()

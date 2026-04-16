@@ -43,7 +43,7 @@
 | 2026-04-15 | 收敛 REM 手动创建环境边界；移除 post-create workflow 配置并改为创建后保持 RUNNING | Codex |
 | 2026-04-15 | 收敛 REM 创建成功反馈；创建后仅刷新列表，不再弹成功提示框 | Codex |
 | 2026-04-15 | 收敛 ATM 生命周期：删除 TaskScript/TaskFlow 私有 hooks，引入 `TaskSignal` 与 `WAITING_CONFIRMATION`，移除运行模板清理策略 UI | Codex |
-| 2026-04-15 | 准备 SDK / Contracts `1.1.1` 发布口径；更新脚手架默认版本范围并固化 `on_cleanup` 终态规则 | Codex |
+| 2026-04-17 | 完成 SDK / Contracts `1.2.0` 版本收口；同步 `__version__`、依赖基线、脚手架默认版本范围与开发者文档口径 | Codex |
 | 2026-04-15 | 按方案 A 落地 ATM 手动批次任务：新增 `BATCH + MANUAL` 的“执行一次”模式，并补任务创建页/列表页交互与回归测试 | Codex |
 | 2026-04-15 | 按方案 A 收敛运行模板资源配置：拆成“创建环境 / 选择环境”，并让 provider / 匹配规则真正进入 REM 选环境链路 | Codex |
 | 2026-04-15 | 继续收敛运行模板创建环境页：将执行脚本选择并入基础信息区，按 VirtualBrowser 现有交互重做指纹参数表单，补官方 `addBrowser` 指纹参数透传与 IP 池绑定策略下发，并移除 `retry`；随后补齐浏览器版本下拉、默认 `145`、内核自动匹配，以及 UA 的默认 / 自定义 / 随机交互 | Codex |

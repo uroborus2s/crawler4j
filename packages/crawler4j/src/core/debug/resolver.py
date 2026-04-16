@@ -18,7 +18,9 @@ class JobDebugTarget:
     module: ModuleInfo
     workflow: str
     hooks_module: str
-    params: dict = field(default_factory=dict)
+    execution_params: dict = field(default_factory=dict)
+    job_params: dict = field(default_factory=dict)
+    runtime_params: dict = field(default_factory=dict)
     timeout: int = 0
     wait_timeout: int = 60
 
@@ -48,7 +50,9 @@ def resolve_job_debug_target(
         module=module,
         workflow=run_profile.execution.workflow or "default",
         hooks_module=run_profile.execution.hooks_module or run_profile.execution.module,
-        params={**run_profile.execution.params, **job.params},
+        execution_params=dict(run_profile.execution.params),
+        job_params=dict(job.params),
+        runtime_params={**run_profile.execution.params, **job.params},
         timeout=run_profile.execution.timeout,
         wait_timeout=run_profile.resource.acquisition.wait_timeout,
     )

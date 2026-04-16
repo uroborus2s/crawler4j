@@ -84,8 +84,9 @@ def test_module_data_table_page_routes_add_and_edit_to_module_handlers(qtbot, mo
 
     def fake_handler(self, handler_name, *args):
         calls.append((handler_name, args))
-        kv.set(
-            _meta_key("demo_module", "accounts"),
+        self._data_store.write_data_table_schema(
+            "demo_module",
+            "accounts",
             {
                 "title": "账号管理",
                 "dataset": "accounts",
@@ -103,7 +104,7 @@ def test_module_data_table_page_routes_add_and_edit_to_module_handlers(qtbot, mo
                 ],
             },
         )
-        rows = kv.get(_dataset_key("demo_module", "accounts")) or []
+        rows = self._data_store.read_dataset("demo_module", "accounts")
         if handler_name == "create_account_from_ui":
             rows = list(rows)
             rows.append(
@@ -113,7 +114,7 @@ def test_module_data_table_page_routes_add_and_edit_to_module_handlers(qtbot, mo
                     "account_status": "new",
                 }
             )
-            kv.set(_dataset_key("demo_module", "accounts"), rows)
+            self._data_store.write_dataset("demo_module", "accounts", rows)
         elif handler_name == "update_account_from_ui":
             rows = [
                 {
@@ -122,7 +123,7 @@ def test_module_data_table_page_routes_add_and_edit_to_module_handlers(qtbot, mo
                 }
                 for row in rows
             ]
-            kv.set(_dataset_key("demo_module", "accounts"), rows)
+            self._data_store.write_dataset("demo_module", "accounts", rows)
         return None
 
     monkeypatch.setattr(ModuleDataTablePage, "_call_module_handler", fake_handler)
@@ -166,7 +167,7 @@ def test_module_data_table_page_routes_add_and_edit_to_module_handlers(qtbot, mo
 
     assert ("create_account_from_ui", ({"phone": "13800138001", "account_status": "new"},)) in calls
     assert ("update_account_from_ui", ("13800138000", {"account_status": "blocked"})) in calls
-    assert kv.get(_dataset_key("demo_module", "accounts"))[0]["account_status"] == "blocked"
+    assert page._data_store.read_dataset("demo_module", "accounts")[0]["account_status"] == "blocked"
 
 
 def test_module_data_table_page_refresh_overwrites_stale_schema(qtbot, monkeypatch):
@@ -182,8 +183,9 @@ def test_module_data_table_page_refresh_overwrites_stale_schema(qtbot, monkeypat
 
     def fake_handler(self, handler_name, *args):
         assert handler_name == "declare_ui"
-        kv.set(
-            _meta_key("demo_module", "accounts"),
+        self._data_store.write_data_table_schema(
+            "demo_module",
+            "accounts",
             {
                 "title": "账号管理",
                 "dataset": "accounts",
@@ -206,7 +208,7 @@ def test_module_data_table_page_refresh_overwrites_stale_schema(qtbot, monkeypat
     page = ModuleDataTablePage("demo_module", "accounts")
     qtbot.addWidget(page)
 
-    schema = kv.get(_meta_key("demo_module", "accounts"))
+    schema = page._data_store.read_data_table_schema("demo_module", "accounts")
 
     assert schema["primary_key"] == "phone"
     assert schema["create_handler"] == "create_account_from_ui"
@@ -228,5 +230,5 @@ def test_module_data_table_page_builds_devlink_context_with_settings(qtbot, monk
     context = page._build_task_context()
 
     assert context.config["module_name"] == "demo_module"
-    assert context.config["devel_mode"] is True
+    assert context.runtime["devel_mode"] is True
     assert context.tools is not None

@@ -65,7 +65,7 @@ version = "0.1.0"
 description = "{display_name} 模块项目"
 requires-python = ">={python_version}"
 dependencies = [
-    "crawler4j-sdk>=1.1.1,<2.0.0",
+    "crawler4j-sdk>=1.2.0,<2.0.0",
 ]
 
 [build-system]
@@ -83,7 +83,7 @@ MODEL_PROJECT_README = '''# {display_name}
 - `module.yaml`: 模块清单与能力声明。
 - `tasks/`: [任务层] 原子操作脚本，负责具体页面交互或数据采集。
 - `workflows/`: [编排层] 业务逻辑流，负责串联多个任务。
-- `ui/`: [界面层] 包含 `config_schema.json` (声明式) 和代码型 UI 组件。
+- `ui/`: [界面层] 放模块代码型 UI 组件。
 - `data/`: [数据层] 包含数据模型定义 (`models.py`) 和 Schema。
 
 ## 常用命令
@@ -331,52 +331,11 @@ version: 1.0.0
 display_name: {display_name}
 description: {description}
 author: crawler4j
-sdk_version_range: ">=1.1.1"
-{ui_section}workflows:
+sdk_version_range: ">=1.2.0"
+workflows:
   - name: {workflow_name}
     display_name: {workflow_display_name}
     description: {workflow_description}
-'''
-
-MODEL_UI_SECTION = '''ui_extension:
-  type: declarative
-  entry: ui/config_schema.json
-  nav_item:
-    icon: "🧩"
-    label: "{display_name}配置"
-
-'''
-
-CONFIG_SCHEMA_TEMPLATE = '''{{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "title": "{title}",
-  "description": "{description}",
-  "properties": {{
-    "workflow": {{
-      "type": "string",
-      "title": "工作流名称",
-      "default": "{workflow_name}"
-    }},
-    "start_url": {{
-      "type": "string",
-      "title": "起始 URL",
-      "default": "https://example.com"
-    }},
-    "headless": {{
-      "type": "boolean",
-      "title": "无头模式",
-      "default": false
-    }},
-    "max_pages": {{
-      "type": "integer",
-      "title": "最大页数",
-      "default": 1,
-      "minimum": 1,
-      "maximum": 100
-    }}
-  }}
-}}
 '''
 
 WORKFLOW_TEMPLATE = '''"""工作流: {display_name}

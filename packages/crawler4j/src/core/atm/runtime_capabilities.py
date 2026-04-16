@@ -20,7 +20,7 @@ from crawler4j_contracts.context import (
     ToolSpec,
     ToolsCapability,
 )
-from src.core.persistence import get_kv_store
+from src.core.persistence import get_kv_store, get_module_data_store
 from src.core.rem.ip_pool import IPEntry, get_ip_pool_manager
 from src.core.rem.manager import get_environment_manager
 
@@ -43,20 +43,17 @@ class CoreDatabaseTools:
 
     def __init__(self, module_name: str):
         self._module_name = module_name
+        self._data_store = get_module_data_store()
         self._kv = get_kv_store()
-
-    def _dataset_key(self, dataset: str) -> str:
-        return f"module:{self._module_name}:dataset:{dataset}"
 
     def _lock_key(self, scope: str, key: str) -> str:
         return f"module:{self._module_name}:lock:{scope}:{key}"
 
     def list_records(self, dataset: str) -> list[dict[str, Any]]:
-        raw = self._kv.get(self._dataset_key(dataset)) or []
-        return _normalize_records(raw)
+        return self._data_store.read_dataset(self._module_name, dataset)
 
     def replace_records(self, dataset: str, records: list[dict[str, Any]]) -> bool:
-        return self._kv.set(self._dataset_key(dataset), _normalize_records(records))
+        return self._data_store.write_dataset(self._module_name, dataset, _normalize_records(records))
 
     def acquire_lock(
         self,
@@ -185,13 +182,7 @@ class CoreUITools:
 
     def __init__(self, module_name: str):
         self._module_name = module_name
-        self._kv = get_kv_store()
-
-    def _meta_key(self, view_id: str) -> str:
-        return f"module:{self._module_name}:ui:data_table:{view_id}"
-
-    def _dataset_key(self, dataset: str) -> str:
-        return f"module:{self._module_name}:dataset:{dataset}"
+        self._data_store = get_module_data_store()
 
     def declare_data_table(self, view_id: str, schema: dict[str, Any]) -> bool:
         meta = dict(schema or {})
@@ -200,14 +191,10 @@ class CoreUITools:
         meta.setdefault("primary_key", "id")
         meta.setdefault("columns", [])
 
-        dataset = str(meta.get("dataset") or view_id)
-        if self._kv.get(self._dataset_key(dataset)) is None:
-            self._kv.set(self._dataset_key(dataset), [])
-
-        return self._kv.set(self._meta_key(view_id), meta)
+        return self._data_store.write_data_table_schema(self._module_name, view_id, meta)
 
     def get_data_table(self, view_id: str) -> dict[str, Any]:
-        return self._kv.get(self._meta_key(view_id)) or {}
+        return self._data_store.read_data_table_schema(self._module_name, view_id)
 
 
 def _solve_slider_with_sinanz(

@@ -25,6 +25,7 @@ from src.core.mms.models import (
 )
 from src.core.mms.scanner import ModuleScanner
 from src.core.mms.settings_store import ModuleSettingsStore, get_module_settings_store
+from src.core.persistence import get_module_data_store
 from src.utils.paths import get_app_data_dir
 
 
@@ -385,6 +386,7 @@ class ModuleRegistry:
                 shutil.rmtree(module.path)
 
             self._settings_store.clear_module_records(module_name, keep_settings=keep_settings)
+            get_module_data_store().clear_module_data(module_name)
             
             # 从注册表移除
             del self._modules[module_name]

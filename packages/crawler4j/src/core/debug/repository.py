@@ -27,6 +27,8 @@ class DebugSessionRepository:
                     module_name TEXT NOT NULL,
                     source_path TEXT NOT NULL,
                     workflow TEXT NOT NULL,
+                    execution_params_json TEXT NOT NULL DEFAULT '{}',
+                    job_params_json TEXT NOT NULL DEFAULT '{}',
                     params_json TEXT NOT NULL,
                     hooks_module TEXT NOT NULL,
                     provider TEXT NOT NULL,
@@ -58,6 +60,12 @@ class DebugSessionRepository:
             migrations = {
                 "job_id": "ALTER TABLE debug_sessions ADD COLUMN job_id TEXT NOT NULL DEFAULT ''",
                 "job_name": "ALTER TABLE debug_sessions ADD COLUMN job_name TEXT NOT NULL DEFAULT ''",
+                "execution_params_json": (
+                    "ALTER TABLE debug_sessions ADD COLUMN execution_params_json TEXT NOT NULL DEFAULT '{}'"
+                ),
+                "job_params_json": (
+                    "ALTER TABLE debug_sessions ADD COLUMN job_params_json TEXT NOT NULL DEFAULT '{}'"
+                ),
                 "creation_lifecycle": (
                     "ALTER TABLE debug_sessions ADD COLUMN creation_lifecycle TEXT NOT NULL DEFAULT 'ephemeral'"
                 ),
@@ -74,17 +82,19 @@ class DebugSessionRepository:
                 conn.execute(
                     """
                     INSERT INTO debug_sessions (
-                        id, job_id, job_name, module_name, source_path, workflow, params_json, hooks_module,
+                        id, job_id, job_name, module_name, source_path, workflow, execution_params_json, job_params_json, params_json, hooks_module,
                         provider, selector_name, acquisition_mode, creation_params_json, creation_lifecycle, wait_timeout, timeout,
                         attach_host, attach_port, wait_for_attach, stop_on_entry, keep_environment,
                         state, worker_pid, env_id, created_at, started_at, finished_at, last_error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         job_id = excluded.job_id,
                         job_name = excluded.job_name,
                         module_name = excluded.module_name,
                         source_path = excluded.source_path,
                         workflow = excluded.workflow,
+                        execution_params_json = excluded.execution_params_json,
+                        job_params_json = excluded.job_params_json,
                         params_json = excluded.params_json,
                         hooks_module = excluded.hooks_module,
                         provider = excluded.provider,
@@ -113,6 +123,8 @@ class DebugSessionRepository:
                         session.module_name,
                         session.source_path,
                         session.workflow,
+                        json.dumps(session.execution_params, ensure_ascii=False),
+                        json.dumps(session.job_params, ensure_ascii=False),
                         json.dumps(session.params, ensure_ascii=False),
                         session.hooks_module,
                         session.provider,
@@ -170,6 +182,8 @@ class DebugSessionRepository:
             module_name=row["module_name"],
             source_path=row["source_path"],
             workflow=row["workflow"],
+            execution_params=json.loads(row["execution_params_json"]) if row["execution_params_json"] else {},
+            job_params=json.loads(row["job_params_json"]) if row["job_params_json"] else {},
             params=json.loads(row["params_json"]) if row["params_json"] else {},
             hooks_module=row["hooks_module"],
             provider=row["provider"],

@@ -149,7 +149,11 @@ class DefaultHttpClient:
 
 @dataclass
 class TaskContext:
-    """任务执行上下文。"""
+    """任务执行上下文。
+
+    `config` 只承载宿主持久化的模块级/工作流级配置视图。
+    `runtime` 只承载当前执行期元数据与临时输入。
+    """
 
     env_id: int
     task_name: str
@@ -189,6 +193,7 @@ class TaskContext:
         return str(path)
 
     def get_config(self, key: str, default: Any = None) -> Any:
+        """读取宿主持久化的模块配置项。"""
         return self.config.get(key, default)
 
     def should_stop(self) -> bool:

@@ -1,4 +1,6 @@
 from types import SimpleNamespace
+from contextlib import ExitStack
+from unittest.mock import patch
 
 import pytest
 
@@ -9,6 +11,16 @@ from src.core.atm.runtime_capabilities import (
     build_runtime_capabilities,
 )
 from src.core.rem.ip_pool import IPEntry, IPPool
+
+
+@pytest.fixture(autouse=True)
+def temp_data_dir(tmp_path):
+    with ExitStack() as stack:
+        stack.enter_context(patch("src.utils.paths.get_app_data_dir", return_value=tmp_path))
+        from src.core.persistence.database import init_database
+
+        init_database()
+        yield tmp_path
 
 
 class _FakeKV:

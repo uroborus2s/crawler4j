@@ -4,7 +4,7 @@
 
 本页默认你已经完成上一页的环境准备。
 
-本页以下示例以 `crawler4j-sdk 1.1.x` 为准；如果你在维护 1.x 或 2.x 时期的旧模块，先完成工具接口升级，再继续走新脚手架流程。
+本页以下示例以 `crawler4j-sdk 1.2.0` 为准；如果你在维护 1.x 或 2.x 时期的旧模块，先完成工具接口升级，再继续走新脚手架流程。
 
 ## 第 1 步：创建模块项目
 
@@ -32,7 +32,7 @@ uvx --from crawler4j-sdk crawler4j init-model hotel_demo --defaults --no-git --n
 
 1. 已删除 `DataService` 导入
 2. 已把旧 `ctx.db.storage / accounts / tasks` 写法改成 `ctx.tools.call("db.*", ...)`
-3. 已把 `module.yaml.sdk_version_range` 改到 `>=1.1.1`
+3. 已把 `module.yaml.sdk_version_range` 改到 `>=1.2.0`
 
 ### 这一步做完后你应该看到什么
 
@@ -53,7 +53,7 @@ uv run crawler4j add-workflow sync_hotels
 
 ## 第 2.5 步：编写你的第一个业务逻辑
 
-打开 `tasks/fetch_hotels.py`，你会看到脚手架生成的模板。将其修改为以下符合 **SDK 1.1.1** 规范的简化示例：
+打开 `tasks/fetch_hotels.py`，你会看到脚手架生成的模板。将其修改为以下符合 **SDK 1.2.0** 规范的简化示例：
 
 ```python
 from crawler4j_sdk import TaskScript, TaskResult
@@ -64,7 +64,7 @@ class FetchHotelsTask(TaskScript):
     async def execute(self, ctx):
         ctx.logger.info("开始模拟抓取酒店数据...")
         
-        # 1. 从配置获取参数 (来自 module.yaml 或 UI 输入)
+        # 1. 从宿主持久化的模块配置读取参数
         city = ctx.get_config("city", "shanghai")
         
         # 2. 模拟采集数据
@@ -73,7 +73,7 @@ class FetchHotelsTask(TaskScript):
             {"id": "h2", "name": f"{city} 示例酒店 B", "price": 800},
         ]
         
-        # 3. 保存到模块数据集 (SDK 1.1.1 标准用法)
+        # 3. 保存到模块数据集 (SDK 1.2.0 标准用法)
         ctx.tools.call("db.replace_records", dataset="hotels", records=hotels)
 
         # 4. 记录当前抓取状态（如下次翻页游标）
@@ -95,12 +95,14 @@ class FetchHotelsTask(TaskScript):
 ```text
 hotel_demo/
 ├── __init__.py
+├── module_runtime.py
 ├── .gitignore
 ├── .python-version
 ├── pyproject.toml
 ├── README.md
 ├── module.yaml
-├── config_schema.json
+├── ui/
+│   └── __init__.py
 ├── tasks/
 │   ├── __init__.py
 │   ├── example_task.py

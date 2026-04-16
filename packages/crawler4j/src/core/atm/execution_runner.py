@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -14,6 +15,7 @@ from src.core.atm.runtime_capabilities import (
     build_runtime_capabilities,
 )
 from src.core.foundation.logging import logger
+from src.core.mms.settings_store import ModuleSettingsStore, get_module_settings_store
 from src.core.mms.service import ModuleService, get_module_service
 from src.core.rem.manager import EnvironmentManager, get_environment_manager
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvRequirement, EnvStatus, ProxyConfig, ProxyMode
@@ -46,7 +48,11 @@ class ExecutionRequest:
     task: Task
     module_name: str
     hooks_module: str = ""
-    params: dict[str, Any] = field(default_factory=dict)
+    workflow_name: str = "default"
+    execution_params: dict[str, Any] = field(default_factory=dict)
+    job_params: dict[str, Any] = field(default_factory=dict)
+    runtime_params: dict[str, Any] = field(default_factory=dict)
+    devel_mode: bool = False
     state: dict[str, Any] = field(default_factory=dict)
     provider_name: str = ""
     selector_name: str = ""
@@ -85,11 +91,31 @@ class ExecutionRunner:
         *,
         rem: EnvironmentManager | None = None,
         mms: ModuleService | None = None,
+        settings_store: ModuleSettingsStore | None = None,
         runtime_capabilities_factory: Callable[[str], RuntimeCapabilities] = build_runtime_capabilities,
     ):
         self.rem = rem or get_environment_manager()
         self.mms = mms or get_module_service()
+        self._settings_store = settings_store or get_module_settings_store()
         self._runtime_capabilities_factory = runtime_capabilities_factory
+
+    def _build_runtime_payload(self, request: ExecutionRequest, hooks_module: str) -> dict[str, Any]:
+        return {
+            "module_name": request.module_name,
+            "hooks_module": hooks_module,
+            "workflow": request.workflow_name or "default",
+            "devel_mode": bool(request.devel_mode),
+            "execution_params": deepcopy(request.execution_params),
+            "job_params": deepcopy(request.job_params),
+            "runtime_params": deepcopy(request.runtime_params),
+            "params": deepcopy(request.runtime_params),
+            "provider_name": request.provider_name,
+            "selector_name": request.selector_name,
+            "acquisition_mode": request.acquisition_mode.value,
+            "selector_wait_timeout": request.selector_wait_timeout,
+            "creation_params": deepcopy(request.creation_params),
+            "execution_timeout": request.execution_timeout,
+        }
 
     async def run(
         self,
@@ -105,14 +131,16 @@ class ExecutionRunner:
         module_name = request.module_name
         hooks_module = request.hooks_module or module_name
         runtime_caps = request.runtime_capabilities or self._runtime_capabilities_factory(module_name)
+        task_config = self._settings_store.build_task_config(module_name, request.workflow_name)
 
         prepare_context = TaskContext(
             env_id=0,
             task_name=module_name,
-            config=request.params.copy(),
+            config=deepcopy(task_config),
             logger=logger,
             tools=runtime_caps.tools,
             state=dict(request.state),
+            runtime=self._build_runtime_payload(request, hooks_module),
         )
 
         prepare_result_raw = await self.mms.call_hook(hooks_module, "prepare_env", prepare_context)
@@ -129,6 +157,7 @@ class ExecutionRunner:
         task_context = None
         result: TaskResult | None = None
         signal: TaskSignal | None = None
+        effective_creation_params = deepcopy(request.creation_params)
 
         try:
             self._ensure_not_stopped(is_stop_requested)
@@ -162,6 +191,8 @@ class ExecutionRunner:
                     request.creation_params,
                     prepare_creation_params,
                 )
+                effective_creation_params = deepcopy(merged_creation_params)
+                prepare_context.runtime["creation_params"] = deepcopy(merged_creation_params)
                 proxy_config = self._extract_proxy_config(merged_creation_params)
                 create_params = {
                     "creation_params": merged_creation_params,
@@ -226,17 +257,17 @@ class ExecutionRunner:
             task_context = TaskContext(
                 env_id=int(task.env_id) if task.env_id else 0,
                 task_name=module_name,
-                config=request.params.copy(),
+                config=deepcopy(task_config),
                 page=page,
                 context=browser_ctx,
                 logger=logger,
                 tools=runtime_caps.tools,
                 state=dict(request.state),
+                runtime=self._build_runtime_payload(request, hooks_module),
             )
             task_context.runtime.update(
                 {
-                    "module_name": module_name,
-                    "hooks_module": hooks_module,
+                    "creation_params": deepcopy(effective_creation_params),
                     "env_created": env_created,
                     "creation_lifecycle": request.creation_lifecycle.value,
                 }

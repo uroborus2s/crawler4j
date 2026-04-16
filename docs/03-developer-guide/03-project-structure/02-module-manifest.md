@@ -8,14 +8,7 @@ version: 1.0.0
 display_name: Hotel Demo
 description: 示例模块
 author: crawler4j
-sdk_version_range: ">=1.1.1"
-
-ui_extension:
-  type: declarative
-  entry: config_schema.json
-  nav_item:
-    icon: "🧩"
-    label: "Hotel Demo 配置"
+sdk_version_range: ">=1.2.0"
 
 workflows:
   - name: main_workflow
@@ -60,7 +53,7 @@ workflows:
 SDK 兼容范围。当前扫描器最稳定支持的是简单的 `>=x.y.z` 格式，因此建议写成：
 
 ```yaml
-sdk_version_range: ">=1.1.1"
+sdk_version_range: ">=1.2.0"
 ```
 
 第一次开发模块时，照着这个格式写就够了。不要把版本范围写成一大串复杂表达式，然后再猜宿主到底怎么判断兼容。
@@ -78,14 +71,16 @@ sdk_version_range: ">=1.1.1"
 
 ### `ui_extension`
 
-声明模块 UI 扩展入口。对于第一次开发模块的人，推荐先用：
+声明模块 UI 扩展入口。如果你暂时不需要自定义页面，可以完全不写这个字段。
+如果你需要代码型页面，可写成：
 
 ```yaml
-type: declarative
-entry: config_schema.json
+type: micro_app
+entry: ui:DashboardPage
 ```
 
-第一次开发模块时，这个字段的目标不是“炫”，而是“稳”。先让配置入口清晰可见，比一开始追求复杂 UI 更重要。
+模块默认配置由宿主详情页统一维护，不再要求模块侧提供 `config_schema.json`。
+如果你要声明通用数据表入口，可以只在 `detail_menu` 里配置 `core:data_table:<view_id>`，不需要再配一套声明式 UI。
 
 ## 当前实现里的校验点
 
@@ -120,7 +115,7 @@ entry: config_schema.json
 第一次开发模块时，优先遵守下面这组约束：
 
 1. 目录名、包名、`module.yaml.name` 保持一致
-2. `sdk_version_range` 用简单的 `>=1.1.1`
+2. `sdk_version_range` 用简单的 `>=1.2.0`
 3. 每加一个工作流，都同步更新 `module.yaml`
 4. 不要把复杂 UI 声明、实验性字段和历史遗留字段一起塞进去
 

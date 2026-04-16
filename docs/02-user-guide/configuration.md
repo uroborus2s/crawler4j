@@ -41,12 +41,17 @@
 
 模块相关配置不是在全局设置页维护，而是在 `📦 模块管理` 的模块详情页中维护。
 
-当前模块配置有两种常见形式：
+当前模块配置由宿主统一维护并持久化，主要分成两层：
 
-- 声明式配置：模块提供 `config_schema.json`，宿主生成配置表单并保存。
-- 工作流级配置：宿主按模块名和工作流名持久化配置。
+- 模块级配置：按模块名保存。
+- 工作流级配置：按模块名和工作流名保存。
 
 这些内容同样会写入 `config.db`，而不是保存在模块项目目录里。
+当前正式落点是 `config.db.module_config_entries`。
+`config_schema.json` 已不再作为正式配置入口。
+
+模块运行时通过 `ctx.get_config()` 读取到的，只是这里保存的模块配置与工作流覆盖结果；
+不会再混入 `workflow`、`devel_mode`、调试参数或环境创建参数。
 
 ### 关于自定义页面的当前限制
 
@@ -55,7 +60,7 @@
 - 内置模块和 DevLink 模块默认允许。
 - 外部正式安装模块只有在命中 allowlist 时才会被加载。
 
-因此第一次接手时，优先把“声明式配置 + 正常运行链路”确认好，不要一开始就把问题定位到复杂 UI 上。
+因此第一次接手时，优先把“模块设置保存成功 + 正常运行链路”确认好，不要一开始就把问题定位到复杂 UI 上。
 
 ## 4. 执行配置
 
@@ -63,6 +68,8 @@
 
 - `execution.module` 必须等于目标模块的 `module.yaml.name`
 - `execution.workflow` 必须等于目标工作流名
+- `execution.params` 是运行模板默认输入
+- `job.params` 是当前作业的一次性覆盖输入
 
 当前运行模板的资源配置已收敛成两条主路径：
 
@@ -107,12 +114,20 @@
 - 工作流文件存在，但任务运行模板里选不到
 - `🐞 调试` 按钮不出现
 
+当前执行期参数的边界也要记住：
+
+- `execution.params`、`job.params` 会保存在 `state.db.jobs` 中
+- 调度时它们会进入 `ctx.runtime["execution_params"]`、`ctx.runtime["job_params"]`
+- 合并后的有效输入会放到 `ctx.runtime["params"]`
+- `workflow`、`devel_mode`、`creation_params` 也都属于 `ctx.runtime`
+- `ctx.get_config()` 不再读取这些执行态字段
+
 ## 5. 配置存放位置速查
 
 | 内容 | 位置 |
 |---|---|
 | 系统设置 | `config.db` 的 `settings` 表 |
-| 模块/工作流设置 | `config.db` 的 `configs` 表 |
+| 模块/工作流设置 | `config.db` 的 `module_config_entries` 表 |
 | 运行态状态、KV、环境数据 | `state.db` |
 | 日志 | `<app-data>/logs/` |
 | 正式安装模块 | `<app-data>/modules/` |

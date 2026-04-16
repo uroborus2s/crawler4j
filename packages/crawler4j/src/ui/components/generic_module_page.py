@@ -223,6 +223,8 @@ class GenericModulePage(QWidget):
         
         # JSON 编辑器
         import json
+        from src.core.mms.settings_store import get_module_settings_store
+
         self.config_editor = QTextEdit()
         self.config_editor.setStyleSheet("""
             QTextEdit {
@@ -238,7 +240,7 @@ class GenericModulePage(QWidget):
         self.config_editor.setMinimumHeight(200)
         
         # 加载配置
-        config_data = self._module.manifest.config_schema or {}
+        config_data = get_module_settings_store().read_module_settings(self._module.name)
         self.config_editor.setPlainText(json.dumps(config_data, indent=2, ensure_ascii=False))
         
         layout.addWidget(self.config_editor)

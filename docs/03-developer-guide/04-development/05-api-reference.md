@@ -1,4 +1,4 @@
-# 4.5 Core 注入能力 API 参考 (SDK 1.1.1)
+# 4.5 Core 注入能力 API 参考 (SDK 1.2.0)
 
 本页提供 `TaskContext.tools` 的完整 API 参考。这是模块与宿主 (Core) 交互的唯一官方扩展通道。
 
@@ -83,7 +83,7 @@ await ctx.tools.call("env.set_proxy", env_id=ctx.env_id, proxy_value="http://127
 
 | 方法 | 说明 |
 |---|---|
-| `get_config(key, default=None)` | 安全获取模块配置（来自 `module.yaml` 或 UI 输入）。 |
+| `get_config(key, default=None)` | 安全获取宿主持久化的模块/工作流配置。 |
 | `logger.info(msg)` | 模块专用日志，由 Core 统一收集并在控制台/UI 展示。 |
 | `wait(seconds)` | 纯异步等待；不会自动提前响应停止请求。 |
 | `screenshot(name)` | 捕获当前浏览器快照并自动保存至指定目录。 |
@@ -92,11 +92,22 @@ await ctx.tools.call("env.set_proxy", env_id=ctx.env_id, proxy_value="http://127
 
 `TaskContext` 还提供 `ctx.runtime: dict[str, Any]`，用于暴露 ATM 写入的运行态元数据，例如：
 
+- `workflow`
+- `devel_mode`
+- `execution_params`
+- `job_params`
+- `params`
+- `creation_params`
 - `final_status`
 - `task_error`
 - `task_result`
 - `task_signal`
 - `env_action`
+
+约束补充：
+
+- `ctx.get_config()` 不再读取 `workflow`、调试参数或环境创建参数
+- `execution.params` / `job.params` 会进入 `ctx.runtime`
 
 规则：
 

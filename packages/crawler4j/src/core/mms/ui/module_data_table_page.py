@@ -29,7 +29,7 @@ from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleSource
 from src.core.mms.service import get_module_service
 from src.core.mms.settings_store import get_module_settings_store
-from src.core.persistence import get_kv_store
+from src.core.persistence import get_kv_store, get_module_data_store
 from src.ui.components.table import SkyTableWidget
 
 
@@ -195,6 +195,7 @@ class ModuleDataTablePage(QWidget):
         self._module_name = module_name
         self._view_id = view_id
         self._kv = get_kv_store()
+        self._data_store = get_module_data_store()
         self._mms = get_module_service()
 
         self._schema: dict[str, Any] = {}
@@ -205,14 +206,8 @@ class ModuleDataTablePage(QWidget):
         self._setup_ui()
         self.refresh()
 
-    def _meta_key(self) -> str:
-        return f"module:{self._module_name}:ui:data_table:{self._view_id}"
-
     def _dataset(self) -> str:
         return str(self._schema.get("dataset") or self._view_id)
-
-    def _dataset_key(self) -> str:
-        return f"module:{self._module_name}:dataset:{self._dataset()}"
 
     def _primary_key(self) -> str:
         return str(self._schema.get("primary_key") or "id")
@@ -276,17 +271,16 @@ class ModuleDataTablePage(QWidget):
     def _build_task_context(self) -> TaskContext:
         config = get_module_settings_store().read_module_settings(self._module_name)
         module = self._mms.registry.get_module(self._module_name)
+        runtime: dict[str, Any] = {}
         if module and module.source == ModuleSource.DEV_LINK:
-            config = {
-                **config,
-                "devel_mode": True,
-            }
+            runtime["devel_mode"] = True
         return TaskContext(
             env_id=0,
             task_name=self._module_name,
             config=config,
             logger=logger,
             tools=build_runtime_capabilities(self._module_name).tools,
+            runtime=runtime,
         )
 
     def _call_module_handler(self, handler_name: str, *args: Any) -> Any:
@@ -301,7 +295,7 @@ class ModuleDataTablePage(QWidget):
 
     def _load_schema(self):
         self._call_module_handler("declare_ui")
-        schema = self._kv.get(self._meta_key()) or {}
+        schema = self._data_store.read_data_table_schema(self._module_name, self._view_id)
         if not isinstance(schema, dict):
             schema = {}
         self._schema = schema
@@ -341,10 +335,10 @@ class ModuleDataTablePage(QWidget):
         ]
 
     def _load_records(self):
-        self._records = _normalize_records(self._kv.get(self._dataset_key()) or [])
+        self._records = self._data_store.read_dataset(self._module_name, self._dataset())
 
     def _save_records(self):
-        self._kv.set(self._dataset_key(), self._records)
+        self._data_store.write_dataset(self._module_name, self._dataset(), self._records)
 
     def _is_row_locked(self, row: dict[str, Any]) -> bool:
         lock_key_field = self._lock_key_field()

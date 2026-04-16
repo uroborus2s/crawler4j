@@ -12,6 +12,15 @@ from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 from src.core.rem.models import ProxyMode
 
 
+@pytest.fixture(autouse=True)
+def temp_data_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    from src.core.persistence.database import init_database
+
+    init_database()
+    yield tmp_path
+
+
 def _build_env() -> tuple[Environment, EnvLease]:
     env = Environment(
         id=21,
@@ -35,7 +44,10 @@ def _build_request(
         task=Task(id="task-21", job_id="job-21"),
         module_name="example_module",
         hooks_module="example_module",
-        params={"seed": 1, "workflow": "default"},
+        workflow_name="default",
+        execution_params={"seed": 1},
+        job_params={"city": "Shanghai"},
+        runtime_params={"seed": 1, "city": "Shanghai"},
         state={
             "job_id": "job-21",
             "task_id": "task-21",
@@ -67,8 +79,13 @@ def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[Ex
 
 @pytest.mark.asyncio
 async def test_execution_runner_calls_success_hooks_and_merges_prepare_env():
+    from src.core.mms.settings_store import ModuleSettingsStore
+
     request = _build_request()
     env, lease = _build_env()
+    store = ModuleSettingsStore()
+    store.write_module_settings("example_module", {"accounts": {"default": "u1"}, "region": "cn"})
+    store.write_workflow_settings("example_module", "default", {"accounts": {"enabled": True}})
 
     async def hook(module_name, hook_name, context, *args):
         if hook_name == "prepare_env":
@@ -102,7 +119,14 @@ async def test_execution_runner_calls_success_hooks_and_merges_prepare_env():
     assert request.task.status == TaskStatus.SUCCEEDED
     assert request.task.env_id == str(env.id)
     assert contexts
-    assert contexts[0].config["workflow"] == "default"
+    assert contexts[0].config == {
+        "accounts": {"default": "u1", "enabled": True},
+        "region": "cn",
+    }
+    assert contexts[0].runtime["workflow"] == "default"
+    assert contexts[0].runtime["params"] == {"seed": 1, "city": "Shanghai"}
+    assert contexts[0].runtime["execution_params"] == {"seed": 1}
+    assert contexts[0].runtime["job_params"] == {"city": "Shanghai"}
     assert contexts[0].logger is app_logger
     assert contexts[0].tools is not None
     assert module_service.call_hook.await_args_list[0].args[2].tools is not None

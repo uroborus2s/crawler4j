@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -46,29 +47,32 @@ class StatCard(QFrame):
                     stop:0 rgba(99, 102, 241, 0.2),
                     stop:1 rgba(99, 102, 241, 0.05));
                 border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 12px;
-                padding: 16px;
+                border-radius: 10px;
+                padding: 12px;
             }}
         """)
-        self.setMinimumHeight(120)
+        self.setMinimumHeight(96)
+        self.setMaximumHeight(108)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
         
         # 标题
         title_label = QLabel(title)
-        title_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 13px;")
+        title_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 12px;")
         layout.addWidget(title_label)
         
         # 数值
         self.value_label = QLabel(value)
-        self.value_label.setStyleSheet(f"color: {color}; font-size: 32px; font-weight: bold;")
+        self.value_label.setStyleSheet(f"color: {color}; font-size: 28px; font-weight: bold;")
         layout.addWidget(self.value_label)
         
         # 副标题
         if subtitle:
             self.subtitle_label = QLabel(subtitle)
-            self.subtitle_label.setStyleSheet("color: rgba(255, 255, 255, 0.5); font-size: 12px;")
+            self.subtitle_label.setStyleSheet("color: rgba(255, 255, 255, 0.5); font-size: 11px;")
             layout.addWidget(self.subtitle_label)
         else:
             self.subtitle_label = None
@@ -93,13 +97,14 @@ class DashboardPage(QWidget):
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(24)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
         
         # 标题栏
         header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
         title = QLabel("📊 仪表盘")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; color: white;")
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: white;")
         header.addWidget(title)
         header.addStretch()
         
@@ -109,9 +114,9 @@ class DashboardPage(QWidget):
                 background: rgba(99, 102, 241, 0.8);
                 color: white;
                 border: none;
-                padding: 10px 20px;
+                padding: 8px 16px;
                 border-radius: 6px;
-                font-size: 14px;
+                font-size: 13px;
             }
             QPushButton:hover { background: rgba(99, 102, 241, 1); }
         """)
@@ -122,7 +127,9 @@ class DashboardPage(QWidget):
         
         # 统计卡片网格
         cards_grid = QGridLayout()
-        cards_grid.setSpacing(16)
+        cards_grid.setContentsMargins(0, 0, 0, 0)
+        cards_grid.setHorizontalSpacing(16)
+        cards_grid.setVerticalSpacing(12)
         
         # 任务 (Job) 统计
         self.running_card = StatCard("活跃作业", "0", "正在运行", "#facc15")
@@ -148,12 +155,16 @@ class DashboardPage(QWidget):
         layout.addLayout(cards_grid)
         
         # 实时日志区域
-        layout.addSpacing(20)
         log_title = QLabel("📋 系统实时日志")
-        log_title.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
+        log_title.setStyleSheet("font-size: 15px; font-weight: bold; color: white;")
         layout.addWidget(log_title)
         
         self.log_console = LogConsoleWidget()
+        self.log_console.setMinimumHeight(320)
+        self.log_console.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         # 全局模式，不设置 filtered_task_id
         layout.addWidget(self.log_console, stretch=1)
     

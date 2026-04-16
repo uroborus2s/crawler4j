@@ -10,10 +10,10 @@
 - 活跃工作项：20
 - 阻塞项：0
 - 开放风险：0
-- 最近发布包：`crawler4j-sdk 1.1.1`、`crawler4j-contracts 1.1.1`
+- 最近发布包：`crawler4j-sdk 1.2.0`、`crawler4j-contracts 1.2.0`
 - 最近交接包：无
 - 最近快照：无
-- 备注：已完成 `TASK-013`；模块根入口薄壳 (Shim) 与 SDK 组装器 (ModuleAssembler) 已落地；CLI 命令（new, list, --defaults）已补齐并与集成测试对齐；`module_runtime.py` 已收敛为标准模块文件并承载 `@env_selector(...)` 环境选择回调；ATM 已彻底删除规则匹配选环境模式，运行模板“选择环境”现统一走模块回调，界面会对 `return_none` 占位选择器给出提示；`core:data_table` 现会在刷新时重放 `declare_ui` 并支持本地 create/update hook，DevLink 页面刷新可重载最新同步 hook；ATM 已收敛为“任务直接持有 RunProfile”模型，`TSM` 与 `strategy_id` 兼容层已删除；ATM/debug/sdk 相关 178 项单测于 2026-04-16 通过；`crawler4j-sdk` / `crawler4j-contracts` `1.1.1` 已发布到 PyPI；ATM Job 创建页现已支持“批次任务 + 执行一次 / Cron”双模式
+- 备注：已完成 `TASK-013`；模块根入口薄壳 (Shim) 与 SDK 组装器 (ModuleAssembler) 已落地；CLI 命令（new, list, --defaults）已补齐并与集成测试对齐；`module_runtime.py` 已收敛为标准模块文件并承载 `@env_selector(...)` 环境选择回调；ATM 已彻底删除规则匹配选环境模式，运行模板“选择环境”现统一走模块回调，界面会对 `return_none` 占位选择器给出提示；`core:data_table` 现会在刷新时重放 `declare_ui` 并支持本地 create/update hook，DevLink 页面刷新可重载最新同步 hook；ATM 已收敛为“任务直接持有 RunProfile”模型，`TSM` 与 `strategy_id` 兼容层已删除；ATM/debug/sdk 相关 178 项单测于 2026-04-16 通过；`crawler4j-sdk` / `crawler4j-contracts` `1.2.0` 已发布到 PyPI；ATM Job 创建页现已支持“批次任务 + 执行一次 / Cron”双模式；声明式 `ui/config_schema.json` 与模块目录内 `strategy.yaml` 链路已从脚手架、客户端主链路和相关文档中移除；模块持久配置现统一持久化到 `config.db.module_config_entries`，`ctx.get_config()` 与 `ctx.runtime` 已按“配置 / 运行态”彻底分离，旧 KV 兼容迁移与旧 workflow 配置兜底已删除
 
 ## AI 最小读取顺序
 

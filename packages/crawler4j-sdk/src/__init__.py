@@ -28,7 +28,7 @@ from crawler4j_contracts import (
     ToolsCapability,
 )
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 # 稳定导出列表（同 MAJOR 版本内冻结）
 __all__ = [

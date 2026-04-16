@@ -79,7 +79,7 @@ Core 扫描与加载模块时，关键依据是：
 扫描器现在对版本范围的兼容性判断是简化实现，最可靠的是：
 
 ```yaml
-sdk_version_range: ">=1.1.1"
+sdk_version_range: ">=1.2.0"
 ```
 
 复杂表达式即使写出来，也不建议当成当前交付口径。
@@ -90,14 +90,14 @@ sdk_version_range: ">=1.1.1"
 
 当前对新模块作者最稳的 UI 路径只有两类：
 
-1. `config_schema.json` 为主的声明式配置
+1. 宿主默认模块配置页
 2. `core:data_table:<view_id>` 通用数据表入口
 
 代码型页面 `ui:SomePage` 并不是完全不能用，但它额外受到以下限制：
 
 - `ui_extension.type` 必须是 `micro_app`
 - 模块来源必须是 `DevLink` / 内置来源，或者命中 `mms.ui.allowlist`
-- 模块里必须有 `ui.py`，并导出对应的 `QWidget` 类
+- 模块里必须提供 `ui.py` 或 `ui/__init__.py`，并导出对应的 `QWidget` 类
 
 所以第一次开发模块时，先不要把“自定义 UI 页面”作为首个里程碑。
 
@@ -106,7 +106,7 @@ sdk_version_range: ">=1.1.1"
 1. 先让任务脚本能跑
 2. 再让工作流能调到它
 3. 再让 DevLink 调试跑通
-4. 最后再考虑增强 UI
+4. 最后再考虑 `core:data_table` 或代码型 UI
 
 ## 9. 命名不要求绝对一致，但保持一致最省坑
 
@@ -127,7 +127,21 @@ sdk_version_range: ">=1.1.1"
 
 如果答案是后者，就不要用改业务代码的方式去“硬撞”它。应该先回到这页，确认自己是不是踩到了这里列出的约束。
 
-## 11. 模块的宿主扩展能力只能来自 `ctx.tools`
+## 11. `ctx.get_config()` 不再承载运行时参数
+
+当前已经把“模块持久配置”和“执行态输入”拆开：
+
+- `ctx.get_config()` / `ctx.config` 只读取宿主持久化的模块级配置和工作流级覆盖
+- `ctx.runtime` 才承载 `workflow`、`devel_mode`、`execution.params`、`job.params`、`creation_params` 这类执行期字段
+
+这条边界的实际含义是：
+
+- 需要长期保存、可在模块详情页编辑的内容，走模块配置
+- 需要随某次作业、某次调试、某次环境创建临时变化的内容，走 `ctx.runtime`
+
+执行期字段一律不要再挂到 `ctx.get_config()` 上，统一从 `ctx.runtime` 读取。
+
+## 12. 模块的宿主扩展能力只能来自 `ctx.tools`
 
 当前模块开发有一个明确工程边界：
 
@@ -144,11 +158,11 @@ sdk_version_range: ">=1.1.1"
 
 如果你看到旧资料里还有 `DataService`、`ctx.db.storage`、`ctx.db.accounts` 这类说法，请优先以当前 `TaskContext.tools` 的真实接口为准。对新模块来说，不要继续沿用旧抽象。
 
-`crawler4j-sdk 1.1.1` 起，模块侧统一通过 `ctx.tools.call(...)` 访问这些能力。
+`crawler4j-sdk 1.2.0` 起，模块侧统一通过 `ctx.tools.call(...)` 访问这些能力。
 
 如果你在维护旧模块，升级时要直接完成下面这些替换：
 
 1. 删除 `from crawler4j_sdk import DataService`
 2. 把历史 `ctx.db.*` 调用改成 `ctx.tools.call("db.*", ...)`
 3. 把 `ctx.db.storage` / `ctx.db.accounts` / `ctx.db.tasks` 改成 `db.*` 工具调用
-4. 把 `module.yaml` 里的 `sdk_version_range` 更新到 `>=1.1.1`
+4. 把 `module.yaml` 里的 `sdk_version_range` 更新到 `>=1.2.0`

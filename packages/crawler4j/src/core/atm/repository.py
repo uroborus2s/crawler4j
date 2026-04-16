@@ -15,13 +15,14 @@ from typing import Any, List
 
 from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig
 from src.core.atm.run_profile import RunProfile
-from src.core.persistence.database import STATE_DB, get_connection
+from src.core.persistence.database import STATE_DB, get_connection, get_db_path
 
 
 class TaskRepository:
     """Task Engine V2 Repository."""
 
     def __init__(self):
+        self._db_path = str(get_db_path(STATE_DB))
         self._ensure_tables()
 
     async def _run_async(self, func, *args):
@@ -304,7 +305,8 @@ _repository: TaskRepository | None = None
 
 def get_task_repository() -> TaskRepository:
     global _repository
-    if _repository is None:
+    current_db_path = str(get_db_path(STATE_DB))
+    if _repository is None or getattr(_repository, "_db_path", "") != current_db_path:
         _repository = TaskRepository()
     return _repository
 

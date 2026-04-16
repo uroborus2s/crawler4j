@@ -73,14 +73,19 @@ class MyTask(TaskScript):
 | `ctx.page` | Playwright Page 对象 |
 | `ctx.logger` | 日志记录器 |
 | `ctx.http` | HTTP 客户端 |
-| `ctx.config` | 任务配置 |
+| `ctx.config` | 宿主持久化后的模块/工作流配置视图 |
 | `ctx.state` | 共享状态 |
-| `ctx.runtime` | ATM 写入的运行态元数据 |
+| `ctx.runtime` | ATM/Debug 写入的执行态输入与元数据 |
 | `ctx.run_subtask()` | 调用子任务 |
 | `ctx.should_stop()` | 检查停止标志 |
 | `ctx.screenshot()` | 截图 |
 | `ctx.emit_signal()` | 向 ATM 发出流程控制信号 |
 | `ctx.tools` | 宿主注入的统一扩展工具入口 |
+
+固定边界如下：
+
+- `ctx.get_config()` / `ctx.config` 只读取宿主持久化的模块级配置和工作流级覆盖
+- `workflow`、`devel_mode`、`execution_params`、`job_params`、`params`、`creation_params` 统一读取 `ctx.runtime`
 
 ## Core 工具能力边界
 
@@ -152,8 +157,8 @@ uv run crawler4j list
 # 创建工作流并写入 module.yaml
 uv run crawler4j add-workflow sync_orders
 
-# 创建/补齐 declarative UI
-uv run crawler4j add-ui
+# 创建代码型 UI 页面
+uv run crawler4j add-ui dashboard
 ```
 
 `init-model` 默认会进入一轮初始化向导，并在创建后自动：

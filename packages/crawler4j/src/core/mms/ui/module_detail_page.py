@@ -11,16 +11,15 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QStackedWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from src.core.mms.models import ModuleInfo, ModuleSource
+from src.core.mms.ui.module_config_page import ModuleConfigPage
 from src.core.mms.ui_loader import (
     ModuleUIAccessDenied,
     ModuleUILoadError,
@@ -40,8 +39,8 @@ class ModuleDetailPage(QWidget):
     
     BASE_MENU = [
         ("info", "📋", "基本信息"),
+        ("config", "⚙️", "配置"),
         ("workflows", "⚡", "任务链"),
-        ("strategy", "⚙️", "策略配置"),
     ]
     
     def __init__(self, parent=None):
@@ -215,6 +214,8 @@ class ModuleDetailPage(QWidget):
             
             # 创建对应页面
             page = self._create_fixed_page(menu_id)
+            if hasattr(page, "set_module") and self._module is not None:
+                page.set_module(self._module)
             self._menu_pages[menu_id] = page
             self.content_stack.addWidget(page)
         
@@ -242,10 +243,10 @@ class ModuleDetailPage(QWidget):
         """创建固定页面。"""
         if menu_id == "info":
             return self._create_info_page()
+        elif menu_id == "config":
+            return ModuleConfigPage()
         elif menu_id == "workflows":
             return self._create_workflows_page()
-        elif menu_id == "strategy":
-            return self._create_strategy_page()
         return QWidget()
     
     def _create_info_page(self) -> QWidget:
@@ -414,105 +415,6 @@ class ModuleDetailPage(QWidget):
         
         return page
 
-    def _create_strategy_page(self) -> QWidget:
-        """创建策略配置页面（YAML 编辑器）。"""
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
-        
-        # 标题
-        header = QHBoxLayout()
-        title = QLabel("策略配置")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
-        header.addWidget(title)
-        header.addStretch()
-        
-        # 保存按钮
-        save_btn = QPushButton("💾 保存")
-        save_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(74, 222, 128, 0.8);
-                color: black;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(74, 222, 128, 1); }
-        """)
-        save_btn.clicked.connect(lambda: self._save_strategy())
-        header.addWidget(save_btn)
-        
-        layout.addLayout(header)
-        
-        # 提示
-        hint = QLabel("编辑模块的策略配置文件 (YAML 格式)")
-        hint.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 13px;")
-        layout.addWidget(hint)
-        
-        # YAML 编辑器
-        self.strategy_editor = QTextEdit()
-        self.strategy_editor.setStyleSheet("""
-            QTextEdit {
-                background: rgba(20, 20, 30, 0.9);
-                color: #e0e0e0;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 6px;
-                padding: 12px;
-                font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
-                font-size: 13px;
-            }
-        """)
-        self.strategy_editor.setPlaceholderText("# 策略配置\nreliability:\n  max_retries: 3\n  backoff_factor: 2.0\n")
-        
-        # 加载模块当前策略
-        if self._module:
-            strategy_yaml = self._load_module_strategy()
-            self.strategy_editor.setPlainText(strategy_yaml)
-        
-        layout.addWidget(self.strategy_editor)
-        
-        return page
-    
-    def _load_module_strategy(self) -> str:
-        """加载模块策略配置。"""
-        if not self._module or not self._module.path:
-            return ""
-        
-        strategy_path = self._module.path / "strategy.yaml"
-        if strategy_path.exists():
-            try:
-                return strategy_path.read_text(encoding="utf-8")
-            except Exception:
-                pass
-        
-        # 返回默认模板
-        return f"""# {self._module.name} 策略配置
-# 此配置会覆盖全局策略
-
-reliability:
-  max_retries: 3
-  backoff_factor: 2.0
-
-scheduling:
-  default_priority: 100
-  timeout_seconds: 300
-"""
-    
-    def _save_strategy(self):
-        """保存策略配置。"""
-        if not self._module or not self._module.path:
-            QMessageBox.warning(self, "保存失败", "模块路径不可用")
-            return
-        
-        strategy_path = self._module.path / "strategy.yaml"
-        try:
-            content = self.strategy_editor.toPlainText()
-            strategy_path.write_text(content, encoding="utf-8")
-            QMessageBox.information(self, "保存成功", f"策略已保存到:\n{strategy_path}")
-        except Exception as e:
-            QMessageBox.warning(self, "保存失败", str(e))
-    
     def _create_custom_page(self, menu_item) -> QWidget:
         """创建自定义页面（动态加载模块 UI）。"""
         if not self._module:

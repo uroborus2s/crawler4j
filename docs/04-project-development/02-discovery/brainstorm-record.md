@@ -83,7 +83,7 @@ globals().update(export_entrypoints(__name__, __file__))
 
 为避免再把默认工作流写死在根 `__init__.py`，默认工作流按以下顺序解析：
 
-1. `context.get_config("workflow")`
+1. `context.runtime["workflow"]`
 2. `module_runtime.py.DEFAULT_WORKFLOW`
 3. `module.yaml.workflows[0].name`
 

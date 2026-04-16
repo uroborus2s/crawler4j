@@ -12,12 +12,14 @@
 from src.core.persistence.config_store import ConfigStore, get_config_store
 from src.core.persistence.database import (
     CONFIG_DB,
+    DATA_DB,
     STATE_DB,
     get_connection,
     get_db_path,
     init_database,
 )
 from src.core.persistence.kv_store import KVStore, get_kv_store
+from src.core.persistence.module_data_store import ModuleDataStore, get_module_data_store
 
 __all__ = [
     # 数据库
@@ -25,10 +27,14 @@ __all__ = [
     "get_connection",
     "get_db_path",
     "CONFIG_DB",
+    "DATA_DB",
     "STATE_DB",
     # KV Store
     "KVStore",
     "get_kv_store",
+    # Module Data Store
+    "ModuleDataStore",
+    "get_module_data_store",
     # Config Store
     "ConfigStore",
     "get_config_store",

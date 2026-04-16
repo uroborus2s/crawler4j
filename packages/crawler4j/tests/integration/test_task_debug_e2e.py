@@ -83,13 +83,14 @@ def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int
 
 
         async def init_env(context):
-            accounts = context.get_config("accounts", [])
+            runtime_params = context.runtime.get("params", {})
+            accounts = runtime_params.get("accounts", [])
             if accounts:
                 context.state["selected_account_phone"] = accounts[0]["phone_number"]
 
 
         async def run(context):
-            workflow = context.get_config("workflow", "login_workflow")
+            workflow = context.runtime.get("workflow", "login_workflow")
             if workflow != "login_workflow":
                 raise ValueError(f"Unsupported workflow: {workflow}")
             return await run_login(context)  # MODULE_FRAME
@@ -101,11 +102,12 @@ def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int
 
 
         async def run_login(context):
-            accounts = context.get_config("accounts", [])
+            runtime_params = context.runtime.get("params", {})
+            accounts = runtime_params.get("accounts", [])
             phone = accounts[0]["phone_number"] if accounts else ""
             if context.page:
                 await context.page.goto(
-                    context.get_config("login_url", "about:blank"),
+                    runtime_params.get("login_url", "about:blank"),
                     wait_until="domcontentloaded",
                 )
             selected_phone = phone  # BREAKPOINT

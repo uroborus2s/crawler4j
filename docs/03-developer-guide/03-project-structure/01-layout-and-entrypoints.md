@@ -19,9 +19,8 @@ hotel_demo/
 ├── data/                 # [数据层] 数据模型与 Schema
 │   ├── __init__.py
 │   └── models.py
-├── ui/                   # [界面层] 配置 Schema 与自定义 UI
+├── ui/                   # [界面层] 代码型 UI
 │   ├── __init__.py
-│   ├── config_schema.json # 声明式配置
 │   └── dashboard.py      # 代码型 UI (micro_app)
 ├── utils/                # [工具层] 内部复用逻辑
 │   ├── __init__.py
@@ -44,8 +43,8 @@ hotel_demo/
 
 ### `ui/` (界面层)
 收纳模块的所有界面元素。
-*   `config_schema.json` 定义了作业启动时的参数表单。
-*   代码型 UI (`micro_app`) 则允许开发者编写基于 PyQt 的复杂监控或管理面板。
+*   代码型 UI (`micro_app`) 允许开发者编写基于 PyQt 的复杂监控或管理面板。
+*   模块持久配置由宿主统一保存，不再要求模块目录内维护 `config_schema.json` 之类的声明式文件。
 
 ### `utils/` (工具层)
 存放模块内的公共辅助函数，严禁在 `tasks` 之间通过相对路径互相引用逻辑，应统一抽取至此。

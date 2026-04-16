@@ -43,10 +43,9 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     assert init_result.returncode == 0, init_result.stderr
     assert (target / "__init__.py").exists()
     assert (target / "module.yaml").exists()
-    assert (target / "ui" / "config_schema.json").exists()
     assert (target / ".gitignore").exists()
     assert (target / ".python-version").exists()
-    assert not (target / "module_runtime.py").exists()
+    assert (target / "module_runtime.py").exists()
     assert not (target / "debug_runner.py").exists()
 
     new_result = _run_cli("new", "extra_task", cwd=target)
@@ -64,7 +63,7 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
 
     with (target / "module.yaml").open("r", encoding="utf-8") as f:
         manifest = yaml.safe_load(f)
-    assert manifest["sdk_version_range"] == ">=1.1.1"
+    assert manifest["sdk_version_range"] == ">=1.2.0"
     workflow_names = [item["name"] for item in manifest["workflows"]]
     assert "main_workflow" in workflow_names
     assert "repair_orders" in workflow_names

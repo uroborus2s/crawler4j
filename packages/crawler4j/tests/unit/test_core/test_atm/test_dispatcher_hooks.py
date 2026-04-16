@@ -21,6 +21,15 @@ from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 
 
+@pytest.fixture(autouse=True)
+def temp_data_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    from src.core.persistence.database import init_database
+
+    init_database()
+    yield tmp_path
+
+
 def _build_run_profile(timeout: int = 0) -> RunProfile:
     return RunProfile(
         resource=ResourceConfig(
@@ -313,7 +322,7 @@ def test_dispatcher_clear_stop_for_job():
 async def test_dispatcher_marks_dev_link_tasks_for_reload(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
-    seen_configs: list[dict[str, object]] = []
+    seen_runtimes: list[dict[str, object]] = []
     module_info = ModuleInfo(
         name="example_module",
         manifest=ModuleManifest(name="example_module"),
@@ -322,11 +331,11 @@ async def test_dispatcher_marks_dev_link_tasks_for_reload(monkeypatch):
     )
 
     async def hook(module_name, hook_name, context, *args):
-        seen_configs.append(dict(context.config))
+        seen_runtimes.append(dict(context.runtime))
         return None
 
     async def run_module(module_name, context):
-        seen_configs.append(dict(context.config))
+        seen_runtimes.append(dict(context.runtime))
         return {"status": "ok"}
 
     module_service = SimpleNamespace(
@@ -344,5 +353,5 @@ async def test_dispatcher_marks_dev_link_tasks_for_reload(monkeypatch):
     await dispatcher._run_logic(task, job)
 
     assert task.status == TaskStatus.SUCCEEDED
-    assert seen_configs
-    assert all(config["devel_mode"] is True for config in seen_configs)
+    assert seen_runtimes
+    assert all(runtime["devel_mode"] is True for runtime in seen_runtimes)

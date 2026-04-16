@@ -62,7 +62,9 @@ class JobDebugDialog(QDialog):
             module=module,
             workflow=run_profile.execution.workflow if run_profile.execution else "default",
             hooks_module=(run_profile.execution.hooks_module if run_profile.execution else "") or module.name,
-            params={
+            execution_params=dict((run_profile.execution.params if run_profile.execution else {}) or {}),
+            job_params=dict(job.params or {}),
+            runtime_params={
                 **((run_profile.execution.params if run_profile.execution else {}) or {}),
                 **(job.params or {}),
             },
@@ -264,7 +266,7 @@ class JobDebugDialog(QDialog):
 
         form.addRow("附加端口", self.attach_port_spin)
         form.addRow("执行超时", self.timeout_spin)
-        form.addRow("调试参数", self.params_editor)
+        form.addRow("运行态参数", self.params_editor)
         form.addRow("", self.wait_for_attach_checkbox)
         form.addRow("", self.stop_on_entry_checkbox)
         form.addRow("", self.keep_environment_checkbox)
@@ -356,7 +358,7 @@ class JobDebugDialog(QDialog):
 
     def _load_defaults(self) -> None:
         self.timeout_spin.setValue(self._target.timeout)
-        self.params_editor.setPlainText(json.dumps(self._target.params, ensure_ascii=False, indent=2))
+        self.params_editor.setPlainText(json.dumps(self._target.runtime_params, ensure_ascii=False, indent=2))
 
     def build_request(self) -> DebugSessionRequest:
         raw = self.params_editor.toPlainText().strip() or "{}"

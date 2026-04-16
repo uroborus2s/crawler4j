@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "crawler4j-contracts>=1.1.1",
+    "crawler4j-contracts>=1.2.0",
     "pandas>=2.3.3",
     "playwright>=1.57.0",
     "pyqt6>=6.10.1",

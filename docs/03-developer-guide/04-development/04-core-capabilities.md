@@ -22,13 +22,13 @@
 |---|---|---|
 | `ctx.env_id` | `int` | 当前运行环境 ID |
 | `ctx.task_name` | `str` | 当前任务名 |
-| `ctx.config` | `dict[str, Any]` | 运行配置原始字典 |
+| `ctx.config` | `dict[str, Any]` | 宿主持久化后的模块/工作流配置视图 |
 | `ctx.page` | `Page \| None` | 当前 Playwright Page |
 | `ctx.context` | `BrowserContext \| None` | 当前 Playwright BrowserContext |
 | `ctx.logger` | `logging.Logger` | 日志能力 |
 | `ctx.http` | `HttpClient` | HTTP 请求能力 |
 | `ctx.state` | `dict[str, Any]` | 任务 / 工作流共享状态 |
-| `ctx.runtime` | `dict[str, Any]` | ATM 写入的运行态元数据，如最终状态、环境动作结果 |
+| `ctx.runtime` | `dict[str, Any]` | ATM/Debug 写入的执行态输入与元数据 |
 | `ctx.captured_data` | `list[Any]` | 运行过程收集的数据 |
 | `ctx.tools` | `ToolsCapability \| None` | 宿主注入的统一工具入口 |
 
@@ -38,11 +38,16 @@
 |---|---|---|
 | `await ctx.wait(seconds)` | `None` | 异步等待 |
 | `await ctx.screenshot(name)` | `str` | 截图并返回路径 |
-| `ctx.get_config(key, default=None)` | `Any` | 读取配置项 |
+| `ctx.get_config(key, default=None)` | `Any` | 读取模块持久配置项 |
 | `ctx.should_stop()` | `bool` | 检查停止标志 |
 | `ctx.request_stop()` | `None` | 请求停止工作流 |
 | `await ctx.run_subtask(task_name, **kwargs)` | `Any` | 调用子任务 |
 | `ctx.emit_signal(signal)` | `None` | 向 ATM 发出结构化流程信号 |
+
+当前边界固定如下：
+
+- `ctx.get_config()` 只读取宿主持久化的模块级配置和工作流级覆盖
+- `ctx.runtime` 才承载 `workflow`、`devel_mode`、`execution_params`、`job_params`、`params`、`creation_params` 这类执行态字段
 
 ## `ctx.tools` 怎么用
 

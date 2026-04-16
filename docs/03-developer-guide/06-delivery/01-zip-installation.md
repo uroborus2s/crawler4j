@@ -20,8 +20,8 @@
 hotel_demo-1.0.0.zip
 └── hotel_demo/
     ├── __init__.py
+    ├── module_runtime.py
     ├── module.yaml
-    ├── config_schema.json
     ├── tasks/
     └── workflows/
 ```

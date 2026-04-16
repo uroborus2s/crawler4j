@@ -297,11 +297,6 @@ class ModuleDetailPanel(QFrame):
         from src.core.mms.settings_store import get_module_settings_store
 
         config = get_module_settings_store().read_module_settings(module.name)
-        
-        # 如果没有保存的配置，使用 manifest 中的默认值
-        if not config:
-            config = module.manifest.config_schema or {}
-        
         self.config_editor.setPlainText(
             json.dumps(config, indent=2, ensure_ascii=False)
         )

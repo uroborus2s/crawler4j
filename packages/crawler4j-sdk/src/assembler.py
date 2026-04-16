@@ -162,9 +162,19 @@ class ModuleAssembler:
             raise ValueError(f"Unknown subtask: {task_name}")
         return await self._run_task_script(self.task_scripts[task_name], ctx)
 
+    @staticmethod
+    def _resolve_workflow_name(context: TaskContext, default_workflow: str) -> str:
+        """Resolve workflow selection from runtime only."""
+        runtime = getattr(context, "runtime", None)
+        if isinstance(runtime, dict):
+            workflow_name = runtime.get("workflow")
+            if isinstance(workflow_name, str) and workflow_name.strip():
+                return workflow_name
+        return default_workflow
+
     async def run(self, context: TaskContext) -> TaskResult:
         """Module execution entry point."""
-        workflow_name = context.get_config("workflow", self.default_workflow) or self.default_workflow
+        workflow_name = self._resolve_workflow_name(context, self.default_workflow)
 
         if workflow_name in self.workflows:
             context._subtask_executor = self._subtask_executor

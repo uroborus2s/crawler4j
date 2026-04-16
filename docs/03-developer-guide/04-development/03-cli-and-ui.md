@@ -13,7 +13,7 @@ uv run crawler4j add-ui
 ```
 
 各命令的真实作用如下。
-当前 CLI 生成的新模块项目默认面向 `crawler4j-sdk 1.1.x`：模块项目依赖会落到 `>=1.1.1,<2.0.0`，`module.yaml.sdk_version_range` 也会从 `>=1.1.1` 起步。
+当前 CLI 生成的新模块项目默认面向 `crawler4j-sdk 1.2.0`：模块项目依赖会落到 `>=1.2.0,<2.0.0`，`module.yaml.sdk_version_range` 也会从 `>=1.2.0` 起步。
 
 如果你是第一次接触这些命令，可以把它们理解成“在标准模块项目上继续补结构的工具”，而不是“随便在哪个目录都能用的通用命令”。
 
@@ -45,7 +45,7 @@ uv run crawler4j add-ui
 
 ### `add-ui`
 
-生成或补齐 `config_schema.json`，并把 `module.yaml.ui_extension` 指向它。
+生成代码型 UI 页面 `ui/<name>.py`，并把 `module.yaml.ui_extension` 更新为 `micro_app` 入口。
 
 如果命令提示：
 
@@ -55,82 +55,54 @@ uv run crawler4j add-ui
 
 先不要继续排别的问题，先确认你已经 `cd` 到模块根目录。因为对这些命令来说，“你在哪个目录里执行”本身就是输入条件的一部分。
 
-## `config_schema.json` 的最小示例
+## `add-ui` 生成的最小示例
 
-CLI 模板生成的默认内容类似下面这样：
+例如执行：
 
-```json
-{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "title": "Hotel Demo 配置",
-  "description": "Hotel Demo 的运行参数配置",
-  "properties": {
-    "workflow": {
-      "type": "string",
-      "title": "工作流名称",
-      "default": "main_workflow"
-    },
-    "start_url": {
-      "type": "string",
-      "title": "起始 URL",
-      "default": "https://example.com"
-    },
-    "headless": {
-      "type": "boolean",
-      "title": "无头模式",
-      "default": false
-    }
-  }
-}
+```bash
+uv run crawler4j add-ui dashboard
 ```
 
-第一次开发模块时，建议把 UI 目标控制在“能输入和保存运行参数”这个级别，不要一开始就设计复杂交互。
+CLI 会生成类似下面的页面骨架：
 
-### 作为小白，你应该先关注哪几个字段
+```python
+# ui/dashboard.py
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
+from crawler4j_sdk import TaskContext
 
-第一次先看懂下面 3 个字段就够了：
 
-1. `title`
-2. `description`
-3. `properties`
+class DashboardPage(QWidget):
+    def __init__(self, ctx: TaskContext, parent=None):
+        super().__init__(parent)
+        self.ctx = ctx
 
-其中 `properties` 可以简单理解成“这个配置页上有哪些可配置项”。
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Dashboard"))
 
-例如：
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.clicked.connect(self.on_refresh)
+        layout.addWidget(refresh_btn)
 
-- `workflow`
-  让你选择或填写工作流名
-- `start_url`
-  让你填写入口网址
-- `headless`
-  让你选择是否启用无头模式
+    def on_refresh(self):
+        self.ctx.logger.info("UI 请求刷新数据")
+```
 
-你不需要一开始就掌握完整 JSON Schema 规范。
-
-## `module.yaml` 里的 UI 扩展示例
-
-### 声明式配置 UI
+同时，CLI 会把 `module.yaml` 更新成：
 
 ```yaml
 ui_extension:
-  type: declarative
-  entry: config_schema.json
-  nav_item:
-    icon: "🧩"
-    label: "模块配置"
+  type: micro_app
+  entry: ui:DashboardPage
 ```
 
-这条路径最适合作为新模块的第一版 UI。
+`config_schema.json` 已从当前脚手架和主链路中移除。模块持久配置由宿主统一维护并保存，不再要求模块目录里再放一份声明式 JSON 文件。
 
-对小白来说，这也是最推荐的开始方式。
+## `module.yaml` 里的 UI 扩展示例
 
 ### 通用数据表入口
 
 ```yaml
 ui_extension:
-  type: declarative
-  entry: config_schema.json
   detail_menu:
     - id: accounts
       icon: "👤"
@@ -168,7 +140,7 @@ if ctx.tools and ctx.tools.has_tool("db.list_records"):
 
 ### 代码型 UI 页面 (Micro App)
 
-当声明式 UI 无法满足需求（如需要实时图表、复杂的拖拽交互）时，你可以使用 `micro_app` 模式。
+当你需要实时图表、复杂的拖拽交互或专门的管理面板时，可以使用 `micro_app` 模式。
 
 ```yaml
 ui_extension:
@@ -181,10 +153,10 @@ ui_extension:
 ```
 
 #### 1. 实现契约
-要在模块中实现代码型 UI，你必须在模块根目录创建 `ui.py`，并导出一个继承自 `QWidget` 的类：
+要在模块中实现代码型 UI，你需要在 `ui/` 包内提供页面类，并从 `ui/__init__.py` 导出一个继承自 `QWidget` 的类：
 
 ```python
-# ui.py
+# ui/__init__.py
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 class DashboardPage(QWidget):
@@ -213,7 +185,7 @@ class DashboardPage(QWidget):
 在打包 `.zip` 提交给用户或安装到正式环境前，请依次确认以下 6 项：
 
 1. **[ ] 目录契约**：模块目录名、`module.yaml.name` 和包名（`__init__.py` 所在目录）必须完全一致。
-2. **[ ] 版本范围**：`module.yaml` 中的 `sdk_version_range` 必须设置为 `>=1.1.1`。
+2. **[ ] 版本范围**：`module.yaml` 中的 `sdk_version_range` 必须设置为 `>=1.2.0`。
 3. **[ ] 依赖孤立**：确保所有第三方库已在 `pyproject.toml` 中声明，且没有硬编码任何本地绝对路径。
 4. **[ ] 接口合规**：代码中已彻底删除 `DataService`、`ctx.db.storage` 和直接依赖 `ctx.db` 字段的旧接口。
 5. **[ ] 停止响应**：长循环任务中是否已调用 `ctx.should_stop()` 检查停止信号？
@@ -224,7 +196,7 @@ class DashboardPage(QWidget):
 
 建议按下面优先级来：
 
-1. `config_schema.json`
+1. 不写 `ui_extension`，先用宿主默认配置页
 2. `core:data_table:<view_id>`
 3. `ui:SomePage`
 
@@ -234,7 +206,7 @@ class DashboardPage(QWidget):
 
 如果你想稳一点，可以按下面这个顺序升级：
 
-1. 第一版只做 `config_schema.json`
+1. 第一版只做宿主默认配置页
 2. 第二版再考虑 `core:data_table:<view_id>`
 3. 最后才考虑代码型 UI 页面
 
