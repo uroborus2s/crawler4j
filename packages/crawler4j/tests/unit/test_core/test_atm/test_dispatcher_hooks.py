@@ -2,10 +2,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import asyncio
 import pytest
 from crawler4j_contracts import EnvAction, TaskResult, TaskSignal
 
-from src.core.atm.dispatcher import TaskDispatcher
+from src.core.atm.dispatcher import JobStopRequest, TaskDispatcher
 from src.core.atm.models import Job, Task, TaskStatus
 from src.core.atm.run_profile import (
     AcquisitionConfig,
@@ -244,7 +245,7 @@ async def test_dispatcher_confirms_waiting_task_and_runs_cleanup(monkeypatch):
         {
             "action": "recycle",
             "env_id": env.id,
-            "success": True,
+            "success": None,
         }
     ]
 
@@ -313,9 +314,128 @@ def test_dispatcher_publish_waiting_confirmation_signal_event(monkeypatch):
 
 def test_dispatcher_clear_stop_for_job():
     dispatcher = TaskDispatcher()
-    dispatcher._job_stop_requests.add("job-1")
+    dispatcher._job_stop_requests["job-1"] = JobStopRequest(env_action=EnvAction.RECYCLE)
     dispatcher.clear_stop_for_job("job-1")
     assert "job-1" not in dispatcher._job_stop_requests
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_request_stop_for_job_records_env_action_and_notifies_context():
+    dispatcher = TaskDispatcher()
+    stop_context = SimpleNamespace(request_stop=MagicMock())
+    dispatcher._task_jobs["task-1"] = "job-1"
+    dispatcher._task_contexts["task-1"] = stop_context
+
+    await dispatcher.request_stop_for_job("job-1", env_action=EnvAction.RECYCLE)
+
+    assert dispatcher._is_stop_requested("job-1") is True
+    assert dispatcher._resolve_stop_env_action("job-1") == EnvAction.RECYCLE
+    stop_context.request_stop.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_request_stop_for_job_cancels_waiting_confirmation_task(monkeypatch):
+    run_profile = _build_run_profile()
+    env, lease = _build_env()
+    cleanup_env_actions: list[dict[str, object]] = []
+
+    async def hook(module_name, hook_name, context, *args):
+        if hook_name == "on_cleanup":
+            cleanup_env_actions.append(dict(context.runtime.get("env_action") or {}))
+        return None
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(
+            return_value=TaskResult.ok(
+                message="等待用户确认",
+                signal=TaskSignal.wait_for_confirmation(
+                    message="等待用户确认",
+                    env_action=EnvAction.KEEP_ALIVE,
+                ),
+            )
+        ),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+
+    monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
+
+    dispatcher = _build_dispatcher(env, lease)
+    task = Task(id="task-wait-stop", job_id="job-wait-stop")
+    dispatcher.repo.get_task = AsyncMock(return_value=task)
+    job = Job(id="job-wait-stop", name="job", run_profile=run_profile)
+
+    await dispatcher._run_logic(task, job)
+
+    assert task.status == TaskStatus.WAITING_CONFIRMATION
+    dispatcher._task_jobs[task.id] = job.id
+    dispatcher._task_contexts[task.id] = dispatcher._waiting_tasks[task.id].task_context
+
+    await dispatcher.request_stop_for_job(job.id, env_action=EnvAction.DESTROY)
+
+    assert task.status == TaskStatus.CANCELLED
+    assert task.error == "Job paused"
+    assert task.id not in dispatcher._waiting_tasks
+    dispatcher.rem.release.assert_not_awaited()
+    dispatcher.rem.release_keep_alive.assert_awaited_once_with(lease)
+    dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
+    assert cleanup_env_actions[-1] == {
+        "action": "destroy",
+        "env_id": env.id,
+        "success": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_request_stop_for_job_interrupts_running_module(monkeypatch):
+    run_profile = _build_run_profile()
+    env, lease = _build_env()
+    cleanup_env_actions: list[dict[str, object]] = []
+    module_started = asyncio.Event()
+    module_cancelled = asyncio.Event()
+
+    async def hook(module_name, hook_name, context, *args):
+        if hook_name == "on_cleanup":
+            cleanup_env_actions.append(dict(context.runtime.get("env_action") or {}))
+        return None
+
+    async def blocking_run(module_name, context):
+        module_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            module_cancelled.set()
+            raise
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(side_effect=blocking_run),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+    monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
+
+    dispatcher = _build_dispatcher(env, lease)
+    task = Task(id="task-running-stop", job_id="job-running-stop")
+    job = Job(id="job-running-stop", name="job", run_profile=run_profile)
+    dispatcher._task_jobs[task.id] = job.id
+
+    run_task = asyncio.create_task(dispatcher._run_logic(task, job))
+    await module_started.wait()
+
+    await dispatcher.request_stop_for_job(job.id, env_action=EnvAction.DESTROY)
+    await asyncio.wait_for(run_task, timeout=0.5)
+
+    assert task.status == TaskStatus.CANCELLED
+    assert task.error == "Job paused during execution"
+    assert module_cancelled.is_set()
+    dispatcher.rem.release.assert_not_awaited()
+    dispatcher.rem.release_keep_alive.assert_awaited_once_with(lease)
+    dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
+    assert cleanup_env_actions == [
+        {
+            "action": "destroy",
+            "env_id": env.id,
+            "success": None,
+        }
+    ]
 
 
 @pytest.mark.asyncio

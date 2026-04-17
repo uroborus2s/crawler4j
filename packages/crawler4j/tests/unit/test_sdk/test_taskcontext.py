@@ -7,6 +7,9 @@
     - 子任务调用测试
 """
 
+import asyncio
+import time
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -141,12 +144,29 @@ class TestTaskContextUtilities:
     @pytest.mark.asyncio
     async def test_wait(self, basic_context: TaskContext):
         """验证 wait 方法。"""
-        import time
         start = time.time()
         await basic_context.wait(0.1)
         elapsed = time.time() - start
         
         assert elapsed >= 0.1
+
+    @pytest.mark.asyncio
+    async def test_wait_raises_cancelled_error_when_stop_requested(self, basic_context: TaskContext):
+        """验证 wait 在收到 stop 后会尽快中断。"""
+        basic_context.logger = MagicMock()
+
+        async def request_stop():
+            await asyncio.sleep(0.05)
+            basic_context.request_stop()
+
+        stopper = asyncio.create_task(request_stop())
+        start = time.time()
+        with pytest.raises(asyncio.CancelledError):
+            await basic_context.wait(1)
+        elapsed = time.time() - start
+        await stopper
+
+        assert elapsed < 0.5
     
     @pytest.mark.asyncio
     async def test_screenshot_without_page_raises_error(self, basic_context: TaskContext):
@@ -293,6 +313,18 @@ class TestTaskContextSubtask:
         assert result["message"] == "labor login failed"
         assert result["error"] == "invalid_labor_credentials"
         assert result["current_url"] == "https://frontend.lobaobao97.com/login"
+
+    @pytest.mark.asyncio
+    async def test_run_subtask_raises_cancelled_error_when_stop_requested(self, basic_context: TaskContext):
+        """验证 stop 后不会继续启动新的子任务。"""
+        basic_context.logger = MagicMock()
+        basic_context._subtask_executor = AsyncMock(return_value=TaskResult.ok())
+        basic_context.request_stop()
+
+        with pytest.raises(asyncio.CancelledError):
+            await basic_context.run_subtask("sub_task")
+
+        basic_context._subtask_executor.assert_not_called()
 
 
 # === 状态共享测试 ===

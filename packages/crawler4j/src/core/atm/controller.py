@@ -12,6 +12,7 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from crawler4j_contracts import EnvAction
 from src.core.atm.job_runtime import resolve_job_run_profile
 from src.core.atm.dispatcher import get_task_dispatcher
 from src.core.atm.models import Job, JobState, JobType, TriggerType
@@ -65,11 +66,11 @@ class JobController:
             
         logger.info("[ATM] JobController stopped")
 
-    async def request_job_stop(self, job_id: str):
+    async def request_job_stop(self, job_id: str, env_action: EnvAction | None = None):
         """停止某个 Job 的后续调度，并向活动 Task 请求停止。"""
         self._remove_batch_schedule(job_id)
         if hasattr(self.dispatcher, "request_stop_for_job"):
-            await self.dispatcher.request_stop_for_job(job_id)
+            await self.dispatcher.request_stop_for_job(job_id, env_action=env_action)
 
     async def request_job_resume(self, job_id: str):
         """恢复某个 Job 的调度状态。"""

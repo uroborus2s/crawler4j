@@ -27,6 +27,14 @@ class HttpClient(Protocol):
     async def get(self, url: str, **kwargs: Any) -> dict[str, Any]:
         ...
 
+    async def post(
+        self,
+        url: str,
+        data: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        ...
+
 
 @runtime_checkable
 class LoggerLike(Protocol):
@@ -45,14 +53,6 @@ class LoggerLike(Protocol):
         ...
 
     def exception(self, message: str, environment_id: int | None = None) -> None:
-        ...
-
-    async def post(
-        self,
-        url: str,
-        data: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
         ...
 
 
@@ -216,7 +216,13 @@ class TaskContext:
     _signal_phase: str = field(default="", repr=False)
 
     async def wait(self, seconds: float) -> None:
-        await asyncio.sleep(seconds)
+        remaining = max(float(seconds), 0.0)
+        while remaining > 0:
+            self._raise_if_stop_requested()
+            sleep_for = min(remaining, 0.1)
+            await asyncio.sleep(sleep_for)
+            remaining -= sleep_for
+        self._raise_if_stop_requested()
 
     async def screenshot(self, name: str) -> str:
         if not self.page:
@@ -242,6 +248,10 @@ class TaskContext:
     def request_stop(self) -> None:
         self._stop_requested = True
         self.logger.info("已请求停止工作流")
+
+    def _raise_if_stop_requested(self) -> None:
+        if self._stop_requested:
+            raise asyncio.CancelledError("Task stop requested")
 
     def set_signal_phase(self, phase: str | None) -> None:
         """由宿主设置当前允许发信号的生命周期阶段。"""
@@ -276,6 +286,7 @@ class TaskContext:
     async def run_subtask(self, task_name: str, **kwargs: Any) -> Any:
         if not self._subtask_executor:
             raise RuntimeError("子任务执行器未注入，请确保通过框架运行")
+        self._raise_if_stop_requested()
 
         if kwargs:
             self.state.update(kwargs)

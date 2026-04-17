@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -348,9 +349,139 @@ async def test_execution_runner_exposes_env_action_to_cleanup_hook():
         {
             "action": "recycle",
             "env_id": env.id,
-            "success": True,
+            "success": None,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_runs_cleanup_before_releasing_environment():
+    request = _build_request()
+    env, lease = _build_env()
+    call_order: list[str] = []
+
+    async def hook(module_name, hook_name, context, *args):
+        if hook_name == "on_cleanup":
+            call_order.append("cleanup")
+        return None
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    async def release_with_trace(*args, **kwargs):
+        call_order.append("release")
+        return True
+
+    rem.release = AsyncMock(side_effect=release_with_trace)
+
+    await runner.run(request)
+
+    assert call_order == ["cleanup", "release"]
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_uses_stop_env_action_for_cancelled_task():
+    request = _build_request()
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+        call_hook=AsyncMock(return_value=None),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+    stop_checks = iter([False, False, True])
+
+    await runner.run(
+        request,
+        is_stop_requested=lambda: next(stop_checks, True),
+        resolve_stop_env_action=lambda: EnvAction.DESTROY,
+    )
+
+    assert request.task.status == TaskStatus.CANCELLED
+    rem.release.assert_not_awaited()
+    rem.release_keep_alive.assert_awaited_once_with(lease)
+    rem.destroy_env.assert_awaited_once_with(env.id)
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_interrupts_running_module_when_stop_requested():
+    request = _build_request()
+    env, lease = _build_env()
+    cleanup_env_actions: list[dict[str, object]] = []
+    module_started = asyncio.Event()
+    module_cancelled = asyncio.Event()
+    stop_requested = False
+
+    async def hook(module_name, hook_name, context, *args):
+        if hook_name == "on_cleanup":
+            cleanup_env_actions.append(dict(context.runtime.get("env_action") or {}))
+        return None
+
+    async def blocking_run(module_name, context):
+        module_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            module_cancelled.set()
+            raise
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(side_effect=blocking_run),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    run_task = asyncio.create_task(
+        runner.run(
+            request,
+            is_stop_requested=lambda: stop_requested,
+            resolve_stop_env_action=lambda: EnvAction.DESTROY,
+        )
+    )
+
+    await module_started.wait()
+    stop_requested = True
+    await asyncio.wait_for(run_task, timeout=0.5)
+
+    assert request.task.status == TaskStatus.CANCELLED
+    assert request.task.error == "Job paused during execution"
+    assert module_cancelled.is_set()
+    rem.release.assert_not_awaited()
+    rem.release_keep_alive.assert_awaited_once_with(lease)
+    rem.destroy_env.assert_awaited_once_with(env.id)
+    assert cleanup_env_actions == [
+        {
+            "action": "destroy",
+            "env_id": env.id,
+            "success": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_uses_stop_env_action_during_acquisition_cleanup():
+    request = _build_request()
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+        call_hook=AsyncMock(return_value=None),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+    stop_checks = iter([False, True])
+
+    await runner.run(
+        request,
+        is_stop_requested=lambda: next(stop_checks, True),
+        resolve_stop_env_action=lambda: EnvAction.DESTROY,
+    )
+
+    assert request.task.status == TaskStatus.CANCELLED
+    rem.release.assert_not_awaited()
+    rem.release_keep_alive.assert_awaited_once_with(lease)
+    rem.destroy_env.assert_awaited_once_with(env.id)
+    module_service.run_module.assert_not_awaited()
 
 
 @pytest.mark.asyncio

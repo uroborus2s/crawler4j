@@ -482,6 +482,78 @@ async def test_run_job_once_rechecks_runtime_before_dispatch():
 
 
 @pytest.mark.asyncio
+async def test_stop_run_once_requests_job_stop_with_selected_env_action():
+    service = TaskService()
+    job = Job(
+        id="batch-manual-job",
+        name="manual-batch",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=_build_select_run_profile(),
+        concurrency_target=2,
+    )
+    service._repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        count_active_tasks=AsyncMock(return_value=1),
+    )
+    service._controller = SimpleNamespace(request_job_stop=AsyncMock())
+
+    result = await service.stop_run_once(job.id, EnvAction.RECYCLE)
+
+    assert result is True
+    service._controller.request_job_stop.assert_awaited_once_with(job.id, env_action=EnvAction.RECYCLE)
+
+
+@pytest.mark.asyncio
+async def test_stop_run_once_rejects_destroy_for_selected_env_mode():
+    service = TaskService()
+    job = Job(
+        id="batch-manual-job",
+        name="manual-batch",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=_build_select_run_profile(),
+        concurrency_target=2,
+    )
+    service._repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        count_active_tasks=AsyncMock(return_value=1),
+    )
+    service._controller = SimpleNamespace(request_job_stop=AsyncMock())
+
+    with pytest.raises(ValueError, match="不能删除环境"):
+        await service.stop_run_once(job.id, EnvAction.DESTROY)
+
+    service._controller.request_job_stop.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stop_run_once_returns_false_when_no_active_tasks():
+    service = TaskService()
+    job = Job(
+        id="batch-manual-job",
+        name="manual-batch",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=_build_select_run_profile(),
+        concurrency_target=2,
+    )
+    service._repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        count_active_tasks=AsyncMock(return_value=0),
+    )
+    service._controller = SimpleNamespace(request_job_stop=AsyncMock())
+
+    result = await service.stop_run_once(job.id, EnvAction.RECYCLE)
+
+    assert result is False
+    service._controller.request_job_stop.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_update_job_switches_manual_batch_to_paused_and_requests_stop():
     service = TaskService()
     job = Job(

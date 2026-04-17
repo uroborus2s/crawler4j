@@ -23,7 +23,7 @@
 ## 2. 先记住这 8 个当前事实
 
 1. 根应用真实入口是 `src.ui.app:main`，当前从 workspace 根通过 `uv run python -m src.ui.app` 启动。
-2. 应用启动链会初始化数据库、日志、REM、ATM，再创建 `Shell`。
+2. 应用启动链会初始化数据库、唯一日志服务、REM、ATM，再创建 `Shell`。
 3. `packages/crawler4j/modules/` 现在只是占位目录；真实模块来自应用数据目录下的安装包或 DevLink。
 4. `ModuleRegistry` 支持扫描 builtin、external、dev link 三类来源，但正式交付链仍以 zip 安装验收为准。
 5. 调试会话只允许针对 `ModuleSource.DEV_LINK` 模块创建。
@@ -32,6 +32,7 @@
 8. 当前最大剩余风险不是文档，而是 `ctrip` 真实站点 E2E 仍未回放。
 9. 客户端下拉框已统一走 `src.ui.components.combo_box.StyledComboBox`；新增 UI 时不要再直接实例化原生 `QComboBox`，也不要在页面级样式里覆盖整套 `QComboBox` 外观。
 10. 仓库根 `scripts/` 当前只保留 `smoke_test_ui.py` 和 `db_cli.py` 两个维护脚本；旧的本地调试壳与图标生成脚本已清理。
+11. 当前全系统日志已收口到一个统一日志服务：Core `logger`、模块 `ctx.logger` 和标准库 `logging` 都应汇入同一条链路；`系统设置 -> 资源` 修改日志级别/保留天数后应立即热更新，而不是等待重启。
 
 ## 3. 日常开发最常用命令
 

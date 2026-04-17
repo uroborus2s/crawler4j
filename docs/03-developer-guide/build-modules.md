@@ -214,6 +214,31 @@ rg -n "(service|repository|controller|store|manager|client|facade|adapter|BaseTa
 - `declare_ui`
 - 很薄的同步 data table handler
 
+### `on_cleanup` 该怎么理解
+
+`on_cleanup` 是任务结束前的最后一个模块级清理 hook。
+
+你现在应该按下面的事实写它:
+
+- 只会调用当前任务对应的 `hooks_module.on_cleanup(...)`
+- 不会把所有模块的 cleanup 都调一遍
+- 对已经进入模块执行阶段的任务，`on_cleanup` 会先执行，再由宿主关闭或删除环境
+- 如果任务还没真正进入模块执行，只是在环境申请/启动阶段就失败或被中止，不保证会调用 `on_cleanup`
+
+这意味着:
+
+- 需要依赖 `ctx.page`、`ctx.context`、已登录态或页面内按钮/接口做收尾时，把逻辑放在 `on_cleanup`
+- 不要假设 cleanup 执行时环境已经被宿主关掉
+- 不要在 cleanup 里再实现第二套环境回收逻辑；真正的关环境 / 删环境仍由宿主负责
+
+`on_cleanup` 的硬约束:
+
+- 要幂等。重复执行一次不能把数据清坏
+- 要尽快返回。不要在里面做无限等待
+- 手动中止时，宿主会主动 cancel 正在执行的模块协程；如果你的代码在 `ctx.wait()` 或 `ctx.run_subtask()` 上挂起，它们会提前抛 `asyncio.CancelledError`
+- 需要长流程提前退出时，平时仍应在 task / workflow 主链路主动检查 `ctx.should_stop()`，不要把 stop 处理只押在 cleanup
+- 如果需要根据宿主最终动作做分支，只能读取宿主已经放进 `ctx.runtime` 的运行态，不要自己猜
+
 不要做:
 
 - 主要业务流程

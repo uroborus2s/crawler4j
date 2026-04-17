@@ -6,6 +6,7 @@
 import asyncio
 from dataclasses import dataclass
 
+from crawler4j_contracts import EnvAction
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
@@ -21,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.atm.job_runtime import describe_job_runtime
 from src.core.atm.models import Job, JobState, JobType, TaskStatus, TriggerType
+from src.core.atm.run_profile import AcquisitionMode
 from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
@@ -80,6 +82,7 @@ class TaskListWidget(QWidget):
         self._load_task: asyncio.Task | None = None
         self._pending_run_once_job_ids: set[str] = set()
         self._run_once_requesting_job_ids: set[str] = set()
+        self._run_once_stopping_job_ids: set[str] = set()
 
         self._setup_ui()
         self._subscribe_events()
@@ -112,6 +115,14 @@ class TaskListWidget(QWidget):
     def _release_run_once_lock(self, job_id: str):
         self._pending_run_once_job_ids.discard(job_id)
         self._run_once_requesting_job_ids.discard(job_id)
+        self._run_once_stopping_job_ids.discard(job_id)
+
+    @staticmethod
+    def _can_destroy_run_once_env(job: Job) -> bool:
+        run_profile = getattr(job, "run_profile", None)
+        if not run_profile or not run_profile.resource:
+            return False
+        return run_profile.resource.acquisition.mode == AcquisitionMode.CREATE
 
     @staticmethod
     def _normalize_state(state: JobState | str) -> JobState:
@@ -280,11 +291,16 @@ class TaskListWidget(QWidget):
                     and pending_task_count == 0
                     and job.id not in self._run_once_requesting_job_ids
                 ):
-                    self._pending_run_once_job_ids.discard(job.id)
+                    self._release_run_once_lock(job.id)
 
                 run_once_phase = "idle"
                 if self._is_manual_batch_job(job):
-                    if job.id in self._run_once_requesting_job_ids or pending_task_count > 0:
+                    if (
+                        job.id in self._run_once_stopping_job_ids
+                        and (job.id in self._pending_run_once_job_ids or pending_task_count > 0 or active_task_count > 0)
+                    ):
+                        run_once_phase = "stopping"
+                    elif job.id in self._run_once_requesting_job_ids or pending_task_count > 0:
                         run_once_phase = "starting"
                     elif self._is_run_once_busy(job.id, active_task_count):
                         run_once_phase = "running"
@@ -292,6 +308,9 @@ class TaskListWidget(QWidget):
                 if run_once_phase == "starting":
                     status_text = "环境启动中"
                     status_color = self.STARTING_STATUS_COLOR
+                elif run_once_phase == "stopping":
+                    status_text = "中止中"
+                    status_color = "#f97316"
                 elif run_once_phase == "running":
                     status_text = "执行中"
                     status_color = self.STATUS_COLORS[JobState.ACTIVE]
@@ -375,24 +394,31 @@ class TaskListWidget(QWidget):
         if is_manual_batch:
             is_starting = item.run_once_phase == "starting"
             is_running = item.run_once_phase == "running"
-            run_btn = QPushButton(
-                "⏳ 启动中" if is_starting else "⏳ 执行中" if is_running else "▶ 执行一次"
+            is_stopping = item.run_once_phase == "stopping"
+            primary_btn = QPushButton(
+                "⏹ 中止中" if is_stopping else "⏹ 中止" if is_manual_batch_busy else "▶ 执行一次"
             )
-            run_btn.setEnabled(not is_manual_batch_busy)
+            primary_btn.setEnabled(not is_stopping)
             if is_starting:
-                run_btn.setToolTip("正在创建环境并启动浏览器，成功后会自动进入执行中。")
+                primary_btn.setToolTip("环境正在启动；可以手动中止并选择关闭或删除本次环境。")
             elif is_running:
-                run_btn.setToolTip("当前批次仍在执行或等待环境回收完成。")
-            run_btn.setStyleSheet(
-                "background: #2563eb; color: white; border: none; padding: 4px 10px; border-radius: 4px;"
-                if is_starting
-                else "background: #6b7280; color: rgba(255, 255, 255, 0.75); border: none; padding: 4px 10px; border-radius: 4px;"
-                if is_running
+                primary_btn.setToolTip("当前批次仍在执行；可以手动中止并选择关闭或删除本次环境。")
+            elif is_stopping:
+                primary_btn.setToolTip("已发出中止请求，等待任务执行 cleanup 并回收环境。")
+            else:
+                primary_btn.setToolTip("立即执行一次当前批次任务。")
+            primary_btn.setStyleSheet(
+                "background: #f97316; color: white; border: none; padding: 4px 10px; border-radius: 4px;"
+                if is_manual_batch_busy and not is_stopping
+                else "background: #9a3412; color: rgba(255, 255, 255, 0.78); border: none; padding: 4px 10px; border-radius: 4px;"
+                if is_stopping
                 else "background: #60a5fa; color: white; border: none; padding: 4px 10px; border-radius: 4px;"
             )
-            if not is_manual_batch_busy:
-                run_btn.clicked.connect(lambda _, jid=job.id: self._run_job_once(jid))
-            action_layout.addWidget(run_btn)
+            if is_manual_batch_busy and not is_stopping:
+                primary_btn.clicked.connect(lambda _, jid=job.id: self._stop_run_once(jid))
+            elif not is_manual_batch_busy:
+                primary_btn.clicked.connect(lambda _, jid=job.id: self._run_job_once(jid))
+            action_layout.addWidget(primary_btn)
         elif state == JobState.ACTIVE:
             # 运行中 -> 显示"暂停"
             stop_btn = QPushButton("⏸ 暂停")
@@ -446,6 +472,42 @@ class TaskListWidget(QWidget):
         self.table.refresh()
         asyncio.create_task(self._async_op(job_id, "run_once"))
 
+    def _stop_run_once(self, job_id: str):
+        if job_id in self._run_once_stopping_job_ids:
+            return
+
+        job = next((candidate for candidate in self._jobs if candidate.id == job_id), None)
+        if not job:
+            return
+
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("中止任务")
+        dialog.setText(f"要中止“{job.name}”这次手动执行吗？")
+        if self._can_destroy_run_once_env(job):
+            dialog.setInformativeText("保留环境会关闭环境但不删除；删除环境会删除本次创建的环境。")
+            destroy_button = dialog.addButton("删除环境中止", QMessageBox.ButtonRole.DestructiveRole)
+        else:
+            dialog.setInformativeText("当前运行模板是复用环境模式，只支持关闭环境但不删除。")
+            destroy_button = None
+        recycle_button = dialog.addButton("保留环境中止", QMessageBox.ButtonRole.AcceptRole)
+        dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+
+        clicked = dialog.clickedButton()
+        if clicked is None:
+            return
+        if clicked == recycle_button:
+            env_action = EnvAction.RECYCLE
+        elif destroy_button is not None and clicked == destroy_button:
+            env_action = EnvAction.DESTROY
+        else:
+            return
+
+        self._run_once_stopping_job_ids.add(job_id)
+        self.table.refresh()
+        asyncio.create_task(self._async_stop_run_once(job_id, env_action))
+
     def _delete_job(self, job_id: str):
         reply = QMessageBox.question(
             self, "确认删除",
@@ -488,6 +550,22 @@ class TaskListWidget(QWidget):
             self._run_once_requesting_job_ids.discard(job_id)
 
         # 操作完成后立即拉取最新状态，确保按钮与数据库一致
+        self._load_seq += 1
+        await self._load_data_async(self._load_seq)
+
+    async def _async_stop_run_once(self, job_id: str, env_action: EnvAction):
+        service = get_task_service()
+        try:
+            success = await service.stop_run_once(job_id, env_action)
+            if not success:
+                raise RuntimeError("当前没有可中止的批次任务，或任务已经结束。")
+        except Exception as e:
+            self._run_once_stopping_job_ids.discard(job_id)
+            self.table.refresh()
+            self.load_data()
+            QMessageBox.warning(self, "中止失败", str(e))
+            return
+
         self._load_seq += 1
         await self._load_data_async(self._load_seq)
 

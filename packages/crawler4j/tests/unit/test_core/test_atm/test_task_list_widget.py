@@ -4,6 +4,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig, TriggerType
+from src.core.atm.run_profile import (
+    AcquisitionConfig,
+    AcquisitionMode,
+    CreationConfig,
+    ExecutionContext,
+    ResourceConfig,
+    RunProfile,
+)
 
 
 def test_task_list_widget_uses_wider_actions_column(qtbot, monkeypatch):
@@ -60,6 +68,55 @@ def test_task_list_widget_renders_manual_batch_run_once_button(qtbot, monkeypatc
     assert "▶ 启动" not in button_texts
 
 
+def test_task_list_widget_can_destroy_run_once_env_only_for_create_mode(qtbot, monkeypatch):
+    import src.core.atm.ui.task_list_widget as task_list_widget
+
+    monkeypatch.setattr(
+        task_list_widget.QTimer,
+        "singleShot",
+        staticmethod(lambda *_args, **_kwargs: None),
+    )
+
+    widget = task_list_widget.TaskListWidget()
+    qtbot.addWidget(widget)
+
+    create_job = Job(
+        id="job-create",
+        name="manual-create",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.CREATE,
+                    creation=CreationConfig(params={"groups": ["default"]}),
+                )
+            ),
+            execution=ExecutionContext(module="demo_module"),
+        ),
+    )
+    select_job = Job(
+        id="job-select",
+        name="manual-select",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.SELECT,
+                    selector_name="pick_ready",
+                )
+            ),
+            execution=ExecutionContext(module="demo_module"),
+        ),
+    )
+
+    assert widget._can_destroy_run_once_env(create_job) is True
+    assert widget._can_destroy_run_once_env(select_job) is False
+
+
 def test_task_list_widget_renders_manual_batch_busy_button(qtbot, monkeypatch):
     import src.core.atm.ui.task_list_widget as task_list_widget
 
@@ -96,9 +153,9 @@ def test_task_list_widget_renders_manual_batch_busy_button(qtbot, monkeypatch):
 
     action_widget = table.cellWidget(0, 6)
     buttons = action_widget.findChildren(task_list_widget.QPushButton)
-    run_button = next(button for button in buttons if button.text() == "⏳ 执行中")
+    run_button = next(button for button in buttons if button.text() == "⏹ 中止")
 
-    assert run_button.isEnabled() is False
+    assert run_button.isEnabled() is True
 
 
 @pytest.mark.asyncio
@@ -137,10 +194,49 @@ async def test_task_list_widget_marks_pending_manual_batch_as_starting(qtbot, mo
     assert widget.table.table.item(0, 5).text() == "环境启动中"
     action_widget = widget.table.table.cellWidget(0, 6)
     buttons = action_widget.findChildren(task_list_widget.QPushButton)
-    run_button = next(button for button in buttons if button.text() == "⏳ 启动中")
-    assert run_button.isEnabled() is False
+    run_button = next(button for button in buttons if button.text() == "⏹ 中止")
+    assert run_button.isEnabled() is True
     assert widget.startup_hint.isHidden() is False
     assert "manual-batch-starting" in widget.startup_hint_label.text()
+
+
+def test_task_list_widget_renders_manual_batch_stopping_button(qtbot, monkeypatch):
+    import src.core.atm.ui.task_list_widget as task_list_widget
+
+    monkeypatch.setattr(
+        task_list_widget.QTimer,
+        "singleShot",
+        staticmethod(lambda *_args, **_kwargs: None),
+    )
+
+    widget = task_list_widget.TaskListWidget()
+    qtbot.addWidget(widget)
+
+    job = Job(
+        id="job-manual-stopping",
+        name="manual-batch-stopping",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        concurrency_target=1,
+    )
+    item = task_list_widget.JobDisplayItem(
+        raw=job,
+        display_status_text="中止中",
+        display_status_color="#f97316",
+        active_task_count=1,
+        run_once_phase="stopping",
+    )
+
+    table = widget.table.table
+    table.setRowCount(1)
+    widget._render_row(0, item, table)
+
+    assert table.item(0, 5).text() == "中止中"
+    action_widget = table.cellWidget(0, 6)
+    buttons = action_widget.findChildren(task_list_widget.QPushButton)
+    stop_button = next(button for button in buttons if button.text() == "⏹ 中止中")
+    assert stop_button.isEnabled() is False
 
 
 def test_task_list_widget_run_once_locks_row_immediately(qtbot, monkeypatch):
