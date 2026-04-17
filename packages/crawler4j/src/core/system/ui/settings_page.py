@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.foundation.logging import logger
 from src.core.system.preferences_service import (
     PreferenceKey,
     get_preferences_service,
@@ -398,7 +399,7 @@ class SettingsPage(QWidget):
 
         self.log_retention_spin = QSpinBox()
         self.log_retention_spin.setRange(1, 365)
-        self.log_retention_spin.setValue(14)
+        self.log_retention_spin.setValue(29)
         self.log_retention_spin.setSuffix(" 天")
         form3.addRow("日志保留:", self.log_retention_spin)
 
@@ -598,9 +599,8 @@ class SettingsPage(QWidget):
         self.virt_apikey_edit.setText(prefs.get(PreferenceKey.VIRTUALBROWSER_API_KEY, ""))
 
         # Resources
-        # from src.utils.paths import get_app_data_dir (Moved to top)
-        self._set_combo_value(self.log_level_combo, prefs.get(PreferenceKey.LOG_LEVEL, "INFO"))
-        self.log_retention_spin.setValue(prefs.get(PreferenceKey.LOG_RETENTION, 14))
+        self._set_combo_value(self.log_level_combo, prefs.get(PreferenceKey.LOG_LEVEL))
+        self.log_retention_spin.setValue(prefs.get(PreferenceKey.LOG_RETENTION))
 
     def _connect_signals(self):
         """连接控件信号实现 Auto-Save。"""
@@ -659,9 +659,7 @@ class SettingsPage(QWidget):
 
     def _save_preference(self, key: PreferenceKey, value):
         """保存配置项。"""
-        # 调试输出
-        import sys
-        print(f"[Settings] Saving {key.value} = {value}", file=sys.stderr)
+        logger.debug(f"[Settings] Saving {key.value} = {value}")
 
         requires_restart = self._preferences.set(key, value)
         

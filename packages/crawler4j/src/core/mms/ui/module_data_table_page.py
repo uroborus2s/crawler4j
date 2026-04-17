@@ -30,6 +30,7 @@ from src.core.mms.service import get_module_service
 from src.core.mms.settings_store import get_module_settings_store
 from src.core.persistence import get_kv_store, get_module_data_store
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.line_edit import StyledLineEdit
 from src.ui.components.table import SkyTableWidget
 
 
@@ -81,20 +82,6 @@ class _RecordEditDialog(QDialog):
                 font-size: 14px;
                 font-weight: 500;
             }
-            QLineEdit {
-                background-color: #0f1326;
-                color: #f5f7ff;
-                border: 1px solid rgba(134, 148, 214, 0.62);
-                border-radius: 6px;
-                padding: 6px 8px;
-                min-height: 30px;
-                selection-background-color: #4f7cff;
-                selection-color: white;
-            }
-            QLineEdit:focus {
-                border: 1px solid #7ea2ff;
-                background-color: #141a34;
-            }
             QCheckBox {
                 color: #eaf0ff;
                 spacing: 8px;
@@ -139,7 +126,8 @@ class _RecordEditDialog(QDialog):
             checkbox.setChecked(bool(value))
             return checkbox
 
-        edit = QLineEdit("" if value is None else str(value))
+        edit = StyledLineEdit()
+        edit.setText("" if value is None else str(value))
         return edit
 
     def get_value(self) -> dict[str, Any]:

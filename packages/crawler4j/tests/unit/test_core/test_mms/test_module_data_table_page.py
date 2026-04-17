@@ -10,6 +10,7 @@ from src.core.mms.models import ModuleSource
 from src.core.mms.ui import module_data_table_page as page_module
 from src.core.mms.ui.module_data_table_page import ModuleDataTablePage
 from src.ui.components.combo_box import StyledComboBox
+from src.ui.components.line_edit import StyledLineEdit
 
 
 @pytest.fixture(autouse=True)
@@ -244,3 +245,22 @@ def test_record_edit_dialog_uses_styled_combo_box(qtbot):
 
     assert isinstance(widget, StyledComboBox)
     assert widget.currentText() == "blocked"
+
+
+def test_record_edit_dialog_uses_styled_line_edit(qtbot):
+    dialog = page_module._RecordEditDialog(
+        columns=[
+            {
+                "key": "account",
+                "label": "账号",
+                "type": "text",
+            }
+        ],
+        record={"account": "demo-user"},
+    )
+    qtbot.addWidget(dialog)
+
+    widget = dialog._widgets["account"]
+
+    assert isinstance(widget, StyledLineEdit)
+    assert widget.text() == "demo-user"

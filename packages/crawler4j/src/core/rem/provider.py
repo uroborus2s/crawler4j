@@ -1465,8 +1465,9 @@ class VirtualBrowserProvider(BaseProvider):
             handle.ws_url = ws_url
             return True
         except Exception as e:
+            message = f"VirtualBrowser launchBrowser 失败: {e}"
             logger.error(f"[VirtualBrowser] Failed to open browser {browser_id}: {e}")
-            return False
+            raise RuntimeError(message) from e
 
     async def connect(self, env: Environment) -> bool:
         """连接 Playwright。"""

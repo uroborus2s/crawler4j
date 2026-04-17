@@ -27,6 +27,26 @@ class HttpClient(Protocol):
     async def get(self, url: str, **kwargs: Any) -> dict[str, Any]:
         ...
 
+
+@runtime_checkable
+class LoggerLike(Protocol):
+    """任务上下文可用的最小日志接口。"""
+
+    def debug(self, message: str, environment_id: int | None = None) -> None:
+        ...
+
+    def info(self, message: str, environment_id: int | None = None) -> None:
+        ...
+
+    def warning(self, message: str, environment_id: int | None = None) -> None:
+        ...
+
+    def error(self, message: str, environment_id: int | None = None) -> None:
+        ...
+
+    def exception(self, message: str, environment_id: int | None = None) -> None:
+        ...
+
     async def post(
         self,
         url: str,
@@ -149,6 +169,24 @@ class DefaultHttpClient:
                 return await resp.json()
 
 
+def _build_std_task_logger() -> LoggerLike:
+    return logging.getLogger("task")
+
+
+_task_logger_factory: Callable[[], LoggerLike] = _build_std_task_logger
+
+
+def set_default_task_logger_factory(factory: Callable[[], LoggerLike] | None) -> None:
+    """允许宿主在运行期替换 TaskContext 默认日志服务。"""
+    global _task_logger_factory
+    _task_logger_factory = factory or _build_std_task_logger
+
+
+def get_default_task_logger() -> LoggerLike:
+    """获取当前 TaskContext 默认日志服务。"""
+    return _task_logger_factory()
+
+
 @dataclass
 class TaskContext:
     """任务执行上下文。
@@ -164,7 +202,7 @@ class TaskContext:
     page: "Page | None" = None
     context: "BrowserContext | None" = None
 
-    logger: logging.Logger = field(default_factory=lambda: logging.getLogger("task"))
+    logger: LoggerLike = field(default_factory=get_default_task_logger)
     http: HttpClient = field(default_factory=DefaultHttpClient)
     tools: ToolsCapability | None = None
 

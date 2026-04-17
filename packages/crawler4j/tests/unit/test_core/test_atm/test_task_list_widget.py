@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.core.atm.models import Job, JobState, JobType, TriggerConfig, TriggerType
+from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig, TriggerType
 
 
 def test_task_list_widget_uses_wider_actions_column(qtbot, monkeypatch):
@@ -85,6 +85,7 @@ def test_task_list_widget_renders_manual_batch_busy_button(qtbot, monkeypatch):
         display_status_text="执行中",
         display_status_color=task_list_widget.TaskListWidget.STATUS_COLORS[JobState.ACTIVE],
         active_task_count=1,
+        run_once_phase="running",
     )
 
     table = widget.table.table
@@ -98,6 +99,48 @@ def test_task_list_widget_renders_manual_batch_busy_button(qtbot, monkeypatch):
     run_button = next(button for button in buttons if button.text() == "⏳ 执行中")
 
     assert run_button.isEnabled() is False
+
+
+@pytest.mark.asyncio
+async def test_task_list_widget_marks_pending_manual_batch_as_starting(qtbot, monkeypatch):
+    import src.core.atm.ui.task_list_widget as task_list_widget
+
+    monkeypatch.setattr(
+        task_list_widget.QTimer,
+        "singleShot",
+        staticmethod(lambda *_args, **_kwargs: None),
+    )
+
+    job = Job(
+        id="job-manual-starting",
+        name="manual-batch-starting",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        concurrency_target=1,
+    )
+    service = SimpleNamespace(
+        list_jobs=AsyncMock(return_value=[job]),
+        count_active_tasks=AsyncMock(return_value=1),
+        list_tasks=AsyncMock(
+            return_value=[Task(id="task-pending", job_id=job.id, status=TaskStatus.PENDING)]
+        ),
+    )
+    monkeypatch.setattr(task_list_widget, "get_task_service", lambda: service)
+
+    widget = task_list_widget.TaskListWidget()
+    qtbot.addWidget(widget)
+
+    widget._load_seq = 1
+    await widget._load_data_async(1)
+
+    assert widget.table.table.item(0, 5).text() == "环境启动中"
+    action_widget = widget.table.table.cellWidget(0, 6)
+    buttons = action_widget.findChildren(task_list_widget.QPushButton)
+    run_button = next(button for button in buttons if button.text() == "⏳ 启动中")
+    assert run_button.isEnabled() is False
+    assert widget.startup_hint.isHidden() is False
+    assert "manual-batch-starting" in widget.startup_hint_label.text()
 
 
 def test_task_list_widget_run_once_locks_row_immediately(qtbot, monkeypatch):
@@ -126,6 +169,7 @@ def test_task_list_widget_run_once_locks_row_immediately(qtbot, monkeypatch):
     assert "job-manual" in widget._pending_run_once_job_ids
     assert "job-manual" in widget._run_once_requesting_job_ids
     assert created_tasks
+    assert widget.startup_hint.isHidden() is False
 
 
 @pytest.mark.asyncio
@@ -149,6 +193,7 @@ async def test_task_list_widget_clears_run_once_lock_after_active_tasks_clear(qt
     service = SimpleNamespace(
         list_jobs=AsyncMock(return_value=[job]),
         count_active_tasks=AsyncMock(side_effect=[0, 0]),
+        list_tasks=AsyncMock(side_effect=[[], []]),
     )
     monkeypatch.setattr(task_list_widget, "get_task_service", lambda: service)
 
@@ -160,7 +205,8 @@ async def test_task_list_widget_clears_run_once_lock_after_active_tasks_clear(qt
     widget._load_seq = 1
     await widget._load_data_async(1)
     assert job.id in widget._pending_run_once_job_ids
-    assert widget.table.table.item(0, 5).text() == "执行中"
+    assert widget.table.table.item(0, 5).text() == "环境启动中"
+    assert widget.startup_hint.isHidden() is False
 
     widget._run_once_requesting_job_ids.clear()
     widget._load_seq = 2
@@ -168,3 +214,4 @@ async def test_task_list_widget_clears_run_once_lock_after_active_tasks_clear(qt
 
     assert job.id not in widget._pending_run_once_job_ids
     assert widget.table.table.item(0, 5).text() == "已暂停"
+    assert widget.startup_hint.isHidden() is True

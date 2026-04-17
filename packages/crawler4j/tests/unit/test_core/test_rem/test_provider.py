@@ -1,6 +1,14 @@
 """Provider 注册测试。"""
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from src.core.rem.handle import BrowserHandle
+from src.core.rem.models import Environment, EnvKind, EnvStatus
 from src.core.rem.provider import (
+    VirtualBrowserProvider,
     get_provider,
     list_providers,
 )
@@ -43,3 +51,28 @@ class TestProviderRegistry:
         provider = get_provider("unknown_provider")
         
         assert provider is None
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="101"),
+    )
+    client = SimpleNamespace(
+        launch_browser=AsyncMock(side_effect=RuntimeError("Launch Error: DevTools port not detected"))
+    )
+
+    monkeypatch.setattr(provider, "is_window_open", AsyncMock(return_value=False))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    with pytest.raises(
+        RuntimeError,
+        match="VirtualBrowser launchBrowser 失败: Launch Error: DevTools port not detected",
+    ):
+        await provider.open(env)

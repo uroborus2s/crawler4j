@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTableWidgetItem,
     QVBoxLayout,
@@ -19,7 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.atm.job_runtime import describe_job_runtime
-from src.core.atm.models import Job, JobState, JobType, TriggerType
+from src.core.atm.models import Job, JobState, JobType, TaskStatus, TriggerType
 from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
@@ -33,6 +34,7 @@ class JobDisplayItem:
     display_status_text: str
     display_status_color: str
     active_task_count: int = 0
+    run_once_phase: str = "idle"
 
 
 class TaskListWidget(QWidget):
@@ -69,6 +71,7 @@ class TaskListWidget(QWidget):
         JobType.BATCH: "批次任务",
         JobType.SERVICE: "持续保活",
     }
+    STARTING_STATUS_COLOR = "#60a5fa"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -163,6 +166,34 @@ class TaskListWidget(QWidget):
 
         layout.addLayout(header)
 
+        self.startup_hint = QWidget()
+        startup_layout = QVBoxLayout(self.startup_hint)
+        startup_layout.setContentsMargins(0, 0, 0, 0)
+        startup_layout.setSpacing(6)
+
+        self.startup_hint_label = QLabel("环境启动中，请稍候...")
+        self.startup_hint_label.setStyleSheet("color: #93c5fd; font-size: 12px; font-weight: bold;")
+        startup_layout.addWidget(self.startup_hint_label)
+
+        self.startup_progress = QProgressBar()
+        self.startup_progress.setMaximum(0)
+        self.startup_progress.setTextVisible(False)
+        self.startup_progress.setFixedHeight(3)
+        self.startup_progress.setStyleSheet("""
+            QProgressBar {
+                background: rgba(96, 165, 250, 0.12);
+                border: none;
+                border-radius: 2px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #60a5fa, stop:1 #22d3ee);
+                border-radius: 2px;
+            }
+        """)
+        startup_layout.addWidget(self.startup_progress)
+        self.startup_hint.hide()
+        layout.addWidget(self.startup_hint)
+
         # 错误提示
         self.error_label = QLabel()
         self.error_label.setStyleSheet("color: #f87171; padding: 8px;")
@@ -195,6 +226,18 @@ class TaskListWidget(QWidget):
             self._load_task.cancel()
         self._load_task = asyncio.create_task(self._load_data_async(seq))
 
+    def _set_startup_indicator(self, starting_job_names: list[str]) -> None:
+        if not starting_job_names:
+            self.startup_hint.hide()
+            return
+
+        if len(starting_job_names) == 1:
+            message = f"环境启动中：{starting_job_names[0]}。启动完成后会自动切回执行中。"
+        else:
+            message = f"有 {len(starting_job_names)} 条作业正在启动环境。启动完成后会自动隐藏。"
+        self.startup_hint_label.setText(message)
+        self.startup_hint.show()
+
     async def _load_data_async(self, seq: int):
         """异步加载数据。"""
         self.table.set_loading(True)
@@ -209,12 +252,18 @@ class TaskListWidget(QWidget):
             self._jobs = jobs
             manual_jobs = [job for job in jobs if self._is_manual_batch_job(job)]
             active_task_counts: dict[str, int] = {}
+            pending_task_counts: dict[str, int] = {}
             if manual_jobs:
-                counts = await asyncio.gather(
-                    *(service.count_active_tasks(job.id) for job in manual_jobs)
+                counts, task_lists = await asyncio.gather(
+                    asyncio.gather(*(service.count_active_tasks(job.id) for job in manual_jobs)),
+                    asyncio.gather(*(service.list_tasks(job.id) for job in manual_jobs)),
                 )
                 active_task_counts = {
                     job.id: count for job, count in zip(manual_jobs, counts, strict=False)
+                }
+                pending_task_counts = {
+                    job.id: sum(task.status == TaskStatus.PENDING for task in tasks)
+                    for job, tasks in zip(manual_jobs, task_lists, strict=False)
                 }
                 if seq != self._load_seq:
                     return
@@ -224,18 +273,26 @@ class TaskListWidget(QWidget):
                 state = self._normalize_state(job.state)
                 job.state = state
                 active_task_count = active_task_counts.get(job.id, 0)
+                pending_task_count = pending_task_counts.get(job.id, 0)
                 if (
                     job.id in self._pending_run_once_job_ids
                     and active_task_count == 0
+                    and pending_task_count == 0
                     and job.id not in self._run_once_requesting_job_ids
                 ):
                     self._pending_run_once_job_ids.discard(job.id)
 
-                is_run_once_busy = self._is_manual_batch_job(job) and self._is_run_once_busy(
-                    job.id,
-                    active_task_count,
-                )
-                if is_run_once_busy:
+                run_once_phase = "idle"
+                if self._is_manual_batch_job(job):
+                    if job.id in self._run_once_requesting_job_ids or pending_task_count > 0:
+                        run_once_phase = "starting"
+                    elif self._is_run_once_busy(job.id, active_task_count):
+                        run_once_phase = "running"
+
+                if run_once_phase == "starting":
+                    status_text = "环境启动中"
+                    status_color = self.STARTING_STATUS_COLOR
+                elif run_once_phase == "running":
                     status_text = "执行中"
                     status_color = self.STATUS_COLORS[JobState.ACTIVE]
                 else:
@@ -247,15 +304,20 @@ class TaskListWidget(QWidget):
                     display_status_text=status_text,
                     display_status_color=status_color,
                     active_task_count=active_task_count,
+                    run_once_phase=run_once_phase,
                 ))
 
             self.table.set_data(display_items)
+            self._set_startup_indicator(
+                [item.raw.name for item in display_items if item.run_once_phase == "starting"]
+            )
         except asyncio.CancelledError:
             return
 
         except Exception as e:
             self.error_label.setText(f"❌ 加载失败: {e}")
             self.error_label.show()
+            self._set_startup_indicator([])
         finally:
             if seq == self._load_seq:
                 self.table.set_loading(False)
@@ -311,13 +373,21 @@ class TaskListWidget(QWidget):
 
         state = self._normalize_state(job.state)
         if is_manual_batch:
-            run_btn = QPushButton("⏳ 执行中" if is_manual_batch_busy else "▶ 执行一次")
+            is_starting = item.run_once_phase == "starting"
+            is_running = item.run_once_phase == "running"
+            run_btn = QPushButton(
+                "⏳ 启动中" if is_starting else "⏳ 执行中" if is_running else "▶ 执行一次"
+            )
             run_btn.setEnabled(not is_manual_batch_busy)
-            if is_manual_batch_busy:
+            if is_starting:
+                run_btn.setToolTip("正在创建环境并启动浏览器，成功后会自动进入执行中。")
+            elif is_running:
                 run_btn.setToolTip("当前批次仍在执行或等待环境回收完成。")
             run_btn.setStyleSheet(
-                "background: #6b7280; color: rgba(255, 255, 255, 0.75); border: none; padding: 4px 10px; border-radius: 4px;"
-                if is_manual_batch_busy
+                "background: #2563eb; color: white; border: none; padding: 4px 10px; border-radius: 4px;"
+                if is_starting
+                else "background: #6b7280; color: rgba(255, 255, 255, 0.75); border: none; padding: 4px 10px; border-radius: 4px;"
+                if is_running
                 else "background: #60a5fa; color: white; border: none; padding: 4px 10px; border-radius: 4px;"
             )
             if not is_manual_batch_busy:
@@ -371,6 +441,8 @@ class TaskListWidget(QWidget):
             return
         self._pending_run_once_job_ids.add(job_id)
         self._run_once_requesting_job_ids.add(job_id)
+        job_name = next((job.name for job in self._jobs if job.id == job_id), "当前作业")
+        self._set_startup_indicator([job_name])
         self.table.refresh()
         asyncio.create_task(self._async_op(job_id, "run_once"))
 

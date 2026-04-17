@@ -1,11 +1,12 @@
 """UI 应用入口。"""
 
 import sys
+from pathlib import Path
 
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
-from src.core.foundation.logging import setup_file_logging
+from src.core.foundation.logging import logger
 from src.core.persistence import init_database
 from src.core.system.preferences_service import (
     PreferenceKey,
@@ -15,19 +16,37 @@ from src.ui.shell import Shell
 from src.utils.paths import get_app_data_dir, get_resource_path
 
 
+def install_logging_preferences_sync(prefs, *, log_dir: Path) -> None:
+    """把偏好设置绑定到唯一日志服务，支持热更新。"""
+
+    def _apply() -> None:
+        logger.configure(
+            log_dir=log_dir,
+            level=prefs.get(PreferenceKey.LOG_LEVEL),
+            retention_days=prefs.get(PreferenceKey.LOG_RETENTION),
+        )
+
+    def _on_preference_changed(key: str, _value, _requires_restart: bool) -> None:
+        if key not in {
+            PreferenceKey.LOG_LEVEL.value,
+            PreferenceKey.LOG_RETENTION.value,
+        }:
+            return
+        _apply()
+
+    _apply()
+    prefs.preference_changed.connect(_on_preference_changed)
+
+
 def main():
     """启动应用。"""
     # 初始化数据库
     init_database()
 
-    # 读取日志配置
+    # 初始化唯一日志服务，并绑定日志偏好热更新
     prefs = get_preferences_service()
-    log_level = prefs.get(PreferenceKey.LOG_LEVEL, "INFO")
-    log_retention = prefs.get(PreferenceKey.LOG_RETENTION, 14)
-
-    # 初始化日志 (使用默认路径)
     log_dir = get_app_data_dir() / "logs"
-    setup_file_logging(str(log_dir), level=log_level, retention_days=log_retention)
+    install_logging_preferences_sync(prefs, log_dir=log_dir)
     
     # 创建应用
     app = QApplication(sys.argv)
@@ -44,7 +63,7 @@ def main():
 
         import qasync
     except ImportError:
-        print("Error: qasync is required but not installed.")
+        logger.error("qasync is required but not installed.")
         sys.exit(1)
 
     # Setup qasync loop

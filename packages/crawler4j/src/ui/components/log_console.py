@@ -1,12 +1,11 @@
 """实时日志控制台组件。
 
-支持显示实时日志，并按 Task ID 过滤。
+支持显示统一日志服务的实时日志，并按 Task ID 过滤。
 """
 
 from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtWidgets import QTextEdit, QVBoxLayout, QWidget
 
-from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import LogEntry, logger
 
 
@@ -17,9 +16,7 @@ class LogConsoleWidget(QWidget):
         super().__init__(parent)
         self._filter_task_id: str | None = None
         self._setup_ui()
-        
-        # Subscribe to events
-        get_event_bus().subscribe(EventType.TASK_LOG, self._on_task_log)
+        logger.signals.log_added.connect(self._on_log_added)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -44,17 +41,13 @@ class LogConsoleWidget(QWidget):
         """设置过滤 ID。"""
         self._filter_task_id = task_id
         self.clear()
-        
-        # TODO: Load history logs from memory or storage?
-        # For now, we only show realtime logs after opening
+
         if task_id:
             self.append_log(f"--- Listening for logs from Task: {task_id} ---")
-            
-            # Load recent memory logs
-            entries = logger.get_entries(limit=1000)
-            for entry in entries:
-                if entry.task_id == task_id:
-                     self._append_entry(entry)
+
+        entries = list(reversed(logger.get_entries(limit=1000)))
+        for entry in entries:
+            self._append_entry(entry)
 
     def clear(self):
         self.text_edit.clear()
@@ -65,6 +58,9 @@ class LogConsoleWidget(QWidget):
 
     def _append_entry(self, entry: LogEntry):
         """Internal append entry."""
+        if self._filter_task_id and entry.task_id != self._filter_task_id:
+            return
+
         color = "#cdd6f4"
         if entry.level == "WARNING":
             color = "#f9e2af"
@@ -77,36 +73,6 @@ class LogConsoleWidget(QWidget):
         self.append_log(f"[{time_str}] {entry.message}", color)
 
     @pyqtSlot(object)
-    def _on_task_log(self, event: Event):
-        """Handle log event."""
-        data = event.data
-        task_id = event.task_run_id
-        
-        # Filter
-        if self._filter_task_id and task_id != self._filter_task_id:
-            return
-            
-        # Parse data back to display (or use raw data)
-        # We construct a simple display here
-        level = data.get("level", "INFO")
-        message = data.get("message", "")
-        created_at = data.get("created_at", "")
-        
-        color = "#cdd6f4"
-        if level == "WARNING":
-            color = "#f9e2af"
-        elif level == "ERROR":
-            color = "#f38ba8"
-        elif level == "DEBUG":
-            color = "#6c7086"
-            
-        # Check if created_at needs parsing or just use current time?
-        # data['created_at'] is isoformat string
-        import dateutil.parser
-        try:
-             dt = dateutil.parser.isoparse(created_at)
-             time_str = dt.strftime("%H:%M:%S")
-        except Exception:
-             time_str = "??"
-
-        self.append_log(f"[{time_str}] {message}", color)
+    def _on_log_added(self, entry: LogEntry):
+        """Handle unified log stream updates."""
+        self._append_entry(entry)
