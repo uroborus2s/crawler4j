@@ -39,6 +39,7 @@ class ModuleSettingsStore:
     MODULE_SCOPE = "module"
     WORKFLOW_SCOPE = "workflow"
     MODULE_STATUS_SCOPE = "module_status"
+    CONFIG_DEFAULTS_INIT_SCOPE = "config_defaults_init"
 
     def _infer_value_type(self, value: Any) -> str:
         if value is None:
@@ -161,6 +162,21 @@ class ModuleSettingsStore:
         rows = self._read_scope_rows(scope, module_name, scope_name)
         return self._rebuild_entries(rows) if rows else {}
 
+    def _has_any_scope_rows(self, module_name: str, scopes: tuple[str, ...]) -> bool:
+        placeholders = ",".join("?" for _ in scopes)
+        params: list[Any] = [module_name, *scopes]
+        with get_connection(CONFIG_DB) as conn:
+            row = conn.execute(
+                f"""
+                SELECT 1
+                FROM module_config_entries
+                WHERE module_name = ? AND scope_type IN ({placeholders})
+                LIMIT 1
+                """,
+                params,
+            ).fetchone()
+        return row is not None
+
     def read_settings(self, scope: str, key: str) -> Any:
         """读取指定 scope/key 的设置。"""
         if scope == self.MODULE_SCOPE:
@@ -218,6 +234,37 @@ class ModuleSettingsStore:
         value: dict[str, Any],
     ) -> bool:
         return self._write_scope_rows(self.WORKFLOW_SCOPE, module_name, workflow_name, value)
+
+    def is_config_defaults_initialized(self, module_name: str) -> bool:
+        payload = self._read_scope_dict(self.CONFIG_DEFAULTS_INIT_SCOPE, module_name)
+        return bool(payload.get("initialized"))
+
+    def mark_config_defaults_initialized(self, module_name: str) -> bool:
+        return self._write_scope_rows(
+            self.CONFIG_DEFAULTS_INIT_SCOPE,
+            module_name,
+            "",
+            {"initialized": True},
+        )
+
+    def ensure_config_defaults_initialized(
+        self,
+        module_name: str,
+        module_defaults: dict[str, Any],
+        workflow_defaults: dict[str, dict[str, Any]],
+    ) -> bool:
+        if self.is_config_defaults_initialized(module_name):
+            return False
+
+        if self._has_any_scope_rows(module_name, (self.MODULE_SCOPE, self.WORKFLOW_SCOPE)):
+            self.mark_config_defaults_initialized(module_name)
+            return False
+
+        self.write_module_settings(module_name, module_defaults)
+        for workflow_name, payload in workflow_defaults.items():
+            self.write_workflow_settings(module_name, workflow_name, payload)
+        self.mark_config_defaults_initialized(module_name)
+        return True
 
     def build_task_config(self, module_name: str, workflow_name: str = "") -> dict[str, Any]:
         module_settings = self.read_module_settings(module_name)

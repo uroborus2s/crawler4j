@@ -218,6 +218,10 @@ async def test_assembler_manifest_loading(temp_module):
     # Create module.yaml
     manifest = {
         "name": "test_module",
+        "upgrade_source": {
+            "type": "github_release",
+            "repo": "example/test_module",
+        },
         "workflows": [
             {"name": "manifest_wf", "display_name": "Manifest Workflow"}
         ]

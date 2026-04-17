@@ -34,7 +34,11 @@ def _write_module(root: Path, name: str = "demo_module") -> Path:
     module_dir = root / name
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "module.yaml").write_text(
-        f"name: {name}\nversion: 1.0.0\nsdk_version_range: \">=1.0.2\"\n",
+        "name: {name}\n"
+        "version: 1.0.0\n"
+        "upgrade_source:\n"
+        "  type: github_release\n"
+        "  repo: example/{name}\n".format(name=name),
         encoding="utf-8",
     )
     (module_dir / "__init__.py").write_text("VALUE = 'demo'\n", encoding="utf-8")
@@ -99,6 +103,58 @@ def test_settings_store_persists_flattened_entries_in_module_config_table(temp_d
         ("module", "", "auth.headless", "false"),
         ("module", "", "auth.login_url", '"https://example.com"'),
     ]
+
+
+def test_settings_store_initializes_defaults_once_and_marks_module(temp_data_dir):
+    from src.core.mms.settings_store import ModuleSettingsStore
+
+    store = ModuleSettingsStore()
+
+    changed = store.ensure_config_defaults_initialized(
+        "demo_module",
+        {"base_url": "https://example.com", "retry": 3},
+        {"default": {"headless": False}},
+    )
+
+    assert changed is True
+    assert store.export_module_settings("demo_module") == {
+        "module": {"base_url": "https://example.com", "retry": 3},
+        "workflows": {"default": {"headless": False}},
+    }
+    assert store.is_config_defaults_initialized("demo_module") is True
+
+    changed = store.ensure_config_defaults_initialized(
+        "demo_module",
+        {"base_url": "https://changed.example.com"},
+        {"default": {"headless": True}},
+    )
+
+    assert changed is False
+    assert store.export_module_settings("demo_module") == {
+        "module": {"base_url": "https://example.com", "retry": 3},
+        "workflows": {"default": {"headless": False}},
+    }
+
+
+def test_settings_store_marks_existing_settings_as_initialized_without_overwriting(temp_data_dir):
+    from src.core.mms.settings_store import ModuleSettingsStore
+
+    store = ModuleSettingsStore()
+    store.write_module_settings("demo_module", {"base_url": "https://custom.example.com"})
+    store.write_workflow_settings("demo_module", "default", {"headless": True})
+
+    changed = store.ensure_config_defaults_initialized(
+        "demo_module",
+        {"base_url": "https://default.example.com", "retry": 3},
+        {"default": {"headless": False}},
+    )
+
+    assert changed is False
+    assert store.export_module_settings("demo_module") == {
+        "module": {"base_url": "https://custom.example.com"},
+        "workflows": {"default": {"headless": True}},
+    }
+    assert store.is_config_defaults_initialized("demo_module") is True
 
 
 def test_settings_store_ignores_legacy_configs_rows(temp_data_dir):
@@ -181,6 +237,7 @@ def test_registry_persists_module_status_across_reload(temp_data_dir):
         ).fetchall()
 
     assert [(row["scope_type"], row["key_path"], row["value_json"]) for row in rows] == [
+        ("config_defaults_init", "initialized", "true"),
         ("module_status", "status", '"disabled"'),
     ]
 
@@ -193,22 +250,83 @@ def test_registry_persists_module_status_across_reload(temp_data_dir):
     assert enabled_again.get_module("demo_module").status == ModuleStatus.ENABLED
 
 
+def test_registry_initializes_manifest_config_defaults_only_on_first_load(temp_data_dir):
+    from src.core.mms.settings_store import ModuleSettingsStore
+
+    scan_root = temp_data_dir / "scan_root"
+    module_dir = _write_module(scan_root)
+    (module_dir / "module.yaml").write_text(
+        """
+name: demo_module
+version: 1.0.0
+upgrade_source:
+  type: github_release
+  repo: example/demo_module
+workflows:
+  - name: default
+config_defaults:
+  module:
+    base_url: https://example.com
+    retry: 3
+  workflows:
+    default:
+      headless: false
+""".strip(),
+        encoding="utf-8",
+    )
+
+    store = ModuleSettingsStore()
+    registry = ModuleRegistry(
+        scanner=ModuleScanner(scan_paths=[scan_root]),
+        dev_link_store=_FakeDevLinkStore(),
+        settings_store=store,
+    )
+
+    registry.get_module("demo_module")
+    assert store.export_module_settings("demo_module") == {
+        "module": {"base_url": "https://example.com", "retry": 3},
+        "workflows": {"default": {"headless": False}},
+    }
+
+    (module_dir / "module.yaml").write_text(
+        """
+name: demo_module
+version: 1.0.1
+upgrade_source:
+  type: github_release
+  repo: example/demo_module
+workflows:
+  - name: default
+config_defaults:
+  module:
+    base_url: https://changed.example.com
+    retry: 5
+  workflows:
+    default:
+      headless: true
+""".strip(),
+        encoding="utf-8",
+    )
+
+    registry.refresh()
+    assert store.export_module_settings("demo_module") == {
+        "module": {"base_url": "https://example.com", "retry": 3},
+        "workflows": {"default": {"headless": False}},
+    }
+
+
 def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
     from src.core.mms.settings_store import ModuleSettingsStore
-    from src.core.persistence import get_kv_store
     from src.core.persistence.module_data_store import ModuleDataStore
 
     scan_root = temp_data_dir / "scan_root"
     _write_module(scan_root)
     store = ModuleSettingsStore()
     data_store = ModuleDataStore()
-    kv = get_kv_store()
     store.write_module_settings("demo_module", {"api_key": "secret"})
     store.write_workflow_settings("demo_module", "login", {"headless": False})
     data_store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
     data_store.write_data_table_schema("demo_module", "accounts", {"title": "账号管理", "dataset": "accounts"})
-    kv.set("module:demo_module:dataset:legacy_accounts", [{"id": "legacy"}])
-    kv.set("module:demo_module:ui:data_table:legacy_accounts", {"title": "旧账号"})
 
     registry = ModuleRegistry(
         scanner=ModuleScanner(scan_paths=[scan_root]),
@@ -219,8 +337,6 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
     assert store.export_module_settings("demo_module") == {"module": {}, "workflows": {}}
     assert data_store.read_dataset("demo_module", "accounts") == []
     assert data_store.read_data_table_schema("demo_module", "accounts") == {}
-    assert kv.get("module:demo_module:dataset:legacy_accounts") is None
-    assert kv.get("module:demo_module:ui:data_table:legacy_accounts") is None
 
     _write_module(scan_root)
     store.write_module_settings("demo_module", {"api_key": "secret"})

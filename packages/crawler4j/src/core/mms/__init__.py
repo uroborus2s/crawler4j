@@ -19,9 +19,17 @@ from src.core.mms.models import (
     ModuleParseError,
     ModuleSource,
     ModuleStatus,
+    UpgradeSourceInfo,
     ModuleValidationError,
     UIExtensionInfo,
     WorkflowInfo,
+)
+from src.core.mms.release_service import (
+    ModulePackagePreview,
+    ModuleReleaseInfo,
+    ModuleReleaseService,
+    ModuleUpdateInfo,
+    get_module_release_service,
 )
 from src.core.mms.registry import (
     ModuleRegistry,
@@ -29,7 +37,6 @@ from src.core.mms.registry import (
 )
 from src.core.mms.settings_store import ModuleSettingsStore, get_module_settings_store
 from src.core.mms.scanner import (
-    CURRENT_SDK_VERSION,
     ModuleScanner,
     get_module_scanner,
 )
@@ -43,6 +50,7 @@ __all__ = [
     "WorkflowInfo",
     "DevModuleLink",
     "UIExtensionInfo",
+    "UpgradeSourceInfo",
     # 错误
     "ModuleError",
     "ModuleDiscoveryError",
@@ -52,10 +60,14 @@ __all__ = [
     # 扫描器
     "ModuleScanner",
     "get_module_scanner",
-    "CURRENT_SDK_VERSION",
     # 注册表
     "ModuleRegistry",
     "get_module_registry",
+    "ModuleReleaseInfo",
+    "ModuleUpdateInfo",
+    "ModulePackagePreview",
+    "ModuleReleaseService",
+    "get_module_release_service",
     "ModuleSettingsStore",
     "get_module_settings_store",
     "DevModuleLinkStore",

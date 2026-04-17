@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
+import re
 import tomllib
 from pathlib import Path
 
 
 APP_ROOT = Path(__file__).resolve().parents[3]
 WORKSPACE_ROOT = APP_ROOT.parents[1]
+BASE_VERSION_RE = re.compile(r"^v?(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)")
 
 
 def _load_pyproject(path: Path) -> dict:
@@ -16,8 +19,17 @@ def _load_pyproject(path: Path) -> dict:
         return tomllib.load(f)
 
 
-def _load_module_version(package_root: Path, package_dir: str) -> str:
-    _ = package_dir
+def _load_version_helper(package_root: Path):
+    helper_path = package_root / "src" / "_version.py"
+    module_name = f"{package_root.name.replace('-', '_')}_version_helper"
+    spec = importlib.util.spec_from_file_location(module_name, helper_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_literal_module_version(package_root: Path) -> str | None:
     module_path = package_root / "src" / "__init__.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
 
@@ -26,10 +38,20 @@ def _load_module_version(package_root: Path, package_dir: str) -> str:
             continue
         for target in node.targets:
             if isinstance(target, ast.Name) and target.id == "__version__":
-                value = ast.literal_eval(node.value)
-                return str(value)
+                if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                    return node.value.value
+                return None
 
-    raise AssertionError(f"Failed to find __version__ in {module_path}")
+    return None
+
+
+def _build_compatible_requirement(distribution_name: str, version: str) -> str:
+    match = BASE_VERSION_RE.match(version.strip())
+    if not match:
+        raise AssertionError(f"Unsupported version format: {version}")
+    base_version = f"{match.group('major')}.{match.group('minor')}.{match.group('patch')}"
+    upper_bound = f"{int(match.group('major')) + 1}.0.0"
+    return f"{distribution_name}>={base_version},<{upper_bound}"
 
 
 def test_sdk_packaging_maps_flat_src_to_public_package_names():
@@ -44,18 +66,22 @@ def test_sdk_packaging_maps_flat_src_to_public_package_names():
 
 def test_sdk_cli_package_exports_console_script_without_playwright_runtime_dependency():
     pyproject = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "pyproject.toml")
+    contracts_pyproject = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "pyproject.toml")
     dependencies = pyproject["project"]["dependencies"]
     scripts = pyproject["project"]["scripts"]
 
     assert scripts["crawler4j"] == "crawler4j_sdk.cli.commands:main"
     assert all("playwright" not in dependency for dependency in dependencies)
-    assert "crawler4j-contracts>=1.2.0,<2.0.0" in dependencies
+    assert _build_compatible_requirement("crawler4j-contracts", contracts_pyproject["project"]["version"]) in dependencies
 
 
 def test_sdk_runtime_version_matches_publish_metadata():
     package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
     pyproject = _load_pyproject(package_root / "pyproject.toml")
-    assert _load_module_version(package_root, "crawler4j_sdk") == pyproject["project"]["version"]
+    version_helper = _load_version_helper(package_root)
+
+    assert version_helper.get_version() == pyproject["project"]["version"]
+    assert _load_literal_module_version(package_root) is None
 
 
 def test_contracts_packaging_maps_flat_src_to_public_package_name():
@@ -70,17 +96,20 @@ def test_contracts_packaging_maps_flat_src_to_public_package_name():
 def test_contracts_runtime_version_matches_publish_metadata():
     package_root = WORKSPACE_ROOT / "packages" / "crawler4j-contracts"
     pyproject = _load_pyproject(package_root / "pyproject.toml")
-    assert _load_module_version(package_root, "crawler4j_contracts") == pyproject["project"]["version"]
+    assert pyproject["project"]["version"]
+    assert not (package_root / "src" / "_version.py").exists()
+    assert _load_literal_module_version(package_root) is None
 
 
 def test_root_app_package_does_not_reexport_sdk_cli_command():
     pyproject = _load_pyproject(APP_ROOT / "pyproject.toml")
+    contracts_pyproject = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "pyproject.toml")
     dependencies = pyproject["project"]["dependencies"]
     scripts = pyproject["project"]["scripts"]
 
     assert scripts["start"] == "src.ui.app:main"
     assert "crawler4j" not in scripts
-    assert "crawler4j-contracts>=1.2.0" in dependencies
+    assert f"crawler4j-contracts>={contracts_pyproject['project']['version']}" in dependencies
 
 
 def test_workspace_root_declares_packages_workspace_members():

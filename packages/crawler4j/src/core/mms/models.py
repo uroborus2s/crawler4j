@@ -104,6 +104,83 @@ class UIExtensionInfo:
 
 
 @dataclass
+class ConfigDefaultsInfo:
+    """模块默认配置模板。"""
+
+    module: dict[str, Any] = field(default_factory=dict)
+    workflows: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "module": self.module,
+            "workflows": self.workflows,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "ConfigDefaultsInfo":
+        if data is None:
+            return cls()
+        if not isinstance(data, dict):
+            raise ValueError("config_defaults 必须是 YAML 映射对象")
+
+        module_defaults = data.get("module", {})
+        if module_defaults is None:
+            module_defaults = {}
+        if not isinstance(module_defaults, dict):
+            raise ValueError("config_defaults.module 必须是 YAML 映射对象")
+
+        workflow_defaults = data.get("workflows", {})
+        if workflow_defaults is None:
+            workflow_defaults = {}
+        if not isinstance(workflow_defaults, dict):
+            raise ValueError("config_defaults.workflows 必须是 YAML 映射对象")
+
+        normalized_workflows: dict[str, dict[str, Any]] = {}
+        for workflow_name, payload in workflow_defaults.items():
+            workflow_key = str(workflow_name).strip()
+            if not workflow_key:
+                raise ValueError("config_defaults.workflows 里的 workflow 名称不能为空")
+            if payload is None:
+                normalized_workflows[workflow_key] = {}
+                continue
+            if not isinstance(payload, dict):
+                raise ValueError(
+                    f"config_defaults.workflows.{workflow_key} 必须是 YAML 映射对象"
+                )
+            normalized_workflows[workflow_key] = payload
+
+        return cls(module=module_defaults, workflows=normalized_workflows)
+
+
+@dataclass
+class UpgradeSourceInfo:
+    """模块升级源配置。"""
+
+    type: str = "github_release"
+    repo: str = ""
+    allow_prerelease: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "repo": self.repo,
+            "allow_prerelease": self.allow_prerelease,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "UpgradeSourceInfo":
+        if data is None:
+            return cls()
+        if not isinstance(data, dict):
+            raise ValueError("upgrade_source 必须是 YAML 映射对象")
+        return cls(
+            type=str(data.get("type", "github_release") or "github_release").strip() or "github_release",
+            repo=str(data.get("repo", "") or "").strip(),
+            allow_prerelease=bool(data.get("allow_prerelease", False)),
+        )
+
+
+@dataclass
 class ModuleManifest:
     """模块清单 (module.yaml)。
     
@@ -114,9 +191,10 @@ class ModuleManifest:
     display_name: str = ""
     description: str = ""
     author: str = ""
-    sdk_version_range: str = ">=2.0.0"
     workflows: list[WorkflowInfo] = field(default_factory=list)
     ui_extension: UIExtensionInfo = field(default_factory=UIExtensionInfo)
+    config_defaults: ConfigDefaultsInfo = field(default_factory=ConfigDefaultsInfo)
+    upgrade_source: UpgradeSourceInfo = field(default_factory=UpgradeSourceInfo)
     
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典。"""
@@ -126,7 +204,7 @@ class ModuleManifest:
             "display_name": self.display_name,
             "description": self.description,
             "author": self.author,
-            "sdk_version_range": self.sdk_version_range,
+            "upgrade_source": self.upgrade_source.to_dict(),
             "workflows": [
                 {
                     "name": w.name,
@@ -161,6 +239,7 @@ class ModuleManifest:
                     for item in self.ui_extension.detail_menu
                 ],
             },
+            "config_defaults": self.config_defaults.to_dict(),
         }
     
     @classmethod
@@ -204,16 +283,19 @@ class ModuleManifest:
             nav_item=nav_item,
             detail_menu=detail_menu,
         )
-        
+        config_defaults = ConfigDefaultsInfo.from_dict(data.get("config_defaults"))
+        upgrade_source = UpgradeSourceInfo.from_dict(data.get("upgrade_source"))
+
         return cls(
             name=data.get("name", ""),
             version=data.get("version", "1.0.0"),
             display_name=data.get("display_name", ""),
             description=data.get("description", ""),
             author=data.get("author", ""),
-            sdk_version_range=data.get("sdk_version_range", ">=2.0.0"),
             workflows=workflows,
             ui_extension=ui_extension,
+            config_defaults=config_defaults,
+            upgrade_source=upgrade_source,
         )
 
 

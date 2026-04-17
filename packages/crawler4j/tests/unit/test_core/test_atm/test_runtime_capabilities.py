@@ -159,15 +159,46 @@ async def test_env_tool_delegates_to_environment_manager(monkeypatch):
 
 
 def test_ui_tools_persist_data_table_meta(monkeypatch):
-    fake_kv = _FakeKV()
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
-
     caps = build_runtime_capabilities("demo_module")
-    assert caps.tools.call("ui.declare_data_table", view_id="accounts", schema={"title": "示例账号", "dataset": "accounts"})
+    assert caps.tools.call(
+        "ui.declare_data_table",
+        view_id="accounts",
+        schema={
+            "title": "示例账号",
+            "dataset": "accounts",
+            "columns": [{"key": "phone", "label": "手机号"}],
+        },
+    )
 
     meta = caps.tools.call("ui.get_data_table", view_id="accounts")
     assert meta["title"] == "示例账号"
     assert meta["dataset"] == "accounts"
+    assert meta["columns"] == [{"key": "phone", "label": "手机号"}]
+
+
+def test_ui_tools_reject_unmanaged_schema_fields():
+    caps = build_runtime_capabilities("demo_module")
+
+    with pytest.raises(ValueError):
+        caps.tools.call(
+            "ui.declare_data_table",
+            view_id="accounts",
+            schema={"title": "示例账号", "dataset": "other_dataset"},
+        )
+
+    with pytest.raises(ValueError):
+        caps.tools.call(
+            "ui.declare_data_table",
+            view_id="Accounts",
+            schema={"title": "示例账号"},
+        )
+
+    with pytest.raises(ValueError):
+        caps.tools.call(
+            "ui.declare_data_table",
+            view_id="accounts",
+            schema={"title": "示例账号", "unknown": True},
+        )
 
 
 def test_captcha_tool_matches_slider_via_sinanz(monkeypatch):

@@ -531,12 +531,9 @@ class SettingsPage(QWidget):
 
     def _populate_combo(self, combo: QComboBox, items: list[tuple[str, str]]):
         """填充下拉框 (data, display_text)。"""
-        # combo.setView(QListView())  # Handled by StyledComboBox
         combo.clear()
         for data, text in items:
             combo.addItem(text, data)
-        # 固定高度修复显示问题 - Handled by StyledComboBox min-height
-        # combo.setStyleSheet(combo.styleSheet() + "QComboBox { min-height: 28px; }")
 
     def _set_combo_value(self, combo: QComboBox, value: Any):
         """根据内部值选中下拉项。"""

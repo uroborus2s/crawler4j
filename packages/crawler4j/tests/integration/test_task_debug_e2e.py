@@ -118,7 +118,9 @@ def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int
         """
         name: demo_module
         version: 1.0.0
-        sdk_version_range: ">=1.0.2"
+        upgrade_source:
+          type: github_release
+          repo: example/demo_module
         workflows:
           - name: login_workflow
             display_name: 登录流程

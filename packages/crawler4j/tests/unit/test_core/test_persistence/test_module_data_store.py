@@ -16,30 +16,25 @@ def temp_data_dir(tmp_path):
         yield tmp_path
 
 
-def test_module_data_store_migrates_legacy_kv_records_and_schema(temp_data_dir):
-    from src.core.persistence import DATA_DB, get_connection, get_kv_store
+def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.module_data_store import ModuleDataStore
 
-    kv = get_kv_store()
-    kv.set(
-        "module:demo_module:dataset:accounts",
-        [{"id": "u1", "phone": "13800138000"}],
-    )
-    kv.set(
-        "module:demo_module:ui:data_table:accounts",
-        {"title": "账号管理", "dataset": "accounts", "columns": [{"key": "phone"}]},
-    )
-
     store = ModuleDataStore()
+
+    assert store.write_dataset("demo_module", "accounts", [{"id": "u1", "phone": "13800138000"}]) is True
+    assert store.write_data_table_schema(
+        "demo_module",
+        "accounts",
+        {"title": "账号管理", "dataset": "accounts", "columns": [{"key": "phone", "label": "手机号"}]},
+    ) is True
 
     assert store.read_dataset("demo_module", "accounts") == [{"id": "u1", "phone": "13800138000"}]
     assert store.read_data_table_schema("demo_module", "accounts") == {
         "title": "账号管理",
         "dataset": "accounts",
-        "columns": [{"key": "phone"}],
+        "columns": [{"key": "phone", "label": "手机号"}],
     }
-    assert kv.get("module:demo_module:dataset:accounts") is None
-    assert kv.get("module:demo_module:ui:data_table:accounts") is None
 
     with get_connection(DATA_DB) as conn:
         dataset_row = conn.execute(
@@ -55,38 +50,36 @@ def test_module_data_store_migrates_legacy_kv_records_and_schema(temp_data_dir):
     assert schema_row is not None
 
 
-def test_module_data_store_clear_module_data_removes_new_and_legacy_rows(temp_data_dir):
+def test_module_data_store_clear_module_data_removes_data_db_rows_only(temp_data_dir):
     from src.core.persistence import get_kv_store
     from src.core.persistence.module_data_store import ModuleDataStore
 
     kv = get_kv_store()
+    kv.set("module:demo_module:dataset:legacy_accounts", [{"id": "legacy"}])
+    kv.set("module:demo_module:ui:data_table:legacy_accounts", {"title": "旧账号"})
+
     store = ModuleDataStore()
     store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
     store.write_data_table_schema("demo_module", "accounts", {"title": "账号管理", "dataset": "accounts"})
 
-    kv.set("module:demo_module:dataset:legacy_accounts", [{"id": "legacy"}])
-    kv.set("module:demo_module:ui:data_table:legacy_accounts", {"title": "旧账号"})
-
     assert store.clear_module_data("demo_module") is True
     assert store.read_dataset("demo_module", "accounts") == []
     assert store.read_data_table_schema("demo_module", "accounts") == {}
-    assert kv.get("module:demo_module:dataset:legacy_accounts") is None
-    assert kv.get("module:demo_module:ui:data_table:legacy_accounts") is None
+    assert kv.get("module:demo_module:dataset:legacy_accounts") == [{"id": "legacy"}]
+    assert kv.get("module:demo_module:ui:data_table:legacy_accounts") == {"title": "旧账号"}
 
 
-def test_module_data_store_keeps_explicit_empty_new_rows_over_legacy_kv(temp_data_dir):
+def test_module_data_store_ignores_legacy_kv_rows(temp_data_dir):
     from src.core.persistence import get_kv_store
     from src.core.persistence.module_data_store import ModuleDataStore
 
     kv = get_kv_store()
-    store = ModuleDataStore()
-    store.write_dataset("demo_module", "accounts", [])
-    store.write_data_table_schema("demo_module", "accounts", {})
-
     kv.set("module:demo_module:dataset:accounts", [{"id": "legacy"}])
     kv.set("module:demo_module:ui:data_table:accounts", {"title": "旧账号"})
 
+    store = ModuleDataStore()
+
     assert store.read_dataset("demo_module", "accounts") == []
     assert store.read_data_table_schema("demo_module", "accounts") == {}
-    assert kv.get("module:demo_module:dataset:accounts") is None
-    assert kv.get("module:demo_module:ui:data_table:accounts") is None
+    assert kv.get("module:demo_module:dataset:accounts") == [{"id": "legacy"}]
+    assert kv.get("module:demo_module:ui:data_table:accounts") == {"title": "旧账号"}

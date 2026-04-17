@@ -121,7 +121,6 @@ class GenericModulePage(QWidget):
         meta = [
             ("作者", self._module.manifest.author or "未知"),
             ("来源", "内置" if self._module.source.value == "builtin" else "外部"),
-            ("SDK 版本", self._module.manifest.sdk_version_range),
         ]
         
         for label, value in meta:

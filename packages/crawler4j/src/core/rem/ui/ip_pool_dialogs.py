@@ -67,23 +67,6 @@ class AddPoolDialog(QDialog):
             QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {
                 border-color: #89b4fa;
             }
-            QComboBox {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #cdd6f4;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 24px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                selection-background-color: #89b4fa;
-                selection-color: #1e1e2e;
-            }
             QPushButton {
                 background-color: #45475a;
                 border: none;
@@ -169,23 +152,6 @@ class AddIPDialog(QDialog):
             }
             QLineEdit:focus, QSpinBox:focus {
                 border-color: #89b4fa;
-            }
-            QComboBox {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #cdd6f4;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 24px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                selection-background-color: #89b4fa;
-                selection-color: #1e1e2e;
             }
             QPushButton {
                 background-color: #45475a;
@@ -307,23 +273,6 @@ class BatchImportDialog(QDialog):
             }
             QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {
                 border-color: #89b4fa;
-            }
-            QComboBox {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #cdd6f4;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 24px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                selection-background-color: #89b4fa;
-                selection-color: #1e1e2e;
             }
             QPushButton {
                 background-color: #45475a;

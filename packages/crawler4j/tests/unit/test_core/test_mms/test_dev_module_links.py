@@ -16,7 +16,11 @@ def temp_data_dir(tmp_path):
 def _write_module(module_dir: Path, name: str, version: str) -> None:
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "module.yaml").write_text(
-        f"name: {name}\nversion: {version}\n",
+        "name: {name}\n"
+        "version: {version}\n"
+        "upgrade_source:\n"
+        "  type: github_release\n"
+        "  repo: example/{name}\n".format(name=name, version=version),
         encoding="utf-8",
     )
 

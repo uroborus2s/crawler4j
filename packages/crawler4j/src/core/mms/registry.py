@@ -18,6 +18,7 @@ from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
 from src.core.mms.models import (
     ModuleInfo,
+    ModuleInstallError,
     ModuleManifest,
     ModuleSource,
     ModuleStatus,
@@ -27,12 +28,6 @@ from src.core.mms.scanner import ModuleScanner
 from src.core.mms.settings_store import ModuleSettingsStore, get_module_settings_store
 from src.core.persistence import get_module_data_store
 from src.utils.paths import get_app_data_dir
-
-
-class ModuleInstallError(Exception):
-    """模块安装错误。"""
-    pass
-
 
 class ModuleRegistry:
     """模块注册表。
@@ -92,6 +87,8 @@ class ModuleRegistry:
                 name_hint=link.module_name,
             )
             self._merge_loaded_module(module_info)
+
+        self._initialize_loaded_module_configs()
         
         self._loaded = True
         logger.info(f"[MMS] 注册表加载完成: {len(self._modules)} 个模块")
@@ -132,6 +129,17 @@ class ModuleRegistry:
         if persisted is not None:
             module_info.status = persisted
         return module_info
+
+    def _initialize_loaded_module_configs(self) -> None:
+        for module_info in self._modules.values():
+            if module_info.status not in {ModuleStatus.ENABLED, ModuleStatus.DISABLED}:
+                continue
+            defaults = module_info.manifest.config_defaults
+            self._settings_store.ensure_config_defaults_initialized(
+                module_info.name,
+                defaults.module,
+                defaults.workflows,
+            )
     
     def refresh(self) -> dict[str, list[str] | int]:
         """刷新注册表。
@@ -245,6 +253,7 @@ class ModuleRegistry:
         
         # 确保安装目录存在
         self._install_dir.mkdir(parents=True, exist_ok=True)
+        previous_module = None
         
         try:
             if source_path.suffix == ".zip":
@@ -256,6 +265,8 @@ class ModuleRegistry:
             else:
                 raise ModuleInstallError(f"不支持的源类型: {source}")
 
+            previous_module = self._modules.get(module_info.name)
+
             # 安装正式模块时，移除同名开发链接，避免运行时继续优先落到源码目录。
             if self._dev_link_store.delete_link(module_info.name):
                 logger.info(f"[MMS] 已移除同名开发链接，切换到安装模块: {module_info.name}")
@@ -263,7 +274,19 @@ class ModuleRegistry:
             # 更新注册表
             self._apply_persisted_module_status(module_info)
             self._modules[module_info.name] = module_info
+            self._initialize_loaded_module_configs()
             logger.info(f"[MMS] 已安装: {module_info.name} v{module_info.manifest.version}")
+
+            event_type = EventType.MODULE_UPGRADED if previous_module and previous_module.source == ModuleSource.EXTERNAL else EventType.MODULE_INSTALLED
+            get_event_bus().publish(Event(
+                type=event_type,
+                module_name=module_info.name,
+                data={
+                    "module_name": module_info.name,
+                    "version": module_info.manifest.version,
+                    "source": module_info.source.value,
+                },
+            ))
             
             return module_info
             
@@ -278,6 +301,7 @@ class ModuleRegistry:
             raise ModuleInstallError(f"开发模块目录不存在: {module_dir}")
 
         manifest = self._scanner.parse_manifest(module_dir)
+        self._scanner.validate(manifest, module_dir)
         self._dev_link_store.upsert_link(manifest.name, module_dir)
         self.load(force=True)
 
@@ -390,6 +414,12 @@ class ModuleRegistry:
             
             # 从注册表移除
             del self._modules[module_name]
+
+            get_event_bus().publish(Event(
+                type=EventType.MODULE_UNINSTALLED,
+                module_name=module_name,
+                data={"module_name": module_name},
+            ))
             
             logger.info(f"[MMS] 已卸载: {module_name}")
             return True

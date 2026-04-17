@@ -1,21 +1,21 @@
-"""CLI scaffolding tests for module-only projects."""
+"""CLI scaffold tests for the refactored crawler4j SDK command tree."""
 
 from __future__ import annotations
 
 import importlib
 import sys
+import tomllib
 from argparse import Namespace
 from pathlib import Path
-import tomllib
 
 import pytest
 import yaml
 
+from crawler4j_sdk._version import get_compatible_dependency_spec
 from crawler4j_sdk.cli import commands
 
 
 def _import_generated_package(package_root: Path):
-    """Import a generated package from a temporary parent directory."""
     package_name = package_root.name
     parent = str(package_root.parent)
     if parent not in sys.path:
@@ -29,190 +29,274 @@ def _import_generated_package(package_root: Path):
 
 
 def _read_manifest(module_root: Path) -> dict:
-    with (module_root / "module.yaml").open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    with (module_root / "module.yaml").open("r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
 
 
 @pytest.fixture
-def model_args(tmp_path: Path) -> Namespace:
+def module_root(tmp_path: Path) -> Path:
     target = tmp_path / "demo_model"
-    return Namespace(
+    args = Namespace(
         name="demo_model",
+        repo="demo/demo_model",
         output=str(target),
-        force=False,
-        no_install=True,
-        no_git=True,
-        workflow_name="main_workflow",
         display_name=None,
         description=None,
+        version="0.1.0",
+        workflow_name="main_workflow",
         workflow_display_name=None,
         workflow_description=None,
         python_version="3.12",
-        defaults=True,
-        no_ui=False,
+        no_git=True,
+        no_install=True,
+        force=False,
+    )
+    assert commands.cmd_module_init(args) == 0
+    return target
+
+
+def test_module_init_creates_complete_project(module_root: Path):
+    assert (module_root / "__init__.py").exists()
+    assert (module_root / "module_runtime.py").exists()
+    assert (module_root / "module.yaml").exists()
+    assert (module_root / "pyproject.toml").exists()
+    assert (module_root / "README.md").exists()
+    assert (module_root / ".gitignore").exists()
+    assert (module_root / ".python-version").exists()
+    assert (module_root / "tasks" / "example_task.py").exists()
+    assert (module_root / "workflows" / "main_workflow.py").exists()
+    assert (module_root / "ui" / "__init__.py").exists()
+    assert not (module_root / "data").exists()
+
+    manifest = _read_manifest(module_root)
+    assert manifest["name"] == "demo_model"
+    assert manifest["version"] == "0.1.0"
+    assert manifest["upgrade_source"] == {
+        "type": "github_release",
+        "repo": "demo/demo_model",
+        "allow_prerelease": False,
+    }
+    assert manifest["config_defaults"] == {"module": {}, "workflows": {}}
+    assert manifest["workflows"] == [
+        {
+            "name": "main_workflow",
+            "display_name": "Main Workflow",
+            "description": "Main Workflow 工作流",
+        }
+    ]
+    assert "ui_extension" not in manifest
+
+
+def test_module_init_generates_importable_package(module_root: Path):
+    module = _import_generated_package(module_root)
+
+    assert hasattr(module, "run")
+    assert hasattr(module, "prepare_env")
+    assert hasattr(module, "select_env")
+    assert hasattr(module, "declare_ui")
+    assert "example_task" in module.assembler.task_scripts
+    assert "main_workflow" in module.assembler.workflows
+    assert [selector.name for selector in module.assembler.list_env_selectors()] == [
+        "random_ready",
+        "return_none",
+    ]
+
+
+def test_generated_pyproject_uses_sdk_dependency_range(module_root: Path):
+    with (module_root / "pyproject.toml").open("rb") as fh:
+        pyproject = tomllib.load(fh)
+
+    assert get_compatible_dependency_spec() in pyproject["project"]["dependencies"]
+    assert "scripts" not in pyproject["project"]
+
+
+def test_module_set_commands_update_manifest_and_runtime(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+
+    assert commands.cmd_workflow_create(
+        Namespace(name="repair_orders", display_name=None, description=None, force=False)
+    ) == 0
+    assert commands.cmd_module_set_repo(Namespace(repo="demo/release_repo")) == 0
+    assert commands.cmd_module_set_version(Namespace(version="0.2.0")) == 0
+    assert commands.cmd_module_set_default_workflow(Namespace(workflow="repair_orders")) == 0
+
+    manifest = _read_manifest(module_root)
+    assert manifest["upgrade_source"]["repo"] == "demo/release_repo"
+    assert manifest["version"] == "0.2.0"
+    runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
+    assert 'DEFAULT_WORKFLOW = "repair_orders"' in runtime_text
+
+
+def test_resource_commands_create_files_and_update_manifest(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.chdir(module_root)
+
+    assert commands.cmd_task_create(Namespace(name="extra_task", force=False)) == 0
+    assert commands.cmd_workflow_create(
+        Namespace(name="repair_orders", display_name=None, description=None, force=False)
+    ) == 0
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    assert commands.cmd_data_table_create(Namespace(view_id="accounts", label=None, icon=None)) == 0
+    assert commands.cmd_env_selector_create(
+        Namespace(name="pick_ready", display_name=None, description=None)
+    ) == 0
+
+    assert (module_root / "tasks" / "extra_task.py").exists()
+    assert (module_root / "workflows" / "repair_orders.py").exists()
+    assert (module_root / "ui" / "dashboard.py").exists()
+
+    ui_init = (module_root / "ui" / "__init__.py").read_text(encoding="utf-8")
+    assert "from .dashboard import DashboardPage" in ui_init
+
+    manifest = _read_manifest(module_root)
+    assert [item["name"] for item in manifest["workflows"]] == ["main_workflow", "repair_orders"]
+    assert manifest["ui_extension"]["type"] == "micro_app"
+    assert manifest["ui_extension"]["entry"] == "ui:DashboardPage"
+    assert manifest["ui_extension"]["detail_menu"] == [
+        {
+            "id": "accounts",
+            "label": "Accounts",
+            "icon": "📋",
+            "entry": "core:data_table:accounts",
+        }
+    ]
+
+    runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
+    assert "_declare_accounts_table" in runtime_text
+    assert "_declare_accounts_table(context)" in runtime_text
+    assert 'name="pick_ready"' in runtime_text
+
+
+def test_task_create_refuses_to_clobber_existing_files(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+
+    assert commands.cmd_task_create(Namespace(name="sync_orders", force=False)) == 0
+    assert commands.cmd_task_create(Namespace(name="sync_orders", force=False)) == 1
+    assert commands.cmd_task_create(Namespace(name="sync_orders", force=True)) == 0
+
+
+def test_config_commands_update_manifest_and_lint(module_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+
+    module_defaults = tmp_path / "module_defaults.yaml"
+    workflow_defaults = tmp_path / "workflow_defaults.yaml"
+    module_defaults.write_text("base_url: https://example.com\nenabled: true\n", encoding="utf-8")
+    workflow_defaults.write_text("limit: 20\n", encoding="utf-8")
+
+    assert commands.cmd_config_set_module(Namespace(file=str(module_defaults))) == 0
+    assert commands.cmd_config_set_workflow(
+        Namespace(workflow="main_workflow", file=str(workflow_defaults))
+    ) == 0
+    assert commands.cmd_config_lint(Namespace()) == 0
+
+    manifest = _read_manifest(module_root)
+    assert manifest["config_defaults"]["module"] == {
+        "base_url": "https://example.com",
+        "enabled": True,
+    }
+    assert manifest["config_defaults"]["workflows"]["main_workflow"] == {"limit": 20}
+
+
+def test_check_full_passes_for_fresh_scaffold(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_check_full(Namespace()) == 0
+
+
+def test_check_rejects_missing_module_runtime(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+    (module_root / "module_runtime.py").unlink()
+
+    assert commands.cmd_check_structure(Namespace()) == 1
+
+
+def test_check_rejects_undeclared_workflow_defaults(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+    manifest = _read_manifest(module_root)
+    manifest["config_defaults"]["workflows"]["missing_workflow"] = {"limit": 1}
+    (module_root / "module.yaml").write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
     )
 
-
-class TestModelScaffoldInit:
-    def test_init_model_creates_complete_module_project(self, model_args: Namespace):
-        target = Path(model_args.output)
-
-        result = commands.cmd_init_model(model_args)
-
-        assert result == 0
-        assert (target / "__init__.py").exists()
-        assert (target / "module.yaml").exists()
-        assert (target / ".gitignore").exists()
-        assert (target / ".python-version").exists()
-        assert (target / "tasks" / "__init__.py").exists()
-        assert (target / "tasks" / "example_task.py").exists()
-        assert (target / "workflows" / "__init__.py").exists()
-        assert (target / "workflows" / "main_workflow.py").exists()
-        assert (target / "module_runtime.py").exists()
-        assert (target / "pyproject.toml").exists()
-
-        manifest = _read_manifest(target)
-        assert manifest["name"] == "demo_model"
-        assert "ui_extension" not in manifest
-        assert manifest["workflows"][0]["name"] == "main_workflow"
-
-    def test_init_model_generates_importable_module_package(self, model_args: Namespace):
-        target = Path(model_args.output)
-        commands.cmd_init_model(model_args)
-
-        module = _import_generated_package(target)
-
-        assert hasattr(module, "run")
-        assert hasattr(module, "prepare_env")
-        assert hasattr(module, "select_env")
-        assert "example_task" in module.assembler.task_scripts
-        assert "main_workflow" in module.assembler.workflows
-        assert [selector.name for selector in module.assembler.list_env_selectors()] == [
-            "random_ready",
-            "return_none",
-        ]
-
-    def test_init_model_generated_pyproject_does_not_duplicate_cli_or_playwright_dependency(self, model_args: Namespace):
-        target = Path(model_args.output)
-
-        result = commands.cmd_init_model(model_args)
-
-        assert result == 0
-        with (target / "pyproject.toml").open("rb") as f:
-            pyproject = tomllib.load(f)
-
-        dependencies = pyproject["project"]["dependencies"]
-        assert "scripts" not in pyproject["project"]
-        assert all("playwright" not in dependency for dependency in dependencies)
-        assert "crawler4j-sdk>=1.2.0,<2.0.0" in dependencies
-
-    def test_init_model_interactive_wizard_runs_git_init_and_uv_sync(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ):
-        target = tmp_path / "demo_model"
-        # commands.cmd_init_model doesn't use interactive wizard anymore in latest implementation, 
-        # it just uses args. 
-        args = Namespace(
-            name="demo_model",
-            output=str(target),
-            force=False,
-            no_install=False,
-            no_git=False,
-            workflow_name="main_workflow",
-            display_name="示例模块",
-            description="示例任务模块",
-            workflow_display_name=None,
-            workflow_description=None,
-            python_version="3.12",
-            defaults=True,
-            no_ui=False,
-        )
-
-        calls: list[tuple[list[str], str]] = []
-
-        def fake_run(cmd: list[str], cwd: str | None = None, check: bool = False, capture_output: bool = False):
-            calls.append((cmd, cwd or ""))
-            return None
-
-        monkeypatch.setattr(commands.subprocess, "run", fake_run)
-
-        result = commands.cmd_init_model(args)
-
-        assert result == 0
-        assert calls == [
-            (["git", "init"], str(target)),
-            (["uv", "sync"], str(target)),
-        ]
-
-    def test_removed_init_command_is_no_longer_supported(self, monkeypatch: pytest.MonkeyPatch, capsys):
-        monkeypatch.setattr(sys, "argv", ["crawler4j", "init", "demo_project"])
-
-        with pytest.raises(SystemExit) as exc_info:
-            commands.main()
-
-        captured = capsys.readouterr()
-        assert exc_info.value.code == 2
-        assert "invalid choice" in captured.err
-        assert "init-model" in captured.err
+    assert commands.cmd_check_release(Namespace()) == 1
 
 
-class TestModelScaffoldExtensions:
-    def test_add_workflow_creates_file_and_updates_manifest(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        model_args: Namespace,
-    ):
-        target = Path(model_args.output)
-        commands.cmd_init_model(model_args)
-        monkeypatch.chdir(target)
+def test_check_rejects_unregistered_workflow_file(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+    (module_root / "workflows" / "rogue.py").write_text("# rogue workflow\n", encoding="utf-8")
 
-        result = commands.cmd_add_workflow(
-            Namespace(
-                name="sync_orders",
-                force=False,
-            )
-        )
+    assert commands.cmd_check_structure(Namespace()) == 1
 
-        assert result == 0
-        assert (target / "workflows" / "sync_orders.py").exists()
 
-        manifest = _read_manifest(target)
-        workflow_names = [item["name"] for item in manifest["workflows"]]
-        assert "sync_orders" in workflow_names
+def test_check_full_reports_module_runtime_import_error(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    (module_root / "module_runtime.py").write_text(
+        "from missing_runtime_dependency import nope\n",
+        encoding="utf-8",
+    )
 
-    def test_add_ui_creates_code_ui_and_updates_manifest(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        model_args: Namespace,
-    ):
-        target = Path(model_args.output)
-        commands.cmd_init_model(model_args)
-        monkeypatch.chdir(target)
+    assert commands.cmd_check_full(Namespace()) == 1
 
-        result = commands.cmd_add_ui(
-            Namespace(
-                name="dashboard",
-                type="code",
-                force=False,
-            )
-        )
+    captured = capsys.readouterr()
+    assert "module_runtime.py 无法导入" in captured.out
 
-        assert result == 0
-        assert (target / "ui" / "dashboard.py").exists()
-        assert (target / "ui" / "__init__.py").read_text(encoding="utf-8").strip() == "from .dashboard import DashboardPage"
 
-        manifest = _read_manifest(target)
-        assert manifest["ui_extension"]["type"] == "micro_app"
-        assert manifest["ui_extension"]["entry"] == "ui:DashboardPage"
+def test_check_full_reports_ui_import_error(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    (module_root / "ui" / "__init__.py").write_text(
+        "from missing_ui_dependency import BrokenPage\n",
+        encoding="utf-8",
+    )
 
-    def test_add_requires_model_project_context(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
-        monkeypatch.chdir(tmp_path)
+    assert commands.cmd_check_full(Namespace()) == 1
 
-        with pytest.raises(SystemExit):
-            commands.cmd_add(Namespace(name="extra_task", force=False))
+    captured = capsys.readouterr()
+    assert "ui 包无法导入" in captured.out
 
-        captured = capsys.readouterr()
-        assert "找不到 module.yaml" in captured.out
+
+def test_package_build_and_verify(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+
+    build_result = commands.cmd_package_build(Namespace(output=None))
+    assert build_result == 0
+
+    archive = module_root / "dist" / "demo_model-0.1.0.zip"
+    assert archive.exists()
+    assert commands.cmd_package_verify(Namespace(archive=str(archive))) == 0
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["crawler4j", "init-model", "demo_model"],
+        ["crawler4j", "add", "task_name"],
+        ["crawler4j", "new", "task_name"],
+        ["crawler4j", "list"],
+        ["crawler4j", "add-workflow", "sync_orders"],
+        ["crawler4j", "add-ui", "dashboard"],
+        ["crawler4j", "add-data-table", "accounts"],
+        ["crawler4j", "add-data", "legacy_data"],
+    ],
+)
+def test_legacy_command_name_is_rejected(monkeypatch: pytest.MonkeyPatch, argv: list[str]):
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as exc_info:
+        commands.main()
+
+    assert exc_info.value.code == 2

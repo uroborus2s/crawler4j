@@ -51,7 +51,14 @@ def _build_module_archive(
     package_root = root / package_dir_name
     package_root.mkdir(parents=True, exist_ok=True)
     (package_root / "module.yaml").write_text(
-        f"name: {module_name}\nversion: {version}\nsdk_version_range: \">=1.0.2\"\n",
+        "name: {module_name}\n"
+        "version: {version}\n"
+        "upgrade_source:\n"
+        "  type: github_release\n"
+        "  repo: example/{module_name}\n".format(
+            module_name=module_name,
+            version=version,
+        ),
         encoding="utf-8",
     )
     (package_root / "__init__.py").write_text(
@@ -109,7 +116,14 @@ async def test_installing_packaged_module_removes_same_name_dev_link_and_uses_in
     )
     dev_source = temp_data_dir / "demo_module_dev"
     dev_source.mkdir(parents=True, exist_ok=True)
-    (dev_source / "module.yaml").write_text("name: demo_module\nversion: 9.9.9\n", encoding="utf-8")
+    (dev_source / "module.yaml").write_text(
+        "name: demo_module\n"
+        "version: 9.9.9\n"
+        "upgrade_source:\n"
+        "  type: github_release\n"
+        "  repo: example/demo_module\n",
+        encoding="utf-8",
+    )
     (dev_source / "__init__.py").write_text("VALUE = 'dev'\n", encoding="utf-8")
     dev_store = _FakeDevLinkStore(
         [

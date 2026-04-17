@@ -10,7 +10,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -30,6 +29,7 @@ from src.core.mms.models import ModuleSource
 from src.core.mms.service import get_module_service
 from src.core.mms.settings_store import get_module_settings_store
 from src.core.persistence import get_kv_store, get_module_data_store
+from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.table import SkyTableWidget
 
 
@@ -81,7 +81,7 @@ class _RecordEditDialog(QDialog):
                 font-size: 14px;
                 font-weight: 500;
             }
-            QLineEdit, QComboBox {
+            QLineEdit {
                 background-color: #0f1326;
                 color: #f5f7ff;
                 border: 1px solid rgba(134, 148, 214, 0.62);
@@ -91,23 +91,9 @@ class _RecordEditDialog(QDialog):
                 selection-background-color: #4f7cff;
                 selection-color: white;
             }
-            QLineEdit:focus, QComboBox:focus {
+            QLineEdit:focus {
                 border: 1px solid #7ea2ff;
                 background-color: #141a34;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 24px;
-                background: rgba(255, 255, 255, 0.06);
-                border-top-right-radius: 6px;
-                border-bottom-right-radius: 6px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #1d2445;
-                color: #f5f7ff;
-                border: 1px solid rgba(134, 148, 214, 0.62);
-                selection-background-color: #4f7cff;
-                selection-color: white;
             }
             QCheckBox {
                 color: #eaf0ff;

@@ -19,7 +19,16 @@ class InstallPreviewDialog(QDialog):
     展示待安装模块的元信息供用户确认。
     """
     
-    def __init__(self, manifest, warnings: list[str], parent=None):
+    def __init__(
+        self,
+        manifest,
+        warnings: list[str],
+        parent=None,
+        *,
+        title: str = "确认安装模块",
+        confirm_text: str = "确认安装",
+        source_details: list[tuple[str, str]] | None = None,
+    ):
         """初始化对话框。
         
         Args:
@@ -30,10 +39,13 @@ class InstallPreviewDialog(QDialog):
         super().__init__(parent)
         self._manifest = manifest
         self._warnings = warnings
+        self._title = title
+        self._confirm_text = confirm_text
+        self._source_details = source_details or []
         self._setup_ui()
     
     def _setup_ui(self):
-        self.setWindowTitle("确认安装模块")
+        self.setWindowTitle(self._title)
         self.setMinimumWidth(450)
         self.setStyleSheet("""
             QDialog {
@@ -61,7 +73,6 @@ class InstallPreviewDialog(QDialog):
             ("版本", self._manifest.version),
             ("作者", self._manifest.author or "未知"),
             ("描述", self._manifest.description or "无"),
-            ("SDK 要求", self._manifest.sdk_version_range),
         ]
         
         for label, value in info:
@@ -73,8 +84,26 @@ class InstallPreviewDialog(QDialog):
             row.addWidget(key_label)
             row.addWidget(value_label, 1)
             info_layout.addLayout(row)
-        
+
         layout.addLayout(info_layout)
+
+        if self._source_details:
+            source_title = QLabel("来源信息")
+            source_title.setStyleSheet("color: rgba(255,255,255,0.8); margin-top: 8px;")
+            layout.addWidget(source_title)
+
+            source_layout = QVBoxLayout()
+            source_layout.setSpacing(8)
+            for label, value in self._source_details:
+                row = QHBoxLayout()
+                key_label = QLabel(f"{label}:")
+                key_label.setStyleSheet("color: rgba(255,255,255,0.6); min-width: 80px;")
+                value_label = QLabel(value or "-")
+                value_label.setWordWrap(True)
+                row.addWidget(key_label)
+                row.addWidget(value_label, 1)
+                source_layout.addLayout(row)
+            layout.addLayout(source_layout)
         
         # 工作流列表
         if self._manifest.workflows:
@@ -120,7 +149,7 @@ class InstallPreviewDialog(QDialog):
         ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
         cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
         if ok_btn:
-            ok_btn.setText("确认安装")
+            ok_btn.setText(self._confirm_text)
         if cancel_btn:
             cancel_btn.setText("取消")
         buttons.accepted.connect(self.accept)
@@ -132,7 +161,7 @@ class InstallPreviewDialog(QDialog):
                 border-radius: 4px;
                 font-weight: bold;
             }
-            QPushButton[text="确认安装"] {
+            QPushButton[text="%s"] {
                 background-color: #4ade80;
                 color: black;
             }
@@ -140,6 +169,6 @@ class InstallPreviewDialog(QDialog):
                 background-color: rgba(255,255,255,0.1);
                 color: white;
             }
-        """)
+        """ % self._confirm_text)
         
         layout.addWidget(buttons)

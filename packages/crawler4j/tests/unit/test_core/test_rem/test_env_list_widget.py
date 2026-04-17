@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 from src.core.rem import EnvKind
 from src.core.rem.models import ProxyMode
+from src.ui.components.combo_box import StyledComboBox
 
 
 def _patch_dialog_dependencies(monkeypatch, suggested_name: str):
@@ -55,6 +56,20 @@ def test_create_env_dialog_submits_custom_name_after_edit(qtbot, monkeypatch):
     _, _, config = dialog.get_values()
 
     assert config["env_name"] == "custom-env"
+
+
+def test_create_env_dialog_uses_styled_combo_boxes(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    dialog = env_list_widget.CreateEnvDialog()
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog.kind_combo, StyledComboBox)
+    assert isinstance(dialog.provider_combo, StyledComboBox)
+    assert isinstance(dialog.proxy_mode_combo, StyledComboBox)
+    assert isinstance(dialog.proxy_source_combo, StyledComboBox)
+    assert isinstance(dialog.pool_combo, StyledComboBox)
+    assert "QComboBox {" not in dialog.styleSheet()
 
 
 def test_env_list_widget_create_finished_refreshes_without_success_dialog(qtbot, monkeypatch):

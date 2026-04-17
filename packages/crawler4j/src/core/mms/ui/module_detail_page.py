@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -18,7 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.mms.models import ModuleInfo, ModuleSource
+from src.core.mms.models import DetailMenuItem, ModuleInfo, ModuleSource
 from src.core.mms.ui.module_config_page import ModuleConfigPage
 from src.core.mms.ui_loader import (
     ModuleUIAccessDenied,
@@ -42,6 +43,7 @@ class ModuleDetailPage(QWidget):
         ("config", "⚙️", "配置"),
         ("workflows", "⚡", "任务链"),
     ]
+    MICRO_APP_MENU_ID = "__micro_app__"
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -221,15 +223,31 @@ class ModuleDetailPage(QWidget):
         
         # 自定义菜单
         if self._module:
-            detail_menu = self._module.manifest.ui_extension.detail_menu
-            if detail_menu:
+            custom_items: list[DetailMenuItem] = []
+
+            ui_ext = self._module.manifest.ui_extension
+            root_entry = str(ui_ext.entry or "").strip()
+            if ui_ext.type == "micro_app" and root_entry:
+                nav_item = ui_ext.nav_item
+                custom_items.append(
+                    DetailMenuItem(
+                        id=self.MICRO_APP_MENU_ID,
+                        icon=nav_item.icon if nav_item else "🧩",
+                        label=nav_item.label if nav_item and nav_item.label else "模块页面",
+                        entry=root_entry,
+                    )
+                )
+
+            custom_items.extend(self._module.manifest.ui_extension.detail_menu)
+
+            if custom_items:
                 # 分隔符
                 separator = QListWidgetItem("────────")
                 separator.setData(Qt.ItemDataRole.UserRole, "__sep__")
                 separator.setFlags(separator.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 self.menu_list.addItem(separator)
                 
-                for menu_item in detail_menu:
+                for menu_item in custom_items:
                     item = QListWidgetItem(f"{menu_item.icon} {menu_item.label}")
                     item.setData(Qt.ItemDataRole.UserRole, menu_item.id)
                     self.menu_list.addItem(item)
@@ -291,7 +309,6 @@ class ModuleDetailPage(QWidget):
                 if self._module.source == ModuleSource.DEV_LINK
                 else "外部",
             ),
-            ("SDK 版本", manifest.sdk_version_range),
         ]
         
         for label, value in info_items:

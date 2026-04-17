@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -34,6 +35,141 @@ def _normalize_records(raw: Any) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         normalized.append(dict(item))
+
+    return normalized
+
+
+MANAGED_VIEW_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+ALLOWED_TABLE_SCHEMA_KEYS = {
+    "title",
+    "dataset",
+    "primary_key",
+    "lock_scope",
+    "lock_key",
+    "display_fields",
+    "create_fields",
+    "update_fields",
+    "create_handler",
+    "update_handler",
+    "columns",
+}
+ALLOWED_TABLE_COLUMN_KEYS = {
+    "key",
+    "label",
+    "visible",
+    "required",
+    "type",
+    "options",
+    "default",
+}
+ALLOWED_TABLE_COLUMN_TYPES = {"text", "number", "int", "bool", "select"}
+
+
+def _validate_managed_identifier(value: str, *, field_name: str) -> str:
+    normalized = str(value or "").strip()
+    if not MANAGED_VIEW_ID_RE.match(normalized):
+        raise ValueError(f"{field_name} 必须是以小写字母开头、只包含字母数字下划线的标识符")
+    return normalized
+
+
+def _normalize_table_field_list(raw: Any, *, field_name: str) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{field_name} 必须是字符串数组")
+
+    values: list[str] = []
+    for item in raw:
+        values.append(_validate_managed_identifier(str(item), field_name=field_name))
+    return values
+
+
+def _normalize_table_column(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("数据表 columns 中的每一项都必须是对象")
+
+    unknown_keys = sorted(set(raw) - ALLOWED_TABLE_COLUMN_KEYS)
+    if unknown_keys:
+        raise ValueError(f"数据表列定义包含不支持的字段: {', '.join(unknown_keys)}")
+
+    key = _validate_managed_identifier(str(raw.get("key", "")), field_name="column.key")
+    label = str(raw.get("label") or key).strip()
+    if not label:
+        raise ValueError("数据表列定义必须提供 label")
+
+    col_type = str(raw.get("type") or "text").strip().lower()
+    if col_type not in ALLOWED_TABLE_COLUMN_TYPES:
+        raise ValueError(f"不支持的数据表列类型: {col_type}")
+
+    column: dict[str, Any] = {
+        "key": key,
+        "label": label,
+    }
+    if raw.get("visible") is not None:
+        column["visible"] = bool(raw["visible"])
+    if raw.get("required") is not None:
+        column["required"] = bool(raw["required"])
+    if col_type != "text":
+        column["type"] = col_type
+    if raw.get("default") is not None:
+        column["default"] = raw["default"]
+    if col_type == "select":
+        options = raw.get("options")
+        if not isinstance(options, list) or not options:
+            raise ValueError("select 列必须提供非空 options 数组")
+        column["options"] = [str(option) for option in options]
+    elif raw.get("options") is not None:
+        raise ValueError("只有 select 列允许配置 options")
+
+    return column
+
+
+def _normalize_table_schema(view_id: str, schema: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(schema, dict):
+        raise ValueError("数据表 schema 必须是对象")
+
+    unknown_keys = sorted(set(schema) - ALLOWED_TABLE_SCHEMA_KEYS)
+    if unknown_keys:
+        raise ValueError(f"数据表 schema 包含不支持的字段: {', '.join(unknown_keys)}")
+
+    dataset = str(schema.get("dataset") or view_id).strip()
+    if dataset != view_id:
+        raise ValueError("数据表 dataset 必须与 view_id 保持一致，由宿主统一管理")
+
+    raw_columns = schema.get("columns", [])
+    if not isinstance(raw_columns, list):
+        raise ValueError("数据表 columns 必须是数组")
+
+    normalized = {
+        "title": str(schema.get("title") or view_id).strip() or view_id,
+        "dataset": view_id,
+        "primary_key": _validate_managed_identifier(
+            str(schema.get("primary_key") or "id"),
+            field_name="primary_key",
+        ),
+        "columns": [_normalize_table_column(column) for column in raw_columns],
+    }
+
+    if schema.get("lock_scope") is not None:
+        normalized["lock_scope"] = _validate_managed_identifier(
+            str(schema.get("lock_scope")),
+            field_name="lock_scope",
+        )
+    if schema.get("lock_key") is not None:
+        normalized["lock_key"] = _validate_managed_identifier(
+            str(schema.get("lock_key")),
+            field_name="lock_key",
+        )
+    for list_field in ("display_fields", "create_fields", "update_fields"):
+        values = _normalize_table_field_list(schema.get(list_field), field_name=list_field)
+        if values:
+            normalized[list_field] = values
+    for handler_field in ("create_handler", "update_handler"):
+        if schema.get(handler_field) is not None:
+            normalized[handler_field] = _validate_managed_identifier(
+                str(schema.get(handler_field)),
+                field_name=handler_field,
+            )
 
     return normalized
 
@@ -185,13 +321,9 @@ class CoreUITools:
         self._data_store = get_module_data_store()
 
     def declare_data_table(self, view_id: str, schema: dict[str, Any]) -> bool:
-        meta = dict(schema or {})
-        meta.setdefault("title", view_id)
-        meta.setdefault("dataset", view_id)
-        meta.setdefault("primary_key", "id")
-        meta.setdefault("columns", [])
-
-        return self._data_store.write_data_table_schema(self._module_name, view_id, meta)
+        managed_view_id = _validate_managed_identifier(view_id, field_name="view_id")
+        meta = _normalize_table_schema(managed_view_id, dict(schema or {}))
+        return self._data_store.write_data_table_schema(self._module_name, managed_view_id, meta)
 
     def get_data_table(self, view_id: str) -> dict[str, Any]:
         return self._data_store.read_data_table_schema(self._module_name, view_id)

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from PyQt6.QtWidgets import QMessageBox, QPushButton
 
 from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
+from src.core.mms.release_service import ModuleUpdateInfo
 from src.core.mms.ui.module_list_widget import ModuleListWidget
 
 
@@ -76,3 +77,21 @@ def test_remove_dev_link_calls_registry_and_refreshes(qtbot, tmp_path, monkeypat
     assert remove_calls == ["demo_module"]
     assert refresh_calls == [1]
     assert any("已移除开发链接" in message for message in info_messages)
+
+
+def test_external_module_row_shows_upgrade_button_when_update_available(qtbot, tmp_path):
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+
+    module = _make_module(tmp_path, source=ModuleSource.EXTERNAL)
+    widget._update_states[module.name] = ModuleUpdateInfo(
+        module_name=module.name,
+        current_version="1.0.0",
+        latest_version="1.1.0",
+        has_update=True,
+    )
+
+    action_widget = widget._create_action_widget(module)
+    texts = [button.text() for button in action_widget.findChildren(QPushButton)]
+
+    assert "升级" in texts

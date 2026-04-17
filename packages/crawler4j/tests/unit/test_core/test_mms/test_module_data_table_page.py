@@ -7,9 +7,9 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QAbstractItemView, QDialog
 
 from src.core.mms.models import ModuleSource
-from src.core.persistence import get_kv_store
 from src.core.mms.ui import module_data_table_page as page_module
 from src.core.mms.ui.module_data_table_page import ModuleDataTablePage
+from src.ui.components.combo_box import StyledComboBox
 
 
 @pytest.fixture(autouse=True)
@@ -21,22 +21,12 @@ def temp_data_dir(tmp_path):
         init_database()
         yield tmp_path
 
-
-def _meta_key(module_name: str, view_id: str) -> str:
-    return f"module:{module_name}:ui:data_table:{view_id}"
-
-
-def _dataset_key(module_name: str, dataset: str) -> str:
-    return f"module:{module_name}:dataset:{dataset}"
-
-
 def test_module_data_table_page_declares_schema_and_renders_display_fields(qtbot, monkeypatch):
-    kv = get_kv_store()
-
     def fake_handler(self, handler_name, *args):
         assert handler_name == "declare_ui"
-        kv.set(
-            _meta_key("demo_module", "accounts"),
+        self._data_store.write_data_table_schema(
+            "demo_module",
+            "accounts",
             {
                 "title": "账号管理",
                 "dataset": "accounts",
@@ -51,8 +41,9 @@ def test_module_data_table_page_declares_schema_and_renders_display_fields(qtbot
                 ],
             },
         )
-        kv.set(
-            _dataset_key("demo_module", "accounts"),
+        self._data_store.write_dataset(
+            "demo_module",
+            "accounts",
             [
                 {
                     "phone": "13800138000",
@@ -79,7 +70,6 @@ def test_module_data_table_page_declares_schema_and_renders_display_fields(qtbot
 
 
 def test_module_data_table_page_routes_add_and_edit_to_module_handlers(qtbot, monkeypatch):
-    kv = get_kv_store()
     calls: list[tuple[str, tuple[object, ...]]] = []
 
     def fake_handler(self, handler_name, *args):
@@ -127,8 +117,10 @@ def test_module_data_table_page_routes_add_and_edit_to_module_handlers(qtbot, mo
         return None
 
     monkeypatch.setattr(ModuleDataTablePage, "_call_module_handler", fake_handler)
-    kv.set(
-        _dataset_key("demo_module", "accounts"),
+    page_data_store = page_module.get_module_data_store()
+    page_data_store.write_dataset(
+        "demo_module",
+        "accounts",
         [
             {
                 "phone": "13800138000",
@@ -171,9 +163,9 @@ def test_module_data_table_page_routes_add_and_edit_to_module_handlers(qtbot, mo
 
 
 def test_module_data_table_page_refresh_overwrites_stale_schema(qtbot, monkeypatch):
-    kv = get_kv_store()
-    kv.set(
-        _meta_key("demo_module", "accounts"),
+    page_module.get_module_data_store().write_data_table_schema(
+        "demo_module",
+        "accounts",
         {
             "title": "过期账号管理",
             "dataset": "accounts",
@@ -232,3 +224,23 @@ def test_module_data_table_page_builds_devlink_context_with_settings(qtbot, monk
     assert context.config["module_name"] == "demo_module"
     assert context.runtime["devel_mode"] is True
     assert context.tools is not None
+
+
+def test_record_edit_dialog_uses_styled_combo_box(qtbot):
+    dialog = page_module._RecordEditDialog(
+        columns=[
+            {
+                "key": "status",
+                "label": "状态",
+                "type": "select",
+                "options": ["active", "blocked"],
+            }
+        ],
+        record={"status": "blocked"},
+    )
+    qtbot.addWidget(dialog)
+
+    widget = dialog._widgets["status"]
+
+    assert isinstance(widget, StyledComboBox)
+    assert widget.currentText() == "blocked"

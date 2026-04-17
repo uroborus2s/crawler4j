@@ -7,6 +7,7 @@ import pytest
 from PyQt6.QtWidgets import QLabel, QPushButton
 
 from src.core.mms.models import (
+    ConfigDefaultsInfo,
     DetailMenuItem,
     ModuleInfo,
     ModuleManifest,
@@ -15,6 +16,7 @@ from src.core.mms.models import (
     WorkflowInfo,
 )
 from src.core.mms.ui.module_detail_page import ModuleDetailPage
+from src.ui.components.combo_box import StyledComboBox
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +35,8 @@ def _make_module(
     source: ModuleSource = ModuleSource.DEV_LINK,
     entry: str = "ui:LoadedPage",
     ui_type: str = "micro_app",
+    detail_menu: list[DetailMenuItem] | None = None,
+    config_defaults: ConfigDefaultsInfo | None = None,
 ) -> ModuleInfo:
     module_dir = tmp_path / source.value / "demo_module"
     module_dir.mkdir(parents=True, exist_ok=True)
@@ -54,15 +58,10 @@ def _make_module(
             ],
             ui_extension=UIExtensionInfo(
                 type=ui_type,
-                detail_menu=[
-                    DetailMenuItem(
-                        id="custom",
-                        icon="🧩",
-                        label="自定义页",
-                        entry=entry,
-                    )
-                ],
+                entry=entry if entry.startswith("ui:") else "",
+                detail_menu=list(detail_menu or []),
             ),
+            config_defaults=config_defaults or ConfigDefaultsInfo(),
         ),
         source=source,
         path=module_dir,
@@ -88,7 +87,7 @@ def test_module_detail_page_loads_micro_app_for_dev_link_modules(qtbot, tmp_path
 
     page.set_module(_make_module(tmp_path, source=ModuleSource.DEV_LINK))
 
-    custom_page = page._menu_pages["custom"]
+    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
     assert custom_page.__class__.__name__ == "LoadedPage"
     assert isinstance(custom_page, QLabel)
     assert custom_page.text() == "Loaded from module UI"
@@ -100,7 +99,7 @@ def test_module_detail_page_blocks_external_micro_app_without_allowlist(qtbot, t
 
     page.set_module(_make_module(tmp_path, source=ModuleSource.EXTERNAL))
 
-    custom_page = page._menu_pages["custom"]
+    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
     texts = [label.text() for label in custom_page.findChildren(QLabel)]
     assert any("trust gate" in text or "allowlist" in text for text in texts)
 
@@ -115,7 +114,7 @@ def test_module_detail_page_allows_external_micro_app_when_allowlisted(qtbot, tm
 
     page.set_module(_make_module(tmp_path, source=ModuleSource.EXTERNAL))
 
-    custom_page = page._menu_pages["custom"]
+    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
     assert custom_page.__class__.__name__ == "LoadedPage"
     assert isinstance(custom_page, QLabel)
     assert custom_page.text() == "Loaded from module UI"
@@ -127,9 +126,31 @@ def test_module_detail_page_gracefully_degrades_when_custom_page_load_fails(qtbo
 
     page.set_module(_make_module(tmp_path, source=ModuleSource.DEV_LINK, entry="ui:MissingPage"))
 
-    custom_page = page._menu_pages["custom"]
+    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
     texts = [label.text() for label in custom_page.findChildren(QLabel)]
     assert any("加载失败" in text or "MissingPage" in text for text in texts)
+
+
+def test_module_detail_page_renders_core_managed_data_table_entry(qtbot, tmp_path):
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    page.set_module(
+        _make_module(
+            tmp_path,
+            detail_menu=[
+                DetailMenuItem(
+                    id="accounts",
+                    icon="📋",
+                    label="账号管理",
+                    entry="core:data_table:accounts",
+                )
+            ],
+        )
+    )
+
+    custom_page = page._menu_pages["accounts"]
+    assert custom_page.__class__.__name__ == "ModuleDataTablePage"
 
 
 def test_module_detail_page_exposes_config_page_and_persists_module_and_workflow_settings(qtbot, tmp_path):
@@ -149,14 +170,19 @@ def test_module_detail_page_exposes_config_page_and_persists_module_and_workflow
         assert any("配置" in text for text in menu_texts)
 
         config_page = page._menu_pages["config"]
-        assert '"base_url": "https://example.com"' in config_page.module_config_editor.toPlainText()
-        assert '"headless": false' in config_page.workflow_config_editor.toPlainText()
+        assert isinstance(config_page.workflow_selector, StyledComboBox)
+        assert "base_url: https://example.com" in config_page.module_config_editor.toPlainText()
+        assert "headless: false" in config_page.workflow_config_editor.toPlainText()
 
-        config_page.module_config_editor.setPlainText('{"base_url": "https://new.example.com", "retry": 3}')
+        config_page.module_config_editor.setPlainText(
+            "base_url: https://new.example.com\nretry: 3\n"
+        )
         config_page._save_module_config()
 
         config_page.workflow_selector.setCurrentIndex(0)
-        config_page.workflow_config_editor.setPlainText('{"headless": true, "region": "cn"}')
+        config_page.workflow_config_editor.setPlainText(
+            "headless: true\nregion: cn\n"
+        )
         config_page._save_workflow_config()
 
     assert store.read_module_settings("demo_module") == {
@@ -167,3 +193,83 @@ def test_module_detail_page_exposes_config_page_and_persists_module_and_workflow
         "headless": True,
         "region": "cn",
     }
+
+
+def test_module_detail_page_rejects_json_literal_in_config_editors(qtbot, tmp_path):
+    from src.core.mms.settings_store import ModuleSettingsStore
+
+    store = ModuleSettingsStore()
+    store.write_module_settings("demo_module", {"base_url": "https://example.com"})
+    store.write_workflow_settings("demo_module", "default", {"headless": False})
+
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    with patch("PyQt6.QtWidgets.QMessageBox.information"), patch("PyQt6.QtWidgets.QMessageBox.warning") as warning:
+        page.set_module(_make_module(tmp_path, source=ModuleSource.DEV_LINK))
+
+        config_page = page._menu_pages["config"]
+        config_page.module_config_editor.setPlainText('{"base_url": "https://bad.example.com"}')
+        config_page._save_module_config()
+        config_page.workflow_config_editor.setPlainText('{"headless": true}')
+        config_page._save_workflow_config()
+
+    assert warning.call_count == 2
+    assert store.read_module_settings("demo_module") == {
+        "base_url": "https://example.com",
+    }
+    assert store.read_workflow_settings("demo_module", "default") == {
+        "headless": False,
+    }
+
+
+def test_module_detail_page_restores_default_settings_after_warning_confirmation(qtbot, tmp_path):
+    from PyQt6.QtWidgets import QMessageBox
+    from src.core.mms.settings_store import ModuleSettingsStore
+
+    store = ModuleSettingsStore()
+
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    module = _make_module(
+        tmp_path,
+        source=ModuleSource.DEV_LINK,
+        config_defaults=ConfigDefaultsInfo(
+            module={"base_url": "https://example.com", "retry": 3},
+            workflows={"default": {"headless": False, "region": "cn"}},
+        ),
+    )
+
+    with patch("PyQt6.QtWidgets.QMessageBox.information"), patch(
+        "PyQt6.QtWidgets.QMessageBox.warning",
+        side_effect=[
+            QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Yes,
+        ],
+    ):
+        page.set_module(module)
+        config_page = page._menu_pages["config"]
+
+        store.write_module_settings("demo_module", {"base_url": "https://custom.example.com", "retry": 9})
+        store.write_workflow_settings("demo_module", "default", {"headless": True, "region": "us"})
+        config_page._reload_editors()
+
+        config_page._restore_module_defaults()
+        assert store.read_module_settings("demo_module") == {
+            "base_url": "https://custom.example.com",
+            "retry": 9,
+        }
+
+        config_page._restore_module_defaults()
+        assert store.read_module_settings("demo_module") == {
+            "base_url": "https://example.com",
+            "retry": 3,
+        }
+
+        config_page._restore_workflow_defaults()
+        assert store.read_workflow_settings("demo_module", "default") == {
+            "headless": False,
+            "region": "cn",
+        }
