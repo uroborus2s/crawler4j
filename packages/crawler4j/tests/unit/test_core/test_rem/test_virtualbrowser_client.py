@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 import src.core.rem.provider as provider_module
@@ -5,28 +6,55 @@ from src.core.rem.provider import VirtualBrowserClient
 
 
 class _DummyResponse:
-    def __init__(self, payload, *, response_data=None):
+    def __init__(self, payload, *, response_data=None, success=True, status_code=200, error_message=""):
         self._payload = payload
         self._response_data = response_data if response_data is not None else {"id": 101}
+        self._success = success
+        self.status_code = status_code
+        self._error_message = error_message
+        self.text = (
+            '{"success":true}'
+            if success
+            else f'{{"success":false,"error":"{error_message}"}}'
+        )
+
+    @property
+    def is_success(self):
+        return 200 <= self.status_code < 400
 
     def raise_for_status(self):
-        return None
+        if self.is_success:
+            return None
+        request = httpx.Request("POST", "http://localhost/test")
+        response = httpx.Response(self.status_code, request=request, text=self.text)
+        raise httpx.HTTPStatusError("dummy failure", request=request, response=response)
 
     def json(self):
-        return {"success": True, "data": self._response_data, "echo": self._payload}
+        payload = {"success": self._success, "echo": self._payload}
+        if self._success:
+            payload["data"] = self._response_data
+        elif self._error_message:
+            payload["error"] = self._error_message
+        return payload
 
 
 class _DummyHttpClient:
-    def __init__(self, *, response_data=None):
+    def __init__(self, *, response_data=None, responses=None):
         self.last_path = None
         self.last_payload = None
         self._response_data = response_data
+        self._responses = list(responses or [])
         self.calls: list[tuple[str, dict]] = []
 
     async def post(self, path, json):
         self.last_path = path
         self.last_payload = json
         self.calls.append((path, json))
+        if self._responses:
+            response = self._responses.pop(0)
+            if isinstance(response, _DummyResponse):
+                return response
+            return _DummyResponse(json, **response)
         return _DummyResponse(json, response_data=self._response_data)
 
 
@@ -208,3 +236,67 @@ async def test_launch_browser_falls_back_to_debugging_port():
     endpoint = await client.launch_browser(101)
 
     assert endpoint == "http://localhost:56764"
+
+
+@pytest.mark.asyncio
+async def test_launch_browser_retries_after_recoverable_devtools_failure():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(
+        responses=[
+            {
+                "success": False,
+                "status_code": 500,
+                "error_message": "Browser process closed before DevTools port was detected.",
+            },
+            {},
+            {
+                "response_data": {"debuggingPort": 56764},
+            },
+        ]
+    )
+
+    async def _fake_get_client():
+        return dummy
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+
+    endpoint = await client.launch_browser(101)
+
+    assert endpoint == "http://localhost:56764"
+    assert dummy.calls == [
+        ("/api/launchBrowser", {"id": 101}),
+        ("/api/stopBrowser", {"id": 101}),
+        ("/api/launchBrowser", {"id": 101}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_launch_browser_retries_after_running_conflict():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(
+        responses=[
+            {
+                "success": False,
+                "status_code": 400,
+                "error_message": "browser(id: 101) is running",
+            },
+            {},
+            {
+                "response_data": {"debuggingPort": 56764},
+            },
+        ]
+    )
+
+    async def _fake_get_client():
+        return dummy
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+
+    endpoint = await client.launch_browser(101)
+
+    assert endpoint == "http://localhost:56764"
+    assert dummy.calls == [
+        ("/api/launchBrowser", {"id": 101}),
+        ("/api/stopBrowser", {"id": 101}),
+        ("/api/launchBrowser", {"id": 101}),
+    ]

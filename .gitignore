@@ -97,6 +97,10 @@ build/
 dist/
 wheels/
 *.egg-info
+.mypy_cache/
+.ruff_cache/
+.tmp
+*.tmp
 
 # Virtual environments
 .venv
@@ -117,7 +121,10 @@ wheels/
 # pytest cache
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+.tox/
+.nox/
 
 # Project specific
 /*.html

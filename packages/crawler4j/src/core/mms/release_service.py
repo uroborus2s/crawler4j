@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from src.core.foundation.logging import logger
 from src.core.foundation.network import AsyncHttpClient
+from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
 from src.core.mms.registry import get_module_registry
 from src.core.mms.semver import compare_semver, is_valid_semver
@@ -37,6 +38,7 @@ class ModuleReleaseInfo:
     html_url: str
     asset_name: str
     asset_download_url: str
+    asset_api_url: str = ""
     prerelease: bool = False
 
 
@@ -106,10 +108,18 @@ class ModuleReleaseService:
             raise ValueError("GitHub 仓库必须是 owner/repo 形式")
         return candidate
 
-    async def prepare_local_install(self, archive_path: str | Path) -> ModulePackagePreview:
+    async def prepare_local_install(
+        self,
+        archive_path: str | Path,
+        *,
+        github_token: str | None = None,
+    ) -> ModulePackagePreview:
         path = Path(archive_path).expanduser().resolve()
         manifest, warnings = self._validate_archive(path)
-        repo = await self.verify_repo_accessible(manifest.upgrade_source.repo)
+        repo = await self.verify_repo_accessible(
+            manifest.upgrade_source.repo,
+            github_token=github_token,
+        )
         manifest.upgrade_source.repo = repo
         return ModulePackagePreview(
             install_kind="local_zip",
@@ -119,11 +129,16 @@ class ModuleReleaseService:
             source_label="本地 ZIP",
         )
 
-    async def prepare_github_install(self, repo_input: str) -> ModulePackagePreview:
+    async def prepare_github_install(
+        self,
+        repo_input: str,
+        *,
+        github_token: str | None = None,
+    ) -> ModulePackagePreview:
         repo = self.normalize_repo(repo_input)
-        await self._fetch_repo_metadata(repo)
-        release = await self._fetch_latest_release(repo)
-        archive_path = await self._download_release_asset(release)
+        await self._fetch_repo_metadata(repo, github_token=github_token)
+        release = await self._fetch_latest_release(repo, github_token=github_token)
+        archive_path = await self._download_release_asset(release, github_token=github_token)
         manifest, warnings = self._validate_archive(archive_path)
 
         manifest_repo = self.normalize_repo(manifest.upgrade_source.repo)
@@ -142,20 +157,41 @@ class ModuleReleaseService:
             release=release,
         )
 
-    async def prepare_dev_link(self, module_path: str | Path) -> tuple[ModuleManifest, list[str]]:
+    async def prepare_dev_link(
+        self,
+        module_path: str | Path,
+        *,
+        github_token: str | None = None,
+    ) -> tuple[ModuleManifest, list[str]]:
         path = Path(module_path).expanduser().resolve()
         registry = get_module_registry()
         manifest, warnings = registry.validate_source(path)
-        repo = await self.verify_repo_accessible(manifest.upgrade_source.repo)
+        repo = self.normalize_repo(manifest.upgrade_source.repo)
+        try:
+            await self._fetch_repo_metadata(repo, github_token=github_token)
+        except ValueError as exc:
+            warnings.append(
+                f"GitHub 仓库可达性检查失败，已跳过远端预检: {exc}"
+            )
         manifest.upgrade_source.repo = repo
         return manifest, warnings
 
-    async def verify_repo_accessible(self, repo_input: str) -> str:
+    async def verify_repo_accessible(
+        self,
+        repo_input: str,
+        *,
+        github_token: str | None = None,
+    ) -> str:
         repo = self.normalize_repo(repo_input)
-        await self._fetch_repo_metadata(repo)
+        await self._fetch_repo_metadata(repo, github_token=github_token)
         return repo
 
-    async def check_for_update(self, module: ModuleInfo) -> ModuleUpdateInfo:
+    async def check_for_update(
+        self,
+        module: ModuleInfo,
+        *,
+        github_token: str | None = None,
+    ) -> ModuleUpdateInfo:
         current_version = str(module.manifest.version or "").strip()
         repo = str(module.manifest.upgrade_source.repo or "").strip()
         if module.source != ModuleSource.EXTERNAL or not repo:
@@ -170,6 +206,7 @@ class ModuleReleaseService:
         release = await self._fetch_latest_release(
             normalized_repo,
             allow_prerelease=module.manifest.upgrade_source.allow_prerelease,
+            github_token=github_token,
         )
         has_update = self._compare_versions(release.version, current_version) > 0
         return ModuleUpdateInfo(
@@ -180,18 +217,23 @@ class ModuleReleaseService:
             release=release,
         )
 
-    async def prepare_module_upgrade(self, module: ModuleInfo) -> ModulePackagePreview:
+    async def prepare_module_upgrade(
+        self,
+        module: ModuleInfo,
+        *,
+        github_token: str | None = None,
+    ) -> ModulePackagePreview:
         if module.source != ModuleSource.EXTERNAL:
             raise ValueError("只有正式安装的模块才支持在线升级")
 
-        update_info = await self.check_for_update(module)
+        update_info = await self.check_for_update(module, github_token=github_token)
         if not update_info.has_update or not update_info.release:
             raise ValueError("已经是最新版本，无需升级")
 
         await self._ensure_module_idle(module.name)
 
         release = update_info.release
-        archive_path = await self._download_release_asset(release)
+        archive_path = await self._download_release_asset(release, github_token=github_token)
         manifest, warnings = self._validate_archive(archive_path)
         self._validate_upgrade_package(module, manifest, release)
 
@@ -331,16 +373,60 @@ class ModuleReleaseService:
     def _upgrade_lock_key(module_name: str) -> str:
         return f"module:{module_name}:lock:maintenance:module_upgrade"
 
-    async def _fetch_repo_metadata(self, repo: str) -> dict[str, Any]:
-        return await self._request_json(f"{self.GITHUB_API_BASE}/repos/{repo}")
+    def _resolve_github_token(
+        self,
+        repo: str | None = None,
+        github_token: str | None = None,
+    ) -> str | None:
+        explicit = str(github_token or "").strip()
+        if explicit:
+            return explicit
+        normalized_repo = str(repo or "").strip()
+        if normalized_repo:
+            return get_github_credential_store().get_token(normalized_repo)
+        return None
+
+    def _build_github_headers(
+        self,
+        *,
+        accept: str,
+        repo: str | None = None,
+        github_token: str | None = None,
+        user_agent: str = "crawler4j-module-updater",
+    ) -> dict[str, str]:
+        headers = {
+            "Accept": accept,
+            "User-Agent": user_agent,
+        }
+        token = self._resolve_github_token(repo=repo, github_token=github_token)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    async def _fetch_repo_metadata(
+        self,
+        repo: str,
+        *,
+        github_token: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request_json(
+            f"{self.GITHUB_API_BASE}/repos/{repo}",
+            repo=repo,
+            github_token=github_token,
+        )
 
     async def _fetch_latest_release(
         self,
         repo: str,
         *,
         allow_prerelease: bool = False,
+        github_token: str | None = None,
     ) -> ModuleReleaseInfo:
-        payload = await self._request_json(f"{self.GITHUB_API_BASE}/repos/{repo}/releases")
+        payload = await self._request_json(
+            f"{self.GITHUB_API_BASE}/repos/{repo}/releases",
+            repo=repo,
+            github_token=github_token,
+        )
         if not isinstance(payload, list) or not payload:
             raise ValueError(f"仓库 {repo} 没有可用的 GitHub Release")
 
@@ -355,23 +441,33 @@ class ModuleReleaseService:
             raise ValueError(f"仓库 {repo} 没有可用的 GitHub Release")
         raise ValueError(f"仓库 {repo} 没有稳定版 GitHub Release")
 
-    async def _download_release_asset(self, release: ModuleReleaseInfo) -> Path:
+    async def _download_release_asset(
+        self,
+        release: ModuleReleaseInfo,
+        *,
+        github_token: str | None = None,
+    ) -> Path:
         target_dir = get_app_data_dir() / "downloads" / "modules" / release.repo.replace("/", "__")
         target_dir.mkdir(parents=True, exist_ok=True)
         target_path = target_dir / release.asset_name
 
-        headers = {"User-Agent": "crawler4j-module-updater", "Accept": "application/octet-stream"}
+        headers = self._build_github_headers(
+            accept="application/octet-stream",
+            repo=release.repo,
+            github_token=github_token,
+        )
         session = await AsyncHttpClient.get_session()
         proxy = AsyncHttpClient._get_proxy()
         request_kwargs: dict[str, Any] = {"headers": headers}
         if proxy:
             request_kwargs["proxy"] = proxy
 
-        async with session.get(release.asset_download_url, **request_kwargs) as response:
+        download_url = str(release.asset_api_url or "").strip() or release.asset_download_url
+        async with session.get(download_url, **request_kwargs) as response:
             if response.status >= 400:
                 message = await response.text()
                 raise ValueError(
-                    f"下载模块安装包失败 ({response.status}): {message or release.asset_download_url}"
+                    f"下载模块安装包失败 ({response.status}): {message or download_url}"
                 )
 
             with target_path.open("wb") as fh:
@@ -384,11 +480,18 @@ class ModuleReleaseService:
         registry = get_module_registry()
         return registry.validate_source(path)
 
-    async def _request_json(self, url: str) -> Any:
-        headers = {
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "crawler4j-module-updater",
-        }
+    async def _request_json(
+        self,
+        url: str,
+        *,
+        repo: str | None = None,
+        github_token: str | None = None,
+    ) -> Any:
+        headers = self._build_github_headers(
+            accept="application/vnd.github+json",
+            repo=repo,
+            github_token=github_token,
+        )
         session = await AsyncHttpClient.get_session()
         proxy = AsyncHttpClient._get_proxy()
         request_kwargs: dict[str, Any] = {"headers": headers}
@@ -404,7 +507,9 @@ class ModuleReleaseService:
                         message = str(payload.get("message", ""))
                 except Exception:
                     message = await response.text()
-                logger.warning("[MMS] GitHub API request failed: %s %s %s", response.status, url, message)
+                logger.warning(
+                    f"[MMS] GitHub API request failed: {response.status} {url} {message}"
+                )
                 raise ValueError(f"GitHub 请求失败 ({response.status}): {message or url}")
             return await response.json()
 
@@ -434,6 +539,7 @@ class ModuleReleaseService:
             html_url=str(payload.get("html_url", "") or "").strip(),
             asset_name=str(asset.get("name", "") or "").strip(),
             asset_download_url=str(asset.get("browser_download_url", "") or "").strip(),
+            asset_api_url=str(asset.get("url", "") or "").strip(),
             prerelease=bool(payload.get("prerelease", False)),
         )
 

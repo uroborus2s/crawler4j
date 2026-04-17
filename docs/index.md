@@ -5,34 +5,31 @@ mkdocs:
   nav:
     - title: 入门说明
       children:
-        - title: 概览
+        - title: 了解 crawler4j
           path: 01-getting-started/index.md
-          access: public
-        - title: 项目概览
-          path: 01-getting-started/project-overview.md
-          access: public
-        - title: 快速开始
-          path: 01-getting-started/quick-start.md
-          access: public
-        - title: 文档地图
-          path: 01-getting-started/document-map.md
           access: public
     - title: 用户指南
       children:
         - title: 概览
           path: 02-user-guide/index.md
           access: public
-        - title: 接手入口
-          path: 02-user-guide/user-guide.md
-          access: public
-        - title: 安装说明
+        - title: 安装与第一次打开
           path: 02-user-guide/installation.md
           access: public
-        - title: 配置说明
+        - title: 首次设置
           path: 02-user-guide/configuration.md
           access: public
-        - title: 使用说明
+        - title: 开始使用
+          path: 02-user-guide/user-guide.md
+          access: public
+        - title: 日常使用
           path: 02-user-guide/usage.md
+          access: public
+        - title: 作业详情整图说明
+          path: 02-user-guide/job-detail-guide.md
+          access: public
+        - title: 异常案例
+          path: 02-user-guide/exception-cases.md
           access: public
         - title: 管理员指南
           path: 02-user-guide/admin-guide.md
@@ -224,13 +221,15 @@ mkdocs:
 
 # crawler4j
 
-这是 `crawler4j` 的正式项目文档源。AI 软件工厂 在项目仓库内直接维护这些文档，`docs-stratego`  通过 Git 子模块或等价的仓级挂载方式聚合展示，但不反向改写源文档。
+这是 `crawler4j` 的正式文档入口，面向第一次接触产品的人、日常使用者、现场支持、模块开发者和内部维护者。
+
+文档按“入门说明 / 用户指南 / 开发者指南 / 项目开发文档（内）”四层组织。如果你不是在维护源码，通常只需要前两层。
 
 ## 四大模块
 
 | 模块 | 回答的问题 | 主要读者 |
 |---|---|---|
-| `docs/01-getting-started/` | 这是什么项目、文档怎么读、从哪里开始 | 新维护者 / 协作者 |
+| `docs/01-getting-started/` | 面向所有人的单页产品介绍：这是什么、能做什么、从哪开始读 | 第一次接触产品的人 / 协作者 |
 | `docs/02-user-guide/` | 如何安装、配置、使用 和管理宿主应用 | 宿主使用者 / 管理员 / 协作者 |
 | `docs/03-developer-guide/` | 如何开发、调试、交付模块 | 模块开发者 / Core 集成人员 |
 | `docs/04-project-development/` | 项目如何治理、设计、实施、验证、发布、运维和追踪 | Tech Lead / Dev / QA / Release / Ops |
@@ -239,8 +238,8 @@ mkdocs:
 
 ### 新维护者
 
-1. [文档地图](01-getting-started/document-map.md)
-2. [接手入口](02-user-guide/user-guide.md)
+1. [了解 crawler4j](01-getting-started/index.md)
+2. [开始使用](02-user-guide/user-guide.md)
 3. [Core 接手与日常维护](04-project-development/08-operations-maintenance/core-maintainer-guide.md)
 4. [当前真实状态分析](04-project-development/02-discovery/current-state-analysis.md)
 5. [实施方案](04-project-development/05-development-process/implementation-plan.md)
@@ -264,11 +263,13 @@ mkdocs:
 
 ### 宿主使用者 / 协作者
 
-1. [接手入口](02-user-guide/user-guide.md)
-2. [安装说明](02-user-guide/installation.md)
-3. [配置说明](02-user-guide/configuration.md)
-4. [使用说明](02-user-guide/usage.md)
-5. [管理员指南](02-user-guide/admin-guide.md)
+1. [开始使用](02-user-guide/user-guide.md)
+2. [安装与第一次打开](02-user-guide/installation.md)
+3. [首次设置](02-user-guide/configuration.md)
+4. [日常使用](02-user-guide/usage.md)
+5. [作业详情整图说明](02-user-guide/job-detail-guide.md)
+6. [异常案例](02-user-guide/exception-cases.md)
+7. [管理员指南](02-user-guide/admin-guide.md)
 
 ## 维护规则
 

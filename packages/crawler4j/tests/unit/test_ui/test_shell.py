@@ -18,3 +18,9 @@ def test_shell_defaults_to_1420px_startup_width(qtbot, monkeypatch):
     assert window.minimumWidth() == 1200
     assert window.width() == 1420
     assert window.height() == 800
+
+
+def test_sidebar_includes_help_entry():
+    from src.ui.shell import Sidebar
+
+    assert ("help", "📘 使用文档") in Sidebar.NAV_ITEMS

@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -48,16 +49,199 @@ def test_compare_versions_treats_stable_as_newer_than_prerelease():
 
 
 @pytest.mark.asyncio
+async def test_prepare_dev_link_warns_when_repo_check_fails_but_still_returns_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = ModuleReleaseService()
+    module_dir = tmp_path / "demo_module"
+    module_dir.mkdir(parents=True, exist_ok=True)
+    manifest = ModuleManifest(
+        name="demo_module",
+        version="1.0.0",
+        upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
+    )
+    registry = SimpleNamespace(validate_source=lambda path: (manifest, ["base warning"]))
+
+    async def fake_repo(repo: str, *, github_token: str | None = None) -> dict[str, str]:  # noqa: ARG001
+        raise ValueError(f"GitHub 请求失败 (404): {repo}")
+
+    monkeypatch.setattr("src.core.mms.release_service.get_module_registry", lambda: registry)
+    monkeypatch.setattr(service, "_fetch_repo_metadata", fake_repo)
+
+    resolved_manifest, warnings = await service.prepare_dev_link(module_dir)
+
+    assert resolved_manifest is manifest
+    assert resolved_manifest.upgrade_source.repo == "example/demo_module"
+    assert warnings == [
+        "base warning",
+        "GitHub 仓库可达性检查失败，已跳过远端预检: GitHub 请求失败 (404): example/demo_module",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_request_json_raises_value_error_without_logger_signature_crash(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = ModuleReleaseService()
+    warning_messages: list[str] = []
+
+    class FakeResponse:
+        status = 404
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def json(self):
+            return {"message": "Not Found"}
+
+        async def text(self):
+            return "Not Found"
+
+    class FakeSession:
+        def get(self, url: str, **kwargs):  # noqa: ARG002
+            return FakeResponse()
+
+    async def fake_get_session():
+        return FakeSession()
+
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient.get_session", fake_get_session)
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient._get_proxy", lambda: None)
+    monkeypatch.setattr("src.core.mms.release_service.logger.warning", lambda message: warning_messages.append(message))
+
+    with pytest.raises(ValueError) as exc_info:
+        await service._request_json("https://api.github.com/repos/example/demo_module")
+
+    assert str(exc_info.value) == "GitHub 请求失败 (404): Not Found"
+    assert warning_messages == [
+        "[MMS] GitHub API request failed: 404 https://api.github.com/repos/example/demo_module Not Found"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_request_json_adds_authorization_header_from_repo_store(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = ModuleReleaseService()
+    captured: dict[str, Any] = {}
+
+    class FakeResponse:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def json(self):
+            return {"ok": True}
+
+    class FakeSession:
+        def get(self, url: str, **kwargs):
+            captured["url"] = url
+            captured["headers"] = dict(kwargs.get("headers", {}))
+            return FakeResponse()
+
+    async def fake_get_session():
+        return FakeSession()
+
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient.get_session", fake_get_session)
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient._get_proxy", lambda: None)
+    monkeypatch.setattr(
+        "src.core.mms.release_service.get_github_credential_store",
+        lambda: SimpleNamespace(get_token=lambda repo: "stored-token"),  # noqa: ARG005
+    )
+
+    payload = await service._request_json(
+        "https://api.github.com/repos/example/demo_module",
+        repo="example/demo_module",
+    )
+
+    assert payload == {"ok": True}
+    assert captured["url"] == "https://api.github.com/repos/example/demo_module"
+    assert captured["headers"]["Authorization"] == "Bearer stored-token"
+
+
+@pytest.mark.asyncio
+async def test_download_release_asset_uses_asset_api_url_with_authorization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = ModuleReleaseService()
+    release = ModuleReleaseInfo(
+        repo="example/demo_module",
+        tag_name="v1.2.0",
+        version="1.2.0",
+        title="v1.2.0",
+        release_notes="notes",
+        published_at="2026-04-17T00:00:00Z",
+        html_url="https://github.com/example/demo_module/releases/tag/v1.2.0",
+        asset_name="demo_module-1.2.0.zip",
+        asset_download_url="https://github.com/example/demo_module/releases/download/v1.2.0/demo_module-1.2.0.zip",
+        asset_api_url="https://api.github.com/repos/example/demo_module/releases/assets/123",
+        prerelease=False,
+    )
+    captured: dict[str, Any] = {}
+
+    class FakeContent:
+        async def iter_chunked(self, size: int):  # noqa: ARG002
+            yield b"fake zip"
+
+    class FakeResponse:
+        status = 200
+        content = FakeContent()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSession:
+        def get(self, url: str, **kwargs):
+            captured["url"] = url
+            captured["headers"] = dict(kwargs.get("headers", {}))
+            return FakeResponse()
+
+    async def fake_get_session():
+        return FakeSession()
+
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient.get_session", fake_get_session)
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient._get_proxy", lambda: None)
+    monkeypatch.setattr("src.core.mms.release_service.get_app_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "src.core.mms.release_service.get_github_credential_store",
+        lambda: SimpleNamespace(get_token=lambda repo: "stored-download-token"),  # noqa: ARG005
+    )
+
+    archive_path = await service._download_release_asset(release)
+
+    assert archive_path.read_bytes() == b"fake zip"
+    assert captured["url"] == release.asset_api_url
+    assert captured["headers"]["Authorization"] == "Bearer stored-download-token"
+    assert captured["headers"]["Accept"] == "application/octet-stream"
+
+
+@pytest.mark.asyncio
 async def test_prepare_github_install_rejects_manifest_repo_mismatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
     service = ModuleReleaseService()
 
-    async def fake_repo(repo: str) -> dict:
+    async def fake_repo(repo: str, *, github_token: str | None = None) -> dict:  # noqa: ARG001
         return {"full_name": repo}
 
-    async def fake_release(repo: str, *, allow_prerelease: bool = False) -> ModuleReleaseInfo:  # noqa: ARG001
+    async def fake_release(
+        repo: str,
+        *,
+        allow_prerelease: bool = False,
+        github_token: str | None = None,
+    ) -> ModuleReleaseInfo:  # noqa: ARG001
         return ModuleReleaseInfo(
             repo=repo,
             tag_name="v1.2.0",
@@ -99,7 +283,12 @@ async def test_check_for_update_detects_newer_release(tmp_path: Path, monkeypatc
     service = ModuleReleaseService()
     module = _make_module(tmp_path, version="1.0.0")
 
-    async def fake_release(repo: str, *, allow_prerelease: bool = False) -> ModuleReleaseInfo:  # noqa: ARG001
+    async def fake_release(
+        repo: str,
+        *,
+        allow_prerelease: bool = False,
+        github_token: str | None = None,
+    ) -> ModuleReleaseInfo:  # noqa: ARG001
         return ModuleReleaseInfo(
             repo=repo,
             tag_name="v1.1.0",
@@ -130,7 +319,12 @@ async def test_check_for_update_treats_stable_as_newer_than_prerelease(
     service = ModuleReleaseService()
     module = _make_module(tmp_path, version="1.2.0-rc.1")
 
-    async def fake_release(repo: str, *, allow_prerelease: bool = False) -> ModuleReleaseInfo:  # noqa: ARG001
+    async def fake_release(
+        repo: str,
+        *,
+        allow_prerelease: bool = False,
+        github_token: str | None = None,
+    ) -> ModuleReleaseInfo:  # noqa: ARG001
         return ModuleReleaseInfo(
             repo=repo,
             tag_name="v1.2.0",
@@ -161,7 +355,12 @@ async def test_prepare_module_upgrade_rejects_same_or_older_version(
     service = ModuleReleaseService()
     module = _make_module(tmp_path, version="1.1.0")
 
-    async def fake_release(repo: str, *, allow_prerelease: bool = False) -> ModuleReleaseInfo:  # noqa: ARG001
+    async def fake_release(
+        repo: str,
+        *,
+        allow_prerelease: bool = False,
+        github_token: str | None = None,
+    ) -> ModuleReleaseInfo:  # noqa: ARG001
         return ModuleReleaseInfo(
             repo=repo,
             tag_name="v1.1.0",
@@ -191,7 +390,11 @@ async def test_prepare_module_upgrade_rejects_manifest_release_version_mismatch(
     service = ModuleReleaseService()
     module = _make_module(tmp_path, version="1.0.0")
 
-    async def fake_check_for_update(module_info: ModuleInfo):
+    async def fake_check_for_update(
+        module_info: ModuleInfo,
+        *,
+        github_token: str | None = None,
+    ):  # noqa: ARG001
         return SimpleNamespace(
             module_name=module_info.name,
             current_version="1.0.0",

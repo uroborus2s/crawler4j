@@ -13,12 +13,14 @@ def _load_project_version(pyproject_path: Path) -> str:
 
 block_cipher = None
 PROJECT_ROOT = Path(globals().get("SPECPATH", Path.cwd())).resolve()
+WORKSPACE_ROOT = PROJECT_ROOT.parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 PROJECT_METADATA = PROJECT_ROOT / "pyproject.toml"
 APP_ENTRY = PROJECT_ROOT / "src" / "ui" / "app.py"
 UI_STYLE = PROJECT_ROOT / "src" / "ui" / "styles" / "dark_theme.qss"
 UI_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "icon.jpg"
 MODULES_DIR = PROJECT_ROOT / "modules"
+DOCS_ROOT = WORKSPACE_ROOT / "docs"
 PROJECT_VERSION = _load_project_version(PROJECT_METADATA)
 
 a = Analysis(
@@ -30,6 +32,10 @@ a = Analysis(
         (str(MODULES_DIR), "modules"),  # 内置模块
         (str(UI_STYLE), "src/ui/styles"),
         (str(UI_ICON), "src/ui/assets"),
+        (str(DOCS_ROOT / "index.md"), "docs"),
+        (str(DOCS_ROOT / "01-getting-started"), "docs/01-getting-started"),
+        (str(DOCS_ROOT / "02-user-guide"), "docs/02-user-guide"),
+        (str(DOCS_ROOT / "03-developer-guide"), "docs/03-developer-guide"),
     ],
     hiddenimports=[
         "PyQt6.sip",

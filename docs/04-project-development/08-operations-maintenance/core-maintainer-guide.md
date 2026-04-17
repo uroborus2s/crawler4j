@@ -52,7 +52,7 @@ uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
 | 应用入口、启动链、桌面壳层 | `docs/04-project-development/04-design/system-architecture.md`、`docs/04-project-development/04-design/api-design.md`、`docs/04-project-development/08-operations-maintenance/deployment-guide.md` |
 | Core 服务边界（ATM/MMS/REM/RunProfile/Debug/Persistence/System） | `docs/04-project-development/04-design/system-architecture.md`、`docs/04-project-development/04-design/module-boundaries.md`、`docs/04-project-development/06-testing-verification/test-plan.md` |
 | SDK CLI、模板、模块契约 | `docs/04-project-development/04-design/technical-selection.md`、`docs/03-developer-guide/index.md`、`docs/04-project-development/06-testing-verification/test-plan.md` |
-| 文档结构、导航、过程规则 | `docs/index.md`、`docs/01-getting-started/document-map.md`、`docs/04-project-development/10-traceability/document-index.md`、`docs/04-project-development/06-testing-verification/quality-gates.md` |
+| 文档结构、导航、过程规则 | `docs/index.md`、`docs/01-getting-started/index.md`、`docs/04-project-development/10-traceability/document-index.md`、`docs/04-project-development/06-testing-verification/quality-gates.md` |
 | 版本、发布、构建 | `docs/04-project-development/07-release-delivery/version-governance.md`、`docs/04-project-development/07-release-delivery/release-notes.md`、`docs/04-project-development/08-operations-maintenance/deployment-guide.md` |
 
 ## 5. 遇到不同问题先看哪里
@@ -67,7 +67,7 @@ uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
 
 ## 6. 当前文档使用边界
 
-- 要理解 Core 当前事实，优先读 `docs/01-getting-started/document-map.md` 与 `docs/04-project-development/`。
+- 要理解 Core 当前事实，优先读 `docs/01-getting-started/index.md` 与 `docs/04-project-development/`。
 - 要理解模块作者如何创建、调试和交付模块，先读 `docs/03-developer-guide/index.md`，再按需进入对应章节。
 - 不再回读旧归档正文，也不再使用 `docs/project-process/` 或 `docs/model-development/` 作为正式入口。
 

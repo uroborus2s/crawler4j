@@ -140,11 +140,19 @@ def test_root_app_runtime_does_not_keep_version_mirror_file():
 
 def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
     spec_text = (APP_ROOT / "crawler4j.spec").read_text(encoding="utf-8")
+    paths_text = (APP_ROOT / "src" / "utils" / "paths.py").read_text(encoding="utf-8")
 
     assert 'APP_ENTRY = PROJECT_ROOT / "src" / "ui" / "app.py"' in spec_text
+    assert 'WORKSPACE_ROOT = PROJECT_ROOT.parents[1]' in spec_text
+    assert 'DOCS_ROOT = WORKSPACE_ROOT / "docs"' in spec_text
+    assert '(str(DOCS_ROOT / "index.md"), "docs")' in spec_text
+    assert '(str(DOCS_ROOT / "01-getting-started"), "docs/01-getting-started")' in spec_text
+    assert '(str(DOCS_ROOT / "02-user-guide"), "docs/02-user-guide")' in spec_text
+    assert '(str(DOCS_ROOT / "03-developer-guide"), "docs/03-developer-guide")' in spec_text
     assert "sys.path.insert(0, str(PROJECT_ROOT))" in spec_text
     assert '(str(UI_ICON), "src/ui/assets")' in spec_text
     assert 'PROJECT_METADATA = PROJECT_ROOT / "pyproject.toml"' in spec_text
     assert 'def _load_project_version' in spec_text
     assert "from src.__version__ import VERSION" not in spec_text
     assert "src/main.py" not in spec_text
+    assert "def get_docs_root() -> Path:" in paths_text

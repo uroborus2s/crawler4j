@@ -91,6 +91,12 @@ class MyTask(TaskScript):
 - `ctx.get_config()` / `ctx.config` 只读取宿主持久化的模块级配置和工作流级覆盖
 - `workflow`、`devel_mode`、`execution_params`、`job_params`、`params`、`creation_params` 统一读取 `ctx.runtime`
 
+`ctx.run_subtask()` 的返回语义：
+
+- 成功且子任务返回了 `TaskResult.data` 时，直接返回该 payload
+- 成功但没有 payload 时，返回 `True`
+- 失败时，返回一个 `dict` 风格但布尔值为 `False` 的失败结果，至少保留 `status=failed` 以及可用的 `message` / `error`
+
 ## Core 工具能力边界
 
 模块侧只应通过 `ctx.tools.call(...)` 使用宿主注入的扩展能力。

@@ -65,7 +65,7 @@
 ## 5. 文档状态
 
 - 当前 `docs/` 已收敛为四大模块：`docs/01-getting-started/`、`docs/02-user-guide/`、`docs/03-developer-guide/`、`docs/04-project-development/`。
-- 当前正式入口以 `docs/01-getting-started/document-map.md`、`docs/02-user-guide/user-guide.md`、`docs/03-developer-guide/index.md` 和 `docs/04-project-development/10-traceability/document-index.md` 为主。
+- 当前正式入口以 `docs/01-getting-started/index.md`、`docs/02-user-guide/user-guide.md`、`docs/03-developer-guide/index.md` 和 `docs/04-project-development/10-traceability/document-index.md` 为主。
 - 旧 SRS、旧设计、旧测试和旧用户专题文档已从当前文档树移除，避免与现行实现形成双事实源。
 - 本仓不再承担独立静态文档站构建职责。
 - 当前事实以代码、当前文档和本地验证结果为准。

@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
+from crawler4j_contracts.result import TaskResult
+
 if TYPE_CHECKING:
     from playwright.async_api import BrowserContext, Page
 
@@ -243,9 +245,30 @@ class TaskContext:
         self.logger.info(f"▶ 执行子任务: {task_name}")
         result = await self._subtask_executor(task_name, self)
 
-        if result and hasattr(result, "data"):
-            if result.data:
-                return result.data
-            if hasattr(result, "success"):
-                return bool(result.success)
+        if isinstance(result, TaskResult):
+            if result.success:
+                if result.data:
+                    return result.data
+                return True
+            return _SubtaskFailurePayload.from_task_result(result)
         return result
+
+
+class _SubtaskFailurePayload(dict[str, Any]):
+    """A falsey mapping that preserves failed subtask details for workflows."""
+
+    def __bool__(self) -> bool:
+        return False
+
+    @classmethod
+    def from_task_result(cls, result: TaskResult) -> "_SubtaskFailurePayload":
+        payload = dict(result.data or {})
+        payload.setdefault("status", "failed")
+        payload.setdefault("success", False)
+        if result.message:
+            payload.setdefault("message", result.message)
+        if result.error is not None:
+            payload.setdefault("error", result.error)
+        if result.signal is not None:
+            payload.setdefault("signal", result.signal.to_dict())
+        return cls(payload)

@@ -261,13 +261,38 @@ class TestTaskContextSubtask:
 
     @pytest.mark.asyncio
     async def test_run_subtask_returns_false_for_failed_result(self, basic_context: TaskContext):
-        """验证失败结果返回 False。"""
+        """验证失败结果返回 falsey 的结构化 payload。"""
         basic_context.logger = MagicMock()
         basic_context._subtask_executor = AsyncMock(return_value=TaskResult.fail(message="failed"))
 
         result = await basic_context.run_subtask("sub_task")
 
-        assert result is False
+        assert isinstance(result, dict)
+        assert not result
+        assert result["status"] == "failed"
+        assert result["message"] == "failed"
+        assert result["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_run_subtask_preserves_failed_result_details(self, basic_context: TaskContext):
+        """验证失败结果会保留 error 和原始 data。"""
+        basic_context.logger = MagicMock()
+        basic_context._subtask_executor = AsyncMock(
+            return_value=TaskResult.fail(
+                message="labor login failed",
+                error="invalid_labor_credentials",
+                data={"current_url": "https://frontend.lobaobao97.com/login"},
+            )
+        )
+
+        result = await basic_context.run_subtask("sub_task")
+
+        assert isinstance(result, dict)
+        assert not result
+        assert result["status"] == "failed"
+        assert result["message"] == "labor login failed"
+        assert result["error"] == "invalid_labor_credentials"
+        assert result["current_url"] == "https://frontend.lobaobao97.com/login"
 
 
 # === 状态共享测试 ===

@@ -56,7 +56,7 @@
 
 | 任务 | 目标 | 主要产物 | 验收标准 | 优先级 | 状态 |
 |---|---|---|---|---|---|
-| `TASK-014` | 收口根导航与角色快读入口 | `docs/index.md`、`docs/01-getting-started/document-map.md` | 根导航覆盖正式页面，四类读者都有明确入口 | P0 | 已完成 |
+| `TASK-014` | 收口根导航与角色快读入口 | `docs/index.md`、`docs/01-getting-started/index.md` | 根导航覆盖正式页面，四类读者都有明确入口 | P0 | 已完成 |
 | `TASK-015` | 重构开发者/维护者入口页 | `docs/03-developer-guide/index.md`、`docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md`、`docs/02-user-guide/user-guide.md` | 每个入口页都说明“谁看、看什么、下一步去哪” | P0 | 已完成 |
 | `TASK-016` | 补齐过程控制文档骨架 | `software-development-process.md`、`execution-log.md` | 过程规则和执行事实分离，且都可独立交接 | P1 | 已完成 |
 | `TASK-017` | 补齐发布与交付文档骨架 | `acceptance-checklist.md`、`delivery-package.md` | 发布前检查、交付物清单和阻塞项可快速判断 | P1 | 已完成 |

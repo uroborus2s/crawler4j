@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,6 +25,8 @@ from PyQt6.QtWidgets import (
 class ModuleInstallRequest:
     install_kind: str
     source: str
+    github_token: str = ""
+    remember_github_token: bool = False
 
 
 class ModuleInstallDialog(QDialog):
@@ -117,10 +120,14 @@ class ModuleInstallDialog(QDialog):
     def _build_local_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        form = QFormLayout()
-        form.setLabelAlignment(form.labelAlignment())
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
+        layout.addWidget(self._build_field_label("ZIP 文件"))
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
         self.local_path_input = QLineEdit()
         self.local_path_input.setPlaceholderText("选择模块 ZIP 安装包")
         browse_btn = QPushButton("浏览…")
@@ -130,34 +137,82 @@ class ModuleInstallDialog(QDialog):
 
         row_widget = QWidget()
         row_widget.setLayout(row)
-        form.addRow("ZIP 文件", row_widget)
-        layout.addLayout(form)
+        layout.addWidget(row_widget)
 
-        hint = QLabel("要求 ZIP 内包含单一模块根目录，且 `module.yaml` 必须声明 `upgrade_source.repo`。")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: rgba(255,255,255,0.6);")
-        layout.addWidget(hint)
+        layout.addWidget(self._build_field_label("GitHub Token（私有升级仓库可填）"))
+
+        self.local_token_input = QLineEdit()
+        self.local_token_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.local_token_input.setPlaceholderText("如果模块升级仓库是私有仓库，在这里填 Token")
+        layout.addWidget(self.local_token_input)
+
+        layout.addWidget(
+            self._build_hint_label(
+                "要求 ZIP 内包含单一模块根目录，且 `module.yaml` 必须声明 `upgrade_source.repo`。"
+            )
+        )
+
+        self.local_remember_check = QCheckBox("保存这个 Token，后续更新这个模块时自动使用")
+        self.local_remember_check.setStyleSheet("color: rgba(255,255,255,0.72);")
+        layout.addWidget(self.local_remember_check)
+        layout.addWidget(
+            self._build_hint_label(
+                "只保存在当前应用，不会上传到 GitHub。安装成功后，会自动绑定到安装包声明的升级仓库。"
+            )
+        )
         layout.addStretch()
         return widget
 
     def _build_github_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        form = QFormLayout()
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
+        layout.addWidget(self._build_field_label("GitHub 仓库"))
         self.repo_input = QLineEdit()
         self.repo_input.setPlaceholderText("owner/repo 或 GitHub 仓库 URL")
-        form.addRow("GitHub 仓库", self.repo_input)
-        layout.addLayout(form)
+        layout.addWidget(self.repo_input)
 
-        hint = QLabel(
-            "仓库必须发布 GitHub Release，且每个可安装版本只能上传一个 `.zip` 模块安装包。"
+        layout.addWidget(self._build_field_label("GitHub Token（私有仓库必填）"))
+
+        self.repo_token_input = QLineEdit()
+        self.repo_token_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.repo_token_input.setPlaceholderText("公开仓库可留空；私有仓库请填写可读取 Release 的 Token")
+        layout.addWidget(self.repo_token_input)
+
+        layout.addWidget(
+            self._build_hint_label(
+                "仓库必须发布 GitHub Release，且每个可安装版本只能上传一个 `.zip` 模块安装包。"
+            )
         )
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: rgba(255,255,255,0.6);")
-        layout.addWidget(hint)
+
+        self.repo_remember_check = QCheckBox("保存这个 Token，后续更新这个仓库时自动使用")
+        self.repo_remember_check.setStyleSheet("color: rgba(255,255,255,0.72);")
+        layout.addWidget(self.repo_remember_check)
+        layout.addWidget(
+            self._build_hint_label(
+                "只保存在当前应用，不会上传到 GitHub。后续检查更新或升级这个仓库时会自动复用。"
+            )
+        )
         layout.addStretch()
         return widget
+
+    @staticmethod
+    def _build_field_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        label.setStyleSheet("color: white; font-size: 13px; font-weight: 600;")
+        return label
+
+    @staticmethod
+    def _build_hint_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        label.setStyleSheet("color: rgba(255,255,255,0.6); font-size: 12px;")
+        return label
 
     def _browse_zip(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -182,9 +237,27 @@ class ModuleInstallDialog(QDialog):
             source = self.local_path_input.text().strip()
             if not source:
                 raise ValueError("请选择本地 ZIP 安装包")
-            return ModuleInstallRequest(install_kind="local_zip", source=source)
+            github_token = self.local_token_input.text().strip()
+            remember = self.local_remember_check.isChecked()
+            if remember and not github_token:
+                raise ValueError("勾选保存 GitHub Token 时必须先输入 Token")
+            return ModuleInstallRequest(
+                install_kind="local_zip",
+                source=source,
+                github_token=github_token,
+                remember_github_token=remember,
+            )
 
         source = self.repo_input.text().strip()
         if not source:
             raise ValueError("请输入 GitHub 仓库地址")
-        return ModuleInstallRequest(install_kind="github_release", source=source)
+        github_token = self.repo_token_input.text().strip()
+        remember = self.repo_remember_check.isChecked()
+        if remember and not github_token:
+            raise ValueError("勾选保存 GitHub Token 时必须先输入 Token")
+        return ModuleInstallRequest(
+            install_kind="github_release",
+            source=source,
+            github_token=github_token,
+            remember_github_token=remember,
+        )

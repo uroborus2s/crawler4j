@@ -65,6 +65,15 @@ class ConfigStore:
                 (key, value, now)
             )
         return True
+
+    def delete_setting(self, key: str) -> bool:
+        """删除系统设置值。"""
+        with get_connection(CONFIG_DB) as conn:
+            cursor = conn.execute(
+                "DELETE FROM settings WHERE key = ?",
+                (key,),
+            )
+        return cursor.rowcount > 0
     
     def get_all_settings(self) -> dict[str, str]:
         """获取所有系统设置。

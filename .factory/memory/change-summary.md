@@ -1,6 +1,10 @@
 # 变更摘要
 
 ## 文档演进
+- `docs/01-getting-started/` 再次重写并压缩为单页模式：当前只保留 `了解 crawler4j` 这一篇作为正式入口；正文改为面向客户的产品介绍，不再拆成多页教读者选路径，原辅助页已删除 | 状态：DONE | 关联：`docs/01-getting-started/*.md`、`docs/index.md`
+- `docs/02-user-guide/` 二次完全重写：按 `安装与第一次打开 -> 首次设置 -> 开始使用 -> 日常使用 -> 管理员指南` 重排用户路径，新增“新手三入口”“参数来源表”“运行模板入口固定说明”“结果单入口”“状态下一步动作”“IP 池最短闭环”“可复制报障模板”，并将根 `docs/index.md` 的用户指南导航顺序同步调整 | 状态：DONE | 关联：`docs/02-user-guide/*.md`、`docs/index.md`
+- `docs/02-user-guide/` 普通用户复核闭环：按用户要求执行 3 个专业文档子 agent 分工重写和 6 个普通用户子 agent 两轮复核；首轮 `3 PASS / 3 FAIL`，二次修订后第二轮 6 个普通用户全部 `PASS` 并明确愿意原样发给新同事 | 状态：DONE | 关联：`docs/02-user-guide/*.md`、`docs/04-project-development/10-traceability/document-index.md`
+- 客户端内置使用文档：主导航已新增 `📘 使用文档` 页面，当前已收口为“文档中心”结构；正式发布包会把 `docs/index.md`、`docs/01-getting-started/`、`docs/02-user-guide/` 与 `docs/03-developer-guide/` 一起打进客户端，并直接按 Markdown 展示树形目录与文内相对跳转 | 状态：DONE | 关联：`packages/crawler4j/src/core/system/ui/help_page.py`、`packages/crawler4j/crawler4j.spec`
 - `docs-stratego` 自动联动接入：源仓已新增 `.github/workflows/notify-docs-stratego.yml`，在 `feature/task-plugin-system` 分支提交 `docs/**` 变更后自动向 `uroborus2s/docs-stratego` 发送 `source-pointer-sync-requested`；部署说明已同步补充 secret、分支对齐与“共享 PR 审核后发布”的闭环约束 | 状态：DONE | 关联：`.github/workflows/notify-docs-stratego.yml`、`docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 - `DOC-module-guide-directory-expansion` 模块开发指南已从单文件重构为目录化章节主指南，并按“小白开发者”视角补齐概念、上手、结构、开发、调试、交付与排错说明 | 状态：DONE | 关联：`TASK-010`
 - README 与发布描述收口：仓库根 / 子包 README、包 `description`、release 文档与 `.factory` 版本摘要已统一到 `0.2.0` 发布基线；同时移除了 `packages/crawler4j/modules/` 不存在目录的错误说明，并明确最近正式 Git tag 仍为 `v0.1.1` | 状态：DONE | 关联：`README.md`、`packages/*/README.md`、`docs/04-project-development/07-release-delivery/*`
@@ -18,6 +22,7 @@
 - 版本事实源进一步收口：`crawler4j-sdk` 保留的运行时 `__version__` 与 SDK CLI 初始化模板里的默认依赖范围，现都由 `packages/crawler4j-sdk/pyproject.toml` 动态派生；`crawler4j-contracts` 已删除运行时 `__version__` 镜像与仅为其服务的 `_version.py`；对应回归测试已移除对版本字面量镜像的依赖 | 状态：DONE | 关联：`packages/crawler4j-sdk/src/_version.py`、`packages/crawler4j-sdk/src/cli/commands.py`、`packages/crawler4j-sdk/src/cli/templates.py`、`packages/crawler4j-contracts/src/__init__.py`
 
 ## 缺陷修复
+- 仓库忽略规则补齐：根 `.gitignore` 已补 `.mypy_cache/`、`.ruff_cache/`、`.tmp` / `*.tmp`、`.coverage.*`、`.tox/`、`.nox/`，避免本地质量工具与测试临时产物误入版本库 | 状态：DONE | 关联：`.gitignore`
 - `BUG-001-root-entrypoint-and-pyinstaller-spec-drift` BUG-001 根入口与 PyInstaller 规格漂移 | 状态：DONE | 关联：无
 - `BUG-002-ctrip-labor-workflow-falls-back-to-login` BUG-002 `ctrip labor_workflow` 因旧依赖缺失退化为登录流程 | 状态：DONE | 关联：无
 - `BUG-003-pyqt-runtime-blocked-by-system-policy` BUG-003 PyQt6 运行时当前被系统策略阻断，导致 UI 与 `pytest-qt` 不可用 | 状态：DONE | 关联：无
@@ -43,6 +48,10 @@
 - `BUG-013-module-assembler-import-errors-hidden` BUG-013 `ModuleAssembler` 在发现 `tasks/` / `workflows/` 时会静默吞掉 import failure，导致开发者只看到泛化的 “Workflow or task not found” | 状态：DONE | 关联：`packages/crawler4j/tests/unit/test_sdk/test_assembler.py`
 - 模块列表页卸载结果收敛：`ModuleListWidget` 现在会显式处理 `registry.uninstall()` 返回 `False` 的场景，拒绝卸载时改为提示“卸载失败”且不再错误弹出成功提示；同时补齐“失败不刷新 / 成功才刷新”的 UI 单测 | 状态：DONE | 关联：`packages/crawler4j/src/core/mms/ui/module_list_widget.py`、`packages/crawler4j/tests/unit/test_core/test_mms/test_module_list_widget.py`
 - 模块在线升级链路收敛：`ModuleReleaseService` 现在会拒绝 `module.yaml.version` 与 GitHub Release 版本不一致的 ZIP，并在真正执行升级时持有模块级升级维护锁、重新校验运行中任务与当前模块状态；ATM 的手动执行、服务并发补齐与 Cron 触发也已接入这把锁，避免确认升级后仍有新任务钻入安装窗口；CLI `host upgrade apply` 与 UI 升级入口统一走同一条安全应用路径 | 状态：DONE | 关联：`packages/crawler4j/src/core/mms/release_service.py`、`packages/crawler4j/src/core/atm/controller.py`、`packages/crawler4j/src/core/atm/service.py`、`packages/crawler4j-sdk/src/cli/commands.py`
+- DevLink 预检收敛：添加开发模块时，宿主现在只要求本地 manifest 合法，不再因 GitHub 仓库暂时不可达而阻断开发链接注册；远端失败会降级为 warning 展示，同时修复了 GitHub 请求错误路径里 `logger.warning(...)` 误用导致的二次 `TypeError`，开发者终于能看到真实远端报错 | 状态：DONE | 关联：`packages/crawler4j/src/core/mms/release_service.py`、`packages/crawler4j/tests/unit/test_core/test_mms/test_release_service.py`
+- 私有 GitHub 仓库鉴权收敛：桌面客户端现已切到“按 `repo` 维度保存 GitHub Token”的模型，token 会以应用内主密钥加密后写入配置库，模块详情页可直接保存 / 测试 / 清除，安装弹窗也支持首次录入并记住到对应仓库；宿主 `ModuleReleaseService` 不再依赖环境变量，而是优先使用显式传入 token 或 repo 维度的已保存凭据，并继续优先走 release asset API URL 以兼容私有仓库下载；SDK CLI 仍保留 `release check-remote`、`host install preview/apply`、`host upgrade check/preview/apply` 的 `--github-token` 参数与环境变量兜底 | 状态：DONE | 关联：`packages/crawler4j/src/core/mms/github_credentials.py`、`packages/crawler4j/src/core/mms/release_service.py`、`packages/crawler4j/src/core/mms/ui/module_detail_page.py`、`packages/crawler4j/src/core/mms/ui/module_install_dialog.py`、`packages/crawler4j-sdk/src/cli/commands.py`
+- 模块安装弹窗对齐与文案修正：`本地 ZIP` / `GitHub 源` 两个页签的字段、提示文案和勾选框现统一改为左对齐纵向布局，避免标签列居中导致的视觉漂移；两个勾选项也改成“记住当前 Token，并绑定到哪个仓库，供后续检查更新/升级复用”的直白语义，消除“像是在上传到 GitHub” 的误读 | 状态：DONE | 关联：`packages/crawler4j/src/core/mms/ui/module_install_dialog.py`、`docs/02-user-guide/user-guide.md`
+- 模块安装弹窗文案再收敛：把“记住/绑定仓库”进一步改成“保存这个 Token，后续更新时自动使用”，并补上“只保存在当前应用，不会上传到 GitHub”的明确说明，降低普通用户理解门槛 | 状态：DONE | 关联：`packages/crawler4j/src/core/mms/ui/module_install_dialog.py`、`docs/02-user-guide/user-guide.md`
 - 旧版本兼容层清理：已删除 `src.automation.*`、`src.utils.logger`、`src.core.models` 聚合导出、`SignalBridge/get_signal_bridge` 别名，以及 MMS settings store 对旧 `module:{name}:config` KV 的兼容回退；历史手工验证脚本中的旧入口也已移除或切到新路径，当前仓内仅保留“兼容已删除”的负向回归测试 | 状态：DONE | 关联：`tests/unit/test_core/test_mms/test_removed_runtime_surface.py`、`tests/unit/test_core/test_mms/test_settings_store.py`
 - 宿主 `src/utils` 第二轮收口：已删除业务重复实现与死代码（`captcha_solver`、`hotel_matcher`、`sms_platform`、`fingerprint_generator`、`network_checker`、`async_utils`），并删除旧本地验证码分析脚本；模块侧由模块仓自带实现独立承载，且相关测试在模块仓验证通过 | 状态：DONE | 关联：`tests/unit/test_core/test_mms/test_removed_runtime_surface.py`
 - 宿主源码第三轮收口：已删除 `src/core/models` 业务模型目录、`src/automation`/`src/core/models` 残留缓存目录、业务 smoke/verify 脚本，并把宿主测试中的业务样例统一泛化为 `demo_module`；同时移除 REM 中旧数据/旧字段兼容分支 | 状态：DONE | 关联：`tests/unit/test_core/test_mms/test_removed_runtime_surface.py`、`tests/integration/test_task_debug_e2e.py`

@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 from src.core.mms import (
     ModuleSource,
     ModuleStatus,
+    get_github_credential_store,
     get_module_registry,
     get_module_release_service,
 )
@@ -425,9 +426,15 @@ class ModuleListWidget(QWidget):
         try:
             service = get_module_release_service()
             if request.install_kind == "local_zip":
-                preview = await service.prepare_local_install(request.source)
+                preview = await service.prepare_local_install(
+                    request.source,
+                    github_token=request.github_token or None,
+                )
             else:
-                preview = await service.prepare_github_install(request.source)
+                preview = await service.prepare_github_install(
+                    request.source,
+                    github_token=request.github_token or None,
+                )
 
             dialog = InstallPreviewDialog(
                 preview.manifest,
@@ -439,6 +446,12 @@ class ModuleListWidget(QWidget):
             )
             if dialog.exec() != dialog.DialogCode.Accepted:
                 return
+
+            if request.remember_github_token and request.github_token:
+                get_github_credential_store().set_token(
+                    preview.manifest.upgrade_source.repo,
+                    request.github_token,
+                )
 
             registry = get_module_registry()
             module_info = registry.install(preview.archive_path)

@@ -5,9 +5,12 @@
 Provider 层面向具体技术栈，负责实际 spawn/keepalive/kill/healthcheck。
 """
 
+import asyncio
+
 from abc import ABC, abstractmethod
 from typing import Any
 
+from src.core.foundation.logging import logger
 from src.core.rem.handle import BrowserHandle
 from src.core.rem.models import Environment, EnvKind
 from src.core.rem.virtualbrowser_fingerprint import materialize_virtualbrowser_fingerprint
@@ -281,43 +284,134 @@ class PlaywrightProvider(BaseProvider):
         from src.core.rem.models import Environment, EnvStatus
         
         config = config or {}
+        browser_id = str(config.get("env_name") or "local-playwright")
         return Environment(
             name=config.get("env_name", "local-playwright"),
             kind=self.kind,
             provider=self.name,
             status=EnvStatus.READY,
-            external_id="local",
+            external_id=browser_id,
+            capabilities={"page", "cookies"},
+            handle=BrowserHandle(browser_id=browser_id),
             created_at=int(time.time()),
             updated_at=int(time.time()),
         )
     
     async def reset(self, env: Environment) -> bool:
         """重置本地环境。"""
-        return True
+        handle = env.handle
+        if not handle:
+            return True
+
+        try:
+            if handle.context:
+                clear_cookies = getattr(handle.context, "clear_cookies", None)
+                if callable(clear_cookies):
+                    await clear_cookies()
+            if handle.page and not handle.page.is_closed():
+                await handle.page.goto("about:blank", wait_until="domcontentloaded")
+            return True
+        except Exception:
+            return False
     
     async def health_check(self, env: Environment) -> bool:
         """健康检查。"""
-        return True
+        handle = env.handle
+        if not handle or not handle.page or handle.page.is_closed():
+            return False
+        try:
+            await handle.page.title()
+            return True
+        except Exception:
+            return False
     
     async def destroy(self, env: Environment) -> bool:
         """销毁本地环境。"""
-        return True
+        return await self.close(env)
     
     async def open(self, env: Environment) -> bool:
         """打开本地浏览器。"""
-        return True
+        handle = env.handle
+        if handle is None:
+            browser_id = str(env.external_id or env.name or "local-playwright")
+            handle = BrowserHandle(browser_id=browser_id)
+            env.handle = handle
+
+        if handle.browser and handle.is_connected():
+            return True
+
+        launch_candidates = (
+            {"headless": False},
+            {"channel": "chrome", "headless": False},
+            {"headless": True},
+            {"channel": "chrome", "headless": True},
+        )
+        try:
+            from src.core.rem.handle import PlaywrightManager
+
+            playwright = await PlaywrightManager.acquire()
+            handle._has_playwright_ref = True
+            last_error: Exception | None = None
+            for launch_options in launch_candidates:
+                try:
+                    handle._browser = await playwright.chromium.launch(**launch_options)
+                    return True
+                except Exception as exc:
+                    last_error = exc
+            if last_error is not None:
+                raise last_error
+            return False
+        except Exception as exc:
+            from src.core.foundation.logging import logger
+
+            logger.error(f"[PlaywrightProvider] Failed to launch local browser: {exc}")
+            if handle._has_playwright_ref:
+                from src.core.rem.handle import PlaywrightManager
+
+                await PlaywrightManager.release()
+                handle._has_playwright_ref = False
+            handle._browser = None
+            handle._context = None
+            handle._page = None
+            return False
 
     async def connect(self, env: Environment) -> bool:
         """建立自动化连接。"""
-        return True
+        handle = env.handle
+        if not handle or not handle.browser:
+            return False
+
+        try:
+            handle._context = (
+                handle.browser.contexts[0]
+                if handle.browser.contexts
+                else await handle.browser.new_context()
+            )
+            handle._page = (
+                handle.context.pages[0]
+                if handle.context and handle.context.pages
+                else await handle.context.new_page()
+            )
+            return handle.page is not None
+        except Exception:
+            handle._context = None
+            handle._page = None
+            return False
         
     async def close(self, env: Environment) -> bool:
         """关闭窗口。"""
+        handle = env.handle
+        if not handle:
+            return True
+        browser_id = handle.browser_id
+        await handle.safe_close()
+        env.handle = BrowserHandle(browser_id=browser_id)
         return True
     
     async def is_window_open(self, env: Environment) -> bool:
         """本地模式下不支持查询窗口状态。"""
-        return False
+        handle = env.handle
+        return bool(handle and handle.browser and handle.is_connected())
     
     async def exists(self, env: Environment) -> bool:
         """本地环境始终存在。"""
@@ -325,11 +419,13 @@ class PlaywrightProvider(BaseProvider):
 
     async def is_running(self, env: Environment) -> bool:
         """检查本地环境是否在运行。"""
-        return True
+        handle = env.handle
+        return bool(handle and handle.browser and handle.is_connected())
 
     async def update(self, env: Environment, config: dict) -> bool:
         """更新本地环境配置。"""
-        return True
+        del env, config
+        return False
 
 
 # =============================================================================
@@ -992,18 +1088,62 @@ class VirtualBrowserClient:
         """启动浏览器，返回 WS 地址。"""
         client = await self._get_client()
         payload = {"id": browser_id}
-        resp = await client.post("/api/launchBrowser", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        if not data.get("success"):
-            raise RuntimeError(f"Launch Error: {data.get('msg')}")
-        
-        result_data = data.get("data", {})
+        last_error = ""
 
-        ws_url = _extract_cdp_endpoint(result_data)
-        if not ws_url:
-            raise KeyError(f"Missing 'ws' in VirtualBrowser API response: {result_data}")
-        return ws_url
+        for attempt in range(2):
+            resp = await client.post("/api/launchBrowser", json=payload)
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+            launch_error = str(
+                data.get("error")
+                or data.get("msg")
+                or resp.text
+                or f"HTTP {resp.status_code}"
+            )
+
+            if resp.is_success and data.get("success"):
+                result_data = data.get("data", {})
+                ws_url = _extract_cdp_endpoint(result_data)
+                if not ws_url:
+                    raise KeyError(f"Missing 'ws' in VirtualBrowser API response: {result_data}")
+                return ws_url
+
+            last_error = launch_error
+            if attempt == 0 and self._is_recoverable_launch_error(resp.status_code, launch_error):
+                logger.warning(
+                    "[VirtualBrowser] launchBrowser failed with recoverable error; "
+                    f"stopping browser and retrying once: id={browser_id} "
+                    f"status={resp.status_code} error={launch_error}"
+                )
+                await self.stop_browser(browser_id)
+                await asyncio.sleep(1)
+                continue
+
+            logger.error(
+                "[VirtualBrowser] launchBrowser failed: "
+                f"id={browser_id} status={resp.status_code} error={launch_error}"
+            )
+            if not resp.is_success:
+                resp.raise_for_status()
+            break
+
+        raise RuntimeError(f"Launch Error: {last_error}")
+
+    @staticmethod
+    def _is_recoverable_launch_error(status_code: int, message: str) -> bool:
+        text = message.strip().lower()
+        if status_code == 400 and "is running" in text:
+            return True
+        if status_code == 500 and "devtools port" in text:
+            return True
+        if "remote debugging" in text:
+            return True
+        if "browser process closed before devtools port was detected" in text:
+            return True
+        return False
     
     async def stop_browser(self, browser_id: int):
         client = await self._get_client()

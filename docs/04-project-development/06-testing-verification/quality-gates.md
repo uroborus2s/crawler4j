@@ -47,11 +47,11 @@
 ## 4. 文档导航规则
 
 - `docs/index.md` 只暴露四大模块：`01-getting-started`、`02-user-guide`、`03-developer-guide`、`04-project-development`
-- Core 维护者入口是 `docs/01-getting-started/document-map.md` 与 `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md`；模块作者入口是 `docs/03-developer-guide/index.md`
+- Core 维护者入口是 `docs/01-getting-started/index.md` 与 `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md`；模块作者入口是 `docs/03-developer-guide/index.md`
 - 当前正式正文层以四大模块为准，不再保留 `docs/project-process/` 或 `docs/model-development/` 这类额外顶层入口
 - 任何包含 Markdown 页面的人类文档目录，都必须提供自己的 `index.md`
 - `.obsidian/` 和纯资产目录不属于正式文档入口要求范围
-- `docs/02-user-guide/user-guide.md` 只保留跨角色接手职责
+- `docs/02-user-guide/user-guide.md` 作为第一次使用入口，必须能带用户走通第一条任务
 - 冲突时，以代码、已验证命令结果和当前编号文档为准
 - `.factory/` 记录工厂控制面状态；`docs/` 负责面向人的正式说明
 

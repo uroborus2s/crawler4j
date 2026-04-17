@@ -123,6 +123,36 @@ class TestTaskFlowSubtaskIntegration:
         
         assert iterations == 5
         assert mock_context.should_stop() is True
+
+    @pytest.mark.asyncio
+    async def test_workflow_receives_falsey_mapping_for_failed_subtask(self, mock_context: TaskContext):
+        """验证失败子任务对工作流仍保持 falsey，但可读取结构化错误。"""
+
+        async def mock_executor(task_name: str, ctx: TaskContext) -> TaskResult:
+            del task_name, ctx
+            return TaskResult.fail(
+                message="labor login failed",
+                error="invalid_labor_credentials",
+            )
+
+        mock_context._subtask_executor = mock_executor
+
+        class FailureAwareFlow(TaskFlow):
+            name = "failure_aware"
+
+            async def run(self, ctx: TaskContext) -> None:
+                result = await ctx.run_subtask("login_labor_task")
+                ctx.state["subtask_result"] = result
+                ctx.state["subtask_truthy"] = bool(result)
+
+        flow = FailureAwareFlow()
+        await flow.run(mock_context)
+
+        subtask_result = mock_context.state["subtask_result"]
+        assert isinstance(subtask_result, dict)
+        assert mock_context.state["subtask_truthy"] is False
+        assert subtask_result["status"] == "failed"
+        assert subtask_result["error"] == "invalid_labor_credentials"
     
     @pytest.mark.asyncio
     async def test_workflow_state_sharing(self, mock_context: TaskContext):

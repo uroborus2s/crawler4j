@@ -4,7 +4,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from PyQt6.QtWidgets import QLabel, QPushButton
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QLabel, QMessageBox, QPushButton, QSplitter
 
 from src.core.mms.models import (
     ConfigDefaultsInfo,
@@ -15,6 +16,7 @@ from src.core.mms.models import (
     UIExtensionInfo,
     WorkflowInfo,
 )
+from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.ui.module_detail_page import ModuleDetailPage
 from src.ui.components.combo_box import StyledComboBox
 
@@ -193,6 +195,76 @@ def test_module_detail_page_exposes_config_page_and_persists_module_and_workflow
         "headless": True,
         "region": "cn",
     }
+
+
+def test_module_detail_page_saves_and_clears_repo_token(qtbot, tmp_path):
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+    module = _make_module(tmp_path, source=ModuleSource.EXTERNAL)
+    module.manifest.upgrade_source.repo = "example/private-repo"
+
+    infos: list[str] = []
+    with patch("PyQt6.QtWidgets.QMessageBox.information", lambda *args: infos.append(args[2])):
+        page.set_module(module)
+
+        assert page.repo_token_status_label is not None
+        assert page.repo_token_status_label.text() == "未配置"
+
+        page.repo_token_edit.setText("ghp_secret_token_1234")
+        page._save_repo_token()
+
+        assert page.repo_token_status_label.text() == "已配置"
+        assert get_github_credential_store().get_token("example/private-repo") == "ghp_secret_token_1234"
+
+    with patch(
+        "PyQt6.QtWidgets.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    ), patch("PyQt6.QtWidgets.QMessageBox.information", lambda *args: infos.append(args[2])):
+        page._clear_repo_token()
+
+    assert page.repo_token_status_label.text() == "未配置"
+    assert get_github_credential_store().get_token("example/private-repo") is None
+    assert any("已保存仓库 example/private-repo 的 GitHub Token" in message for message in infos)
+    assert any("已清除仓库 example/private-repo 的 GitHub Token" in message for message in infos)
+
+
+def test_module_detail_page_config_page_uses_resizable_70_30_splitter(qtbot, tmp_path):
+    page = ModuleDetailPage()
+    page.resize(1280, 900)
+    qtbot.addWidget(page)
+
+    page.set_module(_make_module(tmp_path, source=ModuleSource.DEV_LINK))
+    page._select_menu("config")
+    page.show()
+
+    config_page = page._menu_pages["config"]
+    qtbot.waitUntil(lambda: sum(config_page.config_splitter.sizes()) > 0)
+
+    sizes = config_page.config_splitter.sizes()
+    total = sum(sizes)
+
+    assert isinstance(config_page.config_splitter, QSplitter)
+    assert config_page.config_splitter.handleWidth() == 8
+    assert total > 0
+    assert 0.62 <= sizes[0] / total <= 0.78
+    assert sizes[0] > sizes[1]
+
+
+def test_module_detail_page_config_editors_hide_vertical_scrollbars(qtbot, tmp_path):
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    page.set_module(_make_module(tmp_path, source=ModuleSource.DEV_LINK))
+    config_page = page._menu_pages["config"]
+
+    assert (
+        config_page.module_config_editor.verticalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
+    assert (
+        config_page.workflow_config_editor.verticalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
 
 
 def test_module_detail_page_rejects_json_literal_in_config_editors(qtbot, tmp_path):

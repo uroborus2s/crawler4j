@@ -4,11 +4,14 @@
 固定菜单（基本信息、任务链）+ 模块自定义菜单。
 """
 
+import asyncio
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -21,6 +24,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.mms.models import DetailMenuItem, ModuleInfo, ModuleSource
 from src.core.mms.ui.module_config_page import ModuleConfigPage
+from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.ui_loader import (
     ModuleUIAccessDenied,
     ModuleUILoadError,
@@ -50,6 +54,9 @@ class ModuleDetailPage(QWidget):
         self._module: ModuleInfo | None = None
         self._menu_pages: dict[str, QWidget] = {}
         self._custom_page_loader = get_module_custom_page_loader()
+        self._pending_tasks: set[asyncio.Task] = set()
+        self.repo_token_status_label: QLabel | None = None
+        self.repo_token_edit: QLineEdit | None = None
         self._setup_ui()
     
     def _setup_ui(self):
@@ -273,6 +280,8 @@ class ModuleDetailPage(QWidget):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(20)
+        self.repo_token_status_label = None
+        self.repo_token_edit = None
         
         if not self._module:
             return page
@@ -301,6 +310,7 @@ class ModuleDetailPage(QWidget):
         info_items = [
             ("版本", manifest.version),
             ("作者", manifest.author or "未知"),
+            ("GitHub 仓库", manifest.upgrade_source.repo or "未声明"),
             (
                 "来源",
                 "内置"
@@ -323,7 +333,51 @@ class ModuleDetailPage(QWidget):
             row.addStretch()
             
             card_layout.addLayout(row)
-        
+
+        repo = str(manifest.upgrade_source.repo or "").strip()
+        if repo:
+            token_status_row = QHBoxLayout()
+            token_status_label = QLabel("GitHub Token:")
+            token_status_label.setStyleSheet(
+                "color: rgba(255,255,255,0.5); font-size: 13px; min-width: 80px;"
+            )
+            token_status_row.addWidget(token_status_label)
+
+            self.repo_token_status_label = QLabel()
+            self.repo_token_status_label.setStyleSheet("color: white; font-size: 13px;")
+            token_status_row.addWidget(self.repo_token_status_label)
+            token_status_row.addStretch()
+            card_layout.addLayout(token_status_row)
+
+            self.repo_token_edit = QLineEdit()
+            self.repo_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+            self.repo_token_edit.setPlaceholderText("输入该仓库的 GitHub Token")
+            self.repo_token_edit.setStyleSheet(
+                "background: rgba(255, 255, 255, 0.08);"
+                "border: 1px solid rgba(255, 255, 255, 0.16);"
+                "border-radius: 6px; padding: 8px 10px; color: white;"
+            )
+            card_layout.addWidget(self.repo_token_edit)
+
+            token_actions = QHBoxLayout()
+            save_token_btn = QPushButton("保存 Token")
+            save_token_btn.setStyleSheet(self._repo_action_btn_style("#4ade80", "#111827"))
+            save_token_btn.clicked.connect(self._save_repo_token)
+            token_actions.addWidget(save_token_btn)
+
+            test_token_btn = QPushButton("测试连接")
+            test_token_btn.setStyleSheet(self._repo_action_btn_style("#60a5fa", "white"))
+            test_token_btn.clicked.connect(self._test_repo_token)
+            token_actions.addWidget(test_token_btn)
+
+            clear_token_btn = QPushButton("清除 Token")
+            clear_token_btn.setStyleSheet(self._repo_action_btn_style("#f87171", "white"))
+            clear_token_btn.clicked.connect(self._clear_repo_token)
+            token_actions.addWidget(clear_token_btn)
+            token_actions.addStretch()
+            card_layout.addLayout(token_actions)
+            self._refresh_repo_token_status()
+
         # 安装路径
         if self._module.path:
             row = QHBoxLayout()
@@ -532,3 +586,103 @@ class ModuleDetailPage(QWidget):
 
         QMessageBox.information(self, "已移除", f"已移除开发链接: {self._module.name}")
         self.back_requested.emit()
+
+    @staticmethod
+    def _repo_action_btn_style(background: str, foreground: str) -> str:
+        return (
+            "QPushButton {"
+            f"background: {background};"
+            f"color: {foreground};"
+            "border: none; padding: 8px 14px; border-radius: 4px; font-weight: bold;"
+            "}"
+            "QPushButton:hover {"
+            "border: 1px solid rgba(255, 255, 255, 0.18);"
+            "}"
+        )
+
+    def _track_task(self, coroutine) -> None:
+        task = asyncio.create_task(coroutine)
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
+
+    def _current_repo(self) -> str:
+        if not self._module:
+            raise ValueError("当前未选择模块")
+        repo = str(self._module.manifest.upgrade_source.repo or "").strip()
+        if not repo:
+            raise ValueError("当前模块未声明 GitHub 仓库")
+        from src.core.mms.release_service import ModuleReleaseService
+
+        return ModuleReleaseService.normalize_repo(repo)
+
+    def _refresh_repo_token_status(self) -> None:
+        if not self.repo_token_status_label:
+            return
+        try:
+            has_token = get_github_credential_store().has_token(self._current_repo())
+        except Exception as exc:
+            self.repo_token_status_label.setText(f"异常: {exc}")
+            self.repo_token_status_label.setStyleSheet("color: #f87171; font-size: 13px;")
+            return
+        if has_token:
+            self.repo_token_status_label.setText("已配置")
+            self.repo_token_status_label.setStyleSheet("color: #4ade80; font-size: 13px;")
+        else:
+            self.repo_token_status_label.setText("未配置")
+            self.repo_token_status_label.setStyleSheet("color: rgba(255,255,255,0.72); font-size: 13px;")
+
+    def _save_repo_token(self) -> None:
+        if not self.repo_token_edit:
+            return
+        token = self.repo_token_edit.text().strip()
+        if not token:
+            QMessageBox.warning(self, "保存失败", "请输入 GitHub Token")
+            return
+        try:
+            repo = self._current_repo()
+            get_github_credential_store().set_token(repo, token)
+        except Exception as exc:
+            QMessageBox.warning(self, "保存失败", str(exc))
+            return
+        self.repo_token_edit.clear()
+        self._refresh_repo_token_status()
+        QMessageBox.information(self, "保存成功", f"已保存仓库 {repo} 的 GitHub Token")
+
+    def _clear_repo_token(self) -> None:
+        try:
+            repo = self._current_repo()
+        except Exception as exc:
+            QMessageBox.warning(self, "清除失败", str(exc))
+            return
+        reply = QMessageBox.question(
+            self,
+            "清除 GitHub Token",
+            f"确定要清除仓库 {repo} 的 GitHub Token 吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        get_github_credential_store().clear_token(repo)
+        if self.repo_token_edit:
+            self.repo_token_edit.clear()
+        self._refresh_repo_token_status()
+        QMessageBox.information(self, "已清除", f"已清除仓库 {repo} 的 GitHub Token")
+
+    def _test_repo_token(self) -> None:
+        self._track_task(self._test_repo_token_async())
+
+    async def _test_repo_token_async(self) -> None:
+        try:
+            repo = self._current_repo()
+            token = self.repo_token_edit.text().strip() if self.repo_token_edit else ""
+            if not token:
+                token = get_github_credential_store().get_token(repo) or ""
+            if not token:
+                raise ValueError("请先输入或保存 GitHub Token")
+            from src.core.mms.release_service import get_module_release_service
+
+            await get_module_release_service().verify_repo_accessible(repo, github_token=token)
+        except Exception as exc:
+            QMessageBox.warning(self, "连接失败", str(exc))
+            return
+        QMessageBox.information(self, "连接成功", f"GitHub 仓库连接正常: {repo}")

@@ -102,6 +102,51 @@ def test_release_publish_uses_gh_release_create(monkeypatch, tmp_path: Path):
     assert calls[1][3] == "v0.1.0"
 
 
+def test_fetch_latest_release_adds_authorization_header(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return commands.json.dumps(
+                [
+                    {
+                        "tag_name": "v1.2.0",
+                        "name": "v1.2.0",
+                        "draft": False,
+                        "prerelease": False,
+                        "assets": [
+                            {
+                                "name": "demo_model-1.2.0.zip",
+                                "browser_download_url": "https://example.com/demo_model-1.2.0.zip",
+                                "url": "https://api.github.com/repos/demo/demo_model/releases/assets/1",
+                            }
+                        ],
+                        "html_url": "https://github.com/demo/demo_model/releases/tag/v1.2.0",
+                    }
+                ]
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout=0):  # noqa: ARG001
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        return FakeResponse()
+
+    monkeypatch.setattr(commands.urllib.request, "urlopen", fake_urlopen)
+
+    payload = commands._fetch_latest_release("demo/demo_model", github_token="cli-token")
+
+    assert payload["version"] == "1.2.0"
+    assert payload["asset_api_url"] == "https://api.github.com/repos/demo/demo_model/releases/assets/1"
+    assert captured["url"] == "https://api.github.com/repos/demo/demo_model/releases"
+    assert captured["headers"]["Authorization"] == "Bearer cli-token"
+
+
 def test_release_check_remote_treats_stable_as_newer_than_prerelease(
     monkeypatch, tmp_path: Path, capsys
 ):
@@ -117,7 +162,7 @@ def test_release_check_remote_treats_stable_as_newer_than_prerelease(
     monkeypatch.setattr(
         commands,
         "_fetch_latest_release",
-        lambda repo, allow_prerelease=False: {
+        lambda repo, allow_prerelease=False, github_token=None: {
             "version": "1.2.0",
             "title": "v1.2.0",
             "tag_name": "v1.2.0",
@@ -125,11 +170,39 @@ def test_release_check_remote_treats_stable_as_newer_than_prerelease(
         },
     )
 
-    result = commands.cmd_release_check_remote(Namespace())
+    result = commands.cmd_release_check_remote(Namespace(github_token=None))
 
     captured = capsys.readouterr()
     assert result == 0
     assert "状态: behind" in captured.out
+
+
+def test_release_check_remote_prefers_explicit_github_token(monkeypatch, tmp_path: Path):
+    module_root = tmp_path / "demo_model"
+    module_root.mkdir()
+    captured: list[tuple[str, bool, str | None]] = []
+
+    monkeypatch.setattr(commands, "require_module_root", lambda: module_root)
+    monkeypatch.setattr(commands, "load_manifest", lambda root: _make_manifest(version="1.0.0"))
+    monkeypatch.setattr(
+        commands,
+        "_fetch_latest_release",
+        lambda repo, allow_prerelease=False, github_token=None: (
+            captured.append((repo, allow_prerelease, github_token))
+            or {
+                "version": "1.0.0",
+                "title": "v1.0.0",
+                "tag_name": "v1.0.0",
+                "asset_name": "demo_model-1.0.0.zip",
+            }
+        ),
+    )
+    monkeypatch.setenv("GITHUB_TOKEN", "env-token")
+
+    result = commands.cmd_release_check_remote(Namespace(github_token="explicit-token"))
+
+    assert result == 0
+    assert captured == [("demo/demo_model", False, "explicit-token")]
 
 
 def test_host_devlink_commands_delegate_to_registry(monkeypatch, tmp_path: Path):
@@ -195,6 +268,38 @@ def test_host_install_preview_and_apply_support_local_zip_skip_remote(monkeypatc
     ]
 
 
+def test_host_install_preview_passes_github_token(monkeypatch, tmp_path: Path):
+    calls: list[tuple[str, object, object]] = []
+
+    class FakeRegistry:
+        def validate_source(self, source):  # pragma: no cover - should not be used
+            raise AssertionError(source)
+
+    class FakeService:
+        async def prepare_github_install(self, repo_input, *, github_token=None):
+            calls.append(("prepare_github_install", repo_input, github_token))
+            return SimpleNamespace(
+                source_label="GitHub Release",
+                manifest=SimpleNamespace(
+                    name="demo_model",
+                    version="0.2.0",
+                    upgrade_source=SimpleNamespace(repo="demo/demo_model"),
+                ),
+                warnings=[],
+                archive_path=tmp_path / "demo_model-0.2.0.zip",
+                release=SimpleNamespace(version="0.2.0", html_url="https://example.com/release"),
+            )
+
+    monkeypatch.setattr(commands, "_load_host_runtime", lambda: _fake_runtime(FakeRegistry(), FakeService()))
+
+    result = commands.cmd_host_install_preview(
+        Namespace(source="demo/demo_model", skip_remote_check=False, github_token="host-token")
+    )
+
+    assert result == 0
+    assert calls == [("prepare_github_install", "demo/demo_model", "host-token")]
+
+
 def test_host_upgrade_commands_delegate_to_release_service(monkeypatch, tmp_path: Path):
     archive_path = tmp_path / "demo_model-0.2.0.zip"
     module = _fake_module(tmp_path / "installed_demo")
@@ -211,8 +316,8 @@ def test_host_upgrade_commands_delegate_to_release_service(monkeypatch, tmp_path
             return installed
 
     class FakeService:
-        async def check_for_update(self, module_info):
-            calls.append(("check_for_update", module_info.name))
+        async def check_for_update(self, module_info, *, github_token=None):
+            calls.append(("check_for_update", module_info.name, github_token))
             return SimpleNamespace(
                 module_name=module_info.name,
                 current_version="0.1.0",
@@ -222,8 +327,8 @@ def test_host_upgrade_commands_delegate_to_release_service(monkeypatch, tmp_path
                 error="",
             )
 
-        async def prepare_module_upgrade(self, module_info):
-            calls.append(("prepare_module_upgrade", module_info.name))
+        async def prepare_module_upgrade(self, module_info, *, github_token=None):
+            calls.append(("prepare_module_upgrade", module_info.name, github_token))
             return SimpleNamespace(
                 source_label="GitHub Release",
                 manifest=SimpleNamespace(
@@ -242,16 +347,16 @@ def test_host_upgrade_commands_delegate_to_release_service(monkeypatch, tmp_path
 
     monkeypatch.setattr(commands, "_load_host_runtime", lambda: _fake_runtime(FakeRegistry(), FakeService()))
 
-    assert commands.cmd_host_upgrade_check(Namespace(module_name="demo_model")) == 0
-    assert commands.cmd_host_upgrade_preview(Namespace(module_name="demo_model")) == 0
-    assert commands.cmd_host_upgrade_apply(Namespace(module_name="demo_model")) == 0
+    assert commands.cmd_host_upgrade_check(Namespace(module_name="demo_model", github_token="upgrade-token")) == 0
+    assert commands.cmd_host_upgrade_preview(Namespace(module_name="demo_model", github_token="upgrade-token")) == 0
+    assert commands.cmd_host_upgrade_apply(Namespace(module_name="demo_model", github_token="upgrade-token")) == 0
     assert calls == [
         ("get_module", "demo_model"),
-        ("check_for_update", "demo_model"),
+        ("check_for_update", "demo_model", "upgrade-token"),
         ("get_module", "demo_model"),
-        ("prepare_module_upgrade", "demo_model"),
+        ("prepare_module_upgrade", "demo_model", "upgrade-token"),
         ("get_module", "demo_model"),
-        ("prepare_module_upgrade", "demo_model"),
+        ("prepare_module_upgrade", "demo_model", "upgrade-token"),
         ("apply_module_upgrade", "demo_model", archive_path),
     ]
 

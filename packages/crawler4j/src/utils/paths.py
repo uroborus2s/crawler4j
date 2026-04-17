@@ -23,6 +23,18 @@ def get_resource_path(relative_path: str) -> str:
     return os.path.join(base_path, relative_path)
 
 
+def get_workspace_root() -> Path:
+    """Return the repository workspace root in development mode."""
+    return Path(__file__).resolve().parents[4]
+
+
+def get_docs_root() -> Path:
+    """Return the bundled public docs root for dev and packaged runs."""
+    if is_frozen():
+        return Path(get_resource_path("docs"))
+    return get_workspace_root() / "docs"
+
+
 def get_app_data_dir() -> Path:
     """Get the platform-specific directory for application data.
 
@@ -68,4 +80,3 @@ def get_config_dir() -> Path:
     config_dir = get_app_data_dir() / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
-

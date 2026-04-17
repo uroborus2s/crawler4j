@@ -33,6 +33,15 @@
 - 验证人能够读取宿主日志、模块日志、任务详情和运行环境状态。
 - 若需要调试，仅允许走 `DevLink -> ATM 调试` 正式链路；不要重新启用已删除的旧调试脚本。
 
+## 2.1 2026-04-17 已确认事实
+
+- `playwright_local` 已不再卡在环境创建；真实执行能进入 `https://passport.ctrip.com/user/login`，并把业务失败正确回写为任务失败，不再出现 workflow 假绿。
+- `virtualbrowser` 当前剩余阻塞已收敛为外部应用运行时故障：
+  - 宿主配置实际读取 `browser.virtualbrowser.port=9002`，`9000` 不是当前有效 API。
+  - 直接对 `localhost:9002` 调用 `addBrowser -> launchBrowser`，可在不经过 `crawler4j` 的情况下稳定复现 `Failed to detect DevTools port for worker 4`。
+  - 冷启动 VirtualBrowser 应用、复用旧 worker、以及扫描 `chrome_version=139..146` 都不能恢复。
+- 因此，后续若 `virtualbrowser` 再次在真实 E2E 中失败，应优先按“外部运行时阻塞”记录，而不是先回退为宿主 REM 代码缺陷。
+
 ## 3. 测试对象与环境
 
 ### 3.1 宿主环境

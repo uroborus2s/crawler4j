@@ -1,10 +1,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from PyQt6.QtWidgets import QMessageBox, QPushButton
 
 from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
-from src.core.mms.release_service import ModuleUpdateInfo
+from src.core.mms.release_service import ModulePackagePreview, ModuleUpdateInfo
+from src.core.mms.models import UpgradeSourceInfo
 from src.core.mms.ui.module_list_widget import ModuleListWidget
 
 
@@ -161,3 +163,61 @@ def test_uninstall_module_refreshes_only_after_success(qtbot, tmp_path, monkeypa
     assert uninstall_calls == ["demo_module"]
     assert infos == ["已卸载模块: demo_module"]
     assert refresh_calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_install_module_async_persists_repo_token_when_requested(qtbot, tmp_path, monkeypatch):
+    module = _make_module(tmp_path, source=ModuleSource.EXTERNAL)
+    module.manifest.upgrade_source = UpgradeSourceInfo(repo="example/private-repo")
+    archive_path = tmp_path / "demo_module-1.0.0.zip"
+    archive_path.write_text("fake zip", encoding="utf-8")
+    saved_tokens: list[tuple[str, str]] = []
+
+    class FakeDialog:
+        class DialogCode:
+            Accepted = 1
+
+        def __init__(self, *args, **kwargs):  # noqa: ARG002
+            pass
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+    registry = SimpleNamespace(
+        install=lambda source: module,
+        refresh=lambda: None,
+        list_modules=lambda: [module],
+    )
+    service = SimpleNamespace(
+        prepare_github_install=lambda source, github_token=None: ModulePackagePreview(
+            install_kind="github_release",
+            manifest=module.manifest,
+            warnings=[],
+            archive_path=archive_path,
+            source_label="GitHub Release",
+            release=None,
+        )
+    )
+
+    async def fake_prepare(repo, github_token=None):  # noqa: ARG001
+        return service.prepare_github_install(repo, github_token=github_token)
+
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_release_service", lambda: SimpleNamespace(prepare_github_install=fake_prepare))
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_github_credential_store", lambda: SimpleNamespace(set_token=lambda repo, token: saved_tokens.append((repo, token))))
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.InstallPreviewDialog", FakeDialog)
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.QMessageBox.information", lambda *args, **kwargs: None)
+
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+
+    await widget._install_module_async(
+        SimpleNamespace(
+            install_kind="github_release",
+            source="example/private-repo",
+            github_token="ghp_secret_token_1234",
+            remember_github_token=True,
+        )
+    )
+
+    assert saved_tokens == [("example/private-repo", "ghp_secret_token_1234")]

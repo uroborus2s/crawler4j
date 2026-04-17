@@ -19,7 +19,7 @@
 
 | 日期 | 条目 | 输入 | 输出 | 状态 |
 |---|---|---|---|---|
-| 2026-04-02 | `TASK-014` 根导航收口 | 文档规范审计、根导航覆盖检查 | `docs/index.md`、`docs/01-getting-started/document-map.md` | 已完成 |
+| 2026-04-02 | `TASK-014` 根导航收口 | 文档规范审计、根导航覆盖检查 | `docs/index.md`、`docs/01-getting-started/index.md` | 已完成 |
 | 2026-04-02 | `TASK-015` 角色入口重构 | 接手路径审计、四大模块边界 | `docs/02-user-guide/user-guide.md`、`docs/03-developer-guide/index.md`、`docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md` | 已完成 |
 | 2026-04-02 | `TASK-016` 过程文档补齐 | 空壳页清理清单 | `software-development-process.md`、`execution-log.md` | 已完成 |
 | 2026-04-02 | `TASK-017` 发布文档补齐 | 最小文档包缺口 | `acceptance-checklist.md`、`delivery-package.md` | 已完成 |

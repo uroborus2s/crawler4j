@@ -32,7 +32,9 @@ class TaskFlow(ABC):
     子任务调用:
         - 通过 ctx.run_subtask("task_name", **kwargs) 调用子任务
         - kwargs 会合并到 ctx.state，子任务共享同一个 state
-        - 返回值为子任务 TaskResult.data
+        - 成功且有 payload 时返回子任务 TaskResult.data
+        - 成功但无 payload 时返回 True
+        - 失败时返回一个可按 dict 读取、但布尔值为 False 的失败结果
     
     停止/取消语义:
         - ctx.request_stop(): 请求停止工作流

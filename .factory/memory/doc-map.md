@@ -9,14 +9,13 @@
 
 - `docs/index.md` -> `.factory/memory/runtime-brief.md`
 - `docs/01-getting-started/index.md` -> `.factory/memory/runtime-brief.md`
-- `docs/01-getting-started/project-overview.md` -> `.factory/memory/runtime-brief.md`
-- `docs/01-getting-started/quick-start.md` -> `.factory/memory/runtime-brief.md`
-- `docs/01-getting-started/document-map.md` -> `.factory/memory/runtime-brief.md`
 - `docs/02-user-guide/index.md` -> `.factory/memory/runtime-brief.md`
 - `docs/02-user-guide/user-guide.md` -> `.factory/memory/runtime-brief.md`
 - `docs/02-user-guide/installation.md` -> `.factory/memory/runtime-brief.md`
 - `docs/02-user-guide/configuration.md` -> `.factory/memory/runtime-brief.md`
 - `docs/02-user-guide/usage.md` -> `.factory/memory/runtime-brief.md`
+- `docs/02-user-guide/job-detail-guide.md` -> `.factory/memory/runtime-brief.md`
+- `docs/02-user-guide/exception-cases.md` -> `.factory/memory/runtime-brief.md`
 - `docs/02-user-guide/admin-guide.md` -> `.factory/memory/runtime-brief.md`
 - `docs/03-developer-guide/index.md` -> `.factory/memory/runtime-brief.md`
 - `docs/03-developer-guide/quickstart.md` -> `.factory/memory/runtime-brief.md`

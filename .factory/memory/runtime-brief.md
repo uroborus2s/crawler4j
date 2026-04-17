@@ -26,7 +26,7 @@
 
 ## 当前阶段核心文档
 
-- `docs/01-getting-started/document-map.md`
+- `docs/01-getting-started/index.md`
 - `docs/03-developer-guide/index.md`
 - `docs/04-project-development/02-discovery/brainstorm-record.md`
 - `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md`

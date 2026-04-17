@@ -9,6 +9,7 @@
 """
 
 from src.core.mms.dev_links import DevModuleLinkStore, get_dev_module_link_store
+from src.core.mms.github_credentials import GitHubCredentialStore, get_github_credential_store
 from src.core.mms.models import (
     DevModuleLink,
     ModuleDiscoveryError,
@@ -72,4 +73,6 @@ __all__ = [
     "get_module_settings_store",
     "DevModuleLinkStore",
     "get_dev_module_link_store",
+    "GitHubCredentialStore",
+    "get_github_credential_store",
 ]

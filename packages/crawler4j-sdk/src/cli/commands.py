@@ -6,6 +6,7 @@ import asyncio
 import argparse
 import importlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -49,6 +50,7 @@ SEMVER_RE = re.compile(
 )
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 UI_ENTRY_RE = re.compile(r"^ui:[A-Za-z_][A-Za-z0-9_]*$")
+GITHUB_TOKEN_ENV_VARS = ("CRAWLER4J_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
 
 
 class CLIError(RuntimeError):
@@ -82,6 +84,46 @@ def is_valid_semver(version: str) -> bool:
 def is_valid_repo(repo: str) -> bool:
     """Validate GitHub owner/repo notation."""
     return bool(REPO_RE.match(str(repo or "").strip()))
+
+
+def _resolve_github_token(explicit_token: str | None = None) -> str | None:
+    token = str(explicit_token or "").strip()
+    if token:
+        return token
+    for env_name in GITHUB_TOKEN_ENV_VARS:
+        value = str(os.getenv(env_name, "") or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _github_headers(*, accept: str, github_token: str | None = None) -> dict[str, str]:
+    headers = {
+        "Accept": accept,
+        "User-Agent": "crawler4j-sdk-cli",
+    }
+    token = _resolve_github_token(github_token)
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _read_http_error_message(exc: urllib.error.HTTPError) -> str:
+    try:
+        payload = exc.read().decode("utf-8").strip()
+    except Exception:
+        payload = ""
+    if payload:
+        try:
+            body = json.loads(payload)
+        except Exception:
+            return payload
+        if isinstance(body, dict):
+            message = str(body.get("message", "") or "").strip()
+            if message:
+                return message
+        return payload
+    return str(exc.reason or exc)
 
 
 def _print_error(message: str) -> None:
@@ -642,16 +684,25 @@ def _extract_archive_to_temp(archive_path: Path) -> Path:
     return temp_dir / root_dir
 
 
-def _fetch_latest_release(repo: str, *, allow_prerelease: bool = False) -> dict[str, Any]:
+def _fetch_latest_release(
+    repo: str,
+    *,
+    allow_prerelease: bool = False,
+    github_token: str | None = None,
+) -> dict[str, Any]:
     request = urllib.request.Request(
         f"https://api.github.com/repos/{repo}/releases",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "crawler4j-sdk-cli",
-        },
+        headers=_github_headers(
+            accept="application/vnd.github+json",
+            github_token=github_token,
+        ),
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        message = _read_http_error_message(exc)
+        raise CLIError(f"GitHub 请求失败 ({exc.code}): {message}") from exc
 
     if not isinstance(payload, list) or not payload:
         raise CLIError(f"仓库 {repo} 没有可用的 GitHub Release")
@@ -681,6 +732,7 @@ def _fetch_latest_release(repo: str, *, allow_prerelease: bool = False) -> dict[
             "published_at": str(item.get("published_at", "") or "").strip(),
             "asset_name": str(zip_assets[0].get("name", "") or "").strip(),
             "asset_download_url": str(zip_assets[0].get("browser_download_url", "") or "").strip(),
+            "asset_api_url": str(zip_assets[0].get("url", "") or "").strip(),
             "html_url": str(item.get("html_url", "") or "").strip(),
         }
 
@@ -1252,7 +1304,6 @@ def cmd_release_status(args: argparse.Namespace) -> int:
 
 def cmd_release_check_remote(args: argparse.Namespace) -> int:
     """Compare local manifest version against the latest GitHub Release."""
-    del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
     repo = str((manifest.get("upgrade_source") or {}).get("repo", "") or "").strip()
@@ -1263,8 +1314,12 @@ def cmd_release_check_remote(args: argparse.Namespace) -> int:
     allow_prerelease = bool((manifest.get("upgrade_source") or {}).get("allow_prerelease", False))
     local_version = str(manifest.get("version", "") or "").strip()
     try:
-        remote = _fetch_latest_release(repo, allow_prerelease=allow_prerelease)
-    except (CLIError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+        remote = _fetch_latest_release(
+            repo,
+            allow_prerelease=allow_prerelease,
+            github_token=getattr(args, "github_token", None),
+        )
+    except (CLIError, urllib.error.URLError) as exc:
         _print_error(f"远端版本检查失败: {exc}")
         return 1
 
@@ -1434,9 +1489,19 @@ def cmd_host_install_preview(args: argparse.Namespace) -> int:
             return 0
 
         if source_kind == "zip":
-            preview = _run_async(service.prepare_local_install(source_value))
+            preview = _run_async(
+                service.prepare_local_install(
+                    source_value,
+                    github_token=getattr(args, "github_token", None),
+                )
+            )
         else:
-            preview = _run_async(service.prepare_github_install(str(source_value)))
+            preview = _run_async(
+                service.prepare_github_install(
+                    str(source_value),
+                    github_token=getattr(args, "github_token", None),
+                )
+            )
     except Exception as exc:
         _print_error(str(exc))
         return 1
@@ -1470,10 +1535,20 @@ def cmd_host_install_apply(args: argparse.Namespace) -> int:
         if source_kind == "zip" and args.skip_remote_check:
             module = registry.install(source_value)
         elif source_kind == "zip":
-            preview = _run_async(service.prepare_local_install(source_value))
+            preview = _run_async(
+                service.prepare_local_install(
+                    source_value,
+                    github_token=getattr(args, "github_token", None),
+                )
+            )
             module = registry.install(preview.archive_path or source_value)
         else:
-            preview = _run_async(service.prepare_github_install(str(source_value)))
+            preview = _run_async(
+                service.prepare_github_install(
+                    str(source_value),
+                    github_token=getattr(args, "github_token", None),
+                )
+            )
             module = registry.install(preview.archive_path)
     except Exception as exc:
         _print_error(str(exc))
@@ -1496,7 +1571,12 @@ def cmd_host_upgrade_check(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        update_info = _run_async(service.check_for_update(module))
+        update_info = _run_async(
+            service.check_for_update(
+                module,
+                github_token=getattr(args, "github_token", None),
+            )
+        )
     except Exception as exc:
         _print_error(str(exc))
         return 1
@@ -1526,7 +1606,12 @@ def cmd_host_upgrade_preview(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        preview = _run_async(service.prepare_module_upgrade(module))
+        preview = _run_async(
+            service.prepare_module_upgrade(
+                module,
+                github_token=getattr(args, "github_token", None),
+            )
+        )
     except Exception as exc:
         _print_error(str(exc))
         return 1
@@ -1553,7 +1638,12 @@ def cmd_host_upgrade_apply(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        preview = _run_async(service.prepare_module_upgrade(module))
+        preview = _run_async(
+            service.prepare_module_upgrade(
+                module,
+                github_token=getattr(args, "github_token", None),
+            )
+        )
         installed = _run_async(service.apply_module_upgrade(module, preview))
     except Exception as exc:
         _print_error(str(exc))
@@ -1810,6 +1900,10 @@ def build_parser() -> argparse.ArgumentParser:
         "check-remote",
         help="查询 GitHub Release 最新版本，并和本地 module.yaml.version 对比",
     )
+    release_remote.add_argument(
+        "--github-token",
+        help="GitHub Token；不传则回退到 CRAWLER4J_GITHUB_TOKEN / GITHUB_TOKEN / GH_TOKEN",
+    )
     release_remote.set_defaults(func=cmd_release_check_remote)
     release_publish = release_sub.add_parser(
         "publish",
@@ -1869,6 +1963,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="本地 ZIP 预览时跳过 upgrade_source.repo 的远端可达性校验",
     )
+    host_install_preview.add_argument(
+        "--github-token",
+        help="GitHub Token；用于私有仓库安装或 ZIP 远端仓库校验",
+    )
     host_install_preview.set_defaults(func=cmd_host_install_preview)
     host_install_apply = host_install_sub.add_parser(
         "apply",
@@ -1879,6 +1977,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-remote-check",
         action="store_true",
         help="本地 ZIP 安装时跳过 upgrade_source.repo 的远端可达性校验",
+    )
+    host_install_apply.add_argument(
+        "--github-token",
+        help="GitHub Token；用于私有仓库安装或 ZIP 远端仓库校验",
     )
     host_install_apply.set_defaults(func=cmd_host_install_apply)
 
@@ -1892,18 +1994,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="检查已安装模块是否有新版本",
     )
     host_upgrade_check.add_argument("module_name", help="已安装模块名")
+    host_upgrade_check.add_argument(
+        "--github-token",
+        help="GitHub Token；不传则回退到环境变量",
+    )
     host_upgrade_check.set_defaults(func=cmd_host_upgrade_check)
     host_upgrade_preview = host_upgrade_sub.add_parser(
         "preview",
         help="下载并预览升级包，但不安装",
     )
     host_upgrade_preview.add_argument("module_name", help="已安装模块名")
+    host_upgrade_preview.add_argument(
+        "--github-token",
+        help="GitHub Token；不传则回退到环境变量",
+    )
     host_upgrade_preview.set_defaults(func=cmd_host_upgrade_preview)
     host_upgrade_apply = host_upgrade_sub.add_parser(
         "apply",
         help="下载并安装升级包",
     )
     host_upgrade_apply.add_argument("module_name", help="已安装模块名")
+    host_upgrade_apply.add_argument(
+        "--github-token",
+        help="GitHub Token；不传则回退到环境变量",
+    )
     host_upgrade_apply.set_defaults(func=cmd_host_upgrade_apply)
 
     host_debug = host_sub.add_parser(
