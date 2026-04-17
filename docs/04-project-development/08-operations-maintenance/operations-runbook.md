@@ -20,7 +20,7 @@
 | 检查项 | 期望结果 | 失败时先看哪里 |
 |---|---|---|
 | 宿主应用可启动 | `uv run python -m src.ui.app` 或打包产物可打开 | `deployment-guide.md`、UI smoke 结果 |
-| 应用数据目录存在 | `config.db`、`state.db`、`logs/`、`modules/` 已创建 | `installation.md` |
+| 应用数据目录存在 | `config.db`、`data.db`、`state.db`、`logs/`、`modules/` 已创建 | `installation.md` |
 | 模块列表正常 | `📦 模块管理` 可打开，来源和状态可识别 | `usage.md`、`admin-guide.md` |
 | 配置可保存 | `🔧 系统设置` 与模块设置能写入 `config.db` | `configuration.md` |
 | 日志持续生成 | `<app-data>/logs/` 正常滚动 | 日志级别与保留设置 |

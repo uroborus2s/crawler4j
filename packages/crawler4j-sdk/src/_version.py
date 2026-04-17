@@ -1,0 +1,48 @@
+"""Version helpers backed by package metadata and pyproject.toml."""
+
+from __future__ import annotations
+
+import re
+import tomllib
+from importlib import metadata
+from pathlib import Path
+
+
+PACKAGE_NAME = "crawler4j-sdk"
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+PYPROJECT_PATH = PACKAGE_ROOT / "pyproject.toml"
+BASE_VERSION_RE = re.compile(r"^v?(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)")
+
+
+def _load_version_from_metadata() -> str | None:
+    try:
+        return metadata.version(PACKAGE_NAME)
+    except metadata.PackageNotFoundError:
+        return None
+
+
+def _load_version_from_pyproject() -> str:
+    with PYPROJECT_PATH.open("rb") as f:
+        pyproject = tomllib.load(f)
+    return str(pyproject["project"]["version"])
+
+
+def get_version() -> str:
+    """Resolve the package version from build metadata or the source pyproject."""
+    return _load_version_from_metadata() or _load_version_from_pyproject()
+
+
+def get_base_version(version: str | None = None) -> str:
+    """Extract major.minor.patch from the declared version string."""
+    resolved = version or get_version()
+    match = BASE_VERSION_RE.match(resolved.strip())
+    if not match:
+        raise ValueError(f"Unsupported version format: {resolved}")
+    return f"{match.group('major')}.{match.group('minor')}.{match.group('patch')}"
+
+
+def get_compatible_dependency_spec() -> str:
+    """Build the default scaffold dependency range for the current SDK version."""
+    base_version = get_base_version()
+    major = int(base_version.split(".", 1)[0])
+    return f"{PACKAGE_NAME}>={base_version},<{major + 1}.0.0"

@@ -191,6 +191,12 @@ class TaskService:
             )
             return False
 
+        try:
+            await self._controller.ensure_job_runtime_ready(job.id)
+        except Exception as e:
+            logger.error(f"[ATM] Run-once blocked by final runtime precheck ({job.id}): {e}")
+            return False
+
         logger.info(f"[ATM] Job run once: {job.id} (concurrency={job.concurrency_target})")
         for _ in range(job.concurrency_target):
             await self._controller.dispatcher.dispatch(job)

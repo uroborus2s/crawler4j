@@ -7,7 +7,7 @@
 **上游输入：** `version-governance.md` | `release-notes.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** `delivery-package.md` | 发布决策 | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-003`, `REL-004`, `TASK-017`, `NFR-003`
-**最后更新：** 2026-04-02
+**最后更新：** 2026-04-17
 
 ## 1. 使用范围
 
@@ -17,13 +17,13 @@
 
 | 类别 | 检查项 | 证据 | 当前基线状态 |
 |---|---|---|---|
-| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 待正式切版 |
+| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 已具备（当前为 `0.2.0`） |
 | 版本 | 当前工作区版本、最近正式 tag、SDK/Contracts 版本口径清楚 | `release-notes.md` | 已具备 |
 | 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备 |
 | 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备 |
 | 运行 | `uv run python scripts/smoke_test_ui.py` 通过 | `test-plan.md` | 已具备 |
 | 构建 | Root / SDK / Contracts build 通过 | `test-plan.md` | 已具备 |
-| 业务 | `ctrip` 真实站点 E2E 完成并记录结果 | 真实环境验证记录 | 阻塞 |
+| 业务 | `ctrip` 真实站点 E2E 完成并记录结果 | `ctrip-real-site-e2e-closeout.md` + 真实环境验证记录 | 阻塞 |
 | 文档 | 根导航、文档索引、memory 映射同步完成 | `docs/index.md`、`document-index.md`、`.factory/memory/doc-map.md` | 已具备 |
 | 运维 | 部署说明、运行手册、管理员指南可独立阅读 | `deployment-guide.md`、`operations-runbook.md`、`admin-guide.md` | 已具备 |
 | 交付 | 交付包内容、签收对象和阻塞项清楚 | `delivery-package.md` | 待正式发布 |
@@ -36,8 +36,8 @@
 
 ## 4. 当前阻塞项
 
-1. `ctrip` 真实站点 E2E 仍未回放。
-2. 根应用正式版本切换和 Git tag 尚未执行。
+1. `ctrip` 真实站点 E2E 仍未按 `ctrip-real-site-e2e-closeout.md` 完成回放并留证。
+2. `0.2.0` 对应的 Git tag 与正式 release 资产尚未执行。
 3. 交付包还没有绑定具体发布批次。
 
 ## 5. 变更记录
@@ -45,3 +45,4 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-04-02 | 新增正式验收检查清单，并登记当前基线状态 | Codex |
+| 2026-04-17 | 按 `0.2.0` 发布基线修正版本检查项，明确当前剩余阻塞已转为 Git tag / 交付批次与真实站点 E2E | Codex |

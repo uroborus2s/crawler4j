@@ -19,11 +19,10 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = WORKSPACE_ROOT / "packages" / "crawler4j"
 sys.path.insert(0, str(APP_ROOT))
 
-from src.core.persistence.database import CONFIG_DB, STATE_DB, get_db_path, init_database
-
-
 def reset_database() -> None:
     """Delete framework database files and recreate schema."""
+    from src.core.persistence.database import CONFIG_DB, STATE_DB, get_db_path, init_database
+
     for db_name in (CONFIG_DB, STATE_DB):
         db_path = get_db_path(db_name)
         if db_path.exists():
@@ -34,6 +33,8 @@ def reset_database() -> None:
 
 
 def main() -> None:
+    from src.core.persistence.database import CONFIG_DB, get_db_path, init_database
+
     parser = argparse.ArgumentParser(description="Database management tool (development only)")
     parser.add_argument(
         "action",

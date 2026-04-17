@@ -78,7 +78,7 @@
 - 描述：SDK 与 Contracts 必须可构建，CLI 必须可以展示帮助并生成模块脚手架。
 - 用户故事：作为模块开发者，我希望 SDK 与 CLI 可靠，以便我能创建或维护模块项目。
 - 前置条件：`packages/crawler4j-sdk/` 与 `packages/crawler4j-contracts/` 可独立构建
-- 业务规则：SDK 版本与 Contracts 兼容范围需明确
+- 业务规则：SDK 与 Contracts 的版本基线需明确
 - 依赖项：子包 `pyproject.toml`, `packages/crawler4j-sdk/src/cli/commands.py`
 - 排除范围：不要求本次发布到外部仓库
 
@@ -100,7 +100,7 @@
 
 验收标准：
 
-- [ ] `UAT-012` `init-model` 生成的新模块根 `__init__.py` 为固定薄壳，而不是内联完整调度逻辑
+- [ ] `UAT-012` `module init` 生成的新模块根 `__init__.py` 为固定薄壳，而不是内联完整调度逻辑
 - [ ] `UAT-013` 默认任务/工作流分发逻辑可由 SDK helper 提供，不再要求写在模块根 `__init__.py`
 - [ ] `UAT-014` 模块级自定义 hooks 或默认工作流可在独立文件中声明，而不是必须写在根 `__init__.py`
 - [ ] `UAT-015` 模块升级说明明确要求按最新模板重新初始化，而不是继续维护旧式根入口

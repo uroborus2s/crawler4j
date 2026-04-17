@@ -95,3 +95,69 @@ def test_external_module_row_shows_upgrade_button_when_update_available(qtbot, t
     texts = [button.text() for button in action_widget.findChildren(QPushButton)]
 
     assert "升级" in texts
+
+
+def test_uninstall_module_shows_warning_when_registry_refuses(qtbot, tmp_path, monkeypatch):
+    module = _make_module(tmp_path, source=ModuleSource.EXTERNAL)
+    refresh_calls: list[int] = []
+    registry = SimpleNamespace(
+        refresh=lambda: refresh_calls.append(1),
+        list_modules=lambda: [module],
+        uninstall=lambda name: False,
+    )
+
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    warnings: list[str] = []
+    infos: list[str] = []
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.QMessageBox.warning",
+        lambda *args: warnings.append(args[2]),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.QMessageBox.information",
+        lambda *args: infos.append(args[2]),
+    )
+
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+
+    widget._uninstall_module("demo_module")
+
+    assert warnings == ["未能卸载模块: demo_module"]
+    assert infos == []
+    assert refresh_calls == []
+
+
+def test_uninstall_module_refreshes_only_after_success(qtbot, tmp_path, monkeypatch):
+    module = _make_module(tmp_path, source=ModuleSource.EXTERNAL)
+    refresh_calls: list[int] = []
+    uninstall_calls: list[str] = []
+    registry = SimpleNamespace(
+        refresh=lambda: refresh_calls.append(1),
+        list_modules=lambda: [module],
+        uninstall=lambda name: uninstall_calls.append(name) or True,
+    )
+
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    infos: list[str] = []
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.QMessageBox.information",
+        lambda *args: infos.append(args[2]),
+    )
+
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+
+    widget._uninstall_module("demo_module")
+
+    assert uninstall_calls == ["demo_module"]
+    assert infos == ["已卸载模块: demo_module"]
+    assert refresh_calls == [1]

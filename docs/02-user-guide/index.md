@@ -8,7 +8,7 @@
 |---|---|
 | `user-guide.md` | 跨角色接手入口，帮助快速分流到正确文档 |
 | `installation.md` | 说明源码运行、打包产物运行和应用数据目录 |
-| `configuration.md` | 说明系统设置、模块设置和执行配置 |
+| `configuration.md` | 说明系统设置、模块/工作流配置、执行配置，以及 `data.db` / `state.db` 的边界 |
 | `usage.md` | 说明典型使用路径、DevLink 联调和常见问题 |
 | `admin-guide.md` | 说明管理员/实施者的日常操作与交接边界 |
 

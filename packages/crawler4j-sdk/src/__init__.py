@@ -5,6 +5,7 @@
 TaskFlow 与 ModuleAssembler 等开发入口。
 """
 
+from crawler4j_sdk._version import get_version
 from crawler4j_sdk.base import TaskScript
 from crawler4j_sdk.workflow import TaskFlow
 from crawler4j_sdk.assembler import ModuleAssembler
@@ -28,7 +29,7 @@ from crawler4j_contracts import (
     ToolsCapability,
 )
 
-__version__ = "1.2.0"
+__version__ = get_version()
 
 # 稳定导出列表（同 MAJOR 版本内冻结）
 __all__ = [

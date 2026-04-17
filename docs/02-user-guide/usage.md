@@ -100,6 +100,6 @@
 
 ## 6. 遇到问题后去哪里看
 
-- 想排查模块调试链：看 [DevLink 与调试](../03-developer-guide/05-debugging/01-devlink-and-debug.md)
-- 想排查常见模块问题：看 [常见坑位](../03-developer-guide/07-troubleshooting/01-common-pitfalls.md)
+- 想排查模块调试链：看 [调试模块](../03-developer-guide/debugging.md)
+- 想排查常见模块问题：看 [常见问题](../03-developer-guide/troubleshooting.md)
 - 想理解模块结构与契约：看 [开发者指南总览](../03-developer-guide/index.md)

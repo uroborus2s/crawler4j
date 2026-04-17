@@ -1,17 +1,15 @@
 # Release Summary
 
 - Latest formal release tag: `v0.1.1` on 2026-01-03
-- Current workspace root version: `0.1.2.dev20260326`
-- Runtime version file: `0.1.2.dev20260326`
-- SDK version: `1.2.0`
-- Contracts version: `1.2.0`
+- Current workspace root version: `0.2.0`
+- Runtime version file: `0.2.0`
+- SDK version: `0.2.0`
+- Contracts version: `0.2.0`
 
-Local verification on 2026-03-26:
+Local verification on 2026-04-17:
 
-- Root build: passed
-- Root script alignment: passed
-- UI smoke: passed
-- PyInstaller bundle: passed
-- SDK build: passed
-- Contracts build: passed
-- Docs build: passed
+- Version-related tests: passed (`5 passed`)
+- Root build: passed (`crawler4j-0.2.0`)
+- SDK build: passed (`crawler4j_sdk-0.2.0`)
+- Contracts build: passed (`crawler4j_contracts-0.2.0`)
+- Docs validate: passed (`docs-stratego source validate --repo-path .`)

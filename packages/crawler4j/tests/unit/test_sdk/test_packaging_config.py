@@ -129,8 +129,6 @@ def test_dev_scripts_live_in_workspace_root_instead_of_app_package():
     assert root_scripts.exists()
     assert {
         "db_cli.py",
-        "debug_runner.py",
-        "generate_icon.py",
         "smoke_test_ui.py",
     }.issubset({path.name for path in root_scripts.glob("*.py")})
     assert list(package_scripts.glob("*.py")) == []

@@ -19,37 +19,34 @@
 
 ## 2. 当前仓库相对正式发布的状态
 
-- 当前工作区根应用版本：`0.1.2.dev20260326`
-- 当前运行时版本：`0.1.2.dev20260326`
+- 当前工作区根应用版本：`0.2.0`
+- 当前运行时版本：`0.2.0`
 - 最近正式发布 tag：`v0.1.1`
-- SDK 当前版本：`1.2.0`
-- Contracts 当前版本：`1.2.0`
-- 当前工作区已明确区分“未发布开发版”和“最近正式发布”
+- SDK 当前版本：`0.2.0`
+- Contracts 当前版本：`0.2.0`
+- 当前工作区已切到 `0.2.0` 发布目标，但尚未补打正式 Git tag / release 资产
 - SDK 当前口径已收敛到 `TaskContext.tools` 统一工具接口，模块侧不再使用专用 `ctx.db` / `ctx.captcha` 字段
 - 当前工作区已进一步收敛到“ATM hooks + `TaskSignal`”单一生命周期链；`TaskFlow.on_complete/on_error` 与 `TaskScript` 私有 callbacks 已删除
 
-## 3. 2026-03-26 本地验证结论
+## 3. 2026-04-17 本地复核结论
 
 | 项目 | 结果 |
 |---|---|
-| Root wheel/sdist build | 通过 |
-| SDK wheel/sdist build | 通过 |
-| Contracts wheel/sdist build | 通过 |
-| Docs markdown tree | 通过 |
-| Root script 与 UI smoke | 通过 |
-| PyInstaller 出包 | 通过 |
-| Root release 元数据一致性 | 通过 |
-| 默认 `ruff` gate | 通过 |
+| 版本相关单测（`test_version_service.py`、`test_vscode.py`） | 通过（`5 passed`） |
+| Root wheel/sdist build | 通过（产物：`crawler4j-0.2.0`） |
+| SDK wheel/sdist build | 通过（产物：`crawler4j_sdk-0.2.0`） |
+| Contracts wheel/sdist build | 通过（产物：`crawler4j_contracts-0.2.0`） |
+| Docs markdown tree | 通过（`docs-stratego source validate --repo-path .`） |
 
 ## 4. 当前不建议直接发布的原因
 
-- 当前根应用版本仍是未发布开发版 `0.1.2.dev20260326`
+- `0.2.0` 对应的 Git tag、正式 release notes 与交付批次仍未完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 将根应用从开发版切到正式版本
-- 更新 Git tag 与 release notes
+- 按 [版本治理规则](version-governance.md) 复验 `0.2.0` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
 
@@ -59,6 +56,5 @@
 |---|---|---|
 | 2026-03-26 | 建立基线 release notes | Codex |
 | 2026-03-26 | 按统一版本规则区分当前工作区版本与最近正式发布 | Codex |
-| 2026-03-31 | 记录 SDK `2.0.0` 破坏性升级和模块数据接口升级要求 | Codex |
-| 2026-04-15 | 记录 SDK `1.1.0` / Contracts `1.1.0` 的统一 `ctx.tools` 重构 | Codex |
-| 2026-04-17 | 将 SDK / Contracts 当前工作区版本提升到 `1.2.0`，同步 `TaskContext` 配置分层、脚手架默认版本与开发者文档口径 | Codex |
+| 2026-04-17 | 将根应用 / SDK / Contracts 当前源码版本与 README、release 文档统一收敛到 `0.2.0` 发布基线，并明确最近正式 tag 仍为 `v0.1.1` | Codex |
+| 2026-04-17 | 追加本轮发布前复核结果：版本相关单测、三包构建与 `docs-stratego` 文档树校验均通过 | Codex |

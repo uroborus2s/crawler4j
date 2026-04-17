@@ -42,97 +42,36 @@ mkdocs:
         - title: 概览
           path: 03-developer-guide/index.md
           access: private
-        - title: 01 概念与约束
-          children:
-            - title: 概览
-              path: 03-developer-guide/01-concepts/index.md
-              access: private
-            - title: 系统地图
-              path: 03-developer-guide/01-concepts/01-system-map.md
-              access: private
-            - title: 真实约束
-              path: 03-developer-guide/01-concepts/02-real-constraints.md
-              access: private
-        - title: 02 快速开始
-          children:
-            - title: 概览
-              path: 03-developer-guide/02-quickstart/index.md
-              access: private
-            - title: 环境准备
-              path: 03-developer-guide/02-quickstart/01-environment-setup.md
-              access: private
-            - title: 创建第一个模块
-              path: 03-developer-guide/02-quickstart/02-create-first-module.md
-              access: private
-        - title: 03 项目结构与契约
-          children:
-            - title: 概览
-              path: 03-developer-guide/03-project-structure/index.md
-              access: private
-            - title: 布局与入口点
-              path: 03-developer-guide/03-project-structure/01-layout-and-entrypoints.md
-              access: private
-            - title: module.yaml 清单契约
-              path: 03-developer-guide/03-project-structure/02-module-manifest.md
-              access: private
-        - title: 04 模块开发
-          children:
-            - title: 概览
-              path: 03-developer-guide/04-development/index.md
-              access: private
-            - title: 编写 TaskScript
-              path: 03-developer-guide/04-development/01-taskscript.md
-              access: private
-            - title: 编写 Workflow
-              path: 03-developer-guide/04-development/02-workflow.md
-              access: private
-            - title: CLI 命令与 UI 配置
-              path: 03-developer-guide/04-development/03-cli-and-ui.md
-              access: private
-            - title: Core 能力清单
-              path: 03-developer-guide/04-development/04-core-capabilities.md
-              access: private
-            - title: Core 注入能力 API 参考
-              path: 03-developer-guide/04-development/05-api-reference.md
-              access: private
-            - title: 模块开发最佳实践
-              path: 03-developer-guide/04-development/06-best-practices.md
-              access: private
-        - title: 05 调试
-          children:
-            - title: 概览
-              path: 03-developer-guide/05-debugging/index.md
-              access: private
-            - title: DevLink 与调试
-              path: 03-developer-guide/05-debugging/01-devlink-and-debug.md
-              access: private
-        - title: 06 交付与验收
-          children:
-            - title: 概览
-              path: 03-developer-guide/06-delivery/index.md
-              access: private
-            - title: zip 安装验收
-              path: 03-developer-guide/06-delivery/01-zip-installation.md
-              access: private
-            - title: 交付验收清单
-              path: 03-developer-guide/06-delivery/02-acceptance-checklist.md
-              access: private
-        - title: 07 排错
-          children:
-            - title: 概览
-              path: 03-developer-guide/07-troubleshooting/index.md
-              access: private
-            - title: 常见坑位
-              path: 03-developer-guide/07-troubleshooting/01-common-pitfalls.md
-              access: private
-        - title: 08 迁移指南
-          children:
-            - title: 概览
-              path: 03-developer-guide/08-migration/index.md
-              access: private
-            - title: Shim 迁移
-              path: 03-developer-guide/08-migration/01-shim-migration.md
-              access: private
+        - title: 快速开始
+          path: 03-developer-guide/quickstart.md
+          access: private
+        - title: 核心概念
+          path: 03-developer-guide/core-concepts.md
+          access: private
+        - title: 模块结构
+          path: 03-developer-guide/module-structure.md
+          access: private
+        - title: 构建模块
+          path: 03-developer-guide/build-modules.md
+          access: private
+        - title: UI 与数据表
+          path: 03-developer-guide/ui-and-data-table.md
+          access: private
+        - title: 调试模块
+          path: 03-developer-guide/debugging.md
+          access: private
+        - title: 交付模块
+          path: 03-developer-guide/shipping.md
+          access: private
+        - title: 常见问题
+          path: 03-developer-guide/troubleshooting.md
+          access: private
+        - title: SDK 与 CLI 参考
+          path: 03-developer-guide/reference-sdk-and-cli.md
+          access: private
+        - title: Core 能力参考
+          path: 03-developer-guide/reference-core-capabilities.md
+          access: private
     - title: 项目开发文档（内）
       children:
         - title: 概览
@@ -194,6 +133,9 @@ mkdocs:
             - title: 接口与契约设计
               path: 04-project-development/04-design/api-design.md
               access: private
+            - title: 模块配置与数据契约
+              path: 04-project-development/04-design/module-config-runtime-data-contract.md
+              access: private
         - title: 开发过程文档
           children:
             - title: 概览
@@ -215,6 +157,9 @@ mkdocs:
               access: private
             - title: 测试计划
               path: 04-project-development/06-testing-verification/test-plan.md
+              access: private
+            - title: `ctrip` 真实站点 E2E 收口方案
+              path: 04-project-development/06-testing-verification/ctrip-real-site-e2e-closeout.md
               access: private
             - title: 设计与实现一致性审查
               path: 04-project-development/06-testing-verification/design-implementation-audit.md
@@ -287,7 +232,7 @@ mkdocs:
 |---|---|---|
 | `docs/01-getting-started/` | 这是什么项目、文档怎么读、从哪里开始 | 新维护者 / 协作者 |
 | `docs/02-user-guide/` | 如何安装、配置、使用 和管理宿主应用 | 宿主使用者 / 管理员 / 协作者 |
-| `docs/03-developer-guide/` | 如何开发、调试、交付和迁移模块 | 模块开发者 / Core 集成人员 |
+| `docs/03-developer-guide/` | 如何开发、调试、交付模块 | 模块开发者 / Core 集成人员 |
 | `docs/04-project-development/` | 项目如何治理、设计、实施、验证、发布、运维和追踪 | Tech Lead / Dev / QA / Release / Ops |
 
 ## 按角色快速阅读
@@ -303,10 +248,11 @@ mkdocs:
 ### 模块开发者
 
 1. [开发者指南总览](03-developer-guide/index.md)
-2. [01 概念与约束](03-developer-guide/01-concepts/index.md)
-3. [02 快速开始](03-developer-guide/02-quickstart/index.md)
-4. [04 模块开发](03-developer-guide/04-development/index.md)
-5. [06 交付与验收](03-developer-guide/06-delivery/index.md)
+2. [快速开始](03-developer-guide/quickstart.md)
+3. [核心概念](03-developer-guide/core-concepts.md)
+4. [模块结构](03-developer-guide/module-structure.md)
+5. [构建模块](03-developer-guide/build-modules.md)
+6. [交付模块](03-developer-guide/shipping.md)
 
 ### 发布 / 运维
 

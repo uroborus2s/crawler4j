@@ -1,6 +1,18 @@
 # crawler4j Monorepo
 
-`crawler4j` 现在按 `uv` workspace 的 monorepo 组织。仓库根目录只负责开发编排、统一锁文件、文档和发布动作，真正的可发布项目全部位于 `packages/`。
+`crawler4j` 现在按 `uv` workspace 的 monorepo 组织。仓库根目录只负责开发编排、统一锁文件、文档和发布收口；真正可发布的代码包位于 `packages/`。
+
+## Release Baseline
+
+当前源码已经按 `0.2.0` 口径完成切版，但最近一次正式 Git tag 仍是 `v0.1.1`。发布前请同时区分“当前源码版本”和“最近正式发布”：
+
+| 对象 | 当前值 | 说明 |
+|---|---|---|
+| `crawler4j-workspace` | `0.0.0` | workspace 开发元包，不作为正式发布物 |
+| `crawler4j` | `0.2.0` | 桌面宿主与 Core 运行时包 |
+| `crawler4j-sdk` | `0.2.0` | 模块开发 SDK 与 CLI |
+| `crawler4j-contracts` | `0.2.0` | Core / SDK / 模块共享契约 |
+| 最近正式 Git tag | `v0.1.1` | 仓库中最新已知正式 tag |
 
 ## Workspace Layout
 
@@ -26,7 +38,10 @@ uv sync --all-packages
 # 启动桌面应用
 uv run python -m src.ui.app
 
-# 运行主程序自动化测试
+# 运行完整自动化测试
+uv run pytest -q
+
+# 只跑桌面宿主测试
 uv run pytest packages/crawler4j/tests -q
 
 # 运行默认 lint
@@ -46,9 +61,14 @@ uv run pyinstaller packages/crawler4j/crawler4j.spec
 
 ## Packages
 
-- `packages/crawler4j`: 桌面应用、Core 运行时、内置模块与打包脚本
+- `packages/crawler4j`: 桌面宿主、Core 运行时与 PyInstaller 打包规格
 - `packages/crawler4j-sdk`: 模块开发 SDK 与 `crawler4j` CLI
-- `packages/crawler4j-contracts`: Core / SDK 共用的稳定契约
-- `scripts/`: workspace 级维护脚本，例如 UI smoke、数据库初始化、图标生成和历史调试辅助
+- `packages/crawler4j-contracts`: Core / SDK / 模块共用的稳定契约
+- `scripts/`: workspace 级维护脚本，当前只保留 UI smoke 与数据库初始化/重置辅助
+
+当前保留的脚本：
+
+- `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
+- `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
 
 详细背景和操作说明以仓库根目录 `docs/` 为准。

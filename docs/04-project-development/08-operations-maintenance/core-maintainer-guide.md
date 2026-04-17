@@ -7,7 +7,7 @@
 **上游输入：** `packages/crawler4j/src/ui/app.py` | `packages/crawler4j/src/core/` | `packages/crawler4j-sdk/` | `.factory/project.json`
 **下游输出：** 各阶段过程文档 | `deployment-guide.md` | `operations-runbook.md` | `.factory/memory/`
 **关联 ID：** `OPS-003`, `DOC-105`, `REQ-005`
-**最后更新：** 2026-04-02
+**最后更新：** 2026-04-17
 
 ## 1. 第一小时阅读包
 
@@ -30,6 +30,8 @@
 6. `crawler4j-sdk` 和 `crawler4j-contracts` 已独立成包，CLI 入口是 `crawler4j_sdk.cli.commands:main`。
 7. 当前默认质量门仍以 `uv run pytest -q`、`uv run ruff check .`、UI smoke、build 验证为主。
 8. 当前最大剩余风险不是文档，而是 `ctrip` 真实站点 E2E 仍未回放。
+9. 客户端下拉框已统一走 `src.ui.components.combo_box.StyledComboBox`；新增 UI 时不要再直接实例化原生 `QComboBox`，也不要在页面级样式里覆盖整套 `QComboBox` 外观。
+10. 仓库根 `scripts/` 当前只保留 `smoke_test_ui.py` 和 `db_cli.py` 两个维护脚本；旧的本地调试壳与图标生成脚本已清理。
 
 ## 3. 日常开发最常用命令
 
@@ -59,6 +61,7 @@ uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
 |---|---|
 | 入口、模块加载或架构边界不清楚 | `system-architecture.md`、`module-boundaries.md` |
 | 模块开发链路或 CLI 行为有疑问 | `docs/03-developer-guide/index.md`、`api-design.md` |
+| `ctrip` 发布前真实站点验证怎么做 | `docs/04-project-development/06-testing-verification/ctrip-real-site-e2e-closeout.md` |
 | 部署、发布或交付前检查 | `deployment-guide.md`、`acceptance-checklist.md`、`delivery-package.md` |
 | 日常巡检、故障分级和恢复动作 | `operations-runbook.md` |
 

@@ -1,44 +1,97 @@
-# 开发者指南总览
+# crawler4j 模块开发者指南
 
-**项目名称：** 蛛行演略（crawler4j）
-**文档状态：** 已批准
-**负责人：** 当前仓库维护者
-**主要读者：** 模块开发者 | Core 集成人员
-**上游输入：** `docs/02-user-guide/user-guide.md` | `docs/04-project-development/04-design/technical-selection.md` | `docs/04-project-development/04-design/api-design.md`
-**下游输出：** `docs/03-developer-guide/*` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `DOC-104`, `REQ-003`, `REQ-006`
-**最后更新：** 2026-04-08
+为 `crawler4j` 构建轻量、可调试、可交付的业务模块。
 
-## 1. 本目录解决什么问题
+`crawler4j` 已经通过 SDK 和 Core 抽象好了配置、任务、工作流、环境、调试、托管数据表和交付链路。模块开发者不需要再搭一套自己的平台。你的工作只有一个: 用最少的抽象，把业务流程写清楚。
 
-本目录只解决“如何开发、调试、交付和迁移模块”这件事。
-它不重复解释项目治理、发布流程和运维职责，这些内容统一回到 `docs/04-project-development/`。
+## 快速入口
 
-当前内容以 `crawler4j-sdk 1.2.0` 为准，模块侧统一通过 `ctx.tools.call(...)` 访问宿主扩展能力；旧 `DataService`、`ctx.db.storage / accounts / tasks` 和专用 `ctx.db` 字段写法都已移除。
-当前 `core:data_table:<view_id>` 页面也已进入正式契约：宿主会在页面刷新时重新执行模块根导出的 `declare_ui`，并可继续路由 `create_handler` / `update_handler` 到模块本地同步 hook。
+### 5 分钟上手
 
-## 2. 第一天阅读包
+- [快速开始](quickstart.md)
 
-1. [01 概念与约束](01-concepts/index.md)
-2. [02 快速开始](02-quickstart/index.md)
-3. [03 项目结构与契约](03-project-structure/index.md)
-4. [04 模块开发](04-development/index.md)
-5. [05 调试](05-debugging/index.md)
-6. [06 交付与验收](06-delivery/index.md)
+### 开始开发模块
 
-## 3. 按任务定位
+- [核心概念](core-concepts.md)
+- [模块结构](module-structure.md)
+- [构建模块](build-modules.md)
+- [UI 与数据表](ui-and-data-table.md)
 
-| 目标 | 先看哪里 | 再看哪里 |
-|---|---|---|
-| 创建新模块 | `02-quickstart/` | `03-project-structure/` |
-| 理解 `module.yaml`、入口和目录结构 | `03-project-structure/` | `04-development/` |
-| 编写 TaskScript / Workflow / UI | `04-development/` | `05-debugging/` |
-| 做 DevLink 联调 | `05-debugging/01-devlink-and-debug.md` | `07-troubleshooting/01-common-pitfalls.md` |
-| 打包并做 zip 安装验收 | `06-delivery/` | `02-user-guide/usage.md` |
-| 升级旧模块到最新薄壳入口 | `08-migration/01-shim-migration.md` | `04-development/03-cli-and-ui.md` |
+### 调试、交付与排错
 
-## 4. 阅读纪律
+- [调试模块](debugging.md)
+- [交付模块](shipping.md)
+- [常见问题](troubleshooting.md)
 
-- 先读章节概览页，再进入正文页，不要直接跳到单个 API 片段。
-- 实现边界、宿主入口和发布事实以 `docs/04-project-development/04-design/` 为准。
-- 发现“开发指南写法”和当前 SDK/Contracts 行为不一致时，先修正式文档，再继续交付。
+### 查手册
+
+- [SDK 与 CLI 参考](reference-sdk-and-cli.md)
+- [Core 能力参考](reference-core-capabilities.md)
+
+## 命令与版本口径
+
+这份指南只写当前可用命令，不再在示例里固定 `crawler4j-sdk==某个版本`。
+
+- 获取最新 CLI:
+  `uvx --from crawler4j-sdk crawler4j --help`
+- 在模块项目里执行命令:
+  `uv run crawler4j ...`
+- 独立模块项目里的事实源:
+  `crawler4j --help`
+- 只有在 `crawler4j` Core 源码仓核对实现细节时，才回看
+  `packages/crawler4j-sdk/src/cli/commands.py`
+
+如果你在别处看到旧平铺命令、旧目录说明或过期版本号，不要跟着抄，统一以本章和当前 CLI 帮助输出为准。
+
+## 这份指南适合谁
+
+这份文档只服务两类读者:
+
+1. 第一次写 `crawler4j` 模块的开发者
+2. 需要快速查 CLI、SDK、Core 约束和交付方式的熟手
+
+如果你是宿主使用者或维护者，优先回到用户指南或项目开发文档，不要从这里开始。
+
+## 推荐阅读路径
+
+### 第一次开发模块
+
+1. [快速开始](quickstart.md)
+2. [核心概念](core-concepts.md)
+3. [模块结构](module-structure.md)
+4. [构建模块](build-modules.md)
+5. [UI 与数据表](ui-and-data-table.md)
+6. [调试模块](debugging.md)
+7. [交付模块](shipping.md)
+
+### 已经会写模块，只想查手册
+
+1. [SDK 与 CLI 参考](reference-sdk-and-cli.md)
+2. [Core 能力参考](reference-core-capabilities.md)
+3. [常见问题](troubleshooting.md)
+
+## 主题导航
+
+| 你要做什么 | 直接看哪里 |
+|---|---|
+| 从零创建第一个模块 | [快速开始](quickstart.md) |
+| 理解模块到底是什么 | [核心概念](core-concepts.md) |
+| 搞清楚目录、入口和 `module.yaml` | [模块结构](module-structure.md) |
+| 写 task 和 workflow | [构建模块](build-modules.md) |
+| 写页面或托管数据表 | [UI 与数据表](ui-and-data-table.md) |
+| 用 DevLink / ATM 调试 | [调试模块](debugging.md) |
+| 打 ZIP、安装、验收 | [交付模块](shipping.md) |
+| 查 CLI 命令和 SDK 类型 | [SDK 与 CLI 参考](reference-sdk-and-cli.md) |
+| 查 `db.*`、`ui.*`、`env.*` | [Core 能力参考](reference-core-capabilities.md) |
+| 查高频踩坑 | [常见问题](troubleshooting.md) |
+
+## 开发原则
+
+这一套文档只有一个立场:
+
+- 模块是轻量业务应用，不是二次框架
+- 相同逻辑先抽到 task
+- task 内部如果还有重复，再抽一层纯函数就够了
+- 重约束、轻抽象，比“架构看起来高级”更重要
+
+如果你准备好了，直接从 [快速开始](quickstart.md) 开始。

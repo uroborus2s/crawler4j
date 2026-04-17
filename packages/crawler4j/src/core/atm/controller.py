@@ -19,6 +19,7 @@ from src.core.atm.run_profile import AcquisitionMode
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
+from src.core.mms.release_service import assert_module_upgrade_unlocked
 
 
 class JobController:
@@ -84,6 +85,9 @@ class JobController:
 
     async def _ensure_runtime_for_job(self, job: Job):
         run_profile = resolve_job_run_profile(job)
+        module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
+        if module_name:
+            assert_module_upgrade_unlocked(module_name)
 
         if run_profile.resource.acquisition.mode != AcquisitionMode.CREATE:
             return
@@ -153,6 +157,11 @@ class JobController:
         needed = target - current_count
 
         if needed > 0:
+            try:
+                await self._ensure_runtime_for_job(job)
+            except Exception as e:
+                logger.warning(f"[ATM] Job {job.id} scale-up blocked by runtime precheck: {e}")
+                return
             logger.debug(f"[ATM] Job {job.id} scaling up: {current_count} -> {target} (+{needed})")
             for _ in range(needed):
                 await self.dispatcher.dispatch(job)
@@ -166,6 +175,12 @@ class JobController:
         current_count = await self.repo.count_active_tasks(job.id)
         if current_count > 0:
             logger.info(f"[ATM] Job {job.id} skipped scheduled batch because {current_count} tasks are still active")
+            return
+
+        try:
+            await self._ensure_runtime_for_job(job)
+        except Exception as e:
+            logger.warning(f"[ATM] Job {job.id} scheduled batch blocked by runtime precheck: {e}")
             return
 
         logger.info(f"[ATM] Job {job.id} firing scheduled batch with concurrency={job.concurrency_target}")

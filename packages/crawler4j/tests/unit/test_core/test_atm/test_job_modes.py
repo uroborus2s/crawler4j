@@ -54,6 +54,7 @@ async def test_service_job_maintains_target_concurrency():
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(),
         concurrency_target=3,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
@@ -61,6 +62,28 @@ async def test_service_job_maintains_target_concurrency():
     await controller._reconcile_job(job)
 
     assert controller.dispatcher.dispatch.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_service_job_scale_up_skips_when_runtime_check_fails_before_dispatch():
+    controller = JobController()
+    controller.repo = SimpleNamespace(count_active_tasks=AsyncMock(return_value=1))
+    controller.dispatcher = SimpleNamespace(dispatch=AsyncMock())
+    controller._ensure_runtime_for_job = AsyncMock(side_effect=RuntimeError("module upgrading"))
+
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(),
+        concurrency_target=3,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+
+    await controller._reconcile_job(job)
+
+    controller.dispatcher.dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -74,6 +97,7 @@ async def test_batch_job_registers_cron_schedule_on_reconcile():
         name="batch",
         type=JobType.BATCH,
         state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(),
         concurrency_target=4,
         trigger=TriggerConfig(type=TriggerType.CRON, cron_expr="0 * * * *"),
     )
@@ -95,6 +119,7 @@ async def test_batch_job_dispatches_full_batch_when_cron_trigger_fires():
         name="batch",
         type=JobType.BATCH,
         state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(),
         concurrency_target=4,
         trigger=TriggerConfig(type=TriggerType.CRON, cron_expr="0 * * * *"),
     )
@@ -107,6 +132,29 @@ async def test_batch_job_dispatches_full_batch_when_cron_trigger_fires():
     await controller._on_batch_cron_fire(job.id)
 
     assert controller.dispatcher.dispatch.await_count == 4
+
+
+@pytest.mark.asyncio
+async def test_batch_job_skips_trigger_when_runtime_check_fails_before_dispatch():
+    controller = JobController()
+    job = Job(
+        id="batch-job",
+        name="batch",
+        type=JobType.BATCH,
+        state=JobState.ACTIVE,
+        concurrency_target=4,
+        trigger=TriggerConfig(type=TriggerType.CRON, cron_expr="0 * * * *"),
+    )
+    controller.repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        count_active_tasks=AsyncMock(return_value=0),
+    )
+    controller.dispatcher = SimpleNamespace(dispatch=AsyncMock())
+    controller._ensure_runtime_for_job = AsyncMock(side_effect=RuntimeError("module upgrading"))
+
+    await controller._on_batch_cron_fire(job.id)
+
+    controller.dispatcher.dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -219,6 +267,29 @@ async def test_start_job_blocks_when_runtime_precheck_fails():
 
 
 @pytest.mark.asyncio
+async def test_ensure_job_runtime_ready_blocks_when_module_upgrade_lock_active(temp_state_dir):
+    from src.core.mms.release_service import ModuleReleaseService
+
+    controller = JobController()
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.PAUSED,
+        run_profile=_build_select_run_profile(),
+        concurrency_target=1,
+    )
+    controller.repo = SimpleNamespace(get_job=AsyncMock(return_value=job))
+
+    service = ModuleReleaseService()
+    async with service.hold_module_upgrade_lock("demo_module"):
+        with pytest.raises(ValueError) as exc_info:
+            await controller.ensure_job_runtime_ready(job.id)
+
+    assert "升级维护" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_create_service_job_forces_manual_trigger():
     service = TaskService()
     saved_jobs = []
@@ -314,7 +385,7 @@ async def test_run_job_once_dispatches_manual_batch_without_activating_job():
     assert result is True
     assert job.state == JobState.PAUSED
     service._repo.save_job.assert_not_awaited()
-    service._controller.ensure_job_runtime_ready.assert_awaited_once_with(job.id)
+    assert service._controller.ensure_job_runtime_ready.await_count == 2
     assert service._controller.dispatcher.dispatch.await_count == 3
 
 
@@ -378,6 +449,35 @@ async def test_run_job_once_blocks_when_previous_batch_still_running():
 
     assert result is False
     service._repo.save_job.assert_not_awaited()
+    service._controller.dispatcher.dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_job_once_rechecks_runtime_before_dispatch():
+    service = TaskService()
+    job = Job(
+        id="batch-manual-job",
+        name="manual-batch",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=_build_select_run_profile(),
+        concurrency_target=2,
+    )
+    service._repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        save_job=AsyncMock(),
+        count_active_tasks=AsyncMock(return_value=0),
+    )
+    service._controller = SimpleNamespace(
+        ensure_job_runtime_ready=AsyncMock(side_effect=[None, RuntimeError("module upgrading")]),
+        dispatcher=SimpleNamespace(dispatch=AsyncMock()),
+    )
+
+    result = await service.run_job_once(job.id)
+
+    assert result is False
+    assert service._controller.ensure_job_runtime_ready.await_count == 2
     service._controller.dispatcher.dispatch.assert_not_awaited()
 
 
@@ -512,6 +612,7 @@ async def test_controller_reconcile_job_only_reconciles_target():
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(),
         concurrency_target=3,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
@@ -520,6 +621,7 @@ async def test_controller_reconcile_job_only_reconciles_target():
         name="other",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(),
         concurrency_target=2,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )

@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
 **关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `BUG-013`, `CR-005`, `NFR-003`
-**最后更新：** 2026-04-16
+**最后更新：** 2026-04-17
 
 ## 1. 测试目标
 
@@ -54,7 +54,13 @@
 ## 5. 当前测试缺口
 
 - 没有覆盖 `ctrip labor_workflow` 真实站点 E2E 验证
-- 历史人工调试脚本仍未统一重构为正式自动化测试
+- 真实站点 E2E 的执行口径现已单独收敛到 `ctrip-real-site-e2e-closeout.md`
+
+## 5.2 `ctrip` 真实站点 E2E 收口口径
+
+- 执行入口统一见 [ctrip-real-site-e2e-closeout.md](ctrip-real-site-e2e-closeout.md)。
+- 发布前必须同时验证 DevLink 与 ZIP 安装两条真实站点链路，不能只跑本地模块 smoke。
+- 真实环境失败时必须按“宿主 / 模块 / 站点 / 环境”四类归因，不接受笼统的 “E2E 失败”。
 
 ## 5.1 `REQ-006` 已完成覆盖
 
@@ -78,6 +84,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-17 | 补充 `ctrip` 真实站点 E2E 收口口径，并删除对历史人工调试脚本继续保留的默认假设 | Codex |
 | 2026-04-16 | 新增 `TC-012`，覆盖 `ModuleAssembler` 导入错误可见性与 DevLink 普通执行 reload 语义 | Codex |
 | 2026-04-16 | 新增 `TC-011`，覆盖 `TaskSignal.wait_for_confirmation` 的 signal 持久化、结构化确认面板与客户端确认回调 | Codex |
 | 2026-04-08 | 新增 `TC-010`，同步 `core:data_table` 的本地 UI hook / DevLink 回归覆盖 | Codex |

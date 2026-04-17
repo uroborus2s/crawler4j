@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `BUG-013`, `CR-005`  
-**最后更新：** 2026-04-16
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `BUG-013`, `CR-005`  
+**最后更新：** 2026-04-17
 
 ## `API-001` Root App Entry Contract
 
@@ -23,7 +23,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| Manifest 文件 | `module.yaml` |
+| Manifest 文件 | `module.yaml`（可附带 `config_defaults` 初始化模板） |
 | 宿主入口文件 | 模块根 `__init__.py` |
 | 必需入口 | `run(context)` |
 | 标准运行时文件 | `module_runtime.py` |
@@ -32,7 +32,7 @@
 | 当前实现 | 根 `__init__.py` 已收敛为稳定薄壳，默认入口组装逻辑由 `ModuleAssembler` 提供；选择环境不再接受规则树，只接受模块回调 |
 | Core 扩展入口 | `context.tools.call("<namespace>.<action>", **kwargs)` |
 | 生命周期规则 | `on_cleanup` 是终态清理 hook；只要任务已建立 `TaskContext` 并进入终态就会执行，不以环境是否 `destroy` 为前提；环境动作结果通过 `context.runtime["env_action"]` 暴露 |
-| 默认工作流解析 | `context.config.workflow` -> `module_runtime.DEFAULT_WORKFLOW` -> `module.yaml.workflows[0].name` |
+| 默认工作流解析 | `context.runtime["workflow"]` -> `module_runtime.DEFAULT_WORKFLOW` -> `module.yaml.workflows[0].name` |
 | 发现错误可见性 | `ModuleAssembler` 发现 `tasks/` / `workflows/` import 失败时，必须记录 import 目标、异常类型与 traceback；若当前请求命中失败条目，`run()` 需附带 discovery hint，而不是只报泛化的“not found” |
 | `core:data_table` UI 契约 | 页面创建/刷新时先同步调用根模块 `declare_ui(context)`；若 schema 声明 `create_handler` / `update_handler`，通用页新增/编辑继续路由到同名同步本地 hook |
 | `TaskSignal` UI 契约 | `TaskSignal.wait_for_confirmation(..., payload={"confirmation": ...})` 会把完整 `signal` 快照持久化到任务记录，并发布 `task.signal` 事件；ATM 详情页按 `payload.confirmation` 渲染结构化确认面板，若缺少该块则退回展示 `message` 与 payload 键值 |
@@ -42,6 +42,22 @@
 | 当前风险 | 真实站点 E2E 仍未覆盖；动态加载的模块扩展点仍需依赖回归测试保持稳定 |
 | 关联项 | `TASK-003`, `TASK-013` |
 
+## `API-005` Module Config / Runtime / Data Contract
+
+| 项目 | 内容 |
+|---|---|
+| 静态清单 | `module.yaml`，承载模块发现、UI / workflow 声明，以及只读初始化模板 `config_defaults` |
+| 持久配置 | `config.db.module_config_entries`；模块运行时只通过 `ctx.get_config()` / `ctx.config` 读取 |
+| 配置编辑格式 | 模块详情页 `配置` 标签统一使用 YAML 编辑，但数据库仍是事实源 |
+| 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
+| 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
+| 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
+| 持久业务数据 | `data.db.module_datasets` 与 `data.db.module_data_table_views`，统一通过 `db.*` / `ui.declare_data_table` 访问 |
+| 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
+| 当前实现说明 | 当前运行时代码不包含旧 `state.db.kv_store` 模块表数据自动迁移逻辑；旧数据需要显式迁移或人工导入 |
+| 关联文档 | `module-config-runtime-data-contract.md` |
+| 关联项 | `CR-003` |
+
 ## `API-003` SDK / Contracts Package Contract
 
 | 项目 | 内容 |
@@ -49,7 +65,7 @@
 | SDK 包名 | `crawler4j-sdk` |
 | Contracts 包名 | `crawler4j-contracts` |
 | CLI 入口 | `crawler4j_sdk.cli.commands:main` |
-| 当前能力 | `ModuleAssembler` 已作为统一模块入口组装 helper 落地；`TaskContext` 已收敛为 `tools` 统一扩展入口；`TaskSignal` 已成为模块到 ATM 的正式流程信号；CLI 已支持 `init-model --defaults`、`new` 与 `list` |
+| 当前能力 | `ModuleAssembler` 已作为统一模块入口组装 helper 落地；`TaskContext` 已收敛为 `tools` 统一扩展入口；`TaskSignal` 已成为模块到 ATM 的正式流程信号；CLI 已重构为 `module / task / workflow / page / data-table / env-selector / config / package / release / host / check` 分组体系 |
 | 当前状态 | 本地 build 成功，help 可运行；模块入口自动托管、重初始化路径与集成测试已完成 |
 | 关联项 | `REQ-003`, `REQ-006` |
 
@@ -68,6 +84,7 @@
 ## 设计结论
 
 - 本项目的关键“接口”不是 HTTP API，而是运行入口、模块契约、SDK/Contracts 包接口和发布元数据接口。
+- 模块开发时还必须把“配置 / 运行态 / 单次运行内内存 / 业务数据 / 短期状态”视为不同契约，不能混用。
 - 当前版本治理规则已经明确：根应用 `pyproject.toml`、运行时版本读取、最新正式 tag 和子包版本线各自职责清晰。
 
 ## 变更记录
@@ -81,3 +98,4 @@
 | 2026-04-15 | 固化 `on_cleanup` 终态规则，并补记 `TaskSignal` 为正式流程信号 | Codex |
 | 2026-04-16 | 补记 `TaskSignal.wait_for_confirmation` 的结构化确认面板协议、任务快照持久化与 `task.signal` 事件 | Codex |
 | 2026-04-16 | 补记 `ModuleAssembler` 发现错误可见性，以及 DevLink 普通执行的一次性 reload 语义 | Codex |
+| 2026-04-17 | 增补 `API-005`，收口模块配置、运行态、共享内存与数据表契约 | Codex |

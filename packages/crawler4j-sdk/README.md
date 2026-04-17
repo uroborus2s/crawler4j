@@ -1,6 +1,8 @@
 # Crawler4j SDK
 
-任务脚本开发工具包（Software Development Kit）。
+用于构建 `crawler4j` 标准模块项目的 SDK 与 CLI。
+
+当前源码与开发者文档统一以 `0.2.0` 为基线。注意：模块自己的 `module.yaml.version` 可以独立演进，因此示例 ZIP 名称里的 `0.1.0` 仅表示模块版本，不代表 SDK 仍停留在 `0.1.x`。
 
 ## 使用 CLI 的两种方式
 
@@ -58,6 +60,8 @@ class MyTask(TaskScript):
 |:---|:---|
 | `TaskScript` | 原子任务基类 |
 | `TaskFlow` | 工作流编排基类 |
+| `ModuleAssembler` | 标准模块根入口组装器 |
+| `env_selector` / `EnvSelectorInfo` | 环境选择器声明与元信息 |
 | `TaskContext` | 任务执行上下文 |
 | `TaskResult` | 任务结果模型 |
 | `TaskSignal` | 模块通知 ATM 的流程控制信号 |
@@ -142,35 +146,72 @@ if ctx.tools and ctx.tools.has_tool("captcha.match_slider"):
 ## CLI 命令
 
 ```bash
-# 初始化完整 model 项目
-uvx --from crawler4j-sdk crawler4j init-model my_model
+# 初始化模块项目：生成标准骨架、module.yaml、module_runtime.py
+uvx --from crawler4j-sdk crawler4j module init my_model --repo owner/my_model
 
-# 进入模块目录并安装依赖后，创建任务脚本（交互式）
-uv run crawler4j add
+# 查看当前模块的版本、仓库、默认工作流、页面入口和数据表入口
+uv run crawler4j module show
 
-# 进入模块目录后，创建任务脚本（快速）
-uv run crawler4j new my_task
+# 创建任务脚本：只写 tasks/<name>.py
+uv run crawler4j task create login
 
-# 进入模块目录后，列出任务脚本
-uv run crawler4j list
+# 创建工作流：写 workflows/<name>.py，并同步更新 module.yaml.workflows
+uv run crawler4j workflow create sync_orders
 
-# 创建工作流并写入 module.yaml
-uv run crawler4j add-workflow sync_orders
+# 创建代码型页面：写 ui/<name>.py，并设置 ui_extension.entry
+uv run crawler4j page create dashboard
 
-# 创建代码型 UI 页面
-uv run crawler4j add-ui dashboard
+# 创建受控数据表：注册 core:data_table:<view_id>，并补 declare_ui 骨架
+uv run crawler4j data-table create accounts
+
+# 创建环境选择器：在 module_runtime.py 里追加 @env_selector(...) 函数
+uv run crawler4j env-selector create pick_ready
+
+# 设置默认配置模板
+uv run crawler4j config set module --file defaults.yaml
+
+# 发布前完整校验
+uv run crawler4j check full
+
+# 构建宿主可安装 ZIP
+uv run crawler4j package build
+
+# 发布本地 ZIP 到 GitHub Release
+uv run crawler4j release publish --dry-run
+
+# 通过 SDK CLI 桥接宿主能力
+uv run crawler4j host devlink add /path/to/module
+uv run crawler4j host install preview dist/my_model-0.1.0.zip --skip-remote-check
+uv run crawler4j host upgrade check my_model
+uv run crawler4j host debug config
 ```
 
-`init-model` 默认会进入一轮初始化向导，并在创建后自动：
+当前命令树按“模块元素”和“生命周期动作”分组：
+
+- `module`：初始化模块项目，或维护 `repo / version / default-workflow`
+- `task`：管理 `tasks/` 里的 `TaskScript`
+- `workflow`：管理 `workflows/` 和 `module.yaml.workflows`
+- `page`：管理代码型页面和 `ui_extension.entry`
+- `data-table`：管理受控 `core:data_table:<id>` 入口
+- `env-selector`：管理 `module_runtime.py` 里的环境选择策略函数
+- `config`：管理 `module.yaml.config_defaults`
+- `package`：构建和校验安装 ZIP
+- `release`：看本地发布状态、检查 GitHub Release 最新版本、发布 Release 资产
+- `host`：通过 SDK CLI 桥接宿主的 DevLink、安装、升级和调试配置
+- `check`：运行 `structure / release / full` 三档完整性校验
+
+`module init` 会默认：
 
 - 生成 `.gitignore`
 - 生成 `.python-version`
+- 生成 `module_runtime.py`
 - 执行 `git init`
 - 执行 `uv sync`
 
-如果你在 CI 或脚本里使用 CLI，可以加 `--defaults` 跳过交互；如需跳过自动初始化动作，可额外使用 `--no-git` 或 `--no-install`。
+如果你在 CI 或脚本里使用 CLI，可以直接补齐 `--repo`、`--no-git`、`--no-install` 等参数。第一版命令树已经切到 `module / task / workflow / page / data-table / env-selector / config / package / release / host / check` 分组体系，不再兼容旧平铺命令。
 
-调试主路径已经收敛到 Core 调试会话。CLI 不再生成 `debug_runner.py`。
+调试主路径已经收敛到 Core 调试会话。旧的 `debug_runner.py` 辅助脚本已从宿主仓库移除，CLI 也不再生成任何本地调试壳脚本。
+模块持久配置由宿主统一维护，`config_schema.json` / `strategy.yaml` 已不再受支持；详情页扩展数据表也应通过 `data-table create` 写入受控的 `core:data_table:<view_id>` 入口，而不是手改 `module.yaml`。
 
 ## 工作流示例
 
@@ -217,6 +258,7 @@ return TaskResult.fail(
 `module_runtime.py` 现在是标准模块文件，不再是可选扩展点。模块级生命周期统一在其中实现：
 
 - `prepare_env`
+- `declare_ui`
 - `@env_selector(...)` 声明环境选择回调，供 ATM 的“选择环境”模式调用
 - `init_env`
 - `before_run`
@@ -236,3 +278,4 @@ return TaskResult.fail(
 
 - Python: `>= 3.12`
 - 遵循语义化版本（SemVer）
+- 当前源码包版本：`0.2.0`

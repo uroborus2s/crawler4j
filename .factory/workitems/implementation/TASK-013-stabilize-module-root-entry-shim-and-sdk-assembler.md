@@ -16,7 +16,7 @@
 ## 范围
 
 - 在 `crawler4j_sdk` 中新增统一模块入口组装 helper
-- 将 `init-model` 模板切换为固定薄壳 `__init__.py`
+- 将 `module init` 模板切换为固定薄壳 `__init__.py`
 - 约定可选 `module_runtime.py` 作为模块级可变运行时扩展位置
 - 明确旧模块的重初始化步骤与迁移清单
 - 补齐相关测试与文档

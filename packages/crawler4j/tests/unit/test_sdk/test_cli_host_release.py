@@ -102,6 +102,36 @@ def test_release_publish_uses_gh_release_create(monkeypatch, tmp_path: Path):
     assert calls[1][3] == "v0.1.0"
 
 
+def test_release_check_remote_treats_stable_as_newer_than_prerelease(
+    monkeypatch, tmp_path: Path, capsys
+):
+    module_root = tmp_path / "demo_model"
+    module_root.mkdir()
+
+    monkeypatch.setattr(commands, "require_module_root", lambda: module_root)
+    monkeypatch.setattr(
+        commands,
+        "load_manifest",
+        lambda root: _make_manifest(version="1.2.0-rc.1"),
+    )
+    monkeypatch.setattr(
+        commands,
+        "_fetch_latest_release",
+        lambda repo, allow_prerelease=False: {
+            "version": "1.2.0",
+            "title": "v1.2.0",
+            "tag_name": "v1.2.0",
+            "asset_name": "demo_model-1.2.0.zip",
+        },
+    )
+
+    result = commands.cmd_release_check_remote(Namespace())
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "状态: behind" in captured.out
+
+
 def test_host_devlink_commands_delegate_to_registry(monkeypatch, tmp_path: Path):
     calls: list[tuple[str, object]] = []
     module = _fake_module(tmp_path / "demo_model", source="dev_link")
@@ -206,6 +236,10 @@ def test_host_upgrade_commands_delegate_to_release_service(monkeypatch, tmp_path
                 release=SimpleNamespace(version="0.2.0", html_url="https://example.com/release"),
             )
 
+        async def apply_module_upgrade(self, module_info, preview):
+            calls.append(("apply_module_upgrade", module_info.name, Path(preview.archive_path)))
+            return installed
+
     monkeypatch.setattr(commands, "_load_host_runtime", lambda: _fake_runtime(FakeRegistry(), FakeService()))
 
     assert commands.cmd_host_upgrade_check(Namespace(module_name="demo_model")) == 0
@@ -218,7 +252,7 @@ def test_host_upgrade_commands_delegate_to_release_service(monkeypatch, tmp_path
         ("prepare_module_upgrade", "demo_model"),
         ("get_module", "demo_model"),
         ("prepare_module_upgrade", "demo_model"),
-        ("install", archive_path),
+        ("apply_module_upgrade", "demo_model", archive_path),
     ]
 
 

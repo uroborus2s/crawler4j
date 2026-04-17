@@ -514,7 +514,7 @@ class ModuleListWidget(QWidget):
             if dialog.exec() != dialog.DialogCode.Accepted:
                 return
 
-            installed = registry.install(preview.archive_path)
+            installed = await service.apply_module_upgrade(module, preview)
             QMessageBox.information(
                 self,
                 "升级成功",
@@ -538,7 +538,10 @@ class ModuleListWidget(QWidget):
 
         try:
             registry = get_module_registry()
-            registry.uninstall(name)
+            removed = registry.uninstall(name)
+            if not removed:
+                QMessageBox.warning(self, "卸载失败", f"未能卸载模块: {name}")
+                return
             QMessageBox.information(self, "成功", f"已卸载模块: {name}")
             self.load_data(force_refresh=True)
         except Exception as e:

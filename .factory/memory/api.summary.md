@@ -1,6 +1,7 @@
 # API Summary
 
 - `API-001`: Root app entry contract is `src.ui.app:main` and is currently aligned with the declared script entry.
-- `API-002`: Module runtime contract remains `module.yaml` + root `__init__.py` + `run(context)` / hooks; `REQ-006` is implemented via a stable shim plus `ModuleAssembler`, `core:data_table` refresh runs local UI hooks with `ctx.runtime["devel_mode"]`, and 模块持久配置现统一落在 `config.db.module_config_entries`，运行态输入统一经 `ctx.runtime` 注入。
-- `API-003`: SDK / Contracts / CLI contract is buildable and usable; the unified module entry assembler helper is now implemented and the CLI surface includes `init-model --defaults`, `new`, and `list`.
+- `API-002`: Module runtime contract remains `module.yaml` + root `__init__.py` + `run(context)` / hooks; `REQ-006` is implemented via a stable shim plus `ModuleAssembler`, `core:data_table` refresh runs local UI hooks with `ctx.runtime["devel_mode"]`, 模块持久配置统一落在 `config.db.module_config_entries`，运行态输入统一经 `ctx.runtime` 注入，模块详情页真实默认配置入口为宿主侧模块/工作流 YAML 编辑器，且 `module.yaml.config_defaults` 现在只作为首次初始化与“恢复默认”的静态模板。
+- `API-005`: 模块配置、运行态、共享内存与数据表契约已收口：`module.yaml` 承载静态清单与只读 `config_defaults` 初始化模板，模块当前配置统一落到 `config.db.module_config_entries` 并只经 `ctx.get_config()` / `ctx.config` 读取，`ctx.runtime` 承载宿主执行态元数据，`ctx.state` 仅用于单次运行内共享内存，`core:data_table` schema / dataset records 只认 `data.db`；当前运行时代码不包含旧 `state.db.kv_store` 数据表自动迁移逻辑。
+- `API-003`: SDK / Contracts / CLI contract is buildable and usable; the unified module entry assembler helper is now implemented and the CLI surface now uses grouped V1 commands such as `module init`, `task create`, `workflow create`, `page create`, `data-table create`, `package build`, `release publish`, and `check full`.
 - `API-004`: Release metadata contract is aligned across app `pyproject.toml`, runtime version service, child package versions, and release docs.

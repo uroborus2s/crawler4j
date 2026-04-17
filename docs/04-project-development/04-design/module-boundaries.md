@@ -34,7 +34,7 @@
 | 项目 | 内容 |
 |---|---|
 | 目录 | `packages/crawler4j/modules/README.md`（仓内占位）、`<app-data>/modules`（正式安装）、DevLink 源码目录（开发调试） |
-| 职责 | 定义模块根目录、`module.yaml`、根 `__init__.py`、任务、工作流与 UI 扩展的运行边界 |
+| 职责 | 定义模块根目录、`module.yaml`（含只读 `config_defaults` 初始化模板）、根 `__init__.py`、任务、工作流与 UI 扩展的运行边界 |
 | 对外接口 | `run(context)` 与模块 hooks |
 | 依赖 | `crawler4j_sdk`, Core runtime |
 | 不负责 | Core 基础设施、SDK 公共契约 |

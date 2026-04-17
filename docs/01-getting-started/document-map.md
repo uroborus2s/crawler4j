@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树
 **下游输出：** `docs/02-user-guide/user-guide.md` | `docs/03-developer-guide/index.md` | `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md`
 **关联 ID：** `DOC-101`, `DOC-102`, `DOC-103`
-**最后更新：** 2026-04-02
+**最后更新：** 2026-04-17
 
 ## 1. 四大模块及职责边界
 
@@ -15,7 +15,7 @@
 |---|---|---|
 | `docs/01-getting-started/` | 这是个什么项目，我应该先看什么 | 新维护者 / 协作者 |
 | `docs/02-user-guide/` | 如何安装、配置、使用和管理宿主应用 | 宿主使用者 / 管理员 / 协作者 |
-| `docs/03-developer-guide/` | 如何开发、调试、交付和迁移模块 | 模块开发者 / 做模块集成的 Core 成员 |
+| `docs/03-developer-guide/` | 如何开发、调试、交付模块 | 模块开发者 / 做模块集成的 Core 成员 |
 | `docs/04-project-development/` | 项目如何治理、设计、实施、验证、发布、运维和追踪 | Tech Lead / Dev / QA / 发布负责人 |
 
 ## 2. 3 分钟快速阅读路径
@@ -34,12 +34,11 @@
 
 1. [接手入口](../02-user-guide/user-guide.md)
 2. [开发者指南总览](../03-developer-guide/index.md)
-3. [01 概念与约束](../03-developer-guide/01-concepts/index.md)
-4. [02 快速开始](../03-developer-guide/02-quickstart/index.md)
-5. [03 项目结构与契约](../03-developer-guide/03-project-structure/index.md)
-6. [04 模块开发](../03-developer-guide/04-development/index.md)
-7. [06 交付与验收](../03-developer-guide/06-delivery/index.md)
-8. [Shim 迁移](../03-developer-guide/08-migration/01-shim-migration.md)
+3. [快速开始](../03-developer-guide/quickstart.md)
+4. [核心概念](../03-developer-guide/core-concepts.md)
+5. [模块结构](../03-developer-guide/module-structure.md)
+6. [构建模块](../03-developer-guide/build-modules.md)
+7. [交付模块](../03-developer-guide/shipping.md)
 
 ### 发布 / 运维
 

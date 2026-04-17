@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
+import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,13 +16,14 @@ from src.core.foundation.logging import logger
 from src.core.foundation.network import AsyncHttpClient
 from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
 from src.core.mms.registry import get_module_registry
+from src.core.mms.semver import compare_semver, is_valid_semver
+from src.core.persistence import get_kv_store
 from src.utils.paths import get_app_data_dir
 
 
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-BASE_VERSION_RE = re.compile(
-    r"^v?(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?:[.-].*)?$"
-)
+MODULE_UPGRADE_LOCK_TTL = 10 * 60
+_module_upgrade_process_locks: dict[str, asyncio.Lock] = {}
 
 
 @dataclass(slots=True)
@@ -127,6 +131,7 @@ class ModuleReleaseService:
             raise ValueError(
                 f"安装包声明的升级源仓库不一致: 期望 {repo}，实际 {manifest_repo}。"
             )
+        self._ensure_manifest_matches_release(manifest, release)
 
         return ModulePackagePreview(
             install_kind="github_release",
@@ -188,20 +193,7 @@ class ModuleReleaseService:
         release = update_info.release
         archive_path = await self._download_release_asset(release)
         manifest, warnings = self._validate_archive(archive_path)
-        if manifest.name != module.name:
-            raise ValueError(
-                f"升级包模块名不匹配: 当前模块为 {module.name}，安装包为 {manifest.name}"
-            )
-
-        manifest_repo = self.normalize_repo(manifest.upgrade_source.repo)
-        current_repo = self.normalize_repo(module.manifest.upgrade_source.repo)
-        if manifest_repo != current_repo:
-            raise ValueError(
-                f"升级包声明的升级源仓库不一致: 期望 {current_repo}，实际 {manifest_repo}。"
-            )
-
-        if self._compare_versions(manifest.version, module.manifest.version) <= 0:
-            raise ValueError("下载到的升级包版本没有高于当前版本")
+        self._validate_upgrade_package(module, manifest, release)
 
         return ModulePackagePreview(
             install_kind="module_upgrade",
@@ -211,6 +203,36 @@ class ModuleReleaseService:
             source_label="GitHub Release",
             release=release,
         )
+
+    async def apply_module_upgrade(
+        self,
+        module: ModuleInfo,
+        preview: ModulePackagePreview,
+    ) -> ModuleInfo:
+        if module.source != ModuleSource.EXTERNAL:
+            raise ValueError("只有正式安装的模块才支持在线升级")
+        if preview.install_kind != "module_upgrade":
+            raise ValueError("升级预览无效，请重新检查升级")
+        if not preview.archive_path:
+            raise ValueError("升级包不存在，请重新检查升级")
+        if not preview.release:
+            raise ValueError("升级预览缺少 Release 信息，请重新检查升级")
+
+        async with self.hold_module_upgrade_lock(module.name):
+            registry = get_module_registry()
+            current_module = registry.get_module(module.name)
+            if not current_module:
+                raise ValueError(f"模块不存在: {module.name}")
+            if current_module.source != ModuleSource.EXTERNAL:
+                raise ValueError("只有正式安装的模块才支持在线升级")
+            if current_module.manifest.version != module.manifest.version:
+                raise ValueError(
+                    f"模块 {module.name} 在确认升级后已发生变化，请重新检查升级"
+                )
+
+            self._validate_upgrade_package(current_module, preview.manifest, preview.release)
+            await self._ensure_module_idle(current_module.name)
+            return registry.install(preview.archive_path)
 
     async def _ensure_module_idle(self, module_name: str) -> None:
         from src.core.atm.service import get_task_service
@@ -232,6 +254,82 @@ class ModuleReleaseService:
         active_total = sum(active_counts)
         if active_total > 0:
             raise ValueError(f"模块 {module_name} 当前有 {active_total} 个运行中任务，暂时不能升级")
+
+    def _validate_upgrade_package(
+        self,
+        module: ModuleInfo,
+        manifest: ModuleManifest,
+        release: ModuleReleaseInfo,
+    ) -> None:
+        if manifest.name != module.name:
+            raise ValueError(
+                f"升级包模块名不匹配: 当前模块为 {module.name}，安装包为 {manifest.name}"
+            )
+
+        manifest_repo = self.normalize_repo(manifest.upgrade_source.repo)
+        current_repo = self.normalize_repo(module.manifest.upgrade_source.repo)
+        if manifest_repo != current_repo:
+            raise ValueError(
+                f"升级包声明的升级源仓库不一致: 期望 {current_repo}，实际 {manifest_repo}。"
+            )
+
+        self._ensure_manifest_matches_release(manifest, release)
+
+        if self._compare_versions(manifest.version, module.manifest.version) <= 0:
+            raise ValueError("下载到的升级包版本没有高于当前版本")
+
+    def _ensure_manifest_matches_release(
+        self,
+        manifest: ModuleManifest,
+        release: ModuleReleaseInfo,
+    ) -> None:
+        manifest_version = str(manifest.version or "").strip()
+        release_version = str(release.version or "").strip()
+        if manifest_version != release_version:
+            raise ValueError(
+                f"安装包声明的版本与 Release 不一致: 期望 {release_version}，实际 {manifest_version}。"
+            )
+
+    @asynccontextmanager
+    async def hold_module_upgrade_lock(self, module_name: str):
+        module_name = str(module_name or "").strip()
+        if not module_name:
+            raise ValueError("模块名不能为空")
+
+        process_lock = _module_upgrade_process_locks.get(module_name)
+        if process_lock is None:
+            process_lock = asyncio.Lock()
+            _module_upgrade_process_locks[module_name] = process_lock
+
+        async with process_lock:
+            kv = get_kv_store()
+            lock_key = self._upgrade_lock_key(module_name)
+            existing = kv.get(lock_key)
+            if existing is not None:
+                raise ValueError(f"模块 {module_name} 正在执行升级维护，请稍后再试")
+
+            token = uuid.uuid4().hex
+            kv.set(
+                lock_key,
+                {
+                    "module_name": module_name,
+                    "lock_type": "module_upgrade",
+                    "token": token,
+                    "owner": "module_release_service",
+                    "claimed_at": int(time.time()),
+                },
+                ttl=MODULE_UPGRADE_LOCK_TTL,
+            )
+            try:
+                yield
+            finally:
+                current = kv.get(lock_key)
+                if isinstance(current, dict) and current.get("token") == token:
+                    kv.delete(lock_key)
+
+    @staticmethod
+    def _upgrade_lock_key(module_name: str) -> str:
+        return f"module:{module_name}:lock:maintenance:module_upgrade"
 
     async def _fetch_repo_metadata(self, repo: str) -> dict[str, Any]:
         return await self._request_json(f"{self.GITHUB_API_BASE}/repos/{repo}")
@@ -346,28 +444,12 @@ class ModuleReleaseService:
         ]
         for candidate in candidates:
             version = candidate.lstrip("v")
-            if BASE_VERSION_RE.match(candidate) or BASE_VERSION_RE.match(version):
+            if is_valid_semver(candidate) or is_valid_semver(version):
                 return version
         raise ValueError(f"Release 版本号无效: {candidates[0] or candidates[1] or '<empty>'}")
 
     def _compare_versions(self, left: str, right: str) -> int:
-        left_parts = self._parse_version(left)
-        right_parts = self._parse_version(right)
-        if left_parts < right_parts:
-            return -1
-        if left_parts > right_parts:
-            return 1
-        return 0
-
-    def _parse_version(self, version_str: str) -> tuple[int, int, int]:
-        match = BASE_VERSION_RE.match(str(version_str or "").strip())
-        if not match:
-            raise ValueError(f"无效的版本号: {version_str}")
-        return (
-            int(match.group("major")),
-            int(match.group("minor")),
-            int(match.group("patch")),
-        )
+        return compare_semver(left, right)
 
 
 _release_service: ModuleReleaseService | None = None
@@ -378,3 +460,14 @@ def get_module_release_service() -> ModuleReleaseService:
     if _release_service is None:
         _release_service = ModuleReleaseService()
     return _release_service
+
+
+def is_module_upgrade_locked(module_name: str) -> bool:
+    return get_kv_store().exists(ModuleReleaseService._upgrade_lock_key(module_name))
+
+
+def assert_module_upgrade_unlocked(module_name: str) -> None:
+    payload = get_kv_store().get(ModuleReleaseService._upgrade_lock_key(module_name))
+    if payload is None:
+        return
+    raise ValueError(f"模块 {module_name} 正在执行升级维护，请稍后再试")

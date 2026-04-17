@@ -65,7 +65,7 @@ version = "0.1.0"
 description = "{display_name} 模块项目"
 requires-python = ">={python_version}"
 dependencies = [
-    "crawler4j-sdk>=1.2.0,<2.0.0",
+    "{sdk_dependency_spec}",
 ]
 
 [build-system]
@@ -78,49 +78,43 @@ packages = ["."]
 
 MODEL_PROJECT_README = '''# {display_name}
 
-这是一个规范化的 Crawler4j 模块项目，采用分层架构设计：
+这是一个规范化的 Crawler4j 模块项目，核心文件如下：
 
 - `module.yaml`: 模块清单与能力声明。
-- `tasks/`: [任务层] 原子操作脚本，负责具体页面交互或数据采集。
-- `workflows/`: [编排层] 业务逻辑流，负责串联多个任务。
-- `ui/`: [界面层] 放模块代码型 UI 组件。
-- `data/`: [数据层] 包含数据模型定义 (`models.py`) 和 Schema。
+- `tasks/`: 原子任务脚本。
+- `workflows/`: 工作流编排。
+- `ui/`: 代码型页面组件。
+- `module_runtime.py`: 环境选择器、生命周期 Hook、受控数据表声明。
 
 ## 常用命令
 
 ```bash
+# 查看模块概况
+uv run crawler4j module show
+
 # 创建任务脚本
-uv run crawler4j add <name>
+uv run crawler4j task create <name>
 
 # 创建工作流
-uv run crawler4j add-workflow <name>
+uv run crawler4j workflow create <name>
 
-# 创建数据模型
-uv run crawler4j add-data <name>
+# 创建代码型页面
+uv run crawler4j page create dashboard
 
-# 创建代码型 UI 页面
-uv run crawler4j add-ui --type code
+# 注册受控数据表
+uv run crawler4j data-table create accounts
+
+# 创建环境选择器
+uv run crawler4j env-selector create pick_ready
+
+# 完整校验并打包
+uv run crawler4j check full
+uv run crawler4j package build
 ```
 
 ## 调试
 
 在应用中把该目录注册为“开发链接”模块后，可在 ATM 中对关联作业发起任务调试。
-'''
-
-MODEL_DATA_MODELS_TEMPLATE = '''"""数据模型: {display_name}
-
-{description}
-"""
-
-from typing import Any, Optional
-from pydantic import BaseModel, Field
-
-
-class {class_name}(BaseModel):
-    """{display_name} 模型"""
-    id: str = Field(..., description="唯一标识")
-    name: Optional[str] = Field(None, description="显示名称")
-    data: dict[str, Any] = Field(default_factory=dict, description="原始数据")
 '''
 
 MODEL_UTILS_HELPER_TEMPLATE = '''"""模块通用工具。"""
@@ -191,6 +185,7 @@ MODEL_MODULE_INIT = '''"""{display_name} 模块入口。
 模块运行时扩展统一放在同级目录的 `module_runtime.py`。
 """
 
+import importlib
 from pathlib import Path
 from crawler4j_sdk import EnvCandidate, ModuleAssembler, TaskContext, TaskResult
 
@@ -245,6 +240,23 @@ async def on_timeout(context, *args):
 async def on_cleanup(context, *args):
     hook = assembler.get_hook("on_cleanup")
     return await hook(context, *args) if hook else None
+
+
+_runtime_module = None
+
+
+def _load_runtime_module():
+    global _runtime_module
+    if _runtime_module is None:
+        _runtime_module = importlib.import_module(f"{{__name__}}.module_runtime")
+    return _runtime_module
+
+
+def __getattr__(name: str):
+    runtime_module = _load_runtime_module()
+    if hasattr(runtime_module, name):
+        return getattr(runtime_module, name)
+    raise AttributeError(f"module {{__name__!r}} has no attribute {{name!r}}")
 '''
 
 MODEL_RUNTIME_TEMPLATE = '''"""{display_name} 模块自定义运行时扩展。
@@ -324,14 +336,29 @@ async def on_cleanup(context: TaskContext):
     注意：该 Hook 在 ATM 执行完环境动作后触发，适合做模块内部数据收尾。
     """
     pass
+
+
+def declare_ui(context: TaskContext):
+    """声明受控 UI 元数据。
+
+    `crawler4j data-table create <view_id>` 会把数据表声明插到这个函数里。
+    """
+    # SDK-DATA-TABLES
+    return None
 '''
 
 MODEL_MANIFEST_TEMPLATE = '''name: {module_name}
-version: 1.0.0
+version: {version}
 display_name: {display_name}
 description: {description}
 author: crawler4j
-sdk_version_range: ">=1.2.0"
+upgrade_source:
+  type: github_release
+  repo: {repo}
+  allow_prerelease: false
+config_defaults:
+  module: {{}}
+  workflows: {{}}
 workflows:
   - name: {workflow_name}
     display_name: {workflow_display_name}
@@ -357,4 +384,43 @@ class {class_name}(TaskFlow):
         """执行工作流。"""
         ctx.state["phase"] = "{name}"
         await ctx.run_subtask("example_task")
+'''
+
+ENV_SELECTOR_TEMPLATE = '''
+
+@env_selector(
+    name="{name}",
+    display_name="{display_name}",
+    description="{description}",
+)
+def {function_name}(context: TaskContext, candidates: list[EnvCandidate]):
+    """{display_name}。"""
+    ready_candidates = [candidate for candidate in candidates if candidate.status == "ready"]
+    if not ready_candidates:
+        return None
+    return ready_candidates[0].env_id
+'''
+
+DATA_TABLE_HELPER_TEMPLATE = '''
+
+def _declare_{view_id}_table(context: TaskContext):
+    """声明 `{view_id}` 受控数据表。"""
+    if not context.tools or not context.tools.has_tool("ui.declare_data_table"):
+        return None
+
+    return context.tools.call(
+        "ui.declare_data_table",
+        view_id="{view_id}",
+        schema={{
+            "title": "{display_name}",
+            "dataset": "{view_id}",
+            "primary_key": "id",
+            "display_fields": ["id", "status", "updated_at"],
+            "columns": [
+                {{"key": "id", "label": "ID", "required": True}},
+                {{"key": "status", "label": "状态"}},
+                {{"key": "updated_at", "label": "更新时间"}},
+            ],
+        }},
+    )
 '''

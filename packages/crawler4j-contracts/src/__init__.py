@@ -22,8 +22,6 @@ from crawler4j_contracts.context import (
 from crawler4j_contracts.result import TaskResult
 from crawler4j_contracts.signal import EnvAction, TaskSignal, TaskSignalAction
 
-__version__ = "1.2.0"
-
 __all__ = [
     "TaskContext",
     "TaskResult",

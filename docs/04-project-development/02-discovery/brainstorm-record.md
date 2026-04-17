@@ -4,14 +4,14 @@
 **文档状态：** 草稿  
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
-**上游输入：** 用户关于模块根 `__init__.py` 是否应由工具维护的讨论 | `docs/03-developer-guide/03-project-structure/01-layout-and-entrypoints.md` | `packages/crawler4j-sdk/src/cli/templates.py` | `packages/crawler4j/src/core/mms/service.py`  
+**上游输入：** 用户关于模块根 `__init__.py` 是否应由工具维护的讨论 | `docs/03-developer-guide/module-structure.md` | `packages/crawler4j-sdk/src/cli/templates.py` | `packages/crawler4j/src/core/mms/service.py`  
 **下游输出：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/03-requirements/requirements-analysis.md` | `docs/04-project-development/04-design/module-boundaries.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md` | `.factory/workitems/implementation/TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler.md`  
 **关联 ID：** `REQ-003`, `REQ-006`, `TASK-013`  
 **最后更新：** 2026-03-31  
 
 ## 1. 问题背景
 
-- 当前 `init-model` 会生成完整的模块根 `__init__.py`，其中同时包含自动发现、默认工作流、任务/工作流调度以及默认 hooks 模板。
+- 当前 `module init` 会生成完整的模块根 `__init__.py`，其中同时包含自动发现、默认工作流、任务/工作流调度以及默认 hooks 模板。
 - 这意味着根 `__init__.py` 虽然是脚手架生成的，但它仍然承载可变运行时逻辑；一旦 SDK 模板升级、默认工作流调整或模块作者需要自定义 hooks，就容易回到人工维护。
 - Core 当前仍然通过模块根 `__init__.py` 加载模块；因此本轮不能简单删除该文件或要求 Core 直接改为别的入口契约。
 
@@ -25,7 +25,7 @@
 
 | 方案 | 做法 | 优点 | 缺点 |
 |---|---|---|---|
-| A. CLI 持续重写根 `__init__.py` | 每次 `add-workflow`、`add-ui` 等命令后重新生成根入口 | 现有模型改动最小 | 容易覆盖人工改动；模板升级冲突大；对已有模块很难安全合并 |
+| A. CLI 持续重写根 `__init__.py` | 每次 `workflow create`、`page create`、`data-table create` 等命令后重新生成根入口 | 现有模型改动最小 | 容易覆盖人工改动；模板升级冲突大；对已有模块很难安全合并 |
 | B. 稳定薄壳 + SDK 组装器 + 重初始化升级 | 根 `__init__.py` 固化为极薄 shim，真正的默认运行逻辑由 SDK helper 提供，可选自定义逻辑放到独立文件；旧模块升级时直接重建骨架 | 不需要改 Core；后续几乎无需维护根入口；口径单一 | 旧模块升级要重初始化并搬运业务代码 |
 | C. Core 直接按 manifest 声明加载 | Core 不再要求根 `__init__.py`，改由 `module.yaml` 指定运行入口 | 长期最干净 | 需要修改宿主契约、扫描器、模块模板与历史模块；本轮改动面过大 |
 
@@ -87,14 +87,14 @@ globals().update(export_entrypoints(__name__, __file__))
 2. `module_runtime.py.DEFAULT_WORKFLOW`
 3. `module.yaml.workflows[0].name`
 
-这样 `add-workflow` 继续只需要维护 `module.yaml`，新模块的根 `__init__.py` 无需再同步。
+这样 `workflow create` 继续只需要维护 `module.yaml`，新模块的根 `__init__.py` 无需再同步。
 
 ## 6. 边界与升级方式
 
 ### 6.1 本轮明确包含
 
 - 新增 SDK helper
-- 更新 `init-model` 脚手架模板
+- 更新 `module init` 脚手架模板
 - 明确旧模块的升级路径为按最新模板重新初始化
 - 增补设计、开发者文档与测试计划
 

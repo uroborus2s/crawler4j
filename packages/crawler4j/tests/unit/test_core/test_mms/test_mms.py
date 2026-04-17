@@ -260,6 +260,21 @@ config_defaults:
             scanner.validate(manifest, tmp_path)
 
         assert "owner/repo" in str(exc_info.value)
+
+    def test_validate_rejects_invalid_semver_version(self, tmp_path):
+        from src.core.mms.models import ModuleValidationError
+
+        manifest = ModuleManifest(
+            name="demo_module",
+            version="1.0",
+            upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
+        )
+        scanner = ModuleScanner(scan_paths=[tmp_path])
+
+        with pytest.raises(ModuleValidationError) as exc_info:
+            scanner.validate(manifest, tmp_path)
+
+        assert "语义化版本" in str(exc_info.value)
     
     def test_load_module_success(self, tmp_path):
         """测试成功加载模块。"""

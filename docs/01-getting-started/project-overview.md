@@ -60,5 +60,6 @@
 
 1. [接手入口](../02-user-guide/user-guide.md)
 2. [开发者指南总览](../03-developer-guide/index.md)
-3. [开发前准备](../03-developer-guide/02-quickstart/01-environment-setup.md)
-4. [创建第一个模块](../03-developer-guide/02-quickstart/02-create-first-module.md)
+3. [快速开始](../03-developer-guide/quickstart.md)
+4. [模块结构](../03-developer-guide/module-structure.md)
+5. [调试模块](../03-developer-guide/debugging.md)

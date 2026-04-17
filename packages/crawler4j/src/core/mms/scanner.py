@@ -21,6 +21,7 @@ from src.core.mms.models import (
     ModuleStatus,
     ModuleValidationError,
 )
+from src.core.mms.semver import is_valid_semver
 from src.utils.paths import get_builtin_modules_path, get_user_modules_path
 
 # 忽略的目录
@@ -184,7 +185,15 @@ class ModuleScanner:
         # 命名规范校验（小写字母、数字、下划线）
         if not manifest.name.replace("_", "").isalnum() or not manifest.name.islower():
             warnings.append(f"模块名 '{manifest.name}' 不符合命名规范（应为小写字母、数字、下划线）")
-        
+
+        version = str(manifest.version or "").strip()
+        if not is_valid_semver(version):
+            raise ModuleValidationError(
+                f"无效的 version: {version or '<empty>'}（必须是语义化版本）",
+                stage="VALIDATE",
+                hint="module.yaml.version 必须是合法语义化版本，如 1.2.3 或 1.2.3-rc.1",
+            )
+
         # 工作流名称唯一性
         workflow_names = [w.name for w in manifest.workflows]
         if len(workflow_names) != len(set(workflow_names)):

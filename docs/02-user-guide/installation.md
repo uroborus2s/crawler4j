@@ -34,7 +34,7 @@ uv run python -m src.ui.app
 
 应用启动时会自动：
 
-- 初始化 `config.db` 和 `state.db`
+- 初始化 `config.db`、`data.db` 和 `state.db`
 - 创建日志目录
 - 启动 REM 和 ATM 相关核心服务
 - 打开桌面 Shell
@@ -56,6 +56,7 @@ uv run python -m src.ui.app
 首次启动后，通常会看到下面这些内容：
 
 - `config.db`：系统设置和模块配置
+- `data.db`：模块数据表 schema 和 dataset records
 - `state.db`：运行态状态和任务相关数据
 - `logs/`：运行日志
 - `modules/`：正式安装模块目录
@@ -66,7 +67,7 @@ uv run python -m src.ui.app
 
 1. 应用窗口能正常打开。
 2. 应用数据目录已经创建。
-3. `config.db`、`state.db` 和 `logs/` 已出现。
+3. `config.db`、`data.db`、`state.db` 和 `logs/` 已出现。
 4. `📦 模块管理` 页面可以正常打开。
 
 如果你是仓库维护者，建议再补跑一次：

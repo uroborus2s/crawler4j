@@ -7,7 +7,7 @@
 **上游输入：** `prd.md` | `current-state-analysis.md`  
 **下游输出：** `requirements-verification.md` | `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/`  
 **关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `BUG-001`, `CR-001`, `CR-002`, `CR-004`  
-**最后更新：** 2026-04-16  
+**最后更新：** 2026-04-17  
 
 ## 1. 需求实现现状判断
 
@@ -42,7 +42,7 @@
 ### `REQ-006`
 
 - 根 `__init__.py` 已固定为托管薄壳，运行时组装逻辑收敛到 SDK 的 `ModuleAssembler`。
-- 默认工作流解析顺序已经稳定为 `context.config.workflow -> module_runtime.DEFAULT_WORKFLOW -> module.yaml.workflows[0].name`。
+- 默认工作流解析顺序已经稳定为 `context.runtime["workflow"] -> module_runtime.DEFAULT_WORKFLOW -> module.yaml.workflows[0].name`。
 - `module_runtime.py` 已收敛为标准模块文件，默认脚手架会生成；环境选择能力通过其中的 `@env_selector(...)` 回调声明，ATM“选择环境”模式不再接受规则树。
 - 本轮不再把“兼容旧模块模板”作为目标，旧模块升级路径统一为按最新脚手架重新初始化。
 

@@ -11,7 +11,10 @@
 - `crawler4j.spec`: PyInstaller 打包规格
 - `pyproject.toml`: 包元数据、依赖与入口定义
 
-workspace 级开发脚本已经统一迁到仓库根 `scripts/`，不再作为 `packages/crawler4j` 的目录内容。
+workspace 级开发脚本已经统一迁到仓库根 `scripts/`，不再作为 `packages/crawler4j` 的目录内容。当前只保留：
+
+- `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
+- `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
 
 ## 从 workspace 根目录开发
 

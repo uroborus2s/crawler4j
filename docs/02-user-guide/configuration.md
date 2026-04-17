@@ -49,9 +49,28 @@
 这些内容同样会写入 `config.db`，而不是保存在模块项目目录里。
 当前正式落点是 `config.db.module_config_entries`。
 `config_schema.json` 已不再作为正式配置入口。
+当前模块详情页的 `配置` 标签会直接提供：
+
+- 模块级 YAML 配置编辑器
+- 工作流选择器
+- 当前工作流对应的 YAML 覆盖编辑器
+- 恢复模块默认 / 恢复 Workflow 默认按钮
 
 模块运行时通过 `ctx.get_config()` 读取到的，只是这里保存的模块配置与工作流覆盖结果；
 不会再混入 `workflow`、`devel_mode`、调试参数或环境创建参数。
+
+如果模块在 `module.yaml` 中声明了 `config_defaults`：
+
+- 宿主第一次加载这个模块时，会把 `config_defaults.module` 和 `config_defaults.workflows` 初始化到 `module_config_entries`
+- 这个初始化只做一次
+- 后续模块升级、刷新、重扫不会自动重置已有配置
+- 详情页里的恢复默认按钮会读取当前 `module.yaml.config_defaults`，弹出警告确认后再覆盖对应作用域
+
+这意味着：
+
+- `module.yaml.config_defaults` 是“初始模板”
+- `config.db.module_config_entries` 才是“当前真实配置”
+- 模块运行时仍然只读数据库里的有效配置，不直接读 `module.yaml`
 
 ### 关于自定义页面的当前限制
 
@@ -128,11 +147,14 @@
 |---|---|
 | 系统设置 | `config.db` 的 `settings` 表 |
 | 模块/工作流设置 | `config.db` 的 `module_config_entries` 表 |
-| 运行态状态、KV、环境数据 | `state.db` |
+| 模块数据表 schema / records | `data.db` |
+| 运行态状态、KV、环境锁 | `state.db` |
 | 日志 | `<app-data>/logs/` |
 | 正式安装模块 | `<app-data>/modules/` |
 
 `<app-data>` 的平台路径见 [安装说明](./installation.md)。
+
+如果是从旧版本升级，需要注意：当前运行时代码不会自动把历史 `state.db.kv_store` 里的模块数据表 schema / dataset records 搬到 `data.db`。如果旧环境里仍有这类数据，需要显式迁移工具或人工导入；当前页面只会读取 `data.db`。
 
 ## 6. 最常见的配置错误
 

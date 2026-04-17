@@ -24,34 +24,32 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.1.2.dev20260326` | 当前仓库 HEAD 的未发布开发版 |
-| 根应用运行时版本 | `0.1.2.dev20260326` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.2.0` | 当前仓库 HEAD 已切到本轮正式发布目标版本 |
+| 根应用运行时版本 | `0.2.0` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.1.1` | 最新已知正式发布 |
-| SDK | `1.2.0` | 当前工作区 SDK 版本；统一到纯新配置模型，并同步脚手架与开发者文档版本基线 |
-| Contracts | `1.2.0` | 当前工作区 Contracts 版本；`TaskContext.config/runtime` 分层契约与发布元数据已同步收口 |
+| SDK | `0.2.0` | 当前工作区 SDK 版本；CLI 命令树、脚手架与开发者文档已同步到 `0.2.0` |
+| Contracts | `0.2.0` | 当前工作区 Contracts 版本；共享契约与 SDK / Core README、发布文档口径已同步收口 |
 
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前工作区已经明显领先于 `v0.1.1`，如果继续把根应用显示成 `0.1.1`，会让维护者误以为当前源码仍等同于最新正式发布。
-- 采用开发版号后，维护者可以明确区分“当前工作区”和“最近正式发布”。
+- 当前工作区已经切到 `0.2.0`，但 Git tag 仍停留在 `v0.1.1`；如果不显式分层，维护者会误以为 `0.2.0` 已正式打 tag 并发布。
+- 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 将 `packages/crawler4j/pyproject.toml` 从开发版切到目标正式版本
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.2.0`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用打对应 Git tag
+6. 为根应用补打对应 `0.2.0` Git tag 与正式 release 资产
 
 ## 5. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-03-26 | 建立根应用 / 运行时 / tag / SDK / Contracts 的统一版本治理规则 | Codex |
-| 2026-03-31 | SDK 当前口径提升到 `2.0.0`，移除 `DataService` 兼容层 | Codex |
-| 2026-04-15 | SDK `1.1.0` / Contracts `1.1.0` 当前口径统一收敛到 `TaskContext.tools` | Codex |
-| 2026-04-17 | SDK / Contracts 当前工作区版本提升到 `1.2.0`，统一包入口、依赖、脚手架与开发者文档口径 | Codex |
+| 2026-04-17 | 将根应用 / SDK / Contracts 当前源码版本与 README、release 文档统一收敛到 `0.2.0` 发布基线，并明确最近正式 tag 仍为 `v0.1.1` | Codex |
