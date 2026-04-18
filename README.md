@@ -50,10 +50,8 @@ uv run ruff check .
 # UI smoke
 uv run python scripts/smoke_test_ui.py
 
-# 构建三个包
-uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
-uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check
-uv build --package crawler4j-contracts --out-dir /tmp/crawler4j-contracts-build-check
+# 清空各自 dist 后统一构建三个包
+uv run python scripts/build_workspace_packages.py
 
 # PyInstaller 打包桌面应用
 uv run pyinstaller packages/crawler4j/crawler4j.spec
@@ -64,10 +62,11 @@ uv run pyinstaller packages/crawler4j/crawler4j.spec
 - `packages/crawler4j`: 桌面宿主、Core 运行时与 PyInstaller 打包规格
 - `packages/crawler4j-sdk`: 模块开发 SDK 与 `crawler4j` CLI
 - `packages/crawler4j-contracts`: Core / SDK / 模块共用的稳定契约
-- `scripts/`: workspace 级维护脚本，当前只保留 UI smoke 与数据库初始化/重置辅助
+- `scripts/`: workspace 级维护脚本，当前保留统一构建、UI smoke 与数据库初始化/重置辅助
 
 当前保留的脚本：
 
+- `scripts/build_workspace_packages.py`：清空各包 `dist/` 后统一执行 `uv build --package ... --out-dir ... --clear`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
 - `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
 

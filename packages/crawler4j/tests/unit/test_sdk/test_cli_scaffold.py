@@ -269,6 +269,41 @@ def test_check_full_reports_ui_import_error(
     assert "ui 包无法导入" in captured.out
 
 
+def test_check_full_rejects_lock_key_business_occupancy_conflict(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    runtime_path.write_text(
+        runtime_text.replace(
+            "# SDK-DATA-TABLES\n    return None",
+            """context.tools.call(
+        "ui.declare_data_table",
+        view_id="accounts",
+        schema={
+            "title": "账号管理",
+            "dataset": "accounts",
+            "lock_key": "phone",
+            "columns": [
+                {"key": "phone", "label": "手机号"},
+                {"key": "occupied_label", "label": "占用中"},
+            ],
+        },
+    )
+    return None""",
+        ),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "误用 lock_key" in captured.out
+
+
 def test_package_build_and_verify(module_root: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(module_root)
 

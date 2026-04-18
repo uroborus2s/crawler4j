@@ -63,6 +63,14 @@ ALLOWED_TABLE_COLUMN_KEYS = {
     "default",
 }
 ALLOWED_TABLE_COLUMN_TYPES = {"text", "number", "int", "bool", "select"}
+BUSINESS_OCCUPANCY_COLUMN_KEYS = {
+    "occupied",
+    "occupied_label",
+    "is_occupied",
+    "lock_status",
+    "lock_status_label",
+}
+BUSINESS_OCCUPANCY_COLUMN_LABELS = {"占用中", "占用状态"}
 
 
 def _validate_managed_identifier(value: str, *, field_name: str) -> str:
@@ -171,7 +179,29 @@ def _normalize_table_schema(view_id: str, schema: dict[str, Any]) -> dict[str, A
                 field_name=handler_field,
             )
 
+    _validate_lock_key_usage(normalized)
     return normalized
+
+
+def _validate_lock_key_usage(schema: dict[str, Any]) -> None:
+    if not schema.get("lock_key"):
+        return
+
+    conflicts: list[str] = []
+    for column in schema.get("columns", []):
+        if not isinstance(column, dict):
+            continue
+        key = str(column.get("key", "")).strip()
+        label = str(column.get("label", "")).strip()
+        if key in BUSINESS_OCCUPANCY_COLUMN_KEYS or label in BUSINESS_OCCUPANCY_COLUMN_LABELS:
+            conflicts.append(key or label)
+
+    if conflicts:
+        rendered = ", ".join(dict.fromkeys(conflicts))
+        raise ValueError(
+            "lock_key 只用于 Core 临时锁，不能与业务占用列同时声明；"
+            f"请删除这些列或移除 lock_key: {rendered}"
+        )
 
 
 class CoreDatabaseTools:

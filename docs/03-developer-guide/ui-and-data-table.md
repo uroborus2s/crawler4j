@@ -270,12 +270,16 @@ schema 顶层只允许这些字段:
 - `view_id`、`dataset`、handler 名都必须是 `snake_case`
 - `select` 列必须提供非空 `options`
 - `options` 只能给 `select` 列使用
+- `lock_key` 只用于 Core 管理的临时锁；它会让宿主按 KV 锁状态追加一列通用“占用中”，并在删除/改主键时做锁保护
+- 如果模块已经自己维护 `occupied` / `occupied_label` 这类业务占用字段，就不要再声明 `lock_key`
+- 当前 Core 已显式拒绝“`lock_key` + 业务占用列”同时声明；`crawler4j check full` 也会提前报错
 
 ## 新手最容易误会的点
 
 - `data-table create` 会注册入口并生成一个最小 helper，但 schema 细节仍要你自己改
 - schema 必须通过 `ui.declare_data_table` 声明，不能自己写到别的文件里
 - `dataset` 必须和 `view_id` 一致
+- `lock_key` 不是“业务占用中”开关，它表示 Core 的临时锁键
 - 当前本地数据表 hook 是同步调用链路，写成 `async def` 会直接失败
 
 想继续调试，接着看 [调试模块](debugging.md)。

@@ -29,6 +29,16 @@ def _load_version_helper(package_root: Path):
     return module
 
 
+def _load_script_module(script_name: str):
+    script_path = WORKSPACE_ROOT / "scripts" / script_name
+    module_name = f"workspace_script_{script_name.replace('.', '_')}"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_literal_module_version(package_root: Path) -> str | None:
     module_path = package_root / "src" / "__init__.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
@@ -128,6 +138,7 @@ def test_dev_scripts_live_in_workspace_root_instead_of_app_package():
 
     assert root_scripts.exists()
     assert {
+        "build_workspace_packages.py",
         "db_cli.py",
         "smoke_test_ui.py",
     }.issubset({path.name for path in root_scripts.glob("*.py")})
@@ -156,3 +167,33 @@ def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
     assert "from src.__version__ import VERSION" not in spec_text
     assert "src/main.py" not in spec_text
     assert "def get_docs_root() -> Path:" in paths_text
+
+
+def test_workspace_build_script_targets_publishable_packages_and_dist_dirs():
+    script = _load_script_module("build_workspace_packages.py")
+
+    assert [target.package for target in script.BUILD_TARGETS] == [
+        "crawler4j-sdk",
+        "crawler4j",
+        "crawler4j-contracts",
+    ]
+    assert [target.dist_dir for target in script.BUILD_TARGETS] == [
+        WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "dist",
+        WORKSPACE_ROOT / "packages" / "crawler4j" / "dist",
+        WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "dist",
+    ]
+
+
+def test_workspace_build_script_uses_uv_clear_for_each_target():
+    script = _load_script_module("build_workspace_packages.py")
+    target = script.BUILD_TARGETS[0]
+
+    assert script.build_command(target) == [
+        "uv",
+        "build",
+        "--package",
+        "crawler4j-sdk",
+        "--out-dir",
+        str(WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "dist"),
+        "--clear",
+    ]

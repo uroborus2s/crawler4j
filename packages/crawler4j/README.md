@@ -11,8 +11,9 @@
 - `crawler4j.spec`: PyInstaller 打包规格
 - `pyproject.toml`: 包元数据、依赖与入口定义
 
-workspace 级开发脚本已经统一迁到仓库根 `scripts/`，不再作为 `packages/crawler4j` 的目录内容。当前只保留：
+workspace 级开发脚本已经统一迁到仓库根 `scripts/`，不再作为 `packages/crawler4j` 的目录内容。当前保留：
 
+- `scripts/build_workspace_packages.py`：清空各包 `dist/` 后统一执行 `uv build --package ... --out-dir ... --clear`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
 - `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
 
@@ -23,7 +24,7 @@ uv sync --all-packages
 uv run python -m src.ui.app
 uv run pytest -q
 uv run python scripts/smoke_test_ui.py
-uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
+uv run python scripts/build_workspace_packages.py
 uv run pyinstaller packages/crawler4j/crawler4j.spec
 ```
 

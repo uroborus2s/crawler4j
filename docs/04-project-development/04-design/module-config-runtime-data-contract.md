@@ -154,6 +154,8 @@ ctx.state.setdefault("tasks", {})
 - 数据表 records 只能通过 `db.list_records` / `db.replace_records` 读写。
 - `view_id` 与 `dataset` 必须保持一致，由宿主统一管理。
 - schema 不是配置，不要塞进 `ctx.config`。
+- `lock_key` / `lock_scope` 只用于 Core 临时锁，不用于表达模块业务占用态。
+- 若模块已自行维护 `occupied` / `occupied_label` 等业务占用字段，不得再同时声明 `lock_key`；宿主会把它视为冲突 schema 并拒绝加载。
 
 ## 7. 短期状态与锁契约
 

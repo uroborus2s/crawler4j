@@ -22,7 +22,7 @@
 - `TC-021`: 客户端主导航现已新增 `📘 使用文档` 页面，宿主会把公开 `docs/` 资源打进 PyInstaller 包并直接展示 Markdown；当前文档中心最上面是直接打开 `01-getting-started/index.md` 的顶层文档 `开始前`，其余内容按 `使用指南 / 开发指南` 两组收口；相对 `.md` 跳转、顶层文档与树形目录导航由 `test_help_page.py`、`test_shell.py` 与 `test_packaging_config.py` 覆盖。
 - `TC-022`: 私有 GitHub 仓库现在支持双轨鉴权：桌面客户端按 `repo` 维度把 GitHub Token 加密保存到应用内，并通过模块详情页与安装弹窗维护；SDK CLI 仍支持 `--github-token` 和环境变量；宿主 release service 会优先使用显式传入 token，其次使用 repo 维度的已保存凭据，并继续以鉴权请求下载私有 Release 资产；覆盖见 `tests/unit/test_core/test_mms/test_github_credentials.py`、`tests/unit/test_core/test_mms/test_module_install_dialog.py`、`tests/unit/test_core/test_mms/test_module_detail_page.py`、`tests/unit/test_core/test_mms/test_module_list_widget.py`、`tests/unit/test_core/test_mms/test_release_service.py` 与 `tests/unit/test_sdk/test_cli_host_release.py`.
 - `TC-023`: 模块安装弹窗的本地 ZIP / GitHub 源页签现在使用左对齐纵向字段布局，且“记住 Token”勾选文案明确区分“绑定到安装包声明仓库”和“绑定到当前输入仓库”；覆盖见 `tests/unit/test_core/test_mms/test_module_install_dialog.py`.
-- Workspace root `scripts/` is now intentionally reduced to `db_cli.py` and `smoke_test_ui.py`; legacy local debug and icon-generation helpers are no longer treated as maintained assets.
+- Workspace root `scripts/` now keeps `build_workspace_packages.py`, `db_cli.py`, and `smoke_test_ui.py` as the maintained helper set; legacy local debug and icon-generation helpers are no longer treated as maintained assets.
 
 Current gaps:
 

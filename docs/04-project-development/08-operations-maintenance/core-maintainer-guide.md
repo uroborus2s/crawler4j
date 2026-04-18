@@ -31,7 +31,7 @@
 7. 当前默认质量门仍以 `uv run pytest -q`、`uv run ruff check .`、UI smoke、build 验证为主。
 8. 当前最大剩余风险不是文档，而是 `ctrip` 真实站点 E2E 仍未回放。
 9. 客户端下拉框已统一走 `src.ui.components.combo_box.StyledComboBox`；新增 UI 时不要再直接实例化原生 `QComboBox`，也不要在页面级样式里覆盖整套 `QComboBox` 外观。
-10. 仓库根 `scripts/` 当前只保留 `smoke_test_ui.py` 和 `db_cli.py` 两个维护脚本；旧的本地调试壳与图标生成脚本已清理。
+10. 仓库根 `scripts/` 当前保留 `build_workspace_packages.py`、`smoke_test_ui.py` 和 `db_cli.py` 三个维护脚本；旧的本地调试壳与图标生成脚本已清理。
 11. 当前全系统日志已收口到一个统一日志服务：Core `logger`、模块 `ctx.logger` 和标准库 `logging` 都应汇入同一条链路；`系统设置 -> 资源` 修改日志级别/保留天数后应立即热更新，而不是等待重启。
 
 ## 3. 日常开发最常用命令
@@ -43,7 +43,7 @@ uv run pytest -q
 uv run ruff check .
 uv run python scripts/smoke_test_ui.py
 uv run python -m crawler4j_sdk.cli.commands --help
-uv build --package crawler4j --out-dir /tmp/crawler4j-build-check
+uv run python scripts/build_workspace_packages.py
 ```
 
 ## 4. 改动某块代码时要同步什么

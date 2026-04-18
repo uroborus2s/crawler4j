@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import argparse
 import importlib
+import inspect
 import json
 import os
 import re
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from crawler4j_contracts import TaskContext
 
 from crawler4j_sdk._version import get_compatible_dependency_spec
 from crawler4j_sdk.cli.templates import (
@@ -51,6 +53,14 @@ SEMVER_RE = re.compile(
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 UI_ENTRY_RE = re.compile(r"^ui:[A-Za-z_][A-Za-z0-9_]*$")
 GITHUB_TOKEN_ENV_VARS = ("CRAWLER4J_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
+LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_KEYS = {
+    "occupied",
+    "occupied_label",
+    "is_occupied",
+    "lock_status",
+    "lock_status_label",
+}
+LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_LABELS = {"占用中", "占用状态"}
 
 
 class CLIError(RuntimeError):
@@ -590,10 +600,13 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
                 f"workflows/{workflow_name}.py 无法导入: {exc.__class__.__name__}: {exc}"
             )
 
+    module_runtime = None
     try:
-        importlib.import_module(f"{module_root.name}.module_runtime")
+        module_runtime = importlib.import_module(f"{module_root.name}.module_runtime")
     except Exception as exc:  # pragma: no cover - failure path
         errors.append(f"module_runtime.py 无法导入: {exc.__class__.__name__}: {exc}")
+    else:
+        errors.extend(_validate_declared_data_tables(module_root, module_runtime))
 
     ui_extension = manifest.get("ui_extension") or {}
     if isinstance(ui_extension, dict):
@@ -614,6 +627,133 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
             errors.append(f"工作流未被 assembler 发现: {workflow_name}")
 
     return errors
+
+
+def _collect_lock_key_conflicts(schema: dict[str, Any]) -> list[str]:
+    raw_columns = schema.get("columns", [])
+    if not isinstance(raw_columns, list):
+        return []
+
+    conflicts: list[str] = []
+    for item in raw_columns:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key", "")).strip()
+        label = str(item.get("label", "")).strip()
+        if key in LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_KEYS or label in LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_LABELS:
+            conflicts.append(key or label)
+    return list(dict.fromkeys(conflicts))
+
+
+def _validate_lock_key_usage_for_sdk(view_id: str, schema: dict[str, Any]) -> None:
+    lock_key = str(schema.get("lock_key", "") or "").strip()
+    if not lock_key:
+        return
+
+    conflicts = _collect_lock_key_conflicts(schema)
+    if conflicts:
+        rendered = ", ".join(conflicts)
+        raise CLIError(
+            f"数据表 {view_id} 误用 lock_key：lock_key 只用于 Core 临时锁，"
+            f"不能与业务占用列同时声明；请删除这些列或移除 lock_key: {rendered}"
+        )
+
+
+class _DeclareUICheckLogger:
+    def debug(self, message: str, environment_id: int | None = None) -> None:
+        return None
+
+    def info(self, message: str, environment_id: int | None = None) -> None:
+        return None
+
+    def warning(self, message: str, environment_id: int | None = None) -> None:
+        return None
+
+    def error(self, message: str, environment_id: int | None = None) -> None:
+        return None
+
+    def exception(self, message: str, environment_id: int | None = None) -> None:
+        return None
+
+
+class _DeclareUICheckTools:
+    def __init__(self) -> None:
+        self._schemas: dict[str, dict[str, Any]] = {}
+        self._datasets: dict[str, list[dict[str, Any]]] = {}
+        self._states: dict[str, Any] = {}
+
+    def has_tool(self, tool_name: str) -> bool:
+        return tool_name in {
+            "ui.declare_data_table",
+            "ui.get_data_table",
+            "db.list_records",
+            "db.replace_records",
+            "db.acquire_lock",
+            "db.release_lock",
+            "db.is_locked",
+            "db.get_state",
+            "db.set_state",
+            "db.exists_state",
+        }
+
+    def list_tools(self) -> list[Any]:
+        return []
+
+    def call(self, tool_name: str, /, **kwargs: Any) -> Any:
+        if tool_name == "ui.declare_data_table":
+            view_id = str(kwargs.get("view_id", "")).strip()
+            schema = dict(kwargs.get("schema") or {})
+            _validate_lock_key_usage_for_sdk(view_id, schema)
+            self._schemas[view_id] = schema
+            return True
+        if tool_name == "ui.get_data_table":
+            return dict(self._schemas.get(str(kwargs.get("view_id", "")).strip(), {}))
+        if tool_name == "db.list_records":
+            dataset = str(kwargs.get("dataset", "")).strip()
+            return [dict(row) for row in self._datasets.get(dataset, [])]
+        if tool_name == "db.replace_records":
+            dataset = str(kwargs.get("dataset", "")).strip()
+            records = kwargs.get("records") or []
+            self._datasets[dataset] = [dict(row) for row in records if isinstance(row, dict)]
+            return True
+        if tool_name == "db.acquire_lock":
+            return True
+        if tool_name == "db.release_lock":
+            return True
+        if tool_name == "db.is_locked":
+            return False
+        if tool_name == "db.get_state":
+            return self._states.get(str(kwargs.get("key", "")).strip())
+        if tool_name == "db.set_state":
+            self._states[str(kwargs.get("key", "")).strip()] = kwargs.get("value")
+            return True
+        if tool_name == "db.exists_state":
+            return str(kwargs.get("key", "")).strip() in self._states
+        raise KeyError(f"Unknown check tool: {tool_name}")
+
+
+def _validate_declared_data_tables(module_root: Path, module_runtime: Any) -> list[str]:
+    declare_ui = getattr(module_runtime, "declare_ui", None)
+    if declare_ui is None:
+        return []
+    if inspect.iscoroutinefunction(declare_ui):
+        return ["module_runtime.declare_ui 必须是同步函数"]
+
+    context = TaskContext(
+        env_id=0,
+        task_name=module_root.name,
+        config={},
+        logger=_DeclareUICheckLogger(),
+        tools=_DeclareUICheckTools(),
+        runtime={},
+    )
+    try:
+        declare_ui(context)
+    except CLIError as exc:
+        return [str(exc)]
+    except Exception as exc:
+        return [f"declare_ui 校验失败: {exc.__class__.__name__}: {exc}"]
+    return []
 
 
 def _run_check(level: str, module_root: Path) -> int:

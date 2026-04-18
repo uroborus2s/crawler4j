@@ -201,6 +201,25 @@ def test_ui_tools_reject_unmanaged_schema_fields():
         )
 
 
+def test_ui_tools_reject_lock_key_with_business_occupancy_column():
+    caps = build_runtime_capabilities("demo_module")
+
+    with pytest.raises(ValueError, match="lock_key"):
+        caps.tools.call(
+            "ui.declare_data_table",
+            view_id="accounts",
+            schema={
+                "title": "示例账号",
+                "dataset": "accounts",
+                "lock_key": "phone",
+                "columns": [
+                    {"key": "phone", "label": "手机号"},
+                    {"key": "occupied_label", "label": "占用中"},
+                ],
+            },
+        )
+
+
 def test_captcha_tool_matches_slider_via_sinanz(monkeypatch):
     calls: list[dict[str, object]] = []
 

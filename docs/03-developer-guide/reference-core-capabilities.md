@@ -225,6 +225,8 @@ schema 顶层只允许这些字段:
 
 - 只有 `select` 列允许配置 `options`
 - `select` 列必须提供非空 `options`
+- `lock_key` 只用于 Core 临时锁，不用于表达业务占用态
+- 已声明 `lock_key` 时，不要再声明 `occupied` / `occupied_label` 等业务占用列；Core 会直接拒绝这类 schema
 
 ### `ui.get_data_table`
 
