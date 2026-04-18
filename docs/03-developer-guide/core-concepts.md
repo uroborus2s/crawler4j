@@ -110,8 +110,8 @@
 | 读配置 | `ctx.get_config()` | 直接读 `module.yaml` 或数据库 |
 | 读执行参数 | `ctx.runtime["params"]` | 自己拼接配置和 job 输入 |
 | 暂存单次执行状态 | `ctx.state` | `db.set_state` 或全局变量 |
-| 保存当前快照 | `db.list_records` / `db.replace_records` | `ctx.state` |
-| 记录历史事件 | `db.append_event` / `db.query_events` | `db.replace_records` / `core:data_table` |
+| 保存快照数据 | `db.list_records` / `db.replace_records` | `ctx.state` |
+| 追加审计事件 | `db.append_event` / `db.query_events` | `db.replace_records` / `core:data_table` |
 | 保存轻状态和锁 | `db.get_state` / `db.set_state` / `db.acquire_lock` | `ctx.config` |
 
 ## 术语表

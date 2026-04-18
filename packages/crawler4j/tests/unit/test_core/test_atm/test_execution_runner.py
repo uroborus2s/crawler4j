@@ -181,8 +181,10 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
                     if "page" in candidate.capabilities:
                         context.tools.call(
                             "db.append_event",
+                            dataset="runtime_events",
                             event_type="hook.select_env",
-                            summary="select_env",
+                            entity_key=candidate.env_id,
+                            created_at=200,
                             payload={"candidate_ids": candidate_ids, "selected_env_id": candidate.env_id},
                         )
                         return candidate.env_id
@@ -192,8 +194,9 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
             async def prepare_env(context: TaskContext):
                 context.tools.call(
                     "db.append_event",
+                    dataset="runtime_events",
                     event_type="hook.prepare",
-                    summary="prepare_env",
+                    created_at=100,
                     payload={"selector": context.runtime.get("selector_name")},
                 )
                 return {"wait_timeout": 42}
@@ -203,8 +206,10 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
                 context.state["hook_trace"] = ["init_env"]
                 context.tools.call(
                     "db.append_event",
+                    dataset="runtime_events",
                     event_type="hook.init",
-                    summary="init_env",
+                    entity_key=context.env_id,
+                    created_at=300,
                     payload={"env_id": context.env_id},
                 )
 
@@ -215,8 +220,9 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
                 context.state["hook_trace"] = hook_trace
                 context.tools.call(
                     "db.append_event",
+                    dataset="runtime_events",
                     event_type="hook.before",
-                    summary="before_run",
+                    created_at=400,
                     payload={"workflow": context.runtime.get("workflow")},
                 )
 
@@ -224,8 +230,9 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
             async def on_success(context: TaskContext, result: TaskResult):
                 context.tools.call(
                     "db.append_event",
+                    dataset="runtime_events",
                     event_type="hook.success",
-                    summary="on_success",
+                    created_at=600,
                     payload={"title": result.data.get("title")},
                 )
 
@@ -233,8 +240,9 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
             async def on_cleanup(context: TaskContext):
                 context.tools.call(
                     "db.append_event",
+                    dataset="runtime_events",
                     event_type="hook.cleanup",
-                    summary="on_cleanup",
+                    created_at=700,
                     payload={
                         "final_status": context.runtime.get("final_status"),
                         "env_action": (context.runtime.get("env_action") or {}).get("action"),
@@ -266,10 +274,10 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
 
                     ctx.tools.call(
                         "db.append_event",
+                        dataset="runtime_events",
                         event_type="task.capture",
-                        entity_type="page",
                         entity_key=ctx.page.url,
-                        summary="captured page",
+                        created_at=500,
                         payload={"title": title, "html_length": len(html)},
                     )
 
@@ -830,7 +838,7 @@ async def test_execution_runner_runs_real_module_with_hooks_selectors_and_audit_
     rem.release_keep_alive.assert_not_awaited()
     rem.destroy_env.assert_not_awaited()
 
-    events = get_module_data_store().query_audit_events(module_name, order="asc")
+    events = get_module_data_store().query_audit_events(module_name, "runtime_events", order="asc")
     assert [event["event_type"] for event in events] == [
         "hook.prepare",
         "hook.select_env",
@@ -844,7 +852,7 @@ async def test_execution_runner_runs_real_module_with_hooks_selectors_and_audit_
         "candidate_ids": [env.id],
         "selected_env_id": env.id,
     }
-    assert events[4]["entity_type"] == "page"
+    assert events[4]["dataset_name"] == "runtime_events"
     assert events[4]["entity_key"] == "https://example.com/runtime"
     assert events[4]["payload"] == {
         "title": "Module Runtime Title",

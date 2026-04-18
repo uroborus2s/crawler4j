@@ -223,39 +223,56 @@ class CoreDatabaseTools:
 
     def append_event(
         self,
-        *,
+        dataset: str,
         event_type: str,
-        payload: Any = None,
-        entity_type: str | None = None,
+        *,
         entity_key: str | None = None,
-        summary: str | None = None,
+        run_id: str | None = None,
+        previous_status: str | None = None,
+        next_status: str | None = None,
+        result: str | None = None,
+        reason: str | None = None,
+        payload: dict[str, Any] | None = None,
         created_at: int | None = None,
-    ) -> dict[str, Any]:
-        return self._data_store.append_audit_event(
+    ) -> bool:
+        self._data_store.append_audit_event(
             self._module_name,
-            event_type=event_type,
-            payload=payload,
-            entity_type=entity_type,
-            entity_key=entity_key,
-            summary=summary,
-            created_at=created_at,
+            dataset,
+            {
+                "entity_key": entity_key,
+                "event_type": event_type,
+                "run_id": run_id,
+                "previous_status": previous_status,
+                "next_status": next_status,
+                "result": result,
+                "reason": reason,
+                "payload": dict(payload or {}),
+                "created_at": created_at,
+            },
         )
+        return True
 
     def query_events(
         self,
+        dataset: str,
         *,
-        event_type: str | None = None,
-        entity_type: str | None = None,
         entity_key: str | None = None,
+        event_type: str | None = None,
+        run_id: str | None = None,
+        start_at: int | None = None,
+        end_at: int | None = None,
         limit: int = 100,
         offset: int = 0,
         order: str = "desc",
     ) -> list[dict[str, Any]]:
         return self._data_store.query_audit_events(
             self._module_name,
-            event_type=event_type,
-            entity_type=entity_type,
+            dataset,
             entity_key=entity_key,
+            event_type=event_type,
+            run_id=run_id,
+            start_at=start_at,
+            end_at=end_at,
             limit=limit,
             offset=offset,
             order=order,
@@ -527,7 +544,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         self._register("db.list_records", "读取模块数据集", db_tools.list_records)
         self._register("db.replace_records", "全量覆盖模块数据集", db_tools.replace_records)
         self._register("db.append_event", "追加模块审计事件", db_tools.append_event)
-        self._register("db.query_events", "查询模块审计事件历史", db_tools.query_events)
+        self._register("db.query_events", "查询模块审计事件", db_tools.query_events)
         self._register("db.acquire_lock", "获取模块幂等锁", db_tools.acquire_lock)
         self._register("db.release_lock", "释放模块幂等锁", db_tools.release_lock)
         self._register("db.is_locked", "查询模块锁状态", db_tools.is_locked)

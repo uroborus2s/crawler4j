@@ -28,8 +28,8 @@ ctx.tools.call(...)
 |---|---|---|---|
 | `db.list_records` | 否 | 读取业务数据集 | `list[dict]` |
 | `db.replace_records` | 否 | 全量覆盖业务数据集 | `bool` |
-| `db.append_event` | 否 | 追加审计事件历史 | `dict` |
-| `db.query_events` | 否 | 查询审计事件历史 | `list[dict]` |
+| `db.append_event` | 否 | 追加模块审计事件 | `bool` |
+| `db.query_events` | 否 | 查询模块审计事件 | `list[dict]` |
 | `db.acquire_lock` | 否 | 获取互斥锁 | `bool` |
 | `db.release_lock` | 否 | 释放互斥锁 | `bool` |
 | `db.is_locked` | 否 | 查询锁状态 | `bool` |
@@ -44,6 +44,11 @@ ctx.tools.call(...)
 | `captcha.match_click_targets` | 否 | 识别点选验证码 | `ClickCaptchaMatchResult` |
 
 ## 数据工具
+
+先记住一个大原则：
+
+- `db.list_records` / `db.replace_records` = 快照型当前状态
+- `db.append_event` / `db.query_events` = append-only 审计历史
 
 ### `db.list_records`
 
@@ -102,62 +107,70 @@ ctx.tools.call("db.replace_records", dataset="hotels", records=rows)
 ### `db.append_event`
 
 ```python
-event = ctx.tools.call(
+ok = ctx.tools.call(
     "db.append_event",
-    event_type="status.changed",
-    entity_type="account",
-    entity_key="acc-001",
-    summary="账号状态切换为 active",
-    payload={"before": "new", "after": "active"},
+    dataset="account_events",
+    event_type="status_changed",
+    entity_key="13800000001",
+    previous_status="active",
+    next_status="blocked",
+    payload={"reason": "risk_control"},
 )
 ```
 
-适合放:
+适用场景:
 
-- 状态流转
-- 人工确认、重试、中止等操作痕迹
-- 外部系统回调、关键动作日志
+- 记录账号状态流转
+- 写入运行留痕
+- 保存 append-only 审计事件
 
-不适合放:
+不适合:
 
-- 当前可编辑记录列表
-- 需要 `core:data_table` 直接承载的当前快照
+- 回写当前快照列表
+- 覆盖历史事件
+- 充当通用 CRUD 表
 
-使用约束:
+当前签名固定为：
 
-- 这条通道只服务 append-only 历史，不要把它当成可回写 dataset
-- 当前签名固定为 `event_type`、`payload`、`entity_type`、`entity_key`、`summary`、`created_at`
-- 返回值是单条已落库事件，包含 `id`、`module_name`、`event_type`、`entity_type`、`entity_key`、`summary`、`payload`、`created_at`
+- `dataset`
+- `event_type`
+- `entity_key`
+- `run_id`
+- `previous_status`
+- `next_status`
+- `result`
+- `reason`
+- `payload`
+- `created_at`
 
 ### `db.query_events`
 
 ```python
 events = ctx.tools.call(
     "db.query_events",
-    entity_type="account",
-    entity_key="acc-001",
+    dataset="account_events",
+    entity_key="13800000001",
+    event_type="status_changed",
     limit=20,
 )
 ```
 
-适合:
+适用场景:
 
-- 按业务键回看历史
-- 给代码型页面、调试输出或导出逻辑提供事件时间线
+- 查询某个账号的历史轨迹
+- 按事件类型筛选历史记录
+- 按时间范围拉取运行留痕
 
-不适合:
+返回结果按时间排序，支持：
 
-- 替代当前 dataset 快照读取
-- 充当 `core:data_table` 的 records 数据源
-
-当前支持的查询参数:
-
-- `event_type`
-- `entity_type`
 - `entity_key`
+- `event_type`
+- `run_id`
+- `start_at`
+- `end_at`
 - `limit`
 - `offset`
-- `order`，仅支持 `asc` / `desc`
+- `order`
 
 ### `db.get_state` / `db.set_state` / `db.exists_state`
 

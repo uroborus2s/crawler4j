@@ -28,3 +28,5 @@
   状态：DONE | 负责人：Gemini | 预估：1.5 人/天 | 关联：`REQ-003`, `REQ-006`, `NFR-004`
 - `TASK-021-add-signal-driven-confirmation-panel` TASK-021 建立 ATM 信号驱动的结构化确认面板与客户端确认闭环
   状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`REQ-007`, `CR-004`
+- `TASK-022-add-module-audit-event-storage-tools` TASK-022 新增模块审计事件存储工具链
+  状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`REQ-008`, `CR-008`

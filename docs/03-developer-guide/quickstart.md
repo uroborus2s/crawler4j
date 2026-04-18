@@ -174,7 +174,8 @@ class FetchHotelsTask(TaskScript):
 
 这里的两个工具名是宿主稳定契约，不是你自己发明的字符串:
 
-- `db.replace_records`：同步写入数据集
+- `db.replace_records`：同步写入快照数据集
+- `db.append_event`：追加审计事件
 - `ui.declare_data_table`：同步声明托管数据表 schema
 
 这段示例故意只写“当前酒店列表快照”。如果你还要记录“这次抓取发生了什么”，历史应单独走审计事件通道，不要把日志行混进 `hotels` dataset，也不要指望 `core:data_table` 直接充当事件流水表。

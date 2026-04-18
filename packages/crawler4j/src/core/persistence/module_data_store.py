@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import Any
 
 from src.core.persistence.database import DATA_DB, get_connection
@@ -21,15 +22,26 @@ def _normalize_schema(raw: Any) -> dict[str, Any]:
     return dict(raw)
 
 
-def _normalize_entity_token(raw: Any) -> str:
-    return str(raw or "").strip()
+def _normalize_payload(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    return dict(raw)
 
 
-def _normalize_event_type(raw: Any) -> str:
-    normalized = str(raw or "").strip()
-    if not normalized:
-        raise ValueError("event_type 不能为空")
-    return normalized
+def _normalize_text(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+def _normalize_timestamp(raw: Any) -> int:
+    if raw is None:
+        return int(time.time())
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return int(time.time())
 
 
 class ModuleDataStore:
@@ -73,6 +85,130 @@ class ModuleDataStore:
             return None
         return _normalize_records(json.loads(row["records_json"]))
 
+    def _append_audit_event_row(
+        self,
+        module_name: str,
+        dataset_name: str,
+        event: dict[str, Any],
+    ) -> str:
+        event_id = _normalize_text(event.get("id")) or str(uuid.uuid4())
+        payload = _normalize_payload(event.get("payload"))
+        created_at = _normalize_timestamp(event.get("created_at"))
+        with get_connection(DATA_DB) as conn:
+            conn.execute(
+                """
+                INSERT INTO module_audit_events (
+                    id,
+                    module_name,
+                    dataset_name,
+                    entity_key,
+                    event_type,
+                    run_id,
+                    previous_status,
+                    next_status,
+                    result,
+                    reason,
+                    payload_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    module_name,
+                    dataset_name,
+                    _normalize_text(event.get("entity_key")),
+                    _normalize_text(event.get("event_type")) or "event",
+                    _normalize_text(event.get("run_id")),
+                    _normalize_text(event.get("previous_status")),
+                    _normalize_text(event.get("next_status")),
+                    _normalize_text(event.get("result")),
+                    _normalize_text(event.get("reason")),
+                    json.dumps(payload, ensure_ascii=False),
+                    created_at,
+                ),
+            )
+        return event_id
+
+    def _query_audit_event_rows(
+        self,
+        module_name: str,
+        dataset_name: str,
+        *,
+        entity_key: str | None = None,
+        event_type: str | None = None,
+        run_id: str | None = None,
+        start_at: int | None = None,
+        end_at: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        order: str = "desc",
+    ) -> list[dict[str, Any]]:
+        clauses = ["module_name = ?", "dataset_name = ?"]
+        params: list[Any] = [module_name, dataset_name]
+
+        if entity_key:
+            clauses.append("entity_key = ?")
+            params.append(entity_key)
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        if run_id:
+            clauses.append("run_id = ?")
+            params.append(run_id)
+        if start_at is not None:
+            clauses.append("created_at >= ?")
+            params.append(int(start_at))
+        if end_at is not None:
+            clauses.append("created_at <= ?")
+            params.append(int(end_at))
+
+        direction = "ASC" if str(order).lower() == "asc" else "DESC"
+        normalized_limit = max(int(limit), 1)
+        normalized_offset = max(int(offset), 0)
+        params.extend([normalized_limit, normalized_offset])
+
+        query = f"""
+            SELECT
+                id,
+                module_name,
+                dataset_name,
+                entity_key,
+                event_type,
+                run_id,
+                previous_status,
+                next_status,
+                result,
+                reason,
+                payload_json,
+                created_at
+            FROM module_audit_events
+            WHERE {" AND ".join(clauses)}
+            ORDER BY created_at {direction}, id {direction}
+            LIMIT ? OFFSET ?
+        """
+
+        with get_connection(DATA_DB) as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+
+        return [
+            {
+                "id": row["id"],
+                "module_name": row["module_name"],
+                "dataset_name": row["dataset_name"],
+                "entity_key": row["entity_key"],
+                "event_type": row["event_type"],
+                "run_id": row["run_id"],
+                "previous_status": row["previous_status"],
+                "next_status": row["next_status"],
+                "result": row["result"],
+                "reason": row["reason"],
+                "payload": _normalize_payload(json.loads(row["payload_json"])),
+                "created_at": int(row["created_at"]),
+            }
+            for row in rows
+        ]
+
     def _write_view_row(self, module_name: str, view_id: str, schema: dict[str, Any]) -> bool:
         now = int(time.time())
         with get_connection(DATA_DB) as conn:
@@ -108,120 +244,47 @@ class ModuleDataStore:
             return None
         return _normalize_schema(json.loads(row["schema_json"]))
 
-    def append_audit_event(
-        self,
-        module_name: str,
-        *,
-        event_type: str,
-        payload: Any = None,
-        entity_type: str | None = None,
-        entity_key: str | None = None,
-        summary: str | None = None,
-        created_at: int | None = None,
-    ) -> dict[str, Any]:
-        normalized_event_type = _normalize_event_type(event_type)
-        now = int(created_at) if created_at is not None else int(time.time())
-        payload_json = json.dumps(payload, ensure_ascii=False)
-
-        with get_connection(DATA_DB) as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO module_audit_events (
-                    module_name,
-                    event_type,
-                    entity_type,
-                    entity_key,
-                    summary,
-                    payload_json,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    module_name,
-                    normalized_event_type,
-                    _normalize_entity_token(entity_type),
-                    _normalize_entity_token(entity_key),
-                    str(summary or "").strip(),
-                    payload_json,
-                    now,
-                ),
-            )
-            event_id = int(cursor.lastrowid)
-
-        return {
-            "id": event_id,
-            "module_name": module_name,
-            "event_type": normalized_event_type,
-            "entity_type": _normalize_entity_token(entity_type),
-            "entity_key": _normalize_entity_token(entity_key),
-            "summary": str(summary or "").strip(),
-            "payload": payload,
-            "created_at": now,
-        }
-
-    def query_audit_events(
-        self,
-        module_name: str,
-        *,
-        event_type: str | None = None,
-        entity_type: str | None = None,
-        entity_key: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
-        order: str = "desc",
-    ) -> list[dict[str, Any]]:
-        normalized_limit = max(int(limit), 0)
-        normalized_offset = max(int(offset), 0)
-        normalized_order = "ASC" if str(order or "").strip().lower() == "asc" else "DESC"
-        if normalized_limit == 0:
-            return []
-
-        clauses = ["module_name = ?"]
-        params: list[Any] = [module_name]
-
-        if event_type is not None and str(event_type).strip():
-            clauses.append("event_type = ?")
-            params.append(_normalize_event_type(event_type))
-        if entity_type is not None and str(entity_type).strip():
-            clauses.append("entity_type = ?")
-            params.append(_normalize_entity_token(entity_type))
-        if entity_key is not None and str(entity_key).strip():
-            clauses.append("entity_key = ?")
-            params.append(_normalize_entity_token(entity_key))
-
-        sql = f"""
-            SELECT id, module_name, event_type, entity_type, entity_key, summary, payload_json, created_at
-            FROM module_audit_events
-            WHERE {' AND '.join(clauses)}
-            ORDER BY created_at {normalized_order}, id {normalized_order}
-            LIMIT ? OFFSET ?
-        """
-        params.extend([normalized_limit, normalized_offset])
-
-        with get_connection(DATA_DB) as conn:
-            rows = conn.execute(sql, params).fetchall()
-
-        return [
-            {
-                "id": int(row["id"]),
-                "module_name": str(row["module_name"]),
-                "event_type": str(row["event_type"]),
-                "entity_type": str(row["entity_type"] or ""),
-                "entity_key": str(row["entity_key"] or ""),
-                "summary": str(row["summary"] or ""),
-                "payload": json.loads(row["payload_json"]),
-                "created_at": int(row["created_at"]),
-            }
-            for row in rows
-        ]
-
     def read_dataset(self, module_name: str, dataset_name: str) -> list[dict[str, Any]]:
         records = self._read_dataset_row(module_name, dataset_name)
         return records if records is not None else []
 
     def write_dataset(self, module_name: str, dataset_name: str, records: list[dict[str, Any]]) -> bool:
         return self._write_dataset_row(module_name, dataset_name, _normalize_records(records))
+
+    def append_audit_event(
+        self,
+        module_name: str,
+        dataset_name: str,
+        event: dict[str, Any],
+    ) -> str:
+        return self._append_audit_event_row(module_name, dataset_name, dict(event or {}))
+
+    def query_audit_events(
+        self,
+        module_name: str,
+        dataset_name: str,
+        *,
+        entity_key: str | None = None,
+        event_type: str | None = None,
+        run_id: str | None = None,
+        start_at: int | None = None,
+        end_at: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        order: str = "desc",
+    ) -> list[dict[str, Any]]:
+        return self._query_audit_event_rows(
+            module_name,
+            dataset_name,
+            entity_key=entity_key,
+            event_type=event_type,
+            run_id=run_id,
+            start_at=start_at,
+            end_at=end_at,
+            limit=limit,
+            offset=offset,
+            order=order,
+        )
 
     def read_data_table_schema(self, module_name: str, view_id: str) -> dict[str, Any]:
         schema = self._read_view_row(module_name, view_id)
@@ -241,13 +304,13 @@ class ModuleDataStore:
             changed = bool(cursor.rowcount) or changed
 
             cursor = conn.execute(
-                "DELETE FROM module_data_table_views WHERE module_name = ?",
+                "DELETE FROM module_audit_events WHERE module_name = ?",
                 (module_name,),
             )
             changed = bool(cursor.rowcount) or changed
 
             cursor = conn.execute(
-                "DELETE FROM module_audit_events WHERE module_name = ?",
+                "DELETE FROM module_data_table_views WHERE module_name = ?",
                 (module_name,),
             )
             changed = bool(cursor.rowcount) or changed

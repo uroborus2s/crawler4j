@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `BUG-013`, `CR-005`  
-**最后更新：** 2026-04-17
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `BUG-013`, `CR-005`, `CR-008`
+**最后更新：** 2026-04-18
 
 ## `API-001` Root App Entry Contract
 
@@ -52,11 +52,27 @@
 | 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
 | 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
-| 持久业务数据 | `data.db.module_datasets` 与 `data.db.module_data_table_views`，统一通过 `db.*` / `ui.declare_data_table` 访问 |
+| 快照型业务数据 | `data.db.module_datasets` 与 `data.db.module_data_table_views`，统一通过 `db.list_records` / `db.replace_records` / `ui.declare_data_table` 访问 |
+| 事件型业务数据 | `data.db.module_audit_events`，统一通过 `db.append_event` / `db.query_events` 访问 |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
 | 当前实现说明 | 当前运行时代码不包含旧 `state.db.kv_store` 模块表数据自动迁移逻辑；旧数据需要显式迁移或人工导入 |
 | 关联文档 | `module-config-runtime-data-contract.md` |
 | 关联项 | `CR-003` |
+
+## `API-006` Module Audit Event Contract
+
+| 项目 | 内容 |
+|---|---|
+| 存储表 | `data.db.module_audit_events` |
+| 写入接口 | `ctx.tools.call("db.append_event", ...)` |
+| 查询接口 | `ctx.tools.call("db.query_events", ...)` |
+| 数据语义 | append-only 审计事件，不再按整包 JSON 覆盖历史 |
+| 支持字段 | `dataset`, `event_type`, `entity_key`, `run_id`, `previous_status`, `next_status`, `result`, `reason`, `payload`, `created_at` |
+| 查询维度 | `dataset / entity_key / event_type / run_id / time range / limit / offset / order` |
+| UI 边界 | `core:data_table` 继续只服务快照型 dataset，不承担审计事件编辑 |
+| 当前范围 | 已提供独立存储与查询能力；retention / archive / 自动迁移脚本暂未纳入 |
+| 关联文档 | `module-config-runtime-data-contract.md`, `reference-core-capabilities.md` |
+| 关联项 | `REQ-008`, `CR-008` |
 
 ## `API-003` SDK / Contracts Package Contract
 
@@ -99,3 +115,4 @@
 | 2026-04-16 | 补记 `TaskSignal.wait_for_confirmation` 的结构化确认面板协议、任务快照持久化与 `task.signal` 事件 | Codex |
 | 2026-04-16 | 补记 `ModuleAssembler` 发现错误可见性，以及 DevLink 普通执行的一次性 reload 语义 | Codex |
 | 2026-04-17 | 增补 `API-005`，收口模块配置、运行态、共享内存与数据表契约 | Codex |
+| 2026-04-18 | 新增 `API-006`，将模块快照数据与审计事件拆成两条正式持久化契约 | Codex |

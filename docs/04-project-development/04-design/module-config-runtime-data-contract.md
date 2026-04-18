@@ -6,7 +6,7 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `module-boundaries.md` | `api-design.md` | 当前 `TaskContext` / MMS / ATM / Debug 实现  
 **下游输出：** `docs/03-developer-guide/core-concepts.md` | `docs/03-developer-guide/build-modules.md` | `docs/03-developer-guide/reference-core-capabilities.md` | `.factory/memory/api.summary.md`  
-**关联 ID：** `API-005`, `REQ-002`, `REQ-003`, `REQ-006`, `CR-003`  
+**关联 ID：** `API-005`, `API-006`, `REQ-002`, `REQ-003`, `REQ-006`, `REQ-008`, `CR-003`, `CR-008`
 **最后更新：** 2026-04-18
 
 ## 1. 设计目标
@@ -139,13 +139,17 @@ ctx.state.setdefault("tasks", {})
 ### 6.1 快照数据位置
 
 - `ui.declare_data_table` 声明的 schema 持久化到 `data.db.module_data_table_views`
-- `db.list_records` / `db.replace_records` 读写的 records 持久化到 `data.db.module_datasets`
+- `db.list_records` / `db.replace_records` 读写的快照型 records 持久化到 `data.db.module_datasets`
+- `db.append_event` / `db.query_events` 读写的审计事件持久化到 `data.db.module_audit_events`
 
-### 6.2 审计事件通道的目标边界
+### 6.2 快照数据与审计事件语义
 
-- 审计事件历史与快照数据应该分离。
+- `module_datasets` 承载“当前状态型 / 可覆盖型”业务数据。
+- `module_audit_events` 承载“历史轨迹型 / append-only”审计事件。
 - 当前正式持久化表为 `data.db.module_audit_events`，正式工具名为 `db.append_event` / `db.query_events`。
-- 无论这组工具是否已经暴露，审计事件都不应回写 `module_datasets`，也不直接进入 `core:data_table` 的 schema / records 链路。
+- 审计事件不应回写 `module_datasets`，也不直接进入 `core:data_table` 的 schema / records 链路。
+- `core:data_table` 当前只面向快照型 dataset；不要把事件流接进通用可编辑数据表。
+- retention / archive 后续可在宿主侧继续扩展，但不属于本轮正式契约。
 
 ### 6.3 模块源码与运行时数据边界
 
@@ -167,7 +171,8 @@ ctx.state.setdefault("tasks", {})
 ### 6.5 数据表开发约束
 
 - 数据表 schema 只能通过 `ui.declare_data_table` 声明。
-- 数据表 records 只能通过 `db.list_records` / `db.replace_records` 读写。
+- 快照型 records 只能通过 `db.list_records` / `db.replace_records` 读写。
+- 审计事件只能通过 `db.append_event` / `db.query_events` 读写。
 - `view_id` 与 `dataset` 必须保持一致，由宿主统一管理。
 - `core:data_table` 只服务快照 dataset，不承担 append-only 审计历史。
 - schema 不是配置，不要塞进 `ctx.config`。
@@ -226,6 +231,26 @@ async def execute(ctx: TaskContext):
         rows = ctx.tools.call("db.list_records", dataset="accounts")
         ctx.tools.call("db.replace_records", dataset="accounts", records=rows)
 
+    if ctx.tools and ctx.tools.has_tool("db.append_event"):
+        ctx.tools.call(
+            "db.append_event",
+            dataset="account_events",
+            event_type="status_changed",
+            entity_key="13800000001",
+            previous_status="active",
+            next_status="blocked",
+            payload={"reason": "risk_control"},
+        )
+
+    if ctx.tools and ctx.tools.has_tool("db.query_events"):
+        history = ctx.tools.call(
+            "db.query_events",
+            dataset="account_events",
+            entity_key="13800000001",
+            limit=20,
+        )
+        ctx.state["workflow"]["history_size"] = len(history)
+
     return {
         "workflow": workflow,
         "auth_username": auth.get("username"),
@@ -267,3 +292,4 @@ if ctx.tools and ctx.tools.has_tool("db.append_event"):
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-04-17 | 初版建立模块配置、运行态、内存与数据表的统一契约 | Codex |
+| 2026-04-18 | 增补模块审计事件契约，明确快照数据与审计事件分层存储 | Codex |

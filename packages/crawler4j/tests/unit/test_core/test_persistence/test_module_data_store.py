@@ -35,36 +35,6 @@ def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
         "dataset": "accounts",
         "columns": [{"key": "phone", "label": "手机号"}],
     }
-    assert store.append_audit_event(
-        "demo_module",
-        event_type="status.changed",
-        entity_type="account",
-        entity_key="u1",
-        summary="切换到 active",
-        payload={"before": "new", "after": "active"},
-        created_at=1700000000,
-    ) == {
-        "id": 1,
-        "module_name": "demo_module",
-        "event_type": "status.changed",
-        "entity_type": "account",
-        "entity_key": "u1",
-        "summary": "切换到 active",
-        "payload": {"before": "new", "after": "active"},
-        "created_at": 1700000000,
-    }
-    assert store.query_audit_events("demo_module", entity_type="account", entity_key="u1") == [
-        {
-            "id": 1,
-            "module_name": "demo_module",
-            "event_type": "status.changed",
-            "entity_type": "account",
-            "entity_key": "u1",
-            "summary": "切换到 active",
-            "payload": {"before": "new", "after": "active"},
-            "created_at": 1700000000,
-        }
-    ]
 
     with get_connection(DATA_DB) as conn:
         dataset_row = conn.execute(
@@ -75,18 +45,145 @@ def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
             "SELECT schema_json FROM module_data_table_views WHERE module_name = ? AND view_id = ?",
             ("demo_module", "accounts"),
         ).fetchone()
-        audit_row = conn.execute(
-            """
-            SELECT event_type, entity_type, entity_key, summary, payload_json
-            FROM module_audit_events
-            WHERE module_name = ? AND entity_key = ?
-            """,
-            ("demo_module", "u1"),
-        ).fetchone()
 
     assert dataset_row is not None
     assert schema_row is not None
-    assert audit_row is not None
+
+
+def test_module_data_store_appends_and_queries_audit_events(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+
+    first_event_id = store.append_audit_event(
+        "demo_module",
+        "account_events",
+        {
+            "entity_key": "13800138000",
+            "event_type": "created",
+            "next_status": "active",
+            "payload": {"source": "import"},
+            "created_at": 100,
+        },
+    )
+    second_event_id = store.append_audit_event(
+        "demo_module",
+        "account_events",
+        {
+            "entity_key": "13800138000",
+            "event_type": "status_changed",
+            "previous_status": "active",
+            "next_status": "blocked",
+            "result": "success",
+            "reason": "risk_control",
+            "payload": {"operator": "system"},
+            "created_at": 200,
+        },
+    )
+
+    assert first_event_id
+    assert second_event_id
+    assert first_event_id != second_event_id
+
+    all_events = store.query_audit_events("demo_module", "account_events")
+    created_only = store.query_audit_events(
+        "demo_module",
+        "account_events",
+        entity_key="13800138000",
+        event_type="created",
+    )
+
+    assert [event["event_type"] for event in all_events] == ["status_changed", "created"]
+    assert created_only == [
+        {
+            "id": first_event_id,
+            "module_name": "demo_module",
+            "dataset_name": "account_events",
+            "entity_key": "13800138000",
+            "event_type": "created",
+            "run_id": None,
+            "previous_status": None,
+            "next_status": "active",
+            "result": None,
+            "reason": None,
+            "payload": {"source": "import"},
+            "created_at": 100,
+        }
+    ]
+
+    with get_connection(DATA_DB) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, module_name, dataset_name, event_type, payload_json, created_at
+            FROM module_audit_events
+            WHERE module_name = ?
+            ORDER BY created_at ASC
+            """,
+            ("demo_module",),
+        ).fetchall()
+
+    assert len(rows) == 2
+    assert rows[0]["id"] == first_event_id
+    assert rows[0]["dataset_name"] == "account_events"
+
+
+def test_module_data_store_queries_audit_events_with_filters_and_paging(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    store.append_audit_event(
+        "demo_module",
+        "account_events",
+        {
+            "entity_key": "u1",
+            "event_type": "created",
+            "run_id": "run-1",
+            "payload": {"seq": 1},
+            "created_at": 100,
+        },
+    )
+    store.append_audit_event(
+        "demo_module",
+        "account_events",
+        {
+            "entity_key": "u1",
+            "event_type": "status_changed",
+            "run_id": "run-2",
+            "payload": {"seq": 2},
+            "created_at": 200,
+        },
+    )
+    store.append_audit_event(
+        "demo_module",
+        "account_events",
+        {
+            "entity_key": "u2",
+            "event_type": "status_changed",
+            "run_id": "run-2",
+            "payload": {"seq": 3},
+            "created_at": 300,
+        },
+    )
+
+    filtered = store.query_audit_events(
+        "demo_module",
+        "account_events",
+        entity_key="u1",
+        run_id="run-2",
+        start_at=150,
+        end_at=250,
+    )
+    paged = store.query_audit_events(
+        "demo_module",
+        "account_events",
+        order="asc",
+        limit=1,
+        offset=1,
+    )
+
+    assert [event["payload"]["seq"] for event in filtered] == [2]
+    assert [event["payload"]["seq"] for event in paged] == [2]
 
 
 def test_module_data_store_clear_module_data_removes_data_db_rows_only(temp_data_dir):
@@ -100,12 +197,16 @@ def test_module_data_store_clear_module_data_removes_data_db_rows_only(temp_data
     store = ModuleDataStore()
     store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
     store.write_data_table_schema("demo_module", "accounts", {"title": "账号管理", "dataset": "accounts"})
-    store.append_audit_event("demo_module", event_type="status.changed", entity_key="u1", payload={"after": "active"})
+    store.append_audit_event(
+        "demo_module",
+        "account_events",
+        {"entity_key": "13800138000", "event_type": "created", "payload": {"source": "import"}},
+    )
 
     assert store.clear_module_data("demo_module") is True
     assert store.read_dataset("demo_module", "accounts") == []
     assert store.read_data_table_schema("demo_module", "accounts") == {}
-    assert store.query_audit_events("demo_module") == []
+    assert store.query_audit_events("demo_module", "account_events") == []
     assert kv.get("module:demo_module:dataset:legacy_accounts") == [{"id": "legacy"}]
     assert kv.get("module:demo_module:ui:data_table:legacy_accounts") == {"title": "旧账号"}
 
@@ -124,49 +225,3 @@ def test_module_data_store_ignores_legacy_kv_rows(temp_data_dir):
     assert store.read_data_table_schema("demo_module", "accounts") == {}
     assert kv.get("module:demo_module:dataset:accounts") == [{"id": "legacy"}]
     assert kv.get("module:demo_module:ui:data_table:accounts") == {"title": "旧账号"}
-
-
-def test_module_data_store_query_audit_events_supports_filters_and_order(temp_data_dir):
-    from src.core.persistence.module_data_store import ModuleDataStore
-
-    store = ModuleDataStore()
-    store.append_audit_event(
-        "demo_module",
-        event_type="status.changed",
-        entity_type="account",
-        entity_key="u1",
-        payload={"after": "new"},
-        created_at=1700000000,
-    )
-    store.append_audit_event(
-        "demo_module",
-        event_type="status.changed",
-        entity_type="account",
-        entity_key="u1",
-        payload={"after": "active"},
-        created_at=1700000010,
-    )
-    store.append_audit_event(
-        "demo_module",
-        event_type="sync.completed",
-        entity_type="job",
-        entity_key="job-1",
-        payload={"ok": True},
-        created_at=1700000020,
-    )
-
-    latest_first = store.query_audit_events("demo_module", entity_type="account", entity_key="u1")
-    assert [event["payload"] for event in latest_first] == [{"after": "active"}, {"after": "new"}]
-
-    oldest_first = store.query_audit_events(
-        "demo_module",
-        entity_type="account",
-        entity_key="u1",
-        order="asc",
-        limit=1,
-    )
-    assert [event["payload"] for event in oldest_first] == [{"after": "new"}]
-
-    filtered = store.query_audit_events("demo_module", event_type="sync.completed")
-    assert len(filtered) == 1
-    assert filtered[0]["entity_key"] == "job-1"

@@ -134,10 +134,10 @@ def _write_ui_table_module(base_dir: Path, module_name: str) -> Path:
                 context.tools.call("db.replace_records", dataset="accounts", records=records)
                 context.tools.call(
                     "db.append_event",
+                    dataset="account_events",
                     event_type="ui.account_created",
-                    entity_type="account",
                     entity_key=phone,
-                    summary="create account from ui",
+                    created_at=100,
                     payload={"status": payload.get("account_status", "new")},
                 )
                 return None
@@ -154,10 +154,10 @@ def _write_ui_table_module(base_dir: Path, module_name: str) -> Path:
                 context.tools.call("db.replace_records", dataset="accounts", records=records)
                 context.tools.call(
                     "db.append_event",
+                    dataset="account_events",
                     event_type="ui.account_updated",
-                    entity_type="account",
                     entity_key=str(phone),
-                    summary="update account from ui",
+                    created_at=200,
                     payload={"status": payload.get("account_status")},
                 )
                 return None
@@ -445,11 +445,12 @@ def test_module_data_table_page_runs_real_module_ui_chain(qtbot, monkeypatch, tm
             },
         ]
 
-        events = page._data_store.query_audit_events(module_name, order="asc")
+        events = page._data_store.query_audit_events(module_name, "account_events", order="asc")
         assert [event["event_type"] for event in events] == [
             "ui.account_created",
             "ui.account_updated",
         ]
+        assert events[0]["dataset_name"] == "account_events"
         assert events[0]["entity_key"] == "13800138001"
         assert events[1]["payload"] == {"status": "blocked"}
     finally:

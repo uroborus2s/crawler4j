@@ -719,16 +719,7 @@ class _DeclareUICheckTools:
             self._datasets[dataset] = [dict(row) for row in records if isinstance(row, dict)]
             return True
         if tool_name == "db.append_event":
-            return {
-                "id": 1,
-                "module_name": "declare_ui_check",
-                "event_type": str(kwargs.get("event_type", "")).strip(),
-                "entity_type": str(kwargs.get("entity_type", "") or "").strip(),
-                "entity_key": str(kwargs.get("entity_key", "") or "").strip(),
-                "summary": str(kwargs.get("summary", "") or "").strip(),
-                "payload": kwargs.get("payload"),
-                "created_at": int(kwargs.get("created_at") or 0),
-            }
+            raise CLIError("declare_ui 不允许调用 db.append_event；UI 声明必须保持无副作用")
         if tool_name == "db.query_events":
             return []
         if tool_name == "db.acquire_lock":
