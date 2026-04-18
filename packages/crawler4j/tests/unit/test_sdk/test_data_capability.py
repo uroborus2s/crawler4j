@@ -84,3 +84,56 @@ def test_tools_capability_calls_core_extensions():
 
     assert result == {"tool_name": "db.list_records", "kwargs": {"dataset": "orders"}}
     assert fake_tools.calls == [("db.list_records", {"dataset": "orders"})]
+
+
+def test_tools_capability_preserves_audit_event_kwargs():
+    fake_tools = _FakeTools()
+    ctx = TaskContext(env_id=1, task_name="demo", tools=fake_tools)
+
+    append_result = ctx.tools.call(
+        "db.append_event",
+        dataset="account_events",
+        event_type="status_changed",
+        entity_key="13800000001",
+        previous_status="active",
+        next_status="blocked",
+        result="failed",
+        reason="risk_control",
+        payload={"operator": "system"},
+        created_at=200,
+    )
+    query_result = ctx.tools.call(
+        "db.query_events",
+        dataset="account_events",
+        entity_key="13800000001",
+        event_type="status_changed",
+        run_id="run-001",
+        start_at=100,
+        end_at=300,
+        limit=20,
+        offset=5,
+        order="desc",
+    )
+
+    assert append_result["kwargs"] == {
+        "dataset": "account_events",
+        "event_type": "status_changed",
+        "entity_key": "13800000001",
+        "previous_status": "active",
+        "next_status": "blocked",
+        "result": "failed",
+        "reason": "risk_control",
+        "payload": {"operator": "system"},
+        "created_at": 200,
+    }
+    assert query_result["kwargs"] == {
+        "dataset": "account_events",
+        "entity_key": "13800000001",
+        "event_type": "status_changed",
+        "run_id": "run-001",
+        "start_at": 100,
+        "end_at": 300,
+        "limit": 20,
+        "offset": 5,
+        "order": "desc",
+    }

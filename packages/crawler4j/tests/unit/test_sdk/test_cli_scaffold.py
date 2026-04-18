@@ -340,6 +340,38 @@ def test_check_full_rejects_audit_event_writes_in_declare_ui(
     assert "declare_ui 不允许调用 db.append_event" in captured.out
 
 
+def test_check_full_rejects_audit_event_writes_in_declare_ui_after_list_tools_discovery(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    runtime_path.write_text(
+        runtime_text.replace(
+            "# SDK-DATA-TABLES\n    return None",
+            """tool_names = {spec.name for spec in context.tools.list_tools()}
+    if "db.append_event" in tool_names:
+        context.tools.call(
+            "db.append_event",
+            dataset="account_events",
+            event_type="declare_ui_checked",
+            entity_key="demo-account",
+            reason="sdk_check",
+            created_at=1,
+        )
+    return None""",
+        ),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "declare_ui 不允许调用 db.append_event" in captured.out
+
+
 def test_check_full_accepts_audit_event_queries_in_declare_ui(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
