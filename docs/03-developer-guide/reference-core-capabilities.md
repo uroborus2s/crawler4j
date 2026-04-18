@@ -14,14 +14,22 @@ ctx.tools.call(...)
 
 如果你绕过这层边界，模块就不再是受控轻量应用，而是在偷偷绑定宿主内部实现。
 
+数据相关工具最好先按三类心智来理解:
+
+- 快照数据集: `db.list_records` / `db.replace_records`
+- append-only 审计事件: `db.append_event` / `db.query_events`
+- 轻状态与锁: `db.get_state` / `db.set_state` / `db.acquire_lock`
+
 ## 工具总表
 
-当前宿主注入的工具如下:
+当前工作区可直接确认的宿主工具如下:
 
 | 工具名 | 是否异步 | 主要用途 | 典型返回值 |
 |---|---|---|---|
 | `db.list_records` | 否 | 读取业务数据集 | `list[dict]` |
 | `db.replace_records` | 否 | 全量覆盖业务数据集 | `bool` |
+| `db.append_event` | 否 | 追加审计事件历史 | `dict` |
+| `db.query_events` | 否 | 查询审计事件历史 | `list[dict]` |
 | `db.acquire_lock` | 否 | 获取互斥锁 | `bool` |
 | `db.release_lock` | 否 | 释放互斥锁 | `bool` |
 | `db.is_locked` | 否 | 查询锁状态 | `bool` |
@@ -89,6 +97,67 @@ ctx.tools.call("db.replace_records", dataset="hotels", records=rows)
 - 两个 task 同时读旧列表再各自 `replace_records`，后写入的一方会覆盖前一方结果
 - 如果存在并发写，优先先加锁
 - 如果写逻辑越来越复杂，说明这个数据集设计该重做，而不是继续叠补丁
+- 如果同一条业务既要保留“当前状态”又要保留“发生过什么”，当前状态继续放 dataset，历史另走 `db.append_event`
+
+### `db.append_event`
+
+```python
+event = ctx.tools.call(
+    "db.append_event",
+    event_type="status.changed",
+    entity_type="account",
+    entity_key="acc-001",
+    summary="账号状态切换为 active",
+    payload={"before": "new", "after": "active"},
+)
+```
+
+适合放:
+
+- 状态流转
+- 人工确认、重试、中止等操作痕迹
+- 外部系统回调、关键动作日志
+
+不适合放:
+
+- 当前可编辑记录列表
+- 需要 `core:data_table` 直接承载的当前快照
+
+使用约束:
+
+- 这条通道只服务 append-only 历史，不要把它当成可回写 dataset
+- 当前签名固定为 `event_type`、`payload`、`entity_type`、`entity_key`、`summary`、`created_at`
+- 返回值是单条已落库事件，包含 `id`、`module_name`、`event_type`、`entity_type`、`entity_key`、`summary`、`payload`、`created_at`
+
+### `db.query_events`
+
+```python
+events = ctx.tools.call(
+    "db.query_events",
+    entity_type="account",
+    entity_key="acc-001",
+    limit=20,
+)
+```
+
+适合:
+
+- 按业务键回看历史
+- 给代码型页面、调试输出或导出逻辑提供事件时间线
+
+不适合:
+
+- 替代当前 dataset 快照读取
+- 充当 `core:data_table` 的 records 数据源
+
+当前支持的查询参数:
+
+- `event_type`
+- `entity_type`
+- `entity_key`
+- `limit`
+- `offset`
+- `order`，仅支持 `asc` / `desc`
 
 ### `db.get_state` / `db.set_state` / `db.exists_state`
 
@@ -227,6 +296,7 @@ schema 顶层只允许这些字段:
 - `select` 列必须提供非空 `options`
 - `lock_key` 只用于 Core 临时锁，不用于表达业务占用态
 - 已声明 `lock_key` 时，不要再声明 `occupied` / `occupied_label` 等业务占用列；Core 会直接拒绝这类 schema
+- `core:data_table` 只服务快照 dataset，不直接承载 append-only 审计历史
 
 ### `ui.get_data_table`
 

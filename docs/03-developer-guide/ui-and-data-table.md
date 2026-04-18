@@ -11,6 +11,7 @@
 |---|---|
 | 只是展示和编辑一批结构化记录 | `core:data_table` |
 | 需要复杂交互、业务面板、自定义组件布局 | 代码型页面 |
+| 想展示按条件查询出来的审计历史时间线 | 代码型页面 |
 | 既要业务页，又要结构化数据列表 | 两者都可以用 |
 
 先把宿主里的落点心智模型记死:
@@ -81,6 +82,17 @@ class DashboardPage(QWidget):
 - 复杂审批流
 - 大量联动字段
 - 跨页面异步编排
+- append-only 审计历史
+
+## `core:data_table` 和审计事件怎么分工
+
+| 你要保留什么 | 正确落点 |
+|---|---|
+| 当前酒店列表、账号列表这类“现在长什么样”的数据 | `core:data_table` + `db.list_records` / `db.replace_records` |
+| 登录尝试、状态迁移、人工确认这类“发生过什么”的历史 | `db.append_event` / `db.query_events` |
+| 既要当前列表又要历史轨迹 | 两条都用，不要把历史事件行混进当前 dataset |
+
+`core:data_table` 的 schema、编辑弹窗和 CRUD 语义都默认你维护的是当前快照。它不是审计日志表，也不会替你管理 append-only 历史。
 
 ## 新人照抄版
 
@@ -196,6 +208,8 @@ def update_hotel_from_ui(ctx: TaskContext, pk_value: str, payload: dict):
             break
     return ctx.tools.call("db.replace_records", dataset="hotels", records=rows)
 ```
+
+如果新增/编辑成功后还要留下操作历史，单独追加一条审计事件即可；不要把“谁改过、改了几次”继续塞回 `hotels` 这个快照 dataset。
 
 ## 第三步: 不要手改根 `__init__.py`
 

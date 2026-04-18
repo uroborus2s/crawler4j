@@ -40,7 +40,9 @@
 | 持久配置 | `ctx.get_config()` / `ctx.config` | 读取模块和 workflow 配置 | 写运行时状态、拼 job 参数 |
 | 运行态 | `ctx.runtime` | 读取 workflow、params、`devel_mode` 等 | 持久配置、长期状态 |
 | 单次执行状态 | `ctx.state` | 少量阶段状态、轻量控制参数 | 大对象总线、持久业务数据 |
-| 持久业务数据 | `ctx.tools.call("db.*")` | 结构化 records、轻状态、锁 | 宿主内部数据库细节 |
+| 快照数据 | `db.list_records` / `db.replace_records` | 当前结构化 records、当前结果集 | append-only 历史、宿主内部数据库细节 |
+| 审计事件历史 | `db.append_event` / `db.query_events` | 只追加的业务历史、操作轨迹、事件时间线 | 当前快照、`core:data_table` CRUD |
+| 轻状态与锁 | `db.get_state` / `db.set_state` / `db.acquire_lock` | 游标、短 TTL 状态、互斥锁 | 正式配置、可编辑业务列表 |
 | UI | 代码页面或 `core:data_table` | 业务页面或受控数据表 | 第二套 CRUD 框架 |
 
 ## 模块执行链路
@@ -108,7 +110,8 @@
 | 读配置 | `ctx.get_config()` | 直接读 `module.yaml` 或数据库 |
 | 读执行参数 | `ctx.runtime["params"]` | 自己拼接配置和 job 输入 |
 | 暂存单次执行状态 | `ctx.state` | `db.set_state` 或全局变量 |
-| 保存业务数据 | `db.list_records` / `db.replace_records` | `ctx.state` |
+| 保存当前快照 | `db.list_records` / `db.replace_records` | `ctx.state` |
+| 记录历史事件 | `db.append_event` / `db.query_events` | `db.replace_records` / `core:data_table` |
 | 保存轻状态和锁 | `db.get_state` / `db.set_state` / `db.acquire_lock` | `ctx.config` |
 
 ## 术语表
@@ -131,6 +134,7 @@
 - 把模块当成要长期演化成平台的项目
 - 把 `module_runtime.py` 写成新的业务层
 - 把 `ctx.state` 当成参数总线
+- 拿 `core:data_table` 或快照 dataset 直接充当审计日志表
 - 为了“规范”把模块拆成一堆空层
 
 下一步建议看 [模块结构](module-structure.md)。

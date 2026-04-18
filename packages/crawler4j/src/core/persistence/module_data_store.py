@@ -21,6 +21,17 @@ def _normalize_schema(raw: Any) -> dict[str, Any]:
     return dict(raw)
 
 
+def _normalize_entity_token(raw: Any) -> str:
+    return str(raw or "").strip()
+
+
+def _normalize_event_type(raw: Any) -> str:
+    normalized = str(raw or "").strip()
+    if not normalized:
+        raise ValueError("event_type 不能为空")
+    return normalized
+
+
 class ModuleDataStore:
     """模块数据与 `core:data_table` 视图元数据持久化。
 
@@ -97,6 +108,114 @@ class ModuleDataStore:
             return None
         return _normalize_schema(json.loads(row["schema_json"]))
 
+    def append_audit_event(
+        self,
+        module_name: str,
+        *,
+        event_type: str,
+        payload: Any = None,
+        entity_type: str | None = None,
+        entity_key: str | None = None,
+        summary: str | None = None,
+        created_at: int | None = None,
+    ) -> dict[str, Any]:
+        normalized_event_type = _normalize_event_type(event_type)
+        now = int(created_at) if created_at is not None else int(time.time())
+        payload_json = json.dumps(payload, ensure_ascii=False)
+
+        with get_connection(DATA_DB) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO module_audit_events (
+                    module_name,
+                    event_type,
+                    entity_type,
+                    entity_key,
+                    summary,
+                    payload_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    module_name,
+                    normalized_event_type,
+                    _normalize_entity_token(entity_type),
+                    _normalize_entity_token(entity_key),
+                    str(summary or "").strip(),
+                    payload_json,
+                    now,
+                ),
+            )
+            event_id = int(cursor.lastrowid)
+
+        return {
+            "id": event_id,
+            "module_name": module_name,
+            "event_type": normalized_event_type,
+            "entity_type": _normalize_entity_token(entity_type),
+            "entity_key": _normalize_entity_token(entity_key),
+            "summary": str(summary or "").strip(),
+            "payload": payload,
+            "created_at": now,
+        }
+
+    def query_audit_events(
+        self,
+        module_name: str,
+        *,
+        event_type: str | None = None,
+        entity_type: str | None = None,
+        entity_key: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        order: str = "desc",
+    ) -> list[dict[str, Any]]:
+        normalized_limit = max(int(limit), 0)
+        normalized_offset = max(int(offset), 0)
+        normalized_order = "ASC" if str(order or "").strip().lower() == "asc" else "DESC"
+        if normalized_limit == 0:
+            return []
+
+        clauses = ["module_name = ?"]
+        params: list[Any] = [module_name]
+
+        if event_type is not None and str(event_type).strip():
+            clauses.append("event_type = ?")
+            params.append(_normalize_event_type(event_type))
+        if entity_type is not None and str(entity_type).strip():
+            clauses.append("entity_type = ?")
+            params.append(_normalize_entity_token(entity_type))
+        if entity_key is not None and str(entity_key).strip():
+            clauses.append("entity_key = ?")
+            params.append(_normalize_entity_token(entity_key))
+
+        sql = f"""
+            SELECT id, module_name, event_type, entity_type, entity_key, summary, payload_json, created_at
+            FROM module_audit_events
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at {normalized_order}, id {normalized_order}
+            LIMIT ? OFFSET ?
+        """
+        params.extend([normalized_limit, normalized_offset])
+
+        with get_connection(DATA_DB) as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        return [
+            {
+                "id": int(row["id"]),
+                "module_name": str(row["module_name"]),
+                "event_type": str(row["event_type"]),
+                "entity_type": str(row["entity_type"] or ""),
+                "entity_key": str(row["entity_key"] or ""),
+                "summary": str(row["summary"] or ""),
+                "payload": json.loads(row["payload_json"]),
+                "created_at": int(row["created_at"]),
+            }
+            for row in rows
+        ]
+
     def read_dataset(self, module_name: str, dataset_name: str) -> list[dict[str, Any]]:
         records = self._read_dataset_row(module_name, dataset_name)
         return records if records is not None else []
@@ -123,6 +242,12 @@ class ModuleDataStore:
 
             cursor = conn.execute(
                 "DELETE FROM module_data_table_views WHERE module_name = ?",
+                (module_name,),
+            )
+            changed = bool(cursor.rowcount) or changed
+
+            cursor = conn.execute(
+                "DELETE FROM module_audit_events WHERE module_name = ?",
                 (module_name,),
             )
             changed = bool(cursor.rowcount) or changed

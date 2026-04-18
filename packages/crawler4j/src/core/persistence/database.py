@@ -259,4 +259,25 @@ def _init_data_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_module_data_views_module
             ON module_data_table_views(module_name);
+
+            -- 模块审计事件（append-only 历史）
+            CREATE TABLE IF NOT EXISTS module_audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                module_name TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                entity_type TEXT NOT NULL DEFAULT '',
+                entity_key TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL DEFAULT '',
+                payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_module_audit_events_module_created
+            ON module_audit_events(module_name, created_at DESC, id DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_module_audit_events_entity
+            ON module_audit_events(module_name, entity_type, entity_key, created_at DESC, id DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_module_audit_events_type
+            ON module_audit_events(module_name, event_type, created_at DESC, id DESC);
         """)

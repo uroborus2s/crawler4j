@@ -57,7 +57,7 @@ class HelpPage(QWidget):
     LINK_COLOR = "#8bd3ff"
 
     DOC_ENTRIES = [
-        HelpDocEntry("docs-index", "", "开始", "01-getting-started/index.md"),
+        HelpDocEntry("docs-index", "", "开始前", "01-getting-started/index.md"),
         HelpDocEntry("guide-index", "user-guide", "指南概览", "02-user-guide/index.md"),
         HelpDocEntry("user-guide", "user-guide", "开始使用", "02-user-guide/user-guide.md"),
         HelpDocEntry("installation", "user-guide", "首次安装", "02-user-guide/installation.md"),

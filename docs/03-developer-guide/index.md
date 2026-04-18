@@ -4,6 +4,11 @@
 
 `crawler4j` 已经通过 SDK 和 Core 抽象好了配置、任务、工作流、环境、调试、托管数据表和交付链路。模块开发者不需要再搭一套自己的平台。你的工作只有一个: 用最少的抽象，把业务流程写清楚。
 
+模块里的持久数据现在至少要按两条语义来理解:
+
+- 当前快照继续走 `db.list_records` / `db.replace_records` 和 `core:data_table`
+- append-only 历史优先走独立审计事件通道，不再混进快照 dataset 或数据表 CRUD
+
 ## 快速入口
 
 ### 5 分钟上手
@@ -79,6 +84,7 @@
 | 搞清楚目录、入口和 `module.yaml` | [模块结构](module-structure.md) |
 | 写 task 和 workflow | [构建模块](build-modules.md) |
 | 写页面或托管数据表 | [UI 与数据表](ui-and-data-table.md) |
+| 搞清快照数据和审计历史怎么分工 | [核心概念](core-concepts.md) / [Core 能力参考](reference-core-capabilities.md) / [UI 与数据表](ui-and-data-table.md) |
 | 用 DevLink / ATM 调试 | [调试模块](debugging.md) |
 | 打 ZIP、安装、验收 | [交付模块](shipping.md) |
 | 查 CLI 命令和 SDK 类型 | [SDK 与 CLI 参考](reference-sdk-and-cli.md) |

@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-04-17
+**最后更新：** 2026-04-18
 
 ## 1. 当前正式文档结构
 
@@ -78,3 +78,4 @@
 - 2026-04-17：开发者指南中的 CLI 命令面已再次对齐到当前本地 `crawler4j-sdk` 实现，统一使用 `module/task/workflow/page/data-table/env-selector/config/package/release/host/check` 分组命令；文档不再固定 `crawler4j-sdk==某个版本`，`reference-sdk-and-cli.md` 的总表与最小安全顺序已补成完整可复制命令。
 - 2026-04-17：`docs/03-developer-guide/` 已根据 6 个“小白模块开发者”子 agent 的两轮苛刻复核继续补强：新增 `--repo` 占位值说明、`module set default-workflow`、`ui:DashboardPage` / `ui/__init__.py` 导出关系、`TaskResult.data` / `run_subtask()` 真实语义、CLI 宿主桥接与宿主 UI 安装的互斥路径、DevLink/ATM 最短调试判据，以及 `core:data_table` / 调试 / 排障分叉清单；最终 6 个子 agent 全部给出 PASS。
 - 2026-04-17：`docs/02-user-guide/configuration.md`、`docs/04-project-development/04-design/module-config-runtime-data-contract.md` 与开发者指南相关章节已统一模块配置 / 运行态 / 单次运行内状态 / 数据表边界；`core:data_table` schema / records 当前只读写 `data.db`，运行时代码不包含旧 `state.db.kv_store` 自动迁移逻辑。
+- 2026-04-18：开发者指南与模块运行时数据契约已补齐“快照数据 vs 审计事件”的统一口径：`db.list_records` / `db.replace_records` 与 `core:data_table` 继续只服务当前快照，append-only 历史单独归到审计事件通道；精确工具签名和持久化表名继续以当前宿主实现为准。

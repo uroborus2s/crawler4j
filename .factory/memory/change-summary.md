@@ -1,6 +1,7 @@
 # 变更摘要
 
 ## 文档演进
+- 模块审计能力文档收口：`docs/03-developer-guide/` 与 `docs/04-project-development/04-design/module-config-runtime-data-contract.md` 已按真实运行时实现补齐“快照数据 vs 审计事件”分工、工具签名与 `core:data_table` 边界，不再保留“待宿主实现”占位口径 | 状态：DONE | 关联：`docs/03-developer-guide/*.md`、`docs/04-project-development/04-design/module-config-runtime-data-contract.md`、`docs/04-project-development/10-traceability/document-index.md`
 - `docs/01-getting-started/` 再次重写并压缩为单页模式：当前只保留 `了解 crawler4j` 这一篇作为正式入口；正文改为面向客户的产品介绍，不再拆成多页教读者选路径，原辅助页已删除 | 状态：DONE | 关联：`docs/01-getting-started/*.md`、`docs/index.md`
 - `docs/02-user-guide/` 二次完全重写：按 `安装与第一次打开 -> 首次设置 -> 开始使用 -> 日常使用 -> 管理员指南` 重排用户路径，新增“新手三入口”“参数来源表”“运行模板入口固定说明”“结果单入口”“状态下一步动作”“IP 池最短闭环”“可复制报障模板”，并将根 `docs/index.md` 的用户指南导航顺序同步调整 | 状态：DONE | 关联：`docs/02-user-guide/*.md`、`docs/index.md`
 - `docs/02-user-guide/` 普通用户复核闭环：按用户要求执行 3 个专业文档子 agent 分工重写和 6 个普通用户子 agent 两轮复核；首轮 `3 PASS / 3 FAIL`，二次修订后第二轮 6 个普通用户全部 `PASS` 并明确愿意原样发给新同事 | 状态：DONE | 关联：`docs/02-user-guide/*.md`、`docs/04-project-development/10-traceability/document-index.md`
@@ -8,7 +9,7 @@
 - `docs-stratego` 自动联动接入：源仓已新增 `.github/workflows/notify-docs-stratego.yml`，在 `feature/task-plugin-system` 分支提交 `docs/**` 变更后自动向 `uroborus2s/docs-stratego` 发送 `source-pointer-sync-requested`；部署说明已同步补充 secret、分支对齐与“共享 PR 审核后发布”的闭环约束 | 状态：DONE | 关联：`.github/workflows/notify-docs-stratego.yml`、`docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 - `DOC-module-guide-directory-expansion` 模块开发指南已从单文件重构为目录化章节主指南，并按“小白开发者”视角补齐概念、上手、结构、开发、调试、交付与排错说明 | 状态：DONE | 关联：`TASK-010`
 - README 与发布描述收口：仓库根 / 子包 README、包 `description`、release 文档与 `.factory` 版本摘要已统一到 `0.2.0` 发布基线；同时移除了 `packages/crawler4j/modules/` 不存在目录的错误说明，并明确最近正式 Git tag 仍为 `v0.1.1` | 状态：DONE | 关联：`README.md`、`packages/*/README.md`、`docs/04-project-development/07-release-delivery/*`
-- workspace 构建脚本收口：仓库根新增 `scripts/build_workspace_packages.py`，统一在 workspace 根对 `crawler4j-sdk`、`crawler4j`、`crawler4j-contracts` 执行 `uv build --clear` 并把产物写回各自 `dist/`；README、部署说明、维护指南和打包配置回归测试已同步更新 | 状态：DONE | 关联：`scripts/build_workspace_packages.py`、`packages/crawler4j/tests/unit/test_sdk/test_packaging_config.py`
+- workspace 构建脚本收口：仓库根 `scripts/build_workspace_packages.py` 现已统一包装 `build` / `publish`，并通过 workspace 根 `pyproject.toml` 暴露为 `uv run build` / `uv run publish` 短命令；可直接按包名执行 `crawler4j` 单包构建或 `publish crawler4j-sdk` / `publish crawler4j-contracts`，脚本会自动处理各自包目录下的 `dist` 路径；README、部署说明、维护指南和打包配置回归测试已同步更新 | 状态：DONE | 关联：`scripts/build_workspace_packages.py`、`packages/crawler4j/tests/unit/test_sdk/test_packaging_config.py`
 - `ctrip` 真实站点 E2E 收口文档：`docs/04-project-development/06-testing-verification/ctrip-real-site-e2e-closeout.md` 已新增并接入根导航、测试计划、验收清单和文档索引，真实站点验证现有单一正式入口 | 状态：DONE | 关联：`REQ-002`、`RISK-002`
 
 ## 需求变更
@@ -19,6 +20,7 @@
 - `CR-005-devlink-run-once-reload` CR-005 为 DevLink 普通执行建立显式 reload 语义，改完源码后下一次 ATM 执行即可吃到最新模块代码 | 状态：DONE | 关联：`BUG-013`
 - `CR-006-module-config-default-initialization` CR-006 为 `module.yaml` 增加 `config_defaults` 初始化模板，宿主首次加载模块时按模板写入模块/工作流配置一次，并在详情页提供带确认弹窗的恢复默认按钮 | 状态：DONE | 关联：无
 - `CR-007-sdk-cli-v1-command-tree-refactor` CR-007 重构 `crawler4j-sdk` CLI V1 命令树，去掉 `data` 抽象层与旧平铺命令，统一收敛为 `module / task / workflow / page / data-table / env-selector / config / package / release / host / check` 分组，并把 `check` 强化为完整性 gate；本次继续补齐 `release publish` 与宿主桥接命令 `host devlink/install/upgrade/debug config` | 状态：DONE | 关联：`packages/crawler4j-sdk/src/cli/commands.py`
+- `CR-008-module-audit-event-storage-split` CR-008 为模块新增独立审计事件存储与工具能力，明确把快照数据和 append-only 事件历史拆成两条正式契约 | 状态：DONE | 关联：`TASK-022`
 - ATM RunProfile 收敛：ATM 已切换为“任务直接持有 RunProfile”，任务创建页与主导航移除策略概念，`TSM` 包与兼容壳已删除 | 状态：DONE | 关联：ATM / Debug UI 重构
 - 版本事实源进一步收口：`crawler4j-sdk` 保留的运行时 `__version__` 与 SDK CLI 初始化模板里的默认依赖范围，现都由 `packages/crawler4j-sdk/pyproject.toml` 动态派生；`crawler4j-contracts` 已删除运行时 `__version__` 镜像与仅为其服务的 `_version.py`；对应回归测试已移除对版本字面量镜像的依赖 | 状态：DONE | 关联：`packages/crawler4j-sdk/src/_version.py`、`packages/crawler4j-sdk/src/cli/commands.py`、`packages/crawler4j-sdk/src/cli/templates.py`、`packages/crawler4j-contracts/src/__init__.py`
 
@@ -37,6 +39,7 @@
 - REM 创建成功反馈收敛：环境创建成功后，运行环境列表页现在只刷新列表与按钮状态，不再弹出成功提示框，避免额外打断用户操作 | 状态：DONE | 关联：`tests/unit/test_core/test_rem/test_env_list_widget.py`
 - ATM 生命周期统一：已删除 `TaskScript` / `TaskFlow` 上的私有 lifecycle callbacks，正式生命周期统一收敛到 `module_runtime.py` 的 ATM hooks；模块与 ATM 的流程控制通过新增 `TaskSignal` / `EnvAction` 契约承接，支持 `WAITING_CONFIRMATION`、失败后销毁环境等语义；当前 `on_cleanup` 会在环境动作之前执行，cleanup 阶段通过 `ctx.runtime["env_action"]` 暴露计划动作，环境动作完成后再写回最终结果 | 状态：DONE | 关联：`tests/unit/test_core/test_atm/test_execution_runner.py`、`tests/unit/test_core/test_atm/test_dispatcher_hooks.py`、`tests/unit/test_sdk/test_taskcontext.py`、`tests/unit/test_sdk/test_taskresult.py`
 - ATM 信号确认 UI：`TaskSignal.wait_for_confirmation` 现会把完整 `signal` 快照持久化到任务记录并发布 `task.signal` 事件；ATM 详情页可按 `payload.confirmation` 弹出结构化确认面板，并在用户确认后回调既有 `confirm_task_success` / `confirm_task_failure` 完成任务收尾 | 状态：DONE | 关联：`tests/unit/test_core/test_atm/test_task_detail_dialog.py`、`tests/unit/test_core/test_atm/test_job_modes.py`
+- 模块审计事件存储分层：宿主新增 `module_audit_events` 与 `db.append_event` / `db.query_events`，模块可独立追加和查询 append-only 历史事件，`module_datasets` 继续只承载快照型 dataset | 状态：DONE | 关联：`tests/unit/test_core/test_persistence/test_module_data_store.py`、`tests/unit/test_core/test_atm/test_runtime_capabilities.py`、`tests/unit/test_sdk/test_data_capability.py`
 - 模块自定义数据列表滚动条收敛：`ModuleDataTablePage` 现在隐藏底部横向滚动条，但保留触控板/滚轮横向滑动，并以 UI 单测锁定 `ScrollPerPixel + ScrollBarAlwaysOff` 策略 | 状态：DONE | 关联：`tests/unit/test_core/test_mms/test_module_data_table_page.py`
 - SDK / Contracts / Root 版本口径收口：当前源码、包依赖、脚手架默认依赖范围、README 与发布文档已统一收敛到 `0.2.0` 发布基线，并删除模块自报 `sdk_version_range` 的清单契约；扫描器、CLI、文档与 UI 已同步切到“模块必须跟随宿主一起升级”口径 | 状态：DONE | 关联：`packages/crawler4j-sdk/pyproject.toml`、`packages/crawler4j-contracts/pyproject.toml`、`packages/crawler4j/pyproject.toml`、`packages/crawler4j-sdk/src/cli/templates.py`、`packages/crawler4j/src/core/mms/scanner.py`
 - SDK CLI `check full` 导入失败收敛：当生成模块的 `module_runtime.py` 或 `ui/__init__.py` 自身导入失败时，CLI 现在会返回带文件级提示的校验失败，而不是直接抛出 Python traceback；同时补齐对应回归测试 | 状态：DONE | 关联：`packages/crawler4j-sdk/src/cli/commands.py`、`packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py`

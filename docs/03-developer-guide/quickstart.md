@@ -177,6 +177,8 @@ class FetchHotelsTask(TaskScript):
 - `db.replace_records`：同步写入数据集
 - `ui.declare_data_table`：同步声明托管数据表 schema
 
+这段示例故意只写“当前酒店列表快照”。如果你还要记录“这次抓取发生了什么”，历史应单独走审计事件通道，不要把日志行混进 `hotels` dataset，也不要指望 `core:data_table` 直接充当事件流水表。
+
 完整工具列表和同步/异步语义，直接看 [Core 能力参考](reference-core-capabilities.md)。
 
 ### 3. `workflows/hotel_sync.py`
@@ -288,6 +290,8 @@ def _declare_hotels_table(ctx: TaskContext):
 标准脚手架的根 `__init__.py` 会通过 `__getattr__` 自动转发 `module_runtime.py` 里的 hook。
 
 只要你没手工改坏根入口，这一步不需要再碰 `__init__.py`。
+
+这里声明的 `hotels` 也是“当前快照视图”，不是历史事件流。只要需求开始变成“我要回看每次变化”，就应该把历史转到审计事件通道，而不是继续扩张这张数据表。
 
 ## 第四步: 做最小检查
 

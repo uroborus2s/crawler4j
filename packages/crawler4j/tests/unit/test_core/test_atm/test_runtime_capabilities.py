@@ -46,6 +46,8 @@ def test_runtime_tools_register_expected_surface():
 
     assert caps.tools.has_tool("db.list_records") is True
     assert caps.tools.has_tool("db.replace_records") is True
+    assert caps.tools.has_tool("db.append_event") is True
+    assert caps.tools.has_tool("db.query_events") is True
     assert caps.tools.has_tool("db.acquire_lock") is True
     assert caps.tools.has_tool("db.release_lock") is True
     assert caps.tools.has_tool("db.is_locked") is True
@@ -101,6 +103,27 @@ def test_db_tools_records_and_lock_are_generic(monkeypatch):
     assert first is True
     assert second is False
     assert third is True
+
+
+def test_db_tools_audit_events_roundtrip():
+    caps = build_runtime_capabilities("demo_module")
+
+    appended = caps.tools.call(
+        "db.append_event",
+        event_type="status.changed",
+        entity_type="account",
+        entity_key="acc-001",
+        summary="账号状态切换为 active",
+        payload={"before": "new", "after": "active"},
+        created_at=1700000000,
+    )
+
+    assert appended["event_type"] == "status.changed"
+    assert appended["entity_key"] == "acc-001"
+    assert appended["payload"] == {"before": "new", "after": "active"}
+
+    events = caps.tools.call("db.query_events", entity_type="account", entity_key="acc-001")
+    assert events == [appended]
 
 
 def test_db_tools_state_roundtrip(monkeypatch):

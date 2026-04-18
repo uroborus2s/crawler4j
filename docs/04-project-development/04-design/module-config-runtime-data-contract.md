@@ -7,16 +7,17 @@
 **上游输入：** `module-boundaries.md` | `api-design.md` | 当前 `TaskContext` / MMS / ATM / Debug 实现  
 **下游输出：** `docs/03-developer-guide/core-concepts.md` | `docs/03-developer-guide/build-modules.md` | `docs/03-developer-guide/reference-core-capabilities.md` | `.factory/memory/api.summary.md`  
 **关联 ID：** `API-005`, `REQ-002`, `REQ-003`, `REQ-006`, `CR-003`  
-**最后更新：** 2026-04-17
+**最后更新：** 2026-04-18
 
 ## 1. 设计目标
 
-本契约用于统一模块开发者在运行时面对的四类核心对象：
+本契约用于统一模块开发者在运行时面对的五类核心对象：
 
 1. 配置
 2. 运行态元数据
 3. 单次运行内共享内存
-4. 持久业务数据与短期状态
+4. 快照数据
+5. 审计事件与短期状态
 
 目标不是再引入一层抽象，而是把当前已经落地的事实源固定下来，避免模块作者继续在 `module.yaml`、模块目录、自定义 YAML、`ctx.runtime`、`ctx.state`、`db.*` 之间混用。
 
@@ -28,7 +29,8 @@
 | 持久配置 | `config.db.module_config_entries` | `ctx.get_config()` / `ctx.config` | 禁止 | 宿主统一维护；模块运行时只读 |
 | 运行态元数据 | `ctx.runtime` | `ctx.runtime[...]` | 禁止 | 由 ATM / Debug / Core 注入 |
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
-| 持久业务数据 | `data.db` | `ctx.tools.call("db.*")` | `ctx.tools.call("db.*")` | 记录列表、表数据、模块业务结果 |
+| 快照数据 | `data.db.module_datasets` / `data.db.module_data_table_views` | `ctx.tools.call("db.list_records")` / `ctx.tools.call("ui.get_data_table")` | `ctx.tools.call("db.replace_records")` / `ctx.tools.call("ui.declare_data_table")` | 当前记录列表、当前结果集、可编辑数据表 |
+| 审计事件历史 | `data.db.module_audit_events` | `ctx.tools.call("db.query_events")` | `ctx.tools.call("db.append_event")` | append-only 业务历史、操作轨迹、时间线查询 |
 | 短期状态与锁 | `state.db.kv_store` | `ctx.tools.call("db.get_state")` 等 | `ctx.tools.call("db.set_state")` 等 | 游标、进度、会话、小体量状态、幂等锁 |
 
 ## 3. 配置契约
@@ -132,27 +134,42 @@ ctx.state.setdefault("tasks", {})
 - 长期配置
 - 需要跨多次任务长期保留的持久状态
 
-## 6. 持久业务数据与数据表契约
+## 6. 快照数据、审计事件与数据表契约
 
-### 6.1 运行时数据位置
+### 6.1 快照数据位置
 
 - `ui.declare_data_table` 声明的 schema 持久化到 `data.db.module_data_table_views`
 - `db.list_records` / `db.replace_records` 读写的 records 持久化到 `data.db.module_datasets`
 
-### 6.2 模块源码与运行时数据边界
+### 6.2 审计事件通道的目标边界
+
+- 审计事件历史与快照数据应该分离。
+- 当前正式持久化表为 `data.db.module_audit_events`，正式工具名为 `db.append_event` / `db.query_events`。
+- 无论这组工具是否已经暴露，审计事件都不应回写 `module_datasets`，也不直接进入 `core:data_table` 的 schema / records 链路。
+
+### 6.3 模块源码与运行时数据边界
 
 当前 CLI V1 不再为“源码层数据模型”单独建立 `data/` 命令或固定目录。
 
 换句话说：
 
 - 业务辅助代码按实际职责放在 `tasks/`、`workflows/`、`ui/` 或模块自定义源码文件里
-- `data.db` 才是运行时业务数据
+- `data.db` 才是运行时业务数据，但其中也已按“快照数据 / 审计事件”分成两条能力面
 
-### 6.3 数据表开发约束
+### 6.4 两条持久数据通道怎么分工
+
+| 你要保留什么 | 正式入口 | 语义 |
+|---|---|---|
+| 当前最新名单、当前状态、当前结果集 | `db.list_records` / `db.replace_records` | 可被下一次写入整体替换的快照 |
+| 只追加的历史记录、状态迁移、操作痕迹 | `db.append_event` / `db.query_events` | append-only 历史，不回写当前快照 |
+| 宿主内可编辑数据表 | `ui.declare_data_table` + `core:data_table` | 只服务快照 dataset |
+
+### 6.5 数据表开发约束
 
 - 数据表 schema 只能通过 `ui.declare_data_table` 声明。
 - 数据表 records 只能通过 `db.list_records` / `db.replace_records` 读写。
 - `view_id` 与 `dataset` 必须保持一致，由宿主统一管理。
+- `core:data_table` 只服务快照 dataset，不承担 append-only 审计历史。
 - schema 不是配置，不要塞进 `ctx.config`。
 - `lock_key` / `lock_scope` 只用于 Core 临时锁，不用于表达模块业务占用态。
 - 若模块已自行维护 `occupied` / `occupied_label` 等业务占用字段，不得再同时声明 `lock_key`；宿主会把它视为冲突 schema 并拒绝加载。
@@ -216,12 +233,24 @@ async def execute(ctx: TaskContext):
     }
 ```
 
+最小分流示例：
+
+```python
+snapshot_rows = [...]
+ctx.tools.call("db.replace_records", dataset="accounts", records=snapshot_rows)
+
+if ctx.tools and ctx.tools.has_tool("db.append_event"):
+    audit_event_kwargs = {...}  # 事件参数键以宿主当前工具签名为准
+    ctx.tools.call("db.append_event", **audit_event_kwargs)
+```
+
 ## 9. 明确禁止的模式
 
 - 在模块运行时代码中写配置
 - 直接连接 `config.db`、`data.db`、`state.db`
 - 把 `workflow`、`devel_mode`、`creation_params` 写进 `ctx.config`
 - 把大批量业务数据写进 `ctx.state` 或 `db.set_state`
+- 把审计事件历史混进 `module_datasets` 或 `core:data_table`
 - 在模块目录里再维护一份正式 `*.yml` 配置事实源
 - 把数据表 schema 当成模块配置保存
 
@@ -231,6 +260,7 @@ async def execute(ctx: TaskContext):
 
 1. 当前运行时代码里不存在 `state.db.kv_store -> data.db` 的模块数据表自动迁移逻辑。
 2. 如果历史环境仍有旧 KV 里的 schema / records，需要通过显式迁移工具或人工导入处理；当前读链路只读取 `data.db`。
+3. `core:data_table` 当前只服务快照 dataset，不承担 append-only 审计历史读写。
 
 ## 11. 变更记录
 
