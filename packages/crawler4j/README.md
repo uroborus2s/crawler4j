@@ -13,7 +13,7 @@
 
 workspace 级开发脚本已经统一迁到仓库根 `scripts/`，不再作为 `packages/crawler4j` 的目录内容。当前保留：
 
-- `scripts/build_workspace_packages.py`：清空各包 `dist/` 后统一执行 `uv build --package ... --out-dir ... --clear`
+- `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；构建时自动写回各包 `dist/`，发布时自动指向各包 `dist/*`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
 - `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
 
@@ -24,7 +24,8 @@ uv sync --all-packages
 uv run python -m src.ui.app
 uv run pytest -q
 uv run python scripts/smoke_test_ui.py
-uv run python scripts/build_workspace_packages.py
+uv run build
+UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk
 uv run pyinstaller packages/crawler4j/crawler4j.spec
 ```
 

@@ -42,7 +42,7 @@ uv run pytest -q
 ### Root / SDK / Contracts build
 
 ```bash
-uv run python scripts/build_workspace_packages.py
+uv run build
 ```
 
 说明：
@@ -50,19 +50,22 @@ uv run python scripts/build_workspace_packages.py
 - 脚本会在 workspace 根目录顺序构建 `crawler4j-sdk`、`crawler4j`、`crawler4j-contracts`
 - 每个包在构建前都会通过 `uv build --clear` 清空自己的 `dist/`
 - 产物分别落到 `packages/crawler4j-sdk/dist/`、`packages/crawler4j/dist/`、`packages/crawler4j-contracts/dist/`
+- 如果只想构建一个包，可直接写 `uv run build crawler4j`
+- 长命令 `uv run python scripts/build_workspace_packages.py ...` 仍可用，但正式口径优先使用短命令
 
 ### Publish SDK / Contracts to PyPI
 
 ```bash
-uv publish packages/crawler4j-sdk/dist/*
-uv publish packages/crawler4j-contracts/dist/*
+UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk
+UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-contracts
 ```
 
 说明：
 
 - 若使用 PyPI token，优先设置 `UV_PUBLISH_TOKEN`
-- 需要预演时可先执行 `uv publish --dry-run packages/crawler4j-sdk/dist/*`
+- 需要预演时可先执行 `UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk --dry-run`
 - 若仓库后续配置了带 `publish-url` 的 `tool.uv.index`，也可以改用 `uv publish --index <name> ...`
+- 脚本会自动把 `crawler4j-sdk` / `crawler4j-contracts` 映射到各自包目录下的 `dist/*`，不需要手写文件路径
 
 ### SDK CLI
 

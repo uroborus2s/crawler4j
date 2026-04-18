@@ -367,7 +367,7 @@ requires-dist = [
 [[package]]
 name = "crawler4j-workspace"
 version = "0.0.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "crawler4j" },
     { name = "crawler4j-contracts" },

@@ -132,6 +132,15 @@ def test_workspace_root_declares_packages_workspace_members():
     assert pyproject["tool"]["uv"]["sources"]["crawler4j-contracts"]["workspace"] is True
 
 
+def test_workspace_root_declares_console_shortcuts_for_build_and_publish():
+    pyproject = _load_pyproject(WORKSPACE_ROOT / "pyproject.toml")
+
+    assert pyproject["project"]["scripts"]["build"] == "scripts.build_workspace_packages:build_main"
+    assert pyproject["project"]["scripts"]["publish"] == "scripts.build_workspace_packages:publish_main"
+    assert pyproject["build-system"]["build-backend"] == "setuptools.build_meta"
+    assert pyproject["tool"]["setuptools"]["packages"] == ["scripts"]
+
+
 def test_dev_scripts_live_in_workspace_root_instead_of_app_package():
     root_scripts = WORKSPACE_ROOT / "scripts"
     package_scripts = APP_ROOT / "scripts"
@@ -196,4 +205,41 @@ def test_workspace_build_script_uses_uv_clear_for_each_target():
         "--out-dir",
         str(WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "dist"),
         "--clear",
+    ]
+
+
+def test_workspace_build_script_parse_args_defaults_to_build_mode():
+    script = _load_script_module("build_workspace_packages.py")
+
+    args = script.parse_args(["crawler4j"])
+
+    assert args.action == "build"
+    assert args.packages == ["crawler4j"]
+    assert args.dry_run is False
+
+
+def test_workspace_build_script_parse_args_supports_publish_shorthand():
+    script = _load_script_module("build_workspace_packages.py")
+
+    args = script.parse_args(["publish", "crawler4j-sdk", "--dry-run"])
+
+    assert args.action == "publish"
+    assert args.packages == ["crawler4j-sdk"]
+    assert args.dry_run is True
+
+
+def test_workspace_build_script_uses_package_local_dist_glob_for_publish():
+    script = _load_script_module("build_workspace_packages.py")
+    target = script.BUILD_TARGETS[0]
+
+    assert script.publish_command(target) == [
+        "uv",
+        "publish",
+        str(WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "dist" / "*"),
+    ]
+    assert script.publish_command(target, dry_run=True) == [
+        "uv",
+        "publish",
+        "--dry-run",
+        str(WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "dist" / "*"),
     ]

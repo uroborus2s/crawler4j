@@ -10,6 +10,10 @@ dependencies = [
     "crawler4j-contracts",
 ]
 
+[project.scripts]
+build = "scripts.build_workspace_packages:build_main"
+publish = "scripts.build_workspace_packages:publish_main"
+
 [dependency-groups]
 dev = [
     "pyinstaller>=6.17.0",
@@ -26,6 +30,13 @@ crawler4j-contracts = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["scripts"]
 
 [tool.ruff]
 line-length = 120

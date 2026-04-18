@@ -51,7 +51,14 @@ uv run ruff check .
 uv run python scripts/smoke_test_ui.py
 
 # 清空各自 dist 后统一构建三个包
-uv run python scripts/build_workspace_packages.py
+uv run build
+
+# 只构建一个包，但仍然落到该包自己的 dist/
+uv run build crawler4j
+
+# 直接按包名发布 SDK / Contracts（脚本会自动指向各自 dist/*）
+UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk
+UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-contracts
 
 # PyInstaller 打包桌面应用
 uv run pyinstaller packages/crawler4j/crawler4j.spec
@@ -66,7 +73,7 @@ uv run pyinstaller packages/crawler4j/crawler4j.spec
 
 当前保留的脚本：
 
-- `scripts/build_workspace_packages.py`：清空各包 `dist/` 后统一执行 `uv build --package ... --out-dir ... --clear`
+- `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；构建时自动写回各包 `dist/`，发布时自动指向各包 `dist/*`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
 - `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
 
