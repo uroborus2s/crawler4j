@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 发布负责人  
 **上游输入：** `prd.md` | `requirements-analysis.md` | 本地验证结果  
 **下游输出：** `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/` | `.factory/process/stage-check-report.md`  
-**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`  
-**最后更新：** 2026-04-16  
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`
+**最后更新：** 2026-04-18
 
 ## 1. 校验清单
 
@@ -24,6 +24,9 @@
 | `REQ-007` | 等待确认信号是否可持久化并重新读取 | 通过 | `test_repository_roundtrip_preserves_task_signal` |
 | `REQ-007` | ATM 详情页是否会展示结构化确认面板 | 通过 | `test_task_confirmation_dialog_renders_structured_payload`、`test_job_detail_dialog_presents_waiting_confirmation_task` |
 | `REQ-007` | 确认面板是否回调既有确认服务 | 通过 | `test_job_detail_dialog_confirms_waiting_task_after_dialog_accept` |
+| `REQ-008` | 宿主是否为模块提供独立的审计事件存储表 | 通过 | `test_module_data_store_appends_and_queries_audit_events` |
+| `REQ-008` | runtime tools 是否暴露 `db.append_event` / `db.query_events` | 通过 | `test_runtime_tools_register_expected_surface`、`test_db_tools_append_and_query_events` |
+| `REQ-008` | 模块清理时是否同时清理快照数据、审计事件和数据表 schema | 通过 | `test_module_data_store_clear_module_data_removes_data_db_rows_only` |
 | `REQ-004` | 发布链路版本信号是否一致 | 通过 | 根应用工作区版本、运行时版本服务、最近正式 tag 与 release 文档关系已明确 |
 | `REQ-005` | 工厂控制面是否已补齐 | 通过 | 本次已新增 `AGENTS.md`、`GEMINI.md`、`.factory/`、编号文档 |
 | `NFR-001` | 是否统一使用 `uv` | 通过 | 现有运行方式与本次验证均基于 `uv` |
@@ -54,6 +57,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-18 | 新增 `REQ-008` / `TASK-022` 的模块审计事件独立存储验证结论 | Codex |
 | 2026-03-26 | 初始需求校验结论 | Codex |
 | 2026-03-26 | 同步 `TASK-005` 完成后的质量门结论 | Codex |
 | 2026-03-31 | 新增 `REQ-006` 待实现校验项与 `TASK-013` 设计状态 | Codex |

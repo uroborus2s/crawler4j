@@ -105,6 +105,8 @@ class MyTask(TaskScript):
 
 - `db.list_records`
 - `db.replace_records`
+- `db.append_event`
+- `db.query_events`
 - `db.acquire_lock`
 - `db.release_lock`
 - `db.is_locked`
@@ -137,6 +139,15 @@ class MyTask(TaskScript):
 if ctx.tools and ctx.tools.has_tool("db.list_records"):
     records = ctx.tools.call("db.list_records", dataset="orders")
     ctx.tools.call("db.replace_records", dataset="orders", records=records)
+
+if ctx.tools and ctx.tools.has_tool("db.append_event"):
+    ctx.tools.call(
+        "db.append_event",
+        dataset="order_events",
+        event_type="status_changed",
+        entity_key="order-001",
+        payload={"status": "paid"},
+    )
 
 if ctx.tools and ctx.tools.has_tool("env.set_proxy"):
     await ctx.tools.call("env.set_proxy", env_id=ctx.env_id, proxy_value="http://127.0.0.1:8888")

@@ -9,12 +9,14 @@ class _FakeTools:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     def has_tool(self, tool_name: str) -> bool:
-        return tool_name in {"db.list_records", "captcha.match_slider", "env.set_proxy"}
+        return tool_name in {"db.list_records", "db.append_event", "db.query_events", "captcha.match_slider", "env.set_proxy"}
 
     def list_tools(self) -> list[ToolSpec]:
         return [
             ToolSpec(name="captcha.match_slider", description="识别滑块验证码缺口位置"),
+            ToolSpec(name="db.append_event", description="追加模块审计事件"),
             ToolSpec(name="db.list_records", description="读取模块数据集"),
+            ToolSpec(name="db.query_events", description="查询模块审计事件"),
             ToolSpec(name="env.set_proxy", description="为当前环境设置代理", is_async=True),
         ]
 
@@ -60,15 +62,20 @@ def test_tools_capability_calls_core_extensions():
     fake_tools = _FakeTools()
 
     assert fake_tools.has_tool("db.list_records") is True
+    assert fake_tools.has_tool("db.append_event") is True
     specs = fake_tools.list_tools()
     assert [tool.name for tool in specs] == [
         "captcha.match_slider",
+        "db.append_event",
         "db.list_records",
+        "db.query_events",
         "env.set_proxy",
     ]
     assert {tool.name: tool.is_async for tool in specs} == {
         "captcha.match_slider": False,
+        "db.append_event": False,
         "db.list_records": False,
+        "db.query_events": False,
         "env.set_proxy": True,
     }
 

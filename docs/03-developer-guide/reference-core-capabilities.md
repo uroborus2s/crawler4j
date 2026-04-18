@@ -22,6 +22,8 @@ ctx.tools.call(...)
 |---|---|---|---|
 | `db.list_records` | 否 | 读取业务数据集 | `list[dict]` |
 | `db.replace_records` | 否 | 全量覆盖业务数据集 | `bool` |
+| `db.append_event` | 否 | 追加模块审计事件 | `bool` |
+| `db.query_events` | 否 | 查询模块审计事件 | `list[dict]` |
 | `db.acquire_lock` | 否 | 获取互斥锁 | `bool` |
 | `db.release_lock` | 否 | 释放互斥锁 | `bool` |
 | `db.is_locked` | 否 | 查询锁状态 | `bool` |
@@ -36,6 +38,11 @@ ctx.tools.call(...)
 | `captcha.match_click_targets` | 否 | 识别点选验证码 | `ClickCaptchaMatchResult` |
 
 ## 数据工具
+
+先记住一个大原则：
+
+- `db.list_records` / `db.replace_records` = 快照型当前状态
+- `db.append_event` / `db.query_events` = append-only 审计历史
 
 ### `db.list_records`
 
@@ -89,6 +96,61 @@ ctx.tools.call("db.replace_records", dataset="hotels", records=rows)
 - 两个 task 同时读旧列表再各自 `replace_records`，后写入的一方会覆盖前一方结果
 - 如果存在并发写，优先先加锁
 - 如果写逻辑越来越复杂，说明这个数据集设计该重做，而不是继续叠补丁
+
+### `db.append_event`
+
+```python
+ok = ctx.tools.call(
+    "db.append_event",
+    dataset="account_events",
+    event_type="status_changed",
+    entity_key="13800000001",
+    previous_status="active",
+    next_status="blocked",
+    payload={"reason": "risk_control"},
+)
+```
+
+适用场景:
+
+- 记录账号状态流转
+- 写入运行留痕
+- 保存 append-only 审计事件
+
+不适合:
+
+- 回写当前快照列表
+- 覆盖历史事件
+- 充当通用 CRUD 表
+
+### `db.query_events`
+
+```python
+events = ctx.tools.call(
+    "db.query_events",
+    dataset="account_events",
+    entity_key="13800000001",
+    event_type="status_changed",
+    limit=20,
+)
+```
+
+适用场景:
+
+- 查询某个账号的历史轨迹
+- 按事件类型筛选历史记录
+- 按时间范围拉取运行留痕
+
+返回结果按时间排序，支持：
+
+- `entity_key`
+- `event_type`
+- `run_id`
+- `start_at`
+- `end_at`
+- `limit`
+- `offset`
+- `order`
 
 ### `db.get_state` / `db.set_state` / `db.exists_state`
 

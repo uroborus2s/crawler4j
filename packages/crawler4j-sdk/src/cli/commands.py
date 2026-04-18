@@ -688,6 +688,8 @@ class _DeclareUICheckTools:
             "ui.get_data_table",
             "db.list_records",
             "db.replace_records",
+            "db.append_event",
+            "db.query_events",
             "db.acquire_lock",
             "db.release_lock",
             "db.is_locked",
@@ -716,6 +718,10 @@ class _DeclareUICheckTools:
             records = kwargs.get("records") or []
             self._datasets[dataset] = [dict(row) for row in records if isinstance(row, dict)]
             return True
+        if tool_name == "db.append_event":
+            raise CLIError("declare_ui 不允许调用 db.append_event；UI 声明必须保持无副作用")
+        if tool_name == "db.query_events":
+            return []
         if tool_name == "db.acquire_lock":
             return True
         if tool_name == "db.release_lock":

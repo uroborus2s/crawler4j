@@ -174,7 +174,8 @@ class FetchHotelsTask(TaskScript):
 
 这里的两个工具名是宿主稳定契约，不是你自己发明的字符串:
 
-- `db.replace_records`：同步写入数据集
+- `db.replace_records`：同步写入快照数据集
+- `db.append_event`：追加审计事件
 - `ui.declare_data_table`：同步声明托管数据表 schema
 
 完整工具列表和同步/异步语义，直接看 [Core 能力参考](reference-core-capabilities.md)。

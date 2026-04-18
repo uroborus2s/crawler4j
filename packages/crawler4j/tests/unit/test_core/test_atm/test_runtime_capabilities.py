@@ -46,6 +46,8 @@ def test_runtime_tools_register_expected_surface():
 
     assert caps.tools.has_tool("db.list_records") is True
     assert caps.tools.has_tool("db.replace_records") is True
+    assert caps.tools.has_tool("db.append_event") is True
+    assert caps.tools.has_tool("db.query_events") is True
     assert caps.tools.has_tool("db.acquire_lock") is True
     assert caps.tools.has_tool("db.release_lock") is True
     assert caps.tools.has_tool("db.is_locked") is True
@@ -63,6 +65,7 @@ def test_runtime_tools_register_expected_surface():
     tool_names = [spec.name for spec in specs]
     assert tool_names == sorted(tool_names)
     assert {spec.name: spec.is_async for spec in specs}["env.set_proxy"] is True
+    assert {spec.name: spec.is_async for spec in specs}["db.append_event"] is False
     assert {spec.name: spec.is_async for spec in specs}["db.list_records"] is False
 
 
@@ -101,6 +104,49 @@ def test_db_tools_records_and_lock_are_generic(monkeypatch):
     assert first is True
     assert second is False
     assert third is True
+
+
+def test_db_tools_append_and_query_events(monkeypatch):
+    fake_kv = _FakeKV()
+    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
+
+    caps = build_runtime_capabilities("demo_module")
+    first = caps.tools.call(
+        "db.append_event",
+        dataset="account_events",
+        event_type="created",
+        entity_key="13800000001",
+        next_status="active",
+        payload={"source": "import"},
+        created_at=100,
+    )
+    second = caps.tools.call(
+        "db.append_event",
+        dataset="account_events",
+        event_type="status_changed",
+        entity_key="13800000001",
+        previous_status="active",
+        next_status="blocked",
+        result="success",
+        reason="risk_control",
+        payload={"operator": "system"},
+        created_at=200,
+    )
+
+    events = caps.tools.call("db.query_events", dataset="account_events")
+    created_only = caps.tools.call(
+        "db.query_events",
+        dataset="account_events",
+        entity_key="13800000001",
+        event_type="created",
+    )
+    records = caps.tools.call("db.list_records", dataset="account_events")
+
+    assert first is True
+    assert second is True
+    assert [item["event_type"] for item in events] == ["status_changed", "created"]
+    assert created_only[0]["payload"] == {"source": "import"}
+    assert records == []
 
 
 def test_db_tools_state_roundtrip(monkeypatch):

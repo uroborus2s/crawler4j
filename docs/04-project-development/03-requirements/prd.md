@@ -6,8 +6,8 @@
 **主要读者：** 开发 | QA | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/02-discovery/input.md` | `docs/04-project-development/02-discovery/current-state-analysis.md` | `docs/04-project-development/01-governance/project-charter.md`  
 **下游输出：** `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/` | `docs/04-project-development/06-testing-verification/test-plan.md`  
-**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`  
-**最后更新：** 2026-04-16  
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`
+**最后更新：** 2026-04-18
 
 ## 1. 背景与目标
 
@@ -125,6 +125,29 @@
 - [x] `UAT-017` ATM 详情页在收到等待确认信号时会弹出结构化确认面板
 - [x] `UAT-018` 用户在确认面板中选择成功或失败后，会调用既有确认服务完成任务收尾
 
+### `REQ-008` 宿主必须为模块提供独立的审计事件持久化能力
+
+- 优先级：P1
+- 描述：宿主必须在快照型 dataset 之外，为模块提供 append-only 的审计事件写入与查询能力，用于记录账号状态流转、运行留痕和其他历史轨迹。
+- 用户故事：作为模块开发者，我希望宿主提供与快照数据分离的事件型存储能力，以便记录审计历史，而不是把事件流伪装成普通 dataset 全量覆盖写回。
+- 前置条件：模块通过 `TaskContext.tools` 调用宿主扩展能力。
+- 业务规则：
+  - 快照型数据继续通过 `db.list_records` / `db.replace_records` 落到 `data.db.module_datasets`。
+  - 审计事件通过 `db.append_event` / `db.query_events` 落到独立的 `data.db.module_audit_events`。
+  - 模块写入的审计事件为 append-only；本轮不提供模块侧的更新/删除接口。
+  - `core:data_table` 仍只服务快照型 dataset，不承担审计事件编辑。
+  - retention / archive 暂不纳入本轮实现范围。
+- 依赖项：`packages/crawler4j/src/core/persistence/{database.py,module_data_store.py}`, `packages/crawler4j/src/core/atm/runtime_capabilities.py`, `packages/crawler4j-sdk/README.md`, 模块开发者指南
+- 排除范围：本轮不实现旧 `account_events` 自动迁移脚本；不新增通用审计查询 UI。
+
+验收标准：
+
+- [x] `UAT-019` 模块调用 `db.append_event` 时，宿主会为目标模块和 dataset 新增 1 条独立事件记录，而不是重写整包历史 JSON
+- [x] `UAT-020` 模块调用 `db.query_events` 时，可按 `dataset / entity_key / event_type / run_id / time range` 查询事件，并按时间顺序返回结果
+- [x] `UAT-021` 快照型 dataset 继续通过 `db.list_records` / `db.replace_records` 读写，事件工具不会污染 `module_datasets`
+- [x] `UAT-022` 新增事件工具后，模块仍通过统一的 `ctx.tools.call(...)` 能力面访问宿主，不需要直连数据库
+- [x] `UAT-023` 宿主清理模块数据时，会同时清理该模块的快照数据、审计事件和托管数据表 schema
+
 ### `REQ-004` 项目必须具备可追溯的发布与文档链路
 
 - 优先级：P0
@@ -217,3 +240,4 @@
 | v1.0 | 2026-03-26 | 基于当前仓库真实状态重建工厂 PRD |  |
 | v1.1 | 2026-03-31 | 新增 `REQ-006`，登记模块根入口自动托管的最小改造需求 |  |
 | v1.2 | 2026-04-16 | 新增 `REQ-007`，登记信号驱动的结构化确认面板与客户端确认闭环 | `CR-004` |
+| v1.3 | 2026-04-18 | 新增 `REQ-008`，登记模块快照数据与审计事件分层存储契约 | `CR-008` |
