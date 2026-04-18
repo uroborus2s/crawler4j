@@ -304,6 +304,66 @@ def test_check_full_rejects_lock_key_business_occupancy_conflict(
     assert "误用 lock_key" in captured.out
 
 
+def test_check_full_rejects_audit_event_writes_in_declare_ui(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    runtime_path.write_text(
+        runtime_text.replace(
+            "# SDK-DATA-TABLES\n    return None",
+            """context.tools.call(
+        "db.append_event",
+        dataset="account_events",
+        event_type="declare_ui_checked",
+        entity_key="demo-account",
+        payload={"source": "sdk_check"},
+        created_at=1,
+    )
+    context.tools.call(
+        "db.query_events",
+        dataset="account_events",
+        entity_key="demo-account",
+        limit=10,
+    )
+    return None""",
+        ),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "declare_ui 不允许调用 db.append_event" in captured.out
+
+
+def test_check_full_accepts_audit_event_queries_in_declare_ui(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    runtime_path.write_text(
+        runtime_text.replace(
+            "# SDK-DATA-TABLES\n    return None",
+            """context.tools.call(
+        "db.query_events",
+        dataset="account_events",
+        entity_key="demo-account",
+        limit=10,
+    )
+    return None""",
+        ),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 0
+
+
 def test_package_build_and_verify(module_root: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(module_root)
 

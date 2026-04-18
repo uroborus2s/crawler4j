@@ -247,6 +247,31 @@ def _init_data_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_module_datasets_module
             ON module_datasets(module_name);
 
+            -- 模块审计事件（append-only）
+            CREATE TABLE IF NOT EXISTS module_audit_events (
+                id TEXT PRIMARY KEY,
+                module_name TEXT NOT NULL,
+                dataset_name TEXT NOT NULL,
+                entity_key TEXT,
+                event_type TEXT NOT NULL,
+                run_id TEXT,
+                previous_status TEXT,
+                next_status TEXT,
+                result TEXT,
+                reason TEXT,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_module_audit_events_module_dataset_time
+            ON module_audit_events(module_name, dataset_name, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_module_audit_events_entity_time
+            ON module_audit_events(module_name, dataset_name, entity_key, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_module_audit_events_type_time
+            ON module_audit_events(module_name, dataset_name, event_type, created_at DESC);
+
             -- 模块数据表视图元数据
             CREATE TABLE IF NOT EXISTS module_data_table_views (
                 module_name TEXT NOT NULL,

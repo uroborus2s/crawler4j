@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `module-boundaries.md` | `api-design.md` | 当前 `TaskContext` / MMS / ATM / Debug 实现  
 **下游输出：** `docs/03-developer-guide/core-concepts.md` | `docs/03-developer-guide/build-modules.md` | `docs/03-developer-guide/reference-core-capabilities.md` | `.factory/memory/api.summary.md`  
-**关联 ID：** `API-005`, `REQ-002`, `REQ-003`, `REQ-006`, `CR-003`  
-**最后更新：** 2026-04-17
+**关联 ID：** `API-005`, `API-006`, `REQ-002`, `REQ-003`, `REQ-006`, `REQ-008`, `CR-003`, `CR-008`
+**最后更新：** 2026-04-18
 
 ## 1. 设计目标
 
@@ -28,7 +28,7 @@
 | 持久配置 | `config.db.module_config_entries` | `ctx.get_config()` / `ctx.config` | 禁止 | 宿主统一维护；模块运行时只读 |
 | 运行态元数据 | `ctx.runtime` | `ctx.runtime[...]` | 禁止 | 由 ATM / Debug / Core 注入 |
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
-| 持久业务数据 | `data.db` | `ctx.tools.call("db.*")` | `ctx.tools.call("db.*")` | 记录列表、表数据、模块业务结果 |
+| 快照数据与审计事件 | `data.db` | `ctx.tools.call("db.*")` | `ctx.tools.call("db.*")` | 当前状态型 records、审计事件历史 |
 | 短期状态与锁 | `state.db.kv_store` | `ctx.tools.call("db.get_state")` 等 | `ctx.tools.call("db.set_state")` 等 | 游标、进度、会话、小体量状态、幂等锁 |
 
 ## 3. 配置契约
@@ -132,14 +132,22 @@ ctx.state.setdefault("tasks", {})
 - 长期配置
 - 需要跨多次任务长期保留的持久状态
 
-## 6. 持久业务数据与数据表契约
+## 6. 快照数据、审计事件与数据表契约
 
 ### 6.1 运行时数据位置
 
 - `ui.declare_data_table` 声明的 schema 持久化到 `data.db.module_data_table_views`
-- `db.list_records` / `db.replace_records` 读写的 records 持久化到 `data.db.module_datasets`
+- `db.list_records` / `db.replace_records` 读写的快照型 records 持久化到 `data.db.module_datasets`
+- `db.append_event` / `db.query_events` 读写的审计事件持久化到 `data.db.module_audit_events`
 
-### 6.2 模块源码与运行时数据边界
+### 6.2 快照数据与审计事件语义
+
+- `module_datasets` 承载“当前状态型 / 可覆盖型”业务数据。
+- `module_audit_events` 承载“历史轨迹型 / append-only”审计事件。
+- `core:data_table` 当前只面向快照型 dataset；不要把事件流接进通用可编辑数据表。
+- retention / archive 后续可在宿主侧继续扩展，但不属于本轮正式契约。
+
+### 6.3 模块源码与运行时数据边界
 
 当前 CLI V1 不再为“源码层数据模型”单独建立 `data/` 命令或固定目录。
 
@@ -148,10 +156,11 @@ ctx.state.setdefault("tasks", {})
 - 业务辅助代码按实际职责放在 `tasks/`、`workflows/`、`ui/` 或模块自定义源码文件里
 - `data.db` 才是运行时业务数据
 
-### 6.3 数据表开发约束
+### 6.4 数据开发约束
 
 - 数据表 schema 只能通过 `ui.declare_data_table` 声明。
-- 数据表 records 只能通过 `db.list_records` / `db.replace_records` 读写。
+- 快照型 records 只能通过 `db.list_records` / `db.replace_records` 读写。
+- 审计事件只能通过 `db.append_event` / `db.query_events` 读写。
 - `view_id` 与 `dataset` 必须保持一致，由宿主统一管理。
 - schema 不是配置，不要塞进 `ctx.config`。
 - `lock_key` / `lock_scope` 只用于 Core 临时锁，不用于表达模块业务占用态。
@@ -209,6 +218,26 @@ async def execute(ctx: TaskContext):
         rows = ctx.tools.call("db.list_records", dataset="accounts")
         ctx.tools.call("db.replace_records", dataset="accounts", records=rows)
 
+    if ctx.tools and ctx.tools.has_tool("db.append_event"):
+        ctx.tools.call(
+            "db.append_event",
+            dataset="account_events",
+            event_type="status_changed",
+            entity_key="13800000001",
+            previous_status="active",
+            next_status="blocked",
+            payload={"reason": "risk_control"},
+        )
+
+    if ctx.tools and ctx.tools.has_tool("db.query_events"):
+        history = ctx.tools.call(
+            "db.query_events",
+            dataset="account_events",
+            entity_key="13800000001",
+            limit=20,
+        )
+        ctx.state["workflow"]["history_size"] = len(history)
+
     return {
         "workflow": workflow,
         "auth_username": auth.get("username"),
@@ -237,3 +266,4 @@ async def execute(ctx: TaskContext):
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-04-17 | 初版建立模块配置、运行态、内存与数据表的统一契约 | Codex |
+| 2026-04-18 | 增补模块审计事件契约，明确快照数据与审计事件分层存储 | Codex |

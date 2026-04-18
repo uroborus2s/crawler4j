@@ -40,7 +40,7 @@
 | 持久配置 | `ctx.get_config()` / `ctx.config` | 读取模块和 workflow 配置 | 写运行时状态、拼 job 参数 |
 | 运行态 | `ctx.runtime` | 读取 workflow、params、`devel_mode` 等 | 持久配置、长期状态 |
 | 单次执行状态 | `ctx.state` | 少量阶段状态、轻量控制参数 | 大对象总线、持久业务数据 |
-| 持久业务数据 | `ctx.tools.call("db.*")` | 结构化 records、轻状态、锁 | 宿主内部数据库细节 |
+| 持久业务数据 | `ctx.tools.call("db.*")` | 快照型 records、审计事件、轻状态、锁 | 宿主内部数据库细节 |
 | UI | 代码页面或 `core:data_table` | 业务页面或受控数据表 | 第二套 CRUD 框架 |
 
 ## 模块执行链路
@@ -108,7 +108,8 @@
 | 读配置 | `ctx.get_config()` | 直接读 `module.yaml` 或数据库 |
 | 读执行参数 | `ctx.runtime["params"]` | 自己拼接配置和 job 输入 |
 | 暂存单次执行状态 | `ctx.state` | `db.set_state` 或全局变量 |
-| 保存业务数据 | `db.list_records` / `db.replace_records` | `ctx.state` |
+| 保存快照数据 | `db.list_records` / `db.replace_records` | `ctx.state` |
+| 追加审计事件 | `db.append_event` / `db.query_events` | `db.replace_records` |
 | 保存轻状态和锁 | `db.get_state` / `db.set_state` / `db.acquire_lock` | `ctx.config` |
 
 ## 术语表

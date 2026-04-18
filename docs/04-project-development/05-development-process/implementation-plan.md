@@ -6,8 +6,8 @@
 **主要读者：** 技术负责人 | 开发 | QA | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | 当前文档治理缺口审计  
 **下游输出：** `docs/04-project-development/05-development-process/execution-log.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/07-release-delivery/release-notes.md`  
-**关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`, `CR-004`  
-**最后更新：** 2026-04-16
+**关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`, `CR-004`, `CR-008`
+**最后更新：** 2026-04-18
 
 ## 1. 实施目标
 
@@ -31,6 +31,7 @@
 | Wave 10 | `TASK-013` | `docs/04-project-development/02-discovery/brainstorm-record.md`、`module-boundaries.md`、`api-design.md` | 模块根入口稳定薄壳、SDK 统一组装器与模块重初始化路径 | 已完成：ModuleAssembler 与 Shim 已落地，单测与集成测试 100% 通过 |
 | Wave 11 | `TASK-014` ~ `TASK-020` | 文档规范审计、根导航覆盖检查、最小文档包缺口 | 生产级文档入口收口、缺失正式页补齐、索引与 memory 同步 | 进行中：以四大模块结构为单一入口，补齐发布/运维/追踪关键页 |
 | Wave 12 | `TASK-021` | `REQ-007`、`api-design.md`、现有 `TaskSignal` / ATM / UI 实现 | 信号驱动的结构化确认面板、任务 signal 持久化与客户端确认闭环 | 已完成：任务 signal 已持久化并发布 `task.signal` 事件，ATM 详情页可展示结构化确认面板并回调既有确认服务 |
+| Wave 13 | `TASK-022` | `REQ-008`、`API-005`、模块数据持久化现状 | 模块审计事件独立存储、事件工具能力与契约文档同步 | 已完成：`module_audit_events`、`db.append_event`、`db.query_events` 与对应测试/文档已落地 |
 
 ## 3. 风险与应对
 
@@ -76,6 +77,7 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-04-08 | 补强 Wave 9 的 `core:data_table` 声明刷新、CRUD hook 与 DevLink 调试回路验证 | Codex |
+| 2026-04-18 | 新增 Wave 13 / `TASK-022`，为模块建立快照数据与审计事件分层存储契约 | Codex |
 | 2026-04-02 | 新增 Wave 11 文档治理整改波次，并补写任务表 | Codex |
 | 2026-04-16 | 新增 Wave 12 / `TASK-021`，收口 `TaskSignal.wait_for_confirmation` 的结构化确认面板与客户端确认闭环 | Codex |
 | 2026-03-26 | 建立首批实施计划 | Codex |
