@@ -37,6 +37,7 @@
 - `TC-035`: debug worker 在 `等待 IDE 附加` 场景下会先完成 attach，再刷新模块注册并进入真实执行链，避免早期模块代码在 debugger 就绪前抢跑；覆盖继续由 `tests/integration/test_task_debug_e2e.py` 维持。
 - `TC-036`: `Attach to Crawler4j` 生成的 VS Code 配置现在会写入显式 `pathMappings`，把 `${workspaceFolder}` 映射到宿主实际执行的 DevLink 模块真实目录，降低 Attach 成功但断点因路径不一致而失效的风险；覆盖见 `tests/unit/test_core/test_debug/test_vscode.py`.
 - `TC-037`: debug attach 现在显式回归覆盖了 `wait_for_attach=true + stop_on_entry=false` 的默认分支，确保不勾“启动后立即断住”时普通模块断点仍能命中；覆盖见 `tests/integration/test_task_debug_e2e.py`.
+- `TC-039`: debug worker 的 `等待 IDE 附加` 当前直接走 `debugpy.wait_for_client()`，且 `stop_on_entry=false` 默认分支在真正 attach 前必须持续停留在 `waiting_for_attach`；覆盖见 `tests/integration/test_task_debug_e2e.py`.
 - `TC-038`: `uv run package-desktop` 现在会把 workspace 里的 `crawler4j-contracts` / `crawler4j-sdk` 一并打进 macOS bundle，并在构建完成后自动移除松散的 `Crawler4j/` collect 目录；覆盖见 `tests/unit/test_sdk/test_packaging_config.py`，实包验证已确认 bundle 可在临时 HOME 下启动到 REM/ATM/MMS 初始化阶段。
 - Workspace root `scripts/` now keeps `build_workspace_packages.py`, `db_cli.py`, and `smoke_test_ui.py` as the maintained helper set; legacy local debug and icon-generation helpers are no longer treated as maintained assets.
 

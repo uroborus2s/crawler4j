@@ -22,11 +22,28 @@ def _emit_event(payload: dict[str, Any]) -> None:
 
 
 async def _wait_for_attach(debugpy_module, stop_flag: Path) -> bool:
-    while not debugpy_module.is_client_connected():
+    wait_task = asyncio.create_task(asyncio.to_thread(debugpy_module.wait_for_client))
+    stop_requested = False
+
+    while True:
+        if wait_task.done():
+            try:
+                await wait_task
+            except Exception:
+                if stop_requested or stop_flag.exists():
+                    return False
+                raise
+            return not stop_requested and not stop_flag.exists()
+
         if stop_flag.exists():
-            return False
+            stop_requested = True
+            try:
+                debugpy_module.wait_for_client.cancel()
+            except RuntimeError:
+                # wait_for_client() may not have installed its cancel hook yet.
+                pass
+
         await asyncio.sleep(0.1)
-    return True
 
 
 def _map_final_state(task_status: str) -> DebugSessionState:
@@ -60,10 +77,6 @@ async def main_async(config_path: str) -> int:
 
     await get_environment_manager().startup(recover_crashed=False)
 
-    from src.core.mms.registry import get_module_registry
-
-    get_module_registry().refresh()
-
     debugpy.listen((payload["attach_host"], int(payload["attach_port"])))
     if payload.get("wait_for_attach", True):
         _emit_event(
@@ -85,6 +98,10 @@ async def main_async(config_path: str) -> int:
 
     if payload.get("stop_on_entry", False):
         debugpy.breakpoint()
+
+    from src.core.mms.registry import get_module_registry
+
+    get_module_registry().refresh()
 
     _emit_event({"type": "state", "state": DebugSessionState.RUNNING.value})
 

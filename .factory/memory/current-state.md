@@ -28,6 +28,10 @@
 - 最新修复：2026-04-20 已修正 ATM `任务调试` 对话框生成 VS Code `launch.json` 时固定沿用表单端口的问题；当前若调试服务为避让占用端口而改写 attach 地址，对话框会优先写入活动调试会话的真实 `attach_host/attach_port`，失败或已结束会话则回退到表单请求值；对应 Qt 单测与开发者调试文档已同步更新。
 - 最新修复：2026-04-20 已修正 ATM `任务调试` 对话框日志框的轮询刷新行为；当前当日志内容未变化时不会重复整块重绘，用户手动拖到中间查看旧日志时滚动位置会保留，停留在底部时则继续自动跟随最新输出；对应 Qt 单测与开发者调试文档已同步更新。
 - 最新修复：2026-04-20 已修正 ATM `任务调试` 对话框的“重新开始”语义；当前点击 `重新开始` 时会先停止旧调试会话，再按当前表单里的端口、`等待 IDE 附加`、`启动后立即断住`、运行态参数等值新建并启动调试会话，不再沿用旧 session 的隐藏配置；对应 Qt 单测、调试集成回归与开发者调试文档已同步更新。
+- 最新修复：2026-04-20 已把 debug worker 的模块刷新时机后移到 attach 完成之后；当前勾选 `等待 IDE 附加` 时，宿主会先等待调试器附加，再执行 `ModuleRegistry.refresh()` 并进入 `ExecutionRunner`，避免 `env_selector`、workflow 与 task 等早期模块代码在 debugger 就绪前就被导入/跑过；对应调试集成回归与开发者调试文档已同步更新。
+- 最新修复：2026-04-20 已为 ATM `任务调试` 的 VS Code attach 配置补上显式 `pathMappings`；当前 `Attach to Crawler4j` 会把 `${workspaceFolder}` 映射到宿主实际加载的 DevLink 模块真实目录，减少因工作区别名/符号链接/路径漂移导致的“Attach 成功但断点不生效”；对应 VS Code 配置单测与开发者调试文档已同步更新。
+- 最新修复：2026-04-20 已把 debug worker 的 attach 阻塞从轮询 `debugpy.is_client_connected()` 收紧为官方 `debugpy.wait_for_client()` 路径；当前勾选 `等待 IDE 附加` 时，未完成 IDE attach 前不应再提前进入 `running`；对应调试集成回归已把 `stop_on_entry=false` 默认分支补上“attach 前保持 waiting”断言。
+- 最新修复：2026-04-20 已把仓库根目录 `.vscode/launch.json` 里的 `Crawler4j: Start App` 显式收紧为 `subProcess=false`，并在开发者调试文档补充“不要把主程序 VS Code launch 调试和任务 worker attach 调试混用”的说明，降低主程序调试链干扰 task debug attach 的风险。
 - 最新修复：2026-04-20 已把 ATM `新建作业` 弹窗中的 `配置运行模板`、`取消`、`创建/保存` 按钮切到共享 `StyledButton` 组件，并统一为 `40px` 高度；同时把“运行配置”预览说明改为按当前宽度自动回流并同步最小高度，避免长文本在真实窗口里向下溢出、压到下面按钮区域；对应 Qt 单测已补“使用公共组件”和“预览文本与按钮保持间距”的断言。
 - 最新修复：2026-04-20 已把 `docs-stratego` 通知 workflow 的自动监听分支从 `feature/task-plugin-system` 收口到 `main`，并在发送 `repository_dispatch` 前先去掉 `DOCS_STRATEGO_DISPATCH_TOKEN` 中意外带入的 `CR/LF`，避免 `Authorization` header 被换行拆断；对应部署说明、运维索引、文档索引与 workflow 静态回归测试已同步更新。
 - 设计：2026-04-19 ATM 固定环境池方案已按“模块资源池资格卡片 + 等待队列 + FIFO 补位 + 资源池卡片更新事件 + 轻量定时调和”的口径落地到宿主和 SDK V1。

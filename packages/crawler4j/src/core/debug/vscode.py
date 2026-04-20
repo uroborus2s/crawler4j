@@ -10,7 +10,12 @@ from typing import Any
 DEFAULT_ATTACH_NAME = "Attach to Crawler4j"
 
 
-def _build_attach_configuration(host: str, port: int, name: str = DEFAULT_ATTACH_NAME) -> dict[str, Any]:
+def _build_attach_configuration(
+    host: str,
+    port: int,
+    module_dir: Path,
+    name: str = DEFAULT_ATTACH_NAME,
+) -> dict[str, Any]:
     return {
         "name": name,
         "type": "debugpy",
@@ -20,6 +25,15 @@ def _build_attach_configuration(host: str, port: int, name: str = DEFAULT_ATTACH
             "port": port,
         },
         "justMyCode": False,
+        # VS Code may open the DevLink module through a workspace alias or symlink,
+        # while the worker resolves and imports the real module path on disk.
+        # Explicit pathMappings keeps breakpoints bound to the worker's source files.
+        "pathMappings": [
+            {
+                "localRoot": "${workspaceFolder}",
+                "remoteRoot": str(module_dir),
+            }
+        ],
     }
 
 
@@ -48,7 +62,7 @@ def ensure_vscode_attach_config(
     if not isinstance(configurations, list):
         configurations = []
 
-    new_config = _build_attach_configuration(host, port, configuration_name)
+    new_config = _build_attach_configuration(host, port, module_dir, configuration_name)
     replaced = False
     normalized_configs = []
     for item in configurations:

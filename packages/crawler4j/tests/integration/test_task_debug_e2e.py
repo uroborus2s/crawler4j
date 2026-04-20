@@ -203,6 +203,14 @@ def _send_configuration_done(client: _DapClient) -> dict:
     )
 
 
+def _send_configuration_done_response(client: _DapClient) -> dict:
+    client.send("configurationDone", {})
+    return _wait_for_message(
+        client,
+        lambda msg: msg.get("type") == "response" and msg.get("command") == "configurationDone",
+    )
+
+
 def _exercise_debug_attach(host: str, port: int, breakpoint_file: Path, breakpoint_line: int) -> dict:
     # The worker still needs to create and connect a real browser environment
     # after the initial stop-on-entry breakpoint resumes, so allow a longer DAP
@@ -246,6 +254,56 @@ def _exercise_debug_attach(host: str, port: int, breakpoint_file: Path, breakpoi
         return {
             "breakpoints_response": breakpoints_response,
             "initial_stop": initial_stop,
+            "breakpoint_stop": breakpoint_stop,
+            "stack_trace": stack_trace,
+        }
+    finally:
+        client.close()
+
+
+def _exercise_debug_attach_without_stop_on_entry(
+    host: str,
+    port: int,
+    breakpoint_file: Path,
+    breakpoint_line: int,
+) -> dict:
+    client = _DapClient(host, port, timeout=30.0)
+    try:
+        _initialize_attach(client)
+        breakpoints_response = _set_breakpoints(client, breakpoint_file, breakpoint_line)
+        _set_exception_breakpoints(client)
+        configuration_done = _send_configuration_done_response(client)
+
+        breakpoint_stop = _wait_for_message(
+            client,
+            lambda msg: msg.get("type") == "event" and msg.get("event") == "stopped",
+            limit=200,
+        )
+
+        thread_id = breakpoint_stop.get("body", {}).get("threadId")
+        if thread_id is None:
+            client.send("threads", {})
+            threads_response = _wait_for_message(
+                client,
+                lambda msg: msg.get("type") == "response" and msg.get("command") == "threads",
+            )
+            thread_id = int(threads_response["body"]["threads"][0]["id"])
+
+        client.send("stackTrace", {"threadId": int(thread_id)})
+        stack_trace = _wait_for_message(
+            client,
+            lambda msg: msg.get("type") == "response" and msg.get("command") == "stackTrace",
+        )
+
+        client.send("continue", {"threadId": int(thread_id)})
+        _wait_for_message(
+            client,
+            lambda msg: msg.get("type") == "response" and msg.get("command") == "continue",
+        )
+
+        return {
+            "breakpoints_response": breakpoints_response,
+            "configuration_done": configuration_done,
             "breakpoint_stop": breakpoint_stop,
             "stack_trace": stack_trace,
         }
@@ -396,6 +454,136 @@ async def test_task_debug_session_hits_module_breakpoint(tmp_path, monkeypatch):
     ]
     assert module_frames
     assert any(frame["line"] == module_line for frame in module_frames)
+
+    assert session is not None
+    assert session.state in {
+        DebugSessionState.SUCCEEDED,
+        DebugSessionState.FAILED,
+        DebugSessionState.STOPPED,
+    }
+
+
+@pytest.mark.asyncio
+async def test_task_debug_session_hits_module_breakpoint_without_stop_on_entry(tmp_path, monkeypatch):
+    from src.core.atm.service import TaskService
+    from src.core.atm.run_profile import (
+        AcquisitionConfig,
+        AcquisitionMode,
+        CreationConfig,
+        CreationLifecycle,
+        ExecutionContext,
+        EnvType,
+        ResourceConfig,
+        RunProfile,
+    )
+    from src.core.debug.models import DebugSessionRequest, DebugSessionState
+    from src.core.debug.service import DebugService
+    from src.core.mms.registry import ModuleRegistry
+    from src.core.persistence import init_database
+
+    home_dir = tmp_path / "home"
+    home_dir.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home_dir))
+
+    module_dir, breakpoint_file, breakpoint_line, _module_frame, _module_line = _write_debuggable_module(tmp_path)
+
+    init_database()
+
+    registry = ModuleRegistry()
+    registry.register_dev_link(module_dir)
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.CREATE,
+                provider="playwright_local",
+                env_type=EnvType.CHROME,
+                wait_timeout=30,
+                creation=CreationConfig(lifecycle=CreationLifecycle.EPHEMERAL, params={}),
+            ),
+        ),
+        execution=ExecutionContext(
+            module="demo_module",
+            workflow="login_workflow",
+            params={
+                "login_url": "about:blank",
+                "accounts": [{"id": "u1", "phone_number": "13800000001", "country_code": "86"}],
+                "auto_click_send_code": False,
+            },
+            timeout=60,
+        ),
+    )
+
+    task_service = TaskService()
+    job_id = await task_service.create_job(
+        name="Debug E2E Module Without Stop On Entry",
+        job_type="service",
+        run_profile=run_profile,
+        params={"start_url": "about:blank"},
+    )
+
+    debug_service = DebugService(
+        registry=registry,
+        task_service=task_service,
+    )
+
+    session = None
+    try:
+        session = await debug_service.create_session(
+            DebugSessionRequest(
+                job_id=job_id,
+                attach_host="127.0.0.1",
+                attach_port=5678,
+                wait_for_attach=True,
+                stop_on_entry=False,
+            )
+        )
+        await debug_service.start_session(session.id)
+
+        session = await _wait_for_session_state(
+            debug_service,
+            session.id,
+            {DebugSessionState.WAITING_FOR_ATTACH},
+        )
+
+        await _assert_session_stays_in_state(
+            debug_service,
+            session.id,
+            DebugSessionState.WAITING_FOR_ATTACH,
+            duration=1.5,
+        )
+
+        dap_result = await asyncio.to_thread(
+            _exercise_debug_attach_without_stop_on_entry,
+            session.attach_host,
+            session.attach_port,
+            breakpoint_file,
+            breakpoint_line,
+        )
+
+        session = await _wait_for_session_state(
+            debug_service,
+            session.id,
+            {
+                DebugSessionState.SUCCEEDED,
+                DebugSessionState.FAILED,
+                DebugSessionState.STOPPED,
+            },
+        )
+    finally:
+        await debug_service.shutdown()
+
+    verified_breakpoints = dap_result["breakpoints_response"]["body"]["breakpoints"]
+    assert verified_breakpoints[0]["verified"] is True
+    assert verified_breakpoints[0]["line"] == breakpoint_line
+
+    assert dap_result["configuration_done"]["success"] is True
+    assert dap_result["breakpoint_stop"]["body"]["reason"] == "breakpoint"
+
+    stack_frames = dap_result["stack_trace"]["body"]["stackFrames"]
+    top_frame = stack_frames[0]
+    assert Path(top_frame["source"]["path"]) == breakpoint_file
+    assert top_frame["line"] == breakpoint_line
 
     assert session is not None
     assert session.state in {

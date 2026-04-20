@@ -14,6 +14,12 @@ def test_ensure_vscode_attach_config_creates_launch_json(tmp_path):
     assert payload["version"] == "0.2.0"
     assert payload["configurations"][0]["name"] == "Attach to Crawler4j"
     assert payload["configurations"][0]["connect"] == {"host": "127.0.0.1", "port": 5678}
+    assert payload["configurations"][0]["pathMappings"] == [
+        {
+            "localRoot": "${workspaceFolder}",
+            "remoteRoot": str(module_dir.resolve()),
+        }
+    ]
 
 
 def test_ensure_vscode_attach_config_updates_existing_configuration(tmp_path):
@@ -52,5 +58,11 @@ def test_ensure_vscode_attach_config_updates_existing_configuration(tmp_path):
     assert len(payload["configurations"]) == 2
     attach_config = next(item for item in payload["configurations"] if item["name"] == "Attach to Crawler4j")
     assert attach_config["connect"]["port"] == 5679
+    assert attach_config["pathMappings"] == [
+        {
+            "localRoot": "${workspaceFolder}",
+            "remoteRoot": str(module_dir.resolve()),
+        }
+    ]
     keep_config = next(item for item in payload["configurations"] if item["name"] == "Keep Me")
     assert keep_config["connect"]["port"] == 9999
