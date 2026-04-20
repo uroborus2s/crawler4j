@@ -50,9 +50,61 @@ class ModuleDataStore:
     当前唯一事实源为 `data.db`。
     """
 
+    def _read_dataset_manifest_timestamps(self, module_name: str, dataset_name: str) -> tuple[int | None, int | None]:
+        with get_connection(DATA_DB) as conn:
+            row = conn.execute(
+                """
+                SELECT created_at, updated_at
+                FROM module_dataset_manifests
+                WHERE module_name = ? AND dataset_name = ?
+                """,
+                (module_name, dataset_name),
+            ).fetchone()
+            if not row:
+                row = conn.execute(
+                    """
+                    SELECT MIN(created_at) AS created_at, MAX(updated_at) AS updated_at
+                    FROM module_datasets
+                    WHERE module_name = ? AND dataset_name = ?
+                    """,
+                    (module_name, dataset_name),
+                ).fetchone()
+        if not row:
+            return None, None
+        if row["created_at"] is None or row["updated_at"] is None:
+            return None, None
+        return int(row["created_at"]), int(row["updated_at"])
+
+    def _write_dataset_manifest_row(
+        self,
+        conn,
+        module_name: str,
+        dataset_name: str,
+        *,
+        created_at: int,
+        updated_at: int,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO module_dataset_manifests (
+                module_name,
+                dataset_name,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(module_name, dataset_name) DO UPDATE SET
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (module_name, dataset_name, created_at, updated_at),
+        )
+
     def _write_dataset_row(self, module_name: str, dataset_name: str, records: list[dict[str, Any]]) -> bool:
         now = int(time.time())
         normalized_records = _normalize_records(records)
+        created_at, _ = self._read_dataset_manifest_timestamps(module_name, dataset_name)
+        created_at = created_at if created_at is not None else now
         with get_connection(DATA_DB) as conn:
             conn.execute(
                 """
@@ -80,12 +132,19 @@ class ModuleDataStore:
                             dataset_name,
                             record_index,
                             json.dumps(record, ensure_ascii=False),
-                            now,
+                            created_at,
                             now,
                         )
                         for record_index, record in enumerate(normalized_records)
                     ],
                 )
+            self._write_dataset_manifest_row(
+                conn,
+                module_name,
+                dataset_name,
+                created_at=created_at,
+                updated_at=now,
+            )
         return True
 
     def _read_dataset_row(self, module_name: str, dataset_name: str) -> list[dict[str, Any]] | None:
@@ -317,6 +376,12 @@ class ModuleDataStore:
         with get_connection(DATA_DB) as conn:
             cursor = conn.execute(
                 "DELETE FROM module_datasets WHERE module_name = ?",
+                (module_name,),
+            )
+            changed = bool(cursor.rowcount) or changed
+
+            cursor = conn.execute(
+                "DELETE FROM module_dataset_manifests WHERE module_name = ?",
                 (module_name,),
             )
             changed = bool(cursor.rowcount) or changed

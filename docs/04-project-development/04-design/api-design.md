@@ -7,7 +7,7 @@
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
 **关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`
-**最后更新：** 2026-04-19
+**最后更新：** 2026-04-21
 
 ## `API-001` Root App Entry Contract
 
@@ -52,7 +52,7 @@
 | 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
 | 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
-| 快照型业务数据 | `data.db.module_datasets`（一条 record 一行）与 `data.db.module_data_table_views`，统一通过 `db.list_records` / `db.replace_records` / `ui.declare_data_table` 访问 |
+| 快照型业务数据 | `data.db.module_datasets`（一条 record 一行）+ `data.db.module_dataset_manifests`（dataset 级时间戳/存在性）+ `data.db.module_data_table_views`，统一通过 `db.list_records` / `db.replace_records` / `ui.declare_data_table` 访问 |
 | 事件型业务数据 | `data.db.module_audit_events`，统一通过 `db.append_event` / `db.query_events` 访问 |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
 | 当前实现说明 | 当前运行时代码不包含旧 `state.db.kv_store` 模块表数据自动迁移逻辑；旧数据需要显式迁移或人工导入 |
@@ -145,3 +145,4 @@
 | 2026-04-18 | 新增 `API-006`，将模块快照数据与审计事件拆成两条正式持久化契约 | Codex |
 | 2026-04-19 | 新增 `API-007`，收口固定环境池 Service Job 的等待队列与资源池资格卡片契约 | Codex |
 | 2026-04-19 | `API-007` V1 落地：宿主等待席位、资源池资格 helper 与运行模板 `resource_pool` 契约已实现 | Codex |
+| 2026-04-21 | 刷新 `API-005` 的文档元数据，确认 `module_datasets` 逐行持久化已进入正式契约口径，并补记 `module_dataset_manifests` 负责 dataset 级元数据 | Codex |

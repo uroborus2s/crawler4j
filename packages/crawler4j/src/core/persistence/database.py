@@ -25,6 +25,22 @@ DATA_DB = "data.db"
 # 线程本地存储
 _thread_local = threading.local()
 
+_MODULE_DATASET_V2_REQUIRED_COLUMNS = {
+    "module_name",
+    "dataset_name",
+    "record_index",
+    "record_json",
+    "created_at",
+    "updated_at",
+}
+_MODULE_DATASET_LEGACY_REQUIRED_COLUMNS = {
+    "module_name",
+    "dataset_name",
+    "records_json",
+    "created_at",
+    "updated_at",
+}
+
 
 def get_db_path(db_name: str) -> Path:
     """获取数据库文件路径。
@@ -104,6 +120,30 @@ def _normalize_module_dataset_records(raw: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in raw if isinstance(item, dict)]
 
 
+def _parse_legacy_module_dataset_records(row: sqlite3.Row) -> list[dict[str, Any]]:
+    dataset_label = f"{row['module_name']}/{row['dataset_name']}"
+    try:
+        parsed = json.loads(row["records_json"])
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"Legacy module_datasets row {dataset_label} has invalid JSON"
+        ) from exc
+
+    if not isinstance(parsed, list):
+        raise RuntimeError(
+            f"Legacy module_datasets row {dataset_label} must be a JSON array"
+        )
+
+    records: list[dict[str, Any]] = []
+    for record_index, item in enumerate(parsed):
+        if not isinstance(item, dict):
+            raise RuntimeError(
+                f"Legacy module_datasets row {dataset_label} contains non-object item at index {record_index}"
+            )
+        records.append(dict(item))
+    return records
+
+
 def _create_module_datasets_table(conn: sqlite3.Connection, table_name: str = "module_datasets") -> None:
     conn.execute(
         f"""
@@ -115,6 +155,23 @@ def _create_module_datasets_table(conn: sqlite3.Connection, table_name: str = "m
             created_at INTEGER DEFAULT (strftime('%s', 'now')),
             updated_at INTEGER DEFAULT (strftime('%s', 'now')),
             PRIMARY KEY (module_name, dataset_name, record_index)
+        )
+        """
+    )
+
+
+def _create_module_dataset_manifests_table(
+    conn: sqlite3.Connection,
+    table_name: str = "module_dataset_manifests",
+) -> None:
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            module_name TEXT NOT NULL,
+            dataset_name TEXT NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (module_name, dataset_name)
         )
         """
     )
@@ -133,6 +190,12 @@ def _create_module_datasets_indexes(conn: sqlite3.Connection) -> None:
         ON module_datasets(module_name, dataset_name)
         """
     )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_module_dataset_manifests_module
+        ON module_dataset_manifests(module_name)
+        """
+    )
 
 
 def _migrate_legacy_module_datasets_table(conn: sqlite3.Connection) -> None:
@@ -146,11 +209,29 @@ def _migrate_legacy_module_datasets_table(conn: sqlite3.Connection) -> None:
     _create_module_datasets_table(conn, "module_datasets_v2")
 
     for row in legacy_rows:
-        try:
-            parsed = json.loads(row["records_json"])
-        except (TypeError, ValueError):
-            parsed = []
-        records = _normalize_module_dataset_records(parsed)
+        records = _parse_legacy_module_dataset_records(row)
+
+        conn.execute(
+            """
+            INSERT INTO module_dataset_manifests (
+                module_name,
+                dataset_name,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(module_name, dataset_name) DO UPDATE SET
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                row["module_name"],
+                row["dataset_name"],
+                row["created_at"],
+                row["updated_at"],
+            ),
+        )
+
         for record_index, record in enumerate(records):
             conn.execute(
                 """
@@ -196,10 +277,10 @@ def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
         row["name"]
         for row in conn.execute("PRAGMA table_info(module_datasets)").fetchall()
     }
-    if {"module_name", "dataset_name", "record_index", "record_json"}.issubset(existing_columns):
+    if _MODULE_DATASET_V2_REQUIRED_COLUMNS.issubset(existing_columns):
         _create_module_datasets_indexes(conn)
         return
-    if "records_json" in existing_columns:
+    if _MODULE_DATASET_LEGACY_REQUIRED_COLUMNS.issubset(existing_columns):
         _migrate_legacy_module_datasets_table(conn)
         return
     raise RuntimeError(f"Unexpected module_datasets schema columns: {sorted(existing_columns)}")
@@ -341,6 +422,7 @@ def _init_state_db() -> None:
 def _init_data_db() -> None:
     """初始化业务数据数据库。"""
     with get_connection(DATA_DB) as conn:
+        _create_module_dataset_manifests_table(conn)
         _ensure_module_datasets_table(conn)
         conn.executescript("""
             -- 模块数据集（按 module + dataset + record_index 逐行存储）

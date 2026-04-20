@@ -7,7 +7,7 @@
 **上游输入：** `module-boundaries.md` | `api-design.md` | 当前 `TaskContext` / MMS / ATM / Debug 实现  
 **下游输出：** `docs/03-developer-guide/core-concepts.md` | `docs/03-developer-guide/build-modules.md` | `docs/03-developer-guide/reference-core-capabilities.md` | `.factory/memory/api.summary.md`  
 **关联 ID：** `API-005`, `API-006`, `REQ-002`, `REQ-003`, `REQ-006`, `REQ-008`, `CR-003`, `CR-008`
-**最后更新：** 2026-04-18
+**最后更新：** 2026-04-21
 
 ## 1. 设计目标
 
@@ -140,15 +140,17 @@ ctx.state.setdefault("tasks", {})
 
 - `ui.declare_data_table` 声明的 schema 持久化到 `data.db.module_data_table_views`
 - `db.list_records` / `db.replace_records` 读写的快照型 records 持久化到 `data.db.module_datasets`，宿主按 `(module_name, dataset_name, record_index)` 一条 record 一行存储
+- dataset 级 `created_at` / `updated_at` 与“空 dataset 仍已存在”的元数据由宿主额外持久化到 `data.db.module_dataset_manifests`
 - `db.append_event` / `db.query_events` 读写的审计事件持久化到 `data.db.module_audit_events`
 
 ### 6.2 快照数据与审计事件语义
 
 - `module_datasets` 承载“当前状态型 / 可覆盖型”业务数据；dataset 级语义仍是整包快照，但底层持久化已改为逐行 record。
+- `module_dataset_manifests` 承载 dataset 级时间戳与存在性元数据，避免空 dataset 或 rewrite 把首次 `created_at` 语义抹掉。
 - `module_audit_events` 承载“历史轨迹型 / append-only”审计事件。
 - 当前正式持久化表为 `data.db.module_audit_events`，正式工具名为 `db.append_event` / `db.query_events`。
 - `previous_status` / `next_status` / `result` / `reason` 等一等审计字段应直接写顶层；`payload` 只保留模块私有扩展字段。
-- `init_database()` 会自动把旧版 `(module_name, dataset_name, records_json)` 聚合表迁移为逐行结构，模块侧无需改 `db.list_records` / `db.replace_records` 调用方式。
+- `init_database()` 会自动把旧版 `(module_name, dataset_name, records_json)` 聚合表迁移为逐行结构并补写 manifest；若 legacy `records_json` 非法、不是数组或数组里混入非对象元素，宿主会 fail-fast 回滚，避免静默丢数。
 - 审计事件不应回写 `module_datasets`，也不直接进入 `core:data_table` 的 schema / records 链路。
 - `core:data_table` 当前只面向快照型 dataset；不要把事件流接进通用可编辑数据表。
 - retention / archive 后续可在宿主侧继续扩展，但不属于本轮正式契约。
@@ -304,3 +306,4 @@ if ctx.tools and ctx.tools.has_tool("db.append_event"):
 |---|---|---|
 | 2026-04-17 | 初版建立模块配置、运行态、内存与数据表的统一契约 | Codex |
 | 2026-04-18 | 增补模块审计事件契约，明确快照数据与审计事件分层存储 | Codex |
+| 2026-04-21 | 刷新 `module_datasets` 逐行持久化与 legacy `records_json` 自动迁移的正式契约元数据，并补记 `module_dataset_manifests` 与 fail-fast 迁移规则 | Codex |
