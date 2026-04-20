@@ -85,7 +85,9 @@ def test_sdk_cli_package_exports_console_script_without_playwright_runtime_depen
 
     assert scripts["crawler4j"] == "crawler4j_sdk.cli.commands:main"
     assert all("playwright" not in dependency for dependency in dependencies)
-    assert _build_compatible_requirement("crawler4j-contracts", contracts_pyproject["project"]["version"]) in dependencies
+    assert (
+        _build_compatible_requirement("crawler4j-contracts", contracts_pyproject["project"]["version"]) in dependencies
+    )
 
 
 def test_sdk_runtime_version_matches_publish_metadata():
@@ -123,7 +125,9 @@ def test_root_app_package_does_not_reexport_sdk_cli_command():
 
     assert scripts["start"] == "src.ui.app:main"
     assert "crawler4j" not in scripts
-    assert _build_compatible_requirement("crawler4j-contracts", contracts_pyproject["project"]["version"]) in dependencies
+    assert (
+        _build_compatible_requirement("crawler4j-contracts", contracts_pyproject["project"]["version"]) in dependencies
+    )
 
 
 def test_workspace_root_declares_packages_workspace_members():
@@ -169,18 +173,18 @@ def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
     paths_text = (APP_ROOT / "src" / "utils" / "paths.py").read_text(encoding="utf-8")
 
     assert 'APP_ENTRY = PROJECT_ROOT / "src" / "ui" / "app.py"' in spec_text
-    assert 'WORKSPACE_ROOT = PROJECT_ROOT.parents[1]' in spec_text
+    assert "WORKSPACE_ROOT = PROJECT_ROOT.parents[1]" in spec_text
     assert 'DOCS_ROOT = WORKSPACE_ROOT / "docs"' in spec_text
     assert '(str(DOCS_ROOT / "index.md"), "docs")' in spec_text
     assert '(str(DOCS_ROOT / "01-getting-started"), "docs/01-getting-started")' in spec_text
     assert '(str(DOCS_ROOT / "02-user-guide"), "docs/02-user-guide")' in spec_text
     assert '(str(DOCS_ROOT / "03-developer-guide"), "docs/03-developer-guide")' in spec_text
     assert "if MODULES_DIR.exists():" in spec_text
-    assert 'datas=_build_datas(),' in spec_text
+    assert "datas=_build_datas()," in spec_text
     assert "sys.path.insert(0, str(PROJECT_ROOT))" in spec_text
     assert '(str(UI_ICON), "src/ui/assets")' in spec_text
     assert 'PROJECT_METADATA = PROJECT_ROOT / "pyproject.toml"' in spec_text
-    assert 'def _load_project_version' in spec_text
+    assert "def _load_project_version" in spec_text
     assert "from src.__version__ import VERSION" not in spec_text
     assert "src/main.py" not in spec_text
     assert "def get_docs_root() -> Path:" in paths_text
@@ -189,15 +193,19 @@ def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
 def test_pyinstaller_spec_collects_workspace_runtime_packages_for_desktop_bundle():
     spec_text = (APP_ROOT / "crawler4j.spec").read_text(encoding="utf-8")
 
+    assert "from importlib.metadata import PackageNotFoundError, distribution" in spec_text
     assert "from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata" in spec_text
     assert "import debugpy" in spec_text
-    assert 'DEBUGPY_ROOT = Path(debugpy.__file__).resolve().parent' in spec_text
+    assert "DEBUGPY_ROOT = Path(debugpy.__file__).resolve().parent" in spec_text
     assert 'DEBUGPY_VENDORED_PYDEVD_ROOT = DEBUGPY_ROOT / "_vendored" / "pydevd"' in spec_text
+    assert 'SINGLE_FILE_MODULE_RESOURCE_DISTS = ("sinanz",)' in spec_text
+    assert "def _build_single_file_module_resource_datas() -> list[tuple[str, str]]:" in spec_text
+    assert "datas.extend(_build_single_file_module_resource_datas())" in spec_text
     assert 'datas.extend(collect_data_files("debugpy"))' in spec_text
     assert 'datas.extend(collect_data_files("debugpy", include_py_files=True))' in spec_text
     assert '"debugpy",' in spec_text
     assert 'hiddenimports.extend(collect_submodules("debugpy"))' in spec_text
-    assert 'hiddenimports.extend(_build_debugpy_vendored_hiddenimports())' in spec_text
+    assert "hiddenimports.extend(_build_debugpy_vendored_hiddenimports())" in spec_text
     assert "def _build_debugpy_vendored_hiddenimports() -> list[str]:" in spec_text
     assert '"crawler4j_contracts": "crawler4j-contracts"' in spec_text
     assert '"crawler4j_sdk": "crawler4j-sdk"' in spec_text

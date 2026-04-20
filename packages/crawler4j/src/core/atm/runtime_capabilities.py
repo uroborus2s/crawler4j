@@ -8,6 +8,9 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, distribution
+from pathlib import Path
 from typing import Any, Callable
 
 from crawler4j_contracts.context import (
@@ -30,6 +33,7 @@ from src.core.rem.manager import (
     build_resource_pool_metadata_key,
     get_environment_manager,
 )
+from src.utils.paths import get_resource_path
 
 
 def _normalize_records(raw: Any) -> list[dict[str, Any]]:
@@ -77,6 +81,29 @@ BUSINESS_OCCUPANCY_COLUMN_KEYS = {
     "lock_status_label",
 }
 BUSINESS_OCCUPANCY_COLUMN_LABELS = {"占用中", "占用状态"}
+
+
+@lru_cache(maxsize=1)
+def _resolve_captcha_asset_root() -> Path | None:
+    bundled_root = Path(get_resource_path("resources"))
+    if bundled_root.is_dir():
+        return bundled_root
+
+    try:
+        dist = distribution("sinanz")
+    except PackageNotFoundError:
+        return None
+
+    for entry in dist.files or []:
+        parts = Path(str(entry)).parts
+        if "resources" not in parts:
+            continue
+        resource_index = parts.index("resources")
+        candidate = Path(dist.locate_file(Path(*parts[: resource_index + 1]))).resolve()
+        if candidate.is_dir():
+            return candidate
+
+    return None
 
 
 def _validate_managed_identifier(value: str, *, field_name: str) -> str:
@@ -205,8 +232,7 @@ def _validate_lock_key_usage(schema: dict[str, Any]) -> None:
     if conflicts:
         rendered = ", ".join(dict.fromkeys(conflicts))
         raise ValueError(
-            "lock_key 只用于 Core 临时锁，不能与业务占用列同时声明；"
-            f"请删除这些列或移除 lock_key: {rendered}"
+            f"lock_key 只用于 Core 临时锁，不能与业务占用列同时声明；请删除这些列或移除 lock_key: {rendered}"
         )
 
 
@@ -584,13 +610,15 @@ def _solve_slider_with_sinanz(
     device: str = "auto",
     return_debug: bool = False,
 ) -> SliderCaptchaMatchResult:
-    from sinanz import sn_match_slider
+    from sinanz import CaptchaSolver
 
-    result = sn_match_slider(
+    result = CaptchaSolver(
+        device=device,
+        asset_root=_resolve_captcha_asset_root(),
+    ).sn_match_slider(
         background_image,
         puzzle_piece_image,
         puzzle_piece_start_bbox=puzzle_piece_start_bbox,
-        device=device,
         return_debug=return_debug,
     )
 
@@ -619,7 +647,7 @@ def _solve_click_with_sinanz(
         query_icons_image=query_icons_image,
         background_image=background_image,
         device=device,
-        asset_root=None,
+        asset_root=_resolve_captcha_asset_root(),
         return_debug=return_debug,
     )
 
@@ -715,10 +743,25 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         self._register("ip_pool.pick_proxy", "按条件挑选可用代理", ip_pool_tools.pick_proxy)
         self._register("env.set_proxy", "为当前环境设置代理", env_tools.set_proxy, is_async=True)
         self._register("env.bind_resource_pool", "登记环境资源池资格", env_tools.bind_resource_pool, is_async=True)
-        self._register("env.mark_resource_pool_eligible", "标记环境资源池可接单", env_tools.mark_resource_pool_eligible, is_async=True)
-        self._register("env.mark_resource_pool_ineligible", "标记环境资源池不可接单", env_tools.mark_resource_pool_ineligible, is_async=True)
+        self._register(
+            "env.mark_resource_pool_eligible",
+            "标记环境资源池可接单",
+            env_tools.mark_resource_pool_eligible,
+            is_async=True,
+        )
+        self._register(
+            "env.mark_resource_pool_ineligible",
+            "标记环境资源池不可接单",
+            env_tools.mark_resource_pool_ineligible,
+            is_async=True,
+        )
         self._register("env.remove_resource_pool", "移除环境资源池资格", env_tools.remove_resource_pool, is_async=True)
-        self._register("env.replace_resource_pool_snapshot", "重建环境资源池资格快照", env_tools.replace_resource_pool_snapshot, is_async=True)
+        self._register(
+            "env.replace_resource_pool_snapshot",
+            "重建环境资源池资格快照",
+            env_tools.replace_resource_pool_snapshot,
+            is_async=True,
+        )
 
         self._register("ui.declare_data_table", "声明数据表视图元数据", ui_tools.declare_data_table)
         self._register("ui.get_data_table", "读取数据表视图元数据", ui_tools.get_data_table)

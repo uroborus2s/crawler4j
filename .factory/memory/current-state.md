@@ -18,6 +18,7 @@
 ## 最近条目
 
 - 最新验证：2026-04-20 已按“4 个专业 code review 子 agent + 主线程修复/复验”完成全仓严苛复核；当前主线程 fresh gate 结果为 `uv run pytest -q`（`485 passed`）、`uv run ruff check .`、`uv run python scripts/smoke_test_ui.py`、`uv run build` 与 macOS 桌面打包全部通过；当前正式桌面打包口径已收敛为 `uv run package-desktop`，发布产物固定落到 `packages/crawler4j/dist/desktop/<platform>/`，PyInstaller 中间构建目录固定落到 `packages/crawler4j/build/pyinstaller/<platform>/`；`ctrip_crawler` 当前源码 `check full`、模块仓 `uv run pytest -q`（`193 passed`）、fresh ZIP `/tmp/ctrip_crawler-acceptance.zip` 的 `host install preview --skip-remote-check` 与宿主 `host devlink list` 活跃状态继续沿用 `2026-04-19` 留证。
+- 最新修复：2026-04-20 已为桌面打包补齐 `sinanz` 单文件模块依赖的共享 `resources/` 目录收集，并在 Core 验证码能力里显式向滑块/点选求解器传入 bundle 内 `asset_root`；当前打包版不应再因缺失 `slider_gap_locator.onnx` 等内嵌模型资源而回退本地处理。
 - 发布：2026-04-19 `crawler4j-sdk 0.3.0` 已完成本地 SDK 回归（`uv run pytest packages/crawler4j/tests/unit/test_sdk -q`，`121 passed`）、CLI help 验证、wheel/sdist 构建，并通过 `uv run publish crawler4j-sdk` 发布到 PyPI。
 - 最新结论：2026-04-20 `v0.2.0` 已完成正式 Git tag、GitHub release 与 macOS 发布资产上传；当前仍保留的交付边界只剩 `ctrip` 本轮 DevLink + ZIP 双链真实站点 E2E 留证，以及 Windows 桌面下载产物/打包链缺失。
 - 最新修复：2026-04-20 已移除 REM 环境列表页里 `QThread + 共享 asyncio loop` 的旧执行模型；环境 `start/stop/pause/resume/create/destroy` 现统一切到 UI 主 `qasync` 事件循环里的串行异步任务，并在操作期间禁用表格、创建和刷新入口，避免连续点击时触发跨线程 loop 复用或并发重入。

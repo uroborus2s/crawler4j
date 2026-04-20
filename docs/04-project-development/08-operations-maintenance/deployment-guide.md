@@ -34,6 +34,7 @@ uv run python -m src.ui.app
 - 若需要打包，PyInstaller 规格位于 `packages/crawler4j/crawler4j.spec`
 - 正式桌面打包入口统一为 `uv run package-desktop`
 - 当前 macOS 最终可分发产物固定为 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，不需要再额外携带旁边的 `Crawler4j/` collect 目录
+- PyInstaller 现已显式收集 `sinanz` 的共享 `resources/` 目录，打包版验证码能力不应再因缺失 `slider_gap_locator.onnx` 等内嵌模型而退化
 
 ### 测试
 
@@ -99,6 +100,7 @@ uv run python -m crawler4j_sdk.cli.commands --help
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-20 | 补记桌面打包对 `sinanz` 共享 `resources/` 目录的显式收集约束，避免验证码模型资源在 PyInstaller 产物中丢失 | Codex |
 | 2026-04-20 | 将 docs-stratego 联动发布说明从 `feature/task-plugin-system` 收敛到 `main` 分支口径，并补记 dispatch token 换行清理约束 | Codex |
 | 2026-04-17 | 新增 `docs-stratego` 源仓通知 workflow，并补充共享 PR 联动发布说明 | Codex |
 | 2026-04-02 | 下游输出补齐到运行手册和管理员指南 | Codex |

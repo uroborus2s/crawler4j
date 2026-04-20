@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 import shutil
 import sys
@@ -33,10 +34,31 @@ WORKSPACE_RUNTIME_DISTS = {
     "crawler4j_contracts": "crawler4j-contracts",
     "crawler4j_sdk": "crawler4j-sdk",
 }
+SINGLE_FILE_MODULE_RESOURCE_DISTS = ("sinanz",)
 WORKSPACE_RUNTIME_SOURCES = {
     "crawler4j_contracts": WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "src",
     "crawler4j_sdk": WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "src",
 }
+
+
+def _build_single_file_module_resource_datas() -> list[tuple[str, str]]:
+    datas: list[tuple[str, str]] = []
+    for dist_name in SINGLE_FILE_MODULE_RESOURCE_DISTS:
+        try:
+            dist = distribution(dist_name)
+        except PackageNotFoundError:
+            continue
+
+        for entry in dist.files or []:
+            parts = Path(str(entry)).parts
+            if "resources" not in parts:
+                continue
+            resource_index = parts.index("resources")
+            resource_root = Path(dist.locate_file(Path(*parts[: resource_index + 1]))).resolve()
+            if resource_root.is_dir():
+                datas.append((str(resource_root), "resources"))
+                break
+    return datas
 
 
 def _build_datas() -> list[tuple[str, str]]:
@@ -51,6 +73,7 @@ def _build_datas() -> list[tuple[str, str]]:
     ]
     if MODULES_DIR.exists():
         datas.append((str(MODULES_DIR), "modules"))
+    datas.extend(_build_single_file_module_resource_datas())
     datas.extend(collect_data_files("debugpy"))
     datas.extend(collect_data_files("debugpy", include_py_files=True))
     for dist_name in WORKSPACE_RUNTIME_DISTS.values():

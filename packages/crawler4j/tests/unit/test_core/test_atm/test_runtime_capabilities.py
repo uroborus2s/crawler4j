@@ -1,9 +1,12 @@
+import sys
 from types import SimpleNamespace
 from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+import src.core.atm.runtime_capabilities as runtime_capabilities
 from src.core.atm.runtime_capabilities import (
     ClickCaptchaMatchResult,
     ClickCaptchaOrderedTarget,
@@ -173,11 +176,19 @@ def test_db_tools_state_roundtrip(monkeypatch):
 def test_ip_pool_tool_picks_proxy_by_criteria(monkeypatch):
     pool = IPPool(id="p1", name="pool-1")
     pool.entries = [
-        IPEntry(id="ip-low", pool_id="p1", address="1.1.1.1", protocol="http", port=8001, safety_score=70, bound_count=0),
-        IPEntry(id="ip-best", pool_id="p1", address="2.2.2.2", protocol="http", port=8002, safety_score=99, bound_count=0),
-        IPEntry(id="ip-busy", pool_id="p1", address="3.3.3.3", protocol="http", port=8003, safety_score=95, bound_count=5),
+        IPEntry(
+            id="ip-low", pool_id="p1", address="1.1.1.1", protocol="http", port=8001, safety_score=70, bound_count=0
+        ),
+        IPEntry(
+            id="ip-best", pool_id="p1", address="2.2.2.2", protocol="http", port=8002, safety_score=99, bound_count=0
+        ),
+        IPEntry(
+            id="ip-busy", pool_id="p1", address="3.3.3.3", protocol="http", port=8003, safety_score=95, bound_count=5
+        ),
     ]
-    fake_manager = SimpleNamespace(get_pool=lambda pool_id: pool if pool_id == "p1" else None, list_pools=lambda: [pool])
+    fake_manager = SimpleNamespace(
+        get_pool=lambda pool_id: pool if pool_id == "p1" else None, list_pools=lambda: [pool]
+    )
     monkeypatch.setattr("src.core.atm.runtime_capabilities.get_ip_pool_manager", lambda: fake_manager)
 
     caps = build_runtime_capabilities("demo_module")
@@ -396,8 +407,12 @@ def test_captcha_tool_matches_click_targets_via_sinanz(monkeypatch):
         return ClickCaptchaMatchResult(
             ordered_target_centers=[(15, 20), (80, 65)],
             ordered_targets=[
-                ClickCaptchaOrderedTarget(query_order=1, center=(15, 20), class_id=0, class_name="target_1", score=0.97),
-                ClickCaptchaOrderedTarget(query_order=2, center=(80, 65), class_id=1, class_name="target_2", score=0.93),
+                ClickCaptchaOrderedTarget(
+                    query_order=1, center=(15, 20), class_id=0, class_name="target_1", score=0.97
+                ),
+                ClickCaptchaOrderedTarget(
+                    query_order=2, center=(80, 65), class_id=1, class_name="target_2", score=0.93
+                ),
             ],
         )
 
@@ -418,6 +433,109 @@ def test_captcha_tool_matches_click_targets_via_sinanz(monkeypatch):
             "query_icons_image": b"query",
             "background_image": b"background",
             "device": "cuda",
+            "return_debug": False,
+        }
+    ]
+
+
+def test_captcha_asset_root_prefers_bundled_resources(tmp_path, monkeypatch):
+    bundled_resources = tmp_path / "resources"
+    bundled_resources.mkdir()
+    monkeypatch.setattr(
+        runtime_capabilities,
+        "get_resource_path",
+        lambda relative_path: str((tmp_path / relative_path).resolve()),
+    )
+    runtime_capabilities._resolve_captcha_asset_root.cache_clear()
+
+    try:
+        assert runtime_capabilities._resolve_captcha_asset_root() == bundled_resources
+    finally:
+        runtime_capabilities._resolve_captcha_asset_root.cache_clear()
+
+
+def test_solve_slider_with_sinanz_passes_resolved_asset_root(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    class _FakeSolver:
+        def __init__(self, *, device: str, asset_root: Path | None):
+            calls.append({"device": device, "asset_root": asset_root})
+
+        def sn_match_slider(
+            self, background_image, puzzle_piece_image, *, puzzle_piece_start_bbox=None, return_debug=False
+        ):
+            calls.append(
+                {
+                    "background_image": background_image,
+                    "puzzle_piece_image": puzzle_piece_image,
+                    "puzzle_piece_start_bbox": puzzle_piece_start_bbox,
+                    "return_debug": return_debug,
+                }
+            )
+            return SimpleNamespace(
+                target_center=(135, 48),
+                target_bbox=(100, 16, 170, 80),
+                puzzle_piece_offset=(18, 0),
+                debug=None,
+            )
+
+    monkeypatch.setattr(runtime_capabilities, "_resolve_captcha_asset_root", lambda: tmp_path)
+    monkeypatch.setitem(sys.modules, "sinanz", SimpleNamespace(CaptchaSolver=_FakeSolver))
+
+    result = runtime_capabilities._solve_slider_with_sinanz(
+        background_image=b"background",
+        puzzle_piece_image=b"piece",
+        puzzle_piece_start_bbox=(0, 0, 40, 40),
+        device="cpu",
+        return_debug=True,
+    )
+
+    assert result.target_center == (135, 48)
+    assert calls == [
+        {"device": "cpu", "asset_root": tmp_path},
+        {
+            "background_image": b"background",
+            "puzzle_piece_image": b"piece",
+            "puzzle_piece_start_bbox": (0, 0, 40, 40),
+            "return_debug": True,
+        },
+    ]
+
+
+def test_solve_click_with_sinanz_passes_resolved_asset_root(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def _fake_solve_click_targets(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            ordered_target_centers=[(15, 20)],
+            ordered_targets=[
+                SimpleNamespace(query_order=1, center=(15, 20), class_id=0, class_name="target_1", score=0.97),
+            ],
+            missing_query_orders=[],
+            ambiguous_query_orders=[],
+            debug=None,
+        )
+
+    monkeypatch.setattr(runtime_capabilities, "_resolve_captcha_asset_root", lambda: tmp_path)
+    monkeypatch.setitem(
+        sys.modules, "sinanz_group1_service", SimpleNamespace(solve_click_targets=_fake_solve_click_targets)
+    )
+
+    result = runtime_capabilities._solve_click_with_sinanz(
+        query_icons_image=b"query",
+        background_image=b"background",
+        device="cuda",
+        return_debug=False,
+    )
+
+    assert result.ordered_target_centers == [(15, 20)]
+    assert calls == [
+        {
+            "query_icons_image": b"query",
+            "background_image": b"background",
+            "device": "cuda",
+            "asset_root": tmp_path,
             "return_debug": False,
         }
     ]
