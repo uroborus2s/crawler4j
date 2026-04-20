@@ -111,7 +111,7 @@
 | 宿主职责 | FIFO 等待队列、容量变化补位、环境租约治理、终态收口 |
 | 当前 V1 形态 | `AcquisitionConfig.resource_pool` + `env.bind_resource_pool` / `env.mark_resource_pool_eligible` / `env.mark_resource_pool_ineligible` / `env.remove_resource_pool` / `env.replace_resource_pool_snapshot` + Service Job `PENDING` 等待补位 |
 | `replace_resource_pool_snapshot` 语义 | `entries` 是当前资源池的完整权威列表；未出现的环境卡片会被删除，不是增量 patch |
-| 容量变化触发 | 环境释放、新环境可分配、异常/暂停环境恢复、模块更新资格卡片；另有轻量巡检兜底 |
+| 容量变化触发 | 环境释放、新环境可分配、异常/暂停环境恢复、模块更新资格卡片；控制器启动时还会先做 bootstrap 调和，作业激活/更新时会定向调和，另有运行在主 async loop 上的轻量异步巡检兜底 |
 | 环境占用规则 | 占用不移出资源池；资源池归属和运行中占用分离 |
 | 黑号规则 | 先把环境标成 `eligible=false` 并写入原因，再按业务策略销毁或保留待人工处理 |
 | 选择器分层 | `resource_pool` 做宿主级粗筛；若配置了 `selector_name`，宿主只把当前池内候选交给它做细粒度选择；若 `selector_name` 为空，则不会调用 `select_env`，宿主直接取当前池内第一个可分配候选；这对从旧 selector 模块迁移来说是显式行为变化，不是无害默认，且当前实现不承诺额外业务排序 |

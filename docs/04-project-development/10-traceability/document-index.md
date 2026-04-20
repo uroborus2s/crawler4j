@@ -78,7 +78,7 @@
 - 2026-04-17：`docs/01-getting-started/` 已进一步压缩为单页模式，当前只保留 `了解 crawler4j` 这一篇作为正式入口；正文改为面向客户的产品介绍，不再拆成多页教读者选路径，原辅助页已删除。
 - 2026-04-17：新增 `docs/02-user-guide/exception-cases.md`，把“应用打不开、页面空白、模块未启用、执行一次没反应、任务实例全失败、环境不可用、升级失败、结果找不到”统一收敛为按症状分诊的异常案例页；每个案例都固定给出“现象 / 先看哪里 / 先做什么 / 什么情况升级给管理员或研发”，并同步接入 `docs/index.md` 与 `docs/02-user-guide/index.md`。
 - 2026-04-17：新增 `docs/02-user-guide/job-detail-guide.md`，把“作业详情整图说明”单独收口为培训讲义页，固定按 `任务实例表 -> 结果/错误 -> 任务日志 -> 成功/失败判据 -> 不同状态下一步动作` 的顺序讲解；当前正文已可直接用于培训。
-- 2026-04-20：`docs/02-user-guide/configuration.md` 与 `docs/02-user-guide/index.md` 已补记统一日志服务对 `APScheduler` 周期性心跳日志的 `WARNING` 下限；Service Job 的 5 秒定时调和仍正常执行，但 `INFO` 级“运行/成功”日志不再持续刷屏，对应日志系统实现与单测已同步锁定。
+- 2026-04-20：`docs/02-user-guide/configuration.md`、`system-architecture.md`、`api-design.md` 与 `atm-resource-pool-queue-design.md` 已同步补记 ATM Service Job 的 5 秒兜底巡检改为 `JobController` 挂在主 async loop 上的后台协程循环，不再复用 `APScheduler` 周期 job / `run_coroutine_job()` 包装；启动时先做 bootstrap 调和、作业激活/更新时定向调和，5 秒 periodic loop 仅作后续兜底。统一日志服务对 `APScheduler` 周期性心跳日志仍维持 `WARNING` 下限，对应控制器回归测试与日志口径已同步更新。
 - 2026-04-17：`docs/02-user-guide/` 已按“普通用户真正能照着走”的标准做第二次完全重写，正式顺序调整为 `安装与第一次打开`、`首次设置`、`开始使用`、`日常使用`、`管理员指南`；本轮补齐了“新手先点哪 3 个入口”“设置参数从哪里拿”“运行模板入口”“结果只认一个入口”“作业状态下一步动作”“IP 池最短操作闭环”“可复制报障模板”，并同步更新根 `docs/index.md` 导航顺序。
 - 2026-04-17：按用户要求执行了 3 个专业产品文档子 agent 分工重写和 6 个普通用户子 agent 两轮苛刻复核。普通用户首轮反馈为 `3 PASS / 3 FAIL`，集中指出入口顺序、参数来源、运行模板入口、状态决策和结果入口收束仍不够傻瓜；二次修订后，第二轮 6 个普通用户子 agent 全部给出 `PASS`，并明确表示愿意将当前 `docs/02-user-guide/` 原样发给新同事使用。
 - 2026-04-17：`docs/04-project-development/06-testing-verification/` 新增 `ctrip-real-site-e2e-closeout.md`，把真实站点 E2E 的前置条件、Phase A/B/C 执行顺序、证据要求与放行条件收敛为单一正式入口；发布/运维阅读路径已同步纳入该页。
