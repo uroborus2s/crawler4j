@@ -39,8 +39,10 @@ class JobController:
         self._batch_job_ids: dict[str, str] = {}
         self._event_bus = get_event_bus()
         self._event_handlers_registered = False
-        self._service_tick_job_id = "service:reconcile"
         self._service_job_reconcile_locks: dict[str, asyncio.Lock] = {}
+        self._service_reconcile_interval_seconds = 5.0
+        self._service_reconcile_timeout_seconds = 45.0
+        self._service_reconcile_task: asyncio.Task[None] | None = None
         
     async def start(self):
         """启动控制器循环。"""
@@ -57,6 +59,7 @@ class JobController:
         self._start_scheduler()
         self._subscribe_task_events()
         await self._bootstrap_active_jobs()
+        self._start_service_reconcile_loop()
         logger.info("[ATM] JobController started")
         
     async def stop(self):
@@ -64,6 +67,7 @@ class JobController:
         self._running = False
         self._unsubscribe_task_events()
         self._stop_scheduler()
+        await self._stop_service_reconcile_loop()
             
         # 安全等待 Dispatcher 中的所有任务跑完并回收
         if hasattr(self.dispatcher, "wait_for_completion"):
@@ -236,15 +240,6 @@ class JobController:
         if self._scheduler_started:
             return
         self._scheduler.start()
-        self._scheduler.add_job(
-            self._reconcile_active_service_jobs,
-            trigger="interval",
-            seconds=5,
-            id=self._service_tick_job_id,
-            replace_existing=True,
-            coalesce=True,
-            max_instances=1,
-        )
         self._scheduler_started = True
 
     def _stop_scheduler(self):
@@ -254,6 +249,56 @@ class JobController:
         self._scheduler = AsyncIOScheduler(timezone=self._timezone)
         self._scheduler_started = False
         self._batch_job_ids.clear()
+
+    def _start_service_reconcile_loop(self):
+        task = self._service_reconcile_task
+        if task is not None and not task.done():
+            return
+        self._service_reconcile_task = asyncio.create_task(
+            self._service_reconcile_loop(),
+            name="atm-service-reconcile-loop",
+        )
+
+    async def _stop_service_reconcile_loop(self):
+        task = self._service_reconcile_task
+        if task is None:
+            return
+        self._service_reconcile_task = None
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _service_reconcile_loop(self):
+        current_task = asyncio.current_task()
+        next_tick_at = time.monotonic() + self._service_reconcile_interval_seconds
+        try:
+            while self._running:
+                sleep_seconds = max(next_tick_at - time.monotonic(), 0.0)
+                if sleep_seconds > 0:
+                    await asyncio.sleep(sleep_seconds)
+                if not self._running:
+                    break
+                tick_started_at = time.monotonic()
+                await self._run_service_reconcile_tick()
+                next_tick_at = tick_started_at + self._service_reconcile_interval_seconds
+                if not self._running:
+                    break
+        except asyncio.CancelledError:
+            logger.debug("[ATM] Service reconcile loop cancelled")
+            raise
+        finally:
+            if self._service_reconcile_task is current_task:
+                self._service_reconcile_task = None
+
+    async def _run_service_reconcile_tick(self):
+        try:
+            await self._reconcile_active_service_jobs()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"[ATM] Service reconcile tick failed unexpectedly: {e}")
 
     def _ensure_batch_schedule(self, job: Job):
         if job.type != JobType.BATCH:
@@ -352,7 +397,16 @@ class JobController:
             if job.type != JobType.SERVICE:
                 continue
             try:
-                await self._reconcile_service_job(job)
+                await asyncio.wait_for(
+                    self._reconcile_service_job(job),
+                    timeout=self._service_reconcile_timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[ATM] Service reconcile job %s timed out after %.1fs; cancelling only this job and continuing sweep",
+                    job.id,
+                    self._service_reconcile_timeout_seconds,
+                )
             except Exception as e:
                 logger.error(f"[ATM] Failed to reconcile service job {job.id} on periodic tick: {e}")
 

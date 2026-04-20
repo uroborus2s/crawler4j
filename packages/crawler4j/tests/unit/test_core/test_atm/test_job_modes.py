@@ -66,6 +66,151 @@ async def test_service_job_maintains_target_concurrency():
 
 
 @pytest.mark.asyncio
+async def test_controller_start_wires_bootstrap_before_service_periodic_loop():
+    controller = JobController()
+    call_order: list[str] = []
+
+    async def _recover():
+        call_order.append("recover")
+
+    async def _bootstrap():
+        call_order.append("bootstrap")
+
+    def _start_scheduler():
+        call_order.append("start_scheduler")
+
+    def _subscribe():
+        call_order.append("subscribe")
+
+    def _start_service_loop():
+        call_order.append("start_service_loop")
+
+    controller._recover_zombies = AsyncMock(side_effect=_recover)
+    controller._bootstrap_active_jobs = AsyncMock(side_effect=_bootstrap)
+    controller._start_scheduler = MagicMock(side_effect=_start_scheduler)
+    controller._start_service_reconcile_loop = MagicMock(side_effect=_start_service_loop)
+    controller._subscribe_task_events = MagicMock(side_effect=_subscribe)
+
+    await controller.start()
+
+    assert call_order == [
+        "recover",
+        "start_scheduler",
+        "subscribe",
+        "bootstrap",
+        "start_service_loop",
+    ]
+
+
+def test_start_scheduler_only_starts_apscheduler_without_service_tick_registration():
+    controller = JobController()
+    controller._scheduler = SimpleNamespace(start=MagicMock(), add_job=MagicMock())
+
+    controller._start_scheduler()
+
+    controller._scheduler.start.assert_called_once_with()
+    controller._scheduler.add_job.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_service_reconcile_loop_uses_single_interval_cadence_between_tick_starts(monkeypatch):
+    controller = JobController()
+    controller._running = True
+    controller._service_reconcile_interval_seconds = 5.0
+    current_time = 100.0
+    sleep_calls: list[float] = []
+    tick_starts: list[float] = []
+
+    async def _sleep(seconds: float):
+        sleep_calls.append(seconds)
+        nonlocal current_time
+        current_time += seconds
+
+    async def _run_tick():
+        nonlocal current_time
+        tick_starts.append(current_time)
+        current_time += 1.25
+        if len(tick_starts) >= 2:
+            controller._running = False
+
+    monkeypatch.setattr("src.core.atm.controller.asyncio.sleep", _sleep)
+    monkeypatch.setattr("src.core.atm.controller.time.monotonic", lambda: current_time)
+    controller._run_service_reconcile_tick = AsyncMock(side_effect=_run_tick)
+
+    await controller._service_reconcile_loop()
+
+    assert tick_starts == [pytest.approx(105.0), pytest.approx(110.0)]
+    assert sleep_calls == [pytest.approx(5.0), pytest.approx(3.75)]
+
+
+@pytest.mark.asyncio
+async def test_service_reconcile_tick_times_out_stuck_job_but_continues_following_jobs(monkeypatch):
+    controller = JobController()
+    controller._service_reconcile_timeout_seconds = 0.01
+    cancelled = asyncio.Event()
+    reconciled_job_ids: list[str] = []
+
+    stuck_job = Job(
+        id="service-job-stuck",
+        name="service-stuck",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(),
+        concurrency_target=1,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+    healthy_job = Job(
+        id="service-job-healthy",
+        name="service-healthy",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(),
+        concurrency_target=1,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+    controller.repo = SimpleNamespace(list_active_jobs=AsyncMock(return_value=[stuck_job, healthy_job]))
+
+    async def _reconcile(job: Job):
+        reconciled_job_ids.append(job.id)
+        if job.id == stuck_job.id:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    warning_log = MagicMock()
+    monkeypatch.setattr("src.core.atm.controller.logger.warning", warning_log)
+    controller._reconcile_service_job = AsyncMock(side_effect=_reconcile)
+
+    await controller._run_service_reconcile_tick()
+
+    await asyncio.wait_for(cancelled.wait(), timeout=0.1)
+    assert reconciled_job_ids == [stuck_job.id, healthy_job.id]
+    warning_log.assert_any_call(
+        "[ATM] Service reconcile job %s timed out after %.1fs; cancelling only this job and continuing sweep",
+        stuck_job.id,
+        controller._service_reconcile_timeout_seconds,
+    )
+
+
+@pytest.mark.asyncio
+async def test_stop_service_reconcile_loop_cancels_pending_background_task():
+    controller = JobController()
+
+    async def _wait_forever():
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(_wait_forever())
+    controller._service_reconcile_task = task
+
+    await controller._stop_service_reconcile_loop()
+
+    assert controller._service_reconcile_task is None
+    assert task.cancelled()
+
+
+@pytest.mark.asyncio
 async def test_service_job_scale_up_skips_when_runtime_check_fails_before_dispatch():
     controller = JobController()
     controller.repo = SimpleNamespace(count_active_tasks=AsyncMock(return_value=1))
