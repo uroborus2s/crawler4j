@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-04-19
+**最后更新：** 2026-04-20
 
 ## 1. 当前正式文档结构
 
@@ -71,6 +71,7 @@
 
 ## 5. 最近同步
 
+- 2026-04-20：`docs-stratego` 联动发布口径已从 `feature/task-plugin-system` 收口到 `main`；`deployment-guide.md`、运维目录索引与 notify workflow 现统一说明主分支是唯一自动通知来源，且 dispatch token 会先去掉意外换行再发起 `repository_dispatch`。
 - 2026-04-20：固定环境池语义已进一步收紧并同步到开发/设计/测试文档：当前只从 `eligible=true + READY + 无租约` 环境集合发号，`KEEP_ALIVE` 留下的 `RUNNING` 环境不会自动回池；若候选在 `get_env` / 租约阶段被别人先抢走，任务会回到等待席位而不是直接失败；对应 ATM/REM 单测已补锁。
 - 2026-04-19：已对固定环境池 / 环境队列开发者文档执行“1 个专业文档 reviewer + 2 个模块开发者 reviewer”的三轮苛刻复核；`docs/03-developer-guide/index.md`、`reference-core-capabilities.md`、`build-modules.md`、`debugging.md`、`troubleshooting.md` 以及 `api-design.md`、`atm-resource-pool-queue-design.md` 现统一钉死 `Service Job` 前提、`resource_pool / selector_name / wait_timeout` 语义、`env_id` 来源、`@env_selector(...)` 入口、`replace_resource_pool_snapshot(...)` 全量重建和等待状态文案分层，最终 3 个 reviewer 全部给出 `无 blocker`。
 - 2026-04-19：已新增 `docs/04-project-development/02-discovery/atm-resource-pool-queue-brainstorm.md` 与 `docs/04-project-development/04-design/atm-resource-pool-queue-design.md`，把“模块资源池资格标签 + 宿主等待队列 + FIFO 补位 + 黑号先停发号再销毁”的方案沉淀为正式 discovery/design 输入；根 `docs/index.md` 与 `.factory/memory/doc-map.md` 已同步接入。

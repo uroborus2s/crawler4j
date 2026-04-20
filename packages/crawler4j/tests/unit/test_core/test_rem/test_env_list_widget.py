@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from src.core.rem import EnvKind
 from src.core.rem.models import ProxyMode
@@ -88,13 +88,59 @@ def test_env_list_widget_create_finished_refreshes_without_success_dialog(qtbot,
 
     widget = env_list_widget.EnvListWidget()
     qtbot.addWidget(widget)
-    widget._show_loading = MagicMock()
     widget.load_data = MagicMock()
-    widget.create_btn.setEnabled(False)
 
     widget._on_create_finished(SimpleNamespace(id=123))
 
-    widget._show_loading.assert_called_once_with(False)
-    assert widget.create_btn.isEnabled() is True
     widget.load_data.assert_called_once_with()
     info.assert_not_called()
+
+
+def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    assert widget._begin_operation() is True
+    assert widget.create_btn.isEnabled() is False
+    assert widget.refresh_btn.isEnabled() is False
+    assert widget.table.isEnabled() is False
+
+    widget._end_operation()
+
+    assert widget.create_btn.isEnabled() is True
+    assert widget.refresh_btn.isEnabled() is True
+    assert widget.table.isEnabled() is True
+
+
+def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    manager = SimpleNamespace(
+        pool=SimpleNamespace(),
+        start_env=AsyncMock(return_value=True),
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget.load_data = MagicMock()
+
+    import asyncio
+
+    asyncio.run(widget._async_env_action("env-1", "start"))
+
+    manager.start_env.assert_awaited_once_with("env-1")
+    widget.load_data.assert_called_once_with()

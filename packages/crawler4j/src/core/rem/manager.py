@@ -8,6 +8,8 @@ EnvironmentManager 是 REM 的统一入口，提供：
     - startup: 初始化与崩溃恢复
     - run_gc: 垃圾回收
 """
+import asyncio
+import json
 import time
 from datetime import datetime
 from typing import Any
@@ -141,8 +143,9 @@ class EnvironmentManager:
         self.lease_manager = LeaseManager(self.pool)
         self._gc_interval = gc_interval
         self._running = False
+        self._reservation_lock = asyncio.Lock()
     
-    async def startup(self) -> None:
+    async def startup(self, *, recover_crashed: bool = True) -> None:
         """启动环境管理器。
         
         执行：
@@ -159,7 +162,8 @@ class EnvironmentManager:
         await get_ip_pool_manager().startup()
 
         # 处理崩溃残留
-        await self._recover_crashed()
+        if recover_crashed:
+            await self._recover_crashed()
         
         # 启动 GC
         self._running = True
@@ -210,13 +214,20 @@ class EnvironmentManager:
                 )
             
             env = await self._create_env(provider, proxy_config=requirement.proxy_config)
-        
+
         # 3. 发放租约
-        lease = await self.lease_manager.acquire(
-            env,
-            requirement.task_run_id,
-            timeout=requirement.timeout,
-        )
+        if env.lease_id is None and env.status == EnvStatus.RUNNING:
+            lease = await self.lease_manager.claim_created_env(
+                env,
+                requirement.task_run_id,
+                timeout=requirement.timeout,
+            )
+        else:
+            lease = await self.lease_manager.acquire(
+                env,
+                requirement.task_run_id,
+                timeout=requirement.timeout,
+            )
         
         return lease
 
@@ -1031,41 +1042,60 @@ class EnvironmentManager:
         """
         now = datetime.now()
         prefix = _get_env_name_prefix(now)
-        
-        with get_connection(STATE_DB) as conn:
-            # 1. 查找所有匹配前缀的名称
-            cursor = conn.execute(
-                "SELECT name FROM environments WHERE name LIKE ?",
-                (f"{prefix}%",)
-            )
-            existing_names = [row[0] for row in cursor.fetchall()]
 
-            # 2. 计算最大序列号
-            new_name = _get_next_env_name(existing_names, now)
-            
-            # 3. 创建并持久化占位对象
-            env = Environment(
-                name=new_name,
-                kind=kind,
-                provider=provider,
-                status=EnvStatus.CREATING,
-                created_at=int(time.time()),
-                updated_at=int(time.time()),
-                proxy_config=proxy_config,
-            )
-            
-            # 使用现有逻辑插入 (依赖 pool.add -> _persist_env)
-            # 此时无法直接在 get_connection 上下文中使用 pool.add (因为它会重开连接), 
-            # 但既然已经在一个事务里了... 
-            # 简单起见，这里仅计算名称，持久化交给 pool.add
-            # 风险提示：如果在 select 和 pool.add 之间有其他插入，可能冲突。
-            # 但由于我们基于 fetchall 做了 max 逻辑，冲突概率极低。
-            # 真正原子性需要 pool.add 支持传入 external connection，或者这里手动 insert。
-            # 为了保持架构整洁，我们还是调用 pool.add
-            pass
-        
-        # 移出 context manager 以使用 pool.add
-        await self.pool.add(env)
+        async with self._reservation_lock:
+            with get_connection(STATE_DB) as conn:
+                # 先拿写锁，再计算序号并插入，避免并发创建拿到同一个默认名称。
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    "SELECT name FROM environments WHERE name LIKE ?",
+                    (f"{prefix}%",)
+                )
+                existing_names = [row[0] for row in cursor.fetchall()]
+                new_name = _get_next_env_name(existing_names, now)
+
+                env = Environment(
+                    name=new_name,
+                    kind=kind,
+                    provider=provider,
+                    status=EnvStatus.CREATING,
+                    created_at=int(time.time()),
+                    updated_at=int(time.time()),
+                    proxy_config=proxy_config,
+                )
+                proxy_config_json = json.dumps(env.proxy_config.to_dict()) if env.proxy_config else None
+                cursor = conn.execute(
+                    """
+                    INSERT INTO environments (
+                        name, kind, provider, status, external_id, lease_id, task_run_id,
+                        last_used_at, daily_usage_count, daily_usage_date,
+                        proxy_config_json,
+                        capabilities, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        env.name,
+                        env.kind.value,
+                        env.provider,
+                        env.status.value,
+                        env.external_id,
+                        env.lease_id,
+                        env.task_run_id,
+                        env.last_used_at,
+                        env.daily_usage_count,
+                        env.daily_usage_date,
+                        proxy_config_json,
+                        json.dumps({"capabilities": list(env.capabilities)}),
+                        env.created_at,
+                        env.updated_at,
+                    )
+                )
+                env.id = cursor.lastrowid or 0
+                cache = getattr(self.pool, "_environments", None)
+                if isinstance(cache, dict):
+                    cache[env.id] = env
+
         logger.info(f"[REM] 预留环境名称: {env.name} id={env.id}")
         return env
             

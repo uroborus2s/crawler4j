@@ -327,94 +327,6 @@ class DataLoaderThread(QThread):
             self.error.emit(str(e))
 
 
-class EnvWorkerThread(QThread):
-    """环境操作工作线程。
-    
-    注意：Playwright 的 WebSocket 连接绑定到创建它的事件循环。
-    为避免连接失效，start 操作使用主线程的 qasync 事件循环。
-    """
-    
-    finished = pyqtSignal(object)  # 成功时发射结果
-    error = pyqtSignal(str)
-    
-    # 共享的事件循环（用于保持 Playwright 连接）
-    _shared_loop: asyncio.AbstractEventLoop | None = None
-    
-    def __init__(self, action: str, **kwargs):
-        super().__init__()
-        self._action = action
-        self._kwargs = kwargs
-    
-    @classmethod
-    def _get_shared_loop(cls) -> asyncio.AbstractEventLoop:
-        """获取或创建共享事件循环。"""
-        if cls._shared_loop is None or cls._shared_loop.is_closed():
-            cls._shared_loop = asyncio.new_event_loop()
-        return cls._shared_loop
-    
-    def run(self):
-        from src.core.rem.manager import get_environment_manager
-        
-        try:
-            # 对于需要保持连接的操作，使用共享循环
-            # 对于其他操作，使用临时循环
-            if self._action in ("start", "stop"):
-                loop = self._get_shared_loop()
-                asyncio.set_event_loop(loop)
-                should_close_loop = False
-            else:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                should_close_loop = True
-            
-            manager = get_environment_manager()
-            
-            if self._action == "create":
-                # Ensure provider name is a string
-                provider_obj = self._kwargs["provider"]
-                provider_name = provider_obj.name if hasattr(provider_obj, "name") else str(provider_obj)
-                
-                env = loop.run_until_complete(
-                    manager.create_env(
-                        provider_name=provider_name,
-                        config=self._kwargs.get("config"),
-                        requirement=self._kwargs.get("requirement"),
-                    )
-                )
-                self.finished.emit(env)
-            elif self._action == "destroy":
-                success = loop.run_until_complete(
-                    manager.destroy_env(self._kwargs["env_id"])
-                )
-                self.finished.emit(success)
-            elif self._action == "start":
-                success = loop.run_until_complete(
-                    manager.start_env(self._kwargs["env_id"])
-                )
-                self.finished.emit(success)
-            elif self._action == "stop":
-                success = loop.run_until_complete(
-                    manager.stop_env(self._kwargs["env_id"])
-                )
-                self.finished.emit(success)
-            elif self._action == "pause":
-                success = loop.run_until_complete(
-                    manager.pause_env(self._kwargs["env_id"])
-                )
-                self.finished.emit(success)
-            elif self._action == "resume":
-                success = loop.run_until_complete(
-                    manager.resume_env(self._kwargs["env_id"])
-                )
-                self.finished.emit(success)
-            
-            # 只关闭临时循环，共享循环保持打开
-            if should_close_loop:
-                loop.close()
-        except Exception as e:
-            self.error.emit(str(e))
-
-
 @dataclass
 class EnvDisplayItem:
     """环境显示项包装。"""
@@ -452,6 +364,10 @@ class EnvListWidget(QWidget):
         self._manager = get_environment_manager()
         self._pool = self._manager.pool
         self._loader_thread = None
+        self._display_items: list[EnvDisplayItem] = []
+        self._load_in_progress = False
+        self._operation_in_progress = False
+        self._operation_task: asyncio.Task[Any] | None = None
         self._setup_ui()
     
     def _setup_ui(self):
@@ -536,9 +452,11 @@ class EnvListWidget(QWidget):
     
     def load_data(self, run_gc: bool = False):
         """加载环境数据。"""
-        self.table.set_loading(True)
+        if self._load_in_progress:
+            return
+        self._load_in_progress = True
         self.error_label.hide()
-        self.refresh_btn.setEnabled(False)
+        self._apply_busy_state()
         
         self._loader_thread = DataLoaderThread(self._pool, run_gc=run_gc)
         self._loader_thread.finished.connect(self._on_data_loaded)
@@ -547,8 +465,9 @@ class EnvListWidget(QWidget):
     
     def _on_data_loaded(self, envs: list):
         """数据加载完成。"""
-        self.table.set_loading(False)
-        self.refresh_btn.setEnabled(True)
+        self._load_in_progress = False
+        self._loader_thread = None
+        self._apply_busy_state()
         
         ready_count = 0
         busy_count = 0
@@ -706,48 +625,109 @@ class EnvListWidget(QWidget):
     
     def _on_load_error(self, error: str):
         """加载出错。"""
-        self._show_loading(False)
-        self.refresh_btn.setEnabled(True)
+        self._load_in_progress = False
+        self._loader_thread = None
+        self._apply_busy_state()
         self.error_label.setText(f"❌ 加载失败: {error}")
         self.error_label.show()
+
+    def _apply_busy_state(self):
+        """同步按钮和表格的忙碌状态。"""
+        self.create_btn.setEnabled(not self._operation_in_progress)
+        self.refresh_btn.setEnabled(not self._load_in_progress and not self._operation_in_progress)
+        self.table.set_loading(self._load_in_progress)
+        if not self._load_in_progress:
+            self.table.setEnabled(not self._operation_in_progress)
+
+    def _begin_operation(self) -> bool:
+        if self._operation_in_progress:
+            return False
+        self._operation_in_progress = True
+        self._show_loading(True)
+        self._apply_busy_state()
+        return True
+
+    def _end_operation(self):
+        self._operation_in_progress = False
+        self._operation_task = None
+        self._show_loading(False)
+        self._apply_busy_state()
+
+    def _schedule_operation(self, coro: Any) -> bool:
+        if not self._begin_operation():
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            return False
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._end_operation()
+            QMessageBox.critical(self, "错误", "当前 UI 异步事件循环未启动，无法执行环境操作。")
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            return False
+        self._operation_task = loop.create_task(self._run_operation(coro))
+        return True
+
+    async def _run_operation(self, coro: Any):
+        try:
+            await coro
+        finally:
+            self._end_operation()
+
+    async def _async_create_env(self, provider: str, config: dict[str, Any], requirement: Any):
+        try:
+            env = await self._manager.create_env(
+                provider_name=provider,
+                config=config,
+                requirement=requirement,
+            )
+        except Exception as exc:
+            self._on_worker_error(str(exc))
+            return
+        self._on_create_finished(env)
+
+    async def _async_destroy_env(self, env_id: str):
+        try:
+            success = await self._manager.destroy_env(env_id)
+        except Exception as exc:
+            self._on_worker_error(str(exc))
+            return
+        self._on_destroy_finished(success)
+
+    async def _async_env_action(self, env_id: str, action: str):
+        operation = getattr(self._manager, f"{action}_env")
+        try:
+            success = await operation(env_id)
+        except Exception as exc:
+            self._on_worker_error(str(exc))
+            return
+        self._on_action_finished(success, action=action)
     
     def _create_env(self):
         """创建环境。"""
         dialog = CreateEnvDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             kind, provider, config = dialog.get_values()
-            
-            self.create_btn.setEnabled(False)
-            self._show_loading(True)
-            
+
             # Construct EnvRequirement to pass proxy_config correctly
             from src.core.rem.models import EnvRequirement, ProxyConfig
             
             requirement = EnvRequirement(kind=kind)
             if "proxy" in config:
                 requirement.proxy_config = ProxyConfig.from_dict(config["proxy"])
-            
-            self._worker = EnvWorkerThread(
-                action="create",
-                provider=provider,
-                config=config,
-                requirement=requirement,
-            )
-            self._worker.finished.connect(self._on_create_finished)
-            self._worker.error.connect(self._on_worker_error)
-            self._worker.start()
+
+            self._schedule_operation(self._async_create_env(provider, config, requirement))
     
     def _on_create_finished(self, env):
         """创建完成。"""
-        self._show_loading(False)
-        self.create_btn.setEnabled(True)
+        del env
         self.load_data()
     
     def _on_worker_error(self, error: str):
         """工作线程出错。"""
-        self._show_loading(False)
-        self.create_btn.setEnabled(True)
-        self.refresh_btn.setEnabled(True)
         QMessageBox.critical(self, "错误", f"操作失败: {error}")
     
     def _destroy_env(self, env_id: str):
@@ -757,19 +737,10 @@ class EnvListWidget(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self._show_loading(True)
-            
-            self._worker = EnvWorkerThread(
-                action="destroy",
-                env_id=env_id,
-            )
-            self._worker.finished.connect(self._on_destroy_finished)
-            self._worker.error.connect(self._on_worker_error)
-            self._worker.start()
+            self._schedule_operation(self._async_destroy_env(env_id))
     
     def _on_destroy_finished(self, success: bool):
         """销毁完成。"""
-        self._show_loading(False)
         if success:
             QMessageBox.information(self, "成功", "环境已销毁")
         else:
@@ -782,35 +753,19 @@ class EnvListWidget(QWidget):
     
     def _start_env(self, env_id: str):
         """启动环境（打开窗口）。"""
-        self._show_loading(True)
-        self._worker = EnvWorkerThread(action="start", env_id=env_id)
-        self._worker.finished.connect(self._on_action_finished)
-        self._worker.error.connect(self._on_worker_error)
-        self._worker.start()
+        self._schedule_operation(self._async_env_action(env_id, "start"))
     
     def _stop_env(self, env_id: str):
         """停止环境（关闭窗口）。"""
-        self._show_loading(True)
-        self._worker = EnvWorkerThread(action="stop", env_id=env_id)
-        self._worker.finished.connect(self._on_action_finished)
-        self._worker.error.connect(self._on_worker_error)
-        self._worker.start()
+        self._schedule_operation(self._async_env_action(env_id, "stop"))
     
     def _pause_env(self, env_id: str):
         """暂停环境。"""
-        self._show_loading(True)
-        self._worker = EnvWorkerThread(action="pause", env_id=env_id)
-        self._worker.finished.connect(self._on_action_finished)
-        self._worker.error.connect(self._on_worker_error)
-        self._worker.start()
+        self._schedule_operation(self._async_env_action(env_id, "pause"))
     
     def _resume_env(self, env_id: str):
         """恢复环境。"""
-        self._show_loading(True)
-        self._worker = EnvWorkerThread(action="resume", env_id=env_id)
-        self._worker.finished.connect(self._on_action_finished)
-        self._worker.error.connect(self._on_worker_error)
-        self._worker.start()
+        self._schedule_operation(self._async_env_action(env_id, "resume"))
     
     def _edit_env(self, env_id: str):
         """编辑环境（弹出对话框）。"""
@@ -836,13 +791,15 @@ class EnvListWidget(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.load_data()  # 刷新列表
     
-    def _on_action_finished(self, success: bool):
+    def _on_action_finished(self, success: bool, *, action: str):
         """通用操作完成回调。
         
         注意: 失败时错误信息由 Shell 通过 Toast 显示，
         详见 ENV_OPERATION_FAILED 事件处理。
         """
-        self._show_loading(False)
+        if not success:
+            QMessageBox.warning(self, "操作失败", f"{action} 环境失败，请稍后重试。")
+            return
         self.load_data()
     
     def _show_loading(self, show: bool):

@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/04-design/technical-selection.md` | 本地验证结果
 **下游输出：** `docs/04-project-development/08-operations-maintenance/operations-runbook.md` | `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md` | `docs/02-user-guide/user-guide.md` | `docs/02-user-guide/admin-guide.md`
 **关联 ID：** `OPS-001`, `OPS-002`, `OPS-003`, `REQ-001`, `REQ-003`, `REQ-004`
-**最后更新：** 2026-04-02
+**最后更新：** 2026-04-20
 
 ## 1. 环境准备
 
@@ -86,16 +86,18 @@ uv run python -m crawler4j_sdk.cli.commands --help
 
 ## 5. docs-stratego 联动发布
 
-- 当前仓库通过 `.github/workflows/notify-docs-stratego.yml` 监听 `feature/task-plugin-system` 分支上的 `docs/**` 变更。
+- docs-stratego 源仓联动的正式口径以 `main` 为准：`.github/workflows/notify-docs-stratego.yml` 应监听 `main` 分支上的 `docs/**` 变更。
 - workflow 只负责向 `uroborus2s/docs-stratego` 发送 `source-pointer-sync-requested` 事件，不在本仓直接构建或部署线上文档。
 - 源仓必须在 GitHub Actions Secret 中配置 `DOCS_STRATEGO_DISPATCH_TOKEN`；该 token 只用于触发 `docs-stratego` 根仓的 `repository_dispatch`。
-- `docs-stratego` 根仓当前 remote 配置同样指向 `crawler4j` 的 `feature/task-plugin-system`；如果后续切换到 `main` 或其他发布分支，需要同时更新源仓 workflow 分支过滤与根仓 `config/source-repos.json`。
+- workflow 会先去掉 `DOCS_STRATEGO_DISPATCH_TOKEN` 中意外带入的 `CR/LF` 再构造 `Authorization` header，避免凭据换行把 dispatch 请求拆断。
+- `docs-stratego` 根仓的 source pointer 也应指向 `crawler4j` 的 `main`；如果后续切换到其他发布分支，需要同时更新源仓 workflow 分支过滤与根仓 `config/source-repos.json`。
 - 根仓收到事件后会更新 `bot/sync-source-pointers` 共享 PR；线上文档仍以根仓审核合并后的 `main/master` 部署结果为准。
 
 ## 6. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-20 | 将 docs-stratego 联动发布说明从 `feature/task-plugin-system` 收敛到 `main` 分支口径，并补记 dispatch token 换行清理约束 | Codex |
 | 2026-04-17 | 新增 `docs-stratego` 源仓通知 workflow，并补充共享 PR 联动发布说明 | Codex |
 | 2026-04-02 | 下游输出补齐到运行手册和管理员指南 | Codex |
 | 2026-03-28 | 同步四大模块结构下的上下游文档路径 | Codex |

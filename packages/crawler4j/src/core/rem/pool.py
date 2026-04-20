@@ -427,6 +427,57 @@ class LeaseManager:
             
             return lease
 
+    async def claim_created_env(
+        self,
+        env: Environment,
+        task_run_id: str,
+        timeout: int | None = None,
+    ) -> EnvLease:
+        """为刚创建完成的环境补发租约。
+
+        `_create_env()` 成功返回时，环境已经过 open/connect，真实状态通常是
+        `RUNNING`。这类环境不应再走只接受 `READY` 的普通 acquire 守卫，
+        否则会把当前任务自己刚创建好的环境误判成“已被占用”。
+        """
+        from src.core.rem.models import EnvUnavailableError
+
+        async with self._lock:
+            if env.lease_id:
+                raise EnvUnavailableError(
+                    f"环境 {env.id} 已存在租约",
+                    stage="LEASE",
+                    hint="请等待环境释放或选择其他环境",
+                )
+            if env.status not in {EnvStatus.READY, EnvStatus.BUSY, EnvStatus.RUNNING}:
+                raise EnvUnavailableError(
+                    f"环境 {env.id} 当前状态不可认领 (status={env.status.value})",
+                    stage="LEASE",
+                    hint="请检查环境创建链路或重新创建环境",
+                )
+
+            now = int(time.time())
+            expires_at = now + timeout if timeout else None
+            lease = EnvLease(
+                env_id=env.id,
+                task_run_id=task_run_id,
+                acquired_at=now,
+                expires_at=expires_at,
+            )
+
+            if env.status == EnvStatus.READY:
+                env.status = EnvStatus.BUSY
+            env.lease_id = lease.id
+            env.task_run_id = task_run_id
+            env.updated_at = now
+
+            self.pool._persist_env(env)
+            self._leases[lease.id] = lease
+
+            logger.info(
+                f"[REM] 认领新建环境租约: lease={lease.id[:8]}... env={env.name[:8]}... task={task_run_id[:8]}..."
+            )
+            return lease
+
     async def acquire_atomic(
         self,
         requirement: EnvRequirement,

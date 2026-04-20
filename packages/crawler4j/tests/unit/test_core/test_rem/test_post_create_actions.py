@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.rem.manager import EnvironmentManager
-from src.core.rem.models import Environment, EnvKind, EnvStatus, EnvUnavailableError
+from src.core.rem.models import Environment, EnvKind, EnvRequirement, EnvStatus, EnvUnavailableError
 from src.core.rem.provider import BaseProvider, register_provider
 from src.core.system.external_app_service import AppLaunchResult, ExternalApp
 
@@ -115,6 +115,44 @@ async def test_create_env_keeps_connected_environment_running(manager):
     assert provider.open_called
     assert provider.connect_called
     assert not provider.close_called
+
+
+@pytest.mark.asyncio
+async def test_acquire_claims_fresh_running_environment(manager, mock_pool):
+    provider = MockProvider()
+    register_provider(provider)
+
+    mock_pool.find_available = AsyncMock(return_value=None)
+    mock_pool.can_create = MagicMock(return_value=True)
+
+    requirement = EnvRequirement(task_run_id="task-create", timeout=45)
+
+    lease = await manager.acquire(requirement, default_provider=provider.name)
+
+    env = await mock_pool.get(lease.env_id)
+    assert env is not None
+    assert env.status == EnvStatus.RUNNING
+    assert env.lease_id == lease.id
+    assert env.task_run_id == "task-create"
+
+
+@pytest.mark.asyncio
+async def test_startup_can_skip_crash_recovery(mock_pool):
+    with patch("src.core.rem.manager.get_ip_pool_manager") as mock_get_pool:
+        mock_ip_manager = AsyncMock()
+        mock_get_pool.return_value = mock_ip_manager
+
+        manager = EnvironmentManager()
+        manager.pool = mock_pool
+        manager.pool.load_from_db = AsyncMock()
+        manager.pool.list_all = AsyncMock(return_value=[])
+        manager._recover_crashed = AsyncMock()
+
+        await manager.startup(recover_crashed=False)
+
+    manager.pool.load_from_db.assert_awaited_once()
+    mock_ip_manager.startup.assert_awaited_once()
+    manager._recover_crashed.assert_not_awaited()
 
 @pytest.mark.asyncio
 async def test_create_env_connect_failure_closes_env_and_raises(manager):

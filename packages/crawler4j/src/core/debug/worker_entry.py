@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from crawler4j_contracts import EnvAction
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 from src.core.debug.models import DebugSessionState
@@ -57,7 +58,7 @@ async def main_async(config_path: str) -> int:
         )
         return 1
 
-    await get_environment_manager().startup()
+    await get_environment_manager().startup(recover_crashed=False)
 
     from src.core.mms.registry import get_module_registry
 
@@ -112,6 +113,7 @@ async def main_async(config_path: str) -> int:
         ),
         selector_wait_timeout=int(payload.get("wait_timeout", 60)),
         execution_timeout=int(payload.get("timeout", 0)),
+        default_env_action=EnvAction.KEEP_ALIVE if payload.get("keep_environment") else None,
     )
 
     runner = ExecutionRunner()

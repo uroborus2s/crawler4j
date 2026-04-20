@@ -23,20 +23,26 @@ MODULES_DIR = PROJECT_ROOT / "modules"
 DOCS_ROOT = WORKSPACE_ROOT / "docs"
 PROJECT_VERSION = _load_project_version(PROJECT_METADATA)
 
-a = Analysis(
-    [str(APP_ENTRY)],
-    pathex=[str(PROJECT_ROOT)],
-    binaries=[],
-    datas=[
+
+def _build_datas() -> list[tuple[str, str]]:
+    datas = [
         (str(PROJECT_METADATA), "."),
-        (str(MODULES_DIR), "modules"),  # 内置模块
         (str(UI_STYLE), "src/ui/styles"),
         (str(UI_ICON), "src/ui/assets"),
         (str(DOCS_ROOT / "index.md"), "docs"),
         (str(DOCS_ROOT / "01-getting-started"), "docs/01-getting-started"),
         (str(DOCS_ROOT / "02-user-guide"), "docs/02-user-guide"),
         (str(DOCS_ROOT / "03-developer-guide"), "docs/03-developer-guide"),
-    ],
+    ]
+    if MODULES_DIR.exists():
+        datas.append((str(MODULES_DIR), "modules"))
+    return datas
+
+a = Analysis(
+    [str(APP_ENTRY)],
+    pathex=[str(PROJECT_ROOT)],
+    binaries=[],
+    datas=_build_datas(),
     hiddenimports=[
         "PyQt6.sip",
         "playwright",

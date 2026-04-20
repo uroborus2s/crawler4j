@@ -9,9 +9,9 @@ import pytest
 
 
 class _DapClient:
-    def __init__(self, host: str, port: int):
-        self._sock = socket.create_connection((host, port), timeout=10)
-        self._sock.settimeout(10)
+    def __init__(self, host: str, port: int, *, timeout: float = 30.0):
+        self._sock = socket.create_connection((host, port), timeout=timeout)
+        self._sock.settimeout(timeout)
         self._seq = 1
 
     def close(self) -> None:
@@ -144,7 +144,10 @@ def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int
 
 
 def _exercise_debug_attach(host: str, port: int, breakpoint_file: Path, breakpoint_line: int) -> dict:
-    client = _DapClient(host, port)
+    # The worker still needs to create and connect a real browser environment
+    # after the initial stop-on-entry breakpoint resumes, so allow a longer DAP
+    # socket timeout before declaring the module breakpoint missing.
+    client = _DapClient(host, port, timeout=30.0)
     try:
         client.send(
             "initialize",

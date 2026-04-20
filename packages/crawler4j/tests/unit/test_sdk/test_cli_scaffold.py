@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import importlib
 import sys
 import tomllib
@@ -106,6 +107,7 @@ def test_generated_pyproject_uses_sdk_dependency_range(module_root: Path):
     with (module_root / "pyproject.toml").open("rb") as fh:
         pyproject = tomllib.load(fh)
 
+    assert get_compatible_dependency_spec() == "crawler4j-sdk>=0.3.0,<0.4.0"
     assert get_compatible_dependency_spec() in pyproject["project"]["dependencies"]
     assert "scripts" not in pyproject["project"]
 
@@ -169,6 +171,34 @@ def test_resource_commands_create_files_and_update_manifest(
     assert "_declare_accounts_table" in runtime_text
     assert "_declare_accounts_table(context)" in runtime_text
     assert 'name="pick_ready"' in runtime_text
+
+
+def test_page_scaffold_stays_importable_without_pyqt6(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+
+    generated_page = (module_root / "ui" / "dashboard.py").read_text(encoding="utf-8")
+    assert "except ModuleNotFoundError as exc" in generated_page
+    assert "PyQt6 is required to instantiate code pages" in generated_page
+
+    manifest = _read_manifest(module_root)
+    package_name = module_root.name
+    stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
+    for name in stale:
+        sys.modules.pop(name, None)
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "PyQt6.QtWidgets":
+            raise ModuleNotFoundError("No module named 'PyQt6'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    assert commands.collect_full_errors(module_root, manifest) == []
 
 
 def test_task_create_refuses_to_clobber_existing_files(module_root: Path, monkeypatch: pytest.MonkeyPatch):

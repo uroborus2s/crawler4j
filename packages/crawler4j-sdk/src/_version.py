@@ -44,5 +44,9 @@ def get_base_version(version: str | None = None) -> str:
 def get_compatible_dependency_spec() -> str:
     """Build the default scaffold dependency range for the current SDK version."""
     base_version = get_base_version()
-    major = int(base_version.split(".", 1)[0])
-    return f"{PACKAGE_NAME}>={base_version},<{major + 1}.0.0"
+    major, minor, _patch = (int(part) for part in base_version.split(".", 2))
+    if major == 0:
+        upper_bound = f"0.{minor + 1}.0"
+    else:
+        upper_bound = f"{major + 1}.0.0"
+    return f"{PACKAGE_NAME}>={base_version},<{upper_bound}"

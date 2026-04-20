@@ -1,6 +1,6 @@
 # Tests Summary
 
-- `TC-001`: `uv run pytest -q` currently passes in the validated baseline.
+- `TC-001`: `uv run pytest -q` currently passes in the validated baseline (`485 passed` on `2026-04-20`).
 - `TC-002`: Root package, SDK, and Contracts builds currently pass.
 - `TC-003`: Root script import and startup path are aligned.
 - `TC-004`: Headless UI smoke currently passes.
@@ -8,7 +8,7 @@
   - `TC-007`: New scaffolded shim `__init__.py` imports and exposes standard entrypoints.
   - `TC-008`: Standard `module_runtime.py` carries lifecycle hooks and `@env_selector(...)` callbacks, and overrides default run / hook behavior when declared.
   - `TC-009`: A module re-initialized from the latest template imports and runs correctly.
-- `TC-010`: `core:data_table` now replays `declare_ui` on refresh, routes add/edit to schema-declared sync local handlers, and sets `devel_mode` for DevLink page refresh; covered by `test_module_data_table_page.py` and `test_ctrip_account_ui_smoke.py`.
+- `TC-010`: `core:data_table` now replays `declare_ui` on refresh, routes add/edit to schema-declared sync local handlers, sets `devel_mode` for DevLink page refresh, and still has a reproducible formal rerun command through `test_module_data_table_page.py`.
 - `TC-011`: ATM `Job` now persists `RunProfile` snapshots directly, task UI/debug/dispatcher only consume `job.run_profile`, and `TSM` compatibility code has been removed; covered by `test_dispatcher_run_profile.py`, `test_debug/test_service.py`, `test_job_modes.py`, `test_task_create_dialog.py`, `test_run_profile_schema.py`, and `tests/integration/test_task_debug_e2e.py`.
 - `TC-012`: ATM “选择环境”已切到模块回调模式，UI 会提示 `return_none` 占位选择器，执行链路会在回调返回 `None` 时直接失败；覆盖见 `test_run_profile_dialog.py`, `test_execution_runner.py`, `test_dispatcher_run_profile.py`, `test_cli_scaffold.py`, `test_assembler.py`.
 - `TC-013`: 模块持久配置已迁到 `config.db.module_config_entries`，`ctx.get_config()` 只读模块/工作流配置，ATM/Debug 的 `workflow`、`execution_params`、`job_params`、`devel_mode`、`creation_params` 统一进入 `ctx.runtime`；覆盖见 `test_settings_store.py`, `test_execution_runner.py`, `test_dispatcher_hooks.py`, `test_debug/test_service.py`, `tests/integration/test_task_debug_e2e.py`.
@@ -27,10 +27,14 @@
 - `TC-026`: 固定环境池 Service Job 的等待队列语义已由 ATM 单测覆盖，包括“运行中 + 等待中”、FIFO 补位与资源池模式下的等待语义。
 - `TC-027`: 模块资源池资格卡片已由 runtime capability / SDK helper 单测覆盖，包括资源池隔离、不可接单切换与快照重建。
 - `TC-028`: ATM `TaskCreateDialog` 现锁定 `配置运行模板`、`取消`、`创建/保存` 按钮必须使用共享 `StyledButton`，且按钮高度统一为 `40px`；同时覆盖“运行配置”长预览文本不会再向下压到蓝色按钮区域，见 `tests/unit/test_core/test_atm/test_task_create_dialog.py` 与 `tests/unit/test_ui/test_button.py`.
+- `TC-029`: REM 环境列表页已切到 UI 主 `qasync` 事件循环中的串行异步环境操作，并在执行期间禁用表格/创建/刷新入口，避免旧版 `QThread + 共享 asyncio loop` 在连续点击时触发跨线程 loop 复用；覆盖见 `tests/unit/test_core/test_rem/test_env_list_widget.py`.
+- `TC-030`: `crawler4j-sdk page create` 生成的代码型页面现在在缺少 `PyQt6` 时仍可被 `check full` 安全导入，且 SDK / Contracts / Root app 的 `0.x` 兼容区间已收紧到当前 minor 的 patch 版本；覆盖见 `tests/unit/test_sdk/test_cli_scaffold.py`, `tests/unit/test_sdk/test_packaging_config.py`, `tests/integration/test_sdk_cli_module_mode.py`.
+- `TC-031`: 默认环境名占位的 `SELECT max + INSERT` 现已改为同一 SQLite 写事务内完成，避免并发创建时重复发放 `env-YYYYMMDD-N` 名称；覆盖见 `tests/unit/test_core/test_rem/test_atomic_reservation.py`.
 - Workspace root `scripts/` now keeps `build_workspace_packages.py`, `db_cli.py`, and `smoke_test_ui.py` as the maintained helper set; legacy local debug and icon-generation helpers are no longer treated as maintained assets.
 
 Current gaps:
 
 - Real-site `ctrip` E2E is still open.
+- Windows desktop delivery artifacts are still open.
 - `REQ-009` queue semantics are now covered locally by ATM / SDK unit tests: `uv run pytest packages/crawler4j/tests/unit/test_core/test_atm -q packages/crawler4j/tests/unit/test_sdk/test_data_capability.py` => `122 passed`.
 - The execution baseline for that closeout now lives in `docs/04-project-development/06-testing-verification/ctrip-real-site-e2e-closeout.md`.

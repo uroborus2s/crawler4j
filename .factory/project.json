@@ -12,7 +12,7 @@
     "tests": {
       "command": "uv run pytest -q",
       "result": "passed",
-      "details": "188 passed on 2026-03-26 after completing TASK-012 and rerunning the full suite"
+      "details": "485 passed on 2026-04-20 after resolving the REM UI async-loop blocker, the standalone page-scaffold import blocker, the pre-1.0 dependency-range risk, and the default env-name reservation race"
     },
     "docs": {
       "command": "Review docs/ markdown tree",
@@ -27,17 +27,17 @@
     "root_build": {
       "command": "uv build --package crawler4j --out-dir /tmp/crawler4j-build-check",
       "result": "passed",
-      "details": "wheel/sdist produced successfully for crawler4j-0.2.0"
+      "details": "workspace build reran on 2026-04-20 and produced crawler4j-0.2.0 wheel/sdist successfully"
     },
     "sdk_build": {
       "command": "uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check",
       "result": "passed",
-      "details": "wheel/sdist produced successfully for crawler4j_sdk-0.3.0 on 2026-04-19"
+      "details": "workspace build reran on 2026-04-20 and produced crawler4j_sdk-0.3.0 wheel/sdist successfully"
     },
     "contracts_build": {
       "command": "uv build --package crawler4j-contracts --out-dir /tmp/crawler4j-contracts-build-check",
       "result": "passed",
-      "details": "wheel/sdist produced successfully"
+      "details": "workspace build reran on 2026-04-20 and produced crawler4j_contracts-0.2.0 wheel/sdist successfully"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",
@@ -52,12 +52,12 @@
     "ui_smoke": {
       "command": "uv run python scripts/smoke_test_ui.py",
       "result": "passed",
-      "details": "Smoke passed on 2026-03-26; QApplication, Shell import, and Shell instantiation succeeded"
+      "details": "Smoke passed on 2026-04-20; QApplication, Shell import, and Shell instantiation succeeded"
     },
     "pyinstaller_bundle": {
       "command": "uv run pyinstaller --noconfirm --clean --distpath /tmp/crawler4j-pyinstaller-dist --workpath /tmp/crawler4j-pyinstaller-build packages/crawler4j/crawler4j.spec",
       "result": "passed",
-      "details": "PyInstaller build completed successfully into /tmp"
+      "details": "PyInstaller build completed successfully on 2026-04-20; macOS bundle available at /tmp/crawler4j-pyinstaller-dist/Crawler4j.app"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -93,7 +93,12 @@
     "workspace_run_command": "uv run python -m src.ui.app",
     "sdk_cli_entry": "uv run python -m crawler4j_sdk.cli.commands --help"
   },
-  "known_risks": [],
+  "known_risks": [
+    "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
+    "Git tag v0.2.0, formal release assets, and delivery batch binding have not been executed yet.",
+    "Windows desktop delivery artifacts are still missing because the repo does not currently provide a Windows packaging pipeline or runner.",
+    "Latest local validation is green, but release evidence still spans 2026-04-19 retained ctrip records plus 2026-04-20 code/build checks and has not been bound into one formal release batch."
+  ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/role-charter.project.md",

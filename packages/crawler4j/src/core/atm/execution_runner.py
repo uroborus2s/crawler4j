@@ -79,6 +79,7 @@ class ExecutionRequest:
     creation_params: dict[str, Any] = field(default_factory=dict)
     creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
     execution_timeout: int = 0
+    default_env_action: EnvAction | None = None
     runtime_capabilities: RuntimeCapabilities | None = None
 
 
@@ -304,7 +305,7 @@ class ExecutionRunner:
                 env_created = True
                 logger.info(f"[ATM] Task {task.id} created env {env_id}")
 
-                env_lease = await self.rem.lease_manager.acquire(env, task.id)
+                env_lease = await self.rem.lease_manager.claim_created_env(env, task.id)
                 task.lease_id = env_lease.id
             else:
                 raise ValueError(
@@ -479,6 +480,7 @@ class ExecutionRunner:
                 signal=signal,
                 env_created=env_created,
                 creation_lifecycle=request.creation_lifecycle,
+                default_env_action=request.default_env_action,
                 resolve_stop_env_action=resolve_stop_env_action,
             )
             if env_lease and resolved_env_action:
@@ -497,6 +499,7 @@ class ExecutionRunner:
                 signal=signal,
                 env_created=env_created,
                 creation_lifecycle=request.creation_lifecycle,
+                default_env_action=request.default_env_action,
                 resolve_stop_env_action=resolve_stop_env_action,
             )
             env_action_info = await self._apply_env_action(
@@ -1050,6 +1053,7 @@ class ExecutionRunner:
         signal: TaskSignal | None,
         env_created: bool,
         creation_lifecycle: CreationLifecycle,
+        default_env_action: EnvAction | None,
         resolve_stop_env_action: StopEnvActionCallback | None,
     ) -> EnvAction:
         if signal and signal.env_action is not None:
@@ -1058,6 +1062,8 @@ class ExecutionRunner:
             requested = resolve_stop_env_action()
             if requested is not None:
                 return requested
+        if default_env_action is not None:
+            return default_env_action
         return self._default_env_action(env_created, creation_lifecycle)
 
     async def _apply_created_env_stop_action_without_lease(

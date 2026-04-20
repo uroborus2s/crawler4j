@@ -153,8 +153,25 @@ MODEL_UI_PAGES_TEMPLATE = '''"""界面组件: {display_name}
 {description}
 """
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 from crawler4j_sdk import TaskContext
+
+try:
+    from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
+except ModuleNotFoundError as exc:
+    _PYQT_IMPORT_ERROR = exc
+
+    class _PyQt6Stub:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError(
+                "PyQt6 is required to instantiate code pages. Install the host GUI dependencies first."
+            ) from _PYQT_IMPORT_ERROR
+
+    QWidget = _PyQt6Stub
+    QVBoxLayout = _PyQt6Stub
+    QLabel = _PyQt6Stub
+    QPushButton = _PyQt6Stub
+else:
+    _PYQT_IMPORT_ERROR = None
 
 
 class {class_name}(QWidget):

@@ -60,7 +60,9 @@ def _build_compatible_requirement(distribution_name: str, version: str) -> str:
     if not match:
         raise AssertionError(f"Unsupported version format: {version}")
     base_version = f"{match.group('major')}.{match.group('minor')}.{match.group('patch')}"
-    upper_bound = f"{int(match.group('major')) + 1}.0.0"
+    major = int(match.group("major"))
+    minor = int(match.group("minor"))
+    upper_bound = f"0.{minor + 1}.0" if major == 0 else f"{major + 1}.0.0"
     return f"{distribution_name}>={base_version},<{upper_bound}"
 
 
@@ -91,6 +93,7 @@ def test_sdk_runtime_version_matches_publish_metadata():
     version_helper = _load_version_helper(package_root)
 
     assert version_helper.get_version() == pyproject["project"]["version"]
+    assert version_helper.get_compatible_dependency_spec() == "crawler4j-sdk>=0.3.0,<0.4.0"
     assert _load_literal_module_version(package_root) is None
 
 
@@ -119,7 +122,7 @@ def test_root_app_package_does_not_reexport_sdk_cli_command():
 
     assert scripts["start"] == "src.ui.app:main"
     assert "crawler4j" not in scripts
-    assert f"crawler4j-contracts>={contracts_pyproject['project']['version']}" in dependencies
+    assert _build_compatible_requirement("crawler4j-contracts", contracts_pyproject["project"]["version"]) in dependencies
 
 
 def test_workspace_root_declares_packages_workspace_members():
@@ -169,6 +172,8 @@ def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
     assert '(str(DOCS_ROOT / "01-getting-started"), "docs/01-getting-started")' in spec_text
     assert '(str(DOCS_ROOT / "02-user-guide"), "docs/02-user-guide")' in spec_text
     assert '(str(DOCS_ROOT / "03-developer-guide"), "docs/03-developer-guide")' in spec_text
+    assert "if MODULES_DIR.exists():" in spec_text
+    assert 'datas=_build_datas(),' in spec_text
     assert "sys.path.insert(0, str(PROJECT_ROOT))" in spec_text
     assert '(str(UI_ICON), "src/ui/assets")' in spec_text
     assert 'PROJECT_METADATA = PROJECT_ROOT / "pyproject.toml"' in spec_text

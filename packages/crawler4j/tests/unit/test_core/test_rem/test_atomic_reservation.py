@@ -1,5 +1,5 @@
-
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -13,7 +13,8 @@ async def test_reserve_env_placeholder_max_plus_one():
     # Setup
     manager = EnvironmentManager()
     manager.pool = MagicMock()
-    manager.pool.add = AsyncMock()
+    manager.pool._lock = asyncio.Lock()
+    manager.pool._environments = {}
     
     # Mock datetime to fixed date
     fixed_date_str = "20260118"
@@ -43,6 +44,7 @@ async def test_reserve_env_placeholder_max_plus_one():
         ]
         # In the code: cursor.fetchall() returns list of tuples [(name,), ...]
         mock_cursor.fetchall.return_value = [(n,) for n in existing_names]
+        mock_cursor.lastrowid = 106
         
         # Action
         env = await manager._reserve_env_placeholder(EnvKind.BROWSER, "test_provider")
@@ -52,11 +54,8 @@ async def test_reserve_env_placeholder_max_plus_one():
         expected_name = f"env-{fixed_date_str}-6"
         assert env.name == expected_name
         assert env.status == EnvStatus.CREATING
-        
-        # Verify pool.add was called (Persistence)
-        manager.pool.add.assert_called_once()
-        saved_env = manager.pool.add.call_args[0][0]
-        assert saved_env.name == expected_name
+        assert env.id == 106
+        assert manager.pool._environments[106].name == expected_name
 
 @pytest.mark.asyncio
 async def test_reserve_env_placeholder_no_existing():
@@ -64,7 +63,8 @@ async def test_reserve_env_placeholder_no_existing():
     # Setup
     manager = EnvironmentManager()
     manager.pool = MagicMock()
-    manager.pool.add = AsyncMock()
+    manager.pool._lock = asyncio.Lock()
+    manager.pool._environments = {}
     
     fixed_date_str = "20260118"
     
@@ -76,7 +76,11 @@ async def test_reserve_env_placeholder_no_existing():
         mock_datetime.now.return_value = mock_now
         
         # Mock empty DB result
-        mock_get_conn.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
+        mock_conn = mock_get_conn.return_value.__enter__.return_value
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.lastrowid = 1
+        mock_conn.execute.return_value = mock_cursor
         
         # Action
         env = await manager._reserve_env_placeholder(EnvKind.BROWSER, "test_provider")
@@ -86,3 +90,4 @@ async def test_reserve_env_placeholder_no_existing():
         expected_name = f"env-{fixed_date_str}-1"
         assert env.name == expected_name
         assert env.status == EnvStatus.CREATING
+        assert env.id == 1

@@ -71,6 +71,7 @@ def _build_dispatcher(env: Environment, lease: EnvLease) -> TaskDispatcher:
         create_env=AsyncMock(return_value=env),
         lease_manager=SimpleNamespace(
             acquire=AsyncMock(return_value=lease),
+            claim_created_env=AsyncMock(return_value=lease),
             get_lease=AsyncMock(return_value=lease),
         ),
         start_env=AsyncMock(return_value=True),
@@ -178,7 +179,7 @@ async def test_dispatcher_cleans_up_created_env_when_acquisition_fails(monkeypat
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
     dispatcher = _build_dispatcher(env, lease)
-    dispatcher.rem.lease_manager.acquire = AsyncMock(side_effect=RuntimeError("lease failed"))
+    dispatcher.rem.lease_manager.claim_created_env = AsyncMock(side_effect=RuntimeError("lease failed"))
 
     task = Task(id="task-21", job_id="job-21")
     job = Job(id="job-21", name="job", run_profile=run_profile)

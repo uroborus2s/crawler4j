@@ -7,7 +7,7 @@
 **上游输入：** `acceptance-checklist.md` | `release-notes.md` | `version-governance.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** 交付签收 | `docs/02-user-guide/admin-guide.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-005`, `REL-006`, `TASK-017`, `REQ-004`
-**最后更新：** 2026-04-02
+**最后更新：** 2026-04-20
 
 ## 1. 用途
 
@@ -31,7 +31,9 @@
 | 发布说明基线 | 已具备 | 已能区分当前工作区和最近正式发布 |
 | 验收清单模板 | 已具备 | 可直接用于下一次正式发布 Gate |
 | 部署与运行文档 | 已具备 | 部署说明、运行手册、管理员指南已补齐 |
-| 正式交付产物 | 待发布时补齐 | 当前仅完成本地构建验证，不等于已形成正式发布物 |
+| macOS 桌面包 | 已具备本地构建验证 | `uv run pyinstaller ...` 已在 `2026-04-20` 生成 `/tmp/crawler4j-pyinstaller-dist/Crawler4j.app`，但尚未绑定 GitHub release 资产 |
+| Windows 桌面包 | 阻塞 | 当前仓库没有 Windows 打包链、CI runner 或正式产物，不能声称“已交付 Windows 下载包” |
+| 正式交付产物 | 待发布时补齐 | 当前只有本地验证产物，不等于已形成可对外下载的正式发布物 |
 
 ## 4. 使用规则
 
@@ -43,4 +45,5 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-20 | 补记当前交付能力边界：macOS PyInstaller bundle 已完成本地复验，Windows 桌面包仍缺打包链与正式产物 | Codex |
 | 2026-04-02 | 新增正式交付包清单并登记当前基线可复用材料 | Codex |
