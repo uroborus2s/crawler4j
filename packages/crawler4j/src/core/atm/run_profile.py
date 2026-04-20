@@ -37,13 +37,17 @@ class AcquisitionConfig(BaseModel):
     provider: str = Field(default="virtualbrowser")
     env_type: EnvType = Field(default=EnvType.VIRTUAL_BROWSER)
     selector_name: str = Field(default="")
+    resource_pool: str = Field(default="")
     wait_timeout: int = Field(default=60, ge=0)
     creation: CreationConfig = Field(default_factory=CreationConfig)
 
     @model_validator(mode="after")
     def _validate_mode_specific_fields(self) -> "AcquisitionConfig":
-        if self.mode == AcquisitionMode.SELECT and not self.selector_name.strip():
-            raise ValueError("selector_name is required when acquisition.mode=select")
+        if self.mode == AcquisitionMode.SELECT:
+            has_selector = bool(self.selector_name.strip())
+            has_resource_pool = bool(self.resource_pool.strip())
+            if not has_selector and not has_resource_pool:
+                raise ValueError("selector_name or resource_pool is required when acquisition.mode=select")
         if self.mode == AcquisitionMode.CREATE and not self.provider.strip():
             raise ValueError("provider is required when acquisition.mode=create")
         return self

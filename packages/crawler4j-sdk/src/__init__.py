@@ -10,6 +10,13 @@ from crawler4j_sdk.base import TaskScript
 from crawler4j_sdk.workflow import TaskFlow
 from crawler4j_sdk.assembler import ModuleAssembler
 from crawler4j_sdk.env_selector import EnvSelectorInfo, env_selector
+from crawler4j_sdk.resource_pool import (
+    bind_resource_pool,
+    mark_resource_pool_eligible,
+    mark_resource_pool_ineligible,
+    remove_resource_pool,
+    replace_resource_pool_snapshot,
+)
 from crawler4j_contracts import (
     BBox,
     ClickCaptchaDebugInfo,
@@ -39,6 +46,11 @@ __all__ = [
     "ModuleAssembler",
     "env_selector",
     "EnvSelectorInfo",
+    "bind_resource_pool",
+    "mark_resource_pool_eligible",
+    "mark_resource_pool_ineligible",
+    "remove_resource_pool",
+    "replace_resource_pool_snapshot",
     "TaskContext",
     "TaskResult",
     "TaskSignal",

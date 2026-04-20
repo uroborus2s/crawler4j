@@ -99,6 +99,9 @@ mkdocs:
             - title: 头脑风暴记录：模块根 `__init__.py` 自动托管改造
               path: 04-project-development/02-discovery/brainstorm-record.md
               access: private
+            - title: 头脑风暴记录：ATM 模块资源池等待队列
+              path: 04-project-development/02-discovery/atm-resource-pool-queue-brainstorm.md
+              access: private
         - title: 需求
           children:
             - title: 概览
@@ -129,6 +132,9 @@ mkdocs:
               access: private
             - title: 接口与契约设计
               path: 04-project-development/04-design/api-design.md
+              access: private
+            - title: ATM 模块资源池等待队列设计
+              path: 04-project-development/04-design/atm-resource-pool-queue-design.md
               access: private
             - title: 模块配置与数据契约
               path: 04-project-development/04-design/module-config-runtime-data-contract.md

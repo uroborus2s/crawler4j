@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 维护者  
 **上游输入：** `technical-selection.md` | 现有 `packages/crawler4j/`, `packages/crawler4j-sdk/`, `packages/crawler4j-contracts/`  
 **下游输出：** `module-boundaries.md` | `api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
-**关联 ID：** `MOD-001`, `MOD-002`, `MOD-003`, `MOD-004`, `MOD-005`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`  
-**最后更新：** 2026-04-15  
+**关联 ID：** `MOD-001`, `MOD-002`, `MOD-003`, `MOD-004`, `MOD-005`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-009`, `TASK-023`  
+**最后更新：** 2026-04-19  
 
 ## 1. 总体结构
 
@@ -82,11 +82,21 @@ Maintainer
 - Git tag 只表示最近正式发布
 - SDK / Contracts 保持独立版本线
 
-## 6. 说明
+## 6. 已实现的当前设计（V1）
+
+### ATM 模块资源池等待队列
+
+- 固定环境池的 Service Job 已不再把“当前轮没拿到环境”视为失败，而是把它建模成正式的等待席位。
+- ATM 现在按“服务席位”而不是“失败重试实例”维持目标并发；业务口径收口为“运行中 + 等待中 = 目标并发”。
+- REM 继续拥有环境生命周期；模块通过宿主可读的资源池资格卡片声明“这个环境当前是否属于本模块的某个资源池、现在能否接单”。
+- 宿主只会在“当前模块 + 当前资源池 + 资格有效”的环境集合里分配环境，不再面对全局浏览器池盲抢。
+- 叫号与补位由宿主 FIFO 处理；当前已接入任务终态事件、资源池卡片更新事件和轻量定时调和来补位等待席位。
+
+## 7. 说明
 
 - 旧归档文档已删除，避免与当前实现形成双事实源。
 
-## 7. 变更记录
+## 8. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
@@ -94,3 +104,5 @@ Maintainer
 | 2026-03-26 | 吸收旧总体架构/SRS 的层次与边界结论 | Codex |
 | 2026-04-15 | 补记 `TaskContext.tools` 统一工具接口已成为宿主扩展单入口 | Codex |
 | 2026-04-15 | 补记 ATM hooks / `TaskSignal` / `WAITING_CONFIRMATION` 已成为正式任务生命周期链 | Codex |
+| 2026-04-19 | 新增“ATM 模块资源池等待队列”下一轮架构设计摘要，并明确其为已确认、待实施方案 | Codex |
+| 2026-04-19 | 固定环境池 Service Job 的等待队列、资源池资格卡片与 FIFO 补位 V1 已实现 | Codex |

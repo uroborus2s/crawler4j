@@ -17,6 +17,7 @@ from src.core.persistence.database import STATE_DB, get_connection
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.models import (
     Environment,
+    EnvKind,
     EnvLease,
     EnvRequirement,
     EnvStatus,
@@ -26,6 +27,7 @@ from src.core.rem.pool import EnvPool, LeaseManager
 from src.core.rem.provider import BaseProvider, get_provider
 
 FINGERPRINT_BROWSER_PROVIDERS = {"bitbrowser", "virtualbrowser"}
+RESOURCE_POOL_METADATA_NAMESPACE = "scheduler.resource_pool"
 
 
 def _get_env_name_prefix(now: datetime | None = None) -> str:
@@ -65,6 +67,39 @@ def peek_next_env_name(now: datetime | None = None) -> str:
         existing_names = [row[0] for row in cursor.fetchall()]
 
     return _get_next_env_name(existing_names, now)
+
+
+def normalize_resource_pool_module_name(module_name: str) -> str:
+    return str(module_name or "").strip().split(".")[0]
+
+
+def build_resource_pool_metadata_key(module_name: str, pool_name: str) -> str:
+    normalized_module = normalize_resource_pool_module_name(module_name)
+    normalized_pool = str(pool_name or "").strip()
+    if not normalized_module or not normalized_pool:
+        raise ValueError("module_name and pool_name are required")
+    return f"{normalized_module}:{normalized_pool}"
+
+
+def build_resource_pool_card(
+    module_name: str,
+    pool_name: str,
+    *,
+    eligible: bool,
+    reason: str = "",
+    exclusive: bool = True,
+    updated_at: int | None = None,
+) -> dict[str, object]:
+    return {
+        "module_name": normalize_resource_pool_module_name(module_name),
+        "pool_name": str(pool_name or "").strip(),
+        "eligible": bool(eligible),
+        "reason": str(reason or ""),
+        "exclusive": bool(exclusive),
+        "updated_at": int(updated_at or time.time()),
+    }
+
+
 class EnvironmentManager:
     """环境管理器。
     
@@ -389,11 +424,21 @@ class EnvironmentManager:
         env = await self.pool.get(env_id)
         if not env:
             return False
+        provider = get_provider(env.provider)
+        if not provider:
+            return False
         if env.status == EnvStatus.RUNNING:
             return True
         if env.provider in FINGERPRINT_BROWSER_PROVIDERS:
             await self.ensure_provider_runtime(env.provider)
         if env.status == EnvStatus.BUSY:
+            try:
+                if await provider.is_window_open(env):
+                    return await self._provider_operation(env, "connect")
+            except Exception as e:
+                logger.warning(f"[REM] 检查窗口状态失败，按未打开窗口处理: {e}")
+            if not await self._provider_operation(env, "open"):
+                return False
             return await self._provider_operation(env, "connect")
         if await self._provider_operation(env, "open"):
             return await self._provider_operation(env, "connect")
@@ -498,7 +543,33 @@ class EnvironmentManager:
             元数据字典
         """
         return self.pool.list_metadata(env_id, namespace)
-    
+
+    async def list_allocatable_envs(
+        self,
+        module_name: str,
+        pool_name: str,
+    ) -> list[Environment]:
+        """列出指定模块资源池中当前可分配的环境。"""
+        metadata_key = build_resource_pool_metadata_key(module_name, pool_name)
+        environments = await self.list_envs()
+        allocatable: list[Environment] = []
+        for env in environments:
+            if env.kind != EnvKind.BROWSER or env.status != EnvStatus.READY or env.lease_id:
+                continue
+            card = await self.get_metadata(env.id, RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+            if isinstance(card, dict) and bool(card.get("eligible")):
+                allocatable.append(env)
+        return allocatable
+
+    async def count_allocatable_envs(
+        self,
+        module_name: str,
+        pool_name: str,
+    ) -> int:
+        """统计指定模块资源池中当前可分配的环境数量。"""
+        environments = await self.list_allocatable_envs(module_name, pool_name)
+        return len(environments)
+
     async def delete_metadata(
         self,
         env_id: int,

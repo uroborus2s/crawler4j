@@ -92,6 +92,59 @@ test -f module.yaml && echo ok || echo bad
 - 先把作业运行模板选对
 - 再确保 workflow 名和清单一致
 
+## 固定环境池作业没有进入等待队列
+
+最常见原因不是 helper 没生效，而是运行模板根本没走固定池契约。
+
+直接确认:
+
+1. 作业类型是不是 `Service Job`
+2. 运行模板是不是 `选择环境`
+3. `resource_pool` 有没有填稳定池名
+4. 是不是只有 `selector_name`、没有 `resource_pool`
+5. 作业摘要里是不是已经显示 `资源池: <pool>`
+
+修法:
+
+- 要进入等待队列，必须是 `Service Job + select + resource_pool`
+- 只有 `selector_name` 的旧模式里，`select_env(...)` 返回 `None` 会直接失败
+- `selector_name` 留空并不是报错；宿主会直接选当前池里的第一个可分配候选
+- 如果你保留 selector，真正要检查的是 `module_runtime.py` 里通过 `@env_selector(...)` 声明的函数，而不是去找一个名叫 `select_env` 的自定义 hook
+
+## `replace_resource_pool_snapshot(...)` 一调用，整个池像被清空了
+
+高概率是把它当成增量 patch 了。
+
+直接确认:
+
+1. 这次传的 `entries` 是不是这个池当前完整权威列表
+2. 你是不是只传了“这次变更的几个 env”
+3. 清空后任务是不是开始大量出现 `等待环境池工位: <pool>`
+
+修法:
+
+- 把 `replace_resource_pool_snapshot(...)` 当成整池重建，不要当 patch
+- 未出现在 `entries` 里的环境卡片会被删除
+- 只想临时停发号时，改用 `mark_resource_pool_ineligible(...)`
+
+## 资源池 helper 报 `env_id is required`
+
+这通常不是 helper 坏了，而是调用时当前 `TaskContext` 根本没有绑定环境。
+
+直接确认:
+
+1. 你是不是在没有环境上下文的批量扫描、宿主启动恢复或离线对账逻辑里调用 helper
+2. 这次调用有没有显式传 `env_id`
+3. 你传的是不是宿主 `environments.id`，而不是外部 `browser_id` / `external_id` 或业务账号 ID
+4. 如果是全量重建，你是不是本来就该用 `replace_resource_pool_snapshot(...)`
+
+修法:
+
+- 当前上下文已绑定环境时再省略 `env_id`
+- 没有环境上下文时显式传 `env_id`
+- `prepare_env` 阶段不要写资源池卡片；那时 `TaskContext.env_id` 当前还是 `0`
+- 批量对账优先直接提交整池权威快照
+
 ## `ctx.page` 是 `None`
 
 这通常不是 task 写错了，而是当前运行环境没有可用页面。

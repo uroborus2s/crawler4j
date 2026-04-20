@@ -45,20 +45,59 @@ def _normalize_cdp_endpoint(value: Any) -> str | None:
 
 def _extract_cdp_endpoint(payload: dict[str, Any]) -> str | None:
     """从不同宿主 API 返回结构中提取 CDP 入口。"""
+    if not isinstance(payload, dict):
+        return None
+
     for key in (
         "ws",
         "wsUrl",
         "ws_url",
+        "wsEndpoint",
+        "ws_endpoint",
+        "browserWs",
+        "browserWsUrl",
+        "browserWsEndpoint",
+        "browserWSEndpoint",
+        "browser_ws",
+        "browser_wse",
+        "browser_websocket_url",
         "webSocketDebuggerUrl",
+        "websocketDebuggerUrl",
+        "websocketDebuggerURL",
         "debuggingPort",
         "debugPort",
         "remoteDebuggingPort",
         "port",
+        "cdpUrl",
+        "cdp_url",
+        "debuggerUrl",
+        "debugger_url",
+        "remoteDebuggingUrl",
+        "remote_debugging_url",
     ):
         if key in payload:
             endpoint = _normalize_cdp_endpoint(payload.get(key))
             if endpoint:
                 return endpoint
+
+    host = payload.get("host") or payload.get("hostname") or payload.get("address")
+    port = payload.get("port") or payload.get("debuggingPort") or payload.get("debugPort")
+    if host and port is not None:
+        normalized_port = _normalize_cdp_endpoint(port)
+        if normalized_port and normalized_port.startswith("http://localhost:"):
+            return f"http://{host}:{normalized_port.rsplit(':', 1)[-1]}"
+
+    for value in payload.values():
+        if isinstance(value, dict):
+            endpoint = _extract_cdp_endpoint(value)
+            if endpoint:
+                return endpoint
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    endpoint = _extract_cdp_endpoint(item)
+                    if endpoint:
+                        return endpoint
     return None
 
 
@@ -1212,10 +1251,54 @@ class VirtualBrowserClient:
         data = resp.json()
         if not data.get("success"):
             return None
-        # data.data 是列表，找到匹配 ID 的环境
-        for env in data.get("data", []):
-            if env.get("id") == browser_id:
-                return env
+        return self._find_browser_entry(data.get("data", []), browser_id)
+
+    async def get_browser_running_detail(self, browser_id: int) -> dict | None:
+        """获取运行中的浏览器详情。
+
+        运行列表通常比完整列表更接近实时状态，适合作为 CDP 入口兜底。
+        """
+        client = await self._get_client()
+        resp = await client.get("/api/getBrowserRunningList")
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            return None
+        return self._find_browser_entry(data.get("data", []), browser_id)
+
+    async def get_browser_runtime_detail(self, browser_id: int) -> dict | None:
+        """获取可用于连接的运行时详情。
+
+        运行态调试入口以 getBrowserRunningList 为准，只有拿不到运行态记录时才回退静态详情。
+        """
+        running_detail = await self.get_browser_running_detail(browser_id)
+        if running_detail:
+            return running_detail
+        return await self.get_browser_detail(browser_id)
+
+    @staticmethod
+    def _match_browser_id(candidate: dict[str, Any], browser_id: int) -> bool:
+        target = str(browser_id)
+        for key in ("id", "browserId", "browser_id", "envId", "environmentId"):
+            value = candidate.get(key)
+            if value is not None and str(value) == target:
+                return True
+        return False
+
+    @classmethod
+    def _find_browser_entry(cls, payload: Any, browser_id: int) -> dict | None:
+        if isinstance(payload, dict):
+            if cls._match_browser_id(payload, browser_id):
+                return payload
+            for value in payload.values():
+                found = cls._find_browser_entry(value, browser_id)
+                if found:
+                    return found
+        elif isinstance(payload, list):
+            for item in payload:
+                found = cls._find_browser_entry(item, browser_id)
+                if found:
+                    return found
         return None
     
     async def update_browser(self, browser_id: int, config: dict) -> bool:
@@ -1469,6 +1552,45 @@ class VirtualBrowserProvider(BaseProvider):
             logger.error(f"[VirtualBrowser] Failed to open browser {browser_id}: {e}")
             raise RuntimeError(message) from e
 
+    async def _hydrate_ws_url(self, handle: BrowserHandle) -> str | None:
+        """尽量从 VirtualBrowser 详情中恢复可连接的 ws_url。"""
+        from src.core.foundation.logging import logger
+
+        if handle.ws_url:
+            return handle.ws_url
+
+        if not handle.browser_id:
+            return None
+
+        try:
+            browser_id_int = int(handle.browser_id)
+        except (TypeError, ValueError):
+            logger.warning(f"[VirtualBrowser] 无法解析 browser_id: {handle.browser_id}")
+            return None
+
+        client = self._get_api_client()
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                detail = await client.get_browser_runtime_detail(browser_id_int)
+            except Exception as e:
+                last_error = e
+                detail = None
+
+            if detail:
+                ws_url = _extract_cdp_endpoint(detail)
+                if ws_url:
+                    handle.ws_url = ws_url
+                    logger.info(f"[VirtualBrowser] 已恢复 ws_url: id={handle.browser_id}")
+                    return ws_url
+
+            if attempt < 2:
+                await asyncio.sleep(0.2 * (attempt + 1))
+
+        if last_error:
+            logger.warning(f"[VirtualBrowser] 读取浏览器运行时详情失败: id={handle.browser_id} error={last_error}")
+        return None
+
     async def connect(self, env: Environment) -> bool:
         """连接 Playwright。"""
         from src.core.foundation.logging import logger
@@ -1477,6 +1599,14 @@ class VirtualBrowserProvider(BaseProvider):
         if not handle:
             logger.error("[VirtualBrowser] Cannot connect: No handle")
             return False
+
+        if not handle.ws_url:
+            if not await self._hydrate_ws_url(handle):
+                logger.error(
+                    f"[VirtualBrowser] Cannot connect: Missing ws_url and cannot resolve browser detail "
+                    f"for browser {handle.browser_id}"
+                )
+                return False
         
         # 使用 BrowserHandle 的 safe_connect 方法
         result = await handle.safe_connect()

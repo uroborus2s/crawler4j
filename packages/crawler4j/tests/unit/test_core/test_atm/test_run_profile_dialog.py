@@ -237,6 +237,27 @@ def test_run_profile_dialog_builds_select_mode_profile(qtbot, monkeypatch):
     assert profile.resource.acquisition.wait_timeout == 60
 
 
+def test_run_profile_dialog_builds_fixed_pool_select_profile_without_selector(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("demo_module", "collect")
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.selector_name_combo.setCurrentIndex(-1)
+    dialog.resource_pool_edit.setText("bound_account_ready")
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.resource.acquisition.mode == AcquisitionMode.SELECT
+    assert profile.resource.acquisition.selector_name == ""
+    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
+    assert profile.resource.acquisition.provider == ""
+
+
 def test_run_profile_dialog_warns_when_selector_returns_none(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 

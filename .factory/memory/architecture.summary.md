@@ -18,3 +18,10 @@ Current module entry architecture:
 - Default task/workflow discovery and module entry assembly now live in `crawler4j_sdk.assembler.ModuleAssembler`.
 - Module-specific runtime logic now lives in standard `module_runtime.py`, including lifecycle hooks and `@env_selector(...)` callbacks for ATM environment selection.
 - Old modules are not a compatibility target for the new contract; upgrades should rebuild the module skeleton from the latest template.
+
+Latest implemented design:
+
+- Fixed-pool Service jobs now move from “selector returned none => fail” to host-managed waiting seats when `resource_pool` is configured.
+- ATM reconciles service concurrency as `running + waiting = target`, with FIFO refill against current pool capacity.
+- REM remains the environment owner, while module-scoped pool eligibility is exposed to ATM through host-readable cards stored in `env_metadata`.
+- `REQ-009` / `TASK-023` is implemented locally and validated by ATM/SDK unit tests; PR closure is still pending.

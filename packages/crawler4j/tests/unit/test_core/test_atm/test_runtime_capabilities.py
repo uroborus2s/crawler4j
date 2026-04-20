@@ -56,6 +56,11 @@ def test_runtime_tools_register_expected_surface():
     assert caps.tools.has_tool("db.exists_state") is True
     assert caps.tools.has_tool("ip_pool.pick_proxy") is True
     assert caps.tools.has_tool("env.set_proxy") is True
+    assert caps.tools.has_tool("env.bind_resource_pool") is True
+    assert caps.tools.has_tool("env.mark_resource_pool_eligible") is True
+    assert caps.tools.has_tool("env.mark_resource_pool_ineligible") is True
+    assert caps.tools.has_tool("env.remove_resource_pool") is True
+    assert caps.tools.has_tool("env.replace_resource_pool_snapshot") is True
     assert caps.tools.has_tool("ui.declare_data_table") is True
     assert caps.tools.has_tool("ui.get_data_table") is True
     assert caps.tools.has_tool("captcha.match_slider") is True
@@ -64,6 +69,11 @@ def test_runtime_tools_register_expected_surface():
     specs = caps.tools.list_tools()
     tool_names = [spec.name for spec in specs]
     assert tool_names == sorted(tool_names)
+    assert {spec.name: spec.is_async for spec in specs}["env.bind_resource_pool"] is True
+    assert {spec.name: spec.is_async for spec in specs}["env.mark_resource_pool_eligible"] is True
+    assert {spec.name: spec.is_async for spec in specs}["env.mark_resource_pool_ineligible"] is True
+    assert {spec.name: spec.is_async for spec in specs}["env.remove_resource_pool"] is True
+    assert {spec.name: spec.is_async for spec in specs}["env.replace_resource_pool_snapshot"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.set_proxy"] is True
     assert {spec.name: spec.is_async for spec in specs}["db.append_event"] is False
     assert {spec.name: spec.is_async for spec in specs}["db.list_records"] is False
@@ -202,6 +212,83 @@ async def test_env_tool_delegates_to_environment_manager(monkeypatch):
 
     assert ok is True
     assert calls == [(12, "http://1.1.1.1:8001", None)]
+
+
+@pytest.mark.asyncio
+async def test_env_resource_pool_tools_manage_metadata_cards(monkeypatch):
+    store: dict[tuple[int, str, str], object] = {
+        (13, "scheduler.resource_pool", "demo_module:bound_account_ready"): {
+            "module_name": "demo_module",
+            "pool_name": "bound_account_ready",
+            "eligible": True,
+            "reason": "",
+            "exclusive": True,
+            "updated_at": 1,
+        }
+    }
+
+    class _FakeManager:
+        async def update_env(self, env_id: int, *, proxy_value: str | None = None, proxy_pool_id: str | None = None):
+            return True
+
+        async def set_metadata(self, env_id: int, namespace: str, key: str, value, value_type: str = "string"):
+            store[(env_id, namespace, key)] = value
+            return True
+
+        async def get_metadata(self, env_id: int, namespace: str, key: str):
+            return store.get((env_id, namespace, key))
+
+        async def delete_metadata(self, env_id: int, namespace: str, key: str | None = None):
+            removed = 0
+            for entry_key in list(store):
+                same_env = entry_key[0] == env_id
+                same_namespace = entry_key[1] == namespace
+                same_key = key is None or entry_key[2] == key
+                if same_env and same_namespace and same_key:
+                    store.pop(entry_key, None)
+                    removed += 1
+            return removed
+
+        async def list_envs(self):
+            return [SimpleNamespace(id=11), SimpleNamespace(id=12), SimpleNamespace(id=13)]
+
+    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_environment_manager", lambda: _FakeManager())
+
+    caps = build_runtime_capabilities("demo_module")
+    await caps.tools.call(
+        "env.bind_resource_pool",
+        env_id=11,
+        pool_name="bound_account_ready",
+        eligible=True,
+        reason="",
+        exclusive=True,
+    )
+    await caps.tools.call(
+        "env.mark_resource_pool_ineligible",
+        env_id=11,
+        pool_name="bound_account_ready",
+        reason="blacklisted",
+    )
+    await caps.tools.call(
+        "env.replace_resource_pool_snapshot",
+        pool_name="bound_account_ready",
+        entries=[
+            {"env_id": 11, "eligible": True, "reason": "", "exclusive": True},
+            {"env_id": 12, "eligible": False, "reason": "manual_disabled", "exclusive": True},
+        ],
+    )
+    await caps.tools.call(
+        "env.remove_resource_pool",
+        env_id=12,
+        pool_name="bound_account_ready",
+    )
+
+    card_11 = store[(11, "scheduler.resource_pool", "demo_module:bound_account_ready")]
+    assert card_11["module_name"] == "demo_module"
+    assert card_11["pool_name"] == "bound_account_ready"
+    assert card_11["eligible"] is True
+    assert (12, "scheduler.resource_pool", "demo_module:bound_account_ready") not in store
+    assert (13, "scheduler.resource_pool", "demo_module:bound_account_ready") not in store
 
 
 def test_ui_tools_persist_data_table_meta(monkeypatch):

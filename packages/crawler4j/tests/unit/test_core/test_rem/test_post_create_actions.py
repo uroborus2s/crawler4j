@@ -237,6 +237,54 @@ async def test_start_env_ensures_fingerprint_runtime_before_open(manager, mock_p
 
 
 @pytest.mark.asyncio
+async def test_start_env_opens_busy_environment_when_window_is_not_open(manager, mock_pool):
+    provider = MockProvider()
+    provider.name = "virtualbrowser"
+    register_provider(provider)
+
+    env = Environment(
+        id=102,
+        name="vb-env-closed",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.BUSY,
+    )
+    mock_pool.get = AsyncMock(return_value=env)
+
+    call_order: list[str] = []
+
+    async def ensure_runtime(provider_name: str) -> None:
+        call_order.append(f"ensure:{provider_name}")
+
+    async def is_window_open(target_env: Environment) -> bool:
+        call_order.append(f"is_window_open:{target_env.id}")
+        return False
+
+    async def open_env(target_env: Environment) -> bool:
+        call_order.append(f"open:{target_env.id}")
+        return True
+
+    async def connect_env(target_env: Environment) -> bool:
+        call_order.append(f"connect:{target_env.id}")
+        return True
+
+    with patch.object(manager, "ensure_provider_runtime", side_effect=ensure_runtime):
+        provider.is_window_open = is_window_open  # type: ignore[method-assign]
+        provider.open = open_env  # type: ignore[method-assign]
+        provider.connect = connect_env  # type: ignore[method-assign]
+
+        success = await manager.start_env(env.id)
+
+    assert success is True
+    assert call_order == [
+        "ensure:virtualbrowser",
+        "is_window_open:102",
+        "open:102",
+        "connect:102",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_start_env_propagates_runtime_failure_for_fingerprint_provider(manager, mock_pool):
     provider = MockProvider()
     provider.name = "bitbrowser"

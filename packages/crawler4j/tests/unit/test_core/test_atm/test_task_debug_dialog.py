@@ -121,6 +121,106 @@ def test_job_debug_dialog_copies_attach_address(qtbot, tmp_path):
     assert QApplication.clipboard().text() == "127.0.0.1:5678"
 
 
+def test_job_debug_dialog_generate_vscode_config_uses_active_session_attach_target(
+    qtbot,
+    tmp_path,
+    monkeypatch,
+):
+    from src.core.atm.ui.task_debug_dialog import JobDebugDialog
+
+    page = JobDebugDialog(
+        _make_job(),
+        _make_run_profile(),
+        _make_module(tmp_path),
+        debug_service=SimpleNamespace(),
+    )
+    qtbot.addWidget(page)
+    page.attach_port_spin.setValue(5678)
+
+    session = DebugSession(
+        id="session-1",
+        job_id="job-1",
+        job_name="Demo Job",
+        module_name="demo_module",
+        source_path=str(tmp_path / "demo_module"),
+        workflow="repair",
+        attach_host="127.0.0.1",
+        attach_port=5679,
+        state=DebugSessionState.WAITING_FOR_ATTACH,
+    )
+    page._current_session_id = session.id
+    page._apply_session(session)
+
+    captured: dict[str, object] = {}
+
+    def fake_ensure(source_path, *, host, port, configuration_name="Attach to Crawler4j"):
+        captured["source_path"] = source_path
+        captured["host"] = host
+        captured["port"] = port
+        captured["configuration_name"] = configuration_name
+        return Path(source_path) / ".vscode" / "launch.json"
+
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.ensure_vscode_attach_config", fake_ensure)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.information", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.warning", lambda *args: None)
+
+    page.generate_vscode_config()
+
+    assert captured["source_path"] == page._module.path
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 5679
+
+
+def test_job_debug_dialog_generate_vscode_config_ignores_final_session_attach_target(
+    qtbot,
+    tmp_path,
+    monkeypatch,
+):
+    from src.core.atm.ui.task_debug_dialog import JobDebugDialog
+
+    page = JobDebugDialog(
+        _make_job(),
+        _make_run_profile(),
+        _make_module(tmp_path),
+        debug_service=SimpleNamespace(),
+    )
+    qtbot.addWidget(page)
+    page.attach_port_spin.setValue(5680)
+
+    session = DebugSession(
+        id="session-2",
+        job_id="job-1",
+        job_name="Demo Job",
+        module_name="demo_module",
+        source_path=str(tmp_path / "demo_module"),
+        workflow="repair",
+        attach_host="127.0.0.1",
+        attach_port=5679,
+        state=DebugSessionState.FAILED,
+    )
+    page._current_session_id = session.id
+    page._apply_session(session)
+
+    captured: dict[str, object] = {}
+
+    def fake_ensure(source_path, *, host, port, configuration_name="Attach to Crawler4j"):
+        captured["source_path"] = source_path
+        captured["host"] = host
+        captured["port"] = port
+        captured["configuration_name"] = configuration_name
+        return Path(source_path) / ".vscode" / "launch.json"
+
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.ensure_vscode_attach_config", fake_ensure)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.information", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.warning", lambda *args: None)
+
+    page.generate_vscode_config()
+
+    assert captured["source_path"] == page._module.path
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 5680
+
+
 def test_job_debug_dialog_uses_dark_theme_controls(qtbot, tmp_path):
     from src.core.atm.ui.task_debug_dialog import JobDebugDialog
     from src.ui.components.spin_box import StyledSpinBox

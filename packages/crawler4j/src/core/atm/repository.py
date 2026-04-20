@@ -66,6 +66,7 @@ class TaskRepository:
                     error TEXT,
                     signal_json TEXT,
                     created_at INTEGER,
+                    waiting_since INTEGER,
                     started_at INTEGER,
                     finished_at INTEGER,
                     FOREIGN KEY(job_id) REFERENCES jobs(id)
@@ -77,9 +78,24 @@ class TaskRepository:
             }
             if "signal_json" not in task_columns:
                 conn.execute("ALTER TABLE tasks ADD COLUMN signal_json TEXT")
+            if "waiting_since" not in task_columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN waiting_since INTEGER")
+                conn.execute(
+                    """
+                    UPDATE tasks
+                    SET waiting_since = CAST(strftime('%s', 'now') AS INTEGER)
+                    WHERE waiting_since IS NULL
+                      AND status = ?
+                      AND result LIKE ?
+                    """,
+                    (TaskStatus.PENDING.value, "等待环境池工位:%"),
+                )
             
             # 索引优化 (用于 Controller 查询)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_job_status ON tasks(job_id, status)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_job_status_waiting_since ON tasks(job_id, status, waiting_since)"
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state)")
 
     # =========================================================================
@@ -150,11 +166,25 @@ class TaskRepository:
 
     async def save_task(self, task: Task) -> None:
         def _do():
+            waiting_since = task.waiting_since if task.status == TaskStatus.PENDING else None
             with get_connection(STATE_DB) as conn:
                 conn.execute(
                     """
-                    INSERT INTO tasks (id, job_id, status, env_id, lease_id, result, error, signal_json, created_at, started_at, finished_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO tasks (
+                        id,
+                        job_id,
+                        status,
+                        env_id,
+                        lease_id,
+                        result,
+                        error,
+                        signal_json,
+                        created_at,
+                        waiting_since,
+                        started_at,
+                        finished_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         status = excluded.status,
                         env_id = excluded.env_id,
@@ -162,13 +192,14 @@ class TaskRepository:
                         result = excluded.result,
                         error = excluded.error,
                         signal_json = excluded.signal_json,
+                        waiting_since = excluded.waiting_since,
                         started_at = excluded.started_at,
                         finished_at = excluded.finished_at
                     """,
                     (
                         task.id, task.job_id, task.status.value, task.env_id, task.lease_id,
                         task.message, task.error, json.dumps(task.signal, ensure_ascii=False) if task.signal else "",
-                        task.created_at, task.started_at, task.finished_at
+                        task.created_at, waiting_since, task.started_at, task.finished_at
                     )
                 )
         await self._run_async(_do)
@@ -223,6 +254,128 @@ class TaskRepository:
                 return [self._row_to_task(row) for row in cursor.fetchall()]
         return await self._run_async(_do)
 
+    async def count_tasks_by_statuses(self, job_id: str, statuses: List[TaskStatus]) -> int:
+        """统计某 Job 在指定状态集合下的任务数量。"""
+        if not statuses:
+            return 0
+
+        def _do():
+            placeholders = ",".join("?" for _ in statuses)
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute(
+                    f"SELECT COUNT(*) FROM tasks WHERE job_id = ? AND status IN ({placeholders})",
+                    [job_id, *[status.value for status in statuses]],
+                )
+                return cursor.fetchone()[0]
+
+        return await self._run_async(_do)
+
+    async def get_oldest_tasks_by_status(self, job_id: str, statuses: List[TaskStatus], limit: int) -> List[Task]:
+        """获取指定状态集合下按创建时间升序的任务列表。"""
+        if not statuses or limit <= 0:
+            return []
+
+        def _do():
+            placeholders = ",".join("?" for _ in statuses)
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute(
+                    f"SELECT * FROM tasks WHERE job_id = ? AND status IN ({placeholders}) ORDER BY created_at ASC LIMIT ?",
+                    [job_id, *[status.value for status in statuses], limit],
+                )
+                return [self._row_to_task(row) for row in cursor.fetchall()]
+
+        return await self._run_async(_do)
+
+    async def get_oldest_tasks_by_status_before(
+        self,
+        job_id: str,
+        statuses: List[TaskStatus],
+        created_before: int,
+        limit: int | None = None,
+    ) -> List[Task]:
+        """获取指定状态集合下在给定时间前创建的最老任务列表。"""
+        if not statuses:
+            return []
+        if limit is not None and limit <= 0:
+            return []
+
+        def _do():
+            placeholders = ",".join("?" for _ in statuses)
+            sql = (
+                f"SELECT * FROM tasks WHERE job_id = ? AND status IN ({placeholders}) "
+                "AND created_at <= ? ORDER BY created_at ASC"
+            )
+            params: list[Any] = [job_id, *[status.value for status in statuses], created_before]
+            if limit is not None:
+                sql += " LIMIT ?"
+                params.append(limit)
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute(sql, params)
+                return [self._row_to_task(row) for row in cursor.fetchall()]
+
+        return await self._run_async(_do)
+
+    async def get_oldest_waiting_tasks(
+        self,
+        job_id: str,
+        statuses: List[TaskStatus],
+        limit: int,
+    ) -> List[Task]:
+        """获取等待队列中按 waiting_since 升序排列的任务列表。"""
+        if not statuses or limit <= 0:
+            return []
+
+        def _do():
+            placeholders = ",".join("?" for _ in statuses)
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute(
+                    f"""
+                    SELECT * FROM tasks
+                    WHERE job_id = ?
+                      AND status IN ({placeholders})
+                      AND waiting_since IS NOT NULL
+                    ORDER BY waiting_since ASC, created_at ASC
+                    LIMIT ?
+                    """,
+                    [job_id, *[status.value for status in statuses], limit],
+                )
+                return [self._row_to_task(row) for row in cursor.fetchall()]
+
+        return await self._run_async(_do)
+
+    async def get_oldest_waiting_tasks_before(
+        self,
+        job_id: str,
+        statuses: List[TaskStatus],
+        waiting_since_before: int,
+        limit: int | None = None,
+    ) -> List[Task]:
+        """获取等待队列中在给定 waiting_since 前进入排队的任务列表。"""
+        if not statuses:
+            return []
+        if limit is not None and limit <= 0:
+            return []
+
+        def _do():
+            placeholders = ",".join("?" for _ in statuses)
+            sql = f"""
+                SELECT * FROM tasks
+                WHERE job_id = ?
+                  AND status IN ({placeholders})
+                  AND waiting_since IS NOT NULL
+                  AND waiting_since <= ?
+                ORDER BY waiting_since ASC, created_at ASC
+            """
+            params: list[Any] = [job_id, *[status.value for status in statuses], waiting_since_before]
+            if limit is not None:
+                sql += " LIMIT ?"
+                params.append(limit)
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute(sql, params)
+                return [self._row_to_task(row) for row in cursor.fetchall()]
+
+        return await self._run_async(_do)
+
     async def get_running_tasks(self) -> List[Task]:
         """获取所有处于未终态的任务（重启恢复用）。"""
         def _do():
@@ -238,27 +391,35 @@ class TaskRepository:
                 return [self._row_to_task(row) for row in cursor.fetchall()]
         return await self._run_async(_do)
         
-    async def mark_tasks_failed(self, task_ids: List[str], error_message: str) -> None:
+    async def mark_tasks_failed(self, task_ids: List[str], error_message: str) -> List[Task]:
         """批量将任务标记为 FAILED。"""
         if not task_ids:
-            return
+            return []
         def _do():
             with get_connection(STATE_DB) as conn:
                 placeholders = ",".join("?" for _ in task_ids)
                 now = int(time.time())
-                
-                # Combine dynamic status and task IDs for parameterized execution
-                params = [TaskStatus.FAILED.value, error_message, now] + task_ids
-                
+
+                params = [TaskStatus.FAILED.value, "", error_message, "", now, *task_ids]
                 conn.execute(
                     f"""
                     UPDATE tasks 
-                    SET status = ?, error = ?, signal_json = '', finished_at = ?
+                    SET status = ?,
+                        result = ?,
+                        error = ?,
+                        signal_json = ?,
+                        waiting_since = NULL,
+                        finished_at = ?
                     WHERE id IN ({placeholders})
                     """,
                     params
                 )
-        await self._run_async(_do)
+                cursor = conn.execute(
+                    f"SELECT * FROM tasks WHERE id IN ({placeholders})",
+                    task_ids,
+                )
+                return [self._row_to_task(row) for row in cursor.fetchall()]
+        return await self._run_async(_do)
 
     # =========================================================================
     # Helpers
@@ -296,6 +457,7 @@ class TaskRepository:
             error=row["error"] or "",
             signal=json.loads(row["signal_json"]) if "signal_json" in row.keys() and row["signal_json"] else None,
             created_at=row["created_at"],
+            waiting_since=row["waiting_since"] if "waiting_since" in row.keys() else None,
             started_at=row["started_at"],
             finished_at=row["finished_at"]
         )

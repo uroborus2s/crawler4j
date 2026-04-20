@@ -147,6 +147,7 @@ ctx.state.setdefault("tasks", {})
 - `module_datasets` 承载“当前状态型 / 可覆盖型”业务数据。
 - `module_audit_events` 承载“历史轨迹型 / append-only”审计事件。
 - 当前正式持久化表为 `data.db.module_audit_events`，正式工具名为 `db.append_event` / `db.query_events`。
+- `previous_status` / `next_status` / `result` / `reason` 等一等审计字段应直接写顶层；`payload` 只保留模块私有扩展字段。
 - 审计事件不应回写 `module_datasets`，也不直接进入 `core:data_table` 的 schema / records 链路。
 - `core:data_table` 当前只面向快照型 dataset；不要把事件流接进通用可编辑数据表。
 - retention / archive 后续可在宿主侧继续扩展，但不属于本轮正式契约。
@@ -239,7 +240,8 @@ async def execute(ctx: TaskContext):
             entity_key="13800000001",
             previous_status="active",
             next_status="blocked",
-            payload={"reason": "risk_control"},
+            reason="risk_control",
+            payload={"operator": "system"},
         )
 
     if ctx.tools and ctx.tools.has_tool("db.query_events"):
@@ -265,8 +267,16 @@ snapshot_rows = [...]
 ctx.tools.call("db.replace_records", dataset="accounts", records=snapshot_rows)
 
 if ctx.tools and ctx.tools.has_tool("db.append_event"):
-    audit_event_kwargs = {...}  # 事件参数键以宿主当前工具签名为准
-    ctx.tools.call("db.append_event", **audit_event_kwargs)
+    ctx.tools.call(
+        "db.append_event",
+        dataset="account_events",
+        event_type="status_changed",
+        entity_key="13800000001",
+        previous_status="active",
+        next_status="blocked",
+        reason="risk_control",
+        payload={"operator": "system"},
+    )
 ```
 
 ## 9. 明确禁止的模式

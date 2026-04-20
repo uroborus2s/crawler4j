@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import time
 from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -15,12 +16,13 @@ from apscheduler.triggers.cron import CronTrigger
 from crawler4j_contracts import EnvAction
 from src.core.atm.job_runtime import resolve_job_run_profile
 from src.core.atm.dispatcher import get_task_dispatcher
-from src.core.atm.models import Job, JobState, JobType, TriggerType
+from src.core.atm.models import Job, JobState, JobType, TaskStatus, TriggerType
 from src.core.atm.run_profile import AcquisitionMode
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
 from src.core.mms.release_service import assert_module_upgrade_unlocked
+from src.core.rem.manager import get_environment_manager, normalize_resource_pool_module_name
 
 
 class JobController:
@@ -29,6 +31,7 @@ class JobController:
     def __init__(self):
         self.repo = get_task_repository()
         self.dispatcher = get_task_dispatcher()
+        self.rem = get_environment_manager()
         self._running = False
         self._timezone = datetime.now().astimezone().tzinfo
         self._scheduler = AsyncIOScheduler(timezone=self._timezone)
@@ -36,6 +39,8 @@ class JobController:
         self._batch_job_ids: dict[str, str] = {}
         self._event_bus = get_event_bus()
         self._event_handlers_registered = False
+        self._service_tick_job_id = "service:reconcile"
+        self._service_job_reconcile_locks: dict[str, asyncio.Lock] = {}
         
     async def start(self):
         """启动控制器循环。"""
@@ -105,6 +110,24 @@ class JobController:
         stuck_tasks = await self.repo.get_running_tasks()
         if not stuck_tasks:
             return
+
+        waiting_tasks = [
+            task
+            for task in stuck_tasks
+            if task.status == TaskStatus.PENDING and task.waiting_since is not None
+        ]
+        stuck_tasks = [
+            task
+            for task in stuck_tasks
+            if not (task.status == TaskStatus.PENDING and task.waiting_since is not None)
+        ]
+        if waiting_tasks:
+            logger.info(
+                "[ATM] Preserving %s fixed-pool waiting tasks across restart recovery.",
+                len(waiting_tasks),
+            )
+        if not stuck_tasks:
+            return
         
         logger.warning(f"[ATM] Found {len(stuck_tasks)} unfinished tasks from previous run. Recovering...")
         
@@ -153,19 +176,30 @@ class JobController:
 
     async def _reconcile_service_job(self, job: Job):
         """常驻并发型 Job：始终维持目标并发。"""
-        current_count = await self.repo.count_active_tasks(job.id)
-        target = job.concurrency_target
-        needed = target - current_count
+        lock = self._service_job_reconcile_locks.setdefault(job.id, asyncio.Lock())
+        async with lock:
+            if hasattr(self.repo, "get_job"):
+                persisted_job = await self.repo.get_job(job.id)
+                if not persisted_job or persisted_job.type != JobType.SERVICE or persisted_job.state != JobState.ACTIVE:
+                    return
+                job = persisted_job
 
-        if needed > 0:
-            try:
-                await self._ensure_runtime_for_job(job)
-            except Exception as e:
-                logger.warning(f"[ATM] Job {job.id} scale-up blocked by runtime precheck: {e}")
-                return
-            logger.debug(f"[ATM] Job {job.id} scaling up: {current_count} -> {target} (+{needed})")
-            for _ in range(needed):
-                await self.dispatcher.dispatch(job)
+            await self._fail_expired_fixed_pool_waiting_tasks(job)
+
+            current_count = await self.repo.count_active_tasks(job.id)
+            target = job.concurrency_target
+            needed = target - current_count
+
+            if needed > 0:
+                try:
+                    await self._ensure_runtime_for_job(job)
+                except Exception as e:
+                    logger.warning(f"[ATM] Job {job.id} scale-up blocked by runtime precheck: {e}")
+                    return
+                logger.debug(f"[ATM] Job {job.id} scaling up: {current_count} -> {target} (+{needed})")
+                for _ in range(needed):
+                    await self.dispatcher.dispatch(job)
+            await self._resume_fixed_pool_waiting_tasks(job)
 
     async def _on_batch_cron_fire(self, job_id: str):
         """Cron 触发批次执行：上一批未结束则跳过。"""
@@ -202,6 +236,15 @@ class JobController:
         if self._scheduler_started:
             return
         self._scheduler.start()
+        self._scheduler.add_job(
+            self._reconcile_active_service_jobs,
+            trigger="interval",
+            seconds=5,
+            id=self._service_tick_job_id,
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
         self._scheduler_started = True
 
     def _stop_scheduler(self):
@@ -252,6 +295,8 @@ class JobController:
         self._event_bus.subscribe(EventType.TASK_FINISHED, self._on_task_terminal_event)
         self._event_bus.subscribe(EventType.TASK_FAILED, self._on_task_terminal_event)
         self._event_bus.subscribe(EventType.TASK_CANCELLED, self._on_task_terminal_event)
+        if hasattr(EventType, "ENV_RESOURCE_POOL_UPDATED"):
+            self._event_bus.subscribe(EventType.ENV_RESOURCE_POOL_UPDATED, self._on_resource_pool_updated_event)
         self._event_handlers_registered = True
 
     def _unsubscribe_task_events(self):
@@ -260,6 +305,8 @@ class JobController:
         self._event_bus.unsubscribe(EventType.TASK_FINISHED, self._on_task_terminal_event)
         self._event_bus.unsubscribe(EventType.TASK_FAILED, self._on_task_terminal_event)
         self._event_bus.unsubscribe(EventType.TASK_CANCELLED, self._on_task_terminal_event)
+        if hasattr(EventType, "ENV_RESOURCE_POOL_UPDATED"):
+            self._event_bus.unsubscribe(EventType.ENV_RESOURCE_POOL_UPDATED, self._on_resource_pool_updated_event)
         self._event_handlers_registered = False
 
     def _on_task_terminal_event(self, event: Event):
@@ -274,6 +321,158 @@ class JobController:
         except RuntimeError:
             return
         loop.create_task(self.reconcile_job(job_id))
+
+    def _publish_task_terminal_event(self, task) -> None:
+        if task.status == TaskStatus.SUCCEEDED:
+            event_type = EventType.TASK_FINISHED
+        elif task.status == TaskStatus.CANCELLED:
+            event_type = EventType.TASK_CANCELLED
+        elif task.status == TaskStatus.FAILED:
+            event_type = EventType.TASK_FAILED
+        else:
+            return
+
+        self._event_bus.publish(
+            Event(
+                type=event_type,
+                task_run_id=task.id,
+                data={
+                    "task_id": task.id,
+                    "job_id": task.job_id,
+                    "status": task.status.value,
+                    "env_id": task.env_id,
+                    "error": task.error,
+                },
+            )
+        )
+
+    async def _reconcile_active_service_jobs(self):
+        jobs = await self.repo.list_active_jobs()
+        for job in jobs:
+            if job.type != JobType.SERVICE:
+                continue
+            try:
+                await self._reconcile_service_job(job)
+            except Exception as e:
+                logger.error(f"[ATM] Failed to reconcile service job {job.id} on periodic tick: {e}")
+
+    def _on_resource_pool_updated_event(self, event: Event):
+        if not self._running:
+            return
+        module_name = str(event.data.get("module_name", "")).strip()
+        pool_name = str(event.data.get("pool_name", "")).strip()
+        if not module_name or not pool_name:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._reconcile_resource_pool_jobs(module_name, pool_name))
+
+    async def _reconcile_resource_pool_jobs(self, module_name: str, pool_name: str):
+        jobs = await self.repo.list_active_jobs()
+        for job in jobs:
+            binding = self._fixed_pool_binding(job)
+            if not binding:
+                continue
+            if binding != (normalize_resource_pool_module_name(module_name), pool_name):
+                continue
+            await self._reconcile_service_job(job)
+
+    def _fixed_pool_binding(self, job: Job) -> tuple[str, str] | None:
+        if job.type != JobType.SERVICE:
+            return None
+        try:
+            run_profile = resolve_job_run_profile(job)
+        except Exception:
+            return None
+        if not run_profile.execution or not run_profile.execution.module:
+            return None
+        acquisition = run_profile.resource.acquisition
+        resource_pool = str(acquisition.resource_pool or "").strip()
+        if acquisition.mode != AcquisitionMode.SELECT or not resource_pool:
+            return None
+        module_name = normalize_resource_pool_module_name(run_profile.execution.module)
+        if not module_name:
+            return None
+        return module_name, resource_pool
+
+    async def _count_fixed_pool_capacity(self, job: Job) -> int:
+        binding = self._fixed_pool_binding(job)
+        if not binding:
+            return 0
+        module_name, pool_name = binding
+        return await self.rem.count_allocatable_envs(module_name, pool_name)
+
+    async def _fail_expired_fixed_pool_waiting_tasks(self, job: Job) -> None:
+        binding = self._fixed_pool_binding(job)
+        if not binding or not hasattr(self.repo, "get_oldest_waiting_tasks_before"):
+            return
+
+        wait_timeout = int(resolve_job_run_profile(job).resource.acquisition.wait_timeout)
+        if wait_timeout <= 0:
+            return
+
+        pool_name = binding[1]
+        expired_tasks = await self.repo.get_oldest_waiting_tasks_before(
+            job.id,
+            [TaskStatus.PENDING],
+            waiting_since_before=int(time.time()) - wait_timeout,
+        )
+        if not expired_tasks:
+            return
+
+        expired_task_ids: list[str] = []
+        for task in expired_tasks:
+            if hasattr(self.dispatcher, "has_live_task_loop") and self.dispatcher.has_live_task_loop(task.id):
+                continue
+            expired_task_ids.append(task.id)
+
+        if not expired_task_ids:
+            return
+
+        failed_tasks = await self.repo.mark_tasks_failed(
+            expired_task_ids,
+            f"等待环境池工位超时: {pool_name} ({wait_timeout}s)",
+        )
+        for task in failed_tasks:
+            self._publish_task_terminal_event(task)
+
+    async def _resume_fixed_pool_waiting_tasks(self, job: Job) -> None:
+        binding = self._fixed_pool_binding(job)
+        if not binding:
+            return
+
+        capacity = await self._count_fixed_pool_capacity(job)
+        running_like_count = await self.repo.count_tasks_by_statuses(
+            job.id,
+            [TaskStatus.RUNNING, TaskStatus.WAITING_CONFIRMATION],
+        )
+        remaining_target = job.concurrency_target - running_like_count
+        resumable = min(max(remaining_target, 0), capacity)
+        if resumable <= 0:
+            return
+
+        if hasattr(self.repo, "get_oldest_waiting_tasks"):
+            pending_tasks = await self.repo.get_oldest_waiting_tasks(
+                job.id,
+                [TaskStatus.PENDING],
+                limit=resumable,
+            )
+        else:
+            pending_tasks = await self.repo.get_oldest_tasks_by_status(
+                job.id,
+                [TaskStatus.PENDING],
+                limit=resumable,
+            )
+        resumed = 0
+        for task in pending_tasks:
+            if resumed >= resumable:
+                break
+            if hasattr(self.dispatcher, "has_live_task_loop") and self.dispatcher.has_live_task_loop(task.id):
+                continue
+            await self.dispatcher.resume_task(task, job)
+            resumed += 1
 
 # Singleton
 _controller: JobController | None = None

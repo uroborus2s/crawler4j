@@ -32,6 +32,7 @@
 
 - [SDK 与 CLI 参考](reference-sdk-and-cli.md)
 - [Core 能力参考](reference-core-capabilities.md)
+- [固定环境池与环境队列](reference-core-capabilities.md#固定环境池工具)
 
 ## 命令与版本口径
 
@@ -65,15 +66,17 @@
 2. [核心概念](core-concepts.md)
 3. [模块结构](module-structure.md)
 4. [构建模块](build-modules.md)
-5. [UI 与数据表](ui-and-data-table.md)
-6. [调试模块](debugging.md)
-7. [交付模块](shipping.md)
+5. [固定环境池与环境队列](reference-core-capabilities.md#固定环境池工具)
+6. [UI 与数据表](ui-and-data-table.md)
+7. [调试模块](debugging.md)
+8. [交付模块](shipping.md)
 
 ### 已经会写模块，只想查手册
 
 1. [SDK 与 CLI 参考](reference-sdk-and-cli.md)
 2. [Core 能力参考](reference-core-capabilities.md)
-3. [常见问题](troubleshooting.md)
+3. [固定环境池与环境队列](reference-core-capabilities.md#固定环境池工具)
+4. [常见问题](troubleshooting.md)
 
 ## 主题导航
 
@@ -83,6 +86,7 @@
 | 理解模块到底是什么 | [核心概念](core-concepts.md) |
 | 搞清楚目录、入口和 `module.yaml` | [模块结构](module-structure.md) |
 | 写 task 和 workflow | [构建模块](build-modules.md) |
+| 接入固定环境池 Service Job / 环境队列 | [构建模块](build-modules.md) / [Core 能力参考](reference-core-capabilities.md) / [调试模块](debugging.md)；当前只从 `READY + 无租约` 工位发号，抢位冲突会回等待 |
 | 写页面或托管数据表 | [UI 与数据表](ui-and-data-table.md) |
 | 搞清快照数据和审计历史怎么分工 | [核心概念](core-concepts.md) / [Core 能力参考](reference-core-capabilities.md) / [UI 与数据表](ui-and-data-table.md) |
 | 用 DevLink / ATM 调试 | [调试模块](debugging.md) |

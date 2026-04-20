@@ -2,7 +2,7 @@
 
 用于构建 `crawler4j` 标准模块项目的 SDK 与 CLI。
 
-当前源码与开发者文档统一以 `0.2.0` 为基线。注意：模块自己的 `module.yaml.version` 可以独立演进，因此示例 ZIP 名称里的 `0.1.0` 仅表示模块版本，不代表 SDK 仍停留在 `0.1.x`。
+当前源码与开发者文档统一以 `0.3.0` 为基线。注意：模块自己的 `module.yaml.version` 可以独立演进，因此示例 ZIP 名称里的 `0.1.0` 仅表示模块版本，不代表 SDK 仍停留在 `0.1.x`。
 
 ## 使用 CLI 的两种方式
 
@@ -115,6 +115,11 @@ class MyTask(TaskScript):
 - `db.exists_state`
 - `ip_pool.pick_proxy`
 - `env.set_proxy`
+- `env.bind_resource_pool`
+- `env.mark_resource_pool_eligible`
+- `env.mark_resource_pool_ineligible`
+- `env.remove_resource_pool`
+- `env.replace_resource_pool_snapshot`
 - `ui.declare_data_table`
 - `ui.get_data_table`
 - `captcha.match_slider`
@@ -146,11 +151,27 @@ if ctx.tools and ctx.tools.has_tool("db.append_event"):
         dataset="order_events",
         event_type="status_changed",
         entity_key="order-001",
-        payload={"status": "paid"},
+        previous_status="pending",
+        next_status="paid",
+        result="success",
+        reason="payment_confirmed",
+        payload={"gateway": "alipay"},
     )
 
 if ctx.tools and ctx.tools.has_tool("env.set_proxy"):
     await ctx.tools.call("env.set_proxy", env_id=ctx.env_id, proxy_value="http://127.0.0.1:8888")
+
+from crawler4j_sdk import bind_resource_pool, mark_resource_pool_ineligible
+
+if ctx.tools and ctx.tools.has_tool("env.bind_resource_pool"):
+    await bind_resource_pool(ctx, pool_name="bound_account_ready")
+
+if ctx.tools and ctx.tools.has_tool("env.mark_resource_pool_ineligible"):
+    await mark_resource_pool_ineligible(
+        ctx,
+        pool_name="bound_account_ready",
+        reason="blacklisted",
+    )
 
 if ctx.tools and ctx.tools.has_tool("captcha.match_slider"):
     result = ctx.tools.call(
@@ -159,6 +180,14 @@ if ctx.tools and ctx.tools.has_tool("captcha.match_slider"):
         puzzle_piece_image=piece_bytes,
     )
 ```
+
+固定环境池口径：
+
+- `bind_resource_pool` / `mark_resource_pool_eligible` / `mark_resource_pool_ineligible` / `remove_resource_pool` / `replace_resource_pool_snapshot` 都是异步 helper，必须 `await`
+- 这些 helper 依赖宿主提供对应的 `env.*resource_pool*` capability；如果宿主版本可能偏旧，请先用 `ctx.tools.has_tool(...)` 判断
+- 若 capability 缺失，helper 会抛出明确 `RuntimeError`，而不是让底层 `call()` 直接冒出 `KeyError`
+- helper 的 `pool_name` 只写资源池名，例如 `bound_account_ready`
+- 宿主内部会按当前模块自动生成 metadata key `<module_name>:<pool_name>`；模块侧不要自己拼这个 key
 
 ## CLI 命令
 
@@ -295,4 +324,4 @@ return TaskResult.fail(
 
 - Python: `>= 3.12`
 - 遵循语义化版本（SemVer）
-- 当前源码包版本：`0.2.0`
+- 当前源码包版本：`0.3.0`

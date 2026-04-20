@@ -22,9 +22,10 @@
 - 当前工作区根应用版本：`0.2.0`
 - 当前运行时版本：`0.2.0`
 - 最近正式发布 tag：`v0.1.1`
-- SDK 当前版本：`0.2.0`
+- SDK 当前版本：`0.3.0`
 - Contracts 当前版本：`0.2.0`
 - 当前工作区已切到 `0.2.0` 发布目标，但尚未补打正式 Git tag / release 资产
+- `crawler4j-sdk 0.3.0` 已于 2026-04-19 完成本地构建并发布到 PyPI
 - SDK 当前口径已收敛到 `TaskContext.tools` 统一工具接口，模块侧不再使用专用 `ctx.db` / `ctx.captcha` 字段
 - 当前工作区已进一步收敛到“ATM hooks + `TaskSignal`”单一生命周期链；`TaskFlow.on_complete/on_error` 与 `TaskScript` 私有 callbacks 已删除
 
@@ -34,7 +35,7 @@
 |---|---|
 | 版本相关单测（`test_version_service.py`、`test_vscode.py`） | 通过（`5 passed`） |
 | Root wheel/sdist build | 通过（产物：`crawler4j-0.2.0`） |
-| SDK wheel/sdist build | 通过（产物：`crawler4j_sdk-0.2.0`） |
+| SDK wheel/sdist build | 通过（产物：`crawler4j_sdk-0.3.0`） |
 | Contracts wheel/sdist build | 通过（产物：`crawler4j_contracts-0.2.0`） |
 | Docs markdown tree | 通过（`docs-stratego source validate --repo-path .`） |
 
@@ -58,3 +59,4 @@
 | 2026-03-26 | 按统一版本规则区分当前工作区版本与最近正式发布 | Codex |
 | 2026-04-17 | 将根应用 / SDK / Contracts 当前源码版本与 README、release 文档统一收敛到 `0.2.0` 发布基线，并明确最近正式 tag 仍为 `v0.1.1` | Codex |
 | 2026-04-17 | 追加本轮发布前复核结果：版本相关单测、三包构建与 `docs-stratego` 文档树校验均通过 | Codex |
+| 2026-04-19 | SDK 独立升到 `0.3.0`，并完成本地构建与 PyPI 发布 | Codex |

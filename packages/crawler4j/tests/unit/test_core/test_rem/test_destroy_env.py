@@ -1,7 +1,9 @@
+from contextlib import ExitStack
 from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
+from src.core.persistence.database import STATE_DB, get_connection
 from src.core.rem.manager import EnvironmentManager
 from src.core.rem.models import Environment, EnvKind, EnvStatus, EnvUnavailableError
 from src.core.rem.provider import BaseProvider, register_provider
@@ -51,6 +53,17 @@ class DestroyTrackingProvider(BaseProvider):
 
 
 @pytest.fixture
+def temp_data_dir(tmp_path):
+    with ExitStack() as stack:
+        stack.enter_context(patch("src.utils.paths.get_app_data_dir", return_value=tmp_path))
+
+        from src.core.persistence.database import init_database
+
+        init_database()
+        yield tmp_path
+
+
+@pytest.fixture
 def mock_pool():
     pool = AsyncMock()
     pool.get = AsyncMock()
@@ -66,6 +79,13 @@ def manager(mock_pool):
         mgr = EnvironmentManager()
         mgr.pool = mock_pool
         return mgr
+
+
+@pytest.fixture
+def persistent_manager(temp_data_dir):
+    with patch("src.core.rem.ip_pool.get_ip_pool_manager") as mock_get_pool:
+        mock_get_pool.return_value = AsyncMock()
+        yield EnvironmentManager()
 
 
 @pytest.fixture
@@ -152,3 +172,87 @@ async def test_destroy_env_removes_db_record_after_external_delete_succeeds(
         fingerprint_env.id,
         EnvStatus.TERMINATING,
     )
+
+
+@pytest.mark.asyncio
+async def test_destroy_env_cascades_env_metadata_cleanup_after_row_delete(
+    persistent_manager,
+):
+    provider = DestroyTrackingProvider(name="destroy-cascade-provider", destroy_result=True)
+    register_provider(provider)
+
+    doomed_env = Environment(
+        name="doomed-env",
+        kind=EnvKind.BROWSER,
+        provider=provider.name,
+        status=EnvStatus.READY,
+        external_id="browser-doomed",
+    )
+    survivor_env = Environment(
+        name="survivor-env",
+        kind=EnvKind.BROWSER,
+        provider=provider.name,
+        status=EnvStatus.READY,
+        external_id="browser-survivor",
+    )
+    await persistent_manager.pool.add(doomed_env)
+    await persistent_manager.pool.add(survivor_env)
+
+    await persistent_manager.set_metadata(
+        doomed_env.id,
+        "scheduler.resource_pool",
+        "demo_module:bound_account_ready",
+        {"eligible": False, "reason": "blacklisted"},
+        value_type="json",
+    )
+    await persistent_manager.set_metadata(
+        doomed_env.id,
+        "demo.custom",
+        "note",
+        {"source": "manual-review"},
+        value_type="json",
+    )
+    await persistent_manager.set_metadata(
+        survivor_env.id,
+        "scheduler.resource_pool",
+        "demo_module:bound_account_ready",
+        {"eligible": True, "reason": ""},
+        value_type="json",
+    )
+
+    with get_connection(STATE_DB) as conn:
+        doomed_metadata_count = conn.execute(
+            "SELECT COUNT(*) FROM env_metadata WHERE env_id = ?",
+            (doomed_env.id,),
+        ).fetchone()[0]
+        survivor_metadata_count = conn.execute(
+            "SELECT COUNT(*) FROM env_metadata WHERE env_id = ?",
+            (survivor_env.id,),
+        ).fetchone()[0]
+
+    assert doomed_metadata_count == 2
+    assert survivor_metadata_count == 1
+
+    success = await persistent_manager.destroy_env(doomed_env.id)
+
+    assert success is True
+    assert provider.destroy_called is True
+    assert await persistent_manager.get_env(doomed_env.id) is None
+
+    with get_connection(STATE_DB) as conn:
+        doomed_row_count = conn.execute(
+            "SELECT COUNT(*) FROM environments WHERE id = ?",
+            (doomed_env.id,),
+        ).fetchone()[0]
+        doomed_metadata_count = conn.execute(
+            "SELECT COUNT(*) FROM env_metadata WHERE env_id = ?",
+            (doomed_env.id,),
+        ).fetchone()[0]
+        survivor_metadata_count = conn.execute(
+            "SELECT COUNT(*) FROM env_metadata WHERE env_id = ?",
+            (survivor_env.id,),
+        ).fetchone()[0]
+
+    assert doomed_row_count == 0
+    assert doomed_metadata_count == 0
+    assert survivor_metadata_count == 1

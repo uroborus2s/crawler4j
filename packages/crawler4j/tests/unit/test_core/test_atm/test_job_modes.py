@@ -30,12 +30,13 @@ def temp_state_dir(tmp_path):
         yield tmp_path
 
 
-def _build_select_run_profile(wait_timeout: int = 60) -> RunProfile:
+def _build_select_run_profile(wait_timeout: int = 60, resource_pool: str = "") -> RunProfile:
     return RunProfile(
         resource=ResourceConfig(
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.SELECT,
                 selector_name="random_ready",
+                resource_pool=resource_pool,
                 wait_timeout=wait_timeout,
             ),
         ),
@@ -84,6 +85,202 @@ async def test_service_job_scale_up_skips_when_runtime_check_fails_before_dispat
     await controller._reconcile_job(job)
 
     controller.dispatcher.dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_service_job_fixed_pool_resumes_waiting_tasks_up_to_current_capacity():
+    controller = JobController()
+    waiting_tasks = [
+        Task(id="task-p1", job_id="service-job", status=TaskStatus.PENDING),
+        Task(id="task-p2", job_id="service-job", status=TaskStatus.PENDING),
+        Task(id="task-p3", job_id="service-job", status=TaskStatus.PENDING),
+        Task(id="task-p4", job_id="service-job", status=TaskStatus.PENDING),
+        Task(id="task-p5", job_id="service-job", status=TaskStatus.PENDING),
+        Task(id="task-p6", job_id="service-job", status=TaskStatus.PENDING),
+    ]
+    controller.repo = SimpleNamespace(
+        count_active_tasks=AsyncMock(return_value=10),
+        count_tasks_by_statuses=AsyncMock(return_value=2),
+        get_oldest_waiting_tasks=AsyncMock(return_value=waiting_tasks),
+    )
+    controller.dispatcher = SimpleNamespace(
+        dispatch=AsyncMock(),
+        resume_task=AsyncMock(return_value=True),
+        has_live_task_loop=MagicMock(return_value=False),
+    )
+    controller._count_fixed_pool_capacity = AsyncMock(return_value=5)
+
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        concurrency_target=10,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+
+    await controller._reconcile_job(job)
+
+    controller.dispatcher.dispatch.assert_not_awaited()
+    assert controller.dispatcher.resume_task.await_count == 5
+    resumed_ids = [call.args[0].id for call in controller.dispatcher.resume_task.await_args_list]
+    assert resumed_ids == ["task-p1", "task-p2", "task-p3", "task-p4", "task-p5"]
+
+
+@pytest.mark.asyncio
+async def test_fixed_pool_resource_pool_reconcile_is_serialized_to_avoid_over_dispatch():
+    controller = JobController()
+    active_count = 0
+    count_calls = 0
+    first_count_entered = asyncio.Event()
+    second_count_entered = asyncio.Event()
+    allow_dispatch = asyncio.Event()
+
+    async def _count_active_tasks(_job_id: str) -> int:
+        nonlocal active_count, count_calls
+        count_calls += 1
+        if count_calls == 1:
+            first_count_entered.set()
+            try:
+                await asyncio.wait_for(second_count_entered.wait(), timeout=0.05)
+            except asyncio.TimeoutError:
+                pass
+        elif count_calls == 2:
+            second_count_entered.set()
+        return active_count
+
+    async def _dispatch(_job: Job) -> None:
+        nonlocal active_count
+        await allow_dispatch.wait()
+        active_count += 1
+
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        concurrency_target=2,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+
+    controller.repo = SimpleNamespace(
+        list_active_jobs=AsyncMock(return_value=[job]),
+        count_active_tasks=AsyncMock(side_effect=_count_active_tasks),
+        count_tasks_by_statuses=AsyncMock(return_value=0),
+        get_oldest_tasks_by_status=AsyncMock(return_value=[]),
+    )
+    controller.dispatcher = SimpleNamespace(dispatch=AsyncMock(side_effect=_dispatch))
+    controller._count_fixed_pool_capacity = AsyncMock(return_value=0)
+
+    first_task = asyncio.create_task(controller._reconcile_resource_pool_jobs("demo_module", "bound_account_ready"))
+    second_task = asyncio.create_task(controller._reconcile_resource_pool_jobs("demo_module", "bound_account_ready"))
+
+    await first_count_entered.wait()
+    try:
+        await asyncio.wait_for(second_count_entered.wait(), timeout=0.05)
+    except asyncio.TimeoutError:
+        pass
+    allow_dispatch.set()
+
+    await asyncio.gather(first_task, second_task)
+
+    assert controller.dispatcher.dispatch.await_count == 2
+    assert active_count == 2
+
+
+@pytest.mark.asyncio
+async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publishes_failed_event(
+    temp_state_dir,
+    monkeypatch,
+):
+    import src.core.atm.controller as controller_module
+
+    class _FakeEventBus:
+        def __init__(self):
+            self.events: list[Event] = []
+
+        def subscribe(self, *_args, **_kwargs):
+            return None
+
+        def unsubscribe(self, *_args, **_kwargs):
+            return None
+
+        def publish(self, event: Event):
+            self.events.append(event)
+
+    now = 1_710_000_100
+    event_bus = _FakeEventBus()
+    monkeypatch.setattr(controller_module, "get_event_bus", lambda: event_bus)
+    monkeypatch.setattr(controller_module.time, "time", lambda: now)
+
+    repo = TaskRepository()
+    repo._run_async = AsyncMock(side_effect=lambda func, *args: func(*args))
+
+    controller = controller_module.JobController()
+    controller.repo = repo
+    controller._event_bus = event_bus
+    controller.dispatcher = SimpleNamespace(
+        dispatch=AsyncMock(),
+        resume_task=AsyncMock(return_value=True),
+        has_live_task_loop=MagicMock(return_value=False),
+    )
+    controller._count_fixed_pool_capacity = AsyncMock(return_value=1)
+
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(wait_timeout=30, resource_pool="bound_account_ready"),
+        concurrency_target=1,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+    await repo.save_job(job)
+
+    expired_task = Task(
+        id="task-expired",
+        job_id=job.id,
+        status=TaskStatus.PENDING,
+        message="等待环境池工位: bound_account_ready",
+        created_at=now - 300,
+    )
+    fresh_task = Task(
+        id="task-fresh",
+        job_id=job.id,
+        status=TaskStatus.PENDING,
+        message="等待环境池工位: bound_account_ready",
+        created_at=now - 240,
+    )
+    setattr(expired_task, "waiting_since", now - 31)
+    setattr(fresh_task, "waiting_since", now - 5)
+    await repo.save_task(expired_task)
+    await repo.save_task(fresh_task)
+
+    await controller._reconcile_job(job)
+
+    expired_loaded = await repo.get_task(expired_task.id)
+    fresh_loaded = await repo.get_task(fresh_task.id)
+
+    assert expired_loaded is not None
+    assert expired_loaded.status == TaskStatus.FAILED
+    assert expired_loaded.message == ""
+    assert expired_loaded.error == "等待环境池工位超时: bound_account_ready (30s)"
+    assert expired_loaded.waiting_since is None
+    assert fresh_loaded is not None
+    assert fresh_loaded.status == TaskStatus.PENDING
+    controller.dispatcher.resume_task.assert_awaited_once()
+    resumed_task, resumed_job = controller.dispatcher.resume_task.await_args.args
+    assert resumed_task.id == fresh_task.id
+    assert resumed_job.id == job.id
+    assert len(event_bus.events) == 1
+    event = event_bus.events[0]
+    assert event.type == EventType.TASK_FAILED
+    assert event.task_run_id == expired_task.id
+    assert event.data["task_id"] == expired_task.id
+    assert event.data["job_id"] == job.id
+    assert event.data["error"] == "等待环境池工位超时: bound_account_ready (30s)"
 
 
 @pytest.mark.asyncio
@@ -733,11 +930,18 @@ async def test_task_terminal_event_triggers_targeted_reconcile():
 async def test_recover_zombies_marks_pending_and_running_tasks_failed(monkeypatch):
     controller = JobController()
     pending = Task(id="task-pending", job_id="job-1", status=TaskStatus.PENDING)
+    waiting = Task(
+        id="task-waiting",
+        job_id="job-1",
+        status=TaskStatus.PENDING,
+        message="等待环境池工位: bound_account_ready",
+        waiting_since=123,
+    )
     running = Task(id="task-running", job_id="job-1", status=TaskStatus.RUNNING, env_id="42")
     env = SimpleNamespace(id=42)
 
     controller.repo = SimpleNamespace(
-        get_running_tasks=AsyncMock(return_value=[pending, running]),
+        get_running_tasks=AsyncMock(return_value=[pending, waiting, running]),
         mark_tasks_failed=AsyncMock(),
     )
 

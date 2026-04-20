@@ -1,3 +1,5 @@
+from PyQt6.QtWidgets import QPushButton
+
 from src.core.atm.models import Job, TriggerConfig, TriggerType
 from src.core.atm.run_profile import (
     AcquisitionConfig,
@@ -7,6 +9,7 @@ from src.core.atm.run_profile import (
     ResourceConfig,
     RunProfile,
 )
+from src.ui.components.button import StyledButton
 
 
 def _make_run_profile() -> RunProfile:
@@ -80,7 +83,25 @@ def test_task_create_dialog_keeps_inline_config_button_wide_enough(qtbot):
 
     assert dialog.inline_config_btn.text() == "重新编辑运行模板"
     assert dialog.inline_config_btn.minimumWidth() >= expected_min_width
-    assert dialog.inline_config_btn.minimumHeight() == 36
+    assert dialog.inline_config_btn.minimumHeight() == 40
+
+
+def test_task_create_dialog_uses_taller_primary_and_secondary_actions(qtbot):
+    from src.core.atm.ui.task_create_dialog import TaskCreateDialog
+
+    dialog = TaskCreateDialog()
+    qtbot.addWidget(dialog)
+
+    buttons = {button.text(): button for button in dialog.findChildren(QPushButton)}
+
+    assert isinstance(dialog.inline_config_btn, StyledButton)
+    assert isinstance(dialog.cancel_btn, StyledButton)
+    assert isinstance(dialog.create_btn, StyledButton)
+    assert buttons["配置运行模板"].minimumHeight() == 40
+    assert buttons["取消"].minimumHeight() == 40
+    assert buttons["创建"].minimumHeight() == 40
+    assert buttons["取消"].minimumWidth() == 92
+    assert buttons["创建"].minimumWidth() == 92
 
 
 def test_task_create_dialog_supports_manual_batch_trigger(qtbot):
@@ -117,3 +138,58 @@ def test_task_create_dialog_initializes_manual_batch_job_mode(qtbot):
     assert dialog.trigger_combo.currentData() == TriggerType.MANUAL.value
     assert dialog.trigger_combo.currentText() == "执行一次"
     assert dialog.trigger_stack.currentIndex() == 0
+
+
+def test_task_create_dialog_preview_shows_resource_pool_for_select_mode(qtbot):
+    from src.core.atm.ui.task_create_dialog import TaskCreateDialog
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                resource_pool="bound_account_ready",
+                wait_timeout=45,
+            ),
+        ),
+        execution=ExecutionContext(
+            module="demo_module",
+            workflow="repair",
+        ),
+    )
+
+    dialog = TaskCreateDialog()
+    qtbot.addWidget(dialog)
+    dialog._inline_run_profile = run_profile
+    dialog._update_inline_preview()
+
+    assert "资源池: bound_account_ready" in dialog.inline_preview.text()
+    assert "选择器: -" in dialog.inline_preview.text()
+
+
+def test_task_create_dialog_preview_keeps_spacing_above_inline_button(qtbot):
+    from src.core.atm.ui.task_create_dialog import TaskCreateDialog
+
+    dialog = TaskCreateDialog()
+    qtbot.addWidget(dialog)
+    dialog._inline_run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                resource_pool="reuse_bound_account_env",
+                selector_name="bound_account_selector",
+                wait_timeout=45,
+            ),
+        ),
+        execution=ExecutionContext(
+            module="ctrip_crawler",
+            workflow="auto_strip_login_workflow",
+        ),
+    )
+    dialog._update_inline_preview()
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    preview_bottom = dialog.inline_preview.geometry().bottom()
+    button_top = dialog.inline_config_btn.geometry().top()
+
+    assert button_top - preview_bottom >= 6

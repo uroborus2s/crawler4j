@@ -83,3 +83,18 @@ def test_install_logging_preferences_sync_hot_updates_unique_logger(tmp_path):
     assert logger.level == logging.DEBUG
     assert logger._file_handler is not None
     assert logger._file_handler.backupCount == 9
+
+
+def test_apscheduler_periodic_info_is_suppressed_below_warning(tmp_path):
+    log_dir = tmp_path / "logs"
+    logger._entries = []
+    logger.configure(log_dir=log_dir, level="INFO", retention_days=3)
+
+    scheduler_logger = logging.getLogger("apscheduler.executors.default")
+    scheduler_logger.info("apscheduler-hidden-periodic-info")
+    scheduler_logger.warning("apscheduler-visible-warning")
+
+    messages = [entry.message for entry in logger.get_entries(limit=20)]
+    assert "apscheduler-hidden-periodic-info" not in messages
+    assert "apscheduler-visible-warning" in messages
+    assert logging.getLogger("apscheduler").level == logging.WARNING

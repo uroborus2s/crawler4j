@@ -1,7 +1,10 @@
 import httpx
 import pytest
+from unittest.mock import AsyncMock
+from types import SimpleNamespace
 
 import src.core.rem.provider as provider_module
+from src.core.rem.models import EnvKind, EnvStatus, Environment
 from src.core.rem.provider import VirtualBrowserClient
 
 
@@ -39,12 +42,16 @@ class _DummyResponse:
 
 
 class _DummyHttpClient:
-    def __init__(self, *, response_data=None, responses=None):
+    def __init__(self, *, response_data=None, responses=None, get_responses=None):
         self.last_path = None
         self.last_payload = None
+        self.last_get_path = None
+        self.last_get_payload = None
         self._response_data = response_data
         self._responses = list(responses or [])
+        self._get_responses = list(get_responses or [])
         self.calls: list[tuple[str, dict]] = []
+        self.get_calls: list[str] = []
 
     async def post(self, path, json):
         self.last_path = path
@@ -56,6 +63,17 @@ class _DummyHttpClient:
                 return response
             return _DummyResponse(json, **response)
         return _DummyResponse(json, response_data=self._response_data)
+
+    async def get(self, path):
+        self.last_get_path = path
+        self.last_get_payload = {}
+        self.get_calls.append(path)
+        if self._get_responses:
+            response = self._get_responses.pop(0)
+            if isinstance(response, _DummyResponse):
+                return response
+            return _DummyResponse({}, **response)
+        return _DummyResponse({}, response_data=self._response_data)
 
 
 @pytest.mark.asyncio
@@ -236,6 +254,73 @@ async def test_launch_browser_falls_back_to_debugging_port():
     endpoint = await client.launch_browser(101)
 
     assert endpoint == "http://localhost:56764"
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_connect_recovers_ws_url_from_running_detail(monkeypatch):
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(
+        get_responses=[
+            {
+                "response_data": {
+                    "data": [
+                        {
+                            "id": 1,
+                            "name": "1",
+                            "debuggingPort": 57204,
+                            "webdriverPath": "/tmp/driver",
+                        }
+                    ]
+                }
+            },
+        ]
+    )
+
+    async def _fake_get_client():
+        return dummy
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+
+    runtime_detail = await client.get_browser_runtime_detail(1)
+
+    assert runtime_detail is not None
+    assert dummy.get_calls == ["/api/getBrowserRunningList"]
+    assert provider_module._extract_cdp_endpoint(runtime_detail) == "http://localhost:57204"
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_connect_recovers_missing_ws_url_from_running_detail(monkeypatch):
+    provider = provider_module.VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.BUSY,
+        handle=provider_module.BrowserHandle(browser_id="1"),
+    )
+    handle = env.handle
+    assert handle is not None
+
+    client = SimpleNamespace(
+        get_browser_runtime_detail=AsyncMock(
+            return_value={
+                "id": 1,
+                "name": "1",
+                "debuggingPort": 57204,
+                "webdriverPath": "/tmp/driver",
+            }
+        )
+    )
+
+    provider._get_api_client = lambda: client  # type: ignore[method-assign]
+    monkeypatch.setattr(handle, "safe_connect", AsyncMock(return_value=True))
+
+    success = await provider.connect(env)
+
+    assert success is True
+    assert handle.ws_url == "http://localhost:57204"
+    client.get_browser_runtime_detail.assert_awaited_once_with(1)
 
 
 @pytest.mark.asyncio

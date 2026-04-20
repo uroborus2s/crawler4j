@@ -22,7 +22,8 @@ def describe_job_runtime(
         detail = f"Provider: {acquisition.provider}"
     else:
         mode_text = "选择环境"
-        detail = f"选择器: {acquisition.selector_name or '-'}"
+        pool_text = acquisition.resource_pool or "-"
+        detail = f"资源池: {pool_text} | 选择器: {acquisition.selector_name or '-'}"
     return ("运行模板", f"{module_name}/{workflow_name} | {mode_text} | {detail}")
 
 

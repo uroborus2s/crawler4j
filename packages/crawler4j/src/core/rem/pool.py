@@ -395,8 +395,8 @@ class LeaseManager:
         from src.core.rem.models import EnvUnavailableError
 
         async with self._lock:
-            # 状态守卫: 只允许未租赁的 READY/RUNNING 环境发放 lease。
-            if env.lease_id or env.status not in {EnvStatus.READY, EnvStatus.RUNNING}:
+            # 状态守卫: 固定池/常规任务都只允许 READY 环境进入新的租赁周期。
+            if env.lease_id or env.status != EnvStatus.READY:
                 raise EnvUnavailableError(
                     f"环境 {env.id} 已被占用 (status={env.status.value})",
                     stage="LEASE",
@@ -413,9 +413,8 @@ class LeaseManager:
                 expires_at=expires_at,
             )
             
-            # 已连接环境保持 RUNNING；未启动环境在租赁后进入 BUSY。
-            if env.status == EnvStatus.READY:
-                env.status = EnvStatus.BUSY
+            # 发放租约后统一进入 BUSY，后续由 start/connect 再转成 RUNNING。
+            env.status = EnvStatus.BUSY
             env.lease_id = lease.id
             env.task_run_id = task_run_id
             env.updated_at = now

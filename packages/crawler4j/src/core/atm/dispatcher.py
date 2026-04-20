@@ -20,7 +20,7 @@ from src.core.atm.execution_runner import (
     ExecutionResult,
     TaskStopRequested,
 )
-from src.core.atm.models import Job, Task, TaskStatus
+from src.core.atm.models import Job, JobType, Task, TaskStatus
 from src.core.atm.run_profile import CreationLifecycle
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.context import current_task_id
@@ -92,6 +92,25 @@ class TaskDispatcher:
         loop_task.add_done_callback(lambda _: self._cleanup_runtime_refs(task.id, preserve_waiting=task.status == TaskStatus.WAITING_CONFIRMATION))
         
         return task.id
+
+    async def resume_task(self, task: Task, job: Job) -> bool:
+        """恢复一个已存在的等待任务。"""
+        if task.status != TaskStatus.PENDING:
+            return False
+        if task.id in self._task_loops:
+            return False
+
+        loop_task = asyncio.create_task(self._run_safe(task, job))
+        self._active_tasks.add(loop_task)
+        loop_task.add_done_callback(self._active_tasks.discard)
+        self._task_loops[task.id] = loop_task
+        self._task_jobs[task.id] = job.id
+        loop_task.add_done_callback(lambda _: self._cleanup_runtime_refs(task.id, preserve_waiting=task.status == TaskStatus.WAITING_CONFIRMATION))
+        return True
+
+    def has_live_task_loop(self, task_id: str) -> bool:
+        loop_task = self._task_loops.get(task_id)
+        return loop_task is not None and not loop_task.done()
 
     async def wait_for_completion(self):
         """等待所有正在执行的任务完成 (Graceful Shutdown)。"""
@@ -181,8 +200,14 @@ class TaskDispatcher:
             },
             provider_name=run_profile.resource.acquisition.provider,
             selector_name=run_profile.resource.acquisition.selector_name,
+            resource_pool_name=run_profile.resource.acquisition.resource_pool,
             acquisition_mode=run_profile.resource.acquisition.mode,
             selector_wait_timeout=run_profile.resource.acquisition.wait_timeout,
+            wait_for_resource=(
+                job.type == JobType.SERVICE
+                and run_profile.resource.acquisition.mode.value == "select"
+                and bool(str(run_profile.resource.acquisition.resource_pool or "").strip())
+            ),
             creation_params=dict(run_profile.resource.acquisition.creation.params),
             creation_lifecycle=run_profile.resource.acquisition.creation.lifecycle,
             execution_timeout=run_profile.execution.timeout,

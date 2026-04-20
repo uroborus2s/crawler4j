@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `BUG-013`, `CR-005`, `CR-008`
-**最后更新：** 2026-04-18
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`
+**最后更新：** 2026-04-19
 
 ## `API-001` Root App Entry Contract
 
@@ -97,6 +97,33 @@
 | 当前状态 | 已收口：当前工作区版本与最近正式发布已被明确区分 |
 | 关联项 | `CR-001`, `TASK-004` |
 
+## `API-007` Fixed-Pool Service Queue Contract（V1 已实现，本地验证通过）
+
+| 项目 | 内容 |
+|---|---|
+| 适用场景 | 固定环境池 + Service Job 保活并发，不再适合“拿不到环境就失败”的运行模式 |
+| 目标语义 | `运行中 + 等待中 = 目标并发`；资源不足属于正常等待，不属于失败 |
+| 进入队列前提 | 只有 `JobType.SERVICE + AcquisitionConfig.mode=select + resource_pool 非空` 时才进入固定池等待语义；`selector_name` 可选，但 `selector_name` 和 `resource_pool` 不能同时为空 |
+| 资源池定位 | 宿主只在“当前模块 + 当前资源池 + `eligible=true` + `READY` + 无租约占用”的环境集合里分配环境 |
+| 卡片存储 | 宿主内部 `env_metadata`；建议 `namespace=scheduler.resource_pool`，key 由宿主按“根模块名归一化 + pool_name”拼接，例如 `demo.foo` -> `demo:<pool>` |
+| 卡片字段 | 至少包含 `module_name`、`pool_name`、`eligible`、`reason`、`exclusive`、`updated_at` |
+| 模块开发者职责 | 通过 SDK helper 维护资源池资格卡片，并提供全量重建；不负责排队、轮询和补位 |
+| 宿主职责 | FIFO 等待队列、容量变化补位、环境租约治理、终态收口 |
+| 当前 V1 形态 | `AcquisitionConfig.resource_pool` + `env.bind_resource_pool` / `env.mark_resource_pool_eligible` / `env.mark_resource_pool_ineligible` / `env.remove_resource_pool` / `env.replace_resource_pool_snapshot` + Service Job `PENDING` 等待补位 |
+| `replace_resource_pool_snapshot` 语义 | `entries` 是当前资源池的完整权威列表；未出现的环境卡片会被删除，不是增量 patch |
+| 容量变化触发 | 环境释放、新环境可分配、异常/暂停环境恢复、模块更新资格卡片；另有轻量巡检兜底 |
+| 环境占用规则 | 占用不移出资源池；资源池归属和运行中占用分离 |
+| 黑号规则 | 先把环境标成 `eligible=false` 并写入原因，再按业务策略销毁或保留待人工处理 |
+| 选择器分层 | `resource_pool` 做宿主级粗筛；若配置了 `selector_name`，宿主只把当前池内候选交给它做细粒度选择；若 `selector_name` 为空，则不会调用 `select_env`，宿主直接取当前池内第一个可分配候选；这对从旧 selector 模块迁移来说是显式行为变化，不是无害默认，且当前实现不承诺额外业务排序 |
+| selector 作者入口 | `selector_name` 指向 `module_runtime.py` 里通过 `@env_selector(...)` 声明的 selector；运行时 `select_env(...)` 是框架包装壳，不是模块作者另写的新 hook |
+| 队列模式下无命中语义 | 只有 `resource_pool` 非空路径里，当前轮没命中才回到等待；没有 `resource_pool` 的旧选择模式里，`selector` 返回 `None` 仍然直接失败 |
+| 候选竞争语义 | 固定池候选如果在 `get_env` / 租约阶段被其他任务先抢走，或候选在快照之后被资源池卡片改成不可发号，当前任务回到等待席位，不直接记失败；只有 selector 选了候选集外环境或其他真实异常才进入失败收口 |
+| 等待状态口径 | 固定池等待会复用底层 `TaskStatus.PENDING`；UI 展示为 `等待环境`，等待中的 `task.message` 为 `等待环境池工位: <pool>` |
+| 等待超时口径 | `wait_timeout` 同时用于环境租约获取与固定环境池 `PENDING` 等待席位收口；固定池等待从第一次写下 `waiting_since` 开始计时，`wait_timeout=0` 时当前不会自动超时收口；当前实现不会单独用它中断 `select_env(...)` 本身；失败文案为 `等待环境池工位超时: <pool> (<seconds>s)`，且与 `execution.timeout` 分离 |
+| `KEEP_ALIVE` 环境口径 | `KEEP_ALIVE` 只表示保留现场，不表示重新回池；保留后的 `RUNNING` 环境不会被固定池当成可发号工位 |
+| `exclusive` 当前语义 | V1 只把它写进资格卡片；当前分配器不依据它改变调度路径，不应把它当成路由开关 |
+| `env_id` 口径 | helper 使用的 `env_id` 是宿主 `environments.id` 主键；`prepare_env` 阶段的 `TaskContext.env_id` 当前固定为 `0`，不应用于写资源池卡片 |
+
 ## 设计结论
 
 - 本项目的关键“接口”不是 HTTP API，而是运行入口、模块契约、SDK/Contracts 包接口和发布元数据接口。
@@ -116,3 +143,5 @@
 | 2026-04-16 | 补记 `ModuleAssembler` 发现错误可见性，以及 DevLink 普通执行的一次性 reload 语义 | Codex |
 | 2026-04-17 | 增补 `API-005`，收口模块配置、运行态、共享内存与数据表契约 | Codex |
 | 2026-04-18 | 新增 `API-006`，将模块快照数据与审计事件拆成两条正式持久化契约 | Codex |
+| 2026-04-19 | 新增 `API-007`，收口固定环境池 Service Job 的等待队列与资源池资格卡片契约 | Codex |
+| 2026-04-19 | `API-007` V1 落地：宿主等待席位、资源池资格 helper 与运行模板 `resource_pool` 契约已实现 | Codex |

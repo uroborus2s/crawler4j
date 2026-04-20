@@ -9,6 +9,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -324,6 +325,39 @@ class ModuleListWidget(QWidget):
         self._pending_tasks.add(task)
         task.add_done_callback(self._pending_tasks.discard)
 
+    async def _exec_dialog_async(self, dialog: QDialog) -> int:
+        loop = asyncio.get_running_loop()
+        result_future = loop.create_future()
+
+        def _resolve(result: int) -> None:
+            if not result_future.done():
+                result_future.set_result(result)
+
+        dialog.finished.connect(_resolve)
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.open()
+        try:
+            return int(await result_future)
+        finally:
+            try:
+                dialog.finished.disconnect(_resolve)
+            except TypeError:
+                pass
+
+    async def _show_message_async(
+        self,
+        title: str,
+        text: str,
+        *,
+        icon: QMessageBox.Icon,
+    ) -> None:
+        dialog = QMessageBox(self)
+        dialog.setIcon(icon)
+        dialog.setWindowTitle(title)
+        dialog.setText(text)
+        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+        await self._exec_dialog_async(dialog)
+
     def _set_busy(self, busy: bool, *, checking_updates: bool = False) -> None:
         self.loading_bar.setVisible(busy)
         self.install_btn.setEnabled(not busy)
@@ -370,7 +404,11 @@ class ModuleListWidget(QWidget):
         try:
             if not external_modules:
                 if notify:
-                    QMessageBox.information(self, "检查完成", "当前没有可检查在线升级的正式模块。")
+                    await self._show_message_async(
+                        "检查完成",
+                        "当前没有可检查在线升级的正式模块。",
+                        icon=QMessageBox.Icon.Information,
+                    )
                 return
 
             service = get_module_release_service()
@@ -398,16 +436,16 @@ class ModuleListWidget(QWidget):
                 update_count = sum(1 for state in self._update_states.values() if state.has_update)
                 if self._update_errors:
                     error_modules = "、".join(sorted(self._update_errors.keys()))
-                    QMessageBox.warning(
-                        self,
+                    await self._show_message_async(
                         "检查完成",
                         f"检测到 {update_count} 个可升级模块。\n以下模块检查失败：{error_modules}",
+                        icon=QMessageBox.Icon.Warning,
                     )
                 else:
-                    QMessageBox.information(
-                        self,
+                    await self._show_message_async(
                         "检查完成",
                         f"检测到 {update_count} 个可升级模块。",
+                        icon=QMessageBox.Icon.Information,
                     )
         finally:
             if seq == self._update_check_seq:
@@ -444,7 +482,7 @@ class ModuleListWidget(QWidget):
                 confirm_text="确认安装",
                 source_details=preview.describe_source(),
             )
-            if dialog.exec() != dialog.DialogCode.Accepted:
+            if await self._exec_dialog_async(dialog) != int(dialog.DialogCode.Accepted):
                 return
 
             if request.remember_github_token and request.github_token:
@@ -455,10 +493,18 @@ class ModuleListWidget(QWidget):
 
             registry = get_module_registry()
             module_info = registry.install(preview.archive_path)
-            QMessageBox.information(self, "成功", f"已安装模块: {module_info.name}")
+            await self._show_message_async(
+                "成功",
+                f"已安装模块: {module_info.name}",
+                icon=QMessageBox.Icon.Information,
+            )
             self.load_data(force_refresh=True)
         except Exception as e:
-            QMessageBox.warning(self, "安装失败", str(e))
+            await self._show_message_async(
+                "安装失败",
+                str(e),
+                icon=QMessageBox.Icon.Warning,
+            )
         finally:
             self._set_busy(False)
 
@@ -486,7 +532,7 @@ class ModuleListWidget(QWidget):
                 confirm_text="确认添加",
                 source_details=source_details,
             )
-            if dialog.exec() != dialog.DialogCode.Accepted:
+            if await self._exec_dialog_async(dialog) != int(dialog.DialogCode.Accepted):
                 return
 
             registry = get_module_registry()
@@ -495,10 +541,18 @@ class ModuleListWidget(QWidget):
                 f"已添加开发模块: {module_info.name}\n"
                 "当前模块来源会切换为“开发链接”，可在 ATM 中发起任务调试。"
             )
-            QMessageBox.information(self, "成功", message)
+            await self._show_message_async(
+                "成功",
+                message,
+                icon=QMessageBox.Icon.Information,
+            )
             self.load_data(force_refresh=True)
         except Exception as e:
-            QMessageBox.warning(self, "添加开发模块失败", str(e))
+            await self._show_message_async(
+                "添加开发模块失败",
+                str(e),
+                icon=QMessageBox.Icon.Warning,
+            )
         finally:
             self._set_busy(False)
 
@@ -524,18 +578,22 @@ class ModuleListWidget(QWidget):
                 confirm_text="确认升级",
                 source_details=source_details,
             )
-            if dialog.exec() != dialog.DialogCode.Accepted:
+            if await self._exec_dialog_async(dialog) != int(dialog.DialogCode.Accepted):
                 return
 
             installed = await service.apply_module_upgrade(module, preview)
-            QMessageBox.information(
-                self,
+            await self._show_message_async(
                 "升级成功",
                 f"模块 {installed.name} 已升级到 v{installed.manifest.version}",
+                icon=QMessageBox.Icon.Information,
             )
             self.load_data(force_refresh=True)
         except Exception as e:
-            QMessageBox.warning(self, "升级失败", str(e))
+            await self._show_message_async(
+                "升级失败",
+                str(e),
+                icon=QMessageBox.Icon.Warning,
+            )
         finally:
             self._set_busy(False)
 

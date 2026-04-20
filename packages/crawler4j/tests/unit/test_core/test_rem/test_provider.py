@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 import pytest
 
@@ -76,3 +77,67 @@ async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
         match="VirtualBrowser launchBrowser 失败: Launch Error: DevTools port not detected",
     ):
         await provider.open(env)
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_connect_recovers_missing_ws_url_from_browser_detail(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.BUSY,
+        handle=BrowserHandle(browser_id="101"),
+    )
+    handle = env.handle
+    assert handle is not None
+
+    client = SimpleNamespace(
+        get_browser_runtime_detail=AsyncMock(return_value={"debuggingPort": 56764}),
+    )
+
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(handle, "safe_connect", AsyncMock(return_value=True))
+
+    success = await provider.connect(env)
+
+    assert success is True
+    assert handle.ws_url == "http://localhost:56764"
+    handle.safe_connect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_connect_retries_runtime_detail_before_missing_ws_url(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=102,
+        name="vb-env-retry",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.BUSY,
+        handle=BrowserHandle(browser_id="102"),
+    )
+    handle = env.handle
+    assert handle is not None
+
+    client = SimpleNamespace(
+        get_browser_runtime_detail=AsyncMock(
+            side_effect=[
+                None,
+                None,
+                {"id": 102, "debuggingPort": 57204},
+            ]
+        )
+    )
+
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(handle, "safe_connect", AsyncMock(return_value=True))
+
+    with patch("src.core.rem.provider.asyncio.sleep", AsyncMock()):
+        success = await provider.connect(env)
+
+    assert success is True
+    assert handle.ws_url == "http://localhost:57204"
+    assert client.get_browser_runtime_detail.await_count == 3
+    handle.safe_connect.assert_awaited_once()

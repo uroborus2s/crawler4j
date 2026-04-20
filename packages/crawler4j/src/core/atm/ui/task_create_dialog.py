@@ -1,12 +1,13 @@
 """新建任务(Job)弹窗。"""
 
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -15,22 +16,76 @@ from PyQt6.QtWidgets import (
 from src.core.atm.models import Job, JobType, TriggerType
 from src.core.atm.run_profile import AcquisitionMode, RunProfile
 from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
 
+class AutoWrapLabel(QLabel):
+    """根据当前宽度自动同步高度的说明文本。"""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_minimum_height()
+
+    def setText(self, text: str) -> None:
+        super().setText(text)
+        self._sync_minimum_height()
+
+    def _sync_minimum_height(self) -> None:
+        width = self.contentsRect().width() or self.width() or self.sizeHint().width() or 1
+        text_rect = self.fontMetrics().boundingRect(
+            0,
+            0,
+            max(1, width),
+            10_000,
+            int(Qt.TextFlag.TextWordWrap),
+            self.text(),
+        )
+        target_height = max(1, text_rect.height())
+        if self.minimumHeight() != target_height:
+            self.setMinimumHeight(target_height)
+            self.updateGeometry()
+            parent = self.parentWidget()
+            if parent is not None:
+                parent.updateGeometry()
+                if parent.layout() is not None:
+                    parent.layout().activate()
+            window = self.window()
+            if window is not None and window.layout() is not None:
+                window.layout().activate()
+
+
 class TaskCreateDialog(QDialog):
     """新建作业弹窗。"""
+
+    _INLINE_ACTION_BUTTON_MIN_HEIGHT = 40
+    _FOOTER_ACTION_BUTTON_MIN_HEIGHT = 40
+    _FOOTER_ACTION_BUTTON_MIN_WIDTH = 92
 
     def __init__(self, parent=None, job: Job | None = None):
         super().__init__(parent)
         self._inline_run_profile: RunProfile | None = None
         self._job = job  # Existing job for editing
+        self._inline_preview_relayout_pending = False
         self._setup_ui()
         
         if self._job:
             self._init_form_data()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_inline_preview_height()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._schedule_inline_preview_relayout()
 
     def _setup_ui(self):
         self.setWindowTitle("新建任务 (Job)")
@@ -55,6 +110,7 @@ class TaskCreateDialog(QDialog):
         # 表单
         form = QFormLayout()
         form.setSpacing(16)
+        self.form = form
         # label alignment
         # label alignment
 
@@ -71,39 +127,32 @@ class TaskCreateDialog(QDialog):
         form.addRow("作业模式:", self.type_combo)
 
         # 3. 运行配置
-        inline_page = QWidget()
-        inline_layout = QVBoxLayout(inline_page)
-        inline_layout.setContentsMargins(0, 0, 0, 0)
-        inline_layout.setSpacing(8)
+        self.inline_page = QWidget()
+        self.inline_layout = QVBoxLayout(self.inline_page)
+        self.inline_layout.setContentsMargins(0, 0, 0, 0)
+        self.inline_layout.setSpacing(8)
 
-        self.inline_preview = QLabel("尚未配置运行模板。")
+        self.inline_preview = AutoWrapLabel("尚未配置运行模板。")
         self.inline_preview.setStyleSheet("color: rgba(255, 255, 255, 0.7); font-size: 12px;")
-        self.inline_preview.setWordWrap(True)
-        inline_layout.addWidget(self.inline_preview)
+        self.inline_layout.addWidget(self.inline_preview)
 
-        self.inline_config_btn = QPushButton("配置运行模板")
-        self.inline_config_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-        """)
-        self.inline_config_btn.setMinimumHeight(36)
+        self.inline_config_btn = StyledButton(
+            "配置运行模板",
+            variant="primary",
+            min_height=self._INLINE_ACTION_BUTTON_MIN_HEIGHT,
+            horizontal_padding=16,
+        )
         self.inline_config_btn.clicked.connect(self._edit_inline_run_profile)
-        inline_btn_row = QHBoxLayout()
-        inline_btn_row.setContentsMargins(0, 0, 0, 0)
-        inline_btn_row.setSpacing(0)
-        inline_btn_row.addWidget(self.inline_config_btn)
-        inline_btn_row.addStretch()
-        inline_layout.addLayout(inline_btn_row)
+        self.inline_btn_row = QHBoxLayout()
+        self.inline_btn_row.setContentsMargins(0, 0, 0, 0)
+        self.inline_btn_row.setSpacing(0)
+        self.inline_btn_row.addWidget(self.inline_config_btn)
+        self.inline_btn_row.addStretch()
+        self.inline_layout.addLayout(self.inline_btn_row)
         self._sync_inline_config_button_width()
+        self._sync_inline_preview_height()
 
-        form.addRow("运行配置:", inline_page)
+        form.addRow("运行配置:", self.inline_page)
         
         # 4. 并发配置
         self.concurrency_spin = QSpinBox()
@@ -147,34 +196,25 @@ class TaskCreateDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(255, 255, 255, 0.1);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                padding: 10px 24px;
-                border-radius: 6px;
-            }
-            QPushButton:hover { background: rgba(255, 255, 255, 0.2); }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
+        self.cancel_btn = StyledButton(
+            "取消",
+            variant="secondary",
+            min_height=self._FOOTER_ACTION_BUTTON_MIN_HEIGHT,
+            min_width=self._FOOTER_ACTION_BUTTON_MIN_WIDTH,
+            horizontal_padding=20,
+        )
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self.cancel_btn)
 
-        create_btn = QPushButton("保存" if self._job else "创建")
-        create_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(99, 102, 241, 0.9);
-                color: white;
-                border: none;
-                padding: 10px 24px;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-        """)
-        create_btn.clicked.connect(self._on_create)
-        btn_layout.addWidget(create_btn)
+        self.create_btn = StyledButton(
+            "保存" if self._job else "创建",
+            variant="primary",
+            min_height=self._FOOTER_ACTION_BUTTON_MIN_HEIGHT,
+            min_width=self._FOOTER_ACTION_BUTTON_MIN_WIDTH,
+            horizontal_padding=20,
+        )
+        self.create_btn.clicked.connect(self._on_create)
+        btn_layout.addWidget(self.create_btn)
 
         layout.addLayout(btn_layout)
 
@@ -231,17 +271,51 @@ class TaskCreateDialog(QDialog):
             lines.append(f"Provider: {run_profile.resource.acquisition.provider}")
             lines.append(f"环境: {run_profile.resource.acquisition.env_type.value}")
         else:
+            lines.append(f"资源池: {run_profile.resource.acquisition.resource_pool or '-'}")
             lines.append(f"选择器: {run_profile.resource.acquisition.selector_name or '-'}")
         if run_profile.execution:
             lines.append(f"执行: {run_profile.execution.module}/{run_profile.execution.workflow or 'default'}")
         self.inline_preview.setText(" | ".join(lines))
         self.inline_config_btn.setText("重新编辑运行模板")
         self._sync_inline_config_button_width()
+        self._sync_inline_preview_height()
 
     def _sync_inline_config_button_width(self) -> None:
         text = self.inline_config_btn.text().strip()
         content_width = self.inline_config_btn.fontMetrics().horizontalAdvance(text)
         self.inline_config_btn.setMinimumWidth(max(220, content_width + 48))
+
+    def _sync_inline_preview_height(self) -> None:
+        self.inline_preview._sync_minimum_height()
+        preview_height = self.inline_preview.minimumHeight()
+        button_height = self.inline_config_btn.minimumHeight()
+        total_height = (
+            self.inline_layout.contentsMargins().top()
+            + preview_height
+            + self.inline_layout.spacing()
+            + button_height
+            + self.inline_layout.contentsMargins().bottom()
+        )
+        if self.inline_page.height() != total_height:
+            self.inline_page.setFixedHeight(total_height)
+            self.inline_page.updateGeometry()
+        self.form.invalidate()
+        self.form.activate()
+        self.inline_layout.activate()
+        self.adjustSize()
+        self.layout().activate()
+
+    def _schedule_inline_preview_relayout(self) -> None:
+        if self._inline_preview_relayout_pending:
+            return
+
+        self._inline_preview_relayout_pending = True
+
+        def _flush() -> None:
+            self._inline_preview_relayout_pending = False
+            self._sync_inline_preview_height()
+
+        QTimer.singleShot(0, _flush)
 
     def _on_trigger_changed(self, index: int):
         del index

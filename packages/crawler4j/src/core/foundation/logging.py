@@ -86,6 +86,11 @@ def _level_name(level_no: int) -> str:
     return LogLevel.DEBUG
 
 
+_LOGGER_MIN_LEVEL_FLOORS: dict[str, int] = {
+    "apscheduler": logging.WARNING,
+}
+
+
 class _AppLogHandler(logging.Handler):
     """把标准 logging 记录转成统一 LogEntry。"""
 
@@ -160,6 +165,11 @@ class AppLogger:
         self._console_handler.setLevel(level_no)
         if self._file_handler is not None:
             self._file_handler.setLevel(level_no)
+        self._apply_logger_min_level_floors()
+
+    def _apply_logger_min_level_floors(self) -> None:
+        for logger_name, minimum_level in _LOGGER_MIN_LEVEL_FLOORS.items():
+            logging.getLogger(logger_name).setLevel(max(self._level, minimum_level))
 
     def _replace_file_handler(self, log_dir: str | Path | None, retention_days: int) -> None:
         if self._file_handler is not None:

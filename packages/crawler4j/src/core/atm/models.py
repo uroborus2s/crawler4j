@@ -125,5 +125,12 @@ class Task:
     
     # 时间戳
     created_at: int = field(default_factory=lambda: int(time.time()))
+    waiting_since: int | None = None
     started_at: int | None = None
     finished_at: int | None = None
+
+    def __post_init__(self):
+        if isinstance(self.status, str):
+            self.status = TaskStatus(self.status)
+        if self.status != TaskStatus.PENDING and self.message.startswith("等待环境池工位:"):
+            self.message = ""

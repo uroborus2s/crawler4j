@@ -54,6 +54,7 @@ class JobDebugDialog(QDialog):
         self._module = module
         self._service = debug_service or get_debug_service()
         self._current_session_id: str | None = None
+        self._current_session: DebugSession | None = None
         self._refresh_in_flight = False
         self._runtime_label, self._runtime_tooltip = describe_job_runtime(job)
         self._target = JobDebugTarget(
@@ -434,22 +435,31 @@ class JobDebugDialog(QDialog):
 
     def generate_vscode_config(self) -> None:
         try:
-            request = self.build_request()
             if not self._module.path:
                 raise ValueError("模块路径不可用")
+            attach_host, attach_port = self._resolve_vscode_attach_target()
             launch_path = ensure_vscode_attach_config(
                 self._module.path,
-                host=request.attach_host,
-                port=request.attach_port,
+                host=attach_host,
+                port=attach_port,
             )
             QMessageBox.information(self, "已生成 VS Code 配置", f"已写入:\n{launch_path}")
         except Exception as exc:
             QMessageBox.warning(self, "生成配置失败", str(exc))
 
+    def _resolve_vscode_attach_target(self) -> tuple[str, int]:
+        session = self._current_session
+        if session and not session.is_final() and session.attach_port > 0:
+            return session.attach_host, session.attach_port
+
+        request = self.build_request()
+        return request.attach_host, request.attach_port
+
     def copy_attach_address(self) -> None:
         QApplication.clipboard().setText(self.attach_value.text() if self.attach_value.text() != "-" else "")
 
     def _apply_session(self, session: DebugSession | None) -> None:
+        self._current_session = session
         if not session:
             self.state_value.setText("-")
             self.attach_value.setText("-")

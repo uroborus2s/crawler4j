@@ -6,13 +6,13 @@
 **主要读者：** 技术负责人 | 开发 | QA | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | 当前文档治理缺口审计  
 **下游输出：** `docs/04-project-development/05-development-process/execution-log.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/07-release-delivery/release-notes.md`  
-**关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`, `CR-004`, `CR-008`
-**最后更新：** 2026-04-18
+**关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-023`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`, `CR-004`, `CR-008`, `CR-009`
+**最后更新：** 2026-04-19
 
 ## 1. 实施目标
 
 - 把历史项目从“可运行但发布/治理漂移”的状态推进到“入口、关键模块、版本规则可验证”的状态。
-- 当前波次不新增新业务功能，优先修复根入口、关键模块运行时和版本治理。
+- 已完成波次优先修复根入口、关键模块运行时和版本治理；Wave 14 已补齐固定环境池 Service Job 的宿主等待队列能力。
 - 在不改变 Core 当前模块加载契约的前提下，为模块开发链路补齐“根 `__init__.py` 自动托管”的最小演进方案。
 
 ## 2. 交付波次
@@ -32,6 +32,7 @@
 | Wave 11 | `TASK-014` ~ `TASK-020` | 文档规范审计、根导航覆盖检查、最小文档包缺口 | 生产级文档入口收口、缺失正式页补齐、索引与 memory 同步 | 进行中：以四大模块结构为单一入口，补齐发布/运维/追踪关键页 |
 | Wave 12 | `TASK-021` | `REQ-007`、`api-design.md`、现有 `TaskSignal` / ATM / UI 实现 | 信号驱动的结构化确认面板、任务 signal 持久化与客户端确认闭环 | 已完成：任务 signal 已持久化并发布 `task.signal` 事件，ATM 详情页可展示结构化确认面板并回调既有确认服务 |
 | Wave 13 | `TASK-022` | `REQ-008`、`API-005`、模块数据持久化现状 | 模块审计事件独立存储、事件工具能力与契约文档同步 | 已完成：`module_audit_events`、`db.append_event`、`db.query_events` 与对应测试/文档已落地 |
+| Wave 14 | `TASK-023` | `REQ-009`、`API-007`、`atm-resource-pool-queue-design.md` | 固定环境池 Service Job 的宿主等待队列、资源池资格卡片、FIFO 补位与 SDK helper | 已完成：宿主不再把固定环境池场景的“当前轮没命中”直接判失败，模块资源池资格同步、测试与文档同步完成 |
 
 ## 3. 风险与应对
 
@@ -52,8 +53,9 @@
 - Wave 6 已完成：已按真实模块作者视角重做开发、调试、测试与打包说明
 - Wave 10 已完成：ModuleAssembler 与 Shim 落地并经全量测试验证
 - Wave 9 后续回归已补强：`core:data_table` 页面会在刷新时重放 `declare_ui`，并验证 `create_handler` / `update_handler` 与 DevLink 调试上下文
+- Wave 14 额外需要验证固定环境池 Service Job 的“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、黑号停发号与环境删除后的资格卡片级联清理
 
-## 5. 文档治理整改任务表
+## 5. 任务表
 
 | 任务 | 目标 | 主要产物 | 验收标准 | 优先级 | 状态 |
 |---|---|---|---|---|---|
@@ -65,17 +67,20 @@
 | `TASK-019` | 补齐追踪与索引同步 | `interface-matrix.md`、`document-index.md`、`.factory/memory/doc-map.md` | 文档索引、接口矩阵和 memory 映射一致 | P1 | 已完成 |
 | `TASK-020` | 治理演进与结构验证收口 | `skill-evolution-plan.md`、结构校验记录 | 空壳页清理完毕，根导航覆盖与链接检查通过 | P1 | 已完成 |
 | `TASK-021` | 建立 ATM 信号驱动的结构化确认面板闭环 | `TaskSignal`、ATM 详情页、任务快照持久化 | `wait_for_confirmation` 信号可展示结构化内容，客户端确认后调用既有确认服务完成任务收尾 | P1 | 已完成 |
+| `TASK-023` | 建立 ATM 固定环境池 Service Job 等待队列与资源池资格分配闭环 | `execution_runner`、`controller`、REM `env_metadata` 资格卡片、SDK helper、运行模板/UI 文案 | 固定环境池场景支持“运行中 + 等待中 = 目标并发”，宿主只从当前模块资源池可分配工位里 FIFO 补位，黑号先停发号再销毁 | P1 | 已完成 |
 
 ## 6. 阶段建议
 
 - 当前登记阶段：`IMPLEMENTATION`
-- 当前活动波次：Wave 11 文档治理整改已完成，建议回到真实站点 E2E 验证或发布收口
-- 当前首项：按优先级继续真实站点 E2E 回放 / 发布收口，并在正式发布前复用新增验收与交付文档
+- 当前活动波次：Wave 14 `TASK-023` 已实现并通过本地验证，待 PR 收口
+- 当前首项：继续真实站点 E2E / 发布收口，并推动固定环境池方案接入真实业务模块
 
 ## 7. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-19 | 新增 Wave 14 / `TASK-023`，为固定环境池 Service Job 补宿主等待队列与资源池资格分配能力 | Codex |
+| 2026-04-19 | 完成 Wave 14 / `TASK-023` 实现与本地回归验证 | Codex |
 | 2026-04-08 | 补强 Wave 9 的 `core:data_table` 声明刷新、CRUD hook 与 DevLink 调试回路验证 | Codex |
 | 2026-04-18 | 新增 Wave 13 / `TASK-022`，为模块建立快照数据与审计事件分层存储契约 | Codex |
 | 2026-04-02 | 新增 Wave 11 文档治理整改波次，并补写任务表 | Codex |

@@ -1,24 +1,43 @@
 """SDK tools 导出与契约测试。"""
 
 import crawler4j_sdk
+import pytest
 from crawler4j_sdk import TaskContext, ToolSpec, ToolsCapability
 
 
 class _FakeTools:
-    def __init__(self):
+    def __init__(self, available_tools: set[str] | None = None):
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.available_tools = available_tools or {
+            "db.list_records",
+            "db.append_event",
+            "db.query_events",
+            "captcha.match_slider",
+            "env.set_proxy",
+            "env.bind_resource_pool",
+            "env.mark_resource_pool_eligible",
+            "env.mark_resource_pool_ineligible",
+            "env.remove_resource_pool",
+            "env.replace_resource_pool_snapshot",
+        }
 
     def has_tool(self, tool_name: str) -> bool:
-        return tool_name in {"db.list_records", "db.append_event", "db.query_events", "captcha.match_slider", "env.set_proxy"}
+        return tool_name in self.available_tools
 
     def list_tools(self) -> list[ToolSpec]:
-        return [
+        specs = [
             ToolSpec(name="captcha.match_slider", description="识别滑块验证码缺口位置"),
             ToolSpec(name="db.append_event", description="追加模块审计事件"),
             ToolSpec(name="db.list_records", description="读取模块数据集"),
             ToolSpec(name="db.query_events", description="查询模块审计事件"),
+            ToolSpec(name="env.bind_resource_pool", description="登记环境资源池资格", is_async=True),
+            ToolSpec(name="env.mark_resource_pool_eligible", description="标记环境可接单", is_async=True),
+            ToolSpec(name="env.mark_resource_pool_ineligible", description="标记环境不可接单", is_async=True),
+            ToolSpec(name="env.remove_resource_pool", description="移除环境资源池资格", is_async=True),
+            ToolSpec(name="env.replace_resource_pool_snapshot", description="重建环境资源池资格快照", is_async=True),
             ToolSpec(name="env.set_proxy", description="为当前环境设置代理", is_async=True),
         ]
+        return [spec for spec in specs if spec.name in self.available_tools]
 
     def call(self, tool_name: str, /, **kwargs):
         self.calls.append((tool_name, kwargs))
@@ -49,6 +68,11 @@ def test_sdk_exports_expected_stable_surface():
         "ToolSpec",
         "ToolsCapability",
         "env_selector",
+        "bind_resource_pool",
+        "mark_resource_pool_eligible",
+        "mark_resource_pool_ineligible",
+        "remove_resource_pool",
+        "replace_resource_pool_snapshot",
     }
 
     assert isinstance(fake_tools, ToolsCapability)
@@ -69,6 +93,11 @@ def test_tools_capability_calls_core_extensions():
         "db.append_event",
         "db.list_records",
         "db.query_events",
+        "env.bind_resource_pool",
+        "env.mark_resource_pool_eligible",
+        "env.mark_resource_pool_ineligible",
+        "env.remove_resource_pool",
+        "env.replace_resource_pool_snapshot",
         "env.set_proxy",
     ]
     assert {tool.name: tool.is_async for tool in specs} == {
@@ -76,6 +105,11 @@ def test_tools_capability_calls_core_extensions():
         "db.append_event": False,
         "db.list_records": False,
         "db.query_events": False,
+        "env.bind_resource_pool": True,
+        "env.mark_resource_pool_eligible": True,
+        "env.mark_resource_pool_ineligible": True,
+        "env.remove_resource_pool": True,
+        "env.replace_resource_pool_snapshot": True,
         "env.set_proxy": True,
     }
 
@@ -137,3 +171,122 @@ def test_tools_capability_preserves_audit_event_kwargs():
         "offset": 5,
         "order": "desc",
     }
+
+
+@pytest.mark.asyncio
+async def test_sdk_resource_pool_helpers_route_to_core_env_tools():
+    fake_tools = _FakeTools()
+    ctx = TaskContext(env_id=11, task_name="demo", tools=fake_tools)
+
+    await crawler4j_sdk.bind_resource_pool(ctx, pool_name="bound_account_ready")
+    await crawler4j_sdk.mark_resource_pool_eligible(ctx, pool_name="bound_account_ready")
+    await crawler4j_sdk.mark_resource_pool_ineligible(
+        ctx,
+        pool_name="bound_account_ready",
+        reason="blacklisted",
+    )
+    await crawler4j_sdk.remove_resource_pool(ctx, pool_name="bound_account_ready")
+    await crawler4j_sdk.replace_resource_pool_snapshot(
+        ctx,
+        pool_name="bound_account_ready",
+        entries=[{"env_id": 11, "eligible": True}],
+    )
+
+    assert fake_tools.calls == [
+        (
+            "env.bind_resource_pool",
+            {
+                "env_id": 11,
+                "pool_name": "bound_account_ready",
+                "eligible": True,
+                "reason": "",
+                "exclusive": True,
+            },
+        ),
+        (
+            "env.mark_resource_pool_eligible",
+            {
+                "env_id": 11,
+                "pool_name": "bound_account_ready",
+                "reason": "",
+            },
+        ),
+        (
+            "env.mark_resource_pool_ineligible",
+            {
+                "env_id": 11,
+                "pool_name": "bound_account_ready",
+                "reason": "blacklisted",
+            },
+        ),
+        (
+            "env.remove_resource_pool",
+            {
+                "env_id": 11,
+                "pool_name": "bound_account_ready",
+            },
+        ),
+        (
+            "env.replace_resource_pool_snapshot",
+            {
+                "pool_name": "bound_account_ready",
+                "entries": [{"env_id": 11, "eligible": True}],
+            },
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("helper", "tool_name", "kwargs"),
+    [
+        (
+            crawler4j_sdk.bind_resource_pool,
+            "env.bind_resource_pool",
+            {"pool_name": "bound_account_ready"},
+        ),
+        (
+            crawler4j_sdk.mark_resource_pool_eligible,
+            "env.mark_resource_pool_eligible",
+            {"pool_name": "bound_account_ready"},
+        ),
+        (
+            crawler4j_sdk.mark_resource_pool_ineligible,
+            "env.mark_resource_pool_ineligible",
+            {"pool_name": "bound_account_ready", "reason": "blacklisted"},
+        ),
+        (
+            crawler4j_sdk.remove_resource_pool,
+            "env.remove_resource_pool",
+            {"pool_name": "bound_account_ready"},
+        ),
+        (
+            crawler4j_sdk.replace_resource_pool_snapshot,
+            "env.replace_resource_pool_snapshot",
+            {"pool_name": "bound_account_ready", "entries": []},
+        ),
+    ],
+)
+async def test_sdk_resource_pool_helpers_raise_clear_error_when_capability_missing(
+    helper,
+    tool_name: str,
+    kwargs: dict[str, object],
+):
+    fake_tools = _FakeTools(
+        available_tools={
+            "db.list_records",
+            "db.append_event",
+            "db.query_events",
+            "captcha.match_slider",
+            "env.set_proxy",
+        }
+    )
+    ctx = TaskContext(env_id=11, task_name="demo", tools=fake_tools)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await helper(ctx, **kwargs)
+
+    message = str(exc_info.value)
+    assert tool_name in message
+    assert "ctx.tools.has_tool" in message
+    assert fake_tools.calls == []

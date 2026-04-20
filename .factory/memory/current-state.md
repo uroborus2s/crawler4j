@@ -2,8 +2,8 @@
 
 - 当前模式：Default
 - 当前阶段：IMPLEMENTATION
-- 活跃任务：13
-- 活跃变更：3
+- 活跃任务：14
+- 活跃变更：4
 - 活跃缺陷：5
 - 活跃 PR：0
 
@@ -17,13 +17,24 @@
 
 ## 最近条目
 
-- 任务：TASK-011-mms-settings-store-and-module-state-persistence、TASK-012-mms-trust-gate-and-custom-ui-loading、TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler、TASK-021-add-signal-driven-confirmation-panel、TASK-022-add-module-audit-event-storage-tools
-- 变更：CR-001-version-and-release-governance-alignment、CR-002-quality-gate-and-docs-navigation-alignment、CR-003-mms-settings-and-ui-extension-compliance、CR-004-atm-signal-driven-confirmation-ui、CR-005-devlink-run-once-reload、CR-008-module-audit-event-storage-split
+- 最新验证：2026-04-19 已按“1 个测试模块开发子 agent + 4 个测试子 agent + 1 个待命修复子 agent”的协作方式补齐 `packages/crawler4j/tests/acceptance/` 4 组正式验收夹具；主线程 fresh gate 结果为 `uv sync --all-packages`、`uv run pytest -q`（`426 passed`）、`uv run ruff check .`、`uv run python scripts/smoke_test_ui.py`、Root / SDK / Contracts build 全部通过；`ctrip_crawler` 当前源码 `check full` 与模块仓 `uv run pytest -q`（`193 passed`）通过，fresh ZIP `/tmp/ctrip_crawler-acceptance.zip` 的 `host install preview --skip-remote-check` 通过，且宿主 `host devlink list` 确认当前活跃集成路径仍为 DevLink。
+- 发布：2026-04-19 `crawler4j-sdk 0.3.0` 已完成本地 SDK 回归（`uv run pytest packages/crawler4j/tests/unit/test_sdk -q`，`121 passed`）、CLI help 验证、wheel/sdist 构建，并通过 `uv run publish crawler4j-sdk` 发布到 PyPI。
+- 最新结论：2026-04-19 正式 release gate 仍为 `No-Go`；当前剩余阻塞收敛为 `ctrip` 缺少本轮 DevLink + ZIP 双链真实站点 E2E 留证、`0.2.0` 对应 Git tag / release 资产尚未执行，以及交付包未绑定发布批次。
+- 最新修复：2026-04-20 已按固定环境池正式业务口径收紧调度与租约语义：当前只从 `eligible=true + READY + 无租约` 环境发号，`KEEP_ALIVE` 留下的 `RUNNING` 环境不会自动回池；若候选环境在 `get_env` / 租约阶段被其他任务先抢走，或在发号快照后被资源池卡片改成不可发号，任务会回到等待席位并保留原 `waiting_since`，不再直接记为失败；对应 ATM/REM 单测与开发/设计/测试文档已同步更新。
+- 最新修复：2026-04-20 已把统一日志服务对 `APScheduler` 的最低输出级别收口到 `WARNING`；ATM `Service Job` 的 5 秒定时调和仍正常执行，但 `INFO` 级 `Running job` / `executed successfully` 周期心跳不再持续刷屏；对应日志单测与用户设置文档已同步更新。
+- 最新修复：2026-04-20 已修正 ATM `任务调试` 对话框生成 VS Code `launch.json` 时固定沿用表单端口的问题；当前若调试服务为避让占用端口而改写 attach 地址，对话框会优先写入活动调试会话的真实 `attach_host/attach_port`，失败或已结束会话则回退到表单请求值；对应 Qt 单测与开发者调试文档已同步更新。
+- 最新修复：2026-04-20 已把 ATM `新建作业` 弹窗中的 `配置运行模板`、`取消`、`创建/保存` 按钮切到共享 `StyledButton` 组件，并统一为 `40px` 高度；同时把“运行配置”预览说明改为按当前宽度自动回流并同步最小高度，避免长文本在真实窗口里向下溢出、压到下面按钮区域；对应 Qt 单测已补“使用公共组件”和“预览文本与按钮保持间距”的断言。
+- 设计：2026-04-19 ATM 固定环境池方案已按“模块资源池资格卡片 + 等待队列 + FIFO 补位 + 资源池卡片更新事件 + 轻量定时调和”的口径落地到宿主和 SDK V1。
+- 规划：2026-04-19 `REQ-009` / `CR-009` / `TASK-023` / `API-007` 已完成等待队列、FIFO 补位、资源池隔离与等待席位自动超时收口的本地实现与单测验证；当前待收口到 PR，并补真实业务模块接入验证。
+- 任务：TASK-011-mms-settings-store-and-module-state-persistence、TASK-012-mms-trust-gate-and-custom-ui-loading、TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler、TASK-021-add-signal-driven-confirmation-panel、TASK-022-add-module-audit-event-storage-tools、TASK-023-add-atm-fixed-pool-service-queue
+- 变更：CR-001-version-and-release-governance-alignment、CR-002-quality-gate-and-docs-navigation-alignment、CR-003-mms-settings-and-ui-extension-compliance、CR-004-atm-signal-driven-confirmation-ui、CR-005-devlink-run-once-reload、CR-008-module-audit-event-storage-split、CR-009-atm-fixed-pool-service-queue
 - 文档：2026-04-17 已把 `docs/03-developer-guide/` 统一收口到当前 `crawler4j-sdk` 命令树与模块契约，正式口径不再固定 `crawler4j-sdk==某个版本`；首页、quickstart、CLI 参考、调试、交付与排障现统一以 `module/task/workflow/page/data-table/env-selector/config/package/release/host/check` 分组命令和最新帮助输出为准，旧迁移页已删除。
-- 文档：2026-04-17 已对仓库根与各子包 `README.md`、包 `pyproject.toml` 描述、`release-notes.md`、`version-governance.md` 和 `.factory` 版本摘要做发布前复核，移除了 `packages/crawler4j/modules/` 这类不存在目录的错误说明，并把当前源码版本口径统一收敛为 `crawler4j / crawler4j-sdk / crawler4j-contracts 0.2.0`，同时保留“最近正式 Git tag 仍为 `v0.1.1`”的分层描述。
+- 文档：2026-04-19 已对固定环境池 / 环境队列开发者文档完成“1 个专业文档 reviewer + 2 个模块开发者 reviewer”的三轮苛刻复核；`docs/03-developer-guide/index.md`、`reference-core-capabilities.md`、`build-modules.md`、`debugging.md`、`troubleshooting.md` 与 `API-007` / `atm-resource-pool-queue-design.md` 现统一钉死 `Service Job` 前提、`resource_pool / selector_name / wait_timeout` 语义、`env_id` 来源、`@env_selector(...)` 入口、`replace_resource_pool_snapshot(...)` 全量重建与等待状态文案分层，最终 3 个 reviewer 全部给出 `无 blocker`。
+- 文档：2026-04-19 已把 SDK 版本独立提升到 `0.3.0`，并同步仓库根与子包 `README.md`、`release-notes.md`、`version-governance.md`、`.factory/project.json` 及版本摘要；当前源码版本线为 `crawler4j 0.2.0 / crawler4j-sdk 0.3.0 / crawler4j-contracts 0.2.0`，同时保留“最近正式 Git tag 仍为 `v0.1.1`”的分层描述。
 - 文档：2026-04-17 已根据“小白模块开发者”苛刻审稿完成第二轮修订：补齐了 `--repo` 占位值说明、`module set default-workflow`、`ui:DashboardPage` / `ui/__init__.py` 导出关系、`TaskResult.data` / `run_subtask()` 真实语义、`host install` 与宿主 UI 两条互斥安装路径、DevLink/ATM 最短调试判据、`core:data_table` 最短分叉排障，以及 `reference-sdk-and-cli.md` 的完整可复制命令前缀。
 - 文档：2026-04-17 已完成 6 个“小白模块开发者”子 agent 二轮复核，分别覆盖上手、命令复制、调试、交付四类场景，最终全部给出 PASS；当前 `docs/03-developer-guide/` 可直接作为标准模块开发主手册使用。
 - 文档：2026-04-18 已按真实实现把模块审计能力补回开发者指南主链路：`reference-core-capabilities.md`、`core-concepts.md`、`build-modules.md`、`ui-and-data-table.md` 与 `module-config-runtime-data-contract.md` 现统一明确 `db.append_event` / `db.query_events`、`data.db.module_audit_events` 以及 `core:data_table` 只承载快照的边界。
+- 文档：2026-04-18 已继续收口审计事件示例口径：开发者指南、设计契约与 `crawler4j-sdk/README.md` 现统一要求把 `previous_status` / `next_status` / `result` / `reason` 作为顶层审计字段写入，`payload` 只保留模块私有扩展字段；`db.query_events` 章节也已补记当前返回事件结构。
 - 文档：2026-04-17 `docs/02-user-guide/` 已完成第二次完全重写并按真实普通用户路径重新排序为 `安装与第一次打开 -> 首次设置 -> 开始使用 -> 日常使用 -> 管理员指南`；本轮新增“新手只看 3 个入口”“参数来源表”“运行模板入口固定说明”“结果只认一个入口”“作业状态下一步动作”“IP 池最短闭环”“可复制报障模板”，根 `docs/index.md` 导航顺序已同步调整。
 - 文档：2026-04-17 `docs/01-getting-started/` 已进一步压缩为单页模式，当前只保留 `了解 crawler4j` 这一篇作为正式入口；正文改为面向客户的产品介绍，不再拆成多页教读者选路径，原辅助页已删除。
 - 文档：2026-04-17 已新增 `docs/02-user-guide/exception-cases.md`，面向普通用户与现场支持按症状收敛“应用打不开、页面空白、模块未启用、执行一次没反应、任务实例全失败、环境不可用、升级失败、结果找不到”8 类异常；每个案例统一采用“现象 / 先看哪里 / 先做什么 / 什么情况升级给管理员或研发”结构，`docs/index.md`、`docs/02-user-guide/index.md`、`document-index.md` 与 `.factory/memory/doc-map.md` 已同步接入。
@@ -34,12 +45,19 @@
 - 维护资产：2026-04-18 仓库根 `scripts/` 现保留 `build_workspace_packages.py`、`db_cli.py` 与 `smoke_test_ui.py` 三个维护脚本；其中 `build_workspace_packages.py` 已扩成统一构建/发布包装器，并通过 workspace 根 `pyproject.toml` 暴露为 `uv run build` / `uv run publish` 短命令；构建时会在 workspace 根顺序执行 `crawler4j-sdk / crawler4j / crawler4j-contracts` 的 `uv build --clear` 并把产物分别落到各自包的 `dist/`，发布时则自动指向各自包的 `dist/*`；README、部署说明、维护指南与 `test_packaging_config.py` 已同步更新。
 - 最新修复：2026-04-18 已把系统日志链路进一步收口为唯一日志服务：`src.core.foundation.logging.logger` 现统一承接 Core 直接日志、模块 `ctx.logger` 默认注入以及标准库 `logging` 记录；`系统设置 -> 资源` 修改 `日志级别` / `日志保留` 后会立即热更新根日志 handler 与文件日志，不再只在下次启动时生效；仪表盘与任务详情日志窗格也已切到直接订阅统一日志信号，系统日志与模块日志现走同一条实时链路。
 - 最新修复：2026-04-18 已把模块持久数据契约进一步拆分为“快照数据 + 审计事件”两条正式能力面：宿主新增 `data.db.module_audit_events`，运行时工具面新增 `db.append_event` / `db.query_events`，模块现在可以独立追加和查询 append-only 事件历史；`module_datasets`、`db.list_records` / `db.replace_records` 与 `core:data_table` 继续保持快照语义，不再承担审计事件历史存储。
+- 最新修复：2026-04-18 已补上 `crawler4j check full` 对 `declare_ui()` 的一处审计写入绕过：SDK 检查态工具现在会通过 `list_tools()` 暴露与 `has_tool()` 一致的工具集，模块若先用 `ctx.tools.list_tools()` 再决定调用 `db.append_event`，也会被 `declare_ui` 无副作用校验拦住；对应 SDK CLI 单测与数据能力回归已同步补齐。
 - 最新验证：2026-04-18 审计事件能力与文档导航回归已通过质量门：全量 `uv run pytest -q` 为 `411 passed`，全量 `uv run ruff check .` 通过；其中审计事件直接命中的 `test_module_data_store.py`、`test_runtime_capabilities.py`、`test_data_capability.py` 共 `17 passed`，`test_settings_store.py` `9 passed`，`test_help_page.py` `4 passed`。
 - 最新修复：2026-04-18 已把 `core:data_table.lock_key` 的语义正式收口为“Core 临时锁”：开发者文档与设计契约现明确禁止把 `lock_key` 当成业务占用态开关使用；Core 运行时和 `crawler4j-sdk check full` 现在都会拒绝“`lock_key` + `occupied`/`occupied_label` 业务占用列”同时声明，避免模块作者再次配出重复“占用中”列。
 - 最新修复：2026-04-17 已把 `playwright_local` 从“环境创建成功但无 `page` 可用”修到真实站点可执行：Provider 现在会真实拉起本地 Playwright 浏览器，优先尝试 bundled Chromium，再回退 system Chrome；对应 `test_playwright_provider.py` 已锁定 open/connect/close/reset/health_check 语义。真实 `ctrip` 回放已能进入登录页，业务失败也会正确落到任务失败而不是 workflow 假绿。
 - 最新修复：2026-04-17 已继续收口 `VirtualBrowser` 观测与恢复链：`VirtualBrowserClient.launch_browser()` 现会把可恢复的 `launchBrowser` 错误写入主日志，并把 `browser is running` 冲突纳入 stop-then-retry；新增回归测试覆盖 `500 DevTools port` 与 `400 is running` 两类恢复路径。通过直接调用 `localhost:9002` 的 `addBrowser -> launchBrowser`、冷启动外部应用、复用旧 worker 和 `chrome_version=139..146` 扫描，已确认当前剩余阻塞收敛为外部 VirtualBrowser 运行时故障，不再是宿主 REM 配置或 provider 默认值问题。
 - 最新修复：2026-04-16 已把 ATM 与 `core:data_table` 构造的 `TaskContext.logger` 接到统一应用日志器，模块 `before_run()` / workflow / task script 的 `ctx.logger` 输出会进入主日志，便于确认“执行一次”是否真正进入模块执行链；同日又修复任务监控里手动批次作业的 `▶ 执行一次` 交互，点击后会立即进入“执行中”禁用态，并以活跃任务计数为准，在任务终态和环境回收完成后自动恢复可点击；本次再把 ATM 默认环境收尾语义收敛为“任务结束只关闭并回收到 READY”，创建环境失败和僵尸任务恢复也不再自动销毁环境，只有模块显式发出 `EnvAction.DESTROY` 信号时才允许删除环境；随后又把运行模板里残留的“生命周期”兼容控件彻底移除，前端不再暴露任何自动删除环境选项；现在又将 `EnvironmentManager.reset()` 正式更名为 `recycle_env()`，明确该动作只是关窗回收并解除任务占用，不代表清空 cookie、指纹或代理配置；本次再为 `TaskSignal.wait_for_confirmation` 补齐任务 signal 持久化、`task.signal` 事件和 ATM 详情页结构化确认面板，客户端可按 `payload.confirmation` 展示字段并直接回调既有确认服务；现在又把模块自定义数据列表底部横向滚动条设为隐藏，同时保留触控板/滚轮横向滑动，并补回归断言锁定滚动策略；这次继续修复 `ModuleAssembler` 发现期静默吞错问题，task/workflow import 失败会进入主日志并在命中失败条目时向运行时回传 discovery hint；同时为 DevLink 普通执行补齐一次性 reload 语义，改完源码后下一次 ATM 执行可直接吃到新代码。
 - 最新修复：2026-04-17 已继续细化 ATM 手动批次“执行一次”反馈：当任务仍停留在 `PENDING` 的环境创建/浏览器启动阶段时，任务监控列表现在会显示 `环境启动中` 与顶部启动条，等环境真正可用后自动切回 `执行中`；同时 `VirtualBrowserProvider.open()` 不再吞掉 `launchBrowser` 细节，顶部 Toast 会直接展示 `VirtualBrowser launchBrowser 失败: ...` 这类具体错误，减少“按钮像卡死”的误判。
+- 最新修复：2026-04-19 已补上 VirtualBrowser 选中已运行环境的 `ws_url` 自愈：`VirtualBrowserProvider.connect()` 在 `BrowserHandle.ws_url` 为空时会先从浏览器详情回填可连接入口，再进入 `safe_connect()`，避免 `select` 模式下 `READY -> BUSY` 的已开窗口环境直接报 `Missing ws_url for browser 1`；对应 provider 回归测试已补齐。
+- 最新修复：2026-04-19 已继续增强 VirtualBrowser 运行时详情恢复链：`get_browser_detail()` 支持字符串/嵌套 ID，`get_browser_running_detail()` / `get_browser_runtime_detail()` 会合并运行列表作为兜底；`_extract_cdp_endpoint()` 也补齐了 `browserWSEndpoint` 等真实字段和递归抽取，避免 live API 结构差异继续卡住连接。
+- 最新修复：2026-04-19 已按 live probe 结果调整 VirtualBrowser 运行态优先级：`get_browser_runtime_detail()` 现在以 `getBrowserRunningList` 为第一来源，只有运行列表没有记录时才退回 `getBrowserList`；连接恢复直接使用运行态 `debuggingPort`，与真实 API 结构对齐。
+- 最新修复：2026-04-19 已修正模块管理页的 `qasync` UI 重入问题：`ModuleListWidget` 在异步安装 / DevLink / 升级 / 检查更新链路里不再直接调用阻塞式 `dialog.exec()` 或静态 `QMessageBox.*`，统一改为 `open()` + await 完成信号；对应单测已锁定 DevLink 添加成功与通用对话框两条非阻塞路径。
+- 最新修复：2026-04-19 已修正 `EnvironmentManager.start_env()` 对 `BUSY` 的默认判断：先问 provider 窗口是否真的已开，已关窗的复用环境会先 `open()` 再 `connect()`，避免 `select` + lease 场景把 `READY` 复用环境误当成“已开窗待连接”。
+- 最新修复：2026-04-19 已为 VirtualBrowser 运行态回填加短重试：`VirtualBrowserProvider.connect()` 在 `ws_url` 为空时会对 `get_browser_runtime_detail()` 最多重试 3 次再失败，避免真实站点运行态信息尚未准备好就过早进入 `safe_connect()`。
 - 最新修复：2026-04-18 已把 ATM 手动批次“执行一次”的中止链路真正收口：当作业处于 `环境启动中` / `执行中` 时，列表主按钮会切成 `⏹ 中止`，弹窗支持“保留环境中止 / 删除环境中止”（删除只对创建环境模式开放）；`WAITING_CONFIRMATION` 任务收到 stop 后会直接收口为 `CANCELLED` 并继续执行 cleanup / 环境动作，不再把列表卡在 `中止中`；此前运行中任务只会记录 stop request、无法打断模块协程的问题已修复，`ExecutionRunner` 现在会主动 cancel 运行中的模块协程，`TaskContext.wait()` / `run_subtask()` 在 stop 后也会尽快抛 `asyncio.CancelledError`。同时 `on_cleanup` 已固定为先于环境动作执行，cleanup 阶段可读取计划中的 `ctx.runtime["env_action"]`。
 - 最新修复：2026-04-16 已删除脚手架与客户端内残留的声明式 `ui/config_schema.json` / `strategy.yaml` 链路；`module.yaml` 继续作为唯一模块清单，默认配置页改为只读取宿主持久化的模块设置，代码型页面脚手架也已收敛为 `page create` 只生成 `micro_app` 页面。
 - 最新修复：2026-04-16 已把模块持久配置从旧 `configs` 聚合键迁到 `config.db.module_config_entries`，`ctx.get_config()` 现只读取模块/工作流配置；ATM 与 Debug 注入链中的 `workflow`、`execution.params`、`job.params`、`devel_mode`、`creation_params` 已全部改走 `ctx.runtime`，不再污染模块配置命名空间；旧 KV 配置兼容迁移与旧 workflow 配置兜底路径已删除。
@@ -58,7 +76,7 @@
 
 - 检查任务人天估算是否真实合理，仅在必要时再细化到 0.5 人天精度
 - 若进入设计或实施阶段，先确认 `docs/04-project-development/04-design/technical-selection.md` 已明确框架、模块、后台范围和编码规则
-- 模块入口自动托管方案已闭环，后续优先处理真实站点 E2E 与发布收口
+- 模块入口自动托管方案已闭环；当前应先完成 `TASK-023` 的 PR 收口与真实业务模块接入验证，再处理真实站点 E2E 与发布收口
 - 执行 `ctrip` 真实站点 E2E 时，统一按 `docs/04-project-development/06-testing-verification/ctrip-real-site-e2e-closeout.md` 收口，不再用临时聊天清单替代正式步骤
 - 优先处理外部 VirtualBrowser 运行时故障；当前 `localhost:9002` 上直接 `addBrowser -> launchBrowser` 也会稳定报 `Failed to detect DevTools port`，在外部应用恢复前不要把该阻塞继续归因到宿主 REM 代码
 - 调试模块 UI 时，优先使用 DevLink 并在详情页通用数据表中点击“刷新”验证最新 `declare_ui` / handler 行为

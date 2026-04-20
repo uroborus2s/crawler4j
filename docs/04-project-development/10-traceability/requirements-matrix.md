@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 发布负责人 | 运维  
 **上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | `docs/04-project-development/06-testing-verification/test-plan.md`  
 **下游输出：** `docs/04-project-development/07-release-delivery/acceptance-checklist.md` | `docs/04-project-development/07-release-delivery/release-notes.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`  
-**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`
-**最后更新：** 2026-04-18
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`
+**最后更新：** 2026-04-19
 
 ## 1. 需求到设计/实施/测试映射
 
@@ -19,6 +19,7 @@
 | `REQ-006` | 模块根入口应可由工具托管 | `docs/04-project-development/04-design/module-boundaries.md`, `docs/04-project-development/04-design/api-design.md` | `MOD-003`, `MOD-004` | `API-002`, `API-003` | `TASK-013` | `TC-007`, `TC-008`, `TC-009` | Verified locally |
 | `REQ-007` | ATM 必须能够根据信号展示结构化确认内容并等待客户端确认 | `docs/04-project-development/04-design/api-design.md` | `MOD-003`, `MOD-005` | `API-002` | `TASK-021` | `TC-011` | Verified locally |
 | `REQ-008` | 宿主必须为模块提供独立的审计事件持久化能力 | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/module-config-runtime-data-contract.md` | `MOD-003`, `MOD-005` | `API-005`, `API-006` | `TASK-022` | `TC-024` | Verified locally |
+| `REQ-009` | ATM 必须支持固定环境池 Service Job 的等待队列与模块资源池分配 | `docs/04-project-development/04-design/system-architecture.md`, `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/atm-resource-pool-queue-design.md` | `MOD-003`, `MOD-005` | `API-007` | `TASK-023` | `TC-026`, `TC-027` | Implemented and unit-tested locally; PR pending |
 | `REQ-004` | 发布与文档链路可追溯 | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/07-release-delivery/version-governance.md` | `MOD-005` | `API-004` | `TASK-004` | build + metadata checks | Version governance aligned locally |
 | `REQ-005` | 软件工厂治理基线存在 | 全部编号文档 | `MOD-005` | `API-004` | `TASK-001`, `TASK-005` | 文档与 `.factory/` 存在性检查 | Baseline created |
 
@@ -40,6 +41,7 @@
 | `API-003` | SDK / Contracts / CLI | 模块开发者 | 子包 `pyproject.toml`, SDK docs | build + help output | 维护者 |
 | `API-004` | Release metadata | 发布负责人 | `docs/04-project-development/07-release-delivery/release-notes.md` | 版本对齐检查 | 维护者 |
 | `API-006` | Module audit event storage | 模块开发者 | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/module-config-runtime-data-contract.md` | 审计事件追加 / 查询单测 | 维护者 |
+| `API-007` | Fixed-pool service queue and pool eligibility cards | 模块开发者 / 服务运营者 | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/atm-resource-pool-queue-design.md` | FIFO 补位、资源池隔离、等待超时收口 | 维护者 |
 
 ## 4. 未闭环项
 
@@ -58,6 +60,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-19 | 新增 `REQ-009` / `API-007` / `TASK-023` 的追踪关系 | Codex |
+| 2026-04-19 | 将 `REQ-009` 追踪状态更新为“等待队列、等待超时收口与资源池契约已本地实现并验证；PR 待收口” | Codex |
 | 2026-04-18 | 新增 `REQ-007` / `REQ-008` 与 `API-006` 的追踪关系 | Codex |
 | 2026-03-26 | 建立初始追踪矩阵 | Codex |
 | 2026-03-26 | 标记 `CR-002` 关闭，并保留 `CR-003` 为当前未闭环项 | Codex |

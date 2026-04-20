@@ -34,6 +34,12 @@ from src.ui.components.table import SkyTableWidget
 class JobDetailDialog(QDialog):
     """作业详情对话框。"""
 
+    REFRESH_EVENTS = (
+        EventType.TASK_FINISHED,
+        EventType.TASK_FAILED,
+        EventType.TASK_CANCELLED,
+    )
+
     TYPE_TEXT = {
         "batch": "批次任务",
         "service": "持续保活",
@@ -169,10 +175,16 @@ class JobDetailDialog(QDialog):
         layout.addWidget(self.config_text)
 
     def _subscribe_events(self) -> None:
-        get_event_bus().subscribe(EventType.TASK_SIGNAL, self._on_task_signal)
+        bus = get_event_bus()
+        bus.subscribe(EventType.TASK_SIGNAL, self._on_task_signal)
+        for event_type in self.REFRESH_EVENTS:
+            bus.subscribe(event_type, self._on_task_changed)
 
     def _unsubscribe_events(self) -> None:
-        get_event_bus().unsubscribe(EventType.TASK_SIGNAL, self._on_task_signal)
+        bus = get_event_bus()
+        bus.unsubscribe(EventType.TASK_SIGNAL, self._on_task_signal)
+        for event_type in self.REFRESH_EVENTS:
+            bus.unsubscribe(event_type, self._on_task_changed)
 
     def _load_data(self):
         asyncio.create_task(self._load_data_async())
@@ -255,7 +267,10 @@ class JobDetailDialog(QDialog):
             if run_profile.resource.acquisition.mode.value == "create":
                 resource_text = f"Provider: {run_profile.resource.acquisition.provider}"
             else:
-                resource_text = f"选择器: {run_profile.resource.acquisition.selector_name or '-'}"
+                resource_text = (
+                    f"资源池: {run_profile.resource.acquisition.resource_pool or '-'} | "
+                    f"选择器: {run_profile.resource.acquisition.selector_name or '-'}"
+                )
         except Exception:
             execution_text = "-"
             resource_text = "-"
@@ -335,6 +350,11 @@ class JobDetailDialog(QDialog):
         if task.id and task.id not in self._auto_presented_confirmation_task_ids:
             self._auto_presented_confirmation_task_ids.add(task.id)
         self._present_confirmation_task(task)
+        self._load_data()
+
+    def _on_task_changed(self, event: Event) -> None:
+        if event.data.get("job_id") != self.job_id:
+            return
         self._load_data()
 
     def _open_debug_dialog(self):

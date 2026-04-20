@@ -254,6 +254,71 @@ rg -n "(service|repository|controller|store|manager|client|facade|adapter|BaseTa
 - 大段页面操作
 - 自建 service / repository / facade
 
+## 接入固定环境池 Service Job
+
+这条能力要同时改“模块代码”和“运行模板”。只在模块里调用资源池 helper，不会自动把作业变成等待队列模式。
+
+先把入口条件记死：
+
+- 作业类型必须是 `Service Job`；批次任务不会开启等待席位
+- 运行模板必须选 `选择环境`
+- `resource_pool` 必须是非空稳定池名
+- `selector_name` 可选；如果留空，宿主不会调用 `select_env(...)`，而是直接取当前资源池里第一个可分配候选
+- 只有 `selector_name`、没有 `resource_pool` 的旧选择模式里，`select_env(...)` 返回 `None` 仍然是失败，不会进入等待
+- 如果你是在迁移已有 selector 模块，不要把“清空 `selector_name`”当成无害默认；那代表你接受宿主直接按当前池内可分配候选的先后顺序取第一台环境
+- 当前实现没有给“第一个候选”定义额外业务排序承诺；只有任何候选都等价时，才适合把 `selector_name` 留空
+
+最小判断表：
+
+| 配置 | 结果 |
+|---|---|
+| `批次任务 + select + resource_pool` | 不会开启等待席位；它不是固定池队列模式 |
+| `select + selector_name` | 旧选择器语义，`None` 直接失败 |
+| `select + resource_pool` | 固定池等待语义，没候选时进入等待 |
+| `select + resource_pool + selector_name` | 先按资源池粗筛，再由选择器细挑；`None` 回到等待 |
+
+### 代码该写在哪
+
+资源池 helper 默认使用 `ctx.env_id`。所以你要区分两种路径：
+
+- 当前 `TaskContext` 已经绑定了环境：可以省略 `env_id`
+- 当前逻辑是批量对账、宿主启动恢复、后台扫描：必须显式传 `env_id`，或者直接用 `replace_resource_pool_snapshot(...)` 提交整池权威列表
+
+额外约束：
+
+- 这里的 `env_id` 指宿主 `environments.id`
+- 不是外部浏览器的 `browser_id` / `external_id`
+- 也不是你的业务账号 ID
+- `prepare_env` 阶段的 `TaskContext.env_id` 当前固定是 `0`，不要在那里写资源池卡片
+
+如果你要保留模块自己的细粒度选环境逻辑，真正该写的是 `module_runtime.py` 里用 `@env_selector(...)` 标记的 selector 函数。运行时出现的 `select_env(...)` 只是框架壳，不是给模块作者手写的新 hook 名。
+
+推荐的写入时机：
+
+- 账号和环境第一次稳定绑定成功后：`bind_resource_pool(...)`
+- 暂时停发号但仍保留池归属：`mark_resource_pool_ineligible(...)`
+- 从黑号或人工停用恢复：`mark_resource_pool_eligible(...)`
+- 环境彻底解绑、不再属于该池：`remove_resource_pool(...)`
+- 宿主重启后的全量重建 / 批量对账：`replace_resource_pool_snapshot(...)`
+
+### `replace_resource_pool_snapshot(...)` 的正确心智
+
+这不是 patch API，而是整池快照重建。
+
+- `entries` 必须是这个池当前完整的权威列表
+- 未出现在 `entries` 里的环境卡片会被宿主删除
+- 只想停某个环境发号时，不要用它，改用 `mark_resource_pool_ineligible(...)`
+
+### 超时怎么理解
+
+固定池场景至少会同时碰到两个超时：
+
+- `wait_timeout`：环境租约获取和固定池等待席位共用；任务第一次进入等待时开始计时
+- `execution.timeout`：模块已经拿到环境并开始执行后的超时
+- 当前实现不会单独用 `wait_timeout` 中断 `select_env(...)`；选择器里不要做慢查询、长轮询或睡眠等待
+
+如果你把 `wait_timeout` 设成 `0`，固定池等待席位当前不会自动超时收口。除非你有明确运营策略，否则保持正整数更安全。
+
 ## 开发完成后的最小自检
 
 改完一批代码后，至少问自己:

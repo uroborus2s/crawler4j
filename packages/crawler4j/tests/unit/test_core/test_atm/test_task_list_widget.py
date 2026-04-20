@@ -158,6 +158,52 @@ def test_task_list_widget_renders_manual_batch_busy_button(qtbot, monkeypatch):
     assert run_button.isEnabled() is True
 
 
+def test_task_list_widget_refreshes_on_task_failed_event(qtbot, monkeypatch):
+    import src.core.atm.ui.task_list_widget as task_list_widget
+
+    class _FakeEventBus:
+        def __init__(self):
+            self._handlers = {}
+
+        def subscribe(self, event_type, handler):
+            self._handlers.setdefault(event_type, []).append(handler)
+
+        def unsubscribe(self, event_type, handler):
+            handlers = self._handlers.get(event_type, [])
+            if handler in handlers:
+                handlers.remove(handler)
+
+        def publish(self, event):
+            for handler in list(self._handlers.get(event.type, [])):
+                handler(event)
+
+    event_bus = _FakeEventBus()
+    monkeypatch.setattr(task_list_widget, "get_event_bus", lambda: event_bus)
+    monkeypatch.setattr(
+        task_list_widget.QTimer,
+        "singleShot",
+        staticmethod(lambda *_args, **_kwargs: None),
+    )
+
+    widget = task_list_widget.TaskListWidget()
+    qtbot.addWidget(widget)
+    widget.load_data = MagicMock()
+
+    event_bus.publish(
+        task_list_widget.Event(
+            type=task_list_widget.EventType.TASK_FAILED,
+            data={
+                "job_id": "job-timeout",
+                "task_id": "task-timeout",
+                "error": "等待环境池工位超时: bound_account_ready (30s)",
+            },
+            task_run_id="task-timeout",
+        )
+    )
+
+    widget.load_data.assert_called_once_with()
+
+
 @pytest.mark.asyncio
 async def test_task_list_widget_marks_pending_manual_batch_as_starting(qtbot, monkeypatch):
     import src.core.atm.ui.task_list_widget as task_list_widget

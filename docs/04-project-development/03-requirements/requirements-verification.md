@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 发布负责人  
 **上游输入：** `prd.md` | `requirements-analysis.md` | 本地验证结果  
 **下游输出：** `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/` | `.factory/process/stage-check-report.md`  
-**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`
-**最后更新：** 2026-04-18
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`
+**最后更新：** 2026-04-19
 
 ## 1. 校验清单
 
@@ -27,6 +27,8 @@
 | `REQ-008` | 宿主是否为模块提供独立的审计事件存储表 | 通过 | `test_module_data_store_appends_and_queries_audit_events` |
 | `REQ-008` | runtime tools 是否暴露 `db.append_event` / `db.query_events` | 通过 | `test_runtime_tools_register_expected_surface`、`test_db_tools_append_and_query_events` |
 | `REQ-008` | 模块清理时是否同时清理快照数据、审计事件和数据表 schema | 通过 | `test_module_data_store_clear_module_data_removes_data_db_rows_only` |
+| `REQ-009` | 是否已存在正式的需求、设计与工作项挂接 | 通过 | `prd.md`、`atm-resource-pool-queue-design.md`、`implementation-plan.md`、`TASK-023` |
+| `REQ-009` | 固定环境池 Service Job 是否已具备“运行中 + 等待中 = 目标并发”的正式行为 | 通过 | 当前已由本地单测验证固定环境池 Service Job 的等待语义、FIFO 补位、资源池隔离、等待席位自动超时收口与 SDK helper |
 | `REQ-004` | 发布链路版本信号是否一致 | 通过 | 根应用工作区版本、运行时版本服务、最近正式 tag 与 release 文档关系已明确 |
 | `REQ-005` | 工厂控制面是否已补齐 | 通过 | 本次已新增 `AGENTS.md`、`GEMINI.md`、`.factory/`、编号文档 |
 | `NFR-001` | 是否统一使用 `uv` | 通过 | 现有运行方式与本次验证均基于 `uv` |
@@ -46,17 +48,20 @@
 ### 未满足
 
 - `ctrip` 真实站点 E2E 仍未形成正式验证结论
+- `REQ-009` 已完成本地实现与单测验证；当前剩余工作是 PR 收口、真实业务模块接入和更高层验证
 
 ## 3. 建议结论
 
 - 当前项目已进入软件工厂 `IMPLEMENTATION`
-- `TASK-013` 已关闭，建议进入下一波次 E2E 验证或发布收口
-- `TASK-021` 已完成，ATM 信号驱动确认面板与客户端确认闭环已建立，后续仅需按模块场景继续补展示字段
+- `TASK-013`、`TASK-021`、`TASK-022` 已关闭，相关契约已进入回归维护阶段
+- `TASK-023` 已完成本地实现，下一步应先完成 PR 收口，再继续真实站点 E2E 与发布收口
+- `UAT-028` 已进入当前本地实现；后续只需补更高层集成与真实业务接入验证
 
 ## 4. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-19 | 同步 `REQ-009` 为“等待队列、FIFO 补位、资源池隔离与等待超时收口已本地实现并验证” | Codex |
 | 2026-04-18 | 新增 `REQ-008` / `TASK-022` 的模块审计事件独立存储验证结论 | Codex |
 | 2026-03-26 | 初始需求校验结论 | Codex |
 | 2026-03-26 | 同步 `TASK-005` 完成后的质量门结论 | Codex |

@@ -1534,13 +1534,16 @@ class RunProfileDialog(QDialog):
         self.selector_name_combo.setPlaceholderText("选择环境回调函数")
         self.selector_name_combo.currentIndexChanged.connect(self._on_selector_name_changed)
         self.select_form.addRow("回调函数:", self.selector_name_combo)
+        self.resource_pool_edit = QLineEdit()
+        self.resource_pool_edit.setPlaceholderText("例如：bound_account_ready")
+        self.select_form.addRow("资源池:", self.resource_pool_edit)
         self.select_form.addRow(
             "等待超时:",
             self._wrap_widget_with_suffix(self.wait_timeout_spin, "秒"),
         )
         select_layout.addWidget(select_form_widget)
 
-        self.selector_none_hint = QLabel("当前环境选择回调函数返回了 none，运行时会直接失败。")
+        self.selector_none_hint = QLabel("当前环境选择回调函数返回了 none。普通选择模式会直接失败；固定资源池 Service Job 会继续等待。")
         self.selector_none_hint.setWordWrap(True)
         self.selector_none_hint.setStyleSheet("color: #f59e0b;")
         self.selector_none_hint.hide()
@@ -1552,7 +1555,7 @@ class RunProfileDialog(QDialog):
         self.selector_empty_hint.hide()
         select_layout.addWidget(self.selector_empty_hint)
 
-        select_desc = QLabel("模块通过回调函数接收全部就绪环境候选集，并返回目标环境 ID。")
+        select_desc = QLabel("可选先按资源池做宿主级粗筛，再把当前池内候选交给模块回调做细粒度选择。")
         select_desc.setWordWrap(True)
         select_desc.setStyleSheet("color: rgba(255, 255, 255, 0.72);")
         select_layout.addWidget(select_desc)
@@ -2122,6 +2125,7 @@ class RunProfileDialog(QDialog):
             self.resource_provider_combo.setCurrentIndex(provider_index)
 
         self.wait_timeout_spin.setValue(acquisition.wait_timeout)
+        self.resource_pool_edit.setText(acquisition.resource_pool or "")
 
         creation_params = acquisition.creation.params
         provider = acquisition.provider
@@ -2161,6 +2165,7 @@ class RunProfileDialog(QDialog):
         env_type = self._provider_to_env_type(provider)
         creation_params: dict = {}
         selector_name = ""
+        resource_pool = ""
 
         if acquisition_mode == AcquisitionMode.CREATE and env_type in {EnvType.BIT_BROWSER, EnvType.VIRTUAL_BROWSER}:
             provider_params = self._build_virtualbrowser_params() if provider == "virtualbrowser" else {}
@@ -2177,8 +2182,9 @@ class RunProfileDialog(QDialog):
         if acquisition_mode == AcquisitionMode.SELECT:
             selector_data = self.selector_name_combo.currentData()
             selector_name = selector_data.strip() if isinstance(selector_data, str) else ""
-            if not selector_name:
-                raise ValueError("请选择环境选择回调函数")
+            resource_pool = self.resource_pool_edit.text().strip()
+            if not selector_name and not resource_pool:
+                raise ValueError("请选择环境选择回调函数或填写资源池")
             provider = ""
             env_type = EnvType.VIRTUAL_BROWSER
 
@@ -2188,6 +2194,7 @@ class RunProfileDialog(QDialog):
                 provider=provider,
                 env_type=env_type,
                 selector_name=selector_name,
+                resource_pool=resource_pool,
                 wait_timeout=self.wait_timeout_spin.value(),
                 creation=CreationConfig(
                     lifecycle=CreationLifecycle.PERSISTENT,

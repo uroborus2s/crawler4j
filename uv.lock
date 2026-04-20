@@ -349,7 +349,7 @@ requires-dist = [{ name = "aiohttp", specifier = ">=3.13.0" }]
 
 [[package]]
 name = "crawler4j-sdk"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/crawler4j-sdk" }
 dependencies = [
     { name = "aiohttp" },

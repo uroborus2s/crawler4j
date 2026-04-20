@@ -23,9 +23,14 @@
 - `TC-022`: 私有 GitHub 仓库现在支持双轨鉴权：桌面客户端按 `repo` 维度把 GitHub Token 加密保存到应用内，并通过模块详情页与安装弹窗维护；SDK CLI 仍支持 `--github-token` 和环境变量；宿主 release service 会优先使用显式传入 token，其次使用 repo 维度的已保存凭据，并继续以鉴权请求下载私有 Release 资产；覆盖见 `tests/unit/test_core/test_mms/test_github_credentials.py`、`tests/unit/test_core/test_mms/test_module_install_dialog.py`、`tests/unit/test_core/test_mms/test_module_detail_page.py`、`tests/unit/test_core/test_mms/test_module_list_widget.py`、`tests/unit/test_core/test_mms/test_release_service.py` 与 `tests/unit/test_sdk/test_cli_host_release.py`.
 - `TC-023`: 模块安装弹窗的本地 ZIP / GitHub 源页签现在使用左对齐纵向字段布局，且“记住 Token”勾选文案明确区分“绑定到安装包声明仓库”和“绑定到当前输入仓库”；覆盖见 `tests/unit/test_core/test_mms/test_module_install_dialog.py`.
 - `TC-024`: 模块快照数据与审计事件已拆成两条正式能力面：`module_audit_events` / `db.append_event` / `db.query_events` 负责 append-only 历史，`module_datasets` 继续承载快照型 records；覆盖见 `test_module_data_store.py`, `test_runtime_capabilities.py`, `test_data_capability.py`.
+- `TC-025`: acceptance 套件当前覆盖 SDK CLI 脚手架到 `package verify`、`host devlink`、本地 ZIP `preview/apply` 与验收 gate 命令矩阵，已作为当前 fresh gate 的一部分。
+- `TC-026`: 固定环境池 Service Job 的等待队列语义已由 ATM 单测覆盖，包括“运行中 + 等待中”、FIFO 补位与资源池模式下的等待语义。
+- `TC-027`: 模块资源池资格卡片已由 runtime capability / SDK helper 单测覆盖，包括资源池隔离、不可接单切换与快照重建。
+- `TC-028`: ATM `TaskCreateDialog` 现锁定 `配置运行模板`、`取消`、`创建/保存` 按钮必须使用共享 `StyledButton`，且按钮高度统一为 `40px`；同时覆盖“运行配置”长预览文本不会再向下压到蓝色按钮区域，见 `tests/unit/test_core/test_atm/test_task_create_dialog.py` 与 `tests/unit/test_ui/test_button.py`.
 - Workspace root `scripts/` now keeps `build_workspace_packages.py`, `db_cli.py`, and `smoke_test_ui.py` as the maintained helper set; legacy local debug and icon-generation helpers are no longer treated as maintained assets.
 
 Current gaps:
 
 - Real-site `ctrip` E2E is still open.
+- `REQ-009` queue semantics are now covered locally by ATM / SDK unit tests: `uv run pytest packages/crawler4j/tests/unit/test_core/test_atm -q packages/crawler4j/tests/unit/test_sdk/test_data_capability.py` => `122 passed`.
 - The execution baseline for that closeout now lives in `docs/04-project-development/06-testing-verification/ctrip-real-site-e2e-closeout.md`.

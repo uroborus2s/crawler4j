@@ -21,9 +21,15 @@ from crawler4j_contracts.context import (
     ToolSpec,
     ToolsCapability,
 )
+from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.persistence import get_kv_store, get_module_data_store
 from src.core.rem.ip_pool import IPEntry, get_ip_pool_manager
-from src.core.rem.manager import get_environment_manager
+from src.core.rem.manager import (
+    RESOURCE_POOL_METADATA_NAMESPACE,
+    build_resource_pool_card,
+    build_resource_pool_metadata_key,
+    get_environment_manager,
+)
 
 
 def _normalize_records(raw: Any) -> list[dict[str, Any]]:
@@ -385,6 +391,22 @@ class CoreIPPoolTools:
 class CoreEnvTools:
     """Core 侧环境操作工具实现。"""
 
+    def __init__(self, module_name: str):
+        self._module_name = module_name
+
+    def _publish_resource_pool_updated(self, *, env_id: int, pool_name: str) -> None:
+        get_event_bus().publish(
+            Event(
+                type=EventType.ENV_RESOURCE_POOL_UPDATED,
+                data={
+                    "env_id": int(env_id),
+                    "module_name": self._module_name,
+                    "pool_name": str(pool_name or "").strip(),
+                },
+                module_name=self._module_name,
+            )
+        )
+
     async def set_proxy(
         self,
         env_id: int,
@@ -398,6 +420,144 @@ class CoreEnvTools:
             proxy_value=proxy_value or None,
             proxy_pool_id=proxy_pool_id or None,
         )
+
+    async def bind_resource_pool(
+        self,
+        env_id: int,
+        *,
+        pool_name: str,
+        eligible: bool = True,
+        reason: str = "",
+        exclusive: bool = True,
+    ) -> bool:
+        manager = get_environment_manager()
+        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
+        card = build_resource_pool_card(
+            self._module_name,
+            pool_name,
+            eligible=eligible,
+            reason=reason,
+            exclusive=exclusive,
+        )
+        ok = await manager.set_metadata(
+            int(env_id),
+            RESOURCE_POOL_METADATA_NAMESPACE,
+            metadata_key,
+            card,
+            value_type="json",
+        )
+        if ok:
+            self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
+        return ok
+
+    async def mark_resource_pool_eligible(
+        self,
+        env_id: int,
+        *,
+        pool_name: str,
+        reason: str = "",
+    ) -> bool:
+        manager = get_environment_manager()
+        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
+        current = await manager.get_metadata(int(env_id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+        exclusive = bool(current.get("exclusive", True)) if isinstance(current, dict) else True
+        card = build_resource_pool_card(
+            self._module_name,
+            pool_name,
+            eligible=True,
+            reason=reason,
+            exclusive=exclusive,
+        )
+        ok = await manager.set_metadata(
+            int(env_id),
+            RESOURCE_POOL_METADATA_NAMESPACE,
+            metadata_key,
+            card,
+            value_type="json",
+        )
+        if ok:
+            self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
+        return ok
+
+    async def mark_resource_pool_ineligible(
+        self,
+        env_id: int,
+        *,
+        pool_name: str,
+        reason: str,
+    ) -> bool:
+        manager = get_environment_manager()
+        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
+        current = await manager.get_metadata(int(env_id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+        exclusive = bool(current.get("exclusive", True)) if isinstance(current, dict) else True
+        card = build_resource_pool_card(
+            self._module_name,
+            pool_name,
+            eligible=False,
+            reason=reason,
+            exclusive=exclusive,
+        )
+        ok = await manager.set_metadata(
+            int(env_id),
+            RESOURCE_POOL_METADATA_NAMESPACE,
+            metadata_key,
+            card,
+            value_type="json",
+        )
+        if ok:
+            self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
+        return ok
+
+    async def remove_resource_pool(
+        self,
+        env_id: int,
+        *,
+        pool_name: str,
+    ) -> bool:
+        manager = get_environment_manager()
+        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
+        await manager.delete_metadata(int(env_id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+        self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
+        return True
+
+    async def replace_resource_pool_snapshot(
+        self,
+        *,
+        pool_name: str,
+        entries: list[dict[str, Any]],
+    ) -> bool:
+        manager = get_environment_manager()
+        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
+        desired_env_ids: set[int] = set()
+
+        for entry in entries:
+            env_id = int(entry["env_id"])
+            desired_env_ids.add(env_id)
+            card = build_resource_pool_card(
+                self._module_name,
+                pool_name,
+                eligible=bool(entry.get("eligible", True)),
+                reason=str(entry.get("reason", "")),
+                exclusive=bool(entry.get("exclusive", True)),
+            )
+            await manager.set_metadata(
+                env_id,
+                RESOURCE_POOL_METADATA_NAMESPACE,
+                metadata_key,
+                card,
+                value_type="json",
+            )
+
+        for env in await manager.list_envs():
+            if int(env.id) in desired_env_ids:
+                continue
+            current = await manager.get_metadata(int(env.id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+            if current is not None:
+                await manager.delete_metadata(int(env.id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+                self._publish_resource_pool_updated(env_id=int(env.id), pool_name=pool_name)
+        for env_id in desired_env_ids:
+            self._publish_resource_pool_updated(env_id=env_id, pool_name=pool_name)
+        return True
 
 
 class CoreUITools:
@@ -537,7 +697,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
         db_tools = CoreDatabaseTools(module_name)
         ip_pool_tools = CoreIPPoolTools()
-        env_tools = CoreEnvTools()
+        env_tools = CoreEnvTools(module_name)
         ui_tools = CoreUITools(module_name)
         captcha_tools = CoreCaptchaTools()
 
@@ -554,6 +714,11 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
         self._register("ip_pool.pick_proxy", "按条件挑选可用代理", ip_pool_tools.pick_proxy)
         self._register("env.set_proxy", "为当前环境设置代理", env_tools.set_proxy, is_async=True)
+        self._register("env.bind_resource_pool", "登记环境资源池资格", env_tools.bind_resource_pool, is_async=True)
+        self._register("env.mark_resource_pool_eligible", "标记环境资源池可接单", env_tools.mark_resource_pool_eligible, is_async=True)
+        self._register("env.mark_resource_pool_ineligible", "标记环境资源池不可接单", env_tools.mark_resource_pool_ineligible, is_async=True)
+        self._register("env.remove_resource_pool", "移除环境资源池资格", env_tools.remove_resource_pool, is_async=True)
+        self._register("env.replace_resource_pool_snapshot", "重建环境资源池资格快照", env_tools.replace_resource_pool_snapshot, is_async=True)
 
         self._register("ui.declare_data_table", "声明数据表视图元数据", ui_tools.declare_data_table)
         self._register("ui.get_data_table", "读取数据表视图元数据", ui_tools.get_data_table)

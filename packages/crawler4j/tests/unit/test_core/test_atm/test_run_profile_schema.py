@@ -35,6 +35,26 @@ def test_run_profile_serialization_roundtrip_for_select_mode():
     assert loaded == run_profile
 
 
+def test_run_profile_serialization_roundtrip_for_fixed_pool_select_mode():
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                resource_pool="bound_account_ready",
+                wait_timeout=120,
+            ),
+        ),
+        execution=ExecutionContext(
+            module="demo_module",
+            workflow="repair",
+        ),
+    )
+
+    loaded = RunProfile.from_yaml(run_profile.to_yaml())
+
+    assert loaded == run_profile
+
+
 def test_run_profile_serialization_roundtrip_for_create_mode():
     run_profile = RunProfile(
         resource=ResourceConfig(
@@ -107,3 +127,12 @@ execution:
 
     with pytest.raises(Exception):
         RunProfile.from_yaml(invalid_yaml)
+
+
+def test_select_mode_requires_selector_or_resource_pool():
+    with pytest.raises(ValueError, match="selector_name or resource_pool"):
+        AcquisitionConfig(
+            mode=AcquisitionMode.SELECT,
+            selector_name="",
+            resource_pool="",
+        )

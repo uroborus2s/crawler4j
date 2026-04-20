@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from crawler4j_contracts import TaskContext
+from crawler4j_contracts import TaskContext, ToolSpec
 
 from crawler4j_sdk._version import get_compatible_dependency_spec
 from crawler4j_sdk.cli.templates import (
@@ -681,25 +681,26 @@ class _DeclareUICheckTools:
         self._schemas: dict[str, dict[str, Any]] = {}
         self._datasets: dict[str, list[dict[str, Any]]] = {}
         self._states: dict[str, Any] = {}
+        self._tool_specs = [
+            ToolSpec(name="db.acquire_lock", description="db.acquire_lock"),
+            ToolSpec(name="db.append_event", description="db.append_event"),
+            ToolSpec(name="db.exists_state", description="db.exists_state"),
+            ToolSpec(name="db.get_state", description="db.get_state"),
+            ToolSpec(name="db.is_locked", description="db.is_locked"),
+            ToolSpec(name="db.list_records", description="db.list_records"),
+            ToolSpec(name="db.query_events", description="db.query_events"),
+            ToolSpec(name="db.release_lock", description="db.release_lock"),
+            ToolSpec(name="db.replace_records", description="db.replace_records"),
+            ToolSpec(name="db.set_state", description="db.set_state"),
+            ToolSpec(name="ui.declare_data_table", description="ui.declare_data_table"),
+            ToolSpec(name="ui.get_data_table", description="ui.get_data_table"),
+        ]
 
     def has_tool(self, tool_name: str) -> bool:
-        return tool_name in {
-            "ui.declare_data_table",
-            "ui.get_data_table",
-            "db.list_records",
-            "db.replace_records",
-            "db.append_event",
-            "db.query_events",
-            "db.acquire_lock",
-            "db.release_lock",
-            "db.is_locked",
-            "db.get_state",
-            "db.set_state",
-            "db.exists_state",
-        }
+        return tool_name in {spec.name for spec in self._tool_specs}
 
-    def list_tools(self) -> list[Any]:
-        return []
+    def list_tools(self) -> list[ToolSpec]:
+        return list(self._tool_specs)
 
     def call(self, tool_name: str, /, **kwargs: Any) -> Any:
         if tool_name == "ui.declare_data_table":
