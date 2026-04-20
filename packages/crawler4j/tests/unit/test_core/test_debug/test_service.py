@@ -345,3 +345,40 @@ async def test_debug_service_rejects_non_dev_link_modules(temp_data_dir):
                 job_id=job.id,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_debug_service_uses_embedded_worker_flag_when_frozen(monkeypatch, temp_data_dir):
+    from src.core.debug.models import DebugSessionRequest
+    from src.core.debug.service import DebugService
+
+    captured: dict[str, tuple] = {}
+    worker = _FakeProcess(pid=7777)
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        return worker
+
+    job = _make_job()
+    service = DebugService(
+        registry=_make_registry(temp_data_dir / "demo_module"),
+        task_service=SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None),
+        python_executable="/Applications/Crawler4j.app/Contents/MacOS/Crawler4j",
+        frozen=True,
+        stop_timeout=0.01,
+    )
+
+    monkeypatch.setattr("src.core.debug.service.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(service, "_allocate_attach_port", lambda host, port: port)
+
+    session = await service.create_session(DebugSessionRequest(job_id=job.id))
+    await service.start_session(session.id)
+
+    assert captured["args"] == (
+        "/Applications/Crawler4j.app/Contents/MacOS/Crawler4j",
+        "--crawler4j-debug-worker",
+        str(service.get_session_file(session.id)),
+    )
+
+    worker.finish(0)
+    await asyncio.sleep(0.05)

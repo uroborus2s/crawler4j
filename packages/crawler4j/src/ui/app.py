@@ -1,11 +1,17 @@
 """UI 应用入口。"""
 
+import runpy
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
+from src.core.debug.launcher import (
+    extract_embedded_debug_worker_args,
+    extract_embedded_debugpy_adapter_args,
+)
 from src.core.foundation.logging import logger
 from src.core.persistence import init_database
 from src.core.system.preferences_service import (
@@ -38,8 +44,66 @@ def install_logging_preferences_sync(prefs, *, log_dir: Path) -> None:
     prefs.preference_changed.connect(_on_preference_changed)
 
 
-def main():
+def _normalize_exit_code(code: object) -> int:
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    return 1
+
+
+def _run_embedded_debug_worker_if_requested(argv: Sequence[str]) -> int | None:
+    if not getattr(sys, "frozen", False):
+        return None
+
+    worker_args = extract_embedded_debug_worker_args(argv)
+    if worker_args is None:
+        return None
+
+    from src.core.debug import worker_entry
+
+    original_argv = sys.argv
+    try:
+        sys.argv = [argv[0], *worker_args]
+        try:
+            worker_entry.main()
+        except SystemExit as exc:
+            return _normalize_exit_code(exc.code)
+        return 0
+    finally:
+        sys.argv = original_argv
+
+
+def _run_embedded_debugpy_adapter_if_requested(argv: Sequence[str]) -> int | None:
+    if not getattr(sys, "frozen", False):
+        return None
+
+    adapter_args = extract_embedded_debugpy_adapter_args(argv)
+    if adapter_args is None:
+        return None
+
+    original_argv = sys.argv
+    try:
+        sys.argv = [argv[0], *adapter_args]
+        try:
+            runpy.run_module("debugpy.adapter", run_name="__main__")
+        except SystemExit as exc:
+            return _normalize_exit_code(exc.code)
+        return 0
+    finally:
+        sys.argv = original_argv
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     """启动应用。"""
+    argv_list = list(sys.argv if argv is None else argv)
+    embedded_worker_exit_code = _run_embedded_debug_worker_if_requested(argv_list)
+    if embedded_worker_exit_code is not None:
+        return embedded_worker_exit_code
+    embedded_adapter_exit_code = _run_embedded_debugpy_adapter_if_requested(argv_list)
+    if embedded_adapter_exit_code is not None:
+        return embedded_adapter_exit_code
+
     # 初始化数据库
     init_database()
 
@@ -49,7 +113,7 @@ def main():
     install_logging_preferences_sync(prefs, log_dir=log_dir)
     
     # 创建应用
-    app = QApplication(sys.argv)
+    app = QApplication(argv_list)
     app.setApplicationName("蛛行演略 · crawler4j")
     
     # 设置应用图标
@@ -104,7 +168,8 @@ def main():
         # 2. 关闭 Playwright 进程
         from src.core.rem.handle import PlaywrightManager
         loop.run_until_complete(PlaywrightManager.force_shutdown())
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

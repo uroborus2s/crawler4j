@@ -189,7 +189,16 @@ def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
 def test_pyinstaller_spec_collects_workspace_runtime_packages_for_desktop_bundle():
     spec_text = (APP_ROOT / "crawler4j.spec").read_text(encoding="utf-8")
 
-    assert "from PyInstaller.utils.hooks import collect_submodules, copy_metadata" in spec_text
+    assert "from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata" in spec_text
+    assert "import debugpy" in spec_text
+    assert 'DEBUGPY_ROOT = Path(debugpy.__file__).resolve().parent' in spec_text
+    assert 'DEBUGPY_VENDORED_PYDEVD_ROOT = DEBUGPY_ROOT / "_vendored" / "pydevd"' in spec_text
+    assert 'datas.extend(collect_data_files("debugpy"))' in spec_text
+    assert 'datas.extend(collect_data_files("debugpy", include_py_files=True))' in spec_text
+    assert '"debugpy",' in spec_text
+    assert 'hiddenimports.extend(collect_submodules("debugpy"))' in spec_text
+    assert 'hiddenimports.extend(_build_debugpy_vendored_hiddenimports())' in spec_text
+    assert "def _build_debugpy_vendored_hiddenimports() -> list[str]:" in spec_text
     assert '"crawler4j_contracts": "crawler4j-contracts"' in spec_text
     assert '"crawler4j_sdk": "crawler4j-sdk"' in spec_text
     assert '"crawler4j_contracts": WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "src"' in spec_text
@@ -199,7 +208,7 @@ def test_pyinstaller_spec_collects_workspace_runtime_packages_for_desktop_bundle
     assert "hiddenimports.extend(collect_submodules(package_name))" in spec_text
     assert "datas.extend(copy_metadata(dist_name))" in spec_text
     assert "hiddenimports=_build_hiddenimports()," in spec_text
-    assert "pathex=[str(PROJECT_ROOT), str(WORKSPACE_PACKAGE_ALIAS_ROOT)]" in spec_text
+    assert "str(DEBUGPY_VENDORED_PYDEVD_ROOT)," in spec_text
 
 
 def test_workspace_build_script_targets_publishable_packages_and_dist_dirs():

@@ -6,10 +6,12 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 from crawler4j_contracts import EnvAction
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
+from src.core.debug.launcher import configure_debugpy_for_frozen_bundle
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 from src.core.debug.models import DebugSessionState
 from src.core.debug.protocol import encode_debug_event
@@ -77,6 +79,12 @@ async def main_async(config_path: str) -> int:
 
     await get_environment_manager().startup(recover_crashed=False)
 
+    configure_debugpy_for_frozen_bundle(
+        debugpy,
+        executable=sys.executable,
+        session_dir=session_dir,
+        frozen=bool(getattr(sys, "frozen", False)),
+    )
     debugpy.listen((payload["attach_host"], int(payload["attach_port"])))
     if payload.get("wait_for_attach", True):
         _emit_event(

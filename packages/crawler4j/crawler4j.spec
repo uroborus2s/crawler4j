@@ -5,7 +5,8 @@ import shutil
 import sys
 import tomllib
 
-from PyInstaller.utils.hooks import collect_submodules, copy_metadata
+import debugpy
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 
 def _load_project_version(pyproject_path: Path) -> str:
@@ -26,6 +27,8 @@ MODULES_DIR = PROJECT_ROOT / "modules"
 DOCS_ROOT = WORKSPACE_ROOT / "docs"
 PROJECT_VERSION = _load_project_version(PROJECT_METADATA)
 PYINSTALLER_SUPPORT_ROOT = PROJECT_ROOT / "build" / "pyinstaller-support"
+DEBUGPY_ROOT = Path(debugpy.__file__).resolve().parent
+DEBUGPY_VENDORED_PYDEVD_ROOT = DEBUGPY_ROOT / "_vendored" / "pydevd"
 WORKSPACE_RUNTIME_DISTS = {
     "crawler4j_contracts": "crawler4j-contracts",
     "crawler4j_sdk": "crawler4j-sdk",
@@ -48,6 +51,8 @@ def _build_datas() -> list[tuple[str, str]]:
     ]
     if MODULES_DIR.exists():
         datas.append((str(MODULES_DIR), "modules"))
+    datas.extend(collect_data_files("debugpy"))
+    datas.extend(collect_data_files("debugpy", include_py_files=True))
     for dist_name in WORKSPACE_RUNTIME_DISTS.values():
         datas.extend(copy_metadata(dist_name))
     return datas
@@ -56,6 +61,7 @@ def _build_datas() -> list[tuple[str, str]]:
 def _build_hiddenimports() -> list[str]:
     hiddenimports = [
         "PyQt6.sip",
+        "debugpy",
         "playwright",
         "pandas",
         "ddddocr",
@@ -63,6 +69,8 @@ def _build_hiddenimports() -> list[str]:
         "numpy",
         "sqlite3",
     ]
+    hiddenimports.extend(collect_submodules("debugpy"))
+    hiddenimports.extend(_build_debugpy_vendored_hiddenimports())
     for package_name in WORKSPACE_RUNTIME_DISTS:
         hiddenimports.extend(collect_submodules(package_name))
     return hiddenimports
@@ -78,11 +86,30 @@ def _prepare_workspace_package_aliases() -> Path:
     return alias_root
 
 
+def _build_debugpy_vendored_hiddenimports() -> list[str]:
+    hiddenimports: list[str] = []
+    for path in sorted(DEBUGPY_VENDORED_PYDEVD_ROOT.rglob("*.py")):
+        relative = path.relative_to(DEBUGPY_VENDORED_PYDEVD_ROOT)
+        if "tests" in relative.parts:
+            continue
+        if path.name == "__init__.py":
+            module_name = ".".join(relative.parts[:-1])
+        else:
+            module_name = ".".join(relative.with_suffix("").parts)
+        if module_name:
+            hiddenimports.append(module_name)
+    return hiddenimports
+
+
 WORKSPACE_PACKAGE_ALIAS_ROOT = _prepare_workspace_package_aliases()
 
 a = Analysis(
     [str(APP_ENTRY)],
-    pathex=[str(PROJECT_ROOT), str(WORKSPACE_PACKAGE_ALIAS_ROOT)],
+    pathex=[
+        str(PROJECT_ROOT),
+        str(WORKSPACE_PACKAGE_ALIAS_ROOT),
+        str(DEBUGPY_VENDORED_PYDEVD_ROOT),
+    ],
     binaries=[],
     datas=_build_datas(),
     hiddenimports=_build_hiddenimports(),

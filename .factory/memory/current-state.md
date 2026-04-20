@@ -32,6 +32,9 @@
 - 最新修复：2026-04-20 已为 ATM `任务调试` 的 VS Code attach 配置补上显式 `pathMappings`；当前 `Attach to Crawler4j` 会把 `${workspaceFolder}` 映射到宿主实际加载的 DevLink 模块真实目录，减少因工作区别名/符号链接/路径漂移导致的“Attach 成功但断点不生效”；对应 VS Code 配置单测与开发者调试文档已同步更新。
 - 最新修复：2026-04-20 已把 debug worker 的 attach 阻塞从轮询 `debugpy.is_client_connected()` 收紧为官方 `debugpy.wait_for_client()` 路径；当前勾选 `等待 IDE 附加` 时，未完成 IDE attach 前不应再提前进入 `running`；对应调试集成回归已把 `stop_on_entry=false` 默认分支补上“attach 前保持 waiting”断言。
 - 最新修复：2026-04-20 已把仓库根目录 `.vscode/launch.json` 里的 `Crawler4j: Start App` 显式收紧为 `subProcess=false`，并在开发者调试文档补充“不要把主程序 VS Code launch 调试和任务 worker attach 调试混用”的说明，降低主程序调试链干扰 task debug attach 的风险。
+- 最新修复：2026-04-20 已把桌面打包态的 task debug worker 启动链显式分叉；源码运行继续走 `python -m src.core.debug.worker_entry`，PyInstaller 打包态则改为宿主内嵌 `--crawler4j-debug-worker` 入口，避免 `sys.executable` 指向 `Crawler4j.app` 时再次拉起一份 GUI 主窗口；对应 UI 单测、debug service 单测与调试文档已同步更新。
+- 最新修复：2026-04-20 已把 `debugpy` 及其 `_vendored` 数据文件、vendored `pydevd` 的 `.py` 运行时模块一并显式纳入 PyInstaller 桌面包；当前打包版 task debug worker 不再因 bundle 漏收 `debugpy/_vendored` 或 `_pydevd_bundle.pydevd_constants` 这类 vendored 模块而直接以退出码 `1` 失败；对应打包配置单测、开发者调试文档与桌面重打包 smoke 验证已同步更新。
+- 最新修复：2026-04-20 已继续把 frozen 场景下 `debugpy.listen()` 的 adapter 启动链收口到宿主内嵌 `--crawler4j-debugpy-adapter` 入口，并在 worker 启动前通过临时 launcher 脚本显式 `debugpy.configure(python=...)`；当前真包 smoke 已验证 macOS 桌面包可进入 `waiting_for_attach` 且端口真实监听，不再回退到 GUI 主程序。
 - 最新修复：2026-04-20 已把 ATM `新建作业` 弹窗中的 `配置运行模板`、`取消`、`创建/保存` 按钮切到共享 `StyledButton` 组件，并统一为 `40px` 高度；同时把“运行配置”预览说明改为按当前宽度自动回流并同步最小高度，避免长文本在真实窗口里向下溢出、压到下面按钮区域；对应 Qt 单测已补“使用公共组件”和“预览文本与按钮保持间距”的断言。
 - 最新修复：2026-04-20 已把 `docs-stratego` 通知 workflow 的自动监听分支从 `feature/task-plugin-system` 收口到 `main`，并在发送 `repository_dispatch` 前先去掉 `DOCS_STRATEGO_DISPATCH_TOKEN` 中意外带入的 `CR/LF`，避免 `Authorization` header 被换行拆断；对应部署说明、运维索引、文档索引与 workflow 静态回归测试已同步更新。
 - 设计：2026-04-19 ATM 固定环境池方案已按“模块资源池资格卡片 + 等待队列 + FIFO 补位 + 资源池卡片更新事件 + 轻量定时调和”的口径落地到宿主和 SDK V1。

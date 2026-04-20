@@ -204,6 +204,9 @@ ctx.logger.info("进入登录阶段")
 - `启动后立即断住` 仍然只控制“附加成功后是否立刻人为停住一次”；不勾选它时，正常断点仍然应该生效
 - `生成 VS Code 配置` 现在会为 `Attach to Crawler4j` 写入显式 `pathMappings`，把当前工作区映射到宿主实际加载的 DevLink 模块目录，避免“Attach 成功但断点不绑定”的路径漂移问题
 - `等待 IDE 附加` 的阻塞当前直接走 `debugpy.wait_for_client()`；在 IDE 真正完成 attach 前，不应再提前进入 `running`
+- 打包版桌面应用在点击 `开始调试` 时，本质上也会启动一个独立 debug worker 子进程；当前该子进程会走宿主内嵌 worker 入口，而不是再拉起一份新的 GUI 主窗口
+- 正式桌面包也必须随包带上 `debugpy`、其 `_vendored` 资源，以及 vendored `pydevd` 的 `.py` 运行时模块；如果你还在用旧包，任务调试可能会直接失败并看到 `debugpy/_vendored` 缺失、`_pydevd_bundle.pydevd_constants` 不存在，或 worker 退出码 `1`
+- 打包版里 `debugpy.listen()` 自己还会再拉起一个 adapter 子进程；当前宿主也已为这条链补了内嵌 `--crawler4j-debugpy-adapter` 入口，避免 frozen 环境下 adapter 再次误启动 GUI 主程序
 
 推荐顺序:
 

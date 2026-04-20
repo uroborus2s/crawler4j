@@ -12,6 +12,7 @@ from asyncio.subprocess import PIPE, create_subprocess_exec
 from pathlib import Path
 
 from src.core.atm.run_profile import CreationLifecycle
+from src.core.debug.launcher import build_debug_worker_command
 from src.core.debug.models import (
     FINAL_DEBUG_STATES,
     DebugSession,
@@ -41,6 +42,7 @@ class DebugService:
         task_service: TaskService | None = None,
         worker_module: str = "src.core.debug.worker_entry",
         python_executable: str | None = None,
+        frozen: bool | None = None,
         stop_timeout: float = 5.0,
     ):
         self.repo = repo or get_debug_session_repository()
@@ -48,6 +50,7 @@ class DebugService:
         self.task_service = task_service or get_task_service()
         self._worker_module = worker_module
         self._python_executable = python_executable or sys.executable
+        self._frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
         self._stop_timeout = stop_timeout
         self._session_root = get_app_data_dir() / "debug_sessions"
         self._session_root.mkdir(parents=True, exist_ok=True)
@@ -134,10 +137,12 @@ class DebugService:
             stop_flag.unlink()
 
         process = await create_subprocess_exec(
-            self._python_executable,
-            "-m",
-            self._worker_module,
-            str(session_file),
+            *build_debug_worker_command(
+                self._python_executable,
+                session_file,
+                worker_module=self._worker_module,
+                frozen=self._frozen,
+            ),
             stdout=PIPE,
             stderr=PIPE,
         )
