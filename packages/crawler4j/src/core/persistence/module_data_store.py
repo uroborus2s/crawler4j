@@ -52,38 +52,56 @@ class ModuleDataStore:
 
     def _write_dataset_row(self, module_name: str, dataset_name: str, records: list[dict[str, Any]]) -> bool:
         now = int(time.time())
+        normalized_records = _normalize_records(records)
         with get_connection(DATA_DB) as conn:
             conn.execute(
                 """
-                INSERT INTO module_datasets (module_name, dataset_name, records_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(module_name, dataset_name) DO UPDATE SET
-                    records_json = excluded.records_json,
-                    updated_at = excluded.updated_at
+                DELETE FROM module_datasets
+                WHERE module_name = ? AND dataset_name = ?
                 """,
-                (
-                    module_name,
-                    dataset_name,
-                    json.dumps(records, ensure_ascii=False),
-                    now,
-                    now,
-                ),
+                (module_name, dataset_name),
             )
+            if normalized_records:
+                conn.executemany(
+                    """
+                    INSERT INTO module_datasets (
+                        module_name,
+                        dataset_name,
+                        record_index,
+                        record_json,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            module_name,
+                            dataset_name,
+                            record_index,
+                            json.dumps(record, ensure_ascii=False),
+                            now,
+                            now,
+                        )
+                        for record_index, record in enumerate(normalized_records)
+                    ],
+                )
         return True
 
     def _read_dataset_row(self, module_name: str, dataset_name: str) -> list[dict[str, Any]] | None:
         with get_connection(DATA_DB) as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 """
-                SELECT records_json
+                SELECT record_json
                 FROM module_datasets
                 WHERE module_name = ? AND dataset_name = ?
+                ORDER BY record_index ASC
                 """,
                 (module_name, dataset_name),
-            ).fetchone()
-        if not row:
+            ).fetchall()
+        if not rows:
             return None
-        return _normalize_records(json.loads(row["records_json"]))
+        return _normalize_records([json.loads(row["record_json"]) for row in rows])
 
     def _append_audit_event_row(
         self,

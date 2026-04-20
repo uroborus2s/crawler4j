@@ -57,8 +57,8 @@
 
 ### `REQ-008`
 
-- 现有 `db.list_records` / `db.replace_records` 与 `module_datasets.records_json` 天然是“当前快照”模型，不适合承载 append-only 的审计事件。
-- 如果模块把 `account_events` 这类历史事件继续当普通 dataset 全量覆盖写回，运行时间越长，单条 `records_json` 越大，写放大和并发覆盖风险越高。
+- 现有 `db.list_records` / `db.replace_records` 与 `module_datasets` 天然是“当前快照”模型，不适合承载 append-only 的审计事件。
+- 即便 `module_datasets` 已改为“一条 record 一行”持久化，只要模块把 `account_events` 这类历史事件继续当普通 dataset 全量覆盖写回，运行时间越长，整包重写成本和并发覆盖风险仍会持续放大。
 - 本轮最小可落地方案不是改写快照接口，而是补一条平行的事件通道：`module_audit_events` + `db.append_event` / `db.query_events`。
 - 当前实现刻意保持边界收敛：快照型数据继续服务 `core:data_table` 和当前列表型 UI，事件型数据只提供追加与查询，不在本轮引入 retention / archive 与通用查询页面。
 

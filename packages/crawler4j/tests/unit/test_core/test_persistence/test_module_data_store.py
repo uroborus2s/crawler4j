@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -22,14 +23,19 @@ def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
 
     store = ModuleDataStore()
 
-    assert store.write_dataset("demo_module", "accounts", [{"id": "u1", "phone": "13800138000"}]) is True
+    records = [
+        {"id": "u1", "phone": "13800138000"},
+        {"id": "u2", "phone": "13900139000"},
+    ]
+
+    assert store.write_dataset("demo_module", "accounts", records) is True
     assert store.write_data_table_schema(
         "demo_module",
         "accounts",
         {"title": "账号管理", "dataset": "accounts", "columns": [{"key": "phone", "label": "手机号"}]},
     ) is True
 
-    assert store.read_dataset("demo_module", "accounts") == [{"id": "u1", "phone": "13800138000"}]
+    assert store.read_dataset("demo_module", "accounts") == records
     assert store.read_data_table_schema("demo_module", "accounts") == {
         "title": "账号管理",
         "dataset": "accounts",
@@ -37,17 +43,77 @@ def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
     }
 
     with get_connection(DATA_DB) as conn:
-        dataset_row = conn.execute(
-            "SELECT records_json FROM module_datasets WHERE module_name = ? AND dataset_name = ?",
+        dataset_rows = conn.execute(
+            """
+            SELECT record_index, record_json
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            ORDER BY record_index ASC
+            """,
             ("demo_module", "accounts"),
-        ).fetchone()
+        ).fetchall()
         schema_row = conn.execute(
             "SELECT schema_json FROM module_data_table_views WHERE module_name = ? AND view_id = ?",
             ("demo_module", "accounts"),
         ).fetchone()
 
-    assert dataset_row is not None
+    assert [row["record_index"] for row in dataset_rows] == [0, 1]
+    assert [json.loads(row["record_json"]) for row in dataset_rows] == records
     assert schema_row is not None
+
+
+def test_init_database_migrates_legacy_module_dataset_rows(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.database import init_database
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    legacy_records = [
+        {"id": "u1", "phone": "13800138000"},
+        {"id": "u2", "phone": "13900139000"},
+    ]
+
+    with get_connection(DATA_DB) as conn:
+        conn.execute("DROP TABLE module_datasets")
+        conn.execute(
+            """
+            CREATE TABLE module_datasets (
+                module_name TEXT NOT NULL,
+                dataset_name TEXT NOT NULL,
+                records_json TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (module_name, dataset_name)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO module_datasets (module_name, dataset_name, records_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("demo_module", "accounts", json.dumps(legacy_records, ensure_ascii=False), 100, 200),
+        )
+
+    init_database()
+
+    store = ModuleDataStore()
+    assert store.read_dataset("demo_module", "accounts") == legacy_records
+
+    with get_connection(DATA_DB) as conn:
+        dataset_rows = conn.execute(
+            """
+            SELECT record_index, record_json, created_at, updated_at
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            ORDER BY record_index ASC
+            """,
+            ("demo_module", "accounts"),
+        ).fetchall()
+
+    assert [row["record_index"] for row in dataset_rows] == [0, 1]
+    assert [json.loads(row["record_json"]) for row in dataset_rows] == legacy_records
+    assert [row["created_at"] for row in dataset_rows] == [100, 100]
+    assert [row["updated_at"] for row in dataset_rows] == [200, 200]
 
 
 def test_module_data_store_appends_and_queries_audit_events(temp_data_dir):

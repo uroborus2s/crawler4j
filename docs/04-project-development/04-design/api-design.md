@@ -52,7 +52,7 @@
 | 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
 | 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
-| 快照型业务数据 | `data.db.module_datasets` 与 `data.db.module_data_table_views`，统一通过 `db.list_records` / `db.replace_records` / `ui.declare_data_table` 访问 |
+| 快照型业务数据 | `data.db.module_datasets`（一条 record 一行）与 `data.db.module_data_table_views`，统一通过 `db.list_records` / `db.replace_records` / `ui.declare_data_table` 访问 |
 | 事件型业务数据 | `data.db.module_audit_events`，统一通过 `db.append_event` / `db.query_events` 访问 |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
 | 当前实现说明 | 当前运行时代码不包含旧 `state.db.kv_store` 模块表数据自动迁移逻辑；旧数据需要显式迁移或人工导入 |

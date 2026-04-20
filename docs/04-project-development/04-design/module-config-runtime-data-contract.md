@@ -139,15 +139,16 @@ ctx.state.setdefault("tasks", {})
 ### 6.1 快照数据位置
 
 - `ui.declare_data_table` 声明的 schema 持久化到 `data.db.module_data_table_views`
-- `db.list_records` / `db.replace_records` 读写的快照型 records 持久化到 `data.db.module_datasets`
+- `db.list_records` / `db.replace_records` 读写的快照型 records 持久化到 `data.db.module_datasets`，宿主按 `(module_name, dataset_name, record_index)` 一条 record 一行存储
 - `db.append_event` / `db.query_events` 读写的审计事件持久化到 `data.db.module_audit_events`
 
 ### 6.2 快照数据与审计事件语义
 
-- `module_datasets` 承载“当前状态型 / 可覆盖型”业务数据。
+- `module_datasets` 承载“当前状态型 / 可覆盖型”业务数据；dataset 级语义仍是整包快照，但底层持久化已改为逐行 record。
 - `module_audit_events` 承载“历史轨迹型 / append-only”审计事件。
 - 当前正式持久化表为 `data.db.module_audit_events`，正式工具名为 `db.append_event` / `db.query_events`。
 - `previous_status` / `next_status` / `result` / `reason` 等一等审计字段应直接写顶层；`payload` 只保留模块私有扩展字段。
+- `init_database()` 会自动把旧版 `(module_name, dataset_name, records_json)` 聚合表迁移为逐行结构，模块侧无需改 `db.list_records` / `db.replace_records` 调用方式。
 - 审计事件不应回写 `module_datasets`，也不直接进入 `core:data_table` 的 schema / records 链路。
 - `core:data_table` 当前只面向快照型 dataset；不要把事件流接进通用可编辑数据表。
 - retention / archive 后续可在宿主侧继续扩展，但不属于本轮正式契约。
@@ -165,7 +166,7 @@ ctx.state.setdefault("tasks", {})
 
 | 你要保留什么 | 正式入口 | 语义 |
 |---|---|---|
-| 当前最新名单、当前状态、当前结果集 | `db.list_records` / `db.replace_records` | 可被下一次写入整体替换的快照 |
+| 当前最新名单、当前状态、当前结果集 | `db.list_records` / `db.replace_records` | 可被下一次写入整体替换的快照；底层按 record 逐行落库 |
 | 只追加的历史记录、状态迁移、操作痕迹 | `db.append_event` / `db.query_events` | append-only 历史，不回写当前快照 |
 | 宿主内可编辑数据表 | `ui.declare_data_table` + `core:data_table` | 只服务快照 dataset |
 
