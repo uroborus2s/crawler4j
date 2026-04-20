@@ -14,6 +14,8 @@ APP_ROOT = WORKSPACE_ROOT / "packages" / "crawler4j"
 SPEC_PATH = APP_ROOT / "crawler4j.spec"
 DESKTOP_DIST_ROOT = APP_ROOT / "dist" / "desktop"
 PYINSTALLER_BUILD_ROOT = APP_ROOT / "build" / "pyinstaller"
+APP_NAME = "Crawler4j"
+MACOS_APP_NAME = f"{APP_NAME}.app"
 
 
 def platform_slug(platform: str | None = None) -> str:
@@ -60,6 +62,21 @@ def build_command(platform: str | None = None) -> list[str]:
     ]
 
 
+def prune_macos_collect_dir(platform: str | None = None) -> Path | None:
+    slug = platform_slug(platform)
+    if slug != "macos":
+        return None
+
+    target_dist_dir = dist_dir(slug)
+    collect_dir = target_dist_dir / APP_NAME
+    app_bundle = target_dist_dir / MACOS_APP_NAME
+    if not app_bundle.exists() or not collect_dir.is_dir():
+        return None
+
+    shutil.rmtree(collect_dir)
+    return collect_dir
+
+
 def main() -> int:
     slug = platform_slug()
     target_dist_dir, target_build_dir = clean_output_dirs(slug)
@@ -71,6 +88,9 @@ def main() -> int:
     print(f"[cmd]   {' '.join(command)}")
 
     subprocess.run(command, cwd=WORKSPACE_ROOT, check=True)
+    removed = prune_macos_collect_dir(slug)
+    if removed is not None:
+        print(f"[prune] removed non-distribution collect dir {removed}")
     print(f"[done] desktop package available under {target_dist_dir}")
     return 0
 

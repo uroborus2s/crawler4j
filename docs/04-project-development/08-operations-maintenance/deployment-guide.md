@@ -32,6 +32,8 @@ uv run python -m src.ui.app
 
 - workspace 根通过 `uv run python -m src.ui.app` 直接启动 `packages/crawler4j` 中的真实入口
 - 若需要打包，PyInstaller 规格位于 `packages/crawler4j/crawler4j.spec`
+- 正式桌面打包入口统一为 `uv run package-desktop`
+- 当前 macOS 最终可分发产物固定为 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，不需要再额外携带旁边的 `Crawler4j/` collect 目录
 
 ### 测试
 

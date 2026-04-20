@@ -68,8 +68,9 @@ uv run package-desktop
 
 - 发布产物：`packages/crawler4j/dist/desktop/<platform>/`
 - PyInstaller 中间构建目录：`packages/crawler4j/build/pyinstaller/<platform>/`
+- macOS 最终分发物：`packages/crawler4j/dist/desktop/macos/Crawler4j.app`
 
-其中 `build/pyinstaller/...` 只保存 PyInstaller 的分析缓存与中间文件，不是发布物；需要精简工作区时可以删除，下一次 `uv run package-desktop` 会自动重建。
+其中 `build/pyinstaller/...` 只保存 PyInstaller 的分析缓存与中间文件，不是发布物；需要精简工作区时可以删除，下一次 `uv run package-desktop` 会自动重建。macOS 打包完成后，脚本会自动删除 PyInstaller 旁路生成的松散 `Crawler4j/` collect 目录，避免把非分发目录误当成必须随包携带的正式产物。
 
 ## Packages
 
@@ -81,7 +82,7 @@ uv run package-desktop
 当前保留的脚本：
 
 - `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；构建时自动写回各包 `dist/`，发布时自动指向各包 `dist/*`
-- `scripts/package_desktop_app.py`：`uv run package-desktop` 背后的固定目录桌面打包入口；输出固定落在 `packages/crawler4j/dist/desktop/<platform>/`
+- `scripts/package_desktop_app.py`：`uv run package-desktop` 背后的固定目录桌面打包入口；输出固定落在 `packages/crawler4j/dist/desktop/<platform>/`，其中 macOS 只保留最终可分发的 `Crawler4j.app`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
 - `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
 

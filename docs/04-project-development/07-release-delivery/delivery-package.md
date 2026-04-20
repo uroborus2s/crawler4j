@@ -31,7 +31,7 @@
 | 发布说明基线 | 已具备 | 已能区分当前工作区和最近正式发布 |
 | 验收清单模板 | 已具备 | 可直接用于下一次正式发布 Gate |
 | 部署与运行文档 | 已具备 | 部署说明、运行手册、管理员指南已补齐 |
-| macOS 桌面包 | 已具备本地构建验证 | `uv run package-desktop` 现固定把 macOS bundle 生成到 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，PyInstaller 中间产物固定放在 `packages/crawler4j/build/pyinstaller/macos/` |
+| macOS 桌面包 | 已具备本地构建验证 | `uv run package-desktop` 现固定把 macOS bundle 生成到 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，且分发目录只保留该 `.app`；PyInstaller 中间产物固定放在 `packages/crawler4j/build/pyinstaller/macos/` |
 | Windows 桌面包 | 阻塞 | 当前仓库没有 Windows 打包链、CI runner 或正式产物，不能声称“已交付 Windows 下载包” |
 | 正式交付产物 | 待发布时补齐 | 当前只有本地验证产物，不等于已形成可对外下载的正式发布物 |
 

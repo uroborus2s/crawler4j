@@ -186,6 +186,22 @@ def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
     assert "def get_docs_root() -> Path:" in paths_text
 
 
+def test_pyinstaller_spec_collects_workspace_runtime_packages_for_desktop_bundle():
+    spec_text = (APP_ROOT / "crawler4j.spec").read_text(encoding="utf-8")
+
+    assert "from PyInstaller.utils.hooks import collect_submodules, copy_metadata" in spec_text
+    assert '"crawler4j_contracts": "crawler4j-contracts"' in spec_text
+    assert '"crawler4j_sdk": "crawler4j-sdk"' in spec_text
+    assert '"crawler4j_contracts": WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "src"' in spec_text
+    assert '"crawler4j_sdk": WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "src"' in spec_text
+    assert 'alias_root = PYINSTALLER_SUPPORT_ROOT / "workspace-package-aliases"' in spec_text
+    assert "shutil.copytree(source_root, target_root)" in spec_text
+    assert "hiddenimports.extend(collect_submodules(package_name))" in spec_text
+    assert "datas.extend(copy_metadata(dist_name))" in spec_text
+    assert "hiddenimports=_build_hiddenimports()," in spec_text
+    assert "pathex=[str(PROJECT_ROOT), str(WORKSPACE_PACKAGE_ALIAS_ROOT)]" in spec_text
+
+
 def test_workspace_build_script_targets_publishable_packages_and_dist_dirs():
     script = _load_script_module("build_workspace_packages.py")
 
@@ -318,3 +334,20 @@ def test_desktop_packaging_script_cleans_and_recreates_fixed_output_dirs(tmp_pat
     assert target_build.exists()
     assert not (target_dist / "stale.txt").exists()
     assert not (target_build / "stale.txt").exists()
+
+
+def test_desktop_packaging_script_prunes_macos_collect_dir_after_app_bundle_build(tmp_path, monkeypatch):
+    script = _load_script_module("package_desktop_app.py")
+    monkeypatch.setattr(script, "DESKTOP_DIST_ROOT", tmp_path / "dist-root")
+
+    target_dist = script.dist_dir("darwin")
+    collect_dir = target_dist / script.APP_NAME
+    app_bundle = target_dist / script.MACOS_APP_NAME
+    collect_dir.mkdir(parents=True)
+    app_bundle.mkdir(parents=True)
+
+    removed = script.prune_macos_collect_dir("darwin")
+
+    assert removed == collect_dir
+    assert not collect_dir.exists()
+    assert app_bundle.exists()

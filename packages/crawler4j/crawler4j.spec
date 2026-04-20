@@ -1,8 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+import shutil
 import sys
 import tomllib
+
+from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 
 def _load_project_version(pyproject_path: Path) -> str:
@@ -22,6 +25,15 @@ UI_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "icon.jpg"
 MODULES_DIR = PROJECT_ROOT / "modules"
 DOCS_ROOT = WORKSPACE_ROOT / "docs"
 PROJECT_VERSION = _load_project_version(PROJECT_METADATA)
+PYINSTALLER_SUPPORT_ROOT = PROJECT_ROOT / "build" / "pyinstaller-support"
+WORKSPACE_RUNTIME_DISTS = {
+    "crawler4j_contracts": "crawler4j-contracts",
+    "crawler4j_sdk": "crawler4j-sdk",
+}
+WORKSPACE_RUNTIME_SOURCES = {
+    "crawler4j_contracts": WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "src",
+    "crawler4j_sdk": WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "src",
+}
 
 
 def _build_datas() -> list[tuple[str, str]]:
@@ -36,14 +48,13 @@ def _build_datas() -> list[tuple[str, str]]:
     ]
     if MODULES_DIR.exists():
         datas.append((str(MODULES_DIR), "modules"))
+    for dist_name in WORKSPACE_RUNTIME_DISTS.values():
+        datas.extend(copy_metadata(dist_name))
     return datas
 
-a = Analysis(
-    [str(APP_ENTRY)],
-    pathex=[str(PROJECT_ROOT)],
-    binaries=[],
-    datas=_build_datas(),
-    hiddenimports=[
+
+def _build_hiddenimports() -> list[str]:
+    hiddenimports = [
         "PyQt6.sip",
         "playwright",
         "pandas",
@@ -51,7 +62,30 @@ a = Analysis(
         "cv2",
         "numpy",
         "sqlite3",
-    ],
+    ]
+    for package_name in WORKSPACE_RUNTIME_DISTS:
+        hiddenimports.extend(collect_submodules(package_name))
+    return hiddenimports
+
+
+def _prepare_workspace_package_aliases() -> Path:
+    alias_root = PYINSTALLER_SUPPORT_ROOT / "workspace-package-aliases"
+    shutil.rmtree(alias_root, ignore_errors=True)
+    alias_root.mkdir(parents=True, exist_ok=True)
+    for package_name, source_root in WORKSPACE_RUNTIME_SOURCES.items():
+        target_root = alias_root / package_name
+        shutil.copytree(source_root, target_root)
+    return alias_root
+
+
+WORKSPACE_PACKAGE_ALIAS_ROOT = _prepare_workspace_package_aliases()
+
+a = Analysis(
+    [str(APP_ENTRY)],
+    pathex=[str(PROJECT_ROOT), str(WORKSPACE_PACKAGE_ALIAS_ROOT)],
+    binaries=[],
+    datas=_build_datas(),
+    hiddenimports=_build_hiddenimports(),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
