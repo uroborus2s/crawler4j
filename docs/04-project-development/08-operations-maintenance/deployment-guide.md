@@ -34,7 +34,7 @@ uv run python -m src.ui.app
 - 若需要打包，PyInstaller 规格位于 `packages/crawler4j/crawler4j.spec`
 - 正式桌面打包入口统一为 `uv run package-desktop`
 - 当前 macOS 最终可分发产物固定为 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，不需要再额外携带旁边的 `Crawler4j/` collect 目录
-- PyInstaller 现已显式收集 `sinanz` 的共享 `resources/` 目录，打包版验证码能力不应再因缺失 `slider_gap_locator.onnx` 等内嵌模型而退化
+- PyInstaller 现已显式收集 `sinanz` 的共享 `resources/` 目录；滑块验证码运行时会从其中的 `resources/models/` 解析 `slider_gap_locator.onnx`
 
 ### 测试
 

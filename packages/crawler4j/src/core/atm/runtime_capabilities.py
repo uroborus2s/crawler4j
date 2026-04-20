@@ -84,7 +84,7 @@ BUSINESS_OCCUPANCY_COLUMN_LABELS = {"占用中", "占用状态"}
 
 
 @lru_cache(maxsize=1)
-def _resolve_captcha_asset_root() -> Path | None:
+def _resolve_captcha_resource_root() -> Path | None:
     bundled_root = Path(get_resource_path("resources"))
     if bundled_root.is_dir():
         return bundled_root
@@ -104,6 +104,18 @@ def _resolve_captcha_asset_root() -> Path | None:
             return candidate
 
     return None
+
+
+@lru_cache(maxsize=1)
+def _resolve_captcha_models_root() -> Path | None:
+    resource_root = _resolve_captcha_resource_root()
+    if resource_root is None:
+        return None
+
+    models_root = resource_root / "models"
+    if models_root.is_dir():
+        return models_root
+    return resource_root
 
 
 def _validate_managed_identifier(value: str, *, field_name: str) -> str:
@@ -614,7 +626,7 @@ def _solve_slider_with_sinanz(
 
     result = CaptchaSolver(
         device=device,
-        asset_root=_resolve_captcha_asset_root(),
+        asset_root=_resolve_captcha_models_root(),
     ).sn_match_slider(
         background_image,
         puzzle_piece_image,
@@ -647,7 +659,7 @@ def _solve_click_with_sinanz(
         query_icons_image=query_icons_image,
         background_image=background_image,
         device=device,
-        asset_root=_resolve_captcha_asset_root(),
+        asset_root=_resolve_captcha_resource_root(),
         return_debug=return_debug,
     )
 

@@ -438,7 +438,7 @@ def test_captcha_tool_matches_click_targets_via_sinanz(monkeypatch):
     ]
 
 
-def test_captcha_asset_root_prefers_bundled_resources(tmp_path, monkeypatch):
+def test_captcha_resource_root_prefers_bundled_resources(tmp_path, monkeypatch):
     bundled_resources = tmp_path / "resources"
     bundled_resources.mkdir()
     monkeypatch.setattr(
@@ -446,12 +446,32 @@ def test_captcha_asset_root_prefers_bundled_resources(tmp_path, monkeypatch):
         "get_resource_path",
         lambda relative_path: str((tmp_path / relative_path).resolve()),
     )
-    runtime_capabilities._resolve_captcha_asset_root.cache_clear()
+    runtime_capabilities._resolve_captcha_resource_root.cache_clear()
+    runtime_capabilities._resolve_captcha_models_root.cache_clear()
 
     try:
-        assert runtime_capabilities._resolve_captcha_asset_root() == bundled_resources
+        assert runtime_capabilities._resolve_captcha_resource_root() == bundled_resources
     finally:
-        runtime_capabilities._resolve_captcha_asset_root.cache_clear()
+        runtime_capabilities._resolve_captcha_resource_root.cache_clear()
+        runtime_capabilities._resolve_captcha_models_root.cache_clear()
+
+
+def test_captcha_models_root_prefers_resources_models_subdir(tmp_path, monkeypatch):
+    bundled_models = tmp_path / "resources" / "models"
+    bundled_models.mkdir(parents=True)
+    monkeypatch.setattr(
+        runtime_capabilities,
+        "get_resource_path",
+        lambda relative_path: str((tmp_path / relative_path).resolve()),
+    )
+    runtime_capabilities._resolve_captcha_resource_root.cache_clear()
+    runtime_capabilities._resolve_captcha_models_root.cache_clear()
+
+    try:
+        assert runtime_capabilities._resolve_captcha_models_root() == bundled_models
+    finally:
+        runtime_capabilities._resolve_captcha_resource_root.cache_clear()
+        runtime_capabilities._resolve_captcha_models_root.cache_clear()
 
 
 def test_solve_slider_with_sinanz_passes_resolved_asset_root(tmp_path, monkeypatch):
@@ -479,7 +499,7 @@ def test_solve_slider_with_sinanz_passes_resolved_asset_root(tmp_path, monkeypat
                 debug=None,
             )
 
-    monkeypatch.setattr(runtime_capabilities, "_resolve_captcha_asset_root", lambda: tmp_path)
+    monkeypatch.setattr(runtime_capabilities, "_resolve_captcha_models_root", lambda: tmp_path)
     monkeypatch.setitem(sys.modules, "sinanz", SimpleNamespace(CaptchaSolver=_FakeSolver))
 
     result = runtime_capabilities._solve_slider_with_sinanz(
@@ -517,7 +537,7 @@ def test_solve_click_with_sinanz_passes_resolved_asset_root(tmp_path, monkeypatc
             debug=None,
         )
 
-    monkeypatch.setattr(runtime_capabilities, "_resolve_captcha_asset_root", lambda: tmp_path)
+    monkeypatch.setattr(runtime_capabilities, "_resolve_captcha_resource_root", lambda: tmp_path)
     monkeypatch.setitem(
         sys.modules, "sinanz_group1_service", SimpleNamespace(solve_click_targets=_fake_solve_click_targets)
     )
