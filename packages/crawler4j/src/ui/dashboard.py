@@ -92,8 +92,11 @@ class DashboardPage(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._load_seq = 0
+        self._load_task: asyncio.Task[None] | None = None
         self._setup_ui()
         self._setup_timer()
+        self.destroyed.connect(lambda *_args: self._cancel_pending_load())
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -173,22 +176,44 @@ class DashboardPage(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.load_data)
         self._timer.start(5000)  # 每 5 秒刷新
-    
+
+    def _cancel_pending_load(self) -> None:
+        if self._load_task and not self._load_task.done():
+            self._load_task.cancel()
+
+    def _on_load_done(self, task: asyncio.Task[None]) -> None:
+        if self._load_task is task:
+            self._load_task = None
+
     def load_data(self):
         """加载统计数据。"""
-        # Async load requires qasync loop or fire & forget
-        asyncio.create_task(self._load_data_async())
+        self._load_seq += 1
+        seq = self._load_seq
+        if self._load_task and not self._load_task.done():
+            self._load_task.cancel()
+        coro = self._load_data_async(seq)
+        try:
+            task = asyncio.create_task(coro)
+        except RuntimeError:
+            coro.close()
+            return
+        self._load_task = task
+        task.add_done_callback(self._on_load_done)
 
-    async def _load_data_async(self):
+    async def _load_data_async(self, seq: int):
+        if seq != self._load_seq:
+            return
         self._load_env_stats()
         self._load_module_stats()
-        await self._load_job_stats()
+        await self._load_job_stats(seq)
     
-    async def _load_job_stats(self):
+    async def _load_job_stats(self, seq: int):
         """加载作业统计。"""
         try:
             service = get_task_service()
             jobs = await service.list_jobs()
+            if seq != self._load_seq:
+                return
             
             active = sum(1 for j in jobs if j.state == JobState.ACTIVE)
             completed = sum(1 for j in jobs if j.state == JobState.COMPLETED)

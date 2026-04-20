@@ -1,5 +1,9 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from PyQt6.QtWidgets import QDialog
 
 from src.core.rem import EnvKind
 from src.core.rem.models import ProxyMode
@@ -143,4 +147,106 @@ def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypat
     asyncio.run(widget._async_env_action("env-1", "start"))
 
     manager.start_env.assert_awaited_once_with("env-1")
+    widget.load_data.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_exec_dialog_async_uses_open_without_nested_exec(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    class FakeDialog(QDialog):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.open_called = False
+            self.exec_called = False
+
+        def exec(self):  # type: ignore[override]
+            self.exec_called = True
+            raise AssertionError("blocking exec should not be used")
+
+        def open(self):  # type: ignore[override]
+            self.open_called = True
+            asyncio.get_running_loop().call_soon(
+                lambda: self.done(int(QDialog.DialogCode.Accepted))
+            )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    dialog = FakeDialog(widget)
+    result = await widget._exec_dialog_async(dialog)
+
+    assert result == int(QDialog.DialogCode.Accepted)
+    assert dialog.open_called is True
+    assert dialog.exec_called is False
+
+
+async def _drain_widget_tasks(widget) -> None:
+    for _ in range(20):
+        pending = [task for task in widget._pending_tasks if not task.done()]
+        operation_task = widget._operation_task
+        if not pending and (operation_task is None or operation_task.done()):
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("pending widget tasks did not finish in time")
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_destroy_uses_non_blocking_dialogs(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    manager = SimpleNamespace(
+        pool=SimpleNamespace(),
+        destroy_env=AsyncMock(return_value=True),
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+    monkeypatch.setattr(
+        env_list_widget.QMessageBox,
+        "question",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("blocking static question dialog should not be used")
+        ),
+    )
+    monkeypatch.setattr(
+        env_list_widget.QMessageBox,
+        "information",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("blocking static information dialog should not be used")
+        ),
+    )
+    shown_messages: list[tuple[str, str]] = []
+
+    def fake_open(box):
+        shown_messages.append((box.windowTitle(), box.text()))
+        if box.windowTitle() == "确认":
+            result = int(env_list_widget.QMessageBox.StandardButton.Yes)
+        else:
+            result = int(env_list_widget.QMessageBox.StandardButton.Ok)
+        asyncio.get_running_loop().call_soon(lambda: box.done(result))
+
+    monkeypatch.setattr(env_list_widget.QMessageBox, "open", fake_open)
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget.load_data = MagicMock()
+    widget._confirm_async = AsyncMock(return_value=True)
+
+    widget._destroy_env("env-1")
+    await _drain_widget_tasks(widget)
+
+    manager.destroy_env.assert_awaited_once_with("env-1")
+    assert shown_messages == [
+        ("", "环境已销毁"),
+    ]
     widget.load_data.assert_called_once_with()

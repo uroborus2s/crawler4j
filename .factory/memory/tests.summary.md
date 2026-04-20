@@ -41,6 +41,7 @@
 - `TC-040`: PyInstaller 打包态启动 task debug 时，debug service 必须改走宿主内嵌 `--crawler4j-debug-worker` 入口，`src.ui.app` 也必须在创建 `QApplication` 前先分流到 worker；覆盖见 `tests/unit/test_core/test_debug/test_service.py` 与 `tests/unit/test_ui/test_app.py`.
 - `TC-041`: PyInstaller spec 必须显式把 `debugpy` 子模块、`_vendored` 数据文件以及 vendored `pydevd` 的 `.py` 运行时模块打进桌面 bundle，避免打包版 task debug worker 因缺失 `debugpy/_vendored` 或 `_pydevd_bundle.pydevd_constants` 直接失败；覆盖见 `tests/unit/test_sdk/test_packaging_config.py`.
 - `TC-042`: frozen 桌面包里的 `debugpy.listen()` adapter 进程也必须改走宿主内嵌 `--crawler4j-debugpy-adapter` 入口，避免 adapter 再次误启动 GUI 主程序；覆盖见 `tests/unit/test_ui/test_app.py`，并已通过真包 smoke 验证进入 `waiting_for_attach` 且端口监听。
+- `TC-043`: 宿主 `qasync` UI 重入回归现在同时锁定两条链路：`EnvListWidget` 在创建/编辑/销毁及异步操作提示中不再走阻塞式 `exec()` / 静态 `QMessageBox.*`，`DashboardPage` 则在新一轮刷新前取消上一轮 pending load，避免 REM 操作完成提示与仪表盘定时刷新在同一主线程窗口内交错触发重入；覆盖见 `tests/unit/test_core/test_rem/test_env_list_widget.py` 与 `tests/unit/test_ui/test_dashboard.py`.
 - `TC-038`: `uv run package-desktop` 现在会把 workspace 里的 `crawler4j-contracts` / `crawler4j-sdk` 一并打进 macOS bundle，并在构建完成后自动移除松散的 `Crawler4j/` collect 目录；覆盖见 `tests/unit/test_sdk/test_packaging_config.py`，实包验证已确认 bundle 可在临时 HOME 下启动到 REM/ATM/MMS 初始化阶段。
 - Workspace root `scripts/` now keeps `build_workspace_packages.py`, `db_cli.py`, and `smoke_test_ui.py` as the maintained helper set; legacy local debug and icon-generation helpers are no longer treated as maintained assets.
 

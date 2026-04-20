@@ -6,3 +6,4 @@
 - 目录树、页面路径和访问级别统一由根 `docs/index.md` 声明，这里不重复维护页面清单。
 - 本目录下的 Markdown 页面、契约文件和资源文件应随内容变更一起演进。
 - 当前发布阻塞项 `ctrip` 真实站点 E2E 的执行口径，以 `ctrip-real-site-e2e-closeout.md` 为准。
+- 宿主 `qasync` UI 重入相关的最新回归口径，以 `test-plan.md` 变更记录和 `.factory/memory/tests.summary.md` 中的 `TC-043` 为准。

@@ -368,7 +368,9 @@ class EnvListWidget(QWidget):
         self._load_in_progress = False
         self._operation_in_progress = False
         self._operation_task: asyncio.Task[Any] | None = None
+        self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._setup_ui()
+        self.destroyed.connect(lambda *_args: self._cancel_pending_tasks())
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -631,6 +633,99 @@ class EnvListWidget(QWidget):
         self.error_label.setText(f"❌ 加载失败: {error}")
         self.error_label.show()
 
+    def _cancel_pending_tasks(self) -> None:
+        for task in list(self._pending_tasks):
+            if not task.done():
+                task.cancel()
+
+    def _track_task(self, coro: Any) -> None:
+        try:
+            task = asyncio.create_task(coro)
+        except RuntimeError:
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            QMessageBox.warning(self, "当前不可用", "当前界面没有可用的异步事件循环，无法执行该操作。")
+            return
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
+
+    async def _exec_dialog_async(self, dialog: QDialog) -> int:
+        loop = asyncio.get_running_loop()
+        result_future = loop.create_future()
+
+        def _resolve(result: int) -> None:
+            if not result_future.done():
+                result_future.set_result(int(result))
+
+        dialog.finished.connect(_resolve)
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.open()
+        try:
+            return int(await result_future)
+        finally:
+            try:
+                dialog.finished.disconnect(_resolve)
+            except TypeError:
+                pass
+
+    async def _show_message_async(
+        self,
+        title: str,
+        text: str,
+        *,
+        icon: QMessageBox.Icon,
+    ) -> None:
+        dialog = QMessageBox(self)
+        dialog.setIcon(icon)
+        dialog.setWindowTitle(title)
+        dialog.setText(text)
+        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+        await self._exec_dialog_async(dialog)
+
+    async def _confirm_async(self, title: str, text: str) -> bool:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Question)
+        dialog.setWindowTitle(title)
+        dialog.setText(text)
+        dialog.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        dialog.setDefaultButton(QMessageBox.StandardButton.No)
+        loop = asyncio.get_running_loop()
+        result_future = loop.create_future()
+
+        def _resolve(button) -> None:
+            if not result_future.done():
+                result_future.set_result(dialog.standardButton(button))
+
+        def _resolve_reject(_result: int) -> None:
+            if not result_future.done():
+                if _result == int(QMessageBox.StandardButton.Yes):
+                    result_future.set_result(QMessageBox.StandardButton.Yes)
+                    return
+                if _result == int(QMessageBox.StandardButton.No):
+                    result_future.set_result(QMessageBox.StandardButton.No)
+                    return
+                result_future.set_result(QMessageBox.StandardButton.No)
+
+        dialog.buttonClicked.connect(_resolve)
+        dialog.finished.connect(_resolve_reject)
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.open()
+        try:
+            result = await result_future
+        finally:
+            try:
+                dialog.buttonClicked.disconnect(_resolve)
+            except TypeError:
+                pass
+            try:
+                dialog.finished.disconnect(_resolve_reject)
+            except TypeError:
+                pass
+        return result == QMessageBox.StandardButton.Yes
+
     def _apply_busy_state(self):
         """同步按钮和表格的忙碌状态。"""
         self.create_btn.setEnabled(not self._operation_in_progress)
@@ -669,6 +764,8 @@ class EnvListWidget(QWidget):
                 close()
             return False
         self._operation_task = loop.create_task(self._run_operation(coro))
+        self._pending_tasks.add(self._operation_task)
+        self._operation_task.add_done_callback(self._pending_tasks.discard)
         return True
 
     async def _run_operation(self, coro: Any):
@@ -685,7 +782,7 @@ class EnvListWidget(QWidget):
                 requirement=requirement,
             )
         except Exception as exc:
-            self._on_worker_error(str(exc))
+            await self._show_operation_error(str(exc))
             return
         self._on_create_finished(env)
 
@@ -693,61 +790,66 @@ class EnvListWidget(QWidget):
         try:
             success = await self._manager.destroy_env(env_id)
         except Exception as exc:
-            self._on_worker_error(str(exc))
+            await self._show_operation_error(str(exc))
             return
-        self._on_destroy_finished(success)
+        await self._on_destroy_finished(success)
 
     async def _async_env_action(self, env_id: str, action: str):
         operation = getattr(self._manager, f"{action}_env")
         try:
             success = await operation(env_id)
         except Exception as exc:
-            self._on_worker_error(str(exc))
+            await self._show_operation_error(str(exc))
             return
-        self._on_action_finished(success, action=action)
+        await self._on_action_finished(success, action=action)
     
     def _create_env(self):
         """创建环境。"""
+        self._track_task(self._create_env_async())
+
+    async def _create_env_async(self) -> None:
+        """创建环境。"""
         dialog = CreateEnvDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            kind, provider, config = dialog.get_values()
+        if await self._exec_dialog_async(dialog) != int(QDialog.DialogCode.Accepted):
+            return
+        kind, provider, config = dialog.get_values()
 
-            # Construct EnvRequirement to pass proxy_config correctly
-            from src.core.rem.models import EnvRequirement, ProxyConfig
-            
-            requirement = EnvRequirement(kind=kind)
-            if "proxy" in config:
-                requirement.proxy_config = ProxyConfig.from_dict(config["proxy"])
+        # Construct EnvRequirement to pass proxy_config correctly
+        from src.core.rem.models import EnvRequirement, ProxyConfig
 
-            self._schedule_operation(self._async_create_env(provider, config, requirement))
+        requirement = EnvRequirement(kind=kind)
+        if "proxy" in config:
+            requirement.proxy_config = ProxyConfig.from_dict(config["proxy"])
+
+        self._schedule_operation(self._async_create_env(provider, config, requirement))
     
     def _on_create_finished(self, env):
         """创建完成。"""
         del env
         self.load_data()
     
-    def _on_worker_error(self, error: str):
+    async def _show_operation_error(self, error: str):
         """工作线程出错。"""
-        QMessageBox.critical(self, "错误", f"操作失败: {error}")
+        await self._show_message_async("错误", f"操作失败: {error}", icon=QMessageBox.Icon.Critical)
     
     def _destroy_env(self, env_id: str):
         """销毁环境。"""
-        reply = QMessageBox.question(
-            self, "确认", f"确定要销毁环境 {env_id} ?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        self._track_task(self._confirm_destroy_env_async(env_id))
+
+    async def _confirm_destroy_env_async(self, env_id: str) -> None:
+        confirmed = await self._confirm_async("确认", f"确定要销毁环境 {env_id} ?")
+        if confirmed:
             self._schedule_operation(self._async_destroy_env(env_id))
     
-    def _on_destroy_finished(self, success: bool):
+    async def _on_destroy_finished(self, success: bool):
         """销毁完成。"""
         if success:
-            QMessageBox.information(self, "成功", "环境已销毁")
+            await self._show_message_async("成功", "环境已销毁", icon=QMessageBox.Icon.Information)
         else:
-            QMessageBox.warning(
-                self,
+            await self._show_message_async(
                 "警告",
                 "环境销毁失败，数据库记录已保留。请检查指纹浏览器连接后重试。",
+                icon=QMessageBox.Icon.Warning,
             )
         self.load_data()
     
@@ -769,6 +871,10 @@ class EnvListWidget(QWidget):
     
     def _edit_env(self, env_id: str):
         """编辑环境（弹出对话框）。"""
+        self._track_task(self._edit_env_async(env_id))
+
+    async def _edit_env_async(self, env_id: str) -> None:
+        """编辑环境（弹出对话框）。"""
         from src.core.rem.ui.edit_env_dialog import EditEnvDialog
         
         # 从表格数据中查找环境
@@ -784,21 +890,29 @@ class EnvListWidget(QWidget):
         
         if not env:
             # 如果找不到，从 pool 异步加载
-            QMessageBox.warning(self, "错误", f"未找到环境: {env_id}...")
+            await self._show_message_async(
+                "错误",
+                f"未找到环境: {env_id}...",
+                icon=QMessageBox.Icon.Warning,
+            )
             return
         
         dialog = EditEnvDialog(env, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if await self._exec_dialog_async(dialog) == int(QDialog.DialogCode.Accepted):
             self.load_data()  # 刷新列表
     
-    def _on_action_finished(self, success: bool, *, action: str):
+    async def _on_action_finished(self, success: bool, *, action: str):
         """通用操作完成回调。
         
         注意: 失败时错误信息由 Shell 通过 Toast 显示，
         详见 ENV_OPERATION_FAILED 事件处理。
         """
         if not success:
-            QMessageBox.warning(self, "操作失败", f"{action} 环境失败，请稍后重试。")
+            await self._show_message_async(
+                "操作失败",
+                f"{action} 环境失败，请稍后重试。",
+                icon=QMessageBox.Icon.Warning,
+            )
             return
         self.load_data()
     

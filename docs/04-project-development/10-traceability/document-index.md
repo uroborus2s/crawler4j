@@ -71,6 +71,7 @@
 
 ## 5. 最近同步
 
+- 2026-04-21：`docs/04-project-development/06-testing-verification/index.md` 与 `test-plan.md` 已同步补记宿主 `qasync` UI 重入回归：REM 环境列表页的创建/编辑/销毁及异步操作提示现统一走非阻塞对话框，仪表盘刷新则改为取消旧 pending load 后再启动新一轮；对应 `.factory/memory/tests.summary.md` 已新增 `TC-043`。
 - 2026-04-20：`docs-stratego` 联动发布口径已从 `feature/task-plugin-system` 收口到 `main`；`deployment-guide.md`、运维目录索引与 notify workflow 现统一说明主分支是唯一自动通知来源，且 dispatch token 会先去掉意外换行再发起 `repository_dispatch`。
 - 2026-04-20：固定环境池语义已进一步收紧并同步到开发/设计/测试文档：当前只从 `eligible=true + READY + 无租约` 环境集合发号，`KEEP_ALIVE` 留下的 `RUNNING` 环境不会自动回池；若候选在 `get_env` / 租约阶段被别人先抢走，任务会回到等待席位而不是直接失败；对应 ATM/REM 单测已补锁。
 - 2026-04-19：已对固定环境池 / 环境队列开发者文档执行“1 个专业文档 reviewer + 2 个模块开发者 reviewer”的三轮苛刻复核；`docs/03-developer-guide/index.md`、`reference-core-capabilities.md`、`build-modules.md`、`debugging.md`、`troubleshooting.md` 以及 `api-design.md`、`atm-resource-pool-queue-design.md` 现统一钉死 `Service Job` 前提、`resource_pool / selector_name / wait_timeout` 语义、`env_id` 来源、`@env_selector(...)` 入口、`replace_resource_pool_snapshot(...)` 全量重建和等待状态文案分层，最终 3 个 reviewer 全部给出 `无 blocker`。
