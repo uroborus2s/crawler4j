@@ -57,12 +57,19 @@ uv run build
 uv run build crawler4j
 
 # 直接按包名发布 SDK / Contracts（脚本会自动指向各自 dist/*）
-UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk
-UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-contracts
+uv run publish crawler4j-sdk
+uv run publish crawler4j-contracts
 
-# PyInstaller 打包桌面应用
-uv run pyinstaller packages/crawler4j/crawler4j.spec
+# 固定目录打包桌面应用
+uv run package-desktop
 ```
+
+桌面打包固定输出：
+
+- 发布产物：`packages/crawler4j/dist/desktop/<platform>/`
+- PyInstaller 中间构建目录：`packages/crawler4j/build/pyinstaller/<platform>/`
+
+其中 `build/pyinstaller/...` 只保存 PyInstaller 的分析缓存与中间文件，不是发布物；需要精简工作区时可以删除，下一次 `uv run package-desktop` 会自动重建。
 
 ## Packages
 
@@ -74,6 +81,7 @@ uv run pyinstaller packages/crawler4j/crawler4j.spec
 当前保留的脚本：
 
 - `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；构建时自动写回各包 `dist/`，发布时自动指向各包 `dist/*`
+- `scripts/package_desktop_app.py`：`uv run package-desktop` 背后的固定目录桌面打包入口；输出固定落在 `packages/crawler4j/dist/desktop/<platform>/`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
 - `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
 

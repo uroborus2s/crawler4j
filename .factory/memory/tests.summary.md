@@ -4,6 +4,7 @@
 - `TC-002`: Root package, SDK, and Contracts builds currently pass.
 - `TC-003`: Root script import and startup path are aligned.
 - `TC-004`: Headless UI smoke currently passes.
+- `TC-005`: Desktop packaging now uses the fixed `uv run package-desktop` entry; publishable artifacts land under `packages/crawler4j/dist/desktop/<platform>/`, while PyInstaller intermediates land under `packages/crawler4j/build/pyinstaller/<platform>/` and can be deleted after packaging.
 - `REQ-006` implemented coverage:
   - `TC-007`: New scaffolded shim `__init__.py` imports and exposes standard entrypoints.
   - `TC-008`: Standard `module_runtime.py` carries lifecycle hooks and `@env_selector(...)` callbacks, and overrides default run / hook behavior when declared.
@@ -30,6 +31,9 @@
 - `TC-029`: REM 环境列表页已切到 UI 主 `qasync` 事件循环中的串行异步环境操作，并在执行期间禁用表格/创建/刷新入口，避免旧版 `QThread + 共享 asyncio loop` 在连续点击时触发跨线程 loop 复用；覆盖见 `tests/unit/test_core/test_rem/test_env_list_widget.py`.
 - `TC-030`: `crawler4j-sdk page create` 生成的代码型页面现在在缺少 `PyQt6` 时仍可被 `check full` 安全导入，且 SDK / Contracts / Root app 的 `0.x` 兼容区间已收紧到当前 minor 的 patch 版本；覆盖见 `tests/unit/test_sdk/test_cli_scaffold.py`, `tests/unit/test_sdk/test_packaging_config.py`, `tests/integration/test_sdk_cli_module_mode.py`.
 - `TC-031`: 默认环境名占位的 `SELECT max + INSERT` 现已改为同一 SQLite 写事务内完成，避免并发创建时重复发放 `env-YYYYMMDD-N` 名称；覆盖见 `tests/unit/test_core/test_rem/test_atomic_reservation.py`.
+- `TC-032`: `uv run build` 现在会保留 `packages/crawler4j/dist/desktop/`，而 `uv run package-desktop` 会固定清理并重建平台专属的 `dist/desktop/<platform>/` 与 `build/pyinstaller/<platform>/`；覆盖见 `tests/unit/test_sdk/test_packaging_config.py`.
+- `TC-033`: ATM `任务调试` 对话框日志框在轮询刷新时会保留手动滚动位置，并在用户停留底部时继续自动跟随最新输出；覆盖见 `tests/unit/test_core/test_atm/test_task_debug_dialog.py`.
+- `TC-034`: ATM `任务调试` 对话框点击 `重新开始` 时会按当前表单重新创建调试会话，而不是隐式复用旧 session 配置；覆盖见 `tests/unit/test_core/test_atm/test_task_debug_dialog.py`，相关调试 attach 回归继续由 `tests/integration/test_task_debug_e2e.py` 维持。
 - Workspace root `scripts/` now keeps `build_workspace_packages.py`, `db_cli.py`, and `smoke_test_ui.py` as the maintained helper set; legacy local debug and icon-generation helpers are no longer treated as maintained assets.
 
 Current gaps:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import re
+import shutil
 import tomllib
 from pathlib import Path
 
@@ -139,6 +140,7 @@ def test_workspace_root_declares_console_shortcuts_for_build_and_publish():
     pyproject = _load_pyproject(WORKSPACE_ROOT / "pyproject.toml")
 
     assert pyproject["project"]["scripts"]["build"] == "scripts.build_workspace_packages:build_main"
+    assert pyproject["project"]["scripts"]["package-desktop"] == "scripts.package_desktop_app:main"
     assert pyproject["project"]["scripts"]["publish"] == "scripts.build_workspace_packages:publish_main"
     assert pyproject["build-system"]["build-backend"] == "setuptools.build_meta"
     assert pyproject["tool"]["setuptools"]["packages"] == ["scripts"]
@@ -152,6 +154,7 @@ def test_dev_scripts_live_in_workspace_root_instead_of_app_package():
     assert {
         "build_workspace_packages.py",
         "db_cli.py",
+        "package_desktop_app.py",
         "smoke_test_ui.py",
     }.issubset({path.name for path in root_scripts.glob("*.py")})
     assert list(package_scripts.glob("*.py")) == []
@@ -213,6 +216,31 @@ def test_workspace_build_script_uses_uv_clear_for_each_target():
     ]
 
 
+def test_workspace_build_script_preserves_desktop_subdir_for_root_package(tmp_path, monkeypatch):
+    script = _load_script_module("build_workspace_packages.py")
+    dist_dir = tmp_path / "crawler4j-dist"
+    desktop_dir = dist_dir / "desktop" / "macos"
+    desktop_dir.mkdir(parents=True)
+    kept_marker = desktop_dir / "keep.txt"
+    kept_marker.write_text("desktop artifact", encoding="utf-8")
+    target = script.BuildTarget("crawler4j", dist_dir)
+
+    def fake_run(command, *, cwd, check):
+        assert command == script.build_command(target)
+        assert cwd == script.WORKSPACE_ROOT
+        assert check is True
+        shutil.rmtree(dist_dir)
+        dist_dir.mkdir(parents=True)
+        (dist_dir / "crawler4j-0.2.0-py3-none-any.whl").write_text("wheel", encoding="utf-8")
+
+    monkeypatch.setattr(script.subprocess, "run", fake_run)
+
+    script.run_build(target)
+
+    assert (dist_dir / "crawler4j-0.2.0-py3-none-any.whl").read_text(encoding="utf-8") == "wheel"
+    assert kept_marker.read_text(encoding="utf-8") == "desktop artifact"
+
+
 def test_workspace_build_script_parse_args_defaults_to_build_mode():
     script = _load_script_module("build_workspace_packages.py")
 
@@ -248,3 +276,45 @@ def test_workspace_build_script_uses_package_local_dist_glob_for_publish():
         "--dry-run",
         str(WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "dist" / "*"),
     ]
+
+
+def test_desktop_packaging_script_uses_fixed_platform_specific_paths():
+    script = _load_script_module("package_desktop_app.py")
+
+    assert script.platform_slug("darwin") == "macos"
+    assert script.platform_slug("win32") == "windows"
+    assert script.platform_slug("linux") == "linux"
+    assert script.dist_dir("darwin") == WORKSPACE_ROOT / "packages" / "crawler4j" / "dist" / "desktop" / "macos"
+    assert script.build_dir("darwin") == WORKSPACE_ROOT / "packages" / "crawler4j" / "build" / "pyinstaller" / "macos"
+    assert script.build_command("darwin") == [
+        "pyinstaller",
+        "--noconfirm",
+        "--clean",
+        "--distpath",
+        str(WORKSPACE_ROOT / "packages" / "crawler4j" / "dist" / "desktop" / "macos"),
+        "--workpath",
+        str(WORKSPACE_ROOT / "packages" / "crawler4j" / "build" / "pyinstaller" / "macos"),
+        str(WORKSPACE_ROOT / "packages" / "crawler4j" / "crawler4j.spec"),
+    ]
+
+
+def test_desktop_packaging_script_cleans_and_recreates_fixed_output_dirs(tmp_path, monkeypatch):
+    script = _load_script_module("package_desktop_app.py")
+    monkeypatch.setattr(script, "DESKTOP_DIST_ROOT", tmp_path / "dist-root")
+    monkeypatch.setattr(script, "PYINSTALLER_BUILD_ROOT", tmp_path / "build-root")
+
+    stale_dist = script.dist_dir("windows")
+    stale_build = script.build_dir("windows")
+    stale_dist.mkdir(parents=True)
+    stale_build.mkdir(parents=True)
+    (stale_dist / "stale.txt").write_text("stale", encoding="utf-8")
+    (stale_build / "stale.txt").write_text("stale", encoding="utf-8")
+
+    target_dist, target_build = script.clean_output_dirs("windows")
+
+    assert target_dist == stale_dist
+    assert target_build == stale_build
+    assert target_dist.exists()
+    assert target_build.exists()
+    assert not (target_dist / "stale.txt").exists()
+    assert not (target_build / "stale.txt").exists()

@@ -12,7 +12,7 @@
 | `uv run ruff check .` | PASS | Full repo lint rechecked after the REM UI / SDK scaffold / version-range fixes |
 | UI smoke | PASS | `uv run python scripts/smoke_test_ui.py` |
 | Workspace build | PASS | `uv run build` regenerated Root / SDK / Contracts wheels and sdists |
-| macOS PyInstaller bundle | PASS | `uv run pyinstaller --noconfirm --clean --distpath /tmp/crawler4j-pyinstaller-dist --workpath /tmp/crawler4j-pyinstaller-build packages/crawler4j/crawler4j.spec` |
+| macOS PyInstaller bundle | PASS | `uv run package-desktop` 固定生成到 `packages/crawler4j/dist/desktop/macos/`，中间构建目录固定为 `packages/crawler4j/build/pyinstaller/macos/` |
 | Host DevLink list | PASS | `ctrip_crawler` 当前通过 DevLink 指向 `/Users/uroborus/PythonProject/ctrip_crawler`（沿用 2026-04-19 证据） |
 | Fresh `ctrip` ZIP preview | PASS | `/tmp/ctrip_crawler-acceptance.zip` 通过 `host install preview --skip-remote-check`（沿用 2026-04-19 证据） |
 | `ctrip` module `check full` | PASS | 当前模块源码 gate 通过（沿用 2026-04-19 证据） |

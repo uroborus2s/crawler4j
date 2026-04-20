@@ -55,9 +55,9 @@
       "details": "Smoke passed on 2026-04-20; QApplication, Shell import, and Shell instantiation succeeded"
     },
     "pyinstaller_bundle": {
-      "command": "uv run pyinstaller --noconfirm --clean --distpath /tmp/crawler4j-pyinstaller-dist --workpath /tmp/crawler4j-pyinstaller-build packages/crawler4j/crawler4j.spec",
+      "command": "uv run package-desktop",
       "result": "passed",
-      "details": "PyInstaller build completed successfully on 2026-04-20; macOS bundle available at /tmp/crawler4j-pyinstaller-dist/Crawler4j.app"
+      "details": "PyInstaller build completed successfully on 2026-04-20; desktop artifacts now have fixed output dirs under packages/crawler4j/dist/desktop/<platform>/ and packages/crawler4j/build/pyinstaller/<platform>/"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -84,7 +84,7 @@
     "workspace_root": "0.0.0",
     "app_package_pyproject": "0.2.0",
     "runtime": "0.2.0",
-    "git_tag_latest": "v0.1.1",
+    "git_tag_latest": "v0.2.0",
     "sdk": "0.3.0",
     "contracts": "0.2.0"
   },

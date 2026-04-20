@@ -416,11 +416,12 @@ class JobDebugDialog(QDialog):
 
     async def _restart_debug(self) -> None:
         try:
+            request = self.build_request()
             if self._current_session_id:
-                await self._service.restart_session(self._current_session_id)
-            else:
-                await self._start_debug()
-                return
+                await self._service.stop_session(self._current_session_id)
+            session = await self._service.create_session(request)
+            self._current_session_id = session.id
+            await self._service.start_session(session.id)
             await self._refresh()
         except Exception as exc:
             QMessageBox.warning(self, "重启调试失败", str(exc))
@@ -466,7 +467,7 @@ class JobDebugDialog(QDialog):
             self.pid_value.setText("-")
             self.env_value.setText("-")
             self.error_value.setText("-")
-            self.logs_view.setPlainText("")
+            self._update_logs_view([])
             self._update_action_states()
             return
 
@@ -475,7 +476,7 @@ class JobDebugDialog(QDialog):
         self.pid_value.setText(str(session.worker_pid or "-"))
         self.env_value.setText(str(session.env_id or "-"))
         self.error_value.setText(session.last_error or "-")
-        self.logs_view.setPlainText("\n".join(session.logs[-200:]))
+        self._update_logs_view(session.logs[-200:])
         self._update_action_states(session)
 
     def _update_action_states(self, session: DebugSession | None = None) -> None:
@@ -490,6 +491,25 @@ class JobDebugDialog(QDialog):
         self.restart_btn.setEnabled(self._current_session_id is not None)
         self.stop_btn.setEnabled(running)
         self.copy_attach_btn.setEnabled(bool(session and session.attach_port))
+
+    def _update_logs_view(self, logs: list[str]) -> None:
+        new_text = "\n".join(logs)
+        if self.logs_view.toPlainText() == new_text:
+            return
+
+        scrollbar = self.logs_view.verticalScrollBar()
+        previous_value = scrollbar.value()
+        previous_maximum = scrollbar.maximum()
+        was_following_latest = previous_maximum <= 0 or previous_value >= max(0, previous_maximum - 4)
+
+        self.logs_view.setPlainText(new_text)
+
+        scrollbar = self.logs_view.verticalScrollBar()
+        if was_following_latest:
+            scrollbar.setValue(scrollbar.maximum())
+            return
+
+        scrollbar.setValue(min(previous_value, scrollbar.maximum()))
 
     def _run_async(self, coro) -> None:
         try:

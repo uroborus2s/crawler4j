@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 build = "scripts.build_workspace_packages:build_main"
+package-desktop = "scripts.package_desktop_app:main"
 publish = "scripts.build_workspace_packages:publish_main"
 
 [dependency-groups]

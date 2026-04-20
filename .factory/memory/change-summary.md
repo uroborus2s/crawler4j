@@ -1,6 +1,7 @@
 # 变更摘要
 
 ## 测试与验收
+- 2026-04-20 桌面打包目录收口：新增 `uv run package-desktop` 固定入口，PyInstaller 正式发布产物现统一落到 `packages/crawler4j/dist/desktop/<platform>/`，中间构建目录统一落到 `packages/crawler4j/build/pyinstaller/<platform>/`；同时 `uv run build` 对 `crawler4j` 根包构建现会保留 `dist/desktop/`，避免 wheel/sdist 构建时清掉桌面发布物 | 状态：DONE | 关联：`scripts/package_desktop_app.py`、`scripts/build_workspace_packages.py`、`packages/crawler4j/tests/unit/test_sdk/test_packaging_config.py`
 - 2026-04-20 review-driven final gate：4 个专业 code review 子 agent 的 blocker/high-risk 已全部收口；主线程重新跑通 `uv run pytest -q`（`485 passed`）、`uv run ruff check .`、`uv run python scripts/smoke_test_ui.py`、`uv run build` 与 macOS `uv run pyinstaller ...`，并把正式 release gate 明确维持在 `No-Go`，因为 `ctrip` 真站 E2E、tag/release、交付批次与 Windows 桌面包仍未闭环 | 状态：DONE | 关联：`.factory/process/quality-check-report.md`、`docs/04-project-development/07-release-delivery/acceptance-checklist.md`、`docs/04-project-development/07-release-delivery/delivery-package.md`
 - REM 默认环境名占位收口：`_reserve_env_placeholder()` 现已在同一 SQLite `BEGIN IMMEDIATE` 写事务里完成名称计算和 `CREATING` 占位插入，不再依赖“先查 max、再用 `pool.add()` 另开事务写入”的非原子路径；对应原子命名回归测试已同步更新 | 状态：DONE | 关联：`packages/crawler4j/src/core/rem/manager.py`、`packages/crawler4j/tests/unit/test_core/test_rem/test_atomic_reservation.py`
 - 验收测试模块补齐：已新增 `packages/crawler4j/tests/acceptance/`，覆盖 SDK CLI 脚手架到 `package verify`、`host devlink add/list/remove`、本地 ZIP `preview/apply` 与验收 gate 命令矩阵；对应 acceptance 套件当前为 `8 passed`，并已纳入仓库 fresh gate | 状态：DONE | 关联：`packages/crawler4j/tests/acceptance/*.py`

@@ -2,9 +2,12 @@
 """Build or publish workspace packages via one package-name-oriented wrapper."""
 
 import argparse
+import contextlib
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -26,6 +29,9 @@ BUILD_TARGETS = (
 )
 TARGETS_BY_PACKAGE = {target.package: target for target in BUILD_TARGETS}
 SUPPORTED_ACTIONS = ("build", "publish")
+PRESERVED_DIST_SUBDIRS = {
+    "crawler4j": ("desktop",),
+}
 
 
 def build_command(target: BuildTarget) -> list[str]:
@@ -58,7 +64,34 @@ def run_build(target: BuildTarget) -> None:
     command = build_command(target)
     print(f"[build] {target.package} -> {target.dist_dir}")
     print(f"[cmd]   {shlex.join(command)}")
-    subprocess.run(command, cwd=WORKSPACE_ROOT, check=True)
+    with _preserve_dist_subdirs(target):
+        subprocess.run(command, cwd=WORKSPACE_ROOT, check=True)
+
+
+@contextlib.contextmanager
+def _preserve_dist_subdirs(target: BuildTarget):
+    names = PRESERVED_DIST_SUBDIRS.get(target.package, ())
+    if not names:
+        yield
+        return
+
+    preserved: list[tuple[Path, Path]] = []
+    with tempfile.TemporaryDirectory(dir=target.dist_dir.parent) as temp_dir:
+        temp_root = Path(temp_dir)
+        for name in names:
+            source = target.dist_dir / name
+            if not source.exists():
+                continue
+            destination = temp_root / name
+            shutil.move(str(source), str(destination))
+            preserved.append((destination, source))
+        try:
+            yield
+        finally:
+            for source, destination in preserved:
+                if destination.exists():
+                    shutil.rmtree(destination)
+                shutil.move(str(source), str(destination))
 
 
 def run_publish(target: BuildTarget, *, dry_run: bool = False) -> None:

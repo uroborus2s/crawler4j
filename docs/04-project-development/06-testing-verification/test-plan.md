@@ -33,7 +33,7 @@
 | `TC-002` 根包 / SDK / Contracts build | 通过 | 2026-04-19 复验通过；当前仅证明可构建，不等于可运行 |
 | `TC-003` `uv sync --all-packages` + `uv run python -m src.ui.app` | 通过 | workspace 根可直接启动应用包里的真实入口 |
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | 2026-04-19 headless UI smoke 复验通过 |
-| `TC-005` PyInstaller build | 通过 | 修正后的 spec 成功构建到 `/tmp/crawler4j-pyinstaller-dist` |
+| `TC-005` PyInstaller build | 通过 | `uv run package-desktop` 现固定构建到 `packages/crawler4j/dist/desktop/<platform>/`，中间产物固定落在 `packages/crawler4j/build/pyinstaller/<platform>/` |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-04-19 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
 | `TC-010` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py -q` | 通过 | 2026-04-20 口径已收敛到当前仍存在的正式回归文件，覆盖 `declare_ui` 刷新、`create_handler` / `update_handler` 路由、DevLink 页面上下文与真实模块 UI 链路 |
 | `TC-011` `uv run pytest packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py packages/crawler4j/tests/unit/test_core/test_atm/test_dispatcher_hooks.py packages/crawler4j/tests/unit/test_core/test_atm/test_job_modes.py packages/crawler4j/tests/unit/test_core/test_atm/test_task_detail_dialog.py -q` | 通过 | 2026-04-16 覆盖等待确认信号持久化、`task.signal` 事件、结构化确认面板与客户端确认回调 |

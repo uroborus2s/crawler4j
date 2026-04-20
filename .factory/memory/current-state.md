@@ -17,15 +17,17 @@
 
 ## 最近条目
 
-- 最新验证：2026-04-20 已按“4 个专业 code review 子 agent + 主线程修复/复验”完成全仓严苛复核；当前主线程 fresh gate 结果为 `uv run pytest -q`（`485 passed`）、`uv run ruff check .`、`uv run python scripts/smoke_test_ui.py`、`uv run build` 与 macOS `uv run pyinstaller ...` 全部通过；`ctrip_crawler` 当前源码 `check full`、模块仓 `uv run pytest -q`（`193 passed`）、fresh ZIP `/tmp/ctrip_crawler-acceptance.zip` 的 `host install preview --skip-remote-check` 与宿主 `host devlink list` 活跃状态继续沿用 `2026-04-19` 留证。
+- 最新验证：2026-04-20 已按“4 个专业 code review 子 agent + 主线程修复/复验”完成全仓严苛复核；当前主线程 fresh gate 结果为 `uv run pytest -q`（`485 passed`）、`uv run ruff check .`、`uv run python scripts/smoke_test_ui.py`、`uv run build` 与 macOS 桌面打包全部通过；当前正式桌面打包口径已收敛为 `uv run package-desktop`，发布产物固定落到 `packages/crawler4j/dist/desktop/<platform>/`，PyInstaller 中间构建目录固定落到 `packages/crawler4j/build/pyinstaller/<platform>/`；`ctrip_crawler` 当前源码 `check full`、模块仓 `uv run pytest -q`（`193 passed`）、fresh ZIP `/tmp/ctrip_crawler-acceptance.zip` 的 `host install preview --skip-remote-check` 与宿主 `host devlink list` 活跃状态继续沿用 `2026-04-19` 留证。
 - 发布：2026-04-19 `crawler4j-sdk 0.3.0` 已完成本地 SDK 回归（`uv run pytest packages/crawler4j/tests/unit/test_sdk -q`，`121 passed`）、CLI help 验证、wheel/sdist 构建，并通过 `uv run publish crawler4j-sdk` 发布到 PyPI。
-- 最新结论：2026-04-20 经过 4 个专业 reviewer 的全面 code review 后，主线 blocker 已修复且本地质量门重新转绿，但正式 release gate 仍为 `No-Go`；当前剩余阻塞收敛为 `ctrip` 缺少本轮 DevLink + ZIP 双链真实站点 E2E 留证、`0.2.0` 对应 Git tag / release 资产尚未执行、交付包未绑定发布批次，以及 Windows 桌面下载产物/打包链仍缺失。
+- 最新结论：2026-04-20 `v0.2.0` 已完成正式 Git tag、GitHub release 与 macOS 发布资产上传；当前仍保留的交付边界只剩 `ctrip` 本轮 DevLink + ZIP 双链真实站点 E2E 留证，以及 Windows 桌面下载产物/打包链缺失。
 - 最新修复：2026-04-20 已移除 REM 环境列表页里 `QThread + 共享 asyncio loop` 的旧执行模型；环境 `start/stop/pause/resume/create/destroy` 现统一切到 UI 主 `qasync` 事件循环里的串行异步任务，并在操作期间禁用表格、创建和刷新入口，避免连续点击时触发跨线程 loop 复用或并发重入。
 - 最新修复：2026-04-20 已修正 `crawler4j-sdk page create` 的独立模块仓脚手架：生成的代码型页面现在在缺少 `PyQt6` 时仍可被 `crawler4j check full` 安全导入，只在真正实例化页面时才提示安装宿主 GUI 依赖；同时把 SDK / Contracts / Root app 的 `0.x` 兼容区间从宽泛的 `<1.0.0` 收紧到当前 minor 的 patch 版本，避免未来 `0.x` breaking minor 被 fresh install / `uv sync` 静默拉入。
 - 最新修复：2026-04-20 已把默认环境名占位的 `SELECT max + INSERT` 收回到同一个 SQLite `BEGIN IMMEDIATE` 写事务里；环境名计算与 `CREATING` 占位记录持久化现同步完成，不再依赖“查完再用 `pool.add()` 另开事务写入”的非原子路径，避免并发创建时重复发放 `env-YYYYMMDD-N` 名称。
 - 最新修复：2026-04-20 已按固定环境池正式业务口径收紧调度与租约语义：当前只从 `eligible=true + READY + 无租约` 环境发号，`KEEP_ALIVE` 留下的 `RUNNING` 环境不会自动回池；若候选环境在 `get_env` / 租约阶段被其他任务先抢走，或在发号快照后被资源池卡片改成不可发号，任务会回到等待席位并保留原 `waiting_since`，不再直接记为失败；对应 ATM/REM 单测与开发/设计/测试文档已同步更新。
 - 最新修复：2026-04-20 已把统一日志服务对 `APScheduler` 的最低输出级别收口到 `WARNING`；ATM `Service Job` 的 5 秒定时调和仍正常执行，但 `INFO` 级 `Running job` / `executed successfully` 周期心跳不再持续刷屏；对应日志单测与用户设置文档已同步更新。
 - 最新修复：2026-04-20 已修正 ATM `任务调试` 对话框生成 VS Code `launch.json` 时固定沿用表单端口的问题；当前若调试服务为避让占用端口而改写 attach 地址，对话框会优先写入活动调试会话的真实 `attach_host/attach_port`，失败或已结束会话则回退到表单请求值；对应 Qt 单测与开发者调试文档已同步更新。
+- 最新修复：2026-04-20 已修正 ATM `任务调试` 对话框日志框的轮询刷新行为；当前当日志内容未变化时不会重复整块重绘，用户手动拖到中间查看旧日志时滚动位置会保留，停留在底部时则继续自动跟随最新输出；对应 Qt 单测与开发者调试文档已同步更新。
+- 最新修复：2026-04-20 已修正 ATM `任务调试` 对话框的“重新开始”语义；当前点击 `重新开始` 时会先停止旧调试会话，再按当前表单里的端口、`等待 IDE 附加`、`启动后立即断住`、运行态参数等值新建并启动调试会话，不再沿用旧 session 的隐藏配置；对应 Qt 单测、调试集成回归与开发者调试文档已同步更新。
 - 最新修复：2026-04-20 已把 ATM `新建作业` 弹窗中的 `配置运行模板`、`取消`、`创建/保存` 按钮切到共享 `StyledButton` 组件，并统一为 `40px` 高度；同时把“运行配置”预览说明改为按当前宽度自动回流并同步最小高度，避免长文本在真实窗口里向下溢出、压到下面按钮区域；对应 Qt 单测已补“使用公共组件”和“预览文本与按钮保持间距”的断言。
 - 最新修复：2026-04-20 已把 `docs-stratego` 通知 workflow 的自动监听分支从 `feature/task-plugin-system` 收口到 `main`，并在发送 `repository_dispatch` 前先去掉 `DOCS_STRATEGO_DISPATCH_TOKEN` 中意外带入的 `CR/LF`，避免 `Authorization` header 被换行拆断；对应部署说明、运维索引、文档索引与 workflow 静态回归测试已同步更新。
 - 设计：2026-04-19 ATM 固定环境池方案已按“模块资源池资格卡片 + 等待队列 + FIFO 补位 + 资源池卡片更新事件 + 轻量定时调和”的口径落地到宿主和 SDK V1。
