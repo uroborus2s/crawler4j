@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 文档：2026-04-21 已修正根 `docs/index.md` 中 `ctrip-real-site-e2e-closeout.md` 导航项的非法 YAML 标题写法，并把测试收口页标题与 `document-index.md` 入口统一收口为普通字符串；当前 `docs-stratego` 不应再因该条 `title` 解析失败而阻塞源仓同步。
 - 最新修复：2026-04-21 已继续收口桌面宿主的 `qasync`/Qt 定时器崩溃链：`src.ui.app:main` 现先对 `qasync` 安装宿主侧 `_SimpleTimer` 兼容补丁，再以单次 `run_until_complete(_run_application(...))` 驱动完整 UI 生命周期，避免在 `PyQt6 6.10.1 + qasync 0.28.0` 组合下继续走 `QObject.startTimer()` 私有路径并多次启停 `QApplication.exec()`；统一日志服务的 `LogSignals(QObject)` 也改为延迟创建，减少 `QApplication` 之前提前实例化全局 `QObject` 的风险。当前直接锁定这条兼容层的是 `test_qasync_compat.py`，UI 启动与日志台相关回归已补跑 `test_app.py` / `test_log_console.py` / `test_dashboard.py` / `test_shell.py`。
 - 最新修复：2026-04-21 已为 ATM `ExecutionRunner` 的终态收尾补上超时防线：`on_success` / `on_failure` / `on_timeout` / `on_cleanup` 以及后续环境回收动作现在都有宿主级 timeout guard；当外部模块 hook 或 REM 回收长时间不返回时，任务不再永久卡在 `running`，而是记录主日志后继续完成失败/成功落库与作业收口。对应回归当前锁定于 `test_execution_runner.py` 的“failure hook 挂死 / cleanup 挂死 / env action 挂死”三条路径。
 - 最新修复：2026-04-21 已补齐 MMS 正式模块安装/升级的原子切换防线：ZIP 覆盖安装与本地目录安装现统一走“先在 staging 目录做 manifest 校验 + `__init__.py` 导入预检，再切换到目标目录；若切换后任一步失败则删除坏包并回滚旧版本”的路径，避免坏包在升级失败时覆盖掉可用模块；对应回归已补到 `test_external_module_install.py`，当前锁定 ZIP 升级失败回滚、本地目录安装失败回滚与坏包导入预检三条路径。

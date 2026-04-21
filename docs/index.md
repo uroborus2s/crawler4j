@@ -161,7 +161,7 @@ mkdocs:
             - title: 测试计划
               path: 04-project-development/06-testing-verification/test-plan.md
               access: private
-            - title: `ctrip` 真实站点 E2E 收口方案
+            - title: ctrip 真实站点 E2E 收口方案
               path: 04-project-development/06-testing-verification/ctrip-real-site-e2e-closeout.md
               access: private
             - title: 设计与实现一致性审查
