@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-04-21 已为 ATM `ExecutionRunner` 的终态收尾补上超时防线：`on_success` / `on_failure` / `on_timeout` / `on_cleanup` 以及后续环境回收动作现在都有宿主级 timeout guard；当外部模块 hook 或 REM 回收长时间不返回时，任务不再永久卡在 `running`，而是记录主日志后继续完成失败/成功落库与作业收口。对应回归当前锁定于 `test_execution_runner.py` 的“failure hook 挂死 / cleanup 挂死 / env action 挂死”三条路径。
 - 最新修复：2026-04-21 已补齐 MMS 正式模块安装/升级的原子切换防线：ZIP 覆盖安装与本地目录安装现统一走“先在 staging 目录做 manifest 校验 + `__init__.py` 导入预检，再切换到目标目录；若切换后任一步失败则删除坏包并回滚旧版本”的路径，避免坏包在升级失败时覆盖掉可用模块；对应回归已补到 `test_external_module_install.py`，当前锁定 ZIP 升级失败回滚、本地目录安装失败回滚与坏包导入预检三条路径。
 - 最新验证：2026-04-21 已再次按“多子 agent review + 主线程修复/复验”执行 fresh gate；当前主线程结果为 `uv run pytest -q`（`523 passed`）、`uv run ruff check .`、强化后的 `uv run python scripts/smoke_test_ui.py` 与 `uv run build` 全部通过。当前正式交付结论仍为 `No-Go`，剩余外部阻塞只包括 `ctrip` 真站 E2E 留证、远端 release/交付批次闭环，以及 Windows 桌面产物缺失。
 - 最新修复：2026-04-21 已补齐宿主 `qasync` UI 重入防线：`EnvListWidget` 的创建/编辑/销毁链路不再在协程内调用阻塞式 `dialog.exec()` 或静态 `QMessageBox.*`，统一改为 `open()` + await 完成信号；`DashboardPage` 的定时刷新也已改为“新一轮开始前先取消上一轮 pending load”的串行刷新模型，避免在 REM 环境操作后的模态提示窗口内再叠加仪表盘刷新任务，把主线程推入 `Cannot enter into task ... while another task ... is being executed` 并进一步诱发 Qt 定时器崩溃。对应回归当前锁定于 `test_env_list_widget.py` 与 `test_dashboard.py`。

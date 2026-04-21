@@ -425,6 +425,40 @@ async def test_execution_runner_calls_failure_and_cleanup_hooks_on_error():
 
 
 @pytest.mark.asyncio
+async def test_execution_runner_times_out_hanging_failure_hook_and_still_finalizes_task():
+    request = _build_request()
+    env, lease = _build_env()
+
+    async def hook(_module_name, hook_name, _context, *args):
+        if hook_name == "on_failure":
+            await asyncio.Event().wait()
+        return None
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(side_effect=RuntimeError("boom")),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+    runner._terminal_hook_timeout_seconds = 0.01
+
+    updates: list[TaskStatus] = []
+
+    async def on_task_update(task: Task):
+        updates.append(task.status)
+
+    await asyncio.wait_for(runner.run(request, on_task_update=on_task_update), timeout=0.5)
+
+    hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
+    assert hook_names == ["prepare_env", "init_env", "before_run", "on_failure", "on_cleanup"]
+    assert updates == [TaskStatus.RUNNING, TaskStatus.FAILED]
+    assert request.task.status == TaskStatus.FAILED
+    assert "boom" in request.task.error
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_execution_runner_calls_timeout_and_cleanup_hooks_on_timeout():
     request = _build_request(timeout=1)
     env, lease = _build_env()
@@ -445,6 +479,33 @@ async def test_execution_runner_calls_timeout_and_cleanup_hooks_on_timeout():
     assert hook_names == ["prepare_env", "init_env", "before_run", "on_timeout", "on_cleanup"]
     assert request.task.status == TaskStatus.FAILED
     assert "Timeout" in request.task.error
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_times_out_hanging_cleanup_hook_and_still_releases_environment():
+    request = _build_request()
+    env, lease = _build_env()
+
+    async def hook(_module_name, hook_name, _context, *args):
+        if hook_name == "on_cleanup":
+            await asyncio.Event().wait()
+        return None
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+    runner._cleanup_hook_timeout_seconds = 0.01
+
+    await asyncio.wait_for(runner.run(request), timeout=0.5)
+
+    hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
+    assert hook_names == ["prepare_env", "init_env", "before_run", "on_success", "on_cleanup"]
+    assert request.task.status == TaskStatus.SUCCEEDED
     rem.release.assert_awaited_once_with(lease)
     rem.release_keep_alive.assert_not_awaited()
     rem.destroy_env.assert_not_awaited()
@@ -613,6 +674,34 @@ async def test_execution_runner_runs_cleanup_before_releasing_environment():
     await runner.run(request)
 
     assert call_order == ["cleanup", "release"]
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_times_out_hanging_env_action_and_still_finishes_task():
+    request = _build_request()
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+        call_hook=AsyncMock(return_value=None),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+    runner._env_action_timeout_seconds = 0.01
+
+    async def hanging_release(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    rem.release = AsyncMock(side_effect=hanging_release)
+
+    execution_result = await asyncio.wait_for(runner.run(request), timeout=0.5)
+
+    assert request.task.status == TaskStatus.SUCCEEDED
+    assert execution_result.task_context is not None
+    assert execution_result.task_context.runtime["env_action"]["action"] == "recycle"
+    assert execution_result.task_context.runtime["env_action"]["success"] is False
+    assert "timed out after" in execution_result.task_context.runtime["env_action"]["error"]
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
 
 
 @pytest.mark.asyncio

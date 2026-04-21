@@ -118,6 +118,9 @@ class ExecutionRunner:
         self._settings_store = settings_store or get_module_settings_store()
         self._runtime_capabilities_factory = runtime_capabilities_factory
         self._module_poll_interval = 0.1
+        self._terminal_hook_timeout_seconds = 8.0
+        self._cleanup_hook_timeout_seconds = 8.0
+        self._env_action_timeout_seconds = 15.0
 
     def _build_runtime_payload(self, request: ExecutionRequest, hooks_module: str) -> dict[str, Any]:
         return {
@@ -860,13 +863,29 @@ class ExecutionRunner:
         *args: Any,
     ) -> None:
         try:
-            await self.mms.call_hook(hooks_module, hook_name, task_context, *args)
+            await asyncio.wait_for(
+                self.mms.call_hook(hooks_module, hook_name, task_context, *args),
+                timeout=self._terminal_hook_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"[ATM] Task {task_context.task_name} terminal hook {hook_name} "
+                f"timed out after {self._terminal_hook_timeout_seconds:.1f}s"
+            )
         except Exception as e:
             logger.error(f"[ATM] Task {task_context.task_name} terminal hook {hook_name} failed: {e}")
 
     async def _call_cleanup_hook(self, hooks_module: str, task_context: TaskContext) -> None:
         try:
-            await self.mms.call_hook(hooks_module, "on_cleanup", task_context)
+            await asyncio.wait_for(
+                self.mms.call_hook(hooks_module, "on_cleanup", task_context),
+                timeout=self._cleanup_hook_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"[ATM] Task {task_context.task_name} cleanup hook timed out after "
+                f"{self._cleanup_hook_timeout_seconds:.1f}s"
+            )
         except Exception as e:
             logger.error(f"[ATM] Task {task_context.task_name} cleanup hook failed: {e}")
 
@@ -1014,6 +1033,17 @@ class ExecutionRunner:
         # 默认仅关闭并回收环境；显式 DESTROY 信号才允许删除。
         return EnvAction.RECYCLE
 
+    async def _await_env_action_step(self, label: str, operation: Awaitable[Any]) -> Any:
+        try:
+            return await asyncio.wait_for(
+                operation,
+                timeout=self._env_action_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"{label} timed out after {self._env_action_timeout_seconds:.1f}s"
+            ) from exc
+
     async def _apply_env_action(
         self,
         *,
@@ -1028,14 +1058,30 @@ class ExecutionRunner:
         }
         try:
             if env_action == EnvAction.RECYCLE:
-                info["success"] = await self.rem.release(env_lease)
+                info["success"] = await self._await_env_action_step(
+                    "release",
+                    self.rem.release(env_lease),
+                )
                 return info
             if env_action == EnvAction.KEEP_ALIVE:
-                info["success"] = await self.rem.release_keep_alive(env_lease)
+                info["success"] = await self._await_env_action_step(
+                    "release_keep_alive",
+                    self.rem.release_keep_alive(env_lease),
+                )
                 return info
             if env_action == EnvAction.DESTROY:
-                released = await self.rem.release_keep_alive(env_lease)
-                destroyed = released and bool(env_id is not None) and await self.rem.destroy_env(int(env_id))
+                released = await self._await_env_action_step(
+                    "release_keep_alive",
+                    self.rem.release_keep_alive(env_lease),
+                )
+                destroyed = (
+                    released
+                    and bool(env_id is not None)
+                    and await self._await_env_action_step(
+                        "destroy_env",
+                        self.rem.destroy_env(int(env_id)),
+                    )
+                )
                 info["success"] = released and destroyed
                 info["released"] = released
                 info["destroyed"] = destroyed
@@ -1075,8 +1121,17 @@ class ExecutionRunner:
         if env_action == EnvAction.KEEP_ALIVE:
             return
         if env_action == EnvAction.DESTROY:
-            await self.rem.destroy_env(env_id)
+            await self._await_env_action_step(
+                "destroy_env",
+                self.rem.destroy_env(env_id),
+            )
             return
-        env = await self.rem.get_env(env_id)
+        env = await self._await_env_action_step(
+            "get_env",
+            self.rem.get_env(env_id),
+        )
         if env:
-            await self.rem.recycle_env(env)
+            await self._await_env_action_step(
+                "recycle_env",
+                self.rem.recycle_env(env),
+            )
