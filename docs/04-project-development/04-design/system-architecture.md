@@ -7,7 +7,7 @@
 **上游输入：** `technical-selection.md` | 现有 `packages/crawler4j/`, `packages/crawler4j-sdk/`, `packages/crawler4j-contracts/`  
 **下游输出：** `module-boundaries.md` | `api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **关联 ID：** `MOD-001`, `MOD-002`, `MOD-003`, `MOD-004`, `MOD-005`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-009`, `TASK-023`  
-**最后更新：** 2026-04-19  
+**最后更新：** 2026-04-21  
 
 ## 1. 总体结构
 
@@ -35,7 +35,7 @@ Maintainer
 
 ## 2. 核心运行链
 
-1. `src.ui.app:main` 初始化数据库、日志、事件循环与核心服务；其源码位于 `packages/crawler4j/src/ui/app.py`
+1. `src.ui.app:main` 初始化数据库、日志、`qasync` 兼容层与核心服务；当前 UI 生命周期已收敛为单次 `run_until_complete(_run_application(...))` 驱动，避免重复启停 `QApplication.exec()`；其源码位于 `packages/crawler4j/src/ui/app.py`
 2. REM 管理运行环境生命周期与浏览器资源，负责 create/open/connect/stop/destroy，不负责任务工作流编排
 3. ATM 负责任务调度、派发、生命周期 hooks 与任务终态收口
 4. MMS 负责发现、解析、校验和执行模块
@@ -106,3 +106,4 @@ Maintainer
 | 2026-04-15 | 补记 ATM hooks / `TaskSignal` / `WAITING_CONFIRMATION` 已成为正式任务生命周期链 | Codex |
 | 2026-04-19 | 新增“ATM 模块资源池等待队列”下一轮架构设计摘要，并明确其为已确认、待实施方案 | Codex |
 | 2026-04-19 | 固定环境池 Service Job 的等待队列、资源池资格卡片与 FIFO 补位 V1 已实现 | Codex |
+| 2026-04-21 | 补记桌面宿主已新增 `qasync` `_SimpleTimer` 兼容层，并把 UI 启动链改为单次 async 生命周期驱动 | Codex |

@@ -101,6 +101,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-21 | 新增宿主打包态 `qasync` 定时器兼容回归：`test_qasync_compat.py` 现锁定 `_SimpleTimer` 已替换为宿主安全实现，覆盖回调触发与 stop 后不再继续执行两条路径；同时补跑 `test_app.py` / `test_log_console.py` / `test_dashboard.py` / `test_shell.py` 作为 UI 生命周期回归 | Codex |
 | 2026-04-21 | 新增宿主 `qasync` UI 重入回归：`test_env_list_widget.py` 现锁定 REM 环境页异步链路不再在协程内调用阻塞式 `exec()` / 静态 `QMessageBox.*`，`test_dashboard.py` 现锁定仪表盘刷新会在新一轮开始前取消上一轮 pending load，避免 REM 模态提示与定时刷新交错重入 | Codex |
 | 2026-04-20 | `TC-010` 删除对已移除 `test_ctrip_account_ui_smoke.py` 的引用，正式回归命令收口到当前仍存在的 `test_module_data_table_page.py` | Codex |
 | 2026-04-19 | 补充宿主模块管理页 `qasync` 非阻塞对话框回归：`test_module_list_widget.py` 现锁定异步链路不再在协程内调用阻塞式 `exec()`，并覆盖 DevLink 添加成功提示的非阻塞消息框路径 | Codex |

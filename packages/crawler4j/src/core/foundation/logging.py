@@ -124,7 +124,7 @@ class AppLogger:
         if self._initialized:
             return
 
-        self.signals = LogSignals()
+        self._signals: LogSignals | None = None
         self._entries: list[LogEntry] = []
         self._max_entries = 1000
         self._storage_callback: Callable[[LogEntry], None] | None = None
@@ -151,6 +151,12 @@ class AppLogger:
     @property
     def level(self) -> int:
         return self._level
+
+    @property
+    def signals(self) -> LogSignals:
+        if self._signals is None:
+            self._signals = LogSignals()
+        return self._signals
 
     def _install_base_handlers(self) -> None:
         if self._app_handler not in self._root_logger.handlers:
@@ -234,7 +240,8 @@ class AppLogger:
         if len(self._entries) > self._max_entries:
             self._entries = self._entries[-self._max_entries :]
 
-        self.signals.log_added.emit(entry)
+        if self._signals is not None:
+            self._signals.log_added.emit(entry)
 
         if task_id:
             try:
