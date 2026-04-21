@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-04-21 已对齐 VirtualBrowser `addBrowser` 的代理协议口径：宿主创建环境时会把代理 `protocol` 统一转成官方文档示例所用的大写 `HTTP/HTTPS/SOCKS5`，避免继续把 IP 池生成的 `http://user:pass@host:port` 代理以小写协议透传给外部浏览器；同时 `VirtualBrowserClient.add_browser()` 在 `addBrowser` 返回非 2xx 或 `success=false` 时，现会把状态码与响应正文一起写入主日志并抛出带正文的异常，后续排查代理认证失败或外部宿主 500 不再只剩一条裸 `HTTPStatusError`。对应回归当前锁定于 `test_virtualbrowser_client.py` 的协议归一化与 `500` 正文透传断言。
 - 最新修复：2026-04-21 已把 ATM `ExecutionRunner` 的 `on_cleanup` 默认最大执行时间从 `8s` 提高到 `120s`，以便模块在取消或终态收口时完成更长的一轮有界 finalize；当前只放宽 cleanup budget，本地终态 hook / 环境动作的其余 timeout guard 仍保留短超时兜底，避免宿主完全失去收口保护。对应回归当前锁定于 `test_execution_runner.py` 的默认 budget 断言与既有 cleanup 超时路径。
 - 文档：2026-04-21 已修正根 `docs/index.md` 中 `ctrip-real-site-e2e-closeout.md` 导航项的非法 YAML 标题写法，并把测试收口页标题与 `document-index.md` 入口统一收口为普通字符串；当前 `docs-stratego` 不应再因该条 `title` 解析失败而阻塞源仓同步。
 - 最新修复：2026-04-21 已继续收口桌面宿主的 `qasync`/Qt 定时器崩溃链：`src.ui.app:main` 现先对 `qasync` 安装宿主侧 `_SimpleTimer` 兼容补丁，再以单次 `run_until_complete(_run_application(...))` 驱动完整 UI 生命周期，避免在 `PyQt6 6.10.1 + qasync 0.28.0` 组合下继续走 `QObject.startTimer()` 私有路径并多次启停 `QApplication.exec()`；统一日志服务的 `LogSignals(QObject)` 也改为延迟创建，减少 `QApplication` 之前提前实例化全局 `QObject` 的风险。当前直接锁定这条兼容层的是 `test_qasync_compat.py`，UI 启动与日志台相关回归已补跑 `test_app.py` / `test_log_console.py` / `test_dashboard.py` / `test_shell.py`。

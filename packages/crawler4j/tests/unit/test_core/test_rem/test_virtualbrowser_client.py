@@ -109,7 +109,7 @@ async def test_add_browser_uses_canonical_proxy_keys_and_enables_custom_mode():
         name="env-b",
         group_ids=["g1"],
         proxy={
-            "protocol": "SOCKS5",
+            "protocol": "socks5",
             "host": "127.0.0.1",
             "port": "1080",
             "user": "u",
@@ -119,9 +119,50 @@ async def test_add_browser_uses_canonical_proxy_keys_and_enables_custom_mode():
 
     proxy = dummy.last_payload["proxy"]
     assert proxy["mode"] == 2
-    assert proxy["protocol"] == "socks5"
+    assert proxy["protocol"] == "SOCKS5"
     assert proxy["user"] == "u"
     assert proxy["pass"] == "p"
+
+
+@pytest.mark.asyncio
+async def test_add_browser_surfaces_http_failure_response_body(monkeypatch):
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(
+        responses=[
+            {
+                "success": False,
+                "status_code": 500,
+                "error_message": "ERR_PROXY_AUTHENTICATION_FAILED",
+            }
+        ]
+    )
+    error_messages: list[str] = []
+
+    async def _fake_get_client():
+        return dummy
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+    monkeypatch.setattr(provider_module.logger, "error", lambda message: error_messages.append(str(message)))
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"VirtualBrowser addBrowser 失败: status=500 body=\{\"success\":false,\"error\":\"ERR_PROXY_AUTHENTICATION_FAILED\"\}",
+    ):
+        await client.add_browser(
+            name="env-error",
+            group_ids=[],
+            proxy={
+                "protocol": "http",
+                "host": "127.0.0.1",
+                "port": 8080,
+                "user": "bad-user",
+                "pass": "bad-pass",
+            },
+        )
+
+    assert error_messages == [
+        '[VirtualBrowser] addBrowser failed: status=500 body={"success":false,"error":"ERR_PROXY_AUTHENTICATION_FAILED"}'
+    ]
 
 
 @pytest.mark.asyncio

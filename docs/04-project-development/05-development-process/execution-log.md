@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `CR-004`, `CR-005`, `CR-008`, `BUG-013`
-**最后更新：** 2026-04-18
+**最后更新：** 2026-04-21
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-21 | 对齐 VirtualBrowser `addBrowser` 官方代理口径：创建环境时把代理 `protocol` 统一转成大写 `HTTP/HTTPS/SOCKS5`，并在 `addBrowser` 返回非 2xx 或 `success=false` 时把状态码与响应正文透传到宿主日志和异常消息，便于继续定位代理/IP 池创建失败；同步补充 REM 单测锁定协议归一化与 `500` 正文回传 | Codex |
 | 2026-04-18 | 完成 `TASK-022` / `CR-008`：为模块新增 `module_audit_events`、`db.append_event`、`db.query_events`，并把快照数据与审计事件契约同步到正式文档、测试计划与 `.factory/memory/` | Codex |
 | 2026-04-02 | 新增正式执行记录页并登记 Wave 11 文档治理整改结果 | Codex |
 | 2026-04-15 | 修复 VirtualBrowser 创建后 CDP 连接过早失败；补 REM post-create connect 语义与单测 | Codex |

@@ -6,6 +6,7 @@ Provider 层面向具体技术栈，负责实际 spawn/keepalive/kill/healthchec
 """
 
 import asyncio
+import json
 
 from abc import ABC, abstractmethod
 from typing import Any
@@ -1068,7 +1069,7 @@ class VirtualBrowserClient:
             normalized_proxy = dict(proxy)
 
             if "protocol" in normalized_proxy and isinstance(normalized_proxy["protocol"], str):
-                normalized_proxy["protocol"] = normalized_proxy["protocol"].lower()
+                normalized_proxy["protocol"] = normalized_proxy["protocol"].strip().upper()
 
             default_proxy.update(normalized_proxy)
 
@@ -1095,10 +1096,38 @@ class VirtualBrowserClient:
             payload[key] = value
 
         resp = await client.post("/api/addBrowser", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception:
+            data = None
+
+        body = (resp.text or "").strip()
+        if not body and data is not None:
+            try:
+                body = json.dumps(data, ensure_ascii=False)
+            except TypeError:
+                body = str(data)
+
+        if not resp.is_success:
+            detail = f"status={resp.status_code}"
+            if body:
+                detail = f"{detail} body={body}"
+            logger.error(f"[VirtualBrowser] addBrowser failed: {detail}")
+            raise RuntimeError(f"VirtualBrowser addBrowser 失败: {detail}")
+
+        if not isinstance(data, dict):
+            detail = f"status={resp.status_code}"
+            if body:
+                detail = f"{detail} body={body}"
+            logger.error(f"[VirtualBrowser] addBrowser failed: {detail}")
+            raise RuntimeError(f"VirtualBrowser addBrowser 失败: {detail}")
+
         if not data.get("success"):
-            raise RuntimeError(f"API Error: {data.get('msg')}")
+            detail = f"status={resp.status_code}"
+            if body:
+                detail = f"{detail} body={body}"
+            logger.error(f"[VirtualBrowser] addBrowser failed: {detail}")
+            raise RuntimeError(f"VirtualBrowser addBrowser 失败: {detail}")
         
         return data["data"]["id"]
 
