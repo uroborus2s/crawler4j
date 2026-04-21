@@ -1,11 +1,4 @@
-"""关于弹窗。
-
-显示应用信息：
-- 应用图标与名称
-- 版本号与构建信息
-- 版权与官网链接
-- 检查更新按钮
-"""
+"""关于信息组件与弹窗。"""
 
 from __future__ import annotations
 
@@ -25,35 +18,25 @@ from src.core.system.update_service import get_update_service
 from src.core.system.version_service import get_version_service
 from src.ui.app_icon import load_app_icon_pixmap
 
+DOCS_URL = "https://github.com/uroborus2s/crawler4j"
 
-class AboutDialog(QDialog):
-    """关于弹窗。
 
-    符合 SRS 5.10.1 UI 规范：
-    - 顶部: 应用图标
-    - 中部: 应用名称、版本号
-    - 底部: 版权信息、官网链接
-    - 交互: [Check for Updates] 按钮
-    """
+class AboutContentWidget(QWidget):
+    """可复用的关于信息内容。"""
 
-    # 样式常量
-    DIALOG_MIN_WIDTH = 400
-    DIALOG_MIN_HEIGHT = 300
+    CONTENT_MARGIN = 40
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self._setup_window()
+        self.setObjectName("aboutContentWidget")
         self._setup_ui()
         self._load_version_info()
 
-    def _setup_window(self):
-        """配置窗口属性。"""
-        self.setWindowTitle("关于 蛛行演略")
-        self.setMinimumSize(self.DIALOG_MIN_WIDTH, self.DIALOG_MIN_HEIGHT)
-        self.setModal(True)
+    def _setup_ui(self):
+        """构建完整信息布局。"""
         self.setStyleSheet("""
-            QDialog {
-                background-color: #1a1a24;
+            #aboutContentWidget {
+                background-color: transparent;
             }
             QLabel {
                 color: white;
@@ -74,13 +57,15 @@ class AboutDialog(QDialog):
             }
         """)
 
-    def _setup_ui(self):
-        """构建 UI 布局。"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setContentsMargins(
+            self.CONTENT_MARGIN,
+            self.CONTENT_MARGIN,
+            self.CONTENT_MARGIN,
+            self.CONTENT_MARGIN,
+        )
         layout.setSpacing(16)
 
-        # 应用图标
         icon_container = QWidget()
         icon_layout = QHBoxLayout(icon_container)
         icon_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -91,19 +76,16 @@ class AboutDialog(QDialog):
         icon_layout.addWidget(self.icon_label)
         layout.addWidget(icon_container)
 
-        # 应用名称
         name_label = QLabel("蛛行演略 · crawler4j")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(name_label)
 
-        # 版本号
         self.version_label = QLabel("v0.0.0")
         self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.version_label.setStyleSheet("font-size: 14px; color: rgba(255, 255, 255, 0.7);")
         layout.addWidget(self.version_label)
 
-        # 构建信息
         self.build_label = QLabel("")
         self.build_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.build_label.setStyleSheet("font-size: 12px; color: rgba(255, 255, 255, 0.5);")
@@ -111,13 +93,11 @@ class AboutDialog(QDialog):
 
         layout.addStretch()
 
-        # 更新状态
         self.update_status_label = QLabel("")
         self.update_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.update_status_label.setStyleSheet("font-size: 13px;")
         layout.addWidget(self.update_status_label)
 
-        # 检查更新按钮
         btn_container = QWidget()
         btn_layout = QHBoxLayout(btn_container)
         btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -130,14 +110,12 @@ class AboutDialog(QDialog):
 
         layout.addStretch()
 
-        # 版权信息
         copyright_label = QLabel("© 2024-2026 蛛行演略（crawler4j）项目组")
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         copyright_label.setStyleSheet("font-size: 12px; color: rgba(255, 255, 255, 0.5);")
         layout.addWidget(copyright_label)
 
-        # 官网链接
-        link_label = QLabel('<a href="https://crawler4j.example.com" style="color: #6366f1;">crawler4j.example.com</a>')
+        link_label = QLabel(f'<a href="{DOCS_URL}" style="color: #6366f1;">{DOCS_URL}</a>')
         link_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         link_label.setOpenExternalLinks(True)
         layout.addWidget(link_label)
@@ -172,3 +150,31 @@ class AboutDialog(QDialog):
 
         self.update_status_label.setText(service.availability_reason or "❌ 当前无法检查更新。")
         self.update_status_label.setStyleSheet("font-size: 13px; color: #f87171;")
+
+
+class AboutDialog(QDialog):
+    """关于弹窗。"""
+
+    DIALOG_MIN_WIDTH = 400
+    DIALOG_MIN_HEIGHT = 300
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._setup_window()
+        self._setup_ui()
+
+    def _setup_window(self):
+        """配置窗口属性。"""
+        self.setWindowTitle("关于 蛛行演略")
+        self.setMinimumSize(self.DIALOG_MIN_WIDTH, self.DIALOG_MIN_HEIGHT)
+        self.setModal(True)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a24;
+            }
+        """)
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(AboutContentWidget(self))

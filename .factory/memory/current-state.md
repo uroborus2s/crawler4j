@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-04-22 已继续收口系统设置里的 `关于` 页：设置页右侧内容区现直接复用完整版本信息组件，不再额外显示页内 `关于` 标题或 `📋 完整信息` 二次入口，且切到 `关于` 标签时底部 `↺ 恢复默认` 会自动隐藏；关于内容里的官网链接已同步切到 `https://github.com/uroborus2s/crawler4j`，同时顶部状态栏版本号点击出的 `AboutDialog` 弹窗入口保持不变。
 - 最新修复：2026-04-22 已继续打通 macOS Sparkle 内部分发的发布侧签名链：`package-macos-internal-release` 现会在注入 `Sparkle.framework` 并改写 `Info.plist` 后自动对宿主 bundle 执行 ad-hoc `codesign`，避免 `generate_appcast` 再把更新归档判成 `No usable archives found`；同时发布脚本已支持通过 `CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT`、`CRAWLER4J_SPARKLE_PRIVATE_ED_KEY_FILE` 或 `CRAWLER4J_SPARKLE_PRIVATE_ED_KEY` 显式提供 EdDSA 私钥来源。当前本机真实复验已确认：`codesign --verify --deep --strict` 通过，后续阻塞已前移为“若仍缺少私钥则 `generate_appcast` 会报 `Could not sign ... due to lack of private EdDSA key`”。
 - 最新修复：2026-04-22 已把 macOS 内部 Sparkle unsigned 分发的签名口径固化到打包脚本：`package-macos-internal-release` 现会向 `Info.plist` 写入 `SUEnableCodeSigningValidation=false` 与空 `SUPackageSigningCertificate`，关闭宿主 app 的苹果代码签名校验，但继续保留 `SUPublicEDKey` 对更新包的 EdDSA 校验，适配未做 Developer ID / notarization 的内部发布场景。
 - 最新修复：2026-04-22 已把 macOS 内部 Sparkle 发布 DMG 从“纯文件容器”升级为固定 Finder 图标视图：脚本现先生成可写 staging DMG、挂载后用 `osascript + Finder` 摆放 `Crawler4j.app` 与 `Applications`，再通过 `makehybrid -hfs-openfolder` 生成带自动打开目录标记的最终镜像并压缩为发布 DMG；当前直接锁定该布局链的是 `test_packaging_config.py` 的 DMG 命令序列与挂载输出解析回归。

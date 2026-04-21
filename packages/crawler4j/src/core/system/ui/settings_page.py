@@ -40,9 +40,7 @@ from src.core.system.preferences_service import (
     PreferenceKey,
     get_preferences_service,
 )
-from src.core.system.ui.about_dialog import AboutDialog
-from src.core.system.version_service import get_version_service
-from src.ui.app_icon import load_app_icon_pixmap
+from src.core.system.ui.about_dialog import AboutContentWidget
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
@@ -415,67 +413,7 @@ class SettingsPage(QWidget):
         layout = QVBoxLayout(page)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        title = QLabel("关于")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: white;")
-        layout.addWidget(title)
-        layout.addSpacing(16)
-
-        # 版本信息卡片
-        info_card = QFrame()
-        info_card.setStyleSheet("""
-            QFrame {
-                background: rgba(30, 30, 40, 0.8);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 12px;
-                padding: 20px;
-            }
-        """)
-        card_layout = QVBoxLayout(info_card)
-
-        # from src.core.system.version_service import get_version_service (Moved to top)
-        # service = get_version_service()
-        # build_info = service.get_build_info()
-        service = get_version_service()
-        build_info = service.get_build_info()
-
-        title_row = QHBoxLayout()
-        title_row.setSpacing(12)
-
-        icon_label = QLabel()
-        icon_label.setFixedSize(32, 32)
-        icon_pixmap = load_app_icon_pixmap(32)
-        if not icon_pixmap.isNull():
-            icon_label.setPixmap(icon_pixmap)
-        title_row.addWidget(icon_label)
-
-        name_label = QLabel("蛛行演略 · crawler4j")
-        name_label.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
-        title_row.addWidget(name_label)
-        title_row.addStretch()
-        card_layout.addLayout(title_row)
-
-        version_label = QLabel(str(build_info))
-        version_label.setStyleSheet("font-size: 14px; color: rgba(255, 255, 255, 0.7);")
-        card_layout.addWidget(version_label)
-
-        layout.addWidget(info_card)
-        layout.addSpacing(16)
-
-        # 操作按钮
-        btn_layout = QHBoxLayout()
-
-        about_btn = QPushButton("📋 完整信息")
-        about_btn.setStyleSheet(self._btn_style())
-        about_btn.clicked.connect(self._show_about_dialog)
-        btn_layout.addWidget(about_btn)
-
-        check_btn = QPushButton("🔍 检查更新")
-        check_btn.setStyleSheet(self._btn_style())
-        btn_layout.addWidget(check_btn)
-
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
-
+        layout.addWidget(AboutContentWidget(page))
         layout.addStretch()
         return page
 
@@ -565,6 +503,7 @@ class SettingsPage(QWidget):
             cat_id = current.data(Qt.ItemDataRole.UserRole)
             if cat_id in self._pages:
                 self.content_stack.setCurrentWidget(self._pages[cat_id])
+                self.reset_btn.setVisible(cat_id != "about")
 
     def _on_proxy_mode_changed(self, index: int = 0):
         """代理模式变更。"""
@@ -582,11 +521,6 @@ class SettingsPage(QWidget):
         if file_path:
             edit.setText(file_path)
             self._save_preference(pref_key, file_path)
-
-    def _show_about_dialog(self):
-        """显示关于弹窗。"""
-        dialog = AboutDialog(self)
-        dialog.exec()
 
     def _load_settings(self):
         """加载设置。"""
