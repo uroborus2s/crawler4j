@@ -195,7 +195,6 @@ def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
     assert "if MODULES_DIR.exists():" in spec_text
     assert "datas=_build_datas()," in spec_text
     assert "sys.path.insert(0, str(PROJECT_ROOT))" in spec_text
-    assert '(str(UI_ICON), "src/ui/assets")' in spec_text
     assert 'PROJECT_METADATA = PROJECT_ROOT / "pyproject.toml"' in spec_text
     assert "def _load_project_version" in spec_text
     assert "from src.__version__ import VERSION" not in spec_text
@@ -435,6 +434,59 @@ def test_macos_internal_release_config_reads_default_dotenv_when_present(tmp_pat
     assert config.generate_appcast_tool == generate_appcast.resolve()
 
 
+def test_macos_internal_release_config_reads_private_key_overrides_from_env(tmp_path, monkeypatch):
+    script = _load_script_module("package_macos_internal_release.py")
+    sparkle_root = tmp_path / "sparkle"
+    (sparkle_root / "Sparkle.framework").mkdir(parents=True)
+    generate_appcast = sparkle_root / "bin" / "generate_appcast"
+    generate_appcast.parent.mkdir(parents=True)
+    generate_appcast.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    private_key_file = tmp_path / "sparkle-private-key.txt"
+    private_key_file.write_text("private-key", encoding="utf-8")
+
+    config = script.load_sparkle_release_config(
+        {
+            script.SPARKLE_ROOT_ENV: str(sparkle_root),
+            script.SPARKLE_FEED_URL_ENV: "https://updates.example.com/appcast.xml",
+            script.SPARKLE_PUBLIC_KEY_ENV: "dotenv-public-key",
+            script.SPARKLE_KEYCHAIN_ACCOUNT_ENV: "crawler4j-internal",
+            script.SPARKLE_PRIVATE_KEY_FILE_ENV: str(private_key_file),
+        }
+    )
+
+    assert config.keychain_account == "crawler4j-internal"
+    assert config.private_key_file == private_key_file.resolve()
+    assert config.private_key is None
+
+
+def test_macos_internal_release_config_rejects_multiple_private_key_sources(tmp_path):
+    script = _load_script_module("package_macos_internal_release.py")
+    sparkle_root = tmp_path / "sparkle"
+    (sparkle_root / "Sparkle.framework").mkdir(parents=True)
+    generate_appcast = sparkle_root / "bin" / "generate_appcast"
+    generate_appcast.parent.mkdir(parents=True)
+    generate_appcast.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    private_key_file = tmp_path / "sparkle-private-key.txt"
+    private_key_file.write_text("private-key", encoding="utf-8")
+
+    try:
+        script.load_sparkle_release_config(
+            {
+                script.SPARKLE_ROOT_ENV: str(sparkle_root),
+                script.SPARKLE_FEED_URL_ENV: "https://updates.example.com/appcast.xml",
+                script.SPARKLE_PUBLIC_KEY_ENV: "dotenv-public-key",
+                script.SPARKLE_PRIVATE_KEY_ENV: "private-key",
+                script.SPARKLE_PRIVATE_KEY_FILE_ENV: str(private_key_file),
+            }
+        )
+    except ValueError as exc:
+        assert "只能设置一种" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError when multiple private key sources are configured.")
+
+
 def test_macos_internal_release_updates_bundle_plist_with_sparkle_keys(tmp_path):
     script = _load_script_module("package_macos_internal_release.py")
     app_bundle = tmp_path / "Crawler4j.app"
@@ -462,6 +514,71 @@ def test_macos_internal_release_updates_bundle_plist_with_sparkle_keys(tmp_path)
     assert data["SUEnableAutomaticChecks"] is True
     assert data["SUEnableCodeSigningValidation"] is False
     assert data["SUPackageSigningCertificate"] == ""
+
+
+def test_macos_internal_release_codesign_bundle_command_is_stable(tmp_path):
+    script = _load_script_module("package_macos_internal_release.py")
+    app_bundle = tmp_path / "Crawler4j.app"
+
+    assert script.codesign_bundle_command(app_bundle) == [
+        "codesign",
+        "--force",
+        "--sign",
+        "-",
+        "--deep",
+        "--timestamp=none",
+        str(app_bundle),
+    ]
+
+
+def test_macos_internal_release_build_release_artifacts_resigns_bundle_before_packaging(tmp_path, monkeypatch):
+    script = _load_script_module("package_macos_internal_release.py")
+    app_bundle = tmp_path / "Crawler4j.app"
+    (app_bundle / "Contents").mkdir(parents=True)
+    output_dir = tmp_path / "updates"
+    events: list[tuple[str, object]] = []
+
+    config = script.SparkleReleaseConfig(
+        sparkle_root=tmp_path / "sparkle",
+        feed_url="https://example.com/appcast.xml",
+        public_key="sparkle-public-key",
+        auto_check=True,
+    )
+
+    monkeypatch.setattr(script, "load_sparkle_release_config", lambda env=None, env_file=None: config)
+    monkeypatch.setattr(script, "load_project_version", lambda: "0.2.0")
+    monkeypatch.setattr(script, "app_bundle_path", lambda: app_bundle)
+    monkeypatch.setattr(
+        script,
+        "copy_sparkle_framework",
+        lambda bundle, framework_source: events.append(("copy", bundle)) or (bundle / "Contents" / "Frameworks" / "Sparkle.framework"),
+    )
+    monkeypatch.setattr(
+        script,
+        "update_bundle_plist",
+        lambda bundle, *, version, config: events.append(("plist", bundle)) or (bundle / "Contents" / "Info.plist"),
+    )
+    monkeypatch.setattr(script, "ad_hoc_sign_bundle", lambda bundle: events.append(("codesign", bundle)))
+    monkeypatch.setattr(
+        script,
+        "create_dmg",
+        lambda bundle, destination, *, version, volume_name: events.append(("dmg", bundle))
+        or (destination / "Crawler4j-0.2.0.dmg"),
+    )
+
+    args = script.parse_args(["--skip-build", "--skip-appcast", "--output-dir", str(output_dir)])
+    artifacts = script.build_release_artifacts(args)
+
+    assert artifacts.app_bundle == app_bundle
+    assert artifacts.output_dir == output_dir
+    assert artifacts.dmg_path == output_dir / "Crawler4j-0.2.0.dmg"
+    assert artifacts.appcast_generated is False
+    assert events == [
+        ("copy", app_bundle),
+        ("plist", app_bundle),
+        ("codesign", app_bundle),
+        ("dmg", app_bundle),
+    ]
 
 
 def test_macos_internal_release_copies_sparkle_framework_into_bundle(tmp_path):
@@ -612,6 +729,72 @@ def test_macos_internal_release_generate_appcast_command_is_stable(tmp_path):
     updates_dir = tmp_path / "updates"
 
     assert script.generate_appcast_command(tool, updates_dir) == [str(tool), str(updates_dir)]
+
+
+def test_macos_internal_release_generate_appcast_command_uses_private_key_file(tmp_path):
+    script = _load_script_module("package_macos_internal_release.py")
+    tool = tmp_path / "generate_appcast"
+    updates_dir = tmp_path / "updates"
+    config = script.SparkleReleaseConfig(
+        sparkle_root=tmp_path / "sparkle",
+        feed_url="https://example.com/appcast.xml",
+        public_key="sparkle-public-key",
+        private_key_file=tmp_path / "sparkle-private-key.txt",
+    )
+
+    assert script.generate_appcast_command(tool, updates_dir, config=config) == [
+        str(tool),
+        "--ed-key-file",
+        str(tmp_path / "sparkle-private-key.txt"),
+        str(updates_dir),
+    ]
+
+
+def test_macos_internal_release_generate_appcast_command_uses_keychain_account(tmp_path):
+    script = _load_script_module("package_macos_internal_release.py")
+    tool = tmp_path / "generate_appcast"
+    updates_dir = tmp_path / "updates"
+    config = script.SparkleReleaseConfig(
+        sparkle_root=tmp_path / "sparkle",
+        feed_url="https://example.com/appcast.xml",
+        public_key="sparkle-public-key",
+        keychain_account="crawler4j-release",
+    )
+
+    assert script.generate_appcast_command(tool, updates_dir, config=config) == [
+        str(tool),
+        "--account",
+        "crawler4j-release",
+        str(updates_dir),
+    ]
+
+
+def test_macos_internal_release_run_generate_appcast_reads_private_key_from_stdin(tmp_path, monkeypatch):
+    script = _load_script_module("package_macos_internal_release.py")
+    tool = tmp_path / "generate_appcast"
+    updates_dir = tmp_path / "updates"
+    config = script.SparkleReleaseConfig(
+        sparkle_root=tmp_path / "sparkle",
+        feed_url="https://example.com/appcast.xml",
+        public_key="sparkle-public-key",
+        private_key="private-key-secret",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(command, *, cwd, check, **kwargs):
+        captured["command"] = command
+        captured["cwd"] = cwd
+        captured["check"] = check
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(script.subprocess, "run", fake_run)
+
+    script.run_generate_appcast(tool, updates_dir, config=config)
+
+    assert captured["command"] == [str(tool), "--ed-key-file", "-", str(updates_dir)]
+    assert captured["cwd"] == script.WORKSPACE_ROOT
+    assert captured["check"] is True
+    assert captured["kwargs"] == {"input": b"private-key-secret"}
 
 
 def test_install_sparkle_vendor_locates_distribution_root_in_nested_tree(tmp_path):

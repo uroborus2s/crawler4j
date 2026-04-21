@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from scripts import package_desktop_app
@@ -25,6 +25,10 @@ SPARKLE_ROOT_ENV = "CRAWLER4J_SPARKLE_ROOT"
 SPARKLE_FEED_URL_ENV = "CRAWLER4J_SPARKLE_FEED_URL"
 SPARKLE_PUBLIC_KEY_ENV = "CRAWLER4J_SPARKLE_PUBLIC_ED_KEY"
 SPARKLE_APPCAST_TOOL_ENV = "CRAWLER4J_SPARKLE_GENERATE_APPCAST_PATH"
+SPARKLE_PRIVATE_KEY_ENV = "CRAWLER4J_SPARKLE_PRIVATE_ED_KEY"
+SPARKLE_PRIVATE_KEY_FILE_ENV = "CRAWLER4J_SPARKLE_PRIVATE_ED_KEY_FILE"
+SPARKLE_KEYCHAIN_ACCOUNT_ENV = "CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT"
+DEFAULT_SPARKLE_KEYCHAIN_ACCOUNT = "ed25519"
 
 SPARKLE_FRAMEWORK_NAME = "Sparkle.framework"
 SPARKLE_FEED_URL_KEY = "SUFeedURL"
@@ -47,6 +51,9 @@ class SparkleReleaseConfig:
     sparkle_root: Path
     feed_url: str
     public_key: str
+    keychain_account: str = DEFAULT_SPARKLE_KEYCHAIN_ACCOUNT
+    private_key_file: Path | None = None
+    private_key: str | None = field(default=None, repr=False)
     auto_check: bool = True
     generate_appcast_tool: Path | None = None
 
@@ -168,15 +175,29 @@ def load_sparkle_release_config(
     sparkle_root = resolve_sparkle_root(env_map, env_file=env_file)
     feed_url = str(env_map.get(SPARKLE_FEED_URL_ENV, "")).strip()
     public_key = str(env_map.get(SPARKLE_PUBLIC_KEY_ENV, "")).strip()
+    keychain_account = str(env_map.get(SPARKLE_KEYCHAIN_ACCOUNT_ENV, DEFAULT_SPARKLE_KEYCHAIN_ACCOUNT)).strip()
+    private_key = str(env_map.get(SPARKLE_PRIVATE_KEY_ENV, "")).strip() or None
+    private_key_file_value = str(env_map.get(SPARKLE_PRIVATE_KEY_FILE_ENV, "")).strip()
+    private_key_file = Path(private_key_file_value).expanduser().resolve() if private_key_file_value else None
     if not feed_url:
         raise ValueError(f"缺少 {SPARKLE_FEED_URL_ENV}。")
     if not public_key:
         raise ValueError(f"缺少 {SPARKLE_PUBLIC_KEY_ENV}。")
+    private_key_sources = [private_key is not None, private_key_file is not None]
+    if sum(private_key_sources) > 1:
+        raise ValueError(
+            f"{SPARKLE_PRIVATE_KEY_ENV} 与 {SPARKLE_PRIVATE_KEY_FILE_ENV} 只能设置一种私钥来源。"
+        )
+    if private_key_file is not None and not private_key_file.exists():
+        raise ValueError(f"未找到私钥文件: {private_key_file}")
 
     config = SparkleReleaseConfig(
         sparkle_root=sparkle_root,
         feed_url=feed_url,
         public_key=public_key,
+        keychain_account=keychain_account or DEFAULT_SPARKLE_KEYCHAIN_ACCOUNT,
+        private_key_file=private_key_file,
+        private_key=private_key,
         auto_check=True,
         generate_appcast_tool=resolve_generate_appcast_tool(sparkle_root, env_map, env_file=env_file),
     )
@@ -238,6 +259,22 @@ def update_bundle_plist(app_bundle: Path, *, version: str, config: SparkleReleas
         plistlib.dump(data, f)
 
     return plist_path
+
+
+def codesign_bundle_command(app_bundle: Path) -> list[str]:
+    return [
+        "codesign",
+        "--force",
+        "--sign",
+        "-",
+        "--deep",
+        "--timestamp=none",
+        str(app_bundle),
+    ]
+
+
+def ad_hoc_sign_bundle(app_bundle: Path) -> None:
+    subprocess.run(codesign_bundle_command(app_bundle), cwd=WORKSPACE_ROOT, check=True)
 
 
 def dmg_name(version: str) -> str:
@@ -388,12 +425,28 @@ def create_dmg(app_bundle: Path, output_dir: Path, *, version: str, volume_name:
     return dmg_path
 
 
-def generate_appcast_command(tool_path: Path, updates_dir: Path) -> list[str]:
-    return [str(tool_path), str(updates_dir)]
+def generate_appcast_command(
+    tool_path: Path, updates_dir: Path, *, config: SparkleReleaseConfig | None = None
+) -> list[str]:
+    command = [str(tool_path)]
+    if config is not None:
+        if config.private_key is not None:
+            command.extend(["--ed-key-file", "-"])
+        elif config.private_key_file is not None:
+            command.extend(["--ed-key-file", str(config.private_key_file)])
+        elif config.keychain_account:
+            command.extend(["--account", config.keychain_account])
+    command.append(str(updates_dir))
+    return command
 
 
-def run_generate_appcast(tool_path: Path, updates_dir: Path) -> None:
-    subprocess.run(generate_appcast_command(tool_path, updates_dir), cwd=WORKSPACE_ROOT, check=True)
+def run_generate_appcast(tool_path: Path, updates_dir: Path, *, config: SparkleReleaseConfig) -> None:
+    subprocess.run(
+        generate_appcast_command(tool_path, updates_dir, config=config),
+        cwd=WORKSPACE_ROOT,
+        check=True,
+        input=config.private_key.encode("utf-8") if config.private_key is not None else None,
+    )
 
 
 def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None = None) -> SparkleReleaseArtifacts:
@@ -410,9 +463,11 @@ def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None
 
     copied_framework = copy_sparkle_framework(bundle, config.framework_path)
     update_bundle_plist(bundle, version=version, config=config)
+    ad_hoc_sign_bundle(bundle)
 
     print(f"[sparkle] framework copied to {copied_framework}")
     print(f"[sparkle] feed={config.feed_url}")
+    print(f"[codesign] ad-hoc re-signed {bundle}")
 
     dmg_path = create_dmg(bundle, args.output_dir, version=version, volume_name=args.volume_name)
     print(f"[dmg] {dmg_path}")
@@ -423,7 +478,7 @@ def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None
             raise FileNotFoundError(
                 f"未找到 generate_appcast，请设置 {SPARKLE_APPCAST_TOOL_ENV} 或提供 Sparkle bin/ 目录。"
             )
-        run_generate_appcast(config.generate_appcast_tool, args.output_dir)
+        run_generate_appcast(config.generate_appcast_tool, args.output_dir, config=config)
         print(f"[appcast] generated under {args.output_dir}")
         appcast_generated = True
 

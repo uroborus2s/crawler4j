@@ -71,6 +71,7 @@
 
 ## 5. 最近同步
 
+- 2026-04-22：`deployment-guide.md`、根 `README.md`、`packages/crawler4j/README.md` 与 `.env.example` 已同步补记 macOS Sparkle 内部分发的两项新口径：改写 bundle 后自动 ad-hoc 重签，以及 `generate_appcast` 可通过 keychain account / 私钥文件 / 私钥串读取 EdDSA 私钥，不再只依赖默认 `ed25519` 账户名。
 - 2026-04-22：`deployment-guide.md`、运维目录索引、根 `README.md` 与 `packages/crawler4j/README.md` 已同步补记 macOS Sparkle unsigned 内部分发的签名口径：`package-macos-internal-release` 当前会写入 `SUEnableCodeSigningValidation=false` 与空 `SUPackageSigningCertificate`，只关闭宿主 app 的苹果代码签名校验，更新包仍保留 EdDSA 校验。
 - 2026-04-21：已修正根 `docs/index.md` 中 `ctrip-real-site-e2e-closeout.md` 对应导航项的非法 YAML 标题写法，并把测试收口页标题与本文件入口统一收口为普通字符串，恢复 `docs-stratego` 对文档根索引的解析。
 - 2026-04-21：`docs/04-project-development/06-testing-verification/index.md` 与 `test-plan.md` 已同步补记宿主 `qasync` UI 重入回归：REM 环境列表页的创建/编辑/销毁及异步操作提示现统一走非阻塞对话框，仪表盘刷新则改为取消旧 pending load 后再启动新一轮；对应 `.factory/memory/tests.summary.md` 已新增 `TC-043`。

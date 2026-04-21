@@ -47,10 +47,12 @@ cp .env.example .env
 CRAWLER4J_SPARKLE_ROOT=/path/to/sparkle \
 CRAWLER4J_SPARKLE_FEED_URL=https://updates.example.com/crawler4j/appcast.xml \
 CRAWLER4J_SPARKLE_PUBLIC_ED_KEY=<sparkle-public-key> \
+CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT=ed25519 \
 uv run package-macos-internal-release
 
 CRAWLER4J_SPARKLE_FEED_URL=https://updates.example.com/crawler4j/appcast.xml \
 CRAWLER4J_SPARKLE_PUBLIC_ED_KEY=<sparkle-public-key> \
+CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT=ed25519 \
 CRAWLER4J_UPDATE_UPLOAD_TARGET=deploy@example.internal:/srv/nginx/updates/crawler4j/ \
 uv run deploy-macos-internal-release
 ```
@@ -59,7 +61,7 @@ uv run deploy-macos-internal-release
 
 - `uv run install-sparkle --archive ...` 用于把本地下载的 Sparkle release archive 解压到 `packages/crawler4j/vendor/macos/sparkle/`，其中至少应包含 `Sparkle.framework`、`bin/generate_keys` 与 `bin/generate_appcast`
 - 发布脚本会默认读取 workspace 根的 `.env`；仓库提供 `.env.example` 作为模板，也可继续显式传 `--env-file <path>`
-- 该命令会先复用现有 `PyInstaller -> Crawler4j.app` 打包链，再把 `Sparkle.framework` 复制进 bundle，并把 `SUFeedURL` / `SUPublicEDKey` / `SUEnableAutomaticChecks` / `SUEnableCodeSigningValidation=false` / `SUPackageSigningCertificate=""` 写入 `Info.plist`
+- 该命令会先复用现有 `PyInstaller -> Crawler4j.app` 打包链，再把 `Sparkle.framework` 复制进 bundle，并把 `SUFeedURL` / `SUPublicEDKey` / `SUEnableAutomaticChecks` / `SUEnableCodeSigningValidation=false` / `SUPackageSigningCertificate=""` 写入 `Info.plist`；随后会对改写后的 app bundle 自动执行一次 ad-hoc `codesign`
 - 默认更新产物目录为 `packages/crawler4j/dist/updates/macos/`，其中至少包含 `Crawler4j-<version>.dmg`；若本机 Sparkle 分发目录内存在 `bin/generate_appcast`，还会同时生成 `appcast.xml`
 - 当前 DMG 会在构建阶段挂载一次 staging 镜像，并通过 Finder 布局脚本固定窗口尺寸、图标大小与 `Crawler4j.app` / `Applications` 的摆放，用户双击后即可直接拖拽安装
 - `uv run deploy-macos-internal-release` 会在完成上述构建后继续执行 `rsync -av packages/crawler4j/dist/updates/macos/ -> $CRAWLER4J_UPDATE_UPLOAD_TARGET/`；目标既可以是本机 nginx 静态目录，也可以是 `user@host:/srv/nginx/updates/crawler4j/` 这类远端 rsync 路径
@@ -68,6 +70,7 @@ uv run deploy-macos-internal-release
 - DMG 布局步骤依赖本地 Finder 图形会话；若在无桌面会话的 headless macOS 环境中执行，样式化阶段会失败并提示改为在已登录 Finder 的会话中打包
 - `CRAWLER4J_SPARKLE_ROOT` 默认也可指向 `packages/crawler4j/vendor/macos/sparkle/`
 - `CRAWLER4J_SPARKLE_FEED_URL` 与 `CRAWLER4J_SPARKLE_PUBLIC_ED_KEY` 为必填项
+- 若要生成 `appcast.xml`，还必须提供一条私钥来源：`CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT`、`CRAWLER4J_SPARKLE_PRIVATE_ED_KEY_FILE` 或 `CRAWLER4J_SPARKLE_PRIVATE_ED_KEY` 三选一；默认 account 仍是 `ed25519`
 - `CRAWLER4J_UPDATE_UPLOAD_TARGET` 只在 `deploy-macos-internal-release` 中必填；若需要先演练命令形状，可追加 `--dry-run`
 
 ### nginx / HTTPS / 二级域名建议
@@ -146,6 +149,7 @@ uv run python -m crawler4j_sdk.cli.commands --help
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 为 macOS Sparkle 内部分发补上“改写 bundle 后自动 ad-hoc 重签”与私钥来源配置：`generate_appcast` 现支持 keychain account、私钥文件或私钥串三种输入，不再只依赖默认 `ed25519` 账户 | Codex |
 | 2026-04-22 | 补记 macOS 内部 Sparkle unsigned 分发的签名口径：`package-macos-internal-release` 现会写入 `SUEnableCodeSigningValidation=false` 与空 `SUPackageSigningCertificate`，仅关闭宿主代码签名校验，继续保留更新包 EdDSA 校验 | Codex |
 | 2026-04-22 | 将 macOS 内部 DMG 构建改为固定 Finder 图标视图，打开后直接展示 `Crawler4j.app` 与 `Applications` 拖拽安装布局，并补记对 Finder 图形会话的依赖 | Codex |
 | 2026-04-22 | 为 macOS Sparkle 内部分发补齐服务器侧 nginx / HTTPS 配置口径：推荐 `updates.<主域名>`、新增 `deploy/nginx/crawler4j-updates.example.conf` 样板，并说明 Certbot 与静态目录约定 | Codex |
