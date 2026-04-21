@@ -41,3 +41,21 @@ def test_log_console_widget_filters_task_logs_from_same_service(qtbot):
         assert "task-2-log" not in widget.text_edit.toPlainText()
     finally:
         logger._entries = old_entries
+
+
+def test_log_console_widget_batches_duplicate_logs_into_single_line(qtbot):
+    old_entries = list(logger._entries)
+    logger._entries = []
+    try:
+        widget = LogConsoleWidget()
+        qtbot.addWidget(widget)
+
+        for _ in range(5):
+            logger.warning("duplicate-storm-log")
+
+        qtbot.waitUntil(lambda: "duplicate-storm-log" in widget.text_edit.toPlainText())
+        rendered = widget.text_edit.toPlainText()
+        assert rendered.count("duplicate-storm-log") == 1
+        assert "(x5)" in rendered
+    finally:
+        logger._entries = old_entries
