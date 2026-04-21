@@ -7,6 +7,7 @@ import plistlib
 import shutil
 import subprocess
 import tempfile
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,7 @@ APP_ROOT = WORKSPACE_ROOT / "packages" / "crawler4j"
 PACKAGE_PYPROJECT = APP_ROOT / "pyproject.toml"
 DEFAULT_UPDATES_DIR = APP_ROOT / "dist" / "updates" / "macos"
 DEFAULT_SPARKLE_ROOT = APP_ROOT / "vendor" / "macos" / "sparkle"
+DEFAULT_ENV_FILE = WORKSPACE_ROOT / ".env"
 
 SPARKLE_ROOT_ENV = "CRAWLER4J_SPARKLE_ROOT"
 SPARKLE_FEED_URL_ENV = "CRAWLER4J_SPARKLE_FEED_URL"
@@ -28,6 +30,14 @@ SPARKLE_FRAMEWORK_NAME = "Sparkle.framework"
 SPARKLE_FEED_URL_KEY = "SUFeedURL"
 SPARKLE_PUBLIC_KEY_KEY = "SUPublicEDKey"
 SPARKLE_ENABLE_AUTOMATIC_CHECKS_KEY = "SUEnableAutomaticChecks"
+SPARKLE_ENABLE_CODE_SIGNING_VALIDATION_KEY = "SUEnableCodeSigningValidation"
+SPARKLE_PACKAGE_SIGNING_CERTIFICATE_KEY = "SUPackageSigningCertificate"
+
+DMG_WINDOW_BOUNDS = (120, 120, 960, 620)
+DMG_ICON_SIZE = 160
+DMG_TEXT_SIZE = 16
+DMG_APP_POSITION = (220, 250)
+DMG_APPLICATIONS_POSITION = (560, 250)
 
 
 @dataclass(slots=True)
@@ -61,6 +71,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-build", action="store_true", help="Reuse the existing packaged .app.")
     parser.add_argument("--skip-appcast", action="store_true", help="Skip running Sparkle generate_appcast.")
     parser.add_argument(
+        "--env-file",
+        type=Path,
+        help=f"Load release environment variables from a dotenv file (default: {DEFAULT_ENV_FILE} if present).",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=DEFAULT_UPDATES_DIR,
@@ -82,8 +97,47 @@ def load_project_version() -> str:
     return str(pyproject["project"]["version"])
 
 
-def resolve_sparkle_root(env: dict[str, str] | None = None) -> Path:
-    env_map = env or os.environ
+def load_dotenv_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            raise ValueError(f"{path}:{line_number} 缺少 '='。")
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            raise ValueError(f"{path}:{line_number} 缺少环境变量名。")
+        if value and value[0] in {'"', "'"}:
+            quote = value[0]
+            if len(value) < 2 or value[-1] != quote:
+                raise ValueError(f"{path}:{line_number} 引号未闭合。")
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def resolve_runtime_env(env: dict[str, str] | None = None, *, env_file: Path | None = None) -> dict[str, str]:
+    env_map: dict[str, str] = {}
+    dotenv_path = env_file.expanduser().resolve() if env_file else DEFAULT_ENV_FILE
+    if env_file is not None:
+        if not dotenv_path.exists():
+            raise FileNotFoundError(f"未找到 dotenv 文件: {dotenv_path}")
+        env_map.update(load_dotenv_file(dotenv_path))
+    elif dotenv_path.exists():
+        env_map.update(load_dotenv_file(dotenv_path))
+    env_map.update(os.environ)
+    if env:
+        env_map.update(env)
+    return env_map
+
+
+def resolve_sparkle_root(env: dict[str, str] | None = None, *, env_file: Path | None = None) -> Path:
+    env_map = resolve_runtime_env(env, env_file=env_file)
     override = str(env_map.get(SPARKLE_ROOT_ENV, "")).strip()
     root = Path(override).expanduser() if override else DEFAULT_SPARKLE_ROOT
     root = root.resolve()
@@ -94,8 +148,10 @@ def resolve_sparkle_root(env: dict[str, str] | None = None) -> Path:
     return root
 
 
-def resolve_generate_appcast_tool(sparkle_root: Path, env: dict[str, str] | None = None) -> Path | None:
-    env_map = env or os.environ
+def resolve_generate_appcast_tool(
+    sparkle_root: Path, env: dict[str, str] | None = None, *, env_file: Path | None = None
+) -> Path | None:
+    env_map = resolve_runtime_env(env, env_file=env_file)
     override = str(env_map.get(SPARKLE_APPCAST_TOOL_ENV, "")).strip()
     if override:
         candidate = Path(override).expanduser().resolve()
@@ -105,9 +161,11 @@ def resolve_generate_appcast_tool(sparkle_root: Path, env: dict[str, str] | None
     return candidate if candidate.exists() else None
 
 
-def load_sparkle_release_config(env: dict[str, str] | None = None) -> SparkleReleaseConfig:
-    env_map = env or os.environ
-    sparkle_root = resolve_sparkle_root(env_map)
+def load_sparkle_release_config(
+    env: dict[str, str] | None = None, *, env_file: Path | None = None
+) -> SparkleReleaseConfig:
+    env_map = resolve_runtime_env(env, env_file=env_file)
+    sparkle_root = resolve_sparkle_root(env_map, env_file=env_file)
     feed_url = str(env_map.get(SPARKLE_FEED_URL_ENV, "")).strip()
     public_key = str(env_map.get(SPARKLE_PUBLIC_KEY_ENV, "")).strip()
     if not feed_url:
@@ -120,7 +178,7 @@ def load_sparkle_release_config(env: dict[str, str] | None = None) -> SparkleRel
         feed_url=feed_url,
         public_key=public_key,
         auto_check=True,
-        generate_appcast_tool=resolve_generate_appcast_tool(sparkle_root, env_map),
+        generate_appcast_tool=resolve_generate_appcast_tool(sparkle_root, env_map, env_file=env_file),
     )
     if not config.framework_path.exists():
         raise ValueError(f"未找到 Sparkle.framework: {config.framework_path}")
@@ -173,6 +231,8 @@ def update_bundle_plist(app_bundle: Path, *, version: str, config: SparkleReleas
     data[SPARKLE_FEED_URL_KEY] = config.feed_url
     data[SPARKLE_PUBLIC_KEY_KEY] = config.public_key
     data[SPARKLE_ENABLE_AUTOMATIC_CHECKS_KEY] = bool(config.auto_check)
+    data[SPARKLE_ENABLE_CODE_SIGNING_VALIDATION_KEY] = False
+    data[SPARKLE_PACKAGE_SIGNING_CERTIFICATE_KEY] = ""
 
     with plist_path.open("wb") as f:
         plistlib.dump(data, f)
@@ -184,17 +244,80 @@ def dmg_name(version: str) -> str:
     return f"{package_desktop_app.APP_NAME}-{version}.dmg"
 
 
+def writable_dmg_name(version: str) -> str:
+    return f"{package_desktop_app.APP_NAME}-{version}-staging.dmg"
+
+
+def hybrid_dmg_name(version: str) -> str:
+    return f"{package_desktop_app.APP_NAME}-{version}-hybrid.dmg"
+
+
+def parse_hdiutil_attach_plist(output: bytes) -> tuple[str, Path]:
+    data = plistlib.loads(output)
+    entities = data.get("system-entities", [])
+    for entity in entities:
+        mount_point = entity.get("mount-point")
+        if mount_point:
+            return str(entity.get("dev-entry", "")), Path(str(mount_point))
+    raise ValueError("无法从 hdiutil attach 输出中解析挂载点。")
+
+
+def dmg_finder_applescript(volume_name: str, app_name: str) -> str:
+    escaped_volume_name = volume_name.replace("\\", "\\\\").replace('"', '\\"')
+    escaped_app_name = app_name.replace("\\", "\\\\").replace('"', '\\"')
+    left, top, right, bottom = DMG_WINDOW_BOUNDS
+    app_x, app_y = DMG_APP_POSITION
+    applications_x, applications_y = DMG_APPLICATIONS_POSITION
+
+    return textwrap.dedent(
+        f"""
+        tell application "Finder"
+            tell disk "{escaped_volume_name}"
+                open
+                delay 1
+                set current view of container window to icon view
+                set toolbar visible of container window to false
+                set statusbar visible of container window to false
+                set the bounds of container window to {{{left}, {top}, {right}, {bottom}}}
+                set theViewOptions to the icon view options of container window
+                set arrangement of theViewOptions to not arranged
+                set icon size of theViewOptions to {DMG_ICON_SIZE}
+                set text size of theViewOptions to {DMG_TEXT_SIZE}
+                set position of item "{escaped_app_name}" of container window to {{{app_x}, {app_y}}}
+                set position of item "Applications" of container window to {{{applications_x}, {applications_y}}}
+                update without registering applications
+                delay 2
+                close
+                open
+                delay 1
+            end tell
+        end tell
+        """
+    ).strip()
+
+
+def apply_dmg_finder_layout(mounted_volume: Path, *, app_name: str) -> None:
+    script = dmg_finder_applescript(mounted_volume.name, app_name)
+    try:
+        subprocess.run(["osascript", "-e", script], cwd=WORKSPACE_ROOT, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError("DMG Finder 布局设置失败，请在已登录 Finder 图形会话的 macOS 上执行。") from exc
+
+
 def create_dmg(app_bundle: Path, output_dir: Path, *, version: str, volume_name: str) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     dmg_path = output_dir / dmg_name(version)
 
     with tempfile.TemporaryDirectory(prefix="crawler4j-dmg-") as tmpdir:
         staging_root = Path(tmpdir) / volume_name
+        staging_dmg_path = Path(tmpdir) / writable_dmg_name(version)
+        hybrid_source_dir = Path(tmpdir) / f"{package_desktop_app.APP_NAME}-{version}-hybrid-source"
+        hybrid_dmg_path = Path(tmpdir) / hybrid_dmg_name(version)
         staging_root.mkdir(parents=True, exist_ok=True)
         shutil.copytree(app_bundle, staging_root / app_bundle.name, symlinks=True)
         (staging_root / "Applications").symlink_to("/Applications")
 
-        command = [
+        create_command = [
             "hdiutil",
             "create",
             "-ov",
@@ -205,10 +328,62 @@ def create_dmg(app_bundle: Path, output_dir: Path, *, version: str, volume_name:
             "-fs",
             "HFS+",
             "-format",
+            "UDRW",
+            str(staging_dmg_path),
+        ]
+        subprocess.run(create_command, cwd=WORKSPACE_ROOT, check=True)
+
+        mount_point: Path | None = None
+        try:
+            attach_result = subprocess.run(
+                [
+                    "hdiutil",
+                    "attach",
+                    "-readwrite",
+                    "-noverify",
+                    "-noautoopen",
+                    "-plist",
+                    str(staging_dmg_path),
+                ],
+                cwd=WORKSPACE_ROOT,
+                check=True,
+                capture_output=True,
+            )
+            _device, mount_point = parse_hdiutil_attach_plist(attach_result.stdout)
+            apply_dmg_finder_layout(mount_point, app_name=app_bundle.name)
+            shutil.copytree(mount_point, hybrid_source_dir, symlinks=True)
+        finally:
+            if mount_point is not None:
+                subprocess.run(["hdiutil", "detach", str(mount_point)], cwd=WORKSPACE_ROOT, check=True)
+
+        makehybrid_command = [
+            "hdiutil",
+            "makehybrid",
+            "-hfs",
+            "-default-volume-name",
+            volume_name,
+            "-hfs-volume-name",
+            volume_name,
+            "-hfs-openfolder",
+            str(hybrid_source_dir),
+            "-ov",
+            "-o",
+            str(hybrid_dmg_path),
+            str(hybrid_source_dir),
+        ]
+        subprocess.run(makehybrid_command, cwd=WORKSPACE_ROOT, check=True)
+
+        convert_command = [
+            "hdiutil",
+            "convert",
+            str(hybrid_dmg_path),
+            "-ov",
+            "-format",
             "UDZO",
+            "-o",
             str(dmg_path),
         ]
-        subprocess.run(command, cwd=WORKSPACE_ROOT, check=True)
+        subprocess.run(convert_command, cwd=WORKSPACE_ROOT, check=True)
 
     return dmg_path
 
@@ -223,7 +398,7 @@ def run_generate_appcast(tool_path: Path, updates_dir: Path) -> None:
 
 def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None = None) -> SparkleReleaseArtifacts:
     """Build Sparkle-enabled DMG/appcast artifacts for internal macOS releases."""
-    config = load_sparkle_release_config(env)
+    config = load_sparkle_release_config(env, env_file=args.env_file)
     version = load_project_version()
 
     if args.skip_build:

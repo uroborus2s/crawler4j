@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 from pathlib import Path
 
@@ -18,6 +17,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build DMG/appcast and upload them to a server directory.")
     parser.add_argument("--skip-build", action="store_true", help="Reuse the existing packaged .app.")
     parser.add_argument("--skip-appcast", action="store_true", help="Skip running Sparkle generate_appcast.")
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        help=(
+            "Load release environment variables from a dotenv file "
+            f"(default: {package_macos_internal_release.DEFAULT_ENV_FILE} if present)."
+        ),
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -42,7 +49,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def resolve_upload_target(args: argparse.Namespace, env: dict[str, str] | None = None) -> str:
-    env_map = env or os.environ
+    env_map = package_macos_internal_release.resolve_runtime_env(env, env_file=args.env_file)
     target = (args.upload_target or env_map.get(UPLOAD_TARGET_ENV, "")).strip()
     if not target:
         raise ValueError(f"缺少上传目标目录，请传 --upload-target 或设置 {UPLOAD_TARGET_ENV}。")

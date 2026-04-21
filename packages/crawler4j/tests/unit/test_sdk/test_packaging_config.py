@@ -406,6 +406,35 @@ def test_macos_internal_release_config_reads_env_and_vendor_layout(tmp_path, mon
     assert config.generate_appcast_tool == generate_appcast.resolve()
 
 
+def test_macos_internal_release_config_reads_default_dotenv_when_present(tmp_path, monkeypatch):
+    script = _load_script_module("package_macos_internal_release.py")
+    sparkle_root = tmp_path / "sparkle"
+    (sparkle_root / "Sparkle.framework").mkdir(parents=True)
+    generate_appcast = sparkle_root / "bin" / "generate_appcast"
+    generate_appcast.parent.mkdir(parents=True)
+    generate_appcast.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                f"{script.SPARKLE_ROOT_ENV}='{sparkle_root}'",
+                f"{script.SPARKLE_FEED_URL_ENV}='https://updates.example.com/appcast.xml'",
+                f"{script.SPARKLE_PUBLIC_KEY_ENV}='dotenv-public-key'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(script, "DEFAULT_ENV_FILE", dotenv_path)
+
+    config = script.load_sparkle_release_config()
+
+    assert config.sparkle_root == sparkle_root.resolve()
+    assert config.feed_url == "https://updates.example.com/appcast.xml"
+    assert config.public_key == "dotenv-public-key"
+    assert config.generate_appcast_tool == generate_appcast.resolve()
+
+
 def test_macos_internal_release_updates_bundle_plist_with_sparkle_keys(tmp_path):
     script = _load_script_module("package_macos_internal_release.py")
     app_bundle = tmp_path / "Crawler4j.app"
@@ -431,6 +460,8 @@ def test_macos_internal_release_updates_bundle_plist_with_sparkle_keys(tmp_path)
     assert data["SUFeedURL"] == "https://example.com/appcast.xml"
     assert data["SUPublicEDKey"] == "sparkle-public-key"
     assert data["SUEnableAutomaticChecks"] is True
+    assert data["SUEnableCodeSigningValidation"] is False
+    assert data["SUPackageSigningCertificate"] == ""
 
 
 def test_macos_internal_release_copies_sparkle_framework_into_bundle(tmp_path):
@@ -452,28 +483,127 @@ def test_macos_internal_release_create_dmg_uses_hdiutil_with_applications_symlin
     script = _load_script_module("package_macos_internal_release.py")
     app_bundle = tmp_path / "Crawler4j.app"
     (app_bundle / "Contents").mkdir(parents=True)
+    mounted_volume = tmp_path / "Volumes" / "Crawler4j 2"
+    mounted_volume.mkdir(parents=True)
+    (mounted_volume / ".DS_Store").write_text("finder-layout", encoding="utf-8")
 
-    captured: dict[str, object] = {}
+    captured: list[dict[str, object]] = []
 
-    def fake_run(command, *, cwd, check):
-        captured["command"] = command
-        captured["cwd"] = cwd
-        captured["check"] = check
+    attach_plist = plistlib.dumps(
+        {
+            "system-entities": [
+                {"dev-entry": "/dev/disk9"},
+                {
+                    "dev-entry": "/dev/disk9s1",
+                    "mount-point": str(mounted_volume),
+                },
+            ]
+        }
+    )
+
+    class FakeCompletedProcess:
+        def __init__(self, stdout: bytes = b""):
+            self.stdout = stdout
+
+    def fake_run(command, *, cwd, check, **kwargs):
+        captured.append(
+            {
+                "command": command,
+                "cwd": cwd,
+                "check": check,
+                "kwargs": kwargs,
+            }
+        )
+        if command[0:2] == ["hdiutil", "attach"]:
+            return FakeCompletedProcess(stdout=attach_plist)
+        return FakeCompletedProcess()
 
     monkeypatch.setattr(script.subprocess, "run", fake_run)
 
     dmg_path = script.create_dmg(app_bundle, tmp_path / "updates", version="0.2.0", volume_name="Crawler4j")
 
     assert dmg_path == tmp_path / "updates" / "Crawler4j-0.2.0.dmg"
-    command = captured["command"]
-    assert isinstance(command, list)
-    assert command[0:5] == ["hdiutil", "create", "-ov", "-volname", "Crawler4j"]
-    assert command[5] == "-srcfolder"
-    assert command[6] != ""
-    assert command[7:11] == ["-fs", "HFS+", "-format", "UDZO"]
-    assert command[-1] == str(tmp_path / "updates" / "Crawler4j-0.2.0.dmg")
-    assert captured["cwd"] == script.WORKSPACE_ROOT
-    assert captured["check"] is True
+    assert len(captured) == 6
+
+    create_command = captured[0]["command"]
+    assert isinstance(create_command, list)
+    assert create_command[0:5] == ["hdiutil", "create", "-ov", "-volname", "Crawler4j"]
+    assert create_command[5] == "-srcfolder"
+    assert create_command[6] != ""
+    assert create_command[7:11] == ["-fs", "HFS+", "-format", "UDRW"]
+    assert str(create_command[-1]).endswith("Crawler4j-0.2.0-staging.dmg")
+    staging_dmg_path = str(create_command[-1])
+
+    attach_command = captured[1]["command"]
+    assert attach_command == [
+        "hdiutil",
+        "attach",
+        "-readwrite",
+        "-noverify",
+        "-noautoopen",
+        "-plist",
+        staging_dmg_path,
+    ]
+    assert captured[1]["kwargs"] == {"capture_output": True}
+
+    osascript_command = captured[2]["command"]
+    assert osascript_command[0:2] == ["osascript", "-e"]
+    assert "set current view of container window to icon view" in osascript_command[2]
+    assert 'tell disk "Crawler4j 2"' in osascript_command[2]
+    assert 'set position of item "Crawler4j.app" of container window to {220, 250}' in osascript_command[2]
+    assert 'set position of item "Applications" of container window to {560, 250}' in osascript_command[2]
+
+    detach_command = captured[3]["command"]
+    assert detach_command == ["hdiutil", "detach", str(tmp_path / "Volumes" / "Crawler4j 2")]
+
+    makehybrid_command = captured[4]["command"]
+    assert makehybrid_command[0:2] == ["hdiutil", "makehybrid"]
+    assert makehybrid_command[2] == "-hfs"
+    assert makehybrid_command[3] == "-default-volume-name"
+    assert makehybrid_command[4] == "Crawler4j"
+    assert makehybrid_command[5] == "-hfs-volume-name"
+    assert makehybrid_command[6] == "Crawler4j"
+    assert makehybrid_command[7] == "-hfs-openfolder"
+    assert str(makehybrid_command[8]).endswith("Crawler4j-0.2.0-hybrid-source")
+    assert makehybrid_command[9] == "-ov"
+    assert makehybrid_command[10] == "-o"
+    assert str(makehybrid_command[11]).endswith("Crawler4j-0.2.0-hybrid.dmg")
+    assert makehybrid_command[12] == makehybrid_command[8]
+
+    final_convert_command = captured[5]["command"]
+    assert final_convert_command == [
+        "hdiutil",
+        "convert",
+        str(makehybrid_command[11]),
+        "-ov",
+        "-format",
+        "UDZO",
+        "-o",
+        str(tmp_path / "updates" / "Crawler4j-0.2.0.dmg"),
+    ]
+
+    assert all(call["cwd"] == script.WORKSPACE_ROOT for call in captured)
+    assert all(call["check"] is True for call in captured)
+
+
+def test_macos_internal_release_parse_hdiutil_attach_plist_extracts_mount_point(tmp_path):
+    script = _load_script_module("package_macos_internal_release.py")
+    output = plistlib.dumps(
+        {
+            "system-entities": [
+                {"dev-entry": "/dev/disk8"},
+                {
+                    "dev-entry": "/dev/disk8s1",
+                    "mount-point": str(tmp_path / "Volumes" / "Crawler4j"),
+                },
+            ]
+        }
+    )
+
+    device, mount_point = script.parse_hdiutil_attach_plist(output)
+
+    assert device == "/dev/disk8s1"
+    assert mount_point == tmp_path / "Volumes" / "Crawler4j"
 
 
 def test_macos_internal_release_generate_appcast_command_is_stable(tmp_path):
@@ -532,3 +662,20 @@ def test_deploy_macos_internal_release_builds_rsync_command_from_env(tmp_path):
         f"{source_dir.resolve()}/",
         "deploy@example.internal:/srv/updates/crawler4j/",
     ]
+
+
+def test_deploy_macos_internal_release_reads_default_dotenv_for_upload_target(tmp_path, monkeypatch):
+    package_script = _load_script_module("package_macos_internal_release.py")
+    script = _load_script_module("deploy_macos_internal_release.py")
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        f"{script.UPLOAD_TARGET_ENV}='sso.whzhsc.cn:/var/www/crawler4j/'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(package_script, "DEFAULT_ENV_FILE", dotenv_path)
+    monkeypatch.setattr(script.package_macos_internal_release, "DEFAULT_ENV_FILE", dotenv_path)
+    args = script.parse_args([])
+
+    upload_target = script.resolve_upload_target(args)
+
+    assert upload_target == "sso.whzhsc.cn:/var/www/crawler4j/"

@@ -66,6 +66,8 @@ uv run package-desktop
 # macOS 内部 DMG + Sparkle 发布
 uv run install-sparkle --archive ~/Downloads/Sparkle-2.x.y.tar.xz
 
+cp .env.example .env
+
 CRAWLER4J_SPARKLE_ROOT=/path/to/sparkle \
 CRAWLER4J_SPARKLE_FEED_URL=https://updates.example.com/crawler4j/appcast.xml \
 CRAWLER4J_SPARKLE_PUBLIC_ED_KEY=<sparkle-public-key> \
@@ -86,8 +88,8 @@ uv run deploy-macos-internal-release
 
 其中 `build/pyinstaller/...` 只保存 PyInstaller 的分析缓存与中间文件，不是发布物；需要精简工作区时可以删除，下一次 `uv run package-desktop` 会自动重建。macOS 打包完成后，脚本会自动删除 PyInstaller 旁路生成的松散 `Crawler4j/` collect 目录，避免把非分发目录误当成必须随包携带的正式产物。
 
-若需要给小范围内部用户分发带自动更新能力的 macOS 包，继续以 `PyInstaller -> Crawler4j.app` 为底座，再通过 `uv run package-macos-internal-release` 把 `Sparkle.framework`、`SUFeedURL` / `SUPublicEDKey`、DMG 与 `appcast.xml` 串起来。该路径面向“首次手动拖到 `/Applications` 并允许未知开发者”场景，不要求 `Developer ID` / notarization。
-若本机尚未放置 Sparkle 分发目录，可先下载 Sparkle 官方 release archive，再运行 `uv run install-sparkle --archive /path/to/Sparkle-*.tar.xz` 把 `Sparkle.framework` 与 `bin/generate_appcast` 解压到仓库约定的 `packages/crawler4j/vendor/macos/sparkle/`。若要一键打包并推送到 nginx 静态目录，则使用 `uv run deploy-macos-internal-release`，它会先复用现有 DMG/appcast 构建链，再通过 `rsync -av` 把 `packages/crawler4j/dist/updates/macos/` 下的产物同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET` 指定的本地目录或 `user@host:/path/` 目标。服务器端 nginx / 证书样板见 `deploy/nginx/crawler4j-updates.example.conf`，默认推荐把更新子域名固定为 `updates.<主域名>`。
+若需要给小范围内部用户分发带自动更新能力的 macOS 包，继续以 `PyInstaller -> Crawler4j.app` 为底座，再通过 `uv run package-macos-internal-release` 把 `Sparkle.framework`、`SUFeedURL` / `SUPublicEDKey`、DMG 与 `appcast.xml` 串起来。当前生成的 DMG 会固定成 `Crawler4j.app + Applications` 的拖拽安装视图；打包脚本还会把 `SUEnableCodeSigningValidation=false` 和空的 `SUPackageSigningCertificate` 写进 `Info.plist`，仅关闭宿主 app 的苹果代码签名校验，更新包仍继续依赖 `SUPublicEDKey` 做 EdDSA 校验。该路径面向“首次手动拖到 `/Applications` 并允许未知开发者”场景，不要求 `Developer ID` / notarization。
+若本机尚未放置 Sparkle 分发目录，可先下载 Sparkle 官方 release archive，再运行 `uv run install-sparkle --archive /path/to/Sparkle-*.tar.xz` 把 `Sparkle.framework` 与 `bin/generate_appcast` 解压到仓库约定的 `packages/crawler4j/vendor/macos/sparkle/`。发布脚本现在会默认读取 workspace 根的 `.env`；仓库提供了 `.env.example` 模板，可先复制成 `.env` 再填 `CRAWLER4J_SPARKLE_FEED_URL`、`CRAWLER4J_SPARKLE_PUBLIC_ED_KEY`、`CRAWLER4J_UPDATE_UPLOAD_TARGET`。若要一键打包并推送到 nginx 静态目录，则使用 `uv run deploy-macos-internal-release`，它会先复用现有 DMG/appcast 构建链，再通过 `rsync -av` 把 `packages/crawler4j/dist/updates/macos/` 下的产物同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET` 指定的本地目录或 `user@host:/path/` 目标。服务器端 nginx / 证书样板见 `deploy/nginx/crawler4j-updates.example.conf`，默认推荐把更新子域名固定为 `updates.<主域名>`。
 
 ## Packages
 

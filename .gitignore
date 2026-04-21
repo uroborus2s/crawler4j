@@ -131,6 +131,9 @@ htmlcov/
 /screenshots/
 site/
 
+packages/crawler4j/vendor/macos/sparkle/
+!packages/crawler4j/vendor/macos/README.md
+
 .tmphome
 .VSCodeCounter
 **/.obsidian/
