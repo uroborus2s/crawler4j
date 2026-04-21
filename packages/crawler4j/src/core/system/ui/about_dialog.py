@@ -144,11 +144,13 @@ class AboutContentWidget(QWidget):
         self.update_status_label.setText("")
 
         if service.check_for_updates():
-            self.update_status_label.setText("✅ 已打开 Sparkle 更新检查。")
+            self.update_status_label.setText(getattr(service, "last_action_message", "") or "✅ 已开始检查更新。")
             self.update_status_label.setStyleSheet("font-size: 13px; color: #4ade80;")
             return
 
-        self.update_status_label.setText(service.availability_reason or "❌ 当前无法检查更新。")
+        self.update_status_label.setText(
+            getattr(service, "last_action_message", "") or service.availability_reason or "❌ 当前无法检查更新。"
+        )
         self.update_status_label.setStyleSheet("font-size: 13px; color: #f87171;")
 
 

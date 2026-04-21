@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 维护者  
 **上游输入：** `technical-selection.md` | 现有 `packages/crawler4j/`, `packages/crawler4j-sdk/`, `packages/crawler4j-contracts/`  
 **下游输出：** `module-boundaries.md` | `api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
-**关联 ID：** `MOD-001`, `MOD-002`, `MOD-003`, `MOD-004`, `MOD-005`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-009`, `TASK-023`  
-**最后更新：** 2026-04-21  
+**关联 ID：** `MOD-001`, `MOD-002`, `MOD-003`, `MOD-004`, `MOD-005`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-009`, `TASK-023`, `TASK-024`  
+**最后更新：** 2026-04-22  
 
 ## 1. 总体结构
 
@@ -22,7 +22,7 @@ User
 
 Maintainer
   -> Markdown Docs (`docs/`)
-  -> Build / Release (`uv build`, `PyInstaller`, SDK/Contracts build)
+  -> Build / Release (`uv build`, `PyInstaller`, `Velopack`, `Sparkle`, SDK/Contracts build)
   -> Factory Control Plane (`.factory/`)
 ```
 
@@ -35,7 +35,7 @@ Maintainer
 
 ## 2. 核心运行链
 
-1. `src.ui.app:main` 初始化数据库、日志、`qasync` 兼容层与核心服务；当前 UI 生命周期已收敛为单次 `run_until_complete(_run_application(...))` 驱动，避免重复启停 `QApplication.exec()`；其源码位于 `packages/crawler4j/src/ui/app.py`
+1. `src.ui.app:main` 初始化数据库、日志、`qasync` 兼容层与核心服务；在 Windows 打包态且非内嵌 debug 子进程时，入口会先执行 Velopack bootstrap，再进入单次 `run_until_complete(_run_application(...))` 驱动的 UI 生命周期；其源码位于 `packages/crawler4j/src/ui/app.py`
 2. REM 管理运行环境生命周期与浏览器资源，负责 create/open/connect/stop/destroy，不负责任务工作流编排
 3. ATM 负责任务调度、派发、生命周期 hooks 与任务终态收口
 4. MMS 负责发现、解析、校验和执行模块
@@ -55,6 +55,7 @@ Maintainer
 ## 4. 当前最重要的架构事实
 
 - Root app package 的真实桌面入口位于 `packages/crawler4j/src/ui/app.py`
+- Windows 正式发布层已收口为“`PyInstaller onedir` 生成宿主目录，Velopack 负责 installer / package feed / 宿主自更新”；macOS 内部发布继续走 “`PyInstaller.app + Sparkle`”
 - `packages/crawler4j-sdk` 与 `packages/crawler4j-contracts` 已经具备独立包形态
 - `TaskContext` 的宿主扩展能力已收敛到 `ctx.tools.call("<namespace>.<action>", **kwargs)` 单入口
 - 模块生命周期 hooks 已收敛到 ATM 调度的 `module_runtime.py`；`TaskScript` / `TaskFlow` 本身只保留单入口方法
@@ -100,6 +101,7 @@ Maintainer
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 补记 Windows 桌面宿主发布层已新增 `PyInstaller onedir + Velopack` 双阶段链路，且 `src.ui.app:main` 在 Windows 打包态会先执行 Velopack bootstrap | Codex |
 | 2026-03-26 | 基于当前仓库事实重建总体架构摘要 | Codex |
 | 2026-03-26 | 吸收旧总体架构/SRS 的层次与边界结论 | Codex |
 | 2026-04-15 | 补记 `TaskContext.tools` 统一工具接口已成为宿主扩展单入口 | Codex |

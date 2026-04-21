@@ -95,9 +95,9 @@
   },
   "known_risks": [
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
-    "Git tag v0.2.0, formal release assets, and delivery batch binding have not been executed yet.",
-    "Windows desktop delivery artifacts are still missing because the repo does not currently provide a Windows packaging pipeline or runner.",
-    "Latest local validation is green, but release evidence still spans 2026-04-19 retained ctrip records plus 2026-04-20 code/build checks and has not been bound into one formal release batch."
+    "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
+    "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
+    "Latest local validation is green, but release evidence still spans 2026-04-21 full-repo checks plus 2026-04-22 targeted packaging/update checks and has not been bound into one formal release batch."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",

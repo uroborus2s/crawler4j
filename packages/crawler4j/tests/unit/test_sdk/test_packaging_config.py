@@ -151,6 +151,7 @@ def test_workspace_root_declares_console_shortcuts_for_build_and_publish():
     )
     assert pyproject["project"]["scripts"]["install-sparkle"] == "scripts.install_sparkle_vendor:main"
     assert pyproject["project"]["scripts"]["package-desktop"] == "scripts.package_desktop_app:main"
+    assert pyproject["project"]["scripts"]["package-windows-release"] == "scripts.package_windows_release:main"
     assert (
         pyproject["project"]["scripts"]["package-macos-internal-release"]
         == "scripts.package_macos_internal_release:main"
@@ -171,6 +172,7 @@ def test_dev_scripts_live_in_workspace_root_instead_of_app_package():
         "db_cli.py",
         "install_sparkle_vendor.py",
         "package_desktop_app.py",
+        "package_windows_release.py",
         "package_macos_internal_release.py",
         "smoke_test_ui.py",
     }.issubset({path.name for path in root_scripts.glob("*.py")})
@@ -380,6 +382,106 @@ def test_desktop_packaging_script_prunes_macos_collect_dir_after_app_bundle_buil
     assert removed == collect_dir
     assert not collect_dir.exists()
     assert app_bundle.exists()
+
+
+def test_windows_release_config_reads_env_defaults():
+    script = _load_script_module("package_windows_release.py")
+
+    config = script.load_windows_release_config(
+        {
+            script.VELOPACK_FEED_URL_ENV: "https://updates.example.com/crawler4j/windows",
+        }
+    )
+
+    assert config.feed_url == "https://updates.example.com/crawler4j/windows"
+    assert config.pack_id == script.DEFAULT_PACK_ID
+    assert config.channel == script.DEFAULT_CHANNEL
+    assert config.runtime == script.DEFAULT_RUNTIME
+    assert config.main_exe == f"{script.package_desktop_app.APP_NAME}.exe"
+    assert config.vpk_bin == script.DEFAULT_VPK_BIN
+    assert config.use_dnx is False
+
+
+def test_windows_release_write_update_config_to_bundle(tmp_path):
+    script = _load_script_module("package_windows_release.py")
+    bundle_dir = tmp_path / "Crawler4j"
+    bundle_dir.mkdir(parents=True)
+    config = script.WindowsReleaseConfig(
+        feed_url="https://updates.example.com/crawler4j/windows",
+        pack_id="io.github.uroborus2s.crawler4j",
+        channel="win",
+        runtime="win-x64",
+    )
+
+    config_path = script.write_windows_update_config(bundle_dir, config)
+
+    assert config_path == bundle_dir / script.UPDATE_CONFIG_FILENAME
+    payload = script.json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload == {
+        "feed_url": "https://updates.example.com/crawler4j/windows",
+        "pack_id": "io.github.uroborus2s.crawler4j",
+        "channel": "win",
+    }
+
+
+def test_windows_release_build_vpk_pack_command_uses_global_vpk(tmp_path):
+    script = _load_script_module("package_windows_release.py")
+    bundle_dir = tmp_path / "Crawler4j"
+    output_dir = tmp_path / "updates"
+    config = script.WindowsReleaseConfig(
+        feed_url="https://updates.example.com/crawler4j/windows",
+        pack_id="io.github.uroborus2s.crawler4j",
+        channel="win",
+        runtime="win-x64",
+    )
+
+    command = script.build_vpk_pack_command(bundle_dir, output_dir, version="0.2.0", config=config)
+
+    assert command == [
+        "vpk",
+        "pack",
+        "--packId",
+        "io.github.uroborus2s.crawler4j",
+        "--packVersion",
+        "0.2.0",
+        "--packDir",
+        str(bundle_dir),
+        "--outputDir",
+        str(output_dir),
+        "--channel",
+        "win",
+        "--runtime",
+        "win-x64",
+        "--mainExe",
+        "Crawler4j.exe",
+        "--packTitle",
+        script.package_desktop_app.APP_NAME,
+    ]
+
+
+def test_windows_release_build_vpk_pack_command_uses_dnx_when_requested(tmp_path):
+    script = _load_script_module("package_windows_release.py")
+    bundle_dir = tmp_path / "Crawler4j"
+    output_dir = tmp_path / "updates"
+    config = script.WindowsReleaseConfig(
+        feed_url="https://updates.example.com/crawler4j/windows",
+        pack_id="io.github.uroborus2s.crawler4j",
+        channel="win",
+        runtime="win-x64",
+        use_dnx=True,
+    )
+
+    command = script.build_vpk_pack_command(
+        bundle_dir,
+        output_dir,
+        version="0.2.0",
+        config=config,
+        velopack_version="0.0.1298",
+    )
+
+    assert command[:5] == ["dnx", "vpk", "--version", "0.0.1298", "pack"]
+    assert "--packId" in command
+    assert "--mainExe" in command
 
 
 def test_macos_internal_release_config_reads_env_and_vendor_layout(tmp_path, monkeypatch):

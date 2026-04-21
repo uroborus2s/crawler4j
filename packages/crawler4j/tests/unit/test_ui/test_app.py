@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 
 def test_main_dispatches_embedded_debug_worker_before_starting_gui(monkeypatch):
     from src.ui import app
@@ -56,3 +58,31 @@ def test_main_dispatches_embedded_debugpy_adapter_before_starting_gui(monkeypatc
     assert observed["module_name"] == "debugpy.adapter"
     assert observed["run_name"] == "__main__"
     assert observed["argv"] == ["Crawler4j", "--for-server", "32123"]
+
+
+def test_main_bootstraps_host_updater_before_starting_gui(monkeypatch):
+    from src.ui import app
+
+    observed: list[str] = []
+
+    def fake_bootstrap() -> None:
+        observed.append("bootstrap")
+
+    def fake_init_database() -> None:
+        observed.append("init_database")
+
+    class StopAfterBootstrap(RuntimeError):
+        pass
+
+    def fake_get_preferences_service():
+        observed.append("get_preferences_service")
+        raise StopAfterBootstrap
+
+    monkeypatch.setattr(app, "bootstrap_host_updater", fake_bootstrap)
+    monkeypatch.setattr(app, "init_database", fake_init_database)
+    monkeypatch.setattr(app, "get_preferences_service", fake_get_preferences_service)
+
+    with pytest.raises(StopAfterBootstrap):
+        app.main(["Crawler4j"])
+
+    assert observed == ["bootstrap", "init_database", "get_preferences_service"]

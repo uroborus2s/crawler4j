@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`
-**最后更新：** 2026-04-21
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `TASK-024`
+**最后更新：** 2026-04-22
 
 ## `API-001` Root App Entry Contract
 
@@ -16,6 +16,7 @@
 | 目标 | 启动桌面应用 |
 | 当前真实入口 | `src.ui.app:main` |
 | 当前开发入口 | workspace 根执行 `uv run python -m src.ui.app` |
+| 打包态前置动作 | Windows 打包态在 GUI 初始化前先执行 Velopack `App().run()`；内嵌 debug worker / debugpy adapter 子进程必须先短路，不参与宿主自更新 bootstrap |
 | 当前状态 | 已对齐，需持续回归验证 |
 | 关联项 | `BUG-001`, `TASK-002` |
 
@@ -93,6 +94,8 @@
 | 运行时版本读取 | `packages/crawler4j/src/core/system/version_service.py` 从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 | Git tag |
 | 子包版本 | `packages/crawler4j-sdk/pyproject.toml`, `packages/crawler4j-contracts/pyproject.toml` |
+| Windows 发布元数据 | `scripts/package_windows_release.py` 负责把 `feed_url / pack_id / channel` 收口到 Windows 宿主目录内的 `crawler4j.update.json`，供 Velopack 运行时读取 |
+| 桌面更新后端 | macOS 打包态走 Sparkle；Windows 打包安装态走 Velopack；统一对 UI 暴露为 `UpdateService` |
 | 发布文档 | `docs/04-project-development/07-release-delivery/version-governance.md`, `docs/04-project-development/07-release-delivery/release-notes.md` |
 | 当前状态 | 已收口：当前工作区版本与最近正式发布已被明确区分 |
 | 关联项 | `CR-001`, `TASK-004` |
@@ -134,6 +137,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 补记 root app 在 Windows 打包态的 Velopack 启动前置动作，并将 Windows `crawler4j.update.json` 与统一 `UpdateService` 后端分派纳入发布元数据契约 | Codex |
 | 2026-03-26 | 初始接口与契约设计摘要 | Codex |
 | 2026-03-31 | 增补模块根入口自动托管的契约演进设计 | Codex |
 | 2026-04-08 | 补记 `core:data_table` 的本地 UI hook 契约与 DevLink 刷新调试语义 | Codex |

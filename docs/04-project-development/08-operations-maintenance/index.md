@@ -6,7 +6,7 @@
 
 | 页面 | 作用 |
 |---|---|
-| `deployment-guide.md` | 环境准备、启动方式、发布前最小检查，以及 Sparkle unsigned 内部分发与 docs-stratego `main` 分支联动口径 |
+| `deployment-guide.md` | 环境准备、启动方式、发布前最小检查，以及 Windows Velopack / macOS Sparkle 分发口径与 docs-stratego `main` 分支联动说明 |
 | `operations-runbook.md` | 日常巡检、故障分级、应急处理和恢复动作 |
 | `core-maintainer-guide.md` | Core 维护者的第一小时阅读包和同步边界 |
 

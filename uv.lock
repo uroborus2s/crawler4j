@@ -297,6 +297,7 @@ dependencies = [
     { name = "requests" },
     { name = "sinanz" },
     { name = "sqlalchemy" },
+    { name = "velopack", marker = "sys_platform == 'win32'" },
     { name = "watchdog" },
 ]
 
@@ -328,6 +329,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.5" },
     { name = "sinanz", specifier = ">=0.0.1.dev0" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },
+    { name = "velopack", marker = "sys_platform == 'win32'" },
     { name = "watchdog", specifier = ">=4.0.0" },
 ]
 
@@ -1707,6 +1709,17 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1e/24/a2a2ed9addd907787d7aa0355ba36a6cadf1768b934c652ea78acbd59dcd/urllib3-2.6.2.tar.gz", hash = "sha256:016f9c98bb7e98085cb2b4b17b87d2c702975664e4f060c6532e64d1c1a5e797", size = 432930, upload-time = "2025-12-11T15:56:40.252Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6d/b9/4095b668ea3678bf6a0af005527f39de12fb026516fb3df17495a733b7f8/urllib3-2.6.2-py3-none-any.whl", hash = "sha256:ec21cddfe7724fc7cb4ba4bea7aa8e2ef36f607a4bab81aa6ce42a13dc3f03dd", size = 131182, upload-time = "2025-12-11T15:56:38.584Z" },
+]
+
+[[package]]
+name = "velopack"
+version = "0.0.1589.dev41669"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/06/792f02fa5795ece938b29809bd56a591a1f88ea51caf02f04f24559b359e/velopack-0.0.1589.dev41669.tar.gz", hash = "sha256:dceb714861080f42657aa83b375b406922313d8c8108b8db0fae3254667d17f4", size = 97228, upload-time = "2026-04-14T21:45:36.74Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/29/f2/7efd03a62da8386806b18ce4facd5a777b61378bd60c9481004b41e5c031/velopack-0.0.1589.dev41669-cp37-abi3-win32.whl", hash = "sha256:7d4bdfcc582c5d630c627f79235105742e1300167596d2b6c6c9d9b735de1dbd", size = 943475, upload-time = "2026-04-14T21:45:31.893Z" },
+    { url = "https://files.pythonhosted.org/packages/34/9d/79350e3a00e093b42824463ecb5d8c500d8bea6b58a69c95832eb46a9693/velopack-0.0.1589.dev41669-cp37-abi3-win_amd64.whl", hash = "sha256:853c07c32dd875a715c18d436031cc6e1519c299494d66f1fe1692ade1e9a2eb", size = 1187483, upload-time = "2026-04-14T21:45:33.263Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/c5/648f6a035ff7f4e159742165f72ce3c0800a63efd353f8b1802ef8022227/velopack-0.0.1589.dev41669-cp37-abi3-win_arm64.whl", hash = "sha256:ca7e799e4a6671aa19a5725becdb90ccee639d78407d19ba366d95d25476f510", size = 1117978, upload-time = "2026-04-14T21:45:35.119Z" },
 ]
 
 [[package]]

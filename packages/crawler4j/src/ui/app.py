@@ -64,6 +64,13 @@ def install_update_preferences_sync(prefs) -> None:
     prefs.preference_changed.connect(_on_preference_changed)
 
 
+def bootstrap_host_updater() -> None:
+    """Run packaged-app updater bootstrap before the GUI starts."""
+    from src.core.system.update_service import bootstrap_update_runtime
+
+    bootstrap_update_runtime()
+
+
 def _normalize_exit_code(code: object) -> int:
     if code is None:
         return 0
@@ -123,6 +130,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     embedded_adapter_exit_code = _run_embedded_debugpy_adapter_if_requested(argv_list)
     if embedded_adapter_exit_code is not None:
         return embedded_adapter_exit_code
+
+    bootstrap_host_updater()
 
     # 初始化数据库
     init_database()

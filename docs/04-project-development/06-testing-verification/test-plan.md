@@ -6,8 +6,8 @@
 **主要读者：** QA | 开发 | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
-**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `NFR-003`
-**最后更新：** 2026-04-20
+**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `NFR-003`
+**最后更新：** 2026-04-22
 
 ## 1. 测试目标
 
@@ -40,6 +40,8 @@
 | `TC-012` `uv run pytest packages/crawler4j/tests/unit/test_sdk/test_assembler.py packages/crawler4j/tests/unit/test_core/test_atm/test_dispatcher_hooks.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_runtime.py -q` | 通过 | 2026-04-16 覆盖 `ModuleAssembler` 导入错误可见性、DevLink 普通执行 reload 注入，以及同一执行上下文只 reload 一次 |
 | `TC-024` `uv run pytest packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_sdk/test_data_capability.py -q` | 通过 | 2026-04-18 覆盖 `module_audit_events`、`db.append_event` / `db.query_events`、模块级清理与 SDK 工具能力面 |
 | `TC-025` `uv run pytest packages/crawler4j/tests/acceptance -q` | 通过 | 2026-04-19 新增 acceptance 夹具，覆盖 CLI 脚手架到 `package verify`、`host devlink`、本地 ZIP `preview/apply` 与验收 gate 命令矩阵 |
+| `TC-044` `uv run pytest packages/crawler4j/tests/unit/test_core/test_system/test_update_service.py -q` | 通过 | 2026-04-22 补齐 Windows Velopack / macOS Sparkle 后端分派、状态消息与启动时 bootstrap 分流回归 |
+| `TC-045` `uv run pytest packages/crawler4j/tests/unit/test_sdk/test_packaging_config.py -q` | 通过 | 2026-04-22 补齐 `package-windows-release` 命令、Velopack 配置写入、`vpk` 命令形状与 root script 暴露回归 |
 
 ## 4. 重点覆盖项
 
@@ -54,6 +56,7 @@
 | `CR-003` / 模块 UI 调试回归 | `core:data_table` 页面声明刷新、模块本地 CRUD hook 与 DevLink 调试重载 | MMS 单测（`test_module_data_table_page.py`） |
 | `BUG-013` / `CR-005` | 发现错误可见、DevLink 普通执行热更新 | SDK 单测 + ATM/MMS 单测 |
 | `REQ-004` / `RISK-003` | 版本与 release 口径一致 | 元数据对照检查 |
+| `CR-010` / Windows 发布闭环 | Windows `PyInstaller onedir + Velopack` 打包、自更新桥接与宿主更新配置一致 | 脚本回归 + `UpdateService` 单测 + 文档同步检查 |
 | `NFR-003` | lint 质量门清晰 | `uv run ruff check .` 达成约定范围 |
 | `REQ-003` / `REQ-006` | SDK CLI 与宿主安装链的正式验收夹具 | `packages/crawler4j/tests/acceptance/` + 现有 CLI / host 集成测试 |
 
@@ -71,6 +74,7 @@
 - 没有覆盖 `ctrip labor_workflow` 真实站点 E2E 验证
 - `REQ-009` 当前已完成 V1 实现级单测与 SDK 契约回归，但仍缺真实业务模块接入和更高层集成验证
 - `REQ-009` 当前仍缺真实业务模块接入和更高层集成验证；当前回归主要停留在宿主 / SDK 单测
+- `CR-010` 当前只完成本地脚本/单元级验证，仍缺 Windows 真机打包、安装、升级与签名验证
 - 真实站点 E2E 的执行口径现已单独收敛到 `ctrip-real-site-e2e-closeout.md`
 
 ## 6.1 `REQ-006` 已完成覆盖
@@ -101,6 +105,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 新增 `TC-044` / `TC-045`，补齐 Windows Velopack 更新服务与发布脚本回归计划；同时登记 `CR-010` 当前仍缺 Windows 真机安装/升级验证 | Codex |
 | 2026-04-21 | 新增宿主打包态 `qasync` 定时器兼容回归：`test_qasync_compat.py` 现锁定 `_SimpleTimer` 已替换为宿主安全实现，覆盖回调触发与 stop 后不再继续执行两条路径；同时补跑 `test_app.py` / `test_log_console.py` / `test_dashboard.py` / `test_shell.py` 作为 UI 生命周期回归 | Codex |
 | 2026-04-21 | 新增宿主 `qasync` UI 重入回归：`test_env_list_widget.py` 现锁定 REM 环境页异步链路不再在协程内调用阻塞式 `exec()` / 静态 `QMessageBox.*`，`test_dashboard.py` 现锁定仪表盘刷新会在新一轮开始前取消上一轮 pending load，避免 REM 模态提示与定时刷新交错重入 | Codex |
 | 2026-04-20 | `TC-010` 删除对已移除 `test_ctrip_account_ui_smoke.py` 的引用，正式回归命令收口到当前仍存在的 `test_module_data_table_page.py` | Codex |

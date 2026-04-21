@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/01-governance/project-charter.md` | `docs/04-project-development/03-requirements/prd.md` | `crawler4j-model` 技术画像
 **下游输出：** `system-architecture.md` | `module-boundaries.md` | `api-design.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **关联 ID：** `REQ-003`, `REQ-006`, `NFR-001`, `NFR-003`
-**最后更新：** 2026-04-02
+**最后更新：** 2026-04-22
 
 **当前阶段：** DESIGN
 **技术画像：** Crawler4j Model 项目画像
@@ -40,6 +40,14 @@
 - 新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。
 - 调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。
 - 改动 SDK CLI、模板、模块契约或 Core 集成行为时，同时更新模块开发文档与回归测试。
+
+## 桌面宿主发布补充约束
+
+- 桌面宿主统一以 `PyInstaller` 作为编译基线，不为不同平台引入第二套应用编译产物。
+- macOS 小范围内部发布固定走 `PyInstaller.app + Sparkle`，由 `uv run package-macos-internal-release` 生成 DMG 与 `appcast.xml`。
+- Windows 正式发布固定走 `PyInstaller onedir + Velopack`，由 `uv run package-windows-release` 生成 `Setup.exe`、`.nupkg` 与 `releases.<channel>.json`。
+- Windows 宿主更新必须保持“应用可变数据不写入安装目录”的边界；当前 `%APPDATA%/Crawler4j/` 数据目录与 Velopack 的安装/替换模型兼容，不允许回退到把运行期数据写回安装目录的方案。
+- Windows 正式安装默认使用 Velopack `Setup.exe` 的 per-user 安装路径，不把当前方案收口到 `Program Files` 或管理员权限安装。
 
 ## 管理后台要求
 

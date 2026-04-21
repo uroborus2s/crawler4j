@@ -9,6 +9,13 @@
 
 适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml` 契约（含只读 `config_defaults` 初始化模板）、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。
 
+## 桌面宿主发布补充栈
+
+- 桌面宿主编译基线固定为 `PyInstaller`。
+- macOS 内部发布固定为 `PyInstaller.app + Sparkle`。
+- Windows 正式发布固定为 `PyInstaller onedir + Velopack`。
+- 宿主可变运行数据继续落在应用数据目录，不回写安装目录。
+
 ## 项目范围
 
 - Crawler4j 标准模块项目

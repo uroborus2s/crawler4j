@@ -7,7 +7,7 @@
 **上游输入：** `acceptance-checklist.md` | `release-notes.md` | `version-governance.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** 交付签收 | `docs/02-user-guide/admin-guide.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-005`, `REL-006`, `TASK-017`, `REQ-004`
-**最后更新：** 2026-04-21
+**最后更新：** 2026-04-22
 
 ## 1. 用途
 
@@ -33,7 +33,7 @@
 | 部署与运行文档 | 已具备 | 部署说明、运行手册、管理员指南已补齐 |
 | macOS 桌面包 | 已具备本地构建验证 | `uv run package-desktop` 现固定把 macOS bundle 生成到 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，且分发目录只保留该 `.app`；PyInstaller 中间产物固定放在 `packages/crawler4j/build/pyinstaller/macos/` |
 | macOS 内部 Sparkle 更新包 | 已具备本地构建/上传脚手架 | `uv run install-sparkle --archive ...` 可先把 Sparkle release archive 落到仓库约定目录；`uv run package-macos-internal-release` 生成内部 DMG 与 `appcast.xml`；`uv run deploy-macos-internal-release` 则会继续把 `packages/crawler4j/dist/updates/macos/` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET` |
-| Windows 桌面包 | 阻塞 | 当前仓库没有 Windows 打包链、CI runner 或正式产物，不能声称“已交付 Windows 下载包” |
+| Windows 桌面包 | 已具备发布脚手架，待正式批次补齐证据 | 仓库已具备 `PyInstaller onedir + Velopack` 发布链，`uv run package-windows-release` 可生成 `Setup.exe` / `.nupkg` / `releases.<channel>.json`；但当前批次仍缺 Windows 真机签名、安装、升级留证与正式下载地址 |
 | 正式交付产物 | 待发布时补齐 | 当前只有本地验证产物，不等于已形成可对外下载的正式发布物 |
 
 ## 4. 使用规则
@@ -46,6 +46,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 补记 Windows 发布能力边界：当前仓库已具备 `package-windows-release` 与 Velopack 更新目录脚手架，但仍未形成带真机留证的正式 Windows 下载包 | Codex |
 | 2026-04-21 | 补记 macOS 内部 Sparkle 更新包：当前仓库已具备 DMG / `appcast.xml` 生成脚手架，但仍依赖本机提供 Sparkle 分发目录与 EdDSA 发布配置 | Codex |
 | 2026-04-20 | 补记当前交付能力边界：macOS PyInstaller bundle 已完成本地复验，Windows 桌面包仍缺打包链与正式产物 | Codex |
 | 2026-04-02 | 新增正式交付包清单并登记当前基线可复用材料 | Codex |

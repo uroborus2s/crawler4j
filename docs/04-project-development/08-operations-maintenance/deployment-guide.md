@@ -34,8 +34,33 @@ uv run python -m src.ui.app
 - 若需要打包，PyInstaller 规格位于 `packages/crawler4j/crawler4j.spec`
 - 正式桌面打包入口统一为 `uv run package-desktop`
 - 当前 macOS 最终可分发产物固定为 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，不需要再额外携带旁边的 `Crawler4j/` collect 目录
+- 当前 Windows 正式发布入口固定为 `uv run package-windows-release`，它会先复用 `package-desktop` 产出的 `PyInstaller onedir` 宿主目录，再继续生成 Velopack 安装器与更新目录
 - 若需要小范围内部 DMG 分发并启用 Sparkle 自动更新，使用 `uv run package-macos-internal-release`
 - PyInstaller 现已显式收集 `sinanz` 的共享 `resources/` 目录；滑块验证码运行时会从其中的 `resources/models/` 解析 `slider_gap_locator.onnx`
+
+### Windows Setup.exe + Velopack 发布
+
+```bash
+cp .env.example .env
+
+CRAWLER4J_VELOPACK_FEED_URL=https://updates.example.com/crawler4j/windows \
+uv run package-windows-release
+```
+
+说明：
+
+- 该命令会先复用 `uv run package-desktop` 的 Windows `PyInstaller onedir` 结果，默认输入目录为 `packages/crawler4j/dist/desktop/windows/Crawler4j/`
+- 随后脚本会在 onedir 根目录写入 `crawler4j.update.json`，把 Windows 宿主运行时需要的 `feed_url / pack_id / channel` 收口为同一事实源
+- 默认 Velopack 输出目录为 `packages/crawler4j/dist/updates/windows/`，其中通常包含 `Setup.exe`、`RELEASES*` 清单与 `.nupkg` 包
+- `CRAWLER4J_VELOPACK_FEED_URL` 为必填项；正式口径建议固定为 `https://updates.example.com/crawler4j/windows`
+- `CRAWLER4J_VELOPACK_PACK_ID` 默认为 `io.github.uroborus2s.crawler4j`
+- `CRAWLER4J_VELOPACK_CHANNEL` 默认为 `win`
+- `CRAWLER4J_VELOPACK_RUNTIME` 默认为 `win-x64`
+- 若本机已全局安装 `vpk`，脚本默认直接调用它；若希望强制使用与 Python `velopack` 运行时同版本的 CLI，可设置 `CRAWLER4J_VPK_USE_DNX=1`，脚本会改为调用 `dnx vpk --version <当前 velopack 版本>`
+- 若需要显式指定 `vpk` 可执行文件路径，可设置 `CRAWLER4J_VPK_BIN=/absolute/path/to/vpk`
+- Velopack Windows 安装目录默认位于 `%LocalAppData%\\<packId>\\current`。更新时会整体替换 `current/`，所以任何可变文件都不能写在程序目录里；`crawler4j` 当前应用数据继续落在 `%APPDATA%/Crawler4j/`，与这条约束兼容
+- Windows 宿主自更新只对“通过 Velopack Setup 安装”的客户端生效；如果用户直接运行裸 `PyInstaller onedir` 目录，`检查更新` 会明确提示当前不是正式安装态
+- Velopack 官方当前明确说明 Windows 不支持安装到 `C:\\Program Files` 这类特权目录；本仓当前也不提供管理员安装模式
 
 ### macOS 内部 DMG + Sparkle 发布
 
@@ -79,11 +104,13 @@ uv run deploy-macos-internal-release
 
 - 建议把 macOS 更新站点单独放在 `updates.<主域名>`，例如 `updates.example.com`；这样路径稳定、语义直观，也方便后续继续在同一子域名下挂更多桌面更新产物
 - Sparkle feed URL 固定为 `https://updates.example.com/crawler4j/appcast.xml`
+- Windows Velopack feed URL 固定为 `https://updates.example.com/crawler4j/windows`
 - 服务器静态目录固定为 `/srv/nginx/updates/crawler4j/`，与 `CRAWLER4J_UPDATE_UPLOAD_TARGET=deploy@updates-host:/srv/nginx/updates/crawler4j/` 保持一致
 - 仓库已提供 nginx 样板配置 `deploy/nginx/crawler4j-updates.example.conf`；上线时只需要替换域名、证书路径和服务器用户
 - 如果域名能被公网解析，优先执行 `sudo certbot --nginx -d updates.example.com` 申请 Let's Encrypt；如果是纯内网域名，则改用企业内部 CA 或已有证书体系，并把样板里的 `ssl_certificate*` 路径替换为实际文件
 - 上述样板默认把 `appcast.xml` 设为短缓存、把 `.dmg/.pkg/.zip` 设为长缓存，避免 Sparkle 长时间拿旧清单，同时不浪费大文件带宽
-- 首次上线至少确认 DNS 已解析到更新服务器，再执行 `curl -I https://updates.example.com/crawler4j/appcast.xml` 和 `curl -I https://updates.example.com/crawler4j/Crawler4j-<version>.dmg`；两者都应返回 `200`
+- Windows 更新目录建议直接作为静态目录对外暴露，确保 `RELEASES*` 与 `.nupkg` 文件能被直接下载
+- 首次上线至少确认 DNS 已解析到更新服务器，再执行 `curl -I https://updates.example.com/crawler4j/appcast.xml`、`curl -I https://updates.example.com/crawler4j/Crawler4j-<version>.dmg` 和 `curl -I https://updates.example.com/crawler4j/windows/RELEASES`；都应返回 `200`
 
 ### 测试
 
@@ -149,6 +176,7 @@ uv run python -m crawler4j_sdk.cli.commands --help
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 新增 Windows `PyInstaller onedir + Velopack` 发布口径，说明 `package-windows-release` 的环境变量、输出目录、安装边界和与 `%APPDATA%/Crawler4j/` 的持久化兼容关系 | Codex |
 | 2026-04-22 | 为 macOS Sparkle 内部分发补上“改写 bundle 后自动 ad-hoc 重签”与私钥来源配置：`generate_appcast` 现支持 keychain account、私钥文件或私钥串三种输入，不再只依赖默认 `ed25519` 账户 | Codex |
 | 2026-04-22 | 补记 macOS 内部 Sparkle unsigned 分发的签名口径：`package-macos-internal-release` 现会写入 `SUEnableCodeSigningValidation=false` 与空 `SUPackageSigningCertificate`，仅关闭宿主代码签名校验，继续保留更新包 EdDSA 校验 | Codex |
 | 2026-04-22 | 将 macOS 内部 DMG 构建改为固定 Finder 图标视图，打开后直接展示 `Crawler4j.app` 与 `Applications` 拖拽安装布局，并补记对 Finder 图形会话的依赖 | Codex |
