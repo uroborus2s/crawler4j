@@ -19,7 +19,7 @@ def test_pyinstaller_spec_binds_runtime_and_bundle_icon_assets():
 def test_shared_app_icon_assets_exist_and_legacy_jpg_is_removed():
     assets_root = APP_ROOT / "src" / "ui" / "assets"
 
-    assert (assets_root / "app_icon.svg").exists()
     assert (assets_root / "app_icon.png").exists()
     assert (assets_root / "app_icon.icns").exists()
+    assert not (assets_root / "app_icon.svg").exists()
     assert not (assets_root / "icon.jpg").exists()
