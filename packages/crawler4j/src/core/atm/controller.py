@@ -21,8 +21,13 @@ from src.core.atm.run_profile import AcquisitionMode
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
+from src.core.mms.service import get_module_service
 from src.core.mms.release_service import assert_module_upgrade_unlocked
 from src.core.rem.manager import get_environment_manager, normalize_resource_pool_module_name
+
+
+class InvalidJobConfigurationError(ValueError):
+    """作业运行模板组合无效。"""
 
 
 class JobController:
@@ -93,8 +98,53 @@ class JobController:
             raise ValueError(f"Job {job_id} not found")
         await self._ensure_runtime_for_job(job)
 
+    @staticmethod
+    def _validate_service_select_wait_semantics(job: Job, run_profile) -> None:
+        if job.type != JobType.SERVICE:
+            return
+
+        acquisition = run_profile.resource.acquisition if run_profile.resource else None
+        if not acquisition or acquisition.mode != AcquisitionMode.SELECT:
+            return
+
+        selector_name = str(acquisition.selector_name or "").strip()
+        resource_pool = str(acquisition.resource_pool or "").strip()
+        if not selector_name or resource_pool:
+            return
+
+        module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
+        if not module_name:
+            return
+
+        try:
+            selector_infos = get_module_service().list_env_selectors(module_name)
+        except Exception:
+            return
+
+        info = next((item for item in selector_infos if item.name == selector_name), None)
+        if info and getattr(info, "returns_none", False):
+            raise InvalidJobConfigurationError(
+                f"Service Job 使用会返回 none 的环境选择器时必须配置 resource_pool: {module_name}.{selector_name}"
+            )
+
+    async def _pause_job_after_invalid_precheck(self, job: Job, error: Exception, *, source: str) -> bool:
+        if not isinstance(error, InvalidJobConfigurationError):
+            return False
+        if job.state != JobState.ACTIVE:
+            return False
+
+        job.state = JobState.PAUSED
+        job.updated_at = int(time.time())
+        await self.repo.save_job(job)
+        await self.request_job_stop(job.id)
+        logger.error(
+            f"[ATM] Job {job.id} paused due to invalid runtime configuration during {source}: {error}"
+        )
+        return True
+
     async def _ensure_runtime_for_job(self, job: Job):
         run_profile = resolve_job_run_profile(job)
+        self._validate_service_select_wait_semantics(job, run_profile)
         module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
         if module_name:
             assert_module_upgrade_unlocked(module_name)
@@ -198,6 +248,8 @@ class JobController:
                 try:
                     await self._ensure_runtime_for_job(job)
                 except Exception as e:
+                    if await self._pause_job_after_invalid_precheck(job, e, source="service_reconcile"):
+                        return
                     logger.warning(f"[ATM] Job {job.id} scale-up blocked by runtime precheck: {e}")
                     return
                 logger.debug(f"[ATM] Job {job.id} scaling up: {current_count} -> {target} (+{needed})")
@@ -232,6 +284,8 @@ class JobController:
             try:
                 await self._ensure_runtime_for_job(job)
             except Exception as e:
+                if await self._pause_job_after_invalid_precheck(job, e, source="bootstrap"):
+                    continue
                 logger.error(f"[ATM] Job {job.id} runtime precheck failed at bootstrap: {e}")
                 continue
             await self._reconcile_job(job)

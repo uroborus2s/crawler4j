@@ -108,6 +108,7 @@ test -f module.yaml && echo ok || echo bad
 
 - 要进入等待队列，必须是 `Service Job + select + resource_pool`
 - 只有 `selector_name` 的旧模式里，`select_env(...)` 返回 `None` 会直接失败
+- 从 `2026-04-22` 起，宿主会在 runtime precheck 阶段拦截 `Service Job + select + returns_none selector + empty resource_pool` 这类会导致持续补单的无效组合，并自动把该作业暂停，避免应用启动后被高频失败任务拖死
 - `selector_name` 留空并不是报错；宿主会直接选当前池里的第一个可分配候选
 - 如果你保留 selector，真正要检查的是 `module_runtime.py` 里通过 `@env_selector(...)` 声明的函数，而不是去找一个名叫 `select_env` 的自定义 hook
 

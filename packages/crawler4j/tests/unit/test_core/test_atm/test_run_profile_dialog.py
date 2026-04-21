@@ -64,6 +64,48 @@ def _patch_dialog_dependencies(monkeypatch):
     )
 
 
+def _patch_ctrip_dialog_dependencies(monkeypatch):
+    import src.core.atm.ui.run_profile_dialog as dialog_module
+
+    module = SimpleNamespace(
+        name="ctrip_crawler",
+        manifest=SimpleNamespace(
+            workflows=[
+                SimpleNamespace(name="web_quiz_workflow", display_name="网页做题"),
+            ]
+        ),
+    )
+    registry = SimpleNamespace(
+        list_modules=lambda: [module],
+        get_module=lambda name: module if name == "ctrip_crawler" else None,
+        refresh=lambda: None,
+    )
+    pool = SimpleNamespace(id="pool-1", name="主池")
+
+    monkeypatch.setattr(dialog_module, "get_module_registry", lambda: registry)
+    monkeypatch.setattr(
+        dialog_module,
+        "get_ip_pool_manager",
+        lambda: SimpleNamespace(list_pools=lambda: [pool]),
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "get_module_service",
+        lambda: SimpleNamespace(
+            list_env_selectors=lambda module_name: [
+                SimpleNamespace(
+                    name="reuse_bound_account_env",
+                    display_name="复用已绑定账号环境",
+                    description="在当前资源池候选内复用已绑定账号环境",
+                    returns_none=True,
+                ),
+            ]
+            if module_name == "ctrip_crawler"
+            else []
+        ),
+    )
+
+
 def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
@@ -272,6 +314,41 @@ def test_run_profile_dialog_warns_when_selector_returns_none(qtbot, monkeypatch)
 
     assert dialog.selector_none_hint.isHidden() is False
     assert "返回了 none" in dialog.selector_none_hint.text()
+
+
+def test_run_profile_dialog_autofills_required_pool_for_ctrip_reuse_selector(qtbot, monkeypatch):
+    _patch_ctrip_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("ctrip_crawler", "web_quiz_workflow")
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("reuse_bound_account_env"))
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert dialog.resource_pool_edit.text() == "bound_account_ready"
+    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
+
+
+def test_run_profile_dialog_requires_bound_pool_for_ctrip_reuse_selector(qtbot, monkeypatch):
+    _patch_ctrip_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("ctrip_crawler", "web_quiz_workflow")
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("reuse_bound_account_env"))
+    dialog.resource_pool_edit.clear()
+
+    with pytest.raises(ValueError, match="bound_account_ready"):
+        dialog._build_run_profile_from_form()
 
 
 def test_run_profile_dialog_randomizes_user_agent_with_selected_version(qtbot, monkeypatch):

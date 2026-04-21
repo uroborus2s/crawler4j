@@ -233,6 +233,53 @@ async def test_service_job_scale_up_skips_when_runtime_check_fails_before_dispat
 
 
 @pytest.mark.asyncio
+async def test_service_job_with_returns_none_selector_without_pool_is_paused(monkeypatch):
+    controller = JobController()
+    job = Job(
+        id="service-job-invalid-selector",
+        name="service-invalid-selector",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.SELECT,
+                    selector_name="return_none",
+                    resource_pool="",
+                ),
+            ),
+            execution=ExecutionContext(module="demo_module", workflow="repair"),
+        ),
+        concurrency_target=1,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+    controller.repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        count_active_tasks=AsyncMock(return_value=0),
+        save_job=AsyncMock(),
+    )
+    controller.dispatcher = SimpleNamespace(
+        dispatch=AsyncMock(),
+        request_stop_for_job=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "src.core.atm.controller.get_module_service",
+        lambda: SimpleNamespace(
+            list_env_selectors=lambda module_name: [
+                SimpleNamespace(name="return_none", returns_none=True),
+            ]
+        ),
+    )
+
+    await controller._reconcile_job(job)
+
+    assert job.state == JobState.PAUSED
+    controller.repo.save_job.assert_awaited_once_with(job)
+    controller.dispatcher.dispatch.assert_not_awaited()
+    controller.dispatcher.request_stop_for_job.assert_awaited_once_with(job.id, env_action=None)
+
+
+@pytest.mark.asyncio
 async def test_service_job_fixed_pool_resumes_waiting_tasks_up_to_current_capacity():
     controller = JobController()
     waiting_tasks = [
