@@ -244,7 +244,7 @@ rg -n "(service|repository|controller|store|manager|client|facade|adapter|BaseTa
 
 - 要幂等。重复执行一次不能把数据清坏
 - 要尽快返回。不要在里面做无限等待
-- 当前宿主会对 `on_success` / `on_failure` / `on_timeout` / `on_cleanup` 与后续环境动作加有限超时兜底；超时后只记主日志并继续任务收口，所以不要把必须完成的主业务押在这些终态 hook 里
+- 当前宿主会对 `on_success` / `on_failure` / `on_timeout` / `on_cleanup` 与后续环境动作加有限超时兜底；其中 `on_cleanup` 当前默认最多执行 `120s`，其余终态 hook 与环境动作仍保持更短超时。超时后宿主只记主日志并继续任务收口，所以不要把必须完成的主业务押在这些终态 hook 里
 - 手动中止时，宿主会主动 cancel 正在执行的模块协程；如果你的代码在 `ctx.wait()` 或 `ctx.run_subtask()` 上挂起，它们会提前抛 `asyncio.CancelledError`
 - 需要长流程提前退出时，平时仍应在 task / workflow 主链路主动检查 `ctx.should_stop()`，不要把 stop 处理只押在 cleanup
 - 如果需要根据宿主最终动作做分支，只能读取宿主已经放进 `ctx.runtime` 的运行态，不要自己猜

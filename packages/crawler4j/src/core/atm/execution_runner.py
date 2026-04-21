@@ -119,7 +119,7 @@ class ExecutionRunner:
         self._runtime_capabilities_factory = runtime_capabilities_factory
         self._module_poll_interval = 0.1
         self._terminal_hook_timeout_seconds = 8.0
-        self._cleanup_hook_timeout_seconds = 8.0
+        self._cleanup_hook_timeout_seconds = 120.0
         self._env_action_timeout_seconds = 15.0
 
     def _build_runtime_payload(self, request: ExecutionRequest, hooks_module: str) -> dict[str, Any]:

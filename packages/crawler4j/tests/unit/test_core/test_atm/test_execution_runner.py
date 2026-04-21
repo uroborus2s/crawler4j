@@ -84,6 +84,19 @@ def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[Ex
     return ExecutionRunner(rem=rem, mms=module_service), rem
 
 
+def test_execution_runner_uses_120_second_default_cleanup_timeout():
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+        call_hook=AsyncMock(return_value=None),
+    )
+
+    runner, _ = _build_runner(env, lease, module_service)
+
+    assert runner._terminal_hook_timeout_seconds == 8.0
+    assert runner._cleanup_hook_timeout_seconds == 120.0
+
+
 def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
     module_dir = base_dir / module_name
     tasks_dir = module_dir / "tasks"
