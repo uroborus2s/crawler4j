@@ -45,6 +45,17 @@ class SparkleReleaseConfig:
         return self.sparkle_root / SPARKLE_FRAMEWORK_NAME
 
 
+@dataclass(slots=True)
+class SparkleReleaseArtifacts:
+    """Artifacts produced by the internal Sparkle release packaging flow."""
+
+    version: str
+    app_bundle: Path
+    output_dir: Path
+    dmg_path: Path
+    appcast_generated: bool
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build an internal macOS Sparkle DMG release.")
     parser.add_argument("--skip-build", action="store_true", help="Reuse the existing packaged .app.")
@@ -210,9 +221,9 @@ def run_generate_appcast(tool_path: Path, updates_dir: Path) -> None:
     subprocess.run(generate_appcast_command(tool_path, updates_dir), cwd=WORKSPACE_ROOT, check=True)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    config = load_sparkle_release_config()
+def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None = None) -> SparkleReleaseArtifacts:
+    """Build Sparkle-enabled DMG/appcast artifacts for internal macOS releases."""
+    config = load_sparkle_release_config(env)
     version = load_project_version()
 
     if args.skip_build:
@@ -231,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     dmg_path = create_dmg(bundle, args.output_dir, version=version, volume_name=args.volume_name)
     print(f"[dmg] {dmg_path}")
 
+    appcast_generated = False
     if not args.skip_appcast:
         if config.generate_appcast_tool is None:
             raise FileNotFoundError(
@@ -238,8 +250,21 @@ def main(argv: list[str] | None = None) -> int:
             )
         run_generate_appcast(config.generate_appcast_tool, args.output_dir)
         print(f"[appcast] generated under {args.output_dir}")
+        appcast_generated = True
 
     print(f"[done] internal macOS Sparkle release artifacts are under {args.output_dir}")
+    return SparkleReleaseArtifacts(
+        version=version,
+        app_bundle=bundle,
+        output_dir=args.output_dir,
+        dmg_path=dmg_path,
+        appcast_generated=appcast_generated,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    build_release_artifacts(args)
     return 0
 
 

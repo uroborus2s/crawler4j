@@ -145,6 +145,11 @@ def test_workspace_root_declares_console_shortcuts_for_build_and_publish():
     pyproject = _load_pyproject(WORKSPACE_ROOT / "pyproject.toml")
 
     assert pyproject["project"]["scripts"]["build"] == "scripts.build_workspace_packages:build_main"
+    assert (
+        pyproject["project"]["scripts"]["deploy-macos-internal-release"]
+        == "scripts.deploy_macos_internal_release:main"
+    )
+    assert pyproject["project"]["scripts"]["install-sparkle"] == "scripts.install_sparkle_vendor:main"
     assert pyproject["project"]["scripts"]["package-desktop"] == "scripts.package_desktop_app:main"
     assert (
         pyproject["project"]["scripts"]["package-macos-internal-release"]
@@ -162,7 +167,9 @@ def test_dev_scripts_live_in_workspace_root_instead_of_app_package():
     assert root_scripts.exists()
     assert {
         "build_workspace_packages.py",
+        "deploy_macos_internal_release.py",
         "db_cli.py",
+        "install_sparkle_vendor.py",
         "package_desktop_app.py",
         "package_macos_internal_release.py",
         "smoke_test_ui.py",
@@ -475,3 +482,53 @@ def test_macos_internal_release_generate_appcast_command_is_stable(tmp_path):
     updates_dir = tmp_path / "updates"
 
     assert script.generate_appcast_command(tool, updates_dir) == [str(tool), str(updates_dir)]
+
+
+def test_install_sparkle_vendor_locates_distribution_root_in_nested_tree(tmp_path):
+    script = _load_script_module("install_sparkle_vendor.py")
+    sparkle_root = tmp_path / "Sparkle-2.8.0"
+    (sparkle_root / "Sparkle.framework").mkdir(parents=True)
+    tool = sparkle_root / "bin" / "generate_appcast"
+    tool.parent.mkdir(parents=True)
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert script.locate_distribution_root(tmp_path) == sparkle_root.resolve()
+
+
+def test_install_sparkle_vendor_copies_distribution_into_target(tmp_path):
+    script = _load_script_module("install_sparkle_vendor.py")
+    source_root = tmp_path / "Sparkle-2.8.0"
+    framework = source_root / "Sparkle.framework" / "Versions" / "A" / "Sparkle"
+    tool = source_root / "bin" / "generate_appcast"
+    framework.parent.mkdir(parents=True)
+    tool.parent.mkdir(parents=True)
+    framework.write_text("sparkle", encoding="utf-8")
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    target_dir = script.install_distribution(source_root, tmp_path / "vendor" / "sparkle", force=False)
+
+    assert target_dir == (tmp_path / "vendor" / "sparkle").resolve()
+    assert (target_dir / "Sparkle.framework" / "Versions" / "A" / "Sparkle").read_text(encoding="utf-8") == "sparkle"
+    assert (target_dir / "bin" / "generate_appcast").read_text(encoding="utf-8") == "#!/bin/sh\n"
+
+
+def test_deploy_macos_internal_release_builds_rsync_command_from_env(tmp_path):
+    script = _load_script_module("deploy_macos_internal_release.py")
+    source_dir = tmp_path / "updates"
+    source_dir.mkdir()
+    args = script.parse_args(["--dry-run"])
+
+    upload_target = script.resolve_upload_target(
+        args,
+        {script.UPLOAD_TARGET_ENV: "deploy@example.internal:/srv/updates/crawler4j"},
+    )
+    command = script.build_rsync_command(source_dir, upload_target, dry_run=True)
+
+    assert upload_target == "deploy@example.internal:/srv/updates/crawler4j"
+    assert command == [
+        "rsync",
+        "-av",
+        "--dry-run",
+        f"{source_dir.resolve()}/",
+        "deploy@example.internal:/srv/updates/crawler4j/",
+    ]

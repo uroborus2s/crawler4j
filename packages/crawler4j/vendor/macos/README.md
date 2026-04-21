@@ -6,8 +6,17 @@
 
 - `sparkle/`：解压后的 Sparkle 分发目录
   - `sparkle/Sparkle.framework`
+  - `sparkle/bin/generate_keys`
   - `sparkle/bin/generate_appcast`
   - 其他 Sparkle 官方分发自带资源
+
+若已从 Sparkle 官方 release 页面下载压缩包，可在 workspace 根直接执行：
+
+```bash
+uv run install-sparkle --archive ~/Downloads/Sparkle-2.x.y.tar.xz
+```
+
+该命令会把压缩包中的 Sparkle 分发目录复制到本目录下的 `sparkle/`。
 
 若不想把 Sparkle 放在仓库工作区，也可以在发布前设置：
 

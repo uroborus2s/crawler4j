@@ -64,10 +64,17 @@ uv run publish crawler4j-contracts
 uv run package-desktop
 
 # macOS 内部 DMG + Sparkle 发布
+uv run install-sparkle --archive ~/Downloads/Sparkle-2.x.y.tar.xz
+
 CRAWLER4J_SPARKLE_ROOT=/path/to/sparkle \
-CRAWLER4J_SPARKLE_FEED_URL=https://example.internal/crawler4j/appcast.xml \
+CRAWLER4J_SPARKLE_FEED_URL=https://updates.example.com/crawler4j/appcast.xml \
 CRAWLER4J_SPARKLE_PUBLIC_ED_KEY=<sparkle-public-key> \
 uv run package-macos-internal-release
+
+CRAWLER4J_SPARKLE_FEED_URL=https://updates.example.com/crawler4j/appcast.xml \
+CRAWLER4J_SPARKLE_PUBLIC_ED_KEY=<sparkle-public-key> \
+CRAWLER4J_UPDATE_UPLOAD_TARGET=deploy@example.internal:/srv/nginx/updates/crawler4j/ \
+uv run deploy-macos-internal-release
 ```
 
 桌面打包固定输出：
@@ -80,6 +87,7 @@ uv run package-macos-internal-release
 其中 `build/pyinstaller/...` 只保存 PyInstaller 的分析缓存与中间文件，不是发布物；需要精简工作区时可以删除，下一次 `uv run package-desktop` 会自动重建。macOS 打包完成后，脚本会自动删除 PyInstaller 旁路生成的松散 `Crawler4j/` collect 目录，避免把非分发目录误当成必须随包携带的正式产物。
 
 若需要给小范围内部用户分发带自动更新能力的 macOS 包，继续以 `PyInstaller -> Crawler4j.app` 为底座，再通过 `uv run package-macos-internal-release` 把 `Sparkle.framework`、`SUFeedURL` / `SUPublicEDKey`、DMG 与 `appcast.xml` 串起来。该路径面向“首次手动拖到 `/Applications` 并允许未知开发者”场景，不要求 `Developer ID` / notarization。
+若本机尚未放置 Sparkle 分发目录，可先下载 Sparkle 官方 release archive，再运行 `uv run install-sparkle --archive /path/to/Sparkle-*.tar.xz` 把 `Sparkle.framework` 与 `bin/generate_appcast` 解压到仓库约定的 `packages/crawler4j/vendor/macos/sparkle/`。若要一键打包并推送到 nginx 静态目录，则使用 `uv run deploy-macos-internal-release`，它会先复用现有 DMG/appcast 构建链，再通过 `rsync -av` 把 `packages/crawler4j/dist/updates/macos/` 下的产物同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET` 指定的本地目录或 `user@host:/path/` 目标。服务器端 nginx / 证书样板见 `deploy/nginx/crawler4j-updates.example.conf`，默认推荐把更新子域名固定为 `updates.<主域名>`。
 
 ## Packages
 
@@ -91,6 +99,8 @@ uv run package-macos-internal-release
 当前保留的脚本：
 
 - `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；构建时自动写回各包 `dist/`，发布时自动指向各包 `dist/*`
+- `scripts/deploy_macos_internal_release.py`：`uv run deploy-macos-internal-release` 背后的 macOS 内部发布+上传入口；复用 `package-macos-internal-release` 构建 DMG / `appcast.xml`，再用 `rsync` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET`
+- `scripts/install_sparkle_vendor.py`：`uv run install-sparkle` 背后的 Sparkle 安装辅助；把本地下载好的 Sparkle release archive 或已解压目录复制到 `packages/crawler4j/vendor/macos/sparkle/`
 - `scripts/package_desktop_app.py`：`uv run package-desktop` 背后的固定目录桌面打包入口；输出固定落在 `packages/crawler4j/dist/desktop/<platform>/`，其中 macOS 只保留最终可分发的 `Crawler4j.app`
 - `scripts/package_macos_internal_release.py`：`uv run package-macos-internal-release` 背后的 macOS 内部发布入口；要求本机可访问 Sparkle 分发目录与 EdDSA 公钥环境变量，并在 `packages/crawler4j/dist/updates/macos/` 生成 DMG / `appcast.xml`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke

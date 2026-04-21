@@ -12,6 +12,8 @@ dependencies = [
 
 [project.scripts]
 build = "scripts.build_workspace_packages:build_main"
+deploy-macos-internal-release = "scripts.deploy_macos_internal_release:main"
+install-sparkle = "scripts.install_sparkle_vendor:main"
 package-desktop = "scripts.package_desktop_app:main"
 package-macos-internal-release = "scripts.package_macos_internal_release:main"
 publish = "scripts.build_workspace_packages:publish_main"

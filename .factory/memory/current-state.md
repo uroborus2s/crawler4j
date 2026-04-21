@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 文档：2026-04-22 已为 macOS Sparkle 内部分发补齐服务器侧部署口径：当前推荐使用 `updates.<主域名>` 承载 `https://updates.example.com/crawler4j/appcast.xml`，仓库新增 `deploy/nginx/crawler4j-updates.example.conf` 样板，并在 `deployment-guide.md` 说明 Certbot/Let's Encrypt 与 `/srv/nginx/updates/crawler4j/` 静态目录约定；后续 `deploy-macos-internal-release` 的 rsync 目标与 nginx 目录现有统一口径。
 - 最新修复：2026-04-21 已为 macOS 小范围内部发布补齐 Sparkle 线路的最小实现：宿主新增 macOS 打包版 Sparkle 运行时桥接，`system.auto_update` 现可同步控制 Sparkle 自动检查开关；workspace 根新增 `uv run package-macos-internal-release`，会在保留现有 `PyInstaller -> Crawler4j.app` 基线的前提下，把 `Sparkle.framework`、`SUFeedURL` / `SUPublicEDKey` 注入 bundle，并在 `packages/crawler4j/dist/updates/macos/` 生成内部 DMG / `appcast.xml` 发布脚手架。当前直接锁定该路径的是 `test_update_service.py` 与 `test_packaging_config.py` 的 Sparkle 回归。
 - 最新修复：2026-04-21 已对齐 VirtualBrowser `addBrowser` 的代理协议口径：宿主创建环境时会把代理 `protocol` 统一转成官方文档示例所用的大写 `HTTP/HTTPS/SOCKS5`，避免继续把 IP 池生成的 `http://user:pass@host:port` 代理以小写协议透传给外部浏览器；同时 `VirtualBrowserClient.add_browser()` 在 `addBrowser` 返回非 2xx 或 `success=false` 时，现会把状态码与响应正文一起写入主日志并抛出带正文的异常，后续排查代理认证失败或外部宿主 500 不再只剩一条裸 `HTTPStatusError`。对应回归当前锁定于 `test_virtualbrowser_client.py` 的协议归一化与 `500` 正文透传断言。
 - 最新修复：2026-04-21 已把 ATM `ExecutionRunner` 的 `on_cleanup` 默认最大执行时间从 `8s` 提高到 `120s`，以便模块在取消或终态收口时完成更长的一轮有界 finalize；当前只放宽 cleanup budget，本地终态 hook / 环境动作的其余 timeout guard 仍保留短超时兜底，避免宿主完全失去收口保护。对应回归当前锁定于 `test_execution_runner.py` 的默认 budget 断言与既有 cleanup 超时路径。
@@ -50,6 +51,7 @@
 - 最新修复：2026-04-20 已继续把 frozen 场景下 `debugpy.listen()` 的 adapter 启动链收口到宿主内嵌 `--crawler4j-debugpy-adapter` 入口，并在 worker 启动前通过临时 launcher 脚本显式 `debugpy.configure(python=...)`；当前真包 smoke 已验证 macOS 桌面包可进入 `waiting_for_attach` 且端口真实监听，不再回退到 GUI 主程序。
 - 最新修复：2026-04-20 已把 ATM `新建作业` 弹窗中的 `配置运行模板`、`取消`、`创建/保存` 按钮切到共享 `StyledButton` 组件，并统一为 `40px` 高度；同时把“运行配置”预览说明改为按当前宽度自动回流并同步最小高度，避免长文本在真实窗口里向下溢出、压到下面按钮区域；对应 Qt 单测已补“使用公共组件”和“预览文本与按钮保持间距”的断言。
 - 最新修复：2026-04-20 已把 `docs-stratego` 通知 workflow 的自动监听分支从 `feature/task-plugin-system` 收口到 `main`，并在发送 `repository_dispatch` 前先去掉 `DOCS_STRATEGO_DISPATCH_TOKEN` 中意外带入的 `CR/LF`，避免 `Authorization` header 被换行拆断；对应部署说明、运维索引、文档索引与 workflow 静态回归测试已同步更新。
+- 最新修复：2026-04-22 已为 macOS 内部 Sparkle 分发补齐“安装 Sparkle + 打包并上传 nginx 目录”闭环：workspace 根新增 `uv run install-sparkle --archive ...` 与 `uv run deploy-macos-internal-release`，前者可把 Sparkle release archive 安装到 `packages/crawler4j/vendor/macos/sparkle/`，后者复用 `package-macos-internal-release` 生成 DMG / `appcast.xml` 后再通过 `rsync -av` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET`；README、部署/交付文档、vendor 说明与打包配置回归测试已同步更新。
 - 设计：2026-04-19 ATM 固定环境池方案已按“模块资源池资格卡片 + 等待队列 + FIFO 补位 + 资源池卡片更新事件 + 轻量定时调和”的口径落地到宿主和 SDK V1。
 - 规划：2026-04-19 `REQ-009` / `CR-009` / `TASK-023` / `API-007` 已完成等待队列、FIFO 补位、资源池隔离与等待席位自动超时收口的本地实现与单测验证；当前待收口到 PR，并补真实业务模块接入验证。
 - 任务：TASK-011-mms-settings-store-and-module-state-persistence、TASK-012-mms-trust-gate-and-custom-ui-loading、TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler、TASK-021-add-signal-driven-confirmation-panel、TASK-022-add-module-audit-event-storage-tools、TASK-023-add-atm-fixed-pool-service-queue
