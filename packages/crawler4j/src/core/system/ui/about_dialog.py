@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QDialog,
@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.system.update_service import get_update_service
 from src.core.system.version_service import get_version_service
 
 
@@ -169,16 +170,13 @@ class AboutDialog(QDialog):
 
     def _on_check_update(self):
         """检查更新按钮点击。"""
-        self.check_update_btn.setEnabled(False)
-        self.check_update_btn.setText("⏳ 检查中...")
+        service = get_update_service()
         self.update_status_label.setText("")
 
-        # 模拟检查（实际应调用 UpdateService）
-        QTimer.singleShot(1500, self._on_check_complete)
+        if service.check_for_updates():
+            self.update_status_label.setText("✅ 已打开 Sparkle 更新检查。")
+            self.update_status_label.setStyleSheet("font-size: 13px; color: #4ade80;")
+            return
 
-    def _on_check_complete(self):
-        """检查完成。"""
-        self.check_update_btn.setEnabled(True)
-        self.check_update_btn.setText("🔍 检查更新")
-        self.update_status_label.setText("✅ 您的软件已是最新版本")
-        self.update_status_label.setStyleSheet("font-size: 13px; color: #4ade80;")
+        self.update_status_label.setText(service.availability_reason or "❌ 当前无法检查更新。")
+        self.update_status_label.setStyleSheet("font-size: 13px; color: #f87171;")

@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/04-design/technical-selection.md` | 本地验证结果
 **下游输出：** `docs/04-project-development/08-operations-maintenance/operations-runbook.md` | `docs/04-project-development/08-operations-maintenance/core-maintainer-guide.md` | `docs/02-user-guide/user-guide.md` | `docs/02-user-guide/admin-guide.md`
 **关联 ID：** `OPS-001`, `OPS-002`, `OPS-003`, `REQ-001`, `REQ-003`, `REQ-004`
-**最后更新：** 2026-04-20
+**最后更新：** 2026-04-21
 
 ## 1. 环境准备
 
@@ -34,7 +34,26 @@ uv run python -m src.ui.app
 - 若需要打包，PyInstaller 规格位于 `packages/crawler4j/crawler4j.spec`
 - 正式桌面打包入口统一为 `uv run package-desktop`
 - 当前 macOS 最终可分发产物固定为 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，不需要再额外携带旁边的 `Crawler4j/` collect 目录
+- 若需要小范围内部 DMG 分发并启用 Sparkle 自动更新，使用 `uv run package-macos-internal-release`
 - PyInstaller 现已显式收集 `sinanz` 的共享 `resources/` 目录；滑块验证码运行时会从其中的 `resources/models/` 解析 `slider_gap_locator.onnx`
+
+### macOS 内部 DMG + Sparkle 发布
+
+```bash
+CRAWLER4J_SPARKLE_ROOT=/path/to/sparkle \
+CRAWLER4J_SPARKLE_FEED_URL=https://example.internal/crawler4j/appcast.xml \
+CRAWLER4J_SPARKLE_PUBLIC_ED_KEY=<sparkle-public-key> \
+uv run package-macos-internal-release
+```
+
+说明：
+
+- 该命令会先复用现有 `PyInstaller -> Crawler4j.app` 打包链，再把 `Sparkle.framework` 复制进 bundle，并把 `SUFeedURL` / `SUPublicEDKey` / `SUEnableAutomaticChecks` 写入 `Info.plist`
+- 默认更新产物目录为 `packages/crawler4j/dist/updates/macos/`，其中至少包含 `Crawler4j-<version>.dmg`；若本机 Sparkle 分发目录内存在 `bin/generate_appcast`，还会同时生成 `appcast.xml`
+- 该分发路径面向“小范围内部用户第一次手动把 app 拖到 `/Applications`、首次启动允许未知开发者、后续自动更新由 Sparkle 处理”的场景
+- 不要求 `Developer ID` 或 notarization，但用户不能一直直接从挂载的 DMG 中运行应用；首次安装后应从 `/Applications` 打开
+- `CRAWLER4J_SPARKLE_ROOT` 默认也可指向 `packages/crawler4j/vendor/macos/sparkle/`
+- `CRAWLER4J_SPARKLE_FEED_URL` 与 `CRAWLER4J_SPARKLE_PUBLIC_ED_KEY` 为必填项
 
 ### 测试
 
@@ -100,6 +119,7 @@ uv run python -m crawler4j_sdk.cli.commands --help
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-21 | 新增 macOS 内部 DMG + Sparkle 发布口径，说明 `package-macos-internal-release` 的环境变量、产物目录与手动拖入 `/Applications` 的使用边界 | Codex |
 | 2026-04-20 | 补记桌面打包对 `sinanz` 共享 `resources/` 目录的显式收集约束，避免验证码模型资源在 PyInstaller 产物中丢失 | Codex |
 | 2026-04-20 | 将 docs-stratego 联动发布说明从 `feature/task-plugin-system` 收敛到 `main` 分支口径，并补记 dispatch token 换行清理约束 | Codex |
 | 2026-04-17 | 新增 `docs-stratego` 源仓通知 workflow，并补充共享 PR 联动发布说明 | Codex |

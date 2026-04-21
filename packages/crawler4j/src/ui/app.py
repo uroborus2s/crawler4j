@@ -46,6 +46,24 @@ def install_logging_preferences_sync(prefs, *, log_dir: Path) -> None:
     prefs.preference_changed.connect(_on_preference_changed)
 
 
+def install_update_preferences_sync(prefs) -> None:
+    """把更新偏好设置绑定到应用更新服务。"""
+    from src.core.system.update_service import get_update_service
+
+    service = get_update_service()
+
+    def _apply() -> None:
+        service.configure(auto_check=bool(prefs.get(PreferenceKey.AUTO_UPDATE, True)))
+
+    def _on_preference_changed(key: str, _value, _requires_restart: bool) -> None:
+        if key != PreferenceKey.AUTO_UPDATE.value:
+            return
+        _apply()
+
+    _apply()
+    prefs.preference_changed.connect(_on_preference_changed)
+
+
 def _normalize_exit_code(code: object) -> int:
     if code is None:
         return 0
@@ -113,6 +131,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     prefs = get_preferences_service()
     log_dir = get_app_data_dir() / "logs"
     install_logging_preferences_sync(prefs, log_dir=log_dir)
+    install_update_preferences_sync(prefs)
     from src.core.foundation.logging import logger
 
     # 创建应用
@@ -161,6 +180,10 @@ async def _run_application(app: QApplication, prefs) -> None:
         window.showMinimized()
     else:
         window.show()
+
+    from src.core.system.update_service import get_update_service
+
+    get_update_service().startup()
 
     try:
         await shutdown_requested.wait()

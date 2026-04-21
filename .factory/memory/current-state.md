@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-04-21 已为 macOS 小范围内部发布补齐 Sparkle 线路的最小实现：宿主新增 macOS 打包版 Sparkle 运行时桥接，`system.auto_update` 现可同步控制 Sparkle 自动检查开关；workspace 根新增 `uv run package-macos-internal-release`，会在保留现有 `PyInstaller -> Crawler4j.app` 基线的前提下，把 `Sparkle.framework`、`SUFeedURL` / `SUPublicEDKey` 注入 bundle，并在 `packages/crawler4j/dist/updates/macos/` 生成内部 DMG / `appcast.xml` 发布脚手架。当前直接锁定该路径的是 `test_update_service.py` 与 `test_packaging_config.py` 的 Sparkle 回归。
 - 最新修复：2026-04-21 已对齐 VirtualBrowser `addBrowser` 的代理协议口径：宿主创建环境时会把代理 `protocol` 统一转成官方文档示例所用的大写 `HTTP/HTTPS/SOCKS5`，避免继续把 IP 池生成的 `http://user:pass@host:port` 代理以小写协议透传给外部浏览器；同时 `VirtualBrowserClient.add_browser()` 在 `addBrowser` 返回非 2xx 或 `success=false` 时，现会把状态码与响应正文一起写入主日志并抛出带正文的异常，后续排查代理认证失败或外部宿主 500 不再只剩一条裸 `HTTPStatusError`。对应回归当前锁定于 `test_virtualbrowser_client.py` 的协议归一化与 `500` 正文透传断言。
 - 最新修复：2026-04-21 已把 ATM `ExecutionRunner` 的 `on_cleanup` 默认最大执行时间从 `8s` 提高到 `120s`，以便模块在取消或终态收口时完成更长的一轮有界 finalize；当前只放宽 cleanup budget，本地终态 hook / 环境动作的其余 timeout guard 仍保留短超时兜底，避免宿主完全失去收口保护。对应回归当前锁定于 `test_execution_runner.py` 的默认 budget 断言与既有 cleanup 超时路径。
 - 文档：2026-04-21 已修正根 `docs/index.md` 中 `ctrip-real-site-e2e-closeout.md` 导航项的非法 YAML 标题写法，并把测试收口页标题与 `document-index.md` 入口统一收口为普通字符串；当前 `docs-stratego` 不应再因该条 `title` 解析失败而阻塞源仓同步。

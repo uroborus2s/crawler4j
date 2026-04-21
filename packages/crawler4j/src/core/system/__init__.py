@@ -2,13 +2,17 @@
 
 提供 Framework Core 的基础系统能力：
 - VersionService: 版本管理
-- UpdateService: OTA 升级
+- UpdateService: 应用更新
 - PreferencesService: 偏好设置
 """
 
 from src.core.system.preferences_service import (
     PreferencesService,
     get_preferences_service,
+)
+from src.core.system.update_service import (
+    UpdateService,
+    get_update_service,
 )
 from src.core.system.version_service import (
     BuildInfo,
@@ -21,6 +25,9 @@ __all__ = [
     "BuildInfo",
     "VersionService",
     "get_version_service",
+    # Update
+    "UpdateService",
+    "get_update_service",
     # Preferences
     "PreferencesService",
     "get_preferences_service",

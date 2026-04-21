@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import plistlib
 import re
 import shutil
 import tomllib
@@ -145,6 +146,10 @@ def test_workspace_root_declares_console_shortcuts_for_build_and_publish():
 
     assert pyproject["project"]["scripts"]["build"] == "scripts.build_workspace_packages:build_main"
     assert pyproject["project"]["scripts"]["package-desktop"] == "scripts.package_desktop_app:main"
+    assert (
+        pyproject["project"]["scripts"]["package-macos-internal-release"]
+        == "scripts.package_macos_internal_release:main"
+    )
     assert pyproject["project"]["scripts"]["publish"] == "scripts.build_workspace_packages:publish_main"
     assert pyproject["build-system"]["build-backend"] == "setuptools.build_meta"
     assert pyproject["tool"]["setuptools"]["packages"] == ["scripts"]
@@ -159,6 +164,7 @@ def test_dev_scripts_live_in_workspace_root_instead_of_app_package():
         "build_workspace_packages.py",
         "db_cli.py",
         "package_desktop_app.py",
+        "package_macos_internal_release.py",
         "smoke_test_ui.py",
     }.issubset({path.name for path in root_scripts.glob("*.py")})
     assert list(package_scripts.glob("*.py")) == []
@@ -368,3 +374,104 @@ def test_desktop_packaging_script_prunes_macos_collect_dir_after_app_bundle_buil
     assert removed == collect_dir
     assert not collect_dir.exists()
     assert app_bundle.exists()
+
+
+def test_macos_internal_release_config_reads_env_and_vendor_layout(tmp_path, monkeypatch):
+    script = _load_script_module("package_macos_internal_release.py")
+    sparkle_root = tmp_path / "sparkle"
+    (sparkle_root / "Sparkle.framework").mkdir(parents=True)
+    generate_appcast = sparkle_root / "bin" / "generate_appcast"
+    generate_appcast.parent.mkdir(parents=True)
+    generate_appcast.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    env = {
+        script.SPARKLE_ROOT_ENV: str(sparkle_root),
+        script.SPARKLE_FEED_URL_ENV: "https://example.com/appcast.xml",
+        script.SPARKLE_PUBLIC_KEY_ENV: "sparkle-public-key",
+    }
+
+    config = script.load_sparkle_release_config(env)
+
+    assert config.sparkle_root == sparkle_root.resolve()
+    assert config.framework_path == sparkle_root.resolve() / "Sparkle.framework"
+    assert config.feed_url == "https://example.com/appcast.xml"
+    assert config.public_key == "sparkle-public-key"
+    assert config.generate_appcast_tool == generate_appcast.resolve()
+
+
+def test_macos_internal_release_updates_bundle_plist_with_sparkle_keys(tmp_path):
+    script = _load_script_module("package_macos_internal_release.py")
+    app_bundle = tmp_path / "Crawler4j.app"
+    plist_path = app_bundle / "Contents" / "Info.plist"
+    plist_path.parent.mkdir(parents=True)
+    with plist_path.open("wb") as f:
+        plistlib.dump({"CFBundleVersion": "0.0.0"}, f)
+
+    config = script.SparkleReleaseConfig(
+        sparkle_root=tmp_path / "sparkle",
+        feed_url="https://example.com/appcast.xml",
+        public_key="sparkle-public-key",
+        auto_check=True,
+    )
+
+    script.update_bundle_plist(app_bundle, version="0.2.0", config=config)
+
+    with plist_path.open("rb") as f:
+        data = plistlib.load(f)
+
+    assert data["CFBundleVersion"] == "0.2.0"
+    assert data["CFBundleShortVersionString"] == "0.2.0"
+    assert data["SUFeedURL"] == "https://example.com/appcast.xml"
+    assert data["SUPublicEDKey"] == "sparkle-public-key"
+    assert data["SUEnableAutomaticChecks"] is True
+
+
+def test_macos_internal_release_copies_sparkle_framework_into_bundle(tmp_path):
+    script = _load_script_module("package_macos_internal_release.py")
+    app_bundle = tmp_path / "Crawler4j.app"
+    app_bundle.mkdir()
+    source = tmp_path / "sparkle-root" / "Sparkle.framework"
+    resource = source / "Versions" / "A" / "Resources" / "Sparkle"
+    resource.parent.mkdir(parents=True)
+    resource.write_text("sparkle", encoding="utf-8")
+
+    target = script.copy_sparkle_framework(app_bundle, source)
+
+    assert target == app_bundle / "Contents" / "Frameworks" / "Sparkle.framework"
+    assert (target / "Versions" / "A" / "Resources" / "Sparkle").read_text(encoding="utf-8") == "sparkle"
+
+
+def test_macos_internal_release_create_dmg_uses_hdiutil_with_applications_symlink(tmp_path, monkeypatch):
+    script = _load_script_module("package_macos_internal_release.py")
+    app_bundle = tmp_path / "Crawler4j.app"
+    (app_bundle / "Contents").mkdir(parents=True)
+
+    captured: dict[str, object] = {}
+
+    def fake_run(command, *, cwd, check):
+        captured["command"] = command
+        captured["cwd"] = cwd
+        captured["check"] = check
+
+    monkeypatch.setattr(script.subprocess, "run", fake_run)
+
+    dmg_path = script.create_dmg(app_bundle, tmp_path / "updates", version="0.2.0", volume_name="Crawler4j")
+
+    assert dmg_path == tmp_path / "updates" / "Crawler4j-0.2.0.dmg"
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert command[0:5] == ["hdiutil", "create", "-ov", "-volname", "Crawler4j"]
+    assert command[5] == "-srcfolder"
+    assert command[6] != ""
+    assert command[7:11] == ["-fs", "HFS+", "-format", "UDZO"]
+    assert command[-1] == str(tmp_path / "updates" / "Crawler4j-0.2.0.dmg")
+    assert captured["cwd"] == script.WORKSPACE_ROOT
+    assert captured["check"] is True
+
+
+def test_macos_internal_release_generate_appcast_command_is_stable(tmp_path):
+    script = _load_script_module("package_macos_internal_release.py")
+    tool = tmp_path / "generate_appcast"
+    updates_dir = tmp_path / "updates"
+
+    assert script.generate_appcast_command(tool, updates_dir) == [str(tool), str(updates_dir)]

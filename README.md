@@ -62,6 +62,12 @@ uv run publish crawler4j-contracts
 
 # 固定目录打包桌面应用
 uv run package-desktop
+
+# macOS 内部 DMG + Sparkle 发布
+CRAWLER4J_SPARKLE_ROOT=/path/to/sparkle \
+CRAWLER4J_SPARKLE_FEED_URL=https://example.internal/crawler4j/appcast.xml \
+CRAWLER4J_SPARKLE_PUBLIC_ED_KEY=<sparkle-public-key> \
+uv run package-macos-internal-release
 ```
 
 桌面打包固定输出：
@@ -69,8 +75,11 @@ uv run package-desktop
 - 发布产物：`packages/crawler4j/dist/desktop/<platform>/`
 - PyInstaller 中间构建目录：`packages/crawler4j/build/pyinstaller/<platform>/`
 - macOS 最终分发物：`packages/crawler4j/dist/desktop/macos/Crawler4j.app`
+- macOS 内部 Sparkle 更新产物：`packages/crawler4j/dist/updates/macos/`
 
 其中 `build/pyinstaller/...` 只保存 PyInstaller 的分析缓存与中间文件，不是发布物；需要精简工作区时可以删除，下一次 `uv run package-desktop` 会自动重建。macOS 打包完成后，脚本会自动删除 PyInstaller 旁路生成的松散 `Crawler4j/` collect 目录，避免把非分发目录误当成必须随包携带的正式产物。
+
+若需要给小范围内部用户分发带自动更新能力的 macOS 包，继续以 `PyInstaller -> Crawler4j.app` 为底座，再通过 `uv run package-macos-internal-release` 把 `Sparkle.framework`、`SUFeedURL` / `SUPublicEDKey`、DMG 与 `appcast.xml` 串起来。该路径面向“首次手动拖到 `/Applications` 并允许未知开发者”场景，不要求 `Developer ID` / notarization。
 
 ## Packages
 
@@ -83,6 +92,7 @@ uv run package-desktop
 
 - `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；构建时自动写回各包 `dist/`，发布时自动指向各包 `dist/*`
 - `scripts/package_desktop_app.py`：`uv run package-desktop` 背后的固定目录桌面打包入口；输出固定落在 `packages/crawler4j/dist/desktop/<platform>/`，其中 macOS 只保留最终可分发的 `Crawler4j.app`
+- `scripts/package_macos_internal_release.py`：`uv run package-macos-internal-release` 背后的 macOS 内部发布入口；要求本机可访问 Sparkle 分发目录与 EdDSA 公钥环境变量，并在 `packages/crawler4j/dist/updates/macos/` 生成 DMG / `appcast.xml`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
 - `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
 
