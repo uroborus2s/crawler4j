@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from PyQt6.QtWidgets import QDialog
 
-from src.core.rem import EnvKind
+from src.core.rem import EnvKind, EnvStatus
 from src.core.rem.models import ProxyMode
 from src.ui.components.combo_box import StyledComboBox
 
@@ -30,6 +30,56 @@ def _patch_dialog_dependencies(monkeypatch, suggested_name: str):
         lambda: SimpleNamespace(get_enabled_modules=lambda: []),
     )
     return env_list_widget
+
+
+def _make_env(env_id: str, status: EnvStatus = EnvStatus.READY):
+    return SimpleNamespace(
+        id=env_id,
+        name=f"{env_id}-name",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=status,
+        task_run_id="",
+    )
+
+
+class _FakeSignal:
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def disconnect(self, callback):
+        try:
+            self._callbacks.remove(callback)
+        except ValueError as exc:
+            raise TypeError from exc
+
+    def emit(self, *args):
+        for callback in list(self._callbacks):
+            callback(*args)
+
+
+class _ControlledLoaderThread:
+    instances: list["_ControlledLoaderThread"] = []
+
+    def __init__(self, pool, run_gc: bool = False):
+        self._pool = pool
+        self._run_gc = run_gc
+        self.finished = _FakeSignal()
+        self.error = _FakeSignal()
+        self.started = False
+        _ControlledLoaderThread.instances.append(self)
+
+    def start(self):
+        self.started = True
+
+    def finish(self, envs):
+        self.finished.emit(envs)
+
+    def fail(self, message: str):
+        self.error.emit(message)
 
 
 def test_create_env_dialog_prefills_suggested_name_without_submitting_override(qtbot, monkeypatch):
@@ -200,8 +250,10 @@ async def _drain_widget_tasks(widget) -> None:
 
 
 @pytest.mark.asyncio
-async def test_env_list_widget_destroy_uses_non_blocking_dialogs(qtbot, monkeypatch):
+async def test_env_list_widget_destroy_refresh_waits_for_inflight_load(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    _ControlledLoaderThread.instances.clear()
+    monkeypatch.setattr(env_list_widget, "DataLoaderThread", _ControlledLoaderThread)
 
     manager = SimpleNamespace(
         pool=SimpleNamespace(),
@@ -229,7 +281,7 @@ async def test_env_list_widget_destroy_uses_non_blocking_dialogs(qtbot, monkeypa
 
     def fake_open(box):
         shown_messages.append((box.windowTitle(), box.text()))
-        if box.windowTitle() == "确认":
+        if box.text().startswith("确定要销毁环境"):
             result = int(env_list_widget.QMessageBox.StandardButton.Yes)
         else:
             result = int(env_list_widget.QMessageBox.StandardButton.Ok)
@@ -239,14 +291,71 @@ async def test_env_list_widget_destroy_uses_non_blocking_dialogs(qtbot, monkeypa
 
     widget = env_list_widget.EnvListWidget()
     qtbot.addWidget(widget)
-    widget.load_data = MagicMock()
-    widget._confirm_async = AsyncMock(return_value=True)
+    widget.table.set_data = MagicMock()
+
+    widget.load_data()
+    assert len(_ControlledLoaderThread.instances) == 1
+    assert widget._load_in_progress is True
 
     widget._destroy_env("env-1")
     await _drain_widget_tasks(widget)
 
     manager.destroy_env.assert_awaited_once_with("env-1")
-    assert shown_messages == [
-        ("", "环境已销毁"),
-    ]
-    widget.load_data.assert_called_once_with()
+    assert widget._reload_requested is True
+    assert len(shown_messages) == 2
+    assert shown_messages[0][1] == "确定要销毁环境 env-1 ?"
+    assert shown_messages[1][1] == "环境已销毁"
+
+    _ControlledLoaderThread.instances[0].finish([_make_env("env-1", EnvStatus.READY)])
+    qtbot.waitUntil(lambda: len(_ControlledLoaderThread.instances) == 2, timeout=500)
+
+    assert len(_ControlledLoaderThread.instances) == 2
+    assert _ControlledLoaderThread.instances[1].started is True
+    assert widget.table.set_data.call_count == 1
+
+    _ControlledLoaderThread.instances[1].finish([_make_env("env-1", EnvStatus.BUSY)])
+    qtbot.waitUntil(lambda: widget._load_in_progress is False, timeout=500)
+
+    assert widget._reload_requested is False
+    assert widget.table.set_data.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_load_data_queues_refresh_when_loading(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    _ControlledLoaderThread.instances.clear()
+    monkeypatch.setattr(env_list_widget, "DataLoaderThread", _ControlledLoaderThread)
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget.table.set_data = MagicMock()
+
+    widget.load_data()
+    assert len(_ControlledLoaderThread.instances) == 1
+    assert widget._load_in_progress is True
+
+    widget.load_data()
+    assert len(_ControlledLoaderThread.instances) == 1
+
+    _ControlledLoaderThread.instances[0].finish([_make_env("env-1", EnvStatus.READY)])
+    qtbot.waitUntil(lambda: len(_ControlledLoaderThread.instances) == 2, timeout=500)
+
+    assert len(_ControlledLoaderThread.instances) == 2
+    assert _ControlledLoaderThread.instances[1].started is True
+    assert widget._load_in_progress is True
+    assert widget.table.set_data.call_count == 1
+
+    _ControlledLoaderThread.instances[1].finish([_make_env("env-1", EnvStatus.BUSY)])
+    qtbot.waitUntil(lambda: widget._load_in_progress is False, timeout=500)
+
+    assert widget._load_in_progress is False
+    assert widget.table.set_data.call_count == 2
+    assert widget.stats_label.text() == "总计: 1 | 就绪: 0 | 忙碌: 1"

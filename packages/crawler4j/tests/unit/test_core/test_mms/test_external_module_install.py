@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from crawler4j_sdk import TaskContext
-from src.core.mms.models import DevModuleLink, ModuleSource
+from src.core.mms.models import DevModuleLink, ModuleInstallError, ModuleSource
 from src.core.mms.registry import ModuleRegistry
 from src.core.mms.service import ModuleService
 
@@ -40,7 +40,7 @@ class _FakeDevLinkStore:
         return existed
 
 
-def _build_module_archive(
+def _build_module_dir(
     root: Path,
     *,
     package_dir_name: str,
@@ -62,15 +62,37 @@ def _build_module_archive(
         encoding="utf-8",
     )
     (package_root / "__init__.py").write_text(
-        "from crawler4j_contracts import TaskResult\n\n"
-        "def run(context):\n"
-        f"    return TaskResult.ok(module='{module_name}', source='external')\n",
+        extra_files.pop("__init__.py", None)
+        if extra_files and "__init__.py" in extra_files
+        else (
+            "from crawler4j_contracts import TaskResult\n\n"
+            "def run(context):\n"
+            f"    return TaskResult.ok(module='{module_name}', source='external')\n"
+        ),
         encoding="utf-8",
     )
     for relative_path, content in (extra_files or {}).items():
         file_path = package_root / relative_path
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
+    return package_root
+
+
+def _build_module_archive(
+    root: Path,
+    *,
+    package_dir_name: str,
+    module_name: str,
+    version: str = "1.0.0",
+    extra_files: dict[str, str] | None = None,
+) -> Path:
+    package_root = _build_module_dir(
+        root,
+        package_dir_name=package_dir_name,
+        module_name=module_name,
+        version=version,
+        extra_files=dict(extra_files or {}),
+    )
 
     archive_path = root / f"{package_dir_name}-{version}.zip"
     with zipfile.ZipFile(archive_path, "w") as zf:
@@ -172,3 +194,62 @@ def test_zip_upgrade_replaces_existing_module_without_leaving_stale_files(temp_d
     assert module.manifest.version == "1.1.0"
     assert module.path == temp_data_dir / "modules" / "demo_module_pkg"
     assert not (module.path / "obsolete.py").exists()
+
+
+def test_zip_upgrade_rolls_back_when_new_package_fails_import(temp_data_dir):
+    first_archive = _build_module_archive(
+        temp_data_dir / "v1",
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+        version="1.0.0",
+        extra_files={"stable.py": "STABLE = True\n"},
+    )
+    bad_archive = _build_module_archive(
+        temp_data_dir / "v2",
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+        version="1.1.0",
+        extra_files={"__init__.py": "raise RuntimeError('broken module')\n"},
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    registry.install(first_archive)
+
+    with pytest.raises(ModuleInstallError, match="模块导入预检失败"):
+        registry.install(bad_archive)
+
+    current = registry.get_module("demo_module")
+    assert current is not None
+    assert current.manifest.version == "1.0.0"
+    assert current.path == temp_data_dir / "modules" / "demo_module_pkg"
+    assert (current.path / "stable.py").exists()
+    assert "broken module" not in (current.path / "__init__.py").read_text(encoding="utf-8")
+
+
+def test_dir_install_rolls_back_when_copied_module_fails_import(temp_data_dir):
+    first_dir = _build_module_dir(
+        temp_data_dir / "v1",
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+        version="1.0.0",
+        extra_files={"stable.py": "STABLE = True\n"},
+    )
+    bad_dir = _build_module_dir(
+        temp_data_dir / "v2",
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+        version="1.1.0",
+        extra_files={"__init__.py": "raise RuntimeError('broken copied module')\n"},
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    registry.install(first_dir)
+
+    with pytest.raises(ModuleInstallError, match="模块导入预检失败"):
+        registry.install(bad_dir)
+
+    current = registry.get_module("demo_module")
+    assert current is not None
+    assert current.manifest.version == "1.0.0"
+    assert current.path == temp_data_dir / "modules" / "demo_module_pkg"
+    assert (current.path / "stable.py").exists()

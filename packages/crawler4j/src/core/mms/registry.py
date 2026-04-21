@@ -8,10 +8,13 @@
     - 模块安装/卸载/启用/禁用
 """
 
+import importlib
+import importlib.util
 import shutil
+import sys
+import tempfile
 import zipfile
 from pathlib import Path
-import tempfile
 
 from src.core.mms.dev_links import DevModuleLinkStore, get_dev_module_link_store
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
@@ -324,8 +327,6 @@ class ModuleRegistry:
         """从 ZIP 安装。"""
         temp_dir = Path(tempfile.mkdtemp(prefix="mms_install_", dir=str(self._install_dir)))
         extracted_module_dir: Path | None = None
-        target_dir: Path | None = None
-        backup_dir: Path | None = None
 
         try:
             # 防御 zip slip 攻击
@@ -346,41 +347,101 @@ class ModuleRegistry:
             if not extracted_module_dir or not extracted_module_dir.exists():
                 raise ModuleInstallError("ZIP 安装失败：未找到解压后的模块目录")
 
-            target_dir = self._install_dir / extracted_module_dir.name
-
-            if target_dir.exists():
-                backup_dir = self._install_dir / f".{target_dir.name}.bak"
-                if backup_dir.exists():
-                    shutil.rmtree(backup_dir)
-                shutil.move(str(target_dir), str(backup_dir))
-
-            shutil.move(str(extracted_module_dir), str(target_dir))
-
-            module_info = self._scanner.load_module(target_dir, ModuleSource.EXTERNAL)
-
-            if backup_dir and backup_dir.exists():
-                shutil.rmtree(backup_dir)
-
-            return module_info
-        except Exception:
-            if target_dir and not target_dir.exists() and backup_dir and backup_dir.exists():
-                shutil.move(str(backup_dir), str(target_dir))
-            raise
+            manifest = self._preflight_installable_module(extracted_module_dir)
+            return self._activate_staged_module(extracted_module_dir, manifest)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
     
     def _install_from_dir(self, dir_path: Path) -> ModuleInfo:
         """从目录安装。"""
-        module_name = dir_path.name
-        target_dir = self._install_dir / module_name
-        
-        # 复制目录
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        shutil.copytree(dir_path, target_dir)
-        
-        # 加载模块信息
-        return self._scanner.load_module(target_dir, ModuleSource.EXTERNAL)
+        temp_dir = Path(tempfile.mkdtemp(prefix="mms_install_dir_", dir=str(self._install_dir)))
+        staged_dir = temp_dir / dir_path.name
+
+        try:
+            shutil.copytree(dir_path, staged_dir)
+            manifest = self._preflight_installable_module(staged_dir)
+            return self._activate_staged_module(staged_dir, manifest)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _preflight_installable_module(self, module_dir: Path) -> ModuleManifest:
+        manifest = self._scanner.parse_manifest(module_dir)
+        warnings = self._scanner.validate(manifest, module_dir)
+        for warning in warnings:
+            logger.warning(f"[MMS] {module_dir.name}: {warning}")
+        self._probe_module_import(manifest.name, module_dir)
+        return manifest
+
+    def _activate_staged_module(self, staged_dir: Path, manifest: ModuleManifest) -> ModuleInfo:
+        target_dir = self._install_dir / staged_dir.name
+        backup_dir: Path | None = None
+
+        try:
+            if target_dir.exists():
+                backup_dir = self._reserve_install_slot(f".{target_dir.name}.bak.")
+                shutil.move(str(target_dir), str(backup_dir))
+
+            shutil.move(str(staged_dir), str(target_dir))
+            self._probe_module_import(manifest.name, target_dir)
+
+            return ModuleInfo(
+                name=manifest.name,
+                manifest=manifest,
+                source=ModuleSource.EXTERNAL,
+                status=ModuleStatus.ENABLED,
+                path=target_dir,
+            )
+        except Exception:
+            if backup_dir and backup_dir.exists():
+                if target_dir.exists():
+                    shutil.rmtree(target_dir, ignore_errors=True)
+                shutil.move(str(backup_dir), str(target_dir))
+            raise
+        finally:
+            if backup_dir and backup_dir.exists():
+                shutil.rmtree(backup_dir, ignore_errors=True)
+
+    def _reserve_install_slot(self, prefix: str) -> Path:
+        reserved_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=str(self._install_dir)))
+        shutil.rmtree(reserved_dir, ignore_errors=True)
+        return reserved_dir
+
+    def _probe_module_import(self, module_name: str, module_dir: Path) -> None:
+        package_root = module_dir.resolve()
+        package_init = package_root / "__init__.py"
+        if not package_init.exists():
+            raise ModuleInstallError(f"模块目录缺少 __init__.py: {package_root}")
+
+        prefix = f"{module_name}."
+        previous_modules = {
+            loaded_name: loaded_module
+            for loaded_name, loaded_module in list(sys.modules.items())
+            if loaded_name == module_name or loaded_name.startswith(prefix)
+        }
+
+        for loaded_name in previous_modules:
+            sys.modules.pop(loaded_name, None)
+
+        importlib.invalidate_caches()
+        spec = importlib.util.spec_from_file_location(
+            module_name,
+            package_init,
+            submodule_search_locations=[str(package_root)],
+        )
+        if spec is None or spec.loader is None:
+            raise ModuleInstallError(f"模块导入预检失败，无法加载: {package_root}")
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception as exc:
+            raise ModuleInstallError(f"模块导入预检失败: {exc}") from exc
+        finally:
+            for loaded_name in list(sys.modules):
+                if loaded_name == module_name or loaded_name.startswith(prefix):
+                    sys.modules.pop(loaded_name, None)
+            sys.modules.update(previous_modules)
     
     def uninstall(self, module_name: str, keep_settings: bool = False) -> bool:
         """卸载模块。

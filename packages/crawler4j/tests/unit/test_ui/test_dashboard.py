@@ -25,7 +25,7 @@ def test_dashboard_compresses_summary_area_for_log_console(qtbot, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dashboard_load_data_cancels_previous_pending_refresh(qtbot, monkeypatch):
+async def test_dashboard_load_data_ignores_stale_results_from_cancelled_refresh(qtbot, monkeypatch):
     import src.ui.dashboard as dashboard_module
 
     monkeypatch.setattr(dashboard_module.DashboardPage, "_setup_timer", lambda self: None)
@@ -58,7 +58,14 @@ async def test_dashboard_load_data_cancels_previous_pending_refresh(qtbot, monke
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            await first_call_gate.wait()
+            try:
+                await first_call_gate.wait()
+            except asyncio.CancelledError:
+                pass
+            return [
+                SimpleNamespace(state=dashboard_module.JobState.COMPLETED),
+                SimpleNamespace(state=dashboard_module.JobState.COMPLETED),
+            ]
         return [
             SimpleNamespace(state=dashboard_module.JobState.ACTIVE),
             SimpleNamespace(state=dashboard_module.JobState.ERROR),
@@ -85,15 +92,16 @@ async def test_dashboard_load_data_cancels_previous_pending_refresh(qtbot, monke
     assert second_task is not None
     assert second_task is not first_task
 
-    with pytest.raises(asyncio.CancelledError):
-        await first_task
+    first_call_gate.set()
 
     await second_task
+    await first_task
     await asyncio.sleep(0)
 
     assert call_count == 2
     assert page._load_task is None
     assert page.running_card.value_label.text() == "1"
+    assert page.completed_card.value_label.text() == "0"
     assert page.failed_card.value_label.text() == "1"
     assert page.env_ready_card.value_label.text() == "1"
     assert page.env_busy_card.value_label.text() == "1"

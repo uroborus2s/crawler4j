@@ -7,7 +7,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
@@ -366,6 +366,8 @@ class EnvListWidget(QWidget):
         self._loader_thread = None
         self._display_items: list[EnvDisplayItem] = []
         self._load_in_progress = False
+        self._reload_requested = False
+        self._reload_run_gc = False
         self._operation_in_progress = False
         self._operation_task: asyncio.Task[Any] | None = None
         self._pending_tasks: set[asyncio.Task[Any]] = set()
@@ -455,6 +457,8 @@ class EnvListWidget(QWidget):
     def load_data(self, run_gc: bool = False):
         """加载环境数据。"""
         if self._load_in_progress:
+            self._reload_requested = True
+            self._reload_run_gc = self._reload_run_gc or run_gc
             return
         self._load_in_progress = True
         self.error_label.hide()
@@ -490,6 +494,7 @@ class EnvListWidget(QWidget):
         self.table.set_data(display_items)
         self._display_items = display_items  # 保存引用供编辑对话框使用
         self._update_stats(len(envs), ready_count, busy_count)
+        self._run_queued_reload_if_needed()
         
     def _render_row(self, row: int, item: EnvDisplayItem, table):
         """渲染单行。"""
@@ -632,6 +637,15 @@ class EnvListWidget(QWidget):
         self._apply_busy_state()
         self.error_label.setText(f"❌ 加载失败: {error}")
         self.error_label.show()
+        self._run_queued_reload_if_needed()
+
+    def _run_queued_reload_if_needed(self) -> None:
+        if not self._reload_requested:
+            return
+        run_gc = self._reload_run_gc
+        self._reload_requested = False
+        self._reload_run_gc = False
+        QTimer.singleShot(0, lambda: self.load_data(run_gc=run_gc))
 
     def _cancel_pending_tasks(self) -> None:
         for task in list(self._pending_tasks):
