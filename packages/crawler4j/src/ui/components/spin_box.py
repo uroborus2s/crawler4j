@@ -1,4 +1,40 @@
-from PyQt6.QtWidgets import QSpinBox
+from PyQt6.QtCore import QPointF, QRect, Qt
+from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtWidgets import QSpinBox, QStyle, QStyleOptionSpinBox
+
+
+def _draw_chevron(painter: QPainter, rect: QRect, *, direction: str, color: str = "#e5e7eb") -> None:
+    if rect.isNull():
+        return
+
+    half_width = max(2.8, min(rect.width(), rect.height()) * 0.16)
+    half_height = max(2.0, min(rect.width(), rect.height()) * 0.12)
+    center_x = rect.center().x()
+    center_y = rect.center().y()
+
+    if direction == "up":
+        points = (
+            QPointF(center_x - half_width, center_y + half_height),
+            QPointF(center_x, center_y - half_height),
+            QPointF(center_x + half_width, center_y + half_height),
+        )
+    else:
+        points = (
+            QPointF(center_x - half_width, center_y - half_height),
+            QPointF(center_x, center_y + half_height),
+            QPointF(center_x + half_width, center_y - half_height),
+        )
+
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(color))
+    pen.setWidthF(1.6)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.drawLine(points[0], points[1])
+    painter.drawLine(points[1], points[2])
+    painter.restore()
 
 
 class StyledSpinBox(QSpinBox):
@@ -59,13 +95,39 @@ class StyledSpinBox(QSpinBox):
             
             /* 箭头图标 */
             QSpinBox::up-arrow {
-                image: url(src/ui/assets/arrow_up.svg);
-                width: 10px;
-                height: 10px;
+                image: none;
+                border: none;
+                width: 0px;
+                height: 0px;
+                background: transparent;
             }
             QSpinBox::down-arrow {
-                image: url(src/ui/assets/arrow_down.svg);
-                width: 10px;
-                height: 10px;
+                image: none;
+                border: none;
+                width: 0px;
+                height: 0px;
+                background: transparent;
             }
         """)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        option = QStyleOptionSpinBox()
+        self.initStyleOption(option)
+        up_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_SpinBox,
+            option,
+            QStyle.SubControl.SC_SpinBoxUp,
+            self,
+        )
+        down_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_SpinBox,
+            option,
+            QStyle.SubControl.SC_SpinBoxDown,
+            self,
+        )
+
+        painter = QPainter(self)
+        _draw_chevron(painter, up_rect.adjusted(0, 1, 0, 0), direction="up")
+        _draw_chevron(painter, down_rect.adjusted(0, 0, 0, -1), direction="down")

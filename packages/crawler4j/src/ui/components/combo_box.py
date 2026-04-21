@@ -1,5 +1,47 @@
-from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtWidgets import QComboBox, QListView, QStyledItemDelegate, QStyleOptionViewItem
+from PyQt6.QtCore import QPointF, QRect, Qt
+from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QListView,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionComboBox,
+    QStyleOptionViewItem,
+)
+
+
+def _draw_chevron(painter: QPainter, rect: QRect, *, direction: str, color: str = "#e5e7eb") -> None:
+    if rect.isNull():
+        return
+
+    half_width = max(3.5, min(rect.width(), rect.height()) * 0.16)
+    half_height = max(2.5, min(rect.width(), rect.height()) * 0.12)
+    center_x = rect.center().x()
+    center_y = rect.center().y()
+
+    if direction == "up":
+        points = (
+            QPointF(center_x - half_width, center_y + half_height),
+            QPointF(center_x, center_y - half_height),
+            QPointF(center_x + half_width, center_y + half_height),
+        )
+    else:
+        points = (
+            QPointF(center_x - half_width, center_y - half_height),
+            QPointF(center_x, center_y + half_height),
+            QPointF(center_x + half_width, center_y - half_height),
+        )
+
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(color))
+    pen.setWidthF(1.8)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.drawLine(points[0], points[1])
+    painter.drawLine(points[1], points[2])
+    painter.restore()
 
 
 class DropdownDelegate(QStyledItemDelegate):
@@ -130,9 +172,25 @@ class StyledComboBox(QComboBox):
                 border-bottom-right-radius: 4px;
             }}
             QComboBox::down-arrow {{
-                image: url(src/ui/assets/arrow_down.svg);
-                width: 14px;
-                height: 14px;
-                padding-right: 8px;
+                image: none;
+                border: none;
+                width: 0px;
+                height: 0px;
+                background: transparent;
             }}
         """)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        arrow_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxArrow,
+            self,
+        )
+
+        painter = QPainter(self)
+        _draw_chevron(painter, arrow_rect.adjusted(0, 0, -2, 0), direction="down")
