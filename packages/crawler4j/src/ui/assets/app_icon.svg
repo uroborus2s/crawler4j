@@ -1,0 +1,58 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="plate" x1="150" y1="118" x2="862" y2="910" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F2F1EB"/>
+      <stop offset="0.52" stop-color="#D7D8D3"/>
+      <stop offset="1" stop-color="#B8BFC4"/>
+    </linearGradient>
+    <linearGradient id="plateInner" x1="220" y1="180" x2="812" y2="862" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FAFAF7"/>
+      <stop offset="1" stop-color="#C9CED1"/>
+    </linearGradient>
+    <linearGradient id="browser" x1="270" y1="210" x2="708" y2="748" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#52A8E8"/>
+      <stop offset="1" stop-color="#206BAE"/>
+    </linearGradient>
+    <linearGradient id="browserInner" x1="322" y1="238" x2="650" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EDF5FA"/>
+    </linearGradient>
+    <linearGradient id="dock" x1="352" y1="560" x2="570" y2="678" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D9DEE3"/>
+      <stop offset="1" stop-color="#AEB6BD"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="224" y1="210" x2="478" y2="462" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE07A"/>
+      <stop offset="1" stop-color="#F1AA18"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="48" y="48" width="928" height="928" rx="210" fill="url(#plate)"/>
+  <rect x="72" y="72" width="880" height="880" rx="186" fill="url(#plateInner)"/>
+  <rect x="72" y="72" width="880" height="880" rx="186" stroke="#6E757D" stroke-opacity="0.22" stroke-width="4"/>
+  <circle cx="244" cy="176" r="92" fill="#FFFFFF" fill-opacity="0.22"/>
+  <ellipse cx="512" cy="802" rx="248" ry="46" fill="#5F6670" fill-opacity="0.16"/>
+
+  <g transform="rotate(-7 512 512)">
+    <rect x="286" y="222" width="438" height="538" rx="54" fill="#7C8794" fill-opacity="0.28"/>
+    <rect x="270" y="206" width="438" height="538" rx="54" fill="url(#browser)"/>
+    <rect x="310" y="238" width="352" height="286" rx="28" fill="url(#browserInner)"/>
+    <rect x="334" y="270" width="232" height="18" rx="9" fill="#C4D9E8"/>
+    <rect x="334" y="308" width="270" height="18" rx="9" fill="#D6E6F1"/>
+    <rect x="334" y="346" width="188" height="18" rx="9" fill="#E3EEF5"/>
+    <path d="M394 442L448 392L514 432L582 356" stroke="#3E9BDA" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="394" cy="442" r="16" fill="#57B7F0"/>
+    <circle cx="448" cy="392" r="16" fill="#57B7F0"/>
+    <circle cx="514" cy="432" r="16" fill="#57B7F0"/>
+    <circle cx="582" cy="356" r="16" fill="#57B7F0"/>
+    <rect x="352" y="560" width="220" height="120" rx="20" fill="url(#dock)"/>
+    <rect x="352" y="560" width="220" height="120" rx="20" stroke="#7D8792" stroke-opacity="0.3" stroke-width="4"/>
+  </g>
+
+  <g>
+    <circle cx="330" cy="314" r="116" fill="#8E6922" fill-opacity="0.12"/>
+    <circle cx="330" cy="314" r="102" stroke="url(#gold)" stroke-width="52"/>
+    <path d="M402 386L502 488" stroke="url(#gold)" stroke-width="58" stroke-linecap="round"/>
+    <circle cx="330" cy="314" r="54" fill="#FFF1B8" fill-opacity="0.26"/>
+  </g>
+</svg>

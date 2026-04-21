@@ -42,6 +42,7 @@ from src.core.system.preferences_service import (
 )
 from src.core.system.ui.about_dialog import AboutDialog
 from src.core.system.version_service import get_version_service
+from src.ui.app_icon import load_app_icon_pixmap
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
@@ -437,9 +438,21 @@ class SettingsPage(QWidget):
         service = get_version_service()
         build_info = service.get_build_info()
 
-        name_label = QLabel("🕷️ 蛛行演略 · crawler4j")
+        title_row = QHBoxLayout()
+        title_row.setSpacing(12)
+
+        icon_label = QLabel()
+        icon_label.setFixedSize(32, 32)
+        icon_pixmap = load_app_icon_pixmap(32)
+        if not icon_pixmap.isNull():
+            icon_label.setPixmap(icon_pixmap)
+        title_row.addWidget(icon_label)
+
+        name_label = QLabel("蛛行演略 · crawler4j")
         name_label.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
-        card_layout.addWidget(name_label)
+        title_row.addWidget(name_label)
+        title_row.addStretch()
+        card_layout.addLayout(title_row)
 
         version_label = QLabel(str(build_info))
         version_label.setStyleSheet("font-size: 14px; color: rgba(255, 255, 255, 0.7);")

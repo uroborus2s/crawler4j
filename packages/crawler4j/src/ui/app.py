@@ -6,7 +6,6 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 from src.core.debug.launcher import (
@@ -18,9 +17,10 @@ from src.core.system.preferences_service import (
     PreferenceKey,
     get_preferences_service,
 )
+from src.ui.app_icon import load_app_icon
 from src.ui.shell import Shell
 from src.ui.qasync_compat import install_qasync_timer_compat
-from src.utils.paths import get_app_data_dir, get_resource_path
+from src.utils.paths import get_app_data_dir
 
 
 def install_logging_preferences_sync(prefs, *, log_dir: Path) -> None:
@@ -137,11 +137,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # 创建应用
     app = QApplication(argv_list)
     app.setApplicationName("蛛行演略 · crawler4j")
-    
+
     # 设置应用图标
-    icon_path = get_resource_path("src/ui/assets/icon.jpg")
-    if icon_path:
-        app.setWindowIcon(QIcon(icon_path))
+    app_icon = load_app_icon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
     
     # 创建主窗口
     try:

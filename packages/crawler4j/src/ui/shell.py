@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.atm import TaskStatus, get_task_service
+from src.ui.app_icon import load_app_icon, load_app_icon_pixmap
 
 
 class StatusIndicator(QFrame):
@@ -42,11 +43,24 @@ class StatusIndicator(QFrame):
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 0, 20, 0)
-        
+
         # 标题
-        title = QLabel("🕷️ 蛛行演略 · crawler4j")
+        title_container = QWidget()
+        title_layout = QHBoxLayout(title_container)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(10)
+
+        title_icon = QLabel()
+        title_icon.setFixedSize(22, 22)
+        title_pixmap = load_app_icon_pixmap(22)
+        if not title_pixmap.isNull():
+            title_icon.setPixmap(title_pixmap)
+        title_layout.addWidget(title_icon)
+
+        title = QLabel("蛛行演略 · crawler4j")
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
-        layout.addWidget(title)
+        title_layout.addWidget(title)
+        layout.addWidget(title_container)
         
         layout.addStretch()
         
@@ -212,6 +226,9 @@ class Shell(QMainWindow):
     def _setup_window(self):
         self.setWindowTitle("蛛行演略 · crawler4j")
         self.setMinimumSize(1200, 800)
+        app_icon = load_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #0f0f14;

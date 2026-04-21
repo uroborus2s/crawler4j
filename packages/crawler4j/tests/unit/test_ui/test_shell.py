@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 def test_shell_defaults_to_1420px_startup_width(qtbot, monkeypatch):
     import src.ui.shell as shell_module
+    from PyQt6.QtGui import QIcon, QPixmap
 
     monkeypatch.setattr(shell_module.Shell, "_setup_ui", lambda self: None)
     monkeypatch.setattr(shell_module.Shell, "_register_pages", lambda self: None)
@@ -11,6 +12,9 @@ def test_shell_defaults_to_1420px_startup_width(qtbot, monkeypatch):
     fake_geometry = SimpleNamespace(width=lambda: 1600, height=lambda: 1000)
     fake_screen = SimpleNamespace(availableGeometry=lambda: fake_geometry)
     monkeypatch.setattr(shell_module.QApplication, "primaryScreen", lambda: fake_screen)
+    pixmap = QPixmap(16, 16)
+    pixmap.fill()
+    monkeypatch.setattr(shell_module, "load_app_icon", lambda: QIcon(pixmap))
 
     window = shell_module.Shell()
     qtbot.addWidget(window)
@@ -18,6 +22,7 @@ def test_shell_defaults_to_1420px_startup_width(qtbot, monkeypatch):
     assert window.minimumWidth() == 1200
     assert window.width() == 1420
     assert window.height() == 800
+    assert not window.windowIcon().isNull()
 
 
 def test_sidebar_includes_help_entry():

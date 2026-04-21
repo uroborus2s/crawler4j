@@ -9,11 +9,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -25,6 +23,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.system.update_service import get_update_service
 from src.core.system.version_service import get_version_service
+from src.ui.app_icon import load_app_icon_pixmap
 
 
 class AboutDialog(QDialog):
@@ -93,7 +92,7 @@ class AboutDialog(QDialog):
         layout.addWidget(icon_container)
 
         # 应用名称
-        name_label = QLabel("🕷️ 蛛行演略 · crawler4j")
+        name_label = QLabel("蛛行演略 · crawler4j")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(name_label)
@@ -145,16 +144,9 @@ class AboutDialog(QDialog):
 
     def _load_icon(self):
         """加载应用图标。"""
-        icon_path = Path(__file__).parent.parent.parent.parent / "ui" / "assets" / "icon.jpg"
-        if icon_path.exists():
-            pixmap = QPixmap(str(icon_path))
-            self.icon_label.setPixmap(
-                pixmap.scaled(
-                    80, 80,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
+        pixmap = load_app_icon_pixmap(80)
+        if not pixmap.isNull():
+            self.icon_label.setPixmap(pixmap)
 
     def _load_version_info(self):
         """加载版本信息。"""
