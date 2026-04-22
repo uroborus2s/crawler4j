@@ -25,3 +25,10 @@ Latest implemented design:
 - ATM reconciles service concurrency as `running + waiting = target`, with FIFO refill against current pool capacity.
 - REM remains the environment owner, while module-scoped pool eligibility is exposed to ATM through host-readable cards stored in `env_metadata`.
 - `REQ-009` / `TASK-023` is implemented locally and validated by ATM/SDK unit tests; PR closure is still pending.
+
+Latest approved design (not yet implemented):
+
+- Module UI will move from `micro_app` / `ui:*` / direct `QWidget` injection to host-managed page schemas declared by `declare_ui(context)`.
+- The new hosted UI contract is intentionally narrow: modules may only declare `Page`, `Section`, `Text`, `Button`, and `DataTable`.
+- `DataTable` remains the only composite widget surface in V1, covering both readonly dashboard tables and host-managed CRUD tables.
+- Trust gate / allowlist / `trusted` will be deleted together with the old code-page loader, because the host will stop executing external UI code.

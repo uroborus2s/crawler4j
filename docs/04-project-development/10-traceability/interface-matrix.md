@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 发布负责人 | 运维
 **上游输入：** `docs/04-project-development/04-design/api-design.md` | `requirements-matrix.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/07-release-delivery/version-governance.md`
 **下游输出：** `docs/04-project-development/07-release-delivery/acceptance-checklist.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `TASK-019`
-**最后更新：** 2026-04-02
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-008`, `TASK-019`
+**最后更新：** 2026-04-22
 
 ## 1. 接口责任矩阵
 
@@ -17,6 +17,7 @@
 | `API-002` | Module Runtime Contract | Core + Module runtime | 最终用户 / 模块维护者 | `module.yaml`、模块根 `__init__.py`、`ModuleAssembler` | 单元/集成测试、关键工作流验证；真实站点 E2E 仍待完成 | Core 维护者 |
 | `API-003` | SDK / Contracts Package Contract | `crawler4j_sdk`、`crawler4j_contracts` | 模块开发者 | `packages/crawler4j-sdk/pyproject.toml`、`packages/crawler4j-contracts/pyproject.toml`、CLI 入口 | build、CLI help、脚手架测试 | SDK / Core 维护者 |
 | `API-004` | Release Metadata Contract | Release metadata | 发布负责人 / 维护者 | `packages/crawler4j/pyproject.toml`、运行时版本服务、Git tag、子包版本 | 版本对照检查、release notes 校验 | 发布负责人 |
+| `API-008` | Hosted Module UI Contract（V1） | Core MMS + SDK + 模块 `declare_ui` | 模块开发者 / 模块详情页 / QA | `ui_extension.pages[]`、`ui.declare_page`、`ui.declare_data_table`、`module-hosted-ui-framework.md` | `ctrip_crawler` 页面覆盖分析、CLI / 宿主页集成测试、模块详情页回归 | Core / SDK 维护者 |
 
 ## 2. 当前接口风险
 
@@ -24,6 +25,7 @@
 |---|---|---|
 | `API-002` | 真实站点 E2E 尚未完成，运行契约仍缺最终现场验证 | 未闭环 |
 | `API-004` | 正式发布尚未切版，交付包仍需绑定实际发布批次 | 未闭环 |
+| `API-008` | 目前仍停留在设计阶段，宿主页 schema 与 CLI 收口尚未实施 | 未启动 |
 
 ## 3. 使用规则
 
@@ -34,4 +36,5 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 新增 `API-008` 责任矩阵，登记模块宿主管理页与最小化 UI 框架的提供方、消费方与验证方式 | Codex |
 | 2026-04-02 | 将占位页重写为正式接口责任矩阵 | Codex |

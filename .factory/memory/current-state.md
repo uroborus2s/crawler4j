@@ -28,6 +28,7 @@
 - 最新修复：2026-04-22 已继续修正 macOS 内部 DMG 布局链的三处实机问题：Apple Silicon 上不再调用会失败的 `bless --openfolder`，Finder 布局脚本改为使用 `hdiutil attach` 返回的实际挂载卷名，且 `makehybrid` 现显式指定最终 HFS 卷名为 `Crawler4j`，避免本机已挂载同名卷时打偏布局或把中间目录名暴露给用户；最新 real artifact 已通过本机 `hdiutil attach` 验证。
 - 最新修复：2026-04-22 已把 macOS 内部发布脚本的环境变量入口补成“默认读取 workspace 根 `.env`，也支持显式 `--env-file` 覆盖”，并新增 `.env.example` 模板；当前 `deploy-macos-internal-release` 仍旧通过 `rsync -av packages/crawler4j/dist/updates/macos/ -> $CRAWLER4J_UPDATE_UPLOAD_TARGET/` 上传，不会在 `generate_appcast` 失败后继续执行上传。
 - 文档：2026-04-22 已为 macOS Sparkle 内部分发补齐服务器侧部署口径：当前推荐使用 `updates.<主域名>` 承载 `https://updates.example.com/crawler4j/appcast.xml`，仓库新增 `deploy/nginx/crawler4j-updates.example.conf` 样板，并在 `deployment-guide.md` 说明 Certbot/Let's Encrypt 与 `/srv/nginx/updates/crawler4j/` 静态目录约定；后续 `deploy-macos-internal-release` 的 rsync 目标与 nginx 目录现有统一口径。
+- 文档：2026-04-22 已把模块 UI 重构方案沉淀为正式设计：新增 `module-hosted-ui-framework.md`，明确模块不得再导出 `PyQt6` 页面，下一轮 UI 契约将统一收口为 `ui_extension.pages[] + ui.declare_page/ui.declare_data_table`，第一版宿主控件固定为 `Page`、`Section`、`Text`、`Button`、`DataTable`。
 - 最新修复：2026-04-21 已为 macOS 小范围内部发布补齐 Sparkle 线路的最小实现：宿主新增 macOS 打包版 Sparkle 运行时桥接，`system.auto_update` 现可同步控制 Sparkle 自动检查开关；workspace 根新增 `uv run package-macos-internal-release`，会在保留现有 `PyInstaller -> Crawler4j.app` 基线的前提下，把 `Sparkle.framework`、`SUFeedURL` / `SUPublicEDKey` 注入 bundle，并在 `packages/crawler4j/dist/updates/macos/` 生成内部 DMG / `appcast.xml` 发布脚手架。当前直接锁定该路径的是 `test_update_service.py` 与 `test_packaging_config.py` 的 Sparkle 回归。
 - 最新修复：2026-04-21 已对齐 VirtualBrowser `addBrowser` 的代理协议口径：宿主创建环境时会把代理 `protocol` 统一转成官方文档示例所用的大写 `HTTP/HTTPS/SOCKS5`，避免继续把 IP 池生成的 `http://user:pass@host:port` 代理以小写协议透传给外部浏览器；同时 `VirtualBrowserClient.add_browser()` 在 `addBrowser` 返回非 2xx 或 `success=false` 时，现会把状态码与响应正文一起写入主日志并抛出带正文的异常，后续排查代理认证失败或外部宿主 500 不再只剩一条裸 `HTTPStatusError`。对应回归当前锁定于 `test_virtualbrowser_client.py` 的协议归一化与 `500` 正文透传断言。
 - 最新修复：2026-04-21 已把 ATM `ExecutionRunner` 的 `on_cleanup` 默认最大执行时间从 `8s` 提高到 `120s`，以便模块在取消或终态收口时完成更长的一轮有界 finalize；当前只放宽 cleanup budget，本地终态 hook / 环境动作的其余 timeout guard 仍保留短超时兜底，避免宿主完全失去收口保护。对应回归当前锁定于 `test_execution_runner.py` 的默认 budget 断言与既有 cleanup 超时路径。
@@ -119,6 +120,7 @@
 - 优先处理外部 VirtualBrowser 运行时故障；当前 `localhost:9002` 上直接 `addBrowser -> launchBrowser` 也会稳定报 `Failed to detect DevTools port`，在外部应用恢复前不要把该阻塞继续归因到宿主 REM 代码
 - 调试模块 UI 时，优先使用 DevLink 并在详情页通用数据表中点击“刷新”验证最新 `declare_ui` / handler 行为
 - 若 UX/UI 需要可视化评审，优先登记真实设计交付物而不是只写文字
+- 模块 UI 重构进入实施前，先按 `module-hosted-ui-framework.md` 钉死 schema 边界和删除清单，不要再追加兼容层
 - 若工作项进入收尾，确认关联 PR 已完成评审并合并
 - 阶段切换前先更新正式文档，再刷新 `/.factory/memory/` 压缩记忆
 - 最新修复：2026-04-22 已完成代码洁净性专项第一轮收口。REM 回收失败不再把环境误标为 `READY`；ATM 删除作业改为“先停调度/请求停机，再等 active task 归零后删库”；MMS 外部模块安装目录已改为稳定模块名并兼容旧非规范目录迁移/回滚；`write_dataset()` 对坏输入改为 fail-fast；SDK `page create` 输出已对齐宿主 `module`/无参实例化契约，`module init/set version/release status` 同步校验 `pyproject.toml` 与 `module.yaml` 版本一致；开发者指南里的页面示例签名也已同步更新。

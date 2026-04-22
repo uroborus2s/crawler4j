@@ -6,7 +6,7 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `TASK-024`
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `TASK-024`
 **最后更新：** 2026-04-22
 
 ## `API-001` Root App Entry Contract
@@ -42,6 +42,23 @@
 | 升级策略 | 旧模块统一按最新模板重新初始化；不再为旧式完整 `__init__.py` 模板提供兼容承诺 |
 | 当前风险 | 真实站点 E2E 仍未覆盖；动态加载的模块扩展点仍需依赖回归测试保持稳定 |
 | 关联项 | `TASK-003`, `TASK-013` |
+
+## `API-008` Hosted Module UI Contract（V1 设计已定，尚未落地）
+
+| 项目 | 内容 |
+|---|---|
+| 目标 | 模块 UI 不再直接导出 `PyQt6` 页面，而是声明宿主管理页 schema，由宿主统一渲染 |
+| Manifest 形态 | `ui_extension.pages[]`，每页通过 `entry=core:page:<page_id>` 或 `entry=core:data_table:<view_id>` 声明 |
+| 模块 UI 声明入口 | `module_runtime.py` 中的 `declare_ui(context)` |
+| 新能力入口 | `context.tools.call("ui.declare_page", ...)`、`context.tools.call("ui.declare_data_table", ...)` |
+| 宿主公开控件 | `Page`、`Section`、`Text`、`Button`、`DataTable` |
+| `DataTable` V1 范围 | `readonly` 与 `managed_crud` 两种模式；字段类型最少支持 `text`、`select`、`secret` |
+| 宿主动作范围 | `Button.action` 第一版只开放 `reload`、`open_page` |
+| 明确删除 | `micro_app`、`ui:*`、代码型页面脚手架、trust gate / allowlist / `trusted` |
+| 设计输入 | `module-hosted-ui-framework.md` |
+| 当前验证基线 | `ctrip_crawler` 的 dashboard + 3 张宿主管理表可以被最小控件集完整承载 |
+| 当前状态 | 设计已批准，等待进入实施波次 |
+| 关联项 | `CR-011` |
 
 ## `API-005` Module Config / Runtime / Data Contract
 
@@ -137,6 +154,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 新增 `API-008`，登记模块宿主管理页与最小化 UI 框架的目标契约 | Codex |
 | 2026-04-22 | 补记 root app 在 Windows 打包态的 Velopack 启动前置动作，并将 Windows `crawler4j.update.json` 与统一 `UpdateService` 后端分派纳入发布元数据契约 | Codex |
 | 2026-03-26 | 初始接口与契约设计摘要 | Codex |
 | 2026-03-31 | 增补模块根入口自动托管的契约演进设计 | Codex |

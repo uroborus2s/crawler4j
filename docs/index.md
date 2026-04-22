@@ -133,6 +133,9 @@ mkdocs:
             - title: 接口与契约设计
               path: 04-project-development/04-design/api-design.md
               access: private
+            - title: 模块宿主管理页与最小化 UI 框架设计
+              path: 04-project-development/04-design/module-hosted-ui-framework.md
+              access: private
             - title: ATM 模块资源池等待队列设计
               path: 04-project-development/04-design/atm-resource-pool-queue-design.md
               access: private

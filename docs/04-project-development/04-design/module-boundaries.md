@@ -34,10 +34,10 @@
 | 项目 | 内容 |
 |---|---|
 | 目录 | `packages/crawler4j/modules/README.md`（仓内占位）、`<app-data>/modules`（正式安装）、DevLink 源码目录（开发调试） |
-| 职责 | 定义模块根目录、`module.yaml`（含只读 `config_defaults` 初始化模板）、根 `__init__.py`、任务、工作流与 UI 扩展的运行边界 |
+| 职责 | 定义模块根目录、`module.yaml`（含只读 `config_defaults` 初始化模板）、根 `__init__.py`、任务、工作流与宿主管理 UI 声明的运行边界 |
 | 对外接口 | `run(context)` 与模块 hooks |
 | 依赖 | `crawler4j_sdk`, Core runtime |
-| 不负责 | Core 基础设施、SDK 公共契约 |
+| 不负责 | Core 基础设施、SDK 公共契约、宿主内部 `PyQt6` 组件实现 |
 
 当前边界事实：
 
@@ -50,6 +50,8 @@
 - 根 `__init__.py` 继续保留为宿主入口，但目标是收敛为稳定薄壳，而不是长期承载可变业务分发逻辑。
 - 任务/工作流自动发现、默认 `run(context)` 分发和默认 hooks 由 SDK 统一入口组装器提供。
 - 模块级可变行为迁移到独立文件，例如 `module_runtime.py`，而不是继续要求模块作者手改根 `__init__.py`。
+- 模块 UI 不再导出 `QWidget` 或 `ui:*` 页面类；模块只能在 `module_runtime.py` 的 `declare_ui(context)` 中声明宿主管理页或宿主数据表。
+- 宿主允许模块使用的公开 UI 面固定为最小化 UI 框架 V1，而不是开放任意 `PyQt6` 组件能力。
 - 旧模块不再作为新契约的兼容目标；升级时统一按最新模板重新初始化模块骨架。
 
 ## `MOD-004` SDK 与 Contracts
@@ -82,5 +84,6 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 补记模块 UI 边界：模块不再直接导出 `PyQt6` 页面，只能声明宿主管理页与宿主数据表 | Codex |
 | 2026-03-26 | 建立当前代码边界摘要 | Codex |
 | 2026-03-31 | 登记模块根入口自动托管的目标边界 | Codex |

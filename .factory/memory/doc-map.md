@@ -46,6 +46,7 @@
 - `docs/04-project-development/04-design/index.md` -> `.factory/memory/runtime-brief.md`
 - `docs/04-project-development/04-design/api-design.md` -> `.factory/memory/api.summary.md`
 - `docs/04-project-development/04-design/atm-resource-pool-queue-design.md` -> `.factory/memory/architecture.summary.md`
+- `docs/04-project-development/04-design/module-hosted-ui-framework.md` -> `.factory/memory/architecture.summary.md`
 - `docs/04-project-development/04-design/module-config-runtime-data-contract.md` -> `.factory/memory/api.summary.md`
 - `docs/04-project-development/04-design/module-boundaries.md` -> `.factory/memory/runtime-brief.md`
 - `docs/04-project-development/04-design/system-architecture.md` -> `.factory/memory/architecture.summary.md`
