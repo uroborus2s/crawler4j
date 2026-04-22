@@ -191,6 +191,9 @@ async def _run_application(app: QApplication, prefs) -> None:
         window.showMinimized()
     else:
         window.show()
+    # Windows 打包态下，show() 返回时主窗口仍可能尚未完成首轮原生注册；
+    # 先让事件循环过一个 tick，再恢复“最后一个窗口关闭时退出”，可避免 qasync 提前停环。
+    await asyncio.sleep(0)
     app.setQuitOnLastWindowClosed(True)
 
     from src.core.system.update_service import get_update_service

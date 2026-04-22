@@ -146,7 +146,7 @@ def test_main_disables_quit_on_last_window_closed_before_async_startup(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_run_application_restores_quit_on_last_window_closed_after_window_show(monkeypatch):
+async def test_run_application_restores_quit_on_last_window_closed_after_window_first_tick(monkeypatch):
     from src.ui import app
 
     observed: list[tuple[str, object]] = []
@@ -204,18 +204,23 @@ async def test_run_application_restores_quit_on_last_window_closed_after_window_
     async def fake_force_shutdown() -> None:
         observed.append(("playwright", "force_shutdown"))
 
+    async def fake_sleep(delay: float) -> None:
+        observed.append(("sleep", delay))
+
     monkeypatch.setattr("src.core.rem.manager.get_environment_manager", lambda: FakeEnvironmentManager())
     monkeypatch.setattr("src.core.atm.service.get_task_service", lambda: FakeTaskService())
     monkeypatch.setattr("src.core.system.update_service.get_update_service", lambda: FakeUpdateService())
     monkeypatch.setattr("src.core.debug.service.get_debug_service", lambda: FakeDebugService())
     monkeypatch.setattr("src.core.rem.handle.PlaywrightManager.force_shutdown", fake_force_shutdown)
     monkeypatch.setattr(app, "Shell", FakeWindow)
+    monkeypatch.setattr(app.asyncio, "sleep", fake_sleep)
 
     await app._run_application(FakeApplication(), FakePrefs())
 
     show_index = observed.index(("window", "show"))
+    sleep_index = observed.index(("sleep", 0))
     quit_restore_index = observed.index(("quit", True))
-    assert show_index < quit_restore_index
+    assert show_index < sleep_index < quit_restore_index
     assert ("task_service", "stop") in observed
     assert ("debug_service", "shutdown") in observed
     assert ("playwright", "force_shutdown") in observed
