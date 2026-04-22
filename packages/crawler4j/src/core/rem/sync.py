@@ -4,14 +4,10 @@
 """
 
 import asyncio
-from typing import TYPE_CHECKING, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from src.core.foundation.logging import logger
 from src.core.rem.manager import get_environment_manager
-
-if TYPE_CHECKING:
-    from src.core.rem.pool import EnvPool
-    from src.core.rem.provider import BaseProvider
 
 
 class ExternalSyncManager:
@@ -27,21 +23,14 @@ class ExternalSyncManager:
     
     def __init__(
         self,
-        pool: "EnvPool",
         sync_interval: int = 30,
         gc_runner: Callable[[], Awaitable[int]] | None = None,
     ) -> None:
         """初始化同步管理器。"""
-        self._pool = pool
         self._sync_interval = sync_interval
         self._running = False
         self._sync_task: asyncio.Task | None = None
-        self._providers: dict[str, "BaseProvider"] = {}
         self._gc_runner = gc_runner or get_environment_manager().run_gc
-    
-    def register_provider(self, provider: "BaseProvider") -> None:
-        """注册需要同步的 Provider。"""
-        self._providers[provider.name] = provider
     
     async def startup(self) -> None:
         """启动同步管理器。"""

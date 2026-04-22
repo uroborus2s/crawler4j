@@ -15,7 +15,7 @@ workspace 级开发脚本已经统一迁到仓库根 `scripts/`，不再作为 `
 
 - `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；构建时自动写回各包 `dist/`，发布时自动指向各包 `dist/*`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
-- `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
+- `scripts/db_cli.py`：本地维护用 `config.db` / `state.db` / `data.db` 初始化与全量重置脚本
 
 ## 从 workspace 根目录开发
 

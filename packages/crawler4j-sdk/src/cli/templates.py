@@ -121,35 +121,36 @@ uv run crawler4j package build
 - 如果需要根据即将执行的 `recycle / keep_alive / destroy` 做收尾，可读取 `context.runtime["env_action"]`。
 '''
 
-MODEL_UTILS_HELPER_TEMPLATE = '''"""模块通用工具。"""
-
-def format_currency(value: float) -> str:
-    """格式化货币。"""
-    return f"¥{value:,.2f}"
-'''
-
 MODEL_TEST_TASK_TEMPLATE = '''"""测试任务脚本。"""
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
 from crawler4j_sdk import TaskContext
 from tasks.example_task import ExampleTask
+
 
 @pytest.mark.asyncio
 async def test_example_task_logic():
     # 1. 准备 Mock 环境
     ctx = MagicMock(spec=TaskContext)
     ctx.get_config.return_value = "https://mock.url"
+    ctx.logger = MagicMock()
     ctx.page = MagicMock()
+    ctx.page.goto = AsyncMock()
+    ctx.page.title = AsyncMock(return_value="Mock Title")
     ctx.captured_data = []
-    
+
     # 2. 执行任务
     task = ExampleTask()
     result = await task.execute(ctx)
-    
+
     # 3. 验证结果
     assert result.success is True
     assert len(ctx.captured_data) == 1
+    assert result.data["title"] == "Mock Title"
+    ctx.page.goto.assert_awaited_once_with("https://mock.url", wait_until="domcontentloaded")
+    ctx.page.title.assert_awaited_once()
 '''
 MODEL_MODULE_INIT = '''"""{display_name} 模块入口。
 

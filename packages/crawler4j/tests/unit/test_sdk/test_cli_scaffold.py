@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 import tomllib
@@ -26,6 +27,14 @@ def _import_generated_package(package_root: Path):
         sys.modules.pop(name, None)
 
     return importlib.import_module(package_name)
+
+
+def _import_module_from_file(module_name: str, file_path: Path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _read_manifest(module_root: Path) -> dict:
@@ -105,7 +114,7 @@ def test_module_init_creates_complete_project(module_root: Path):
     assert "`on_cleanup` 会在 ATM 执行计划中的环境动作前调用" in readme_text
 
 
-def test_archive_members_excludes_nested_egg_info_contents(tmp_path: Path):
+def test_archive_members_keeps_regular_files_while_excluding_cache_artifacts(tmp_path: Path):
     module_root = tmp_path / "demo_model"
     module_root.mkdir()
     nested_package = module_root / "nested"
@@ -134,11 +143,11 @@ def test_archive_members_excludes_nested_egg_info_contents(tmp_path: Path):
     archived_paths = {arcname for _, arcname in members}
 
     assert "demo_model/module.yaml" in archived_paths
+    assert "demo_model/ui/legacy_page.py" in archived_paths
     assert "demo_model/.DS_Store" not in archived_paths
     assert "demo_model/.idea/workspace.xml" not in archived_paths
     assert "demo_model/.vscode/settings.json" not in archived_paths
     assert "demo_model/nested/demo_model.egg-info/PKG-INFO" not in archived_paths
-    assert "demo_model/ui/legacy_page.py" not in archived_paths
 
 
 def test_module_init_generates_importable_package(module_root: Path):
@@ -259,6 +268,27 @@ def test_page_create_generates_hosted_page_runtime_skeleton(
     payload = module_runtime.load_dashboard_page(None, "dashboard")
     assert payload["summary"] == "Dashboard 页面已由 hosted page V1 加载。"
     assert payload["updated_at"] == "待接入真实数据"
+
+
+def test_module_init_generates_runnable_task_test_scaffold(module_root: Path):
+    module_path = str(module_root)
+    if module_path not in sys.path:
+        sys.path.insert(0, module_path)
+
+    stale = [
+        name
+        for name in sys.modules
+        if name in {"tasks", "tests"} or name.startswith("tasks.") or name.startswith("tests.")
+    ]
+    for name in stale:
+        sys.modules.pop(name, None)
+
+    generated_tests = _import_module_from_file(
+        f"{module_root.name}_generated_test_tasks",
+        module_root / "tests" / "test_tasks.py",
+    )
+
+    asyncio.run(generated_tests.test_example_task_logic())
 
 
 def test_task_create_refuses_to_clobber_existing_files(module_root: Path, monkeypatch: pytest.MonkeyPatch):
@@ -778,6 +808,39 @@ def test_page_create_does_not_mutate_manifest_when_declare_ui_is_missing(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 1
     assert "ui_extension" not in _read_manifest(module_root)
+
+
+def test_page_create_force_refreshes_existing_helper(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8")
+        .replace('"title": "Dashboard"', '"title": "STALE TITLE"')
+        .replace('"summary": "Dashboard 页面已由 hosted page V1 加载。"', '"summary": "STALE SUMMARY"')
+        .replace('"updated_at": "待接入真实数据"', '"updated_at": "STALE TIMESTAMP"'),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name="Overview", description="Overview 宿主页", force=True)
+    ) == 0
+
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    assert '"title": "Overview"' in runtime_text
+    assert '"text": "Overview 宿主页"' in runtime_text
+    assert '"summary": "Overview 页面已由 hosted page V1 加载。"' in runtime_text
+    assert '"updated_at": "待接入真实数据"' in runtime_text
+    assert "STALE TITLE" not in runtime_text
+    assert "STALE SUMMARY" not in runtime_text
+    assert "STALE TIMESTAMP" not in runtime_text
+    assert _read_manifest(module_root)["ui_extension"]["pages"][0]["label"] == "Overview"
 
 
 def test_check_full_rejects_manifest_page_missing_from_declare_ui(

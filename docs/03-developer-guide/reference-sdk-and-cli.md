@@ -81,6 +81,10 @@
 - 数据表是否真的通过 `ui.declare_data_table` 注册
 - Hosted UI 的 `load_handler` 是否存在且为同步函数
 
+补一条脚手架刷新语义：
+
+- `uv run crawler4j page create <page_id> --force` 会同步刷新 `module.yaml.ui_extension.pages[]` 和 `module_runtime.py` 里该页面对应的 helper block；如果页面已存在，不会只改 manifest 而留下旧 `build_*_page_schema` / `load_*_page` 实现。
+
 ## 模块升级包、安装和升级的边界
 
 ### 模块升级包

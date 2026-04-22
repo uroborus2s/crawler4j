@@ -126,3 +126,4 @@
 - 若工作项进入收尾，确认关联 PR 已完成评审并合并
 - 阶段切换前先更新正式文档，再刷新 `/.factory/memory/` 压缩记忆
 - 最新修复：2026-04-22 已完成代码洁净性专项第一轮收口。REM 回收失败不再把环境误标为 `READY`；ATM 删除作业改为“先停调度/请求停机，再等 active task 归零后删库”；MMS 外部模块安装目录已改为稳定模块名并兼容旧非规范目录迁移/回滚；`write_dataset()` 对坏输入改为 fail-fast；SDK `page create` 输出已对齐宿主 `module`/无参实例化契约，`module init/set version/release status` 同步校验 `pyproject.toml` 与 `module.yaml` 版本一致；开发者指南里的页面示例签名也已同步更新。
+- 最新修复：2026-04-22 已完成代码洁净性专项第二轮收口。`db_cli reset` 改为同时清空 `config.db` / `state.db` / `data.db`；`module init` 生成的默认任务测试脚手架改为可直接运行；`page create --force` 现会同步刷新 manifest 与 runtime helper block，避免页面 helper 漂移；ATM `returns_none` 选择器提示与运行时校验统一收口到共享 helper；REM 删除了伪 GC loop 状态机与死的外部同步兼容壳；旧 `src/ui/core` 兼容层与 `ModuleDetailPanel` 已正式退出主线。全量质量门当前为 `uv run ruff check .` 与 `uv run pytest -q` 通过（`640 passed`）。

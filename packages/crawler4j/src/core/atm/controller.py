@@ -8,6 +8,7 @@
 
 import asyncio
 import time
+from collections.abc import Mapping
 from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -30,19 +31,16 @@ class InvalidJobConfigurationError(ValueError):
     """作业运行模板组合无效。"""
 
 
-def selector_returns_none(module_name: str, selector_name: str) -> bool:
-    """返回环境选择器是否用 `None` 表示“继续等待/无候选”。"""
-    normalized_module = normalize_resource_pool_module_name(module_name)
+def selector_returns_none(selector_infos: Mapping[str, object] | list[object], selector_name: str) -> bool:
+    """纯谓词：给定 selector 元数据集合，判断目标 selector 是否以 `None` 表示“继续等待/无候选”。"""
     normalized_selector = str(selector_name or "").strip()
-    if not normalized_module or not normalized_selector:
+    if not normalized_selector:
         return False
 
-    try:
-        selector_infos = get_module_service().list_env_selectors(normalized_module)
-    except Exception:
-        return False
-
-    info = next((item for item in selector_infos if item.name == normalized_selector), None)
+    if isinstance(selector_infos, Mapping):
+        info = selector_infos.get(normalized_selector)
+    else:
+        info = next((item for item in selector_infos if item.name == normalized_selector), None)
     return bool(info and getattr(info, "returns_none", False))
 
 
@@ -132,7 +130,21 @@ class JobController:
         if not module_name:
             return
 
-        if selector_returns_none(module_name, selector_name):
+        normalized_module = normalize_resource_pool_module_name(module_name)
+        try:
+            selector_infos = list(get_module_service().list_env_selectors(normalized_module))
+        except Exception as exc:
+            raise InvalidJobConfigurationError(
+                f"无法校验环境选择器是否允许空返回: {normalized_module}.{selector_name}"
+            ) from exc
+
+        info = next((item for item in selector_infos if item.name == selector_name), None)
+        if info is None:
+            raise InvalidJobConfigurationError(
+                f"未找到环境选择器定义: {normalized_module}.{selector_name}"
+            )
+
+        if selector_returns_none(selector_infos, selector_name):
             raise InvalidJobConfigurationError(
                 f"Service Job 使用会返回 none 的环境选择器时必须配置 resource_pool: {module_name}.{selector_name}"
             )

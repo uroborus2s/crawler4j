@@ -1,3 +1,4 @@
+import inspect
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -115,6 +116,33 @@ async def test_create_env_keeps_connected_environment_running(manager):
     assert provider.open_called
     assert provider.connect_called
     assert not provider.close_called
+
+
+@pytest.mark.asyncio
+async def test_create_env_does_not_mutate_input_config(manager):
+    provider = MockProvider()
+    register_provider(provider)
+    config = {
+        "env_name": "custom-env",
+        "labels": ["demo"],
+    }
+
+    env = await manager._create_env(provider=provider, config=config)
+
+    assert env.name == "custom-env"
+    assert config == {
+        "env_name": "custom-env",
+        "labels": ["demo"],
+    }
+    assert provider.last_config is not config
+    assert provider.last_config["env_id"] == env.id
+    assert provider.last_config["env_name"] == "custom-env"
+    assert provider.last_config["labels"] == ["demo"]
+    assert "env_id" not in config
+
+
+def test_release_signature_removes_dirty_placeholder_argument():
+    assert "dirty" not in inspect.signature(EnvironmentManager.release).parameters
 
 
 @pytest.mark.asyncio

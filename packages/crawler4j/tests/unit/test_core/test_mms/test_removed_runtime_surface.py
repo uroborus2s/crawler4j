@@ -10,6 +10,13 @@ from src.core.mms.models import ModuleInfo, ModuleManifest
 from src.core.mms.service import ModuleService
 
 
+def _assert_removed_module(module_name: str) -> None:
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        importlib.import_module(module_name)
+
+    assert exc_info.value.name == module_name
+
+
 def test_removed_legacy_runtime_and_ui_surface_stays_unavailable():
     app_root = Path(__file__).resolve().parents[4]
     workspace_root = app_root.parents[1]
@@ -17,13 +24,13 @@ def test_removed_legacy_runtime_and_ui_surface_stays_unavailable():
         app_root / "src" / "automation",
         app_root / "src" / "core" / "models",
         app_root / "src" / "ui" / "core",
+        app_root / "src" / "ui" / "components" / "sidebar.py",
         app_root / "src" / "core" / "mms" / "ui" / "module_detail_panel.py",
         workspace_root / "packages" / "crawler4j-sdk" / "crawler4j_sdk" / "extensions.py",
     ]
     removed_modules = [
         "src.ui.core",
-        "src.ui.core.adapter",
-        "src.ui.core.command_channel",
+        "src.ui.components.sidebar",
         "src.core.mms.ui.module_detail_panel",
         "src.utils.async_utils",
         "src.utils.captcha_solver",
@@ -37,8 +44,7 @@ def test_removed_legacy_runtime_and_ui_surface_stays_unavailable():
         assert path.exists() is False
 
     for module_name in removed_modules:
-        with pytest.raises(ModuleNotFoundError):
-            importlib.import_module(module_name)
+        _assert_removed_module(module_name)
 
 
 class _FakeLocator:

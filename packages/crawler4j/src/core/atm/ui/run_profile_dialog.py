@@ -2039,7 +2039,7 @@ class RunProfileDialog(QDialog):
         selector_name = self.selector_name_combo.currentData()
         normalized_selector = selector_name if isinstance(selector_name, str) else ""
         self.selector_none_hint.setVisible(
-            selector_returns_none(self._current_script_module_name(), normalized_selector)
+            selector_returns_none(self._selector_infos, normalized_selector)
         )
 
     def _on_script_module_changed(self, _module_name: str) -> None:

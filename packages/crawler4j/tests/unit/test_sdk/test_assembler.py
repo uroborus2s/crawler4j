@@ -7,6 +7,7 @@ from textwrap import dedent
 from unittest.mock import MagicMock, AsyncMock
 
 from crawler4j_sdk.assembler import ModuleAssembler
+from crawler4j_sdk.cli.templates import MODEL_MODULE_INIT
 from crawler4j_sdk.context import TaskContext
 
 @pytest.fixture
@@ -39,59 +40,8 @@ def create_mock_context():
 
 def write_managed_root_module(module_dir):
     (module_dir / "__init__.py").write_text(
-        dedent(
-            '''
-            import importlib
-            from pathlib import Path
-
-            from crawler4j_sdk import EnvCandidate, ModuleAssembler, TaskContext, TaskResult
-
-            assembler = ModuleAssembler(
-                package_root=Path(__file__).parent,
-                module_name=__name__,
-            )
-
-
-            async def run(context: TaskContext) -> TaskResult:
-                return await assembler.run(context)
-
-
-            async def prepare_env(context, *args):
-                hook = assembler.get_hook("prepare_env")
-                return await hook(context, *args) if hook else None
-
-
-            async def on_cleanup(context, *args):
-                hook = assembler.get_hook("on_cleanup")
-                return await hook(context, *args) if hook else None
-
-
-            async def select_env(
-                context: TaskContext,
-                candidates: list[EnvCandidate],
-                selector_name: str,
-            ):
-                return await assembler.run_env_selector(selector_name, context, candidates)
-
-
-            _runtime_module = None
-
-
-            def _load_runtime_module():
-                global _runtime_module
-                if _runtime_module is None:
-                    _runtime_module = importlib.import_module(f"{__name__}.module_runtime")
-                return _runtime_module
-
-
-            def __getattr__(name: str):
-                runtime_module = _load_runtime_module()
-                if hasattr(runtime_module, name):
-                    return getattr(runtime_module, name)
-                raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-            '''
-        ).strip()
-        + "\n"
+        MODEL_MODULE_INIT.format(display_name="Test Module"),
+        encoding="utf-8",
     )
 
 @pytest.mark.asyncio
@@ -307,6 +257,9 @@ class ManifestFlow(TaskFlow):
 @pytest.mark.asyncio
 async def test_managed_root_module_delegates_hooks_and_runtime_attributes(temp_module):
     write_managed_root_module(temp_module)
+    assert (temp_module / "__init__.py").read_text(encoding="utf-8") == MODEL_MODULE_INIT.format(
+        display_name="Test Module"
+    )
     (temp_module / "module_runtime.py").write_text(
         dedent(
             """

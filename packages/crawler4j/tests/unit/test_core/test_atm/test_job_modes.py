@@ -44,6 +44,21 @@ def _build_select_run_profile(wait_timeout: int = 60, resource_pool: str = "") -
     )
 
 
+@pytest.fixture(autouse=True)
+def patch_default_selector_metadata(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.atm.controller.get_module_service",
+        lambda: SimpleNamespace(
+            list_env_selectors=lambda module_name: [
+                SimpleNamespace(name="random_ready", returns_none=False),
+                SimpleNamespace(name="return_none", returns_none=True),
+            ]
+            if module_name == "demo_module"
+            else []
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_service_job_maintains_target_concurrency():
     controller = JobController()
@@ -268,6 +283,51 @@ async def test_service_job_with_returns_none_selector_without_pool_is_paused(mon
             list_env_selectors=lambda module_name: [
                 SimpleNamespace(name="return_none", returns_none=True),
             ]
+        ),
+    )
+
+    await controller._reconcile_job(job)
+
+    assert job.state == JobState.PAUSED
+    controller.repo.save_job.assert_awaited_once_with(job)
+    controller.dispatcher.dispatch.assert_not_awaited()
+    controller.dispatcher.request_stop_for_job.assert_awaited_once_with(job.id, env_action=None)
+
+
+@pytest.mark.asyncio
+async def test_service_job_selector_validation_fails_closed_when_selector_metadata_load_fails(monkeypatch):
+    controller = JobController()
+    job = Job(
+        id="service-job-selector-metadata-error",
+        name="service-selector-metadata-error",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.SELECT,
+                    selector_name="return_none",
+                    resource_pool="",
+                ),
+            ),
+            execution=ExecutionContext(module="demo_module", workflow="repair"),
+        ),
+        concurrency_target=1,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+    controller.repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        count_active_tasks=AsyncMock(return_value=0),
+        save_job=AsyncMock(),
+    )
+    controller.dispatcher = SimpleNamespace(
+        dispatch=AsyncMock(),
+        request_stop_for_job=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "src.core.atm.controller.get_module_service",
+        lambda: SimpleNamespace(
+            list_env_selectors=lambda module_name: (_ for _ in ()).throw(RuntimeError("selector metadata unavailable"))
         ),
     )
 

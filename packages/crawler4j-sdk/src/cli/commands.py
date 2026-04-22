@@ -136,6 +136,24 @@ def _insert_declare_ui_call(runtime_text: str, call_line: str) -> str:
     return "".join(lines)
 
 
+def _upsert_function_block(runtime_text: str, function_names: list[str], block: str) -> str:
+    lines = runtime_text.splitlines(keepends=True)
+    tree = ast.parse(runtime_text)
+    names = set(function_names)
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    ]
+    if not functions:
+        return f"{runtime_text}{block}"
+
+    start = min(node.lineno for node in functions) - 1
+    end = max((node.end_lineno or node.lineno) for node in functions)
+    lines[start:end] = [block]
+    return "".join(lines)
+
+
 def _resolve_github_token(explicit_token: str | None = None) -> str | None:
     token = str(explicit_token or "").strip()
     if token:
@@ -1076,8 +1094,6 @@ def _archive_members(module_root: Path) -> list[tuple[Path, str]]:
             continue
         if any(part.endswith(".egg-info") for part in relative.parts):
             continue
-        if relative.parts and relative.parts[0] == "ui":
-            continue
         if path.is_dir():
             continue
         if path.name in ignored_files:
@@ -1488,12 +1504,20 @@ def cmd_page_create(args: argparse.Namespace) -> int:
     runtime_path = module_root / "module_runtime.py"
     runtime_text = runtime_path.read_text(encoding="utf-8")
     helper_name = f"_declare_{name}_page"
-    if helper_name not in runtime_text:
-        runtime_text += PAGE_HELPER_TEMPLATE.format(
-            page_id=name,
-            display_name=args.display_name or to_display_name(name),
-            description=args.description or f"{to_display_name(name)} 宿主页",
-        )
+    helper_block = PAGE_HELPER_TEMPLATE.format(
+        page_id=name,
+        display_name=args.display_name or to_display_name(name),
+        description=args.description or f"{to_display_name(name)} 宿主页",
+    )
+    helper_functions = [
+        helper_name,
+        f"build_{name}_page_schema",
+        f"load_{name}_page",
+    ]
+    if args.force:
+        runtime_text = _upsert_function_block(runtime_text, helper_functions, helper_block)
+    elif helper_name not in runtime_text:
+        runtime_text += helper_block
 
     call_line = f"    {helper_name}(context)"
     try:

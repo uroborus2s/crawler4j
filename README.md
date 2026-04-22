@@ -122,6 +122,6 @@ uv run deploy-windows-release
 - `scripts/package_macos_internal_release.py`：`uv run package-macos-internal-release` 背后的 macOS 内部发布入口；要求本机可访问 Sparkle 分发目录、EdDSA 公钥与一条私钥来源配置，并在 `packages/crawler4j/dist/updates/macos/` 生成 DMG / `appcast.xml`
 - `scripts/package_windows_release.py`：`uv run package-windows-release` 背后的 Windows 发布入口；复用 `PyInstaller onedir` 目录，写入 Velopack 更新配置并生成 `Setup.exe` / `.nupkg` / `releases.<channel>.json`
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
-- `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
+- `scripts/db_cli.py`：本地维护用 `config.db` / `state.db` / `data.db` 初始化与全量重置脚本
 
 详细背景和操作说明以仓库根目录 `docs/` 为准。

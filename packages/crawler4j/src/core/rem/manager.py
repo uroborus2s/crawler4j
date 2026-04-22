@@ -134,15 +134,8 @@ class EnvironmentManager:
         await manager.release(lease)
     """
     
-    def __init__(
-        self,
-        gc_interval: int = 30,
-    ):
-        """初始化环境管理器。
-        
-        Args:
-            gc_interval: 垃圾回收间隔（秒）
-        """
+    def __init__(self):
+        """初始化环境管理器。"""
         from src.core.system.preferences_service import (
             PreferenceKey,
             get_preferences_service,
@@ -153,8 +146,6 @@ class EnvironmentManager:
         
         self.pool = EnvPool(max_instances=max_instances)
         self.lease_manager = LeaseManager(self.pool)
-        self._gc_interval = gc_interval
-        self._running = False
         self._reservation_lock = asyncio.Lock()
     
     async def startup(self, *, recover_crashed: bool = True) -> None:
@@ -163,7 +154,7 @@ class EnvironmentManager:
         执行：
             1. 从数据库恢复环境状态
             2. 处理崩溃残留
-            3. 启动 GC 循环
+            3. 完成基础依赖初始化
         """
         logger.info("[REM] 环境管理器启动中...")
         
@@ -177,8 +168,6 @@ class EnvironmentManager:
         if recover_crashed:
             await self._recover_crashed()
         
-        # 启动 GC
-        self._running = True
         logger.info(f"[REM] 环境管理器启动完成, 环境数: {len(await self.pool.list_all())}")
         
     async def acquire(
@@ -278,18 +267,16 @@ class EnvironmentManager:
         logger.info(f"[REM] 环境已回收: id={env.id}")
         return True
     
-    async def release(self, lease: EnvLease, dirty: bool = False) -> bool:
+    async def release(self, lease: EnvLease) -> bool:
         """释放环境租约。
         
         Release 流程：
             1. 验证令牌
             2. 关闭窗口
-            3. 执行清理
-            4. 恢复为 READY
+            3. 恢复为 READY
         
         Args:
             lease: 租约
-            dirty: 是否标记为脏（需要额外清理）
         
         Returns:
             是否释放成功
@@ -989,15 +976,14 @@ class EnvironmentManager:
                     logger.warning(f"[REM] 环境绑定 IP 失败: id={env_id} pool={proxy_config.pool_id}")
             
             # 4. 调用 Provider 创建
-            if config is None:
-                config = {}
-            config["env_id"] = env_id
-            config["env_name"] = env_name
+            provider_config = dict(config) if config is not None else {}
+            provider_config["env_id"] = env_id
+            provider_config["env_name"] = env_name
             if proxy_config:
-                config["proxy"] = proxy_config.to_dict()
+                provider_config["proxy"] = proxy_config.to_dict()
             
             # create 仅负责创建记录，不再启动 (config["launch"] 已弃用或被忽略)
-            env = await provider.create(config)
+            env = await provider.create(provider_config)
             
             # 修正 id
             env.id = env_id
