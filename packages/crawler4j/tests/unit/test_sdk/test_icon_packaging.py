@@ -31,13 +31,30 @@ def test_runtime_app_icon_uses_transparent_outer_corners():
     image = QImage(str(APP_ROOT / "src" / "ui" / "assets" / "app_icon.png"))
 
     assert not image.isNull()
-    for x, y in ((0, 0), (20, 20), (40, 40), (80, 80), (100, 100), (512, 0), (0, 512)):
+    for x, y in (
+        (0, 0),
+        (20, 20),
+        (40, 40),
+        (60, 60),
+        (1023, 0),
+        (1003, 20),
+        (983, 40),
+        (963, 60),
+        (0, 1023),
+        (20, 1003),
+        (40, 983),
+        (60, 963),
+        (1023, 1023),
+        (1003, 1003),
+        (983, 983),
+        (963, 963),
+    ):
         assert image.pixelColor(x, y).alpha() == 0
 
     assert image.pixelColor(image.width() // 2, image.height() // 2).alpha() > 0
 
 
-def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge():
+def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge_and_center_mark():
     image = QImage(str(APP_ROOT / "src" / "ui" / "assets" / "app_icon.png"))
 
     assert not image.isNull()
@@ -46,5 +63,8 @@ def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge():
     assert background.red() >= background.green() >= background.blue()
     assert background.lightness() > 240
 
-    badge = image.pixelColor(image.width() // 2, image.height() // 2)
+    badge = image.pixelColor(image.width() // 2, 340)
     assert badge.blue() > badge.green() > badge.red()
+
+    center_mark = image.pixelColor(image.width() // 2, image.height() // 2)
+    assert center_mark.lightness() > 245

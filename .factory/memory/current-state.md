@@ -18,7 +18,7 @@
 ## 最近条目
 
 - 最新修复：2026-04-22 已继续修正 Windows Velopack CLI 在 `uv run python` 下的两段断链：当 `dnx` 或 `vpk` 实际解析为 `*.cmd` / `*.bat` 时，`package-windows-release` 现在会自动改用 `cmd.exe /c` 调起 CLI；若 Python `velopack` 版本带 `.dev` / `+local` 后缀，则会先正规化成 NuGet 可接受的基础版本后再传给 `dnx --version`，不再继续命中 `WinError 2` 或 `invalid NuGet version`。
-- 最新修复：2026-04-22 已将桌面宿主应用图标重构为浅色品牌主标版：当前正式图标已收口为“暖灰白底板 + 蓝色主徽记 + 放大镜轮廓 + 4j 主字标”的一体化新母版，运行时 `app_icon.png` 与 macOS bundle `app_icon.icns` 已同步替换；当前直接锁定该回归的是 `test_icon_packaging.py` 的透明角断言与“浅色暖灰底板 + 蓝色主徽记”断言。
+- 最新修复：2026-04-22 已将桌面宿主应用图标终稿做工程化清理后正式入包：当前正式图标保留“暖灰白底板 + 蓝色主徽记 + 放大镜轮廓 + 4j 主字标”的浅色品牌母版，同时去除了 AI 编辑控制点并重建 `app_icon.png` / `app_icon.icns`；当前直接锁定该回归的是 `test_icon_packaging.py` 的“透明圆角 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言。
 - 最新修复：2026-04-22 已把桌面更新服务器目录口径收口为 `mac/` 与 `win/` 并列：`deploy-macos-internal-release` 现在会把 `packages/crawler4j/dist/updates/macos/` 同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`，同时新增 `uv run deploy-windows-release`，会通过 OpenSSH `sftp` 把 `packages/crawler4j/dist/updates/windows/` 同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`；`.env.example`、README、部署说明与打包配置回归已同步到新的 feed / 上传目录约定。
 - 最新修复：2026-04-22 已为 Windows 正式交付补齐 `PyInstaller onedir + Velopack` 发布与宿主自更新主链：workspace 根新增 `uv run package-windows-release`，会在现有 onedir bundle 基线上写入 `crawler4j.update.json` 并继续生成 `Setup.exe` / `.nupkg` / `releases.win.json`；宿主系统层新增 `src.core.system.velopack`，`UpdateService` 已收口为 Sparkle / Velopack 平台分派，`src.ui.app:main` 也会在 GUI 初始化前先跑 Windows Velopack bootstrap。当前直接锁定该路径的是 `test_packaging_config.py`、`test_update_service.py` 与 `test_app.py`。
 - 最新修复：2026-04-22 已继续收口系统设置里的 `关于` 页：设置页右侧内容区现直接复用完整版本信息组件，不再额外显示页内 `关于` 标题或 `📋 完整信息` 二次入口，且切到 `关于` 标签时底部 `↺ 恢复默认` 会自动隐藏；关于内容里的官网链接已同步切到 `https://github.com/uroborus2s/crawler4j`，同时顶部状态栏版本号点击出的 `AboutDialog` 弹窗入口保持不变。
