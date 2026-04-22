@@ -159,7 +159,7 @@ def test_module_init_generates_importable_package(module_root: Path):
 def test_generated_pyproject_uses_sdk_dependency_range(module_root: Path):
     pyproject = _read_pyproject(module_root)
 
-    assert get_compatible_dependency_spec() == "crawler4j-sdk>=0.3.0,<0.4.0"
+    assert get_compatible_dependency_spec() == "crawler4j-sdk>=0.4.0,<0.5.0"
     assert get_compatible_dependency_spec() in pyproject["project"]["dependencies"]
     assert "scripts" not in pyproject["project"]
 

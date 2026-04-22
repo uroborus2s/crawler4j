@@ -98,7 +98,7 @@ def test_sdk_runtime_version_matches_publish_metadata():
     version_helper = _load_version_helper(package_root)
 
     assert version_helper.get_version() == pyproject["project"]["version"]
-    assert version_helper.get_compatible_dependency_spec() == "crawler4j-sdk>=0.3.0,<0.4.0"
+    assert version_helper.get_compatible_dependency_spec() == "crawler4j-sdk>=0.4.0,<0.5.0"
     assert _load_literal_module_version(package_root) is None
 
 

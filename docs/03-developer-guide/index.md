@@ -4,7 +4,7 @@
 
 当前仓内基线如下：
 
-- `crawler4j-sdk`：`0.3.0`
+- `crawler4j-sdk`：`0.4.0`
 - `crawler4j` 宿主 / Core：`0.2.0`
 
 这两个版本描述的是工具链和宿主能力，不是你的模块版本。模块自己的版本始终由你维护。
@@ -100,7 +100,7 @@ uv run crawler4j host install preview dist/<module>-<version>.zip
 
 直接记住：
 
-- `crawler4j-sdk 0.3.0` 不是你的模块版本。
+- `crawler4j-sdk 0.4.0` 不是你的模块版本。
 - `module.yaml.version` 变化不会自动升级宿主本体。
 - `host upgrade` 升的是“宿主里已安装的某个模块”，不是升级 SDK，也不是升级宿主程序。
 

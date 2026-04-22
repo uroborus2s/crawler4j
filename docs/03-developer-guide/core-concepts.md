@@ -117,7 +117,7 @@ DevLink 挂载 -> ATM 创建作业 -> 执行 / 调试 -> ZIP 安装 -> host upgr
 
 当前仓内基线：
 
-- `crawler4j-sdk`：`0.3.0`
+- `crawler4j-sdk`：`0.4.0`
 - `crawler4j` 宿主 / Core：`0.2.0`
 
 它们决定的是：
