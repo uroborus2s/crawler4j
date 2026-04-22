@@ -1,58 +1,64 @@
 # 构建模块
 
-这一页讲模块代码应该怎么写。
+这一页回答一个问题：标准模块应该怎么从“目录骨架”写成“可联调、可交付、可升级”的业务模块。
 
-如果你只想记一条规则，记这个:
+最短答案是：
 
-- 一个 task 做一个原子业务动作
-- 一个 workflow 做流程编排
-- 相同逻辑先抽到 task；task 内部若还有真实重复，再抽一层纯函数
+- 用 `task` 写原子动作
+- 用 `workflow` 写流程编排
+- 用 `module_runtime.py` 接宿主生命周期、环境选择器和 Hosted UI V1
+- 先用 `check` 跑通模块工程和 DevLink 联调，再用 `package`、`release`、`host` 收口成正式交付物
 
-## 开发顺序
+## 开发顺序固定按这条线走
 
-推荐始终按这个顺序开发:
+推荐顺序不要改：
 
-1. 用 CLI 生成骨架
-2. 写 task
-3. 写 workflow
-4. 补 `module.yaml`
-5. 跑 `uv run crawler4j check full`
-6. 进入 DevLink / ATM 调试
+1. `module init`
+2. `task create`
+3. `workflow create`
+4. `page create` / `data-table create`
+5. 补 `module.yaml`、`tasks/`、`workflows/`、`module_runtime.py`
+6. `check full`
+7. DevLink 联调
+8. `package build`
+9. `release publish`
+10. `host upgrade`
 
-## 写 TaskScript
+这样做的好处是，CLI、源码、宿主、交付链路始终是同一条主线，不会出现“本地能跑，正式安装不通”的双轨结构。
 
-`TaskScript` 是模块里的最小原子业务单元。
+## 先把命令树映射到开发动作
 
-一个动作满足下面任意条件，就应该是 task:
+| 命令组 | 你在开发时什么时候用 |
+|---|---|
+| `task` | 新增一个原子业务动作时 |
+| `workflow` | 新增一个业务流程或默认工作流时 |
+| `page` | 需要概览页、看板、说明页时 |
+| `data-table` | 需要维护当前快照数据时 |
+| `env-selector` | 需要 ATM 的“选择环境”模式时 |
+| `config` | 需要更新默认配置模板时 |
+| `check` | 每完成一个阶段就跑 gate |
+| `package` | 准备正式交付时 |
+| `release` | 准备把 ZIP 发布到 GitHub Release 时 |
+| `host` | 在宿主里联调、安装或升级模块时 |
+
+不要绕过这些命令手写第二套工程流程。
+
+## 写 TaskScript：一个 task 只做一个原子动作
+
+`TaskScript` 是模块里的最小业务单元。一个动作满足下面任意一点，就应该做成 task：
 
 - 可以单独调试
-- 可以被多个 workflow 复用
-- 本质上只做一个原子业务动作
+- 会被多个 workflow 复用
+- 本质上只做一个动作
 
-例如:
+典型例子：
 
 - 登录
 - 打开目标页
-- 抓取一页列表
+- 抓一页列表
 - 提交一个表单
 
-### task 的合同
-
-一个 task 只做三件事:
-
-1. 读取必要配置和运行态
-2. 完成一个原子业务动作
-3. 返回一个清晰结果
-
-一旦出现下面任意一种情况，就应该上升到 workflow:
-
-- 第二个业务阶段
-- 明显的阶段切换
-- 多页循环
-- 状态机
-- 多次重试编排
-
-### 最小写法
+最小写法：
 
 ```python
 from crawler4j_sdk import TaskContext, TaskResult, TaskScript
@@ -66,47 +72,41 @@ class FetchHotelsTask(TaskScript):
     async def execute(self, ctx: TaskContext) -> TaskResult:
         if not ctx.page:
             return TaskResult.fail(
-                message="当前环境没有可用 Page",
-                error="page_not_available",
+                message="当前环境没有可用页面",
+                error="page_unavailable",
             )
 
         city = ctx.get_config("city", "shanghai")
         await ctx.page.goto(f"https://example.com/hotels?city={city}")
-        records = [{"id": "hotel-001", "name": "示例酒店", "city": city}]
-        return TaskResult.ok(
-            message="抓取完成",
-            data={"records": records},
-        )
+        rows = [{"id": "hotel-001", "name": "示例酒店", "city": city}]
+
+        if ctx.tools and ctx.tools.has_tool("db.replace_records"):
+            ctx.tools.call("db.replace_records", dataset="hotels", records=rows)
+
+        return TaskResult.ok(message="抓取完成", data={"records": rows})
 ```
 
-### task 类属性约定
+task 的边界很明确：
 
-| 属性 | 是否必须 | 说明 |
-|---|---|---|
-| `name` | 是 | 稳定的 `snake_case` 标识 |
-| `display_name` | 建议 | UI 和日志展示名 |
-| `description` | 建议 | 一句话说明 |
-| `default_config` | 可选 | task 层局部默认值说明 |
+- 读取配置和运行态
+- 做一个原子业务动作
+- 返回清晰结果
 
-## 写 Workflow
+一旦开始出现明显的第二阶段、循环、分支或状态机，就该上升为 workflow。
 
-`TaskFlow` 负责业务流程编排。
+## 写 TaskFlow：workflow 只做编排
 
-workflow 只负责:
+`TaskFlow` 负责的是“组织 task”，不是重写 task 的细节。
+
+workflow 适合做：
 
 - 顺序
 - 分支
 - 循环
-- 停止判断
+- stop 判断
 - 阶段切换
 
-workflow 不负责:
-
-- 页面细节
-- 大量字段解析
-- 第二套调度框架
-
-### 最小写法
+最小写法：
 
 ```python
 from crawler4j_sdk import TaskContext, TaskFlow, TaskResult
@@ -115,7 +115,7 @@ from crawler4j_sdk import TaskContext, TaskFlow, TaskResult
 class HotelSyncWorkflow(TaskFlow):
     name = "hotel_sync"
     display_name = "酒店同步"
-    description = "同步酒店列表"
+    description = "抓取并刷新酒店列表"
 
     async def run(self, ctx: TaskContext):
         ctx.state["phase"] = "fetch_hotels"
@@ -125,215 +125,247 @@ class HotelSyncWorkflow(TaskFlow):
                 message="fetch_hotels 执行失败",
                 error="fetch_hotels_failed",
             )
-        records = payload.get("records", []) if isinstance(payload, dict) else []
-        return {"records": records}
+
+        return {"records": payload.get("records", []) if isinstance(payload, dict) else []}
 ```
 
-### `ctx.run_subtask(...)` 的真实语义
+workflow 的硬约束也很简单：
+
+- 子任务失败时不要静默降级
+- 页面操作和字段解析不要在 workflow 里越写越重
+- 不要在 workflow 里再造调度框架
+
+## `module_runtime.py` 只做宿主接缝
+
+模块开发的第三个落点是 `module_runtime.py`。这里的职责固定为三类：
+
+1. lifecycle hook
+2. `@env_selector(...)`
+3. Hosted UI V1 声明
+
+如果你准备在这里手写 hook、页面 schema 或数据表 handler，先继续看：
+
+- [UI 与数据表](ui-and-data-table.md)
+- [SDK 与 CLI 参考](reference-sdk-and-cli.md)
+- [Core 能力参考](reference-core-capabilities.md)
+
+最小签名边界先记住：
+
+| 名称 | 当前约束 |
+|---|---|
+| `declare_ui(context)` | 同步函数，必须可重放 |
+| `load_*_page(context, page_id, params=None)` | 同步函数，返回结构化字典 |
+| `create_handler(context, payload)` | 同步函数 |
+| `update_handler(context, pk_value, payload)` | 同步函数 |
+| `ctx.tools.call(...)` | 统一宿主能力边界 |
+
+### 生命周期 hook
+
+包括：
+
+- `prepare_env`
+- `init_env`
+- `before_run`
+- `on_success`
+- `on_failure`
+- `on_timeout`
+- `on_cleanup`
+
+这些 hook 解决的是“宿主和模块的接缝问题”，不是业务主流程本身。
+
+### 环境选择器
+
+如果你的作业走 ATM 的“选择环境”模式，就在这里声明：
 
 ```python
-payload = await ctx.run_subtask("fetch_hotels", page_no=1)
+@env_selector(
+    name="pick_ready",
+    display_name="优先选择可用环境",
+    description="从当前资源池里选择一个可用候选",
+)
+def pick_ready_selector(candidates, context):
+    ...
 ```
 
-它会:
+注意：
 
-1. 先把 `kwargs` 合并进 `ctx.state`
-2. 再调用目标 task
-3. 优先返回 `TaskResult.data`
-4. 如果没有 `data`，返回布尔成功语义
+- 真正要写的是 `@env_selector(...)` 函数
+- 不是再发明一个名叫 `select_env` 的自定义 hook
+- 固定环境池是否进入等待，还取决于运行模板是不是 `Service Job + select + resource_pool`
 
-所以:
+### Hosted UI V1
 
-- 子任务返回 `TaskResult.ok(data={"records": records})` -> 你拿到 `{"records": records}`
-- 子任务返回 `TaskResult.ok()` -> 你拿到 `True`
-- 子任务返回 `TaskResult.fail(...)` -> 你拿到 `False`
+当前 UI 正式写法只有一种：在 `module_runtime.py` 里声明。
 
-workflow 里的硬规则:
+最小骨架：
 
-- 不允许把 `False` 静默降级成空列表、空字典或“成功但无数据”
-- 只要子任务失败，就必须显式返回 `TaskResult.fail(...)`、发出 `TaskSignal`，或直接抛异常
+```python
+def declare_ui(context: TaskContext):
+    _declare_dashboard_page(context)
+    _declare_hotels_table(context)
+    return None
+```
 
-## 当前快照和历史轨迹分开写
+#### 宿主页
 
-如果同一条业务既要更新“现在的结果”，又要保留“发生过什么”，把两件事分开:
+适合：
 
-- 当前可展示状态继续维护成 snapshot dataset
-- 历史轨迹只走宿主提供的审计通道
+- KPI
+- 说明文案
+- 只读表格
+- 页面按钮
 
-不要把历史事件塞进 `ctx.state`，也不要把 data table handler 当成记录审计历史的主入口。
+入口写法：
 
-### `kwargs` 只能传少量控制参数
+- `module.yaml.ui_extension.pages[].entry = core:page:<page_id>`
+- `context.tools.call("ui.declare_page", ...)`
 
-正确用法:
+#### 托管数据表
 
-- `page_no=1`
-- `force_refresh=True`
-- `phase="detail"`
+适合：
 
-错误用法:
+- 当前账号列表
+- 当前酒店列表
+- 小型业务记录维护
 
-- 把大列表对象塞进去
-- 把业务实体对象在多个 task 之间来回传
-- 用它替代明确的返回值
+入口写法：
 
-## 结果怎么返回
+- `module.yaml.ui_extension.pages[].entry = core:data_table:<view_id>`
+- `context.tools.call("ui.declare_data_table", ...)`
 
-按这个决策表选:
+它默认服务的是“当前快照”，不是历史事件流。
 
-| 场景 | 正确做法 |
-|---|---|
-| 正常完成业务动作 | `return TaskResult.ok(...)` |
-| 业务预期内失败，比如登录失败、没数据、账号不可用 | `return TaskResult.fail(...)` |
-| 需要让宿主等待确认、取消、明确销毁环境 | 在 `TaskResult` 里带 `signal=TaskSignal.*(...)` |
-| 代码写错、第三方库异常、你根本不知道怎么恢复 | 直接抛异常 |
+## 把配置、运行态、快照数据和历史事件分开
 
-## 代码风格和抽象边界
+这一条是写模块时最容易出事故的边界。
 
-允许存在的业务层只有:
+| 类别 | 正式入口 | 用法 |
+|---|---|---|
+| 持久配置 | `ctx.get_config()` / `ctx.config` | 读模块级和 workflow 级配置 |
+| 运行态元数据 | `ctx.runtime` | 读 `workflow`、`params`、`devel_mode`、`creation_params` |
+| 单次执行状态 | `ctx.state` | 保存一次执行内的小体量临时状态 |
+| 当前快照数据 | `db.list_records` / `db.replace_records` | 保存当前列表、当前结果集 |
+| append-only 历史 | `db.append_event` / `db.query_events` | 保存状态迁移、操作痕迹、事件历史 |
 
-1. `workflows/`
-2. `tasks/`
+不要混用：
+
+- 不要把 `workflow`、`params` 写进配置
+- 不要把长期数据塞进 `ctx.state`
+- 不要把历史事件混进 `core:data_table`
+
+## 当前明确推荐的抽象层次
+
+一个合格模块，通常只需要这几层：
+
+1. `workflow`
+2. `task`
 3. `utils/` 里的纯函数
-4. `module_runtime.py` 里的薄 hook
-5. `module_runtime.py` 里的 hosted page / data table schema 与同步 handler
+4. `module_runtime.py` 里的薄 hook 和 Hosted UI V1 声明
 
-命中下面任意一项，这个模块就应视为不合格，必须回退重构:
+下面这些结构，当前默认视为过度抽象：
 
-- 新增 `services/`、`repositories/`、`controllers/`、`stores/`、`managers/`、`clients/`、`facades/`、`adapters/`
-- 新增 `BaseTask`、`BaseWorkflow`、`AbstractClient`、`ContextFacade`、`DbClient` 这类包宿主能力的抽象层
-- 在 `module_runtime.py` 写主要业务流程、批量循环、复杂数据转换
-- 在 workflow 里塞大量页面细节和字段解析
-- 在 task / workflow / UI 里直接操作宿主内部数据库或 ORM
+- `services/`
+- `repositories/`
+- `managers/`
+- `controllers/`
+- `BaseTask`
+- `BaseWorkflow`
+- `ContextAdapter`
+- `DbClient`
 
-代码评审时可以直接按下面两条判定:
+模块是交付业务，不是证明架构技巧。
 
-```bash
-rg --files tasks workflows ui utils
-rg -n "(service|repository|controller|store|manager|client|facade|adapter|BaseTask|BaseWorkflow|AbstractClient|ContextFacade|DbClient)" __init__.py module_runtime.py tasks workflows ui utils
-```
+## 每完成一个阶段就跑 gate
 
-如果第二条命中的是你自建的业务抽象，而不是第三方库名称，默认判不通过。
-
-### `module_runtime.py` 的边界
-
-它只做:
-
-- 根装配需要的薄扩展
-- 生命周期 hook
-- `declare_ui`
-- 很薄的同步 data table handler
-
-### `on_cleanup` 该怎么理解
-
-`on_cleanup` 是任务结束前的最后一个模块级清理 hook。
-
-你现在应该按下面的事实写它:
-
-- 只会调用当前任务对应的 `hooks_module.on_cleanup(...)`
-- 不会把所有模块的 cleanup 都调一遍
-- 对已经进入模块执行阶段的任务，`on_cleanup` 会先执行，再由宿主关闭或删除环境
-- 如果任务还没真正进入模块执行，只是在环境申请/启动阶段就失败或被中止，不保证会调用 `on_cleanup`
-
-这意味着:
-
-- 需要依赖 `ctx.page`、`ctx.context`、已登录态或页面内按钮/接口做收尾时，把逻辑放在 `on_cleanup`
-- 不要假设 cleanup 执行时环境已经被宿主关掉
-- 不要在 cleanup 里再实现第二套环境回收逻辑；真正的关环境 / 删环境仍由宿主负责
-
-`on_cleanup` 的硬约束:
-
-- 要幂等。重复执行一次不能把数据清坏
-- 要尽快返回。不要在里面做无限等待
-- 当前宿主会对 `on_success` / `on_failure` / `on_timeout` / `on_cleanup` 与后续环境动作加有限超时兜底；其中 `on_cleanup` 当前默认最多执行 `120s`，其余终态 hook 与环境动作仍保持更短超时。超时后宿主只记主日志并继续任务收口，所以不要把必须完成的主业务押在这些终态 hook 里
-- 手动中止时，宿主会主动 cancel 正在执行的模块协程；如果你的代码在 `ctx.wait()` 或 `ctx.run_subtask()` 上挂起，它们会提前抛 `asyncio.CancelledError`
-- 需要长流程提前退出时，平时仍应在 task / workflow 主链路主动检查 `ctx.should_stop()`，不要把 stop 处理只押在 cleanup
-- 如果需要根据宿主最终动作做分支，只能读取宿主已经放进 `ctx.runtime` 的运行态，不要自己猜
-
-不要做:
-
-- 主要业务流程
-- 大段页面操作
-- 自建 service / repository / facade
-
-## 接入固定环境池 Service Job
-
-这条能力要同时改“模块代码”和“运行模板”。只在模块里调用资源池 helper，不会自动把作业变成等待队列模式。
-
-先把入口条件记死：
-
-- 作业类型必须是 `Service Job`；批次任务不会开启等待席位
-- 运行模板必须选 `选择环境`
-- `resource_pool` 必须是非空稳定池名
-- `selector_name` 可选；如果留空，宿主不会调用 `select_env(...)`，而是直接取当前资源池里第一个可分配候选
-- 只有 `selector_name`、没有 `resource_pool` 的旧选择模式里，`select_env(...)` 返回 `None` 仍然是失败，不会进入等待
-- 如果你是在迁移已有 selector 模块，不要把“清空 `selector_name`”当成无害默认；那代表你接受宿主直接按当前池内可分配候选的先后顺序取第一台环境
-- 当前实现没有给“第一个候选”定义额外业务排序承诺；只有任何候选都等价时，才适合把 `selector_name` 留空
-
-最小判断表：
-
-| 配置 | 结果 |
-|---|---|
-| `批次任务 + select + resource_pool` | 不会开启等待席位；它不是固定池队列模式 |
-| `select + selector_name` | 旧选择器语义，`None` 直接失败 |
-| `select + resource_pool` | 固定池等待语义，没候选时进入等待 |
-| `select + resource_pool + selector_name` | 先按资源池粗筛，再由选择器细挑；`None` 回到等待 |
-
-### 代码该写在哪
-
-资源池 helper 默认使用 `ctx.env_id`。所以你要区分两种路径：
-
-- 当前 `TaskContext` 已经绑定了环境：可以省略 `env_id`
-- 当前逻辑是批量对账、宿主启动恢复、后台扫描：必须显式传 `env_id`，或者直接用 `replace_resource_pool_snapshot(...)` 提交整池权威列表
-
-额外约束：
-
-- 这里的 `env_id` 指宿主 `environments.id`
-- 不是外部浏览器的 `browser_id` / `external_id`
-- 也不是你的业务账号 ID
-- `prepare_env` 阶段的 `TaskContext.env_id` 当前固定是 `0`，不要在那里写资源池卡片
-
-如果你要保留模块自己的细粒度选环境逻辑，真正该写的是 `module_runtime.py` 里用 `@env_selector(...)` 标记的 selector 函数。运行时出现的 `select_env(...)` 只是框架壳，不是给模块作者手写的新 hook 名。
-
-推荐的写入时机：
-
-- 账号和环境第一次稳定绑定成功后：`bind_resource_pool(...)`
-- 暂时停发号但仍保留池归属：`mark_resource_pool_ineligible(...)`
-- 从黑号或人工停用恢复：`mark_resource_pool_eligible(...)`
-- 环境彻底解绑、不再属于该池：`remove_resource_pool(...)`
-- 宿主重启后的全量重建 / 批量对账：`replace_resource_pool_snapshot(...)`
-
-### `replace_resource_pool_snapshot(...)` 的正确心智
-
-这不是 patch API，而是整池快照重建。
-
-- `entries` 必须是这个池当前完整的权威列表
-- 未出现在 `entries` 里的环境卡片会被宿主删除
-- 只想停某个环境发号时，不要用它，改用 `mark_resource_pool_ineligible(...)`
-
-### 超时怎么理解
-
-固定池场景至少会同时碰到两个超时：
-
-- `wait_timeout`：环境租约获取和固定池等待席位共用；任务第一次进入等待时开始计时
-- `execution.timeout`：模块已经拿到环境并开始执行后的超时
-- 当前实现不会单独用 `wait_timeout` 中断 `select_env(...)`；选择器里不要做慢查询、长轮询或睡眠等待
-
-如果你把 `wait_timeout` 设成 `0`，固定池等待席位当前不会自动超时收口。除非你有明确运营策略，否则保持正整数更安全。
-
-## 开发完成后的最小自检
-
-改完一批代码后，至少问自己:
-
-- 这个逻辑应该在 workflow 还是 task
-- 这里是不是又造了一层宿主已经给的能力
-- 这里的数据应该进 `ctx.state` 还是 `db.*`
-- 这个 helper 是真实复用，还是为了看起来“更架构”
-- 新人第一次看能不能顺着目录和名字理解代码
-
-然后跑:
+建议最少用这几档校验：
 
 ```bash
+uv run crawler4j check structure
+uv run crawler4j check release
 uv run crawler4j check full
 ```
 
-想继续做页面和托管数据表，接着看 [UI 与数据表](ui-and-data-table.md)。
+直接理解成：
+
+- `structure`：骨架、清单和 UI 入口格式
+- `release`：版本、升级源、默认配置等发布前提
+- `full`：模块、task、workflow、Hosted UI V1 的完整导入和声明 gate
+
+只要 `check full` 没过，就不要把问题推给宿主。
+
+## 从联调切到正式交付
+
+模块开发的最后两步，不是继续写代码，而是切换边界。
+
+### 联调边界
+
+用 DevLink：
+
+```bash
+uv run crawler4j host devlink add /abs/path/to/module
+uv run crawler4j host debug config
+```
+
+这条链路解决的是：
+
+- 本地源码能否被宿主加载
+- ATM 能否执行和调试
+- Hosted UI V1 入口是否出现
+
+### 交付边界
+
+用 ZIP 和 GitHub Release：
+
+```bash
+uv run crawler4j package build
+uv run crawler4j package verify dist/<module>-<version>.zip
+uv run crawler4j release publish
+```
+
+这条链路解决的是：
+
+- 正式安装包是否合格
+- 远端分发源是否存在
+- 宿主后续是否能执行正式升级
+
+DevLink 和正式交付是两条不同边界，不要混用。
+
+## 升级一个模块时到底改什么
+
+模块升级时，动作顺序应该非常清楚：
+
+1. 改模块版本
+2. 重建 ZIP
+3. 发布到 GitHub Release
+4. 让宿主检查并安装升级包
+
+推荐命令：
+
+```bash
+uv run crawler4j module set version 0.1.1
+uv run crawler4j package build
+uv run crawler4j release publish --rebuild
+uv run crawler4j host upgrade check hotel_demo
+uv run crawler4j host upgrade apply hotel_demo
+```
+
+这条线里有三个不要混淆的点：
+
+- 你改的是模块版本，不是 SDK 版本
+- 你发的是模块 ZIP，不是宿主本体
+- 宿主执行的是模块升级，不是 CLI 升级
+
+## 一页记住构建主线
+
+```text
+CLI 生成骨架
+-> task / workflow 写业务
+-> module_runtime.py 接生命周期、环境选择器和 Hosted UI V1
+-> check full
+-> DevLink 联调
+-> package build
+-> release publish
+-> host upgrade
+```
+
+这就是当前 `crawler4j` 模块开发的正式主线。

@@ -1,12 +1,10 @@
 # 模块结构
 
-这一页只回答三个问题：
+把模块目录看成一份正式交付物，会更容易理解所有约束。
 
-1. 标准模块目录长什么样
-2. 根入口、`module_runtime.py`、`module.yaml` 各自负责什么
-3. 哪些字段和目录是正式契约，不能再发明第二套
+模块不是“源码目录 + 一堆临时脚本”，而是一份最终会被宿主打包、安装、升级的产品单元。
 
-## 标准目录
+## 标准目录长什么样
 
 当前 `crawler4j module init` 生成的标准模块目录如下：
 
@@ -24,101 +22,48 @@ hotel_demo/
 └── workflows/
 ```
 
-补一条最容易误解的事实：
+后续真正交付时，还会多一个：
 
-- `ui/` 不再是正式脚手架目录
-- hosted page 和 `core:data_table` 都通过 `module_runtime.py -> declare_ui()` 声明
-- `utils/` 不是 CLI 默认生成目录；只有你确实有纯函数要复用时，再自己创建
+```text
+dist/
+└── hotel_demo-0.1.0.zip
+```
 
-## 每个路径负责什么
+这就是完整的一条开发到交付链。
 
-| 路径 | 职责 | 明确不要放什么 |
+## 目录里每个路径负责什么
+
+| 路径 | 正式职责 | 明确不要放什么 |
 |---|---|---|
-| `__init__.py` | 薄壳装配和必要导出 | 业务逻辑、配置解析 |
-| `module.yaml` | 唯一静态清单 | 运行时状态、持久数据 |
-| `module_runtime.py` | hook、环境选择器、`declare_ui()`、hosted page / data table schema、很薄的 glue code | 领域转换、多步流程、批处理循环 |
-| `tasks/` | 原子业务动作 | 完整流程编排 |
-| `workflows/` | 流程编排 | 页面细节和大量字段解析 |
-| `tests/` | 模块自己的最小回归测试 | 宿主内部实现细节、集成环境硬编码 |
-| `utils/`（按需自建） | 轻量纯函数 | 再包一层宿主 API |
-
-## 根 `__init__.py` 的纪律
-
-当前根入口本质上只做三件事：
-
-1. 创建 `ModuleAssembler`
-2. 暴露统一 `run(context)` 入口
-3. 代理标准 lifecycle hook 和 `module_runtime.py` 里的同步 UI hook
-
-所以默认规则是：
-
-- 不在这里写业务逻辑
-- 不在这里做配置拼装
-- 不在这里定义 workflow
-
-### 唯一例外：不要破坏标准根薄壳
-
-如果你使用标准 CLI 脚手架，根 `__init__.py` 已经通过 `__getattr__` 自动转发 `module_runtime.py` 里的：
-
-- `declare_ui`
-- hosted page 的 `load_*_page`
-- 数据表 schema 里 `create_handler` / `update_handler` 指向的同名函数
-- 其他生命周期 hook
-
-这意味着：
-
-- 标准模块通常不需要为了页面或数据表再手改根 `__init__.py`
-- 真正要求不是“手工导出”，而是“不要破坏 SDK 托管的根薄壳”
-
-安全边界直接记这 4 条：
-
-- 安全：不改 `__init__.py`
-- 安全：只改 `module_runtime.py`、`tasks/`、`workflows/`
-- 危险：删除 `__getattr__`
-- 危险：往根入口里新增业务逻辑、自定义导出或第二套装配代码
-
-## `module_runtime.py` 只允许做薄胶水
-
-`module_runtime.py` 只允许放：
-
-- lifecycle hook
-- 环境选择器
-- `declare_ui()`
-- hosted page 的 `build_*_page_schema()` / `load_*_page()`
-- 很薄的 data table handler
-
-如果你在这里开始写：
-
-- 多步业务流程
-- 批量处理循环
-- 大段数据转换
-- 类似 service / repository 的抽象
-
-那通常已经写错位置了。
+| `__init__.py` | SDK 托管薄壳、模块统一入口 | 业务逻辑、配置解析、页面逻辑 |
+| `module.yaml` | 唯一静态清单 | 运行态、持久数据、宿主内部状态 |
+| `module_runtime.py` | lifecycle hook、`@env_selector(...)`、Hosted UI V1 声明 | 大段业务流程、复杂领域转换 |
+| `pyproject.toml` | 模块开发环境、包元数据、版本同步点 | 宿主运行时依赖安装器 |
+| `tasks/` | 原子业务动作 | 多阶段流程编排 |
+| `workflows/` | 业务流程编排 | 页面渲染、字段细节解析 |
+| `tests/` | 模块自测 | 宿主内部实现细节 |
+| `dist/` | 正式 ZIP 安装产物 | 源码事实源 |
 
 ## `module.yaml` 是唯一静态清单
 
-它负责：
+它回答的不是“模块现在在跑什么”，而是“这个模块是什么”。
 
-- 模块身份
-- 升级来源
-- 工作流列表
-- UI 页面清单
-- 默认配置模板
+它至少应当描述：
 
-它不负责：
+- 模块身份：`name`、`display_name`、`description`
+- 模块版本：`version`
+- 升级来源：`upgrade_source`
+- 工作流入口：`workflows`
+- Hosted UI V1 页面入口：`ui_extension.pages`
+- 默认配置模板：`config_defaults`
 
-- 持久化运行时配置
-- 保存业务数据
-- 描述 SDK 兼容范围
-
-## 一个完整示例
+最小示例：
 
 ```yaml
 name: hotel_demo
 version: 0.1.0
 display_name: 酒店采集示例
-description: 酒店业务模块
+description: 抓取并维护酒店快照数据
 author: crawler4j
 upgrade_source:
   type: github_release
@@ -131,61 +76,156 @@ workflows:
 ui_extension:
   pages:
     - id: dashboard
-      label: Dashboard
+      label: 运营看板
       icon: 📄
       entry: core:page:dashboard
     - id: hotels
-      label: Hotels
+      label: 酒店列表
       icon: 📋
       entry: core:data_table:hotels
 config_defaults:
   module:
     city: shanghai
-    page_size: 20
-  workflows:
-    hotel_sync:
-      retry_enabled: false
 ```
 
-## 重要字段说明
+这里最容易写错的只有 3 件事：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
-| `name` | 是 | 模块名；必须是全小写合法 Python 标识符 |
-| `version` | 建议 | 模块自身版本 |
-| `display_name` | 建议 | 人类可读名称 |
-| `description` | 建议 | 模块说明 |
-| `author` | 可选 | 作者信息 |
-| `upgrade_source` | 是 | 当前只支持 GitHub Release |
-| `workflows` | 是 | 工作流列表，不能为空 |
-| `ui_extension.pages` | 可选 | 宿主页和托管数据表页清单 |
-| `config_defaults` | 建议 | 默认配置模板 |
+1. `upgrade_source.repo` 必须是真实的 `owner/repo`
+2. `ui_extension.pages[].entry` 只允许 `core:page:<id>` 或 `core:data_table:<id>`
+3. `module.yaml` 不负责声明 `sdk_version_range`
 
-补一条规则：
+## `pyproject.toml` 是模块项目元数据，不是宿主事实源
 
-- `ui_extension.pages[].entry` 当前只允许 `core:page:<page_id>` 或 `core:data_table:<view_id>`
-- 旧的 `type`、`entry`、`detail_menu` 都不再是正式契约
+这个文件主要服务于模块开发者自己：
 
-## `config_defaults` 和 `TaskScript.default_config` 不是一回事
+- 管理本地开发依赖
+- 声明模块项目包名和版本
+- 支撑 `uv sync`
 
-这是新手最容易混的点：
+它和 `module.yaml` 的关系可以直接这样理解：
 
-| 名称 | 作用 | 生效时机 |
-|---|---|---|
-| `module.yaml.config_defaults` | 宿主初始化和“恢复默认”的静态模板 | 模块首次加载、手动恢复默认 |
-| `TaskScript.default_config` | task 类自己声明的局部默认值 | task 自身语义层面的默认说明 |
+- `module.yaml` 是宿主识别模块的清单
+- `pyproject.toml` 是你本地开发模块项目的包元数据
 
-简单记忆：
+两者里的版本必须保持一致。推荐只用下面这条命令改版本：
 
-- 你要影响“宿主第一次初始化配置”，改 `config_defaults`
-- 你要表达“这个 task 本身的局部默认值”，才考虑 `default_config`
+```bash
+uv run crawler4j module set version 0.1.1
+```
 
-## 命名规则
+CLI 会同步改这两个位置，避免版本漂移。
 
-- 文件名：`snake_case`
-- task 名：`snake_case`
-- workflow 名：`snake_case`
-- page / view ID：`snake_case`
-- 配置 key：`snake_case`
+## `__init__.py` 保持薄壳，不要碰成业务入口
+
+当前标准模块根入口的职责很简单：
+
+1. 创建 `ModuleAssembler`
+2. 暴露统一 `run(context)` 入口
+3. 把 `module_runtime.py` 里的 hook 和 UI 声明转发给宿主
+
+最重要的纪律只有一句：
+
+不要在根 `__init__.py` 写业务逻辑。
+
+安全做法：
+
+- 只改 `module.yaml`
+- 只改 `module_runtime.py`
+- 只改 `tasks/` 和 `workflows/`
+
+危险做法：
+
+- 删除 SDK 托管的转发逻辑
+- 手写第二套装配入口
+- 把 UI handler 或业务流程塞进根入口
+
+## `module_runtime.py` 是模块和宿主的接缝层
+
+它只应该承担“很薄”的宿主接缝职责：
+
+- `prepare_env`
+- `init_env`
+- `before_run`
+- `on_success`
+- `on_failure`
+- `on_timeout`
+- `on_cleanup`
+- `@env_selector(...)`
+- `declare_ui()`
+- `build_*_page_schema()`
+- `load_*_page()`
+- 数据表 handler
+
+这里的关键词是“薄”。如果你在这里写大段业务流程、复杂循环或 service 层，模块结构就已经跑偏了。
+
+## `tasks/` 和 `workflows/` 的分工不要反
+
+### `tasks/`
+
+放原子业务动作，例如：
+
+- 登录
+- 抓一页列表
+- 打开详情页
+- 提交表单
+
+### `workflows/`
+
+放流程编排，例如：
+
+- 先登录，再抓列表，再抓详情
+- 分支选择
+- 循环翻页
+- stop 判断
+
+只要你觉得“这里已经出现第二阶段”，大概率就该从 task 提升到 workflow。
+
+## Hosted UI V1 相关文件实际落在哪里
+
+当前 UI 不再新建 `ui/` 目录。页面和数据表都落在两个地方：
+
+| 位置 | 作用 |
+|---|---|
+| `module.yaml.ui_extension.pages` | 定义宿主里会出现哪些页面入口 |
+| `module_runtime.py` | 定义这些入口背后的 `declare_ui()`、页面 schema、load handler、数据表 handler |
+
+所以：
+
+- `page create` 会同时改 `module.yaml` 和 `module_runtime.py`
+- `data-table create` 也会同时改这两个文件
+
+如果你看见有人手写 `ui/SomePage.py`，那已经不是当前正式结构了。
+
+当前 `crawler4j check structure / release / full` 与 `package build` 都会把顶层 `ui/` 目录当成旧结构残留直接阻断；不要再把它当成“还能顺手兼容”的可选目录。
+
+## 交付物最终长什么样
+
+模块交付给宿主时，正式产物是 ZIP，不是源码目录，也不是 wheel。
+
+典型交付物：
+
+```text
+dist/hotel_demo-0.1.0.zip
+```
+
+这个 ZIP 后续会进入两条链路：
+
+1. 宿主本地安装：`host install`
+2. GitHub Release 分发后，宿主执行 `host upgrade`
+
+也就是说，模块目录本身是开发事实源，ZIP 才是正式安装事实源。
+
+## 当前明确不要新增的东西
+
+下面这些文件或目录，当前都不属于标准模块结构：
+
+- `ui/`
+- `config_schema.json`
+- `strategy.yaml`
+- `sdk_version_range`
+- 宿主私有数据库接入代码
+- 第二套 `services/`、`repositories/`、`managers/`
+
+如果你在一个新模块里看到这些内容，优先判断它是不是旧结构残留，而不是把它继续扩散。
 
 下一步建议看 [构建模块](build-modules.md)。

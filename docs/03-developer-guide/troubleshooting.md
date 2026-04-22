@@ -1,156 +1,176 @@
 # 常见问题
 
-下面每一条都按“症状 -> 怎么确认 -> 怎么修”写。
+这一页按“运行与交付主线”排问题。先判断你卡在模块工程、DevLink/ATM、Hosted UI、ZIP 交付，还是宿主安装/升级，再看对应条目。
 
-## 最短排障分叉
+## 最短定位顺序
 
-如果你一时间不知道该看哪条 FAQ，先按这个顺序缩小范围:
-
-1. 没有 `🐞 调试` 按钮:
-   先查是不是 DevLink 模块
-2. 有按钮但没有任务实例:
-   先查作业运行模板是不是绑定了正确模块和 workflow
-3. 有任务实例但没有你要的日志:
-   先在 task / workflow 里补 `ctx.logger.info(...)`
-4. 数据表入口有了但空白:
-   先查 `declare_ui`
-5. 按钮有了但 handler 不触发:
-   先查 handler 名和签名
-
-## 最小观察手法
-
-不会调试时，先别急着猜 `ctx.runtime` 或 `ctx.get_config()`，直接打日志:
-
-```python
-ctx.logger.info(
-    "debug snapshot workflow=%s devel_mode=%s city=%s",
-    ctx.runtime.get("workflow"),
-    ctx.runtime.get("devel_mode"),
-    ctx.get_config("city"),
-)
-```
-
-然后去两个地方看:
-
-1. `📋 任务监控` -> 作业详情 -> `任务日志`
-2. `📊 仪表盘` -> `系统实时日志`
+1. CLI 不通过：先看 `check`、模块根目录和 `module.yaml`
+2. DevLink 不生效：先看模块来源是不是 `开发链接`
+3. ATM 跑不对：先看作业绑定的模块和 workflow
+4. 页面或数据表空白：先看 `declare_ui()` 和 `check full`
+5. 正式安装失败：先看 ZIP 结构和 `upgrade_source.repo`
+6. 升级不生效：先看模块是否处于正式安装态、远端 Release 是否存在 ZIP 资产
 
 ## `uv run crawler4j check <level>` 不通过
 
-最常见原因:
+确认：
 
-- `module.yaml.name` 不合法
-- `upgrade_source.repo` 不是 `owner/repo`
-- `workflows` 为空
-- 还残留 `sdk_version_range`
-- `ui_extension.pages[].entry` 格式不对
+- 当前目录下有 `module.yaml`
+- `module.yaml.version` 是合法语义化版本
+- `module.yaml.upgrade_source.repo` 是合法的 `owner/repo`
+- `ui_extension.pages[].entry` 只使用 `core:page:*` 或 `core:data_table:*`
 
-直接确认:
+处理：
 
-```bash
-uv run crawler4j check full
-```
-
-修法:
-
-- 对照错误逐项改 `module.yaml`
-- 不要边跳过错误边继续写业务代码
+- 先执行 `uv run crawler4j check full`
+- 按错误逐项改 `module.yaml` 或 `module_runtime.py`
+- 不要带着已知 gate 错误继续写业务代码
 
 ## 明明在模块里，CLI 却说找不到 `module.yaml`
 
-症状:
-
-- `crawler4j task create ...`
-- `crawler4j workflow create ...`
-- `crawler4j check full`
-
-直接失败，说当前目录不在 model 项目中。
-
-直接确认:
+确认：
 
 ```bash
 pwd
 test -f module.yaml && echo ok || echo bad
 ```
 
-修法:
+处理：
 
-- 先切回模块根目录再执行
-- 不要长期依赖 CLI 向上回溯找根目录
+- 切回模块根目录再执行 CLI
+- 不要长期依赖 CLI 向上回溯猜根目录
 
 ## workflow 跑不到你以为的流程
 
-直接确认:
+确认：
 
-1. 看运行模板里选的 workflow 是不是目标 workflow
-2. 看 `ctx.runtime["workflow"]` 是什么
-3. 看 `module.yaml.workflows` 里有没有这个名字
-4. 看 `module_runtime.py` 是否覆盖了默认 workflow
+1. ATM 运行模板里选中的 workflow 是不是目标 workflow
+2. `ctx.runtime["workflow"]` 是什么
+3. `module.yaml.workflows` 里是否声明了该 workflow
+4. `module_runtime.py` 是否改过默认 workflow
 
-修法:
+处理：
 
-- 先把作业运行模板选对
-- 再确保 workflow 名和清单一致
+- 先修运行模板
+- 再修清单和默认 workflow
+
+## Hosted UI 页面或数据表是空白
+
+确认：
+
+1. `module.yaml.ui_extension.pages[]` 是否存在对应入口
+2. `module_runtime.py` 是否存在同步 `declare_ui()`
+3. `uv run crawler4j check full` 是否通过
+4. Hosted UI 是否真的调用了 `ui.declare_page`
+5. 数据表是否真的调用了 `ui.declare_data_table`
+
+处理：
+
+- 先修声明链，再回宿主点击 `刷新`
+- 不要一上来就猜 UI 缓存
+
+## `create_handler` / `update_handler` 没触发
+
+确认：
+
+1. schema 是否声明了 `create_handler` / `update_handler`
+2. `module_runtime.py` 里是否存在这些函数
+3. 这些函数是否为同步函数
+4. handler 名字是否与 schema 字符串完全一致
+5. 根 `__init__.py` 是否仍保留 SDK 托管薄壳
+
+处理：
+
+- 名字对齐
+- 改回同步函数
+- 不要改坏根薄壳
+
+## 结果看起来像旧代码
+
+确认：
+
+1. 模块详情页来源是不是 `开发链接`
+2. `ctx.runtime["devel_mode"]` 是否为 `True`
+3. 你改的是不是 ATM 实际绑定的 workflow / task
+
+处理：
+
+- 先确认运行来源
+- 再确认运行模板
+- 最后确认代码路径
+
+## `调试` 按钮不出现
+
+确认：
+
+1. 模块来源是不是 `开发链接`
+2. 作业绑定的是不是这个 DevLink 模块
+
+处理：
+
+- 重新注册 DevLink
+- 回 ATM 重新检查模块和 workflow 绑定
+
+## 调试对话框提示 `debugpy is not installed`
+
+确认：
+
+- 报错发生在宿主调试会话里，而不是你的模块虚拟环境里
+
+处理：
+
+- 给宿主调试 worker 所在的 Python 环境安装 `debugpy`
+- 安装后重新创建调试会话
 
 ## 固定环境池作业没有进入等待队列
 
-最常见原因不是 helper 没生效，而是运行模板根本没走固定池契约。
-
-直接确认:
+确认：
 
 1. 作业类型是不是 `Service Job`
 2. 运行模板是不是 `选择环境`
-3. `resource_pool` 有没有填稳定池名
+3. `resource_pool` 有没有填写
 4. 是不是只有 `selector_name`、没有 `resource_pool`
-5. 作业摘要里是不是已经显示 `资源池: <pool>`
+5. `task.message` 是否包含 `等待环境池工位: <pool>`
 
-修法:
+处理：
 
-- 要进入等待队列，必须是 `Service Job + select + resource_pool`
-- 只有 `selector_name` 的旧模式里，`select_env(...)` 返回 `None` 会直接失败
-- 从 `2026-04-22` 起，宿主会在 runtime precheck 阶段拦截 `Service Job + select + returns_none selector + empty resource_pool` 这类会导致持续补单的无效组合，并自动把该作业暂停，避免应用启动后被高频失败任务拖死
-- `selector_name` 留空并不是报错；宿主会直接选当前池里的第一个可分配候选
-- 如果你保留 selector，真正要检查的是 `module_runtime.py` 里通过 `@env_selector(...)` 声明的函数，而不是去找一个名叫 `select_env` 的自定义 hook
-
-## `replace_resource_pool_snapshot(...)` 一调用，整个池像被清空了
-
-高概率是把它当成增量 patch 了。
-
-直接确认:
-
-1. 这次传的 `entries` 是不是这个池当前完整权威列表
-2. 你是不是只传了“这次变更的几个 env”
-3. 清空后任务是不是开始大量出现 `等待环境池工位: <pool>`
-
-修法:
-
-- 把 `replace_resource_pool_snapshot(...)` 当成整池重建，不要当 patch
-- 未出现在 `entries` 里的环境卡片会被删除
-- 只想临时停发号时，改用 `mark_resource_pool_ineligible(...)`
+- 固定池等待必须是 `Service Job + select + resource_pool`
+- 只有 `selector_name` 的旧模式里，选择器返回 `None` 会直接失败
 
 ## 资源池 helper 报 `env_id is required`
 
-这通常不是 helper 坏了，而是调用时当前 `TaskContext` 根本没有绑定环境。
+确认：
 
-直接确认:
+1. 当前 `TaskContext` 是否真的绑定了宿主环境
+2. 你传的是不是宿主 `environments.id`，而不是外部浏览器 ID 或业务账号 ID
+3. 是不是在 `prepare_env` 之类尚未拿到正式 `env_id` 的阶段调用了 helper
 
-1. 你是不是在没有环境上下文的批量扫描、宿主启动恢复或离线对账逻辑里调用 helper
-2. 这次调用有没有显式传 `env_id`
-3. 你传的是不是宿主 `environments.id`，而不是外部 `browser_id` / `external_id` 或业务账号 ID
-4. 如果是全量重建，你是不是本来就该用 `replace_resource_pool_snapshot(...)`
+处理：
 
-修法:
-
-- 当前上下文已绑定环境时再省略 `env_id`
 - 没有环境上下文时显式传 `env_id`
-- `prepare_env` 阶段不要写资源池卡片；那时 `TaskContext.env_id` 当前还是 `0`
-- 批量对账优先直接提交整池权威快照
+- `prepare_env` 阶段不要写资源池卡片
+- 批量重建时优先走 `replace_resource_pool_snapshot(...)`
+
+## 数据更新一半，另一半丢了
+
+确认：
+
+1. 你是不是把 `db.replace_records` 当成了增量更新
+2. 有没有两个 task 同时写同一个 dataset
+
+处理：
+
+- 记住 `db.replace_records` 是全量覆盖
+- 有并发写时先加锁
+- 写逻辑越来越复杂时，回头重做数据集设计
 
 ## `ctx.page` 是 `None`
 
-这通常不是 task 写错了，而是当前运行环境没有可用页面。
+确认：
 
-修法:
+- 当前作业运行环境是否真的提供了可用页面
+
+处理：
 
 ```python
 if ctx.page is None:
@@ -161,148 +181,86 @@ if ctx.page is None:
 
 ## 配置为什么读不到
 
-最常见错误是读错地方。
+确认：
 
-正确边界:
+- 宿主持久配置是不是从 `ctx.get_config()` / `ctx.config` 读取
+- 一次性输入是不是从 `ctx.runtime["params"]` 读取
+- 当前 workflow 是不是从 `ctx.runtime["workflow"]` 读取
 
-- 持久配置 -> `ctx.get_config()` / `ctx.config`
-- 运行模板和一次性参数 -> `ctx.runtime["params"]`
-- 当前 workflow 名 -> `ctx.runtime["workflow"]`
+处理：
 
-修法:
-
-- 配置问题先查 `ctx.get_config`
-- 一次性参数先查 `ctx.runtime`
+- 配置读 `ctx.get_config()`
+- 运行态读 `ctx.runtime`
 - 不要混用
 
-## 数据表入口有了，但页面是空的
+## `host install` 拒绝源码目录
 
-直接确认顺序:
+确认：
 
-1. `module.yaml.ui_extension.pages` 里是否有 `core:data_table:<view_id>`
-2. `module_runtime.py` 里是否存在 `declare_ui`
-3. 根 `__init__.py` 是否仍是 SDK 托管薄壳，没有被手工改坏
-4. `declare_ui` 是否是同步函数
-5. schema 的 `dataset` 是否与 `view_id` 一致
-6. schema 是否含不支持字段
+- 你传给 `host install preview|apply` 的是不是本地源码目录
 
-修法:
+处理：
 
-- 先修入口和 `module_runtime.py`
-- 再确认根薄壳还在自动透传 `module_runtime.py`
-- 再修 schema
-- 最后刷新页面，不要一上来怀疑 UI 缓存
-
-## `create_handler` / `update_handler` 没触发
-
-直接确认:
-
-1. schema 里是否声明了 `create_handler` / `update_handler`
-2. `module_runtime.py` 里是否存在这些函数
-3. 根 `__init__.py` 是否仍保留 SDK 托管的 `__getattr__`
-4. 这些函数是否为同步函数
-5. handler 名字是否和 schema 字符串完全一致
-
-修法:
-
-- 名字对齐
-- 同步函数
-- 保持标准根薄壳不被破坏
-
-这三件事缺任何一件都不会通。
-
-## 数据更新一半，另一半丢了
-
-高概率是误用了 `db.replace_records`。
-
-直接确认:
-
-- 你的写法是不是“读旧列表 -> 改一部分 -> 全量覆盖”
-- 有没有两个 task 同时写同一个 dataset
-
-修法:
-
-- 明白 `db.replace_records` 是全量覆盖，不是 patch
-- 有并发写时先加锁
-- 如果写逻辑越来越复杂，回头重做数据集设计
-
-## 结果看起来像旧代码
-
-如果你是 DevLink 模块，先确认:
-
-1. 模块详情页来源是不是 `开发链接`
-2. 执行时 `ctx.runtime["devel_mode"]` 是否为 `True`
-3. 你改的是不是实际被执行的 workflow / task
-
-修法:
-
-- 先确认来源，再确认运行模板，再确认代码路径
-- 不要一边猜缓存，一边继续堆抽象
-
-## `🐞 调试` 按钮不出现
-
-直接确认:
-
-1. 模块详情页来源是不是 `开发链接`
-2. 目标作业绑定的是不是这个 DevLink 模块
-
-修法:
-
-- 先到 `📦 模块管理` 重新挂 DevLink
-- 再回 `📋 任务监控` 检查作业运行模板
-
-## 等待确认直接报错
-
-高概率是给 `TaskSignal.wait_for_confirmation(...)` 传了错误的 `env_action`。
-
-当前正确语义:
-
-- 只允许 `KEEP_ALIVE` 或默认值
-
-修法:
-
-- 改成 `EnvAction.KEEP_ALIVE`
-- 不要给它传 `DESTROY` / `RECYCLE`
-
-## 调试对话框提示 `debugpy is not installed`
-
-症状:
-
-- 任务调试窗口的 `最近错误` 出现 `debugpy is not installed`
-
-修法:
-
-- 给宿主调试 worker 所在运行环境安装 `debugpy`
-- 安装后重新打开 `🐞 调试`
+- 源码目录走 `uv run crawler4j host devlink add <module_root>`
+- `host install` 只接受 ZIP 或 GitHub 仓库 `owner/repo`
 
 ## 正式安装失败
 
-最常见原因:
-
-- ZIP 里不是单一根目录
-- 根目录缺 `module.yaml`
-- `upgrade_source.repo` 不合法
-
-直接确认:
+确认：
 
 ```bash
-unzip -l <module>.zip | sed -n '1,40p'
+uv run crawler4j package verify dist/<module>-<version>.zip
+unzip -l dist/<module>-<version>.zip | sed -n '1,40p'
 ```
 
-修法:
+重点看：
+
+- ZIP 是否是单根目录
+- 根目录下是否有 `module.yaml`
+- `upgrade_source.repo` 是否合法
+
+处理：
 
 - 重新按单根目录打包
 - 确保 `<module_name>/module.yaml` 在 ZIP 内顶层可见
 
 ## 正式安装后行为还像本地源码
 
-直接确认:
+确认：
 
-1. 模块来源是不是仍然是 `开发链接`
-2. 同名 DevLink 是否已被正式安装移除
-3. 你是不是拿 wheel 当正式安装包用了
+1. 模块详情页来源是不是仍然显示为 `开发链接`
+2. 你是不是把 wheel 当成正式安装包用了
+3. 正式安装后是否真的切换到了新来源
 
-修法:
+处理：
 
-- 正式安装只认 ZIP
-- 安装成功后去模块详情页确认来源已经不是 DevLink
+- 正式安装只认 ZIP 或 GitHub 仓库安装
+- 安装完成后回模块详情页确认来源已经不是 DevLink
+
+## `host upgrade` 看不到新版本
+
+确认：
+
+1. 目标模块是否已经处于正式安装态
+2. `module.yaml.upgrade_source.repo` 是否正确
+3. GitHub Release 上是否真的有当前版本之后的新 ZIP 资产
+
+处理：
+
+- 先确认该模块不是 DevLink
+- 再确认远端 Release 和资产
+- 必要时先执行 `uv run crawler4j release check-remote`
+
+## `host upgrade apply` 后版本没变
+
+确认：
+
+1. `host upgrade preview <module_name>` 看到的远端版本是否真的是新版本
+2. 模块详情页是否刷新到了新来源和新版本
+3. 远端 Release 上传的是否就是目标 ZIP 升级包
+
+处理：
+
+- 先跑 `check` 和 `preview`
+- 再执行 `apply`
+- 升级后回宿主详情页重新核对版本和行为
