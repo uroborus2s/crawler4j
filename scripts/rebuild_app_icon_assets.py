@@ -13,7 +13,7 @@ MASTER_ICON = ASSETS_ROOT / "app_icon_master.png"
 RUNTIME_ICON = ASSETS_ROOT / "app_icon.png"
 MACOS_ICON = ASSETS_ROOT / "app_icon.icns"
 WINDOWS_ICON = ASSETS_ROOT / "app_icon.ico"
-ICON_SCALE = 0.965
+ICON_SCALE = 0.964
 ICO_SIZES = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 
 

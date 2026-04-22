@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-04-22 已继续微调桌面图标的壳层占比：共享图标母版的导出缩放系数现从 `0.965` 下调到 `0.964`，重新生成 `app_icon.png` / `app_icon.icns` / `app_icon.ico` 后，macOS Dock 与 Windows 壳层图标再缩小约 1px。
 - 最新修复：2026-04-22 已继续收口桌面应用图标的 Dock 外轮廓占比：仓库现新增 `app_icon_master.png -> scripts/rebuild_app_icon_assets.py -> app_icon.png/icns/ico` 的固定生成链，运行时与打包图标统一按同一比例回缩到更保守的四边安全区；同时图标回归测试已修正右/下 inset 计算口径，并锁定四边安全区在同一范围内，避免图标再次在 macOS Dock 中显得比浅色系统图标更大。
 - 最新修复：2026-04-22 已完成 hosted UI V1 第二轮收口：模块详情页对 `core:page:*` / `core:data_table:*` 入口改为首次选中时再实例化，未选中的宿主页不会提前执行 `declare_ui()` 或 `load_handler`，且已有 hosted page 在再次选中菜单时会自动 refresh；`ModuleUIRuntimeBridge` 现把 `declare_ui` 产出的 session 收口为“下一次 non-declare hook 单次消费”，并让 data-table handler 在执行前先刷新声明会话，同时通过 staging buffer + `replace_declared_ui()` 保证 UI schema 整套原子替换，`declare_ui` 失败时旧 schema 保留、新 schema 不会半写入；`crawler4j check full` / `package build` / `package verify` 同步补齐 `load_handler` / `create_handler` / `update_handler` 的存在性、同步性与签名兼容校验，`ui/` 目录也已正式收口为 legacy 结构并在打包/发布链路阻断。
 - 最新修复：2026-04-22 已完成 hosted module UI V1 主链：模块清单现统一使用 `ui_extension.pages[]`，运行时新增 `ui.declare_page` / `ui.get_page` 并把 page schema 持久化到 `data.db`；模块详情页只消费 `core:page:<page_id>` 与 `core:data_table:<view_id>` 两类入口，宿主通过 `ManagedPageRenderer` 渲染 `Page / Section / Text / Button / DataTable` 最小控件集；SDK CLI `page create` / `data-table create` / `check full`、integration / acceptance、开发者文档与 `.factory` 记忆已同步切到新契约，旧 `micro_app` / `ui:*` / trust gate / allowlist 路径已退出正式实现。

@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 继续微调桌面应用图标的壳层占比：将共享图标母版的导出缩放系数从 `0.965` 下调到 `0.964`，统一重建 `app_icon.png` / `app_icon.icns` / `app_icon.ico`，把 macOS Dock 与 Windows 壳层图标再缩小约 1px | Codex |
 | 2026-04-22 | 继续收口桌面应用图标的 Dock 外轮廓占比：新增 `app_icon_master.png -> scripts/rebuild_app_icon_assets.py -> app_icon.png/icns/ico` 的可重复生成链，统一把共享图标按固定比例回缩到更保守的安全区，避免 macOS Dock 中的外轮廓继续比浅色系统图标更大；同时修正图标回归测试里右/下 inset 计算口径，锁定四边安全区范围 | Codex |
 | 2026-04-22 | 发布打包目录清理收口：`package-windows-release` 与 `package-macos-internal-release` 现会在真正生成新发布物前先清空各自的 `dist/updates/<platform>/` 目录，避免本地打包或打包后上传继续复用旧 release 产物；对应单测已补齐 Windows/macOS 两条回归 | Codex |
 | 2026-04-22 | 修正 Windows 安装态启动与图标对齐：GUI 入口在异步启动阶段会先禁用 `quitOnLastWindowClosed`，等主窗口显示后再恢复，避免 Windows 打包版在首窗显示前提前停掉事件循环；同时 `package-windows-release` 现在会把 `app_icon.ico` 一并传给 Velopack，确保安装器/快捷方式与 `Crawler4j.exe` 图标一致 | Codex |
