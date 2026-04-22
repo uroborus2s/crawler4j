@@ -145,6 +145,7 @@ def test_workspace_root_declares_console_shortcuts_for_build_and_publish():
     pyproject = _load_pyproject(WORKSPACE_ROOT / "pyproject.toml")
 
     assert pyproject["project"]["scripts"]["build"] == "scripts.build_workspace_packages:build_main"
+    assert pyproject["project"]["scripts"]["deploy-windows-release"] == "scripts.deploy_windows_release:main"
     assert (
         pyproject["project"]["scripts"]["deploy-macos-internal-release"]
         == "scripts.deploy_macos_internal_release:main"
@@ -169,6 +170,7 @@ def test_dev_scripts_live_in_workspace_root_instead_of_app_package():
     assert {
         "build_workspace_packages.py",
         "deploy_macos_internal_release.py",
+        "deploy_windows_release.py",
         "db_cli.py",
         "install_sparkle_vendor.py",
         "package_desktop_app.py",
@@ -389,11 +391,11 @@ def test_windows_release_config_reads_env_defaults():
 
     config = script.load_windows_release_config(
         {
-            script.VELOPACK_FEED_URL_ENV: "https://updates.example.com/crawler4j/windows",
+            script.VELOPACK_FEED_URL_ENV: "https://updates.example.com/win/releases.win.json",
         }
     )
 
-    assert config.feed_url == "https://updates.example.com/crawler4j/windows"
+    assert config.feed_url == "https://updates.example.com/win/releases.win.json"
     assert config.pack_id == script.DEFAULT_PACK_ID
     assert config.channel == script.DEFAULT_CHANNEL
     assert config.runtime == script.DEFAULT_RUNTIME
@@ -407,7 +409,7 @@ def test_windows_release_write_update_config_to_bundle(tmp_path):
     bundle_dir = tmp_path / "Crawler4j"
     bundle_dir.mkdir(parents=True)
     config = script.WindowsReleaseConfig(
-        feed_url="https://updates.example.com/crawler4j/windows",
+        feed_url="https://updates.example.com/win/releases.win.json",
         pack_id="io.github.uroborus2s.crawler4j",
         channel="win",
         runtime="win-x64",
@@ -418,7 +420,7 @@ def test_windows_release_write_update_config_to_bundle(tmp_path):
     assert config_path == bundle_dir / script.UPDATE_CONFIG_FILENAME
     payload = script.json.loads(config_path.read_text(encoding="utf-8"))
     assert payload == {
-        "feed_url": "https://updates.example.com/crawler4j/windows",
+        "feed_url": "https://updates.example.com/win/releases.win.json",
         "pack_id": "io.github.uroborus2s.crawler4j",
         "channel": "win",
     }
@@ -429,7 +431,7 @@ def test_windows_release_build_vpk_pack_command_uses_global_vpk(tmp_path):
     bundle_dir = tmp_path / "Crawler4j"
     output_dir = tmp_path / "updates"
     config = script.WindowsReleaseConfig(
-        feed_url="https://updates.example.com/crawler4j/windows",
+        feed_url="https://updates.example.com/win/releases.win.json",
         pack_id="io.github.uroborus2s.crawler4j",
         channel="win",
         runtime="win-x64",
@@ -464,7 +466,7 @@ def test_windows_release_build_vpk_pack_command_uses_dnx_when_requested(tmp_path
     bundle_dir = tmp_path / "Crawler4j"
     output_dir = tmp_path / "updates"
     config = script.WindowsReleaseConfig(
-        feed_url="https://updates.example.com/crawler4j/windows",
+        feed_url="https://updates.example.com/win/releases.win.json",
         pack_id="io.github.uroborus2s.crawler4j",
         channel="win",
         runtime="win-x64",
@@ -520,7 +522,7 @@ def test_macos_internal_release_config_reads_default_dotenv_when_present(tmp_pat
         "\n".join(
             [
                 f"{script.SPARKLE_ROOT_ENV}='{sparkle_root}'",
-                f"{script.SPARKLE_FEED_URL_ENV}='https://updates.example.com/appcast.xml'",
+                f"{script.SPARKLE_FEED_URL_ENV}='https://updates.example.com/mac/appcast.xml'",
                 f"{script.SPARKLE_PUBLIC_KEY_ENV}='dotenv-public-key'",
             ]
         ),
@@ -531,7 +533,7 @@ def test_macos_internal_release_config_reads_default_dotenv_when_present(tmp_pat
     config = script.load_sparkle_release_config()
 
     assert config.sparkle_root == sparkle_root.resolve()
-    assert config.feed_url == "https://updates.example.com/appcast.xml"
+    assert config.feed_url == "https://updates.example.com/mac/appcast.xml"
     assert config.public_key == "dotenv-public-key"
     assert config.generate_appcast_tool == generate_appcast.resolve()
 
@@ -550,7 +552,7 @@ def test_macos_internal_release_config_reads_private_key_overrides_from_env(tmp_
     config = script.load_sparkle_release_config(
         {
             script.SPARKLE_ROOT_ENV: str(sparkle_root),
-            script.SPARKLE_FEED_URL_ENV: "https://updates.example.com/appcast.xml",
+            script.SPARKLE_FEED_URL_ENV: "https://updates.example.com/mac/appcast.xml",
             script.SPARKLE_PUBLIC_KEY_ENV: "dotenv-public-key",
             script.SPARKLE_KEYCHAIN_ACCOUNT_ENV: "crawler4j-internal",
             script.SPARKLE_PRIVATE_KEY_FILE_ENV: str(private_key_file),
@@ -577,7 +579,7 @@ def test_macos_internal_release_config_rejects_multiple_private_key_sources(tmp_
         script.load_sparkle_release_config(
             {
                 script.SPARKLE_ROOT_ENV: str(sparkle_root),
-                script.SPARKLE_FEED_URL_ENV: "https://updates.example.com/appcast.xml",
+                script.SPARKLE_FEED_URL_ENV: "https://updates.example.com/mac/appcast.xml",
                 script.SPARKLE_PUBLIC_KEY_ENV: "dotenv-public-key",
                 script.SPARKLE_PRIVATE_KEY_ENV: "private-key",
                 script.SPARKLE_PRIVATE_KEY_FILE_ENV: str(private_key_file),
@@ -939,13 +941,13 @@ def test_deploy_macos_internal_release_builds_rsync_command_from_env(tmp_path):
     )
     command = script.build_rsync_command(source_dir, upload_target, dry_run=True)
 
-    assert upload_target == "deploy@example.internal:/srv/updates/crawler4j"
+    assert upload_target == "deploy@example.internal:/srv/updates/crawler4j/mac"
     assert command == [
         "rsync",
         "-av",
         "--dry-run",
         f"{source_dir.resolve()}/",
-        "deploy@example.internal:/srv/updates/crawler4j/",
+        "deploy@example.internal:/srv/updates/crawler4j/mac/",
     ]
 
 
@@ -963,4 +965,43 @@ def test_deploy_macos_internal_release_reads_default_dotenv_for_upload_target(tm
 
     upload_target = script.resolve_upload_target(args)
 
-    assert upload_target == "sso.whzhsc.cn:/var/www/crawler4j/"
+    assert upload_target == "sso.whzhsc.cn:/var/www/crawler4j/mac"
+
+
+def test_deploy_windows_release_builds_rsync_command_from_env(tmp_path):
+    script = _load_script_module("deploy_windows_release.py")
+    source_dir = tmp_path / "updates"
+    source_dir.mkdir()
+    args = script.parse_args(["--dry-run"])
+
+    upload_target = script.resolve_upload_target(
+        args,
+        {script.UPLOAD_TARGET_ENV: "deploy@example.internal:/srv/updates/crawler4j"},
+    )
+    command = script.build_rsync_command(source_dir, upload_target, dry_run=True)
+
+    assert upload_target == "deploy@example.internal:/srv/updates/crawler4j/win"
+    assert command == [
+        "rsync",
+        "-av",
+        "--dry-run",
+        f"{source_dir.resolve()}/",
+        "deploy@example.internal:/srv/updates/crawler4j/win/",
+    ]
+
+
+def test_deploy_windows_release_reads_default_dotenv_for_upload_target(tmp_path, monkeypatch):
+    package_script = _load_script_module("package_windows_release.py")
+    script = _load_script_module("deploy_windows_release.py")
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        f"{script.UPLOAD_TARGET_ENV}='sso.whzhsc.cn:/var/www/crawler4j/'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(package_script, "DEFAULT_ENV_FILE", dotenv_path)
+    monkeypatch.setattr(script.package_windows_release, "DEFAULT_ENV_FILE", dotenv_path)
+    args = script.parse_args([])
+
+    upload_target = script.resolve_upload_target(args)
+
+    assert upload_target == "sso.whzhsc.cn:/var/www/crawler4j/win"

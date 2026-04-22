@@ -43,21 +43,26 @@ uv run python -m src.ui.app
 ```bash
 cp .env.example .env
 
-CRAWLER4J_VELOPACK_FEED_URL=https://updates.example.com/crawler4j/windows \
+CRAWLER4J_VELOPACK_FEED_URL=https://updates.example.com/win/releases.win.json \
 uv run package-windows-release
+
+CRAWLER4J_VELOPACK_FEED_URL=https://updates.example.com/win/releases.win.json \
+CRAWLER4J_UPDATE_UPLOAD_TARGET=deploy@example.internal:/var/www/crawler4j/ \
+uv run deploy-windows-release
 ```
 
 说明：
 
 - 该命令会先复用 `uv run package-desktop` 的 Windows `PyInstaller onedir` 结果，默认输入目录为 `packages/crawler4j/dist/desktop/windows/Crawler4j/`
 - 随后脚本会在 onedir 根目录写入 `crawler4j.update.json`，把 Windows 宿主运行时需要的 `feed_url / pack_id / channel` 收口为同一事实源
-- 默认 Velopack 输出目录为 `packages/crawler4j/dist/updates/windows/`，其中通常包含 `Setup.exe`、`RELEASES*` 清单与 `.nupkg` 包
-- `CRAWLER4J_VELOPACK_FEED_URL` 为必填项；正式口径建议固定为 `https://updates.example.com/crawler4j/windows`
+- 默认 Velopack 输出目录为 `packages/crawler4j/dist/updates/windows/`，其中通常包含 `Setup.exe`、`releases.<channel>.json` 清单与 `.nupkg` 包
+- `CRAWLER4J_VELOPACK_FEED_URL` 为必填项；正式口径建议固定为 `https://updates.example.com/win/releases.win.json`
 - `CRAWLER4J_VELOPACK_PACK_ID` 默认为 `io.github.uroborus2s.crawler4j`
 - `CRAWLER4J_VELOPACK_CHANNEL` 默认为 `win`
 - `CRAWLER4J_VELOPACK_RUNTIME` 默认为 `win-x64`
 - 若本机已全局安装 `vpk`，脚本默认直接调用它；若希望强制使用与 Python `velopack` 运行时同版本的 CLI，可设置 `CRAWLER4J_VPK_USE_DNX=1`，脚本会改为调用 `dnx vpk --version <当前 velopack 版本>`
 - 若需要显式指定 `vpk` 可执行文件路径，可设置 `CRAWLER4J_VPK_BIN=/absolute/path/to/vpk`
+- `uv run deploy-windows-release` 会在打包完成后继续执行 `rsync -av packages/crawler4j/dist/updates/windows/ -> $CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`
 - Velopack Windows 安装目录默认位于 `%LocalAppData%\\<packId>\\current`。更新时会整体替换 `current/`，所以任何可变文件都不能写在程序目录里；`crawler4j` 当前应用数据继续落在 `%APPDATA%/Crawler4j/`，与这条约束兼容
 - Windows 宿主自更新只对“通过 Velopack Setup 安装”的客户端生效；如果用户直接运行裸 `PyInstaller onedir` 目录，`检查更新` 会明确提示当前不是正式安装态
 - Velopack 官方当前明确说明 Windows 不支持安装到 `C:\\Program Files` 这类特权目录；本仓当前也不提供管理员安装模式
@@ -70,15 +75,15 @@ uv run install-sparkle --archive ~/Downloads/Sparkle-2.x.y.tar.xz
 cp .env.example .env
 
 CRAWLER4J_SPARKLE_ROOT=/path/to/sparkle \
-CRAWLER4J_SPARKLE_FEED_URL=https://updates.example.com/crawler4j/appcast.xml \
+CRAWLER4J_SPARKLE_FEED_URL=https://updates.example.com/mac/appcast.xml \
 CRAWLER4J_SPARKLE_PUBLIC_ED_KEY=<sparkle-public-key> \
 CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT=ed25519 \
 uv run package-macos-internal-release
 
-CRAWLER4J_SPARKLE_FEED_URL=https://updates.example.com/crawler4j/appcast.xml \
+CRAWLER4J_SPARKLE_FEED_URL=https://updates.example.com/mac/appcast.xml \
 CRAWLER4J_SPARKLE_PUBLIC_ED_KEY=<sparkle-public-key> \
 CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT=ed25519 \
-CRAWLER4J_UPDATE_UPLOAD_TARGET=deploy@example.internal:/srv/nginx/updates/crawler4j/ \
+CRAWLER4J_UPDATE_UPLOAD_TARGET=deploy@example.internal:/var/www/crawler4j/ \
 uv run deploy-macos-internal-release
 ```
 
@@ -89,7 +94,7 @@ uv run deploy-macos-internal-release
 - 该命令会先复用现有 `PyInstaller -> Crawler4j.app` 打包链，再把 `Sparkle.framework` 复制进 bundle，并把 `SUFeedURL` / `SUPublicEDKey` / `SUEnableAutomaticChecks` / `SUEnableCodeSigningValidation=false` / `SUPackageSigningCertificate=""` 写入 `Info.plist`；随后会对改写后的 app bundle 自动执行一次 ad-hoc `codesign`
 - 默认更新产物目录为 `packages/crawler4j/dist/updates/macos/`，其中至少包含 `Crawler4j-<version>.dmg`；若本机 Sparkle 分发目录内存在 `bin/generate_appcast`，还会同时生成 `appcast.xml`
 - 当前 DMG 会在构建阶段挂载一次 staging 镜像，并通过 Finder 布局脚本固定窗口尺寸、图标大小与 `Crawler4j.app` / `Applications` 的摆放，用户双击后即可直接拖拽安装
-- `uv run deploy-macos-internal-release` 会在完成上述构建后继续执行 `rsync -av packages/crawler4j/dist/updates/macos/ -> $CRAWLER4J_UPDATE_UPLOAD_TARGET/`；目标既可以是本机 nginx 静态目录，也可以是 `user@host:/srv/nginx/updates/crawler4j/` 这类远端 rsync 路径
+- `uv run deploy-macos-internal-release` 会在完成上述构建后继续执行 `rsync -av packages/crawler4j/dist/updates/macos/ -> $CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`；目标既可以是本机静态目录，也可以是 `user@host:/var/www/crawler4j/` 这类远端 rsync 路径
 - 该分发路径面向“小范围内部用户第一次手动把 app 拖到 `/Applications`、首次启动允许未知开发者、后续自动更新由 Sparkle 处理”的场景；当前会关闭宿主 app 的苹果代码签名校验，但不会关闭 Sparkle 对更新包的 EdDSA 校验
 - 不要求 `Developer ID` 或 notarization，但用户不能一直直接从挂载的 DMG 中运行应用；首次安装后应从 `/Applications` 打开
 - DMG 布局步骤依赖本地 Finder 图形会话；若在无桌面会话的 headless macOS 环境中执行，样式化阶段会失败并提示改为在已登录 Finder 的会话中打包
@@ -98,19 +103,19 @@ uv run deploy-macos-internal-release
 - 若要生成 `appcast.xml`，还必须提供一条私钥来源：`CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT`、`CRAWLER4J_SPARKLE_PRIVATE_ED_KEY_FILE` 或 `CRAWLER4J_SPARKLE_PRIVATE_ED_KEY` 三选一；默认 account 仍是 `ed25519`
 - `CRAWLER4J_UPDATE_UPLOAD_TARGET` 只在 `deploy-macos-internal-release` 中必填；若需要先演练命令形状，可追加 `--dry-run`
 
-### nginx / HTTPS / 二级域名建议
+### 静态目录 / HTTPS / 二级域名建议
 
 推荐口径：
 
-- 建议把 macOS 更新站点单独放在 `updates.<主域名>`，例如 `updates.example.com`；这样路径稳定、语义直观，也方便后续继续在同一子域名下挂更多桌面更新产物
-- Sparkle feed URL 固定为 `https://updates.example.com/crawler4j/appcast.xml`
-- Windows Velopack feed URL 固定为 `https://updates.example.com/crawler4j/windows`
-- 服务器静态目录固定为 `/srv/nginx/updates/crawler4j/`，与 `CRAWLER4J_UPDATE_UPLOAD_TARGET=deploy@updates-host:/srv/nginx/updates/crawler4j/` 保持一致
-- 仓库已提供 nginx 样板配置 `deploy/nginx/crawler4j-updates.example.conf`；上线时只需要替换域名、证书路径和服务器用户
-- 如果域名能被公网解析，优先执行 `sudo certbot --nginx -d updates.example.com` 申请 Let's Encrypt；如果是纯内网域名，则改用企业内部 CA 或已有证书体系，并把样板里的 `ssl_certificate*` 路径替换为实际文件
-- 上述样板默认把 `appcast.xml` 设为短缓存、把 `.dmg/.pkg/.zip` 设为长缓存，避免 Sparkle 长时间拿旧清单，同时不浪费大文件带宽
-- Windows 更新目录建议直接作为静态目录对外暴露，确保 `RELEASES*` 与 `.nupkg` 文件能被直接下载
-- 首次上线至少确认 DNS 已解析到更新服务器，再执行 `curl -I https://updates.example.com/crawler4j/appcast.xml`、`curl -I https://updates.example.com/crawler4j/Crawler4j-<version>.dmg` 和 `curl -I https://updates.example.com/crawler4j/windows/RELEASES`；都应返回 `200`
+- 建议把桌面更新站点单独放在 `updates.<主域名>`，例如 `updates.example.com`
+- Sparkle feed URL 固定为 `https://updates.example.com/mac/appcast.xml`
+- Windows Velopack feed URL 固定为 `https://updates.example.com/win/releases.win.json`
+- 服务器静态目录固定为 `/var/www/crawler4j/`，并让 deploy 脚本把产物分别同步到 `/var/www/crawler4j/mac/` 和 `/var/www/crawler4j/win/`
+- 首次部署前先创建目录：`mkdir -p /var/www/crawler4j/mac /var/www/crawler4j/win`
+- Web 服务用户至少需要对这两个目录具备读权限，发布用户需要写权限；若使用 nginx + `www-data`，常见做法是把目录组设为 `www-data` 并给目录 `2755`、文件 `0644`
+- 如果域名能被公网解析，优先执行 `sudo certbot --nginx -d updates.example.com` 申请 Let's Encrypt；如果是纯内网域名，则改用企业内部 CA 或已有证书体系，并把 nginx 配置里的 `ssl_certificate*` 路径替换为实际文件
+- Windows 更新目录建议直接作为静态目录对外暴露，确保 `releases.win.json` 与 `.nupkg` 文件能被直接下载
+- 首次上线至少确认 DNS 已解析到更新服务器，再执行 `curl -I https://updates.example.com/mac/appcast.xml`、`curl -I https://updates.example.com/mac/Crawler4j-<version>.dmg` 和 `curl -I https://updates.example.com/win/releases.win.json`；都应返回 `200`
 
 ### 测试
 
@@ -180,7 +185,7 @@ uv run python -m crawler4j_sdk.cli.commands --help
 | 2026-04-22 | 为 macOS Sparkle 内部分发补上“改写 bundle 后自动 ad-hoc 重签”与私钥来源配置：`generate_appcast` 现支持 keychain account、私钥文件或私钥串三种输入，不再只依赖默认 `ed25519` 账户 | Codex |
 | 2026-04-22 | 补记 macOS 内部 Sparkle unsigned 分发的签名口径：`package-macos-internal-release` 现会写入 `SUEnableCodeSigningValidation=false` 与空 `SUPackageSigningCertificate`，仅关闭宿主代码签名校验，继续保留更新包 EdDSA 校验 | Codex |
 | 2026-04-22 | 将 macOS 内部 DMG 构建改为固定 Finder 图标视图，打开后直接展示 `Crawler4j.app` 与 `Applications` 拖拽安装布局，并补记对 Finder 图形会话的依赖 | Codex |
-| 2026-04-22 | 为 macOS Sparkle 内部分发补齐服务器侧 nginx / HTTPS 配置口径：推荐 `updates.<主域名>`、新增 `deploy/nginx/crawler4j-updates.example.conf` 样板，并说明 Certbot 与静态目录约定 | Codex |
+| 2026-04-22 | 收口桌面更新站点目录结构为 `mac/` 与 `win/` 并列，补充 `deploy-windows-release`、静态目录创建与访问权限约定 | Codex |
 | 2026-04-21 | 新增 macOS 内部 DMG + Sparkle 发布口径，说明 `package-macos-internal-release` 的环境变量、产物目录与手动拖入 `/Applications` 的使用边界 | Codex |
 | 2026-04-20 | 补记桌面打包对 `sinanz` 共享 `resources/` 目录的显式收集约束，避免验证码模型资源在 PyInstaller 产物中丢失 | Codex |
 | 2026-04-20 | 将 docs-stratego 联动发布说明从 `feature/task-plugin-system` 收敛到 `main` 分支口径，并补记 dispatch token 换行清理约束 | Codex |
