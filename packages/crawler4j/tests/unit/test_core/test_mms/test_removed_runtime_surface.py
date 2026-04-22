@@ -10,15 +10,21 @@ from src.core.mms.models import ModuleInfo, ModuleManifest
 from src.core.mms.service import ModuleService
 
 
-def test_removed_runtime_packages_stay_unavailable():
+def test_removed_legacy_runtime_and_ui_surface_stays_unavailable():
     app_root = Path(__file__).resolve().parents[4]
     workspace_root = app_root.parents[1]
     removed_paths = [
         app_root / "src" / "automation",
         app_root / "src" / "core" / "models",
+        app_root / "src" / "ui" / "core",
+        app_root / "src" / "core" / "mms" / "ui" / "module_detail_panel.py",
         workspace_root / "packages" / "crawler4j-sdk" / "crawler4j_sdk" / "extensions.py",
     ]
     removed_modules = [
+        "src.ui.core",
+        "src.ui.core.adapter",
+        "src.ui.core.command_channel",
+        "src.core.mms.ui.module_detail_panel",
         "src.utils.async_utils",
         "src.utils.captcha_solver",
         "src.utils.fingerprint_generator",
@@ -93,7 +99,7 @@ def _write_demo_module(module_dir: Path) -> None:
                 context.state["selected_account_phone"] = context.selected_account.phone_number
                 if context.page:
                     await context.page.goto(
-                        context.get_config("login_url", "https://example.com/login"),
+                        context.get_config("target_url", "https://example.com/start"),
                         wait_until="domcontentloaded",
                     )
 
@@ -124,7 +130,7 @@ def _demo_registry(module_dir: Path):
 
 
 @pytest.mark.asyncio
-async def test_module_init_hook_injects_account_and_opens_login_page(tmp_path):
+async def test_module_service_init_hook_prepares_account_and_opens_target_page(tmp_path):
     module_dir = tmp_path / "demo_module"
     _write_demo_module(module_dir)
 
@@ -137,7 +143,7 @@ async def test_module_init_hook_injects_account_and_opens_login_page(tmp_path):
         task_name="demo_module",
         config={
             "accounts": [{"id": "u1", "phone_number": "13800000001", "country_code": "86"}],
-            "login_url": "https://example.com/login",
+            "target_url": "https://example.com/start",
         },
         page=page,
     )
@@ -147,11 +153,11 @@ async def test_module_init_hook_injects_account_and_opens_login_page(tmp_path):
 
     assert getattr(ctx, "selected_account").phone_number == "13800000001"
     assert ctx.state["selected_account_phone"] == "13800000001"
-    assert page.goto_calls[-1] == "https://example.com/login"
+    assert page.goto_calls[-1] == "https://example.com/start"
 
 
 @pytest.mark.asyncio
-async def test_module_login_workflow_executes_login_script(tmp_path):
+async def test_module_service_runs_module_root_entry_after_init_hook(tmp_path):
     module_dir = tmp_path / "demo_module"
     _write_demo_module(module_dir)
 
@@ -163,9 +169,8 @@ async def test_module_login_workflow_executes_login_script(tmp_path):
         env_id=5,
         task_name="demo_module",
         config={
-            "workflow": "login_workflow",
             "accounts": [{"id": "u2", "phone_number": "13900000002", "country_code": "86"}],
-            "login_url": "https://example.com/login",
+            "target_url": "https://example.com/start",
         },
         page=page,
     )

@@ -2,6 +2,8 @@ import pytest
 import logging
 import sys
 import yaml
+import importlib
+from textwrap import dedent
 from unittest.mock import MagicMock, AsyncMock
 
 from crawler4j_sdk.assembler import ModuleAssembler
@@ -33,6 +35,64 @@ def create_mock_context():
     ctx.logger = logging.getLogger("test")
     ctx.run_subtask = AsyncMock(return_value={"data": "mocked"})
     return ctx
+
+
+def write_managed_root_module(module_dir):
+    (module_dir / "__init__.py").write_text(
+        dedent(
+            '''
+            import importlib
+            from pathlib import Path
+
+            from crawler4j_sdk import EnvCandidate, ModuleAssembler, TaskContext, TaskResult
+
+            assembler = ModuleAssembler(
+                package_root=Path(__file__).parent,
+                module_name=__name__,
+            )
+
+
+            async def run(context: TaskContext) -> TaskResult:
+                return await assembler.run(context)
+
+
+            async def prepare_env(context, *args):
+                hook = assembler.get_hook("prepare_env")
+                return await hook(context, *args) if hook else None
+
+
+            async def on_cleanup(context, *args):
+                hook = assembler.get_hook("on_cleanup")
+                return await hook(context, *args) if hook else None
+
+
+            async def select_env(
+                context: TaskContext,
+                candidates: list[EnvCandidate],
+                selector_name: str,
+            ):
+                return await assembler.run_env_selector(selector_name, context, candidates)
+
+
+            _runtime_module = None
+
+
+            def _load_runtime_module():
+                global _runtime_module
+                if _runtime_module is None:
+                    _runtime_module = importlib.import_module(f"{__name__}.module_runtime")
+                return _runtime_module
+
+
+            def __getattr__(name: str):
+                runtime_module = _load_runtime_module()
+                if hasattr(runtime_module, name):
+                    return getattr(runtime_module, name)
+                raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+            '''
+        ).strip()
+        + "\n"
+    )
 
 @pytest.mark.asyncio
 async def test_assembler_discovery(temp_module):
@@ -244,22 +304,32 @@ class ManifestFlow(TaskFlow):
     assert assembler.default_workflow == "manifest_wf"
     assert "manifest_wf" in assembler.workflows
 
-def test_shim_hook_delegation(temp_module):
-    # Mock ModuleAssembler and get_hook
-    from crawler4j_sdk import ModuleAssembler
-    
-    # We will simulate the shim's __init__.py logic
-    mock_assembler = MagicMock(spec=ModuleAssembler)
-    mock_hook = AsyncMock(return_value={"hook": "called"})
-    mock_assembler.get_hook.return_value = mock_hook
-    
-    # Simulating what the shim does:
-    # hook = assembler.get_hook("prepare_env")
-    # return await hook(context, *args) if hook else None
-    
-    # We can't easily import the dynamically generated shim in unit test without more complex setup,
-    # but we've verified the logic above.
-    pass
+@pytest.mark.asyncio
+async def test_managed_root_module_delegates_hooks_and_runtime_attributes(temp_module):
+    write_managed_root_module(temp_module)
+    (temp_module / "module_runtime.py").write_text(
+        dedent(
+            """
+            RUNTIME_FLAG = "runtime-visible"
+
+            async def prepare_env(ctx, *args):
+                ctx.state["prepare_env_args"] = list(args)
+                return {"hook": "called", "args": list(args)}
+            """
+        ).strip()
+        + "\n"
+    )
+
+    module = importlib.import_module("test_module")
+    ctx = create_mock_context()
+
+    assert await module.prepare_env(ctx, "demo") == {
+        "hook": "called",
+        "args": ["demo"],
+    }
+    assert ctx.state["prepare_env_args"] == ["demo"]
+    assert await module.on_cleanup(ctx, "ignored") is None
+    assert module.RUNTIME_FLAG == "runtime-visible"
 
 
 @pytest.mark.asyncio
