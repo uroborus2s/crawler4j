@@ -26,3 +26,17 @@ def test_release_status_reports_blocked_when_manifest_drifts(rich_module_root: P
     result.assert_failed()
     result.assert_stdout_contains("发布状态: BLOCKED")
     result.assert_stdout_contains("upgrade_source.repo 必须是 owner/repo 形式")
+
+
+def test_release_status_reports_blocked_when_pyproject_version_drifts(rich_module_root: Path):
+    pyproject_path = rich_module_root / "pyproject.toml"
+    pyproject_path.write_text(
+        pyproject_path.read_text(encoding="utf-8").replace('version = "0.1.0"', 'version = "9.9.9"'),
+        encoding="utf-8",
+    )
+
+    result = run_cli("release", "status", cwd=rich_module_root)
+
+    result.assert_failed()
+    result.assert_stdout_contains("发布状态: BLOCKED")
+    result.assert_stdout_contains("pyproject.toml [project].version 必须与 module.yaml.version 一致")

@@ -8,6 +8,7 @@ import sys
 import tomllib
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -32,6 +33,11 @@ def _import_generated_package(package_root: Path):
 def _read_manifest(module_root: Path) -> dict:
     with (module_root / "module.yaml").open("r", encoding="utf-8") as fh:
         return yaml.safe_load(fh)
+
+
+def _read_pyproject(module_root: Path) -> dict:
+    with (module_root / "pyproject.toml").open("rb") as fh:
+        return tomllib.load(fh)
 
 
 @pytest.fixture
@@ -86,6 +92,7 @@ def test_module_init_creates_complete_project(module_root: Path):
         }
     ]
     assert "ui_extension" not in manifest
+    assert _read_pyproject(module_root)["project"]["version"] == manifest["version"]
 
 
 def test_module_init_generates_importable_package(module_root: Path):
@@ -104,8 +111,7 @@ def test_module_init_generates_importable_package(module_root: Path):
 
 
 def test_generated_pyproject_uses_sdk_dependency_range(module_root: Path):
-    with (module_root / "pyproject.toml").open("rb") as fh:
-        pyproject = tomllib.load(fh)
+    pyproject = _read_pyproject(module_root)
 
     assert get_compatible_dependency_spec() == "crawler4j-sdk>=0.3.0,<0.4.0"
     assert get_compatible_dependency_spec() in pyproject["project"]["dependencies"]
@@ -125,6 +131,7 @@ def test_module_set_commands_update_manifest_and_runtime(module_root: Path, monk
     manifest = _read_manifest(module_root)
     assert manifest["upgrade_source"]["repo"] == "demo/release_repo"
     assert manifest["version"] == "0.2.0"
+    assert _read_pyproject(module_root)["project"]["version"] == "0.2.0"
     runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
     assert 'DEFAULT_WORKFLOW = "repair_orders"' in runtime_text
 
@@ -201,6 +208,31 @@ def test_page_scaffold_stays_importable_without_pyqt6(module_root: Path, monkeyp
     assert commands.collect_full_errors(module_root, manifest) == []
 
 
+def test_page_scaffold_matches_host_loader_contract(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    qtbot,
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+
+    package_name = module_root.name
+    stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
+    for name in stale:
+        sys.modules.pop(name, None)
+
+    ui_module = importlib.import_module(f"{package_name}.ui")
+    page = ui_module.DashboardPage(SimpleNamespace(name="demo_model", manifest=SimpleNamespace(display_name="Demo Module")))
+    qtbot.addWidget(page)
+
+    page.on_refresh()
+
+    assert page.label.text()
+    assert "Demo Module" in page.label.text()
+
+
 def test_task_create_refuses_to_clobber_existing_files(module_root: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(module_root)
 
@@ -249,6 +281,17 @@ def test_check_rejects_undeclared_workflow_defaults(module_root: Path, monkeypat
     manifest["config_defaults"]["workflows"]["missing_workflow"] = {"limit": 1}
     (module_root / "module.yaml").write_text(
         yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_release(Namespace()) == 1
+
+
+def test_check_release_rejects_pyproject_version_drift(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(module_root)
+    pyproject_path = module_root / "pyproject.toml"
+    pyproject_path.write_text(
+        pyproject_path.read_text(encoding="utf-8").replace('version = "0.1.0"', 'version = "9.9.9"'),
         encoding="utf-8",
     )
 

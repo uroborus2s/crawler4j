@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import urllib.error
 import urllib.request
 import zipfile
@@ -202,6 +203,51 @@ def save_manifest(module_root: Path, manifest: dict[str, Any]) -> None:
         yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
+
+
+def _load_project_version(pyproject_path: Path) -> str:
+    try:
+        with pyproject_path.open("rb") as fh:
+            payload = tomllib.load(fh)
+    except FileNotFoundError as exc:
+        raise CLIError(f"缺少文件: {pyproject_path}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise CLIError(f"pyproject.toml 解析失败: {pyproject_path}") from exc
+
+    project = payload.get("project")
+    if not isinstance(project, dict):
+        raise CLIError("pyproject.toml 缺少 [project] 配置")
+
+    version = str(project.get("version", "") or "").strip()
+    if not version:
+        raise CLIError("pyproject.toml [project].version 不能为空")
+    return version
+
+
+def _set_project_version(pyproject_path: Path, version: str) -> None:
+    text = pyproject_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    in_project = False
+    replaced = False
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_project = stripped == "[project]"
+            continue
+        if in_project and stripped.startswith("version"):
+            indent = line[: len(line) - len(line.lstrip())]
+            lines[index] = f'{indent}version = "{version}"'
+            replaced = True
+            break
+
+    if not replaced:
+        raise CLIError("pyproject.toml [project] 缺少 version 声明")
+
+    rendered = "\n".join(lines)
+    if text.endswith("\n"):
+        rendered += "\n"
+    pyproject_path.write_text(rendered, encoding="utf-8")
 
 
 def _list_python_modules(package_dir: Path) -> list[str]:
@@ -559,6 +605,17 @@ def collect_release_errors(module_root: Path, manifest: dict[str, Any]) -> list[
                 errors.append(f"config_defaults.workflows 包含未声明的 workflow: {workflow_name}")
     except CLIError as exc:
         errors.append(str(exc))
+
+    try:
+        project_version = _load_project_version(module_root / "pyproject.toml")
+    except CLIError as exc:
+        errors.append(str(exc))
+    else:
+        if project_version != version:
+            errors.append(
+                "pyproject.toml [project].version 必须与 module.yaml.version 一致: "
+                f"{project_version} != {version}"
+            )
 
     if str(manifest.get("name", "")).strip() != module_root.name:
         errors.append("module.yaml.name 必须与模块根目录名一致")
@@ -931,6 +988,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             output_dir / "pyproject.toml",
             MODEL_PROJECT_PYPROJECT.format(
                 project_name=module_name,
+                version=args.version,
                 display_name=display_name,
                 python_version=args.python_version,
                 sdk_dependency_spec=sdk_dependency_spec,
@@ -1063,6 +1121,11 @@ def cmd_module_set_version(args: argparse.Namespace) -> int:
     module_root = require_module_root()
     if not is_valid_semver(args.version):
         _print_error("版本号必须是合法语义化版本")
+        return 1
+    try:
+        _set_project_version(module_root / "pyproject.toml", args.version)
+    except CLIError as exc:
+        _print_error(str(exc))
         return 1
     manifest = load_manifest(module_root)
     manifest["version"] = args.version

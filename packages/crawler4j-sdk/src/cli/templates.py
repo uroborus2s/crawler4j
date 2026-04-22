@@ -61,7 +61,7 @@ dist/
 
 MODEL_PROJECT_PYPROJECT = '''[project]
 name = "{project_name}"
-version = "0.1.0"
+version = "{version}"
 description = "{display_name} 模块项目"
 requires-python = ">={python_version}"
 dependencies = [
@@ -153,7 +153,9 @@ MODEL_UI_PAGES_TEMPLATE = '''"""界面组件: {display_name}
 {description}
 """
 
-from crawler4j_sdk import TaskContext
+from __future__ import annotations
+
+from typing import Any
 
 try:
     from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
@@ -177,14 +179,24 @@ else:
 class {class_name}(QWidget):
     """{display_name} 页面"""
 
-    def __init__(self, ctx: TaskContext, parent=None):
+    def __init__(self, module: Any | None = None, parent=None):
         super().__init__(parent)
-        self.ctx = ctx
+        self.module = module
         self._init_ui()
+
+    def _resolve_title(self) -> str:
+        manifest = getattr(self.module, "manifest", None)
+        display_name = str(getattr(manifest, "display_name", "") or "").strip()
+        if display_name:
+            return display_name
+        module_name = str(getattr(self.module, "name", "") or "").strip()
+        if module_name:
+            return module_name
+        return self.__class__.__name__
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        self.label = QLabel(f"欢迎使用 {{self.__class__.__name__}}")
+        self.label = QLabel(f"欢迎使用 {{self._resolve_title()}}")
         self.btn = QPushButton("刷新数据")
         self.btn.clicked.connect(self.on_refresh)
         
@@ -192,8 +204,7 @@ class {class_name}(QWidget):
         layout.addWidget(self.btn)
 
     def on_refresh(self):
-        self.ctx.logger.info("UI 请求刷新数据")
-        # 实现具体逻辑
+        self.label.setText(f"{{self._resolve_title()}} 页面已刷新")
 '''
 
 MODEL_MODULE_INIT = '''"""{display_name} 模块入口。
