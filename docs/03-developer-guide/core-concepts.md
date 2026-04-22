@@ -43,7 +43,7 @@
 | 快照数据 | `db.list_records` / `db.replace_records` | 当前结构化 records、当前结果集 | append-only 历史、宿主内部数据库细节 |
 | 审计事件历史 | `db.append_event` / `db.query_events` | 只追加的业务历史、操作轨迹、事件时间线 | 当前快照、`core:data_table` CRUD |
 | 轻状态与锁 | `db.get_state` / `db.set_state` / `db.acquire_lock` | 游标、短 TTL 状态、互斥锁 | 正式配置、可编辑业务列表 |
-| UI | 代码页面或 `core:data_table` | 业务页面或受控数据表 | 第二套 CRUD 框架 |
+| UI | hosted page 或 `core:data_table` | 业务页面、看板或受控数据表 | 第二套模块 UI 框架 |
 
 ## 模块执行链路
 

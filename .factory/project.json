@@ -75,9 +75,9 @@
       "details": "4 passed on 2026-03-26 covering module/workflow settings export, removed legacy KV ignore semantics, persisted module status, and uninstall cleanup policy"
     },
     "mms_custom_ui_tests": {
-      "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py -q",
+      "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py packages/crawler4j/tests/acceptance/test_sdk_cli_scaffold_package_acceptance.py",
       "result": "passed",
-      "details": "14 passed on 2026-03-26 covering DevLink trust, external-module blocking, allowlist override, and custom-page load fallback"
+      "details": "105 passed on 2026-04-22 covering hosted page renderer, module detail routing, runtime capabilities, declared UI persistence cleanup, CLI scaffold, integration, and acceptance on the new ui_extension.pages[] contract"
     }
   },
   "versions": {

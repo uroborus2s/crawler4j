@@ -7,7 +7,7 @@
 **上游输入：** `input.md` | 当前仓库代码与构建结果  
 **下游输出：** `docs/04-project-development/03-requirements/` | `.factory/memory/current-state.md` | 首批工作项  
 **关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `RISK-001`, `RISK-002`, `RISK-003`  
-**最后更新：** 2026-03-31  
+**最后更新：** 2026-04-22
 
 ## 1. 项目形态
 
@@ -25,7 +25,7 @@
 |---|---|---|
 | 自动化测试 | 通过 | `uv run pytest -q` -> `188 passed` |
 | MMS settings store 基础能力 | 通过 | 模块级/工作流级 settings、导出与模块启停状态持久化已落地并有单测覆盖 |
-| MMS 自定义页面 trust gate | 通过 | `ui:*` 页面已支持受信加载，外部模块默认拒绝，allowlist 命中后可真实装载 |
+| MMS hosted module UI V1 | 通过 | 模块清单、runtime capability、详情页与 SDK CLI 已统一切到 `ui_extension.pages[]`、`ui.declare_page`、`ui.declare_data_table` 与宿主 `ManagedPageRenderer`；旧 `micro_app/ui:*` 与 trust gate 路径已退出正式实现 |
 | 文档体系 | 通过 | `docs/` 已统一为 Markdown 文档树，不再依赖静态站构建 |
 | 应用入口 | 通过 | workspace 根通过 `uv run python -m src.ui.app` 启动 `packages/crawler4j` 中的真实入口 |
 | UI smoke | 通过 | `uv run python scripts/smoke_test_ui.py` 通过 |

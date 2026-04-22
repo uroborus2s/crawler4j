@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import builtins
 import importlib
 import sys
 import tomllib
 from argparse import Namespace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -72,8 +70,8 @@ def test_module_init_creates_complete_project(module_root: Path):
     assert (module_root / ".python-version").exists()
     assert (module_root / "tasks" / "example_task.py").exists()
     assert (module_root / "workflows" / "main_workflow.py").exists()
-    assert (module_root / "ui" / "__init__.py").exists()
     assert not (module_root / "data").exists()
+    assert not (module_root / "ui").exists()
 
     manifest = _read_manifest(module_root)
     assert manifest["name"] == "demo_model"
@@ -194,16 +192,17 @@ def test_resource_commands_create_files_and_update_manifest(
 
     assert (module_root / "tasks" / "extra_task.py").exists()
     assert (module_root / "workflows" / "repair_orders.py").exists()
-    assert (module_root / "ui" / "dashboard.py").exists()
-
-    ui_init = (module_root / "ui" / "__init__.py").read_text(encoding="utf-8")
-    assert "from .dashboard import DashboardPage" in ui_init
+    assert not (module_root / "ui").exists()
 
     manifest = _read_manifest(module_root)
     assert [item["name"] for item in manifest["workflows"]] == ["main_workflow", "repair_orders"]
-    assert manifest["ui_extension"]["type"] == "micro_app"
-    assert manifest["ui_extension"]["entry"] == "ui:DashboardPage"
-    assert manifest["ui_extension"]["detail_menu"] == [
+    assert manifest["ui_extension"]["pages"] == [
+        {
+            "id": "dashboard",
+            "label": "Dashboard",
+            "icon": "📄",
+            "entry": "core:page:dashboard",
+        },
         {
             "id": "accounts",
             "label": "Accounts",
@@ -213,62 +212,43 @@ def test_resource_commands_create_files_and_update_manifest(
     ]
 
     runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
+    assert "_declare_dashboard_page" in runtime_text
+    assert "build_dashboard_page_schema" in runtime_text
+    assert "load_dashboard_page" in runtime_text
+    assert '_declare_dashboard_page(context)' in runtime_text
     assert "_declare_accounts_table" in runtime_text
     assert "_declare_accounts_table(context)" in runtime_text
     assert 'name="pick_ready"' in runtime_text
 
 
-def test_page_scaffold_stays_importable_without_pyqt6(module_root: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.chdir(module_root)
-    assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name=None, description=None, force=False)
-    ) == 0
-
-    generated_page = (module_root / "ui" / "dashboard.py").read_text(encoding="utf-8")
-    assert "except ModuleNotFoundError as exc" in generated_page
-    assert "PyQt6 is required to instantiate code pages" in generated_page
-
-    manifest = _read_manifest(module_root)
-    package_name = module_root.name
-    stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
-    for name in stale:
-        sys.modules.pop(name, None)
-
-    real_import = builtins.__import__
-
-    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "PyQt6.QtWidgets":
-            raise ModuleNotFoundError("No module named 'PyQt6'")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _fake_import)
-
-    assert commands.collect_full_errors(module_root, manifest) == []
-
-
-def test_page_scaffold_matches_host_loader_contract(
+def test_page_create_generates_hosted_page_runtime_skeleton(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
-    qtbot,
 ):
     monkeypatch.chdir(module_root)
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
 
+    runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
+    assert '"ui.declare_page"' in runtime_text
+    assert "build_dashboard_page_schema" in runtime_text
+    assert "load_dashboard_page" in runtime_text
+    assert "PyQt6" not in runtime_text
+
     package_name = module_root.name
     stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
     for name in stale:
         sys.modules.pop(name, None)
 
-    ui_module = importlib.import_module(f"{package_name}.ui")
-    page = ui_module.DashboardPage(SimpleNamespace(name="demo_model", manifest=SimpleNamespace(display_name="Demo Module")))
-    qtbot.addWidget(page)
+    parent = str(module_root.parent)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
 
-    page.on_refresh()
-
-    assert page.label.text()
-    assert "Demo Module" in page.label.text()
+    module_runtime = importlib.import_module(f"{module_root.name}.module_runtime")
+    payload = module_runtime.load_dashboard_page(None, "dashboard")
+    assert payload["summary"] == "Dashboard 页面已由 hosted page V1 加载。"
+    assert payload["updated_at"] == "待接入真实数据"
 
 
 def test_task_create_refuses_to_clobber_existing_files(module_root: Path, monkeypatch: pytest.MonkeyPatch):
@@ -360,7 +340,7 @@ def test_check_full_reports_module_runtime_import_error(
     assert "module_runtime.py 无法导入" in captured.out
 
 
-def test_check_full_reports_ui_import_error(
+def test_check_full_reports_missing_page_load_handler(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -369,15 +349,93 @@ def test_check_full_reports_ui_import_error(
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
-    (module_root / "ui" / "__init__.py").write_text(
-        "from missing_ui_dependency import BrokenPage\n",
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace(
+            '"load_handler": "load_dashboard_page"',
+            '"load_handler": "missing_dashboard_page_loader"',
+        ),
         encoding="utf-8",
     )
 
     assert commands.cmd_check_full(Namespace()) == 1
 
     captured = capsys.readouterr()
-    assert "ui 包无法导入" in captured.out
+    assert "宿主页 dashboard 的 load_handler 未在 module_runtime.py 中定义" in captured.out
+
+
+def test_check_full_rejects_invalid_hosted_page_schema(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace(
+            '"action": {"type": "reload"}',
+            '"action": {"type": "open_page", "entry": "ui:LegacyPage"}',
+        ),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "schema 无效" in captured.out
+    assert "core:page:<page_id> 或 core:data_table:<view_id>" in captured.out
+
+
+def test_check_full_rejects_invalid_managed_data_table_schema(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    runtime_path.write_text(
+        runtime_text.replace(
+            "# SDK-DATA-TABLES\n    return None",
+            """context.tools.call(
+        "ui.declare_data_table",
+        view_id="accounts",
+        schema={
+            "title": "账号管理",
+            "dataset": "accounts",
+            "columns": [
+                {"key": "status", "label": "状态", "type": "select"},
+            ],
+        },
+    )
+    return None""",
+        ),
+        encoding="utf-8",
+    )
+    manifest = _read_manifest(module_root)
+    manifest["ui_extension"] = {
+        "pages": [
+            {
+                "id": "accounts",
+                "label": "Accounts",
+                "icon": "📋",
+                "entry": "core:data_table:accounts",
+            }
+        ]
+    }
+    (module_root / "module.yaml").write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "schema 无效" in captured.out
+    assert "select 列必须提供非空 options 数组" in captured.out
 
 
 def test_check_full_rejects_lock_key_business_occupancy_conflict(
@@ -412,7 +470,7 @@ def test_check_full_rejects_lock_key_business_occupancy_conflict(
     assert commands.cmd_check_full(Namespace()) == 1
 
     captured = capsys.readouterr()
-    assert "误用 lock_key" in captured.out
+    assert "lock_key 只用于 Core 临时锁" in captured.out
 
 
 def test_check_full_rejects_audit_event_writes_in_declare_ui(
@@ -505,6 +563,61 @@ def test_check_full_accepts_audit_event_queries_in_declare_ui(
     )
 
     assert commands.cmd_check_full(Namespace()) == 0
+
+
+def test_page_create_inserts_call_without_sdk_sentinel(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace("    # SDK-DATA-TABLES\n", ""),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    assert "    _declare_dashboard_page(context)\n    return None" in runtime_text
+    assert _read_manifest(module_root)["ui_extension"]["pages"][0]["id"] == "dashboard"
+
+
+def test_data_table_create_inserts_call_without_sdk_sentinel(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace("    # SDK-DATA-TABLES\n", ""),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_data_table_create(Namespace(view_id="accounts", label=None, icon=None)) == 0
+
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    assert "    _declare_accounts_table(context)\n    return None" in runtime_text
+    assert _read_manifest(module_root)["ui_extension"]["pages"][0]["id"] == "accounts"
+
+
+def test_page_create_does_not_mutate_manifest_when_declare_ui_is_missing(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace("def declare_ui(context: TaskContext):", "def missing_ui(context: TaskContext):"),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 1
+    assert "ui_extension" not in _read_manifest(module_root)
 
 
 def test_package_build_and_verify(module_root: Path, monkeypatch: pytest.MonkeyPatch):

@@ -195,7 +195,7 @@ workflow 里的硬规则:
 2. `tasks/`
 3. `utils/` 里的纯函数
 4. `module_runtime.py` 里的薄 hook
-5. `ui/` 里的页面类
+5. `module_runtime.py` 里的 hosted page / data table schema 与同步 handler
 
 命中下面任意一项，这个模块就应视为不合格，必须回退重构:
 

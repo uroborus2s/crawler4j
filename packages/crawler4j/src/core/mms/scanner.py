@@ -28,7 +28,7 @@ from src.utils.paths import get_builtin_modules_path, get_user_modules_path
 IGNORED_DIRS = {"__pycache__", ".git", ".venv", "node_modules"}
 LEGACY_MODULE_FILES = ("config_schema.json", "strategy.yaml")
 MANAGED_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-UI_ENTRY_RE = re.compile(r"^ui:[A-Z][A-Za-z0-9_]*$")
+HOSTED_PAGE_ENTRY_RE = re.compile(r"^core:(page|data_table):([a-z][a-z0-9_]*)$")
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REMOVED_MANIFEST_FIELDS = ("sdk_version_range",)
 
@@ -251,59 +251,45 @@ class ModuleScanner:
 
     def _validate_ui_extension(self, manifest: ModuleManifest) -> None:
         ui_ext = manifest.ui_extension
-        ui_type = str(ui_ext.type or "none").strip() or "none"
-        if ui_type not in {"none", "micro_app"}:
-            raise ModuleValidationError(
-                f"不支持的 ui_extension.type: {ui_type}",
-                stage="VALIDATE",
-                hint="当前只允许 `none` 或 `micro_app`"
-            )
+        seen_page_ids: set[str] = set()
+        for item in ui_ext.pages:
+            page_id = str(item.id or "").strip()
+            if not MANAGED_NAME_RE.match(page_id):
+                raise ModuleValidationError(
+                    f"无效的 ui_extension.pages[].id: {page_id or '<empty>'}",
+                    stage="VALIDATE",
+                    hint="页面 ID 只能使用小写字母、数字和下划线，且必须以字母开头",
+                )
+            if page_id in seen_page_ids:
+                raise ModuleValidationError(
+                    f"ui_extension.pages[].id 重复: {page_id}",
+                    stage="VALIDATE",
+                    hint="请确保每个宿主页入口有唯一的 ID",
+                )
+            seen_page_ids.add(page_id)
 
-        entry = str(ui_ext.entry or "").strip()
-        if entry:
-            if ui_type != "micro_app":
+            if not str(item.label or "").strip():
                 raise ModuleValidationError(
-                    "声明 ui_extension.entry 时必须同时设置 ui_extension.type = micro_app",
+                    f"ui_extension.pages[{page_id}].label 不能为空",
                     stage="VALIDATE",
-                    hint="代码型页面只能通过 SDK `add-ui` 维护"
+                    hint="模块详情页导航标签必须显式声明",
                 )
-            if not UI_ENTRY_RE.match(entry):
-                raise ModuleValidationError(
-                    f"无效的 ui_extension.entry: {entry}",
-                    stage="VALIDATE",
-                    hint="代码型页面入口必须是 `ui:PageClass` 形式"
-                )
-        elif ui_type == "micro_app":
-            raise ModuleValidationError(
-                "ui_extension.type = micro_app 时必须提供 ui_extension.entry",
-                stage="VALIDATE",
-                hint="请使用 SDK CLI `add-ui <name>` 生成并维护代码型页面入口"
-            )
 
-        seen_menu_ids: set[str] = set()
-        for item in ui_ext.detail_menu:
-            menu_id = str(item.id or "").strip()
-            if not MANAGED_NAME_RE.match(menu_id):
-                raise ModuleValidationError(
-                    f"无效的 detail_menu.id: {menu_id or '<empty>'}",
-                    stage="VALIDATE",
-                    hint="详情页数据表入口 ID 只能使用小写字母、数字和下划线，且必须以字母开头"
-                )
-            if menu_id in seen_menu_ids:
-                raise ModuleValidationError(
-                    f"detail_menu.id 重复: {menu_id}",
-                    stage="VALIDATE",
-                    hint="请确保每个详情页数据表入口有唯一的 ID"
-                )
-            seen_menu_ids.add(menu_id)
-
-            expected_entry = f"core:data_table:{menu_id}"
             actual_entry = str(item.entry or "").strip()
-            if actual_entry != expected_entry:
+            match = HOSTED_PAGE_ENTRY_RE.match(actual_entry)
+            if not match:
                 raise ModuleValidationError(
-                    f"detail_menu.entry 不受支持: {actual_entry or '<empty>'}",
+                    f"ui_extension.pages[{page_id}].entry 不受支持: {actual_entry or '<empty>'}",
                     stage="VALIDATE",
-                    hint="详情页扩展入口现在只允许 Core 托管的数据表，且 entry 必须与 id 对齐为 `core:data_table:<id>`"
+                    hint="详情页入口现在只允许 `core:page:<id>` 或 `core:data_table:<id>`",
+                )
+
+            _, target_id = match.groups()
+            if target_id != page_id:
+                raise ModuleValidationError(
+                    f"ui_extension.pages[{page_id}].entry 必须与 id 对齐: {actual_entry}",
+                    stage="VALIDATE",
+                    hint="entry 里的目标 ID 必须与页面声明 ID 保持一致",
                 )
     
     def load_module(

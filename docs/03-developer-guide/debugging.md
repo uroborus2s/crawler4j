@@ -261,7 +261,7 @@ ctx.runtime["devel_mode"] is True
 
 调试 `core:data_table` 时，按这个顺序查:
 
-1. `module.yaml.ui_extension.detail_menu` 是否已有 `core:data_table:<view_id>`
+1. `module.yaml.ui_extension.pages` 是否已有 `core:data_table:<view_id>`
 2. `module_runtime.py` 里是否存在 `declare_ui`
 3. 根 `__init__.py` 是否仍保留 SDK 托管薄壳，没有被手工改坏
 4. `declare_ui` 是否是同步函数

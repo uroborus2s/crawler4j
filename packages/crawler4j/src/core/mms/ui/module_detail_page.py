@@ -22,15 +22,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.mms.models import DetailMenuItem, ModuleInfo, ModuleSource
+from src.core.mms.models import ModuleInfo, ModuleSource, UIPageInfo
 from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.module_config_page import ModuleConfigPage
 from src.core.mms.github_credentials import get_github_credential_store
-from src.core.mms.ui_loader import (
-    ModuleUIAccessDenied,
-    ModuleUILoadError,
-    get_module_custom_page_loader,
-)
+from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
 
 
 class ModuleDetailPage(QWidget):
@@ -48,13 +44,12 @@ class ModuleDetailPage(QWidget):
         ("config", "⚙️", "配置"),
         ("workflows", "⚡", "任务链"),
     ]
-    MICRO_APP_MENU_ID = "__micro_app__"
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self._module: ModuleInfo | None = None
         self._menu_pages: dict[str, QWidget] = {}
-        self._custom_page_loader = get_module_custom_page_loader()
+        self._entry_to_menu_id: dict[str, str] = {}
         self._pending_tasks: set[asyncio.Task] = set()
         self.repo_token_status_label: QLabel | None = None
         self.repo_token_edit: QLineEdit | None = None
@@ -179,11 +174,8 @@ class ModuleDetailPage(QWidget):
         self._module = module
         
         # 更新标题
-        icon = "📦"
-        if module.manifest.ui_extension.nav_item:
-            icon = module.manifest.ui_extension.nav_item.icon
         display = module.manifest.display_name or module.name
-        self.title_label.setText(f"{icon} {display}")
+        self.title_label.setText(f"{self._module_icon(module)} {display}")
         
         # 更新状态
         status_colors = {
@@ -209,6 +201,7 @@ class ModuleDetailPage(QWidget):
         """构建菜单列表。"""
         self.menu_list.clear()
         self._menu_pages.clear()
+        self._entry_to_menu_id.clear()
         
         # 清除旧页面
         while self.content_stack.count() > 0:
@@ -229,40 +222,24 @@ class ModuleDetailPage(QWidget):
             self._menu_pages[menu_id] = page
             self.content_stack.addWidget(page)
         
-        # 自定义菜单
+        # 模块宿主页入口
         if self._module:
-            custom_items: list[DetailMenuItem] = []
-
-            ui_ext = self._module.manifest.ui_extension
-            root_entry = str(ui_ext.entry or "").strip()
-            if ui_ext.type == "micro_app" and root_entry:
-                nav_item = ui_ext.nav_item
-                custom_items.append(
-                    DetailMenuItem(
-                        id=self.MICRO_APP_MENU_ID,
-                        icon=nav_item.icon if nav_item else "🧩",
-                        label=nav_item.label if nav_item and nav_item.label else "模块页面",
-                        entry=root_entry,
-                    )
-                )
-
-            custom_items.extend(self._module.manifest.ui_extension.detail_menu)
-
-            if custom_items:
+            hosted_pages = list(self._module.manifest.ui_extension.pages)
+            if hosted_pages:
                 # 分隔符
                 separator = QListWidgetItem("────────")
                 separator.setData(Qt.ItemDataRole.UserRole, "__sep__")
                 separator.setFlags(separator.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 self.menu_list.addItem(separator)
                 
-                for menu_item in custom_items:
-                    item = QListWidgetItem(f"{menu_item.icon} {menu_item.label}")
-                    item.setData(Qt.ItemDataRole.UserRole, menu_item.id)
+                for page_info in hosted_pages:
+                    item = QListWidgetItem(f"{page_info.icon} {page_info.label}")
+                    item.setData(Qt.ItemDataRole.UserRole, page_info.id)
                     self.menu_list.addItem(item)
-                    
-                    # 创建自定义页面
-                    page = self._create_custom_page(menu_item)
-                    self._menu_pages[menu_item.id] = page
+
+                    page = self._create_hosted_page(page_info)
+                    self._entry_to_menu_id[page_info.entry] = page_info.id
+                    self._menu_pages[page_info.id] = page
                     self.content_stack.addWidget(page)
     
     def _create_fixed_page(self, menu_id: str) -> QWidget:
@@ -274,6 +251,13 @@ class ModuleDetailPage(QWidget):
         elif menu_id == "workflows":
             return self._create_workflows_page()
         return QWidget()
+
+    @staticmethod
+    def _module_icon(module: ModuleInfo) -> str:
+        pages = list(module.manifest.ui_extension.pages)
+        if pages:
+            return str(pages[0].icon or "📦").strip() or "📦"
+        return "📦"
     
     def _create_info_page(self) -> QWidget:
         """创建基本信息页面。"""
@@ -487,43 +471,44 @@ class ModuleDetailPage(QWidget):
         
         return page
 
-    def _create_custom_page(self, menu_item) -> QWidget:
-        """创建自定义页面（动态加载模块 UI）。"""
+    def _create_hosted_page(self, page_info: UIPageInfo) -> QWidget:
+        """创建宿主页入口页面。"""
         if not self._module:
             return QWidget()
 
-        if isinstance(menu_item.entry, str) and menu_item.entry.startswith("core:data_table:"):
-            view_id = menu_item.entry.split(":", 2)[-1].strip()
-            if not view_id:
-                view_id = menu_item.id
+        entry = str(page_info.entry or "").strip()
+        if entry.startswith("core:data_table:"):
+            view_id = entry.split(":", 2)[-1].strip() or page_info.id
 
             from src.core.mms.ui.module_data_table_page import ModuleDataTablePage
 
-            return ModuleDataTablePage(self._module.name, view_id)
+            return ModuleDataTablePage(self._module.name, view_id, module_info=self._module)
+        if entry.startswith("core:page:"):
+            page_id = entry.split(":", 2)[-1].strip() or page_info.id
+            return ManagedPageRenderer(
+                self._module.name,
+                page_id,
+                module_info=self._module,
+                open_entry_callback=self._open_entry,
+            )
+        return self._create_custom_page_placeholder(page_info, "入口不受支持", entry)
 
-        try:
-            return self._custom_page_loader.load_widget(self._module, menu_item.entry)
-        except ModuleUIAccessDenied as exc:
-            return self._create_custom_page_placeholder(menu_item, "未通过 trust gate", str(exc))
-        except ModuleUILoadError as exc:
-            return self._create_custom_page_placeholder(menu_item, "模块 UI 加载失败", str(exc))
-
-    def _create_custom_page_placeholder(self, menu_item, title: str, message: str) -> QWidget:
+    def _create_custom_page_placeholder(self, page_info: UIPageInfo, title: str, message: str) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        icon = QLabel(menu_item.icon)
+        icon = QLabel(page_info.icon)
         icon.setStyleSheet("font-size: 48px;")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon)
         
-        label = QLabel(f"{menu_item.label}\n\n{title}")
+        label = QLabel(f"{page_info.label}\n\n{title}")
         label.setStyleSheet("color: rgba(255,255,255,0.75); font-size: 14px;")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label)
 
-        detail = QLabel(f"{message}\n\n入口: {menu_item.entry}")
+        detail = QLabel(f"{message}\n\n入口: {page_info.entry}")
         detail.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 12px;")
         detail.setWordWrap(True)
         detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -553,6 +538,13 @@ class ModuleDetailPage(QWidget):
             if item and item.data(Qt.ItemDataRole.UserRole) == menu_id:
                 self.menu_list.setCurrentRow(row)
                 break
+
+    def _open_entry(self, entry: str) -> None:
+        menu_id = self._entry_to_menu_id.get(str(entry or "").strip())
+        if not menu_id:
+            QMessageBox.warning(self, "页面跳转失败", f"未找到宿主页入口: {entry}")
+            return
+        self._select_menu(menu_id)
 
     def _remove_dev_link(self):
         if not self._module or self._module.source != ModuleSource.DEV_LINK:

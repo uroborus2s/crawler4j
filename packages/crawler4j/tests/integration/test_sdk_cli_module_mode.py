@@ -65,7 +65,7 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
 
     page_result = _run_cli("page", "create", "dashboard", cwd=target)
     assert page_result.returncode == 0, page_result.stderr
-    assert (target / "ui" / "dashboard.py").exists()
+    assert not (target / "ui").exists()
 
     table_result = _run_cli("data-table", "create", "accounts", cwd=target)
     assert table_result.returncode == 0, table_result.stderr
@@ -99,8 +99,20 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
         "repo": "demo/demo_model",
         "allow_prerelease": False,
     }
-    assert manifest["ui_extension"]["entry"] == "ui:DashboardPage"
-    assert manifest["ui_extension"]["detail_menu"][0]["entry"] == "core:data_table:accounts"
+    assert manifest["ui_extension"]["pages"] == [
+        {
+            "id": "dashboard",
+            "label": "Dashboard",
+            "icon": "📄",
+            "entry": "core:page:dashboard",
+        },
+        {
+            "id": "accounts",
+            "label": "Accounts",
+            "icon": "📋",
+            "entry": "core:data_table:accounts",
+        },
+    ]
     assert [item["name"] for item in manifest["workflows"]] == ["main_workflow", "repair_orders"]
 
 

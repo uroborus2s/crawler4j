@@ -6,7 +6,7 @@
 **主要读者：** 技术负责人 | 开发 | QA | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | 当前文档治理缺口审计  
 **下游输出：** `docs/04-project-development/05-development-process/execution-log.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/07-release-delivery/release-notes.md`  
-**关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-023`, `TASK-024`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`, `CR-004`, `CR-008`, `CR-009`, `CR-010`
+**关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-023`, `TASK-024`, `TASK-025`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`, `CR-004`, `CR-008`, `CR-009`, `CR-010`, `CR-011`
 **最后更新：** 2026-04-22
 
 ## 1. 实施目标
@@ -15,6 +15,7 @@
 - 已完成波次优先修复根入口、关键模块运行时和版本治理；Wave 14 已补齐固定环境池 Service Job 的宿主等待队列能力。
 - 在不改变 Core 当前模块加载契约的前提下，为模块开发链路补齐“根 `__init__.py` 自动托管”的最小演进方案。
 - 在不改动现有 macOS Sparkle 线路的前提下，为 Windows 桌面宿主补齐正式安装器与自更新主方案。
+- 已完成把模块 UI 从 `micro_app` / `ui:*` 切换到 hosted page V1；模块详情页、SDK CLI、测试夹具与开发者文档已统一到 `ui_extension.pages[] + ui.declare_page/ui.declare_data_table` 契约。
 
 ## 2. 交付波次
 
@@ -35,6 +36,7 @@
 | Wave 13 | `TASK-022` | `REQ-008`、`API-005`、模块数据持久化现状 | 模块审计事件独立存储、事件工具能力与契约文档同步 | 已完成：`module_audit_events`、`db.append_event`、`db.query_events` 与对应测试/文档已落地 |
 | Wave 14 | `TASK-023` | `REQ-009`、`API-007`、`atm-resource-pool-queue-design.md` | 固定环境池 Service Job 的宿主等待队列、资源池资格卡片、FIFO 补位与 SDK helper | 已完成：宿主不再把固定环境池场景的“当前轮没命中”直接判失败，模块资源池资格同步、测试与文档同步完成 |
 | Wave 15 | `TASK-024` | `CR-010`、当前 `package-desktop`、`UpdateService`、Windows 发布缺口 | Windows `PyInstaller onedir + Velopack` 发布与宿主自更新闭环 | 已完成：新增 Windows Velopack 发布脚本、宿主更新后端分派、README/运维/测试计划同步 |
+| Wave 16 | `TASK-025` | `CR-011`、`API-008`、`module-hosted-ui-framework.md` | Hosted module UI V1：`ui_extension.pages[]`、`ui.declare_page`、宿主页渲染器、SDK CLI/测试/文档同步 | 已完成：宿主不再执行外部 `PyQt6` 页面类，详情页/CLI/回归夹具已统一切到 hosted page V1 |
 
 ## 3. 风险与应对
 
@@ -56,6 +58,7 @@
 - Wave 10 已完成：ModuleAssembler 与 Shim 落地并经全量测试验证
 - Wave 9 后续回归已补强：`core:data_table` 页面会在刷新时重放 `declare_ui`，并验证 `create_handler` / `update_handler` 与 DevLink 调试上下文
 - Wave 14 额外需要验证固定环境池 Service Job 的“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、黑号停发号与环境删除后的资格卡片级联清理
+- Wave 16 额外需要验证 hosted page renderer、模块详情页入口跳转、CLI 骨架生成、`check full` hosted UI gate，以及 integration/acceptance 对新契约的覆盖
 
 ## 5. 任务表
 
@@ -71,17 +74,20 @@
 | `TASK-021` | 建立 ATM 信号驱动的结构化确认面板闭环 | `TaskSignal`、ATM 详情页、任务快照持久化 | `wait_for_confirmation` 信号可展示结构化内容，客户端确认后调用既有确认服务完成任务收尾 | P1 | 已完成 |
 | `TASK-023` | 建立 ATM 固定环境池 Service Job 等待队列与资源池资格分配闭环 | `execution_runner`、`controller`、REM `env_metadata` 资格卡片、SDK helper、运行模板/UI 文案 | 固定环境池场景支持“运行中 + 等待中 = 目标并发”，宿主只从当前模块资源池可分配工位里 FIFO 补位，黑号先停发号再销毁 | P1 | 已完成 |
 | `TASK-024` | 建立 Windows `PyInstaller onedir + Velopack` 正式发布与宿主自更新闭环 | Windows 发布脚本、宿主更新桥接、README/运维/测试计划同步 | `uv run package-windows-release` 能产出 Velopack 安装器/更新目录，宿主 `检查更新` 在 Windows 安装态可用 | P0 | 已完成 |
+| `TASK-025` | 建立 hosted module UI V1 并删掉旧 `micro_app/ui:*` 路径 | hosted page runtime capability、schema 存储、`ManagedPageRenderer`、SDK CLI/开发者文档同步 | 模块详情页只消费 `core:page` / `core:data_table`，CLI 不再生成 `ui/` 页面类，相关回归通过 | P0 | 已完成 |
 
 ## 6. 阶段建议
 
 - 当前登记阶段：`IMPLEMENTATION`
-- 当前活动波次：Wave 15 `TASK-024` 已实现并通过本地验证，待 PR 收口
-- 当前首项：继续 Windows 真机打包/签名与真实站点 E2E / 发布收口
+- 当前活动波次：Wave 16 `TASK-025` 已实现并通过本地验证，待 PR 收口
+- 当前首项：继续 hosted UI PR 收口、真实业务模块接入验证，以及真实站点 E2E / 发布收口
 
 ## 7. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 新增 Wave 16 / `TASK-025`，为模块 UI 建立 hosted page V1 并移除旧 `micro_app/ui:*` 路径 | Codex |
+| 2026-04-22 | 完成 Wave 16 / `TASK-025` 实现与本地回归验证 | Codex |
 | 2026-04-22 | 新增 Wave 15 / `TASK-024`，为 Windows 建立 `PyInstaller onedir + Velopack` 正式发布与宿主自更新闭环 | Codex |
 | 2026-04-22 | 完成 Wave 15 / `TASK-024` 实现与本地回归验证 | Codex |
 | 2026-04-19 | 新增 Wave 14 / `TASK-023`，为固定环境池 Service Job 补宿主等待队列与资源池资格分配能力 | Codex |

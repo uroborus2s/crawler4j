@@ -205,7 +205,7 @@ uv run crawler4j task create login
 # 创建工作流：写 workflows/<name>.py，并同步更新 module.yaml.workflows
 uv run crawler4j workflow create sync_orders
 
-# 创建代码型页面：写 ui/<name>.py，并设置 ui_extension.entry
+# 创建宿主页：写 module_runtime.py 中的 schema / load handler，并注册 ui_extension.pages[]
 uv run crawler4j page create dashboard
 
 # 创建受控数据表：注册 core:data_table:<view_id>，并补 declare_ui 骨架
@@ -238,7 +238,7 @@ uv run crawler4j host debug config
 - `module`：初始化模块项目，或维护 `repo / version / default-workflow`
 - `task`：管理 `tasks/` 里的 `TaskScript`
 - `workflow`：管理 `workflows/` 和 `module.yaml.workflows`
-- `page`：管理代码型页面和 `ui_extension.entry`
+- `page`：管理 hosted page 和 `ui_extension.pages[]`
 - `data-table`：管理受控 `core:data_table:<id>` 入口
 - `env-selector`：管理 `module_runtime.py` 里的环境选择策略函数
 - `config`：管理 `module.yaml.config_defaults`

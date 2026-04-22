@@ -4,11 +4,11 @@ import pytest
 
 from src.core.mms.models import (
     ConfigDefaultsInfo,
-    DetailMenuItem,
     ModuleManifest,
     ModuleSource,
     ModuleStatus,
     UpgradeSourceInfo,
+    UIPageInfo,
     UIExtensionInfo,
     WorkflowInfo,
 )
@@ -35,15 +35,19 @@ class TestModuleManifest:
                 }
             ],
             "ui_extension": {
-                "type": "micro_app",
-                "entry": "ui:AccountConfigPage",
-                "trusted": True,
-                "detail_menu": [
+                "pages": [
+                    {
+                        "id": "dashboard",
+                        "icon": "📊",
+                        "label": "今日运营看板",
+                        "entry": "core:page:dashboard",
+                    },
                     {
                         "id": "accounts",
+                        "icon": "📋",
                         "label": "账号管理",
                         "entry": "core:data_table:accounts",
-                    }
+                    },
                 ],
             },
             "config_defaults": {
@@ -65,10 +69,9 @@ class TestModuleManifest:
         assert len(manifest.workflows) == 1
         assert manifest.workflows[0].name == "login_flow"
         assert manifest.upgrade_source.repo == "example/test_module"
-        assert manifest.ui_extension.type == "micro_app"
-        assert manifest.ui_extension.trusted is True
-        assert manifest.ui_extension.entry == "ui:AccountConfigPage"
-        assert manifest.ui_extension.detail_menu[0].entry == "core:data_table:accounts"
+        assert [page.id for page in manifest.ui_extension.pages] == ["dashboard", "accounts"]
+        assert manifest.ui_extension.pages[0].entry == "core:page:dashboard"
+        assert manifest.ui_extension.pages[1].entry == "core:data_table:accounts"
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
         assert manifest.config_defaults.workflows == {"login_flow": {"headless": False}}
     
@@ -79,10 +82,20 @@ class TestModuleManifest:
             upgrade_source=UpgradeSourceInfo(repo="example/test_module"),
             workflows=[WorkflowInfo(name="flow1")],
             ui_extension=UIExtensionInfo(
-                type="micro_app",
-                entry="ui:AccountConfigPage",
-                trusted=True,
-                detail_menu=[DetailMenuItem(id="accounts", entry="core:data_table:accounts")],
+                pages=[
+                    UIPageInfo(
+                        id="dashboard",
+                        icon="📊",
+                        label="今日运营看板",
+                        entry="core:page:dashboard",
+                    ),
+                    UIPageInfo(
+                        id="accounts",
+                        icon="📋",
+                        label="账号管理",
+                        entry="core:data_table:accounts",
+                    ),
+                ],
             ),
             config_defaults=ConfigDefaultsInfo(
                 module={"base_url": "https://example.com"},
@@ -99,9 +112,20 @@ class TestModuleManifest:
             "repo": "example/test_module",
             "allow_prerelease": False,
         }
-        assert data["ui_extension"]["trusted"] is True
-        assert data["ui_extension"]["entry"] == "ui:AccountConfigPage"
-        assert data["ui_extension"]["detail_menu"][0]["entry"] == "core:data_table:accounts"
+        assert data["ui_extension"]["pages"] == [
+            {
+                "id": "dashboard",
+                "icon": "📊",
+                "label": "今日运营看板",
+                "entry": "core:page:dashboard",
+            },
+            {
+                "id": "accounts",
+                "icon": "📋",
+                "label": "账号管理",
+                "entry": "core:data_table:accounts",
+            },
+        ]
         assert data["config_defaults"] == {
             "module": {"base_url": "https://example.com"},
             "workflows": {"flow1": {"headless": False}},
@@ -223,6 +247,32 @@ config_defaults:
 
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
         assert manifest.config_defaults.workflows == {"default": {"headless": False}}
+
+    def test_parse_manifest_rejects_legacy_ui_extension_fields(self, tmp_path):
+        from src.core.mms.models import ModuleParseError
+
+        module_dir = tmp_path / "test_module"
+        module_dir.mkdir()
+        (module_dir / "module.yaml").write_text(
+            """
+name: test_module
+version: 1.0.0
+upgrade_source:
+  type: github_release
+  repo: example/test_module
+ui_extension:
+  type: micro_app
+  entry: ui:LegacyPage
+""".strip(),
+            encoding="utf-8",
+        )
+
+        scanner = ModuleScanner(scan_paths=[tmp_path])
+
+        with pytest.raises(ModuleParseError) as exc_info:
+            scanner.parse_manifest(module_dir)
+
+        assert "ui_extension" in str(exc_info.value)
     
     def test_validate_missing_name(self, tmp_path):
         """测试校验缺少 name。"""
@@ -310,7 +360,7 @@ upgrade_source:
         assert module_info.status == ModuleStatus.INVALID
         assert module_info.error != ""
 
-    def test_validate_rejects_legacy_config_schema_and_unmanaged_detail_menu(self, tmp_path):
+    def test_validate_rejects_legacy_config_schema_and_unmanaged_page_entry(self, tmp_path):
         from src.core.mms.models import ModuleValidationError
 
         (tmp_path / "config_schema.json").write_text("{}", encoding="utf-8")
@@ -318,7 +368,13 @@ upgrade_source:
             name="demo_module",
             upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
             ui_extension=UIExtensionInfo(
-                detail_menu=[DetailMenuItem(id="custom_page", entry="ui:CustomPage")],
+                pages=[
+                    UIPageInfo(
+                        id="custom_page",
+                        label="自定义页面",
+                        entry="ui:CustomPage",
+                    )
+                ],
             ),
         )
         scanner = ModuleScanner(scan_paths=[tmp_path])
@@ -326,7 +382,7 @@ upgrade_source:
         with pytest.raises(ModuleValidationError) as exc_info:
             scanner.validate(manifest, tmp_path)
 
-        assert "config_schema.json" in str(exc_info.value) or "detail_menu.entry" in str(exc_info.value)
+        assert "config_schema.json" in str(exc_info.value) or "ui_extension.pages" in str(exc_info.value)
 
     def test_validate_rejects_unknown_workflow_in_config_defaults(self, tmp_path):
         from src.core.mms.models import ModuleValidationError

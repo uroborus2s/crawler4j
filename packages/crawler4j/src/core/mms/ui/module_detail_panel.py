@@ -228,8 +228,8 @@ class ModuleDetailPanel(QFrame):
         
         # 更新标题
         icon = "📦"
-        if module.manifest.ui_extension.nav_item:
-            icon = module.manifest.ui_extension.nav_item.icon
+        if module.manifest.ui_extension.pages:
+            icon = str(module.manifest.ui_extension.pages[0].icon or "📦").strip() or "📦"
         display = module.manifest.display_name or module.name
         self.title_label.setText(f"{icon} {display}")
         

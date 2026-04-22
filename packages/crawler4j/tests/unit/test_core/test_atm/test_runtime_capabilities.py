@@ -64,6 +64,8 @@ def test_runtime_tools_register_expected_surface():
     assert caps.tools.has_tool("env.mark_resource_pool_ineligible") is True
     assert caps.tools.has_tool("env.remove_resource_pool") is True
     assert caps.tools.has_tool("env.replace_resource_pool_snapshot") is True
+    assert caps.tools.has_tool("ui.declare_page") is True
+    assert caps.tools.has_tool("ui.get_page") is True
     assert caps.tools.has_tool("ui.declare_data_table") is True
     assert caps.tools.has_tool("ui.get_data_table") is True
     assert caps.tools.has_tool("captcha.match_slider") is True
@@ -302,8 +304,30 @@ async def test_env_resource_pool_tools_manage_metadata_cards(monkeypatch):
     assert (13, "scheduler.resource_pool", "demo_module:bound_account_ready") not in store
 
 
-def test_ui_tools_persist_data_table_meta(monkeypatch):
+def test_ui_tools_persist_page_and_data_table_meta(monkeypatch):
     caps = build_runtime_capabilities("demo_module")
+    assert caps.tools.call(
+        "ui.declare_page",
+        page_id="dashboard",
+        schema={
+            "type": "Page",
+            "load_handler": "load_dashboard_page",
+            "children": [
+                {"type": "Text", "style": "title", "binding": "title"},
+                {
+                    "type": "Button",
+                    "label": "打开账号管理",
+                    "action": {"type": "open_page", "entry": "core:data_table:accounts"},
+                },
+                {
+                    "type": "DataTable",
+                    "title": "统计明细",
+                    "binding": "rows",
+                    "columns": [{"key": "name", "label": "名称"}],
+                },
+            ],
+        },
+    )
     assert caps.tools.call(
         "ui.declare_data_table",
         view_id="accounts",
@@ -314,7 +338,18 @@ def test_ui_tools_persist_data_table_meta(monkeypatch):
         },
     )
 
+    page = caps.tools.call("ui.get_page", page_id="dashboard")
     meta = caps.tools.call("ui.get_data_table", view_id="accounts")
+    assert page["load_handler"] == "load_dashboard_page"
+    assert page["children"][0] == {
+        "type": "Text",
+        "style": "title",
+        "binding": "title",
+    }
+    assert page["children"][1]["action"] == {
+        "type": "open_page",
+        "entry": "core:data_table:accounts",
+    }
     assert meta["title"] == "示例账号"
     assert meta["dataset"] == "accounts"
     assert meta["columns"] == [{"key": "phone", "label": "手机号"}]
@@ -322,6 +357,36 @@ def test_ui_tools_persist_data_table_meta(monkeypatch):
 
 def test_ui_tools_reject_unmanaged_schema_fields():
     caps = build_runtime_capabilities("demo_module")
+
+    with pytest.raises(ValueError):
+        caps.tools.call(
+            "ui.declare_page",
+            page_id="Dashboard",
+            schema={"type": "Page", "children": []},
+        )
+
+    with pytest.raises(ValueError):
+        caps.tools.call(
+            "ui.declare_page",
+            page_id="dashboard",
+            schema={"type": "Section", "children": []},
+        )
+
+    with pytest.raises(ValueError):
+        caps.tools.call(
+            "ui.declare_page",
+            page_id="dashboard",
+            schema={
+                "type": "Page",
+                "children": [
+                    {
+                        "type": "Button",
+                        "label": "打开",
+                        "action": {"type": "open_page", "entry": "ui:LegacyPage"},
+                    }
+                ],
+            },
+        )
 
     with pytest.raises(ValueError):
         caps.tools.call(

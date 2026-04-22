@@ -20,6 +20,7 @@ from src.core.mms.models import (
     ModuleParseError,
     ModuleSource,
     ModuleStatus,
+    UIPageInfo,
     UpgradeSourceInfo,
     ModuleValidationError,
     UIExtensionInfo,
@@ -50,6 +51,7 @@ __all__ = [
     "ModuleStatus",
     "WorkflowInfo",
     "DevModuleLink",
+    "UIPageInfo",
     "UIExtensionInfo",
     "UpgradeSourceInfo",
     # 错误

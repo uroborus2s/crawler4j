@@ -319,6 +319,27 @@ class ModuleDataStore:
             )
         return True
 
+    def _write_page_row(self, module_name: str, page_id: str, schema: dict[str, Any]) -> bool:
+        now = int(time.time())
+        with get_connection(DATA_DB) as conn:
+            conn.execute(
+                """
+                INSERT INTO module_pages (module_name, page_id, schema_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(module_name, page_id) DO UPDATE SET
+                    schema_json = excluded.schema_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    module_name,
+                    page_id,
+                    json.dumps(schema, ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            )
+        return True
+
     def _read_view_row(self, module_name: str, view_id: str) -> dict[str, Any] | None:
         with get_connection(DATA_DB) as conn:
             row = conn.execute(
@@ -328,6 +349,20 @@ class ModuleDataStore:
                 WHERE module_name = ? AND view_id = ?
                 """,
                 (module_name, view_id),
+            ).fetchone()
+        if not row:
+            return None
+        return _normalize_schema(json.loads(row["schema_json"]))
+
+    def _read_page_row(self, module_name: str, page_id: str) -> dict[str, Any] | None:
+        with get_connection(DATA_DB) as conn:
+            row = conn.execute(
+                """
+                SELECT schema_json
+                FROM module_pages
+                WHERE module_name = ? AND page_id = ?
+                """,
+                (module_name, page_id),
             ).fetchone()
         if not row:
             return None
@@ -379,8 +414,32 @@ class ModuleDataStore:
         schema = self._read_view_row(module_name, view_id)
         return schema if schema is not None else {}
 
+    def read_page_schema(self, module_name: str, page_id: str) -> dict[str, Any]:
+        schema = self._read_page_row(module_name, page_id)
+        return schema if schema is not None else {}
+
     def write_data_table_schema(self, module_name: str, view_id: str, schema: dict[str, Any]) -> bool:
         return self._write_view_row(module_name, view_id, _normalize_schema(schema))
+
+    def write_page_schema(self, module_name: str, page_id: str, schema: dict[str, Any]) -> bool:
+        return self._write_page_row(module_name, page_id, _normalize_schema(schema))
+
+    def clear_declared_ui(self, module_name: str) -> bool:
+        changed = False
+        with get_connection(DATA_DB) as conn:
+            cursor = conn.execute(
+                "DELETE FROM module_data_table_views WHERE module_name = ?",
+                (module_name,),
+            )
+            changed = bool(cursor.rowcount) or changed
+
+            cursor = conn.execute(
+                "DELETE FROM module_pages WHERE module_name = ?",
+                (module_name,),
+            )
+            changed = bool(cursor.rowcount) or changed
+
+        return changed
 
     def clear_module_data(self, module_name: str) -> bool:
         changed = False
@@ -406,6 +465,12 @@ class ModuleDataStore:
 
             cursor = conn.execute(
                 "DELETE FROM module_data_table_views WHERE module_name = ?",
+                (module_name,),
+            )
+            changed = bool(cursor.rowcount) or changed
+
+            cursor = conn.execute(
+                "DELETE FROM module_pages WHERE module_name = ?",
                 (module_name,),
             )
             changed = bool(cursor.rowcount) or changed

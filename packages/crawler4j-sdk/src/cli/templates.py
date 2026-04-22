@@ -83,8 +83,7 @@ MODEL_PROJECT_README = '''# {display_name}
 - `module.yaml`: 模块清单与能力声明。
 - `tasks/`: 原子任务脚本。
 - `workflows/`: 工作流编排。
-- `ui/`: 代码型页面组件。
-- `module_runtime.py`: 环境选择器、生命周期 Hook、受控数据表声明。
+- `module_runtime.py`: 环境选择器、生命周期 Hook、宿主页 / 受控数据表声明。
 
 ## 常用命令
 
@@ -98,7 +97,7 @@ uv run crawler4j task create <name>
 # 创建工作流
 uv run crawler4j workflow create <name>
 
-# 创建代码型页面
+# 创建宿主页
 uv run crawler4j page create dashboard
 
 # 注册受控数据表
@@ -152,66 +151,6 @@ async def test_example_task_logic():
     assert result.success is True
     assert len(ctx.captured_data) == 1
 '''
-
-MODEL_UI_PAGES_TEMPLATE = '''"""界面组件: {display_name}
-
-{description}
-"""
-
-from __future__ import annotations
-
-from typing import Any
-
-try:
-    from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
-except ModuleNotFoundError as exc:
-    _PYQT_IMPORT_ERROR = exc
-
-    class _PyQt6Stub:
-        def __init__(self, *args, **kwargs):
-            raise RuntimeError(
-                "PyQt6 is required to instantiate code pages. Install the host GUI dependencies first."
-            ) from _PYQT_IMPORT_ERROR
-
-    QWidget = _PyQt6Stub
-    QVBoxLayout = _PyQt6Stub
-    QLabel = _PyQt6Stub
-    QPushButton = _PyQt6Stub
-else:
-    _PYQT_IMPORT_ERROR = None
-
-
-class {class_name}(QWidget):
-    """{display_name} 页面"""
-
-    def __init__(self, module: Any | None = None, parent=None):
-        super().__init__(parent)
-        self.module = module
-        self._init_ui()
-
-    def _resolve_title(self) -> str:
-        manifest = getattr(self.module, "manifest", None)
-        display_name = str(getattr(manifest, "display_name", "") or "").strip()
-        if display_name:
-            return display_name
-        module_name = str(getattr(self.module, "name", "") or "").strip()
-        if module_name:
-            return module_name
-        return self.__class__.__name__
-
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        self.label = QLabel(f"欢迎使用 {{self._resolve_title()}}")
-        self.btn = QPushButton("刷新数据")
-        self.btn.clicked.connect(self.on_refresh)
-        
-        layout.addWidget(self.label)
-        layout.addWidget(self.btn)
-
-    def on_refresh(self):
-        self.label.setText(f"{{self._resolve_title()}} 页面已刷新")
-'''
-
 MODEL_MODULE_INIT = '''"""{display_name} 模块入口。
 
 本文件由 SDK 自动托管，不建议手动修改。
@@ -294,7 +233,8 @@ def __getattr__(name: str):
 
 MODEL_RUNTIME_TEMPLATE = '''"""{display_name} 模块自定义运行时扩展。
 
-本文件现在是模块标准组成部分，用于声明环境选择器、生命周期 Hooks、手动注册组件或覆盖默认行为。
+本文件现在是模块标准组成部分，用于声明环境选择器、生命周期 Hooks、
+宿主页 schema、托管数据表 schema，以及少量同步加载 / CRUD hook。
 """
 
 import random
@@ -374,9 +314,10 @@ async def on_cleanup(context: TaskContext):
 
 
 def declare_ui(context: TaskContext):
-    """声明受控 UI 元数据。
+    """声明 Hosted UI 元数据。
 
-    `crawler4j data-table create <view_id>` 会把数据表声明插到这个函数里。
+    `crawler4j page create <page_id>` 和 `crawler4j data-table create <view_id>`
+    会把宿主页 / 受控数据表声明插到这个函数里。
     """
     # SDK-DATA-TABLES
     return None
@@ -458,4 +399,61 @@ def _declare_{view_id}_table(context: TaskContext):
             ],
         }},
     )
+'''
+
+PAGE_HELPER_TEMPLATE = '''
+
+def _declare_{page_id}_page(context: TaskContext):
+    """声明 `{page_id}` 宿主页。"""
+    if not context.tools or not context.tools.has_tool("ui.declare_page"):
+        return None
+
+    return context.tools.call(
+        "ui.declare_page",
+        page_id="{page_id}",
+        schema=build_{page_id}_page_schema(),
+    )
+
+
+def build_{page_id}_page_schema() -> dict:
+    """构造 `{page_id}` 宿主页 schema。"""
+    return {{
+        "type": "Page",
+        "title": "{display_name}",
+        "load_handler": "load_{page_id}_page",
+        "layout": {{"direction": "column", "gap": 16}},
+        "children": [
+            {{
+                "type": "Section",
+                "variant": "plain",
+                "children": [
+                    {{"type": "Text", "style": "title", "text": "{display_name}"}},
+                    {{"type": "Text", "style": "subtitle", "text": "{description}"}},
+                    {{"type": "Button", "label": "刷新", "action": {{"type": "reload"}}}},
+                ],
+            }},
+            {{
+                "type": "Section",
+                "title": "页面状态",
+                "variant": "card",
+                "children": [
+                    {{"type": "Text", "style": "body", "binding": "summary"}},
+                    {{"type": "Text", "style": "meta", "binding": "updated_at"}},
+                ],
+            }},
+        ],
+    }}
+
+
+def load_{page_id}_page(
+    context: TaskContext,
+    page_id: str,
+    params: dict | None = None,
+) -> dict:
+    """同步加载 `{page_id}` 页面数据。"""
+    del page_id, params
+    return {{
+        "summary": "{display_name} 页面已由 hosted page V1 加载。",
+        "updated_at": "待接入真实数据",
+    }}
 '''

@@ -402,4 +402,17 @@ def _init_data_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_module_data_views_module
             ON module_data_table_views(module_name);
+
+            -- 模块宿主页 schema
+            CREATE TABLE IF NOT EXISTS module_pages (
+                module_name TEXT NOT NULL,
+                page_id TEXT NOT NULL,
+                schema_json TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (module_name, page_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_module_pages_module
+            ON module_pages(module_name);
         """)

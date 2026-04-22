@@ -43,7 +43,7 @@ ctx.logger.info(
 - `upgrade_source.repo` 不是 `owner/repo`
 - `workflows` 为空
 - 还残留 `sdk_version_range`
-- `ui_extension.entry` 或 `detail_menu.entry` 格式不对
+- `ui_extension.pages[].entry` 格式不对
 
 直接确认:
 
@@ -179,7 +179,7 @@ if ctx.page is None:
 
 直接确认顺序:
 
-1. `module.yaml.ui_extension.detail_menu` 里是否有 `core:data_table:<view_id>`
+1. `module.yaml.ui_extension.pages` 里是否有 `core:data_table:<view_id>`
 2. `module_runtime.py` 里是否存在 `declare_ui`
 3. 根 `__init__.py` 是否仍是 SDK 托管薄壳，没有被手工改坏
 4. `declare_ui` 是否是同步函数

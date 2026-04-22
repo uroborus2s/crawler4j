@@ -34,3 +34,5 @@
   状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`REQ-009`, `CR-009`
 - `TASK-024-add-windows-velopack-release-pipeline` TASK-024 为 Windows 建立 PyInstaller onedir + Velopack 发布与宿主自更新闭环
   状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-001`, `REQ-004`, `NFR-003`, `CR-010`
+- `TASK-025-implement-hosted-module-ui-framework` TASK-025 实现模块宿主管理页框架 V1
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-002`, `REQ-003`, `API-008`, `CR-011`

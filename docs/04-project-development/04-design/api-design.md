@@ -43,7 +43,7 @@
 | 当前风险 | 真实站点 E2E 仍未覆盖；动态加载的模块扩展点仍需依赖回归测试保持稳定 |
 | 关联项 | `TASK-003`, `TASK-013` |
 
-## `API-008` Hosted Module UI Contract（V1 设计已定，尚未落地）
+## `API-008` Hosted Module UI Contract（V1 已实现）
 
 | 项目 | 内容 |
 |---|---|
@@ -52,13 +52,13 @@
 | 模块 UI 声明入口 | `module_runtime.py` 中的 `declare_ui(context)` |
 | 新能力入口 | `context.tools.call("ui.declare_page", ...)`、`context.tools.call("ui.declare_data_table", ...)` |
 | 宿主公开控件 | `Page`、`Section`、`Text`、`Button`、`DataTable` |
-| `DataTable` V1 范围 | `readonly` 与 `managed_crud` 两种模式；字段类型最少支持 `text`、`select`、`secret` |
+| `DataTable` V1 范围 | `readonly` 与 `managed_crud` 两种模式；字段类型最少支持 `text`、`number`、`int`、`bool`、`select` |
 | 宿主动作范围 | `Button.action` 第一版只开放 `reload`、`open_page` |
 | 明确删除 | `micro_app`、`ui:*`、代码型页面脚手架、trust gate / allowlist / `trusted` |
 | 设计输入 | `module-hosted-ui-framework.md` |
-| 当前验证基线 | `ctrip_crawler` 的 dashboard + 3 张宿主管理表可以被最小控件集完整承载 |
-| 当前状态 | 设计已批准，等待进入实施波次 |
-| 关联项 | `CR-011` |
+| 当前验证基线 | Core / SDK / integration / acceptance 已跑通 hosted page V1 定向回归；模块详情页、CLI 和 schema gate 已统一到新契约 |
+| 当前状态 | 已本地实现并通过定向验证；PR 收口与真实业务模块接入验证待继续推进 |
+| 关联项 | `CR-011`, `TASK-025` |
 
 ## `API-005` Module Config / Runtime / Data Contract
 
@@ -154,6 +154,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 将 `API-008` 从“设计已定未落地”更新为 hosted page V1 已本地实现：`ui_extension.pages[]`、`ui.declare_page`、宿主页渲染器与 SDK CLI 已同步完成 | Codex |
 | 2026-04-22 | 新增 `API-008`，登记模块宿主管理页与最小化 UI 框架的目标契约 | Codex |
 | 2026-04-22 | 补记 root app 在 Windows 打包态的 Velopack 启动前置动作，并将 Windows `crawler4j.update.json` 与统一 `UpdateService` 后端分派纳入发布元数据契约 | Codex |
 | 2026-03-26 | 初始接口与契约设计摘要 | Codex |

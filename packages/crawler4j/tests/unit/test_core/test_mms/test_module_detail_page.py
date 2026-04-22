@@ -1,6 +1,6 @@
-import json
 from contextlib import ExitStack
 from pathlib import Path
+from textwrap import dedent
 from unittest.mock import patch
 
 import pytest
@@ -9,10 +9,10 @@ from PyQt6.QtWidgets import QLabel, QMessageBox, QPushButton, QSplitter
 
 from src.core.mms.models import (
     ConfigDefaultsInfo,
-    DetailMenuItem,
     ModuleInfo,
     ModuleManifest,
     ModuleSource,
+    UIPageInfo,
     UIExtensionInfo,
     WorkflowInfo,
 )
@@ -36,21 +36,42 @@ def _make_module(
     tmp_path: Path,
     *,
     source: ModuleSource = ModuleSource.DEV_LINK,
-    entry: str = "ui:LoadedPage",
-    ui_type: str = "micro_app",
-    detail_menu: list[DetailMenuItem] | None = None,
+    pages: list[UIPageInfo] | None = None,
+    runtime_body: str | None = None,
     config_defaults: ConfigDefaultsInfo | None = None,
 ) -> ModuleInfo:
     module_dir = tmp_path / source.value / "demo_module"
     module_dir.mkdir(parents=True, exist_ok=True)
-    (module_dir / "__init__.py").write_text("VALUE = 'demo'\n", encoding="utf-8")
-    (module_dir / "ui.py").write_text(
-        "from PyQt6.QtWidgets import QLabel\n\n"
-        "class LoadedPage(QLabel):\n"
-        "    def __init__(self):\n"
-        "        super().__init__('Loaded from module UI')\n",
-        encoding="utf-8",
-    )
+    if runtime_body:
+        (module_dir / "__init__.py").write_text(
+            dedent(
+                """
+                import importlib
+
+                _runtime_module = None
+
+
+                def _load_runtime_module():
+                    global _runtime_module
+                    if _runtime_module is None:
+                        _runtime_module = importlib.import_module(f"{__name__}.module_runtime")
+                    return _runtime_module
+
+
+                def __getattr__(name: str):
+                    runtime_module = _load_runtime_module()
+                    if hasattr(runtime_module, name):
+                        return getattr(runtime_module, name)
+                    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+                """
+            ).strip()
+            + "\n",
+            encoding="utf-8",
+        )
+        (module_dir / "module_runtime.py").write_text(dedent(runtime_body).strip() + "\n", encoding="utf-8")
+    else:
+        (module_dir / "__init__.py").write_text("VALUE = 'demo'\n", encoding="utf-8")
+
     return ModuleInfo(
         name="demo_module",
         manifest=ModuleManifest(
@@ -60,14 +81,96 @@ def _make_module(
                 WorkflowInfo(name="default", display_name="默认流程"),
             ],
             ui_extension=UIExtensionInfo(
-                type=ui_type,
-                entry=entry if entry.startswith("ui:") else "",
-                detail_menu=list(detail_menu or []),
+                pages=list(pages or []),
             ),
             config_defaults=config_defaults or ConfigDefaultsInfo(),
         ),
         source=source,
         path=module_dir,
+    )
+
+
+def _make_hosted_ui_module(
+    tmp_path: Path,
+    *,
+    source: ModuleSource = ModuleSource.DEV_LINK,
+    dashboard_title: str = "今日运营看板",
+) -> ModuleInfo:
+    return _make_module(
+        tmp_path,
+        source=source,
+        pages=[
+            UIPageInfo(
+                id="dashboard",
+                icon="📊",
+                label="今日运营看板",
+                entry="core:page:dashboard",
+            ),
+            UIPageInfo(
+                id="accounts",
+                icon="📋",
+                label="账号管理",
+                entry="core:data_table:accounts",
+            ),
+        ],
+        runtime_body=f"""
+        from crawler4j_sdk import TaskContext
+
+
+        def declare_ui(context: TaskContext):
+            context.tools.call(
+                "ui.declare_page",
+                page_id="dashboard",
+                schema={{
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [
+                        {{"type": "Text", "style": "title", "binding": "title"}},
+                        {{"type": "Text", "style": "body", "binding": "summary"}},
+                        {{
+                            "type": "Button",
+                            "label": "打开账号管理",
+                            "action": {{"type": "open_page", "entry": "core:data_table:accounts"}},
+                        }},
+                        {{
+                            "type": "DataTable",
+                            "title": "统计明细",
+                            "binding": "rows",
+                            "columns": [
+                                {{"key": "metric", "label": "指标"}},
+                                {{"key": "value", "label": "值"}},
+                            ],
+                        }},
+                    ],
+                }},
+            )
+            context.tools.call(
+                "ui.declare_data_table",
+                view_id="accounts",
+                schema={{
+                    "title": "账号管理",
+                    "dataset": "accounts",
+                    "columns": [
+                        {{"key": "phone", "label": "手机号"}},
+                    ],
+                }},
+            )
+            context.tools.call(
+                "db.replace_records",
+                dataset="accounts",
+                records=[{{"phone": "13800138000"}}],
+            )
+
+
+        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+            return {{
+                "title": "{dashboard_title}",
+                "summary": "展示宿主页渲染内容",
+                "rows": [
+                    {{"metric": "活跃账号", "value": "12"}},
+                ],
+            }}
+        """,
     )
 
 
@@ -84,99 +187,104 @@ def test_module_detail_page_no_longer_exposes_debug_ui(qtbot, tmp_path):
     assert all("调试" not in text for text in button_texts)
 
 
-def test_module_detail_page_loads_micro_app_for_dev_link_modules(qtbot, tmp_path):
+def test_module_detail_page_loads_hosted_pages_from_manifest(qtbot, tmp_path):
     page = ModuleDetailPage()
     qtbot.addWidget(page)
 
-    page.set_module(_make_module(tmp_path, source=ModuleSource.DEV_LINK))
+    page.set_module(_make_hosted_ui_module(tmp_path, source=ModuleSource.DEV_LINK))
 
-    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
-    assert custom_page.__class__.__name__ == "LoadedPage"
-    assert isinstance(custom_page, QLabel)
-    assert custom_page.text() == "Loaded from module UI"
+    menu_texts = [page.menu_list.item(i).text() for i in range(page.menu_list.count())]
+    assert "📊 今日运营看板" in menu_texts
+    assert "📋 账号管理" in menu_texts
+    assert page._menu_pages["dashboard"].__class__.__name__ == "ManagedPageRenderer"
+    assert page._menu_pages["accounts"].__class__.__name__ == "ModuleDataTablePage"
 
 
-def test_module_detail_page_blocks_external_micro_app_without_allowlist(qtbot, tmp_path):
+def test_module_detail_page_loads_hosted_page_for_core_page_entry(qtbot, tmp_path):
     page = ModuleDetailPage()
     qtbot.addWidget(page)
 
-    page.set_module(_make_module(tmp_path, source=ModuleSource.EXTERNAL))
+    page.set_module(_make_hosted_ui_module(tmp_path, source=ModuleSource.EXTERNAL))
+    hosted_page = page._menu_pages["dashboard"]
+    texts = [label.text() for label in hosted_page.findChildren(QLabel)]
 
-    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
-    texts = [label.text() for label in custom_page.findChildren(QLabel)]
-    assert any("trust gate" in text or "allowlist" in text for text in texts)
+    assert "今日运营看板" in texts
+    assert "展示宿主页渲染内容" in texts
 
 
-def test_module_detail_page_allows_external_micro_app_when_allowlisted(qtbot, tmp_path):
-    from src.core.persistence import get_config_store
-
-    get_config_store().set_setting("mms.ui.allowlist", json.dumps(["demo_module"], ensure_ascii=False))
-
+def test_module_detail_page_reloads_dev_link_hosted_page_after_source_change(qtbot, tmp_path):
     page = ModuleDetailPage()
     qtbot.addWidget(page)
-
-    page.set_module(_make_module(tmp_path, source=ModuleSource.EXTERNAL))
-
-    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
-    assert custom_page.__class__.__name__ == "LoadedPage"
-    assert isinstance(custom_page, QLabel)
-    assert custom_page.text() == "Loaded from module UI"
-
-
-def test_module_detail_page_gracefully_degrades_when_custom_page_load_fails(qtbot, tmp_path):
-    page = ModuleDetailPage()
-    qtbot.addWidget(page)
-
-    page.set_module(_make_module(tmp_path, source=ModuleSource.DEV_LINK, entry="ui:MissingPage"))
-
-    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
-    texts = [label.text() for label in custom_page.findChildren(QLabel)]
-    assert any("加载失败" in text or "MissingPage" in text for text in texts)
-
-
-def test_module_detail_page_reloads_dev_link_ui_after_source_change(qtbot, tmp_path):
-    page = ModuleDetailPage()
-    qtbot.addWidget(page)
-    module = _make_module(tmp_path, source=ModuleSource.DEV_LINK)
+    module = _make_hosted_ui_module(tmp_path, source=ModuleSource.DEV_LINK)
 
     page.set_module(module)
-    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
-    assert custom_page.text() == "Loaded from module UI"
+    hosted_page = page._menu_pages["dashboard"]
+    assert any(label.text() == "今日运营看板" for label in hosted_page.findChildren(QLabel))
 
     module_dir = Path(module.path)
-    (module_dir / "ui.py").write_text(
-        "from PyQt6.QtWidgets import QLabel\n\n"
-        "class LoadedPage(QLabel):\n"
-        "    def __init__(self):\n"
-        "        super().__init__('Reloaded from module UI')\n",
+    (module_dir / "module_runtime.py").write_text(
+        dedent(
+            """
+            from crawler4j_sdk import TaskContext
+
+
+            def declare_ui(context: TaskContext):
+                context.tools.call(
+                    "ui.declare_page",
+                    page_id="dashboard",
+                    schema={
+                        "type": "Page",
+                        "load_handler": "load_dashboard_page",
+                        "children": [
+                            {"type": "Text", "style": "title", "binding": "title"},
+                        ],
+                    },
+                )
+
+
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                return {"title": "已重新加载看板"}
+            """
+        ).strip()
+        + "\n",
         encoding="utf-8",
     )
 
     page.set_module(module)
-    reloaded_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
-    assert reloaded_page.text() == "Reloaded from module UI"
+    reloaded_page = page._menu_pages["dashboard"]
+    assert any(label.text() == "已重新加载看板" for label in reloaded_page.findChildren(QLabel))
 
 
 def test_module_detail_page_renders_core_managed_data_table_entry(qtbot, tmp_path):
     page = ModuleDetailPage()
     qtbot.addWidget(page)
 
-    page.set_module(
-        _make_module(
-            tmp_path,
-            detail_menu=[
-                DetailMenuItem(
-                    id="accounts",
-                    icon="📋",
-                    label="账号管理",
-                    entry="core:data_table:accounts",
-                )
-            ],
-        )
-    )
+    page.set_module(_make_hosted_ui_module(tmp_path))
 
     custom_page = page._menu_pages["accounts"]
     assert custom_page.__class__.__name__ == "ModuleDataTablePage"
+
+
+def test_module_detail_page_open_page_button_switches_to_target_entry(qtbot, tmp_path):
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    page.set_module(_make_hosted_ui_module(tmp_path))
+    page._select_menu("dashboard")
+
+    hosted_page = page._menu_pages["dashboard"]
+    open_button = next(
+        button
+        for button in hosted_page.findChildren(QPushButton)
+        if button.text() == "打开账号管理"
+    )
+    open_button.click()
+
+    qtbot.waitUntil(lambda: page.content_stack.currentWidget() is page._menu_pages["accounts"])
+
+    current_item = page.menu_list.currentItem()
+    assert current_item is not None
+    assert current_item.data(Qt.ItemDataRole.UserRole) == "accounts"
 
 
 def test_module_detail_page_remove_dev_link_uses_shared_fallback_message(qtbot, tmp_path, monkeypatch):

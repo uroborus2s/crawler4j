@@ -107,12 +107,13 @@ ui_extension:
 `managed_crud` 的第一版字段类型最少支持：
 
 - `text`
+- `number`
+- `int`
+- `bool`
 - `select`
-- `secret`
 
 第一版明确不支持：
 
-- `bool`
 - `date` / `datetime`
 - `radio` / `checkbox`
 - `tree`
@@ -341,7 +342,7 @@ def load_dashboard_page(ctx, page_id, params=None) -> dict:
 - SDK 与文档不再指导模块作者编写 `PyQt6` 页面。
 - `ctrip_crawler` 的 dashboard 和 3 张账号表可完全由宿主控件承载。
 - 第一版公开控件稳定固定为 `Page`、`Section`、`Text`、`Button`、`DataTable`。
-- `DataTable` 的 V1 字段类型固定为 `text`、`select`、`secret`。
+- `DataTable` 的 V1 字段类型固定为 `text`、`number`、`int`、`bool`、`select`。
 - 文档、memory 与后续实施计划基于同一口径推进，不再保留“旧方案仍是正式契约”的模糊表述。
 
 ## 11. 设计结论

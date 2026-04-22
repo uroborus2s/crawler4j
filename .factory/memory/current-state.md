@@ -17,8 +17,9 @@
 
 ## 最近条目
 
+- 最新修复：2026-04-22 已完成 hosted module UI V1 主链：模块清单现统一使用 `ui_extension.pages[]`，运行时新增 `ui.declare_page` / `ui.get_page` 并把 page schema 持久化到 `data.db`；模块详情页只消费 `core:page:<page_id>` 与 `core:data_table:<view_id>` 两类入口，宿主通过 `ManagedPageRenderer` 渲染 `Page / Section / Text / Button / DataTable` 最小控件集；SDK CLI `page create` / `data-table create` / `check full`、integration / acceptance、开发者文档与 `.factory` 记忆已同步切到新契约，旧 `micro_app` / `ui:*` / trust gate / allowlist 路径已退出正式实现。
 - 最新修复：2026-04-22 已继续修正 Windows Velopack CLI 在 `uv run python` 下的两段断链：当 `dnx` 或 `vpk` 实际解析为 `*.cmd` / `*.bat` 时，`package-windows-release` 现在会自动改用 `cmd.exe /c` 调起 CLI；若 Python `velopack` 版本带 `.dev` / `+local` 后缀，则会先正规化成 NuGet 可接受的基础版本后再传给 `dnx --version`，不再继续命中 `WinError 2` 或 `invalid NuGet version`。
-- 最新修复：2026-04-22 已将桌面宿主应用图标终稿做工程化清理后正式入包：当前正式图标保留“暖灰白底板 + 蓝色主徽记 + 放大镜轮廓 + 4j 主字标”的浅色品牌母版，同时去除了 AI 编辑控制点并重建 `app_icon.png` / `app_icon.icns`；当前直接锁定该回归的是 `test_icon_packaging.py` 的“透明圆角 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言。
+- 最新修复：2026-04-22 已继续收口桌面宿主应用图标的 Dock 光学尺寸：当前正式图标仍保留“暖灰白底板 + 蓝色主徽记 + 放大镜轮廓 + 4j 主字标”的浅色品牌母版，但整张图标连同外层底板已整体内缩一轮，不再在 Dock 中比常见系统应用显得更大；当前直接锁定该回归的是 `test_icon_packaging.py` 的“透明圆角 + 中轴安全区 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言。
 - 最新修复：2026-04-22 已把桌面更新服务器目录口径收口为 `mac/` 与 `win/` 并列：`deploy-macos-internal-release` 现在会把 `packages/crawler4j/dist/updates/macos/` 同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`，同时新增 `uv run deploy-windows-release`，会通过 OpenSSH `sftp` 把 `packages/crawler4j/dist/updates/windows/` 同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`；`.env.example`、README、部署说明与打包配置回归已同步到新的 feed / 上传目录约定。
 - 最新修复：2026-04-22 已为 Windows 正式交付补齐 `PyInstaller onedir + Velopack` 发布与宿主自更新主链：workspace 根新增 `uv run package-windows-release`，会在现有 onedir bundle 基线上写入 `crawler4j.update.json` 并继续生成 `Setup.exe` / `.nupkg` / `releases.win.json`；宿主系统层新增 `src.core.system.velopack`，`UpdateService` 已收口为 Sparkle / Velopack 平台分派，`src.ui.app:main` 也会在 GUI 初始化前先跑 Windows Velopack bootstrap。当前直接锁定该路径的是 `test_packaging_config.py`、`test_update_service.py` 与 `test_app.py`。
 - 最新修复：2026-04-22 已继续收口系统设置里的 `关于` 页：设置页右侧内容区现直接复用完整版本信息组件，不再额外显示页内 `关于` 标题或 `📋 完整信息` 二次入口，且切到 `关于` 标签时底部 `↺ 恢复默认` 会自动隐藏；关于内容里的官网链接已同步切到 `https://github.com/uroborus2s/crawler4j`，同时顶部状态栏版本号点击出的 `AboutDialog` 弹窗入口保持不变。
@@ -98,15 +99,15 @@
 - 最新修复：2026-04-19 已修正 `EnvironmentManager.start_env()` 对 `BUSY` 的默认判断：先问 provider 窗口是否真的已开，已关窗的复用环境会先 `open()` 再 `connect()`，避免 `select` + lease 场景把 `READY` 复用环境误当成“已开窗待连接”。
 - 最新修复：2026-04-19 已为 VirtualBrowser 运行态回填加短重试：`VirtualBrowserProvider.connect()` 在 `ws_url` 为空时会对 `get_browser_runtime_detail()` 最多重试 3 次再失败，避免真实站点运行态信息尚未准备好就过早进入 `safe_connect()`。
 - 最新修复：2026-04-18 已把 ATM 手动批次“执行一次”的中止链路真正收口：当作业处于 `环境启动中` / `执行中` 时，列表主按钮会切成 `⏹ 中止`，弹窗支持“保留环境中止 / 删除环境中止”（删除只对创建环境模式开放）；`WAITING_CONFIRMATION` 任务收到 stop 后会直接收口为 `CANCELLED` 并继续执行 cleanup / 环境动作，不再把列表卡在 `中止中`；此前运行中任务只会记录 stop request、无法打断模块协程的问题已修复，`ExecutionRunner` 现在会主动 cancel 运行中的模块协程，`TaskContext.wait()` / `run_subtask()` 在 stop 后也会尽快抛 `asyncio.CancelledError`。同时 `on_cleanup` 已固定为先于环境动作执行，cleanup 阶段可读取计划中的 `ctx.runtime["env_action"]`。
-- 最新修复：2026-04-16 已删除脚手架与客户端内残留的声明式 `ui/config_schema.json` / `strategy.yaml` 链路；`module.yaml` 继续作为唯一模块清单，默认配置页改为只读取宿主持久化的模块设置，代码型页面脚手架也已收敛为 `page create` 只生成 `micro_app` 页面。
+- 最新修复：2026-04-16 已删除脚手架与客户端内残留的声明式 `ui/config_schema.json` / `strategy.yaml` 链路；`module.yaml` 继续作为唯一模块清单，默认配置页改为只读取宿主持久化的模块设置；后续 2026-04-22 又继续把页面脚手架正式收敛为 hosted page V1，不再生成 `micro_app` 页面。
 - 最新修复：2026-04-16 已把模块持久配置从旧 `configs` 聚合键迁到 `config.db.module_config_entries`，`ctx.get_config()` 现只读取模块/工作流配置；ATM 与 Debug 注入链中的 `workflow`、`execution.params`、`job.params`、`devel_mode`、`creation_params` 已全部改走 `ctx.runtime`，不再污染模块配置命名空间；旧 KV 配置兼容迁移与旧 workflow 配置兜底路径已删除。
-- 最新修复：2026-04-17 已把真实生效的模块详情页补回 `配置` 标签，宿主现在直接提供模块级配置与工作流级覆盖的 YAML 编辑器，并显式拒绝 JSON/花括号对象字面量；`core:data_table` 的 schema 与 dataset records 当前只认 `data.db`，运行时代码不包含旧 `state.db.kv_store` 自动迁移逻辑；SDK CLI 现已提供 `data-table create` 并把 `detail_menu` 收敛为受控的 `core:data_table:<view_id>` 入口，代码型 UI 只允许单一 `ui_extension.entry`。
+- 最新修复：2026-04-17 已把真实生效的模块详情页补回 `配置` 标签，宿主现在直接提供模块级配置与工作流级覆盖的 YAML 编辑器，并显式拒绝 JSON/花括号对象字面量；`core:data_table` 的 schema 与 dataset records 当前只认 `data.db`，运行时代码不包含旧 `state.db.kv_store` 自动迁移逻辑；后续 2026-04-22 又继续把模块详情页入口统一切到 `ui_extension.pages[]`，正式删除 `detail_menu` 与单一 `ui_extension.entry` 口径。
 - 最新修复：2026-04-17 已重排模块详情页 `配置` 标签布局：移除了模块配置与 Workflow 配置外层卡片框，页面主体改为可拖拽的纵向分隔布局，默认按“模块配置约 70% / Workflow 配置约 30%”分配高度；用户可直接拖动中间分隔条手动调整两个 YAML 编辑区的可视高度，长模块配置不再被底部区域挤压得过于局促；两个编辑区右侧纵向滚动条默认隐藏，但滚轮与触控板滚动仍可用。
 - 最新修复：2026-04-17 已把 `core:data_table` 记录编辑弹窗里的文本输入框从局部 `QLineEdit` 收口到公共 `src.ui.components.line_edit.StyledLineEdit`，并删除该弹窗对 `QLineEdit` 的重复局部样式覆盖；对应 UI 单测现同时锁定公共下拉框与公共单行输入框约束，避免后续表单弹窗再次回退到原生组件。
 - 最新修复：2026-04-17 已为 `module.yaml` 增加 `config_defaults` 契约；宿主首次加载模块时会按 `config_defaults.module` / `config_defaults.workflows` 初始化 `config.db.module_config_entries` 一次并写入初始化标记，后续升级与刷新不再自动覆盖；模块详情页新增“恢复模块默认 / 恢复 Workflow 默认”按钮，并在警告确认后按当前 manifest 模板重写对应 scope。
 - 最新修复：2026-04-17 已补齐 `docs/04-project-development/04-design/module-config-runtime-data-contract.md`，并把开发者指南中的 `ctx.config`、`ctx.runtime`、`ctx.state`、`db.*` 使用边界同步为统一规范，供模块开发者按同一契约开发。
 - 最新修复：2026-04-17 已把模块分发契约收敛到 `module.yaml.upgrade_source`；正式模块安装入口现支持 `本地 ZIP` 与 `GitHub 源 URL` 双模式，安装前会校验 GitHub 仓库是否存在；DevLink 注册同样执行清单与升级源预检；模块管理页新增 `检查更新` 与行级 `升级` 按钮，正式模块可按 GitHub Release 自动下载并执行原子升级，运行中任务会阻断升级。
-- 最新修复：2026-04-17 已开始重构 `crawler4j-sdk` CLI V1，旧平铺命令树已被 `module / task / workflow / page / data-table / env-selector / config / package / release / host / check` 分组体系替换；脚手架不再创建 `data/` 抽象层，`data-table create` 会直接维护 `detail_menu` 并在 `module_runtime.py` 追加 `declare_ui` 骨架，`check` 也已强化为 `structure / release / full` 三档 gate，且 SDK CLI 现已补上 `release publish` 以及宿主桥接命令 `host devlink/install/upgrade/debug config`。
+- 最新修复：2026-04-17 已开始重构 `crawler4j-sdk` CLI V1，旧平铺命令树已被 `module / task / workflow / page / data-table / env-selector / config / package / release / host / check` 分组体系替换；脚手架不再创建 `data/` 抽象层，后续 2026-04-22 又进一步把 `page create` / `data-table create` 与 `check full` 全部切到 hosted page V1，不再维护 `detail_menu` 或 `ui:PageClass` 旧契约。
 - 最新修复：2026-04-17 已补齐 `crawler4j check full` 的导入失败收敛逻辑：当生成模块的 `module_runtime.py` 或 `ui/__init__.py` 本身存在缺失依赖/导入错误时，CLI 现在会输出明确的文件级校验错误并返回失败，不再直接抛出 traceback；新增回归测试已锁定这两条失败路径，`uv run pytest -q` 当前为 `337 passed`。
 - 最新修复：2026-04-16 已压缩仪表盘页面上半部分的标题区、统计卡高度与纵向间距，并抬高“系统实时日志”区域的最小高度；默认窗口尺寸下首页可见日志行数明显增加，便于直接观察任务执行输出。
 - 缺陷：BUG-003-pyqt-runtime-blocked-by-system-policy、BUG-004-zip-upgrade-leaves-stale-files、BUG-005-hybrid-acquisition-mode-declared-but-rejected、BUG-013-module-assembler-import-errors-hidden
@@ -120,7 +121,7 @@
 - 优先处理外部 VirtualBrowser 运行时故障；当前 `localhost:9002` 上直接 `addBrowser -> launchBrowser` 也会稳定报 `Failed to detect DevTools port`，在外部应用恢复前不要把该阻塞继续归因到宿主 REM 代码
 - 调试模块 UI 时，优先使用 DevLink 并在详情页通用数据表中点击“刷新”验证最新 `declare_ui` / handler 行为
 - 若 UX/UI 需要可视化评审，优先登记真实设计交付物而不是只写文字
-- 模块 UI 重构进入实施前，先按 `module-hosted-ui-framework.md` 钉死 schema 边界和删除清单，不要再追加兼容层
+- 模块 UI 重构主链已闭环；当前优先做 hosted UI PR 收口与真实业务模块接入验证，不要重新引入 `micro_app` / `ui:*` 兼容层
 - 若工作项进入收尾，确认关联 PR 已完成评审并合并
 - 阶段切换前先更新正式文档，再刷新 `/.factory/memory/` 压缩记忆
 - 最新修复：2026-04-22 已完成代码洁净性专项第一轮收口。REM 回收失败不再把环境误标为 `READY`；ATM 删除作业改为“先停调度/请求停机，再等 active task 归零后删库”；MMS 外部模块安装目录已改为稳定模块名并兼容旧非规范目录迁移/回滚；`write_dataset()` 对坏输入改为 fail-fast；SDK `page create` 输出已对齐宿主 `module`/无参实例化契约，`module init/set version/release status` 同步校验 `pyproject.toml` 与 `module.yaml` 版本一致；开发者指南里的页面示例签名也已同步更新。

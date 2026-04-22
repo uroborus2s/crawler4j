@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import argparse
+import ast
+import asyncio
 import importlib
 import inspect
 import json
@@ -34,10 +35,11 @@ from crawler4j_sdk.cli.templates import (
     MODEL_PROJECT_README,
     MODEL_RUNTIME_TEMPLATE,
     MODEL_TEST_TASK_TEMPLATE,
-    MODEL_UI_PAGES_TEMPLATE,
+    PAGE_HELPER_TEMPLATE,
     SCRIPT_TEMPLATE,
     WORKFLOW_TEMPLATE,
 )
+from crawler4j_sdk.hosted_ui import normalize_page_schema, normalize_table_schema
 
 
 DEFAULT_PYTHON_VERSION = "3.12"
@@ -52,8 +54,10 @@ SEMVER_RE = re.compile(
     r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-UI_ENTRY_RE = re.compile(r"^ui:[A-Za-z_][A-Za-z0-9_]*$")
+CORE_PAGE_ENTRY_RE = re.compile(r"^core:page:(?P<id>[a-z][a-z0-9_]*)$")
+CORE_DATA_TABLE_ENTRY_RE = re.compile(r"^core:data_table:(?P<id>[a-z][a-z0-9_]*)$")
 GITHUB_TOKEN_ENV_VARS = ("CRAWLER4J_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
+LEGACY_UI_EXTENSION_KEYS = ("type", "entry", "detail_menu", "trusted")
 LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_KEYS = {
     "occupied",
     "occupied_label",
@@ -95,6 +99,41 @@ def is_valid_semver(version: str) -> bool:
 def is_valid_repo(repo: str) -> bool:
     """Validate GitHub owner/repo notation."""
     return bool(REPO_RE.match(str(repo or "").strip()))
+
+
+def _insert_declare_ui_call(runtime_text: str, call_line: str) -> str:
+    lines = runtime_text.splitlines(keepends=True)
+    tree = ast.parse(runtime_text)
+    declare_ui = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "declare_ui"
+        ),
+        None,
+    )
+    if declare_ui is None:
+        raise CLIError("module_runtime.py 缺少 declare_ui，无法自动注册 hosted UI helper")
+
+    function_start = declare_ui.lineno - 1
+    function_end = declare_ui.end_lineno or declare_ui.lineno
+    body_lines = lines[function_start:function_end]
+    if any(line.rstrip("\n") == call_line for line in body_lines):
+        return runtime_text
+
+    sentinel = "    # SDK-DATA-TABLES"
+    for offset, line in enumerate(body_lines):
+        if line.rstrip("\n") == sentinel:
+            lines.insert(function_start + offset, f"{call_line}\n")
+            return "".join(lines)
+
+    insert_at = function_end
+    if declare_ui.body:
+        last_stmt = declare_ui.body[-1]
+        if isinstance(last_stmt, (ast.Return, ast.Pass)):
+            insert_at = last_stmt.lineno - 1
+    lines.insert(insert_at, f"{call_line}\n")
+    return "".join(lines)
 
 
 def _resolve_github_token(explicit_token: str | None = None) -> str | None:
@@ -292,14 +331,44 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _normalize_detail_menu(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+def _normalize_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     ui_extension = manifest.setdefault("ui_extension", {})
     if not isinstance(ui_extension, dict):
         raise CLIError("module.yaml.ui_extension 必须是映射对象")
-    detail_menu = ui_extension.setdefault("detail_menu", [])
-    if not isinstance(detail_menu, list):
-        raise CLIError("module.yaml.ui_extension.detail_menu 必须是数组")
-    return detail_menu
+    pages = ui_extension.setdefault("pages", [])
+    if not isinstance(pages, list):
+        raise CLIError("module.yaml.ui_extension.pages 必须是数组")
+    return pages
+
+
+def _classify_ui_entry(page_id: str, entry: str) -> str | None:
+    page_match = CORE_PAGE_ENTRY_RE.match(entry)
+    if page_match and page_match.group("id") == page_id:
+        return "page"
+    table_match = CORE_DATA_TABLE_ENTRY_RE.match(entry)
+    if table_match and table_match.group("id") == page_id:
+        return "data_table"
+    return None
+
+
+def _manifest_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    ui_extension = manifest.get("ui_extension") or {}
+    if not isinstance(ui_extension, dict):
+        return []
+    pages = ui_extension.get("pages") or []
+    if not isinstance(pages, list):
+        return []
+    return [item for item in pages if isinstance(item, dict)]
+
+
+def _manifest_ui_entries_by_kind(manifest: dict[str, Any], kind: str) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for item in _manifest_ui_pages(manifest):
+        page_id = str(item.get("id", "") or "").strip()
+        entry = str(item.get("entry", "") or "").strip()
+        if _classify_ui_entry(page_id, entry) == kind:
+            entries.append(item)
+    return entries
 
 
 def _normalize_config_defaults(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -499,40 +568,38 @@ def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
     if not isinstance(ui_extension, dict):
         return ["ui_extension 必须是 YAML 映射对象"]
 
-    ui_type = str(ui_extension.get("type", "none") or "none").strip() or "none"
-    if ui_type not in {"none", "micro_app"}:
-        errors.append(f"不支持的 ui_extension.type: {ui_type}")
+    legacy_keys = [key for key in LEGACY_UI_EXTENSION_KEYS if key in ui_extension]
+    if legacy_keys:
+        errors.append(
+            "ui_extension 不再支持旧字段: " + ", ".join(legacy_keys)
+        )
 
-    entry = str(ui_extension.get("entry", "") or "").strip()
-    if entry:
-        if ui_type != "micro_app":
-            errors.append("声明 ui_extension.entry 时必须同时设置 ui_extension.type = micro_app")
-        if not UI_ENTRY_RE.match(entry):
-            errors.append(f"无效的 ui_extension.entry: {entry}")
-    elif ui_type == "micro_app":
-        errors.append("ui_extension.type = micro_app 时必须提供 ui_extension.entry")
-
-    detail_menu = ui_extension.get("detail_menu") or []
-    if not isinstance(detail_menu, list):
-        errors.append("ui_extension.detail_menu 必须是数组")
+    pages = ui_extension.get("pages") or []
+    if not isinstance(pages, list):
+        errors.append("ui_extension.pages 必须是数组")
         return errors
 
     seen_ids: set[str] = set()
-    for item in detail_menu:
+    for item in pages:
         if not isinstance(item, dict):
-            errors.append("ui_extension.detail_menu 里的每一项都必须是对象")
+            errors.append("ui_extension.pages 里的每一项都必须是对象")
             continue
-        menu_id = str(item.get("id", "") or "").strip()
-        if not is_valid_name(menu_id):
-            errors.append(f"无效的 detail_menu.id: {menu_id or '<empty>'}")
+
+        page_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(page_id):
+            errors.append(f"无效的 ui_extension.pages[].id: {page_id or '<empty>'}")
             continue
-        if menu_id in seen_ids:
-            errors.append(f"detail_menu.id 重复: {menu_id}")
-        seen_ids.add(menu_id)
-        expected_entry = f"core:data_table:{menu_id}"
-        actual_entry = str(item.get("entry", "") or "").strip()
-        if actual_entry != expected_entry:
-            errors.append(f"detail_menu.entry 不受支持: {actual_entry or '<empty>'}")
+        if page_id in seen_ids:
+            errors.append(f"ui_extension.pages[].id 重复: {page_id}")
+        seen_ids.add(page_id)
+
+        label = str(item.get("label", "") or "").strip()
+        if not label:
+            errors.append(f"ui_extension.pages[{page_id}].label 不能为空")
+
+        entry = str(item.get("entry", "") or "").strip()
+        if _classify_ui_entry(page_id, entry) is None:
+            errors.append(f"ui_extension.pages[{page_id}].entry 不受支持: {entry or '<empty>'}")
     return errors
 
 
@@ -541,7 +608,7 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
     errors: list[str] = []
 
     required_files = ["module.yaml", "__init__.py", "module_runtime.py", "pyproject.toml"]
-    required_dirs = ["tasks", "workflows", "ui"]
+    required_dirs = ["tasks", "workflows"]
     for name in required_files:
         if not (module_root / name).exists():
             errors.append(f"缺少关键文件: {name}")
@@ -657,26 +724,12 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
                 f"workflows/{workflow_name}.py 无法导入: {exc.__class__.__name__}: {exc}"
             )
 
-    module_runtime = None
     try:
         module_runtime = importlib.import_module(f"{module_root.name}.module_runtime")
     except Exception as exc:  # pragma: no cover - failure path
         errors.append(f"module_runtime.py 无法导入: {exc.__class__.__name__}: {exc}")
     else:
-        errors.extend(_validate_declared_data_tables(module_root, module_runtime))
-
-    ui_extension = manifest.get("ui_extension") or {}
-    if isinstance(ui_extension, dict):
-        entry = str(ui_extension.get("entry", "") or "").strip()
-        if entry:
-            class_name = entry.split(":", 1)[1]
-            try:
-                ui_package = importlib.import_module(f"{module_root.name}.ui")
-            except Exception as exc:  # pragma: no cover - failure path
-                errors.append(f"ui 包无法导入: {exc.__class__.__name__}: {exc}")
-            else:
-                if not hasattr(ui_package, class_name):
-                    errors.append(f"ui_extension.entry 指向的页面未从 ui 包导出: {class_name}")
+        errors.extend(_validate_declared_ui(module_root, module_runtime, manifest))
 
     assembler_workflows = set(getattr(assembler, "workflows", {}).keys())
     for workflow_name in workflow_names:
@@ -735,6 +788,7 @@ class _DeclareUICheckLogger:
 
 class _DeclareUICheckTools:
     def __init__(self) -> None:
+        self._pages: dict[str, dict[str, Any]] = {}
         self._schemas: dict[str, dict[str, Any]] = {}
         self._datasets: dict[str, list[dict[str, Any]]] = {}
         self._states: dict[str, Any] = {}
@@ -749,7 +803,9 @@ class _DeclareUICheckTools:
             ToolSpec(name="db.release_lock", description="db.release_lock"),
             ToolSpec(name="db.replace_records", description="db.replace_records"),
             ToolSpec(name="db.set_state", description="db.set_state"),
+            ToolSpec(name="ui.declare_page", description="ui.declare_page"),
             ToolSpec(name="ui.declare_data_table", description="ui.declare_data_table"),
+            ToolSpec(name="ui.get_page", description="ui.get_page"),
             ToolSpec(name="ui.get_data_table", description="ui.get_data_table"),
         ]
 
@@ -760,9 +816,21 @@ class _DeclareUICheckTools:
         return list(self._tool_specs)
 
     def call(self, tool_name: str, /, **kwargs: Any) -> Any:
+        if tool_name == "ui.declare_page":
+            page_id = str(kwargs.get("page_id", "")).strip()
+            try:
+                self._pages[page_id] = normalize_page_schema(page_id, dict(kwargs.get("schema") or {}))
+            except ValueError as exc:
+                raise CLIError(f"宿主页 {page_id or '<empty>'} schema 无效: {exc}") from exc
+            return True
+        if tool_name == "ui.get_page":
+            return dict(self._pages.get(str(kwargs.get("page_id", "")).strip(), {}))
         if tool_name == "ui.declare_data_table":
             view_id = str(kwargs.get("view_id", "")).strip()
-            schema = dict(kwargs.get("schema") or {})
+            try:
+                schema = normalize_table_schema(view_id, dict(kwargs.get("schema") or {}))
+            except ValueError as exc:
+                raise CLIError(f"数据表 {view_id or '<empty>'} schema 无效: {exc}") from exc
             _validate_lock_key_usage_for_sdk(view_id, schema)
             self._schemas[view_id] = schema
             return True
@@ -796,19 +864,50 @@ class _DeclareUICheckTools:
         raise KeyError(f"Unknown check tool: {tool_name}")
 
 
-def _validate_declared_data_tables(module_root: Path, module_runtime: Any) -> list[str]:
+def _validate_declared_page_handlers(module_runtime: Any, declared_pages: dict[str, dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    for page_id, schema in declared_pages.items():
+        if not isinstance(schema, dict):
+            errors.append(f"宿主页 {page_id} 的 schema 必须是对象")
+            continue
+
+        schema_type = str(schema.get("type", "") or "").strip()
+        if schema_type != "Page":
+            errors.append(f"宿主页 {page_id} 的 schema.type 必须是 Page")
+
+        load_handler_name = str(schema.get("load_handler", "") or "").strip()
+        if not load_handler_name:
+            errors.append(f"宿主页 {page_id} 缺少 load_handler")
+            continue
+
+        load_handler = getattr(module_runtime, load_handler_name, None)
+        if load_handler is None or not callable(load_handler):
+            errors.append(f"宿主页 {page_id} 的 load_handler 未在 module_runtime.py 中定义: {load_handler_name}")
+            continue
+        if inspect.iscoroutinefunction(load_handler):
+            errors.append(f"宿主页 {page_id} 的 load_handler 必须是同步函数: {load_handler_name}")
+    return errors
+
+
+def _validate_declared_ui(module_root: Path, module_runtime: Any, manifest: dict[str, Any]) -> list[str]:
     declare_ui = getattr(module_runtime, "declare_ui", None)
+    declared_manifest_pages = {
+        str(item.get("id", "")).strip(): str(item.get("entry", "")).strip()
+        for item in _manifest_ui_pages(manifest)
+        if str(item.get("id", "")).strip()
+    }
     if declare_ui is None:
-        return []
+        return ["module_runtime.py 缺少 declare_ui"] if declared_manifest_pages else []
     if inspect.iscoroutinefunction(declare_ui):
         return ["module_runtime.declare_ui 必须是同步函数"]
 
+    tools = _DeclareUICheckTools()
     context = TaskContext(
         env_id=0,
         task_name=module_root.name,
         config={},
         logger=_DeclareUICheckLogger(),
-        tools=_DeclareUICheckTools(),
+        tools=tools,
         runtime={},
     )
     try:
@@ -817,7 +916,42 @@ def _validate_declared_data_tables(module_root: Path, module_runtime: Any) -> li
         return [str(exc)]
     except Exception as exc:
         return [f"declare_ui 校验失败: {exc.__class__.__name__}: {exc}"]
-    return []
+
+    errors = _validate_declared_page_handlers(module_runtime, tools._pages)
+
+    expected_pages = {
+        page_id
+        for page_id, entry in declared_manifest_pages.items()
+        if _classify_ui_entry(page_id, entry) == "page"
+    }
+    expected_data_tables = {
+        page_id
+        for page_id, entry in declared_manifest_pages.items()
+        if _classify_ui_entry(page_id, entry) == "data_table"
+    }
+
+    missing_pages = sorted(expected_pages - set(tools._pages))
+    missing_data_tables = sorted(expected_data_tables - set(tools._schemas))
+    extra_pages = sorted(set(tools._pages) - expected_pages)
+    extra_data_tables = sorted(set(tools._schemas) - expected_data_tables)
+
+    errors.extend(
+        f"module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: {page_id}"
+        for page_id in missing_pages
+    )
+    errors.extend(
+        f"module.yaml.ui_extension.pages 声明的数据表未从 declare_ui 注册: {page_id}"
+        for page_id in missing_data_tables
+    )
+    errors.extend(
+        f"declare_ui 注册了未写入 module.yaml.ui_extension.pages 的宿主页: {page_id}"
+        for page_id in extra_pages
+    )
+    errors.extend(
+        f"declare_ui 注册了未写入 module.yaml.ui_extension.pages 的数据表: {page_id}"
+        for page_id in extra_data_tables
+    )
+    return errors
 
 
 def _run_check(level: str, module_root: Path) -> int:
@@ -985,7 +1119,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     sdk_dependency_spec = get_compatible_dependency_spec()
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    for subdir in ["tasks", "workflows", "ui", "tests"]:
+    for subdir in ["tasks", "workflows", "tests"]:
         _ensure_package_dir(output_dir / subdir)
 
     try:
@@ -1078,8 +1212,8 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    ui_extension = manifest.get("ui_extension") or {}
-    detail_menu = ui_extension.get("detail_menu") or []
+    hosted_pages = _manifest_ui_entries_by_kind(manifest, "page")
+    data_tables = _manifest_ui_entries_by_kind(manifest, "data_table")
     workflow_names = _manifest_workflow_names(manifest)
     runtime_path = module_root / "module_runtime.py"
     default_workflow = _read_default_workflow(runtime_path) or (workflow_names[0] if workflow_names else "")
@@ -1091,11 +1225,17 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     print(f"默认工作流: {default_workflow}")
     print(f"任务: {', '.join(_list_python_modules(module_root / 'tasks')) or '(无)'}")
     print(f"工作流: {', '.join(workflow_names) or '(无)'}")
-    print(f"页面入口: {ui_extension.get('entry', '') or '(无)'}")
+    print(
+        "宿主页: "
+        + (
+            ", ".join(str(item.get("id", "")) for item in hosted_pages if item.get("id"))
+            or "(无)"
+        )
+    )
     print(
         "数据表入口: "
         + (
-            ", ".join(str(item.get("id", "")) for item in detail_menu if isinstance(item, dict))
+            ", ".join(str(item.get("id", "")) for item in data_tables if item.get("id"))
             or "(无)"
         )
     )
@@ -1234,51 +1374,74 @@ def cmd_workflow_list(args: argparse.Namespace) -> int:
 
 
 def cmd_page_create(args: argparse.Namespace) -> int:
-    """Create a code page under ui/ and set it as ui_extension.entry."""
+    """Create a hosted page scaffold inside module_runtime.py."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
     if not is_valid_name(name):
         _print_error("页面名必须是小写 snake_case")
         return 1
-    class_name = f"{to_class_name(name)}Page"
-    try:
-        _write_text(
-            module_root / "ui" / f"{name}.py",
-            MODEL_UI_PAGES_TEMPLATE.format(
-                display_name=args.display_name or to_display_name(name),
-                description=args.description or f"{to_display_name(name)} 页面",
-                class_name=class_name,
-            ),
-            force=args.force,
-        )
-        _ensure_package_export(module_root / "ui" / "__init__.py", name, class_name)
-    except CLIError as exc:
-        _print_error(str(exc))
-        return 1
 
     manifest = load_manifest(module_root)
-    ui_extension = manifest.setdefault("ui_extension", {})
-    if not isinstance(ui_extension, dict):
-        _print_error("module.yaml.ui_extension 必须是映射对象")
+    pages = _normalize_ui_pages(manifest)
+    existing_page = next(
+        (item for item in pages if isinstance(item, dict) and item.get("id") == name),
+        None,
+    )
+    if existing_page is not None:
+        if not args.force:
+            _print_error(f"页面入口已存在: {name}")
+            return 1
+        existing_page["label"] = args.display_name or to_display_name(name)
+        existing_page["icon"] = "📄"
+        existing_page["entry"] = f"core:page:{name}"
+    else:
+        pages.append(
+            {
+                "id": name,
+                "label": args.display_name or to_display_name(name),
+                "icon": "📄",
+                "entry": f"core:page:{name}",
+            }
+        )
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    helper_name = f"_declare_{name}_page"
+    if helper_name not in runtime_text:
+        runtime_text += PAGE_HELPER_TEMPLATE.format(
+            page_id=name,
+            display_name=args.display_name or to_display_name(name),
+            description=args.description or f"{to_display_name(name)} 宿主页",
+        )
+
+    call_line = f"    {helper_name}(context)"
+    try:
+        runtime_text = _insert_declare_ui_call(runtime_text, call_line)
+    except (CLIError, SyntaxError) as exc:
+        _print_error(f"无法更新 module_runtime.py: {exc}")
         return 1
-    ui_extension["type"] = "micro_app"
-    ui_extension["entry"] = f"ui:{class_name}"
+
+    runtime_path.write_text(runtime_text, encoding="utf-8")
     save_manifest(module_root, manifest)
-    _print_success(f"已创建代码型页面: ui/{name}.py")
+    _print_success(f"已创建宿主页骨架: {name}")
     return 0
 
 
 def cmd_page_list(args: argparse.Namespace) -> int:
-    """List code pages under ui/."""
+    """List hosted pages declared in module.yaml."""
     del args
     module_root = require_module_root()
-    pages = _list_python_modules(module_root / "ui")
+    manifest = load_manifest(module_root)
+    pages = [
+        str(item.get("id", ""))
+        for item in _manifest_ui_entries_by_kind(manifest, "page")
+        if item.get("id")
+    ]
     print("\n".join(pages) if pages else "(无页面)")
     return 0
 
 
 def cmd_data_table_create(args: argparse.Namespace) -> int:
-    """Register a managed core:data_table view and append a declare_ui helper."""
+    """Register a managed core:data_table page and append a declare_ui helper."""
     module_root = require_module_root()
     view_id = str(args.view_id or "").strip()
     if not is_valid_name(view_id):
@@ -1286,12 +1449,12 @@ def cmd_data_table_create(args: argparse.Namespace) -> int:
         return 1
 
     manifest = load_manifest(module_root)
-    detail_menu = _normalize_detail_menu(manifest)
-    if any(isinstance(item, dict) and item.get("id") == view_id for item in detail_menu):
+    pages = _normalize_ui_pages(manifest)
+    if any(isinstance(item, dict) and item.get("id") == view_id for item in pages):
         _print_error(f"数据表入口已存在: {view_id}")
         return 1
 
-    detail_menu.append(
+    pages.append(
         {
             "id": view_id,
             "label": args.label or to_display_name(view_id),
@@ -1299,8 +1462,6 @@ def cmd_data_table_create(args: argparse.Namespace) -> int:
             "entry": f"core:data_table:{view_id}",
         }
     )
-    save_manifest(module_root, manifest)
-
     runtime_path = module_root / "module_runtime.py"
     runtime_text = runtime_path.read_text(encoding="utf-8")
     helper_name = f"_declare_{view_id}_table"
@@ -1310,26 +1471,28 @@ def cmd_data_table_create(args: argparse.Namespace) -> int:
             display_name=args.label or to_display_name(view_id),
         )
 
-    sentinel = "    # SDK-DATA-TABLES"
     call_line = f"    {helper_name}(context)"
-    if call_line not in runtime_text and sentinel in runtime_text:
-        runtime_text = runtime_text.replace(sentinel, f"{call_line}\n{sentinel}", 1)
+    try:
+        runtime_text = _insert_declare_ui_call(runtime_text, call_line)
+    except (CLIError, SyntaxError) as exc:
+        _print_error(f"无法更新 module_runtime.py: {exc}")
+        return 1
 
     runtime_path.write_text(runtime_text, encoding="utf-8")
+    save_manifest(module_root, manifest)
     _print_success(f"已注册受控数据表入口: core:data_table:{view_id}")
     return 0
 
 
 def cmd_data_table_list(args: argparse.Namespace) -> int:
-    """List managed data-table entries from module.yaml."""
+    """List managed data-table pages from module.yaml."""
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    detail_menu = ((manifest.get("ui_extension") or {}).get("detail_menu") or [])
     rows = [
         str(item.get("id", ""))
-        for item in detail_menu
-        if isinstance(item, dict) and item.get("id")
+        for item in _manifest_ui_entries_by_kind(manifest, "data_table")
+        if item.get("id")
     ]
     print("\n".join(rows) if rows else "(无数据表入口)")
     return 0
@@ -1940,7 +2103,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_show = module_sub.add_parser(
         "show",
-        help="显示当前模块的版本、仓库、默认工作流、页面入口和数据表入口",
+        help="显示当前模块的版本、仓库、默认工作流、宿主页和数据表入口",
     )
     module_show.set_defaults(func=cmd_module_show)
 
@@ -2005,35 +2168,35 @@ def build_parser() -> argparse.ArgumentParser:
 
     page_parser = subparsers.add_parser(
         "page",
-        help="代码型页面操作：生成 ui 页面类并维护 ui_extension.entry",
+        help="宿主页操作：在 module_runtime.py 生成 hosted page 骨架并维护 ui_extension.pages",
     )
     page_sub = page_parser.add_subparsers(dest="action")
     page_create = page_sub.add_parser(
         "create",
-        help="创建一个代码型页面，并把它设置为 ui_extension.entry",
+        help="创建一个宿主页骨架，并把它注册到 ui_extension.pages",
     )
     page_create.add_argument("name", help="页面名，snake_case")
     page_create.add_argument("--display-name", help="页面显示名")
     page_create.add_argument("--description", help="页面说明")
     page_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     page_create.set_defaults(func=cmd_page_create)
-    page_list = page_sub.add_parser("list", help="列出 ui/ 下的代码型页面文件")
+    page_list = page_sub.add_parser("list", help="列出 ui_extension.pages 中的宿主页入口")
     page_list.set_defaults(func=cmd_page_list)
 
     data_table_parser = subparsers.add_parser(
         "data-table",
-        help="受控数据表操作：注册 core:data_table:<id> 入口并补 declare_ui 骨架",
+        help="受控数据表操作：注册 ui_extension.pages 中的 core:data_table:<id> 入口并补 declare_ui 骨架",
     )
     data_table_sub = data_table_parser.add_subparsers(dest="action")
     data_table_create = data_table_sub.add_parser(
         "create",
-        help="创建一个受控数据表入口，会更新 detail_menu 并在 module_runtime.py 追加声明函数",
+        help="创建一个受控数据表入口，会更新 ui_extension.pages 并在 module_runtime.py 追加声明函数",
     )
     data_table_create.add_argument("view_id", help="数据表视图 ID，snake_case")
     data_table_create.add_argument("--label", help="数据表显示名")
     data_table_create.add_argument("--icon", help="数据表图标")
     data_table_create.set_defaults(func=cmd_data_table_create)
-    data_table_list = data_table_sub.add_parser("list", help="列出 detail_menu 中的受控数据表入口")
+    data_table_list = data_table_sub.add_parser("list", help="列出 ui_extension.pages 中的受控数据表入口")
     data_table_list.set_defaults(func=cmd_data_table_list)
 
     selector_parser = subparsers.add_parser(
@@ -2271,7 +2434,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_release.set_defaults(func=cmd_check_release)
     check_full = check_sub.add_parser(
         "full",
-        help="在 release 基础上再尝试导入模块、任务、工作流和页面入口，作为完整 gate",
+        help="在 release 基础上再尝试导入模块、任务、工作流并校验 hosted UI 声明，作为完整 gate",
     )
     check_full.set_defaults(func=cmd_check_full)
 

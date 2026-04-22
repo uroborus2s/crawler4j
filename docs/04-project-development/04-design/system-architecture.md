@@ -74,7 +74,7 @@ Maintainer
 ### `ARCH-002` 模块高阶能力仍未闭环
 
 - `ctrip labor_workflow` 已脱离旧兼容包并回到正式运行时链路，但真实站点 E2E 仍需验证
-- MMS 的 settings store、工作流导出、模块状态持久化、trust gate 与自定义页面加载已落地
+- MMS 的 settings store、工作流导出与模块状态持久化已落地；模块 UI 也已继续收口为 hosted page V1，详情页只消费 `ui_extension.pages[]`、`core:page:<page_id>` 与 `core:data_table:<view_id>`
 
 ### `ARCH-003` 版本规则已收口
 

@@ -364,14 +364,13 @@ def test_module_data_table_page_refresh_overwrites_stale_schema(qtbot, monkeypat
 def test_module_data_table_page_builds_devlink_context_with_settings(qtbot, monkeypatch):
     monkeypatch.setattr(ModuleDataTablePage, "refresh", lambda self: None)
     monkeypatch.setattr(
-        page_module,
-        "get_module_settings_store",
+        "src.core.mms.ui.module_ui_runtime.get_module_settings_store",
         lambda: SimpleNamespace(read_module_settings=lambda module_name: {"module_name": module_name}),
     )
 
     page = ModuleDataTablePage("demo_module", "accounts")
     qtbot.addWidget(page)
-    page._mms.registry = SimpleNamespace(get_module=lambda module_name: SimpleNamespace(source=ModuleSource.DEV_LINK))
+    page._bridge._mms.registry = SimpleNamespace(get_module=lambda module_name: SimpleNamespace(source=ModuleSource.DEV_LINK))
 
     context = page._build_task_context()
 
@@ -394,7 +393,7 @@ def test_module_data_table_page_runs_real_module_ui_chain(qtbot, monkeypatch, tm
         )
     )
 
-    monkeypatch.setattr(page_module, "get_module_service", lambda: service)
+    monkeypatch.setattr("src.core.mms.ui.module_ui_runtime.get_module_service", lambda: service)
 
     class FakeDialog:
         next_payload = {}

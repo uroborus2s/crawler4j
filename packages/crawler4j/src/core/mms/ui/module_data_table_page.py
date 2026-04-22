@@ -23,11 +23,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.atm.runtime_capabilities import build_runtime_capabilities
-from src.core.foundation.logging import logger
-from src.core.mms.models import ModuleSource
-from src.core.mms.service import get_module_service
-from src.core.mms.settings_store import get_module_settings_store
+from src.core.mms.models import ModuleInfo
+from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
 from src.core.persistence import get_kv_store, get_module_data_store
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.line_edit import StyledLineEdit
@@ -164,13 +161,19 @@ class _RecordEditDialog(QDialog):
 class ModuleDataTablePage(QWidget):
     """模块声明式数据表页面。"""
 
-    def __init__(self, module_name: str, view_id: str, parent=None):
+    def __init__(
+        self,
+        module_name: str,
+        view_id: str,
+        module_info: ModuleInfo | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self._module_name = module_name
         self._view_id = view_id
+        self._bridge = ModuleUIRuntimeBridge(module_name, module_info=module_info)
         self._kv = get_kv_store()
         self._data_store = get_module_data_store()
-        self._mms = get_module_service()
 
         self._schema: dict[str, Any] = {}
         self._records: list[dict[str, Any]] = []
@@ -243,23 +246,10 @@ class ModuleDataTablePage(QWidget):
         self.refresh_btn.clicked.connect(self.refresh)
 
     def _build_task_context(self) -> TaskContext:
-        config = get_module_settings_store().read_module_settings(self._module_name)
-        module = self._mms.registry.get_module(self._module_name)
-        runtime: dict[str, Any] = {}
-        if module and module.source == ModuleSource.DEV_LINK:
-            runtime["devel_mode"] = True
-        return TaskContext(
-            env_id=0,
-            task_name=self._module_name,
-            config=config,
-            logger=logger,
-            tools=build_runtime_capabilities(self._module_name).tools,
-            runtime=runtime,
-        )
+        return self._bridge.build_task_context()
 
     def _call_module_handler(self, handler_name: str, *args: Any) -> Any:
-        context = self._build_task_context()
-        return self._mms.call_local_hook(self._module_name, handler_name, context, *args)
+        return self._bridge.call_local_hook(handler_name, *args)
 
     def _schema_handler(self, key: str) -> str:
         raw = self._schema.get(key)

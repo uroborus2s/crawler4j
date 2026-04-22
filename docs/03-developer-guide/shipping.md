@@ -56,7 +56,6 @@ hotel_demo/
   module_runtime.py
   tasks/
   workflows/
-  ui/          # 可选: 有代码型页面时再带
   tests/       # 可选: 有模块自测时带上
   utils/       # 可选: 有纯函数工具时再带
 ```
@@ -76,7 +75,7 @@ uv run crawler4j check release
 - `module.yaml.name` 正确
 - `module.yaml.upgrade_source.repo` 正确
 - 目标 workflow 已声明
-- `ui_extension.entry` / `detail_menu` 与代码一致
+- `ui_extension.pages` 与 `declare_ui()` 一致
 
 ## 推荐打包命令
 
@@ -197,7 +196,7 @@ uv run crawler4j host install preview dist/hotel_demo-0.1.0.zip --skip-remote-ch
 | 站在模块根目录 | `test -f module.yaml && test -f __init__.py && test -f module_runtime.py` | 三个关键文件都存在 |
 | 站在模块根目录 | `uv run crawler4j check release` | 退出码为 `0`，无错误输出 |
 | 打开 `module.yaml` | 检查 `name`、`upgrade_source.repo`、`workflows` | `name` 合法，`repo` 为 `owner/repo`，`workflows` 非空 |
-| 打开 `module.yaml` | 检查 `ui_extension.entry` 和 `detail_menu` | 代码型 UI 为 `ui:PageClass`；数据表入口为 `core:data_table:<id>` |
+| 打开 `module.yaml` | 检查 `ui_extension.pages` | 页面入口只允许 `core:page:<id>` 或 `core:data_table:<id>` |
 | 检查清单文件 | `rg -n "sdk_version_range" module.yaml` | 无结果 |
 | 检查模块根目录 | `test ! -f config_schema.json && test ! -f strategy.yaml` | 两个旧配置文件都不存在 |
 
