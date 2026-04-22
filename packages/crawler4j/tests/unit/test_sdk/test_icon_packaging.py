@@ -23,6 +23,7 @@ def test_pyinstaller_spec_binds_runtime_and_bundle_icon_assets():
 def test_shared_app_icon_assets_exist_and_legacy_jpg_is_removed():
     assets_root = APP_ROOT / "src" / "ui" / "assets"
 
+    assert (assets_root / "app_icon_master.png").exists()
     assert (assets_root / "app_icon.png").exists()
     assert (assets_root / "app_icon.icns").exists()
     assert (assets_root / "app_icon.ico").exists()
@@ -59,13 +60,13 @@ def test_runtime_app_icon_uses_transparent_outer_corners():
     center_x = width // 2
     center_y = height // 2
     left_inset = next(x for x in range(width) if image.pixelColor(x, center_y).alpha() > 0)
-    right_inset = next((width - 1) - x for x in range(width) if image.pixelColor((width - 1) - x, center_y).alpha() > 0)
+    right_inset = next(x for x in range(width) if image.pixelColor((width - 1) - x, center_y).alpha() > 0)
     top_inset = next(y for y in range(height) if image.pixelColor(center_x, y).alpha() > 0)
-    bottom_inset = next((height - 1) - y for y in range(height) if image.pixelColor(center_x, (height - 1) - y).alpha() > 0)
-    assert left_inset >= 50
-    assert right_inset >= 50
-    assert top_inset >= 50
-    assert bottom_inset >= 50
+    bottom_inset = next(y for y in range(height) if image.pixelColor(center_x, (height - 1) - y).alpha() > 0)
+    assert 72 <= left_inset <= 82
+    assert 72 <= right_inset <= 82
+    assert 72 <= top_inset <= 82
+    assert 72 <= bottom_inset <= 82
 
 
 def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge_and_center_mark():
