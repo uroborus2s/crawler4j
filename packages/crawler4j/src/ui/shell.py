@@ -6,6 +6,8 @@
     - 内容区 (动态加载 Core 子系统 UI)
 """
 
+import asyncio
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
@@ -20,7 +22,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.atm import TaskStatus, get_task_service
+from src.core.atm import get_task_service
 from src.ui.app_icon import load_app_icon, load_app_icon_pixmap
 
 
@@ -29,6 +31,7 @@ class StatusIndicator(QFrame):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._refresh_task: asyncio.Task[None] | None = None
         self._setup_ui()
         self._setup_timer()
     
@@ -94,17 +97,41 @@ class StatusIndicator(QFrame):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh_status)
         self._timer.start(3000)  # 每 3 秒刷新
+
+    def _on_refresh_done(self, task: asyncio.Task[None]) -> None:
+        if self._refresh_task is task:
+            self._refresh_task = None
     
     def _refresh_status(self):
+        if self._refresh_task and not self._refresh_task.done():
+            return
+        coro = self._refresh_status_async()
         try:
-            # 任务统计
+            task = asyncio.create_task(coro)
+        except RuntimeError:
+            coro.close()
+            return
+        self._refresh_task = task
+        task.add_done_callback(self._on_refresh_done)
+
+    async def _refresh_status_async(self) -> None:
+        try:
             service = get_task_service()
-            tasks = service.list_recent(50)
-            running = sum(1 for t in tasks if t.status == TaskStatus.RUNNING)
-            self.running_label.setText(f"⏳ {running} 运行中")
-            
-            # 模块统计
+            jobs = await service.list_jobs()
+            active_counts = await asyncio.gather(
+                *(service.count_active_tasks(job.id) for job in jobs),
+            )
+            active_tasks = sum(active_counts)
+            self.running_label.setText(f"⏳ {active_tasks} 运行中")
+
+            from src.core.rem.manager import get_environment_manager
+
+            manager = get_environment_manager()
+            env_cache = getattr(manager.pool, "_environments", {})
+            self.env_label.setText(f"🖥️ {len(env_cache)} 环境")
+
             from src.core.mms import get_module_registry
+
             registry = get_module_registry()
             modules = registry.list_modules()
             self.module_label.setText(f"📦 {len(modules)} 模块")

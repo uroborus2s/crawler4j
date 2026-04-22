@@ -115,7 +115,7 @@ async def test_registry_installs_packaged_module_and_module_service_runs_it(temp
 
     assert module.name == "demo_module"
     assert module.source == ModuleSource.EXTERNAL
-    assert module.path == temp_data_dir / "modules" / "demo_module_pkg"
+    assert module.path == temp_data_dir / "modules" / "demo_module"
 
     service = ModuleService()
     service.registry = registry
@@ -169,7 +169,7 @@ async def test_installing_packaged_module_removes_same_name_dev_link_and_uses_in
         TaskContext(env_id=1, task_name="demo_module", config={}),
     )
 
-    assert Path(module_obj.__file__).resolve() == (temp_data_dir / "modules" / "demo_module_pkg" / "__init__.py").resolve()
+    assert Path(module_obj.__file__).resolve() == (temp_data_dir / "modules" / "demo_module" / "__init__.py").resolve()
 
 
 def test_zip_upgrade_replaces_existing_module_without_leaving_stale_files(temp_data_dir):
@@ -192,8 +192,63 @@ def test_zip_upgrade_replaces_existing_module_without_leaving_stale_files(temp_d
     module = registry.install(second_archive)
 
     assert module.manifest.version == "1.1.0"
-    assert module.path == temp_data_dir / "modules" / "demo_module_pkg"
+    assert module.path == temp_data_dir / "modules" / "demo_module"
     assert not (module.path / "obsolete.py").exists()
+
+
+def test_zip_upgrade_reuses_existing_install_dir_when_zip_root_changes(temp_data_dir):
+    first_archive = _build_module_archive(
+        temp_data_dir / "v1",
+        package_dir_name="demo_module_pkg_v1",
+        module_name="demo_module",
+        version="1.0.0",
+        extra_files={"obsolete.py": "OLD = True\n"},
+    )
+    second_archive = _build_module_archive(
+        temp_data_dir / "v2",
+        package_dir_name="demo_module_pkg_v2",
+        module_name="demo_module",
+        version="1.1.0",
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    first_module = registry.install(first_archive)
+    upgraded = registry.install(second_archive)
+
+    assert upgraded.manifest.version == "1.1.0"
+    assert upgraded.path == first_module.path
+    assert upgraded.path == temp_data_dir / "modules" / "demo_module"
+    assert upgraded.path.exists()
+    assert not (upgraded.path / "obsolete.py").exists()
+    assert not (temp_data_dir / "modules" / "demo_module_pkg_v1").exists()
+    assert not (temp_data_dir / "modules" / "demo_module_pkg_v2").exists()
+
+
+def test_zip_upgrade_migrates_legacy_non_canonical_install_dir(temp_data_dir):
+    legacy_dir = _build_module_dir(
+        temp_data_dir / "modules",
+        package_dir_name="demo_module_pkg_v1",
+        module_name="demo_module",
+        version="1.0.0",
+        extra_files={"obsolete.py": "OLD = True\n"},
+    )
+    second_archive = _build_module_archive(
+        temp_data_dir / "v2",
+        package_dir_name="demo_module_pkg_v2",
+        module_name="demo_module",
+        version="1.1.0",
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    registry.load(force=True)
+    upgraded = registry.install(second_archive)
+
+    assert upgraded.manifest.version == "1.1.0"
+    assert upgraded.path == temp_data_dir / "modules" / "demo_module"
+    assert upgraded.path.exists()
+    assert not legacy_dir.exists()
+    assert not (upgraded.path / "obsolete.py").exists()
+    assert not (temp_data_dir / "modules" / "demo_module_pkg_v2").exists()
 
 
 def test_zip_upgrade_rolls_back_when_new_package_fails_import(temp_data_dir):
@@ -221,7 +276,7 @@ def test_zip_upgrade_rolls_back_when_new_package_fails_import(temp_data_dir):
     current = registry.get_module("demo_module")
     assert current is not None
     assert current.manifest.version == "1.0.0"
-    assert current.path == temp_data_dir / "modules" / "demo_module_pkg"
+    assert current.path == temp_data_dir / "modules" / "demo_module"
     assert (current.path / "stable.py").exists()
     assert "broken module" not in (current.path / "__init__.py").read_text(encoding="utf-8")
 
@@ -251,5 +306,36 @@ def test_dir_install_rolls_back_when_copied_module_fails_import(temp_data_dir):
     current = registry.get_module("demo_module")
     assert current is not None
     assert current.manifest.version == "1.0.0"
-    assert current.path == temp_data_dir / "modules" / "demo_module_pkg"
+    assert current.path == temp_data_dir / "modules" / "demo_module"
+    assert (current.path / "stable.py").exists()
+
+
+def test_zip_upgrade_rolls_back_to_legacy_dir_when_canonical_migration_fails(temp_data_dir):
+    legacy_dir = _build_module_dir(
+        temp_data_dir / "modules",
+        package_dir_name="demo_module_pkg_v1",
+        module_name="demo_module",
+        version="1.0.0",
+        extra_files={"stable.py": "STABLE = True\n"},
+    )
+    bad_archive = _build_module_archive(
+        temp_data_dir / "v2",
+        package_dir_name="demo_module_pkg_v2",
+        module_name="demo_module",
+        version="1.1.0",
+        extra_files={"__init__.py": "raise RuntimeError('broken migrated module')\n"},
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    registry.load(force=True)
+
+    with pytest.raises(ModuleInstallError, match="模块导入预检失败"):
+        registry.install(bad_archive)
+
+    current = registry.get_module("demo_module")
+    assert current is not None
+    assert current.manifest.version == "1.0.0"
+    assert current.path == legacy_dir
+    assert legacy_dir.exists()
+    assert not (temp_data_dir / "modules" / "demo_module").exists()
     assert (current.path / "stable.py").exists()

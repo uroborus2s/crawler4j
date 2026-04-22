@@ -38,30 +38,32 @@ uv run crawler4j check structure
 ### 最小页面写法
 
 ```python
+from typing import Any
+
 from PyQt6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
-from crawler4j_sdk import TaskContext
 
 
 class DashboardPage(QWidget):
-    def __init__(self, ctx: TaskContext, parent=None):
+    def __init__(self, module: Any | None = None, parent=None):
         super().__init__(parent)
-        self.ctx = ctx
+        self.module = module
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("酒店模块"))
+        self.label = QLabel("酒店模块")
+        layout.addWidget(self.label)
 
         btn = QPushButton("刷新数据")
         btn.clicked.connect(self.on_refresh)
         layout.addWidget(btn)
 
     def on_refresh(self):
-        self.ctx.logger.info("UI 请求刷新数据")
+        self.label.setText("酒店模块已刷新")
 ```
 
 ### 页面开发纪律
 
-- 页面类签名保持 `__init__(self, ctx: TaskContext, parent=None)`
-- 页面里仍然通过 `ctx.tools.call(...)` 访问宿主能力
+- 页面类签名保持兼容宿主 loader：`__init__(self, module: Any | None = None, parent=None)`
+- 代码型页面默认只拿到 `module` 对象或无参实例化，不要假定宿主会传 `TaskContext`
 - 页面只做界面交互和轻量业务动作
 - 如果页面逻辑已经需要大量状态机、服务层、仓储层，说明页面职责已经写重了
 

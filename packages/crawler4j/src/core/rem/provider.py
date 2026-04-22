@@ -1759,35 +1759,6 @@ class VirtualBrowserProvider(BaseProvider):
         except Exception as e:
             logger.error(f"[VirtualBrowser] 更新环境失败: {e}")
             return False
-        
-        if not browser_id:
-            return False
-        
-        try:
-            browser_id_int = int(browser_id)
-            client = self._get_api_client()
-            
-            # 处理刷新指纹的特殊情况
-            api_config = dict(config)
-            should_randomize = api_config.pop("randomize_fingerprint", False)
-            
-            # 如果有其他配置项，先更新
-            if api_config:
-                success = await client.update_browser(browser_id_int, api_config)
-                if not success:
-                    logger.error(f"[VirtualBrowser] 更新环境失败: id={browser_id}")
-                    return False
-            
-            # 如果需要刷新指纹
-            if should_randomize:
-                await client.randomize_fingerprint(browser_id_int, {})
-                logger.info(f"[VirtualBrowser] 指纹已刷新: id={browser_id}")
-            
-            logger.info(f"[VirtualBrowser] 更新环境成功: id={browser_id}")
-            return True
-        except Exception as e:
-            logger.error(f"[VirtualBrowser] 更新环境失败: {e}")
-            return False
 
 
 # =============================================================================

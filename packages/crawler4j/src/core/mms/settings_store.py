@@ -93,16 +93,60 @@ class ModuleSettingsStore:
             self._assign_nested(payload, row["key_path"], json.loads(row["value_json"]))
         return payload
 
+    def _delete_scope_rows_in_conn(
+        self,
+        conn,
+        module_name: str,
+        scope: str,
+        scope_name: str = "",
+    ) -> int:
+        cursor = conn.execute(
+            """
+            DELETE FROM module_config_entries
+            WHERE module_name = ? AND scope_type = ? AND scope_name = ?
+            """,
+            (module_name, scope, scope_name),
+        )
+        return cursor.rowcount or 0
+
     def _delete_scope_rows(self, module_name: str, scope: str, scope_name: str = "") -> int:
         with get_connection(CONFIG_DB) as conn:
-            cursor = conn.execute(
+            return self._delete_scope_rows_in_conn(conn, module_name, scope, scope_name)
+
+    def _write_scope_rows_in_conn(
+        self,
+        conn,
+        scope: str,
+        module_name: str,
+        scope_name: str,
+        value: dict[str, Any],
+    ) -> bool:
+        now = int(time.time())
+        rows = self._flatten_entries(value)
+        self._delete_scope_rows_in_conn(conn, module_name, scope, scope_name)
+        for key_path, raw_value, value_type in rows:
+            conn.execute(
                 """
-                DELETE FROM module_config_entries
-                WHERE module_name = ? AND scope_type = ? AND scope_name = ?
+                INSERT INTO module_config_entries (
+                    module_name, scope_type, scope_name, key_path, value_json, value_type, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(module_name, scope_type, scope_name, key_path) DO UPDATE SET
+                    value_json = excluded.value_json,
+                    value_type = excluded.value_type,
+                    updated_at = excluded.updated_at
                 """,
-                (module_name, scope, scope_name),
+                (
+                    module_name,
+                    scope,
+                    scope_name,
+                    key_path,
+                    json.dumps(raw_value, ensure_ascii=False),
+                    value_type,
+                    now,
+                    now,
+                ),
             )
-            return cursor.rowcount or 0
+        return True
 
     def _write_scope_rows(
         self,
@@ -111,71 +155,54 @@ class ModuleSettingsStore:
         scope_name: str,
         value: dict[str, Any],
     ) -> bool:
-        now = int(time.time())
-        rows = self._flatten_entries(value)
         with get_connection(CONFIG_DB) as conn:
-            conn.execute(
-                """
-                DELETE FROM module_config_entries
-                WHERE module_name = ? AND scope_type = ? AND scope_name = ?
-                """,
-                (module_name, scope, scope_name),
-            )
-            for key_path, raw_value, value_type in rows:
-                conn.execute(
-                    """
-                    INSERT INTO module_config_entries (
-                        module_name, scope_type, scope_name, key_path, value_json, value_type, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(module_name, scope_type, scope_name, key_path) DO UPDATE SET
-                        value_json = excluded.value_json,
-                        value_type = excluded.value_type,
-                        updated_at = excluded.updated_at
-                    """,
-                    (
-                        module_name,
-                        scope,
-                        scope_name,
-                        key_path,
-                        json.dumps(raw_value, ensure_ascii=False),
-                        value_type,
-                        now,
-                        now,
-                    ),
-                )
-        return True
+            return self._write_scope_rows_in_conn(conn, scope, module_name, scope_name, value)
+
+    def _read_scope_rows_in_conn(self, conn, scope: str, module_name: str, scope_name: str = "") -> list[Any]:
+        cursor = conn.execute(
+            """
+            SELECT key_path, value_json, value_type
+            FROM module_config_entries
+            WHERE module_name = ? AND scope_type = ? AND scope_name = ?
+            ORDER BY key_path
+            """,
+            (module_name, scope, scope_name),
+        )
+        return cursor.fetchall()
 
     def _read_scope_rows(self, scope: str, module_name: str, scope_name: str = "") -> list[Any]:
         with get_connection(CONFIG_DB) as conn:
-            cursor = conn.execute(
-                """
-                SELECT key_path, value_json, value_type
-                FROM module_config_entries
-                WHERE module_name = ? AND scope_type = ? AND scope_name = ?
-                ORDER BY key_path
-                """,
-                (module_name, scope, scope_name),
-            )
-            return cursor.fetchall()
+            return self._read_scope_rows_in_conn(conn, scope, module_name, scope_name)
+
+    def _read_scope_dict_in_conn(self, conn, scope: str, module_name: str, scope_name: str = "") -> dict[str, Any]:
+        rows = self._read_scope_rows_in_conn(conn, scope, module_name, scope_name)
+        return self._rebuild_entries(rows) if rows else {}
 
     def _read_scope_dict(self, scope: str, module_name: str, scope_name: str = "") -> dict[str, Any]:
         rows = self._read_scope_rows(scope, module_name, scope_name)
         return self._rebuild_entries(rows) if rows else {}
 
-    def _has_any_scope_rows(self, module_name: str, scopes: tuple[str, ...]) -> bool:
+    def _has_any_scope_rows_in_conn(self, conn, module_name: str, scopes: tuple[str, ...]) -> bool:
         placeholders = ",".join("?" for _ in scopes)
         params: list[Any] = [module_name, *scopes]
-        with get_connection(CONFIG_DB) as conn:
-            row = conn.execute(
-                f"""
-                SELECT 1
-                FROM module_config_entries
-                WHERE module_name = ? AND scope_type IN ({placeholders})
-                LIMIT 1
-                """,
-                params,
-            ).fetchone()
+        row = conn.execute(
+            f"""
+            SELECT 1
+            FROM module_config_entries
+            WHERE module_name = ? AND scope_type IN ({placeholders})
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
         return row is not None
+
+    def _has_any_scope_rows(self, module_name: str, scopes: tuple[str, ...]) -> bool:
+        with get_connection(CONFIG_DB) as conn:
+            return self._has_any_scope_rows_in_conn(conn, module_name, scopes)
+
+    def _is_config_defaults_initialized_in_conn(self, conn, module_name: str) -> bool:
+        payload = self._read_scope_dict_in_conn(conn, self.CONFIG_DEFAULTS_INIT_SCOPE, module_name)
+        return bool(payload.get("initialized"))
 
     def read_settings(self, scope: str, key: str) -> Any:
         """读取指定 scope/key 的设置。"""
@@ -253,18 +280,40 @@ class ModuleSettingsStore:
         module_defaults: dict[str, Any],
         workflow_defaults: dict[str, dict[str, Any]],
     ) -> bool:
-        if self.is_config_defaults_initialized(module_name):
-            return False
+        with get_connection(CONFIG_DB) as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
 
-        if self._has_any_scope_rows(module_name, (self.MODULE_SCOPE, self.WORKFLOW_SCOPE)):
-            self.mark_config_defaults_initialized(module_name)
-            return False
+            if self._is_config_defaults_initialized_in_conn(conn, module_name):
+                return False
 
-        self.write_module_settings(module_name, module_defaults)
-        for workflow_name, payload in workflow_defaults.items():
-            self.write_workflow_settings(module_name, workflow_name, payload)
-        self.mark_config_defaults_initialized(module_name)
-        return True
+            if self._has_any_scope_rows_in_conn(conn, module_name, (self.MODULE_SCOPE, self.WORKFLOW_SCOPE)):
+                self._write_scope_rows_in_conn(
+                    conn,
+                    self.CONFIG_DEFAULTS_INIT_SCOPE,
+                    module_name,
+                    "",
+                    {"initialized": True},
+                )
+                return False
+
+            self._write_scope_rows_in_conn(conn, self.MODULE_SCOPE, module_name, "", module_defaults)
+            for workflow_name, payload in workflow_defaults.items():
+                self._write_scope_rows_in_conn(
+                    conn,
+                    self.WORKFLOW_SCOPE,
+                    module_name,
+                    workflow_name,
+                    payload,
+                )
+            self._write_scope_rows_in_conn(
+                conn,
+                self.CONFIG_DEFAULTS_INIT_SCOPE,
+                module_name,
+                "",
+                {"initialized": True},
+            )
+            return True
 
     def build_task_config(self, module_name: str, workflow_name: str = "") -> dict[str, Any]:
         module_settings = self.read_module_settings(module_name)

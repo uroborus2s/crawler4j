@@ -372,14 +372,28 @@ class ModuleRegistry:
         self._probe_module_import(manifest.name, module_dir)
         return manifest
 
+    def _resolve_install_target_dir(self, manifest: ModuleManifest) -> Path:
+        return self._install_dir / manifest.name
+
+    def _collect_existing_install_dirs(self, manifest: ModuleManifest, target_dir: Path) -> list[Path]:
+        install_dirs: list[Path] = []
+        existing = self.get_module(manifest.name)
+        if existing and existing.source == ModuleSource.EXTERNAL and existing.path:
+            install_dirs.append(existing.path)
+        if target_dir not in install_dirs and target_dir.exists():
+            install_dirs.append(target_dir)
+        return [path for path in install_dirs if path.exists()]
+
     def _activate_staged_module(self, staged_dir: Path, manifest: ModuleManifest) -> ModuleInfo:
-        target_dir = self._install_dir / staged_dir.name
-        backup_dir: Path | None = None
+        target_dir = self._resolve_install_target_dir(manifest)
+        replaced_dirs = self._collect_existing_install_dirs(manifest, target_dir)
+        backup_dirs: list[tuple[Path, Path]] = []
 
         try:
-            if target_dir.exists():
-                backup_dir = self._reserve_install_slot(f".{target_dir.name}.bak.")
-                shutil.move(str(target_dir), str(backup_dir))
+            for replaced_dir in replaced_dirs:
+                backup_dir = self._reserve_install_slot(f".{replaced_dir.name}.bak.")
+                shutil.move(str(replaced_dir), str(backup_dir))
+                backup_dirs.append((replaced_dir, backup_dir))
 
             shutil.move(str(staged_dir), str(target_dir))
             self._probe_module_import(manifest.name, target_dir)
@@ -392,14 +406,18 @@ class ModuleRegistry:
                 path=target_dir,
             )
         except Exception:
-            if backup_dir and backup_dir.exists():
+            if target_dir.exists():
+                shutil.rmtree(target_dir, ignore_errors=True)
+            for replaced_dir, backup_dir in reversed(backup_dirs):
                 if target_dir.exists():
                     shutil.rmtree(target_dir, ignore_errors=True)
-                shutil.move(str(backup_dir), str(target_dir))
+                if backup_dir.exists():
+                    shutil.move(str(backup_dir), str(replaced_dir))
             raise
         finally:
-            if backup_dir and backup_dir.exists():
-                shutil.rmtree(backup_dir, ignore_errors=True)
+            for _, backup_dir in backup_dirs:
+                if backup_dir.exists():
+                    shutil.rmtree(backup_dir, ignore_errors=True)
 
     def _reserve_install_slot(self, prefix: str) -> Path:
         reserved_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=str(self._install_dir)))

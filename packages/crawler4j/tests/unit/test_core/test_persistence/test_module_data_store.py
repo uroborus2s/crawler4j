@@ -327,6 +327,34 @@ def test_module_data_store_write_empty_dataset_keeps_manifest_and_clears_rows(te
     assert dict(manifest_row) == {"created_at": 100, "updated_at": 200}
 
 
+def test_module_data_store_rejects_invalid_write_dataset_without_clobbering_rows(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    assert store.write_dataset("demo_module", "accounts", [{"id": "u1"}]) is True
+
+    with pytest.raises(ValueError, match=r"records\[1\]"):
+        store.write_dataset("demo_module", "accounts", [{"id": "u2"}, "bad"])
+
+    assert store.read_dataset("demo_module", "accounts") == [{"id": "u1"}]
+
+    with get_connection(DATA_DB) as conn:
+        rows = conn.execute(
+            """
+            SELECT record_index, record_json
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            ORDER BY record_index ASC
+            """,
+            ("demo_module", "accounts"),
+        ).fetchall()
+
+    assert len(rows) == 1
+    assert rows[0]["record_index"] == 0
+    assert json.loads(rows[0]["record_json"]) == {"id": "u1"}
+
+
 @pytest.mark.parametrize(
     "create_sql",
     [

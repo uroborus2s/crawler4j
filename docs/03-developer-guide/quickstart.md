@@ -222,14 +222,15 @@ class HotelSyncWorkflow(TaskFlow):
 最小写法:
 
 ```python
+from typing import Any
+
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
-from crawler4j_sdk import TaskContext
 
 
 class DashboardPage(QWidget):
-    def __init__(self, ctx: TaskContext, parent=None):
+    def __init__(self, module: Any | None = None, parent=None):
         super().__init__(parent)
-        self.ctx = ctx
+        self.module = module
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("酒店模块 Dashboard"))

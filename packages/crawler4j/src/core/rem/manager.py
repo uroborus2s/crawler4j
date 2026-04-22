@@ -242,21 +242,29 @@ class EnvironmentManager:
         """
         return await self.lease_manager.acquire_atomic(requirement, timeout)
     
-    async def recycle_env(self, env: Environment) -> None:
+    async def recycle_env(self, env: Environment) -> bool:
         """关闭窗口并回收到 READY，不清理浏览器持久数据。"""
     
         provider = get_provider(env.provider)
         # 关闭窗口
         if provider:
             try:
-                await provider.close(env)
+                closed = await provider.close(env)
+                if not closed:
+                    await self.pool.update_status(env.id, env.status)
+                    logger.warning(f"[REM] 关闭窗口失败，环境保持原状态: id={env.id} status={env.status.value}")
+                    return False
             except Exception as e:
                 logger.warning(f"[REM] 关闭窗口失败: {e}")
+                await self.pool.update_status(env.id, env.status)
+                self._emit_error(env, "close", str(e))
+                return False
         # 清空租约绑定，避免 READY 状态残留旧 lease/task 标记。
         env.lease_id = None
         env.task_run_id = None
         await self.pool.update_status(env.id, EnvStatus.READY)
         logger.info(f"[REM] 环境已回收: id={env.id}")
+        return True
     
     async def release(self, lease: EnvLease, dirty: bool = False) -> bool:
         """释放环境租约。
@@ -277,8 +285,7 @@ class EnvironmentManager:
         env = await self.lease_manager.release(lease, lease.token)
         if not env:
             return False
-        await self.recycle_env(env)
-        return True
+        return await self.recycle_env(env)
 
     async def release_keep_alive(self, lease: EnvLease) -> bool:
         """释放租约但保持环境当前运行状态。"""

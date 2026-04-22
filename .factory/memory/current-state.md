@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-04-22 已把桌面更新服务器目录口径收口为 `mac/` 与 `win/` 并列：`deploy-macos-internal-release` 现在会把 `packages/crawler4j/dist/updates/macos/` 同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`，同时新增 `uv run deploy-windows-release`，会把 `packages/crawler4j/dist/updates/windows/` 同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`；`.env.example`、README、部署说明与打包配置回归已同步到新的 feed / 上传目录约定。
 - 最新修复：2026-04-22 已为 Windows 正式交付补齐 `PyInstaller onedir + Velopack` 发布与宿主自更新主链：workspace 根新增 `uv run package-windows-release`，会在现有 onedir bundle 基线上写入 `crawler4j.update.json` 并继续生成 `Setup.exe` / `.nupkg` / `releases.win.json`；宿主系统层新增 `src.core.system.velopack`，`UpdateService` 已收口为 Sparkle / Velopack 平台分派，`src.ui.app:main` 也会在 GUI 初始化前先跑 Windows Velopack bootstrap。当前直接锁定该路径的是 `test_packaging_config.py`、`test_update_service.py` 与 `test_app.py`。
 - 最新修复：2026-04-22 已继续收口系统设置里的 `关于` 页：设置页右侧内容区现直接复用完整版本信息组件，不再额外显示页内 `关于` 标题或 `📋 完整信息` 二次入口，且切到 `关于` 标签时底部 `↺ 恢复默认` 会自动隐藏；关于内容里的官网链接已同步切到 `https://github.com/uroborus2s/crawler4j`，同时顶部状态栏版本号点击出的 `AboutDialog` 弹窗入口保持不变。
 - 最新修复：2026-04-22 已继续打通 macOS Sparkle 内部分发的发布侧签名链：`package-macos-internal-release` 现会在注入 `Sparkle.framework` 并改写 `Info.plist` 后自动对宿主 bundle 执行 ad-hoc `codesign`，避免 `generate_appcast` 再把更新归档判成 `No usable archives found`；同时发布脚本已支持通过 `CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT`、`CRAWLER4J_SPARKLE_PRIVATE_ED_KEY_FILE` 或 `CRAWLER4J_SPARKLE_PRIVATE_ED_KEY` 显式提供 EdDSA 私钥来源。当前本机真实复验已确认：`codesign --verify --deep --strict` 通过，后续阻塞已前移为“若仍缺少私钥则 `generate_appcast` 会报 `Could not sign ... due to lack of private EdDSA key`”。
@@ -118,3 +119,4 @@
 - 若 UX/UI 需要可视化评审，优先登记真实设计交付物而不是只写文字
 - 若工作项进入收尾，确认关联 PR 已完成评审并合并
 - 阶段切换前先更新正式文档，再刷新 `/.factory/memory/` 压缩记忆
+- 最新修复：2026-04-22 已完成代码洁净性专项第一轮收口。REM 回收失败不再把环境误标为 `READY`；ATM 删除作业改为“先停调度/请求停机，再等 active task 归零后删库”；MMS 外部模块安装目录已改为稳定模块名并兼容旧非规范目录迁移/回滚；`write_dataset()` 对坏输入改为 fail-fast；SDK `page create` 输出已对齐宿主 `module`/无参实例化契约，`module init/set version/release status` 同步校验 `pyproject.toml` 与 `module.yaml` 版本一致；开发者指南里的页面示例签名也已同步更新。

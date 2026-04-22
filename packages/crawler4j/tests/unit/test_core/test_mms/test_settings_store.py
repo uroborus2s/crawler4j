@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
@@ -155,6 +156,53 @@ def test_settings_store_marks_existing_settings_as_initialized_without_overwriti
         "workflows": {"default": {"headless": True}},
     }
     assert store.is_config_defaults_initialized("demo_module") is True
+
+
+def test_settings_store_default_init_rolls_back_when_a_write_fails(temp_data_dir):
+    from src.core.mms.settings_store import ModuleSettingsStore
+    from src.core.persistence.database import get_connection as real_get_connection
+
+    store = ModuleSettingsStore()
+
+    class _FailOnSecondaryWorkflowConn:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, params=()):  # noqa: ANN001
+            normalized_sql = " ".join(sql.split()).lower()
+            if (
+                "insert into module_config_entries" in normalized_sql
+                and len(params) >= 3
+                and params[1] == store.WORKFLOW_SCOPE
+                and params[2] == "secondary"
+            ):
+                raise RuntimeError("simulated workflow write failure")
+            return self._conn.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    @contextmanager
+    def flaky_get_connection(db_name="config.db"):
+        with real_get_connection(db_name) as conn:
+            yield _FailOnSecondaryWorkflowConn(conn)
+
+    with patch("src.core.mms.settings_store.get_connection", flaky_get_connection):
+        with pytest.raises(RuntimeError, match="simulated workflow write failure"):
+            store.ensure_config_defaults_initialized(
+                "demo_module",
+                {"base_url": "https://example.com", "retry": 3},
+                {
+                    "default": {"headless": False},
+                    "secondary": {"headless": True},
+                },
+            )
+
+    assert store.export_module_settings("demo_module") == {
+        "module": {},
+        "workflows": {},
+    }
+    assert store.is_config_defaults_initialized("demo_module") is False
 
 
 def test_settings_store_ignores_legacy_configs_rows(temp_data_dir):

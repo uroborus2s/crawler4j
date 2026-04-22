@@ -45,7 +45,9 @@
 - `TC-038`: `uv run package-desktop` 现在会把 workspace 里的 `crawler4j-contracts` / `crawler4j-sdk` 一并打进 macOS bundle，并在构建完成后自动移除松散的 `Crawler4j/` collect 目录；覆盖见 `tests/unit/test_sdk/test_packaging_config.py`，实包验证已确认 bundle 可在临时 HOME 下启动到 REM/ATM/MMS 初始化阶段。
 - `TC-044`: `uv run package-windows-release` 现已覆盖 Windows Velopack 发布配置读取、`crawler4j.update.json` 写入，以及 `vpk pack` / `dnx vpk pack` 命令形状；覆盖见 `tests/unit/test_sdk/test_packaging_config.py`.
 - `TC-045`: Windows 宿主更新链现已覆盖 Velopack 后端分派、统一 `UpdateService` 结果语义，以及 GUI 启动前的 bootstrap 顺序；覆盖见 `tests/unit/test_core/test_system/test_update_service.py` 与 `tests/unit/test_ui/test_app.py`.
-- Workspace root `scripts/` now keeps `build_workspace_packages.py`, `db_cli.py`, and `smoke_test_ui.py` as the maintained helper set; legacy local debug and icon-generation helpers are no longer treated as maintained assets.
+- `TC-046`: 更新站点上传脚本现在会把 `CRAWLER4J_UPDATE_UPLOAD_TARGET` 视为公共发布根目录，并分别把 macOS / Windows 产物同步到 `mac/` 与 `win/`；覆盖见 `tests/unit/test_sdk/test_packaging_config.py`.
+- `TC-047`: 代码洁净性专项回归现覆盖 6 条主链修复：REM 回收失败不回池、ATM 删作业先收口 active task、MMS `config_defaults` 原子初始化、`module_datasets` 非法写入 fail-fast、外部模块安装目录 canonical path/迁移回滚，以及 SDK 页面脚手架与版本契约收敛；覆盖见 `tests/unit/test_core/test_rem/test_recycle_env.py`、`tests/unit/test_core/test_atm/test_job_modes.py`、`tests/unit/test_core/test_mms/test_settings_store.py`、`tests/unit/test_core/test_mms/test_external_module_install.py`、`tests/unit/test_core/test_persistence/test_module_data_store.py`、`tests/unit/test_sdk/test_cli_scaffold.py`、`tests/acceptance/test_release_status_acceptance.py`.
+- Workspace root `scripts/` now keeps the maintained build, desktop packaging, Sparkle / Velopack release, UI smoke, and database helper set; legacy local debug and icon-generation helpers are no longer treated as maintained assets.
 
 Current gaps:
 

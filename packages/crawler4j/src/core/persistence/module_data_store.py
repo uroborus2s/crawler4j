@@ -16,6 +16,18 @@ def _normalize_records(raw: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in raw if isinstance(item, dict)]
 
 
+def _normalize_records_for_write(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        raise ValueError("dataset records must be a list of objects")
+
+    records: list[dict[str, Any]] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"dataset records[{index}] must be an object")
+        records.append(dict(item))
+    return records
+
+
 def _normalize_schema(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
@@ -102,7 +114,7 @@ class ModuleDataStore:
 
     def _write_dataset_row(self, module_name: str, dataset_name: str, records: list[dict[str, Any]]) -> bool:
         now = int(time.time())
-        normalized_records = _normalize_records(records)
+        normalized_records = [dict(record) for record in records]
         created_at, _ = self._read_dataset_manifest_timestamps(module_name, dataset_name)
         created_at = created_at if created_at is not None else now
         with get_connection(DATA_DB) as conn:
@@ -326,7 +338,7 @@ class ModuleDataStore:
         return records if records is not None else []
 
     def write_dataset(self, module_name: str, dataset_name: str, records: list[dict[str, Any]]) -> bool:
-        return self._write_dataset_row(module_name, dataset_name, _normalize_records(records))
+        return self._write_dataset_row(module_name, dataset_name, _normalize_records_for_write(records))
 
     def append_audit_event(
         self,
