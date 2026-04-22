@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import importlib.util
 import plistlib
 import re
@@ -105,9 +106,21 @@ def test_contracts_packaging_maps_flat_src_to_public_package_name():
     pyproject = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "pyproject.toml")
     setuptools_cfg = pyproject["tool"]["setuptools"]
     assert pyproject["build-system"]["build-backend"] == "setuptools.build_meta"
+    assert pyproject["project"]["dependencies"] == []
     assert setuptools_cfg["packages"] == ["crawler4j_contracts"]
     assert setuptools_cfg["package-dir"]["crawler4j_contracts"] == "src"
     assert setuptools_cfg["package-data"]["crawler4j_contracts"] == ["py.typed"]
+
+
+def test_contracts_package_no_longer_ships_default_http_runtime():
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-contracts"
+    context_path = package_root / "src" / "context.py"
+    tree = ast.parse(context_path.read_text(encoding="utf-8"), filename=str(context_path))
+
+    assert all(
+        not (isinstance(node, ast.ClassDef) and node.name == "DefaultHttpClient")
+        for node in tree.body
+    )
 
 
 def test_contracts_runtime_version_matches_publish_metadata():
@@ -386,6 +399,76 @@ def test_desktop_packaging_script_prunes_macos_collect_dir_after_app_bundle_buil
     assert app_bundle.exists()
 
 
+def test_release_packaging_helper_loads_project_version_from_app_pyproject():
+    helper = _load_script_module("release_packaging_helpers.py")
+    pyproject = _load_pyproject(APP_ROOT / "pyproject.toml")
+
+    assert helper.load_project_version() == pyproject["project"]["version"]
+
+
+def test_release_packaging_helper_parses_dotenv_export_and_quoted_values(tmp_path):
+    helper = _load_script_module("release_packaging_helpers.py")
+    dotenv_path = tmp_path / ".env.release"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                "# release env",
+                "export CRAWLER4J_RELEASE_NAME=internal",
+                'CRAWLER4J_RELEASE_URL="https://updates.example.com/feed.xml"',
+                "CRAWLER4J_RELEASE_CHANNEL='beta'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert helper.load_dotenv_file(dotenv_path) == {
+        "CRAWLER4J_RELEASE_NAME": "internal",
+        "CRAWLER4J_RELEASE_URL": "https://updates.example.com/feed.xml",
+        "CRAWLER4J_RELEASE_CHANNEL": "beta",
+    }
+
+
+def test_release_packaging_helper_resolve_runtime_env_merges_dotenv_os_and_explicit_env(tmp_path, monkeypatch):
+    helper = _load_script_module("release_packaging_helpers.py")
+    dotenv_path = tmp_path / ".env.release"
+    dotenv_path.write_text(
+        "FROM_DOTENV=dotenv\nSHARED_KEY=dotenv\nFROM_OS=dotenv-default\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FROM_OS", "os")
+    monkeypatch.setenv("SHARED_KEY", "os")
+
+    env_map = helper.resolve_runtime_env(
+        {"FROM_CALL": "call", "SHARED_KEY": "call"},
+        env_file=dotenv_path,
+    )
+
+    assert env_map["FROM_DOTENV"] == "dotenv"
+    assert env_map["FROM_OS"] == "os"
+    assert env_map["FROM_CALL"] == "call"
+    assert env_map["SHARED_KEY"] == "call"
+
+
+def test_platform_release_scripts_reuse_shared_runtime_env_helpers(tmp_path, monkeypatch):
+    helper = importlib.import_module("scripts.release_packaging_helpers")
+    macos_script = _load_script_module("package_macos_internal_release.py")
+    windows_script = _load_script_module("package_windows_release.py")
+    macos_dotenv = tmp_path / ".mac.env"
+    windows_dotenv = tmp_path / ".win.env"
+    macos_dotenv.write_text("SHARED_KEY=mac-dotenv\n", encoding="utf-8")
+    windows_dotenv.write_text("SHARED_KEY=win-dotenv\n", encoding="utf-8")
+
+    monkeypatch.setattr(macos_script, "DEFAULT_ENV_FILE", macos_dotenv)
+    monkeypatch.setattr(windows_script, "DEFAULT_ENV_FILE", windows_dotenv)
+    assert macos_script.resolve_runtime_env()["SHARED_KEY"] == helper.resolve_runtime_env(
+        default_env_file=macos_dotenv
+    )["SHARED_KEY"]
+    assert windows_script.resolve_runtime_env()["SHARED_KEY"] == helper.resolve_runtime_env(
+        default_env_file=windows_dotenv
+    )["SHARED_KEY"]
+
+
 def test_windows_release_config_reads_env_defaults():
     script = _load_script_module("package_windows_release.py")
 
@@ -484,6 +567,71 @@ def test_windows_release_build_vpk_pack_command_uses_dnx_when_requested(tmp_path
     assert command[:5] == ["dnx", "vpk", "--version", "0.0.1298", "pack"]
     assert "--packId" in command
     assert "--mainExe" in command
+
+
+def test_windows_release_normalizes_dev_velopack_version_for_dnx():
+    script = _load_script_module("package_windows_release.py")
+
+    assert script.normalize_dnx_package_version("0.0.1589.dev41669") == "0.0.1589"
+    assert script.normalize_dnx_package_version("0.0.1589+local") == "0.0.1589"
+    assert script.normalize_dnx_package_version("0.0.1589") == "0.0.1589"
+
+
+def test_windows_release_build_vpk_pack_command_wraps_batch_shims_with_cmd(tmp_path, monkeypatch):
+    script = _load_script_module("package_windows_release.py")
+    bundle_dir = tmp_path / "Crawler4j"
+    output_dir = tmp_path / "updates"
+    config = script.WindowsReleaseConfig(
+        feed_url="https://updates.example.com/win/releases.win.json",
+        pack_id="io.github.uroborus2s.crawler4j",
+        channel="win",
+        runtime="win-x64",
+        use_dnx=True,
+    )
+    monkeypatch.setattr(script.shutil, "which", lambda name: r"C:\Program Files\dotnet\dnx.cmd" if name == "dnx" else None)
+
+    command = script.build_vpk_pack_command(
+        bundle_dir,
+        output_dir,
+        version="0.2.0",
+        config=config,
+        velopack_version="0.0.1298",
+    )
+
+    assert command[:7] == [
+        script.os.environ.get("COMSPEC", "cmd.exe"),
+        "/c",
+        r"C:\Program Files\dotnet\dnx.cmd",
+        "vpk",
+        "--version",
+        "0.0.1298",
+        "pack",
+    ]
+    assert "--packId" in command
+
+
+def test_windows_release_build_vpk_pack_command_uses_normalized_dnx_version(tmp_path):
+    script = _load_script_module("package_windows_release.py")
+    bundle_dir = tmp_path / "Crawler4j"
+    output_dir = tmp_path / "updates"
+    config = script.WindowsReleaseConfig(
+        feed_url="https://updates.example.com/win/releases.win.json",
+        pack_id="io.github.uroborus2s.crawler4j",
+        channel="win",
+        runtime="win-x64",
+        use_dnx=True,
+    )
+
+    command = script.build_vpk_pack_command(
+        bundle_dir,
+        output_dir,
+        version="0.2.0",
+        config=config,
+        velopack_version="0.0.1589.dev41669",
+    )
+
+    version_index = command.index("--version") + 1
+    assert command[version_index] == "0.0.1589"
 
 
 def test_macos_internal_release_config_reads_env_and_vendor_layout(tmp_path, monkeypatch):
@@ -650,7 +798,7 @@ def test_macos_internal_release_build_release_artifacts_resigns_bundle_before_pa
     )
 
     monkeypatch.setattr(script, "load_sparkle_release_config", lambda env=None, env_file=None: config)
-    monkeypatch.setattr(script, "load_project_version", lambda: "0.2.0")
+    monkeypatch.setattr(script.release_packaging_helpers, "load_project_version", lambda: "0.2.0")
     monkeypatch.setattr(script, "app_bundle_path", lambda: app_bundle)
     monkeypatch.setattr(
         script,
@@ -968,25 +1116,40 @@ def test_deploy_macos_internal_release_reads_default_dotenv_for_upload_target(tm
     assert upload_target == "sso.whzhsc.cn:/var/www/crawler4j/mac"
 
 
-def test_deploy_windows_release_builds_rsync_command_from_env(tmp_path):
+def test_deploy_windows_release_builds_sftp_commands_from_env(tmp_path):
     script = _load_script_module("deploy_windows_release.py")
     source_dir = tmp_path / "updates"
     source_dir.mkdir()
+    (source_dir / "Setup.exe").write_text("setup", encoding="utf-8")
+    (source_dir / "releases.win.json").write_text("{}", encoding="utf-8")
     args = script.parse_args(["--dry-run"])
 
     upload_target = script.resolve_upload_target(
         args,
         {script.UPLOAD_TARGET_ENV: "deploy@example.internal:/srv/updates/crawler4j"},
     )
-    command = script.build_rsync_command(source_dir, upload_target, dry_run=True)
+    target = script.parse_sftp_target(upload_target)
+    command = script.build_sftp_command(target, tmp_path / "upload.batch")
+    batch_commands = script.build_sftp_batch_commands(source_dir, target.remote_dir)
 
     assert upload_target == "deploy@example.internal:/srv/updates/crawler4j/win"
+    assert target == script.SFTPTarget(
+        host="deploy@example.internal",
+        remote_dir="/srv/updates/crawler4j/win",
+    )
     assert command == [
-        "rsync",
-        "-av",
-        "--dry-run",
-        f"{source_dir.resolve()}/",
-        "deploy@example.internal:/srv/updates/crawler4j/win/",
+        "sftp",
+        "-b",
+        str((tmp_path / "upload.batch").resolve()),
+        "deploy@example.internal",
+    ]
+    assert batch_commands == [
+        "-mkdir /srv",
+        "-mkdir /srv/updates",
+        "-mkdir /srv/updates/crawler4j",
+        "-mkdir /srv/updates/crawler4j/win",
+        f"put {(source_dir / 'Setup.exe').resolve()} Setup.exe",
+        f"put {(source_dir / 'releases.win.json').resolve()} releases.win.json",
     ]
 
 

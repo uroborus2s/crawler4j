@@ -33,44 +33,44 @@ class EditEnvWorker(QThread):
         env_id: int,
         action: str,
         proxy_value: str | None = None,
+        proxy_pool_id: str | None = None,
     ):
         super().__init__()
         self._env_id = env_id
         self._action = action
         self._proxy_value = proxy_value
+        self._proxy_pool_id = proxy_pool_id
+
+    def _build_update_request(self) -> tuple[dict[str, object], str, str]:
+        if self._action == "update_proxy":
+            if not self._proxy_value:
+                raise ValueError("缺少代理地址，无法保存代理配置")
+            return {"proxy_value": self._proxy_value}, "代理已更新", "更新失败"
+
+        if self._action == "refresh_proxy":
+            if not self._proxy_pool_id:
+                raise ValueError("当前环境未绑定 IP 池，无法刷新代理")
+            return {"proxy_pool_id": self._proxy_pool_id}, "IP 已刷新", "刷新失败（无可用 IP 池）"
+
+        if self._action == "refresh_fingerprint":
+            return {"randomize_fingerprint": True}, "指纹已刷新", "刷新失败"
+
+        raise ValueError(f"不支持的操作: {self._action}")
     
     def run(self):
         from src.core.rem.manager import get_environment_manager
         
+        loop = asyncio.new_event_loop()
         try:
-            loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             manager = get_environment_manager()
-            
-            if self._action == "update_proxy":
-                success = loop.run_until_complete(
-                    manager.update_env(self._env_id)
-                )
-                msg = "代理已更新" if success else "更新失败"
-                self.finished.emit(success, msg)
-                
-            elif self._action == "refresh_proxy":
-                success = loop.run_until_complete(
-                    manager.update_env(self._env_id)
-                )
-                msg = "IP 已刷新" if success else "刷新失败（无可用 IP 池）"
-                self.finished.emit(success, msg)
-                
-            elif self._action == "refresh_fingerprint":
-                success = loop.run_until_complete(
-                    manager.update_env(self._env_id)
-                )
-                msg = "指纹已刷新" if success else "刷新失败"
-                self.finished.emit(success, msg)
-            
-            loop.close()
+            kwargs, success_msg, failure_msg = self._build_update_request()
+            success = loop.run_until_complete(manager.update_env(self._env_id, **kwargs))
+            self.finished.emit(success, success_msg if success else failure_msg)
         except Exception as e:
             self.finished.emit(False, str(e))
+        finally:
+            loop.close()
 
 
 class EditEnvDialog(QDialog):
@@ -232,13 +232,20 @@ class EditEnvDialog(QDialog):
     
     def _refresh_proxy(self):
         """刷新代理 IP。"""
-        self._run_action("refresh_proxy")
+        proxy = self._env.proxy_config
+        pool_id = proxy.pool_id if proxy else None
+        self._run_action("refresh_proxy", proxy_pool_id=pool_id)
     
     def _refresh_fingerprint(self):
         """刷新指纹。"""
         self._run_action("refresh_fingerprint")
     
-    def _run_action(self, action: str, proxy_value: str | None = None):
+    def _run_action(
+        self,
+        action: str,
+        proxy_value: str | None = None,
+        proxy_pool_id: str | None = None,
+    ):
         """执行异步操作。"""
         self._set_buttons_enabled(False)
         
@@ -246,6 +253,7 @@ class EditEnvDialog(QDialog):
             self._env.id, 
             action,
             proxy_value=proxy_value,
+            proxy_pool_id=proxy_pool_id,
         )
         self._worker.finished.connect(self._on_action_finished)
         self._worker.start()

@@ -62,10 +62,14 @@ uv run deploy-windows-release
 - `CRAWLER4J_VELOPACK_RUNTIME` 默认为 `win-x64`
 - 若本机已全局安装 `vpk`，脚本默认直接调用它；若希望强制使用与 Python `velopack` 运行时同版本的 CLI，可设置 `CRAWLER4J_VPK_USE_DNX=1`，脚本会改为调用 `dnx vpk --version <当前 velopack 版本>`
 - 若需要显式指定 `vpk` 可执行文件路径，可设置 `CRAWLER4J_VPK_BIN=/absolute/path/to/vpk`
-- `uv run deploy-windows-release` 会在打包完成后继续执行 `rsync -av packages/crawler4j/dist/updates/windows/ -> $CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`
+- 若 Windows 上的 `dnx` / `vpk` 实际是 `*.cmd` 或 `*.bat` shim，脚本会自动改用 `cmd.exe /c` 包装启动，避免在 `uv run python` 下直接 `subprocess.run(['dnx', ...])` 命中 `WinError 2`
+- 若当前 Python `velopack` 包版本带 `.dev` 或 `+local` 后缀，脚本会先把它正规化成 NuGet 可接受的基础版本后再传给 `dnx --version`，避免 `invalid NuGet version`
+- `uv run deploy-windows-release` 会在打包完成后继续调用系统 OpenSSH `sftp`，把 `packages/crawler4j/dist/updates/windows/` 上传到 `$CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`
+- `CRAWLER4J_UPDATE_UPLOAD_TARGET` 在 Windows 侧建议写成 `host:/var/www/crawler4j/` 这类 `host:path` 远端目录；若写成本地目录，脚本会改为直接复制文件
 - Velopack Windows 安装目录默认位于 `%LocalAppData%\\<packId>\\current`。更新时会整体替换 `current/`，所以任何可变文件都不能写在程序目录里；`crawler4j` 当前应用数据继续落在 `%APPDATA%/Crawler4j/`，与这条约束兼容
 - Windows 宿主自更新只对“通过 Velopack Setup 安装”的客户端生效；如果用户直接运行裸 `PyInstaller onedir` 目录，`检查更新` 会明确提示当前不是正式安装态
 - Velopack 官方当前明确说明 Windows 不支持安装到 `C:\\Program Files` 这类特权目录；本仓当前也不提供管理员安装模式
+- 若要使用 `uv run deploy-windows-release`，Windows 机器只需要启用系统自带的 OpenSSH Client，确保 `sftp` 命令在 PATH 中可用；不再要求额外安装 `rsync`
 
 ### macOS 内部 DMG + Sparkle 发布
 

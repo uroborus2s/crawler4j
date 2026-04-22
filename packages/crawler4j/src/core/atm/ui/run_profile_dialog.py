@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -195,14 +196,6 @@ class WorkflowSelector(QWidget):
             index = self.module_combo.findText(module)
             if index >= 0:
                 self.module_combo.setCurrentIndex(index)
-        else:
-            # In hidden mode, we assume external filter sets the module context
-            pass
-            # Or should we allow set_value to override filter? 
-            # User workflow: Select Global Module -> Init Workflow updates list.
-            # _load_run_profile: Sets Global Module -> Filter updates -> Then sets Init Workflow value.
-            # So we just need to set workflow.
-            pass
             
         wf_index = self._find_workflow_index(workflow)
         if wf_index >= 0:
@@ -2088,7 +2081,11 @@ class RunProfileDialog(QDialog):
 
     def _switch_mode(self, mode):
         if mode == "form":
-            self._yaml_to_form()
+            if not self._yaml_to_form(show_error=True):
+                self.stack.setCurrentIndex(1)
+                self.form_btn.setChecked(False)
+                self.yaml_btn.setChecked(True)
+                return
             self.stack.setCurrentIndex(0)
             self.form_btn.setChecked(True)
             self.yaml_btn.setChecked(False)
@@ -2257,19 +2254,32 @@ class RunProfileDialog(QDialog):
         except Exception as e:
             self.yaml_editor.setPlainText(f"# Error building YAML: {e}")
 
-    def _yaml_to_form(self):
+    def _yaml_to_form(self, *, show_error: bool = False) -> bool:
+        yaml_str = self.yaml_editor.toPlainText()
+        if not yaml_str.strip():
+            return True
+
         try:
-            yaml_str = self.yaml_editor.toPlainText()
-            if not yaml_str.strip():
-                return
-            self._run_profile = RunProfile.from_yaml(yaml_str)
+            parsed_profile = RunProfile.from_yaml(yaml_str)
+        except Exception as exc:
+            if show_error:
+                QMessageBox.warning(self, "YAML 无效", f"运行模板 YAML 保存失败：{exc}")
+            return False
+
+        self._run_profile = parsed_profile
+        try:
             self._load_run_profile()
-        except Exception:
-            pass
+        except Exception as exc:
+            if show_error:
+                QMessageBox.warning(self, "YAML 无效", f"运行模板 YAML 保存失败：{exc}")
+            return False
+
+        return True
 
     def _on_save(self):
         if self.stack.currentIndex() == 1:
-            self._yaml_to_form()
+            if not self._yaml_to_form(show_error=True):
+                return
         else:
             self._run_profile = self._build_run_profile_from_form()
             

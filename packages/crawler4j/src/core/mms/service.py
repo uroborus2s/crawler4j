@@ -1,13 +1,13 @@
 import importlib
-import importlib.util
 import inspect
-import sys
 from pathlib import Path
 from typing import Any
 
 from crawler4j_sdk import EnvSelectorInfo
 from crawler4j_contracts import TaskContext, TaskResult
 from src.core.foundation.logging import logger
+from src.core.mms.module_loader import load_root_module_from_path
+from src.core.mms.models import ModuleInfo, ModuleSource
 from src.core.mms.registry import get_module_registry
 
 
@@ -19,12 +19,6 @@ class ModuleService:
 
     def __init__(self):
         self.registry = get_module_registry()
-
-    def _purge_module_namespace(self, module_name: str) -> None:
-        prefix = f"{module_name}."
-        for loaded_name in list(sys.modules):
-            if loaded_name == module_name or loaded_name.startswith(prefix):
-                sys.modules.pop(loaded_name, None)
 
     def _should_force_reload(self, module_name: str, context: TaskContext | None = None) -> bool:
         if not context or not context.runtime.get("devel_mode", False):
@@ -41,43 +35,7 @@ class ModuleService:
         reloaded_modules[module_name] = True
         return True
 
-    def _load_root_module_from_path(
-        self,
-        module_name: str,
-        module_path: Path,
-        *,
-        force_reload: bool = False,
-    ):
-        package_root = Path(module_path).resolve()
-        package_init = package_root / "__init__.py"
-        if not package_init.exists():
-            raise ValueError(f"Module '{module_name}' is missing __init__.py: {package_root}")
-
-        existing = sys.modules.get(module_name)
-        existing_file = getattr(existing, "__file__", "") if existing else ""
-        same_origin = bool(existing_file) and Path(existing_file).resolve() == package_init
-
-        if force_reload or (existing and not same_origin):
-            self._purge_module_namespace(module_name)
-        elif same_origin:
-            return existing
-
-        importlib.invalidate_caches()
-        spec = importlib.util.spec_from_file_location(
-            module_name,
-            package_init,
-            submodule_search_locations=[str(package_root)],
-        )
-        if spec is None or spec.loader is None:
-            raise ValueError(f"Module '{module_name}' could not be loaded from: {package_root}")
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        return module
-
-    def _load_module(self, module_name: str, context: TaskContext | None = None):
-        """加载模块并返回 Python module 对象。"""
+    def _get_module_info(self, module_name: str) -> ModuleInfo:
         module_root = module_name.split(".")[0]
         module_info = self.registry.get_module(module_name) or self.registry.get_module(module_root)
         if not module_info:
@@ -85,13 +43,29 @@ class ModuleService:
 
         if not module_info.path:
             raise ValueError(f"Module '{module_name}' has no valid path")
+        return module_info
 
-        force_reload = self._should_force_reload(module_info.name, context)
-        root_module = self._load_root_module_from_path(
-            module_info.name,
-            Path(module_info.path),
-            force_reload=force_reload,
-        )
+    def _load_module(
+        self,
+        module_name: str,
+        context: TaskContext | None = None,
+        *,
+        force_reload: bool = False,
+    ):
+        """加载模块并返回 Python module 对象。"""
+        module_info = self._get_module_info(module_name)
+
+        force_reload = force_reload or self._should_force_reload(module_info.name, context)
+        try:
+            root_module = load_root_module_from_path(
+                module_info.name,
+                Path(module_info.path),
+                force_reload=force_reload,
+            )
+        except FileNotFoundError as exc:
+            raise ValueError(f"Module '{module_name}' is missing __init__.py: {exc.args[0]}") from exc
+        except ImportError as exc:
+            raise ValueError(f"Module '{module_name}' could not be loaded from: {module_info.path}") from exc
 
         if module_name == module_info.name:
             return root_module
@@ -157,7 +131,11 @@ class ModuleService:
 
     def list_env_selectors(self, module_name: str) -> list[EnvSelectorInfo]:
         """列出模块声明的环境选择器。"""
-        module = self._load_module(module_name)
+        module_info = self._get_module_info(module_name)
+        module = self._load_module(
+            module_name,
+            force_reload=module_info.source != ModuleSource.BUILTIN,
+        )
         assembler = getattr(module, "assembler", None)
         if not assembler or not hasattr(assembler, "list_env_selectors"):
             return []

@@ -1,7 +1,9 @@
 import re
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
+from PyQt6.QtWidgets import QDialog
 
 from src.core.atm.run_profile import (
     AcquisitionConfig,
@@ -668,3 +670,23 @@ def test_run_profile_dialog_uses_60_percent_screen_width(qtbot, monkeypatch):
 
     assert dialog.width() == 1200
     assert dialog.height() == 950
+
+
+def test_run_profile_dialog_keeps_dialog_open_when_yaml_is_invalid_on_save(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+    dialog.stack.setCurrentIndex(1)
+    dialog.yaml_editor.setPlainText("resource: [")
+
+    with patch("PyQt6.QtWidgets.QMessageBox.warning") as warning:
+        dialog._on_save()
+
+    warning.assert_called_once()
+    assert warning.call_args.args[0] is dialog
+    assert warning.call_args.args[1] == "YAML 无效"
+    assert dialog.result() != int(QDialog.DialogCode.Accepted)
+    assert dialog.stack.currentIndex() == 1

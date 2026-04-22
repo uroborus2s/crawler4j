@@ -30,6 +30,7 @@ from src.core.mms import (
 )
 from src.core.mms.models import ModuleInfo
 from src.core.mms.release_service import ModuleUpdateInfo
+from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.install_preview_dialog import InstallPreviewDialog
 from src.core.mms.ui.module_install_dialog import ModuleInstallDialog, ModuleInstallRequest
 from src.ui.components.data_table import SkyDataTable
@@ -629,22 +630,8 @@ class ModuleListWidget(QWidget):
             return
 
         try:
-            registry = get_module_registry()
-            removed = registry.remove_dev_link(name)
-            if not removed:
-                QMessageBox.warning(self, "移除失败", f"未找到开发链接: {name}")
-                return
-
-            fallback = registry.get_module(name)
-            if fallback:
-                source_label = "内置模块" if fallback.source == ModuleSource.BUILTIN else "正式安装模块"
-                QMessageBox.information(
-                    self,
-                    "已切换",
-                    f"已移除开发链接，当前已回退到 {source_label}: {name}",
-                )
-            else:
-                QMessageBox.information(self, "已移除", f"已移除开发链接: {name}")
+            result = remove_dev_link_and_describe(name)
+            QMessageBox.information(self, result.title, result.message)
             self.load_data(force_refresh=True)
         except Exception as e:
             QMessageBox.warning(self, "移除失败", str(e))

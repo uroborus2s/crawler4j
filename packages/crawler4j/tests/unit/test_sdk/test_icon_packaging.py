@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PyQt6.QtGui import QImage
+
 
 APP_ROOT = Path(__file__).resolve().parents[3]
 
@@ -23,3 +25,26 @@ def test_shared_app_icon_assets_exist_and_legacy_jpg_is_removed():
     assert (assets_root / "app_icon.icns").exists()
     assert not (assets_root / "app_icon.svg").exists()
     assert not (assets_root / "icon.jpg").exists()
+
+
+def test_runtime_app_icon_uses_transparent_outer_corners():
+    image = QImage(str(APP_ROOT / "src" / "ui" / "assets" / "app_icon.png"))
+
+    assert not image.isNull()
+    for x, y in ((0, 0), (20, 20), (40, 40), (80, 80), (100, 100), (512, 0), (0, 512)):
+        assert image.pixelColor(x, y).alpha() == 0
+
+    assert image.pixelColor(image.width() // 2, image.height() // 2).alpha() > 0
+
+
+def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge():
+    image = QImage(str(APP_ROOT / "src" / "ui" / "assets" / "app_icon.png"))
+
+    assert not image.isNull()
+    background = image.pixelColor(160, 160)
+    assert background.alpha() > 0
+    assert background.red() >= background.green() >= background.blue()
+    assert background.lightness() > 240
+
+    badge = image.pixelColor(image.width() // 2, image.height() // 2)
+    assert badge.blue() > badge.green() > badge.red()

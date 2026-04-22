@@ -844,7 +844,9 @@ def _run_check(level: str, module_root: Path) -> int:
 def _archive_members(module_root: Path) -> list[tuple[Path, str]]:
     ignored_dirs = {
         ".git",
+        ".idea",
         ".venv",
+        ".vscode",
         ".pytest_cache",
         ".mypy_cache",
         ".ruff_cache",
@@ -852,16 +854,19 @@ def _archive_members(module_root: Path) -> list[tuple[Path, str]]:
         "build",
         "dist",
     }
+    ignored_files = {".DS_Store"}
     members: list[tuple[Path, str]] = []
     for path in module_root.rglob("*"):
         relative = path.relative_to(module_root)
         if any(part in ignored_dirs for part in relative.parts):
             continue
+        if any(part.endswith(".egg-info") for part in relative.parts):
+            continue
         if path.is_dir():
             continue
-        if path.suffix in {".pyc", ".pyo"}:
+        if path.name in ignored_files:
             continue
-        if path.name.endswith(".egg-info"):
+        if path.suffix in {".pyc", ".pyo"}:
             continue
         arcname = f"{module_root.name}/{relative.as_posix()}"
         members.append((path, arcname))

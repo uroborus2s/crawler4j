@@ -5,17 +5,18 @@ import argparse
 import importlib.metadata
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 import subprocess
 
 from scripts import package_desktop_app
+from scripts import release_packaging_helpers
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = WORKSPACE_ROOT / "packages" / "crawler4j"
-PACKAGE_PYPROJECT = APP_ROOT / "pyproject.toml"
-DEFAULT_ENV_FILE = WORKSPACE_ROOT / ".env"
+DEFAULT_ENV_FILE = release_packaging_helpers.DEFAULT_ENV_FILE
 DEFAULT_UPDATES_DIR = APP_ROOT / "dist" / "updates" / "windows"
 UPDATE_CONFIG_FILENAME = "crawler4j.update.json"
 
@@ -30,6 +31,7 @@ DEFAULT_PACK_ID = "io.github.uroborus2s.crawler4j"
 DEFAULT_CHANNEL = "win"
 DEFAULT_RUNTIME = "win-x64"
 DEFAULT_VPK_BIN = "vpk"
+BATCH_SCRIPT_SUFFIXES = {".bat", ".cmd"}
 
 
 @dataclass(slots=True)
@@ -72,51 +74,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def load_project_version() -> str:
-    import tomllib
-
-    with PACKAGE_PYPROJECT.open("rb") as f:
-        pyproject = tomllib.load(f)
-    return str(pyproject["project"]["version"])
-
-
-def load_dotenv_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[7:].lstrip()
-        if "=" not in line:
-            raise ValueError(f"{path}:{line_number} 缺少 '='。")
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            raise ValueError(f"{path}:{line_number} 缺少环境变量名。")
-        if value and value[0] in {'"', "'"}:
-            quote = value[0]
-            if len(value) < 2 or value[-1] != quote:
-                raise ValueError(f"{path}:{line_number} 引号未闭合。")
-            value = value[1:-1]
-        values[key] = value
-    return values
-
-
 def resolve_runtime_env(env: dict[str, str] | None = None, *, env_file: Path | None = None) -> dict[str, str]:
-    env_map: dict[str, str] = {}
-    dotenv_path = env_file.expanduser().resolve() if env_file else DEFAULT_ENV_FILE
-    if env_file is not None:
-        if not dotenv_path.exists():
-            raise FileNotFoundError(f"未找到 dotenv 文件: {dotenv_path}")
-        env_map.update(load_dotenv_file(dotenv_path))
-    elif dotenv_path.exists():
-        env_map.update(load_dotenv_file(dotenv_path))
-    env_map.update(os.environ)
-    if env:
-        env_map.update(env)
-    return env_map
+    return release_packaging_helpers.resolve_runtime_env(
+        env,
+        env_file=env_file,
+        default_env_file=DEFAULT_ENV_FILE,
+    )
 
 
 def load_windows_release_config(
@@ -178,12 +141,34 @@ def resolve_velopack_version() -> str | None:
         return None
 
 
+def normalize_dnx_package_version(version: str) -> str:
+    normalized = version.strip()
+    if "+" in normalized:
+        normalized = normalized.split("+", 1)[0]
+    if ".dev" in normalized:
+        normalized = normalized.split(".dev", 1)[0]
+    return normalized
+
+
+def _resolve_process_prefix(command: str, *extra_args: str) -> list[str]:
+    resolved = shutil.which(command) or command
+    if Path(resolved).suffix.lower() in BATCH_SCRIPT_SUFFIXES:
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/c", resolved, *extra_args]
+    return [resolved, *extra_args]
+
+
 def _resolve_vpk_prefix(config: WindowsReleaseConfig, *, velopack_version: str | None = None) -> list[str]:
     if not config.use_dnx:
-        return [config.vpk_bin]
+        return _resolve_process_prefix(config.vpk_bin)
     if not velopack_version:
         raise ValueError("使用 dnx 调用 vpk 时必须能解析当前 velopack Python 包版本。")
-    return ["dnx", "vpk", "--version", velopack_version]
+    dnx_version = normalize_dnx_package_version(velopack_version)
+    if dnx_version != velopack_version:
+        print(
+            "[vpk]    normalized Python velopack version "
+            f"{velopack_version} -> {dnx_version} for dnx/NuGet compatibility"
+        )
+    return _resolve_process_prefix("dnx", "vpk", "--version", dnx_version)
 
 
 def build_vpk_pack_command(
@@ -234,7 +219,7 @@ def _build_base_bundle() -> Path:
 
 
 def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None = None) -> WindowsReleaseArtifacts:
-    version = load_project_version()
+    version = release_packaging_helpers.load_project_version()
     config = load_windows_release_config(
         env,
         env_file=args.env_file,

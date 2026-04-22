@@ -24,7 +24,7 @@ def resolve_platform_upload_target(base_target: str, platform_dir: str) -> str:
     if _looks_like_windows_path(target):
         return _append_windows_path(target, subdir)
 
-    remote = _split_rsync_remote_target(target)
+    remote = split_remote_target(target)
     if remote is not None:
         host, path = remote
         return f"{host}:{_append_posix_path(path, subdir)}"
@@ -43,7 +43,7 @@ def _append_windows_path(target: str, subdir: str) -> str:
     return str(path / subdir)
 
 
-def _split_rsync_remote_target(target: str) -> tuple[str, str] | None:
+def split_remote_target(target: str) -> tuple[str, str] | None:
     if target.startswith("rsync://") or WINDOWS_DRIVE_RE.match(target):
         return None
     if ":" not in target:

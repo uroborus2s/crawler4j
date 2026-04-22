@@ -94,6 +94,44 @@ def test_module_init_creates_complete_project(module_root: Path):
     assert "ui_extension" not in manifest
     assert _read_pyproject(module_root)["project"]["version"] == manifest["version"]
 
+    runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
+    assert "该 Hook 会在 ATM 执行环境动作前触发" in runtime_text
+    assert 'context.runtime["env_action"]' in runtime_text
+
+    readme_text = (module_root / "README.md").read_text(encoding="utf-8")
+    assert "`on_cleanup` 会在 ATM 执行计划中的环境动作前调用" in readme_text
+
+
+def test_archive_members_excludes_nested_egg_info_contents(tmp_path: Path):
+    module_root = tmp_path / "demo_model"
+    module_root.mkdir()
+    nested_package = module_root / "nested"
+    nested_package.mkdir()
+    egg_info = nested_package / "demo_model.egg-info"
+    egg_info.mkdir()
+    (module_root / ".idea").mkdir()
+    (module_root / ".vscode").mkdir()
+
+    keep_file = module_root / "module.yaml"
+    keep_file.write_text("name: demo_model\nversion: 0.1.0\n", encoding="utf-8")
+    ignored_mac_file = module_root / ".DS_Store"
+    ignored_mac_file.write_text("junk", encoding="utf-8")
+    ignored_file = egg_info / "PKG-INFO"
+    ignored_file.write_text("metadata", encoding="utf-8")
+    ignored_idea_file = module_root / ".idea" / "workspace.xml"
+    ignored_idea_file.write_text("<xml />", encoding="utf-8")
+    ignored_vscode_file = module_root / ".vscode" / "settings.json"
+    ignored_vscode_file.write_text("{}", encoding="utf-8")
+
+    members = commands._archive_members(module_root)
+    archived_paths = {arcname for _, arcname in members}
+
+    assert "demo_model/module.yaml" in archived_paths
+    assert "demo_model/.DS_Store" not in archived_paths
+    assert "demo_model/.idea/workspace.xml" not in archived_paths
+    assert "demo_model/.vscode/settings.json" not in archived_paths
+    assert "demo_model/nested/demo_model.egg-info/PKG-INFO" not in archived_paths
+
 
 def test_module_init_generates_importable_package(module_root: Path):
     module = _import_generated_package(module_root)

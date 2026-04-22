@@ -5,7 +5,6 @@ description = "Crawler4j shared contracts for Core, SDK, and external modules"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "aiohttp>=3.13.0",
 ]
 
 [build-system]

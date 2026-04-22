@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.mms.models import DetailMenuItem, ModuleInfo, ModuleSource
+from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.module_config_page import ModuleConfigPage
 from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.ui_loader import (
@@ -566,25 +567,18 @@ class ModuleDetailPage(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        from src.core.mms import get_module_registry
-
-        registry = get_module_registry()
-        if not registry.remove_dev_link(self._module.name):
-            QMessageBox.warning(self, "移除失败", f"未找到开发链接: {self._module.name}")
+        try:
+            result = remove_dev_link_and_describe(self._module.name)
+        except Exception as exc:
+            QMessageBox.warning(self, "移除失败", str(exc))
             return
 
-        fallback = registry.get_module(self._module.name)
-        if fallback:
-            self.set_module(fallback)
-            source_text = "内置模块" if fallback.source == ModuleSource.BUILTIN else "正式安装模块"
-            QMessageBox.information(
-                self,
-                "已切换",
-                f"已移除开发链接，当前已回退到 {source_text}: {fallback.name}",
-            )
+        if result.fallback:
+            self.set_module(result.fallback)
+            QMessageBox.information(self, result.title, result.message)
             return
 
-        QMessageBox.information(self, "已移除", f"已移除开发链接: {self._module.name}")
+        QMessageBox.information(self, result.title, result.message)
         self.back_requested.emit()
 
     @staticmethod

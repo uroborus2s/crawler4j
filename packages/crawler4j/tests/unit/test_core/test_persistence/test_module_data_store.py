@@ -71,136 +71,7 @@ def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
     assert schema_row is not None
 
 
-def test_init_database_migrates_legacy_module_dataset_rows(temp_data_dir):
-    from src.core.persistence import DATA_DB, get_connection
-    from src.core.persistence.database import init_database
-    from src.core.persistence.module_data_store import ModuleDataStore
-
-    legacy_records = [
-        {"id": "u1", "phone": "13800138000"},
-        {"id": "u2", "phone": "13900139000"},
-    ]
-
-    with get_connection(DATA_DB) as conn:
-        conn.execute("DROP TABLE module_datasets")
-        conn.execute(
-            """
-            CREATE TABLE module_datasets (
-                module_name TEXT NOT NULL,
-                dataset_name TEXT NOT NULL,
-                records_json TEXT NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-                PRIMARY KEY (module_name, dataset_name)
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO module_datasets (module_name, dataset_name, records_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            ("demo_module", "accounts", json.dumps(legacy_records, ensure_ascii=False), 100, 200),
-        )
-
-    init_database()
-
-    store = ModuleDataStore()
-    assert store.read_dataset("demo_module", "accounts") == legacy_records
-
-    with get_connection(DATA_DB) as conn:
-        dataset_rows = conn.execute(
-            """
-            SELECT record_index, record_json, created_at, updated_at
-            FROM module_datasets
-            WHERE module_name = ? AND dataset_name = ?
-            ORDER BY record_index ASC
-            """,
-            ("demo_module", "accounts"),
-        ).fetchall()
-        manifest_row = conn.execute(
-            """
-            SELECT created_at, updated_at
-            FROM module_dataset_manifests
-            WHERE module_name = ? AND dataset_name = ?
-            """,
-            ("demo_module", "accounts"),
-        ).fetchone()
-
-    assert [row["record_index"] for row in dataset_rows] == [0, 1]
-    assert [json.loads(row["record_json"]) for row in dataset_rows] == legacy_records
-    assert [row["created_at"] for row in dataset_rows] == [100, 100]
-    assert [row["updated_at"] for row in dataset_rows] == [200, 200]
-    assert manifest_row is not None
-    assert dict(manifest_row) == {"created_at": 100, "updated_at": 200}
-
-
-def test_init_database_preserves_empty_legacy_module_dataset_manifest(temp_data_dir):
-    from src.core.persistence import DATA_DB, get_connection
-    from src.core.persistence.database import init_database
-    from src.core.persistence.module_data_store import ModuleDataStore
-
-    with get_connection(DATA_DB) as conn:
-        conn.execute("DROP TABLE module_datasets")
-        conn.execute(
-            """
-            CREATE TABLE module_datasets (
-                module_name TEXT NOT NULL,
-                dataset_name TEXT NOT NULL,
-                records_json TEXT NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-                PRIMARY KEY (module_name, dataset_name)
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO module_datasets (module_name, dataset_name, records_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            ("demo_module", "empty_accounts", json.dumps([], ensure_ascii=False), 100, 200),
-        )
-
-    init_database()
-
-    store = ModuleDataStore()
-    assert store.read_dataset("demo_module", "empty_accounts") == []
-
-    with get_connection(DATA_DB) as conn:
-        dataset_rows = conn.execute(
-            """
-            SELECT record_index, record_json
-            FROM module_datasets
-            WHERE module_name = ? AND dataset_name = ?
-            """,
-            ("demo_module", "empty_accounts"),
-        ).fetchall()
-        manifest_row = conn.execute(
-            """
-            SELECT created_at, updated_at
-            FROM module_dataset_manifests
-            WHERE module_name = ? AND dataset_name = ?
-            """,
-            ("demo_module", "empty_accounts"),
-        ).fetchone()
-
-    assert dataset_rows == []
-    assert manifest_row is not None
-    assert dict(manifest_row) == {"created_at": 100, "updated_at": 200}
-
-
-@pytest.mark.parametrize(
-    ("records_json", "expected_fragment"),
-    [
-        ("{not-json", "has invalid JSON"),
-        (json.dumps({"id": "u1"}, ensure_ascii=False), "must be a JSON array"),
-        (json.dumps([{"id": "u1"}, "bad"], ensure_ascii=False), "contains non-object item"),
-    ],
-)
-def test_init_database_rejects_invalid_legacy_module_dataset_rows(
-    temp_data_dir, records_json, expected_fragment
-):
+def test_init_database_rejects_legacy_module_dataset_schema(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.database import init_database
 
@@ -223,10 +94,10 @@ def test_init_database_rejects_invalid_legacy_module_dataset_rows(
             INSERT INTO module_datasets (module_name, dataset_name, records_json, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?)
             """,
-            ("demo_module", "broken_accounts", records_json, 100, 200),
+            ("demo_module", "legacy_accounts", json.dumps([{"id": "legacy"}], ensure_ascii=False), 100, 200),
         )
 
-    with pytest.raises(RuntimeError, match=expected_fragment):
+    with pytest.raises(RuntimeError, match="Legacy module_datasets schema is no longer supported"):
         init_database()
 
     with get_connection(DATA_DB) as conn:
@@ -240,12 +111,37 @@ def test_init_database_rejects_invalid_legacy_module_dataset_rows(
             FROM module_datasets
             WHERE module_name = ? AND dataset_name = ?
             """,
-            ("demo_module", "broken_accounts"),
+            ("demo_module", "legacy_accounts"),
         ).fetchone()
 
     assert "records_json" in existing_columns
     assert legacy_row is not None
-    assert legacy_row["records_json"] == records_json
+    assert legacy_row["records_json"] == json.dumps([{"id": "legacy"}], ensure_ascii=False)
+
+
+def test_init_database_rejects_hybrid_module_dataset_schema_with_legacy_column(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.database import init_database
+
+    with get_connection(DATA_DB) as conn:
+        conn.execute("DROP TABLE module_datasets")
+        conn.execute(
+            """
+            CREATE TABLE module_datasets (
+                module_name TEXT NOT NULL,
+                dataset_name TEXT NOT NULL,
+                record_index INTEGER NOT NULL,
+                record_json TEXT NOT NULL,
+                records_json TEXT,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (module_name, dataset_name, record_index)
+            )
+            """
+        )
+
+    with pytest.raises(RuntimeError, match="Legacy module_datasets schema is no longer supported"):
+        init_database()
 
 
 def test_module_data_store_rewrite_preserves_manifest_created_at_and_reindexes_rows(temp_data_dir):
@@ -374,6 +270,17 @@ def test_module_data_store_rejects_invalid_write_dataset_without_clobbering_rows
             PRIMARY KEY (module_name, dataset_name, record_index)
         )
         """,
+        """
+        CREATE TABLE module_datasets (
+            module_name TEXT NOT NULL,
+            dataset_name TEXT NOT NULL,
+            record_index INTEGER NOT NULL,
+            record_json TEXT NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (module_name, dataset_name)
+        )
+        """,
     ],
 )
 def test_init_database_rejects_incompatible_module_dataset_schema(temp_data_dir, create_sql):
@@ -384,7 +291,7 @@ def test_init_database_rejects_incompatible_module_dataset_schema(temp_data_dir,
         conn.execute("DROP TABLE module_datasets")
         conn.execute(create_sql)
 
-    with pytest.raises(RuntimeError, match="Unexpected module_datasets schema columns"):
+    with pytest.raises(RuntimeError, match="Unexpected module_datasets schema definition"):
         init_database()
 
 

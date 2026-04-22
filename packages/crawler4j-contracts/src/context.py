@@ -1,6 +1,8 @@
 """TaskContext 任务执行上下文契约。
 
 本模块定义 Crawler4j Core 与 SDK 共享的稳定契约：TaskContext。
+contracts 层承载共享协议、数据类型与 TaskContext 的轻量辅助方法，
+但不内置运行时 HTTP 实现或第三方宿主适配器。
 """
 
 from __future__ import annotations
@@ -146,29 +148,6 @@ class EnvCandidate:
     proxy: dict[str, Any] | None = None
 
 
-class DefaultHttpClient:
-    """默认 HTTP 客户端实现，基于 aiohttp。"""
-
-    async def get(self, url: str, **kwargs: Any) -> dict[str, Any]:
-        import aiohttp
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, **kwargs) as resp:
-                return await resp.json()
-
-    async def post(
-        self,
-        url: str,
-        data: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        import aiohttp
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=data, **kwargs) as resp:
-                return await resp.json()
-
-
 def _build_std_task_logger() -> LoggerLike:
     return logging.getLogger("task")
 
@@ -203,7 +182,7 @@ class TaskContext:
     context: "BrowserContext | None" = None
 
     logger: LoggerLike = field(default_factory=get_default_task_logger)
-    http: HttpClient = field(default_factory=DefaultHttpClient)
+    http: HttpClient | None = None
     tools: ToolsCapability | None = None
 
     captured_data: list[Any] = field(default_factory=list)

@@ -76,7 +76,7 @@ class MyTask(TaskScript):
 |:---|:---|
 | `ctx.page` | Playwright Page 对象 |
 | `ctx.logger` | 日志记录器 |
-| `ctx.http` | HTTP 客户端 |
+| `ctx.http` | 可选 HTTP 客户端（宿主注入，或模块显式注入） |
 | `ctx.config` | 宿主持久化后的模块/工作流配置视图 |
 | `ctx.state` | 共享状态 |
 | `ctx.runtime` | ATM/Debug 写入的执行态输入与元数据 |
@@ -90,6 +90,7 @@ class MyTask(TaskScript):
 
 - `ctx.get_config()` / `ctx.config` 只读取宿主持久化的模块级配置和工作流级覆盖
 - `workflow`、`devel_mode`、`execution_params`、`job_params`、`params`、`creation_params` 统一读取 `ctx.runtime`
+- `ctx.http` 是可选注入的 `HttpClient` 协议对象；contracts 层不再默认构造 aiohttp 客户端，如需默认实现可显式注入 `crawler4j_sdk.context.DefaultHttpClient()`
 
 `ctx.run_subtask()` 的返回语义：
 
@@ -318,7 +319,7 @@ return TaskResult.fail(
 - `return_none`：占位选择器，固定返回 `None`，用于提醒开发者必须替换成真实逻辑
 - `random_ready`：从当前 `ready` 候选环境里随机选择一个
 
-`on_cleanup` 发生在 ATM 完成环境动作之后。如果模块需要在环境已删除后清理自己的数据，应在 `on_cleanup` 中读取 `ctx.runtime["env_action"]`，而不是再增加一套额外的“环境删除 hook”。
+`on_cleanup` 会在 ATM 执行计划中的环境动作之前触发。如果模块需要根据即将执行的 `recycle / keep_alive / destroy` 做收尾，应在 `on_cleanup` 中读取 `ctx.runtime["env_action"]`，而不是再增加一套额外的“环境删除 hook”。
 
 ## 版本兼容
 

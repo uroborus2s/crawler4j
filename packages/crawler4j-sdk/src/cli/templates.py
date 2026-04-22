@@ -115,6 +115,11 @@ uv run crawler4j package build
 ## 调试
 
 在应用中把该目录注册为“开发链接”模块后，可在 ATM 中对关联作业发起任务调试。
+
+## 生命周期约定
+
+- `module_runtime.py` 里的 `on_cleanup` 会在 ATM 执行计划中的环境动作前调用。
+- 如果需要根据即将执行的 `recycle / keep_alive / destroy` 做收尾，可读取 `context.runtime["env_action"]`。
 '''
 
 MODEL_UTILS_HELPER_TEMPLATE = '''"""模块通用工具。"""
@@ -361,7 +366,9 @@ async def on_timeout(context: TaskContext):
 async def on_cleanup(context: TaskContext):
     """最终清理 Hook。
 
-    注意：该 Hook 在 ATM 执行完环境动作后触发，适合做模块内部数据收尾。
+    注意：该 Hook 会在 ATM 执行环境动作前触发。
+    如需根据计划中的 recycle / keep_alive / destroy 做收尾，可读取
+    `context.runtime["env_action"]`。
     """
     pass
 

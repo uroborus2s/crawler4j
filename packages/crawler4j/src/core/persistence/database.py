@@ -8,12 +8,11 @@
     - data.db: 业务数据（只写/批量读）
 """
 
-import json
 import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator
+from typing import Generator
 
 from src.utils import paths
 
@@ -32,6 +31,11 @@ _MODULE_DATASET_V2_REQUIRED_COLUMNS = {
     "record_json",
     "created_at",
     "updated_at",
+}
+_MODULE_DATASET_V2_PRIMARY_KEY = {
+    "module_name": 1,
+    "dataset_name": 2,
+    "record_index": 3,
 }
 _MODULE_DATASET_LEGACY_REQUIRED_COLUMNS = {
     "module_name",
@@ -114,36 +118,6 @@ def init_database() -> None:
     _init_data_db()
 
 
-def _normalize_module_dataset_records(raw: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw, list):
-        return []
-    return [dict(item) for item in raw if isinstance(item, dict)]
-
-
-def _parse_legacy_module_dataset_records(row: sqlite3.Row) -> list[dict[str, Any]]:
-    dataset_label = f"{row['module_name']}/{row['dataset_name']}"
-    try:
-        parsed = json.loads(row["records_json"])
-    except (TypeError, ValueError) as exc:
-        raise RuntimeError(
-            f"Legacy module_datasets row {dataset_label} has invalid JSON"
-        ) from exc
-
-    if not isinstance(parsed, list):
-        raise RuntimeError(
-            f"Legacy module_datasets row {dataset_label} must be a JSON array"
-        )
-
-    records: list[dict[str, Any]] = []
-    for record_index, item in enumerate(parsed):
-        if not isinstance(item, dict):
-            raise RuntimeError(
-                f"Legacy module_datasets row {dataset_label} contains non-object item at index {record_index}"
-            )
-        records.append(dict(item))
-    return records
-
-
 def _create_module_datasets_table(conn: sqlite3.Connection, table_name: str = "module_datasets") -> None:
     conn.execute(
         f"""
@@ -198,66 +172,21 @@ def _create_module_datasets_indexes(conn: sqlite3.Connection) -> None:
     )
 
 
-def _migrate_legacy_module_datasets_table(conn: sqlite3.Connection) -> None:
-    legacy_rows = conn.execute(
-        """
-        SELECT module_name, dataset_name, records_json, created_at, updated_at
-        FROM module_datasets
-        """
-    ).fetchall()
+def _table_info_rows(conn: sqlite3.Connection, table_name: str) -> list[sqlite3.Row]:
+    return conn.execute(f"PRAGMA table_info({table_name})").fetchall()
 
-    _create_module_datasets_table(conn, "module_datasets_v2")
 
-    for row in legacy_rows:
-        records = _parse_legacy_module_dataset_records(row)
+def _module_datasets_has_v2_schema(table_info_rows: list[sqlite3.Row]) -> bool:
+    existing_columns = {row["name"] for row in table_info_rows}
+    if existing_columns != _MODULE_DATASET_V2_REQUIRED_COLUMNS:
+        return False
 
-        conn.execute(
-            """
-            INSERT INTO module_dataset_manifests (
-                module_name,
-                dataset_name,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(module_name, dataset_name) DO UPDATE SET
-                created_at = excluded.created_at,
-                updated_at = excluded.updated_at
-            """,
-            (
-                row["module_name"],
-                row["dataset_name"],
-                row["created_at"],
-                row["updated_at"],
-            ),
-        )
-
-        for record_index, record in enumerate(records):
-            conn.execute(
-                """
-                INSERT INTO module_datasets_v2 (
-                    module_name,
-                    dataset_name,
-                    record_index,
-                    record_json,
-                    created_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    row["module_name"],
-                    row["dataset_name"],
-                    record_index,
-                    json.dumps(record, ensure_ascii=False),
-                    row["created_at"],
-                    row["updated_at"],
-                ),
-            )
-
-    conn.execute("DROP TABLE module_datasets")
-    conn.execute("ALTER TABLE module_datasets_v2 RENAME TO module_datasets")
-    _create_module_datasets_indexes(conn)
+    primary_key = {
+        row["name"]: row["pk"]
+        for row in table_info_rows
+        if row["pk"]
+    }
+    return primary_key == _MODULE_DATASET_V2_PRIMARY_KEY
 
 
 def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
@@ -273,17 +202,26 @@ def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
         _create_module_datasets_indexes(conn)
         return
 
-    existing_columns = {
-        row["name"]
-        for row in conn.execute("PRAGMA table_info(module_datasets)").fetchall()
-    }
-    if _MODULE_DATASET_V2_REQUIRED_COLUMNS.issubset(existing_columns):
+    table_info_rows = _table_info_rows(conn, "module_datasets")
+    existing_columns = {row["name"] for row in table_info_rows}
+    if _module_datasets_has_v2_schema(table_info_rows):
         _create_module_datasets_indexes(conn)
         return
     if _MODULE_DATASET_LEGACY_REQUIRED_COLUMNS.issubset(existing_columns):
-        _migrate_legacy_module_datasets_table(conn)
-        return
-    raise RuntimeError(f"Unexpected module_datasets schema columns: {sorted(existing_columns)}")
+        raise RuntimeError(
+            "Legacy module_datasets schema is no longer supported; "
+            "please migrate records_json datasets manually before starting the host"
+        )
+
+    primary_key = {
+        row["name"]: row["pk"]
+        for row in table_info_rows
+        if row["pk"]
+    }
+    raise RuntimeError(
+        "Unexpected module_datasets schema definition: "
+        f"columns={sorted(existing_columns)}, primary_key={primary_key}"
+    )
 
 
 def _init_config_db() -> None:

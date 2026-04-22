@@ -17,6 +17,7 @@ from src.core.mms.models import (
     WorkflowInfo,
 )
 from src.core.mms.github_credentials import get_github_credential_store
+from src.core.mms.ui.dev_link_actions import DevLinkRemovalResult
 from src.core.mms.ui.module_detail_page import ModuleDetailPage
 from src.ui.components.combo_box import StyledComboBox
 
@@ -133,6 +134,29 @@ def test_module_detail_page_gracefully_degrades_when_custom_page_load_fails(qtbo
     assert any("加载失败" in text or "MissingPage" in text for text in texts)
 
 
+def test_module_detail_page_reloads_dev_link_ui_after_source_change(qtbot, tmp_path):
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+    module = _make_module(tmp_path, source=ModuleSource.DEV_LINK)
+
+    page.set_module(module)
+    custom_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
+    assert custom_page.text() == "Loaded from module UI"
+
+    module_dir = Path(module.path)
+    (module_dir / "ui.py").write_text(
+        "from PyQt6.QtWidgets import QLabel\n\n"
+        "class LoadedPage(QLabel):\n"
+        "    def __init__(self):\n"
+        "        super().__init__('Reloaded from module UI')\n",
+        encoding="utf-8",
+    )
+
+    page.set_module(module)
+    reloaded_page = page._menu_pages[ModuleDetailPage.MICRO_APP_MENU_ID]
+    assert reloaded_page.text() == "Reloaded from module UI"
+
+
 def test_module_detail_page_renders_core_managed_data_table_entry(qtbot, tmp_path):
     page = ModuleDetailPage()
     qtbot.addWidget(page)
@@ -153,6 +177,38 @@ def test_module_detail_page_renders_core_managed_data_table_entry(qtbot, tmp_pat
 
     custom_page = page._menu_pages["accounts"]
     assert custom_page.__class__.__name__ == "ModuleDataTablePage"
+
+
+def test_module_detail_page_remove_dev_link_uses_shared_fallback_message(qtbot, tmp_path, monkeypatch):
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+    module = _make_module(tmp_path, source=ModuleSource.DEV_LINK)
+    fallback = _make_module(tmp_path, source=ModuleSource.EXTERNAL)
+    fallback.manifest.display_name = "Fallback Module"
+
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_detail_page.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    info_messages: list[str] = []
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_detail_page.QMessageBox.information",
+        lambda *args: info_messages.append(args[2]),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_detail_page.remove_dev_link_and_describe",
+        lambda name: DevLinkRemovalResult(
+            fallback=fallback if name == module.name else None,
+            title="已切换",
+            message="已移除开发链接，当前已回退到 正式安装模块: demo_module",
+        ),
+    )
+
+    page.set_module(module)
+    page._remove_dev_link()
+
+    assert page._module is fallback
+    assert info_messages == ["已移除开发链接，当前已回退到 正式安装模块: demo_module"]
 
 
 def test_module_detail_page_exposes_config_page_and_persists_module_and_workflow_settings(qtbot, tmp_path):

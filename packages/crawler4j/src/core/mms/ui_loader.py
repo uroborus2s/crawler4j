@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import importlib
-import importlib.util
+import inspect
 import json
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtWidgets import QWidget
 
 from src.core.foundation.logging import logger
+from src.core.mms.module_loader import load_root_module_from_path
 from src.core.mms.models import ModuleInfo, ModuleSource
 from src.core.persistence import get_config_store
 
@@ -112,55 +112,46 @@ class ModuleCustomPageLoader:
 
     def _instantiate_widget(self, widget_cls, module: ModuleInfo) -> QWidget:
         try:
-            return widget_cls(module)
-        except TypeError:
+            signature = inspect.signature(widget_cls)
+        except (TypeError, ValueError) as exc:
+            raise ModuleUILoadError(f"无法解析 `{widget_cls.__name__}` 的构造函数: {exc}") from exc
+
+        accepts_module = self._supports_constructor_call(signature, module)
+        accepts_empty = self._supports_constructor_call(signature)
+        if accepts_module:
+            try:
+                return widget_cls(module)
+            except Exception as exc:
+                raise ModuleUILoadError(f"`{widget_cls.__name__}` 实例化失败: {exc}") from exc
+        elif accepts_empty:
             try:
                 return widget_cls()
-            except TypeError as exc:
-                raise ModuleUILoadError(
-                    f"`{widget_cls.__name__}` 的构造函数不受支持，请使用 `__init__()` 或 `__init__(module)`"
-                ) from exc
+            except Exception as exc:
+                raise ModuleUILoadError(f"`{widget_cls.__name__}` 实例化失败: {exc}") from exc
+        else:
+            raise ModuleUILoadError(
+                f"`{widget_cls.__name__}` 的构造函数不受支持，请使用 `__init__()` 或 `__init__(module)`"
+            )
 
-    def _purge_module_namespace(self, module_name: str) -> None:
-        prefix = f"{module_name}."
-        for loaded_name in list(sys.modules):
-            if loaded_name == module_name or loaded_name.startswith(prefix):
-                sys.modules.pop(loaded_name, None)
-
-    def _load_root_module_from_path(self, module_name: str, module_path: Path):
-        package_root = Path(module_path).resolve()
-        package_init = package_root / "__init__.py"
-        if not package_init.exists():
-            raise ModuleUILoadError(f"模块目录缺少 __init__.py: {package_root}")
-
-        existing = sys.modules.get(module_name)
-        existing_file = getattr(existing, "__file__", "") if existing else ""
-        same_origin = bool(existing_file) and Path(existing_file).resolve() == package_init
-
-        if existing and not same_origin:
-            self._purge_module_namespace(module_name)
-        elif same_origin:
-            return existing
-
-        importlib.invalidate_caches()
-        spec = importlib.util.spec_from_file_location(
-            module_name,
-            package_init,
-            submodule_search_locations=[str(package_root)],
-        )
-        if spec is None or spec.loader is None:
-            raise ModuleUILoadError(f"无法从 `{package_root}` 构建模块加载规格")
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        return module
+    @staticmethod
+    def _supports_constructor_call(signature: inspect.Signature, *args: object) -> bool:
+        try:
+            signature.bind(*args)
+        except TypeError:
+            return False
+        return True
 
     def _load_ui_module(self, module: ModuleInfo):
         if not module.path:
             raise ModuleUILoadError(f"模块 `{module.name}` 没有可用路径")
 
-        self._load_root_module_from_path(module.name, Path(module.path))
+        force_reload = module.source != ModuleSource.BUILTIN
+        try:
+            load_root_module_from_path(module.name, Path(module.path), force_reload=force_reload)
+        except FileNotFoundError as exc:
+            raise ModuleUILoadError(f"模块目录缺少 __init__.py: {exc.args[0]}") from exc
+        except ImportError as exc:
+            raise ModuleUILoadError(str(exc)) from exc
         importlib.invalidate_caches()
 
         try:

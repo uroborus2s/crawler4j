@@ -62,6 +62,7 @@ def test_remove_dev_link_calls_registry_and_refreshes(qtbot, tmp_path, monkeypat
         get_module=lambda name: None,
     )
 
+    monkeypatch.setattr("src.core.mms.ui.dev_link_actions.get_module_registry", lambda: registry)
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
     monkeypatch.setattr(
         "src.core.mms.ui.module_list_widget.QMessageBox.question",
@@ -80,6 +81,39 @@ def test_remove_dev_link_calls_registry_and_refreshes(qtbot, tmp_path, monkeypat
     assert remove_calls == ["demo_module"]
     assert refresh_calls == [1]
     assert any("已移除开发链接" in message for message in info_messages)
+
+
+def test_remove_dev_link_reports_fallback_source_via_shared_helper(qtbot, tmp_path, monkeypatch):
+    module = _make_module(tmp_path, source=ModuleSource.DEV_LINK)
+    fallback = _make_module(tmp_path, source=ModuleSource.BUILTIN)
+    remove_calls: list[str] = []
+    refresh_calls: list[int] = []
+    registry = SimpleNamespace(
+        refresh=lambda: refresh_calls.append(1),
+        list_modules=lambda: [module],
+        remove_dev_link=lambda name: remove_calls.append(name) or True,
+        get_module=lambda name: fallback if name == "demo_module" else None,
+    )
+
+    monkeypatch.setattr("src.core.mms.ui.dev_link_actions.get_module_registry", lambda: registry)
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    info_messages: list[str] = []
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.QMessageBox.information",
+        lambda *args: info_messages.append(args[2]),
+    )
+
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+    widget._remove_dev_link("demo_module")
+
+    assert remove_calls == ["demo_module"]
+    assert refresh_calls == [1]
+    assert info_messages == ["已移除开发链接，当前已回退到 内置模块: demo_module"]
 
 
 def test_external_module_row_shows_upgrade_button_when_update_available(qtbot, tmp_path):

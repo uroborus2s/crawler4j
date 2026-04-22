@@ -346,12 +346,6 @@ dev = [
 name = "crawler4j-contracts"
 version = "0.2.0"
 source = { editable = "packages/crawler4j-contracts" }
-dependencies = [
-    { name = "aiohttp" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "aiohttp", specifier = ">=3.13.0" }]
 
 [[package]]
 name = "crawler4j-sdk"

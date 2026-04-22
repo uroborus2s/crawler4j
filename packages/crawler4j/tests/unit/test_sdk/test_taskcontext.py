@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from crawler4j_sdk import EnvAction, TaskContext, TaskResult, TaskSignal, ToolSpec, ToolsCapability
+from crawler4j_sdk.context import DefaultHttpClient, HttpClient
 
 # === 测试夹具 ===
 
@@ -63,11 +64,33 @@ class TestTaskContextInjection:
         # 应该可以调用日志方法
         basic_context.logger.info("测试日志")
     
-    def test_http_client_injection(self, basic_context: TaskContext):
-        """验证 HTTP 客户端注入。"""
-        assert basic_context.http is not None
-        assert hasattr(basic_context.http, "get")
-        assert hasattr(basic_context.http, "post")
+    def test_http_client_defaults_to_none(self, basic_context: TaskContext):
+        """验证 contracts 层默认不再提供运行时 HTTP 实现。"""
+        assert basic_context.http is None
+
+    def test_http_client_can_be_injected(self, basic_context: TaskContext):
+        """验证 HTTP 客户端可按协议显式注入。"""
+
+        class _FakeHttpClient:
+            async def get(self, url: str, **kwargs):
+                return {"method": "get", "url": url, "kwargs": kwargs}
+
+            async def post(self, url: str, data=None, **kwargs):
+                return {"method": "post", "url": url, "data": data, "kwargs": kwargs}
+
+        fake_http = _FakeHttpClient()
+
+        assert isinstance(fake_http, HttpClient)
+
+        basic_context.http = fake_http
+        assert basic_context.http is fake_http
+
+    def test_sdk_default_http_client_remains_available_for_explicit_opt_in(self):
+        """验证 SDK 兼容层仍提供默认 HTTP 客户端 helper。"""
+        client = DefaultHttpClient()
+
+        assert hasattr(client, "get")
+        assert hasattr(client, "post")
     
     def test_page_can_be_none(self, basic_context: TaskContext):
         """验证 page 可以为 None。"""
