@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-22 | 发布打包目录清理收口：`package-windows-release` 与 `package-macos-internal-release` 现会在真正生成新发布物前先清空各自的 `dist/updates/<platform>/` 目录，避免本地打包或打包后上传继续复用旧 release 产物；对应单测已补齐 Windows/macOS 两条回归 | Codex |
 | 2026-04-22 | 补齐 Windows 桌面壳层图标资源：在既有 `app_icon.png` / `app_icon.icns` 之外新增 `app_icon.ico`，并让 PyInstaller 在 macOS 继续绑定 `icns`、在 Windows 改绑 `ico`，避免 Windows `Crawler4j.exe` 继续显示旧图标；同时更新桌面发布说明与图标打包回归测试 | Codex |
 | 2026-04-22 | 完成 hosted UI V1 二轮问题收口：模块详情页对宿主页入口改为 lazy instantiate，避免详情页打开时提前执行未选中页面的 `declare_ui()` / `load_handler`，并在再次选中已有 hosted page 时自动 refresh；`ModuleUIRuntimeBridge` 改为“`declare_ui` session 仅供下一次 non-declare hook 单次消费”，data-table handler 执行前也会先刷新声明会话，并通过 UI 声明 staging buffer + `replace_declared_ui()` 保证 schema 原子替换；SDK `check full` / `package build` / `package verify` 现统一补齐 hosted page / data table handler 契约校验并阻断 legacy `ui/` 目录；相关 unit/integration/acceptance 合并回归 `130 passed`，定向 `ruff check` 通过 | Codex |
 | 2026-04-22 | 继续收口桌面应用图标的 Dock 光学尺寸：先对标本机系统圆角方形图标在 `1024x1024` 画布中的外轮廓占比，再在保持外底板占比不变的前提下单独缩小中心蓝色徽章与放大镜组，避免在 Dock 中比系统常见应用图标显得更大；同时把图标回归测试补成“透明圆角 + 中轴安全区 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言 | Codex |

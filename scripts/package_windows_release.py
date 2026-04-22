@@ -233,8 +233,7 @@ def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None
     if not bundle_dir.exists():
         raise FileNotFoundError(f"未找到 Windows 宿主目录: {bundle_dir}")
 
-    output_dir = args.output_dir.expanduser().resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = release_packaging_helpers.reset_output_dir(args.output_dir)
 
     update_config_path = write_windows_update_config(bundle_dir, config)
     velopack_version = resolve_velopack_version() if config.use_dnx else None

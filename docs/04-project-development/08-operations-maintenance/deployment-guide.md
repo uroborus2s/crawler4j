@@ -36,6 +36,7 @@ uv run python -m src.ui.app
 - 当前 macOS 最终可分发产物固定为 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，不需要再额外携带旁边的 `Crawler4j/` collect 目录
 - 当前 Windows 正式发布入口固定为 `uv run package-windows-release`，它会先复用 `package-desktop` 产出的 `PyInstaller onedir` 宿主目录，再继续生成 Velopack 安装器与更新目录
 - 桌面壳层图标当前统一收口为同一套 `app_icon` 资源：运行时继续使用 `app_icon.png`，macOS bundle 使用 `app_icon.icns`，Windows `Crawler4j.exe` 使用 `app_icon.ico`
+- `package-windows-release` 与 `package-macos-internal-release` 现在都会在生成新发布物前先清空各自的 `dist/updates/<platform>/` 输出目录；`deploy-windows-release` / `deploy-macos-internal-release` 因复用同一打包入口，也会继承这条清理行为
 - 若需要小范围内部 DMG 分发并启用 Sparkle 自动更新，使用 `uv run package-macos-internal-release`
 - PyInstaller 现已显式收集 `sinanz` 的共享 `resources/` 目录；滑块验证码运行时会从其中的 `resources/models/` 解析 `slider_gap_locator.onnx`
 

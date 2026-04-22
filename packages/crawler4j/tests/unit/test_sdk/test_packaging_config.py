@@ -450,6 +450,19 @@ def test_release_packaging_helper_resolve_runtime_env_merges_dotenv_os_and_expli
     assert env_map["SHARED_KEY"] == "call"
 
 
+def test_release_packaging_helper_reset_output_dir_removes_stale_files(tmp_path):
+    helper = _load_script_module("release_packaging_helpers.py")
+    output_dir = tmp_path / "updates"
+    output_dir.mkdir()
+    (output_dir / "stale.txt").write_text("stale", encoding="utf-8")
+
+    reset_dir = helper.reset_output_dir(output_dir)
+
+    assert reset_dir == output_dir.resolve()
+    assert reset_dir.exists()
+    assert not (reset_dir / "stale.txt").exists()
+
+
 def test_platform_release_scripts_reuse_shared_runtime_env_helpers(tmp_path, monkeypatch):
     helper = importlib.import_module("scripts.release_packaging_helpers")
     macos_script = _load_script_module("package_macos_internal_release.py")
@@ -632,6 +645,56 @@ def test_windows_release_build_vpk_pack_command_uses_normalized_dnx_version(tmp_
 
     version_index = command.index("--version") + 1
     assert command[version_index] == "0.0.1589"
+
+
+def test_windows_release_build_release_artifacts_cleans_output_dir_before_packaging(tmp_path, monkeypatch):
+    script = _load_script_module("package_windows_release.py")
+    bundle_dir = tmp_path / "Crawler4j"
+    bundle_dir.mkdir()
+    output_dir = tmp_path / "updates"
+    output_dir.mkdir()
+    (output_dir / "stale.txt").write_text("stale", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    config = script.WindowsReleaseConfig(
+        feed_url="https://updates.example.com/win/releases.win.json",
+        pack_id="io.github.uroborus2s.crawler4j",
+        channel="win",
+        runtime="win-x64",
+    )
+
+    monkeypatch.setattr(script.release_packaging_helpers, "load_project_version", lambda: "0.2.0")
+    monkeypatch.setattr(script, "load_windows_release_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr(script, "windows_bundle_dir", lambda: bundle_dir)
+    monkeypatch.setattr(script, "write_windows_update_config", lambda bundle, release_config: bundle / script.UPDATE_CONFIG_FILENAME)
+
+    def fake_build_vpk_pack_command(bundle, destination, *, version, config, velopack_version=None):
+        observed["bundle_dir"] = bundle
+        observed["output_dir"] = destination
+        observed["version"] = version
+        return ["vpk", "pack"]
+
+    def fake_run(command, *, cwd, check):
+        observed["command"] = command
+        observed["cwd"] = cwd
+        observed["check"] = check
+
+    monkeypatch.setattr(script, "build_vpk_pack_command", fake_build_vpk_pack_command)
+    monkeypatch.setattr(script.subprocess, "run", fake_run)
+
+    args = script.parse_args(["--skip-build", "--output-dir", str(output_dir)])
+    artifacts = script.build_release_artifacts(args, env={script.VELOPACK_FEED_URL_ENV: config.feed_url})
+
+    assert artifacts.output_dir == output_dir.resolve()
+    assert artifacts.update_config_path == bundle_dir / script.UPDATE_CONFIG_FILENAME
+    assert observed["bundle_dir"] == bundle_dir
+    assert observed["output_dir"] == output_dir.resolve()
+    assert observed["version"] == "0.2.0"
+    assert observed["command"] == ["vpk", "pack"]
+    assert observed["cwd"] == script.WORKSPACE_ROOT
+    assert observed["check"] is True
+    assert output_dir.exists()
+    assert not (output_dir / "stale.txt").exists()
 
 
 def test_macos_internal_release_config_reads_env_and_vendor_layout(tmp_path, monkeypatch):
@@ -831,6 +894,50 @@ def test_macos_internal_release_build_release_artifacts_resigns_bundle_before_pa
         ("codesign", app_bundle),
         ("dmg", app_bundle),
     ]
+
+
+def test_macos_internal_release_build_release_artifacts_cleans_output_dir_before_packaging(tmp_path, monkeypatch):
+    script = _load_script_module("package_macos_internal_release.py")
+    app_bundle = tmp_path / "Crawler4j.app"
+    (app_bundle / "Contents").mkdir(parents=True)
+    output_dir = tmp_path / "updates"
+    output_dir.mkdir()
+    (output_dir / "stale.txt").write_text("stale", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    config = script.SparkleReleaseConfig(
+        sparkle_root=tmp_path / "sparkle",
+        feed_url="https://example.com/appcast.xml",
+        public_key="sparkle-public-key",
+        auto_check=True,
+    )
+
+    monkeypatch.setattr(script, "load_sparkle_release_config", lambda env=None, env_file=None: config)
+    monkeypatch.setattr(script.release_packaging_helpers, "load_project_version", lambda: "0.2.0")
+    monkeypatch.setattr(script, "app_bundle_path", lambda: app_bundle)
+    monkeypatch.setattr(script, "copy_sparkle_framework", lambda bundle, framework_source: bundle / "Contents" / "Frameworks" / "Sparkle.framework")
+    monkeypatch.setattr(script, "update_bundle_plist", lambda bundle, *, version, config: bundle / "Contents" / "Info.plist")
+    monkeypatch.setattr(script, "ad_hoc_sign_bundle", lambda bundle: None)
+
+    def fake_create_dmg(bundle, destination, *, version, volume_name):
+        observed["bundle"] = bundle
+        observed["output_dir"] = destination
+        observed["version"] = version
+        observed["volume_name"] = volume_name
+        return destination / "Crawler4j-0.2.0.dmg"
+
+    monkeypatch.setattr(script, "create_dmg", fake_create_dmg)
+
+    args = script.parse_args(["--skip-build", "--skip-appcast", "--output-dir", str(output_dir)])
+    artifacts = script.build_release_artifacts(args)
+
+    assert artifacts.output_dir == output_dir.resolve()
+    assert observed["bundle"] == app_bundle
+    assert observed["output_dir"] == output_dir.resolve()
+    assert observed["version"] == "0.2.0"
+    assert observed["volume_name"] == script.package_desktop_app.APP_NAME
+    assert output_dir.exists()
+    assert not (output_dir / "stale.txt").exists()
 
 
 def test_macos_internal_release_copies_sparkle_framework_into_bundle(tmp_path):
