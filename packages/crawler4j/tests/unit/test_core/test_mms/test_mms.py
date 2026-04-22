@@ -360,10 +360,24 @@ upgrade_source:
         assert module_info.status == ModuleStatus.INVALID
         assert module_info.error != ""
 
-    def test_validate_rejects_legacy_config_schema_and_unmanaged_page_entry(self, tmp_path):
+    def test_validate_rejects_legacy_config_schema(self, tmp_path):
         from src.core.mms.models import ModuleValidationError
 
         (tmp_path / "config_schema.json").write_text("{}", encoding="utf-8")
+        manifest = ModuleManifest(
+            name="demo_module",
+            upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
+        )
+        scanner = ModuleScanner(scan_paths=[tmp_path])
+
+        with pytest.raises(ModuleValidationError) as exc_info:
+            scanner.validate(manifest, tmp_path)
+
+        assert "config_schema.json" in str(exc_info.value)
+
+    def test_validate_rejects_unmanaged_page_entry(self, tmp_path):
+        from src.core.mms.models import ModuleValidationError
+
         manifest = ModuleManifest(
             name="demo_module",
             upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
@@ -382,7 +396,7 @@ upgrade_source:
         with pytest.raises(ModuleValidationError) as exc_info:
             scanner.validate(manifest, tmp_path)
 
-        assert "config_schema.json" in str(exc_info.value) or "ui_extension.pages" in str(exc_info.value)
+        assert "ui_extension.pages" in str(exc_info.value)
 
     def test_validate_rejects_unknown_workflow_in_config_defaults(self, tmp_path):
         from src.core.mms.models import ModuleValidationError

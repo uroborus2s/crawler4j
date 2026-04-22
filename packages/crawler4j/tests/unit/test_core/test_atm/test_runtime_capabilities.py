@@ -355,6 +355,47 @@ def test_ui_tools_persist_page_and_data_table_meta(monkeypatch):
     assert meta["columns"] == [{"key": "phone", "label": "手机号"}]
 
 
+def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
+    page_calls: list[tuple[str, dict[str, object]]] = []
+    table_calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_normalize_page_schema(page_id: str, schema: dict[str, object]) -> dict[str, object]:
+        page_calls.append((page_id, dict(schema)))
+        return {"type": "Page", "title": f"normalized:{page_id}", "children": []}
+
+    def fake_normalize_table_schema(view_id: str, schema: dict[str, object]) -> dict[str, object]:
+        table_calls.append((view_id, dict(schema)))
+        return {"title": f"normalized:{view_id}", "dataset": view_id, "columns": []}
+
+    monkeypatch.setattr(runtime_capabilities, "sdk_normalize_page_schema", fake_normalize_page_schema)
+    monkeypatch.setattr(runtime_capabilities, "sdk_normalize_table_schema", fake_normalize_table_schema)
+
+    caps = build_runtime_capabilities("demo_module")
+    assert caps.tools.call(
+        "ui.declare_page",
+        page_id="dashboard",
+        schema={"type": "Page", "children": []},
+    )
+    assert caps.tools.call(
+        "ui.declare_data_table",
+        view_id="accounts",
+        schema={"columns": []},
+    )
+
+    assert page_calls == [("dashboard", {"type": "Page", "children": []})]
+    assert table_calls == [("accounts", {"columns": []})]
+    assert caps.tools.call("ui.get_page", page_id="dashboard") == {
+        "type": "Page",
+        "title": "normalized:dashboard",
+        "children": [],
+    }
+    assert caps.tools.call("ui.get_data_table", view_id="accounts") == {
+        "title": "normalized:accounts",
+        "dataset": "accounts",
+        "columns": [],
+    }
+
+
 def test_ui_tools_reject_unmanaged_schema_fields():
     caps = build_runtime_capabilities("demo_module")
 

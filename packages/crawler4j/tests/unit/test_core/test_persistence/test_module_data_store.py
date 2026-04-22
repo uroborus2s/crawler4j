@@ -223,6 +223,53 @@ def test_module_data_store_write_empty_dataset_keeps_manifest_and_clears_rows(te
     assert dict(manifest_row) == {"created_at": 100, "updated_at": 200}
 
 
+def test_module_data_store_replace_declared_ui_replaces_stale_pages_and_tables(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    store.write_page_schema(
+        "demo_module",
+        "legacy_page",
+        {"type": "Page", "title": "旧页面", "children": []},
+    )
+    store.write_data_table_schema(
+        "demo_module",
+        "legacy_table",
+        {"title": "旧表", "dataset": "legacy_table", "columns": []},
+    )
+
+    assert store.replace_declared_ui(
+        "demo_module",
+        page_schemas={
+            "dashboard": {
+                "type": "Page",
+                "title": "新页面",
+                "children": [],
+            }
+        },
+        data_table_schemas={
+            "accounts": {
+                "title": "新表",
+                "dataset": "accounts",
+                "columns": [],
+            }
+        },
+    )
+
+    assert store.read_page_schema("demo_module", "legacy_page") == {}
+    assert store.read_data_table_schema("demo_module", "legacy_table") == {}
+    assert store.read_page_schema("demo_module", "dashboard") == {
+        "type": "Page",
+        "title": "新页面",
+        "children": [],
+    }
+    assert store.read_data_table_schema("demo_module", "accounts") == {
+        "title": "新表",
+        "dataset": "accounts",
+        "columns": [],
+    }
+
+
 def test_module_data_store_rejects_invalid_write_dataset_without_clobbering_rows(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.module_data_store import ModuleDataStore

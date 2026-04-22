@@ -33,6 +33,11 @@ def _read_manifest(module_root: Path) -> dict:
         return yaml.safe_load(fh)
 
 
+def _write_manifest(module_root: Path, manifest: dict) -> None:
+    with (module_root / "module.yaml").open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(manifest, fh, allow_unicode=True, sort_keys=False)
+
+
 def _read_pyproject(module_root: Path) -> dict:
     with (module_root / "pyproject.toml").open("rb") as fh:
         return tomllib.load(fh)
@@ -120,6 +125,10 @@ def test_archive_members_excludes_nested_egg_info_contents(tmp_path: Path):
     ignored_idea_file.write_text("<xml />", encoding="utf-8")
     ignored_vscode_file = module_root / ".vscode" / "settings.json"
     ignored_vscode_file.write_text("{}", encoding="utf-8")
+    legacy_ui_dir = module_root / "ui"
+    legacy_ui_dir.mkdir()
+    legacy_ui_file = legacy_ui_dir / "legacy_page.py"
+    legacy_ui_file.write_text("class LegacyPage: ...\n", encoding="utf-8")
 
     members = commands._archive_members(module_root)
     archived_paths = {arcname for _, arcname in members}
@@ -129,6 +138,7 @@ def test_archive_members_excludes_nested_egg_info_contents(tmp_path: Path):
     assert "demo_model/.idea/workspace.xml" not in archived_paths
     assert "demo_model/.vscode/settings.json" not in archived_paths
     assert "demo_model/nested/demo_model.egg-info/PKG-INFO" not in archived_paths
+    assert "demo_model/ui/legacy_page.py" not in archived_paths
 
 
 def test_module_init_generates_importable_package(module_root: Path):
@@ -316,6 +326,43 @@ def test_check_release_rejects_pyproject_version_drift(module_root: Path, monkey
     assert commands.cmd_check_release(Namespace()) == 1
 
 
+@pytest.mark.parametrize(
+    ("manifest_patch", "expected_message"),
+    [
+        ({"ui_extension": ""}, "ui_extension 必须是 YAML 映射对象"),
+        ({"ui_extension": {"pages": ""}}, "ui_extension.pages 必须是数组"),
+    ],
+)
+def test_check_structure_rejects_falsy_invalid_ui_extension_types(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    manifest_patch: dict,
+    expected_message: str,
+):
+    monkeypatch.chdir(module_root)
+    manifest = _read_manifest(module_root)
+    manifest.update(manifest_patch)
+    _write_manifest(module_root, manifest)
+
+    assert commands.cmd_check_structure(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert expected_message in captured.out
+
+
+@pytest.mark.parametrize(
+    ("manifest", "expected_message"),
+    [
+        ({"ui_extension": ""}, "module.yaml.ui_extension 必须是映射对象"),
+        ({"ui_extension": {"pages": ""}}, "module.yaml.ui_extension.pages 必须是数组"),
+    ],
+)
+def test_manifest_ui_pages_rejects_falsy_invalid_types(manifest: dict, expected_message: str):
+    with pytest.raises(commands.CLIError, match=expected_message):
+        commands._manifest_ui_pages(manifest)
+
+
 def test_check_rejects_unregistered_workflow_file(module_root: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.chdir(module_root)
     (module_root / "workflows" / "rogue.py").write_text("# rogue workflow\n", encoding="utf-8")
@@ -362,6 +409,119 @@ def test_check_full_reports_missing_page_load_handler(
 
     captured = capsys.readouterr()
     assert "宿主页 dashboard 的 load_handler 未在 module_runtime.py 中定义" in captured.out
+
+
+def test_check_full_rejects_page_load_handler_signature_mismatch(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace(
+            """def load_dashboard_page(
+    context: TaskContext,
+    page_id: str,
+    params: dict | None = None,
+) -> dict:""",
+            "def load_dashboard_page(context: TaskContext) -> dict:",
+        ),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "宿主页 dashboard 的 load_handler 签名不兼容" in captured.out
+    assert "(context, page_id, params)" in captured.out
+
+
+def test_check_full_rejects_async_callable_page_load_handler(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    runtime_text = runtime_text.replace(
+        '"load_handler": "load_dashboard_page"',
+        '"load_handler": "async_dashboard_loader"',
+    )
+    runtime_text += """
+
+class AsyncDashboardLoader:
+    async def __call__(self, context: TaskContext, page_id: str, params: dict | None = None) -> dict:
+        return {
+            "title": "Dashboard",
+            "summary": "TODO: replace with real content",
+        }
+
+
+async_dashboard_loader = AsyncDashboardLoader()
+"""
+    runtime_path.write_text(runtime_text, encoding="utf-8")
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "宿主页 dashboard 的 load_handler 必须是同步函数" in captured.out
+
+
+@pytest.mark.parametrize(
+    ("handler_field", "handler_name", "handler_definition", "expected_call"),
+    [
+        (
+            "create_handler",
+            "create_accounts_record",
+            """def create_accounts_record(context: TaskContext):
+    return None
+""",
+            "(context, payload)",
+        ),
+        (
+            "update_handler",
+            "update_accounts_record",
+            """def update_accounts_record(context: TaskContext, pk_value: str):
+    return None
+""",
+            "(context, row_id, payload)",
+        ),
+    ],
+)
+def test_check_full_rejects_managed_data_table_handler_signature_mismatch(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    handler_field: str,
+    handler_name: str,
+    handler_definition: str,
+    expected_call: str,
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_data_table_create(Namespace(view_id="accounts", label=None, icon=None)) == 0
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    runtime_text = runtime_text.replace(
+        '"display_fields": ["id", "status", "updated_at"],',
+        f'"display_fields": ["id", "status", "updated_at"],\n'
+        f'            "{handler_field}": "{handler_name}",',
+    )
+    runtime_text += f"\n\n{handler_definition}"
+    runtime_path.write_text(runtime_text, encoding="utf-8")
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert f"数据表 accounts 的 {handler_field} 签名不兼容" in captured.out
+    assert expected_call in captured.out
 
 
 def test_check_full_rejects_invalid_hosted_page_schema(
@@ -618,6 +778,110 @@ def test_page_create_does_not_mutate_manifest_when_declare_ui_is_missing(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 1
     assert "ui_extension" not in _read_manifest(module_root)
+
+
+def test_check_full_rejects_manifest_page_missing_from_declare_ui(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace("    _declare_dashboard_page(context)\n", ""),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: dashboard" in captured.out
+
+
+def test_package_build_rejects_manifest_page_missing_from_declare_ui(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace("    _declare_dashboard_page(context)\n", ""),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_package_build(Namespace(output=None)) == 1
+
+    captured = capsys.readouterr()
+    assert "module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: dashboard" in captured.out
+
+
+def test_check_full_rejects_extra_declared_page_not_in_manifest(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    runtime_path = module_root / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace(
+            "    # SDK-DATA-TABLES\n",
+            """    context.tools.call(
+        "ui.declare_page",
+        page_id="rogue",
+        schema=build_dashboard_page_schema(),
+    )
+    # SDK-DATA-TABLES
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "declare_ui 注册了未写入 module.yaml.ui_extension.pages 的宿主页: rogue" in captured.out
+
+
+@pytest.mark.parametrize("legacy_name", ["config_schema.json", "strategy.yaml"])
+def test_check_structure_rejects_legacy_files(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    legacy_name: str,
+):
+    monkeypatch.chdir(module_root)
+    (module_root / legacy_name).write_text("{}", encoding="utf-8")
+
+    assert commands.cmd_check_structure(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert f"残留旧配置文件: {legacy_name}" in captured.out
+
+
+def test_check_structure_rejects_legacy_ui_directory(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    legacy_ui_dir = module_root / "ui"
+    legacy_ui_dir.mkdir()
+    (legacy_ui_dir / "legacy_page.py").write_text("class LegacyPage: ...\n", encoding="utf-8")
+
+    assert commands.cmd_check_structure(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "残留旧 UI 目录: ui/" in captured.out
 
 
 def test_package_build_and_verify(module_root: Path, monkeypatch: pytest.MonkeyPatch):

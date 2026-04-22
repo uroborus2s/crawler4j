@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tomllib
+import zipfile
 from pathlib import Path
 
 import yaml
@@ -134,3 +135,130 @@ def test_cli_rejects_legacy_commands(tmp_path: Path):
         assert "invalid choice" in result.stderr
 
     assert not (tmp_path / "removed_command_project").exists()
+
+
+def test_cli_check_full_rejects_manifest_declare_ui_drift(tmp_path: Path):
+    target = tmp_path / "demo_model"
+
+    init_result = _run_cli(
+        "module",
+        "init",
+        "demo_model",
+        "--repo",
+        "demo/demo_model",
+        "--output",
+        str(target),
+        "--no-install",
+        "--no-git",
+        cwd=REPO_ROOT,
+    )
+    assert init_result.returncode == 0, init_result.stderr
+
+    page_result = _run_cli("page", "create", "dashboard", cwd=target)
+    assert page_result.returncode == 0, page_result.stderr
+
+    runtime_path = target / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace("    _declare_dashboard_page(context)\n", ""),
+        encoding="utf-8",
+    )
+
+    check_result = _run_cli("check", "full", cwd=target)
+    assert check_result.returncode == 1
+    assert "module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: dashboard" in check_result.stdout
+
+
+def test_cli_package_build_rejects_legacy_ui_directory(tmp_path: Path):
+    target = tmp_path / "demo_model"
+
+    init_result = _run_cli(
+        "module",
+        "init",
+        "demo_model",
+        "--repo",
+        "demo/demo_model",
+        "--output",
+        str(target),
+        "--no-install",
+        "--no-git",
+        cwd=REPO_ROOT,
+    )
+    assert init_result.returncode == 0, init_result.stderr
+
+    legacy_ui_dir = target / "ui"
+    legacy_ui_dir.mkdir()
+    (legacy_ui_dir / "legacy_page.py").write_text("class LegacyPage: ...\n", encoding="utf-8")
+
+    package_result = _run_cli("package", "build", cwd=target)
+    assert package_result.returncode == 1
+    assert "残留旧 UI 目录: ui/" in package_result.stdout
+
+
+def test_cli_package_build_rejects_manifest_declare_ui_drift(tmp_path: Path):
+    target = tmp_path / "demo_model"
+
+    init_result = _run_cli(
+        "module",
+        "init",
+        "demo_model",
+        "--repo",
+        "demo/demo_model",
+        "--output",
+        str(target),
+        "--no-install",
+        "--no-git",
+        cwd=REPO_ROOT,
+    )
+    assert init_result.returncode == 0, init_result.stderr
+
+    page_result = _run_cli("page", "create", "dashboard", cwd=target)
+    assert page_result.returncode == 0, page_result.stderr
+
+    runtime_path = target / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace("    _declare_dashboard_page(context)\n", ""),
+        encoding="utf-8",
+    )
+
+    package_result = _run_cli("package", "build", cwd=target)
+    assert package_result.returncode == 1
+    assert "module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: dashboard" in package_result.stdout
+
+
+def test_cli_package_verify_rejects_manifest_declare_ui_drift(tmp_path: Path):
+    target = tmp_path / "demo_model"
+
+    init_result = _run_cli(
+        "module",
+        "init",
+        "demo_model",
+        "--repo",
+        "demo/demo_model",
+        "--output",
+        str(target),
+        "--no-install",
+        "--no-git",
+        cwd=REPO_ROOT,
+    )
+    assert init_result.returncode == 0, init_result.stderr
+
+    page_result = _run_cli("page", "create", "dashboard", cwd=target)
+    assert page_result.returncode == 0, page_result.stderr
+
+    runtime_path = target / "module_runtime.py"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace("    _declare_dashboard_page(context)\n", ""),
+        encoding="utf-8",
+    )
+
+    archive_path = tmp_path / "demo_model-0.1.0.zip"
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in target.rglob("*"):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(target)
+            zf.write(path, f"{target.name}/{relative.as_posix()}")
+
+    verify_result = _run_cli("package", "verify", str(archive_path), cwd=target)
+    assert verify_result.returncode == 1
+    assert "module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: dashboard" in verify_result.stdout

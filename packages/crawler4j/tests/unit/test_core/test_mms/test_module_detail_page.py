@@ -196,8 +196,78 @@ def test_module_detail_page_loads_hosted_pages_from_manifest(qtbot, tmp_path):
     menu_texts = [page.menu_list.item(i).text() for i in range(page.menu_list.count())]
     assert "📊 今日运营看板" in menu_texts
     assert "📋 账号管理" in menu_texts
-    assert page._menu_pages["dashboard"].__class__.__name__ == "ManagedPageRenderer"
-    assert page._menu_pages["accounts"].__class__.__name__ == "ModuleDataTablePage"
+    assert "dashboard" not in page._menu_pages
+    assert "accounts" not in page._menu_pages
+    assert page._entry_to_menu_id["core:page:dashboard"] == "dashboard"
+    assert page._entry_to_menu_id["core:data_table:accounts"] == "accounts"
+
+
+def test_module_detail_page_defers_hosted_page_hooks_until_selected(qtbot, tmp_path):
+    events_path = tmp_path / "hosted-page-events.log"
+    module = _make_module(
+        tmp_path,
+        source=ModuleSource.DEV_LINK,
+        pages=[
+            UIPageInfo(
+                id="dashboard",
+                icon="📊",
+                label="懒加载看板",
+                entry="core:page:dashboard",
+            ),
+        ],
+        runtime_body=f"""
+        from pathlib import Path
+
+        from crawler4j_sdk import TaskContext
+
+
+        EVENTS_PATH = Path({str(events_path)!r})
+
+
+        def _record(event: str) -> None:
+            previous = EVENTS_PATH.read_text(encoding="utf-8") if EVENTS_PATH.exists() else ""
+            EVENTS_PATH.write_text(previous + event + "\\n", encoding="utf-8")
+
+
+        def declare_ui(context: TaskContext):
+            _record("declare_ui")
+            context.tools.call(
+                "ui.declare_page",
+                page_id="dashboard",
+                schema={{
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [
+                        {{"type": "Text", "binding": "title"}},
+                    ],
+                }},
+            )
+
+
+        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+            _record("load_handler")
+            return {{
+                "title": "懒加载看板",
+            }}
+        """,
+    )
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    page.set_module(module)
+
+    assert "dashboard" not in page._menu_pages
+    assert not events_path.exists()
+
+    page._select_menu("dashboard")
+    qtbot.waitUntil(lambda: events_path.exists())
+
+    hosted_page = page._menu_pages["dashboard"]
+    assert events_path.read_text(encoding="utf-8").splitlines() == [
+        "declare_ui",
+        "load_handler",
+    ]
+    assert any(label.text() == "懒加载看板" for label in hosted_page.findChildren(QLabel))
 
 
 def test_module_detail_page_loads_hosted_page_for_core_page_entry(qtbot, tmp_path):
@@ -205,6 +275,7 @@ def test_module_detail_page_loads_hosted_page_for_core_page_entry(qtbot, tmp_pat
     qtbot.addWidget(page)
 
     page.set_module(_make_hosted_ui_module(tmp_path, source=ModuleSource.EXTERNAL))
+    page._select_menu("dashboard")
     hosted_page = page._menu_pages["dashboard"]
     texts = [label.text() for label in hosted_page.findChildren(QLabel)]
 
@@ -218,6 +289,7 @@ def test_module_detail_page_reloads_dev_link_hosted_page_after_source_change(qtb
     module = _make_hosted_ui_module(tmp_path, source=ModuleSource.DEV_LINK)
 
     page.set_module(module)
+    page._select_menu("dashboard")
     hosted_page = page._menu_pages["dashboard"]
     assert any(label.text() == "今日运营看板" for label in hosted_page.findChildren(QLabel))
 
@@ -251,8 +323,74 @@ def test_module_detail_page_reloads_dev_link_hosted_page_after_source_change(qtb
     )
 
     page.set_module(module)
+    assert "dashboard" not in page._menu_pages
+    page._select_menu("dashboard")
     reloaded_page = page._menu_pages["dashboard"]
     assert any(label.text() == "已重新加载看板" for label in reloaded_page.findChildren(QLabel))
+
+
+def test_module_detail_page_refreshes_existing_data_table_page_when_reselected(qtbot, tmp_path):
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+    module = _make_hosted_ui_module(tmp_path, source=ModuleSource.DEV_LINK)
+
+    page.set_module(module)
+    page._select_menu("accounts")
+    accounts_page = page._menu_pages["accounts"]
+    assert accounts_page.title_label.text() == "账号管理"
+    assert accounts_page.table.item(0, 0).text() == "13800138000"
+
+    module_dir = Path(module.path)
+    (module_dir / "module_runtime.py").write_text(
+        dedent(
+            """
+            from crawler4j_sdk import TaskContext
+
+
+            def declare_ui(context: TaskContext):
+                context.tools.call(
+                    "ui.declare_page",
+                    page_id="dashboard",
+                    schema={
+                        "type": "Page",
+                        "load_handler": "load_dashboard_page",
+                        "children": [
+                            {"type": "Text", "style": "title", "binding": "title"},
+                        ],
+                    },
+                )
+                context.tools.call(
+                    "ui.declare_data_table",
+                    view_id="accounts",
+                    schema={
+                        "title": "已重新加载账号表",
+                        "dataset": "accounts",
+                        "columns": [
+                            {"key": "phone", "label": "手机号"},
+                        ],
+                    },
+                )
+                context.tools.call(
+                    "db.replace_records",
+                    dataset="accounts",
+                    records=[{"phone": "13900139000"}],
+                )
+
+
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                return {"title": "已重新加载看板"}
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    page._select_menu("info")
+    page._select_menu("accounts")
+
+    assert page._menu_pages["accounts"] is accounts_page
+    assert accounts_page.title_label.text() == "已重新加载账号表"
+    assert accounts_page.table.item(0, 0).text() == "13900139000"
 
 
 def test_module_detail_page_renders_core_managed_data_table_entry(qtbot, tmp_path):
@@ -260,7 +398,9 @@ def test_module_detail_page_renders_core_managed_data_table_entry(qtbot, tmp_pat
     qtbot.addWidget(page)
 
     page.set_module(_make_hosted_ui_module(tmp_path))
+    assert "accounts" not in page._menu_pages
 
+    page._select_menu("accounts")
     custom_page = page._menu_pages["accounts"]
     assert custom_page.__class__.__name__ == "ModuleDataTablePage"
 
@@ -270,6 +410,8 @@ def test_module_detail_page_open_page_button_switches_to_target_entry(qtbot, tmp
     qtbot.addWidget(page)
 
     page.set_module(_make_hosted_ui_module(tmp_path))
+    assert "dashboard" not in page._menu_pages
+    assert "accounts" not in page._menu_pages
     page._select_menu("dashboard")
 
     hosted_page = page._menu_pages["dashboard"]
@@ -280,7 +422,10 @@ def test_module_detail_page_open_page_button_switches_to_target_entry(qtbot, tmp
     )
     open_button.click()
 
-    qtbot.waitUntil(lambda: page.content_stack.currentWidget() is page._menu_pages["accounts"])
+    qtbot.waitUntil(
+        lambda: "accounts" in page._menu_pages
+        and page.content_stack.currentWidget() is page._menu_pages["accounts"]
+    )
 
     current_item = page.menu_list.currentItem()
     assert current_item is not None

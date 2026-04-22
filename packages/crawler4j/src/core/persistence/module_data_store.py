@@ -301,44 +301,66 @@ class ModuleDataStore:
     def _write_view_row(self, module_name: str, view_id: str, schema: dict[str, Any]) -> bool:
         now = int(time.time())
         with get_connection(DATA_DB) as conn:
-            conn.execute(
-                """
-                INSERT INTO module_data_table_views (module_name, view_id, schema_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(module_name, view_id) DO UPDATE SET
-                    schema_json = excluded.schema_json,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    module_name,
-                    view_id,
-                    json.dumps(schema, ensure_ascii=False),
-                    now,
-                    now,
-                ),
-            )
+            self._write_view_row_with_conn(conn, module_name, view_id, schema, now=now)
         return True
 
     def _write_page_row(self, module_name: str, page_id: str, schema: dict[str, Any]) -> bool:
         now = int(time.time())
         with get_connection(DATA_DB) as conn:
-            conn.execute(
-                """
-                INSERT INTO module_pages (module_name, page_id, schema_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(module_name, page_id) DO UPDATE SET
-                    schema_json = excluded.schema_json,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    module_name,
-                    page_id,
-                    json.dumps(schema, ensure_ascii=False),
-                    now,
-                    now,
-                ),
-            )
+            self._write_page_row_with_conn(conn, module_name, page_id, schema, now=now)
         return True
+
+    def _write_view_row_with_conn(
+        self,
+        conn,
+        module_name: str,
+        view_id: str,
+        schema: dict[str, Any],
+        *,
+        now: int,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO module_data_table_views (module_name, view_id, schema_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(module_name, view_id) DO UPDATE SET
+                schema_json = excluded.schema_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                module_name,
+                view_id,
+                json.dumps(schema, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+
+    def _write_page_row_with_conn(
+        self,
+        conn,
+        module_name: str,
+        page_id: str,
+        schema: dict[str, Any],
+        *,
+        now: int,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO module_pages (module_name, page_id, schema_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(module_name, page_id) DO UPDATE SET
+                schema_json = excluded.schema_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                module_name,
+                page_id,
+                json.dumps(schema, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
 
     def _read_view_row(self, module_name: str, view_id: str) -> dict[str, Any] | None:
         with get_connection(DATA_DB) as conn:
@@ -424,8 +446,24 @@ class ModuleDataStore:
     def write_page_schema(self, module_name: str, page_id: str, schema: dict[str, Any]) -> bool:
         return self._write_page_row(module_name, page_id, _normalize_schema(schema))
 
-    def clear_declared_ui(self, module_name: str) -> bool:
-        changed = False
+    def replace_declared_ui(
+        self,
+        module_name: str,
+        *,
+        page_schemas: dict[str, dict[str, Any]],
+        data_table_schemas: dict[str, dict[str, Any]],
+    ) -> bool:
+        normalized_pages = {
+            str(page_id): _normalize_schema(schema)
+            for page_id, schema in dict(page_schemas or {}).items()
+        }
+        normalized_tables = {
+            str(view_id): _normalize_schema(schema)
+            for view_id, schema in dict(data_table_schemas or {}).items()
+        }
+
+        changed = bool(normalized_pages) or bool(normalized_tables)
+        now = int(time.time())
         with get_connection(DATA_DB) as conn:
             cursor = conn.execute(
                 "DELETE FROM module_data_table_views WHERE module_name = ?",
@@ -438,6 +476,12 @@ class ModuleDataStore:
                 (module_name,),
             )
             changed = bool(cursor.rowcount) or changed
+
+            for view_id, schema in normalized_tables.items():
+                self._write_view_row_with_conn(conn, module_name, view_id, schema, now=now)
+
+            for page_id, schema in normalized_pages.items():
+                self._write_page_row_with_conn(conn, module_name, page_id, schema, now=now)
 
         return changed
 

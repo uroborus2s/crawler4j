@@ -54,48 +54,6 @@ def _normalize_records(raw: Any) -> list[dict[str, Any]]:
 
 
 MANAGED_VIEW_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-ALLOWED_TABLE_SCHEMA_KEYS = {
-    "title",
-    "dataset",
-    "primary_key",
-    "lock_scope",
-    "lock_key",
-    "display_fields",
-    "create_fields",
-    "update_fields",
-    "create_handler",
-    "update_handler",
-    "columns",
-}
-ALLOWED_TABLE_COLUMN_KEYS = {
-    "key",
-    "label",
-    "visible",
-    "required",
-    "type",
-    "options",
-    "default",
-}
-ALLOWED_TABLE_COLUMN_TYPES = {"text", "number", "int", "bool", "select"}
-BUSINESS_OCCUPANCY_COLUMN_KEYS = {
-    "occupied",
-    "occupied_label",
-    "is_occupied",
-    "lock_status",
-    "lock_status_label",
-}
-BUSINESS_OCCUPANCY_COLUMN_LABELS = {"占用中", "占用状态"}
-HOSTED_PAGE_ENTRY_RE = re.compile(r"^core:(page|data_table):([a-z][a-z0-9_]*)$")
-ALLOWED_PAGE_LAYOUT_KEYS = {"direction", "kind", "columns", "gap"}
-ALLOWED_PAGE_SCHEMA_KEYS = {"type", "title", "load_handler", "children", "layout"}
-ALLOWED_SECTION_SCHEMA_KEYS = {"type", "title", "children", "variant", "layout"}
-ALLOWED_TEXT_SCHEMA_KEYS = {"type", "text", "binding", "style"}
-ALLOWED_BUTTON_SCHEMA_KEYS = {"type", "label", "action"}
-ALLOWED_BUTTON_ACTION_KEYS = {"type", "entry", "page_id", "view_id"}
-ALLOWED_INLINE_TABLE_SCHEMA_KEYS = {"type", "title", "binding", "rows", "columns", "empty_text"}
-ALLOWED_LAYOUT_DIRECTIONS = {"column", "row"}
-ALLOWED_LAYOUT_KINDS = {"grid"}
-ALLOWED_TEXT_STYLES = {"title", "subtitle", "body", "meta"}
 
 
 @lru_cache(maxsize=1)
@@ -140,327 +98,26 @@ def _validate_managed_identifier(value: str, *, field_name: str) -> str:
     return normalized
 
 
-def _normalize_table_field_list(raw: Any, *, field_name: str) -> list[str]:
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise ValueError(f"{field_name} 必须是字符串数组")
+class HostedUIDeclarationBuffer:
+    """声明期的 hosted UI staging buffer。"""
 
-    values: list[str] = []
-    for item in raw:
-        values.append(_validate_managed_identifier(str(item), field_name=field_name))
-    return values
+    def __init__(self):
+        self.page_schemas: dict[str, dict[str, Any]] = {}
+        self.data_table_schemas: dict[str, dict[str, Any]] = {}
+        self._collecting = True
 
+    @property
+    def is_collecting(self) -> bool:
+        return self._collecting
 
-def _normalize_table_column(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValueError("数据表 columns 中的每一项都必须是对象")
+    def stage_page(self, page_id: str, schema: dict[str, Any]) -> None:
+        self.page_schemas[page_id] = dict(schema)
 
-    unknown_keys = sorted(set(raw) - ALLOWED_TABLE_COLUMN_KEYS)
-    if unknown_keys:
-        raise ValueError(f"数据表列定义包含不支持的字段: {', '.join(unknown_keys)}")
+    def stage_data_table(self, view_id: str, schema: dict[str, Any]) -> None:
+        self.data_table_schemas[view_id] = dict(schema)
 
-    key = _validate_managed_identifier(str(raw.get("key", "")), field_name="column.key")
-    label = str(raw.get("label") or key).strip()
-    if not label:
-        raise ValueError("数据表列定义必须提供 label")
-
-    col_type = str(raw.get("type") or "text").strip().lower()
-    if col_type not in ALLOWED_TABLE_COLUMN_TYPES:
-        raise ValueError(f"不支持的数据表列类型: {col_type}")
-
-    column: dict[str, Any] = {
-        "key": key,
-        "label": label,
-    }
-    if raw.get("visible") is not None:
-        column["visible"] = bool(raw["visible"])
-    if raw.get("required") is not None:
-        column["required"] = bool(raw["required"])
-    if col_type != "text":
-        column["type"] = col_type
-    if raw.get("default") is not None:
-        column["default"] = raw["default"]
-    if col_type == "select":
-        options = raw.get("options")
-        if not isinstance(options, list) or not options:
-            raise ValueError("select 列必须提供非空 options 数组")
-        column["options"] = [str(option) for option in options]
-    elif raw.get("options") is not None:
-        raise ValueError("只有 select 列允许配置 options")
-
-    return column
-
-
-def _normalize_table_schema(view_id: str, schema: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(schema, dict):
-        raise ValueError("数据表 schema 必须是对象")
-
-    unknown_keys = sorted(set(schema) - ALLOWED_TABLE_SCHEMA_KEYS)
-    if unknown_keys:
-        raise ValueError(f"数据表 schema 包含不支持的字段: {', '.join(unknown_keys)}")
-
-    dataset = str(schema.get("dataset") or view_id).strip()
-    if dataset != view_id:
-        raise ValueError("数据表 dataset 必须与 view_id 保持一致，由宿主统一管理")
-
-    raw_columns = schema.get("columns", [])
-    if not isinstance(raw_columns, list):
-        raise ValueError("数据表 columns 必须是数组")
-
-    normalized = {
-        "title": str(schema.get("title") or view_id).strip() or view_id,
-        "dataset": view_id,
-        "primary_key": _validate_managed_identifier(
-            str(schema.get("primary_key") or "id"),
-            field_name="primary_key",
-        ),
-        "columns": [_normalize_table_column(column) for column in raw_columns],
-    }
-
-    if schema.get("lock_scope") is not None:
-        normalized["lock_scope"] = _validate_managed_identifier(
-            str(schema.get("lock_scope")),
-            field_name="lock_scope",
-        )
-    if schema.get("lock_key") is not None:
-        normalized["lock_key"] = _validate_managed_identifier(
-            str(schema.get("lock_key")),
-            field_name="lock_key",
-        )
-    for list_field in ("display_fields", "create_fields", "update_fields"):
-        values = _normalize_table_field_list(schema.get(list_field), field_name=list_field)
-        if values:
-            normalized[list_field] = values
-    for handler_field in ("create_handler", "update_handler"):
-        if schema.get(handler_field) is not None:
-            normalized[handler_field] = _validate_managed_identifier(
-                str(schema.get(handler_field)),
-                field_name=handler_field,
-            )
-
-    _validate_lock_key_usage(normalized)
-    return normalized
-
-
-def _validate_lock_key_usage(schema: dict[str, Any]) -> None:
-    if not schema.get("lock_key"):
-        return
-
-    conflicts: list[str] = []
-    for column in schema.get("columns", []):
-        if not isinstance(column, dict):
-            continue
-        key = str(column.get("key", "")).strip()
-        label = str(column.get("label", "")).strip()
-        if key in BUSINESS_OCCUPANCY_COLUMN_KEYS or label in BUSINESS_OCCUPANCY_COLUMN_LABELS:
-            conflicts.append(key or label)
-
-    if conflicts:
-        rendered = ", ".join(dict.fromkeys(conflicts))
-        raise ValueError(
-            f"lock_key 只用于 Core 临时锁，不能与业务占用列同时声明；请删除这些列或移除 lock_key: {rendered}"
-        )
-
-
-def _normalize_binding(raw: Any, *, field_name: str) -> str:
-    if raw is None:
-        return ""
-    binding = str(raw).strip()
-    if not binding:
-        raise ValueError(f"{field_name} 不能为空字符串")
-    return binding
-
-
-def _normalize_layout(raw: Any, *, field_name: str) -> dict[str, Any]:
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"{field_name} 必须是对象")
-
-    unknown_keys = sorted(set(raw) - ALLOWED_PAGE_LAYOUT_KEYS)
-    if unknown_keys:
-        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
-
-    layout: dict[str, Any] = {}
-    if raw.get("direction") is not None:
-        direction = str(raw.get("direction") or "").strip().lower()
-        if direction not in ALLOWED_LAYOUT_DIRECTIONS:
-            raise ValueError(f"{field_name}.direction 只支持 column 或 row")
-        layout["direction"] = direction
-    if raw.get("kind") is not None:
-        kind = str(raw.get("kind") or "").strip().lower()
-        if kind not in ALLOWED_LAYOUT_KINDS:
-            raise ValueError(f"{field_name}.kind 只支持 grid")
-        layout["kind"] = kind
-    if raw.get("columns") is not None:
-        columns = int(raw.get("columns"))
-        if columns <= 0:
-            raise ValueError(f"{field_name}.columns 必须大于 0")
-        layout["columns"] = columns
-    if raw.get("gap") is not None:
-        gap = int(raw.get("gap"))
-        if gap < 0:
-            raise ValueError(f"{field_name}.gap 不能小于 0")
-        layout["gap"] = gap
-
-    return layout
-
-
-def _normalize_hosted_entry(raw: Any, *, field_name: str) -> str:
-    entry = str(raw or "").strip()
-    if not HOSTED_PAGE_ENTRY_RE.match(entry):
-        raise ValueError(f"{field_name} 只支持 `core:page:<id>` 或 `core:data_table:<id>`")
-    return entry
-
-
-def _normalize_button_action(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValueError("Button.action 必须是对象")
-
-    unknown_keys = sorted(set(raw) - ALLOWED_BUTTON_ACTION_KEYS)
-    if unknown_keys:
-        raise ValueError(f"Button.action 包含不支持的字段: {', '.join(unknown_keys)}")
-
-    action_type = str(raw.get("type") or "").strip()
-    if action_type not in {"reload", "open_page"}:
-        raise ValueError("Button.action.type 只支持 reload 或 open_page")
-
-    if action_type == "reload":
-        return {"type": "reload"}
-
-    if raw.get("entry") is not None:
-        return {
-            "type": "open_page",
-            "entry": _normalize_hosted_entry(raw.get("entry"), field_name="Button.action.entry"),
-        }
-    if raw.get("page_id") is not None:
-        return {
-            "type": "open_page",
-            "entry": f"core:page:{_validate_managed_identifier(str(raw.get('page_id')), field_name='Button.action.page_id')}",
-        }
-    if raw.get("view_id") is not None:
-        return {
-            "type": "open_page",
-            "entry": f"core:data_table:{_validate_managed_identifier(str(raw.get('view_id')), field_name='Button.action.view_id')}",
-        }
-    raise ValueError("open_page 动作必须提供 entry、page_id 或 view_id")
-
-
-def _normalize_inline_table_schema(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValueError("DataTable 组件必须是对象")
-
-    unknown_keys = sorted(set(raw) - ALLOWED_INLINE_TABLE_SCHEMA_KEYS)
-    if unknown_keys:
-        raise ValueError(f"DataTable 组件包含不支持的字段: {', '.join(unknown_keys)}")
-
-    columns = raw.get("columns", [])
-    if not isinstance(columns, list):
-        raise ValueError("DataTable.columns 必须是数组")
-
-    schema: dict[str, Any] = {
-        "type": "DataTable",
-        "title": str(raw.get("title") or "").strip(),
-        "columns": [_normalize_table_column(column) for column in columns],
-        "empty_text": str(raw.get("empty_text") or "暂无数据").strip() or "暂无数据",
-    }
-    if raw.get("binding") is not None:
-        schema["binding"] = _normalize_binding(raw.get("binding"), field_name="DataTable.binding")
-    if raw.get("rows") is not None:
-        schema["rows"] = _normalize_records(raw.get("rows"))
-    return schema
-
-
-def _normalize_page_children(raw: Any, *, field_name: str) -> list[dict[str, Any]]:
-    if not isinstance(raw, list):
-        raise ValueError(f"{field_name} 必须是数组")
-
-    children: list[dict[str, Any]] = []
-    for index, item in enumerate(raw):
-        children.append(_normalize_page_component(item, field_name=f"{field_name}[{index}]"))
-    return children
-
-
-def _normalize_page_component(raw: Any, *, field_name: str) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValueError(f"{field_name} 必须是对象")
-
-    component_type = str(raw.get("type") or "").strip()
-    if component_type == "Section":
-        unknown_keys = sorted(set(raw) - ALLOWED_SECTION_SCHEMA_KEYS)
-        if unknown_keys:
-            raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
-        return {
-            "type": "Section",
-            "title": str(raw.get("title") or "").strip(),
-            "variant": str(raw.get("variant") or "group").strip() or "group",
-            "layout": _normalize_layout(raw.get("layout"), field_name=f"{field_name}.layout"),
-            "children": _normalize_page_children(raw.get("children", []), field_name=f"{field_name}.children"),
-        }
-
-    if component_type == "Text":
-        unknown_keys = sorted(set(raw) - ALLOWED_TEXT_SCHEMA_KEYS)
-        if unknown_keys:
-            raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
-        style = str(raw.get("style") or "body").strip().lower() or "body"
-        if style not in ALLOWED_TEXT_STYLES:
-            raise ValueError(f"{field_name}.style 不受支持: {style}")
-        component: dict[str, Any] = {
-            "type": "Text",
-            "style": style,
-        }
-        if raw.get("text") is not None:
-            component["text"] = str(raw.get("text") or "")
-        if raw.get("binding") is not None:
-            component["binding"] = _normalize_binding(raw.get("binding"), field_name=f"{field_name}.binding")
-        return component
-
-    if component_type == "Button":
-        unknown_keys = sorted(set(raw) - ALLOWED_BUTTON_SCHEMA_KEYS)
-        if unknown_keys:
-            raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
-        label = str(raw.get("label") or "").strip()
-        if not label:
-            raise ValueError(f"{field_name}.label 不能为空")
-        return {
-            "type": "Button",
-            "label": label,
-            "action": _normalize_button_action(raw.get("action")),
-        }
-
-    if component_type == "DataTable":
-        return _normalize_inline_table_schema(raw)
-
-    raise ValueError(f"{field_name}.type 不受支持: {component_type or '<empty>'}")
-
-
-def _normalize_page_schema(page_id: str, schema: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(schema, dict):
-        raise ValueError("页面 schema 必须是对象")
-
-    unknown_keys = sorted(set(schema) - ALLOWED_PAGE_SCHEMA_KEYS)
-    if unknown_keys:
-        raise ValueError(f"页面 schema 包含不支持的字段: {', '.join(unknown_keys)}")
-
-    component_type = str(schema.get("type") or "").strip()
-    if component_type != "Page":
-        raise ValueError("页面 schema 顶层必须是 type=Page")
-
-    normalized: dict[str, Any] = {
-        "type": "Page",
-        "title": str(schema.get("title") or page_id).strip() or page_id,
-        "layout": _normalize_layout(schema.get("layout"), field_name="Page.layout"),
-        "children": _normalize_page_children(schema.get("children", []), field_name="Page.children"),
-    }
-
-    if schema.get("load_handler") is not None:
-        normalized["load_handler"] = _validate_managed_identifier(
-            str(schema.get("load_handler")),
-            field_name="load_handler",
-        )
-
-    return normalized
+    def seal(self) -> None:
+        self._collecting = False
 
 
 class CoreDatabaseTools:
@@ -816,13 +473,17 @@ class CoreEnvTools:
 class CoreUITools:
     """Core 侧 UI 声明工具实现。"""
 
-    def __init__(self, module_name: str):
+    def __init__(self, module_name: str, *, declaration_buffer: HostedUIDeclarationBuffer | None = None):
         self._module_name = module_name
         self._data_store = get_module_data_store()
+        self._declaration_buffer = declaration_buffer
 
     def declare_page(self, page_id: str, schema: dict[str, Any]) -> bool:
         managed_page_id = _validate_managed_identifier(page_id, field_name="page_id")
         meta = sdk_normalize_page_schema(managed_page_id, dict(schema or {}))
+        if self._declaration_buffer and self._declaration_buffer.is_collecting:
+            self._declaration_buffer.stage_page(managed_page_id, meta)
+            return True
         return self._data_store.write_page_schema(self._module_name, managed_page_id, meta)
 
     def get_page(self, page_id: str) -> dict[str, Any]:
@@ -831,6 +492,9 @@ class CoreUITools:
     def declare_data_table(self, view_id: str, schema: dict[str, Any]) -> bool:
         managed_view_id = _validate_managed_identifier(view_id, field_name="view_id")
         meta = sdk_normalize_table_schema(managed_view_id, dict(schema or {}))
+        if self._declaration_buffer and self._declaration_buffer.is_collecting:
+            self._declaration_buffer.stage_data_table(managed_view_id, meta)
+            return True
         return self._data_store.write_data_table_schema(self._module_name, managed_view_id, meta)
 
     def get_data_table(self, view_id: str) -> dict[str, Any]:
@@ -955,13 +619,18 @@ class _ToolBinding:
 class CoreToolsCapabilityImpl(ToolsCapability):
     """Core 侧统一工具注册表。"""
 
-    def __init__(self, module_name: str):
+    def __init__(
+        self,
+        module_name: str,
+        *,
+        ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
+    ):
         self._bindings: dict[str, _ToolBinding] = {}
 
         db_tools = CoreDatabaseTools(module_name)
         ip_pool_tools = CoreIPPoolTools()
         env_tools = CoreEnvTools(module_name)
-        ui_tools = CoreUITools(module_name)
+        ui_tools = CoreUITools(module_name, declaration_buffer=ui_declaration_buffer)
         captcha_tools = CoreCaptchaTools()
 
         self._register("db.list_records", "读取模块数据集", db_tools.list_records)
@@ -1030,6 +699,12 @@ class RuntimeCapabilities:
     tools: ToolsCapability
 
 
-def build_runtime_capabilities(task_name: str) -> RuntimeCapabilities:
+def build_runtime_capabilities(
+    task_name: str,
+    *,
+    ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
+) -> RuntimeCapabilities:
     module_name = (task_name or "").split(".")[0] or "default"
-    return RuntimeCapabilities(tools=CoreToolsCapabilityImpl(module_name))
+    return RuntimeCapabilities(
+        tools=CoreToolsCapabilityImpl(module_name, ui_declaration_buffer=ui_declaration_buffer)
+    )

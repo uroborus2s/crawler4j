@@ -398,6 +398,8 @@ class ModuleDataTablePage(QWidget):
     def _on_add(self):
         create_handler = self._schema_handler("create_handler")
         if create_handler:
+            self.refresh()
+            create_handler = self._schema_handler("create_handler")
             columns = self._form_columns(mode="create")
         else:
             columns = self._effective_columns()
@@ -445,6 +447,19 @@ class ModuleDataTablePage(QWidget):
         old = dict(self._records[row_index])
         update_handler = self._schema_handler("update_handler")
         if update_handler:
+            pk = self._primary_key()
+            target_pk = str(old.get(pk, "")).strip()
+            self.refresh()
+            update_handler = self._schema_handler("update_handler")
+            if target_pk:
+                old = next(
+                    (
+                        dict(row)
+                        for row in self._records
+                        if str(row.get(pk, "")).strip() == target_pk
+                    ),
+                    old,
+                )
             columns = self._form_columns(mode="update")
         else:
             columns = self._effective_columns()

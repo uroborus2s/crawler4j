@@ -51,7 +51,18 @@ def test_runtime_app_icon_uses_transparent_outer_corners():
     ):
         assert image.pixelColor(x, y).alpha() == 0
 
-    assert image.pixelColor(image.width() // 2, image.height() // 2).alpha() > 0
+    width = image.width()
+    height = image.height()
+    center_x = width // 2
+    center_y = height // 2
+    left_inset = next(x for x in range(width) if image.pixelColor(x, center_y).alpha() > 0)
+    right_inset = next((width - 1) - x for x in range(width) if image.pixelColor((width - 1) - x, center_y).alpha() > 0)
+    top_inset = next(y for y in range(height) if image.pixelColor(center_x, y).alpha() > 0)
+    bottom_inset = next((height - 1) - y for y in range(height) if image.pixelColor(center_x, (height - 1) - y).alpha() > 0)
+    assert left_inset >= 50
+    assert right_inset >= 50
+    assert top_inset >= 50
+    assert bottom_inset >= 50
 
 
 def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge_and_center_mark():
@@ -66,5 +77,5 @@ def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge_and_c
     badge = image.pixelColor(image.width() // 2, 340)
     assert badge.blue() > badge.green() > badge.red()
 
-    center_mark = image.pixelColor(image.width() // 2, image.height() // 2)
+    center_mark = image.pixelColor(620, 520)
     assert center_mark.lightness() > 245

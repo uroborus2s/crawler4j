@@ -49,6 +49,7 @@ class ModuleDetailPage(QWidget):
         super().__init__(parent)
         self._module: ModuleInfo | None = None
         self._menu_pages: dict[str, QWidget] = {}
+        self._hosted_page_infos: dict[str, UIPageInfo] = {}
         self._entry_to_menu_id: dict[str, str] = {}
         self._pending_tasks: set[asyncio.Task] = set()
         self.repo_token_status_label: QLabel | None = None
@@ -201,6 +202,7 @@ class ModuleDetailPage(QWidget):
         """构建菜单列表。"""
         self.menu_list.clear()
         self._menu_pages.clear()
+        self._hosted_page_infos.clear()
         self._entry_to_menu_id.clear()
         
         # 清除旧页面
@@ -236,11 +238,8 @@ class ModuleDetailPage(QWidget):
                     item = QListWidgetItem(f"{page_info.icon} {page_info.label}")
                     item.setData(Qt.ItemDataRole.UserRole, page_info.id)
                     self.menu_list.addItem(item)
-
-                    page = self._create_hosted_page(page_info)
+                    self._hosted_page_infos[page_info.id] = page_info
                     self._entry_to_menu_id[page_info.entry] = page_info.id
-                    self._menu_pages[page_info.id] = page
-                    self.content_stack.addWidget(page)
     
     def _create_fixed_page(self, menu_id: str) -> QWidget:
         """创建固定页面。"""
@@ -529,8 +528,25 @@ class ModuleDetailPage(QWidget):
         if menu_id == "__sep__":
             return
         
-        if menu_id in self._menu_pages:
-            self.content_stack.setCurrentWidget(self._menu_pages[menu_id])
+        page = self._ensure_menu_page(menu_id)
+        if page is not None:
+            self.content_stack.setCurrentWidget(page)
+
+    def _ensure_menu_page(self, menu_id: str) -> QWidget | None:
+        page = self._menu_pages.get(menu_id)
+        if page is not None:
+            if menu_id in self._hosted_page_infos and hasattr(page, "refresh"):
+                page.refresh()
+            return page
+
+        page_info = self._hosted_page_infos.get(menu_id)
+        if page_info is None:
+            return None
+
+        page = self._create_hosted_page(page_info)
+        self._menu_pages[menu_id] = page
+        self.content_stack.addWidget(page)
+        return page
 
     def _select_menu(self, menu_id: str):
         for row in range(self.menu_list.count()):

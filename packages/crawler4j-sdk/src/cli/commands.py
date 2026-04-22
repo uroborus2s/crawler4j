@@ -351,13 +351,24 @@ def _classify_ui_entry(page_id: str, entry: str) -> str | None:
     return None
 
 
-def _manifest_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    ui_extension = manifest.get("ui_extension") or {}
+def _manifest_ui_extension(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    ui_extension = manifest.get("ui_extension")
+    if ui_extension is None:
+        return None
     if not isinstance(ui_extension, dict):
+        raise CLIError("module.yaml.ui_extension 必须是映射对象")
+    return ui_extension
+
+
+def _manifest_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    ui_extension = _manifest_ui_extension(manifest)
+    if ui_extension is None:
         return []
-    pages = ui_extension.get("pages") or []
+    pages = ui_extension.get("pages")
+    if pages is None:
+        return []
     if not isinstance(pages, list):
-        return []
+        raise CLIError("module.yaml.ui_extension.pages 必须是数组")
     return [item for item in pages if isinstance(item, dict)]
 
 
@@ -564,7 +575,9 @@ def _print_module_info(module: Any) -> None:
 
 def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    ui_extension = manifest.get("ui_extension") or {}
+    ui_extension = manifest.get("ui_extension")
+    if ui_extension is None:
+        return errors
     if not isinstance(ui_extension, dict):
         return ["ui_extension 必须是 YAML 映射对象"]
 
@@ -574,7 +587,9 @@ def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
             "ui_extension 不再支持旧字段: " + ", ".join(legacy_keys)
         )
 
-    pages = ui_extension.get("pages") or []
+    pages = ui_extension.get("pages")
+    if pages is None:
+        return errors
     if not isinstance(pages, list):
         errors.append("ui_extension.pages 必须是数组")
         return errors
@@ -624,6 +639,8 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
     for legacy_file in ["config_schema.json", "strategy.yaml"]:
         if (module_root / legacy_file).exists():
             errors.append(f"残留旧配置文件: {legacy_file}")
+    if (module_root / "ui").exists():
+        errors.append("残留旧 UI 目录: ui/")
 
     workflow_names = _manifest_workflow_names(manifest)
     if not workflow_names:
@@ -880,12 +897,74 @@ def _validate_declared_page_handlers(module_runtime: Any, declared_pages: dict[s
             errors.append(f"宿主页 {page_id} 缺少 load_handler")
             continue
 
-        load_handler = getattr(module_runtime, load_handler_name, None)
-        if load_handler is None or not callable(load_handler):
-            errors.append(f"宿主页 {page_id} 的 load_handler 未在 module_runtime.py 中定义: {load_handler_name}")
+        error = _validate_runtime_handler(
+            module_runtime,
+            owner_label=f"宿主页 {page_id}",
+            handler_field="load_handler",
+            handler_name=load_handler_name,
+            runtime_call_label="(context, page_id, params)",
+            call_args=(page_id, None),
+        )
+        if error:
+            errors.append(error)
+    return errors
+
+
+def _validate_runtime_handler(
+    module_runtime: Any,
+    *,
+    owner_label: str,
+    handler_field: str,
+    handler_name: str,
+    runtime_call_label: str,
+    call_args: tuple[Any, ...],
+) -> str | None:
+    handler = getattr(module_runtime, handler_name, None)
+    if handler is None or not callable(handler):
+        return f"{owner_label} 的 {handler_field} 未在 module_runtime.py 中定义: {handler_name}"
+    handler_call = getattr(handler, "__call__", None)
+    if inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(handler_call):
+        return f"{owner_label} 的 {handler_field} 必须是同步函数: {handler_name}"
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError) as exc:
+        return f"{owner_label} 的 {handler_field} 无法解析签名: {handler_name} ({exc})"
+    try:
+        signature.bind(object(), *call_args)
+    except TypeError:
+        return (
+            f"{owner_label} 的 {handler_field} 签名不兼容，"
+            f"运行时会按 {runtime_call_label} 调用: {handler_name}"
+        )
+    return None
+
+
+def _validate_declared_data_table_handlers(
+    module_runtime: Any,
+    declared_tables: dict[str, dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    for view_id, schema in declared_tables.items():
+        if not isinstance(schema, dict):
+            errors.append(f"数据表 {view_id} 的 schema 必须是对象")
             continue
-        if inspect.iscoroutinefunction(load_handler):
-            errors.append(f"宿主页 {page_id} 的 load_handler 必须是同步函数: {load_handler_name}")
+        for handler_field, runtime_call_label, call_args in (
+            ("create_handler", "(context, payload)", ({},)),
+            ("update_handler", "(context, row_id, payload)", ("row-1", {})),
+        ):
+            handler_name = str(schema.get(handler_field, "") or "").strip()
+            if not handler_name:
+                continue
+            error = _validate_runtime_handler(
+                module_runtime,
+                owner_label=f"数据表 {view_id}",
+                handler_field=handler_field,
+                handler_name=handler_name,
+                runtime_call_label=runtime_call_label,
+                call_args=call_args,
+            )
+            if error:
+                errors.append(error)
     return errors
 
 
@@ -918,6 +997,7 @@ def _validate_declared_ui(module_root: Path, module_runtime: Any, manifest: dict
         return [f"declare_ui 校验失败: {exc.__class__.__name__}: {exc}"]
 
     errors = _validate_declared_page_handlers(module_runtime, tools._pages)
+    errors.extend(_validate_declared_data_table_handlers(module_runtime, tools._schemas))
 
     expected_pages = {
         page_id
@@ -995,6 +1075,8 @@ def _archive_members(module_root: Path) -> list[tuple[Path, str]]:
         if any(part in ignored_dirs for part in relative.parts):
             continue
         if any(part.endswith(".egg-info") for part in relative.parts):
+            continue
+        if relative.parts and relative.parts[0] == "ui":
             continue
         if path.is_dir():
             continue
@@ -1600,7 +1682,7 @@ def cmd_config_lint(args: argparse.Namespace) -> int:
 def cmd_package_build(args: argparse.Namespace) -> int:
     """Build an installable single-root ZIP package for the current module."""
     module_root = require_module_root()
-    if _run_check("release", module_root) != 0:
+    if _run_check("full", module_root) != 0:
         return 1
 
     manifest = load_manifest(module_root)
@@ -1638,7 +1720,7 @@ def cmd_package_verify(args: argparse.Namespace) -> int:
         _validate_archive_structure(archive_path)
         extracted_root = _extract_archive_to_temp(archive_path)
         manifest = load_manifest(extracted_root)
-        errors = collect_release_errors(extracted_root, manifest)
+        errors = collect_full_errors(extracted_root, manifest)
     except (CLIError, zipfile.BadZipFile) as exc:
         _print_error(str(exc))
         return 1

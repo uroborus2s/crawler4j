@@ -313,6 +313,10 @@ def test_module_data_table_page_routes_add_and_edit_to_module_handlers(qtbot, mo
 
     assert ("create_account_from_ui", ({"phone": "13800138001", "account_status": "new"},)) in calls
     assert ("update_account_from_ui", ("13800138000", {"account_status": "blocked"})) in calls
+    create_index = next(index for index, item in enumerate(calls) if item[0] == "create_account_from_ui")
+    update_index = next(index for index, item in enumerate(calls) if item[0] == "update_account_from_ui")
+    assert calls[create_index - 1] == ("declare_ui", ())
+    assert calls[update_index - 1] == ("declare_ui", ())
     assert page._data_store.read_dataset("demo_module", "accounts")[0]["account_status"] == "blocked"
 
 

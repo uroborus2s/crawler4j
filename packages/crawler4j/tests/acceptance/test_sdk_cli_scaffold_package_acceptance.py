@@ -38,3 +38,13 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
     assert "demo_model/module_runtime.py" in members
     assert "demo_model/tasks/extra_task.py" in members
     assert "demo_model/workflows/repair_orders.py" in members
+
+
+def test_sdk_cli_scaffold_rejects_legacy_ui_directory_acceptance(rich_module_root: Path):
+    legacy_ui_dir = rich_module_root / "ui"
+    legacy_ui_dir.mkdir()
+    (legacy_ui_dir / "legacy_page.py").write_text("class LegacyPage: ...\n", encoding="utf-8")
+
+    result = run_cli("check", "structure", cwd=rich_module_root)
+    result.assert_failed()
+    result.assert_stdout_contains("残留旧 UI 目录: ui/")

@@ -38,7 +38,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-04-22 | 收口桌面应用图标终稿：将经确认的 AI 终稿做工程化清理后正式入包，去除了编辑控制点、保留“暖灰白底板 + 蓝色主徽记 + 放大镜轮廓 + 4j 主字标”的浅色品牌母版，并重新生成运行时 `app_icon.png` / macOS bundle `app_icon.icns`；同时把图标回归测试收口到“透明圆角 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言，避免 Dock 再出现黑边、融底或误带编辑痕迹的问题 | Codex |
+| 2026-04-22 | 完成 hosted UI V1 二轮问题收口：模块详情页对宿主页入口改为 lazy instantiate，避免详情页打开时提前执行未选中页面的 `declare_ui()` / `load_handler`，并在再次选中已有 hosted page 时自动 refresh；`ModuleUIRuntimeBridge` 改为“`declare_ui` session 仅供下一次 non-declare hook 单次消费”，data-table handler 执行前也会先刷新声明会话，并通过 UI 声明 staging buffer + `replace_declared_ui()` 保证 schema 原子替换；SDK `check full` / `package build` / `package verify` 现统一补齐 hosted page / data table handler 契约校验并阻断 legacy `ui/` 目录；相关 unit/integration/acceptance 合并回归 `130 passed`，定向 `ruff check` 通过 | Codex |
+| 2026-04-22 | 继续收口桌面应用图标的 Dock 光学尺寸：先对标本机系统圆角方形图标在 `1024x1024` 画布中的外轮廓占比，再在保持外底板占比不变的前提下单独缩小中心蓝色徽章与放大镜组，避免在 Dock 中比系统常见应用图标显得更大；同时把图标回归测试补成“透明圆角 + 中轴安全区 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言 | Codex |
 | 2026-04-21 | 对齐 VirtualBrowser `addBrowser` 官方代理口径：创建环境时把代理 `protocol` 统一转成大写 `HTTP/HTTPS/SOCKS5`，并在 `addBrowser` 返回非 2xx 或 `success=false` 时把状态码与响应正文透传到宿主日志和异常消息，便于继续定位代理/IP 池创建失败；同步补充 REM 单测锁定协议归一化与 `500` 正文回传 | Codex |
 | 2026-04-18 | 完成 `TASK-022` / `CR-008`：为模块新增 `module_audit_events`、`db.append_event`、`db.query_events`，并把快照数据与审计事件契约同步到正式文档、测试计划与 `.factory/memory/` | Codex |
 | 2026-04-02 | 新增正式执行记录页并登记 Wave 11 文档治理整改结果 | Codex |
