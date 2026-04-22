@@ -16,6 +16,7 @@ from scripts import release_packaging_helpers
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = WORKSPACE_ROOT / "packages" / "crawler4j"
+WINDOWS_PACKAGE_ICON = APP_ROOT / "src" / "ui" / "assets" / "app_icon.ico"
 DEFAULT_ENV_FILE = release_packaging_helpers.DEFAULT_ENV_FILE
 DEFAULT_UPDATES_DIR = APP_ROOT / "dist" / "updates" / "windows"
 UPDATE_CONFIG_FILENAME = "crawler4j.update.json"
@@ -198,6 +199,8 @@ def build_vpk_pack_command(
         config.main_exe,
         "--packTitle",
         package_desktop_app.APP_NAME,
+        "--icon",
+        str(WINDOWS_PACKAGE_ICON.resolve()),
     ]
 
 

@@ -36,6 +36,8 @@ uv run python -m src.ui.app
 - 当前 macOS 最终可分发产物固定为 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，不需要再额外携带旁边的 `Crawler4j/` collect 目录
 - 当前 Windows 正式发布入口固定为 `uv run package-windows-release`，它会先复用 `package-desktop` 产出的 `PyInstaller onedir` 宿主目录，再继续生成 Velopack 安装器与更新目录
 - 桌面壳层图标当前统一收口为同一套 `app_icon` 资源：运行时继续使用 `app_icon.png`，macOS bundle 使用 `app_icon.icns`，Windows `Crawler4j.exe` 使用 `app_icon.ico`
+- 图标母版固定为 `packages/crawler4j/src/ui/assets/app_icon_master.png`；若继续微调 Dock 占比或品牌细节，统一执行 `uv run python scripts/rebuild_app_icon_assets.py` 重建 `png/icns/ico`，避免手工缩放让三套产物再次漂移
+- `package-windows-release` 会把同源 `app_icon.ico` 同时传给 Velopack，确保 `Setup.exe`、安装后快捷方式与 `Crawler4j.exe` 使用同一套 Windows 图标，而不是回退到默认安装器图标
 - `package-windows-release` 与 `package-macos-internal-release` 现在都会在生成新发布物前先清空各自的 `dist/updates/<platform>/` 输出目录；`deploy-windows-release` / `deploy-macos-internal-release` 因复用同一打包入口，也会继承这条清理行为
 - 若需要小范围内部 DMG 分发并启用 Sparkle 自动更新，使用 `uv run package-macos-internal-release`
 - PyInstaller 现已显式收集 `sinanz` 的共享 `resources/` 目录；滑块验证码运行时会从其中的 `resources/models/` 解析 `slider_gap_locator.onnx`
@@ -58,6 +60,7 @@ uv run deploy-windows-release
 - 该命令会先复用 `uv run package-desktop` 的 Windows `PyInstaller onedir` 结果，默认输入目录为 `packages/crawler4j/dist/desktop/windows/Crawler4j/`
 - 随后脚本会在 onedir 根目录写入 `crawler4j.update.json`，把 Windows 宿主运行时需要的 `feed_url / pack_id / channel` 收口为同一事实源
 - 默认 Velopack 输出目录为 `packages/crawler4j/dist/updates/windows/`，其中通常包含 `Setup.exe`、`releases.<channel>.json` 清单与 `.nupkg` 包
+- Velopack 打包阶段会继续复用仓库里的 `packages/crawler4j/src/ui/assets/app_icon.ico`，确保 `Setup.exe`、安装后桌面/开始菜单快捷方式与 `Crawler4j.exe` 的图标保持一致
 - `CRAWLER4J_VELOPACK_FEED_URL` 为必填项；正式口径建议固定为 `https://updates.example.com/win/releases.win.json`
 - `CRAWLER4J_VELOPACK_PACK_ID` 默认为 `io.github.uroborus2s.crawler4j`
 - `CRAWLER4J_VELOPACK_CHANNEL` 默认为 `win`
@@ -188,6 +191,7 @@ uv run python -m crawler4j_sdk.cli.commands --help
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-04-22 | 新增 Windows `PyInstaller onedir + Velopack` 发布口径，说明 `package-windows-release` 的环境变量、输出目录、安装边界和与 `%APPDATA%/Crawler4j/` 的持久化兼容关系 | Codex |
+| 2026-04-22 | 补记 Windows `package-windows-release` 会把 `app_icon.ico` 同时传给 Velopack，保证安装器、快捷方式与主程序图标一致 | Codex |
 | 2026-04-22 | 为 macOS Sparkle 内部分发补上“改写 bundle 后自动 ad-hoc 重签”与私钥来源配置：`generate_appcast` 现支持 keychain account、私钥文件或私钥串三种输入，不再只依赖默认 `ed25519` 账户 | Codex |
 | 2026-04-22 | 补记 macOS 内部 Sparkle unsigned 分发的签名口径：`package-macos-internal-release` 现会写入 `SUEnableCodeSigningValidation=false` 与空 `SUPackageSigningCertificate`，仅关闭宿主代码签名校验，继续保留更新包 EdDSA 校验 | Codex |
 | 2026-04-22 | 将 macOS 内部 DMG 构建改为固定 Finder 图标视图，打开后直接展示 `Crawler4j.app` 与 `Applications` 拖拽安装布局，并补记对 Finder 图形会话的依赖 | Codex |

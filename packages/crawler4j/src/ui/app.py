@@ -146,6 +146,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     # 创建应用
     app = QApplication(argv_list)
     app.setApplicationName("蛛行演略 · crawler4j")
+    # 在异步服务启动且主窗口真正显示前，避免 Qt 因“尚无顶层窗口”提前退出事件循环。
+    app.setQuitOnLastWindowClosed(False)
 
     # 设置应用图标
     app_icon = load_app_icon()
@@ -189,6 +191,7 @@ async def _run_application(app: QApplication, prefs) -> None:
         window.showMinimized()
     else:
         window.show()
+    app.setQuitOnLastWindowClosed(True)
 
     from src.core.system.update_service import get_update_service
 

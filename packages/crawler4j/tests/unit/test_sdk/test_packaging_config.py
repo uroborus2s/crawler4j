@@ -554,6 +554,8 @@ def test_windows_release_build_vpk_pack_command_uses_global_vpk(tmp_path):
         "Crawler4j.exe",
         "--packTitle",
         script.package_desktop_app.APP_NAME,
+        "--icon",
+        str(script.WINDOWS_PACKAGE_ICON.resolve()),
     ]
 
 
@@ -580,6 +582,7 @@ def test_windows_release_build_vpk_pack_command_uses_dnx_when_requested(tmp_path
     assert command[:5] == ["dnx", "vpk", "--version", "0.0.1298", "pack"]
     assert "--packId" in command
     assert "--mainExe" in command
+    assert command[command.index("--icon") + 1] == str(script.WINDOWS_PACKAGE_ICON.resolve())
 
 
 def test_windows_release_normalizes_dev_velopack_version_for_dnx():
@@ -621,6 +624,7 @@ def test_windows_release_build_vpk_pack_command_wraps_batch_shims_with_cmd(tmp_p
         "pack",
     ]
     assert "--packId" in command
+    assert command[command.index("--icon") + 1] == str(script.WINDOWS_PACKAGE_ICON.resolve())
 
 
 def test_windows_release_build_vpk_pack_command_uses_normalized_dnx_version(tmp_path):
@@ -645,6 +649,7 @@ def test_windows_release_build_vpk_pack_command_uses_normalized_dnx_version(tmp_
 
     version_index = command.index("--version") + 1
     assert command[version_index] == "0.0.1589"
+    assert command[command.index("--icon") + 1] == str(script.WINDOWS_PACKAGE_ICON.resolve())
 
 
 def test_windows_release_build_release_artifacts_cleans_output_dir_before_packaging(tmp_path, monkeypatch):
