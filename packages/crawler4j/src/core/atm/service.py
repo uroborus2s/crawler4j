@@ -29,6 +29,8 @@ class TaskService:
         self._repo = get_task_repository()
         self._controller = get_job_controller()
         self._started = False
+        self._delete_job_wait_timeout_seconds = 5.0
+        self._delete_job_poll_interval_seconds = 0.1
 
     @staticmethod
     def _normalize_trigger(job_type: JobType, trigger_config: dict | TriggerConfig | None) -> TriggerConfig:
@@ -260,8 +262,33 @@ class TaskService:
         logger.info(f"[ATM] Job paused: {job.id}")
         return True
 
+    async def _wait_for_job_active_tasks_to_finish(self, job_id: str) -> bool:
+        active_count = await self._repo.count_active_tasks(job_id)
+        if active_count <= 0:
+            return True
+
+        deadline = time.monotonic() + self._delete_job_wait_timeout_seconds
+        while active_count > 0 and time.monotonic() < deadline:
+            await asyncio.sleep(self._delete_job_poll_interval_seconds)
+            active_count = await self._repo.count_active_tasks(job_id)
+        return active_count <= 0
+
     async def delete_job(self, job_id: str) -> bool:
         """删除作业。"""
+        job = await self._repo.get_job(job_id)
+        if not job:
+            return False
+
+        if job.state != JobState.PAUSED:
+            job.state = JobState.PAUSED
+            job.updated_at = int(time.time())
+            await self._repo.save_job(job)
+
+        await self._controller.request_job_stop(job.id)
+        if not await self._wait_for_job_active_tasks_to_finish(job.id):
+            logger.warning(f"[ATM] Job delete blocked because active tasks are still stopping: {job.id}")
+            return False
+
         await self._repo.delete_job(job_id)
         logger.info(f"[ATM] Job deleted: {job_id}")
         return True

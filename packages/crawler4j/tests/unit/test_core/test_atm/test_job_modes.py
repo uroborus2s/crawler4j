@@ -590,6 +590,67 @@ async def test_pause_job_requests_stop_for_service_tasks():
 
 
 @pytest.mark.asyncio
+async def test_delete_job_pauses_active_cron_job_and_waits_for_active_tasks_before_delete():
+    service = TaskService()
+    service._delete_job_poll_interval_seconds = 0
+    job = Job(
+        id="batch-job",
+        name="batch",
+        type=JobType.BATCH,
+        state=JobState.ACTIVE,
+        trigger=TriggerConfig(type=TriggerType.CRON, cron_expr="0 * * * *"),
+        run_profile=_build_select_run_profile(),
+        concurrency_target=2,
+    )
+    service._repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        save_job=AsyncMock(),
+        count_active_tasks=AsyncMock(side_effect=[2, 0]),
+        delete_job=AsyncMock(),
+    )
+    service._controller = SimpleNamespace(request_job_stop=AsyncMock())
+
+    result = await service.delete_job(job.id)
+
+    assert result is True
+    assert job.state == JobState.PAUSED
+    service._repo.save_job.assert_awaited_once_with(job)
+    service._controller.request_job_stop.assert_awaited_once_with(job.id)
+    assert service._repo.count_active_tasks.await_count == 2
+    service._repo.delete_job.assert_awaited_once_with(job.id)
+
+
+@pytest.mark.asyncio
+async def test_delete_job_returns_false_without_deleting_when_manual_run_once_is_still_active():
+    service = TaskService()
+    service._delete_job_wait_timeout_seconds = 0
+    job = Job(
+        id="batch-manual-job",
+        name="manual-batch",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=_build_select_run_profile(),
+        concurrency_target=2,
+    )
+    service._repo = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        save_job=AsyncMock(),
+        count_active_tasks=AsyncMock(return_value=1),
+        delete_job=AsyncMock(),
+    )
+    service._controller = SimpleNamespace(request_job_stop=AsyncMock())
+
+    result = await service.delete_job(job.id)
+
+    assert result is False
+    assert job.state == JobState.PAUSED
+    service._repo.save_job.assert_not_awaited()
+    service._controller.request_job_stop.assert_awaited_once_with(job.id)
+    service._repo.delete_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_service_counts_active_tasks():
     service = TaskService()
     service._repo = SimpleNamespace(count_active_tasks=AsyncMock(return_value=2))
