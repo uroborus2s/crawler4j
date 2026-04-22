@@ -30,6 +30,22 @@ class InvalidJobConfigurationError(ValueError):
     """作业运行模板组合无效。"""
 
 
+def selector_returns_none(module_name: str, selector_name: str) -> bool:
+    """返回环境选择器是否用 `None` 表示“继续等待/无候选”。"""
+    normalized_module = normalize_resource_pool_module_name(module_name)
+    normalized_selector = str(selector_name or "").strip()
+    if not normalized_module or not normalized_selector:
+        return False
+
+    try:
+        selector_infos = get_module_service().list_env_selectors(normalized_module)
+    except Exception:
+        return False
+
+    info = next((item for item in selector_infos if item.name == normalized_selector), None)
+    return bool(info and getattr(info, "returns_none", False))
+
+
 class JobController:
     """作业控制器。"""
     
@@ -116,13 +132,7 @@ class JobController:
         if not module_name:
             return
 
-        try:
-            selector_infos = get_module_service().list_env_selectors(module_name)
-        except Exception:
-            return
-
-        info = next((item for item in selector_infos if item.name == selector_name), None)
-        if info and getattr(info, "returns_none", False):
+        if selector_returns_none(module_name, selector_name):
             raise InvalidJobConfigurationError(
                 f"Service Job 使用会返回 none 的环境选择器时必须配置 resource_pool: {module_name}.{selector_name}"
             )

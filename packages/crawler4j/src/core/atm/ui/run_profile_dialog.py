@@ -49,6 +49,7 @@ from src.core.atm.run_profile import (
     RunProfile,
     ResourceConfig,
 )
+from src.core.atm.controller import selector_returns_none
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
@@ -460,11 +461,6 @@ class ToggleSwitch(QCheckBox):
 
 class RunProfileDialog(QDialog):
     """运行模板编辑弹窗。"""
-
-    _SELECTOR_REQUIRED_RESOURCE_POOLS: dict[tuple[str, str], str] = {
-        # ctrip 的账号复用 selector 只有在固定资源池语义下返回 None 才表示“继续等待”。
-        ("ctrip_crawler", "reuse_bound_account_env"): "bound_account_ready",
-    }
 
     def __init__(self, run_profile: RunProfile | None = None, parent=None, read_only: bool = False):
         super().__init__(parent)
@@ -2011,24 +2007,6 @@ class RunProfileDialog(QDialog):
             return module_name
         return self.script_selector.module_combo.currentText().strip()
 
-    @classmethod
-    def _required_resource_pool_for_selector(cls, module_name: str, selector_name: str) -> str:
-        normalized_module = str(module_name or "").strip().split(".")[0]
-        normalized_selector = str(selector_name or "").strip()
-        if not normalized_module or not normalized_selector:
-            return ""
-        return cls._SELECTOR_REQUIRED_RESOURCE_POOLS.get((normalized_module, normalized_selector), "")
-
-    def _apply_selector_resource_pool_default(self) -> None:
-        current_data = self.selector_name_combo.currentData()
-        selector_name = current_data if isinstance(current_data, str) else ""
-        default_pool = self._required_resource_pool_for_selector(
-            self._current_script_module_name(),
-            selector_name,
-        )
-        if default_pool and not self.resource_pool_edit.text().strip():
-            self.resource_pool_edit.setText(default_pool)
-
     def _load_selector_options(self, preferred: str | None = None) -> None:
         module_name = self._current_script_module_name()
         selectors = []
@@ -2059,9 +2037,10 @@ class RunProfileDialog(QDialog):
 
     def _update_selector_none_hint(self) -> None:
         selector_name = self.selector_name_combo.currentData()
-        info = self._selector_infos.get(selector_name) if isinstance(selector_name, str) else None
-        self.selector_none_hint.setVisible(bool(info and getattr(info, "returns_none", False)))
-        self._apply_selector_resource_pool_default()
+        normalized_selector = selector_name if isinstance(selector_name, str) else ""
+        self.selector_none_hint.setVisible(
+            selector_returns_none(self._current_script_module_name(), normalized_selector)
+        )
 
     def _on_script_module_changed(self, _module_name: str) -> None:
         previous = self.selector_name_combo.currentData()
@@ -2206,12 +2185,6 @@ class RunProfileDialog(QDialog):
             resource_pool = self.resource_pool_edit.text().strip()
             if not selector_name and not resource_pool:
                 raise ValueError("请选择环境选择回调函数或填写资源池")
-            required_pool = self._required_resource_pool_for_selector(
-                self._current_script_module_name(),
-                selector_name,
-            )
-            if required_pool and resource_pool != required_pool:
-                raise ValueError(f"选择器 {selector_name} 必须配置资源池 {required_pool}")
             provider = ""
             env_type = EnvType.VIRTUAL_BROWSER
 

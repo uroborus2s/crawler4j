@@ -19,6 +19,7 @@ from src.core.atm.run_profile import (
 
 def _patch_dialog_dependencies(monkeypatch):
     import src.core.atm.ui.run_profile_dialog as dialog_module
+    import src.core.atm.controller as controller_module
 
     module = SimpleNamespace(
         name="demo_module",
@@ -42,10 +43,8 @@ def _patch_dialog_dependencies(monkeypatch):
         "get_ip_pool_manager",
         lambda: SimpleNamespace(list_pools=lambda: [pool]),
     )
-    monkeypatch.setattr(
-        dialog_module,
-        "get_module_service",
-        lambda: SimpleNamespace(
+    def module_service():
+        return SimpleNamespace(
             list_env_selectors=lambda module_name: [
                 SimpleNamespace(
                     name="return_none",
@@ -62,12 +61,14 @@ def _patch_dialog_dependencies(monkeypatch):
             ]
             if module_name == "demo_module"
             else []
-        ),
-    )
+        )
+    monkeypatch.setattr(dialog_module, "get_module_service", module_service)
+    monkeypatch.setattr(controller_module, "get_module_service", module_service)
 
 
 def _patch_ctrip_dialog_dependencies(monkeypatch):
     import src.core.atm.ui.run_profile_dialog as dialog_module
+    import src.core.atm.controller as controller_module
 
     module = SimpleNamespace(
         name="ctrip_crawler",
@@ -90,10 +91,8 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
         "get_ip_pool_manager",
         lambda: SimpleNamespace(list_pools=lambda: [pool]),
     )
-    monkeypatch.setattr(
-        dialog_module,
-        "get_module_service",
-        lambda: SimpleNamespace(
+    def module_service():
+        return SimpleNamespace(
             list_env_selectors=lambda module_name: [
                 SimpleNamespace(
                     name="reuse_bound_account_env",
@@ -104,8 +103,9 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
             ]
             if module_name == "ctrip_crawler"
             else []
-        ),
-    )
+        )
+    monkeypatch.setattr(dialog_module, "get_module_service", module_service)
+    monkeypatch.setattr(controller_module, "get_module_service", module_service)
 
 
 def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
@@ -318,7 +318,7 @@ def test_run_profile_dialog_warns_when_selector_returns_none(qtbot, monkeypatch)
     assert "返回了 none" in dialog.selector_none_hint.text()
 
 
-def test_run_profile_dialog_autofills_required_pool_for_ctrip_reuse_selector(qtbot, monkeypatch):
+def test_run_profile_dialog_does_not_autofill_pool_for_returns_none_selector(qtbot, monkeypatch):
     _patch_ctrip_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -332,11 +332,12 @@ def test_run_profile_dialog_autofills_required_pool_for_ctrip_reuse_selector(qtb
 
     profile = dialog._build_run_profile_from_form()
 
-    assert dialog.resource_pool_edit.text() == "bound_account_ready"
-    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
+    assert dialog.selector_none_hint.isHidden() is False
+    assert dialog.resource_pool_edit.text() == ""
+    assert profile.resource.acquisition.resource_pool == ""
 
 
-def test_run_profile_dialog_requires_bound_pool_for_ctrip_reuse_selector(qtbot, monkeypatch):
+def test_run_profile_dialog_keeps_manual_pool_for_returns_none_selector(qtbot, monkeypatch):
     _patch_ctrip_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -347,10 +348,11 @@ def test_run_profile_dialog_requires_bound_pool_for_ctrip_reuse_selector(qtbot, 
     dialog.script_selector.set_value("ctrip_crawler", "web_quiz_workflow")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
     dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("reuse_bound_account_env"))
-    dialog.resource_pool_edit.clear()
+    dialog.resource_pool_edit.setText("bound_account_ready")
 
-    with pytest.raises(ValueError, match="bound_account_ready"):
-        dialog._build_run_profile_from_form()
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
 
 
 def test_run_profile_dialog_randomizes_user_agent_with_selected_version(qtbot, monkeypatch):

@@ -30,6 +30,14 @@ from src.core.rem.provider import BaseProvider, get_provider
 
 FINGERPRINT_BROWSER_PROVIDERS = {"bitbrowser", "virtualbrowser"}
 RESOURCE_POOL_METADATA_NAMESPACE = "scheduler.resource_pool"
+GC_REAPABLE_STATUSES = frozenset(
+    {
+        EnvStatus.CREATING,
+        EnvStatus.DEAD,
+        EnvStatus.ERROR,
+        EnvStatus.TERMINATING,
+    }
+)
 
 
 def _get_env_name_prefix(now: datetime | None = None) -> str:
@@ -100,6 +108,10 @@ def build_resource_pool_card(
         "exclusive": bool(exclusive),
         "updated_at": int(updated_at or time.time()),
     }
+
+
+def is_gc_reapable_status(status: EnvStatus) -> bool:
+    return status in GC_REAPABLE_STATUSES
 
 
 class EnvironmentManager:
@@ -1119,7 +1131,7 @@ class EnvironmentManager:
             if not provider:
                 logger.error(f"[REM] 未找到 Provider: {env.provider}")
                 await self.destroy_env(env.id)
-            elif env.status == EnvStatus.CREATING or env.status == EnvStatus.DEAD:
+            elif is_gc_reapable_status(env.status):
                 # 创建中的环境视为失败，需要同步关闭并删除
                 logger.warning(f"[REM] 发现未完成创建的环境: id={env.id}")
                 await self.destroy_env(env.id)
@@ -1148,7 +1160,7 @@ class EnvironmentManager:
                 await self.destroy_env(env.id)
                 count = count + 1 
                 logger.info(f"[REM] 已删除不存在的环境记录: id={env.id}")
-            elif env.status == EnvStatus.CREATING or env.status == EnvStatus.DEAD:
+            elif is_gc_reapable_status(env.status):
                 logger.warning(f"[REM] 发现未完成创建的环境: id={env.id}")
                 await self.destroy_env(env.id)
                 count = count + 1 

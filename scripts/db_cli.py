@@ -21,9 +21,15 @@ sys.path.insert(0, str(APP_ROOT))
 
 def reset_database() -> None:
     """Delete framework database files and recreate schema."""
-    from src.core.persistence.database import CONFIG_DB, STATE_DB, get_db_path, init_database
+    from src.core.persistence.database import (
+        CONFIG_DB,
+        DATA_DB,
+        STATE_DB,
+        get_db_path,
+        init_database,
+    )
 
-    for db_name in (CONFIG_DB, STATE_DB):
+    for db_name in (CONFIG_DB, STATE_DB, DATA_DB):
         db_path = get_db_path(db_name)
         if db_path.exists():
             db_path.unlink()
