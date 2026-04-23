@@ -98,8 +98,105 @@ def test_sdk_runtime_version_matches_publish_metadata():
     version_helper = _load_version_helper(package_root)
 
     assert version_helper.get_version() == pyproject["project"]["version"]
-    assert version_helper.get_compatible_dependency_spec() == "crawler4j-sdk>=0.4.0,<0.5.0"
+    assert version_helper.get_compatible_dependency_spec() == _build_compatible_requirement(
+        "crawler4j-sdk",
+        pyproject["project"]["version"],
+    )
     assert _load_literal_module_version(package_root) is None
+
+
+def test_sdk_contracts_dependency_spec_matches_current_contracts_version():
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    version_helper = _load_version_helper(package_root)
+    contracts_pyproject = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "pyproject.toml")
+
+    assert version_helper.get_compatible_contracts_dependency_spec() == _build_compatible_requirement(
+        "crawler4j-contracts",
+        contracts_pyproject["project"]["version"],
+    )
+
+
+def test_sdk_pyproject_declares_same_contracts_range_as_version_helper():
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    version_helper = _load_version_helper(package_root)
+    sdk_pyproject = _load_pyproject(package_root / "pyproject.toml")
+
+    assert version_helper.get_compatible_contracts_dependency_spec() in sdk_pyproject["project"]["dependencies"]
+
+
+def test_sdk_contracts_dependency_spec_prefers_installed_contracts_metadata_when_repo_pyproject_missing(
+    tmp_path,
+    monkeypatch,
+):
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    version_helper = _load_version_helper(package_root)
+
+    def fake_version(name: str) -> str:
+        if name == version_helper.CONTRACTS_PACKAGE_NAME:
+            return "0.3.2"
+        if name == version_helper.PACKAGE_NAME:
+            return "0.5.0"
+        raise version_helper.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(version_helper.metadata, "version", fake_version)
+    monkeypatch.setattr(version_helper, "CONTRACTS_PYPROJECT_PATH", tmp_path / "missing-pyproject.toml")
+
+    assert version_helper.get_compatible_contracts_dependency_spec() == "crawler4j-contracts>=0.3.2,<0.4.0"
+
+
+def test_sdk_contracts_dependency_spec_prefers_source_pyproject_inside_repo_checkout(tmp_path, monkeypatch):
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    version_helper = _load_version_helper(package_root)
+    pyproject_path = tmp_path / "crawler4j-contracts.toml"
+    pyproject_path.write_text('[project]\nversion = "0.3.7"\n', encoding="utf-8")
+
+    def fake_version(name: str) -> str:
+        if name == version_helper.CONTRACTS_PACKAGE_NAME:
+            return "0.4.0"
+        if name == version_helper.PACKAGE_NAME:
+            return "0.5.0"
+        raise version_helper.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(version_helper.metadata, "version", fake_version)
+    monkeypatch.setattr(version_helper, "CONTRACTS_PYPROJECT_PATH", pyproject_path)
+
+    assert version_helper.get_compatible_contracts_dependency_spec() == "crawler4j-contracts>=0.3.7,<0.4.0"
+
+
+def test_sdk_readme_dependency_example_matches_generated_compatibility_ranges():
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    readme_text = (package_root / "README.md").read_text(encoding="utf-8")
+    sdk_pyproject = _load_pyproject(package_root / "pyproject.toml")
+    contracts_pyproject = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "pyproject.toml")
+
+    assert _build_compatible_requirement("crawler4j-contracts", contracts_pyproject["project"]["version"]) in readme_text
+    assert _build_compatible_requirement("crawler4j-sdk", sdk_pyproject["project"]["version"]) in readme_text
+    assert "crawler4j-contracts==<compatible-version>" not in readme_text
+    assert "crawler4j-sdk==<compatible-version>" not in readme_text
+
+
+def test_workspace_release_docs_reflect_current_versions_and_publish_order():
+    root_readme = (WORKSPACE_ROOT / "README.md").read_text(encoding="utf-8")
+    deployment_guide = (
+        WORKSPACE_ROOT / "docs" / "04-project-development" / "08-operations-maintenance" / "deployment-guide.md"
+    ).read_text(encoding="utf-8")
+    contracts_version = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "pyproject.toml")[
+        "project"
+    ]["version"]
+    sdk_version = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "pyproject.toml")["project"][
+        "version"
+    ]
+    app_version = _load_pyproject(APP_ROOT / "pyproject.toml")["project"]["version"]
+
+    assert f"| `crawler4j` | `{app_version}` |" in root_readme
+    assert f"| `crawler4j-sdk` | `{sdk_version}` |" in root_readme
+    assert f"| `crawler4j-contracts` | `{contracts_version}` |" in root_readme
+    assert root_readme.index("uv run publish crawler4j-contracts") < root_readme.index(
+        "uv run publish crawler4j-sdk"
+    )
+    assert deployment_guide.index("uv run publish crawler4j-contracts") < deployment_guide.index(
+        "uv run publish crawler4j-sdk"
+    )
 
 
 def test_contracts_packaging_maps_flat_src_to_public_package_name():
@@ -252,20 +349,20 @@ def test_workspace_build_script_targets_publishable_packages_and_dist_dirs():
     script = _load_script_module("build_workspace_packages.py")
 
     assert [target.package for target in script.BUILD_TARGETS] == [
+        "crawler4j-contracts",
         "crawler4j-sdk",
         "crawler4j",
-        "crawler4j-contracts",
     ]
     assert [target.dist_dir for target in script.BUILD_TARGETS] == [
+        WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "dist",
         WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "dist",
         WORKSPACE_ROOT / "packages" / "crawler4j" / "dist",
-        WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "dist",
     ]
 
 
 def test_workspace_build_script_uses_uv_clear_for_each_target():
     script = _load_script_module("build_workspace_packages.py")
-    target = script.BUILD_TARGETS[0]
+    target = next(target for target in script.BUILD_TARGETS if target.package == "crawler4j-sdk")
 
     assert script.build_command(target) == [
         "uv",
@@ -293,13 +390,13 @@ def test_workspace_build_script_preserves_desktop_subdir_for_root_package(tmp_pa
         assert check is True
         shutil.rmtree(dist_dir)
         dist_dir.mkdir(parents=True)
-        (dist_dir / "crawler4j-0.2.0-py3-none-any.whl").write_text("wheel", encoding="utf-8")
+        (dist_dir / "crawler4j-test.whl").write_text("wheel", encoding="utf-8")
 
     monkeypatch.setattr(script.subprocess, "run", fake_run)
 
     script.run_build(target)
 
-    assert (dist_dir / "crawler4j-0.2.0-py3-none-any.whl").read_text(encoding="utf-8") == "wheel"
+    assert (dist_dir / "crawler4j-test.whl").read_text(encoding="utf-8") == "wheel"
     assert kept_marker.read_text(encoding="utf-8") == "desktop artifact"
 
 
@@ -325,7 +422,7 @@ def test_workspace_build_script_parse_args_supports_publish_shorthand():
 
 def test_workspace_build_script_uses_package_local_dist_glob_for_publish():
     script = _load_script_module("build_workspace_packages.py")
-    target = script.BUILD_TARGETS[0]
+    target = next(target for target in script.BUILD_TARGETS if target.package == "crawler4j-sdk")
 
     assert script.publish_command(target) == [
         "uv",

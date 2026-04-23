@@ -27,17 +27,17 @@
     "root_build": {
       "command": "uv build --package crawler4j --out-dir /tmp/crawler4j-build-check",
       "result": "passed",
-      "details": "workspace build reran on 2026-04-20 and produced crawler4j-0.2.0 wheel/sdist successfully"
+      "details": "workspace build reran on 2026-04-23 and produced crawler4j-0.3.0 wheel/sdist successfully"
     },
     "sdk_build": {
       "command": "uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check",
       "result": "passed",
-      "details": "workspace build reran on 2026-04-22 and produced crawler4j_sdk-0.4.0 wheel/sdist successfully"
+      "details": "workspace build reran on 2026-04-23 and produced crawler4j_sdk-0.5.0 wheel/sdist successfully"
     },
     "contracts_build": {
       "command": "uv build --package crawler4j-contracts --out-dir /tmp/crawler4j-contracts-build-check",
       "result": "passed",
-      "details": "workspace build reran on 2026-04-20 and produced crawler4j_contracts-0.2.0 wheel/sdist successfully"
+      "details": "workspace build reran on 2026-04-23 and produced crawler4j_contracts-0.3.0 wheel/sdist successfully"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",
@@ -82,11 +82,11 @@
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.2.0",
-    "runtime": "0.2.0",
+    "app_package_pyproject": "0.3.0",
+    "runtime": "0.3.0",
     "git_tag_latest": "v0.2.0",
-    "sdk": "0.4.0",
-    "contracts": "0.2.0"
+    "sdk": "0.5.0",
+    "contracts": "0.3.0"
   },
   "entrypoints": {
     "actual_ui_entry": "uv run python -m src.ui.app",

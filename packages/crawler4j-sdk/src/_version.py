@@ -16,21 +16,23 @@ CONTRACTS_PYPROJECT_PATH = PACKAGE_ROOT.parent / "crawler4j-contracts" / "pyproj
 BASE_VERSION_RE = re.compile(r"^v?(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)")
 
 
-def _load_version_from_metadata() -> str | None:
+def _load_version_from_metadata(package_name: str = PACKAGE_NAME) -> str | None:
     try:
-        return metadata.version(PACKAGE_NAME)
+        return metadata.version(package_name)
     except metadata.PackageNotFoundError:
         return None
 
 
-def _load_version_from_pyproject() -> str:
-    with PYPROJECT_PATH.open("rb") as f:
+def _load_version_from_pyproject(pyproject_path: Path = PYPROJECT_PATH) -> str:
+    with pyproject_path.open("rb") as f:
         pyproject = tomllib.load(f)
     return str(pyproject["project"]["version"])
 
 
 def get_version() -> str:
     """Resolve the package version from build metadata or the source pyproject."""
+    if PYPROJECT_PATH.exists():
+        return _load_version_from_pyproject()
     return _load_version_from_metadata() or _load_version_from_pyproject()
 
 
@@ -61,9 +63,14 @@ def get_compatible_sdk_dependency_spec(version: str | None = None) -> str:
 
 
 def _load_contracts_version() -> str:
-    with CONTRACTS_PYPROJECT_PATH.open("rb") as f:
-        pyproject = tomllib.load(f)
-    return str(pyproject["project"]["version"])
+    # Inside the source workspace, keep generated dependencies aligned with the local contracts checkout.
+    if CONTRACTS_PYPROJECT_PATH.exists():
+        return _load_version_from_pyproject(CONTRACTS_PYPROJECT_PATH)
+
+    resolved = _load_version_from_metadata(CONTRACTS_PACKAGE_NAME)
+    if resolved:
+        return resolved
+    return _load_version_from_pyproject(CONTRACTS_PYPROJECT_PATH)
 
 
 def get_compatible_contracts_dependency_spec() -> str:

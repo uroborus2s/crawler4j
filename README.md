@@ -4,15 +4,15 @@
 
 ## Release Baseline
 
-当前源码版本线已收敛为 `crawler4j 0.2.0`、`crawler4j-sdk 0.4.0`、`crawler4j-contracts 0.2.0`，但最近一次正式 Git tag 仍是 `v0.1.1`。发布前请同时区分“当前源码版本”和“最近正式发布”：
+当前源码版本线已收敛为 `crawler4j 0.3.0`、`crawler4j-sdk 0.5.0`、`crawler4j-contracts 0.3.0`，最近一次正式 Git tag 为 `v0.2.0`。发布前请同时区分“当前源码版本”和“最近正式发布”：
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
 | `crawler4j-workspace` | `0.0.0` | workspace 开发元包，不作为正式发布物 |
-| `crawler4j` | `0.2.0` | 桌面宿主与 Core 运行时包 |
-| `crawler4j-sdk` | `0.4.0` | 模块开发 SDK 与 CLI |
-| `crawler4j-contracts` | `0.2.0` | Core / SDK / 模块共享契约 |
-| 最近正式 Git tag | `v0.1.1` | 仓库中最新已知正式 tag |
+| `crawler4j` | `0.3.0` | 桌面宿主与 Core 运行时包 |
+| `crawler4j-sdk` | `0.5.0` | 模块开发 SDK 与 CLI |
+| `crawler4j-contracts` | `0.3.0` | Core / SDK / 模块共享契约 |
+| 最近正式 Git tag | `v0.2.0` | 仓库中最新已知正式 tag |
 
 ## Workspace Layout
 
@@ -56,9 +56,9 @@ uv run build
 # 只构建一个包，但仍然落到该包自己的 dist/
 uv run build crawler4j
 
-# 直接按包名发布 SDK / Contracts（脚本会自动指向各自 dist/*）
-uv run publish crawler4j-sdk
+# 直接按包名发布 workspace 包时，按依赖顺序先发 contracts，再发 sdk
 uv run publish crawler4j-contracts
+uv run publish crawler4j-sdk
 
 # 固定目录打包桌面应用
 uv run package-desktop
@@ -115,7 +115,7 @@ uv run deploy-windows-release
 
 当前保留的脚本：
 
-- `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；构建时自动写回各包 `dist/`，发布时自动指向各包 `dist/*`
+- `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；按 `crawler4j-contracts -> crawler4j-sdk -> crawler4j` 的依赖顺序构建/发布，并自动写回各包 `dist/`
 - `scripts/deploy_macos_internal_release.py`：`uv run deploy-macos-internal-release` 背后的 macOS 内部发布+上传入口；复用 `package-macos-internal-release` 构建 DMG / `appcast.xml`，再用 `rsync` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`
 - `scripts/deploy_windows_release.py`：`uv run deploy-windows-release` 背后的 Windows 发布+上传入口；复用 `package-windows-release` 生成 Velopack 产物，再用 OpenSSH `sftp` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`
 - `scripts/install_sparkle_vendor.py`：`uv run install-sparkle` 背后的 Sparkle 安装辅助；把本地下载好的 Sparkle release archive 或已解压目录复制到 `packages/crawler4j/vendor/macos/sparkle/`

@@ -10,7 +10,7 @@
 - 活跃工作项：21
 - 阻塞项：0
 - 开放风险：1
-- 当前源码版本基线：`crawler4j 0.2.0`、`crawler4j-sdk 0.4.0`、`crawler4j-contracts 0.2.0`；最近正式 Git tag：`v0.2.0`
+- 当前源码版本基线：`crawler4j 0.3.0`、`crawler4j-sdk 0.5.0`、`crawler4j-contracts 0.3.0`；最近正式 Git tag：`v0.2.0`
 - 最近交接包：无
 - 最近快照：无
 - 备注：2026-04-23 已按方案 A 完成模块运行时硬切换。Core 现为唯一运行时 owner，正式模块契约收口为 `module.yaml(runtime_api=core-native-v1)` + 宿主侧 runtime descriptor 扫描；Core 固定扫描 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/` 并直接调度 `TASK/execute`、`WORKFLOW/run`、`handle`、`SELECTOR/select`、`PAGE/handler`。`crawler4j-contracts` 现承载共享契约与 Hosted UI 归一化 helper；`crawler4j-sdk` 仅保留 CLI、脚手架、校验与开发辅助，不再导出 `ModuleAssembler`、`TaskScript`、`TaskFlow`、`env_selector` 或任何运行时 owner 身份。模块运行时代码只允许依赖 `crawler4j-contracts`；缺少 `runtime_api: core-native-v1` 或仍保留旧运行薄壳的模块会被明确拒绝加载，不再提供兼容桥。主回归已通过：core/sdk/ui/debug 相关定向组合 `158 passed`，开发者文档与 `.factory/memory` 已同步到新协议。

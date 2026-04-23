@@ -222,16 +222,18 @@ uv run crawler4j package build
 ```toml
 [project]
 dependencies = [
-  "crawler4j-contracts==<compatible-version>",
+  "crawler4j-contracts>=0.3.0,<0.4.0",
 ]
 
 [dependency-groups]
 dev = [
-  "crawler4j-sdk==<compatible-version>",
+  "crawler4j-sdk>=0.5.0,<0.6.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
 ]
 ```
+
+CLI 脚手架生成的 `pyproject.toml` 会默认写入同样的兼容范围。
 
 意思是：
 

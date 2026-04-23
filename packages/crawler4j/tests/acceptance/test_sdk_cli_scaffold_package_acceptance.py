@@ -13,6 +13,18 @@ from crawler4j_sdk._version import (
 from ._helpers import MODULE_VERSION, archive_members, load_manifest, run_cli
 
 
+def test_sdk_cli_scaffold_acceptance_writes_current_dependency_ranges(module_root: Path):
+    with (module_root / "pyproject.toml").open("rb") as fh:
+        generated_pyproject = tomllib.load(fh)
+
+    assert generated_pyproject["project"]["dependencies"] == [get_compatible_contracts_dependency_spec()]
+    assert generated_pyproject["dependency-groups"]["dev"] == [
+        get_compatible_sdk_dependency_spec(),
+        "pytest>=9.0.2",
+        "pytest-asyncio>=1.3.0",
+    ]
+
+
 def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, built_archive: Path):
     check_result = run_cli("check", "full", cwd=rich_module_root)
     check_result.assert_ok()

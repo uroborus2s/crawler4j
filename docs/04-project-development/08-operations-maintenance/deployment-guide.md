@@ -36,7 +36,7 @@ uv run python -m src.ui.app
 - 当前 macOS 最终可分发产物固定为 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，不需要再额外携带旁边的 `Crawler4j/` collect 目录
 - 当前 Windows 正式发布入口固定为 `uv run package-windows-release`，它会先复用 `package-desktop` 产出的 `PyInstaller onedir` 宿主目录，再继续生成 Velopack 安装器与更新目录
 - 桌面壳层图标当前统一收口为同一套 `app_icon` 资源：运行时继续使用 `app_icon.png`，macOS bundle 使用 `app_icon.icns`，Windows `Crawler4j.exe` 使用 `app_icon.ico`
-- 图标母版固定为 `packages/crawler4j/src/ui/assets/app_icon_master.png`；若继续微调 Dock 占比或品牌细节，统一执行 `uv run python scripts/rebuild_app_icon_assets.py` 重建 `png/icns/ico`，避免手工缩放让三套产物再次漂移
+- 图标母版固定为 `packages/crawler4j/src/ui/assets/app_icon_master.png`；当前 `scripts/rebuild_app_icon_assets.py` 会直接生成“白底板 + 放大镜主徽记”两层参数化图标，并同步写回 `master/png/icns/ico`。若继续微调 Dock 占比或品牌细节，统一执行 `uv run python scripts/rebuild_app_icon_assets.py`，不要再通过整张位图缩放去调光学尺寸
 - `package-windows-release` 会把同源 `app_icon.ico` 同时传给 Velopack，确保 `Setup.exe`、安装后快捷方式与 `Crawler4j.exe` 使用同一套 Windows 图标，而不是回退到默认安装器图标
 - `package-windows-release` 与 `package-macos-internal-release` 现在都会在生成新发布物前先清空各自的 `dist/updates/<platform>/` 输出目录；`deploy-windows-release` / `deploy-macos-internal-release` 因复用同一打包入口，也会继承这条清理行为
 - 若需要小范围内部 DMG 分发并启用 Sparkle 自动更新，使用 `uv run package-macos-internal-release`
@@ -140,25 +140,26 @@ uv run build
 
 说明：
 
-- 脚本会在 workspace 根目录顺序构建 `crawler4j-sdk`、`crawler4j`、`crawler4j-contracts`
+- 脚本会在 workspace 根目录按依赖顺序构建 `crawler4j-contracts`、`crawler4j-sdk`、`crawler4j`
 - 每个包在构建前都会通过 `uv build --clear` 清空自己的 `dist/`
-- 产物分别落到 `packages/crawler4j-sdk/dist/`、`packages/crawler4j/dist/`、`packages/crawler4j-contracts/dist/`
+- 产物分别落到 `packages/crawler4j-contracts/dist/`、`packages/crawler4j-sdk/dist/`、`packages/crawler4j/dist/`
 - 如果只想构建一个包，可直接写 `uv run build crawler4j`
 - 长命令 `uv run python scripts/build_workspace_packages.py ...` 仍可用，但正式口径优先使用短命令
 
 ### Publish SDK / Contracts to PyPI
 
 ```bash
-UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk
 UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-contracts
+UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk
 ```
 
 说明：
 
 - 若使用 PyPI token，优先设置 `UV_PUBLISH_TOKEN`
-- 需要预演时可先执行 `UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk --dry-run`
+- 连续发布 workspace 包时，按 `crawler4j-contracts -> crawler4j-sdk -> crawler4j` 的顺序执行，避免先发布依赖方再发布被依赖方
+- 需要预演时可先执行 `UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-contracts --dry-run`
 - 若仓库后续配置了带 `publish-url` 的 `tool.uv.index`，也可以改用 `uv publish --index <name> ...`
-- 脚本会自动把 `crawler4j-sdk` / `crawler4j-contracts` 映射到各自包目录下的 `dist/*`，不需要手写文件路径
+- 脚本会自动把 `crawler4j-contracts` / `crawler4j-sdk` / `crawler4j` 映射到各自包目录下的 `dist/*`，不需要手写文件路径
 
 ### SDK CLI
 
