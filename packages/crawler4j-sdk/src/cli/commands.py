@@ -1246,6 +1246,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     print("  - 新建任务: `crawler4j task create <name>`")
     print("  - 新建工作流: `crawler4j workflow create <name>`")
     print("  - 新建页面: `crawler4j page create <page_id>`")
+    print("  - 新建 Hook: `crawler4j hook create <hook_name>`")
     print("  - 新建选择器: `crawler4j env-selector create <name>`")
     print("  - 完整校验: `crawler4j check full`")
     return 0

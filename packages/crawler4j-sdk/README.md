@@ -208,10 +208,13 @@ uv run crawler4j task create login
 # 创建工作流：写 workflows/<name>.py，并同步更新 module.yaml.workflows
 uv run crawler4j workflow create sync_orders
 
-# 创建宿主页：写 module_runtime.py 中的 schema / load handler，并注册 ui_extension.pages[]
+# 创建宿主页：写 pages/<page>.py，并注册 ui_extension.pages[]
 uv run crawler4j page create dashboard
 
-# 创建环境选择器：在 module_runtime.py 里追加 @env_selector(...) 函数
+# 创建生命周期 Hook：写 hooks/<hook>.py
+uv run crawler4j hook create on_cleanup
+
+# 创建环境选择器：写 env_selectors/<name>.py
 uv run crawler4j env-selector create pick_ready
 
 # 设置默认配置模板
@@ -238,8 +241,9 @@ uv run crawler4j host debug config
 - `module`：初始化模块项目，或维护 `repo / version / default-workflow`
 - `task`：管理 `tasks/` 里的 `TaskScript`
 - `workflow`：管理 `workflows/` 和 `module.yaml.workflows`
-- `page`：管理 hosted page 和 `ui_extension.pages[]`
-- `env-selector`：管理 `module_runtime.py` 里的环境选择策略函数
+- `page`：管理 `pages/` 里的 Hosted UI 页面，并维护 `ui_extension.pages[]`
+- `hook`：管理 `hooks/` 里的生命周期 Hook 文件
+- `env-selector`：管理 `env_selectors/` 里的环境选择策略函数
 - `config`：管理 `module.yaml.config_defaults`
 - `package`：构建和校验安装 ZIP
 - `release`：看本地发布状态、检查 GitHub Release 最新版本、发布 Release 资产
@@ -251,13 +255,14 @@ uv run crawler4j host debug config
 - 生成 `.gitignore`
 - 生成 `.python-version`
 - 生成 `module_runtime.py`
+- 生成 `pages/`、`hooks/`、`env_selectors/`
 - 执行 `git init`
 - 执行 `uv sync`
 
 如果你在 CI 或脚本里使用 CLI，可以直接补齐 `--repo`、`--no-git`、`--no-install` 等参数。第一版命令树已经切到 `module / task / workflow / page / env-selector / config / package / release / host / check` 分组体系，不再兼容旧平铺命令。
 
 调试主路径已经收敛到 Core 调试会话。旧的 `debug_runner.py` 辅助脚本已从宿主仓库移除，CLI 也不再生成任何本地调试壳脚本。
-模块持久配置由宿主统一维护，`config_schema.json` / `strategy.yaml` 已不再受支持；列表页、统计页和可编辑表格页都应通过 `page create` 生成页面骨架，再在页面 schema 中声明 `DataTable` 组件，而不是手改旧式 `entry` 或独立数据表入口。
+模块持久配置由宿主统一维护；页面、Hook、环境选择器的正式源码位置分别是 `pages/`、`hooks/`、`env_selectors/`。列表页、统计页和可编辑表格页都应通过 `page create` 生成页面骨架，再在页面 schema 中声明 `DataTable` 组件。
 
 ## 工作流示例
 
@@ -301,17 +306,11 @@ return TaskResult.fail(
 ```
 
 当前 `TaskScript` / `TaskFlow` 自身只有一个稳定入口方法：`execute(ctx)` 或 `run(ctx)`。
-`module_runtime.py` 现在是标准模块文件，不再是可选扩展点。模块级生命周期统一在其中实现：
+`module_runtime.py` 现在是标准薄壳文件，不再承载大段业务实现。模块级生命周期统一由它把以下目录暴露给宿主：
 
-- `prepare_env`
-- `declare_ui`
-- `@env_selector(...)` 声明环境选择回调，供 ATM 的“选择环境”模式调用
-- `init_env`
-- `before_run`
-- `on_success`
-- `on_failure`
-- `on_timeout`
-- `on_cleanup`
+- `hooks/`：`prepare_env`、`init_env`、`before_run`、`on_success`、`on_failure`、`on_timeout`、`on_cleanup`
+- `pages/`：`declare_ui()`、页面 schema、`load_handler`、内联表格 `query_handler`
+- `env_selectors/`：`@env_selector(...)` 环境选择回调
 
 脚手架默认会生成两个示例环境选择器：
 
