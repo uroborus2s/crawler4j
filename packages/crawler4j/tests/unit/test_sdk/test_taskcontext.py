@@ -9,12 +9,17 @@
 
 import asyncio
 import time
+import sys
+from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from crawler4j_sdk import EnvAction, TaskContext, TaskResult, TaskSignal, ToolSpec, ToolsCapability
+import crawler4j_contracts.context as contracts_context
 from crawler4j_sdk.context import DefaultHttpClient, HttpClient
 
 # === 测试夹具 ===
@@ -85,12 +90,55 @@ class TestTaskContextInjection:
         basic_context.http = fake_http
         assert basic_context.http is fake_http
 
-    def test_sdk_default_http_client_remains_available_for_explicit_opt_in(self):
-        """验证 SDK 兼容层仍提供默认 HTTP 客户端 helper。"""
-        client = DefaultHttpClient()
+    @pytest.mark.asyncio
+    async def test_sdk_default_http_client_forwards_requests_to_aiohttp_session(self, monkeypatch):
+        """验证 README 建议的默认 HTTP 客户端只做最小请求转发。"""
+        calls: list[tuple[str, str, dict[str, object]]] = []
 
-        assert hasattr(client, "get")
-        assert hasattr(client, "post")
+        class _FakeResponse:
+            def __init__(self, payload: dict[str, object]):
+                self._payload = payload
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def json(self):
+                return self._payload
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            def get(self, url: str, **kwargs):
+                calls.append(("get", url, kwargs))
+                return _FakeResponse({"method": "get", "url": url, "kwargs": kwargs})
+
+            def post(self, url: str, **kwargs):
+                calls.append(("post", url, kwargs))
+                return _FakeResponse({"method": "post", "url": url, "kwargs": kwargs})
+
+        monkeypatch.setitem(sys.modules, "aiohttp", SimpleNamespace(ClientSession=lambda: _FakeSession()))
+
+        client = DefaultHttpClient()
+        get_result = await client.get("https://example.com/api", timeout=3)
+        post_result = await client.post("https://example.com/api", data={"key": "value"}, headers={"x-id": "1"})
+
+        assert get_result == {"method": "get", "url": "https://example.com/api", "kwargs": {"timeout": 3}}
+        assert post_result == {
+            "method": "post",
+            "url": "https://example.com/api",
+            "kwargs": {"json": {"key": "value"}, "headers": {"x-id": "1"}},
+        }
+        assert calls == [
+            ("get", "https://example.com/api", {"timeout": 3}),
+            ("post", "https://example.com/api", {"json": {"key": "value"}, "headers": {"x-id": "1"}}),
+        ]
     
     def test_page_can_be_none(self, basic_context: TaskContext):
         """验证 page 可以为 None。"""
@@ -205,6 +253,38 @@ class TestTaskContextUtilities:
         assert "test_shot" in path
         assert path.endswith(".png")
         mock_context_with_page.page.screenshot.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_screenshot_same_second_keeps_unique_filenames(
+        self,
+        monkeypatch,
+        mock_context_with_page: TaskContext,
+        tmp_path,
+    ):
+        """验证同秒连续截图不会互相覆盖。"""
+        monkeypatch.chdir(tmp_path)
+        timestamps = [
+            datetime(2026, 4, 23, 12, 0, 0, 123456),
+            datetime(2026, 4, 23, 12, 0, 0, 789012),
+        ]
+
+        class _FakeDateTime:
+            @classmethod
+            def now(cls):
+                return timestamps.pop(0)
+
+        monkeypatch.setattr(contracts_context, "datetime", _FakeDateTime)
+
+        first_path = await mock_context_with_page.screenshot("test_shot")
+        second_path = await mock_context_with_page.screenshot("test_shot")
+
+        assert first_path != second_path
+        assert (tmp_path / first_path).parent == tmp_path / "screenshots"
+        assert (tmp_path / second_path).parent == tmp_path / "screenshots"
+        assert Path(first_path).name.startswith("test_shot_20260423_120000_")
+        assert Path(second_path).name.startswith("test_shot_20260423_120000_")
+        assert mock_context_with_page.page.screenshot.call_args_list[0].kwargs["path"] == first_path
+        assert mock_context_with_page.page.screenshot.call_args_list[1].kwargs["path"] == second_path
 
 
 # === 停止/取消测试 ===

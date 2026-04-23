@@ -210,7 +210,7 @@ class TaskContext:
         screenshots_dir = Path("screenshots")
         screenshots_dir.mkdir(exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         path = screenshots_dir / f"{name}_{timestamp}.png"
 
         await self.page.screenshot(path=str(path))
