@@ -37,6 +37,7 @@ uv run crawler4j module init hotel_demo --repo your-org/hotel_demo
 - `hooks/`
 - `env_selectors/`
 - `tests/`
+- `pyproject.toml` 里的 `dependency-groups.dev`（默认预置 `pytest` / `pytest-asyncio`）
 
 其中：
 
@@ -104,6 +105,7 @@ uv run crawler4j env-selector create return_none --force
 `check full` 当前会直接检查：
 
 - `declare_ui()` 是否为同步函数
+- `declare_ui()` 是否只使用声明期允许的最小工具面（当前只允许 `ui.declare_page`）
 - `module.yaml.ui_extension.pages[]` 声明的页面是否真的被 `ui.declare_page` 注册
 - 页面 `load_handler` 是否存在且为同步函数
 - 页面内联表格 `query_handler` 若声明，是否存在且为同步函数
@@ -116,5 +118,6 @@ uv run crawler4j env-selector create return_none --force
 - 页面 schema 和 handler 放在 `pages/*.py`
 - `module_runtime.py` 只做薄壳导出
 - 宿主只负责纯 UI 渲染和通用能力
+- `declare_ui()` 只做页面声明，不读取运行期数据；真实数据访问统一放到 `load_handler(..., params)` / `query_handler(...)`
 
 如果是同一菜单项下的详情态切换，继续使用同一个 `page_id`，通过 `open_page(page_id, params)` 和 `load_handler(..., params)` 处理，不需要额外创建第二套 UI 入口。

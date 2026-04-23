@@ -45,8 +45,6 @@ from crawler4j_sdk.cli.templates import (
     render_selector_template,
 )
 from crawler4j_sdk.hosted_ui import (
-    normalize_data_resource,
-    normalize_db_view_schema,
     normalize_page_schema,
 )
 
@@ -64,23 +62,15 @@ SEMVER_RE = re.compile(
 )
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_TOKEN_ENV_VARS = ("CRAWLER4J_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
-DECLARE_UI_SIDE_EFFECT_DB_TOOLS = {
-    "db.replace_records",
-    "db.declare_data_resource",
-    "db.declare_db_view",
-    "db.append_event",
-    "db.set_state",
-    "db.acquire_lock",
-    "db.release_lock",
-}
+LEGACY_HOSTED_UI_PATHS: tuple[tuple[str, str], ...] = (
+    ("ui", "dir"),
+    ("config_schema.json", "file"),
+    ("strategy.yaml", "file"),
+)
 
 
 class CLIError(RuntimeError):
     """Raised when a CLI action cannot be completed safely."""
-
-
-def _raise_declare_ui_side_effect_error(tool_name: str) -> None:
-    raise CLIError(f"declare_ui 不允许调用 {tool_name}；UI 声明必须保持无副作用")
 
 
 def to_class_name(name: str) -> str:
@@ -569,6 +559,27 @@ def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
         if not label:
             errors.append(f"ui_extension.pages[{page_id}].label 不能为空")
     return errors
+
+
+def _collect_legacy_hosted_ui_errors(module_root: Path) -> list[str]:
+    errors: list[str] = []
+    for relative_path, expected_kind in LEGACY_HOSTED_UI_PATHS:
+        candidate = module_root / relative_path
+        if not candidate.exists():
+            continue
+        if expected_kind == "dir":
+            if candidate.is_dir():
+                errors.append(f"残留旧 UI 目录: {relative_path}/")
+            else:
+                errors.append(f"残留旧 UI 路径: {relative_path}")
+            continue
+        if candidate.is_file():
+            errors.append(f"残留旧 UI 文件: {relative_path}")
+        else:
+            errors.append(f"残留旧 UI 路径: {relative_path}")
+    return errors
+
+
 def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
     """Collect structure-level validation errors."""
     errors: list[str] = []
@@ -604,6 +615,7 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
         errors.append(f"workflows/{extra}.py 未写入 module.yaml.workflows")
 
     errors.extend(_validate_ui_extension(manifest))
+    errors.extend(_collect_legacy_hosted_ui_errors(module_root))
     return errors
 
 
@@ -720,19 +732,8 @@ class _DeclareUICheckLogger:
 class _DeclareUICheckTools:
     def __init__(self) -> None:
         self._pages: dict[str, dict[str, Any]] = {}
-        self._db_views: dict[str, dict[str, Any]] = {}
-        self._resources: dict[str, dict[str, Any]] = {}
-        self._datasets: dict[str, list[dict[str, Any]]] = {}
-        self._states: dict[str, Any] = {}
         self._tool_specs = [
-            ToolSpec(name="db.exists_state", description="db.exists_state"),
-            ToolSpec(name="db.get_state", description="db.get_state"),
-            ToolSpec(name="db.is_locked", description="db.is_locked"),
-            ToolSpec(name="db.list_records", description="db.list_records"),
-            ToolSpec(name="db.query_events", description="db.query_events"),
-            ToolSpec(name="db.query_view", description="db.query_view"),
             ToolSpec(name="ui.declare_page", description="ui.declare_page"),
-            ToolSpec(name="ui.get_page", description="ui.get_page"),
         ]
 
     def has_tool(self, tool_name: str) -> bool:
@@ -742,8 +743,6 @@ class _DeclareUICheckTools:
         return list(self._tool_specs)
 
     def call(self, tool_name: str, /, **kwargs: Any) -> Any:
-        if tool_name in DECLARE_UI_SIDE_EFFECT_DB_TOOLS:
-            _raise_declare_ui_side_effect_error(tool_name)
         if tool_name == "ui.declare_page":
             page_id = str(kwargs.get("page_id", "")).strip()
             try:
@@ -751,66 +750,6 @@ class _DeclareUICheckTools:
             except ValueError as exc:
                 raise CLIError(f"宿主页 {page_id or '<empty>'} schema 无效: {exc}") from exc
             return True
-        if tool_name == "ui.get_page":
-            return dict(self._pages.get(str(kwargs.get("page_id", "")).strip(), {}))
-        if tool_name == "db.declare_data_resource":
-            resource_id = str(kwargs.get("resource_id", "")).strip()
-            try:
-                meta = normalize_data_resource(
-                    resource_id,
-                    {
-                        "storage_mode": kwargs.get("storage_mode", "managed_dataset"),
-                        "record_key_field": kwargs.get("record_key_field"),
-                        "schema": kwargs.get("schema") or {},
-                        "indexes": kwargs.get("indexes") or {},
-                        "cleanup_policy": kwargs.get("cleanup_policy"),
-                    },
-                )
-            except ValueError as exc:
-                raise CLIError(f"数据资源 {resource_id or '<empty>'} 声明无效: {exc}") from exc
-            self._resources[resource_id] = meta
-            return dict(meta)
-        if tool_name == "db.declare_db_view":
-            view_id = str(kwargs.get("view_id", "")).strip()
-            try:
-                meta = normalize_db_view_schema(
-                    view_id,
-                    {
-                        "view_kind": kwargs.get("view_kind", "sql_view"),
-                        "source_resource_ids": kwargs.get("source_resource_ids") or [],
-                        "select_sql_template": kwargs.get("select_sql_template"),
-                        "columns": kwargs.get("columns") or [],
-                        "cleanup_policy": kwargs.get("cleanup_policy"),
-                        "schema_version": kwargs.get("schema_version"),
-                    },
-                )
-            except ValueError as exc:
-                raise CLIError(f"数据库视图 {view_id or '<empty>'} 声明无效: {exc}") from exc
-            self._db_views[view_id] = meta
-            return dict(meta)
-        if tool_name == "db.list_records":
-            dataset = str(kwargs.get("dataset", "")).strip()
-            return [dict(row) for row in self._datasets.get(dataset, [])]
-        if tool_name == "db.replace_records":
-            dataset = str(kwargs.get("dataset", "")).strip()
-            records = kwargs.get("records") or []
-            self._datasets[dataset] = [dict(row) for row in records if isinstance(row, dict)]
-            return True
-        if tool_name == "db.query_events":
-            return []
-        if tool_name == "db.query_view":
-            return {
-                "rows": [],
-                "total": 0,
-                "limit": int(kwargs.get("limit", 100) or 100),
-                "offset": int(kwargs.get("offset", 0) or 0),
-            }
-        if tool_name == "db.is_locked":
-            return False
-        if tool_name == "db.get_state":
-            return self._states.get(str(kwargs.get("key", "")).strip())
-        if tool_name == "db.exists_state":
-            return str(kwargs.get("key", "")).strip() in self._states
         raise KeyError(f"Unknown check tool: {tool_name}")
 
 
@@ -1425,6 +1364,12 @@ def cmd_page_create(args: argparse.Namespace) -> int:
         for item in ui_errors:
             print(f"  - {item}")
         return 1
+    legacy_ui_errors = _collect_legacy_hosted_ui_errors(module_root)
+    if legacy_ui_errors:
+        _print_error("检测到旧 Hosted UI 产物，请先移除后再创建宿主页")
+        for item in legacy_ui_errors:
+            print(f"  - {item}")
+        return 1
     _ensure_dir(module_root / "pages")
     if not (module_root / "pages" / "__init__.py").exists():
         (module_root / "pages" / "__init__.py").write_text(MODEL_PAGES_INIT_TEMPLATE, encoding="utf-8")
@@ -1518,16 +1463,23 @@ def cmd_env_selector_list(args: argparse.Namespace) -> int:
     module_root = require_module_root()
     try:
         module = _import_module_root(module_root)
-        assembler = getattr(module, "assembler", None)
-        selectors = []
-        if assembler and hasattr(assembler, "list_env_selectors"):
-            selectors = [item.name for item in assembler.list_env_selectors()]
-        print("\n".join(selectors) if selectors else "(无环境选择器)")
-        return 0
-    except Exception:
-        names = _list_python_modules(module_root / "env_selectors")
-        print("\n".join(names) if names else "(无环境选择器)")
-        return 0
+    except Exception as exc:
+        _print_error(f"无法导入模块以列出环境选择器: {exc.__class__.__name__}: {exc}")
+        return 1
+
+    assembler = getattr(module, "assembler", None)
+    if assembler is None or not hasattr(assembler, "list_env_selectors"):
+        _print_error("模块根入口缺少可用的 assembler.list_env_selectors")
+        return 1
+
+    try:
+        selectors = [item.name for item in assembler.list_env_selectors()]
+    except Exception as exc:
+        _print_error(f"读取环境选择器失败: {exc.__class__.__name__}: {exc}")
+        return 1
+
+    print("\n".join(selectors) if selectors else "(无环境选择器)")
+    return 0
 
 
 def cmd_hook_create(args: argparse.Namespace) -> int:

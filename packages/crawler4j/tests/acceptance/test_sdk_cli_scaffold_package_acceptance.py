@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -17,8 +18,14 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
     verify_result.assert_stdout_contains("ZIP 校验通过")
 
     manifest = load_manifest(rich_module_root)
+    with (rich_module_root / "pyproject.toml").open("rb") as fh:
+        generated_pyproject = tomllib.load(fh)
     assert manifest["name"] == "demo_model"
     assert manifest["version"] == MODULE_VERSION
+    assert generated_pyproject["dependency-groups"]["dev"] == [
+        "pytest>=9.0.2",
+        "pytest-asyncio>=1.3.0",
+    ]
     assert manifest["ui_extension"]["pages"] == [
         {
             "id": "dashboard",
@@ -44,7 +51,7 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
 
 
 @pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
-def test_sdk_cli_scaffold_allows_additional_module_artifacts_acceptance(
+def test_sdk_cli_scaffold_rejects_additional_legacy_module_artifacts_acceptance(
     rich_module_root: Path,
     extra_name: str,
 ):
@@ -56,4 +63,8 @@ def test_sdk_cli_scaffold_allows_additional_module_artifacts_acceptance(
         (rich_module_root / extra_name).write_text("{}", encoding="utf-8")
 
     result = run_cli("package", "build", cwd=rich_module_root)
-    result.assert_ok()
+    result.assert_failed()
+    if extra_name == "ui/":
+        result.assert_stdout_contains("残留旧 UI 目录: ui/")
+    else:
+        result.assert_stdout_contains(f"残留旧 UI 文件: {extra_name}")

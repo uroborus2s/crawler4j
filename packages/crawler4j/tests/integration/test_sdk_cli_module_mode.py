@@ -73,6 +73,10 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     with (target / "pyproject.toml").open("rb") as fh:
         generated_pyproject = tomllib.load(fh)
     assert get_compatible_dependency_spec() in generated_pyproject["project"]["dependencies"]
+    assert generated_pyproject["dependency-groups"]["dev"] == [
+        "pytest>=9.0.2",
+        "pytest-asyncio>=1.3.0",
+    ]
 
     task_result = _run_cli("task", "create", "extra_task", cwd=target)
     assert task_result.returncode == 0, task_result.stderr
@@ -174,8 +178,23 @@ def test_cli_check_full_rejects_manifest_declare_ui_drift(tmp_path: Path):
     assert "module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: dashboard" in check_result.stdout
 
 
+def test_cli_env_selector_list_fails_fast_on_import_error(tmp_path: Path):
+    target = tmp_path / "demo_model"
+
+    _init_demo_module(target)
+    (target / "__init__.py").write_text(
+        "from missing_runtime_dependency import nope\n",
+        encoding="utf-8",
+    )
+
+    result = _run_cli("env-selector", "list", cwd=target)
+    assert result.returncode == 1
+    assert "无法导入模块" in result.stdout
+    assert "missing_runtime_dependency" in result.stdout
+
+
 @pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
-def test_cli_check_full_allows_additional_module_artifacts(tmp_path: Path, extra_name: str):
+def test_cli_check_full_rejects_additional_legacy_module_artifacts(tmp_path: Path, extra_name: str):
     target = tmp_path / "demo_model"
 
     _init_demo_module(target)
@@ -183,15 +202,18 @@ def test_cli_check_full_allows_additional_module_artifacts(tmp_path: Path, extra
         extra_ui_dir = target / "ui"
         extra_ui_dir.mkdir()
         (extra_ui_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
+        expected = "残留旧 UI 目录: ui/"
     else:
         (target / extra_name).write_text("{}", encoding="utf-8")
+        expected = f"残留旧 UI 文件: {extra_name}"
 
     check_result = _run_cli("check", "full", cwd=target)
-    assert check_result.returncode == 0
+    assert check_result.returncode == 1
+    assert expected in check_result.stdout
 
 
 @pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
-def test_cli_package_build_allows_additional_module_artifacts(tmp_path: Path, extra_name: str):
+def test_cli_package_build_rejects_additional_legacy_module_artifacts(tmp_path: Path, extra_name: str):
     target = tmp_path / "demo_model"
 
     _init_demo_module(target)
@@ -199,11 +221,14 @@ def test_cli_package_build_allows_additional_module_artifacts(tmp_path: Path, ex
         extra_ui_dir = target / "ui"
         extra_ui_dir.mkdir()
         (extra_ui_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
+        expected = "残留旧 UI 目录: ui/"
     else:
         (target / extra_name).write_text("{}", encoding="utf-8")
+        expected = f"残留旧 UI 文件: {extra_name}"
 
     package_result = _run_cli("package", "build", cwd=target)
-    assert package_result.returncode == 0
+    assert package_result.returncode == 1
+    assert expected in package_result.stdout
 
 
 def test_cli_package_build_rejects_manifest_declare_ui_drift(tmp_path: Path):
@@ -226,7 +251,7 @@ def test_cli_package_build_rejects_manifest_declare_ui_drift(tmp_path: Path):
 
 
 @pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
-def test_cli_package_verify_allows_additional_module_artifacts(tmp_path: Path, extra_name: str):
+def test_cli_package_verify_rejects_additional_legacy_module_artifacts(tmp_path: Path, extra_name: str):
     target = tmp_path / "demo_model"
 
     _init_demo_module(target)
@@ -234,8 +259,10 @@ def test_cli_package_verify_allows_additional_module_artifacts(tmp_path: Path, e
         extra_ui_dir = target / "ui"
         extra_ui_dir.mkdir()
         (extra_ui_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
+        expected = "残留旧 UI 目录: ui/"
     else:
         (target / extra_name).write_text("{}", encoding="utf-8")
+        expected = f"残留旧 UI 文件: {extra_name}"
 
     archive_path = tmp_path / "demo_model-0.1.0.zip"
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -246,7 +273,8 @@ def test_cli_package_verify_allows_additional_module_artifacts(tmp_path: Path, e
             zf.write(path, f"{target.name}/{relative.as_posix()}")
 
     verify_result = _run_cli("package", "verify", str(archive_path), cwd=target)
-    assert verify_result.returncode == 0
+    assert verify_result.returncode == 1
+    assert expected in verify_result.stdout
 
 
 def test_cli_package_verify_rejects_manifest_declare_ui_drift(tmp_path: Path):

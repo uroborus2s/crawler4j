@@ -254,6 +254,7 @@ uv run crawler4j host debug config
 
 - 生成 `.gitignore`
 - 生成 `.python-version`
+- 在 `pyproject.toml` 写入 `dependency-groups.dev`，预置 `pytest` / `pytest-asyncio`
 - 生成 `module_runtime.py`
 - 生成 `pages/`、`hooks/`、`env_selectors/`
 - 执行 `git init`
@@ -311,6 +312,11 @@ return TaskResult.fail(
 - `hooks/`：`prepare_env`、`init_env`、`before_run`、`on_success`、`on_failure`、`on_timeout`、`on_cleanup`
 - `pages/`：`declare_ui()`、页面 schema、`load_handler`、内联表格 `query_handler`
 - `env_selectors/`：`@env_selector(...)` 环境选择回调
+
+Hosted UI 运行边界：
+
+- `declare_ui()` 只允许声明页面 schema，只会拿到 `ui.declare_page`
+- 页面数据读取、查询和其他宿主能力访问统一放到 `load_handler` / `query_handler`
 
 脚手架默认会生成两个示例环境选择器：
 

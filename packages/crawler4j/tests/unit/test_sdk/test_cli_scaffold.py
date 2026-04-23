@@ -196,6 +196,10 @@ def test_module_init_creates_complete_project(module_root: Path):
     ]
     assert "ui_extension" not in manifest
     assert _read_pyproject(module_root)["project"]["version"] == manifest["version"]
+    assert _read_pyproject(module_root)["dependency-groups"]["dev"] == [
+        "pytest>=9.0.2",
+        "pytest-asyncio>=1.3.0",
+    ]
 
     runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
     assert "本文件保持为薄壳" in runtime_text
@@ -231,16 +235,16 @@ def test_archive_members_keeps_regular_files_while_excluding_cache_artifacts(tmp
     ignored_idea_file.write_text("<xml />", encoding="utf-8")
     ignored_vscode_file = module_root / ".vscode" / "settings.json"
     ignored_vscode_file.write_text("{}", encoding="utf-8")
-    extra_ui_dir = module_root / "ui"
-    extra_ui_dir.mkdir()
-    extra_ui_file = extra_ui_dir / "custom_page.py"
-    extra_ui_file.write_text("class CustomPage: ...\n", encoding="utf-8")
+    pages_dir = module_root / "pages"
+    pages_dir.mkdir()
+    hosted_page_file = pages_dir / "dashboard.py"
+    hosted_page_file.write_text("def render(): ...\n", encoding="utf-8")
 
     members = commands._archive_members(module_root)
     archived_paths = {arcname for _, arcname in members}
 
     assert "demo_model/module.yaml" in archived_paths
-    assert "demo_model/ui/custom_page.py" in archived_paths
+    assert "demo_model/pages/dashboard.py" in archived_paths
     assert "demo_model/.DS_Store" not in archived_paths
     assert "demo_model/.idea/workspace.xml" not in archived_paths
     assert "demo_model/.vscode/settings.json" not in archived_paths
@@ -665,7 +669,8 @@ def test_check_full_rejects_side_effect_db_tools_in_declare_ui(
     assert commands.cmd_check_full(Namespace()) == 1
 
     captured = capsys.readouterr()
-    assert f"declare_ui 不允许调用 {tool_name}" in captured.out
+    assert "declare_ui 校验失败: KeyError" in captured.out
+    assert f"Unknown check tool: {tool_name}" in captured.out
 
 
 def test_check_full_hides_side_effect_db_tools_from_declare_ui_list_tools(
@@ -701,9 +706,37 @@ if exposed:
     assert commands.cmd_check_full(Namespace()) == 0
 
 
-def test_check_full_accepts_audit_event_queries_in_declare_ui(
+def test_check_full_does_not_expose_runtime_only_tools_in_declare_ui_surface(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    runtime_path.write_text(
+        _inject_declare_ui_block(
+            runtime_text,
+            _indent_block(
+                """tool_names = {spec.name for spec in context.tools.list_tools()}
+if tool_names != {"ui.declare_page"}:
+    raise AssertionError(f"unexpected declare_ui tools: {sorted(tool_names)}")
+if context.tools.has_tool("ui.get_page"):
+    raise AssertionError("ui.get_page should not be available during declare_ui")
+if context.tools.has_tool("db.query_events"):
+    raise AssertionError("db.query_events should not be available during declare_ui")"""
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_check_full(Namespace()) == 0
+
+
+def test_check_full_rejects_query_tools_in_declare_ui(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
     monkeypatch.chdir(module_root)
     runtime_path = module_root / "module_runtime.py"
@@ -723,26 +756,36 @@ def test_check_full_accepts_audit_event_queries_in_declare_ui(
         encoding="utf-8",
     )
 
-    assert commands.cmd_check_full(Namespace()) == 0
+    assert commands.cmd_check_full(Namespace()) == 1
+
+    captured = capsys.readouterr()
+    assert "declare_ui 校验失败: KeyError" in captured.out
+    assert "db.query_events" in captured.out
 
 
 @pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
-def test_check_and_package_allow_additional_module_artifacts(
+def test_check_and_package_reject_legacy_ui_artifacts(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     extra_name: str,
+    capsys: pytest.CaptureFixture[str],
 ):
     monkeypatch.chdir(module_root)
     if extra_name == "ui/":
         extra_dir = module_root / "ui"
         extra_dir.mkdir()
         (extra_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
+        expected = "残留旧 UI 目录: ui/"
     else:
         target = module_root / extra_name
         target.write_text("{}", encoding="utf-8")
+        expected = f"残留旧 UI 文件: {extra_name}"
 
-    assert commands.cmd_check_full(Namespace()) == 0
-    assert commands.cmd_package_build(Namespace(output=None)) == 0
+    assert commands.cmd_check_full(Namespace()) == 1
+    assert expected in capsys.readouterr().out
+
+    assert commands.cmd_package_build(Namespace(output=None)) == 1
+    assert expected in capsys.readouterr().out
 
 
 def test_page_create_does_not_mutate_module_runtime(
@@ -779,14 +822,16 @@ def test_page_create_still_writes_page_file_when_runtime_declare_ui_is_missing(
     assert _read_manifest(module_root)["ui_extension"]["pages"][0]["id"] == "dashboard"
 
 
+@pytest.mark.parametrize("legacy_key", ["entry", "page"])
 def test_page_create_rejects_unsupported_ui_extension_keys(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    legacy_key: str,
 ):
     monkeypatch.chdir(module_root)
     manifest = _read_manifest(module_root)
-    manifest["ui_extension"] = {"entry": "dashboard"}
+    manifest["ui_extension"] = {legacy_key: "dashboard"}
     _write_manifest(module_root, manifest)
 
     assert commands.cmd_page_create(
@@ -794,8 +839,8 @@ def test_page_create_rejects_unsupported_ui_extension_keys(
     ) == 1
 
     captured = capsys.readouterr()
-    assert "ui_extension 包含不支持的字段: entry" in captured.out
-    assert _read_manifest(module_root)["ui_extension"] == {"entry": "dashboard"}
+    assert f"ui_extension 包含不支持的字段: {legacy_key}" in captured.out
+    assert _read_manifest(module_root)["ui_extension"] == {legacy_key: "dashboard"}
 
 
 def test_page_create_rejects_unsupported_page_fields(
@@ -832,24 +877,30 @@ def test_page_create_rejects_unsupported_page_fields(
 
 
 @pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
-def test_page_create_allows_additional_module_artifacts(
+def test_page_create_rejects_legacy_hosted_ui_artifacts(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     extra_name: str,
+    capsys: pytest.CaptureFixture[str],
 ):
     monkeypatch.chdir(module_root)
     if extra_name == "ui/":
         extra_dir = module_root / "ui"
         extra_dir.mkdir()
         (extra_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
+        expected = "残留旧 UI 目录: ui/"
     else:
         (module_root / extra_name).write_text("{}", encoding="utf-8")
+        expected = f"残留旧 UI 文件: {extra_name}"
 
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
-    ) == 0
-    assert _page_file(module_root, "dashboard").exists()
-    assert _read_manifest(module_root)["ui_extension"]["pages"][0]["id"] == "dashboard"
+    ) == 1
+    captured = capsys.readouterr()
+    assert "检测到旧 Hosted UI 产物，请先移除后再创建宿主页" in captured.out
+    assert expected in captured.out
+    assert not _page_file(module_root, "dashboard").exists()
+    assert _read_manifest(module_root).get("ui_extension", {}).get("pages", []) == []
 
 
 def test_page_create_force_refreshes_existing_helper(
