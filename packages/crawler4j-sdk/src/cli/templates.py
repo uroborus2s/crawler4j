@@ -92,7 +92,7 @@ MODEL_PROJECT_README = '''# {display_name}
 - `workflows/`: 工作流，一个文件导出一个 `WORKFLOW` 与 `run(ctx)`。
 - `hooks/`: 生命周期 Hook，一个文件导出一个 `handle(...)`。
 - `env_selectors/`: 环境选择器，一个文件导出一个 `SELECTOR` 与 `select(ctx, candidates)`。
-- `pages/`: Hosted UI 页面，一个文件导出一个 `PAGE` 与页面处理函数。
+- `pages/`: Hosted UI 页面；可以平铺在 `pages/*.py`，也可以按单层业务分组放到 `pages/<group>/*.py`。
 - `data/`: 数据契约附属资产，存放种子数据与已注册 SQL 文件。
 
 ## 常用命令
@@ -109,6 +109,7 @@ uv run crawler4j workflow create <name>
 
 # 创建宿主页
 uv run crawler4j page create dashboard
+uv run crawler4j page create account_detail --group account
 
 # 创建环境选择器
 uv run crawler4j env-selector create pick_ready
@@ -166,6 +167,7 @@ async def test_example_task_logic():
 MODEL_MODULE_INIT = '''"""{display_name} 模块包。
 
 Core 会直接扫描 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`。
+宿主页源码既可以平铺，也可以按单层分组放到 `pages/<group>/`。
 模块根包不再承载运行时装配逻辑。
 """
 '''

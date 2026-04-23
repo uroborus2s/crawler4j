@@ -15,7 +15,7 @@
 | `module` | `module init` `module show` `module set repo/version/default-workflow` | 模块根目录与 `module.yaml` |
 | `task` | `task create` `task list` | `tasks/<name>.py` |
 | `workflow` | `workflow create` `workflow list` | `workflows/<name>.py` 与 `module.yaml.workflows` |
-| `page` | `page create` `page list` | `pages/<page>.py` 与 `ui_extension.pages[]` |
+| `page` | `page create` `page list` | `pages/<page>.py` 或 `pages/<group>/<file>.py` 与 `ui_extension.pages[]` |
 | `hook` | `hook create` `hook list` | `hooks/<hook>.py` |
 | `env-selector` | `env-selector create` `env-selector list` | `env_selectors/<name>.py` |
 | `data` | `data list` `data resource create` `data view create` `data query create` `data seed create` | `module.yaml.data`、`data/sql/*`、`data/seeds/*` |
@@ -68,8 +68,8 @@
 - `module.yaml.data` 存在且四段都是合法数组
 - `default_workflow` 与 `module.yaml.workflows` 一致
 - `TaskSpec/WorkflowSpec/EnvSelectorSpec/PageSpec` 导出存在
-- 文件名与声明名一致
-- 页面文件与 `ui_extension.pages[]` 一致，且 `PAGE.id` 与文件名一致
+- 任务、工作流、环境选择器的文件名与声明名一致
+- 页面文件与 `ui_extension.pages[]` 一致，且 `PAGE.id` 为扁平 snake_case 并与 manifest 对齐
 - 页面 `load_handler` 必须是同步函数；内联 `query_handler` 需要存在且签名兼容
 - 视图/命名查询只引用 `custom_table` 资源
 - `data/sql` / `data/seeds` 文件路径、格式和占位符合法

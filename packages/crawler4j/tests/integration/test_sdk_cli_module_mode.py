@@ -192,6 +192,37 @@ def test_cli_check_full_rejects_manifest_page_missing_page_file(tmp_path: Path):
     assert "module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: dashboard" in check_result.stdout
 
 
+def test_cli_page_create_supports_grouped_source_layout_and_packaging(tmp_path: Path):
+    target = tmp_path / "demo_model"
+
+    _init_demo_module(target)
+
+    page_result = _run_cli("page", "create", "account_detail", "--group", "account", cwd=target)
+    assert page_result.returncode == 0, page_result.stderr
+    assert (target / "pages" / "account" / "detail.py").exists()
+
+    check_result = _run_cli("check", "full", cwd=target)
+    assert check_result.returncode == 0, check_result.stdout
+
+    package_result = _run_cli("package", "build", cwd=target)
+    assert package_result.returncode == 0, package_result.stdout
+    archive = target / "dist" / "demo_model-0.1.0.zip"
+    assert archive.exists()
+
+    verify_result = _run_cli("package", "verify", str(archive), cwd=target)
+    assert verify_result.returncode == 0, verify_result.stdout
+
+    with (target / "module.yaml").open("r", encoding="utf-8") as fh:
+        manifest = yaml.safe_load(fh)
+    assert manifest["ui_extension"]["pages"] == [
+        {"id": "account_detail", "label": "Account Detail", "icon": "📄"},
+    ]
+
+    with zipfile.ZipFile(archive) as zf:
+        members = set(zf.namelist())
+    assert "demo_model/pages/account/detail.py" in members
+
+
 def test_cli_check_and_package_allow_manifest_name_to_differ_from_directory_name(tmp_path: Path):
     target = tmp_path / "demo_model_pkg"
     archive = target / "dist" / "mismatch-layout.zip"

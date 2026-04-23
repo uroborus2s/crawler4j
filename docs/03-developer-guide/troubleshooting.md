@@ -7,7 +7,7 @@
 1. CLI 不通过：先跑 `uv run crawler4j check full`
 2. Core 拒绝加载：先看 `module.yaml.runtime_api`
 3. 任务或工作流找不到：先看固定导出是否存在
-4. 页面不出来：先看 `pages/*.py` 和 `ui_extension.pages[]`
+4. 页面不出来：先看 `pages/*.py`、`pages/<group>/*.py` 和 `ui_extension.pages[]`
 5. 数据或统计查询报错：先看 `module.yaml.data` 和 `data list`
 6. 环境选择器不生效：先看 `env-selector list`
 7. 安装失败：先看 ZIP 结构和 `upgrade_source.repo`
@@ -53,7 +53,7 @@
 确认：
 
 1. `module.yaml.ui_extension.pages[]` 是否存在目标页面
-2. `pages/<page>.py` 是否导出 `PAGE`
+2. `pages/<page>.py` 或 `pages/<group>/<file>.py` 是否导出 `PAGE`
 3. `PAGE.schema` 顶层是否是 `Page`
 4. `load_handler` / `query_handler` 是否真实存在于同一文件
 5. `uv run crawler4j check full` 是否通过

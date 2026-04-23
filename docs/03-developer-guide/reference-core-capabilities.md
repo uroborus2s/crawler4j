@@ -17,7 +17,7 @@ Core 会扫描固定目录并读取固定导出：
 | `workflows/*.py` | `WORKFLOW`、`run` | 工作流 |
 | `hooks/*.py` | `handle` | 生命周期 Hook |
 | `env_selectors/*.py` | `SELECTOR`、`select` | 环境选择器 |
-| `pages/*.py` | `PAGE`、页面 handler | Hosted UI 页面 |
+| `pages/*.py` / `pages/<group>/*.py` | `PAGE`、页面 handler | Hosted UI 页面 |
 
 Core 不会调用模块根 `run()`，也不会让模块自己做运行时装配。
 

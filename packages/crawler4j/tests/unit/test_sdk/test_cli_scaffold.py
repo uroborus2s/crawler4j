@@ -178,7 +178,7 @@ def test_page_create_registers_manifest_and_generates_page_spec(tmp_path: Path, 
     monkeypatch.chdir(module_root)
 
     assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name="Dashboard", description="Dashboard 页面", force=False)
+        Namespace(name="dashboard", display_name="Dashboard", description="Dashboard 页面", group=None, force=False)
     ) == 0
 
     manifest = _read_manifest(module_root)
@@ -196,6 +196,40 @@ def test_page_create_registers_manifest_and_generates_page_spec(tmp_path: Path, 
     assert '"load_handler": "load_dashboard_page"' in page_text
     assert "def load_dashboard_page(" in page_text
     assert "declare_ui" not in page_text
+
+
+def test_page_create_supports_grouped_source_layout(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+
+    assert commands.cmd_page_create(
+        Namespace(
+            name="account_detail",
+            display_name="Account Detail",
+            description="Account Detail 页面",
+            group="account",
+            force=False,
+        )
+    ) == 0
+
+    manifest = _read_manifest(module_root)
+    assert manifest["ui_extension"]["pages"] == [
+        {
+            "id": "account_detail",
+            "label": "Account Detail",
+            "icon": "📄",
+        }
+    ]
+
+    page_path = module_root / "pages" / "account" / "detail.py"
+    assert page_path.exists()
+    page_text = page_path.read_text(encoding="utf-8")
+    assert 'id="account_detail"' in page_text
+    assert '"load_handler": "load_account_detail_page"' in page_text
+    assert "def load_account_detail_page(" in page_text
+
+    page_module = _import_module_child(module_root, "pages", "account.detail")
+    assert page_module.PAGE.id == "account_detail"
 
 
 def test_env_selector_list_reads_exported_selector_specs(tmp_path: Path, monkeypatch, capsys):
@@ -255,7 +289,7 @@ def test_collect_full_errors_rejects_manifest_page_missing_from_files(tmp_path: 
     module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
     assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name=None, description=None, force=False)
+        Namespace(name="dashboard", display_name=None, description=None, group=None, force=False)
     ) == 0
     (module_root / "pages" / "dashboard.py").unlink()
 
@@ -268,7 +302,7 @@ def test_collect_full_errors_rejects_page_file_missing_from_manifest(tmp_path: P
     module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
     assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name=None, description=None, force=False)
+        Namespace(name="dashboard", display_name=None, description=None, group=None, force=False)
     ) == 0
     manifest = _read_manifest(module_root)
     manifest["ui_extension"]["pages"] = []
@@ -277,6 +311,18 @@ def test_collect_full_errors_rejects_page_file_missing_from_manifest(tmp_path: P
     errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
 
     assert "pages/ 声明了未写入 module.yaml.ui_extension.pages 的宿主页: dashboard" in errors
+
+
+def test_collect_full_errors_accepts_grouped_page_source_layout(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="account_detail", display_name=None, description=None, group="account", force=False)
+    ) == 0
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert errors == []
 
 
 def test_collect_full_errors_allow_manifest_name_to_differ_from_directory_name(tmp_path: Path):
@@ -310,6 +356,15 @@ def test_build_parser_registers_data_commands():
     assert query_args.source == ["accounts"]
     assert seed_args.func is commands.cmd_data_seed_create
     assert seed_args.resource == "accounts"
+
+
+def test_build_parser_registers_page_group_argument():
+    parser = commands.build_parser()
+
+    args = parser.parse_args(["page", "create", "account_detail", "--group", "account"])
+
+    assert args.func is commands.cmd_page_create
+    assert args.group == "account"
 
 
 def test_data_commands_scaffold_manifest_sql_and_seed_files(tmp_path: Path, monkeypatch):

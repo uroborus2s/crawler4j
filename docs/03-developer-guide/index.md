@@ -34,6 +34,6 @@
 - `workflows/*.py` 导出 `WORKFLOW` 和 `run`
 - `hooks/*.py` 导出 `handle`
 - `env_selectors/*.py` 导出 `SELECTOR` 和 `select`
-- `pages/*.py` 导出 `PAGE` 和页面处理函数
+- `pages/*.py`、`pages/<group>/*.py` 导出 `PAGE` 和页面处理函数
 
 如果你看到任何 `TaskScript`、`TaskFlow`、`ModuleAssembler`、`module_runtime.py`、`declare_ui()`、`@env_selector(...)`、`db.declare_data_resource(...)`、`db.declare_db_view(...)` 的旧写法，应视为历史资料，而不是当前正式协议。

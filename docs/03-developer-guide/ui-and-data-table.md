@@ -3,7 +3,7 @@
 当前正式 UI 协议已经完全切到宿主扫描模式：
 
 - `module.yaml.ui_extension.pages[]` 只声明导航元信息
-- `pages/*.py` 直接导出 `PAGE: PageSpec`
+- `pages/*.py` 或 `pages/<group>/*.py` 直接导出 `PAGE: PageSpec`
 - Core 读取 `PAGE.schema` 并渲染
 - 页面数据和动作都走页面 handler
 
@@ -14,7 +14,7 @@
 页面入口分两部分：
 
 1. `module.yaml.ui_extension.pages[]`
-2. `pages/<page>.py`
+2. `pages/<page>.py` 或 `pages/<group>/<file>.py`
 
 清单只放导航元信息：
 
@@ -63,10 +63,17 @@ def load_dashboard_page(
 标准顺序：
 
 1. `uv run crawler4j page create dashboard`
-2. CLI 更新 `module.yaml.ui_extension.pages[]` 和 `pages/dashboard.py`
-3. 你补 `PAGE.schema` 和 handler
-4. `uv run crawler4j check full`
-5. 用 DevLink 到宿主里验证
+2. 如果某个菜单下有多个文件，可以用 `uv run crawler4j page create account_detail --group account`
+3. CLI 更新 `module.yaml.ui_extension.pages[]` 和对应页面文件，例如 `pages/dashboard.py` 或 `pages/account/detail.py`
+4. 你补 `PAGE.schema` 和 handler
+5. `uv run crawler4j check full`
+6. 用 DevLink 到宿主里验证
+
+分组目录只影响源码组织，不影响页面路由：
+
+- `page_id` 仍然保持扁平，例如 `account_detail`
+- `open_page.page_id` 继续写扁平 ID
+- 左侧菜单层级仍然只看 `module.yaml.ui_extension.pages[]`
 
 ## 页面可以做什么
 
@@ -226,4 +233,4 @@ def query_billing_stats_table(
 - `load_handler` 是否存在且签名兼容
 - `query_handler` 是否存在且签名兼容
 
-如果页面显示不对，优先查 `pages/*.py`，不要回退去找已经删除的旧 UI 壳。
+如果页面显示不对，优先查 `pages/*.py`、`pages/<group>/*.py`，不要回退去找已经删除的旧 UI 壳。

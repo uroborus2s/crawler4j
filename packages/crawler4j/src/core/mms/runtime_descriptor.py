@@ -74,6 +74,22 @@ def _iter_module_files(package_dir: Path) -> list[str]:
     )
 
 
+def _iter_page_modules(package_dir: Path) -> list[tuple[str, str]]:
+    if not package_dir.exists():
+        return []
+    page_modules: list[tuple[str, str]] = []
+    for path in sorted(package_dir.rglob("*.py")):
+        if path.name == "__init__.py" or path.name.startswith("_"):
+            continue
+        relative = path.relative_to(package_dir)
+        if any(part.startswith("_") for part in relative.parts[:-1]):
+            continue
+        module_name = ".".join(relative.with_suffix("").parts)
+        owner = f"pages/{relative.as_posix()}"
+        page_modules.append((module_name, owner))
+    return page_modules
+
+
 def _import_submodule(module_name: str, subpackage: str, item_name: str) -> Any:
     import_target = f"{module_name}.{subpackage}.{item_name}"
     try:
@@ -161,13 +177,16 @@ def _page_handlers(module: Any) -> dict[str, Callable[..., Any]]:
 
 def _discover_pages(module_name: str, package_root: Path) -> dict[str, PageRuntimeEntry]:
     pages: dict[str, PageRuntimeEntry] = {}
-    for item_name in _iter_module_files(package_root / "pages"):
+    page_owners: dict[str, str] = {}
+    for item_name, owner in _iter_page_modules(package_root / "pages"):
         module = _import_submodule(module_name, "pages", item_name)
-        owner = f"pages/{item_name}.py"
         spec = _require_spec(module, "PAGE", PageSpec, owner=owner)
         page_id = str(spec.id or "").strip()
         if not page_id:
             raise RuntimeError(f"{owner} 的 PAGE.id 不能为空")
+        previous_owner = page_owners.get(page_id)
+        if previous_owner and previous_owner != owner:
+            raise RuntimeError(f"宿主页 {page_id} 重复定义: {previous_owner}、{owner}")
         normalized_schema = normalize_page_schema(page_id, dict(spec.schema or {}))
         normalized_spec = PageSpec(
             id=page_id,
@@ -175,6 +194,7 @@ def _discover_pages(module_name: str, package_root: Path) -> dict[str, PageRunti
             icon=str(spec.icon or "📋").strip() or "📋",
             schema=normalized_schema,
         )
+        page_owners[page_id] = owner
         pages[page_id] = PageRuntimeEntry(
             spec=normalized_spec,
             module_name=module.__name__,

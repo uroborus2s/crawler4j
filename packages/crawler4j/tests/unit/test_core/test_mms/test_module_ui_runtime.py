@@ -101,6 +101,63 @@ def test_module_ui_runtime_bridge_reads_page_schema_and_handlers_from_descriptor
         restore_module(service, original_registry, module_name)
 
 
+def test_module_ui_runtime_bridge_reads_grouped_page_schema_and_handlers_from_descriptor(tmp_path):
+    module_name = "runtime_bridge_grouped_page_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/account/detail.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
+
+            PAGE = PageSpec(
+                id="account_detail",
+                label="Account Detail",
+                icon="📋",
+                schema={
+                    "type": "Page",
+                    "title": "账号详情",
+                    "load_handler": "load_account_detail_page",
+                    "children": [],
+                },
+            )
+
+
+            def load_account_detail_page(
+                context: TaskContext,
+                page_id: str,
+                params: dict | None = None,
+            ):
+                del context
+                return {"page_id": page_id, "params": params}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("account_detail", label="Account Detail", icon="📋")])
+    service, original_registry, _ = register_module(module_name, module_dir, manifest=manifest)
+    bridge = ModuleUIRuntimeBridge(module_name)
+
+    try:
+        bridge.declare_ui()
+
+        assert bridge.get_declared_page("account_detail") == {
+            "type": "Page",
+            "title": "账号详情",
+            "load_handler": "load_account_detail_page",
+            "children": [],
+        }
+        assert bridge.call_page_handler(
+            "load_account_detail_page",
+            "account_detail",
+            {"account_id": "acct-001"},
+        ) == {
+            "page_id": "account_detail",
+            "params": {"account_id": "acct-001"},
+        }
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
 def test_module_ui_runtime_bridge_does_not_persist_page_schema_to_store(tmp_path):
     module_name = "staged_only_bridge_module"
     module_dir = write_module_tree(

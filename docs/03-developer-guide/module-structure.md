@@ -24,7 +24,9 @@ demo_module/
 ├── env_selectors/
 │   └── *.py
 └── pages/
-    └── *.py
+    ├── *.py
+    └── <group>/
+        └── *.py
 ```
 
 ## 每个位置负责什么
@@ -40,7 +42,7 @@ demo_module/
 | `workflows/*.py` | 单个工作流声明与实现 |
 | `hooks/*.py` | 生命周期 Hook |
 | `env_selectors/*.py` | 环境选择器 |
-| `pages/*.py` | Hosted UI 页面与页面处理函数 |
+| `pages/*.py` / `pages/<group>/*.py` | Hosted UI 页面与页面处理函数 |
 
 即使当前模块暂时不用数据能力，`module.yaml.data` 也必须存在，`data/` 目录也会由脚手架预先创建。
 

@@ -71,6 +71,35 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
     assert "demo_model/module_runtime.py" not in members
 
 
+def test_sdk_cli_scaffold_supports_grouped_page_source_layout_acceptance(module_root: Path):
+    page_result = run_cli("page", "create", "account_detail", "--group", "account", cwd=module_root)
+    page_result.assert_ok()
+
+    check_result = run_cli("check", "full", cwd=module_root)
+    check_result.assert_ok()
+
+    package_result = run_cli("package", "build", cwd=module_root)
+    package_result.assert_ok()
+
+    archive_path = module_root / "dist" / f"{module_root.name}-{MODULE_VERSION}.zip"
+    assert archive_path.exists()
+
+    verify_result = run_cli("package", "verify", str(archive_path), cwd=module_root)
+    verify_result.assert_ok()
+
+    manifest = load_manifest(module_root)
+    assert manifest["ui_extension"]["pages"] == [
+        {
+            "id": "account_detail",
+            "label": "Account Detail",
+            "icon": "📄",
+        }
+    ]
+
+    members = archive_members(archive_path)
+    assert "demo_model/pages/account/detail.py" in members
+
+
 @pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
 def test_sdk_cli_scaffold_rejects_additional_legacy_module_artifacts_acceptance(
     rich_module_root: Path,

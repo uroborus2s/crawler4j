@@ -66,7 +66,7 @@ Core 固定扫描：
 - `workflows/*.py` -> `WORKFLOW` / `run`
 - `hooks/*.py` -> `handle`
 - `env_selectors/*.py` -> `SELECTOR` / `select`
-- `pages/*.py` -> `PAGE` / 页面处理函数
+- `pages/*.py`、`pages/<group>/*.py` -> `PAGE` / 页面处理函数
 
 这些导出会被 Core 归一化成宿主侧 descriptor。模块作者只写业务逻辑，不再写运行时装配代码。
 

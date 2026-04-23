@@ -91,7 +91,7 @@ Core 的运行描述对象来自固定目录扫描，所以调试时按目录定
 | 工作流 | `workflows/*.py` 是否导出 `WORKFLOW`、`run` |
 | Hook | `hooks/<name>.py` 是否导出 `handle` |
 | 环境选择器 | `env_selectors/*.py` 是否导出 `SELECTOR`、`select` |
-| 页面 | `pages/*.py` 是否导出 `PAGE` 和对应 handler |
+| 页面 | `pages/*.py`、`pages/<group>/*.py` 是否导出 `PAGE` 和对应 handler |
 
 如果 `check full` 过了但宿主行为不对，优先确认：
 
@@ -109,7 +109,7 @@ Core 的运行描述对象来自固定目录扫描，所以调试时按目录定
 4. `query_handler` / `load_handler` 是否只调用已注册的 `db.get_record` / `db.list_records` / `db.run_query` / `db.query_view` 等正式能力
 5. 模块详情页打开对应页面后是否拿到最新数据
 
-页面现在直接来自 `pages/*.py`。宿主不会再等待模块根入口去声明页面。
+页面现在直接来自 `pages/*.py`、`pages/<group>/*.py`。宿主不会再等待模块根入口去声明页面。
 
 ## 7. 环境选择器调试
 

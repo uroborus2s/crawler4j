@@ -23,7 +23,7 @@ Current module runtime architecture:
 Current UI architecture:
 
 - `packages/crawler4j/src/core/mms/ui/managed_page_renderer.py` is the Hosted UI renderer.
-- Page schemas now come from `pages/*.py` exported `PAGE: PageSpec`, normalized by `crawler4j_contracts.hosted_ui`.
+- Page schemas now come from `pages/*.py` or grouped `pages/<group>/*.py` exported `PAGE: PageSpec`, normalized by `crawler4j_contracts.hosted_ui`.
 - `DataTable` remains a page-scoped component. Data comes from page `load_handler` / `query_handler` plus `db.*` tools.
 
 Current pool/data architecture:

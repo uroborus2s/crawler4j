@@ -30,6 +30,7 @@ uv run crawler4j module show
 - 运行时依赖只包含 `crawler4j-contracts`
 - `crawler4j-sdk` 只放在开发依赖里
 - Core 会扫描 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`
+- 宿主页源码既可以平铺在 `pages/`，也可以按单层分组放到 `pages/<group>/`
 - CLI 会同时创建 `data/sql/views`、`data/sql/queries`、`data/seeds`
 
 ## 2. 生成业务骨架
@@ -39,6 +40,7 @@ uv run crawler4j task create fetch_hotels
 uv run crawler4j workflow create hotel_sync --display-name "酒店同步"
 uv run crawler4j module set default-workflow hotel_sync
 uv run crawler4j page create dashboard --display-name "运营看板"
+uv run crawler4j page create account_detail --group account
 uv run crawler4j hook create before_run
 uv run crawler4j env-selector create pick_ready
 uv run crawler4j check structure
@@ -90,7 +92,7 @@ async def run(ctx: TaskContext):
 
 ## 5. 写最小页面
 
-`pages/dashboard.py` 的正式导出是 `PAGE` 和页面 handler：
+`pages/dashboard.py` 的正式导出是 `PAGE` 和页面 handler；如果某个菜单下有多个文件，也可以放到 `pages/<group>/`：
 
 ```python
 from crawler4j_contracts import PageSpec, TaskContext

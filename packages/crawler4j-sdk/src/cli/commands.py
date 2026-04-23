@@ -248,14 +248,47 @@ def _set_project_version(pyproject_path: Path, version: str) -> None:
     pyproject_path.write_text(rendered, encoding="utf-8")
 
 
-def _list_python_modules(package_dir: Path) -> list[str]:
+def _list_python_modules(package_dir: Path, *, recursive: bool = False) -> list[str]:
     if not package_dir.exists():
         return []
+    paths = package_dir.rglob("*.py") if recursive else package_dir.glob("*.py")
     return sorted(
-        path.stem
-        for path in package_dir.glob("*.py")
-        if path.name != "__init__.py" and not path.name.startswith("_")
+        ".".join(path.relative_to(package_dir).with_suffix("").parts)
+        for path in paths
+        if path.name != "__init__.py"
+        and not path.name.startswith("_")
+        and not any(part.startswith("_") for part in path.relative_to(package_dir).parts[:-1])
     )
+
+
+def _page_owner_label(page_module_name: str) -> str:
+    return f"pages/{page_module_name.replace('.', '/')}.py"
+
+
+def _normalize_page_group(group: str | None) -> str:
+    normalized_group = str(group or "").strip()
+    if not normalized_group:
+        return ""
+    if "/" in normalized_group or "\\" in normalized_group or "." in normalized_group:
+        raise CLIError("页面分组名必须是单层小写 snake_case")
+    if not is_valid_name(normalized_group):
+        raise CLIError("页面分组名必须是单层小写 snake_case")
+    return normalized_group
+
+
+def _page_source_relative_path(page_id: str, *, group: str | None = None) -> Path:
+    normalized_page_id = str(page_id or "").strip()
+    normalized_group = _normalize_page_group(group)
+    if not normalized_group:
+        return Path("pages") / f"{normalized_page_id}.py"
+
+    prefix = f"{normalized_group}_"
+    file_stem = normalized_page_id
+    if normalized_page_id.startswith(prefix):
+        candidate = normalized_page_id[len(prefix) :].strip()
+        if candidate:
+            file_stem = candidate
+    return Path("pages") / normalized_group / f"{file_stem}.py"
 
 
 def _manifest_default_workflow(manifest: dict[str, Any]) -> str:
@@ -699,39 +732,39 @@ def _validate_page_module(
     module_root: Path,
     module_name: str,
     page_name: str,
-) -> tuple[list[str], dict[str, Any] | None]:
-    owner_label = f"pages/{page_name}.py"
+) -> tuple[list[str], str | None, dict[str, Any] | None]:
+    owner_label = _page_owner_label(page_name)
     try:
         module = _import_module_child(module_root, module_name, "pages", page_name)
     except Exception as exc:
-        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"], None
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"], None, None
 
     errors: list[str] = []
     spec_error = _validate_exported_spec(module, "PAGE", PageSpec, owner_label=owner_label)
     if spec_error:
-        return [spec_error], None
+        return [spec_error], None, None
 
     page_spec = module.PAGE
     page_id = str(page_spec.id or "").strip()
-    if page_id != page_name:
-        errors.append(f"{owner_label} 的 PAGE.id 必须与文件名一致: {page_name}")
-        return errors, None
+    if not is_valid_name(page_id):
+        errors.append(f"{owner_label} 的 PAGE.id 必须是小写 snake_case: {page_id or '<empty>'}")
+        return errors, None, None
 
     try:
         schema = normalize_page_schema(page_id, dict(page_spec.schema or {}))
     except ValueError as exc:
         errors.append(f"宿主页 {page_id} schema 无效: {exc}")
-        return errors, None
+        return errors, None, None
 
     load_handler_name = str(schema.get("load_handler", "") or "").strip()
     load_handler = getattr(module, load_handler_name, None)
     if load_handler is None or not callable(load_handler):
-        errors.append(f"宿主页 {page_id} 的 load_handler 未在 pages/{page_name}.py 中定义: {load_handler_name}")
+        errors.append(f"宿主页 {page_id} 的 load_handler 未在 {owner_label} 中定义: {load_handler_name}")
     elif inspect.iscoroutinefunction(load_handler):
         errors.append(f"宿主页 {page_id} 的 load_handler 必须是同步函数: {load_handler_name}")
 
     errors.extend(_validate_inline_table_handlers(module, page_id, schema, owner_label=owner_label))
-    return errors, schema
+    return errors, page_id, schema
 
 
 def _render_yaml(data: Any) -> str:
@@ -1062,15 +1095,21 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
         for item in _manifest_ui_pages(manifest)
         if str(item.get("id", "")).strip()
     }
-    discovered_pages: set[str] = set()
-    for page_name in _list_python_modules(module_root / "pages"):
-        page_errors, schema = _validate_page_module(module_root, module_name, page_name)
+    discovered_pages: dict[str, str] = {}
+    for page_name in _list_python_modules(module_root / "pages", recursive=True):
+        page_errors, page_id, schema = _validate_page_module(module_root, module_name, page_name)
         errors.extend(page_errors)
-        if schema:
-            discovered_pages.add(page_name)
+        if not page_id or not schema:
+            continue
+        owner_label = _page_owner_label(page_name)
+        previous_owner = discovered_pages.get(page_id)
+        if previous_owner and previous_owner != owner_label:
+            errors.append(f"宿主页 {page_id} 重复定义: {previous_owner}、{owner_label}")
+            continue
+        discovered_pages[page_id] = owner_label
 
-    missing_pages = sorted(declared_pages - discovered_pages)
-    extra_pages = sorted(discovered_pages - declared_pages)
+    missing_pages = sorted(declared_pages - set(discovered_pages))
+    extra_pages = sorted(set(discovered_pages) - declared_pages)
     errors.extend(
         f"module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: {page_id}"
         for page_id in missing_pages
@@ -1862,6 +1901,11 @@ def cmd_page_create(args: argparse.Namespace) -> int:
     if not is_valid_name(name):
         _print_error("页面名必须是小写 snake_case")
         return 1
+    try:
+        page_relative_path = _page_source_relative_path(name, group=getattr(args, "group", None))
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
 
     manifest = load_manifest(module_root)
     ui_errors = _validate_ui_extension(manifest)
@@ -1898,7 +1942,7 @@ def cmd_page_create(args: argparse.Namespace) -> int:
         )
     try:
         _write_text(
-            module_root / "pages" / f"{name}.py",
+            module_root / page_relative_path,
             render_page_template(
                 page_id=name,
                 display_name=args.display_name or to_display_name(name),
@@ -1911,7 +1955,7 @@ def cmd_page_create(args: argparse.Namespace) -> int:
         return 1
 
     save_manifest(module_root, manifest)
-    _print_success(f"已创建宿主页骨架: pages/{name}.py")
+    _print_success(f"已创建宿主页骨架: {page_relative_path.as_posix()}")
     return 0
 
 
@@ -2549,7 +2593,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="crawler4j",
         description="Crawler4j SDK 模块工程 CLI",
     )
-    subparsers = parser.add_subparsers(dest="group")
+    subparsers = parser.add_subparsers(dest="command")
 
     module_parser = subparsers.add_parser(
         "module",
@@ -2743,6 +2787,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="创建一个宿主页骨架，并把它注册到 ui_extension.pages",
     )
     page_create.add_argument("name", help="页面名，snake_case")
+    page_create.add_argument("--group", help="可选源码分组目录，单层 snake_case；例如 account")
     page_create.add_argument("--display-name", help="页面显示名")
     page_create.add_argument("--description", help="页面说明")
     page_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
@@ -3012,7 +3057,7 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point for the crawler4j CLI."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not getattr(args, "group", None):
+    if not getattr(args, "command", None):
         parser.print_help()
         return 0
     if not hasattr(args, "func"):
