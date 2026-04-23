@@ -64,14 +64,14 @@
 
 | 项目 | 内容 |
 |---|---|
-| 目标 | 在模块 `custom_table` 实体表之上提供宿主管理的数据库视图和分析查询能力 |
-| 新事实源 | `data.db.module_db_views` |
-| 声明接口 | `ctx.tools.call("db.declare_db_view", ...)` |
-| 查询接口 | `ctx.tools.call("db.query_view", ...)` |
-| SQL 契约 | 模块只登记受控 `SELECT` SQL 模板，不登记完整 `CREATE VIEW`；源表通过 `{{resource:<resource_id>}}` 占位引用 |
-| UI 接入 | 模块页面通过内联 `DataTable(query_handler)` 调用 `db.query_view`，宿主只负责表格交互与渲染 |
-| 生命周期 | 宿主负责命名、校验、`DROP VIEW + CREATE VIEW` 原子重建，以及卸载清理 |
-| 当前状态 | 已本地实现并通过定向验证；V1 范围为 `sql_view + query_view + readonly hosted table` |
+| 目标 | 在模块 `custom_table` 实体表之上提供 manifest 驱动的数据库视图和命名查询能力 |
+| 新事实源 | `module.yaml.data.views[]`、`module.yaml.data.queries[]`、`data.db.module_db_views` |
+| 注册入口 | `module.yaml.data` + `data/sql/views/*.sql` + `data/sql/queries/*.sql` |
+| 查询接口 | `ctx.tools.call("db.run_query", ...)`、`ctx.tools.call("db.query_view", ...)` |
+| SQL 契约 | 模块只能执行宿主已注册的 `SELECT/WITH SELECT` SQL；源表通过 `{{resource:<resource_id>}}` 占位引用；禁止未注册 SQL |
+| UI 接入 | 模块页面通过内联 `DataTable(query_handler)` 调用 `db.query_view` / `db.run_query`，宿主只负责表格交互与渲染 |
+| 生命周期 | 宿主在模块加载/安装时校验、同步、建表、建视图、导种子，并在卸载时统一清理 |
+| 当前状态 | 已切到 manifest 驱动契约；旧 `db.declare_db_view` 运行时声明口已退出正式协议 |
 | 关联文档 | `module-entity-table-view-design.md` |
 | 关联项 | `CR-014`, `TASK-028` |
 
@@ -86,7 +86,7 @@
 | 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
 | 页面 schema | `data.db.module_pages`，统一通过 `ui.declare_page` / `ui.get_page` 访问 |
-| 快照型业务数据 | `data.db.module_data_resources` 统一登记 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`）+ `data.db.module_dataset_manifests`，`custom_table` 落在受控实体表 `module_name_resource_id`，并由 `schema_version` / `schema_json` / `indexes_json` 描述真实列结构；业务数据统一通过 `db.declare_data_resource` / `db.list_records` / `db.replace_records` 访问 |
+| 快照型业务数据 | `module.yaml.data.resources[]` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`）+ `data.db.module_dataset_manifests`，`custom_table` 落在受控实体表 `module_name_resource_id`，并由 `schema_version` / `schema_json` / `indexes_json` 描述真实列结构；业务数据统一通过 `db.get_record` / `db.list_records` / `db.replace_records` 访问 |
 | 事件型业务数据 | `data.db.module_audit_events`，统一通过 `db.append_event` / `db.query_events` 访问 |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
 | 当前实现说明 | `db.list_records` / `db.replace_records` 已按资源 `storage_mode` 路由；`custom_table` 现为 schema 驱动的受控实体表，不再写入统一 `record_json` 容器。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单；当前运行时代码仍不包含旧 `state.db.kv_store` 模块表数据自动迁移逻辑，旧数据需要显式迁移或人工导入 |

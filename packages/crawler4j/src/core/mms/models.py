@@ -14,6 +14,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from src.core.mms.data_contract import normalize_manifest_data
+
 
 class ModuleStatus(StrEnum):
     """模块状态。
@@ -226,6 +228,7 @@ class ModuleManifest:
     ui_extension: UIExtensionInfo = field(default_factory=UIExtensionInfo)
     config_defaults: ConfigDefaultsInfo = field(default_factory=ConfigDefaultsInfo)
     upgrade_source: UpgradeSourceInfo = field(default_factory=UpgradeSourceInfo)
+    data: dict[str, Any] = field(default_factory=lambda: normalize_manifest_data(None))
     
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典。"""
@@ -250,6 +253,7 @@ class ModuleManifest:
             "default_workflow": self.default_workflow,
             "ui_extension": self.ui_extension.to_dict(),
             "config_defaults": self.config_defaults.to_dict(),
+            "data": self.data,
         }
     
     @classmethod
@@ -268,6 +272,7 @@ class ModuleManifest:
         ui_extension = UIExtensionInfo.from_dict(data.get("ui_extension"))
         config_defaults = ConfigDefaultsInfo.from_dict(data.get("config_defaults"))
         upgrade_source = UpgradeSourceInfo.from_dict(data.get("upgrade_source"))
+        module_data = normalize_manifest_data(data.get("data"))
 
         return cls(
             name=data.get("name", ""),
@@ -281,6 +286,7 @@ class ModuleManifest:
             ui_extension=ui_extension,
             config_defaults=config_defaults,
             upgrade_source=upgrade_source,
+            data=module_data,
         )
 
 

@@ -9,6 +9,8 @@
 **关联 ID：** `API-005`, `API-008`, `API-009`, `CR-014`, `TASK-028`  
 **最后更新：** 2026-04-23
 
+> 注：本设计文档的“运行时声明视图”方案已被后续破坏性升级收口为 manifest 驱动实现。当前正式事实源以 `api-design.md` 和 `module-config-runtime-data-contract.md` 为准：表、视图、命名查询统一登记在 `module.yaml.data`，SQL 位于 `data/sql/*`，运行时只保留 `db.query_view` / `db.run_query`，不再接受 `db.declare_db_view`。
+
 ## 1. 背景
 
 `CR-012` 已把模块数据资源收口成两种正式模式：

@@ -158,9 +158,8 @@ def declare_ui(ctx):
 
 ### 5.3 Core 其它能力负责
 
-- `db.declare_data_resource`
-- `db.list_records` / `db.replace_records`
-- `db.declare_db_view` / `db.query_view`
+- `module.yaml.data.resources[]` + `db.get_record` / `db.list_records` / `db.replace_records`
+- `module.yaml.data.views[]` / `queries[]` + `db.query_view` / `db.run_query`
 - `db.append_event` / `db.query_events`
 
 这些能力负责数据事实源，但不拥有模块页面结构。

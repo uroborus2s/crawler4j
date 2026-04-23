@@ -92,6 +92,7 @@ class ModuleRegistry:
             self._merge_loaded_module(module_info)
 
         self._initialize_loaded_module_configs()
+        self._sync_loaded_module_data()
         
         self._loaded = True
         logger.info(f"[MMS] 注册表加载完成: {len(self._modules)} 个模块")
@@ -143,6 +144,24 @@ class ModuleRegistry:
                 defaults.module,
                 defaults.workflows,
             )
+
+    def _sync_loaded_module_data(self) -> None:
+        for module_info in self._modules.values():
+            if module_info.status not in {ModuleStatus.ENABLED, ModuleStatus.DISABLED}:
+                continue
+            if not module_info.path:
+                continue
+            try:
+                get_module_data_store().sync_manifest_data(
+                    module_info.name,
+                    Path(module_info.path),
+                    module_info.manifest.data,
+                )
+            except Exception as exc:
+                logger.error(f"[MMS] 模块数据契约同步失败 {module_info.name}: {exc}")
+                module_info.status = ModuleStatus.INVALID
+                module_info.error = str(exc)
+                module_info.hint = "请检查 module.yaml.data、data/sql 与 data/seeds 是否符合当前协议"
     
     def refresh(self) -> dict[str, list[str] | int]:
         """刷新注册表。
@@ -278,6 +297,10 @@ class ModuleRegistry:
             self._apply_persisted_module_status(module_info)
             self._modules[module_info.name] = module_info
             self._initialize_loaded_module_configs()
+            self._sync_loaded_module_data()
+            synced_module = self._modules.get(module_info.name)
+            if synced_module and synced_module.status == ModuleStatus.INVALID:
+                raise ModuleInstallError(synced_module.error or f"模块数据契约同步失败: {module_info.name}")
             logger.info(f"[MMS] 已安装: {module_info.name} v{module_info.manifest.version}")
 
             event_type = EventType.MODULE_UPGRADED if previous_module and previous_module.source == ModuleSource.EXTERNAL else EventType.MODULE_INSTALLED

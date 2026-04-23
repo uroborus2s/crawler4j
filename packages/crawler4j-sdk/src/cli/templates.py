@@ -93,6 +93,7 @@ MODEL_PROJECT_README = '''# {display_name}
 - `hooks/`: 生命周期 Hook，一个文件导出一个 `handle(...)`。
 - `env_selectors/`: 环境选择器，一个文件导出一个 `SELECTOR` 与 `select(ctx, candidates)`。
 - `pages/`: Hosted UI 页面，一个文件导出一个 `PAGE` 与页面处理函数。
+- `data/`: 数据契约附属资产，存放种子数据与已注册 SQL 文件。
 
 ## 常用命令
 
@@ -112,6 +113,12 @@ uv run crawler4j page create dashboard
 # 创建环境选择器
 uv run crawler4j env-selector create pick_ready
 
+# 创建数据资源 / 视图 / 查询 / 种子
+uv run crawler4j data resource create accounts
+uv run crawler4j data query create get_account_by_id --source accounts
+uv run crawler4j data view create account_stats --source accounts
+uv run crawler4j data seed create accounts_seed --resource accounts
+
 # 重建某个 Hook 骨架
 uv run crawler4j hook create on_cleanup --force
 
@@ -125,6 +132,7 @@ uv run crawler4j package build
 - 模块运行时只依赖 `crawler4j-contracts`。
 - `crawler4j-sdk` 只作为 CLI / 校验 / 开发辅助存在。
 - Core 会自行扫描目录生成运行时 descriptor，不会调用模块根 `run()` 或 `declare_ui()`。
+- 表、视图、命名查询统一注册在 `module.yaml.data`；模块代码不允许执行未注册 SQL。
 '''
 
 MODEL_TEST_TASK_TEMPLATE = '''"""测试任务脚本。"""
@@ -182,6 +190,11 @@ workflows:
     description: {workflow_description}
 ui_extension:
   pages: []
+data:
+  resources: []
+  views: []
+  queries: []
+  seeds: []
 '''
 
 MODEL_HOOKS_INIT_TEMPLATE = '"""模块生命周期 Hook 集合。"""\n'

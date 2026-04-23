@@ -25,11 +25,10 @@ from crawler4j_contracts.context import (
     ToolsCapability,
 )
 from crawler4j_contracts.hosted_ui import (
-    normalize_data_resource as sdk_normalize_data_resource,
-    normalize_db_view_schema as sdk_normalize_db_view_schema,
     normalize_page_schema as sdk_normalize_page_schema,
 )
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
+from src.core.mms.data_contract import load_sql_file, validate_resource_sql
 from src.core.persistence import get_kv_store, get_module_data_store
 from src.core.rem.ip_pool import IPEntry, get_ip_pool_manager
 from src.core.rem.manager import (
@@ -68,8 +67,10 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
     ),
     RUNTIME_SURFACE_HOSTED_UI_READONLY: frozenset(
         {
+            "db.get_record",
             "db.list_records",
             "db.query_events",
+            "db.run_query",
             "db.query_view",
             "ui.get_page",
         }
@@ -77,8 +78,6 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
 }
 DECLARE_UI_SIDE_EFFECT_DB_TOOLS = {
     "db.replace_records",
-    "db.declare_data_resource",
-    "db.declare_db_view",
     "db.append_event",
     "db.set_state",
     "db.acquire_lock",
@@ -167,79 +166,87 @@ class CoreDatabaseTools:
     def _lock_key(self, scope: str, key: str) -> str:
         return f"module:{self._module_name}:lock:{scope}:{key}"
 
-    def list_records(self, dataset: str) -> list[dict[str, Any]]:
-        return self._data_store.read_dataset(self._module_name, dataset)
+    def _resolve_resource_name(self, dataset: str | None = None, resource: str | None = None) -> str:
+        names = [str(item or "").strip() for item in (resource, dataset) if str(item or "").strip()]
+        if not names:
+            raise ValueError("必须提供 resource")
+        if len(set(names)) > 1:
+            raise ValueError("dataset/resource 不能指向不同资源")
+        return names[0]
 
-    def replace_records(self, dataset: str, records: list[dict[str, Any]]) -> bool:
-        return self._data_store.write_dataset(self._module_name, dataset, _normalize_records(records))
-
-    def declare_data_resource(
+    def list_records(
         self,
-        resource_id: str,
+        dataset: str | None = None,
         *,
-        storage_mode: str = "managed_dataset",
-        record_key_field: str | None = None,
-        schema: dict[str, Any] | None = None,
-        indexes: dict[str, Any] | None = None,
-        cleanup_policy: str | None = None,
-    ) -> dict[str, Any]:
-        meta = sdk_normalize_data_resource(
-            resource_id,
-            {
-                "storage_mode": storage_mode,
-                "record_key_field": record_key_field,
-                "schema": schema or {},
-                "indexes": indexes or {},
-                "cleanup_policy": cleanup_policy,
-            },
-        )
-        register_data_resource = getattr(self._data_store, "register_data_resource", None)
-        if not callable(register_data_resource):
-            raise RuntimeError("当前宿主不支持 db.declare_data_resource")
-        return register_data_resource(
+        resource: str | None = None,
+        filters: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        resource_name = self._resolve_resource_name(dataset, resource)
+        return self._data_store.list_records(
             self._module_name,
-            meta["resource_id"],
-            storage_mode=meta["storage_mode"],
-            record_key_field=meta["record_key_field"],
-            schema=meta["schema"],
-            indexes=meta["indexes"],
-            cleanup_policy=meta["cleanup_policy"],
+            resource_name,
+            filters=dict(filters or {}),
+            sort=list(sort or []),
+            limit=limit,
+            offset=offset,
         )
 
-    def declare_db_view(
+    def get_record(self, key: Any, dataset: str | None = None, *, resource: str | None = None) -> dict[str, Any] | None:
+        resource_name = self._resolve_resource_name(dataset, resource)
+        return self._data_store.get_record(self._module_name, resource_name, key)
+
+    def replace_records(
         self,
-        view_id: str,
+        dataset: str | None = None,
         *,
-        view_kind: str = "sql_view",
-        source_resource_ids: list[str],
-        select_sql_template: str,
-        columns: list[dict[str, Any]],
-        cleanup_policy: str | None = None,
-        schema_version: int | None = None,
-    ) -> dict[str, Any]:
-        meta = sdk_normalize_db_view_schema(
-            view_id,
-            {
-                "view_kind": view_kind,
-                "source_resource_ids": list(source_resource_ids or []),
-                "select_sql_template": select_sql_template,
-                "columns": list(columns or []),
-                "cleanup_policy": cleanup_policy,
-                "schema_version": schema_version,
-            },
+        resource: str | None = None,
+        records: list[dict[str, Any]],
+    ) -> bool:
+        resource_name = self._resolve_resource_name(dataset, resource)
+        return self._data_store.write_dataset(self._module_name, resource_name, _normalize_records(records))
+
+    def run_query(self, query_id: str, *, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        from src.core.mms.registry import get_module_registry
+
+        normalized_query_id = _validate_managed_identifier(str(query_id or "").strip(), field_name="query_id")
+        module = get_module_registry().get_module(self._module_name)
+        if module is None or module.path is None:
+            raise RuntimeError(f"未找到模块数据契约: {self._module_name}")
+
+        query_spec = next(
+            (item for item in module.manifest.data["queries"] if item["query_id"] == normalized_query_id),
+            None,
         )
-        declare_db_view = getattr(self._data_store, "declare_db_view", None)
-        if not callable(declare_db_view):
-            raise RuntimeError("当前宿主不支持 db.declare_db_view")
-        return declare_db_view(
+        if query_spec is None:
+            raise ValueError(f"未注册的 query_id: {normalized_query_id}")
+
+        sql = load_sql_file(module.path, query_spec["sql_file"], expected_prefix="data/sql/queries/")
+        validate_resource_sql(
+            sql,
+            source_resource_ids=query_spec["source_resource_ids"],
+            owner_label=f"data.queries[{normalized_query_id}]",
+        )
+        normalized_params = dict(params or {})
+        declared_params = {item["name"]: item for item in query_spec["params"]}
+        missing = sorted(
+            name
+            for name, spec in declared_params.items()
+            if spec["required"] and name not in normalized_params
+        )
+        if missing:
+            raise ValueError(f"query 参数缺失: {', '.join(missing)}")
+        extra = sorted(set(normalized_params) - set(declared_params))
+        if extra:
+            raise ValueError(f"query 参数未注册: {', '.join(extra)}")
+        return self._data_store.run_registered_query(
             self._module_name,
-            meta["view_id"],
-            view_kind=meta["view_kind"],
-            source_resource_ids=meta["source_resource_ids"],
-            select_sql_template=meta["select_sql_template"],
-            columns=meta["columns"],
-            cleanup_policy=meta["cleanup_policy"],
-            schema_version=meta["schema_version"],
+            source_resource_ids=query_spec["source_resource_ids"],
+            sql_template=sql,
+            columns=query_spec["columns"],
+            params=normalized_params,
         )
 
     def query_view(
@@ -782,9 +789,9 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         captcha_tools = CoreCaptchaTools()
 
         self._register("db.list_records", "读取模块数据集", db_tools.list_records)
+        self._register("db.get_record", "按主键读取单条模块记录", db_tools.get_record)
         self._register("db.replace_records", "全量覆盖模块数据集", db_tools.replace_records)
-        self._register("db.declare_data_resource", "声明模块数据资源", db_tools.declare_data_resource)
-        self._register("db.declare_db_view", "声明数据库统计视图", db_tools.declare_db_view)
+        self._register("db.run_query", "执行已注册命名 SQL 查询", db_tools.run_query)
         self._register("db.query_view", "查询数据库统计视图", db_tools.query_view)
         self._register("db.append_event", "追加模块审计事件", db_tools.append_event)
         self._register("db.query_events", "查询模块审计事件", db_tools.query_events)

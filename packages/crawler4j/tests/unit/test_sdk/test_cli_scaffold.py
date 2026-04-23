@@ -96,6 +96,9 @@ def test_module_init_creates_core_native_project(tmp_path: Path):
     assert (module_root / "hooks" / "on_cleanup.py").exists()
     assert (module_root / "env_selectors" / "return_none.py").exists()
     assert (module_root / "env_selectors" / "random_ready.py").exists()
+    assert (module_root / "data" / "sql" / "views").is_dir()
+    assert (module_root / "data" / "sql" / "queries").is_dir()
+    assert (module_root / "data" / "seeds").is_dir()
     assert not (module_root / "module_runtime.py").exists()
 
     manifest = _read_manifest(module_root)
@@ -110,6 +113,12 @@ def test_module_init_creates_core_native_project(tmp_path: Path):
         }
     ]
     assert manifest["ui_extension"] == {"pages": []}
+    assert manifest["data"] == {
+        "resources": [],
+        "views": [],
+        "queries": [],
+        "seeds": [],
+    }
 
     pyproject = _read_pyproject(module_root)
     assert pyproject["project"]["dependencies"] == [get_compatible_contracts_dependency_spec()]
@@ -280,6 +289,128 @@ def test_collect_full_errors_allow_manifest_name_to_differ_from_directory_name(t
     errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
 
     assert errors == []
+
+
+def test_build_parser_registers_data_commands():
+    parser = commands.build_parser()
+
+    resource_args = parser.parse_args(
+        ["data", "resource", "create", "accounts", "--storage-mode", "custom_table"]
+    )
+    query_args = parser.parse_args(
+        ["data", "query", "create", "get_account_by_id", "--source", "accounts"]
+    )
+    seed_args = parser.parse_args(
+        ["data", "seed", "create", "accounts_seed", "--resource", "accounts"]
+    )
+
+    assert resource_args.func is commands.cmd_data_resource_create
+    assert resource_args.storage_mode == "custom_table"
+    assert query_args.func is commands.cmd_data_query_create
+    assert query_args.source == ["accounts"]
+    assert seed_args.func is commands.cmd_data_seed_create
+    assert seed_args.resource == "accounts"
+
+
+def test_data_commands_scaffold_manifest_sql_and_seed_files(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+
+    assert commands.cmd_data_resource_create(
+        Namespace(
+            name="accounts",
+            storage_mode="custom_table",
+            record_key_field="account_id",
+        )
+    ) == 0
+    assert commands.cmd_data_view_create(
+        Namespace(
+            name="account_stats",
+            source=["accounts"],
+            force=False,
+        )
+    ) == 0
+    assert commands.cmd_data_query_create(
+        Namespace(
+            name="get_account_by_id",
+            source=["accounts"],
+            force=False,
+        )
+    ) == 0
+    assert commands.cmd_data_seed_create(
+        Namespace(
+            name="accounts_seed",
+            resource="accounts",
+            mode="replace_if_empty",
+            force=False,
+        )
+    ) == 0
+
+    manifest = _read_manifest(module_root)
+    assert manifest["data"]["resources"] == [
+        {
+            "id": "accounts",
+            "storage_mode": "custom_table",
+            "record_key_field": "account_id",
+            "indexes": {},
+            "cleanup_policy": "drop_table",
+            "schema": {
+                "version": 1,
+                "columns": [
+                    {"key": "account_id", "type": "text", "required": True},
+                ],
+            },
+        }
+    ]
+    assert manifest["data"]["views"] == [
+        {
+            "id": "account_stats",
+            "view_kind": "sql_view",
+            "source_resource_ids": ["accounts"],
+            "sql_file": "data/sql/views/account_stats.sql",
+            "columns": [
+                {
+                    "name": "account_id",
+                    "type": "text",
+                    "nullable": False,
+                    "filterable": True,
+                    "sortable": True,
+                }
+            ],
+            "cleanup_policy": "drop_view",
+            "schema_version": 1,
+        }
+    ]
+    assert manifest["data"]["queries"] == [
+        {
+            "id": "get_account_by_id",
+            "source_resource_ids": ["accounts"],
+            "sql_file": "data/sql/queries/get_account_by_id.sql",
+            "params": [{"name": "account_id", "type": "text", "required": True}],
+            "columns": [{"name": "account_id", "type": "text", "nullable": False}],
+        }
+    ]
+    assert manifest["data"]["seeds"] == [
+        {
+            "id": "accounts_seed",
+            "resource_id": "accounts",
+            "file": "data/seeds/accounts_seed.json",
+            "format": "json",
+            "mode": "replace_if_empty",
+        }
+    ]
+    assert (module_root / "data" / "sql" / "views" / "account_stats.sql").read_text(encoding="utf-8") == (
+        "SELECT account_id\nFROM {{resource:accounts}}\n"
+    )
+    assert (module_root / "data" / "sql" / "queries" / "get_account_by_id.sql").read_text(encoding="utf-8") == (
+        "SELECT account_id\n"
+        "FROM {{resource:accounts}}\n"
+        "WHERE account_id = :account_id\n"
+        "LIMIT 1\n"
+    )
+    assert (module_root / "data" / "seeds" / "accounts_seed.json").read_text(encoding="utf-8") == (
+        '[\n  {\n    "account_id": "sample-id"\n  }\n]\n'
+    )
 
 
 def test_archive_members_keep_generated_files_without_runtime_shim(tmp_path: Path):

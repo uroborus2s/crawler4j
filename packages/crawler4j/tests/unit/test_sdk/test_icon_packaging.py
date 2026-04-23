@@ -6,7 +6,8 @@ from PyQt6.QtGui import QImage
 
 
 APP_ROOT = Path(__file__).resolve().parents[3]
-EXPECTED_CENTERLINE_INSETS = (79, 80, 79, 80)
+EXPECTED_PLATE_INSETS = (97, 96, 97, 96)
+EXPECTED_BLUE_BADGE_BBOX = (284, 258, 741, 715)
 
 
 def test_pyinstaller_spec_binds_runtime_and_bundle_icon_assets():
@@ -32,7 +33,7 @@ def test_shared_app_icon_assets_exist_and_legacy_jpg_is_removed():
     assert not (assets_root / "icon.jpg").exists()
 
 
-def test_runtime_app_icon_uses_transparent_outer_corners():
+def test_runtime_app_icon_uses_transparent_outer_corners_and_locked_plate_insets():
     image = QImage(str(APP_ROOT / "src" / "ui" / "assets" / "app_icon.png"))
 
     assert not image.isNull()
@@ -60,12 +61,32 @@ def test_runtime_app_icon_uses_transparent_outer_corners():
     height = image.height()
     center_x = width // 2
     center_y = height // 2
-    left_inset = next(x for x in range(width) if image.pixelColor(x, center_y).alpha() > 0)
-    right_inset = next(x for x in range(width) if image.pixelColor((width - 1) - x, center_y).alpha() > 0)
-    top_inset = next(y for y in range(height) if image.pixelColor(center_x, y).alpha() > 0)
-    bottom_inset = next(y for y in range(height) if image.pixelColor(center_x, (height - 1) - y).alpha() > 0)
-    # 图标尺寸只按中轴线安全区锁定，避免再被 bbox / 抗锯齿口径误导。
-    assert (left_inset, right_inset, top_inset, bottom_inset) == EXPECTED_CENTERLINE_INSETS
+    left_inset = next(x for x in range(width) if image.pixelColor(x, center_y).alpha() > 220)
+    right_inset = next(x for x in range(width) if image.pixelColor((width - 1) - x, center_y).alpha() > 220)
+    top_inset = next(y for y in range(height) if image.pixelColor(center_x, y).alpha() > 220)
+    bottom_inset = next(y for y in range(height) if image.pixelColor(center_x, (height - 1) - y).alpha() > 220)
+    assert (left_inset, right_inset, top_inset, bottom_inset) == EXPECTED_PLATE_INSETS
+
+
+def test_runtime_app_icon_locks_blue_badge_bbox_to_prevent_optical_regression():
+    image = QImage(str(APP_ROOT / "src" / "ui" / "assets" / "app_icon.png"))
+
+    assert not image.isNull()
+    coords: list[tuple[int, int]] = []
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = image.pixelColor(x, y)
+            if (
+                color.alpha() > 200
+                and color.blue() > 180
+                and color.green() > 120
+                and color.red() < 130
+            ):
+                coords.append((x, y))
+
+    xs = [x for x, _ in coords]
+    ys = [y for _, y in coords]
+    assert (min(xs), min(ys), max(xs) + 1, max(ys) + 1) == EXPECTED_BLUE_BADGE_BBOX
 
 
 def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge_and_center_mark():
@@ -80,5 +101,5 @@ def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge_and_c
     badge = image.pixelColor(image.width() // 2, 340)
     assert badge.blue() > badge.green() > badge.red()
 
-    center_mark = image.pixelColor(620, 520)
+    center_mark = image.pixelColor(560, 520)
     assert center_mark.lightness() > 245

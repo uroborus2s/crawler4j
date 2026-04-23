@@ -24,19 +24,20 @@
 
 | 类别 | 事实源 | 模块读取方式 | 模块写入方式 | 说明 |
 |---|---|---|---|---|
-| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、工作流、页面导航，以及一次性初始化模板 `config_defaults` |
+| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、工作流、页面导航，以及一次性初始化模板 `config_defaults` 和 `data` 数据契约 |
 | 持久配置 | `config.db.module_config_entries` | `ctx.get_config()` / `ctx.config` | 禁止 | 宿主统一维护；模块运行时只读 |
 | 运行态元数据 | `ctx.runtime` | `ctx.runtime[...]` | 禁止 | 由 ATM / Debug / Core 注入 |
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
 | 页面 schema | `declare_ui()` 本轮声明缓存（宿主桥接内存） | `ctx.tools.call("ui.get_page")` | `ctx.tools.call("ui.declare_page")` | 宿主管理页面 schema；模块只声明页面，不再声明独立数据表页；正式 Hosted UI 刷新链路不再依赖 `data.db.module_pages` |
-| 快照数据 | `data.db.module_data_resources` + `data.db.module_datasets` / 模块自定义物理表 | `ctx.tools.call("db.list_records")` | `ctx.tools.call("db.declare_data_resource")` / `ctx.tools.call("db.replace_records")` | `managed_dataset` 适合低频稳定数据，`custom_table` 适合高频计算或明细表 |
-| 数据库视图 | `data.db.module_db_views` | `ctx.tools.call("db.query_view")` | `ctx.tools.call("db.declare_db_view")` | 基于当前模块 `custom_table` 的受控 `SELECT` 统计视图 |
+| 快照数据 | `module.yaml.data.resources[]` + `data.db.module_data_resources` + `data.db.module_datasets` / 模块自定义物理表 | `ctx.tools.call("db.get_record")` / `ctx.tools.call("db.list_records")` | `ctx.tools.call("db.replace_records")` | `managed_dataset` 适合低频稳定数据，`custom_table` 适合高频计算或明细表 |
+| 数据库视图 | `module.yaml.data.views[]` + `data.db.module_db_views` | `ctx.tools.call("db.query_view")` | 禁止 | 基于当前模块 `custom_table` 的受控 `SELECT` 统计视图 |
+| 命名查询 | `module.yaml.data.queries[]` | `ctx.tools.call("db.run_query")` | 禁止 | 受控 SQL 查询，只能执行已注册 `query_id` |
 | 审计事件历史 | `data.db.module_audit_events` | `ctx.tools.call("db.query_events")` | `ctx.tools.call("db.append_event")` | append-only 业务历史、操作轨迹、时间线查询 |
 | 短期状态与锁 | `state.db.kv_store` | `ctx.tools.call("db.get_state")` 等 | `ctx.tools.call("db.set_state")` 等 | 游标、进度、会话、小体量状态、幂等锁 |
 
 ## 3. 配置契约
 
-- `module.yaml` 是唯一模块清单，可额外声明只读默认模板 `config_defaults`，但不是可变配置存储。
+- `module.yaml` 是唯一模块清单，可额外声明只读默认模板 `config_defaults` 与 `data` 数据契约，但不是可变配置存储。
 - 模块可变配置统一持久化到 `config.db.module_config_entries`。
 - 模块运行时代码只能通过 `ctx.get_config()` 或 `ctx.config` 读取配置。
 - 模块不得自行读取宿主配置数据库。
@@ -85,7 +86,9 @@
 
 模块可以在这些函数中调用：
 
+- `db.get_record`
 - `db.list_records`
+- `db.run_query`
 - `db.query_view`
 - `db.query_events`
 - 其它宿主能力
@@ -112,20 +115,21 @@
 
 ### 6.1 快照数据位置
 
-- `db.declare_data_resource` 会把模块数据资源登记到 `data.db.module_data_resources`
-- `managed_dataset` 模式下，`db.list_records` / `db.replace_records` 读写的快照记录持久化到 `data.db.module_datasets`
-- `custom_table` 模式下，宿主会创建受控物理表 `module_name_resource_id`
-- `db.declare_db_view` 会把数据库视图登记到 `data.db.module_db_views`
-- `db view` 的正式 V1 契约只支持 `view_kind="sql_view"`，`cleanup_policy` 只支持 `drop_view` / `keep`
+- `module.yaml.data.resources[]` 是表资源的唯一声明入口
+- `managed_dataset` 模式下，`db.get_record` / `db.list_records` / `db.replace_records` 读写的快照记录持久化到 `data.db.module_datasets`
+- `custom_table` 模式下，宿主会在模块加载/安装时创建受控物理表 `module_name_resource_id`
+- `module.yaml.data.views[]` 会同步到 `data.db.module_db_views`
+- `module.yaml.data.queries[]` 会在宿主加载时完成校验，运行时只能通过 `db.run_query(query_id=..., params=...)` 调用
 - `db.append_event` / `db.query_events` 读写的审计事件持久化到 `data.db.module_audit_events`
 
 ### 6.2 数据分工
 
 | 你要保留什么 | 正式入口 | 语义 |
 |---|---|---|
-| 低频稳定记录、账号表、开关清单 | `db.declare_data_resource(storage_mode="managed_dataset")` + `db.list_records` / `db.replace_records` | 当前快照，可整包覆盖 |
-| 高频计算明细、运行审计、计费明细 | `db.declare_data_resource(storage_mode="custom_table")` + `db.list_records` / `db.replace_records` | schema 驱动的受控实体表 |
-| 基于实体表的统计汇总、条件筛选、排序分页 | `db.declare_db_view` + `db.query_view` | 只读统计查询 |
+| 低频稳定记录、账号表、开关清单 | `module.yaml.data.resources[]`(`managed_dataset`) + `db.get_record` / `db.list_records` / `db.replace_records` | 当前快照，可整包覆盖 |
+| 高频计算明细、运行审计、计费明细 | `module.yaml.data.resources[]`(`custom_table`) + `db.get_record` / `db.list_records` / `db.replace_records` | schema 驱动的受控实体表 |
+| 基于实体表的统计汇总、条件筛选、排序分页 | `module.yaml.data.views[]` + `db.query_view` | 只读统计查询 |
+| 复杂筛选、联表、聚合 SQL | `module.yaml.data.queries[]` + `db.run_query` | 只允许执行已注册命名查询 |
 | 只追加的历史记录、状态迁移、操作痕迹 | `db.append_event` / `db.query_events` | append-only 历史，不回写快照 |
 
 ### 6.3 明确删除的旧边界
@@ -159,6 +163,7 @@
 
 - 在模块运行时代码中写配置
 - 直接连接 `config.db`、`data.db`、`state.db`
+- 在模块代码里执行未注册 SQL
 - 把 `workflow`、`devel_mode`、`creation_params` 写进 `ctx.config`
 - 把大批量业务数据写进 `ctx.state` 或 `db.set_state`
 - 把审计事件历史混进快照数据

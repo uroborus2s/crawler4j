@@ -8,10 +8,16 @@
     - 校验：命名、唯一性、受控字段约束
 """
 
+import json
 from pathlib import Path
 import re
 import yaml
 
+from src.core.mms.data_contract import (
+    load_sql_file,
+    validate_resource_sql,
+    validate_seed_file,
+)
 from src.core.foundation.logging import logger
 from src.core.mms.models import (
     ModuleInfo,
@@ -132,6 +138,13 @@ class ModuleScanner:
                     hint="模块必须与当前宿主一起升级，请删除这些兼容范围声明后再继续"
                 )
 
+            if "data" not in data:
+                raise ModuleParseError(
+                    "module.yaml 缺少 data",
+                    stage="PARSE",
+                    hint="请按新协议在 module.yaml 中声明 data.resources / data.views / data.queries / data.seeds",
+                )
+
             return ModuleManifest.from_dict(data)
         except ValueError as e:
             raise ModuleParseError(
@@ -226,6 +239,7 @@ class ModuleScanner:
         self._validate_upgrade_source(manifest)
         self._validate_config_defaults(manifest)
         self._validate_ui_extension(manifest)
+        self._validate_data_contract(manifest, module_path)
 
         return warnings
 
@@ -294,6 +308,66 @@ class ModuleScanner:
                     stage="VALIDATE",
                     hint="模块详情页导航标签必须显式声明",
                 )
+
+    def _validate_data_contract(self, manifest: ModuleManifest, module_path: Path) -> None:
+        module_data = manifest.data
+        resources = {item["resource_id"]: item for item in module_data["resources"]}
+
+        for view in module_data["views"]:
+            for resource_id in view["source_resource_ids"]:
+                resource = resources[resource_id]
+                if resource["storage_mode"] != "custom_table":
+                    raise ModuleValidationError(
+                        f"data.views[{view['view_id']}] 只允许引用 custom_table 资源: {resource_id}",
+                        stage="VALIDATE",
+                        hint="视图 SQL 只能建立在模块自建表之上；托管快照表请走 db.get_record/db.list_records",
+                    )
+            try:
+                sql = load_sql_file(module_path, view["sql_file"], expected_prefix="data/sql/views/")
+                validate_resource_sql(
+                    sql,
+                    source_resource_ids=view["source_resource_ids"],
+                    owner_label=f"data.views[{view['view_id']}]",
+                )
+            except ValueError as exc:
+                raise ModuleValidationError(
+                    str(exc),
+                    stage="VALIDATE",
+                    hint="请检查视图 SQL 文件路径、占位符和 SELECT 语句边界是否符合新协议",
+                ) from exc
+
+        for query in module_data["queries"]:
+            for resource_id in query["source_resource_ids"]:
+                resource = resources[resource_id]
+                if resource["storage_mode"] != "custom_table":
+                    raise ModuleValidationError(
+                        f"data.queries[{query['query_id']}] 只允许引用 custom_table 资源: {resource_id}",
+                        stage="VALIDATE",
+                        hint="命名 SQL 查询只能建立在模块自建表之上；按主键/条件查托管快照请走标准记录接口",
+                    )
+            try:
+                sql = load_sql_file(module_path, query["sql_file"], expected_prefix="data/sql/queries/")
+                validate_resource_sql(
+                    sql,
+                    source_resource_ids=query["source_resource_ids"],
+                    owner_label=f"data.queries[{query['query_id']}]",
+                )
+            except ValueError as exc:
+                raise ModuleValidationError(
+                    str(exc),
+                    stage="VALIDATE",
+                    hint="请检查命名查询 SQL 文件路径、占位符和 SELECT 语句边界是否符合新协议",
+                ) from exc
+
+        for seed in module_data["seeds"]:
+            try:
+                validate_seed_file(module_path, seed["file"])
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:  # pragma: no cover
+                raise ModuleValidationError(
+                    str(exc),
+                    stage="VALIDATE",
+                    hint="请检查种子文件路径和 JSON 对象数组格式是否符合新协议",
+                ) from exc
 
     def load_module(
         self,

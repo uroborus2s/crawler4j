@@ -281,6 +281,230 @@ def _normalize_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return pages
 
 
+def _normalize_data_section(manifest: dict[str, Any]) -> dict[str, Any]:
+    data = manifest.setdefault("data", {})
+    if not isinstance(data, dict):
+        raise CLIError("module.yaml.data 必须是映射对象")
+    for section in ("resources", "views", "queries", "seeds"):
+        value = data.setdefault(section, [])
+        if not isinstance(value, list):
+            raise CLIError(f"module.yaml.data.{section} 必须是数组")
+    return data
+
+
+def _manifest_data_entries(manifest: dict[str, Any], section: str) -> list[dict[str, Any]]:
+    data = _normalize_data_section(manifest)
+    entries = data[section]
+    assert isinstance(entries, list)
+    return entries
+
+
+def _manifest_resource_entry(manifest: dict[str, Any], resource_id: str) -> dict[str, Any] | None:
+    normalized_resource_id = str(resource_id or "").strip()
+    for item in _manifest_data_entries(manifest, "resources"):
+        if isinstance(item, dict) and str(item.get("id", "") or "").strip() == normalized_resource_id:
+            return item
+    return None
+
+
+def _append_unique_data_entry(manifest: dict[str, Any], section: str, entry_id: str, payload: dict[str, Any]) -> None:
+    entries = _manifest_data_entries(manifest, section)
+    normalized_entry_id = str(entry_id or "").strip()
+    for item in entries:
+        if isinstance(item, dict) and str(item.get("id", "") or "").strip() == normalized_entry_id:
+            raise CLIError(f"module.yaml.data.{section} 已存在同名条目: {normalized_entry_id}")
+    entries.append(payload)
+
+
+def _validate_sql_file(module_root: Path, relative_path: str, *, expected_prefix: str) -> str | None:
+    normalized = str(relative_path or "").strip()
+    if not normalized:
+        return "SQL 文件路径不能为空"
+    if not normalized.startswith(expected_prefix):
+        return f"SQL 文件必须位于 {expected_prefix}"
+    target = (module_root / normalized).resolve()
+    if not str(target).startswith(str(module_root.resolve())):
+        return f"SQL 文件路径越界: {relative_path}"
+    if not target.is_file():
+        return f"找不到 SQL 文件: {relative_path}"
+    sql = target.read_text(encoding="utf-8").strip()
+    if not sql:
+        return f"SQL 文件为空: {relative_path}"
+    if ";" in sql:
+        return f"SQL 文件必须只包含单条语句: {relative_path}"
+    if re.search(r"\b(insert|update|delete|drop|alter|attach|detach|pragma|create|replace)\b", sql, re.IGNORECASE):
+        return f"SQL 文件包含被禁止的关键字: {relative_path}"
+    if not re.match(r"^\s*(with\b|select\b)", sql, flags=re.IGNORECASE):
+        return f"SQL 文件必须以 SELECT / WITH 开头: {relative_path}"
+    return None
+
+
+def _validate_sql_placeholders(sql: str, source_resource_ids: list[str], *, owner_label: str) -> str | None:
+    placeholder_re = re.compile(r"\{\{resource:([a-z][a-z0-9_]*)\}\}")
+    sql_ref_re = re.compile(r"\b(?:from|join)\s+([^\s,()]+)", re.IGNORECASE)
+    placeholders = placeholder_re.findall(sql)
+    if not placeholders:
+        return f"{owner_label} 必须至少引用一个 {{resource:<id>}} 占位符"
+    for token in sql_ref_re.findall(sql):
+        if not placeholder_re.fullmatch(token):
+            return f"{owner_label} 的 FROM/JOIN 只允许引用 {{resource:<id>}} 占位符"
+    if set(placeholders) != set(source_resource_ids):
+        return f"{owner_label} 的 SQL 占位符必须与 source_resource_ids 完全一致"
+    return None
+
+
+def _collect_data_contract_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
+    data = manifest.get("data")
+    if not isinstance(data, dict):
+        return ["module.yaml 缺少 data"]
+
+    errors: list[str] = []
+    resources = data.get("resources")
+    views = data.get("views")
+    queries = data.get("queries")
+    seeds = data.get("seeds")
+    if not isinstance(resources, list):
+        errors.append("module.yaml.data.resources 必须是数组")
+        resources = []
+    if not isinstance(views, list):
+        errors.append("module.yaml.data.views 必须是数组")
+        views = []
+    if not isinstance(queries, list):
+        errors.append("module.yaml.data.queries 必须是数组")
+        queries = []
+    if not isinstance(seeds, list):
+        errors.append("module.yaml.data.seeds 必须是数组")
+        seeds = []
+
+    resource_map: dict[str, dict[str, Any]] = {}
+    for item in resources:
+        if not isinstance(item, dict):
+            errors.append("data.resources 中的每一项都必须是对象")
+            continue
+        resource_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(resource_id):
+            errors.append(f"无效的 data.resources[].id: {resource_id or '<empty>'}")
+            continue
+        if resource_id in resource_map:
+            errors.append(f"data.resources[].id 重复: {resource_id}")
+            continue
+        resource_map[resource_id] = item
+        storage_mode = str(item.get("storage_mode", "managed_dataset") or "managed_dataset").strip().lower()
+        if storage_mode not in {"managed_dataset", "custom_table"}:
+            errors.append(f"data.resources[{resource_id}].storage_mode 不支持: {storage_mode}")
+        if storage_mode == "custom_table":
+            schema = item.get("schema")
+            columns = schema.get("columns") if isinstance(schema, dict) else None
+            if not isinstance(columns, list) or not columns:
+                errors.append(f"data.resources[{resource_id}].schema.columns 不能为空")
+
+    for item in views:
+        if not isinstance(item, dict):
+            errors.append("data.views 中的每一项都必须是对象")
+            continue
+        view_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(view_id):
+            errors.append(f"无效的 data.views[].id: {view_id or '<empty>'}")
+            continue
+        source_resource_ids = [
+            str(raw or "").strip()
+            for raw in (item.get("source_resource_ids") or [])
+            if str(raw or "").strip()
+        ]
+        if not source_resource_ids:
+            errors.append(f"data.views[{view_id}].source_resource_ids 不能为空")
+            continue
+        for resource_id in source_resource_ids:
+            resource = resource_map.get(resource_id)
+            if not resource:
+                errors.append(f"data.views[{view_id}] 引用了未声明资源: {resource_id}")
+                continue
+            if str(resource.get("storage_mode", "managed_dataset")).strip().lower() != "custom_table":
+                errors.append(f"data.views[{view_id}] 只允许引用 custom_table 资源: {resource_id}")
+        sql_file = str(item.get("sql_file", "") or "").strip()
+        error = _validate_sql_file(module_root, sql_file, expected_prefix="data/sql/views/")
+        if error:
+            errors.append(error)
+        else:
+            sql = (module_root / sql_file).read_text(encoding="utf-8").strip()
+            placeholder_error = _validate_sql_placeholders(
+                sql,
+                source_resource_ids,
+                owner_label=f"data.views[{view_id}]",
+            )
+            if placeholder_error:
+                errors.append(placeholder_error)
+
+    for item in queries:
+        if not isinstance(item, dict):
+            errors.append("data.queries 中的每一项都必须是对象")
+            continue
+        query_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(query_id):
+            errors.append(f"无效的 data.queries[].id: {query_id or '<empty>'}")
+            continue
+        source_resource_ids = [
+            str(raw or "").strip()
+            for raw in (item.get("source_resource_ids") or [])
+            if str(raw or "").strip()
+        ]
+        if not source_resource_ids:
+            errors.append(f"data.queries[{query_id}].source_resource_ids 不能为空")
+            continue
+        for resource_id in source_resource_ids:
+            resource = resource_map.get(resource_id)
+            if not resource:
+                errors.append(f"data.queries[{query_id}] 引用了未声明资源: {resource_id}")
+                continue
+            if str(resource.get("storage_mode", "managed_dataset")).strip().lower() != "custom_table":
+                errors.append(f"data.queries[{query_id}] 只允许引用 custom_table 资源: {resource_id}")
+        sql_file = str(item.get("sql_file", "") or "").strip()
+        error = _validate_sql_file(module_root, sql_file, expected_prefix="data/sql/queries/")
+        if error:
+            errors.append(error)
+        else:
+            sql = (module_root / sql_file).read_text(encoding="utf-8").strip()
+            placeholder_error = _validate_sql_placeholders(
+                sql,
+                source_resource_ids,
+                owner_label=f"data.queries[{query_id}]",
+            )
+            if placeholder_error:
+                errors.append(placeholder_error)
+
+    for item in seeds:
+        if not isinstance(item, dict):
+            errors.append("data.seeds 中的每一项都必须是对象")
+            continue
+        seed_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(seed_id):
+            errors.append(f"无效的 data.seeds[].id: {seed_id or '<empty>'}")
+            continue
+        resource_id = str(item.get("resource_id", "") or "").strip()
+        if resource_id not in resource_map:
+            errors.append(f"data.seeds[{seed_id}] 引用了未声明资源: {resource_id or '<empty>'}")
+        seed_file = str(item.get("file", "") or "").strip()
+        if not seed_file.startswith("data/seeds/"):
+            errors.append(f"data.seeds[{seed_id}].file 必须位于 data/seeds/")
+            continue
+        target = (module_root / seed_file).resolve()
+        if not str(target).startswith(str(module_root.resolve())):
+            errors.append(f"data.seeds[{seed_id}].file 路径越界: {seed_file}")
+            continue
+        if not target.is_file():
+            errors.append(f"找不到种子文件: {seed_file}")
+            continue
+        try:
+            payload = json.loads(target.read_text(encoding='utf-8'))
+        except json.JSONDecodeError:
+            errors.append(f"种子文件不是合法 JSON: {seed_file}")
+            continue
+        if not isinstance(payload, list) or any(not isinstance(row, dict) for row in payload):
+            errors.append(f"种子文件必须是对象数组 JSON: {seed_file}")
+
+    return errors
+
+
 def _manifest_ui_extension(manifest: dict[str, Any]) -> dict[str, Any] | None:
     ui_extension = manifest.get("ui_extension")
     if ui_extension is None:
@@ -751,6 +975,7 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
         errors.append(f"workflows/{extra}.py 未写入 module.yaml.workflows")
 
     errors.extend(_validate_ui_extension(manifest))
+    errors.extend(_collect_data_contract_errors(module_root, manifest))
     errors.extend(_collect_legacy_hosted_ui_errors(module_root))
     return errors
 
@@ -934,6 +1159,234 @@ def _validate_runtime_handler(
     return None
 
 
+def cmd_data_list(args: argparse.Namespace) -> int:
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    data = _normalize_data_section(manifest)
+    for section in ("resources", "views", "queries", "seeds"):
+        entries = data[section]
+        labels = ", ".join(str(item.get("id", "")) for item in entries if isinstance(item, dict) and item.get("id"))
+        print(f"{section}: {labels or '(无)'}")
+    return 0
+
+
+def cmd_data_resource_create(args: argparse.Namespace) -> int:
+    module_root = require_module_root()
+    resource_id = str(args.name or "").strip()
+    if not is_valid_name(resource_id):
+        _print_error("资源名必须是小写 snake_case")
+        return 1
+    storage_mode = str(args.storage_mode or "managed_dataset").strip().lower()
+    if storage_mode not in {"managed_dataset", "custom_table"}:
+        _print_error("storage_mode 只支持 managed_dataset/custom_table")
+        return 1
+    record_key_field = str(args.record_key_field or "id").strip()
+    if not is_valid_name(record_key_field):
+        _print_error("record_key_field 必须是小写 snake_case")
+        return 1
+
+    manifest = load_manifest(module_root)
+    try:
+        payload: dict[str, Any] = {
+            "id": resource_id,
+            "storage_mode": storage_mode,
+            "record_key_field": record_key_field,
+            "indexes": {},
+            "cleanup_policy": "drop_table" if storage_mode == "custom_table" else "delete_rows",
+        }
+        if storage_mode == "custom_table":
+            payload["schema"] = {
+                "version": 1,
+                "columns": [
+                    {"key": record_key_field, "type": "text", "required": True},
+                ],
+            }
+        else:
+            payload["schema"] = {}
+        _append_unique_data_entry(manifest, "resources", resource_id, payload)
+        save_manifest(module_root, manifest)
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已登记数据资源: {resource_id}")
+    return 0
+
+
+def cmd_data_view_create(args: argparse.Namespace) -> int:
+    module_root = require_module_root()
+    view_id = str(args.name or "").strip()
+    if not is_valid_name(view_id):
+        _print_error("视图名必须是小写 snake_case")
+        return 1
+    source_ids = [str(item or "").strip() for item in list(args.source or []) if str(item or "").strip()]
+    if not source_ids or any(not is_valid_name(item) for item in source_ids):
+        _print_error("--source 至少提供一个已注册资源 ID，且必须是小写 snake_case")
+        return 1
+
+    manifest = load_manifest(module_root)
+    first_resource = _manifest_resource_entry(manifest, source_ids[0])
+    if first_resource is None:
+        _print_error(f"未找到资源: {source_ids[0]}")
+        return 1
+    if str(first_resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
+        _print_error(f"视图只能建立在 custom_table 资源上: {source_ids[0]}")
+        return 1
+    for resource_id in source_ids[1:]:
+        resource = _manifest_resource_entry(manifest, resource_id)
+        if resource is None:
+            _print_error(f"未找到资源: {resource_id}")
+            return 1
+        if str(resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
+            _print_error(f"视图只能建立在 custom_table 资源上: {resource_id}")
+            return 1
+
+    record_key_field = str(first_resource.get("record_key_field") or "id").strip() or "id"
+    sql_path = f"data/sql/views/{view_id}.sql"
+    sql_template = f"SELECT {record_key_field}\nFROM {{{{resource:{source_ids[0]}}}}}\n"
+
+    try:
+        _write_text(module_root / sql_path, sql_template, force=args.force)
+        _append_unique_data_entry(
+            manifest,
+            "views",
+            view_id,
+            {
+                "id": view_id,
+                "view_kind": "sql_view",
+                "source_resource_ids": source_ids,
+                "sql_file": sql_path,
+                "columns": [
+                    {
+                        "name": record_key_field,
+                        "type": "text",
+                        "nullable": False,
+                        "filterable": True,
+                        "sortable": True,
+                    }
+                ],
+                "cleanup_policy": "drop_view",
+                "schema_version": 1,
+            },
+        )
+        save_manifest(module_root, manifest)
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已创建视图骨架: {view_id}")
+    return 0
+
+
+def cmd_data_query_create(args: argparse.Namespace) -> int:
+    module_root = require_module_root()
+    query_id = str(args.name or "").strip()
+    if not is_valid_name(query_id):
+        _print_error("查询名必须是小写 snake_case")
+        return 1
+    source_ids = [str(item or "").strip() for item in list(args.source or []) if str(item or "").strip()]
+    if not source_ids or any(not is_valid_name(item) for item in source_ids):
+        _print_error("--source 至少提供一个已注册资源 ID，且必须是小写 snake_case")
+        return 1
+
+    manifest = load_manifest(module_root)
+    first_resource = _manifest_resource_entry(manifest, source_ids[0])
+    if first_resource is None:
+        _print_error(f"未找到资源: {source_ids[0]}")
+        return 1
+    if str(first_resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
+        _print_error(f"命名查询只能建立在 custom_table 资源上: {source_ids[0]}")
+        return 1
+    for resource_id in source_ids[1:]:
+        resource = _manifest_resource_entry(manifest, resource_id)
+        if resource is None:
+            _print_error(f"未找到资源: {resource_id}")
+            return 1
+        if str(resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
+            _print_error(f"命名查询只能建立在 custom_table 资源上: {resource_id}")
+            return 1
+
+    record_key_field = str(first_resource.get("record_key_field") or "id").strip() or "id"
+    sql_path = f"data/sql/queries/{query_id}.sql"
+    sql_template = (
+        f"SELECT {record_key_field}\n"
+        f"FROM {{{{resource:{source_ids[0]}}}}}\n"
+        f"WHERE {record_key_field} = :{record_key_field}\n"
+        "LIMIT 1\n"
+    )
+    try:
+        _write_text(module_root / sql_path, sql_template, force=args.force)
+        _append_unique_data_entry(
+            manifest,
+            "queries",
+            query_id,
+            {
+                "id": query_id,
+                "source_resource_ids": source_ids,
+                "sql_file": sql_path,
+                "params": [
+                    {"name": record_key_field, "type": "text", "required": True},
+                ],
+                "columns": [
+                    {"name": record_key_field, "type": "text", "nullable": False},
+                ],
+            },
+        )
+        save_manifest(module_root, manifest)
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已创建命名查询骨架: {query_id}")
+    return 0
+
+
+def cmd_data_seed_create(args: argparse.Namespace) -> int:
+    module_root = require_module_root()
+    seed_id = str(args.name or "").strip()
+    if not is_valid_name(seed_id):
+        _print_error("种子名必须是小写 snake_case")
+        return 1
+    resource_id = str(args.resource or "").strip()
+    if not is_valid_name(resource_id):
+        _print_error("--resource 必须是已注册资源 ID")
+        return 1
+
+    manifest = load_manifest(module_root)
+    resource = _manifest_resource_entry(manifest, resource_id)
+    if resource is None:
+        _print_error(f"未找到资源: {resource_id}")
+        return 1
+
+    seed_path = f"data/seeds/{seed_id}.json"
+    payload = []
+    if str(resource.get("storage_mode") or "").strip().lower() == "custom_table":
+        payload = [{str(resource.get("record_key_field") or "id"): "sample-id"}]
+
+    try:
+        _write_text(module_root / seed_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n", force=args.force)
+        _append_unique_data_entry(
+            manifest,
+            "seeds",
+            seed_id,
+            {
+                "id": seed_id,
+                "resource_id": resource_id,
+                "file": seed_path,
+                "format": "json",
+                "mode": str(args.mode or "replace_if_empty").strip().lower(),
+            },
+        )
+        save_manifest(module_root, manifest)
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已创建种子骨架: {seed_id}")
+    return 0
+
+
 def _run_check(level: str, module_root: Path) -> int:
     manifest = load_manifest(module_root)
     if level == "structure":
@@ -1097,7 +1550,19 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     sdk_dependency_spec = get_compatible_sdk_dependency_spec()
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    for subdir in ["tasks", "workflows", "pages", "hooks", "env_selectors", "tests"]:
+    for subdir in [
+        "tasks",
+        "workflows",
+        "pages",
+        "hooks",
+        "env_selectors",
+        "tests",
+        "data",
+        "data/sql",
+        "data/sql/views",
+        "data/sql/queries",
+        "data/seeds",
+    ]:
         (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     try:
@@ -1220,6 +1685,8 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     print("  - 新建页面: `crawler4j page create <page_id>`")
     print("  - 新建 Hook: `crawler4j hook create <hook_name>`")
     print("  - 新建选择器: `crawler4j env-selector create <name>`")
+    print("  - 新建数据资源: `crawler4j data resource create <name>`")
+    print("  - 新建命名查询: `crawler4j data query create <name> --source <resource>`")
     print("  - 完整校验: `crawler4j check full`")
     return 0
 
@@ -1248,6 +1715,11 @@ def cmd_module_show(args: argparse.Namespace) -> int:
             or "(无)"
         )
     )
+    data = manifest.get("data") if isinstance(manifest.get("data"), dict) else {}
+    for section in ("resources", "views", "queries", "seeds"):
+        items = data.get(section)
+        count = len(items) if isinstance(items, list) else 0
+        print(f"数据 {section}: {count}")
     return 0
 
 
@@ -2109,6 +2581,98 @@ def build_parser() -> argparse.ArgumentParser:
         help="显示当前模块的版本、仓库、默认工作流和宿主页入口",
     )
     module_show.set_defaults(func=cmd_module_show)
+
+    data_parser = subparsers.add_parser(
+        "data",
+        help="数据契约操作：维护 module.yaml.data 以及 data/sql、data/seeds 脚手架",
+    )
+    data_sub = data_parser.add_subparsers(dest="action")
+
+    data_list = data_sub.add_parser(
+        "list",
+        help="列出当前模块已声明的数据资源、视图、命名查询和种子",
+    )
+    data_list.set_defaults(func=cmd_data_list)
+
+    data_resource = data_sub.add_parser(
+        "resource",
+        help="创建并登记 module.yaml.data.resources 条目",
+    )
+    data_resource_sub = data_resource.add_subparsers(dest="subaction")
+    data_resource_create = data_resource_sub.add_parser(
+        "create",
+        help="创建一个数据资源骨架",
+    )
+    data_resource_create.add_argument("name", help="资源名，snake_case")
+    data_resource_create.add_argument(
+        "--storage-mode",
+        default="managed_dataset",
+        help="存储模式：managed_dataset 或 custom_table",
+    )
+    data_resource_create.add_argument(
+        "--record-key-field",
+        default="id",
+        help="记录主键字段，默认 id",
+    )
+    data_resource_create.set_defaults(func=cmd_data_resource_create)
+
+    data_view = data_sub.add_parser(
+        "view",
+        help="创建并登记 module.yaml.data.views 条目及 SQL 文件",
+    )
+    data_view_sub = data_view.add_subparsers(dest="subaction")
+    data_view_create = data_view_sub.add_parser(
+        "create",
+        help="创建一个数据库视图骨架",
+    )
+    data_view_create.add_argument("name", help="视图名，snake_case")
+    data_view_create.add_argument(
+        "--source",
+        action="append",
+        required=True,
+        help="来源资源 ID，可重复传入多个；仅支持 custom_table",
+    )
+    data_view_create.add_argument("--force", action="store_true", help="允许覆盖已有 SQL 文件")
+    data_view_create.set_defaults(func=cmd_data_view_create)
+
+    data_query = data_sub.add_parser(
+        "query",
+        help="创建并登记 module.yaml.data.queries 条目及 SQL 文件",
+    )
+    data_query_sub = data_query.add_subparsers(dest="subaction")
+    data_query_create = data_query_sub.add_parser(
+        "create",
+        help="创建一个命名查询骨架",
+    )
+    data_query_create.add_argument("name", help="查询名，snake_case")
+    data_query_create.add_argument(
+        "--source",
+        action="append",
+        required=True,
+        help="来源资源 ID，可重复传入多个；仅支持 custom_table",
+    )
+    data_query_create.add_argument("--force", action="store_true", help="允许覆盖已有 SQL 文件")
+    data_query_create.set_defaults(func=cmd_data_query_create)
+
+    data_seed = data_sub.add_parser(
+        "seed",
+        help="创建并登记 module.yaml.data.seeds 条目及种子文件",
+    )
+    data_seed_sub = data_seed.add_subparsers(dest="subaction")
+    data_seed_create = data_seed_sub.add_parser(
+        "create",
+        help="创建一个种子文件骨架",
+    )
+    data_seed_create.add_argument("name", help="种子名，snake_case")
+    data_seed_create.add_argument("--resource", required=True, help="目标资源 ID")
+    data_seed_create.add_argument(
+        "--mode",
+        default="replace_if_empty",
+        choices=["replace", "replace_if_empty"],
+        help="导入模式",
+    )
+    data_seed_create.add_argument("--force", action="store_true", help="允许覆盖已有种子文件")
+    data_seed_create.set_defaults(func=cmd_data_seed_create)
 
     module_set = module_sub.add_parser(
         "set",

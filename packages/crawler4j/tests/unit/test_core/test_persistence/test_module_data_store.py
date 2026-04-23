@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -37,6 +38,57 @@ def _recreate_legacy_module_db_views_table(conn) -> None:
         )
         """
     )
+
+
+def _sync_manifest_data(
+    store,
+    module_root: Path,
+    *,
+    module_name: str = "demo_module",
+    resources: list[dict[str, object]] | None = None,
+    views: list[dict[str, object]] | None = None,
+    queries: list[dict[str, object]] | None = None,
+    seeds: list[dict[str, object]] | None = None,
+) -> bool:
+    from src.core.mms.data_contract import normalize_manifest_data
+
+    (module_root / "data" / "sql" / "views").mkdir(parents=True, exist_ok=True)
+    (module_root / "data" / "sql" / "queries").mkdir(parents=True, exist_ok=True)
+    (module_root / "data" / "seeds").mkdir(parents=True, exist_ok=True)
+
+    raw_resources = [dict(item) for item in (resources or [])]
+    raw_views = [dict(item) for item in (views or [])]
+    raw_queries = [dict(item) for item in (queries or [])]
+    raw_seeds = [dict(item) for item in (seeds or [])]
+
+    for view in raw_views:
+        view_id = str(view["id"])
+        sql_file = str(view.get("sql_file") or f"data/sql/views/{view_id}.sql")
+        (module_root / sql_file).write_text(str(view.pop("sql", "")).strip() + "\n", encoding="utf-8")
+        view["sql_file"] = sql_file
+
+    for query in raw_queries:
+        query_id = str(query["id"])
+        sql_file = str(query.get("sql_file") or f"data/sql/queries/{query_id}.sql")
+        (module_root / sql_file).write_text(str(query.pop("sql", "")).strip() + "\n", encoding="utf-8")
+        query["sql_file"] = sql_file
+
+    for seed in raw_seeds:
+        seed_id = str(seed["id"])
+        seed_file = str(seed.get("file") or f"data/seeds/{seed_id}.json")
+        payload = seed.pop("records", [])
+        (module_root / seed_file).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        seed["file"] = seed_file
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": raw_resources,
+            "views": raw_views,
+            "queries": raw_queries,
+            "seeds": raw_seeds,
+        }
+    )
+    return store.sync_manifest_data(module_name, module_root, manifest_data)
 
 
 def _legacy_db_view_row(*, cleanup_policy: str = "drop_table", view_kind: str = "materialized_view") -> tuple:
@@ -402,23 +454,51 @@ def test_module_data_store_declares_db_view_and_queries_rows(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    store.register_data_resource(
-        "demo_module",
-        "billing_entries",
-        storage_mode="custom_table",
-        record_key_field="entry_id",
-        schema={
-            "columns": [
-                {"name": "entry_id", "type": "text", "required": True},
-                {"name": "execution_date", "type": "text", "required": True},
-                {"name": "labor_account", "type": "text", "required": True},
-                {"name": "bill_batch", "type": "text", "required": True},
-                {"name": "amount", "type": "number", "required": True},
-            ]
-        },
-        indexes={
-            "execution_account_batch": ["execution_date", "labor_account", "bill_batch"],
-        },
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "billing_entries",
+                "storage_mode": "custom_table",
+                "record_key_field": "entry_id",
+                "schema": {
+                    "columns": [
+                        {"name": "entry_id", "type": "text", "required": True},
+                        {"name": "execution_date", "type": "text", "required": True},
+                        {"name": "labor_account", "type": "text", "required": True},
+                        {"name": "bill_batch", "type": "text", "required": True},
+                        {"name": "amount", "type": "number", "required": True},
+                    ]
+                },
+                "indexes": {
+                    "execution_account_batch": ["execution_date", "labor_account", "bill_batch"],
+                },
+            }
+        ],
+        views=[
+            {
+                "id": "labor_billing_stats",
+                "source_resource_ids": ["billing_entries"],
+                "sql": """
+SELECT
+  execution_date,
+  labor_account,
+  bill_batch,
+  COUNT(*) AS total_count,
+  SUM(amount) AS total_amount
+FROM {{resource:billing_entries}}
+GROUP BY execution_date, labor_account, bill_batch
+""",
+                "columns": [
+                    {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
+                    {"name": "labor_account", "type": "text", "filterable": True, "sortable": True},
+                    {"name": "bill_batch", "type": "text", "filterable": True, "sortable": True},
+                    {"name": "total_count", "type": "int", "sortable": True},
+                    {"name": "total_amount", "type": "number", "sortable": True},
+                ],
+            }
+        ],
     )
     store.write_dataset(
         "demo_module",
@@ -448,28 +528,7 @@ def test_module_data_store_declares_db_view_and_queries_rows(temp_data_dir):
         ],
     )
 
-    declared = store.declare_db_view(
-        "demo_module",
-        "labor_billing_stats",
-        source_resource_ids=["billing_entries"],
-        select_sql_template="""
-SELECT
-  execution_date,
-  labor_account,
-  bill_batch,
-  COUNT(*) AS total_count,
-  SUM(amount) AS total_amount
-FROM {{resource:billing_entries}}
-GROUP BY execution_date, labor_account, bill_batch
-""",
-        columns=[
-            {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
-            {"name": "labor_account", "type": "text", "filterable": True, "sortable": True},
-            {"name": "bill_batch", "type": "text", "filterable": True, "sortable": True},
-            {"name": "total_count", "type": "int", "sortable": True},
-            {"name": "total_amount", "type": "number", "sortable": True},
-        ],
-    )
+    declared = store.list_db_views("demo_module")[0]
 
     assert declared["physical_view_name"] == "demo_module_view_labor_billing_stats"
     assert declared["view_kind"] == "sql_view"
@@ -537,23 +596,23 @@ def test_module_data_store_rejects_db_view_over_managed_dataset(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    store.write_dataset(
-        "demo_module",
-        "accounts",
-        [{"id": "a-1", "phone": "13800138000"}],
-    )
-
     with pytest.raises(ValueError, match="custom_table"):
-        store.declare_db_view(
-            "demo_module",
-            "account_stats",
-            source_resource_ids=["accounts"],
-            select_sql_template="""
+        _sync_manifest_data(
+            store,
+            temp_data_dir,
+            resources=[{"id": "accounts", "storage_mode": "managed_dataset"}],
+            views=[
+                {
+                    "id": "account_stats",
+                    "source_resource_ids": ["accounts"],
+                    "sql": """
 SELECT phone
 FROM {{resource:accounts}}
 """,
-            columns=[
-                {"name": "phone", "type": "text", "filterable": True, "sortable": True},
+                    "columns": [
+                        {"name": "phone", "type": "text", "filterable": True, "sortable": True},
+                    ],
+                }
             ],
         )
 
@@ -561,32 +620,38 @@ FROM {{resource:accounts}}
 @pytest.mark.parametrize(
     ("kwargs", "match"),
     [
-        ({"view_kind": "materialized_view"}, "unsupported view_kind"),
-        ({"cleanup_policy": "drop_table"}, "unsupported db view cleanup_policy"),
+        ({"view_kind": "materialized_view"}, r"view_kind 只支持 sql_view"),
+        ({"cleanup_policy": "drop_table"}, r"cleanup_policy 只支持 drop_view/keep"),
     ],
 )
 def test_module_data_store_rejects_legacy_db_view_v1_options(temp_data_dir, kwargs, match):
-    from src.core.persistence.module_data_store import ModuleDataStore
-
-    store = ModuleDataStore()
-    store.register_data_resource(
-        "demo_module",
-        "billing_entries",
-        storage_mode="custom_table",
-        record_key_field="entry_id",
-        schema={"columns": [{"name": "entry_id", "type": "text", "required": True}]},
-    )
+    from src.core.mms.data_contract import normalize_manifest_data
 
     with pytest.raises(ValueError, match=match):
-        store.declare_db_view(
-            "demo_module",
-            "billing_stats",
-            source_resource_ids=["billing_entries"],
-            select_sql_template="SELECT entry_id FROM {{resource:billing_entries}}",
-            columns=[
-                {"name": "entry_id", "type": "text", "filterable": True, "sortable": True},
-            ],
-            **kwargs,
+        normalize_manifest_data(
+            {
+                "resources": [
+                    {
+                        "id": "billing_entries",
+                        "storage_mode": "custom_table",
+                        "record_key_field": "entry_id",
+                        "schema": {"columns": [{"name": "entry_id", "type": "text", "required": True}]},
+                    }
+                ],
+                "views": [
+                    {
+                        "id": "billing_stats",
+                        "source_resource_ids": ["billing_entries"],
+                        "sql_file": "data/sql/views/billing_stats.sql",
+                        "columns": [
+                            {"name": "entry_id", "type": "text", "filterable": True, "sortable": True},
+                        ],
+                        **kwargs,
+                    }
+                ],
+                "queries": [],
+                "seeds": [],
+            }
         )
 
 
@@ -595,34 +660,40 @@ def test_module_data_store_clear_module_data_drops_registered_db_views(temp_data
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    store.register_data_resource(
-        "demo_module",
-        "billing_entries",
-        storage_mode="custom_table",
-        record_key_field="entry_id",
-        schema={
-            "columns": [
-                {"name": "entry_id", "type": "text", "required": True},
-                {"name": "execution_date", "type": "text", "required": True},
-            ]
-        },
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "billing_entries",
+                "storage_mode": "custom_table",
+                "record_key_field": "entry_id",
+                "schema": {
+                    "columns": [
+                        {"name": "entry_id", "type": "text", "required": True},
+                        {"name": "execution_date", "type": "text", "required": True},
+                    ]
+                },
+            }
+        ],
+        views=[
+            {
+                "id": "billing_stats",
+                "source_resource_ids": ["billing_entries"],
+                "sql": """
+SELECT execution_date
+FROM {{resource:billing_entries}}
+""",
+                "columns": [
+                    {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
+                ],
+            }
+        ],
     )
     store.write_dataset(
         "demo_module",
         "billing_entries",
         [{"entry_id": "e-1", "execution_date": "2026-04-23"}],
-    )
-    store.declare_db_view(
-        "demo_module",
-        "billing_stats",
-        source_resource_ids=["billing_entries"],
-        select_sql_template="""
-SELECT execution_date
-FROM {{resource:billing_entries}}
-""",
-        columns=[
-            {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
-        ],
     )
 
     assert store.clear_module_data("demo_module") is True
@@ -646,20 +717,26 @@ def test_module_data_store_clear_module_data_treats_legacy_drop_table_view_as_vi
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    store.register_data_resource(
-        "demo_module",
-        "billing_entries",
-        storage_mode="custom_table",
-        record_key_field="entry_id",
-        schema={"columns": [{"name": "entry_id", "type": "text", "required": True}]},
-    )
-    store.declare_db_view(
-        "demo_module",
-        "billing_stats",
-        source_resource_ids=["billing_entries"],
-        select_sql_template="SELECT entry_id FROM {{resource:billing_entries}}",
-        columns=[
-            {"name": "entry_id", "type": "text", "filterable": True, "sortable": True},
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "billing_entries",
+                "storage_mode": "custom_table",
+                "record_key_field": "entry_id",
+                "schema": {"columns": [{"name": "entry_id", "type": "text", "required": True}]},
+            }
+        ],
+        views=[
+            {
+                "id": "billing_stats",
+                "source_resource_ids": ["billing_entries"],
+                "sql": "SELECT entry_id FROM {{resource:billing_entries}}",
+                "columns": [
+                    {"name": "entry_id", "type": "text", "filterable": True, "sortable": True},
+                ],
+            }
         ],
     )
 
@@ -896,20 +973,26 @@ def test_module_data_store_creates_and_routes_custom_table_resources(temp_data_d
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    assert store.register_data_resource(
-        "demo_module",
-        "accounts",
-        storage_mode="custom_table",
-        record_key_field="id",
-        schema={
-            "columns": [
-                {"key": "id", "type": "text"},
-                {"key": "phone", "type": "text"},
-                {"key": "status", "type": "text", "nullable": True},
-            ]
-        },
-        cleanup_policy="drop_table",
-    ) == {
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "accounts",
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {
+                    "columns": [
+                        {"key": "id", "type": "text"},
+                        {"key": "phone", "type": "text"},
+                        {"key": "status", "type": "text", "nullable": True},
+                    ]
+                },
+                "cleanup_policy": "drop_table",
+            }
+        ],
+    )
+    assert store.list_data_resources("demo_module")[0] == {
         "module_name": "demo_module",
         "resource_id": "accounts",
         "storage_mode": "custom_table",
@@ -969,31 +1052,37 @@ def test_module_data_store_lists_registered_data_resources(temp_data_dir):
 
     store = ModuleDataStore()
     store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
-    store.register_data_resource(
-        "demo_module",
-        "billing_audit",
-        storage_mode="custom_table",
-        record_key_field="id",
-        schema={"columns": [{"key": "id", "type": "text"}]},
-        cleanup_policy="drop_table",
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "billing_audit",
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {"columns": [{"key": "id", "type": "text"}]},
+                "cleanup_policy": "drop_table",
+            }
+        ],
     )
 
     resources = store.list_data_resources("demo_module")
 
-    assert [resource["resource_id"] for resource in resources] == ["accounts", "billing_audit"]
-    assert [resource["storage_mode"] for resource in resources] == ["managed_dataset", "custom_table"]
+    assert [resource["resource_id"] for resource in resources] == ["billing_audit"]
+    assert [resource["storage_mode"] for resource in resources] == ["custom_table"]
 
 
 def test_module_data_store_rejects_unsafe_custom_table_names(temp_data_dir):
-    from src.core.persistence.module_data_store import ModuleDataStore
-
-    store = ModuleDataStore()
+    from src.core.mms.data_contract import normalize_manifest_data
 
     with pytest.raises(ValueError, match="snake_case"):
-        store.register_data_resource(
-            "demo_module",
-            "accounts;drop",
-            storage_mode="custom_table",
+        normalize_manifest_data(
+            {
+                "resources": [{"id": "accounts;drop", "storage_mode": "custom_table"}],
+                "views": [],
+                "queries": [],
+                "seeds": [],
+            }
         )
 
 
@@ -1221,13 +1310,18 @@ def test_module_data_store_clear_module_data_drops_custom_tables(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    store.register_data_resource(
-        "demo_module",
-        "accounts",
-        storage_mode="custom_table",
-        record_key_field="id",
-        schema={"columns": [{"key": "id", "type": "text"}]},
-        cleanup_policy="drop_table",
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "accounts",
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {"columns": [{"key": "id", "type": "text"}]},
+                "cleanup_policy": "drop_table",
+            }
+        ],
     )
     store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
 
@@ -1260,13 +1354,18 @@ def test_module_data_store_clear_module_data_keep_policy_preserves_custom_table(
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    store.register_data_resource(
-        "demo_module",
-        "accounts",
-        storage_mode="custom_table",
-        record_key_field="id",
-        schema={"columns": [{"key": "id", "type": "text"}]},
-        cleanup_policy="keep",
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "accounts",
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {"columns": [{"key": "id", "type": "text"}]},
+                "cleanup_policy": "keep",
+            }
+        ],
     )
     store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
 

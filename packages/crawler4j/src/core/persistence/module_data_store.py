@@ -8,6 +8,7 @@ import time
 import uuid
 from typing import Any
 
+from src.core.mms.data_contract import load_sql_file, validate_resource_sql, validate_seed_file
 from src.core.persistence.database import DATA_DB, get_connection
 
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -275,6 +276,33 @@ def _normalize_db_view_sort(raw: Any) -> list[dict[str, str]]:
             raise ValueError(f"unsupported db view sort direction: {direction}")
         normalized.append({"field": field, "direction": direction})
     return normalized
+
+
+def _apply_record_query(
+    records: list[dict[str, Any]] | None,
+    *,
+    filters: dict[str, Any] | None = None,
+    sort: list[dict[str, Any]] | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    filtered = list(records or [])
+    for field, value in dict(filters or {}).items():
+        normalized_field = _validate_snake_case_identifier(str(field))
+        if value is None:
+            filtered = [item for item in filtered if item.get(normalized_field) is None]
+        else:
+            filtered = [item for item in filtered if item.get(normalized_field) == value]
+
+    for item in reversed(_normalize_db_view_sort(sort or [])):
+        filtered.sort(
+            key=lambda row: row.get(item["field"]),
+            reverse=item["direction"] == "desc",
+        )
+
+    normalized_offset = max(int(offset), 0)
+    normalized_limit = max(int(limit), 1)
+    return filtered[normalized_offset : normalized_offset + normalized_limit]
 
 
 def _normalize_db_view_sql_template(raw: Any) -> str:
@@ -1438,76 +1466,9 @@ class ModuleDataStore:
             return None
         return _normalize_schema(json.loads(row["schema_json"]))
 
-    def register_data_resource(
-        self,
-        module_name: str,
-        resource_id: str,
-        *,
-        storage_mode: str = "managed_dataset",
-        logical_name: str | None = None,
-        record_key_field: str | None = None,
-        schema: Any | None = None,
-        indexes: Any | None = None,
-        cleanup_policy: str | None = None,
-    ) -> dict[str, Any]:
-        storage_mode = _validate_storage_mode(storage_mode)
-        if storage_mode == "custom_table":
-            physical_table_name = _custom_table_name(module_name, resource_id)
-            cleanup_policy = cleanup_policy or "drop_table"
-        else:
-            physical_table_name = "module_datasets"
-            cleanup_policy = cleanup_policy or "delete_rows"
-        cleanup_policy = _validate_cleanup_policy(cleanup_policy)
-
-        now = int(time.time())
-        with get_connection(DATA_DB) as conn:
-            resource = self._write_resource_row_with_conn(
-                conn,
-                module_name,
-                resource_id,
-                storage_mode=storage_mode,
-                logical_name=logical_name or resource_id,
-                physical_table_name=physical_table_name,
-                record_key_field=_normalize_text(record_key_field),
-                schema=schema,
-                indexes=indexes,
-                cleanup_policy=cleanup_policy,
-                now=now,
-            )
-            if storage_mode == "custom_table":
-                self._ensure_custom_table_with_conn(conn, resource)
-        return resource
-
     def list_data_resources(self, module_name: str) -> list[dict[str, Any]]:
         with get_connection(DATA_DB) as conn:
             return self._list_resource_rows_with_conn(conn, module_name)
-
-    def declare_db_view(
-        self,
-        module_name: str,
-        view_id: str,
-        *,
-        view_kind: str = "sql_view",
-        source_resource_ids: list[str],
-        select_sql_template: str,
-        columns: list[dict[str, Any]],
-        cleanup_policy: str | None = None,
-        schema_version: int | None = None,
-    ) -> dict[str, Any]:
-        now = int(time.time())
-        with get_connection(DATA_DB) as conn:
-            return self._write_db_view_row_with_conn(
-                conn,
-                module_name,
-                _validate_snake_case_identifier(view_id),
-                view_kind=view_kind,
-                source_resource_ids=source_resource_ids,
-                select_sql_template=select_sql_template,
-                columns=columns,
-                cleanup_policy=cleanup_policy or "drop_view",
-                schema_version=schema_version or 1,
-                now=now,
-            )
 
     def list_db_views(self, module_name: str) -> list[dict[str, Any]]:
         with get_connection(DATA_DB) as conn:
@@ -1597,6 +1558,162 @@ class ModuleDataStore:
             "offset": normalized_offset,
         }
 
+    def _list_custom_table_records_with_conn(
+        self,
+        conn,
+        resource: dict[str, Any],
+        *,
+        filters: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        self._ensure_custom_table_with_conn(conn, resource)
+        column_defs = self._custom_table_schema_columns(resource)
+        column_map = {column["name"]: column for column in column_defs}
+        table_identifier = _quote_identifier(resource["physical_table_name"])
+        rendered_columns = ", ".join(_quote_identifier(column["name"]) for column in column_defs)
+
+        where_clauses: list[str] = []
+        params: list[Any] = []
+        for field, value in dict(filters or {}).items():
+            normalized_field = _validate_snake_case_identifier(str(field))
+            if normalized_field not in column_map:
+                raise ValueError(f"resource filter field not found: {normalized_field}")
+            if value is None:
+                where_clauses.append(f"{_quote_identifier(normalized_field)} IS NULL")
+            else:
+                where_clauses.append(f"{_quote_identifier(normalized_field)} = ?")
+                params.append(value)
+
+        order_by = ""
+        normalized_sort = _normalize_db_view_sort(sort or [])
+        if normalized_sort:
+            order_by = " ORDER BY " + ", ".join(
+                f"{_quote_identifier(item['field'])} {item['direction'].upper()}"
+                for item in normalized_sort
+            )
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        rows = conn.execute(
+            f"""
+            SELECT {rendered_columns}
+            FROM {table_identifier}
+            {where_sql}
+            {order_by}
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params + [max(int(limit), 1), max(int(offset), 0)]),
+        ).fetchall()
+        rendered: list[dict[str, Any]] = []
+        for row in rows:
+            payload: dict[str, Any] = {}
+            for column in column_defs:
+                payload[column["name"]] = _python_value_for_custom_table_column(
+                    row[column["name"]],
+                    column_type=column["type"],
+                )
+            rendered.append(payload)
+        return rendered
+
+    def get_record(self, module_name: str, resource_id: str, key: Any) -> dict[str, Any] | None:
+        normalized_key = _normalize_text(key)
+        if normalized_key is None:
+            return None
+        with get_connection(DATA_DB) as conn:
+            resource = self._read_resource_row_with_conn(conn, module_name, resource_id)
+            if resource is None:
+                rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource_id)
+                for row in rows:
+                    row_key = _normalize_text(row.get("record_key") or row.get("id"))
+                    if row_key == normalized_key:
+                        return row
+                return None
+
+            record_key_field = resource.get("record_key_field") or "id"
+            if resource["storage_mode"] == "custom_table":
+                rows = self._list_custom_table_records_with_conn(
+                    conn,
+                    resource,
+                    filters={record_key_field: normalized_key},
+                    limit=1,
+                    offset=0,
+                )
+                return rows[0] if rows else None
+
+            rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"])
+            for row in rows:
+                row_key = _normalize_text(row.get(record_key_field) or row.get("record_key") or row.get("id"))
+                if row_key == normalized_key:
+                    return row
+        return None
+
+    def list_records(
+        self,
+        module_name: str,
+        resource_id: str,
+        *,
+        filters: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        with get_connection(DATA_DB) as conn:
+            resource = self._read_resource_row_with_conn(conn, module_name, resource_id)
+            if resource is None:
+                rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource_id)
+                return _apply_record_query(rows, filters=filters, sort=sort, limit=limit, offset=offset)
+            if resource["storage_mode"] == "custom_table":
+                return self._list_custom_table_records_with_conn(
+                    conn,
+                    resource,
+                    filters=filters,
+                    sort=sort,
+                    limit=limit,
+                    offset=offset,
+                )
+            rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"])
+            return _apply_record_query(rows, filters=filters, sort=sort, limit=limit, offset=offset)
+
+    def run_registered_query(
+        self,
+        module_name: str,
+        *,
+        source_resource_ids: list[str],
+        sql_template: str,
+        columns: list[dict[str, Any]],
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized_sql = _normalize_db_view_sql_template(sql_template)
+        normalized_columns = _normalize_db_view_columns(columns)
+        normalized_params = dict(params or {})
+
+        with get_connection(DATA_DB) as conn:
+            resolved_sql = self._resolve_db_view_sql_with_conn(
+                conn,
+                module_name,
+                source_resource_ids=source_resource_ids,
+                select_sql_template=normalized_sql,
+            )
+            cursor = conn.execute(resolved_sql, normalized_params)
+            actual_columns = [str(item[0]) for item in cursor.description or []]
+            expected_columns = [column["name"] for column in normalized_columns]
+            if actual_columns != expected_columns:
+                raise ValueError(
+                    f"registered query columns do not match query output: expected={expected_columns}, actual={actual_columns}"
+                )
+            rows = cursor.fetchall()
+
+        rendered_rows: list[dict[str, Any]] = []
+        for row in rows:
+            payload: dict[str, Any] = {}
+            for column in normalized_columns:
+                payload[column["name"]] = _python_value_for_custom_table_column(
+                    row[column["name"]],
+                    column_type=column["type"],
+                )
+            rendered_rows.append(payload)
+        return rendered_rows
+
     def read_dataset(self, module_name: str, dataset_name: str) -> list[dict[str, Any]]:
         records = self._read_dataset_row(module_name, dataset_name)
         return records if records is not None else []
@@ -1645,6 +1762,137 @@ class ModuleDataStore:
 
     def write_page_schema(self, module_name: str, page_id: str, schema: dict[str, Any]) -> bool:
         return self._write_page_row(module_name, page_id, _normalize_schema(schema))
+
+    def sync_manifest_data(self, module_name: str, module_root, manifest_data: dict[str, Any]) -> bool:
+        module_root_path = getattr(module_root, "resolve", None)
+        if callable(module_root_path):
+            module_root = module_root.resolve()
+
+        changed = False
+        now = int(time.time())
+        resource_ids = {item["resource_id"] for item in manifest_data["resources"]}
+        view_ids = {item["view_id"] for item in manifest_data["views"]}
+
+        with get_connection(DATA_DB) as conn:
+            for resource in manifest_data["resources"]:
+                current = self._read_resource_row_with_conn(conn, module_name, resource["resource_id"])
+                updated = self._write_resource_row_with_conn(
+                    conn,
+                    module_name,
+                    resource["resource_id"],
+                    storage_mode=resource["storage_mode"],
+                    logical_name=resource["resource_id"],
+                    physical_table_name=(
+                        _custom_table_name(module_name, resource["resource_id"])
+                        if resource["storage_mode"] == "custom_table"
+                        else "module_datasets"
+                    ),
+                    record_key_field=resource["record_key_field"],
+                    schema=resource["schema"],
+                    indexes=resource["indexes"],
+                    cleanup_policy=resource["cleanup_policy"],
+                    now=now,
+                )
+                if resource["storage_mode"] == "custom_table":
+                    self._ensure_custom_table_with_conn(conn, updated)
+                changed = current != updated or changed
+
+            existing_views = self._list_db_view_rows_with_conn(conn, module_name)
+            for db_view in existing_views:
+                if db_view["view_id"] in view_ids:
+                    continue
+                physical_view_name = db_view["physical_view_name"]
+                if db_view.get("cleanup_policy") != "keep":
+                    conn.execute(f"DROP VIEW IF EXISTS {_quote_identifier(physical_view_name)}")
+                cursor = conn.execute(
+                    "DELETE FROM module_db_views WHERE module_name = ? AND view_id = ?",
+                    (module_name, db_view["view_id"]),
+                )
+                changed = bool(cursor.rowcount) or changed
+
+            existing_resources = self._list_resource_rows_with_conn(conn, module_name)
+            for resource in existing_resources:
+                if resource["resource_id"] in resource_ids:
+                    continue
+                if resource["storage_mode"] == "custom_table":
+                    physical_table_name = resource["physical_table_name"]
+                    if resource["cleanup_policy"] == "drop_table":
+                        conn.execute(f"DROP TABLE IF EXISTS {_quote_identifier(physical_table_name)}")
+                    elif resource["cleanup_policy"] == "delete_rows":
+                        conn.execute(f"DELETE FROM {_quote_identifier(physical_table_name)}")
+                else:
+                    conn.execute(
+                        "DELETE FROM module_datasets WHERE module_name = ? AND dataset_name = ?",
+                        (module_name, resource["logical_name"]),
+                    )
+                    conn.execute(
+                        "DELETE FROM module_dataset_manifests WHERE module_name = ? AND dataset_name = ?",
+                        (module_name, resource["logical_name"]),
+                    )
+                cursor = conn.execute(
+                    "DELETE FROM module_data_resources WHERE module_name = ? AND resource_id = ?",
+                    (module_name, resource["resource_id"]),
+                )
+                changed = bool(cursor.rowcount) or changed
+
+            for view in manifest_data["views"]:
+                sql = load_sql_file(module_root, view["sql_file"], expected_prefix="data/sql/views/")
+                validate_resource_sql(
+                    sql,
+                    source_resource_ids=view["source_resource_ids"],
+                    owner_label=f"data.views[{view['view_id']}]",
+                )
+                current = self._read_db_view_row_with_conn(conn, module_name, view["view_id"])
+                updated = self._write_db_view_row_with_conn(
+                    conn,
+                    module_name,
+                    view["view_id"],
+                    view_kind=view["view_kind"],
+                    source_resource_ids=view["source_resource_ids"],
+                    select_sql_template=sql,
+                    columns=view["columns"],
+                    cleanup_policy=view["cleanup_policy"],
+                    schema_version=view["schema_version"],
+                    now=now,
+                )
+                changed = current != updated or changed
+
+            for seed in manifest_data["seeds"]:
+                records = validate_seed_file(module_root, seed["file"])
+                current_resource = self._read_resource_row_with_conn(conn, module_name, seed["resource_id"])
+                if current_resource and current_resource["storage_mode"] == "custom_table":
+                    current_rows = self._list_custom_table_records_with_conn(
+                        conn,
+                        current_resource,
+                        limit=1,
+                        offset=0,
+                    )
+                else:
+                    logical_name = current_resource["logical_name"] if current_resource else seed["resource_id"]
+                    current_rows = _apply_record_query(
+                        self._read_managed_dataset_rows_with_conn(conn, module_name, logical_name),
+                        limit=1,
+                        offset=0,
+                )
+                if seed["mode"] == "replace_if_empty" and current_rows:
+                    continue
+                target_resource = current_resource or self._read_resource_row_with_conn(conn, module_name, seed["resource_id"])
+                if target_resource is None:
+                    raise ValueError(f"seed target resource not found: {seed['resource_id']}")
+                if target_resource["storage_mode"] == "custom_table":
+                    self._write_custom_table_rows_with_conn(conn, target_resource, records, now=now)
+                else:
+                    self._write_managed_dataset_rows_with_conn(
+                        conn,
+                        module_name,
+                        target_resource["logical_name"],
+                        records,
+                        record_key_field=target_resource["record_key_field"],
+                        now=now,
+                    )
+                changed = bool(records) or changed
+
+        return changed
 
     def replace_declared_ui(
         self,

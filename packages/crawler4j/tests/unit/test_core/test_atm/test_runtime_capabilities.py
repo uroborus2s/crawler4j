@@ -51,9 +51,9 @@ def test_runtime_tools_register_expected_surface():
     caps = build_runtime_capabilities("demo_module")
 
     assert caps.tools.has_tool("db.list_records") is True
+    assert caps.tools.has_tool("db.get_record") is True
     assert caps.tools.has_tool("db.replace_records") is True
-    assert caps.tools.has_tool("db.declare_data_resource") is True
-    assert caps.tools.has_tool("db.declare_db_view") is True
+    assert caps.tools.has_tool("db.run_query") is True
     assert caps.tools.has_tool("db.query_view") is True
     assert caps.tools.has_tool("db.append_event") is True
     assert caps.tools.has_tool("db.query_events") is True
@@ -87,9 +87,9 @@ def test_runtime_tools_register_expected_surface():
     assert {spec.name: spec.is_async for spec in specs}["env.replace_resource_pool_snapshot"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.set_proxy"] is True
     assert {spec.name: spec.is_async for spec in specs}["db.append_event"] is False
-    assert {spec.name: spec.is_async for spec in specs}["db.declare_data_resource"] is False
-    assert {spec.name: spec.is_async for spec in specs}["db.declare_db_view"] is False
+    assert {spec.name: spec.is_async for spec in specs}["db.get_record"] is False
     assert {spec.name: spec.is_async for spec in specs}["db.list_records"] is False
+    assert {spec.name: spec.is_async for spec in specs}["db.run_query"] is False
 
 
 def test_runtime_tools_register_hosted_ui_declare_surface():
@@ -137,9 +137,11 @@ def test_runtime_tools_register_hosted_ui_readonly_surface():
     caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_READONLY)
 
     assert [spec.name for spec in caps.tools.list_tools()] == [
+        "db.get_record",
         "db.list_records",
         "db.query_events",
         "db.query_view",
+        "db.run_query",
         "ui.get_page",
     ]
     assert caps.tools.has_tool("ui.get_page") is True
@@ -173,61 +175,78 @@ def test_runtime_tools_hosted_ui_readonly_surface_does_not_read_persisted_page_s
         caps.tools.call("ui.get_page", page_id="dashboard")
 
 
-def test_db_tools_declare_data_resource_delegates_to_store(monkeypatch):
-    calls: list[dict[str, object]] = []
+def test_db_tools_get_record_and_list_delegate_to_store(monkeypatch):
+    get_calls: list[dict[str, object]] = []
+    list_calls: list[dict[str, object]] = []
 
     class _FakeDataStore:
-        def register_data_resource(self, module_name: str, resource_id: str, **kwargs):
-            calls.append(
+        def get_record(self, module_name: str, resource_id: str, key: object):
+            get_calls.append(
+                {
+                    "module_name": module_name,
+                    "resource_id": resource_id,
+                    "key": key,
+                }
+            )
+            return {"id": key, "phone": "13800138000"}
+
+        def list_records(self, module_name: str, resource_id: str, **kwargs):
+            list_calls.append(
                 {
                     "module_name": module_name,
                     "resource_id": resource_id,
                     **kwargs,
                 }
             )
-            return {"module_name": module_name, "resource_id": resource_id, **kwargs}
+            return [{"id": "u1"}]
 
     monkeypatch.setattr("src.core.atm.runtime_capabilities.get_module_data_store", lambda: _FakeDataStore())
 
     caps = build_runtime_capabilities("demo_module")
-    result = caps.tools.call(
-        "db.declare_data_resource",
-        resource_id="account_records",
-        storage_mode="custom_table",
-        record_key_field="phone",
-        schema={"columns": [{"key": "phone"}]},
-        indexes={"phone": ["phone"]},
-        cleanup_policy="drop_table",
+    record = caps.tools.call("db.get_record", resource="account_records", key="u1")
+    rows = caps.tools.call(
+        "db.list_records",
+        resource="account_records",
+        filters={"phone": "13800138000"},
+        sort=[{"field": "phone", "direction": "asc"}],
+        limit=5,
+        offset=1,
     )
 
-    assert result["resource_id"] == "account_records"
-    assert calls == [
+    assert record == {"id": "u1", "phone": "13800138000"}
+    assert rows == [{"id": "u1"}]
+    assert get_calls == [
         {
             "module_name": "demo_module",
             "resource_id": "account_records",
-            "storage_mode": "custom_table",
-            "record_key_field": "phone",
-            "schema": {"columns": [{"key": "phone"}]},
-            "indexes": {"phone": ["phone"]},
-            "cleanup_policy": "drop_table",
+            "key": "u1",
+        }
+    ]
+    assert list_calls == [
+        {
+            "module_name": "demo_module",
+            "resource_id": "account_records",
+            "filters": {"phone": "13800138000"},
+            "sort": [{"field": "phone", "direction": "asc"}],
+            "limit": 5,
+            "offset": 1,
         }
     ]
 
 
-def test_db_tools_declare_db_view_and_query_view_delegate_to_store(monkeypatch):
-    declare_calls: list[dict[str, object]] = []
+def test_db_tools_run_query_and_query_view_delegate_to_store(monkeypatch):
+    run_query_calls: list[dict[str, object]] = []
     query_calls: list[dict[str, object]] = []
 
     class _FakeDataStore:
-        def declare_db_view(self, module_name: str, view_id: str, **kwargs):
-            declare_calls.append(
+        def run_registered_query(self, module_name: str, **kwargs):
+            run_query_calls.append(
                 {
                     "module_name": module_name,
-                    "view_id": view_id,
                     **kwargs,
                 }
             )
-            return {"module_name": module_name, "view_id": view_id, **kwargs}
+            return [{"entry_id": "row-1"}]
 
         def query_db_view(self, module_name: str, view_id: str, **kwargs):
             query_calls.append(
@@ -240,21 +259,43 @@ def test_db_tools_declare_db_view_and_query_view_delegate_to_store(monkeypatch):
             return {"rows": [{"execution_date": "2026-04-23"}], "total": 1, "limit": 20, "offset": 0}
 
     monkeypatch.setattr("src.core.atm.runtime_capabilities.get_module_data_store", lambda: _FakeDataStore())
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities.load_sql_file",
+        lambda module_root, relative_path, expected_prefix: "SELECT entry_id FROM {{resource:billing_entries}} WHERE entry_id = :entry_id",
+    )
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities.validate_resource_sql",
+        lambda sql, *, source_resource_ids, owner_label: None,
+    )
+
+    fake_module = SimpleNamespace(
+        path=Path("/tmp/demo_module"),
+        manifest=SimpleNamespace(
+            data={
+                "queries": [
+                    {
+                        "query_id": "get_billing_entry_by_id",
+                        "source_resource_ids": ["billing_entries"],
+                        "sql_file": "data/sql/queries/get_billing_entry_by_id.sql",
+                        "params": [{"name": "entry_id", "type": "text", "required": True}],
+                        "columns": [{"name": "entry_id", "type": "text", "nullable": False}],
+                    }
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.registry.get_module_registry",
+        lambda: SimpleNamespace(get_module=lambda module_name: fake_module if module_name == "demo_module" else None),
+    )
 
     caps = build_runtime_capabilities("demo_module")
-    declared = caps.tools.call(
-        "db.declare_db_view",
-        view_id="billing_stats",
-        view_kind=" SQL_VIEW ",
-        source_resource_ids=[" billing_entries "],
-        select_sql_template="SELECT execution_date FROM {{resource:billing_entries}}",
-        columns=[
-            {"name": "execution_date", "type": "TEXT", "filterable": True, "sortable": True},
-        ],
-        cleanup_policy=" KEEP ",
-        schema_version="2",
+    queried_rows = caps.tools.call(
+        "db.run_query",
+        query_id="get_billing_entry_by_id",
+        params={"entry_id": "row-1"},
     )
-    queried = caps.tools.call(
+    queried_view = caps.tools.call(
         "db.query_view",
         view_id="billing_stats",
         filters={"execution_date": "2026-04-23"},
@@ -263,26 +304,15 @@ def test_db_tools_declare_db_view_and_query_view_delegate_to_store(monkeypatch):
         offset=0,
     )
 
-    assert declared["view_id"] == "billing_stats"
-    assert queried["total"] == 1
-    assert declare_calls == [
+    assert queried_rows == [{"entry_id": "row-1"}]
+    assert queried_view["total"] == 1
+    assert run_query_calls == [
         {
             "module_name": "demo_module",
-            "view_id": "billing_stats",
-            "view_kind": "sql_view",
             "source_resource_ids": ["billing_entries"],
-            "select_sql_template": "SELECT execution_date FROM {{resource:billing_entries}}",
-            "columns": [
-                {
-                    "name": "execution_date",
-                    "type": "text",
-                    "nullable": True,
-                    "filterable": True,
-                    "sortable": True,
-                },
-            ],
-            "cleanup_policy": "keep",
-            "schema_version": 2,
+            "sql_template": "SELECT entry_id FROM {{resource:billing_entries}} WHERE entry_id = :entry_id",
+            "columns": [{"name": "entry_id", "type": "text", "nullable": False}],
+            "params": {"entry_id": "row-1"},
         }
     ]
     assert query_calls == [
@@ -298,33 +328,57 @@ def test_db_tools_declare_db_view_and_query_view_delegate_to_store(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("extra_kwargs", "expected_message"),
+    ("params", "expected_message"),
     [
-        ({"view_kind": "materialized_view"}, "view_kind 只支持 sql_view"),
-        ({"cleanup_policy": "drop_table"}, "cleanup_policy 只支持 drop_view/keep"),
+        ({}, "query 参数缺失: entry_id"),
+        ({"entry_id": "row-1", "extra": 1}, "query 参数未注册: extra"),
     ],
 )
-def test_db_tools_declare_db_view_rejects_v1_unsupported_contracts(
-    extra_kwargs: dict[str, object],
+def test_db_tools_run_query_rejects_invalid_params(
+    monkeypatch,
+    params: dict[str, object],
     expected_message: str,
 ):
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities.get_module_data_store",
+        lambda: SimpleNamespace(run_registered_query=lambda *args, **kwargs: []),
+    )
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities.load_sql_file",
+        lambda module_root, relative_path, expected_prefix: "SELECT entry_id FROM {{resource:billing_entries}} WHERE entry_id = :entry_id",
+    )
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities.validate_resource_sql",
+        lambda sql, *, source_resource_ids, owner_label: None,
+    )
+    fake_module = SimpleNamespace(
+        path=Path("/tmp/demo_module"),
+        manifest=SimpleNamespace(
+            data={
+                "queries": [
+                    {
+                        "query_id": "get_billing_entry_by_id",
+                        "source_resource_ids": ["billing_entries"],
+                        "sql_file": "data/sql/queries/get_billing_entry_by_id.sql",
+                        "params": [{"name": "entry_id", "type": "text", "required": True}],
+                        "columns": [{"name": "entry_id", "type": "text", "nullable": False}],
+                    }
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.registry.get_module_registry",
+        lambda: SimpleNamespace(get_module=lambda module_name: fake_module if module_name == "demo_module" else None),
+    )
+
     caps = build_runtime_capabilities("demo_module")
 
     with pytest.raises(ValueError, match=expected_message):
         caps.tools.call(
-            "db.declare_db_view",
-            view_id="billing_stats",
-            source_resource_ids=["billing_entries"],
-            select_sql_template="SELECT execution_date FROM {{resource:billing_entries}}",
-            columns=[
-                {
-                    "name": "execution_date",
-                    "type": "text",
-                    "filterable": True,
-                    "sortable": True,
-                }
-            ],
-            **extra_kwargs,
+            "db.run_query",
+            query_id="get_billing_entry_by_id",
+            params=params,
         )
 
 
@@ -332,8 +386,6 @@ def test_db_tools_declare_db_view_rejects_v1_unsupported_contracts(
     "tool_name",
     [
         "db.replace_records",
-        "db.declare_data_resource",
-        "db.declare_db_view",
         "db.append_event",
         "db.set_state",
         "db.acquire_lock",
