@@ -52,6 +52,12 @@ default_workflow: main_workflow
 
 没有这个字段，或值不对，Core 会直接拒绝加载。
 
+还要接受一条数据约束：
+
+- `module.yaml.data` 必须存在，即使四段暂时都是空数组
+- 表、视图、命名查询和种子统一登记在 `module.yaml.data.resources/views/queries/seeds`
+- SQL 文件固定放 `data/sql/views/*.sql`、`data/sql/queries/*.sql`，种子固定放 `data/seeds/*.json`
+
 ## 目录扫描规则
 
 Core 固定扫描：
@@ -63,3 +69,5 @@ Core 固定扫描：
 - `pages/*.py` -> `PAGE` / 页面处理函数
 
 这些导出会被 Core 归一化成宿主侧 descriptor。模块作者只写业务逻辑，不再写运行时装配代码。
+
+另外，模块数据契约虽然不是“固定目录导出扫描”的一部分，但仍是正式加载门禁。Core 会在加载和安装时校验 `module.yaml.data` 并同步 `data/sql` / `data/seeds`；模块运行时代码只通过 `ctx.tools` 访问已注册数据对象。

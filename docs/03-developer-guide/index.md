@@ -8,6 +8,7 @@
 - 模块运行时代码只依赖 `crawler4j-contracts`
 - `crawler4j-sdk` 只保留 CLI、脚手架、校验和开发辅助
 - Core 通过扫描模块目录生成 runtime descriptor
+- 模块数据契约固定为 `module.yaml.data` + `data/sql` + `data/seeds`
 - 不保留 `module_runtime.py`、`declare_ui()`、根模块 `run()` 的兼容桥
 
 推荐阅读顺序：
@@ -26,10 +27,11 @@
 最重要的事实：
 
 - `module.yaml.runtime_api` 必须是 `core-native-v1`
+- `module.yaml.data` 必须存在，`resources/views/queries/seeds` 是唯一数据契约入口
 - `tasks/*.py` 导出 `TASK` 和 `execute`
 - `workflows/*.py` 导出 `WORKFLOW` 和 `run`
 - `hooks/*.py` 导出 `handle`
 - `env_selectors/*.py` 导出 `SELECTOR` 和 `select`
 - `pages/*.py` 导出 `PAGE` 和页面处理函数
 
-如果你看到任何 `TaskScript`、`TaskFlow`、`ModuleAssembler`、`module_runtime.py`、`declare_ui()`、`@env_selector(...)` 的旧写法，应视为历史资料，而不是当前正式协议。
+如果你看到任何 `TaskScript`、`TaskFlow`、`ModuleAssembler`、`module_runtime.py`、`declare_ui()`、`@env_selector(...)`、`db.declare_data_resource(...)`、`db.declare_db_view(...)` 的旧写法，应视为历史资料，而不是当前正式协议。

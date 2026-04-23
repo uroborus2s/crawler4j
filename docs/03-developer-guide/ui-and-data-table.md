@@ -118,7 +118,7 @@ def load_accounts_page(
     params: dict | None = None,
 ) -> dict:
     del page_id, params
-    rows = context.tools.call("db.list_records", dataset="accounts") or []
+    rows = context.tools.call("db.list_records", resource="accounts") or []
     return {"rows": rows}
 ```
 
@@ -196,7 +196,7 @@ def query_billing_stats_table(
 | Dashboard、概览页 | `Page + Text + Button + DataTable` |
 | 快照列表 | `db.list_records` + `binding` |
 | 统计查询 | `db.query_view` + `query_handler` |
-| 明细实体表 | `db.declare_data_resource(storage_mode=\"custom_table\")` |
+| 明细实体表 | `module.yaml.data.resources[]` + `db.get_record/db.list_records/db.replace_records` |
 | 历史时间线 | `db.query_events` 后自行组装页面 |
 
 ## 职责分工
@@ -215,7 +215,8 @@ def query_billing_stats_table(
 - `load_handler`
 - `query_handler`
 - 页面业务动作
-- 数据资源、数据库视图和审计事件的使用
+- `module.yaml.data` / `data/sql` / `data/seeds` 的声明与维护
+- 数据记录、命名查询、数据库视图和审计事件的使用
 
 ## `check full` 会校验什么
 

@@ -8,8 +8,9 @@
 2. Core 拒绝加载：先看 `module.yaml.runtime_api`
 3. 任务或工作流找不到：先看固定导出是否存在
 4. 页面不出来：先看 `pages/*.py` 和 `ui_extension.pages[]`
-5. 环境选择器不生效：先看 `env-selector list`
-6. 安装失败：先看 ZIP 结构和 `upgrade_source.repo`
+5. 数据或统计查询报错：先看 `module.yaml.data` 和 `data list`
+6. 环境选择器不生效：先看 `env-selector list`
+7. 安装失败：先看 ZIP 结构和 `upgrade_source.repo`
 
 ## Core 直接拒绝加载模块
 
@@ -28,7 +29,9 @@
 - 当前目录下有 `module.yaml`
 - `module.yaml.version` 是合法语义化版本
 - `module.yaml.upgrade_source.repo` 是合法 `owner/repo`
+- `module.yaml.data` 存在且 `resources/views/queries/seeds` 结构正确
 - `tasks/`、`workflows/`、`pages/` 目录结构存在
+- `data/sql`、`data/seeds` 文件路径和内容合法
 - 运行时代码没有 import `crawler4j-sdk`
 
 处理方式：
@@ -64,7 +67,18 @@
 1. `DataTable.data_source.type` 是否是 `binding`、`rows` 或 `query_handler`
 2. `load_handler` 返回值里是否真的有绑定字段
 3. `query_handler` 的签名是否是 `(context, table_id, query, params=None)`
-4. `db.list_records` / `db.query_view` 返回值是否是对象数组
+4. `db.get_record` / `db.list_records` / `db.run_query` / `db.query_view` 返回值是否真的是你页面期望的结构
+
+## 数据契约或查询报错
+
+确认：
+
+1. `module.yaml.data` 是否真的声明了目标 `resource/view/query`
+2. `data list` / `module show` 是否能看到对应数量
+3. `view` / `query` 是否只引用 `custom_table` 资源
+4. SQL 文件是否位于 `data/sql/views`、`data/sql/queries`，且只包含单条 `SELECT/WITH`
+5. `{{resource:<id>}}` 是否和 `source_resource_ids` 完全一致
+6. 运行时代码是否还在调用旧 `db.declare_*`，或试图自己执行未注册 SQL
 
 ## 环境选择器不生效
 
@@ -92,7 +106,8 @@
 1. ZIP 是否只有一个根目录
 2. 根目录下是否存在 `module.yaml`
 3. `module.yaml.upgrade_source.repo` 是否合法
-4. ZIP 是否仍然混入 legacy 结构
+4. `module.yaml.data` 是否存在并符合当前协议
+5. ZIP 是否仍然混入 legacy 结构
 
 必要时先执行：
 

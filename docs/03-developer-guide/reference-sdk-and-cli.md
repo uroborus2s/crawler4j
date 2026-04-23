@@ -18,6 +18,7 @@
 | `page` | `page create` `page list` | `pages/<page>.py` 与 `ui_extension.pages[]` |
 | `hook` | `hook create` `hook list` | `hooks/<hook>.py` |
 | `env-selector` | `env-selector create` `env-selector list` | `env_selectors/<name>.py` |
+| `data` | `data list` `data resource create` `data view create` `data query create` `data seed create` | `module.yaml.data`、`data/sql/*`、`data/seeds/*` |
 | `config` | `config show` `config set ...` `config lint` | `module.yaml.config_defaults` |
 | `check` | `check structure` `check release` `check full` | 本地校验 gate |
 | `package` | `package build` `package verify` | ZIP 包 |
@@ -30,9 +31,11 @@
 
 - `runtime_api: core-native-v1`
 - `default_workflow`
+- `module.yaml.data.resources/views/queries/seeds`
 - contracts-only 运行时依赖
 - sdk-only 开发依赖
 - `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`
+- `data/sql/views`、`data/sql/queries`、`data/seeds`
 
 不会再生成：
 
@@ -40,17 +43,37 @@
 - 根包运行薄壳
 - 任何兼容桥
 
+`module show` 现在还会额外打印 `resources/views/queries/seeds` 数量，方便你快速确认当前模块的数据契约规模。
+
+## 数据契约命令
+
+- `data resource create <name> [--storage-mode managed_dataset|custom_table]`
+- `data view create <view_id> --source <resource_id>`
+- `data query create <query_id> --source <resource_id>`
+- `data seed create <seed_id> --resource <resource_id>`
+- `data list`
+
+当前约束：
+
+- `view` / `query` 只允许引用已经登记的 `custom_table` 资源
+- SQL 文件会固定写到 `data/sql/views`、`data/sql/queries`
+- `seed` 固定写到 `data/seeds/*.json`
+
 ## `check full`
 
 当前会校验：
 
 - `runtime_api == core-native-v1`
 - 目录结构完整
+- `module.yaml.data` 存在且四段都是合法数组
 - `default_workflow` 与 `module.yaml.workflows` 一致
 - `TaskSpec/WorkflowSpec/EnvSelectorSpec/PageSpec` 导出存在
 - 文件名与声明名一致
-- 页面文件与 `ui_extension.pages[]` 一致
-- 页面 `load_handler` / 内联 `query_handler` 存在且签名兼容
+- 页面文件与 `ui_extension.pages[]` 一致，且 `PAGE.id` 与文件名一致
+- 页面 `load_handler` 必须是同步函数；内联 `query_handler` 需要存在且签名兼容
+- 视图/命名查询只引用 `custom_table` 资源
+- `data/sql` / `data/seeds` 文件路径、格式和占位符合法
+- SQL 只能是单条 `SELECT/WITH`，且 `{{resource:<id>}}` 必须与 `source_resource_ids` 一致
 - legacy `ui/`、`config_schema.json`、`strategy.yaml` 已清理
 
 ## 环境选择器

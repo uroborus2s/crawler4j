@@ -26,9 +26,11 @@ uv run crawler4j module show
 初始化后的关键事实：
 
 - `module.yaml.runtime_api` 已固定为 `core-native-v1`
+- `module.yaml.data` 默认带空的 `resources/views/queries/seeds`
 - 运行时依赖只包含 `crawler4j-contracts`
 - `crawler4j-sdk` 只放在开发依赖里
 - Core 会扫描 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`
+- CLI 会同时创建 `data/sql/views`、`data/sql/queries`、`data/seeds`
 
 ## 2. 生成业务骨架
 
@@ -119,7 +121,25 @@ def load_dashboard_page(
 
 这里不再有 `declare_ui()`。Core 会直接读取 `PAGE.schema`。
 
-## 6. 校验并接入宿主
+## 6. 需要数据时再补契约
+
+如果你的模块要保存快照数据、维护实体表、执行只读统计查询或导入种子，可以继续补标准骨架：
+
+```bash
+uv run crawler4j data resource create accounts --storage-mode custom_table
+uv run crawler4j data query create get_account_by_id --source accounts
+uv run crawler4j data view create account_stats --source accounts
+uv run crawler4j data seed create accounts_seed --resource accounts
+uv run crawler4j data list
+```
+
+需要记住两条：
+
+- 低频快照数据可以沿用默认 `managed_dataset`；视图和命名查询当前只允许建立在 `custom_table` 资源上。
+- SQL 和种子都要先落到 `data/sql`、`data/seeds`，运行时代码只调用 `db.get_record` / `db.list_records` / `db.replace_records` / `db.run_query` / `db.query_view`，不再声明资源或视图。
+- 文档示例统一按 `resource=...` 书写；运行时当前仍兼容历史别名 `dataset=...`，但新模块不要再把它当正式参数名。
+
+## 7. 校验并接入宿主
 
 在第一次联调前，至少跑：
 
@@ -145,7 +165,7 @@ uv run crawler4j host debug config
 5. 需要断点时再点 `🐞 调试`
 6. 在模块详情页确认 `dashboard` 已出现
 
-## 7. 构建并安装
+## 8. 构建并安装
 
 回到模块工程环境：
 
@@ -162,9 +182,10 @@ uv run crawler4j host install preview dist/hotel_demo-0.1.0.zip --skip-remote-ch
 uv run crawler4j host install apply dist/hotel_demo-0.1.0.zip --skip-remote-check
 ```
 
-## 记住这 4 条
+## 记住这 5 条
 
 - 模块业务代码只 `import crawler4j-contracts`
 - Core 是唯一运行时 owner
 - 没有 `runtime_api: core-native-v1` 会直接拒绝加载
+- 表、视图、命名查询先写进 `module.yaml.data` 和 `data/` 资产，再在 handler 里调用 `db.*`
 - 即使运行时环境卸载 `crawler4j-sdk`，模块也必须能跑

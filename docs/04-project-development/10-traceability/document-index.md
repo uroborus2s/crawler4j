@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-04-22
+**最后更新：** 2026-04-23
 
 ## 1. 当前正式文档结构
 
@@ -71,6 +71,7 @@
 
 ## 5. 最近同步
 
+- 2026-04-23：`docs/03-developer-guide/` 已把 manifest 驱动数据契约正式收口到开发者入口：`index.md`、`core-concepts.md`、`module-structure.md`、`quickstart.md`、`build-modules.md`、`reference-sdk-and-cli.md`、`debugging.md`、`troubleshooting.md` 现统一说明 `module.yaml.data + data/sql + data/seeds`、CLI `data` 命令组，以及 `db.get_record` / `db.run_query` / `db.query_view` 新正式口径；`docs/02-user-guide/` 同步补记管理员与现场支持对“旧协议模块包会被直接拒绝加载”的分诊口径。
 - 2026-04-22：`module-hosted-ui-framework.md` 已从“设计已批准”推进到“本地实现已落地”，对应的 `implementation-plan.md`、`test-plan.md`、`requirements-matrix.md`、`interface-matrix.md`、`.factory/workitems/` 与 `.factory/memory/` 已同步登记 `CR-011` / `TASK-025` / `TC-049`。
 - 2026-04-22：已新增 `module-hosted-ui-framework.md`，将“模块不得直接使用 `PyQt6`、宿主统一托管模块页面、最小化 UI 框架 V1 只公开 `Page/Section/Text/Button/DataTable`”正式沉淀为设计文档；`docs/index.md`、`module-boundaries.md`、`api-design.md`、`interface-matrix.md` 与 `.factory/memory/` 摘要已同步到同一口径。
 - 2026-04-22：`deployment-guide.md`、根 `README.md`、`packages/crawler4j/README.md` 与 `.env.example` 已同步补记 macOS Sparkle 内部分发的两项新口径：改写 bundle 后自动 ad-hoc 重签，以及 `generate_appcast` 可通过 keychain account / 私钥文件 / 私钥串读取 EdDSA 私钥，不再只依赖默认 `ed25519` 账户名。

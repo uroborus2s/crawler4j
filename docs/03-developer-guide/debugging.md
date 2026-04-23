@@ -20,14 +20,16 @@ uv run crawler4j task list
 uv run crawler4j workflow list
 uv run crawler4j page list
 uv run crawler4j env-selector list
+uv run crawler4j data list
 ```
 
-这一层优先确认 4 件事：
+这一层优先确认 5 件事：
 
 - `module.yaml.runtime_api == core-native-v1`
 - `default_workflow` 与 `module.yaml.workflows` 一致
 - Core 规定的导出对象都存在
-- 页面 handler、表格 `query_handler`、环境选择器都能成功导入
+- `module.yaml.data`、`data/sql`、`data/seeds` 结构合法
+- `PAGE.id`、同步 `load_handler`、表格 `query_handler`、环境选择器都能通过 gate
 
 ## 2. 注册 DevLink
 
@@ -104,7 +106,8 @@ Core 的运行描述对象来自固定目录扫描，所以调试时按目录定
 1. `page list` 是否能列出页面
 2. 页面文件里的 `PAGE.schema` 是否有效
 3. `load_handler` / `query_handler` 是否真实存在于同一文件
-4. 模块详情页打开对应页面后是否拿到最新数据
+4. `query_handler` / `load_handler` 是否只调用已注册的 `db.get_record` / `db.list_records` / `db.run_query` / `db.query_view` 等正式能力
+5. 模块详情页打开对应页面后是否拿到最新数据
 
 页面现在直接来自 `pages/*.py`。宿主不会再等待模块根入口去声明页面。
 
@@ -119,7 +122,17 @@ Core 的运行描述对象来自固定目录扫描，所以调试时按目录定
 
 当 `resource_pool` 已配置时，返回 `None` 会进入等待语义；没配池时会按失败处理。
 
-## 8. 常见误区
+## 8. 数据契约调试
+
+数据问题优先按这条线查：
+
+1. `data list` / `module show` 能不能列出目标 `resources/views/queries/seeds`
+2. `module.yaml.data` 里是否真的声明了目标资源、视图或命名查询
+3. `data/sql/views/*.sql`、`data/sql/queries/*.sql` 是否只包含单条 `SELECT/WITH`
+4. `{{resource:<id>}}` 占位符是否和 `source_resource_ids` 完全一致
+5. 页面或任务代码是否还在调用旧 `db.declare_*`，或试图自己执行未注册 SQL
+
+## 9. 常见误区
 
 下面这些不是当前调试主线：
 
@@ -127,5 +140,6 @@ Core 的运行描述对象来自固定目录扫描，所以调试时按目录定
 - 新增 `module_runtime.py`
 - 在运行时代码里 `import crawler4j_sdk`
 - 试图通过 `declare_ui()` 注册页面
+- 试图在运行时代码里调用 `db.declare_data_resource()` 或 `db.declare_db_view()`
 
 如果你发现自己在排这些问题，说明模块还停留在旧协议。
