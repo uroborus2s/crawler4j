@@ -60,6 +60,7 @@
 - Wave 6 已完成：已按真实模块作者视角重做开发、调试、测试与打包说明
 - UI 组件目录需保留导入 smoke；未被主流程引用的残留组件也必须能被正常导入，避免已删除旧路径继续静默滞留
 - UI 组件公共基座应优先抽成 `src.ui.components.*` 正式组件，避免把样式逻辑继续内嵌在单页私有类里
+- UI 静态资源也要做引用面扫描；未被任何入口加载的 QSS / SVG 不应继续留在仓库里伪装成可用资源
 - Wave 10 已完成：ModuleAssembler 与 Shim 落地并经全量测试验证
 - Wave 9 后续回归已补强：`core:data_table` 页面会在刷新时重放 `declare_ui`，并验证 `create_handler` / `update_handler` 与 DevLink 调试上下文
 - Wave 14 额外需要验证固定环境池 Service Job 的“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、黑号停发号与环境删除后的资格卡片级联清理
@@ -95,6 +96,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | 删除未加载的 `dark_theme.qss` 与旧箭头 SVG 资源，收口 UI 目录静态孤岛资源 | Codex |
 | 2026-04-24 | 清理 `config_editor` / `log_viewer` / `status_bar` / `syntax_highlighter` 孤岛代码，并新增正式 `StatCard` 组件替换 dashboard 私有实现 | Codex |
 | 2026-04-24 | 为 `src.ui.components` 新增导入 smoke，并删除未使用的旧路径残留组件 `glass_card` / `metric_badge` | Codex |
 | 2026-04-22 | 新增 Wave 16 / `TASK-025`，为模块 UI 建立 hosted page V1 并移除旧 `micro_app/ui:*` 路径 | Codex |

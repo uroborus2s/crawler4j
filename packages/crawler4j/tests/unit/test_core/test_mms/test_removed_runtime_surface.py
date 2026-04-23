@@ -32,6 +32,9 @@ def test_removed_legacy_runtime_and_ui_surface_stays_unavailable():
         workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "config_editor.py",
         workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "log_viewer.py",
         workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "status_bar.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "assets" / "arrow_down.svg",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "assets" / "arrow_up.svg",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "styles" / "dark_theme.qss",
         workspace_root / "packages" / "crawler4j" / "src" / "ui" / "utils" / "syntax_highlighter.py",
     ]
     removed_modules = [
