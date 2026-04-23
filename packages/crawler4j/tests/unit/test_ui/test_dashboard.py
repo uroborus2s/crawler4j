@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import pytest
 from PyQt6.QtWidgets import QSizePolicy
 
+from src.ui.components.stat_card import StatCard
+
 
 def test_dashboard_compresses_summary_area_for_log_console(qtbot, monkeypatch):
     import src.ui.dashboard as dashboard_module
@@ -18,6 +20,7 @@ def test_dashboard_compresses_summary_area_for_log_console(qtbot, monkeypatch):
 
     assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (20, 20, 20, 20)
     assert layout.spacing() == 16
+    assert isinstance(page.running_card, StatCard)
     assert page.running_card.minimumHeight() == 96
     assert page.running_card.maximumHeight() == 108
     assert page.log_console.minimumHeight() == 320

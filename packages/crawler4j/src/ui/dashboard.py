@@ -10,7 +10,6 @@ import asyncio
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
-    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -24,67 +23,7 @@ from src.core.atm import JobState, get_task_service
 from src.core.mms import ModuleStatus, get_module_registry
 from src.core.rem import EnvStatus
 from src.ui.components.log_console import LogConsoleWidget
-
-
-class StatCard(QFrame):
-    """统计卡片组件。"""
-    
-    def __init__(
-        self,
-        title: str,
-        value: str = "0",
-        subtitle: str = "",
-        color: str = "#6366f1",
-        parent=None,
-    ):
-        super().__init__(parent)
-        self._setup_ui(title, value, subtitle, color)
-    
-    def _setup_ui(self, title: str, value: str, subtitle: str, color: str):
-        self.setStyleSheet("""
-            StatCard {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(99, 102, 241, 0.2),
-                    stop:1 rgba(99, 102, 241, 0.05));
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 10px;
-                padding: 12px;
-            }}
-        """)
-        self.setMinimumHeight(96)
-        self.setMaximumHeight(108)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(6)
-        
-        # 标题
-        title_label = QLabel(title)
-        title_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); font-size: 12px;")
-        layout.addWidget(title_label)
-        
-        # 数值
-        self.value_label = QLabel(value)
-        self.value_label.setStyleSheet(f"color: {color}; font-size: 28px; font-weight: bold;")
-        layout.addWidget(self.value_label)
-        
-        # 副标题
-        if subtitle:
-            self.subtitle_label = QLabel(subtitle)
-            self.subtitle_label.setStyleSheet("color: rgba(255, 255, 255, 0.5); font-size: 11px;")
-            layout.addWidget(self.subtitle_label)
-        else:
-            self.subtitle_label = None
-        
-        layout.addStretch()
-    
-    def set_value(self, value: str):
-        self.value_label.setText(value)
-    
-    def set_subtitle(self, text: str):
-        if self.subtitle_label:
-            self.subtitle_label.setText(text)
+from src.ui.components.stat_card import StatCard
 
 
 class DashboardPage(QWidget):
@@ -135,24 +74,24 @@ class DashboardPage(QWidget):
         cards_grid.setVerticalSpacing(12)
         
         # 任务 (Job) 统计
-        self.running_card = StatCard("活跃作业", "0", "正在运行", "#facc15")
+        self.running_card = StatCard("活跃作业", "0", subtitle="正在运行", accent_color="#facc15")
         cards_grid.addWidget(self.running_card, 0, 0)
         
-        self.completed_card = StatCard("已完成作业", "0", "Batch Completed", "#4ade80")
+        self.completed_card = StatCard("已完成作业", "0", subtitle="Batch Completed", accent_color="#4ade80")
         cards_grid.addWidget(self.completed_card, 0, 1)
         
-        self.failed_card = StatCard("异常作业", "0", "需要关注", "#f87171")
+        self.failed_card = StatCard("异常作业", "0", subtitle="需要关注", accent_color="#f87171")
         cards_grid.addWidget(self.failed_card, 0, 2)
         
         # 环境统计
-        self.env_ready_card = StatCard("就绪环境", "0", "可用实例", "#60a5fa")
+        self.env_ready_card = StatCard("就绪环境", "0", subtitle="可用实例", accent_color="#60a5fa")
         cards_grid.addWidget(self.env_ready_card, 1, 0)
         
-        self.env_busy_card = StatCard("忙碌环境", "0", "正在使用", "#a78bfa")
+        self.env_busy_card = StatCard("忙碌环境", "0", subtitle="正在使用", accent_color="#a78bfa")
         cards_grid.addWidget(self.env_busy_card, 1, 1)
         
         # 模块统计
-        self.modules_card = StatCard("已加载模块", "0", "已启用", "#34d399")
+        self.modules_card = StatCard("已加载模块", "0", subtitle="已启用", accent_color="#34d399")
         cards_grid.addWidget(self.modules_card, 1, 2)
         
         layout.addLayout(cards_grid)

@@ -29,6 +29,10 @@ def test_removed_legacy_runtime_and_ui_surface_stays_unavailable():
         workspace_root / "packages" / "crawler4j" / "src" / "automation",
         workspace_root / "packages" / "crawler4j" / "src" / "ui" / "core",
         workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "sidebar.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "config_editor.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "log_viewer.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "status_bar.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "utils" / "syntax_highlighter.py",
     ]
     removed_modules = [
         "crawler4j_sdk.assembler",
@@ -39,6 +43,10 @@ def test_removed_legacy_runtime_and_ui_surface_stays_unavailable():
         "crawler4j_sdk.workflow",
         "src.ui.core",
         "src.ui.components.sidebar",
+        "src.ui.components.config_editor",
+        "src.ui.components.log_viewer",
+        "src.ui.components.status_bar",
+        "src.ui.utils.syntax_highlighter",
         "src.utils.async_utils",
         "src.utils.captcha_solver",
         "src.utils.fingerprint_generator",
