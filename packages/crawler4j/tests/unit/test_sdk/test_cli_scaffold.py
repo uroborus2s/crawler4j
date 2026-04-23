@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import shutil
 import sys
 import tomllib
 from argparse import Namespace
@@ -17,22 +18,29 @@ from crawler4j_sdk._version import (
 from crawler4j_sdk.cli import commands
 
 
-def _import_generated_package(package_root: Path):
-    package_name = package_root.name
+def _import_generated_package(package_root: Path, *, package_name: str | None = None):
+    import_name = package_name or package_root.name
     parent = str(package_root.parent)
     if parent not in sys.path:
         sys.path.insert(0, parent)
 
-    stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
+    stale = [name for name in sys.modules if name == import_name or name.startswith(f"{import_name}.")]
     for name in stale:
         sys.modules.pop(name, None)
 
-    return importlib.import_module(package_name)
+    return importlib.import_module(import_name)
 
 
-def _import_module_child(package_root: Path, subpackage: str, name: str):
-    _import_generated_package(package_root)
-    return importlib.import_module(f"{package_root.name}.{subpackage}.{name}")
+def _import_module_child(
+    package_root: Path,
+    subpackage: str,
+    name: str,
+    *,
+    package_name: str | None = None,
+):
+    import_name = package_name or package_root.name
+    _import_generated_package(package_root, package_name=import_name)
+    return importlib.import_module(f"{import_name}.{subpackage}.{name}")
 
 
 def _read_manifest(module_root: Path) -> dict:
@@ -50,11 +58,11 @@ def _read_pyproject(module_root: Path) -> dict:
         return tomllib.load(fh)
 
 
-def _init_module(tmp_path: Path) -> Path:
-    target = tmp_path / "demo_model"
+def _init_module(tmp_path: Path, *, module_name: str = "demo_model", output_name: str | None = None) -> Path:
+    target = tmp_path / (output_name or module_name)
     args = Namespace(
-        name="demo_model",
-        repo="demo/demo_model",
+        name=module_name,
+        repo=f"demo/{module_name}",
         output=str(target),
         display_name=None,
         description=None,
@@ -222,6 +230,18 @@ def test_collect_structure_errors_requires_runtime_api_and_default_workflow(tmp_
     assert "module.yaml 缺少 default_workflow" in errors
 
 
+def test_collect_structure_errors_allow_optional_sdk_only_layout_bits(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    shutil.rmtree(module_root / "pages")
+    shutil.rmtree(module_root / "hooks")
+    shutil.rmtree(module_root / "env_selectors")
+    (module_root / "pyproject.toml").unlink()
+
+    errors = commands.collect_structure_errors(module_root, _read_manifest(module_root))
+
+    assert errors == []
+
+
 def test_collect_full_errors_rejects_manifest_page_missing_from_files(tmp_path: Path, monkeypatch):
     module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
@@ -250,12 +270,24 @@ def test_collect_full_errors_rejects_page_file_missing_from_manifest(tmp_path: P
     assert "pages/ 声明了未写入 module.yaml.ui_extension.pages 的宿主页: dashboard" in errors
 
 
+def test_collect_full_errors_allow_manifest_name_to_differ_from_directory_name(tmp_path: Path):
+    module_root = _init_module(tmp_path, output_name="demo_model_pkg")
+    shutil.rmtree(module_root / "pages")
+    shutil.rmtree(module_root / "hooks")
+    shutil.rmtree(module_root / "env_selectors")
+    (module_root / "pyproject.toml").unlink()
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert errors == []
+
+
 def test_archive_members_keep_generated_files_without_runtime_shim(tmp_path: Path):
     module_root = _init_module(tmp_path)
     (module_root / ".idea").mkdir()
     (module_root / ".idea" / "workspace.xml").write_text("<xml />", encoding="utf-8")
 
-    members = commands._archive_members(module_root)
+    members = commands._archive_members(module_root, "demo_model")
     archived_paths = {arcname for _, arcname in members}
 
     assert "demo_model/module.yaml" in archived_paths

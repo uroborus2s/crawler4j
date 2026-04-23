@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
+import importlib.util
 import inspect
 import json
 import os
@@ -195,6 +196,13 @@ def save_manifest(module_root: Path, manifest: dict[str, Any]) -> None:
     )
 
 
+def _resolve_module_import_name(module_root: Path, manifest: dict[str, Any] | None = None) -> str:
+    module_name = str((manifest or {}).get("name", "") or "").strip()
+    if module_name:
+        return module_name
+    return module_root.name
+
+
 def _load_project_version(pyproject_path: Path) -> str:
     try:
         with pyproject_path.open("rb") as fh:
@@ -338,26 +346,44 @@ def _run_async(awaitable):
     return asyncio.run(awaitable)
 
 
-def _import_module_root(module_root: Path) -> Any:
-    package_name = module_root.name
-    parent = str(module_root.parent)
-    if parent not in sys.path:
-        sys.path.insert(0, parent)
-
-    stale = [
-        name
-        for name in list(sys.modules)
-        if name == package_name or name.startswith(f"{package_name}.")
-    ]
-    for name in stale:
-        sys.modules.pop(name, None)
-
-    return importlib.import_module(package_name)
+def _purge_module_namespace(module_name: str) -> None:
+    prefix = f"{module_name}."
+    for loaded_name in list(sys.modules):
+        if loaded_name == module_name or loaded_name.startswith(prefix):
+            sys.modules.pop(loaded_name, None)
 
 
-def _import_module_child(module_root: Path, subpackage: str, name: str) -> Any:
-    _import_module_root(module_root)
-    return importlib.import_module(f"{module_root.name}.{subpackage}.{name}")
+def _import_module_root(module_root: Path, module_name: str) -> Any:
+    package_init = module_root / "__init__.py"
+    if not package_init.exists():
+        raise FileNotFoundError(package_init)
+
+    existing = sys.modules.get(module_name)
+    existing_file = getattr(existing, "__file__", "") if existing else ""
+    same_origin = bool(existing_file) and Path(existing_file).resolve() == package_init.resolve()
+    if same_origin:
+        return existing
+    if existing:
+        _purge_module_namespace(module_name)
+
+    importlib.invalidate_caches()
+    spec = importlib.util.spec_from_file_location(
+        module_name,
+        package_init,
+        submodule_search_locations=[str(module_root)],
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法从 `{module_root}` 构建模块加载规格")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _import_module_child(module_root: Path, module_name: str, subpackage: str, name: str) -> Any:
+    _import_module_root(module_root, module_name)
+    return importlib.import_module(f"{module_name}.{subpackage}.{name}")
 
 
 def _validate_exported_spec(
@@ -373,10 +399,10 @@ def _validate_exported_spec(
     return None
 
 
-def _validate_task_module(module_root: Path, task_name: str) -> list[str]:
+def _validate_task_module(module_root: Path, module_name: str, task_name: str) -> list[str]:
     owner_label = f"tasks/{task_name}.py"
     try:
-        module = _import_module_child(module_root, "tasks", task_name)
+        module = _import_module_child(module_root, module_name, "tasks", task_name)
     except Exception as exc:
         return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
 
@@ -393,10 +419,10 @@ def _validate_task_module(module_root: Path, task_name: str) -> list[str]:
     return errors
 
 
-def _validate_workflow_module(module_root: Path, workflow_name: str) -> list[str]:
+def _validate_workflow_module(module_root: Path, module_name: str, workflow_name: str) -> list[str]:
     owner_label = f"workflows/{workflow_name}.py"
     try:
-        module = _import_module_child(module_root, "workflows", workflow_name)
+        module = _import_module_child(module_root, module_name, "workflows", workflow_name)
     except Exception as exc:
         return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
 
@@ -413,10 +439,10 @@ def _validate_workflow_module(module_root: Path, workflow_name: str) -> list[str
     return errors
 
 
-def _validate_hook_module(module_root: Path, hook_name: str) -> list[str]:
+def _validate_hook_module(module_root: Path, module_name: str, hook_name: str) -> list[str]:
     owner_label = f"hooks/{hook_name}.py"
     try:
-        module = _import_module_child(module_root, "hooks", hook_name)
+        module = _import_module_child(module_root, module_name, "hooks", hook_name)
     except Exception as exc:
         return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
     handle = getattr(module, "handle", None)
@@ -425,10 +451,10 @@ def _validate_hook_module(module_root: Path, hook_name: str) -> list[str]:
     return []
 
 
-def _validate_selector_module(module_root: Path, selector_name: str) -> list[str]:
+def _validate_selector_module(module_root: Path, module_name: str, selector_name: str) -> list[str]:
     owner_label = f"env_selectors/{selector_name}.py"
     try:
-        module = _import_module_child(module_root, "env_selectors", selector_name)
+        module = _import_module_child(module_root, module_name, "env_selectors", selector_name)
     except Exception as exc:
         return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
 
@@ -445,10 +471,14 @@ def _validate_selector_module(module_root: Path, selector_name: str) -> list[str
     return errors
 
 
-def _validate_page_module(module_root: Path, page_name: str) -> tuple[list[str], dict[str, Any] | None]:
+def _validate_page_module(
+    module_root: Path,
+    module_name: str,
+    page_name: str,
+) -> tuple[list[str], dict[str, Any] | None]:
     owner_label = f"pages/{page_name}.py"
     try:
-        module = _import_module_child(module_root, "pages", page_name)
+        module = _import_module_child(module_root, module_name, "pages", page_name)
     except Exception as exc:
         return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"], None
 
@@ -682,8 +712,8 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
     """Collect structure-level validation errors."""
     errors: list[str] = []
 
-    required_files = ["module.yaml", "__init__.py", "pyproject.toml"]
-    required_dirs = ["tasks", "workflows", "pages", "hooks", "env_selectors"]
+    required_files = ["module.yaml", "__init__.py"]
+    required_dirs = ["tasks", "workflows"]
     for name in required_files:
         if not (module_root / name).exists():
             errors.append(f"缺少关键文件: {name}")
@@ -753,19 +783,22 @@ def collect_release_errors(module_root: Path, manifest: dict[str, Any]) -> list[
     except CLIError as exc:
         errors.append(str(exc))
 
-    try:
-        project_version = _load_project_version(module_root / "pyproject.toml")
-    except CLIError as exc:
-        errors.append(str(exc))
-    else:
-        if project_version != version:
-            errors.append(
-                "pyproject.toml [project].version 必须与 module.yaml.version 一致: "
-                f"{project_version} != {version}"
-            )
+    pyproject_path = module_root / "pyproject.toml"
+    if pyproject_path.exists():
+        try:
+            project_version = _load_project_version(pyproject_path)
+        except CLIError as exc:
+            errors.append(str(exc))
+        else:
+            if project_version != version:
+                errors.append(
+                    "pyproject.toml [project].version 必须与 module.yaml.version 一致: "
+                    f"{project_version} != {version}"
+                )
 
-    if str(manifest.get("name", "")).strip() != module_root.name:
-        errors.append("module.yaml.name 必须与模块根目录名一致")
+    module_name = str(manifest.get("name", "")).strip()
+    if module_name and not is_valid_name(module_name):
+        errors.append("module.yaml.name 必须是可导入的 snake_case 包名")
     return errors
 
 
@@ -775,32 +808,29 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
     if errors:
         return errors
 
+    module_name = _resolve_module_import_name(module_root, manifest)
     try:
-        _import_module_root(module_root)
+        _import_module_root(module_root, module_name)
     except Exception as exc:  # pragma: no cover - exercised by tests via failure paths
         return [f"模块无法导入: {exc.__class__.__name__}: {exc}"]
 
     for task_name in _list_python_modules(module_root / "tasks"):
-        errors.extend(_validate_task_module(module_root, task_name))
+        errors.extend(_validate_task_module(module_root, module_name, task_name))
 
     workflow_names = _manifest_workflow_names(manifest)
     for workflow_name in workflow_names:
-        errors.extend(_validate_workflow_module(module_root, workflow_name))
+        errors.extend(_validate_workflow_module(module_root, module_name, workflow_name))
 
     for hook_name in _list_python_modules(module_root / "hooks"):
-        errors.extend(_validate_hook_module(module_root, hook_name))
+        errors.extend(_validate_hook_module(module_root, module_name, hook_name))
 
     selector_files = _list_python_modules(module_root / "env_selectors")
-    selector_names: set[str] = set()
     for selector_name in selector_files:
-        errors.extend(_validate_selector_module(module_root, selector_name))
+        errors.extend(_validate_selector_module(module_root, module_name, selector_name))
         try:
-            module = _import_module_child(module_root, "env_selectors", selector_name)
+            _import_module_child(module_root, module_name, "env_selectors", selector_name)
         except Exception:
             continue
-        selector = getattr(module, "SELECTOR", None)
-        if isinstance(selector, EnvSelectorSpec):
-            selector_names.add(str(selector.name or "").strip())
 
     declared_pages = {
         str(item.get("id", "")).strip()
@@ -809,7 +839,7 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
     }
     discovered_pages: set[str] = set()
     for page_name in _list_python_modules(module_root / "pages"):
-        page_errors, schema = _validate_page_module(module_root, page_name)
+        page_errors, schema = _validate_page_module(module_root, module_name, page_name)
         errors.extend(page_errors)
         if schema:
             discovered_pages.add(page_name)
@@ -925,7 +955,7 @@ def _run_check(level: str, module_root: Path) -> int:
     return 0
 
 
-def _archive_members(module_root: Path) -> list[tuple[Path, str]]:
+def _archive_members(module_root: Path, archive_root: str) -> list[tuple[Path, str]]:
     ignored_dirs = {
         ".git",
         ".idea",
@@ -952,7 +982,7 @@ def _archive_members(module_root: Path) -> list[tuple[Path, str]]:
             continue
         if path.suffix in {".pyc", ".pyo"}:
             continue
-        arcname = f"{module_root.name}/{relative.as_posix()}"
+        arcname = f"{archive_root}/{relative.as_posix()}"
         members.append((path, arcname))
     return members
 
@@ -1054,9 +1084,6 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     output_dir = Path(args.output).expanduser().resolve() if args.output else Path.cwd() / module_name
     if output_dir.exists() and not output_dir.is_dir():
         _print_error(f"目标路径不是目录: {output_dir}")
-        return 1
-    if output_dir.name != module_name:
-        _print_error("输出目录名必须与模块名一致，避免 module.yaml.name 与包目录漂移")
         return 1
     if output_dir.exists() and any(output_dir.iterdir()) and not args.force:
         _print_error(f"目标目录已存在且非空: {output_dir}")
@@ -1460,10 +1487,12 @@ def cmd_env_selector_list(args: argparse.Namespace) -> int:
     """List env-selector declarations."""
     del args
     module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    module_name = _resolve_module_import_name(module_root, manifest)
     selectors: list[str] = []
     for selector_name in _list_python_modules(module_root / "env_selectors"):
         try:
-            module = _import_module_child(module_root, "env_selectors", selector_name)
+            module = _import_module_child(module_root, module_name, "env_selectors", selector_name)
         except Exception as exc:
             _print_error(f"读取环境选择器失败: {exc.__class__.__name__}: {exc}")
             return 1
@@ -1575,16 +1604,17 @@ def cmd_package_build(args: argparse.Namespace) -> int:
         return 1
 
     manifest = load_manifest(module_root)
+    archive_root = _resolve_module_import_name(module_root, manifest)
     version = str(manifest.get("version", "") or "").strip()
     output = (
         Path(args.output).expanduser().resolve()
         if args.output
-        else module_root / "dist" / f"{module_root.name}-{version}.zip"
+        else module_root / "dist" / f"{archive_root}-{version}.zip"
     )
     output.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for source, arcname in _archive_members(module_root):
+        for source, arcname in _archive_members(module_root, archive_root):
             zf.write(source, arcname)
 
     try:
@@ -1633,9 +1663,10 @@ def cmd_release_status(args: argparse.Namespace) -> int:
     module_root = require_module_root()
     manifest = load_manifest(module_root)
     errors = collect_release_errors(module_root, manifest)
+    archive_root = _resolve_module_import_name(module_root, manifest)
     version = str(manifest.get("version", "") or "").strip()
     repo = str((manifest.get("upgrade_source") or {}).get("repo", "") or "").strip()
-    archive_path = module_root / "dist" / f"{module_root.name}-{version}.zip"
+    archive_path = module_root / "dist" / f"{archive_root}-{version}.zip"
 
     print(f"模块: {manifest.get('name', '')}")
     print(f"版本: {version}")
@@ -1690,6 +1721,7 @@ def cmd_release_publish(args: argparse.Namespace) -> int:
     """Publish the local ZIP asset to a GitHub Release via gh CLI."""
     module_root = require_module_root()
     manifest = load_manifest(module_root)
+    archive_root = _resolve_module_import_name(module_root, manifest)
     repo = str((manifest.get("upgrade_source") or {}).get("repo", "") or "").strip()
     version = str(manifest.get("version", "") or "").strip()
     if not is_valid_repo(repo):
@@ -1704,7 +1736,7 @@ def cmd_release_publish(args: argparse.Namespace) -> int:
     archive_path = (
         Path(args.archive).expanduser().resolve()
         if args.archive
-        else module_root / "dist" / f"{module_root.name}-{version}.zip"
+        else module_root / "dist" / f"{archive_root}-{version}.zip"
     )
 
     if args.rebuild or not archive_path.exists():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -45,13 +46,13 @@ def _run_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _init_demo_module(target: Path) -> None:
+def _init_demo_module(target: Path, *, module_name: str = "demo_model") -> None:
     init_result = _run_cli(
         "module",
         "init",
-        "demo_model",
+        module_name,
         "--repo",
-        "demo/demo_model",
+        f"demo/{module_name}",
         "--output",
         str(target),
         "--no-install",
@@ -189,6 +190,37 @@ def test_cli_check_full_rejects_manifest_page_missing_page_file(tmp_path: Path):
     check_result = _run_cli("check", "full", cwd=target)
     assert check_result.returncode == 1
     assert "module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: dashboard" in check_result.stdout
+
+
+def test_cli_check_and_package_allow_manifest_name_to_differ_from_directory_name(tmp_path: Path):
+    target = tmp_path / "demo_model_pkg"
+    archive = target / "dist" / "mismatch-layout.zip"
+
+    _init_demo_module(target, module_name="demo_model")
+    shutil.rmtree(target / "pages")
+    shutil.rmtree(target / "hooks")
+    shutil.rmtree(target / "env_selectors")
+    (target / "pyproject.toml").unlink()
+
+    check_result = _run_cli("check", "full", cwd=target)
+    assert check_result.returncode == 0, check_result.stdout
+
+    package_result = _run_cli("package", "build", "--output", str(archive), cwd=target)
+    assert package_result.returncode == 0, package_result.stdout
+    assert archive.exists()
+
+    verify_result = _run_cli("package", "verify", str(archive), cwd=target)
+    assert verify_result.returncode == 0, verify_result.stdout
+
+    with zipfile.ZipFile(archive) as zf:
+        members = set(zf.namelist())
+    assert "demo_model/module.yaml" in members
+    assert "demo_model/tasks/example_task.py" in members
+    assert "demo_model/workflows/main_workflow.py" in members
+    assert "demo_model/pyproject.toml" not in members
+    assert "demo_model/pages/__init__.py" not in members
+    assert "demo_model/hooks/__init__.py" not in members
+    assert "demo_model/env_selectors/__init__.py" not in members
 
 
 def test_cli_env_selector_list_fails_fast_on_import_error(tmp_path: Path):
