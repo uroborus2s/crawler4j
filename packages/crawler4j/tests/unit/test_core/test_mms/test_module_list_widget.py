@@ -3,12 +3,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtWidgets import QDialog, QMessageBox, QPushButton
+from PyQt6.QtWidgets import QDialog, QMessageBox
 
 from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
 from src.core.mms.release_service import ModulePackagePreview, ModuleUpdateInfo
 from src.core.mms.models import UpgradeSourceInfo
-from src.core.mms.ui.module_list_widget import ModuleListWidget
+from src.core.mms.ui.module_list_widget import ModuleDisplayItem, ModuleListWidget
 
 
 def _make_module(tmp_path: Path, *, source: ModuleSource) -> ModuleInfo:
@@ -44,8 +44,8 @@ def test_dev_link_row_uses_remove_action(qtbot, tmp_path):
     widget = ModuleListWidget()
     qtbot.addWidget(widget)
 
-    action_widget = widget._create_action_widget(_make_module(tmp_path, source=ModuleSource.DEV_LINK))
-    texts = [button.text() for button in action_widget.findChildren(QPushButton)]
+    actions = widget._build_row_actions(_make_module(tmp_path, source=ModuleSource.DEV_LINK))
+    texts = [action["label"] for action in actions]
 
     assert "移除开发链接" in texts
     assert "🗑️" not in texts
@@ -128,10 +128,59 @@ def test_external_module_row_shows_upgrade_button_when_update_available(qtbot, t
         has_update=True,
     )
 
-    action_widget = widget._create_action_widget(module)
-    texts = [button.text() for button in action_widget.findChildren(QPushButton)]
+    actions = widget._build_row_actions(module)
+    texts = [action["label"] for action in actions]
 
     assert "升级" in texts
+
+
+def test_table_row_click_emits_open_detail(qtbot, tmp_path):
+    module = _make_module(tmp_path, source=ModuleSource.DEV_LINK)
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+    widget._display_items = [ModuleDisplayItem(raw=module, display_name_str="Demo Module")]
+    opened: list[ModuleInfo] = []
+    widget.open_detail.connect(opened.append)
+    widget._refresh_table()
+
+    widget._on_table_row_clicked(widget.table.displayed_rows()[0])
+
+    assert opened == [module]
+
+
+def test_module_list_widget_uses_explicit_index_column(qtbot):
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+
+    first_column = widget.TABLE_SCHEMA["columns"][0]
+
+    assert first_column["key"] == "__index__"
+    assert first_column["label"] == "序号"
+    assert first_column["sortable"] is False
+
+
+def test_module_list_widget_numbers_rows_across_pages(qtbot, tmp_path):
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+
+    widget._table_rows = [
+        {
+            "module_name": f"module_{index}",
+            "name": f"module_{index}",
+            "display_name": f"Module {index}",
+            "version": {"text": "1.0.0", "sort_value": "1.0.0"},
+            "status": {"text": "已启用", "tone": "success"},
+            "actions": [],
+        }
+        for index in range(1, 5)
+    ]
+
+    widget.table.set_query({"search_text": "", "sort": [], "page": 2, "page_size": 2})
+    widget.table.request_refresh()
+
+    rows = widget.table.displayed_rows()
+
+    assert [row["__index__"]["text"] for row in rows] == ["3", "4"]
 
 
 def test_uninstall_module_shows_warning_when_registry_refuses(qtbot, tmp_path, monkeypatch):
@@ -198,6 +247,64 @@ def test_uninstall_module_refreshes_only_after_success(qtbot, tmp_path, monkeypa
     assert uninstall_calls == ["demo_module"]
     assert infos == ["已卸载模块: demo_module"]
     assert refresh_calls == [1]
+
+
+def test_uninstall_module_warning_lists_registered_data_resources(qtbot, tmp_path, monkeypatch):
+    module = _make_module(tmp_path, source=ModuleSource.EXTERNAL)
+    registry = SimpleNamespace(
+        refresh=lambda: None,
+        list_modules=lambda: [module],
+        uninstall=lambda name: True,
+    )
+
+    class _FakeDataStore:
+        def list_data_resources(self, module_name: str):
+            assert module_name == "demo_module"
+            return [
+                {
+                    "resource_id": "accounts",
+                    "storage_mode": "managed_dataset",
+                    "cleanup_policy": "delete_rows",
+                    "physical_table_name": "module_datasets",
+                },
+                {
+                    "resource_id": "billing_audit",
+                    "storage_mode": "custom_table",
+                    "cleanup_policy": "drop_table",
+                    "physical_table_name": "demo_module_billing_audit",
+                },
+            ]
+
+        def list_db_views(self, module_name: str):
+            assert module_name == "demo_module"
+            return [
+                {
+                    "view_id": "billing_stats",
+                    "cleanup_policy": "drop_view",
+                    "physical_view_name": "demo_module_view_billing_stats",
+                }
+            ]
+
+    question_texts: list[str] = []
+
+    def _capture_question(parent, title, text, buttons):
+        question_texts.append(text)
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_data_store", lambda: _FakeDataStore())
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.QMessageBox.question", _capture_question)
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.QMessageBox.information", lambda *args: None)
+
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+
+    widget._uninstall_module("demo_module")
+
+    assert "此操作不可撤销" in question_texts[0]
+    assert "accounts: 删除 module_datasets 托管记录" in question_texts[0]
+    assert "billing_audit: 删除自定义物理表 demo_module_billing_audit" in question_texts[0]
+    assert "billing_stats: 删除数据库视图 demo_module_view_billing_stats" in question_texts[0]
 
 
 @pytest.mark.asyncio

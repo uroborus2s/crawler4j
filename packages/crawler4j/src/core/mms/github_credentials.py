@@ -49,6 +49,10 @@ class GitHubCredentialStore:
             raise ValueError(f"仓库 {repo} 的 GitHub Token 存储已损坏，请重新配置")
         return self._decrypt_token(ciphertext, repo)
 
+    # Compatibility aliases for older UI/tests that still speak in repo-token terms.
+    def get_repo_token(self, repo: str) -> str | None:
+        return self.get_token(repo)
+
     def set_token(self, repo: str, token: str) -> None:
         repo = str(repo or "").strip()
         token = str(token or "").strip()
@@ -65,8 +69,14 @@ class GitHubCredentialStore:
             json.dumps(payload, ensure_ascii=False),
         )
 
+    def set_repo_token(self, repo: str, token: str) -> None:
+        self.set_token(repo, token)
+
     def clear_token(self, repo: str) -> bool:
         return self._config_store.delete_setting(self._setting_key(repo))
+
+    def remove_repo_token(self, repo: str) -> bool:
+        return self.clear_token(repo)
 
     @staticmethod
     def _setting_key(repo: str) -> str:

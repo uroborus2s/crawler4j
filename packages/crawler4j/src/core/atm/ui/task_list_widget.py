@@ -5,17 +5,16 @@
 
 import asyncio
 from dataclasses import dataclass
+from typing import Any
 
 from crawler4j_contracts import EnvAction
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +26,8 @@ from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
+from src.ui.components.data_table import SkyDataTable
+from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
 
 
 @dataclass
@@ -43,6 +44,26 @@ class TaskListWidget(QWidget):
     """任务(Job)列表组件。"""
 
     task_selected = pyqtSignal(str)
+    TABLE_SCHEMA = {
+        "columns": [
+            {"key": "__index__", "label": "序号", "type": "number", "width": 72, "align": "right", "sortable": False, "searchable": False},
+            {"key": "name", "label": "作业名称", "type": "text", "width": 240},
+            {"key": "type", "label": "类型", "type": "text", "width": 100},
+            {"key": "runtime", "label": "运行配置", "type": "text", "width": 140},
+            {"key": "concurrency", "label": "目标并发", "type": "number", "width": 80, "align": "right"},
+            {"key": "trigger", "label": "触发规则", "type": "text", "width": 120},
+            {"key": "status", "label": "状态", "type": "text", "width": 96},
+            {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
+        ],
+        "features": {
+            "search": {"enabled": True, "placeholder": "搜索作业、模块或触发规则"},
+            "sort": {
+                "enabled": True,
+                "default": [{"field": "name", "direction": "asc"}],
+            },
+            "pagination": {"enabled": True, "page_size": 20, "page_size_options": [10, 20, 50, 100]},
+        },
+    }
     REFRESH_EVENTS = (
         EventType.TASK_SIGNAL,
         EventType.TASK_FINISHED,
@@ -83,6 +104,8 @@ class TaskListWidget(QWidget):
         self._pending_run_once_job_ids: set[str] = set()
         self._run_once_requesting_job_ids: set[str] = set()
         self._run_once_stopping_job_ids: set[str] = set()
+        self._display_items: list[JobDisplayItem] = []
+        self._table_rows: list[dict[str, Any]] = []
 
         self._setup_ui()
         self._subscribe_events()
@@ -211,22 +234,10 @@ class TaskListWidget(QWidget):
         self.error_label.hide()
         layout.addWidget(self.error_label)
 
-        # 表格 (SkyDataTable)
-        from src.ui.components.data_table import SkyDataTable
-
-        columns_config = [
-            ("name", "作业名称", -1),
-            ("type", "类型", 100),
-            ("runtime", "运行配置", 140),
-            ("concurrency", "目标并发", 80),
-            ("trigger", "触发规则", 120),
-            ("status", "状态", 80),
-            ("actions", "操作", 240),
-        ]
-
-        self.table = SkyDataTable(columns=columns_config)
-        self.table.set_render_callback(self._render_row)
-        self.table.cell_clicked.connect(self._on_cell_clicked)
+        self.table = SkyDataTable(schema=self.TABLE_SCHEMA)
+        self.table.query_requested.connect(self._on_table_query_requested)
+        self.table.row_clicked.connect(self._on_table_row_clicked)
+        self.table.row_action_requested.connect(self._on_table_action_requested)
         layout.addWidget(self.table)
 
     def load_data(self):
@@ -326,7 +337,8 @@ class TaskListWidget(QWidget):
                     run_once_phase=run_once_phase,
                 ))
 
-            self.table.set_data(display_items)
+            self._display_items = display_items
+            self._refresh_table()
             self._set_startup_indicator(
                 [item.raw.name for item in display_items if item.run_once_phase == "starting"]
             )
@@ -341,34 +353,16 @@ class TaskListWidget(QWidget):
             if seq == self._load_seq:
                 self.table.set_loading(False)
 
-    def _render_row(self, row: int, item: JobDisplayItem, table):
-        """渲染单行。"""
+    def _refresh_table(self) -> None:
+        self._table_rows = [self._build_table_row(item) for item in self._display_items]
+        self.table.request_refresh()
+
+    def _build_table_row(self, item: JobDisplayItem) -> dict[str, Any]:
         job = item.raw
-
-        # 0. 名称
-        name_item = QTableWidgetItem(job.name)
-        name_item.setData(Qt.ItemDataRole.UserRole, job.id)
-        table.setItem(row, 0, name_item)
-
-        # 1. 类型
         type_str = self.TYPE_TEXT.get(job.type, job.type.value)
-        table.setItem(row, 1, QTableWidgetItem(type_str))
-
-        # 2. 运行配置
         runtime_text, runtime_tooltip = describe_job_runtime(job)
-        runtime_item = QTableWidgetItem(runtime_text)
-        runtime_item.setToolTip(runtime_tooltip)
-        table.setItem(row, 2, runtime_item)
-        
-        # 3. 并发
-        table.setItem(row, 3, QTableWidgetItem(str(job.concurrency_target)))
 
-        # 4. Trigger
         is_manual_batch = self._is_manual_batch_job(job)
-        is_manual_batch_busy = is_manual_batch and self._is_run_once_busy(
-            job.id,
-            item.active_task_count,
-        )
         if is_manual_batch:
             trigger_text = "手动执行一次"
         elif job.type == JobType.BATCH and job.trigger.cron_expr:
@@ -377,84 +371,123 @@ class TaskListWidget(QWidget):
             trigger_text = "Cron 配置缺失"
         else:
             trigger_text = "手动启动后持续保活"
-        table.setItem(row, 4, QTableWidgetItem(trigger_text))
+        return {
+            "job": job,
+            "job_id": job.id,
+            "name": job.name,
+            "type": type_str,
+            "runtime": {
+                "text": runtime_text,
+                "tooltip": runtime_tooltip,
+            },
+            "concurrency": {
+                "text": str(job.concurrency_target),
+                "sort_value": int(job.concurrency_target),
+            },
+            "trigger": trigger_text,
+            "status": {
+                "text": item.display_status_text,
+                "tone": self._status_tone(item),
+            },
+            "actions": self._build_row_actions(item),
+        }
 
-        # 5. 状态
-        status_item = QTableWidgetItem(item.display_status_text)
-        status_item.setForeground(QColor(item.display_status_color))
-        table.setItem(row, 5, status_item)
-
-        # 6. 操作按钮
-        action_widget = QWidget()
-        action_layout = QHBoxLayout(action_widget)
-        action_layout.setContentsMargins(4, 2, 4, 2)
-        action_layout.setSpacing(8)
-
+    def _build_row_actions(self, item: JobDisplayItem) -> list[dict[str, Any]]:
+        job = item.raw
+        actions: list[dict[str, Any]] = []
+        is_manual_batch = self._is_manual_batch_job(job)
+        is_manual_batch_busy = is_manual_batch and self._is_run_once_busy(
+            job.id,
+            item.active_task_count,
+        )
         state = self._normalize_state(job.state)
         if is_manual_batch:
             is_starting = item.run_once_phase == "starting"
             is_running = item.run_once_phase == "running"
             is_stopping = item.run_once_phase == "stopping"
-            primary_btn = QPushButton(
-                "⏹ 中止中" if is_stopping else "⏹ 中止" if is_manual_batch_busy else "▶ 执行一次"
-            )
-            primary_btn.setEnabled(not is_stopping)
+            tooltip = "立即执行一次当前批次任务。"
             if is_starting:
-                primary_btn.setToolTip("环境正在启动；可以手动中止并选择关闭或删除本次环境。")
+                tooltip = "环境正在启动；可以手动中止并选择关闭或删除本次环境。"
             elif is_running:
-                primary_btn.setToolTip("当前批次仍在执行；可以手动中止并选择关闭或删除本次环境。")
+                tooltip = "当前批次仍在执行；可以手动中止并选择关闭或删除本次环境。"
             elif is_stopping:
-                primary_btn.setToolTip("已发出中止请求，等待任务执行 cleanup 并回收环境。")
-            else:
-                primary_btn.setToolTip("立即执行一次当前批次任务。")
-            primary_btn.setStyleSheet(
-                "background: #f97316; color: white; border: none; padding: 4px 10px; border-radius: 4px;"
-                if is_manual_batch_busy and not is_stopping
-                else "background: #9a3412; color: rgba(255, 255, 255, 0.78); border: none; padding: 4px 10px; border-radius: 4px;"
-                if is_stopping
-                else "background: #60a5fa; color: white; border: none; padding: 4px 10px; border-radius: 4px;"
+                tooltip = "已发出中止请求，等待任务执行 cleanup 并回收环境。"
+            actions.append(
+                {
+                    "id": "stop_run_once" if is_manual_batch_busy else "run_once",
+                    "label": "⏹ 中止中" if is_stopping else "⏹ 中止" if is_manual_batch_busy else "▶ 执行一次",
+                    "tooltip": tooltip,
+                    "enabled": not is_stopping,
+                    "variant": "warning"
+                    if is_manual_batch_busy and not is_stopping
+                    else "secondary"
+                    if is_stopping
+                    else "primary",
+                }
             )
-            if is_manual_batch_busy and not is_stopping:
-                primary_btn.clicked.connect(lambda _, jid=job.id: self._stop_run_once(jid))
-            elif not is_manual_batch_busy:
-                primary_btn.clicked.connect(lambda _, jid=job.id: self._run_job_once(jid))
-            action_layout.addWidget(primary_btn)
         elif state == JobState.ACTIVE:
-            # 运行中 -> 显示"暂停"
-            stop_btn = QPushButton("⏸ 暂停")
-            stop_btn.setStyleSheet("background: #fb923c; color: white; border: none; padding: 4px 10px; border-radius: 4px;")
-            stop_btn.clicked.connect(lambda _, jid=job.id: self._pause_job(jid))
-            action_layout.addWidget(stop_btn)
+            actions.append({"id": "pause", "label": "⏸ 暂停", "variant": "warning"})
         else:
-            # 暂停/其他 -> 显示"启动"
-            run_btn = QPushButton("▶ 启动")
-            run_btn.setStyleSheet("background: #60a5fa; color: white; border: none; padding: 4px 10px; border-radius: 4px;")
-            run_btn.clicked.connect(lambda _, jid=job.id: self._start_job(jid))
-            action_layout.addWidget(run_btn)
+            actions.append({"id": "start", "label": "▶ 启动", "variant": "primary"})
 
         debug_target = self._resolve_debug_target(job)
         if debug_target and debug_target.module.source == ModuleSource.DEV_LINK:
-            debug_btn = QPushButton("🐞 调试")
-            debug_btn.setStyleSheet(
-                "background: rgba(245, 158, 11, 0.88); color: black; border: none; padding: 4px 10px; border-radius: 4px;"
-            )
-            debug_btn.clicked.connect(lambda _, jid=job.id: self._open_debug_dialog(jid))
-            action_layout.addWidget(debug_btn)
+            actions.append({"id": "debug", "label": "🐞 调试", "variant": "warning"})
+        actions.append({"id": "edit", "label": "✏️", "variant": "secondary"})
+        actions.append({"id": "delete", "label": "🗑", "variant": "secondary"})
+        return actions
 
-        # 编辑按钮
-        edit_btn = QPushButton("✏️")
-        edit_btn.setStyleSheet("background: transparent; color: #9ca3af; border: 1px solid #4b5563; padding: 4px 8px; border-radius: 4px;")
-        edit_btn.clicked.connect(lambda _, jid=job.id: self._edit_job(jid))
-        action_layout.addWidget(edit_btn)
+    def _status_tone(self, item: JobDisplayItem) -> str:
+        if item.run_once_phase == "starting":
+            return "info"
+        if item.run_once_phase == "stopping":
+            return "warning"
+        if item.run_once_phase == "running":
+            return "warning"
+        state = self._normalize_state(item.raw.state)
+        return {
+            JobState.ACTIVE: "warning",
+            JobState.PAUSED: "neutral",
+            JobState.COMPLETED: "success",
+            JobState.ERROR: "danger",
+        }.get(state, "neutral")
 
-        # 删除按钮
-        del_btn = QPushButton("🗑")
-        del_btn.setStyleSheet("background: transparent; color: #9ca3af; border: 1px solid #4b5563; padding: 4px 8px; border-radius: 4px;")
-        del_btn.clicked.connect(lambda _, jid=job.id: self._delete_job(jid))
-        action_layout.addWidget(del_btn)
+    def _on_table_query_requested(self, request_id: int, query: dict[str, Any]) -> None:
+        result = resolve_local_data_table_result(
+            self._table_rows,
+            columns=self.TABLE_SCHEMA["columns"],
+            query=query,
+        )
+        self.table.apply_result(request_id, attach_display_index(result))
 
-        action_layout.addStretch()
-        table.setCellWidget(row, 6, action_widget)
+    def _on_table_row_clicked(self, row: dict[str, Any]) -> None:
+        job_id = str(row.get("job_id") or "")
+        if not job_id:
+            return
+        self.task_selected.emit(job_id)
+        from src.core.atm.ui.task_detail_dialog import JobDetailDialog
+
+        dialog = JobDetailDialog(job_id, parent=self)
+        dialog.exec()
+
+    def _on_table_action_requested(self, action_id: str, row: dict[str, Any]) -> None:
+        job_id = str(row.get("job_id") or "")
+        if not job_id:
+            return
+        if action_id == "run_once":
+            self._run_job_once(job_id)
+        elif action_id == "stop_run_once":
+            self._stop_run_once(job_id)
+        elif action_id == "pause":
+            self._pause_job(job_id)
+        elif action_id == "start":
+            self._start_job(job_id)
+        elif action_id == "debug":
+            self._open_debug_dialog(job_id)
+        elif action_id == "edit":
+            self._edit_job(job_id)
+        elif action_id == "delete":
+            self._delete_job(job_id)
 
     def _start_job(self, job_id: str):
         asyncio.create_task(self._async_op(job_id, "start"))
@@ -469,7 +502,7 @@ class TaskListWidget(QWidget):
         self._run_once_requesting_job_ids.add(job_id)
         job_name = next((job.name for job in self._jobs if job.id == job_id), "当前作业")
         self._set_startup_indicator([job_name])
-        self.table.refresh()
+        self._refresh_table()
         asyncio.create_task(self._async_op(job_id, "run_once"))
 
     def _stop_run_once(self, job_id: str):
@@ -505,7 +538,7 @@ class TaskListWidget(QWidget):
             return
 
         self._run_once_stopping_job_ids.add(job_id)
-        self.table.refresh()
+        self._refresh_table()
         asyncio.create_task(self._async_stop_run_once(job_id, env_action))
 
     def _delete_job(self, job_id: str):
@@ -541,7 +574,7 @@ class TaskListWidget(QWidget):
         except Exception as e:
             if op == "run_once":
                 self._release_run_once_lock(job_id)
-                self.table.refresh()
+                self._refresh_table()
                 self.load_data()
             QMessageBox.warning(self, "操作失败", str(e))
             return
@@ -561,7 +594,7 @@ class TaskListWidget(QWidget):
                 raise RuntimeError("当前没有可中止的批次任务，或任务已经结束。")
         except Exception as e:
             self._run_once_stopping_job_ids.discard(job_id)
-            self.table.refresh()
+            self._refresh_table()
             self.load_data()
             QMessageBox.warning(self, "中止失败", str(e))
             return
@@ -631,18 +664,3 @@ class TaskListWidget(QWidget):
         )
         dialog.exec()
     
-    def _on_cell_clicked(self, row: int, col: int):
-        # 忽略操作列
-        if col == 6:
-            return
-            
-        # 获取作业ID
-        name_item = self.table.item(row, 0)
-        if not name_item:
-            return
-        job_id = name_item.data(Qt.ItemDataRole.UserRole)
-        
-        # 打开详情
-        from src.core.atm.ui.task_detail_dialog import JobDetailDialog
-        dialog = JobDetailDialog(job_id, parent=self)
-        dialog.exec()

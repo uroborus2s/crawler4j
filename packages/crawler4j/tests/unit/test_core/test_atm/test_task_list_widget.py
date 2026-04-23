@@ -2,6 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import crawler4j_contracts.hosted_ui as hosted_ui
+
+if not hasattr(hosted_ui, "normalize_db_view_schema"):
+    hosted_ui.normalize_db_view_schema = lambda schema: schema
 
 from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig, TriggerType
 from src.core.atm.run_profile import (
@@ -14,7 +18,7 @@ from src.core.atm.run_profile import (
 )
 
 
-def test_task_list_widget_uses_wider_actions_column(qtbot, monkeypatch):
+def _build_widget(qtbot, monkeypatch):
     import src.core.atm.ui.task_list_widget as task_list_widget
 
     monkeypatch.setattr(
@@ -22,24 +26,29 @@ def test_task_list_widget_uses_wider_actions_column(qtbot, monkeypatch):
         "singleShot",
         staticmethod(lambda *_args, **_kwargs: None),
     )
-
     widget = task_list_widget.TaskListWidget()
     qtbot.addWidget(widget)
+    return task_list_widget, widget
 
-    assert widget.table.table.columnWidth(6) == 240
+
+def test_task_list_widget_declares_wide_actions_column(qtbot, monkeypatch):
+    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
+
+    first_column = widget.TABLE_SCHEMA["columns"][0]
+    name_column = next(column for column in widget.TABLE_SCHEMA["columns"] if column["key"] == "name")
+    actions_column = next(column for column in widget.TABLE_SCHEMA["columns"] if column["key"] == "actions")
+
+    assert first_column["key"] == "__index__"
+    assert first_column["label"] == "序号"
+    assert first_column["sortable"] is False
+    assert name_column["width"] == 240
+    assert name_column.get("stretch", False) is False
+    assert actions_column["stretch"] is True
+    assert task_list_widget.TaskListWidget.TABLE_SCHEMA["features"]["pagination"]["enabled"] is True
 
 
 def test_task_list_widget_renders_manual_batch_run_once_button(qtbot, monkeypatch):
-    import src.core.atm.ui.task_list_widget as task_list_widget
-
-    monkeypatch.setattr(
-        task_list_widget.QTimer,
-        "singleShot",
-        staticmethod(lambda *_args, **_kwargs: None),
-    )
-
-    widget = task_list_widget.TaskListWidget()
-    qtbot.addWidget(widget)
+    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
 
     job = Job(
         id="job-manual",
@@ -49,36 +58,25 @@ def test_task_list_widget_renders_manual_batch_run_once_button(qtbot, monkeypatc
         trigger=TriggerConfig(type=TriggerType.MANUAL),
         concurrency_target=1,
     )
-    item = task_list_widget.JobDisplayItem(
-        raw=job,
-        display_status_text="已暂停",
-        display_status_color="#9ca3af",
-    )
+    widget._display_items = [
+        task_list_widget.JobDisplayItem(
+            raw=job,
+            display_status_text="已暂停",
+            display_status_color="#9ca3af",
+        )
+    ]
 
-    table = widget.table.table
-    table.setRowCount(1)
-    widget._render_row(0, item, table)
+    widget._refresh_table()
+    row = widget.table.displayed_rows()[0]
+    button_texts = [action["label"] for action in row["actions"]]
 
-    assert table.item(0, 4).text() == "手动执行一次"
-
-    action_widget = table.cellWidget(0, 6)
-    button_texts = [button.text() for button in action_widget.findChildren(task_list_widget.QPushButton)]
-
+    assert row["trigger"] == "手动执行一次"
     assert "▶ 执行一次" in button_texts
     assert "▶ 启动" not in button_texts
 
 
 def test_task_list_widget_can_destroy_run_once_env_only_for_create_mode(qtbot, monkeypatch):
-    import src.core.atm.ui.task_list_widget as task_list_widget
-
-    monkeypatch.setattr(
-        task_list_widget.QTimer,
-        "singleShot",
-        staticmethod(lambda *_args, **_kwargs: None),
-    )
-
-    widget = task_list_widget.TaskListWidget()
-    qtbot.addWidget(widget)
+    _task_list_widget, widget = _build_widget(qtbot, monkeypatch)
 
     create_job = Job(
         id="job-create",
@@ -118,16 +116,7 @@ def test_task_list_widget_can_destroy_run_once_env_only_for_create_mode(qtbot, m
 
 
 def test_task_list_widget_renders_manual_batch_busy_button(qtbot, monkeypatch):
-    import src.core.atm.ui.task_list_widget as task_list_widget
-
-    monkeypatch.setattr(
-        task_list_widget.QTimer,
-        "singleShot",
-        staticmethod(lambda *_args, **_kwargs: None),
-    )
-
-    widget = task_list_widget.TaskListWidget()
-    qtbot.addWidget(widget)
+    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
 
     job = Job(
         id="job-manual-busy",
@@ -137,25 +126,23 @@ def test_task_list_widget_renders_manual_batch_busy_button(qtbot, monkeypatch):
         trigger=TriggerConfig(type=TriggerType.MANUAL),
         concurrency_target=1,
     )
-    item = task_list_widget.JobDisplayItem(
-        raw=job,
-        display_status_text="执行中",
-        display_status_color=task_list_widget.TaskListWidget.STATUS_COLORS[JobState.ACTIVE],
-        active_task_count=1,
-        run_once_phase="running",
-    )
+    widget._display_items = [
+        task_list_widget.JobDisplayItem(
+            raw=job,
+            display_status_text="执行中",
+            display_status_color=task_list_widget.TaskListWidget.STATUS_COLORS[JobState.ACTIVE],
+            active_task_count=1,
+            run_once_phase="running",
+        )
+    ]
 
-    table = widget.table.table
-    table.setRowCount(1)
-    widget._render_row(0, item, table)
+    widget._refresh_table()
+    row = widget.table.displayed_rows()[0]
+    stop_action = next(action for action in row["actions"] if action["id"] == "stop_run_once")
 
-    assert table.item(0, 5).text() == "执行中"
-
-    action_widget = table.cellWidget(0, 6)
-    buttons = action_widget.findChildren(task_list_widget.QPushButton)
-    run_button = next(button for button in buttons if button.text() == "⏹ 中止")
-
-    assert run_button.isEnabled() is True
+    assert row["status"]["text"] == "执行中"
+    assert stop_action["label"] == "⏹ 中止"
+    assert stop_action["enabled"] is True
 
 
 def test_task_list_widget_refreshes_on_task_failed_event(qtbot, monkeypatch):
@@ -236,27 +223,18 @@ async def test_task_list_widget_marks_pending_manual_batch_as_starting(qtbot, mo
 
     widget._load_seq = 1
     await widget._load_data_async(1)
+    row = widget.table.displayed_rows()[0]
+    stop_action = next(action for action in row["actions"] if action["id"] == "stop_run_once")
 
-    assert widget.table.table.item(0, 5).text() == "环境启动中"
-    action_widget = widget.table.table.cellWidget(0, 6)
-    buttons = action_widget.findChildren(task_list_widget.QPushButton)
-    run_button = next(button for button in buttons if button.text() == "⏹ 中止")
-    assert run_button.isEnabled() is True
+    assert row["status"]["text"] == "环境启动中"
+    assert stop_action["label"] == "⏹ 中止"
+    assert stop_action["enabled"] is True
     assert widget.startup_hint.isHidden() is False
     assert "manual-batch-starting" in widget.startup_hint_label.text()
 
 
 def test_task_list_widget_renders_manual_batch_stopping_button(qtbot, monkeypatch):
-    import src.core.atm.ui.task_list_widget as task_list_widget
-
-    monkeypatch.setattr(
-        task_list_widget.QTimer,
-        "singleShot",
-        staticmethod(lambda *_args, **_kwargs: None),
-    )
-
-    widget = task_list_widget.TaskListWidget()
-    qtbot.addWidget(widget)
+    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
 
     job = Job(
         id="job-manual-stopping",
@@ -266,33 +244,27 @@ def test_task_list_widget_renders_manual_batch_stopping_button(qtbot, monkeypatc
         trigger=TriggerConfig(type=TriggerType.MANUAL),
         concurrency_target=1,
     )
-    item = task_list_widget.JobDisplayItem(
-        raw=job,
-        display_status_text="中止中",
-        display_status_color="#f97316",
-        active_task_count=1,
-        run_once_phase="stopping",
-    )
+    widget._display_items = [
+        task_list_widget.JobDisplayItem(
+            raw=job,
+            display_status_text="中止中",
+            display_status_color="#f97316",
+            active_task_count=1,
+            run_once_phase="stopping",
+        )
+    ]
 
-    table = widget.table.table
-    table.setRowCount(1)
-    widget._render_row(0, item, table)
+    widget._refresh_table()
+    row = widget.table.displayed_rows()[0]
+    stop_action = next(action for action in row["actions"] if action["id"] == "stop_run_once")
 
-    assert table.item(0, 5).text() == "中止中"
-    action_widget = table.cellWidget(0, 6)
-    buttons = action_widget.findChildren(task_list_widget.QPushButton)
-    stop_button = next(button for button in buttons if button.text() == "⏹ 中止中")
-    assert stop_button.isEnabled() is False
+    assert row["status"]["text"] == "中止中"
+    assert stop_action["label"] == "⏹ 中止中"
+    assert stop_action["enabled"] is False
 
 
 def test_task_list_widget_run_once_locks_row_immediately(qtbot, monkeypatch):
-    import src.core.atm.ui.task_list_widget as task_list_widget
-
-    monkeypatch.setattr(
-        task_list_widget.QTimer,
-        "singleShot",
-        staticmethod(lambda *_args, **_kwargs: None),
-    )
+    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
 
     created_tasks = []
 
@@ -303,15 +275,32 @@ def test_task_list_widget_run_once_locks_row_immediately(qtbot, monkeypatch):
 
     monkeypatch.setattr(task_list_widget.asyncio, "create_task", _fake_create_task)
 
-    widget = task_list_widget.TaskListWidget()
-    qtbot.addWidget(widget)
+    job = Job(
+        id="job-manual",
+        name="manual-batch",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        concurrency_target=1,
+    )
+    widget._jobs = [job]
+    widget._display_items = [
+        task_list_widget.JobDisplayItem(
+            raw=job,
+            display_status_text="已暂停",
+            display_status_color="#9ca3af",
+        )
+    ]
+    widget._refresh_table()
 
     widget._run_job_once("job-manual")
+    row = widget.table.displayed_rows()[0]
 
     assert "job-manual" in widget._pending_run_once_job_ids
     assert "job-manual" in widget._run_once_requesting_job_ids
     assert created_tasks
     assert widget.startup_hint.isHidden() is False
+    assert row["actions"][0]["label"] == "⏹ 中止"
 
 
 @pytest.mark.asyncio
@@ -347,7 +336,7 @@ async def test_task_list_widget_clears_run_once_lock_after_active_tasks_clear(qt
     widget._load_seq = 1
     await widget._load_data_async(1)
     assert job.id in widget._pending_run_once_job_ids
-    assert widget.table.table.item(0, 5).text() == "环境启动中"
+    assert widget.table.displayed_rows()[0]["status"]["text"] == "环境启动中"
     assert widget.startup_hint.isHidden() is False
 
     widget._run_once_requesting_job_ids.clear()
@@ -355,5 +344,53 @@ async def test_task_list_widget_clears_run_once_lock_after_active_tasks_clear(qt
     await widget._load_data_async(2)
 
     assert job.id not in widget._pending_run_once_job_ids
-    assert widget.table.table.item(0, 5).text() == "已暂停"
+    assert widget.table.displayed_rows()[0]["status"]["text"] == "已暂停"
     assert widget.startup_hint.isHidden() is True
+
+
+def test_task_list_widget_row_click_opens_detail_dialog(qtbot, monkeypatch):
+    import src.core.atm.ui.task_detail_dialog as detail_dialog_module
+
+    _task_list_widget, widget = _build_widget(qtbot, monkeypatch)
+    opened_job_ids: list[str] = []
+    selected_job_ids: list[str] = []
+
+    class _FakeDialog:
+        def __init__(self, job_id, parent=None):
+            assert parent is widget
+            opened_job_ids.append(job_id)
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(detail_dialog_module, "JobDetailDialog", _FakeDialog)
+    widget.task_selected.connect(selected_job_ids.append)
+
+    widget._on_table_row_clicked({"job_id": "job-42"})
+
+    assert selected_job_ids == ["job-42"]
+    assert opened_job_ids == ["job-42"]
+
+
+def test_task_list_widget_numbers_rows_across_pages(qtbot, monkeypatch):
+    _task_list_widget, widget = _build_widget(qtbot, monkeypatch)
+    widget._table_rows = [
+        {
+            "job_id": f"job-{index}",
+            "name": f"job-{index}",
+            "type": "批次任务",
+            "runtime": {"text": "demo"},
+            "concurrency": {"text": "1", "sort_value": 1},
+            "trigger": "手动执行一次",
+            "status": {"text": "已暂停", "tone": "neutral"},
+            "actions": [],
+        }
+        for index in range(1, 5)
+    ]
+
+    widget.table.set_query({"search_text": "", "sort": [], "page": 2, "page_size": 2})
+    widget.table.request_refresh()
+
+    rows = widget.table.displayed_rows()
+
+    assert [row["__index__"]["text"] for row in rows] == ["3", "4"]

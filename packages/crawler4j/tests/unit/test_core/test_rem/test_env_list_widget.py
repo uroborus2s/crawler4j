@@ -200,6 +200,33 @@ def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypat
     widget.load_data.assert_called_once_with()
 
 
+def test_env_list_widget_rows_expose_actions_and_row_click_signal(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    selected: list[str] = []
+    widget.env_selected.connect(selected.append)
+
+    widget._on_data_loaded([_make_env("env-1", EnvStatus.READY)])
+    row = widget.table.displayed_rows()[0]
+
+    assert row["status"]["text"] == "就绪"
+    assert [action["id"] for action in row["actions"]] == ["start", "pause", "edit", "destroy"]
+
+    widget._on_table_row_clicked(row)
+
+    assert selected == ["env-1"]
+
+
 @pytest.mark.asyncio
 async def test_env_list_widget_exec_dialog_async_uses_open_without_nested_exec(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
@@ -291,7 +318,6 @@ async def test_env_list_widget_destroy_refresh_waits_for_inflight_load(qtbot, mo
 
     widget = env_list_widget.EnvListWidget()
     qtbot.addWidget(widget)
-    widget.table.set_data = MagicMock()
 
     widget.load_data()
     assert len(_ControlledLoaderThread.instances) == 1
@@ -311,13 +337,14 @@ async def test_env_list_widget_destroy_refresh_waits_for_inflight_load(qtbot, mo
 
     assert len(_ControlledLoaderThread.instances) == 2
     assert _ControlledLoaderThread.instances[1].started is True
-    assert widget.table.set_data.call_count == 1
+    assert widget.table.displayed_rows()[0]["id"] == "env-1"
+    assert widget.table.displayed_rows()[0]["status"]["text"] == "就绪"
 
     _ControlledLoaderThread.instances[1].finish([_make_env("env-1", EnvStatus.BUSY)])
     qtbot.waitUntil(lambda: widget._load_in_progress is False, timeout=500)
 
     assert widget._reload_requested is False
-    assert widget.table.set_data.call_count == 2
+    assert widget.table.displayed_rows()[0]["status"]["text"] == "启动中"
 
 
 @pytest.mark.asyncio
@@ -336,7 +363,6 @@ async def test_env_list_widget_load_data_queues_refresh_when_loading(qtbot, monk
 
     widget = env_list_widget.EnvListWidget()
     qtbot.addWidget(widget)
-    widget.table.set_data = MagicMock()
 
     widget.load_data()
     assert len(_ControlledLoaderThread.instances) == 1
@@ -351,11 +377,11 @@ async def test_env_list_widget_load_data_queues_refresh_when_loading(qtbot, monk
     assert len(_ControlledLoaderThread.instances) == 2
     assert _ControlledLoaderThread.instances[1].started is True
     assert widget._load_in_progress is True
-    assert widget.table.set_data.call_count == 1
+    assert widget.table.displayed_rows()[0]["status"]["text"] == "就绪"
 
     _ControlledLoaderThread.instances[1].finish([_make_env("env-1", EnvStatus.BUSY)])
     qtbot.waitUntil(lambda: widget._load_in_progress is False, timeout=500)
 
     assert widget._load_in_progress is False
-    assert widget.table.set_data.call_count == 2
+    assert widget.table.displayed_rows()[0]["status"]["text"] == "启动中"
     assert widget.stats_label.text() == "总计: 1 | 就绪: 0 | 忙碌: 1"

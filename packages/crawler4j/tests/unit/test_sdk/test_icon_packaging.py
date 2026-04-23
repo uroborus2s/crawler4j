@@ -6,6 +6,7 @@ from PyQt6.QtGui import QImage
 
 
 APP_ROOT = Path(__file__).resolve().parents[3]
+EXPECTED_CENTERLINE_INSETS = (79, 80, 79, 80)
 
 
 def test_pyinstaller_spec_binds_runtime_and_bundle_icon_assets():
@@ -63,10 +64,8 @@ def test_runtime_app_icon_uses_transparent_outer_corners():
     right_inset = next(x for x in range(width) if image.pixelColor((width - 1) - x, center_y).alpha() > 0)
     top_inset = next(y for y in range(height) if image.pixelColor(center_x, y).alpha() > 0)
     bottom_inset = next(y for y in range(height) if image.pixelColor(center_x, (height - 1) - y).alpha() > 0)
-    assert 72 <= left_inset <= 82
-    assert 72 <= right_inset <= 82
-    assert 72 <= top_inset <= 82
-    assert 72 <= bottom_inset <= 82
+    # 图标尺寸只按中轴线安全区锁定，避免再被 bbox / 抗锯齿口径误导。
+    assert (left_inset, right_inset, top_inset, bottom_inset) == EXPECTED_CENTERLINE_INSETS
 
 
 def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge_and_center_mark():

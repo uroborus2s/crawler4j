@@ -3,6 +3,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from crawler4j_contracts import EnvAction, TaskSignal
+import crawler4j_contracts.hosted_ui as hosted_ui
+
+if not hasattr(hosted_ui, "normalize_db_view_schema"):
+    hosted_ui.normalize_db_view_schema = lambda schema: schema
 
 from src.core.atm.models import Job, Task, TaskStatus
 from src.core.atm.run_profile import (
@@ -205,7 +209,7 @@ async def test_job_detail_dialog_shows_timeout_reason_instead_of_waiting_message
 
     await dialog._load_data_async()
 
-    assert dialog.task_table.item(0, 6).text() == "等待环境池工位超时: bound_account_ready (30s)"
+    assert dialog.task_table.displayed_rows()[0]["result"] == "等待环境池工位超时: bound_account_ready (30s)"
 
 
 def test_job_detail_dialog_refreshes_on_task_failed_event(qtbot, monkeypatch):

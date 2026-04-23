@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -16,7 +16,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -33,7 +32,9 @@ from src.core.mms.release_service import ModuleUpdateInfo
 from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.install_preview_dialog import InstallPreviewDialog
 from src.core.mms.ui.module_install_dialog import ModuleInstallDialog, ModuleInstallRequest
+from src.core.persistence import get_module_data_store
 from src.ui.components.data_table import SkyDataTable
+from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
 
 
 @dataclass
@@ -48,6 +49,24 @@ class ModuleListWidget(QWidget):
     """全屏模块管理列表。"""
 
     open_detail = pyqtSignal(object)
+    TABLE_SCHEMA = {
+        "columns": [
+            {"key": "__index__", "label": "序号", "type": "number", "width": 72, "align": "right", "sortable": False, "searchable": False},
+            {"key": "name", "label": "名称", "type": "text", "width": 160},
+            {"key": "display_name", "label": "显示名", "type": "text", "width": 240},
+            {"key": "version", "label": "版本", "type": "text", "width": 150},
+            {"key": "status", "label": "状态", "type": "text", "width": 120},
+            {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
+        ],
+        "features": {
+            "search": {"enabled": True, "placeholder": "搜索模块名称、显示名或版本"},
+            "sort": {
+                "enabled": True,
+                "default": [{"field": "display_name", "direction": "asc"}],
+            },
+            "pagination": {"enabled": True, "page_size": 20, "page_size_options": [10, 20, 50, 100]},
+        },
+    }
 
     STATUS_COLORS = {
         ModuleStatus.ENABLED: "#4ade80",
@@ -71,6 +90,8 @@ class ModuleListWidget(QWidget):
         self._update_check_seq = 0
         self._pending_tasks: set[asyncio.Task] = set()
         self._update_check_running = False
+        self._display_items: list[ModuleDisplayItem] = []
+        self._table_rows: list[dict[str, Any]] = []
         self._setup_ui()
 
     def _setup_ui(self):
@@ -162,15 +183,10 @@ class ModuleListWidget(QWidget):
         self.error_label.hide()
         layout.addWidget(self.error_label)
 
-        columns = [
-            ("name", "名称", 160),
-            ("display_name", "显示名", 240),
-            ("version", "版本", 150),
-            ("status", "状态", 120),
-            ("actions", "操作", None),
-        ]
-        self.table = SkyDataTable(columns=columns)
-        self.table.set_render_callback(self._render_row)
+        self.table = SkyDataTable(schema=self.TABLE_SCHEMA)
+        self.table.query_requested.connect(self._on_table_query_requested)
+        self.table.row_clicked.connect(self._on_table_row_clicked)
+        self.table.row_action_requested.connect(self._on_table_action_requested)
         layout.addWidget(self.table)
 
         self.stats_label = QLabel()
@@ -187,11 +203,11 @@ class ModuleListWidget(QWidget):
             if force_refresh:
                 registry.refresh()
             self._modules = registry.list_modules()
-            display_items = [
+            self._display_items = [
                 ModuleDisplayItem(raw=module, display_name_str=module.manifest.display_name or module.name)
                 for module in self._modules
             ]
-            self.table.set_data(display_items)
+            self._refresh_table()
             self._update_stats_label()
         except Exception as e:
             self.error_label.setText(f"❌ 加载失败: {e}")
@@ -202,119 +218,133 @@ class ModuleListWidget(QWidget):
 
         self._schedule_update_check(notify=False)
 
-    def _render_row(self, row: int, item: ModuleDisplayItem, table):
+    def _refresh_table(self) -> None:
+        self._table_rows = [self._build_table_row(item) for item in self._display_items]
+        self.table.request_refresh()
+
+    def _build_table_row(self, item: ModuleDisplayItem) -> dict[str, Any]:
         module = item.raw
-        table.setRowHeight(row, 52)
-
-        name_item = QTableWidgetItem(module.name)
-        name_item.setData(Qt.ItemDataRole.UserRole, module)
-        table.setItem(row, 0, name_item)
-        table.setItem(row, 1, QTableWidgetItem(item.display_name_str))
-
-        version_text = module.manifest.version
         update_state = self._update_states.get(module.name)
+        version_text = module.manifest.version
+        version_tone = ""
+        version_tooltip = ""
         if update_state and update_state.has_update:
             version_text = f"{module.manifest.version} → {update_state.latest_version}"
-        version_item = QTableWidgetItem(version_text)
-        if update_state and update_state.has_update:
-            version_item.setForeground(QColor("#60a5fa"))
-            version_item.setToolTip(f"检测到可升级版本 {update_state.latest_version}")
+            version_tone = "info"
+            version_tooltip = f"检测到可升级版本 {update_state.latest_version}"
         elif module.name in self._update_errors:
-            version_item.setToolTip(self._update_errors[module.name])
-        table.setItem(row, 2, version_item)
+            version_tooltip = self._update_errors[module.name]
 
         status_text = self.STATUS_TEXT.get(module.status, module.status.value)
-        status_item = QTableWidgetItem(status_text)
-        if module.status in self.STATUS_COLORS:
-            status_item.setForeground(QColor(self.STATUS_COLORS[module.status]))
-        table.setItem(row, 3, status_item)
+        return {
+            "module": module,
+            "module_name": module.name,
+            "name": module.name,
+            "display_name": item.display_name_str,
+            "version": {
+                "text": version_text,
+                "tooltip": version_tooltip,
+                "tone": version_tone,
+                "sort_value": module.manifest.version,
+            },
+            "status": {
+                "text": status_text,
+                "tone": self._status_tone(module.status),
+            },
+            "actions": self._build_row_actions(module),
+        }
 
-        table.setCellWidget(row, 4, self._create_action_widget(module))
+    def _build_row_actions(self, module: ModuleInfo) -> list[dict[str, Any]]:
+        actions: list[dict[str, Any]] = [
+            {"id": "detail", "label": "详情 →", "variant": "primary"},
+        ]
 
-    def _create_action_widget(self, module: ModuleInfo) -> QWidget:
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(6)
-
-        detail_btn = QPushButton("详情 →")
-        detail_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                padding: 5px 10px;
-                border-radius: 3px;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-            """
-        )
-        detail_btn.clicked.connect(lambda _, m=module: self.open_detail.emit(m))
-        layout.addWidget(detail_btn)
-
-        if module.status == ModuleStatus.ENABLED:
-            toggle_btn = QPushButton("禁用")
-            toggle_btn.setStyleSheet(
-                "background: #f87171; color: white; border: none; padding: 5px 8px; border-radius: 3px;"
-            )
-            toggle_btn.clicked.connect(lambda _, n=module.name: self._disable_module(n))
-        else:
-            toggle_btn = QPushButton("启用")
-            toggle_btn.setStyleSheet(
-                "background: #4ade80; color: black; border: none; padding: 5px 8px; border-radius: 3px;"
-            )
-            toggle_btn.clicked.connect(lambda _, n=module.name: self._enable_module(n))
-        if module.status in {ModuleStatus.INVALID, ModuleStatus.INCOMPATIBLE}:
-            toggle_btn.setEnabled(False)
-        layout.addWidget(toggle_btn)
+        toggle_action = {
+            "id": "disable" if module.status == ModuleStatus.ENABLED else "enable",
+            "label": "禁用" if module.status == ModuleStatus.ENABLED else "启用",
+            "variant": "danger" if module.status == ModuleStatus.ENABLED else "success",
+            "enabled": module.status not in {ModuleStatus.INVALID, ModuleStatus.INCOMPATIBLE},
+        }
+        actions.append(toggle_action)
 
         if module.source == ModuleSource.EXTERNAL:
             update_state = self._update_states.get(module.name)
             if update_state and update_state.has_update:
-                upgrade_btn = QPushButton("升级")
-                upgrade_btn.setToolTip(f"升级到 {update_state.latest_version}")
-                upgrade_btn.setStyleSheet(
-                    "background: #60a5fa; color: black; border: none; padding: 5px 10px; border-radius: 3px;"
+                actions.append(
+                    {
+                        "id": "upgrade",
+                        "label": "升级",
+                        "tooltip": f"升级到 {update_state.latest_version}",
+                        "variant": "info",
+                    }
                 )
-                upgrade_btn.clicked.connect(lambda _, n=module.name: self._upgrade_module(n))
-                layout.addWidget(upgrade_btn)
             elif self._update_check_running:
-                checking_btn = QPushButton("检查中")
-                checking_btn.setEnabled(False)
-                checking_btn.setStyleSheet(
-                    "background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.55); border: none; padding: 5px 10px; border-radius: 3px;"
+                actions.append(
+                    {
+                        "id": "checking_updates",
+                        "label": "检查中",
+                        "enabled": False,
+                        "variant": "secondary",
+                    }
                 )
-                layout.addWidget(checking_btn)
 
         if module.source == ModuleSource.DEV_LINK:
-            remove_btn = QPushButton("移除开发链接")
-            remove_btn.setToolTip("移除开发链接，不删除本地源码")
-            remove_btn.setStyleSheet(
-                """
-                QPushButton {
-                    background: rgba(248, 113, 113, 0.85);
-                    color: white;
-                    border: none;
-                    padding: 5px 10px;
-                    border-radius: 3px;
+            actions.append(
+                {
+                    "id": "remove_dev_link",
+                    "label": "移除开发链接",
+                    "tooltip": "移除开发链接，不删除本地源码",
+                    "variant": "danger",
                 }
-                QPushButton:hover { background: rgba(248, 113, 113, 1); }
-                """
             )
-            remove_btn.clicked.connect(lambda _, n=module.name: self._remove_dev_link(n))
-            layout.addWidget(remove_btn)
 
         if module.source == ModuleSource.EXTERNAL:
-            uninstall_btn = QPushButton("🗑️")
-            uninstall_btn.setToolTip("卸载模块")
-            uninstall_btn.setStyleSheet(
-                "background: #9ca3af; color: white; border: none; padding: 5px 8px; border-radius: 3px;"
+            actions.append(
+                {
+                    "id": "uninstall",
+                    "label": "🗑️",
+                    "tooltip": "卸载模块",
+                    "variant": "secondary",
+                }
             )
-            uninstall_btn.clicked.connect(lambda _, n=module.name: self._uninstall_module(n))
-            layout.addWidget(uninstall_btn)
+        return actions
 
-        return widget
+    def _status_tone(self, status: ModuleStatus) -> str:
+        return {
+            ModuleStatus.ENABLED: "success",
+            ModuleStatus.DISABLED: "neutral",
+            ModuleStatus.INCOMPATIBLE: "warning",
+            ModuleStatus.INVALID: "danger",
+        }.get(status, "neutral")
+
+    def _on_table_query_requested(self, request_id: int, query: dict[str, Any]) -> None:
+        result = resolve_local_data_table_result(
+            self._table_rows,
+            columns=self.TABLE_SCHEMA["columns"],
+            query=query,
+        )
+        self.table.apply_result(request_id, attach_display_index(result))
+
+    def _on_table_row_clicked(self, row: dict[str, Any]) -> None:
+        module = row.get("module")
+        if isinstance(module, ModuleInfo):
+            self.open_detail.emit(module)
+
+    def _on_table_action_requested(self, action_id: str, row: dict[str, Any]) -> None:
+        module_name = str(row.get("module_name") or "")
+        module = row.get("module")
+        if action_id == "detail" and isinstance(module, ModuleInfo):
+            self.open_detail.emit(module)
+        elif action_id == "enable" and module_name:
+            self._enable_module(module_name)
+        elif action_id == "disable" and module_name:
+            self._disable_module(module_name)
+        elif action_id == "upgrade" and module_name:
+            self._upgrade_module(module_name)
+        elif action_id == "remove_dev_link" and module_name:
+            self._remove_dev_link(module_name)
+        elif action_id == "uninstall" and module_name:
+            self._uninstall_module(module_name)
 
     def _track_task(self, coroutine) -> None:
         try:
@@ -401,7 +431,7 @@ class ModuleListWidget(QWidget):
         ]
         self._update_check_running = True
         self.check_updates_btn.setText("检查中…")
-        self.table.refresh()
+        self._refresh_table()
         try:
             if not external_modules:
                 if notify:
@@ -452,7 +482,7 @@ class ModuleListWidget(QWidget):
             if seq == self._update_check_seq:
                 self._update_check_running = False
                 self.check_updates_btn.setText("⬆ 检查更新")
-                self.table.refresh()
+                self._refresh_table()
 
     def _install_module(self):
         dialog = ModuleInstallDialog(self)
@@ -599,10 +629,11 @@ class ModuleListWidget(QWidget):
             self._set_busy(False)
 
     def _uninstall_module(self, name: str):
+        warning_text = self._build_uninstall_warning_text(name)
         reply = QMessageBox.question(
             self,
-            "确认卸载",
-            f"确定要卸载模块 '{name}' 吗？\n此操作不可撤销。",
+            "⚠️ 确认卸载并清理数据",
+            warning_text,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -618,6 +649,56 @@ class ModuleListWidget(QWidget):
             self.load_data(force_refresh=True)
         except Exception as e:
             QMessageBox.warning(self, "卸载失败", str(e))
+
+    def _build_uninstall_warning_text(self, name: str) -> str:
+        lines = [
+            f"确定要卸载模块 '{name}' 吗？",
+            "",
+            "此操作不可撤销，并会清理该模块的配置、托管数据、审计事件和宿主页面声明。",
+        ]
+        try:
+            data_store = get_module_data_store()
+            resources = data_store.list_data_resources(name)
+        except Exception:
+            resources = []
+            data_store = None
+
+        try:
+            db_views = data_store.list_db_views(name) if data_store is not None else []
+        except Exception:
+            db_views = []
+
+        if resources:
+            lines.extend(["", "将清理的数据资源："])
+            for resource in resources:
+                resource_id = str(resource.get("resource_id") or "")
+                storage_mode = str(resource.get("storage_mode") or "")
+                cleanup_policy = str(resource.get("cleanup_policy") or "")
+                physical_table_name = str(resource.get("physical_table_name") or "")
+                if storage_mode == "custom_table":
+                    action = "删除自定义物理表" if cleanup_policy == "drop_table" else "保留物理表" if cleanup_policy == "keep" else "清空自定义物理表"
+                    lines.append(f"- {resource_id}: {action} {physical_table_name}")
+                else:
+                    lines.append(f"- {resource_id}: 删除 module_datasets 托管记录")
+        else:
+            lines.extend(["", "当前未发现已登记的数据资源，但仍会执行模块级配置和数据清理。"])
+
+        if db_views:
+            lines.extend(["", "将清理的数据库视图："])
+            for db_view in db_views:
+                view_id = str(db_view.get("view_id") or "")
+                cleanup_policy = str(db_view.get("cleanup_policy") or "")
+                physical_view_name = str(db_view.get("physical_view_name") or "")
+                if cleanup_policy == "keep":
+                    action = "保留数据库视图"
+                elif cleanup_policy == "drop_table":
+                    action = "删除物化统计表"
+                else:
+                    action = "删除数据库视图"
+                lines.append(f"- {view_id}: {action} {physical_view_name}")
+
+        lines.extend(["", "请确认已经备份需要保留的数据。"])
+        return "\n".join(lines)
 
     def _remove_dev_link(self, name: str):
         reply = QMessageBox.question(

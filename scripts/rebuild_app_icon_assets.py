@@ -13,7 +13,8 @@ MASTER_ICON = ASSETS_ROOT / "app_icon_master.png"
 RUNTIME_ICON = ASSETS_ROOT / "app_icon.png"
 MACOS_ICON = ASSETS_ROOT / "app_icon.icns"
 WINDOWS_ICON = ASSETS_ROOT / "app_icon.ico"
-ICON_SCALE = 0.964
+# Dock / 壳层图标尺寸只按中轴线 inset（安全区）调，不按 visible bbox 调。
+ICON_SCALE = 0.955078125
 ICO_SIZES = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 
 
