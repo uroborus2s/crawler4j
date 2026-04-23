@@ -193,7 +193,7 @@ uv run crawler4j host install apply dist/<module>-<version>.zip --skip-remote-ch
 3. 宿主能成功安装 ZIP，或能从 GitHub 仓库 / Release URL 直接安装
 4. 模块详情页来源不再是 `开发链接`
 5. 宿主里能选到该模块并执行最小 workflow
-6. Hosted UI 页面和 `core:data_table` 页面能正常打开
+6. Hosted UI 页面都能正常打开，内联 `DataTable` 的搜索、排序、分页与跳转行为符合预期
 
 如果你还要验证正式升级，再补两步：
 

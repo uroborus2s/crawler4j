@@ -4,91 +4,43 @@
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
-**上游输入：** `module-boundaries.md` | `api-design.md` | 当前 `TaskContext` / MMS / ATM / Debug 实现  
-**下游输出：** `docs/03-developer-guide/core-concepts.md` | `docs/03-developer-guide/build-modules.md` | `docs/03-developer-guide/reference-core-capabilities.md` | `.factory/memory/api.summary.md`  
-**关联 ID：** `API-005`, `API-006`, `REQ-002`, `REQ-003`, `REQ-006`, `REQ-008`, `CR-003`, `CR-008`
-**最后更新：** 2026-04-21
+**关联 ID：** `API-005`, `API-006`, `API-008`, `API-009`  
+**最后更新：** 2026-04-23
 
 ## 1. 设计目标
 
-本契约用于统一模块开发者在运行时面对的五类核心对象：
+本契约用于统一模块开发者在运行时面对的六类核心对象：
 
 1. 配置
 2. 运行态元数据
 3. 单次运行内共享内存
-4. 快照数据
-5. 审计事件与短期状态
+4. 页面 schema
+5. 快照数据 / 数据库视图
+6. 审计事件与短期状态
 
-目标不是再引入一层抽象，而是把当前已经落地的事实源固定下来，避免模块作者继续在 `module.yaml`、模块目录、自定义 YAML、`ctx.runtime`、`ctx.state`、`db.*` 之间混用。
+目标不是再引入一层抽象，而是把当前已经落地的事实源固定下来，避免模块作者继续在 `module.yaml`、模块目录、自定义 YAML、`ctx.runtime`、`ctx.state`、`db.*`、UI schema 之间混用。
 
 ## 2. 统一分层
 
 | 类别 | 事实源 | 模块读取方式 | 模块写入方式 | 说明 |
 |---|---|---|---|---|
-| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、工作流、UI 扩展，以及一次性初始化模板 `config_defaults` |
+| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、工作流、页面导航，以及一次性初始化模板 `config_defaults` |
 | 持久配置 | `config.db.module_config_entries` | `ctx.get_config()` / `ctx.config` | 禁止 | 宿主统一维护；模块运行时只读 |
 | 运行态元数据 | `ctx.runtime` | `ctx.runtime[...]` | 禁止 | 由 ATM / Debug / Core 注入 |
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
-| 快照数据 | `data.db.module_datasets` / `data.db.module_data_table_views` | `ctx.tools.call("db.list_records")` / `ctx.tools.call("ui.get_data_table")` | `ctx.tools.call("db.replace_records")` / `ctx.tools.call("ui.declare_data_table")` | 当前记录列表、当前结果集、可编辑数据表 |
+| 页面 schema | `data.db.module_pages` | `ctx.tools.call("ui.get_page")` | `ctx.tools.call("ui.declare_page")` | 宿主管理页面 schema；模块只声明页面，不再声明独立数据表页 |
+| 快照数据 | `data.db.module_data_resources` + `data.db.module_datasets` / 模块自定义物理表 | `ctx.tools.call("db.list_records")` | `ctx.tools.call("db.declare_data_resource")` / `ctx.tools.call("db.replace_records")` | `managed_dataset` 适合低频稳定数据，`custom_table` 适合高频计算或明细表 |
+| 数据库视图 | `data.db.module_db_views` | `ctx.tools.call("db.query_view")` | `ctx.tools.call("db.declare_db_view")` | 基于当前模块 `custom_table` 的受控 `SELECT` 统计视图 |
 | 审计事件历史 | `data.db.module_audit_events` | `ctx.tools.call("db.query_events")` | `ctx.tools.call("db.append_event")` | append-only 业务历史、操作轨迹、时间线查询 |
 | 短期状态与锁 | `state.db.kv_store` | `ctx.tools.call("db.get_state")` 等 | `ctx.tools.call("db.set_state")` 等 | 游标、进度、会话、小体量状态、幂等锁 |
 
 ## 3. 配置契约
 
-### 3.1 配置事实源
-
 - `module.yaml` 是唯一模块清单，可额外声明只读默认模板 `config_defaults`，但不是可变配置存储。
 - 模块可变配置统一持久化到 `config.db.module_config_entries`。
-- 模块详情页的 `配置` 标签以 YAML 作为编辑格式，但数据库才是正式事实源。
-- `config_defaults` 只参与首次初始化和手动“恢复默认”，不会成为运行时直接读取的配置来源。
-
-### 3.2 模块开发者约束
-
-- 运行时代码只能通过 `ctx.get_config()` 或 `ctx.config` 读取配置。
-- 运行时代码不得写配置。
+- 模块运行时代码只能通过 `ctx.get_config()` 或 `ctx.config` 读取配置。
 - 模块不得自行读取宿主配置数据库。
 - 除 `module.yaml.config_defaults` 外，不再承认模块目录里的第二套配置事实源，例如 `module.settings.yml`、`strategy.yaml`、`config_schema.json`。
-
-### 3.3 推荐 YAML 结构
-
-```yaml
-auth:
-  base_url: https://example.com
-  username: demo
-
-browser:
-  headless: true
-  timeout_seconds: 30
-```
-
-规则：
-
-- 根节点必须是 mapping。
-- key 统一使用 `snake_case`。
-- 按业务域分组，不要铺平成一堆魔法 key。
-- workflow 覆盖只写差异项，不复制整份模块级配置。
-
-### 3.4 `config_defaults` 契约
-
-`module.yaml` 允许声明：
-
-```yaml
-config_defaults:
-  module:
-    auth:
-      base_url: https://example.com
-  workflows:
-    default:
-      headless: false
-```
-
-约束：
-
-- `config_defaults.module` 必须是 mapping
-- `config_defaults.workflows.<workflow_name>` 必须是 mapping
-- `workflow_name` 必须先在 `module.yaml.workflows` 中声明
-- 首次加载模块时，如数据库中尚无该模块的配置记录，宿主会把这份模板初始化到 `config.db.module_config_entries`
-- 初始化完成后会写入宿主侧标记，后续升级、刷新和重扫不再自动覆盖数据库里的当前配置
 
 ## 4. 运行态元数据契约
 
@@ -110,78 +62,75 @@ config_defaults:
 - `workflow`、`devel_mode`、`creation_params` 不能再混进 `ctx.config`。
 - 本次执行的临时变量也不要写入 `ctx.runtime`，应放到局部变量或 `ctx.state`。
 
-## 5. 单次运行内共享内存契约
+## 5. 页面 schema 契约
 
-`ctx.state` 是当前一次任务 / 工作流执行内可读写的共享内存，不会替代长期配置，也不承担业务数据集职责。
+### 5.1 页面声明
 
-推荐命名空间如下：
+页面 schema 只能通过 `ui.declare_page` 声明，并持久化到 `data.db.module_pages`。
 
-```python
-ctx.state.setdefault("module", {})
-ctx.state.setdefault("workflow", {})
-ctx.state.setdefault("tasks", {})
-```
+正式契约：
 
-推荐约束：
+- `module.yaml.ui_extension.pages[]` 只声明导航元信息
+- `declare_ui()` 只调用 `ui.declare_page`
+- `ui.get_page` 只读取页面 schema
+- 不再存在 `ui.declare_data_table` / `ui.get_data_table`
 
-- `ctx.state["module"]`：模块级临时缓存，例如本次登录态、当前游标快照。
-- `ctx.state["workflow"]`：工作流编排临时结果，例如阶段计数、分页进度。
-- `ctx.state["tasks"]`：任务级共享对象，例如子任务回传的小体量中间结果。
+### 5.2 页面数据
 
-不要把下面这些内容塞进 `ctx.state`：
+页面数据只允许通过两类同步函数提供：
 
-- 大批量业务 records
-- 长期配置
-- 需要跨多次任务长期保留的持久状态
+- `load_handler(context, page_id, params=None)`
+- `query_handler(context, table_id, query, params=None)`
 
-## 6. 快照数据、审计事件与数据表契约
+模块可以在这些函数中调用：
+
+- `db.list_records`
+- `db.query_view`
+- `db.query_events`
+- 其它宿主能力
+
+但宿主只负责接收结构化返回值并渲染，不解释业务语义。
+
+### 5.3 `DataTable` 组件
+
+`DataTable` 只是页面 schema 的子组件。
+
+数据源只支持：
+
+- `binding`
+- `rows`
+- `query_handler`
+
+表格交互由宿主统一处理，但数据查询和写回策略由模块自行决定。
+
+## 6. 快照数据、数据库视图与审计事件契约
 
 ### 6.1 快照数据位置
 
-- `ui.declare_data_table` 声明的 schema 持久化到 `data.db.module_data_table_views`
-- `db.list_records` / `db.replace_records` 读写的快照型 records 持久化到 `data.db.module_datasets`，宿主按 `(module_name, dataset_name, record_index)` 一条 record 一行存储
-- dataset 级 `created_at` / `updated_at` 与“空 dataset 仍已存在”的元数据由宿主额外持久化到 `data.db.module_dataset_manifests`
+- `db.declare_data_resource` 会把模块数据资源登记到 `data.db.module_data_resources`
+- `managed_dataset` 模式下，`db.list_records` / `db.replace_records` 读写的快照记录持久化到 `data.db.module_datasets`
+- `custom_table` 模式下，宿主会创建受控物理表 `module_name_resource_id`
+- `db.declare_db_view` 会把数据库视图登记到 `data.db.module_db_views`
 - `db.append_event` / `db.query_events` 读写的审计事件持久化到 `data.db.module_audit_events`
 
-### 6.2 快照数据与审计事件语义
-
-- `module_datasets` 承载“当前状态型 / 可覆盖型”业务数据；dataset 级语义仍是整包快照，但底层持久化已改为逐行 record。
-- `module_dataset_manifests` 承载 dataset 级时间戳与存在性元数据，避免空 dataset 或 rewrite 把首次 `created_at` 语义抹掉。
-- `module_audit_events` 承载“历史轨迹型 / append-only”审计事件。
-- 当前正式持久化表为 `data.db.module_audit_events`，正式工具名为 `db.append_event` / `db.query_events`。
-- `previous_status` / `next_status` / `result` / `reason` 等一等审计字段应直接写顶层；`payload` 只保留模块私有扩展字段。
-- `init_database()` 会自动把旧版 `(module_name, dataset_name, records_json)` 聚合表迁移为逐行结构并补写 manifest；若 legacy `records_json` 非法、不是数组或数组里混入非对象元素，宿主会 fail-fast 回滚，避免静默丢数。
-- 审计事件不应回写 `module_datasets`，也不直接进入 `core:data_table` 的 schema / records 链路。
-- `core:data_table` 当前只面向快照型 dataset；不要把事件流接进通用可编辑数据表。
-- retention / archive 后续可在宿主侧继续扩展，但不属于本轮正式契约。
-
-### 6.3 模块源码与运行时数据边界
-
-当前 CLI V1 不再为“源码层数据模型”单独建立 `data/` 命令或固定目录。
-
-换句话说：
-
-- 业务辅助代码按实际职责放在 `tasks/`、`workflows/`、`ui/` 或模块自定义源码文件里
-- `data.db` 才是运行时业务数据，但其中也已按“快照数据 / 审计事件”分成两条能力面
-
-### 6.4 两条持久数据通道怎么分工
+### 6.2 数据分工
 
 | 你要保留什么 | 正式入口 | 语义 |
 |---|---|---|
-| 当前最新名单、当前状态、当前结果集 | `db.list_records` / `db.replace_records` | 可被下一次写入整体替换的快照；底层按 record 逐行落库 |
-| 只追加的历史记录、状态迁移、操作痕迹 | `db.append_event` / `db.query_events` | append-only 历史，不回写当前快照 |
-| 宿主内可编辑数据表 | `ui.declare_data_table` + `core:data_table` | 只服务快照 dataset |
+| 低频稳定记录、账号表、开关清单 | `db.declare_data_resource(storage_mode="managed_dataset")` + `db.list_records` / `db.replace_records` | 当前快照，可整包覆盖 |
+| 高频计算明细、运行审计、计费明细 | `db.declare_data_resource(storage_mode="custom_table")` + `db.list_records` / `db.replace_records` | schema 驱动的受控实体表 |
+| 基于实体表的统计汇总、条件筛选、排序分页 | `db.declare_db_view` + `db.query_view` | 只读统计查询 |
+| 只追加的历史记录、状态迁移、操作痕迹 | `db.append_event` / `db.query_events` | append-only 历史，不回写快照 |
 
-### 6.5 数据表开发约束
+### 6.3 明确删除的旧边界
 
-- 数据表 schema 只能通过 `ui.declare_data_table` 声明。
-- 快照型 records 只能通过 `db.list_records` / `db.replace_records` 读写。
-- 审计事件只能通过 `db.append_event` / `db.query_events` 读写。
-- `view_id` 与 `dataset` 必须保持一致，由宿主统一管理。
-- `core:data_table` 只服务快照 dataset，不承担 append-only 审计历史。
-- schema 不是配置，不要塞进 `ctx.config`。
-- `lock_key` / `lock_scope` 只用于 Core 临时锁，不用于表达模块业务占用态。
-- 若模块已自行维护 `occupied` / `occupied_label` 等业务占用字段，不得再同时声明 `lock_key`；宿主会把它视为冲突 schema 并拒绝加载。
+不再存在以下正式契约：
+
+- `module_data_table_views`
+- `ui.declare_data_table`
+- `ui.get_data_table`
+- `core:data_table`
+- 由宿主替模块管理数据表页面语义
 
 ## 7. 短期状态与锁契约
 
@@ -199,111 +148,14 @@ ctx.state.setdefault("tasks", {})
 推荐 key 结构：
 
 - `<module_name>:<domain>:<name>`
-- 例如 `ctrip:orders:cursor`
 
-推荐用法：
-
-- 轻量游标、进度、短期 session 信息 -> `db.set_state`
-- 并发互斥、幂等写保护 -> `db.acquire_lock`
-
-## 8. 典型代码模型
-
-```python
-from crawler4j_sdk import TaskContext
-
-
-async def execute(ctx: TaskContext):
-    auth = ctx.get_config("auth", {})
-    workflow = ctx.runtime.get("workflow")
-    params = ctx.runtime.get("params", {})
-
-    ctx.state.setdefault("workflow", {})
-    ctx.state["workflow"]["page"] = 1
-
-    if ctx.tools and ctx.tools.has_tool("ui.declare_data_table"):
-        ctx.tools.call(
-            "ui.declare_data_table",
-            view_id="accounts",
-            schema={
-                "title": "账号管理",
-                "dataset": "accounts",
-                "columns": ["id", "phone_number", "status"],
-            },
-        )
-
-    if ctx.tools and ctx.tools.has_tool("db.list_records"):
-        rows = ctx.tools.call("db.list_records", dataset="accounts")
-        ctx.tools.call("db.replace_records", dataset="accounts", records=rows)
-
-    if ctx.tools and ctx.tools.has_tool("db.append_event"):
-        ctx.tools.call(
-            "db.append_event",
-            dataset="account_events",
-            event_type="status_changed",
-            entity_key="13800000001",
-            previous_status="active",
-            next_status="blocked",
-            reason="risk_control",
-            payload={"operator": "system"},
-        )
-
-    if ctx.tools and ctx.tools.has_tool("db.query_events"):
-        history = ctx.tools.call(
-            "db.query_events",
-            dataset="account_events",
-            entity_key="13800000001",
-            limit=20,
-        )
-        ctx.state["workflow"]["history_size"] = len(history)
-
-    return {
-        "workflow": workflow,
-        "auth_username": auth.get("username"),
-        "params": params,
-    }
-```
-
-最小分流示例：
-
-```python
-snapshot_rows = [...]
-ctx.tools.call("db.replace_records", dataset="accounts", records=snapshot_rows)
-
-if ctx.tools and ctx.tools.has_tool("db.append_event"):
-    ctx.tools.call(
-        "db.append_event",
-        dataset="account_events",
-        event_type="status_changed",
-        entity_key="13800000001",
-        previous_status="active",
-        next_status="blocked",
-        reason="risk_control",
-        payload={"operator": "system"},
-    )
-```
-
-## 9. 明确禁止的模式
+## 8. 明确禁止的模式
 
 - 在模块运行时代码中写配置
 - 直接连接 `config.db`、`data.db`、`state.db`
 - 把 `workflow`、`devel_mode`、`creation_params` 写进 `ctx.config`
 - 把大批量业务数据写进 `ctx.state` 或 `db.set_state`
-- 把审计事件历史混进 `module_datasets` 或 `core:data_table`
+- 把审计事件历史混进快照数据
 - 在模块目录里再维护一份正式 `*.yml` 配置事实源
-- 把数据表 schema 当成模块配置保存
-
-## 10. 当前实现说明
-
-为了避免文档与运行代码漂移，这里额外固定两条当前事实：
-
-1. 当前运行时代码里不存在 `state.db.kv_store -> data.db` 的模块数据表自动迁移逻辑。
-2. 如果历史环境仍有旧 KV 里的 schema / records，需要通过显式迁移工具或人工导入处理；当前读链路只读取 `data.db`。
-3. `core:data_table` 当前只服务快照 dataset，不承担 append-only 审计历史读写。
-
-## 11. 变更记录
-
-| 日期 | 变更内容 | 变更人 |
-|---|---|---|
-| 2026-04-17 | 初版建立模块配置、运行态、内存与数据表的统一契约 | Codex |
-| 2026-04-18 | 增补模块审计事件契约，明确快照数据与审计事件分层存储 | Codex |
-| 2026-04-21 | 刷新 `module_datasets` 逐行持久化与 legacy `records_json` 自动迁移的正式契约元数据，并补记 `module_dataset_manifests` 与 fail-fast 迁移规则 | Codex |
+- 把页面 schema 当成模块配置保存
+- 重新引入独立数据表页面契约

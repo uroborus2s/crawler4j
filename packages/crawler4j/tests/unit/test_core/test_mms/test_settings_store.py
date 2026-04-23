@@ -374,7 +374,11 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
     store.write_module_settings("demo_module", {"api_key": "secret"})
     store.write_workflow_settings("demo_module", "login", {"headless": False})
     data_store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
-    data_store.write_data_table_schema("demo_module", "accounts", {"title": "账号管理", "dataset": "accounts"})
+    data_store.write_page_schema(
+        "demo_module",
+        "dashboard",
+        {"type": "Page", "title": "账号管理", "load_handler": "load_dashboard_page", "children": []},
+    )
 
     registry = ModuleRegistry(
         scanner=ModuleScanner(scan_paths=[scan_root]),
@@ -384,13 +388,17 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
     assert registry.uninstall("demo_module") is True
     assert store.export_module_settings("demo_module") == {"module": {}, "workflows": {}}
     assert data_store.read_dataset("demo_module", "accounts") == []
-    assert data_store.read_data_table_schema("demo_module", "accounts") == {}
+    assert data_store.read_page_schema("demo_module", "dashboard") == {}
 
     _write_module(scan_root)
     store.write_module_settings("demo_module", {"api_key": "secret"})
     store.write_workflow_settings("demo_module", "login", {"headless": False})
     data_store.write_dataset("demo_module", "accounts", [{"id": "u2"}])
-    data_store.write_data_table_schema("demo_module", "accounts", {"title": "账号管理", "dataset": "accounts"})
+    data_store.write_page_schema(
+        "demo_module",
+        "dashboard",
+        {"type": "Page", "title": "账号管理", "load_handler": "load_dashboard_page", "children": []},
+    )
     registry = ModuleRegistry(
         scanner=ModuleScanner(scan_paths=[scan_root]),
         dev_link_store=_FakeDevLinkStore(),
@@ -403,4 +411,4 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
         "workflows": {"login": {"headless": False}},
     }
     assert data_store.read_dataset("demo_module", "accounts") == []
-    assert data_store.read_data_table_schema("demo_module", "accounts") == {}
+    assert data_store.read_page_schema("demo_module", "dashboard") == {}

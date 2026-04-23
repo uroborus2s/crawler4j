@@ -100,8 +100,8 @@ uv run crawler4j workflow create <name>
 # 创建宿主页
 uv run crawler4j page create dashboard
 
-# 注册受控数据表
-uv run crawler4j data-table create accounts
+# 在宿主页里接入纯 UI DataTable 组件
+# 通过 `crawler4j page create` 生成页面骨架后，在 build_<page>_page_schema 中补 DataTable
 
 # 创建环境选择器
 uv run crawler4j env-selector create pick_ready
@@ -317,8 +317,7 @@ async def on_cleanup(context: TaskContext):
 def declare_ui(context: TaskContext):
     """声明 Hosted UI 元数据。
 
-    `crawler4j page create <page_id>` 和 `crawler4j data-table create <view_id>`
-    会把宿主页 / 受控数据表声明插到这个函数里。
+    `crawler4j page create <page_id>` 会把宿主页声明插到这个函数里。
     """
     # SDK-DATA-TABLES
     return None
@@ -376,30 +375,6 @@ def {function_name}(context: TaskContext, candidates: list[EnvCandidate]):
     if not ready_candidates:
         return None
     return ready_candidates[0].env_id
-'''
-
-DATA_TABLE_HELPER_TEMPLATE = '''
-
-def _declare_{view_id}_table(context: TaskContext):
-    """声明 `{view_id}` 受控数据表。"""
-    if not context.tools or not context.tools.has_tool("ui.declare_data_table"):
-        return None
-
-    return context.tools.call(
-        "ui.declare_data_table",
-        view_id="{view_id}",
-        schema={{
-            "title": "{display_name}",
-            "dataset": "{view_id}",
-            "primary_key": "id",
-            "display_fields": ["id", "status", "updated_at"],
-            "columns": [
-                {{"key": "id", "label": "ID", "required": True}},
-                {{"key": "status", "label": "状态"}},
-                {{"key": "updated_at", "label": "更新时间"}},
-            ],
-        }},
-    )
 '''
 
 PAGE_HELPER_TEMPLATE = '''

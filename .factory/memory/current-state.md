@@ -2,8 +2,8 @@
 
 - 当前模式：Default
 - 当前阶段：IMPLEMENTATION
-- 活跃任务：14
-- 活跃变更：4
+- 活跃任务：1
+- 活跃变更：1
 - 活跃缺陷：5
 - 活跃 PR：0
 
@@ -17,11 +17,18 @@
 
 ## 最近条目
 
+- 最新修复：2026-04-23 已完成 Hosted UI 纯 UI 收口：模块清单 `ui_extension.pages[]` 现只保留 `id/label/icon` 导航元信息，运行时只保留 `ui.declare_page` / `ui.get_page`，宿主已删除 `entry` / `core:data_table` / `ui.declare_data_table` / `module_data_table_page` 等旧边界；所有表格场景统一改为页面内联 `DataTable`，页面数据与查询全部由 `load_handler` / `query_handler` 和 `db.*` 能力提供，相关定向回归 `148 passed`。
+- 最新修复：2026-04-23 已完成 `CR-014` / `TASK-028` 实现：宿主新增 `module_db_views` 作为数据库视图事实源，运行时提供 `db.declare_db_view` / `db.query_view`，Hosted UI `core:data_table` 新增 `data_source_kind="db_view"` 只读统计表模式，支持受控过滤、排序、分页，并在模块卸载时列出需删除的数据库视图；当前 V1 正式支持 `sql_view`，相关定向回归 `122 passed`、目标文件 `ruff check` 通过。
+- 最新修复：2026-04-23 已完成 `CR-013` / `TASK-027` 最终收口：Hosted UI 新增 `open_page.params`、表格 `row_action`、模块详情页缓存页参数替换，以及目标 `core:data_table` 的 `navigation_filters`；默认 CRUD 已改为对底层全量资源做定点写回，不再在过滤详情表里覆盖 sibling records，`row_action` 未声明 `params` 时也不会再透传整行；同时保留显式 `data_resource` metadata 与 omitted `resource_id` 的 alias 路由兼容。当前主表点击可打开关联详情页/详情表，目标页收到最新 params，目标详情表会按参数过滤关联记录；对应最终定向回归 `122 passed`、目标文件 `ruff check` 通过，测试团队结论 `PASS`、审查团队结论 `no blocking findings`。
 - 最新修复：2026-04-22 已继续微调桌面图标的壳层占比：共享图标母版的导出缩放系数现从 `0.965` 下调到 `0.964`，重新生成 `app_icon.png` / `app_icon.icns` / `app_icon.ico` 后，macOS Dock 与 Windows 壳层图标再缩小约 1px。
+- 最新修复：2026-04-23 已完成 `CR-012` / `TASK-026` 纠偏收口：宿主新增 `module_data_resources` 统一登记 `managed_dataset` / `custom_table`，`module_datasets` 升级到带 `record_key` / `run_status` / `record_status` 的 V3 结构，`custom_table` 已从泛型 `record_json` 容器改为 `schema_version` / `schema_json` / `indexes_json` 驱动的受控实体表；`db.declare_data_resource`、`ui.declare_data_table` 与 `core:data_table` 已按资源模式路由，模块卸载时会按资源清单给出醒目清理提示；对应相关 unit/integration/acceptance 组合回归 `157 passed`、目标文件 `ruff check` 通过。
+- 最新修复：2026-04-23 已将桌面图标可见 bbox 收口到 `855x855`：基于母版导出枚举确认 `scaled_size=966x966` 时 PNG 非透明 bbox 为 `855x855`，因此 `ICON_SCALE` 固定为 `0.943359375`，并同步放宽透明安全区测试上限到 `85px`。
+- 最新修复：2026-04-23 已完成桌面图标壳层占比最后一轮微调：共享图标母版导出缩放系数现从 `0.95` 下调到 `0.94575`，让导出 PNG 的实际可见 bbox 高度从 `858px` 收到 `857px`，作为本轮 macOS / Windows 共用图标尺寸收口值。
+- 最新修复：2026-04-23 已继续微调桌面图标壳层占比：共享图标母版导出缩放系数现从 `0.952` 下调到 `0.95`，基于 `1024x1024` 母版让导出主图高度再缩小约 `2px`，用于继续压低 macOS Dock 与 Windows 壳层中的视觉占比。
 - 最新修复：2026-04-23 已继续收口 Windows 打包版首窗启动竞态：`src.ui.app:_run_application` 在 `Shell.show()/showMinimized()` 后不再立刻恢复 `quitOnLastWindowClosed`，而是先让 `qasync` 事件循环过一个 tick 再恢复，避免 Windows 安装态在主窗口完成首轮原生注册前就提前停掉事件循环；对应 `test_app.py` 已同步锁定这个顺序。
 - 最新修复：2026-04-22 已继续收口桌面应用图标的 Dock 外轮廓占比：仓库现新增 `app_icon_master.png -> scripts/rebuild_app_icon_assets.py -> app_icon.png/icns/ico` 的固定生成链，运行时与打包图标统一按同一比例回缩到更保守的四边安全区；同时图标回归测试已修正右/下 inset 计算口径，并锁定四边安全区在同一范围内，避免图标再次在 macOS Dock 中显得比浅色系统图标更大。
-- 最新修复：2026-04-22 已完成 hosted UI V1 第二轮收口：模块详情页对 `core:page:*` / `core:data_table:*` 入口改为首次选中时再实例化，未选中的宿主页不会提前执行 `declare_ui()` 或 `load_handler`，且已有 hosted page 在再次选中菜单时会自动 refresh；`ModuleUIRuntimeBridge` 现把 `declare_ui` 产出的 session 收口为“下一次 non-declare hook 单次消费”，并让 data-table handler 在执行前先刷新声明会话，同时通过 staging buffer + `replace_declared_ui()` 保证 UI schema 整套原子替换，`declare_ui` 失败时旧 schema 保留、新 schema 不会半写入；`crawler4j check full` / `package build` / `package verify` 同步补齐 `load_handler` / `create_handler` / `update_handler` 的存在性、同步性与签名兼容校验，`ui/` 目录也已正式收口为 legacy 结构并在打包/发布链路阻断。
-- 最新修复：2026-04-22 已完成 hosted module UI V1 主链：模块清单现统一使用 `ui_extension.pages[]`，运行时新增 `ui.declare_page` / `ui.get_page` 并把 page schema 持久化到 `data.db`；模块详情页只消费 `core:page:<page_id>` 与 `core:data_table:<view_id>` 两类入口，宿主通过 `ManagedPageRenderer` 渲染 `Page / Section / Text / Button / DataTable` 最小控件集；SDK CLI `page create` / `data-table create` / `check full`、integration / acceptance、开发者文档与 `.factory` 记忆已同步切到新契约，旧 `micro_app` / `ui:*` / trust gate / allowlist 路径已退出正式实现。
+- 最新修复：2026-04-22 已完成 hosted UI V1 第二轮收口：模块详情页入口改为首次选中时再实例化，未选中的宿主页不会提前执行 `declare_ui()` 或 `load_handler`，且已有 hosted page 在再次选中菜单时会自动 refresh；`ModuleUIRuntimeBridge` 现把 `declare_ui` 产出的 session 收口为“下一次 non-declare hook 单次消费”，并通过 staging buffer + `replace_declared_ui()` 保证 UI schema 整套原子替换，`declare_ui` 失败时旧 schema 保留、新 schema 不会半写入；`crawler4j check full` / `package build` / `package verify` 同步补齐 `load_handler` 与内联表格 `query_handler` 的存在性、同步性与签名兼容校验，`ui/` 目录也已正式收口为 legacy 结构并在打包/发布链路阻断。
+- 最新修复：2026-04-22 已完成 hosted module UI V1 主链：模块清单现统一使用 `ui_extension.pages[]`，运行时新增 `ui.declare_page` / `ui.get_page` 并把 page schema 持久化到 `data.db.module_pages`；模块详情页按 `page_id` 路由页面，宿主通过 `ManagedPageRenderer` 渲染 `Page / Section / Text / Button / DataTable` 最小控件集；SDK CLI `page create` / `check full`、integration / acceptance、开发者文档与 `.factory` 记忆已同步切到新契约，旧 `micro_app` / `ui:*` / trust gate / allowlist 路径已退出正式实现。
 - 最新修复：2026-04-22 已继续修正 Windows Velopack CLI 在 `uv run python` 下的两段断链：当 `dnx` 或 `vpk` 实际解析为 `*.cmd` / `*.bat` 时，`package-windows-release` 现在会自动改用 `cmd.exe /c` 调起 CLI；若 Python `velopack` 版本带 `.dev` / `+local` 后缀，则会先正规化成 NuGet 可接受的基础版本后再传给 `dnx --version`，不再继续命中 `WinError 2` 或 `invalid NuGet version`。
 - 最新修复：2026-04-22 已继续修正 Windows 打包版首窗显示前的启动竞态与安装态图标漂移：`src.ui.app:main` 现在会在异步启动阶段先禁用 `quitOnLastWindowClosed`，并在主窗口 `show()` 后继续把恢复动作延后到下一轮事件循环，避免 Windows 客户端在 `Shell` 真正完成首轮显示前提前停掉 `qasync` 事件循环；同时 `package-windows-release` 现会把 `app_icon.ico` 继续传给 Velopack，确保 `Setup.exe`、安装后快捷方式与 `Crawler4j.exe` 使用同一套 Windows 图标。
 - 最新修复：2026-04-22 已继续收口桌面宿主应用图标的 Dock 光学尺寸：当前正式图标仍保留“暖灰白底板 + 蓝色主徽记 + 放大镜轮廓 + 4j 主字标”的浅色品牌母版，但已先按本机系统圆角方形图标的外轮廓占比对齐底板，再单独缩小中心蓝色徽章与放大镜组，不再在 Dock 中比常见系统应用显得更大；当前直接锁定该回归的是 `test_icon_packaging.py` 的“透明圆角 + 中轴安全区 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言。
@@ -36,7 +43,7 @@
 - 最新修复：2026-04-22 已继续修正 macOS 内部 DMG 布局链的三处实机问题：Apple Silicon 上不再调用会失败的 `bless --openfolder`，Finder 布局脚本改为使用 `hdiutil attach` 返回的实际挂载卷名，且 `makehybrid` 现显式指定最终 HFS 卷名为 `Crawler4j`，避免本机已挂载同名卷时打偏布局或把中间目录名暴露给用户；最新 real artifact 已通过本机 `hdiutil attach` 验证。
 - 最新修复：2026-04-22 已把 macOS 内部发布脚本的环境变量入口补成“默认读取 workspace 根 `.env`，也支持显式 `--env-file` 覆盖”，并新增 `.env.example` 模板；当前 `deploy-macos-internal-release` 仍旧通过 `rsync -av packages/crawler4j/dist/updates/macos/ -> $CRAWLER4J_UPDATE_UPLOAD_TARGET/` 上传，不会在 `generate_appcast` 失败后继续执行上传。
 - 文档：2026-04-22 已为 macOS Sparkle 内部分发补齐服务器侧部署口径：当前推荐使用 `updates.<主域名>` 承载 `https://updates.example.com/crawler4j/appcast.xml`，仓库新增 `deploy/nginx/crawler4j-updates.example.conf` 样板，并在 `deployment-guide.md` 说明 Certbot/Let's Encrypt 与 `/srv/nginx/updates/crawler4j/` 静态目录约定；后续 `deploy-macos-internal-release` 的 rsync 目标与 nginx 目录现有统一口径。
-- 文档：2026-04-22 已把模块 UI 重构方案沉淀为正式设计：新增 `module-hosted-ui-framework.md`，明确模块不得再导出 `PyQt6` 页面，下一轮 UI 契约将统一收口为 `ui_extension.pages[] + ui.declare_page/ui.declare_data_table`，第一版宿主控件固定为 `Page`、`Section`、`Text`、`Button`、`DataTable`。
+- 文档：2026-04-22 已把模块 UI 重构方案沉淀为正式设计：新增 `module-hosted-ui-framework.md`，明确模块不得再导出 `PyQt6` 页面，当前 UI 契约已统一收口为 `ui_extension.pages[] + ui.declare_page`，第一版宿主控件固定为 `Page`、`Section`、`Text`、`Button`、`DataTable`。
 - 最新修复：2026-04-21 已为 macOS 小范围内部发布补齐 Sparkle 线路的最小实现：宿主新增 macOS 打包版 Sparkle 运行时桥接，`system.auto_update` 现可同步控制 Sparkle 自动检查开关；workspace 根新增 `uv run package-macos-internal-release`，会在保留现有 `PyInstaller -> Crawler4j.app` 基线的前提下，把 `Sparkle.framework`、`SUFeedURL` / `SUPublicEDKey` 注入 bundle，并在 `packages/crawler4j/dist/updates/macos/` 生成内部 DMG / `appcast.xml` 发布脚手架。当前直接锁定该路径的是 `test_update_service.py` 与 `test_packaging_config.py` 的 Sparkle 回归。
 - 最新修复：2026-04-21 已对齐 VirtualBrowser `addBrowser` 的代理协议口径：宿主创建环境时会把代理 `protocol` 统一转成官方文档示例所用的大写 `HTTP/HTTPS/SOCKS5`，避免继续把 IP 池生成的 `http://user:pass@host:port` 代理以小写协议透传给外部浏览器；同时 `VirtualBrowserClient.add_browser()` 在 `addBrowser` 返回非 2xx 或 `success=false` 时，现会把状态码与响应正文一起写入主日志并抛出带正文的异常，后续排查代理认证失败或外部宿主 500 不再只剩一条裸 `HTTPStatusError`。对应回归当前锁定于 `test_virtualbrowser_client.py` 的协议归一化与 `500` 正文透传断言。
 - 最新修复：2026-04-21 已把 ATM `ExecutionRunner` 的 `on_cleanup` 默认最大执行时间从 `8s` 提高到 `120s`，以便模块在取消或终态收口时完成更长的一轮有界 finalize；当前只放宽 cleanup budget，本地终态 hook / 环境动作的其余 timeout guard 仍保留短超时兜底，避免宿主完全失去收口保护。对应回归当前锁定于 `test_execution_runner.py` 的默认 budget 断言与既有 cleanup 超时路径。
@@ -115,7 +122,7 @@
 - 最新修复：2026-04-17 已为 `module.yaml` 增加 `config_defaults` 契约；宿主首次加载模块时会按 `config_defaults.module` / `config_defaults.workflows` 初始化 `config.db.module_config_entries` 一次并写入初始化标记，后续升级与刷新不再自动覆盖；模块详情页新增“恢复模块默认 / 恢复 Workflow 默认”按钮，并在警告确认后按当前 manifest 模板重写对应 scope。
 - 最新修复：2026-04-17 已补齐 `docs/04-project-development/04-design/module-config-runtime-data-contract.md`，并把开发者指南中的 `ctx.config`、`ctx.runtime`、`ctx.state`、`db.*` 使用边界同步为统一规范，供模块开发者按同一契约开发。
 - 最新修复：2026-04-17 已把模块分发契约收敛到 `module.yaml.upgrade_source`；正式模块安装入口现支持 `本地 ZIP` 与 `GitHub 源 URL` 双模式，安装前会校验 GitHub 仓库是否存在；DevLink 注册同样执行清单与升级源预检；模块管理页新增 `检查更新` 与行级 `升级` 按钮，正式模块可按 GitHub Release 自动下载并执行原子升级，运行中任务会阻断升级。
-- 最新修复：2026-04-17 已开始重构 `crawler4j-sdk` CLI V1，旧平铺命令树已被 `module / task / workflow / page / data-table / env-selector / config / package / release / host / check` 分组体系替换；脚手架不再创建 `data/` 抽象层，后续 2026-04-22 又进一步把 `page create` / `data-table create` 与 `check full` 全部切到 hosted page V1，不再维护 `detail_menu` 或 `ui:PageClass` 旧契约。
+- 最新修复：2026-04-17 已开始重构 `crawler4j-sdk` CLI V1，旧平铺命令树已被 `module / task / workflow / page / env-selector / config / package / release / host / check` 分组体系替换；脚手架不再创建 `data/` 抽象层，后续 2026-04-22 又进一步把 `page create` 与 `check full` 全部切到 hosted page V1，不再维护 `detail_menu`、`entry` 或 `ui:PageClass` 旧契约。
 - 最新修复：2026-04-17 已补齐 `crawler4j check full` 的导入失败收敛逻辑：当生成模块的 `module_runtime.py` 或 `ui/__init__.py` 本身存在缺失依赖/导入错误时，CLI 现在会输出明确的文件级校验错误并返回失败，不再直接抛出 traceback；新增回归测试已锁定这两条失败路径，`uv run pytest -q` 当前为 `337 passed`。
 - 最新修复：2026-04-16 已压缩仪表盘页面上半部分的标题区、统计卡高度与纵向间距，并抬高“系统实时日志”区域的最小高度；默认窗口尺寸下首页可见日志行数明显增加，便于直接观察任务执行输出。
 - 缺陷：BUG-003-pyqt-runtime-blocked-by-system-policy、BUG-004-zip-upgrade-leaves-stale-files、BUG-005-hybrid-acquisition-mode-declared-but-rejected、BUG-013-module-assembler-import-errors-hidden

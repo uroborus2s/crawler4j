@@ -28,7 +28,6 @@ from src.utils.paths import get_builtin_modules_path, get_user_modules_path
 IGNORED_DIRS = {"__pycache__", ".git", ".venv", "node_modules"}
 LEGACY_MODULE_FILES = ("config_schema.json", "strategy.yaml")
 MANAGED_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-HOSTED_PAGE_ENTRY_RE = re.compile(r"^core:(page|data_table):([a-z][a-z0-9_]*)$")
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REMOVED_MANIFEST_FIELDS = ("sdk_version_range",)
 
@@ -275,23 +274,6 @@ class ModuleScanner:
                     hint="模块详情页导航标签必须显式声明",
                 )
 
-            actual_entry = str(item.entry or "").strip()
-            match = HOSTED_PAGE_ENTRY_RE.match(actual_entry)
-            if not match:
-                raise ModuleValidationError(
-                    f"ui_extension.pages[{page_id}].entry 不受支持: {actual_entry or '<empty>'}",
-                    stage="VALIDATE",
-                    hint="详情页入口现在只允许 `core:page:<id>` 或 `core:data_table:<id>`",
-                )
-
-            _, target_id = match.groups()
-            if target_id != page_id:
-                raise ModuleValidationError(
-                    f"ui_extension.pages[{page_id}].entry 必须与 id 对齐: {actual_entry}",
-                    stage="VALIDATE",
-                    hint="entry 里的目标 ID 必须与页面声明 ID 保持一致",
-                )
-    
     def load_module(
         self,
         module_path: Path,

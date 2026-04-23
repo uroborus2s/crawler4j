@@ -50,7 +50,7 @@ class ModuleDetailPage(QWidget):
         self._module: ModuleInfo | None = None
         self._menu_pages: dict[str, QWidget] = {}
         self._hosted_page_infos: dict[str, UIPageInfo] = {}
-        self._entry_to_menu_id: dict[str, str] = {}
+        self._menu_navigation_params: dict[str, dict[str, object]] = {}
         self._pending_tasks: set[asyncio.Task] = set()
         self.repo_token_status_label: QLabel | None = None
         self.repo_token_edit: QLineEdit | None = None
@@ -173,6 +173,7 @@ class ModuleDetailPage(QWidget):
     def set_module(self, module: ModuleInfo):
         """设置要显示的模块。"""
         self._module = module
+        self._menu_navigation_params.clear()
         
         # 更新标题
         display = module.manifest.display_name or module.name
@@ -203,7 +204,6 @@ class ModuleDetailPage(QWidget):
         self.menu_list.clear()
         self._menu_pages.clear()
         self._hosted_page_infos.clear()
-        self._entry_to_menu_id.clear()
         
         # 清除旧页面
         while self.content_stack.count() > 0:
@@ -239,7 +239,6 @@ class ModuleDetailPage(QWidget):
                     item.setData(Qt.ItemDataRole.UserRole, page_info.id)
                     self.menu_list.addItem(item)
                     self._hosted_page_infos[page_info.id] = page_info
-                    self._entry_to_menu_id[page_info.entry] = page_info.id
     
     def _create_fixed_page(self, menu_id: str) -> QWidget:
         """创建固定页面。"""
@@ -475,22 +474,14 @@ class ModuleDetailPage(QWidget):
         if not self._module:
             return QWidget()
 
-        entry = str(page_info.entry or "").strip()
-        if entry.startswith("core:data_table:"):
-            view_id = entry.split(":", 2)[-1].strip() or page_info.id
-
-            from src.core.mms.ui.module_data_table_page import ModuleDataTablePage
-
-            return ModuleDataTablePage(self._module.name, view_id, module_info=self._module)
-        if entry.startswith("core:page:"):
-            page_id = entry.split(":", 2)[-1].strip() or page_info.id
-            return ManagedPageRenderer(
-                self._module.name,
-                page_id,
-                module_info=self._module,
-                open_entry_callback=self._open_entry,
-            )
-        return self._create_custom_page_placeholder(page_info, "入口不受支持", entry)
+        initial_params = self._menu_navigation_params.get(page_info.id)
+        return ManagedPageRenderer(
+            self._module.name,
+            page_info.id,
+            module_info=self._module,
+            open_page_callback=self._open_page,
+            initial_params=initial_params,
+        )
 
     def _create_custom_page_placeholder(self, page_info: UIPageInfo, title: str, message: str) -> QWidget:
         page = QWidget()
@@ -507,7 +498,7 @@ class ModuleDetailPage(QWidget):
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label)
 
-        detail = QLabel(f"{message}\n\n入口: {page_info.entry}")
+        detail = QLabel(f"{message}\n\n页面 ID: {page_info.id}")
         detail.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 12px;")
         detail.setWordWrap(True)
         detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -536,6 +527,8 @@ class ModuleDetailPage(QWidget):
         page = self._menu_pages.get(menu_id)
         if page is not None:
             if menu_id in self._hosted_page_infos and hasattr(page, "refresh"):
+                if hasattr(page, "set_navigation_params"):
+                    page.set_navigation_params(self._menu_navigation_params.get(menu_id), auto_refresh=False)
                 page.refresh()
             return page
 
@@ -555,11 +548,28 @@ class ModuleDetailPage(QWidget):
                 self.menu_list.setCurrentRow(row)
                 break
 
-    def _open_entry(self, entry: str) -> None:
-        menu_id = self._entry_to_menu_id.get(str(entry or "").strip())
+    @staticmethod
+    def _normalize_navigation_params(params: dict[str, object] | None) -> dict[str, object]:
+        if not isinstance(params, dict):
+            return {}
+        return dict(params)
+
+    def _open_page(self, page_id: str, params: dict[str, object] | None = None) -> None:
+        normalized_page_id = str(page_id or "").strip()
+        menu_id = normalized_page_id if normalized_page_id in self._hosted_page_infos else None
         if not menu_id:
-            QMessageBox.warning(self, "页面跳转失败", f"未找到宿主页入口: {entry}")
+            QMessageBox.warning(self, "页面跳转失败", f"未找到宿主页: {page_id}")
             return
+        self._menu_navigation_params[menu_id] = self._normalize_navigation_params(params)
+
+        current_item = self.menu_list.currentItem()
+        current_menu_id = current_item.data(Qt.ItemDataRole.UserRole) if current_item else None
+        if current_menu_id == menu_id:
+            page = self._ensure_menu_page(menu_id)
+            if page is not None:
+                self.content_stack.setCurrentWidget(page)
+            return
+
         self._select_menu(menu_id)
 
     def _remove_dev_link(self):

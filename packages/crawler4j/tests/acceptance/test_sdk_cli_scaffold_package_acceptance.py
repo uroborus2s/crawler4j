@@ -22,13 +22,11 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
             "id": "dashboard",
             "label": "Dashboard",
             "icon": "📄",
-            "entry": "core:page:dashboard",
         },
         {
             "id": "accounts",
             "label": "Accounts",
-            "icon": "📋",
-            "entry": "core:data_table:accounts",
+            "icon": "📄",
         },
     ]
     assert [item["name"] for item in manifest["workflows"]] == ["main_workflow", "repair_orders"]

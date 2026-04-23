@@ -145,7 +145,6 @@ class ModuleUIRuntimeBridge:
                 self._data_store.replace_declared_ui(
                     self._module_name,
                     page_schemas=buffer.page_schemas,
-                    data_table_schemas=buffer.data_table_schemas,
                 )
             finally:
                 buffer.seal()

@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from crawler4j_sdk.hosted_ui import (
+    normalize_data_resource as sdk_normalize_data_resource,
+    normalize_db_view_schema as sdk_normalize_db_view_schema,
     normalize_page_schema as sdk_normalize_page_schema,
-    normalize_table_schema as sdk_normalize_table_schema,
 )
 from crawler4j_contracts.context import (
     BBox,
@@ -103,7 +104,6 @@ class HostedUIDeclarationBuffer:
 
     def __init__(self):
         self.page_schemas: dict[str, dict[str, Any]] = {}
-        self.data_table_schemas: dict[str, dict[str, Any]] = {}
         self._collecting = True
 
     @property
@@ -112,9 +112,6 @@ class HostedUIDeclarationBuffer:
 
     def stage_page(self, page_id: str, schema: dict[str, Any]) -> None:
         self.page_schemas[page_id] = dict(schema)
-
-    def stage_data_table(self, view_id: str, schema: dict[str, Any]) -> None:
-        self.data_table_schemas[view_id] = dict(schema)
 
     def seal(self) -> None:
         self._collecting = False
@@ -136,6 +133,96 @@ class CoreDatabaseTools:
 
     def replace_records(self, dataset: str, records: list[dict[str, Any]]) -> bool:
         return self._data_store.write_dataset(self._module_name, dataset, _normalize_records(records))
+
+    def declare_data_resource(
+        self,
+        resource_id: str,
+        *,
+        storage_mode: str = "managed_dataset",
+        record_key_field: str | None = None,
+        schema: dict[str, Any] | None = None,
+        indexes: dict[str, Any] | None = None,
+        cleanup_policy: str | None = None,
+    ) -> dict[str, Any]:
+        meta = sdk_normalize_data_resource(
+            resource_id,
+            {
+                "storage_mode": storage_mode,
+                "record_key_field": record_key_field,
+                "schema": schema or {},
+                "indexes": indexes or {},
+                "cleanup_policy": cleanup_policy,
+            },
+        )
+        register_data_resource = getattr(self._data_store, "register_data_resource", None)
+        if not callable(register_data_resource):
+            raise RuntimeError("当前宿主不支持 db.declare_data_resource")
+        return register_data_resource(
+            self._module_name,
+            meta["resource_id"],
+            storage_mode=meta["storage_mode"],
+            record_key_field=meta["record_key_field"],
+            schema=meta["schema"],
+            indexes=meta["indexes"],
+            cleanup_policy=meta["cleanup_policy"],
+        )
+
+    def declare_db_view(
+        self,
+        view_id: str,
+        *,
+        view_kind: str = "sql_view",
+        source_resource_ids: list[str],
+        select_sql_template: str,
+        columns: list[dict[str, Any]],
+        cleanup_policy: str | None = None,
+        schema_version: int | None = None,
+    ) -> dict[str, Any]:
+        meta = sdk_normalize_db_view_schema(
+            view_id,
+            {
+                "view_kind": view_kind,
+                "source_resource_ids": list(source_resource_ids or []),
+                "select_sql_template": select_sql_template,
+                "columns": list(columns or []),
+                "cleanup_policy": cleanup_policy,
+                "schema_version": schema_version,
+            },
+        )
+        declare_db_view = getattr(self._data_store, "declare_db_view", None)
+        if not callable(declare_db_view):
+            raise RuntimeError("当前宿主不支持 db.declare_db_view")
+        return declare_db_view(
+            self._module_name,
+            meta["view_id"],
+            view_kind=meta["view_kind"],
+            source_resource_ids=meta["source_resource_ids"],
+            select_sql_template=meta["select_sql_template"],
+            columns=meta["columns"],
+            cleanup_policy=cleanup_policy,
+            schema_version=schema_version,
+        )
+
+    def query_view(
+        self,
+        view_id: str,
+        *,
+        filters: dict[str, Any] | None = None,
+        sort: list[dict[str, Any]] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        query_db_view = getattr(self._data_store, "query_db_view", None)
+        if not callable(query_db_view):
+            raise RuntimeError("当前宿主不支持 db.query_view")
+        return query_db_view(
+            self._module_name,
+            view_id,
+            filters=dict(filters or {}),
+            sort=[dict(item) for item in (sort or []) if isinstance(item, dict)],
+            limit=limit,
+            offset=offset,
+        )
 
     def append_event(
         self,
@@ -489,17 +576,6 @@ class CoreUITools:
     def get_page(self, page_id: str) -> dict[str, Any]:
         return self._data_store.read_page_schema(self._module_name, page_id)
 
-    def declare_data_table(self, view_id: str, schema: dict[str, Any]) -> bool:
-        managed_view_id = _validate_managed_identifier(view_id, field_name="view_id")
-        meta = sdk_normalize_table_schema(managed_view_id, dict(schema or {}))
-        if self._declaration_buffer and self._declaration_buffer.is_collecting:
-            self._declaration_buffer.stage_data_table(managed_view_id, meta)
-            return True
-        return self._data_store.write_data_table_schema(self._module_name, managed_view_id, meta)
-
-    def get_data_table(self, view_id: str) -> dict[str, Any]:
-        return self._data_store.read_data_table_schema(self._module_name, view_id)
-
 
 def _solve_slider_with_sinanz(
     *,
@@ -635,6 +711,9 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
         self._register("db.list_records", "读取模块数据集", db_tools.list_records)
         self._register("db.replace_records", "全量覆盖模块数据集", db_tools.replace_records)
+        self._register("db.declare_data_resource", "声明模块数据资源", db_tools.declare_data_resource)
+        self._register("db.declare_db_view", "声明数据库统计视图", db_tools.declare_db_view)
+        self._register("db.query_view", "查询数据库统计视图", db_tools.query_view)
         self._register("db.append_event", "追加模块审计事件", db_tools.append_event)
         self._register("db.query_events", "查询模块审计事件", db_tools.query_events)
         self._register("db.acquire_lock", "获取模块幂等锁", db_tools.acquire_lock)
@@ -669,8 +748,6 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
         self._register("ui.declare_page", "声明宿主页 schema", ui_tools.declare_page)
         self._register("ui.get_page", "读取宿主页 schema", ui_tools.get_page)
-        self._register("ui.declare_data_table", "声明数据表视图元数据", ui_tools.declare_data_table)
-        self._register("ui.get_data_table", "读取数据表视图元数据", ui_tools.get_data_table)
 
         self._register("captcha.match_slider", "识别滑块验证码缺口位置", captcha_tools.match_slider)
         self._register("captcha.match_click_targets", "识别点选验证码目标位置", captcha_tools.match_click_targets)

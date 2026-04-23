@@ -146,15 +146,6 @@ def test_module_ui_runtime_bridge_keeps_previous_ui_schema_when_declare_ui_fails
                     "children": [],
                 },
             )
-            context.tools.call(
-                "ui.declare_data_table",
-                view_id="next_accounts",
-                schema={
-                    "title": "新账号表",
-                    "dataset": "next_accounts",
-                    "columns": [{"key": "phone", "label": "手机号"}],
-                },
-            )
             raise RuntimeError("declare_ui boom")
 
 
@@ -167,15 +158,17 @@ def test_module_ui_runtime_bridge_keeps_previous_ui_schema_when_declare_ui_fails
     legacy_page = {
         "type": "Page",
         "title": "旧看板",
+        "load_handler": "load_dashboard_page",
         "children": [{"type": "Text", "text": "legacy"}],
     }
-    legacy_table = {
-        "title": "旧账号表",
-        "dataset": "accounts",
-        "columns": [{"key": "phone", "label": "手机号"}],
+    legacy_accounts_page = {
+        "type": "Page",
+        "title": "旧账号页",
+        "load_handler": "load_accounts_page",
+        "children": [{"type": "Text", "text": "legacy"}],
     }
     store.write_page_schema(module_name, "dashboard", legacy_page)
-    store.write_data_table_schema(module_name, "accounts", legacy_table)
+    store.write_page_schema(module_name, "accounts", legacy_accounts_page)
     bridge = ModuleUIRuntimeBridge(module_name)
 
     try:
@@ -183,9 +176,8 @@ def test_module_ui_runtime_bridge_keeps_previous_ui_schema_when_declare_ui_fails
             bridge.declare_ui()
 
         assert store.read_page_schema(module_name, "dashboard") == legacy_page
-        assert store.read_data_table_schema(module_name, "accounts") == legacy_table
+        assert store.read_page_schema(module_name, "accounts") == legacy_accounts_page
         assert store.read_page_schema(module_name, "next_dashboard") == {}
-        assert store.read_data_table_schema(module_name, "next_accounts") == {}
     finally:
         service.registry = original_registry
         purge_module_namespace(module_name)

@@ -204,7 +204,9 @@ def test_resource_commands_create_files_and_update_manifest(
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
-    assert commands.cmd_data_table_create(Namespace(view_id="accounts", label=None, icon=None)) == 0
+    assert commands.cmd_page_create(
+        Namespace(name="accounts", display_name=None, description=None, force=False)
+    ) == 0
     assert commands.cmd_env_selector_create(
         Namespace(name="pick_ready", display_name=None, description=None)
     ) == 0
@@ -220,13 +222,11 @@ def test_resource_commands_create_files_and_update_manifest(
             "id": "dashboard",
             "label": "Dashboard",
             "icon": "📄",
-            "entry": "core:page:dashboard",
         },
         {
             "id": "accounts",
             "label": "Accounts",
-            "icon": "📋",
-            "entry": "core:data_table:accounts",
+            "icon": "📄",
         }
     ]
 
@@ -235,8 +235,8 @@ def test_resource_commands_create_files_and_update_manifest(
     assert "build_dashboard_page_schema" in runtime_text
     assert "load_dashboard_page" in runtime_text
     assert '_declare_dashboard_page(context)' in runtime_text
-    assert "_declare_accounts_table" in runtime_text
-    assert "_declare_accounts_table(context)" in runtime_text
+    assert "_declare_accounts_page" in runtime_text
+    assert "_declare_accounts_page(context)" in runtime_text
     assert 'name="pick_ready"' in runtime_text
 
 
@@ -505,55 +505,6 @@ async_dashboard_loader = AsyncDashboardLoader()
     assert "宿主页 dashboard 的 load_handler 必须是同步函数" in captured.out
 
 
-@pytest.mark.parametrize(
-    ("handler_field", "handler_name", "handler_definition", "expected_call"),
-    [
-        (
-            "create_handler",
-            "create_accounts_record",
-            """def create_accounts_record(context: TaskContext):
-    return None
-""",
-            "(context, payload)",
-        ),
-        (
-            "update_handler",
-            "update_accounts_record",
-            """def update_accounts_record(context: TaskContext, pk_value: str):
-    return None
-""",
-            "(context, row_id, payload)",
-        ),
-    ],
-)
-def test_check_full_rejects_managed_data_table_handler_signature_mismatch(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    handler_field: str,
-    handler_name: str,
-    handler_definition: str,
-    expected_call: str,
-):
-    monkeypatch.chdir(module_root)
-    assert commands.cmd_data_table_create(Namespace(view_id="accounts", label=None, icon=None)) == 0
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    runtime_text = runtime_text.replace(
-        '"display_fields": ["id", "status", "updated_at"],',
-        f'"display_fields": ["id", "status", "updated_at"],\n'
-        f'            "{handler_field}": "{handler_name}",',
-    )
-    runtime_text += f"\n\n{handler_definition}"
-    runtime_path.write_text(runtime_text, encoding="utf-8")
-
-    assert commands.cmd_check_full(Namespace()) == 1
-
-    captured = capsys.readouterr()
-    assert f"数据表 accounts 的 {handler_field} 签名不兼容" in captured.out
-    assert expected_call in captured.out
-
-
 def test_check_full_rejects_invalid_hosted_page_schema(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -567,7 +518,7 @@ def test_check_full_rejects_invalid_hosted_page_schema(
     runtime_path.write_text(
         runtime_path.read_text(encoding="utf-8").replace(
             '"action": {"type": "reload"}',
-            '"action": {"type": "open_page", "entry": "ui:LegacyPage"}',
+            '"action": {"type": "open_page", "page_id": "InvalidPage"}',
         ),
         encoding="utf-8",
     )
@@ -576,91 +527,7 @@ def test_check_full_rejects_invalid_hosted_page_schema(
 
     captured = capsys.readouterr()
     assert "schema 无效" in captured.out
-    assert "core:page:<page_id> 或 core:data_table:<view_id>" in captured.out
-
-
-def test_check_full_rejects_invalid_managed_data_table_schema(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-):
-    monkeypatch.chdir(module_root)
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    runtime_path.write_text(
-        runtime_text.replace(
-            "# SDK-DATA-TABLES\n    return None",
-            """context.tools.call(
-        "ui.declare_data_table",
-        view_id="accounts",
-        schema={
-            "title": "账号管理",
-            "dataset": "accounts",
-            "columns": [
-                {"key": "status", "label": "状态", "type": "select"},
-            ],
-        },
-    )
-    return None""",
-        ),
-        encoding="utf-8",
-    )
-    manifest = _read_manifest(module_root)
-    manifest["ui_extension"] = {
-        "pages": [
-            {
-                "id": "accounts",
-                "label": "Accounts",
-                "icon": "📋",
-                "entry": "core:data_table:accounts",
-            }
-        ]
-    }
-    (module_root / "module.yaml").write_text(
-        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
-    )
-
-    assert commands.cmd_check_full(Namespace()) == 1
-
-    captured = capsys.readouterr()
-    assert "schema 无效" in captured.out
-    assert "select 列必须提供非空 options 数组" in captured.out
-
-
-def test_check_full_rejects_lock_key_business_occupancy_conflict(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-):
-    monkeypatch.chdir(module_root)
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    runtime_path.write_text(
-        runtime_text.replace(
-            "# SDK-DATA-TABLES\n    return None",
-            """context.tools.call(
-        "ui.declare_data_table",
-        view_id="accounts",
-        schema={
-            "title": "账号管理",
-            "dataset": "accounts",
-            "lock_key": "phone",
-            "columns": [
-                {"key": "phone", "label": "手机号"},
-                {"key": "occupied_label", "label": "占用中"},
-            ],
-        },
-    )
-    return None""",
-        ),
-        encoding="utf-8",
-    )
-
-    assert commands.cmd_check_full(Namespace()) == 1
-
-    captured = capsys.readouterr()
-    assert "lock_key 只用于 Core 临时锁" in captured.out
+    assert "page_id 必须是以小写字母开头" in captured.out
 
 
 def test_check_full_rejects_audit_event_writes_in_declare_ui(
@@ -773,24 +640,6 @@ def test_page_create_inserts_call_without_sdk_sentinel(
     runtime_text = runtime_path.read_text(encoding="utf-8")
     assert "    _declare_dashboard_page(context)\n    return None" in runtime_text
     assert _read_manifest(module_root)["ui_extension"]["pages"][0]["id"] == "dashboard"
-
-
-def test_data_table_create_inserts_call_without_sdk_sentinel(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.chdir(module_root)
-    runtime_path = module_root / "module_runtime.py"
-    runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8").replace("    # SDK-DATA-TABLES\n", ""),
-        encoding="utf-8",
-    )
-
-    assert commands.cmd_data_table_create(Namespace(view_id="accounts", label=None, icon=None)) == 0
-
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    assert "    _declare_accounts_table(context)\n    return None" in runtime_text
-    assert _read_manifest(module_root)["ui_extension"]["pages"][0]["id"] == "accounts"
 
 
 def test_page_create_does_not_mutate_manifest_when_declare_ui_is_missing(

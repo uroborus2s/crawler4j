@@ -26,7 +26,6 @@ from crawler4j_contracts import TaskContext, ToolSpec
 
 from crawler4j_sdk._version import get_compatible_dependency_spec
 from crawler4j_sdk.cli.templates import (
-    DATA_TABLE_HELPER_TEMPLATE,
     ENV_SELECTOR_TEMPLATE,
     MODEL_GITIGNORE_TEMPLATE,
     MODEL_MANIFEST_TEMPLATE,
@@ -39,7 +38,11 @@ from crawler4j_sdk.cli.templates import (
     SCRIPT_TEMPLATE,
     WORKFLOW_TEMPLATE,
 )
-from crawler4j_sdk.hosted_ui import normalize_page_schema, normalize_table_schema
+from crawler4j_sdk.hosted_ui import (
+    normalize_data_resource,
+    normalize_db_view_schema,
+    normalize_page_schema,
+)
 
 
 DEFAULT_PYTHON_VERSION = "3.12"
@@ -54,18 +57,8 @@ SEMVER_RE = re.compile(
     r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-CORE_PAGE_ENTRY_RE = re.compile(r"^core:page:(?P<id>[a-z][a-z0-9_]*)$")
-CORE_DATA_TABLE_ENTRY_RE = re.compile(r"^core:data_table:(?P<id>[a-z][a-z0-9_]*)$")
 GITHUB_TOKEN_ENV_VARS = ("CRAWLER4J_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
 LEGACY_UI_EXTENSION_KEYS = ("type", "entry", "detail_menu", "trusted")
-LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_KEYS = {
-    "occupied",
-    "occupied_label",
-    "is_occupied",
-    "lock_status",
-    "lock_status_label",
-}
-LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_LABELS = {"占用中", "占用状态"}
 
 
 class CLIError(RuntimeError):
@@ -359,16 +352,6 @@ def _normalize_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return pages
 
 
-def _classify_ui_entry(page_id: str, entry: str) -> str | None:
-    page_match = CORE_PAGE_ENTRY_RE.match(entry)
-    if page_match and page_match.group("id") == page_id:
-        return "page"
-    table_match = CORE_DATA_TABLE_ENTRY_RE.match(entry)
-    if table_match and table_match.group("id") == page_id:
-        return "data_table"
-    return None
-
-
 def _manifest_ui_extension(manifest: dict[str, Any]) -> dict[str, Any] | None:
     ui_extension = manifest.get("ui_extension")
     if ui_extension is None:
@@ -388,17 +371,6 @@ def _manifest_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(pages, list):
         raise CLIError("module.yaml.ui_extension.pages 必须是数组")
     return [item for item in pages if isinstance(item, dict)]
-
-
-def _manifest_ui_entries_by_kind(manifest: dict[str, Any], kind: str) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
-    for item in _manifest_ui_pages(manifest):
-        page_id = str(item.get("id", "") or "").strip()
-        entry = str(item.get("entry", "") or "").strip()
-        if _classify_ui_entry(page_id, entry) == kind:
-            entries.append(item)
-    return entries
-
 
 def _normalize_config_defaults(manifest: dict[str, Any]) -> dict[str, Any]:
     config_defaults = manifest.setdefault("config_defaults", {})
@@ -618,6 +590,13 @@ def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
             errors.append("ui_extension.pages 里的每一项都必须是对象")
             continue
 
+        unknown_keys = sorted(set(item) - {"id", "label", "icon"})
+        if unknown_keys:
+            page_label = str(item.get("id", "") or "").strip() or "<empty>"
+            errors.append(
+                f"ui_extension.pages[{page_label}] 包含不支持的字段: {', '.join(unknown_keys)}"
+            )
+
         page_id = str(item.get("id", "") or "").strip()
         if not is_valid_name(page_id):
             errors.append(f"无效的 ui_extension.pages[].id: {page_id or '<empty>'}")
@@ -629,10 +608,6 @@ def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
         label = str(item.get("label", "") or "").strip()
         if not label:
             errors.append(f"ui_extension.pages[{page_id}].label 不能为空")
-
-        entry = str(item.get("entry", "") or "").strip()
-        if _classify_ui_entry(page_id, entry) is None:
-            errors.append(f"ui_extension.pages[{page_id}].entry 不受支持: {entry or '<empty>'}")
     return errors
 
 
@@ -773,37 +748,6 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
 
     return errors
 
-
-def _collect_lock_key_conflicts(schema: dict[str, Any]) -> list[str]:
-    raw_columns = schema.get("columns", [])
-    if not isinstance(raw_columns, list):
-        return []
-
-    conflicts: list[str] = []
-    for item in raw_columns:
-        if not isinstance(item, dict):
-            continue
-        key = str(item.get("key", "")).strip()
-        label = str(item.get("label", "")).strip()
-        if key in LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_KEYS or label in LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_LABELS:
-            conflicts.append(key or label)
-    return list(dict.fromkeys(conflicts))
-
-
-def _validate_lock_key_usage_for_sdk(view_id: str, schema: dict[str, Any]) -> None:
-    lock_key = str(schema.get("lock_key", "") or "").strip()
-    if not lock_key:
-        return
-
-    conflicts = _collect_lock_key_conflicts(schema)
-    if conflicts:
-        rendered = ", ".join(conflicts)
-        raise CLIError(
-            f"数据表 {view_id} 误用 lock_key：lock_key 只用于 Core 临时锁，"
-            f"不能与业务占用列同时声明；请删除这些列或移除 lock_key: {rendered}"
-        )
-
-
 class _DeclareUICheckLogger:
     def debug(self, message: str, environment_id: int | None = None) -> None:
         return None
@@ -824,24 +768,26 @@ class _DeclareUICheckLogger:
 class _DeclareUICheckTools:
     def __init__(self) -> None:
         self._pages: dict[str, dict[str, Any]] = {}
-        self._schemas: dict[str, dict[str, Any]] = {}
+        self._db_views: dict[str, dict[str, Any]] = {}
+        self._resources: dict[str, dict[str, Any]] = {}
         self._datasets: dict[str, list[dict[str, Any]]] = {}
         self._states: dict[str, Any] = {}
         self._tool_specs = [
             ToolSpec(name="db.acquire_lock", description="db.acquire_lock"),
             ToolSpec(name="db.append_event", description="db.append_event"),
+            ToolSpec(name="db.declare_data_resource", description="db.declare_data_resource"),
+            ToolSpec(name="db.declare_db_view", description="db.declare_db_view"),
             ToolSpec(name="db.exists_state", description="db.exists_state"),
             ToolSpec(name="db.get_state", description="db.get_state"),
             ToolSpec(name="db.is_locked", description="db.is_locked"),
             ToolSpec(name="db.list_records", description="db.list_records"),
             ToolSpec(name="db.query_events", description="db.query_events"),
+            ToolSpec(name="db.query_view", description="db.query_view"),
             ToolSpec(name="db.release_lock", description="db.release_lock"),
             ToolSpec(name="db.replace_records", description="db.replace_records"),
             ToolSpec(name="db.set_state", description="db.set_state"),
             ToolSpec(name="ui.declare_page", description="ui.declare_page"),
-            ToolSpec(name="ui.declare_data_table", description="ui.declare_data_table"),
             ToolSpec(name="ui.get_page", description="ui.get_page"),
-            ToolSpec(name="ui.get_data_table", description="ui.get_data_table"),
         ]
 
     def has_tool(self, tool_name: str) -> bool:
@@ -860,17 +806,41 @@ class _DeclareUICheckTools:
             return True
         if tool_name == "ui.get_page":
             return dict(self._pages.get(str(kwargs.get("page_id", "")).strip(), {}))
-        if tool_name == "ui.declare_data_table":
+        if tool_name == "db.declare_data_resource":
+            resource_id = str(kwargs.get("resource_id", "")).strip()
+            try:
+                meta = normalize_data_resource(
+                    resource_id,
+                    {
+                        "storage_mode": kwargs.get("storage_mode", "managed_dataset"),
+                        "record_key_field": kwargs.get("record_key_field"),
+                        "schema": kwargs.get("schema") or {},
+                        "indexes": kwargs.get("indexes") or {},
+                        "cleanup_policy": kwargs.get("cleanup_policy"),
+                    },
+                )
+            except ValueError as exc:
+                raise CLIError(f"数据资源 {resource_id or '<empty>'} 声明无效: {exc}") from exc
+            self._resources[resource_id] = meta
+            return dict(meta)
+        if tool_name == "db.declare_db_view":
             view_id = str(kwargs.get("view_id", "")).strip()
             try:
-                schema = normalize_table_schema(view_id, dict(kwargs.get("schema") or {}))
+                meta = normalize_db_view_schema(
+                    view_id,
+                    {
+                        "view_kind": kwargs.get("view_kind", "sql_view"),
+                        "source_resource_ids": kwargs.get("source_resource_ids") or [],
+                        "select_sql_template": kwargs.get("select_sql_template"),
+                        "columns": kwargs.get("columns") or [],
+                        "cleanup_policy": kwargs.get("cleanup_policy"),
+                        "schema_version": kwargs.get("schema_version"),
+                    },
+                )
             except ValueError as exc:
-                raise CLIError(f"数据表 {view_id or '<empty>'} schema 无效: {exc}") from exc
-            _validate_lock_key_usage_for_sdk(view_id, schema)
-            self._schemas[view_id] = schema
-            return True
-        if tool_name == "ui.get_data_table":
-            return dict(self._schemas.get(str(kwargs.get("view_id", "")).strip(), {}))
+                raise CLIError(f"数据库视图 {view_id or '<empty>'} 声明无效: {exc}") from exc
+            self._db_views[view_id] = meta
+            return dict(meta)
         if tool_name == "db.list_records":
             dataset = str(kwargs.get("dataset", "")).strip()
             return [dict(row) for row in self._datasets.get(dataset, [])]
@@ -883,6 +853,13 @@ class _DeclareUICheckTools:
             raise CLIError("declare_ui 不允许调用 db.append_event；UI 声明必须保持无副作用")
         if tool_name == "db.query_events":
             return []
+        if tool_name == "db.query_view":
+            return {
+                "rows": [],
+                "total": 0,
+                "limit": int(kwargs.get("limit", 100) or 100),
+                "offset": int(kwargs.get("offset", 0) or 0),
+            }
         if tool_name == "db.acquire_lock":
             return True
         if tool_name == "db.release_lock":
@@ -925,6 +902,53 @@ def _validate_declared_page_handlers(module_runtime: Any, declared_pages: dict[s
         )
         if error:
             errors.append(error)
+        errors.extend(_validate_inline_table_handlers(module_runtime, page_id, schema))
+    return errors
+
+
+def _iter_inline_tables(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    tables: list[dict[str, Any]] = []
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        if str(child.get("type") or "") == "DataTable":
+            tables.append(child)
+            continue
+        nested = child.get("children")
+        if isinstance(nested, list):
+            tables.extend(_iter_inline_tables(nested))
+    return tables
+
+
+def _validate_inline_table_handlers(
+    module_runtime: Any,
+    page_id: str,
+    page_schema: dict[str, Any],
+) -> list[str]:
+    errors: list[str] = []
+    children = page_schema.get("children")
+    if not isinstance(children, list):
+        return errors
+    for table_schema in _iter_inline_tables(children):
+        data_source = table_schema.get("data_source")
+        if not isinstance(data_source, dict):
+            continue
+        if str(data_source.get("type") or "").strip().lower() != "query_handler":
+            continue
+        handler_name = str(data_source.get("handler") or "").strip()
+        if not handler_name:
+            continue
+        table_id = str(table_schema.get("table_id") or "").strip()
+        error = _validate_runtime_handler(
+            module_runtime,
+            owner_label=f"宿主页 {page_id} 的内联表格 {table_id or '<empty>'}",
+            handler_field="data_source.handler",
+            handler_name=handler_name,
+            runtime_call_label="(context, table_id, query, params)",
+            call_args=(table_id, {}, None),
+        )
+        if error:
+            errors.append(error)
     return errors
 
 
@@ -957,39 +981,10 @@ def _validate_runtime_handler(
     return None
 
 
-def _validate_declared_data_table_handlers(
-    module_runtime: Any,
-    declared_tables: dict[str, dict[str, Any]],
-) -> list[str]:
-    errors: list[str] = []
-    for view_id, schema in declared_tables.items():
-        if not isinstance(schema, dict):
-            errors.append(f"数据表 {view_id} 的 schema 必须是对象")
-            continue
-        for handler_field, runtime_call_label, call_args in (
-            ("create_handler", "(context, payload)", ({},)),
-            ("update_handler", "(context, row_id, payload)", ("row-1", {})),
-        ):
-            handler_name = str(schema.get(handler_field, "") or "").strip()
-            if not handler_name:
-                continue
-            error = _validate_runtime_handler(
-                module_runtime,
-                owner_label=f"数据表 {view_id}",
-                handler_field=handler_field,
-                handler_name=handler_name,
-                runtime_call_label=runtime_call_label,
-                call_args=call_args,
-            )
-            if error:
-                errors.append(error)
-    return errors
-
-
 def _validate_declared_ui(module_root: Path, module_runtime: Any, manifest: dict[str, Any]) -> list[str]:
     declare_ui = getattr(module_runtime, "declare_ui", None)
     declared_manifest_pages = {
-        str(item.get("id", "")).strip(): str(item.get("entry", "")).strip()
+        str(item.get("id", "")).strip()
         for item in _manifest_ui_pages(manifest)
         if str(item.get("id", "")).strip()
     }
@@ -1015,39 +1010,17 @@ def _validate_declared_ui(module_root: Path, module_runtime: Any, manifest: dict
         return [f"declare_ui 校验失败: {exc.__class__.__name__}: {exc}"]
 
     errors = _validate_declared_page_handlers(module_runtime, tools._pages)
-    errors.extend(_validate_declared_data_table_handlers(module_runtime, tools._schemas))
 
-    expected_pages = {
-        page_id
-        for page_id, entry in declared_manifest_pages.items()
-        if _classify_ui_entry(page_id, entry) == "page"
-    }
-    expected_data_tables = {
-        page_id
-        for page_id, entry in declared_manifest_pages.items()
-        if _classify_ui_entry(page_id, entry) == "data_table"
-    }
-
-    missing_pages = sorted(expected_pages - set(tools._pages))
-    missing_data_tables = sorted(expected_data_tables - set(tools._schemas))
-    extra_pages = sorted(set(tools._pages) - expected_pages)
-    extra_data_tables = sorted(set(tools._schemas) - expected_data_tables)
+    missing_pages = sorted(declared_manifest_pages - set(tools._pages))
+    extra_pages = sorted(set(tools._pages) - declared_manifest_pages)
 
     errors.extend(
         f"module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: {page_id}"
         for page_id in missing_pages
     )
     errors.extend(
-        f"module.yaml.ui_extension.pages 声明的数据表未从 declare_ui 注册: {page_id}"
-        for page_id in missing_data_tables
-    )
-    errors.extend(
         f"declare_ui 注册了未写入 module.yaml.ui_extension.pages 的宿主页: {page_id}"
         for page_id in extra_pages
-    )
-    errors.extend(
-        f"declare_ui 注册了未写入 module.yaml.ui_extension.pages 的数据表: {page_id}"
-        for page_id in extra_data_tables
     )
     return errors
 
@@ -1310,8 +1283,7 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    hosted_pages = _manifest_ui_entries_by_kind(manifest, "page")
-    data_tables = _manifest_ui_entries_by_kind(manifest, "data_table")
+    hosted_pages = _manifest_ui_pages(manifest)
     workflow_names = _manifest_workflow_names(manifest)
     runtime_path = module_root / "module_runtime.py"
     default_workflow = _read_default_workflow(runtime_path) or (workflow_names[0] if workflow_names else "")
@@ -1327,13 +1299,6 @@ def cmd_module_show(args: argparse.Namespace) -> int:
         "宿主页: "
         + (
             ", ".join(str(item.get("id", "")) for item in hosted_pages if item.get("id"))
-            or "(无)"
-        )
-    )
-    print(
-        "数据表入口: "
-        + (
-            ", ".join(str(item.get("id", "")) for item in data_tables if item.get("id"))
             or "(无)"
         )
     )
@@ -1491,14 +1456,12 @@ def cmd_page_create(args: argparse.Namespace) -> int:
             return 1
         existing_page["label"] = args.display_name or to_display_name(name)
         existing_page["icon"] = "📄"
-        existing_page["entry"] = f"core:page:{name}"
     else:
         pages.append(
             {
                 "id": name,
                 "label": args.display_name or to_display_name(name),
                 "icon": "📄",
-                "entry": f"core:page:{name}",
             }
         )
     runtime_path = module_root / "module_runtime.py"
@@ -1537,70 +1500,8 @@ def cmd_page_list(args: argparse.Namespace) -> int:
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    pages = [
-        str(item.get("id", ""))
-        for item in _manifest_ui_entries_by_kind(manifest, "page")
-        if item.get("id")
-    ]
+    pages = [str(item.get("id", "")) for item in _manifest_ui_pages(manifest) if item.get("id")]
     print("\n".join(pages) if pages else "(无页面)")
-    return 0
-
-
-def cmd_data_table_create(args: argparse.Namespace) -> int:
-    """Register a managed core:data_table page and append a declare_ui helper."""
-    module_root = require_module_root()
-    view_id = str(args.view_id or "").strip()
-    if not is_valid_name(view_id):
-        _print_error("数据表 ID 必须是小写 snake_case")
-        return 1
-
-    manifest = load_manifest(module_root)
-    pages = _normalize_ui_pages(manifest)
-    if any(isinstance(item, dict) and item.get("id") == view_id for item in pages):
-        _print_error(f"数据表入口已存在: {view_id}")
-        return 1
-
-    pages.append(
-        {
-            "id": view_id,
-            "label": args.label or to_display_name(view_id),
-            "icon": args.icon or "📋",
-            "entry": f"core:data_table:{view_id}",
-        }
-    )
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    helper_name = f"_declare_{view_id}_table"
-    if helper_name not in runtime_text:
-        runtime_text += DATA_TABLE_HELPER_TEMPLATE.format(
-            view_id=view_id,
-            display_name=args.label or to_display_name(view_id),
-        )
-
-    call_line = f"    {helper_name}(context)"
-    try:
-        runtime_text = _insert_declare_ui_call(runtime_text, call_line)
-    except (CLIError, SyntaxError) as exc:
-        _print_error(f"无法更新 module_runtime.py: {exc}")
-        return 1
-
-    runtime_path.write_text(runtime_text, encoding="utf-8")
-    save_manifest(module_root, manifest)
-    _print_success(f"已注册受控数据表入口: core:data_table:{view_id}")
-    return 0
-
-
-def cmd_data_table_list(args: argparse.Namespace) -> int:
-    """List managed data-table pages from module.yaml."""
-    del args
-    module_root = require_module_root()
-    manifest = load_manifest(module_root)
-    rows = [
-        str(item.get("id", ""))
-        for item in _manifest_ui_entries_by_kind(manifest, "data_table")
-        if item.get("id")
-    ]
-    print("\n".join(rows) if rows else "(无数据表入口)")
     return 0
 
 
@@ -2288,22 +2189,6 @@ def build_parser() -> argparse.ArgumentParser:
     page_create.set_defaults(func=cmd_page_create)
     page_list = page_sub.add_parser("list", help="列出 ui_extension.pages 中的宿主页入口")
     page_list.set_defaults(func=cmd_page_list)
-
-    data_table_parser = subparsers.add_parser(
-        "data-table",
-        help="受控数据表操作：注册 ui_extension.pages 中的 core:data_table:<id> 入口并补 declare_ui 骨架",
-    )
-    data_table_sub = data_table_parser.add_subparsers(dest="action")
-    data_table_create = data_table_sub.add_parser(
-        "create",
-        help="创建一个受控数据表入口，会更新 ui_extension.pages 并在 module_runtime.py 追加声明函数",
-    )
-    data_table_create.add_argument("view_id", help="数据表视图 ID，snake_case")
-    data_table_create.add_argument("--label", help="数据表显示名")
-    data_table_create.add_argument("--icon", help="数据表图标")
-    data_table_create.set_defaults(func=cmd_data_table_create)
-    data_table_list = data_table_sub.add_parser("list", help="列出 ui_extension.pages 中的受控数据表入口")
-    data_table_list.set_defaults(func=cmd_data_table_list)
 
     selector_parser = subparsers.add_parser(
         "env-selector",

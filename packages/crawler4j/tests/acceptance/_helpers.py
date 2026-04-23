@@ -147,7 +147,7 @@ def enrich_module(module_root: Path) -> Path:
         ("task", "create", "extra_task"),
         ("workflow", "create", "repair_orders"),
         ("page", "create", "dashboard"),
-        ("data-table", "create", "accounts"),
+        ("page", "create", "accounts"),
         ("env-selector", "create", "pick_ready"),
     )
     for argv in commands:

@@ -49,6 +49,9 @@ def test_runtime_tools_register_expected_surface():
 
     assert caps.tools.has_tool("db.list_records") is True
     assert caps.tools.has_tool("db.replace_records") is True
+    assert caps.tools.has_tool("db.declare_data_resource") is True
+    assert caps.tools.has_tool("db.declare_db_view") is True
+    assert caps.tools.has_tool("db.query_view") is True
     assert caps.tools.has_tool("db.append_event") is True
     assert caps.tools.has_tool("db.query_events") is True
     assert caps.tools.has_tool("db.acquire_lock") is True
@@ -66,8 +69,8 @@ def test_runtime_tools_register_expected_surface():
     assert caps.tools.has_tool("env.replace_resource_pool_snapshot") is True
     assert caps.tools.has_tool("ui.declare_page") is True
     assert caps.tools.has_tool("ui.get_page") is True
-    assert caps.tools.has_tool("ui.declare_data_table") is True
-    assert caps.tools.has_tool("ui.get_data_table") is True
+    assert caps.tools.has_tool("ui.declare_data_table") is False
+    assert caps.tools.has_tool("ui.get_data_table") is False
     assert caps.tools.has_tool("captcha.match_slider") is True
     assert caps.tools.has_tool("captcha.match_click_targets") is True
 
@@ -81,7 +84,130 @@ def test_runtime_tools_register_expected_surface():
     assert {spec.name: spec.is_async for spec in specs}["env.replace_resource_pool_snapshot"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.set_proxy"] is True
     assert {spec.name: spec.is_async for spec in specs}["db.append_event"] is False
+    assert {spec.name: spec.is_async for spec in specs}["db.declare_data_resource"] is False
+    assert {spec.name: spec.is_async for spec in specs}["db.declare_db_view"] is False
     assert {spec.name: spec.is_async for spec in specs}["db.list_records"] is False
+
+
+def test_db_tools_declare_data_resource_delegates_to_store(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    class _FakeDataStore:
+        def register_data_resource(self, module_name: str, resource_id: str, **kwargs):
+            calls.append(
+                {
+                    "module_name": module_name,
+                    "resource_id": resource_id,
+                    **kwargs,
+                }
+            )
+            return {"module_name": module_name, "resource_id": resource_id, **kwargs}
+
+    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_module_data_store", lambda: _FakeDataStore())
+
+    caps = build_runtime_capabilities("demo_module")
+    result = caps.tools.call(
+        "db.declare_data_resource",
+        resource_id="account_records",
+        storage_mode="custom_table",
+        record_key_field="phone",
+        schema={"columns": [{"key": "phone"}]},
+        indexes={"phone": ["phone"]},
+        cleanup_policy="drop_table",
+    )
+
+    assert result["resource_id"] == "account_records"
+    assert calls == [
+        {
+            "module_name": "demo_module",
+            "resource_id": "account_records",
+            "storage_mode": "custom_table",
+            "record_key_field": "phone",
+            "schema": {"columns": [{"key": "phone"}]},
+            "indexes": {"phone": ["phone"]},
+            "cleanup_policy": "drop_table",
+        }
+    ]
+
+
+def test_db_tools_declare_db_view_and_query_view_delegate_to_store(monkeypatch):
+    declare_calls: list[dict[str, object]] = []
+    query_calls: list[dict[str, object]] = []
+
+    class _FakeDataStore:
+        def declare_db_view(self, module_name: str, view_id: str, **kwargs):
+            declare_calls.append(
+                {
+                    "module_name": module_name,
+                    "view_id": view_id,
+                    **kwargs,
+                }
+            )
+            return {"module_name": module_name, "view_id": view_id, **kwargs}
+
+        def query_db_view(self, module_name: str, view_id: str, **kwargs):
+            query_calls.append(
+                {
+                    "module_name": module_name,
+                    "view_id": view_id,
+                    **kwargs,
+                }
+            )
+            return {"rows": [{"execution_date": "2026-04-23"}], "total": 1, "limit": 20, "offset": 0}
+
+    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_module_data_store", lambda: _FakeDataStore())
+
+    caps = build_runtime_capabilities("demo_module")
+    declared = caps.tools.call(
+        "db.declare_db_view",
+        view_id="billing_stats",
+        source_resource_ids=["billing_entries"],
+        select_sql_template="SELECT execution_date FROM {{resource:billing_entries}}",
+        columns=[
+            {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
+        ],
+    )
+    queried = caps.tools.call(
+        "db.query_view",
+        view_id="billing_stats",
+        filters={"execution_date": "2026-04-23"},
+        sort=[{"field": "execution_date", "direction": "desc"}],
+        limit=20,
+        offset=0,
+    )
+
+    assert declared["view_id"] == "billing_stats"
+    assert queried["total"] == 1
+    assert declare_calls == [
+        {
+            "module_name": "demo_module",
+            "view_id": "billing_stats",
+            "view_kind": "sql_view",
+            "source_resource_ids": ["billing_entries"],
+            "select_sql_template": "SELECT execution_date FROM {{resource:billing_entries}}",
+            "columns": [
+                {
+                    "name": "execution_date",
+                    "type": "text",
+                    "nullable": True,
+                    "filterable": True,
+                    "sortable": True,
+                },
+            ],
+            "cleanup_policy": None,
+            "schema_version": None,
+        }
+    ]
+    assert query_calls == [
+        {
+            "module_name": "demo_module",
+            "view_id": "billing_stats",
+            "filters": {"execution_date": "2026-04-23"},
+            "sort": [{"field": "execution_date", "direction": "desc"}],
+            "limit": 20,
+            "offset": 0,
+        }
+    ]
 
 
 def test_db_tools_records_and_lock_are_generic(monkeypatch):
@@ -304,7 +430,7 @@ async def test_env_resource_pool_tools_manage_metadata_cards(monkeypatch):
     assert (13, "scheduler.resource_pool", "demo_module:bound_account_ready") not in store
 
 
-def test_ui_tools_persist_page_and_data_table_meta(monkeypatch):
+def test_ui_tools_persist_page_meta(monkeypatch):
     caps = build_runtime_capabilities("demo_module")
     assert caps.tools.call(
         "ui.declare_page",
@@ -316,30 +442,34 @@ def test_ui_tools_persist_page_and_data_table_meta(monkeypatch):
                 {"type": "Text", "style": "title", "binding": "title"},
                 {
                     "type": "Button",
-                    "label": "打开账号管理",
-                    "action": {"type": "open_page", "entry": "core:data_table:accounts"},
+                    "label": "打开详情页",
+                    "action": {
+                        "type": "open_page",
+                        "page_id": "details",
+                        "params": {
+                            "account_id": {"binding": "selected_account.id"},
+                        },
+                    },
                 },
                 {
                     "type": "DataTable",
+                    "table_id": "stats",
                     "title": "统计明细",
-                    "binding": "rows",
                     "columns": [{"key": "name", "label": "名称"}],
+                    "data_source": {"type": "binding", "binding": "rows"},
+                    "row_action": {
+                        "type": "open_page",
+                        "page_id": "details",
+                        "params": {
+                            "account_id": {"binding": "id"},
+                        },
+                    },
                 },
             ],
         },
     )
-    assert caps.tools.call(
-        "ui.declare_data_table",
-        view_id="accounts",
-        schema={
-            "title": "示例账号",
-            "dataset": "accounts",
-            "columns": [{"key": "phone", "label": "手机号"}],
-        },
-    )
 
     page = caps.tools.call("ui.get_page", page_id="dashboard")
-    meta = caps.tools.call("ui.get_data_table", view_id="accounts")
     assert page["load_handler"] == "load_dashboard_page"
     assert page["children"][0] == {
         "type": "Text",
@@ -348,27 +478,86 @@ def test_ui_tools_persist_page_and_data_table_meta(monkeypatch):
     }
     assert page["children"][1]["action"] == {
         "type": "open_page",
-        "entry": "core:data_table:accounts",
+        "page_id": "details",
+        "params": {"account_id": {"binding": "selected_account.id"}},
     }
-    assert meta["title"] == "示例账号"
-    assert meta["dataset"] == "accounts"
-    assert meta["columns"] == [{"key": "phone", "label": "手机号"}]
+    assert page["children"][2]["table_id"] == "stats"
+    assert page["children"][2]["data_source"] == {"type": "binding", "binding": "rows"}
+    assert page["children"][2]["row_action"] == {
+        "type": "open_page",
+        "page_id": "details",
+        "params": {"account_id": {"binding": "id"}},
+    }
+
+
+def test_ui_tools_persist_navigation_params_with_page_ids():
+    caps = build_runtime_capabilities("demo_module")
+
+    assert caps.tools.call(
+        "ui.declare_page",
+        page_id="dashboard",
+        schema={
+            "type": "Page",
+            "load_handler": "load_dashboard_page",
+            "children": [
+                {
+                    "type": "Button",
+                    "label": "打开详情",
+                    "action": {
+                        "type": "open_page",
+                        "page_id": "account_details",
+                        "params": {
+                            "phone": {"binding": "selected.phone"},
+                            "source": {"value": "dashboard"},
+                        },
+                    },
+                },
+                {
+                    "type": "DataTable",
+                    "table_id": "accounts",
+                    "columns": [{"key": "phone", "label": "手机号"}],
+                    "data_source": {"type": "binding", "binding": "rows"},
+                    "row_action": {
+                        "type": "open_page",
+                        "page_id": "account_details",
+                        "params": {
+                            "phone": {"binding": "phone"},
+                        },
+                    },
+                },
+            ],
+        },
+    )
+
+    page = caps.tools.call("ui.get_page", page_id="dashboard")
+
+    assert page["children"][0]["action"] == {
+        "type": "open_page",
+        "page_id": "account_details",
+        "params": {
+            "phone": {"binding": "selected.phone"},
+            "source": {"value": "dashboard"},
+        },
+    }
+    assert page["children"][1]["row_action"] == {
+        "type": "open_page",
+        "page_id": "account_details",
+        "params": {
+            "phone": {"binding": "phone"},
+        },
+    }
+    assert page["children"][1]["table_id"] == "accounts"
+    assert page["children"][1]["data_source"] == {"type": "binding", "binding": "rows"}
 
 
 def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
     page_calls: list[tuple[str, dict[str, object]]] = []
-    table_calls: list[tuple[str, dict[str, object]]] = []
 
     def fake_normalize_page_schema(page_id: str, schema: dict[str, object]) -> dict[str, object]:
         page_calls.append((page_id, dict(schema)))
         return {"type": "Page", "title": f"normalized:{page_id}", "children": []}
 
-    def fake_normalize_table_schema(view_id: str, schema: dict[str, object]) -> dict[str, object]:
-        table_calls.append((view_id, dict(schema)))
-        return {"title": f"normalized:{view_id}", "dataset": view_id, "columns": []}
-
     monkeypatch.setattr(runtime_capabilities, "sdk_normalize_page_schema", fake_normalize_page_schema)
-    monkeypatch.setattr(runtime_capabilities, "sdk_normalize_table_schema", fake_normalize_table_schema)
 
     caps = build_runtime_capabilities("demo_module")
     assert caps.tools.call(
@@ -376,23 +565,12 @@ def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
         page_id="dashboard",
         schema={"type": "Page", "children": []},
     )
-    assert caps.tools.call(
-        "ui.declare_data_table",
-        view_id="accounts",
-        schema={"columns": []},
-    )
 
     assert page_calls == [("dashboard", {"type": "Page", "children": []})]
-    assert table_calls == [("accounts", {"columns": []})]
     assert caps.tools.call("ui.get_page", page_id="dashboard") == {
         "type": "Page",
         "title": "normalized:dashboard",
         "children": [],
-    }
-    assert caps.tools.call("ui.get_data_table", view_id="accounts") == {
-        "title": "normalized:accounts",
-        "dataset": "accounts",
-        "columns": [],
     }
 
 
@@ -423,7 +601,7 @@ def test_ui_tools_reject_unmanaged_schema_fields():
                     {
                         "type": "Button",
                         "label": "打开",
-                        "action": {"type": "open_page", "entry": "ui:LegacyPage"},
+                        "action": {"type": "open_page", "page_id": "InvalidPage"},
                     }
                 ],
             },
@@ -431,40 +609,22 @@ def test_ui_tools_reject_unmanaged_schema_fields():
 
     with pytest.raises(ValueError):
         caps.tools.call(
-            "ui.declare_data_table",
-            view_id="accounts",
-            schema={"title": "示例账号", "dataset": "other_dataset"},
-        )
-
-    with pytest.raises(ValueError):
-        caps.tools.call(
-            "ui.declare_data_table",
-            view_id="Accounts",
-            schema={"title": "示例账号"},
-        )
-
-    with pytest.raises(ValueError):
-        caps.tools.call(
-            "ui.declare_data_table",
-            view_id="accounts",
-            schema={"title": "示例账号", "unknown": True},
-        )
-
-
-def test_ui_tools_reject_lock_key_with_business_occupancy_column():
-    caps = build_runtime_capabilities("demo_module")
-
-    with pytest.raises(ValueError, match="lock_key"):
-        caps.tools.call(
-            "ui.declare_data_table",
-            view_id="accounts",
+            "ui.declare_page",
+            page_id="dashboard",
             schema={
-                "title": "示例账号",
-                "dataset": "accounts",
-                "lock_key": "phone",
-                "columns": [
-                    {"key": "phone", "label": "手机号"},
-                    {"key": "occupied_label", "label": "占用中"},
+                "type": "Page",
+                "load_handler": "load_dashboard_page",
+                "children": [
+                    {
+                        "type": "DataTable",
+                        "title": "统计明细",
+                        "rows": [{"id": "1"}],
+                        "row_action": {
+                            "type": "open_page",
+                            "page_id": "accounts",
+                            "params": {"account_id": {"binding": ""}},
+                        },
+                    }
                 ],
             },
         )

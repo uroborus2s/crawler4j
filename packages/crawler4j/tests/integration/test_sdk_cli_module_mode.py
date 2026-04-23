@@ -68,7 +68,7 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     assert page_result.returncode == 0, page_result.stderr
     assert not (target / "ui").exists()
 
-    table_result = _run_cli("data-table", "create", "accounts", cwd=target)
+    table_result = _run_cli("page", "create", "accounts", cwd=target)
     assert table_result.returncode == 0, table_result.stderr
 
     selector_result = _run_cli("env-selector", "create", "pick_ready", cwd=target)
@@ -105,13 +105,11 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
             "id": "dashboard",
             "label": "Dashboard",
             "icon": "📄",
-            "entry": "core:page:dashboard",
         },
         {
             "id": "accounts",
             "label": "Accounts",
-            "icon": "📋",
-            "entry": "core:data_table:accounts",
+            "icon": "📄",
         },
     ]
     assert [item["name"] for item in manifest["workflows"]] == ["main_workflow", "repair_orders"]

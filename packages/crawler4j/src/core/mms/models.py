@@ -70,14 +70,12 @@ class UIPageInfo:
     id: str
     icon: str = "📋"
     label: str = ""
-    entry: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "icon": self.icon,
             "label": self.label,
-            "entry": self.entry,
         }
 
     @classmethod
@@ -85,7 +83,7 @@ class UIPageInfo:
         if not isinstance(data, dict):
             raise ValueError("ui_extension.pages 中的每一项都必须是 YAML 映射对象")
 
-        allowed_keys = {"id", "icon", "label", "entry"}
+        allowed_keys = {"id", "icon", "label"}
         unknown_keys = sorted(set(data) - allowed_keys)
         if unknown_keys:
             raise ValueError(
@@ -96,7 +94,6 @@ class UIPageInfo:
             id=str(data.get("id", "") or "").strip(),
             icon=str(data.get("icon", "📋") or "📋").strip() or "📋",
             label=str(data.get("label", "") or "").strip(),
-            entry=str(data.get("entry", "") or "").strip(),
         )
 
 

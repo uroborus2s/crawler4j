@@ -40,13 +40,11 @@ class TestModuleManifest:
                         "id": "dashboard",
                         "icon": "📊",
                         "label": "今日运营看板",
-                        "entry": "core:page:dashboard",
                     },
                     {
                         "id": "accounts",
                         "icon": "📋",
                         "label": "账号管理",
-                        "entry": "core:data_table:accounts",
                     },
                 ],
             },
@@ -70,8 +68,6 @@ class TestModuleManifest:
         assert manifest.workflows[0].name == "login_flow"
         assert manifest.upgrade_source.repo == "example/test_module"
         assert [page.id for page in manifest.ui_extension.pages] == ["dashboard", "accounts"]
-        assert manifest.ui_extension.pages[0].entry == "core:page:dashboard"
-        assert manifest.ui_extension.pages[1].entry == "core:data_table:accounts"
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
         assert manifest.config_defaults.workflows == {"login_flow": {"headless": False}}
     
@@ -87,13 +83,11 @@ class TestModuleManifest:
                         id="dashboard",
                         icon="📊",
                         label="今日运营看板",
-                        entry="core:page:dashboard",
                     ),
                     UIPageInfo(
                         id="accounts",
                         icon="📋",
                         label="账号管理",
-                        entry="core:data_table:accounts",
                     ),
                 ],
             ),
@@ -117,13 +111,11 @@ class TestModuleManifest:
                 "id": "dashboard",
                 "icon": "📊",
                 "label": "今日运营看板",
-                "entry": "core:page:dashboard",
             },
             {
                 "id": "accounts",
                 "icon": "📋",
                 "label": "账号管理",
-                "entry": "core:data_table:accounts",
             },
         ]
         assert data["config_defaults"] == {
@@ -375,28 +367,20 @@ upgrade_source:
 
         assert "config_schema.json" in str(exc_info.value)
 
-    def test_validate_rejects_unmanaged_page_entry(self, tmp_path):
-        from src.core.mms.models import ModuleValidationError
-
+    def test_validate_rejects_legacy_page_entry_field(self):
         manifest = ModuleManifest(
             name="demo_module",
             upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
             ui_extension=UIExtensionInfo(
                 pages=[
-                    UIPageInfo(
-                        id="custom_page",
-                        label="自定义页面",
-                        entry="ui:CustomPage",
-                    )
+                    UIPageInfo(id="custom_page", label="自定义页面")
                 ],
             ),
         )
-        scanner = ModuleScanner(scan_paths=[tmp_path])
-
-        with pytest.raises(ModuleValidationError) as exc_info:
-            scanner.validate(manifest, tmp_path)
-
-        assert "ui_extension.pages" in str(exc_info.value)
+        manifest_dict = manifest.to_dict()
+        manifest_dict["ui_extension"]["pages"][0]["entry"] = "ui:CustomPage"
+        with pytest.raises(ValueError):
+            ModuleManifest.from_dict(manifest_dict)
 
     def test_validate_rejects_unknown_workflow_in_config_defaults(self, tmp_path):
         from src.core.mms.models import ModuleValidationError

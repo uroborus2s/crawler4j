@@ -114,6 +114,9 @@ class MyTask(TaskScript):
 - `db.get_state`
 - `db.set_state`
 - `db.exists_state`
+- `db.declare_data_resource`
+- `db.declare_db_view`
+- `db.query_view`
 - `ip_pool.pick_proxy`
 - `env.set_proxy`
 - `env.bind_resource_pool`
@@ -121,8 +124,8 @@ class MyTask(TaskScript):
 - `env.mark_resource_pool_ineligible`
 - `env.remove_resource_pool`
 - `env.replace_resource_pool_snapshot`
-- `ui.declare_data_table`
-- `ui.get_data_table`
+- `ui.declare_page`
+- `ui.get_page`
 - `captcha.match_slider`
 - `captcha.match_click_targets`
 
@@ -196,7 +199,7 @@ if ctx.tools and ctx.tools.has_tool("captcha.match_slider"):
 # 初始化模块项目：生成标准骨架、module.yaml、module_runtime.py
 uvx --from crawler4j-sdk crawler4j module init my_model --repo owner/my_model
 
-# 查看当前模块的版本、仓库、默认工作流、页面入口和数据表入口
+# 查看当前模块的版本、仓库、默认工作流和页面入口
 uv run crawler4j module show
 
 # 创建任务脚本：只写 tasks/<name>.py
@@ -207,9 +210,6 @@ uv run crawler4j workflow create sync_orders
 
 # 创建宿主页：写 module_runtime.py 中的 schema / load handler，并注册 ui_extension.pages[]
 uv run crawler4j page create dashboard
-
-# 创建受控数据表：注册 core:data_table:<view_id>，并补 declare_ui 骨架
-uv run crawler4j data-table create accounts
 
 # 创建环境选择器：在 module_runtime.py 里追加 @env_selector(...) 函数
 uv run crawler4j env-selector create pick_ready
@@ -239,7 +239,6 @@ uv run crawler4j host debug config
 - `task`：管理 `tasks/` 里的 `TaskScript`
 - `workflow`：管理 `workflows/` 和 `module.yaml.workflows`
 - `page`：管理 hosted page 和 `ui_extension.pages[]`
-- `data-table`：管理受控 `core:data_table:<id>` 入口
 - `env-selector`：管理 `module_runtime.py` 里的环境选择策略函数
 - `config`：管理 `module.yaml.config_defaults`
 - `package`：构建和校验安装 ZIP
@@ -255,10 +254,10 @@ uv run crawler4j host debug config
 - 执行 `git init`
 - 执行 `uv sync`
 
-如果你在 CI 或脚本里使用 CLI，可以直接补齐 `--repo`、`--no-git`、`--no-install` 等参数。第一版命令树已经切到 `module / task / workflow / page / data-table / env-selector / config / package / release / host / check` 分组体系，不再兼容旧平铺命令。
+如果你在 CI 或脚本里使用 CLI，可以直接补齐 `--repo`、`--no-git`、`--no-install` 等参数。第一版命令树已经切到 `module / task / workflow / page / env-selector / config / package / release / host / check` 分组体系，不再兼容旧平铺命令。
 
 调试主路径已经收敛到 Core 调试会话。旧的 `debug_runner.py` 辅助脚本已从宿主仓库移除，CLI 也不再生成任何本地调试壳脚本。
-模块持久配置由宿主统一维护，`config_schema.json` / `strategy.yaml` 已不再受支持；详情页扩展数据表也应通过 `data-table create` 写入受控的 `core:data_table:<view_id>` 入口，而不是手改 `module.yaml`。
+模块持久配置由宿主统一维护，`config_schema.json` / `strategy.yaml` 已不再受支持；列表页、统计页和可编辑表格页都应通过 `page create` 生成页面骨架，再在页面 schema 中声明 `DataTable` 组件，而不是手改旧式 `entry` 或独立数据表入口。
 
 ## 工作流示例
 

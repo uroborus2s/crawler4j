@@ -1,19 +1,16 @@
-"""模块宿主页最小渲染器。"""
+"""Minimal hosted page renderer."""
 
 from __future__ import annotations
 
 from typing import Any, Callable
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QAbstractItemView,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -21,11 +18,12 @@ from PyQt6.QtWidgets import (
 from src.core.mms.models import ModuleInfo
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
 from src.core.persistence import get_module_data_store
-from src.ui.components.table import SkyTableWidget
+from src.ui.components.data_table import SkyDataTable
+from src.ui.components.data_table_query import resolve_local_data_table_result
 
 
 class ManagedPageRenderer(QWidget):
-    """渲染 `ui.declare_page` 声明的最小宿主页。"""
+    """Render `ui.declare_page` declared hosted pages."""
 
     def __init__(
         self,
@@ -33,19 +31,21 @@ class ManagedPageRenderer(QWidget):
         page_id: str,
         *,
         module_info: ModuleInfo | None = None,
-        open_entry_callback: Callable[[str], Any] | None = None,
+        open_page_callback: Callable[..., Any] | None = None,
+        initial_params: dict[str, Any] | None = None,
         parent=None,
     ):
         super().__init__(parent)
         self._module_name = module_name
         self._page_id = page_id
-        self._open_entry_callback = open_entry_callback
+        self._open_page_callback = open_page_callback
         self._bridge = ModuleUIRuntimeBridge(module_name, module_info=module_info)
         self._data_store = get_module_data_store()
 
         self._schema: dict[str, Any] = {}
         self._payload: dict[str, Any] = {}
-        self._data_table_widgets: dict[str, SkyTableWidget] = {}
+        self._data_table_widgets: dict[str, SkyDataTable] = {}
+        self._navigation_params = self._normalize_navigation_params(initial_params)
 
         self._setup_ui()
         self.refresh()
@@ -78,6 +78,17 @@ class ManagedPageRenderer(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
+    @staticmethod
+    def _normalize_navigation_params(params: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(params, dict):
+            return {}
+        return dict(params)
+
+    def set_navigation_params(self, params: dict[str, Any] | None, *, auto_refresh: bool = True) -> None:
+        self._navigation_params = self._normalize_navigation_params(params)
+        if auto_refresh:
+            self.refresh()
+
     def _resolve_binding(self, binding: str) -> Any:
         current: Any = self._payload
         for part in binding.split("."):
@@ -86,6 +97,31 @@ class ManagedPageRenderer(QWidget):
                 continue
             return None
         return current
+
+    @staticmethod
+    def _resolve_action_binding(source: Any, binding: str) -> Any:
+        current: Any = source
+        for part in binding.split("."):
+            if isinstance(current, dict):
+                current = current.get(part)
+                continue
+            return None
+        return current
+
+    def _resolve_action_params(self, action: dict[str, Any], source: Any) -> dict[str, Any]:
+        raw_params = action.get("params")
+        if not isinstance(raw_params, dict):
+            return {}
+        resolved: dict[str, Any] = {}
+        for key, spec in raw_params.items():
+            if isinstance(spec, dict) and "binding" in spec:
+                resolved[str(key)] = self._resolve_action_binding(source, str(spec.get("binding") or ""))
+                continue
+            if isinstance(spec, dict) and "value" in spec:
+                resolved[str(key)] = spec.get("value")
+                continue
+            resolved[str(key)] = spec
+        return resolved
 
     def _build_layout_widget(self, children: list[dict[str, Any]], layout_spec: dict[str, Any]) -> QWidget:
         container = QWidget()
@@ -151,8 +187,7 @@ class ManagedPageRenderer(QWidget):
         if action.get("type") == "reload":
             button.clicked.connect(self.refresh)
         else:
-            entry = str(action.get("entry") or "").strip()
-            button.clicked.connect(lambda _checked=False, target=entry: self._open_entry(target))
+            button.clicked.connect(lambda _checked=False, current_action=dict(action): self._handle_button_action(current_action))
         return button
 
     def _build_data_table(self, component: dict[str, Any]) -> QWidget:
@@ -167,50 +202,100 @@ class ManagedPageRenderer(QWidget):
             title_label.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 14px; font-weight: 600;")
             layout.addWidget(title_label)
 
-        table = SkyTableWidget()
-        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        table.verticalHeader().setDefaultSectionSize(40)
-        table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        table = SkyDataTable(
+            {
+                "columns": list(component.get("columns") or []),
+                "features": dict(component.get("features") or {}),
+                "empty_text": str(component.get("empty_text") or "暂无数据"),
+                "selection_mode": "single",
+            }
+        )
+        table.query_requested.connect(
+            lambda request_id, query, table_widget=table, spec=dict(component): self._on_inline_table_query(
+                table_widget,
+                spec,
+                request_id,
+                query,
+            )
+        )
+        row_action = component.get("row_action")
+        if isinstance(row_action, dict):
+            table.row_clicked.connect(lambda row, action=dict(row_action): self._handle_row_action(action, row))
 
-        rows = component.get("rows")
-        binding = str(component.get("binding") or "").strip()
-        if binding:
-            bound_rows = self._resolve_binding(binding)
-            if isinstance(bound_rows, list):
-                rows = bound_rows
-        if not isinstance(rows, list):
-            rows = []
+        table.set_query({"params": dict(self._navigation_params)})
+        table.request_refresh()
 
-        columns = component.get("columns")
-        if not isinstance(columns, list) or not columns:
-            first_row = rows[0] if rows else {}
-            columns = [
-                {"key": str(key), "label": str(key)}
-                for key in first_row.keys()
-            ]
-
-        table.setColumnCount(len(columns))
-        table.setHorizontalHeaderLabels([str(column.get("label") or column.get("key")) for column in columns])
-        table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            row_data = row if isinstance(row, dict) else {}
-            for col_index, column in enumerate(columns):
-                value = row_data.get(str(column.get("key") or ""), "")
-                item = QTableWidgetItem("" if value is None else str(value))
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                table.setItem(row_index, col_index, item)
-
-        table_key = title or f"table_{len(self._data_table_widgets) + 1}"
-        self._data_table_widgets[table_key] = table
+        table_id = str(component.get("table_id") or title or f"table_{len(self._data_table_widgets) + 1}")
+        self._data_table_widgets[table_id] = table
         layout.addWidget(table)
-
-        if not rows:
-            empty = QLabel(str(component.get("empty_text") or "暂无数据"))
-            empty.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 12px;")
-            layout.addWidget(empty)
-
         return wrapper
+
+    def _normalize_inline_query_result(self, raw: Any) -> dict[str, Any]:
+        if not isinstance(raw, dict):
+            raise ValueError("query_handler 必须返回对象")
+        rows = raw.get("rows")
+        if not isinstance(rows, list):
+            raise ValueError("query_handler 返回值必须包含 rows 数组")
+        normalized_rows = [dict(row) for row in rows if isinstance(row, dict)]
+        return {
+            "rows": normalized_rows,
+            "total": int(raw.get("total", len(normalized_rows))),
+            "page": int(raw.get("page", 1)),
+            "page_size": int(raw.get("page_size", 20)),
+            "sort": list(raw.get("sort") or []),
+        }
+
+    def _on_inline_table_query(
+        self,
+        table: SkyDataTable,
+        component: dict[str, Any],
+        request_id: int,
+        query: dict[str, Any],
+    ) -> None:
+        data_source = component.get("data_source") or {}
+        source_type = str(data_source.get("type") or "").strip().lower()
+        merged_query = dict(query or {})
+        merged_query["params"] = dict(self._navigation_params)
+        try:
+            if source_type == "binding":
+                rows = self._resolve_binding(str(data_source.get("binding") or ""))
+                if not isinstance(rows, list):
+                    rows = []
+                result = resolve_local_data_table_result(
+                    [dict(row) for row in rows if isinstance(row, dict)],
+                    columns=list(component.get("columns") or []),
+                    query=merged_query,
+                )
+            elif source_type == "rows":
+                rows = data_source.get("rows")
+                if not isinstance(rows, list):
+                    rows = []
+                result = resolve_local_data_table_result(
+                    [dict(row) for row in rows if isinstance(row, dict)],
+                    columns=list(component.get("columns") or []),
+                    query=merged_query,
+                )
+            else:
+                handler_name = str(data_source.get("handler") or "").strip()
+                if not handler_name:
+                    raise ValueError("query_handler 数据源必须提供 handler")
+                result = self._normalize_inline_query_result(
+                    self._bridge.call_local_hook(
+                        handler_name,
+                        str(component.get("table_id") or ""),
+                        merged_query,
+                        dict(self._navigation_params) if self._navigation_params else None,
+                        runtime_extra={
+                            "page_id": self._page_id,
+                            "table_id": str(component.get("table_id") or ""),
+                            "params": dict(self._navigation_params) if self._navigation_params else None,
+                        },
+                    )
+                )
+        except Exception as exc:
+            table.apply_error(request_id, str(exc))
+            return
+        table.apply_result(request_id, result)
 
     def _build_section(self, component: dict[str, Any]) -> QWidget:
         frame = QFrame()
@@ -251,7 +336,6 @@ class ManagedPageRenderer(QWidget):
             return self._build_section(component)
         if component_type == "DataTable":
             return self._build_data_table(component)
-
         fallback = QLabel(f"不支持的组件: {component_type or '<empty>'}")
         fallback.setStyleSheet("color: #f87171; font-size: 12px;")
         return fallback
@@ -260,25 +344,48 @@ class ManagedPageRenderer(QWidget):
         handler_name = str(self._schema.get("load_handler") or "").strip()
         if not handler_name:
             return {}
+        params = dict(self._navigation_params) if self._navigation_params else None
         payload = self._bridge.call_local_hook(
             handler_name,
             self._page_id,
-            None,
-            runtime_extra={"page_id": self._page_id},
+            params,
+            runtime_extra={
+                "page_id": self._page_id,
+                "params": params,
+            },
         )
         return payload if isinstance(payload, dict) else {}
 
-    def _open_entry(self, entry: str) -> None:
-        if not self._open_entry_callback:
-            self._status_label.setText(f"未配置页面跳转处理器: {entry}")
+    def _handle_button_action(self, action: dict[str, Any]) -> None:
+        page_id = str(action.get("page_id") or "").strip()
+        params = self._resolve_action_params(action, self._payload)
+        self._open_page(page_id, params or None)
+
+    def _handle_row_action(self, action: dict[str, Any], row: dict[str, Any]) -> None:
+        page_id = str(action.get("page_id") or "").strip()
+        params = self._resolve_action_params(action, row)
+        self._open_page(page_id, params or None)
+
+    def _open_page(self, page_id: str, params: dict[str, Any] | None = None) -> None:
+        if not self._open_page_callback:
+            self._status_label.setText(f"未配置页面跳转处理器: {page_id}")
             return
-        self._open_entry_callback(entry)
+        try:
+            self._open_page_callback(page_id, params)
+        except TypeError:
+            self._open_page_callback(page_id)
 
     def refresh(self) -> None:
         self._status_label.setText("")
         self._data_table_widgets = {}
         try:
-            self._bridge.declare_ui()
+            self._bridge.call_local_hook(
+                "declare_ui",
+                runtime_extra={
+                    "page_id": self._page_id,
+                    "params": dict(self._navigation_params) if self._navigation_params else None,
+                },
+            )
             self._schema = self._data_store.read_page_schema(self._module_name, self._page_id)
             if not self._schema:
                 raise ValueError(f"未声明页面 schema: {self._page_id}")
