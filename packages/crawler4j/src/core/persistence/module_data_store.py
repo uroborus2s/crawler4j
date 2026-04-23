@@ -53,12 +53,12 @@ def _normalize_records(raw: Any) -> list[dict[str, Any]]:
 
 def _normalize_records_for_write(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
-        raise ValueError("dataset records must be a list of objects")
+        raise ValueError("resource records must be a list of objects")
 
     records: list[dict[str, Any]] = []
     for index, item in enumerate(raw):
         if not isinstance(item, dict):
-            raise ValueError(f"dataset records[{index}] must be an object")
+            raise ValueError(f"resource records[{index}] must be an object")
         records.append(dict(item))
     return records
 
@@ -528,6 +528,12 @@ class ModuleDataStore:
         ).fetchone()
         return self._resource_from_row(row) if row else None
 
+    def _require_resource_row_with_conn(self, conn, module_name: str, resource_id: str) -> dict[str, Any]:
+        resource = self._read_resource_row_with_conn(conn, module_name, resource_id)
+        if resource is None:
+            raise ValueError(f"未注册的数据资源: {resource_id}")
+        return resource
+
     def _list_resource_rows_with_conn(self, conn, module_name: str) -> list[dict[str, Any]]:
         rows = conn.execute(
             """
@@ -691,99 +697,6 @@ class ModuleDataStore:
             raise RuntimeError("module data resource registration failed")
         return resource
 
-    def _ensure_managed_dataset_resource_with_conn(
-        self,
-        conn,
-        module_name: str,
-        dataset_name: str,
-        *,
-        now: int,
-    ) -> dict[str, Any]:
-        existing = self._read_resource_row_with_conn(conn, module_name, dataset_name)
-        if existing is not None:
-            if existing["storage_mode"] == "managed_dataset":
-                return self._write_resource_row_with_conn(
-                    conn,
-                    module_name,
-                    dataset_name,
-                    storage_mode="managed_dataset",
-                    logical_name=existing["logical_name"],
-                    physical_table_name="module_datasets",
-                    record_key_field=existing["record_key_field"],
-                    schema=existing["schema"],
-                    indexes=existing["indexes"],
-                    cleanup_policy=existing["cleanup_policy"],
-                    now=now,
-                )
-            return existing
-        return self._write_resource_row_with_conn(
-            conn,
-            module_name,
-            dataset_name,
-            storage_mode="managed_dataset",
-            logical_name=dataset_name,
-            physical_table_name="module_datasets",
-            record_key_field=None,
-            schema={},
-            indexes={},
-            cleanup_policy="delete_rows",
-            now=now,
-        )
-
-    def _read_dataset_manifest_timestamps_with_conn(
-        self,
-        conn,
-        module_name: str,
-        dataset_name: str,
-    ) -> tuple[int | None, int | None]:
-        row = conn.execute(
-            """
-            SELECT created_at, updated_at
-            FROM module_dataset_manifests
-            WHERE module_name = ? AND dataset_name = ?
-            """,
-            (module_name, dataset_name),
-        ).fetchone()
-        if not row:
-            row = conn.execute(
-                """
-                SELECT MIN(created_at) AS created_at, MAX(updated_at) AS updated_at
-                FROM module_datasets
-                WHERE module_name = ? AND dataset_name = ?
-                """,
-                (module_name, dataset_name),
-            ).fetchone()
-        if not row:
-            return None, None
-        if row["created_at"] is None or row["updated_at"] is None:
-            return None, None
-        return int(row["created_at"]), int(row["updated_at"])
-
-    def _write_dataset_manifest_row(
-        self,
-        conn,
-        module_name: str,
-        dataset_name: str,
-        *,
-        created_at: int,
-        updated_at: int,
-    ) -> None:
-        conn.execute(
-            """
-            INSERT INTO module_dataset_manifests (
-                module_name,
-                dataset_name,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(module_name, dataset_name) DO UPDATE SET
-                created_at = excluded.created_at,
-                updated_at = excluded.updated_at
-            """,
-            (module_name, dataset_name, created_at, updated_at),
-        )
-
     def _write_managed_dataset_rows_with_conn(
         self,
         conn,
@@ -795,7 +708,15 @@ class ModuleDataStore:
         now: int,
     ) -> None:
         normalized_records = [dict(record) for record in records]
-        created_at, _ = self._read_dataset_manifest_timestamps_with_conn(conn, module_name, dataset_name)
+        row = conn.execute(
+            """
+            SELECT MIN(created_at) AS created_at
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            """,
+            (module_name, dataset_name),
+        ).fetchone()
+        created_at = int(row["created_at"]) if row and row["created_at"] is not None else None
         created_at = created_at if created_at is not None else now
         conn.execute(
             """
@@ -839,13 +760,6 @@ class ModuleDataStore:
                     for record_index, record in enumerate(normalized_records)
                 ],
             )
-        self._write_dataset_manifest_row(
-            conn,
-            module_name,
-            dataset_name,
-            created_at=created_at,
-            updated_at=now,
-        )
 
     def _read_managed_dataset_rows_with_conn(
         self,
@@ -1265,15 +1179,10 @@ class ModuleDataStore:
             rendered_rows.append(payload)
         return rendered_rows
 
-    def _write_dataset_row(self, module_name: str, dataset_name: str, records: list[dict[str, Any]]) -> bool:
+    def _replace_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
         now = int(time.time())
         with get_connection(DATA_DB) as conn:
-            resource = self._ensure_managed_dataset_resource_with_conn(
-                conn,
-                module_name,
-                dataset_name,
-                now=now,
-            )
+            resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
             if resource["storage_mode"] == "custom_table":
                 self._write_custom_table_rows_with_conn(conn, resource, records, now=now)
             else:
@@ -1287,11 +1196,9 @@ class ModuleDataStore:
                 )
         return True
 
-    def _read_dataset_row(self, module_name: str, dataset_name: str) -> list[dict[str, Any]] | None:
+    def _read_resource_records(self, module_name: str, resource_id: str) -> list[dict[str, Any]] | None:
         with get_connection(DATA_DB) as conn:
-            resource = self._read_resource_row_with_conn(conn, module_name, dataset_name)
-            if resource is None:
-                return self._read_managed_dataset_rows_with_conn(conn, module_name, dataset_name)
+            resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
             if resource["storage_mode"] == "custom_table":
                 return self._read_custom_table_rows_with_conn(conn, resource)
             return self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"])
@@ -1620,15 +1527,7 @@ class ModuleDataStore:
         if normalized_key is None:
             return None
         with get_connection(DATA_DB) as conn:
-            resource = self._read_resource_row_with_conn(conn, module_name, resource_id)
-            if resource is None:
-                rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource_id)
-                for row in rows:
-                    row_key = _normalize_text(row.get("record_key") or row.get("id"))
-                    if row_key == normalized_key:
-                        return row
-                return None
-
+            resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
             record_key_field = resource.get("record_key_field") or "id"
             if resource["storage_mode"] == "custom_table":
                 rows = self._list_custom_table_records_with_conn(
@@ -1658,10 +1557,7 @@ class ModuleDataStore:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         with get_connection(DATA_DB) as conn:
-            resource = self._read_resource_row_with_conn(conn, module_name, resource_id)
-            if resource is None:
-                rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource_id)
-                return _apply_record_query(rows, filters=filters, sort=sort, limit=limit, offset=offset)
+            resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
             if resource["storage_mode"] == "custom_table":
                 return self._list_custom_table_records_with_conn(
                     conn,
@@ -1714,12 +1610,12 @@ class ModuleDataStore:
             rendered_rows.append(payload)
         return rendered_rows
 
-    def read_dataset(self, module_name: str, dataset_name: str) -> list[dict[str, Any]]:
-        records = self._read_dataset_row(module_name, dataset_name)
+    def read_resource_records(self, module_name: str, resource_id: str) -> list[dict[str, Any]]:
+        records = self._read_resource_records(module_name, resource_id)
         return records if records is not None else []
 
-    def write_dataset(self, module_name: str, dataset_name: str, records: list[dict[str, Any]]) -> bool:
-        return self._write_dataset_row(module_name, dataset_name, _normalize_records_for_write(records))
+    def replace_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
+        return self._replace_resource_records(module_name, resource_id, _normalize_records_for_write(records))
 
     def append_audit_event(
         self,
@@ -1823,10 +1719,6 @@ class ModuleDataStore:
                 else:
                     conn.execute(
                         "DELETE FROM module_datasets WHERE module_name = ? AND dataset_name = ?",
-                        (module_name, resource["logical_name"]),
-                    )
-                    conn.execute(
-                        "DELETE FROM module_dataset_manifests WHERE module_name = ? AND dataset_name = ?",
                         (module_name, resource["logical_name"]),
                     )
                 cursor = conn.execute(
@@ -1969,23 +1861,8 @@ class ModuleDataStore:
                 )
                 changed = bool(cursor.rowcount) or changed
 
-                cursor = conn.execute(
-                    """
-                    DELETE FROM module_dataset_manifests
-                    WHERE module_name = ? AND dataset_name = ?
-                    """,
-                    (module_name, resource["logical_name"]),
-                )
-                changed = bool(cursor.rowcount) or changed
-
             cursor = conn.execute(
                 "DELETE FROM module_datasets WHERE module_name = ?",
-                (module_name,),
-            )
-            changed = bool(cursor.rowcount) or changed
-
-            cursor = conn.execute(
-                "DELETE FROM module_dataset_manifests WHERE module_name = ?",
                 (module_name,),
             )
             changed = bool(cursor.rowcount) or changed

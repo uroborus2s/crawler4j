@@ -118,6 +118,7 @@
 - `module.yaml.data.resources[]` 是表资源的唯一声明入口
 - `managed_dataset` 模式下，`db.get_record` / `db.list_records` / `db.replace_records` 读写的快照记录持久化到 `data.db.module_datasets`
 - `custom_table` 模式下，宿主会在模块加载/安装时创建受控物理表 `module_name_resource_id`
+- 未注册的 `resource_id` 会直接报错；宿主不再按资源名隐式补建 `managed_dataset`
 - `module.yaml.data.views[]` 会同步到 `data.db.module_db_views`
 - `module.yaml.data.queries[]` 会在宿主加载时完成校验，运行时只能通过 `db.run_query(query_id=..., params=...)` 调用
 - `db.append_event` / `db.query_events` 读写的审计事件持久化到 `data.db.module_audit_events`

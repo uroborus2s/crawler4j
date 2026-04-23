@@ -71,6 +71,7 @@
 
 ## 5. 最近同步
 
+- 2026-04-23：开发者指南与设计文档已补记 `managed_dataset` 的最终收口语义：`docs/03-developer-guide/{index.md,quickstart.md,reference-core-capabilities.md}` 与 `docs/04-project-development/04-design/{api-design.md,module-config-runtime-data-contract.md}` 现统一说明 `managed_dataset/custom_table` 都必须先在 `module.yaml.data.resources[]` 注册，未注册资源会被 `db.get_record` / `db.list_records` / `db.replace_records` 直接拒绝，不再按名称隐式创建托管表资源。
 - 2026-04-23：`docs/03-developer-guide/` 已把 manifest 驱动数据契约正式收口到开发者入口：`index.md`、`core-concepts.md`、`module-structure.md`、`quickstart.md`、`build-modules.md`、`reference-sdk-and-cli.md`、`debugging.md`、`troubleshooting.md` 现统一说明 `module.yaml.data + data/sql + data/seeds`、CLI `data` 命令组，以及 `db.get_record` / `db.run_query` / `db.query_view` 新正式口径；`docs/02-user-guide/` 同步补记管理员与现场支持对“旧协议模块包会被直接拒绝加载”的分诊口径。
 - 2026-04-22：`module-hosted-ui-framework.md` 已从“设计已批准”推进到“本地实现已落地”，对应的 `implementation-plan.md`、`test-plan.md`、`requirements-matrix.md`、`interface-matrix.md`、`.factory/workitems/` 与 `.factory/memory/` 已同步登记 `CR-011` / `TASK-025` / `TC-049`。
 - 2026-04-22：已新增 `module-hosted-ui-framework.md`，将“模块不得直接使用 `PyQt6`、宿主统一托管模块页面、最小化 UI 框架 V1 只公开 `Page/Section/Text/Button/DataTable`”正式沉淀为设计文档；`docs/index.md`、`module-boundaries.md`、`api-design.md`、`interface-matrix.md` 与 `.factory/memory/` 摘要已同步到同一口径。

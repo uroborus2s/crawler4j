@@ -172,7 +172,7 @@ def query_orders_table(
 - 命名 SQL：`db.run_query(query_id=..., params=...)`
 - 审计时间线：`db.query_events` 后由页面自己组装
 
-文档示例统一推荐写 `resource=...` 来对应 `module.yaml.data.resources[]`。运行时当前仍兼容历史别名 `dataset=...`，但新模块不要再把它当正式口径。
+文档示例统一只写 `resource=...` 来对应 `module.yaml.data.resources[]`；运行时不再接受历史别名 `dataset=...`。
 
 ## 数据能力约束
 
@@ -184,6 +184,8 @@ def query_orders_table(
 - `data/sql/views/*.sql`
 - `data/sql/queries/*.sql`
 - `data/seeds/*.json`
+
+未在 `module.yaml.data.resources[]` 注册的 `resource_id` 会直接报错；`managed_dataset` 也不再按 `dataset` 名自动创建托管表资源。
 
 `db.run_query` / `db.query_view` 当前只支持：
 

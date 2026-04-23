@@ -86,10 +86,10 @@
 | 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
 | 页面 schema | `data.db.module_pages`，统一通过 `ui.declare_page` / `ui.get_page` 访问 |
-| 快照型业务数据 | `module.yaml.data.resources[]` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`）+ `data.db.module_dataset_manifests`，`custom_table` 落在受控实体表 `module_name_resource_id`，并由 `schema_version` / `schema_json` / `indexes_json` 描述真实列结构；业务数据统一通过 `db.get_record` / `db.list_records` / `db.replace_records` 访问 |
+| 快照型业务数据 | `module.yaml.data.resources[]` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`），`custom_table` 落在受控实体表 `module_name_resource_id`，并由 `schema_version` / `schema_json` / `indexes_json` 描述真实列结构；业务数据统一通过 `db.get_record` / `db.list_records` / `db.replace_records` 访问 |
 | 事件型业务数据 | `data.db.module_audit_events`，统一通过 `db.append_event` / `db.query_events` 访问 |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
-| 当前实现说明 | `db.list_records` / `db.replace_records` 已按资源 `storage_mode` 路由；`custom_table` 现为 schema 驱动的受控实体表，不再写入统一 `record_json` 容器。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单；当前运行时代码仍不包含旧 `state.db.kv_store` 模块表数据自动迁移逻辑，旧数据需要显式迁移或人工导入 |
+| 当前实现说明 | `db.get_record` / `db.list_records` / `db.replace_records` 已统一要求资源先在 `module.yaml.data.resources[]` 注册，再按 `storage_mode` 路由；`managed_dataset` 不再按名称隐式落库，`custom_table` 继续使用 schema 驱动的受控实体表，不再写入统一 `record_json` 容器。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单；当前运行时代码仍不包含旧 `state.db.kv_store` 模块表数据自动迁移逻辑，旧数据需要显式迁移或人工导入 |
 | 关联文档 | `module-config-runtime-data-contract.md` |
 | 关联项 | `CR-003`, `CR-012`, `TASK-026` |
 
@@ -184,6 +184,7 @@
 | 2026-04-18 | 新增 `API-006`，将模块快照数据与审计事件拆成两条正式持久化契约 | Codex |
 | 2026-04-19 | 新增 `API-007`，收口固定环境池 Service Job 的等待队列与资源池资格卡片契约 | Codex |
 | 2026-04-19 | `API-007` V1 落地：宿主等待席位、资源池资格 helper 与运行模板 `resource_pool` 契约已实现 | Codex |
-| 2026-04-21 | 刷新 `API-005` 的文档元数据，确认 `module_datasets` 逐行持久化已进入正式契约口径，并补记 `module_dataset_manifests` 负责 dataset 级元数据 | Codex |
+| 2026-04-21 | 刷新 `API-005` 的文档元数据，确认 `module_datasets` 逐行持久化已进入正式契约口径 | Codex |
+| 2026-04-23 | 刷新 `API-005`：移除 `module_dataset_manifests`，`managed_dataset` 只保留 `module_datasets` 作为记录事实源 | Codex |
 | 2026-04-23 | 刷新 `API-005`：新增 `module_data_resources`、`managed_dataset/custom_table` 两种存储模式、`module_datasets` V3 记录状态字段与 `db.declare_data_resource` 契约，并补记卸载清理策略 | Codex |
 | 2026-04-23 | 新增 `API-009`，正式登记模块实体表视图与分析查询能力设计 | Codex |

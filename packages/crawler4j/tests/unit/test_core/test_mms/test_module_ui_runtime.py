@@ -23,6 +23,20 @@ def temp_data_dir(tmp_path):
         yield tmp_path
 
 
+def _sync_managed_dataset(module_name: str, module_root, resource_id: str) -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [{"id": resource_id, "storage_mode": "managed_dataset"}],
+            "views": [],
+            "queries": [],
+            "seeds": [],
+        }
+    )
+    get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
+
+
 def test_module_ui_runtime_bridge_reads_page_schema_and_handlers_from_descriptor(tmp_path):
     module_name = "runtime_bridge_module"
     module_dir = write_module_tree(
@@ -312,7 +326,7 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
                 OBSERVED["query_page_id"] = context.runtime.get("page_id")
                 OBSERVED["query_table_id"] = context.runtime.get("table_id")
                 OBSERVED["query_params"] = context.runtime.get("params")
-                OBSERVED["query_rows_before"] = context.tools.call("db.list_records", dataset="metrics")
+                OBSERVED["query_rows_before"] = context.tools.call("db.list_records", resource="metrics")
                 try:
                     context.tools.call("db.append_event", dataset="metrics_events", event_type="query")
                 except Exception as exc:
@@ -328,10 +342,26 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
         },
     )
     manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    manifest.data = {
+        "resources": [
+            {
+                "resource_id": "metrics",
+                "storage_mode": "managed_dataset",
+                "record_key_field": "id",
+                "schema": {},
+                "indexes": {},
+                "cleanup_policy": "delete_rows",
+            }
+        ],
+        "views": [],
+        "queries": [],
+        "seeds": [],
+    }
     service, original_registry, _ = register_module(module_name, module_dir, manifest=manifest)
     bridge = ModuleUIRuntimeBridge(module_name)
 
     try:
+        _sync_managed_dataset(module_name, module_dir, "metrics")
         bridge.declare_ui(page_id="dashboard", params={"phone": "13800138000"})
         page_payload = bridge.call_page_handler(
             "load_dashboard_page",
@@ -347,9 +377,11 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
         )
 
         assert page_payload["load_tools"] == [
+            "db.get_record",
             "db.list_records",
             "db.query_events",
             "db.query_view",
+            "db.run_query",
             "ui.get_page",
         ]
         assert page_payload["load_has_get_page"] is True
@@ -358,9 +390,11 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
         assert page_payload["load_schema_type"] == "Page"
         assert page_payload["load_write_error"] == "KeyError"
         assert query_payload["observed"]["query_tools"] == [
+            "db.get_record",
             "db.list_records",
             "db.query_events",
             "db.query_view",
+            "db.run_query",
             "ui.get_page",
         ]
         assert query_payload["observed"]["query_page_id"] == "dashboard"

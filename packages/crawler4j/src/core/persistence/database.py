@@ -197,23 +197,6 @@ def _create_module_data_resources_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def _create_module_dataset_manifests_table(
-    conn: sqlite3.Connection,
-    table_name: str = "module_dataset_manifests",
-) -> None:
-    conn.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            module_name TEXT NOT NULL,
-            dataset_name TEXT NOT NULL,
-            created_at INTEGER DEFAULT (strftime('%s', 'now')),
-            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-            PRIMARY KEY (module_name, dataset_name)
-        )
-        """
-    )
-
-
 def _create_module_db_views_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -342,12 +325,6 @@ def _create_module_datasets_indexes(conn: sqlite3.Connection) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_module_datasets_dataset
         ON module_datasets(module_name, dataset_name)
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_module_dataset_manifests_module
-        ON module_dataset_manifests(module_name)
         """
     )
 
@@ -624,8 +601,8 @@ def _init_data_db() -> None:
     with get_connection(DATA_DB) as conn:
         _ensure_module_data_resources_table(conn)
         _ensure_module_db_views_table(conn)
-        _create_module_dataset_manifests_table(conn)
         _ensure_module_datasets_table(conn)
+        conn.execute("DROP TABLE IF EXISTS module_dataset_manifests")
         conn.executescript("""
             -- 模块数据资源登记表统一管理 managed dataset 与 custom table。
 

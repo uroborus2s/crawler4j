@@ -47,6 +47,26 @@ class _FakeKV:
         return self._store.pop(key, None) is not None
 
 
+def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+    from src.core.persistence import get_module_data_store
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [
+                {
+                    "id": resource_id,
+                    "storage_mode": "managed_dataset",
+                }
+            ],
+            "views": [],
+            "queries": [],
+            "seeds": [],
+        }
+    )
+    get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
+
+
 def test_runtime_tools_register_expected_surface():
     caps = build_runtime_capabilities("demo_module")
 
@@ -327,6 +347,19 @@ def test_db_tools_run_query_and_query_view_delegate_to_store(monkeypatch):
     ]
 
 
+def test_db_tools_reject_undeclared_resources():
+    caps = build_runtime_capabilities("demo_module")
+
+    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
+        caps.tools.call("db.list_records", resource="accounts")
+
+    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
+        caps.tools.call("db.get_record", resource="accounts", key="u1")
+
+    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
+        caps.tools.call("db.replace_records", resource="accounts", records=[{"id": "u1"}])
+
+
 @pytest.mark.parametrize(
     ("params", "expected_message"),
     [
@@ -408,20 +441,21 @@ def test_runtime_tools_hide_side_effect_db_tools_during_ui_declaration(tool_name
     assert tool_name in {spec.name for spec in caps.tools.list_tools()}
 
 
-def test_db_tools_records_and_lock_are_generic(monkeypatch):
+def test_db_tools_records_and_lock_are_generic(temp_data_dir, monkeypatch):
     fake_kv = _FakeKV()
     monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
 
     caps = build_runtime_capabilities("demo_module")
     assert caps.tools.call(
         "db.replace_records",
-        dataset="accounts",
+        resource="accounts",
         records=[
             {"id": "u1", "phone_number": "13800000001", "country_code": "86"},
             {"id": "u2", "phone_number": "13800000002", "country_code": "86"},
         ],
     )
-    records = caps.tools.call("db.list_records", dataset="accounts")
+    records = caps.tools.call("db.list_records", resource="accounts")
     assert len(records) == 2
 
     first = caps.tools.call(
@@ -445,25 +479,27 @@ def test_db_tools_records_and_lock_are_generic(monkeypatch):
     assert third is True
 
 
-def test_db_tools_replace_records_rejects_invalid_records():
+def test_db_tools_replace_records_rejects_invalid_records(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
     caps = build_runtime_capabilities("demo_module")
 
-    with pytest.raises(ValueError, match=r"dataset records\[1\] must be an object"):
+    with pytest.raises(ValueError, match=r"resource records\[1\] must be an object"):
         caps.tools.call(
             "db.replace_records",
-            dataset="accounts",
+            resource="accounts",
             records=[
                 {"id": "u1", "phone_number": "13800000001"},
                 "broken-record",
             ],
         )
 
-    assert caps.tools.call("db.list_records", dataset="accounts") == []
+    assert caps.tools.call("db.list_records", resource="accounts") == []
 
 
-def test_db_tools_append_and_query_events(monkeypatch):
+def test_db_tools_append_and_query_events(temp_data_dir, monkeypatch):
     fake_kv = _FakeKV()
     monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="account_events")
 
     caps = build_runtime_capabilities("demo_module")
     first = caps.tools.call(
@@ -495,7 +531,7 @@ def test_db_tools_append_and_query_events(monkeypatch):
         entity_key="13800000001",
         event_type="created",
     )
-    records = caps.tools.call("db.list_records", dataset="account_events")
+    records = caps.tools.call("db.list_records", resource="account_events")
 
     assert first is True
     assert second is True

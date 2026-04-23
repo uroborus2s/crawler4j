@@ -182,7 +182,7 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
                 del table_id, query, params
                 query_tools = ",".join(spec.name for spec in context.tools.list_tools())
                 try:
-                    context.tools.call("db.replace_records", dataset="hosted_ui_query", records=[])
+                    context.tools.call("db.replace_records", resource="hosted_ui_query", records=[])
                 except Exception as exc:
                     query_write_error = type(exc).__name__
                 return {
@@ -204,7 +204,7 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
         page = ManagedPageRenderer(module_name, "dashboard", module_info=module_info)
         qtbot.addWidget(page)
 
-        readonly_tools = "db.list_records,db.query_events,db.query_view,ui.get_page"
+        readonly_tools = "db.get_record,db.list_records,db.query_events,db.query_view,db.run_query,ui.get_page"
         assert any(label.text() == readonly_tools for label in page.findChildren(QLabel))
         assert any(label.text() == "KeyError" for label in page.findChildren(QLabel))
 

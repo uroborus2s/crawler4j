@@ -33,11 +33,11 @@ class _FakeTools:
             ToolSpec(name="captcha.match_slider", description="识别滑块验证码缺口位置"),
             ToolSpec(name="db.append_event", description="追加模块审计事件"),
             ToolSpec(name="db.get_record", description="按主键读取单条模块记录"),
-            ToolSpec(name="db.list_records", description="读取模块数据集"),
+            ToolSpec(name="db.list_records", description="读取模块资源记录"),
             ToolSpec(name="db.query_events", description="查询模块审计事件"),
             ToolSpec(name="db.run_query", description="执行已注册命名 SQL 查询"),
             ToolSpec(name="db.query_view", description="查询数据库统计视图"),
-            ToolSpec(name="db.replace_records", description="全量覆盖模块数据集"),
+            ToolSpec(name="db.replace_records", description="全量覆盖模块资源记录"),
             ToolSpec(name="env.bind_resource_pool", description="登记环境资源池资格", is_async=True),
             ToolSpec(name="env.mark_resource_pool_eligible", description="标记环境可接单", is_async=True),
             ToolSpec(name="env.mark_resource_pool_ineligible", description="标记环境不可接单", is_async=True),
@@ -117,10 +117,10 @@ def test_tools_capability_calls_core_extensions():
     }
 
     ctx = TaskContext(env_id=1, task_name="demo", tools=fake_tools)
-    result = ctx.tools.call("db.list_records", dataset="orders")
+    result = ctx.tools.call("db.list_records", resource="orders")
 
-    assert result == {"tool_name": "db.list_records", "kwargs": {"dataset": "orders"}}
-    assert fake_tools.calls == [("db.list_records", {"dataset": "orders"})]
+    assert result == {"tool_name": "db.list_records", "kwargs": {"resource": "orders"}}
+    assert fake_tools.calls == [("db.list_records", {"resource": "orders"})]
 
 
 def test_tools_capability_preserves_record_query_and_db_view_kwargs():

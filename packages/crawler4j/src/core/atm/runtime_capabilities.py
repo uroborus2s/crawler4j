@@ -42,12 +42,12 @@ from src.utils.paths import get_resource_path
 
 def _normalize_records(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
-        raise ValueError("dataset records must be a list of objects")
+        raise ValueError("resource records must be a list of objects")
 
     normalized: list[dict[str, Any]] = []
     for index, item in enumerate(raw):
         if not isinstance(item, dict):
-            raise ValueError(f"dataset records[{index}] must be an object")
+            raise ValueError(f"resource records[{index}] must be an object")
         normalized.append(dict(item))
 
     return normalized
@@ -166,25 +166,23 @@ class CoreDatabaseTools:
     def _lock_key(self, scope: str, key: str) -> str:
         return f"module:{self._module_name}:lock:{scope}:{key}"
 
-    def _resolve_resource_name(self, dataset: str | None = None, resource: str | None = None) -> str:
-        names = [str(item or "").strip() for item in (resource, dataset) if str(item or "").strip()]
-        if not names:
+    @staticmethod
+    def _normalize_resource_name(resource: str | None) -> str:
+        name = str(resource or "").strip()
+        if not name:
             raise ValueError("必须提供 resource")
-        if len(set(names)) > 1:
-            raise ValueError("dataset/resource 不能指向不同资源")
-        return names[0]
+        return name
 
     def list_records(
         self,
-        dataset: str | None = None,
         *,
-        resource: str | None = None,
+        resource: str,
         filters: dict[str, Any] | None = None,
         sort: list[dict[str, Any]] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        resource_name = self._resolve_resource_name(dataset, resource)
+        resource_name = self._normalize_resource_name(resource)
         return self._data_store.list_records(
             self._module_name,
             resource_name,
@@ -194,19 +192,18 @@ class CoreDatabaseTools:
             offset=offset,
         )
 
-    def get_record(self, key: Any, dataset: str | None = None, *, resource: str | None = None) -> dict[str, Any] | None:
-        resource_name = self._resolve_resource_name(dataset, resource)
+    def get_record(self, key: Any, *, resource: str) -> dict[str, Any] | None:
+        resource_name = self._normalize_resource_name(resource)
         return self._data_store.get_record(self._module_name, resource_name, key)
 
     def replace_records(
         self,
-        dataset: str | None = None,
         *,
-        resource: str | None = None,
+        resource: str,
         records: list[dict[str, Any]],
     ) -> bool:
-        resource_name = self._resolve_resource_name(dataset, resource)
-        return self._data_store.write_dataset(self._module_name, resource_name, _normalize_records(records))
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.replace_resource_records(self._module_name, resource_name, _normalize_records(records))
 
     def run_query(self, query_id: str, *, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         from src.core.mms.registry import get_module_registry
@@ -788,9 +785,9 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         )
         captcha_tools = CoreCaptchaTools()
 
-        self._register("db.list_records", "读取模块数据集", db_tools.list_records)
+        self._register("db.list_records", "读取模块资源记录", db_tools.list_records)
         self._register("db.get_record", "按主键读取单条模块记录", db_tools.get_record)
-        self._register("db.replace_records", "全量覆盖模块数据集", db_tools.replace_records)
+        self._register("db.replace_records", "全量覆盖模块资源记录", db_tools.replace_records)
         self._register("db.run_query", "执行已注册命名 SQL 查询", db_tools.run_query)
         self._register("db.query_view", "查询数据库统计视图", db_tools.query_view)
         self._register("db.append_event", "追加模块审计事件", db_tools.append_event)

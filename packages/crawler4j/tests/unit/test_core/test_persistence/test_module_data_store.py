@@ -91,6 +91,28 @@ def _sync_manifest_data(
     return store.sync_manifest_data(module_name, module_root, manifest_data)
 
 
+def _declare_managed_dataset(
+    store,
+    module_root: Path,
+    *,
+    module_name: str = "demo_module",
+    resource_id: str = "accounts",
+    record_key_field: str = "id",
+) -> bool:
+    return _sync_manifest_data(
+        store,
+        module_root,
+        module_name=module_name,
+        resources=[
+            {
+                "id": resource_id,
+                "storage_mode": "managed_dataset",
+                "record_key_field": record_key_field,
+            }
+        ],
+    )
+
+
 def _legacy_db_view_row(*, cleanup_policy: str = "drop_table", view_kind: str = "materialized_view") -> tuple:
     return (
         "demo_module",
@@ -117,20 +139,21 @@ def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
 
     records = [
         {"id": "u1", "phone": "13800138000"},
         {"id": "u2", "phone": "13900139000"},
     ]
 
-    assert store.write_dataset("demo_module", "accounts", records) is True
+    assert store.replace_resource_records("demo_module", "accounts", records) is True
     assert store.write_page_schema(
         "demo_module",
         "dashboard",
         {"type": "Page", "title": "账号管理", "load_handler": "load_dashboard_page", "children": []},
     ) is True
 
-    assert store.read_dataset("demo_module", "accounts") == [
+    assert store.read_resource_records("demo_module", "accounts") == [
         {"id": "u1", "phone": "13800138000", "record_key": "u1", "run_status": "不占用", "record_status": ""},
         {"id": "u2", "phone": "13900139000", "record_key": "u2", "run_status": "不占用", "record_status": ""},
     ]
@@ -151,14 +174,6 @@ def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
             """,
             ("demo_module", "accounts"),
         ).fetchall()
-        manifest_row = conn.execute(
-            """
-            SELECT created_at, updated_at
-            FROM module_dataset_manifests
-            WHERE module_name = ? AND dataset_name = ?
-            """,
-            ("demo_module", "accounts"),
-        ).fetchone()
         page_row = conn.execute(
             "SELECT schema_json FROM module_pages WHERE module_name = ? AND page_id = ?",
             ("demo_module", "dashboard"),
@@ -166,8 +181,19 @@ def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
 
     assert [row["record_index"] for row in dataset_rows] == [0, 1]
     assert [json.loads(row["record_json"]) for row in dataset_rows] == records
-    assert manifest_row is not None
     assert page_row is not None
+
+
+def test_module_data_store_rejects_access_to_undeclared_resource(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+
+    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
+        store.replace_resource_records("demo_module", "accounts", [{"id": "u1"}])
+
+    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
+        store.read_resource_records("demo_module", "accounts")
 
 
 def test_init_database_creates_module_data_resources_table(temp_data_dir):
@@ -240,6 +266,21 @@ def test_init_database_creates_module_db_views_table(temp_data_dir):
     assert "'sql_view'" in create_sql
     assert "'drop_view'" in create_sql
     assert "'keep'" in create_sql
+
+
+def test_init_database_does_not_create_module_dataset_manifests_table(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+
+    with get_connection(DATA_DB) as conn:
+        table_row = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'module_dataset_manifests'
+            """
+        ).fetchone()
+
+    assert table_row is None
 
 
 def test_init_database_normalizes_legacy_module_db_view_metadata(temp_data_dir):
@@ -500,7 +541,7 @@ GROUP BY execution_date, labor_account, bill_batch
             }
         ],
     )
-    store.write_dataset(
+    store.replace_resource_records(
         "demo_module",
         "billing_entries",
         [
@@ -690,7 +731,7 @@ FROM {{resource:billing_entries}}
             }
         ],
     )
-    store.write_dataset(
+    store.replace_resource_records(
         "demo_module",
         "billing_entries",
         [{"entry_id": "e-1", "execution_date": "2026-04-23"}],
@@ -786,21 +827,22 @@ def test_module_data_store_clear_module_data_treats_legacy_drop_table_view_as_vi
     assert sqlite_view is None
 
 
-def test_module_data_store_rewrite_preserves_manifest_created_at_and_reindexes_rows(temp_data_dir):
+def test_module_data_store_rewrite_preserves_created_at_and_reindexes_rows(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
 
     with patch("src.core.persistence.module_data_store.time.time", side_effect=[100, 200]):
-        assert store.write_dataset(
+        assert store.replace_resource_records(
             "demo_module",
             "accounts",
             [{"id": "u1"}, {"id": "u2"}, {"id": "u3"}],
         ) is True
-        assert store.write_dataset("demo_module", "accounts", [{"id": "u9"}]) is True
+        assert store.replace_resource_records("demo_module", "accounts", [{"id": "u9"}]) is True
 
-    assert store.read_dataset("demo_module", "accounts") == [
+    assert store.read_resource_records("demo_module", "accounts") == [
         {"id": "u9", "record_key": "u9", "run_status": "不占用", "record_status": ""}
     ]
 
@@ -814,22 +856,12 @@ def test_module_data_store_rewrite_preserves_manifest_created_at_and_reindexes_r
             """,
             ("demo_module", "accounts"),
         ).fetchall()
-        manifest_row = conn.execute(
-            """
-            SELECT created_at, updated_at
-            FROM module_dataset_manifests
-            WHERE module_name = ? AND dataset_name = ?
-            """,
-            ("demo_module", "accounts"),
-        ).fetchone()
 
     assert len(dataset_rows) == 1
     assert dataset_rows[0]["record_index"] == 0
     assert json.loads(dataset_rows[0]["record_json"]) == {"id": "u9"}
     assert dataset_rows[0]["created_at"] == 100
     assert dataset_rows[0]["updated_at"] == 200
-    assert manifest_row is not None
-    assert dict(manifest_row) == {"created_at": 100, "updated_at": 200}
 
 
 def test_module_data_store_roundtrips_record_key_and_status_columns(temp_data_dir):
@@ -837,6 +869,7 @@ def test_module_data_store_roundtrips_record_key_and_status_columns(temp_data_di
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
     records = [
         {
             "record_key": "account:1",
@@ -852,9 +885,9 @@ def test_module_data_store_roundtrips_record_key_and_status_columns(temp_data_di
         },
     ]
 
-    assert store.write_dataset("demo_module", "accounts", records) is True
+    assert store.replace_resource_records("demo_module", "accounts", records) is True
 
-    assert store.read_dataset("demo_module", "accounts") == records
+    assert store.read_resource_records("demo_module", "accounts") == records
     with get_connection(DATA_DB) as conn:
         rows = conn.execute(
             """
@@ -872,17 +905,18 @@ def test_module_data_store_roundtrips_record_key_and_status_columns(temp_data_di
     ]
 
 
-def test_module_data_store_write_empty_dataset_keeps_manifest_and_clears_rows(temp_data_dir):
+def test_module_data_store_write_empty_dataset_clears_rows(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
 
     with patch("src.core.persistence.module_data_store.time.time", side_effect=[100, 200]):
-        assert store.write_dataset("demo_module", "accounts", [{"id": "u1"}]) is True
-        assert store.write_dataset("demo_module", "accounts", []) is True
+        assert store.replace_resource_records("demo_module", "accounts", [{"id": "u1"}]) is True
+        assert store.replace_resource_records("demo_module", "accounts", []) is True
 
-    assert store.read_dataset("demo_module", "accounts") == []
+    assert store.read_resource_records("demo_module", "accounts") == []
 
     with get_connection(DATA_DB) as conn:
         dataset_rows = conn.execute(
@@ -893,18 +927,8 @@ def test_module_data_store_write_empty_dataset_keeps_manifest_and_clears_rows(te
             """,
             ("demo_module", "accounts"),
         ).fetchall()
-        manifest_row = conn.execute(
-            """
-            SELECT created_at, updated_at
-            FROM module_dataset_manifests
-            WHERE module_name = ? AND dataset_name = ?
-            """,
-            ("demo_module", "accounts"),
-        ).fetchone()
 
     assert dataset_rows == []
-    assert manifest_row is not None
-    assert dict(manifest_row) == {"created_at": 100, "updated_at": 200}
 
 
 def test_module_data_store_replace_declared_ui_replaces_stale_pages(temp_data_dir):
@@ -943,12 +967,13 @@ def test_module_data_store_rejects_invalid_write_dataset_without_clobbering_rows
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    assert store.write_dataset("demo_module", "accounts", [{"id": "u1"}]) is True
+    _declare_managed_dataset(store, temp_data_dir)
+    assert store.replace_resource_records("demo_module", "accounts", [{"id": "u1"}]) is True
 
     with pytest.raises(ValueError, match=r"records\[1\]"):
-        store.write_dataset("demo_module", "accounts", [{"id": "u2"}, "bad"])
+        store.replace_resource_records("demo_module", "accounts", [{"id": "u2"}, "bad"])
 
-    assert store.read_dataset("demo_module", "accounts") == [
+    assert store.read_resource_records("demo_module", "accounts") == [
         {"id": "u1", "record_key": "u1", "run_status": "不占用", "record_status": ""}
     ]
 
@@ -1019,9 +1044,9 @@ def test_module_data_store_creates_and_routes_custom_table_resources(temp_data_d
             "phone": "13800138000",
         }
     ]
-    assert store.write_dataset("demo_module", "accounts", records) is True
+    assert store.replace_resource_records("demo_module", "accounts", records) is True
 
-    assert store.read_dataset("demo_module", "accounts") == records
+    assert store.read_resource_records("demo_module", "accounts") == records
     with get_connection(DATA_DB) as conn:
         dataset_rows = conn.execute(
             """
@@ -1051,7 +1076,6 @@ def test_module_data_store_lists_registered_data_resources(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
     _sync_manifest_data(
         store,
         temp_data_dir,
@@ -1267,14 +1291,15 @@ def test_module_data_store_queries_audit_events_with_filters_and_paging(temp_dat
 
 
 def test_module_data_store_clear_module_data_removes_data_db_rows_only(temp_data_dir):
-    from src.core.persistence import DATA_DB, get_connection, get_kv_store
+    from src.core.persistence import get_kv_store
     from src.core.persistence.module_data_store import ModuleDataStore
 
     kv = get_kv_store()
     kv.set("module:demo_module:dataset:legacy_accounts", [{"id": "legacy"}])
 
     store = ModuleDataStore()
-    store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
+    _declare_managed_dataset(store, temp_data_dir)
+    store.replace_resource_records("demo_module", "accounts", [{"id": "u1"}])
     store.write_page_schema(
         "demo_module",
         "dashboard",
@@ -1287,21 +1312,10 @@ def test_module_data_store_clear_module_data_removes_data_db_rows_only(temp_data
     )
 
     assert store.clear_module_data("demo_module") is True
-    assert store.read_dataset("demo_module", "accounts") == []
+    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
+        store.read_resource_records("demo_module", "accounts")
     assert store.read_page_schema("demo_module", "dashboard") == {}
     assert store.query_audit_events("demo_module", "account_events") == []
-
-    with get_connection(DATA_DB) as conn:
-        manifest_row = conn.execute(
-            """
-            SELECT 1
-            FROM module_dataset_manifests
-            WHERE module_name = ? AND dataset_name = ?
-            """,
-            ("demo_module", "accounts"),
-        ).fetchone()
-
-    assert manifest_row is None
     assert kv.get("module:demo_module:dataset:legacy_accounts") == [{"id": "legacy"}]
 
 
@@ -1323,7 +1337,7 @@ def test_module_data_store_clear_module_data_drops_custom_tables(temp_data_dir):
             }
         ],
     )
-    store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
+    store.replace_resource_records("demo_module", "accounts", [{"id": "u1"}])
 
     assert store.clear_module_data("demo_module") is True
 
@@ -1367,7 +1381,7 @@ def test_module_data_store_clear_module_data_keep_policy_preserves_custom_table(
             }
         ],
     )
-    store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
+    store.replace_resource_records("demo_module", "accounts", [{"id": "u1"}])
 
     assert store.clear_module_data("demo_module") is True
 
@@ -1395,5 +1409,7 @@ def test_module_data_store_ignores_legacy_kv_rows(temp_data_dir):
 
     store = ModuleDataStore()
 
-    assert store.read_dataset("demo_module", "accounts") == []
+    _declare_managed_dataset(store, temp_data_dir)
+
+    assert store.read_resource_records("demo_module", "accounts") == []
     assert kv.get("module:demo_module:dataset:accounts") == [{"id": "legacy"}]

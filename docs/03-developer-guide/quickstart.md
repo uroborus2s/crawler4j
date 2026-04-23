@@ -135,9 +135,9 @@ uv run crawler4j data list
 
 需要记住两条：
 
-- 低频快照数据可以沿用默认 `managed_dataset`；视图和命名查询当前只允许建立在 `custom_table` 资源上。
+- 低频快照数据可以沿用默认 `managed_dataset`，但仍然必须先登记到 `module.yaml.data.resources[]`；视图和命名查询当前只允许建立在 `custom_table` 资源上。
 - SQL 和种子都要先落到 `data/sql`、`data/seeds`，运行时代码只调用 `db.get_record` / `db.list_records` / `db.replace_records` / `db.run_query` / `db.query_view`，不再声明资源或视图。
-- 文档示例统一按 `resource=...` 书写；运行时当前仍兼容历史别名 `dataset=...`，但新模块不要再把它当正式参数名。
+- 文档示例统一按 `resource=...` 书写；运行时不再接受历史别名 `dataset=...`。
 
 ## 7. 校验并接入宿主
 
