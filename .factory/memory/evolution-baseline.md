@@ -9,7 +9,7 @@
 - Keep real-time log widgets resilient to bursty duplicate warnings by batching UI flushes instead of appending one QTextEdit block per signal
 - When PyInstaller bundles third-party single-file modules, explicitly collect their shared resource trees and pass the consumer-expected subdirectory instead of assuming `collect_data_files()` or a generic asset root will line up automatically
 - Keep module-facing Core extensions behind one stable entry (`TaskContext.tools`)
-- Keep task lifecycle control behind one stable path (`module_runtime.py` hooks + `TaskSignal`), not per-class callbacks or run-profile teardown rules
+- Keep task lifecycle control behind one stable host-owned path (`hooks/*.py` + `TaskSignal`), not per-class callbacks, root shims, or run-profile teardown rules
 - Treat fingerprint-browser CDP attachment as a warm-up phase: normalize host-returned endpoints first, then give Playwright multiple retries before declaring connect failure
 
 ## What To Improve First

@@ -1,15 +1,13 @@
 # 快速开始
 
-这一页给你一条从零到第一次交付的最短主线。
+这一页只讲一条最短闭环：
 
-目标不是把所有概念一次看完，而是先得到一个标准模块项目，并把下面 4 件事跑通：
+1. 用 CLI 生成 `core-native-v1` 模块骨架
+2. 用 `crawler4j-contracts` 写任务、工作流、页面
+3. 用 DevLink 接到宿主里联调
+4. 构建 ZIP 并做安装验收
 
-1. 用当前 CLI 命令树生成模块骨架
-2. 用 Hosted UI 接出页面
-3. 在宿主里用 DevLink 联调
-4. 产出可安装、可升级的正式 ZIP
-
-## 第 1 步：初始化标准模块项目
+## 1. 初始化模块
 
 下面以 `hotel_demo` 为例：
 
@@ -25,84 +23,112 @@ uv sync
 uv run crawler4j module show
 ```
 
-## 第 2 步：按当前命令树补业务骨架
+初始化后的关键事实：
 
-先不要手写脚手架，直接走 CLI：
+- `module.yaml.runtime_api` 已固定为 `core-native-v1`
+- 运行时依赖只包含 `crawler4j-contracts`
+- `crawler4j-sdk` 只放在开发依赖里
+- Core 会扫描 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`
+
+## 2. 生成业务骨架
 
 ```bash
 uv run crawler4j task create fetch_hotels
 uv run crawler4j workflow create hotel_sync --display-name "酒店同步"
 uv run crawler4j module set default-workflow hotel_sync
 uv run crawler4j page create dashboard --display-name "运营看板"
-uv run crawler4j page create accounts --display-name "账号列表"
+uv run crawler4j hook create before_run
+uv run crawler4j env-selector create pick_ready
 uv run crawler4j check structure
 ```
 
-这一步会把项目补成当前正式形态：
+这一步只负责生成标准文件和更新 `module.yaml`。不要手写兼容薄壳，也不要把运行时逻辑放回根包。
 
-- `task create` 生成原子任务文件
-- `workflow create` 生成工作流并写回 `module.yaml.workflows`
-- `page create` 生成 Hosted UI 页面骨架，并维护 `ui_extension.pages[]`
-- `check structure` 做第一次骨架级 gate
+## 3. 写最小任务
 
-## 第 3 步：把清单和源码改成真实业务
-
-优先把 `module.yaml` 改成真实业务值：
-
-```yaml
-name: hotel_demo
-version: 0.1.0
-display_name: 酒店采集示例
-description: 抓取并维护酒店快照数据
-author: crawler4j
-upgrade_source:
-  type: github_release
-  repo: your-org/hotel_demo
-  allow_prerelease: false
-workflows:
-  - name: hotel_sync
-    display_name: 酒店同步
-    description: 抓取并刷新酒店列表
-ui_extension:
-  pages:
-    - id: dashboard
-      label: 运营看板
-      icon: 📄
-    - id: accounts
-      label: 账号列表
-      icon: 📄
-config_defaults:
-  module:
-    city: shanghai
-    page_size: 20
-```
-
-然后开始补 `module_runtime.py`：
+`tasks/fetch_hotels.py` 的正式导出是 `TASK` 和 `execute`：
 
 ```python
-from crawler4j_sdk import TaskContext
+from crawler4j_contracts import TaskContext, TaskResult, TaskSpec
+
+TASK = TaskSpec(
+    name="fetch_hotels",
+    display_name="抓取酒店",
+    description="抓取酒店列表",
+)
 
 
-def declare_ui(context: TaskContext):
-    _declare_dashboard_page(context)
-    _declare_accounts_page(context)
-    return None
+async def execute(ctx: TaskContext) -> TaskResult:
+    return TaskResult.ok(data={"count": 0, "message": "ok"})
 ```
 
-页面 schema 里可以直接放 `DataTable` 组件；宿主负责渲染，模块只负责返回数据。
+## 4. 写最小工作流
 
-## 第 4 步：跑完整 gate
+`workflows/hotel_sync.py` 的正式导出是 `WORKFLOW` 和 `run`：
 
-在第一次联调前，至少跑下面这些命令：
+```python
+from crawler4j_contracts import TaskContext, WorkflowSpec
+
+WORKFLOW = WorkflowSpec(
+    name="hotel_sync",
+    display_name="酒店同步",
+    tasks=("fetch_hotels",),
+)
+
+
+async def run(ctx: TaskContext):
+    return await ctx.run_subtask("fetch_hotels")
+```
+
+`module.yaml` 里必须同时满足：
+
+- `runtime_api: core-native-v1`
+- `default_workflow: hotel_sync`
+- `workflows` 数组里存在 `hotel_sync`
+
+## 5. 写最小页面
+
+`pages/dashboard.py` 的正式导出是 `PAGE` 和页面 handler：
+
+```python
+from crawler4j_contracts import PageSpec, TaskContext
+
+PAGE = PageSpec(
+    id="dashboard",
+    label="运营看板",
+    icon="📄",
+    schema={
+        "type": "Page",
+        "title": "运营看板",
+        "load_handler": "load_dashboard_page",
+        "children": [
+            {"type": "Text", "style": "title", "binding": "title"},
+        ],
+    },
+)
+
+
+def load_dashboard_page(
+    context: TaskContext,
+    page_id: str,
+    params: dict | None = None,
+) -> dict:
+    del context, page_id, params
+    return {"title": "运营看板"}
+```
+
+这里不再有 `declare_ui()`。Core 会直接读取 `PAGE.schema`。
+
+## 6. 校验并接入宿主
+
+在第一次联调前，至少跑：
 
 ```bash
 uv run crawler4j config lint
 uv run crawler4j check full
 ```
 
-## 第 5 步：接到宿主里联调
-
-先切到已经安装 `crawler4j` 宿主 / Core 的环境：
+然后切到宿主环境：
 
 ```bash
 uv run python -c "import src.core; print('ok: host runtime ready')"
@@ -110,23 +136,23 @@ uv run crawler4j host devlink add /absolute/path/to/hotel_demo
 uv run crawler4j host debug config
 ```
 
-然后在宿主里按这条线联调：
+联调顺序：
 
-1. 打开 `📦 模块管理`，确认模块来源是 `开发链接`
-2. 打开 `📋 任务监控`，新建绑定 `hotel_demo` 的作业
+1. 打开 `📦 模块管理`，确认来源是 `开发链接`
+2. 打开 `📋 任务监控`，创建绑定 `hotel_demo` 的作业
 3. 选择 `hotel_sync`
-4. 点 `▶ 执行一次` 或 `🐞 调试`
-5. 在模块详情页确认 `dashboard` 和 `accounts` 都已出现
+4. 先点 `▶ 执行一次`
+5. 需要断点时再点 `🐞 调试`
+6. 在模块详情页确认 `dashboard` 已出现
 
-## 第 6 步：做第一次正式交付
+## 7. 构建并安装
 
-回到模块工程环境构建升级包：
+回到模块工程环境：
 
 ```bash
 uv run crawler4j package build
 uv run crawler4j package verify dist/hotel_demo-0.1.0.zip
 uv run crawler4j release publish --dry-run
-uv run crawler4j release publish
 ```
 
 再回到宿主环境做安装验收：
@@ -136,26 +162,9 @@ uv run crawler4j host install preview dist/hotel_demo-0.1.0.zip --skip-remote-ch
 uv run crawler4j host install apply dist/hotel_demo-0.1.0.zip --skip-remote-check
 ```
 
-## 一页记住这条主线
+## 记住这 4 条
 
-```bash
-uvx --from crawler4j-sdk crawler4j module init hotel_demo --repo your-org/hotel_demo
-uv run crawler4j task create fetch_hotels
-uv run crawler4j workflow create hotel_sync
-uv run crawler4j page create dashboard
-uv run crawler4j page create accounts
-uv run crawler4j check full
-```
-
-切到宿主环境后：
-
-```bash
-uv run crawler4j host devlink add /absolute/path/to/hotel_demo
-```
-
-跑通联调后，回到模块工程环境：
-
-```bash
-uv run crawler4j package build
-uv run crawler4j release publish
-```
+- 模块业务代码只 `import crawler4j-contracts`
+- Core 是唯一运行时 owner
+- 没有 `runtime_api: core-native-v1` 会直接拒绝加载
+- 即使运行时环境卸载 `crawler4j-sdk`，模块也必须能跑

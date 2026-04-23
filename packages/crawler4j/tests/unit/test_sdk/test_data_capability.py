@@ -2,7 +2,7 @@
 
 import crawler4j_sdk
 import pytest
-from crawler4j_sdk import TaskContext, ToolSpec, ToolsCapability
+from crawler4j_contracts import TaskContext, ToolSpec, ToolsCapability
 
 
 class _FakeTools:
@@ -55,27 +55,10 @@ class _FakeTools:
 def test_sdk_exports_expected_stable_surface():
     fake_tools = _FakeTools()
     expected_exports = {
-        "BBox",
-        "ClickCaptchaDebugInfo",
-        "ClickCaptchaMatchResult",
-        "ClickCaptchaOrderedTarget",
-        "EnvAction",
-        "EnvCandidate",
-        "EnvSelectorInfo",
-        "ImageInput",
-        "ModuleAssembler",
-        "Point",
-        "SliderCaptchaDebugInfo",
-        "SliderCaptchaMatchResult",
-        "TaskContext",
-        "TaskFlow",
-        "TaskResult",
-        "TaskSignal",
-        "TaskSignalAction",
-        "TaskScript",
-        "ToolSpec",
-        "ToolsCapability",
-        "env_selector",
+        "get_version",
+        "get_compatible_dependency_spec",
+        "get_compatible_sdk_dependency_spec",
+        "get_compatible_contracts_dependency_spec",
         "bind_resource_pool",
         "mark_resource_pool_eligible",
         "mark_resource_pool_ineligible",

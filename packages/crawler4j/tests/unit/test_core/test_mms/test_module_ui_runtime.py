@@ -1,18 +1,16 @@
 from __future__ import annotations
 
+import time
 from contextlib import ExitStack
-from pathlib import Path
-from textwrap import dedent
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
-from src.core.mms.module_loader import purge_module_namespace
-from src.core.mms.service import get_module_service
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
 from src.core.persistence import get_module_data_store
+
+from ._core_native_v1 import make_manifest, make_page_info, register_module, restore_module, write_module_tree
 
 
 @pytest.fixture(autouse=True)
@@ -25,176 +23,19 @@ def temp_data_dir(tmp_path):
         yield tmp_path
 
 
-def _write_runtime_module(base_dir: Path, module_name: str, runtime_code: str) -> Path:
-    module_dir = base_dir / module_name
-    module_dir.mkdir(parents=True, exist_ok=True)
-    (module_dir / "__init__.py").write_text(
-        dedent(
-            """
-            import importlib
-
-            _runtime_module = None
-
-
-            def _load_runtime_module():
-                global _runtime_module
-                if _runtime_module is None:
-                    _runtime_module = importlib.import_module(f"{__name__}.module_runtime")
-                return _runtime_module
-
-
-            def __getattr__(name: str):
-                runtime_module = _load_runtime_module()
-                if hasattr(runtime_module, name):
-                    return getattr(runtime_module, name)
-                raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    (module_dir / "module_runtime.py").write_text(dedent(runtime_code).strip() + "\n", encoding="utf-8")
-    return module_dir
-
-
-def _register_dev_link_module(module_name: str, module_dir: Path):
-    service = get_module_service()
-    original_registry = service.registry
-    service.registry = SimpleNamespace(
-        get_module=lambda name: ModuleInfo(
-            name=module_name,
-            manifest=ModuleManifest(name=module_name),
-            path=module_dir,
-            source=ModuleSource.DEV_LINK,
-        )
-        if name in {module_name, module_name.split(".")[0]}
-        else None
-    )
-    return service, original_registry
-
-
-def test_module_ui_runtime_bridge_reuses_same_module_instance_within_refresh_cycle(tmp_path):
+def test_module_ui_runtime_bridge_reads_page_schema_and_handlers_from_descriptor(tmp_path):
     module_name = "runtime_bridge_module"
-    module_dir = _write_runtime_module(
+    module_dir = write_module_tree(
         tmp_path,
         module_name,
-        """
-        from crawler4j_sdk import TaskContext
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
 
-
-        STATE = {"count": 0}
-
-
-        def declare_ui(context: TaskContext):
-            STATE["count"] += 1
-            context.tools.call(
-                "ui.declare_page",
-                page_id="dashboard",
-                schema={
-                    "type": "Page",
-                    "load_handler": "load_dashboard_page",
-                    "children": [],
-                },
-            )
-
-
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            return {"module_state": STATE["count"], "page_id": page_id}
-
-
-        def create_account_from_ui(context: TaskContext, payload: dict):
-            return {"module_state": STATE["count"], "payload": dict(payload)}
-        """,
-    )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
-    bridge = ModuleUIRuntimeBridge(module_name)
-
-    try:
-        bridge.declare_ui()
-        page_payload = bridge.call_page_handler(
-            "load_dashboard_page",
-            "dashboard",
-            None,
-        )
-        bridge.declare_ui()
-        create_payload = bridge.call_local_hook("create_account_from_ui", {"id": "u1"})
-
-        assert page_payload == {"module_state": 1, "page_id": "dashboard"}
-        assert create_payload == {"module_state": 1, "payload": {"id": "u1"}}
-    finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
-
-
-def test_module_ui_runtime_bridge_keeps_previous_ui_schema_when_declare_ui_fails(tmp_path):
-    module_name = "atomic_bridge_module"
-    module_dir = _write_runtime_module(
-        tmp_path,
-        module_name,
-        """
-        from crawler4j_sdk import TaskContext
-
-
-        def declare_ui(context: TaskContext):
-            context.tools.call(
-                "ui.declare_page",
-                page_id="next_dashboard",
-                schema={
-                    "type": "Page",
-                    "load_handler": "load_dashboard_page",
-                    "children": [],
-                },
-            )
-            raise RuntimeError("declare_ui boom")
-
-
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            return {}
-        """,
-    )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
-    store = get_module_data_store()
-    legacy_page = {
-        "type": "Page",
-        "title": "旧看板",
-        "load_handler": "load_dashboard_page",
-        "children": [{"type": "Text", "text": "legacy"}],
-    }
-    legacy_accounts_page = {
-        "type": "Page",
-        "title": "旧账号页",
-        "load_handler": "load_accounts_page",
-        "children": [{"type": "Text", "text": "legacy"}],
-    }
-    store.write_page_schema(module_name, "dashboard", legacy_page)
-    store.write_page_schema(module_name, "accounts", legacy_accounts_page)
-    bridge = ModuleUIRuntimeBridge(module_name)
-
-    try:
-        with pytest.raises(RuntimeError, match="declare_ui boom"):
-            bridge.declare_ui()
-
-        assert store.read_page_schema(module_name, "dashboard") == legacy_page
-        assert store.read_page_schema(module_name, "accounts") == legacy_accounts_page
-        assert store.read_page_schema(module_name, "next_dashboard") == {}
-    finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
-
-
-def test_module_ui_runtime_bridge_declare_ui_stages_pages_without_persisting_to_store(tmp_path):
-    module_name = "staged_only_bridge_module"
-    module_dir = _write_runtime_module(
-        tmp_path,
-        module_name,
-        """
-        from crawler4j_sdk import TaskContext
-
-
-        def declare_ui(context: TaskContext):
-            context.tools.call(
-                "ui.declare_page",
-                page_id="dashboard",
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
+                icon="📊",
                 schema={
                     "type": "Page",
                     "title": "今日看板",
@@ -204,43 +45,101 @@ def test_module_ui_runtime_bridge_declare_ui_stages_pages_without_persisting_to_
             )
 
 
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            return {"page_id": page_id, "params": params}
-        """,
+            def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None = None):
+                return {"page_id": page_id, "params": params, "mode": context.config.get("mode", "unset")}
+            """,
+            "hooks/create_account_from_ui.py": """
+            from crawler4j_contracts import TaskContext
+
+
+            def handle(context: TaskContext, payload: dict):
+                return {"payload": dict(payload), "mode": context.config.get("mode", "unset")}
+            """,
+        },
     )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
-    store = get_module_data_store()
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard", label="Dashboard", icon="📊")])
+    service, original_registry, _ = register_module(module_name, module_dir, manifest=manifest)
     bridge = ModuleUIRuntimeBridge(module_name)
 
     try:
         bridge.declare_ui()
 
-        assert bridge.get_declared_page("dashboard")["title"] == "今日看板"
-        assert store.read_page_schema(module_name, "dashboard") == {}
+        assert bridge.get_declared_page("dashboard") == {
+            "type": "Page",
+            "title": "今日看板",
+            "load_handler": "load_dashboard_page",
+            "children": [],
+        }
+        assert bridge.call_page_handler(
+            "load_dashboard_page",
+            "dashboard",
+            {"phone": "13800138000"},
+        ) == {
+            "page_id": "dashboard",
+            "params": {"phone": "13800138000"},
+            "mode": "unset",
+        }
+        assert bridge.call_local_hook("create_account_from_ui", {"id": "u1"}) == {
+            "payload": {"id": "u1"},
+            "mode": "unset",
+        }
     finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
+        restore_module(service, original_registry, module_name)
 
 
-def test_module_ui_runtime_bridge_drops_consumed_session_before_later_hooks(tmp_path, monkeypatch):
-    module_name = "refreshable_bridge_module"
-    config_state = {"mode": "old"}
-    module_dir = _write_runtime_module(
+def test_module_ui_runtime_bridge_does_not_persist_page_schema_to_store(tmp_path):
+    module_name = "staged_only_bridge_module"
+    module_dir = write_module_tree(
         tmp_path,
         module_name,
-        """
-        from crawler4j_sdk import TaskContext
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "title": "只存在于 descriptor",
+                    "load_handler": "load_dashboard_page",
+                    "children": [],
+                },
+            )
 
 
-        MODULE_VERSION = "v1"
-        STATE = {"count": 0}
+            def load_dashboard_page(context, page_id, params=None):
+                return {"page_id": page_id}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, _ = register_module(module_name, module_dir, manifest=manifest)
+    bridge = ModuleUIRuntimeBridge(module_name)
+    store = get_module_data_store()
+
+    try:
+        bridge.declare_ui()
+
+        assert bridge.get_declared_page("dashboard")["title"] == "只存在于 descriptor"
+        assert store.read_page_schema(module_name, "dashboard") == {}
+    finally:
+        restore_module(service, original_registry, module_name)
 
 
-        def declare_ui(context: TaskContext):
-            STATE["count"] += 1
-            context.tools.call(
-                "ui.declare_page",
-                page_id="dashboard",
+def test_module_ui_runtime_bridge_reloads_dev_link_descriptor_between_sessions(tmp_path, monkeypatch):
+    module_name = "reloadable_bridge_module"
+    config_state = {"mode": "old"}
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
+
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
                 schema={
                     "type": "Page",
                     "load_handler": "load_dashboard_page",
@@ -249,24 +148,20 @@ def test_module_ui_runtime_bridge_drops_consumed_session_before_later_hooks(tmp_
             )
 
 
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            return {
-                "version": MODULE_VERSION,
-                "mode": context.config.get("mode"),
-                "state": STATE["count"],
-            }
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                return {"version": "v1", "mode": context.config.get("mode")}
+            """,
+            "hooks/create_account_from_ui.py": """
+            from crawler4j_contracts import TaskContext
 
 
-        def create_account_from_ui(context: TaskContext, payload: dict):
-            return {
-                "version": MODULE_VERSION,
-                "mode": context.config.get("mode"),
-                "state": STATE["count"],
-                "payload": dict(payload),
-            }
-        """,
+            def handle(context: TaskContext, payload: dict):
+                return {"version": "v1", "mode": context.config.get("mode"), "payload": dict(payload)}
+            """,
+        },
     )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, _ = register_module(module_name, module_dir, manifest=manifest)
     monkeypatch.setattr(
         "src.core.mms.ui.module_ui_runtime.get_module_settings_store",
         lambda: SimpleNamespace(read_module_settings=lambda _module_name: dict(config_state)),
@@ -275,131 +170,165 @@ def test_module_ui_runtime_bridge_drops_consumed_session_before_later_hooks(tmp_
 
     try:
         bridge.declare_ui()
-        first_payload = bridge.call_page_handler(
-            "load_dashboard_page",
-            "dashboard",
-            None,
-        )
+        first_payload = bridge.call_page_handler("load_dashboard_page", "dashboard", None)
 
         config_state["mode"] = "new"
-        (module_dir / "module_runtime.py").write_text(
-            dedent(
-                """
-                from crawler4j_sdk import TaskContext
+        time.sleep(1.1)
+        write_module_tree(
+            tmp_path,
+            module_name,
+            files={
+                "pages/dashboard.py": """
+                from crawler4j_contracts import PageSpec, TaskContext
 
-
-                MODULE_VERSION = "v2"
-                STATE = {"count": 0}
-
-
-                def declare_ui(context: TaskContext):
-                    STATE["count"] += 1
-                    context.tools.call(
-                        "ui.declare_page",
-                        page_id="dashboard",
-                        schema={
-                            "type": "Page",
-                            "load_handler": "load_dashboard_page",
-                            "children": [],
-                        },
-                    )
+                PAGE = PageSpec(
+                    id="dashboard",
+                    label="Dashboard",
+                    schema={
+                        "type": "Page",
+                        "load_handler": "load_dashboard_page",
+                        "children": [],
+                    },
+                )
 
 
                 def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-                    return {
-                        "version": MODULE_VERSION,
-                        "mode": context.config.get("mode"),
-                        "state": STATE["count"],
-                    }
+                    return {"version": "v2", "mode": context.config.get("mode")}
+                """,
+                "hooks/create_account_from_ui.py": """
+                from crawler4j_contracts import TaskContext
 
 
-                def create_account_from_ui(context: TaskContext, payload: dict):
-                    return {
-                        "version": MODULE_VERSION,
-                        "mode": context.config.get("mode"),
-                        "state": STATE["count"],
-                        "payload": dict(payload),
-                    }
-                """
-            ).strip()
-            + "\n",
-            encoding="utf-8",
+                def handle(context: TaskContext, payload: dict):
+                    return {"version": "v2", "mode": context.config.get("mode"), "payload": dict(payload)}
+                """,
+            },
         )
+
         later_payload = bridge.call_local_hook("create_account_from_ui", {"id": "u1"})
 
-        assert first_payload == {"version": "v1", "mode": "old", "state": 1}
-        assert later_payload == {
-            "version": "v2",
-            "mode": "new",
-            "state": 0,
-            "payload": {"id": "u1"},
-        }
+        assert first_payload == {"version": "v1", "mode": "old"}
+        assert later_payload == {"version": "v2", "mode": "new", "payload": {"id": "u1"}}
     finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
+        restore_module(service, original_registry, module_name)
 
 
-def test_module_ui_runtime_bridge_scopes_hosted_ui_tools_by_hook_type(tmp_path):
-    module_name = "scoped_bridge_module"
-    module_dir = _write_runtime_module(
+def test_module_ui_runtime_bridge_preserves_previous_schema_when_reload_fails(tmp_path):
+    module_name = "atomic_bridge_module"
+    module_dir = write_module_tree(
         tmp_path,
         module_name,
-        """
-        from crawler4j_sdk import TaskContext
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec
 
-
-        OBSERVED = {}
-
-
-        def declare_ui(context: TaskContext):
-            OBSERVED["declare_tools"] = [spec.name for spec in context.tools.list_tools()]
-            OBSERVED["declare_has_get_page"] = context.tools.has_tool("ui.get_page")
-            context.tools.call(
-                "ui.declare_page",
-                page_id="dashboard",
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
                 schema={
                     "type": "Page",
+                    "title": "旧看板",
                     "load_handler": "load_dashboard_page",
                     "children": [],
                 },
             )
 
 
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            OBSERVED["load_tools"] = [spec.name for spec in context.tools.list_tools()]
-            OBSERVED["load_has_declare_page"] = context.tools.has_tool("ui.declare_page")
-            OBSERVED["load_has_get_page"] = context.tools.has_tool("ui.get_page")
-            OBSERVED["load_page_id"] = context.runtime.get("page_id")
-            OBSERVED["load_params"] = context.runtime.get("params")
-            OBSERVED["load_schema_type"] = context.tools.call("ui.get_page", page_id=page_id).get("type")
-            try:
-                context.tools.call("db.set_state", key="hosted_ui_load", value=1)
-            except Exception as exc:
-                OBSERVED["load_write_error"] = type(exc).__name__
-            return dict(OBSERVED)
-
-
-        def query_dashboard_metrics(context: TaskContext, table_id: str, query, params=None):
-            OBSERVED["query_tools"] = [spec.name for spec in context.tools.list_tools()]
-            OBSERVED["query_has_declare_page"] = context.tools.has_tool("ui.declare_page")
-            OBSERVED["query_page_id"] = context.runtime.get("page_id")
-            OBSERVED["query_table_id"] = context.runtime.get("table_id")
-            OBSERVED["query_params"] = context.runtime.get("params")
-            OBSERVED["query_rows_before"] = context.tools.call("db.list_records", dataset="metrics")
-            try:
-                context.tools.call("db.append_event", dataset="metrics_events", event_type="query")
-            except Exception as exc:
-                OBSERVED["query_write_error"] = type(exc).__name__
-            return {
-                "rows": [],
-                "total": 0,
-                "page": 1,
-                "page_size": 20,
-                "observed": dict(OBSERVED),
-            }
-        """,
+            def load_dashboard_page(context, page_id, params=None):
+                return {}
+            """,
+        },
     )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, _ = register_module(module_name, module_dir, manifest=manifest)
+    bridge = ModuleUIRuntimeBridge(module_name)
+
+    try:
+        bridge.declare_ui()
+        assert bridge.get_declared_page("dashboard")["title"] == "旧看板"
+
+        time.sleep(1.1)
+        (module_dir / "pages" / "dashboard.py").write_text(
+            "from missing_runtime_dependency import nope\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(RuntimeError, match="无法导入"):
+            bridge.declare_ui()
+
+        assert bridge.get_declared_page("dashboard")["title"] == "旧看板"
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_tools(tmp_path):
+    module_name = "scoped_bridge_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
+
+            OBSERVED = {}
+
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "metrics",
+                            "title": "统计明细",
+                            "data_source": {"type": "query_handler", "handler": "query_dashboard_metrics"},
+                            "columns": [
+                                {"key": "metric", "label": "指标"},
+                                {"key": "value", "label": "值"},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                OBSERVED["load_tools"] = [spec.name for spec in context.tools.list_tools()]
+                OBSERVED["load_has_get_page"] = context.tools.has_tool("ui.get_page")
+                OBSERVED["load_page_id"] = context.runtime.get("page_id")
+                OBSERVED["load_params"] = context.runtime.get("params")
+                OBSERVED["load_schema_type"] = context.tools.call("ui.get_page", page_id=page_id).get("type")
+                try:
+                    context.tools.call("db.set_state", key="hosted_ui_load", value=1)
+                except Exception as exc:
+                    OBSERVED["load_write_error"] = type(exc).__name__
+                return dict(OBSERVED)
+
+
+            def query_dashboard_metrics(context: TaskContext, table_id: str, query, params=None):
+                OBSERVED["query_tools"] = [spec.name for spec in context.tools.list_tools()]
+                OBSERVED["query_page_id"] = context.runtime.get("page_id")
+                OBSERVED["query_table_id"] = context.runtime.get("table_id")
+                OBSERVED["query_params"] = context.runtime.get("params")
+                OBSERVED["query_rows_before"] = context.tools.call("db.list_records", dataset="metrics")
+                try:
+                    context.tools.call("db.append_event", dataset="metrics_events", event_type="query")
+                except Exception as exc:
+                    OBSERVED["query_write_error"] = type(exc).__name__
+                return {
+                    "rows": [],
+                    "total": 0,
+                    "page": 1,
+                    "page_size": 20,
+                    "observed": dict(OBSERVED),
+                }
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, _ = register_module(module_name, module_dir, manifest=manifest)
     bridge = ModuleUIRuntimeBridge(module_name)
 
     try:
@@ -417,15 +346,12 @@ def test_module_ui_runtime_bridge_scopes_hosted_ui_tools_by_hook_type(tmp_path):
             page_id="dashboard",
         )
 
-        assert page_payload["declare_tools"] == ["ui.declare_page"]
-        assert page_payload["declare_has_get_page"] is False
         assert page_payload["load_tools"] == [
             "db.list_records",
             "db.query_events",
             "db.query_view",
             "ui.get_page",
         ]
-        assert page_payload["load_has_declare_page"] is False
         assert page_payload["load_has_get_page"] is True
         assert page_payload["load_page_id"] == "dashboard"
         assert page_payload["load_params"] == {"phone": "13800138000"}
@@ -437,12 +363,10 @@ def test_module_ui_runtime_bridge_scopes_hosted_ui_tools_by_hook_type(tmp_path):
             "db.query_view",
             "ui.get_page",
         ]
-        assert query_payload["observed"]["query_has_declare_page"] is False
         assert query_payload["observed"]["query_page_id"] == "dashboard"
         assert query_payload["observed"]["query_table_id"] == "metrics"
         assert query_payload["observed"]["query_params"] == {"phone": "13800138000"}
         assert query_payload["observed"]["query_rows_before"] == []
         assert query_payload["observed"]["query_write_error"] == "KeyError"
     finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
+        restore_module(service, original_registry, module_name)

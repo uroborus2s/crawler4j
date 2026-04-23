@@ -11,6 +11,8 @@ from pathlib import Path
 PACKAGE_NAME = "crawler4j-sdk"
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = PACKAGE_ROOT / "pyproject.toml"
+CONTRACTS_PACKAGE_NAME = "crawler4j-contracts"
+CONTRACTS_PYPROJECT_PATH = PACKAGE_ROOT.parent / "crawler4j-contracts" / "pyproject.toml"
 BASE_VERSION_RE = re.compile(r"^v?(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)")
 
 
@@ -44,9 +46,32 @@ def get_base_version(version: str | None = None) -> str:
 def get_compatible_dependency_spec() -> str:
     """Build the default scaffold dependency range for the current SDK version."""
     base_version = get_base_version()
+    return get_compatible_sdk_dependency_spec(base_version)
+
+
+def get_compatible_sdk_dependency_spec(version: str | None = None) -> str:
+    """Build the default crawler4j-sdk dependency range for development helpers."""
+    base_version = get_base_version(version)
     major, minor, _patch = (int(part) for part in base_version.split(".", 2))
     if major == 0:
         upper_bound = f"0.{minor + 1}.0"
     else:
         upper_bound = f"{major + 1}.0.0"
     return f"{PACKAGE_NAME}>={base_version},<{upper_bound}"
+
+
+def _load_contracts_version() -> str:
+    with CONTRACTS_PYPROJECT_PATH.open("rb") as f:
+        pyproject = tomllib.load(f)
+    return str(pyproject["project"]["version"])
+
+
+def get_compatible_contracts_dependency_spec() -> str:
+    """Build the default crawler4j-contracts dependency range for generated modules."""
+    base_version = get_base_version(_load_contracts_version())
+    major, minor, _patch = (int(part) for part in base_version.split(".", 2))
+    if major == 0:
+        upper_bound = f"0.{minor + 1}.0"
+    else:
+        upper_bound = f"{major + 1}.0.0"
+    return f"{CONTRACTS_PACKAGE_NAME}>={base_version},<{upper_bound}"

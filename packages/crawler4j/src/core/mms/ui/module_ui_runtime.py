@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import inspect
+from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from crawler4j_contracts import TaskContext
@@ -18,7 +18,7 @@ from src.core.atm.runtime_capabilities import (
 )
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo, ModuleSource
-from src.core.mms.module_loader import load_root_module_from_path
+from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptor, PageRuntimeEntry
 from src.core.mms.service import get_module_service
 from src.core.mms.settings_store import get_module_settings_store
 
@@ -26,7 +26,7 @@ from src.core.mms.settings_store import get_module_settings_store
 @dataclass
 class _HookSession:
     context: TaskContext
-    root_module: Any | None
+    descriptor: ModuleRuntimeDescriptor
 
 
 class ModuleUIRuntimeBridge:
@@ -75,16 +75,6 @@ class ModuleUIRuntimeBridge:
             runtime=runtime,
         )
 
-    def _load_root_module(self, *, force_reload: bool) -> Any | None:
-        module = self._resolve_module_info()
-        if not module or not module.path:
-            return None
-        return load_root_module_from_path(
-            module.name,
-            Path(module.path),
-            force_reload=force_reload,
-        )
-
     def _create_session(
         self,
         *,
@@ -93,14 +83,17 @@ class ModuleUIRuntimeBridge:
         capability_surface: str = RUNTIME_SURFACE_FULL,
         declared_page_schemas: dict[str, dict[str, Any]] | None = None,
     ) -> _HookSession:
-        return _HookSession(
-            context=self.build_task_context(
-                ui_declaration_buffer=ui_declaration_buffer,
-                capability_surface=capability_surface,
-                declared_page_schemas=declared_page_schemas,
-            ),
-            root_module=self._load_root_module(force_reload=force_reload),
+        context = self.build_task_context(
+            ui_declaration_buffer=ui_declaration_buffer,
+            capability_surface=capability_surface,
+            declared_page_schemas=declared_page_schemas,
         )
+        descriptor = self._mms.get_runtime_descriptor(
+            self._module_name,
+            context,
+            force_reload=force_reload,
+        )
+        return _HookSession(context=context, descriptor=descriptor)
 
     def _set_context_tools(
         self,
@@ -117,14 +110,9 @@ class ModuleUIRuntimeBridge:
             declared_page_schemas=declared_page_schemas,
         ).tools
 
-    def _run_hook(
-        self,
-        session: _HookSession,
-        handler_name: str,
-        *args: Any,
-        runtime_extra: dict[str, Any] | None = None,
-    ) -> Any:
-        runtime = session.context.runtime
+    @contextmanager
+    def _override_runtime(self, context: TaskContext, runtime_extra: dict[str, Any] | None = None):
+        runtime = context.runtime
         previous_runtime: dict[str, Any] = {}
         missing_keys: set[str] = set()
         if runtime_extra:
@@ -134,29 +122,32 @@ class ModuleUIRuntimeBridge:
                 else:
                     missing_keys.add(key)
                 runtime[key] = value
-
         try:
-            module = self._resolve_module_info()
-            if module and module.path:
-                root_module = session.root_module
-                if root_module is None:
-                    raise RuntimeError(f"Module '{module.name}' has no loaded runtime module")
-                if not hasattr(root_module, handler_name):
-                    logger.debug(f"[MMS] Hook not implemented: {module.name}.{handler_name}")
-                    return None
-                hook = getattr(root_module, handler_name)
-                logger.info(f"[MMS] Executing local hook: {module.name}.{handler_name}")
-                if inspect.iscoroutinefunction(hook):
-                    raise RuntimeError(
-                        f"Module hook '{module.name}.{handler_name}' is async and cannot be executed from a sync caller"
-                    )
-                return hook(session.context, *args)
-
-            return self._mms.call_local_hook(self._module_name, handler_name, session.context, *args)
+            yield
         finally:
             for key in missing_keys:
                 runtime.pop(key, None)
             runtime.update(previous_runtime)
+
+    def _run_sync_callable(
+        self,
+        func: Any,
+        *,
+        owner: str,
+        context: TaskContext,
+        args: tuple[Any, ...],
+    ) -> Any:
+        if func is None or not callable(func):
+            raise RuntimeError(f"{owner} 未定义或不可调用")
+        if inspect.iscoroutinefunction(func):
+            raise RuntimeError(f"{owner} 是 async，不能从同步宿主页调用")
+        return func(context, *args)
+
+    def _resolve_page_entry(self, session: _HookSession, page_id: str) -> PageRuntimeEntry:
+        page = session.descriptor.pages.get(page_id)
+        if not page:
+            raise RuntimeError(f"未找到宿主页声明: {page_id}")
+        return page
 
     def call_local_hook(
         self,
@@ -166,35 +157,7 @@ class ModuleUIRuntimeBridge:
         capability_surface: str | None = None,
     ) -> Any:
         if capability_surface is None:
-            capability_surface = (
-                RUNTIME_SURFACE_HOSTED_UI_DECLARE
-                if handler_name == "declare_ui"
-                else RUNTIME_SURFACE_HOSTED_UI_READONLY
-            )
-        if handler_name == "declare_ui":
-            buffer = HostedUIDeclarationBuffer()
-            session = self._create_session(
-                force_reload=self._is_dev_link(),
-                ui_declaration_buffer=buffer,
-                capability_surface=capability_surface,
-            )
-            try:
-                result = self._run_hook(session, handler_name, *args, runtime_extra=runtime_extra)
-                self._declared_page_schemas = {
-                    str(page_id): dict(schema)
-                    for page_id, schema in buffer.page_schemas.items()
-                    if isinstance(schema, dict)
-                }
-                self._set_context_tools(
-                    session.context,
-                    capability_surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
-                    declared_page_schemas=self._declared_page_schemas,
-                )
-            finally:
-                buffer.seal()
-            self._active_session = session
-            return result
-
+            capability_surface = RUNTIME_SURFACE_HOSTED_UI_READONLY
         session = self._active_session
         if session is None:
             session = self._create_session(
@@ -209,7 +172,14 @@ class ModuleUIRuntimeBridge:
                 declared_page_schemas=self._declared_page_schemas or None,
             )
         try:
-            return self._run_hook(session, handler_name, *args, runtime_extra=runtime_extra)
+            hook = session.descriptor.hooks.get(handler_name)
+            with self._override_runtime(session.context, runtime_extra):
+                return self._run_sync_callable(
+                    hook,
+                    owner=f"{self._module_name}.hooks.{handler_name}",
+                    context=session.context,
+                    args=args,
+                )
         finally:
             if self._active_session is session:
                 self._active_session = None
@@ -228,11 +198,28 @@ class ModuleUIRuntimeBridge:
             runtime_extra["page_id"] = page_id
         if params is not None:
             runtime_extra["params"] = dict(params)
-        return self.call_local_hook(
-            "declare_ui",
-            runtime_extra=runtime_extra or None,
+
+        buffer = HostedUIDeclarationBuffer()
+        session = self._create_session(
+            force_reload=self._is_dev_link(),
+            ui_declaration_buffer=buffer,
             capability_surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE,
         )
+        try:
+            with self._override_runtime(session.context, runtime_extra or None):
+                self._declared_page_schemas = {
+                    page_id: dict(page.spec.schema)
+                    for page_id, page in session.descriptor.pages.items()
+                }
+                self._set_context_tools(
+                    session.context,
+                    capability_surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
+                    declared_page_schemas=self._declared_page_schemas,
+                )
+        finally:
+            buffer.seal()
+        self._active_session = session
+        return None
 
     def call_page_handler(
         self,
@@ -241,16 +228,32 @@ class ModuleUIRuntimeBridge:
         params: dict[str, Any] | None = None,
     ) -> Any:
         normalized_params = dict(params) if isinstance(params, dict) else None
-        return self.call_local_hook(
-            handler_name,
-            page_id,
-            normalized_params,
-            runtime_extra={
-                "page_id": page_id,
-                "params": normalized_params,
-            },
-            capability_surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
-        )
+        session = self._active_session
+        if session is None:
+            session = self._create_session(
+                force_reload=self._is_dev_link(),
+                capability_surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
+                declared_page_schemas=self._declared_page_schemas or None,
+            )
+        try:
+            page = self._resolve_page_entry(session, page_id)
+            handler = page.get_handler(handler_name)
+            with self._override_runtime(
+                session.context,
+                {
+                    "page_id": page_id,
+                    "params": normalized_params,
+                },
+            ):
+                return self._run_sync_callable(
+                    handler,
+                    owner=f"{page.module_name}.{handler_name}",
+                    context=session.context,
+                    args=(page_id, normalized_params),
+                )
+        finally:
+            if self._active_session is session:
+                self._active_session = None
 
     def call_query_handler(
         self,
@@ -263,15 +266,30 @@ class ModuleUIRuntimeBridge:
     ) -> Any:
         normalized_query = dict(query or {})
         normalized_params = dict(params) if isinstance(params, dict) else None
-        return self.call_local_hook(
-            handler_name,
-            table_id,
-            normalized_query,
-            normalized_params,
-            runtime_extra={
-                "page_id": page_id,
-                "table_id": table_id,
-                "params": normalized_params,
-            },
-            capability_surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
-        )
+        session = self._active_session
+        if session is None:
+            session = self._create_session(
+                force_reload=self._is_dev_link(),
+                capability_surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
+                declared_page_schemas=self._declared_page_schemas or None,
+            )
+        try:
+            page = self._resolve_page_entry(session, page_id)
+            handler = page.get_handler(handler_name)
+            with self._override_runtime(
+                session.context,
+                {
+                    "page_id": page_id,
+                    "table_id": table_id,
+                    "params": normalized_params,
+                },
+            ):
+                return self._run_sync_callable(
+                    handler,
+                    owner=f"{page.module_name}.{handler_name}",
+                    context=session.context,
+                    args=(table_id, normalized_query, normalized_params),
+                )
+        finally:
+            if self._active_session is session:
+                self._active_session = None

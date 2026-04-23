@@ -29,6 +29,7 @@ IGNORED_DIRS = {"__pycache__", ".git", ".venv", "node_modules"}
 MANAGED_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REMOVED_MANIFEST_FIELDS = ("sdk_version_range",)
+REQUIRED_RUNTIME_API = "core-native-v1"
 
 
 class ModuleScanner:
@@ -172,6 +173,14 @@ class ModuleScanner:
                 hint="请在 module.yaml 中添加 name 字段"
             )
 
+        runtime_api = str(manifest.runtime_api or "").strip()
+        if runtime_api != REQUIRED_RUNTIME_API:
+            raise ModuleValidationError(
+                f"module.yaml.runtime_api 必须是 {REQUIRED_RUNTIME_API}",
+                stage="VALIDATE",
+                hint="旧模块不再兼容，请迁移到 core-native-v1 协议后再加载",
+            )
+
         # 命名规范校验（小写字母、数字、下划线）
         if not manifest.name.replace("_", "").isalnum() or not manifest.name.islower():
             warnings.append(f"模块名 '{manifest.name}' 不符合命名规范（应为小写字母、数字、下划线）")
@@ -191,6 +200,27 @@ class ModuleScanner:
                 "工作流名称重复",
                 stage="VALIDATE",
                 hint="请确保每个工作流有唯一的 name"
+            )
+
+        if not workflow_names:
+            raise ModuleValidationError(
+                "module.yaml.workflows 不能为空",
+                stage="VALIDATE",
+                hint="至少声明一个 workflow，并让 default_workflow 指向其中之一",
+            )
+
+        default_workflow = str(manifest.default_workflow or "").strip()
+        if not default_workflow:
+            raise ModuleValidationError(
+                "缺少必填字段: default_workflow",
+                stage="VALIDATE",
+                hint="请在 module.yaml 中声明 default_workflow",
+            )
+        if default_workflow not in workflow_names:
+            raise ModuleValidationError(
+                f"default_workflow 未在 module.yaml.workflows 中声明: {default_workflow}",
+                stage="VALIDATE",
+                hint="default_workflow 必须指向已声明的 workflow 名称",
             )
 
         self._validate_upgrade_source(manifest)

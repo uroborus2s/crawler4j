@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from crawler4j_sdk import EnvAction, TaskContext, TaskResult, TaskSignal, ToolSpec, ToolsCapability
+from crawler4j_contracts import EnvAction, TaskContext, TaskResult, TaskSignal, ToolSpec, ToolsCapability
 import crawler4j_contracts.context as contracts_context
 from crawler4j_sdk.context import DefaultHttpClient, HttpClient
 

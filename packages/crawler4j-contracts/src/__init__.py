@@ -20,6 +20,7 @@ from crawler4j_contracts.context import (
 )
 from crawler4j_contracts.result import TaskResult
 from crawler4j_contracts.signal import EnvAction, TaskSignal, TaskSignalAction
+from crawler4j_contracts.specs import EnvSelectorSpec, PageSpec, TaskSpec, WorkflowSpec
 
 __all__ = [
     "TaskContext",
@@ -39,4 +40,8 @@ __all__ = [
     "ClickCaptchaOrderedTarget",
     "ClickCaptchaMatchResult",
     "EnvCandidate",
+    "TaskSpec",
+    "WorkflowSpec",
+    "EnvSelectorSpec",
+    "PageSpec",
 ]

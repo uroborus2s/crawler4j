@@ -21,9 +21,13 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from crawler4j_contracts import TaskContext, ToolSpec
+from crawler4j_contracts import EnvSelectorSpec, PageSpec, TaskSpec, WorkflowSpec
+from crawler4j_contracts.hosted_ui import normalize_page_schema
 
-from crawler4j_sdk._version import get_compatible_dependency_spec
+from crawler4j_sdk._version import (
+    get_compatible_contracts_dependency_spec,
+    get_compatible_sdk_dependency_spec,
+)
 from crawler4j_sdk.cli.templates import (
     HOOK_NAMES,
     MODEL_GITIGNORE_TEMPLATE,
@@ -33,7 +37,6 @@ from crawler4j_sdk.cli.templates import (
     MODEL_PAGES_INIT_TEMPLATE,
     MODEL_PROJECT_PYPROJECT,
     MODEL_PROJECT_README,
-    MODEL_RUNTIME_TEMPLATE,
     MODEL_SELECTORS_INIT_TEMPLATE,
     MODEL_TEST_TASK_TEMPLATE,
     RANDOM_READY_SELECTOR_TEMPLATE,
@@ -43,9 +46,6 @@ from crawler4j_sdk.cli.templates import (
     render_hook_template,
     render_page_template,
     render_selector_template,
-)
-from crawler4j_sdk.hosted_ui import (
-    normalize_page_schema,
 )
 
 
@@ -67,15 +67,11 @@ LEGACY_HOSTED_UI_PATHS: tuple[tuple[str, str], ...] = (
     ("config_schema.json", "file"),
     ("strategy.yaml", "file"),
 )
+REQUIRED_RUNTIME_API = "core-native-v1"
 
 
 class CLIError(RuntimeError):
     """Raised when a CLI action cannot be completed safely."""
-
-
-def to_class_name(name: str) -> str:
-    """Convert a snake_case identifier to PascalCase."""
-    return "".join(part.capitalize() for part in name.replace("-", "_").split("_"))
 
 
 def to_display_name(name: str) -> str:
@@ -162,10 +158,6 @@ def _ensure_package_dir(path: Path) -> None:
     init_file = path / "__init__.py"
     if not init_file.exists():
         init_file.write_text("", encoding="utf-8")
-
-
-def _ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
 
 
 def find_module_root(start: Path | None = None) -> Path | None:
@@ -258,27 +250,8 @@ def _list_python_modules(package_dir: Path) -> list[str]:
     )
 
 
-def _read_default_workflow(runtime_path: Path) -> str:
-    if not runtime_path.exists():
-        return ""
-    match = re.search(
-        r'(?m)^\s*DEFAULT_WORKFLOW\s*=\s*["\'](?P<name>[a-z][a-z0-9_]*)["\']\s*$',
-        runtime_path.read_text(encoding="utf-8"),
-    )
-    return match.group("name") if match else ""
-
-
-def _set_default_workflow(runtime_path: Path, workflow_name: str) -> None:
-    text = runtime_path.read_text(encoding="utf-8")
-    replacement = f'DEFAULT_WORKFLOW = "{workflow_name}"'
-    pattern = re.compile(
-        r'(?m)^(?:#\s*)?DEFAULT_WORKFLOW\s*=\s*["\'][A-Za-z0-9_]+["\']\s*$'
-    )
-    if pattern.search(text):
-        text = pattern.sub(replacement, text, count=1)
-    else:
-        text += f"\n\n{replacement}\n"
-    runtime_path.write_text(text, encoding="utf-8")
+def _manifest_default_workflow(manifest: dict[str, Any]) -> str:
+    return str(manifest.get("default_workflow", "") or "").strip()
 
 
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:
@@ -380,6 +353,131 @@ def _import_module_root(module_root: Path) -> Any:
         sys.modules.pop(name, None)
 
     return importlib.import_module(package_name)
+
+
+def _import_module_child(module_root: Path, subpackage: str, name: str) -> Any:
+    _import_module_root(module_root)
+    return importlib.import_module(f"{module_root.name}.{subpackage}.{name}")
+
+
+def _validate_exported_spec(
+    module: Any,
+    export_name: str,
+    spec_type: type[Any],
+    *,
+    owner_label: str,
+) -> str | None:
+    exported = getattr(module, export_name, None)
+    if not isinstance(exported, spec_type):
+        return f"{owner_label} 缺少 {export_name}，或类型不是 {spec_type.__name__}"
+    return None
+
+
+def _validate_task_module(module_root: Path, task_name: str) -> list[str]:
+    owner_label = f"tasks/{task_name}.py"
+    try:
+        module = _import_module_child(module_root, "tasks", task_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
+
+    errors: list[str] = []
+    spec_error = _validate_exported_spec(module, "TASK", TaskSpec, owner_label=owner_label)
+    if spec_error:
+        errors.append(spec_error)
+    elif str(module.TASK.name or "").strip() != task_name:
+        errors.append(f"{owner_label} 的 TASK.name 必须与文件名一致: {task_name}")
+
+    execute = getattr(module, "execute", None)
+    if execute is None or not callable(execute):
+        errors.append(f"{owner_label} 缺少可调用导出: execute")
+    return errors
+
+
+def _validate_workflow_module(module_root: Path, workflow_name: str) -> list[str]:
+    owner_label = f"workflows/{workflow_name}.py"
+    try:
+        module = _import_module_child(module_root, "workflows", workflow_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
+
+    errors: list[str] = []
+    spec_error = _validate_exported_spec(module, "WORKFLOW", WorkflowSpec, owner_label=owner_label)
+    if spec_error:
+        errors.append(spec_error)
+    elif str(module.WORKFLOW.name or "").strip() != workflow_name:
+        errors.append(f"{owner_label} 的 WORKFLOW.name 必须与文件名一致: {workflow_name}")
+
+    run_func = getattr(module, "run", None)
+    if run_func is None or not callable(run_func):
+        errors.append(f"{owner_label} 缺少可调用导出: run")
+    return errors
+
+
+def _validate_hook_module(module_root: Path, hook_name: str) -> list[str]:
+    owner_label = f"hooks/{hook_name}.py"
+    try:
+        module = _import_module_child(module_root, "hooks", hook_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
+    handle = getattr(module, "handle", None)
+    if handle is None or not callable(handle):
+        return [f"{owner_label} 缺少可调用导出: handle"]
+    return []
+
+
+def _validate_selector_module(module_root: Path, selector_name: str) -> list[str]:
+    owner_label = f"env_selectors/{selector_name}.py"
+    try:
+        module = _import_module_child(module_root, "env_selectors", selector_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
+
+    errors: list[str] = []
+    spec_error = _validate_exported_spec(module, "SELECTOR", EnvSelectorSpec, owner_label=owner_label)
+    if spec_error:
+        errors.append(spec_error)
+    elif str(module.SELECTOR.name or "").strip() != selector_name:
+        errors.append(f"{owner_label} 的 SELECTOR.name 必须与文件名一致: {selector_name}")
+
+    select = getattr(module, "select", None)
+    if select is None or not callable(select):
+        errors.append(f"{owner_label} 缺少可调用导出: select")
+    return errors
+
+
+def _validate_page_module(module_root: Path, page_name: str) -> tuple[list[str], dict[str, Any] | None]:
+    owner_label = f"pages/{page_name}.py"
+    try:
+        module = _import_module_child(module_root, "pages", page_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"], None
+
+    errors: list[str] = []
+    spec_error = _validate_exported_spec(module, "PAGE", PageSpec, owner_label=owner_label)
+    if spec_error:
+        return [spec_error], None
+
+    page_spec = module.PAGE
+    page_id = str(page_spec.id or "").strip()
+    if page_id != page_name:
+        errors.append(f"{owner_label} 的 PAGE.id 必须与文件名一致: {page_name}")
+        return errors, None
+
+    try:
+        schema = normalize_page_schema(page_id, dict(page_spec.schema or {}))
+    except ValueError as exc:
+        errors.append(f"宿主页 {page_id} schema 无效: {exc}")
+        return errors, None
+
+    load_handler_name = str(schema.get("load_handler", "") or "").strip()
+    load_handler = getattr(module, load_handler_name, None)
+    if load_handler is None or not callable(load_handler):
+        errors.append(f"宿主页 {page_id} 的 load_handler 未在 pages/{page_name}.py 中定义: {load_handler_name}")
+    elif inspect.iscoroutinefunction(load_handler):
+        errors.append(f"宿主页 {page_id} 的 load_handler 必须是同步函数: {load_handler_name}")
+
+    errors.extend(_validate_inline_table_handlers(module, page_id, schema, owner_label=owner_label))
+    return errors, schema
 
 
 def _render_yaml(data: Any) -> str:
@@ -584,7 +682,7 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
     """Collect structure-level validation errors."""
     errors: list[str] = []
 
-    required_files = ["module.yaml", "__init__.py", "module_runtime.py", "pyproject.toml"]
+    required_files = ["module.yaml", "__init__.py", "pyproject.toml"]
     required_dirs = ["tasks", "workflows", "pages", "hooks", "env_selectors"]
     for name in required_files:
         if not (module_root / name).exists():
@@ -595,6 +693,8 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
 
     if not str(manifest.get("name", "")).strip():
         errors.append("module.yaml 缺少 name")
+    if str(manifest.get("runtime_api", "")).strip() != REQUIRED_RUNTIME_API:
+        errors.append(f"module.yaml.runtime_api 必须是 {REQUIRED_RUNTIME_API}")
     if "sdk_version_range" in manifest:
         errors.append("module.yaml 不再允许声明 sdk_version_range")
 
@@ -608,6 +708,12 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
                 continue
             if not (module_root / "workflows" / f"{workflow_name}.py").exists():
                 errors.append(f"module.yaml 声明的 workflow 缺少源码文件: workflows/{workflow_name}.py")
+
+    default_workflow = _manifest_default_workflow(manifest)
+    if not default_workflow:
+        errors.append("module.yaml 缺少 default_workflow")
+    elif default_workflow not in workflow_names:
+        errors.append(f"default_workflow 未在 module.yaml.workflows 中声明: {default_workflow}")
 
     declared = set(workflow_names)
     files = set(_list_python_modules(module_root / "workflows"))
@@ -670,118 +776,56 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
         return errors
 
     try:
-        module = _import_module_root(module_root)
+        _import_module_root(module_root)
     except Exception as exc:  # pragma: no cover - exercised by tests via failure paths
         return [f"模块无法导入: {exc.__class__.__name__}: {exc}"]
 
-    assembler = getattr(module, "assembler", None)
-    if not assembler:
-        errors.append("模块根入口缺少 assembler")
-        return errors
-
-    discovery_errors = getattr(assembler, "discovery_errors", {}) or {}
-    for message in discovery_errors.values():
-        errors.append(str(message))
-
     for task_name in _list_python_modules(module_root / "tasks"):
-        try:
-            importlib.import_module(f"{module_root.name}.tasks.{task_name}")
-        except Exception as exc:  # pragma: no cover - failure path
-            errors.append(f"tasks/{task_name}.py 无法导入: {exc.__class__.__name__}: {exc}")
+        errors.extend(_validate_task_module(module_root, task_name))
 
     workflow_names = _manifest_workflow_names(manifest)
     for workflow_name in workflow_names:
+        errors.extend(_validate_workflow_module(module_root, workflow_name))
+
+    for hook_name in _list_python_modules(module_root / "hooks"):
+        errors.extend(_validate_hook_module(module_root, hook_name))
+
+    selector_files = _list_python_modules(module_root / "env_selectors")
+    selector_names: set[str] = set()
+    for selector_name in selector_files:
+        errors.extend(_validate_selector_module(module_root, selector_name))
         try:
-            importlib.import_module(f"{module_root.name}.workflows.{workflow_name}")
-        except Exception as exc:  # pragma: no cover - failure path
-            errors.append(
-                f"workflows/{workflow_name}.py 无法导入: {exc.__class__.__name__}: {exc}"
-            )
+            module = _import_module_child(module_root, "env_selectors", selector_name)
+        except Exception:
+            continue
+        selector = getattr(module, "SELECTOR", None)
+        if isinstance(selector, EnvSelectorSpec):
+            selector_names.add(str(selector.name or "").strip())
 
-    try:
-        module_runtime = importlib.import_module(f"{module_root.name}.module_runtime")
-    except Exception as exc:  # pragma: no cover - failure path
-        errors.append(f"module_runtime.py 无法导入: {exc.__class__.__name__}: {exc}")
-    else:
-        errors.extend(_validate_declared_ui(module_root, module_runtime, manifest))
+    declared_pages = {
+        str(item.get("id", "")).strip()
+        for item in _manifest_ui_pages(manifest)
+        if str(item.get("id", "")).strip()
+    }
+    discovered_pages: set[str] = set()
+    for page_name in _list_python_modules(module_root / "pages"):
+        page_errors, schema = _validate_page_module(module_root, page_name)
+        errors.extend(page_errors)
+        if schema:
+            discovered_pages.add(page_name)
 
-    assembler_workflows = set(getattr(assembler, "workflows", {}).keys())
-    for workflow_name in workflow_names:
-        if workflow_name not in assembler_workflows:
-            errors.append(f"工作流未被 assembler 发现: {workflow_name}")
+    missing_pages = sorted(declared_pages - discovered_pages)
+    extra_pages = sorted(discovered_pages - declared_pages)
+    errors.extend(
+        f"module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: {page_id}"
+        for page_id in missing_pages
+    )
+    errors.extend(
+        f"pages/ 声明了未写入 module.yaml.ui_extension.pages 的宿主页: {page_id}"
+        for page_id in extra_pages
+    )
 
     return errors
-
-class _DeclareUICheckLogger:
-    def debug(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-    def info(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-    def warning(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-    def error(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-    def exception(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-
-class _DeclareUICheckTools:
-    def __init__(self) -> None:
-        self._pages: dict[str, dict[str, Any]] = {}
-        self._tool_specs = [
-            ToolSpec(name="ui.declare_page", description="ui.declare_page"),
-        ]
-
-    def has_tool(self, tool_name: str) -> bool:
-        return tool_name in {spec.name for spec in self._tool_specs}
-
-    def list_tools(self) -> list[ToolSpec]:
-        return list(self._tool_specs)
-
-    def call(self, tool_name: str, /, **kwargs: Any) -> Any:
-        if tool_name == "ui.declare_page":
-            page_id = str(kwargs.get("page_id", "")).strip()
-            try:
-                self._pages[page_id] = normalize_page_schema(page_id, dict(kwargs.get("schema") or {}))
-            except ValueError as exc:
-                raise CLIError(f"宿主页 {page_id or '<empty>'} schema 无效: {exc}") from exc
-            return True
-        raise KeyError(f"Unknown check tool: {tool_name}")
-
-
-def _validate_declared_page_handlers(module_runtime: Any, declared_pages: dict[str, dict[str, Any]]) -> list[str]:
-    errors: list[str] = []
-    for page_id, schema in declared_pages.items():
-        if not isinstance(schema, dict):
-            errors.append(f"宿主页 {page_id} 的 schema 必须是对象")
-            continue
-
-        schema_type = str(schema.get("type", "") or "").strip()
-        if schema_type != "Page":
-            errors.append(f"宿主页 {page_id} 的 schema.type 必须是 Page")
-
-        load_handler_name = str(schema.get("load_handler", "") or "").strip()
-        if not load_handler_name:
-            errors.append(f"宿主页 {page_id} 缺少 load_handler")
-            continue
-
-        error = _validate_runtime_handler(
-            module_runtime,
-            owner_label=f"宿主页 {page_id}",
-            handler_field="load_handler",
-            handler_name=load_handler_name,
-            runtime_call_label="(context, page_id, params)",
-            call_args=(page_id, None),
-        )
-        if error:
-            errors.append(error)
-        errors.extend(_validate_inline_table_handlers(module_runtime, page_id, schema))
-    return errors
-
 
 def _iter_inline_tables(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
     tables: list[dict[str, Any]] = []
@@ -798,9 +842,11 @@ def _iter_inline_tables(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _validate_inline_table_handlers(
-    module_runtime: Any,
+    owner_module: Any,
     page_id: str,
     page_schema: dict[str, Any],
+    *,
+    owner_label: str,
 ) -> list[str]:
     errors: list[str] = []
     children = page_schema.get("children")
@@ -817,8 +863,8 @@ def _validate_inline_table_handlers(
             continue
         table_id = str(table_schema.get("table_id") or "").strip()
         error = _validate_runtime_handler(
-            module_runtime,
-            owner_label=f"宿主页 {page_id} 的内联表格 {table_id or '<empty>'}",
+            owner_module,
+            owner_label=f"{owner_label} 的内联表格 {table_id or '<empty>'}",
             handler_field="data_source.handler",
             handler_name=handler_name,
             runtime_call_label="(context, table_id, query, params)",
@@ -830,7 +876,7 @@ def _validate_inline_table_handlers(
 
 
 def _validate_runtime_handler(
-    module_runtime: Any,
+    owner_module: Any,
     *,
     owner_label: str,
     handler_field: str,
@@ -838,9 +884,9 @@ def _validate_runtime_handler(
     runtime_call_label: str,
     call_args: tuple[Any, ...],
 ) -> str | None:
-    handler = getattr(module_runtime, handler_name, None)
+    handler = getattr(owner_module, handler_name, None)
     if handler is None or not callable(handler):
-        return f"{owner_label} 的 {handler_field} 未在 module_runtime.py 中定义: {handler_name}"
+        return f"{owner_label} 的 {handler_field} 未定义: {handler_name}"
     handler_call = getattr(handler, "__call__", None)
     if inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(handler_call):
         return f"{owner_label} 的 {handler_field} 必须是同步函数: {handler_name}"
@@ -856,50 +902,6 @@ def _validate_runtime_handler(
             f"运行时会按 {runtime_call_label} 调用: {handler_name}"
         )
     return None
-
-
-def _validate_declared_ui(module_root: Path, module_runtime: Any, manifest: dict[str, Any]) -> list[str]:
-    declare_ui = getattr(module_runtime, "declare_ui", None)
-    declared_manifest_pages = {
-        str(item.get("id", "")).strip()
-        for item in _manifest_ui_pages(manifest)
-        if str(item.get("id", "")).strip()
-    }
-    if declare_ui is None:
-        return ["module_runtime.py 缺少 declare_ui"] if declared_manifest_pages else []
-    if inspect.iscoroutinefunction(declare_ui):
-        return ["module_runtime.declare_ui 必须是同步函数"]
-
-    tools = _DeclareUICheckTools()
-    context = TaskContext(
-        env_id=0,
-        task_name=module_root.name,
-        config={},
-        logger=_DeclareUICheckLogger(),
-        tools=tools,
-        runtime={},
-    )
-    try:
-        declare_ui(context)
-    except CLIError as exc:
-        return [str(exc)]
-    except Exception as exc:
-        return [f"declare_ui 校验失败: {exc.__class__.__name__}: {exc}"]
-
-    errors = _validate_declared_page_handlers(module_runtime, tools._pages)
-
-    missing_pages = sorted(declared_manifest_pages - set(tools._pages))
-    extra_pages = sorted(set(tools._pages) - declared_manifest_pages)
-
-    errors.extend(
-        f"module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: {page_id}"
-        for page_id in missing_pages
-    )
-    errors.extend(
-        f"declare_ui 注册了未写入 module.yaml.ui_extension.pages 的宿主页: {page_id}"
-        for page_id in extra_pages
-    )
-    return errors
 
 
 def _run_check(level: str, module_root: Path) -> int:
@@ -1064,13 +1066,12 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     description = args.description or f"{display_name} 模块"
     workflow_display_name = args.workflow_display_name or to_display_name(args.workflow_name)
     workflow_description = args.workflow_description or f"{workflow_display_name} 工作流"
-    sdk_dependency_spec = get_compatible_dependency_spec()
+    contracts_dependency_spec = get_compatible_contracts_dependency_spec()
+    sdk_dependency_spec = get_compatible_sdk_dependency_spec()
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    for subdir in ["tasks", "workflows", "tests"]:
-        _ensure_package_dir(output_dir / subdir)
-    for subdir in ["pages", "hooks", "env_selectors"]:
-        _ensure_dir(output_dir / subdir)
+    for subdir in ["tasks", "workflows", "pages", "hooks", "env_selectors", "tests"]:
+        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     try:
         _write_text(
@@ -1080,6 +1081,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
                 version=args.version,
                 display_name=display_name,
                 python_version=args.python_version,
+                contracts_dependency_spec=contracts_dependency_spec,
                 sdk_dependency_spec=sdk_dependency_spec,
             ),
             force=args.force,
@@ -1095,8 +1097,13 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             force=args.force,
         )
         _write_text(
-            output_dir / "module_runtime.py",
-            MODEL_RUNTIME_TEMPLATE.format(display_name=display_name),
+            output_dir / "tasks" / "__init__.py",
+            "",
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "workflows" / "__init__.py",
+            "",
             force=args.force,
         )
         _write_text(
@@ -1132,7 +1139,6 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             output_dir / "tasks" / "example_task.py",
             SCRIPT_TEMPLATE.format(
                 name="example_task",
-                class_name="ExampleTask",
                 display_name="示例任务",
                 description="示例任务脚本",
             ),
@@ -1142,7 +1148,6 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             output_dir / "workflows" / f"{args.workflow_name}.py",
             WORKFLOW_TEMPLATE.format(
                 name=args.workflow_name,
-                class_name=f"{to_class_name(args.workflow_name)}Workflow",
                 display_name=workflow_display_name,
                 description=workflow_description,
             ),
@@ -1165,6 +1170,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             force=args.force,
         )
         _write_text(output_dir / "tests" / "test_tasks.py", MODEL_TEST_TASK_TEMPLATE, force=args.force)
+        _write_text(output_dir / "tests" / "__init__.py", "", force=args.force)
         _write_text(output_dir / ".gitignore", MODEL_GITIGNORE_TEMPLATE, force=args.force)
         _write_text(output_dir / ".python-version", f"{args.python_version}\n", force=args.force)
     except CLIError as exc:
@@ -1198,11 +1204,11 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     manifest = load_manifest(module_root)
     hosted_pages = _manifest_ui_pages(manifest)
     workflow_names = _manifest_workflow_names(manifest)
-    runtime_path = module_root / "module_runtime.py"
-    default_workflow = _read_default_workflow(runtime_path) or (workflow_names[0] if workflow_names else "")
+    default_workflow = _manifest_default_workflow(manifest) or (workflow_names[0] if workflow_names else "")
 
     print(f"模块目录: {module_root}")
     print(f"模块名: {manifest.get('name', '')}")
+    print(f"运行时协议: {manifest.get('runtime_api', '')}")
     print(f"版本: {manifest.get('version', '')}")
     print(f"仓库: {(manifest.get('upgrade_source') or {}).get('repo', '')}")
     print(f"默认工作流: {default_workflow}")
@@ -1256,14 +1262,15 @@ def cmd_module_set_version(args: argparse.Namespace) -> int:
 
 
 def cmd_module_set_default_workflow(args: argparse.Namespace) -> int:
-    """Set DEFAULT_WORKFLOW inside module_runtime.py."""
+    """Set module.yaml.default_workflow."""
     module_root = require_module_root()
     manifest = load_manifest(module_root)
     workflow_name = str(args.workflow or "").strip()
     if workflow_name not in _manifest_workflow_names(manifest):
         _print_error(f"未声明的 workflow: {workflow_name}")
         return 1
-    _set_default_workflow(module_root / "module_runtime.py", workflow_name)
+    manifest["default_workflow"] = workflow_name
+    save_manifest(module_root, manifest)
     _print_success(f"已设置默认工作流: {workflow_name}")
     return 0
 
@@ -1280,7 +1287,6 @@ def cmd_task_create(args: argparse.Namespace) -> int:
             module_root / "tasks" / f"{name}.py",
             SCRIPT_TEMPLATE.format(
                 name=name,
-                class_name=f"{to_class_name(name)}Task",
                 display_name=to_display_name(name),
                 description=f"{to_display_name(name)} 任务",
             ),
@@ -1315,7 +1321,6 @@ def cmd_workflow_create(args: argparse.Namespace) -> int:
             module_root / "workflows" / f"{name}.py",
             WORKFLOW_TEMPLATE.format(
                 name=name,
-                class_name=f"{to_class_name(name)}Workflow",
                 display_name=args.display_name or to_display_name(name),
                 description=args.description or f"{to_display_name(name)} 工作流",
             ),
@@ -1334,7 +1339,9 @@ def cmd_workflow_create(args: argparse.Namespace) -> int:
                 "description": args.description or f"{to_display_name(name)} 工作流",
             }
         )
-        save_manifest(module_root, manifest)
+    if not _manifest_default_workflow(manifest):
+        manifest["default_workflow"] = name
+    save_manifest(module_root, manifest)
     _print_success(f"已创建工作流: workflows/{name}.py")
     return 0
 
@@ -1370,9 +1377,7 @@ def cmd_page_create(args: argparse.Namespace) -> int:
         for item in legacy_ui_errors:
             print(f"  - {item}")
         return 1
-    _ensure_dir(module_root / "pages")
-    if not (module_root / "pages" / "__init__.py").exists():
-        (module_root / "pages" / "__init__.py").write_text(MODEL_PAGES_INIT_TEMPLATE, encoding="utf-8")
+    _ensure_package_dir(module_root / "pages")
     pages = _normalize_ui_pages(manifest)
     existing_page = next(
         (item for item in pages if isinstance(item, dict) and item.get("id") == name),
@@ -1422,19 +1427,14 @@ def cmd_page_list(args: argparse.Namespace) -> int:
 
 
 def cmd_env_selector_create(args: argparse.Namespace) -> int:
-    """Create a new env_selector module under env_selectors/."""
+    """Create a new env-selector module under env_selectors/."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
     force = bool(getattr(args, "force", False))
     if not is_valid_name(name):
         _print_error("环境选择器名必须是小写 snake_case")
         return 1
-    _ensure_dir(module_root / "env_selectors")
-    if not (module_root / "env_selectors" / "__init__.py").exists():
-        (module_root / "env_selectors" / "__init__.py").write_text(
-            MODEL_SELECTORS_INIT_TEMPLATE,
-            encoding="utf-8",
-        )
+    _ensure_package_dir(module_root / "env_selectors")
     selector_path = module_root / "env_selectors" / f"{name}.py"
     if selector_path.exists() and not force:
         _print_error(f"环境选择器已存在: {name}")
@@ -1446,7 +1446,6 @@ def cmd_env_selector_create(args: argparse.Namespace) -> int:
                 name=name,
                 display_name=args.display_name or to_display_name(name),
                 description=args.description or f"{to_display_name(name)} 环境选择器",
-                function_name=f"{name}_selector",
             ),
             force=force,
         )
@@ -1458,25 +1457,21 @@ def cmd_env_selector_create(args: argparse.Namespace) -> int:
 
 
 def cmd_env_selector_list(args: argparse.Namespace) -> int:
-    """List env_selector declarations."""
+    """List env-selector declarations."""
     del args
     module_root = require_module_root()
-    try:
-        module = _import_module_root(module_root)
-    except Exception as exc:
-        _print_error(f"无法导入模块以列出环境选择器: {exc.__class__.__name__}: {exc}")
-        return 1
-
-    assembler = getattr(module, "assembler", None)
-    if assembler is None or not hasattr(assembler, "list_env_selectors"):
-        _print_error("模块根入口缺少可用的 assembler.list_env_selectors")
-        return 1
-
-    try:
-        selectors = [item.name for item in assembler.list_env_selectors()]
-    except Exception as exc:
-        _print_error(f"读取环境选择器失败: {exc.__class__.__name__}: {exc}")
-        return 1
+    selectors: list[str] = []
+    for selector_name in _list_python_modules(module_root / "env_selectors"):
+        try:
+            module = _import_module_child(module_root, "env_selectors", selector_name)
+        except Exception as exc:
+            _print_error(f"读取环境选择器失败: {exc.__class__.__name__}: {exc}")
+            return 1
+        selector = getattr(module, "SELECTOR", None)
+        if not isinstance(selector, EnvSelectorSpec):
+            _print_error(f"env_selectors/{selector_name}.py 缺少 SELECTOR")
+            return 1
+        selectors.append(selector.name)
 
     print("\n".join(selectors) if selectors else "(无环境选择器)")
     return 0
@@ -1491,9 +1486,7 @@ def cmd_hook_create(args: argparse.Namespace) -> int:
         _print_error("Hook 名必须是标准生命周期入口之一")
         return 1
 
-    _ensure_dir(module_root / "hooks")
-    if not (module_root / "hooks" / "__init__.py").exists():
-        (module_root / "hooks" / "__init__.py").write_text(MODEL_HOOKS_INIT_TEMPLATE, encoding="utf-8")
+    _ensure_package_dir(module_root / "hooks")
 
     try:
         _write_text(
@@ -2062,7 +2055,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_init = module_sub.add_parser(
         "init",
-        help="初始化一个新的模块项目，生成标准骨架、module.yaml 和 module_runtime.py",
+        help="初始化一个新的模块项目，生成 core-native-v1 标准骨架与 module.yaml",
     )
     module_init.add_argument("name", help="模块包名，必须是 snake_case")
     module_init.add_argument("--repo", required=True, help="升级源 GitHub 仓库，格式 owner/repo")
@@ -2087,7 +2080,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_set = module_sub.add_parser(
         "set",
-        help="修改 module.yaml 或 module_runtime.py 中的关键字段",
+        help="修改 module.yaml 中的关键字段",
     )
     module_set_sub = module_set.add_subparsers(dest="field")
 
@@ -2107,19 +2100,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_set_default_workflow = module_set_sub.add_parser(
         "default-workflow",
-        help="设置 module_runtime.py 里的 DEFAULT_WORKFLOW",
+        help="设置 module.yaml.default_workflow",
     )
     module_set_default_workflow.add_argument("workflow", help="已声明的 workflow 名称")
     module_set_default_workflow.set_defaults(func=cmd_module_set_default_workflow)
 
     task_parser = subparsers.add_parser(
         "task",
-        help="任务脚本操作：在 tasks/ 下创建或列出 TaskScript 文件",
+        help="任务脚本操作：在 tasks/ 下创建或列出 TASK/execute 文件",
     )
     task_sub = task_parser.add_subparsers(dest="action")
     task_create = task_sub.add_parser(
         "create",
-        help="创建一个新的 TaskScript 文件，不会修改 module.yaml",
+        help="创建一个新的 TASK/execute 文件，不会修改 module.yaml",
     )
     task_create.add_argument("name", help="任务名，snake_case")
     task_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
@@ -2163,12 +2156,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     selector_parser = subparsers.add_parser(
         "env-selector",
-        help="环境选择器操作：在 env_selectors/ 中声明 @env_selector(...) 函数",
+        help="环境选择器操作：在 env_selectors/ 中声明 SELECTOR/select 文件",
     )
     selector_sub = selector_parser.add_subparsers(dest="action")
     selector_create = selector_sub.add_parser(
         "create",
-        help="创建一个环境选择策略函数，用于 ATM 的“选择环境”模式",
+        help="创建一个环境选择策略文件，用于 ATM 的“选择环境”模式",
     )
     selector_create.add_argument("name", help="选择器名，snake_case")
     selector_create.add_argument("--display-name", help="显示名")
@@ -2402,7 +2395,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_sub = check_parser.add_subparsers(dest="level")
     check_structure = check_sub.add_parser(
         "structure",
-        help="检查 module.yaml、module_runtime.py、目录结构、workflow 声明和 UI 入口格式",
+        help="检查 module.yaml、core-native-v1 目录结构、workflow 声明和 UI 入口格式",
     )
     check_structure.set_defaults(func=cmd_check_structure)
     check_release = check_sub.add_parser(
@@ -2412,7 +2405,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_release.set_defaults(func=cmd_check_release)
     check_full = check_sub.add_parser(
         "full",
-        help="在 release 基础上再尝试导入模块、任务、工作流并校验 hosted UI 声明，作为完整 gate",
+        help="在 release 基础上再尝试导入模块文件并校验 TASK/WORKFLOW/SELECTOR/PAGE 导出，作为完整 gate",
     )
     check_full.set_defaults(func=cmd_check_full)
 

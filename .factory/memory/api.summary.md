@@ -1,11 +1,11 @@
 # API Summary
 
-- `API-001`: Root app entry contract is `src.ui.app:main` and is currently aligned with the declared script entry.
-- `API-002`: Module runtime contract remains `module.yaml` + root `__init__.py` + `run(context)` / hooks; `REQ-006` is implemented via a stable shim plus `ModuleAssembler`, 模块持久配置统一落在 `config.db.module_config_entries`，运行态输入统一经 `ctx.runtime` 注入，模块详情页真实默认配置入口为宿主侧模块/工作流 YAML 编辑器，且 `module.yaml.config_defaults` 现在只作为首次初始化与“恢复默认”的静态模板；Hosted UI 已进一步收口为页面清单 + `ui.declare_page` / `ui.get_page` 契约，页面刷新会重放本地 UI 声明 hook。
-- `API-005`: 模块配置、运行态、共享内存与快照型数据表契约已继续收口：`module.yaml` 承载静态清单与只读 `config_defaults` 初始化模板，模块当前配置统一落到 `config.db.module_config_entries` 并只经 `ctx.get_config()` / `ctx.config` 读取，`ctx.runtime` 承载宿主执行态元数据，`ctx.state` 仅用于单次运行内共享内存；模块数据资源现统一登记到 `data.db.module_data_resources`，并支持 `managed_dataset` / `custom_table` 两种存储模式，其中 `module_datasets` 已升级为带 `record_key` / `run_status` / `record_status` 的 V3 结构，`custom_table` 已收口为 schema 驱动的受控实体表，`db.declare_data_resource` 成为正式资源登记入口。
-- `API-009`: 模块实体表视图与分析查询能力已在本地实现：宿主新增 `data.db.module_db_views` 作为数据库视图事实源，模块登记受控 `SELECT` SQL 模板而不是完整 `CREATE VIEW`；当前运行时已提供 `db.declare_db_view` / `db.query_view`，页面可通过内联 `DataTable(query_handler)` 组合只读统计表。V1 正式契约只支持 `sql_view`，并把 `cleanup_policy` 收口为 `drop_view` / `keep`，不再保留 `materialized_view` / `drop_table` 兼容实现。
-- `API-006`: 模块审计事件已从快照 dataset 中拆出：宿主新增 `data.db.module_audit_events`，模块统一通过 `db.append_event` / `db.query_events` 追加和查询 append-only 事件历史；当前未提供 retention / archive / 通用审计事件 UI。
-- `API-007`: 固定环境池 Service Job 契约已在本地实现：`AcquisitionConfig.resource_pool`、宿主等待席位、资源池资格卡片和 SDK helper 已落地；队列模式下“当前轮没命中环境”会回到等待，而不是直接失败。
-- `API-008`: 模块 UI V1 已进一步收口为纯页面契约：模块不再导出 `ui:*` / `PyQt6` 页面，而是通过 `ui_extension.pages[]` 与 `ui.declare_page` 声明宿主管理页；第一版公开控件固定为 `Page`、`Section`、`Text`、`Button`、`DataTable`，`DataTable` 仅作为页面内组件存在，旧 `entry` / `core:data_table` / `ui.declare_data_table` / `micro_app` / trust gate 路径已退出正式实现。
-- `API-003`: SDK / Contracts / CLI contract is buildable and usable; the unified module entry assembler helper is now implemented and the CLI surface now uses grouped V1 commands such as `module init`, `task create`, `workflow create`, `page create`, `package build`, `release publish`, and `check full`.
+- `API-001`: Root desktop app entry contract remains `src.ui.app:main`.
+- `API-002`: 模块正式运行时契约已切到 `core-native-v1`。Core 只接受 `module.yaml` + 宿主扫描协议：`tasks/*.py -> TASK/execute`、`workflows/*.py -> WORKFLOW/run`、`hooks/*.py -> handle`、`env_selectors/*.py -> SELECTOR/select`、`pages/*.py -> PAGE/handler`。缺少 `runtime_api: core-native-v1` 或仍依赖旧运行薄壳的模块会被直接拒绝加载。
+- `API-003`: `crawler4j-sdk` 现只提供 CLI、脚手架、校验和开发辅助，不再导出运行时 owner 能力；`crawler4j-contracts` 负责共享契约类型与 Hosted UI 归一化 helper。
 - `API-004`: Release metadata contract is aligned across app `pyproject.toml`, runtime version service, child package versions, and release docs.
+- `API-005`: 模块配置、运行态和数据边界已稳定：`module.yaml` 承载静态清单与 `config_defaults` 模板，当前配置落到 `config.db.module_config_entries`，`ctx.runtime` 承载宿主执行态元数据，`ctx.state` 仅用于单次运行内共享内存。
+- `API-006`: 模块审计事件统一通过 `db.append_event` / `db.query_events` 访问 `data.db.module_audit_events`；快照数据继续通过 `db.list_records` / `db.replace_records` 访问资源或 dataset。
+- `API-007`: 固定环境池 Service Job 契约已本地实现：`resource_pool`、环境候选、资格卡片与等待席位都由宿主负责；环境选择器返回 `None` 时，是否等待取决于是否配置了 `resource_pool`。
+- `API-008`: Hosted UI 正式契约收口为 `PageSpec` + `ui_extension.pages[]`。页面 schema 顶层必须是 `Page`，公开组件固定为 `Page`、`Section`、`Text`、`Button`、`DataTable`；页面数据与查询通过页面 handler 承接。
+- `API-009`: 模块实体表视图与分析查询能力已实现：宿主提供 `db.declare_db_view` / `db.query_view`，页面通过 `DataTable(query_handler)` 组合只读统计表；V1 当前只支持 `sql_view` 与 `drop_view|keep` 清理策略。

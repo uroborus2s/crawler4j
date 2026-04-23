@@ -3,11 +3,12 @@ from __future__ import annotations
 import zipfile
 from contextlib import ExitStack
 from pathlib import Path
+from textwrap import dedent
 from unittest.mock import patch
 
 import pytest
 
-from crawler4j_sdk import TaskContext
+from crawler4j_contracts import TaskContext
 from src.core.mms.models import DevModuleLink, ModuleInstallError, ModuleSource
 from src.core.mms.registry import ModuleRegistry
 from src.core.mms.service import ModuleService
@@ -40,6 +41,51 @@ class _FakeDevLinkStore:
         return existed
 
 
+def _module_yaml(module_name: str, version: str) -> str:
+    return dedent(
+        f"""
+        name: {module_name}
+        runtime_api: core-native-v1
+        version: {version}
+        upgrade_source:
+          type: github_release
+          repo: example/{module_name}
+        default_workflow: default
+        workflows:
+          - name: default
+            display_name: Default
+            description: Default workflow
+        """
+    ).strip() + "\n"
+
+
+def _task_file(module_name: str) -> str:
+    return dedent(
+        f"""
+        from crawler4j_contracts import TaskResult, TaskSpec
+
+        TASK = TaskSpec(name="external_task", display_name="External Task")
+
+
+        async def execute(context):
+            return TaskResult.ok(module="{module_name}", source="external")
+        """
+    ).strip() + "\n"
+
+
+WORKFLOW_FILE = dedent(
+    """
+    from crawler4j_contracts import WorkflowSpec
+
+    WORKFLOW = WorkflowSpec(name="default", tasks=("external_task",))
+
+
+    async def run(context):
+        return await context.run_subtask("external_task")
+    """
+).strip() + "\n"
+
+
 def _build_module_dir(
     root: Path,
     *,
@@ -49,29 +95,22 @@ def _build_module_dir(
     extra_files: dict[str, str] | None = None,
 ) -> Path:
     package_root = root / package_dir_name
-    package_root.mkdir(parents=True, exist_ok=True)
-    (package_root / "module.yaml").write_text(
-        "name: {module_name}\n"
-        "version: {version}\n"
-        "upgrade_source:\n"
-        "  type: github_release\n"
-        "  repo: example/{module_name}\n".format(
-            module_name=module_name,
-            version=version,
-        ),
-        encoding="utf-8",
-    )
-    (package_root / "__init__.py").write_text(
-        extra_files.pop("__init__.py", None)
-        if extra_files and "__init__.py" in extra_files
-        else (
-            "from crawler4j_contracts import TaskResult\n\n"
-            "def run(context):\n"
-            f"    return TaskResult.ok(module='{module_name}', source='external')\n"
-        ),
-        encoding="utf-8",
-    )
-    for relative_path, content in (extra_files or {}).items():
+    tasks_dir = package_root / "tasks"
+    workflows_dir = package_root / "workflows"
+    for package_dir in (package_root, tasks_dir, workflows_dir):
+        package_dir.mkdir(parents=True, exist_ok=True)
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    extras = dict(extra_files or {})
+    init_source = extras.pop("__init__.py", None)
+    if init_source is None:
+        init_source = ""
+    (package_root / "__init__.py").write_text(init_source, encoding="utf-8")
+    (package_root / "module.yaml").write_text(_module_yaml(module_name, version), encoding="utf-8")
+    (tasks_dir / "external_task.py").write_text(_task_file(module_name), encoding="utf-8")
+    (workflows_dir / "default.py").write_text(WORKFLOW_FILE, encoding="utf-8")
+
+    for relative_path, content in extras.items():
         file_path = package_root / relative_path
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
@@ -136,17 +175,12 @@ async def test_installing_packaged_module_removes_same_name_dev_link_and_uses_in
         package_dir_name="demo_module_pkg",
         module_name="demo_module",
     )
-    dev_source = temp_data_dir / "demo_module_dev"
-    dev_source.mkdir(parents=True, exist_ok=True)
-    (dev_source / "module.yaml").write_text(
-        "name: demo_module\n"
-        "version: 9.9.9\n"
-        "upgrade_source:\n"
-        "  type: github_release\n"
-        "  repo: example/demo_module\n",
-        encoding="utf-8",
+    dev_source = _build_module_dir(
+        temp_data_dir,
+        package_dir_name="demo_module_dev",
+        module_name="demo_module",
+        version="9.9.9",
     )
-    (dev_source / "__init__.py").write_text("VALUE = 'dev'\n", encoding="utf-8")
     dev_store = _FakeDevLinkStore(
         [
             DevModuleLink(
@@ -164,12 +198,13 @@ async def test_installing_packaged_module_removes_same_name_dev_link_and_uses_in
 
     service = ModuleService()
     service.registry = registry
-    module_obj = service._load_module(
+    descriptor = service.get_runtime_descriptor(
         "demo_module",
         TaskContext(env_id=1, task_name="demo_module", config={}),
     )
 
-    assert Path(module_obj.__file__).resolve() == (temp_data_dir / "modules" / "demo_module" / "__init__.py").resolve()
+    task_file = Path(descriptor.tasks["external_task"].execute.__globals__["__file__"]).resolve()
+    assert task_file == (temp_data_dir / "modules" / "demo_module" / "tasks" / "external_task.py").resolve()
 
 
 def test_zip_upgrade_replaces_existing_module_without_leaving_stale_files(temp_data_dir):

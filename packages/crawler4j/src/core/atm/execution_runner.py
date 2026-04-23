@@ -208,12 +208,11 @@ class ExecutionRunner:
                 candidate_env_ids = {int(candidate.env_id) for candidate in candidates}
 
                 if request.selector_name:
-                    selected_env_id = await self.mms.call_hook(
+                    selected_env_id = await self.mms.run_env_selector(
                         hooks_module,
-                        "select_env",
+                        request.selector_name,
                         prepare_context,
                         candidates,
-                        request.selector_name,
                     )
                 else:
                     selected_env_id = candidates[0].env_id if candidates else None

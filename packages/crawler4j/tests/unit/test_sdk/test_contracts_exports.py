@@ -13,17 +13,21 @@ def test_contracts_root_exports_stable_surface():
         "ClickCaptchaOrderedTarget",
         "EnvAction",
         "EnvCandidate",
+        "EnvSelectorSpec",
         "HttpClient",
         "ImageInput",
+        "PageSpec",
         "Point",
         "SliderCaptchaDebugInfo",
         "SliderCaptchaMatchResult",
         "TaskContext",
         "TaskResult",
+        "TaskSpec",
         "TaskSignal",
         "TaskSignalAction",
         "ToolSpec",
         "ToolsCapability",
+        "WorkflowSpec",
     }
 
     assert set(crawler4j_contracts.__all__) == expected_exports

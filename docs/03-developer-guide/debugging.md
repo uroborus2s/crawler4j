@@ -1,65 +1,56 @@
 # 调试模块
 
-模块的正式开发调试链路只有一条：
+模块调试主线固定为：
 
-1. 把本地源码目录注册成 DevLink
-2. 在 ATM 创建或选择目标作业
-3. 先执行一次，确认最小运行链路
-4. 需要断点时再进入调试会话并附加 `debugpy`
+1. 在模块工程里先跑本地校验
+2. 用 DevLink 把源码目录接到宿主
+3. 在 ATM 先执行一次
+4. 需要断点时再附加 `debugpy`
 
-不要再回退到旧的临时脚本调试模式，也不要把“启动宿主应用”和“附加任务 worker”混成同一条调试链。
+不要再单独维护模块根运行薄壳，也不要为调试临时发明第二套入口。
 
-## 先记住两个术语
+## 1. 先在模块工程里自检
 
-- DevLink：宿主直接加载你的本地模块源码目录
-- ATM：宿主里的任务监控与作业执行入口
+最小命令集：
 
-DevLink 只服务开发态联调，不是正式交付方式；正式交付请看 [交付模块](shipping.md)。
+```bash
+uv run crawler4j check structure
+uv run crawler4j check full
+uv run crawler4j task list
+uv run crawler4j workflow list
+uv run crawler4j page list
+uv run crawler4j env-selector list
+```
 
-## 调试主线
+这一层优先确认 4 件事：
 
-### 1. 注册 DevLink
+- `module.yaml.runtime_api == core-native-v1`
+- `default_workflow` 与 `module.yaml.workflows` 一致
+- Core 规定的导出对象都存在
+- 页面 handler、表格 `query_handler`、环境选择器都能成功导入
 
-先确认你已经切到宿主环境。最小检查：
+## 2. 注册 DevLink
+
+切到宿主环境后：
 
 ```bash
 uv run python -c "import src.core; print('ok: host runtime ready')"
-```
-
-可以在宿主 UI 里通过 `📦 模块管理 -> 添加开发模块` 完成，也可以在宿主环境里执行：
-
-```bash
 uv run crawler4j host devlink add /abs/path/to/module
 ```
 
-进入可调试状态的最小判据：
+进入开发调试态的最小判据：
 
-1. 模块详情页显示 `来源: 开发链接`
-2. 作业绑定的就是这个模块
-3. ATM 列表里出现 `执行一次`；DevLink 模块还会出现 `调试`
+1. 模块详情页来源显示 `开发链接`
+2. ATM 能选到这个模块
+3. DevLink 模块可以执行 `执行一次`，也可以进入 `调试`
 
-如果详情页显示的仍然是 `来源: 外部` 或 `来源: 内置`，说明这次运行不是 DevLink。
-
-### 2. 在 ATM 创建作业
-
-推荐顺序：
-
-1. 打开 `📋 任务监控`
-2. 新建作业
-3. 选择目标模块和 workflow
-4. 默认先用 `批次任务`
-5. 只有要验证固定环境池等待语义时，才改成 `Service Job`
-6. 先以 `执行一次` 作为触发方式保存
-
-先把运行链路跑通，再考虑 debugpy 断点；不要一上来就在复杂作业上排查。
-
-### 3. 先执行一次
+## 3. 先执行一次，再断点
 
 第一次联调建议只保留：
 
-- 1 个 workflow
-- 1 到 2 个 task
-- 清晰的阶段日志
+- 1 个工作流
+- 1 到 2 个任务
+- 明确的阶段日志
 
 推荐最小日志：
 
@@ -68,130 +59,73 @@ ctx.state["phase"] = "login"
 ctx.logger.info("进入登录阶段")
 ```
 
-这一步的目标不是“调试很高级”，而是先确认：
+先用一次普通执行确认：
 
-- 是否真的进入了目标 workflow
-- 卡在哪个 task
-- 是业务失败、配置错误，还是代码异常
+- 是否真的进入目标工作流
+- 哪个任务先失败
+- 是导入错误、清单错误，还是业务错误
 
-### 4. 再进入调试会话
-
-只有 DevLink 模块支持宿主调试会话。
-
-常用入口：
-
-- ATM 列表行上的 `调试`
-- 作业详情页里的 `调试任务`
-
-如果需要 IDE attach，可以先生成或更新 VS Code 配置：
+## 4. 需要时再附加 IDE
 
 ```bash
 uv run crawler4j host debug config
 ```
 
-这条命令只生成 `.vscode/launch.json` 的 attach 配置，不负责启动宿主，也不负责创建调试会话。
-
 推荐顺序：
 
 1. 在宿主里点击 `调试`
-2. 看到 `附加地址` 或状态进入 `waiting_for_attach`
-3. 生成或刷新 VS Code 配置
+2. 看到会话进入 `waiting_for_attach`
+3. 生成或刷新 IDE attach 配置
 4. 从 IDE 附加
-5. 继续执行并观察断点
+5. 再继续执行
 
-如果宿主为避开占用端口而改写了实际 attach 端口，应以调试会话里显示的最新地址为准，再重新生成一次配置。
+## 5. 怎么查目录扫描问题
 
-## 日志观察面
+Core 的运行描述对象来自固定目录扫描，所以调试时按目录定位：
 
-### 系统实时日志
+| 类型 | 先看什么 |
+|---|---|
+| 任务 | `tasks/*.py` 是否导出 `TASK`、`execute` |
+| 工作流 | `workflows/*.py` 是否导出 `WORKFLOW`、`run` |
+| Hook | `hooks/<name>.py` 是否导出 `handle` |
+| 环境选择器 | `env_selectors/*.py` 是否导出 `SELECTOR`、`select` |
+| 页面 | `pages/*.py` 是否导出 `PAGE` 和对应 handler |
 
-入口：`📊 仪表盘 -> 系统实时日志`
+如果 `check full` 过了但宿主行为不对，优先确认：
 
-适合看：
+- `TASK.name` / `WORKFLOW.name` / `SELECTOR.name` / `PAGE.id` 是否和预期一致
+- `module.yaml.ui_extension.pages[]` 是否真的声明了目标页面
+- `default_workflow` 是否指向你正在调的工作流
 
-- 模块是否真的启动
-- 全局错误
-- 调试会话状态变化
+## 6. 页面调试
 
-### 作业级日志
+页面问题优先按这条线查：
 
-入口：`📋 任务监控 -> 作业详情 -> 任务日志`
+1. `page list` 是否能列出页面
+2. 页面文件里的 `PAGE.schema` 是否有效
+3. `load_handler` / `query_handler` 是否真实存在于同一文件
+4. 模块详情页打开对应页面后是否拿到最新数据
 
-适合看：
+页面现在直接来自 `pages/*.py`。宿主不会再等待模块根入口去声明页面。
 
-- `ctx.logger` 输出
-- task 的最终 `message` / `error`
-- 哪个 task 先失败
+## 7. 环境选择器调试
 
-### 调试会话日志
+环境选择器问题先看：
 
-入口：调试对话框底部日志区
+1. `env-selector list` 是否成功
+2. `SELECTOR.name` 是否和运行模板里配置的一致
+3. `select(context, candidates)` 返回的是 `env_id` 还是 `None`
+4. 作业是否配置了 `resource_pool`
 
-适合看：
+当 `resource_pool` 已配置时，返回 `None` 会进入等待语义；没配池时会按失败处理。
 
-- 当前 worker PID
-- 最近错误
-- attach 状态
-- 断点前后的实时输出
+## 8. 常见误区
 
-## Hosted UI V1 与数据表的调试方式
+下面这些不是当前调试主线：
 
-模块 UI 的调试链路也要走 DevLink，不要单独发明另一套入口。
+- 修改根包 `__init__.py` 试图接管运行时
+- 新增 `module_runtime.py`
+- 在运行时代码里 `import crawler4j_sdk`
+- 试图通过 `declare_ui()` 注册页面
 
-最小检查顺序：
-
-1. `module.yaml.ui_extension.pages[]` 是否存在目标入口
-2. `module_runtime.py` 是否存在同步 `declare_ui()`
-3. 执行 `uv run crawler4j check full`
-4. 打开模块详情页或数据表页
-5. 点击 `刷新`，确认宿主重放 `declare_ui()`
-
-当前 Hosted UI 页面共用同一条刷新主链：宿主刷新页面时会重新拉取最新声明。页面不对时，先看声明链，后看渲染结果。
-
-## `devel_mode` 的语义
-
-DevLink 运行时，宿主会把下面这个标记写进 `ctx.runtime`：
-
-```python
-ctx.runtime["devel_mode"] is True
-```
-
-适合：
-
-- 区分开发态和正式安装态
-- 打开额外调试日志
-
-不要做：
-
-- 把它写回配置
-- 把它当正式业务开关
-
-## 固定环境池的调试口径
-
-如果你的模块涉及固定环境池，不要只看 helper 是否调用成功，还要确认运行模板真的走对契约。
-
-最小检查项：
-
-1. 作业类型是 `Service Job`
-2. 运行模板选择了 `选择环境`
-3. `resource_pool` 已填写稳定池名
-4. `selector_name` 可选；为空时宿主直接从池里拿可分配候选
-
-判断它是不是“固定池等待”时，至少同时确认：
-
-- UI 状态显示为 `等待环境`
-- `task.message` 包含 `等待环境池工位: <pool>`
-
-只有 `selector_name`、没有 `resource_pool` 的旧模式里，选择器返回 `None` 仍然会直接失败。
-
-## 最小成功判据
-
-一次有效的开发调试至少要看到下面这些事实：
-
-1. 模块来源是 `开发链接`
-2. ATM 作业能执行一次
-3. 作业详情里能看到 task 实例和日志
-4. 需要断点时，IDE 能附加到调试会话地址
-5. Hosted UI 或数据表刷新后能拿到最新声明
-
-如果这些事实对不上，不要继续猜缓存、猜宿主、猜配置，直接回到“单 workflow、单 task、清晰日志”的最小复现。
+如果你发现自己在排这些问题，说明模块还停留在旧协议。

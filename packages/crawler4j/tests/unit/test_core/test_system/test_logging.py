@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from crawler4j_sdk import TaskContext
+from crawler4j_contracts import TaskContext
 from src.core.foundation.logging import logger
 from src.core.system.preferences_service import PreferenceKey, PreferencesService
 from src.ui.app import install_logging_preferences_sync

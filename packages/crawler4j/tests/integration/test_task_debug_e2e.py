@@ -75,33 +75,20 @@ def _find_marker_line(source: str, marker: str) -> int:
 def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int]:
     module_dir = base_dir / "demo_module"
     tasks_dir = module_dir / "tasks"
-    tasks_dir.mkdir(parents=True, exist_ok=True)
+    workflows_dir = module_dir / "workflows"
+    hooks_dir = module_dir / "hooks"
+    for package_dir in (module_dir, tasks_dir, workflows_dir, hooks_dir):
+        package_dir.mkdir(parents=True, exist_ok=True)
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
 
-    init_source = dedent(
-        """
-        from .tasks.login_task import run_login
-
-
-        async def init_env(context):
-            runtime_params = context.runtime.get("params", {})
-            accounts = runtime_params.get("accounts", [])
-            if accounts:
-                context.state["selected_account_phone"] = accounts[0]["phone_number"]
-
-
-        async def run(context):
-            workflow = context.runtime.get("workflow", "login_workflow")
-            if workflow != "login_workflow":
-                raise ValueError(f"Unsupported workflow: {workflow}")
-            return await run_login(context)  # MODULE_FRAME
-        """
-    ).strip() + "\n"
     task_source = dedent(
         """
-        from crawler4j_sdk import TaskResult
+        from crawler4j_contracts import TaskResult, TaskSpec
+
+        TASK = TaskSpec(name="login_task", display_name="登录任务")
 
 
-        async def run_login(context):
+        async def execute(context):
             runtime_params = context.runtime.get("params", {})
             accounts = runtime_params.get("accounts", [])
             phone = accounts[0]["phone_number"] if accounts else ""
@@ -114,32 +101,57 @@ def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int
             return TaskResult.ok(phone=selected_phone)
         """
     ).strip() + "\n"
+    workflow_source = dedent(
+        """
+        from crawler4j_contracts import WorkflowSpec
+
+        WORKFLOW = WorkflowSpec(name="login_workflow", tasks=("login_task",))
+
+
+        async def run(context):
+            return await context.run_subtask("login_task")  # MODULE_FRAME
+        """
+    ).strip() + "\n"
+    hook_source = dedent(
+        """
+        from crawler4j_contracts import TaskContext
+
+
+        async def handle(context: TaskContext):
+            runtime_params = context.runtime.get("params", {})
+            accounts = runtime_params.get("accounts", [])
+            if accounts:
+                context.state["selected_account_phone"] = accounts[0]["phone_number"]
+        """
+    ).strip() + "\n"
     manifest_source = dedent(
         """
         name: demo_module
+        runtime_api: core-native-v1
         version: 1.0.0
         upgrade_source:
           type: github_release
           repo: example/demo_module
+        default_workflow: login_workflow
         workflows:
           - name: login_workflow
             display_name: 登录流程
         """
     ).strip() + "\n"
 
-    (module_dir / "__init__.py").write_text(init_source, encoding="utf-8")
     (module_dir / "module.yaml").write_text(manifest_source, encoding="utf-8")
-    (tasks_dir / "__init__.py").write_text("", encoding="utf-8")
     (tasks_dir / "login_task.py").write_text(task_source, encoding="utf-8")
+    (workflows_dir / "login_workflow.py").write_text(workflow_source, encoding="utf-8")
+    (hooks_dir / "init_env.py").write_text(hook_source, encoding="utf-8")
 
     breakpoint_file = tasks_dir / "login_task.py"
-    module_frame = module_dir / "__init__.py"
+    module_frame = workflows_dir / "login_workflow.py"
     return (
         module_dir,
         breakpoint_file,
         _find_marker_line(task_source, "# BREAKPOINT"),
         module_frame,
-        _find_marker_line(init_source, "# MODULE_FRAME"),
+        _find_marker_line(workflow_source, "# MODULE_FRAME"),
     )
 
 

@@ -13,11 +13,6 @@ from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any, Callable
 
-from crawler4j_sdk.hosted_ui import (
-    normalize_data_resource as sdk_normalize_data_resource,
-    normalize_db_view_schema as sdk_normalize_db_view_schema,
-    normalize_page_schema as sdk_normalize_page_schema,
-)
 from crawler4j_contracts.context import (
     BBox,
     ClickCaptchaDebugInfo,
@@ -28,6 +23,11 @@ from crawler4j_contracts.context import (
     SliderCaptchaMatchResult,
     ToolSpec,
     ToolsCapability,
+)
+from crawler4j_contracts.hosted_ui import (
+    normalize_data_resource as sdk_normalize_data_resource,
+    normalize_db_view_schema as sdk_normalize_db_view_schema,
+    normalize_page_schema as sdk_normalize_page_schema,
 )
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.persistence import get_kv_store, get_module_data_store

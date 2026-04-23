@@ -1,16 +1,15 @@
+from __future__ import annotations
+
+import builtins
 from contextlib import ExitStack
-from pathlib import Path
-from textwrap import dedent
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from PyQt6.QtWidgets import QLabel, QPushButton
 
-from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
-from src.core.mms.module_loader import purge_module_namespace
-from src.core.mms.service import get_module_service
 from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
+
+from ._core_native_v1 import make_manifest, make_page_info, register_module, restore_module, write_module_tree
 
 
 @pytest.fixture(autouse=True)
@@ -23,133 +22,94 @@ def temp_data_dir(tmp_path):
         yield tmp_path
 
 
-def _write_runtime_module(base_dir: Path, module_name: str, runtime_code: str) -> Path:
-    module_dir = base_dir / module_name
-    module_dir.mkdir(parents=True, exist_ok=True)
-    (module_dir / "__init__.py").write_text(
-        dedent(
-            """
-            import importlib
-
-            _runtime_module = None
-
-
-            def _load_runtime_module():
-                global _runtime_module
-                if _runtime_module is None:
-                    _runtime_module = importlib.import_module(f"{__name__}.module_runtime")
-                return _runtime_module
-
-
-            def __getattr__(name: str):
-                runtime_module = _load_runtime_module()
-                if hasattr(runtime_module, name):
-                    return getattr(runtime_module, name)
-                raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    (module_dir / "module_runtime.py").write_text(dedent(runtime_code).strip() + "\n", encoding="utf-8")
-    return module_dir
-
-
-def _register_dev_link_module(module_name: str, module_dir: Path):
-    service = get_module_service()
-    original_registry = service.registry
-    service.registry = SimpleNamespace(
-        get_module=lambda name: ModuleInfo(
-            name=module_name,
-            manifest=ModuleManifest(name=module_name),
-            path=module_dir,
-            source=ModuleSource.DEV_LINK,
-        )
-        if name in {module_name, module_name.split(".")[0]}
-        else None
-    )
-    return service, original_registry
-
-
-def test_managed_page_renderer_declares_schema_loads_data_and_handles_actions(qtbot, tmp_path):
+def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(qtbot, tmp_path):
     module_name = "hosted_page_module"
-    module_dir = _write_runtime_module(
+    load_key = "_hosted_page_module_load_count"
+    setattr(builtins, load_key, 0)
+    module_dir = write_module_tree(
         tmp_path,
         module_name,
-        """
-        import builtins
+        files={
+            "pages/dashboard.py": f"""
+            import builtins
 
-        from crawler4j_sdk import TaskContext
+            from crawler4j_contracts import PageSpec, TaskContext
 
+            LOAD_COUNT_KEY = "{load_key}"
 
-        LOAD_COUNT_KEY = "_hosted_page_module_load_count"
-
-
-        def declare_ui(context: TaskContext):
-            context.tools.call(
-                "ui.declare_page",
-                page_id="dashboard",
-                schema={
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
+                icon="📊",
+                schema={{
                     "type": "Page",
                     "load_handler": "load_dashboard_page",
                     "children": [
-                        {"type": "Text", "style": "title", "binding": "title"},
-                        {"type": "Text", "style": "body", "binding": "load_count_text"},
-                        {"type": "Button", "label": "刷新", "action": {"type": "reload"}},
-                        {
-                            "type": "Button",
-                            "label": "打开账号页",
-                            "action": {"type": "open_page", "page_id": "accounts"},
-                        },
-                        {
+                        {{"type": "Text", "style": "title", "binding": "title"}},
+                        {{"type": "Text", "style": "body", "binding": "load_count_text"}},
+                        {{"type": "Button", "label": "刷新", "action": {{"type": "reload"}}}},
+                        {{"type": "Button", "label": "打开账号页", "action": {{"type": "open_page", "page_id": "accounts"}}}},
+                        {{
                             "type": "DataTable",
                             "table_id": "metrics",
                             "title": "统计明细",
-                            "data_source": {"type": "binding", "binding": "rows"},
+                            "data_source": {{"type": "binding", "binding": "rows"}},
                             "columns": [
-                                {"key": "metric", "label": "指标"},
-                                {"key": "value", "label": "值"},
+                                {{"key": "metric", "label": "指标"}},
+                                {{"key": "value", "label": "值"}},
                             ],
-                        },
+                        }},
                     ],
-                },
+                }},
             )
-            context.tools.call(
-                "ui.declare_page",
-                page_id="accounts",
+
+
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                count = int(getattr(builtins, LOAD_COUNT_KEY, 0)) + 1
+                setattr(builtins, LOAD_COUNT_KEY, count)
+                return {{
+                    "title": "今日运营看板",
+                    "load_count_text": f"第 {{count}} 次加载",
+                    "rows": [{{"metric": "活跃账号", "value": str(10 + count)}}],
+                }}
+            """,
+            "pages/accounts.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
+
+            PAGE = PageSpec(
+                id="accounts",
+                label="Accounts",
+                icon="📋",
                 schema={
                     "type": "Page",
                     "load_handler": "load_accounts_page",
-                    "children": [
-                        {"type": "Text", "style": "title", "binding": "title"},
-                    ],
+                    "children": [{"type": "Text", "style": "title", "binding": "title"}],
                 },
             )
 
 
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            del context, page_id, params
-            count = int(getattr(builtins, LOAD_COUNT_KEY, 0)) + 1
-            setattr(builtins, LOAD_COUNT_KEY, count)
-            return {
-                "title": "今日运营看板",
-                "load_count_text": f"第 {count} 次加载",
-                "rows": [{"metric": "活跃账号", "value": str(10 + count)}],
-            }
-
-
-        def load_accounts_page(context: TaskContext, page_id: str, params=None):
-            del context, page_id, params
-            return {"title": "账号页"}
-        """,
+            def load_accounts_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                return {"title": "账号页"}
+            """,
+        },
     )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
+    manifest = make_manifest(
+        module_name,
+        pages=[
+            make_page_info("dashboard", label="今日运营看板", icon="📊"),
+            make_page_info("accounts", label="账号管理", icon="📋"),
+        ],
+    )
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
     opened_pages: list[tuple[str, dict[str, object] | None]] = []
 
     try:
         page = ManagedPageRenderer(
             module_name,
             "dashboard",
+            module_info=module_info,
             open_page_callback=lambda page_id, params=None: opened_pages.append((page_id, params)),
         )
         qtbot.addWidget(page)
@@ -168,23 +128,22 @@ def test_managed_page_renderer_declares_schema_loads_data_and_handles_actions(qt
         open_button.click()
         assert opened_pages == [("accounts", None)]
     finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
+        restore_module(service, original_registry, module_name)
+        delattr(builtins, load_key)
 
 
 def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(qtbot, tmp_path):
     module_name = "hosted_page_readonly_tools_module"
-    module_dir = _write_runtime_module(
+    module_dir = write_module_tree(
         tmp_path,
         module_name,
-        """
-        from crawler4j_sdk import TaskContext
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
 
-
-        def declare_ui(context: TaskContext):
-            context.tools.call(
-                "ui.declare_page",
-                page_id="dashboard",
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
                 schema={
                     "type": "Page",
                     "load_handler": "load_dashboard_page",
@@ -206,41 +165,43 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
             )
 
 
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            del page_id, params
-            load_tools = ",".join(spec.name for spec in context.tools.list_tools())
-            try:
-                context.tools.call("db.set_state", key="hosted_ui_load", value=1)
-            except Exception as exc:
-                load_write_error = type(exc).__name__
-            return {
-                "load_tools": load_tools,
-                "load_write_error": load_write_error,
-            }
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                del page_id, params
+                load_tools = ",".join(spec.name for spec in context.tools.list_tools())
+                try:
+                    context.tools.call("db.set_state", key="hosted_ui_load", value=1)
+                except Exception as exc:
+                    load_write_error = type(exc).__name__
+                return {
+                    "load_tools": load_tools,
+                    "load_write_error": load_write_error,
+                }
 
 
-        def query_stats_table(context: TaskContext, table_id: str, query, params=None):
-            del table_id, query, params
-            query_tools = ",".join(spec.name for spec in context.tools.list_tools())
-            try:
-                context.tools.call("db.replace_records", dataset="hosted_ui_query", records=[])
-            except Exception as exc:
-                query_write_error = type(exc).__name__
-            return {
-                "rows": [
-                    {"metric": "query_tools", "value": query_tools},
-                    {"metric": "query_write_error", "value": query_write_error},
-                ],
-                "total": 2,
-                "page": 1,
-                "page_size": 20,
-            }
-        """,
+            def query_stats_table(context: TaskContext, table_id: str, query, params=None):
+                del table_id, query, params
+                query_tools = ",".join(spec.name for spec in context.tools.list_tools())
+                try:
+                    context.tools.call("db.replace_records", dataset="hosted_ui_query", records=[])
+                except Exception as exc:
+                    query_write_error = type(exc).__name__
+                return {
+                    "rows": [
+                        {"metric": "query_tools", "value": query_tools},
+                        {"metric": "query_write_error", "value": query_write_error},
+                    ],
+                    "total": 2,
+                    "page": 1,
+                    "page_size": 20,
+                }
+            """,
+        },
     )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
 
     try:
-        page = ManagedPageRenderer(module_name, "dashboard")
+        page = ManagedPageRenderer(module_name, "dashboard", module_info=module_info)
         qtbot.addWidget(page)
 
         readonly_tools = "db.list_records,db.query_events,db.query_view,ui.get_page"
@@ -255,23 +216,21 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
         assert table.item(1, 0).text() == "query_write_error"
         assert table.item(1, 1).text() == "KeyError"
     finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
+        restore_module(service, original_registry, module_name)
 
 
 def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_path):
     module_name = "hosted_page_row_action_module"
-    module_dir = _write_runtime_module(
+    module_dir = write_module_tree(
         tmp_path,
         module_name,
-        """
-        from crawler4j_sdk import TaskContext
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec
 
-
-        def declare_ui(context: TaskContext):
-            context.tools.call(
-                "ui.declare_page",
-                page_id="dashboard",
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
                 schema={
                     "type": "Page",
                     "load_handler": "load_dashboard_page",
@@ -296,9 +255,23 @@ def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_
                     ],
                 },
             )
-            context.tools.call(
-                "ui.declare_page",
-                page_id="details",
+
+
+            def load_dashboard_page(context, page_id, params=None):
+                del context, page_id, params
+                return {
+                    "rows": [
+                        {"account_id": "acct-001", "status": "active"},
+                        {"account_id": "acct-002", "status": "blocked"},
+                    ],
+                }
+            """,
+            "pages/details.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="details",
+                label="Details",
                 schema={
                     "type": "Page",
                     "load_handler": "load_details_page",
@@ -307,28 +280,21 @@ def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_
             )
 
 
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            del context, page_id, params
-            return {
-                "rows": [
-                    {"account_id": "acct-001", "status": "active"},
-                    {"account_id": "acct-002", "status": "blocked"},
-                ],
-            }
-
-
-        def load_details_page(context: TaskContext, page_id: str, params=None):
-            del context, page_id, params
-            return {"title": "详情"}
-        """,
+            def load_details_page(context, page_id, params=None):
+                del context, page_id, params
+                return {"title": "详情"}
+            """,
+        },
     )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard"), make_page_info("details")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
     calls: list[tuple[str, dict[str, object] | None]] = []
 
     try:
         page = ManagedPageRenderer(
             module_name,
             "dashboard",
+            module_info=module_info,
             open_page_callback=lambda page_id, params=None: calls.append((page_id, params)),
         )
         qtbot.addWidget(page)
@@ -336,23 +302,21 @@ def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_
         page._data_table_widgets["accounts"].cellClicked.emit(1, 0)
         assert calls == [("details", {"account_id": "acct-002"})]
     finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
+        restore_module(service, original_registry, module_name)
 
 
 def test_managed_page_renderer_row_action_without_params_does_not_forward_row_payload(qtbot, tmp_path):
     module_name = "hosted_page_no_row_params_module"
-    module_dir = _write_runtime_module(
+    module_dir = write_module_tree(
         tmp_path,
         module_name,
-        """
-        from crawler4j_sdk import TaskContext
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec
 
-
-        def declare_ui(context: TaskContext):
-            context.tools.call(
-                "ui.declare_page",
-                page_id="dashboard",
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
                 schema={
                     "type": "Page",
                     "load_handler": "load_dashboard_page",
@@ -374,9 +338,23 @@ def test_managed_page_renderer_row_action_without_params_does_not_forward_row_pa
                     ],
                 },
             )
-            context.tools.call(
-                "ui.declare_page",
-                page_id="details",
+
+
+            def load_dashboard_page(context, page_id, params=None):
+                del context, page_id, params
+                return {
+                    "rows": [
+                        {"account_id": "acct-001", "status": "active"},
+                        {"account_id": "acct-002", "status": "blocked"},
+                    ],
+                }
+            """,
+            "pages/details.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="details",
+                label="Details",
                 schema={
                     "type": "Page",
                     "load_handler": "load_details_page",
@@ -385,28 +363,21 @@ def test_managed_page_renderer_row_action_without_params_does_not_forward_row_pa
             )
 
 
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            del context, page_id, params
-            return {
-                "rows": [
-                    {"account_id": "acct-001", "status": "active"},
-                    {"account_id": "acct-002", "status": "blocked"},
-                ],
-            }
-
-
-        def load_details_page(context: TaskContext, page_id: str, params=None):
-            del context, page_id, params
-            return {"title": "详情"}
-        """,
+            def load_details_page(context, page_id, params=None):
+                del context, page_id, params
+                return {"title": "详情"}
+            """,
+        },
     )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard"), make_page_info("details")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
     calls: list[tuple[str, dict[str, object] | None]] = []
 
     try:
         page = ManagedPageRenderer(
             module_name,
             "dashboard",
+            module_info=module_info,
             open_page_callback=lambda page_id, params=None: calls.append((page_id, params)),
         )
         qtbot.addWidget(page)
@@ -414,73 +385,21 @@ def test_managed_page_renderer_row_action_without_params_does_not_forward_row_pa
         page._data_table_widgets["accounts"].cellClicked.emit(1, 0)
         assert calls == [("details", None)]
     finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
+        restore_module(service, original_registry, module_name)
 
 
-def test_managed_page_renderer_refresh_clears_removed_stale_ui_schema(qtbot, tmp_path):
-    from src.core.persistence import get_module_data_store
-
-    module_name = "stale_hosted_page_module"
-    module_dir = _write_runtime_module(
-        tmp_path,
-        module_name,
-        """
-        from crawler4j_sdk import TaskContext
-
-
-        def declare_ui(context: TaskContext):
-            return None
-        """,
-    )
-    store = get_module_data_store()
-    store.write_page_schema(
-        module_name,
-        "dashboard",
-        {
-            "type": "Page",
-            "title": "旧看板",
-            "load_handler": "load_dashboard_page",
-            "children": [{"type": "Text", "text": "stale"}],
-        },
-    )
-    store.write_page_schema(
-        module_name,
-        "accounts",
-        {
-            "type": "Page",
-            "title": "旧账号页",
-            "load_handler": "load_accounts_page",
-            "children": [{"type": "Text", "text": "legacy"}],
-        },
-    )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
-
-    try:
-        page = ManagedPageRenderer(module_name, "dashboard")
-        qtbot.addWidget(page)
-
-        assert page._status_label.text() == "未声明页面 schema: dashboard"
-        assert store.read_page_schema(module_name, "dashboard")["title"] == "旧看板"
-        assert store.read_page_schema(module_name, "accounts")["title"] == "旧账号页"
-    finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
-
-
-def test_managed_page_renderer_supports_navigation_params_and_row_actions(qtbot, tmp_path):
+def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtbot, tmp_path):
     module_name = "hosted_page_navigation_module"
-    module_dir = _write_runtime_module(
+    module_dir = write_module_tree(
         tmp_path,
         module_name,
-        """
-        from crawler4j_sdk import TaskContext
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec
 
-
-        def declare_ui(context: TaskContext):
-            context.tools.call(
-                "ui.declare_page",
-                page_id="dashboard",
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
                 schema={
                     "type": "Page",
                     "load_handler": "load_dashboard_page",
@@ -498,30 +417,28 @@ def test_managed_page_renderer_supports_navigation_params_and_row_actions(qtbot,
                                 },
                             },
                         },
-                        {
-                            "type": "DataTable",
-                            "table_id": "accounts",
-                            "title": "账号列表",
-                            "data_source": {"type": "binding", "binding": "rows"},
-                            "columns": [
-                                {"key": "phone", "label": "手机号"},
-                                {"key": "status", "label": "状态"},
-                            ],
-                            "row_action": {
-                                "type": "open_page",
-                                "page_id": "account_details",
-                                "params": {
-                                    "phone": {"binding": "phone"},
-                                    "status": {"binding": "status"},
-                                },
-                            },
-                        },
                     ],
                 },
             )
-            context.tools.call(
-                "ui.declare_page",
-                page_id="account_details",
+
+
+            def load_dashboard_page(context, page_id, params=None):
+                del context, page_id
+                selected_phone = "none"
+                params_state = "none" if params is None else "dict"
+                if isinstance(params, dict):
+                    selected_phone = str(params.get("phone") or "none")
+                return {
+                    "selected_phone": f"params:{params_state}|selected:{selected_phone}",
+                    "selected": {"phone": selected_phone},
+                }
+            """,
+            "pages/account_details.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="account_details",
+                label="Account Details",
                 schema={
                     "type": "Page",
                     "load_handler": "load_account_details_page",
@@ -530,55 +447,34 @@ def test_managed_page_renderer_supports_navigation_params_and_row_actions(qtbot,
             )
 
 
-        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            selected_phone = "none"
-            params_state = "none" if params is None else "dict"
-            if isinstance(params, dict):
-                selected_phone = str(params.get("phone") or "none")
-            return {
-                "selected_phone": f"params:{params_state}|selected:{selected_phone}",
-                "selected": {"phone": selected_phone},
-                "rows": [
-                    {"phone": "13800138000", "status": "active"},
-                    {"phone": "13900139000", "status": "blocked"},
-                ],
-            }
-
-
-        def load_account_details_page(context: TaskContext, page_id: str, params=None):
-            del context, page_id, params
-            return {"title": "详情页"}
-        """,
+            def load_account_details_page(context, page_id, params=None):
+                del context, page_id, params
+                return {"title": "详情页"}
+            """,
+        },
     )
-    service, original_registry = _register_dev_link_module(module_name, module_dir)
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard"), make_page_info("account_details")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
     opened_pages: list[tuple[str, dict[str, object] | None]] = []
 
     try:
         page = ManagedPageRenderer(
             module_name,
             "dashboard",
+            module_info=module_info,
             open_page_callback=lambda page_id, params=None: opened_pages.append((page_id, params)),
+            initial_params={"phone": "13800138000"},
         )
         qtbot.addWidget(page)
 
-        assert any(label.text() == "params:none|selected:none" for label in page.findChildren(QLabel))
-
-        page.set_navigation_params({"phone": "13800138000"})
-        qtbot.waitUntil(
-            lambda: any(
-                label.text() == "params:dict|selected:13800138000"
-                for label in page.findChildren(QLabel)
-            )
+        assert any(
+            label.text() == "params:dict|selected:13800138000"
+            for label in page.findChildren(QLabel)
         )
 
-        button = next(button for button in page.findChildren(QPushButton) if button.text() == "打开详情页")
-        button.click()
+        open_button = next(button for button in page.findChildren(QPushButton) if button.text() == "打开详情页")
+        open_button.click()
 
-        page._data_table_widgets["accounts"].cellClicked.emit(1, 0)
-        assert opened_pages == [
-            ("account_details", {"phone": "13800138000", "source": "dashboard"}),
-            ("account_details", {"phone": "13900139000", "status": "blocked"}),
-        ]
+        assert opened_pages == [("account_details", {"phone": "13800138000", "source": "dashboard"})]
     finally:
-        service.registry = original_registry
-        purge_module_namespace(module_name)
+        restore_module(service, original_registry, module_name)

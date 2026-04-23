@@ -5,6 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from crawler4j_sdk._version import (
+    get_compatible_contracts_dependency_spec,
+    get_compatible_sdk_dependency_spec,
+)
+
 from ._helpers import MODULE_VERSION, archive_members, load_manifest, run_cli
 
 
@@ -22,7 +27,11 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
         generated_pyproject = tomllib.load(fh)
     assert manifest["name"] == "demo_model"
     assert manifest["version"] == MODULE_VERSION
+    assert manifest["runtime_api"] == "core-native-v1"
+    assert manifest["default_workflow"] == "main_workflow"
+    assert generated_pyproject["project"]["dependencies"] == [get_compatible_contracts_dependency_spec()]
     assert generated_pyproject["dependency-groups"]["dev"] == [
+        get_compatible_sdk_dependency_spec(),
         "pytest>=9.0.2",
         "pytest-asyncio>=1.3.0",
     ]
@@ -42,12 +51,12 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
 
     members = archive_members(built_archive)
     assert "demo_model/module.yaml" in members
-    assert "demo_model/module_runtime.py" in members
     assert "demo_model/pages/dashboard.py" in members
     assert "demo_model/pages/accounts.py" in members
     assert "demo_model/env_selectors/pick_ready.py" in members
     assert "demo_model/tasks/extra_task.py" in members
     assert "demo_model/workflows/repair_orders.py" in members
+    assert "demo_model/module_runtime.py" not in members
 
 
 @pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])

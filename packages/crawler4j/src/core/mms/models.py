@@ -216,11 +216,13 @@ class ModuleManifest:
     规格参考: 第 7 章模块规范
     """
     name: str
+    runtime_api: str = ""
     version: str = "1.0.0"
     display_name: str = ""
     description: str = ""
     author: str = ""
     workflows: list[WorkflowInfo] = field(default_factory=list)
+    default_workflow: str = ""
     ui_extension: UIExtensionInfo = field(default_factory=UIExtensionInfo)
     config_defaults: ConfigDefaultsInfo = field(default_factory=ConfigDefaultsInfo)
     upgrade_source: UpgradeSourceInfo = field(default_factory=UpgradeSourceInfo)
@@ -229,6 +231,7 @@ class ModuleManifest:
         """序列化为字典。"""
         return {
             "name": self.name,
+            "runtime_api": self.runtime_api,
             "version": self.version,
             "display_name": self.display_name,
             "description": self.description,
@@ -244,6 +247,7 @@ class ModuleManifest:
                 }
                 for w in self.workflows
             ],
+            "default_workflow": self.default_workflow,
             "ui_extension": self.ui_extension.to_dict(),
             "config_defaults": self.config_defaults.to_dict(),
         }
@@ -267,11 +271,13 @@ class ModuleManifest:
 
         return cls(
             name=data.get("name", ""),
+            runtime_api=data.get("runtime_api", ""),
             version=data.get("version", "1.0.0"),
             display_name=data.get("display_name", ""),
             description=data.get("description", ""),
             author=data.get("author", ""),
             workflows=workflows,
+            default_workflow=data.get("default_workflow", ""),
             ui_extension=ui_extension,
             config_defaults=config_defaults,
             upgrade_source=upgrade_source,

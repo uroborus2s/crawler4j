@@ -1,250 +1,191 @@
 # Core 能力参考
 
-模块运行时不应该直连宿主内部对象。正式边界只有一层：
+模块运行时只有两个正式边界：
 
-```python
-ctx.tools.call(...)
-```
+1. 从 `crawler4j-contracts` 导入共享契约
+2. 通过 `ctx.tools` 调用宿主能力
 
-配套接口也只有三项：
+模块不应该直接 import Core 内部实现，也不应该依赖 `crawler4j-sdk` 参与运行时装配。
+
+## 宿主扫描协议
+
+Core 会扫描固定目录并读取固定导出：
+
+| 目录 | 必需导出 | 作用 |
+|---|---|---|
+| `tasks/*.py` | `TASK`、`execute` | 原子任务 |
+| `workflows/*.py` | `WORKFLOW`、`run` | 工作流 |
+| `hooks/*.py` | `handle` | 生命周期 Hook |
+| `env_selectors/*.py` | `SELECTOR`、`select` | 环境选择器 |
+| `pages/*.py` | `PAGE`、页面 handler | Hosted UI 页面 |
+
+Core 不会调用模块根 `run()`，也不会让模块自己做运行时装配。
+
+## 共享契约
+
+运行时模块通常只需要这些类型：
+
+- `TaskContext`
+- `TaskResult`
+- `TaskSignal`
+- `EnvAction`
+- `EnvCandidate`
+- `TaskSpec`
+- `WorkflowSpec`
+- `EnvSelectorSpec`
+- `PageSpec`
+
+## `TaskContext.tools`
+
+宿主能力统一经 `ctx.tools` 暴露：
 
 - `ctx.tools.has_tool(name)`
 - `ctx.tools.list_tools()`
 - `ctx.tools.call(name, **kwargs)`
 
-## 能力全景
+常见能力面如下：
 
-| 类别 | 工具名 | 是否异步 | 主要用途 |
-|---|---|---|---|
-| Hosted UI | `ui.declare_page` `ui.get_page` | 否 | 声明和读取页面 schema |
-| 数据资源登记 | `db.declare_data_resource` | 否 | 登记 `managed_dataset` / `custom_table` 资源生命周期 |
-| 数据库视图 | `db.declare_db_view` `db.query_view` | 否 | 登记受控统计视图并按过滤/排序/分页查询 |
-| 快照数据 | `db.list_records` `db.replace_records` | 否 | 按资源模式读取和全量覆盖当前记录集 |
-| 审计事件 | `db.append_event` `db.query_events` | 否 | 记录和查询 append-only 历史 |
-| 轻状态与锁 | `db.get_state` `db.set_state` `db.exists_state` `db.acquire_lock` `db.release_lock` `db.is_locked` | 否 | 保存轻量状态、游标、会话和互斥锁 |
-| 代理与环境 | `ip_pool.pick_proxy` `env.set_proxy` `env.bind_resource_pool` `env.mark_resource_pool_eligible` `env.mark_resource_pool_ineligible` `env.remove_resource_pool` `env.replace_resource_pool_snapshot` | `env.*` 为异步 | 代理选择、环境代理设置、固定环境池维护 |
-| 验证码 | `captcha.match_slider` `captcha.match_click_targets` | 否 | 图像识别类验证码辅助 |
+| 类别 | 工具名 | 主要用途 |
+|---|---|---|
+| Hosted UI | `ui.get_page` | 调试页面声明结果 |
+| 数据资源 | `db.declare_data_resource` | 登记 `managed_dataset` / `custom_table` |
+| 数据读写 | `db.list_records` `db.replace_records` | 快照型记录集 |
+| 数据视图 | `db.declare_db_view` `db.query_view` | 受控统计查询 |
+| 审计事件 | `db.append_event` `db.query_events` | append-only 历史 |
+| 轻状态 | `db.get_state` `db.set_state` `db.exists_state` | 轻量状态与游标 |
+| 锁 | `db.acquire_lock` `db.release_lock` `db.is_locked` | 幂等与互斥 |
+| 环境与资源池 | `env.*` `ip_pool.pick_proxy` | 环境选择、代理、固定池维护 |
+| 验证码 | `captcha.match_slider` `captcha.match_click_targets` | 图像辅助 |
 
-## Hosted UI
+## 任务与工作流
 
-Hosted UI 是模块在宿主中的正式 UI 能力面。模块通过 schema 声明页面，宿主负责渲染和执行。
-
-### `ui.declare_page`
+最小任务签名：
 
 ```python
-ctx.tools.call(
-    "ui.declare_page",
-    page_id="dashboard",
+async def execute(ctx: TaskContext) -> TaskResult:
+    ...
+```
+
+最小工作流签名：
+
+```python
+async def run(ctx: TaskContext):
+    return await ctx.run_subtask("task_name")
+```
+
+如果 `run()` 返回：
+
+- `TaskResult`：宿主直接使用
+- `dict`：宿主归一化为成功结果
+- `None`：宿主会把当前 `ctx.state` 归一化为成功结果
+
+## 生命周期 Hook
+
+当前宿主识别的 Hook 文件名固定为：
+
+- `prepare_env`
+- `init_env`
+- `before_run`
+- `on_success`
+- `on_failure`
+- `on_timeout`
+- `on_cleanup`
+
+每个文件都导出：
+
+```python
+async def handle(context: TaskContext):
+    ...
+```
+
+文件名就是 Hook 名。宿主负责调度，不需要模块再注册。
+
+## 环境选择器
+
+环境选择器文件导出：
+
+```python
+from crawler4j_contracts import EnvCandidate, EnvSelectorSpec, TaskContext
+
+SELECTOR = EnvSelectorSpec(name="pick_ready")
+
+def select(context: TaskContext, candidates: list[EnvCandidate]):
+    ...
+```
+
+返回值约定：
+
+- 返回 `env_id`：宿主绑定该环境
+- 返回 `None`：当前轮未选中
+
+当作业配置了 `resource_pool` 时，`None` 会进入宿主管理的等待语义；没有 `resource_pool` 时会按失败处理。
+
+## 页面与处理函数
+
+页面文件导出：
+
+```python
+from crawler4j_contracts import PageSpec
+
+PAGE = PageSpec(
+    id="dashboard",
+    label="Dashboard",
+    icon="📄",
     schema={...},
 )
 ```
 
-正式约束：
-
-- `page_id` 必须是 `snake_case`
-- `module.yaml.ui_extension.pages[]` 中必须存在同名页面
-- `declare_ui()` 必须是同步函数
-- `load_handler` 必须指向 `module_runtime.py` 中真实存在的同步函数
-- schema 顶层必须是 `Page`
-
-### `ui.get_page`
+常见 handler 签名：
 
 ```python
-schema = ctx.tools.call("ui.get_page", page_id="dashboard")
-```
+def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None = None) -> dict:
+    ...
 
-适用场景：
-
-- 确认页面 schema 是否已被宿主登记
-- 调试页面刷新后是否拿到了最新声明
-
-## 页面里的 `DataTable`
-
-`DataTable` 不是独立工具，而是 `ui.declare_page` schema 的一个组件。正式能力边界如下：
-
-- 数据源只支持 `binding`、`rows`、`query_handler`
-- `query_handler` 必须是同步函数，签名为 `(context, table_id, query, params=None)`
-- 行点击只支持 `row_action.type="open_page"`
-- `open_page` 和按钮动作只支持 `page_id`，不再支持 `entry`
-
-## `db.declare_data_resource`
-
-```python
-ctx.tools.call(
-    "db.declare_data_resource",
-    resource_id="billing_audit",
-    storage_mode="custom_table",
-    record_key_field="audit_id",
-    cleanup_policy="drop_table",
-    schema={
-        "version": 1,
-        "columns": [
-            {"name": "audit_id", "type": "text"},
-            {"name": "execution_date", "type": "text"},
-            {"name": "amount", "type": "number", "nullable": True},
-        ],
-    },
-    indexes={
-        "exec_date": ["execution_date"],
-    },
-)
-```
-
-适用场景：
-
-- 先显式登记数据资源，再由多个页面复用
-- 为高频明细表声明 `custom_table` 生命周期
-- 提前固定 `record_key_field`、`cleanup_policy`、资源 schema/index 元数据
-
-正式约束：
-
-- `resource_id` 必须是 `snake_case`
-- `storage_mode` 只支持 `managed_dataset` / `custom_table`
-- `cleanup_policy` 只支持 `delete_rows` / `drop_table` / `keep`
-- `custom_table` 的真实物理表名由宿主受控生成，不由模块直接指定
-
-## `db.declare_db_view`
-
-```python
-ctx.tools.call(
-    "db.declare_db_view",
-    view_id="labor_billing_stats",
-    source_resource_ids=["billing_entries"],
-    select_sql_template="""
-SELECT
-  execution_date,
-  COUNT(*) AS total_count
-FROM {{resource:billing_entries}}
-GROUP BY execution_date
-""",
-    columns=[
-        {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
-        {"name": "total_count", "type": "int", "sortable": True},
-    ],
-)
+def query_orders_table(
+    context: TaskContext,
+    table_id: str,
+    query: dict,
+    params: dict | None = None,
+) -> dict:
+    ...
 ```
 
 正式约束：
 
-- `view_id`、`source_resource_ids[*]` 必须是 `snake_case`
-- V1 当前只支持 `sql_view`
-- SQL 只能是单条 `SELECT` / `WITH ... SELECT` 模板
-- 只允许通过 `{{resource:<resource_id>}}` 引用当前模块已登记的 `custom_table`
+- `PAGE.id` 必须与 `module.yaml.ui_extension.pages[]` 对齐
+- `PAGE.schema` 顶层必须是 `Page`
+- `load_handler` 必须指向页面文件中真实存在的函数
+- `DataTable(query_handler)` 必须指向页面文件中真实存在的函数
 
-### `db.query_view`
+## 数据表
 
-```python
-result = ctx.tools.call(
-    "db.query_view",
-    view_id="labor_billing_stats",
-    filters={"execution_date": "2026-04-23"},
-    sort=[{"field": "total_count", "direction": "desc"}],
-    limit=50,
-    offset=0,
-)
-```
+`DataTable` 是页面内组件，不是独立运行时入口。当前正式数据源只有三种：
 
-返回值：
-
+- `binding`
 - `rows`
-- `total`
-- `limit`
-- `offset`
+- `query_handler`
 
-正式约束：
+推荐用法：
 
-- 过滤只支持等值匹配
-- 只能过滤 `columns.filterable=true` 的字段
-- 只能排序 `columns.sortable=true` 的字段
-- 若页面中的 `DataTable` 通过 `query_handler` 调它，分页和排序由模块自行从 `query` 映射到这里
+- 快照列表：`db.list_records` + `binding`
+- 统计查询：`db.query_view` + `query_handler`
+- 审计时间线：`db.query_events` 后由页面自己组装
 
-## 快照数据与审计事件
+## 数据能力约束
 
-数据能力分成两条正式通道：
+`db.replace_records` 的语义只有一个：全量覆盖，不是 patch 或 upsert。
 
-- 快照数据：`db.list_records` / `db.replace_records`
-- 审计事件：`db.append_event` / `db.query_events`
+`db.declare_db_view` 当前只支持：
 
-### `db.list_records`
+- `sql_view`
+- 受控 `SELECT` / `WITH ... SELECT`
+- 通过 `{{resource:<resource_id>}}` 引用已登记资源
 
-```python
-rows = ctx.tools.call("db.list_records", dataset="hotels")
-```
+## 调试建议
 
-适合：
+能力边界问题优先这样查：
 
-- 读取当前账号列表、酒店列表、状态清单
-- 给 Hosted UI 页面或 workflow 提供当前记录集
-
-### `db.replace_records`
-
-```python
-ctx.tools.call("db.replace_records", dataset="hotels", records=rows)
-```
-
-真实语义只有一个：全量覆盖。
-
-这不是：
-
-- 增量更新
-- patch
-- upsert API
-
-### `db.append_event`
-
-```python
-ctx.tools.call(
-    "db.append_event",
-    dataset="account_events",
-    event_type="status_changed",
-    entity_key="13800000001",
-    previous_status="active",
-    next_status="blocked",
-    reason="risk_control",
-    payload={"operator": "system"},
-)
-```
-
-适合：
-
-- 状态流转
-- 操作审计
-- 失败留痕
-- 时间线追溯
-
-### `db.query_events`
-
-```python
-events = ctx.tools.call(
-    "db.query_events",
-    dataset="account_events",
-    entity_key="13800000001",
-    limit=20,
-)
-```
-
-## 轻状态与锁
-
-| 工具 | 用途 |
-|---|---|
-| `db.get_state` | 读取轻量状态 |
-| `db.set_state` | 写轻量状态 |
-| `db.exists_state` | 判断状态是否存在 |
-| `db.acquire_lock` | 获取互斥锁 |
-| `db.release_lock` | 释放互斥锁 |
-| `db.is_locked` | 检查锁状态 |
-
-推荐：
-
-- 用它们保存游标、会话、小体量幂等状态
-- 不要把业务列表和大对象塞进去
-
-## 固定环境池 helper
-
-这些 helper 都依赖 `env.*resource_pool*` capability，必须在确认宿主能力存在时使用。
-
-- `env.bind_resource_pool`
-- `env.mark_resource_pool_eligible`
-- `env.mark_resource_pool_ineligible`
-- `env.remove_resource_pool`
-- `env.replace_resource_pool_snapshot`
+1. `uv run crawler4j check full`
+2. 确认导出对象和 handler 是否存在
+3. 用 `ctx.tools.list_tools()` 看宿主是否真的暴露了目标能力
+4. 再去查业务逻辑
