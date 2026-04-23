@@ -30,19 +30,6 @@ class UpdateChannel(str, Enum):
 
 
 @dataclass(slots=True)
-class UpdateInfo:
-    """Reserved update payload for non-Sparkle backends."""
-
-    version: str
-    channel: UpdateChannel
-    release_notes: str
-    download_url: str
-    file_size: int
-    sha256: str
-    is_critical: bool = False
-
-
-@dataclass(slots=True)
 class UpdateAvailability:
     """User-facing updater availability state."""
 

@@ -3,10 +3,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from crawler4j_contracts import EnvAction, TaskSignal
-import crawler4j_contracts.hosted_ui as hosted_ui
-
-if not hasattr(hosted_ui, "normalize_db_view_schema"):
-    hosted_ui.normalize_db_view_schema = lambda schema: schema
 
 from src.core.atm.models import Job, Task, TaskStatus
 from src.core.atm.run_profile import (
