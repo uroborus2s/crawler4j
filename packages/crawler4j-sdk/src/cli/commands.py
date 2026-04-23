@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import asyncio
 import importlib
 import inspect
@@ -26,17 +25,24 @@ from crawler4j_contracts import TaskContext, ToolSpec
 
 from crawler4j_sdk._version import get_compatible_dependency_spec
 from crawler4j_sdk.cli.templates import (
-    ENV_SELECTOR_TEMPLATE,
+    HOOK_NAMES,
     MODEL_GITIGNORE_TEMPLATE,
+    MODEL_HOOKS_INIT_TEMPLATE,
     MODEL_MANIFEST_TEMPLATE,
     MODEL_MODULE_INIT,
+    MODEL_PAGES_INIT_TEMPLATE,
     MODEL_PROJECT_PYPROJECT,
     MODEL_PROJECT_README,
     MODEL_RUNTIME_TEMPLATE,
+    MODEL_SELECTORS_INIT_TEMPLATE,
     MODEL_TEST_TASK_TEMPLATE,
-    PAGE_HELPER_TEMPLATE,
+    RANDOM_READY_SELECTOR_TEMPLATE,
+    RETURN_NONE_SELECTOR_TEMPLATE,
     SCRIPT_TEMPLATE,
     WORKFLOW_TEMPLATE,
+    render_hook_template,
+    render_page_template,
+    render_selector_template,
 )
 from crawler4j_sdk.hosted_ui import (
     normalize_data_resource,
@@ -58,8 +64,23 @@ SEMVER_RE = re.compile(
 )
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_TOKEN_ENV_VARS = ("CRAWLER4J_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
+DECLARE_UI_SIDE_EFFECT_DB_TOOLS = {
+    "db.replace_records",
+    "db.declare_data_resource",
+    "db.declare_db_view",
+    "db.append_event",
+    "db.set_state",
+    "db.acquire_lock",
+    "db.release_lock",
+}
+
+
 class CLIError(RuntimeError):
     """Raised when a CLI action cannot be completed safely."""
+
+
+def _raise_declare_ui_side_effect_error(tool_name: str) -> None:
+    raise CLIError(f"declare_ui 不允许调用 {tool_name}；UI 声明必须保持无副作用")
 
 
 def to_class_name(name: str) -> str:
@@ -89,59 +110,6 @@ def is_valid_semver(version: str) -> bool:
 def is_valid_repo(repo: str) -> bool:
     """Validate GitHub owner/repo notation."""
     return bool(REPO_RE.match(str(repo or "").strip()))
-
-
-def _insert_declare_ui_call(runtime_text: str, call_line: str) -> str:
-    lines = runtime_text.splitlines(keepends=True)
-    tree = ast.parse(runtime_text)
-    declare_ui = next(
-        (
-            node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "declare_ui"
-        ),
-        None,
-    )
-    if declare_ui is None:
-        raise CLIError("module_runtime.py 缺少 declare_ui，无法自动注册 hosted UI helper")
-
-    function_start = declare_ui.lineno - 1
-    function_end = declare_ui.end_lineno or declare_ui.lineno
-    body_lines = lines[function_start:function_end]
-    if any(line.rstrip("\n") == call_line for line in body_lines):
-        return runtime_text
-
-    sentinel = "    # SDK-DATA-TABLES"
-    for offset, line in enumerate(body_lines):
-        if line.rstrip("\n") == sentinel:
-            lines.insert(function_start + offset, f"{call_line}\n")
-            return "".join(lines)
-
-    insert_at = function_end
-    if declare_ui.body:
-        last_stmt = declare_ui.body[-1]
-        if isinstance(last_stmt, (ast.Return, ast.Pass)):
-            insert_at = last_stmt.lineno - 1
-    lines.insert(insert_at, f"{call_line}\n")
-    return "".join(lines)
-
-
-def _upsert_function_block(runtime_text: str, function_names: list[str], block: str) -> str:
-    lines = runtime_text.splitlines(keepends=True)
-    tree = ast.parse(runtime_text)
-    names = set(function_names)
-    functions = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name in names
-    ]
-    if not functions:
-        return f"{runtime_text}{block}"
-
-    start = min(node.lineno for node in functions) - 1
-    end = max((node.end_lineno or node.lineno) for node in functions)
-    lines[start:end] = [block]
-    return "".join(lines)
 
 
 def _resolve_github_token(explicit_token: str | None = None) -> str | None:
@@ -206,15 +174,8 @@ def _ensure_package_dir(path: Path) -> None:
         init_file.write_text("", encoding="utf-8")
 
 
-def _ensure_package_export(init_file: Path, module_name: str, symbol_name: str) -> None:
-    export_line = f"from .{module_name} import {symbol_name}\n"
-    content = init_file.read_text(encoding="utf-8") if init_file.exists() else ""
-    if export_line in content:
-        return
-    if content and not content.endswith("\n"):
-        content += "\n"
-    content += export_line
-    init_file.write_text(content, encoding="utf-8")
+def _ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
 
 
 def find_module_root(start: Path | None = None) -> Path | None:
@@ -400,6 +361,10 @@ def _manifest_workflow_names(manifest: dict[str, Any]) -> list[str]:
             if name:
                 names.append(name)
     return names
+
+
+def _is_known_hook(name: str) -> bool:
+    return name in HOOK_NAMES
 
 
 def _safe_run(cmd: list[str], *, cwd: Path) -> None:
@@ -604,14 +569,12 @@ def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
         if not label:
             errors.append(f"ui_extension.pages[{page_id}].label 不能为空")
     return errors
-
-
 def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
     """Collect structure-level validation errors."""
     errors: list[str] = []
 
     required_files = ["module.yaml", "__init__.py", "module_runtime.py", "pyproject.toml"]
-    required_dirs = ["tasks", "workflows"]
+    required_dirs = ["tasks", "workflows", "pages", "hooks", "env_selectors"]
     for name in required_files:
         if not (module_root / name).exists():
             errors.append(f"缺少关键文件: {name}")
@@ -762,19 +725,12 @@ class _DeclareUICheckTools:
         self._datasets: dict[str, list[dict[str, Any]]] = {}
         self._states: dict[str, Any] = {}
         self._tool_specs = [
-            ToolSpec(name="db.acquire_lock", description="db.acquire_lock"),
-            ToolSpec(name="db.append_event", description="db.append_event"),
-            ToolSpec(name="db.declare_data_resource", description="db.declare_data_resource"),
-            ToolSpec(name="db.declare_db_view", description="db.declare_db_view"),
             ToolSpec(name="db.exists_state", description="db.exists_state"),
             ToolSpec(name="db.get_state", description="db.get_state"),
             ToolSpec(name="db.is_locked", description="db.is_locked"),
             ToolSpec(name="db.list_records", description="db.list_records"),
             ToolSpec(name="db.query_events", description="db.query_events"),
             ToolSpec(name="db.query_view", description="db.query_view"),
-            ToolSpec(name="db.release_lock", description="db.release_lock"),
-            ToolSpec(name="db.replace_records", description="db.replace_records"),
-            ToolSpec(name="db.set_state", description="db.set_state"),
             ToolSpec(name="ui.declare_page", description="ui.declare_page"),
             ToolSpec(name="ui.get_page", description="ui.get_page"),
         ]
@@ -786,6 +742,8 @@ class _DeclareUICheckTools:
         return list(self._tool_specs)
 
     def call(self, tool_name: str, /, **kwargs: Any) -> Any:
+        if tool_name in DECLARE_UI_SIDE_EFFECT_DB_TOOLS:
+            _raise_declare_ui_side_effect_error(tool_name)
         if tool_name == "ui.declare_page":
             page_id = str(kwargs.get("page_id", "")).strip()
             try:
@@ -838,8 +796,6 @@ class _DeclareUICheckTools:
             records = kwargs.get("records") or []
             self._datasets[dataset] = [dict(row) for row in records if isinstance(row, dict)]
             return True
-        if tool_name == "db.append_event":
-            raise CLIError("declare_ui 不允许调用 db.append_event；UI 声明必须保持无副作用")
         if tool_name == "db.query_events":
             return []
         if tool_name == "db.query_view":
@@ -849,17 +805,10 @@ class _DeclareUICheckTools:
                 "limit": int(kwargs.get("limit", 100) or 100),
                 "offset": int(kwargs.get("offset", 0) or 0),
             }
-        if tool_name == "db.acquire_lock":
-            return True
-        if tool_name == "db.release_lock":
-            return True
         if tool_name == "db.is_locked":
             return False
         if tool_name == "db.get_state":
             return self._states.get(str(kwargs.get("key", "")).strip())
-        if tool_name == "db.set_state":
-            self._states[str(kwargs.get("key", "")).strip()] = kwargs.get("value")
-            return True
         if tool_name == "db.exists_state":
             return str(kwargs.get("key", "")).strip() in self._states
         raise KeyError(f"Unknown check tool: {tool_name}")
@@ -1181,6 +1130,8 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     for subdir in ["tasks", "workflows", "tests"]:
         _ensure_package_dir(output_dir / subdir)
+    for subdir in ["pages", "hooks", "env_selectors"]:
+        _ensure_dir(output_dir / subdir)
 
     try:
         _write_text(
@@ -1207,6 +1158,21 @@ def cmd_module_init(args: argparse.Namespace) -> int:
         _write_text(
             output_dir / "module_runtime.py",
             MODEL_RUNTIME_TEMPLATE.format(display_name=display_name),
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "pages" / "__init__.py",
+            MODEL_PAGES_INIT_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "hooks" / "__init__.py",
+            MODEL_HOOKS_INIT_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "env_selectors" / "__init__.py",
+            MODEL_SELECTORS_INIT_TEMPLATE,
             force=args.force,
         )
         _write_text(
@@ -1243,6 +1209,22 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             ),
             force=args.force,
         )
+        for hook_name in HOOK_NAMES:
+            _write_text(
+                output_dir / "hooks" / f"{hook_name}.py",
+                render_hook_template(hook_name),
+                force=args.force,
+            )
+        _write_text(
+            output_dir / "env_selectors" / "return_none.py",
+            RETURN_NONE_SELECTOR_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "env_selectors" / "random_ready.py",
+            RANDOM_READY_SELECTOR_TEMPLATE,
+            force=args.force,
+        )
         _write_text(output_dir / "tests" / "test_tasks.py", MODEL_TEST_TASK_TEMPLATE, force=args.force)
         _write_text(output_dir / ".gitignore", MODEL_GITIGNORE_TEMPLATE, force=args.force)
         _write_text(output_dir / ".python-version", f"{args.python_version}\n", force=args.force)
@@ -1263,6 +1245,8 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     print("  - 命令入口: `crawler4j module show`")
     print("  - 新建任务: `crawler4j task create <name>`")
     print("  - 新建工作流: `crawler4j workflow create <name>`")
+    print("  - 新建页面: `crawler4j page create <page_id>`")
+    print("  - 新建选择器: `crawler4j env-selector create <name>`")
     print("  - 完整校验: `crawler4j check full`")
     return 0
 
@@ -1426,7 +1410,7 @@ def cmd_workflow_list(args: argparse.Namespace) -> int:
 
 
 def cmd_page_create(args: argparse.Namespace) -> int:
-    """Create a hosted page scaffold inside module_runtime.py."""
+    """Create a hosted page scaffold inside pages/ and register it."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
     if not is_valid_name(name):
@@ -1434,6 +1418,15 @@ def cmd_page_create(args: argparse.Namespace) -> int:
         return 1
 
     manifest = load_manifest(module_root)
+    ui_errors = _validate_ui_extension(manifest)
+    if ui_errors:
+        _print_error("module.yaml.ui_extension 不符合 Hosted UI V1 契约")
+        for item in ui_errors:
+            print(f"  - {item}")
+        return 1
+    _ensure_dir(module_root / "pages")
+    if not (module_root / "pages" / "__init__.py").exists():
+        (module_root / "pages" / "__init__.py").write_text(MODEL_PAGES_INIT_TEMPLATE, encoding="utf-8")
     pages = _normalize_ui_pages(manifest)
     existing_page = next(
         (item for item in pages if isinstance(item, dict) and item.get("id") == name),
@@ -1453,34 +1446,22 @@ def cmd_page_create(args: argparse.Namespace) -> int:
                 "icon": "📄",
             }
         )
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    helper_name = f"_declare_{name}_page"
-    helper_block = PAGE_HELPER_TEMPLATE.format(
-        page_id=name,
-        display_name=args.display_name or to_display_name(name),
-        description=args.description or f"{to_display_name(name)} 宿主页",
-    )
-    helper_functions = [
-        helper_name,
-        f"build_{name}_page_schema",
-        f"load_{name}_page",
-    ]
-    if args.force:
-        runtime_text = _upsert_function_block(runtime_text, helper_functions, helper_block)
-    elif helper_name not in runtime_text:
-        runtime_text += helper_block
-
-    call_line = f"    {helper_name}(context)"
     try:
-        runtime_text = _insert_declare_ui_call(runtime_text, call_line)
-    except (CLIError, SyntaxError) as exc:
-        _print_error(f"无法更新 module_runtime.py: {exc}")
+        _write_text(
+            module_root / "pages" / f"{name}.py",
+            render_page_template(
+                page_id=name,
+                display_name=args.display_name or to_display_name(name),
+                description=args.description or f"{to_display_name(name)} 宿主页",
+            ),
+            force=args.force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
         return 1
 
-    runtime_path.write_text(runtime_text, encoding="utf-8")
     save_manifest(module_root, manifest)
-    _print_success(f"已创建宿主页骨架: {name}")
+    _print_success(f"已创建宿主页骨架: pages/{name}.py")
     return 0
 
 
@@ -1495,25 +1476,38 @@ def cmd_page_list(args: argparse.Namespace) -> int:
 
 
 def cmd_env_selector_create(args: argparse.Namespace) -> int:
-    """Append a new env_selector function into module_runtime.py."""
+    """Create a new env_selector module under env_selectors/."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
+    force = bool(getattr(args, "force", False))
     if not is_valid_name(name):
         _print_error("环境选择器名必须是小写 snake_case")
         return 1
-    runtime_path = module_root / "module_runtime.py"
-    text = runtime_path.read_text(encoding="utf-8")
-    if f'name="{name}"' in text or f"name='{name}'" in text:
+    _ensure_dir(module_root / "env_selectors")
+    if not (module_root / "env_selectors" / "__init__.py").exists():
+        (module_root / "env_selectors" / "__init__.py").write_text(
+            MODEL_SELECTORS_INIT_TEMPLATE,
+            encoding="utf-8",
+        )
+    selector_path = module_root / "env_selectors" / f"{name}.py"
+    if selector_path.exists() and not force:
         _print_error(f"环境选择器已存在: {name}")
         return 1
-    text += ENV_SELECTOR_TEMPLATE.format(
-        name=name,
-        display_name=args.display_name or to_display_name(name),
-        description=args.description or f"{to_display_name(name)} 环境选择器",
-        function_name=f"{name}_selector",
-    )
-    runtime_path.write_text(text, encoding="utf-8")
-    _print_success(f"已创建环境选择器: {name}")
+    try:
+        _write_text(
+            selector_path,
+            render_selector_template(
+                name=name,
+                display_name=args.display_name or to_display_name(name),
+                description=args.description or f"{to_display_name(name)} 环境选择器",
+                function_name=f"{name}_selector",
+            ),
+            force=force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+    _print_success(f"已创建环境选择器: env_selectors/{name}.py")
     return 0
 
 
@@ -1530,10 +1524,45 @@ def cmd_env_selector_list(args: argparse.Namespace) -> int:
         print("\n".join(selectors) if selectors else "(无环境选择器)")
         return 0
     except Exception:
-        runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
-        names = re.findall(r'name\s*=\s*["\']([a-z][a-z0-9_]*)["\']', runtime_text)
-        print("\n".join(sorted(set(names))) if names else "(无环境选择器)")
+        names = _list_python_modules(module_root / "env_selectors")
+        print("\n".join(names) if names else "(无环境选择器)")
         return 0
+
+
+def cmd_hook_create(args: argparse.Namespace) -> int:
+    """Create or refresh a lifecycle hook scaffold under hooks/."""
+    module_root = require_module_root()
+    name = str(args.name or "").strip()
+    force = bool(getattr(args, "force", False))
+    if not _is_known_hook(name):
+        _print_error("Hook 名必须是标准生命周期入口之一")
+        return 1
+
+    _ensure_dir(module_root / "hooks")
+    if not (module_root / "hooks" / "__init__.py").exists():
+        (module_root / "hooks" / "__init__.py").write_text(MODEL_HOOKS_INIT_TEMPLATE, encoding="utf-8")
+
+    try:
+        _write_text(
+            module_root / "hooks" / f"{name}.py",
+            render_hook_template(name),
+            force=force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已创建 Hook 骨架: hooks/{name}.py")
+    return 0
+
+
+def cmd_hook_list(args: argparse.Namespace) -> int:
+    """List lifecycle hook files in hooks/."""
+    del args
+    module_root = require_module_root()
+    hooks = _list_python_modules(module_root / "hooks")
+    print("\n".join(hooks) if hooks else "(无 Hook)")
+    return 0
 
 
 def cmd_config_show(args: argparse.Namespace) -> int:
@@ -2099,7 +2128,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_show = module_sub.add_parser(
         "show",
-        help="显示当前模块的版本、仓库、默认工作流、宿主页和数据表入口",
+        help="显示当前模块的版本、仓库、默认工作流和宿主页入口",
     )
     module_show.set_defaults(func=cmd_module_show)
 
@@ -2164,7 +2193,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     page_parser = subparsers.add_parser(
         "page",
-        help="宿主页操作：在 module_runtime.py 生成 hosted page 骨架并维护 ui_extension.pages",
+        help="宿主页操作：在 pages/ 生成 hosted page 骨架并维护 ui_extension.pages",
     )
     page_sub = page_parser.add_subparsers(dest="action")
     page_create = page_sub.add_parser(
@@ -2181,7 +2210,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     selector_parser = subparsers.add_parser(
         "env-selector",
-        help="环境选择器操作：在 module_runtime.py 中声明 @env_selector(...) 函数",
+        help="环境选择器操作：在 env_selectors/ 中声明 @env_selector(...) 函数",
     )
     selector_sub = selector_parser.add_subparsers(dest="action")
     selector_create = selector_sub.add_parser(
@@ -2191,9 +2220,25 @@ def build_parser() -> argparse.ArgumentParser:
     selector_create.add_argument("name", help="选择器名，snake_case")
     selector_create.add_argument("--display-name", help="显示名")
     selector_create.add_argument("--description", help="说明")
+    selector_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     selector_create.set_defaults(func=cmd_env_selector_create)
     selector_list = selector_sub.add_parser("list", help="列出模块声明的环境选择器")
     selector_list.set_defaults(func=cmd_env_selector_list)
+
+    hook_parser = subparsers.add_parser(
+        "hook",
+        help="生命周期 Hook 操作：在 hooks/ 中生成标准 Hook 文件",
+    )
+    hook_sub = hook_parser.add_subparsers(dest="action")
+    hook_create = hook_sub.add_parser(
+        "create",
+        help="创建或重建一个标准生命周期 Hook 文件",
+    )
+    hook_create.add_argument("name", choices=HOOK_NAMES, help="Hook 名")
+    hook_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    hook_create.set_defaults(func=cmd_hook_create)
+    hook_list = hook_sub.add_parser("list", help="列出 hooks/ 下已有的 Hook 文件")
+    hook_list.set_defaults(func=cmd_hook_list)
 
     config_parser = subparsers.add_parser(
         "config",

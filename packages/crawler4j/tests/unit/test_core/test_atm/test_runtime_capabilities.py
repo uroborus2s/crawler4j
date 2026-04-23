@@ -10,6 +10,9 @@ import src.core.atm.runtime_capabilities as runtime_capabilities
 from src.core.atm.runtime_capabilities import (
     ClickCaptchaMatchResult,
     ClickCaptchaOrderedTarget,
+    HostedUIDeclarationBuffer,
+    RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+    RUNTIME_SURFACE_HOSTED_UI_READONLY,
     SliderCaptchaMatchResult,
     build_runtime_capabilities,
 )
@@ -89,6 +92,87 @@ def test_runtime_tools_register_expected_surface():
     assert {spec.name: spec.is_async for spec in specs}["db.list_records"] is False
 
 
+def test_runtime_tools_register_hosted_ui_declare_surface():
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE)
+
+    assert [spec.name for spec in caps.tools.list_tools()] == ["ui.declare_page"]
+    assert caps.tools.has_tool("ui.declare_page") is True
+    assert caps.tools.has_tool("ui.get_page") is False
+    assert caps.tools.has_tool("db.list_records") is False
+
+    with pytest.raises(KeyError, match=r"Unknown core tool: ui.get_page"):
+        caps.tools.call("ui.get_page", page_id="dashboard")
+
+
+def test_runtime_tools_hosted_ui_declare_surface_does_not_persist_page_schema():
+    from src.core.persistence import get_module_data_store
+
+    store = get_module_data_store()
+    legacy_page = {
+        "type": "Page",
+        "title": "旧看板",
+        "load_handler": "load_dashboard_page",
+        "children": [],
+    }
+    assert store.write_page_schema("demo_module", "dashboard", legacy_page) is True
+
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE)
+
+    with pytest.raises(RuntimeError, match="必须使用声明缓冲区"):
+        caps.tools.call(
+            "ui.declare_page",
+            page_id="dashboard",
+            schema={
+                "type": "Page",
+                "title": "新看板",
+                "load_handler": "load_dashboard_page",
+                "children": [],
+            },
+        )
+
+    assert store.read_page_schema("demo_module", "dashboard") == legacy_page
+
+
+def test_runtime_tools_register_hosted_ui_readonly_surface():
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_READONLY)
+
+    assert [spec.name for spec in caps.tools.list_tools()] == [
+        "db.list_records",
+        "db.query_events",
+        "db.query_view",
+        "ui.get_page",
+    ]
+    assert caps.tools.has_tool("ui.get_page") is True
+    assert caps.tools.has_tool("db.list_records") is True
+    assert caps.tools.has_tool("ui.declare_page") is False
+    assert caps.tools.has_tool("db.set_state") is False
+    assert caps.tools.has_tool("db.append_event") is False
+
+    with pytest.raises(KeyError, match=r"Unknown core tool: db.set_state"):
+        caps.tools.call("db.set_state", key="cursor", value=1)
+
+
+def test_runtime_tools_hosted_ui_readonly_surface_does_not_read_persisted_page_schema():
+    from src.core.persistence import get_module_data_store
+
+    store = get_module_data_store()
+    assert store.write_page_schema(
+        "demo_module",
+        "dashboard",
+        {
+            "type": "Page",
+            "title": "旧看板",
+            "load_handler": "load_dashboard_page",
+            "children": [],
+        },
+    ) is True
+
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_READONLY)
+
+    with pytest.raises(RuntimeError, match="必须使用本轮声明的页面 schema"):
+        caps.tools.call("ui.get_page", page_id="dashboard")
+
+
 def test_db_tools_declare_data_resource_delegates_to_store(monkeypatch):
     calls: list[dict[str, object]] = []
 
@@ -161,11 +245,14 @@ def test_db_tools_declare_db_view_and_query_view_delegate_to_store(monkeypatch):
     declared = caps.tools.call(
         "db.declare_db_view",
         view_id="billing_stats",
-        source_resource_ids=["billing_entries"],
+        view_kind=" SQL_VIEW ",
+        source_resource_ids=[" billing_entries "],
         select_sql_template="SELECT execution_date FROM {{resource:billing_entries}}",
         columns=[
-            {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
+            {"name": "execution_date", "type": "TEXT", "filterable": True, "sortable": True},
         ],
+        cleanup_policy=" KEEP ",
+        schema_version="2",
     )
     queried = caps.tools.call(
         "db.query_view",
@@ -194,8 +281,8 @@ def test_db_tools_declare_db_view_and_query_view_delegate_to_store(monkeypatch):
                     "sortable": True,
                 },
             ],
-            "cleanup_policy": None,
-            "schema_version": None,
+            "cleanup_policy": "keep",
+            "schema_version": 2,
         }
     ]
     assert query_calls == [
@@ -208,6 +295,65 @@ def test_db_tools_declare_db_view_and_query_view_delegate_to_store(monkeypatch):
             "offset": 0,
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("extra_kwargs", "expected_message"),
+    [
+        ({"view_kind": "materialized_view"}, "view_kind 只支持 sql_view"),
+        ({"cleanup_policy": "drop_table"}, "cleanup_policy 只支持 drop_view/keep"),
+    ],
+)
+def test_db_tools_declare_db_view_rejects_v1_unsupported_contracts(
+    extra_kwargs: dict[str, object],
+    expected_message: str,
+):
+    caps = build_runtime_capabilities("demo_module")
+
+    with pytest.raises(ValueError, match=expected_message):
+        caps.tools.call(
+            "db.declare_db_view",
+            view_id="billing_stats",
+            source_resource_ids=["billing_entries"],
+            select_sql_template="SELECT execution_date FROM {{resource:billing_entries}}",
+            columns=[
+                {
+                    "name": "execution_date",
+                    "type": "text",
+                    "filterable": True,
+                    "sortable": True,
+                }
+            ],
+            **extra_kwargs,
+        )
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "db.replace_records",
+        "db.declare_data_resource",
+        "db.declare_db_view",
+        "db.append_event",
+        "db.set_state",
+        "db.acquire_lock",
+        "db.release_lock",
+    ],
+)
+def test_runtime_tools_hide_side_effect_db_tools_during_ui_declaration(tool_name: str):
+    buffer = HostedUIDeclarationBuffer()
+    caps = build_runtime_capabilities("demo_module", ui_declaration_buffer=buffer)
+
+    assert caps.tools.has_tool(tool_name) is False
+    assert tool_name not in {spec.name for spec in caps.tools.list_tools()}
+
+    with pytest.raises(RuntimeError, match=rf"declare_ui 不允许调用 {tool_name}"):
+        caps.tools.call(tool_name)
+
+    buffer.seal()
+
+    assert caps.tools.has_tool(tool_name) is True
+    assert tool_name in {spec.name for spec in caps.tools.list_tools()}
 
 
 def test_db_tools_records_and_lock_are_generic(monkeypatch):
@@ -245,6 +391,22 @@ def test_db_tools_records_and_lock_are_generic(monkeypatch):
     assert first is True
     assert second is False
     assert third is True
+
+
+def test_db_tools_replace_records_rejects_invalid_records():
+    caps = build_runtime_capabilities("demo_module")
+
+    with pytest.raises(ValueError, match=r"dataset records\[1\] must be an object"):
+        caps.tools.call(
+            "db.replace_records",
+            dataset="accounts",
+            records=[
+                {"id": "u1", "phone_number": "13800000001"},
+                "broken-record",
+            ],
+        )
+
+    assert caps.tools.call("db.list_records", dataset="accounts") == []
 
 
 def test_db_tools_append_and_query_events(monkeypatch):

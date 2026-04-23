@@ -10,7 +10,7 @@ Current architecture facts:
 
 - Builtin business modules have been removed; `packages/crawler4j/modules/` is now a placeholder, while real modules come from installed packages or DevLink source directories.
 - Module projects run inside the host runtime, not their own virtualenv.
-- `packages/crawler4j/src/core/mms/ui/managed_page_renderer.py` 现作为 Hosted UI 唯一页面渲染器，页面 schema 统一来自 `data.db.module_pages`；模块详情页按 `page_id` 打开页面，`DataTable` 只作为页面内组件，通过 `load_handler` / `query_handler` 和 `db.*` 能力获取数据。
+- `packages/crawler4j/src/core/mms/ui/managed_page_renderer.py` 现作为 Hosted UI 唯一页面渲染器；页面 refresh 会重新执行 `declare_ui()`，并从 `ModuleUIRuntimeBridge` 的本轮内存声明缓存读取 page schema，不再把 `data.db.module_pages` 作为正式渲染事实源；模块详情页按 `page_id` 打开页面，`DataTable` 只作为页面内组件，通过 `load_handler` / `query_handler` 和只读 `db.*` 能力获取数据。
 
 Current module entry architecture:
 

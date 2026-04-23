@@ -11,8 +11,6 @@ ALLOWED_INLINE_TABLE_SCHEMA_KEYS = {
     "type",
     "table_id",
     "title",
-    "binding",
-    "rows",
     "columns",
     "features",
     "data_source",
@@ -70,8 +68,8 @@ ALLOWED_DB_VIEW_SCHEMA_KEYS = {
     "cleanup_policy",
     "schema_version",
 }
-ALLOWED_DB_VIEW_KINDS = {"sql_view", "materialized_view"}
-ALLOWED_DB_VIEW_CLEANUP_POLICIES = {"drop_view", "drop_table", "keep"}
+ALLOWED_DB_VIEW_KINDS = {"sql_view"}
+ALLOWED_DB_VIEW_CLEANUP_POLICIES = {"drop_view", "keep"}
 ALLOWED_DB_VIEW_COLUMN_KEYS = {"name", "label", "type", "nullable", "filterable", "sortable"}
 ALLOWED_DB_VIEW_COLUMN_TYPES = {"text", "int", "number", "bool", "json"}
 
@@ -396,7 +394,7 @@ def normalize_db_view_schema(view_id: str, schema: Any) -> dict[str, Any]:
     managed_view_id = _validate_managed_identifier(view_id, field_name="view_id")
     view_kind = str(schema.get("view_kind") or "sql_view").strip().lower()
     if view_kind not in ALLOWED_DB_VIEW_KINDS:
-        raise ValueError("view_kind 只支持 sql_view/materialized_view")
+        raise ValueError("view_kind 只支持 sql_view")
     source_resource_ids = _normalize_string_list(
         schema.get("source_resource_ids"),
         field_name="source_resource_ids",
@@ -411,7 +409,7 @@ def normalize_db_view_schema(view_id: str, schema: Any) -> dict[str, Any]:
         raise ValueError("columns 必须是非空数组")
     cleanup_policy = str(schema.get("cleanup_policy") or "drop_view").strip().lower()
     if cleanup_policy not in ALLOWED_DB_VIEW_CLEANUP_POLICIES:
-        raise ValueError("cleanup_policy 只支持 drop_view/drop_table/keep")
+        raise ValueError("cleanup_policy 只支持 drop_view/keep")
     schema_version = int(schema.get("schema_version") or 1)
     if schema_version < 1:
         raise ValueError("schema_version 必须 >= 1")
@@ -444,12 +442,7 @@ def _normalize_inline_table_schema(raw: Any, *, field_name: str) -> dict[str, An
     table_id_raw = str(raw.get("table_id") or "inline_table").strip() or "inline_table"
     data_source_raw = raw.get("data_source")
     if data_source_raw is None:
-        if raw.get("binding") is not None:
-            data_source_raw = {"type": "binding", "binding": raw.get("binding")}
-        elif raw.get("rows") is not None:
-            data_source_raw = {"type": "rows", "rows": raw.get("rows")}
-        else:
-            raise ValueError(f"{field_name} 必须提供 data_source、binding 或 rows")
+        raise ValueError(f"{field_name} 必须提供 data_source")
 
     normalized: dict[str, Any] = {
         "type": "DataTable",

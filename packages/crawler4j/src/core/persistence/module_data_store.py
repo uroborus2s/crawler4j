@@ -13,8 +13,8 @@ from src.core.persistence.database import DATA_DB, get_connection
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _STORAGE_MODES = {"managed_dataset", "custom_table"}
 _CLEANUP_POLICIES = {"delete_rows", "drop_table", "keep"}
-_DB_VIEW_KINDS = {"sql_view", "materialized_view"}
-_DB_VIEW_CLEANUP_POLICIES = {"drop_view", "drop_table", "keep"}
+_DB_VIEW_KINDS = {"sql_view"}
+_DB_VIEW_CLEANUP_POLICIES = {"drop_view", "keep"}
 _DEFAULT_RUN_STATUS = "不占用"
 _DEFAULT_RECORD_STATUS = ""
 _DB_VIEW_COLUMN_TYPES = {"text", "int", "number", "bool", "json"}
@@ -529,10 +529,11 @@ class ModuleDataStore:
         raw_columns = _normalize_resource_json(row["columns_json"])
         if not isinstance(raw_columns, list):
             raw_columns = []
+        cleanup_policy = "keep" if str(row["cleanup_policy"] or "").strip() == "keep" else "drop_view"
         return {
             "module_name": row["module_name"],
             "view_id": row["view_id"],
-            "view_kind": row["view_kind"],
+            "view_kind": "sql_view",
             "physical_view_name": row["physical_view_name"],
             "source_resource_ids": [
                 _validate_snake_case_identifier(str(item))
@@ -541,7 +542,7 @@ class ModuleDataStore:
             "select_sql_template": str(row["select_sql_template"] or "").strip(),
             "columns": _normalize_db_view_columns(raw_columns),
             "schema_version": _normalize_db_view_schema_version(row["schema_version"]),
-            "cleanup_policy": row["cleanup_policy"],
+            "cleanup_policy": cleanup_policy,
         }
 
     def _read_db_view_row_with_conn(self, conn, module_name: str, view_id: str) -> dict[str, Any] | None:
@@ -1033,8 +1034,6 @@ class ModuleDataStore:
         now: int,
     ) -> dict[str, Any]:
         normalized_view_kind = _validate_db_view_kind(view_kind)
-        if normalized_view_kind != "sql_view":
-            raise ValueError("only sql_view is supported in V1")
         normalized_source_resource_ids = _normalize_db_view_source_resource_ids(source_resource_ids)
         normalized_sql = _normalize_db_view_sql_template(select_sql_template)
         normalized_columns = _normalize_db_view_columns(columns)
@@ -1681,21 +1680,17 @@ class ModuleDataStore:
                 cleanup_policy = str(db_view.get("cleanup_policy") or "")
                 if cleanup_policy == "keep":
                     continue
-                object_type = "table" if cleanup_policy == "drop_table" else "view"
-                existing_object = conn.execute(
+                existing_view = conn.execute(
                     """
                     SELECT 1
                     FROM sqlite_master
-                    WHERE type = ? AND name = ?
+                    WHERE type = 'view' AND name = ?
                     """,
-                    (object_type, physical_view_name),
+                    (physical_view_name,),
                 ).fetchone()
                 identifier = _quote_identifier(physical_view_name)
-                if cleanup_policy == "drop_table":
-                    conn.execute(f"DROP TABLE IF EXISTS {identifier}")
-                else:
-                    conn.execute(f"DROP VIEW IF EXISTS {identifier}")
-                changed = bool(existing_object) or changed
+                conn.execute(f"DROP VIEW IF EXISTS {identifier}")
+                changed = bool(existing_view) or changed
 
             for resource in self._list_resource_rows_with_conn(conn, module_name):
                 if resource["storage_mode"] == "custom_table":

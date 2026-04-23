@@ -17,6 +17,49 @@ def temp_data_dir(tmp_path):
         yield tmp_path
 
 
+def _recreate_legacy_module_db_views_table(conn) -> None:
+    conn.execute("DROP TABLE module_db_views")
+    conn.execute(
+        """
+        CREATE TABLE module_db_views (
+            module_name TEXT NOT NULL,
+            view_id TEXT NOT NULL,
+            view_kind TEXT NOT NULL CHECK (view_kind IN ('sql_view', 'materialized_view')),
+            physical_view_name TEXT NOT NULL,
+            source_resource_ids_json TEXT NOT NULL DEFAULT '[]',
+            select_sql_template TEXT NOT NULL,
+            columns_json TEXT NOT NULL DEFAULT '[]',
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            cleanup_policy TEXT NOT NULL CHECK (cleanup_policy IN ('drop_view', 'drop_table', 'keep')),
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (module_name, view_id)
+        )
+        """
+    )
+
+
+def _legacy_db_view_row(*, cleanup_policy: str = "drop_table", view_kind: str = "materialized_view") -> tuple:
+    return (
+        "demo_module",
+        "billing_stats",
+        view_kind,
+        "demo_module_view_billing_stats",
+        json.dumps(["billing_entries"], ensure_ascii=False),
+        "SELECT entry_id FROM {{resource:billing_entries}}",
+        json.dumps(
+            [
+                {"name": "entry_id", "type": "text", "nullable": True, "filterable": True, "sortable": True},
+            ],
+            ensure_ascii=False,
+        ),
+        1,
+        cleanup_policy,
+        100,
+        200,
+    )
+
+
 def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.module_data_store import ModuleDataStore
@@ -118,6 +161,13 @@ def test_init_database_creates_module_db_views_table(temp_data_dir):
             row["name"]
             for row in conn.execute("PRAGMA index_list(module_db_views)").fetchall()
         }
+        create_sql = conn.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'module_db_views'
+            """
+        ).fetchone()["sql"]
 
     assert {
         "module_name",
@@ -133,6 +183,84 @@ def test_init_database_creates_module_db_views_table(temp_data_dir):
         "updated_at",
     }.issubset(columns)
     assert "idx_module_db_views_module" in indexes
+    assert "materialized_view" not in create_sql
+    assert "drop_table" not in create_sql
+    assert "'sql_view'" in create_sql
+    assert "'drop_view'" in create_sql
+    assert "'keep'" in create_sql
+
+
+def test_init_database_normalizes_legacy_module_db_view_metadata(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.database import init_database
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    with get_connection(DATA_DB) as conn:
+        _recreate_legacy_module_db_views_table(conn)
+        conn.execute(
+            """
+            INSERT INTO module_db_views (
+                module_name,
+                view_id,
+                view_kind,
+                physical_view_name,
+                source_resource_ids_json,
+                select_sql_template,
+                columns_json,
+                schema_version,
+                cleanup_policy,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            _legacy_db_view_row(),
+        )
+
+    init_database()
+
+    store = ModuleDataStore()
+    assert store.list_db_views("demo_module") == [
+        {
+            "module_name": "demo_module",
+            "view_id": "billing_stats",
+            "view_kind": "sql_view",
+            "physical_view_name": "demo_module_view_billing_stats",
+            "source_resource_ids": ["billing_entries"],
+            "select_sql_template": "SELECT entry_id FROM {{resource:billing_entries}}",
+            "columns": [
+                {"name": "entry_id", "type": "text", "nullable": True, "filterable": True, "sortable": True},
+            ],
+            "schema_version": 1,
+            "cleanup_policy": "drop_view",
+        }
+    ]
+
+    with get_connection(DATA_DB) as conn:
+        row = conn.execute(
+            """
+            SELECT view_kind, cleanup_policy, created_at, updated_at
+            FROM module_db_views
+            WHERE module_name = ? AND view_id = ?
+            """,
+            ("demo_module", "billing_stats"),
+        ).fetchone()
+        create_sql = conn.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'module_db_views'
+            """
+        ).fetchone()["sql"]
+
+    assert dict(row) == {
+        "view_kind": "sql_view",
+        "cleanup_policy": "drop_view",
+        "created_at": 100,
+        "updated_at": 200,
+    }
+    assert "materialized_view" not in create_sql
+    assert "drop_table" not in create_sql
 
 
 def test_init_database_upgrades_v2_module_dataset_schema_to_v3(temp_data_dir):
@@ -430,6 +558,38 @@ FROM {{resource:accounts}}
         )
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"view_kind": "materialized_view"}, "unsupported view_kind"),
+        ({"cleanup_policy": "drop_table"}, "unsupported db view cleanup_policy"),
+    ],
+)
+def test_module_data_store_rejects_legacy_db_view_v1_options(temp_data_dir, kwargs, match):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    store.register_data_resource(
+        "demo_module",
+        "billing_entries",
+        storage_mode="custom_table",
+        record_key_field="entry_id",
+        schema={"columns": [{"name": "entry_id", "type": "text", "required": True}]},
+    )
+
+    with pytest.raises(ValueError, match=match):
+        store.declare_db_view(
+            "demo_module",
+            "billing_stats",
+            source_resource_ids=["billing_entries"],
+            select_sql_template="SELECT entry_id FROM {{resource:billing_entries}}",
+            columns=[
+                {"name": "entry_id", "type": "text", "filterable": True, "sortable": True},
+            ],
+            **kwargs,
+        )
+
+
 def test_module_data_store_clear_module_data_drops_registered_db_views(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.module_data_store import ModuleDataStore
@@ -467,6 +627,74 @@ FROM {{resource:billing_entries}}
 
     assert store.clear_module_data("demo_module") is True
     assert store.list_db_views("demo_module") == []
+
+    with get_connection(DATA_DB) as conn:
+        sqlite_view = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'view' AND name = ?
+            """,
+            ("demo_module_view_billing_stats",),
+        ).fetchone()
+
+    assert sqlite_view is None
+
+
+def test_module_data_store_clear_module_data_treats_legacy_drop_table_view_as_view(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    store.register_data_resource(
+        "demo_module",
+        "billing_entries",
+        storage_mode="custom_table",
+        record_key_field="entry_id",
+        schema={"columns": [{"name": "entry_id", "type": "text", "required": True}]},
+    )
+    store.declare_db_view(
+        "demo_module",
+        "billing_stats",
+        source_resource_ids=["billing_entries"],
+        select_sql_template="SELECT entry_id FROM {{resource:billing_entries}}",
+        columns=[
+            {"name": "entry_id", "type": "text", "filterable": True, "sortable": True},
+        ],
+    )
+
+    with get_connection(DATA_DB) as conn:
+        _recreate_legacy_module_db_views_table(conn)
+        conn.execute(
+            """
+            INSERT INTO module_db_views (
+                module_name,
+                view_id,
+                view_kind,
+                physical_view_name,
+                source_resource_ids_json,
+                select_sql_template,
+                columns_json,
+                schema_version,
+                cleanup_policy,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            _legacy_db_view_row(cleanup_policy="drop_table", view_kind="sql_view"),
+        )
+        sqlite_view = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'view' AND name = ?
+            """,
+            ("demo_module_view_billing_stats",),
+        ).fetchone()
+
+    assert sqlite_view is not None
+    assert store.clear_module_data("demo_module") is True
 
     with get_connection(DATA_DB) as conn:
         sqlite_view = conn.execute(

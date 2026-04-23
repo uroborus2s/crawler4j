@@ -9,7 +9,11 @@ class _FakeTools:
     def __init__(self, available_tools: set[str] | None = None):
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.available_tools = available_tools or {
+            "db.declare_data_resource",
+            "db.declare_db_view",
             "db.list_records",
+            "db.query_view",
+            "db.replace_records",
             "db.append_event",
             "db.query_events",
             "captcha.match_slider",
@@ -28,8 +32,12 @@ class _FakeTools:
         specs = [
             ToolSpec(name="captcha.match_slider", description="识别滑块验证码缺口位置"),
             ToolSpec(name="db.append_event", description="追加模块审计事件"),
+            ToolSpec(name="db.declare_data_resource", description="声明模块数据资源"),
+            ToolSpec(name="db.declare_db_view", description="声明数据库统计视图"),
             ToolSpec(name="db.list_records", description="读取模块数据集"),
             ToolSpec(name="db.query_events", description="查询模块审计事件"),
+            ToolSpec(name="db.query_view", description="查询数据库统计视图"),
+            ToolSpec(name="db.replace_records", description="全量覆盖模块数据集"),
             ToolSpec(name="env.bind_resource_pool", description="登记环境资源池资格", is_async=True),
             ToolSpec(name="env.mark_resource_pool_eligible", description="标记环境可接单", is_async=True),
             ToolSpec(name="env.mark_resource_pool_ineligible", description="标记环境不可接单", is_async=True),
@@ -85,14 +93,22 @@ def test_sdk_exports_expected_stable_surface():
 def test_tools_capability_calls_core_extensions():
     fake_tools = _FakeTools()
 
+    assert fake_tools.has_tool("db.declare_data_resource") is True
+    assert fake_tools.has_tool("db.declare_db_view") is True
     assert fake_tools.has_tool("db.list_records") is True
+    assert fake_tools.has_tool("db.query_view") is True
+    assert fake_tools.has_tool("db.replace_records") is True
     assert fake_tools.has_tool("db.append_event") is True
     specs = fake_tools.list_tools()
     assert [tool.name for tool in specs] == [
         "captcha.match_slider",
         "db.append_event",
+        "db.declare_data_resource",
+        "db.declare_db_view",
         "db.list_records",
         "db.query_events",
+        "db.query_view",
+        "db.replace_records",
         "env.bind_resource_pool",
         "env.mark_resource_pool_eligible",
         "env.mark_resource_pool_ineligible",
@@ -103,8 +119,12 @@ def test_tools_capability_calls_core_extensions():
     assert {tool.name: tool.is_async for tool in specs} == {
         "captcha.match_slider": False,
         "db.append_event": False,
+        "db.declare_data_resource": False,
+        "db.declare_db_view": False,
         "db.list_records": False,
         "db.query_events": False,
+        "db.query_view": False,
+        "db.replace_records": False,
         "env.bind_resource_pool": True,
         "env.mark_resource_pool_eligible": True,
         "env.mark_resource_pool_ineligible": True,
@@ -118,6 +138,101 @@ def test_tools_capability_calls_core_extensions():
 
     assert result == {"tool_name": "db.list_records", "kwargs": {"dataset": "orders"}}
     assert fake_tools.calls == [("db.list_records", {"dataset": "orders"})]
+
+
+def test_tools_capability_preserves_data_resource_and_db_view_kwargs():
+    fake_tools = _FakeTools()
+    ctx = TaskContext(env_id=1, task_name="demo", tools=fake_tools)
+
+    resource_result = ctx.tools.call(
+        "db.declare_data_resource",
+        resource_id="billing_entries",
+        storage_mode="custom_table",
+        record_key_field="entry_id",
+        schema={
+            "columns": [
+                {"key": "entry_id", "type": "text"},
+                {"key": "amount", "type": "number"},
+            ]
+        },
+        indexes={"by_entry_id": ["entry_id"]},
+        cleanup_policy="keep",
+    )
+    replace_result = ctx.tools.call(
+        "db.replace_records",
+        dataset="billing_entries",
+        records=[
+            {"entry_id": "row-1", "amount": 10.5},
+            {"entry_id": "row-2", "amount": 20.0},
+        ],
+    )
+    declare_view_result = ctx.tools.call(
+        "db.declare_db_view",
+        view_id="billing_stats",
+        view_kind="sql_view",
+        source_resource_ids=["billing_entries"],
+        select_sql_template=(
+            "SELECT execution_date, COUNT(*) AS total_count "
+            "FROM {{resource:billing_entries}} GROUP BY execution_date"
+        ),
+        columns=[
+            {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
+            {"name": "total_count", "type": "int", "filterable": False, "sortable": True},
+        ],
+        cleanup_policy="drop_view",
+        schema_version=3,
+    )
+    query_view_result = ctx.tools.call(
+        "db.query_view",
+        view_id="billing_stats",
+        filters={"execution_date": "2026-04-23"},
+        sort=[{"field": "total_count", "direction": "desc"}],
+        limit=20,
+        offset=5,
+    )
+
+    assert resource_result["kwargs"] == {
+        "resource_id": "billing_entries",
+        "storage_mode": "custom_table",
+        "record_key_field": "entry_id",
+        "schema": {
+            "columns": [
+                {"key": "entry_id", "type": "text"},
+                {"key": "amount", "type": "number"},
+            ]
+        },
+        "indexes": {"by_entry_id": ["entry_id"]},
+        "cleanup_policy": "keep",
+    }
+    assert replace_result["kwargs"] == {
+        "dataset": "billing_entries",
+        "records": [
+            {"entry_id": "row-1", "amount": 10.5},
+            {"entry_id": "row-2", "amount": 20.0},
+        ],
+    }
+    assert declare_view_result["kwargs"] == {
+        "view_id": "billing_stats",
+        "view_kind": "sql_view",
+        "source_resource_ids": ["billing_entries"],
+        "select_sql_template": (
+            "SELECT execution_date, COUNT(*) AS total_count "
+            "FROM {{resource:billing_entries}} GROUP BY execution_date"
+        ),
+        "columns": [
+            {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
+            {"name": "total_count", "type": "int", "filterable": False, "sortable": True},
+        ],
+        "cleanup_policy": "drop_view",
+        "schema_version": 3,
+    }
+    assert query_view_result["kwargs"] == {
+        "view_id": "billing_stats",
+        "filters": {"execution_date": "2026-04-23"},
+        "sort": [{"field": "total_count", "direction": "desc"}],
+        "limit": 20,
+        "offset": 5,
+    }
 
 
 def test_tools_capability_preserves_audit_event_kwargs():

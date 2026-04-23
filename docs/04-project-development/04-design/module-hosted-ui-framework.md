@@ -143,7 +143,7 @@ def declare_ui(ctx):
 
 - 扫描 `ui_extension.pages[]`
 - 校验 `ui.declare_page` schema
-- 持久化页面 schema 到 `data.db.module_pages`
+- 在每次 refresh 前重新执行 `declare_ui()`，并把页面 schema 缓存在当前 bridge 内存中
 - 基于 `page_id` 做页面路由和刷新
 - 渲染宿主控件
 - 执行通用表格交互和按钮动作
@@ -167,14 +167,13 @@ def declare_ui(ctx):
 
 ## 6. 持久化与运行时实现
 
-### 6.1 页面 schema 持久化
+### 6.1 页面 schema 生命周期
 
-宿主统一把页面 schema 持久化到：
+正式 Hosted UI 链路在每次 refresh 前都会重新执行 `declare_ui()`，并把页面 schema 缓存在当前 `ModuleUIRuntimeBridge` 内存中，供 `ui.get_page` / `ManagedPageRenderer` 消费。
+
+不再把以下对象作为正式渲染事实源：
 
 - `data.db.module_pages`
-
-不再存在：
-
 - `module_data_table_views`
 
 ### 6.2 运行时工具面

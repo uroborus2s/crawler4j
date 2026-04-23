@@ -215,27 +215,120 @@ def _create_module_dataset_manifests_table(
 
 
 def _create_module_db_views_table(conn: sqlite3.Connection) -> None:
-    conn.executescript(
+    conn.execute(
         """
         CREATE TABLE IF NOT EXISTS module_db_views (
             module_name TEXT NOT NULL,
             view_id TEXT NOT NULL,
-            view_kind TEXT NOT NULL CHECK (view_kind IN ('sql_view', 'materialized_view')),
+            view_kind TEXT NOT NULL CHECK (view_kind = 'sql_view'),
             physical_view_name TEXT NOT NULL,
             source_resource_ids_json TEXT NOT NULL DEFAULT '[]',
             select_sql_template TEXT NOT NULL,
             columns_json TEXT NOT NULL DEFAULT '[]',
             schema_version INTEGER NOT NULL DEFAULT 1,
-            cleanup_policy TEXT NOT NULL CHECK (cleanup_policy IN ('drop_view', 'drop_table', 'keep')),
+            cleanup_policy TEXT NOT NULL CHECK (cleanup_policy IN ('drop_view', 'keep')),
             created_at INTEGER DEFAULT (strftime('%s', 'now')),
             updated_at INTEGER DEFAULT (strftime('%s', 'now')),
             PRIMARY KEY (module_name, view_id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_module_db_views_module
-        ON module_db_views(module_name);
+        )
         """
     )
+
+
+def _create_module_db_views_indexes(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_module_db_views_module
+        ON module_db_views(module_name)
+        """
+    )
+
+
+def _module_db_views_uses_legacy_v1_schema(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'module_db_views'
+        """
+    ).fetchone()
+    table_sql = str(row["sql"] or "").lower() if row else ""
+    return "materialized_view" in table_sql or "drop_table" in table_sql
+
+
+def _module_db_views_has_legacy_rows(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM module_db_views
+        WHERE view_kind <> 'sql_view'
+           OR cleanup_policy NOT IN ('drop_view', 'keep')
+        LIMIT 1
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _rebuild_module_db_views_table_to_v1(conn: sqlite3.Connection) -> None:
+    temp_table_name = "module_db_views__v1"
+    conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
+    conn.execute(
+        f"""
+        CREATE TABLE {temp_table_name} (
+            module_name TEXT NOT NULL,
+            view_id TEXT NOT NULL,
+            view_kind TEXT NOT NULL CHECK (view_kind = 'sql_view'),
+            physical_view_name TEXT NOT NULL,
+            source_resource_ids_json TEXT NOT NULL DEFAULT '[]',
+            select_sql_template TEXT NOT NULL,
+            columns_json TEXT NOT NULL DEFAULT '[]',
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            cleanup_policy TEXT NOT NULL CHECK (cleanup_policy IN ('drop_view', 'keep')),
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (module_name, view_id)
+        )
+        """
+    )
+    conn.execute(
+        f"""
+        INSERT INTO {temp_table_name} (
+            module_name,
+            view_id,
+            view_kind,
+            physical_view_name,
+            source_resource_ids_json,
+            select_sql_template,
+            columns_json,
+            schema_version,
+            cleanup_policy,
+            created_at,
+            updated_at
+        )
+        SELECT
+            module_name,
+            view_id,
+            'sql_view',
+            physical_view_name,
+            source_resource_ids_json,
+            select_sql_template,
+            columns_json,
+            CASE
+                WHEN schema_version IS NULL OR schema_version < 1 THEN 1
+                ELSE schema_version
+            END,
+            CASE
+                WHEN cleanup_policy = 'keep' THEN 'keep'
+                ELSE 'drop_view'
+            END,
+            created_at,
+            updated_at
+        FROM module_db_views
+        """
+    )
+    conn.execute("DROP TABLE module_db_views")
+    conn.execute(f"ALTER TABLE {temp_table_name} RENAME TO module_db_views")
+    _create_module_db_views_indexes(conn)
 
 
 def _create_module_datasets_indexes(conn: sqlite3.Connection) -> None:
@@ -334,6 +427,7 @@ def _ensure_module_db_views_table(conn: sqlite3.Connection) -> None:
     ).fetchone()
     if not table_exists:
         _create_module_db_views_table(conn)
+        _create_module_db_views_indexes(conn)
         return
 
     table_info_rows = _table_info_rows(conn, "module_db_views")
@@ -345,7 +439,12 @@ def _ensure_module_db_views_table(conn: sqlite3.Connection) -> None:
             f"missing_columns={sorted(missing_columns)}, existing_columns={sorted(existing_columns)}"
         )
 
+    if _module_db_views_uses_legacy_v1_schema(conn) or _module_db_views_has_legacy_rows(conn):
+        _rebuild_module_db_views_table_to_v1(conn)
+        return
+
     _create_module_db_views_table(conn)
+    _create_module_db_views_indexes(conn)
 
 
 def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:

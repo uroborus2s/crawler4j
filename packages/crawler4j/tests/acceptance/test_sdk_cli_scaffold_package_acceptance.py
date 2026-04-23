@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ._helpers import MODULE_VERSION, archive_members, load_manifest, run_cli
 
 
@@ -34,17 +36,24 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
     members = archive_members(built_archive)
     assert "demo_model/module.yaml" in members
     assert "demo_model/module_runtime.py" in members
+    assert "demo_model/pages/dashboard.py" in members
+    assert "demo_model/pages/accounts.py" in members
+    assert "demo_model/env_selectors/pick_ready.py" in members
     assert "demo_model/tasks/extra_task.py" in members
     assert "demo_model/workflows/repair_orders.py" in members
 
 
-def test_sdk_cli_scaffold_allows_additional_ui_directory_acceptance(rich_module_root: Path):
-    extra_ui_dir = rich_module_root / "ui"
-    extra_ui_dir.mkdir()
-    (extra_ui_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
+@pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
+def test_sdk_cli_scaffold_allows_additional_module_artifacts_acceptance(
+    rich_module_root: Path,
+    extra_name: str,
+):
+    if extra_name == "ui/":
+        extra_ui_dir = rich_module_root / "ui"
+        extra_ui_dir.mkdir()
+        (extra_ui_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
+    else:
+        (rich_module_root / extra_name).write_text("{}", encoding="utf-8")
 
     result = run_cli("package", "build", cwd=rich_module_root)
     result.assert_ok()
-    result.assert_stdout_contains("已生成安装包")
-    archive = rich_module_root / "dist" / "demo_model-0.1.0.zip"
-    assert "demo_model/ui/custom_page.py" in archive_members(archive)

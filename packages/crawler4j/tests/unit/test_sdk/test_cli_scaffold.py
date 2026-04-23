@@ -52,6 +52,76 @@ def _read_pyproject(module_root: Path) -> dict:
         return tomllib.load(fh)
 
 
+def _page_file(module_root: Path, page_id: str) -> Path:
+    return module_root / "pages" / f"{page_id}.py"
+
+
+def _selector_file(module_root: Path, selector_name: str) -> Path:
+    return module_root / "env_selectors" / f"{selector_name}.py"
+
+
+def _hook_file(module_root: Path, hook_name: str) -> Path:
+    return module_root / "hooks" / f"{hook_name}.py"
+
+
+def _declare_ui_side_effect_call(tool_name: str) -> str:
+    calls = {
+        "db.append_event": """context.tools.call(
+    "db.append_event",
+    dataset="account_events",
+    event_type="declare_ui_checked",
+    entity_key="demo-account",
+    payload={"source": "sdk_check"},
+    created_at=1,
+)""",
+        "db.replace_records": """context.tools.call(
+    "db.replace_records",
+    dataset="account_records",
+    records=[{"id": "demo-account"}],
+)""",
+        "db.declare_data_resource": """context.tools.call(
+    "db.declare_data_resource",
+    resource_id="account_records",
+    storage_mode="managed_dataset",
+)""",
+        "db.declare_db_view": """context.tools.call(
+    "db.declare_db_view",
+    view_id="account_stats",
+    source_resource_ids=["account_records"],
+    select_sql_template="SELECT id FROM {{resource:account_records}}",
+    columns=[{"name": "id", "type": "text"}],
+)""",
+        "db.set_state": """context.tools.call(
+    "db.set_state",
+    key="declare_ui_checked",
+    value={"source": "sdk_check"},
+)""",
+        "db.acquire_lock": """context.tools.call(
+    "db.acquire_lock",
+    scope="account_records",
+    key="demo-account",
+    ttl=60,
+)""",
+        "db.release_lock": """context.tools.call(
+    "db.release_lock",
+    scope="account_records",
+    key="demo-account",
+)""",
+    }
+    return calls[tool_name]
+
+
+def _indent_block(block: str, prefix: str = "    ") -> str:
+    return "\n".join(f"{prefix}{line}" if line else line for line in block.splitlines())
+
+
+def _inject_declare_ui_block(runtime_text: str, block: str) -> str:
+    modern_anchor = "    return _pages.declare_pages(context)"
+    if modern_anchor not in runtime_text:
+        raise AssertionError("module_runtime.py 缺少可识别的 declare_ui 注入锚点")
+    return runtime_text.replace(modern_anchor, f"{block}\n{modern_anchor}")
+
+
 @pytest.fixture
 def module_root(tmp_path: Path) -> Path:
     target = tmp_path / "demo_model"
@@ -71,6 +141,21 @@ def module_root(tmp_path: Path) -> Path:
         force=False,
     )
     assert commands.cmd_module_init(args) == 0
+    runtime_text = (target / "module_runtime.py").read_text(encoding="utf-8")
+    if "from . import hooks as _hooks" in runtime_text:
+        for subdir in ("hooks", "env_selectors"):
+            package_dir = target / subdir
+            package_dir.mkdir(exist_ok=True)
+            (package_dir / "__init__.py").write_text("__all__ = []\n", encoding="utf-8")
+        pages_dir = target / "pages"
+        pages_dir.mkdir(exist_ok=True)
+        (pages_dir / "__init__.py").write_text(
+            'from crawler4j_sdk import TaskContext\n\n'
+            '__all__ = ["declare_pages"]\n\n'
+            "def declare_pages(context: TaskContext):\n"
+            "    return None\n",
+            encoding="utf-8",
+        )
     return target
 
 
@@ -84,6 +169,12 @@ def test_module_init_creates_complete_project(module_root: Path):
     assert (module_root / ".python-version").exists()
     assert (module_root / "tasks" / "example_task.py").exists()
     assert (module_root / "workflows" / "main_workflow.py").exists()
+    assert (module_root / "pages" / "__init__.py").exists()
+    assert (module_root / "hooks" / "__init__.py").exists()
+    assert (module_root / "env_selectors" / "__init__.py").exists()
+    assert _hook_file(module_root, "on_cleanup").exists()
+    assert _selector_file(module_root, "return_none").exists()
+    assert _selector_file(module_root, "random_ready").exists()
     assert not (module_root / "data").exists()
     assert not (module_root / "ui").exists()
 
@@ -107,11 +198,17 @@ def test_module_init_creates_complete_project(module_root: Path):
     assert _read_pyproject(module_root)["project"]["version"] == manifest["version"]
 
     runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
-    assert "该 Hook 会在 ATM 执行环境动作前触发" in runtime_text
-    assert 'context.runtime["env_action"]' in runtime_text
+    assert "本文件保持为薄壳" in runtime_text
+    assert '_hooks = importlib.import_module(f"{__package__}.hooks")' in runtime_text
+    assert '_pages = importlib.import_module(f"{__package__}.pages")' in runtime_text
+    assert '_env_selectors = importlib.import_module(f"{__package__}.env_selectors")' in runtime_text
+
+    cleanup_text = _hook_file(module_root, "on_cleanup").read_text(encoding="utf-8")
+    assert "该 Hook 会在 ATM 执行环境动作前触发" in cleanup_text
+    assert 'context.runtime["env_action"]' in cleanup_text
 
     readme_text = (module_root / "README.md").read_text(encoding="utf-8")
-    assert "`on_cleanup` 会在 ATM 执行计划中的环境动作前调用" in readme_text
+    assert "`hooks/on_cleanup.py` 会在 ATM 执行计划中的环境动作前调用" in readme_text
 
 
 def test_archive_members_keeps_regular_files_while_excluding_cache_artifacts(tmp_path: Path):
@@ -208,11 +305,17 @@ def test_resource_commands_create_files_and_update_manifest(
         Namespace(name="accounts", display_name=None, description=None, force=False)
     ) == 0
     assert commands.cmd_env_selector_create(
-        Namespace(name="pick_ready", display_name=None, description=None)
+        Namespace(name="pick_ready", display_name=None, description=None, force=False)
+    ) == 0
+    assert commands.cmd_hook_create(
+        Namespace(name="on_cleanup", force=True)
     ) == 0
 
     assert (module_root / "tasks" / "extra_task.py").exists()
     assert (module_root / "workflows" / "repair_orders.py").exists()
+    assert _page_file(module_root, "dashboard").exists()
+    assert _page_file(module_root, "accounts").exists()
+    assert _selector_file(module_root, "pick_ready").exists()
     assert not (module_root / "ui").exists()
 
     manifest = _read_manifest(module_root)
@@ -230,14 +333,14 @@ def test_resource_commands_create_files_and_update_manifest(
         }
     ]
 
+    page_text = _page_file(module_root, "dashboard").read_text(encoding="utf-8")
+    assert "declare_dashboard_page" in page_text
+    assert "build_dashboard_page_schema" in page_text
+    assert "load_dashboard_page" in page_text
+
     runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
-    assert "_declare_dashboard_page" in runtime_text
-    assert "build_dashboard_page_schema" in runtime_text
-    assert "load_dashboard_page" in runtime_text
-    assert '_declare_dashboard_page(context)' in runtime_text
-    assert "_declare_accounts_page" in runtime_text
-    assert "_declare_accounts_page(context)" in runtime_text
-    assert 'name="pick_ready"' in runtime_text
+    assert "return _pages.declare_pages(context)" in runtime_text
+    assert "__getattr__" in runtime_text
 
 
 def test_page_create_generates_hosted_page_runtime_skeleton(
@@ -249,11 +352,11 @@ def test_page_create_generates_hosted_page_runtime_skeleton(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
 
-    runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
-    assert '"ui.declare_page"' in runtime_text
-    assert "build_dashboard_page_schema" in runtime_text
-    assert "load_dashboard_page" in runtime_text
-    assert "PyQt6" not in runtime_text
+    page_text = _page_file(module_root, "dashboard").read_text(encoding="utf-8")
+    assert '"ui.declare_page"' in page_text
+    assert "build_dashboard_page_schema" in page_text
+    assert "load_dashboard_page" in page_text
+    assert "PyQt6" not in page_text
 
     package_name = module_root.name
     stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
@@ -427,9 +530,9 @@ def test_check_full_reports_missing_page_load_handler(
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
-    runtime_path = module_root / "module_runtime.py"
-    runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8").replace(
+    page_path = _page_file(module_root, "dashboard")
+    page_path.write_text(
+        page_path.read_text(encoding="utf-8").replace(
             '"load_handler": "load_dashboard_page"',
             '"load_handler": "missing_dashboard_page_loader"',
         ),
@@ -451,9 +554,9 @@ def test_check_full_rejects_page_load_handler_signature_mismatch(
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
-    runtime_path = module_root / "module_runtime.py"
-    runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8").replace(
+    page_path = _page_file(module_root, "dashboard")
+    page_path.write_text(
+        page_path.read_text(encoding="utf-8").replace(
             """def load_dashboard_page(
     context: TaskContext,
     page_id: str,
@@ -480,25 +583,12 @@ def test_check_full_rejects_async_callable_page_load_handler(
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    runtime_text = runtime_text.replace(
-        '"load_handler": "load_dashboard_page"',
-        '"load_handler": "async_dashboard_loader"',
+    page_path = _page_file(module_root, "dashboard")
+    page_text = page_path.read_text(encoding="utf-8").replace(
+        "def load_dashboard_page(",
+        "async def load_dashboard_page(",
     )
-    runtime_text += """
-
-class AsyncDashboardLoader:
-    async def __call__(self, context: TaskContext, page_id: str, params: dict | None = None) -> dict:
-        return {
-            "title": "Dashboard",
-            "summary": "TODO: replace with real content",
-        }
-
-
-async_dashboard_loader = AsyncDashboardLoader()
-"""
-    runtime_path.write_text(runtime_text, encoding="utf-8")
+    page_path.write_text(page_text, encoding="utf-8")
 
     assert commands.cmd_check_full(Namespace()) == 1
 
@@ -515,9 +605,9 @@ def test_check_full_rejects_invalid_hosted_page_schema(
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
-    runtime_path = module_root / "module_runtime.py"
-    runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8").replace(
+    page_path = _page_file(module_root, "dashboard")
+    page_path.write_text(
+        page_path.read_text(encoding="utf-8").replace(
             '"action": {"type": "reload"}',
             '"action": {"type": "open_page", "page_id": "InvalidPage"}',
         ),
@@ -531,32 +621,43 @@ def test_check_full_rejects_invalid_hosted_page_schema(
     assert "page_id 必须是以小写字母开头" in captured.out
 
 
-def test_check_full_rejects_audit_event_writes_in_declare_ui(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-):
-    monkeypatch.chdir(module_root)
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    runtime_path.write_text(
-        runtime_text.replace(
-            "# SDK-DATA-TABLES\n    return None",
-            """context.tools.call(
+@pytest.mark.parametrize(
+    "tool_name",
+    [
         "db.append_event",
-        dataset="account_events",
-        event_type="declare_ui_checked",
-        entity_key="demo-account",
-        payload={"source": "sdk_check"},
-        created_at=1,
-    )
-    context.tools.call(
-        "db.query_events",
-        dataset="account_events",
-        entity_key="demo-account",
-        limit=10,
-    )
-    return None""",
+        "db.replace_records",
+        "db.declare_data_resource",
+        "db.declare_db_view",
+        "db.set_state",
+        "db.acquire_lock",
+        "db.release_lock",
+    ],
+)
+def test_check_full_rejects_side_effect_db_tools_in_declare_ui(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tool_name: str,
+):
+    monkeypatch.chdir(module_root)
+    runtime_path = module_root / "module_runtime.py"
+    runtime_text = runtime_path.read_text(encoding="utf-8")
+    runtime_path.write_text(
+        _inject_declare_ui_block(
+            runtime_text,
+            _indent_block(
+                "\n".join(
+                    [
+                        _declare_ui_side_effect_call(tool_name),
+                        """context.tools.call(
+    "db.query_events",
+    dataset="account_events",
+    entity_key="demo-account",
+    limit=10,
+)""",
+                    ]
+                )
+            ),
         ),
         encoding="utf-8",
     )
@@ -564,10 +665,10 @@ def test_check_full_rejects_audit_event_writes_in_declare_ui(
     assert commands.cmd_check_full(Namespace()) == 1
 
     captured = capsys.readouterr()
-    assert "declare_ui 不允许调用 db.append_event" in captured.out
+    assert f"declare_ui 不允许调用 {tool_name}" in captured.out
 
 
-def test_check_full_rejects_audit_event_writes_in_declare_ui_after_list_tools_discovery(
+def test_check_full_hides_side_effect_db_tools_from_declare_ui_list_tools(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -576,27 +677,28 @@ def test_check_full_rejects_audit_event_writes_in_declare_ui_after_list_tools_di
     runtime_path = module_root / "module_runtime.py"
     runtime_text = runtime_path.read_text(encoding="utf-8")
     runtime_path.write_text(
-        runtime_text.replace(
-            "# SDK-DATA-TABLES\n    return None",
-            """tool_names = {spec.name for spec in context.tools.list_tools()}
-    if "db.append_event" in tool_names:
-        context.tools.call(
-            "db.append_event",
-            dataset="account_events",
-            event_type="declare_ui_checked",
-            entity_key="demo-account",
-            reason="sdk_check",
-            created_at=1,
-        )
-    return None""",
+        _inject_declare_ui_block(
+            runtime_text,
+            _indent_block(
+                """blocked = {
+    "db.replace_records",
+    "db.declare_data_resource",
+    "db.declare_db_view",
+    "db.append_event",
+    "db.set_state",
+    "db.acquire_lock",
+    "db.release_lock",
+}
+tool_names = {spec.name for spec in context.tools.list_tools()}
+exposed = sorted(blocked & tool_names)
+if exposed:
+    raise AssertionError(f"declare_ui exposed side-effect tools: {exposed}")"""
+            ),
         ),
         encoding="utf-8",
     )
 
-    assert commands.cmd_check_full(Namespace()) == 1
-
-    captured = capsys.readouterr()
-    assert "declare_ui 不允许调用 db.append_event" in captured.out
+    assert commands.cmd_check_full(Namespace()) == 0
 
 
 def test_check_full_accepts_audit_event_queries_in_declare_ui(
@@ -607,15 +709,16 @@ def test_check_full_accepts_audit_event_queries_in_declare_ui(
     runtime_path = module_root / "module_runtime.py"
     runtime_text = runtime_path.read_text(encoding="utf-8")
     runtime_path.write_text(
-        runtime_text.replace(
-            "# SDK-DATA-TABLES\n    return None",
-            """context.tools.call(
-        "db.query_events",
-        dataset="account_events",
-        entity_key="demo-account",
-        limit=10,
-    )
-    return None""",
+        _inject_declare_ui_block(
+            runtime_text,
+            _indent_block(
+                """context.tools.call(
+    "db.query_events",
+    dataset="account_events",
+    entity_key="demo-account",
+    limit=10,
+)"""
+            ),
         ),
         encoding="utf-8",
     )
@@ -623,27 +726,42 @@ def test_check_full_accepts_audit_event_queries_in_declare_ui(
     assert commands.cmd_check_full(Namespace()) == 0
 
 
-def test_page_create_inserts_call_without_sdk_sentinel(
+@pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
+def test_check_and_package_allow_additional_module_artifacts(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extra_name: str,
+):
+    monkeypatch.chdir(module_root)
+    if extra_name == "ui/":
+        extra_dir = module_root / "ui"
+        extra_dir.mkdir()
+        (extra_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
+    else:
+        target = module_root / extra_name
+        target.write_text("{}", encoding="utf-8")
+
+    assert commands.cmd_check_full(Namespace()) == 0
+    assert commands.cmd_package_build(Namespace(output=None)) == 0
+
+
+def test_page_create_does_not_mutate_module_runtime(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.chdir(module_root)
     runtime_path = module_root / "module_runtime.py"
-    runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8").replace("    # SDK-DATA-TABLES\n", ""),
-        encoding="utf-8",
-    )
+    original_runtime = runtime_path.read_text(encoding="utf-8")
 
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
 
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    assert "    _declare_dashboard_page(context)\n    return None" in runtime_text
+    assert runtime_path.read_text(encoding="utf-8") == original_runtime
     assert _read_manifest(module_root)["ui_extension"]["pages"][0]["id"] == "dashboard"
 
 
-def test_page_create_does_not_mutate_manifest_when_declare_ui_is_missing(
+def test_page_create_still_writes_page_file_when_runtime_declare_ui_is_missing(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -656,8 +774,82 @@ def test_page_create_does_not_mutate_manifest_when_declare_ui_is_missing(
 
     assert commands.cmd_page_create(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    assert _page_file(module_root, "dashboard").exists()
+    assert _read_manifest(module_root)["ui_extension"]["pages"][0]["id"] == "dashboard"
+
+
+def test_page_create_rejects_unsupported_ui_extension_keys(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    manifest = _read_manifest(module_root)
+    manifest["ui_extension"] = {"entry": "dashboard"}
+    _write_manifest(module_root, manifest)
+
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 1
-    assert "ui_extension" not in _read_manifest(module_root)
+
+    captured = capsys.readouterr()
+    assert "ui_extension 包含不支持的字段: entry" in captured.out
+    assert _read_manifest(module_root)["ui_extension"] == {"entry": "dashboard"}
+
+
+def test_page_create_rejects_unsupported_page_fields(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(module_root)
+    manifest = _read_manifest(module_root)
+    manifest["ui_extension"] = {
+        "pages": [
+            {
+                "id": "dashboard",
+                "label": "Dashboard",
+                "icon": "📄",
+                "entry": "dashboard_entry",
+            }
+        ]
+    }
+    _write_manifest(module_root, manifest)
+
+    assert commands.cmd_page_create(
+        Namespace(
+            name="dashboard",
+            display_name="Overview",
+            description="Overview 宿主页",
+            force=True,
+        )
+    ) == 1
+
+    captured = capsys.readouterr()
+    assert "ui_extension.pages[dashboard] 包含不支持的字段: entry" in captured.out
+    assert _read_manifest(module_root)["ui_extension"]["pages"][0]["entry"] == "dashboard_entry"
+
+
+@pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])
+def test_page_create_allows_additional_module_artifacts(
+    module_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extra_name: str,
+):
+    monkeypatch.chdir(module_root)
+    if extra_name == "ui/":
+        extra_dir = module_root / "ui"
+        extra_dir.mkdir()
+        (extra_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
+    else:
+        (module_root / extra_name).write_text("{}", encoding="utf-8")
+
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, force=False)
+    ) == 0
+    assert _page_file(module_root, "dashboard").exists()
+    assert _read_manifest(module_root)["ui_extension"]["pages"][0]["id"] == "dashboard"
 
 
 def test_page_create_force_refreshes_existing_helper(
@@ -669,9 +861,9 @@ def test_page_create_force_refreshes_existing_helper(
         Namespace(name="dashboard", display_name=None, description=None, force=False)
     ) == 0
 
-    runtime_path = module_root / "module_runtime.py"
-    runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8")
+    page_path = _page_file(module_root, "dashboard")
+    page_path.write_text(
+        page_path.read_text(encoding="utf-8")
         .replace('"title": "Dashboard"', '"title": "STALE TITLE"')
         .replace('"summary": "Dashboard 页面已由 hosted page V1 加载。"', '"summary": "STALE SUMMARY"')
         .replace('"updated_at": "待接入真实数据"', '"updated_at": "STALE TIMESTAMP"'),
@@ -682,14 +874,14 @@ def test_page_create_force_refreshes_existing_helper(
         Namespace(name="dashboard", display_name="Overview", description="Overview 宿主页", force=True)
     ) == 0
 
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    assert '"title": "Overview"' in runtime_text
-    assert '"text": "Overview 宿主页"' in runtime_text
-    assert '"summary": "Overview 页面已由 hosted page V1 加载。"' in runtime_text
-    assert '"updated_at": "待接入真实数据"' in runtime_text
-    assert "STALE TITLE" not in runtime_text
-    assert "STALE SUMMARY" not in runtime_text
-    assert "STALE TIMESTAMP" not in runtime_text
+    page_text = page_path.read_text(encoding="utf-8")
+    assert '"title": "Overview"' in page_text
+    assert '"text": "Overview 宿主页"' in page_text
+    assert '"summary": "Overview 页面已由 hosted page V1 加载。"' in page_text
+    assert '"updated_at": "待接入真实数据"' in page_text
+    assert "STALE TITLE" not in page_text
+    assert "STALE SUMMARY" not in page_text
+    assert "STALE TIMESTAMP" not in page_text
     assert _read_manifest(module_root)["ui_extension"]["pages"][0]["label"] == "Overview"
 
 
@@ -704,7 +896,7 @@ def test_check_full_rejects_manifest_page_missing_from_declare_ui(
     ) == 0
     runtime_path = module_root / "module_runtime.py"
     runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8").replace("    _declare_dashboard_page(context)\n", ""),
+        runtime_path.read_text(encoding="utf-8").replace("    return _pages.declare_pages(context)", "    return None"),
         encoding="utf-8",
     )
 
@@ -725,7 +917,7 @@ def test_package_build_rejects_manifest_page_missing_from_declare_ui(
     ) == 0
     runtime_path = module_root / "module_runtime.py"
     runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8").replace("    _declare_dashboard_page(context)\n", ""),
+        runtime_path.read_text(encoding="utf-8").replace("    return _pages.declare_pages(context)", "    return None"),
         encoding="utf-8",
     )
 
@@ -746,15 +938,15 @@ def test_check_full_rejects_extra_declared_page_not_in_manifest(
     ) == 0
     runtime_path = module_root / "module_runtime.py"
     runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8").replace(
-            "    # SDK-DATA-TABLES\n",
-            """    context.tools.call(
+        _inject_declare_ui_block(
+            runtime_path.read_text(encoding="utf-8"),
+            _indent_block(
+                """context.tools.call(
         "ui.declare_page",
         page_id="rogue",
-        schema=build_dashboard_page_schema(),
-    )
-    # SDK-DATA-TABLES
-""",
+        schema=_pages.build_dashboard_page_schema(),
+    )"""
+            ),
         ),
         encoding="utf-8",
     )
@@ -763,30 +955,6 @@ def test_check_full_rejects_extra_declared_page_not_in_manifest(
 
     captured = capsys.readouterr()
     assert "declare_ui 注册了未写入 module.yaml.ui_extension.pages 的宿主页: rogue" in captured.out
-
-
-@pytest.mark.parametrize("extra_name", ["config_schema.json", "strategy.yaml"])
-def test_check_structure_allows_additional_module_files(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    extra_name: str,
-):
-    monkeypatch.chdir(module_root)
-    (module_root / extra_name).write_text("{}", encoding="utf-8")
-
-    assert commands.cmd_check_structure(Namespace()) == 0
-
-
-def test_check_structure_allows_additional_ui_directory(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.chdir(module_root)
-    extra_ui_dir = module_root / "ui"
-    extra_ui_dir.mkdir()
-    (extra_ui_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
-
-    assert commands.cmd_check_structure(Namespace()) == 0
 
 
 def test_package_build_and_verify(module_root: Path, monkeypatch: pytest.MonkeyPatch):

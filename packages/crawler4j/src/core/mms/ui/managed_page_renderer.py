@@ -17,7 +17,6 @@ from PyQt6.QtWidgets import (
 
 from src.core.mms.models import ModuleInfo
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
-from src.core.persistence import get_module_data_store
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
 
@@ -40,7 +39,6 @@ class ManagedPageRenderer(QWidget):
         self._page_id = page_id
         self._open_page_callback = open_page_callback
         self._bridge = ModuleUIRuntimeBridge(module_name, module_info=module_info)
-        self._data_store = get_module_data_store()
 
         self._schema: dict[str, Any] = {}
         self._payload: dict[str, Any] = {}
@@ -280,16 +278,12 @@ class ManagedPageRenderer(QWidget):
                 if not handler_name:
                     raise ValueError("query_handler 数据源必须提供 handler")
                 result = self._normalize_inline_query_result(
-                    self._bridge.call_local_hook(
+                    self._bridge.call_query_handler(
                         handler_name,
                         str(component.get("table_id") or ""),
                         merged_query,
                         dict(self._navigation_params) if self._navigation_params else None,
-                        runtime_extra={
-                            "page_id": self._page_id,
-                            "table_id": str(component.get("table_id") or ""),
-                            "params": dict(self._navigation_params) if self._navigation_params else None,
-                        },
+                        page_id=self._page_id,
                     )
                 )
         except Exception as exc:
@@ -345,14 +339,10 @@ class ManagedPageRenderer(QWidget):
         if not handler_name:
             return {}
         params = dict(self._navigation_params) if self._navigation_params else None
-        payload = self._bridge.call_local_hook(
+        payload = self._bridge.call_page_handler(
             handler_name,
             self._page_id,
             params,
-            runtime_extra={
-                "page_id": self._page_id,
-                "params": params,
-            },
         )
         return payload if isinstance(payload, dict) else {}
 
@@ -379,14 +369,11 @@ class ManagedPageRenderer(QWidget):
         self._status_label.setText("")
         self._data_table_widgets = {}
         try:
-            self._bridge.call_local_hook(
-                "declare_ui",
-                runtime_extra={
-                    "page_id": self._page_id,
-                    "params": dict(self._navigation_params) if self._navigation_params else None,
-                },
+            self._bridge.declare_ui(
+                page_id=self._page_id,
+                params=dict(self._navigation_params) if self._navigation_params else None,
             )
-            self._schema = self._data_store.read_page_schema(self._module_name, self._page_id)
+            self._schema = self._bridge.get_declared_page(self._page_id)
             if not self._schema:
                 raise ValueError(f"未声明页面 schema: {self._page_id}")
             self._payload = self._load_page_payload()

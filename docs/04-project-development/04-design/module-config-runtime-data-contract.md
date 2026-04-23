@@ -28,7 +28,7 @@
 | 持久配置 | `config.db.module_config_entries` | `ctx.get_config()` / `ctx.config` | 禁止 | 宿主统一维护；模块运行时只读 |
 | 运行态元数据 | `ctx.runtime` | `ctx.runtime[...]` | 禁止 | 由 ATM / Debug / Core 注入 |
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
-| 页面 schema | `data.db.module_pages` | `ctx.tools.call("ui.get_page")` | `ctx.tools.call("ui.declare_page")` | 宿主管理页面 schema；模块只声明页面，不再声明独立数据表页 |
+| 页面 schema | `declare_ui()` 本轮声明缓存（宿主桥接内存） | `ctx.tools.call("ui.get_page")` | `ctx.tools.call("ui.declare_page")` | 宿主管理页面 schema；模块只声明页面，不再声明独立数据表页；正式 Hosted UI 刷新链路不再依赖 `data.db.module_pages` |
 | 快照数据 | `data.db.module_data_resources` + `data.db.module_datasets` / 模块自定义物理表 | `ctx.tools.call("db.list_records")` | `ctx.tools.call("db.declare_data_resource")` / `ctx.tools.call("db.replace_records")` | `managed_dataset` 适合低频稳定数据，`custom_table` 适合高频计算或明细表 |
 | 数据库视图 | `data.db.module_db_views` | `ctx.tools.call("db.query_view")` | `ctx.tools.call("db.declare_db_view")` | 基于当前模块 `custom_table` 的受控 `SELECT` 统计视图 |
 | 审计事件历史 | `data.db.module_audit_events` | `ctx.tools.call("db.query_events")` | `ctx.tools.call("db.append_event")` | append-only 业务历史、操作轨迹、时间线查询 |
@@ -66,13 +66,14 @@
 
 ### 5.1 页面声明
 
-页面 schema 只能通过 `ui.declare_page` 声明，并持久化到 `data.db.module_pages`。
+页面 schema 只能通过 `ui.declare_page` 声明；正式 Hosted UI 链路会在每次 refresh 前重新执行 `declare_ui()`，并把声明结果缓存到当前 bridge 内存中供 `ui.get_page` / renderer 消费，不再把 `data.db.module_pages` 作为正式渲染事实源。
 
 正式契约：
 
 - `module.yaml.ui_extension.pages[]` 只声明导航元信息
 - `declare_ui()` 只调用 `ui.declare_page`
 - `ui.get_page` 只读取页面 schema
+- 正式页面链路固定为 `ui.declare_page -> Page.children[] 内联 DataTable -> query_handler`
 - 不再存在 `ui.declare_data_table` / `ui.get_data_table`
 
 ### 5.2 页面数据
@@ -101,7 +102,11 @@
 - `rows`
 - `query_handler`
 
-表格交互由宿主统一处理，但数据查询和写回策略由模块自行决定。
+正式宿主页里的可交互表格统一走内联 `DataTable(data_source.type="query_handler")`。
+
+- `query_handler` 是正式查询链路，负责把过滤、排序、分页路由到 `db.query_view` / `db.list_records` 等能力
+- `binding` / `rows` 只用于页面内静态或局部数据，不构成另一条宿主页注册链路
+- 表格交互由宿主统一处理，但数据查询和写回策略由模块自行决定
 
 ## 6. 快照数据、数据库视图与审计事件契约
 
@@ -111,6 +116,7 @@
 - `managed_dataset` 模式下，`db.list_records` / `db.replace_records` 读写的快照记录持久化到 `data.db.module_datasets`
 - `custom_table` 模式下，宿主会创建受控物理表 `module_name_resource_id`
 - `db.declare_db_view` 会把数据库视图登记到 `data.db.module_db_views`
+- `db view` 的正式 V1 契约只支持 `view_kind="sql_view"`，`cleanup_policy` 只支持 `drop_view` / `keep`
 - `db.append_event` / `db.query_events` 读写的审计事件持久化到 `data.db.module_audit_events`
 
 ### 6.2 数据分工

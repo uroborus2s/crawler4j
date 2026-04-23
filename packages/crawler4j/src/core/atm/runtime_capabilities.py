@@ -43,18 +43,47 @@ from src.utils.paths import get_resource_path
 
 def _normalize_records(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
-        return []
+        raise ValueError("dataset records must be a list of objects")
 
     normalized: list[dict[str, Any]] = []
-    for item in raw:
+    for index, item in enumerate(raw):
         if not isinstance(item, dict):
-            continue
+            raise ValueError(f"dataset records[{index}] must be an object")
         normalized.append(dict(item))
 
     return normalized
 
 
 MANAGED_VIEW_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+RUNTIME_SURFACE_FULL = "full"
+RUNTIME_SURFACE_HOSTED_UI_DECLARE = "hosted_ui_declare"
+RUNTIME_SURFACE_HOSTED_UI_READONLY = "hosted_ui_readonly"
+
+_RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
+    RUNTIME_SURFACE_FULL: None,
+    RUNTIME_SURFACE_HOSTED_UI_DECLARE: frozenset(
+        {
+            "ui.declare_page",
+        }
+    ),
+    RUNTIME_SURFACE_HOSTED_UI_READONLY: frozenset(
+        {
+            "db.list_records",
+            "db.query_events",
+            "db.query_view",
+            "ui.get_page",
+        }
+    ),
+}
+DECLARE_UI_SIDE_EFFECT_DB_TOOLS = {
+    "db.replace_records",
+    "db.declare_data_resource",
+    "db.declare_db_view",
+    "db.append_event",
+    "db.set_state",
+    "db.acquire_lock",
+    "db.release_lock",
+}
 
 
 @lru_cache(maxsize=1)
@@ -97,6 +126,16 @@ def _validate_managed_identifier(value: str, *, field_name: str) -> str:
     if not MANAGED_VIEW_ID_RE.match(normalized):
         raise ValueError(f"{field_name} 必须是以小写字母开头、只包含字母数字下划线的标识符")
     return normalized
+
+
+def _raise_declare_ui_side_effect_error(tool_name: str) -> None:
+    raise RuntimeError(f"declare_ui 不允许调用 {tool_name}；UI 声明必须保持无副作用")
+
+
+def _resolve_runtime_surface_tools(surface: str) -> frozenset[str] | None:
+    if surface not in _RUNTIME_SURFACE_TOOL_NAMES:
+        raise ValueError(f"Unknown runtime capability surface: {surface}")
+    return _RUNTIME_SURFACE_TOOL_NAMES[surface]
 
 
 class HostedUIDeclarationBuffer:
@@ -199,8 +238,8 @@ class CoreDatabaseTools:
             source_resource_ids=meta["source_resource_ids"],
             select_sql_template=meta["select_sql_template"],
             columns=meta["columns"],
-            cleanup_policy=cleanup_policy,
-            schema_version=schema_version,
+            cleanup_policy=meta["cleanup_policy"],
+            schema_version=meta["schema_version"],
         )
 
     def query_view(
@@ -560,10 +599,27 @@ class CoreEnvTools:
 class CoreUITools:
     """Core 侧 UI 声明工具实现。"""
 
-    def __init__(self, module_name: str, *, declaration_buffer: HostedUIDeclarationBuffer | None = None):
+    def __init__(
+        self,
+        module_name: str,
+        *,
+        declaration_buffer: HostedUIDeclarationBuffer | None = None,
+        declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+        allow_persisted_pages: bool = True,
+    ):
         self._module_name = module_name
-        self._data_store = get_module_data_store()
+        self._allow_persisted_pages = allow_persisted_pages
+        self._data_store = get_module_data_store() if allow_persisted_pages else None
         self._declaration_buffer = declaration_buffer
+        self._declared_page_schemas = (
+            {
+                str(page_id): dict(schema)
+                for page_id, schema in dict(declared_page_schemas or {}).items()
+                if isinstance(schema, dict)
+            }
+            if declared_page_schemas is not None
+            else None
+        )
 
     def declare_page(self, page_id: str, schema: dict[str, Any]) -> bool:
         managed_page_id = _validate_managed_identifier(page_id, field_name="page_id")
@@ -571,9 +627,15 @@ class CoreUITools:
         if self._declaration_buffer and self._declaration_buffer.is_collecting:
             self._declaration_buffer.stage_page(managed_page_id, meta)
             return True
+        if not self._allow_persisted_pages or self._data_store is None:
+            raise RuntimeError("hosted UI declare surface 必须使用声明缓冲区，不能持久化页面 schema")
         return self._data_store.write_page_schema(self._module_name, managed_page_id, meta)
 
     def get_page(self, page_id: str) -> dict[str, Any]:
+        if self._declared_page_schemas is not None:
+            return dict(self._declared_page_schemas.get(str(page_id or "").strip(), {}))
+        if not self._allow_persisted_pages or self._data_store is None:
+            raise RuntimeError("hosted UI readonly surface 必须使用本轮声明的页面 schema")
         return self._data_store.read_page_schema(self._module_name, page_id)
 
 
@@ -700,13 +762,23 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         module_name: str,
         *,
         ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
+        allowed_tool_names: frozenset[str] | None = None,
+        declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+        allow_persisted_pages: bool = True,
     ):
         self._bindings: dict[str, _ToolBinding] = {}
+        self._allowed_tool_names = allowed_tool_names
+        self._ui_declaration_buffer = ui_declaration_buffer
 
         db_tools = CoreDatabaseTools(module_name)
         ip_pool_tools = CoreIPPoolTools()
         env_tools = CoreEnvTools(module_name)
-        ui_tools = CoreUITools(module_name, declaration_buffer=ui_declaration_buffer)
+        ui_tools = CoreUITools(
+            module_name,
+            declaration_buffer=ui_declaration_buffer,
+            declared_page_schemas=declared_page_schemas,
+            allow_persisted_pages=allow_persisted_pages,
+        )
         captcha_tools = CoreCaptchaTools()
 
         self._register("db.list_records", "读取模块数据集", db_tools.list_records)
@@ -753,18 +825,35 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         self._register("captcha.match_click_targets", "识别点选验证码目标位置", captcha_tools.match_click_targets)
 
     def _register(self, name: str, description: str, handler: Callable[..., Any], *, is_async: bool = False) -> None:
+        if self._allowed_tool_names is not None and name not in self._allowed_tool_names:
+            return
         self._bindings[name] = _ToolBinding(
             spec=ToolSpec(name=name, description=description, is_async=is_async),
             handler=handler,
         )
 
+    def _blocks_side_effect_tool(self, tool_name: str) -> bool:
+        return bool(
+            self._ui_declaration_buffer
+            and self._ui_declaration_buffer.is_collecting
+            and tool_name in DECLARE_UI_SIDE_EFFECT_DB_TOOLS
+        )
+
     def has_tool(self, tool_name: str) -> bool:
+        if self._blocks_side_effect_tool(tool_name):
+            return False
         return tool_name in self._bindings
 
     def list_tools(self) -> list[ToolSpec]:
-        return [binding.spec for binding in sorted(self._bindings.values(), key=lambda item: item.spec.name)]
+        return [
+            binding.spec
+            for binding in sorted(self._bindings.values(), key=lambda item: item.spec.name)
+            if not self._blocks_side_effect_tool(binding.spec.name)
+        ]
 
     def call(self, tool_name: str, /, **kwargs: Any) -> Any:
+        if self._blocks_side_effect_tool(tool_name):
+            _raise_declare_ui_side_effect_error(tool_name)
         binding = self._bindings.get(tool_name)
         if binding is None:
             raise KeyError(f"Unknown core tool: {tool_name}")
@@ -780,8 +869,16 @@ def build_runtime_capabilities(
     task_name: str,
     *,
     ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
+    surface: str = RUNTIME_SURFACE_FULL,
+    declared_page_schemas: dict[str, dict[str, Any]] | None = None,
 ) -> RuntimeCapabilities:
     module_name = (task_name or "").split(".")[0] or "default"
     return RuntimeCapabilities(
-        tools=CoreToolsCapabilityImpl(module_name, ui_declaration_buffer=ui_declaration_buffer)
+        tools=CoreToolsCapabilityImpl(
+            module_name,
+            ui_declaration_buffer=ui_declaration_buffer,
+            allowed_tool_names=_resolve_runtime_surface_tools(surface),
+            declared_page_schemas=declared_page_schemas,
+            allow_persisted_pages=surface == RUNTIME_SURFACE_FULL,
+        )
     )

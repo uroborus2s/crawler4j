@@ -111,11 +111,10 @@ def test_module_ui_runtime_bridge_reuses_same_module_instance_within_refresh_cyc
 
     try:
         bridge.declare_ui()
-        page_payload = bridge.call_local_hook(
+        page_payload = bridge.call_page_handler(
             "load_dashboard_page",
             "dashboard",
             None,
-            runtime_extra={"page_id": "dashboard"},
         )
         bridge.declare_ui()
         create_payload = bridge.call_local_hook("create_account_from_ui", {"id": "u1"})
@@ -183,6 +182,46 @@ def test_module_ui_runtime_bridge_keeps_previous_ui_schema_when_declare_ui_fails
         purge_module_namespace(module_name)
 
 
+def test_module_ui_runtime_bridge_declare_ui_stages_pages_without_persisting_to_store(tmp_path):
+    module_name = "staged_only_bridge_module"
+    module_dir = _write_runtime_module(
+        tmp_path,
+        module_name,
+        """
+        from crawler4j_sdk import TaskContext
+
+
+        def declare_ui(context: TaskContext):
+            context.tools.call(
+                "ui.declare_page",
+                page_id="dashboard",
+                schema={
+                    "type": "Page",
+                    "title": "今日看板",
+                    "load_handler": "load_dashboard_page",
+                    "children": [],
+                },
+            )
+
+
+        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+            return {"page_id": page_id, "params": params}
+        """,
+    )
+    service, original_registry = _register_dev_link_module(module_name, module_dir)
+    store = get_module_data_store()
+    bridge = ModuleUIRuntimeBridge(module_name)
+
+    try:
+        bridge.declare_ui()
+
+        assert bridge.get_declared_page("dashboard")["title"] == "今日看板"
+        assert store.read_page_schema(module_name, "dashboard") == {}
+    finally:
+        service.registry = original_registry
+        purge_module_namespace(module_name)
+
+
 def test_module_ui_runtime_bridge_drops_consumed_session_before_later_hooks(tmp_path, monkeypatch):
     module_name = "refreshable_bridge_module"
     config_state = {"mode": "old"}
@@ -236,11 +275,10 @@ def test_module_ui_runtime_bridge_drops_consumed_session_before_later_hooks(tmp_
 
     try:
         bridge.declare_ui()
-        first_payload = bridge.call_local_hook(
+        first_payload = bridge.call_page_handler(
             "load_dashboard_page",
             "dashboard",
             None,
-            runtime_extra={"page_id": "dashboard"},
         )
 
         config_state["mode"] = "new"
@@ -296,6 +334,115 @@ def test_module_ui_runtime_bridge_drops_consumed_session_before_later_hooks(tmp_
             "state": 0,
             "payload": {"id": "u1"},
         }
+    finally:
+        service.registry = original_registry
+        purge_module_namespace(module_name)
+
+
+def test_module_ui_runtime_bridge_scopes_hosted_ui_tools_by_hook_type(tmp_path):
+    module_name = "scoped_bridge_module"
+    module_dir = _write_runtime_module(
+        tmp_path,
+        module_name,
+        """
+        from crawler4j_sdk import TaskContext
+
+
+        OBSERVED = {}
+
+
+        def declare_ui(context: TaskContext):
+            OBSERVED["declare_tools"] = [spec.name for spec in context.tools.list_tools()]
+            OBSERVED["declare_has_get_page"] = context.tools.has_tool("ui.get_page")
+            context.tools.call(
+                "ui.declare_page",
+                page_id="dashboard",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [],
+                },
+            )
+
+
+        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+            OBSERVED["load_tools"] = [spec.name for spec in context.tools.list_tools()]
+            OBSERVED["load_has_declare_page"] = context.tools.has_tool("ui.declare_page")
+            OBSERVED["load_has_get_page"] = context.tools.has_tool("ui.get_page")
+            OBSERVED["load_page_id"] = context.runtime.get("page_id")
+            OBSERVED["load_params"] = context.runtime.get("params")
+            OBSERVED["load_schema_type"] = context.tools.call("ui.get_page", page_id=page_id).get("type")
+            try:
+                context.tools.call("db.set_state", key="hosted_ui_load", value=1)
+            except Exception as exc:
+                OBSERVED["load_write_error"] = type(exc).__name__
+            return dict(OBSERVED)
+
+
+        def query_dashboard_metrics(context: TaskContext, table_id: str, query, params=None):
+            OBSERVED["query_tools"] = [spec.name for spec in context.tools.list_tools()]
+            OBSERVED["query_has_declare_page"] = context.tools.has_tool("ui.declare_page")
+            OBSERVED["query_page_id"] = context.runtime.get("page_id")
+            OBSERVED["query_table_id"] = context.runtime.get("table_id")
+            OBSERVED["query_params"] = context.runtime.get("params")
+            OBSERVED["query_rows_before"] = context.tools.call("db.list_records", dataset="metrics")
+            try:
+                context.tools.call("db.append_event", dataset="metrics_events", event_type="query")
+            except Exception as exc:
+                OBSERVED["query_write_error"] = type(exc).__name__
+            return {
+                "rows": [],
+                "total": 0,
+                "page": 1,
+                "page_size": 20,
+                "observed": dict(OBSERVED),
+            }
+        """,
+    )
+    service, original_registry = _register_dev_link_module(module_name, module_dir)
+    bridge = ModuleUIRuntimeBridge(module_name)
+
+    try:
+        bridge.declare_ui(page_id="dashboard", params={"phone": "13800138000"})
+        page_payload = bridge.call_page_handler(
+            "load_dashboard_page",
+            "dashboard",
+            {"phone": "13800138000"},
+        )
+        query_payload = bridge.call_query_handler(
+            "query_dashboard_metrics",
+            "metrics",
+            {"page": 1, "page_size": 20, "sort": []},
+            {"phone": "13800138000"},
+            page_id="dashboard",
+        )
+
+        assert page_payload["declare_tools"] == ["ui.declare_page"]
+        assert page_payload["declare_has_get_page"] is False
+        assert page_payload["load_tools"] == [
+            "db.list_records",
+            "db.query_events",
+            "db.query_view",
+            "ui.get_page",
+        ]
+        assert page_payload["load_has_declare_page"] is False
+        assert page_payload["load_has_get_page"] is True
+        assert page_payload["load_page_id"] == "dashboard"
+        assert page_payload["load_params"] == {"phone": "13800138000"}
+        assert page_payload["load_schema_type"] == "Page"
+        assert page_payload["load_write_error"] == "KeyError"
+        assert query_payload["observed"]["query_tools"] == [
+            "db.list_records",
+            "db.query_events",
+            "db.query_view",
+            "ui.get_page",
+        ]
+        assert query_payload["observed"]["query_has_declare_page"] is False
+        assert query_payload["observed"]["query_page_id"] == "dashboard"
+        assert query_payload["observed"]["query_table_id"] == "metrics"
+        assert query_payload["observed"]["query_params"] == {"phone": "13800138000"}
+        assert query_payload["observed"]["query_rows_before"] == []
+        assert query_payload["observed"]["query_write_error"] == "KeyError"
     finally:
         service.registry = original_registry
         purge_module_namespace(module_name)

@@ -77,7 +77,12 @@ def test_managed_page_renderer_declares_schema_loads_data_and_handles_actions(qt
         tmp_path,
         module_name,
         """
+        import builtins
+
         from crawler4j_sdk import TaskContext
+
+
+        LOAD_COUNT_KEY = "_hosted_page_module_load_count"
 
 
         def declare_ui(context: TaskContext):
@@ -123,8 +128,9 @@ def test_managed_page_renderer_declares_schema_loads_data_and_handles_actions(qt
 
 
         def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-            count = int(context.tools.call("db.get_state", key="dashboard_load_count") or 0) + 1
-            context.tools.call("db.set_state", key="dashboard_load_count", value=count)
+            del context, page_id, params
+            count = int(getattr(builtins, LOAD_COUNT_KEY, 0)) + 1
+            setattr(builtins, LOAD_COUNT_KEY, count)
             return {
                 "title": "今日运营看板",
                 "load_count_text": f"第 {count} 次加载",
@@ -161,6 +167,93 @@ def test_managed_page_renderer_declares_schema_loads_data_and_handles_actions(qt
         open_button = next(button for button in page.findChildren(QPushButton) if button.text() == "打开账号页")
         open_button.click()
         assert opened_pages == [("accounts", None)]
+    finally:
+        service.registry = original_registry
+        purge_module_namespace(module_name)
+
+
+def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(qtbot, tmp_path):
+    module_name = "hosted_page_readonly_tools_module"
+    module_dir = _write_runtime_module(
+        tmp_path,
+        module_name,
+        """
+        from crawler4j_sdk import TaskContext
+
+
+        def declare_ui(context: TaskContext):
+            context.tools.call(
+                "ui.declare_page",
+                page_id="dashboard",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [
+                        {"type": "Text", "style": "body", "binding": "load_tools"},
+                        {"type": "Text", "style": "body", "binding": "load_write_error"},
+                        {
+                            "type": "DataTable",
+                            "table_id": "stats",
+                            "title": "统计明细",
+                            "data_source": {"type": "query_handler", "handler": "query_stats_table"},
+                            "columns": [
+                                {"key": "metric", "label": "指标"},
+                                {"key": "value", "label": "值"},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+        def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+            del page_id, params
+            load_tools = ",".join(spec.name for spec in context.tools.list_tools())
+            try:
+                context.tools.call("db.set_state", key="hosted_ui_load", value=1)
+            except Exception as exc:
+                load_write_error = type(exc).__name__
+            return {
+                "load_tools": load_tools,
+                "load_write_error": load_write_error,
+            }
+
+
+        def query_stats_table(context: TaskContext, table_id: str, query, params=None):
+            del table_id, query, params
+            query_tools = ",".join(spec.name for spec in context.tools.list_tools())
+            try:
+                context.tools.call("db.replace_records", dataset="hosted_ui_query", records=[])
+            except Exception as exc:
+                query_write_error = type(exc).__name__
+            return {
+                "rows": [
+                    {"metric": "query_tools", "value": query_tools},
+                    {"metric": "query_write_error", "value": query_write_error},
+                ],
+                "total": 2,
+                "page": 1,
+                "page_size": 20,
+            }
+        """,
+    )
+    service, original_registry = _register_dev_link_module(module_name, module_dir)
+
+    try:
+        page = ManagedPageRenderer(module_name, "dashboard")
+        qtbot.addWidget(page)
+
+        readonly_tools = "db.list_records,db.query_events,db.query_view,ui.get_page"
+        assert any(label.text() == readonly_tools for label in page.findChildren(QLabel))
+        assert any(label.text() == "KeyError" for label in page.findChildren(QLabel))
+
+        table = page._data_table_widgets["stats"]
+        qtbot.waitUntil(lambda: table.item(1, 1) is not None)
+
+        assert table.item(0, 0).text() == "query_tools"
+        assert table.item(0, 1).text() == readonly_tools
+        assert table.item(1, 0).text() == "query_write_error"
+        assert table.item(1, 1).text() == "KeyError"
     finally:
         service.registry = original_registry
         purge_module_namespace(module_name)
@@ -368,8 +461,8 @@ def test_managed_page_renderer_refresh_clears_removed_stale_ui_schema(qtbot, tmp
         qtbot.addWidget(page)
 
         assert page._status_label.text() == "未声明页面 schema: dashboard"
-        assert store.read_page_schema(module_name, "dashboard") == {}
-        assert store.read_page_schema(module_name, "accounts") == {}
+        assert store.read_page_schema(module_name, "dashboard")["title"] == "旧看板"
+        assert store.read_page_schema(module_name, "accounts")["title"] == "旧账号页"
     finally:
         service.registry = original_registry
         purge_module_namespace(module_name)
