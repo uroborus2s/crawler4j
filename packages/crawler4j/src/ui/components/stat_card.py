@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from typing import Literal
 
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy
 
-from src.ui.theme.styles import StyleSheets
+from src.ui.components.card import Card
 
 CardDeltaDirection = Literal["up", "down", "neutral"]
 
 
-class StatCard(QFrame):
-    """统一的统计卡片组件，支持标题、数值、副标题和变化值。"""
+class StatCard(Card):
+    """Metric card composed on top of the shared Card surface."""
 
     _DELTA_STYLES: dict[str, tuple[str, str, str]] = {
         "up": ("#4ade80", "↑", "rgba(74, 222, 128, 0.14)"),
@@ -29,36 +29,36 @@ class StatCard(QFrame):
         delta_direction: CardDeltaDirection = "neutral",
         parent=None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(title=title, variant="card", gap=8, parent=parent)
         self._accent_color = accent_color
-        self._setup_ui(title, value)
+        self._setup_ui(value)
         self.set_subtitle(subtitle)
         self.set_delta(delta_text, direction=delta_direction)
 
-    def _setup_ui(self, title: str, value: str) -> None:
-        self.setStyleSheet(StyleSheets.stat_card(accent_color=self._accent_color))
+    def _setup_ui(self, value: str) -> None:
         self.setMinimumHeight(96)
         self.setMaximumHeight(108)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(6)
-
-        self.title_label = QLabel(title)
-        self.title_label.setObjectName("statCardTitle")
-        layout.addWidget(self.title_label)
+        self.content_layout.setContentsMargins(18, 16, 18, 16)
+        self.content_layout.setSpacing(8)
+        self.title_label = self.title_label or QLabel()
+        if self.title_label.objectName() != "cardTitle":
+            self.title_label.setObjectName("cardTitle")
 
         self.value_label = QLabel(value)
-        self.value_label.setObjectName("statCardValue")
-        layout.addWidget(self.value_label)
+        self.value_label.setStyleSheet(
+            f"color: {self._accent_color}; font-size: 32px; font-weight: 700; border: none; background: transparent;"
+        )
+        self.content_layout.addWidget(self.value_label)
 
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 0, 0, 0)
         footer.setSpacing(8)
 
         self.subtitle_label = QLabel()
-        self.subtitle_label.setObjectName("statCardSubtitle")
+        self.subtitle_label.setStyleSheet(
+            "color: rgba(255, 255, 255, 0.56); font-size: 11px; border: none; background: transparent;"
+        )
         self.subtitle_label.setHidden(True)
         footer.addWidget(self.subtitle_label)
 
@@ -69,8 +69,8 @@ class StatCard(QFrame):
         self.delta_label.setHidden(True)
         footer.addWidget(self.delta_label)
 
-        layout.addLayout(footer)
-        layout.addStretch()
+        self.content_layout.addLayout(footer)
+        self.content_layout.addStretch()
 
     def set_value(self, value: str) -> None:
         self.value_label.setText(value)

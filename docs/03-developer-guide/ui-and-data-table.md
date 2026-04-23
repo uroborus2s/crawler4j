@@ -80,12 +80,35 @@ def load_dashboard_page(
 当前正式组件面固定为：
 
 - `Page`
+- `Card`
 - `Section`
 - `Text`
 - `Button`
 - `DataTable`
 
 宿主负责渲染和交互分发；模块负责返回页面数据、实现查询和业务动作。
+
+## `Card`：纯容器卡片
+
+`Card` 是 Hosted UI 里的正式卡片容器。它只负责提供统一的卡片外壳和内容布局，不内置“标题 + 数值 + 趋势”这类业务模板，因此适合承载文字、按钮、数据表以及后续图表类组件。
+
+```python
+{
+    "type": "Card",
+    "title": "Payment Due",
+    "layout": {"direction": "column", "gap": 8},
+    "children": [
+        {"type": "Text", "style": "title", "text": "1 Apr"},
+        {"type": "Button", "label": "Pay Early", "action": {"type": "reload"}},
+    ],
+}
+```
+
+补充约定：
+
+- `Card` 是当前推荐的纯卡片容器
+- `Section` 仍保留给普通分组容器
+- 历史 `Section.variant="card"` 仍可用，但只作为兼容别名，新的页面 schema 优先直接写 `type="Card"`
 
 ## `DataTable` 的 4 种数据源
 
@@ -257,7 +280,7 @@ def query_billing_stats_table(
 
 | 需求 | 推荐做法 |
 |---|---|
-| Dashboard、概览页 | `Page + Text + Button + DataTable` |
+| Dashboard、概览页 | `Page + Card + Text + Button + DataTable` |
 | 快照列表 | `db.list_records` + `binding` |
 | 统计查询 | `db.query_view` + `query_handler` |
 | 明细实体表 | `module.yaml.data.resources[]` + `db.get_record/db.list_records/db.replace_records` |
@@ -270,7 +293,7 @@ def query_billing_stats_table(
 - schema 校验
 - 页面路由
 - 页面刷新
-- 统一渲染 `Page / Section / Text / Button / DataTable`
+- 统一渲染 `Page / Card / Section / Text / Button / DataTable`
 - 搜索、排序、分页交互分发
 
 模块负责：

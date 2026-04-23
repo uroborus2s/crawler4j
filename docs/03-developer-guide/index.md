@@ -35,5 +35,6 @@
 - `hooks/*.py` 导出 `handle`
 - `env_selectors/*.py` 导出 `SELECTOR` 和 `select`
 - `pages/*.py`、`pages/<group>/*.py` 导出 `PAGE` 和页面处理函数
+- Hosted UI 正式组件面现为 `Page / Card / Section / Text / Button / DataTable`，新的卡片容器优先使用 `Card`
 
 如果你看到任何 `TaskScript`、`TaskFlow`、`ModuleAssembler`、`module_runtime.py`、`declare_ui()`、`@env_selector(...)`、`db.declare_data_resource(...)`、`db.declare_db_view(...)` 的旧写法，应视为历史资料，而不是当前正式协议。

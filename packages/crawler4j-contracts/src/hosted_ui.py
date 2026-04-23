@@ -46,6 +46,7 @@ ALLOWED_DATA_RESOURCE_KEYS = {
 ALLOWED_PAGE_LAYOUT_KEYS = {"direction", "kind", "columns", "gap"}
 ALLOWED_PAGE_SCHEMA_KEYS = {"type", "title", "load_handler", "children", "layout"}
 ALLOWED_SECTION_SCHEMA_KEYS = {"type", "title", "children", "variant", "layout"}
+ALLOWED_CARD_SCHEMA_KEYS = {"type", "title", "children", "layout"}
 ALLOWED_TEXT_SCHEMA_KEYS = {"type", "text", "binding", "style"}
 ALLOWED_BUTTON_SCHEMA_KEYS = {"type", "label", "action"}
 ALLOWED_BUTTON_ACTION_KEYS = {"type", "page_id", "params"}
@@ -643,6 +644,21 @@ def _normalize_page_component(raw: Any, *, field_name: str) -> dict[str, Any]:
         if layout:
             section["layout"] = layout
         return section
+
+    if component_type == "Card":
+        unknown_keys = sorted(set(raw) - ALLOWED_CARD_SCHEMA_KEYS)
+        if unknown_keys:
+            raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+        card: dict[str, Any] = {
+            "type": "Card",
+            "children": _normalize_page_children(raw.get("children"), field_name=f"{field_name}.children"),
+        }
+        if raw.get("title") is not None:
+            card["title"] = str(raw.get("title") or "").strip()
+        layout = _normalize_layout(raw.get("layout"), field_name=f"{field_name}.layout")
+        if layout:
+            card["layout"] = layout
+        return card
 
     if component_type == "Text":
         unknown_keys = sorted(set(raw) - ALLOWED_TEXT_SCHEMA_KEYS)

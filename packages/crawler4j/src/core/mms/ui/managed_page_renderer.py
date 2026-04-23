@@ -23,6 +23,7 @@ from src.core.atm.runtime_capabilities import RUNTIME_SURFACE_FULL
 from src.core.persistence import get_module_data_store
 from src.core.mms.models import ModuleInfo
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
+from src.ui.components.card import Card
 from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
@@ -707,17 +708,16 @@ class ManagedPageRenderer(QWidget):
         table.apply_result(request_id, result)
 
     def _build_section(self, component: dict[str, Any]) -> QWidget:
-        frame = QFrame()
         variant = str(component.get("variant") or "group").strip().lower()
+        if variant == "card":
+            return self._build_card(component)
+
+        frame = QFrame()
         styles = {
             "plain": "QFrame { background: transparent; border: none; }",
             "group": (
                 "QFrame { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);"
                 " border-radius: 10px; }"
-            ),
-            "card": (
-                "QFrame { background: rgba(20, 25, 40, 0.85); border: 1px solid rgba(99,102,241,0.22);"
-                " border-radius: 12px; }"
             ),
         }
         frame.setStyleSheet(styles.get(variant, styles["group"]))
@@ -735,12 +735,23 @@ class ManagedPageRenderer(QWidget):
         layout.addWidget(self._build_layout_widget(component.get("children", []), component.get("layout", {})))
         return frame
 
+    def _build_card(self, component: dict[str, Any]) -> QWidget:
+        title = str(component.get("title") or "").strip()
+        layout_spec = dict(component.get("layout") or {})
+        card = Card(title=title, variant="card", gap=int(layout_spec.get("gap", 12)))
+        card.content_layout.addWidget(
+            self._build_layout_widget(component.get("children", []), layout_spec)
+        )
+        return card
+
     def _build_component(self, component: dict[str, Any]) -> QWidget:
         component_type = str(component.get("type") or "").strip()
         if component_type == "Text":
             return self._build_text(component)
         if component_type == "Button":
             return self._build_button(component)
+        if component_type == "Card":
+            return self._build_card(component)
         if component_type == "Section":
             return self._build_section(component)
         if component_type == "DataTable":

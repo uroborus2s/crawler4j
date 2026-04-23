@@ -51,7 +51,7 @@
 | Manifest 形态 | `ui_extension.pages[]`，每页只声明 `id`、`label`、`icon` |
 | 模块 UI 声明入口 | `module_runtime.py` 中的 `declare_ui(context)` |
 | 新能力入口 | `context.tools.call("ui.declare_page", ...)` |
-| 宿主公开控件 | `Page`、`Section`、`Text`、`Button`、`DataTable` |
+| 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Button`、`DataTable` |
 | `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`、`managed_resource`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
 | 宿主动作范围 | `Button.action` 第一版只开放 `reload`、`open_page` |
 | 明确删除 | `micro_app`、`ui:*`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_data_table` |

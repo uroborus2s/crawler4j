@@ -5,29 +5,30 @@ class StyleSheets:
     """Shared stylesheet helpers."""
 
     @staticmethod
-    def stat_card(*, accent_color: str) -> str:
+    def card(*, variant: str = "card") -> str:
+        normalized_variant = variant if variant in {"plain", "group", "card"} else "card"
+        if normalized_variant == "plain":
+            frame_style = "background: transparent; border: none;"
+        elif normalized_variant == "group":
+            frame_style = (
+                "background: rgba(255, 255, 255, 0.04); "
+                f"border: 1px solid {Palette.BORDER_LIGHT}; "
+                "border-radius: 14px;"
+            )
+        else:
+            frame_style = (
+                "background: rgba(17, 24, 39, 0.92); "
+                f"border: 1px solid {Palette.BORDER_LIGHT}; "
+                "border-radius: 18px;"
+            )
+
         return f"""
         QFrame {{
-            background: qlineargradient(
-                x1:0, y1:0, x2:1, y2:1,
-                stop:0 rgba(20, 25, 40, 0.92),
-                stop:1 rgba(20, 25, 40, 0.82)
-            );
-            border: 1px solid {Palette.BORDER_LIGHT};
-            border-radius: 10px;
+            {frame_style}
         }}
-        QLabel#statCardTitle {{
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 12px;
-            font-weight: 500;
-        }}
-        QLabel#statCardValue {{
-            color: {accent_color};
-            font-size: 28px;
-            font-weight: 700;
-        }}
-        QLabel#statCardSubtitle {{
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 11px;
+        QLabel#cardTitle {{
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 13px;
+            font-weight: 600;
         }}
         """

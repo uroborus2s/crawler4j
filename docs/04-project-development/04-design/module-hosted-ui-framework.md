@@ -110,10 +110,17 @@ def declare_ui(ctx):
 组件固定为：
 
 - `Page`
+- `Card`
 - `Section`
 - `Text`
 - `Button`
 - `DataTable`
+
+其中：
+
+- `Card` 是正式的卡片容器组件，只负责统一外壳和布局
+- `Section` 继续承担普通分组语义
+- `Section.variant="card"` 只保留为兼容别名，新的 schema 统一优先使用 `Card`
 
 ### 4.4 数据入口
 

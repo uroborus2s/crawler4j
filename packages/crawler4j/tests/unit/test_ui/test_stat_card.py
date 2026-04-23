@@ -19,7 +19,8 @@ def test_stat_card_renders_value_subtitle_and_delta(qtbot):
     assert card.subtitle_label.text() == "较昨日"
     assert card.subtitle_label.isHidden() is False
     assert card.delta_label.text() == "↑ 12.5%"
-    assert "#34d399" in card.styleSheet()
+    assert "#34d399" in card.value_label.styleSheet()
+    assert "border-radius: 18px;" in card.styleSheet()
     assert "#4ade80" in card.delta_label.styleSheet()
 
 

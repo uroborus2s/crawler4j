@@ -96,6 +96,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | Hosted UI 正式新增 `Card` 容器组件，并把 dashboard `StatCard` 改为基于共享 `Card` 组合；`Section.variant="card"` 收口为兼容别名 | Codex |
 | 2026-04-24 | 删除未加载的 `dark_theme.qss` 与旧箭头 SVG 资源，收口 UI 目录静态孤岛资源 | Codex |
 | 2026-04-24 | 清理 `config_editor` / `log_viewer` / `status_bar` / `syntax_highlighter` 孤岛代码，并新增正式 `StatCard` 组件替换 dashboard 私有实现 | Codex |
 | 2026-04-24 | 为 `src.ui.components` 新增导入 smoke，并删除未使用的旧路径残留组件 `glass_card` / `metric_badge` | Codex |
