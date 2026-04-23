@@ -121,9 +121,7 @@ class UIExtensionInfo:
         allowed_keys = {"pages"}
         unknown_keys = sorted(set(data) - allowed_keys)
         if unknown_keys:
-            raise ValueError(
-                "ui_extension 包含已移除或不支持的字段: " + ", ".join(unknown_keys)
-            )
+            raise ValueError("ui_extension 包含不支持的字段: " + ", ".join(unknown_keys))
 
         raw_pages = data.get("pages", [])
         if raw_pages is None:

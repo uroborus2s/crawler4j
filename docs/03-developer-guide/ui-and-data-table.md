@@ -271,4 +271,3 @@ def query_billing_stats_table(
 - Hosted UI 是否真的通过 `ui.declare_page` 注册
 - `load_handler` 是否存在、为同步函数且签名兼容 `(context, page_id, params)`
 - 内联表格 `query_handler` 若声明，是否存在、为同步函数且签名兼容 `(context, table_id, query, params)`
-- 顶层 `ui/` 目录是否已清理；当前会被视为旧结构残留并直接阻断

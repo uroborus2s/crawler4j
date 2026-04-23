@@ -26,7 +26,6 @@ from src.utils.paths import get_builtin_modules_path, get_user_modules_path
 
 # 忽略的目录
 IGNORED_DIRS = {"__pycache__", ".git", ".venv", "node_modules"}
-LEGACY_MODULE_FILES = ("config_schema.json", "strategy.yaml")
 MANAGED_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REMOVED_MANIFEST_FIELDS = ("sdk_version_range",)
@@ -173,14 +172,6 @@ class ModuleScanner:
                 hint="请在 module.yaml 中添加 name 字段"
             )
 
-        for legacy_file in LEGACY_MODULE_FILES:
-            if (module_path / legacy_file).exists():
-                raise ModuleValidationError(
-                    f"检测到已废弃的模块声明文件: {legacy_file}",
-                    stage="VALIDATE",
-                    hint="模块配置与数据表入口已改为宿主集中管理，请删除旧声明式文件并改用 SDK CLI"
-                )
-        
         # 命名规范校验（小写字母、数字、下划线）
         if not manifest.name.replace("_", "").isalnum() or not manifest.name.islower():
             warnings.append(f"模块名 '{manifest.name}' 不符合命名规范（应为小写字母、数字、下划线）")

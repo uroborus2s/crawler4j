@@ -240,7 +240,7 @@ config_defaults:
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
         assert manifest.config_defaults.workflows == {"default": {"headless": False}}
 
-    def test_parse_manifest_rejects_legacy_ui_extension_fields(self, tmp_path):
+    def test_parse_manifest_rejects_unsupported_ui_extension_fields(self, tmp_path):
         from src.core.mms.models import ModuleParseError
 
         module_dir = tmp_path / "test_module"
@@ -253,8 +253,7 @@ upgrade_source:
   type: github_release
   repo: example/test_module
 ui_extension:
-  type: micro_app
-  entry: ui:LegacyPage
+  extra: unsupported
 """.strip(),
             encoding="utf-8",
         )
@@ -352,9 +351,7 @@ upgrade_source:
         assert module_info.status == ModuleStatus.INVALID
         assert module_info.error != ""
 
-    def test_validate_rejects_legacy_config_schema(self, tmp_path):
-        from src.core.mms.models import ModuleValidationError
-
+    def test_validate_allows_additional_module_files(self, tmp_path):
         (tmp_path / "config_schema.json").write_text("{}", encoding="utf-8")
         manifest = ModuleManifest(
             name="demo_module",
@@ -362,12 +359,9 @@ upgrade_source:
         )
         scanner = ModuleScanner(scan_paths=[tmp_path])
 
-        with pytest.raises(ModuleValidationError) as exc_info:
-            scanner.validate(manifest, tmp_path)
+        assert scanner.validate(manifest, tmp_path) == []
 
-        assert "config_schema.json" in str(exc_info.value)
-
-    def test_validate_rejects_legacy_page_entry_field(self):
+    def test_validate_rejects_unsupported_page_extra_field(self):
         manifest = ModuleManifest(
             name="demo_module",
             upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
@@ -378,7 +372,7 @@ upgrade_source:
             ),
         )
         manifest_dict = manifest.to_dict()
-        manifest_dict["ui_extension"]["pages"][0]["entry"] = "ui:CustomPage"
+        manifest_dict["ui_extension"]["pages"][0]["extra"] = "unsupported"
         with pytest.raises(ValueError):
             ModuleManifest.from_dict(manifest_dict)
 

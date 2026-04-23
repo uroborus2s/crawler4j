@@ -58,9 +58,6 @@ SEMVER_RE = re.compile(
 )
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 GITHUB_TOKEN_ENV_VARS = ("CRAWLER4J_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
-LEGACY_UI_EXTENSION_KEYS = ("type", "entry", "detail_menu", "trusted")
-
-
 class CLIError(RuntimeError):
     """Raised when a CLI action cannot be completed safely."""
 
@@ -571,11 +568,9 @@ def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
     if not isinstance(ui_extension, dict):
         return ["ui_extension 必须是 YAML 映射对象"]
 
-    legacy_keys = [key for key in LEGACY_UI_EXTENSION_KEYS if key in ui_extension]
-    if legacy_keys:
-        errors.append(
-            "ui_extension 不再支持旧字段: " + ", ".join(legacy_keys)
-        )
+    unknown_keys = sorted(set(ui_extension) - {"pages"})
+    if unknown_keys:
+        errors.append("ui_extension 包含不支持的字段: " + ", ".join(unknown_keys))
 
     pages = ui_extension.get("pages")
     if pages is None:
@@ -628,12 +623,6 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
         errors.append("module.yaml 缺少 name")
     if "sdk_version_range" in manifest:
         errors.append("module.yaml 不再允许声明 sdk_version_range")
-
-    for legacy_file in ["config_schema.json", "strategy.yaml"]:
-        if (module_root / legacy_file).exists():
-            errors.append(f"残留旧配置文件: {legacy_file}")
-    if (module_root / "ui").exists():
-        errors.append("残留旧 UI 目录: ui/")
 
     workflow_names = _manifest_workflow_names(manifest)
     if not workflow_names:

@@ -38,11 +38,13 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
     assert "demo_model/workflows/repair_orders.py" in members
 
 
-def test_sdk_cli_scaffold_rejects_legacy_ui_directory_acceptance(rich_module_root: Path):
-    legacy_ui_dir = rich_module_root / "ui"
-    legacy_ui_dir.mkdir()
-    (legacy_ui_dir / "legacy_page.py").write_text("class LegacyPage: ...\n", encoding="utf-8")
+def test_sdk_cli_scaffold_allows_additional_ui_directory_acceptance(rich_module_root: Path):
+    extra_ui_dir = rich_module_root / "ui"
+    extra_ui_dir.mkdir()
+    (extra_ui_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
 
-    result = run_cli("check", "structure", cwd=rich_module_root)
-    result.assert_failed()
-    result.assert_stdout_contains("残留旧 UI 目录: ui/")
+    result = run_cli("package", "build", cwd=rich_module_root)
+    result.assert_ok()
+    result.assert_stdout_contains("已生成安装包")
+    archive = rich_module_root / "dist" / "demo_model-0.1.0.zip"
+    assert "demo_model/ui/custom_page.py" in archive_members(archive)

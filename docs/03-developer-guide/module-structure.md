@@ -122,6 +122,4 @@ config_defaults:
 - 需要多个页面时，就执行多次 `page create`
 - 可编辑表格和只读表格都在页面 schema 里通过 `DataTable` 表达
 
-如果你看见有人手写 `ui/SomePage.py`，那已经不是当前正式结构了。
-
-当前 `crawler4j check structure / release / full` 与 `package build` 都会把顶层 `ui/` 目录当成旧结构残留直接阻断；不要再把它当成“还能顺手兼容”的可选目录。
+如果你看见有人手写 `ui/SomePage.py`，那已经偏离当前正式 Hosted UI 接口了。当前宿主与 CLI 只认 `module.yaml.ui_extension.pages` 和 `module_runtime.py` 中的页面声明。

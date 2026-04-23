@@ -134,16 +134,16 @@ def test_archive_members_keeps_regular_files_while_excluding_cache_artifacts(tmp
     ignored_idea_file.write_text("<xml />", encoding="utf-8")
     ignored_vscode_file = module_root / ".vscode" / "settings.json"
     ignored_vscode_file.write_text("{}", encoding="utf-8")
-    legacy_ui_dir = module_root / "ui"
-    legacy_ui_dir.mkdir()
-    legacy_ui_file = legacy_ui_dir / "legacy_page.py"
-    legacy_ui_file.write_text("class LegacyPage: ...\n", encoding="utf-8")
+    extra_ui_dir = module_root / "ui"
+    extra_ui_dir.mkdir()
+    extra_ui_file = extra_ui_dir / "custom_page.py"
+    extra_ui_file.write_text("class CustomPage: ...\n", encoding="utf-8")
 
     members = commands._archive_members(module_root)
     archived_paths = {arcname for _, arcname in members}
 
     assert "demo_model/module.yaml" in archived_paths
-    assert "demo_model/ui/legacy_page.py" in archived_paths
+    assert "demo_model/ui/custom_page.py" in archived_paths
     assert "demo_model/.DS_Store" not in archived_paths
     assert "demo_model/.idea/workspace.xml" not in archived_paths
     assert "demo_model/.vscode/settings.json" not in archived_paths
@@ -361,6 +361,7 @@ def test_check_release_rejects_pyproject_version_drift(module_root: Path, monkey
     [
         ({"ui_extension": ""}, "ui_extension 必须是 YAML 映射对象"),
         ({"ui_extension": {"pages": ""}}, "ui_extension.pages 必须是数组"),
+        ({"ui_extension": {"extra": "value"}}, "ui_extension 包含不支持的字段: extra"),
     ],
 )
 def test_check_structure_rejects_falsy_invalid_ui_extension_types(
@@ -764,36 +765,28 @@ def test_check_full_rejects_extra_declared_page_not_in_manifest(
     assert "declare_ui 注册了未写入 module.yaml.ui_extension.pages 的宿主页: rogue" in captured.out
 
 
-@pytest.mark.parametrize("legacy_name", ["config_schema.json", "strategy.yaml"])
-def test_check_structure_rejects_legacy_files(
+@pytest.mark.parametrize("extra_name", ["config_schema.json", "strategy.yaml"])
+def test_check_structure_allows_additional_module_files(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    legacy_name: str,
+    extra_name: str,
 ):
     monkeypatch.chdir(module_root)
-    (module_root / legacy_name).write_text("{}", encoding="utf-8")
+    (module_root / extra_name).write_text("{}", encoding="utf-8")
 
-    assert commands.cmd_check_structure(Namespace()) == 1
-
-    captured = capsys.readouterr()
-    assert f"残留旧配置文件: {legacy_name}" in captured.out
+    assert commands.cmd_check_structure(Namespace()) == 0
 
 
-def test_check_structure_rejects_legacy_ui_directory(
+def test_check_structure_allows_additional_ui_directory(
     module_root: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ):
     monkeypatch.chdir(module_root)
-    legacy_ui_dir = module_root / "ui"
-    legacy_ui_dir.mkdir()
-    (legacy_ui_dir / "legacy_page.py").write_text("class LegacyPage: ...\n", encoding="utf-8")
+    extra_ui_dir = module_root / "ui"
+    extra_ui_dir.mkdir()
+    (extra_ui_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
 
-    assert commands.cmd_check_structure(Namespace()) == 1
-
-    captured = capsys.readouterr()
-    assert "残留旧 UI 目录: ui/" in captured.out
+    assert commands.cmd_check_structure(Namespace()) == 0
 
 
 def test_package_build_and_verify(module_root: Path, monkeypatch: pytest.MonkeyPatch):
@@ -817,10 +810,10 @@ def test_package_build_and_verify(module_root: Path, monkeypatch: pytest.MonkeyP
         ["crawler4j", "add-workflow", "sync_orders"],
         ["crawler4j", "add-ui", "dashboard"],
         ["crawler4j", "add-data-table", "accounts"],
-        ["crawler4j", "add-data", "legacy_data"],
+        ["crawler4j", "add-data", "removed_data"],
     ],
 )
-def test_legacy_command_name_is_rejected(monkeypatch: pytest.MonkeyPatch, argv: list[str]):
+def test_removed_command_name_is_rejected(monkeypatch: pytest.MonkeyPatch, argv: list[str]):
     monkeypatch.setattr(sys, "argv", argv)
 
     with pytest.raises(SystemExit) as exc_info:

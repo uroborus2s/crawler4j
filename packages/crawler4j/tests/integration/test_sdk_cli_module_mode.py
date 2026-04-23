@@ -115,8 +115,8 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     assert [item["name"] for item in manifest["workflows"]] == ["main_workflow", "repair_orders"]
 
 
-def test_cli_rejects_legacy_commands(tmp_path: Path):
-    legacy_cases = [
+def test_cli_rejects_removed_commands(tmp_path: Path):
+    removed_cases = [
         ("init-model", "removed_command_project"),
         ("add", "task_name"),
         ("new", "task_name"),
@@ -124,10 +124,10 @@ def test_cli_rejects_legacy_commands(tmp_path: Path):
         ("add-workflow", "sync_orders"),
         ("add-ui", "dashboard"),
         ("add-data-table", "accounts"),
-        ("add-data", "legacy_data"),
+        ("add-data", "removed_data"),
     ]
 
-    for argv in legacy_cases:
+    for argv in removed_cases:
         result = _run_cli(*argv, cwd=tmp_path)
         assert result.returncode != 0
         assert "invalid choice" in result.stderr
@@ -166,7 +166,7 @@ def test_cli_check_full_rejects_manifest_declare_ui_drift(tmp_path: Path):
     assert "module.yaml.ui_extension.pages 声明的宿主页未从 declare_ui 注册: dashboard" in check_result.stdout
 
 
-def test_cli_package_build_rejects_legacy_ui_directory(tmp_path: Path):
+def test_cli_package_build_allows_additional_ui_directory(tmp_path: Path):
     target = tmp_path / "demo_model"
 
     init_result = _run_cli(
@@ -183,13 +183,13 @@ def test_cli_package_build_rejects_legacy_ui_directory(tmp_path: Path):
     )
     assert init_result.returncode == 0, init_result.stderr
 
-    legacy_ui_dir = target / "ui"
-    legacy_ui_dir.mkdir()
-    (legacy_ui_dir / "legacy_page.py").write_text("class LegacyPage: ...\n", encoding="utf-8")
+    extra_ui_dir = target / "ui"
+    extra_ui_dir.mkdir()
+    (extra_ui_dir / "custom_page.py").write_text("class CustomPage: ...\n", encoding="utf-8")
 
     package_result = _run_cli("package", "build", cwd=target)
-    assert package_result.returncode == 1
-    assert "残留旧 UI 目录: ui/" in package_result.stdout
+    assert package_result.returncode == 0, package_result.stderr
+    assert (target / "dist" / "demo_model-0.1.0.zip").exists()
 
 
 def test_cli_package_build_rejects_manifest_declare_ui_drift(tmp_path: Path):
