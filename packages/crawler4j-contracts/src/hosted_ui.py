@@ -59,6 +59,8 @@ ALLOWED_DATA_SOURCE_KEYS = {"type", "handler", "binding", "rows", "resource_id"}
 ALLOWED_INLINE_DATA_SOURCE_TYPES = {"binding", "rows", "query_handler", "managed_resource"}
 ALLOWED_TABLE_CRUD_KEYS = {
     "mode",
+    "render",
+    "toolbar",
     "primary_key",
     "form",
     "create_handler",
@@ -66,6 +68,8 @@ ALLOWED_TABLE_CRUD_KEYS = {
     "delete_handler",
 }
 ALLOWED_TABLE_CRUD_FORM_KEYS = {"create_columns", "update_columns"}
+ALLOWED_TABLE_CRUD_RENDER_MODES = {"toolbar", "row_actions"}
+ALLOWED_TABLE_CRUD_TOOLBAR_KEYS = {"create", "update", "delete"}
 ALLOWED_LAYOUT_DIRECTIONS = {"column", "row"}
 ALLOWED_LAYOUT_KINDS = {"grid"}
 ALLOWED_TEXT_STYLES = {"title", "subtitle", "body", "meta"}
@@ -389,6 +393,21 @@ def _normalize_crud_form_columns(raw: Any, *, field_name: str) -> list[str]:
     ]
 
 
+def _normalize_table_crud_toolbar(raw: Any, *, field_name: str) -> dict[str, bool]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+    unknown_keys = sorted(set(raw) - ALLOWED_TABLE_CRUD_TOOLBAR_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+    return {
+        key: bool(raw.get(key))
+        for key in ("create", "update", "delete")
+        if key in raw
+    }
+
+
 def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError(f"{field_name} 必须是对象")
@@ -400,6 +419,9 @@ def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
     mode = str(raw.get("mode") or "handlers").strip().lower()
     if mode != "handlers":
         raise ValueError(f"{field_name}.mode 目前只支持 handlers")
+    render = str(raw.get("render") or "toolbar").strip().lower()
+    if render not in ALLOWED_TABLE_CRUD_RENDER_MODES:
+        raise ValueError(f"{field_name}.render 不受支持: {render}")
 
     form = raw.get("form") or {}
     if not isinstance(form, dict):
@@ -410,6 +432,11 @@ def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
 
     normalized = {
         "mode": mode,
+        "render": render,
+        "toolbar": _normalize_table_crud_toolbar(
+            raw.get("toolbar"),
+            field_name=f"{field_name}.toolbar",
+        ),
         "primary_key": _validate_managed_identifier(
             str(raw.get("primary_key") or ""),
             field_name=f"{field_name}.primary_key",

@@ -87,7 +87,7 @@ def load_dashboard_page(
 
 宿主负责渲染和交互分发；模块负责返回页面数据、实现查询和业务动作。
 
-## `DataTable` 的 3 种数据源
+## `DataTable` 的 4 种数据源
 
 ### 1. `binding`
 
@@ -168,6 +168,63 @@ def query_billing_stats_table(
 ```python
 (context, table_id, query, params=None)
 ```
+
+### 4. `managed_resource`
+
+宿主直接读取已注册资源，并把搜索、排序、分页统一适配到共享 `SkyDataTable`。这个模式适合模块实体表，也允许叠加 `crud`：
+
+```python
+{
+    "type": "DataTable",
+    "table_id": "accounts",
+    "columns": [
+        {"key": "account_id", "label": "ID", "visible": False},
+        {"key": "name", "label": "账号名", "required": True},
+        {"key": "status", "label": "状态", "type": "badge"},
+    ],
+    "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+    "crud": {
+        "mode": "handlers",
+        "render": "row_actions",
+        "toolbar": {"create": True},
+        "primary_key": "account_id",
+        "form": {
+            "create_columns": ["name"],
+            "update_columns": ["name"],
+        },
+        "create_handler": "create_account_from_ui",
+        "update_handler": "update_account_from_ui",
+        "delete_handler": "delete_account_from_ui",
+    },
+}
+```
+
+这里的边界仍然不变：
+
+- `SkyDataTable` 只负责渲染 actions 列和发出 `row_action_requested`
+- 宿主 renderer 负责把 `crud.render="row_actions"` 适配成行内按钮
+- 模块真正的数据写入仍然只能发生在 `hooks/*.py`
+
+## `crud` 怎么配
+
+当前 `crud` 正式支持：
+
+- `mode`
+- `render`
+- `toolbar`
+- `primary_key`
+- `form`
+- `create_handler`
+- `update_handler`
+- `delete_handler`
+
+其中：
+
+- `render="toolbar"`：编辑/删除默认出现在表头 toolbar
+- `render="row_actions"`：编辑/删除默认适配到 actions 列，新增默认仍可保留在 toolbar
+- `toolbar.create/update/delete`：按动作粒度覆盖 toolbar 放置，未声明时沿用默认放置策略
+- `form.create_columns/update_columns`：只声明要进入表单的字段，不需要把所有列都放进去
+- 非必填字段留空时会把 `None` 传给 hook，是否“清空字段”还是“保持原值”由 hook 自己决定
 
 ## 页面动作
 

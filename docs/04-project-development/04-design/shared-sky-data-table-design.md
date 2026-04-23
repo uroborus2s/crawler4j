@@ -157,12 +157,32 @@ class SkyDataTable(QWidget):
 - `features`
 - `data_source`
 - `row_action`
+- `crud`
 
 `data_source.type` 支持：
 
 - `binding`
 - `rows`
 - `query_handler`
+- `managed_resource`
+
+`crud` 当前支持：
+
+- `mode`
+- `render`
+- `toolbar`
+- `primary_key`
+- `form`
+- `create_handler`
+- `update_handler`
+- `delete_handler`
+
+其中：
+
+- `render=toolbar` 时，新增/编辑/删除默认落在表头 toolbar
+- `render=row_actions` 时，编辑/删除由宿主 renderer 适配到 actions 列；`SkyDataTable` 只渲染按钮并发事件
+- `toolbar.create/update/delete` 可按动作粒度覆盖 toolbar 放置，避免和行内 actions 重复
+- 行内 actions 列由宿主 adapter 注入或复用已有 `type=actions` 列，不把 CRUD 语义下沉到共享组件内部
 
 内联 `DataTable` 必须显式声明 `data_source`，不再接受顶层 `binding` / `rows` 兼容写法。
 

@@ -381,6 +381,208 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         restore_module(service, original_registry, module_name)
 
 
+def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_page_row_action_crud_table_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="accounts",
+                label="账号管理",
+                icon="📋",
+                schema={
+                    "type": "Page",
+                    "title": "账号管理",
+                    "load_handler": "load_accounts_page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                            "crud": {
+                                "mode": "handlers",
+                                "render": "row_actions",
+                                "toolbar": {"create": True},
+                                "primary_key": "account_id",
+                                "form": {
+                                    "create_columns": ["name", "secret"],
+                                    "update_columns": ["name", "secret"],
+                                },
+                                "create_handler": "create_account_from_ui",
+                                "update_handler": "update_account_from_ui",
+                                "delete_handler": "delete_account_from_ui",
+                            },
+                            "columns": [
+                                {"key": "account_id", "label": "ID", "visible": False},
+                                {"key": "name", "label": "账号名", "required": True},
+                                {"key": "secret", "label": "密码", "visible": False, "required": True},
+                                {"key": "status", "label": "状态", "readonly": True},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+            """,
+            "hooks/create_account_from_ui.py": """
+            def handle(context, payload):
+                rows = context.tools.call("db.list_records", resource="accounts", limit=1000, offset=0)
+                next_id = len(rows) + 1
+                row = {
+                    "account_id": str(next_id),
+                    "name": str(payload.get("name") or ""),
+                    "secret": str(payload.get("secret") or ""),
+                    "status": "active",
+                }
+                context.tools.call("db.replace_records", resource="accounts", records=rows + [row])
+                return {"record": row, "created": True}
+            """,
+            "hooks/update_account_from_ui.py": """
+            def handle(context, account_id, payload):
+                rows = context.tools.call("db.list_records", resource="accounts", limit=1000, offset=0)
+                updated_rows = []
+                updated = None
+                for row in rows:
+                    current = dict(row)
+                    if str(current.get("account_id")) == str(account_id):
+                        current.update(
+                            {
+                                "name": str(payload.get("name") or current.get("name") or ""),
+                                "secret": str(payload.get("secret") or current.get("secret") or ""),
+                            }
+                        )
+                        updated = dict(current)
+                    updated_rows.append(current)
+                context.tools.call("db.replace_records", resource="accounts", records=updated_rows)
+                return {"record": updated, "created": False}
+            """,
+            "hooks/delete_account_from_ui.py": """
+            def handle(context, account_id):
+                rows = context.tools.call("db.list_records", resource="accounts", limit=1000, offset=0)
+                remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
+                deleted = next((row for row in rows if str(row.get("account_id")) == str(account_id)), None)
+                context.tools.call("db.replace_records", resource="accounts", records=remaining)
+                return {"deleted": True, "record": deleted, "account_id": str(account_id)}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理", icon="📋")])
+    manifest.data = {
+        "resources": [
+            {
+                "resource_id": "accounts",
+                "storage_mode": "managed_dataset",
+                "record_key_field": "account_id",
+                "schema": {},
+                "indexes": {},
+                "cleanup_policy": "delete_rows",
+            }
+        ],
+        "views": [],
+        "queries": [],
+        "seeds": [],
+    }
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    store = get_module_data_store()
+    payloads = iter(
+        [
+            {"name": "beta", "secret": "secret-beta"},
+            {"name": "alpha-updated", "secret": "secret-alpha-2"},
+        ]
+    )
+
+    monkeypatch.setattr(
+        ManagedPageRenderer,
+        "_prompt_crud_form_payload",
+        lambda self, component, *, mode, row=None: dict(next(payloads)),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.managed_page_renderer.ConfirmDialog.delete_confirm",
+        lambda parent, item_name: True,
+    )
+
+    try:
+        _sync_managed_dataset(module_dir, module_name=module_name, resource_id="accounts")
+        assert store.replace_resource_records(
+            module_name,
+            "accounts",
+            [
+                {
+                    "account_id": "1",
+                    "name": "alpha",
+                    "secret": "secret-alpha",
+                    "status": "active",
+                }
+            ],
+        ) is True
+
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        table = page._data_table_widgets["accounts"]
+        qtbot.waitUntil(lambda: table.rowCount() == 1)
+
+        assert table.columnCount() == 3
+        assert table.horizontalHeaderItem(0).text() == "账号名"
+        assert table.horizontalHeaderItem(1).text() == "状态"
+        assert table.horizontalHeaderItem(2).text() == "操作"
+        assert table.item(0, 0).text() == "alpha"
+
+        add_button = next(button for button in page.findChildren(QPushButton) if button.text() == "新增")
+        add_button.click()
+        qtbot.waitUntil(lambda: table.rowCount() == 2)
+
+        action_cell = table.cellWidget(0, 2)
+        assert action_cell is not None
+        action_texts = [button.text() for button in action_cell.findChildren(QPushButton)]
+        assert action_texts == ["编辑", "删除"]
+
+        edit_button = next(button for button in action_cell.findChildren(QPushButton) if button.text() == "编辑")
+        edit_button.click()
+        qtbot.waitUntil(lambda: any(table.item(row, 0).text() == "alpha-updated" for row in range(table.rowCount())))
+
+        beta_row_index = next(
+            index
+            for index, row in enumerate(table.displayed_rows())
+            if str(row.get("name") or "") == "beta"
+        )
+        delete_button = next(
+            button
+            for button in table.cellWidget(beta_row_index, 2).findChildren(QPushButton)
+            if button.text() == "删除"
+        )
+        delete_button.click()
+        qtbot.waitUntil(lambda: table.rowCount() == 1)
+
+        assert [
+            {
+                "account_id": str(row.get("account_id") or ""),
+                "name": str(row.get("name") or ""),
+                "secret": str(row.get("secret") or ""),
+                "status": str(row.get("status") or ""),
+            }
+            for row in store.list_records(module_name, "accounts", limit=1000, offset=0)
+        ] == [
+            {
+                "account_id": "1",
+                "name": "alpha-updated",
+                "secret": "secret-alpha-2",
+                "status": "active",
+            }
+        ]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
 def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(qtbot, tmp_path):
     module_name = "hosted_page_readonly_tools_module"
     module_dir = write_module_tree(

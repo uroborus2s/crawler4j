@@ -29,6 +29,10 @@ from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
 from src.ui.components.line_edit import StyledLineEdit
 
+CRUD_ROW_ACTION_EDIT = "__crud_update__"
+CRUD_ROW_ACTION_DELETE = "__crud_delete__"
+CRUD_ACTION_COLUMN_KEY = "__crud_actions__"
+
 
 class ManagedPageRenderer(QWidget):
     """Render `ui.declare_page` declared hosted pages."""
@@ -198,6 +202,7 @@ class ManagedPageRenderer(QWidget):
         return button
 
     def _build_data_table(self, component: dict[str, Any]) -> QWidget:
+        component = self._prepare_table_component(component)
         wrapper = QWidget()
         layout = QVBoxLayout(wrapper)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -232,6 +237,15 @@ class ManagedPageRenderer(QWidget):
         row_action = component.get("row_action")
         if isinstance(row_action, dict):
             table.row_clicked.connect(lambda row, action=dict(row_action): self._handle_row_action(action, row))
+        if self._build_crud_row_actions(component):
+            table.row_action_requested.connect(
+                lambda action_id, row, table_widget=table, spec=dict(component): self._handle_crud_row_action(
+                    spec,
+                    table_widget,
+                    action_id,
+                    row,
+                )
+            )
 
         if self._build_crud_toolbar(header, component, table):
             layout.addLayout(header)
@@ -251,6 +265,117 @@ class ManagedPageRenderer(QWidget):
         visible_columns = [column for column in columns if column.get("visible", True) is not False]
         return visible_columns or columns
 
+    def _prepare_table_component(self, component: dict[str, Any]) -> dict[str, Any]:
+        prepared = dict(component)
+        columns = [dict(column) for column in list(component.get("columns") or []) if isinstance(column, dict)]
+        if self._build_crud_row_actions(component) and not self._has_visible_action_column(columns):
+            columns.append(
+                {
+                    "key": CRUD_ACTION_COLUMN_KEY,
+                    "label": "操作",
+                    "type": "actions",
+                    "width": 180,
+                    "sortable": False,
+                    "searchable": False,
+                }
+            )
+        prepared["columns"] = columns
+        return prepared
+
+    @staticmethod
+    def _crud_config(component: dict[str, Any]) -> dict[str, Any]:
+        crud = component.get("crud")
+        return dict(crud) if isinstance(crud, dict) else {}
+
+    def _crud_toolbar_actions(self, component: dict[str, Any]) -> dict[str, bool]:
+        crud = self._crud_config(component)
+        render = str(crud.get("render") or "toolbar").strip().lower() or "toolbar"
+        toolbar = dict(crud.get("toolbar") or {}) if isinstance(crud.get("toolbar"), dict) else {}
+        handlers = {
+            "create": bool(str(crud.get("create_handler") or "").strip()),
+            "update": bool(str(crud.get("update_handler") or "").strip()),
+            "delete": bool(str(crud.get("delete_handler") or "").strip()),
+        }
+        actions = {
+            "create": handlers["create"],
+            "update": handlers["update"] and render != "row_actions",
+            "delete": handlers["delete"] and render != "row_actions",
+        }
+        for action_name in ("create", "update", "delete"):
+            if action_name in toolbar:
+                actions[action_name] = handlers[action_name] and bool(toolbar[action_name])
+        return actions
+
+    def _build_crud_row_actions(self, component: dict[str, Any]) -> bool:
+        crud = self._crud_config(component)
+        if str(crud.get("render") or "toolbar").strip().lower() != "row_actions":
+            return False
+        toolbar_actions = self._crud_toolbar_actions(component)
+        has_update_action = bool(str(crud.get("update_handler") or "").strip()) and not toolbar_actions["update"]
+        has_delete_action = bool(str(crud.get("delete_handler") or "").strip()) and not toolbar_actions["delete"]
+        return has_update_action or has_delete_action
+
+    @staticmethod
+    def _has_visible_action_column(columns: list[dict[str, Any]]) -> bool:
+        for column in columns:
+            if not isinstance(column, dict):
+                continue
+            if str(column.get("type") or "").strip().lower() != "actions":
+                continue
+            if column.get("visible", True) is False:
+                continue
+            if str(column.get("key") or "").strip():
+                return True
+        return False
+
+    @staticmethod
+    def _action_column_key(columns: list[dict[str, Any]]) -> str:
+        for column in columns:
+            if not isinstance(column, dict):
+                continue
+            if str(column.get("type") or "").strip().lower() != "actions":
+                continue
+            if column.get("visible", True) is False:
+                continue
+            key = str(column.get("key") or "").strip()
+            if key:
+                return key
+        return CRUD_ACTION_COLUMN_KEY
+
+    def _crud_row_action_specs(self, component: dict[str, Any]) -> list[dict[str, Any]]:
+        if not self._build_crud_row_actions(component):
+            return []
+        crud = self._crud_config(component)
+        toolbar_actions = self._crud_toolbar_actions(component)
+        actions: list[dict[str, Any]] = []
+        if bool(str(crud.get("update_handler") or "").strip()) and not toolbar_actions["update"]:
+            actions.append({"id": CRUD_ROW_ACTION_EDIT, "label": "编辑", "variant": "secondary"})
+        if bool(str(crud.get("delete_handler") or "").strip()) and not toolbar_actions["delete"]:
+            actions.append({"id": CRUD_ROW_ACTION_DELETE, "label": "删除", "variant": "danger"})
+        return actions
+
+    def _attach_crud_row_actions(self, component: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        actions = self._crud_row_action_specs(component)
+        rows = result.get("rows") if isinstance(result, dict) else None
+        if not actions or not isinstance(rows, list):
+            return result
+
+        action_key = self._action_column_key(list(component.get("columns") or []))
+        updated_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            updated_row = dict(row)
+            existing_actions = updated_row.get(action_key)
+            merged_actions = [dict(item) for item in existing_actions if isinstance(item, dict)] if isinstance(existing_actions, list) else []
+            merged_actions.extend(dict(action) for action in actions)
+            updated_row[action_key] = merged_actions
+            updated_rows.append(updated_row)
+
+        updated_result = dict(result)
+        updated_result["rows"] = updated_rows
+        return updated_result
+
     def _build_crud_toolbar(
         self,
         header: QHBoxLayout,
@@ -261,24 +386,22 @@ class ManagedPageRenderer(QWidget):
         if not isinstance(crud, dict):
             return False
 
-        create_handler = str(crud.get("create_handler") or "").strip()
-        update_handler = str(crud.get("update_handler") or "").strip()
-        delete_handler = str(crud.get("delete_handler") or "").strip()
-        if not any((create_handler, update_handler, delete_handler)):
+        toolbar_actions = self._crud_toolbar_actions(component)
+        if not any(toolbar_actions.values()):
             return False
 
         edit_button: QPushButton | None = None
         delete_button: QPushButton | None = None
 
-        if create_handler:
+        if toolbar_actions["create"]:
             create_button = QPushButton("新增")
             create_button.clicked.connect(lambda _checked=False: self._handle_create_action(component, table))
             header.addWidget(create_button)
-        if update_handler:
+        if toolbar_actions["update"]:
             edit_button = QPushButton("编辑")
             edit_button.clicked.connect(lambda _checked=False: self._handle_update_action(component, table))
             header.addWidget(edit_button)
-        if delete_handler:
+        if toolbar_actions["delete"]:
             delete_button = QPushButton("删除")
             delete_button.clicked.connect(lambda _checked=False: self._handle_delete_action(component, table))
             header.addWidget(delete_button)
@@ -292,7 +415,7 @@ class ManagedPageRenderer(QWidget):
             button.setEnabled(False)
             button.setCursor(table.cursor())
             button.setStyleSheet(table._action_button_style(variant))
-        if create_handler:
+        if toolbar_actions["create"]:
             create_button.setCursor(table.cursor())
             create_button.setStyleSheet(table._action_button_style("primary"))
 
@@ -306,6 +429,21 @@ class ManagedPageRenderer(QWidget):
         table.selection_changed.connect(_sync_buttons)
         _sync_buttons(table.selected_rows())
         return True
+
+    def _handle_crud_row_action(
+        self,
+        component: dict[str, Any],
+        table: SkyDataTable,
+        action_id: str,
+        row: dict[str, Any],
+    ) -> None:
+        del row
+        if action_id == CRUD_ROW_ACTION_EDIT:
+            self._handle_update_action(component, table)
+            return
+        if action_id == CRUD_ROW_ACTION_DELETE:
+            self._handle_delete_action(component, table)
+            return
 
     def _handle_create_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
         crud = dict(component.get("crud") or {})
@@ -565,6 +703,7 @@ class ManagedPageRenderer(QWidget):
         except Exception as exc:
             table.apply_error(request_id, str(exc))
             return
+        result = self._attach_crud_row_actions(component, result)
         table.apply_result(request_id, result)
 
     def _build_section(self, component: dict[str, Any]) -> QWidget:
