@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | 当前文档治理缺口审计  
 **下游输出：** `docs/04-project-development/05-development-process/execution-log.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/07-release-delivery/release-notes.md`  
 **关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-023`, `TASK-024`, `TASK-025`, `TASK-027`, `TASK-028`, `TASK-029`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`, `CR-004`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `API-009`, `API-010`
-**最后更新：** 2026-04-22
+**最后更新：** 2026-04-24
 
 ## 1. 实施目标
 
@@ -58,6 +58,7 @@
 - Wave 4 额外需要形成“已满足 / 未满足 / 风险”审查清单
 - Wave 5 额外需要验证 `docs/` 已完成单树重组，且仓库不再依赖 MkDocs
 - Wave 6 已完成：已按真实模块作者视角重做开发、调试、测试与打包说明
+- UI 组件目录需保留导入 smoke；未被主流程引用的残留组件也必须能被正常导入，避免已删除旧路径继续静默滞留
 - Wave 10 已完成：ModuleAssembler 与 Shim 落地并经全量测试验证
 - Wave 9 后续回归已补强：`core:data_table` 页面会在刷新时重放 `declare_ui`，并验证 `create_handler` / `update_handler` 与 DevLink 调试上下文
 - Wave 14 额外需要验证固定环境池 Service Job 的“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、黑号停发号与环境删除后的资格卡片级联清理
@@ -93,6 +94,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | 为 `src.ui.components` 新增导入 smoke，并删除未使用的旧路径残留组件 `glass_card` / `metric_badge` | Codex |
 | 2026-04-22 | 新增 Wave 16 / `TASK-025`，为模块 UI 建立 hosted page V1 并移除旧 `micro_app/ui:*` 路径 | Codex |
 | 2026-04-22 | 完成 Wave 16 / `TASK-025` 实现与本地回归验证 | Codex |
 | 2026-04-23 | 新增 Wave 17 / `TASK-027`，为 Hosted UI 补主从表行导航、`open_page.params` 与详情表 `navigation_filters` | Codex |

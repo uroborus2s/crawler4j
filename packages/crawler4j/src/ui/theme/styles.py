@@ -3,21 +3,13 @@ from src.ui.theme.palette import Palette
 
 class StyleSheets:
     """Centralized Stylesheets."""
-    
+
     MAIN_WINDOW = f"""
         QMainWindow {{
             background-color: {Palette.BG_MAIN};
         }}
     """
-    
-    GLASS_CARD = f"""
-        QFrame.GlassCard {{
-            background-color: {Palette.BG_GLASS};
-            border: 1px solid {Palette.BORDER_LIGHT};
-            border-radius: 12px;
-        }}
-    """
-    
+
     SIDEBAR = f"""
         QWidget#Sidebar {{
             background-color: {Palette.BG_SIDEBAR};
