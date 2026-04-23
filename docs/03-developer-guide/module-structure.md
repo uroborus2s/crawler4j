@@ -63,3 +63,9 @@ demo_module/
 ## 根包要求
 
 `__init__.py` 只需要保持为普通 Python 包。Core 会自行扫描子目录，不会从这里取运行时入口。
+
+如果旧模块的根 `__init__.py` 被误删，或者你已经清理掉旧 `run()` / `declare_ui()` 残留，需要恢复到当前标准模板，可以直接执行：
+
+```bash
+uv run crawler4j module repair-init
+```

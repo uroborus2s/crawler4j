@@ -16,6 +16,7 @@ ALLOWED_INLINE_TABLE_SCHEMA_KEYS = {
     "data_source",
     "row_action",
     "empty_text",
+    "crud",
 }
 ALLOWED_TABLE_COLUMN_KEYS = {
     "key",
@@ -54,8 +55,17 @@ ALLOWED_SEARCH_FEATURE_KEYS = {"enabled", "placeholder"}
 ALLOWED_SORT_FEATURE_KEYS = {"enabled", "default"}
 ALLOWED_PAGINATION_FEATURE_KEYS = {"enabled", "page_size", "page_size_options"}
 ALLOWED_SORT_SPEC_KEYS = {"field", "direction"}
-ALLOWED_DATA_SOURCE_KEYS = {"type", "handler", "binding", "rows"}
-ALLOWED_INLINE_DATA_SOURCE_TYPES = {"binding", "rows", "query_handler"}
+ALLOWED_DATA_SOURCE_KEYS = {"type", "handler", "binding", "rows", "resource_id"}
+ALLOWED_INLINE_DATA_SOURCE_TYPES = {"binding", "rows", "query_handler", "managed_resource"}
+ALLOWED_TABLE_CRUD_KEYS = {
+    "mode",
+    "primary_key",
+    "form",
+    "create_handler",
+    "update_handler",
+    "delete_handler",
+}
+ALLOWED_TABLE_CRUD_FORM_KEYS = {"create_columns", "update_columns"}
 ALLOWED_LAYOUT_DIRECTIONS = {"column", "row"}
 ALLOWED_LAYOUT_KINDS = {"grid"}
 ALLOWED_TEXT_STYLES = {"title", "subtitle", "body", "meta"}
@@ -345,13 +355,18 @@ def _normalize_table_data_source(raw: Any, *, field_name: str) -> dict[str, Any]
 
     source_type = str(raw.get("type") or "").strip().lower()
     if source_type not in ALLOWED_INLINE_DATA_SOURCE_TYPES:
-        raise ValueError(f"{field_name}.type 只支持 binding/rows/query_handler")
+        raise ValueError(f"{field_name}.type 只支持 binding/rows/query_handler/managed_resource")
 
     normalized: dict[str, Any] = {"type": source_type}
     if source_type == "query_handler":
         normalized["handler"] = _validate_managed_identifier(
             str(raw.get("handler") or ""),
             field_name=f"{field_name}.handler",
+        )
+    elif source_type == "managed_resource":
+        normalized["resource_id"] = _validate_managed_identifier(
+            str(raw.get("resource_id") or ""),
+            field_name=f"{field_name}.resource_id",
         )
     elif source_type == "binding":
         normalized["binding"] = _normalize_binding(raw.get("binding"), field_name=f"{field_name}.binding")
@@ -360,6 +375,62 @@ def _normalize_table_data_source(raw: Any, *, field_name: str) -> dict[str, Any]
         if not isinstance(rows, list):
             raise ValueError(f"{field_name}.rows 必须是数组")
         normalized["rows"] = [dict(item) for item in rows if isinstance(item, dict)]
+    return normalized
+
+
+def _normalize_crud_form_columns(raw: Any, *, field_name: str) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{field_name} 必须是数组")
+    return [
+        _validate_managed_identifier(str(item), field_name=f"{field_name}[{index}]")
+        for index, item in enumerate(raw)
+    ]
+
+
+def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+
+    unknown_keys = sorted(set(raw) - ALLOWED_TABLE_CRUD_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+
+    mode = str(raw.get("mode") or "handlers").strip().lower()
+    if mode != "handlers":
+        raise ValueError(f"{field_name}.mode 目前只支持 handlers")
+
+    form = raw.get("form") or {}
+    if not isinstance(form, dict):
+        raise ValueError(f"{field_name}.form 必须是对象")
+    unknown_form_keys = sorted(set(form) - ALLOWED_TABLE_CRUD_FORM_KEYS)
+    if unknown_form_keys:
+        raise ValueError(f"{field_name}.form 包含不支持的字段: {', '.join(unknown_form_keys)}")
+
+    normalized = {
+        "mode": mode,
+        "primary_key": _validate_managed_identifier(
+            str(raw.get("primary_key") or ""),
+            field_name=f"{field_name}.primary_key",
+        ),
+        "form": {
+            "create_columns": _normalize_crud_form_columns(
+                form.get("create_columns"),
+                field_name=f"{field_name}.form.create_columns",
+            ),
+            "update_columns": _normalize_crud_form_columns(
+                form.get("update_columns"),
+                field_name=f"{field_name}.form.update_columns",
+            ),
+        },
+    }
+    for handler_key in ("create_handler", "update_handler", "delete_handler"):
+        if raw.get(handler_key) is not None:
+            normalized[handler_key] = _validate_managed_identifier(
+                str(raw.get(handler_key) or ""),
+                field_name=f"{field_name}.{handler_key}",
+            )
     return normalized
 
 
@@ -467,6 +538,11 @@ def _normalize_inline_table_schema(raw: Any, *, field_name: str) -> dict[str, An
         normalized["row_action"] = _normalize_row_action(
             raw.get("row_action"),
             field_name=f"{field_name}.row_action",
+        )
+    if raw.get("crud") is not None:
+        normalized["crud"] = _normalize_table_crud(
+            raw.get("crud"),
+            field_name=f"{field_name}.crud",
         )
     return normalized
 

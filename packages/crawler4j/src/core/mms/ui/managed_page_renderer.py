@@ -6,19 +6,28 @@ from typing import Any, Callable
 
 from PyQt6.QtWidgets import (
     QFrame,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from src.core.atm.runtime_capabilities import RUNTIME_SURFACE_FULL
+from src.core.persistence import get_module_data_store
 from src.core.mms.models import ModuleInfo
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
+from src.ui.components.combo_box import StyledComboBox
+from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.line_edit import StyledLineEdit
 
 
 class ManagedPageRenderer(QWidget):
@@ -195,14 +204,18 @@ class ManagedPageRenderer(QWidget):
         layout.setSpacing(8)
 
         title = str(component.get("title") or "").strip()
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
         if title:
             title_label = QLabel(title)
             title_label.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 14px; font-weight: 600;")
-            layout.addWidget(title_label)
+            header.addWidget(title_label)
+        header.addStretch()
 
         table = SkyDataTable(
             {
-                "columns": list(component.get("columns") or []),
+                "columns": self._visible_table_columns(component),
                 "features": dict(component.get("features") or {}),
                 "empty_text": str(component.get("empty_text") or "暂无数据"),
                 "selection_mode": "single",
@@ -220,6 +233,11 @@ class ManagedPageRenderer(QWidget):
         if isinstance(row_action, dict):
             table.row_clicked.connect(lambda row, action=dict(row_action): self._handle_row_action(action, row))
 
+        if self._build_crud_toolbar(header, component, table):
+            layout.addLayout(header)
+        elif title:
+            layout.addLayout(header)
+
         table.set_query({"params": dict(self._navigation_params)})
         table.request_refresh()
 
@@ -227,6 +245,249 @@ class ManagedPageRenderer(QWidget):
         self._data_table_widgets[table_id] = table
         layout.addWidget(table)
         return wrapper
+
+    def _visible_table_columns(self, component: dict[str, Any]) -> list[dict[str, Any]]:
+        columns = [dict(column) for column in list(component.get("columns") or []) if isinstance(column, dict)]
+        visible_columns = [column for column in columns if column.get("visible", True) is not False]
+        return visible_columns or columns
+
+    def _build_crud_toolbar(
+        self,
+        header: QHBoxLayout,
+        component: dict[str, Any],
+        table: SkyDataTable,
+    ) -> bool:
+        crud = component.get("crud")
+        if not isinstance(crud, dict):
+            return False
+
+        create_handler = str(crud.get("create_handler") or "").strip()
+        update_handler = str(crud.get("update_handler") or "").strip()
+        delete_handler = str(crud.get("delete_handler") or "").strip()
+        if not any((create_handler, update_handler, delete_handler)):
+            return False
+
+        edit_button: QPushButton | None = None
+        delete_button: QPushButton | None = None
+
+        if create_handler:
+            create_button = QPushButton("新增")
+            create_button.clicked.connect(lambda _checked=False: self._handle_create_action(component, table))
+            header.addWidget(create_button)
+        if update_handler:
+            edit_button = QPushButton("编辑")
+            edit_button.clicked.connect(lambda _checked=False: self._handle_update_action(component, table))
+            header.addWidget(edit_button)
+        if delete_handler:
+            delete_button = QPushButton("删除")
+            delete_button.clicked.connect(lambda _checked=False: self._handle_delete_action(component, table))
+            header.addWidget(delete_button)
+
+        for button, variant in (
+            (edit_button, "secondary"),
+            (delete_button, "danger"),
+        ):
+            if button is None:
+                continue
+            button.setEnabled(False)
+            button.setCursor(table.cursor())
+            button.setStyleSheet(table._action_button_style(variant))
+        if create_handler:
+            create_button.setCursor(table.cursor())
+            create_button.setStyleSheet(table._action_button_style("primary"))
+
+        def _sync_buttons(rows: list[dict[str, Any]]) -> None:
+            enabled = bool(rows)
+            if edit_button is not None:
+                edit_button.setEnabled(enabled)
+            if delete_button is not None:
+                delete_button.setEnabled(enabled)
+
+        table.selection_changed.connect(_sync_buttons)
+        _sync_buttons(table.selected_rows())
+        return True
+
+    def _handle_create_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
+        crud = dict(component.get("crud") or {})
+        handler_name = str(crud.get("create_handler") or "").strip()
+        if not handler_name:
+            return
+        payload = self._prompt_crud_form_payload(component, mode="create")
+        if payload is None:
+            return
+        try:
+            self._bridge.call_local_hook(
+                handler_name,
+                payload,
+                capability_surface=RUNTIME_SURFACE_FULL,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "新增失败", str(exc))
+            return
+        table.request_refresh()
+
+    def _handle_update_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
+        crud = dict(component.get("crud") or {})
+        handler_name = str(crud.get("update_handler") or "").strip()
+        primary_key = str(crud.get("primary_key") or "").strip()
+        selected_row = table.selected_row()
+        if not handler_name or not primary_key or not isinstance(selected_row, dict):
+            return
+        row_key = selected_row.get(primary_key)
+        if row_key in (None, ""):
+            QMessageBox.warning(self, "编辑失败", f"当前记录缺少主键字段: {primary_key}")
+            return
+        payload = self._prompt_crud_form_payload(component, mode="update", row=selected_row)
+        if payload is None:
+            return
+        try:
+            self._bridge.call_local_hook(
+                handler_name,
+                row_key,
+                payload,
+                capability_surface=RUNTIME_SURFACE_FULL,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "编辑失败", str(exc))
+            return
+        table.request_refresh()
+
+    def _handle_delete_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
+        crud = dict(component.get("crud") or {})
+        handler_name = str(crud.get("delete_handler") or "").strip()
+        primary_key = str(crud.get("primary_key") or "").strip()
+        selected_row = table.selected_row()
+        if not handler_name or not primary_key or not isinstance(selected_row, dict):
+            return
+        row_key = selected_row.get(primary_key)
+        if row_key in (None, ""):
+            QMessageBox.warning(self, "删除失败", f"当前记录缺少主键字段: {primary_key}")
+            return
+        item_name = str(selected_row.get("name") or selected_row.get("account") or selected_row.get(primary_key) or "当前记录")
+        if not ConfirmDialog.delete_confirm(self, item_name):
+            return
+        try:
+            self._bridge.call_local_hook(
+                handler_name,
+                row_key,
+                capability_surface=RUNTIME_SURFACE_FULL,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "删除失败", str(exc))
+            return
+        table.request_refresh()
+
+    def _prompt_crud_form_payload(
+        self,
+        component: dict[str, Any],
+        *,
+        mode: str,
+        row: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        crud = dict(component.get("crud") or {})
+        form = dict(crud.get("form") or {})
+        field_names = list(form.get("create_columns" if mode == "create" else "update_columns") or [])
+        if not field_names:
+            return {}
+
+        columns_by_key = {
+            str(column.get("key") or ""): dict(column)
+            for column in list(component.get("columns") or [])
+            if isinstance(column, dict)
+        }
+        dialog = QDialog(self)
+        title = str(component.get("title") or "数据表")
+        dialog.setWindowTitle(f"{'新增' if mode == 'create' else '编辑'}{title}")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(420)
+
+        layout = QVBoxLayout(dialog)
+        form_layout = QFormLayout()
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(10)
+        widgets: dict[str, tuple[QWidget, dict[str, Any]]] = {}
+
+        for field_name in field_names:
+            column = dict(columns_by_key.get(str(field_name), {"key": str(field_name), "label": str(field_name)}))
+            label = str(column.get("label") or field_name)
+            widget = self._build_crud_input_widget(column, value=(row or {}).get(field_name))
+            widgets[str(field_name)] = (widget, column)
+            form_layout.addRow(f"{label}：", widget)
+
+        layout.addLayout(form_layout)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+
+        payload: dict[str, Any] = {}
+        for field_name, (widget, column) in widgets.items():
+            value = self._read_crud_input_value(widget, column)
+            if column.get("required") and value in (None, ""):
+                QMessageBox.warning(self, "表单不完整", f"{column.get('label') or field_name} 不能为空")
+                return None
+            payload[field_name] = value
+        return payload
+
+    def _build_crud_input_widget(self, column: dict[str, Any], *, value: Any) -> QWidget:
+        column_type = str(column.get("type") or "text").strip().lower()
+        if column_type == "select":
+            combo = StyledComboBox()
+            options = list(column.get("options") or [])
+            if not column.get("required"):
+                combo.addItem("", None)
+            for option in options:
+                combo.addItem(str(option), option)
+            current_index = combo.findData(value)
+            if current_index < 0 and value not in (None, ""):
+                combo.addItem(str(value), value)
+                current_index = combo.findData(value)
+            if current_index >= 0:
+                combo.setCurrentIndex(current_index)
+            return combo
+
+        if column_type == "bool":
+            combo = StyledComboBox()
+            if not column.get("required"):
+                combo.addItem("", None)
+            combo.addItem("是", True)
+            combo.addItem("否", False)
+            current_index = combo.findData(value)
+            if current_index >= 0:
+                combo.setCurrentIndex(current_index)
+            return combo
+
+        line_edit = StyledLineEdit()
+        if value not in (None, ""):
+            line_edit.setText(str(value))
+        key = str(column.get("key") or "").strip().lower()
+        if key == "password" or key.endswith("_token"):
+            line_edit.setEchoMode(StyledLineEdit.EchoMode.Password)
+        return line_edit
+
+    def _read_crud_input_value(self, widget: QWidget, column: dict[str, Any]) -> Any:
+        column_type = str(column.get("type") or "text").strip().lower()
+        if isinstance(widget, StyledComboBox):
+            value = widget.currentData()
+            if value is None and column.get("required"):
+                value = widget.currentText().strip()
+            return value
+
+        if not isinstance(widget, StyledLineEdit):
+            return None
+        text = widget.text().strip()
+        if not text:
+            return None
+        if column_type == "int":
+            return int(text)
+        if column_type == "number":
+            return float(text)
+        if column_type == "bool":
+            return text.lower() in {"1", "true", "yes", "on", "是"}
+        return text
 
     def _normalize_inline_query_result(self, raw: Any) -> dict[str, Any]:
         if not isinstance(raw, dict):
@@ -268,6 +529,21 @@ class ManagedPageRenderer(QWidget):
                 rows = data_source.get("rows")
                 if not isinstance(rows, list):
                     rows = []
+                result = resolve_local_data_table_result(
+                    [dict(row) for row in rows if isinstance(row, dict)],
+                    columns=list(component.get("columns") or []),
+                    query=merged_query,
+                )
+            elif source_type == "managed_resource":
+                resource_id = str(data_source.get("resource_id") or "").strip()
+                if not resource_id:
+                    raise ValueError("managed_resource 数据源必须提供 resource_id")
+                rows = get_module_data_store().list_records(
+                    self._module_name,
+                    resource_id,
+                    limit=1000,
+                    offset=0,
+                )
                 result = resolve_local_data_table_result(
                     [dict(row) for row in rows if isinstance(row, dict)],
                     columns=list(component.get("columns") or []),

@@ -196,6 +196,7 @@ uvx --from crawler4j-sdk crawler4j module init demo_module --repo example/demo_m
 
 ```bash
 uv run crawler4j module show
+uv run crawler4j module repair-init
 uv run crawler4j task create example_task
 uv run crawler4j workflow create repair_orders
 uv run crawler4j page create dashboard
@@ -205,6 +206,8 @@ uv run crawler4j hook create on_cleanup
 uv run crawler4j check full
 uv run crawler4j package build
 ```
+
+`module repair-init` 会只重建模块根 `__init__.py`，适合在清理旧 `run()` / `declare_ui()` 残留后，把根包恢复到当前标准模板；它不会覆盖 `module.yaml`、任务、工作流或页面源码。
 
 ## 校验规则
 
@@ -231,7 +234,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "crawler4j-sdk>=0.5.0,<0.6.0",
+  "crawler4j-sdk>=0.5.2,<0.6.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
 ]

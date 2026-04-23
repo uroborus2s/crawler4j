@@ -196,6 +196,15 @@ def save_manifest(module_root: Path, manifest: dict[str, Any]) -> None:
     )
 
 
+def _module_display_name(module_root: Path, manifest: dict[str, Any]) -> str:
+    """Resolve the human-facing module display name."""
+    display_name = str(manifest.get("display_name", "") or "").strip()
+    if display_name:
+        return display_name
+    module_name = str(manifest.get("name", "") or "").strip() or module_root.name
+    return to_display_name(module_name)
+
+
 def _resolve_module_import_name(module_root: Path, manifest: dict[str, Any] | None = None) -> str:
     module_name = str((manifest or {}).get("name", "") or "").strip()
     if module_name:
@@ -1813,6 +1822,24 @@ def cmd_module_set_default_workflow(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_module_repair_init(args: argparse.Namespace) -> int:
+    """Rebuild the module root __init__.py from the current standard template."""
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    try:
+        _write_text(
+            module_root / "__init__.py",
+            MODEL_MODULE_INIT.format(display_name=_module_display_name(module_root, manifest)),
+            force=True,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+    _print_success("已重建模块根包文件: __init__.py")
+    return 0
+
+
 def cmd_task_create(args: argparse.Namespace) -> int:
     """Create a task script under tasks/."""
     module_root = require_module_root()
@@ -2625,6 +2652,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="显示当前模块的版本、仓库、默认工作流和宿主页入口",
     )
     module_show.set_defaults(func=cmd_module_show)
+
+    module_repair_init = module_sub.add_parser(
+        "repair-init",
+        help="按当前标准模板重建模块根 __init__.py，不修改其他脚手架文件",
+    )
+    module_repair_init.set_defaults(func=cmd_module_repair_init)
 
     data_parser = subparsers.add_parser(
         "data",

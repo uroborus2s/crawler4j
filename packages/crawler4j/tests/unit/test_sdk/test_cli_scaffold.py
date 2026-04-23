@@ -173,6 +173,42 @@ def test_generated_package_is_importable_without_runtime_shim(tmp_path: Path):
     assert hasattr(selector_module, "select")
 
 
+def test_module_repair_init_rewrites_root_package_file(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    init_path = module_root / "__init__.py"
+    init_path.write_text(
+        '"""旧入口。"""\n\n'
+        "def run():\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_module_repair_init(Namespace()) == 0
+
+    root_text = init_path.read_text(encoding="utf-8")
+    assert "Demo Model 模块包" in root_text
+    assert "Core 会直接扫描" in root_text
+    assert "模块根包不再承载运行时装配逻辑" in root_text
+    assert "def run" not in root_text
+
+    module = _import_generated_package(module_root)
+    assert module.__doc__ is not None
+    assert "Demo Model 模块包" in module.__doc__
+
+
+def test_module_repair_init_recreates_missing_root_package_file(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    init_path = module_root / "__init__.py"
+    init_path.unlink()
+
+    assert commands.cmd_module_repair_init(Namespace()) == 0
+
+    assert init_path.exists()
+    assert "模块根包不再承载运行时装配逻辑" in init_path.read_text(encoding="utf-8")
+
+
 def test_page_create_registers_manifest_and_generates_page_spec(tmp_path: Path, monkeypatch):
     module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
@@ -356,6 +392,14 @@ def test_build_parser_registers_data_commands():
     assert query_args.source == ["accounts"]
     assert seed_args.func is commands.cmd_data_seed_create
     assert seed_args.resource == "accounts"
+
+
+def test_build_parser_registers_module_repair_init():
+    parser = commands.build_parser()
+
+    args = parser.parse_args(["module", "repair-init"])
+
+    assert args.func is commands.cmd_module_repair_init
 
 
 def test_build_parser_registers_page_group_argument():

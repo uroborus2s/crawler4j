@@ -12,7 +12,7 @@
 
 | 命令组 | 关键命令 | 主要输出 |
 |---|---|---|
-| `module` | `module init` `module show` `module set repo/version/default-workflow` | 模块根目录与 `module.yaml` |
+| `module` | `module init` `module show` `module repair-init` `module set repo/version/default-workflow` | 模块根目录与 `module.yaml` |
 | `task` | `task create` `task list` | `tasks/<name>.py` |
 | `workflow` | `workflow create` `workflow list` | `workflows/<name>.py` 与 `module.yaml.workflows` |
 | `page` | `page create` `page list` | `pages/<page>.py` 或 `pages/<group>/<file>.py` 与 `ui_extension.pages[]` |
@@ -44,6 +44,16 @@
 - 任何兼容桥
 
 `module show` 现在还会额外打印 `resources/views/queries/seeds` 数量，方便你快速确认当前模块的数据契约规模。
+
+## `module repair-init`
+
+当旧模块的根 `__init__.py` 被手改脏、误删，或者你已经把旧 `run()` / `declare_ui()` / `TaskScript` 残留拆回标准目录后，可以执行：
+
+```bash
+uv run crawler4j module repair-init
+```
+
+这个命令只会按当前模板重建模块根 `__init__.py`，显示名优先取 `module.yaml.display_name`；它不会改写 `module.yaml`、任务、工作流、Hook、环境选择器或页面源码。
 
 ## 数据契约命令
 
