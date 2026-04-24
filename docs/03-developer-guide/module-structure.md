@@ -33,7 +33,7 @@ demo_module/
 
 | 路径 | 职责 |
 |---|---|
-| `module.yaml` | 静态清单、`runtime_api`、工作流列表、默认工作流、页面导航元信息、`data` 数据契约 |
+| `module.yaml` | 静态清单、`runtime_api`、工作流列表、默认工作流、左侧页面菜单元信息、`data` 数据契约 |
 | `__init__.py` | 普通包入口，不再承载运行时装配 |
 | `data/sql/views/*.sql` | 已注册统计视图的 SQL 文件 |
 | `data/sql/queries/*.sql` | 已注册命名查询的 SQL 文件 |
@@ -42,7 +42,7 @@ demo_module/
 | `workflows/*.py` | 单个工作流声明与实现 |
 | `hooks/*.py` | 生命周期 Hook |
 | `env_selectors/*.py` | 环境选择器 |
-| `pages/*.py` / `pages/<group>/*.py` | Hosted UI 页面与页面处理函数 |
+| `pages/*.py` / `pages/<group>/*.py` | Hosted UI 可路由页面注册、页面 schema 与处理函数 |
 
 即使当前模块暂时不用数据能力，`module.yaml.data` 也必须存在，`data/` 目录也会由脚手架预先创建。
 

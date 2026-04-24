@@ -11,6 +11,8 @@ def test_contracts_root_exports_stable_surface():
         "ClickCaptchaDebugInfo",
         "ClickCaptchaMatchResult",
         "ClickCaptchaOrderedTarget",
+        "DatabaseClient",
+        "DatabaseExecutor",
         "EnvAction",
         "EnvCandidate",
         "EnvSelectorSpec",
@@ -32,6 +34,8 @@ def test_contracts_root_exports_stable_surface():
 
     assert set(crawler4j_contracts.__all__) == expected_exports
     assert not hasattr(crawler4j_contracts, "DefaultHttpClient")
+    assert crawler4j_contracts.DatabaseClient is not None
+    assert crawler4j_contracts.DatabaseExecutor is not None
     assert crawler4j_contracts.TaskContext is not None
     assert crawler4j_contracts.TaskResult is not None
     assert crawler4j_contracts.EnvAction is not None

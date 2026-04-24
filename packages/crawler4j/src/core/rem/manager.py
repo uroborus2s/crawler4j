@@ -29,6 +29,8 @@ from src.core.rem.pool import EnvPool, LeaseManager
 from src.core.rem.provider import BaseProvider, get_provider, list_providers
 
 FINGERPRINT_BROWSER_PROVIDERS = {"bitbrowser", "virtualbrowser"}
+DEFAULT_PROVIDER_RUNTIME_TIMEOUT = 30
+RECOVERY_PROVIDER_RUNTIME_TIMEOUT = 3
 RESOURCE_POOL_METADATA_NAMESPACE = "scheduler.resource_pool"
 EXISTING_ENV_IMPORT_METADATA_NAMESPACE = "existing_env_import"
 GC_REAPABLE_STATUSES = frozenset(
@@ -493,15 +495,26 @@ class EnvironmentManager:
             proxy_config=proxy_config,
         )
 
-    async def ensure_provider_runtime(self, provider_name: str) -> None:
+    async def ensure_provider_runtime(
+        self,
+        provider_name: str,
+        *,
+        timeout: int = DEFAULT_PROVIDER_RUNTIME_TIMEOUT,
+    ) -> None:
         """确保指定 Provider 的外部运行时已就绪（按需启动）。"""
-        await self._ensure_external_provider_ready(provider_name)
+        await self._ensure_external_provider_ready(provider_name, timeout=timeout)
     
-    async def destroy_env(self, env_id: int) -> bool:
+    async def destroy_env(
+        self,
+        env_id: int,
+        *,
+        runtime_timeout: int = DEFAULT_PROVIDER_RUNTIME_TIMEOUT,
+    ) -> bool:
         """直接销毁环境（供 UI 调用）。
         
         Args:
             env_id: 环境 ID
+            runtime_timeout: 指纹浏览器 API 就绪等待超时（秒）
         
         Returns:
             是否销毁成功
@@ -519,7 +532,7 @@ class EnvironmentManager:
         if provider:
             try:
                 if provider.name in FINGERPRINT_BROWSER_PROVIDERS:
-                    await self.ensure_provider_runtime(provider.name)
+                    await self.ensure_provider_runtime(provider.name, timeout=runtime_timeout)
 
                 destroyed = await provider.destroy(env)
                 if destroyed is False:
@@ -982,7 +995,12 @@ class EnvironmentManager:
         
         return False
     
-    async def _ensure_external_provider_ready(self, provider_name: str) -> None:
+    async def _ensure_external_provider_ready(
+        self,
+        provider_name: str,
+        *,
+        timeout: int = DEFAULT_PROVIDER_RUNTIME_TIMEOUT,
+    ) -> None:
         """确保外部指纹浏览器软件已启动且 API 就绪。"""
         from src.core.system.external_app_service import ExternalApp, get_external_app_service
 
@@ -996,7 +1014,7 @@ class EnvironmentManager:
             return
 
         app_service = get_external_app_service()
-        result = await app_service.ensure_running(app)
+        result = await app_service.ensure_running(app, timeout=timeout)
         if not result.success:
             raise EnvUnavailableError(
                 result.error_message or f"{app.value} 启动失败",
@@ -1005,7 +1023,7 @@ class EnvironmentManager:
             )
 
         # 防止“进程存在但 API 尚未可用”导致 create 阶段出现 502。
-        ready = await app_service.wait_until_ready(app, timeout=30)
+        ready = await app_service.wait_until_ready(app, timeout=timeout)
         if not ready:
             raise EnvUnavailableError(
                 f"{app.value} API 未就绪",
@@ -1133,7 +1151,10 @@ class EnvironmentManager:
         except Exception:
             # 如果创建失败，清理占位环境（未在外部创建成功）
             logger.error(f"[REM] 环境创建失败，清理预创建记录: id={env_id}")
-            await self.destroy_env(env_id)
+            await self.destroy_env(
+                env_id,
+                runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+            )
             raise
 
     async def _reserve_env_placeholder(
@@ -1229,12 +1250,20 @@ class EnvironmentManager:
             provider = get_provider(env.provider)
             if not provider:
                 logger.error(f"[REM] 未找到 Provider: {env.provider}")
-                await self.destroy_env(env.id)
+                await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                )
             elif is_gc_reapable_status(env.status):
                 # 创建中的环境视为失败，需要同步关闭并删除
                 logger.warning(f"[REM] 发现未完成创建的环境: id={env.id}")
-                await self.destroy_env(env.id)
-                logger.info(f"[REM] 已删除未完成创建的环境记录: id={env.id}")
+                if await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                ):
+                    logger.info(f"[REM] 已删除未完成创建的环境记录: id={env.id}")
+                else:
+                    logger.warning(f"[REM] 未完成创建的环境记录保留，等待下次重试: id={env.id}")
             elif env.status in {EnvStatus.BUSY, EnvStatus.RUNNING}:
                 # 用户规范：崩溃时运行中的环境，重启后恢复为 READY
                 logger.warning(f"[REM] 发现崩溃时运行中的环境: id={env.id}")
@@ -1252,18 +1281,29 @@ class EnvironmentManager:
             provider = get_provider(env.provider)
             if not provider:
                 logger.error(f"[REM] 未找到 Provider: {env.provider}")
-                await self.destroy_env(env.id)
-                count = count + 1 
-            elif not await provider.exists(env):
-                logger.warning(f"[REM] 发现不存在的环境: id={env.id}")
-                await self.destroy_env(env.id)
-                count = count + 1 
-                logger.info(f"[REM] 已删除不存在的环境记录: id={env.id}")
+                if await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                ):
+                    count = count + 1
             elif is_gc_reapable_status(env.status):
                 logger.warning(f"[REM] 发现未完成创建的环境: id={env.id}")
-                await self.destroy_env(env.id)
-                count = count + 1 
-                logger.info(f"[REM] 已删除未完成创建的环境记录: id={env.id}")
+                if await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                ):
+                    count = count + 1
+                    logger.info(f"[REM] 已删除未完成创建的环境记录: id={env.id}")
+                else:
+                    logger.warning(f"[REM] 未完成创建的环境记录保留，等待下次重试: id={env.id}")
+            elif not await provider.exists(env):
+                logger.warning(f"[REM] 发现不存在的环境: id={env.id}")
+                if await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                ):
+                    count = count + 1
+                    logger.info(f"[REM] 已删除不存在的环境记录: id={env.id}")
             elif env.status in {EnvStatus.BUSY, EnvStatus.RUNNING}:
                 # 用户规范：崩溃时运行中的环境，重启后恢复为 READY
                 if not await provider.is_window_open(env):

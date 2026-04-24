@@ -30,14 +30,14 @@ uv run crawler4j workflow create main_workflow
 uv run crawler4j hook create on_cleanup
 uv run crawler4j env-selector create pick_ready
 uv run crawler4j page create dashboard
-uv run crawler4j page create account_detail --group account
+uv run crawler4j page create account_detail --group account --no-menu
 uv run crawler4j data resource create accounts --storage-mode custom_table
 uv run crawler4j data query create get_account_by_id --source accounts
 uv run crawler4j data view create account_stats --source accounts
 uv run crawler4j data seed create accounts_seed --resource accounts
 ```
 
-CLI 会同步更新 `module.yaml.data`，并把 SQL / seed 骨架写到 `data/sql`、`data/seeds`。页面源码默认落在 `pages/`，也可以用 `--group` 放到 `pages/<group>/`；这只影响源码组织，不影响扁平 `page_id`。不要再在运行时代码里声明资源或视图。
+CLI 会同步更新 `module.yaml.data`，并把 SQL / seed 骨架写到 `data/sql`、`data/seeds`。页面源码默认落在 `pages/`，也可以用 `--group` 放到 `pages/<group>/`；这只影响源码组织，不影响扁平 `page_id`。`page create` 默认把页面加入左侧菜单；详情页、二级页用 `--no-menu` 只创建可路由页面文件。不要再在运行时代码里声明资源或视图。
 
 ## 4. 只从 contracts 导入
 

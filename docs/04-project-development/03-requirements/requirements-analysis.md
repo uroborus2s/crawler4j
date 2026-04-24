@@ -18,7 +18,7 @@
 | `REQ-003` | SDK / Contracts / CLI 可用 | 基本满足 | SDK/Contracts build 成功，CLI help 可运行 |
 | `REQ-006` | 模块根入口可由工具托管 | 满足 | 根 `__init__.py` 已收敛为稳定薄壳，`ModuleAssembler` 负责默认发现与分发，旧模块升级路径统一为按最新模板重新初始化 |
 | `REQ-007` | 信号驱动的结构化确认面板 | 本次完成 | `TaskSignal` 已持久化到任务快照，ATM 详情页可按 `payload.confirmation` 弹出确认面板，并回调既有确认服务 |
-| `REQ-008` | 模块审计事件独立存储 | 本次完成 | 宿主已新增 `module_audit_events` 与 `db.append_event` / `db.query_events`，快照 dataset 继续保留原语义 |
+| `REQ-008` | 模块审计事件独立存储 | 本次完成 | 宿主已新增 `module_audit_events` 与 `ctx.db.audit(...).append/query`，快照 dataset 继续保留原语义 |
 | `REQ-009` | 固定环境池 Service Job 等待队列 | 本次完成 | 当前宿主已实现固定环境池 Service Job 的 `PENDING` 等待、FIFO 补位、资源池隔离、等待席位自动超时收口，以及资源池资格 helper / REM 筛选入口 |
 | `REQ-004` | 发布与文档链路可追溯 | 满足 | 根应用工作区版本、运行时版本服务、最近正式 tag 与 release 文档口径已明确分层 |
 | `REQ-005` | 软件工厂治理基线存在 | 本次建立 | `AGENTS.md`、`GEMINI.md`、`.factory/`、编号文档已新增 |
@@ -59,7 +59,7 @@
 
 - 现有 `db.list_records` / `db.replace_records` 与 `module_datasets` 天然是“当前快照”模型，不适合承载 append-only 的审计事件。
 - 即便 `module_datasets` 已改为“一条 record 一行”持久化，只要模块把 `account_events` 这类历史事件继续当普通 dataset 全量覆盖写回，运行时间越长，整包重写成本和并发覆盖风险仍会持续放大。
-- 本轮最小可落地方案不是改写快照接口，而是补一条平行的事件通道：`module_audit_events` + `db.append_event` / `db.query_events`。
+- 本轮最小可落地方案不是改写快照接口，而是补一条平行的事件通道：`module_audit_events` + `ctx.db.audit(...).append/query`。
 - 当前实现刻意保持边界收敛：快照型数据继续服务 `core:data_table` 和当前列表型 UI，事件型数据只提供追加与查询，不在本轮引入 retention / archive 与通用查询页面。
 
 ### `REQ-009`

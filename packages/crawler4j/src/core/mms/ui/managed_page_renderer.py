@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -196,18 +197,38 @@ class ManagedPageRenderer(QWidget):
         return label
 
     def _build_button(self, component: dict[str, Any]) -> QPushButton:
-        button = QPushButton(str(component.get("label") or "按钮"))
+        label = str(component.get("label") or "").strip()
+        icon = str(component.get("icon") or "").strip()
+        text = f"{icon} {label}".strip() if label else icon or "按钮"
+        button = QPushButton(text)
+        aria_label = str(component.get("aria_label") or label or icon or "").strip()
+        if aria_label:
+            button.setToolTip(aria_label)
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        size = str(component.get("size") or "md").strip().lower()
+        variant = str(component.get("variant") or "primary").strip().lower()
+        if size == "icon":
+            button.setFixedSize(34, 34)
+        elif size == "sm":
+            button.setMinimumHeight(30)
+        color_by_variant = {
+            "primary": ("rgba(99, 102, 241, 0.75)", "rgba(99, 102, 241, 0.95)"),
+            "secondary": ("rgba(255, 255, 255, 0.10)", "rgba(255, 255, 255, 0.18)"),
+            "ghost": ("transparent", "rgba(255, 255, 255, 0.10)"),
+        }
+        background, hover_background = color_by_variant.get(variant, color_by_variant["primary"])
+        padding = "0" if size == "icon" else "6px 10px" if size == "sm" else "8px 14px"
         button.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(99, 102, 241, 0.75);
+            f"""
+            QPushButton {{
+                background: {background};
                 color: white;
                 border: none;
                 border-radius: 6px;
-                padding: 8px 14px;
+                padding: {padding};
                 font-weight: 600;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 0.95); }
+            }}
+            QPushButton:hover {{ background: {hover_background}; }}
             """
         )
         action = component.get("action", {})

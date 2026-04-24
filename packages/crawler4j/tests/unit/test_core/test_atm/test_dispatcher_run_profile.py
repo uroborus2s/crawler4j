@@ -18,6 +18,22 @@ def temp_data_dir(tmp_path, monkeypatch):
     yield tmp_path
 
 
+def _build_module_service(selector_hook=None):
+    async def default_hook(module_name, hook_name, context, *args):
+        return None
+
+    service = SimpleNamespace(
+        run_module=AsyncMock(return_value="ok"),
+        call_hook=AsyncMock(side_effect=selector_hook or default_hook),
+    )
+
+    async def run_env_selector(module_name, selector_name, context, candidates):
+        return await service.call_hook(module_name, "select_env", context, candidates, selector_name)
+
+    service.run_env_selector = AsyncMock(side_effect=run_env_selector)
+    return service
+
+
 @pytest.mark.asyncio
 async def test_dispatcher_selects_existing_env_for_run_profile(monkeypatch):
     run_profile = RunProfile(
@@ -46,10 +62,7 @@ async def test_dispatcher_selects_existing_env_for_run_profile(monkeypatch):
             return env.id
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -111,10 +124,7 @@ async def test_dispatcher_passes_selector_name_to_module_callback(monkeypatch):
             return None
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -184,10 +194,7 @@ async def test_dispatcher_service_fixed_pool_waits_instead_of_failing_on_selecto
             return None
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -246,10 +253,7 @@ async def test_dispatcher_service_fixed_pool_requeues_when_selected_candidate_di
             return env.id
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -308,10 +312,7 @@ async def test_dispatcher_service_fixed_pool_fails_when_selector_returns_non_can
             return 999
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -370,10 +371,7 @@ async def test_dispatcher_service_fixed_pool_fails_when_lease_acquire_raises(mon
             return env.id
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 

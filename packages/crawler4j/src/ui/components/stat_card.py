@@ -27,27 +27,38 @@ class StatCard(Card):
         accent_color: str = "#6366f1",
         delta_text: str = "",
         delta_direction: CardDeltaDirection = "neutral",
+        compact: bool = False,
         parent=None,
     ) -> None:
-        super().__init__(title=title, variant="card", gap=8, parent=parent)
+        gap = 5 if compact else 8
+        padding = (12, 10, 10, 10) if compact else (18, 16, 18, 16)
+        super().__init__(title=title, variant="card", gap=gap, padding=padding, parent=parent)
         self._accent_color = accent_color
+        self._compact = compact
         self._setup_ui(value)
         self.set_subtitle(subtitle)
         self.set_delta(delta_text, direction=delta_direction)
 
     def _setup_ui(self, value: str) -> None:
-        self.setMinimumHeight(96)
-        self.setMaximumHeight(108)
+        self.setMinimumHeight(76 if self._compact else 96)
+        self.setMaximumHeight(84 if self._compact else 108)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setSpacing(8)
+        self.content_layout.setSpacing(4 if self._compact else 8)
         self.title_label = self.title_label or QLabel()
         if self.title_label.objectName() != "cardTitle":
             self.title_label.setObjectName("cardTitle")
+        if self._compact:
+            self.title_label.setStyleSheet(
+                "color: rgba(255, 255, 255, 0.72); font-size: 12px; font-weight: 600;"
+                "border: none; background: transparent;"
+            )
 
         self.value_label = QLabel(value)
+        value_size = 24 if self._compact else 32
         self.value_label.setStyleSheet(
-            f"color: {self._accent_color}; font-size: 32px; font-weight: 700; border: none; background: transparent;"
+            f"color: {self._accent_color}; font-size: {value_size}px; font-weight: 700;"
+            "border: none; background: transparent;"
         )
         self.content_layout.addWidget(self.value_label)
 
@@ -56,8 +67,10 @@ class StatCard(Card):
         footer.setSpacing(8)
 
         self.subtitle_label = QLabel()
+        subtitle_size = 10 if self._compact else 11
         self.subtitle_label.setStyleSheet(
-            "color: rgba(255, 255, 255, 0.56); font-size: 11px; border: none; background: transparent;"
+            f"color: rgba(255, 255, 255, 0.56); font-size: {subtitle_size}px;"
+            "border: none; background: transparent;"
         )
         self.subtitle_label.setHidden(True)
         footer.addWidget(self.subtitle_label)

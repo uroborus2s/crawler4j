@@ -15,10 +15,10 @@
 2. 运行态元数据
 3. 单次运行内共享内存
 4. 页面 schema
-5. 快照数据 / 数据库视图
-6. 审计事件与短期状态
+5. 模块数据资源 / 数据库视图 / 命名查询
+6. 短期状态
 
-目标不是再引入一层抽象，而是把当前已经落地的事实源固定下来，避免模块作者继续在 `module.yaml`、模块目录、自定义 YAML、`ctx.runtime`、`ctx.state`、`db.*`、UI schema 之间混用。
+目标不是再引入多套抽象，而是把当前已经落地的事实源固定下来，避免模块作者继续在 `module.yaml`、模块目录、自定义 YAML、`ctx.runtime`、`ctx.state`、旧 `ctx.tools.call("db.*")` 和 UI schema 之间混用。
 
 ## 2. 统一分层
 
@@ -29,11 +29,13 @@
 | 运行态元数据 | `ctx.runtime` | `ctx.runtime[...]` | 禁止 | 由 ATM / Debug / Core 注入 |
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
 | 页面 schema | `declare_ui()` 本轮声明缓存（宿主桥接内存） | `ctx.tools.call("ui.get_page")` | `ctx.tools.call("ui.declare_page")` | 宿主管理页面 schema；模块只声明页面，不再声明独立数据表页；正式 Hosted UI 刷新链路不再依赖 `data.db.module_pages` |
-| 快照数据 | `module.yaml.data.resources[]` + `data.db.module_data_resources` + `data.db.module_datasets` / 模块自定义物理表 | `ctx.tools.call("db.get_record")` / `ctx.tools.call("db.list_records")` | `ctx.tools.call("db.replace_records")` | `managed_dataset` 适合低频稳定数据，`custom_table` 适合高频计算或明细表 |
-| 数据库视图 | `module.yaml.data.views[]` + `data.db.module_db_views` | `ctx.tools.call("db.query_view")` | 禁止 | 基于当前模块 `custom_table` 的受控 `SELECT` 统计视图 |
-| 命名查询 | `module.yaml.data.queries[]` | `ctx.tools.call("db.run_query")` | 禁止 | 受控 SQL 查询，只能执行已注册 `query_id` |
-| 审计事件历史 | `data.db.module_audit_events` | `ctx.tools.call("db.query_events")` | `ctx.tools.call("db.append_event")` | append-only 业务历史、操作轨迹、时间线查询 |
-| 短期状态与锁 | `state.db.kv_store` | `ctx.tools.call("db.get_state")` 等 | `ctx.tools.call("db.set_state")` 等 | 游标、进度、会话、小体量状态、幂等锁 |
+| 模块数据资源 | `module.yaml.data.resources[]` + `data.db.module_data_resources` + `data.db.module_datasets` / 模块自定义物理表 | `ctx.db.from_("resource_id")` | `ctx.db.into("resource_id").replace(records)` | `managed_dataset` 适合低频稳定数据，`custom_table` 适合高频计算或明细表 |
+| 模块审计事件 | `data.db.module_audit_events` | `ctx.db.audit("dataset").query(...)` | `ctx.db.audit("dataset").append(...)` | append-only 历史事件，不进入 `module_datasets` |
+| 数据库视图 | `module.yaml.data.views[]` + `data.db.module_db_views` | `ctx.db.from_("view_id")` | 禁止 | 只读 read model；不承载复杂联表或聚合 |
+| 命名查询 | `module.yaml.data.queries[]` | `ctx.db.named("query_id").bind(...).execute()` | 禁止 | 受控 SQL 查询，只能执行已注册 `query_id` |
+| 短期状态 | `ctx.state` | `ctx.state[...]` | `ctx.state[...] = ...` | 仅当前一次任务 / workflow 内有效，不落正式业务库 |
+
+`ctx.captured_data` 不再作为正式契约存在。临时小状态统一放 `ctx.state`，任务输出统一放 `TaskResult.data`，需要跨运行持久化的数据统一走 `ctx.db`。
 
 ## 3. 配置契约
 
@@ -104,11 +106,10 @@
 
 模块可以在这些函数中调用：
 
-- `db.get_record`
-- `db.list_records`
-- `db.run_query`
-- `db.query_view`
-- `db.query_events`
+- `ctx.db.from_(...)`
+- `ctx.db.named(...)`
+- `ctx.db.into(...).replace(...)`
+- `ctx.db.audit(...).append(...)` / `.query(...)`
 - 其它宿主能力
 
 但宿主只负责接收结构化返回值并渲染，不解释业务语义。
@@ -122,36 +123,47 @@
 - `binding`
 - `rows`
 - `query_handler`
+- `managed_resource`
 
 正式宿主页里的可交互表格统一走内联 `DataTable(data_source.type="query_handler")`。
 
-- `query_handler` 是正式查询链路，负责把过滤、排序、分页路由到 `db.query_view` / `db.list_records` 等能力
+- `query_handler` 是正式查询链路，负责把过滤、排序、分页路由到 `ctx.db` fluent API
 - `binding` / `rows` 只用于页面内静态或局部数据，不构成另一条宿主页注册链路
 - 表格交互由宿主统一处理，但数据查询和写回策略由模块自行决定
 
-## 6. 快照数据、数据库视图与审计事件契约
+## 6. 模块数据、数据库视图与命名查询契约
 
 ### 6.1 快照数据位置
 
 - `module.yaml.data.resources[]` 是表资源的唯一声明入口
-- `managed_dataset` 模式下，`db.get_record` / `db.list_records` / `db.replace_records` 读写的快照记录持久化到 `data.db.module_datasets`
+- `managed_dataset` 模式下，`ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` 读写的快照记录持久化到 `data.db.module_datasets`
 - `custom_table` 模式下，宿主会在模块加载/安装时创建受控物理表 `module_name_resource_id`
+- 审计事件不建模为 `resources[]`，只通过 `ctx.db.audit("dataset")` 写入和查询 `data.db.module_audit_events`
 - 未注册的 `resource_id` 会直接报错；宿主不再按资源名隐式补建 `managed_dataset`
 - `module.yaml.data.views[]` 会同步到 `data.db.module_db_views`
-- `module.yaml.data.queries[]` 会在宿主加载时完成校验，运行时只能通过 `db.run_query(query_id=..., params=...)` 调用
-- `db.append_event` / `db.query_events` 读写的审计事件持久化到 `data.db.module_audit_events`
+- `module.yaml.data.queries[]` 会在宿主加载时完成校验，运行时只能通过 `ctx.db.named("query_id").bind(...).execute()` 调用
+- `ctx.tools` 不再暴露任何 `db.*` 工具；旧接入方式必须从模块代码和文档示例中删除
 
-### 6.2 数据分工
+### 6.2 查询能力分层
+
+| 数据源 | 允许能力 | 禁止能力 |
+|---|---|---|
+| `managed_dataset` | `select`、`where_*`、`order_by`、`limit`、`offset` | `join`、`group_by`、`aggregate` |
+| `custom_table` | `select`、`where_*`、`order_by`、`limit`、`offset`、已声明 `join`、`group_by`、`count/sum/avg/min/max` | 未声明 join、跨模块表、未注册 SQL |
+| `view` | 只读筛选、排序、分页 | 复杂联表、复杂聚合、写入 |
+| `named query` | 已注册参数绑定和执行 | 运行时拼 SQL、访问未声明资源 |
+
+### 6.3 数据分工
 
 | 你要保留什么 | 正式入口 | 语义 |
 |---|---|---|
-| 低频稳定记录、账号表、开关清单 | `module.yaml.data.resources[]`(`managed_dataset`) + `db.get_record` / `db.list_records` / `db.replace_records` | 当前快照，可整包覆盖 |
-| 高频计算明细、运行审计、计费明细 | `module.yaml.data.resources[]`(`custom_table`) + `db.get_record` / `db.list_records` / `db.replace_records` | schema 驱动的受控实体表 |
-| 基于实体表的统计汇总、条件筛选、排序分页 | `module.yaml.data.views[]` + `db.query_view` | 只读统计查询 |
-| 复杂筛选、联表、聚合 SQL | `module.yaml.data.queries[]` + `db.run_query` | 只允许执行已注册命名查询 |
-| 只追加的历史记录、状态迁移、操作痕迹 | `db.append_event` / `db.query_events` | append-only 历史，不回写快照 |
+| 低频稳定记录、账号表、开关清单 | `module.yaml.data.resources[]`(`managed_dataset`) + `ctx.db.from_` / `ctx.db.into(...).replace` | 当前快照，可整包覆盖 |
+| 高频计算明细、计费明细 | `module.yaml.data.resources[]`(`custom_table`) + `ctx.db.from_` / `ctx.db.into(...).replace` | schema 驱动的受控实体表 |
+| 基于实体表的统计汇总、条件筛选、排序分页 | `module.yaml.data.resources[]`(`custom_table`) + manifest `joins` + fluent aggregate | 查询构造器下推到受控实体表 |
+| 固定复杂 SQL | `module.yaml.data.queries[]` + `ctx.db.named(...).bind(...).execute()` | 只允许执行已注册命名查询 |
+| 只追加的历史记录、状态迁移、操作痕迹 | `ctx.db.audit("dataset").append(...)` / `.query(...)` | 独立审计表 append-only，不污染快照资源 |
 
-### 6.3 明确删除的旧边界
+### 6.4 明确删除的旧边界
 
 不再存在以下正式契约：
 
@@ -161,18 +173,9 @@
 - `core:data_table`
 - 由宿主替模块管理数据表页面语义
 
-## 7. 短期状态与锁契约
+## 7. 短期状态契约
 
-`state.db.kv_store` 当前只承载轻量状态和锁，不再用于正式业务数据表。
-
-正式入口：
-
-- `db.get_state`
-- `db.set_state`
-- `db.exists_state`
-- `db.acquire_lock`
-- `db.release_lock`
-- `db.is_locked`
+模块侧短期状态使用 `ctx.state`，只在当前一次任务 / workflow 执行期间有效。宿主内部可以继续使用 `state.db.kv_store` 管理自己的状态和锁，但这不是模块开发者接口。
 
 推荐 key 结构：
 
@@ -183,9 +186,10 @@
 - 在模块运行时代码中写配置
 - 直接连接 `config.db`、`data.db`、`state.db`
 - 在模块代码里执行未注册 SQL
+- 在模块代码里调用旧 `ctx.tools.call("db.*")`
 - 把 `workflow`、`devel_mode`、`creation_params` 写进 `ctx.config`
-- 把大批量业务数据写进 `ctx.state` 或 `db.set_state`
-- 把审计事件历史混进快照数据
+- 把大批量业务数据写进 `ctx.state`
+- 绕过 `module.yaml.data.resources[]` 私自读写模块数据
 - 在模块目录里再维护一份正式 `*.yml` 配置事实源
 - 把页面 schema 当成模块配置保存
 - 重新引入独立数据表页面契约

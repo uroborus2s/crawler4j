@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
+from crawler4j_contracts.database import DatabaseClient
 from crawler4j_contracts.result import TaskResult
 
 if TYPE_CHECKING:
@@ -184,8 +185,8 @@ class TaskContext:
     logger: LoggerLike = field(default_factory=get_default_task_logger)
     http: HttpClient | None = None
     tools: ToolsCapability | None = None
+    db: DatabaseClient = field(default_factory=DatabaseClient)
 
-    captured_data: list[Any] = field(default_factory=list)
     state: dict[str, Any] = field(default_factory=dict)
     runtime: dict[str, Any] = field(default_factory=dict)
 

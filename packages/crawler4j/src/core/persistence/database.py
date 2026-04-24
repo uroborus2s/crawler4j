@@ -625,6 +625,21 @@ def _init_state_db() -> None:
         )
         conn.execute(
             """
+            UPDATE environments
+            SET provider_env_id = NULL
+            WHERE provider_env_id IS NOT NULL
+              AND provider_env_id <> ''
+              AND id NOT IN (
+                  SELECT MIN(id)
+                  FROM environments
+                  WHERE provider_env_id IS NOT NULL
+                    AND provider_env_id <> ''
+                  GROUP BY provider, provider_env_id
+              )
+            """
+        )
+        conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_env_provider_env_id
             ON environments(provider_env_id)
             """
@@ -649,7 +664,18 @@ def _init_data_db() -> None:
         conn.executescript("""
             -- 模块数据资源登记表统一管理 managed dataset 与 custom table。
 
-            -- 模块数据集（按 module + dataset + record_index 逐行存储）
+            -- 模块宿主页 schema
+            CREATE TABLE IF NOT EXISTS module_pages (
+                module_name TEXT NOT NULL,
+                page_id TEXT NOT NULL,
+                schema_json TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (module_name, page_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_module_pages_module
+            ON module_pages(module_name);
 
             -- 模块审计事件（append-only）
             CREATE TABLE IF NOT EXISTS module_audit_events (
@@ -675,17 +701,4 @@ def _init_data_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_module_audit_events_type_time
             ON module_audit_events(module_name, dataset_name, event_type, created_at DESC);
-
-            -- 模块宿主页 schema
-            CREATE TABLE IF NOT EXISTS module_pages (
-                module_name TEXT NOT NULL,
-                page_id TEXT NOT NULL,
-                schema_json TEXT NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-                PRIMARY KEY (module_name, page_id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_module_pages_module
-            ON module_pages(module_name);
         """)

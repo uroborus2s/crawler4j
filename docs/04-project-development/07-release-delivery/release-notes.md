@@ -22,11 +22,11 @@
 - 当前工作区根应用版本：`0.3.1`
 - 当前运行时版本：`0.3.1`
 - 最近正式发布 tag：`v0.2.0`
-- SDK 当前版本：`0.5.2`
-- Contracts 当前版本：`0.3.0`
+- SDK 当前版本：`0.6.0`
+- Contracts 当前版本：`0.4.0`
 - 当前工作区已切到 `0.3.1` 源码版本线，但尚未补打对应正式 Git tag / release 资产
-- `crawler4j-sdk 0.5.2` 已于 2026-04-24 完成本地构建并发布到 PyPI
-- SDK 当前口径已收敛到 `TaskContext.tools` 统一工具接口，模块侧不再使用专用 `ctx.db` / `ctx.captcha` 字段
+- `crawler4j-sdk 0.6.0` 与 `crawler4j-contracts 0.4.0` 为当前源码版本线，正式发布资产仍需按发布流程补齐
+- SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
 - 当前工作区已进一步收敛到“ATM hooks + `TaskSignal`”单一生命周期链；`TaskFlow.on_complete/on_error` 与 `TaskScript` 私有 callbacks 已删除
 
 ## 3. 2026-04-17 本地复核结论
@@ -35,7 +35,7 @@
 |---|---|
 | 版本相关单测（`test_version_service.py`、`test_vscode.py`） | 通过（`5 passed`） |
 | Root wheel/sdist build | 通过（产物：`crawler4j-0.2.0`） |
-| SDK wheel/sdist build | 通过（产物：`crawler4j_sdk-0.4.0`） |
+| SDK wheel/sdist build | 待按 `crawler4j-sdk 0.6.0` 重新执行正式发布构建 |
 | Contracts wheel/sdist build | 通过（产物：`crawler4j_contracts-0.2.0`） |
 | Docs markdown tree | 通过（`docs-stratego source validate --repo-path .`） |
 

@@ -61,17 +61,19 @@ class ModuleUIRuntimeBridge:
         if runtime_extra:
             runtime.update(runtime_extra)
 
+        capabilities = build_runtime_capabilities(
+            self._module_name,
+            ui_declaration_buffer=ui_declaration_buffer,
+            surface=capability_surface,
+            declared_page_schemas=declared_page_schemas,
+        )
         return TaskContext(
             env_id=0,
             task_name=self._module_name,
             config=config,
             logger=logger,
-            tools=build_runtime_capabilities(
-                self._module_name,
-                ui_declaration_buffer=ui_declaration_buffer,
-                surface=capability_surface,
-                declared_page_schemas=declared_page_schemas,
-            ).tools,
+            tools=capabilities.tools,
+            db=capabilities.db,
             runtime=runtime,
         )
 
@@ -103,12 +105,14 @@ class ModuleUIRuntimeBridge:
         capability_surface: str = RUNTIME_SURFACE_FULL,
         declared_page_schemas: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        context.tools = build_runtime_capabilities(
+        capabilities = build_runtime_capabilities(
             self._module_name,
             ui_declaration_buffer=ui_declaration_buffer,
             surface=capability_surface,
             declared_page_schemas=declared_page_schemas,
-        ).tools
+        )
+        context.tools = capabilities.tools
+        context.db = capabilities.db
 
     @contextmanager
     def _override_runtime(self, context: TaskContext, runtime_extra: dict[str, Any] | None = None):

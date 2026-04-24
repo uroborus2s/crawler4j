@@ -5,7 +5,7 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
-from PyQt6.QtWidgets import QDialog, QLabel, QPushButton
+from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QSizePolicy
 
 from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
 from src.core.persistence import get_module_data_store
@@ -133,6 +133,67 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
         delattr(builtins, load_key)
 
 
+def test_managed_page_renderer_keeps_header_icon_button_compact(qtbot, tmp_path):
+    module_name = "hosted_page_header_button_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/detail.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
+
+            PAGE = PageSpec(
+                id="detail",
+                label="明细",
+                icon="📄",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_detail_page",
+                    "children": [
+                        {
+                            "type": "Section",
+                            "variant": "plain",
+                            "layout": {"direction": "row", "gap": 8},
+                            "children": [
+                                {
+                                    "type": "Button",
+                                    "icon": "←",
+                                    "aria_label": "返回",
+                                    "size": "icon",
+                                    "variant": "ghost",
+                                    "action": {"type": "open_page", "page_id": "accounts"},
+                                },
+                                {"type": "Text", "style": "title", "text": "劳保计费明细"},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+            def load_detail_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                return {}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("detail", label="明细", icon="📄")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    try:
+        page = ManagedPageRenderer(module_name, "detail", module_info=module_info)
+        qtbot.addWidget(page)
+
+        back_button = next(button for button in page.findChildren(QPushButton) if button.text() == "←")
+        assert back_button.toolTip() == "返回"
+        assert back_button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
+        assert back_button.minimumWidth() <= 40
+        assert back_button.maximumWidth() <= 40
+        assert back_button.width() <= 40
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
 def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) -> None:
     from src.core.mms.data_contract import normalize_manifest_data
 
@@ -142,6 +203,16 @@ def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) ->
                 {
                     "id": resource_id,
                     "storage_mode": "managed_dataset",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "text", "required": True},
+                            {"name": "account_id", "type": "text"},
+                            {"name": "name", "type": "text"},
+                            {"name": "secret", "type": "text"},
+                            {"name": "status", "type": "text"},
+                        ],
+                    },
                 }
             ],
             "views": [],
@@ -204,7 +275,7 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
             """,
             "hooks/create_account_from_ui.py": """
             def handle(context, payload):
-                rows = context.tools.call("db.list_records", resource="accounts", limit=1000, offset=0)
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 next_id = len(rows) + 1
                 row = {
                     "account_id": str(next_id),
@@ -212,12 +283,12 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                     "secret": str(payload.get("secret") or ""),
                     "status": "active",
                 }
-                context.tools.call("db.replace_records", resource="accounts", records=rows + [row])
+                context.db.into("accounts").replace(rows + [row])
                 return {"record": row, "created": True}
             """,
             "hooks/update_account_from_ui.py": """
             def handle(context, account_id, payload):
-                rows = context.tools.call("db.list_records", resource="accounts", limit=1000, offset=0)
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 updated_rows = []
                 updated = None
                 for row in rows:
@@ -231,15 +302,15 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                         )
                         updated = dict(current)
                     updated_rows.append(current)
-                context.tools.call("db.replace_records", resource="accounts", records=updated_rows)
+                context.db.into("accounts").replace(updated_rows)
                 return {"record": updated, "created": False}
             """,
             "hooks/delete_account_from_ui.py": """
             def handle(context, account_id):
-                rows = context.tools.call("db.list_records", resource="accounts", limit=1000, offset=0)
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
                 deleted = next((row for row in rows if str(row.get("account_id")) == str(account_id)), None)
-                context.tools.call("db.replace_records", resource="accounts", records=remaining)
+                context.db.into("accounts").replace(remaining)
                 return {"deleted": True, "record": deleted, "account_id": str(account_id)}
             """,
         },
@@ -251,7 +322,12 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                 "resource_id": "accounts",
                 "storage_mode": "managed_dataset",
                 "record_key_field": "account_id",
-                "schema": {},
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": "account_id", "type": "text", "required": True},
+                    ],
+                },
                 "indexes": {},
                 "cleanup_policy": "delete_rows",
             }
@@ -435,7 +511,7 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
             """,
             "hooks/create_account_from_ui.py": """
             def handle(context, payload):
-                rows = context.tools.call("db.list_records", resource="accounts", limit=1000, offset=0)
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 next_id = len(rows) + 1
                 row = {
                     "account_id": str(next_id),
@@ -443,12 +519,12 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                     "secret": str(payload.get("secret") or ""),
                     "status": "active",
                 }
-                context.tools.call("db.replace_records", resource="accounts", records=rows + [row])
+                context.db.into("accounts").replace(rows + [row])
                 return {"record": row, "created": True}
             """,
             "hooks/update_account_from_ui.py": """
             def handle(context, account_id, payload):
-                rows = context.tools.call("db.list_records", resource="accounts", limit=1000, offset=0)
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 updated_rows = []
                 updated = None
                 for row in rows:
@@ -462,15 +538,15 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                         )
                         updated = dict(current)
                     updated_rows.append(current)
-                context.tools.call("db.replace_records", resource="accounts", records=updated_rows)
+                context.db.into("accounts").replace(updated_rows)
                 return {"record": updated, "created": False}
             """,
             "hooks/delete_account_from_ui.py": """
             def handle(context, account_id):
-                rows = context.tools.call("db.list_records", resource="accounts", limit=1000, offset=0)
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
                 deleted = next((row for row in rows if str(row.get("account_id")) == str(account_id)), None)
-                context.tools.call("db.replace_records", resource="accounts", records=remaining)
+                context.db.into("accounts").replace(remaining)
                 return {"deleted": True, "record": deleted, "account_id": str(account_id)}
             """,
         },
@@ -482,7 +558,12 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                 "resource_id": "accounts",
                 "storage_mode": "managed_dataset",
                 "record_key_field": "account_id",
-                "schema": {},
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": "account_id", "type": "text", "required": True},
+                    ],
+                },
                 "indexes": {},
                 "cleanup_policy": "delete_rows",
             }
@@ -704,7 +785,7 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
                 del page_id, params
                 load_tools = ",".join(spec.name for spec in context.tools.list_tools())
                 try:
-                    context.tools.call("db.set_state", key="hosted_ui_load", value=1)
+                    context.db.into("hosted_ui_load").replace([])
                 except Exception as exc:
                     load_write_error = type(exc).__name__
                 return {
@@ -717,7 +798,7 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
                 del table_id, query, params
                 query_tools = ",".join(spec.name for spec in context.tools.list_tools())
                 try:
-                    context.tools.call("db.replace_records", resource="hosted_ui_query", records=[])
+                    context.db.into("hosted_ui_query").replace([])
                 except Exception as exc:
                     query_write_error = type(exc).__name__
                 return {
@@ -739,9 +820,9 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
         page = ManagedPageRenderer(module_name, "dashboard", module_info=module_info)
         qtbot.addWidget(page)
 
-        readonly_tools = "db.get_record,db.list_records,db.query_events,db.query_view,db.run_query,ui.get_page"
+        readonly_tools = "ui.get_page"
         assert any(label.text() == readonly_tools for label in page.findChildren(QLabel))
-        assert any(label.text() == "KeyError" for label in page.findChildren(QLabel))
+        assert any(label.text() == "RuntimeError" for label in page.findChildren(QLabel))
 
         table = page._data_table_widgets["stats"]
         qtbot.waitUntil(lambda: table.item(1, 1) is not None)
@@ -749,7 +830,7 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
         assert table.item(0, 0).text() == "query_tools"
         assert table.item(0, 1).text() == readonly_tools
         assert table.item(1, 0).text() == "query_write_error"
-        assert table.item(1, 1).text() == "KeyError"
+        assert table.item(1, 1).text() == "RuntimeError"
     finally:
         restore_module(service, original_registry, module_name)
 

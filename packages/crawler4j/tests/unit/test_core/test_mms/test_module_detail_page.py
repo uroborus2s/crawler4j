@@ -408,7 +408,6 @@ def test_module_detail_page_row_action_refreshes_cached_target_with_new_params(q
         tmp_path,
         pages=[
             make_page_info("dashboard", label="主表", icon="📊"),
-            make_page_info("details", label="详情页", icon="📋"),
         ],
         files={
             "pages/dashboard.py": """
@@ -500,12 +499,19 @@ def test_module_detail_page_row_action_refreshes_cached_target_with_new_params(q
     try:
         page.set_module(module)
 
+        menu_texts = [page.menu_list.item(i).text() for i in range(page.menu_list.count())]
+        assert "📊 主表" in menu_texts
+        assert "📋 详情页" not in menu_texts
+
         page._select_menu("dashboard")
         dashboard = page._menu_pages["dashboard"]
         master_table = dashboard._data_table_widgets["master"]
 
         master_table.cellClicked.emit(0, 0)
-        qtbot.waitUntil(lambda: "details" in page._menu_pages)
+        qtbot.waitUntil(
+            lambda: "details" in page._menu_pages
+            and page.content_stack.currentWidget() is page._menu_pages["details"]
+        )
         details_page = page._menu_pages["details"]
         details_table = details_page._data_table_widgets["details_table"]
         assert details_table.item(0, 1).text() == "detail-1"

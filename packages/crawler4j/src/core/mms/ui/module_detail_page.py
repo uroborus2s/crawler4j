@@ -22,10 +22,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.models import ModuleInfo, ModuleSource, UIPageInfo
+from src.core.mms.service import get_module_service
 from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.module_config_page import ModuleConfigPage
-from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
 
 
@@ -554,23 +555,66 @@ class ModuleDetailPage(QWidget):
             return {}
         return dict(params)
 
+    def _resolve_hosted_page_info(self, page_id: str) -> UIPageInfo | None:
+        page_info = self._hosted_page_infos.get(page_id)
+        if page_info is not None:
+            return page_info
+        if not self._module:
+            return None
+
+        try:
+            descriptor = get_module_service().get_runtime_descriptor(
+                self._module.name,
+                force_reload=self._module.source != ModuleSource.BUILTIN,
+            )
+        except Exception:
+            return None
+
+        runtime_page = descriptor.pages.get(page_id)
+        if runtime_page is None:
+            return None
+
+        spec = runtime_page.spec
+        return UIPageInfo(
+            id=str(spec.id or page_id).strip() or page_id,
+            icon=str(spec.icon or "📋").strip() or "📋",
+            label=str(spec.label or page_id).strip() or page_id,
+        )
+
     def _open_page(self, page_id: str, params: dict[str, object] | None = None) -> None:
         normalized_page_id = str(page_id or "").strip()
-        menu_id = normalized_page_id if normalized_page_id in self._hosted_page_infos else None
-        if not menu_id:
+        page_info = self._resolve_hosted_page_info(normalized_page_id)
+        if page_info is None:
             QMessageBox.warning(self, "页面跳转失败", f"未找到宿主页: {page_id}")
             return
-        self._menu_navigation_params[menu_id] = self._normalize_navigation_params(params)
+        self._menu_navigation_params[normalized_page_id] = self._normalize_navigation_params(params)
+
+        if normalized_page_id not in self._hosted_page_infos:
+            page = self._menu_pages.get(normalized_page_id)
+            if page is None:
+                page = self._create_hosted_page(page_info)
+                self._menu_pages[normalized_page_id] = page
+                self.content_stack.addWidget(page)
+            else:
+                if hasattr(page, "set_navigation_params"):
+                    page.set_navigation_params(
+                        self._menu_navigation_params.get(normalized_page_id),
+                        auto_refresh=False,
+                    )
+                if hasattr(page, "refresh"):
+                    page.refresh()
+            self.content_stack.setCurrentWidget(page)
+            return
 
         current_item = self.menu_list.currentItem()
         current_menu_id = current_item.data(Qt.ItemDataRole.UserRole) if current_item else None
-        if current_menu_id == menu_id:
-            page = self._ensure_menu_page(menu_id)
+        if current_menu_id == normalized_page_id:
+            page = self._ensure_menu_page(normalized_page_id)
             if page is not None:
                 self.content_stack.setCurrentWidget(page)
             return
 
-        self._select_menu(menu_id)
+        self._select_menu(normalized_page_id)
 
     def _remove_dev_link(self):
         if not self._module or self._module.source != ModuleSource.DEV_LINK:

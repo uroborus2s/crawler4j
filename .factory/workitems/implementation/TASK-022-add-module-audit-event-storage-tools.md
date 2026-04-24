@@ -16,7 +16,7 @@
 
 - 在 `data.db` 中新增 `module_audit_events` 表与索引。
 - 为 `ModuleDataStore` 增加事件追加与查询能力。
-- 为 runtime capabilities 注册 `db.append_event`、`db.query_events`。
+- 为 `ctx.db` 注册 `audit(...).append/query` 能力。
 - 补齐持久层 / runtime / SDK 能力面的回归测试。
 - 更新 PRD、需求分析、需求校验、API 设计、开发者指南、测试计划和 `.factory/memory/`。
 
@@ -29,7 +29,7 @@
 ## 验收标准
 
 - `module_audit_events` 可独立持久化 append-only 事件。
-- `db.append_event` 可追加审计事件，不覆盖历史。
-- `db.query_events` 支持按 `dataset / entity_key / event_type / run_id / time range` 查询。
+- `ctx.db.audit(...).append` 可追加审计事件，不覆盖历史。
+- `ctx.db.audit(...).query` 支持按 `dataset / entity_key / event_type / run_id / time range` 查询。
 - `clear_module_data()` 会同时清理模块快照数据、事件数据和数据表 schema。
 - 正式文档、追踪矩阵和 `.factory/memory/` 已同步。

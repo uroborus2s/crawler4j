@@ -49,6 +49,22 @@ def _build_request() -> ExecutionRequest:
     )
 
 
+def _build_module_service(selector_hook=None):
+    async def default_hook(module_name, hook_name, context, *args):
+        return None
+
+    service = SimpleNamespace(
+        run_module=AsyncMock(return_value="ok"),
+        call_hook=AsyncMock(side_effect=selector_hook or default_hook),
+    )
+
+    async def run_env_selector(module_name, selector_name, context, candidates):
+        return await service.call_hook(module_name, "select_env", context, candidates, selector_name)
+
+    service.run_env_selector = AsyncMock(side_effect=run_env_selector)
+    return service
+
+
 def _build_runner(
     *,
     env: Environment | None,
@@ -79,10 +95,7 @@ def _build_runner(
 @pytest.mark.asyncio
 async def test_execution_runner_waits_when_fixed_pool_has_no_candidates():
     request = _build_request()
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(return_value=None),
-    )
+    module_service = _build_module_service()
     runner, rem = _build_runner(env=None, lease=None, module_service=module_service)
 
     await runner.run(request)
@@ -102,10 +115,7 @@ async def test_execution_runner_records_waiting_since_when_fixed_pool_enters_que
     request = _build_request()
     request.task.created_at = 1_710_000_000
     waiting_since = request.task.created_at + 90
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(return_value=None),
-    )
+    module_service = _build_module_service()
     runner, _rem = _build_runner(env=None, lease=None, module_service=module_service)
     monkeypatch.setattr(execution_runner.time, "time", lambda: waiting_since)
 
@@ -124,10 +134,7 @@ async def test_execution_runner_preserves_existing_waiting_since_on_requeue(monk
 
     request = _build_request()
     request.task.waiting_since = 1_710_000_090
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(return_value=None),
-    )
+    module_service = _build_module_service()
     runner, _rem = _build_runner(env=None, lease=None, module_service=module_service)
     monkeypatch.setattr(execution_runner.time, "time", lambda: 1_710_000_190)
 
@@ -147,10 +154,7 @@ async def test_execution_runner_fixed_pool_requeues_when_selected_candidate_disa
             return env.id
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service, env_lookup=None)
     rem.get_env = AsyncMock(return_value=None)
 
@@ -176,10 +180,7 @@ async def test_execution_runner_fixed_pool_fails_when_lease_acquire_raises():
             return env.id
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
     rem.lease_manager.acquire = AsyncMock(side_effect=RuntimeError("lease failed"))
 
@@ -207,10 +208,7 @@ async def test_execution_runner_fixed_pool_requeues_when_selected_env_is_taken(m
             return env.id
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
     rem.lease_manager.acquire = AsyncMock(
         side_effect=EnvUnavailableError("环境 21 已被占用", stage="LEASE")
@@ -241,10 +239,7 @@ async def test_execution_runner_fixed_pool_requeues_when_pool_card_turns_ineligi
             return env.id
         return None
 
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
-    )
+    module_service = _build_module_service(hook)
     runner, rem = _build_runner(
         env=env,
         lease=lease,

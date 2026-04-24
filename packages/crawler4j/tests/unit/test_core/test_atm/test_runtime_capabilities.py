@@ -10,7 +10,6 @@ import src.core.atm.runtime_capabilities as runtime_capabilities
 from src.core.atm.runtime_capabilities import (
     ClickCaptchaMatchResult,
     ClickCaptchaOrderedTarget,
-    HostedUIDeclarationBuffer,
     RUNTIME_SURFACE_HOSTED_UI_DECLARE,
     RUNTIME_SURFACE_HOSTED_UI_READONLY,
     SliderCaptchaMatchResult,
@@ -29,24 +28,6 @@ def temp_data_dir(tmp_path):
         yield tmp_path
 
 
-class _FakeKV:
-    def __init__(self):
-        self._store: dict[str, object] = {}
-
-    def get(self, key: str):
-        return self._store.get(key)
-
-    def set(self, key: str, value, ttl: int | None = None):  # noqa: ARG002
-        self._store[key] = value
-        return True
-
-    def exists(self, key: str) -> bool:
-        return key in self._store
-
-    def delete(self, key: str) -> bool:
-        return self._store.pop(key, None) is not None
-
-
 def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) -> None:
     from src.core.mms.data_contract import normalize_manifest_data
     from src.core.persistence import get_module_data_store
@@ -57,6 +38,12 @@ def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) ->
                 {
                     "id": resource_id,
                     "storage_mode": "managed_dataset",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "text", "required": True},
+                        ],
+                    },
                 }
             ],
             "views": [],
@@ -70,19 +57,6 @@ def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) ->
 def test_runtime_tools_register_expected_surface():
     caps = build_runtime_capabilities("demo_module")
 
-    assert caps.tools.has_tool("db.list_records") is True
-    assert caps.tools.has_tool("db.get_record") is True
-    assert caps.tools.has_tool("db.replace_records") is True
-    assert caps.tools.has_tool("db.run_query") is True
-    assert caps.tools.has_tool("db.query_view") is True
-    assert caps.tools.has_tool("db.append_event") is True
-    assert caps.tools.has_tool("db.query_events") is True
-    assert caps.tools.has_tool("db.acquire_lock") is True
-    assert caps.tools.has_tool("db.release_lock") is True
-    assert caps.tools.has_tool("db.is_locked") is True
-    assert caps.tools.has_tool("db.get_state") is True
-    assert caps.tools.has_tool("db.set_state") is True
-    assert caps.tools.has_tool("db.exists_state") is True
     assert caps.tools.has_tool("ip_pool.pick_proxy") is True
     assert caps.tools.has_tool("env.set_proxy") is True
     assert caps.tools.has_tool("env.bind_resource_pool") is True
@@ -100,16 +74,13 @@ def test_runtime_tools_register_expected_surface():
     specs = caps.tools.list_tools()
     tool_names = [spec.name for spec in specs]
     assert tool_names == sorted(tool_names)
+    assert not any(name.startswith("db.") for name in tool_names)
     assert {spec.name: spec.is_async for spec in specs}["env.bind_resource_pool"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.mark_resource_pool_eligible"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.mark_resource_pool_ineligible"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.remove_resource_pool"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.replace_resource_pool_snapshot"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.set_proxy"] is True
-    assert {spec.name: spec.is_async for spec in specs}["db.append_event"] is False
-    assert {spec.name: spec.is_async for spec in specs}["db.get_record"] is False
-    assert {spec.name: spec.is_async for spec in specs}["db.list_records"] is False
-    assert {spec.name: spec.is_async for spec in specs}["db.run_query"] is False
 
 
 def test_runtime_tools_register_hosted_ui_declare_surface():
@@ -118,7 +89,7 @@ def test_runtime_tools_register_hosted_ui_declare_surface():
     assert [spec.name for spec in caps.tools.list_tools()] == ["ui.declare_page"]
     assert caps.tools.has_tool("ui.declare_page") is True
     assert caps.tools.has_tool("ui.get_page") is False
-    assert caps.tools.has_tool("db.list_records") is False
+    assert not any(spec.name.startswith("db.") for spec in caps.tools.list_tools())
 
     with pytest.raises(KeyError, match=r"Unknown core tool: ui.get_page"):
         caps.tools.call("ui.get_page", page_id="dashboard")
@@ -156,22 +127,13 @@ def test_runtime_tools_hosted_ui_declare_surface_does_not_persist_page_schema():
 def test_runtime_tools_register_hosted_ui_readonly_surface():
     caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_READONLY)
 
-    assert [spec.name for spec in caps.tools.list_tools()] == [
-        "db.get_record",
-        "db.list_records",
-        "db.query_events",
-        "db.query_view",
-        "db.run_query",
-        "ui.get_page",
-    ]
+    assert [spec.name for spec in caps.tools.list_tools()] == ["ui.get_page"]
     assert caps.tools.has_tool("ui.get_page") is True
-    assert caps.tools.has_tool("db.list_records") is True
     assert caps.tools.has_tool("ui.declare_page") is False
-    assert caps.tools.has_tool("db.set_state") is False
-    assert caps.tools.has_tool("db.append_event") is False
+    assert not any(spec.name.startswith("db.") for spec in caps.tools.list_tools())
 
-    with pytest.raises(KeyError, match=r"Unknown core tool: db.set_state"):
-        caps.tools.call("db.set_state", key="cursor", value=1)
+    with pytest.raises(KeyError, match=r"Unknown core tool: ui.unknown"):
+        caps.tools.call("ui.unknown", key="cursor", value=1)
 
 
 def test_runtime_tools_hosted_ui_readonly_surface_does_not_read_persisted_page_schema():
@@ -195,327 +157,32 @@ def test_runtime_tools_hosted_ui_readonly_surface_does_not_read_persisted_page_s
         caps.tools.call("ui.get_page", page_id="dashboard")
 
 
-def test_db_tools_get_record_and_list_delegate_to_store(monkeypatch):
-    get_calls: list[dict[str, object]] = []
-    list_calls: list[dict[str, object]] = []
-
-    class _FakeDataStore:
-        def get_record(self, module_name: str, resource_id: str, key: object):
-            get_calls.append(
-                {
-                    "module_name": module_name,
-                    "resource_id": resource_id,
-                    "key": key,
-                }
-            )
-            return {"id": key, "phone": "13800138000"}
-
-        def list_records(self, module_name: str, resource_id: str, **kwargs):
-            list_calls.append(
-                {
-                    "module_name": module_name,
-                    "resource_id": resource_id,
-                    **kwargs,
-                }
-            )
-            return [{"id": "u1"}]
-
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_module_data_store", lambda: _FakeDataStore())
-
-    caps = build_runtime_capabilities("demo_module")
-    record = caps.tools.call("db.get_record", resource="account_records", key="u1")
-    rows = caps.tools.call(
-        "db.list_records",
-        resource="account_records",
-        filters={"phone": "13800138000"},
-        sort=[{"field": "phone", "direction": "asc"}],
-        limit=5,
-        offset=1,
-    )
-
-    assert record == {"id": "u1", "phone": "13800138000"}
-    assert rows == [{"id": "u1"}]
-    assert get_calls == [
-        {
-            "module_name": "demo_module",
-            "resource_id": "account_records",
-            "key": "u1",
-        }
-    ]
-    assert list_calls == [
-        {
-            "module_name": "demo_module",
-            "resource_id": "account_records",
-            "filters": {"phone": "13800138000"},
-            "sort": [{"field": "phone", "direction": "asc"}],
-            "limit": 5,
-            "offset": 1,
-        }
-    ]
-
-
-def test_db_tools_run_query_and_query_view_delegate_to_store(monkeypatch):
-    run_query_calls: list[dict[str, object]] = []
-    query_calls: list[dict[str, object]] = []
-
-    class _FakeDataStore:
-        def run_registered_query(self, module_name: str, **kwargs):
-            run_query_calls.append(
-                {
-                    "module_name": module_name,
-                    **kwargs,
-                }
-            )
-            return [{"entry_id": "row-1"}]
-
-        def query_db_view(self, module_name: str, view_id: str, **kwargs):
-            query_calls.append(
-                {
-                    "module_name": module_name,
-                    "view_id": view_id,
-                    **kwargs,
-                }
-            )
-            return {"rows": [{"execution_date": "2026-04-23"}], "total": 1, "limit": 20, "offset": 0}
-
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_module_data_store", lambda: _FakeDataStore())
-    monkeypatch.setattr(
-        "src.core.atm.runtime_capabilities.load_sql_file",
-        lambda module_root, relative_path, expected_prefix: "SELECT entry_id FROM {{resource:billing_entries}} WHERE entry_id = :entry_id",
-    )
-    monkeypatch.setattr(
-        "src.core.atm.runtime_capabilities.validate_resource_sql",
-        lambda sql, *, source_resource_ids, owner_label: None,
-    )
-
-    fake_module = SimpleNamespace(
-        path=Path("/tmp/demo_module"),
-        manifest=SimpleNamespace(
-            data={
-                "queries": [
-                    {
-                        "query_id": "get_billing_entry_by_id",
-                        "source_resource_ids": ["billing_entries"],
-                        "sql_file": "data/sql/queries/get_billing_entry_by_id.sql",
-                        "params": [{"name": "entry_id", "type": "text", "required": True}],
-                        "columns": [{"name": "entry_id", "type": "text", "nullable": False}],
-                    }
-                ]
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "src.core.mms.registry.get_module_registry",
-        lambda: SimpleNamespace(get_module=lambda module_name: fake_module if module_name == "demo_module" else None),
-    )
-
-    caps = build_runtime_capabilities("demo_module")
-    queried_rows = caps.tools.call(
-        "db.run_query",
-        query_id="get_billing_entry_by_id",
-        params={"entry_id": "row-1"},
-    )
-    queried_view = caps.tools.call(
-        "db.query_view",
-        view_id="billing_stats",
-        filters={"execution_date": "2026-04-23"},
-        sort=[{"field": "execution_date", "direction": "desc"}],
-        limit=20,
-        offset=0,
-    )
-
-    assert queried_rows == [{"entry_id": "row-1"}]
-    assert queried_view["total"] == 1
-    assert run_query_calls == [
-        {
-            "module_name": "demo_module",
-            "source_resource_ids": ["billing_entries"],
-            "sql_template": "SELECT entry_id FROM {{resource:billing_entries}} WHERE entry_id = :entry_id",
-            "columns": [{"name": "entry_id", "type": "text", "nullable": False}],
-            "params": {"entry_id": "row-1"},
-        }
-    ]
-    assert query_calls == [
-        {
-            "module_name": "demo_module",
-            "view_id": "billing_stats",
-            "filters": {"execution_date": "2026-04-23"},
-            "sort": [{"field": "execution_date", "direction": "desc"}],
-            "limit": 20,
-            "offset": 0,
-        }
-    ]
-
-
-def test_db_tools_reject_undeclared_resources():
-    caps = build_runtime_capabilities("demo_module")
-
-    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
-        caps.tools.call("db.list_records", resource="accounts")
-
-    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
-        caps.tools.call("db.get_record", resource="accounts", key="u1")
-
-    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
-        caps.tools.call("db.replace_records", resource="accounts", records=[{"id": "u1"}])
-
-
-@pytest.mark.parametrize(
-    ("params", "expected_message"),
-    [
-        ({}, "query 参数缺失: entry_id"),
-        ({"entry_id": "row-1", "extra": 1}, "query 参数未注册: extra"),
-    ],
-)
-def test_db_tools_run_query_rejects_invalid_params(
-    monkeypatch,
-    params: dict[str, object],
-    expected_message: str,
-):
-    monkeypatch.setattr(
-        "src.core.atm.runtime_capabilities.get_module_data_store",
-        lambda: SimpleNamespace(run_registered_query=lambda *args, **kwargs: []),
-    )
-    monkeypatch.setattr(
-        "src.core.atm.runtime_capabilities.load_sql_file",
-        lambda module_root, relative_path, expected_prefix: "SELECT entry_id FROM {{resource:billing_entries}} WHERE entry_id = :entry_id",
-    )
-    monkeypatch.setattr(
-        "src.core.atm.runtime_capabilities.validate_resource_sql",
-        lambda sql, *, source_resource_ids, owner_label: None,
-    )
-    fake_module = SimpleNamespace(
-        path=Path("/tmp/demo_module"),
-        manifest=SimpleNamespace(
-            data={
-                "queries": [
-                    {
-                        "query_id": "get_billing_entry_by_id",
-                        "source_resource_ids": ["billing_entries"],
-                        "sql_file": "data/sql/queries/get_billing_entry_by_id.sql",
-                        "params": [{"name": "entry_id", "type": "text", "required": True}],
-                        "columns": [{"name": "entry_id", "type": "text", "nullable": False}],
-                    }
-                ]
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "src.core.mms.registry.get_module_registry",
-        lambda: SimpleNamespace(get_module=lambda module_name: fake_module if module_name == "demo_module" else None),
-    )
-
-    caps = build_runtime_capabilities("demo_module")
-
-    with pytest.raises(ValueError, match=expected_message):
-        caps.tools.call(
-            "db.run_query",
-            query_id="get_billing_entry_by_id",
-            params=params,
-        )
-
-
-@pytest.mark.parametrize(
-    "tool_name",
-    [
-        "db.replace_records",
-        "db.append_event",
-        "db.set_state",
-        "db.acquire_lock",
-        "db.release_lock",
-    ],
-)
-def test_runtime_tools_hide_side_effect_db_tools_during_ui_declaration(tool_name: str):
-    buffer = HostedUIDeclarationBuffer()
-    caps = build_runtime_capabilities("demo_module", ui_declaration_buffer=buffer)
-
-    assert caps.tools.has_tool(tool_name) is False
-    assert tool_name not in {spec.name for spec in caps.tools.list_tools()}
-
-    with pytest.raises(RuntimeError, match=rf"declare_ui 不允许调用 {tool_name}"):
-        caps.tools.call(tool_name)
-
-    buffer.seal()
-
-    assert caps.tools.has_tool(tool_name) is True
-    assert tool_name in {spec.name for spec in caps.tools.list_tools()}
-
-
-def test_db_tools_records_and_lock_are_generic(temp_data_dir, monkeypatch):
-    fake_kv = _FakeKV()
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
-    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
-
-    caps = build_runtime_capabilities("demo_module")
-    assert caps.tools.call(
-        "db.replace_records",
-        resource="accounts",
-        records=[
-            {"id": "u1", "phone_number": "13800000001", "country_code": "86"},
-            {"id": "u2", "phone_number": "13800000002", "country_code": "86"},
-        ],
-    )
-    records = caps.tools.call("db.list_records", resource="accounts")
-    assert len(records) == 2
-
-    first = caps.tools.call(
-        "db.acquire_lock",
-        scope="accounts",
-        key="13800000001",
-        ttl=60,
-        owner={"task_id": "t1", "job_id": "j1"},
-    )
-    second = caps.tools.call(
-        "db.acquire_lock",
-        scope="accounts",
-        key="13800000001",
-        ttl=60,
-        owner={"task_id": "t2", "job_id": "j1"},
-    )
-    third = caps.tools.call("db.release_lock", scope="accounts", key="13800000001")
-
-    assert first is True
-    assert second is False
-    assert third is True
-
-
-def test_db_tools_replace_records_rejects_invalid_records(temp_data_dir):
+def test_runtime_ctx_db_replaces_public_db_tools(temp_data_dir):
     _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
     caps = build_runtime_capabilities("demo_module")
 
-    with pytest.raises(ValueError, match=r"resource records\[1\] must be an object"):
-        caps.tools.call(
-            "db.replace_records",
-            resource="accounts",
-            records=[
-                {"id": "u1", "phone_number": "13800000001"},
-                "broken-record",
-            ],
-        )
+    assert not any(spec.name.startswith("db.") for spec in caps.tools.list_tools())
+    assert caps.db.into("accounts").replace([{"id": "u1"}, {"id": "u2"}]) is True
 
-    assert caps.tools.call("db.list_records", resource="accounts") == []
+    rows = (
+        caps.db.from_("accounts")
+        .select("id")
+        .where_eq("id", "u2")
+        .limit(10)
+        .execute()
+    )
+
+    assert rows == [{"id": "u2"}]
 
 
-def test_db_tools_append_and_query_events(temp_data_dir, monkeypatch):
-    fake_kv = _FakeKV()
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
-    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="account_events")
+def test_runtime_ctx_db_audit_uses_independent_audit_table(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
 
     caps = build_runtime_capabilities("demo_module")
-    first = caps.tools.call(
-        "db.append_event",
-        dataset="account_events",
-        event_type="created",
-        entity_key="13800000001",
-        next_status="active",
-        payload={"source": "import"},
-        created_at=100,
-    )
-    second = caps.tools.call(
-        "db.append_event",
-        dataset="account_events",
+
+    event_id = caps.db.audit("account_events").append(
+        entity_key="13800138000",
         event_type="status_changed",
-        entity_key="13800000001",
         previous_status="active",
         next_status="blocked",
         result="success",
@@ -523,32 +190,38 @@ def test_db_tools_append_and_query_events(temp_data_dir, monkeypatch):
         payload={"operator": "system"},
         created_at=200,
     )
+    events = caps.db.audit("account_events").query(entity_key="13800138000")
 
-    events = caps.tools.call("db.query_events", dataset="account_events")
-    created_only = caps.tools.call(
-        "db.query_events",
-        dataset="account_events",
-        entity_key="13800000001",
-        event_type="created",
-    )
-    records = caps.tools.call("db.list_records", resource="account_events")
+    assert events == [
+        {
+            "id": event_id,
+            "module_name": "demo_module",
+            "dataset_name": "account_events",
+            "entity_key": "13800138000",
+            "event_type": "status_changed",
+            "run_id": None,
+            "previous_status": "active",
+            "next_status": "blocked",
+            "result": "success",
+            "reason": "risk_control",
+            "payload": {"operator": "system"},
+            "created_at": 200,
+        }
+    ]
+    with get_connection(DATA_DB) as conn:
+        dataset_rows = conn.execute(
+            "SELECT COUNT(*) AS count FROM module_datasets WHERE module_name = ?",
+            ("demo_module",),
+        ).fetchone()
+    assert dataset_rows["count"] == 0
 
-    assert first is True
-    assert second is True
-    assert [item["event_type"] for item in events] == ["status_changed", "created"]
-    assert created_only[0]["payload"] == {"source": "import"}
-    assert records == []
 
-
-def test_db_tools_state_roundtrip(monkeypatch):
-    fake_kv = _FakeKV()
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
-
+def test_runtime_ctx_db_rejects_complex_query_on_managed_dataset(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
     caps = build_runtime_capabilities("demo_module")
 
-    assert caps.tools.call("db.set_state", key="demo_module:cursor", value={"page": 2}, ttl=60) is True
-    assert caps.tools.call("db.get_state", key="demo_module:cursor") == {"page": 2}
-    assert caps.tools.call("db.exists_state", key="demo_module:cursor") is True
+    with pytest.raises(ValueError, match="managed_dataset\\(snapshot\\).*join"):
+        caps.db.from_("accounts").join("profiles", on={"id": "id"}).execute()
 
 
 def test_ip_pool_tool_picks_proxy_by_criteria(monkeypatch):
@@ -567,7 +240,7 @@ def test_ip_pool_tool_picks_proxy_by_criteria(monkeypatch):
     fake_manager = SimpleNamespace(
         get_pool=lambda pool_id: pool if pool_id == "p1" else None, list_pools=lambda: [pool]
     )
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_ip_pool_manager", lambda: fake_manager)
+    monkeypatch.setattr("src.core.atm.runtime_capabilities._get_ip_pool_manager", lambda: fake_manager)
 
     caps = build_runtime_capabilities("demo_module")
     selected = caps.tools.call(
@@ -594,7 +267,10 @@ async def test_env_tool_delegates_to_environment_manager(monkeypatch):
         return True
 
     fake_manager = SimpleNamespace(update_env=_update_env)
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_environment_manager", lambda: fake_manager)
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities._rem_manager_helpers",
+        lambda: (lambda: fake_manager, "scheduler.resource_pool", None, None),
+    )
 
     caps = build_runtime_capabilities("demo_module")
     ok = await caps.tools.call("env.set_proxy", env_id=12, proxy_value="http://1.1.1.1:8001", proxy_pool_id=None)
@@ -641,7 +317,26 @@ async def test_env_resource_pool_tools_manage_metadata_cards(monkeypatch):
         async def list_envs(self):
             return [SimpleNamespace(id=11), SimpleNamespace(id=12), SimpleNamespace(id=13)]
 
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_environment_manager", lambda: _FakeManager())
+    fake_manager = _FakeManager()
+
+    def _build_card(module_name: str, pool_name: str, *, eligible: bool, reason: str, exclusive: bool):
+        return {
+            "module_name": module_name,
+            "pool_name": pool_name,
+            "eligible": eligible,
+            "reason": reason,
+            "exclusive": exclusive,
+        }
+
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities._rem_manager_helpers",
+        lambda: (
+            lambda: fake_manager,
+            "scheduler.resource_pool",
+            _build_card,
+            lambda module_name, pool_name: f"{module_name}:{pool_name}",
+        ),
+    )
 
     caps = build_runtime_capabilities("demo_module")
     await caps.tools.call(

@@ -7,7 +7,7 @@
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
 **关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `TASK-024`, `TASK-026`, `TASK-028`
-**最后更新：** 2026-04-23
+**最后更新：** 2026-04-24
 
 ## `API-001` Root App Entry Contract
 
@@ -35,7 +35,7 @@
 | 生命周期规则 | `on_cleanup` 是终态清理 hook；对已建立 `TaskContext` 的任务，ATM 会先执行 `on_cleanup`，再执行环境关闭/删除；cleanup 期间 `context.runtime["env_action"]` 先暴露计划动作（`success=None`），环境动作完成后再写回最终结果；若任务在环境申请/启动阶段就失败，不保证会进入 `on_cleanup`；手动中止运行中任务时，ATM 会主动 cancel 当前模块协程，`TaskContext.wait()` / `run_subtask()` 会尽快抛出 `asyncio.CancelledError` 以配合收口；`on_success` / `on_failure` / `on_timeout` / `on_cleanup` 与环境动作均受宿主超时保护，避免终态收尾把任务永久卡在 `running`；其中 `on_cleanup` 当前默认最大执行时间为 `120s`，其余终态 hook 与环境动作保持更短超时 |
 | 默认工作流解析 | `context.runtime["workflow"]` -> `module_runtime.DEFAULT_WORKFLOW` -> `module.yaml.workflows[0].name` |
 | 发现错误可见性 | `ModuleAssembler` 发现 `tasks/` / `workflows/` import 失败时，必须记录 import 目标、异常类型与 traceback；若当前请求命中失败条目，`run()` 需附带 discovery hint，而不是只报泛化的“not found” |
-| Hosted UI 契约 | 页面创建/刷新时先同步调用根模块 `declare_ui(context)`；页面只通过 `ui.declare_page` 声明，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象 |
+| Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 导出的 `PAGE`；`module.yaml.ui_extension.pages[]` 只控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象 |
 | `TaskSignal` UI 契约 | `TaskSignal.wait_for_confirmation(..., payload={"confirmation": ...})` 会把完整 `signal` 快照持久化到任务记录，并发布 `task.signal` 事件；ATM 详情页按 `payload.confirmation` 渲染结构化确认面板，若缺少该块则退回展示 `message` 与 payload 键值 |
 | DevLink 调试语义 | 模块来源为 `DevLink` 时，详情页数据表刷新会以 `devel_mode=true` 重建本地 hook 上下文，便于联调最新 UI 声明 |
 | DevLink 普通执行语义 | ATM 普通执行 `DevLink` 模块时，也会注入 `devel_mode=true`；`ModuleService` 对同一个 `TaskContext` 只在首次加载时强制 reload 一次，后续 hook / `run()` 复用同次执行内已加载模块 |
@@ -48,16 +48,16 @@
 | 项目 | 内容 |
 |---|---|
 | 目标 | 模块 UI 不再直接导出 `PyQt6` 页面，而是声明宿主管理页 schema，由宿主统一渲染 |
-| Manifest 形态 | `ui_extension.pages[]`，每页只声明 `id`、`label`、`icon` |
-| 模块 UI 声明入口 | `module_runtime.py` 中的 `declare_ui(context)` |
-| 新能力入口 | `context.tools.call("ui.declare_page", ...)` |
+| Manifest 形态 | `ui_extension.pages[]` 只声明左侧菜单入口，每项只允许 `id`、`label`、`icon` |
+| 模块 UI 声明入口 | `pages/*.py` 或 `pages/<group>/*.py` 导出 `PAGE: PageSpec` |
+| 页面路由 | `open_page.page_id` 可以打开任意已注册 `PAGE`，包括未出现在左侧菜单的详情页或二级页 |
 | 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Button`、`DataTable` |
 | `Card` V1 范围 | 纯容器卡片；支持 `title`、`title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 与子组件布局 |
-| `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`、`managed_resource`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
+| `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
 | 宿主动作范围 | `Button.action` 第一版只开放 `reload`、`open_page` |
-| 明确删除 | `micro_app`、`ui:*`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_data_table` |
+| 明确删除 | `micro_app`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_page`、`ui.declare_data_table` |
 | 设计输入 | `module-hosted-ui-framework.md` |
-| 当前验证基线 | Core / SDK / integration / acceptance 已跑通 hosted page V1 定向回归；模块详情页、CLI 和 schema gate 已统一到新契约 |
+| 当前验证基线 | Core / SDK / integration / acceptance 已跑通 hosted page V1 定向回归；模块详情页、CLI 和 schema gate 已统一到 `pages/` 页面注册 + `ui_extension.pages[]` 菜单配置的新契约 |
 | 当前状态 | 已本地实现并通过定向验证；PR 收口与真实业务模块接入验证待继续推进 |
 | 关联项 | `CR-011`, `TASK-025` |
 
@@ -68,9 +68,9 @@
 | 目标 | 在模块 `custom_table` 实体表之上提供 manifest 驱动的数据库视图和命名查询能力 |
 | 新事实源 | `module.yaml.data.views[]`、`module.yaml.data.queries[]`、`data.db.module_db_views` |
 | 注册入口 | `module.yaml.data` + `data/sql/views/*.sql` + `data/sql/queries/*.sql` |
-| 查询接口 | `ctx.tools.call("db.run_query", ...)`、`ctx.tools.call("db.query_view", ...)` |
+| 查询接口 | `ctx.db.from_(...)`、`ctx.db.named(...).bind(...).execute()` |
 | SQL 契约 | 模块只能执行宿主已注册的 `SELECT/WITH SELECT` SQL；源表通过 `{{resource:<resource_id>}}` 占位引用；禁止未注册 SQL |
-| UI 接入 | 模块页面通过内联 `DataTable(query_handler)` 调用 `db.query_view` / `db.run_query`，宿主只负责表格交互与渲染 |
+| UI 接入 | 模块页面通过内联 `DataTable(query_handler)` 调用 `ctx.db` fluent API，宿主只负责表格交互与渲染 |
 | 生命周期 | 宿主在模块加载/安装时校验、同步、建表、建视图、导种子，并在卸载时统一清理 |
 | 当前状态 | 已切到 manifest 驱动契约；旧 `db.declare_db_view` 运行时声明口已退出正式协议 |
 | 关联文档 | `module-entity-table-view-design.md` |
@@ -86,11 +86,11 @@
 | 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
 | 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
-| 页面 schema | `data.db.module_pages`，统一通过 `ui.declare_page` / `ui.get_page` 访问 |
-| 快照型业务数据 | `module.yaml.data.resources[]` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`），`custom_table` 落在受控实体表 `module_name_resource_id`，并由 `schema_version` / `schema_json` / `indexes_json` 描述真实列结构；业务数据统一通过 `db.get_record` / `db.list_records` / `db.replace_records` 访问 |
-| 事件型业务数据 | `data.db.module_audit_events`，统一通过 `db.append_event` / `db.query_events` 访问 |
+| 页面 schema | 来自运行时 descriptor 中扫描到的 `PAGE.schema`；`ui.get_page` 只读访问当前已注册 schema |
+| 快照型业务数据 | `module.yaml.data.resources[]` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`），`custom_table` 落在受控实体表 `module_name_resource_id`，并由 `schema_version` / `schema_json` / `indexes_json` 描述真实列结构；业务数据统一通过 `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` 访问 |
+| 事件型审计数据 | `data.db.module_audit_events` 独立承载 append-only 审计事件；通过 `ctx.db.audit("dataset")` 访问，不进入 `module_datasets` |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
-| 当前实现说明 | `db.get_record` / `db.list_records` / `db.replace_records` 已统一要求资源先在 `module.yaml.data.resources[]` 注册，再按 `storage_mode` 路由；`managed_dataset` 不再按名称隐式落库，`custom_table` 继续使用 schema 驱动的受控实体表，不再写入统一 `record_json` 容器。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单；当前运行时代码仍不包含旧 `state.db.kv_store` 模块表数据自动迁移逻辑，旧数据需要显式迁移或人工导入 |
+| 当前实现说明 | `ctx.db` 已统一要求资源先在 `module.yaml.data.resources[]` 注册，再按 `storage_mode` 路由；`managed_dataset` 不再按名称隐式落库，且只允许单源读取；`custom_table` 继续使用 schema 驱动的受控实体表，并可在 manifest 显式声明后联表、分组和聚合。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单 |
 | 关联文档 | `module-config-runtime-data-contract.md` |
 | 关联项 | `CR-003`, `CR-012`, `TASK-026` |
 
@@ -99,13 +99,13 @@
 | 项目 | 内容 |
 |---|---|
 | 存储表 | `data.db.module_audit_events` |
-| 写入接口 | `ctx.tools.call("db.append_event", ...)` |
-| 查询接口 | `ctx.tools.call("db.query_events", ...)` |
+| 写入接口 | `ctx.db.audit("dataset").append(...)` |
+| 查询接口 | `ctx.db.audit("dataset").query(...)` |
 | 数据语义 | append-only 审计事件，不再按整包 JSON 覆盖历史 |
 | 支持字段 | `dataset`, `event_type`, `entity_key`, `run_id`, `previous_status`, `next_status`, `result`, `reason`, `payload`, `created_at` |
 | 查询维度 | `dataset / entity_key / event_type / run_id / time range / limit / offset / order` |
 | UI 边界 | Hosted UI 只负责渲染页面和表格组件，不承担审计事件编辑语义 |
-| 当前范围 | 已提供独立存储与查询能力；retention / archive / 自动迁移脚本暂未纳入 |
+| 当前范围 | 审计能力融入 `ctx.db`；模块开发者侧不再暴露旧 `ctx.tools.call("db.*")` 工具 |
 | 关联文档 | `module-config-runtime-data-contract.md`, `reference-core-capabilities.md` |
 | 关联项 | `REQ-008`, `CR-008` |
 
@@ -171,6 +171,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | 将 Hosted UI 页面契约修正为 `pages/` 注册可路由页面、`ui_extension.pages[]` 只控制左侧菜单，并允许 `open_page` 跳转到非菜单详情页 | Codex |
 | 2026-04-22 | 将 `API-008` 从“设计已定未落地”更新为 hosted page V1 已本地实现：`ui_extension.pages[]`、`ui.declare_page`、宿主页渲染器与 SDK CLI 已同步完成 | Codex |
 | 2026-04-22 | 新增 `API-008`，登记模块宿主管理页与最小化 UI 框架的目标契约 | Codex |
 | 2026-04-22 | 补记 root app 在 Windows 打包态的 Velopack 启动前置动作，并将 Windows `crawler4j.update.json` 与统一 `UpdateService` 后端分派纳入发布元数据契约 | Codex |

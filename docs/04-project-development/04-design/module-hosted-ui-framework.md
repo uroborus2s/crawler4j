@@ -5,7 +5,7 @@
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | Core 开发 | SDK 开发 | QA | 模块开发者  
 **关联 ID：** `API-002`, `API-008`  
-**最后更新：** 2026-04-23
+**最后更新：** 2026-04-24
 
 ## 1. 结论
 
@@ -13,8 +13,8 @@
 
 唯一正式契约如下：
 
-- `module.yaml.ui_extension.pages[]` 只声明导航元信息：`id`、`label`、`icon`
-- 模块在 `module_runtime.py` 里通过 `declare_ui(context)` 调用 `ui.declare_page(page_id=..., schema=...)`
+- `module.yaml.ui_extension.pages[]` 只声明左侧导航菜单入口：`id`、`label`、`icon`
+- `pages/*.py` 或 `pages/<group>/*.py` 直接导出 `PAGE: PageSpec`，作为可路由页面注册表
 - 页面 schema 只允许使用宿主提供的 `Page`、`Section`、`Text`、`Button`、`DataTable`
 - 页面数据全部由 `load_handler` 或 `DataTable.query_handler` 返回结构化对象
 - 宿主只负责 schema 校验、路由、渲染和通用交互，不再负责模块业务数据语义
@@ -82,18 +82,25 @@ ui_extension:
 - 允许字段只有 `id`、`label`、`icon`
 - 清单只描述“宿主导航里有哪些页面”，不描述路由类型
 
-### 4.2 运行时声明入口
+### 4.2 页面源码入口
 
-模块统一在 `module_runtime.py` 里通过 `declare_ui(ctx)` 声明页面：
+模块统一在 `pages/*.py` 或 `pages/<group>/*.py` 里导出 `PAGE`：
 
 ```python
-def declare_ui(ctx):
-    ctx.tools.call("ui.declare_page", page_id="dashboard", schema=build_dashboard_page_schema())
-    ctx.tools.call("ui.declare_page", page_id="accounts", schema=build_accounts_page_schema())
+from crawler4j_contracts import PageSpec
+
+PAGE = PageSpec(
+    id="dashboard",
+    label="今日运营看板",
+    icon="📊",
+    schema=build_dashboard_page_schema(),
+)
 ```
 
 不再存在：
 
+- `module_runtime.py` 里的 `declare_ui`
+- `ui.declare_page`
 - `ui.declare_data_table`
 - `ui.get_data_table`
 
@@ -149,10 +156,10 @@ def declare_ui(ctx):
 
 ### 5.1 宿主负责
 
-- 扫描 `ui_extension.pages[]`
-- 校验 `ui.declare_page` schema
-- 在每次 refresh 前重新执行 `declare_ui()`，并把页面 schema 缓存在当前 bridge 内存中
-- 基于 `page_id` 做页面路由和刷新
+- 扫描 `pages/` 下的 `PAGE` 页面注册表
+- 只用 `ui_extension.pages[]` 渲染左侧菜单
+- 校验 `PAGE.schema`
+- 基于 `page_id` 做页面路由和刷新，允许跳转到未出现在左侧菜单的详情页或二级页
 - 渲染宿主控件
 - 执行通用表格交互和按钮动作
 
@@ -161,14 +168,14 @@ def declare_ui(ctx):
 - 组装页面 schema
 - 实现 `load_handler`
 - 实现内联表格 `query_handler`
-- 调用 `db.*` 和其它 Core 能力准备页面数据
+- 调用 `ctx.db` fluent API 和其它 Core 能力准备页面数据
 - 处理业务动作与数据语义
 
 ### 5.3 Core 其它能力负责
 
-- `module.yaml.data.resources[]` + `db.get_record` / `db.list_records` / `db.replace_records`
-- `module.yaml.data.views[]` / `queries[]` + `db.query_view` / `db.run_query`
-- `db.append_event` / `db.query_events`
+- `module.yaml.data.resources[]` + `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)`
+- `module.yaml.data.views[]` / `queries[]` + `ctx.db.from_(...)` / `ctx.db.named(...).bind(...).execute()`
+- `custom_table` 的已声明联表、分组和聚合查询
 
 这些能力负责数据事实源，但不拥有模块页面结构。
 
@@ -176,7 +183,7 @@ def declare_ui(ctx):
 
 ### 6.1 页面 schema 生命周期
 
-正式 Hosted UI 链路在每次 refresh 前都会重新执行 `declare_ui()`，并把页面 schema 缓存在当前 `ModuleUIRuntimeBridge` 内存中，供 `ui.get_page` / `ManagedPageRenderer` 消费。
+正式 Hosted UI 链路直接扫描 `pages/` 下导出的 `PAGE`，并把所有页面注册到运行时 descriptor。`module.yaml.ui_extension.pages[]` 只影响左侧菜单，不是页面注册表。
 
 不再把以下对象作为正式渲染事实源：
 
@@ -187,11 +194,11 @@ def declare_ui(ctx):
 
 保留：
 
-- `ui.declare_page`
 - `ui.get_page`
 
 删除：
 
+- `ui.declare_page`
 - `ui.declare_data_table`
 - `ui.get_data_table`
 
@@ -200,8 +207,9 @@ def declare_ui(ctx):
 模块详情页只按 `page_id` 打开页面：
 
 - 菜单项来自 `ui_extension.pages[]`
-- 页面实例来自 `ui.declare_page`
+- 页面实例来自 `pages/` 中导出的 `PAGE`
 - 页面跳转统一走 `open_page(page_id, params)`
+- `open_page` 可打开任意已注册 `PAGE`，不要求目标页面配置为菜单项
 
 ## 7. `DataTable` 的位置
 
@@ -218,13 +226,13 @@ def declare_ui(ctx):
 - 独立页面事实源
 - 业务 CRUD 语义判定
 
-这些都回到模块或 `db.*` 能力层处理。
+这些都回到模块或 `ctx.db` 能力层处理。
 
 ## 8. CLI 与校验链
 
 CLI 只保留：
 
-- `page create`
+- `page create`，默认创建菜单页面；`--no-menu` 只创建可路由页面文件
 - `page list`
 
 删除：
@@ -235,8 +243,8 @@ CLI 只保留：
 `check full` 需要校验：
 
 - `ui_extension.pages[]` 是否合法
-- `declare_ui()` 是否同步
-- 页面是否真的通过 `ui.declare_page` 声明
+- `ui_extension.pages[]` 中的菜单页面是否存在对应 `PAGE`
+- 每个页面文件是否导出合法且唯一的 `PAGE`
 - `load_handler` 是否存在且同步
 - 内联表格 `query_handler` 是否存在且同步
 

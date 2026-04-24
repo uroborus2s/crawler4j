@@ -200,7 +200,7 @@ uv run crawler4j module repair-init
 uv run crawler4j task create example_task
 uv run crawler4j workflow create repair_orders
 uv run crawler4j page create dashboard
-uv run crawler4j page create account_detail --group account
+uv run crawler4j page create account_detail --group account --no-menu
 uv run crawler4j env-selector create pick_ready
 uv run crawler4j hook create on_cleanup
 uv run crawler4j check full
@@ -215,10 +215,11 @@ uv run crawler4j package build
 
 - `module.yaml.runtime_api == core-native-v1`
 - `default_workflow` 与 `module.yaml.workflows` 一致
+- `data.resources[]` 不包含 `resource_id` 等未知字段；资源项公开字段使用 `id`
 - `TaskSpec/WorkflowSpec/EnvSelectorSpec/PageSpec` 导出是否存在
 - `TASK.name` / `WORKFLOW.name` / `SELECTOR.name` 是否与文件名一致
-- `PAGE.id` 是否是小写 snake_case，且与 `ui_extension.pages[]` 对齐
-- `ui_extension.pages[]` 与 `pages/*.py`、`pages/<group>/*.py` 是否一致
+- `ui_extension.pages[]` 中的菜单页面是否有对应页面文件
+- `pages/*.py`、`pages/<group>/*.py` 是否导出唯一且合法的 `PAGE.id`
 - 页面 `load_handler` 和内联表格 `query_handler` 是否存在且签名兼容
 - legacy `ui/`、`config_schema.json`、`strategy.yaml` 是否已清理
 
@@ -229,12 +230,12 @@ uv run crawler4j package build
 ```toml
 [project]
 dependencies = [
-  "crawler4j-contracts>=0.3.0,<0.4.0",
+  "crawler4j-contracts>=0.4.0,<0.5.0",
 ]
 
 [dependency-groups]
 dev = [
-  "crawler4j-sdk>=0.5.2,<0.6.0",
+  "crawler4j-sdk>=0.6.0,<0.7.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
 ]

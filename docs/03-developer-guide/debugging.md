@@ -96,7 +96,8 @@ Core 的运行描述对象来自固定目录扫描，所以调试时按目录定
 如果 `check full` 过了但宿主行为不对，优先确认：
 
 - `TASK.name` / `WORKFLOW.name` / `SELECTOR.name` / `PAGE.id` 是否和预期一致
-- `module.yaml.ui_extension.pages[]` 是否真的声明了目标页面
+- 如果目标要出现在左侧菜单，`module.yaml.ui_extension.pages[]` 是否声明了它
+- 如果目标只作为详情页或二级页，`pages/` 下是否存在对应 `PAGE.id`
 - `default_workflow` 是否指向你正在调的工作流
 
 ## 6. 页面调试
@@ -106,7 +107,7 @@ Core 的运行描述对象来自固定目录扫描，所以调试时按目录定
 1. `page list` 是否能列出页面
 2. 页面文件里的 `PAGE.schema` 是否有效
 3. `load_handler` / `query_handler` 是否真实存在于同一文件
-4. `query_handler` / `load_handler` 是否只调用已注册的 `db.get_record` / `db.list_records` / `db.run_query` / `db.query_view` 等正式能力
+4. `query_handler` / `load_handler` 是否只通过 `ctx.db` 访问已注册的 `resource/view/query`
 5. 模块详情页打开对应页面后是否拿到最新数据
 
 页面现在直接来自 `pages/*.py`、`pages/<group>/*.py`。宿主不会再等待模块根入口去声明页面。

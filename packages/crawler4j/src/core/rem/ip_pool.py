@@ -383,6 +383,12 @@ class IPPoolManager:
                 INSERT INTO ip_entries (id, pool_id, address, protocol, port, username, password, bound_count, safety_score, expires_at, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    pool_id = excluded.pool_id,
+                    address = excluded.address,
+                    protocol = excluded.protocol,
+                    port = excluded.port,
+                    username = excluded.username,
+                    password = excluded.password,
                     bound_count = excluded.bound_count,
                     safety_score = excluded.safety_score,
                     expires_at = excluded.expires_at

@@ -37,7 +37,6 @@ async def execute(ctx: TaskContext) -> TaskResult:
         "url": ctx.page.url,
         "title": title,
     }}
-    ctx.captured_data.append(result)
 
     return TaskResult.ok(
         tasks_completed=1,
@@ -109,7 +108,7 @@ uv run crawler4j workflow create <name>
 
 # 创建宿主页
 uv run crawler4j page create dashboard
-uv run crawler4j page create account_detail --group account
+uv run crawler4j page create account_detail --group account --no-menu
 
 # 创建环境选择器
 uv run crawler4j env-selector create pick_ready
@@ -153,12 +152,10 @@ async def test_example_task_logic():
     ctx.page = MagicMock()
     ctx.page.goto = AsyncMock()
     ctx.page.title = AsyncMock(return_value="Mock Title")
-    ctx.captured_data = []
 
     result = await execute(ctx)
 
     assert result.success is True
-    assert len(ctx.captured_data) == 1
     assert result.data["title"] == "Mock Title"
     ctx.page.goto.assert_awaited_once_with("https://mock.url", wait_until="domcontentloaded")
     ctx.page.title.assert_awaited_once()

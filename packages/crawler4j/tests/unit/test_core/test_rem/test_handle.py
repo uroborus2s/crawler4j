@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.core.rem.handle import BrowserHandle, PlaywrightManager
+from src.core.rem.handle import BrowserHandle, PlaywrightManager, CDP_CONNECT_TIMEOUT_MS
 
 
 class _FakePage:
@@ -59,6 +59,28 @@ async def test_safe_connect_retries_before_succeeding():
     assert handle.browser is browser
     assert handle.context is context
     assert handle.page is page
+
+
+@pytest.mark.asyncio
+async def test_safe_connect_uses_short_cdp_timeout():
+    page = _FakePage()
+    context = _FakeContext(page)
+    browser = _FakeBrowser(context)
+    connect = AsyncMock(return_value=browser)
+    playwright = SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=connect))
+
+    handle = BrowserHandle(browser_id="browser-1", ws_url="ws://127.0.0.1/devtools/browser/1")
+
+    with (
+        patch.object(PlaywrightManager, "acquire", AsyncMock(return_value=playwright)),
+        patch.object(PlaywrightManager, "release", AsyncMock()),
+        patch("src.core.rem.handle.asyncio.sleep", AsyncMock()),
+    ):
+        success = await handle.safe_connect()
+
+    assert success is True
+    assert CDP_CONNECT_TIMEOUT_MS == 15_000
+    assert connect.await_args.kwargs["timeout"] == CDP_CONNECT_TIMEOUT_MS
 
 
 @pytest.mark.asyncio

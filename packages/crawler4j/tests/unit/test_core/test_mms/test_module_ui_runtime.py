@@ -28,7 +28,16 @@ def _sync_managed_dataset(module_name: str, module_root, resource_id: str) -> No
 
     manifest_data = normalize_manifest_data(
         {
-            "resources": [{"id": resource_id, "storage_mode": "managed_dataset"}],
+            "resources": [
+                {
+                    "id": resource_id,
+                    "storage_mode": "managed_dataset",
+                    "schema": {
+                        "version": 1,
+                        "columns": [{"name": "id", "type": "text", "required": True}],
+                    },
+                }
+            ],
             "views": [],
             "queries": [],
             "seeds": [],
@@ -372,7 +381,7 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
                 OBSERVED["load_params"] = context.runtime.get("params")
                 OBSERVED["load_schema_type"] = context.tools.call("ui.get_page", page_id=page_id).get("type")
                 try:
-                    context.tools.call("db.set_state", key="hosted_ui_load", value=1)
+                    context.db.into("metrics").replace([])
                 except Exception as exc:
                     OBSERVED["load_write_error"] = type(exc).__name__
                 return dict(OBSERVED)
@@ -383,9 +392,9 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
                 OBSERVED["query_page_id"] = context.runtime.get("page_id")
                 OBSERVED["query_table_id"] = context.runtime.get("table_id")
                 OBSERVED["query_params"] = context.runtime.get("params")
-                OBSERVED["query_rows_before"] = context.tools.call("db.list_records", resource="metrics")
+                OBSERVED["query_rows_before"] = context.db.from_("metrics").execute()
                 try:
-                    context.tools.call("db.append_event", dataset="metrics_events", event_type="query")
+                    context.db.into("metrics").replace([])
                 except Exception as exc:
                     OBSERVED["query_write_error"] = type(exc).__name__
                 return {
@@ -405,7 +414,10 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
                 "resource_id": "metrics",
                 "storage_mode": "managed_dataset",
                 "record_key_field": "id",
-                "schema": {},
+                "schema": {
+                    "version": 1,
+                    "columns": [{"name": "id", "type": "text", "required": True}],
+                },
                 "indexes": {},
                 "cleanup_policy": "delete_rows",
             }
@@ -433,31 +445,17 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
             page_id="dashboard",
         )
 
-        assert page_payload["load_tools"] == [
-            "db.get_record",
-            "db.list_records",
-            "db.query_events",
-            "db.query_view",
-            "db.run_query",
-            "ui.get_page",
-        ]
+        assert page_payload["load_tools"] == ["ui.get_page"]
         assert page_payload["load_has_get_page"] is True
         assert page_payload["load_page_id"] == "dashboard"
         assert page_payload["load_params"] == {"phone": "13800138000"}
         assert page_payload["load_schema_type"] == "Page"
-        assert page_payload["load_write_error"] == "KeyError"
-        assert query_payload["observed"]["query_tools"] == [
-            "db.get_record",
-            "db.list_records",
-            "db.query_events",
-            "db.query_view",
-            "db.run_query",
-            "ui.get_page",
-        ]
+        assert page_payload["load_write_error"] == "RuntimeError"
+        assert query_payload["observed"]["query_tools"] == ["ui.get_page"]
         assert query_payload["observed"]["query_page_id"] == "dashboard"
         assert query_payload["observed"]["query_table_id"] == "metrics"
         assert query_payload["observed"]["query_params"] == {"phone": "13800138000"}
         assert query_payload["observed"]["query_rows_before"] == []
-        assert query_payload["observed"]["query_write_error"] == "KeyError"
+        assert query_payload["observed"]["query_write_error"] == "RuntimeError"
     finally:
         restore_module(service, original_registry, module_name)

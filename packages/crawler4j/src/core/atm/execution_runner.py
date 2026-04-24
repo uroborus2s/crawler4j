@@ -167,6 +167,7 @@ class ExecutionRunner:
             config=deepcopy(task_config),
             logger=logger,
             tools=runtime_caps.tools,
+            db=runtime_caps.db,
             state=dict(request.state),
             runtime=self._build_runtime_payload(request, hooks_module),
         )
@@ -382,6 +383,7 @@ class ExecutionRunner:
                 context=browser_ctx,
                 logger=logger,
                 tools=runtime_caps.tools,
+                db=runtime_caps.db,
                 state=dict(request.state),
                 runtime=self._build_runtime_payload(request, hooks_module),
             )

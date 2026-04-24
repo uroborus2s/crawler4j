@@ -61,7 +61,6 @@ class TestTaskContextInjection:
         assert isinstance(basic_context.config, dict)
         assert isinstance(basic_context.state, dict)
         assert isinstance(basic_context.runtime, dict)
-        assert isinstance(basic_context.captured_data, list)
     
     def test_logger_injection(self, basic_context: TaskContext):
         """验证 logger 注入。"""
@@ -443,9 +442,3 @@ class TestTaskContextState:
         assert basic_context.state["phase"] == "login"
         assert basic_context.state["cursor"] == 100
     
-    def test_captured_data_is_mutable_list(self, basic_context: TaskContext):
-        """验证 captured_data 是可变列表。"""
-        basic_context.captured_data.append({"id": 1})
-        basic_context.captured_data.append({"id": 2})
-        
-        assert len(basic_context.captured_data) == 2

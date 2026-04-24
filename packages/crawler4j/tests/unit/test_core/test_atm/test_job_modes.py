@@ -19,6 +19,7 @@ from src.core.atm.run_profile import (
     ResourceConfig,
     RunProfile,
 )
+from src.core.rem.manager import RECOVERY_PROVIDER_RUNTIME_TIMEOUT
 
 
 @pytest.fixture
@@ -41,6 +42,18 @@ def _build_select_run_profile(wait_timeout: int = 60, resource_pool: str = "") -
             ),
         ),
         execution=ExecutionContext(module="demo_module", workflow="repair"),
+    )
+
+
+def _build_create_run_profile(provider: str = "virtualbrowser") -> RunProfile:
+    return RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.CREATE,
+                provider=provider,
+            ),
+        ),
+        execution=ExecutionContext(module="", workflow=""),
     )
 
 
@@ -115,6 +128,32 @@ async def test_controller_start_wires_bootstrap_before_service_periodic_loop():
         "bootstrap",
         "start_service_loop",
     ]
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_active_jobs_uses_short_runtime_timeout(monkeypatch):
+    controller = JobController()
+    rem = SimpleNamespace(ensure_provider_runtime=AsyncMock())
+    monkeypatch.setattr("src.core.atm.controller.get_environment_manager", lambda: rem)
+
+    job = Job(
+        id="startup-job",
+        name="startup",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_create_run_profile(),
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+    controller.repo = SimpleNamespace(list_active_jobs=AsyncMock(return_value=[job]))
+    controller._reconcile_job = AsyncMock()
+
+    await controller._bootstrap_active_jobs()
+
+    rem.ensure_provider_runtime.assert_awaited_once_with(
+        "virtualbrowser",
+        timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+    )
+    controller._reconcile_job.assert_awaited_once_with(job)
 
 
 def test_start_scheduler_only_starts_apscheduler_without_service_tick_registration():

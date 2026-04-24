@@ -24,7 +24,11 @@ from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
 from src.core.mms.service import get_module_service
 from src.core.mms.release_service import assert_module_upgrade_unlocked
-from src.core.rem.manager import get_environment_manager, normalize_resource_pool_module_name
+from src.core.rem.manager import (
+    RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+    get_environment_manager,
+    normalize_resource_pool_module_name,
+)
 
 
 class InvalidJobConfigurationError(ValueError):
@@ -164,7 +168,12 @@ class JobController:
         )
         return True
 
-    async def _ensure_runtime_for_job(self, job: Job):
+    async def _ensure_runtime_for_job(
+        self,
+        job: Job,
+        *,
+        runtime_timeout: int | None = None,
+    ):
         run_profile = resolve_job_run_profile(job)
         self._validate_service_select_wait_semantics(job, run_profile)
         module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
@@ -178,8 +187,11 @@ class JobController:
         if not provider_name:
             return
 
-        from src.core.rem.manager import get_environment_manager
-        await get_environment_manager().ensure_provider_runtime(provider_name)
+        rem = get_environment_manager()
+        if runtime_timeout is None:
+            await rem.ensure_provider_runtime(provider_name)
+        else:
+            await rem.ensure_provider_runtime(provider_name, timeout=runtime_timeout)
         
     async def _recover_zombies(self):
         """识别并清理上一轮非正常退出遗留的僵尸任务。"""
@@ -304,7 +316,10 @@ class JobController:
         jobs = await self.repo.list_active_jobs()
         for job in jobs:
             try:
-                await self._ensure_runtime_for_job(job)
+                await self._ensure_runtime_for_job(
+                    job,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                )
             except Exception as e:
                 if await self._pause_job_after_invalid_precheck(job, e, source="bootstrap"):
                     continue

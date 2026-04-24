@@ -28,6 +28,8 @@ from src.ui.components.stat_card import StatCard
 
 class DashboardPage(QWidget):
     """仪表盘页面。"""
+
+    _WIDE_CARD_BREAKPOINT = 1280
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -68,33 +70,37 @@ class DashboardPage(QWidget):
         layout.addLayout(header)
         
         # 统计卡片网格
-        cards_grid = QGridLayout()
-        cards_grid.setContentsMargins(0, 0, 0, 0)
-        cards_grid.setHorizontalSpacing(16)
-        cards_grid.setVerticalSpacing(12)
+        self.cards_grid = QGridLayout()
+        self.cards_grid.setContentsMargins(0, 0, 0, 0)
+        self.cards_grid.setHorizontalSpacing(12)
+        self.cards_grid.setVerticalSpacing(8)
         
         # 任务 (Job) 统计
-        self.running_card = StatCard("活跃作业", "0", subtitle="正在运行", accent_color="#facc15")
-        cards_grid.addWidget(self.running_card, 0, 0)
+        self.running_card = StatCard("活跃作业", "0", subtitle="正在运行", accent_color="#facc15", compact=True)
         
-        self.completed_card = StatCard("已完成作业", "0", subtitle="Batch Completed", accent_color="#4ade80")
-        cards_grid.addWidget(self.completed_card, 0, 1)
+        self.completed_card = StatCard("已完成作业", "0", subtitle="Batch Completed", accent_color="#4ade80", compact=True)
         
-        self.failed_card = StatCard("异常作业", "0", subtitle="需要关注", accent_color="#f87171")
-        cards_grid.addWidget(self.failed_card, 0, 2)
+        self.failed_card = StatCard("异常作业", "0", subtitle="需要关注", accent_color="#f87171", compact=True)
         
         # 环境统计
-        self.env_ready_card = StatCard("就绪环境", "0", subtitle="可用实例", accent_color="#60a5fa")
-        cards_grid.addWidget(self.env_ready_card, 1, 0)
+        self.env_ready_card = StatCard("就绪环境", "0", subtitle="可用实例", accent_color="#60a5fa", compact=True)
         
-        self.env_busy_card = StatCard("忙碌环境", "0", subtitle="正在使用", accent_color="#a78bfa")
-        cards_grid.addWidget(self.env_busy_card, 1, 1)
+        self.env_busy_card = StatCard("忙碌环境", "0", subtitle="正在使用", accent_color="#a78bfa", compact=True)
         
         # 模块统计
-        self.modules_card = StatCard("已加载模块", "0", subtitle="已启用", accent_color="#34d399")
-        cards_grid.addWidget(self.modules_card, 1, 2)
+        self.modules_card = StatCard("已加载模块", "0", subtitle="已启用", accent_color="#34d399", compact=True)
+        self._stat_cards = [
+            self.running_card,
+            self.completed_card,
+            self.failed_card,
+            self.env_ready_card,
+            self.env_busy_card,
+            self.modules_card,
+        ]
+        self._card_columns = 0
+        self._apply_card_layout()
         
-        layout.addLayout(cards_grid)
+        layout.addLayout(self.cards_grid)
         
         # 实时日志区域
         log_title = QLabel("📋 系统实时日志")
@@ -102,13 +108,34 @@ class DashboardPage(QWidget):
         layout.addWidget(log_title)
         
         self.log_console = LogConsoleWidget()
-        self.log_console.setMinimumHeight(320)
+        self.log_console.setMinimumHeight(520)
         self.log_console.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
         # 全局模式，不设置 filtered_task_id
         layout.addWidget(self.log_console, stretch=1)
+
+    def _apply_card_layout(self) -> None:
+        columns = 6 if self.width() >= self._WIDE_CARD_BREAKPOINT else 3
+        if columns == self._card_columns:
+            return
+        self._card_columns = columns
+        while self.cards_grid.count():
+            item = self.cards_grid.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+        for column in range(len(self._stat_cards)):
+            self.cards_grid.setColumnStretch(column, 0)
+        for index, card in enumerate(self._stat_cards):
+            row = index // columns
+            column = index % columns
+            self.cards_grid.addWidget(card, row, column)
+            self.cards_grid.setColumnStretch(column, 1)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_card_layout()
     
     def _setup_timer(self):
         """设置自动刷新定时器。"""

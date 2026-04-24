@@ -108,6 +108,13 @@ def _declare_managed_dataset(
                 "id": resource_id,
                 "storage_mode": "managed_dataset",
                 "record_key_field": record_key_field,
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": record_key_field, "type": "text", "required": True},
+                        {"name": "phone", "type": "text"},
+                    ],
+                },
             }
         ],
     )
@@ -194,6 +201,181 @@ def test_module_data_store_rejects_access_to_undeclared_resource(temp_data_dir):
 
     with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
         store.read_resource_records("demo_module", "accounts")
+
+
+def test_module_data_store_executes_managed_dataset_query_plan(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
+    store.replace_resource_records(
+        "demo_module",
+        "accounts",
+        [
+            {"id": "u1", "phone": "13800138000", "status": "ready"},
+            {"id": "u2", "phone": "13900139000", "status": "blocked"},
+        ],
+    )
+    descriptor = {
+        "source": "accounts",
+        "source_kind": "snapshot",
+        "columns": [
+            {"name": "id", "type": "text"},
+            {"name": "phone", "type": "text"},
+            {"name": "status", "type": "text"},
+        ],
+        "joins": [],
+    }
+
+    rows = store.execute_query_plan(
+        "demo_module",
+        {
+            "kind": "select",
+            "base": {"source": "accounts"},
+            "select": [{"kind": "column", "field": "phone"}],
+            "where": [{"field": "status", "op": "eq", "value": "ready"}],
+            "order_by": [{"field": "phone", "direction": "desc"}],
+            "limit": 10,
+            "offset": 0,
+        },
+        describe_source=lambda source: descriptor,
+    )
+
+    assert rows == [{"phone": "13800138000"}]
+
+
+def test_module_data_store_rejects_managed_dataset_join_plan(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
+
+    with pytest.raises(ValueError, match="managed_dataset\\(snapshot\\).*join"):
+        store.execute_query_plan(
+            "demo_module",
+            {
+                "kind": "select",
+                "base": {"source": "accounts"},
+                "joins": [{"target": "billing_entries", "type": "inner", "on": []}],
+            },
+            describe_source=lambda source: {"source": source, "source_kind": "snapshot", "columns": [], "joins": []},
+        )
+
+
+def test_module_data_store_executes_custom_table_join_aggregate_plan(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "billing_entries",
+                "storage_mode": "custom_table",
+                "record_key_field": "entry_id",
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": "entry_id", "type": "text", "required": True},
+                        {"name": "account_id", "type": "text", "required": True},
+                        {"name": "amount", "type": "number"},
+                        {"name": "status", "type": "text"},
+                    ],
+                },
+                "joins": [
+                    {
+                        "target": "account_profiles",
+                        "on": {"account_id": "account_id"},
+                    }
+                ],
+            },
+            {
+                "id": "account_profiles",
+                "storage_mode": "custom_table",
+                "record_key_field": "account_id",
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": "account_id", "type": "text", "required": True},
+                        {"name": "owner_name", "type": "text"},
+                    ],
+                },
+            },
+        ],
+    )
+    store.replace_resource_records(
+        "demo_module",
+        "billing_entries",
+        [
+            {"entry_id": "e1", "account_id": "A001", "amount": 10.5, "status": "done"},
+            {"entry_id": "e2", "account_id": "A001", "amount": 20.0, "status": "done"},
+            {"entry_id": "e3", "account_id": "A002", "amount": 1.0, "status": "pending"},
+        ],
+    )
+    store.replace_resource_records(
+        "demo_module",
+        "account_profiles",
+        [
+            {"account_id": "A001", "owner_name": "alice"},
+            {"account_id": "A002", "owner_name": "bob"},
+        ],
+    )
+    descriptors = {
+        "billing_entries": {
+            "source": "billing_entries",
+            "source_kind": "relation",
+            "columns": [
+                {"name": "entry_id", "type": "text"},
+                {"name": "account_id", "type": "text"},
+                {"name": "amount", "type": "number"},
+                {"name": "status", "type": "text"},
+            ],
+            "joins": [
+                {
+                    "target": "account_profiles",
+                    "types": ["inner"],
+                    "on": [{"left": "account_id", "right": "account_id"}],
+                }
+            ],
+        },
+        "account_profiles": {
+            "source": "account_profiles",
+            "source_kind": "relation",
+            "columns": [
+                {"name": "account_id", "type": "text"},
+                {"name": "owner_name", "type": "text"},
+            ],
+            "joins": [],
+        },
+    }
+
+    rows = store.execute_query_plan(
+        "demo_module",
+        {
+            "kind": "select",
+            "base": {"source": "billing_entries"},
+            "joins": [
+                {
+                    "target": "account_profiles",
+                    "type": "inner",
+                    "on": [{"left": "account_id", "right": "account_id"}],
+                }
+            ],
+            "where": [{"field": "status", "op": "eq", "value": "done"}],
+            "group_by": ["account_id"],
+            "select": [
+                {"kind": "aggregate", "func": "sum", "field": "amount", "alias": "total_amount"},
+                {"kind": "aggregate", "func": "count", "field": "*", "alias": "total_count"},
+            ],
+            "order_by": [{"field": "total_amount", "direction": "desc"}],
+            "limit": 10,
+            "offset": 0,
+        },
+        describe_source=lambda source: descriptors[source],
+    )
+
+    assert rows == [{"account_id": "A001", "total_amount": 30.5, "total_count": 2}]
 
 
 def test_init_database_creates_module_data_resources_table(temp_data_dir):
@@ -641,7 +823,19 @@ def test_module_data_store_rejects_db_view_over_managed_dataset(temp_data_dir):
         _sync_manifest_data(
             store,
             temp_data_dir,
-            resources=[{"id": "accounts", "storage_mode": "managed_dataset"}],
+            resources=[
+                {
+                    "id": "accounts",
+                    "storage_mode": "managed_dataset",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "text", "required": True},
+                            {"name": "phone", "type": "text"},
+                        ],
+                    },
+                }
+            ],
             views=[
                 {
                     "id": "account_stats",
@@ -694,6 +888,78 @@ def test_module_data_store_rejects_legacy_db_view_v1_options(temp_data_dir, kwar
                 "seeds": [],
             }
         )
+
+
+def test_module_data_store_rejects_db_view_reading_undeclared_table(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    with pytest.raises(ValueError, match="只能读取已声明的数据资源"):
+        _sync_manifest_data(
+            store,
+            temp_data_dir,
+            resources=[
+                {
+                    "id": "accounts",
+                    "storage_mode": "custom_table",
+                    "record_key_field": "id",
+                    "schema": {"columns": [{"name": "id", "type": "text", "required": True}]},
+                }
+            ],
+            views=[
+                {
+                    "id": "account_stats",
+                    "source_resource_ids": ["accounts"],
+                    "sql": "SELECT id FROM {{resource:accounts}}, module_datasets",
+                    "columns": [{"name": "id", "type": "text", "filterable": True, "sortable": True}],
+                }
+            ],
+        )
+
+
+def test_module_data_store_rejects_named_query_reading_undeclared_table(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "accounts",
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {"columns": [{"name": "id", "type": "text", "required": True}]},
+            }
+        ],
+    )
+    with pytest.raises(ValueError, match="只能读取已声明的数据资源|FROM/JOIN 只允许引用"):
+        store.run_registered_query(
+            "demo_module",
+            source_resource_ids=["accounts"],
+            sql_template="SELECT id FROM {{resource:accounts}}, module_datasets",
+            columns=[{"name": "id", "type": "text"}],
+        )
+
+
+def test_data_contract_rejects_sibling_prefix_sql_and_seed_paths(temp_data_dir):
+    from src.core.mms.data_contract import load_sql_file, validate_seed_file
+
+    module_root = temp_data_dir / "demo"
+    sibling = temp_data_dir / "demo_evil"
+    (module_root / "data" / "sql" / "views").mkdir(parents=True)
+    sibling.mkdir()
+    (sibling / "query.sql").write_text("SELECT 1\n", encoding="utf-8")
+    (sibling / "seed.json").write_text("[]\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="路径越界"):
+        load_sql_file(
+            module_root,
+            "data/sql/views/../../../../demo_evil/query.sql",
+            expected_prefix="data/sql/views/",
+        )
+    with pytest.raises(ValueError, match="路径越界"):
+        validate_seed_file(module_root, "data/seeds/../../../demo_evil/seed.json")
 
 
 def test_module_data_store_clear_module_data_drops_registered_db_views(temp_data_dir):
@@ -1108,6 +1374,15 @@ def test_module_data_store_rejects_unsafe_custom_table_names(temp_data_dir):
                 "seeds": [],
             }
         )
+
+
+def test_module_data_store_get_record_returns_none_for_empty_managed_dataset(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
+
+    assert store.get_record("demo_module", "accounts", "missing") is None
 
 
 @pytest.mark.parametrize(

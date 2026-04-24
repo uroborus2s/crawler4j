@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
 
+CDP_CONNECT_TIMEOUT_MS = 15_000
+
+
 class PlaywrightManager:
     """全局 Playwright 单例管理器（引用计数）。
     
@@ -297,7 +300,7 @@ class BrowserHandle:
                         # 指纹浏览器在 open 后可能需要短暂时间才会暴露稳定的 CDP 端点。
                         self._browser = await playwright.chromium.connect_over_cdp(
                             endpoint,
-                            timeout=300000,
+                            timeout=CDP_CONNECT_TIMEOUT_MS,
                         )
 
                         # 获取或创建 context 和 page

@@ -38,6 +38,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | 修复 IP 池条目编辑“保存后重启恢复旧值”缺陷：根因是 `IPPoolManager._persist_entry()` 的 `ip_entries` upsert 只更新 `bound_count/safety_score/expires_at`，没有回写 `address/protocol/port/username/password/pool_id`；因此编辑后当前进程内因为直接修改了内存对象看起来已生效，但应用重启重新从 `state.db` 加载时仍读回旧记录。当前已补齐这些字段的 upsert 回写，并新增 `test_ip_pool.py` 锁定“编辑后重载数据库仍保留新代理字段”回归 | Codex |
+| 2026-04-24 | 修正 Hosted UI 页面注册与左侧菜单协议：`pages/` 现在是可路由页面注册表，`module.yaml.ui_extension.pages[]` 只控制左侧菜单；SDK `check full` 不再拒绝未写入菜单的合法页面文件，`page create --no-menu` 可创建详情页/二级页，模块详情页 `open_page` 可跳转到非菜单页面并复用参数刷新。定向回归已覆盖 SDK full 校验、CLI `--no-menu`、integration check 以及模块详情页 row action 跳转 | Codex |
 | 2026-04-24 | 继续收口“从已有环境导入”弹窗的风险提示：warning 区域现已改为单层提示卡，内层文字显式固定为 `background: transparent; border: none; padding: 0;`，不再出现额外内圈；同时将 warning 文案收敛为“未标注支持已有环境导入，请由配置者自行判断是否适合这个场景”。当前定向回归 `test_import_existing_env_dialog.py` 通过，且本地 Qt 直出截图 `/tmp/import-existing-env-dialog-fix-v2.png` 已确认无内圈、文案为新版本 | Codex |
 | 2026-04-24 | 修复桌面宿主入口与关闭阶段竞态：`src.ui.app` 不再在模块加载期提前拉起 debug worker/debugpy adapter/Shell 的深依赖，而是改为运行时懒加载，解除打包态启动早期的循环导入退出；同时主窗口显示后不再恢复 `quitOnLastWindowClosed`，改由 `lastWindowClosed` 驱动 `_run_application()` 的异步收尾，避免窗口关闭时 `qasync` 事件循环先停、`run_until_complete()` 抛出 `Event loop stopped before Future completed`。定向回归 `test_app.py` 为 `6 passed`，目标文件 `ruff check` 通过，重新打出的 macOS `.app` 已能越过原先的启动即退阶段 | Codex |
 | 2026-04-24 | 完成全局环境页“从已有环境导入”链路：REM 环境表新增 `provider/provider_env_id/...` 来源元数据与唯一来源键 `(provider, provider_env_id)`，`VirtualBrowser` 现可拉取“来源有、本地无”的未同步环境并导入；环境列表页新增 `从已有环境导入` 配置面板，用户可选择 `环境来源 / 目标模块 / 模块工作流 / 未同步环境` 后执行 `导入并执行`；ATM 复用固定 `env_id` 执行链路，模块在 `ctx.env_id`、`ctx.page` 与 `ctx.runtime.creation_params` 中收到 provider metadata 与 `import_mode="existing_env"`。定向回归 `120 passed`，目标文件 `ruff check` 通过 | Codex |
@@ -61,7 +63,7 @@
 | 2026-04-22 | 完成 hosted UI V1 二轮问题收口：模块详情页对宿主页入口改为 lazy instantiate，避免详情页打开时提前执行未选中页面的 `declare_ui()` / `load_handler`，并在再次选中已有 hosted page 时自动 refresh；`ModuleUIRuntimeBridge` 改为“`declare_ui` session 仅供下一次 non-declare hook 单次消费”，data-table handler 执行前也会先刷新声明会话，并通过 UI 声明 staging buffer + `replace_declared_ui()` 保证 schema 原子替换；SDK `check full` / `package build` / `package verify` 现统一补齐 hosted page / data table handler 契约校验并阻断 legacy `ui/` 目录；相关 unit/integration/acceptance 合并回归 `130 passed`，定向 `ruff check` 通过 | Codex |
 | 2026-04-22 | 继续收口桌面应用图标的 Dock 光学尺寸：先对标本机系统圆角方形图标在 `1024x1024` 画布中的外轮廓占比，再在保持外底板占比不变的前提下单独缩小中心蓝色徽章与放大镜组，避免在 Dock 中比系统常见应用图标显得更大；同时把图标回归测试补成“透明圆角 + 中轴安全区 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言 | Codex |
 | 2026-04-21 | 对齐 VirtualBrowser `addBrowser` 官方代理口径：创建环境时把代理 `protocol` 统一转成大写 `HTTP/HTTPS/SOCKS5`，并在 `addBrowser` 返回非 2xx 或 `success=false` 时把状态码与响应正文透传到宿主日志和异常消息，便于继续定位代理/IP 池创建失败；同步补充 REM 单测锁定协议归一化与 `500` 正文回传 | Codex |
-| 2026-04-18 | 完成 `TASK-022` / `CR-008`：为模块新增 `module_audit_events`、`db.append_event`、`db.query_events`，并把快照数据与审计事件契约同步到正式文档、测试计划与 `.factory/memory/` | Codex |
+| 2026-04-18 | 完成 `TASK-022` / `CR-008`：为模块新增 `module_audit_events`，后续收口为 `ctx.db.audit(...).append/query`，并把快照数据与审计事件契约同步到正式文档、测试计划与 `.factory/memory/` | Codex |
 | 2026-04-02 | 新增正式执行记录页并登记 Wave 11 文档治理整改结果 | Codex |
 | 2026-04-15 | 修复 VirtualBrowser 创建后 CDP 连接过早失败；补 REM post-create connect 语义与单测 | Codex |
 | 2026-04-15 | 收敛 REM 手动创建环境边界；移除 post-create workflow 配置并改为创建后保持 RUNNING | Codex |
@@ -94,6 +96,7 @@
 | 2026-04-24 | 收口 Windows 打包态 `qasync` 停环竞态：宿主入口新增 `_ShutdownController`，显式拦截 `QEvent.Type.Quit` 并把真正退出延后到异步清理完成之后；同时补 `Quit`/`lastWindowClosed` 两条 UI 生命周期回归，避免桌面包再次弹出 `Event loop stopped before Future completed` | Codex |
 | 2026-04-24 | 收口共享表格删除确认框配色：`ConfirmDialog` 改为完整深色主题，补齐标题/正文/取消按钮/危险按钮的对象名与样式选择器，避免 macOS 下删除确认面板继续出现黑字/浅底等系统默认配色；同时新增组件级 UI 回归 `test_confirm_dialog.py` | Codex |
 | 2026-04-24 | 为 Hosted UI `Page` 增加页面级滚动配置：`crawler4j_contracts.hosted_ui.normalize_page_schema()` 现支持 `scroll.vertical = auto|hidden`，`ManagedPageRenderer` 会按页面 schema 切换外层 `QScrollArea` 的竖向滚动条策略；同时新增契约回归 `test_hosted_ui_card.py` 与隔离渲染回归 `test_managed_page_scroll.py`，用于收口“今日运营看板”右侧滚动槽 | Codex |
+| 2026-04-24 | 收口模块数据库开发者接口：运行时只向模块暴露 `ctx.db` fluent API，旧 `ctx.tools.call("db.*")` 工具面退出正式协议；同步补齐 managed/custom/view/named query 查询边界、旧调用扫描和定向回归 `159 passed` | Codex |
 
 ## 5. 2026-04-15 缺陷修复记录
 

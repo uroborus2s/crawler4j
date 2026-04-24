@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -169,6 +170,9 @@ def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
     assert widget.import_existing_btn.isEnabled() is False
     assert widget.refresh_btn.isEnabled() is False
     assert widget.table.isEnabled() is False
+    assert widget.loading_bar.isHidden() is False
+    assert widget.operation_status_label.isHidden() is False
+    assert widget.operation_status_label.text() == "正在处理环境操作..."
 
     widget._end_operation()
 
@@ -176,6 +180,8 @@ def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
     assert widget.import_existing_btn.isEnabled() is True
     assert widget.refresh_btn.isEnabled() is True
     assert widget.table.isEnabled() is True
+    assert widget.loading_bar.isHidden() is True
+    assert widget.operation_status_label.isHidden() is True
 
 
 def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypatch):
@@ -227,6 +233,46 @@ def test_env_list_widget_rows_expose_actions_and_row_click_signal(qtbot, monkeyp
     widget._on_table_row_clicked(row)
 
     assert selected == ["env-1"]
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_start_action_shows_provider_status_until_done(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    start_future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+
+    async def start_env(env_id: str) -> bool:
+        assert env_id == "env-1"
+        return await start_future
+
+    manager = SimpleNamespace(
+        pool=SimpleNamespace(),
+        start_env=AsyncMock(side_effect=start_env),
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget.load_data = MagicMock()
+    widget._on_data_loaded([_make_env("env-1", EnvStatus.READY)])
+
+    widget._start_env("env-1")
+    await asyncio.sleep(0)
+
+    assert widget.loading_bar.isHidden() is False
+    assert widget.operation_status_label.isHidden() is False
+    assert "VirtualBrowser API" in widget.operation_status_label.text()
+    assert "启动环境 env-1" in widget.operation_status_label.text()
+    assert widget.create_btn.isEnabled() is False
+
+    start_future.set_result(True)
+    await _drain_widget_tasks(widget)
+
+    assert widget.loading_bar.isHidden() is True
+    assert widget.operation_status_label.isHidden() is True
+    widget.load_data.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -387,6 +433,138 @@ async def test_env_list_widget_load_data_queues_refresh_when_loading(qtbot, monk
     assert widget._load_in_progress is False
     assert widget.table.displayed_rows()[0]["status"]["text"] == "启动中"
     assert widget.stats_label.text() == "总计: 1 | 就绪: 0 | 忙碌: 1"
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_import_source_loading_shows_status_before_dialog(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    list_future: asyncio.Future[list[Any]] = asyncio.get_running_loop().create_future()
+    dialog_events: list[str] = []
+
+    async def list_unsynced_provider_envs(provider_name: str) -> list[Any]:
+        assert provider_name == "virtualbrowser"
+        return await list_future
+
+    manager = SimpleNamespace(
+        pool=SimpleNamespace(),
+        list_existing_env_import_sources=lambda: [
+            {"provider": "virtualbrowser", "label": "Virtual Browser"}
+        ],
+        list_unsynced_provider_envs=AsyncMock(side_effect=list_unsynced_provider_envs),
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+
+    import src.core.mms.registry as registry_module
+
+    module = SimpleNamespace(
+        name="demo_module",
+        manifest=SimpleNamespace(
+            display_name="Demo Module",
+            workflows=[
+                SimpleNamespace(
+                    name="main_flow",
+                    display_name="Main Flow",
+                    host_scenarios=["existing_env_import"],
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        registry_module,
+        "get_module_registry",
+        lambda: SimpleNamespace(get_enabled_modules=lambda: [module]),
+    )
+
+    class FakeDialog(QDialog):
+        def __init__(self, parent=None, **kwargs):
+            super().__init__(parent)
+            dialog_events.append("constructed")
+
+        def open(self):  # type: ignore[override]
+            dialog_events.append("opened")
+            asyncio.get_running_loop().call_soon(
+                lambda: self.done(int(QDialog.DialogCode.Rejected))
+            )
+
+    monkeypatch.setattr(env_list_widget, "ImportExistingEnvDialog", FakeDialog)
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    task = asyncio.create_task(widget._import_existing_env_async())
+    await asyncio.sleep(0)
+
+    assert widget.loading_bar.isHidden() is False
+    assert widget.operation_status_label.text() == "正在读取来源环境列表..."
+    assert widget.create_btn.isEnabled() is False
+    assert dialog_events == []
+
+    list_future.set_result([])
+    await task
+
+    assert dialog_events == ["constructed", "opened"]
+    assert widget.loading_bar.isHidden() is True
+    assert widget.operation_status_label.isHidden() is True
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_import_source_loading_error_is_visible(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    dialog_events: list[str] = []
+
+    manager = SimpleNamespace(
+        pool=SimpleNamespace(),
+        list_existing_env_import_sources=lambda: [
+            {"provider": "virtualbrowser", "label": "Virtual Browser"}
+        ],
+        list_unsynced_provider_envs=AsyncMock(side_effect=RuntimeError("virtualbrowser API 未就绪")),
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+
+    import src.core.mms.registry as registry_module
+
+    module = SimpleNamespace(
+        name="demo_module",
+        manifest=SimpleNamespace(
+            display_name="Demo Module",
+            workflows=[
+                SimpleNamespace(
+                    name="main_flow",
+                    display_name="Main Flow",
+                    host_scenarios=["existing_env_import"],
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        registry_module,
+        "get_module_registry",
+        lambda: SimpleNamespace(get_enabled_modules=lambda: [module]),
+    )
+
+    class FakeDialog(QDialog):
+        def __init__(self, parent=None, **kwargs):
+            super().__init__(parent)
+            dialog_events.append("constructed")
+
+    monkeypatch.setattr(env_list_widget, "ImportExistingEnvDialog", FakeDialog)
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget._show_operation_error = AsyncMock()
+
+    await widget._import_existing_env_async()
+
+    widget._show_operation_error.assert_awaited_once_with("virtualbrowser API 未就绪")
+    assert dialog_events == []
+    assert widget.loading_bar.isHidden() is True
+    assert widget.operation_status_label.isHidden() is True
 
 
 @pytest.mark.asyncio

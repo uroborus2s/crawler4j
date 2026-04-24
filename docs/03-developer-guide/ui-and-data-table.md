@@ -2,8 +2,8 @@
 
 当前正式 UI 协议已经完全切到宿主扫描模式：
 
-- `module.yaml.ui_extension.pages[]` 只声明导航元信息
-- `pages/*.py` 或 `pages/<group>/*.py` 直接导出 `PAGE: PageSpec`
+- `module.yaml.ui_extension.pages[]` 只声明左侧导航菜单入口
+- `pages/*.py` 或 `pages/<group>/*.py` 直接导出 `PAGE: PageSpec`，作为可路由页面注册表
 - Core 读取 `PAGE.schema` 并渲染
 - 页面数据和动作都走页面 handler
 
@@ -11,12 +11,12 @@
 
 ## 页面入口放哪
 
-页面入口分两部分：
+页面入口分两部分，职责不同：
 
-1. `module.yaml.ui_extension.pages[]`
-2. `pages/<page>.py` 或 `pages/<group>/<file>.py`
+1. `module.yaml.ui_extension.pages[]`：左侧菜单入口
+2. `pages/<page>.py` 或 `pages/<group>/<file>.py`：可路由页面源码
 
-清单只放导航元信息：
+清单只放需要出现在左侧菜单里的页面：
 
 ```yaml
 ui_extension:
@@ -29,7 +29,7 @@ ui_extension:
       icon: 👤
 ```
 
-页面文件放真实 schema 和 handler：
+页面文件放真实 schema 和 handler。只要文件导出 `PAGE`，它就是可被 `open_page.page_id` 打开的页面；它不一定要出现在左侧菜单里：
 
 ```python
 from crawler4j_contracts import PageSpec, TaskContext
@@ -69,8 +69,8 @@ def load_dashboard_page(
 标准顺序：
 
 1. `uv run crawler4j page create dashboard`
-2. 如果某个菜单下有多个文件，可以用 `uv run crawler4j page create account_detail --group account`
-3. CLI 更新 `module.yaml.ui_extension.pages[]` 和对应页面文件，例如 `pages/dashboard.py` 或 `pages/account/detail.py`
+2. 如果要创建详情页或二级页，可以用 `uv run crawler4j page create account_detail --group account --no-menu`
+3. CLI 默认更新 `module.yaml.ui_extension.pages[]` 和对应页面文件；加 `--no-menu` 时只写页面文件，不加入左侧菜单
 4. 你补 `PAGE.schema` 和 handler
 5. `uv run crawler4j check full`
 6. 用 DevLink 到宿主里验证
@@ -79,7 +79,7 @@ def load_dashboard_page(
 
 - `page_id` 仍然保持扁平，例如 `account_detail`
 - `open_page.page_id` 继续写扁平 ID
-- 左侧菜单层级仍然只看 `module.yaml.ui_extension.pages[]`
+- 左侧菜单只看 `module.yaml.ui_extension.pages[]`；未写入清单的页面仍可作为详情页、二级页或页面内部跳转目标
 
 ## 页面可以做什么
 
@@ -163,7 +163,7 @@ def load_accounts_page(
     params: dict | None = None,
 ) -> dict:
     del page_id, params
-    rows = context.tools.call("db.list_records", resource="accounts") or []
+    rows = context.db.from_("accounts").limit(1000).offset(0).execute()
     return {"rows": rows}
 ```
 
@@ -185,17 +185,15 @@ def query_billing_stats_table(
     del table_id, params
     page_size = query.get("page_size", 20)
     page = query.get("page", 1)
-    result = context.tools.call(
-        "db.query_view",
-        view_id="billing_stats",
-        filters=query.get("filters") or {},
-        sort=query.get("sort") or [],
-        limit=page_size,
-        offset=max(page - 1, 0) * page_size,
+    rows = (
+        context.db.from_("billing_stats")
+        .limit(page_size)
+        .offset(max(page - 1, 0) * page_size)
+        .execute()
     )
     return {
-        "rows": result.get("rows", []),
-        "total": result.get("total", 0),
+        "rows": rows,
+        "total": len(rows),
         "page": page,
         "page_size": page_size,
     }
@@ -296,10 +294,10 @@ def query_billing_stats_table(
 | 需求 | 推荐做法 |
 |---|---|
 | Dashboard、概览页 | `Page + Card + Text + Button + DataTable` |
-| 快照列表 | `db.list_records` + `binding` |
-| 统计查询 | `db.query_view` + `query_handler` |
-| 明细实体表 | `module.yaml.data.resources[]` + `db.get_record/db.list_records/db.replace_records` |
-| 历史时间线 | `db.query_events` 后自行组装页面 |
+| 快照列表 | `ctx.db.from_("resource_id")` + `binding` |
+| 统计查询 | `ctx.db.from_("custom_table").group_by(...).sum(...)` + `query_handler` |
+| 明细实体表 | `module.yaml.data.resources[]` + `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` |
+| 固定 SQL | `ctx.db.named("query_id").bind(...).execute()` |
 
 ## 职责分工
 
@@ -318,12 +316,13 @@ def query_billing_stats_table(
 - `query_handler`
 - 页面业务动作
 - `module.yaml.data` / `data/sql` / `data/seeds` 的声明与维护
-- 数据记录、命名查询、数据库视图和审计事件的使用
+- 通过 `ctx.db` 读取和写入已注册模块数据
 
 ## `check full` 会校验什么
 
 - `ui_extension.pages[]` 是否有效
-- `PAGE.id` 是否与清单对齐
+- `ui_extension.pages[]` 中的菜单页面是否存在对应页面文件
+- 每个页面文件是否导出合法且唯一的 `PAGE.id`
 - `PAGE.schema` 顶层是否是 `Page`
 - `load_handler` 是否存在且签名兼容
 - `query_handler` 是否存在且签名兼容

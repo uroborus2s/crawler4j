@@ -60,7 +60,16 @@ def _sync_managed_dataset_resource(data_store, module_dir: Path, *, module_name:
 
     manifest_data = normalize_manifest_data(
         {
-            "resources": [{"id": "accounts", "storage_mode": "managed_dataset"}],
+            "resources": [
+                {
+                    "id": "accounts",
+                    "storage_mode": "managed_dataset",
+                    "schema": {
+                        "version": 1,
+                        "columns": [{"name": "id", "type": "text", "required": True}],
+                    },
+                }
+            ],
             "views": [],
             "queries": [],
             "seeds": [],

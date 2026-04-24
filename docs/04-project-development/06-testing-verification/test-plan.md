@@ -38,7 +38,8 @@
 | `TC-010` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py -q` | 通过 | 2026-04-20 口径已收敛到当前仍存在的正式回归文件，覆盖 `declare_ui` 刷新、`create_handler` / `update_handler` 路由、DevLink 页面上下文与真实模块 UI 链路 |
 | `TC-011` `uv run pytest packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py packages/crawler4j/tests/unit/test_core/test_atm/test_dispatcher_hooks.py packages/crawler4j/tests/unit/test_core/test_atm/test_job_modes.py packages/crawler4j/tests/unit/test_core/test_atm/test_task_detail_dialog.py -q` | 通过 | 2026-04-16 覆盖等待确认信号持久化、`task.signal` 事件、结构化确认面板与客户端确认回调 |
 | `TC-012` `uv run pytest packages/crawler4j/tests/unit/test_sdk/test_assembler.py packages/crawler4j/tests/unit/test_core/test_atm/test_dispatcher_hooks.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_runtime.py -q` | 通过 | 2026-04-16 覆盖 `ModuleAssembler` 导入错误可见性、DevLink 普通执行 reload 注入，以及同一执行上下文只 reload 一次 |
-| `TC-024` `uv run pytest packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_sdk/test_data_capability.py -q` | 通过 | 2026-04-18 建立 `module_audit_events` 与 SDK 工具能力面基线；2026-04-23 又补跑 `packages/crawler4j/tests/unit/test_sdk/test_data_capability.py`（`10 passed`），明确锁定 `db.declare_data_resource` / `db.replace_records` / `db.declare_db_view` / `db.query_view` 的 SDK 契约 |
+| `TC-024` `uv run pytest packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_sdk/test_data_capability.py -q` | 通过 | 2026-04-24 已升级为 `ctx.db` fluent API 契约基线，覆盖旧数据库工具面不再注册、managed/custom/view/named query 边界与 SDK 旧调用扫描 |
+| `TC-056` `uv run pytest packages/crawler4j/tests/unit/test_sdk/test_taskcontext.py packages/crawler4j/tests/unit/test_sdk/test_data_capability.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_ui_runtime.py packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_settings_store.py -q` | 通过 | 2026-04-24 `159 passed`，验证模块数据库接口只保留 `ctx.db` fluent API、Hosted UI readonly 写保护、执行器真实模块夹具与文档口径同步 |
 | `TC-025` `uv run pytest packages/crawler4j/tests/acceptance -q` | 通过 | 2026-04-22 已同步到 hosted page V1 口径，覆盖 CLI 脚手架到 `package verify`、`host devlink`、本地 ZIP `preview/apply` 与验收 gate 命令矩阵 |
 | `TC-049` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py packages/crawler4j/tests/acceptance/test_sdk_cli_scaffold_package_acceptance.py` | 通过 | 2026-04-22 回归 `105 passed`，覆盖 hosted page renderer、模块详情页入口跳转、runtime capability、声明式 schema 持久化/清理、CLI 脚手架、integration 与 acceptance 的 hosted UI V1 契约 |
 | `TC-050` `uv run pytest packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py -q` | 通过 | 2026-04-23 最终回归 `138 passed`，覆盖 `row_action`、`open_page.params`、缓存页参数替换、目标页面内联表格 `navigation_filters`、过滤详情表默认 CRUD 的全量资源定点写回、隐藏父键保留、显式 `data_resource` metadata 保持，以及 omitted `resource_id` alias 路由兼容 |
@@ -53,7 +54,7 @@
 | `REQ-002` / `RISK-002` | `ctrip labor_workflow` 完整路径 | 模块运行时测试 + 依赖导入验证 |
 | `REQ-006` / `RISK-004` | 模块根入口自动托管与重初始化路径 | 新脚手架 shim import + helper 分发测试 + 重初始化产物测试 |
 | `REQ-007` / ATM 人工复核闭环 | 等待确认信号持久化、结构化确认面板、确认服务回调 | ATM 单测 + Qt 对话框单测 |
-| `REQ-008` / `CR-008` | 模块快照数据与审计事件分层 | 持久层单测 + runtime capability 单测 + SDK 工具契约单测 |
+| `REQ-008` / `CR-008` | 模块数据资源与模块自管历史统一通过 `ctx.db` 建模 | 持久层单测 + runtime capability 单测 + SDK fluent API 契约单测 |
 | `REQ-009` / `CR-009` | 固定环境池 Service Job 的等待队列与资源池资格卡片 | ATM 单测/集成测试 + REM metadata 回归 + 运行模板/UI 单测 |
 | `CR-003` / 模块 UI 调试回归 | hosted page 页面声明刷新、页面内联 `DataTable` CRUD hook 与 DevLink 调试重载 | MMS 单测（`test_module_data_table_page.py`） |
 | `BUG-013` / `CR-005` | 发现错误可见、DevLink 普通执行热更新 | SDK 单测 + ATM/MMS 单测 |
@@ -61,7 +62,7 @@
 | `CR-010` / Windows 发布闭环 | Windows `PyInstaller onedir + Velopack` 打包、自更新桥接与宿主更新配置一致 | 脚本回归 + `UpdateService` 单测 + 文档同步检查 |
 | `API-008` / `CR-011` | hosted page V1、宿主页渲染器、CLI page/data-table 脚手架与旧 `micro_app` 删除路径一致 | Core/SDK/unit/integration/acceptance 定向回归 |
 | `API-008` / `CR-013` | Hosted UI 主从表行导航、`open_page.params`、缓存页参数替换与详情表 `navigation_filters` | Core/SDK unit 定向回归 + CLI Hosted UI 契约回归 |
-| `API-009` / `CR-014` | 模块实体表视图、受控 SQL 模板、只读统计表查询 | 持久层单测 + runtime capability 单测 + Hosted UI 只读统计表回归 |
+| `API-009` / `CR-014` | 模块实体表视图、受控 SQL 模板、`ctx.db` fluent 查询 | 持久层单测 + runtime capability 单测 + Hosted UI 只读查询回归 |
 | `NFR-003` | lint 质量门清晰 | `uv run ruff check .` 达成约定范围 |
 | `REQ-003` / `REQ-006` | SDK CLI 与宿主安装链的正式验收夹具 | `packages/crawler4j/tests/acceptance/` + 现有 CLI / host 集成测试 |
 
@@ -78,8 +79,8 @@
 
 | 测试 ID | 目标 | 计划验证方式 |
 |---|---|---|
-| `TC-052` | `module_db_views`、`db.declare_db_view`、视图 SQL 模板校验与卸载清理：仅允许单条 `SELECT/WITH SELECT`，只允许 `{{resource:<resource_id>}}` 占位引用当前模块 `custom_table`，并能按 `cleanup_policy` 正确 `DROP VIEW` | 持久层单测 + runtime capability 单测 |
-| `TC-053` | `db.query_view` 与 hosted page 内联 `DataTable` 只读统计表：按受控字段过滤、排序、分页，`query_handler` 正确路由查询参数并保持无 CRUD | MMS 单测 + SDK CLI 契约单测 + integration/acceptance |
+| `TC-052` | `module_db_views`、manifest 视图注册、视图 SQL 模板校验与卸载清理：仅允许单条 `SELECT/WITH SELECT`，只允许 `{{resource:<resource_id>}}` 占位引用当前模块 `custom_table`，并能按 `cleanup_policy` 正确 `DROP VIEW` | 持久层单测 + runtime capability 单测 |
+| `TC-053` | `ctx.db.from_(view_or_resource)` 与 hosted page 内联 `DataTable` 只读查询：按受控字段过滤、排序、分页，`query_handler` 正确路由查询参数并保持无 CRUD | MMS 单测 + SDK CLI 契约单测 + integration/acceptance |
 | `TC-054` | 新 `SkyDataTable` 组件：搜索、排序、分页、request_id 丢弃过期结果、行点击和 actions 事件统一从查询契约驱动 | `packages/crawler4j/tests/unit/test_ui/test_data_table.py` |
 | `TC-055` | 宿主/模块统一接入：宿主页与模块内联 `DataTable` 全部切到新组件与新 schema，旧组件与旧 schema 被移除 | MMS/ATM/REM 定向单测 + SDK CLI 契约回归 + acceptance |
 
@@ -124,13 +125,15 @@
 | 2026-04-24 | 继续补强宿主 UI 生命周期回归：`test_app.py` 新增 `QEvent.Type.Quit` 延后退出路径，并锁定宿主入口会先完成 `TaskService.stop()` / `DebugService.shutdown()` / `PlaywrightManager.force_shutdown()` 再结束 Qt 事件循环，覆盖 Windows 打包态曾复现的 `Event loop stopped before Future completed` | Codex |
 | 2026-04-24 | 补充“从已有环境导入”弹窗的 warning UI 回归：`test_import_existing_env_dialog.py` 现同时锁定 warning 区域的实际高度不再低于 `warning_label.heightForWidth(...) + 内边距`，以及 warning 文本层显式为 `background: transparent; border: none;`，避免打包态下多行文案继续被裁掉或出现额外内圈 | Codex |
 | 2026-04-24 | 补强宿主 UI 生命周期回归：`test_app.py` 现锁定 debug worker/debugpy adapter/Shell 相关入口改为懒加载，不再因深层循环导入阻塞测试；同时新增“最后一个窗口关闭后仍能完成异步收尾”的回归，固定 `lastWindowClosed -> shutdown cleanup -> loop stop` 顺序，防止桌面包再次弹出 `Event loop stopped before Future completed` | Codex |
-| 2026-04-23 | 开发团队 2 补齐 `test_data_capability.py` 的 SDK 契约断言，新增锁定 `db.declare_data_resource` / `db.replace_records` / `db.declare_db_view` / `db.query_view`；定向 `pytest` 为 `10 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-24 | `TC-024` 已升级为 `ctx.db` fluent API 契约回归，新增 `TC-056` 组合覆盖旧数据库工具面退出、managed/custom/view/named query 边界、Hosted UI readonly 写保护与执行器真实模块夹具；定向回归 `159 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-23 | 开发团队 2 曾补齐 SDK 数据能力契约断言；该批断言已在 2026-04-24 被 `ctx.db` fluent API 契约替换 | Codex |
 | 2026-04-22 | 新增 `TC-049`，把 hosted page renderer、模块详情页、runtime capability、CLI / integration / acceptance 的 hosted UI V1 定向回归正式纳入测试计划 | Codex |
 | 2026-04-23 | 新增并最终收口 `TC-050`，补 Hosted UI 主从表行导航、`open_page.params`、缓存页参数替换、详情表 `navigation_filters`、过滤详情表默认 CRUD 与 alias 资源路由兼容的定向回归 | Codex |
 | 2026-04-23 | 新增 `TC-052` / `TC-053` 计划项，为模块实体表视图、受控 SQL 模板与只读统计表查询建立正式测试覆盖入口 | Codex |
-| 2026-04-23 | `TC-052` / `TC-053` 已本地通过：`module_db_views`、`db.declare_db_view`、`db.query_view`、`ui.declare_page + inline DataTable/query_handler` 只读统计表、卸载提示与 SDK CLI 契约定向回归 `122 passed`；另补跑 `runtime_capabilities + module_detail_page` 兼容回归 `34 passed` | Codex |
+| 2026-04-23 | `TC-052` / `TC-053` 已本地通过；该批次在 2026-04-24 已被 `ctx.db` fluent API 口径替换，视图与命名查询仍保持 manifest 驱动 | Codex |
 | 2026-04-23 | 新增 `TC-054` / `TC-055`，为共享表格组件 `SkyDataTable` 重构、宿主/模块统一接入与旧 schema 删除建立正式测试覆盖入口 | Codex |
 | 2026-04-23 | 继续收口 `TC-054` / `TC-055`：`hosted_ui.py` 已删除内联 `DataTable` 顶层 `binding` / `rows` 兼容写法，页面 schema 现必须显式声明 `data_source`，与共享表格破坏性重构边界保持一致 | Codex |
+| 2026-04-24 | Hosted UI 页面协议修正为 `pages/` 注册可路由页面、`ui_extension.pages[]` 只控制左侧菜单；新增 SDK `--no-menu` 与模块详情页非菜单详情页跳转回归 | Codex |
 | 2026-04-22 | SDK CLI / 验收夹具已切到 hosted page V1：`page create` 不再生成 `ui/` 页面类，`data-table create` 与 `check full` 统一改验 `ui_extension.pages[]`、`ui.declare_page` 与页面内联 `DataTable/query_handler` | Codex |
 | 2026-04-22 | 新增 `TC-044` / `TC-045`，补齐 Windows Velopack 更新服务与发布脚本回归计划；同时登记 `CR-010` 当前仍缺 Windows 真机安装/升级验证 | Codex |
 | 2026-04-21 | 新增宿主打包态 `qasync` 定时器兼容回归：`test_qasync_compat.py` 现锁定 `_SimpleTimer` 已替换为宿主安全实现，覆盖回调触发与 stop 后不再继续执行两条路径；同时补跑 `test_app.py` / `test_log_console.py` / `test_dashboard.py` / `test_shell.py` 作为 UI 生命周期回归 | Codex |
@@ -141,7 +144,7 @@
 | 2026-04-19 | 新增 `REQ-009` 的计划测试覆盖 `TC-026` / `TC-027`，用于固定环境池 Service Job 的等待队列、FIFO 补位、等待超时收口与资源池资格卡片回归 | Codex |
 | 2026-04-19 | `REQ-009` V1 已完成本地回归：ATM / SDK 相关单测覆盖等待队列、等待超时收口与资源池契约，目标文件 `ruff` 校验通过 | Codex |
 | 2026-04-19 | 新增 `TC-025` acceptance 夹具，并把 `TC-001` / `TC-002` / `TC-004` / `TC-006` 的 fresh gate 结果更新到当前口径 | Codex |
-| 2026-04-18 | 新增 `TC-024`，覆盖模块审计事件存储、`db.append_event` / `db.query_events` 与 SDK 工具能力面 | Codex |
+| 2026-04-18 | 新增 `TC-024`，最初覆盖模块审计事件工具面；2026-04-24 已升级为 `ctx.db` fluent API 契约基线 | Codex |
 | 2026-04-17 | 补充 `ctrip` 真实站点 E2E 收口口径，并删除对历史人工调试脚本继续保留的默认假设 | Codex |
 | 2026-04-16 | 新增 `TC-012`，覆盖 `ModuleAssembler` 导入错误可见性与 DevLink 普通执行 reload 语义 | Codex |
 | 2026-04-16 | 新增 `TC-011`，覆盖 `TaskSignal.wait_for_confirmation` 的 signal 持久化、结构化确认面板与客户端确认回调 | Codex |

@@ -33,7 +33,7 @@
 | Wave 10 | `TASK-013` | `docs/04-project-development/02-discovery/brainstorm-record.md`、`module-boundaries.md`、`api-design.md` | 模块根入口稳定薄壳、SDK 统一组装器与模块重初始化路径 | 已完成：ModuleAssembler 与 Shim 已落地，单测与集成测试 100% 通过 |
 | Wave 11 | `TASK-014` ~ `TASK-020` | 文档规范审计、根导航覆盖检查、最小文档包缺口 | 生产级文档入口收口、缺失正式页补齐、索引与 memory 同步 | 进行中：以四大模块结构为单一入口，补齐发布/运维/追踪关键页 |
 | Wave 12 | `TASK-021` | `REQ-007`、`api-design.md`、现有 `TaskSignal` / ATM / UI 实现 | 信号驱动的结构化确认面板、任务 signal 持久化与客户端确认闭环 | 已完成：任务 signal 已持久化并发布 `task.signal` 事件，ATM 详情页可展示结构化确认面板并回调既有确认服务 |
-| Wave 13 | `TASK-022` | `REQ-008`、`API-005`、模块数据持久化现状 | 模块审计事件独立存储、事件工具能力与契约文档同步 | 已完成：`module_audit_events`、`db.append_event`、`db.query_events` 与对应测试/文档已落地 |
+| Wave 13 | `TASK-022` | `REQ-008`、`API-005`、模块数据持久化现状 | 模块审计事件独立存储、事件能力与契约文档同步 | 已完成：`module_audit_events`、`ctx.db.audit(...).append/query` 与对应测试/文档已落地 |
 | Wave 14 | `TASK-023` | `REQ-009`、`API-007`、`atm-resource-pool-queue-design.md` | 固定环境池 Service Job 的宿主等待队列、资源池资格卡片、FIFO 补位与 SDK helper | 已完成：宿主不再把固定环境池场景的“当前轮没命中”直接判失败，模块资源池资格同步、测试与文档同步完成 |
 | Wave 15 | `TASK-024` | `CR-010`、当前 `package-desktop`、`UpdateService`、Windows 发布缺口 | Windows `PyInstaller onedir + Velopack` 发布与宿主自更新闭环 | 已完成：新增 Windows Velopack 发布脚本、宿主更新后端分派、README/运维/测试计划同步 |
 | Wave 16 | `TASK-025` | `CR-011`、`API-008`、`module-hosted-ui-framework.md` | Hosted module UI V1：`ui_extension.pages[]`、`ui.declare_page`、宿主页渲染器、SDK CLI/测试/文档同步 | 已完成：宿主不再执行外部 `PyQt6` 页面类，详情页/CLI/回归夹具已统一切到 hosted page V1 |

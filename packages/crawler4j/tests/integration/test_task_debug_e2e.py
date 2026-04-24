@@ -136,6 +136,11 @@ def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int
         workflows:
           - name: login_workflow
             display_name: 登录流程
+        data:
+          resources: []
+          views: []
+          queries: []
+          seeds: []
         """
     ).strip() + "\n"
 

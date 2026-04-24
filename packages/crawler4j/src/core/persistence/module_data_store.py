@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import time
 import uuid
 from typing import Any
@@ -45,6 +46,33 @@ _DB_VIEW_BLOCKED_SQL_RE = re.compile(
 )
 
 
+def _execute_with_read_authorizer(
+    conn,
+    sql: str,
+    params: Any = (),
+    *,
+    allowed_tables: set[str],
+):
+    denied_table: list[str] = []
+
+    def authorize(action_code, arg1, arg2, db_name, trigger_name):
+        del arg2, db_name, trigger_name
+        if action_code == sqlite3.SQLITE_READ and arg1 not in allowed_tables:
+            denied_table.append(str(arg1 or ""))
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    conn.set_authorizer(authorize)
+    try:
+        return conn.execute(sql, params)
+    except sqlite3.DatabaseError as exc:
+        if denied_table:
+            raise ValueError(f"SQL 只能读取已声明的数据资源: {denied_table[0]}") from exc
+        raise
+    finally:
+        conn.set_authorizer(None)
+
+
 def _normalize_records(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         return []
@@ -69,26 +97,11 @@ def _normalize_schema(raw: Any) -> dict[str, Any]:
     return dict(raw)
 
 
-def _normalize_payload(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        return {}
-    return dict(raw)
-
-
 def _normalize_text(raw: Any) -> str | None:
     if raw is None:
         return None
     text = str(raw).strip()
     return text or None
-
-
-def _normalize_timestamp(raw: Any) -> int:
-    if raw is None:
-        return int(time.time())
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return int(time.time())
 
 
 def _normalize_resource_json(raw: Any) -> Any:
@@ -105,6 +118,21 @@ def _normalize_resource_json_for_write(raw: Any) -> Any:
     if raw is None:
         return {}
     return raw if isinstance(raw, (dict, list)) else {}
+
+
+def _normalize_payload(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    return dict(raw)
+
+
+def _normalize_timestamp(raw: Any) -> int:
+    if raw is None:
+        return int(time.time())
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return int(time.time())
 
 
 def _normalize_schema_version(raw: Any) -> int:
@@ -303,6 +331,73 @@ def _apply_record_query(
     normalized_offset = max(int(offset), 0)
     normalized_limit = max(int(limit), 1)
     return filtered[normalized_offset : normalized_offset + normalized_limit]
+
+
+def _normalize_plan_where(raw: Any) -> list[dict[str, Any]]:
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("query plan where must be a list")
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"query plan where[{index}] must be an object")
+        field = _validate_snake_case_identifier(str(item.get("field") or ""))
+        op = str(item.get("op") or "eq").strip().lower()
+        if op not in {"eq", "in", "gt", "gte", "lt", "lte", "between", "like", "is_null"}:
+            raise ValueError(f"unsupported query filter op: {op}")
+        payload = {"field": field, "op": op}
+        if op != "is_null":
+            payload["value"] = item.get("value")
+        normalized.append(payload)
+    return normalized
+
+
+def _normalize_plan_limit(raw: Any) -> int:
+    if raw in (None, ""):
+        return 100
+    value = int(raw)
+    if value < 1:
+        raise ValueError("query plan limit must be >= 1")
+    return value
+
+
+def _normalize_plan_offset(raw: Any) -> int:
+    if raw in (None, ""):
+        return 0
+    value = int(raw)
+    if value < 0:
+        raise ValueError("query plan offset must be >= 0")
+    return value
+
+
+def _plan_has_aggregate(select_items: list[dict[str, Any]]) -> bool:
+    return any(item.get("kind") == "aggregate" for item in select_items)
+
+
+def _filter_record_value(current: Any, op: str, expected: Any) -> bool:
+    if op == "eq":
+        return current == expected
+    if op == "in":
+        return current in list(expected or [])
+    if op == "gt":
+        return current is not None and current > expected
+    if op == "gte":
+        return current is not None and current >= expected
+    if op == "lt":
+        return current is not None and current < expected
+    if op == "lte":
+        return current is not None and current <= expected
+    if op == "between":
+        bounds = list(expected or [])
+        if len(bounds) != 2:
+            raise ValueError("between filter value must contain two items")
+        return current is not None and bounds[0] <= current <= bounds[1]
+    if op == "like":
+        return expected is not None and str(expected) in str(current or "")
+    if op == "is_null":
+        return current is None
+    raise ValueError(f"unsupported query filter op: {op}")
 
 
 def _normalize_db_view_sql_template(raw: Any) -> str:
@@ -902,7 +997,7 @@ class ModuleDataStore:
         *,
         source_resource_ids: list[str],
         select_sql_template: str,
-    ) -> str:
+    ) -> tuple[str, set[str]]:
         placeholders = self._validate_db_view_resource_refs(select_sql_template)
         if set(placeholders) != set(source_resource_ids):
             raise ValueError(
@@ -910,6 +1005,7 @@ class ModuleDataStore:
             )
 
         resolved_sql = select_sql_template
+        allowed_tables: set[str] = set()
         for resource_id in source_resource_ids:
             resource = self._read_resource_row_with_conn(conn, module_name, resource_id)
             if resource is None:
@@ -917,11 +1013,12 @@ class ModuleDataStore:
             if resource["storage_mode"] != "custom_table":
                 raise ValueError(f"db view source resources must be custom_table: {resource_id}")
             self._ensure_custom_table_with_conn(conn, resource)
+            allowed_tables.add(resource["physical_table_name"])
             resolved_sql = resolved_sql.replace(
                 f"{{{{resource:{resource_id}}}}}",
                 _quote_identifier(resource["physical_table_name"]),
             )
-        return resolved_sql
+        return resolved_sql, allowed_tables
 
     def _validate_db_view_columns_with_conn(
         self,
@@ -929,9 +1026,12 @@ class ModuleDataStore:
         *,
         temp_view_name: str,
         columns: list[dict[str, Any]],
+        allowed_tables: set[str],
     ) -> None:
-        cursor = conn.execute(
-            f"SELECT * FROM {_quote_identifier(temp_view_name)} LIMIT 0"
+        cursor = _execute_with_read_authorizer(
+            conn,
+            f"SELECT * FROM {_quote_identifier(temp_view_name)} LIMIT 0",
+            allowed_tables=allowed_tables | {temp_view_name},
         )
         actual_columns = [str(item[0]) for item in cursor.description or []]
         expected_columns = [column["name"] for column in columns]
@@ -947,13 +1047,19 @@ class ModuleDataStore:
         physical_view_name: str,
         resolved_sql: str,
         columns: list[dict[str, Any]],
+        allowed_tables: set[str],
     ) -> None:
         temp_view_name = _validate_snake_case_identifier(f"tmp_{uuid.uuid4().hex[:20]}")
         temp_identifier = _quote_identifier(temp_view_name)
         conn.execute(f"DROP VIEW IF EXISTS {temp_identifier}")
         try:
             conn.execute(f"CREATE TEMP VIEW {temp_identifier} AS {resolved_sql}")
-            self._validate_db_view_columns_with_conn(conn, temp_view_name=temp_view_name, columns=columns)
+            self._validate_db_view_columns_with_conn(
+                conn,
+                temp_view_name=temp_view_name,
+                columns=columns,
+                allowed_tables=allowed_tables,
+            )
         finally:
             conn.execute(f"DROP VIEW IF EXISTS {temp_identifier}")
 
@@ -982,7 +1088,7 @@ class ModuleDataStore:
         normalized_cleanup_policy = _validate_db_view_cleanup_policy(cleanup_policy)
         normalized_schema_version = _normalize_db_view_schema_version(schema_version)
         physical_view_name = _db_view_name(module_name, view_id)
-        resolved_sql = self._resolve_db_view_sql_with_conn(
+        resolved_sql, allowed_tables = self._resolve_db_view_sql_with_conn(
             conn,
             module_name,
             source_resource_ids=normalized_source_resource_ids,
@@ -993,6 +1099,7 @@ class ModuleDataStore:
             physical_view_name=physical_view_name,
             resolved_sql=resolved_sql,
             columns=normalized_columns,
+            allowed_tables=allowed_tables,
         )
         conn.execute(
             """
@@ -1203,12 +1310,11 @@ class ModuleDataStore:
                 return self._read_custom_table_rows_with_conn(conn, resource)
             return self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"])
 
-    def _append_audit_event_row(
-        self,
-        module_name: str,
-        dataset_name: str,
-        event: dict[str, Any],
-    ) -> str:
+    def _append_audit_event_row(self, module_name: str, dataset_name: str, event: dict[str, Any]) -> str:
+        event_type = _normalize_text(event.get("event_type"))
+        if event_type is None:
+            raise ValueError("audit event_type is required")
+
         event_id = _normalize_text(event.get("id")) or str(uuid.uuid4())
         payload = _normalize_payload(event.get("payload"))
         created_at = _normalize_timestamp(event.get("created_at"))
@@ -1236,7 +1342,7 @@ class ModuleDataStore:
                     module_name,
                     dataset_name,
                     _normalize_text(event.get("entity_key")),
-                    _normalize_text(event.get("event_type")) or "event",
+                    event_type,
                     _normalize_text(event.get("run_id")),
                     _normalize_text(event.get("previous_status")),
                     _normalize_text(event.get("next_status")),
@@ -1262,16 +1368,25 @@ class ModuleDataStore:
         offset: int = 0,
         order: str = "desc",
     ) -> list[dict[str, Any]]:
+        normalized_limit = int(limit)
+        if normalized_limit < 1:
+            raise ValueError("audit query limit must be >= 1")
+        normalized_offset = int(offset)
+        if normalized_offset < 0:
+            raise ValueError("audit query offset must be >= 0")
+        direction = str(order or "desc").strip().lower()
+        if direction not in {"asc", "desc"}:
+            raise ValueError(f"unsupported audit query order: {direction}")
+
         clauses = ["module_name = ?", "dataset_name = ?"]
         params: list[Any] = [module_name, dataset_name]
-
-        if entity_key:
+        if entity_key is not None:
             clauses.append("entity_key = ?")
             params.append(entity_key)
-        if event_type:
+        if event_type is not None:
             clauses.append("event_type = ?")
             params.append(event_type)
-        if run_id:
+        if run_id is not None:
             clauses.append("run_id = ?")
             params.append(run_id)
         if start_at is not None:
@@ -1281,51 +1396,54 @@ class ModuleDataStore:
             clauses.append("created_at <= ?")
             params.append(int(end_at))
 
-        direction = "ASC" if str(order).lower() == "asc" else "DESC"
-        normalized_limit = max(int(limit), 1)
-        normalized_offset = max(int(offset), 0)
         params.extend([normalized_limit, normalized_offset])
-
-        query = f"""
-            SELECT
-                id,
-                module_name,
-                dataset_name,
-                entity_key,
-                event_type,
-                run_id,
-                previous_status,
-                next_status,
-                result,
-                reason,
-                payload_json,
-                created_at
-            FROM module_audit_events
-            WHERE {" AND ".join(clauses)}
-            ORDER BY created_at {direction}, id {direction}
-            LIMIT ? OFFSET ?
-        """
-
         with get_connection(DATA_DB) as conn:
-            rows = conn.execute(query, tuple(params)).fetchall()
+            rows = conn.execute(
+                f"""
+                SELECT
+                    id,
+                    module_name,
+                    dataset_name,
+                    entity_key,
+                    event_type,
+                    run_id,
+                    previous_status,
+                    next_status,
+                    result,
+                    reason,
+                    payload_json,
+                    created_at
+                FROM module_audit_events
+                WHERE {" AND ".join(clauses)}
+                ORDER BY created_at {direction.upper()}, id {direction.upper()}
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
 
-        return [
-            {
-                "id": row["id"],
-                "module_name": row["module_name"],
-                "dataset_name": row["dataset_name"],
-                "entity_key": row["entity_key"],
-                "event_type": row["event_type"],
-                "run_id": row["run_id"],
-                "previous_status": row["previous_status"],
-                "next_status": row["next_status"],
-                "result": row["result"],
-                "reason": row["reason"],
-                "payload": _normalize_payload(json.loads(row["payload_json"])),
-                "created_at": int(row["created_at"]),
-            }
-            for row in rows
-        ]
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload_json = json.loads(row["payload_json"])
+            except (TypeError, ValueError):
+                payload_json = {}
+            events.append(
+                {
+                    "id": row["id"],
+                    "module_name": row["module_name"],
+                    "dataset_name": row["dataset_name"],
+                    "entity_key": row["entity_key"],
+                    "event_type": row["event_type"],
+                    "run_id": row["run_id"],
+                    "previous_status": row["previous_status"],
+                    "next_status": row["next_status"],
+                    "result": row["result"],
+                    "reason": row["reason"],
+                    "payload": _normalize_payload(payload_json),
+                    "created_at": row["created_at"],
+                }
+            )
+        return events
 
     def _write_page_row(self, module_name: str, page_id: str, schema: dict[str, Any]) -> bool:
         now = int(time.time())
@@ -1465,6 +1583,294 @@ class ModuleDataStore:
             "offset": normalized_offset,
         }
 
+    def execute_query_plan(
+        self,
+        module_name: str,
+        plan: dict[str, Any],
+        *,
+        describe_source,
+    ) -> list[dict[str, Any]]:
+        base = plan.get("base")
+        if not isinstance(base, dict):
+            raise ValueError("query plan base must be an object")
+        source_id = _validate_snake_case_identifier(str(base.get("source") or ""))
+        descriptor = describe_source(source_id)
+        source_kind = str(descriptor.get("source_kind") or "")
+        joins = [dict(item) for item in plan.get("joins") or [] if isinstance(item, dict)]
+        select_items = [dict(item) for item in plan.get("select") or [] if isinstance(item, dict)]
+        group_by = [_validate_snake_case_identifier(str(item)) for item in plan.get("group_by") or []]
+        has_aggregate = _plan_has_aggregate(select_items)
+        if source_kind != "relation" and (joins or group_by or has_aggregate):
+            label = "managed_dataset(snapshot)" if source_kind == "snapshot" else "view(read_model)"
+            if joins:
+                raise ValueError(f"source '{source_id}' is {label}; join is only supported for custom_table(relation)")
+            if group_by:
+                raise ValueError(f"source '{source_id}' is {label}; group_by is not supported")
+            raise ValueError(f"source '{source_id}' is {label}; aggregate is not supported")
+        if source_kind == "snapshot":
+            return self._execute_snapshot_plan(module_name, source_id, descriptor, plan)
+        if source_kind == "read_model":
+            return self._execute_view_plan(module_name, source_id, descriptor, plan)
+        if source_kind != "relation":
+            raise ValueError(f"unsupported source_kind: {source_kind}")
+        return self._execute_relation_plan(module_name, source_id, descriptor, plan, describe_source=describe_source)
+
+    def _execute_snapshot_plan(
+        self,
+        module_name: str,
+        source_id: str,
+        descriptor: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        column_names = {column["name"] for column in descriptor["columns"]}
+        where = _normalize_plan_where(plan.get("where"))
+        order_by = _normalize_db_view_sort(plan.get("order_by") or [])
+        select_items = [dict(item) for item in plan.get("select") or [] if isinstance(item, dict)]
+        selected_fields = [
+            _validate_snake_case_identifier(str(item.get("field") or ""))
+            for item in select_items
+            if item.get("kind", "column") == "column"
+        ]
+        for field in selected_fields:
+            if field not in column_names:
+                raise ValueError(f"query select field not found: {field}")
+        for item in where:
+            if item["field"] not in column_names:
+                raise ValueError(f"query filter field not found: {item['field']}")
+        for item in order_by:
+            if item["field"] not in column_names:
+                raise ValueError(f"query sort field not found: {item['field']}")
+
+        with get_connection(DATA_DB) as conn:
+            resource = self._require_resource_row_with_conn(conn, module_name, source_id)
+            rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"]) or []
+
+        filtered = rows
+        for item in where:
+            filtered = [
+                row
+                for row in filtered
+                if _filter_record_value(row.get(item["field"]), item["op"], item.get("value"))
+            ]
+        for item in reversed(order_by):
+            filtered.sort(key=lambda row: row.get(item["field"]), reverse=item["direction"] == "desc")
+        offset = _normalize_plan_offset(plan.get("offset"))
+        limit = _normalize_plan_limit(plan.get("limit"))
+        page = filtered[offset : offset + limit]
+        if not selected_fields:
+            selected_fields = [column["name"] for column in descriptor["columns"]]
+        return [{field: row.get(field) for field in selected_fields} for row in page]
+
+    def _execute_view_plan(
+        self,
+        module_name: str,
+        source_id: str,
+        descriptor: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        with get_connection(DATA_DB) as conn:
+            view = self._ensure_db_view_with_conn(conn, module_name, source_id)
+            return self._execute_sql_source_plan_with_conn(
+                conn,
+                source_identifier=_quote_identifier(view["physical_view_name"]),
+                descriptor=descriptor,
+                plan=plan,
+            )
+
+    def _execute_relation_plan(
+        self,
+        module_name: str,
+        source_id: str,
+        descriptor: dict[str, Any],
+        plan: dict[str, Any],
+        *,
+        describe_source,
+    ) -> list[dict[str, Any]]:
+        joins = [dict(item) for item in plan.get("joins") or [] if isinstance(item, dict)]
+        declared_joins = {item["target"]: item for item in descriptor.get("joins", []) if isinstance(item, dict)}
+        with get_connection(DATA_DB) as conn:
+            base_resource = self._require_resource_row_with_conn(conn, module_name, source_id)
+            if base_resource["storage_mode"] != "custom_table":
+                raise ValueError(f"source '{source_id}' is not custom_table(relation)")
+            self._ensure_custom_table_with_conn(conn, base_resource)
+            join_sources: list[dict[str, Any]] = []
+            for index, join in enumerate(joins):
+                target = _validate_snake_case_identifier(str(join.get("target") or ""))
+                declared = declared_joins.get(target)
+                if declared is None:
+                    raise ValueError(f"join target '{target}' is not declared in joins")
+                join_type = str(join.get("type") or "inner").strip().lower()
+                if join_type not in set(declared.get("types") or ["inner"]):
+                    raise ValueError(f"join target '{target}' does not allow {join_type} join")
+                target_descriptor = describe_source(target)
+                if target_descriptor.get("source_kind") != "relation":
+                    raise ValueError(f"join target '{target}' is not custom_table(relation)")
+                target_resource = self._require_resource_row_with_conn(conn, module_name, target)
+                self._ensure_custom_table_with_conn(conn, target_resource)
+                declared_on = {(item["left"], item["right"]) for item in declared.get("on", [])}
+                actual_on = []
+                for pair in join.get("on") or []:
+                    left = _validate_snake_case_identifier(str(pair.get("left") or ""))
+                    right = _validate_snake_case_identifier(str(pair.get("right") or ""))
+                    if (left, right) not in declared_on:
+                        raise ValueError(f"join target '{target}' uses undeclared on pair: {left}={right}")
+                    actual_on.append({"left": left, "right": right})
+                if not actual_on:
+                    raise ValueError(f"join target '{target}' requires on pairs")
+                join_sources.append(
+                    {
+                        "alias": f"j{index}",
+                        "type": join_type,
+                        "resource": target_resource,
+                        "descriptor": target_descriptor,
+                        "on": actual_on,
+                    }
+                )
+            return self._execute_sql_source_plan_with_conn(
+                conn,
+                source_identifier=_quote_identifier(base_resource["physical_table_name"]),
+                descriptor=descriptor,
+                plan=plan,
+                join_sources=join_sources,
+            )
+
+    def _execute_sql_source_plan_with_conn(
+        self,
+        conn,
+        *,
+        source_identifier: str,
+        descriptor: dict[str, Any],
+        plan: dict[str, Any],
+        join_sources: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        join_sources = list(join_sources or [])
+        source_columns = {
+            "base": {column["name"]: column for column in descriptor["columns"]},
+            **{
+                join["alias"]: {column["name"]: column for column in join["descriptor"]["columns"]}
+                for join in join_sources
+            },
+        }
+
+        def resolve_field(field: str) -> str:
+            normalized = _validate_snake_case_identifier(field)
+            if normalized in source_columns["base"]:
+                return f"base.{_quote_identifier(normalized)}"
+            matches = [alias for alias, columns in source_columns.items() if alias != "base" and normalized in columns]
+            if len(matches) == 1:
+                return f"{matches[0]}.{_quote_identifier(normalized)}"
+            if matches:
+                raise ValueError(f"query field is ambiguous: {normalized}")
+            raise ValueError(f"query field not found: {normalized}")
+
+        where = _normalize_plan_where(plan.get("where"))
+        order_by = _normalize_db_view_sort(plan.get("order_by") or [])
+        select_items = [dict(item) for item in plan.get("select") or [] if isinstance(item, dict)]
+        group_by = [_validate_snake_case_identifier(str(item)) for item in plan.get("group_by") or []]
+        params: list[Any] = []
+
+        select_sql: list[str] = []
+        for field in group_by:
+            select_sql.append(f"{resolve_field(field)} AS {_quote_identifier(field)}")
+        if not select_items and not group_by:
+            select_sql = [
+                f"base.{_quote_identifier(column['name'])} AS {_quote_identifier(column['name'])}"
+                for column in descriptor["columns"]
+            ]
+        for item in select_items:
+            kind = str(item.get("kind") or "column")
+            if kind == "column":
+                field = _validate_snake_case_identifier(str(item.get("field") or ""))
+                if field in group_by:
+                    continue
+                select_sql.append(f"{resolve_field(field)} AS {_quote_identifier(field)}")
+                continue
+            if kind != "aggregate":
+                raise ValueError(f"unsupported select item kind: {kind}")
+            func = str(item.get("func") or "").strip().lower()
+            if func not in {"count", "sum", "avg", "min", "max"}:
+                raise ValueError(f"unsupported aggregate function: {func}")
+            alias = _validate_snake_case_identifier(str(item.get("alias") or f"{func}_value"))
+            field = str(item.get("field") or "*")
+            if func == "count" and field == "*":
+                select_sql.append(f"COUNT(*) AS {_quote_identifier(alias)}")
+            else:
+                select_sql.append(f"{func.upper()}({resolve_field(_validate_snake_case_identifier(field))}) AS {_quote_identifier(alias)}")
+        if not select_sql:
+            raise ValueError("query plan select cannot be empty")
+
+        join_sql: list[str] = []
+        for join in join_sources:
+            table_identifier = _quote_identifier(join["resource"]["physical_table_name"])
+            on_sql = " AND ".join(
+                f"base.{_quote_identifier(pair['left'])} = {join['alias']}.{_quote_identifier(pair['right'])}"
+                for pair in join["on"]
+            )
+            join_keyword = "LEFT JOIN" if join["type"] == "left" else "JOIN"
+            join_sql.append(f"{join_keyword} {table_identifier} AS {join['alias']} ON {on_sql}")
+
+        where_sql_parts: list[str] = []
+        for item in where:
+            field_sql = resolve_field(item["field"])
+            op = item["op"]
+            if op == "is_null":
+                where_sql_parts.append(f"{field_sql} IS NULL")
+            elif op == "eq":
+                where_sql_parts.append(f"{field_sql} = ?")
+                params.append(item.get("value"))
+            elif op == "in":
+                values = list(item.get("value") or [])
+                if not values:
+                    where_sql_parts.append("1 = 0")
+                else:
+                    where_sql_parts.append(f"{field_sql} IN ({', '.join(['?'] * len(values))})")
+                    params.extend(values)
+            elif op == "between":
+                values = list(item.get("value") or [])
+                if len(values) != 2:
+                    raise ValueError("between filter value must contain two items")
+                where_sql_parts.append(f"{field_sql} BETWEEN ? AND ?")
+                params.extend(values)
+            else:
+                sql_op = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<=", "like": "LIKE"}[op]
+                where_sql_parts.append(f"{field_sql} {sql_op} ?")
+                params.append(item.get("value"))
+
+        group_sql = ""
+        if group_by:
+            group_sql = " GROUP BY " + ", ".join(resolve_field(field) for field in group_by)
+        rendered_select_aliases = {
+            str(item.get("alias") or item.get("field") or "")
+            for item in select_items
+        } | set(group_by)
+        order_sql = ""
+        if order_by:
+            parts = []
+            for item in order_by:
+                field = item["field"]
+                if field in rendered_select_aliases:
+                    parts.append(f"{_quote_identifier(field)} {item['direction'].upper()}")
+                else:
+                    parts.append(f"{resolve_field(field)} {item['direction'].upper()}")
+            order_sql = " ORDER BY " + ", ".join(parts)
+        limit = _normalize_plan_limit(plan.get("limit"))
+        offset = _normalize_plan_offset(plan.get("offset"))
+        params.extend([limit, offset])
+
+        rows = conn.execute(
+            f"""
+            SELECT {", ".join(select_sql)}
+            FROM {source_identifier} AS base
+            {" ".join(join_sql)}
+            {"WHERE " + " AND ".join(where_sql_parts) if where_sql_parts else ""}
+            {group_sql}
+            {order_sql}
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def _list_custom_table_records_with_conn(
         self,
         conn,
@@ -1539,7 +1945,7 @@ class ModuleDataStore:
                 )
                 return rows[0] if rows else None
 
-            rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"])
+            rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"]) or []
             for row in rows:
                 row_key = _normalize_text(row.get(record_key_field) or row.get("record_key") or row.get("id"))
                 if row_key == normalized_key:
@@ -1584,13 +1990,18 @@ class ModuleDataStore:
         normalized_params = dict(params or {})
 
         with get_connection(DATA_DB) as conn:
-            resolved_sql = self._resolve_db_view_sql_with_conn(
+            resolved_sql, allowed_tables = self._resolve_db_view_sql_with_conn(
                 conn,
                 module_name,
                 source_resource_ids=source_resource_ids,
                 select_sql_template=normalized_sql,
             )
-            cursor = conn.execute(resolved_sql, normalized_params)
+            cursor = _execute_with_read_authorizer(
+                conn,
+                resolved_sql,
+                normalized_params,
+                allowed_tables=allowed_tables,
+            )
             actual_columns = [str(item[0]) for item in cursor.description or []]
             expected_columns = [column["name"] for column in normalized_columns]
             if actual_columns != expected_columns:

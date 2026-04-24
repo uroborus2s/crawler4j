@@ -29,7 +29,7 @@
 
 - `module.yaml.runtime_api` 必须是 `core-native-v1`
 - `module.yaml.data` 必须存在，`resources/views/queries/seeds` 是唯一数据契约入口
-- `db.get_record` / `db.list_records` / `db.replace_records` 只能访问已注册 `resource_id`
+- 模块数据只能通过 `ctx.db` fluent API 访问：`from_()`、`named()`、`into(...).replace(...)`
 - `tasks/*.py` 导出 `TASK` 和 `execute`
 - `workflows/*.py` 导出 `WORKFLOW` 和 `run`
 - `hooks/*.py` 导出 `handle`
@@ -38,4 +38,4 @@
 - Hosted UI 正式组件面现为 `Page / Card / Section / Text / Button / DataTable`，新的卡片容器优先使用 `Card`
 - `Card` 现支持标题对齐、内容水平/垂直对齐、最小高度和 padding 等布局参数
 
-如果你看到任何 `TaskScript`、`TaskFlow`、`ModuleAssembler`、`module_runtime.py`、`declare_ui()`、`@env_selector(...)`、`db.declare_data_resource(...)`、`db.declare_db_view(...)` 的旧写法，应视为历史资料，而不是当前正式协议。
+如果你看到任何 `TaskScript`、`TaskFlow`、`ModuleAssembler`、`module_runtime.py`、`declare_ui()`、`@env_selector(...)`、`ctx.tools.call("db.*")`、`db.declare_data_resource(...)`、`db.declare_db_view(...)` 的旧写法，应视为历史资料，而不是当前正式协议。

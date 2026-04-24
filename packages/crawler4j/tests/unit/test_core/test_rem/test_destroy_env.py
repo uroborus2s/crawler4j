@@ -175,6 +175,23 @@ async def test_destroy_env_removes_db_record_after_external_delete_succeeds(
 
 
 @pytest.mark.asyncio
+async def test_destroy_env_passes_runtime_timeout_to_fingerprint_runtime_check(
+    manager,
+    mock_pool,
+    fingerprint_env,
+):
+    provider = DestroyTrackingProvider(name="bitbrowser", destroy_result=True)
+    register_provider(provider)
+    mock_pool.get.return_value = fingerprint_env
+
+    with patch.object(manager, "ensure_provider_runtime", AsyncMock()) as ensure_runtime:
+        success = await manager.destroy_env(fingerprint_env.id, runtime_timeout=3)
+
+    assert success is True
+    ensure_runtime.assert_awaited_once_with("bitbrowser", timeout=3)
+
+
+@pytest.mark.asyncio
 async def test_destroy_env_cascades_env_metadata_cleanup_after_row_delete(
     persistent_manager,
 ):

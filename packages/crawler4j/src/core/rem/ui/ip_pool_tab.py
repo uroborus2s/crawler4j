@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
@@ -23,9 +24,18 @@ from PyQt6.QtWidgets import (
 
 from src.core.foundation.logging import logger
 from src.core.rem.ip_pool import IPPool, IPStrategy, get_ip_pool_manager
+from src.core.rem.proxy_probe import ProxyProbeResult, probe_ip_entry
 from src.core.rem.ui.ip_pool_dialogs import AddIPDialog, AddPoolDialog, BatchImportDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
+
+
+@dataclass(frozen=True, slots=True)
+class ProxyProbeDialogPayload:
+    title: str
+    summary: str
+    details: str
+    icon: QMessageBox.Icon
 
 
 class IPPoolWorkerThread(QThread):
@@ -80,6 +90,9 @@ class IPPoolWorkerThread(QThread):
                     self.finished.emit(len(entries))
                 else:
                     self.error.emit("IP 池不存在")
+            elif self._action == "test_entry":
+                entry = self._kwargs["entry"]
+                self.finished.emit(probe_ip_entry(entry))
             else:
                 self.error.emit(f"未知操作: {self._action}")
                 
@@ -310,6 +323,7 @@ class IPPoolTab(QWidget):
                 "sort_value": entry.expires_at if entry.expires_at else float("inf"),
             },
             "actions": [
+                {"id": "test_entry", "label": "测试", "variant": "secondary"},
                 {"id": "edit_entry", "label": "编辑", "variant": "primary"},
                 {"id": "delete_entry", "label": "删除", "variant": "danger"},
             ],
@@ -361,7 +375,9 @@ class IPPoolTab(QWidget):
         entry_id = str(row.get("entry_id") or "")
         if not entry_id:
             return
-        if action_id == "edit_entry":
+        if action_id == "test_entry":
+            self._test_entry(entry_id)
+        elif action_id == "edit_entry":
             self._edit_entry(entry_id)
         elif action_id == "delete_entry":
             self._delete_entry(entry_id)
@@ -432,6 +448,48 @@ class IPPoolTab(QWidget):
     def _on_error(self, error: str) -> None:
         """错误处理。"""
         QMessageBox.warning(self, "错误", error)
+
+    def _test_entry(self, entry_id: str) -> None:
+        if not self._current_pool:
+            return
+        entry = self._current_pool.get_entry(entry_id)
+        if entry is None:
+            QMessageBox.warning(self, "错误", "未找到该 IP 条目")
+            return
+        self.entry_table.set_loading(True)
+        self._worker = IPPoolWorkerThread("test_entry", entry=entry)
+        self._worker.finished.connect(self._on_entry_test_finished)
+        self._worker.error.connect(self._on_entry_test_error)
+        self._worker.start()
+
+    def _on_entry_test_finished(self, result: object) -> None:
+        self.entry_table.set_loading(False)
+        if not isinstance(result, ProxyProbeResult):
+            QMessageBox.warning(self, "错误", "代理测试返回了未知结果")
+            return
+        self._show_probe_result(result)
+
+    def _on_entry_test_error(self, error: str) -> None:
+        self.entry_table.set_loading(False)
+        QMessageBox.warning(self, "代理测试失败", error)
+
+    def _build_probe_result_dialog(self, result: ProxyProbeResult) -> ProxyProbeDialogPayload:
+        return ProxyProbeDialogPayload(
+            title=result.title,
+            summary=result.summary_text,
+            details=result.detail_text,
+            icon=QMessageBox.Icon.Information if result.ok else QMessageBox.Icon.Warning,
+        )
+
+    def _show_probe_result(self, result: ProxyProbeResult) -> None:
+        payload = self._build_probe_result_dialog(result)
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle(payload.title)
+        dialog.setText(payload.summary)
+        dialog.setIcon(payload.icon)
+        dialog.setDetailedText(payload.details)
+        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+        dialog.exec()
     
     def _edit_entry(self, entry_id: str) -> None:
         """编辑 IP 条目。"""

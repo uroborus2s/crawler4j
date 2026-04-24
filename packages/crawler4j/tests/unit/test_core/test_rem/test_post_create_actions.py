@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.core.rem.manager import EnvironmentManager
+from src.core.rem.manager import EnvironmentManager, RECOVERY_PROVIDER_RUNTIME_TIMEOUT
 from src.core.rem.models import Environment, EnvKind, EnvRequirement, EnvStatus, EnvUnavailableError
 from src.core.rem.provider import BaseProvider, register_provider
 from src.core.system.external_app_service import AppLaunchResult, ExternalApp
@@ -199,7 +199,10 @@ async def test_create_env_connect_failure_closes_env_and_raises(manager):
 
     assert provider.open_called
     assert provider.close_called
-    destroy_env.assert_awaited_once()
+    destroy_env.assert_awaited_once_with(
+        provider.last_config["env_id"],
+        runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+    )
     error_event.assert_called_once()
 
 
@@ -237,7 +240,7 @@ async def test_ensure_provider_runtime_for_virtualbrowser(manager):
     ):
         await manager.ensure_provider_runtime("virtualbrowser")
 
-    app_service.ensure_running.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER)
+    app_service.ensure_running.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER, timeout=30)
     app_service.wait_until_ready.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER, timeout=30)
 
 
@@ -260,7 +263,7 @@ async def test_ensure_provider_runtime_fails_when_external_app_not_ready(manager
         with pytest.raises(EnvUnavailableError, match="安装路径未配置"):
             await manager.ensure_provider_runtime("virtualbrowser")
 
-    app_service.ensure_running.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER)
+    app_service.ensure_running.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER, timeout=30)
     app_service.wait_until_ready.assert_not_awaited()
 
 

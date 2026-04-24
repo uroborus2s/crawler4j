@@ -60,7 +60,9 @@ ALLOWED_CARD_SCHEMA_KEYS = {
     "padding",
 }
 ALLOWED_TEXT_SCHEMA_KEYS = {"type", "text", "binding", "style"}
-ALLOWED_BUTTON_SCHEMA_KEYS = {"type", "label", "action"}
+ALLOWED_BUTTON_SCHEMA_KEYS = {"type", "label", "icon", "aria_label", "size", "variant", "action"}
+ALLOWED_BUTTON_SIZES = {"md", "sm", "icon"}
+ALLOWED_BUTTON_VARIANTS = {"primary", "secondary", "ghost"}
 ALLOWED_BUTTON_ACTION_KEYS = {"type", "page_id", "params"}
 ALLOWED_ACTION_PARAM_SPEC_KEYS = {"binding", "value"}
 ALLOWED_FEATURES_KEYS = {"search", "sort", "pagination"}
@@ -762,13 +764,33 @@ def _normalize_page_component(raw: Any, *, field_name: str) -> dict[str, Any]:
         if unknown_keys:
             raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
         label = str(raw.get("label") or "").strip()
-        if not label:
-            raise ValueError(f"{field_name}.label 不能为空")
-        return {
+        icon = str(raw.get("icon") or "").strip()
+        aria_label = str(raw.get("aria_label") or "").strip()
+        if not label and not icon:
+            raise ValueError(f"{field_name} 必须提供 label 或 icon")
+        if icon and not label and not aria_label:
+            raise ValueError(f"{field_name}.aria_label 在纯图标按钮中不能为空")
+        item = {
             "type": "Button",
-            "label": label,
             "action": _normalize_button_action(raw.get("action"), field_name=f"{field_name}.action"),
         }
+        if label:
+            item["label"] = label
+        if icon:
+            item["icon"] = icon
+        if aria_label:
+            item["aria_label"] = aria_label
+        if raw.get("size") is not None:
+            size = str(raw.get("size") or "").strip().lower()
+            if size not in ALLOWED_BUTTON_SIZES:
+                raise ValueError(f"{field_name}.size 不受支持: {size}")
+            item["size"] = size
+        if raw.get("variant") is not None:
+            variant = str(raw.get("variant") or "").strip().lower()
+            if variant not in ALLOWED_BUTTON_VARIANTS:
+                raise ValueError(f"{field_name}.variant 不受支持: {variant}")
+            item["variant"] = variant
+        return item
 
     if component_type == "DataTable":
         return _normalize_inline_table_schema(raw, field_name=field_name)

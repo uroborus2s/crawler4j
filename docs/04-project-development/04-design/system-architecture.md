@@ -57,7 +57,7 @@ Maintainer
 - Root app package 的真实桌面入口位于 `packages/crawler4j/src/ui/app.py`
 - Windows 正式发布层已收口为“`PyInstaller onedir` 生成宿主目录，Velopack 负责 installer / package feed / 宿主自更新”；macOS 内部发布继续走 “`PyInstaller.app + Sparkle`”
 - `packages/crawler4j-sdk` 与 `packages/crawler4j-contracts` 已经具备独立包形态
-- `TaskContext` 的宿主扩展能力已收敛到 `ctx.tools.call("<namespace>.<action>", **kwargs)` 单入口
+- `TaskContext` 的数据库能力已收敛到唯一入口 `ctx.db`；非数据库类宿主能力仍通过 `ctx.tools.call("<namespace>.<action>", **kwargs)` 调用
 - 模块生命周期 hooks 已收敛到 ATM 调度的 `module_runtime.py`；`TaskScript` / `TaskFlow` 本身只保留单入口方法
 - `TaskSignal` 已成为模块到 ATM 的正式流程控制通道；等待人工确认、失败后销毁环境等行为不再通过散落回调或 UI 清理策略表达
 - 外部模块运行时已收敛到 MMS + ModuleAssembler 单一执行链，不再保留 `src.automation.*` 旧兼容包
@@ -104,7 +104,7 @@ Maintainer
 | 2026-04-22 | 补记 Windows 桌面宿主发布层已新增 `PyInstaller onedir + Velopack` 双阶段链路，且 `src.ui.app:main` 在 Windows 打包态会先执行 Velopack bootstrap | Codex |
 | 2026-03-26 | 基于当前仓库事实重建总体架构摘要 | Codex |
 | 2026-03-26 | 吸收旧总体架构/SRS 的层次与边界结论 | Codex |
-| 2026-04-15 | 补记 `TaskContext.tools` 统一工具接口已成为宿主扩展单入口 | Codex |
+| 2026-04-15 | 补记 `TaskContext.tools` 统一工具接口已成为非数据库宿主扩展入口；2026-04-24 数据库入口已进一步收口到 `ctx.db` | Codex |
 | 2026-04-15 | 补记 ATM hooks / `TaskSignal` / `WAITING_CONFIRMATION` 已成为正式任务生命周期链 | Codex |
 | 2026-04-19 | 新增“ATM 模块资源池等待队列”下一轮架构设计摘要，并明确其为已确认、待实施方案 | Codex |
 | 2026-04-19 | 固定环境池 Service Job 的等待队列、资源池资格卡片与 FIFO 补位 V1 已实现 | Codex |

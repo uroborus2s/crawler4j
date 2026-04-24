@@ -52,8 +52,8 @@
 
 确认：
 
-1. `module.yaml.ui_extension.pages[]` 是否存在目标页面
-2. `pages/<page>.py` 或 `pages/<group>/<file>.py` 是否导出 `PAGE`
+1. 如果目标应该在左侧菜单出现，`module.yaml.ui_extension.pages[]` 是否存在目标页面
+2. `pages/<page>.py` 或 `pages/<group>/<file>.py` 是否导出对应 `PAGE`
 3. `PAGE.schema` 顶层是否是 `Page`
 4. `load_handler` / `query_handler` 是否真实存在于同一文件
 5. `uv run crawler4j check full` 是否通过
@@ -67,7 +67,7 @@
 1. `DataTable.data_source.type` 是否是 `binding`、`rows` 或 `query_handler`
 2. `load_handler` 返回值里是否真的有绑定字段
 3. `query_handler` 的签名是否是 `(context, table_id, query, params=None)`
-4. `db.get_record` / `db.list_records` / `db.run_query` / `db.query_view` 返回值是否真的是你页面期望的结构
+4. `ctx.db.from_(...)` / `ctx.db.named(...)` 返回值是否真的是你页面期望的结构
 
 ## 数据契约或查询报错
 

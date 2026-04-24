@@ -135,6 +135,7 @@ def test_module_init_creates_core_native_project(tmp_path: Path):
     task_text = (module_root / "tasks" / "example_task.py").read_text(encoding="utf-8")
     assert "TASK = TaskSpec(" in task_text
     assert "async def execute(ctx: TaskContext)" in task_text
+    assert "captured_data" not in task_text
 
     workflow_text = (module_root / "workflows" / "main_workflow.py").read_text(encoding="utf-8")
     assert "WORKFLOW = WorkflowSpec(" in workflow_text
@@ -334,7 +335,7 @@ def test_collect_full_errors_rejects_manifest_page_missing_from_files(tmp_path: 
     assert "module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: dashboard" in errors
 
 
-def test_collect_full_errors_rejects_page_file_missing_from_manifest(tmp_path: Path, monkeypatch):
+def test_collect_full_errors_accepts_page_file_not_registered_as_menu_entry(tmp_path: Path, monkeypatch):
     module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
     assert commands.cmd_page_create(
@@ -346,7 +347,20 @@ def test_collect_full_errors_rejects_page_file_missing_from_manifest(tmp_path: P
 
     errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
 
-    assert "pages/ 声明了未写入 module.yaml.ui_extension.pages 的宿主页: dashboard" in errors
+    assert errors == []
+
+
+def test_collect_full_errors_still_validates_unlisted_page_files(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    (module_root / "pages" / "details.py").write_text(
+        "def load_details_page(context, page_id, params=None):\n"
+        "    return {}\n",
+        encoding="utf-8",
+    )
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert "pages/details.py 缺少 PAGE，或类型不是 PageSpec" in errors
 
 
 def test_collect_full_errors_accepts_grouped_page_source_layout(tmp_path: Path, monkeypatch):
@@ -359,6 +373,95 @@ def test_collect_full_errors_accepts_grouped_page_source_layout(tmp_path: Path, 
     errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
 
     assert errors == []
+
+
+def test_collect_full_errors_rejects_multiline_legacy_db_tool_calls(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    task_path = module_root / "tasks" / "example_task.py"
+    task_text = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        task_text.replace(
+            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
+            '    if ctx.tools.has_tool(\n'
+            '        "db.list_records"\n'
+            "    ):\n"
+            "        ctx.tools.call(\n"
+            '            "db.get_record",\n'
+            '            resource="accounts",\n'
+            '            record_key="A001",\n'
+            "        )\n"
+            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
+        ),
+        encoding="utf-8",
+    )
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    legacy_errors = [error for error in errors if "使用了已删除的旧数据库工具入口" in error]
+    assert len(legacy_errors) == 2
+    assert all(error.startswith("tasks/example_task.py:") for error in legacy_errors)
+
+
+def test_collect_full_errors_rejects_removed_captured_data_usage(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    task_path = module_root / "tasks" / "example_task.py"
+    task_text = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        task_text.replace(
+            '    result = {\n',
+            '    ctx.captured_data.append({"id": 1})\n'
+            '    result = {\n',
+        ),
+        encoding="utf-8",
+    )
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    captured_data_errors = [error for error in errors if "使用了已删除的 ctx.captured_data" in error]
+    assert len(captured_data_errors) == 1
+    assert captured_data_errors[0].startswith("tasks/example_task.py:")
+
+
+def test_page_create_can_create_non_menu_page_source(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+
+    assert commands.cmd_page_create(
+        Namespace(
+            name="account_detail",
+            display_name=None,
+            description=None,
+            group="account",
+            no_menu=True,
+            force=False,
+        )
+    ) == 0
+
+    manifest = _read_manifest(module_root)
+    errors = commands.collect_full_errors(module_root, manifest)
+
+    assert (module_root / "pages" / "account" / "detail.py").exists()
+    assert manifest["ui_extension"]["pages"] == []
+    assert errors == []
+
+
+def test_collect_full_errors_rejects_resource_id_alias_in_data_resources(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_data_resource_create(
+        Namespace(
+            name="accounts",
+            storage_mode="custom_table",
+            record_key_field="account_id",
+        )
+    ) == 0
+    manifest = _read_manifest(module_root)
+    manifest["data"]["resources"][0]["resource_id"] = "accounts"
+    _write_manifest(module_root, manifest)
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert "data.resources 包含不支持的字段: resource_id" in errors
 
 
 def test_collect_full_errors_allow_manifest_name_to_differ_from_directory_name(tmp_path: Path):
@@ -461,6 +564,7 @@ def test_data_commands_scaffold_manifest_sql_and_seed_files(tmp_path: Path, monk
             },
         }
     ]
+    assert "resource_id" not in manifest["data"]["resources"][0]
     assert manifest["data"]["views"] == [
         {
             "id": "account_stats",

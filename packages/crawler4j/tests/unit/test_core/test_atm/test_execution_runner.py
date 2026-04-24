@@ -107,10 +107,27 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
         package_dir.mkdir(parents=True, exist_ok=True)
         (package_dir / "__init__.py").write_text("", encoding="utf-8")
 
+    (module_dir / "runtime_db.py").write_text(
+        dedent(
+            """
+            def record_event(context, event_type, *, entity_key=None, created_at=None, payload=None):
+                event_id = context.db.audit("runtime_events").append(
+                    event_type=event_type,
+                    entity_key=entity_key,
+                    created_at=created_at,
+                    payload=dict(payload or {}),
+                )
+                return {"id": event_id, "event_type": event_type}
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
     (selectors_dir / "pick_ready.py").write_text(
         dedent(
             """
             from crawler4j_contracts import EnvCandidate, EnvSelectorSpec, TaskContext
+            from ..runtime_db import record_event
 
             SELECTOR = EnvSelectorSpec(
                 name="pick_ready",
@@ -123,10 +140,9 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
                 candidate_ids = [candidate.env_id for candidate in candidates]
                 for candidate in candidates:
                     if "page" in candidate.capabilities:
-                        context.tools.call(
-                            "db.append_event",
-                            dataset="runtime_events",
-                            event_type="hook.select_env",
+                        record_event(
+                            context,
+                            "hook.select_env",
                             entity_key=candidate.env_id,
                             created_at=200,
                             payload={"candidate_ids": candidate_ids, "selected_env_id": candidate.env_id},
@@ -142,13 +158,13 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
         dedent(
             """
             from crawler4j_contracts import TaskContext
+            from ..runtime_db import record_event
 
 
             async def handle(context: TaskContext):
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.prepare",
+                record_event(
+                    context,
+                    "hook.prepare",
                     created_at=100,
                     payload={"selector": context.runtime.get("selector_name")},
                 )
@@ -162,14 +178,14 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
         dedent(
             """
             from crawler4j_contracts import TaskContext
+            from ..runtime_db import record_event
 
 
             async def handle(context: TaskContext):
                 context.state["hook_trace"] = ["init_env"]
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.init",
+                record_event(
+                    context,
+                    "hook.init",
                     entity_key=context.env_id,
                     created_at=300,
                     payload={"env_id": context.env_id},
@@ -183,16 +199,16 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
         dedent(
             """
             from crawler4j_contracts import TaskContext
+            from ..runtime_db import record_event
 
 
             async def handle(context: TaskContext):
                 hook_trace = list(context.state.get("hook_trace") or [])
                 hook_trace.append("before_run")
                 context.state["hook_trace"] = hook_trace
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.before",
+                record_event(
+                    context,
+                    "hook.before",
                     created_at=400,
                     payload={"workflow": context.runtime.get("workflow")},
                 )
@@ -205,13 +221,13 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
         dedent(
             """
             from crawler4j_contracts import TaskContext, TaskResult
+            from ..runtime_db import record_event
 
 
             async def handle(context: TaskContext, result: TaskResult):
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.success",
+                record_event(
+                    context,
+                    "hook.success",
                     created_at=600,
                     payload={"title": result.data.get("title")},
                 )
@@ -224,13 +240,13 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
         dedent(
             """
             from crawler4j_contracts import TaskContext
+            from ..runtime_db import record_event
 
 
             async def handle(context: TaskContext):
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.cleanup",
+                record_event(
+                    context,
+                    "hook.cleanup",
                     created_at=700,
                     payload={
                         "final_status": context.runtime.get("final_status"),
@@ -261,6 +277,7 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
         dedent(
             """
             from crawler4j_contracts import TaskContext, TaskResult, TaskSpec
+            from ..runtime_db import record_event
 
             TASK = TaskSpec(name="capture_page")
 
@@ -274,10 +291,9 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
                 title = await ctx.page.title()
                 html = await ctx.page.content()
 
-                ctx.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="task.capture",
+                record_event(
+                    ctx,
+                    "task.capture",
                     entity_key=ctx.page.url,
                     created_at=500,
                     payload={"title": title, "html_length": len(html)},
@@ -919,12 +935,13 @@ async def test_execution_runner_runs_real_module_with_hooks_selectors_and_audit_
     fake_page = _FakePage()
     env.capabilities = {"page"}
     env.handle = SimpleNamespace(page=fake_page, context=SimpleNamespace(name="browser-context"))
+    manifest_data = {"resources": [], "views": [], "queries": [], "seeds": []}
 
     module_service = ModuleService()
     module_service.registry = SimpleNamespace(
         get_module=lambda name: ModuleInfo(
             name=module_name,
-            manifest=ModuleManifest(name=module_name),
+            manifest=ModuleManifest(name=module_name, data=manifest_data),
             path=module_dir,
         )
     )

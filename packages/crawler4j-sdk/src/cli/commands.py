@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import importlib
 import importlib.util
@@ -418,11 +419,23 @@ def _collect_data_contract_errors(module_root: Path, manifest: dict[str, Any]) -
         errors.append("module.yaml.data.seeds 必须是数组")
         seeds = []
 
+    allowed_resource_keys = {
+        "id",
+        "storage_mode",
+        "record_key_field",
+        "schema",
+        "indexes",
+        "cleanup_policy",
+        "joins",
+    }
     resource_map: dict[str, dict[str, Any]] = {}
     for item in resources:
         if not isinstance(item, dict):
             errors.append("data.resources 中的每一项都必须是对象")
             continue
+        unknown_keys = sorted(set(item) - allowed_resource_keys)
+        if unknown_keys:
+            errors.append("data.resources 包含不支持的字段: " + ", ".join(unknown_keys))
         resource_id = str(item.get("id", "") or "").strip()
         if not is_valid_name(resource_id):
             errors.append(f"无效的 data.resources[].id: {resource_id or '<empty>'}")
@@ -434,11 +447,36 @@ def _collect_data_contract_errors(module_root: Path, manifest: dict[str, Any]) -
         storage_mode = str(item.get("storage_mode", "managed_dataset") or "managed_dataset").strip().lower()
         if storage_mode not in {"managed_dataset", "custom_table"}:
             errors.append(f"data.resources[{resource_id}].storage_mode 不支持: {storage_mode}")
-        if storage_mode == "custom_table":
-            schema = item.get("schema")
-            columns = schema.get("columns") if isinstance(schema, dict) else None
-            if not isinstance(columns, list) or not columns:
-                errors.append(f"data.resources[{resource_id}].schema.columns 不能为空")
+        schema = item.get("schema")
+        columns = schema.get("columns") if isinstance(schema, dict) else None
+        if not isinstance(columns, list) or not columns:
+            errors.append(f"data.resources[{resource_id}].schema.columns 不能为空")
+        joins = item.get("joins") or []
+        if storage_mode != "custom_table" and joins:
+            errors.append(f"data.resources[{resource_id}].joins 只允许 custom_table 声明")
+
+    for resource_id, item in resource_map.items():
+        joins = item.get("joins") or []
+        if not isinstance(joins, list):
+            errors.append(f"data.resources[{resource_id}].joins 必须是数组")
+            continue
+        for join in joins:
+            if not isinstance(join, dict):
+                errors.append(f"data.resources[{resource_id}].joins 中的每一项都必须是对象")
+                continue
+            target = str(join.get("target") or "").strip()
+            if not is_valid_name(target):
+                errors.append(f"data.resources[{resource_id}].joins[].target 必须是小写 snake_case")
+                continue
+            target_resource = resource_map.get(target)
+            if not target_resource:
+                errors.append(f"data.resources[{resource_id}].joins 引用了未声明资源: {target}")
+                continue
+            if str(target_resource.get("storage_mode", "managed_dataset")).strip().lower() != "custom_table":
+                errors.append(f"data.resources[{resource_id}].joins 只允许连接 custom_table: {target}")
+            on = join.get("on")
+            if not isinstance(on, dict) or not on:
+                errors.append(f"data.resources[{resource_id}].joins[{target}].on 不能为空")
 
     for item in views:
         if not isinstance(item, dict):
@@ -1118,17 +1156,73 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
         discovered_pages[page_id] = owner_label
 
     missing_pages = sorted(declared_pages - set(discovered_pages))
-    extra_pages = sorted(set(discovered_pages) - declared_pages)
     errors.extend(
         f"module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: {page_id}"
         for page_id in missing_pages
     )
-    errors.extend(
-        f"pages/ 声明了未写入 module.yaml.ui_extension.pages 的宿主页: {page_id}"
-        for page_id in extra_pages
-    )
+    errors.extend(_collect_legacy_db_tool_usage_errors(module_root))
+    errors.extend(_collect_removed_task_context_usage_errors(module_root))
 
     return errors
+
+
+def _iter_module_python_trees(module_root: Path):
+    for path in sorted(module_root.rglob("*.py")):
+        relative = path.relative_to(module_root)
+        if any(part in {".venv", "__pycache__", ".pytest_cache", ".ruff_cache"} for part in relative.parts):
+            continue
+        text = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(text, filename=str(path))
+        except SyntaxError:
+            continue
+        yield relative, tree
+
+
+def _collect_legacy_db_tool_usage_errors(module_root: Path) -> list[str]:
+    errors: list[str] = []
+    for relative, tree in _iter_module_python_trees(module_root):
+        legacy_calls = sorted(
+            (node.args[0].lineno for node in ast.walk(tree) if _is_legacy_db_tool_call(node)),
+            key=int,
+        )
+        errors.extend(
+            f"{relative}:{line_no} 使用了已删除的旧数据库工具入口；请改用 ctx.db fluent API"
+            for line_no in legacy_calls
+        )
+    return errors
+
+
+def _is_legacy_db_tool_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    if not isinstance(node.func, ast.Attribute) or node.func.attr not in {"call", "has_tool"}:
+        return False
+    if not isinstance(node.func.value, ast.Attribute) or node.func.value.attr != "tools":
+        return False
+    if not node.args:
+        return False
+    first_arg = node.args[0]
+    return isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str) and first_arg.value.startswith("db.")
+
+
+def _collect_removed_task_context_usage_errors(module_root: Path) -> list[str]:
+    errors: list[str] = []
+    for relative, tree in _iter_module_python_trees(module_root):
+        captured_data_accesses = sorted(
+            (node.lineno for node in ast.walk(tree) if _is_removed_captured_data_access(node)),
+            key=int,
+        )
+        errors.extend(
+            f"{relative}:{line_no} 使用了已删除的 ctx.captured_data；临时状态请用 ctx.state，任务输出请返回 TaskResult.data"
+            for line_no in captured_data_accesses
+        )
+    return errors
+
+
+def _is_removed_captured_data_access(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "captured_data"
+
 
 def _iter_inline_tables(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
     tables: list[dict[str, Any]] = []
@@ -1251,7 +1345,12 @@ def cmd_data_resource_create(args: argparse.Namespace) -> int:
                 ],
             }
         else:
-            payload["schema"] = {}
+            payload["schema"] = {
+                "version": 1,
+                "columns": [
+                    {"key": record_key_field, "type": "text", "required": True},
+                ],
+            }
         _append_unique_data_entry(manifest, "resources", resource_id, payload)
         save_manifest(module_root, manifest)
     except CLIError as exc:
@@ -1922,7 +2021,7 @@ def cmd_workflow_list(args: argparse.Namespace) -> int:
 
 
 def cmd_page_create(args: argparse.Namespace) -> int:
-    """Create a hosted page scaffold inside pages/ and register it."""
+    """Create a hosted page scaffold inside pages/ and optionally add it to navigation."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
     if not is_valid_name(name):
@@ -1948,25 +2047,27 @@ def cmd_page_create(args: argparse.Namespace) -> int:
             print(f"  - {item}")
         return 1
     _ensure_package_dir(module_root / "pages")
-    pages = _normalize_ui_pages(manifest)
-    existing_page = next(
-        (item for item in pages if isinstance(item, dict) and item.get("id") == name),
-        None,
-    )
-    if existing_page is not None:
-        if not args.force:
-            _print_error(f"页面入口已存在: {name}")
-            return 1
-        existing_page["label"] = args.display_name or to_display_name(name)
-        existing_page["icon"] = "📄"
-    else:
-        pages.append(
-            {
-                "id": name,
-                "label": args.display_name or to_display_name(name),
-                "icon": "📄",
-            }
+    no_menu = bool(getattr(args, "no_menu", False))
+    if not no_menu:
+        pages = _normalize_ui_pages(manifest)
+        existing_page = next(
+            (item for item in pages if isinstance(item, dict) and item.get("id") == name),
+            None,
         )
+        if existing_page is not None:
+            if not args.force:
+                _print_error(f"页面入口已存在: {name}")
+                return 1
+            existing_page["label"] = args.display_name or to_display_name(name)
+            existing_page["icon"] = "📄"
+        else:
+            pages.append(
+                {
+                    "id": name,
+                    "label": args.display_name or to_display_name(name),
+                    "icon": "📄",
+                }
+            )
     try:
         _write_text(
             module_root / page_relative_path,
@@ -1981,13 +2082,14 @@ def cmd_page_create(args: argparse.Namespace) -> int:
         _print_error(str(exc))
         return 1
 
-    save_manifest(module_root, manifest)
+    if not no_menu:
+        save_manifest(module_root, manifest)
     _print_success(f"已创建宿主页骨架: {page_relative_path.as_posix()}")
     return 0
 
 
 def cmd_page_list(args: argparse.Namespace) -> int:
-    """List hosted pages declared in module.yaml."""
+    """List left-menu hosted pages declared in module.yaml."""
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
@@ -2812,20 +2914,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     page_parser = subparsers.add_parser(
         "page",
-        help="宿主页操作：在 pages/ 生成 hosted page 骨架并维护 ui_extension.pages",
+        help="宿主页操作：在 pages/ 生成 hosted page 骨架并按需维护 ui_extension.pages",
     )
     page_sub = page_parser.add_subparsers(dest="action")
     page_create = page_sub.add_parser(
         "create",
-        help="创建一个宿主页骨架，并把它注册到 ui_extension.pages",
+        help="创建一个宿主页骨架；默认注册到左侧菜单，可用 --no-menu 只创建可路由页面",
     )
     page_create.add_argument("name", help="页面名，snake_case")
     page_create.add_argument("--group", help="可选源码分组目录，单层 snake_case；例如 account")
+    page_create.add_argument("--no-menu", action="store_true", help="只创建页面文件，不写入左侧菜单配置")
     page_create.add_argument("--display-name", help="页面显示名")
     page_create.add_argument("--description", help="页面说明")
     page_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     page_create.set_defaults(func=cmd_page_create)
-    page_list = page_sub.add_parser("list", help="列出 ui_extension.pages 中的宿主页入口")
+    page_list = page_sub.add_parser("list", help="列出 ui_extension.pages 中的左侧菜单入口")
     page_list.set_defaults(func=cmd_page_list)
 
     selector_parser = subparsers.add_parser(

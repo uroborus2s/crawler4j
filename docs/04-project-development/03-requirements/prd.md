@@ -132,10 +132,10 @@
 - 优先级：P1
 - 描述：宿主必须在快照型 dataset 之外，为模块提供 append-only 的审计事件写入与查询能力，用于记录账号状态流转、运行留痕和其他历史轨迹。
 - 用户故事：作为模块开发者，我希望宿主提供与快照数据分离的事件型存储能力，以便记录审计历史，而不是把事件流伪装成普通 dataset 全量覆盖写回。
-- 前置条件：模块通过 `TaskContext.tools` 调用宿主扩展能力。
+- 前置条件：模块通过 `TaskContext.db` 调用宿主数据能力。
 - 业务规则：
-  - 快照型数据继续通过 `db.list_records` / `db.replace_records` 落到 `data.db.module_datasets`。
-  - 审计事件通过 `db.append_event` / `db.query_events` 落到独立的 `data.db.module_audit_events`。
+  - 快照型数据继续通过 `ctx.db.from_` / `ctx.db.into(...).replace` 落到 `data.db.module_datasets` 或受控自定义表。
+  - 审计事件通过 `ctx.db.audit(...).append/query` 落到独立的 `data.db.module_audit_events`。
   - 模块写入的审计事件为 append-only；本轮不提供模块侧的更新/删除接口。
   - `core:data_table` 仍只服务快照型 dataset，不承担审计事件编辑。
   - retention / archive 暂不纳入本轮实现范围。
@@ -144,10 +144,10 @@
 
 验收标准：
 
-- [x] `UAT-019` 模块调用 `db.append_event` 时，宿主会为目标模块和 dataset 新增 1 条独立事件记录，而不是重写整包历史 JSON
-- [x] `UAT-020` 模块调用 `db.query_events` 时，可按 `dataset / entity_key / event_type / run_id / time range` 查询事件，并按时间顺序返回结果
-- [x] `UAT-021` 快照型 dataset 继续通过 `db.list_records` / `db.replace_records` 读写，事件工具不会污染 `module_datasets`
-- [x] `UAT-022` 新增事件工具后，模块仍通过统一的 `ctx.tools.call(...)` 能力面访问宿主，不需要直连数据库
+- [x] `UAT-019` 模块调用 `ctx.db.audit(...).append` 时，宿主会为目标模块和 dataset 新增 1 条独立事件记录，而不是重写整包历史 JSON
+- [x] `UAT-020` 模块调用 `ctx.db.audit(...).query` 时，可按 `dataset / entity_key / event_type / run_id / time range` 查询事件，并按时间顺序返回结果
+- [x] `UAT-021` 快照型 dataset 继续通过 `ctx.db.from_` / `ctx.db.into(...).replace` 读写，审计事件不会污染 `module_datasets`
+- [x] `UAT-022` 新增事件能力后，模块仍通过统一的 `ctx.db` 能力面访问宿主，不需要直连数据库
 - [x] `UAT-023` 宿主清理模块数据时，会同时清理该模块的快照数据、审计事件和托管数据表 schema
 
 ### `REQ-009` ATM 必须支持固定环境池 Service Job 的等待队列与模块资源池分配

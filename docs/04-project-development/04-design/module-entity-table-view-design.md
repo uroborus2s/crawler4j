@@ -9,7 +9,7 @@
 **关联 ID：** `API-005`, `API-008`, `API-009`, `CR-014`, `TASK-028`  
 **最后更新：** 2026-04-23
 
-> 注：本设计文档的“运行时声明视图”方案已被后续破坏性升级收口为 manifest 驱动实现。当前正式事实源以 `api-design.md` 和 `module-config-runtime-data-contract.md` 为准：表、视图、命名查询统一登记在 `module.yaml.data`，SQL 位于 `data/sql/*`，运行时只保留 `db.query_view` / `db.run_query`，不再接受 `db.declare_db_view`。
+> 注：本设计文档的“运行时声明视图”方案已被后续破坏性升级收口为 manifest 驱动实现。当前正式事实源以 `api-design.md` 和 `module-config-runtime-data-contract.md` 为准：表、视图、命名查询统一登记在 `module.yaml.data`，SQL 位于 `data/sql/*`，运行时只保留 `ctx.db` fluent API，不再接受旧数据库工具。
 
 ## 1. 背景
 
@@ -62,7 +62,7 @@
 |---|---|---|
 | 存储资源 | `module_data_resources` | 管理 `managed_dataset` / `custom_table` 的生命周期、schema、indexes、cleanup |
 | 数据库视图 | `module_db_views` | 管理实体表之上的数据库视图定义、源资源引用、列能力和卸载清理 |
-| 宿主页 schema | `module_pages` | 管理 `Page / Section / Text / Button / DataTable` 结构；内联 `DataTable` 通过 `query_handler` 调 `db.query_view` |
+| 宿主页 schema | `module_pages` | 管理 `Page / Section / Text / Button / DataTable` 结构；内联 `DataTable` 通过 `query_handler` 调 `ctx.db` |
 
 结论：
 
@@ -120,13 +120,13 @@ V1 只允许数据库视图引用：
 - `declare_ui()` 调用 `ui.declare_page`
 - 页面 schema 在 `children[]` 中内联 `DataTable`
 - `DataTable.data_source.type = "query_handler"`
-- `query_handler(context, table_id, query, params=None)` 内部调用 `db.query_view`
+- `query_handler(context, table_id, query, params=None)` 内部调用 `ctx.db`
 
 V1 仅支持只读统计表：
 
-- 读取：走 `db.query_view`
-- 过滤：由 `query_handler` 把受控字段过滤下推到 `db.query_view`
-- 排序：由 `query_handler` 把受控字段排序下推到 `db.query_view`
+- 读取：走 `ctx.db.from_(...)`
+- 过滤：由 `query_handler` 把受控字段过滤下推到 `ctx.db`
+- 排序：由 `query_handler` 把受控字段排序下推到 `ctx.db`
 - 分页：由宿主查询接口下推
 - 不提供新增、编辑、删除
 
@@ -259,7 +259,7 @@ GROUP BY execution_date, labor_account, bill_batch
 
 ### 5.3 创建校验流程
 
-宿主在 `db.declare_db_view` 时执行：
+宿主在同步 `module.yaml.data.views[]` 时执行：
 
 1. 解析并规范化 `view_id`、`source_resource_ids`、`columns_json`
 2. 校验 SQL 模板语义和占位资源所有权
@@ -273,11 +273,11 @@ SQLite 不支持 `CREATE OR REPLACE VIEW`，所以必须走事务内 drop/create
 
 ## 6. 运行时 API 设计
 
-### 6.1 `db.declare_db_view`
+### 6.1 `module.yaml.data.views[]`
 
 ```python
 ctx.tools.call(
-    "db.declare_db_view",
+    "module.yaml.data.views[]",
     view_id="labor_billing_stats",
     view_kind="sql_view",
     source_resource_ids=["labor_billing_entries"],
@@ -317,11 +317,11 @@ GROUP BY execution_date, labor_account, bill_batch
 }
 ```
 
-### 6.2 `db.query_view`
+### 6.2 `ctx.db.from_(view_id)`
 
 ```python
 ctx.tools.call(
-    "db.query_view",
+    "ctx.db.from_(view_id)",
     view_id="labor_billing_stats",
     filters={
         "execution_date": "2026-04-23",
@@ -369,7 +369,7 @@ V1 约束：
 - `declare_ui()` 只调用 `ui.declare_page`
 - `ui.declare_page` 产出的 `Page.children[]` 内联 `DataTable`
 - `DataTable.data_source.type = "query_handler"`
-- `query_handler` 内部把 `query.filters / query.sort / query.limit / query.offset` 路由到 `db.query_view`
+- `query_handler` 内部把 `query.filters / query.sort / query.limit / query.offset` 路由到 `ctx.db`
 
 V1 规则：
 
@@ -380,10 +380,10 @@ V1 规则：
 ### 7.2 `query_handler` 在 db view 模式下的行为
 
 - 首次加载和翻页时，宿主调用页面内联 `DataTable` 的 `query_handler`
-- `query_handler` 再调用 `db.query_view`
+- `query_handler` 再调用 `ctx.db.from_(...)`
 - 顶部过滤条只下推 `columns_json.filterable = true` 的字段
 - 排序只下推 `columns_json.sortable = true` 的字段
-- 页面参数或导航参数需要参与筛选时，也由 `query_handler` 统一合并到 `db.query_view.filters`
+- 页面参数或导航参数需要参与筛选时，也由 `query_handler` 统一合并到 `ctx.db` 查询条件
 - 数据表行为固定只读
 
 ### 7.3 UI 绑定示例
@@ -420,7 +420,7 @@ ctx.tools.call(
 
 def query_billing_stats(context, table_id, query, params=None):
     return context.tools.call(
-        "db.query_view",
+        "ctx.db.from_(...)",
         view_id="labor_billing_stats",
         filters=query.get("filters") or {},
         sort=query.get("sort") or [{"field": "total_count", "direction": "desc"}],
@@ -504,8 +504,8 @@ GROUP BY execution_date, labor_account, bill_batch
 ### 10.1 V1
 
 - `module_db_views`
-- `db.declare_db_view`
-- `db.query_view`
+- `module.yaml.data.views[]`
+- `ctx.db.from_(...)`
 - `ui.declare_page + inline DataTable/query_handler`
 - 过滤/排序/分页
 - 卸载清理

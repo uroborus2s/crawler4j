@@ -320,7 +320,7 @@ class ModuleScanner:
                     raise ModuleValidationError(
                         f"data.views[{view['view_id']}] 只允许引用 custom_table 资源: {resource_id}",
                         stage="VALIDATE",
-                        hint="视图 SQL 只能建立在模块自建表之上；托管快照表请走 db.get_record/db.list_records",
+                        hint="视图 SQL 只能建立在模块自建表之上；托管快照源请走 ctx.db.from_(...) 单源查询",
                     )
             try:
                 sql = load_sql_file(module_path, view["sql_file"], expected_prefix="data/sql/views/")

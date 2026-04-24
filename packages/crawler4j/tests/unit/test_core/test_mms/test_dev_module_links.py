@@ -17,10 +17,20 @@ def _write_module(module_dir: Path, name: str, version: str) -> None:
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "module.yaml").write_text(
         "name: {name}\n"
+        "runtime_api: core-native-v1\n"
         "version: {version}\n"
+        "default_workflow: default\n"
+        "workflows:\n"
+        "  - name: default\n"
+        "    display_name: Default\n"
         "upgrade_source:\n"
         "  type: github_release\n"
-        "  repo: example/{name}\n".format(name=name, version=version),
+        "  repo: example/{name}\n"
+        "data:\n"
+        "  resources: []\n"
+        "  views: []\n"
+        "  queries: []\n"
+        "  seeds: []\n".format(name=name, version=version),
         encoding="utf-8",
     )
 

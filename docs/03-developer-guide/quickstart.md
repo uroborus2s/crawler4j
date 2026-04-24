@@ -40,7 +40,7 @@ uv run crawler4j task create fetch_hotels
 uv run crawler4j workflow create hotel_sync --display-name "酒店同步"
 uv run crawler4j module set default-workflow hotel_sync
 uv run crawler4j page create dashboard --display-name "运营看板"
-uv run crawler4j page create account_detail --group account
+uv run crawler4j page create account_detail --group account --no-menu
 uv run crawler4j hook create before_run
 uv run crawler4j env-selector create pick_ready
 uv run crawler4j check structure
@@ -92,7 +92,7 @@ async def run(ctx: TaskContext):
 
 ## 5. 写最小页面
 
-`pages/dashboard.py` 的正式导出是 `PAGE` 和页面 handler；如果某个菜单下有多个文件，也可以放到 `pages/<group>/`：
+`pages/dashboard.py` 的正式导出是 `PAGE` 和页面 handler。菜单入口来自 `module.yaml.ui_extension.pages[]`；通过 `--no-menu` 创建的页面不会出现在左侧菜单，但仍可被 `open_page.page_id` 打开：
 
 ```python
 from crawler4j_contracts import PageSpec, TaskContext
@@ -138,8 +138,8 @@ uv run crawler4j data list
 需要记住两条：
 
 - 低频快照数据可以沿用默认 `managed_dataset`，但仍然必须先登记到 `module.yaml.data.resources[]`；视图和命名查询当前只允许建立在 `custom_table` 资源上。
-- SQL 和种子都要先落到 `data/sql`、`data/seeds`，运行时代码只调用 `db.get_record` / `db.list_records` / `db.replace_records` / `db.run_query` / `db.query_view`，不再声明资源或视图。
-- 文档示例统一按 `resource=...` 书写；运行时不再接受历史别名 `dataset=...`。
+- SQL 和种子都要先落到 `data/sql`、`data/seeds`，运行时代码只调用 `ctx.db.from_(...)`、`ctx.db.named(...)`、`ctx.db.into(...).replace(...)`，不再声明资源或视图。
+- 文档示例统一使用 `ctx.db` fluent API；运行时不再接受旧 `ctx.tools.call("db.*")` 接入方式。
 
 ## 7. 校验并接入宿主
 
@@ -189,5 +189,5 @@ uv run crawler4j host install apply dist/hotel_demo-0.1.0.zip --skip-remote-chec
 - 模块业务代码只 `import crawler4j-contracts`
 - Core 是唯一运行时 owner
 - 没有 `runtime_api: core-native-v1` 会直接拒绝加载
-- 表、视图、命名查询先写进 `module.yaml.data` 和 `data/` 资产，再在 handler 里调用 `db.*`
+- 表、视图、命名查询先写进 `module.yaml.data` 和 `data/` 资产，再在 handler 里调用 `ctx.db`
 - 即使运行时环境卸载 `crawler4j-sdk`，模块也必须能跑

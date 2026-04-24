@@ -52,12 +52,14 @@ def _normalize_column(raw: Any, *, field_name: str) -> dict[str, Any]:
     column_type = str(raw.get("type") or "text").strip().lower()
     if column_type not in _COLUMN_TYPES:
         raise ValueError(f"{field_name}.{name}.type 不支持: {column_type}")
+    default_filterable = column_type != "json"
+    default_sortable = column_type != "json"
     return {
         "name": name,
         "type": column_type,
         "nullable": bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required")),
-        "filterable": bool(raw.get("filterable")),
-        "sortable": bool(raw.get("sortable")),
+        "filterable": bool(raw.get("filterable")) if "filterable" in raw else default_filterable,
+        "sortable": bool(raw.get("sortable")) if "sortable" in raw else default_sortable,
     }
 
 
@@ -86,6 +88,61 @@ def _normalize_custom_table_schema(raw: Any, *, record_key_field: str) -> dict[s
     return {"version": version_value, "columns": normalized_columns}
 
 
+def _normalize_resource_schema(raw: Any, *, record_key_field: str) -> dict[str, Any]:
+    schema = _normalize_mapping(raw, field_name="data.resources[].schema")
+    raw_columns = _normalize_list(schema.get("columns"), field_name="data.resources[].schema.columns")
+    columns = [_normalize_column(item, field_name="data.resources[].schema.columns") for item in raw_columns]
+    if not columns:
+        raise ValueError("data.resources[].schema.columns 不能为空")
+    column_names = {column["name"] for column in columns}
+    if record_key_field not in column_names:
+        raise ValueError(f"data.resources[].schema.columns 必须包含主键列: {record_key_field}")
+    normalized_columns: list[dict[str, Any]] = []
+    for column in columns:
+        payload = dict(column)
+        if payload["name"] == record_key_field:
+            payload["nullable"] = False
+        normalized_columns.append(payload)
+    version = schema.get("version") or schema.get("schema_version") or 1
+    try:
+        version_value = int(version)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"data.resources[].schema.version 不是合法整数: {version}") from exc
+    if version_value < 1:
+        raise ValueError("data.resources[].schema.version 必须 >= 1")
+    return {"version": version_value, "columns": normalized_columns}
+
+
+def _normalize_join_entry(raw: Any, *, resource_id: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError(f"data.resources[{resource_id}].joins 中的每一项都必须是对象")
+    allowed_keys = {"target", "on", "type", "types"}
+    unknown_keys = sorted(set(raw) - allowed_keys)
+    if unknown_keys:
+        raise ValueError(f"data.resources[{resource_id}].joins 包含不支持的字段: " + ", ".join(unknown_keys))
+    target = _normalize_identifier(raw.get("target"), field_name=f"data.resources[{resource_id}].joins[].target")
+    on = _normalize_mapping(raw.get("on"), field_name=f"data.resources[{resource_id}].joins[{target}].on")
+    if not on:
+        raise ValueError(f"data.resources[{resource_id}].joins[{target}].on 不能为空")
+    normalized_on = [
+        {
+            "left": _normalize_identifier(left, field_name=f"data.resources[{resource_id}].joins[{target}].on.left"),
+            "right": _normalize_identifier(right, field_name=f"data.resources[{resource_id}].joins[{target}].on.right"),
+        }
+        for left, right in on.items()
+    ]
+    raw_types = raw.get("types")
+    if raw_types is None:
+        raw_types = [raw.get("type") or "inner"]
+    join_types = [
+        str(item or "").strip().lower()
+        for item in _normalize_list(raw_types, field_name=f"data.resources[{resource_id}].joins[{target}].types")
+    ]
+    if not join_types or any(item not in {"inner", "left"} for item in join_types):
+        raise ValueError(f"data.resources[{resource_id}].joins[{target}].types 只支持 inner/left")
+    return {"target": target, "types": sorted(set(join_types)), "on": normalized_on}
+
+
 def _normalize_indexes(raw: Any, *, field_name: str, column_names: set[str]) -> dict[str, list[str]]:
     indexes = _normalize_mapping(raw, field_name=field_name)
     normalized: dict[str, list[str]] = {}
@@ -107,7 +164,7 @@ def _normalize_indexes(raw: Any, *, field_name: str, column_names: set[str]) -> 
 def _normalize_resource_entry(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("data.resources 中的每一项都必须是对象")
-    allowed_keys = {"id", "storage_mode", "record_key_field", "schema", "indexes", "cleanup_policy"}
+    allowed_keys = {"id", "storage_mode", "record_key_field", "schema", "indexes", "cleanup_policy", "joins"}
     unknown_keys = sorted(set(raw) - allowed_keys)
     if unknown_keys:
         raise ValueError("data.resources 包含不支持的字段: " + ", ".join(unknown_keys))
@@ -133,9 +190,16 @@ def _normalize_resource_entry(raw: Any) -> dict[str, Any]:
             field_name=f"data.resources[{resource_id}].indexes",
             column_names={column["name"] for column in schema["columns"]},
         )
+        joins = [
+            _normalize_join_entry(item, resource_id=resource_id)
+            for item in _normalize_list(raw.get("joins"), field_name=f"data.resources[{resource_id}].joins")
+        ]
     else:
-        schema = _normalize_mapping(raw.get("schema"), field_name=f"data.resources[{resource_id}].schema")
+        schema = _normalize_resource_schema(raw.get("schema"), record_key_field=record_key_field)
         indexes = _normalize_mapping(raw.get("indexes"), field_name=f"data.resources[{resource_id}].indexes")
+        joins = _normalize_list(raw.get("joins"), field_name=f"data.resources[{resource_id}].joins")
+        if joins:
+            raise ValueError(f"data.resources[{resource_id}].joins 只允许 custom_table 声明")
 
     return {
         "resource_id": resource_id,
@@ -143,6 +207,7 @@ def _normalize_resource_entry(raw: Any) -> dict[str, Any]:
         "record_key_field": record_key_field,
         "schema": schema,
         "indexes": indexes,
+        "joins": joins,
         "cleanup_policy": cleanup_policy,
     }
 
@@ -312,6 +377,25 @@ def normalize_manifest_data(raw: Any) -> dict[str, Any]:
         raise ValueError("data.queries[].id 不能重复")
     if len(seed_ids) != len(seeds):
         raise ValueError("data.seeds[].id 不能重复")
+    duplicated_sources = sorted(resource_ids & view_ids)
+    if duplicated_sources:
+        raise ValueError("data.resources[].id 与 data.views[].id 不能重复: " + ", ".join(duplicated_sources))
+
+    resource_map = {item["resource_id"]: item for item in resources}
+    for resource in resources:
+        for join in resource.get("joins", []):
+            target = resource_map.get(join["target"])
+            if target is None:
+                raise ValueError(f"data.resources[{resource['resource_id']}].joins 引用了未声明资源: {join['target']}")
+            if target["storage_mode"] != "custom_table":
+                raise ValueError(f"data.resources[{resource['resource_id']}].joins 只允许连接 custom_table: {join['target']}")
+            left_columns = {column["name"] for column in resource["schema"]["columns"]}
+            right_columns = {column["name"] for column in target["schema"]["columns"]}
+            for pair in join["on"]:
+                if pair["left"] not in left_columns:
+                    raise ValueError(f"data.resources[{resource['resource_id']}].joins 引用了未声明字段: {pair['left']}")
+                if pair["right"] not in right_columns:
+                    raise ValueError(f"data.resources[{resource['resource_id']}].joins 引用了目标未声明字段: {pair['right']}")
 
     for view in views:
         for resource_id in view["source_resource_ids"]:
@@ -339,9 +423,12 @@ def load_sql_file(module_root: Path, relative_path: str, *, expected_prefix: str
         raise ValueError("SQL 文件路径不能为空")
     if not normalized.startswith(expected_prefix):
         raise ValueError(f"SQL 文件必须位于 {expected_prefix}")
-    target = (module_root / normalized).resolve()
-    if not str(target).startswith(str(module_root.resolve())):
-        raise ValueError(f"SQL 文件路径越界: {relative_path}")
+    root = module_root.resolve()
+    target = (root / normalized).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"SQL 文件路径越界: {relative_path}") from exc
     if not target.is_file():
         raise ValueError(f"找不到 SQL 文件: {relative_path}")
     sql = target.read_text(encoding="utf-8").strip()
@@ -373,13 +460,15 @@ def validate_seed_file(module_root: Path, relative_path: str) -> list[dict[str, 
         raise ValueError("种子文件路径不能为空")
     if not normalized.startswith("data/seeds/"):
         raise ValueError("种子文件必须位于 data/seeds/")
-    target = (module_root / normalized).resolve()
-    if not str(target).startswith(str(module_root.resolve())):
-        raise ValueError(f"种子文件路径越界: {relative_path}")
+    root = module_root.resolve()
+    target = (root / normalized).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"种子文件路径越界: {relative_path}") from exc
     if not target.is_file():
         raise ValueError(f"找不到种子文件: {relative_path}")
     payload = json.loads(target.read_text(encoding="utf-8"))
     if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
         raise ValueError(f"种子文件必须是对象数组 JSON: {relative_path}")
     return [dict(item) for item in payload]
-

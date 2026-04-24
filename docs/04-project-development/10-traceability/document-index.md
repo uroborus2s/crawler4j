@@ -71,6 +71,9 @@
 
 ## 5. 最近同步
 
+- 2026-04-24：模块数据库开发者接口已收口为唯一 `ctx.db` fluent API。`docs/03-developer-guide/`、`docs/04-project-development/04-design/{api-design.md,module-config-runtime-data-contract.md,module-hosted-ui-framework.md,module-entity-table-view-design.md}` 与 `.factory/memory/` 已同步删除旧数据库工具正式口径，并明确 `managed_dataset` 单源读取、`custom_table` 显式 join/group/aggregate、view 只读轻量查询和 named query 的边界。
+- 2026-04-24：`execution-log.md` 与 `.factory/memory/current-state.md` 已同步补记 IP 池条目编辑持久化缺陷的根因和修复：此前 `ip_entries` upsert 未回写地址/协议/端口/认证字段，现已补齐并新增数据库重载回归 `test_ip_pool.py`。
+- 2026-04-24：`docs/02-user-guide/{index.md,usage.md}` 已同步补记 IP 池条目级代理测试口径：当前 `环境管理 -> IP 池管理` 支持对单条 IP 执行真实代理探测，弹窗直接返回是否成功、出口 IP、耗时和失败阶段，且结果不做持久化。
 - 2026-04-24：Hosted UI `Card` 现已补齐布局参数口径。`docs/03-developer-guide/{index.md,ui-and-data-table.md}`、`docs/04-project-development/04-design/{module-hosted-ui-framework.md,api-design.md}`、`implementation-plan.md` 与 `.factory/memory/current-state.md` 已同步说明 `title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 的正式支持范围。
 - 2026-04-24：Hosted UI 现已正式补入 `Card` 容器组件，并明确收口“`Card` 是纯卡片容器、`Section.variant=\"card\"` 只是兼容别名”的口径；`docs/03-developer-guide/ui-and-data-table.md`、`docs/04-project-development/04-design/{module-hosted-ui-framework.md,api-design.md}`、`implementation-plan.md` 与 `.factory/memory/current-state.md` 已同步更新。
 - 2026-04-23：开发者指南与设计文档已补记 `managed_dataset` 的最终收口语义：`docs/03-developer-guide/{index.md,quickstart.md,reference-core-capabilities.md}` 与 `docs/04-project-development/04-design/{api-design.md,module-config-runtime-data-contract.md}` 现统一说明 `managed_dataset/custom_table` 都必须先在 `module.yaml.data.resources[]` 注册，未注册资源会被 `db.get_record` / `db.list_records` / `db.replace_records` 直接拒绝，不再按名称隐式创建托管表资源。

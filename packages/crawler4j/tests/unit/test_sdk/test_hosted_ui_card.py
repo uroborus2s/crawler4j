@@ -93,3 +93,51 @@ def test_normalize_page_schema_rejects_invalid_page_scroll_vertical_value():
                 "children": [],
             },
         )
+
+
+def test_normalize_page_schema_supports_parameterized_icon_button():
+    schema = normalize_page_schema(
+        "detail",
+        {
+            "type": "Page",
+            "load_handler": "load_detail_page",
+            "children": [
+                {
+                    "type": "Button",
+                    "icon": "←",
+                    "aria_label": "返回",
+                    "size": "icon",
+                    "variant": "ghost",
+                    "action": {"type": "open_page", "page_id": "accounts"},
+                },
+            ],
+        },
+    )
+
+    assert schema["children"][0] == {
+        "type": "Button",
+        "icon": "←",
+        "aria_label": "返回",
+        "size": "icon",
+        "variant": "ghost",
+        "action": {"type": "open_page", "page_id": "accounts"},
+    }
+
+
+def test_normalize_page_schema_requires_accessible_label_for_icon_button():
+    with pytest.raises(ValueError, match="aria_label"):
+        normalize_page_schema(
+            "detail",
+            {
+                "type": "Page",
+                "load_handler": "load_detail_page",
+                "children": [
+                    {
+                        "type": "Button",
+                        "icon": "←",
+                        "size": "icon",
+                        "action": {"type": "open_page", "page_id": "accounts"},
+                    }
+                ],
+            },
+        )

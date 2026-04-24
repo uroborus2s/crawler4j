@@ -16,8 +16,8 @@
 ## 变更范围
 
 - 在 `data.db` 中新增 `module_audit_events` 存储模型。
-- 在运行时工具面新增 `db.append_event`、`db.query_events`。
-- 保持 `module_datasets`、`db.list_records`、`db.replace_records` 的快照语义不变。
+- 在 `ctx.db` 能力面新增 `audit(...).append/query`。
+- 保持 `module_datasets` 与 `ctx.db.into(...).replace` 的快照语义不变。
 - 更新 PRD、需求追踪、API 契约、开发者指南、测试计划和 `.factory/memory/`。
 
 ## 非目标
@@ -30,7 +30,7 @@
 
 - 宿主已新增 `module_audit_events` 表与查询索引。
 - `ModuleDataStore` 已支持事件追加、过滤查询与模块级清理。
-- ATM runtime capabilities 已注入 `db.append_event` / `db.query_events`。
+- ATM runtime capabilities 已注入 `ctx.db.audit(...).append/query`。
 - 文档已明确：快照型数据继续走 `module_datasets`，审计事件走 `module_audit_events`。
 
 ## 完成判定

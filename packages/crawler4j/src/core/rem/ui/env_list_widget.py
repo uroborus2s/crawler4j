@@ -462,6 +462,11 @@ class EnvListWidget(QWidget):
         self.loading_bar.setFixedHeight(3)
         self.loading_bar.hide()
         layout.addWidget(self.loading_bar)
+
+        self.operation_status_label = QLabel()
+        self.operation_status_label.setStyleSheet("color: #cdd6f4; padding: 6px 0;")
+        self.operation_status_label.hide()
+        layout.addWidget(self.operation_status_label)
         
         # 错误提示
         self.error_label = QLabel()
@@ -723,11 +728,11 @@ class EnvListWidget(QWidget):
         if not self._load_in_progress:
             self.table.setEnabled(not self._operation_in_progress)
 
-    def _begin_operation(self) -> bool:
+    def _begin_operation(self, message: str = "正在处理环境操作...") -> bool:
         if self._operation_in_progress:
             return False
         self._operation_in_progress = True
-        self._show_loading(True)
+        self._show_loading(True, message)
         self._apply_busy_state()
         return True
 
@@ -737,8 +742,8 @@ class EnvListWidget(QWidget):
         self._show_loading(False)
         self._apply_busy_state()
 
-    def _schedule_operation(self, coro: Any) -> bool:
-        if not self._begin_operation():
+    def _schedule_operation(self, coro: Any, *, message: str = "正在处理环境操作...") -> bool:
+        if not self._begin_operation(message):
             close = getattr(coro, "close", None)
             if callable(close):
                 close()
@@ -839,7 +844,10 @@ class EnvListWidget(QWidget):
         if "proxy" in config:
             requirement.proxy_config = ProxyConfig.from_dict(config["proxy"])
 
-        self._schedule_operation(self._async_create_env(provider, config, requirement))
+        self._schedule_operation(
+            self._async_create_env(provider, config, requirement),
+            message=self._operation_message("create", provider=provider),
+        )
 
     def _import_existing_env(self):
         """从来源系统导入已有环境。"""
@@ -868,9 +876,22 @@ class EnvListWidget(QWidget):
             return
 
         env_options_by_source: dict[str, list[Any]] = {}
-        for item in sources:
-            provider_name = str(item["provider"])
-            env_options_by_source[provider_name] = await self._manager.list_unsynced_provider_envs(provider_name)
+        if not self._begin_operation(self._operation_message("list_sources")):
+            return
+        list_error = ""
+        try:
+            for item in sources:
+                provider_name = str(item["provider"])
+                env_options_by_source[provider_name] = (
+                    await self._manager.list_unsynced_provider_envs(provider_name)
+                )
+        except Exception as exc:
+            list_error = str(exc)
+        finally:
+            self._end_operation()
+        if list_error:
+            await self._show_operation_error(list_error)
+            return
 
         dialog = ImportExistingEnvDialog(
             sources=sources,
@@ -888,7 +909,8 @@ class EnvListWidget(QWidget):
                 provider_env_id=values["provider_env_id"],
                 module_name=values["module_name"],
                 workflow_name=values["workflow_name"],
-            )
+            ),
+            message=self._operation_message("import", provider=values["provider"]),
         )
     
     def _on_create_finished(self, env):
@@ -907,7 +929,14 @@ class EnvListWidget(QWidget):
     async def _confirm_destroy_env_async(self, env_id: str) -> None:
         confirmed = await self._confirm_async("确认", f"确定要销毁环境 {env_id} ?")
         if confirmed:
-            self._schedule_operation(self._async_destroy_env(env_id))
+            self._schedule_operation(
+                self._async_destroy_env(env_id),
+                message=self._operation_message(
+                    "destroy",
+                    provider=self._env_provider_for_message(env_id),
+                    env_id=env_id,
+                ),
+            )
     
     async def _on_destroy_finished(self, success: bool):
         """销毁完成。"""
@@ -923,19 +952,35 @@ class EnvListWidget(QWidget):
     
     def _start_env(self, env_id: str):
         """启动环境（打开窗口）。"""
-        self._schedule_operation(self._async_env_action(env_id, "start"))
+        self._schedule_operation(
+            self._async_env_action(env_id, "start"),
+            message=self._operation_message(
+                "start",
+                provider=self._env_provider_for_message(env_id),
+                env_id=env_id,
+            ),
+        )
     
     def _stop_env(self, env_id: str):
         """停止环境（关闭窗口）。"""
-        self._schedule_operation(self._async_env_action(env_id, "stop"))
+        self._schedule_operation(
+            self._async_env_action(env_id, "stop"),
+            message=self._operation_message("stop", env_id=env_id),
+        )
     
     def _pause_env(self, env_id: str):
         """暂停环境。"""
-        self._schedule_operation(self._async_env_action(env_id, "pause"))
+        self._schedule_operation(
+            self._async_env_action(env_id, "pause"),
+            message=self._operation_message("pause", env_id=env_id),
+        )
     
     def _resume_env(self, env_id: str):
         """恢复环境。"""
-        self._schedule_operation(self._async_env_action(env_id, "resume"))
+        self._schedule_operation(
+            self._async_env_action(env_id, "resume"),
+            message=self._operation_message("resume", env_id=env_id),
+        )
     
     def _edit_env(self, env_id: str):
         """编辑环境（弹出对话框）。"""
@@ -975,11 +1020,42 @@ class EnvListWidget(QWidget):
             return
         self.load_data()
     
-    def _show_loading(self, show: bool):
+    def _env_provider_for_message(self, env_id: str) -> str:
+        env = next((item.raw for item in self._display_items if str(item.raw.id) == env_id), None)
+        return str(getattr(env, "provider", "") or "")
+
+    def _operation_message(self, action: str, *, provider: str = "", env_id: str = "") -> str:
+        action_text = {
+            "create": "创建",
+            "destroy": "销毁",
+            "start": "启动",
+            "stop": "停止",
+            "pause": "暂停",
+            "resume": "恢复",
+            "import": "导入",
+            "list_sources": "读取来源",
+        }.get(action, "处理")
+        env_text = f" {env_id}" if env_id else ""
+        provider_label = {
+            "virtualbrowser": "VirtualBrowser",
+            "bitbrowser": "BitBrowser",
+        }.get(provider, provider)
+
+        if provider in CreateEnvDialog.FINGERPRINT_PROVIDERS:
+            return f"正在检查 {provider_label} API 并{action_text}环境{env_text}，最长约 30 秒..."
+        if action == "list_sources":
+            return "正在读取来源环境列表..."
+        return f"正在{action_text}环境{env_text}..."
+
+    def _show_loading(self, show: bool, message: str = ""):
         if show:
+            self.operation_status_label.setText(message)
+            self.operation_status_label.show()
             self.loading_bar.show()
         else:
             self.loading_bar.hide()
+            self.operation_status_label.clear()
+            self.operation_status_label.hide()
     
     def _update_stats(self, total: int, ready: int, busy: int):
         self.stats_label.setText(f"总计: {total} | 就绪: {ready} | 忙碌: {busy}")

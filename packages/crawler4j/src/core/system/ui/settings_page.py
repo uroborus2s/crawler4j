@@ -37,12 +37,16 @@ from PyQt6.QtWidgets import (
 
 from src.core.foundation.logging import logger
 from src.core.system.preferences_service import (
+    PREFERENCE_DEFAULTS,
     PreferenceKey,
     get_preferences_service,
 )
 from src.core.system.ui.about_dialog import AboutContentWidget
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
+
+
+DEFAULT_VIRTUALBROWSER_PORT = PREFERENCE_DEFAULTS[PreferenceKey.VIRTUALBROWSER_PORT]
 
 
 class SettingsPage(QWidget):
@@ -342,7 +346,7 @@ class SettingsPage(QWidget):
         
         self.virt_port_spin = QSpinBox()
         self.virt_port_spin.setRange(1024, 65535)
-        self.virt_port_spin.setValue(50325)
+        self.virt_port_spin.setValue(DEFAULT_VIRTUALBROWSER_PORT)
         virt_form.addRow("API 端口:", self.virt_port_spin)
         
         self.virt_apikey_edit = QLineEdit()
@@ -541,7 +545,9 @@ class SettingsPage(QWidget):
         # Browser
         self.bit_port_spin.setValue(prefs.get(PreferenceKey.BITBROWSER_PORT, 54345))
         self.bit_path_edit.setText(prefs.get(PreferenceKey.BITBROWSER_PATH, ""))
-        self.virt_port_spin.setValue(prefs.get(PreferenceKey.VIRTUALBROWSER_PORT, 50325))
+        self.virt_port_spin.setValue(
+            prefs.get(PreferenceKey.VIRTUALBROWSER_PORT, DEFAULT_VIRTUALBROWSER_PORT)
+        )
         self.virt_path_edit.setText(prefs.get(PreferenceKey.VIRTUALBROWSER_PATH, ""))
         self.virt_apikey_edit.setText(prefs.get(PreferenceKey.VIRTUALBROWSER_API_KEY, ""))
 
