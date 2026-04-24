@@ -43,9 +43,26 @@ def test_import_existing_env_dialog_updates_warning_and_returns_selection(qtbot)
         env_options_by_source={"virtualbrowser": [_make_provider_env()]},
     )
     qtbot.addWidget(dialog)
+    dialog.resize(1200, 800)
+    dialog.show()
 
     qtbot.waitUntil(lambda: len(dialog.table.displayed_rows()) == 1, timeout=500)
     assert dialog.warning_label.text() == dialog.RISK_WARNING_TEXT
+    margins = dialog.warning_card.layout().contentsMargins()
+    assert margins.top() == 10
+    assert margins.bottom() == 10
+    assert "border: none" in dialog.warning_label.styleSheet()
+    assert "background: transparent" in dialog.warning_label.styleSheet()
+    qtbot.waitUntil(
+        lambda: dialog.warning_label.height()
+        >= dialog.warning_label.heightForWidth(dialog.warning_card.contentsRect().width()),
+        timeout=500,
+    )
+    assert dialog.warning_card.height() >= (
+        dialog.warning_label.heightForWidth(dialog.warning_card.contentsRect().width())
+        + margins.top()
+        + margins.bottom()
+    )
     assert dialog.submit_btn.isEnabled() is False
 
     dialog.workflow_combo.setCurrentIndex(1)

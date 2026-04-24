@@ -5,13 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from PyQt6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
-    QFormLayout,
-    QLabel,
-    QVBoxLayout,
-)
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.data_table import SkyDataTable
@@ -21,10 +16,9 @@ from src.ui.components.data_table_query import resolve_local_data_table_result
 class ImportExistingEnvDialog(QDialog):
     """配置“从已有环境导入”并执行模块 workflow。"""
 
-    RISK_WARNING_TEXT = (
-        "该 workflow 未声明适配“已有环境导入”场景，可能依赖新建环境、登录步骤或特定运行状态，执行结果由使用者自行判断。"
-    )
+    RISK_WARNING_TEXT = "该 workflow 未标注支持“已有环境导入”，请由配置者自行判断是否适合这个场景。"
     RISK_SAFE_TEXT = "该 workflow 已声明支持“已有环境导入”场景。"
+    RISK_CONTENT_PADDING = (12, 10, 12, 10)
     TABLE_SCHEMA = {
         "columns": [
             {"key": "provider_env_name", "label": "环境名称", "type": "text", "width": 170},
@@ -63,6 +57,7 @@ class ImportExistingEnvDialog(QDialog):
         }
         self._selected_provider_env_id = ""
         self._table_rows: list[dict[str, Any]] = []
+        self._warning_height_sync_pending = False
         self._setup_ui()
         self._load_sources()
         self._load_modules()
@@ -107,12 +102,18 @@ class ImportExistingEnvDialog(QDialog):
         self.workflow_combo.currentIndexChanged.connect(self._on_workflow_changed)
         form.addRow("模块工作流:", self.workflow_combo)
 
+        warning_title = QLabel("风险提示:")
+        warning_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.warning_label = QLabel()
         self.warning_label.setWordWrap(True)
-        self.warning_label.setStyleSheet(
-            "padding: 10px 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.14); color: #fcd34d;"
-        )
-        form.addRow("风险提示:", self.warning_label)
+        self.warning_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.warning_card = QWidget()
+        self.warning_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        warning_layout = QVBoxLayout(self.warning_card)
+        warning_layout.setContentsMargins(*self.RISK_CONTENT_PADDING)
+        warning_layout.setSpacing(0)
+        warning_layout.addWidget(self.warning_label)
+        form.addRow(warning_title, self.warning_card)
         layout.addLayout(form)
 
         self.table = SkyDataTable(schema=self.TABLE_SCHEMA)
@@ -213,14 +214,45 @@ class ImportExistingEnvDialog(QDialog):
     def _update_warning(self) -> None:
         if self._workflow_supports_existing_env_import():
             self.warning_label.setText(self.RISK_SAFE_TEXT)
-            self.warning_label.setStyleSheet(
-                "padding: 10px 12px; border-radius: 8px; background: rgba(34, 197, 94, 0.14); color: #86efac;"
+            self.warning_label.setStyleSheet("color: #86efac; background: transparent; border: none; padding: 0;")
+            self.warning_card.setStyleSheet(
+                "background: rgba(34, 197, 94, 0.14); border: none; border-radius: 8px;"
             )
+            self._schedule_warning_height_sync()
             return
         self.warning_label.setText(self.RISK_WARNING_TEXT)
-        self.warning_label.setStyleSheet(
-            "padding: 10px 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.14); color: #fcd34d;"
+        self.warning_label.setStyleSheet("color: #fcd34d; background: transparent; border: none; padding: 0;")
+        self.warning_card.setStyleSheet(
+            "background: rgba(245, 158, 11, 0.14); border: none; border-radius: 8px;"
         )
+        self._schedule_warning_height_sync()
+
+    def _schedule_warning_height_sync(self) -> None:
+        if self._warning_height_sync_pending:
+            return
+        self._warning_height_sync_pending = True
+        QTimer.singleShot(0, self._sync_warning_height)
+
+    def _sync_warning_height(self) -> None:
+        self._warning_height_sync_pending = False
+        if not hasattr(self, "warning_card"):
+            return
+        warning_layout = self.warning_card.layout()
+        if warning_layout is None:
+            return
+        margins = warning_layout.contentsMargins()
+        content_width = self.warning_card.width() - margins.left() - margins.right()
+        if content_width <= 0:
+            return
+        text_height = max(
+            self.warning_label.minimumSizeHint().height(),
+            self.warning_label.heightForWidth(content_width),
+        )
+        card_height = text_height + margins.top() + margins.bottom()
+        self.warning_label.setFixedHeight(text_height)
+        self.warning_card.setFixedHeight(card_height)
+        self.warning_label.updateGeometry()
+        self.warning_card.updateGeometry()
 
     def _update_accept_state(self) -> None:
         module_name = self._selected_module_name()
@@ -253,6 +285,14 @@ class ImportExistingEnvDialog(QDialog):
         env_name = str(row.get("provider_env_name") or self._selected_provider_env_id)
         self.selection_label.setText(f"未同步环境列表：已选择 {env_name} ({self._selected_provider_env_id})")
         self._update_accept_state()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self._schedule_warning_height_sync()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._schedule_warning_height_sync()
 
     def get_values(self) -> dict[str, str]:
         return {
