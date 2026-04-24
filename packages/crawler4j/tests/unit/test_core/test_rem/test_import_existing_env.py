@@ -17,16 +17,17 @@ def temp_data_dir(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_unsynced_provider_envs_filters_existing_provider_key(monkeypatch):
+async def test_list_unsynced_provider_envs_filters_existing_provider_name(monkeypatch):
     manager = EnvironmentManager()
     await manager.pool.add(
         Environment(
-            name="existing",
+            name="already-synced",
             kind=EnvKind.BROWSER,
             provider="virtualbrowser",
             status=EnvStatus.READY,
-            external_id="200",
-            provider_env_id="200",
+            external_id="local-old-id",
+            provider_env_id="local-old-id",
+            provider_env_name="already-synced",
         )
     )
 
@@ -37,8 +38,14 @@ async def test_list_unsynced_provider_envs_filters_existing_provider_key(monkeyp
                 ProviderEnvInfo(
                     provider="virtualbrowser",
                     provider_label="Virtual Browser",
-                    provider_env_id="200",
+                    provider_env_id="provider-new-id",
                     provider_env_name="already-synced",
+                ),
+                ProviderEnvInfo(
+                    provider="virtualbrowser",
+                    provider_label="Virtual Browser",
+                    provider_env_id="local-old-id",
+                    provider_env_name="same-id-different-name",
                 ),
                 ProviderEnvInfo(
                     provider="virtualbrowser",
@@ -54,7 +61,42 @@ async def test_list_unsynced_provider_envs_filters_existing_provider_key(monkeyp
 
     unsynced = await manager.list_unsynced_provider_envs("virtualbrowser")
 
-    assert [item.provider_env_id for item in unsynced] == ["201"]
+    assert [item.provider_env_id for item in unsynced] == ["local-old-id", "201"]
+
+
+@pytest.mark.asyncio
+async def test_import_existing_env_reuses_existing_provider_name(monkeypatch):
+    manager = EnvironmentManager()
+    await manager.pool.add(
+        Environment(
+            name="vb-imported",
+            kind=EnvKind.BROWSER,
+            provider="virtualbrowser",
+            status=EnvStatus.READY,
+            external_id="local-old-id",
+            provider_env_id="local-old-id",
+            provider_env_name="vb-imported",
+        )
+    )
+    existing = (await manager.list_envs())[0]
+    provider_env = ProviderEnvInfo(
+        provider="virtualbrowser",
+        provider_label="Virtual Browser",
+        provider_env_id="provider-new-id",
+        provider_env_name="vb-imported",
+    )
+    provider = SimpleNamespace(
+        supports_existing_env_import=lambda: True,
+        get_existing_env=AsyncMock(return_value=provider_env),
+        build_imported_environment=AsyncMock(),
+    )
+
+    monkeypatch.setattr("src.core.rem.manager.get_provider", lambda name: provider if name == "virtualbrowser" else None)
+
+    env = await manager.import_existing_env("virtualbrowser", "provider-new-id")
+
+    assert env.id == existing.id
+    provider.build_imported_environment.assert_not_awaited()
 
 
 @pytest.mark.asyncio

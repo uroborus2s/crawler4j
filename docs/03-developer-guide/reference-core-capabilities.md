@@ -143,6 +143,7 @@ workflows:
 - 宿主全局环境页的 `从已有环境导入` 入口仍会展示该模块全部 workflow。
 - 缺少 `host_scenarios: [existing_env_import]` 只会触发风险提示，不会阻断执行。
 - 该场景下宿主保证 `ctx.env_id` 与 `ctx.page` 可用。
+- 宿主以来源环境名称 `provider_env_name` 判定某个外部环境是否已导入；`provider_env_id` 不参与唯一性判断，只作为来源元数据透传。
 - 宿主会在 `ctx.runtime["creation_params"]` 中写入 `provider`、`provider_env_id`、`provider_env_name`、`provider_group`、`provider_proxy` 以及 `import_mode="existing_env"`，模块可据此判断当前运行来自已有环境导入。
 
 ## 生命周期 Hook

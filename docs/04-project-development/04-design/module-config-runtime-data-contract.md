@@ -81,6 +81,7 @@
 该场景还有两条补充约束：
 
 - 宿主仍必须保证 `ctx.env_id` 与 `ctx.page` 可用，模块不需要自己重新绑定浏览器上下文。
+- 宿主用来源环境名称 `provider_env_name` 判定导入唯一性；`provider_env_id` / `external_id` 只保留为来源元数据，不作为重复导入判断依据。
 - `module.yaml.workflows[].host_scenarios` 可选声明 `existing_env_import` 作为适配提示；宿主未命中该声明时只显示风险提示，不作为执行门禁。
 
 ## 5. 页面 schema 契约

@@ -117,6 +117,10 @@ def is_gc_reapable_status(status: EnvStatus) -> bool:
     return status in GC_REAPABLE_STATUSES
 
 
+def _normalize_provider_env_name(name: object) -> str:
+    return str(name or "").strip()
+
+
 class EnvironmentManager:
     """环境管理器。
     
@@ -321,19 +325,19 @@ class EnvironmentManager:
         sources.sort(key=lambda item: item["label"].lower())
         return sources
 
-    async def get_env_by_provider_key(
+    async def get_env_by_provider_name(
         self,
         provider_name: str,
-        provider_env_id: str,
+        provider_env_name: str,
     ) -> Environment | None:
-        """按来源系统唯一键查找宿主环境。"""
+        """按来源系统环境名称查找宿主环境。"""
         target_provider = str(provider_name or "").strip()
-        target_env_id = str(provider_env_id or "").strip()
-        if not target_provider or not target_env_id:
+        target_env_name = _normalize_provider_env_name(provider_env_name)
+        if not target_provider or not target_env_name:
             return None
         for env in await self.list_envs():
-            source_key = str(env.provider_env_id or env.external_id or "").strip()
-            if env.provider == target_provider and source_key == target_env_id:
+            source_name = _normalize_provider_env_name(env.provider_env_name or env.name)
+            if env.provider == target_provider and source_name == target_env_name:
                 return env
         return None
 
@@ -342,16 +346,21 @@ class EnvironmentManager:
         provider = get_provider(provider_name)
         if not provider or not provider.supports_existing_env_import():
             raise ValueError(f"Provider 不支持已有环境导入: {provider_name}")
-        existing_keys = {
-            (env.provider, str(env.provider_env_id or env.external_id or "").strip())
+        provider_key = str(getattr(provider, "name", provider_name) or provider_name).strip()
+        existing_names = {
+            (env.provider, _normalize_provider_env_name(env.provider_env_name or env.name))
             for env in await self.list_envs()
-            if str(env.provider_env_id or env.external_id or "").strip()
+            if _normalize_provider_env_name(env.provider_env_name or env.name)
         }
         items = await provider.list_existing_envs()
         return [
             item
             for item in items
-            if (item.provider, str(item.provider_env_id or "").strip()) not in existing_keys
+            if (
+                str(item.provider or provider_key).strip(),
+                _normalize_provider_env_name(item.provider_env_name),
+            )
+            not in existing_names
         ]
 
     async def import_existing_env(self, provider_name: str, provider_env_id: str) -> Environment:
@@ -359,25 +368,27 @@ class EnvironmentManager:
         provider = get_provider(provider_name)
         if not provider or not provider.supports_existing_env_import():
             raise ValueError(f"Provider 不支持已有环境导入: {provider_name}")
-
-        existing = await self.get_env_by_provider_key(provider_name, provider_env_id)
-        if existing:
-            return existing
+        provider_key = str(getattr(provider, "name", provider_name) or provider_name).strip()
 
         info = await provider.get_existing_env(str(provider_env_id))
         if not info:
             raise ValueError(f"来源环境不存在: {provider_name}/{provider_env_id}")
 
+        source_name = _normalize_provider_env_name(info.provider_env_name) or f"{provider_key}-{info.provider_env_id}"
+        existing = await self.get_env_by_provider_name(provider_key, source_name)
+        if existing:
+            return existing
+
         env = await provider.build_imported_environment(info)
-        env.provider = getattr(provider, "name", provider_name)
+        env.provider = provider_key
         env.external_id = str(info.provider_env_id)
         env.provider_env_id = str(info.provider_env_id)
-        env.provider_env_name = info.provider_env_name
+        env.provider_env_name = source_name
         env.provider_group = info.provider_group
         env.provider_proxy = info.provider_proxy
         env.provider_raw_meta = info.provider_raw_meta
         env.status = EnvStatus.READY
-        env.name = env.name or info.provider_env_name or f"{provider.name}-{info.provider_env_id}"
+        env.name = env.name or source_name
 
         await self.pool.add(env)
         return env

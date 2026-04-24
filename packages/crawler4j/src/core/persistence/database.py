@@ -626,16 +626,8 @@ def _init_state_db() -> None:
         conn.execute(
             """
             UPDATE environments
-            SET provider_env_id = NULL
-            WHERE provider_env_id IS NOT NULL
-              AND provider_env_id <> ''
-              AND id NOT IN (
-                  SELECT MIN(id)
-                  FROM environments
-                  WHERE provider_env_id IS NOT NULL
-                    AND provider_env_id <> ''
-                  GROUP BY provider, provider_env_id
-              )
+            SET provider_env_name = TRIM(provider_env_name)
+            WHERE provider_env_name IS NOT NULL
             """
         )
         conn.execute(
@@ -646,10 +638,32 @@ def _init_state_db() -> None:
         )
         conn.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_env_provider_source_key
-            ON environments(provider, provider_env_id)
-            WHERE provider_env_id IS NOT NULL
-              AND provider_env_id <> ''
+            UPDATE environments
+            SET provider_env_name = NULL
+            WHERE provider_env_name IS NOT NULL
+              AND provider_env_name <> ''
+              AND id NOT IN (
+                  SELECT MIN(id)
+                  FROM environments
+                  WHERE provider_env_name IS NOT NULL
+                    AND provider_env_name <> ''
+                  GROUP BY provider, provider_env_name
+              )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_env_provider_env_name
+            ON environments(provider_env_name)
+            """
+        )
+        conn.execute("DROP INDEX IF EXISTS idx_env_provider_source_key")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX idx_env_provider_source_key
+            ON environments(provider, provider_env_name)
+            WHERE provider_env_name IS NOT NULL
+              AND provider_env_name <> ''
             """
         )
 
