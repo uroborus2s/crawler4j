@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFrame,
     QDialog,
@@ -19,7 +20,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.atm.runtime_capabilities import RUNTIME_SURFACE_FULL
 from src.core.persistence import get_module_data_store
 from src.core.mms.models import ModuleInfo
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
@@ -33,6 +33,12 @@ from src.ui.components.line_edit import StyledLineEdit
 CRUD_ROW_ACTION_EDIT = "__crud_update__"
 CRUD_ROW_ACTION_DELETE = "__crud_delete__"
 CRUD_ACTION_COLUMN_KEY = "__crud_actions__"
+
+
+def _runtime_surface_full():
+    from src.core.atm.runtime_capabilities import RUNTIME_SURFACE_FULL
+
+    return RUNTIME_SURFACE_FULL
 
 
 class ManagedPageRenderer(QWidget):
@@ -76,6 +82,7 @@ class ManagedPageRenderer(QWidget):
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(12)
         self._scroll.setWidget(self._content)
+        self._apply_scroll_policy({})
         layout.addWidget(self._scroll)
 
         self._status_label = QLabel("")
@@ -134,6 +141,14 @@ class ManagedPageRenderer(QWidget):
                 continue
             resolved[str(key)] = spec
         return resolved
+
+    def _apply_scroll_policy(self, schema: dict[str, Any]) -> None:
+        scroll = dict(schema.get("scroll") or {}) if isinstance(schema, dict) else {}
+        vertical = str(scroll.get("vertical") or "auto").strip().lower()
+        if vertical == "hidden":
+            self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            return
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
     def _build_layout_widget(self, children: list[dict[str, Any]], layout_spec: dict[str, Any]) -> QWidget:
         container = QWidget()
@@ -459,7 +474,7 @@ class ManagedPageRenderer(QWidget):
             self._bridge.call_local_hook(
                 handler_name,
                 payload,
-                capability_surface=RUNTIME_SURFACE_FULL,
+                capability_surface=_runtime_surface_full(),
             )
         except Exception as exc:
             QMessageBox.warning(self, "新增失败", str(exc))
@@ -485,7 +500,7 @@ class ManagedPageRenderer(QWidget):
                 handler_name,
                 row_key,
                 payload,
-                capability_surface=RUNTIME_SURFACE_FULL,
+                capability_surface=_runtime_surface_full(),
             )
         except Exception as exc:
             QMessageBox.warning(self, "编辑失败", str(exc))
@@ -510,7 +525,7 @@ class ManagedPageRenderer(QWidget):
             self._bridge.call_local_hook(
                 handler_name,
                 row_key,
-                capability_surface=RUNTIME_SURFACE_FULL,
+                capability_surface=_runtime_surface_full(),
             )
         except Exception as exc:
             QMessageBox.warning(self, "删除失败", str(exc))
@@ -863,11 +878,13 @@ class ManagedPageRenderer(QWidget):
         except Exception as exc:
             self._schema = {}
             self._payload = {}
+            self._apply_scroll_policy({})
             self._clear_content()
             self._content_layout.addWidget(QLabel(f"页面加载失败: {exc}"))
             self._status_label.setText(str(exc))
             return
 
+        self._apply_scroll_policy(self._schema)
         self._clear_content()
         self._content_layout.addWidget(
             self._build_layout_widget(self._schema.get("children", []), self._schema.get("layout", {}))

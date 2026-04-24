@@ -92,6 +92,8 @@
 | 2026-04-16 | 调整模块自定义数据列表横向滚动表现：隐藏底部横向滚动条，但保留触控板/滚轮横向滑动能力，并补 `ModuleDataTablePage` 回归断言锁定滚动策略 | Codex |
 | 2026-04-16 | 完成 `BUG-013` / `CR-005`：`ModuleAssembler` 发现 `tasks/` / `workflows/` import 失败时改为输出异常上下文与 traceback，并在命中失败条目时向运行时回传 discovery hint；ATM 普通执行 `DevLink` 模块时也会显式开启一次性 reload，无需重启主客户端即可吃到最新源码 | Codex |
 | 2026-04-24 | 收口 Windows 打包态 `qasync` 停环竞态：宿主入口新增 `_ShutdownController`，显式拦截 `QEvent.Type.Quit` 并把真正退出延后到异步清理完成之后；同时补 `Quit`/`lastWindowClosed` 两条 UI 生命周期回归，避免桌面包再次弹出 `Event loop stopped before Future completed` | Codex |
+| 2026-04-24 | 收口共享表格删除确认框配色：`ConfirmDialog` 改为完整深色主题，补齐标题/正文/取消按钮/危险按钮的对象名与样式选择器，避免 macOS 下删除确认面板继续出现黑字/浅底等系统默认配色；同时新增组件级 UI 回归 `test_confirm_dialog.py` | Codex |
+| 2026-04-24 | 为 Hosted UI `Page` 增加页面级滚动配置：`crawler4j_contracts.hosted_ui.normalize_page_schema()` 现支持 `scroll.vertical = auto|hidden`，`ManagedPageRenderer` 会按页面 schema 切换外层 `QScrollArea` 的竖向滚动条策略；同时新增契约回归 `test_hosted_ui_card.py` 与隔离渲染回归 `test_managed_page_scroll.py`，用于收口“今日运营看板”右侧滚动槽 | Codex |
 
 ## 5. 2026-04-15 缺陷修复记录
 

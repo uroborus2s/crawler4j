@@ -42,6 +42,7 @@ PAGE = PageSpec(
         "type": "Page",
         "title": "Dashboard",
         "load_handler": "load_dashboard_page",
+        "scroll": {"vertical": "hidden"},
         "children": [
             {"type": "Text", "style": "title", "binding": "title"},
         ],
@@ -57,6 +58,11 @@ def load_dashboard_page(
     del context, page_id, params
     return {"title": "Dashboard"}
 ```
+
+页面级滚动当前支持：
+
+- `scroll.vertical = "auto"`：默认值，宿主按内容需要显示竖向滚动条
+- `scroll.vertical = "hidden"`：隐藏 Hosted Page 外层竖向滚动槽，但仍保留滚轮/触控板滚动能力
 
 ## 接入主线
 

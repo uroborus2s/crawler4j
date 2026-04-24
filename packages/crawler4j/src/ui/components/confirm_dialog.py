@@ -47,8 +47,77 @@ class ConfirmDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(400)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
+        self.setStyleSheet(self._build_stylesheet())
 
         self._setup_ui(title, message, confirm_text, cancel_text, danger)
+
+    @staticmethod
+    def _build_stylesheet() -> str:
+        return """
+            QDialog {
+                background-color: #1e1e2e;
+            }
+            QLabel {
+                background-color: transparent;
+            }
+            QLabel#confirmIcon {
+                font-size: 28px;
+            }
+            QLabel#confirmTitle {
+                color: #f5e0dc;
+                font-size: 16px;
+                font-weight: 700;
+            }
+            QLabel#confirmMessage {
+                color: #bac2de;
+                font-size: 13px;
+                line-height: 1.45;
+            }
+            QPushButton {
+                min-width: 88px;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton#confirmCancel {
+                background-color: #45475a;
+                border: 1px solid #585b70;
+                color: #cdd6f4;
+            }
+            QPushButton#confirmCancel:hover {
+                background-color: #585b70;
+                border-color: #6c7086;
+            }
+            QPushButton#confirmCancel:pressed {
+                background-color: #3b3e52;
+            }
+            QPushButton#confirmDanger {
+                background-color: rgba(243, 139, 168, 0.16);
+                border: 1px solid rgba(243, 139, 168, 0.38);
+                color: #f38ba8;
+            }
+            QPushButton#confirmDanger:hover {
+                background-color: rgba(243, 139, 168, 0.24);
+                border-color: rgba(243, 139, 168, 0.52);
+            }
+            QPushButton#confirmDanger:pressed {
+                background-color: rgba(243, 139, 168, 0.30);
+            }
+            QPushButton#confirmPrimary {
+                background-color: #89b4fa;
+                border: 1px solid #89b4fa;
+                color: #1e1e2e;
+            }
+            QPushButton#confirmPrimary:hover {
+                background-color: #a6c8ff;
+                border-color: #a6c8ff;
+            }
+            QPushButton#confirmPrimary:pressed {
+                background-color: #74a7f2;
+                border-color: #74a7f2;
+            }
+        """
 
     def _setup_ui(
         self,
@@ -67,11 +136,11 @@ class ConfirmDialog(QDialog):
         header = QHBoxLayout()
 
         icon = QLabel("⚠️" if danger else "❓")
-        icon.setStyleSheet("font-size: 24px;")
+        icon.setObjectName("confirmIcon")
         header.addWidget(icon)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        title_label.setObjectName("confirmTitle")
         header.addWidget(title_label)
         header.addStretch()
 
@@ -79,8 +148,8 @@ class ConfirmDialog(QDialog):
 
         # Message
         message_label = QLabel(message)
+        message_label.setObjectName("confirmMessage")
         message_label.setWordWrap(True)
-        message_label.setStyleSheet("color: #a6adc8; font-size: 13px;")
         layout.addWidget(message_label)
 
         # Spacer
@@ -92,16 +161,15 @@ class ConfirmDialog(QDialog):
         buttons.addStretch()
 
         cancel_btn = QPushButton(cancel_text)
-        cancel_btn.setMinimumWidth(80)
+        cancel_btn.setObjectName("confirmCancel")
         cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(cancel_btn)
 
         confirm_btn = QPushButton(confirm_text)
-        confirm_btn.setMinimumWidth(80)
         if danger:
-            confirm_btn.setObjectName("danger")
+            confirm_btn.setObjectName("confirmDanger")
         else:
-            confirm_btn.setObjectName("primary")
+            confirm_btn.setObjectName("confirmPrimary")
         confirm_btn.clicked.connect(self.accept)
         buttons.addWidget(confirm_btn)
 

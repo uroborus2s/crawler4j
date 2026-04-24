@@ -44,7 +44,9 @@ ALLOWED_DATA_RESOURCE_KEYS = {
     "cleanup_policy",
 }
 ALLOWED_PAGE_LAYOUT_KEYS = {"direction", "kind", "columns", "gap"}
-ALLOWED_PAGE_SCHEMA_KEYS = {"type", "title", "load_handler", "children", "layout"}
+ALLOWED_PAGE_SCHEMA_KEYS = {"type", "title", "load_handler", "children", "layout", "scroll"}
+ALLOWED_PAGE_SCROLL_KEYS = {"vertical"}
+ALLOWED_PAGE_SCROLL_VERTICAL_VALUES = {"auto", "hidden"}
 ALLOWED_SECTION_SCHEMA_KEYS = {"type", "title", "children", "variant", "layout"}
 ALLOWED_CARD_SCHEMA_KEYS = {
     "type",
@@ -183,6 +185,22 @@ def _normalize_non_negative_int(raw: Any, *, field_name: str) -> int:
     if value < 0:
         raise ValueError(f"{field_name} 必须 >= 0")
     return value
+
+
+def _normalize_page_scroll(raw: Any, *, field_name: str) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+
+    unknown_keys = sorted(set(raw) - ALLOWED_PAGE_SCROLL_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+
+    vertical = str(raw.get("vertical") or "auto").strip().lower()
+    if vertical not in ALLOWED_PAGE_SCROLL_VERTICAL_VALUES:
+        raise ValueError(f"{field_name}.vertical 不受支持: {vertical}")
+    return {"vertical": vertical}
 
 
 def _normalize_string_list(raw: Any, *, field_name: str) -> list[str]:
@@ -784,6 +802,9 @@ def normalize_page_schema(page_id: str, schema: Any) -> dict[str, Any]:
     layout = _normalize_layout(schema.get("layout"), field_name="layout")
     if layout:
         normalized["layout"] = layout
+    scroll = _normalize_page_scroll(schema.get("scroll"), field_name="scroll")
+    if scroll:
+        normalized["scroll"] = scroll
     return normalized
 
 

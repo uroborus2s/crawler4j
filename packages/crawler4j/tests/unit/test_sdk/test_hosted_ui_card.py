@@ -64,3 +64,32 @@ def test_normalize_page_schema_rejects_invalid_card_vertical_alignment():
                 ],
             },
         )
+
+
+def test_normalize_page_schema_supports_page_scroll_vertical_hidden():
+    schema = normalize_page_schema(
+        "dashboard",
+        {
+            "type": "Page",
+            "load_handler": "load_dashboard_page",
+            "scroll": {"vertical": "hidden"},
+            "children": [
+                {"type": "Text", "style": "title", "text": "今日运营看板"},
+            ],
+        },
+    )
+
+    assert schema["scroll"] == {"vertical": "hidden"}
+
+
+def test_normalize_page_schema_rejects_invalid_page_scroll_vertical_value():
+    with pytest.raises(ValueError, match="scroll\\.vertical 不受支持"):
+        normalize_page_schema(
+            "dashboard",
+            {
+                "type": "Page",
+                "load_handler": "load_dashboard_page",
+                "scroll": {"vertical": "overlay"},
+                "children": [],
+            },
+        )

@@ -119,6 +119,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | 新增 Hosted UI 页面级滚动配置回归：`test_hosted_ui_card.py` 现锁定 `Page.scroll.vertical = hidden` 的 schema 规范化与非法值拒绝；`test_managed_page_scroll.py` 通过隔离 `ModuleUIRuntimeBridge` 的方式锁定 `ManagedPageRenderer` 会把 Hosted Page 外层 `QScrollArea` 切到 `ScrollBarAlwaysOff/AsNeeded`，避免“今日运营看板”这类页面继续误显示竖向滚动槽 | Codex |
+| 2026-04-24 | 新增 `test_confirm_dialog.py`，锁定共享危险确认框 `ConfirmDialog` 的深色背景、标题/正文文案颜色，以及 `confirmCancel` / `confirmDanger` 两个按钮选择器，避免共享表格删除确认面板再次回退到系统默认配色 | Codex |
 | 2026-04-24 | 继续补强宿主 UI 生命周期回归：`test_app.py` 新增 `QEvent.Type.Quit` 延后退出路径，并锁定宿主入口会先完成 `TaskService.stop()` / `DebugService.shutdown()` / `PlaywrightManager.force_shutdown()` 再结束 Qt 事件循环，覆盖 Windows 打包态曾复现的 `Event loop stopped before Future completed` | Codex |
 | 2026-04-24 | 补充“从已有环境导入”弹窗的 warning UI 回归：`test_import_existing_env_dialog.py` 现同时锁定 warning 区域的实际高度不再低于 `warning_label.heightForWidth(...) + 内边距`，以及 warning 文本层显式为 `background: transparent; border: none;`，避免打包态下多行文案继续被裁掉或出现额外内圈 | Codex |
 | 2026-04-24 | 补强宿主 UI 生命周期回归：`test_app.py` 现锁定 debug worker/debugpy adapter/Shell 相关入口改为懒加载，不再因深层循环导入阻塞测试；同时新增“最后一个窗口关闭后仍能完成异步收尾”的回归，固定 `lastWindowClosed -> shutdown cleanup -> loop stop` 顺序，防止桌面包再次弹出 `Event loop stopped before Future completed` | Codex |
