@@ -114,3 +114,6 @@
 ```bash
 uv run crawler4j package verify dist/<module>-<version>.zip
 ```
+
+桌面宿主当前会在“安装失败”弹窗里直接展示 `message / stage / hint / traceback`。
+如果还需要看持久化日志，macOS 默认路径是 `~/Library/Application Support/Crawler4j/logs/crawler4j.log`。

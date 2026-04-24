@@ -5,10 +5,14 @@ from types import SimpleNamespace
 import pytest
 from PyQt6.QtWidgets import QDialog, QMessageBox
 
-from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
+from src.core.mms.models import ModuleInfo, ModuleInstallError, ModuleManifest, ModuleParseError, ModuleSource
 from src.core.mms.release_service import ModulePackagePreview, ModuleUpdateInfo
 from src.core.mms.models import UpgradeSourceInfo
-from src.core.mms.ui.module_list_widget import ModuleDisplayItem, ModuleListWidget
+from src.core.mms.ui.module_list_widget import (
+    ModuleDisplayItem,
+    ModuleListWidget,
+    build_install_exception_diagnostics,
+)
 
 
 def _make_module(tmp_path: Path, *, source: ModuleSource) -> ModuleInfo:
@@ -20,6 +24,42 @@ def _make_module(tmp_path: Path, *, source: ModuleSource) -> ModuleInfo:
         source=source,
         path=module_dir,
     )
+
+
+def test_build_install_exception_diagnostics_uses_stage_hint_from_nested_module_error():
+    try:
+        try:
+            raise ModuleParseError(
+                "",
+                stage="PARSE",
+                hint="请检查 module.yaml.data 和视图 SQL 输出列是否一致",
+            )
+        except ModuleParseError as exc:
+            raise ModuleInstallError("安装失败") from exc
+    except ModuleInstallError as exc:
+        diagnostics = build_install_exception_diagnostics(exc)
+
+    assert diagnostics.summary == "安装失败"
+    assert diagnostics.stage == "PARSE"
+    assert diagnostics.hint == "请检查 module.yaml.data 和视图 SQL 输出列是否一致"
+    assert "ModuleParseError" in diagnostics.traceback_text
+    assert "ModuleInstallError -> ModuleParseError" == diagnostics.chain_text
+
+
+def test_build_install_exception_diagnostics_uses_non_empty_fallback_summary():
+    class SilentError(Exception):
+        def __str__(self) -> str:
+            return ""
+
+    try:
+        raise SilentError()
+    except SilentError as exc:
+        diagnostics = build_install_exception_diagnostics(exc)
+
+    assert diagnostics.summary == "SilentError（异常未提供错误消息）"
+    assert diagnostics.stage == "未提供"
+    assert diagnostics.hint == "未提供"
+    assert "SilentError" in diagnostics.traceback_text
 
 
 def test_refresh_button_forces_registry_refresh(qtbot, tmp_path, monkeypatch):
@@ -386,6 +426,58 @@ async def test_install_module_async_persists_repo_token_when_requested(qtbot, tm
     )
 
     assert saved_tokens == [("example/private-repo", "ghp_secret_token_1234")]
+
+
+@pytest.mark.asyncio
+async def test_install_module_async_uses_diagnostic_dialog_when_error_message_is_empty(qtbot, monkeypatch):
+    observed: dict[str, object] = {}
+
+    class SilentError(Exception):
+        def __str__(self) -> str:
+            return ""
+
+    class FakeErrorDialog(QDialog):
+        def __init__(self, diagnostics, parent=None):
+            super().__init__(parent)
+            observed["diagnostics"] = diagnostics
+
+        def exec(self):  # type: ignore[override]
+            raise AssertionError("blocking exec should not be used")
+
+        def open(self):  # type: ignore[override]
+            asyncio.get_running_loop().call_soon(
+                lambda: self.done(int(QDialog.DialogCode.Accepted))
+            )
+
+    async def fake_prepare_local_install(source, github_token=None):  # noqa: ARG001
+        raise SilentError()
+
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.get_module_release_service",
+        lambda: SimpleNamespace(prepare_local_install=fake_prepare_local_install),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.ModuleInstallErrorDialog",
+        FakeErrorDialog,
+    )
+
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+
+    await widget._install_module_async(
+        SimpleNamespace(
+            install_kind="local_zip",
+            source="/tmp/demo_module.zip",
+            github_token="",
+            remember_github_token=False,
+        )
+    )
+
+    diagnostics = observed["diagnostics"]
+    assert diagnostics.summary == "SilentError（异常未提供错误消息）"
+    assert diagnostics.stage == "未提供"
+    assert diagnostics.hint == "未提供"
+    assert "SilentError" in diagnostics.traceback_text
 
 
 @pytest.mark.asyncio

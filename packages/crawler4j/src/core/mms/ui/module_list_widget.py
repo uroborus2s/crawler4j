@@ -5,17 +5,21 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
+import traceback
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -43,6 +47,164 @@ class ModuleDisplayItem:
 
     raw: ModuleInfo
     display_name_str: str
+
+
+@dataclass(frozen=True, slots=True)
+class InstallExceptionDiagnostics:
+    """安装失败诊断信息。"""
+
+    summary: str
+    stage: str
+    hint: str
+    exception_type: str
+    traceback_text: str
+    chain_text: str
+
+    @property
+    def detail_text(self) -> str:
+        lines = [
+            f"summary: {self.summary}",
+            f"exception_type: {self.exception_type}",
+            f"stage: {self.stage}",
+            f"hint: {self.hint}",
+        ]
+        if self.chain_text:
+            lines.append(f"chain: {self.chain_text}")
+        lines.extend(["", "traceback:", self.traceback_text])
+        return "\n".join(lines)
+
+
+def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return chain
+
+
+def build_install_exception_diagnostics(exc: BaseException) -> InstallExceptionDiagnostics:
+    chain = _iter_exception_chain(exc)
+    summary = next((text for item in chain if (text := str(item).strip())), "")
+    if not summary:
+        summary = f"{exc.__class__.__name__}（异常未提供错误消息）"
+
+    stage = ""
+    hint = ""
+    for item in chain:
+        item_stage = str(getattr(item, "stage", "") or "").strip()
+        item_hint = str(getattr(item, "hint", "") or "").strip()
+        if item_stage or item_hint:
+            stage = item_stage
+            hint = item_hint
+            break
+
+    traceback_text = "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__)
+    ).strip()
+    if not traceback_text:
+        traceback_text = f"{exc.__class__.__name__}: {summary}"
+
+    return InstallExceptionDiagnostics(
+        summary=summary,
+        stage=stage or "未提供",
+        hint=hint or "未提供",
+        exception_type=exc.__class__.__name__,
+        traceback_text=traceback_text,
+        chain_text=" -> ".join(item.__class__.__name__ for item in chain),
+    )
+
+
+class ModuleInstallErrorDialog(QDialog):
+    """安装失败诊断对话框。"""
+
+    def __init__(self, diagnostics: InstallExceptionDiagnostics, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._diagnostics = diagnostics
+        self._details_edit: QTextEdit | None = None
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        self.setWindowTitle("安装失败")
+        self.setMinimumSize(840, 560)
+        self.setModal(True)
+        self.setStyleSheet(
+            """
+            QDialog {
+                background-color: #1e1e28;
+            }
+            QLabel {
+                color: white;
+            }
+            QTextEdit {
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                border-radius: 8px;
+                padding: 8px;
+                color: white;
+                selection-background-color: rgba(59, 130, 246, 0.45);
+                font-family: Menlo, Monaco, 'Courier New', monospace;
+            }
+            QPushButton {
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            """
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("安装模块失败")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #f87171;")
+        layout.addWidget(title)
+
+        summary = QLabel(self._diagnostics.summary)
+        summary.setWordWrap(True)
+        summary.setStyleSheet("font-size: 14px; color: white;")
+        layout.addWidget(summary)
+
+        stage_label = QLabel(f"Stage: {self._diagnostics.stage}")
+        stage_label.setWordWrap(True)
+        stage_label.setStyleSheet("color: rgba(255,255,255,0.82);")
+        layout.addWidget(stage_label)
+
+        hint_label = QLabel(f"Hint: {self._diagnostics.hint}")
+        hint_label.setWordWrap(True)
+        hint_label.setStyleSheet("color: rgba(255,255,255,0.82);")
+        layout.addWidget(hint_label)
+
+        helper = QLabel("已附加完整 traceback，可直接复制给模块维护者或发布者。")
+        helper.setWordWrap(True)
+        helper.setStyleSheet("color: rgba(255,255,255,0.62); font-size: 12px;")
+        layout.addWidget(helper)
+
+        details_title = QLabel("诊断详情")
+        details_title.setStyleSheet("font-size: 13px; font-weight: bold; color: white;")
+        layout.addWidget(details_title)
+
+        self._details_edit = QTextEdit(self)
+        self._details_edit.setReadOnly(True)
+        self._details_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self._details_edit.setPlainText(self._diagnostics.detail_text)
+        self._details_edit.setMinimumHeight(320)
+        layout.addWidget(self._details_edit, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok, parent=self)
+        copy_btn = QPushButton("复制诊断信息", self)
+        copy_btn.clicked.connect(self._copy_details)
+        buttons.addButton(copy_btn, QDialogButtonBox.ButtonRole.ActionRole)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
+
+    def _copy_details(self) -> None:
+        if self._details_edit is None:
+            return
+        QApplication.clipboard().setText(self._details_edit.toPlainText())
 
 
 class ModuleListWidget(QWidget):
@@ -389,6 +551,13 @@ class ModuleListWidget(QWidget):
         dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
         await self._exec_dialog_async(dialog)
 
+    async def _show_install_error_async(self, exc: Exception) -> None:
+        dialog = ModuleInstallErrorDialog(
+            build_install_exception_diagnostics(exc),
+            parent=self,
+        )
+        await self._exec_dialog_async(dialog)
+
     def _set_busy(self, busy: bool, *, checking_updates: bool = False) -> None:
         self.loading_bar.setVisible(busy)
         self.install_btn.setEnabled(not busy)
@@ -531,11 +700,7 @@ class ModuleListWidget(QWidget):
             )
             self.load_data(force_refresh=True)
         except Exception as e:
-            await self._show_message_async(
-                "安装失败",
-                str(e),
-                icon=QMessageBox.Icon.Warning,
-            )
+            await self._show_install_error_async(e)
         finally:
             self._set_busy(False)
 
