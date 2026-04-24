@@ -154,11 +154,8 @@ class ProviderEnvInfo:
 
     provider: str
     provider_label: str
-    provider_env_id: str
-    provider_env_name: str
-    provider_group: str = ""
-    provider_proxy: dict[str, Any] | None = None
-    provider_raw_meta: dict[str, Any] = field(default_factory=dict)
+    external_id: str
+    name: str
     proxy_summary: str = ""
     remark: str = ""
     is_running: bool = False
@@ -169,14 +166,6 @@ class ProviderEnvInfo:
     def proxy_summary_text(self) -> str:
         if self.proxy_summary:
             return self.proxy_summary
-        if not isinstance(self.provider_proxy, dict):
-            return "-"
-        protocol = str(self.provider_proxy.get("protocol") or "").strip()
-        host = str(self.provider_proxy.get("host") or "").strip()
-        port = str(self.provider_proxy.get("port") or "").strip()
-        if host and port:
-            label = " ".join(part for part in (protocol, f"{host}:{port}") if part)
-            return label or f"{host}:{port}"
         return "-"
 
 
@@ -215,12 +204,6 @@ class Environment:
     provider: str = ""
     status: EnvStatus = EnvStatus.CREATING
     external_id: str | None = None
-    provider_env_id: str | None = None
-    provider_env_name: str | None = None
-    provider_group: str | None = None
-    provider_proxy: dict[str, Any] | None = None
-    provider_raw_meta: dict[str, Any] | None = None
-    imported_at: int | None = None
     capabilities: set[str] = field(default_factory=set)
     handle: BrowserHandle | None = None # BrowserHandle | None
     lease_id: str | None = None
@@ -251,16 +234,11 @@ class Environment:
         """序列化为字典（用于持久化）。"""
         return {
             "id": self.id,
+            "name": self.name,
             "kind": self.kind.value,
             "provider": self.provider,
             "status": self.status.value,
             "external_id": self.external_id,
-            "provider_env_id": self.provider_env_id,
-            "provider_env_name": self.provider_env_name,
-            "provider_group": self.provider_group,
-            "provider_proxy": self.provider_proxy,
-            "provider_raw_meta": self.provider_raw_meta,
-            "imported_at": self.imported_at,
             "capabilities": list(self.capabilities),
             "lease_id": self.lease_id,
             "task_run_id": self.task_run_id,
@@ -281,16 +259,11 @@ class Environment:
         
         return cls(
             id=data["id"],
+            name=data.get("name", ""),
             kind=EnvKind(data["kind"]),
             provider=data["provider"],
             status=EnvStatus(data["status"]),
             external_id=data.get("external_id"),
-            provider_env_id=data.get("provider_env_id") or data.get("external_id"),
-            provider_env_name=data.get("provider_env_name") or data.get("name"),
-            provider_group=data.get("provider_group"),
-            provider_proxy=data.get("provider_proxy"),
-            provider_raw_meta=data.get("provider_raw_meta"),
-            imported_at=data.get("imported_at"),
             capabilities=set(data.get("capabilities", [])),
             lease_id=data.get("lease_id"),
             task_run_id=data.get("task_run_id"),

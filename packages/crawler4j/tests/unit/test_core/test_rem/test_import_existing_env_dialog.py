@@ -26,9 +26,8 @@ def _make_module():
 
 def _make_provider_env():
     return SimpleNamespace(
-        provider_env_id="vb-101",
-        provider_env_name="VB Env 101",
-        provider_group="默认分组",
+        external_id="vb-101",
+        name="VB Env 101",
         remark="demo",
         proxy_summary_text="SOCKS5 127.0.0.1:1080",
         running_status="运行中",
@@ -68,6 +67,7 @@ def test_import_existing_env_dialog_updates_warning_and_returns_selection(qtbot)
     dialog.workflow_combo.setCurrentIndex(1)
     assert dialog.warning_label.text() == dialog.RISK_SAFE_TEXT
 
+    qtbot.waitUntil(lambda: len(dialog.table.displayed_rows()) == 1, timeout=500)
     row = dialog.table.displayed_rows()[0]
     dialog._on_table_row_clicked(row)
 
@@ -76,6 +76,6 @@ def test_import_existing_env_dialog_updates_warning_and_returns_selection(qtbot)
         "provider": "virtualbrowser",
         "module_name": "demo_module",
         "workflow_name": "safe_flow",
-        "provider_env_id": "vb-101",
+        "name": "VB Env 101",
     }
     assert dialog.submit_btn.isEnabled() is True

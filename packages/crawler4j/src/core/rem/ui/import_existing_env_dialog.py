@@ -21,19 +21,18 @@ class ImportExistingEnvDialog(QDialog):
     RISK_CONTENT_PADDING = (12, 10, 12, 10)
     TABLE_SCHEMA = {
         "columns": [
-            {"key": "provider_env_name", "label": "环境名称", "type": "text", "width": 170},
-            {"key": "provider_env_id", "label": "来源环境 ID", "type": "text", "width": 130},
-            {"key": "provider_group", "label": "分组", "type": "text", "width": 120},
+            {"key": "name", "label": "环境名称", "type": "text", "width": 180},
+            {"key": "external_id", "label": "外部 ID", "type": "text", "width": 130},
             {"key": "remark", "label": "备注", "type": "text", "width": 150},
             {"key": "proxy_summary", "label": "代理/IP 摘要", "type": "text", "width": 180},
             {"key": "running_status", "label": "当前运行状态", "type": "text", "width": 120},
             {"key": "last_used_at", "label": "最近使用时间", "type": "text", "stretch": True},
         ],
         "features": {
-            "search": {"enabled": True, "placeholder": "搜索环境名称、来源 ID、分组或备注"},
+            "search": {"enabled": True, "placeholder": "搜索环境名称、外部 ID 或备注"},
             "sort": {
                 "enabled": True,
-                "default": [{"field": "provider_env_name", "direction": "asc"}],
+                "default": [{"field": "name", "direction": "asc"}],
             },
             "pagination": {"enabled": True, "page_size": 10, "page_size_options": [10, 20, 50]},
         },
@@ -55,7 +54,7 @@ class ImportExistingEnvDialog(QDialog):
             str(provider): list(items)
             for provider, items in (env_options_by_source or {}).items()
         }
-        self._selected_provider_env_id = ""
+        self._selected_env_name = ""
         self._table_rows: list[dict[str, Any]] = []
         self._warning_height_sync_pending = False
         self._setup_ui()
@@ -180,7 +179,7 @@ class ImportExistingEnvDialog(QDialog):
         provider = self._selected_provider()
         items = self._env_options_by_source.get(provider, [])
         self._table_rows = [self._build_env_row(item) for item in items]
-        self._selected_provider_env_id = ""
+        self._selected_env_name = ""
         self.selection_label.setText(
             "未同步环境列表：请选择一个环境。" if self._table_rows else "未同步环境列表：当前来源没有可导入环境。"
         )
@@ -194,9 +193,8 @@ class ImportExistingEnvDialog(QDialog):
             except (TypeError, ValueError, OSError):
                 last_used = "-"
         return {
-            "provider_env_id": str(getattr(item, "provider_env_id", "") or ""),
-            "provider_env_name": str(getattr(item, "provider_env_name", "") or "-"),
-            "provider_group": str(getattr(item, "provider_group", "") or "-"),
+            "name": str(getattr(item, "name", "") or "-"),
+            "external_id": str(getattr(item, "external_id", "") or ""),
             "remark": str(getattr(item, "remark", "") or "-"),
             "proxy_summary": getattr(item, "proxy_summary_text", "-"),
             "running_status": str(getattr(item, "running_status", "") or "-"),
@@ -257,7 +255,7 @@ class ImportExistingEnvDialog(QDialog):
     def _update_accept_state(self) -> None:
         module_name = self._selected_module_name()
         workflow_name = self._selected_workflow_name()
-        self.submit_btn.setEnabled(bool(module_name and workflow_name and self._selected_provider_env_id))
+        self.submit_btn.setEnabled(bool(module_name and workflow_name and self._selected_env_name))
 
     def _on_source_changed(self, _index: int) -> None:
         self._reload_env_rows()
@@ -281,9 +279,10 @@ class ImportExistingEnvDialog(QDialog):
         self.table.apply_result(request_id, result)
 
     def _on_table_row_clicked(self, row: dict[str, Any]) -> None:
-        self._selected_provider_env_id = str(row.get("provider_env_id") or "")
-        env_name = str(row.get("provider_env_name") or self._selected_provider_env_id)
-        self.selection_label.setText(f"未同步环境列表：已选择 {env_name} ({self._selected_provider_env_id})")
+        self._selected_env_name = str(row.get("name") or "")
+        external_id = str(row.get("external_id") or "")
+        suffix = f" ({external_id})" if external_id else ""
+        self.selection_label.setText(f"未同步环境列表：已选择 {self._selected_env_name}{suffix}")
         self._update_accept_state()
 
     def showEvent(self, event) -> None:  # type: ignore[override]
@@ -299,11 +298,11 @@ class ImportExistingEnvDialog(QDialog):
             "provider": self._selected_provider(),
             "module_name": self._selected_module_name(),
             "workflow_name": self._selected_workflow_name(),
-            "provider_env_id": self._selected_provider_env_id,
+            "name": self._selected_env_name,
         }
 
     def accept(self) -> None:  # type: ignore[override]
         values = self.get_values()
-        if not values["module_name"] or not values["workflow_name"] or not values["provider_env_id"]:
+        if not values["module_name"] or not values["workflow_name"] or not values["name"]:
             return
         super().accept()

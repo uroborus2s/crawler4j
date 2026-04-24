@@ -60,7 +60,7 @@ class ExistingEnvImportJobService:
         self,
         *,
         provider_name: str,
-        provider_env_id: str,
+        env_name: str,
         module_name: str,
         workflow_name: str,
     ) -> ExistingEnvImportRunResult:
@@ -73,13 +73,10 @@ class ExistingEnvImportJobService:
         if workflow_name not in workflow_names:
             raise ValueError(f"目标 workflow 不存在: {module_name}/{workflow_name}")
 
-        env = await self.rem.import_existing_env(provider_name, provider_env_id)
+        env = await self.rem.import_existing_env(provider_name, env_name)
         creation_params = {
             "provider": env.provider,
-            "provider_env_id": str(env.provider_env_id or env.external_id or ""),
-            "provider_env_name": env.provider_env_name or env.name,
-            "provider_group": env.provider_group or "",
-            "provider_proxy": env.provider_proxy or {},
+            "name": env.name,
             "import_mode": "existing_env",
         }
 

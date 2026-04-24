@@ -72,16 +72,13 @@
 | 键 | 含义 |
 |---|---|
 | `provider` | 外部环境来源，例如 `virtual_browser` |
-| `provider_env_id` | 来源系统中的环境 ID |
-| `provider_env_name` | 来源系统中的环境名称 |
-| `provider_group` | 来源系统中的环境分组 |
-| `provider_proxy` | 来源系统返回的代理摘要或原始代理对象 |
+| `name` | 来源系统中的环境名称，也是宿主判定是否已导入的唯一性字段之一 |
 | `import_mode` | 固定为 `existing_env` |
 
 该场景还有两条补充约束：
 
 - 宿主仍必须保证 `ctx.env_id` 与 `ctx.page` 可用，模块不需要自己重新绑定浏览器上下文。
-- 宿主用来源环境名称 `provider_env_name` 判定导入唯一性；`provider_env_id` / `external_id` 只保留为来源元数据，不作为重复导入判断依据。
+- 宿主用 `(provider, name)` 判定导入唯一性；来源系统中的其他扩展元数据不写入环境表，也不作为重复导入判断依据。
 - `module.yaml.workflows[].host_scenarios` 可选声明 `existing_env_import` 作为适配提示；宿主未命中该声明时只显示风险提示，不作为执行门禁。
 
 ## 5. 页面 schema 契约

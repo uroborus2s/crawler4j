@@ -293,28 +293,20 @@ class BaseProvider(ABC):
         """列出来源系统中的环境。"""
         return []
 
-    async def get_existing_env(self, provider_env_id: str) -> ProviderEnvInfo | None:
-        """获取来源系统中的单个环境。"""
-        del provider_env_id
+    async def get_existing_env(self, name: str) -> ProviderEnvInfo | None:
+        """按环境名称获取来源系统中的单个环境。"""
+        del name
         return None
 
     async def build_imported_environment(self, info: ProviderEnvInfo) -> Environment:
         """把来源系统环境信息映射为宿主环境记录。"""
-        import time
-
         return Environment(
-            name=info.provider_env_name,
+            name=info.name,
             kind=self.kind,
             provider=self.name,
             status=EnvStatus.READY,
-            external_id=info.provider_env_id,
-            provider_env_id=info.provider_env_id,
-            provider_env_name=info.provider_env_name,
-            provider_group=info.provider_group,
-            provider_proxy=info.provider_proxy,
-            provider_raw_meta=info.provider_raw_meta,
-            imported_at=int(time.time()),
-            handle=BrowserHandle(browser_id=str(info.provider_env_id)),
+            external_id=info.external_id,
+            handle=BrowserHandle(browser_id=str(info.external_id)),
         )
 
 # Provider 注册表
@@ -1526,8 +1518,6 @@ class VirtualBrowserProvider(BaseProvider):
             provider=self.name,
             status=EnvStatus.READY,
             external_id=str(browser_id),  # 持久化 browser_id
-            provider_env_id=str(browser_id),
-            provider_env_name=name,
             capabilities={"page", "cookies", "fingerprint"},
             proxy_config=final_proxy_config,
             handle=BrowserHandle(browser_id=str(browser_id)),
@@ -1831,10 +1821,17 @@ class VirtualBrowserProvider(BaseProvider):
         for entry in browser_rows:
             if not isinstance(entry, dict) or entry.get("id") is None:
                 continue
-            provider_env_id = str(entry["id"])
+            external_id = str(entry["id"])
             merged = dict(entry)
-            merged.update(full_map.get(provider_env_id, {}))
+            merged.update(full_map.get(external_id, {}))
             proxy = merged.get("proxy") if isinstance(merged.get("proxy"), dict) else None
+            proxy_summary = "-"
+            if isinstance(proxy, dict):
+                protocol = str(proxy.get("protocol") or "").strip()
+                host = str(proxy.get("host") or "").strip()
+                port = str(proxy.get("port") or "").strip()
+                if host and port:
+                    proxy_summary = " ".join(part for part in (protocol, f"{host}:{port}") if part)
             timestamp = merged.get("timestamp")
             last_used_at = None
             if timestamp is not None:
@@ -1842,36 +1839,34 @@ class VirtualBrowserProvider(BaseProvider):
                     last_used_at = int(int(timestamp) / 1000)
                 except (TypeError, ValueError):
                     last_used_at = None
-            is_running = bool(merged.get("isRunning")) or provider_env_id in running_ids
+            is_running = bool(merged.get("isRunning")) or external_id in running_ids
             items.append(
                 ProviderEnvInfo(
                     provider=self.name,
                     provider_label=self.display_name,
-                    provider_env_id=provider_env_id,
-                    provider_env_name=str(merged.get("name") or provider_env_id),
-                    provider_group=str(merged.get("group") or ""),
-                    provider_proxy=proxy,
-                    provider_raw_meta=merged,
+                    external_id=external_id,
+                    name=str(merged.get("name") or external_id),
+                    proxy_summary=proxy_summary,
                     remark=str(merged.get("remark") or ""),
                     is_running=is_running,
                     running_status="运行中" if is_running else "未运行",
                     last_used_at=last_used_at,
                 )
             )
-        items.sort(key=lambda item: (item.provider_env_name.lower(), item.provider_env_id))
+        items.sort(key=lambda item: (item.name.lower(), item.external_id))
         return items
 
-    async def get_existing_env(self, provider_env_id: str) -> ProviderEnvInfo | None:
-        target = str(provider_env_id)
+    async def get_existing_env(self, name: str) -> ProviderEnvInfo | None:
+        target = str(name).strip()
         for item in await self.list_existing_envs():
-            if item.provider_env_id == target:
+            if item.name == target:
                 return item
         return None
 
     async def build_imported_environment(self, info: ProviderEnvInfo) -> Environment:
         imported = await super().build_imported_environment(info)
         imported.capabilities = {"page", "cookies", "fingerprint"}
-        imported.handle = BrowserHandle(browser_id=str(info.provider_env_id))
+        imported.handle = BrowserHandle(browser_id=str(info.external_id))
         return imported
 
     async def update(self, env: Environment, config: dict) -> bool:

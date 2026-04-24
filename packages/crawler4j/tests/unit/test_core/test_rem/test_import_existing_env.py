@@ -26,8 +26,6 @@ async def test_list_unsynced_provider_envs_filters_existing_provider_name(monkey
             provider="virtualbrowser",
             status=EnvStatus.READY,
             external_id="local-old-id",
-            provider_env_id="local-old-id",
-            provider_env_name="already-synced",
         )
     )
 
@@ -38,20 +36,20 @@ async def test_list_unsynced_provider_envs_filters_existing_provider_name(monkey
                 ProviderEnvInfo(
                     provider="virtualbrowser",
                     provider_label="Virtual Browser",
-                    provider_env_id="provider-new-id",
-                    provider_env_name="already-synced",
+                    external_id="provider-new-id",
+                    name="already-synced",
                 ),
                 ProviderEnvInfo(
                     provider="virtualbrowser",
                     provider_label="Virtual Browser",
-                    provider_env_id="local-old-id",
-                    provider_env_name="same-id-different-name",
+                    external_id="local-old-id",
+                    name="same-id-different-name",
                 ),
                 ProviderEnvInfo(
                     provider="virtualbrowser",
                     provider_label="Virtual Browser",
-                    provider_env_id="201",
-                    provider_env_name="unsynced",
+                    external_id="201",
+                    name="unsynced",
                 ),
             ]
         ),
@@ -61,7 +59,7 @@ async def test_list_unsynced_provider_envs_filters_existing_provider_name(monkey
 
     unsynced = await manager.list_unsynced_provider_envs("virtualbrowser")
 
-    assert [item.provider_env_id for item in unsynced] == ["local-old-id", "201"]
+    assert [item.external_id for item in unsynced] == ["local-old-id", "201"]
 
 
 @pytest.mark.asyncio
@@ -74,16 +72,14 @@ async def test_import_existing_env_reuses_existing_provider_name(monkeypatch):
             provider="virtualbrowser",
             status=EnvStatus.READY,
             external_id="local-old-id",
-            provider_env_id="local-old-id",
-            provider_env_name="vb-imported",
         )
     )
     existing = (await manager.list_envs())[0]
     provider_env = ProviderEnvInfo(
         provider="virtualbrowser",
         provider_label="Virtual Browser",
-        provider_env_id="provider-new-id",
-        provider_env_name="vb-imported",
+        external_id="provider-new-id",
+        name="vb-imported",
     )
     provider = SimpleNamespace(
         supports_existing_env_import=lambda: True,
@@ -93,23 +89,21 @@ async def test_import_existing_env_reuses_existing_provider_name(monkeypatch):
 
     monkeypatch.setattr("src.core.rem.manager.get_provider", lambda name: provider if name == "virtualbrowser" else None)
 
-    env = await manager.import_existing_env("virtualbrowser", "provider-new-id")
+    env = await manager.import_existing_env("virtualbrowser", "vb-imported")
 
     assert env.id == existing.id
     provider.build_imported_environment.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_import_existing_env_persists_provider_metadata(monkeypatch):
+async def test_import_existing_env_persists_only_provider_name_and_external_id(monkeypatch):
     manager = EnvironmentManager()
     provider_env = ProviderEnvInfo(
         provider="virtualbrowser",
         provider_label="Virtual Browser",
-        provider_env_id="301",
-        provider_env_name="vb-imported",
-        provider_group="默认分组",
-        provider_proxy={"protocol": "SOCKS5", "host": "127.0.0.1", "port": "1080"},
-        provider_raw_meta={"remark": "demo"},
+        external_id="301",
+        name="vb-imported",
+        proxy_summary="SOCKS5 127.0.0.1:1080",
         remark="demo",
         is_running=True,
         running_status="运行中",
@@ -121,32 +115,27 @@ async def test_import_existing_env_persists_provider_metadata(monkeypatch):
         get_existing_env=AsyncMock(return_value=provider_env),
         build_imported_environment=AsyncMock(
             side_effect=lambda info: Environment(
-                name=info.provider_env_name,
+                name=info.name,
                 kind=EnvKind.BROWSER,
                 provider=info.provider,
                 status=EnvStatus.READY,
-                external_id=info.provider_env_id,
-                provider_env_id=info.provider_env_id,
-                provider_env_name=info.provider_env_name,
-                provider_group=info.provider_group,
-                provider_proxy=info.provider_proxy,
-                provider_raw_meta=info.provider_raw_meta,
-                imported_at=1_746_000_001,
+                external_id=info.external_id,
             )
         ),
     )
 
     monkeypatch.setattr("src.core.rem.manager.get_provider", lambda name: provider if name == "virtualbrowser" else None)
 
-    env = await manager.import_existing_env("virtualbrowser", "301")
+    env = await manager.import_existing_env("virtualbrowser", "vb-imported")
 
     reloaded = await manager.get_env(env.id)
     assert reloaded is not None
     assert reloaded.provider == "virtualbrowser"
+    assert reloaded.name == "vb-imported"
     assert reloaded.external_id == "301"
-    assert reloaded.provider_env_id == "301"
-    assert reloaded.provider_env_name == "vb-imported"
-    assert reloaded.provider_group == "默认分组"
-    assert reloaded.provider_proxy == {"protocol": "SOCKS5", "host": "127.0.0.1", "port": "1080"}
-    assert reloaded.provider_raw_meta == {"remark": "demo"}
-    assert reloaded.imported_at == 1_746_000_001
+    assert not hasattr(reloaded, "provider_env_id")
+    assert not hasattr(reloaded, "provider_env_name")
+    assert not hasattr(reloaded, "provider_group")
+    assert not hasattr(reloaded, "provider_proxy")
+    assert not hasattr(reloaded, "provider_raw_meta")
+    assert not hasattr(reloaded, "imported_at")

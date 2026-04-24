@@ -784,14 +784,14 @@ class EnvListWidget(QWidget):
         self,
         *,
         provider_name: str,
-        provider_env_id: str,
+        env_name: str,
         module_name: str,
         workflow_name: str,
     ) -> None:
         try:
             result = await self._import_job_service.import_and_run(
                 provider_name=provider_name,
-                provider_env_id=provider_env_id,
+                env_name=env_name,
                 module_name=module_name,
                 workflow_name=workflow_name,
             )
@@ -906,7 +906,7 @@ class EnvListWidget(QWidget):
         self._schedule_operation(
             self._async_import_existing_env_and_run(
                 provider_name=values["provider"],
-                provider_env_id=values["provider_env_id"],
+                env_name=values["name"],
                 module_name=values["module_name"],
                 workflow_name=values["workflow_name"],
             ),

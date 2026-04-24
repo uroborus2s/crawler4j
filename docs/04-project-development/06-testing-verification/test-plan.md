@@ -120,7 +120,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-04-25 | 补充“从已有环境导入”名称唯一性回归：`test_import_existing_env.py` 锁定同名不同外部 ID 会被视为已导入、同外部 ID 不同名不会误判；`test_state_db_migration.py` 锁定状态库唯一索引切到 `(provider, provider_env_name)` 并保留重复 `provider_env_id` | Codex |
+| 2026-04-25 | 补充“从已有环境导入”字段删除与名称唯一性回归：`test_import_existing_env.py` 锁定同 provider 同名会被视为已导入，`test_state_db_migration.py` 锁定状态库删除旧 provider 扩展列并把唯一索引切到 `(provider, name)`，UI 与导入任务服务回归锁定只传 `provider/name/import_mode` | Codex |
 | 2026-04-24 | 新增 Hosted UI 页面级滚动配置回归：`test_hosted_ui_card.py` 现锁定 `Page.scroll.vertical = hidden` 的 schema 规范化与非法值拒绝；`test_managed_page_scroll.py` 通过隔离 `ModuleUIRuntimeBridge` 的方式锁定 `ManagedPageRenderer` 会把 Hosted Page 外层 `QScrollArea` 切到 `ScrollBarAlwaysOff/AsNeeded`，避免“今日运营看板”这类页面继续误显示竖向滚动槽 | Codex |
 | 2026-04-24 | 新增 `test_confirm_dialog.py`，锁定共享危险确认框 `ConfirmDialog` 的深色背景、标题/正文文案颜色，以及 `confirmCancel` / `confirmDanger` 两个按钮选择器，避免共享表格删除确认面板再次回退到系统默认配色 | Codex |
 | 2026-04-24 | 继续补强宿主 UI 生命周期回归：`test_app.py` 新增 `QEvent.Type.Quit` 延后退出路径，并锁定宿主入口会先完成 `TaskService.stop()` / `DebugService.shutdown()` / `PlaywrightManager.force_shutdown()` 再结束 Qt 事件循环，覆盖 Windows 打包态曾复现的 `Event loop stopped before Future completed` | Codex |

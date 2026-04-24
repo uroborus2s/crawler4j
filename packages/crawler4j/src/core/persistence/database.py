@@ -598,72 +598,47 @@ def _init_state_db() -> None:
             row["name"]
             for row in conn.execute("PRAGMA table_info(environments)").fetchall()
         }
-        env_column_defs = {
-            "provider_env_id": "TEXT",
-            "provider_env_name": "TEXT",
-            "provider_group": "TEXT",
-            "provider_proxy": "TEXT",
-            "provider_raw_meta": "TEXT",
-            "imported_at": "INTEGER",
+        obsolete_env_columns = {
+            "provider_env_id",
+            "provider_env_name",
+            "provider_group",
+            "provider_proxy",
+            "provider_raw_meta",
+            "imported_at",
         }
-        for column_name, column_type in env_column_defs.items():
-            if column_name not in existing_columns:
-                conn.execute(f"ALTER TABLE environments ADD COLUMN {column_name} {column_type}")
+        conn.execute("DROP INDEX IF EXISTS idx_env_provider_env_id")
+        conn.execute("DROP INDEX IF EXISTS idx_env_provider_env_name")
+        conn.execute("DROP INDEX IF EXISTS idx_env_provider_source_key")
+        for column_name in obsolete_env_columns & existing_columns:
+            conn.execute(f"ALTER TABLE environments DROP COLUMN {column_name}")
         conn.execute(
             """
             UPDATE environments
-            SET provider_env_id = COALESCE(NULLIF(provider_env_id, ''), external_id)
-            WHERE external_id IS NOT NULL AND external_id <> ''
+            SET name = TRIM(name)
+            WHERE name IS NOT NULL
             """
         )
         conn.execute(
             """
             UPDATE environments
-            SET provider_env_name = COALESCE(NULLIF(provider_env_name, ''), name)
-            WHERE name IS NOT NULL AND name <> ''
-            """
-        )
-        conn.execute(
-            """
-            UPDATE environments
-            SET provider_env_name = TRIM(provider_env_name)
-            WHERE provider_env_name IS NOT NULL
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_env_provider_env_id
-            ON environments(provider_env_id)
-            """
-        )
-        conn.execute(
-            """
-            UPDATE environments
-            SET provider_env_name = NULL
-            WHERE provider_env_name IS NOT NULL
-              AND provider_env_name <> ''
+            SET name = NULL
+            WHERE name IS NOT NULL
+              AND name <> ''
               AND id NOT IN (
                   SELECT MIN(id)
                   FROM environments
-                  WHERE provider_env_name IS NOT NULL
-                    AND provider_env_name <> ''
-                  GROUP BY provider, provider_env_name
+                  WHERE name IS NOT NULL
+                    AND name <> ''
+                  GROUP BY provider, name
               )
             """
         )
         conn.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_env_provider_env_name
-            ON environments(provider_env_name)
-            """
-        )
-        conn.execute("DROP INDEX IF EXISTS idx_env_provider_source_key")
-        conn.execute(
-            """
-            CREATE UNIQUE INDEX idx_env_provider_source_key
-            ON environments(provider, provider_env_name)
-            WHERE provider_env_name IS NOT NULL
-              AND provider_env_name <> ''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_env_provider_name
+            ON environments(provider, name)
+            WHERE name IS NOT NULL
+              AND name <> ''
             """
         )
 

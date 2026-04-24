@@ -579,9 +579,8 @@ async def test_env_list_widget_import_existing_env_starts_background_job(qtbot, 
         list_unsynced_provider_envs=AsyncMock(
             return_value=[
                 SimpleNamespace(
-                    provider_env_id="vb-101",
-                    provider_env_name="VB Env 101",
-                    provider_group="默认分组",
+                    external_id="vb-101",
+                    name="VB Env 101",
                     remark="demo",
                     proxy_summary_text="SOCKS5 127.0.0.1:1080",
                     running_status="运行中",
@@ -623,7 +622,7 @@ async def test_env_list_widget_import_existing_env_starts_background_job(qtbot, 
                 "provider": "virtualbrowser",
                 "module_name": "demo_module",
                 "workflow_name": "main_flow",
-                "provider_env_id": "vb-101",
+                "name": "VB Env 101",
             }
 
         def open(self):  # type: ignore[override]
@@ -647,7 +646,7 @@ async def test_env_list_widget_import_existing_env_starts_background_job(qtbot, 
     manager.list_unsynced_provider_envs.assert_awaited_once_with("virtualbrowser")
     import_service.import_and_run.assert_awaited_once_with(
         provider_name="virtualbrowser",
-        provider_env_id="vb-101",
+        env_name="VB Env 101",
         module_name="demo_module",
         workflow_name="main_flow",
     )

@@ -59,8 +59,8 @@ class TestEnvironment:
         assert env.status == EnvStatus.READY
         assert env.capabilities == {"page", "cookies"}
 
-    def test_provider_metadata_roundtrip(self):
-        """测试来源环境字段保留。"""
+    def test_environment_roundtrip_uses_provider_and_name_only(self):
+        """测试环境来源唯一性只保留 provider/name。"""
         env = Environment(
             id=9,
             name="imported-env",
@@ -68,22 +68,15 @@ class TestEnvironment:
             provider="virtualbrowser",
             status=EnvStatus.READY,
             external_id="321",
-            provider_env_id="321",
-            provider_env_name="源环境",
-            provider_group="默认分组",
-            provider_proxy={"host": "127.0.0.1", "port": "1080"},
-            provider_raw_meta={"remark": "demo"},
-            imported_at=1234567890,
         )
 
         restored = Environment.from_dict(env.to_dict())
 
-        assert restored.provider_env_id == "321"
-        assert restored.provider_env_name == "源环境"
-        assert restored.provider_group == "默认分组"
-        assert restored.provider_proxy == {"host": "127.0.0.1", "port": "1080"}
-        assert restored.provider_raw_meta == {"remark": "demo"}
-        assert restored.imported_at == 1234567890
+        assert restored.provider == "virtualbrowser"
+        assert restored.name == "imported-env"
+        assert restored.external_id == "321"
+        assert "provider_env_id" not in restored.to_dict()
+        assert "provider_env_name" not in restored.to_dict()
 
 
 class TestProxyConfig:
@@ -201,20 +194,19 @@ class TestProviderEnvInfo:
         info = ProviderEnvInfo(
             provider="virtualbrowser",
             provider_label="Virtual Browser",
-            provider_env_id="101",
-            provider_env_name="env-101",
+            external_id="101",
+            name="env-101",
             proxy_summary="SOCKS5 127.0.0.1:1080",
         )
 
         assert info.proxy_summary_text == "SOCKS5 127.0.0.1:1080"
 
-    def test_proxy_summary_falls_back_to_proxy_fields(self):
+    def test_proxy_summary_defaults_to_dash(self):
         info = ProviderEnvInfo(
             provider="virtualbrowser",
             provider_label="Virtual Browser",
-            provider_env_id="102",
-            provider_env_name="env-102",
-            provider_proxy={"protocol": "HTTP", "host": "10.0.0.1", "port": "8080"},
+            external_id="102",
+            name="env-102",
         )
 
-        assert info.proxy_summary_text == "HTTP 10.0.0.1:8080"
+        assert info.proxy_summary_text == "-"

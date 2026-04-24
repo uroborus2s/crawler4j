@@ -117,7 +117,7 @@ def is_gc_reapable_status(status: EnvStatus) -> bool:
     return status in GC_REAPABLE_STATUSES
 
 
-def _normalize_provider_env_name(name: object) -> str:
+def _normalize_env_name(name: object) -> str:
     return str(name or "").strip()
 
 
@@ -328,16 +328,15 @@ class EnvironmentManager:
     async def get_env_by_provider_name(
         self,
         provider_name: str,
-        provider_env_name: str,
+        name: str,
     ) -> Environment | None:
-        """按来源系统环境名称查找宿主环境。"""
+        """按 provider/name 查找宿主环境。"""
         target_provider = str(provider_name or "").strip()
-        target_env_name = _normalize_provider_env_name(provider_env_name)
-        if not target_provider or not target_env_name:
+        target_name = _normalize_env_name(name)
+        if not target_provider or not target_name:
             return None
         for env in await self.list_envs():
-            source_name = _normalize_provider_env_name(env.provider_env_name or env.name)
-            if env.provider == target_provider and source_name == target_env_name:
+            if env.provider == target_provider and _normalize_env_name(env.name) == target_name:
                 return env
         return None
 
@@ -348,45 +347,50 @@ class EnvironmentManager:
             raise ValueError(f"Provider 不支持已有环境导入: {provider_name}")
         provider_key = str(getattr(provider, "name", provider_name) or provider_name).strip()
         existing_names = {
-            (env.provider, _normalize_provider_env_name(env.provider_env_name or env.name))
+            (env.provider, _normalize_env_name(env.name))
             for env in await self.list_envs()
-            if _normalize_provider_env_name(env.provider_env_name or env.name)
+            if _normalize_env_name(env.name)
         }
         items = await provider.list_existing_envs()
         return [
             item
             for item in items
-            if (
+            if _normalize_env_name(item.name)
+            and (
                 str(item.provider or provider_key).strip(),
-                _normalize_provider_env_name(item.provider_env_name),
+                _normalize_env_name(item.name),
             )
             not in existing_names
         ]
 
-    async def import_existing_env(self, provider_name: str, provider_env_id: str) -> Environment:
+    async def import_existing_env(self, provider_name: str, name: str) -> Environment:
         """把来源系统中的已有环境导入到宿主环境表。"""
         provider = get_provider(provider_name)
         if not provider or not provider.supports_existing_env_import():
             raise ValueError(f"Provider 不支持已有环境导入: {provider_name}")
         provider_key = str(getattr(provider, "name", provider_name) or provider_name).strip()
+        target_name = _normalize_env_name(name)
+        if not target_name:
+            raise ValueError("来源环境名称不能为空")
 
-        info = await provider.get_existing_env(str(provider_env_id))
+        existing = await self.get_env_by_provider_name(provider_key, target_name)
+        if existing:
+            return existing
+
+        info = await provider.get_existing_env(target_name)
         if not info:
-            raise ValueError(f"来源环境不存在: {provider_name}/{provider_env_id}")
+            raise ValueError(f"来源环境不存在: {provider_name}/{target_name}")
 
-        source_name = _normalize_provider_env_name(info.provider_env_name) or f"{provider_key}-{info.provider_env_id}"
+        source_name = _normalize_env_name(info.name)
+        if not source_name:
+            raise ValueError(f"来源环境名称不能为空: {provider_name}/{target_name}")
         existing = await self.get_env_by_provider_name(provider_key, source_name)
         if existing:
             return existing
 
         env = await provider.build_imported_environment(info)
         env.provider = provider_key
-        env.external_id = str(info.provider_env_id)
-        env.provider_env_id = str(info.provider_env_id)
-        env.provider_env_name = source_name
-        env.provider_group = info.provider_group
-        env.provider_proxy = info.provider_proxy
-        env.provider_raw_meta = info.provider_raw_meta
+        env.external_id = str(info.external_id or "")
         env.status = EnvStatus.READY
         env.name = env.name or source_name
 
@@ -1212,11 +1216,9 @@ class EnvironmentManager:
                     INSERT INTO environments (
                         name, kind, provider, status, external_id, lease_id, task_run_id,
                         last_used_at, daily_usage_count, daily_usage_date,
-                        proxy_config_json, provider_env_id, provider_env_name, provider_group,
-                        provider_proxy, provider_raw_meta, imported_at,
-                        capabilities, created_at, updated_at
+                        proxy_config_json, capabilities, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         env.name,
@@ -1230,12 +1232,6 @@ class EnvironmentManager:
                         env.daily_usage_count,
                         env.daily_usage_date,
                         proxy_config_json,
-                        env.provider_env_id,
-                        env.provider_env_name,
-                        env.provider_group,
-                        None,
-                        None,
-                        env.imported_at,
                         json.dumps({"capabilities": list(env.capabilities)}),
                         env.created_at,
                         env.updated_at,

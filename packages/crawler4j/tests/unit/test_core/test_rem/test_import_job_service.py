@@ -12,13 +12,9 @@ from src.core.rem.import_job_service import ExistingEnvImportJobService
 async def test_import_job_service_builds_fixed_env_run_profile():
     env = SimpleNamespace(
         id=21,
-        name="imported-env",
+        name="VB Imported",
         provider="virtualbrowser",
-        provider_env_id="301",
         external_id="301",
-        provider_env_name="VB Imported",
-        provider_group="默认分组",
-        provider_proxy={"protocol": "SOCKS5", "host": "127.0.0.1", "port": "1080"},
     )
     registry = SimpleNamespace(
         get_module=lambda module_name: SimpleNamespace(
@@ -48,7 +44,7 @@ async def test_import_job_service_builds_fixed_env_run_profile():
 
     result = await service.import_and_run(
         provider_name="virtualbrowser",
-        provider_env_id="301",
+        env_name="VB Imported",
         module_name="demo_module",
         workflow_name="main_flow",
     )
@@ -59,10 +55,7 @@ async def test_import_job_service_builds_fixed_env_run_profile():
     assert saved_job.run_profile.resource.acquisition.env_type == EnvType.VIRTUAL_BROWSER
     assert saved_job.run_profile.resource.acquisition.creation.params == {
         "provider": "virtualbrowser",
-        "provider_env_id": "301",
-        "provider_env_name": "VB Imported",
-        "provider_group": "默认分组",
-        "provider_proxy": {"protocol": "SOCKS5", "host": "127.0.0.1", "port": "1080"},
+        "name": "VB Imported",
         "import_mode": "existing_env",
     }
     dispatcher.dispatch.assert_awaited_once_with(saved_job)
