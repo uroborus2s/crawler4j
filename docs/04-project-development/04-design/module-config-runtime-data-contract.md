@@ -4,8 +4,8 @@
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
-**关联 ID：** `API-005`, `API-006`, `API-008`, `API-009`  
-**最后更新：** 2026-04-23
+**关联 ID：** `API-005`, `API-006`, `API-008`, `API-009`, `API-010`
+**最后更新：** 2026-04-24
 
 ## 1. 设计目标
 
@@ -54,7 +54,7 @@
 | `job_params` | 当前作业的一次性覆盖输入 |
 | `params` | `execution_params + job_params` 合并后的有效输入 |
 | `devel_mode` | 当前是否为 DevLink 开发态 |
-| `creation_params` | 本次环境创建参数 |
+| `creation_params` | 本次环境创建参数；已有环境导入时也通过这里透传来源元数据 |
 | `env_action` | 本次终态环境动作结果 |
 
 约束：
@@ -62,6 +62,24 @@
 - 模块不得覆盖或重写这些键。
 - `workflow`、`devel_mode`、`creation_params` 不能再混进 `ctx.config`。
 - 本次执行的临时变量也不要写入 `ctx.runtime`，应放到局部变量或 `ctx.state`。
+
+### 4.1 已有环境导入场景
+
+当宿主通过 `环境管理 -> 从已有环境导入` 启动模块 workflow 时，`ctx.runtime["creation_params"]` 还会补充以下键：
+
+| 键 | 含义 |
+|---|---|
+| `provider` | 外部环境来源，例如 `virtual_browser` |
+| `provider_env_id` | 来源系统中的环境 ID |
+| `provider_env_name` | 来源系统中的环境名称 |
+| `provider_group` | 来源系统中的环境分组 |
+| `provider_proxy` | 来源系统返回的代理摘要或原始代理对象 |
+| `import_mode` | 固定为 `existing_env` |
+
+该场景还有两条补充约束：
+
+- 宿主仍必须保证 `ctx.env_id` 与 `ctx.page` 可用，模块不需要自己重新绑定浏览器上下文。
+- `module.yaml.workflows[].host_scenarios` 可选声明 `existing_env_import` 作为适配提示；宿主未命中该声明时只显示风险提示，不作为执行门禁。
 
 ## 5. 页面 schema 契约
 

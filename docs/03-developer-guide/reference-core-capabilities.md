@@ -78,6 +78,24 @@ async def run(ctx: TaskContext):
 - `dict`：宿主归一化为成功结果
 - `None`：宿主会把当前 `ctx.state` 归一化为成功结果
 
+如果某个 workflow 明确适配“已有环境导入”场景，可以在 `module.yaml` 里可选声明：
+
+```yaml
+workflows:
+  - name: reuse_logged_in_env
+    display_name: 复用已登录环境
+    description: 从外部浏览器已有环境导入后执行
+    host_scenarios:
+      - existing_env_import
+```
+
+约束如下：
+
+- 宿主全局环境页的 `从已有环境导入` 入口仍会展示该模块全部 workflow。
+- 缺少 `host_scenarios: [existing_env_import]` 只会触发风险提示，不会阻断执行。
+- 该场景下宿主保证 `ctx.env_id` 与 `ctx.page` 可用。
+- 宿主会在 `ctx.runtime["creation_params"]` 中写入 `provider`、`provider_env_id`、`provider_env_name`、`provider_group`、`provider_proxy` 以及 `import_mode="existing_env"`，模块可据此判断当前运行来自已有环境导入。
+
 ## 生命周期 Hook
 
 当前宿主识别的 Hook 文件名固定为：

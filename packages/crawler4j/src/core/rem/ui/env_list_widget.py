@@ -22,9 +22,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.rem.import_job_service import get_existing_env_import_job_service
 from src.core.rem import EnvKind, EnvStatus
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.pool import EnvPool
+from src.core.rem.ui.import_existing_env_dialog import ImportExistingEnvDialog
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
@@ -381,6 +383,7 @@ class EnvListWidget(QWidget):
         # 使用全局 EnvironmentManager 的共享 pool 实例
         from src.core.rem.manager import get_environment_manager
         self._manager = get_environment_manager()
+        self._import_job_service = get_existing_env_import_job_service()
         self._pool = self._manager.pool
         self._loader_thread = None
         self._display_items: list[EnvDisplayItem] = []
@@ -419,6 +422,20 @@ class EnvListWidget(QWidget):
         """)
         self.create_btn.clicked.connect(self._create_env)
         header.addWidget(self.create_btn)
+
+        self.import_existing_btn = QPushButton("从已有环境导入")
+        self.import_existing_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(245, 158, 11, 0.82);
+                color: black;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background: rgba(245, 158, 11, 1); }
+        """)
+        self.import_existing_btn.clicked.connect(self._import_existing_env)
+        header.addWidget(self.import_existing_btn)
         
         self.refresh_btn = QPushButton("🔄")
         self.refresh_btn.setFixedSize(32, 32)
@@ -700,6 +717,7 @@ class EnvListWidget(QWidget):
     def _apply_busy_state(self):
         """同步按钮和表格的忙碌状态。"""
         self.create_btn.setEnabled(not self._operation_in_progress)
+        self.import_existing_btn.setEnabled(not self._operation_in_progress)
         self.refresh_btn.setEnabled(not self._load_in_progress and not self._operation_in_progress)
         self.table.set_loading(self._load_in_progress)
         if not self._load_in_progress:
@@ -757,6 +775,35 @@ class EnvListWidget(QWidget):
             return
         self._on_create_finished(env)
 
+    async def _async_import_existing_env_and_run(
+        self,
+        *,
+        provider_name: str,
+        provider_env_id: str,
+        module_name: str,
+        workflow_name: str,
+    ) -> None:
+        try:
+            result = await self._import_job_service.import_and_run(
+                provider_name=provider_name,
+                provider_env_id=provider_env_id,
+                module_name=module_name,
+                workflow_name=workflow_name,
+            )
+        except Exception as exc:
+            await self._show_operation_error(str(exc))
+            return
+        self.load_data()
+        await self._show_message_async(
+            "已开始执行",
+            (
+                f"环境已导入并启动后台执行。\n"
+                f"环境 ID: {result.env.id}\n"
+                f"任务 ID: {result.task_id}"
+            ),
+            icon=QMessageBox.Icon.Information,
+        )
+
     async def _async_destroy_env(self, env_id: str):
         try:
             success = await self._manager.destroy_env(env_id)
@@ -793,6 +840,56 @@ class EnvListWidget(QWidget):
             requirement.proxy_config = ProxyConfig.from_dict(config["proxy"])
 
         self._schedule_operation(self._async_create_env(provider, config, requirement))
+
+    def _import_existing_env(self):
+        """从来源系统导入已有环境。"""
+        self._track_task(self._import_existing_env_async())
+
+    async def _import_existing_env_async(self) -> None:
+        sources = self._manager.list_existing_env_import_sources()
+        if not sources:
+            await self._show_message_async(
+                "当前不可用",
+                "当前没有可用的来源环境导入入口。",
+                icon=QMessageBox.Icon.Warning,
+            )
+            return
+
+        from src.core.mms.registry import get_module_registry
+
+        registry = get_module_registry()
+        modules = registry.get_enabled_modules()
+        if not modules:
+            await self._show_message_async(
+                "当前不可用",
+                "当前没有可用的已安装模块，无法执行导入后的 workflow。",
+                icon=QMessageBox.Icon.Warning,
+            )
+            return
+
+        env_options_by_source: dict[str, list[Any]] = {}
+        for item in sources:
+            provider_name = str(item["provider"])
+            env_options_by_source[provider_name] = await self._manager.list_unsynced_provider_envs(provider_name)
+
+        dialog = ImportExistingEnvDialog(
+            sources=sources,
+            modules=modules,
+            env_options_by_source=env_options_by_source,
+            parent=self,
+        )
+        if await self._exec_dialog_async(dialog) != int(QDialog.DialogCode.Accepted):
+            return
+
+        values = dialog.get_values()
+        self._schedule_operation(
+            self._async_import_existing_env_and_run(
+                provider_name=values["provider"],
+                provider_env_id=values["provider_env_id"],
+                module_name=values["module_name"],
+                workflow_name=values["workflow_name"],
+            )
+        )
     
     def _on_create_finished(self, env):
         """创建完成。"""

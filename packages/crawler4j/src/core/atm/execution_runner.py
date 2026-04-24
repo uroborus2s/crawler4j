@@ -72,6 +72,7 @@ class ExecutionRequest:
     state: dict[str, Any] = field(default_factory=dict)
     provider_name: str = ""
     selector_name: str = ""
+    fixed_env_id: int | None = None
     resource_pool_name: str = ""
     acquisition_mode: AcquisitionMode = AcquisitionMode.SELECT
     selector_wait_timeout: int = 60
@@ -134,6 +135,7 @@ class ExecutionRunner:
             "params": deepcopy(request.runtime_params),
             "provider_name": request.provider_name,
             "selector_name": request.selector_name,
+            "fixed_env_id": request.fixed_env_id,
             "resource_pool_name": request.resource_pool_name,
             "acquisition_mode": request.acquisition_mode.value,
             "selector_wait_timeout": request.selector_wait_timeout,
@@ -191,86 +193,28 @@ class ExecutionRunner:
             wait_timeout = int(prepare_result.get("wait_timeout", request.selector_wait_timeout))
 
             if request.acquisition_mode == AcquisitionMode.SELECT:
-                candidates = await self._list_ready_env_candidates(
-                    module_name=request.module_name,
-                    resource_pool_name=request.resource_pool_name,
-                )
-                if not candidates and request.wait_for_resource:
-                    return await self._return_waiting_for_resource(
-                        task=task,
-                        resource_pool_name=request.resource_pool_name,
-                        on_task_update=on_task_update,
-                        prepare_result=prepare_result,
-                        hooks_module=hooks_module,
-                        creation_lifecycle=request.creation_lifecycle,
-                    )
-
-                candidate_env_ids = {int(candidate.env_id) for candidate in candidates}
-
-                if request.selector_name:
-                    selected_env_id = await self.mms.run_env_selector(
-                        hooks_module,
-                        request.selector_name,
-                        prepare_context,
-                        candidates,
-                    )
+                if request.fixed_env_id is not None:
+                    selected_env_id = int(request.fixed_env_id)
+                    env = await self.rem.get_env(selected_env_id)
+                    if not env:
+                        raise RuntimeError(f"指定环境不存在: {selected_env_id}")
+                    if env.status == EnvStatus.RUNNING and env.lease_id is None:
+                        env_lease = await self.rem.lease_manager.claim_created_env(
+                            env,
+                            task.id,
+                            timeout=wait_timeout,
+                        )
+                    else:
+                        env_lease = await self.rem.lease_manager.acquire(env, task.id, timeout=wait_timeout)
+                    env_id = int(env_lease.env_id)
+                    task.lease_id = env_lease.id
+                    logger.info(f"[ATM] Task {task.id} selected fixed env {env_id}")
                 else:
-                    selected_env_id = candidates[0].env_id if candidates else None
-
-                if selected_env_id is None:
-                    if request.wait_for_resource:
-                        return await self._return_waiting_for_resource(
-                            task=task,
-                            resource_pool_name=request.resource_pool_name,
-                            on_task_update=on_task_update,
-                            prepare_result=prepare_result,
-                            hooks_module=hooks_module,
-                            creation_lifecycle=request.creation_lifecycle,
-                        )
-                    raise RuntimeError(f"环境选择回调函数返回了 none: {request.selector_name}")
-
-                selected_env_id = int(selected_env_id)
-                selected_from_candidates = selected_env_id in candidate_env_ids
-
-                env = await self.rem.get_env(selected_env_id)
-                if not env:
-                    if request.wait_for_resource and selected_from_candidates:
-                        logger.debug(f"[ATM] Task {task.id} lost fixed-pool env {selected_env_id} before lease; requeueing.")
-                        return await self._return_waiting_for_resource(
-                            task=task,
-                            resource_pool_name=request.resource_pool_name,
-                            on_task_update=on_task_update,
-                            prepare_result=prepare_result,
-                            hooks_module=hooks_module,
-                            creation_lifecycle=request.creation_lifecycle,
-                        )
-                    raise RuntimeError(f"环境选择回调函数返回了不存在的环境: {selected_env_id}")
-
-                try:
-                    env_lease = await self.rem.lease_manager.acquire(env, task.id, timeout=wait_timeout)
-                except EnvUnavailableError:
-                    if request.wait_for_resource and selected_from_candidates:
-                        logger.debug(f"[ATM] Task {task.id} lost fixed-pool env {selected_env_id} lease race; requeueing.")
-                        return await self._return_waiting_for_resource(
-                            task=task,
-                            resource_pool_name=request.resource_pool_name,
-                            on_task_update=on_task_update,
-                            prepare_result=prepare_result,
-                            hooks_module=hooks_module,
-                            creation_lifecycle=request.creation_lifecycle,
-                        )
-                    raise
-                if request.wait_for_resource and selected_from_candidates:
-                    still_allocatable = await self._is_fixed_pool_env_allocatable(
-                        env_id=selected_env_id,
+                    candidates = await self._list_ready_env_candidates(
                         module_name=request.module_name,
                         resource_pool_name=request.resource_pool_name,
                     )
-                    if not still_allocatable:
-                        logger.debug(
-                            f"[ATM] Task {task.id} found fixed-pool env {selected_env_id} no longer allocatable after lease; requeueing."
-                        )
-                        await self.rem.release(env_lease)
+                    if not candidates and request.wait_for_resource:
                         return await self._return_waiting_for_resource(
                             task=task,
                             resource_pool_name=request.resource_pool_name,
@@ -279,11 +223,85 @@ class ExecutionRunner:
                             hooks_module=hooks_module,
                             creation_lifecycle=request.creation_lifecycle,
                         )
-                env_id = int(env_lease.env_id)
-                task.lease_id = env_lease.id
-                logger.info(
-                    f"[ATM] Task {task.id} selected env {env_id} by selector {request.selector_name}"
-                )
+                    candidate_env_ids = {int(candidate.env_id) for candidate in candidates}
+
+                    if request.selector_name:
+                        selected_env_id = await self.mms.run_env_selector(
+                            hooks_module,
+                            request.selector_name,
+                            prepare_context,
+                            candidates,
+                        )
+                    else:
+                        selected_env_id = candidates[0].env_id if candidates else None
+
+                    if selected_env_id is None:
+                        if request.wait_for_resource:
+                            return await self._return_waiting_for_resource(
+                                task=task,
+                                resource_pool_name=request.resource_pool_name,
+                                on_task_update=on_task_update,
+                                prepare_result=prepare_result,
+                                hooks_module=hooks_module,
+                                creation_lifecycle=request.creation_lifecycle,
+                            )
+                        raise RuntimeError(f"环境选择回调函数返回了 none: {request.selector_name}")
+
+                    selected_env_id = int(selected_env_id)
+                    selected_from_candidates = selected_env_id in candidate_env_ids
+
+                    env = await self.rem.get_env(selected_env_id)
+                    if not env:
+                        if request.wait_for_resource and selected_from_candidates:
+                            logger.debug(f"[ATM] Task {task.id} lost fixed-pool env {selected_env_id} before lease; requeueing.")
+                            return await self._return_waiting_for_resource(
+                                task=task,
+                                resource_pool_name=request.resource_pool_name,
+                                on_task_update=on_task_update,
+                                prepare_result=prepare_result,
+                                hooks_module=hooks_module,
+                                creation_lifecycle=request.creation_lifecycle,
+                            )
+                        raise RuntimeError(f"环境选择回调函数返回了不存在的环境: {selected_env_id}")
+
+                    try:
+                        env_lease = await self.rem.lease_manager.acquire(env, task.id, timeout=wait_timeout)
+                    except EnvUnavailableError:
+                        if request.wait_for_resource and selected_from_candidates:
+                            logger.debug(f"[ATM] Task {task.id} lost fixed-pool env {selected_env_id} lease race; requeueing.")
+                            return await self._return_waiting_for_resource(
+                                task=task,
+                                resource_pool_name=request.resource_pool_name,
+                                on_task_update=on_task_update,
+                                prepare_result=prepare_result,
+                                hooks_module=hooks_module,
+                                creation_lifecycle=request.creation_lifecycle,
+                            )
+                        raise
+                    if request.wait_for_resource and selected_from_candidates:
+                        still_allocatable = await self._is_fixed_pool_env_allocatable(
+                            env_id=selected_env_id,
+                            module_name=request.module_name,
+                            resource_pool_name=request.resource_pool_name,
+                        )
+                        if not still_allocatable:
+                            logger.debug(
+                                f"[ATM] Task {task.id} found fixed-pool env {selected_env_id} no longer allocatable after lease; requeueing."
+                            )
+                            await self.rem.release(env_lease)
+                            return await self._return_waiting_for_resource(
+                                task=task,
+                                resource_pool_name=request.resource_pool_name,
+                                on_task_update=on_task_update,
+                                prepare_result=prepare_result,
+                                hooks_module=hooks_module,
+                                creation_lifecycle=request.creation_lifecycle,
+                            )
+                    env_id = int(env_lease.env_id)
+                    task.lease_id = env_lease.id
+                    logger.info(
+                        f"[ATM] Task {task.id} selected env {env_id} by selector {request.selector_name}"
+                    )
             elif request.acquisition_mode == AcquisitionMode.CREATE:
                 merged_creation_params = _deep_merge_dict(
                     request.creation_params,

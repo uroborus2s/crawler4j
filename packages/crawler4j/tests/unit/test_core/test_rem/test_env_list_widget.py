@@ -166,12 +166,14 @@ def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
 
     assert widget._begin_operation() is True
     assert widget.create_btn.isEnabled() is False
+    assert widget.import_existing_btn.isEnabled() is False
     assert widget.refresh_btn.isEnabled() is False
     assert widget.table.isEnabled() is False
 
     widget._end_operation()
 
     assert widget.create_btn.isEnabled() is True
+    assert widget.import_existing_btn.isEnabled() is True
     assert widget.refresh_btn.isEnabled() is True
     assert widget.table.isEnabled() is True
 
@@ -385,3 +387,90 @@ async def test_env_list_widget_load_data_queues_refresh_when_loading(qtbot, monk
     assert widget._load_in_progress is False
     assert widget.table.displayed_rows()[0]["status"]["text"] == "启动中"
     assert widget.stats_label.text() == "总计: 1 | 就绪: 0 | 忙碌: 1"
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_import_existing_env_starts_background_job(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    manager = SimpleNamespace(
+        pool=SimpleNamespace(),
+        list_existing_env_import_sources=lambda: [
+            {"provider": "virtualbrowser", "label": "Virtual Browser"}
+        ],
+        list_unsynced_provider_envs=AsyncMock(
+            return_value=[
+                SimpleNamespace(
+                    provider_env_id="vb-101",
+                    provider_env_name="VB Env 101",
+                    provider_group="默认分组",
+                    remark="demo",
+                    proxy_summary_text="SOCKS5 127.0.0.1:1080",
+                    running_status="运行中",
+                    last_used_at=1_746_000_000,
+                )
+            ]
+        ),
+    )
+    import_service = SimpleNamespace(
+        import_and_run=AsyncMock(
+            return_value=SimpleNamespace(
+                env=SimpleNamespace(id=33),
+                task_id="task-33",
+                job_id="job-33",
+            )
+        )
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+    monkeypatch.setattr(env_list_widget, "get_existing_env_import_job_service", lambda: import_service)
+
+    import src.core.mms.registry as registry_module
+
+    module = SimpleNamespace(
+        name="demo_module",
+        manifest=SimpleNamespace(
+            display_name="Demo Module",
+            workflows=[SimpleNamespace(name="main_flow", display_name="Main Flow", host_scenarios=["existing_env_import"])],
+        ),
+    )
+    monkeypatch.setattr(registry_module, "get_module_registry", lambda: SimpleNamespace(get_enabled_modules=lambda: [module]))
+
+    class FakeDialog(QDialog):
+        def __init__(self, parent=None, **kwargs):
+            super().__init__(parent)
+            self._values = {
+                "provider": "virtualbrowser",
+                "module_name": "demo_module",
+                "workflow_name": "main_flow",
+                "provider_env_id": "vb-101",
+            }
+
+        def open(self):  # type: ignore[override]
+            asyncio.get_running_loop().call_soon(
+                lambda: self.done(int(QDialog.DialogCode.Accepted))
+            )
+
+        def get_values(self):
+            return dict(self._values)
+
+    monkeypatch.setattr(env_list_widget, "ImportExistingEnvDialog", FakeDialog)
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget.load_data = MagicMock()
+    widget._show_message_async = AsyncMock()
+
+    await widget._import_existing_env_async()
+    await _drain_widget_tasks(widget)
+
+    manager.list_unsynced_provider_envs.assert_awaited_once_with("virtualbrowser")
+    import_service.import_and_run.assert_awaited_once_with(
+        provider_name="virtualbrowser",
+        provider_env_id="vb-101",
+        module_name="demo_module",
+        workflow_name="main_flow",
+    )
+    widget.load_data.assert_called_once_with()

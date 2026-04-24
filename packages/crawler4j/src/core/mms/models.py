@@ -63,6 +63,7 @@ class WorkflowInfo:
     description: str = ""
     entry_class: str = ""
     tasks: list[str] = field(default_factory=list)
+    host_scenarios: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -247,6 +248,7 @@ class ModuleManifest:
                     "description": w.description,
                     "entry_class": w.entry_class,
                     "tasks": w.tasks,
+                    **({"host_scenarios": w.host_scenarios} if w.host_scenarios else {}),
                 }
                 for w in self.workflows
             ],
@@ -267,6 +269,7 @@ class ModuleManifest:
                 description=w.get("description", ""),
                 entry_class=w.get("entry_class", ""),
                 tasks=w.get("tasks", []),
+                host_scenarios=w.get("host_scenarios", []),
             ))
         
         ui_extension = UIExtensionInfo.from_dict(data.get("ui_extension"))

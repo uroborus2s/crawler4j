@@ -594,6 +594,49 @@ def _init_state_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_meta_env ON env_metadata(env_id);
             CREATE INDEX IF NOT EXISTS idx_meta_ns_key ON env_metadata(namespace, key);
         """)
+        existing_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(environments)").fetchall()
+        }
+        env_column_defs = {
+            "provider_env_id": "TEXT",
+            "provider_env_name": "TEXT",
+            "provider_group": "TEXT",
+            "provider_proxy": "TEXT",
+            "provider_raw_meta": "TEXT",
+            "imported_at": "INTEGER",
+        }
+        for column_name, column_type in env_column_defs.items():
+            if column_name not in existing_columns:
+                conn.execute(f"ALTER TABLE environments ADD COLUMN {column_name} {column_type}")
+        conn.execute(
+            """
+            UPDATE environments
+            SET provider_env_id = COALESCE(NULLIF(provider_env_id, ''), external_id)
+            WHERE external_id IS NOT NULL AND external_id <> ''
+            """
+        )
+        conn.execute(
+            """
+            UPDATE environments
+            SET provider_env_name = COALESCE(NULLIF(provider_env_name, ''), name)
+            WHERE name IS NOT NULL AND name <> ''
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_env_provider_env_id
+            ON environments(provider_env_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_env_provider_source_key
+            ON environments(provider, provider_env_id)
+            WHERE provider_env_id IS NOT NULL
+              AND provider_env_id <> ''
+            """
+        )
 
 
 def _init_data_db() -> None:

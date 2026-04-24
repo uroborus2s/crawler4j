@@ -30,4 +30,5 @@ Current pool/data architecture:
 
 - Fixed-pool Service jobs use host-managed waiting semantics when `resource_pool` is configured.
 - REM remains the environment owner, while ATM consumes module-provided env selectors and pool eligibility data.
+- REM now also owns existing-env import. Provider-side environments are keyed by `(provider, provider_env_id)`, diffed against the local environment table, imported into REM, and then executed by ATM through a fixed `env_id` handoff instead of a module-owned sync path.
 - Module data resources, database views, and audit events remain Core-owned persistence capabilities exposed to modules only through `ctx.tools`.

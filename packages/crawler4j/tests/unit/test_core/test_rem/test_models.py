@@ -7,6 +7,7 @@ from src.core.rem.models import (
     EnvKind,
     EnvLease,
     EnvRequirement,
+    ProviderEnvInfo,
     ProxyConfig,
     ProxyMode,
     EnvStatus,
@@ -57,6 +58,32 @@ class TestEnvironment:
         assert env.kind == EnvKind.BROWSER
         assert env.status == EnvStatus.READY
         assert env.capabilities == {"page", "cookies"}
+
+    def test_provider_metadata_roundtrip(self):
+        """测试来源环境字段保留。"""
+        env = Environment(
+            id=9,
+            name="imported-env",
+            kind=EnvKind.BROWSER,
+            provider="virtualbrowser",
+            status=EnvStatus.READY,
+            external_id="321",
+            provider_env_id="321",
+            provider_env_name="源环境",
+            provider_group="默认分组",
+            provider_proxy={"host": "127.0.0.1", "port": "1080"},
+            provider_raw_meta={"remark": "demo"},
+            imported_at=1234567890,
+        )
+
+        restored = Environment.from_dict(env.to_dict())
+
+        assert restored.provider_env_id == "321"
+        assert restored.provider_env_name == "源环境"
+        assert restored.provider_group == "默认分组"
+        assert restored.provider_proxy == {"host": "127.0.0.1", "port": "1080"}
+        assert restored.provider_raw_meta == {"remark": "demo"}
+        assert restored.imported_at == 1234567890
 
 
 class TestProxyConfig:
@@ -165,3 +192,29 @@ class TestEnvRequirement:
         env = Environment(kind=EnvKind.BROWSER, provider="bitbrowser", status=EnvStatus.READY)
 
         assert req.matches(env) is False
+
+
+class TestProviderEnvInfo:
+    """测试来源环境信息。"""
+
+    def test_proxy_summary_prefers_explicit_text(self):
+        info = ProviderEnvInfo(
+            provider="virtualbrowser",
+            provider_label="Virtual Browser",
+            provider_env_id="101",
+            provider_env_name="env-101",
+            proxy_summary="SOCKS5 127.0.0.1:1080",
+        )
+
+        assert info.proxy_summary_text == "SOCKS5 127.0.0.1:1080"
+
+    def test_proxy_summary_falls_back_to_proxy_fields(self):
+        info = ProviderEnvInfo(
+            provider="virtualbrowser",
+            provider_label="Virtual Browser",
+            provider_env_id="102",
+            provider_env_name="env-102",
+            provider_proxy={"protocol": "HTTP", "host": "10.0.0.1", "port": "8080"},
+        )
+
+        assert info.proxy_summary_text == "HTTP 10.0.0.1:8080"

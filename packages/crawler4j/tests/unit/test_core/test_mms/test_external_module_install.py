@@ -55,6 +55,11 @@ def _module_yaml(module_name: str, version: str) -> str:
           - name: default
             display_name: Default
             description: Default workflow
+        data:
+          resources: []
+          views: []
+          queries: []
+          seeds: []
         """
     ).strip() + "\n"
 

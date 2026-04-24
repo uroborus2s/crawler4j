@@ -6,7 +6,7 @@
 **主要读者：** Tech Lead | 开发 | QA | 发布负责人
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
-**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `BUG-013`
+**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `API-010`, `BUG-013`
 **最后更新：** 2026-04-24
 
 ## 1. 用途与记录规则
@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | 完成全局环境页“从已有环境导入”链路：REM 环境表新增 `provider/provider_env_id/...` 来源元数据与唯一来源键 `(provider, provider_env_id)`，`VirtualBrowser` 现可拉取“来源有、本地无”的未同步环境并导入；环境列表页新增 `从已有环境导入` 配置面板，用户可选择 `环境来源 / 目标模块 / 模块工作流 / 未同步环境` 后执行 `导入并执行`；ATM 复用固定 `env_id` 执行链路，模块在 `ctx.env_id`、`ctx.page` 与 `ctx.runtime.creation_params` 中收到 provider metadata 与 `import_mode="existing_env"`。定向回归 `120 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-24 | 修复桌面打包遗留问题：删除 `packages/crawler4j/crawler4j.spec` 中已被清理的 `src/ui/styles/dark_theme.qss` data 引用，避免 Windows `package-windows-release` 在 PyInstaller data append 阶段因找不到旧资源而失败；同时补强 `test_packaging_config.py` 锁定 spec 不再引用已删除的 UI 样式目录，并把 README / release 文档 / `.factory` 版本事实源统一更新到 `crawler4j 0.3.1`、最近正式 tag `v0.2.0`。定向回归 `71 passed`，root build 产出 `crawler4j-0.3.1` wheel/sdist，`uv run package-desktop` 本机复验通过 | Codex |
 | 2026-04-24 | 按反馈继续收口桌面图标中心主组：在保持外底板 inset `(97, 96, 97, 96)` 不变的前提下，把圆形镜面保持在白底板几何正中，并将手柄从“短尾巴”延长到更接近右下边缘的安全区，但仍保留明显留白，不贴边、不越界；镜面继续保持约占底板宽度的 `80%`。对应图标回归继续锁定蓝色主徽记 bbox `(210, 210, 815, 815)`、左右上下 margin 仅允许 `1px` 误差，以及整组 focus bbox `(210, 210, 846, 850)`，`test_icon_packaging.py` 定向回归 `6 passed`、目标文件 `ruff check` 通过 | Codex |
 | 2026-04-23 | 完成代码洁净性专项审查第三轮收口：4 个审查子 agent 与主线程复核确认 `crawler4j-sdk/src/hosted_ui.py` 属于真实阻塞级重复实现，现已改为 `crawler4j_contracts.hosted_ui` 的兼容薄 re-export，并新增 `test_hosted_ui_reexport.py` 锁定 SDK/Contracts 同源实现；同时删除 `src/core/system/update_service.py` 中未被消费的 `UpdateInfo` 占位 dataclass，并清理 ATM 相关测试里对 `normalize_db_view_schema` 的过时兼容垫片。定向回归 `47 passed + 17 passed`，目标文件 `ruff check` 通过；旧安装目录迁移回滚、repo-token 旧命名别名、workflow 旧字段与默认工作流 fallback 作为兼容/契约面问题暂不在本轮删除 | Codex |

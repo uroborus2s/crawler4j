@@ -26,10 +26,11 @@ from src.core.rem.models import (
     EnvUnavailableError,
 )
 from src.core.rem.pool import EnvPool, LeaseManager
-from src.core.rem.provider import BaseProvider, get_provider
+from src.core.rem.provider import BaseProvider, get_provider, list_providers
 
 FINGERPRINT_BROWSER_PROVIDERS = {"bitbrowser", "virtualbrowser"}
 RESOURCE_POOL_METADATA_NAMESPACE = "scheduler.resource_pool"
+EXISTING_ENV_IMPORT_METADATA_NAMESPACE = "existing_env_import"
 GC_REAPABLE_STATUSES = frozenset(
     {
         EnvStatus.CREATING,
@@ -302,6 +303,111 @@ class EnvironmentManager:
     async def list_envs(self) -> list[Environment]:
         """列出所有环境。"""
         return await self.pool.list_all()
+
+    def list_existing_env_import_sources(self) -> list[dict[str, str]]:
+        """列出支持“从已有环境导入”的来源。"""
+        sources: list[dict[str, str]] = []
+        for provider_name in list_providers():
+            provider = get_provider(provider_name)
+            if provider and provider.supports_existing_env_import():
+                sources.append(
+                    {
+                        "provider": provider.name,
+                        "label": provider.display_name or provider.name,
+                    }
+                )
+        sources.sort(key=lambda item: item["label"].lower())
+        return sources
+
+    async def get_env_by_provider_key(
+        self,
+        provider_name: str,
+        provider_env_id: str,
+    ) -> Environment | None:
+        """按来源系统唯一键查找宿主环境。"""
+        target_provider = str(provider_name or "").strip()
+        target_env_id = str(provider_env_id or "").strip()
+        if not target_provider or not target_env_id:
+            return None
+        for env in await self.list_envs():
+            source_key = str(env.provider_env_id or env.external_id or "").strip()
+            if env.provider == target_provider and source_key == target_env_id:
+                return env
+        return None
+
+    async def list_unsynced_provider_envs(self, provider_name: str):
+        """列出来源系统中尚未导入宿主环境表的环境。"""
+        provider = get_provider(provider_name)
+        if not provider or not provider.supports_existing_env_import():
+            raise ValueError(f"Provider 不支持已有环境导入: {provider_name}")
+        existing_keys = {
+            (env.provider, str(env.provider_env_id or env.external_id or "").strip())
+            for env in await self.list_envs()
+            if str(env.provider_env_id or env.external_id or "").strip()
+        }
+        items = await provider.list_existing_envs()
+        return [
+            item
+            for item in items
+            if (item.provider, str(item.provider_env_id or "").strip()) not in existing_keys
+        ]
+
+    async def import_existing_env(self, provider_name: str, provider_env_id: str) -> Environment:
+        """把来源系统中的已有环境导入到宿主环境表。"""
+        provider = get_provider(provider_name)
+        if not provider or not provider.supports_existing_env_import():
+            raise ValueError(f"Provider 不支持已有环境导入: {provider_name}")
+
+        existing = await self.get_env_by_provider_key(provider_name, provider_env_id)
+        if existing:
+            return existing
+
+        info = await provider.get_existing_env(str(provider_env_id))
+        if not info:
+            raise ValueError(f"来源环境不存在: {provider_name}/{provider_env_id}")
+
+        env = await provider.build_imported_environment(info)
+        env.provider = getattr(provider, "name", provider_name)
+        env.external_id = str(info.provider_env_id)
+        env.provider_env_id = str(info.provider_env_id)
+        env.provider_env_name = info.provider_env_name
+        env.provider_group = info.provider_group
+        env.provider_proxy = info.provider_proxy
+        env.provider_raw_meta = info.provider_raw_meta
+        env.status = EnvStatus.READY
+        env.name = env.name or info.provider_env_name or f"{provider.name}-{info.provider_env_id}"
+
+        await self.pool.add(env)
+        return env
+
+    async def mark_existing_env_import_state(
+        self,
+        env_id: int,
+        *,
+        status: str,
+        module_name: str = "",
+        workflow_name: str = "",
+        task_id: str = "",
+        error: str = "",
+        message: str = "",
+    ) -> None:
+        """记录已有环境导入执行状态。"""
+        payload = {
+            "status": status,
+            "module_name": module_name,
+            "workflow_name": workflow_name,
+            "task_id": task_id,
+            "error": error,
+            "message": message,
+            "updated_at": int(time.time()),
+        }
+        await self.set_metadata(
+            env_id,
+            EXISTING_ENV_IMPORT_METADATA_NAMESPACE,
+            "latest",
+            payload,
+            value_type="json",
+        )
     
     async def run_gc(self) -> int:
         """手动触发垃圾回收。
@@ -1074,10 +1180,11 @@ class EnvironmentManager:
                     INSERT INTO environments (
                         name, kind, provider, status, external_id, lease_id, task_run_id,
                         last_used_at, daily_usage_count, daily_usage_date,
-                        proxy_config_json,
+                        proxy_config_json, provider_env_id, provider_env_name, provider_group,
+                        provider_proxy, provider_raw_meta, imported_at,
                         capabilities, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         env.name,
@@ -1091,6 +1198,12 @@ class EnvironmentManager:
                         env.daily_usage_count,
                         env.daily_usage_date,
                         proxy_config_json,
+                        env.provider_env_id,
+                        env.provider_env_name,
+                        env.provider_group,
+                        None,
+                        None,
+                        env.imported_at,
                         json.dumps({"capabilities": list(env.capabilities)}),
                         env.created_at,
                         env.updated_at,

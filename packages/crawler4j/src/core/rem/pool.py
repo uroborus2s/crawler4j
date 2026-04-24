@@ -148,6 +148,8 @@ class EnvPool:
         with get_connection(STATE_DB) as conn:
             # 序列化配置为 JSON
             proxy_config_json = json.dumps(env.proxy_config.to_dict()) if env.proxy_config else None
+            provider_proxy_json = json.dumps(env.provider_proxy, ensure_ascii=False) if env.provider_proxy else None
+            provider_raw_meta_json = json.dumps(env.provider_raw_meta, ensure_ascii=False) if env.provider_raw_meta else None
             
             if env.id == 0:
                 # 新环境：INSERT 并获取自增 ID
@@ -156,10 +158,11 @@ class EnvPool:
                     INSERT INTO environments (
                         name, kind, provider, status, external_id, lease_id, task_run_id,
                         last_used_at, daily_usage_count, daily_usage_date,
-                        proxy_config_json,
+                        proxy_config_json, provider_env_id, provider_env_name, provider_group,
+                        provider_proxy, provider_raw_meta, imported_at,
                         capabilities, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         env.name,
@@ -173,6 +176,12 @@ class EnvPool:
                         env.daily_usage_count,
                         env.daily_usage_date,
                         proxy_config_json,
+                        env.provider_env_id,
+                        env.provider_env_name,
+                        env.provider_group,
+                        provider_proxy_json,
+                        provider_raw_meta_json,
+                        env.imported_at,
                         json.dumps({"capabilities": list(env.capabilities)}),
                         env.created_at,
                         env.updated_at,
@@ -194,6 +203,12 @@ class EnvPool:
                         daily_usage_count = ?,
                         daily_usage_date = ?,
                         proxy_config_json = ?,
+                        provider_env_id = ?,
+                        provider_env_name = ?,
+                        provider_group = ?,
+                        provider_proxy = ?,
+                        provider_raw_meta = ?,
+                        imported_at = ?,
                         capabilities = ?,
                         updated_at = ?
                     WHERE id = ?
@@ -208,6 +223,12 @@ class EnvPool:
                         env.daily_usage_count,
                         env.daily_usage_date,
                         proxy_config_json,
+                        env.provider_env_id,
+                        env.provider_env_name,
+                        env.provider_group,
+                        provider_proxy_json,
+                        provider_raw_meta_json,
+                        env.imported_at,
                         json.dumps({"capabilities": list(env.capabilities)}),
                         env.updated_at,
                         env.id,
@@ -233,6 +254,8 @@ class EnvPool:
                 proxy_config = None
                 if row["proxy_config_json"]:
                     proxy_config = ProxyConfig.from_dict(json.loads(row["proxy_config_json"]))
+                provider_proxy = json.loads(row["provider_proxy"]) if row["provider_proxy"] else None
+                provider_raw_meta = json.loads(row["provider_raw_meta"]) if row["provider_raw_meta"] else None
                 
                 env = Environment(
                     id=row["id"],
@@ -241,6 +264,12 @@ class EnvPool:
                     provider=row["provider"],
                     status=EnvStatus(row["status"]),
                     external_id=row["external_id"],
+                    provider_env_id=row["provider_env_id"] if "provider_env_id" in row.keys() else row["external_id"],
+                    provider_env_name=row["provider_env_name"] if "provider_env_name" in row.keys() else row["name"],
+                    provider_group=row["provider_group"] if "provider_group" in row.keys() else None,
+                    provider_proxy=provider_proxy,
+                    provider_raw_meta=provider_raw_meta,
+                    imported_at=row["imported_at"] if "imported_at" in row.keys() else None,
                     capabilities=set(meta.get("capabilities", [])),
                     lease_id=row["lease_id"],
                     task_run_id=row["task_run_id"],

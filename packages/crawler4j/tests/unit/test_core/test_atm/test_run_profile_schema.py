@@ -136,3 +136,12 @@ def test_select_mode_requires_selector_or_resource_pool():
             selector_name="",
             resource_pool="",
         )
+
+
+def test_select_mode_accepts_fixed_env_id():
+    config = AcquisitionConfig(
+        mode=AcquisitionMode.SELECT,
+        env_id=12,
+    )
+
+    assert config.env_id == 12

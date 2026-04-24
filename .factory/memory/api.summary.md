@@ -9,3 +9,4 @@
 - `API-007`: 固定环境池 Service Job 契约已本地实现：`resource_pool`、环境候选、资格卡片与等待席位都由宿主负责；环境选择器返回 `None` 时，是否等待取决于是否配置了 `resource_pool`。
 - `API-008`: Hosted UI 正式契约收口为 `PageSpec` + `ui_extension.pages[]`。页面 schema 顶层必须是 `Page`，公开组件固定为 `Page`、`Section`、`Text`、`Button`、`DataTable`；页面数据与查询通过页面 handler 承接。
 - `API-009`: 模块实体表视图与分析查询能力已切到 manifest 驱动：`module.yaml.data.views[]` / `queries[]` 联合 `data/sql/views/*.sql` / `queries/*.sql` 注册视图和命名查询，运行时只暴露 `db.query_view` / `db.run_query`；模块代码禁止执行未注册 SQL。
+- `API-010`: 宿主已有环境导入契约已落地：REM 以 `(provider, provider_env_id)` 作为外部环境唯一键，环境管理页可从 provider 拉取“来源有、本地无”的环境并导入；执行时宿主保证 `ctx.env_id`、`ctx.page` 可用，并在 `ctx.runtime.creation_params` 中写入 `provider`、`provider_env_id`、`provider_env_name`、`provider_group`、`provider_proxy` 与 `import_mode="existing_env"`；`module.yaml.workflows[].host_scenarios` 可选声明 `existing_env_import`，仅用于风险提示，不构成执行门禁。

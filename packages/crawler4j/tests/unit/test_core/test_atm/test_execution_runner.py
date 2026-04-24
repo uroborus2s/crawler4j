@@ -557,6 +557,30 @@ async def test_execution_runner_selects_existing_env_via_callback():
 
 
 @pytest.mark.asyncio
+async def test_execution_runner_selects_fixed_env_without_module_selector():
+    request = _build_request(mode=AcquisitionMode.SELECT, lifecycle=CreationLifecycle.PERSISTENT)
+    request.fixed_env_id = 21
+    env, lease = _build_env()
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value="ok"),
+        call_hook=AsyncMock(return_value=None),
+        run_env_selector=AsyncMock(),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    rem.get_env.assert_any_await(env.id)
+    assert rem.get_env.await_count == 2
+    rem.list_envs.assert_not_awaited()
+    rem.lease_manager.acquire.assert_awaited_once_with(env, request.task.id, timeout=60)
+    module_service.run_env_selector.assert_not_awaited()
+    module_service.run_module.assert_awaited_once()
+    assert request.task.status == TaskStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
 async def test_execution_runner_marks_task_failed_for_taskresult_fail():
     request = _build_request()
     env, lease = _build_env()

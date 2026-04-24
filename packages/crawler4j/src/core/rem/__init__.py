@@ -15,6 +15,10 @@
 """
 
 from src.core.rem.fingerprint import FingerprintNotSupportedError, FingerprintProvider, supports_fingerprint
+from src.core.rem.import_job_service import (
+    ExistingEnvImportJobService,
+    get_existing_env_import_job_service,
+)
 from src.core.rem.ip_pool import IPEntry, IPPool, IPPoolManager, IPStrategy, get_ip_pool_manager
 from src.core.rem.manager import EnvironmentManager, get_environment_manager
 from src.core.rem.models import (
@@ -28,6 +32,7 @@ from src.core.rem.models import (
     EnvUnavailableError,
     EnvUnhealthyError,
     FingerprintConfig,
+    ProviderEnvInfo,
     ProxyConfig,
     ProxyMode,
 )
@@ -55,6 +60,7 @@ __all__ = [
     # 配置类
     "ProxyConfig",
     "FingerprintConfig",
+    "ProviderEnvInfo",
     # 错误
     "EnvError",
     "EnvUnavailableError",
@@ -74,6 +80,8 @@ __all__ = [
     # Manager
     "EnvironmentManager",
     "get_environment_manager",
+    "ExistingEnvImportJobService",
+    "get_existing_env_import_job_service",
     # IP 池
     "IPEntry",
     "IPPool",
