@@ -6,6 +6,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from PyQt6.QtCore import QEvent, QObject
 from PyQt6.QtWidgets import QApplication
 
 from src.core.persistence import init_database
@@ -20,6 +21,48 @@ from src.utils.paths import get_app_data_dir
 EMBEDDED_DEBUG_WORKER_FLAG = "--crawler4j-debug-worker"
 EMBEDDED_DEBUGPY_ADAPTER_FLAG = "--crawler4j-debugpy-adapter"
 DEFAULT_WORKER_MODULE = "src.core.debug.worker_entry"
+
+
+class _ShutdownController(QObject):
+    """在 Qt 停环前先请求异步收尾。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._shutdown_requested = False
+        self._shutdown_event: asyncio.Event | None = None
+        self._app: QApplication | None = None
+        self._app_bound = False
+
+    @property
+    def shutdown_requested(self) -> bool:
+        return self._shutdown_requested
+
+    def bind_app(self, app: QApplication) -> None:
+        if self._app_bound:
+            return
+        self._app = app
+        self._app_bound = True
+        app.installEventFilter(self)
+        if hasattr(app, "lastWindowClosed"):
+            app.lastWindowClosed.connect(lambda: self.request_shutdown("lastWindowClosed"))
+        if hasattr(app, "aboutToQuit"):
+            app.aboutToQuit.connect(lambda: self.request_shutdown("aboutToQuit"))
+
+    def bind_event(self, shutdown_event: asyncio.Event) -> None:
+        self._shutdown_event = shutdown_event
+        if self._shutdown_requested:
+            shutdown_event.set()
+
+    def request_shutdown(self, _reason: str) -> None:
+        self._shutdown_requested = True
+        if self._shutdown_event is not None:
+            self._shutdown_event.set()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if watched is self._app and event.type() == QEvent.Type.Quit and not self._shutdown_requested:
+            self.request_shutdown("quit")
+            return True
+        return super().eventFilter(watched, event)
 
 
 def install_logging_preferences_sync(prefs, *, log_dir: Path) -> None:
@@ -130,6 +173,10 @@ def _load_shell_class():
     return Shell
 
 
+def _create_shutdown_controller() -> _ShutdownController:
+    return _ShutdownController()
+
+
 def _run_embedded_debug_worker_if_requested(argv: Sequence[str]) -> int | None:
     if not getattr(sys, "frozen", False):
         return None
@@ -206,15 +253,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Setup qasync loop
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
+    shutdown_controller = _create_shutdown_controller()
+    shutdown_controller.bind_app(app)
 
     with loop:
-        loop.run_until_complete(_run_application(app, prefs))
+        loop.run_until_complete(_run_application(app, prefs, shutdown_controller=shutdown_controller))
     return 0
 
 
-async def _run_application(app: QApplication, prefs) -> None:
+async def _run_application(
+    app: QApplication,
+    prefs,
+    *,
+    shutdown_controller: _ShutdownController | None = None,
+) -> None:
+    controller = shutdown_controller or _create_shutdown_controller()
+    controller.bind_app(app)
     shutdown_requested = asyncio.Event()
-    app.lastWindowClosed.connect(shutdown_requested.set)
+    controller.bind_event(shutdown_requested)
 
     from src.core.rem.manager import get_environment_manager
 

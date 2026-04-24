@@ -119,6 +119,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | 继续补强宿主 UI 生命周期回归：`test_app.py` 新增 `QEvent.Type.Quit` 延后退出路径，并锁定宿主入口会先完成 `TaskService.stop()` / `DebugService.shutdown()` / `PlaywrightManager.force_shutdown()` 再结束 Qt 事件循环，覆盖 Windows 打包态曾复现的 `Event loop stopped before Future completed` | Codex |
 | 2026-04-24 | 补充“从已有环境导入”弹窗的 warning UI 回归：`test_import_existing_env_dialog.py` 现同时锁定 warning 区域的实际高度不再低于 `warning_label.heightForWidth(...) + 内边距`，以及 warning 文本层显式为 `background: transparent; border: none;`，避免打包态下多行文案继续被裁掉或出现额外内圈 | Codex |
 | 2026-04-24 | 补强宿主 UI 生命周期回归：`test_app.py` 现锁定 debug worker/debugpy adapter/Shell 相关入口改为懒加载，不再因深层循环导入阻塞测试；同时新增“最后一个窗口关闭后仍能完成异步收尾”的回归，固定 `lastWindowClosed -> shutdown cleanup -> loop stop` 顺序，防止桌面包再次弹出 `Event loop stopped before Future completed` | Codex |
 | 2026-04-23 | 开发团队 2 补齐 `test_data_capability.py` 的 SDK 契约断言，新增锁定 `db.declare_data_resource` / `db.replace_records` / `db.declare_db_view` / `db.query_view`；定向 `pytest` 为 `10 passed`，目标文件 `ruff check` 通过 | Codex |
