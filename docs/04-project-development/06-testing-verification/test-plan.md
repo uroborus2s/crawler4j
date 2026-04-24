@@ -119,6 +119,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | 补强宿主 UI 生命周期回归：`test_app.py` 现锁定 debug worker/debugpy adapter/Shell 相关入口改为懒加载，不再因深层循环导入阻塞测试；同时新增“最后一个窗口关闭后仍能完成异步收尾”的回归，固定 `lastWindowClosed -> shutdown cleanup -> loop stop` 顺序，防止桌面包再次弹出 `Event loop stopped before Future completed` | Codex |
 | 2026-04-23 | 开发团队 2 补齐 `test_data_capability.py` 的 SDK 契约断言，新增锁定 `db.declare_data_resource` / `db.replace_records` / `db.declare_db_view` / `db.query_view`；定向 `pytest` 为 `10 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-22 | 新增 `TC-049`，把 hosted page renderer、模块详情页、runtime capability、CLI / integration / acceptance 的 hosted UI V1 定向回归正式纳入测试计划 | Codex |
 | 2026-04-23 | 新增并最终收口 `TC-050`，补 Hosted UI 主从表行导航、`open_page.params`、缓存页参数替换、详情表 `navigation_filters`、过滤详情表默认 CRUD 与 alias 资源路由兼容的定向回归 | Codex |

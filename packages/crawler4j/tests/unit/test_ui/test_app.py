@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -7,45 +8,68 @@ from types import SimpleNamespace
 import pytest
 
 
+def test_importing_app_keeps_debug_launcher_and_shell_lazy():
+    sys.modules.pop("src.ui.app", None)
+    sys.modules.pop("src.core.debug.launcher", None)
+    sys.modules.pop("src.ui.shell", None)
+
+    module = importlib.import_module("src.ui.app")
+
+    assert module.__name__ == "src.ui.app"
+    assert "src.core.debug.launcher" not in sys.modules
+    assert "src.ui.shell" not in sys.modules
+
+
 def test_main_dispatches_embedded_debug_worker_before_starting_gui(monkeypatch):
     from src.ui import app
-    from src.core.debug import worker_entry
 
-    observed: dict[str, list[str]] = {}
+    observed: dict[str, object] = {}
 
-    def fake_worker_main() -> None:
-        observed["argv"] = list(app.sys.argv)
-        raise SystemExit(7)
+    def fake_extract_worker_args(argv: list[str]) -> list[str]:
+        observed["extract_argv"] = list(argv)
+        return ["/tmp/session.json"]
+
+    def fake_run_worker(worker_args: list[str], *, executable: str) -> int:
+        observed["worker_args"] = list(worker_args)
+        observed["executable"] = executable
+        return 7
 
     def fail_qapplication(*args, **kwargs):
         raise AssertionError("GUI should not start for embedded debug worker")
 
     monkeypatch.setattr(app.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(worker_entry, "main", fake_worker_main)
+    monkeypatch.setattr(app, "_extract_embedded_debug_worker_args", fake_extract_worker_args)
+    monkeypatch.setattr(app, "_run_embedded_debug_worker", fake_run_worker)
     monkeypatch.setattr(app, "QApplication", fail_qapplication)
 
     exit_code = app.main(["Crawler4j", "--crawler4j-debug-worker", "/tmp/session.json"])
 
     assert exit_code == 7
-    assert observed["argv"] == ["Crawler4j", "/tmp/session.json"]
+    assert observed["extract_argv"] == ["Crawler4j", "--crawler4j-debug-worker", "/tmp/session.json"]
+    assert observed["worker_args"] == ["/tmp/session.json"]
+    assert observed["executable"] == "Crawler4j"
 
 
 def test_main_dispatches_embedded_debugpy_adapter_before_starting_gui(monkeypatch):
     from src.ui import app
 
-    observed: dict[str, list[str]] = {}
+    observed: dict[str, object] = {}
 
-    def fake_run_module(module_name: str, run_name: str):
-        observed["module_name"] = module_name
-        observed["run_name"] = run_name
-        observed["argv"] = list(app.sys.argv)
-        raise SystemExit(9)
+    def fake_extract_adapter_args(argv: list[str]) -> list[str]:
+        observed["extract_argv"] = list(argv)
+        return ["--for-server", "32123"]
+
+    def fake_run_adapter(adapter_args: list[str], *, executable: str) -> int:
+        observed["adapter_args"] = list(adapter_args)
+        observed["executable"] = executable
+        return 9
 
     def fail_qapplication(*args, **kwargs):
         raise AssertionError("GUI should not start for embedded debugpy adapter")
 
     monkeypatch.setattr(app.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(app.runpy, "run_module", fake_run_module)
+    monkeypatch.setattr(app, "_extract_embedded_debugpy_adapter_args", fake_extract_adapter_args)
+    monkeypatch.setattr(app, "_run_embedded_debugpy_adapter", fake_run_adapter)
     monkeypatch.setattr(app, "QApplication", fail_qapplication)
 
     exit_code = app.main(
@@ -59,9 +83,15 @@ def test_main_dispatches_embedded_debugpy_adapter_before_starting_gui(monkeypatc
     )
 
     assert exit_code == 9
-    assert observed["module_name"] == "debugpy.adapter"
-    assert observed["run_name"] == "__main__"
-    assert observed["argv"] == ["Crawler4j", "--for-server", "32123"]
+    assert observed["extract_argv"] == [
+        "Crawler4j",
+        "--crawler4j-debugpy-adapter",
+        "/tmp/debugpy/adapter",
+        "--for-server",
+        "32123",
+    ]
+    assert observed["adapter_args"] == ["--for-server", "32123"]
+    assert observed["executable"] == "Crawler4j"
 
 
 def test_main_bootstraps_host_updater_before_starting_gui(monkeypatch):
@@ -134,8 +164,8 @@ def test_main_disables_quit_on_last_window_closed_before_async_startup(monkeypat
     monkeypatch.setattr(app, "QApplication", DummyApplication)
     monkeypatch.setattr(app, "load_app_icon", lambda: DummyIcon())
     monkeypatch.setattr(app, "install_qasync_timer_compat", lambda qasync_module: True)
+    monkeypatch.setattr(app, "_load_qasync_module", lambda: SimpleNamespace(QEventLoop=lambda qt_app: DummyLoop()))
     monkeypatch.setattr(app.asyncio, "set_event_loop", lambda loop: observed.append(("set_event_loop", loop)))
-    monkeypatch.setitem(sys.modules, "qasync", SimpleNamespace(QEventLoop=lambda qt_app: DummyLoop()))
 
     exit_code = app.main(["Crawler4j"])
 
@@ -143,10 +173,11 @@ def test_main_disables_quit_on_last_window_closed_before_async_startup(monkeypat
     quit_index = observed.index(("quit", False))
     run_index = observed.index(("run_until_complete", True))
     assert quit_index < run_index
+    assert ("quit", True) not in observed
 
 
 @pytest.mark.asyncio
-async def test_run_application_restores_quit_on_last_window_closed_after_window_first_tick(monkeypatch):
+async def test_run_application_shuts_down_after_last_window_closed(monkeypatch):
     from src.ui import app
 
     observed: list[tuple[str, object]] = []
@@ -164,12 +195,7 @@ async def test_run_application_restores_quit_on_last_window_closed_after_window_
 
     class FakeApplication:
         def __init__(self) -> None:
-            self.aboutToQuit = FakeSignal()
-
-        def setQuitOnLastWindowClosed(self, enabled: bool) -> None:
-            observed.append(("quit", enabled))
-            if enabled:
-                self.aboutToQuit.emit()
+            self.lastWindowClosed = FakeSignal()
 
     class FakePrefs:
         def get(self, key, default=None):
@@ -206,21 +232,24 @@ async def test_run_application_restores_quit_on_last_window_closed_after_window_
 
     async def fake_sleep(delay: float) -> None:
         observed.append(("sleep", delay))
+        fake_app.lastWindowClosed.emit()
 
     monkeypatch.setattr("src.core.rem.manager.get_environment_manager", lambda: FakeEnvironmentManager())
     monkeypatch.setattr("src.core.atm.service.get_task_service", lambda: FakeTaskService())
     monkeypatch.setattr("src.core.system.update_service.get_update_service", lambda: FakeUpdateService())
     monkeypatch.setattr("src.core.debug.service.get_debug_service", lambda: FakeDebugService())
     monkeypatch.setattr("src.core.rem.handle.PlaywrightManager.force_shutdown", fake_force_shutdown)
-    monkeypatch.setattr(app, "Shell", FakeWindow)
+    monkeypatch.setattr(app, "_load_shell_class", lambda: FakeWindow)
     monkeypatch.setattr(app.asyncio, "sleep", fake_sleep)
 
-    await app._run_application(FakeApplication(), FakePrefs())
+    fake_app = FakeApplication()
+
+    await app._run_application(fake_app, FakePrefs())
 
     show_index = observed.index(("window", "show"))
     sleep_index = observed.index(("sleep", 0))
-    quit_restore_index = observed.index(("quit", True))
-    assert show_index < sleep_index < quit_restore_index
+    update_index = observed.index(("update_service", "startup"))
+    assert show_index < sleep_index < update_index
     assert ("task_service", "stop") in observed
     assert ("debug_service", "shutdown") in observed
     assert ("playwright", "force_shutdown") in observed

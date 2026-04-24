@@ -8,19 +8,18 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
-from src.core.debug.launcher import (
-    extract_embedded_debug_worker_args,
-    extract_embedded_debugpy_adapter_args,
-)
 from src.core.persistence import init_database
 from src.core.system.preferences_service import (
     PreferenceKey,
     get_preferences_service,
 )
 from src.ui.app_icon import load_app_icon
-from src.ui.shell import Shell
 from src.ui.qasync_compat import install_qasync_timer_compat
 from src.utils.paths import get_app_data_dir
+
+EMBEDDED_DEBUG_WORKER_FLAG = "--crawler4j-debug-worker"
+EMBEDDED_DEBUGPY_ADAPTER_FLAG = "--crawler4j-debugpy-adapter"
+DEFAULT_WORKER_MODULE = "src.core.debug.worker_entry"
 
 
 def install_logging_preferences_sync(prefs, *, log_dir: Path) -> None:
@@ -79,19 +78,24 @@ def _normalize_exit_code(code: object) -> int:
     return 1
 
 
-def _run_embedded_debug_worker_if_requested(argv: Sequence[str]) -> int | None:
-    if not getattr(sys, "frozen", False):
-        return None
+def _extract_embedded_debug_worker_args(argv: Sequence[str]) -> Sequence[str] | None:
+    from src.core.debug.launcher import extract_embedded_debug_worker_args
 
-    worker_args = extract_embedded_debug_worker_args(argv)
-    if worker_args is None:
-        return None
+    return extract_embedded_debug_worker_args(argv)
 
+
+def _extract_embedded_debugpy_adapter_args(argv: Sequence[str]) -> Sequence[str] | None:
+    from src.core.debug.launcher import extract_embedded_debugpy_adapter_args
+
+    return extract_embedded_debugpy_adapter_args(argv)
+
+
+def _run_embedded_debug_worker(worker_args: Sequence[str], *, executable: str) -> int:
     from src.core.debug import worker_entry
 
     original_argv = sys.argv
     try:
-        sys.argv = [argv[0], *worker_args]
+        sys.argv = [executable, *worker_args]
         try:
             worker_entry.main()
         except SystemExit as exc:
@@ -101,17 +105,10 @@ def _run_embedded_debug_worker_if_requested(argv: Sequence[str]) -> int | None:
         sys.argv = original_argv
 
 
-def _run_embedded_debugpy_adapter_if_requested(argv: Sequence[str]) -> int | None:
-    if not getattr(sys, "frozen", False):
-        return None
-
-    adapter_args = extract_embedded_debugpy_adapter_args(argv)
-    if adapter_args is None:
-        return None
-
+def _run_embedded_debugpy_adapter(adapter_args: Sequence[str], *, executable: str) -> int:
     original_argv = sys.argv
     try:
-        sys.argv = [argv[0], *adapter_args]
+        sys.argv = [executable, *adapter_args]
         try:
             runpy.run_module("debugpy.adapter", run_name="__main__")
         except SystemExit as exc:
@@ -119,6 +116,49 @@ def _run_embedded_debugpy_adapter_if_requested(argv: Sequence[str]) -> int | Non
         return 0
     finally:
         sys.argv = original_argv
+
+
+def _load_qasync_module():
+    import qasync
+
+    return qasync
+
+
+def _load_shell_class():
+    from src.ui.shell import Shell
+
+    return Shell
+
+
+def _run_embedded_debug_worker_if_requested(argv: Sequence[str]) -> int | None:
+    if not getattr(sys, "frozen", False):
+        return None
+    if len(argv) < 2:
+        return None
+    if argv[1] == "-m":
+        if len(argv) < 4 or argv[2] != DEFAULT_WORKER_MODULE:
+            return None
+    elif argv[1] != EMBEDDED_DEBUG_WORKER_FLAG:
+        return None
+
+    worker_args = _extract_embedded_debug_worker_args(argv)
+    if worker_args is None:
+        return None
+
+    return _run_embedded_debug_worker(worker_args, executable=argv[0])
+
+
+def _run_embedded_debugpy_adapter_if_requested(argv: Sequence[str]) -> int | None:
+    if not getattr(sys, "frozen", False):
+        return None
+    if len(argv) < 2 or argv[1] != EMBEDDED_DEBUGPY_ADAPTER_FLAG:
+        return None
+
+    adapter_args = _extract_embedded_debugpy_adapter_args(argv)
+    if adapter_args is None:
+        return None
+
+    return _run_embedded_debugpy_adapter(adapter_args, executable=argv[0])
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -156,7 +196,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     
     # 创建主窗口
     try:
-        import qasync
+        qasync = _load_qasync_module()
     except ImportError:
         logger.error("qasync is required but not installed.")
         sys.exit(1)
@@ -174,7 +214,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 async def _run_application(app: QApplication, prefs) -> None:
     shutdown_requested = asyncio.Event()
-    app.aboutToQuit.connect(shutdown_requested.set)
+    app.lastWindowClosed.connect(shutdown_requested.set)
 
     from src.core.rem.manager import get_environment_manager
 
@@ -186,15 +226,14 @@ async def _run_application(app: QApplication, prefs) -> None:
     task_service = get_task_service()
     await task_service.start()
 
-    window = Shell()
+    window = _load_shell_class()()
     if prefs.get(PreferenceKey.MINIMIZE_ON_START, False):
         window.showMinimized()
     else:
         window.show()
-    # Windows 打包态下，show() 返回时主窗口仍可能尚未完成首轮原生注册；
-    # 先让事件循环过一个 tick，再恢复“最后一个窗口关闭时退出”，可避免 qasync 提前停环。
+    # 保持“最后一个窗口关闭时不自动退出”，让 qasync 在窗口关闭后仍能继续驱动
+    # 异步清理逻辑，避免 Qt 先停环导致 run_until_complete 误判为未完成。
     await asyncio.sleep(0)
-    app.setQuitOnLastWindowClosed(True)
 
     from src.core.system.update_service import get_update_service
 

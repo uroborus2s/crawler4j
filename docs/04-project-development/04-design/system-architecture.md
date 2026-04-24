@@ -35,7 +35,7 @@ Maintainer
 
 ## 2. 核心运行链
 
-1. `src.ui.app:main` 初始化数据库、日志、`qasync` 兼容层与核心服务；在 Windows 打包态且非内嵌 debug 子进程时，入口会先执行 Velopack bootstrap，再进入单次 `run_until_complete(_run_application(...))` 驱动的 UI 生命周期；其源码位于 `packages/crawler4j/src/ui/app.py`
+1. `src.ui.app:main` 初始化数据库、日志、`qasync` 兼容层与核心服务；在 Windows 打包态且非内嵌 debug 子进程时，入口会先执行 Velopack bootstrap，再进入单次 `run_until_complete(_run_application(...))` 驱动的 UI 生命周期；主窗口创建后宿主会保持 `quitOnLastWindowClosed=False`，由 `lastWindowClosed` 触发异步收尾后再结束事件循环，以避免 `qasync` 在清理尚未完成时提前停环；其源码位于 `packages/crawler4j/src/ui/app.py`
 2. REM 管理运行环境生命周期与浏览器资源，负责 create/open/connect/stop/destroy，不负责任务工作流编排
 3. ATM 负责任务调度、派发、生命周期 hooks 与任务终态收口
 4. MMS 负责发现、解析、校验和执行模块
