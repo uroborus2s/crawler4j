@@ -32,7 +32,7 @@ def test_dashboard_compresses_summary_area_for_log_console(qtbot, monkeypatch):
     assert page.log_console.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
 
 
-def test_dashboard_keeps_two_row_summary_on_narrow_width(qtbot, monkeypatch):
+def test_dashboard_keeps_single_row_summary_on_narrow_width(qtbot, monkeypatch):
     import src.ui.dashboard as dashboard_module
 
     monkeypatch.setattr(dashboard_module.DashboardPage, "_setup_timer", lambda self: None)
@@ -44,8 +44,9 @@ def test_dashboard_keeps_two_row_summary_on_narrow_width(qtbot, monkeypatch):
 
     assert page.cards_grid.itemAtPosition(0, 0).widget() is page.running_card
     assert page.cards_grid.itemAtPosition(0, 2).widget() is page.failed_card
-    assert page.cards_grid.itemAtPosition(1, 0).widget() is page.env_ready_card
-    assert page.cards_grid.itemAtPosition(1, 2).widget() is page.modules_card
+    assert page.cards_grid.itemAtPosition(0, 3).widget() is page.env_ready_card
+    assert page.cards_grid.itemAtPosition(0, 5).widget() is page.modules_card
+    assert page.cards_grid.itemAtPosition(1, 0) is None
 
 
 @pytest.mark.asyncio

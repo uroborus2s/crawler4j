@@ -28,8 +28,6 @@ from src.ui.components.stat_card import StatCard
 
 class DashboardPage(QWidget):
     """仪表盘页面。"""
-
-    _WIDE_CARD_BREAKPOINT = 1280
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -117,7 +115,7 @@ class DashboardPage(QWidget):
         layout.addWidget(self.log_console, stretch=1)
 
     def _apply_card_layout(self) -> None:
-        columns = 6 if self.width() >= self._WIDE_CARD_BREAKPOINT else 3
+        columns = 6
         if columns == self._card_columns:
             return
         self._card_columns = columns
