@@ -248,9 +248,8 @@ class ManagedPageRenderer(QWidget):
                 )
             )
 
-        if self._build_crud_toolbar(header, component, table):
-            layout.addLayout(header)
-        elif title:
+        self._build_crud_toolbar(component, table)
+        if title:
             layout.addLayout(header)
 
         table.set_query({"params": dict(self._navigation_params)})
@@ -379,7 +378,6 @@ class ManagedPageRenderer(QWidget):
 
     def _build_crud_toolbar(
         self,
-        header: QHBoxLayout,
         component: dict[str, Any],
         table: SkyDataTable,
     ) -> bool:
@@ -390,6 +388,9 @@ class ManagedPageRenderer(QWidget):
         toolbar_actions = self._crud_toolbar_actions(component)
         if not any(toolbar_actions.values()):
             return False
+        toolbar = getattr(table, "_toolbar", None)
+        if not isinstance(toolbar, QHBoxLayout):
+            return False
 
         edit_button: QPushButton | None = None
         delete_button: QPushButton | None = None
@@ -397,15 +398,15 @@ class ManagedPageRenderer(QWidget):
         if toolbar_actions["create"]:
             create_button = QPushButton("新增")
             create_button.clicked.connect(lambda _checked=False: self._handle_create_action(component, table))
-            header.addWidget(create_button)
+            toolbar.addWidget(create_button)
         if toolbar_actions["update"]:
             edit_button = QPushButton("编辑")
             edit_button.clicked.connect(lambda _checked=False: self._handle_update_action(component, table))
-            header.addWidget(edit_button)
+            toolbar.addWidget(edit_button)
         if toolbar_actions["delete"]:
             delete_button = QPushButton("删除")
             delete_button.clicked.connect(lambda _checked=False: self._handle_delete_action(component, table))
-            header.addWidget(delete_button)
+            toolbar.addWidget(delete_button)
 
         for button, variant in (
             (edit_button, "secondary"),
@@ -538,9 +539,40 @@ class ManagedPageRenderer(QWidget):
         title = str(component.get("title") or "数据表")
         dialog.setWindowTitle(f"{'新增' if mode == 'create' else '编辑'}{title}")
         dialog.setModal(True)
-        dialog.setMinimumWidth(420)
+        dialog.setMinimumWidth(460)
+        dialog.setStyleSheet(
+            """
+            QDialog {
+                background-color: #1e1e2e;
+            }
+            QLabel {
+                color: #cdd6f4;
+                background-color: transparent;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QDialogButtonBox {
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                padding-top: 12px;
+            }
+            QDialogButtonBox QPushButton {
+                background-color: #45475a;
+                border: none;
+                border-radius: 6px;
+                min-width: 96px;
+                padding: 8px 18px;
+                color: #cdd6f4;
+                font-weight: 600;
+            }
+            QDialogButtonBox QPushButton:hover {
+                background-color: #585b70;
+            }
+            """
+        )
 
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
         form_layout = QFormLayout()
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(10)
@@ -555,6 +587,20 @@ class ManagedPageRenderer(QWidget):
 
         layout.addLayout(form_layout)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_button is not None:
+            cancel_button.setText("取消")
+        if ok_button is not None:
+            ok_button.setText("确认")
+            ok_button.setDefault(True)
+            ok_button.setStyleSheet(
+                """
+                background-color: #89b4fa;
+                color: #11111b;
+                font-weight: 700;
+                """
+            )
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
@@ -738,7 +784,18 @@ class ManagedPageRenderer(QWidget):
     def _build_card(self, component: dict[str, Any]) -> QWidget:
         title = str(component.get("title") or "").strip()
         layout_spec = dict(component.get("layout") or {})
-        card = Card(title=title, variant="card", gap=int(layout_spec.get("gap", 12)))
+        min_height = component.get("min_height")
+        padding = component.get("padding")
+        card = Card(
+            title=title,
+            variant="card",
+            gap=int(layout_spec.get("gap", 12)),
+            title_align=str(component.get("title_align") or "left").strip().lower(),
+            content_align=str(component.get("content_align") or "left").strip().lower(),
+            content_vertical_align=str(component.get("content_vertical_align") or "top").strip().lower(),
+            min_height=int(min_height) if min_height is not None else None,
+            padding=int(padding) if padding is not None else (18, 16, 18, 16),
+        )
         card.content_layout.addWidget(
             self._build_layout_widget(component.get("children", []), layout_spec)
         )

@@ -7,7 +7,8 @@ from PyQt6.QtGui import QImage
 
 APP_ROOT = Path(__file__).resolve().parents[3]
 EXPECTED_PLATE_INSETS = (97, 96, 97, 96)
-EXPECTED_BLUE_BADGE_BBOX = (284, 258, 741, 715)
+EXPECTED_BLUE_BADGE_BBOX = (210, 210, 815, 815)
+EXPECTED_FOCUS_BBOX = (210, 210, 846, 850)
 
 
 def test_pyinstaller_spec_binds_runtime_and_bundle_icon_assets():
@@ -87,6 +88,37 @@ def test_runtime_app_icon_locks_blue_badge_bbox_to_prevent_optical_regression():
     xs = [x for x, _ in coords]
     ys = [y for _, y in coords]
     assert (min(xs), min(ys), max(xs) + 1, max(ys) + 1) == EXPECTED_BLUE_BADGE_BBOX
+    left_margin = min(xs)
+    right_margin = image.width() - (max(xs) + 1)
+    top_margin = min(ys)
+    bottom_margin = image.height() - (max(ys) + 1)
+    assert abs(left_margin - right_margin) <= 1
+    assert abs(top_margin - bottom_margin) <= 1
+
+
+def test_runtime_app_icon_locks_magnifier_group_bbox_while_plate_insets_stay_fixed():
+    image = QImage(str(APP_ROOT / "src" / "ui" / "assets" / "app_icon.png"))
+
+    assert not image.isNull()
+    coords: list[tuple[int, int]] = []
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = image.pixelColor(x, y)
+            if color.alpha() < 30:
+                continue
+            if (
+                color.red() > 220
+                and color.green() > 215
+                and color.blue() > 210
+                and abs(color.red() - color.green()) < 15
+                and abs(color.green() - color.blue()) < 20
+            ):
+                continue
+            coords.append((x, y))
+
+    xs = [x for x, _ in coords]
+    ys = [y for _, y in coords]
+    assert (min(xs), min(ys), max(xs) + 1, max(ys) + 1) == EXPECTED_FOCUS_BBOX
 
 
 def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge_and_center_mark():
@@ -101,5 +133,5 @@ def test_runtime_app_icon_uses_light_warm_background_with_blue_brand_badge_and_c
     badge = image.pixelColor(image.width() // 2, 340)
     assert badge.blue() > badge.green() > badge.red()
 
-    center_mark = image.pixelColor(560, 520)
+    center_mark = image.pixelColor(470, 560)
     assert center_mark.lightness() > 245

@@ -96,6 +96,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-24 | 为共享 `Card` / Hosted UI `Card` 补齐布局参数：标题对齐、内容水平/垂直对齐、最小高度与 padding | Codex |
+| 2026-04-24 | 修正共享 `Card` 样式作用域，避免通配 `QFrame` 误命中 `QLabel` 导致标题/副标题显示成“文字外套边框” | Codex |
 | 2026-04-24 | Hosted UI 正式新增 `Card` 容器组件，并把 dashboard `StatCard` 改为基于共享 `Card` 组合；`Section.variant="card"` 收口为兼容别名 | Codex |
 | 2026-04-24 | 删除未加载的 `dark_theme.qss` 与旧箭头 SVG 资源，收口 UI 目录静态孤岛资源 | Codex |
 | 2026-04-24 | 清理 `config_editor` / `log_viewer` / `status_bar` / `syntax_highlighter` 孤岛代码，并新增正式 `StatCard` 组件替换 dashboard 私有实现 | Codex |

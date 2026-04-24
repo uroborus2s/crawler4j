@@ -121,6 +121,7 @@ def declare_ui(ctx):
 - `Card` 是正式的卡片容器组件，只负责统一外壳和布局
 - `Section` 继续承担普通分组语义
 - `Section.variant="card"` 只保留为兼容别名，新的 schema 统一优先使用 `Card`
+- `Card` 当前已支持 `title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding`
 
 ### 4.4 数据入口
 

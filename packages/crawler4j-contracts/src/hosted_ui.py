@@ -46,7 +46,17 @@ ALLOWED_DATA_RESOURCE_KEYS = {
 ALLOWED_PAGE_LAYOUT_KEYS = {"direction", "kind", "columns", "gap"}
 ALLOWED_PAGE_SCHEMA_KEYS = {"type", "title", "load_handler", "children", "layout"}
 ALLOWED_SECTION_SCHEMA_KEYS = {"type", "title", "children", "variant", "layout"}
-ALLOWED_CARD_SCHEMA_KEYS = {"type", "title", "children", "layout"}
+ALLOWED_CARD_SCHEMA_KEYS = {
+    "type",
+    "title",
+    "children",
+    "layout",
+    "title_align",
+    "content_align",
+    "content_vertical_align",
+    "min_height",
+    "padding",
+}
 ALLOWED_TEXT_SCHEMA_KEYS = {"type", "text", "binding", "style"}
 ALLOWED_BUTTON_SCHEMA_KEYS = {"type", "label", "action"}
 ALLOWED_BUTTON_ACTION_KEYS = {"type", "page_id", "params"}
@@ -75,6 +85,7 @@ ALLOWED_LAYOUT_DIRECTIONS = {"column", "row"}
 ALLOWED_LAYOUT_KINDS = {"grid"}
 ALLOWED_TEXT_STYLES = {"title", "subtitle", "body", "meta"}
 ALLOWED_ALIGNMENTS = {"left", "center", "right"}
+ALLOWED_VERTICAL_ALIGNMENTS = {"top", "center", "bottom"}
 ALLOWED_DB_VIEW_SCHEMA_KEYS = {
     "view_kind",
     "source_resource_ids",
@@ -151,6 +162,27 @@ def _normalize_binding(raw: Any, *, field_name: str) -> str:
     if not binding:
         raise ValueError(f"{field_name} 不能为空")
     return binding
+
+
+def _normalize_alignment(raw: Any, *, field_name: str) -> str:
+    alignment = str(raw or "").strip().lower()
+    if alignment not in ALLOWED_ALIGNMENTS:
+        raise ValueError(f"{field_name} 不受支持: {alignment}")
+    return alignment
+
+
+def _normalize_vertical_alignment(raw: Any, *, field_name: str) -> str:
+    alignment = str(raw or "").strip().lower()
+    if alignment not in ALLOWED_VERTICAL_ALIGNMENTS:
+        raise ValueError(f"{field_name} 不受支持: {alignment}")
+    return alignment
+
+
+def _normalize_non_negative_int(raw: Any, *, field_name: str) -> int:
+    value = int(raw)
+    if value < 0:
+        raise ValueError(f"{field_name} 必须 >= 0")
+    return value
 
 
 def _normalize_string_list(raw: Any, *, field_name: str) -> list[str]:
@@ -655,6 +687,31 @@ def _normalize_page_component(raw: Any, *, field_name: str) -> dict[str, Any]:
         }
         if raw.get("title") is not None:
             card["title"] = str(raw.get("title") or "").strip()
+        if raw.get("title_align") is not None:
+            card["title_align"] = _normalize_alignment(
+                raw.get("title_align"),
+                field_name=f"{field_name}.title_align",
+            )
+        if raw.get("content_align") is not None:
+            card["content_align"] = _normalize_alignment(
+                raw.get("content_align"),
+                field_name=f"{field_name}.content_align",
+            )
+        if raw.get("content_vertical_align") is not None:
+            card["content_vertical_align"] = _normalize_vertical_alignment(
+                raw.get("content_vertical_align"),
+                field_name=f"{field_name}.content_vertical_align",
+            )
+        if raw.get("min_height") is not None:
+            card["min_height"] = _normalize_non_negative_int(
+                raw.get("min_height"),
+                field_name=f"{field_name}.min_height",
+            )
+        if raw.get("padding") is not None:
+            card["padding"] = _normalize_non_negative_int(
+                raw.get("padding"),
+                field_name=f"{field_name}.padding",
+            )
         layout = _normalize_layout(raw.get("layout"), field_name=f"{field_name}.layout")
         if layout:
             card["layout"] = layout

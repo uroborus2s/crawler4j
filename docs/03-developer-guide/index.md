@@ -36,5 +36,6 @@
 - `env_selectors/*.py` 导出 `SELECTOR` 和 `select`
 - `pages/*.py`、`pages/<group>/*.py` 导出 `PAGE` 和页面处理函数
 - Hosted UI 正式组件面现为 `Page / Card / Section / Text / Button / DataTable`，新的卡片容器优先使用 `Card`
+- `Card` 现支持标题对齐、内容水平/垂直对齐、最小高度和 padding 等布局参数
 
 如果你看到任何 `TaskScript`、`TaskFlow`、`ModuleAssembler`、`module_runtime.py`、`declare_ui()`、`@env_selector(...)`、`db.declare_data_resource(...)`、`db.declare_db_view(...)` 的旧写法，应视为历史资料，而不是当前正式协议。

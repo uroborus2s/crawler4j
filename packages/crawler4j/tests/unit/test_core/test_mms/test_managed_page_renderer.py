@@ -5,7 +5,7 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
-from PyQt6.QtWidgets import QLabel, QPushButton
+from PyQt6.QtWidgets import QDialog, QLabel, QPushButton
 
 from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
 from src.core.persistence import get_module_data_store
@@ -536,6 +536,13 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
         assert table.horizontalHeaderItem(1).text() == "状态"
         assert table.horizontalHeaderItem(2).text() == "操作"
         assert table.item(0, 0).text() == "alpha"
+        toolbar_button_texts = []
+        for index in range(table._toolbar.count()):
+            item = table._toolbar.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, QPushButton):
+                toolbar_button_texts.append(widget.text())
+        assert toolbar_button_texts == ["新增"]
 
         add_button = next(button for button in page.findChildren(QPushButton) if button.text() == "新增")
         add_button.click()
@@ -579,6 +586,83 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                 "status": "active",
             }
         ]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_managed_page_renderer_localizes_and_styles_crud_dialog(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_page_crud_dialog_style_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="accounts",
+                label="账号管理",
+                icon="📋",
+                schema={
+                    "type": "Page",
+                    "title": "账号管理",
+                    "load_handler": "load_accounts_page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {"type": "rows", "rows": []},
+                            "crud": {
+                                "mode": "handlers",
+                                "primary_key": "account_id",
+                                "form": {
+                                    "create_columns": ["name", "secret"],
+                                },
+                                "create_handler": "create_account_from_ui",
+                            },
+                            "columns": [
+                                {"key": "account_id", "label": "ID", "visible": False},
+                                {"key": "name", "label": "账号名", "required": True},
+                                {"key": "secret", "label": "密码", "required": True},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理", icon="📋")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    observed: dict[str, object] = {}
+
+    def _fake_exec(dialog: QDialog) -> int:
+        observed["title"] = dialog.windowTitle()
+        observed["button_texts"] = [button.text() for button in dialog.findChildren(QPushButton)]
+        observed["stylesheet"] = dialog.styleSheet()
+        return int(QDialog.DialogCode.Rejected)
+
+    monkeypatch.setattr(QDialog, "exec", _fake_exec)
+
+    try:
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        component = page._schema["children"][0]
+        payload = page._prompt_crud_form_payload(component, mode="create")
+
+        assert payload is None
+        assert observed["title"] == "新增账号管理"
+        assert "取消" in observed["button_texts"]
+        assert "确认" in observed["button_texts"]
+        assert "#1e1e2e" in observed["stylesheet"]
+        assert "QLabel" in observed["stylesheet"]
     finally:
         restore_module(service, original_registry, module_name)
 

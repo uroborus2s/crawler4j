@@ -39,7 +39,7 @@ class StatCard(Card):
         self.setMinimumHeight(96)
         self.setMaximumHeight(108)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.content_layout.setContentsMargins(18, 16, 18, 16)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
         self.content_layout.setSpacing(8)
         self.title_label = self.title_label or QLabel()
         if self.title_label.objectName() != "cardTitle":

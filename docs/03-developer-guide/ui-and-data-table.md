@@ -96,6 +96,11 @@ def load_dashboard_page(
 {
     "type": "Card",
     "title": "Payment Due",
+    "title_align": "left",
+    "content_align": "center",
+    "content_vertical_align": "center",
+    "min_height": 140,
+    "padding": 20,
     "layout": {"direction": "column", "gap": 8},
     "children": [
         {"type": "Text", "style": "title", "text": "1 Apr"},
@@ -109,6 +114,10 @@ def load_dashboard_page(
 - `Card` 是当前推荐的纯卡片容器
 - `Section` 仍保留给普通分组容器
 - 历史 `Section.variant="card"` 仍可用，但只作为兼容别名，新的页面 schema 优先直接写 `type="Card"`
+- `title_align` 支持 `left / center / right`
+- `content_align` 支持 `left / center / right`
+- `content_vertical_align` 支持 `top / center / bottom`
+- `min_height` 和 `padding` 用于控制卡片最小高度和统一内边距
 
 ## `DataTable` 的 4 种数据源
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel
 
 from src.ui.components.card import Card
@@ -29,6 +30,11 @@ def test_managed_page_renderer_supports_hosted_card(qtbot, tmp_path):
                         {
                             "type": "Card",
                             "title": "活跃账号",
+                            "title_align": "center",
+                            "content_align": "center",
+                            "content_vertical_align": "center",
+                            "min_height": 180,
+                            "padding": 24,
                             "layout": {"direction": "column", "gap": 6},
                             "children": [
                                 {"type": "Text", "style": "subtitle", "binding": "active.value"},
@@ -76,11 +82,17 @@ def test_managed_page_renderer_supports_hosted_card(qtbot, tmp_path):
 
         assert cards[0].title_label is not None
         assert cards[0].title_label.text() == "活跃账号"
+        assert cards[0].title_align == "center"
+        assert cards[0].content_align == "center"
+        assert cards[0].content_vertical_align == "center"
+        assert cards[0].minimumHeight() == 180
+        assert cards[0].title_label.alignment() == Qt.AlignmentFlag.AlignHCenter
         assert any(label.text() == "18" for label in cards[0].findChildren(QLabel))
         assert any(label.text() == "较昨日" for label in cards[0].findChildren(QLabel))
 
         assert cards[1].title_label is not None
         assert cards[1].title_label.text() == "转化率"
+        assert cards[1].title_align == "left"
         assert any(label.text() == "3.2%" for label in cards[1].findChildren(QLabel))
         assert any(label.text() == "近 24 小时" for label in cards[1].findChildren(QLabel))
     finally:

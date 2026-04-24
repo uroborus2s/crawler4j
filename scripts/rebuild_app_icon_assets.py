@@ -16,15 +16,21 @@ WINDOWS_ICON = ASSETS_ROOT / "app_icon.ico"
 ICO_SIZES = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 
 CANVAS_SIZE = 1024
-# Dock 光学尺寸的关键是外底板占画布比例；当前继续只收外底板 1px，不改内部蓝色主徽记。
+# Dock 光学尺寸仍由外底板占画布比例决定；本轮保持镜面正中，并把手柄延长到更接近边缘的安全区。
 PLATE_BOX = (97, 97, 927, 927)
 PLATE_RADIUS = 180
-BADGE_CENTER = (512, 486)
-BADGE_OUTER_RADIUS = 258
-BADGE_INNER_RADIUS = 228
-HANDLE_START = (684, 676)
-HANDLE_END = (836, 828)
-HANDLE_WIDTH = 78
+BADGE_CENTER = (512, 512)
+BADGE_OUTER_RADIUS = 332
+BADGE_INNER_RADIUS = 302
+HANDLE_START = (748, 748)
+HANDLE_END = (824, 824)
+HANDLE_WIDTH = 42
+HANDLE_HIGHLIGHT_START = (760, 760)
+HANDLE_HIGHLIGHT_END = (810, 810)
+HANDLE_HIGHLIGHT_WIDTH = 12
+BADGE_TEXT_CENTER = (480, 554)
+BADGE_TEXT_SIZE = 398
+BADGE_DOT_BOX = (640, 328, 690, 378)
 
 
 def _draw_capsule(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int, int], *, width: int, fill) -> None:
@@ -144,15 +150,27 @@ def _build_handle() -> Image.Image:
     handle = Image.new("RGBA", (CANVAS_SIZE, CANVAS_SIZE), (0, 0, 0, 0))
     draw = ImageDraw.Draw(handle)
     _draw_capsule(draw, HANDLE_START, HANDLE_END, width=HANDLE_WIDTH, fill=(224, 226, 233, 255))
-    _draw_capsule(draw, (710, 704), (808, 802), width=18, fill=(210, 214, 224, 210))
+    _draw_capsule(
+        draw,
+        HANDLE_HIGHLIGHT_START,
+        HANDLE_HIGHLIGHT_END,
+        width=HANDLE_HIGHLIGHT_WIDTH,
+        fill=(210, 214, 224, 210),
+    )
     return handle
 
 
 def _build_text_layer() -> Image.Image:
     text_layer = Image.new("RGBA", (CANVAS_SIZE, CANVAS_SIZE), (0, 0, 0, 0))
     draw = ImageDraw.Draw(text_layer)
-    draw.text((470, 520), "4j", font=_load_badge_font(310), anchor="mm", fill=(250, 250, 250, 255))
-    draw.ellipse((590, 336, 632, 378), fill=(255, 190, 76, 255))
+    draw.text(
+        BADGE_TEXT_CENTER,
+        "4j",
+        font=_load_badge_font(BADGE_TEXT_SIZE),
+        anchor="mm",
+        fill=(250, 250, 250, 255),
+    )
+    draw.ellipse(BADGE_DOT_BOX, fill=(255, 190, 76, 255))
     return text_layer
 
 

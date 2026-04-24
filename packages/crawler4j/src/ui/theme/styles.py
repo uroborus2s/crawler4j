@@ -23,7 +23,7 @@ class StyleSheets:
             )
 
         return f"""
-        QFrame {{
+        QFrame#sharedCard {{
             {frame_style}
         }}
         QLabel#cardTitle {{

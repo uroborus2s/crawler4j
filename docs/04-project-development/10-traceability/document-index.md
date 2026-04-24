@@ -71,6 +71,7 @@
 
 ## 5. 最近同步
 
+- 2026-04-24：Hosted UI `Card` 现已补齐布局参数口径。`docs/03-developer-guide/{index.md,ui-and-data-table.md}`、`docs/04-project-development/04-design/{module-hosted-ui-framework.md,api-design.md}`、`implementation-plan.md` 与 `.factory/memory/current-state.md` 已同步说明 `title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 的正式支持范围。
 - 2026-04-24：Hosted UI 现已正式补入 `Card` 容器组件，并明确收口“`Card` 是纯卡片容器、`Section.variant=\"card\"` 只是兼容别名”的口径；`docs/03-developer-guide/ui-and-data-table.md`、`docs/04-project-development/04-design/{module-hosted-ui-framework.md,api-design.md}`、`implementation-plan.md` 与 `.factory/memory/current-state.md` 已同步更新。
 - 2026-04-23：开发者指南与设计文档已补记 `managed_dataset` 的最终收口语义：`docs/03-developer-guide/{index.md,quickstart.md,reference-core-capabilities.md}` 与 `docs/04-project-development/04-design/{api-design.md,module-config-runtime-data-contract.md}` 现统一说明 `managed_dataset/custom_table` 都必须先在 `module.yaml.data.resources[]` 注册，未注册资源会被 `db.get_record` / `db.list_records` / `db.replace_records` 直接拒绝，不再按名称隐式创建托管表资源。
 - 2026-04-23：`docs/03-developer-guide/` 已把 manifest 驱动数据契约正式收口到开发者入口：`index.md`、`core-concepts.md`、`module-structure.md`、`quickstart.md`、`build-modules.md`、`reference-sdk-and-cli.md`、`debugging.md`、`troubleshooting.md` 现统一说明 `module.yaml.data + data/sql + data/seeds`、CLI `data` 命令组，以及 `db.get_record` / `db.run_query` / `db.query_view` 新正式口径；`docs/02-user-guide/` 同步补记管理员与现场支持对“旧协议模块包会被直接拒绝加载”的分诊口径。

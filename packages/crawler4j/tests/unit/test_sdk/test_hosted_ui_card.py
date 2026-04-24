@@ -15,6 +15,11 @@ def test_normalize_page_schema_supports_card_component():
                 {
                     "type": "Card",
                     "title": "活跃账号",
+                    "title_align": "center",
+                    "content_align": "center",
+                    "content_vertical_align": "center",
+                    "min_height": 180,
+                    "padding": 24,
                     "layout": {"direction": "column", "gap": 8},
                     "children": [
                         {"type": "Text", "style": "subtitle", "binding": "summary.active_count"},
@@ -29,6 +34,11 @@ def test_normalize_page_schema_supports_card_component():
         {
             "type": "Card",
             "title": "活跃账号",
+            "title_align": "center",
+            "content_align": "center",
+            "content_vertical_align": "center",
+            "min_height": 180,
+            "padding": 24,
             "layout": {"direction": "column", "gap": 8},
             "children": [
                 {"type": "Text", "style": "subtitle", "binding": "summary.active_count"},
@@ -38,8 +48,8 @@ def test_normalize_page_schema_supports_card_component():
     ]
 
 
-def test_normalize_page_schema_rejects_unsupported_card_fields():
-    with pytest.raises(ValueError, match="children\\[0\\] 包含不支持的字段"):
+def test_normalize_page_schema_rejects_invalid_card_vertical_alignment():
+    with pytest.raises(ValueError, match="children\\[0\\]\\.content_vertical_align 不受支持"):
         normalize_page_schema(
             "dashboard",
             {
@@ -49,7 +59,7 @@ def test_normalize_page_schema_rejects_unsupported_card_fields():
                     {
                         "type": "Card",
                         "title": "活跃账号",
-                        "accent_color": "#facc15",
+                        "content_vertical_align": "middle-ish",
                     }
                 ],
             },
