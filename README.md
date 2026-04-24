@@ -4,12 +4,12 @@
 
 ## Release Baseline
 
-当前源码版本线已收敛为 `crawler4j 0.3.0`、`crawler4j-sdk 0.5.2`、`crawler4j-contracts 0.3.0`，最近一次正式 Git tag 为 `v0.2.0`。发布前请同时区分“当前源码版本”和“最近正式发布”：
+当前源码版本线已收敛为 `crawler4j 0.3.1`、`crawler4j-sdk 0.5.2`、`crawler4j-contracts 0.3.0`，最近一次正式 Git tag 为 `v0.2.0`。发布前请同时区分“当前源码版本”和“最近正式发布”：
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
 | `crawler4j-workspace` | `0.0.0` | workspace 开发元包，不作为正式发布物 |
-| `crawler4j` | `0.3.0` | 桌面宿主与 Core 运行时包 |
+| `crawler4j` | `0.3.1` | 桌面宿主与 Core 运行时包 |
 | `crawler4j-sdk` | `0.5.2` | 模块开发 SDK 与 CLI |
 | `crawler4j-contracts` | `0.3.0` | Core / SDK / 模块共享契约 |
 | 最近正式 Git tag | `v0.2.0` | 仓库中最新已知正式 tag |

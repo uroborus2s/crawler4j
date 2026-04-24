@@ -7,24 +7,24 @@
 **上游输入：** Git tag | `docs/04-project-development/02-discovery/current-state-analysis.md` | 本地构建结果  
 **下游输出：** 后续正式 release notes | `delivery-package.md`（待需要时补齐）  
 **关联 ID：** `REL-001`, `REL-002`, `BUG-001`, `CR-001`  
-**最后更新：** 2026-04-17  
+**最后更新：** 2026-04-24  
 
 ## 1. 最新已知正式发布
 
-### `REL-001` `v0.1.1`
+### `REL-001` `v0.2.0`
 
-- Tag 时间：2026-01-03
-- Tag 标题：`Release v0.1.1: Fix discard logic and account blacklisting`
-- 关联提交：`f3aa4626e007cb39414073c28370faf31164f05b`
+- Tag 时间：2026-04-20
+- Tag 标题：`release: v0.2.0`
+- 关联提交：`2d914f48566647304e6a14053063dadb5b305ef1`
 
 ## 2. 当前仓库相对正式发布的状态
 
-- 当前工作区根应用版本：`0.3.0`
-- 当前运行时版本：`0.3.0`
-- 最近正式发布 tag：`v0.1.1`
+- 当前工作区根应用版本：`0.3.1`
+- 当前运行时版本：`0.3.1`
+- 最近正式发布 tag：`v0.2.0`
 - SDK 当前版本：`0.5.2`
 - Contracts 当前版本：`0.3.0`
-- 当前工作区已切到 `0.3.0` 发布目标，但尚未补打正式 Git tag / release 资产
+- 当前工作区已切到 `0.3.1` 源码版本线，但尚未补打对应正式 Git tag / release 资产
 - `crawler4j-sdk 0.5.2` 已于 2026-04-24 完成本地构建并发布到 PyPI
 - SDK 当前口径已收敛到 `TaskContext.tools` 统一工具接口，模块侧不再使用专用 `ctx.db` / `ctx.captcha` 字段
 - 当前工作区已进一步收敛到“ATM hooks + `TaskSignal`”单一生命周期链；`TaskFlow.on_complete/on_error` 与 `TaskScript` 私有 callbacks 已删除
@@ -41,12 +41,12 @@
 
 ## 4. 当前不建议直接发布的原因
 
-- `0.2.0` 对应的 Git tag、正式 release notes 与交付批次仍未完成
+- `0.3.1` 对应的 Git tag、正式 release notes 与交付批次仍未完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 复验 `0.2.0` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.3.1` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -62,3 +62,4 @@
 | 2026-04-19 | SDK 独立升到 `0.3.0`，并完成本地构建与 PyPI 发布 | Codex |
 | 2026-04-22 | SDK 继续升到 `0.4.0`，并完成本地构建与 PyPI 发布 | Codex |
 | 2026-04-24 | SDK 升到 `0.5.2`，补齐 `module repair-init` 命令与相关回归，发布结果以本轮执行记录为准 | Codex |
+| 2026-04-24 | 修正 release 文档中的版本漂移：最近正式 tag 更新为 `v0.2.0`，当前根应用 / 运行时版本更新为 `0.3.1`，并同步 Packaging 遗留修复后的本地构建事实 | Codex |

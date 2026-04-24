@@ -27,7 +27,7 @@
     "root_build": {
       "command": "uv build --package crawler4j --out-dir /tmp/crawler4j-build-check",
       "result": "passed",
-      "details": "workspace build reran on 2026-04-23 and produced crawler4j-0.3.0 wheel/sdist successfully"
+      "details": "workspace build reran on 2026-04-24 and produced crawler4j-0.3.1 wheel/sdist successfully"
     },
     "sdk_build": {
       "command": "uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check",
@@ -57,7 +57,7 @@
     "pyinstaller_bundle": {
       "command": "uv run package-desktop",
       "result": "passed",
-      "details": "PyInstaller build completed successfully on 2026-04-20; desktop artifacts now have fixed output dirs under packages/crawler4j/dist/desktop/<platform>/ and packages/crawler4j/build/pyinstaller/<platform>/"
+      "details": "PyInstaller build reran successfully on 2026-04-24 after removing the deleted dark_theme.qss data entry from crawler4j.spec; desktop artifacts remain under packages/crawler4j/dist/desktop/<platform>/ and packages/crawler4j/build/pyinstaller/<platform>/"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -82,8 +82,8 @@
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.3.0",
-    "runtime": "0.3.0",
+    "app_package_pyproject": "0.3.1",
+    "runtime": "0.3.1",
     "git_tag_latest": "v0.2.0",
     "sdk": "0.5.2",
     "contracts": "0.3.0"

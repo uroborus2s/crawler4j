@@ -313,6 +313,8 @@ def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
     assert "def _load_project_version" in spec_text
     assert "from src.__version__ import VERSION" not in spec_text
     assert "src/main.py" not in spec_text
+    assert "dark_theme.qss" not in spec_text
+    assert 'src/ui/styles' not in spec_text
     assert "def get_docs_root() -> Path:" in paths_text
 
 

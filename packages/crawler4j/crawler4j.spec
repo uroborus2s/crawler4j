@@ -22,7 +22,6 @@ WORKSPACE_ROOT = PROJECT_ROOT.parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 PROJECT_METADATA = PROJECT_ROOT / "pyproject.toml"
 APP_ENTRY = PROJECT_ROOT / "src" / "ui" / "app.py"
-UI_STYLE = PROJECT_ROOT / "src" / "ui" / "styles" / "dark_theme.qss"
 RUNTIME_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "app_icon.png"
 MACOS_BUNDLE_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "app_icon.icns"
 WINDOWS_BUNDLE_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "app_icon.ico"
@@ -68,7 +67,6 @@ def _build_single_file_module_resource_datas() -> list[tuple[str, str]]:
 def _build_datas() -> list[tuple[str, str]]:
     datas = [
         (str(PROJECT_METADATA), "."),
-        (str(UI_STYLE), "src/ui/styles"),
         (str(RUNTIME_ICON), "src/ui/assets"),
         (str(DOCS_ROOT / "index.md"), "docs"),
         (str(DOCS_ROOT / "01-getting-started"), "docs/01-getting-started"),
