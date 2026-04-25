@@ -7,17 +7,13 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QMessageBox,
     QProgressBar,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -29,9 +25,14 @@ from src.core.rem.manager import RESOURCE_POOL_METADATA_NAMESPACE
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.pool import EnvPool
 from src.core.rem.ui.import_existing_env_dialog import ImportExistingEnvDialog
+from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.dialog_async import open_dialog_async
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
+from src.ui.components.message_dialog import MessageDialog, MessageKind
 
 
 def get_create_env_default_name() -> str:
@@ -61,30 +62,6 @@ class CreateEnvDialog(QDialog):
             QLabel {
                 color: #cdd6f4;
                 background-color: transparent;
-            }
-            QLineEdit {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #cdd6f4;
-            }
-            QLineEdit:focus {
-                border-color: #89b4fa;
-            }
-            QPushButton {
-                background-color: #45475a;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                color: #cdd6f4;
-            }
-            QPushButton:hover {
-                background-color: #585b70;
-            }
-            QDialogButtonBox QPushButton[text="OK"] {
-                background-color: #89b4fa;
-                color: #1e1e2e;
             }
             QGroupBox {
                 border: 1px solid #45475a;
@@ -176,13 +153,32 @@ class CreateEnvDialog(QDialog):
         
         layout.addLayout(self.form)
         
-        # 按钮区
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_btn = StyledButton(
+            "取消",
+            variant="secondary",
+            min_height=40,
+            min_width=92,
+            horizontal_padding=20,
         )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        cancel_btn.setObjectName("createEnvCancelButton")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        create_btn = StyledButton(
+            "创建",
+            variant="success",
+            min_height=40,
+            min_width=92,
+            horizontal_padding=20,
+        )
+        create_btn.setObjectName("createEnvSubmitButton")
+        create_btn.clicked.connect(self.accept)
+        button_row.addWidget(create_btn)
+        layout.addLayout(button_row)
         
         # 初始化显示状态
         self._sync_suggested_name()
@@ -437,47 +433,16 @@ class EnvListWidget(QWidget):
         header.addStretch()
         
         # 创建环境按钮
-        self.create_btn = QPushButton("➕ 创建环境")
-        self.create_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(74, 222, 128, 0.8);
-                color: black;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(74, 222, 128, 1); }
-        """)
+        self.create_btn = StyledButton("创建环境", variant="success", min_height=36)
         self.create_btn.clicked.connect(self._create_env)
         header.addWidget(self.create_btn)
 
-        self.import_existing_btn = QPushButton("从已有环境导入")
-        self.import_existing_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(245, 158, 11, 0.82);
-                color: black;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(245, 158, 11, 1); }
-        """)
+        self.import_existing_btn = StyledButton("从已有环境导入", variant="warning", min_height=36)
         self.import_existing_btn.clicked.connect(self._import_existing_env)
         header.addWidget(self.import_existing_btn)
         
-        self.refresh_btn = QPushButton("🔄")
-        self.refresh_btn.setFixedSize(32, 32)
-        self.refresh_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 16px;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-            QPushButton:disabled { background: rgba(99, 102, 241, 0.3); }
-        """)
+        self.refresh_btn = StyledButton("刷新", variant="primary", min_height=36)
+        self.refresh_btn.setMinimumWidth(64)
         self.refresh_btn.clicked.connect(lambda: self.load_data(run_gc=True))
         header.addWidget(self.refresh_btn)
         
@@ -750,86 +715,25 @@ class EnvListWidget(QWidget):
             close = getattr(coro, "close", None)
             if callable(close):
                 close()
-            QMessageBox.warning(self, "当前不可用", "当前界面没有可用的异步事件循环，无法执行该操作。")
+            MessageDialog.warning(self, "当前不可用", "当前界面没有可用的异步事件循环，无法执行该操作。")
             return
         self._pending_tasks.add(task)
         task.add_done_callback(self._pending_tasks.discard)
 
     async def _exec_dialog_async(self, dialog: QDialog) -> int:
-        loop = asyncio.get_running_loop()
-        result_future = loop.create_future()
-
-        def _resolve(result: int) -> None:
-            if not result_future.done():
-                result_future.set_result(int(result))
-
-        dialog.finished.connect(_resolve)
-        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dialog.open()
-        try:
-            return int(await result_future)
-        finally:
-            try:
-                dialog.finished.disconnect(_resolve)
-            except TypeError:
-                pass
+        return await open_dialog_async(dialog)
 
     async def _show_message_async(
         self,
         title: str,
         text: str,
         *,
-        icon: QMessageBox.Icon,
+        kind: MessageKind = "info",
     ) -> None:
-        dialog = QMessageBox(self)
-        dialog.setIcon(icon)
-        dialog.setWindowTitle(title)
-        dialog.setText(text)
-        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
-        await self._exec_dialog_async(dialog)
+        await MessageDialog.show_async(self, title, text, kind=kind)
 
     async def _confirm_async(self, title: str, text: str) -> bool:
-        dialog = QMessageBox(self)
-        dialog.setIcon(QMessageBox.Icon.Question)
-        dialog.setWindowTitle(title)
-        dialog.setText(text)
-        dialog.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        dialog.setDefaultButton(QMessageBox.StandardButton.No)
-        loop = asyncio.get_running_loop()
-        result_future = loop.create_future()
-
-        def _resolve(button) -> None:
-            if not result_future.done():
-                result_future.set_result(dialog.standardButton(button))
-
-        def _resolve_reject(_result: int) -> None:
-            if not result_future.done():
-                if _result == int(QMessageBox.StandardButton.Yes):
-                    result_future.set_result(QMessageBox.StandardButton.Yes)
-                    return
-                if _result == int(QMessageBox.StandardButton.No):
-                    result_future.set_result(QMessageBox.StandardButton.No)
-                    return
-                result_future.set_result(QMessageBox.StandardButton.No)
-
-        dialog.buttonClicked.connect(_resolve)
-        dialog.finished.connect(_resolve_reject)
-        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dialog.open()
-        try:
-            result = await result_future
-        finally:
-            try:
-                dialog.buttonClicked.disconnect(_resolve)
-            except TypeError:
-                pass
-            try:
-                dialog.finished.disconnect(_resolve_reject)
-            except TypeError:
-                pass
-        return result == QMessageBox.StandardButton.Yes
+        return await ConfirmDialog.confirm_async(self, title, text, confirm_text="确认")
 
     def _apply_busy_state(self):
         """同步按钮和表格的忙碌状态。"""
@@ -864,7 +768,7 @@ class EnvListWidget(QWidget):
             loop = asyncio.get_running_loop()
         except RuntimeError:
             self._end_operation()
-            QMessageBox.critical(self, "错误", "当前 UI 异步事件循环未启动，无法执行环境操作。")
+            MessageDialog.error(self, "错误", "当前 UI 异步事件循环未启动，无法执行环境操作。")
             close = getattr(coro, "close", None)
             if callable(close):
                 close()
@@ -918,7 +822,7 @@ class EnvListWidget(QWidget):
                 f"环境 ID: {result.env.id}\n"
                 f"任务 ID: {result.task_id}"
             ),
-            icon=QMessageBox.Icon.Information,
+            kind="info",
         )
 
     async def _async_destroy_env(self, env_id: str):
@@ -971,7 +875,7 @@ class EnvListWidget(QWidget):
             await self._show_message_async(
                 "当前不可用",
                 "当前没有可用的来源环境导入入口。",
-                icon=QMessageBox.Icon.Warning,
+                kind="warning",
             )
             return
 
@@ -983,7 +887,7 @@ class EnvListWidget(QWidget):
             await self._show_message_async(
                 "当前不可用",
                 "当前没有可用的已安装模块，无法执行导入后的 workflow。",
-                icon=QMessageBox.Icon.Warning,
+                kind="warning",
             )
             return
 
@@ -1032,7 +936,7 @@ class EnvListWidget(QWidget):
     
     async def _show_operation_error(self, error: str):
         """工作线程出错。"""
-        await self._show_message_async("错误", f"操作失败: {error}", icon=QMessageBox.Icon.Critical)
+        await self._show_message_async("错误", f"操作失败: {error}", kind="error")
     
     def _destroy_env(self, env_id: str):
         """销毁环境。"""
@@ -1053,12 +957,12 @@ class EnvListWidget(QWidget):
     async def _on_destroy_finished(self, success: bool):
         """销毁完成。"""
         if success:
-            await self._show_message_async("成功", "环境已销毁", icon=QMessageBox.Icon.Information)
+            await self._show_message_async("成功", "环境已销毁", kind="info")
         else:
             await self._show_message_async(
                 "警告",
                 "环境销毁失败，数据库记录已保留。请检查指纹浏览器连接后重试。",
-                icon=QMessageBox.Icon.Warning,
+                kind="warning",
             )
         self.load_data()
     
@@ -1109,7 +1013,7 @@ class EnvListWidget(QWidget):
             await self._show_message_async(
                 "错误",
                 f"未找到环境: {env_id}...",
-                icon=QMessageBox.Icon.Warning,
+                kind="warning",
             )
             return
         
@@ -1127,7 +1031,7 @@ class EnvListWidget(QWidget):
             await self._show_message_async(
                 "操作失败",
                 f"{action} 环境失败，请稍后重试。",
-                icon=QMessageBox.Icon.Warning,
+                kind="warning",
             )
             return
         self.load_data()

@@ -111,6 +111,62 @@ def test_task_list_widget_can_destroy_run_once_env_only_for_create_mode(qtbot, m
     assert widget._can_destroy_run_once_env(select_job) is False
 
 
+def test_task_list_widget_stop_run_once_uses_public_choice_dialog(qtbot, monkeypatch):
+    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
+    created_tasks = []
+    selected_choices: list[tuple[str, list[str]]] = []
+
+    def _fake_choose(parent, title, message, *, choices, detail="", cancel_text="取消"):
+        assert parent is widget
+        assert title == "中止任务"
+        assert "manual-create" in message
+        selected_choices.append((detail, [choice.id for choice in choices]))
+        return "destroy"
+
+    def _fake_create_task(coro):
+        created_tasks.append(coro)
+        coro.close()
+        return MagicMock()
+
+    monkeypatch.setattr(task_list_widget.ChoiceDialog, "choose", _fake_choose)
+    monkeypatch.setattr(task_list_widget.asyncio, "create_task", _fake_create_task)
+
+    job = Job(
+        id="job-create",
+        name="manual-create",
+        type=JobType.BATCH,
+        state=JobState.PAUSED,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.CREATE,
+                    creation=CreationConfig(params={"groups": ["default"]}),
+                )
+            ),
+            execution=ExecutionContext(module="demo_module"),
+        ),
+    )
+    widget._jobs = [job]
+    widget._display_items = [
+        task_list_widget.JobDisplayItem(
+            raw=job,
+            display_status_text="执行中",
+            display_status_color="#facc15",
+            active_task_count=1,
+            run_once_phase="running",
+        )
+    ]
+
+    widget._stop_run_once("job-create")
+
+    assert selected_choices == [
+        ("保留环境会关闭环境但不删除；删除环境会删除本次创建的环境。", ["recycle", "destroy"])
+    ]
+    assert "job-create" in widget._run_once_stopping_job_ids
+    assert created_tasks
+
+
 def test_task_list_widget_renders_manual_batch_busy_button(qtbot, monkeypatch):
     task_list_widget, widget = _build_widget(qtbot, monkeypatch)
 

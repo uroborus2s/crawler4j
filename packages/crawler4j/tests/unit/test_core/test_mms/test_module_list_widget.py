@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtWidgets import QDialog, QMessageBox
+from PyQt6.QtWidgets import QDialog
 
 from src.core.mms.models import ModuleInfo, ModuleInstallError, ModuleManifest, ModuleParseError, ModuleSource
 from src.core.mms.release_service import ModulePackagePreview, ModuleUpdateInfo
@@ -105,12 +105,12 @@ def test_remove_dev_link_calls_registry_and_refreshes(qtbot, tmp_path, monkeypat
     monkeypatch.setattr("src.core.mms.ui.dev_link_actions.get_module_registry", lambda: registry)
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+        "src.core.mms.ui.module_list_widget.ConfirmDialog.confirm",
+        lambda *args, **kwargs: True,
     )
     info_messages: list[str] = []
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.information",
+        "src.core.mms.ui.module_list_widget.MessageDialog.information",
         lambda *args: info_messages.append(args[2]),
     )
 
@@ -138,12 +138,12 @@ def test_remove_dev_link_reports_fallback_source_via_shared_helper(qtbot, tmp_pa
     monkeypatch.setattr("src.core.mms.ui.dev_link_actions.get_module_registry", lambda: registry)
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+        "src.core.mms.ui.module_list_widget.ConfirmDialog.confirm",
+        lambda *args, **kwargs: True,
     )
     info_messages: list[str] = []
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.information",
+        "src.core.mms.ui.module_list_widget.MessageDialog.information",
         lambda *args: info_messages.append(args[2]),
     )
 
@@ -234,17 +234,17 @@ def test_uninstall_module_shows_warning_when_registry_refuses(qtbot, tmp_path, m
 
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+        "src.core.mms.ui.module_list_widget.ConfirmDialog.confirm",
+        lambda *args, **kwargs: True,
     )
     warnings: list[str] = []
     infos: list[str] = []
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.warning",
+        "src.core.mms.ui.module_list_widget.MessageDialog.warning",
         lambda *args: warnings.append(args[2]),
     )
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.information",
+        "src.core.mms.ui.module_list_widget.MessageDialog.information",
         lambda *args: infos.append(args[2]),
     )
 
@@ -270,12 +270,12 @@ def test_uninstall_module_refreshes_only_after_success(qtbot, tmp_path, monkeypa
 
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+        "src.core.mms.ui.module_list_widget.ConfirmDialog.confirm",
+        lambda *args, **kwargs: True,
     )
     infos: list[str] = []
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.information",
+        "src.core.mms.ui.module_list_widget.MessageDialog.information",
         lambda *args: infos.append(args[2]),
     )
 
@@ -327,14 +327,14 @@ def test_uninstall_module_warning_lists_registered_data_resources(qtbot, tmp_pat
 
     question_texts: list[str] = []
 
-    def _capture_question(parent, title, text, buttons):
+    def _capture_confirm(parent, title, text, **kwargs):
         question_texts.append(text)
-        return QMessageBox.StandardButton.Yes
+        return True
 
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_data_store", lambda: _FakeDataStore())
-    monkeypatch.setattr("src.core.mms.ui.module_list_widget.QMessageBox.question", _capture_question)
-    monkeypatch.setattr("src.core.mms.ui.module_list_widget.QMessageBox.information", lambda *args: None)
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.ConfirmDialog.confirm", _capture_confirm)
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.MessageDialog.information", lambda *args: None)
 
     widget = ModuleListWidget()
     qtbot.addWidget(widget)
@@ -408,9 +408,12 @@ async def test_install_module_async_persists_repo_token_when_requested(qtbot, tm
     )
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_github_credential_store", lambda: SimpleNamespace(set_token=lambda repo, token: saved_tokens.append((repo, token))))
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.InstallPreviewDialog", FakeDialog)
+    async def fake_show_async(*args, **kwargs):
+        return int(QDialog.DialogCode.Accepted)
+
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.open",
-        lambda box: asyncio.get_running_loop().call_soon(box.accept),
+        "src.core.mms.ui.module_list_widget.MessageDialog.show_async",
+        fake_show_async,
     )
 
     widget = ModuleListWidget()
@@ -539,9 +542,9 @@ async def test_register_dev_link_async_uses_non_blocking_dialogs(qtbot, tmp_path
         list_modules=lambda: [module],
     )
 
-    def fake_message_open(box):
-        shown_messages.append((box.windowTitle(), box.text()))
-        asyncio.get_running_loop().call_soon(box.accept)
+    async def fake_message_show_async(parent, title, text, **kwargs):
+        shown_messages.append((title, text))
+        return int(QDialog.DialogCode.Accepted)
 
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.get_module_registry", lambda: registry)
     monkeypatch.setattr(
@@ -550,12 +553,12 @@ async def test_register_dev_link_async_uses_non_blocking_dialogs(qtbot, tmp_path
     )
     monkeypatch.setattr("src.core.mms.ui.module_list_widget.InstallPreviewDialog", FakeDialog)
     monkeypatch.setattr(
-        "src.core.mms.ui.module_list_widget.QMessageBox.information",
+        "src.core.mms.ui.module_list_widget.MessageDialog.information",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("blocking static information dialog should not be used")
         ),
     )
-    monkeypatch.setattr("src.core.mms.ui.module_list_widget.QMessageBox.open", fake_message_open)
+    monkeypatch.setattr("src.core.mms.ui.module_list_widget.MessageDialog.show_async", fake_message_show_async)
 
     widget = ModuleListWidget()
     qtbot.addWidget(widget)

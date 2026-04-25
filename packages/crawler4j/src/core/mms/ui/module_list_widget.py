@@ -8,17 +8,14 @@ from pathlib import Path
 import traceback
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QProgressBar,
-    QPushButton,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -37,8 +34,12 @@ from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.install_preview_dialog import InstallPreviewDialog
 from src.core.mms.ui.module_install_dialog import ModuleInstallDialog, ModuleInstallRequest
 from src.core.persistence import get_module_data_store
+from src.ui.components.button import StyledButton
+from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
+from src.ui.components.dialog_async import open_dialog_async
+from src.ui.components.message_dialog import MessageDialog, MessageKind
 
 
 @dataclass
@@ -147,11 +148,6 @@ class ModuleInstallErrorDialog(QDialog):
                 selection-background-color: rgba(59, 130, 246, 0.45);
                 font-family: Menlo, Monaco, 'Courier New', monospace;
             }
-            QPushButton {
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: bold;
-            }
             """
         )
 
@@ -194,12 +190,32 @@ class ModuleInstallErrorDialog(QDialog):
         self._details_edit.setMinimumHeight(320)
         layout.addWidget(self._details_edit, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok, parent=self)
-        copy_btn = QPushButton("复制诊断信息", self)
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+
+        copy_btn = StyledButton(
+            "复制诊断信息",
+            variant="secondary",
+            min_height=40,
+            min_width=128,
+            horizontal_padding=18,
+            parent=self,
+        )
         copy_btn.clicked.connect(self._copy_details)
-        buttons.addButton(copy_btn, QDialogButtonBox.ButtonRole.ActionRole)
-        buttons.accepted.connect(self.accept)
-        layout.addWidget(buttons)
+        button_row.addWidget(copy_btn)
+        button_row.addStretch()
+
+        close_btn = StyledButton(
+            "知道了",
+            variant="success",
+            min_height=40,
+            min_width=96,
+            horizontal_padding=20,
+            parent=self,
+        )
+        close_btn.clicked.connect(self.accept)
+        button_row.addWidget(close_btn)
+        layout.addLayout(button_row)
 
     def _copy_details(self) -> None:
         if self._details_edit is None:
@@ -266,68 +282,19 @@ class ModuleListWidget(QWidget):
         header.addWidget(title)
         header.addStretch()
 
-        self.install_btn = QPushButton("📥 安装模块")
-        self.install_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(74, 222, 128, 0.8);
-                color: black;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(74, 222, 128, 1); }
-            """
-        )
+        self.install_btn = StyledButton("安装模块", variant="success", min_height=36)
         self.install_btn.clicked.connect(self._install_module)
         header.addWidget(self.install_btn)
 
-        self.dev_link_btn = QPushButton("🔗 添加开发模块")
-        self.dev_link_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(245, 158, 11, 0.85);
-                color: black;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(245, 158, 11, 1); }
-            """
-        )
+        self.dev_link_btn = StyledButton("添加开发模块", variant="warning", min_height=36)
         self.dev_link_btn.clicked.connect(self._register_dev_link)
         header.addWidget(self.dev_link_btn)
 
-        self.check_updates_btn = QPushButton("⬆ 检查更新")
-        self.check_updates_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(59, 130, 246, 0.85);
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(59, 130, 246, 1); }
-            """
-        )
+        self.check_updates_btn = StyledButton("检查更新", variant="primary", min_height=36)
         self.check_updates_btn.clicked.connect(self._check_updates)
         header.addWidget(self.check_updates_btn)
 
-        self.refresh_btn = QPushButton("🔄 刷新")
-        self.refresh_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-            """
-        )
+        self.refresh_btn = StyledButton("刷新", variant="primary", min_height=36)
         self.refresh_btn.clicked.connect(lambda: self.load_data(force_refresh=True))
         header.addWidget(self.refresh_btn)
 
@@ -513,43 +480,22 @@ class ModuleListWidget(QWidget):
             task = asyncio.create_task(coroutine)
         except RuntimeError:
             coroutine.close()
-            QMessageBox.warning(self, "当前不可用", "当前界面没有可用的异步事件循环，无法执行该操作。")
+            MessageDialog.warning(self, "当前不可用", "当前界面没有可用的异步事件循环，无法执行该操作。")
             return
         self._pending_tasks.add(task)
         task.add_done_callback(self._pending_tasks.discard)
 
     async def _exec_dialog_async(self, dialog: QDialog) -> int:
-        loop = asyncio.get_running_loop()
-        result_future = loop.create_future()
-
-        def _resolve(result: int) -> None:
-            if not result_future.done():
-                result_future.set_result(result)
-
-        dialog.finished.connect(_resolve)
-        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dialog.open()
-        try:
-            return int(await result_future)
-        finally:
-            try:
-                dialog.finished.disconnect(_resolve)
-            except TypeError:
-                pass
+        return await open_dialog_async(dialog)
 
     async def _show_message_async(
         self,
         title: str,
         text: str,
         *,
-        icon: QMessageBox.Icon,
+        kind: MessageKind = "info",
     ) -> None:
-        dialog = QMessageBox(self)
-        dialog.setIcon(icon)
-        dialog.setWindowTitle(title)
-        dialog.setText(text)
-        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
-        await self._exec_dialog_async(dialog)
+        await MessageDialog.show_async(self, title, text, kind=kind)
 
     async def _show_install_error_async(self, exc: Exception) -> None:
         dialog = ModuleInstallErrorDialog(
@@ -607,7 +553,7 @@ class ModuleListWidget(QWidget):
                     await self._show_message_async(
                         "检查完成",
                         "当前没有可检查在线升级的正式模块。",
-                        icon=QMessageBox.Icon.Information,
+                        kind="info",
                     )
                 return
 
@@ -639,13 +585,13 @@ class ModuleListWidget(QWidget):
                     await self._show_message_async(
                         "检查完成",
                         f"检测到 {update_count} 个可升级模块。\n以下模块检查失败：{error_modules}",
-                        icon=QMessageBox.Icon.Warning,
+                        kind="warning",
                     )
                 else:
                     await self._show_message_async(
                         "检查完成",
                         f"检测到 {update_count} 个可升级模块。",
-                        icon=QMessageBox.Icon.Information,
+                        kind="info",
                     )
         finally:
             if seq == self._update_check_seq:
@@ -696,7 +642,7 @@ class ModuleListWidget(QWidget):
             await self._show_message_async(
                 "成功",
                 f"已安装模块: {module_info.name}",
-                icon=QMessageBox.Icon.Information,
+                kind="info",
             )
             self.load_data(force_refresh=True)
         except Exception as e:
@@ -740,14 +686,14 @@ class ModuleListWidget(QWidget):
             await self._show_message_async(
                 "成功",
                 message,
-                icon=QMessageBox.Icon.Information,
+                kind="info",
             )
             self.load_data(force_refresh=True)
         except Exception as e:
             await self._show_message_async(
                 "添加开发模块失败",
                 str(e),
-                icon=QMessageBox.Icon.Warning,
+                kind="warning",
             )
         finally:
             self._set_busy(False)
@@ -781,39 +727,40 @@ class ModuleListWidget(QWidget):
             await self._show_message_async(
                 "升级成功",
                 f"模块 {installed.name} 已升级到 v{installed.manifest.version}",
-                icon=QMessageBox.Icon.Information,
+                kind="info",
             )
             self.load_data(force_refresh=True)
         except Exception as e:
             await self._show_message_async(
                 "升级失败",
                 str(e),
-                icon=QMessageBox.Icon.Warning,
+                kind="warning",
             )
         finally:
             self._set_busy(False)
 
     def _uninstall_module(self, name: str):
         warning_text = self._build_uninstall_warning_text(name)
-        reply = QMessageBox.question(
+        confirmed = ConfirmDialog.confirm(
             self,
-            "⚠️ 确认卸载并清理数据",
+            "确认卸载并清理数据",
             warning_text,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            confirm_text="卸载",
+            danger=True,
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
 
         try:
             registry = get_module_registry()
             removed = registry.uninstall(name)
             if not removed:
-                QMessageBox.warning(self, "卸载失败", f"未能卸载模块: {name}")
+                MessageDialog.warning(self, "卸载失败", f"未能卸载模块: {name}")
                 return
-            QMessageBox.information(self, "成功", f"已卸载模块: {name}")
+            MessageDialog.information(self, "成功", f"已卸载模块: {name}")
             self.load_data(force_refresh=True)
         except Exception as e:
-            QMessageBox.warning(self, "卸载失败", str(e))
+            MessageDialog.warning(self, "卸载失败", str(e))
 
     def _build_uninstall_warning_text(self, name: str) -> str:
         lines = [
@@ -866,21 +813,22 @@ class ModuleListWidget(QWidget):
         return "\n".join(lines)
 
     def _remove_dev_link(self, name: str):
-        reply = QMessageBox.question(
+        confirmed = ConfirmDialog.confirm(
             self,
             "确认移除",
             f"确定要移除开发模块 '{name}' 的开发链接吗？\n本地源码目录不会被删除。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            confirm_text="移除",
+            danger=True,
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
 
         try:
             result = remove_dev_link_and_describe(name)
-            QMessageBox.information(self, result.title, result.message)
+            MessageDialog.information(self, result.title, result.message)
             self.load_data(force_refresh=True)
         except Exception as e:
-            QMessageBox.warning(self, "移除失败", str(e))
+            MessageDialog.warning(self, "移除失败", str(e))
 
     def _enable_module(self, name: str):
         try:
@@ -888,7 +836,7 @@ class ModuleListWidget(QWidget):
             registry.enable_module(name)
             self.load_data(force_refresh=True)
         except Exception as e:
-            QMessageBox.warning(self, "启用失败", str(e))
+            MessageDialog.warning(self, "启用失败", str(e))
 
     def _disable_module(self, name: str):
         try:
@@ -896,4 +844,4 @@ class ModuleListWidget(QWidget):
             registry.disable_module(name)
             self.load_data(force_refresh=True)
         except Exception as e:
-            QMessageBox.warning(self, "禁用失败", str(e))
+            MessageDialog.warning(self, "禁用失败", str(e))

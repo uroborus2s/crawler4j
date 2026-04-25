@@ -33,3 +33,13 @@ def test_styled_button_success_uses_module_dialog_action_palette(qtbot):
     assert "background: #10d982;" in button.styleSheet()
     assert "color: #04130c;" in button.styleSheet()
     assert "font-weight: 700;" in button.styleSheet()
+
+
+def test_styled_button_warning_and_danger_variants(qtbot):
+    warning = StyledButton("导入", variant="warning")
+    danger = StyledButton("删除", variant="danger")
+    qtbot.addWidget(warning)
+    qtbot.addWidget(danger)
+
+    assert "background: #f59e0b;" in warning.styleSheet()
+    assert "rgba(248, 113, 113, 0.92)" in danger.styleSheet()

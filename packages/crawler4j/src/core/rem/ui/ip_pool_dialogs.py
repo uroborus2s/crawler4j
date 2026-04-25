@@ -13,19 +13,18 @@ from typing import Any
 
 from PyQt6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPlainTextEdit,
-    QPushButton,
     QVBoxLayout,
 )
 
 from src.core.rem.ip_pool import IPEntry, IPPool, IPStrategy
+from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
 
@@ -67,20 +66,6 @@ class AddPoolDialog(QDialog):
             QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {
                 border-color: #89b4fa;
             }
-            QPushButton {
-                background-color: #45475a;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                color: #cdd6f4;
-            }
-            QPushButton:hover {
-                background-color: #585b70;
-            }
-            QDialogButtonBox QPushButton[text="OK"] {
-                background-color: #89b4fa;
-                color: #1e1e2e;
-            }
         """)
     
     def _setup_ui(self) -> None:
@@ -101,13 +86,20 @@ class AddPoolDialog(QDialog):
         
         layout.addLayout(form)
         
-        # 按钮
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_btn = StyledButton("取消", variant="secondary", min_height=40, min_width=92)
+        cancel_btn.setObjectName("addPoolCancelButton")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        ok_btn = StyledButton("确定", variant="success", min_height=40, min_width=92)
+        ok_btn.setObjectName("addPoolSubmitButton")
+        ok_btn.clicked.connect(self.accept)
+        button_row.addWidget(ok_btn)
+        layout.addLayout(button_row)
     
     def get_values(self) -> IPPool:
         """获取输入值并创建 IPPool 对象。"""
@@ -153,20 +145,6 @@ class AddIPDialog(QDialog):
             QLineEdit:focus, QSpinBox:focus {
                 border-color: #89b4fa;
             }
-            QPushButton {
-                background-color: #45475a;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                color: #cdd6f4;
-            }
-            QPushButton:hover {
-                background-color: #585b70;
-            }
-            QDialogButtonBox QPushButton[text="OK"] {
-                background-color: #89b4fa;
-                color: #1e1e2e;
-            }
         """)
     
     def _setup_ui(self) -> None:
@@ -210,13 +188,20 @@ class AddIPDialog(QDialog):
         
         layout.addLayout(form)
         
-        # 按钮
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_btn = StyledButton("取消", variant="secondary", min_height=40, min_width=92)
+        cancel_btn.setObjectName("addIpCancelButton")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        ok_btn = StyledButton("确定", variant="success", min_height=40, min_width=92)
+        ok_btn.setObjectName("addIpSubmitButton")
+        ok_btn.clicked.connect(self.accept)
+        button_row.addWidget(ok_btn)
+        layout.addLayout(button_row)
     
     def get_values(self) -> IPEntry:
         """获取输入值并创建 IPEntry 对象。"""
@@ -274,20 +259,6 @@ class BatchImportDialog(QDialog):
             QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {
                 border-color: #89b4fa;
             }
-            QPushButton {
-                background-color: #45475a;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                color: #cdd6f4;
-            }
-            QPushButton:hover {
-                background-color: #585b70;
-            }
-            QDialogButtonBox QPushButton[text="导入"] {
-                background-color: #89b4fa;
-                color: #1e1e2e;
-            }
         """)
     
     def _setup_ui(self) -> None:
@@ -322,7 +293,7 @@ class BatchImportDialog(QDialog):
         # 底部操作
         bottom_layout = QHBoxLayout()
         
-        import_btn = QPushButton("从文件导入...")
+        import_btn = StyledButton("从文件导入...", variant="secondary", min_height=36)
         import_btn.clicked.connect(self._import_from_file)
         bottom_layout.addWidget(import_btn)
         
@@ -332,14 +303,20 @@ class BatchImportDialog(QDialog):
         bottom_layout.addStretch()
         layout.addLayout(bottom_layout)
         
-        # 按钮
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("导入")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_btn = StyledButton("取消", variant="secondary", min_height=40, min_width=92)
+        cancel_btn.setObjectName("batchImportCancelButton")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        submit_btn = StyledButton("导入", variant="success", min_height=40, min_width=92)
+        submit_btn.setObjectName("batchImportSubmitButton")
+        submit_btn.clicked.connect(self.accept)
+        button_row.addWidget(submit_btn)
+        layout.addLayout(button_row)
     
     def _import_from_file(self) -> None:
         """从文件导入。"""

@@ -6,11 +6,13 @@ from datetime import datetime
 from typing import Any
 
 from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QFormLayout, QHBoxLayout, QLabel, QVBoxLayout
 
+from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.notice_panel import NoticePanel
 
 
 class ImportExistingEnvDialog(QDialog):
@@ -103,15 +105,8 @@ class ImportExistingEnvDialog(QDialog):
 
         warning_title = QLabel("风险提示:")
         warning_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.warning_label = QLabel()
-        self.warning_label.setWordWrap(True)
-        self.warning_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.warning_card = QWidget()
-        self.warning_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        warning_layout = QVBoxLayout(self.warning_card)
-        warning_layout.setContentsMargins(*self.RISK_CONTENT_PADDING)
-        warning_layout.setSpacing(0)
-        warning_layout.addWidget(self.warning_label)
+        self.warning_card = NoticePanel(margins=self.RISK_CONTENT_PADDING)
+        self.warning_label = self.warning_card.label
         form.addRow(warning_title, self.warning_card)
         layout.addLayout(form)
 
@@ -124,15 +119,32 @@ class ImportExistingEnvDialog(QDialog):
         self.selection_label.setStyleSheet("color: rgba(255, 255, 255, 0.68); font-size: 12px;")
         layout.addWidget(self.selection_label)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_btn = StyledButton(
+            "取消",
+            variant="secondary",
+            min_height=40,
+            min_width=92,
+            horizontal_padding=20,
         )
-        self.submit_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        self.submit_btn.setText("导入并执行")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        cancel_btn.setObjectName("importExistingCancelButton")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        self.submit_btn = StyledButton(
+            "导入并执行",
+            variant="success",
+            min_height=40,
+            min_width=124,
+            horizontal_padding=20,
+        )
+        self.submit_btn.setObjectName("importExistingSubmitButton")
+        self.submit_btn.clicked.connect(self.accept)
+        button_row.addWidget(self.submit_btn)
+        layout.addLayout(button_row)
 
     def _load_sources(self) -> None:
         self.source_combo.clear()
@@ -211,18 +223,12 @@ class ImportExistingEnvDialog(QDialog):
 
     def _update_warning(self) -> None:
         if self._workflow_supports_existing_env_import():
-            self.warning_label.setText(self.RISK_SAFE_TEXT)
-            self.warning_label.setStyleSheet("color: #86efac; background: transparent; border: none; padding: 0;")
-            self.warning_card.setStyleSheet(
-                "background: rgba(34, 197, 94, 0.14); border: none; border-radius: 8px;"
-            )
+            self.warning_card.set_text(self.RISK_SAFE_TEXT)
+            self.warning_card.set_kind("success")
             self._schedule_warning_height_sync()
             return
-        self.warning_label.setText(self.RISK_WARNING_TEXT)
-        self.warning_label.setStyleSheet("color: #fcd34d; background: transparent; border: none; padding: 0;")
-        self.warning_card.setStyleSheet(
-            "background: rgba(245, 158, 11, 0.14); border: none; border-radius: 8px;"
-        )
+        self.warning_card.set_text(self.RISK_WARNING_TEXT)
+        self.warning_card.set_kind("warning")
         self._schedule_warning_height_sync()
 
     def _schedule_warning_height_sync(self) -> None:

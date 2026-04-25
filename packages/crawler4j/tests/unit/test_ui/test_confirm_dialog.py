@@ -27,9 +27,8 @@ def test_confirm_dialog_applies_dark_danger_theme(qtbot):
     assert "QDialog {" in stylesheet
     assert "background-color: #1e1e2e;" in stylesheet
     assert "QLabel#confirmTitle" in stylesheet
-    assert "color: #f5e0dc;" in stylesheet
+    assert "color: #f7f7fb;" in stylesheet
     assert "QLabel#confirmMessage" in stylesheet
-    assert "color: #bac2de;" in stylesheet
-    assert "QPushButton#confirmCancel" in stylesheet
-    assert "QPushButton#confirmDanger" in stylesheet
-    assert "#f38ba8" in stylesheet
+    assert "rgba(255, 255, 255, 0.72)" in stylesheet
+    assert "rgba(248, 113, 113, 0.92)" in confirm_button.styleSheet()
+    assert "rgba(255, 255, 255, 0.1)" in cancel_button.styleSheet()

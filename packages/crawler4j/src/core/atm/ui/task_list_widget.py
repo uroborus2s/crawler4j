@@ -12,9 +12,7 @@ from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QProgressBar,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -26,6 +24,8 @@ from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
+from src.ui.components.button import StyledButton
+from src.ui.components.choice_dialog import ChoiceDialog, DialogChoice
 from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
@@ -170,33 +170,11 @@ class TaskListWidget(QWidget):
         header.addWidget(title)
         header.addStretch()
 
-        self.create_btn = QPushButton("+ 新建作业")
-        self.create_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(74, 222, 128, 0.8);
-                color: black;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(74, 222, 128, 1); }
-        """)
+        self.create_btn = StyledButton("新建作业", variant="success", min_height=36)
         self.create_btn.clicked.connect(self._on_create_job)
         header.addWidget(self.create_btn)
 
-        self.refresh_btn = QPushButton("🔄")
-        self.refresh_btn.setFixedSize(32, 32)
-        self.refresh_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 16px;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-        """)
+        self.refresh_btn = StyledButton("刷新", variant="primary", min_height=36, min_width=64)
         self.refresh_btn.clicked.connect(self.load_data)
         header.addWidget(self.refresh_btn)
 
@@ -515,26 +493,27 @@ class TaskListWidget(QWidget):
         if not job:
             return
 
-        dialog = QMessageBox(self)
-        dialog.setIcon(QMessageBox.Icon.Warning)
-        dialog.setWindowTitle("中止任务")
-        dialog.setText(f"要中止“{job.name}”这次手动执行吗？")
+        choices = [
+            DialogChoice("recycle", "保留环境中止", "warning"),
+        ]
         if self._can_destroy_run_once_env(job):
-            dialog.setInformativeText("保留环境会关闭环境但不删除；删除环境会删除本次创建的环境。")
-            destroy_button = dialog.addButton("删除环境中止", QMessageBox.ButtonRole.DestructiveRole)
+            detail = "保留环境会关闭环境但不删除；删除环境会删除本次创建的环境。"
+            choices.append(DialogChoice("destroy", "删除环境中止", "danger"))
         else:
-            dialog.setInformativeText("当前运行模板是复用环境模式，只支持关闭环境但不删除。")
-            destroy_button = None
-        recycle_button = dialog.addButton("保留环境中止", QMessageBox.ButtonRole.AcceptRole)
-        dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-        dialog.exec()
+            detail = "当前运行模板是复用环境模式，只支持关闭环境但不删除。"
 
-        clicked = dialog.clickedButton()
-        if clicked is None:
+        selected = ChoiceDialog.choose(
+            self,
+            "中止任务",
+            f"要中止“{job.name}”这次手动执行吗？",
+            choices=choices,
+            detail=detail,
+        )
+        if selected is None:
             return
-        if clicked == recycle_button:
+        if selected == "recycle":
             env_action = EnvAction.RECYCLE
-        elif destroy_button is not None and clicked == destroy_button:
+        elif selected == "destroy":
             env_action = EnvAction.DESTROY
         else:
             return

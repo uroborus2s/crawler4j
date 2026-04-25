@@ -138,9 +138,6 @@ def test_env_list_widget_create_finished_refreshes_without_success_dialog(qtbot,
         lambda: SimpleNamespace(pool=SimpleNamespace()),
     )
 
-    info = MagicMock()
-    monkeypatch.setattr(env_list_widget.QMessageBox, "information", info)
-
     widget = env_list_widget.EnvListWidget()
     qtbot.addWidget(widget)
     widget.load_data = MagicMock()
@@ -148,7 +145,6 @@ def test_env_list_widget_create_finished_refreshes_without_success_dialog(qtbot,
     widget._on_create_finished(SimpleNamespace(id=123))
 
     widget.load_data.assert_called_once_with()
-    info.assert_not_called()
 
 
 def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
@@ -394,31 +390,20 @@ async def test_env_list_widget_destroy_refresh_waits_for_inflight_load(qtbot, mo
     import src.core.rem.manager as manager_module
 
     monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
-    monkeypatch.setattr(
-        env_list_widget.QMessageBox,
-        "question",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("blocking static question dialog should not be used")
-        ),
-    )
-    monkeypatch.setattr(
-        env_list_widget.QMessageBox,
-        "information",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("blocking static information dialog should not be used")
-        ),
-    )
+    confirmations: list[tuple[str, str]] = []
     shown_messages: list[tuple[str, str]] = []
 
-    def fake_open(box):
-        shown_messages.append((box.windowTitle(), box.text()))
-        if box.text().startswith("确定要销毁环境"):
-            result = int(env_list_widget.QMessageBox.StandardButton.Yes)
-        else:
-            result = int(env_list_widget.QMessageBox.StandardButton.Ok)
-        asyncio.get_running_loop().call_soon(lambda: box.done(result))
+    async def fake_confirm(parent, title, message, **kwargs):
+        assert parent is widget
+        confirmations.append((title, message))
+        return True
 
-    monkeypatch.setattr(env_list_widget.QMessageBox, "open", fake_open)
+    async def fake_show(parent, title, message, **kwargs):
+        assert parent is widget
+        shown_messages.append((title, message))
+
+    monkeypatch.setattr(env_list_widget.ConfirmDialog, "confirm_async", staticmethod(fake_confirm))
+    monkeypatch.setattr(env_list_widget.MessageDialog, "show_async", staticmethod(fake_show))
 
     widget = env_list_widget.EnvListWidget()
     qtbot.addWidget(widget)
@@ -432,9 +417,8 @@ async def test_env_list_widget_destroy_refresh_waits_for_inflight_load(qtbot, mo
 
     manager.destroy_env.assert_awaited_once_with("env-1")
     assert widget._reload_requested is True
-    assert len(shown_messages) == 2
-    assert shown_messages[0][1] == "确定要销毁环境 env-1 ?"
-    assert shown_messages[1][1] == "环境已销毁"
+    assert confirmations == [("确认", "确定要销毁环境 env-1 ?")]
+    assert shown_messages == [("成功", "环境已销毁")]
 
     _ControlledLoaderThread.instances[0].finish([_make_env("env-1", EnvStatus.READY)])
     qtbot.waitUntil(lambda: len(_ControlledLoaderThread.instances) == 2, timeout=500)

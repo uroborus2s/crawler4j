@@ -8,12 +8,10 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFrame,
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -23,6 +21,7 @@ from PyQt6.QtWidgets import (
 from src.core.persistence import get_module_data_store
 from src.core.mms.models import ModuleInfo
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
+from src.ui.components.button import StyledButton
 from src.ui.components.card import Card
 from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
@@ -196,41 +195,28 @@ class ManagedPageRenderer(QWidget):
         label.setStyleSheet(styles.get(str(component.get("style") or "body"), styles["body"]))
         return label
 
-    def _build_button(self, component: dict[str, Any]) -> QPushButton:
+    def _build_button(self, component: dict[str, Any]) -> StyledButton:
         label = str(component.get("label") or "").strip()
         icon = str(component.get("icon") or "").strip()
         text = f"{icon} {label}".strip() if label else icon or "按钮"
-        button = QPushButton(text)
+        size = str(component.get("size") or "md").strip().lower()
+        variant = str(component.get("variant") or "primary").strip().lower()
+        button_variant = "secondary" if variant == "ghost" else variant
+        if button_variant not in {"primary", "secondary", "success", "warning", "danger"}:
+            button_variant = "primary"
+        button = StyledButton(
+            text,
+            variant=button_variant,
+            min_height=34 if size == "icon" else 30 if size == "sm" else 36,
+            min_width=34 if size == "icon" else None,
+            horizontal_padding=0 if size == "icon" else 10 if size == "sm" else 14,
+        )
         aria_label = str(component.get("aria_label") or label or icon or "").strip()
         if aria_label:
             button.setToolTip(aria_label)
         button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        size = str(component.get("size") or "md").strip().lower()
-        variant = str(component.get("variant") or "primary").strip().lower()
         if size == "icon":
             button.setFixedSize(34, 34)
-        elif size == "sm":
-            button.setMinimumHeight(30)
-        color_by_variant = {
-            "primary": ("rgba(99, 102, 241, 0.75)", "rgba(99, 102, 241, 0.95)"),
-            "secondary": ("rgba(255, 255, 255, 0.10)", "rgba(255, 255, 255, 0.18)"),
-            "ghost": ("transparent", "rgba(255, 255, 255, 0.10)"),
-        }
-        background, hover_background = color_by_variant.get(variant, color_by_variant["primary"])
-        padding = "0" if size == "icon" else "6px 10px" if size == "sm" else "8px 14px"
-        button.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {background};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: {padding};
-                font-weight: 600;
-            }}
-            QPushButton:hover {{ background: {hover_background}; }}
-            """
-        )
         action = component.get("action", {})
         if action.get("type") == "reload":
             button.clicked.connect(self.refresh)
@@ -428,19 +414,19 @@ class ManagedPageRenderer(QWidget):
         if not isinstance(toolbar, QHBoxLayout):
             return False
 
-        edit_button: QPushButton | None = None
-        delete_button: QPushButton | None = None
+        edit_button: StyledButton | None = None
+        delete_button: StyledButton | None = None
 
         if toolbar_actions["create"]:
-            create_button = QPushButton("新增")
+            create_button = StyledButton("新增", variant="primary", min_height=34)
             create_button.clicked.connect(lambda _checked=False: self._handle_create_action(component, table))
             toolbar.addWidget(create_button)
         if toolbar_actions["update"]:
-            edit_button = QPushButton("编辑")
+            edit_button = StyledButton("编辑", variant="secondary", min_height=34)
             edit_button.clicked.connect(lambda _checked=False: self._handle_update_action(component, table))
             toolbar.addWidget(edit_button)
         if toolbar_actions["delete"]:
-            delete_button = QPushButton("删除")
+            delete_button = StyledButton("删除", variant="danger", min_height=34)
             delete_button.clicked.connect(lambda _checked=False: self._handle_delete_action(component, table))
             toolbar.addWidget(delete_button)
 
@@ -587,22 +573,6 @@ class ManagedPageRenderer(QWidget):
                 font-size: 13px;
                 font-weight: 600;
             }
-            QDialogButtonBox {
-                border-top: 1px solid rgba(255, 255, 255, 0.08);
-                padding-top: 12px;
-            }
-            QDialogButtonBox QPushButton {
-                background-color: #45475a;
-                border: none;
-                border-radius: 6px;
-                min-width: 96px;
-                padding: 8px 18px;
-                color: #cdd6f4;
-                font-weight: 600;
-            }
-            QDialogButtonBox QPushButton:hover {
-                background-color: #585b70;
-            }
             """
         )
 
@@ -622,24 +592,21 @@ class ManagedPageRenderer(QWidget):
             form_layout.addRow(f"{label}：", widget)
 
         layout.addLayout(form_layout)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
-        if cancel_button is not None:
-            cancel_button.setText("取消")
-        if ok_button is not None:
-            ok_button.setText("确认")
-            ok_button.setDefault(True)
-            ok_button.setStyleSheet(
-                """
-                background-color: #89b4fa;
-                color: #11111b;
-                font-weight: 700;
-                """
-            )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_button = StyledButton("取消", variant="secondary", min_height=40, min_width=92)
+        cancel_button.setObjectName("managedCrudCancelButton")
+        cancel_button.clicked.connect(dialog.reject)
+        button_row.addWidget(cancel_button)
+
+        ok_button = StyledButton("确认", variant="success", min_height=40, min_width=92)
+        ok_button.setObjectName("managedCrudConfirmButton")
+        ok_button.setDefault(True)
+        ok_button.clicked.connect(dialog.accept)
+        button_row.addWidget(ok_button)
+        layout.addLayout(button_row)
 
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None

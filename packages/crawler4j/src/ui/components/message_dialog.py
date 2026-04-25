@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.ui.components.button import StyledButton
+from src.ui.components.dialog_async import open_dialog_async
 
 MessageKind = Literal["info", "warning", "error"]
 
@@ -160,13 +161,59 @@ class MessageDialog(QDialog):
         self.adjustSize()
 
     @classmethod
+    async def show_async(
+        cls,
+        parent: QWidget | None,
+        title: str,
+        message: str,
+        *,
+        details: str = "",
+        kind: MessageKind = "info",
+    ) -> int:
+        dialog = cls(title, message, details=details, kind=kind, parent=parent)
+        return await open_dialog_async(dialog)
+
+    @classmethod
     def information(cls, parent: QWidget | None, title: str, message: str, *, details: str = "") -> int:
         return cls(title, message, details=details, kind="info", parent=parent).exec()
+
+    @classmethod
+    async def information_async(
+        cls,
+        parent: QWidget | None,
+        title: str,
+        message: str,
+        *,
+        details: str = "",
+    ) -> int:
+        return await cls.show_async(parent, title, message, details=details, kind="info")
 
     @classmethod
     def warning(cls, parent: QWidget | None, title: str, message: str, *, details: str = "") -> int:
         return cls(title, message, details=details, kind="warning", parent=parent).exec()
 
     @classmethod
+    async def warning_async(
+        cls,
+        parent: QWidget | None,
+        title: str,
+        message: str,
+        *,
+        details: str = "",
+    ) -> int:
+        return await cls.show_async(parent, title, message, details=details, kind="warning")
+
+    @classmethod
     def error(cls, parent: QWidget | None, title: str, message: str, *, details: str = "") -> int:
         return cls(title, message, details=details, kind="error", parent=parent).exec()
+
+    @classmethod
+    async def error_async(
+        cls,
+        parent: QWidget | None,
+        title: str,
+        message: str,
+        *,
+        details: str = "",
+    ) -> int:
+        return await cls.show_async(parent, title, message, details=details, kind="error")

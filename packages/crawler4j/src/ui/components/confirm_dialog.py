@@ -4,14 +4,10 @@ Provides confirmation dialogs for dangerous operations.
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QWidget,
-)
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+
+from src.ui.components.button import StyledButton
+from src.ui.components.dialog_async import open_dialog_async
 
 
 class ConfirmDialog(QDialog):
@@ -60,62 +56,15 @@ class ConfirmDialog(QDialog):
             QLabel {
                 background-color: transparent;
             }
-            QLabel#confirmIcon {
-                font-size: 28px;
-            }
             QLabel#confirmTitle {
-                color: #f5e0dc;
-                font-size: 16px;
-                font-weight: 700;
+                color: #f7f7fb;
+                font-size: 18px;
+                font-weight: 800;
             }
             QLabel#confirmMessage {
-                color: #bac2de;
-                font-size: 13px;
+                color: rgba(255, 255, 255, 0.72);
+                font-size: 14px;
                 line-height: 1.45;
-            }
-            QPushButton {
-                min-width: 88px;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QPushButton#confirmCancel {
-                background-color: #45475a;
-                border: 1px solid #585b70;
-                color: #cdd6f4;
-            }
-            QPushButton#confirmCancel:hover {
-                background-color: #585b70;
-                border-color: #6c7086;
-            }
-            QPushButton#confirmCancel:pressed {
-                background-color: #3b3e52;
-            }
-            QPushButton#confirmDanger {
-                background-color: rgba(243, 139, 168, 0.16);
-                border: 1px solid rgba(243, 139, 168, 0.38);
-                color: #f38ba8;
-            }
-            QPushButton#confirmDanger:hover {
-                background-color: rgba(243, 139, 168, 0.24);
-                border-color: rgba(243, 139, 168, 0.52);
-            }
-            QPushButton#confirmDanger:pressed {
-                background-color: rgba(243, 139, 168, 0.30);
-            }
-            QPushButton#confirmPrimary {
-                background-color: #89b4fa;
-                border: 1px solid #89b4fa;
-                color: #1e1e2e;
-            }
-            QPushButton#confirmPrimary:hover {
-                background-color: #a6c8ff;
-                border-color: #a6c8ff;
-            }
-            QPushButton#confirmPrimary:pressed {
-                background-color: #74a7f2;
-                border-color: #74a7f2;
             }
         """
 
@@ -129,22 +78,10 @@ class ConfirmDialog(QDialog):
     ):
         """Setup the dialog UI."""
         layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(24, 24, 24, 24)
-
-        # Icon and title
-        header = QHBoxLayout()
-
-        icon = QLabel("⚠️" if danger else "❓")
-        icon.setObjectName("confirmIcon")
-        header.addWidget(icon)
-
         title_label = QLabel(title)
         title_label.setObjectName("confirmTitle")
-        header.addWidget(title_label)
-        header.addStretch()
-
-        layout.addLayout(header)
+        title_label.setWordWrap(True)
+        layout.addWidget(title_label)
 
         # Message
         message_label = QLabel(message)
@@ -160,12 +97,24 @@ class ConfirmDialog(QDialog):
         buttons.setSpacing(12)
         buttons.addStretch()
 
-        cancel_btn = QPushButton(cancel_text)
+        cancel_btn = StyledButton(
+            cancel_text,
+            variant="secondary",
+            min_height=40,
+            min_width=96,
+            horizontal_padding=20,
+        )
         cancel_btn.setObjectName("confirmCancel")
         cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(cancel_btn)
 
-        confirm_btn = QPushButton(confirm_text)
+        confirm_btn = StyledButton(
+            confirm_text,
+            variant="danger" if danger else "success",
+            min_height=40,
+            min_width=96,
+            horizontal_padding=20,
+        )
         if danger:
             confirm_btn.setObjectName("confirmDanger")
         else:
@@ -202,6 +151,20 @@ class ConfirmDialog(QDialog):
         return dialog.exec() == QDialog.DialogCode.Accepted
 
     @classmethod
+    async def confirm_async(
+        cls,
+        parent: QWidget | None,
+        title: str,
+        message: str,
+        confirm_text: str = "确认",
+        cancel_text: str = "取消",
+        danger: bool = False,
+    ) -> bool:
+        """Open confirmation dialog without a nested event loop."""
+        dialog = cls(title, message, confirm_text, cancel_text, danger, parent)
+        return await open_dialog_async(dialog) == int(QDialog.DialogCode.Accepted)
+
+    @classmethod
     def delete_confirm(cls, parent: QWidget, item_name: str) -> bool:
         """Convenience method for delete confirmation.
 
@@ -213,6 +176,17 @@ class ConfirmDialog(QDialog):
             True if confirmed.
         """
         return cls.confirm(
+            parent,
+            "确认删除",
+            f"确定要删除 {item_name} 吗？此操作不可恢复。",
+            confirm_text="删除",
+            danger=True,
+        )
+
+    @classmethod
+    async def delete_confirm_async(cls, parent: QWidget | None, item_name: str) -> bool:
+        """Async convenience method for delete confirmation."""
+        return await cls.confirm_async(
             parent,
             "确认删除",
             f"确定要删除 {item_name} 吗？此操作不可恢复。",
