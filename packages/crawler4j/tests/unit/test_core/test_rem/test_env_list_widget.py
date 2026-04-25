@@ -235,6 +235,62 @@ def test_env_list_widget_rows_expose_actions_and_row_click_signal(qtbot, monkeyp
     assert selected == ["env-1"]
 
 
+def test_env_list_widget_merges_env_metadata_into_availability(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    from src.core.rem.manager import (
+        RESOURCE_POOL_METADATA_NAMESPACE,
+        build_resource_pool_card,
+    )
+
+    metadata_by_env = {
+        101: {
+            RESOURCE_POOL_METADATA_NAMESPACE: {
+                "demo_module:ready_pool": build_resource_pool_card(
+                    "demo_module",
+                    "ready_pool",
+                    eligible=True,
+                ),
+                "demo_module:blocked_pool": build_resource_pool_card(
+                    "demo_module",
+                    "blocked_pool",
+                    eligible=False,
+                    reason="manual_disabled",
+                ),
+            }
+        },
+        102: {},
+    }
+    pool = SimpleNamespace(
+        list_metadata=MagicMock(side_effect=lambda env_id: metadata_by_env.get(env_id, {}))
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=pool),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    widget._on_data_loaded([
+        _make_env(101, EnvStatus.READY),
+        _make_env(102, EnvStatus.READY),
+    ])
+    rows = widget.table.displayed_rows()
+
+    assert rows[0]["availability"]["text"] == "部分可用 (1/2)"
+    assert rows[0]["availability"]["tone"] == "warning"
+    assert rows[0]["env_metadata"] == metadata_by_env[101]
+    assert "demo_module/ready_pool: 可用" in rows[0]["availability"]["tooltip"]
+    assert "demo_module/blocked_pool: 不可用：manual_disabled" in rows[0]["availability"]["tooltip"]
+    assert "demo_module" in rows[0]["availability"]["search_text"]
+    assert rows[1]["availability"]["text"] == "未标记"
+
+
 @pytest.mark.asyncio
 async def test_env_list_widget_start_action_shows_provider_status_until_done(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")

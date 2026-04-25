@@ -22,8 +22,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.foundation.logging import logger
 from src.core.rem.import_job_service import get_existing_env_import_job_service
 from src.core.rem import EnvKind, EnvStatus
+from src.core.rem.manager import RESOURCE_POOL_METADATA_NAMESPACE
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.pool import EnvPool
 from src.core.rem.ui.import_existing_env_dialog import ImportExistingEnvDialog
@@ -323,10 +325,33 @@ class DataLoaderThread(QThread):
 
             # 使用共享的 pool，无需重新加载
             envs = loop.run_until_complete(self._pool.list_all())
+            records = [
+                EnvLoadedRecord(env=env, env_metadata=self._load_env_metadata(env))
+                for env in envs
+            ]
             loop.close()
-            self.finished.emit(envs)
+            self.finished.emit(records)
         except Exception as e:
             self.error.emit(str(e))
+
+    def _load_env_metadata(self, env: Any) -> dict[str, Any]:
+        list_metadata = getattr(self._pool, "list_metadata", None)
+        if not callable(list_metadata):
+            return {}
+        try:
+            metadata = list_metadata(env.id)
+        except Exception as exc:
+            logger.warning(f"[REM] 读取环境元数据失败: env_id={getattr(env, 'id', '')} error={exc}")
+            return {}
+        return metadata if isinstance(metadata, dict) else {}
+
+
+@dataclass(frozen=True)
+class EnvLoadedRecord:
+    """环境列表加载结果。"""
+
+    env: Any
+    env_metadata: dict[str, Any]
 
 
 @dataclass
@@ -334,6 +359,8 @@ class EnvDisplayItem:
     """环境显示项包装。"""
     raw: Any # EnvInfo
     display_status_text: str
+    env_metadata: dict[str, Any]
+    availability: dict[str, Any]
 
 class EnvListWidget(QWidget):
     """环境列表组件。"""
@@ -346,6 +373,7 @@ class EnvListWidget(QWidget):
             {"key": "kind", "label": "类型", "type": "text", "width": 100},
             {"key": "provider", "label": "节点类型", "type": "text", "width": 110},
             {"key": "status", "label": "状态", "type": "text", "width": 90},
+            {"key": "availability", "label": "可用状态", "type": "text", "width": 150},
             {"key": "task", "label": "任务", "type": "text", "width": 160},
             {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
         ],
@@ -359,7 +387,7 @@ class EnvListWidget(QWidget):
         },
     }
     
-    COLUMNS = ["ID", "名称", "类型", "Provider", "状态", "任务", "操作"]
+    COLUMNS = ["ID", "名称", "类型", "Provider", "状态", "可用状态", "任务", "操作"]
     STATUS_COLORS = {
         EnvStatus.READY: "#4ade80",
         EnvStatus.BUSY: "#facc15",
@@ -510,11 +538,14 @@ class EnvListWidget(QWidget):
         busy_count = 0
         
         display_items = []
-        for env in envs:
+        for loaded in envs:
+            env, env_metadata = self._unpack_loaded_env(loaded)
             status_text = self.STATUS_TEXT.get(env.status, str(env.status.value))
             display_items.append(EnvDisplayItem(
                 raw=env,
-                display_status_text=str(status_text)
+                display_status_text=str(status_text),
+                env_metadata=env_metadata,
+                availability=self._build_availability_cell(env_metadata),
             ))
             
             if env.status == EnvStatus.READY:
@@ -536,6 +567,7 @@ class EnvListWidget(QWidget):
         task_text = f"{env.task_run_id[:8]}..." if env.task_run_id else "-"
         return {
             "env": env,
+            "env_metadata": item.env_metadata,
             "env_id": str(env.id),
             "id": str(env.id),
             "name": env.name if env.name else "-",
@@ -545,9 +577,89 @@ class EnvListWidget(QWidget):
                 "text": item.display_status_text,
                 "tone": self._status_tone(env.status),
             },
+            "availability": item.availability,
             "task": task_text,
             "actions": self._build_row_actions(env),
         }
+
+    def _unpack_loaded_env(self, loaded: Any) -> tuple[Any, dict[str, Any]]:
+        if isinstance(loaded, EnvLoadedRecord):
+            return loaded.env, dict(loaded.env_metadata)
+        if isinstance(loaded, tuple) and len(loaded) == 2:
+            env, metadata = loaded
+            return env, metadata if isinstance(metadata, dict) else {}
+        return loaded, self._load_env_metadata_for_display(loaded)
+
+    def _load_env_metadata_for_display(self, env: Any) -> dict[str, Any]:
+        list_metadata = getattr(self._pool, "list_metadata", None)
+        if not callable(list_metadata):
+            return {}
+        try:
+            metadata = list_metadata(env.id)
+        except Exception:
+            return {}
+        return metadata if isinstance(metadata, dict) else {}
+
+    def _build_availability_cell(self, env_metadata: dict[str, Any]) -> dict[str, Any]:
+        cards = self._resource_pool_cards(env_metadata)
+        if not cards:
+            return {
+                "text": "未标记",
+                "tone": "neutral",
+                "sort_value": 0,
+                "search_text": "未标记 无资源池状态",
+                "tooltip": "env_metadata 中没有资源池可用状态",
+            }
+
+        total_count = len(cards)
+        eligible_count = sum(1 for card in cards if bool(card.get("eligible")))
+        if eligible_count == total_count:
+            text = f"可用 ({eligible_count}/{total_count})"
+            tone = "success"
+            sort_value = 3
+        elif eligible_count > 0:
+            text = f"部分可用 ({eligible_count}/{total_count})"
+            tone = "warning"
+            sort_value = 2
+        else:
+            text = f"不可用 (0/{total_count})"
+            tone = "danger"
+            sort_value = 1
+
+        tooltip_lines = []
+        search_parts = [text]
+        for card in cards:
+            module_name = str(card.get("module_name") or "-")
+            pool_name = str(card.get("pool_name") or "-")
+            state_text = "可用" if bool(card.get("eligible")) else "不可用"
+            reason = str(card.get("reason") or "").strip()
+            suffix = f"：{reason}" if reason else ""
+            tooltip_lines.append(f"{module_name}/{pool_name}: {state_text}{suffix}")
+            search_parts.extend([module_name, pool_name, state_text, reason])
+
+        return {
+            "text": text,
+            "tone": tone,
+            "sort_value": sort_value,
+            "search_text": " ".join(part for part in search_parts if part),
+            "tooltip": "\n".join(tooltip_lines),
+        }
+
+    def _resource_pool_cards(self, env_metadata: dict[str, Any]) -> list[dict[str, Any]]:
+        namespace_payload = env_metadata.get(RESOURCE_POOL_METADATA_NAMESPACE)
+        if not isinstance(namespace_payload, dict):
+            return []
+        cards: list[dict[str, Any]] = []
+        for value in namespace_payload.values():
+            if isinstance(value, dict) and "eligible" in value:
+                cards.append(value)
+        cards.sort(
+            key=lambda card: (
+                str(card.get("module_name") or ""),
+                str(card.get("pool_name") or ""),
+            )
+        )
+        return cards
 
     def _build_row_actions(self, env) -> list[dict[str, Any]]:
         if env.status == EnvStatus.READY:

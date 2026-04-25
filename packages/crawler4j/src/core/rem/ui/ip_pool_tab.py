@@ -38,6 +38,38 @@ class ProxyProbeDialogPayload:
     icon: QMessageBox.Icon
 
 
+PROXY_PROBE_DIALOG_STYLE = """
+    QMessageBox {
+        background-color: #0f172a;
+    }
+    QMessageBox QLabel {
+        color: #e5e7eb;
+        background: transparent;
+        font-size: 13px;
+    }
+    QMessageBox QPushButton {
+        background-color: #2563eb;
+        color: #f8fafc;
+        border: 1px solid rgba(147, 197, 253, 0.42);
+        border-radius: 6px;
+        min-width: 72px;
+        padding: 7px 14px;
+    }
+    QMessageBox QPushButton:hover {
+        background-color: #1d4ed8;
+    }
+    QMessageBox QTextEdit,
+    QMessageBox QPlainTextEdit {
+        background-color: #020617;
+        color: #cbd5e1;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        padding: 8px;
+        selection-background-color: #2563eb;
+    }
+"""
+
+
 class IPPoolWorkerThread(QThread):
     """IP 池操作工作线程。"""
     
@@ -484,11 +516,13 @@ class IPPoolTab(QWidget):
     def _show_probe_result(self, result: ProxyProbeResult) -> None:
         payload = self._build_probe_result_dialog(result)
         dialog = QMessageBox(self)
+        dialog.setStyleSheet(PROXY_PROBE_DIALOG_STYLE)
         dialog.setWindowTitle(payload.title)
         dialog.setText(payload.summary)
         dialog.setIcon(payload.icon)
         dialog.setDetailedText(payload.details)
         dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+        dialog.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         dialog.exec()
     
     def _edit_entry(self, entry_id: str) -> None:

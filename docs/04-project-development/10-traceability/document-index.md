@@ -71,6 +71,7 @@
 
 ## 5. 最近同步
 
+- 2026-04-25：`docs/02-user-guide/usage.md`、`execution-log.md`、`test-plan.md` 与 `.factory/memory/` 已同步补记运行环境列表的 `env_metadata` 可用状态展示和 IP 测试结果深色面板。运行环境列表当前按 `scheduler.resource_pool` 资格卡片聚合展示可用状态，IP 测试结果弹窗固定深色背景。
 - 2026-04-24：模块数据库开发者接口已收口为唯一 `ctx.db` fluent API。`docs/03-developer-guide/`、`docs/04-project-development/04-design/{api-design.md,module-config-runtime-data-contract.md,module-hosted-ui-framework.md,module-entity-table-view-design.md}` 与 `.factory/memory/` 已同步删除旧数据库工具正式口径，并明确 `managed_dataset` 单源读取、`custom_table` 显式 join/group/aggregate、view 只读轻量查询和 named query 的边界。
 - 2026-04-24：`execution-log.md` 与 `.factory/memory/current-state.md` 已同步补记 IP 池条目编辑持久化缺陷的根因和修复：此前 `ip_entries` upsert 未回写地址/协议/端口/认证字段，现已补齐并新增数据库重载回归 `test_ip_pool.py`。
 - 2026-04-24：`docs/02-user-guide/{index.md,usage.md}` 已同步补记 IP 池条目级代理测试口径：当前 `环境管理 -> IP 池管理` 支持对单条 IP 执行真实代理探测，弹窗直接返回是否成功、出口 IP、耗时和失败阶段，且结果不做持久化。

@@ -94,3 +94,40 @@ def test_ip_pool_tab_builds_probe_result_message(qtbot, monkeypatch):
     assert payload.title == "代理测试成功"
     assert "出口 IP: 1.2.3.4" in payload.summary
     assert "masked_proxy_url: socks5://demo:***@10.0.0.9:1080" in payload.details
+
+
+def test_ip_pool_tab_probe_result_dialog_uses_dark_style(qtbot, monkeypatch):
+    import src.core.rem.ui.ip_pool_tab as ip_pool_tab
+
+    monkeypatch.setattr(ip_pool_tab.IPPoolTab, "load_data", lambda self: None)
+
+    widget = ip_pool_tab.IPPoolTab()
+    qtbot.addWidget(widget)
+    captured: dict[str, str] = {}
+
+    def fake_exec(dialog):
+        captured["style"] = dialog.styleSheet()
+        captured["text"] = dialog.text()
+        captured["details"] = dialog.detailedText()
+        return 0
+
+    monkeypatch.setattr(ip_pool_tab.QMessageBox, "exec", fake_exec)
+
+    widget._show_probe_result(
+        ProxyProbeResult(
+            ok=True,
+            stage="probe",
+            protocol="socks5",
+            masked_proxy_url="socks5://demo:***@10.0.0.9:1080",
+            latency_ms=512,
+            exit_ip="1.2.3.4",
+            http_status=200,
+            detail="探针请求成功",
+            error_type=None,
+        )
+    )
+
+    assert "#0f172a" in captured["style"]
+    assert "QMessageBox QTextEdit" in captured["style"]
+    assert "出口 IP: 1.2.3.4" in captured["text"]
+    assert "masked_proxy_url: socks5://demo:***@10.0.0.9:1080" in captured["details"]
