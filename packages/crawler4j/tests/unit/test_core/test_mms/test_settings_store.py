@@ -237,48 +237,15 @@ def test_settings_store_default_init_rolls_back_when_a_write_fails(temp_data_dir
     assert store.is_config_defaults_initialized("demo_module") is False
 
 
-def test_settings_store_ignores_legacy_configs_rows(temp_data_dir):
-    from src.core.mms.settings_store import ModuleSettingsStore
+def test_init_database_does_not_create_legacy_configs_table(temp_data_dir):
     from src.core.persistence.database import CONFIG_DB, get_connection
 
     with get_connection(CONFIG_DB) as conn:
-        conn.execute(
-            """
-            INSERT INTO configs (key, value, created_at, updated_at)
-            VALUES (?, ?, 1, 1)
-            """,
-            (
-                "mms:module_settings:demo_module",
-                '{"auth": {"login_url": "https://legacy.example.com"}}',
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO configs (key, value, created_at, updated_at)
-            VALUES (?, ?, 1, 1)
-            """,
-            (
-                "mms:workflow_settings:demo_module:login",
-                '{"auth": {"headless": true}}',
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO configs (key, value, created_at, updated_at)
-            VALUES (?, ?, 1, 1)
-            """,
-            (
-                "mms:module_status:demo_module",
-                '"disabled"',
-            ),
-        )
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'configs'"
+        ).fetchone()
 
-    store = ModuleSettingsStore()
-
-    assert store.read_module_settings("demo_module") == {}
-    assert store.read_workflow_settings("demo_module", "login") == {}
-    assert store.build_task_config("demo_module", "login") == {}
-    assert store.get_module_status("demo_module") is None
+    assert table is None
 
 
 def test_registry_persists_module_status_across_reload(temp_data_dir):

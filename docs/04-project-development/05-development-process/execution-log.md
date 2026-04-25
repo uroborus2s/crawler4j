@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-25 | 收口 IP 测试弹窗公共组件与无关表初始化：新增公共 `MessageDialog` 深色消息弹窗，`IPPoolTab` 的测试结果、普通提示和删除确认改用公共 `MessageDialog` / `ConfirmDialog`，不再直接使用局部 `QMessageBox`；`IPPoolManager` 不再持久化 `env_ip_bindings`，绑定/解绑只直接增减 `ip_entries.bound_count`；`init_database()` 不再创建遗留 `configs` 表。已有用户库中的旧表通过显式 SQL 清理，不写入启动迁移代码 | Codex |
 | 2026-04-25 | 运行环境列表补齐 `env_metadata` 可用状态展示：列表加载时合并每个环境的元数据，按 `scheduler.resource_pool` 资格卡片聚合展示 `可用 / 部分可用 / 不可用 / 未标记`，并在 tooltip/search 文本中保留模块、资源池和停发原因；IP 池条目测试结果弹窗改为显式深色背景，避免 macOS 默认浅色消息框导致测试结果低对比。定向回归 `20 passed` | Codex |
 | 2026-04-25 | 删除“从已有环境导入”的 provider 扩展字段：REM 环境表、`Environment` 模型与运行参数不再保留 provider 扩展元数据；未同步列表、重复导入复用与状态库唯一索引均改为按 `(provider, name)` 判断，来源名称不存在即视为未同步。定向组合回归 `38 passed`，REM 单测目录回归 `111 passed` | Codex |
 | 2026-04-24 | 修复 IP 池条目编辑“保存后重启恢复旧值”缺陷：根因是 `IPPoolManager._persist_entry()` 的 `ip_entries` upsert 只更新 `bound_count/safety_score/expires_at`，没有回写 `address/protocol/port/username/password/pool_id`；因此编辑后当前进程内因为直接修改了内存对象看起来已生效，但应用重启重新从 `state.db` 加载时仍读回旧记录。当前已补齐这些字段的 upsert 回写，并新增 `test_ip_pool.py` 锁定“编辑后重载数据库仍保留新代理字段”回归 | Codex |

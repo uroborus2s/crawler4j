@@ -15,7 +15,6 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -26,8 +25,10 @@ from src.core.foundation.logging import logger
 from src.core.rem.ip_pool import IPPool, IPStrategy, get_ip_pool_manager
 from src.core.rem.proxy_probe import ProxyProbeResult, probe_ip_entry
 from src.core.rem.ui.ip_pool_dialogs import AddIPDialog, AddPoolDialog, BatchImportDialog
+from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.message_dialog import MessageDialog
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,39 +36,7 @@ class ProxyProbeDialogPayload:
     title: str
     summary: str
     details: str
-    icon: QMessageBox.Icon
-
-
-PROXY_PROBE_DIALOG_STYLE = """
-    QMessageBox {
-        background-color: #0f172a;
-    }
-    QMessageBox QLabel {
-        color: #e5e7eb;
-        background: transparent;
-        font-size: 13px;
-    }
-    QMessageBox QPushButton {
-        background-color: #2563eb;
-        color: #f8fafc;
-        border: 1px solid rgba(147, 197, 253, 0.42);
-        border-radius: 6px;
-        min-width: 72px;
-        padding: 7px 14px;
-    }
-    QMessageBox QPushButton:hover {
-        background-color: #1d4ed8;
-    }
-    QMessageBox QTextEdit,
-    QMessageBox QPlainTextEdit {
-        background-color: #020617;
-        color: #cbd5e1;
-        border: 1px solid #334155;
-        border-radius: 6px;
-        padding: 8px;
-        selection-background-color: #2563eb;
-    }
-"""
+    kind: str
 
 
 class IPPoolWorkerThread(QThread):
@@ -426,12 +395,14 @@ class IPPoolTab(QWidget):
     
     def _delete_pool(self, pool_id: str) -> None:
         """删除 IP 池。"""
-        result = QMessageBox.question(
+        confirmed = ConfirmDialog.confirm(
             self,
             "确认删除",
             "确定要删除此 IP 池吗？\n池中的所有 IP 也会被删除。",
+            confirm_text="删除",
+            danger=True,
         )
-        if result == QMessageBox.StandardButton.Yes:
+        if confirmed:
             self._worker = IPPoolWorkerThread("delete_pool", pool_id=pool_id)
             self._worker.finished.connect(lambda _: self.load_data())
             self._worker.error.connect(self._on_error)
@@ -466,7 +437,7 @@ class IPPoolTab(QWidget):
     
     def _on_batch_import_done(self, count: int) -> None:
         """批量导入完成。"""
-        QMessageBox.information(self, "导入完成", f"成功导入 {count} 条 IP")
+        MessageDialog.information(self, "导入完成", f"成功导入 {count} 条 IP")
         self._refresh_current_pool()
     
     def _refresh_current_pool(self) -> None:
@@ -479,14 +450,14 @@ class IPPoolTab(QWidget):
     
     def _on_error(self, error: str) -> None:
         """错误处理。"""
-        QMessageBox.warning(self, "错误", error)
+        MessageDialog.warning(self, "错误", error)
 
     def _test_entry(self, entry_id: str) -> None:
         if not self._current_pool:
             return
         entry = self._current_pool.get_entry(entry_id)
         if entry is None:
-            QMessageBox.warning(self, "错误", "未找到该 IP 条目")
+            MessageDialog.warning(self, "错误", "未找到该 IP 条目")
             return
         self.entry_table.set_loading(True)
         self._worker = IPPoolWorkerThread("test_entry", entry=entry)
@@ -497,32 +468,31 @@ class IPPoolTab(QWidget):
     def _on_entry_test_finished(self, result: object) -> None:
         self.entry_table.set_loading(False)
         if not isinstance(result, ProxyProbeResult):
-            QMessageBox.warning(self, "错误", "代理测试返回了未知结果")
+            MessageDialog.warning(self, "错误", "代理测试返回了未知结果")
             return
         self._show_probe_result(result)
 
     def _on_entry_test_error(self, error: str) -> None:
         self.entry_table.set_loading(False)
-        QMessageBox.warning(self, "代理测试失败", error)
+        MessageDialog.warning(self, "代理测试失败", error)
 
     def _build_probe_result_dialog(self, result: ProxyProbeResult) -> ProxyProbeDialogPayload:
         return ProxyProbeDialogPayload(
             title=result.title,
             summary=result.summary_text,
             details=result.detail_text,
-            icon=QMessageBox.Icon.Information if result.ok else QMessageBox.Icon.Warning,
+            kind="info" if result.ok else "warning",
         )
 
     def _show_probe_result(self, result: ProxyProbeResult) -> None:
         payload = self._build_probe_result_dialog(result)
-        dialog = QMessageBox(self)
-        dialog.setStyleSheet(PROXY_PROBE_DIALOG_STYLE)
-        dialog.setWindowTitle(payload.title)
-        dialog.setText(payload.summary)
-        dialog.setIcon(payload.icon)
-        dialog.setDetailedText(payload.details)
-        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
-        dialog.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        dialog = MessageDialog(
+            payload.title,
+            payload.summary,
+            details=payload.details,
+            kind=payload.kind,
+            parent=self,
+        )
         dialog.exec()
     
     def _edit_entry(self, entry_id: str) -> None:
@@ -533,7 +503,7 @@ class IPPoolTab(QWidget):
         # 查找 entry
         entry = self._current_pool.get_entry(entry_id)
         if not entry:
-            QMessageBox.warning(self, "错误", "未找到该 IP 条目")
+            MessageDialog.warning(self, "错误", "未找到该 IP 条目")
             return
         
         # 弹出编辑对话框（复用添加对话框）
@@ -568,12 +538,14 @@ class IPPoolTab(QWidget):
         if not self._current_pool:
             return
         
-        result = QMessageBox.question(
+        confirmed = ConfirmDialog.confirm(
             self,
             "确认删除",
             "确定要删除此 IP 条目吗？",
+            confirm_text="删除",
+            danger=True,
         )
-        if result == QMessageBox.StandardButton.Yes:
+        if confirmed:
             # 从池中移除
             self._current_pool.remove_entry(entry_id)
             

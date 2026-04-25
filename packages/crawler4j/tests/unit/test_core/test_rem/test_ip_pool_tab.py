@@ -92,26 +92,29 @@ def test_ip_pool_tab_builds_probe_result_message(qtbot, monkeypatch):
     )
 
     assert payload.title == "代理测试成功"
+    assert payload.kind == "info"
     assert "出口 IP: 1.2.3.4" in payload.summary
     assert "masked_proxy_url: socks5://demo:***@10.0.0.9:1080" in payload.details
 
 
-def test_ip_pool_tab_probe_result_dialog_uses_dark_style(qtbot, monkeypatch):
+def test_ip_pool_tab_probe_result_uses_public_message_dialog(qtbot, monkeypatch):
     import src.core.rem.ui.ip_pool_tab as ip_pool_tab
 
     monkeypatch.setattr(ip_pool_tab.IPPoolTab, "load_data", lambda self: None)
 
     widget = ip_pool_tab.IPPoolTab()
     qtbot.addWidget(widget)
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_exec(dialog):
-        captured["style"] = dialog.styleSheet()
-        captured["text"] = dialog.text()
-        captured["details"] = dialog.detailedText()
+        captured["dialog_type"] = type(dialog).__name__
+        captured["title"] = dialog.title
+        captured["message"] = dialog.message
+        captured["details"] = dialog.details
+        captured["kind"] = dialog.kind
         return 0
 
-    monkeypatch.setattr(ip_pool_tab.QMessageBox, "exec", fake_exec)
+    monkeypatch.setattr(ip_pool_tab.MessageDialog, "exec", fake_exec)
 
     widget._show_probe_result(
         ProxyProbeResult(
@@ -127,7 +130,8 @@ def test_ip_pool_tab_probe_result_dialog_uses_dark_style(qtbot, monkeypatch):
         )
     )
 
-    assert "#0f172a" in captured["style"]
-    assert "QMessageBox QTextEdit" in captured["style"]
-    assert "出口 IP: 1.2.3.4" in captured["text"]
+    assert captured["dialog_type"] == "MessageDialog"
+    assert captured["title"] == "代理测试成功"
+    assert captured["kind"] == "info"
+    assert "出口 IP: 1.2.3.4" in captured["message"]
     assert "masked_proxy_url: socks5://demo:***@10.0.0.9:1080" in captured["details"]

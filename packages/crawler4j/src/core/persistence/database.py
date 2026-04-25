@@ -106,7 +106,7 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
     
     Example:
         >>> with get_connection(CONFIG_DB) as conn:
-        ...     cursor = conn.execute("SELECT * FROM configs")
+        ...     cursor = conn.execute("SELECT * FROM settings")
         ...     rows = cursor.fetchall()
     """
     db_path = get_db_path(db_name)
@@ -467,14 +467,6 @@ def _init_config_db() -> None:
     """初始化配置数据库。"""
     with get_connection(CONFIG_DB) as conn:
         conn.executescript("""
-            -- 配置表（模块配置、全局设置）
-            CREATE TABLE IF NOT EXISTS configs (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-            );
-
             -- 模块配置条目表（按模块/工作流 + key_path 扁平化存储）
             CREATE TABLE IF NOT EXISTS module_config_entries (
                 module_name TEXT NOT NULL,
@@ -566,17 +558,7 @@ def _init_state_db() -> None:
             
             CREATE INDEX IF NOT EXISTS idx_ip_pool ON ip_entries(pool_id);
             CREATE INDEX IF NOT EXISTS idx_ip_bound ON ip_entries(bound_count);
-            
-            -- 环境-IP 绑定表
-            CREATE TABLE IF NOT EXISTS env_ip_bindings (
-                env_id TEXT PRIMARY KEY REFERENCES environments(id) ON DELETE CASCADE,
-                ip_id TEXT NOT NULL REFERENCES ip_entries(id) ON DELETE CASCADE,
-                bound_at INTEGER NOT NULL
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_binding_ip ON env_ip_bindings(ip_id);
-            
-            
+
             -- 环境元数据表（动态扩展字段）
             CREATE TABLE IF NOT EXISTS env_metadata (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
