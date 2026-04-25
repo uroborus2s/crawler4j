@@ -6,7 +6,6 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -19,6 +18,7 @@ from src.core.atm.ui.run_profile_dialog import RunProfileDialog
 from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
+from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
 
@@ -369,7 +369,7 @@ class TaskCreateDialog(QDialog):
             return
 
         if not self._inline_run_profile:
-            QMessageBox.warning(self, "配置不完整", "请先配置任务运行模板。")
+            MessageDialog.warning(self, "配置不完整", "请先配置任务运行模板。")
             return
 
         if (
@@ -377,7 +377,7 @@ class TaskCreateDialog(QDialog):
             and self.trigger_combo.currentData() == TriggerType.CRON.value
             and not self.cron_edit.text().strip()
         ):
-            QMessageBox.warning(self, "配置不完整", "Cron 批次模式必须填写 Cron 表达式。")
+            MessageDialog.warning(self, "配置不完整", "Cron 批次模式必须填写 Cron 表达式。")
             self.cron_edit.setFocus()
             return
 

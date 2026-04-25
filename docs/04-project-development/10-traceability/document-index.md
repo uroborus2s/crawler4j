@@ -71,6 +71,7 @@
 
 ## 5. 最近同步
 
+- 2026-04-25：公共 `MessageDialog` 已按“安装模块”面板视觉重做，`StyledButton` 增加成功态动作按钮；安装模块弹窗和多处简单提示/确认已改用公共组件。剩余未迁移的 `QMessageBox` 已收敛到环境/模块列表异步流程与任务中止三按钮流程，需后续补齐公共异步/多动作弹窗能力。
 - 2026-04-25：IP 测试结果弹窗已从局部 `QMessageBox` 收口到公共 `MessageDialog`，并同步移除 `env_ip_bindings` / `configs` 的初始化与运行依赖；已有用户库旧表只通过显式 SQL 清理，不写入启动迁移代码。
 - 2026-04-25：`docs/02-user-guide/usage.md`、`execution-log.md`、`test-plan.md` 与 `.factory/memory/` 已同步补记运行环境列表的 `env_metadata` 可用状态展示和 IP 测试结果深色面板。运行环境列表当前按 `scheduler.resource_pool` 资格卡片聚合展示可用状态，IP 测试结果弹窗固定深色背景。
 - 2026-04-24：模块数据库开发者接口已收口为唯一 `ctx.db` fluent API。`docs/03-developer-guide/`、`docs/04-project-development/04-design/{api-design.md,module-config-runtime-data-contract.md,module-hosted-ui-framework.md,module-entity-table-view-design.md}` 与 `.factory/memory/` 已同步删除旧数据库工具正式口径，并明确 `managed_dataset` 单源读取、`custom_table` 显式 join/group/aggregate、view 只读轻量查询和 named query 的边界。

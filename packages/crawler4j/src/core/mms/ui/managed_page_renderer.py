@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -30,6 +29,7 @@ from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
 from src.ui.components.line_edit import StyledLineEdit
+from src.ui.components.message_dialog import MessageDialog
 
 CRUD_ROW_ACTION_EDIT = "__crud_update__"
 CRUD_ROW_ACTION_DELETE = "__crud_delete__"
@@ -498,7 +498,7 @@ class ManagedPageRenderer(QWidget):
                 capability_surface=_runtime_surface_full(),
             )
         except Exception as exc:
-            QMessageBox.warning(self, "新增失败", str(exc))
+            MessageDialog.warning(self, "新增失败", str(exc))
             return
         table.request_refresh()
 
@@ -511,7 +511,7 @@ class ManagedPageRenderer(QWidget):
             return
         row_key = selected_row.get(primary_key)
         if row_key in (None, ""):
-            QMessageBox.warning(self, "编辑失败", f"当前记录缺少主键字段: {primary_key}")
+            MessageDialog.warning(self, "编辑失败", f"当前记录缺少主键字段: {primary_key}")
             return
         payload = self._prompt_crud_form_payload(component, mode="update", row=selected_row)
         if payload is None:
@@ -524,7 +524,7 @@ class ManagedPageRenderer(QWidget):
                 capability_surface=_runtime_surface_full(),
             )
         except Exception as exc:
-            QMessageBox.warning(self, "编辑失败", str(exc))
+            MessageDialog.warning(self, "编辑失败", str(exc))
             return
         table.request_refresh()
 
@@ -537,7 +537,7 @@ class ManagedPageRenderer(QWidget):
             return
         row_key = selected_row.get(primary_key)
         if row_key in (None, ""):
-            QMessageBox.warning(self, "删除失败", f"当前记录缺少主键字段: {primary_key}")
+            MessageDialog.warning(self, "删除失败", f"当前记录缺少主键字段: {primary_key}")
             return
         item_name = str(selected_row.get("name") or selected_row.get("account") or selected_row.get(primary_key) or "当前记录")
         if not ConfirmDialog.delete_confirm(self, item_name):
@@ -549,7 +549,7 @@ class ManagedPageRenderer(QWidget):
                 capability_surface=_runtime_surface_full(),
             )
         except Exception as exc:
-            QMessageBox.warning(self, "删除失败", str(exc))
+            MessageDialog.warning(self, "删除失败", str(exc))
             return
         table.request_refresh()
 
@@ -648,7 +648,7 @@ class ManagedPageRenderer(QWidget):
         for field_name, (widget, column) in widgets.items():
             value = self._read_crud_input_value(widget, column)
             if column.get("required") and value in (None, ""):
-                QMessageBox.warning(self, "表单不完整", f"{column.get('label') or field_name} 不能为空")
+                MessageDialog.warning(self, "表单不完整", f"{column.get('label') or field_name} 不能为空")
                 return None
             payload[field_name] = value
         return payload

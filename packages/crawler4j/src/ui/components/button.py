@@ -4,7 +4,7 @@ from typing import Literal
 
 from PyQt6.QtWidgets import QPushButton
 
-ButtonVariant = Literal["primary", "secondary"]
+ButtonVariant = Literal["primary", "secondary", "success"]
 
 
 class StyledButton(QPushButton):
@@ -24,12 +24,21 @@ class StyledButton(QPushButton):
             "hover": "rgba(99, 102, 241, 1)",
             "border": "none",
             "weight": "600",
+            "color": "white",
         },
         "secondary": {
             "background": "rgba(255, 255, 255, 0.1)",
             "hover": "rgba(255, 255, 255, 0.2)",
             "border": "1px solid rgba(255, 255, 255, 0.2)",
             "weight": "500",
+            "color": "white",
+        },
+        "success": {
+            "background": "#10d982",
+            "hover": "#0fca79",
+            "border": "none",
+            "weight": "700",
+            "color": "#04130c",
         },
     }
 
@@ -59,7 +68,7 @@ class StyledButton(QPushButton):
             f"""
             QPushButton {{
                 background: {palette["background"]};
-                color: white;
+                color: {palette["color"]};
                 border: {palette["border"]};
                 border-radius: {self._border_radius}px;
                 padding: 0px {self._horizontal_padding}px;

@@ -120,7 +120,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-04-25 | 新增公共 `MessageDialog`、IP 绑定无持久关系表、遗留 `configs` 表退出初始化回归：`test_message_dialog.py` 锁定深色自绘标题栏，`test_ip_pool_tab.py` 锁定 IP 测试结果使用公共消息弹窗，`test_ip_pool.py` 锁定绑定/解绑只更新 `ip_entries.bound_count` 且不创建 `env_ip_bindings`，`test_settings_store.py` 锁定不再创建 `configs` 表 | Codex |
+| 2026-04-25 | 新增公共消息弹窗视觉优化与公共组件收口回归：`test_message_dialog.py` 锁定 `MessageDialog` 对齐“安装模块”面板的原生窗口壳与深色内容区，`test_button.py` 锁定 `StyledButton(success)` 动作按钮色板，`test_module_install_dialog.py` 锁定安装模块弹窗改用公共输入框/按钮/消息弹窗；ATM/MMS/System 相关单测覆盖简单提示和确认改走公共 `MessageDialog` / `ConfirmDialog` | Codex |
+| 2026-04-25 | 新增公共 `MessageDialog`、IP 绑定无持久关系表、遗留 `configs` 表退出初始化回归：`test_message_dialog.py` 锁定公共消息弹窗，`test_ip_pool_tab.py` 锁定 IP 测试结果使用公共消息弹窗，`test_ip_pool.py` 锁定绑定/解绑只更新 `ip_entries.bound_count` 且不创建 `env_ip_bindings`，`test_settings_store.py` 锁定不再创建 `configs` 表 | Codex |
 | 2026-04-25 | 新增运行环境列表 `env_metadata` 可用状态与 IP 测试结果深色面板回归：`test_env_list_widget.py` 锁定 `scheduler.resource_pool` 资格卡片合并、原始 `env_metadata` 行数据保留与可用状态 tooltip/search 文本；`test_ip_pool_tab.py` 锁定代理测试结果弹窗应用深色公共弹窗。定向回归 `20 passed` | Codex |
 | 2026-04-25 | 补充“从已有环境导入”字段删除与名称唯一性回归：`test_import_existing_env.py` 锁定同 provider 同名会被视为已导入，`test_state_db_migration.py` 锁定状态库删除旧 provider 扩展列并把唯一索引切到 `(provider, name)`，UI 与导入任务服务回归锁定只传 `provider/name/import_mode` | Codex |
 | 2026-04-24 | 新增 Hosted UI 页面级滚动配置回归：`test_hosted_ui_card.py` 现锁定 `Page.scroll.vertical = hidden` 的 schema 规范化与非法值拒绝；`test_managed_page_scroll.py` 通过隔离 `ModuleUIRuntimeBridge` 的方式锁定 `ManagedPageRenderer` 会把 Hosted Page 外层 `QScrollArea` 切到 `ScrollBarAlwaysOff/AsNeeded`，避免“今日运营看板”这类页面继续误显示竖向滚动槽 | Codex |

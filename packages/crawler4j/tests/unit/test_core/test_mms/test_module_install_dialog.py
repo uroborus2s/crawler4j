@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from src.ui.components.button import StyledButton
+from src.ui.components.line_edit import StyledLineEdit
 from src.core.mms.ui.module_install_dialog import ModuleInstallDialog
 
 
@@ -42,3 +44,34 @@ def test_module_install_dialog_uses_clear_repo_token_wording(qtbot):
 
     assert dialog.local_remember_check.text() == "保存这个 Token，后续更新这个模块时自动使用"
     assert dialog.repo_remember_check.text() == "保存这个 Token，后续更新这个仓库时自动使用"
+
+
+def test_module_install_dialog_uses_public_form_controls(qtbot):
+    dialog = ModuleInstallDialog()
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog.local_path_input, StyledLineEdit)
+    assert isinstance(dialog.local_token_input, StyledLineEdit)
+    assert isinstance(dialog.repo_input, StyledLineEdit)
+    assert isinstance(dialog.repo_token_input, StyledLineEdit)
+    assert isinstance(dialog.findChild(StyledButton, "moduleInstallBrowseButton"), StyledButton)
+    assert isinstance(dialog.findChild(StyledButton, "moduleInstallCancelButton"), StyledButton)
+    assert isinstance(dialog.findChild(StyledButton, "moduleInstallStartButton"), StyledButton)
+
+
+def test_module_install_dialog_validation_uses_public_message_dialog(qtbot, monkeypatch):
+    import src.core.mms.ui.module_install_dialog as module_install_dialog
+
+    dialog = ModuleInstallDialog()
+    qtbot.addWidget(dialog)
+    captured: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        module_install_dialog.MessageDialog,
+        "warning",
+        lambda parent, title, message, **kwargs: captured.append((title, message)),
+    )
+
+    dialog._accept_if_valid()
+
+    assert captured == [("输入无效", "请选择本地 ZIP 安装包")]

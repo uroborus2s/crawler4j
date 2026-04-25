@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-25 | 优化公共消息弹窗与公共组件使用：`MessageDialog` 放弃自绘假标题栏，改为对齐“安装模块”面板的原生窗口壳、深色内容区和右下角动作按钮；`StyledButton` 新增 `success` 状态；安装模块弹窗的输入框、浏览/取消/开始检查按钮与校验提示改用公共组件。同步审查 UI 弹窗用法后，已把 ATM/MMS/REM/System 中简单同步提示和确认从 `QMessageBox` 收口到 `MessageDialog` / `ConfirmDialog`。剩余 `QMessageBox` 为环境/模块列表异步 `open()` 流程和任务中止三按钮流程，后续需补公共异步/多动作弹窗能力再迁移 | Codex |
 | 2026-04-25 | 收口 IP 测试弹窗公共组件与无关表初始化：新增公共 `MessageDialog` 深色消息弹窗，`IPPoolTab` 的测试结果、普通提示和删除确认改用公共 `MessageDialog` / `ConfirmDialog`，不再直接使用局部 `QMessageBox`；`IPPoolManager` 不再持久化 `env_ip_bindings`，绑定/解绑只直接增减 `ip_entries.bound_count`；`init_database()` 不再创建遗留 `configs` 表。已有用户库中的旧表通过显式 SQL 清理，不写入启动迁移代码 | Codex |
 | 2026-04-25 | 运行环境列表补齐 `env_metadata` 可用状态展示：列表加载时合并每个环境的元数据，按 `scheduler.resource_pool` 资格卡片聚合展示 `可用 / 部分可用 / 不可用 / 未标记`，并在 tooltip/search 文本中保留模块、资源池和停发原因；IP 池条目测试结果弹窗改为显式深色背景，避免 macOS 默认浅色消息框导致测试结果低对比。定向回归 `20 passed` | Codex |
 | 2026-04-25 | 删除“从已有环境导入”的 provider 扩展字段：REM 环境表、`Environment` 模型与运行参数不再保留 provider 扩展元数据；未同步列表、重复导入复用与状态库唯一索引均改为按 `(provider, name)` 判断，来源名称不存在即视为未同步。定向组合回归 `38 passed`，REM 单测目录回归 `111 passed` | Codex |

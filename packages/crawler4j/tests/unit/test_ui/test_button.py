@@ -24,3 +24,12 @@ def test_styled_button_secondary_uses_secondary_palette(qtbot):
     assert "rgba(255, 255, 255, 0.1)" in button.styleSheet()
     assert "font-weight: 500;" in button.styleSheet()
     assert "padding: 0px 20px;" in button.styleSheet()
+
+
+def test_styled_button_success_uses_module_dialog_action_palette(qtbot):
+    button = StyledButton("开始检查", variant="success", min_height=48, min_width=120)
+    qtbot.addWidget(button)
+
+    assert "background: #10d982;" in button.styleSheet()
+    assert "color: #04130c;" in button.styleSheet()
+    assert "font-weight: 700;" in button.styleSheet()

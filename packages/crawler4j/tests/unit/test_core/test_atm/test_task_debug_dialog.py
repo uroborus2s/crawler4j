@@ -177,8 +177,8 @@ def test_job_debug_dialog_generate_vscode_config_uses_active_session_attach_targ
         return Path(source_path) / ".vscode" / "launch.json"
 
     monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.ensure_vscode_attach_config", fake_ensure)
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.information", lambda *args: None)
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.warning", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.information", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.warning", lambda *args: None)
 
     page.generate_vscode_config()
 
@@ -227,8 +227,8 @@ def test_job_debug_dialog_generate_vscode_config_ignores_final_session_attach_ta
         return Path(source_path) / ".vscode" / "launch.json"
 
     monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.ensure_vscode_attach_config", fake_ensure)
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.information", lambda *args: None)
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.warning", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.information", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.warning", lambda *args: None)
 
     page.generate_vscode_config()
 
@@ -333,7 +333,7 @@ def test_job_debug_dialog_restart_uses_current_form_values(qtbot, tmp_path, monk
     page.attach_port_spin.setValue(6789)
     page.stop_on_entry_checkbox.setChecked(True)
     monkeypatch.setattr(page, "_refresh", AsyncMock())
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.warning", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.warning", lambda *args: None)
 
     import asyncio
 

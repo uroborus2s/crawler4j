@@ -15,12 +15,12 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
 
 from src.core.rem.models import Environment, ProxyMode
+from src.ui.components.message_dialog import MessageDialog
 
 
 class EditEnvWorker(QThread):
@@ -263,10 +263,10 @@ class EditEnvDialog(QDialog):
         self._set_buttons_enabled(True)
         
         if success:
-            QMessageBox.information(self, "成功", message)
+            MessageDialog.information(self, "成功", message)
             self.accept()
         else:
-            QMessageBox.warning(self, "失败", message)
+            MessageDialog.warning(self, "失败", message)
     
     def _set_buttons_enabled(self, enabled: bool):
         """设置按钮启用状态。"""

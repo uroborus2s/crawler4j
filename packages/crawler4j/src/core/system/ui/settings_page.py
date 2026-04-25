@@ -27,7 +27,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QStackedWidget,
     QTabWidget,
@@ -43,6 +42,7 @@ from src.core.system.preferences_service import (
 )
 from src.core.system.ui.about_dialog import AboutContentWidget
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
 
@@ -628,15 +628,15 @@ class SettingsPage(QWidget):
 
     def _on_reset_clicked(self):
         """恢复默认设置。"""
-        reply = QMessageBox.question(
+        confirmed = ConfirmDialog.confirm(
             self,
             "确认",
             "确定要恢复所有设置到默认值吗？\n此操作不可撤销。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            confirm_text="恢复",
+            danger=True,
         )
 
-        if reply == QMessageBox.StandardButton.Yes:
+        if confirmed:
             self._preferences.reset_to_defaults()
             self._load_settings()
 

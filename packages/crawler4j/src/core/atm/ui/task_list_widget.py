@@ -26,8 +26,10 @@ from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
+from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
+from src.ui.components.message_dialog import MessageDialog
 
 
 @dataclass
@@ -542,12 +544,14 @@ class TaskListWidget(QWidget):
         asyncio.create_task(self._async_stop_run_once(job_id, env_action))
 
     def _delete_job(self, job_id: str):
-        reply = QMessageBox.question(
-            self, "确认删除",
+        confirmed = ConfirmDialog.confirm(
+            self,
+            "确认删除",
             "确定要删除该作业吗？关联的任务记录可能会被清理。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            confirm_text="删除",
+            danger=True,
         )
-        if reply == QMessageBox.StandardButton.Yes:
+        if confirmed:
             asyncio.create_task(self._async_op(job_id, "delete"))
 
     async def _async_op(self, job_id: str, op: str):
@@ -576,7 +580,7 @@ class TaskListWidget(QWidget):
                 self._release_run_once_lock(job_id)
                 self._refresh_table()
                 self.load_data()
-            QMessageBox.warning(self, "操作失败", str(e))
+            MessageDialog.warning(self, "操作失败", str(e))
             return
 
         if op == "run_once":
@@ -596,7 +600,7 @@ class TaskListWidget(QWidget):
             self._run_once_stopping_job_ids.discard(job_id)
             self._refresh_table()
             self.load_data()
-            QMessageBox.warning(self, "中止失败", str(e))
+            MessageDialog.warning(self, "中止失败", str(e))
             return
 
         self._load_seq += 1
@@ -622,7 +626,7 @@ class TaskListWidget(QWidget):
             await get_task_service().update_job(job_id, **data)
             self.load_data()
         except Exception as e:
-            QMessageBox.critical(self, "更新失败", str(e))
+            MessageDialog.error(self, "更新失败", str(e))
 
     def _on_create_job(self):
         from src.core.atm.ui.task_create_dialog import TaskCreateDialog
@@ -636,7 +640,7 @@ class TaskListWidget(QWidget):
             await get_task_service().create_job(**data)
             self.load_data()
         except Exception as e:
-            QMessageBox.critical(self, "创建失败", str(e))
+            MessageDialog.error(self, "创建失败", str(e))
 
     def _resolve_debug_target(self, job: Job) -> JobDebugTarget | None:
         try:
@@ -651,7 +655,7 @@ class TaskListWidget(QWidget):
 
         debug_target = self._resolve_debug_target(job)
         if not debug_target or debug_target.module.source != ModuleSource.DEV_LINK:
-            QMessageBox.information(self, "不可调试", "当前作业对应的不是开发链接模块，无法进入 IDE 调试。")
+            MessageDialog.information(self, "不可调试", "当前作业对应的不是开发链接模块，无法进入 IDE 调试。")
             return
 
         from src.core.atm.ui.task_debug_dialog import JobDebugDialog

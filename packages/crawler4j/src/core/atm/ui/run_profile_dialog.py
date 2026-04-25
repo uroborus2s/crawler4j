@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -51,6 +50,7 @@ from src.core.atm.run_profile import (
 )
 from src.core.atm.controller import selector_returns_none
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
 
@@ -2236,7 +2236,7 @@ class RunProfileDialog(QDialog):
             parsed_profile = RunProfile.from_yaml(yaml_str)
         except Exception as exc:
             if show_error:
-                QMessageBox.warning(self, "YAML 无效", f"运行模板 YAML 保存失败：{exc}")
+                MessageDialog.warning(self, "YAML 无效", f"运行模板 YAML 保存失败：{exc}")
             return False
 
         self._run_profile = parsed_profile
@@ -2244,7 +2244,7 @@ class RunProfileDialog(QDialog):
             self._load_run_profile()
         except Exception as exc:
             if show_error:
-                QMessageBox.warning(self, "YAML 无效", f"运行模板 YAML 保存失败：{exc}")
+                MessageDialog.warning(self, "YAML 无效", f"运行模板 YAML 保存失败：{exc}")
             return False
 
         return True

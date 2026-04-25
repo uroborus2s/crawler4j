@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QLabel, QMessageBox, QPushButton
+from PyQt6.QtWidgets import QLabel, QPushButton
 
 from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.models import ModuleInfo, ModuleSource
@@ -536,7 +536,9 @@ def test_module_detail_page_save_repo_token_updates_status_label(qtbot, monkeypa
     store = get_github_credential_store()
     monkeypatch.setattr(store, "set_token", lambda repo, token: None)
     monkeypatch.setattr(store, "has_token", lambda repo: True)
-    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+    import src.core.mms.ui.module_detail_page as module_detail_page
+
+    monkeypatch.setattr(module_detail_page.MessageDialog, "information", lambda *args, **kwargs: None)
 
     module = _make_hosted_ui_module(tmp_path)
     module.manifest.upgrade_source.repo = "demo/repo"
@@ -558,8 +560,10 @@ def test_module_detail_page_clear_repo_token_updates_status_label(qtbot, monkeyp
     store = get_github_credential_store()
     monkeypatch.setattr(store, "clear_token", lambda repo: None)
     monkeypatch.setattr(store, "has_token", lambda repo: False)
-    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+    import src.core.mms.ui.module_detail_page as module_detail_page
+
+    monkeypatch.setattr(module_detail_page.ConfirmDialog, "confirm", lambda *args, **kwargs: True)
+    monkeypatch.setattr(module_detail_page.MessageDialog, "information", lambda *args, **kwargs: None)
 
     module = _make_hosted_ui_module(tmp_path)
     module.manifest.upgrade_source.repo = "demo/repo"

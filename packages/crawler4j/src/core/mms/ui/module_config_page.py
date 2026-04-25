@@ -8,7 +8,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QSplitter,
     QTextEdit,
@@ -18,6 +17,8 @@ from PyQt6.QtWidgets import (
 
 from src.core.mms.settings_store import get_module_settings_store
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.confirm_dialog import ConfirmDialog
+from src.ui.components.message_dialog import MessageDialog
 
 
 class ModuleConfigPage(QWidget):
@@ -256,14 +257,13 @@ class ModuleConfigPage(QWidget):
         return dict(payload)
 
     def _confirm_restore(self, title: str, message: str) -> bool:
-        reply = QMessageBox.warning(
+        return ConfirmDialog.confirm(
             self,
             title,
             message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            confirm_text="恢复",
+            danger=True,
         )
-        return reply == QMessageBox.StandardButton.Yes
 
     def set_module(self, module) -> None:
         self._module = module
@@ -335,12 +335,12 @@ class ModuleConfigPage(QWidget):
         try:
             payload = self._parse_editor_dict(self.module_config_editor, "模块配置")
         except ValueError as exc:
-            QMessageBox.warning(self, "错误", str(exc))
+            MessageDialog.warning(self, "错误", str(exc))
             return
 
         self._store.write_module_settings(self._module.name, payload)
         self.module_config_editor.setPlainText(self._dump(payload))
-        QMessageBox.information(self, "成功", "模块配置已保存")
+        MessageDialog.information(self, "成功", "模块配置已保存")
 
     def _save_workflow_config(self) -> None:
         if not self._module:
@@ -352,12 +352,12 @@ class ModuleConfigPage(QWidget):
         try:
             payload = self._parse_editor_dict(self.workflow_config_editor, "Workflow 配置")
         except ValueError as exc:
-            QMessageBox.warning(self, "错误", str(exc))
+            MessageDialog.warning(self, "错误", str(exc))
             return
 
         self._store.write_workflow_settings(self._module.name, workflow_name, payload)
         self.workflow_config_editor.setPlainText(self._dump(payload))
-        QMessageBox.information(self, "成功", f"Workflow 配置已保存: {workflow_name}")
+        MessageDialog.information(self, "成功", f"Workflow 配置已保存: {workflow_name}")
 
     def _restore_module_defaults(self) -> None:
         if not self._module:
@@ -371,7 +371,7 @@ class ModuleConfigPage(QWidget):
         payload = self._module_default_payload()
         self._store.write_module_settings(self._module.name, payload)
         self.module_config_editor.setPlainText(self._dump(payload))
-        QMessageBox.information(self, "成功", "模块配置已恢复为默认值")
+        MessageDialog.information(self, "成功", "模块配置已恢复为默认值")
 
     def _restore_workflow_defaults(self) -> None:
         if not self._module:
@@ -388,4 +388,4 @@ class ModuleConfigPage(QWidget):
         payload = self._workflow_default_payload(workflow_name)
         self._store.write_workflow_settings(self._module.name, workflow_name, payload)
         self.workflow_config_editor.setPlainText(self._dump(payload))
-        QMessageBox.information(self, "成功", f"Workflow 配置已恢复为默认值: {workflow_name}")
+        MessageDialog.information(self, "成功", f"Workflow 配置已恢复为默认值: {workflow_name}")

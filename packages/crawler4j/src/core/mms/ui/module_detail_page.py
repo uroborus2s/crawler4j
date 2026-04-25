@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -28,6 +27,8 @@ from src.core.mms.service import get_module_service
 from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.module_config_page import ModuleConfigPage
 from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
+from src.ui.components.confirm_dialog import ConfirmDialog
+from src.ui.components.message_dialog import MessageDialog
 
 
 class ModuleDetailPage(QWidget):
@@ -585,7 +586,7 @@ class ModuleDetailPage(QWidget):
         normalized_page_id = str(page_id or "").strip()
         page_info = self._resolve_hosted_page_info(normalized_page_id)
         if page_info is None:
-            QMessageBox.warning(self, "页面跳转失败", f"未找到宿主页: {page_id}")
+            MessageDialog.warning(self, "页面跳转失败", f"未找到宿主页: {page_id}")
             return
         self._menu_navigation_params[normalized_page_id] = self._normalize_navigation_params(params)
 
@@ -620,27 +621,28 @@ class ModuleDetailPage(QWidget):
         if not self._module or self._module.source != ModuleSource.DEV_LINK:
             return
 
-        reply = QMessageBox.question(
+        confirmed = ConfirmDialog.confirm(
             self,
             "移除开发链接",
             f"确定要移除开发模块 '{self._module.name}' 的开发链接吗？\n本地源码目录不会被删除。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            confirm_text="移除",
+            danger=True,
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
 
         try:
             result = remove_dev_link_and_describe(self._module.name)
         except Exception as exc:
-            QMessageBox.warning(self, "移除失败", str(exc))
+            MessageDialog.warning(self, "移除失败", str(exc))
             return
 
         if result.fallback:
             self.set_module(result.fallback)
-            QMessageBox.information(self, result.title, result.message)
+            MessageDialog.information(self, result.title, result.message)
             return
 
-        QMessageBox.information(self, result.title, result.message)
+        MessageDialog.information(self, result.title, result.message)
         self.back_requested.emit()
 
     @staticmethod
@@ -692,37 +694,38 @@ class ModuleDetailPage(QWidget):
             return
         token = self.repo_token_edit.text().strip()
         if not token:
-            QMessageBox.warning(self, "保存失败", "请输入 GitHub Token")
+            MessageDialog.warning(self, "保存失败", "请输入 GitHub Token")
             return
         try:
             repo = self._current_repo()
             get_github_credential_store().set_token(repo, token)
         except Exception as exc:
-            QMessageBox.warning(self, "保存失败", str(exc))
+            MessageDialog.warning(self, "保存失败", str(exc))
             return
         self.repo_token_edit.clear()
         self._refresh_repo_token_status()
-        QMessageBox.information(self, "保存成功", f"已保存仓库 {repo} 的 GitHub Token")
+        MessageDialog.information(self, "保存成功", f"已保存仓库 {repo} 的 GitHub Token")
 
     def _clear_repo_token(self) -> None:
         try:
             repo = self._current_repo()
         except Exception as exc:
-            QMessageBox.warning(self, "清除失败", str(exc))
+            MessageDialog.warning(self, "清除失败", str(exc))
             return
-        reply = QMessageBox.question(
+        confirmed = ConfirmDialog.confirm(
             self,
             "清除 GitHub Token",
             f"确定要清除仓库 {repo} 的 GitHub Token 吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            confirm_text="清除",
+            danger=True,
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
         get_github_credential_store().clear_token(repo)
         if self.repo_token_edit:
             self.repo_token_edit.clear()
         self._refresh_repo_token_status()
-        QMessageBox.information(self, "已清除", f"已清除仓库 {repo} 的 GitHub Token")
+        MessageDialog.information(self, "已清除", f"已清除仓库 {repo} 的 GitHub Token")
 
     def _test_repo_token(self) -> None:
         self._track_task(self._test_repo_token_async())
@@ -739,6 +742,6 @@ class ModuleDetailPage(QWidget):
 
             await get_module_release_service().verify_repo_accessible(repo, github_token=token)
         except Exception as exc:
-            QMessageBox.warning(self, "连接失败", str(exc))
+            MessageDialog.warning(self, "连接失败", str(exc))
             return
-        QMessageBox.information(self, "连接成功", f"GitHub 仓库连接正常: {repo}")
+        MessageDialog.information(self, "连接成功", f"GitHub 仓库连接正常: {repo}")

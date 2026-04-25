@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -33,6 +32,7 @@ from src.core.debug.vscode import ensure_vscode_attach_config
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo
 from src.core.atm.run_profile import RunProfile
+from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.spin_box import StyledSpinBox
 
 
@@ -412,7 +412,7 @@ class JobDebugDialog(QDialog):
             await self._service.start_session(session.id)
             await self._refresh()
         except Exception as exc:
-            QMessageBox.warning(self, "开始调试失败", str(exc))
+            MessageDialog.warning(self, "开始调试失败", str(exc))
 
     async def _restart_debug(self) -> None:
         try:
@@ -424,7 +424,7 @@ class JobDebugDialog(QDialog):
             await self._service.start_session(session.id)
             await self._refresh()
         except Exception as exc:
-            QMessageBox.warning(self, "重启调试失败", str(exc))
+            MessageDialog.warning(self, "重启调试失败", str(exc))
 
     async def _stop_debug(self) -> None:
         try:
@@ -432,7 +432,7 @@ class JobDebugDialog(QDialog):
                 await self._service.stop_session(self._current_session_id)
             await self._refresh()
         except Exception as exc:
-            QMessageBox.warning(self, "停止调试失败", str(exc))
+            MessageDialog.warning(self, "停止调试失败", str(exc))
 
     def generate_vscode_config(self) -> None:
         try:
@@ -444,9 +444,9 @@ class JobDebugDialog(QDialog):
                 host=attach_host,
                 port=attach_port,
             )
-            QMessageBox.information(self, "已生成 VS Code 配置", f"已写入:\n{launch_path}")
+            MessageDialog.information(self, "已生成 VS Code 配置", f"已写入:\n{launch_path}")
         except Exception as exc:
-            QMessageBox.warning(self, "生成配置失败", str(exc))
+            MessageDialog.warning(self, "生成配置失败", str(exc))
 
     def _resolve_vscode_attach_target(self) -> tuple[str, int]:
         session = self._current_session
