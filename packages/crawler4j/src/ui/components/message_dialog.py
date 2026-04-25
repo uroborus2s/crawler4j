@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 
 from src.ui.components.button import StyledButton
 from src.ui.components.dialog_async import open_dialog_async
+from src.ui.components.dialog_window import configure_titled_dialog
 
 MessageKind = Literal["info", "warning", "error"]
 
@@ -42,11 +43,7 @@ class MessageDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(580)
         self.setWindowTitle(self.title)
-        self.setWindowFlags(
-            Qt.WindowType.Dialog
-            | Qt.WindowType.WindowTitleHint
-            | Qt.WindowType.WindowCloseButtonHint
-        )
+        configure_titled_dialog(self)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(self._build_stylesheet())
         self._setup_ui(primary_text)

@@ -3,11 +3,11 @@
 Provides confirmation dialogs for dangerous operations.
 """
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from src.ui.components.button import StyledButton
 from src.ui.components.dialog_async import open_dialog_async
+from src.ui.components.dialog_window import configure_titled_dialog
 
 
 class ConfirmDialog(QDialog):
@@ -42,11 +42,7 @@ class ConfirmDialog(QDialog):
         self.setWindowTitle(title)
         self.setModal(True)
         self.setMinimumWidth(400)
-        self.setWindowFlags(
-            Qt.WindowType.Dialog
-            | Qt.WindowType.WindowTitleHint
-            | Qt.WindowType.WindowCloseButtonHint
-        )
+        configure_titled_dialog(self)
         self.setStyleSheet(self._build_stylesheet())
 
         self._setup_ui(title, message, confirm_text, cancel_text, danger)

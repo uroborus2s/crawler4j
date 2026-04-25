@@ -4,6 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog
 
 from src.core.rem import EnvKind, EnvStatus
@@ -96,6 +97,18 @@ def test_create_env_dialog_prefills_suggested_name_without_submitting_override(q
     assert kind == EnvKind.BROWSER
     assert provider == "virtualbrowser"
     assert config == {"proxy": {"mode": ProxyMode.NONE}}
+
+
+def test_create_env_dialog_keeps_native_title_bar(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    dialog = env_list_widget.CreateEnvDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.windowTitle() == "创建环境"
+    assert dialog.windowFlags() & Qt.WindowType.Window
+    assert dialog.windowFlags() & Qt.WindowType.WindowTitleHint
+    assert not dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
 
 
 def test_create_env_dialog_submits_custom_name_after_edit(qtbot, monkeypatch):
@@ -325,7 +338,7 @@ async def test_env_list_widget_start_action_shows_provider_status_until_done(qtb
 
 
 @pytest.mark.asyncio
-async def test_env_list_widget_exec_dialog_async_uses_open_without_nested_exec(qtbot, monkeypatch):
+async def test_env_list_widget_exec_dialog_async_uses_show_without_nested_exec(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
 
     import src.core.rem.manager as manager_module
@@ -339,15 +352,15 @@ async def test_env_list_widget_exec_dialog_async_uses_open_without_nested_exec(q
     class FakeDialog(QDialog):
         def __init__(self, parent=None):
             super().__init__(parent)
-            self.open_called = False
+            self.show_called = False
             self.exec_called = False
 
         def exec(self):  # type: ignore[override]
             self.exec_called = True
             raise AssertionError("blocking exec should not be used")
 
-        def open(self):  # type: ignore[override]
-            self.open_called = True
+        def show(self):  # type: ignore[override]
+            self.show_called = True
             asyncio.get_running_loop().call_soon(
                 lambda: self.done(int(QDialog.DialogCode.Accepted))
             )
@@ -359,7 +372,7 @@ async def test_env_list_widget_exec_dialog_async_uses_open_without_nested_exec(q
     result = await widget._exec_dialog_async(dialog)
 
     assert result == int(QDialog.DialogCode.Accepted)
-    assert dialog.open_called is True
+    assert dialog.show_called is True
     assert dialog.exec_called is False
 
 
@@ -430,6 +443,32 @@ async def test_env_list_widget_destroy_refresh_waits_for_inflight_load(qtbot, mo
 
     assert widget._reload_requested is False
     assert widget.table.displayed_rows()[0]["status"]["text"] == "启动中"
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_destroy_failure_shows_manager_reason(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    import src.core.rem.manager as manager_module
+
+    manager = SimpleNamespace(pool=SimpleNamespace(), last_destroy_error="VirtualBrowser 删除后环境仍存在")
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+
+    shown_messages: list[tuple[str, str]] = []
+
+    async def fake_show(parent, title, message, **kwargs):
+        shown_messages.append((title, message))
+
+    monkeypatch.setattr(env_list_widget.MessageDialog, "show_async", staticmethod(fake_show))
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    await widget._on_destroy_finished(False)
+
+    assert shown_messages == [
+        ("警告", "环境销毁失败，数据库记录已保留。\n原因：VirtualBrowser 删除后环境仍存在")
+    ]
 
 
 @pytest.mark.asyncio
@@ -520,7 +559,7 @@ async def test_env_list_widget_import_source_loading_shows_status_before_dialog(
             super().__init__(parent)
             dialog_events.append("constructed")
 
-        def open(self):  # type: ignore[override]
+        def show(self):  # type: ignore[override]
             dialog_events.append("opened")
             asyncio.get_running_loop().call_soon(
                 lambda: self.done(int(QDialog.DialogCode.Rejected))
@@ -660,7 +699,7 @@ async def test_env_list_widget_import_existing_env_starts_background_job(qtbot, 
                 "name": "VB Env 101",
             }
 
-        def open(self):  # type: ignore[override]
+        def show(self):  # type: ignore[override]
             asyncio.get_running_loop().call_soon(
                 lambda: self.done(int(QDialog.DialogCode.Accepted))
             )

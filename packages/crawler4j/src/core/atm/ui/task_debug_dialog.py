@@ -32,6 +32,7 @@ from src.core.debug.vscode import ensure_vscode_attach_config
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo
 from src.core.atm.run_profile import RunProfile
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.spin_box import StyledSpinBox
 
@@ -73,6 +74,7 @@ class JobDebugDialog(QDialog):
             wait_timeout=run_profile.resource.acquisition.wait_timeout,
         )
         self.setWindowTitle(f"任务调试 - {job.name}")
+        configure_titled_dialog(self)
         self._setup_ui()
         self._fit_to_screen()
         self._load_defaults()

@@ -282,6 +282,7 @@ async def test_task_list_widget_marks_pending_manual_batch_as_starting(qtbot, mo
     assert stop_action["label"] == "⏹ 中止"
     assert stop_action["enabled"] is True
     assert widget._startup_progress_dialog is not None
+    assert widget._startup_progress_dialog.isModal() is False
     assert "manual-batch-starting" in widget._startup_progress_dialog.message_label.text()
 
 
@@ -313,6 +314,12 @@ def test_task_list_widget_renders_manual_batch_stopping_button(qtbot, monkeypatc
     assert row["status"]["text"] == "中止中"
     assert stop_action["label"] == "⏹ 中止中"
     assert stop_action["enabled"] is False
+
+
+def test_task_list_widget_refreshes_on_task_started_event():
+    import src.core.atm.ui.task_list_widget as task_list_widget
+
+    assert task_list_widget.EventType.TASK_STARTED in task_list_widget.TaskListWidget.REFRESH_EVENTS
 
 
 def test_task_list_widget_run_once_locks_row_immediately(qtbot, monkeypatch):

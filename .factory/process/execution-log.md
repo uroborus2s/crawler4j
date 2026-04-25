@@ -21,6 +21,7 @@
 | 2026-03-26 | Completed `TASK-012` and closed `CR-003`: added trust-gate/allowlist enforcement, real `ui:*` page loading, and safe degradation for blocked or failed module UI | Completed |
 | 2026-04-25 | 收口宿主公共 UI 异步能力与业务 UI 边界，移除 core UI 对 `QMessageBox` / `QDialogButtonBox` 的直接依赖，并补齐边界测试 | Completed |
 | 2026-04-25 | 新增公共 `ProgressDialog`，将 REM/MMS/ATM 内联进度条收口为弹窗式进度反馈，并统一公共弹窗标题栏边界 | Completed |
+| 2026-04-25 | 修复创建/导入环境无标题栏、VirtualBrowser 销毁误判失败、ATM 启动进度弹窗阻塞中止三项 UI/状态问题 | Completed |
 | 2026-03-26 | Upgraded `crawler4j-sdk init-model` into a full interactive bootstrap flow: it now collects initial configuration, writes `.gitignore` / `.python-version`, and auto-runs `git init` + `uv sync` by default | Completed |
 | 2026-03-27 | Audited `docs/` against the software-factory structure, added missing stage/reference directory index pages, introduced `docs/09-evolution/`, and refreshed the document index and `.factory` doc map | Completed |
 | 2026-03-27 | Filled missing `.factory/memory/motivation-state.md` and `.factory/memory/autonomy-rules.md`, and refreshed project/role compressed entry files to match the current implementation stage | Completed |

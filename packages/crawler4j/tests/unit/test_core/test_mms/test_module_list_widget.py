@@ -365,7 +365,7 @@ async def test_install_module_async_persists_repo_token_when_requested(qtbot, tm
         def exec(self):  # type: ignore[override]
             raise AssertionError("blocking exec should not be used")
 
-        def open(self):  # type: ignore[override]
+        def show(self):  # type: ignore[override]
             asyncio.get_running_loop().call_soon(
                 lambda: self.done(int(QDialog.DialogCode.Accepted))
             )
@@ -447,7 +447,7 @@ async def test_install_module_async_uses_diagnostic_dialog_when_error_message_is
         def exec(self):  # type: ignore[override]
             raise AssertionError("blocking exec should not be used")
 
-        def open(self):  # type: ignore[override]
+        def show(self):  # type: ignore[override]
             asyncio.get_running_loop().call_soon(
                 lambda: self.done(int(QDialog.DialogCode.Accepted))
             )
@@ -484,19 +484,19 @@ async def test_install_module_async_uses_diagnostic_dialog_when_error_message_is
 
 
 @pytest.mark.asyncio
-async def test_exec_dialog_async_uses_open_without_nested_exec(qtbot):
+async def test_exec_dialog_async_uses_show_without_nested_exec(qtbot):
     class FakeDialog(QDialog):
         def __init__(self, parent=None):
             super().__init__(parent)
-            self.open_called = False
+            self.show_called = False
             self.exec_called = False
 
         def exec(self):  # type: ignore[override]
             self.exec_called = True
             raise AssertionError("blocking exec should not be used")
 
-        def open(self):  # type: ignore[override]
-            self.open_called = True
+        def show(self):  # type: ignore[override]
+            self.show_called = True
             asyncio.get_running_loop().call_soon(lambda: self.done(int(QDialog.DialogCode.Accepted)))
 
     widget = ModuleListWidget()
@@ -506,7 +506,7 @@ async def test_exec_dialog_async_uses_open_without_nested_exec(qtbot):
     result = await widget._exec_dialog_async(dialog)
 
     assert result == int(QDialog.DialogCode.Accepted)
-    assert dialog.open_called is True
+    assert dialog.show_called is True
     assert dialog.exec_called is False
 
 
@@ -528,7 +528,7 @@ async def test_register_dev_link_async_uses_non_blocking_dialogs(qtbot, tmp_path
         def exec(self):  # type: ignore[override]
             raise AssertionError("blocking exec should not be used")
 
-        def open(self):  # type: ignore[override]
+        def show(self):  # type: ignore[override]
             asyncio.get_running_loop().call_soon(
                 lambda: self.done(int(QDialog.DialogCode.Accepted))
             )

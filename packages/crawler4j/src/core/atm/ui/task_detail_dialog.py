@@ -27,6 +27,7 @@ from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.atm.ui.task_confirmation_dialog import TaskConfirmationDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.log_console import LogConsoleWidget
 
 
@@ -71,6 +72,7 @@ class JobDetailDialog(QDialog):
         self._auto_presented_confirmation_task_ids: set[str] = set()
         self._task_rows: list[dict[str, Any]] = []
         self.setWindowTitle("作业详情 (V2)")
+        configure_titled_dialog(self)
         self.resize(1000, 700)
         self.setModal(True)
         

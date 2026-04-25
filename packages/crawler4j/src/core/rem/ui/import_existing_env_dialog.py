@@ -12,6 +12,7 @@ from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.notice_panel import NoticePanel
 
 
@@ -69,6 +70,7 @@ class ImportExistingEnvDialog(QDialog):
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("从已有环境导入")
+        configure_titled_dialog(self)
         self.setMinimumSize(920, 620)
         self.setStyleSheet(
             """

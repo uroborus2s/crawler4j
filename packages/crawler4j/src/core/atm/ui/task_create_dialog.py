@@ -17,6 +17,7 @@ from src.core.atm.run_profile import AcquisitionMode, RunProfile
 from src.core.atm.ui.run_profile_dialog import RunProfileDialog
 from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
@@ -89,6 +90,7 @@ class TaskCreateDialog(QDialog):
 
     def _setup_ui(self):
         self.setWindowTitle("新建任务 (Job)")
+        configure_titled_dialog(self)
         self.setMinimumSize(500, 450)
         self.setStyleSheet("""
             QDialog {

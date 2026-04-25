@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+from PyQt6.QtCore import Qt
+
 from src.core.rem.ui.import_existing_env_dialog import ImportExistingEnvDialog
 
 
@@ -79,3 +81,17 @@ def test_import_existing_env_dialog_updates_warning_and_returns_selection(qtbot)
         "name": "VB Env 101",
     }
     assert dialog.submit_btn.isEnabled() is True
+
+
+def test_import_existing_env_dialog_keeps_native_title_bar(qtbot):
+    dialog = ImportExistingEnvDialog(
+        sources=[{"provider": "virtualbrowser", "label": "Virtual Browser"}],
+        modules=[_make_module()],
+        env_options_by_source={"virtualbrowser": [_make_provider_env()]},
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.windowTitle() == "从已有环境导入"
+    assert dialog.windowFlags() & Qt.WindowType.Window
+    assert dialog.windowFlags() & Qt.WindowType.WindowTitleHint
+    assert not dialog.windowFlags() & Qt.WindowType.FramelessWindowHint

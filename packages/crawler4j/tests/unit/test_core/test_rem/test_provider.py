@@ -141,3 +141,44 @@ async def test_virtualbrowser_connect_retries_runtime_detail_before_missing_ws_u
     assert handle.ws_url == "http://localhost:57204"
     assert client.get_browser_runtime_detail.await_count == 3
     handle.safe_connect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_destroy_waits_for_async_external_delete(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="101"),
+    )
+    assert env.handle is not None
+
+    client = SimpleNamespace(
+        stop_browser=AsyncMock(),
+        delete_browser=AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(env.handle, "safe_close", AsyncMock())
+    monkeypatch.setattr(
+        provider,
+        "is_window_open",
+        AsyncMock(side_effect=[True, True, False]),
+    )
+    monkeypatch.setattr(
+        provider,
+        "exists",
+        AsyncMock(side_effect=[True, True, False]),
+    )
+    monkeypatch.setattr("src.core.rem.provider.asyncio.sleep", AsyncMock())
+
+    success = await provider.destroy(env)
+
+    assert success is True
+    env.handle.safe_close.assert_awaited_once()
+    client.stop_browser.assert_awaited_once_with(101)
+    client.delete_browser.assert_awaited_once_with(101)
+    assert provider.is_window_open.await_count == 3
+    assert provider.exists.await_count == 3

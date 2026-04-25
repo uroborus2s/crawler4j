@@ -38,6 +38,7 @@ from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
 from src.ui.components.dialog_async import open_dialog_async
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.message_dialog import MessageDialog, MessageKind
 from src.ui.components.progress_dialog import ProgressDialog
 
@@ -129,6 +130,7 @@ class ModuleInstallErrorDialog(QDialog):
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("安装失败")
+        configure_titled_dialog(self)
         self.setMinimumSize(840, 560)
         self.setModal(True)
         self.setStyleSheet(
@@ -522,14 +524,22 @@ class ModuleListWidget(QWidget):
                 "模块操作中",
                 message,
             )
+            self._progress_dialog.finished.connect(
+                lambda *_args, dialog=self._progress_dialog: self._forget_progress_dialog(dialog)
+            )
             return
         self._progress_dialog.set_message(message)
+
+    def _forget_progress_dialog(self, dialog: ProgressDialog) -> None:
+        if self._progress_dialog is dialog:
+            self._progress_dialog = None
 
     def _close_progress_dialog(self) -> None:
         if self._progress_dialog is None:
             return
-        self._progress_dialog.close_progress()
+        dialog = self._progress_dialog
         self._progress_dialog = None
+        dialog.close_progress()
 
     def _update_stats_label(self) -> None:
         total = len(self._modules)

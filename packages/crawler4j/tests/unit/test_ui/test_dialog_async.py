@@ -10,19 +10,19 @@ from src.ui.components.message_dialog import MessageDialog
 
 
 @pytest.mark.asyncio
-async def test_open_dialog_async_uses_open_without_nested_exec(qtbot):
+async def test_open_dialog_async_uses_show_without_nested_exec(qtbot):
     class FakeDialog(QDialog):
         def __init__(self):
             super().__init__()
-            self.open_called = False
+            self.show_called = False
             self.exec_called = False
 
         def exec(self):  # type: ignore[override]
             self.exec_called = True
             raise AssertionError("blocking exec should not be used")
 
-        def open(self):  # type: ignore[override]
-            self.open_called = True
+        def show(self):  # type: ignore[override]
+            self.show_called = True
             asyncio.get_running_loop().call_soon(
                 lambda: self.done(int(QDialog.DialogCode.Accepted))
             )
@@ -33,23 +33,23 @@ async def test_open_dialog_async_uses_open_without_nested_exec(qtbot):
     result = await open_dialog_async(dialog)
 
     assert result == int(QDialog.DialogCode.Accepted)
-    assert dialog.open_called is True
+    assert dialog.show_called is True
     assert dialog.exec_called is False
 
 
 @pytest.mark.asyncio
-async def test_message_dialog_async_entrypoint_uses_open(qtbot, monkeypatch):
+async def test_message_dialog_async_entrypoint_uses_show(qtbot, monkeypatch):
     def fail_exec(self):
         raise AssertionError("blocking exec should not be used")
 
-    def fake_open(self):
+    def fake_show(self):
         qtbot.addWidget(self)
         asyncio.get_running_loop().call_soon(
             lambda: self.done(int(QDialog.DialogCode.Accepted))
         )
 
     monkeypatch.setattr(MessageDialog, "exec", fail_exec)
-    monkeypatch.setattr(MessageDialog, "open", fake_open)
+    monkeypatch.setattr(MessageDialog, "show", fake_show)
 
     result = await MessageDialog.warning_async(None, "标题", "内容")
 
@@ -61,14 +61,14 @@ async def test_confirm_dialog_async_entrypoint_returns_bool(qtbot, monkeypatch):
     def fail_exec(self):
         raise AssertionError("blocking exec should not be used")
 
-    def fake_open(self):
+    def fake_show(self):
         qtbot.addWidget(self)
         asyncio.get_running_loop().call_soon(
             lambda: self.done(int(QDialog.DialogCode.Accepted))
         )
 
     monkeypatch.setattr(ConfirmDialog, "exec", fail_exec)
-    monkeypatch.setattr(ConfirmDialog, "open", fake_open)
+    monkeypatch.setattr(ConfirmDialog, "show", fake_show)
 
     assert await ConfirmDialog.confirm_async(None, "确认", "继续吗？") is True
 
@@ -78,14 +78,14 @@ async def test_choice_dialog_async_returns_selected_choice(qtbot, monkeypatch):
     def fail_exec(self):
         raise AssertionError("blocking exec should not be used")
 
-    def fake_open(self):
+    def fake_show(self):
         qtbot.addWidget(self)
         button = self.findChild(QPushButton, "choiceButton_destroy")
         assert button is not None
         asyncio.get_running_loop().call_soon(button.click)
 
     monkeypatch.setattr(ChoiceDialog, "exec", fail_exec)
-    monkeypatch.setattr(ChoiceDialog, "open", fake_open)
+    monkeypatch.setattr(ChoiceDialog, "show", fake_show)
 
     selected = await ChoiceDialog.choose_async(
         None,

@@ -85,6 +85,33 @@ def _build_dispatcher(env: Environment, lease: EnvLease) -> TaskDispatcher:
 
 
 @pytest.mark.asyncio
+async def test_dispatcher_save_task_update_publishes_task_started(monkeypatch):
+    published = []
+    dispatcher = TaskDispatcher.__new__(TaskDispatcher)
+    dispatcher.repo = SimpleNamespace(save_task=AsyncMock())
+
+    monkeypatch.setattr(
+        "src.core.atm.dispatcher.get_event_bus",
+        lambda: SimpleNamespace(publish=published.append),
+    )
+
+    task = Task(
+        id="task-running",
+        job_id="job-1",
+        status=TaskStatus.RUNNING,
+        env_id="42",
+    )
+
+    await dispatcher._save_task_update(task)
+
+    dispatcher.repo.save_task.assert_awaited_once_with(task)
+    assert len(published) == 1
+    assert published[0].type == EventType.TASK_STARTED
+    assert published[0].data["job_id"] == "job-1"
+    assert published[0].data["env_id"] == "42"
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_calls_success_hooks_and_merges_prepare_env(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()

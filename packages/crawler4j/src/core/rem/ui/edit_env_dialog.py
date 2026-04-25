@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.rem.models import Environment, ProxyMode
 from src.ui.components.button import StyledButton
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
 
@@ -81,6 +82,7 @@ class EditEnvDialog(QDialog):
         self._worker = None
         
         self.setWindowTitle(f"编辑环境 - {env.id}")
+        configure_titled_dialog(self)
         self.setMinimumWidth(450)
         
         # 深色主题样式

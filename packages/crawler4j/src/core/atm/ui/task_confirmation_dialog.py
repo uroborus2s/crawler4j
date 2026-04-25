@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.atm.models import Task
+from src.ui.components.dialog_window import configure_titled_dialog
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,7 @@ class TaskConfirmationDialog(QDialog):
         self.confirmed = False
 
         self.setWindowTitle(self.spec.title)
+        configure_titled_dialog(self)
         self.resize(680, 520)
         self.setModal(True)
         self._setup_ui()

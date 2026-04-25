@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 from src.core.rem.ip_pool import IPEntry, IPPool, IPStrategy
 from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
@@ -42,6 +43,7 @@ class AddPoolDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("新建 IP 池")
+        configure_titled_dialog(self)
         self.setMinimumWidth(350)
         self._apply_dark_theme()
         self._setup_ui()
@@ -121,6 +123,7 @@ class AddIPDialog(QDialog):
         super().__init__(parent)
         self._pool_id = pool_id
         self.setWindowTitle("添加 IP")
+        configure_titled_dialog(self)
         self.setMinimumWidth(350)
         self._apply_dark_theme()
         self._setup_ui()
@@ -234,6 +237,7 @@ class BatchImportDialog(QDialog):
         super().__init__(parent)
         self._pool_id = pool_id
         self.setWindowTitle("批量导入 IP")
+        configure_titled_dialog(self)
         self.setMinimumWidth(500)
         self.setMinimumHeight(400)
         self._apply_dark_theme()

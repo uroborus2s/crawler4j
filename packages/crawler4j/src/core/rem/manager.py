@@ -154,6 +154,7 @@ class EnvironmentManager:
         self.pool = EnvPool(max_instances=max_instances)
         self.lease_manager = LeaseManager(self.pool)
         self._reservation_lock = asyncio.Lock()
+        self.last_destroy_error = ""
     
     async def startup(self, *, recover_crashed: bool = True) -> None:
         """启动环境管理器。
@@ -536,9 +537,11 @@ class EnvironmentManager:
         """
         env = await self.pool.get(env_id)
         if not env:
+            self.last_destroy_error = f"环境不存在: {env_id}"
             return False
 
         logger.info(f"[REM] 销毁环境: id={env.id}")
+        self.last_destroy_error = ""
 
         previous_status = env.status
         await self.pool.update_status(env.id, EnvStatus.TERMINATING)
@@ -551,10 +554,16 @@ class EnvironmentManager:
 
                 destroyed = await provider.destroy(env)
                 if destroyed is False:
-                    logger.warning(f"[REM] 外部环境删除未成功，保留数据库记录: id={env.id}")
+                    self.last_destroy_error = (
+                        f"{provider.name} 未确认外部环境已删除，可能是外部浏览器仍在关闭或删除接口返回失败。"
+                    )
+                    logger.warning(
+                        f"[REM] 外部环境删除未成功，保留数据库记录: id={env.id} reason={self.last_destroy_error}"
+                    )
                     await self.pool.update_status(env.id, previous_status)
                     return False
             except Exception as e:
+                self.last_destroy_error = str(e) or e.__class__.__name__
                 logger.warning(f"[REM] 环境销毁失败: {e}")
                 await self.pool.update_status(env.id, previous_status)
                 return False

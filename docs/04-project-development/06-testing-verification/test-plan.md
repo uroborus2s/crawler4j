@@ -120,8 +120,9 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-04-25 | 新增公共 UI 异步与边界回归：`test_dialog_async.py` 锁定公共弹窗使用 `open()` 而非嵌套 `exec()`，`test_public_ui_boundaries.py` 锁定 core UI 不再直接使用 `QMessageBox` / `QDialogButtonBox`；REM/MMS/ATM 目录回归覆盖创建/导入/编辑环境、IP 池、模块安装/卸载、托管页 CRUD 与手动批次中止选择 | Codex |
-| 2026-04-25 | 新增公共进度弹窗与标题栏边界回归：`test_progress_dialog.py` 锁定 `ProgressDialog` 使用非阻塞 `open()` 与不定进度条，`test_public_ui_boundaries.py` 锁定 core UI 不再直接使用 `QProgressBar` 或无标题栏弹窗；REM/MMS/ATM 相关 UI 测试覆盖内联进度条改为公共弹窗且完成后关闭。全量 `uv run pytest -q` 为 `731 passed` | Codex |
+| 2026-04-25 | 新增弹窗标题栏、VirtualBrowser 销毁稳定等待与 ATM 启动进度不阻塞回归：`test_public_ui_boundaries.py` 锁定所有 core QDialog 必须走公共标题栏 helper，`test_provider.py` 锁定删除后等待外部环境消失，`test_dispatcher_hooks.py` / `test_task_list_widget.py` 锁定 `TASK_STARTED` 刷新与非 modal 启动进度。全量 `uv run pytest -q` 为 `738 passed` | Codex |
+| 2026-04-25 | 新增公共 UI 异步与边界回归：`test_dialog_async.py` 锁定公共弹窗使用非阻塞 `show()` 而非嵌套 `exec()`，`test_public_ui_boundaries.py` 锁定 core UI 不再直接使用 `QMessageBox` / `QDialogButtonBox`；REM/MMS/ATM 目录回归覆盖创建/导入/编辑环境、IP 池、模块安装/卸载、托管页 CRUD 与手动批次中止选择 | Codex |
+| 2026-04-25 | 新增公共进度弹窗与标题栏边界回归：`test_progress_dialog.py` 锁定 `ProgressDialog` 使用非阻塞 `show()` 与不定进度条，`test_public_ui_boundaries.py` 锁定 core UI 不再直接使用 `QProgressBar` 或无标题栏弹窗；REM/MMS/ATM 相关 UI 测试覆盖内联进度条改为公共弹窗且完成后关闭。全量 `uv run pytest -q` 为 `731 passed` | Codex |
 | 2026-04-25 | 新增公共消息弹窗视觉优化与公共组件收口回归：`test_message_dialog.py` 锁定 `MessageDialog` 对齐“安装模块”面板的原生窗口壳与深色内容区，`test_button.py` 锁定 `StyledButton(success)` 动作按钮色板，`test_module_install_dialog.py` 锁定安装模块弹窗改用公共输入框/按钮/消息弹窗；ATM/MMS/System 相关单测覆盖简单提示和确认改走公共 `MessageDialog` / `ConfirmDialog` | Codex |
 | 2026-04-25 | 新增公共 `MessageDialog`、IP 绑定无持久关系表、遗留 `configs` 表退出初始化回归：`test_message_dialog.py` 锁定公共消息弹窗，`test_ip_pool_tab.py` 锁定 IP 测试结果使用公共消息弹窗，`test_ip_pool.py` 锁定绑定/解绑只更新 `ip_entries.bound_count` 且不创建 `env_ip_bindings`，`test_settings_store.py` 锁定不再创建 `configs` 表 | Codex |
 | 2026-04-25 | 新增运行环境列表 `env_metadata` 可用状态与 IP 测试结果深色面板回归：`test_env_list_widget.py` 锁定 `scheduler.resource_pool` 资格卡片合并、原始 `env_metadata` 行数据保留与可用状态 tooltip/search 文本；`test_ip_pool_tab.py` 锁定代理测试结果弹窗应用深色公共弹窗。定向回归 `20 passed` | Codex |

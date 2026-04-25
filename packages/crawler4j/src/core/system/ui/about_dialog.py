@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.system.update_service import get_update_service
 from src.core.system.version_service import get_version_service
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.app_icon import load_app_icon_pixmap
 
 DOCS_URL = "https://github.com/uroborus2s/crawler4j"
@@ -168,6 +169,7 @@ class AboutDialog(QDialog):
     def _setup_window(self):
         """配置窗口属性。"""
         self.setWindowTitle("关于 蛛行演略")
+        configure_titled_dialog(self)
         self.setMinimumSize(self.DIALOG_MIN_WIDTH, self.DIALOG_MIN_HEIGHT)
         self.setModal(True)
         self.setStyleSheet("""

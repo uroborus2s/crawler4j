@@ -30,6 +30,7 @@ from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
 from src.ui.components.dialog_async import open_dialog_async
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog, MessageKind
 from src.ui.components.progress_dialog import ProgressDialog
@@ -52,6 +53,7 @@ class CreateEnvDialog(QDialog):
         super().__init__(parent)
         self._suggested_name = ""
         self.setWindowTitle("创建环境")
+        configure_titled_dialog(self)
         self.setMinimumWidth(450)
         
         # 应用深色主题样式
@@ -947,9 +949,13 @@ class EnvListWidget(QWidget):
         if success:
             await self._show_message_async("成功", "环境已销毁", kind="info")
         else:
+            reason = str(getattr(self._manager, "last_destroy_error", "") or "").strip()
+            message = "环境销毁失败，数据库记录已保留。请检查指纹浏览器连接后重试。"
+            if reason:
+                message = f"环境销毁失败，数据库记录已保留。\n原因：{reason}"
             await self._show_message_async(
                 "警告",
-                "环境销毁失败，数据库记录已保留。请检查指纹浏览器连接后重试。",
+                message,
                 kind="warning",
             )
         self.load_data()
@@ -1059,16 +1065,24 @@ class EnvListWidget(QWidget):
                     "环境操作中",
                     message or "正在处理环境操作...",
                 )
+                self._progress_dialog.finished.connect(
+                    lambda *_args, dialog=self._progress_dialog: self._forget_progress_dialog(dialog)
+                )
             else:
                 self._progress_dialog.set_message(message or "正在处理环境操作...")
         else:
             self._close_progress_dialog()
 
+    def _forget_progress_dialog(self, dialog: ProgressDialog) -> None:
+        if self._progress_dialog is dialog:
+            self._progress_dialog = None
+
     def _close_progress_dialog(self) -> None:
         if self._progress_dialog is None:
             return
-        self._progress_dialog.close_progress()
+        dialog = self._progress_dialog
         self._progress_dialog = None
+        dialog.close_progress()
 
     def _update_stats(self, total: int, ready: int, busy: int):
         self.stats_label.setText(f"总计: {total} | 就绪: {ready} | 忙碌: {busy}")

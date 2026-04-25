@@ -5,6 +5,8 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QLabel, QProgressBar, QVBoxLayout, QWidget
 
+from src.ui.components.dialog_window import configure_titled_dialog
+
 
 class ProgressDialog(QDialog):
     """Public indeterminate progress popup with a native title bar."""
@@ -15,12 +17,13 @@ class ProgressDialog(QDialog):
         message: str,
         *,
         parent: QWidget | None = None,
+        modal: bool = False,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(str(title or "处理中"))
-        self.setModal(True)
+        self.setModal(modal)
         self.setMinimumWidth(420)
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint)
+        configure_titled_dialog(self)
         self.setStyleSheet(self._build_stylesheet())
         self._setup_ui(str(message or "请稍候..."))
 
@@ -83,8 +86,14 @@ class ProgressDialog(QDialog):
         self.message_label.setText(str(message or "请稍候..."))
 
     def show_progress(self) -> None:
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.open()
+        self.setWindowModality(
+            Qt.WindowModality.ApplicationModal
+            if self.isModal()
+            else Qt.WindowModality.NonModal
+        )
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def close_progress(self) -> None:
         self.accept()
@@ -95,7 +104,9 @@ class ProgressDialog(QDialog):
         parent: QWidget | None,
         title: str,
         message: str,
+        *,
+        modal: bool = False,
     ) -> "ProgressDialog":
-        dialog = cls(title, message, parent=parent)
+        dialog = cls(title, message, parent=parent, modal=modal)
         dialog.show_progress()
         return dialog

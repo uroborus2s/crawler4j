@@ -50,6 +50,7 @@ from src.core.atm.run_profile import (
 )
 from src.core.atm.controller import selector_returns_none
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
@@ -475,6 +476,7 @@ class RunProfileDialog(QDialog):
 
     def _setup_ui(self):
         self.setWindowTitle("配置运行模板")
+        configure_titled_dialog(self)
         
         # Responsive sizing (60% width, 95% height of screen)
         screen = QApplication.primaryScreen()

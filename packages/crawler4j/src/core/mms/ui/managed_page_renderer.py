@@ -27,6 +27,7 @@ from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit
 from src.ui.components.message_dialog import MessageDialog
 
@@ -560,6 +561,7 @@ class ManagedPageRenderer(QWidget):
         dialog = QDialog(self)
         title = str(component.get("title") or "数据表")
         dialog.setWindowTitle(f"{'新增' if mode == 'create' else '编辑'}{title}")
+        configure_titled_dialog(dialog)
         dialog.setModal(True)
         dialog.setMinimumWidth(460)
         dialog.setStyleSheet(

@@ -3,6 +3,7 @@ from src.ui.components.choice_dialog import ChoiceDialog, DialogChoice
 from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.dialog_async import open_dialog_async
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.notice_panel import NoticePanel
@@ -20,5 +21,6 @@ __all__ = [
     "StyledComboBox",
     "StyledLineEdit",
     "StyledSpinBox",
+    "configure_titled_dialog",
     "open_dialog_async",
 ]

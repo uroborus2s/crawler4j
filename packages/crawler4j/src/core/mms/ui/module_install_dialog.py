@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.ui.components.button import StyledButton
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
 
@@ -38,6 +39,7 @@ class ModuleInstallDialog(QDialog):
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("安装模块")
+        configure_titled_dialog(self)
         self.setMinimumWidth(520)
         self.setStyleSheet(
             """

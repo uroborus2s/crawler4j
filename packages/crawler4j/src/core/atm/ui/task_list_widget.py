@@ -67,6 +67,7 @@ class TaskListWidget(QWidget):
         },
     }
     REFRESH_EVENTS = (
+        EventType.TASK_STARTED,
         EventType.TASK_SIGNAL,
         EventType.TASK_FINISHED,
         EventType.TASK_FAILED,
@@ -216,14 +217,22 @@ class TaskListWidget(QWidget):
                 "环境启动中",
                 message,
             )
+            self._startup_progress_dialog.finished.connect(
+                lambda *_args, dialog=self._startup_progress_dialog: self._forget_startup_progress(dialog)
+            )
         else:
             self._startup_progress_dialog.set_message(message)
+
+    def _forget_startup_progress(self, dialog: ProgressDialog) -> None:
+        if self._startup_progress_dialog is dialog:
+            self._startup_progress_dialog = None
 
     def _close_startup_progress(self) -> None:
         if self._startup_progress_dialog is None:
             return
-        self._startup_progress_dialog.close_progress()
+        dialog = self._startup_progress_dialog
         self._startup_progress_dialog = None
+        dialog.close_progress()
 
     async def _load_data_async(self, seq: int):
         """异步加载数据。"""

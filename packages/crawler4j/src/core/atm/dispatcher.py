@@ -221,7 +221,7 @@ class TaskDispatcher:
 
         execution_result = await runner.run(
             request,
-            on_task_update=self.repo.save_task,
+            on_task_update=self._save_task_update,
             on_context_ready=_remember_context,
             is_stop_requested=lambda: self._is_stop_requested(job.id),
             resolve_stop_env_action=lambda: self._resolve_stop_env_action(job.id),
@@ -290,7 +290,7 @@ class TaskDispatcher:
             env_created=waiting_runtime.env_created,
             creation_lifecycle=waiting_runtime.creation_lifecycle,
             env_action=env_action,
-            on_task_update=self.repo.save_task,
+            on_task_update=self._save_task_update,
         )
         self._cleanup_runtime_refs(task_id)
         self._publish_task_event(task)
@@ -318,7 +318,7 @@ class TaskDispatcher:
             creation_lifecycle=waiting_runtime.creation_lifecycle,
             confirmed=success,
             confirmation_message=message,
-            on_task_update=self.repo.save_task,
+            on_task_update=self._save_task_update,
         )
         self._cleanup_runtime_refs(task_id)
         self._publish_task_event(task)
@@ -347,6 +347,22 @@ class TaskDispatcher:
                 },
             )
         )
+
+    async def _save_task_update(self, task: Task) -> None:
+        await self.repo.save_task(task)
+        if task.status == TaskStatus.RUNNING:
+            get_event_bus().publish(
+                Event(
+                    type=EventType.TASK_STARTED,
+                    task_run_id=task.id,
+                    data={
+                        "task_id": task.id,
+                        "job_id": task.job_id,
+                        "status": task.status.value,
+                        "env_id": task.env_id,
+                    },
+                )
+            )
 
     def _publish_task_signal_event(self, task: Task) -> None:
         if not task.signal:

@@ -29,6 +29,16 @@ def test_core_ui_popups_do_not_use_frameless_windows():
     assert offenders == []
 
 
+def test_core_ui_dialogs_use_public_titled_dialog_helper():
+    offenders: list[str] = []
+    for path in CORE_UI_ROOT.glob("**/ui/*.py"):
+        text = path.read_text(encoding="utf-8")
+        if ("(QDialog)" in text or "QDialog(" in text) and "configure_titled_dialog" not in text:
+            offenders.append(str(path.relative_to(PROJECT_ROOT)))
+
+    assert offenders == []
+
+
 def test_public_dialog_components_expose_async_entrypoints():
     from src.ui.components.choice_dialog import ChoiceDialog
     from src.ui.components.confirm_dialog import ConfirmDialog
@@ -61,4 +71,6 @@ def test_public_dialog_components_keep_native_title_bars(qtbot):
         qtbot.addWidget(dialog)
         assert dialog.windowTitle()
         assert not dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
+        assert dialog.windowFlags() & Qt.WindowType.WindowType_Mask == Qt.WindowType.Window
+        assert dialog.windowFlags() & Qt.WindowType.Window
         assert dialog.windowFlags() & Qt.WindowType.WindowTitleHint

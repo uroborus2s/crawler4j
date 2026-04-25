@@ -1584,6 +1584,34 @@ class VirtualBrowserProvider(BaseProvider):
         
         return False
 
+    async def _wait_until_window_closed(
+        self,
+        env: Environment,
+        *,
+        attempts: int = 5,
+        delay: float = 0.3,
+    ) -> bool:
+        for attempt in range(attempts):
+            if not await self.is_window_open(env):
+                return True
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay)
+        return False
+
+    async def _wait_until_missing(
+        self,
+        env: Environment,
+        *,
+        attempts: int = 6,
+        delay: float = 0.5,
+    ) -> bool:
+        for attempt in range(attempts):
+            if not await self.exists(env):
+                return True
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay)
+        return False
+
     async def destroy(self, env: Environment) -> bool:
         """销毁: 断开连接 + 停止浏览器 + 删除配置。"""
         from src.core.foundation.logging import logger
@@ -1605,10 +1633,12 @@ class VirtualBrowserProvider(BaseProvider):
         # 2. API Stop & Delete
         client = self._get_api_client()
         try:
+            browser_id_int = int(browser_id)
             if await self.is_window_open(env):
-                await client.stop_browser(int(browser_id))
-            await client.delete_browser(int(browser_id))
-            if await self.exists(env):
+                await client.stop_browser(browser_id_int)
+                await self._wait_until_window_closed(env)
+            await client.delete_browser(browser_id_int)
+            if not await self._wait_until_missing(env):
                 logger.warning(f"[VirtualBrowser] 删除后环境仍存在: id={browser_id}")
                 return False
             logger.info(f"[VirtualBrowser] 环境已销毁: id={browser_id}")

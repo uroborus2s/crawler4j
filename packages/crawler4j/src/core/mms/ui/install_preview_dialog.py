@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.ui.components.button import StyledButton
+from src.ui.components.dialog_window import configure_titled_dialog
 
 
 class InstallPreviewDialog(QDialog):
@@ -47,6 +48,7 @@ class InstallPreviewDialog(QDialog):
     
     def _setup_ui(self):
         self.setWindowTitle(self._title)
+        configure_titled_dialog(self)
         self.setMinimumWidth(450)
         self.setStyleSheet("""
             QDialog {

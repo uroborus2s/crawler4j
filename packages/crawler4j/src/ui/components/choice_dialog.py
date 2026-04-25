@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from src.ui.components.button import ButtonVariant, StyledButton
 from src.ui.components.dialog_async import open_dialog_async
+from src.ui.components.dialog_window import configure_titled_dialog
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,11 +42,7 @@ class ChoiceDialog(QDialog):
         self.setWindowTitle(title)
         self.setModal(True)
         self.setMinimumWidth(520)
-        self.setWindowFlags(
-            Qt.WindowType.Dialog
-            | Qt.WindowType.WindowTitleHint
-            | Qt.WindowType.WindowCloseButtonHint
-        )
+        configure_titled_dialog(self)
         self.setStyleSheet(self._build_stylesheet())
         self._setup_ui(message, cancel_text)
 
