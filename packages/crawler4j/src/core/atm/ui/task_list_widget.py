@@ -12,7 +12,6 @@ from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QProgressBar,
     QVBoxLayout,
     QWidget,
 )
@@ -30,6 +29,7 @@ from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
 from src.ui.components.message_dialog import MessageDialog
+from src.ui.components.progress_dialog import ProgressDialog
 
 
 @dataclass
@@ -108,10 +108,11 @@ class TaskListWidget(QWidget):
         self._run_once_stopping_job_ids: set[str] = set()
         self._display_items: list[JobDisplayItem] = []
         self._table_rows: list[dict[str, Any]] = []
+        self._startup_progress_dialog: ProgressDialog | None = None
 
         self._setup_ui()
         self._subscribe_events()
-        self.destroyed.connect(lambda *_args: self._unsubscribe_events())
+        self.destroyed.connect(lambda *_args: (self._unsubscribe_events(), self._close_startup_progress()))
 
         # 初始加载 (Delay to ensure loop is running)
         QTimer.singleShot(0, self.load_data)
@@ -180,34 +181,6 @@ class TaskListWidget(QWidget):
 
         layout.addLayout(header)
 
-        self.startup_hint = QWidget()
-        startup_layout = QVBoxLayout(self.startup_hint)
-        startup_layout.setContentsMargins(0, 0, 0, 0)
-        startup_layout.setSpacing(6)
-
-        self.startup_hint_label = QLabel("环境启动中，请稍候...")
-        self.startup_hint_label.setStyleSheet("color: #93c5fd; font-size: 12px; font-weight: bold;")
-        startup_layout.addWidget(self.startup_hint_label)
-
-        self.startup_progress = QProgressBar()
-        self.startup_progress.setMaximum(0)
-        self.startup_progress.setTextVisible(False)
-        self.startup_progress.setFixedHeight(3)
-        self.startup_progress.setStyleSheet("""
-            QProgressBar {
-                background: rgba(96, 165, 250, 0.12);
-                border: none;
-                border-radius: 2px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #60a5fa, stop:1 #22d3ee);
-                border-radius: 2px;
-            }
-        """)
-        startup_layout.addWidget(self.startup_progress)
-        self.startup_hint.hide()
-        layout.addWidget(self.startup_hint)
-
         # 错误提示
         self.error_label = QLabel()
         self.error_label.setStyleSheet("color: #f87171; padding: 8px;")
@@ -230,15 +203,27 @@ class TaskListWidget(QWidget):
 
     def _set_startup_indicator(self, starting_job_names: list[str]) -> None:
         if not starting_job_names:
-            self.startup_hint.hide()
+            self._close_startup_progress()
             return
 
         if len(starting_job_names) == 1:
             message = f"环境启动中：{starting_job_names[0]}。启动完成后会自动切回执行中。"
         else:
             message = f"有 {len(starting_job_names)} 条作业正在启动环境。启动完成后会自动隐藏。"
-        self.startup_hint_label.setText(message)
-        self.startup_hint.show()
+        if self._startup_progress_dialog is None:
+            self._startup_progress_dialog = ProgressDialog.open_progress(
+                self,
+                "环境启动中",
+                message,
+            )
+        else:
+            self._startup_progress_dialog.set_message(message)
+
+    def _close_startup_progress(self) -> None:
+        if self._startup_progress_dialog is None:
+            return
+        self._startup_progress_dialog.close_progress()
+        self._startup_progress_dialog = None
 
     async def _load_data_async(self, seq: int):
         """异步加载数据。"""

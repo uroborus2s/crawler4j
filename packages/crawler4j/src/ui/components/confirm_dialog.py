@@ -42,7 +42,11 @@ class ConfirmDialog(QDialog):
         self.setWindowTitle(title)
         self.setModal(True)
         self.setMinimumWidth(400)
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
         self.setStyleSheet(self._build_stylesheet())
 
         self._setup_ui(title, message, confirm_text, cancel_text, danger)

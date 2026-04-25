@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QProgressBar,
     QVBoxLayout,
     QWidget,
 )
@@ -33,6 +32,7 @@ from src.ui.components.data_table_query import resolve_local_data_table_result
 from src.ui.components.dialog_async import open_dialog_async
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog, MessageKind
+from src.ui.components.progress_dialog import ProgressDialog
 
 
 def get_create_env_default_name() -> str:
@@ -418,8 +418,9 @@ class EnvListWidget(QWidget):
         self._operation_task: asyncio.Task[Any] | None = None
         self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._table_rows: list[dict[str, Any]] = []
+        self._progress_dialog: ProgressDialog | None = None
         self._setup_ui()
-        self.destroyed.connect(lambda *_args: self._cancel_pending_tasks())
+        self.destroyed.connect(lambda *_args: (self._cancel_pending_tasks(), self._close_progress_dialog()))
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -447,19 +448,6 @@ class EnvListWidget(QWidget):
         header.addWidget(self.refresh_btn)
         
         layout.addLayout(header)
-        
-        # Loading 指示器
-        self.loading_bar = QProgressBar()
-        self.loading_bar.setMaximum(0)
-        self.loading_bar.setTextVisible(False)
-        self.loading_bar.setFixedHeight(3)
-        self.loading_bar.hide()
-        layout.addWidget(self.loading_bar)
-
-        self.operation_status_label = QLabel()
-        self.operation_status_label.setStyleSheet("color: #cdd6f4; padding: 6px 0;")
-        self.operation_status_label.hide()
-        layout.addWidget(self.operation_status_label)
         
         # 错误提示
         self.error_label = QLabel()
@@ -1065,13 +1053,22 @@ class EnvListWidget(QWidget):
 
     def _show_loading(self, show: bool, message: str = ""):
         if show:
-            self.operation_status_label.setText(message)
-            self.operation_status_label.show()
-            self.loading_bar.show()
+            if self._progress_dialog is None:
+                self._progress_dialog = ProgressDialog.open_progress(
+                    self,
+                    "环境操作中",
+                    message or "正在处理环境操作...",
+                )
+            else:
+                self._progress_dialog.set_message(message or "正在处理环境操作...")
         else:
-            self.loading_bar.hide()
-            self.operation_status_label.clear()
-            self.operation_status_label.hide()
-    
+            self._close_progress_dialog()
+
+    def _close_progress_dialog(self) -> None:
+        if self._progress_dialog is None:
+            return
+        self._progress_dialog.close_progress()
+        self._progress_dialog = None
+
     def _update_stats(self, total: int, ready: int, busy: int):
         self.stats_label.setText(f"总计: {total} | 就绪: {ready} | 忙碌: {busy}")

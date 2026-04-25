@@ -166,9 +166,9 @@ def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
     assert widget.import_existing_btn.isEnabled() is False
     assert widget.refresh_btn.isEnabled() is False
     assert widget.table.isEnabled() is False
-    assert widget.loading_bar.isHidden() is False
-    assert widget.operation_status_label.isHidden() is False
-    assert widget.operation_status_label.text() == "正在处理环境操作..."
+    assert widget._progress_dialog is not None
+    assert widget._progress_dialog.windowTitle() == "环境操作中"
+    assert widget._progress_dialog.message_label.text() == "正在处理环境操作..."
 
     widget._end_operation()
 
@@ -176,8 +176,7 @@ def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
     assert widget.import_existing_btn.isEnabled() is True
     assert widget.refresh_btn.isEnabled() is True
     assert widget.table.isEnabled() is True
-    assert widget.loading_bar.isHidden() is True
-    assert widget.operation_status_label.isHidden() is True
+    assert widget._progress_dialog is None
 
 
 def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypatch):
@@ -313,17 +312,15 @@ async def test_env_list_widget_start_action_shows_provider_status_until_done(qtb
     widget._start_env("env-1")
     await asyncio.sleep(0)
 
-    assert widget.loading_bar.isHidden() is False
-    assert widget.operation_status_label.isHidden() is False
-    assert "VirtualBrowser API" in widget.operation_status_label.text()
-    assert "启动环境 env-1" in widget.operation_status_label.text()
+    assert widget._progress_dialog is not None
+    assert "VirtualBrowser API" in widget._progress_dialog.message_label.text()
+    assert "启动环境 env-1" in widget._progress_dialog.message_label.text()
     assert widget.create_btn.isEnabled() is False
 
     start_future.set_result(True)
     await _drain_widget_tasks(widget)
 
-    assert widget.loading_bar.isHidden() is True
-    assert widget.operation_status_label.isHidden() is True
+    assert widget._progress_dialog is None
     widget.load_data.assert_called_once_with()
 
 
@@ -537,8 +534,8 @@ async def test_env_list_widget_import_source_loading_shows_status_before_dialog(
     task = asyncio.create_task(widget._import_existing_env_async())
     await asyncio.sleep(0)
 
-    assert widget.loading_bar.isHidden() is False
-    assert widget.operation_status_label.text() == "正在读取来源环境列表..."
+    assert widget._progress_dialog is not None
+    assert widget._progress_dialog.message_label.text() == "正在读取来源环境列表..."
     assert widget.create_btn.isEnabled() is False
     assert dialog_events == []
 
@@ -546,8 +543,7 @@ async def test_env_list_widget_import_source_loading_shows_status_before_dialog(
     await task
 
     assert dialog_events == ["constructed", "opened"]
-    assert widget.loading_bar.isHidden() is True
-    assert widget.operation_status_label.isHidden() is True
+    assert widget._progress_dialog is None
 
 
 @pytest.mark.asyncio
@@ -603,8 +599,7 @@ async def test_env_list_widget_import_source_loading_error_is_visible(qtbot, mon
 
     widget._show_operation_error.assert_awaited_once_with("virtualbrowser API 未就绪")
     assert dialog_events == []
-    assert widget.loading_bar.isHidden() is True
-    assert widget.operation_status_label.isHidden() is True
+    assert widget._progress_dialog is None
 
 
 @pytest.mark.asyncio

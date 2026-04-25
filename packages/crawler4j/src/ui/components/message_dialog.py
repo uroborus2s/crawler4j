@@ -42,7 +42,11 @@ class MessageDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(580)
         self.setWindowTitle(self.title)
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(self._build_stylesheet())
         self._setup_ui(primary_text)

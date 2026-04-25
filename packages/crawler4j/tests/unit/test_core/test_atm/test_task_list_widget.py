@@ -281,8 +281,8 @@ async def test_task_list_widget_marks_pending_manual_batch_as_starting(qtbot, mo
     assert row["status"]["text"] == "环境启动中"
     assert stop_action["label"] == "⏹ 中止"
     assert stop_action["enabled"] is True
-    assert widget.startup_hint.isHidden() is False
-    assert "manual-batch-starting" in widget.startup_hint_label.text()
+    assert widget._startup_progress_dialog is not None
+    assert "manual-batch-starting" in widget._startup_progress_dialog.message_label.text()
 
 
 def test_task_list_widget_renders_manual_batch_stopping_button(qtbot, monkeypatch):
@@ -351,7 +351,7 @@ def test_task_list_widget_run_once_locks_row_immediately(qtbot, monkeypatch):
     assert "job-manual" in widget._pending_run_once_job_ids
     assert "job-manual" in widget._run_once_requesting_job_ids
     assert created_tasks
-    assert widget.startup_hint.isHidden() is False
+    assert widget._startup_progress_dialog is not None
     assert row["actions"][0]["label"] == "⏹ 中止"
 
 
@@ -389,7 +389,7 @@ async def test_task_list_widget_clears_run_once_lock_after_active_tasks_clear(qt
     await widget._load_data_async(1)
     assert job.id in widget._pending_run_once_job_ids
     assert widget.table.displayed_rows()[0]["status"]["text"] == "环境启动中"
-    assert widget.startup_hint.isHidden() is False
+    assert widget._startup_progress_dialog is not None
 
     widget._run_once_requesting_job_ids.clear()
     widget._load_seq = 2
@@ -397,7 +397,7 @@ async def test_task_list_widget_clears_run_once_lock_after_active_tasks_clear(qt
 
     assert job.id not in widget._pending_run_once_job_ids
     assert widget.table.displayed_rows()[0]["status"]["text"] == "已暂停"
-    assert widget.startup_hint.isHidden() is True
+    assert widget._startup_progress_dialog is None
 
 
 def test_task_list_widget_row_click_opens_detail_dialog(qtbot, monkeypatch):

@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QProgressBar,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -40,6 +39,7 @@ from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
 from src.ui.components.dialog_async import open_dialog_async
 from src.ui.components.message_dialog import MessageDialog, MessageKind
+from src.ui.components.progress_dialog import ProgressDialog
 
 
 @dataclass
@@ -270,7 +270,9 @@ class ModuleListWidget(QWidget):
         self._update_check_running = False
         self._display_items: list[ModuleDisplayItem] = []
         self._table_rows: list[dict[str, Any]] = []
+        self._progress_dialog: ProgressDialog | None = None
         self._setup_ui()
+        self.destroyed.connect(lambda *_args: self._close_progress_dialog())
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -299,13 +301,6 @@ class ModuleListWidget(QWidget):
         header.addWidget(self.refresh_btn)
 
         layout.addLayout(header)
-
-        self.loading_bar = QProgressBar()
-        self.loading_bar.setMaximum(0)
-        self.loading_bar.setTextVisible(False)
-        self.loading_bar.setFixedHeight(3)
-        self.loading_bar.hide()
-        layout.addWidget(self.loading_bar)
 
         self.error_label = QLabel()
         self.error_label.setStyleSheet("color: #f87171; padding: 8px;")
@@ -504,12 +499,37 @@ class ModuleListWidget(QWidget):
         )
         await self._exec_dialog_async(dialog)
 
-    def _set_busy(self, busy: bool, *, checking_updates: bool = False) -> None:
-        self.loading_bar.setVisible(busy)
+    def _set_busy(
+        self,
+        busy: bool,
+        *,
+        checking_updates: bool = False,
+        message: str = "正在处理模块操作...",
+    ) -> None:
+        if busy:
+            self._show_progress(message)
+        else:
+            self._close_progress_dialog()
         self.install_btn.setEnabled(not busy)
         self.dev_link_btn.setEnabled(not busy)
         self.refresh_btn.setEnabled(not busy)
         self.check_updates_btn.setEnabled(not busy or checking_updates)
+
+    def _show_progress(self, message: str) -> None:
+        if self._progress_dialog is None:
+            self._progress_dialog = ProgressDialog.open_progress(
+                self,
+                "模块操作中",
+                message,
+            )
+            return
+        self._progress_dialog.set_message(message)
+
+    def _close_progress_dialog(self) -> None:
+        if self._progress_dialog is None:
+            return
+        self._progress_dialog.close_progress()
+        self._progress_dialog = None
 
     def _update_stats_label(self) -> None:
         total = len(self._modules)
@@ -546,10 +566,13 @@ class ModuleListWidget(QWidget):
         ]
         self._update_check_running = True
         self.check_updates_btn.setText("检查中…")
+        if notify:
+            self._set_busy(True, checking_updates=True, message="正在检查模块更新...")
         self._refresh_table()
         try:
             if not external_modules:
                 if notify:
+                    self._set_busy(False, checking_updates=True)
                     await self._show_message_async(
                         "检查完成",
                         "当前没有可检查在线升级的正式模块。",
@@ -579,6 +602,7 @@ class ModuleListWidget(QWidget):
             self._update_stats_label()
 
             if notify:
+                self._set_busy(False, checking_updates=True)
                 update_count = sum(1 for state in self._update_states.values() if state.has_update)
                 if self._update_errors:
                     error_modules = "、".join(sorted(self._update_errors.keys()))
@@ -597,6 +621,8 @@ class ModuleListWidget(QWidget):
             if seq == self._update_check_seq:
                 self._update_check_running = False
                 self.check_updates_btn.setText("⬆ 检查更新")
+                if notify:
+                    self._set_busy(False, checking_updates=True)
                 self._refresh_table()
 
     def _install_module(self):
@@ -606,7 +632,7 @@ class ModuleListWidget(QWidget):
         self._track_task(self._install_module_async(dialog.get_request()))
 
     async def _install_module_async(self, request: ModuleInstallRequest) -> None:
-        self._set_busy(True)
+        self._set_busy(True, message="正在检查模块安装包...")
         try:
             service = get_module_release_service()
             if request.install_kind == "local_zip":
@@ -628,8 +654,10 @@ class ModuleListWidget(QWidget):
                 confirm_text="确认安装",
                 source_details=preview.describe_source(),
             )
+            self._set_busy(False)
             if await self._exec_dialog_async(dialog) != int(dialog.DialogCode.Accepted):
                 return
+            self._set_busy(True, message="正在安装模块...")
 
             if request.remember_github_token and request.github_token:
                 get_github_credential_store().set_token(
@@ -657,7 +685,7 @@ class ModuleListWidget(QWidget):
         self._track_task(self._register_dev_link_async(path))
 
     async def _register_dev_link_async(self, path: str) -> None:
-        self._set_busy(True)
+        self._set_busy(True, message="正在检查开发模块...")
         try:
             service = get_module_release_service()
             manifest, warnings = await service.prepare_dev_link(path)
@@ -674,8 +702,10 @@ class ModuleListWidget(QWidget):
                 confirm_text="确认添加",
                 source_details=source_details,
             )
+            self._set_busy(False)
             if await self._exec_dialog_async(dialog) != int(dialog.DialogCode.Accepted):
                 return
+            self._set_busy(True, message="正在添加开发模块...")
 
             registry = get_module_registry()
             module_info = registry.register_dev_link(path)
@@ -702,7 +732,7 @@ class ModuleListWidget(QWidget):
         self._track_task(self._upgrade_module_async(module_name))
 
     async def _upgrade_module_async(self, module_name: str) -> None:
-        self._set_busy(True)
+        self._set_busy(True, message="正在检查模块升级包...")
         try:
             registry = get_module_registry()
             module = registry.get_module(module_name)
@@ -720,8 +750,10 @@ class ModuleListWidget(QWidget):
                 confirm_text="确认升级",
                 source_details=source_details,
             )
+            self._set_busy(False)
             if await self._exec_dialog_async(dialog) != int(dialog.DialogCode.Accepted):
                 return
+            self._set_busy(True, message="正在升级模块...")
 
             installed = await service.apply_module_upgrade(module, preview)
             await self._show_message_async(

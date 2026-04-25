@@ -6,6 +6,7 @@ from src.ui.components.dialog_async import open_dialog_async
 from src.ui.components.line_edit import StyledLineEdit
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.notice_panel import NoticePanel
+from src.ui.components.progress_dialog import ProgressDialog
 from src.ui.components.spin_box import StyledSpinBox
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "DialogChoice",
     "MessageDialog",
     "NoticePanel",
+    "ProgressDialog",
     "StyledButton",
     "StyledComboBox",
     "StyledLineEdit",
