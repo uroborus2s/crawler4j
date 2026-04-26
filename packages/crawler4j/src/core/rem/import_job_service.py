@@ -20,6 +20,7 @@ from src.core.atm.run_profile import (
     ResourceConfig,
     RunProfile,
 )
+from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleStatus
 from src.core.mms.registry import ModuleRegistry, get_module_registry
@@ -165,7 +166,10 @@ class ExistingEnvImportJobService:
         dispatched_count = len(task_ids)
         remaining = envs[dispatched_count:]
         if remaining:
+            self._publish_import_queue_progress(job, queued_count=len(remaining))
             self._track_watch_task(self._schedule_remaining_import_envs(job.id, remaining))
+        else:
+            self._publish_import_queue_progress(job, queued_count=0)
 
         return ExistingEnvImportRunResult(
             env=envs[0],
@@ -212,11 +216,13 @@ class ExistingEnvImportJobService:
             job = await self.repo.get_job(job_id)
             if not job:
                 logger.warning(f"[REM] 导入执行队列缺少关联 Job 记录: {job_id}")
+                self._publish_import_queue_progress_for_job_id(job_id, queued_count=0)
                 return
             try:
                 self._validate_manual_import_job(job)
             except Exception as exc:
                 logger.warning(f"[REM] 导入执行队列停止: job={job_id} error={exc}")
+                self._publish_import_queue_progress(job, queued_count=0)
                 return
 
             slots = await self._available_import_slots(job)
@@ -231,6 +237,7 @@ class ExistingEnvImportJobService:
                     await self._dispatch_import_env(job, env)
                 except Exception as exc:
                     logger.warning(f"[REM] 导入执行队列跳过失败环境: job={job_id} env={env.id} error={exc}")
+            self._publish_import_queue_progress(job, queued_count=len(pending))
 
     async def _dispatch_import_env(self, job: Job, env: Environment) -> str:
         fixed_env_job = self._build_fixed_env_job(job, env)
@@ -307,6 +314,33 @@ class ExistingEnvImportJobService:
         task = asyncio.create_task(coro)
         self._watch_tasks.add(task)
         task.add_done_callback(self._watch_tasks.discard)
+
+    @staticmethod
+    def _publish_import_queue_progress(job: Job, *, queued_count: int) -> None:
+        ExistingEnvImportJobService._publish_import_queue_progress_for_job_id(
+            job.id,
+            queued_count=queued_count,
+            job_name=job.name,
+        )
+
+    @staticmethod
+    def _publish_import_queue_progress_for_job_id(
+        job_id: str,
+        *,
+        queued_count: int,
+        job_name: str = "",
+    ) -> None:
+        get_event_bus().publish(
+            Event(
+                type=EventType.TASK_PROGRESS,
+                data={
+                    "phase": "queued",
+                    "job_id": job_id,
+                    "job_name": job_name or job_id,
+                    "queued_count": max(0, int(queued_count)),
+                },
+            )
+        )
 
     async def _watch_task_terminal_state(
         self,

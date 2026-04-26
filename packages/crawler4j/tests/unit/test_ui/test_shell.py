@@ -67,6 +67,29 @@ def test_shell_shows_env_operation_failed_toast_with_detail(qtbot, monkeypatch):
     ]
 
 
+def test_shell_installs_global_task_progress_presenter(qtbot, monkeypatch):
+    import src.ui.shell as shell_module
+
+    created = []
+
+    class FakeTaskProgressPresenter:
+        def __init__(self, parent):
+            created.append(parent)
+
+    monkeypatch.setattr(shell_module.Shell, "_register_pages", lambda self: None)
+    monkeypatch.setattr(shell_module.Shell, "_subscribe_events", lambda self: None)
+    monkeypatch.setattr(
+        "src.core.atm.ui.task_progress_presenter.TaskProgressPresenter",
+        FakeTaskProgressPresenter,
+    )
+
+    window = shell_module.Shell()
+    qtbot.addWidget(window)
+
+    assert created == [window]
+    assert isinstance(window.task_progress_presenter, FakeTaskProgressPresenter)
+
+
 @pytest.mark.asyncio
 async def test_status_indicator_refreshes_counts_from_current_services(qtbot, monkeypatch):
     import src.ui.shell as shell_module

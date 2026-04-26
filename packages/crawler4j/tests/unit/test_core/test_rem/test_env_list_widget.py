@@ -7,7 +7,7 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog
 
-from src.core.atm.models import Job, JobType, Task, TaskStatus, TriggerConfig, TriggerType
+from src.core.atm.models import Job, JobType, TriggerConfig, TriggerType
 from src.core.atm.run_profile import ExecutionContext, RunProfile
 from src.core.rem import EnvKind, EnvStatus
 from src.core.rem.models import ProxyMode
@@ -176,27 +176,39 @@ def test_env_list_widget_create_finished_refreshes_without_success_dialog(qtbot,
 
 
 @pytest.mark.asyncio
-async def test_env_list_widget_waits_for_imported_tasks_to_leave_pending(qtbot, monkeypatch):
+async def test_env_list_widget_delegates_import_task_startup_progress(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-4")
-    task_sequence = [
-        Task(id="task-33", job_id="job-import", status=TaskStatus.PENDING),
-        Task(id="task-33", job_id="job-import", status=TaskStatus.RUNNING),
-    ]
-    service = SimpleNamespace(get_task=AsyncMock(side_effect=task_sequence))
-
-    import src.core.atm.service as task_service_module
-
-    monkeypatch.setattr(task_service_module, "get_task_service", lambda: service)
+    import_service = SimpleNamespace(
+        import_and_run_with_job=AsyncMock(
+            return_value=SimpleNamespace(
+                env=SimpleNamespace(id=33),
+                envs=[SimpleNamespace(id=33)],
+                task_ids=["task-33"],
+                job_id="job-import",
+            )
+        )
+    )
 
     widget = env_list_widget.EnvListWidget()
     qtbot.addWidget(widget)
+    widget._import_job_service = import_service
+    widget.load_data = MagicMock()
+    widget._show_message_async = AsyncMock()
+    widget._show_loading = MagicMock()
 
-    await widget._wait_for_imported_tasks_started(["task-33"], interval_seconds=0.0)
+    await widget._async_import_existing_env_and_run(
+        provider_name="virtualbrowser",
+        env_names=["VB Env 101"],
+        job_id="job-import",
+    )
 
-    assert service.get_task.await_count == 2
-    assert widget._progress_dialog is not None
-    assert "正在启动导入环境窗口" in widget._progress_dialog.message_label.text()
-    widget._close_progress_dialog()
+    import_service.import_and_run_with_job.assert_awaited_once_with(
+        provider_name="virtualbrowser",
+        env_names=["VB Env 101"],
+        job_id="job-import",
+    )
+    widget._show_loading.assert_not_called()
+    widget.load_data.assert_called_once_with()
 
 
 def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):

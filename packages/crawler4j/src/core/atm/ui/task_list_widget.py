@@ -29,7 +29,6 @@ from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
 from src.ui.components.message_dialog import MessageDialog
-from src.ui.components.progress_dialog import ProgressDialog
 
 
 @dataclass
@@ -109,11 +108,10 @@ class TaskListWidget(QWidget):
         self._run_once_stopping_job_ids: set[str] = set()
         self._display_items: list[JobDisplayItem] = []
         self._table_rows: list[dict[str, Any]] = []
-        self._startup_progress_dialog: ProgressDialog | None = None
 
         self._setup_ui()
         self._subscribe_events()
-        self.destroyed.connect(lambda *_args: (self._unsubscribe_events(), self._close_startup_progress()))
+        self.destroyed.connect(lambda *_args: self._unsubscribe_events())
 
         # 初始加载 (Delay to ensure loop is running)
         QTimer.singleShot(0, self.load_data)
@@ -202,38 +200,6 @@ class TaskListWidget(QWidget):
             self._load_task.cancel()
         self._load_task = asyncio.create_task(self._load_data_async(seq))
 
-    def _set_startup_indicator(self, starting_job_names: list[str]) -> None:
-        if not starting_job_names:
-            self._close_startup_progress()
-            return
-
-        if len(starting_job_names) == 1:
-            message = f"环境启动中：{starting_job_names[0]}。启动完成后会自动切回执行中。"
-        else:
-            message = f"有 {len(starting_job_names)} 条作业正在启动环境。启动完成后会自动隐藏。"
-        if self._startup_progress_dialog is None:
-            self._startup_progress_dialog = ProgressDialog.open_progress(
-                self,
-                "环境启动中",
-                message,
-            )
-            self._startup_progress_dialog.finished.connect(
-                lambda *_args, dialog=self._startup_progress_dialog: self._forget_startup_progress(dialog)
-            )
-        else:
-            self._startup_progress_dialog.set_message(message)
-
-    def _forget_startup_progress(self, dialog: ProgressDialog) -> None:
-        if self._startup_progress_dialog is dialog:
-            self._startup_progress_dialog = None
-
-    def _close_startup_progress(self) -> None:
-        if self._startup_progress_dialog is None:
-            return
-        dialog = self._startup_progress_dialog
-        self._startup_progress_dialog = None
-        dialog.close_progress()
-
     async def _load_data_async(self, seq: int):
         """异步加载数据。"""
         self.table.set_loading(True)
@@ -313,16 +279,12 @@ class TaskListWidget(QWidget):
 
             self._display_items = display_items
             self._refresh_table()
-            self._set_startup_indicator(
-                [item.raw.name for item in display_items if item.run_once_phase == "starting"]
-            )
         except asyncio.CancelledError:
             return
 
         except Exception as e:
             self.error_label.setText(f"❌ 加载失败: {e}")
             self.error_label.show()
-            self._set_startup_indicator([])
         finally:
             if seq == self._load_seq:
                 self.table.set_loading(False)
@@ -475,9 +437,23 @@ class TaskListWidget(QWidget):
         self._pending_run_once_job_ids.add(job_id)
         self._run_once_requesting_job_ids.add(job_id)
         job_name = next((job.name for job in self._jobs if job.id == job_id), "当前作业")
-        self._set_startup_indicator([job_name])
+        self._publish_run_once_requesting(job_id, job_name, active=True)
         self._refresh_table()
         asyncio.create_task(self._async_op(job_id, "run_once"))
+
+    @staticmethod
+    def _publish_run_once_requesting(job_id: str, job_name: str, *, active: bool) -> None:
+        get_event_bus().publish(
+            Event(
+                type=EventType.TASK_PROGRESS,
+                data={
+                    "phase": "requesting",
+                    "job_id": job_id,
+                    "job_name": job_name,
+                    "active": active,
+                },
+            )
+        )
 
     def _stop_run_once(self, job_id: str):
         if job_id in self._run_once_stopping_job_ids:
@@ -550,6 +526,8 @@ class TaskListWidget(QWidget):
                 raise RuntimeError(action_text)
         except Exception as e:
             if op == "run_once":
+                job_name = next((job.name for job in self._jobs if job.id == job_id), "当前作业")
+                self._publish_run_once_requesting(job_id, job_name, active=False)
                 self._release_run_once_lock(job_id)
                 self._refresh_table()
                 self.load_data()

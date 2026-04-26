@@ -803,8 +803,6 @@ class EnvListWidget(QWidget):
             await self._show_operation_error(str(exc))
             return
         queued_count = max(0, len(result.envs) - len(result.task_ids))
-        if result.task_ids:
-            await self._wait_for_imported_tasks_started(result.task_ids)
         self.load_data()
         await self._show_message_async(
             "已开始执行",
@@ -816,38 +814,6 @@ class EnvListWidget(QWidget):
             ),
             kind="info",
         )
-
-    async def _wait_for_imported_tasks_started(
-        self,
-        task_ids: list[str],
-        *,
-        timeout_seconds: float = 90.0,
-        interval_seconds: float = 0.25,
-    ) -> None:
-        from src.core.atm.models import TaskStatus
-        from src.core.atm.service import get_task_service
-
-        pending = {str(task_id) for task_id in task_ids if str(task_id).strip()}
-        if not pending:
-            return
-
-        service = get_task_service()
-        get_task = getattr(service, "get_task", None)
-        if not callable(get_task):
-            return
-        deadline = asyncio.get_event_loop().time() + timeout_seconds
-        total = len(pending)
-        while pending and asyncio.get_event_loop().time() < deadline:
-            self._show_loading(
-                True,
-                f"正在启动导入环境窗口...（{total - len(pending)}/{total}）",
-            )
-            for task_id in list(pending):
-                task = await get_task(task_id)
-                if task is None or task.status != TaskStatus.PENDING:
-                    pending.discard(task_id)
-            if pending:
-                await asyncio.sleep(interval_seconds)
 
     async def _async_destroy_env(self, env_id: str):
         try:

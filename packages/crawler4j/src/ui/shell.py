@@ -281,6 +281,9 @@ class Shell(QMainWindow):
         # 顶栏状态
         self.status_bar = StatusIndicator()
         main_layout.addWidget(self.status_bar)
+        from src.core.atm.ui.task_progress_presenter import TaskProgressPresenter
+
+        self.task_progress_presenter = TaskProgressPresenter(self)
         
         # 主内容区
         content_area = QWidget()

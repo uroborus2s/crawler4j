@@ -350,19 +350,33 @@ class TaskDispatcher:
 
     async def _save_task_update(self, task: Task) -> None:
         await self.repo.save_task(task)
-        if task.status == TaskStatus.RUNNING:
-            get_event_bus().publish(
-                Event(
-                    type=EventType.TASK_STARTED,
-                    task_run_id=task.id,
-                    data={
-                        "task_id": task.id,
-                        "job_id": task.job_id,
-                        "status": task.status.value,
-                        "env_id": task.env_id,
-                    },
-                )
+        if task.status == TaskStatus.PENDING and task.message == "环境启动中":
+            event_type = EventType.TASK_PROGRESS
+            data = {
+                "phase": "environment_starting",
+                "task_id": task.id,
+                "job_id": task.job_id,
+                "status": task.status.value,
+                "env_id": task.env_id,
+                "message": task.message,
+            }
+        elif task.status == TaskStatus.RUNNING:
+            event_type = EventType.TASK_STARTED
+            data = {
+                "task_id": task.id,
+                "job_id": task.job_id,
+                "status": task.status.value,
+                "env_id": task.env_id,
+            }
+        else:
+            return
+        get_event_bus().publish(
+            Event(
+                type=event_type,
+                task_run_id=task.id,
+                data=data,
             )
+        )
 
     def _publish_task_signal_event(self, task: Task) -> None:
         if not task.signal:

@@ -67,7 +67,12 @@ async def test_import_job_service_builds_fixed_env_run_profile():
 
 
 @pytest.mark.asyncio
-async def test_import_job_service_reuses_manual_job_and_respects_concurrency():
+async def test_import_job_service_reuses_manual_job_and_respects_concurrency(monkeypatch):
+    published = []
+    monkeypatch.setattr(
+        "src.core.rem.import_job_service.get_event_bus",
+        lambda: SimpleNamespace(publish=published.append),
+    )
     envs_by_name = {
         "VB Env 101": SimpleNamespace(
             id=101,
@@ -143,3 +148,8 @@ async def test_import_job_service_reuses_manual_job_and_respects_concurrency():
     assert [env.id for env in result.envs] == [101, 102]
     assert result.job_id == "job-import"
     assert result.task_ids == ["task-101"]
+    assert published
+    assert published[0].data["phase"] == "queued"
+    assert published[0].data["job_id"] == "job-import"
+    assert published[0].data["job_name"] == "Import Ctrip Env"
+    assert published[0].data["queued_count"] == 1

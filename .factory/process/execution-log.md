@@ -23,6 +23,7 @@
 | 2026-04-25 | 新增公共 `ProgressDialog`，将 REM/MMS/ATM 内联进度条收口为弹窗式进度反馈，并统一公共弹窗标题栏边界 | Completed |
 | 2026-04-25 | 修复创建/导入环境无标题栏、VirtualBrowser 销毁误判失败、ATM 启动进度弹窗阻塞中止三项 UI/状态问题 | Completed |
 | 2026-04-26 | 修复 REM 环境列表删除时字符串 ID 与整数池键不一致导致的“环境不存在”误判，并补齐销毁回归测试 | Completed |
+| 2026-04-26 | 统一任务启动进度：Shell 级 `TaskProgressPresenter` 接管任务启动与导入队列进度，REM 已有环境导入不再维护本地 task 启动轮询 | Completed |
 | 2026-03-26 | Upgraded `crawler4j-sdk init-model` into a full interactive bootstrap flow: it now collects initial configuration, writes `.gitignore` / `.python-version`, and auto-runs `git init` + `uv sync` by default | Completed |
 | 2026-03-27 | Audited `docs/` against the software-factory structure, added missing stage/reference directory index pages, introduced `docs/09-evolution/`, and refreshed the document index and `.factory` doc map | Completed |
 | 2026-03-27 | Filled missing `.factory/memory/motivation-state.md` and `.factory/memory/autonomy-rules.md`, and refreshed project/role compressed entry files to match the current implementation stage | Completed |
