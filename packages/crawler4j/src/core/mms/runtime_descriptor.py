@@ -203,17 +203,8 @@ def _discover_pages(module_name: str, package_root: Path) -> dict[str, PageRunti
     return pages
 
 
-def resolve_default_workflow(manifest: ModuleManifest, workflows: dict[str, WorkflowRuntimeEntry]) -> str:
-    default_workflow = str(manifest.default_workflow or "").strip()
-    if default_workflow:
-        return default_workflow
-    if manifest.workflows:
-        first_declared = str(manifest.workflows[0].name or "").strip()
-        if first_declared:
-            return first_declared
-    if workflows:
-        return next(iter(workflows))
-    return ""
+def resolve_default_workflow(manifest: ModuleManifest, _workflows: dict[str, WorkflowRuntimeEntry]) -> str:
+    return str(manifest.default_workflow or "").strip()
 
 
 def normalize_result_payload(result: object, context: TaskContext) -> TaskResult:

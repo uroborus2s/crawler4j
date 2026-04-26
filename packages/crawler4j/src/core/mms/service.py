@@ -56,6 +56,17 @@ class ModuleService:
             raise ValueError(f"Module '{module_name}' has no valid path")
         return module_info
 
+    @staticmethod
+    def _inject_manifest_runtime(module_info: ModuleInfo, context: TaskContext | None) -> None:
+        if context is None:
+            return
+        if not isinstance(context.runtime, dict):
+            context.runtime = {}
+        context.runtime["declared_resource_pools"] = [
+            pool.to_dict()
+            for pool in getattr(module_info.manifest, "resource_pools", [])
+        ]
+
     def _load_descriptor(
         self,
         module_name: str,
@@ -64,6 +75,7 @@ class ModuleService:
         force_reload: bool = False,
     ) -> ModuleRuntimeDescriptor:
         module_info = self._get_module_info(module_name)
+        self._inject_manifest_runtime(module_info, context)
         force_reload = force_reload or self._should_force_reload(module_info.name, context)
 
         if force_reload or module_info.name not in self._descriptor_cache:
@@ -131,11 +143,7 @@ class ModuleService:
             if workflow:
                 return await self._run_workflow_entry(descriptor, workflow, context)
 
-            task = descriptor.tasks.get(workflow_name)
-            if task:
-                return await self._run_task_entry(task, context)
-
-            raise ValueError(f"Workflow or task not found: {workflow_name}")
+            raise ValueError(f"Workflow not found: {workflow_name or '<empty>'}")
         except Exception as e:
             logger.error(f"[MMS] Failed to execute module {module_name}: {e}")
             raise e

@@ -109,6 +109,37 @@ def _validate_managed_identifier(value: str, *, field_name: str) -> str:
     return normalized
 
 
+def _normalize_resource_pool_names(declared_resource_pools: Any) -> frozenset[str]:
+    names: set[str] = set()
+    for item in declared_resource_pools or []:
+        if isinstance(item, str):
+            raw_name = item
+        elif isinstance(item, dict):
+            raw_name = item.get("name", "")
+        else:
+            raw_name = getattr(item, "name", "")
+        name = str(raw_name or "").strip()
+        if name:
+            names.add(name)
+    return frozenset(names)
+
+
+def _load_declared_resource_pool_names(module_name: str) -> frozenset[str]:
+    try:
+        from src.core.mms.registry import get_module_registry
+
+        registry = get_module_registry()
+        module_root = (module_name or "").split(".")[0]
+        module_info = registry.get_module(module_name) or registry.get_module(module_root)
+    except Exception:
+        return frozenset()
+
+    if not module_info:
+        return frozenset()
+    manifest = getattr(module_info, "manifest", None)
+    return _normalize_resource_pool_names(getattr(manifest, "resource_pools", []))
+
+
 def _raise_declare_ui_side_effect_error(tool_name: str) -> None:
     raise RuntimeError(f"declare_ui 不允许调用 {tool_name}；UI 声明必须保持无副作用")
 
@@ -445,8 +476,23 @@ class CoreIPPoolTools:
 class CoreEnvTools:
     """Core 侧环境操作工具实现。"""
 
-    def __init__(self, module_name: str):
+    def __init__(self, module_name: str, *, declared_resource_pool_names: frozenset[str]):
         self._module_name = module_name
+        self._declared_resource_pool_names = declared_resource_pool_names
+
+    def _require_declared_resource_pool(self, pool_name: str) -> str:
+        normalized = str(pool_name or "").strip()
+        if not normalized:
+            raise ValueError("pool_name 不能为空")
+        if normalized in self._declared_resource_pool_names:
+            return normalized
+        if self._declared_resource_pool_names:
+            raise ValueError(
+                f"资源池未在 module.yaml.resource_pools 中声明: {self._module_name}.{normalized}"
+            )
+        raise ValueError(
+            f"当前模块未在 module.yaml.resource_pools 中声明资源池，不能使用: {self._module_name}.{normalized}"
+        )
 
     def _publish_resource_pool_updated(self, *, env_id: int, pool_name: str) -> None:
         get_event_bus().publish(
@@ -485,6 +531,7 @@ class CoreEnvTools:
         reason: str = "",
         exclusive: bool = True,
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
         get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
         metadata_key = build_key(self._module_name, pool_name)
@@ -513,6 +560,7 @@ class CoreEnvTools:
         pool_name: str,
         reason: str = "",
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
         get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
         metadata_key = build_key(self._module_name, pool_name)
@@ -543,6 +591,7 @@ class CoreEnvTools:
         pool_name: str,
         reason: str,
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
         get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
         metadata_key = build_key(self._module_name, pool_name)
@@ -572,6 +621,7 @@ class CoreEnvTools:
         *,
         pool_name: str,
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
         get_environment_manager, namespace, _, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
         metadata_key = build_key(self._module_name, pool_name)
@@ -585,6 +635,7 @@ class CoreEnvTools:
         pool_name: str,
         entries: list[dict[str, Any]],
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
         get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
         metadata_key = build_key(self._module_name, pool_name)
@@ -788,6 +839,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
         allowed_tool_names: frozenset[str] | None = None,
         declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+        declared_resource_pool_names: frozenset[str] | None = None,
         allow_persisted_pages: bool = True,
     ):
         self._bindings: dict[str, _ToolBinding] = {}
@@ -795,7 +847,10 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         self._ui_declaration_buffer = ui_declaration_buffer
 
         ip_pool_tools = CoreIPPoolTools()
-        env_tools = CoreEnvTools(module_name)
+        env_tools = CoreEnvTools(
+            module_name,
+            declared_resource_pool_names=declared_resource_pool_names or frozenset(),
+        )
         ui_tools = CoreUITools(
             module_name,
             declaration_buffer=ui_declaration_buffer,
@@ -881,16 +936,23 @@ def build_runtime_capabilities(
     ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
     surface: str = RUNTIME_SURFACE_FULL,
     declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+    declared_resource_pools: Any = None,
 ) -> RuntimeCapabilities:
     module_name = (task_name or "").split(".")[0] or "default"
     db_enabled = surface != RUNTIME_SURFACE_HOSTED_UI_DECLARE
     db_read_only = surface == RUNTIME_SURFACE_HOSTED_UI_READONLY
+    declared_resource_pool_names = (
+        _normalize_resource_pool_names(declared_resource_pools)
+        if declared_resource_pools is not None
+        else _load_declared_resource_pool_names(module_name)
+    )
     return RuntimeCapabilities(
         tools=CoreToolsCapabilityImpl(
             module_name,
             ui_declaration_buffer=ui_declaration_buffer,
             allowed_tool_names=_resolve_runtime_surface_tools(surface),
             declared_page_schemas=declared_page_schemas,
+            declared_resource_pool_names=declared_resource_pool_names,
             allow_persisted_pages=surface == RUNTIME_SURFACE_FULL,
         ),
         db=DatabaseClient(CoreDatabaseTools(module_name, enabled=db_enabled, read_only=db_read_only)),

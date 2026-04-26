@@ -961,7 +961,7 @@ async def test_execution_runner_runs_real_module_with_hooks_selectors_and_audit_
     request = _build_request(mode=AcquisitionMode.SELECT, lifecycle=CreationLifecycle.PERSISTENT)
     request.module_name = module_name
     request.hooks_module = module_name
-    request.workflow_name = "capture_page"
+    request.workflow_name = "default"
     request.selector_name = "pick_ready"
 
     runner, rem = _build_runner(env, lease, module_service)

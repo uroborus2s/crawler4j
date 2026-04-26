@@ -150,7 +150,7 @@ class ModuleScanner:
             raise ModuleParseError(
                 str(e),
                 stage="PARSE",
-                hint="请检查 module.yaml 中 config_defaults 的 YAML 结构是否正确",
+                hint="请检查 module.yaml 字段结构是否符合 core-native-v1 协议",
             )
         except yaml.YAMLError as e:
             raise ModuleParseError(
@@ -239,6 +239,7 @@ class ModuleScanner:
         self._validate_upgrade_source(manifest)
         self._validate_config_defaults(manifest)
         self._validate_ui_extension(manifest)
+        self._validate_resource_pools(manifest)
         self._validate_data_contract(manifest, module_path)
 
         return warnings
@@ -308,6 +309,30 @@ class ModuleScanner:
                     stage="VALIDATE",
                     hint="模块详情页导航标签必须显式声明",
                 )
+
+    def _validate_resource_pools(self, manifest: ModuleManifest) -> None:
+        seen_names: set[str] = set()
+        for item in manifest.resource_pools:
+            pool_name = str(item.name or "").strip()
+            if not pool_name:
+                raise ModuleValidationError(
+                    "resource_pools.name 不能为空",
+                    stage="VALIDATE",
+                    hint="请在 module.yaml.resource_pools 中为每个资源池声明 name",
+                )
+            if not MANAGED_NAME_RE.match(pool_name):
+                raise ModuleValidationError(
+                    f"resource_pools.name 不符合命名规范: {pool_name}",
+                    stage="VALIDATE",
+                    hint="资源池名必须以小写字母开头，只允许小写字母、数字和下划线",
+                )
+            if pool_name in seen_names:
+                raise ModuleValidationError(
+                    f"resource_pools.name 重复: {pool_name}",
+                    stage="VALIDATE",
+                    hint="请确保 module.yaml.resource_pools 中每个资源池名称唯一",
+                )
+            seen_names.add(pool_name)
 
     def _validate_data_contract(self, manifest: ModuleManifest, module_path: Path) -> None:
         module_data = manifest.data

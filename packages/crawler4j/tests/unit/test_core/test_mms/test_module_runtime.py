@@ -72,6 +72,75 @@ async def test_module_service_runs_example_module(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_module_service_requires_explicit_default_workflow(tmp_path):
+    module_dir = tmp_path / "example_module"
+    _write_module_package(module_dir, "example_module")
+
+    service = ModuleService()
+    service.registry = SimpleNamespace(
+        get_module=lambda name: ModuleInfo(
+            name="example_module",
+            manifest=ModuleManifest(
+                name="example_module",
+                runtime_api="core-native-v1",
+                workflows=[WorkflowInfo(name="main_workflow")],
+                default_workflow="",
+            ),
+            path=module_dir,
+        )
+    )
+
+    ctx = TaskContext(env_id=1, task_name="example_module", config={})
+
+    with pytest.raises(ValueError, match="Workflow not found: <empty>"):
+        await service.run_module("example_module", ctx)
+
+
+@pytest.mark.asyncio
+async def test_module_service_does_not_run_task_as_workflow_entrypoint(tmp_path):
+    module_name = "task_fallback_module"
+    module_dir = tmp_path / module_name
+    (module_dir / "tasks").mkdir(parents=True)
+    (module_dir / "workflows").mkdir(parents=True)
+    for package_dir in (module_dir, module_dir / "tasks", module_dir / "workflows"):
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    (module_dir / "tasks" / "default.py").write_text(
+        "from crawler4j_contracts import TaskResult, TaskSpec\n\n"
+        "TASK = TaskSpec(name='default')\n\n"
+        "async def execute(context):\n"
+        "    return TaskResult.ok(message='task fallback should not run')\n",
+        encoding="utf-8",
+    )
+    (module_dir / "workflows" / "main_workflow.py").write_text(
+        "from crawler4j_contracts import WorkflowSpec\n\n"
+        "WORKFLOW = WorkflowSpec(name='main_workflow', tasks=('default',))\n\n"
+        "async def run(context):\n"
+        "    return await context.run_subtask('default')\n",
+        encoding="utf-8",
+    )
+
+    service = ModuleService()
+    service.registry = SimpleNamespace(
+        get_module=lambda name: ModuleInfo(
+            name=module_name,
+            manifest=ModuleManifest(
+                name=module_name,
+                runtime_api="core-native-v1",
+                workflows=[WorkflowInfo(name="default")],
+                default_workflow="default",
+            ),
+            path=module_dir,
+        )
+    )
+
+    ctx = TaskContext(env_id=1, task_name=module_name, config={})
+
+    with pytest.raises(ValueError, match="Workflow not found: default"):
+        await service.run_module(module_name, ctx)
+
+
+@pytest.mark.asyncio
 async def test_module_service_calls_optional_hook(tmp_path):
     module_dir = tmp_path / "example_module"
     _write_module_package(module_dir, "example_module")
@@ -94,6 +163,68 @@ async def test_module_service_calls_optional_hook(tmp_path):
     result = await service.call_hook("example_module", "prepare_env", ctx)
 
     assert result == {"creation_params": {"name_prefix": "hooked"}}
+
+
+@pytest.mark.asyncio
+async def test_module_service_injects_declared_resource_pools_into_runtime(tmp_path):
+    module_name = "resource_module"
+    module_dir = tmp_path / module_name
+    (module_dir / "tasks").mkdir(parents=True)
+    (module_dir / "workflows").mkdir(parents=True)
+    for package_dir in (module_dir, module_dir / "tasks", module_dir / "workflows"):
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    (module_dir / "tasks" / "runtime_pool.py").write_text(
+        "from crawler4j_contracts import TaskResult, TaskSpec\n\n"
+        "TASK = TaskSpec(name='runtime_pool')\n\n"
+        "async def execute(context):\n"
+        "    return TaskResult.ok(data={'declared_resource_pools': context.runtime.get('declared_resource_pools', [])})\n",
+        encoding="utf-8",
+    )
+    (module_dir / "workflows" / "main_workflow.py").write_text(
+        "from crawler4j_contracts import WorkflowSpec\n\n"
+        "WORKFLOW = WorkflowSpec(name='main_workflow', tasks=('runtime_pool',))\n\n"
+        "async def run(context):\n"
+        "    return await context.run_subtask('runtime_pool')\n",
+        encoding="utf-8",
+    )
+
+    service = ModuleService()
+    service.registry = SimpleNamespace(
+        get_module=lambda name: ModuleInfo(
+            name=module_name,
+            manifest=ModuleManifest.from_dict(
+                {
+                    "name": module_name,
+                    "runtime_api": "core-native-v1",
+                    "upgrade_source": {"type": "github_release", "repo": f"example/{module_name}"},
+                    "workflows": [{"name": "main_workflow"}],
+                    "default_workflow": "main_workflow",
+                    "resource_pools": [
+                        {
+                            "name": "bound_account_ready",
+                            "display_name": "已绑定账号环境池",
+                            "description": "可复用环境",
+                        }
+                    ],
+                    "data": {"resources": [], "views": [], "queries": [], "seeds": []},
+                }
+            ),
+            path=module_dir,
+        )
+    )
+
+    ctx = TaskContext(env_id=1, task_name=module_name, config={})
+    result = await service.run_module(module_name, ctx)
+
+    assert result.success is True
+    assert result.data["declared_resource_pools"] == [
+        {
+            "name": "bound_account_ready",
+            "display_name": "已绑定账号环境池",
+            "description": "可复用环境",
+        }
+    ]
 
 
 @pytest.mark.asyncio

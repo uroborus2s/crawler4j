@@ -5,6 +5,7 @@ import pytest
 from src.core.mms.models import (
     ConfigDefaultsInfo,
     ModuleManifest,
+    ResourcePoolInfo,
     ModuleSource,
     ModuleStatus,
     UpgradeSourceInfo,
@@ -37,6 +38,7 @@ class TestModuleManifest:
                 {
                     "name": "login_flow",
                     "display_name": "登录流程",
+                    "tasks": ["login_task"],
                 }
             ],
             "ui_extension": {
@@ -63,6 +65,13 @@ class TestModuleManifest:
                     }
                 },
             },
+            "resource_pools": [
+                {
+                    "name": "bound_account_ready",
+                    "display_name": "已绑定账号环境池",
+                    "description": "可复用的已绑定账号环境",
+                }
+            ],
             "default_workflow": "login_flow",
             "data": _empty_data_contract(),
         }
@@ -73,10 +82,18 @@ class TestModuleManifest:
         assert manifest.version == "1.0.0"
         assert len(manifest.workflows) == 1
         assert manifest.workflows[0].name == "login_flow"
+        assert manifest.workflows[0].tasks == ["login_task"]
         assert manifest.upgrade_source.repo == "example/test_module"
         assert [page.id for page in manifest.ui_extension.pages] == ["dashboard", "accounts"]
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
         assert manifest.config_defaults.workflows == {"login_flow": {"headless": False}}
+        assert manifest.resource_pools == [
+            ResourcePoolInfo(
+                name="bound_account_ready",
+                display_name="已绑定账号环境池",
+                description="可复用的已绑定账号环境",
+            )
+        ]
         assert manifest.data == _empty_data_contract()
     
     def test_to_dict(self):
@@ -85,7 +102,7 @@ class TestModuleManifest:
             name="test_module",
             runtime_api="core-native-v1",
             upgrade_source=UpgradeSourceInfo(repo="example/test_module"),
-            workflows=[WorkflowInfo(name="flow1")],
+            workflows=[WorkflowInfo(name="flow1", tasks=["example_task"])],
             default_workflow="flow1",
             ui_extension=UIExtensionInfo(
                 pages=[
@@ -105,6 +122,13 @@ class TestModuleManifest:
                 module={"base_url": "https://example.com"},
                 workflows={"flow1": {"headless": False}},
             ),
+            resource_pools=[
+                ResourcePoolInfo(
+                    name="bound_account_ready",
+                    display_name="已绑定账号环境池",
+                    description="可复用的已绑定账号环境",
+                )
+            ],
             data=_empty_data_contract(),
         )
         
@@ -113,6 +137,8 @@ class TestModuleManifest:
         assert data["name"] == "test_module"
         assert data["runtime_api"] == "core-native-v1"
         assert len(data["workflows"]) == 1
+        assert data["workflows"][0]["tasks"] == ["example_task"]
+        assert "entry_class" not in data["workflows"][0]
         assert data["upgrade_source"] == {
             "type": "github_release",
             "repo": "example/test_module",
@@ -134,8 +160,38 @@ class TestModuleManifest:
             "module": {"base_url": "https://example.com"},
             "workflows": {"flow1": {"headless": False}},
         }
+        assert data["resource_pools"] == [
+            {
+                "name": "bound_account_ready",
+                "display_name": "已绑定账号环境池",
+                "description": "可复用的已绑定账号环境",
+            }
+        ]
         assert data["default_workflow"] == "flow1"
         assert data["data"] == _empty_data_contract()
+
+    def test_from_dict_rejects_removed_workflow_entry_class(self):
+        """旧 workflows[].entry_class 入口不再是 manifest 兼容面。"""
+        data = {
+            "name": "test_module",
+            "runtime_api": "core-native-v1",
+            "version": "1.0.0",
+            "upgrade_source": {
+                "type": "github_release",
+                "repo": "example/test_module",
+            },
+            "workflows": [
+                {
+                    "name": "login_flow",
+                    "entry_class": "legacy.LoginWorkflow",
+                }
+            ],
+            "default_workflow": "login_flow",
+            "data": _empty_data_contract(),
+        }
+
+        with pytest.raises(ValueError, match="entry_class"):
+            ModuleManifest.from_dict(data)
 
 
 class TestModuleScanner:
@@ -476,3 +532,30 @@ data:
             scanner.validate(manifest, tmp_path)
 
         assert "missing_workflow" in str(exc_info.value)
+
+    def test_validate_rejects_duplicate_resource_pool_names(self, tmp_path):
+        from src.core.mms.models import ModuleValidationError
+
+        manifest = ModuleManifest.from_dict(
+            {
+                "name": "demo_module",
+                "runtime_api": "core-native-v1",
+                "upgrade_source": {
+                    "type": "github_release",
+                    "repo": "example/demo_module",
+                },
+                "workflows": [{"name": "default"}],
+                "default_workflow": "default",
+                "resource_pools": [
+                    {"name": "bound_account_ready"},
+                    {"name": "bound_account_ready"},
+                ],
+                "data": _empty_data_contract(),
+            }
+        )
+        scanner = ModuleScanner(scan_paths=[tmp_path])
+
+        with pytest.raises(ModuleValidationError) as exc_info:
+            scanner.validate(manifest, tmp_path)
+
+        assert "resource_pools" in str(exc_info.value)
