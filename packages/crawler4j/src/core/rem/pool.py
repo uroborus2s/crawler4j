@@ -25,6 +25,19 @@ from src.core.rem.models import (
 )
 
 
+def normalize_env_id(env_id: int | str | None) -> int | None:
+    """Normalize UI/database environment IDs to the integer key used by EnvPool."""
+    if isinstance(env_id, int):
+        return env_id
+    text = str(env_id or "").strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 class EnvPool:
     """环境池。
     
@@ -71,27 +84,34 @@ class EnvPool:
                 del self._environments[old_id]
             self._environments[env.id] = env
     
-    async def remove(self, env_id: int) -> Environment | None:
+    async def remove(self, env_id: int | str) -> Environment | None:
         """从池中移除环境。
         
         统一处理：解绑 IP + 删除数据库记录。
         """
         from src.core.rem.ip_pool import get_ip_pool_manager
+
+        normalized_env_id = normalize_env_id(env_id)
+        if normalized_env_id is None:
+            return None
         
         async with self._lock:
-            env = self._environments.pop(env_id, None)
+            env = self._environments.pop(normalized_env_id, None)
             if env:
                 # 统一解绑 IP（无论删除原因）
                 try:
-                    await get_ip_pool_manager().unbind_ip(env_id)
+                    await get_ip_pool_manager().unbind_ip(normalized_env_id)
                 except Exception:
                     pass  # 忽略解绑失败，确保删除流程继续
-                self._delete_env(env_id)
+                self._delete_env(normalized_env_id)
             return env
     
-    async def get(self, env_id: int) -> Environment | None:
+    async def get(self, env_id: int | str) -> Environment | None:
         """获取环境实例。"""
-        return self._environments.get(env_id)
+        normalized_env_id = normalize_env_id(env_id)
+        if normalized_env_id is None:
+            return None
+        return self._environments.get(normalized_env_id)
     
     async def find_available(self, requirement: EnvRequirement) -> Environment | None:
         """查找满足需求的可用环境。
@@ -108,10 +128,13 @@ class EnvPool:
                     return env
             return None
     
-    async def update_status(self, env_id: int, status: EnvStatus) -> None:
+    async def update_status(self, env_id: int | str, status: EnvStatus) -> None:
         """更新环境状态。"""
+        normalized_env_id = normalize_env_id(env_id)
+        if normalized_env_id is None:
+            return
         async with self._lock:
-            env = self._environments.get(env_id)
+            env = self._environments.get(normalized_env_id)
             if env:
                 env.status = status
                 env.updated_at = int(time.time())
@@ -214,10 +237,13 @@ class EnvPool:
                 )
                 return env.id
     
-    def _delete_env(self, env_id: int) -> None:
+    def _delete_env(self, env_id: int | str) -> None:
         """从数据库删除环境。"""
+        normalized_env_id = normalize_env_id(env_id)
+        if normalized_env_id is None:
+            return
         with get_connection(STATE_DB) as conn:
-            conn.execute("DELETE FROM environments WHERE id = ?", (env_id,))
+            conn.execute("DELETE FROM environments WHERE id = ?", (normalized_env_id,))
     
     async def load_from_db(self) -> None:
         """从数据库加载环境（用于崩溃恢复）。"""
@@ -261,12 +287,15 @@ class EnvPool:
                 self._environments[env.id] = env
     
     # === Metadata 操作 ===
-    def get_metadata(self, env_id: int, namespace: str, key: str) -> Any:
+    def get_metadata(self, env_id: int | str, namespace: str, key: str) -> Any:
         """获取元数据值。"""
+        normalized_env_id = normalize_env_id(env_id)
+        if normalized_env_id is None:
+            return None
         with get_connection(STATE_DB) as conn:
             cursor = conn.execute(
                 "SELECT value, value_type FROM env_metadata WHERE env_id = ? AND namespace = ? AND key = ?",
-                (env_id, namespace, key)
+                (normalized_env_id, namespace, key)
             )
             row = cursor.fetchone()
             if row:
@@ -275,13 +304,16 @@ class EnvPool:
     
     def set_metadata(
         self,
-        env_id: int,
+        env_id: int | str,
         namespace: str,
         key: str,
         value: Any,
         value_type: str = "string",
     ) -> bool:
         """设置元数据值。"""
+        normalized_env_id = normalize_env_id(env_id)
+        if normalized_env_id is None:
+            return False
         encoded_value = self._encode_value(value)
         now = int(time.time())
         with get_connection(STATE_DB) as conn:
@@ -294,22 +326,25 @@ class EnvPool:
                     value_type = excluded.value_type,
                     updated_at = excluded.updated_at
                 """,
-                (env_id, namespace, key, encoded_value, value_type, now, now)
+                (normalized_env_id, namespace, key, encoded_value, value_type, now, now)
             )
         return True
     
-    def list_metadata(self, env_id: int, namespace: str | None = None) -> dict[str, Any]:
+    def list_metadata(self, env_id: int | str, namespace: str | None = None) -> dict[str, Any]:
         """列出元数据。"""
+        normalized_env_id = normalize_env_id(env_id)
+        if normalized_env_id is None:
+            return {}
         with get_connection(STATE_DB) as conn:
             if namespace:
                 cursor = conn.execute(
                     "SELECT key, value, value_type FROM env_metadata WHERE env_id = ? AND namespace = ?",
-                    (env_id, namespace)
+                    (normalized_env_id, namespace)
                 )
             else:
                 cursor = conn.execute(
                     "SELECT namespace, key, value, value_type FROM env_metadata WHERE env_id = ?",
-                    (env_id,)
+                    (normalized_env_id,)
                 )
             
             result = {}
@@ -323,18 +358,21 @@ class EnvPool:
                     result[ns][row["key"]] = self._decode_value(row["value"], row["value_type"])
             return result
     
-    def delete_metadata(self, env_id: int, namespace: str, key: str | None = None) -> int:
+    def delete_metadata(self, env_id: int | str, namespace: str, key: str | None = None) -> int:
         """删除元数据，返回删除条数。"""
+        normalized_env_id = normalize_env_id(env_id)
+        if normalized_env_id is None:
+            return 0
         with get_connection(STATE_DB) as conn:
             if key:
                 cursor = conn.execute(
                     "DELETE FROM env_metadata WHERE env_id = ? AND namespace = ? AND key = ?",
-                    (env_id, namespace, key)
+                    (normalized_env_id, namespace, key)
                 )
             else:
                 cursor = conn.execute(
                     "DELETE FROM env_metadata WHERE env_id = ? AND namespace = ?",
-                    (env_id, namespace)
+                    (normalized_env_id, namespace)
                 )
             return cursor.rowcount
     

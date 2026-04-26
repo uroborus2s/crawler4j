@@ -303,7 +303,7 @@ class EnvironmentManager:
         logger.info(f"[REM] 环境租约已释放并保持状态: id={env.id}, status={env.status.value}")
         return True
     
-    async def get_env(self, env_id: int) -> Environment | None:
+    async def get_env(self, env_id: int | str) -> Environment | None:
         """获取环境实例。"""
         return await self.pool.get(env_id)
     
@@ -435,7 +435,7 @@ class EnvironmentManager:
         """
         return await self._gc_once()
     
-    async def health_check(self, env_id: int) -> bool:
+    async def health_check(self, env_id: int | str) -> bool:
         """执行健康检查，失败则标记 ERROR。
         
         规格 FR-CORE-ENV-004: 周期性或按需检测环境是否可用，不可用时标记隔离。
@@ -522,7 +522,7 @@ class EnvironmentManager:
     
     async def destroy_env(
         self,
-        env_id: int,
+        env_id: int | str,
         *,
         runtime_timeout: int = DEFAULT_PROVIDER_RUNTIME_TIMEOUT,
     ) -> bool:
@@ -572,7 +572,7 @@ class EnvironmentManager:
         logger.info(f"[REM] 环境已销毁: id={env.id}")        
         return True
     
-    async def start_env(self, env_id: int) -> bool:
+    async def start_env(self, env_id: int | str) -> bool:
         """启动环境（READY/PAUSED → BUSY，打开窗口）。
         
         Args:
@@ -604,7 +604,7 @@ class EnvironmentManager:
             return await self._provider_operation(env, "connect")
         return False    
     
-    async def stop_env(self, env_id: int) -> bool:
+    async def stop_env(self, env_id: int | str) -> bool:
         """停止环境（BUSY → READY，关闭窗口）。
         
         Args:
@@ -618,7 +618,7 @@ class EnvironmentManager:
             return False
         return await self._provider_operation(env, "close")
     
-    async def pause_env(self, env_id: int) -> bool:
+    async def pause_env(self, env_id: int | str) -> bool:
         """暂停环境（READY → PAUSED）。
         
         Args:
@@ -632,7 +632,7 @@ class EnvironmentManager:
             return False
         return await self._provider_operation(env, "pause")
     
-    async def resume_env(self, env_id: int) -> bool:
+    async def resume_env(self, env_id: int | str) -> bool:
         """恢复环境（PAUSED → READY）。
         
         Args:
@@ -650,7 +650,7 @@ class EnvironmentManager:
     
     async def get_metadata(
         self, 
-        env_id: int, 
+        env_id: int | str,
         namespace: str, 
         key: str
     ) -> Any:
@@ -668,7 +668,7 @@ class EnvironmentManager:
     
     async def set_metadata(
         self,
-        env_id: int,
+        env_id: int | str,
         namespace: str,
         key: str,
         value: Any,
@@ -690,7 +690,7 @@ class EnvironmentManager:
     
     async def list_metadata(
         self,
-        env_id: int,
+        env_id: int | str,
         namespace: str | None = None,
     ) -> dict:
         """列出环境元数据。
@@ -732,7 +732,7 @@ class EnvironmentManager:
 
     async def delete_metadata(
         self,
-        env_id: int,
+        env_id: int | str,
         namespace: str,
         key: str | None = None,
     ) -> int:
@@ -752,7 +752,7 @@ class EnvironmentManager:
     
     async def update_env(
         self,
-        env_id: int,
+        env_id: int | str,
         *,
         name: str | None = None,
         proxy_value: str | None = None,

@@ -175,6 +175,37 @@ async def test_destroy_env_removes_db_record_after_external_delete_succeeds(
 
 
 @pytest.mark.asyncio
+async def test_destroy_env_accepts_numeric_string_id_from_ui(
+    persistent_manager,
+):
+    provider = DestroyTrackingProvider(name="destroy-string-id-provider", destroy_result=True)
+    register_provider(provider)
+
+    env = Environment(
+        name="ui-string-id-env",
+        kind=EnvKind.BROWSER,
+        provider=provider.name,
+        status=EnvStatus.READY,
+        external_id="browser-ui-string-id",
+    )
+    await persistent_manager.pool.add(env)
+
+    success = await persistent_manager.destroy_env(str(env.id))
+
+    assert success is True
+    assert provider.destroy_called is True
+    assert await persistent_manager.get_env(env.id) is None
+
+    with get_connection(STATE_DB) as conn:
+        row_count = conn.execute(
+            "SELECT COUNT(*) FROM environments WHERE id = ?",
+            (env.id,),
+        ).fetchone()[0]
+
+    assert row_count == 0
+
+
+@pytest.mark.asyncio
 async def test_destroy_env_passes_runtime_timeout_to_fingerprint_runtime_check(
     manager,
     mock_pool,
