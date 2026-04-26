@@ -266,7 +266,7 @@ class SkyDataTable(QWidget):
             pagination_feature = {}
 
         selection_mode = str(raw.get("selection_mode") or "single").strip().lower() if isinstance(raw, dict) else "single"
-        if selection_mode not in {"none", "single"}:
+        if selection_mode not in {"none", "single", "multi"}:
             selection_mode = "single"
 
         return {
@@ -347,6 +347,8 @@ class SkyDataTable(QWidget):
         selection_mode = self._schema.get("selection_mode", "single")
         if selection_mode == "none":
             self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        elif selection_mode == "multi":
+            self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         else:
             self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 

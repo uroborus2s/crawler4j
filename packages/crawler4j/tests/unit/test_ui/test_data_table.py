@@ -1,4 +1,5 @@
 from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QAbstractItemView
 
 from src.ui.components.data_table import SkyDataTable
 
@@ -72,6 +73,19 @@ def test_sky_data_table_hides_qt_vertical_header(qtbot):
     qtbot.addWidget(table)
 
     assert table.table.verticalHeader().isVisible() is False
+
+
+def test_sky_data_table_supports_multi_selection_schema(qtbot):
+    table = SkyDataTable(
+        {
+            "selection_mode": "multi",
+            "columns": [{"key": "name", "label": "名称"}],
+            "features": {"pagination": {"enabled": False}},
+        }
+    )
+    qtbot.addWidget(table)
+
+    assert table.table.selectionMode() == QAbstractItemView.SelectionMode.ExtendedSelection
 
 
 def test_sky_data_table_ignores_stale_results_and_keeps_latest_rows(qtbot):

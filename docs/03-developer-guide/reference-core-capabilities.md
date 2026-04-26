@@ -140,11 +140,12 @@ workflows:
 
 约束如下：
 
-- 宿主全局环境页的 `从已有环境导入` 入口仍会展示该模块全部 workflow。
+- 宿主全局环境页的 `从已有环境导入` 入口会选择一个已配置的“执行一次”批次任务；该任务的运行模板决定模块与 workflow。
 - 缺少 `host_scenarios: [existing_env_import]` 只会触发风险提示，不会阻断执行。
 - 该场景下宿主保证 `ctx.env_id` 与 `ctx.page` 可用。
 - 宿主以 `(provider, name)` 判定某个外部环境是否已导入；未同步列表也通过来源环境名称在本地不存在来判断。
-- 宿主会在 `ctx.runtime["creation_params"]` 中写入 `provider`、`name` 以及 `import_mode="existing_env"`，模块可据此判断当前运行来自已有环境导入。
+- 多选导入时，每个环境会生成一个挂在同一 Job 下的 Task；实际同时打开的窗口数受该 Job 的 `concurrency_target` 限制。
+- 宿主会在 `ctx.runtime["creation_params"]` 中写入 `provider`、`name`、`provider_env_id`、`provider_env_name` 以及 `import_mode="existing_env"`，模块可据此判断当前运行来自已有环境导入。
 
 ## 生命周期 Hook
 

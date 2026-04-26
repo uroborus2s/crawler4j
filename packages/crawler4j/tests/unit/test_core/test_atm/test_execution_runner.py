@@ -559,8 +559,12 @@ async def test_execution_runner_selects_existing_env_via_callback():
         run_env_selector=AsyncMock(return_value=env.id),
     )
     runner, rem = _build_runner(env, lease, module_service)
+    updates: list[tuple[TaskStatus, str]] = []
 
-    await runner.run(request)
+    async def on_task_update(task: Task):
+        updates.append((task.status, task.message))
+
+    await runner.run(request, on_task_update=on_task_update)
 
     rem.list_envs.assert_awaited_once()
     rem.lease_manager.acquire.assert_awaited_once_with(env, request.task.id, timeout=60)
@@ -570,6 +574,7 @@ async def test_execution_runner_selects_existing_env_via_callback():
     rem.release.assert_awaited_once_with(lease)
     rem.destroy_env.assert_not_awaited()
     assert request.task.status == TaskStatus.SUCCEEDED
+    assert updates[:2] == [(TaskStatus.PENDING, "环境启动中"), (TaskStatus.RUNNING, "")]
 
 
 @pytest.mark.asyncio

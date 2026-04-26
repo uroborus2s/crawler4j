@@ -67,12 +67,14 @@
 
 ### 4.1 已有环境导入场景
 
-当宿主通过 `环境管理 -> 从已有环境导入` 启动模块 workflow 时，`ctx.runtime["creation_params"]` 还会补充以下键：
+当宿主通过 `环境管理 -> 从已有环境导入` 把来源环境关联到已有“执行一次”任务时，`ctx.runtime["creation_params"]` 还会补充以下键：
 
 | 键 | 含义 |
 |---|---|
 | `provider` | 外部环境来源，例如 `virtual_browser` |
 | `name` | 来源系统中的环境名称，也是宿主判定是否已导入的唯一性字段之一 |
+| `provider_env_id` | 来源系统中的环境 ID，用于模块记录导入来源 |
+| `provider_env_name` | 来源系统中的环境名称，用于模块记录导入来源；当前与 `name` 保持一致 |
 | `import_mode` | 固定为 `existing_env` |
 
 该场景还有两条补充约束：
@@ -80,6 +82,7 @@
 - 宿主仍必须保证 `ctx.env_id` 与 `ctx.page` 可用，模块不需要自己重新绑定浏览器上下文。
 - 宿主用 `(provider, name)` 判定导入唯一性；来源系统中的其他扩展元数据不写入环境表，也不作为重复导入判断依据。
 - `module.yaml.workflows[].host_scenarios` 可选声明 `existing_env_import` 作为适配提示；宿主未命中该声明时只显示风险提示，不作为执行门禁。
+- 多环境导入时，宿主把每个环境作为同一 Job 下的一条 Task 运行实例；并发上限来自该 Job 的 `concurrency_target`，不会按选择环境数量无限制打开窗口。
 
 ## 5. 页面 schema 契约
 

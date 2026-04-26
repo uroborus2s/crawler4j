@@ -17,10 +17,10 @@ from src.ui.components.notice_panel import NoticePanel
 
 
 class ImportExistingEnvDialog(QDialog):
-    """配置“从已有环境导入”并执行模块 workflow。"""
+    """配置“从已有环境导入”并关联已有任务执行。"""
 
-    RISK_WARNING_TEXT = "该 workflow 未标注支持“已有环境导入”，请由配置者自行判断是否适合这个场景。"
-    RISK_SAFE_TEXT = "该 workflow 已声明支持“已有环境导入”场景。"
+    RISK_WARNING_TEXT = "关联任务的 workflow 未标注支持“已有环境导入”，请由配置者自行判断是否适合这个场景。"
+    RISK_SAFE_TEXT = "关联任务的 workflow 已声明支持“已有环境导入”场景。"
     RISK_CONTENT_PADDING = (12, 10, 12, 10)
     TABLE_SCHEMA = {
         "columns": [
@@ -31,6 +31,7 @@ class ImportExistingEnvDialog(QDialog):
             {"key": "running_status", "label": "当前运行状态", "type": "text", "width": 120},
             {"key": "last_used_at", "label": "最近使用时间", "type": "text", "stretch": True},
         ],
+        "selection_mode": "multi",
         "features": {
             "search": {"enabled": True, "placeholder": "搜索环境名称、外部 ID 或备注"},
             "sort": {
@@ -46,24 +47,26 @@ class ImportExistingEnvDialog(QDialog):
         *,
         sources: list[dict[str, str]],
         modules: list[Any],
+        jobs: list[Any],
         env_options_by_source: dict[str, list[Any]],
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._sources = list(sources)
         self._modules = list(modules)
+        self._jobs = list(jobs)
         self._modules_by_name = {str(module.name): module for module in self._modules}
+        self._jobs_by_id = {str(job.id): job for job in self._jobs}
         self._env_options_by_source = {
             str(provider): list(items)
             for provider, items in (env_options_by_source or {}).items()
         }
-        self._selected_env_name = ""
+        self._selected_env_names: list[str] = []
         self._table_rows: list[dict[str, Any]] = []
         self._warning_height_sync_pending = False
         self._setup_ui()
         self._load_sources()
-        self._load_modules()
-        self._update_workflows()
+        self._load_jobs()
         self._reload_env_rows()
         self._update_warning()
         self._update_accept_state()
@@ -97,13 +100,9 @@ class ImportExistingEnvDialog(QDialog):
         self.source_combo.currentIndexChanged.connect(self._on_source_changed)
         form.addRow("环境来源:", self.source_combo)
 
-        self.module_combo = QComboBox()
-        self.module_combo.currentIndexChanged.connect(self._on_module_changed)
-        form.addRow("目标模块:", self.module_combo)
-
-        self.workflow_combo = QComboBox()
-        self.workflow_combo.currentIndexChanged.connect(self._on_workflow_changed)
-        form.addRow("模块工作流:", self.workflow_combo)
+        self.job_combo = QComboBox()
+        self.job_combo.currentIndexChanged.connect(self._on_job_changed)
+        form.addRow("关联任务:", self.job_combo)
 
         warning_title = QLabel("风险提示:")
         warning_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -115,9 +114,10 @@ class ImportExistingEnvDialog(QDialog):
         self.table = SkyDataTable(schema=self.TABLE_SCHEMA)
         self.table.query_requested.connect(self._on_table_query_requested)
         self.table.row_clicked.connect(self._on_table_row_clicked)
+        self.table.selection_changed.connect(self._on_table_selection_changed)
         layout.addWidget(self.table)
 
-        self.selection_label = QLabel("未同步环境列表：请选择一个环境。")
+        self.selection_label = QLabel("未同步环境列表：请选择一个或多个环境。")
         self.selection_label.setStyleSheet("color: rgba(255, 255, 255, 0.68); font-size: 12px;")
         layout.addWidget(self.selection_label)
 
@@ -137,7 +137,7 @@ class ImportExistingEnvDialog(QDialog):
         button_row.addWidget(cancel_btn)
 
         self.submit_btn = StyledButton(
-            "导入并执行",
+            "导入并执行一次",
             variant="success",
             min_height=40,
             min_width=124,
@@ -153,49 +153,61 @@ class ImportExistingEnvDialog(QDialog):
         for item in self._sources:
             self.source_combo.addItem(item["label"], item["provider"])
 
-    def _load_modules(self) -> None:
-        self.module_combo.clear()
-        for module in self._modules:
-            label = str(getattr(module.manifest, "display_name", "") or module.name)
-            self.module_combo.addItem(label, module.name)
+    def _load_jobs(self) -> None:
+        self.job_combo.clear()
+        for job in self._jobs:
+            self.job_combo.addItem(self._job_label(job), job.id)
 
     def _selected_provider(self) -> str:
         data = self.source_combo.currentData()
         return str(data or "").strip()
 
-    def _selected_module_name(self) -> str:
-        data = self.module_combo.currentData()
+    def _selected_job_id(self) -> str:
+        data = self.job_combo.currentData()
         return str(data or "").strip()
 
-    def _selected_workflow_name(self) -> str:
-        data = self.workflow_combo.currentData()
-        return str(data or "").strip()
+    def _selected_job(self):
+        return self._jobs_by_id.get(self._selected_job_id())
 
     def _selected_workflow(self):
-        module = self._modules_by_name.get(self._selected_module_name())
+        module_name, workflow_name = self._selected_job_module_workflow()
+        module = self._modules_by_name.get(module_name)
         if not module:
             return None
         for workflow in module.manifest.workflows:
-            if workflow.name == self._selected_workflow_name():
+            if workflow.name == workflow_name:
                 return workflow
         return None
 
-    def _update_workflows(self) -> None:
-        self.workflow_combo.clear()
-        module = self._modules_by_name.get(self._selected_module_name())
-        if not module:
-            return
-        for workflow in module.manifest.workflows:
-            label = workflow.display_name or workflow.name
-            self.workflow_combo.addItem(label, workflow.name)
+    def _selected_job_module_workflow(self) -> tuple[str, str]:
+        job = self._selected_job()
+        run_profile = getattr(job, "run_profile", None)
+        execution = getattr(run_profile, "execution", None)
+        if not execution:
+            return "", ""
+        return (
+            str(getattr(execution, "module", "") or "").strip(),
+            str(getattr(execution, "workflow", "") or "default").strip(),
+        )
+
+    def _job_label(self, job: Any) -> str:
+        module_name = workflow_name = ""
+        run_profile = getattr(job, "run_profile", None)
+        execution = getattr(run_profile, "execution", None)
+        if execution:
+            module_name = str(getattr(execution, "module", "") or "").strip()
+            workflow_name = str(getattr(execution, "workflow", "") or "default").strip()
+        concurrency = max(1, int(getattr(job, "concurrency_target", 1) or 1))
+        runtime = f"{module_name}/{workflow_name}" if module_name else "未配置运行模板"
+        return f"{getattr(job, 'name', '') or job.id} | {runtime} | 并发 {concurrency}"
 
     def _reload_env_rows(self) -> None:
         provider = self._selected_provider()
         items = self._env_options_by_source.get(provider, [])
         self._table_rows = [self._build_env_row(item) for item in items]
-        self._selected_env_name = ""
+        self._selected_env_names = []
         self.selection_label.setText(
-            "未同步环境列表：请选择一个环境。" if self._table_rows else "未同步环境列表：当前来源没有可导入环境。"
+            "未同步环境列表：请选择一个或多个环境。" if self._table_rows else "未同步环境列表：当前来源没有可导入环境。"
         )
         self.table.request_refresh()
 
@@ -261,20 +273,13 @@ class ImportExistingEnvDialog(QDialog):
         self.warning_card.updateGeometry()
 
     def _update_accept_state(self) -> None:
-        module_name = self._selected_module_name()
-        workflow_name = self._selected_workflow_name()
-        self.submit_btn.setEnabled(bool(module_name and workflow_name and self._selected_env_name))
+        self.submit_btn.setEnabled(bool(self._selected_job_id() and self._selected_env_names))
 
     def _on_source_changed(self, _index: int) -> None:
         self._reload_env_rows()
         self._update_accept_state()
 
-    def _on_module_changed(self, _index: int) -> None:
-        self._update_workflows()
-        self._update_warning()
-        self._update_accept_state()
-
-    def _on_workflow_changed(self, _index: int) -> None:
+    def _on_job_changed(self, _index: int) -> None:
         self._update_warning()
         self._update_accept_state()
 
@@ -287,10 +292,24 @@ class ImportExistingEnvDialog(QDialog):
         self.table.apply_result(request_id, result)
 
     def _on_table_row_clicked(self, row: dict[str, Any]) -> None:
-        self._selected_env_name = str(row.get("name") or "")
-        external_id = str(row.get("external_id") or "")
-        suffix = f" ({external_id})" if external_id else ""
-        self.selection_label.setText(f"未同步环境列表：已选择 {self._selected_env_name}{suffix}")
+        selected_rows = self.table.selected_rows()
+        self._on_table_selection_changed(selected_rows or [row])
+
+    def _on_table_selection_changed(self, rows: list[dict[str, Any]]) -> None:
+        self._selected_env_names = [
+            str(row.get("name") or "").strip()
+            for row in rows
+            if str(row.get("name") or "").strip()
+        ]
+        if not self._selected_env_names:
+            self.selection_label.setText("未同步环境列表：请选择一个或多个环境。")
+        elif len(self._selected_env_names) == 1:
+            row = rows[0]
+            external_id = str(row.get("external_id") or "")
+            suffix = f" ({external_id})" if external_id else ""
+            self.selection_label.setText(f"未同步环境列表：已选择 {self._selected_env_names[0]}{suffix}")
+        else:
+            self.selection_label.setText(f"未同步环境列表：已选择 {len(self._selected_env_names)} 个环境")
         self._update_accept_state()
 
     def showEvent(self, event) -> None:  # type: ignore[override]
@@ -301,16 +320,15 @@ class ImportExistingEnvDialog(QDialog):
         super().resizeEvent(event)
         self._schedule_warning_height_sync()
 
-    def get_values(self) -> dict[str, str]:
+    def get_values(self) -> dict[str, Any]:
         return {
             "provider": self._selected_provider(),
-            "module_name": self._selected_module_name(),
-            "workflow_name": self._selected_workflow_name(),
-            "name": self._selected_env_name,
+            "job_id": self._selected_job_id(),
+            "names": list(self._selected_env_names),
         }
 
     def accept(self) -> None:  # type: ignore[override]
         values = self.get_values()
-        if not values["module_name"] or not values["workflow_name"] or not values["name"]:
+        if not values["job_id"] or not values["names"]:
             return
         super().accept()

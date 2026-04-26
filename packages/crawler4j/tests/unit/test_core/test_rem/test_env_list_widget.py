@@ -7,6 +7,8 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog
 
+from src.core.atm.models import Job, JobType, Task, TaskStatus, TriggerConfig, TriggerType
+from src.core.atm.run_profile import ExecutionContext, RunProfile
 from src.core.rem import EnvKind, EnvStatus
 from src.core.rem.models import ProxyMode
 from src.ui.components.combo_box import StyledComboBox
@@ -42,6 +44,19 @@ def _make_env(env_id: str, status: EnvStatus = EnvStatus.READY):
         provider="virtualbrowser",
         status=status,
         task_run_id="",
+    )
+
+
+def _make_import_job(job_id: str = "job-import") -> Job:
+    return Job(
+        id=job_id,
+        name="导入已登录环境",
+        type=JobType.BATCH,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        concurrency_target=2,
+        run_profile=RunProfile(
+            execution=ExecutionContext(module="demo_module", workflow="main_flow")
+        ),
     )
 
 
@@ -158,6 +173,30 @@ def test_env_list_widget_create_finished_refreshes_without_success_dialog(qtbot,
     widget._on_create_finished(SimpleNamespace(id=123))
 
     widget.load_data.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_waits_for_imported_tasks_to_leave_pending(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-4")
+    task_sequence = [
+        Task(id="task-33", job_id="job-import", status=TaskStatus.PENDING),
+        Task(id="task-33", job_id="job-import", status=TaskStatus.RUNNING),
+    ]
+    service = SimpleNamespace(get_task=AsyncMock(side_effect=task_sequence))
+
+    import src.core.atm.service as task_service_module
+
+    monkeypatch.setattr(task_service_module, "get_task_service", lambda: service)
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    await widget._wait_for_imported_tasks_started(["task-33"], interval_seconds=0.0)
+
+    assert service.get_task.await_count == 2
+    assert widget._progress_dialog is not None
+    assert "正在启动导入环境窗口" in widget._progress_dialog.message_label.text()
+    widget._close_progress_dialog()
 
 
 def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
@@ -553,6 +592,13 @@ async def test_env_list_widget_import_source_loading_shows_status_before_dialog(
         "get_module_registry",
         lambda: SimpleNamespace(get_enabled_modules=lambda: [module]),
     )
+    import src.core.atm.service as task_service_module
+
+    monkeypatch.setattr(
+        task_service_module,
+        "get_task_service",
+        lambda: SimpleNamespace(list_jobs=AsyncMock(return_value=[_make_import_job()])),
+    )
 
     class FakeDialog(QDialog):
         def __init__(self, parent=None, **kwargs):
@@ -622,6 +668,13 @@ async def test_env_list_widget_import_source_loading_error_is_visible(qtbot, mon
         "get_module_registry",
         lambda: SimpleNamespace(get_enabled_modules=lambda: [module]),
     )
+    import src.core.atm.service as task_service_module
+
+    monkeypatch.setattr(
+        task_service_module,
+        "get_task_service",
+        lambda: SimpleNamespace(list_jobs=AsyncMock(return_value=[_make_import_job()])),
+    )
 
     class FakeDialog(QDialog):
         def __init__(self, parent=None, **kwargs):
@@ -664,11 +717,12 @@ async def test_env_list_widget_import_existing_env_starts_background_job(qtbot, 
         ),
     )
     import_service = SimpleNamespace(
-        import_and_run=AsyncMock(
+        import_and_run_with_job=AsyncMock(
             return_value=SimpleNamespace(
                 env=SimpleNamespace(id=33),
-                task_id="task-33",
-                job_id="job-33",
+                envs=[SimpleNamespace(id=33), SimpleNamespace(id=34)],
+                task_ids=["task-33"],
+                job_id="job-import",
             )
         )
     )
@@ -689,14 +743,21 @@ async def test_env_list_widget_import_existing_env_starts_background_job(qtbot, 
     )
     monkeypatch.setattr(registry_module, "get_module_registry", lambda: SimpleNamespace(get_enabled_modules=lambda: [module]))
 
+    import src.core.atm.service as task_service_module
+
+    monkeypatch.setattr(
+        task_service_module,
+        "get_task_service",
+        lambda: SimpleNamespace(list_jobs=AsyncMock(return_value=[_make_import_job()])),
+    )
+
     class FakeDialog(QDialog):
         def __init__(self, parent=None, **kwargs):
             super().__init__(parent)
             self._values = {
                 "provider": "virtualbrowser",
-                "module_name": "demo_module",
-                "workflow_name": "main_flow",
-                "name": "VB Env 101",
+                "job_id": "job-import",
+                "names": ["VB Env 101", "VB Env 102"],
             }
 
         def show(self):  # type: ignore[override]
@@ -718,10 +779,9 @@ async def test_env_list_widget_import_existing_env_starts_background_job(qtbot, 
     await _drain_widget_tasks(widget)
 
     manager.list_unsynced_provider_envs.assert_awaited_once_with("virtualbrowser")
-    import_service.import_and_run.assert_awaited_once_with(
+    import_service.import_and_run_with_job.assert_awaited_once_with(
         provider_name="virtualbrowser",
-        env_name="VB Env 101",
-        module_name="demo_module",
-        workflow_name="main_flow",
+        env_names=["VB Env 101", "VB Env 102"],
+        job_id="job-import",
     )
     widget.load_data.assert_called_once_with()

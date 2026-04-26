@@ -790,30 +790,64 @@ class EnvListWidget(QWidget):
         self,
         *,
         provider_name: str,
-        env_name: str,
-        module_name: str,
-        workflow_name: str,
+        env_names: list[str],
+        job_id: str,
     ) -> None:
         try:
-            result = await self._import_job_service.import_and_run(
+            result = await self._import_job_service.import_and_run_with_job(
                 provider_name=provider_name,
-                env_name=env_name,
-                module_name=module_name,
-                workflow_name=workflow_name,
+                env_names=env_names,
+                job_id=job_id,
             )
         except Exception as exc:
             await self._show_operation_error(str(exc))
             return
+        queued_count = max(0, len(result.envs) - len(result.task_ids))
+        if result.task_ids:
+            await self._wait_for_imported_tasks_started(result.task_ids)
         self.load_data()
         await self._show_message_async(
             "已开始执行",
             (
-                f"环境已导入并启动后台执行。\n"
-                f"环境 ID: {result.env.id}\n"
-                f"任务 ID: {result.task_id}"
+                f"已导入 {len(result.envs)} 个环境并关联任务。\n"
+                f"关联任务 ID: {result.job_id}\n"
+                f"已启动实例: {len(result.task_ids)} 个"
+                + (f"\n排队等待并发窗口: {queued_count} 个" if queued_count else "")
             ),
             kind="info",
         )
+
+    async def _wait_for_imported_tasks_started(
+        self,
+        task_ids: list[str],
+        *,
+        timeout_seconds: float = 90.0,
+        interval_seconds: float = 0.25,
+    ) -> None:
+        from src.core.atm.models import TaskStatus
+        from src.core.atm.service import get_task_service
+
+        pending = {str(task_id) for task_id in task_ids if str(task_id).strip()}
+        if not pending:
+            return
+
+        service = get_task_service()
+        get_task = getattr(service, "get_task", None)
+        if not callable(get_task):
+            return
+        deadline = asyncio.get_event_loop().time() + timeout_seconds
+        total = len(pending)
+        while pending and asyncio.get_event_loop().time() < deadline:
+            self._show_loading(
+                True,
+                f"正在启动导入环境窗口...（{total - len(pending)}/{total}）",
+            )
+            for task_id in list(pending):
+                task = await get_task(task_id)
+                if task is None or task.status != TaskStatus.PENDING:
+                    pending.discard(task_id)
+            if pending:
+                await asyncio.sleep(interval_seconds)
 
     async def _async_destroy_env(self, env_id: str):
         try:
@@ -869,6 +903,8 @@ class EnvListWidget(QWidget):
             )
             return
 
+        from src.core.atm.models import JobType, TriggerType
+        from src.core.atm.service import get_task_service
         from src.core.mms.registry import get_module_registry
 
         registry = get_module_registry()
@@ -877,6 +913,20 @@ class EnvListWidget(QWidget):
             await self._show_message_async(
                 "当前不可用",
                 "当前没有可用的已安装模块，无法执行导入后的 workflow。",
+                kind="warning",
+            )
+            return
+
+        service = get_task_service()
+        jobs = [
+            job
+            for job in await service.list_jobs()
+            if job.type == JobType.BATCH and job.trigger.type == TriggerType.MANUAL
+        ]
+        if not jobs:
+            await self._show_message_async(
+                "当前不可用",
+                "请先在任务监控中创建一个“执行一次”的批次任务，再导入环境并关联执行。",
                 kind="warning",
             )
             return
@@ -902,6 +952,7 @@ class EnvListWidget(QWidget):
         dialog = ImportExistingEnvDialog(
             sources=sources,
             modules=modules,
+            jobs=jobs,
             env_options_by_source=env_options_by_source,
             parent=self,
         )
@@ -912,9 +963,8 @@ class EnvListWidget(QWidget):
         self._schedule_operation(
             self._async_import_existing_env_and_run(
                 provider_name=values["provider"],
-                env_name=values["name"],
-                module_name=values["module_name"],
-                workflow_name=values["workflow_name"],
+                env_names=values["names"],
+                job_id=values["job_id"],
             ),
             message=self._operation_message("import", provider=values["provider"]),
         )

@@ -121,6 +121,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-26 | 补充“从已有环境导入”启动进度回归：`ExecutionRunner` 锁定复用环境 `start_env()` 完成前维持 `PENDING/环境启动中`，`test_env_list_widget.py` 锁定导入流程等待关联任务离开 `PENDING` 后再关闭公共进度弹窗；定向 `pytest` 为 `53 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 补充“从已有环境导入”关联任务回归：`test_import_job_service.py` 锁定导入多个已有环境时复用用户选择的手动批次 Job，并按 `concurrency_target` 只启动可用并发槽；`test_import_existing_env_dialog.py` / `test_env_list_widget.py` 锁定弹窗改为选择关联任务和多选环境；`test_data_table.py` 锁定表格 schema 支持 `selection_mode="multi"` | Codex |
 | 2026-04-26 | 新增 `TC-057`：`test_destroy_env_accepts_numeric_string_id_from_ui` 锁定环境列表传入数字字符串 ID 时 `destroy_env()` 仍能命中真实 `EnvPool` 整数键并删除数据库记录；REM 目录回归 `119 passed`，全量 `uv run pytest -q` 为 `739 passed` | Codex |
 | 2026-04-25 | 新增弹窗标题栏、VirtualBrowser 销毁稳定等待与 ATM 启动进度不阻塞回归：`test_public_ui_boundaries.py` 锁定所有 core QDialog 必须走公共标题栏 helper，`test_provider.py` 锁定删除后等待外部环境消失，`test_dispatcher_hooks.py` / `test_task_list_widget.py` 锁定 `TASK_STARTED` 刷新与非 modal 启动进度。全量 `uv run pytest -q` 为 `738 passed` | Codex |
 | 2026-04-25 | 新增公共 UI 异步与边界回归：`test_dialog_async.py` 锁定公共弹窗使用非阻塞 `show()` 而非嵌套 `exec()`，`test_public_ui_boundaries.py` 锁定 core UI 不再直接使用 `QMessageBox` / `QDialogButtonBox`；REM/MMS/ATM 目录回归覆盖创建/导入/编辑环境、IP 池、模块安装/卸载、托管页 CRUD 与手动批次中止选择 | Codex |

@@ -337,14 +337,18 @@ class ExecutionRunner:
             task.env_id = str(env_id)
             task.started_at = int(time.time())
             task.waiting_since = None
-            task.message = ""
-            task.status = TaskStatus.RUNNING
-            await self._publish_task_update(task, on_task_update)
+            if not env_created:
+                task.message = "环境启动中"
+                task.status = TaskStatus.PENDING
+                await self._publish_task_update(task, on_task_update)
 
             if not env_created and not await self.rem.start_env(env_id):
                 raise RuntimeError(f"Failed to start env {env_id}")
 
             self._ensure_not_stopped(is_stop_requested)
+            task.message = ""
+            task.status = TaskStatus.RUNNING
+            await self._publish_task_update(task, on_task_update)
         except Exception as e:
             await self._cleanup_failed_acquisition(
                 task=task,

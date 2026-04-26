@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-26 | 调整“从已有环境导入”执行模型：导入弹窗不再按环境自动新建一次性 Job，而是要求选择已配置的“执行一次”批次任务；可一次选择多个未同步环境，每个环境作为同一 Job 下的 Task 运行，实际并发窗口数由该 Job 的 `concurrency_target` 限制，剩余环境在后台排队补位。定向回归 `29 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-25 | 优化公共消息弹窗与公共组件使用：`MessageDialog` 放弃自绘假标题栏，改为对齐“安装模块”面板的原生窗口壳、深色内容区和右下角动作按钮；`StyledButton` 新增 `success` 状态；安装模块弹窗的输入框、浏览/取消/开始检查按钮与校验提示改用公共组件。同步审查 UI 弹窗用法后，已把 ATM/MMS/REM/System 中简单同步提示和确认从 `QMessageBox` 收口到 `MessageDialog` / `ConfirmDialog`。剩余 `QMessageBox` 为环境/模块列表异步 `open()` 流程和任务中止三按钮流程，后续需补公共异步/多动作弹窗能力再迁移 | Codex |
 | 2026-04-25 | 收口 IP 测试弹窗公共组件与无关表初始化：新增公共 `MessageDialog` 深色消息弹窗，`IPPoolTab` 的测试结果、普通提示和删除确认改用公共 `MessageDialog` / `ConfirmDialog`，不再直接使用局部 `QMessageBox`；`IPPoolManager` 不再持久化 `env_ip_bindings`，绑定/解绑只直接增减 `ip_entries.bound_count`；`init_database()` 不再创建遗留 `configs` 表。已有用户库中的旧表通过显式 SQL 清理，不写入启动迁移代码 | Codex |
 | 2026-04-25 | 运行环境列表补齐 `env_metadata` 可用状态展示：列表加载时合并每个环境的元数据，按 `scheduler.resource_pool` 资格卡片聚合展示 `可用 / 部分可用 / 不可用 / 未标记`，并在 tooltip/search 文本中保留模块、资源池和停发原因；IP 池条目测试结果弹窗改为显式深色背景，避免 macOS 默认浅色消息框导致测试结果低对比。定向回归 `20 passed` | Codex |
