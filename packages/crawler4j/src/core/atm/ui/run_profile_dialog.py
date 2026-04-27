@@ -53,6 +53,7 @@ from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
+from src.ui.components.yaml_code_editor import YamlCodeEditor
 
 
 class WorkflowSelector(QWidget):
@@ -608,12 +609,12 @@ class RunProfileDialog(QDialog):
         """设置只读模式。"""
         # Disable all input widgets
         for widget in self.findChildren(
-            (QLineEdit, QPlainTextEdit, QSpinBox, QCheckBox, QComboBox, SegmentedOptionControl)
+            (QLineEdit, QPlainTextEdit, QSpinBox, QCheckBox, QComboBox, SegmentedOptionControl, YamlCodeEditor)
         ):
              # QComboBox and QCheckBox use setEnabled
              if isinstance(widget, (QComboBox, QCheckBox, SegmentedOptionControl)):
                  widget.setEnabled(False)
-             elif isinstance(widget, (QLineEdit, QPlainTextEdit, QSpinBox)):
+             elif isinstance(widget, (QLineEdit, QPlainTextEdit, QSpinBox, YamlCodeEditor)):
                  widget.setReadOnly(True)
         
         # Helper to disable WorkflowSelectors
@@ -1530,9 +1531,9 @@ class RunProfileDialog(QDialog):
         self.selector_name_combo.setPlaceholderText("选择环境回调函数")
         self.selector_name_combo.currentIndexChanged.connect(self._on_selector_name_changed)
         self.select_form.addRow("回调函数:", self.selector_name_combo)
-        self.resource_pool_edit = QLineEdit()
-        self.resource_pool_edit.setPlaceholderText("例如：bound_account_ready")
-        self.select_form.addRow("资源池:", self.resource_pool_edit)
+        self.resource_pool_combo = QComboBox()
+        self.resource_pool_combo.setPlaceholderText("选择资源池")
+        self.select_form.addRow("资源池:", self.resource_pool_combo)
         self.select_form.addRow(
             "等待超时:",
             self._wrap_widget_with_suffix(self.wait_timeout_spin, "秒"),
@@ -2036,6 +2037,7 @@ class RunProfileDialog(QDialog):
         has_selectors = bool(selectors)
         self.selector_empty_hint.setVisible(bool(module_name) and not has_selectors)
         self._update_selector_none_hint()
+        self._sync_resource_pool_options()
 
     def _update_selector_none_hint(self) -> None:
         selector_name = self.selector_name_combo.currentData()
@@ -2052,11 +2054,56 @@ class RunProfileDialog(QDialog):
     def _on_selector_name_changed(self, _index: int) -> None:
         self._update_selector_none_hint()
 
+    def _declared_resource_pool_options(self) -> list[tuple[str, str]]:
+        module_name = self._current_script_module_name()
+        if not module_name:
+            return []
+        module_info = get_module_registry().get_module(module_name)
+        if not module_info:
+            return []
+        return [
+            (
+                str(pool.name or "").strip(),
+                str(getattr(pool, "display_name", "") or "").strip(),
+            )
+            for pool in getattr(module_info.manifest, "resource_pools", [])
+            if str(pool.name or "").strip()
+        ]
+
+    def _declared_resource_pool_names(self) -> list[str]:
+        return [name for name, _display_name in self._declared_resource_pool_options()]
+
+    def _sync_resource_pool_options(self, preferred: str | None = None) -> None:
+        current_data = self.resource_pool_combo.currentData()
+        current = preferred if preferred is not None else current_data if isinstance(current_data, str) else ""
+        pool_options = self._declared_resource_pool_options()
+
+        self.resource_pool_combo.blockSignals(True)
+        self.resource_pool_combo.clear()
+        if not pool_options:
+            self.resource_pool_combo.addItem("当前模块未声明资源池", "")
+            self.resource_pool_combo.setEnabled(False)
+            self.resource_pool_combo.blockSignals(False)
+            return
+
+        self.resource_pool_combo.setEnabled(True)
+        self.resource_pool_combo.addItem("不使用资源池", "")
+        for pool_name, display_name in pool_options:
+            label = f"{display_name} ({pool_name})" if display_name and display_name != pool_name else pool_name
+            self.resource_pool_combo.addItem(label, pool_name)
+
+        index = self.resource_pool_combo.findData(current)
+        self.resource_pool_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.resource_pool_combo.blockSignals(False)
+
+    def _set_resource_pool_value(self, pool_name: str) -> None:
+        index = self.resource_pool_combo.findData(pool_name)
+        self.resource_pool_combo.setCurrentIndex(index if index >= 0 else 0)
+
     def _create_yaml_widget(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        self.yaml_editor = QPlainTextEdit()
-        self.yaml_editor.setStyleSheet("font-family: monospace; background: #1e1e1e; color: #d4d4d4;")
+        self.yaml_editor = YamlCodeEditor()
         layout.addWidget(self.yaml_editor)
         return widget
 
@@ -2126,9 +2173,6 @@ class RunProfileDialog(QDialog):
         if provider_index >= 0:
             self.resource_provider_combo.setCurrentIndex(provider_index)
 
-        self.wait_timeout_spin.setValue(acquisition.wait_timeout)
-        self.resource_pool_edit.setText(acquisition.resource_pool or "")
-
         creation_params = acquisition.creation.params
         provider = acquisition.provider
         provider_params = creation_params.get("virtualbrowser") if provider == "virtualbrowser" else {}
@@ -2151,6 +2195,8 @@ class RunProfileDialog(QDialog):
         if s.execution and s.execution.module:
             self.script_selector.set_value(s.execution.module, s.execution.workflow)
         self._load_selector_options(acquisition.selector_name or None)
+        self.wait_timeout_spin.setValue(acquisition.wait_timeout)
+        self._set_resource_pool_value(acquisition.resource_pool or "")
 
         selector_index = self.selector_name_combo.findData(acquisition.selector_name)
         if selector_index >= 0:
@@ -2184,9 +2230,16 @@ class RunProfileDialog(QDialog):
         if acquisition_mode == AcquisitionMode.SELECT:
             selector_data = self.selector_name_combo.currentData()
             selector_name = selector_data.strip() if isinstance(selector_data, str) else ""
-            resource_pool = self.resource_pool_edit.text().strip()
+            resource_pool_data = self.resource_pool_combo.currentData()
+            resource_pool = resource_pool_data.strip() if isinstance(resource_pool_data, str) else ""
             if not selector_name and not resource_pool:
                 raise ValueError("请选择环境选择回调函数或填写资源池")
+            declared_resource_pools = self._declared_resource_pool_names()
+            if resource_pool:
+                if not declared_resource_pools:
+                    raise ValueError("当前模块未在 module.yaml.resource_pools 中声明资源池")
+                if resource_pool not in declared_resource_pools:
+                    raise ValueError(f"资源池未在 module.yaml.resource_pools 中声明: {resource_pool}")
             provider = ""
             env_type = EnvType.VIRTUAL_BROWSER
 

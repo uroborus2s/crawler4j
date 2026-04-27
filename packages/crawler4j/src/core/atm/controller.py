@@ -22,6 +22,7 @@ from src.core.atm.run_profile import AcquisitionMode
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
+from src.core.mms import get_module_registry
 from src.core.mms.service import get_module_service
 from src.core.mms.release_service import assert_module_upgrade_unlocked
 from src.core.rem.manager import (
@@ -117,6 +118,39 @@ class JobController:
         await self._ensure_runtime_for_job(job)
 
     @staticmethod
+    def _validate_resource_pool_declaration(run_profile) -> None:
+        acquisition = run_profile.resource.acquisition if run_profile.resource else None
+        if not acquisition:
+            return
+
+        resource_pool = str(acquisition.resource_pool or "").strip()
+        if not resource_pool:
+            return
+
+        module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
+        if not module_name:
+            return
+
+        normalized_module = normalize_resource_pool_module_name(module_name)
+        module_info = get_module_registry().get_module(normalized_module)
+        if not module_info:
+            raise InvalidJobConfigurationError(f"未找到模块定义，无法校验资源池: {normalized_module}")
+
+        declared_names = {
+            str(pool.name or "").strip()
+            for pool in getattr(module_info.manifest, "resource_pools", [])
+            if str(pool.name or "").strip()
+        }
+        if resource_pool not in declared_names:
+            if declared_names:
+                raise InvalidJobConfigurationError(
+                    f"resource_pool 未在 module.yaml.resource_pools 中声明: {normalized_module}.{resource_pool}"
+                )
+            raise InvalidJobConfigurationError(
+                f"module.yaml.resource_pools 未声明资源池，不能引用: {normalized_module}.{resource_pool}"
+            )
+
+    @staticmethod
     def _validate_service_select_wait_semantics(job: Job, run_profile) -> None:
         if job.type != JobType.SERVICE:
             return
@@ -175,6 +209,7 @@ class JobController:
         runtime_timeout: int | None = None,
     ):
         run_profile = resolve_job_run_profile(job)
+        self._validate_resource_pool_declaration(run_profile)
         self._validate_service_select_wait_semantics(job, run_profile)
         module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
         if module_name:

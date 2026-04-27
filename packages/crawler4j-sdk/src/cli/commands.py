@@ -350,6 +350,30 @@ def _manifest_resource_entry(manifest: dict[str, Any], resource_id: str) -> dict
     return None
 
 
+def _resolve_custom_table_sources(
+    manifest: dict[str, Any],
+    raw_sources: list[str] | tuple[str, ...] | None,
+    *,
+    owner_label: str,
+) -> tuple[list[str], dict[str, Any]]:
+    source_ids = [str(item or "").strip() for item in list(raw_sources or []) if str(item or "").strip()]
+    if not source_ids or any(not is_valid_name(item) for item in source_ids):
+        raise CLIError("--source 至少提供一个已注册资源 ID，且必须是小写 snake_case")
+
+    first_resource: dict[str, Any] | None = None
+    for resource_id in source_ids:
+        resource = _manifest_resource_entry(manifest, resource_id)
+        if resource is None:
+            raise CLIError(f"未找到资源: {resource_id}")
+        if str(resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
+            raise CLIError(f"{owner_label}只能建立在 custom_table 资源上: {resource_id}")
+        if first_resource is None:
+            first_resource = resource
+
+    assert first_resource is not None
+    return source_ids, first_resource
+
+
 def _append_unique_data_entry(manifest: dict[str, Any], section: str, entry_id: str, payload: dict[str, Any]) -> None:
     entries = _manifest_data_entries(manifest, section)
     normalized_entry_id = str(entry_id or "").strip()
@@ -1029,6 +1053,8 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
         errors.append("module.yaml 缺少 name")
     if str(manifest.get("runtime_api", "")).strip() != REQUIRED_RUNTIME_API:
         errors.append(f"module.yaml.runtime_api 必须是 {REQUIRED_RUNTIME_API}")
+    if (module_root / "module_runtime.py").exists():
+        errors.append("core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py")
     if "sdk_version_range" in manifest:
         errors.append("module.yaml 不再允许声明 sdk_version_range")
 
@@ -1182,10 +1208,7 @@ def _iter_module_python_trees(module_root: Path):
 def _collect_legacy_db_tool_usage_errors(module_root: Path) -> list[str]:
     errors: list[str] = []
     for relative, tree in _iter_module_python_trees(module_root):
-        legacy_calls = sorted(
-            (node.args[0].lineno for node in ast.walk(tree) if _is_legacy_db_tool_call(node)),
-            key=int,
-        )
+        legacy_calls = sorted(_collect_legacy_db_tool_call_lines(tree), key=int)
         errors.extend(
             f"{relative}:{line_no} 使用了已删除的旧数据库工具入口；请改用 ctx.db fluent API"
             for line_no in legacy_calls
@@ -1193,12 +1216,117 @@ def _collect_legacy_db_tool_usage_errors(module_root: Path) -> list[str]:
     return errors
 
 
-def _is_legacy_db_tool_call(node: ast.AST) -> bool:
+def _collect_legacy_db_tool_call_lines(tree: ast.AST) -> list[int]:
+    visitor = _LegacyDbToolUsageVisitor()
+    visitor.visit(tree)
+    return visitor.lines
+
+
+class _LegacyDbToolUsageVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.lines: list[int] = []
+        self._tool_alias_scopes: list[set[str]] = [set()]
+
+    @property
+    def _aliases(self) -> set[str]:
+        return self._tool_alias_scopes[-1]
+
+    def _push_scope(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef) -> None:
+        aliases = set(self._aliases)
+        for name in _bound_argument_names(node):
+            aliases.discard(name)
+        self._tool_alias_scopes.append(aliases)
+
+    def _pop_scope(self) -> None:
+        self._tool_alias_scopes.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._push_scope(node)
+        self.generic_visit(node)
+        self._pop_scope()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._push_scope(node)
+        self.generic_visit(node)
+        self._pop_scope()
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._push_scope(node)
+        self.generic_visit(node)
+        self._pop_scope()
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._push_scope(node)
+        self.generic_visit(node)
+        self._pop_scope()
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.visit(node.value)
+        is_tools_alias = _is_tools_reference(node.value, self._aliases)
+        for target in node.targets:
+            self._update_alias_target(target, is_tools_alias=is_tools_alias)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self.visit(node.value)
+        is_tools_alias = node.value is not None and _is_tools_reference(node.value, self._aliases)
+        self._update_alias_target(node.target, is_tools_alias=is_tools_alias)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        self.visit(node.value)
+        self._update_alias_target(
+            node.target,
+            is_tools_alias=_is_tools_reference(node.value, self._aliases),
+        )
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if _is_legacy_db_tool_call(node, self._aliases):
+            self.lines.append(node.args[0].lineno)
+        self.generic_visit(node)
+
+    def _update_alias_target(self, target: ast.AST, *, is_tools_alias: bool) -> None:
+        if isinstance(target, ast.Name):
+            if is_tools_alias:
+                self._aliases.add(target.id)
+            else:
+                self._aliases.discard(target.id)
+            return
+        if isinstance(target, ast.Starred):
+            self._update_alias_target(target.value, is_tools_alias=False)
+            return
+        if isinstance(target, ast.Tuple | ast.List):
+            for item in target.elts:
+                self._update_alias_target(item, is_tools_alias=False)
+
+
+def _bound_argument_names(node: ast.AST) -> set[str]:
+    args = getattr(node, "args", None)
+    if not isinstance(args, ast.arguments):
+        return set()
+    bound: set[str] = set()
+    for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+        bound.add(arg.arg)
+    if args.vararg:
+        bound.add(args.vararg.arg)
+    if args.kwarg:
+        bound.add(args.kwarg.arg)
+    return bound
+
+
+def _is_tools_reference(node: ast.AST, aliases: set[str]) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "tools"
+    ) or (isinstance(node, ast.Name) and node.id in aliases)
+
+
+def _is_legacy_db_tool_call(node: ast.AST, aliases: set[str] | None = None) -> bool:
+    tool_aliases = aliases or set()
     if not isinstance(node, ast.Call):
         return False
     if not isinstance(node.func, ast.Attribute) or node.func.attr not in {"call", "has_tool"}:
         return False
-    if not isinstance(node.func.value, ast.Attribute) or node.func.value.attr != "tools":
+    if not _is_tools_reference(node.func.value, tool_aliases):
         return False
     if not node.args:
         return False
@@ -1367,27 +1495,17 @@ def cmd_data_view_create(args: argparse.Namespace) -> int:
     if not is_valid_name(view_id):
         _print_error("视图名必须是小写 snake_case")
         return 1
-    source_ids = [str(item or "").strip() for item in list(args.source or []) if str(item or "").strip()]
-    if not source_ids or any(not is_valid_name(item) for item in source_ids):
-        _print_error("--source 至少提供一个已注册资源 ID，且必须是小写 snake_case")
-        return 1
 
     manifest = load_manifest(module_root)
-    first_resource = _manifest_resource_entry(manifest, source_ids[0])
-    if first_resource is None:
-        _print_error(f"未找到资源: {source_ids[0]}")
+    try:
+        source_ids, first_resource = _resolve_custom_table_sources(
+            manifest,
+            args.source,
+            owner_label="视图",
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
         return 1
-    if str(first_resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
-        _print_error(f"视图只能建立在 custom_table 资源上: {source_ids[0]}")
-        return 1
-    for resource_id in source_ids[1:]:
-        resource = _manifest_resource_entry(manifest, resource_id)
-        if resource is None:
-            _print_error(f"未找到资源: {resource_id}")
-            return 1
-        if str(resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
-            _print_error(f"视图只能建立在 custom_table 资源上: {resource_id}")
-            return 1
 
     record_key_field = str(first_resource.get("record_key_field") or "id").strip() or "id"
     sql_path = f"data/sql/views/{view_id}.sql"
@@ -1432,27 +1550,17 @@ def cmd_data_query_create(args: argparse.Namespace) -> int:
     if not is_valid_name(query_id):
         _print_error("查询名必须是小写 snake_case")
         return 1
-    source_ids = [str(item or "").strip() for item in list(args.source or []) if str(item or "").strip()]
-    if not source_ids or any(not is_valid_name(item) for item in source_ids):
-        _print_error("--source 至少提供一个已注册资源 ID，且必须是小写 snake_case")
-        return 1
 
     manifest = load_manifest(module_root)
-    first_resource = _manifest_resource_entry(manifest, source_ids[0])
-    if first_resource is None:
-        _print_error(f"未找到资源: {source_ids[0]}")
+    try:
+        source_ids, first_resource = _resolve_custom_table_sources(
+            manifest,
+            args.source,
+            owner_label="命名查询",
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
         return 1
-    if str(first_resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
-        _print_error(f"命名查询只能建立在 custom_table 资源上: {source_ids[0]}")
-        return 1
-    for resource_id in source_ids[1:]:
-        resource = _manifest_resource_entry(manifest, resource_id)
-        if resource is None:
-            _print_error(f"未找到资源: {resource_id}")
-            return 1
-        if str(resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
-            _print_error(f"命名查询只能建立在 custom_table 资源上: {resource_id}")
-            return 1
 
     record_key_field = str(first_resource.get("record_key_field") or "id").strip() or "id"
     sql_path = f"data/sql/queries/{query_id}.sql"

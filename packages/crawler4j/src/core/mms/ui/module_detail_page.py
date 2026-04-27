@@ -148,6 +148,8 @@ class ModuleDetailPage(QWidget):
         layout.setSpacing(0)
         
         self.menu_list = QListWidget()
+        self.menu_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.menu_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.menu_list.setStyleSheet("""
             QListWidget {
                 background: transparent;
@@ -429,6 +431,8 @@ class ModuleDetailPage(QWidget):
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         content = QWidget()

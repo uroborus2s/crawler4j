@@ -50,9 +50,10 @@ def test_managed_page_renderer_hides_vertical_scrollbar_when_page_scroll_is_hidd
     qtbot.addWidget(page)
 
     assert page._scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert page._scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
 
 
-def test_managed_page_renderer_uses_auto_vertical_scrollbar_by_default(qtbot, monkeypatch):
+def test_managed_page_renderer_uses_vertical_auto_scroll_by_default(qtbot, monkeypatch):
     ManagedPageRenderer = _import_managed_page_renderer_with_fake_bridge(
         monkeypatch,
         declared_page={
@@ -67,3 +68,23 @@ def test_managed_page_renderer_uses_auto_vertical_scrollbar_by_default(qtbot, mo
     qtbot.addWidget(page)
 
     assert page._scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    assert page._scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+
+def test_managed_page_renderer_uses_vertical_auto_scroll_when_declared(qtbot, monkeypatch):
+    ManagedPageRenderer = _import_managed_page_renderer_with_fake_bridge(
+        monkeypatch,
+        declared_page={
+            "type": "Page",
+            "title": "今日运营看板",
+            "load_handler": "load_dashboard_page",
+            "scroll": {"vertical": "auto"},
+            "children": [{"type": "Text", "style": "title", "text": "今日运营看板"}],
+        },
+    )
+
+    page = ManagedPageRenderer("demo_module", "dashboard")
+    qtbot.addWidget(page)
+
+    assert page._scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    assert page._scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff

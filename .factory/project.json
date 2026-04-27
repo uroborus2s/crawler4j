@@ -31,13 +31,13 @@
     },
     "sdk_build": {
       "command": "uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check",
-      "result": "passed",
-      "details": "workspace build reran on 2026-04-24 and produced crawler4j_sdk-0.5.2 wheel/sdist successfully"
+      "result": "pending",
+      "details": "current source version is crawler4j-sdk 0.6.1; no wheel/sdist or publish evidence has been recorded for this version yet. Historical 0.5.2 evidence must not be reused as current release evidence"
     },
     "contracts_build": {
       "command": "uv build --package crawler4j-contracts --out-dir /tmp/crawler4j-contracts-build-check",
-      "result": "passed",
-      "details": "workspace build reran on 2026-04-23 and produced crawler4j_contracts-0.3.0 wheel/sdist successfully"
+      "result": "pending",
+      "details": "current source version is crawler4j-contracts 0.4.0; no wheel/sdist or publish evidence has been recorded for this version yet. Historical 0.3.0 evidence must not be reused as current release evidence"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",
@@ -56,8 +56,8 @@
     },
     "pyinstaller_bundle": {
       "command": "uv run package-desktop",
-      "result": "passed",
-      "details": "PyInstaller build reran successfully on 2026-04-24 after removing the deleted dark_theme.qss data entry from crawler4j.spec; desktop artifacts remain under packages/crawler4j/dist/desktop/<platform>/ and packages/crawler4j/build/pyinstaller/<platform>/"
+      "result": "pending",
+      "details": "PyInstaller build passed on 2026-04-24 before the later QScintilla dependency line was introduced; current QScintilla package/bundle evidence is pending and must be rerun before release"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -85,8 +85,8 @@
     "app_package_pyproject": "0.3.1",
     "runtime": "0.3.1",
     "git_tag_latest": "v0.2.0",
-    "sdk": "0.5.2",
-    "contracts": "0.3.0"
+    "sdk": "0.6.1",
+    "contracts": "0.4.0"
   },
   "entrypoints": {
     "actual_ui_entry": "uv run python -m src.ui.app",
@@ -97,7 +97,9 @@
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
-    "Latest local validation is green, but release evidence still spans 2026-04-21 full-repo checks plus 2026-04-22 targeted packaging/update checks and has not been bound into one formal release batch."
+    "Latest local validation evidence is historical and must not be treated as a fresh full gate for the current dirty workspace.",
+    "QScintilla was added to the desktop dependency line after the last recorded PyInstaller package evidence, so desktop package/bundle verification is pending.",
+    "crawler4j-sdk 0.6.1 and crawler4j-contracts 0.4.0 still need current build/publish evidence if they are to be released."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",
@@ -110,8 +112,8 @@
   "technical_profile": {
     "id": "crawler4j-model",
     "title": "Crawler4j Model 项目画像",
-    "stack": "python + crawler4j sdk cli + model/module project",
-    "summary": "适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml` 契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。",
+    "stack": "python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v1 module project",
+    "summary": "适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml`、`crawler4j-contracts` 运行时契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。",
     "projects": [
       "Crawler4j 标准模块项目",
       "Crawler4j Core 模块开发与验证"
@@ -120,8 +122,9 @@
       "Python 3.12+",
       "uv",
       "crawler4j-sdk CLI",
+      "crawler4j-contracts runtime contracts",
       "module.yaml",
-      "TaskScript / TaskFlow",
+      "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
       "DevLink / ATM 调试链路"
     ],
     "rules": [
@@ -172,7 +175,7 @@
     "note": "移除固定版本并清理旧预设命令",
     "applied_at": "2026-03-28 00:47:22"
   },
-  "stack": "python + crawler4j sdk cli + model/module project",
+  "stack": "python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v1 module project",
   "technical_profile_history": [
     {
       "id": "crawler4j-model",
@@ -188,7 +191,7 @@
         "uv",
         "crawler4j-sdk CLI",
         "module.yaml",
-        "TaskScript / TaskFlow",
+        "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
         "DevLink / ATM 调试链路"
       ],
       "rules": [
@@ -231,7 +234,7 @@
         "uv",
         "crawler4j-sdk CLI",
         "module.yaml",
-        "TaskScript / TaskFlow",
+        "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
         "DevLink / ATM 调试链路"
       ],
       "rules": [
@@ -296,7 +299,7 @@
         "uv",
         "crawler4j-sdk CLI",
         "module.yaml",
-        "TaskScript / TaskFlow",
+        "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
         "DevLink / ATM 调试链路"
       ],
       "rules": [
@@ -362,7 +365,7 @@
         "uv",
         "crawler4j-sdk CLI",
         "module.yaml",
-        "TaskScript / TaskFlow",
+        "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
         "DevLink / ATM 调试链路"
       ],
       "rules": [

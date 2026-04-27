@@ -24,6 +24,7 @@ dependencies = [
     "velopack ; sys_platform == 'win32'",
     "pyobjc-core>=11.1 ; sys_platform == 'darwin'",
     "pyobjc-framework-cocoa>=11.1 ; sys_platform == 'darwin'",
+    "pyqt6-qscintilla>=2.14.1",
 ]
 
 [project.scripts]

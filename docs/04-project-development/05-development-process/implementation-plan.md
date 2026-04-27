@@ -34,7 +34,7 @@
 | Wave 11 | `TASK-014` ~ `TASK-020` | 文档规范审计、根导航覆盖检查、最小文档包缺口 | 生产级文档入口收口、缺失正式页补齐、索引与 memory 同步 | 进行中：以四大模块结构为单一入口，补齐发布/运维/追踪关键页 |
 | Wave 12 | `TASK-021` | `REQ-007`、`api-design.md`、现有 `TaskSignal` / ATM / UI 实现 | 信号驱动的结构化确认面板、任务 signal 持久化与客户端确认闭环 | 已完成：任务 signal 已持久化并发布 `task.signal` 事件，ATM 详情页可展示结构化确认面板并回调既有确认服务 |
 | Wave 13 | `TASK-022` | `REQ-008`、`API-005`、模块数据持久化现状 | 模块审计事件独立存储、事件能力与契约文档同步 | 已完成：`module_audit_events`、`ctx.db.audit(...).append/query` 与对应测试/文档已落地 |
-| Wave 14 | `TASK-023` | `REQ-009`、`API-007`、`atm-resource-pool-queue-design.md` | 固定环境池 Service Job 的宿主等待队列、资源池资格卡片、FIFO 补位与 SDK helper | 已完成：宿主不再把固定环境池场景的“当前轮没命中”直接判失败，模块资源池资格同步、测试与文档同步完成 |
+| Wave 14 | `TASK-023` | `REQ-009`、`API-007`、`atm-resource-pool-queue-design.md` | 固定环境池 Service Job 的宿主等待队列、资源池资格卡片、FIFO 补位与 `ctx.tools` 资源池能力 | 已完成：宿主不再把固定环境池场景的“当前轮没命中”直接判失败，模块资源池资格同步、测试与文档同步完成 |
 | Wave 15 | `TASK-024` | `CR-010`、当前 `package-desktop`、`UpdateService`、Windows 发布缺口 | Windows `PyInstaller onedir + Velopack` 发布与宿主自更新闭环 | 已完成：新增 Windows Velopack 发布脚本、宿主更新后端分派、README/运维/测试计划同步 |
 | Wave 16 | `TASK-025` | `CR-011`、`API-008`、`module-hosted-ui-framework.md` | Hosted module UI V1：`ui_extension.pages[]`、`ui.declare_page`、宿主页渲染器、SDK CLI/测试/文档同步 | 已完成：宿主不再执行外部 `PyQt6` 页面类，详情页/CLI/回归夹具已统一切到 hosted page V1 |
 | Wave 17 | `TASK-027` | `CR-013`、`API-008`、`module-hosted-ui-framework.md`、当前 Hosted UI V1 路由链 | Hosted UI 主从表行导航：`row_action`、`open_page.params`、缓存页参数替换、详情表 `navigation_filters` | 已完成：主表点击可打开关联详情页/详情表，目标页收到 params，目标 `core:data_table` 可按参数过滤关联记录 |
@@ -79,7 +79,7 @@
 | `TASK-019` | 补齐追踪与索引同步 | `interface-matrix.md`、`document-index.md`、`.factory/memory/doc-map.md` | 文档索引、接口矩阵和 memory 映射一致 | P1 | 已完成 |
 | `TASK-020` | 治理演进与结构验证收口 | `skill-evolution-plan.md`、结构校验记录 | 空壳页清理完毕，根导航覆盖与链接检查通过 | P1 | 已完成 |
 | `TASK-021` | 建立 ATM 信号驱动的结构化确认面板闭环 | `TaskSignal`、ATM 详情页、任务快照持久化 | `wait_for_confirmation` 信号可展示结构化内容，客户端确认后调用既有确认服务完成任务收尾 | P1 | 已完成 |
-| `TASK-023` | 建立 ATM 固定环境池 Service Job 等待队列与资源池资格分配闭环 | `execution_runner`、`controller`、REM `env_metadata` 资格卡片、SDK helper、运行模板/UI 文案 | 固定环境池场景支持“运行中 + 等待中 = 目标并发”，宿主只从当前模块资源池可分配工位里 FIFO 补位，黑号先停发号再销毁 | P1 | 已完成 |
+| `TASK-023` | 建立 ATM 固定环境池 Service Job 等待队列与资源池资格分配闭环 | `execution_runner`、`controller`、REM `env_metadata` 资格卡片、`ctx.tools` 资源池能力、运行模板/UI 文案 | 固定环境池场景支持“运行中 + 等待中 = 目标并发”，宿主只从当前模块资源池可分配工位里 FIFO 补位，黑号先停发号再销毁 | P1 | 已完成 |
 | `TASK-024` | 建立 Windows `PyInstaller onedir + Velopack` 正式发布与宿主自更新闭环 | Windows 发布脚本、宿主更新桥接、README/运维/测试计划同步 | `uv run package-windows-release` 能产出 Velopack 安装器/更新目录，宿主 `检查更新` 在 Windows 安装态可用 | P0 | 已完成 |
 | `TASK-025` | 建立 hosted module UI V1 并删掉旧 `micro_app/ui:*` 路径 | hosted page runtime capability、schema 存储、`ManagedPageRenderer`、SDK CLI/开发者文档同步 | 模块详情页只消费 `core:page` / `core:data_table`，CLI 不再生成 `ui/` 页面类，相关回归通过 | P0 | 已完成 |
 | `TASK-027` | 为 Hosted UI 补主从表行导航与关联详情表能力 | `row_action`、`open_page.params`、`navigation_filters`、模块详情页路由参数复用 | 点击主表记录可打开关联详情页/详情表，目标页参数不残留旧值，定向回归通过 | P0 | 已完成 |

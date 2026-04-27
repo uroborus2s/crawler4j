@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 from src.core.persistence import get_module_data_store
 from src.core.mms.models import ModuleInfo
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
-from src.ui.components.button import StyledButton
+from src.ui.components.button import StyledButton, create_action_button, normalize_button_variant
 from src.ui.components.card import Card
 from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
@@ -77,6 +77,7 @@ class ManagedPageRenderer(QWidget):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self._content = QWidget()
         self._content_layout = QVBoxLayout(self._content)
@@ -144,12 +145,17 @@ class ManagedPageRenderer(QWidget):
         return resolved
 
     def _apply_scroll_policy(self, schema: dict[str, Any]) -> None:
-        scroll = dict(schema.get("scroll") or {}) if isinstance(schema, dict) else {}
+        scroll = schema.get("scroll") if isinstance(schema, dict) else {}
+        if not isinstance(scroll, dict):
+            scroll = {}
         vertical = str(scroll.get("vertical") or "auto").strip().lower()
-        if vertical == "hidden":
-            self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            return
-        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        vertical_policy = (
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            if vertical == "hidden"
+            else Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._scroll.setVerticalScrollBarPolicy(vertical_policy)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
     def _build_layout_widget(self, children: list[dict[str, Any]], layout_spec: dict[str, Any]) -> QWidget:
         container = QWidget()
@@ -202,12 +208,9 @@ class ManagedPageRenderer(QWidget):
         text = f"{icon} {label}".strip() if label else icon or "按钮"
         size = str(component.get("size") or "md").strip().lower()
         variant = str(component.get("variant") or "primary").strip().lower()
-        button_variant = "secondary" if variant == "ghost" else variant
-        if button_variant not in {"primary", "secondary", "success", "warning", "danger"}:
-            button_variant = "primary"
         button = StyledButton(
             text,
-            variant=button_variant,
+            variant=normalize_button_variant(variant, default="primary"),
             min_height=34 if size == "icon" else 30 if size == "sm" else 36,
             min_width=34 if size == "icon" else None,
             horizontal_padding=0 if size == "icon" else 10 if size == "sm" else 14,
@@ -419,30 +422,21 @@ class ManagedPageRenderer(QWidget):
         delete_button: StyledButton | None = None
 
         if toolbar_actions["create"]:
-            create_button = StyledButton("新增", variant="primary", min_height=34)
+            create_button = create_action_button("新增", variant="primary", min_height=34)
             create_button.clicked.connect(lambda _checked=False: self._handle_create_action(component, table))
             toolbar.addWidget(create_button)
         if toolbar_actions["update"]:
-            edit_button = StyledButton("编辑", variant="secondary", min_height=34)
+            edit_button = create_action_button("编辑", variant="secondary", min_height=34)
             edit_button.clicked.connect(lambda _checked=False: self._handle_update_action(component, table))
             toolbar.addWidget(edit_button)
         if toolbar_actions["delete"]:
-            delete_button = StyledButton("删除", variant="danger", min_height=34)
+            delete_button = create_action_button("删除", variant="danger", min_height=34)
             delete_button.clicked.connect(lambda _checked=False: self._handle_delete_action(component, table))
             toolbar.addWidget(delete_button)
 
-        for button, variant in (
-            (edit_button, "secondary"),
-            (delete_button, "danger"),
-        ):
-            if button is None:
-                continue
-            button.setEnabled(False)
-            button.setCursor(table.cursor())
-            button.setStyleSheet(table._action_button_style(variant))
-        if toolbar_actions["create"]:
-            create_button.setCursor(table.cursor())
-            create_button.setStyleSheet(table._action_button_style("primary"))
+        for button in (edit_button, delete_button):
+            if button is not None:
+                button.setEnabled(False)
 
         def _sync_buttons(rows: list[dict[str, Any]]) -> None:
             enabled = bool(rows)

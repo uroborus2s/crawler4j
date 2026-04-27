@@ -1,8 +1,8 @@
 {
   "id": "crawler4j-model",
   "title": "Crawler4j Model 项目画像",
-  "stack": "python + crawler4j sdk cli + model/module project",
-  "summary": "适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml` 契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。",
+  "stack": "python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v1 module project",
+  "summary": "适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml`、`crawler4j-contracts` 运行时契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。",
   "projects": [
     "Crawler4j 标准模块项目",
     "Crawler4j Core 模块开发与验证"
@@ -11,8 +11,9 @@
     "Python 3.12+",
     "uv",
     "crawler4j-sdk CLI",
+    "crawler4j-contracts runtime contracts",
     "module.yaml",
-    "TaskScript / TaskFlow",
+    "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
     "DevLink / ATM 调试链路"
   ],
   "rules": [

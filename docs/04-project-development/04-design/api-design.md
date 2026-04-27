@@ -82,7 +82,7 @@
 |---|---|
 | 静态清单 | `module.yaml`，承载模块发现、UI / workflow 声明，以及只读初始化模板 `config_defaults` |
 | 持久配置 | `config.db.module_config_entries`；模块运行时只通过 `ctx.get_config()` / `ctx.config` 读取 |
-| 配置编辑格式 | 模块详情页 `配置` 标签统一使用 YAML 编辑，但数据库仍是事实源 |
+| 配置编辑格式 | 模块详情页 `配置` 标签统一使用 QScintilla YAML 编辑器；保存前由独立验证层校验 YAML 语法、顶层映射对象与重复键，数据库仍是事实源 |
 | 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
 | 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
@@ -141,12 +141,14 @@
 | 适用场景 | 固定环境池 + Service Job 保活并发，不再适合“拿不到环境就失败”的运行模式 |
 | 目标语义 | `运行中 + 等待中 = 目标并发`；资源不足属于正常等待，不属于失败 |
 | 进入队列前提 | 只有 `JobType.SERVICE + AcquisitionConfig.mode=select + resource_pool 非空` 时才进入固定池等待语义；`selector_name` 可选，但 `selector_name` 和 `resource_pool` 不能同时为空 |
+| 资源池声明 | 固定环境池名称必须先在模块 `module.yaml.resource_pools[]` 中声明；运行模板里的 `resource_pool` 只能引用已声明池 |
 | 资源池定位 | 宿主只在“当前模块 + 当前资源池 + `eligible=true` + `READY` + 无租约占用”的环境集合里分配环境 |
 | 卡片存储 | 宿主内部 `env_metadata`；建议 `namespace=scheduler.resource_pool`，key 由宿主按“根模块名归一化 + pool_name”拼接，例如 `demo.foo` -> `demo:<pool>` |
 | 卡片字段 | 至少包含 `module_name`、`pool_name`、`eligible`、`reason`、`exclusive`、`updated_at` |
-| 模块开发者职责 | 通过 SDK helper 维护资源池资格卡片，并提供全量重建；不负责排队、轮询和补位 |
+| 模块开发者职责 | 在 `module.yaml.resource_pools[]` 声明池名，通过宿主注入的 `ctx.tools` 资源池能力维护资格卡片，并提供全量重建；不负责排队、轮询和补位 |
 | 宿主职责 | FIFO 等待队列、容量变化补位、环境租约治理、终态收口 |
-| 当前 V1 形态 | `AcquisitionConfig.resource_pool` + `env.bind_resource_pool` / `env.mark_resource_pool_eligible` / `env.mark_resource_pool_ineligible` / `env.remove_resource_pool` / `env.replace_resource_pool_snapshot` + Service Job `PENDING` 等待补位 |
+| 运行态注入 | 宿主会把 `ctx.runtime["resource_pool_name"]` 注入当前任务绑定池，并把 `ctx.runtime["declared_resource_pools"]` 注入为 manifest 声明池清单 |
+| 当前 V1 形态 | `module.yaml.resource_pools[]` + `AcquisitionConfig.resource_pool` + `env.bind_resource_pool` / `env.mark_resource_pool_eligible` / `env.mark_resource_pool_ineligible` / `env.remove_resource_pool` / `env.replace_resource_pool_snapshot` + Service Job `PENDING` 等待补位 |
 | `replace_resource_pool_snapshot` 语义 | `entries` 是当前资源池的完整权威列表；未出现的环境卡片会被删除，不是增量 patch |
 | 容量变化触发 | 环境释放、新环境可分配、异常/暂停环境恢复、模块更新资格卡片；控制器启动时还会先做 bootstrap 调和，作业激活/更新时会定向调和，另有运行在主 async loop 上的轻量异步巡检兜底 |
 | 环境占用规则 | 占用不移出资源池；资源池归属和运行中占用分离 |
@@ -160,6 +162,7 @@
 | `KEEP_ALIVE` 环境口径 | `KEEP_ALIVE` 只表示保留现场，不表示重新回池；保留后的 `RUNNING` 环境不会被固定池当成可发号工位 |
 | `exclusive` 当前语义 | V1 只把它写进资格卡片；当前分配器不依据它改变调度路径，不应把它当成路由开关 |
 | `env_id` 口径 | helper 使用的 `env_id` 是宿主 `environments.id` 主键；`prepare_env` 阶段的 `TaskContext.env_id` 当前固定为 `0`，不应用于写资源池卡片 |
+| 运行时代码解析池名 | 模块自有 helper 可显式传 `pool_name`；未传时可优先取 `ctx.runtime["resource_pool_name"]`，否则在仅声明一个资源池时自动回退到该池；若存在多个声明池则要求显式指定 |
 
 ## 设计结论
 
@@ -185,7 +188,9 @@
 | 2026-04-17 | 增补 `API-005`，收口模块配置、运行态、共享内存与数据表契约 | Codex |
 | 2026-04-18 | 新增 `API-006`，将模块快照数据与审计事件拆成两条正式持久化契约 | Codex |
 | 2026-04-19 | 新增 `API-007`，收口固定环境池 Service Job 的等待队列与资源池资格卡片契约 | Codex |
-| 2026-04-19 | `API-007` V1 落地：宿主等待席位、资源池资格 helper 与运行模板 `resource_pool` 契约已实现 | Codex |
+| 2026-04-19 | `API-007` V1 落地：宿主等待席位、资源池资格能力与运行模板 `resource_pool` 契约已实现；2026-04-26 起资源池维护口径收敛为宿主 `ctx.tools` 的 `env.*` 能力，SDK 不再提供运行时 helper | Codex |
+| 2026-04-26 | 刷新 `API-007`：资源池名称改为必须在 `module.yaml.resource_pools[]` 声明，并补记 `ctx.runtime` 与模块自有 helper 的池名解析口径 | Codex |
+| 2026-04-26 | 刷新 `API-005`：模块配置页切换为 QScintilla YAML 编辑器，并把 YAML 格式校验、顶层映射校验与重复键校验收口到独立验证层 | Codex |
 | 2026-04-21 | 刷新 `API-005` 的文档元数据，确认 `module_datasets` 逐行持久化已进入正式契约口径 | Codex |
 | 2026-04-23 | 刷新 `API-005`：移除 `module_dataset_manifests`，`managed_dataset` 只保留 `module_datasets` 作为记录事实源 | Codex |
 | 2026-04-23 | 刷新 `API-005`：新增 `module_data_resources`、`managed_dataset/custom_table` 两种存储模式、`module_datasets` V3 记录状态字段与 `db.declare_data_resource` 契约，并补记卸载清理策略 | Codex |

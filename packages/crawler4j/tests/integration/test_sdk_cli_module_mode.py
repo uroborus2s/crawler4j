@@ -179,6 +179,20 @@ def test_cli_check_full_rejects_missing_runtime_api(tmp_path: Path):
     assert "module.yaml.runtime_api 必须是 core-native-v1" in check_result.stdout
 
 
+def test_cli_check_and_package_reject_legacy_module_runtime(tmp_path: Path):
+    target = tmp_path / "demo_model"
+    _init_demo_module(target)
+    (target / "module_runtime.py").write_text("# legacy runtime shim\n", encoding="utf-8")
+
+    check_result = _run_cli("check", "full", cwd=target)
+    assert check_result.returncode == 1
+    assert "core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py" in check_result.stdout
+
+    package_result = _run_cli("package", "build", cwd=target)
+    assert package_result.returncode == 1
+    assert "core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py" in package_result.stdout
+
+
 def test_cli_check_full_rejects_manifest_page_missing_page_file(tmp_path: Path):
     target = tmp_path / "demo_model"
     _init_demo_module(target)

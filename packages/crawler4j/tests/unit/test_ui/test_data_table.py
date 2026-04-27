@@ -1,6 +1,7 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QAbstractItemView
 
+from src.ui.components.button import StyledButton
 from src.ui.components.data_table import SkyDataTable
 
 
@@ -73,6 +74,14 @@ def test_sky_data_table_hides_qt_vertical_header(qtbot):
     qtbot.addWidget(table)
 
     assert table.table.verticalHeader().isVisible() is False
+
+
+def test_sky_data_table_hides_scrollbars(qtbot):
+    table = _build_table()
+    qtbot.addWidget(table)
+
+    assert table.table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert table.table.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
 
 
 def test_sky_data_table_supports_multi_selection_schema(qtbot):
@@ -149,8 +158,45 @@ def test_sky_data_table_emits_row_and_action_events(qtbot):
     table.row_action_requested.connect(lambda action_id, row: action_rows.append((action_id, dict(row))))
 
     table.table.cellClicked.emit(0, 0)
-    action_button = table.table.cellWidget(0, 2).findChildren(type(table.prev_btn))[0]
+    assert table.table.rowHeight(0) == 52
+    action_button = table.table.cellWidget(0, 2).findChildren(StyledButton)[0]
+    assert isinstance(action_button, StyledButton)
+    assert action_button.minimumHeight() == 34
+    assert action_button.maximumHeight() == 34
     qtbot.mouseClick(action_button, Qt.MouseButton.LeftButton)
 
     assert clicked_rows[0]["name"] == "alpha"
     assert action_rows == [("detail", {"name": "alpha", "status": {"text": "启用", "tone": "success"}, "actions": [{"id": "detail", "label": "详情", "variant": "primary"}]})]
+
+
+def test_sky_data_table_action_cell_row_budget_fits_buttons(qtbot):
+    table = _build_table()
+    qtbot.addWidget(table)
+    table.apply_result(
+        0,
+        {
+            "rows": [
+                {
+                    "name": "alpha",
+                    "status": {"text": "启用", "tone": "success"},
+                    "actions": [
+                        {"id": "run_once", "label": "▶ 执行一次", "variant": "primary"},
+                        {"id": "debug", "label": "🐞 调试", "variant": "warning"},
+                        {"id": "edit", "label": "✏️", "variant": "secondary"},
+                        {"id": "delete", "label": "🗑", "variant": "secondary"},
+                    ],
+                }
+            ],
+            "total": 1,
+            "page": 1,
+            "page_size": 2,
+        },
+    )
+
+    action_widget = table.table.cellWidget(0, 2)
+    action_buttons = action_widget.findChildren(StyledButton)
+
+    assert table.table.rowHeight(0) == 52
+    assert action_buttons
+    assert action_widget.sizeHint().height() >= max(button.height() for button in action_buttons) + 4
+    assert table.table.rowHeight(0) >= action_widget.sizeHint().height() + 12

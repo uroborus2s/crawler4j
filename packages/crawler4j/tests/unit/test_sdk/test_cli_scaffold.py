@@ -310,6 +310,15 @@ def test_collect_structure_errors_requires_runtime_api_and_default_workflow(tmp_
     assert "module.yaml 缺少 default_workflow" in errors
 
 
+def test_collect_structure_errors_rejects_legacy_module_runtime_for_core_native(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    (module_root / "module_runtime.py").write_text("# legacy runtime shim\n", encoding="utf-8")
+
+    errors = commands.collect_structure_errors(module_root, _read_manifest(module_root))
+
+    assert "core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py" in errors
+
+
 def test_collect_structure_errors_allow_optional_sdk_only_layout_bits(tmp_path: Path):
     module_root = _init_module(tmp_path)
     shutil.rmtree(module_root / "pages")
@@ -390,6 +399,28 @@ def test_collect_full_errors_rejects_multiline_legacy_db_tool_calls(tmp_path: Pa
             '            resource="accounts",\n'
             '            record_key="A001",\n'
             "        )\n"
+            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
+        ),
+        encoding="utf-8",
+    )
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    legacy_errors = [error for error in errors if "使用了已删除的旧数据库工具入口" in error]
+    assert len(legacy_errors) == 2
+    assert all(error.startswith("tasks/example_task.py:") for error in legacy_errors)
+
+
+def test_collect_full_errors_rejects_aliased_legacy_db_tool_calls(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    task_path = module_root / "tasks" / "example_task.py"
+    task_text = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        task_text.replace(
+            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
+            "    tools = ctx.tools\n"
+            '    if tools.has_tool("db.*"):\n'
+            '        tools.call("db.get_record", resource="accounts", record_key="A001")\n'
             '    start_url = ctx.get_config("start_url", "https://example.com")\n',
         ),
         encoding="utf-8",
@@ -614,6 +645,21 @@ def test_data_commands_scaffold_manifest_sql_and_seed_files(tmp_path: Path, monk
     assert (module_root / "data" / "seeds" / "accounts_seed.json").read_text(encoding="utf-8") == (
         '[\n  {\n    "account_id": "sample-id"\n  }\n]\n'
     )
+
+
+def test_data_view_and_query_source_validation_messages_are_stable(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+
+    assert commands.cmd_data_view_create(Namespace(name="account_stats", source=[], force=False)) == 1
+    assert "--source 至少提供一个已注册资源 ID，且必须是小写 snake_case" in capsys.readouterr().out
+
+    assert commands.cmd_data_query_create(Namespace(name="get_account", source=["missing"], force=False)) == 1
+    assert "未找到资源: missing" in capsys.readouterr().out
 
 
 def test_archive_members_keep_generated_files_without_runtime_shim(tmp_path: Path):

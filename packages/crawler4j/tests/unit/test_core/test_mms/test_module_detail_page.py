@@ -8,11 +8,16 @@ from unittest.mock import patch
 
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QLabel, QPushButton
+from PyQt6.Qsci import QsciScintilla
+from PyQt6.QtWidgets import QLabel, QPushButton, QScrollArea
 
 from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.models import ModuleInfo, ModuleSource
+from src.core.mms.settings_store import get_module_settings_store
+from src.core.mms.ui.module_config_page import ModuleConfigPage
 from src.core.mms.ui.module_detail_page import ModuleDetailPage
+from src.ui.components.button import StyledButton
+from src.ui.components.yaml_code_editor import YamlCodeEditor, YamlDisplayLexer
 
 from ._core_native_v1 import make_manifest, make_page_info, register_module, restore_module, write_module_tree
 
@@ -161,6 +166,122 @@ def test_module_detail_page_no_longer_exposes_debug_ui(qtbot, tmp_path):
 
     button_texts = [button.text() for button in page.findChildren(QPushButton)]
     assert all("调试" not in text for text in button_texts)
+
+
+def test_module_config_page_uses_qscintilla_yaml_editor(qtbot):
+    page = ModuleConfigPage()
+    qtbot.addWidget(page)
+
+    assert isinstance(page.module_config_editor, YamlCodeEditor)
+    assert isinstance(page.workflow_config_editor, YamlCodeEditor)
+    assert isinstance(page.module_config_editor.lexer(), YamlDisplayLexer)
+    assert isinstance(page.workflow_config_editor.lexer(), YamlDisplayLexer)
+    assert page.module_config_editor.font().pointSize() >= 15
+    assert page.module_config_editor.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert page.module_config_editor.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert page.module_config_editor.folding() == QsciScintilla.FoldStyle.NoFoldStyle
+    assert page.workflow_config_editor.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert page.workflow_config_editor.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+
+def test_module_config_page_uses_styled_action_buttons(qtbot):
+    page = ModuleConfigPage()
+    qtbot.addWidget(page)
+
+    assert isinstance(page.restore_module_config_btn, StyledButton)
+    assert isinstance(page.save_module_config_btn, StyledButton)
+    assert isinstance(page.restore_workflow_config_btn, StyledButton)
+    assert isinstance(page.save_workflow_config_btn, StyledButton)
+    assert "font-family" in page.restore_module_config_btn.styleSheet()
+    assert "font-family" in page.save_module_config_btn.styleSheet()
+
+
+def test_module_detail_page_hides_navigation_and_workflow_scrollbars(qtbot, tmp_path):
+    module = _make_module(tmp_path)
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    page.set_module(module)
+    workflows_row = next(
+        index
+        for index in range(page.menu_list.count())
+        if page.menu_list.item(index).data(Qt.ItemDataRole.UserRole) == "workflows"
+    )
+    page.menu_list.setCurrentRow(workflows_row)
+    workflows_page = page.content_stack.currentWidget()
+    scroll_area = workflows_page.findChild(QScrollArea)
+
+    assert page.menu_list.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert page.menu_list.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert scroll_area is not None
+    assert scroll_area.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert scroll_area.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+
+def test_module_config_page_saves_standard_yaml_flow_mapping(qtbot, tmp_path, monkeypatch):
+    module = _make_module(tmp_path)
+    page = ModuleConfigPage()
+    qtbot.addWidget(page)
+    monkeypatch.setattr("src.core.mms.ui.module_config_page.MessageDialog.information", lambda *args: None)
+
+    page.set_module(module)
+    page.module_config_editor.setPlainText("{account: {enabled: true}}")
+    page._save_module_config()
+
+    store = get_module_settings_store()
+    assert store.read_module_settings(module.name) == {"account": {"enabled": True}}
+    assert page.module_config_editor.toPlainText() == "account:\n  enabled: true"
+
+
+def test_module_config_page_dumps_lists_with_parent_indentation(qtbot):
+    page = ModuleConfigPage()
+    qtbot.addWidget(page)
+
+    assert page._dump({"account": {"filter_statuses": ["normal"]}}) == (
+        "account:\n"
+        "  filter_statuses:\n"
+        "      - normal"
+    )
+
+
+def test_yaml_editor_normalizes_legacy_indentless_sequences(qtbot):
+    editor = YamlCodeEditor()
+    qtbot.addWidget(editor)
+
+    editor.setPlainText("account:\n  filter_statuses:\n- normal\n- paused\n  manual_phone: null\n")
+
+    assert editor.toPlainText() == (
+        "account:\n"
+        "  filter_statuses:\n"
+        "      - normal\n"
+        "      - paused\n"
+        "  manual_phone: null\n"
+    )
+
+
+def test_yaml_display_lexer_classifies_scalars():
+    assert YamlDisplayLexer.classify_scalar_style("0.92") == YamlDisplayLexer.NUMBER
+    assert YamlDisplayLexer.classify_scalar_style("false") == YamlDisplayLexer.LITERAL
+    assert YamlDisplayLexer.classify_scalar_style("least_recent_run") == YamlDisplayLexer.STRING
+
+
+def test_module_config_page_rejects_duplicate_yaml_keys(qtbot, tmp_path, monkeypatch):
+    module = _make_module(tmp_path)
+    page = ModuleConfigPage()
+    qtbot.addWidget(page)
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_config_page.MessageDialog.warning",
+        lambda _parent, _title, message: warnings.append(message),
+    )
+
+    page.set_module(module)
+    page.module_config_editor.setPlainText("account:\n  enabled: true\n  enabled: false\n")
+    page._save_module_config()
+
+    assert warnings
+    assert "YAML 中存在重复键: enabled" in warnings[0]
+    assert get_module_settings_store().read_module_settings(module.name) == {}
 
 
 def test_module_detail_page_loads_hosted_pages_from_manifest(qtbot, tmp_path):

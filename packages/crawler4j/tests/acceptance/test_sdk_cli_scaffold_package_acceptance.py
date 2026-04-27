@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,20 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
     assert "demo_model/tasks/extra_task.py" in members
     assert "demo_model/workflows/repair_orders.py" in members
     assert "demo_model/module_runtime.py" not in members
+
+
+def test_sdk_cli_scaffold_package_verify_rejects_legacy_module_runtime_acceptance(module_root: Path):
+    (module_root / "module_runtime.py").write_text("# legacy runtime shim\n", encoding="utf-8")
+    archive_path = module_root / "dist" / "demo_model-with-runtime-shim.zip"
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in module_root.rglob("*"):
+            if path.is_file() and "dist" not in path.relative_to(module_root).parts:
+                archive.write(path, f"demo_model/{path.relative_to(module_root).as_posix()}")
+
+    verify_result = run_cli("package", "verify", str(archive_path), cwd=module_root)
+    verify_result.assert_failed()
+    verify_result.assert_stdout_contains("core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py")
 
 
 def test_sdk_cli_scaffold_supports_grouped_page_source_layout_acceptance(module_root: Path):

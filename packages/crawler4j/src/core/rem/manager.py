@@ -546,6 +546,19 @@ class EnvironmentManager:
         previous_status = env.status
         await self.pool.update_status(env.id, EnvStatus.TERMINATING)
 
+        browser_id = None
+        if env.handle and env.handle.browser_id:
+            browser_id = str(env.handle.browser_id).strip()
+        elif env.external_id:
+            browser_id = str(env.external_id).strip()
+
+        # CREATING 占位记录在 provider.create() 失败前可能尚未拿到 external_id，
+        # 这类记录没有外部资源可删，只需要直接清理本地状态。
+        if not browser_id:
+            await self.pool.remove(env.id)
+            logger.info(f"[REM] 无外部句柄，直接清理本地环境记录: id={env.id}")
+            return True
+
         provider = get_provider(env.provider)
         if provider:
             try:

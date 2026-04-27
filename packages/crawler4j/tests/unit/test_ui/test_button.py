@@ -1,6 +1,6 @@
 from PyQt6.QtGui import QFontInfo
 
-from src.ui.components.button import StyledButton
+from src.ui.components.button import StyledButton, create_action_button
 
 
 def test_styled_button_primary_uses_explicit_font_stack_and_size(qtbot):
@@ -43,3 +43,11 @@ def test_styled_button_warning_and_danger_variants(qtbot):
 
     assert "background: #f59e0b;" in warning.styleSheet()
     assert "rgba(248, 113, 113, 0.92)" in danger.styleSheet()
+
+
+def test_action_button_uses_fixed_table_cell_height(qtbot):
+    button = create_action_button("▶ 执行一次")
+    qtbot.addWidget(button)
+
+    assert button.minimumHeight() == 34
+    assert button.maximumHeight() == 34

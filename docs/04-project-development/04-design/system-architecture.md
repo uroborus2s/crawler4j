@@ -18,7 +18,7 @@ User
       -> ATM / MMS / REM / Persistence / Debug / System
         -> Job RunProfile (`packages/crawler4j/src/core/atm/run_profile.py`)
         -> External Modules (`<app-data>/modules`, `DevLink`, `packages/crawler4j/modules/`)
-          -> SDK Contracts (`crawler4j_sdk`, `crawler4j_contracts`)
+          -> Runtime Contracts (`crawler4j_contracts`)
 
 Maintainer
   -> Markdown Docs (`docs/`)
@@ -30,7 +30,7 @@ Maintainer
 
 1. UI Host：桌面外壳、导航、日志与调试入口
 2. Framework Core：MMS / ATM / REM / Persistence / Debug / System + Job RunProfile
-3. SDK / Contracts：模块开发与运行时契约
+3. SDK / Contracts：SDK 只负责开发 CLI、脚手架和校验；Contracts 负责模块运行时契约
 4. Modules：外部安装模块与本地 DevLink 模块项目
 
 ## 2. 核心运行链
@@ -39,16 +39,16 @@ Maintainer
 2. REM 管理运行环境生命周期与浏览器资源，负责 create/open/connect/stop/destroy，不负责任务工作流编排
 3. ATM 负责任务调度、派发、生命周期 hooks 与任务终态收口
 4. MMS 负责发现、解析、校验和执行模块
-5. 模块通过 `crawler4j_sdk` 暴露任务、工作流，并通过 `TaskSignal` 向 ATM 请求流程动作
-6. Contracts 负责 Core 与 SDK 共享数据结构，模块侧通过 `TaskContext.tools` 访问 Core 扩展能力，通过 `TaskContext.runtime` 读取运行态信息
+5. 模块通过 `crawler4j_contracts` 暴露任务、工作流，并通过 `TaskSignal` 向 ATM 请求流程动作
+6. Contracts 负责 Core 与模块共享数据结构；模块侧通过 `TaskContext.tools` 访问 Core 扩展能力，通过 `TaskContext.runtime` 读取运行态信息
 
 ## 3. 依赖方向与边界
 
 结合当前代码，当前边界可归纳为：
 
-- Modules 应优先依赖 SDK / Contracts 暴露的稳定契约
+- Modules 运行时代码只依赖 `crawler4j-contracts` 暴露的稳定契约；`crawler4j-sdk` 只作为开发依赖用于 CLI、脚手架、校验和打包辅助
 - Core 负责治理与编排，不负责业务语义
-- SDK 应保持可独立发布，不应反向绑死 Core 内部实现
+- SDK 应保持可独立发布，但不得重新承载运行时 owner、资源池 helper 或 Core 内部实现
 - 仓内 `modules/` 当前只保留占位说明；真实模块发现来自应用数据目录和开发链接
 - 当前仍存在一处未闭环偏差：真实业务站点 E2E 尚未回放，发布层面的最终确认仍需单独完成
 
@@ -58,9 +58,9 @@ Maintainer
 - Windows 正式发布层已收口为“`PyInstaller onedir` 生成宿主目录，Velopack 负责 installer / package feed / 宿主自更新”；macOS 内部发布继续走 “`PyInstaller.app + Sparkle`”
 - `packages/crawler4j-sdk` 与 `packages/crawler4j-contracts` 已经具备独立包形态
 - `TaskContext` 的数据库能力已收敛到唯一入口 `ctx.db`；非数据库类宿主能力仍通过 `ctx.tools.call("<namespace>.<action>", **kwargs)` 调用
-- 模块生命周期 hooks 已收敛到 ATM 调度的 `module_runtime.py`；`TaskScript` / `TaskFlow` 本身只保留单入口方法
+- 模块生命周期 hooks 已收敛到 ATM 调度的 `hooks/*.py` + `TaskSignal`；`TaskScript` / `TaskFlow` 不属于当前运行时协议
 - `TaskSignal` 已成为模块到 ATM 的正式流程控制通道；等待人工确认、失败后销毁环境等行为不再通过散落回调或 UI 清理策略表达
-- 外部模块运行时已收敛到 MMS + ModuleAssembler 单一执行链，不再保留 `src.automation.*` 旧兼容包
+- 外部模块运行时已收敛到 MMS 宿主扫描生成的 runtime descriptor，不再保留 `ModuleAssembler` 或 `src.automation.*` 旧兼容包
 - 宿主源码已不再承载业务辅助逻辑或业务模型；酒店匹配、短信平台与本地验证码回退逻辑以模块自带实现为准
 - 当前事实以当前代码和验证结果为准，不再保留并行的旧设计正文
 

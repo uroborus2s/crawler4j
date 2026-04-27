@@ -5,7 +5,7 @@
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **关联 ID：** `API-005`, `API-006`, `API-008`, `API-009`, `API-010`
-**最后更新：** 2026-04-24
+**最后更新：** 2026-04-26
 
 ## 1. 设计目标
 
@@ -24,11 +24,11 @@
 
 | 类别 | 事实源 | 模块读取方式 | 模块写入方式 | 说明 |
 |---|---|---|---|---|
-| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、工作流、页面导航，以及一次性初始化模板 `config_defaults` 和 `data` 数据契约 |
+| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、工作流、页面导航、`resource_pools`，以及一次性初始化模板 `config_defaults` 和 `data` 数据契约 |
 | 持久配置 | `config.db.module_config_entries` | `ctx.get_config()` / `ctx.config` | 禁止 | 宿主统一维护；模块运行时只读 |
 | 运行态元数据 | `ctx.runtime` | `ctx.runtime[...]` | 禁止 | 由 ATM / Debug / Core 注入 |
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
-| 页面 schema | `declare_ui()` 本轮声明缓存（宿主桥接内存） | `ctx.tools.call("ui.get_page")` | `ctx.tools.call("ui.declare_page")` | 宿主管理页面 schema；模块只声明页面，不再声明独立数据表页；正式 Hosted UI 刷新链路不再依赖 `data.db.module_pages` |
+| 页面 schema | `pages/*.py` / `pages/<group>/*.py` 导出的 `PageSpec` 与页面 handler | 宿主通过 runtime descriptor 读取 | 禁止在运行时代码里动态声明 | 宿主管理页面 schema；模块只声明 Hosted UI 页面，不再声明独立数据表页；正式 Hosted UI 刷新链路不再依赖 `data.db.module_pages` |
 | 模块数据资源 | `module.yaml.data.resources[]` + `data.db.module_data_resources` + `data.db.module_datasets` / 模块自定义物理表 | `ctx.db.from_("resource_id")` | `ctx.db.into("resource_id").replace(records)` | `managed_dataset` 适合低频稳定数据，`custom_table` 适合高频计算或明细表 |
 | 模块审计事件 | `data.db.module_audit_events` | `ctx.db.audit("dataset").query(...)` | `ctx.db.audit("dataset").append(...)` | append-only 历史事件，不进入 `module_datasets` |
 | 数据库视图 | `module.yaml.data.views[]` + `data.db.module_db_views` | `ctx.db.from_("view_id")` | 禁止 | 只读 read model；不承载复杂联表或聚合 |
@@ -39,11 +39,19 @@
 
 ## 3. 配置契约
 
-- `module.yaml` 是唯一模块清单，可额外声明只读默认模板 `config_defaults` 与 `data` 数据契约，但不是可变配置存储。
+- `module.yaml` 是唯一模块清单，可额外声明只读默认模板 `config_defaults`、`resource_pools` 与 `data` 数据契约，但不是可变配置存储。
 - 模块可变配置统一持久化到 `config.db.module_config_entries`。
 - 模块运行时代码只能通过 `ctx.get_config()` 或 `ctx.config` 读取配置。
 - 模块不得自行读取宿主配置数据库。
 - 除 `module.yaml.config_defaults` 外，不再承认模块目录里的第二套配置事实源，例如 `module.settings.yml`、`strategy.yaml`、`config_schema.json`。
+- 宿主模块详情页的“配置”标签只承担配置编辑入口：前端使用 QScintilla YAML 编辑器提供行号、折叠、语法高亮与校验错误标记；保存前统一调用独立 YAML 验证层，要求顶层为 YAML 映射对象并拒绝重复键，保存后再规范化为块格式 YAML 展示。
+
+### 3.1 资源池声明
+
+- 固定环境池名称必须在 `module.yaml.resource_pools[]` 中声明。
+- `resource_pools[]` 的正式字段只有 `name`、`display_name`、`description`。
+- `AcquisitionConfig.resource_pool` 只能引用当前模块已经声明过的池名。
+- 模块代码不得再把未声明池名当成正式契约写死在业务逻辑里。
 
 ## 4. 运行态元数据契约
 
@@ -57,6 +65,8 @@
 | `params` | `execution_params + job_params` 合并后的有效输入 |
 | `devel_mode` | 当前是否为 DevLink 开发态 |
 | `creation_params` | 本次环境创建参数；已有环境导入时也通过这里透传来源元数据 |
+| `resource_pool_name` | 当前任务运行模板绑定的资源池名；仅在调度侧已选择固定池时注入 |
+| `declared_resource_pools` | 当前模块在 `module.yaml.resource_pools[]` 中声明的资源池列表 |
 | `env_action` | 本次终态环境动作结果 |
 
 约束：
@@ -64,6 +74,8 @@
 - 模块不得覆盖或重写这些键。
 - `workflow`、`devel_mode`、`creation_params` 不能再混进 `ctx.config`。
 - 本次执行的临时变量也不要写入 `ctx.runtime`，应放到局部变量或 `ctx.state`。
+- 资源池名的事实源仍然是 `module.yaml.resource_pools[]`；`ctx.runtime["resource_pool_name"]` 只表示“本次任务当前正在消费哪个已声明池”。
+- `ctx.runtime["declared_resource_pools"]` 由宿主注入，作用是让模块运行时代码或模块自有 helper 可以读取 manifest 已声明池，而不是要求模块自己重新解析 `module.yaml`。
 
 ### 4.1 已有环境导入场景
 
@@ -191,6 +203,8 @@
 - 把 `workflow`、`devel_mode`、`creation_params` 写进 `ctx.config`
 - 把大批量业务数据写进 `ctx.state`
 - 绕过 `module.yaml.data.resources[]` 私自读写模块数据
+- 绕过 `module.yaml.resource_pools[]` 引用或写入未声明资源池
 - 在模块目录里再维护一份正式 `*.yml` 配置事实源
 - 把页面 schema 当成模块配置保存
 - 重新引入独立数据表页面契约
+- 绕过宿主 YAML 验证层直接把编辑器文本写入 `config.db.module_config_entries`

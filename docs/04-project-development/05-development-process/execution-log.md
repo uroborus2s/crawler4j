@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `API-010`, `BUG-013`
-**最后更新：** 2026-04-25
+**最后更新：** 2026-04-26
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,11 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-26 | 继续优化模块配置 YAML 可读性：修正 PyYAML 默认 indentless sequence 导致数组显示为父级同列的问题，保存/展示时统一输出为父 key 下缩进的 `- item`；`YamlCodeEditor.setPlainText()` 也会兜底规范化旧的 `key:\n- item` 文本；编辑器字号提升到 15pt，并增加额外行高。定向回归 `21 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 收口模块详情页滚动条与 YAML 编辑器视觉：`YamlCodeEditor` 隐藏横向/纵向滚动条，折叠样式从树状连线改为 plain fold，并弱化缩进参考线；模块详情页左侧菜单、任务链页面、Hosted 页面滚动区和 `SkyDataTable` 也统一隐藏滚动条但保留滚轮/触控板滚动。定向回归 `22 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 跟进资源池声明契约调整客户端交互：ATM 运行模板里的“资源池”由手动文本输入改为下拉选择，选项直接来自当前模块 `module.yaml.resource_pools[]`；未声明资源池时控件禁用，有声明时保留“不使用资源池”选项并展示声明池显示名与池名，避免用户继续手填旧资源池名称。定向回归 `23 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 模块详情页配置编辑器改为 QScintilla YAML 编辑器：新增公共 `YamlCodeEditor`，提供行号、折叠、YAML lexer、错误行标记；新增独立 YAML 验证层，保存前统一校验 YAML 语法、顶层映射对象与重复键，并支持标准 YAML flow mapping 输入后规范化回块格式。定向回归 `28 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 收口固定环境池名称事实源：`ModuleManifest` 新增 `resource_pools[]`，MMS 扫描时校验命名与去重；宿主加载模块运行时时把声明池注入 `ctx.runtime["declared_resource_pools"]`，模块运行时代码可从运行时池名或单一声明池解析 `pool_name`；ATM 运行模板表单和 Job 启动前校验都会阻止引用未声明资源池。定向回归 `106 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-26 | 调整“从已有环境导入”执行模型：导入弹窗不再按环境自动新建一次性 Job，而是要求选择已配置的“执行一次”批次任务；可一次选择多个未同步环境，每个环境作为同一 Job 下的 Task 运行，实际并发窗口数由该 Job 的 `concurrency_target` 限制，剩余环境在后台排队补位。定向回归 `29 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-25 | 优化公共消息弹窗与公共组件使用：`MessageDialog` 放弃自绘假标题栏，改为对齐“安装模块”面板的原生窗口壳、深色内容区和右下角动作按钮；`StyledButton` 新增 `success` 状态；安装模块弹窗的输入框、浏览/取消/开始检查按钮与校验提示改用公共组件。同步审查 UI 弹窗用法后，已把 ATM/MMS/REM/System 中简单同步提示和确认从 `QMessageBox` 收口到 `MessageDialog` / `ConfirmDialog`。剩余 `QMessageBox` 为环境/模块列表异步 `open()` 流程和任务中止三按钮流程，后续需补公共异步/多动作弹窗能力再迁移 | Codex |
 | 2026-04-25 | 收口 IP 测试弹窗公共组件与无关表初始化：新增公共 `MessageDialog` 深色消息弹窗，`IPPoolTab` 的测试结果、普通提示和删除确认改用公共 `MessageDialog` / `ConfirmDialog`，不再直接使用局部 `QMessageBox`；`IPPoolManager` 不再持久化 `env_ip_bindings`，绑定/解绑只直接增减 `ip_entries.bound_count`；`init_database()` 不再创建遗留 `configs` 表。已有用户库中的旧表通过显式 SQL 清理，不写入启动迁移代码 | Codex |

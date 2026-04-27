@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QSizePolicy
 
 from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
 from src.core.persistence import get_module_data_store
+from src.ui.components.button import StyledButton
 
 from ._core_native_v1 import make_manifest, make_page_info, register_module, restore_module, write_module_tree
 
@@ -388,6 +389,12 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         add_button = next(button for button in page.findChildren(QPushButton) if button.text() == "新增")
         edit_button = next(button for button in page.findChildren(QPushButton) if button.text() == "编辑")
         delete_button = next(button for button in page.findChildren(QPushButton) if button.text() == "删除")
+        assert isinstance(add_button, StyledButton)
+        assert isinstance(edit_button, StyledButton)
+        assert isinstance(delete_button, StyledButton)
+        assert "font-family" in add_button.styleSheet()
+        assert "font-family" in edit_button.styleSheet()
+        assert "font-family" in delete_button.styleSheet()
 
         add_button.click()
         qtbot.waitUntil(lambda: table.rowCount() == 2)

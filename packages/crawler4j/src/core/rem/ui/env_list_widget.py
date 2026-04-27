@@ -305,16 +305,22 @@ class DataLoaderThread(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
     
-    def __init__(self, pool: EnvPool, run_gc: bool = False):
+    def __init__(self, pool: EnvPool, run_gc: bool = False, reload_from_db: bool = False):
         super().__init__()
         self._pool = pool
         self._run_gc = run_gc
+        self._reload_from_db = reload_from_db
     
     def run(self):
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
+            if self._reload_from_db:
+                reload_pool = getattr(self._pool, "reload_from_db", None)
+                if callable(reload_pool):
+                    loop.run_until_complete(reload_pool())
+
             # 仅在需要时执行 GC
             if self._run_gc:
                 from src.core.rem.manager import get_environment_manager
@@ -416,6 +422,7 @@ class EnvListWidget(QWidget):
         self._load_in_progress = False
         self._reload_requested = False
         self._reload_run_gc = False
+        self._reload_from_db = False
         self._operation_in_progress = False
         self._operation_task: asyncio.Task[Any] | None = None
         self._pending_tasks: set[asyncio.Task[Any]] = set()
@@ -446,7 +453,7 @@ class EnvListWidget(QWidget):
         
         self.refresh_btn = StyledButton("刷新", variant="primary", min_height=36)
         self.refresh_btn.setMinimumWidth(64)
-        self.refresh_btn.clicked.connect(lambda: self.load_data(run_gc=True))
+        self.refresh_btn.clicked.connect(lambda: self.load_data(run_gc=True, reload_from_db=True))
         header.addWidget(self.refresh_btn)
         
         layout.addLayout(header)
@@ -468,17 +475,18 @@ class EnvListWidget(QWidget):
         self.stats_label.setStyleSheet("color: rgba(255, 255, 255, 0.7);")
         layout.addWidget(self.stats_label)
     
-    def load_data(self, run_gc: bool = False):
+    def load_data(self, run_gc: bool = False, reload_from_db: bool = False):
         """加载环境数据。"""
         if self._load_in_progress:
             self._reload_requested = True
             self._reload_run_gc = self._reload_run_gc or run_gc
+            self._reload_from_db = self._reload_from_db or reload_from_db
             return
         self._load_in_progress = True
         self.error_label.hide()
         self._apply_busy_state()
         
-        self._loader_thread = DataLoaderThread(self._pool, run_gc=run_gc)
+        self._loader_thread = DataLoaderThread(self._pool, run_gc=run_gc, reload_from_db=reload_from_db)
         self._loader_thread.finished.connect(self._on_data_loaded)
         self._loader_thread.error.connect(self._on_load_error)
         self._loader_thread.start()
@@ -689,9 +697,11 @@ class EnvListWidget(QWidget):
         if not self._reload_requested:
             return
         run_gc = self._reload_run_gc
+        reload_from_db = self._reload_from_db
         self._reload_requested = False
         self._reload_run_gc = False
-        QTimer.singleShot(0, lambda: self.load_data(run_gc=run_gc))
+        self._reload_from_db = False
+        QTimer.singleShot(0, lambda: self.load_data(run_gc=run_gc, reload_from_db=reload_from_db))
 
     def _cancel_pending_tasks(self) -> None:
         for task in list(self._pending_tasks):

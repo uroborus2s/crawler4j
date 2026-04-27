@@ -245,46 +245,60 @@ class EnvPool:
         with get_connection(STATE_DB) as conn:
             conn.execute("DELETE FROM environments WHERE id = ?", (normalized_env_id,))
     
+    def _deserialize_env_row(self, row: Any) -> Environment:
+        """将数据库行反序列化为 Environment。"""
+        from src.core.rem.models import ProxyConfig
+
+        meta = json.loads(row["capabilities"]) if row["capabilities"] else {}
+
+        proxy_config = None
+        if row["proxy_config_json"]:
+            proxy_config = ProxyConfig.from_dict(json.loads(row["proxy_config_json"]))
+
+        env = Environment(
+            id=row["id"],
+            name=row["name"] if "name" in row.keys() else "",
+            kind=EnvKind(row["kind"]),
+            provider=row["provider"],
+            status=EnvStatus(row["status"]),
+            external_id=row["external_id"],
+            capabilities=set(meta.get("capabilities", [])),
+            lease_id=row["lease_id"],
+            task_run_id=row["task_run_id"],
+            last_used_at=row["last_used_at"],
+            daily_usage_count=row["daily_usage_count"] or 0,
+            daily_usage_date=row["daily_usage_date"] or "",
+            proxy_config=proxy_config,
+            created_at=row["created_at"],
+        )
+
+        if row["external_id"]:
+            try:
+                browser_id = row["external_id"]
+                env.handle = BrowserHandle(browser_id=browser_id)
+            except (ValueError, TypeError):
+                env.handle = BrowserHandle(browser_id=row["external_id"])
+        return env
+
     async def load_from_db(self) -> None:
         """从数据库加载环境（用于崩溃恢复）。"""
-        from src.core.rem.models import ProxyConfig
-        
-        with get_connection(STATE_DB) as conn:
-            cursor = conn.execute("SELECT * FROM environments")
-            for row in cursor.fetchall():
-                meta = json.loads(row["capabilities"]) if row["capabilities"] else {}
-                
-                # 反序列化配置
-                proxy_config = None
-                if row["proxy_config_json"]:
-                    proxy_config = ProxyConfig.from_dict(json.loads(row["proxy_config_json"]))
-                
-                env = Environment(
-                    id=row["id"],
-                    name=row["name"] if "name" in row.keys() else "",
-                    kind=EnvKind(row["kind"]),
-                    provider=row["provider"],
-                    status=EnvStatus(row["status"]),
-                    external_id=row["external_id"],
-                    capabilities=set(meta.get("capabilities", [])),
-                    lease_id=row["lease_id"],
-                    task_run_id=row["task_run_id"],
-                    last_used_at=row["last_used_at"],
-                    daily_usage_count=row["daily_usage_count"] or 0,
-                    daily_usage_date=row["daily_usage_date"] or "",
-                    proxy_config=proxy_config,
-                    created_at=row["created_at"],
-                )
-                
-                # 重建 handle：从 external_id 恢复 browser_id
-                if row["external_id"]:
-                    try:
-                        browser_id = row["external_id"]
-                        env.handle = BrowserHandle(browser_id=browser_id)
-                    except (ValueError, TypeError):
-                        # external_id 不是数字（如 Playwright 本地模式）
-                        env.handle = BrowserHandle(browser_id=row["external_id"])
-                self._environments[env.id] = env
+        async with self._lock:
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute("SELECT * FROM environments")
+                for row in cursor.fetchall():
+                    env = self._deserialize_env_row(row)
+                    self._environments[env.id] = env
+
+    async def reload_from_db(self) -> None:
+        """丢弃内存缓存并按当前数据库状态重建环境池。"""
+        async with self._lock:
+            reloaded: dict[int, Environment] = {}
+            with get_connection(STATE_DB) as conn:
+                cursor = conn.execute("SELECT * FROM environments")
+                for row in cursor.fetchall():
+                    env = self._deserialize_env_row(row)
+                    reloaded[env.id] = env
+            self._environments = reloaded
     
     # === Metadata 操作 ===
     def get_metadata(self, env_id: int | str, namespace: str, key: str) -> Any:

@@ -41,6 +41,7 @@
 | `TC-024` `uv run pytest packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_sdk/test_data_capability.py -q` | 通过 | 2026-04-24 已升级为 `ctx.db` fluent API 契约基线，覆盖旧数据库工具面不再注册、managed/custom/view/named query 边界与 SDK 旧调用扫描 |
 | `TC-056` `uv run pytest packages/crawler4j/tests/unit/test_sdk/test_taskcontext.py packages/crawler4j/tests/unit/test_sdk/test_data_capability.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_ui_runtime.py packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_settings_store.py -q` | 通过 | 2026-04-24 `159 passed`，验证模块数据库接口只保留 `ctx.db` fluent API、Hosted UI readonly 写保护、执行器真实模块夹具与文档口径同步 |
 | `TC-057` `uv run pytest packages/crawler4j/tests/unit/test_core/test_rem/test_destroy_env.py -q` | 通过 | 2026-04-26 `6 passed`，覆盖 REM 环境销毁对 UI 数字字符串 ID 的兼容，锁定真实 `EnvPool` 整数键可被 `"282"` 这类表格值命中并删除数据库记录 |
+| `TC-058` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_config_yaml_validation.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_settings_store.py -q` | 通过 | 2026-04-26 `28 passed`，覆盖 QScintilla YAML 编辑器实例化、标准 YAML flow mapping 保存规范化、重复键拒绝、验证层格式错误与顶层映射约束 |
 | `TC-025` `uv run pytest packages/crawler4j/tests/acceptance -q` | 通过 | 2026-04-22 已同步到 hosted page V1 口径，覆盖 CLI 脚手架到 `package verify`、`host devlink`、本地 ZIP `preview/apply` 与验收 gate 命令矩阵 |
 | `TC-049` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py packages/crawler4j/tests/acceptance/test_sdk_cli_scaffold_package_acceptance.py` | 通过 | 2026-04-22 回归 `105 passed`，覆盖 hosted page renderer、模块详情页入口跳转、runtime capability、声明式 schema 持久化/清理、CLI 脚手架、integration 与 acceptance 的 hosted UI V1 契约 |
 | `TC-050` `uv run pytest packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py -q` | 通过 | 2026-04-23 最终回归 `138 passed`，覆盖 `row_action`、`open_page.params`、缓存页参数替换、目标页面内联表格 `navigation_filters`、过滤详情表默认 CRUD 的全量资源定点写回、隐藏父键保留、显式 `data_resource` metadata 保持，以及 omitted `resource_id` alias 路由兼容 |
@@ -58,6 +59,7 @@
 | `REQ-008` / `CR-008` | 模块数据资源与模块自管历史统一通过 `ctx.db` 建模 | 持久层单测 + runtime capability 单测 + SDK fluent API 契约单测 |
 | `REQ-009` / `CR-009` | 固定环境池 Service Job 的等待队列与资源池资格卡片 | ATM 单测/集成测试 + REM metadata 回归 + 运行模板/UI 单测 |
 | `CR-003` / 模块 UI 调试回归 | hosted page 页面声明刷新、页面内联 `DataTable` CRUD hook 与 DevLink 调试重载 | MMS 单测（`test_module_data_table_page.py`） |
+| `CR-003` / 模块配置编辑回归 | 模块详情页配置编辑器、YAML 语法校验、顶层映射约束、重复键拒绝与保存后规范化 | MMS 单测（`test_config_yaml_validation.py`、`test_module_detail_page.py`、`test_settings_store.py`） |
 | `BUG-013` / `CR-005` | 发现错误可见、DevLink 普通执行热更新 | SDK 单测 + ATM/MMS 单测 |
 | `REQ-004` / `RISK-003` | 版本与 release 口径一致 | 元数据对照检查 |
 | `CR-010` / Windows 发布闭环 | Windows `PyInstaller onedir + Velopack` 打包、自更新桥接与宿主更新配置一致 | 脚本回归 + `UpdateService` 单测 + 文档同步检查 |
@@ -91,6 +93,8 @@
 - `REQ-009` 当前已完成 V1 实现级单测与 SDK 契约回归，但仍缺真实业务模块接入和更高层集成验证
 - `REQ-009` 当前仍缺真实业务模块接入和更高层集成验证；当前回归主要停留在宿主 / SDK 单测
 - `CR-010` 当前只完成本地脚本/单元级验证，仍缺 Windows 真机打包、安装、升级与签名验证
+- QScintilla 已进入桌面依赖线，但尚未记录纳入该依赖后的 PyInstaller 打包态验证；当前只有编辑器单元/界面层回归证据
+- `crawler4j-sdk 0.6.1` 与 `crawler4j-contracts 0.4.0` 尚未记录当前版本的 build/publish 证据
 - 真实站点 E2E 的执行口径现已单独收敛到 `ctrip-real-site-e2e-closeout.md`
 
 ## 6.1 `REQ-006` 已完成覆盖
@@ -98,7 +102,7 @@
 | 测试 ID | 目标 | 当前验证方式 |
 |---|---|---|
 | `TC-007` | 新脚手架根 `__init__.py` 为固定薄壳且可导入 | `packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py` + CLI help smoke |
-| `TC-008` | 标准 `module_runtime.py` 可承载 lifecycle hooks 与 `@env_selector(...)` 环境选择器，并覆盖默认运行逻辑 | `packages/crawler4j/tests/unit/test_sdk/test_assembler.py` |
+| `TC-008` | 历史 `module_runtime.py` / `@env_selector(...)` 覆盖项已退出当前协议；当前应以 `hooks/*.py`、`env_selectors/*.py` 和 Core runtime descriptor 扫描回归为准 | 待在后续测试计划清理为当前文件级扫描用例 |
 | `TC-009` | 旧模块按最新模板重新初始化后可导入并运行默认入口 | `packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py` |
 
 ## 6.2 `ctrip` 真实站点 E2E 收口口径
@@ -121,6 +125,12 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-27 | 仅同步文档/记忆/版本事实；未新增全量测试、包构建、PyInstaller 打包或发布证据。QScintilla 打包态证据、SDK 0.6.1 与 Contracts 0.4.0 build/publish 证据仍待补 | Codex |
+| 2026-04-26 | 补充模块配置 YAML 数组缩进与可读性回归：`test_module_detail_page.py` 锁定 `ModuleConfigPage._dump()` 输出数组时使用父 key 下缩进的 block sequence，锁定 `YamlCodeEditor.setPlainText()` 兜底规范化旧 indentless sequence，并锁定编辑器字号提升；`test_config_yaml_validation.py` 继续覆盖缩进数组的解析契约。定向回归 `21 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 补充模块详情页滚动条与 YAML 编辑器视觉回归：`test_module_detail_page.py` 锁定模块配置/Workflow 配置编辑器隐藏横向和纵向滚动条、使用 plain fold 样式，并锁定左侧菜单与任务链滚动区隐藏滚动条；`test_managed_page_scroll.py` 锁定 Hosted 页面默认隐藏双向滚动条；`test_data_table.py` 锁定 `SkyDataTable` 隐藏双向滚动条。定向回归 `22 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 补充资源池客户端交互回归：`test_run_profile_dialog.py` 锁定运行模板资源池控件从 `module.yaml.resource_pools[]` 加载下拉选项、显示声明池显示名与池名，并继续验证固定资源池 Select 模式生成正确 `resource_pool`。定向回归 `23 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 新增模块配置 YAML 编辑器回归：`test_config_yaml_validation.py` 锁定独立验证层接受标准 YAML 映射、拒绝格式错误、非映射顶层和重复键；`test_module_detail_page.py` 锁定配置页使用 QScintilla 编辑器、flow mapping 保存后规范化为块格式；组合回归 `28 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 新增资源池声明契约回归：`test_mms.py` 锁定 `module.yaml.resource_pools[]` 解析、未知字段拒绝与重名校验；`test_module_runtime.py` 锁定宿主向 `ctx.runtime` 注入 `declared_resource_pools`；`test_data_capability.py` / `test_removed_runtime_surface.py` 锁定 `crawler4j-sdk` 不再导出资源池运行时 helper；`test_run_profile_dialog.py` / `test_job_modes.py` 锁定 ATM UI 与 Job 运行前均拒绝未声明资源池。定向 `pytest` 为 `106 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-26 | 补充“从已有环境导入”启动进度回归：`ExecutionRunner` 锁定复用环境 `start_env()` 完成前维持 `PENDING/环境启动中`，`test_env_list_widget.py` 锁定导入流程等待关联任务离开 `PENDING` 后再关闭公共进度弹窗；定向 `pytest` 为 `53 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-26 | 补充“从已有环境导入”关联任务回归：`test_import_job_service.py` 锁定导入多个已有环境时复用用户选择的手动批次 Job，并按 `concurrency_target` 只启动可用并发槽；`test_import_existing_env_dialog.py` / `test_env_list_widget.py` 锁定弹窗改为选择关联任务和多选环境；`test_data_table.py` 锁定表格 schema 支持 `selection_mode="multi"` | Codex |
 | 2026-04-26 | 新增 `TC-057`：`test_destroy_env_accepts_numeric_string_id_from_ui` 锁定环境列表传入数字字符串 ID 时 `destroy_env()` 仍能命中真实 `EnvPool` 整数键并删除数据库记录；REM 目录回归 `119 passed`，全量 `uv run pytest -q` 为 `739 passed` | Codex |

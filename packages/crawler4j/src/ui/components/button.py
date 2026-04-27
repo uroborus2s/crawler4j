@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QPushButton
 
 ButtonVariant = Literal["primary", "secondary", "success", "warning", "danger"]
@@ -101,3 +102,46 @@ class StyledButton(QPushButton):
             }}
             """
         )
+
+
+def normalize_button_variant(
+    variant: str | None,
+    *,
+    default: ButtonVariant = "secondary",
+) -> ButtonVariant:
+    """Normalize schema/user supplied button variants to supported shared variants."""
+
+    value = str(variant or default).strip().lower()
+    if value == "ghost":
+        value = "secondary"
+    if value not in StyledButton._VARIANT_STYLES:
+        return default
+    return cast(ButtonVariant, value)
+
+
+def create_action_button(
+    text: str,
+    *,
+    variant: str | None = "secondary",
+    min_height: int = 34,
+    min_width: int | None = None,
+    horizontal_padding: int = 10,
+    border_radius: int = 4,
+    parent=None,
+) -> StyledButton:
+    """Create a compact action button with the shared StyledButton palette."""
+
+    button = StyledButton(
+        text,
+        variant=normalize_button_variant(variant),
+        min_height=min_height,
+        min_width=min_width,
+        horizontal_padding=horizontal_padding,
+        border_radius=border_radius,
+        parent=parent,
+    )
+    # Table cell widgets clip children that grow beyond their content rect. A
+    # fixed compact height keeps Chinese text and emoji labels stable.
+    button.setFixedHeight(max(0, int(min_height)))
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    return button

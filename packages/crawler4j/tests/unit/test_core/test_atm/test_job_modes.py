@@ -20,6 +20,7 @@ from src.core.atm.run_profile import (
     RunProfile,
 )
 from src.core.rem.manager import RECOVERY_PROVIDER_RUNTIME_TIMEOUT
+from src.core.mms.models import ModuleManifest, UpgradeSourceInfo, WorkflowInfo
 
 
 @pytest.fixture
@@ -70,6 +71,26 @@ def patch_default_selector_metadata(monkeypatch):
             else []
         ),
     )
+    monkeypatch.setattr(
+        "src.core.atm.controller.get_module_registry",
+        lambda: SimpleNamespace(
+            get_module=lambda module_name: (
+                SimpleNamespace(
+                    manifest=ModuleManifest(
+                        name="demo_module",
+                        runtime_api="core-native-v1",
+                        upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
+                        workflows=[WorkflowInfo(name="repair")],
+                        default_workflow="repair",
+                        resource_pools=[SimpleNamespace(name="bound_account_ready")],
+                        data={"resources": [], "views": [], "queries": [], "seeds": []},
+                    )
+                )
+                if module_name == "demo_module"
+                else None
+            )
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -91,6 +112,39 @@ async def test_service_job_maintains_target_concurrency():
     await controller._reconcile_job(job)
 
     assert controller.dispatcher.dispatch.await_count == 2
+
+
+def test_ensure_runtime_for_job_rejects_undeclared_resource_pool(monkeypatch):
+    controller = JobController()
+    monkeypatch.setattr(
+        "src.core.atm.controller.get_module_registry",
+        lambda: SimpleNamespace(
+            get_module=lambda module_name: SimpleNamespace(
+                manifest=ModuleManifest(
+                    name="demo_module",
+                    runtime_api="core-native-v1",
+                    upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
+                    workflows=[WorkflowInfo(name="repair")],
+                    default_workflow="repair",
+                    resource_pools=[],
+                    data={"resources": [], "views": [], "queries": [], "seeds": []},
+                )
+            )
+        ),
+    )
+
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        concurrency_target=1,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+
+    with pytest.raises(ValueError, match="module.yaml.resource_pools"):
+        asyncio.run(controller._ensure_runtime_for_job(job))
 
 
 @pytest.mark.asyncio

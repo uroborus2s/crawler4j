@@ -1,6 +1,6 @@
 [project]
 name = "crawler4j-sdk"
-version = "0.6.0"
+version = "0.6.1"
 description = "Crawler4j module SDK and CLI for building standard crawler4j modules"
 readme = "README.md"
 requires-python = ">=3.12"

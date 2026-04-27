@@ -81,9 +81,10 @@ class _FakeSignal:
 class _ControlledLoaderThread:
     instances: list["_ControlledLoaderThread"] = []
 
-    def __init__(self, pool, run_gc: bool = False):
+    def __init__(self, pool, run_gc: bool = False, reload_from_db: bool = False):
         self._pool = pool
         self._run_gc = run_gc
+        self._reload_from_db = reload_from_db
         self.finished = _FakeSignal()
         self.error = _FakeSignal()
         self.started = False
@@ -173,6 +174,36 @@ def test_env_list_widget_create_finished_refreshes_without_success_dialog(qtbot,
     widget._on_create_finished(SimpleNamespace(id=123))
 
     widget.load_data.assert_called_once_with()
+
+
+def test_data_loader_thread_reloads_pool_from_db_before_listing(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    events: list[str] = []
+    loaded_records: list[list[Any]] = []
+    errors: list[str] = []
+
+    async def reload_from_db():
+        events.append("reload")
+
+    async def list_all():
+        events.append("list")
+        return []
+
+    pool = SimpleNamespace(
+        reload_from_db=reload_from_db,
+        list_all=list_all,
+        list_metadata=lambda _env_id: {},
+    )
+
+    thread = env_list_widget.DataLoaderThread(pool, reload_from_db=True)
+    thread.finished.connect(lambda records: loaded_records.append(records))
+    thread.error.connect(errors.append)
+
+    thread.run()
+
+    assert events == ["reload", "list"]
+    assert errors == []
+    assert loaded_records == [[]]
 
 
 @pytest.mark.asyncio
@@ -265,6 +296,29 @@ def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypat
 
     manager.start_env.assert_awaited_once_with("env-1")
     widget.load_data.assert_called_once_with()
+
+
+def test_env_list_widget_refresh_requests_pool_reload(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    _ControlledLoaderThread.instances.clear()
+    monkeypatch.setattr(env_list_widget, "DataLoaderThread", _ControlledLoaderThread)
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    widget.refresh_btn.click()
+
+    assert len(_ControlledLoaderThread.instances) == 1
+    assert _ControlledLoaderThread.instances[0]._run_gc is True
+    assert _ControlledLoaderThread.instances[0]._reload_from_db is True
 
 
 def test_env_list_widget_rows_expose_actions_and_row_click_signal(qtbot, monkeypatch):

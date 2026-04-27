@@ -70,7 +70,7 @@
 - 该需求的核心不是“再起更多模块实例”，而是把并发目标收敛为服务席位，把资源不足收敛为“等待环境”这一条正式业务状态。
 - 当前 REM 分配入口已经收口为 `EnvironmentManager.list_allocatable_envs(module_name, pool_name)`；它只从“当前模块 + 当前资源池 + `eligible=true` + `READY` + 未租约占用”的环境集合里挑选候选。
 - 黑号/封禁场景的当前正式收口是“先用 `mark_resource_pool_ineligible(...)` 停发号，再按需 `destroy_env`”；环境记录删除后，对应 `env_metadata` 会随外键级联自动清理。
-- 这轮不应让宿主直接读取模块私有业务表；更稳的边界是模块通过 SDK helper `bind_resource_pool(...)`、`mark_resource_pool_eligible(...)`、`mark_resource_pool_ineligible(...)`、`remove_resource_pool(...)`、`replace_resource_pool_snapshot(...)` 把资格快照同步到宿主 `env_metadata`。
+- 这轮不应让宿主直接读取模块私有业务表；更稳的边界是模块通过宿主注入的 `ctx.tools` 资源池能力把资格快照同步到宿主 `env_metadata`，模块可在自身仓库内封装薄 helper，但不得依赖 `crawler4j-sdk` 参与运行。
 
 ### `REQ-004`
 

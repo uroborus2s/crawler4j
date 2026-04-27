@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.ui.components.button import create_action_button
 from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.line_edit import StyledLineEdit
 from src.ui.components.data_table_query import normalize_cell_value
@@ -33,6 +34,8 @@ class SkyDataTable(QWidget):
     selection_changed = pyqtSignal(list)
 
     DEFAULT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+    DEFAULT_ROW_HEIGHT = 44
+    ACTION_ROW_HEIGHT = 52
 
     def __init__(self, schema: dict[str, Any] | None = None, parent=None):
         super().__init__(parent)
@@ -106,6 +109,7 @@ class SkyDataTable(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.table.cellClicked.connect(self._on_cell_clicked)
@@ -170,7 +174,7 @@ class SkyDataTable(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(True)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(44)
+        self.table.verticalHeader().setDefaultSectionSize(self.DEFAULT_ROW_HEIGHT)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.setStyleSheet(
             """
@@ -186,7 +190,7 @@ class SkyDataTable(QWidget):
                 outline: none;
             }
             QTableWidget::item {
-                padding: 10px;
+                padding: 6px 10px;
                 border-bottom: 1px solid rgba(255, 255, 255, 0.02);
             }
             QHeaderView::section {
@@ -269,9 +273,18 @@ class SkyDataTable(QWidget):
         if selection_mode not in {"none", "single", "multi"}:
             selection_mode = "single"
 
+        has_action_column = any(column["type"] == "actions" for column in columns)
+        default_row_height = self.ACTION_ROW_HEIGHT if has_action_column else self.DEFAULT_ROW_HEIGHT
+        if isinstance(raw, dict) and raw.get("row_height") is not None:
+            row_height = int(raw.get("row_height", default_row_height))
+        else:
+            row_height = default_row_height
+        if has_action_column:
+            row_height = max(row_height, self.ACTION_ROW_HEIGHT)
+
         return {
             "columns": columns,
-            "row_height": int(raw.get("row_height", 44)) if isinstance(raw, dict) else 44,
+            "row_height": row_height,
             "empty_text": str(raw.get("empty_text") or "暂无数据").strip() if isinstance(raw, dict) else "暂无数据",
             "selection_mode": selection_mode,
             "features": {
@@ -463,7 +476,9 @@ class SkyDataTable(QWidget):
     def _render_rows(self) -> None:
         self.table.setRowCount(len(self._rows))
         self.table.clearContents()
+        row_height = int(self._schema.get("row_height", self.DEFAULT_ROW_HEIGHT))
         for row_index, row in enumerate(self._rows):
+            self.table.setRowHeight(row_index, row_height)
             for column_index, column in enumerate(self._columns):
                 self._render_cell(row_index, column_index, column, row)
         self._empty_label.setText(str(self._schema.get("empty_text") or "暂无数据"))
@@ -492,6 +507,7 @@ class SkyDataTable(QWidget):
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         actions = value if isinstance(value, list) else []
         for action in actions:
             if not isinstance(action, dict):
@@ -499,13 +515,14 @@ class SkyDataTable(QWidget):
             action_id = str(action.get("id") or "").strip()
             if not action_id:
                 continue
-            button = QPushButton(str(action.get("label") or action_id))
+            button = create_action_button(
+                str(action.get("label") or action_id),
+                variant=str(action.get("variant") or "secondary"),
+            )
             button.setEnabled(bool(action.get("enabled", True)))
             tooltip = str(action.get("tooltip") or "").strip()
             if tooltip:
                 button.setToolTip(tooltip)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setStyleSheet(self._action_button_style(str(action.get("variant") or "secondary")))
             button.clicked.connect(
                 lambda _checked=False, idx=row_index, action_name=action_id, row_payload=dict(row): self._on_action_clicked(
                     idx,
@@ -516,28 +533,6 @@ class SkyDataTable(QWidget):
             layout.addWidget(button)
         layout.addStretch()
         return widget
-
-    def _action_button_style(self, variant: str) -> str:
-        palette = {
-            "primary": ("rgba(96,165,250,0.9)", "white"),
-            "success": ("rgba(74,222,128,0.92)", "black"),
-            "warning": ("rgba(250,204,21,0.92)", "black"),
-            "danger": ("rgba(248,113,113,0.92)", "white"),
-            "secondary": ("rgba(255,255,255,0.08)", "white"),
-        }
-        background, foreground = palette.get(variant, palette["secondary"])
-        return (
-            "QPushButton {"
-            f"background: {background};"
-            f"color: {foreground};"
-            "border: none;"
-            "border-radius: 4px;"
-            "padding: 4px 10px;"
-            "font-size: 12px;"
-            "}"
-            "QPushButton:hover { opacity: 0.9; }"
-            "QPushButton:disabled { opacity: 0.45; }"
-        )
 
     def _apply_tone(self, item: QTableWidgetItem, tone: str) -> None:
         if not tone:

@@ -175,6 +175,36 @@ async def test_destroy_env_removes_db_record_after_external_delete_succeeds(
 
 
 @pytest.mark.asyncio
+async def test_destroy_env_removes_creating_placeholder_without_external_handle(
+    manager,
+    mock_pool,
+):
+    placeholder_env = Environment(
+        id=77,
+        name="env-creating-placeholder",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.CREATING,
+        external_id="",
+    )
+    provider = DestroyTrackingProvider(name="virtualbrowser", destroy_result=True)
+    register_provider(provider)
+    mock_pool.get.return_value = placeholder_env
+
+    with patch.object(manager, "ensure_provider_runtime", AsyncMock()) as ensure_runtime:
+        success = await manager.destroy_env(placeholder_env.id)
+
+    assert success is True
+    ensure_runtime.assert_not_awaited()
+    assert provider.destroy_called is False
+    mock_pool.remove.assert_awaited_once_with(placeholder_env.id)
+    mock_pool.update_status.assert_awaited_once_with(
+        placeholder_env.id,
+        EnvStatus.TERMINATING,
+    )
+
+
+@pytest.mark.asyncio
 async def test_destroy_env_accepts_numeric_string_id_from_ui(
     persistent_manager,
 ):

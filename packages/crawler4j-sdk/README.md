@@ -24,6 +24,7 @@
 - `WorkflowSpec`
 - `EnvSelectorSpec`
 - `PageSpec`
+- `crawler4j_contracts.hosted_ui` 里的 Hosted UI schema/helper
 
 ### `crawler4j-sdk`
 
@@ -33,7 +34,7 @@
 - 模块模板生成
 - `check structure/release/full`
 - 打包与发布辅助
-- 少量开发期 helper，例如资源池 helper 与 `DefaultHttpClient`
+- 少量开发期 helper，例如 `DefaultHttpClient`
 
 不再导出：
 
@@ -41,6 +42,7 @@
 - `TaskScript`
 - `TaskFlow`
 - `env_selector`
+- `hosted_ui`
 - 任何运行时 owner 角色
 
 ## 核心协议
@@ -235,7 +237,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "crawler4j-sdk>=0.6.0,<0.7.0",
+  "crawler4j-sdk>=0.6.1,<0.7.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
 ]
@@ -250,13 +252,15 @@ CLI 脚手架生成的 `pyproject.toml` 会默认写入同样的兼容范围。
 
 ## 资源池与 HTTP helper
 
-SDK 仍保留这些开发辅助：
+SDK 仍保留 `crawler4j_sdk.context.DefaultHttpClient` 作为本地开发辅助。
 
-- `bind_resource_pool`
-- `mark_resource_pool_eligible`
-- `mark_resource_pool_ineligible`
-- `remove_resource_pool`
-- `replace_resource_pool_snapshot`
-- `crawler4j_sdk.context.DefaultHttpClient`
+模块运行时代码不得依赖 `crawler4j-sdk`。资源池运行时能力由宿主注入到 `ctx.tools`，模块如果需要绑定、标记或移除资源池，应通过 `ctx.tools.has_tool(...)` / `ctx.tools.call(...)` 调用宿主工具，例如：
 
-这些 helper 不改变运行时 owner，只是对 `ctx.tools` 的薄封装。
+```python
+if ctx.tools.has_tool("env.bind_resource_pool"):
+    await ctx.tools.call(
+        "env.bind_resource_pool",
+        env_id=ctx.env_id,
+        pool_name="default",
+    )
+```
