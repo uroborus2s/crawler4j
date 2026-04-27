@@ -59,3 +59,28 @@ def test_log_console_widget_batches_duplicate_logs_into_single_line(qtbot):
         assert "(x5)" in rendered
     finally:
         logger._entries = old_entries
+
+
+def test_log_console_widget_renders_structured_json_logs(qtbot):
+    old_entries = list(logger._entries)
+    logger._entries = []
+    try:
+        widget = LogConsoleWidget()
+        qtbot.addWidget(widget)
+
+        logger.json(
+            "[web-quiz] task snapshot",
+            {
+                "account_id": 1,
+                "failed_task_count": 0,
+                "phone_masked": "185****2132",
+            },
+        )
+
+        qtbot.waitUntil(lambda: '"failed_task_count": 0' in widget.text_edit.toPlainText())
+        rendered = widget.text_edit.toPlainText()
+        assert "[web-quiz] task snapshot" in rendered
+        assert '"account_id": 1' in rendered
+        assert '"phone_masked": "185****2132"' in rendered
+    finally:
+        logger._entries = old_entries

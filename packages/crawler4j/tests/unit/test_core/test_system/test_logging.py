@@ -67,6 +67,39 @@ def test_app_logger_captures_standard_logging_and_reconfigures_hot(tmp_path):
     assert "hidden-before-hot-update" not in log_text
 
 
+def test_app_logger_captures_structured_json_logs(tmp_path):
+    log_dir = tmp_path / "logs"
+    logger._entries = []
+    logger.configure(log_dir=log_dir, level="INFO", retention_days=3)
+
+    logger.json(
+        "[web-quiz] task snapshot",
+        {
+            "account_id": 1,
+            "failed_task_count": 0,
+            "phone_masked": "185****2132",
+        },
+        environment_id=313,
+    )
+
+    entry = logger.get_entries(limit=1)[0]
+    assert entry.message.startswith("[web-quiz] task snapshot:\n{")
+    assert entry.environment_id == 313
+    assert entry.structured_type == "json"
+    assert entry.structured_label == "[web-quiz] task snapshot"
+    assert entry.structured_payload == {
+        "account_id": 1,
+        "failed_task_count": 0,
+        "phone_masked": "185****2132",
+    }
+
+    assert logger._file_handler is not None
+    logger._file_handler.flush()
+    log_text = (log_dir / "crawler4j.log").read_text(encoding="utf-8")
+    assert "[web-quiz] task snapshot:" in log_text
+    assert '"failed_task_count": 0' in log_text
+
+
 def test_install_logging_preferences_sync_hot_updates_unique_logger(tmp_path):
     prefs = PreferencesService()
     prefs.set(PreferenceKey.LOG_LEVEL, "WARNING")

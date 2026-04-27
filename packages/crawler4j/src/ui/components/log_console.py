@@ -3,6 +3,8 @@
 支持显示统一日志服务的实时日志，并按 Task ID 过滤。
 """
 
+import json
+from dataclasses import dataclass
 from html import escape
 
 from PyQt6.QtCore import QTimer, pyqtSlot
@@ -10,6 +12,15 @@ from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QTextEdit, QVBoxLayout, QWidget
 
 from src.core.foundation.logging import LogEntry, logger
+
+
+@dataclass(slots=True)
+class _PendingLine:
+    plain_text: str
+    color: str
+    repeat_count: int = 1
+    preformatted: bool = False
+    dedupe_key: str | None = None
 
 
 class LogConsoleWidget(QWidget):
@@ -20,7 +31,7 @@ class LogConsoleWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._filter_task_id: str | None = None
-        self._pending_lines: list[tuple[str, str, int]] = []
+        self._pending_lines: list[_PendingLine] = []
         self._setup_ui()
         self._setup_flush_timer()
         logger.signals.log_added.connect(self._on_log_added)
@@ -69,14 +80,34 @@ class LogConsoleWidget(QWidget):
 
     def append_log(self, text: str, color: str = "#cdd6f4"):
         """追加日志文本。"""
-        if self._pending_lines:
-            last_text, last_color, last_count = self._pending_lines[-1]
-            if last_text == text and last_color == color:
-                self._pending_lines[-1] = (last_text, last_color, last_count + 1)
-            else:
-                self._pending_lines.append((text, color, 1))
+        self._queue_line(
+            _PendingLine(
+                plain_text=text,
+                color=color,
+                dedupe_key=f"{color}:{text}",
+            )
+        )
+
+    def append_preformatted_log(self, text: str, color: str = "#cdd6f4"):
+        """追加保留缩进和换行的日志块。"""
+        self._queue_line(
+            _PendingLine(
+                plain_text=text,
+                color=color,
+                preformatted=True,
+            )
+        )
+
+    def _queue_line(self, line: _PendingLine) -> None:
+        if (
+            line.dedupe_key is not None
+            and self._pending_lines
+            and self._pending_lines[-1].dedupe_key == line.dedupe_key
+            and self._pending_lines[-1].preformatted == line.preformatted
+        ):
+            self._pending_lines[-1].repeat_count += 1
         else:
-            self._pending_lines.append((text, color, 1))
+            self._pending_lines.append(line)
 
         if not self._flush_timer.isActive():
             self._flush_timer.start(self._flush_interval_ms)
@@ -90,9 +121,25 @@ class LogConsoleWidget(QWidget):
 
         cursor = self.text_edit.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        for text, color, repeat_count in self._pending_lines:
-            rendered = text if repeat_count == 1 else f"{text} (x{repeat_count})"
-            cursor.insertHtml(f'<span style="color:{color}">{escape(rendered)}</span><br/>')
+        for line in self._pending_lines:
+            rendered = (
+                line.plain_text
+                if line.repeat_count == 1
+                else f"{line.plain_text} (x{line.repeat_count})"
+            )
+            if line.preformatted:
+                cursor.insertHtml(
+                    "<pre "
+                    "style=\"margin:0;color:{color};font-family:'Menlo','Consolas','Monaco',monospace;"
+                    "font-size:12px;white-space:pre-wrap;\">{text}</pre>".format(
+                        color=line.color,
+                        text=escape(rendered),
+                    )
+                )
+            else:
+                cursor.insertHtml(
+                    f'<span style="color:{line.color}">{escape(rendered)}</span><br/>'
+                )
 
         self.text_edit.setTextCursor(cursor)
         if stick_to_bottom:
@@ -113,6 +160,21 @@ class LogConsoleWidget(QWidget):
             color = "#6c7086"
             
         time_str = entry.timestamp.strftime("%H:%M:%S")
+        if entry.structured_type == "json":
+            payload = entry.structured_payload
+            rendered_payload = json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+                default=str,
+            )
+            label = entry.structured_label or entry.message
+            self.append_preformatted_log(
+                f"[{time_str}] {label}:\n{rendered_payload}",
+                color,
+            )
+            return
         self.append_log(f"[{time_str}] {entry.message}", color)
 
     @pyqtSlot(object)

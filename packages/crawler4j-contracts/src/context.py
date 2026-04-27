@@ -49,6 +49,9 @@ class LoggerLike(Protocol):
     def info(self, message: str, environment_id: int | None = None) -> None:
         ...
 
+    def json(self, label: str, payload: Any, environment_id: int | None = None) -> None:
+        ...
+
     def warning(self, message: str, environment_id: int | None = None) -> None:
         ...
 

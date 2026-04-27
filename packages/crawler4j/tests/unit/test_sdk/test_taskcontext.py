@@ -67,6 +67,7 @@ class TestTaskContextInjection:
         assert basic_context.logger is not None
         # 应该可以调用日志方法
         basic_context.logger.info("测试日志")
+        assert hasattr(basic_context.logger, "json")
     
     def test_http_client_defaults_to_none(self, basic_context: TaskContext):
         """验证 contracts 层默认不再提供运行时 HTTP 实现。"""
