@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-04-27 已修正 Windows 宿主自更新的 Velopack 安装态误判。根因不是用户没有通过 `Setup.exe` 安装，而是宿主错误依赖了 Velopack Python binding 并未暴露的 `is_installed` 属性，导致即便从 `Setup.exe` 创建的快捷方式启动也会被误判为“未通过 Setup 安装”。当前 `src.core.system.velopack` 改为按官方发布布局识别 Velopack 正式产物：`Setup.exe` 安装态使用 `current/sq.version + ../Update.exe`，`Portable.zip` 使用 `./Update.exe + ./current/sq.version`；两类正式产物都允许 `检查更新`，裸 `PyInstaller onedir` 仍明确判为不支持。新增 `test_velopack.py` 覆盖安装态、Portable 与裸 bundle 三条回归，并同步修正文档口径。
 - 最新修复：2026-04-27 已完成表格行内按钮被挤压/裁切的二次修复。根因不是单个按钮宽度，而是 `QTableWidget::item { padding: 10px; }` 会压缩 `setCellWidget()` 的内容矩形；44px 行高下 action cell 实际只剩约 22px，高度 34px 的中文/emoji 按钮必然被裁剪。当前 `SkyDataTable` 在存在 actions 列时默认行高提升到 52px、item 垂直 padding 收敛到 6px，并在渲染每一行时显式 `setRowHeight()`；`create_action_button()` 保持 34px 固定高度并垂直居中。复测几何为行高 52px、action cell 38px、按钮 34px；聚焦回归 `12 passed`，相关 UI 回归 `53 passed`，`uv run ruff check .` 与 `git diff --check` 通过，全量 `uv run pytest -q -p no:cacheprovider` 为 `777 passed`。
 - 最新同步：2026-04-27 开发团队 4 已同步版本与证据口径：当前源码版本线为 `crawler4j 0.3.1`、`crawler4j-sdk 0.6.1`、`crawler4j-contracts 0.4.0`，最近正式 Git tag 仍为 `v0.2.0`。本轮只做文档/记忆/版本事实同步，未重新执行全量测试、包构建、PyInstaller 打包或发布；`crawler4j-sdk 0.6.1`、`crawler4j-contracts 0.4.0` 的正式 build/publish 证据待补，QScintilla 进入桌面依赖后的打包证据待补。`docs/02-user-guide/assets/screenshots/` 下的大量截图资产仅登记为后续文档资产清理候选，本轮不删除、不移动。
 - 最新修复：2026-04-27 已在保持正确数组缩进的前提下恢复模块配置 YAML 配色。`YamlCodeEditor` 现使用自定义 `YamlDisplayLexer`，不再依赖会画坏 sequence 缩进的 `QsciLexerYAML`；当前 key 为暖黄、字符串为绿色、数字为蓝色、`true/false/null` 等字面量为橙色，数组缩进仍按真实空格显示。定向回归 `22 passed`，目标文件 `ruff check` 通过。

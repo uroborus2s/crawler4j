@@ -72,7 +72,7 @@ uv run deploy-windows-release
 - `uv run deploy-windows-release` 会在打包完成后继续调用系统 OpenSSH `sftp`，把 `packages/crawler4j/dist/updates/windows/` 上传到 `$CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`
 - `CRAWLER4J_UPDATE_UPLOAD_TARGET` 在 Windows 侧建议写成 `host:/var/www/crawler4j/` 这类 `host:path` 远端目录；若写成本地目录，脚本会改为直接复制文件
 - Velopack Windows 安装目录默认位于 `%LocalAppData%\\<packId>\\current`。更新时会整体替换 `current/`，所以任何可变文件都不能写在程序目录里；`crawler4j` 当前应用数据继续落在 `%APPDATA%/Crawler4j/`，与这条约束兼容
-- Windows 宿主自更新只对“通过 Velopack Setup 安装”的客户端生效；如果用户直接运行裸 `PyInstaller onedir` 目录，`检查更新` 会明确提示当前不是正式安装态
+- Windows 宿主自更新对 Velopack 正式发布产物生效，包括 `Setup.exe` 安装态和 `Portable.zip`；如果用户直接运行裸 `PyInstaller onedir` 目录，`检查更新` 会明确提示当前不是 Velopack 正式发布产物
 - Velopack 官方当前明确说明 Windows 不支持安装到 `C:\\Program Files` 这类特权目录；本仓当前也不提供管理员安装模式
 - 若要使用 `uv run deploy-windows-release`，Windows 机器只需要启用系统自带的 OpenSSH Client，确保 `sftp` 命令在 PATH 中可用；不再要求额外安装 `rsync`
 
@@ -191,6 +191,7 @@ uv run python -m crawler4j_sdk.cli.commands --help
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-27 | 更正 Windows 自更新运行边界：宿主更新不再错误限定为“仅 Setup 安装态”，当前口径调整为“Velopack 正式发布产物（Setup / Portable）可更新，裸 onedir 不可更新” | Codex |
 | 2026-04-22 | 新增 Windows `PyInstaller onedir + Velopack` 发布口径，说明 `package-windows-release` 的环境变量、输出目录、安装边界和与 `%APPDATA%/Crawler4j/` 的持久化兼容关系 | Codex |
 | 2026-04-22 | 补记 Windows `package-windows-release` 会把 `app_icon.ico` 同时传给 Velopack，保证安装器、快捷方式与主程序图标一致 | Codex |
 | 2026-04-22 | 为 macOS Sparkle 内部分发补上“改写 bundle 后自动 ad-hoc 重签”与私钥来源配置：`generate_appcast` 现支持 keychain account、私钥文件或私钥串三种输入，不再只依赖默认 `ed25519` 账户 | Codex |
