@@ -268,6 +268,9 @@ class SkyDataTable(QWidget):
         pagination_feature = features.get("pagination")
         if not isinstance(pagination_feature, dict):
             pagination_feature = {}
+        loading_feature = features.get("loading")
+        if not isinstance(loading_feature, dict):
+            loading_feature = {}
 
         selection_mode = str(raw.get("selection_mode") or "single").strip().lower() if isinstance(raw, dict) else "single"
         if selection_mode not in {"none", "single", "multi"}:
@@ -303,6 +306,10 @@ class SkyDataTable(QWidget):
                         max(1, int(option))
                         for option in (pagination_feature.get("page_size_options") or self.DEFAULT_PAGE_SIZE_OPTIONS)
                     ],
+                },
+                "loading": {
+                    "inline": bool(loading_feature.get("inline", True)),
+                    "disable_interaction": bool(loading_feature.get("disable_interaction", True)),
                 },
             },
         }
@@ -340,6 +347,7 @@ class SkyDataTable(QWidget):
         self.prev_btn.setVisible(pagination_visible)
         self.next_btn.setVisible(pagination_visible)
         self.page_label.setVisible(pagination_visible)
+        self.loading_bar.setVisible(bool(self._loading and self._schema["features"]["loading"]["inline"]))
 
     def _configure_columns(self) -> None:
         self.table.setColumnCount(len(self._columns))
@@ -447,12 +455,13 @@ class SkyDataTable(QWidget):
 
     def set_loading(self, loading: bool) -> None:
         self._loading = bool(loading)
-        if self._loading:
+        loading_feature = self._schema["features"]["loading"]
+        if self._loading and bool(loading_feature["inline"]):
             self.loading_bar.setMaximum(0)
             self.loading_bar.show()
         else:
             self.loading_bar.hide()
-        self.table.setEnabled(not self._loading)
+        self.table.setEnabled(not self._loading or not bool(loading_feature["disable_interaction"]))
         self._empty_label.setVisible(not self._loading and not self._rows)
 
     def selected_row(self) -> dict[str, Any] | None:

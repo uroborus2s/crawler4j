@@ -3,6 +3,7 @@ from pathlib import Path
 from PyQt6.QtCore import QUrl, Qt
 from PyQt6.QtGui import QImage
 
+from src.ui.components.button import StyledButton
 
 def _write_doc(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,6 +73,9 @@ def test_help_page_hides_scrollbars_and_applies_doc_styles(qtbot, monkeypatch, t
     assert "max-width: 100%" in doc_css
     assert "#8bd3ff" in doc_css
     assert page.current_doc_label is None
+    assert isinstance(page.back_btn, StyledButton)
+    assert isinstance(page.forward_btn, StyledButton)
+    assert isinstance(page.home_btn, StyledButton)
 
 
 def test_help_page_scales_large_images_to_viewport_width(qtbot, monkeypatch, tmp_path):

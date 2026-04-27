@@ -1,4 +1,5 @@
 from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox, ToggleSwitch
 from src.ui.components.choice_dialog import ChoiceDialog, DialogChoice
 from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
@@ -8,7 +9,9 @@ from src.ui.components.line_edit import StyledLineEdit
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.notice_panel import NoticePanel
 from src.ui.components.progress_dialog import ProgressDialog
+from src.ui.components.segmented_control import SegmentedOptionControl
 from src.ui.components.spin_box import StyledSpinBox
+from src.ui.components.text_edit import StyledPlainTextEdit, StyledTextEdit
 
 __all__ = [
     "ChoiceDialog",
@@ -17,10 +20,15 @@ __all__ = [
     "MessageDialog",
     "NoticePanel",
     "ProgressDialog",
+    "SegmentedOptionControl",
     "StyledButton",
+    "StyledCheckBox",
     "StyledComboBox",
     "StyledLineEdit",
+    "StyledPlainTextEdit",
     "StyledSpinBox",
+    "StyledTextEdit",
+    "ToggleSwitch",
     "configure_titled_dialog",
     "open_dialog_async",
 ]

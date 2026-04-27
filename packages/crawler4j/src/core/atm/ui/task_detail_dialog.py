@@ -11,9 +11,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QTabWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -25,10 +23,12 @@ from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.atm.ui.task_confirmation_dialog import TaskConfirmationDialog
+from src.ui.components.button import StyledButton
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.log_console import LogConsoleWidget
+from src.ui.components.text_edit import StyledTextEdit
 
 
 class JobDetailDialog(QDialog):
@@ -125,19 +125,7 @@ class JobDetailDialog(QDialog):
         self.runtime_label = QLabel("运行配置: -")
         info_layout.addWidget(self.runtime_label)
 
-        self.debug_btn = QPushButton("🐞 调试任务")
-        self.debug_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(245, 158, 11, 0.88);
-                color: black;
-                border: none;
-                padding: 8px 14px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(245, 158, 11, 1); }
-            QPushButton:disabled { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.4); }
-        """)
+        self.debug_btn = StyledButton("🐞 调试任务", variant="warning", min_height=36, min_width=120)
         self.debug_btn.clicked.connect(self._open_debug_dialog)
         self.debug_btn.hide()
         info_layout.addWidget(self.debug_btn)
@@ -161,7 +149,7 @@ class JobDetailDialog(QDialog):
         # 底部按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        close_btn = QPushButton("关闭")
+        close_btn = StyledButton("关闭", variant="secondary", min_height=36, min_width=92)
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
@@ -170,7 +158,7 @@ class JobDetailDialog(QDialog):
         layout = QVBoxLayout(self.tasks_tab)
         
         # Refresh Btn
-        refresh_btn = QPushButton("🔄 刷新列表")
+        refresh_btn = StyledButton("🔄 刷新列表", variant="secondary", min_height=36, min_width=108)
         refresh_btn.clicked.connect(lambda: self._load_data())
         layout.addWidget(refresh_btn)
 
@@ -186,7 +174,7 @@ class JobDetailDialog(QDialog):
 
     def _setup_config_tab(self):
         layout = QVBoxLayout(self.config_tab)
-        self.config_text = QTextEdit()
+        self.config_text = StyledTextEdit(monospace=True)
         self.config_text.setReadOnly(True)
         layout.addWidget(self.config_text)
 

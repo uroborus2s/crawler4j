@@ -17,17 +17,14 @@ from typing import Any, Optional
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QFileDialog,
     QFormLayout,
     QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QStackedWidget,
     QTabWidget,
     QVBoxLayout,
@@ -41,8 +38,11 @@ from src.core.system.preferences_service import (
     get_preferences_service,
 )
 from src.core.system.ui.about_dialog import AboutContentWidget
+from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox as QCheckBox
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 
 
@@ -186,8 +186,7 @@ class SettingsPage(QWidget):
         action_layout = QHBoxLayout()
         action_layout.addStretch()
 
-        self.reset_btn = QPushButton("↺ 恢复默认")
-        self.reset_btn.setStyleSheet(self._btn_style())
+        self.reset_btn = StyledButton("↺ 恢复默认", variant="secondary", min_width=120)
         self.reset_btn.clicked.connect(self._on_reset_clicked)
         action_layout.addWidget(self.reset_btn)
 
@@ -330,8 +329,7 @@ class SettingsPage(QWidget):
         self.bit_path_edit.setPlaceholderText("BitBrowser 可执行文件路径")
         bit_path_layout.addWidget(self.bit_path_edit)
         
-        bit_browse_btn = QPushButton("浏览...")
-        bit_browse_btn.setStyleSheet(self._browse_btn_style())
+        bit_browse_btn = StyledButton("浏览...", variant="secondary", min_height=34, min_width=88)
         bit_browse_btn.clicked.connect(
             lambda: self._on_browse_browser(self.bit_path_edit, PreferenceKey.BITBROWSER_PATH)
         )
@@ -358,8 +356,7 @@ class SettingsPage(QWidget):
         self.virt_path_edit.setPlaceholderText("VirtualBrowser 可执行文件路径")
         virt_path_layout.addWidget(self.virt_path_edit)
         
-        virt_browse_btn = QPushButton("浏览...")
-        virt_browse_btn.setStyleSheet(self._browse_btn_style())
+        virt_browse_btn = StyledButton("浏览...", variant="secondary", min_height=34, min_width=88)
         virt_browse_btn.clicked.connect(
             lambda: self._on_browse_browser(self.virt_path_edit, PreferenceKey.VIRTUALBROWSER_PATH)
         )
@@ -438,51 +435,15 @@ class SettingsPage(QWidget):
                 left: 12px;
                 padding: 0 6px;
             }
-            QLabel, QCheckBox {
+            QLabel {
                 color: rgba(255, 255, 255, 0.8);
             }
-            QLineEdit, QSpinBox {
-                background: rgba(255, 255, 255, 0.1);
-                padding: 0px 10px;
-                color: white;
+            QSpinBox {
                 min-width: 160px;  /* 增加最小宽度 */
                 min-height: 24px;
             }
-            QLineEdit:hover, QSpinBox:hover {
-                border-color: rgba(99, 102, 241, 0.5);
-            }
             
             /* StyledComboBox styling is handled by the component itself */
-        """
-
-    def _btn_style(self) -> str:
-        """返回按钮样式。"""
-        return """
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 6px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background: rgba(99, 102, 241, 1);
-            }
-        """
-
-    def _browse_btn_style(self) -> str:
-        return """
-            QPushButton {
-                background: rgba(255, 255, 255, 0.1);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                padding: 6px 12px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.2);
-            }
         """
 
     def _populate_combo(self, combo: QComboBox, items: list[tuple[str, str]]):

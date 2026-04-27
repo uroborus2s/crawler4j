@@ -10,15 +10,15 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QTextEdit,
     QVBoxLayout,
 )
 
 from src.core.atm.models import Task
+from src.ui.components.button import StyledButton
 from src.ui.components.dialog_window import configure_titled_dialog
+from src.ui.components.text_edit import StyledTextEdit
 
 
 @dataclass(frozen=True)
@@ -115,7 +115,7 @@ class TaskConfirmationDialog(QDialog):
             QLabel {
                 color: #c0caf5;
             }
-            QTextEdit, QTableWidget {
+            QTableWidget {
                 background-color: rgba(30, 30, 40, 0.88);
                 color: #e5e7eb;
                 border: 1px solid rgba(255, 255, 255, 0.08);
@@ -158,7 +158,7 @@ class TaskConfirmationDialog(QDialog):
         note_label.setStyleSheet("font-weight: bold; color: white;")
         layout.addWidget(note_label)
 
-        self.message_edit = QTextEdit(self)
+        self.message_edit = StyledTextEdit(self)
         self.message_edit.setPlaceholderText("可选：填写本次人工确认说明")
         self.message_edit.setMinimumHeight(110)
         layout.addWidget(self.message_edit)
@@ -166,17 +166,15 @@ class TaskConfirmationDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.addStretch()
 
-        cancel_btn = QPushButton("稍后处理")
+        cancel_btn = StyledButton("稍后处理", variant="secondary", min_height=36, min_width=96)
         cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(cancel_btn)
 
-        self.reject_btn = QPushButton(self.spec.reject_text)
-        self.reject_btn.setStyleSheet("background: rgba(248, 113, 113, 0.85); color: white; padding: 8px 14px;")
+        self.reject_btn = StyledButton(self.spec.reject_text, variant="danger", min_height=36, min_width=96)
         self.reject_btn.clicked.connect(self._reject_and_accept)
         buttons.addWidget(self.reject_btn)
 
-        self.confirm_btn = QPushButton(self.spec.confirm_text)
-        self.confirm_btn.setStyleSheet("background: rgba(74, 222, 128, 0.85); color: black; padding: 8px 14px;")
+        self.confirm_btn = StyledButton(self.spec.confirm_text, variant="success", min_height=36, min_width=96)
         self.confirm_btn.clicked.connect(self._confirm_and_accept)
         buttons.addWidget(self.confirm_btn)
 

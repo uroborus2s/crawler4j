@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from PyQt6.QtWidgets import QSizePolicy
 
+from src.ui.components.button import StyledButton
 from src.ui.components.stat_card import StatCard
 
 
@@ -47,6 +48,17 @@ def test_dashboard_keeps_single_row_summary_on_narrow_width(qtbot, monkeypatch):
     assert page.cards_grid.itemAtPosition(0, 3).widget() is page.env_ready_card
     assert page.cards_grid.itemAtPosition(0, 5).widget() is page.modules_card
     assert page.cards_grid.itemAtPosition(1, 0) is None
+
+
+def test_dashboard_uses_public_refresh_button(qtbot, monkeypatch):
+    import src.ui.dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module.DashboardPage, "_setup_timer", lambda self: None)
+
+    page = dashboard_module.DashboardPage()
+    qtbot.addWidget(page)
+
+    assert isinstance(page.refresh_btn, StyledButton)
 
 
 @pytest.mark.asyncio

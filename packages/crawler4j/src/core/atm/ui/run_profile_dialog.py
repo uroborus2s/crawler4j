@@ -4,19 +4,14 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, available_timezones
 
-from PyQt6.QtCore import QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPlainTextEdit,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
@@ -49,10 +44,16 @@ from src.core.atm.run_profile import (
     ResourceConfig,
 )
 from src.core.atm.controller import selector_returns_none
+from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox as QCheckBox
+from src.ui.components.check_box import ToggleSwitch
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.dialog_window import configure_titled_dialog
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
+from src.ui.components.segmented_control import SegmentedOptionControl
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
+from src.ui.components.text_edit import StyledPlainTextEdit as QPlainTextEdit
 from src.ui.components.yaml_code_editor import YamlCodeEditor
 
 
@@ -339,128 +340,6 @@ VIRTUALBROWSER_WEBGL_RENDERER_OPTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
-class SegmentedOptionControl(QWidget):
-    """轻量分段按钮选择器，用于替代简单模式下拉框。"""
-
-    def __init__(self, options: list[tuple[str, object]], on_change=None, parent=None):
-        super().__init__(parent)
-        self._options = list(options)
-        self._on_change = on_change
-        self._current_value = self._options[0][1] if self._options else None
-        self._buttons: dict[object, QPushButton] = {}
-        self._setup_ui()
-
-    def _setup_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        total = len(self._options)
-        for index, (text, value) in enumerate(self._options):
-            button = QPushButton(text)
-            button.setCheckable(True)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            radius_left = "6px" if index == 0 else "0"
-            radius_right = "6px" if index == total - 1 else "0"
-            border_left = "1px" if index == 0 else "0"
-            button.setStyleSheet(
-                f"""
-                QPushButton {{
-                    background: rgba(255, 255, 255, 0.05);
-                    color: rgba(255, 255, 255, 0.88);
-                    border-top: 1px solid rgba(255, 255, 255, 0.1);
-                    border-right: 1px solid rgba(255, 255, 255, 0.1);
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                    border-left: {border_left} solid rgba(255, 255, 255, 0.1);
-                    border-top-left-radius: {radius_left};
-                    border-bottom-left-radius: {radius_left};
-                    border-top-right-radius: {radius_right};
-                    border-bottom-right-radius: {radius_right};
-                    min-height: 32px;
-                    padding: 0 18px;
-                }}
-                QPushButton:checked {{
-                    background: #6366f1;
-                    border-color: #6366f1;
-                    color: white;
-                    font-weight: bold;
-                }}
-                QPushButton:disabled {{
-                    color: rgba(255, 255, 255, 0.35);
-                }}
-                """
-            )
-            button.clicked.connect(
-                lambda checked, current=value: self.set_current_data(current, emit_change=True)
-            )
-            self._buttons[value] = button
-            layout.addWidget(button)
-
-        layout.addStretch()
-        if self._options:
-            self.set_current_data(self._options[0][1], emit_change=False)
-
-    def currentData(self):
-        return self._current_value
-
-    def set_current_data(self, value, emit_change: bool = False) -> None:
-        if value not in self._buttons:
-            return
-        self._current_value = value
-        for option_value, button in self._buttons.items():
-            button.setChecked(option_value == value)
-        if emit_change and callable(self._on_change):
-            self._on_change()
-
-    def setEnabled(self, enabled: bool) -> None:  # noqa: N802 - Qt API
-        super().setEnabled(enabled)
-        for button in self._buttons.values():
-            button.setEnabled(enabled)
-
-
-class ToggleSwitch(QCheckBox):
-    """自绘滑动开关，避免纯样式化 QCheckBox 在深色主题下显示异常。"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setText("")
-        self.setFixedSize(54, 30)
-
-    def sizeHint(self) -> QSize:
-        return QSize(54, 30)
-
-    def minimumSizeHint(self) -> QSize:
-        return self.sizeHint()
-
-    def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
-        knob_diameter = rect.height() - 6.0
-        knob_y = rect.top() + (rect.height() - knob_diameter) / 2
-        knob_x = rect.right() - knob_diameter - 3.0 if self.isChecked() else rect.left() + 3.0
-
-        if self.isEnabled():
-            track_color = QColor("#6366f1") if self.isChecked() else QColor(60, 60, 72)
-            border_color = QColor("#6366f1") if self.isChecked() else QColor(255, 255, 255, 36)
-            knob_color = QColor(255, 255, 255)
-        else:
-            track_color = QColor(255, 255, 255, 18)
-            border_color = QColor(255, 255, 255, 24)
-            knob_color = QColor(255, 255, 255, 120)
-
-        painter.setPen(QPen(border_color, 1.0))
-        painter.setBrush(track_color)
-        painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
-
-        knob_rect = QRectF(knob_x, knob_y, knob_diameter, knob_diameter)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(knob_color)
-        painter.drawEllipse(knob_rect)
-
-
 class RunProfileDialog(QDialog):
     """运行模板编辑弹窗。"""
 
@@ -494,19 +373,6 @@ class RunProfileDialog(QDialog):
         self.setStyleSheet("""
             QDialog { background: rgb(30, 30, 40); }
             QLabel { color: rgba(255, 255, 255, 0.9); font-size: 13px; }
-            QLineEdit, QSpinBox, QPlainTextEdit {
-                background: rgba(40, 40, 50, 0.9);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.15);
-                border-radius: 4px;
-                padding: 5px 8px;
-                min-height: 25px;
-                min-width: 280px;
-            }
-            QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {
-                border-color: #6366f1;
-                background: rgba(50, 50, 60, 1);
-            }
             QGroupBox {
                 color: #a5b4fc;
                 font-weight: bold;
@@ -543,25 +409,12 @@ class RunProfileDialog(QDialog):
 
         # 模式切换
         mode_layout = QHBoxLayout()
-        self.form_btn = QPushButton("📝 表单配置")
-        self.yaml_btn = QPushButton("📄 YAML 源码")
-        
-        for btn in [self.form_btn, self.yaml_btn]:
-            btn.setCheckable(True)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(255, 255, 255, 0.05);
-                    color: white;
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    padding: 6px 16px;
-                    border-radius: 4px;
-                }
-                QPushButton:checked { background: #4f46e5; border-color: #4f46e5; }
-            """)
-        
-        self.form_btn.setChecked(True)
+        self.form_btn = self._create_mode_button("📝 表单配置")
+        self.yaml_btn = self._create_mode_button("📄 YAML 源码")
         self.form_btn.clicked.connect(lambda: self._switch_mode("form"))
         self.yaml_btn.clicked.connect(lambda: self._switch_mode("yaml"))
+        self._set_mode_button_active(self.form_btn, True)
+        self._set_mode_button_active(self.yaml_btn, False)
 
         mode_layout.addWidget(self.form_btn)
         mode_layout.addWidget(self.yaml_btn)
@@ -586,14 +439,10 @@ class RunProfileDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setFixedSize(80, 32)
-        cancel_btn.setStyleSheet("background: rgba(255,255,255,0.1); border:none; color:white; border-radius:4px;")
+        cancel_btn = StyledButton("取消", variant="secondary", min_height=32, min_width=80, border_radius=4)
         cancel_btn.clicked.connect(self.reject)
         
-        save_btn = QPushButton("保存运行模板")
-        save_btn.setFixedSize(100, 32)
-        save_btn.setStyleSheet("background: #10b981; border:none; color:white; font-weight:bold; border-radius:4px;")
+        save_btn = StyledButton("保存运行模板", variant="success", min_height=32, min_width=116, border_radius=4)
         save_btn.clicked.connect(self._on_save)
         
         btn_layout.addWidget(cancel_btn)
@@ -710,65 +559,50 @@ class RunProfileDialog(QDialog):
     def _generate_mac_address(self) -> str:
         return generate_mac_address()
 
-    def _create_mode_button(self, text: str) -> QPushButton:
-        button = QPushButton(text)
+    def _set_mode_button_active(self, button: StyledButton, active: bool) -> None:
+        button.setChecked(active)
+        button.set_variant("primary" if active else "secondary")
+
+    def _create_mode_button(self, text: str) -> StyledButton:
+        button = StyledButton(
+            text,
+            variant="secondary",
+            min_height=32,
+            border_radius=4,
+            horizontal_padding=16,
+        )
         button.setCheckable(True)
-        button.setFixedHeight(32)
-        button.setStyleSheet("""
-            QPushButton {
-                background: rgba(255, 255, 255, 0.05);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 4px;
-                padding: 0 16px;
-            }
-            QPushButton:checked {
-                background: #6366f1;
-                border-color: #6366f1;
-                font-weight: bold;
-            }
-        """)
         return button
 
-    def _create_round_action_button(self, text: str, background: str) -> QPushButton:
-        button = QPushButton(text)
+    def _create_round_action_button(self, text: str, variant: str = "secondary") -> StyledButton:
+        button = StyledButton(
+            text,
+            variant=variant,
+            min_height=48,
+            min_width=48,
+            border_radius=24,
+            horizontal_padding=0,
+        )
         button.setFixedSize(48, 48)
-        button.setStyleSheet(f"""
-            QPushButton {{
-                background: {background};
-                color: white;
-                border: none;
-                border-radius: 24px;
+        button.setStyleSheet(
+            button.styleSheet()
+            + """
+            QPushButton {
                 font-size: 24px;
-            }}
-            QPushButton:hover {{
-                background: rgba(99, 102, 241, 0.85);
-            }}
-            QPushButton:disabled {{
-                background: rgba(255, 255, 255, 0.12);
-                color: rgba(255, 255, 255, 0.45);
-            }}
-        """)
+            }
+            """
+        )
         return button
 
-    def _create_link_button(self, text: str) -> QPushButton:
-        button = QPushButton(text)
+    def _create_link_button(self, text: str) -> StyledButton:
+        button = StyledButton(
+            text,
+            variant="text",
+            min_height=24,
+            horizontal_padding=4,
+            border_radius=4,
+        )
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-        button.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #7c3aed;
-                border: none;
-                padding: 0 4px;
-                min-height: 24px;
-            }
-            QPushButton:hover {
-                color: #a78bfa;
-            }
-            QPushButton:disabled {
-                color: rgba(255, 255, 255, 0.35);
-            }
-        """)
         return button
 
     def _create_toggle_switch(self) -> QCheckBox:
@@ -905,8 +739,8 @@ class RunProfileDialog(QDialog):
 
     def _set_ua_mode(self, mode: str) -> None:
         self._ua_mode = mode
-        self.ua_default_btn.setChecked(mode == "default")
-        self.ua_custom_btn.setChecked(mode == "custom")
+        self._set_mode_button_active(self.ua_default_btn, mode == "default")
+        self._set_mode_button_active(self.ua_custom_btn, mode == "custom")
         self.ua_value_edit.setReadOnly(mode == "default" or self._read_only)
         if mode == "default":
             self.ua_value_edit.setPlainText(self._generate_default_user_agent())
@@ -975,8 +809,8 @@ class RunProfileDialog(QDialog):
 
     def _set_sec_ch_ua_mode(self, mode: str, *, ensure_entries: bool = True) -> None:
         self._sec_ch_ua_mode = mode
-        self.sec_ch_ua_default_btn.setChecked(mode == "default")
-        self.sec_ch_ua_custom_btn.setChecked(mode == "custom")
+        self._set_mode_button_active(self.sec_ch_ua_default_btn, mode == "default")
+        self._set_mode_button_active(self.sec_ch_ua_custom_btn, mode == "custom")
         if mode == "custom" and ensure_entries and not getattr(self, "_sec_ch_ua_rows", []):
             self._ensure_default_sec_ch_ua_entries()
         self._sync_virtualbrowser_field_visibility()
@@ -1013,7 +847,7 @@ class RunProfileDialog(QDialog):
         version_edit.setMaximumWidth(120)
         version_edit.setText(version)
 
-        remove_btn = self._create_round_action_button("−", "#ff4d4f")
+        remove_btn = self._create_round_action_button("−", "danger")
         remove_btn.clicked.connect(lambda: self._remove_sec_ch_ua_entry(row_widget))
 
         row_layout.addWidget(brand_label)
@@ -1143,17 +977,8 @@ class RunProfileDialog(QDialog):
         self.ua_value_edit.setPlaceholderText("Mozilla/5.0 ...")
         self.ua_value_edit.setMinimumHeight(156)
         self.ua_value_edit.setFixedHeight(156)
-        self.ua_random_btn = QPushButton("随机")
+        self.ua_random_btn = StyledButton("随机", variant="primary", min_height=36, min_width=80, border_radius=4)
         self.ua_random_btn.setFixedSize(80, 36)
-        self.ua_random_btn.setStyleSheet("""
-            QPushButton {
-                background: #6366f1;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-        """)
         self.ua_random_btn.clicked.connect(self._randomize_user_agent)
         ua_value_layout.addWidget(self.ua_value_edit, 1)
         ua_value_layout.addWidget(self.ua_random_btn)
@@ -1187,14 +1012,13 @@ class RunProfileDialog(QDialog):
         sec_ch_action_layout = QHBoxLayout()
         sec_ch_action_layout.setContentsMargins(0, 0, 0, 0)
         sec_ch_action_layout.addStretch()
-        self.sec_ch_ua_add_btn = self._create_round_action_button("+", "#2f2f35")
+        self.sec_ch_ua_add_btn = self._create_round_action_button("+")
         self.sec_ch_ua_add_btn.clicked.connect(self._add_sec_ch_ua_entry)
         sec_ch_action_layout.addWidget(self.sec_ch_ua_add_btn)
         sec_ch_editor_layout.addLayout(sec_ch_action_layout)
         form.addRow("", self.sec_ch_ua_editor_widget)
 
         self.language_follow_ip_check = QCheckBox("语言跟随 IP")
-        self.language_follow_ip_check.setStyleSheet("color: white;")
         self.language_follow_ip_check.setChecked(True)
         self.language_follow_ip_check.stateChanged.connect(self._sync_virtualbrowser_field_visibility)
         form.addRow("", self.language_follow_ip_check)
@@ -1205,7 +1029,6 @@ class RunProfileDialog(QDialog):
         form.addRow("语言:", self.language_combo)
 
         self.timezone_follow_ip_check = QCheckBox("时区跟随 IP")
-        self.timezone_follow_ip_check.setStyleSheet("color: white;")
         self.timezone_follow_ip_check.setChecked(True)
         self.timezone_follow_ip_check.stateChanged.connect(self._sync_virtualbrowser_field_visibility)
         form.addRow("", self.timezone_follow_ip_check)
@@ -1227,7 +1050,6 @@ class RunProfileDialog(QDialog):
             [("询问", 0), ("允许", 1), ("禁止", 2)],
         )
         self.location_follow_ip_check = QCheckBox("地理位置跟随 IP")
-        self.location_follow_ip_check.setStyleSheet("color: white;")
         self.location_follow_ip_check.setChecked(True)
         self.location_follow_ip_check.stateChanged.connect(self._sync_virtualbrowser_field_visibility)
         form.addRow("", self.location_follow_ip_check)
@@ -1485,7 +1307,6 @@ class RunProfileDialog(QDialog):
         self.create_form.addRow("内核版本:", self.kernel_version_combo)
 
         self.randomize_fingerprint_check = QCheckBox("随机化指纹")
-        self.randomize_fingerprint_check.setStyleSheet("color: white;")
         self.randomize_fingerprint_check.toggled.connect(self._on_randomize_fingerprint_toggled)
         self.create_form.addRow("", self.randomize_fingerprint_check)
 
@@ -2111,17 +1932,17 @@ class RunProfileDialog(QDialog):
         if mode == "form":
             if not self._yaml_to_form(show_error=True):
                 self.stack.setCurrentIndex(1)
-                self.form_btn.setChecked(False)
-                self.yaml_btn.setChecked(True)
+                self._set_mode_button_active(self.form_btn, False)
+                self._set_mode_button_active(self.yaml_btn, True)
                 return
             self.stack.setCurrentIndex(0)
-            self.form_btn.setChecked(True)
-            self.yaml_btn.setChecked(False)
+            self._set_mode_button_active(self.form_btn, True)
+            self._set_mode_button_active(self.yaml_btn, False)
         else:
             self._form_to_yaml()
             self.stack.setCurrentIndex(1)
-            self.form_btn.setChecked(False)
-            self.yaml_btn.setChecked(True)
+            self._set_mode_button_active(self.form_btn, False)
+            self._set_mode_button_active(self.yaml_btn, True)
 
     def _provider_to_env_type(self, provider: str) -> EnvType:
         if provider == "bitbrowser":

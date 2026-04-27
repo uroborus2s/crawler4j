@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -41,6 +40,7 @@ from src.ui.components.dialog_async import open_dialog_async
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.message_dialog import MessageDialog, MessageKind
 from src.ui.components.progress_dialog import ProgressDialog
+from src.ui.components.text_edit import StyledTextEdit
 
 
 @dataclass
@@ -125,7 +125,7 @@ class ModuleInstallErrorDialog(QDialog):
     def __init__(self, diagnostics: InstallExceptionDiagnostics, parent: QWidget | None = None):
         super().__init__(parent)
         self._diagnostics = diagnostics
-        self._details_edit: QTextEdit | None = None
+        self._details_edit: StyledTextEdit | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -140,15 +140,6 @@ class ModuleInstallErrorDialog(QDialog):
             }
             QLabel {
                 color: white;
-            }
-            QTextEdit {
-                background: rgba(255, 255, 255, 0.06);
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                border-radius: 8px;
-                padding: 8px;
-                color: white;
-                selection-background-color: rgba(59, 130, 246, 0.45);
-                font-family: Menlo, Monaco, 'Courier New', monospace;
             }
             """
         )
@@ -185,9 +176,9 @@ class ModuleInstallErrorDialog(QDialog):
         details_title.setStyleSheet("font-size: 13px; font-weight: bold; color: white;")
         layout.addWidget(details_title)
 
-        self._details_edit = QTextEdit(self)
+        self._details_edit = StyledTextEdit(self, monospace=True)
         self._details_edit.setReadOnly(True)
-        self._details_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self._details_edit.setLineWrapMode(StyledTextEdit.LineWrapMode.NoWrap)
         self._details_edit.setPlainText(self._diagnostics.detail_text)
         self._details_edit.setMinimumHeight(320)
         layout.addWidget(self._details_edit, 1)

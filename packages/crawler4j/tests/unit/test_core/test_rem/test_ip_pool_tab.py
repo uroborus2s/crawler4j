@@ -1,5 +1,6 @@
 from src.core.rem.ip_pool import IPEntry, IPPool, IPStrategy
 from src.core.rem.proxy_probe import ProxyProbeResult
+from src.ui.components.button import StyledButton
 
 
 def _build_pool() -> IPPool:
@@ -69,6 +70,23 @@ def test_ip_pool_tab_entry_action_routes_probe(qtbot, monkeypatch):
     assert tested == ["entry-1"]
 
 
+def test_ip_pool_tab_uses_public_toolbar_buttons(qtbot, monkeypatch):
+    import src.core.rem.ui.ip_pool_tab as ip_pool_tab
+
+    monkeypatch.setattr(ip_pool_tab.IPPoolTab, "load_data", lambda self: None)
+
+    widget = ip_pool_tab.IPPoolTab()
+    qtbot.addWidget(widget)
+
+    buttons = widget.findChildren(StyledButton)
+    texts = {button.text() for button in buttons}
+
+    assert "+ 新建池" in texts
+    assert "刷新" in texts
+    assert "+ 添加 IP" in texts
+    assert "批量导入" in texts
+
+
 def test_ip_pool_tab_builds_probe_result_message(qtbot, monkeypatch):
     import src.core.rem.ui.ip_pool_tab as ip_pool_tab
 
@@ -135,3 +153,51 @@ def test_ip_pool_tab_probe_result_uses_public_message_dialog(qtbot, monkeypatch)
     assert captured["kind"] == "info"
     assert "出口 IP: 1.2.3.4" in captured["message"]
     assert "masked_proxy_url: socks5://demo:***@10.0.0.9:1080" in captured["details"]
+
+
+def test_ip_pool_tab_test_entry_uses_public_progress_dialog(qtbot, monkeypatch):
+    import src.core.rem.ui.ip_pool_tab as ip_pool_tab
+
+    monkeypatch.setattr(ip_pool_tab.IPPoolTab, "load_data", lambda self: None)
+
+    widget = ip_pool_tab.IPPoolTab()
+    qtbot.addWidget(widget)
+    pool = _build_pool()
+    widget._current_pool = pool
+
+    opened: list[tuple[str, str, bool]] = []
+    closed: list[str] = []
+
+    class FakeProgressDialog:
+        def close_progress(self):
+            closed.append("closed")
+
+    def fake_open_progress(parent, title, message, *, modal=False):
+        assert parent is widget
+        opened.append((title, message, modal))
+        return FakeProgressDialog()
+
+    monkeypatch.setattr(ip_pool_tab.ProgressDialog, "open_progress", staticmethod(fake_open_progress))
+    monkeypatch.setattr(widget, "_show_probe_result", lambda _result: None)
+
+    widget._test_entry("entry-1")
+
+    assert opened == [("代理测试中", "正在测试 1.1.1.1:8080，请稍候...", False)]
+    assert widget._progress_dialog is not None
+
+    widget._on_entry_test_finished(
+        ProxyProbeResult(
+            ok=True,
+            stage="probe",
+            protocol="socks5",
+            masked_proxy_url="socks5://demo:***@10.0.0.9:1080",
+            latency_ms=512,
+            exit_ip="1.2.3.4",
+            http_status=200,
+            detail="探针请求成功",
+            error_type=None,
+        )
+    )
+
+    assert closed == ["closed"]
+    assert widget._progress_dialog is None

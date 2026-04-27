@@ -200,3 +200,21 @@ def test_sky_data_table_action_cell_row_budget_fits_buttons(qtbot):
     assert action_buttons
     assert action_widget.sizeHint().height() >= max(button.height() for button in action_buttons) + 4
     assert table.table.rowHeight(0) >= action_widget.sizeHint().height() + 12
+
+
+def test_sky_data_table_can_disable_inline_loading_bar(qtbot):
+    table = SkyDataTable(
+        {
+            "columns": [{"key": "name", "label": "名称"}],
+            "features": {
+                "pagination": {"enabled": False},
+                "loading": {"inline": False, "disable_interaction": False},
+            },
+        }
+    )
+    qtbot.addWidget(table)
+
+    table.set_loading(True)
+
+    assert table.loading_bar.isHidden() is True
+    assert table.table.isEnabled() is True

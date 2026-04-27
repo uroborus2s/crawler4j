@@ -17,6 +17,7 @@ from src.core.mms.settings_store import get_module_settings_store
 from src.core.mms.ui.module_config_page import ModuleConfigPage
 from src.core.mms.ui.module_detail_page import ModuleDetailPage
 from src.ui.components.button import StyledButton
+from src.ui.components.line_edit import StyledLineEdit
 from src.ui.components.yaml_code_editor import YamlCodeEditor, YamlDisplayLexer
 
 from ._core_native_v1 import make_manifest, make_page_info, register_module, restore_module, write_module_tree
@@ -216,6 +217,23 @@ def test_module_detail_page_hides_navigation_and_workflow_scrollbars(qtbot, tmp_
     assert scroll_area is not None
     assert scroll_area.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     assert scroll_area.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+
+def test_module_detail_page_uses_public_header_and_repo_controls(qtbot, tmp_path):
+    module = _make_module(tmp_path)
+    module.manifest.upgrade_source.repo = "demo/repo"
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    page.set_module(module)
+
+    button_texts = {button.text(): button for button in page.findChildren(StyledButton)}
+    assert isinstance(button_texts["← 返回"], StyledButton)
+    assert isinstance(button_texts["保存 Token"], StyledButton)
+    assert isinstance(button_texts["测试连接"], StyledButton)
+    assert isinstance(button_texts["清除 Token"], StyledButton)
+    assert isinstance(button_texts["移除开发链接"], StyledButton)
+    assert isinstance(page.repo_token_edit, StyledLineEdit)
 
 
 def test_module_config_page_saves_standard_yaml_flow_mapping(qtbot, tmp_path, monkeypatch):

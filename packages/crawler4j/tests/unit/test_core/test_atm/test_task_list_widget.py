@@ -41,6 +41,19 @@ def test_task_list_widget_declares_wide_actions_column(qtbot, monkeypatch):
     assert name_column.get("stretch", False) is False
     assert actions_column["stretch"] is True
     assert task_list_widget.TaskListWidget.TABLE_SCHEMA["features"]["pagination"]["enabled"] is True
+    assert task_list_widget.TaskListWidget.TABLE_SCHEMA["features"]["loading"] == {
+        "inline": False,
+        "disable_interaction": False,
+    }
+
+
+def test_task_list_widget_uses_dialog_only_for_run_progress_not_inline_table_bar(qtbot, monkeypatch):
+    _task_list_widget, widget = _build_widget(qtbot, monkeypatch)
+
+    widget.table.set_loading(True)
+
+    assert widget.table.loading_bar.isHidden() is True
+    assert widget.table.table.isEnabled() is True
 
 
 def test_task_list_widget_renders_manual_batch_run_once_button(qtbot, monkeypatch):

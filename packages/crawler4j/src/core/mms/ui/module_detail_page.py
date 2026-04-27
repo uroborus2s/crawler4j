@@ -11,10 +11,8 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QScrollArea,
     QStackedWidget,
     QVBoxLayout,
@@ -27,7 +25,9 @@ from src.core.mms.service import get_module_service
 from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.module_config_page import ModuleConfigPage
 from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
+from src.ui.components.button import StyledButton
 from src.ui.components.confirm_dialog import ConfirmDialog
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
 
 
@@ -100,21 +100,7 @@ class ModuleDetailPage(QWidget):
         layout.setContentsMargins(16, 0, 16, 0)
         
         # 返回按钮
-        back_btn = QPushButton("← 返回")
-        back_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: rgba(255, 255, 255, 0.8);
-                border: none;
-                padding: 8px 12px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                color: white;
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 4px;
-            }
-        """)
+        back_btn = StyledButton("← 返回", variant="ghost", min_height=36, min_width=92)
         back_btn.clicked.connect(self.back_requested.emit)
         layout.addWidget(back_btn)
         
@@ -339,26 +325,18 @@ class ModuleDetailPage(QWidget):
             self.repo_token_edit = QLineEdit()
             self.repo_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
             self.repo_token_edit.setPlaceholderText("输入该仓库的 GitHub Token")
-            self.repo_token_edit.setStyleSheet(
-                "background: rgba(255, 255, 255, 0.08);"
-                "border: 1px solid rgba(255, 255, 255, 0.16);"
-                "border-radius: 6px; padding: 8px 10px; color: white;"
-            )
             card_layout.addWidget(self.repo_token_edit)
 
             token_actions = QHBoxLayout()
-            save_token_btn = QPushButton("保存 Token")
-            save_token_btn.setStyleSheet(self._repo_action_btn_style("#4ade80", "#111827"))
+            save_token_btn = StyledButton("保存 Token", variant="success", min_height=34, min_width=108)
             save_token_btn.clicked.connect(self._save_repo_token)
             token_actions.addWidget(save_token_btn)
 
-            test_token_btn = QPushButton("测试连接")
-            test_token_btn.setStyleSheet(self._repo_action_btn_style("#60a5fa", "white"))
+            test_token_btn = StyledButton("测试连接", variant="primary", min_height=34, min_width=108)
             test_token_btn.clicked.connect(self._test_repo_token)
             token_actions.addWidget(test_token_btn)
 
-            clear_token_btn = QPushButton("清除 Token")
-            clear_token_btn.setStyleSheet(self._repo_action_btn_style("#f87171", "white"))
+            clear_token_btn = StyledButton("清除 Token", variant="danger", min_height=34, min_width=108)
             clear_token_btn.clicked.connect(self._clear_repo_token)
             token_actions.addWidget(clear_token_btn)
             token_actions.addStretch()
@@ -389,18 +367,7 @@ class ModuleDetailPage(QWidget):
             notice.setStyleSheet("color: rgba(255,255,255,0.72); font-size: 13px;")
             card_layout.addWidget(notice)
 
-            remove_btn = QPushButton("移除开发链接")
-            remove_btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(248, 113, 113, 0.85);
-                    color: white;
-                    border: none;
-                    padding: 8px 14px;
-                    border-radius: 4px;
-                    font-weight: bold;
-                }
-                QPushButton:hover { background: rgba(248, 113, 113, 1); }
-            """)
+            remove_btn = StyledButton("移除开发链接", variant="danger", min_height=34, min_width=136)
             remove_btn.clicked.connect(self._remove_dev_link)
             card_layout.addWidget(remove_btn)
         
@@ -648,19 +615,6 @@ class ModuleDetailPage(QWidget):
 
         MessageDialog.information(self, result.title, result.message)
         self.back_requested.emit()
-
-    @staticmethod
-    def _repo_action_btn_style(background: str, foreground: str) -> str:
-        return (
-            "QPushButton {"
-            f"background: {background};"
-            f"color: {foreground};"
-            "border: none; padding: 8px 14px; border-radius: 4px; font-weight: bold;"
-            "}"
-            "QPushButton:hover {"
-            "border: 1px solid rgba(255, 255, 255, 0.18);"
-            "}"
-        )
 
     def _track_task(self, coroutine) -> None:
         task = asyncio.create_task(coroutine)

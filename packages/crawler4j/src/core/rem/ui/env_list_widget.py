@@ -804,7 +804,7 @@ class EnvListWidget(QWidget):
         job_id: str,
     ) -> None:
         try:
-            result = await self._import_job_service.import_and_run_with_job(
+            await self._import_job_service.import_and_run_with_job(
                 provider_name=provider_name,
                 env_names=env_names,
                 job_id=job_id,
@@ -812,18 +812,7 @@ class EnvListWidget(QWidget):
         except Exception as exc:
             await self._show_operation_error(str(exc))
             return
-        queued_count = max(0, len(result.envs) - len(result.task_ids))
         self.load_data()
-        await self._show_message_async(
-            "已开始执行",
-            (
-                f"已导入 {len(result.envs)} 个环境并关联任务。\n"
-                f"关联任务 ID: {result.job_id}\n"
-                f"已启动实例: {len(result.task_ids)} 个"
-                + (f"\n排队等待并发窗口: {queued_count} 个" if queued_count else "")
-            ),
-            kind="info",
-        )
 
     async def _async_destroy_env(self, env_id: str):
         try:

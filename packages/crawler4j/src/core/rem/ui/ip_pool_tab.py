@@ -15,7 +15,6 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -25,10 +24,12 @@ from src.core.foundation.logging import logger
 from src.core.rem.ip_pool import IPPool, IPStrategy, get_ip_pool_manager
 from src.core.rem.proxy_probe import ProxyProbeResult, probe_ip_entry
 from src.core.rem.ui.ip_pool_dialogs import AddIPDialog, AddPoolDialog, BatchImportDialog
+from src.ui.components.button import StyledButton
 from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
 from src.ui.components.message_dialog import MessageDialog
+from src.ui.components.progress_dialog import ProgressDialog
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +158,7 @@ class IPPoolTab(QWidget):
         self._worker: IPPoolWorkerThread | None = None
         self._pool_rows: list[dict[str, Any]] = []
         self._entry_rows: list[dict[str, Any]] = []
+        self._progress_dialog: ProgressDialog | None = None
         self._setup_ui()
         self.load_data()
     
@@ -169,29 +171,6 @@ class IPPoolTab(QWidget):
             QLabel {
                 color: #cdd6f4;
                 font-size: 14px;
-            }
-            QPushButton {
-                background-color: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 6px;
-                padding: 8px 16px;
-                color: white;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.15);
-                border-color: rgba(99, 102, 241, 0.5);
-            }
-            QPushButton:disabled {
-                background-color: rgba(255, 255, 255, 0.05);
-                color: #666666;
-            }
-            QPushButton#danger {
-                background-color: rgba(255, 118, 117, 0.2);
-                border-color: rgba(255, 118, 117, 0.3);
-                color: #FF7675;
-            }
-            QPushButton#danger:hover {
-                background-color: rgba(255, 118, 117, 0.3);
             }
             QSplitter::handle {
                 background-color: rgba(255, 255, 255, 0.1);
@@ -212,11 +191,11 @@ class IPPoolTab(QWidget):
         pool_toolbar.addWidget(QLabel("IP 池列表"))
         pool_toolbar.addStretch()
         
-        add_pool_btn = QPushButton("+ 新建池")
+        add_pool_btn = StyledButton("+ 新建池", variant="success", min_height=36)
         add_pool_btn.clicked.connect(self._add_pool)
         pool_toolbar.addWidget(add_pool_btn)
         
-        refresh_btn = QPushButton("刷新")
+        refresh_btn = StyledButton("刷新", variant="primary", min_height=36)
         refresh_btn.clicked.connect(self.load_data)
         pool_toolbar.addWidget(refresh_btn)
         
@@ -242,12 +221,12 @@ class IPPoolTab(QWidget):
         entry_toolbar.addWidget(self.entry_title)
         entry_toolbar.addStretch()
         
-        self.add_ip_btn = QPushButton("+ 添加 IP")
+        self.add_ip_btn = StyledButton("+ 添加 IP", variant="success", min_height=36)
         self.add_ip_btn.clicked.connect(self._add_ip)
         self.add_ip_btn.setEnabled(False)
         entry_toolbar.addWidget(self.add_ip_btn)
         
-        self.batch_import_btn = QPushButton("批量导入")
+        self.batch_import_btn = StyledButton("批量导入", variant="warning", min_height=36)
         self.batch_import_btn.clicked.connect(self._batch_import)
         self.batch_import_btn.setEnabled(False)
         entry_toolbar.addWidget(self.batch_import_btn)
@@ -450,6 +429,7 @@ class IPPoolTab(QWidget):
     
     def _on_error(self, error: str) -> None:
         """错误处理。"""
+        self._close_progress_dialog()
         MessageDialog.warning(self, "错误", error)
 
     def _test_entry(self, entry_id: str) -> None:
@@ -459,22 +439,33 @@ class IPPoolTab(QWidget):
         if entry is None:
             MessageDialog.warning(self, "错误", "未找到该 IP 条目")
             return
-        self.entry_table.set_loading(True)
+        self._show_progress_dialog("代理测试中", f"正在测试 {entry.address}:{entry.port}，请稍候...")
         self._worker = IPPoolWorkerThread("test_entry", entry=entry)
         self._worker.finished.connect(self._on_entry_test_finished)
         self._worker.error.connect(self._on_entry_test_error)
         self._worker.start()
 
     def _on_entry_test_finished(self, result: object) -> None:
-        self.entry_table.set_loading(False)
+        self._close_progress_dialog()
         if not isinstance(result, ProxyProbeResult):
             MessageDialog.warning(self, "错误", "代理测试返回了未知结果")
             return
         self._show_probe_result(result)
 
     def _on_entry_test_error(self, error: str) -> None:
-        self.entry_table.set_loading(False)
+        self._close_progress_dialog()
         MessageDialog.warning(self, "代理测试失败", error)
+
+    def _show_progress_dialog(self, title: str, message: str) -> None:
+        self._close_progress_dialog()
+        self._progress_dialog = ProgressDialog.open_progress(self, title, message, modal=False)
+
+    def _close_progress_dialog(self) -> None:
+        if self._progress_dialog is None:
+            return
+        dialog = self._progress_dialog
+        self._progress_dialog = None
+        dialog.close_progress()
 
     def _build_probe_result_dialog(self, result: ProxyProbeResult) -> ProxyProbeDialogPayload:
         return ProxyProbeDialogPayload(

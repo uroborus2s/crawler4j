@@ -5,7 +5,7 @@ from typing import Literal, cast
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QPushButton
 
-ButtonVariant = Literal["primary", "secondary", "success", "warning", "danger"]
+ButtonVariant = Literal["primary", "secondary", "success", "warning", "danger", "ghost", "text"]
 
 
 class StyledButton(QPushButton):
@@ -55,6 +55,20 @@ class StyledButton(QPushButton):
             "weight": "700",
             "color": "#19070a",
         },
+        "ghost": {
+            "background": "transparent",
+            "hover": "rgba(255, 255, 255, 0.08)",
+            "border": "1px solid rgba(255, 255, 255, 0.12)",
+            "weight": "500",
+            "color": "rgba(255, 255, 255, 0.82)",
+        },
+        "text": {
+            "background": "transparent",
+            "hover": "transparent",
+            "border": "none",
+            "weight": "600",
+            "color": "#a78bfa",
+        },
     }
 
     def __init__(
@@ -76,6 +90,12 @@ class StyledButton(QPushButton):
         self.setMinimumHeight(min_height)
         if min_width is not None:
             self.setMinimumWidth(min_width)
+
+    def set_variant(self, variant: ButtonVariant) -> None:
+        if variant == self._variant:
+            return
+        self._variant = variant
+        self._apply_style()
 
     def _apply_style(self) -> None:
         palette = self._VARIANT_STYLES[self._variant]

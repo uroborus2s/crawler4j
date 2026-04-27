@@ -6,6 +6,7 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QPushButton
 
 from src.core.system.preferences_service import PREFERENCE_DEFAULTS, PreferenceKey
+from src.ui.components.button import StyledButton
 
 
 class _DummyPreferences:
@@ -53,6 +54,7 @@ def test_settings_about_page_embeds_full_about_content_without_details_button(qt
     assert any(about_dialog_module.DOCS_URL in text for text in label_texts)
     assert "🔍 检查更新" in button_texts
     assert "📋 完整信息" not in button_texts
+    assert isinstance(about_page.findChild(StyledButton), StyledButton)
     assert page.reset_btn.isHidden()
 
 
@@ -83,3 +85,4 @@ def test_about_dialog_still_provides_full_content(qtbot, monkeypatch):
     assert "蛛行演略 · crawler4j" in label_texts
     assert any(about_dialog_module.DOCS_URL in text for text in label_texts)
     assert "🔍 检查更新" in button_texts
+    assert isinstance(dialog.findChild(StyledButton), StyledButton)

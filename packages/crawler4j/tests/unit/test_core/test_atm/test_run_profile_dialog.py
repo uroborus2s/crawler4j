@@ -14,6 +14,9 @@ from src.core.atm.run_profile import (
     ResourceConfig,
     RunProfile,
 )
+from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox
+from src.ui.components.text_edit import StyledPlainTextEdit
 from src.ui.components.yaml_code_editor import YamlCodeEditor
 
 
@@ -472,6 +475,27 @@ def test_run_profile_dialog_toggle_switch_click_updates_state(qtbot, monkeypatch
 
     assert dialog.dnt_check.isChecked() is True
     assert dialog.hardware_accel_check.isChecked() is False
+
+
+def test_run_profile_dialog_uses_public_buttons_and_inputs(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog.form_btn, StyledButton)
+    assert isinstance(dialog.yaml_btn, StyledButton)
+    assert isinstance(dialog.ua_default_btn, StyledButton)
+    assert isinstance(dialog.ua_custom_btn, StyledButton)
+    assert isinstance(dialog.ua_random_btn, StyledButton)
+    assert isinstance(dialog.ua_value_edit, StyledPlainTextEdit)
+    assert isinstance(dialog.launch_args_edit, StyledPlainTextEdit)
+    assert isinstance(dialog.language_follow_ip_check, StyledCheckBox)
+    assert isinstance(dialog.timezone_follow_ip_check, StyledCheckBox)
+    assert isinstance(dialog.location_follow_ip_check, StyledCheckBox)
+    assert isinstance(dialog.randomize_fingerprint_check, StyledCheckBox)
 
 
 def test_run_profile_dialog_defaults_new_create_mode_to_random_fingerprint(qtbot, monkeypatch):

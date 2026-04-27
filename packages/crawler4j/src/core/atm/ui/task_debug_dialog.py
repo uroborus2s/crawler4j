@@ -8,17 +8,14 @@ import json
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QDialog,
     QFormLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
-    QTextEdit,
     QVBoxLayout,
 )
 
@@ -32,9 +29,12 @@ from src.core.debug.vscode import ensure_vscode_attach_config
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo
 from src.core.atm.run_profile import RunProfile
+from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox as QCheckBox
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.spin_box import StyledSpinBox
+from src.ui.components.text_edit import StyledTextEdit
 
 
 class JobDebugDialog(QDialog):
@@ -91,36 +91,6 @@ class JobDebugDialog(QDialog):
                 color: #e5e7eb;
                 background: transparent;
             }
-            QCheckBox {
-                color: rgba(255, 255, 255, 0.82);
-                background: transparent;
-                spacing: 8px;
-            }
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                border-radius: 4px;
-                border: 1px solid rgba(255, 255, 255, 0.18);
-                background: rgba(255, 255, 255, 0.06);
-            }
-            QCheckBox::indicator:hover {
-                border-color: rgba(99, 102, 241, 0.7);
-                background: rgba(255, 255, 255, 0.1);
-            }
-            QCheckBox::indicator:checked {
-                background: rgba(99, 102, 241, 0.95);
-                border-color: rgba(99, 102, 241, 0.95);
-            }
-            QPushButton {
-                background: rgba(255, 255, 255, 0.08);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                padding: 8px 14px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.14);
-            }
             """
         )
         root_layout = QVBoxLayout(self)
@@ -147,38 +117,11 @@ class JobDebugDialog(QDialog):
         header.addWidget(title)
         header.addStretch()
 
-        self.start_btn = QPushButton("开始调试")
-        self.restart_btn = QPushButton("重新开始")
-        self.stop_btn = QPushButton("停止")
-        self.vscode_btn = QPushButton("生成 VS Code 配置")
-        self.copy_attach_btn = QPushButton("复制附加地址")
-        for btn in [self.start_btn, self.restart_btn, self.stop_btn, self.vscode_btn, self.copy_attach_btn]:
-            btn.setStyleSheet(
-                """
-                QPushButton {
-                    background: rgba(99, 102, 241, 0.8);
-                    color: white;
-                    border: none;
-                    padding: 8px 14px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover { background: rgba(99, 102, 241, 1); }
-                QPushButton:disabled { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.4); }
-                """
-            )
-        self.stop_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(248, 113, 113, 0.8);
-                color: white;
-                border: none;
-                padding: 8px 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(248, 113, 113, 1); }
-            QPushButton:disabled { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.4); }
-            """
-        )
+        self.start_btn = StyledButton("开始调试", variant="primary", min_height=36, min_width=108)
+        self.restart_btn = StyledButton("重新开始", variant="primary", min_height=36, min_width=108)
+        self.stop_btn = StyledButton("停止", variant="danger", min_height=36, min_width=96)
+        self.vscode_btn = StyledButton("生成 VS Code 配置", variant="secondary", min_height=36, min_width=156)
+        self.copy_attach_btn = StyledButton("复制附加地址", variant="secondary", min_height=36, min_width=128)
         header.addWidget(self.start_btn)
         header.addWidget(self.restart_btn)
         header.addWidget(self.stop_btn)
@@ -251,21 +194,8 @@ class JobDebugDialog(QDialog):
         self.stop_on_entry_checkbox = QCheckBox("启动后立即断住")
         self.keep_environment_checkbox = QCheckBox("调试后保留环境")
 
-        self.params_editor = QTextEdit()
+        self.params_editor = StyledTextEdit(monospace=True)
         self.params_editor.setMinimumHeight(180)
-        self.params_editor.setStyleSheet(
-            """
-            QTextEdit {
-                background: rgba(20, 20, 30, 0.9);
-                color: #e5e7eb;
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 6px;
-                padding: 10px;
-                font-family: 'SF Mono', 'Consolas', monospace;
-                font-size: 13px;
-            }
-            """
-        )
 
         form.addRow("附加端口", self.attach_port_spin)
         form.addRow("执行超时", self.timeout_spin)
@@ -316,23 +246,17 @@ class JobDebugDialog(QDialog):
         status_layout.addWidget(self.error_value, 4, 1)
         layout.addWidget(status_card)
 
-        self.logs_view = QTextEdit()
+        self.logs_view = StyledTextEdit(
+            monospace=True,
+            background="rgba(12, 12, 18, 0.96)",
+            hover_background="rgba(18, 18, 28, 0.98)",
+            focus_background="rgba(18, 18, 28, 0.98)",
+            font_size=12,
+            border_radius=8,
+        )
         self.logs_view.setReadOnly(True)
         self.logs_view.setMinimumHeight(160)
         self.logs_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.logs_view.setStyleSheet(
-            """
-            QTextEdit {
-                background: rgba(12, 12, 18, 0.96);
-                color: #d1d5db;
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 8px;
-                padding: 10px;
-                font-family: 'SF Mono', 'Consolas', monospace;
-                font-size: 12px;
-            }
-            """
-        )
         layout.addWidget(self.logs_view, 1)
 
         footer = QFrame(self)
@@ -341,7 +265,7 @@ class JobDebugDialog(QDialog):
         footer_layout.setContentsMargins(20, 0, 20, 20)
         footer_layout.setSpacing(12)
         footer_layout.addStretch()
-        self.close_btn = QPushButton("关闭")
+        self.close_btn = StyledButton("关闭", variant="secondary", min_height=36, min_width=92)
         self.close_btn.clicked.connect(self.accept)
         footer_layout.addWidget(self.close_btn)
         root_layout.addWidget(footer)

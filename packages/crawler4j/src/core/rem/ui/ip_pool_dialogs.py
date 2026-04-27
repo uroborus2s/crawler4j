@@ -17,7 +17,6 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
     QVBoxLayout,
 )
 
@@ -27,6 +26,7 @@ from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
+from src.ui.components.text_edit import StyledPlainTextEdit as QPlainTextEdit
 
 
 class AddPoolDialog(QDialog):
@@ -57,16 +57,6 @@ class AddPoolDialog(QDialog):
             QLabel {
                 color: #cdd6f4;
                 background-color: transparent;
-            }
-            QLineEdit, QSpinBox, QPlainTextEdit {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #cdd6f4;
-            }
-            QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {
-                border-color: #89b4fa;
             }
         """)
     
@@ -137,16 +127,6 @@ class AddIPDialog(QDialog):
             QLabel {
                 color: #cdd6f4;
                 background-color: transparent;
-            }
-            QLineEdit, QSpinBox {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #cdd6f4;
-            }
-            QLineEdit:focus, QSpinBox:focus {
-                border-color: #89b4fa;
             }
         """)
     
@@ -252,16 +232,6 @@ class BatchImportDialog(QDialog):
             QLabel {
                 color: #cdd6f4;
                 background-color: transparent;
-            }
-            QLineEdit, QSpinBox, QPlainTextEdit {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #cdd6f4;
-            }
-            QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {
-                border-color: #89b4fa;
             }
         """)
     

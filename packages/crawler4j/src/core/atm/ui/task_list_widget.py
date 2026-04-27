@@ -63,6 +63,7 @@ class TaskListWidget(QWidget):
                 "default": [{"field": "name", "direction": "asc"}],
             },
             "pagination": {"enabled": True, "page_size": 20, "page_size_options": [10, 20, 50, 100]},
+            "loading": {"inline": False, "disable_interaction": False},
         },
     }
     REFRESH_EVENTS = (

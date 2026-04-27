@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -17,6 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox as QCheckBox
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
@@ -152,7 +152,6 @@ class ModuleInstallDialog(QDialog):
         )
 
         self.local_remember_check = QCheckBox("保存这个 Token，后续更新这个模块时自动使用")
-        self.local_remember_check.setStyleSheet("color: rgba(255,255,255,0.72);")
         layout.addWidget(self.local_remember_check)
         layout.addWidget(
             self._build_hint_label(
@@ -188,7 +187,6 @@ class ModuleInstallDialog(QDialog):
         )
 
         self.repo_remember_check = QCheckBox("保存这个 Token，后续更新这个仓库时自动使用")
-        self.repo_remember_check.setStyleSheet("color: rgba(255,255,255,0.72);")
         layout.addWidget(self.repo_remember_check)
         layout.addWidget(
             self._build_hint_label(

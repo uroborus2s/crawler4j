@@ -239,6 +239,7 @@ async def test_env_list_widget_delegates_import_task_startup_progress(qtbot, mon
         job_id="job-import",
     )
     widget._show_loading.assert_not_called()
+    widget._show_message_async.assert_not_awaited()
     widget.load_data.assert_called_once_with()
 
 
@@ -850,4 +851,5 @@ async def test_env_list_widget_import_existing_env_starts_background_job(qtbot, 
         env_names=["VB Env 101", "VB Env 102"],
         job_id="job-import",
     )
+    widget._show_message_async.assert_not_awaited()
     widget.load_data.assert_called_once_with()

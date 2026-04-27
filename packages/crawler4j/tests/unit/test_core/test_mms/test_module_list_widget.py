@@ -9,10 +9,13 @@ from src.core.mms.models import ModuleInfo, ModuleInstallError, ModuleManifest, 
 from src.core.mms.release_service import ModulePackagePreview, ModuleUpdateInfo
 from src.core.mms.models import UpgradeSourceInfo
 from src.core.mms.ui.module_list_widget import (
+    InstallExceptionDiagnostics,
     ModuleDisplayItem,
     ModuleListWidget,
+    ModuleInstallErrorDialog,
     build_install_exception_diagnostics,
 )
+from src.ui.components.text_edit import StyledTextEdit
 
 
 def _make_module(tmp_path: Path, *, source: ModuleSource) -> ModuleInfo:
@@ -60,6 +63,22 @@ def test_build_install_exception_diagnostics_uses_non_empty_fallback_summary():
     assert diagnostics.stage == "未提供"
     assert diagnostics.hint == "未提供"
     assert "SilentError" in diagnostics.traceback_text
+
+
+def test_module_install_error_dialog_uses_public_text_edit(qtbot):
+    dialog = ModuleInstallErrorDialog(
+        InstallExceptionDiagnostics(
+            summary="summary",
+            stage="stage",
+            hint="hint",
+            exception_type="ValueError",
+            traceback_text="traceback",
+            chain_text="ValueError",
+        )
+    )
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog._details_edit, StyledTextEdit)
 
 
 def test_refresh_button_forces_registry_refresh(qtbot, tmp_path, monkeypatch):

@@ -9,13 +9,13 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from src.core.system.update_service import get_update_service
 from src.core.system.version_service import get_version_service
+from src.ui.components.button import StyledButton
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.app_icon import load_app_icon_pixmap
 
@@ -41,20 +41,6 @@ class AboutContentWidget(QWidget):
             }
             QLabel {
                 color: white;
-            }
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                padding: 10px 24px;
-                border-radius: 6px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background: rgba(99, 102, 241, 1);
-            }
-            QPushButton:disabled {
-                background: rgba(99, 102, 241, 0.4);
             }
         """)
 
@@ -103,7 +89,7 @@ class AboutContentWidget(QWidget):
         btn_layout = QHBoxLayout(btn_container)
         btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.check_update_btn = QPushButton("🔍 检查更新")
+        self.check_update_btn = StyledButton("🔍 检查更新", variant="primary", min_height=40, min_width=136)
         self.check_update_btn.clicked.connect(self._on_check_update)
         btn_layout.addWidget(self.check_update_btn)
 

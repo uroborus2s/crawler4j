@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox
 from src.ui.components.line_edit import StyledLineEdit
 from src.core.mms.ui.module_install_dialog import ModuleInstallDialog
 
@@ -54,6 +55,8 @@ def test_module_install_dialog_uses_public_form_controls(qtbot):
     assert isinstance(dialog.local_token_input, StyledLineEdit)
     assert isinstance(dialog.repo_input, StyledLineEdit)
     assert isinstance(dialog.repo_token_input, StyledLineEdit)
+    assert isinstance(dialog.local_remember_check, StyledCheckBox)
+    assert isinstance(dialog.repo_remember_check, StyledCheckBox)
     assert isinstance(dialog.findChild(StyledButton, "moduleInstallBrowseButton"), StyledButton)
     assert isinstance(dialog.findChild(StyledButton, "moduleInstallCancelButton"), StyledButton)
     assert isinstance(dialog.findChild(StyledButton, "moduleInstallStartButton"), StyledButton)

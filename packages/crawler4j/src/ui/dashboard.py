@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -22,6 +21,7 @@ from PyQt6.QtWidgets import (
 from src.core.atm import JobState, get_task_service
 from src.core.mms import ModuleStatus, get_module_registry
 from src.core.rem import EnvStatus
+from src.ui.components.button import StyledButton
 from src.ui.components.log_console import LogConsoleWidget
 from src.ui.components.stat_card import StatCard
 
@@ -50,18 +50,7 @@ class DashboardPage(QWidget):
         header.addWidget(title)
         header.addStretch()
         
-        self.refresh_btn = QPushButton("🔄 刷新")
-        self.refresh_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-size: 13px;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-        """)
+        self.refresh_btn = StyledButton("🔄 刷新", variant="primary", min_height=36, min_width=96)
         self.refresh_btn.clicked.connect(self.load_data)
         header.addWidget(self.refresh_btn)
         
