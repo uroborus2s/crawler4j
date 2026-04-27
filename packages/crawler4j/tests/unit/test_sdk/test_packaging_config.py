@@ -1359,6 +1359,7 @@ def test_deploy_windows_release_builds_sftp_commands_from_env(tmp_path):
         "-mkdir /srv/updates",
         "-mkdir /srv/updates/crawler4j",
         "-mkdir /srv/updates/crawler4j/win",
+        "cd /srv/updates/crawler4j/win",
         f"put {(source_dir / 'Setup.exe').resolve()} Setup.exe",
         f"put {(source_dir / 'releases.win.json').resolve()} releases.win.json",
     ]

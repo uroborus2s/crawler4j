@@ -81,6 +81,7 @@ def build_sftp_command(target: SFTPTarget, batch_file: Path) -> list[str]:
 
 def build_sftp_batch_commands(source_dir: Path, remote_dir: str) -> list[str]:
     commands = [f"-mkdir {directory}" for directory in _build_remote_directory_chain(remote_dir)]
+    commands.append(f"cd {_format_sftp_token(remote_dir)}")
     for item in sorted(source_dir.iterdir(), key=lambda path: path.name):
         local_path = _format_sftp_token(str(item.resolve()))
         remote_name = _format_sftp_token(item.name)
