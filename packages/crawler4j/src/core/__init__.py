@@ -7,5 +7,5 @@ Core 分为三层：
         - rem: 运行环境管理 (Runtime Environment Management)
         - mms: 模块管理系统 (Module Management System)
         - atm: 自动化任务管理 (Automation Task Management)
-        - system: 系统基础能力 (Version/Update/Preferences)
+        - system: 系统基础能力 (Version/Update/Config Center)
 """

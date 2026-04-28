@@ -13,9 +13,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.core.system.update_service import get_update_service
 from src.core.system.version_service import get_version_service
-from src.ui.components.button import StyledButton
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.app_icon import load_app_icon_pixmap
 
@@ -80,21 +78,6 @@ class AboutContentWidget(QWidget):
 
         layout.addStretch()
 
-        self.update_status_label = QLabel("")
-        self.update_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.update_status_label.setStyleSheet("font-size: 13px;")
-        layout.addWidget(self.update_status_label)
-
-        btn_container = QWidget()
-        btn_layout = QHBoxLayout(btn_container)
-        btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.check_update_btn = StyledButton("🔍 检查更新", variant="primary", min_height=40, min_width=136)
-        self.check_update_btn.clicked.connect(self._on_check_update)
-        btn_layout.addWidget(self.check_update_btn)
-
-        layout.addWidget(btn_container)
-
         layout.addStretch()
 
         copyright_label = QLabel("© 2024-2026 蛛行演略（crawler4j）项目组")
@@ -124,22 +107,6 @@ class AboutContentWidget(QWidget):
             self.build_label.setText(f"Build {build_info.commit_hash[:7]}")
         else:
             self.build_label.setText("Development Build")
-
-    def _on_check_update(self):
-        """检查更新按钮点击。"""
-        service = get_update_service()
-        self.update_status_label.setText("")
-
-        if service.check_for_updates():
-            self.update_status_label.setText(getattr(service, "last_action_message", "") or "✅ 已开始检查更新。")
-            self.update_status_label.setStyleSheet("font-size: 13px; color: #4ade80;")
-            return
-
-        self.update_status_label.setText(
-            getattr(service, "last_action_message", "") or service.availability_reason or "❌ 当前无法检查更新。"
-        )
-        self.update_status_label.setStyleSheet("font-size: 13px; color: #f87171;")
-
 
 class AboutDialog(QDialog):
     """关于弹窗。"""

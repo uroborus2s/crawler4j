@@ -109,18 +109,18 @@ def test_main_bootstraps_host_updater_before_starting_gui(monkeypatch):
     class StopAfterBootstrap(RuntimeError):
         pass
 
-    def fake_get_preferences_service():
-        observed.append("get_preferences_service")
+    def fake_get_config_center():
+        observed.append("get_config_center")
         raise StopAfterBootstrap
 
     monkeypatch.setattr(app, "bootstrap_host_updater", fake_bootstrap)
     monkeypatch.setattr(app, "init_database", fake_init_database)
-    monkeypatch.setattr(app, "get_preferences_service", fake_get_preferences_service)
+    monkeypatch.setattr(app, "get_config_center", fake_get_config_center)
 
     with pytest.raises(StopAfterBootstrap):
         app.main(["Crawler4j"])
 
-    assert observed == ["bootstrap", "init_database", "get_preferences_service"]
+    assert observed == ["bootstrap", "init_database", "get_config_center"]
 
 
 def test_main_disables_quit_on_last_window_closed_before_async_startup(monkeypatch):
@@ -163,10 +163,10 @@ def test_main_disables_quit_on_last_window_closed_before_async_startup(monkeypat
 
     monkeypatch.setattr(app, "bootstrap_host_updater", lambda: None)
     monkeypatch.setattr(app, "init_database", lambda: None)
-    monkeypatch.setattr(app, "get_preferences_service", lambda: object())
+    monkeypatch.setattr(app, "get_config_center", lambda: object())
     monkeypatch.setattr(app, "get_app_data_dir", lambda: Path("/tmp/crawler4j-tests"))
-    monkeypatch.setattr(app, "install_logging_preferences_sync", lambda prefs, *, log_dir: None)
-    monkeypatch.setattr(app, "install_update_preferences_sync", lambda prefs: None)
+    monkeypatch.setattr(app, "install_logging_config_sync", lambda config, *, log_dir: None)
+    monkeypatch.setattr(app, "install_update_config_sync", lambda config: None)
     monkeypatch.setattr(app, "QApplication", DummyApplication)
     monkeypatch.setattr(app, "load_app_icon", lambda: DummyIcon())
     monkeypatch.setattr(app, "install_qasync_timer_compat", lambda qasync_module: True)
@@ -208,10 +208,6 @@ async def test_run_application_shuts_down_after_last_window_closed(monkeypatch):
 
         def installEventFilter(self, event_filter) -> None:
             self._event_filters.append(event_filter)
-
-    class FakePrefs:
-        def get(self, key, default=None):
-            return False
 
     class FakeEnvironmentManager:
         async def startup(self) -> None:
@@ -256,7 +252,7 @@ async def test_run_application_shuts_down_after_last_window_closed(monkeypatch):
 
     fake_app = FakeApplication()
 
-    await app._run_application(fake_app, FakePrefs())
+    await app._run_application(fake_app)
 
     show_index = observed.index(("window", "show"))
     sleep_index = observed.index(("sleep", 0))
@@ -265,7 +261,6 @@ async def test_run_application_shuts_down_after_last_window_closed(monkeypatch):
     assert ("task_service", "stop") in observed
     assert ("debug_service", "shutdown") in observed
     assert ("playwright", "force_shutdown") in observed
-
 
 @pytest.mark.asyncio
 async def test_run_application_defers_quit_event_until_shutdown_finishes(monkeypatch):
@@ -292,10 +287,6 @@ async def test_run_application_defers_quit_event_until_shutdown_finishes(monkeyp
 
         def installEventFilter(self, event_filter) -> None:
             self._event_filters.append(event_filter)
-
-    class FakePrefs:
-        def get(self, key, default=None):
-            return False
 
     class FakeEnvironmentManager:
         async def startup(self) -> None:
@@ -342,7 +333,7 @@ async def test_run_application_defers_quit_event_until_shutdown_finishes(monkeyp
 
     fake_app = FakeApplication()
 
-    await app._run_application(fake_app, FakePrefs())
+    await app._run_application(fake_app)
 
     assert ("quit_event_handled", True) in observed
     assert ("task_service", "stop") in observed

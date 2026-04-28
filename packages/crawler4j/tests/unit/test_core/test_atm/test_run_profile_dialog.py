@@ -303,6 +303,26 @@ def test_run_profile_dialog_builds_select_mode_profile(qtbot, monkeypatch):
     assert profile.resource.acquisition.wait_timeout == 60
 
 
+def test_run_profile_dialog_separates_execution_timeout_from_wait_timeout(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("demo_module", "collect")
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("random_ready"))
+    dialog.wait_timeout_spin.setValue(30)
+    dialog.execution_timeout_spin.setValue(0)
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.resource.acquisition.wait_timeout == 30
+    assert profile.execution.timeout == 0
+
+
 def test_run_profile_dialog_builds_fixed_pool_select_profile_without_selector(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 

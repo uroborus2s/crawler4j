@@ -39,8 +39,8 @@ class AppLaunchResult:
 # 应用配置映射
 APP_CONFIG: dict[ExternalApp, dict[str, Any]] = {
     ExternalApp.BITBROWSER: {
-        "preference_key_path": "browser.bitbrowser.path",
-        "preference_key_port": "browser.bitbrowser.port",
+        "config_key_path": "browser.bitbrowser.path",
+        "config_key_port": "browser.bitbrowser.port",
         "default_port": 54345,
         "display_name": "BitBrowser",
         "process_names": {
@@ -57,8 +57,8 @@ APP_CONFIG: dict[ExternalApp, dict[str, Any]] = {
         },
     },
     ExternalApp.VIRTUALBROWSER: {
-        "preference_key_path": "browser.virtualbrowser.path",
-        "preference_key_port": "browser.virtualbrowser.port",
+        "config_key_path": "browser.virtualbrowser.path",
+        "config_key_port": "browser.virtualbrowser.port",
         "default_port": 9002,
         "display_name": "VirtualBrowser",
         "process_names": {
@@ -197,7 +197,7 @@ class ExternalAppService:
         app_path = self._get_app_path(app_enum)
         
         if not app_path:
-            msg = f"{display_name} 安装路径未配置，请在「设置 → 环境管理」中配置应用路径"
+            msg = f"{display_name} 安装路径未配置，请在「配置中心 → 外部浏览器」中配置应用路径"
             logger.error(f"[ExternalApp] {msg}")
             return AppLaunchResult(
                 success=False,
@@ -244,19 +244,19 @@ class ExternalAppService:
     # =========================================================================
     
     def _get_app_path(self, app: ExternalApp) -> str:
-        """从偏好设置获取应用路径，未配置时使用平台默认值。
+        """从配置中心获取应用路径，未配置时使用平台默认值。
         
         优先级:
-        1. 用户配置的路径 (PreferencesService)
+        1. 用户配置的路径
         2. 平台默认安装路径 (APP_CONFIG.default_paths)
         """
-        from src.core.system.preferences_service import get_preferences_service
+        from src.core.system.config_center import get_config_center
         
         config = APP_CONFIG[app]
-        prefs = get_preferences_service()
+        config_center = get_config_center()
         
         # 1. 用户配置优先
-        user_path = prefs.get(config["preference_key_path"], "")
+        user_path = config_center.get(config["config_key_path"])
         if user_path:
             return user_path
         
@@ -266,12 +266,11 @@ class ExternalAppService:
 
     
     def _get_app_port(self, app: ExternalApp) -> int:
-        """从偏好设置获取应用 API 端口。"""
-        from src.core.system.preferences_service import get_preferences_service
+        """从配置中心获取应用 API 端口。"""
+        from src.core.system.config_center import get_config_center
         
         config = APP_CONFIG[app]
-        prefs = get_preferences_service()
-        return prefs.get(config["preference_key_port"], config["default_port"])
+        return int(get_config_center().get(config["config_key_port"]))
     
     async def _check_port_available(self, port: int) -> bool:
         """检查端口是否有目标服务响应。

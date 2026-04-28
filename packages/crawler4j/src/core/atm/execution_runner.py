@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable
 
 from crawler4j_contracts import EnvAction, EnvCandidate, TaskContext, TaskResult, TaskSignal, TaskSignalAction
 from src.core.atm.models import Task, TaskStatus
+from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 from src.core.atm.runtime_capabilities import (
     RuntimeCapabilities,
     build_runtime_capabilities,
@@ -34,7 +35,7 @@ from src.core.rem.models import (
     ProxyConfig,
     ProxyMode,
 )
-from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
+from src.core.system.config_center import ConfigCenterService, get_config_center
 
 TaskUpdateCallback = Callable[[Task], Awaitable[None]]
 StopRequestedCallback = Callable[[], bool]
@@ -112,16 +113,31 @@ class ExecutionRunner:
         rem: EnvironmentManager | None = None,
         mms: ModuleService | None = None,
         settings_store: ModuleSettingsStore | None = None,
+        config: ConfigCenterService | None = None,
         runtime_capabilities_factory: Callable[[str], RuntimeCapabilities] = build_runtime_capabilities,
     ):
         self.rem = rem or get_environment_manager()
         self.mms = mms or get_module_service()
         self._settings_store = settings_store or get_module_settings_store()
+        self._config = config or get_config_center()
         self._runtime_capabilities_factory = runtime_capabilities_factory
         self._module_poll_interval = 0.1
-        self._terminal_hook_timeout_seconds = 8.0
-        self._cleanup_hook_timeout_seconds = 120.0
-        self._env_action_timeout_seconds = 15.0
+        self._terminal_hook_timeout_seconds = self._get_timeout_budget("atm.terminal_hook_timeout_seconds")
+        self._cleanup_hook_timeout_seconds = self._get_timeout_budget("atm.cleanup_hook_timeout_seconds")
+        self._env_action_timeout_seconds = self._get_timeout_budget("atm.env_action_timeout_seconds")
+        logger.debug(
+            "[ATM] ExecutionRunner timeout budgets loaded: "
+            f"terminal_hook={self._terminal_hook_timeout_seconds:.1f}s "
+            f"cleanup_hook={self._cleanup_hook_timeout_seconds:.1f}s "
+            f"env_action={self._env_action_timeout_seconds:.1f}s"
+        )
+
+    def _get_timeout_budget(self, key: str) -> float:
+        try:
+            return float(self._config.get(key))
+        except Exception as exc:
+            logger.warning(f"[ATM] Failed to load timeout config {key}: {exc}")
+            return float(self._config.registry.get_item(key).default)
 
     def _build_runtime_payload(self, request: ExecutionRequest, hooks_module: str) -> dict[str, Any]:
         return {
@@ -885,32 +901,60 @@ class ExecutionRunner:
         task_context: TaskContext,
         *args: Any,
     ) -> None:
+        started_at = time.monotonic()
+        task_id = self._task_log_id(task_context)
+        logger.debug(
+            f"[ATM] Terminal hook start: task={task_id} module={hooks_module} "
+            f"hook={hook_name} budget={self._terminal_hook_timeout_seconds:.1f}s"
+        )
         try:
             await asyncio.wait_for(
                 self.mms.call_hook(hooks_module, hook_name, task_context, *args),
                 timeout=self._terminal_hook_timeout_seconds,
             )
+            logger.debug(
+                f"[ATM] Terminal hook finished: task={task_id} module={hooks_module} "
+                f"hook={hook_name} duration={time.monotonic() - started_at:.3f}s"
+            )
         except asyncio.TimeoutError:
             logger.error(
-                f"[ATM] Task {task_context.task_name} terminal hook {hook_name} "
-                f"timed out after {self._terminal_hook_timeout_seconds:.1f}s"
+                f"[ATM] Terminal hook timeout: task={task_id} module={hooks_module} "
+                f"hook={hook_name} budget={self._terminal_hook_timeout_seconds:.1f}s "
+                f"duration={time.monotonic() - started_at:.3f}s"
             )
         except Exception as e:
-            logger.error(f"[ATM] Task {task_context.task_name} terminal hook {hook_name} failed: {e}")
+            logger.error(
+                f"[ATM] Terminal hook failed: task={task_id} module={hooks_module} "
+                f"hook={hook_name} duration={time.monotonic() - started_at:.3f}s error={e}"
+            )
 
     async def _call_cleanup_hook(self, hooks_module: str, task_context: TaskContext) -> None:
+        started_at = time.monotonic()
+        task_id = self._task_log_id(task_context)
+        logger.debug(
+            f"[ATM] Cleanup hook start: task={task_id} module={hooks_module} "
+            f"budget={self._cleanup_hook_timeout_seconds:.1f}s"
+        )
         try:
             await asyncio.wait_for(
                 self.mms.call_hook(hooks_module, "on_cleanup", task_context),
                 timeout=self._cleanup_hook_timeout_seconds,
             )
+            logger.debug(
+                f"[ATM] Cleanup hook finished: task={task_id} module={hooks_module} "
+                f"duration={time.monotonic() - started_at:.3f}s"
+            )
         except asyncio.TimeoutError:
             logger.error(
-                f"[ATM] Task {task_context.task_name} cleanup hook timed out after "
-                f"{self._cleanup_hook_timeout_seconds:.1f}s"
+                f"[ATM] Cleanup hook timeout: task={task_id} module={hooks_module} "
+                f"budget={self._cleanup_hook_timeout_seconds:.1f}s "
+                f"duration={time.monotonic() - started_at:.3f}s"
             )
         except Exception as e:
-            logger.error(f"[ATM] Task {task_context.task_name} cleanup hook failed: {e}")
+            logger.error(
+                f"[ATM] Cleanup hook failed: task={task_id} module={hooks_module} "
+                f"duration={time.monotonic() - started_at:.3f}s error={e}"
+            )
 
     async def _run_module_with_stop_guard(
         self,
@@ -1057,12 +1101,24 @@ class ExecutionRunner:
         return EnvAction.RECYCLE
 
     async def _await_env_action_step(self, label: str, operation: Awaitable[Any]) -> Any:
+        started_at = time.monotonic()
         try:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 operation,
                 timeout=self._env_action_timeout_seconds,
             )
+            logger.debug(
+                f"[ATM] Env action step finished: step={label} "
+                f"budget={self._env_action_timeout_seconds:.1f}s "
+                f"duration={time.monotonic() - started_at:.3f}s"
+            )
+            return result
         except asyncio.TimeoutError as exc:
+            logger.error(
+                f"[ATM] Env action step timeout: step={label} "
+                f"budget={self._env_action_timeout_seconds:.1f}s "
+                f"duration={time.monotonic() - started_at:.3f}s"
+            )
             raise TimeoutError(
                 f"{label} timed out after {self._env_action_timeout_seconds:.1f}s"
             ) from exc
@@ -1079,17 +1135,29 @@ class ExecutionRunner:
             "env_id": env_id,
             "success": False,
         }
+        logger.info(
+            f"[ATM] Applying env action: env_id={env_id} action={env_action.value} "
+            f"budget={self._env_action_timeout_seconds:.1f}s"
+        )
         try:
             if env_action == EnvAction.RECYCLE:
                 info["success"] = await self._await_env_action_step(
                     "release",
                     self.rem.release(env_lease),
                 )
+                logger.info(
+                    f"[ATM] Env action finished: env_id={env_id} "
+                    f"action={env_action.value} success={info['success']}"
+                )
                 return info
             if env_action == EnvAction.KEEP_ALIVE:
                 info["success"] = await self._await_env_action_step(
                     "release_keep_alive",
                     self.rem.release_keep_alive(env_lease),
+                )
+                logger.info(
+                    f"[ATM] Env action finished: env_id={env_id} "
+                    f"action={env_action.value} success={info['success']}"
                 )
                 return info
             if env_action == EnvAction.DESTROY:
@@ -1108,12 +1176,20 @@ class ExecutionRunner:
                 info["success"] = released and destroyed
                 info["released"] = released
                 info["destroyed"] = destroyed
+                logger.info(
+                    f"[ATM] Env action finished: env_id={env_id} action={env_action.value} "
+                    f"success={info['success']} released={released} destroyed={destroyed}"
+                )
                 return info
         except Exception as e:
             logger.error(f"[ATM] Failed to apply env action {env_action.value} for env {env_id}: {e}")
             info["error"] = str(e)
             return info
         raise ValueError(f"Unsupported env action: {env_action}")
+
+    def _task_log_id(self, task_context: TaskContext) -> str:
+        runtime = getattr(task_context, "runtime", {}) or {}
+        return str(runtime.get("task_id") or runtime.get("job_id") or task_context.task_name)
 
     def _resolve_requested_env_action(
         self,

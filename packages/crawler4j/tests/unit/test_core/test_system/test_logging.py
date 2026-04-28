@@ -6,8 +6,8 @@ import pytest
 
 from crawler4j_contracts import TaskContext
 from src.core.foundation.logging import logger
-from src.core.system.preferences_service import PreferenceKey, PreferencesService
-from src.ui.app import install_logging_preferences_sync
+from src.core.system.config_center import get_config_center
+from src.ui.app import install_logging_config_sync
 
 
 @pytest.fixture(autouse=True)
@@ -100,18 +100,18 @@ def test_app_logger_captures_structured_json_logs(tmp_path):
     assert '"failed_task_count": 0' in log_text
 
 
-def test_install_logging_preferences_sync_hot_updates_unique_logger(tmp_path):
-    prefs = PreferencesService()
-    prefs.set(PreferenceKey.LOG_LEVEL, "WARNING")
-    prefs.set(PreferenceKey.LOG_RETENTION, 5)
+def test_install_logging_config_sync_hot_updates_unique_logger(tmp_path):
+    config = get_config_center()
+    config.set("logging.level", "WARNING")
+    config.set("logging.retention_days", 5)
 
-    install_logging_preferences_sync(prefs, log_dir=tmp_path / "logs")
+    install_logging_config_sync(config, log_dir=tmp_path / "logs")
     assert logger.level == logging.WARNING
     assert logger._file_handler is not None
     assert logger._file_handler.backupCount == 5
 
-    prefs.set(PreferenceKey.LOG_LEVEL, "DEBUG")
-    prefs.set(PreferenceKey.LOG_RETENTION, 9)
+    config.set("logging.level", "DEBUG")
+    config.set("logging.retention_days", 9)
 
     assert logger.level == logging.DEBUG
     assert logger._file_handler is not None

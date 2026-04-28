@@ -10,10 +10,7 @@ from PyQt6.QtCore import QEvent, QObject
 from PyQt6.QtWidgets import QApplication
 
 from src.core.persistence import init_database
-from src.core.system.preferences_service import (
-    PreferenceKey,
-    get_preferences_service,
-)
+from src.core.system.config_center import get_config_center
 from src.ui.app_icon import load_app_icon
 from src.ui.qasync_compat import install_qasync_timer_compat
 from src.utils.paths import get_app_data_dir
@@ -65,45 +62,42 @@ class _ShutdownController(QObject):
         return super().eventFilter(watched, event)
 
 
-def install_logging_preferences_sync(prefs, *, log_dir: Path) -> None:
+def install_logging_config_sync(config, *, log_dir: Path) -> None:
     """把偏好设置绑定到唯一日志服务，支持热更新。"""
     from src.core.foundation.logging import logger
 
     def _apply() -> None:
         logger.configure(
             log_dir=log_dir,
-            level=prefs.get(PreferenceKey.LOG_LEVEL),
-            retention_days=prefs.get(PreferenceKey.LOG_RETENTION),
+            level=config.get("logging.level"),
+            retention_days=config.get("logging.retention_days"),
         )
 
-    def _on_preference_changed(key: str, _value, _requires_restart: bool) -> None:
-        if key not in {
-            PreferenceKey.LOG_LEVEL.value,
-            PreferenceKey.LOG_RETENTION.value,
-        }:
+    def _on_config_changed(key: str, _value, _effect: str) -> None:
+        if key not in {"logging.level", "logging.retention_days"}:
             return
         _apply()
 
     _apply()
-    prefs.preference_changed.connect(_on_preference_changed)
+    config.config_changed.connect(_on_config_changed)
 
 
-def install_update_preferences_sync(prefs) -> None:
+def install_update_config_sync(config) -> None:
     """把更新偏好设置绑定到应用更新服务。"""
     from src.core.system.update_service import get_update_service
 
     service = get_update_service()
 
     def _apply() -> None:
-        service.configure(auto_check=bool(prefs.get(PreferenceKey.AUTO_UPDATE, True)))
+        service.configure(auto_check=bool(config.get("system.auto_update")))
 
-    def _on_preference_changed(key: str, _value, _requires_restart: bool) -> None:
-        if key != PreferenceKey.AUTO_UPDATE.value:
+    def _on_config_changed(key: str, _value, _effect: str) -> None:
+        if key != "system.auto_update":
             return
         _apply()
 
     _apply()
-    prefs.preference_changed.connect(_on_preference_changed)
+    config.config_changed.connect(_on_config_changed)
 
 
 def bootstrap_host_updater() -> None:
@@ -223,11 +217,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # 初始化数据库
     init_database()
 
-    # 初始化唯一日志服务，并绑定日志偏好热更新
-    prefs = get_preferences_service()
+    # 初始化唯一日志服务，并绑定配置中心热更新
+    config = get_config_center()
     log_dir = get_app_data_dir() / "logs"
-    install_logging_preferences_sync(prefs, log_dir=log_dir)
-    install_update_preferences_sync(prefs)
+    install_logging_config_sync(config, log_dir=log_dir)
+    install_update_config_sync(config)
     from src.core.foundation.logging import logger
 
     # 创建应用
@@ -257,13 +251,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     shutdown_controller.bind_app(app)
 
     with loop:
-        loop.run_until_complete(_run_application(app, prefs, shutdown_controller=shutdown_controller))
+        loop.run_until_complete(_run_application(app, shutdown_controller=shutdown_controller))
     return 0
 
 
 async def _run_application(
     app: QApplication,
-    prefs,
     *,
     shutdown_controller: _ShutdownController | None = None,
 ) -> None:
@@ -283,10 +276,7 @@ async def _run_application(
     await task_service.start()
 
     window = _load_shell_class()()
-    if prefs.get(PreferenceKey.MINIMIZE_ON_START, False):
-        window.showMinimized()
-    else:
-        window.show()
+    window.show()
     # 保持“最后一个窗口关闭时不自动退出”，让 qasync 在窗口关闭后仍能继续驱动
     # 异步清理逻辑，避免 Qt 先停环导致 run_until_complete 误判为未完成。
     await asyncio.sleep(0)

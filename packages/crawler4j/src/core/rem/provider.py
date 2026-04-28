@@ -677,9 +677,9 @@ class BitBrowserProvider(BaseProvider):
     _client_port: int | None = None
     
     def _get_api_client(self) -> BitBrowserClient:
-        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
-        prefs = get_preferences_service()
-        port = prefs.get(PreferenceKey.BITBROWSER_PORT, 54345)
+        from src.core.system.config_center import get_config_center
+
+        port = get_config_center().get("browser.bitbrowser.port")
         
         # 配置变化时重建 Client
         if self._client_cache is None or self._client_port != port:
@@ -1430,10 +1430,11 @@ class VirtualBrowserProvider(BaseProvider):
     _client_config: tuple[int, str] | None = None  # (port, api_key)
 
     def _get_api_client(self) -> VirtualBrowserClient:
-        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
-        prefs = get_preferences_service()
-        port = prefs.get(PreferenceKey.VIRTUALBROWSER_PORT, 9002)
-        api_key = prefs.get(PreferenceKey.VIRTUALBROWSER_API_KEY, "")
+        from src.core.system.config_center import get_config_center
+
+        config = get_config_center()
+        port = config.get("browser.virtualbrowser.port")
+        api_key = config.get("browser.virtualbrowser.apikey")
         
         current_config = (port, api_key)
         

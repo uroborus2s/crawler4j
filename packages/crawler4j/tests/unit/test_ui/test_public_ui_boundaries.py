@@ -17,8 +17,8 @@ PUBLIC_UI_REFACTORED_PAGES = (
     CORE_UI_ROOT / "mms" / "ui" / "module_list_widget.py",
     CORE_UI_ROOT / "rem" / "ui" / "ip_pool_dialogs.py",
     CORE_UI_ROOT / "system" / "ui" / "about_dialog.py",
+    CORE_UI_ROOT / "system" / "ui" / "config_center_page.py",
     CORE_UI_ROOT / "system" / "ui" / "help_page.py",
-    CORE_UI_ROOT / "system" / "ui" / "settings_page.py",
 )
 
 
@@ -55,7 +55,7 @@ def test_core_ui_dialogs_use_public_titled_dialog_helper():
 
 
 def test_refactored_core_ui_pages_do_not_import_raw_form_widgets_from_qt() -> None:
-    forbidden = {"QPushButton", "QCheckBox", "QLineEdit", "QPlainTextEdit", "QTextEdit"}
+    forbidden = {"QPushButton", "QCheckBox", "QComboBox", "QLineEdit", "QPlainTextEdit", "QSpinBox", "QTextEdit"}
     offenders: list[str] = []
 
     for path in PUBLIC_UI_REFACTORED_PAGES:

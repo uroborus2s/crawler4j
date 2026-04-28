@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from src.core.system.config_center import get_config_center
 from src.core.system.update_service import UpdateAvailability, UpdateService
-from src.core.system.preferences_service import PreferenceKey, PreferencesService
-from src.ui.app import install_update_preferences_sync
+from src.ui.app import install_update_config_sync
 
 
 def test_update_service_stays_unsupported_when_no_backend_is_available(monkeypatch):
@@ -70,22 +70,27 @@ def test_update_service_surfaces_no_update_message(monkeypatch):
     assert service.last_action_message == "当前已是最新版本。"
 
 
-def test_install_update_preferences_sync_hot_updates_service(monkeypatch):
+def test_install_update_config_sync_hot_updates_service(monkeypatch, tmp_path):
     observed: list[bool] = []
 
     class DummyUpdateService:
         def configure(self, *, auto_check: bool) -> None:
             observed.append(auto_check)
 
-    prefs = PreferencesService()
-    prefs.set(PreferenceKey.AUTO_UPDATE, False)
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    from src.core.persistence.database import init_database
+
+    init_database()
+
+    config = get_config_center()
+    config.set("system.auto_update", False)
 
     monkeypatch.setattr(
         "src.core.system.update_service.get_update_service",
         lambda: DummyUpdateService(),
     )
 
-    install_update_preferences_sync(prefs)
-    prefs.set(PreferenceKey.AUTO_UPDATE, True)
+    install_update_config_sync(config)
+    config.set("system.auto_update", True)
 
     assert observed == [False, True]

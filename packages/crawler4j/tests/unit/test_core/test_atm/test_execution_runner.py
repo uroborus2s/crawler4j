@@ -84,7 +84,7 @@ def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[Ex
     return ExecutionRunner(rem=rem, mms=module_service), rem
 
 
-def test_execution_runner_uses_120_second_default_cleanup_timeout():
+def test_execution_runner_uses_configured_default_timeout_budgets():
     env, lease = _build_env()
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
@@ -93,8 +93,30 @@ def test_execution_runner_uses_120_second_default_cleanup_timeout():
 
     runner, _ = _build_runner(env, lease, module_service)
 
-    assert runner._terminal_hook_timeout_seconds == 8.0
-    assert runner._cleanup_hook_timeout_seconds == 120.0
+    assert runner._terminal_hook_timeout_seconds == 60.0
+    assert runner._cleanup_hook_timeout_seconds == 300.0
+    assert runner._env_action_timeout_seconds == 60.0
+
+
+def test_execution_runner_reads_timeout_budget_overrides_from_config_center():
+    from src.core.system.config_center import get_config_center
+
+    config = get_config_center()
+    config.set("atm.terminal_hook_timeout_seconds", 75)
+    config.set("atm.cleanup_hook_timeout_seconds", 240)
+    config.set("atm.env_action_timeout_seconds", 90)
+
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+        call_hook=AsyncMock(return_value=None),
+    )
+
+    runner, _ = _build_runner(env, lease, module_service)
+
+    assert runner._terminal_hook_timeout_seconds == 75.0
+    assert runner._cleanup_hook_timeout_seconds == 240.0
+    assert runner._env_action_timeout_seconds == 90.0
 
 
 def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:

@@ -23,9 +23,10 @@ class AsyncHttpClient:
         current_loop = asyncio.get_running_loop()
         
         # 获取代理配置
-        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
-        prefs = get_preferences_service()
-        proxy_mode = prefs.get(PreferenceKey.PROXY_MODE, "system")
+        from src.core.system.config_center import get_config_center
+
+        config = get_config_center()
+        proxy_mode = config.get("network.proxy_mode")
         trust_env = (proxy_mode == "system")
         
         # 检查是否需要重建会话 (Loop mismatch 或 trust_env 变更)
@@ -58,12 +59,13 @@ class AsyncHttpClient:
     @classmethod
     def _get_proxy(cls) -> str | None:
         """获取手动代理设置。"""
-        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
-        prefs = get_preferences_service()
-        mode = prefs.get(PreferenceKey.PROXY_MODE, "system")
+        from src.core.system.config_center import get_config_center
+
+        config = get_config_center()
+        mode = config.get("network.proxy_mode")
         
         if mode == "manual":
-            return prefs.get(PreferenceKey.HTTP_PROXY, "")
+            return config.get("network.http_proxy")
         return None
 
     @classmethod

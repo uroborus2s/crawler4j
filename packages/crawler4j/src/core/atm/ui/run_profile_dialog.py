@@ -44,6 +44,8 @@ from src.core.atm.run_profile import (
     ResourceConfig,
 )
 from src.core.atm.controller import selector_returns_none
+from src.core.foundation.logging import logger
+from src.core.system.config_center import get_config_center
 from src.ui.components.button import StyledButton
 from src.ui.components.check_box import StyledCheckBox as QCheckBox
 from src.ui.components.check_box import ToggleSwitch
@@ -1257,6 +1259,12 @@ class RunProfileDialog(QDialog):
         self.script_selector.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         form.addRow("执行脚本:", self.script_selector)
 
+        self.execution_timeout_spin = QSpinBox()
+        self.execution_timeout_spin.setRange(0, 7 * 24 * 60 * 60)
+        self.execution_timeout_spin.setValue(self._default_execution_timeout())
+        self.execution_timeout_spin.setToolTip("0 表示不自动中断模块主体；2 天为 172800 秒，3 天为 259200 秒。")
+        form.addRow("主体执行超时:", self._wrap_widget_with_suffix(self.execution_timeout_spin, "秒"))
+
         layout.addWidget(basic_group)
 
         sel_group = QGroupBox("资源定义")
@@ -2015,6 +2023,7 @@ class RunProfileDialog(QDialog):
 
         if s.execution and s.execution.module:
             self.script_selector.set_value(s.execution.module, s.execution.workflow)
+        self.execution_timeout_spin.setValue(s.execution.timeout if s.execution else self._default_execution_timeout())
         self._load_selector_options(acquisition.selector_name or None)
         self.wait_timeout_spin.setValue(acquisition.wait_timeout)
         self._set_resource_pool_value(acquisition.resource_pool or "")
@@ -2088,13 +2097,20 @@ class RunProfileDialog(QDialog):
             workflow=workflow_name,
             hooks_module=previous_execution.hooks_module if previous_execution else "",
             params=dict(previous_execution.params) if previous_execution else {},
-            timeout=previous_execution.timeout if previous_execution else 600,
+            timeout=self.execution_timeout_spin.value(),
         )
         
         return RunProfile(
             resource=resource,
             execution=execution,
         )
+
+    def _default_execution_timeout(self) -> int:
+        try:
+            return int(get_config_center().get("atm.default_execution_timeout_seconds"))
+        except Exception as exc:
+            logger.warning(f"读取默认任务执行超时失败，使用 600 秒: {exc}")
+            return 600
 
     def _form_to_yaml(self):
         try:

@@ -8,6 +8,7 @@
     - data.db: 业务数据（只写/批量读）
 """
 
+import json
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -106,7 +107,7 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
     
     Example:
         >>> with get_connection(CONFIG_DB) as conn:
-        ...     cursor = conn.execute("SELECT * FROM settings")
+        ...     cursor = conn.execute("SELECT * FROM config_entries")
         ...     rows = cursor.fetchall()
     """
     db_path = get_db_path(db_name)
@@ -467,6 +468,18 @@ def _init_config_db() -> None:
     """初始化配置数据库。"""
     with get_connection(CONFIG_DB) as conn:
         conn.executescript("""
+            -- 宿主配置中心条目表（按 namespace + key_path 路径化存储）
+            CREATE TABLE IF NOT EXISTS config_entries (
+                namespace TEXT NOT NULL,
+                scope_type TEXT NOT NULL DEFAULT 'global',
+                scope_name TEXT NOT NULL DEFAULT '',
+                key_path TEXT NOT NULL,
+                value_json TEXT NOT NULL,
+                value_type TEXT NOT NULL,
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (namespace, scope_type, scope_name, key_path)
+            );
+
             -- 模块配置条目表（按模块/工作流 + key_path 扁平化存储）
             CREATE TABLE IF NOT EXISTS module_config_entries (
                 module_name TEXT NOT NULL,
@@ -482,14 +495,80 @@ def _init_config_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_module_config_scope
             ON module_config_entries(module_name, scope_type, scope_name);
-            
-            -- 设置表（系统设置）
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-            );
         """)
+        _migrate_legacy_settings_to_config_entries(conn)
+        _delete_removed_host_config_entries(conn)
+
+
+def _split_legacy_setting_key(key: str) -> tuple[str, str]:
+    parts = [part for part in str(key or "").strip().split(".") if part]
+    if len(parts) >= 2 and parts[0] in {"browser", "mms"}:
+        return ".".join(parts[:2]), ".".join(parts[2:]) or parts[-1]
+    if len(parts) >= 2:
+        return parts[0], ".".join(parts[1:])
+    return "system", parts[0] if parts else "unknown"
+
+
+def _infer_legacy_setting_type(value_json: str) -> str:
+    try:
+        value = json.loads(value_json)
+    except Exception:
+        return "string"
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "string"
+
+
+def _migrate_legacy_settings_to_config_entries(conn: sqlite3.Connection) -> None:
+    legacy_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
+    ).fetchone()
+    if legacy_table is None:
+        return
+    rows = conn.execute("SELECT key, value, updated_at FROM settings").fetchall()
+    for row in rows:
+        namespace, key_path = _split_legacy_setting_key(row["key"])
+        conn.execute(
+            """
+            INSERT INTO config_entries (
+                namespace, scope_type, scope_name, key_path, value_json, value_type, updated_at
+            ) VALUES (?, 'global', '', ?, ?, ?, ?)
+            ON CONFLICT(namespace, scope_type, scope_name, key_path) DO UPDATE SET
+                value_json = excluded.value_json,
+                value_type = excluded.value_type,
+                updated_at = excluded.updated_at
+            """,
+            (
+                namespace,
+                key_path,
+                row["value"],
+                _infer_legacy_setting_type(row["value"]),
+                row["updated_at"],
+            ),
+        )
+    conn.execute("DROP TABLE settings")
+
+
+def _delete_removed_host_config_entries(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        DELETE FROM config_entries
+        WHERE namespace = 'system'
+          AND scope_type = 'global'
+          AND scope_name = ''
+          AND key_path IN ('autostart', 'minimize_on_start')
+        """
+    )
 
 
 def _init_state_db() -> None:

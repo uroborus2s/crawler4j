@@ -143,13 +143,9 @@ class EnvironmentManager:
     
     def __init__(self):
         """初始化环境管理器。"""
-        from src.core.system.preferences_service import (
-            PreferenceKey,
-            get_preferences_service,
-        )
+        from src.core.system.config_center import get_config_center
         
-        prefs = get_preferences_service()
-        max_instances = prefs.get(PreferenceKey.ENV_MAX_INSTANCES, 50)
+        max_instances = get_config_center().get("rem.max_instances")
         
         self.pool = EnvPool(max_instances=max_instances)
         self.lease_manager = LeaseManager(self.pool)
