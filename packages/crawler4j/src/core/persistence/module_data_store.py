@@ -200,7 +200,14 @@ def _record_status_columns(record: dict[str, Any]) -> tuple[str, str]:
     )
 
 
-def _record_from_storage_row(row) -> dict[str, Any]:
+def _record_json_payload(record: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(record)
+    payload.pop("run_status", None)
+    payload.pop("record_status", None)
+    return payload
+
+
+def _record_from_storage_row(row, *, include_system_fields: bool = False) -> dict[str, Any]:
     record = _normalize_records([json.loads(row["record_json"])])
     payload = record[0] if record else {}
     record_key = _normalize_text(row["record_key"])
@@ -208,6 +215,9 @@ def _record_from_storage_row(row) -> dict[str, Any]:
         payload.setdefault("record_key", record_key)
     payload["run_status"] = _normalize_text(row["run_status"]) or _DEFAULT_RUN_STATUS
     payload["record_status"] = _normalize_text(row["record_status"]) or _DEFAULT_RECORD_STATUS
+    if include_system_fields:
+        payload["created_at"] = row["created_at"]
+        payload["updated_at"] = row["updated_at"]
     return payload
 
 
@@ -848,7 +858,7 @@ class ModuleDataStore:
                             require_key=False,
                         ),
                         *_record_status_columns(record),
-                        json.dumps(record, ensure_ascii=False),
+                        json.dumps(_record_json_payload(record), ensure_ascii=False),
                         created_at,
                         now,
                     )
@@ -861,10 +871,12 @@ class ModuleDataStore:
         conn,
         module_name: str,
         dataset_name: str,
+        *,
+        include_system_fields: bool = False,
     ) -> list[dict[str, Any]] | None:
         rows = conn.execute(
             """
-            SELECT record_key, run_status, record_status, record_json
+            SELECT record_key, run_status, record_status, record_json, created_at, updated_at
             FROM module_datasets
             WHERE module_name = ? AND dataset_name = ?
             ORDER BY record_index ASC
@@ -873,7 +885,7 @@ class ModuleDataStore:
         ).fetchall()
         if not rows:
             return None
-        return [_record_from_storage_row(row) for row in rows]
+        return [_record_from_storage_row(row, include_system_fields=include_system_fields) for row in rows]
 
     def _custom_table_schema_columns(self, resource: dict[str, Any]) -> list[dict[str, Any]]:
         schema = _normalize_custom_table_schema(
@@ -1643,7 +1655,15 @@ class ModuleDataStore:
 
         with get_connection(DATA_DB) as conn:
             resource = self._require_resource_row_with_conn(conn, module_name, source_id)
-            rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"]) or []
+            rows = (
+                self._read_managed_dataset_rows_with_conn(
+                    conn,
+                    module_name,
+                    resource["logical_name"],
+                    include_system_fields=True,
+                )
+                or []
+            )
 
         filtered = rows
         for item in where:

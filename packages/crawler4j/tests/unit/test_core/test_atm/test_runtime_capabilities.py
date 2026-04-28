@@ -168,7 +168,19 @@ def test_runtime_ctx_db_replaces_public_db_tools(temp_data_dir):
     )
 
     assert not any(spec.name.startswith("db.") for spec in caps.tools.list_tools())
-    assert caps.db.into("accounts").replace([{"id": "u1"}, {"id": "u2"}]) is True
+    assert caps.db.into("accounts").replace(
+        [
+            {"id": "u1", "run_status": "占用中", "record_status": "active"},
+            {"id": "u2", "run_status": "空闲", "record_status": "blocked"},
+        ]
+    ) is True
+
+    all_rows = caps.db.from_("accounts").limit(10).execute()
+    assert all({"run_status", "record_status", "created_at", "updated_at"} <= set(row) for row in all_rows)
+    assert all(isinstance(row["created_at"], int) for row in all_rows)
+    assert all(isinstance(row["updated_at"], int) for row in all_rows)
+    assert all_rows[0]["run_status"] == "占用中"
+    assert all_rows[0]["record_status"] == "active"
 
     rows = (
         caps.db.from_("accounts")

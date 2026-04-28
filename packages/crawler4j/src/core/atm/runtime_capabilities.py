@@ -259,6 +259,16 @@ class CoreDatabaseTools:
             columns = self._columns_from_resource(resource)
             if not columns:
                 raise ValueError(f"数据源缺少 schema.columns，不能进入 ctx.db 查询面: {source_id}")
+            if source_kind == "snapshot":
+                column_names = {column["name"] for column in columns}
+                for system_column, column_type in (
+                    ("run_status", "text"),
+                    ("record_status", "text"),
+                    ("created_at", "int"),
+                    ("updated_at", "int"),
+                ):
+                    if system_column not in column_names:
+                        columns.append({"name": system_column, "type": column_type, "nullable": True})
             return {
                 "source": source_id,
                 "source_kind": source_kind,
