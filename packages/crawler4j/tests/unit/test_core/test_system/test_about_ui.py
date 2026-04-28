@@ -6,44 +6,46 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QPushButton
 
 
-def test_config_center_contains_update_controls(qtbot, monkeypatch, tmp_path):
-    import src.core.system.ui.about_dialog as about_dialog_module
-    import src.core.system.ui.config_center_page as config_center_page_module
+def test_about_page_contains_update_controls(qtbot, monkeypatch, tmp_path):
+    import src.core.system.ui.about_page as about_page_module
 
     monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
     from src.core.persistence.database import init_database
 
     init_database()
     monkeypatch.setattr(
-        about_dialog_module,
+        about_page_module,
         "get_version_service",
-        lambda: SimpleNamespace(get_build_info=lambda: SimpleNamespace(version="0.2.0", commit_hash=None)),
+        lambda: SimpleNamespace(get_build_info=lambda: SimpleNamespace(version="0.2.0", commit_hash="a1cd539")),
     )
     monkeypatch.setattr(
-        config_center_page_module,
-        "get_current_version",
-        lambda: "0.2.0",
-    )
-    monkeypatch.setattr(
-        config_center_page_module,
+        about_page_module,
         "get_update_service",
-        lambda: SimpleNamespace(check_for_updates=lambda: True, availability_reason=""),
+        lambda: SimpleNamespace(
+            check_for_updates=lambda: True,
+            configure=lambda **_kwargs: None,
+            is_supported=True,
+            availability_reason="",
+            last_action_message="",
+        ),
     )
     pixmap = QPixmap(16, 16)
     pixmap.fill()
-    monkeypatch.setattr(about_dialog_module, "load_app_icon_pixmap", lambda _size: pixmap)
+    monkeypatch.setattr(about_page_module, "load_app_icon_pixmap", lambda _size: pixmap)
 
-    page = config_center_page_module.ConfigCenterPage()
+    page = about_page_module.AboutPage()
     qtbot.addWidget(page)
     page.show()
-    page._domain_buttons["update"].click()
 
     label_texts = {label.text() for label in page.findChildren(QLabel)}
     button_texts = {button.text() for button in page.findChildren(QPushButton)}
 
     assert "自动检查更新" in label_texts
-    assert "当前版本：v0.2.0" in label_texts
+    assert "更新操作" in label_texts
+    assert "v0.2.0" in label_texts
+    assert "Build a1cd539" in label_texts
     assert "检查更新" in button_texts
+    assert "升级" in button_texts
 
 
 def test_about_dialog_provides_version_and_project_link_only(qtbot, monkeypatch):

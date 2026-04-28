@@ -9,10 +9,7 @@ from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QScrollArea, QStac
 
 from src.core.foundation.logging import logger
 from src.core.system.config_center import ConfigItemSpec, ConfigValidationError, get_config_center
-from src.core.system.update_service import get_update_service
-from src.core.system.version_service import get_current_version
 from src.ui.components.button import StyledButton
-from src.ui.components.card import Card
 from src.ui.components.check_box import ToggleSwitch
 from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.line_edit import StyledLineEdit
@@ -35,9 +32,14 @@ class ConfigCenterPage(QWidget):
 
     def _setup_ui(self) -> None:
         self.setObjectName("configCenterPage")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
             """
-            #configCenterPage {
+            #configCenterPage,
+            QWidget#configCenterContent,
+            QStackedWidget#configCenterStack,
+            QWidget#configDomainViewport,
+            QWidget#configDomainPage {
                 background: #1a1a24;
             }
             QLabel {
@@ -57,20 +59,26 @@ class ConfigCenterPage(QWidget):
                 font-size: 13px;
                 font-weight: 600;
             }
-            QWidget#configFieldRow, QWidget#updateActionRow {
-                background: rgba(255, 255, 255, 0.025);
-                border: 1px solid rgba(255, 255, 255, 0.055);
-                border-radius: 6px;
+            QLabel#configSectionTitle {
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 15px;
+                font-weight: 700;
+            }
+            QWidget#configSection, QWidget#configSectionBody, QWidget#configFieldRow {
+                background: transparent;
+                border: none;
+            }
+            QWidget#configRowDivider {
+                background: rgba(255, 255, 255, 0.08);
+                min-height: 1px;
+                max-height: 1px;
             }
             QLabel#statusLabel {
                 font-size: 12px;
             }
-            QScrollArea {
+            QScrollArea#configDomainScroll {
                 border: none;
-                background: transparent;
-            }
-            QStackedWidget {
-                background: transparent;
+                background: #1a1a24;
             }
             """
         )
@@ -82,6 +90,8 @@ class ConfigCenterPage(QWidget):
         layout.addWidget(self._create_sidebar())
 
         content = QWidget()
+        content.setObjectName("configCenterContent")
+        content.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(24, 24, 24, 20)
         content_layout.setSpacing(14)
@@ -106,6 +116,8 @@ class ConfigCenterPage(QWidget):
         content_layout.addLayout(header_row)
 
         self.content_stack = QStackedWidget()
+        self.content_stack.setObjectName("configCenterStack")
+        self.content_stack.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         for domain in self._config.registry.list_domains():
             page = self._create_domain_page(domain.id)
             self._domain_pages[domain.id] = page
@@ -154,12 +166,19 @@ class ConfigCenterPage(QWidget):
 
     def _create_domain_page(self, domain_id: str) -> QWidget:
         scroll = QScrollArea()
+        scroll.setObjectName("configDomainScroll")
+        scroll.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.viewport().setObjectName("configDomainViewport")
+        scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         page = QWidget()
+        page.setObjectName("configDomainPage")
+        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
+        layout.setSpacing(28)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         domain = next(item for item in self._config.registry.list_domains() if item.id == domain_id)
@@ -168,26 +187,58 @@ class ConfigCenterPage(QWidget):
             items = self._config.registry.list_items(domain=domain_id, section=section.id)
             if not items:
                 continue
-            card = Card(title=section.title, variant="group", gap=12, padding=(18, 16, 18, 16))
-            for spec in items:
-                card.content_layout.addWidget(self._create_field_row(spec))
-            if domain_id == "update" and section.id == "control":
-                card.content_layout.addWidget(self._create_update_action_row())
-            layout.addWidget(card)
+            section_widget = self._create_section_block(section.title)
+            body = section_widget.findChild(QWidget, "configSectionBody")
+            assert body is not None
+            body_layout = body.layout()
+            assert isinstance(body_layout, QVBoxLayout)
+            for index, spec in enumerate(items):
+                body_layout.addWidget(self._create_field_row(spec))
+                if index < len(items) - 1:
+                    body_layout.addWidget(self._create_row_divider())
+            layout.addWidget(section_widget)
 
         layout.addStretch()
         scroll.setWidget(page)
         return scroll
 
+    def _create_section_block(self, title: str) -> QWidget:
+        section = QWidget()
+        section.setObjectName("configSection")
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("configSectionTitle")
+        layout.addWidget(title_label)
+
+        body = QWidget()
+        body.setObjectName("configSectionBody")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
+        layout.addWidget(body)
+
+        return section
+
+    def _create_row_divider(self) -> QWidget:
+        divider = QWidget()
+        divider.setObjectName("configRowDivider")
+        divider.setFixedHeight(1)
+        return divider
+
     def _create_field_row(self, spec: ConfigItemSpec) -> QWidget:
         row = QWidget()
         row.setObjectName("configFieldRow")
-        row.setMinimumHeight(48)
+        row.setMinimumHeight(56)
         row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(14, 10, 14, 10)
-        row_layout.setSpacing(18)
+        row_layout.setContentsMargins(0, 14, 0, 14)
+        row_layout.setSpacing(24)
 
         label_block = QWidget()
+        label_block.setMinimumWidth(280)
+        label_block.setMaximumWidth(360)
         label_layout = QVBoxLayout(label_block)
         label_layout.setContentsMargins(0, 0, 0, 0)
         label_layout.setSpacing(4)
@@ -261,28 +312,6 @@ class ConfigCenterPage(QWidget):
         self._field_widgets[spec.key] = widget
         self._field_specs[spec.key] = spec
         return widget
-
-    def _create_update_action_row(self) -> QWidget:
-        row = QWidget()
-        row.setObjectName("updateActionRow")
-        row.setMinimumHeight(48)
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(12)
-
-        current_version = QLabel(f"当前版本：v{get_current_version()}")
-        current_version.setObjectName("fieldDescription")
-        layout.addWidget(current_version, 1)
-
-        self.update_status_label = QLabel("")
-        self.update_status_label.setObjectName("statusLabel")
-        layout.addWidget(self.update_status_label, 1)
-
-        self.check_update_btn = StyledButton("检查更新", variant="primary", min_height=34, min_width=104)
-        self.check_update_btn.clicked.connect(self._on_check_update)
-        layout.addWidget(self.check_update_btn)
-
-        return row
 
     def _select_domain(self, domain_id: str) -> None:
         self._current_domain = domain_id
@@ -360,17 +389,6 @@ class ConfigCenterPage(QWidget):
                 combo.setCurrentIndex(index)
                 return
         combo.setCurrentIndex(0)
-
-    def _on_check_update(self) -> None:
-        service = get_update_service()
-        self.update_status_label.setText("")
-        if service.check_for_updates():
-            message = getattr(service, "last_action_message", "") or "已开始检查更新。"
-            self.update_status_label.setStyleSheet("font-size: 12px; color: #4ade80;")
-        else:
-            message = getattr(service, "last_action_message", "") or service.availability_reason or "当前无法检查更新。"
-            self.update_status_label.setStyleSheet("font-size: 12px; color: #f87171;")
-        self.update_status_label.setText(message)
 
     def _show_status(self, message: str, *, success: bool) -> None:
         self.status_label.setText(message)

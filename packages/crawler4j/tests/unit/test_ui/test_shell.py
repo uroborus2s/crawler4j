@@ -32,6 +32,7 @@ def test_sidebar_includes_help_entry():
     from src.ui.shell import Sidebar
 
     assert ("help", "📘 使用文档") in Sidebar.NAV_ITEMS
+    assert Sidebar.NAV_ITEMS[-1] == ("about", "ℹ️ 关于")
 
 
 def test_shell_shows_env_operation_failed_toast_with_detail(qtbot, monkeypatch):

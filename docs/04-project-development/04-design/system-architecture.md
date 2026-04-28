@@ -88,9 +88,9 @@ Maintainer
 ### 宿主配置中心
 
 - 宿主级全局配置已收敛到 `ConfigCenterService` 和 `config.db.config_entries`，以 `namespace + scope_type + scope_name + key_path` 存储。
-- 配置中心 UI 按 schema 自动渲染 `系统 / 应用升级 / 网络 / 外部浏览器 / 任务运行 / 资源`，不再保留旧 `SettingsPage`、`PreferencesService` 或 `settings` 表。
+- 配置中心 UI 按 schema 自动渲染 `系统 / 网络 / 外部浏览器 / 任务运行 / 资源`，不再保留旧 `SettingsPage`、`PreferencesService` 或 `settings` 表。
 - 旧版 `settings` 表只在启动初始化时做一次迁移，迁入 `config_entries` 后立即删除；模块业务配置仍保留在 `module_config_entries` 和 MMS `settings_store`，不接入配置中心。
-- `system.auto_update` 仍作为兼容键存储，但 UI 已放入独立的 `应用升级` 域，并同步驱动 Sparkle / Velopack 自动检查行为。
+- `system.auto_update` 仍作为兼容键存储，但 UI 已从配置中心迁出，改由左侧一级 `关于` 页承载，并同步驱动 Sparkle / Velopack 自动检查行为。
 - ATM 收尾保护预算由配置中心管理，默认终态 hook `60s`、`on_cleanup` `300s`、环境动作 `60s`；这些预算只保护异常收尾，不替代运行模板里的业务执行超时。
 
 ### ATM 模块资源池等待队列

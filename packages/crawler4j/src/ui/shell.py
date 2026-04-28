@@ -162,6 +162,7 @@ class Sidebar(QFrame):
         ("modules", "📦 模块管理"),
         ("help", "📘 使用文档"),
         ("settings", "🔧 配置中心"),
+        ("about", "ℹ️ 关于"),
     ]
     
     def __init__(self, parent=None):
@@ -339,10 +340,11 @@ class Shell(QMainWindow):
         self.module_detail_page.back_requested.connect(self._back_to_modules)
         
         # 系统设置 - System UI
-        from src.core.system.ui import ConfigCenterPage
-        from src.core.system.ui import HelpPage
+        from src.core.system.ui import AboutPage, ConfigCenterPage, HelpPage
+
         self._add_page("help", HelpPage())
         self._add_page("settings", ConfigCenterPage())
+        self._add_page("about", AboutPage())
     
     def _add_page(self, page_id: str, widget: QWidget):
         self._pages[page_id] = widget

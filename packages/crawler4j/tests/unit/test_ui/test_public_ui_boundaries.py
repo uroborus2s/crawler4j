@@ -17,6 +17,7 @@ PUBLIC_UI_REFACTORED_PAGES = (
     CORE_UI_ROOT / "mms" / "ui" / "module_list_widget.py",
     CORE_UI_ROOT / "rem" / "ui" / "ip_pool_dialogs.py",
     CORE_UI_ROOT / "system" / "ui" / "about_dialog.py",
+    CORE_UI_ROOT / "system" / "ui" / "about_page.py",
     CORE_UI_ROOT / "system" / "ui" / "config_center_page.py",
     CORE_UI_ROOT / "system" / "ui" / "help_page.py",
 )

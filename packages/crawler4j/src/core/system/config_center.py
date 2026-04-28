@@ -125,14 +125,6 @@ DEFAULT_CONFIG_REGISTRY = ConfigRegistry(
             ),
         ),
         ConfigDomainSpec(
-            id="update",
-            title="应用升级",
-            order=20,
-            sections=(
-                ConfigSectionSpec("control", "升级", 10),
-            ),
-        ),
-        ConfigDomainSpec(
             id="network",
             title="网络",
             order=30,
@@ -199,8 +191,8 @@ DEFAULT_CONFIG_REGISTRY = ConfigRegistry(
             label="自动检查更新",
             value_type="bool",
             default=True,
-            domain="update",
-            section="control",
+            domain="about",
+            section="update",
             description="控制 Sparkle 或 Velopack 的自动检查行为。",
         ),
         ConfigItemSpec(
