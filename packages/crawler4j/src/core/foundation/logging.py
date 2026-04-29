@@ -100,6 +100,12 @@ def _level_name(level_no: int) -> str:
 
 _LOGGER_MIN_LEVEL_FLOORS: dict[str, int] = {
     "apscheduler": logging.WARNING,
+    # 调试模式应聚焦应用自身日志，避免底层事件循环/网络库把 UI 和文件日志打爆。
+    "asyncio": logging.WARNING,
+    "httpcore": logging.WARNING,
+    "httpx": logging.WARNING,
+    "qasync": logging.WARNING,
+    "urllib3": logging.WARNING,
 }
 
 

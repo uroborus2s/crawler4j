@@ -131,3 +131,20 @@ def test_apscheduler_periodic_info_is_suppressed_below_warning(tmp_path):
     assert "apscheduler-hidden-periodic-info" not in messages
     assert "apscheduler-visible-warning" in messages
     assert logging.getLogger("apscheduler").level == logging.WARNING
+
+
+def test_debug_level_keeps_crawler4j_debug_but_suppresses_qasync_noise(tmp_path):
+    log_dir = tmp_path / "logs"
+    logger._entries = []
+    logger.configure(log_dir=log_dir, level="DEBUG", retention_days=3)
+
+    logging.getLogger("crawler4j").debug("crawler4j-debug-visible")
+    qasync_logger = logging.getLogger("qasync._QThreadWorker")
+    qasync_logger.debug("qasync-hidden-debug")
+    qasync_logger.warning("qasync-visible-warning")
+
+    messages = [entry.message for entry in logger.get_entries(limit=20)]
+    assert "crawler4j-debug-visible" in messages
+    assert "qasync-hidden-debug" not in messages
+    assert "qasync-visible-warning" in messages
+    assert logging.getLogger("qasync").level == logging.WARNING
