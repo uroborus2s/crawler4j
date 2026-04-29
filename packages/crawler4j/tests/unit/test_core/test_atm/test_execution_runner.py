@@ -549,6 +549,38 @@ async def test_execution_runner_times_out_hanging_cleanup_hook_and_still_release
 
 
 @pytest.mark.asyncio
+async def test_execution_runner_continues_env_action_when_stopped_cleanup_starts_subtask():
+    request = _build_request()
+    env, lease = _build_env()
+
+    async def run_and_request_stop(_module_name, context):
+        context._subtask_executor = AsyncMock(return_value=TaskResult.ok(message="recorded"))
+        context.request_stop()
+        return TaskResult.ok(message="ok")
+
+    async def hook(_module_name, hook_name, context, *args):
+        if hook_name == "on_cleanup":
+            await context.run_subtask("record_pipeline_task")
+        return None
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(side_effect=run_and_request_stop),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
+    assert hook_names == ["prepare_env", "init_env", "before_run", "on_cleanup"]
+    assert request.task.status == TaskStatus.CANCELLED
+    assert request.task.error == "Job paused during execution"
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_execution_runner_cleans_up_created_env_when_acquisition_fails():
     request = _build_request()
     env, lease = _build_env()

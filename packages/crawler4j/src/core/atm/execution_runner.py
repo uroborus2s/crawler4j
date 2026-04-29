@@ -950,6 +950,19 @@ class ExecutionRunner:
                 f"budget={self._cleanup_hook_timeout_seconds:.1f}s "
                 f"duration={time.monotonic() - started_at:.3f}s"
             )
+        except asyncio.CancelledError as e:
+            current_task = asyncio.current_task()
+            if current_task and current_task.cancelling() and not task_context.should_stop():
+                raise
+            log_message = (
+                f"[ATM] Cleanup hook cancelled: task={task_id} module={hooks_module} "
+                f"duration={time.monotonic() - started_at:.3f}s "
+                f"error={str(e) or e.__class__.__name__}; continuing env action"
+            )
+            if task_context.should_stop():
+                logger.warning(log_message)
+            else:
+                logger.error(log_message)
         except Exception as e:
             logger.error(
                 f"[ATM] Cleanup hook failed: task={task_id} module={hooks_module} "

@@ -170,6 +170,8 @@ async def handle(context: TaskContext):
 
 文件名就是 Hook 名。宿主负责调度，不需要模块再注册。
 
+`on_cleanup` 是 best-effort 收尾阶段。它适合释放模块内存状态、账号占用、轻量审计标记等必须收口的内容；任务已被暂停或中止时，模块不要再从 cleanup 里启动新的 `ctx.run_subtask()`。如果确实需要写状态，优先直接写 `ctx.state` 或使用不依赖子任务调度的幂等逻辑，并用 `ctx.should_stop()` 跳过非必要记录。宿主会记录 cleanup 的超时、异常或 stop 状态触发的 `asyncio.CancelledError`，并继续执行后续环境关闭/回收动作。
+
 ## 环境选择器
 
 环境选择器文件导出：

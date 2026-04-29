@@ -10,6 +10,7 @@
 - When PyInstaller bundles third-party single-file modules, explicitly collect their shared resource trees and pass the consumer-expected subdirectory instead of assuming `collect_data_files()` or a generic asset root will line up automatically
 - Keep module-facing database access behind `TaskContext.db`; keep non-database Core extensions behind `TaskContext.tools`
 - Keep task lifecycle control behind one stable host-owned path (`hooks/*.py` + `TaskSignal`), not per-class callbacks, root shims, or run-profile teardown rules
+- Keep `on_cleanup` best-effort and never let stop-triggered `CancelledError` or hook failure block host-owned environment actions; module cleanup should avoid starting new subtasks after `TaskContext.should_stop()`
 - Treat fingerprint-browser CDP attachment as a warm-up phase: normalize host-returned endpoints first, then give Playwright multiple retries before declaring connect failure
 - Keep Hosted UI page registration and menu configuration separate: `pages/` owns routable `PAGE` modules, while `module.yaml.ui_extension.pages[]` only owns left-menu entries
 
