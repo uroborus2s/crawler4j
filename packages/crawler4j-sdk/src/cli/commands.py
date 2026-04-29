@@ -70,6 +70,21 @@ LEGACY_HOSTED_UI_PATHS: tuple[tuple[str, str], ...] = (
     ("strategy.yaml", "file"),
 )
 REQUIRED_RUNTIME_API = "core-native-v1"
+WORKFLOW_PARAMETER_TYPES = {"string", "text", "integer", "number", "boolean", "enum"}
+WORKFLOW_PARAMETER_KEYS = {
+    "name",
+    "label",
+    "type",
+    "description",
+    "required",
+    "default",
+    "options",
+    "min",
+    "max",
+    "step",
+    "placeholder",
+}
+WORKFLOW_PARAMETER_OPTION_KEYS = {"label", "value"}
 
 
 class CLIError(RuntimeError):
@@ -1036,6 +1051,97 @@ def _collect_legacy_hosted_ui_errors(module_root: Path) -> list[str]:
     return errors
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _collect_workflow_parameter_errors(manifest: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    workflows = manifest.get("workflows", [])
+    if not isinstance(workflows, list):
+        return errors
+
+    for workflow in workflows:
+        if not isinstance(workflow, dict):
+            continue
+        workflow_name = str(workflow.get("name", "") or "<unknown>").strip() or "<unknown>"
+        raw_parameters = workflow.get("parameters", [])
+        if raw_parameters is None:
+            continue
+        if not isinstance(raw_parameters, list):
+            errors.append(f"workflows[{workflow_name}].parameters 必须是数组")
+            continue
+
+        seen_names: set[str] = set()
+        for index, parameter in enumerate(raw_parameters):
+            owner = f"workflows[{workflow_name}].parameters[{index}]"
+            if not isinstance(parameter, dict):
+                errors.append(f"{owner} 必须是 YAML 映射对象")
+                continue
+
+            unknown_keys = sorted(set(parameter) - WORKFLOW_PARAMETER_KEYS)
+            if unknown_keys:
+                errors.append(f"{owner} 包含不支持的字段: {', '.join(unknown_keys)}")
+
+            parameter_name = str(parameter.get("name", "") or "").strip()
+            parameter_owner = (
+                f"workflows[{workflow_name}].parameters[{parameter_name}]"
+                if parameter_name
+                else owner
+            )
+            if not is_valid_name(parameter_name):
+                errors.append(f"{owner}.name 必须是小写 snake_case")
+            elif parameter_name in seen_names:
+                errors.append(f"workflows[{workflow_name}].parameters.name 重复: {parameter_name}")
+            else:
+                seen_names.add(parameter_name)
+
+            parameter_type = str(parameter.get("type", "string") or "string").strip().lower()
+            if parameter_type not in WORKFLOW_PARAMETER_TYPES:
+                errors.append(f"{parameter_owner}.type 不受支持: {parameter_type}")
+                continue
+
+            options = parameter.get("options", [])
+            if options is None:
+                options = []
+            if parameter_type == "enum":
+                if not isinstance(options, list):
+                    errors.append(f"{parameter_owner}.options 必须是数组")
+                elif not options:
+                    errors.append(f"{parameter_owner}.options 不能为空")
+                else:
+                    seen_values: set[str] = set()
+                    for option_index, option in enumerate(options):
+                        option_owner = f"{parameter_owner}.options[{option_index}]"
+                        if isinstance(option, dict):
+                            unknown_option_keys = sorted(set(option) - WORKFLOW_PARAMETER_OPTION_KEYS)
+                            if unknown_option_keys:
+                                errors.append(
+                                    f"{option_owner} 包含不支持的字段: {', '.join(unknown_option_keys)}"
+                                )
+                            if "value" not in option:
+                                errors.append(f"{option_owner}.value 不能为空")
+                                continue
+                            value_key = json.dumps(option.get("value"), ensure_ascii=False, sort_keys=True)
+                        else:
+                            value_key = json.dumps(option, ensure_ascii=False, sort_keys=True)
+                        if value_key in seen_values:
+                            errors.append(f"{parameter_owner}.options.value 不能重复: {value_key}")
+                        seen_values.add(value_key)
+
+            if parameter_type in {"integer", "number"}:
+                for numeric_key in ("min", "max", "step"):
+                    if numeric_key in parameter and parameter[numeric_key] is not None:
+                        value = parameter[numeric_key]
+                        if parameter_type == "integer":
+                            if not isinstance(value, int) or isinstance(value, bool):
+                                errors.append(f"{parameter_owner}.{numeric_key} 必须是整数")
+                        elif not _is_number(value):
+                            errors.append(f"{parameter_owner}.{numeric_key} 必须是数字")
+
+    return errors
+
+
 def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
     """Collect structure-level validation errors."""
     errors: list[str] = []
@@ -1080,6 +1186,7 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
     for extra in sorted(files - declared):
         errors.append(f"workflows/{extra}.py 未写入 module.yaml.workflows")
 
+    errors.extend(_collect_workflow_parameter_errors(manifest))
     errors.extend(_validate_ui_extension(manifest))
     errors.extend(_collect_data_contract_errors(module_root, manifest))
     errors.extend(_collect_legacy_hosted_ui_errors(module_root))

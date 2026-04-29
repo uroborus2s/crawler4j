@@ -319,6 +319,27 @@ def test_collect_structure_errors_rejects_legacy_module_runtime_for_core_native(
     assert "core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py" in errors
 
 
+def test_collect_structure_errors_validates_workflow_parameters(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    manifest = _read_manifest(module_root)
+    manifest["workflows"][0]["parameters"] = [
+        {
+            "name": "member_tier",
+            "type": "enum",
+            "options": [],
+        },
+        {
+            "name": "bad_name",
+            "type": "object",
+        },
+    ]
+
+    errors = commands.collect_structure_errors(module_root, manifest)
+
+    assert "workflows[main_workflow].parameters[member_tier].options 不能为空" in errors
+    assert "workflows[main_workflow].parameters[bad_name].type 不受支持: object" in errors
+
+
 def test_collect_structure_errors_allow_optional_sdk_only_layout_bits(tmp_path: Path):
     module_root = _init_module(tmp_path)
     shutil.rmtree(module_root / "pages")

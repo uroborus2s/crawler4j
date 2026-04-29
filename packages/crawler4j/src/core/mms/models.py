@@ -55,6 +55,132 @@ class DevModuleLink:
     updated_at: int = 0
 
 
+WORKFLOW_PARAMETER_TYPES = {"string", "text", "integer", "number", "boolean", "enum"}
+
+
+@dataclass
+class WorkflowParameterOptionInfo:
+    """工作流运行参数的枚举选项。"""
+
+    label: str
+    value: Any
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "value": self.value,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "WorkflowParameterOptionInfo":
+        if isinstance(data, dict):
+            allowed_keys = {"label", "value"}
+            unknown_keys = sorted(set(data) - allowed_keys)
+            if unknown_keys:
+                raise ValueError("workflow parameter option 包含不支持的字段: " + ", ".join(unknown_keys))
+            if "value" not in data:
+                raise ValueError("workflow parameter option.value 不能为空")
+            raw_label = data.get("label")
+            if raw_label is None:
+                raw_label = data.get("value")
+            label = str(raw_label).strip()
+            if not label:
+                raise ValueError("workflow parameter option.label 不能为空")
+            return cls(label=label, value=data.get("value"))
+
+        return cls(label=str(data), value=data)
+
+
+@dataclass
+class WorkflowParameterInfo:
+    """工作流运行参数声明。"""
+
+    name: str
+    label: str = ""
+    type: str = "string"
+    description: str = ""
+    required: bool = False
+    default: Any = None
+    options: list[WorkflowParameterOptionInfo] = field(default_factory=list)
+    min: int | float | None = None
+    max: int | float | None = None
+    step: int | float | None = None
+    placeholder: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "name": self.name,
+            "label": self.label,
+            "type": self.type,
+        }
+        if self.description:
+            payload["description"] = self.description
+        if self.required:
+            payload["required"] = self.required
+        if self.default is not None:
+            payload["default"] = self.default
+        if self.options:
+            payload["options"] = [option.to_dict() for option in self.options]
+        if self.min is not None:
+            payload["min"] = self.min
+        if self.max is not None:
+            payload["max"] = self.max
+        if self.step is not None:
+            payload["step"] = self.step
+        if self.placeholder:
+            payload["placeholder"] = self.placeholder
+        return payload
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "WorkflowParameterInfo":
+        if not isinstance(data, dict):
+            raise ValueError("workflows.parameters 中的每一项都必须是 YAML 映射对象")
+
+        allowed_keys = {
+            "name",
+            "label",
+            "type",
+            "description",
+            "required",
+            "default",
+            "options",
+            "min",
+            "max",
+            "step",
+            "placeholder",
+        }
+        unknown_keys = sorted(set(data) - allowed_keys)
+        if unknown_keys:
+            raise ValueError("workflows.parameters 包含不支持的字段: " + ", ".join(unknown_keys))
+
+        parameter_type = str(data.get("type", "string") or "string").strip().lower()
+        if parameter_type not in WORKFLOW_PARAMETER_TYPES:
+            raise ValueError(f"workflows.parameters.type 不受支持: {parameter_type}")
+
+        raw_options = data.get("options", [])
+        if raw_options is None:
+            raw_options = []
+        if not isinstance(raw_options, list):
+            raise ValueError("workflows.parameters.options 必须是数组")
+        options = [WorkflowParameterOptionInfo.from_dict(item) for item in raw_options]
+        if parameter_type == "enum" and not options:
+            raise ValueError("workflows.parameters.options 不能为空")
+
+        return cls(
+            name=str(data.get("name", "") or "").strip(),
+            label=str(data.get("label", "") or "").strip(),
+            type=parameter_type,
+            description=str(data.get("description", "") or "").strip(),
+            required=bool(data.get("required", False)),
+            default=data.get("default"),
+            options=options,
+            min=data.get("min"),
+            max=data.get("max"),
+            step=data.get("step"),
+            placeholder=str(data.get("placeholder", "") or "").strip(),
+        )
+
+
 @dataclass
 class WorkflowInfo:
     """工作流信息。"""
@@ -63,6 +189,7 @@ class WorkflowInfo:
     description: str = ""
     tasks: list[str] = field(default_factory=list)
     host_scenarios: list[str] = field(default_factory=list)
+    parameters: list[WorkflowParameterInfo] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +198,7 @@ class WorkflowInfo:
             "description": self.description,
             "tasks": self.tasks,
             **({"host_scenarios": self.host_scenarios} if self.host_scenarios else {}),
+            **({"parameters": [item.to_dict() for item in self.parameters]} if self.parameters else {}),
         }
 
     @classmethod
@@ -92,12 +220,25 @@ class WorkflowInfo:
         if not isinstance(raw_host_scenarios, list):
             raise ValueError("workflows.host_scenarios 必须是数组")
 
+        raw_parameters = data.get("parameters", [])
+        if raw_parameters is None:
+            raw_parameters = []
+        if not isinstance(raw_parameters, list):
+            raise ValueError("workflows.parameters 必须是数组")
+        parameters = [WorkflowParameterInfo.from_dict(item) for item in raw_parameters]
+        parameter_names = [item.name for item in parameters]
+        if any(not name for name in parameter_names):
+            raise ValueError("workflows.parameters.name 不能为空")
+        if len(parameter_names) != len(set(parameter_names)):
+            raise ValueError("workflows.parameters.name 不能重复")
+
         return cls(
             name=str(data.get("name", "") or "").strip(),
             display_name=str(data.get("display_name", "") or "").strip(),
             description=str(data.get("description", "") or "").strip(),
             tasks=[str(item) for item in raw_tasks],
             host_scenarios=[str(item) for item in raw_host_scenarios],
+            parameters=parameters,
         )
 
 

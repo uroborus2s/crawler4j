@@ -8,6 +8,7 @@
 - 模块运行时代码只依赖 `crawler4j-contracts`
 - `crawler4j-sdk` 只保留 CLI、脚手架、校验和开发辅助
 - Core 通过扫描模块目录生成 runtime descriptor
+- Workflow 运行模板参数由 `module.yaml.workflows[].parameters[]` 声明
 - 模块数据契约固定为 `module.yaml.data` + `data/sql` + `data/seeds`
 - `managed_dataset` / `custom_table` 都必须先在 `module.yaml.data.resources[]` 注册；未注册资源会直接 fail-fast
 - 不保留 `module_runtime.py`、`declare_ui()`、根模块 `run()` 的兼容桥
@@ -28,6 +29,7 @@
 最重要的事实：
 
 - `module.yaml.runtime_api` 必须是 `core-native-v1`
+- `module.yaml.workflows[].parameters[]` 可声明运行模板表单参数，当前支持 `string/text/integer/number/boolean/enum`
 - `module.yaml.data` 必须存在，`resources/views/queries/seeds` 是唯一数据契约入口
 - 模块数据只能通过 `ctx.db` fluent API 访问：`from_()`、`named()`、`into(...).replace(...)`
 - `tasks/*.py` 导出 `TASK` 和 `execute`

@@ -10,3 +10,4 @@
 - `API-008`: Hosted UI 正式契约收口为 `PageSpec` + `ui_extension.pages[]`。页面 schema 顶层必须是 `Page`，公开组件固定为 `Page`、`Section`、`Text`、`Button`、`DataTable`；页面数据与查询通过页面 handler 承接。
 - `API-009`: 模块实体表视图与分析查询能力已切到 manifest 驱动：`module.yaml.data.views[]` / `queries[]` 联合 `data/sql/views/*.sql` / `queries/*.sql` 注册视图和命名查询，运行时统一通过 `ctx.db.from_(...)` / `ctx.db.named(...).bind(...).execute()`；模块代码禁止执行未注册 SQL。
 - `API-010`: 宿主已有环境导入契约已落地：REM 以 `(provider, name)` 判定环境唯一性，环境管理页按来源环境名称拉取“来源有、本地无”的环境并导入；执行时宿主保证 `ctx.env_id`、`ctx.page` 可用，并在 `ctx.runtime.creation_params` 中写入 `provider`、`name` 与 `import_mode="existing_env"`；`module.yaml.workflows[].host_scenarios` 可选声明 `existing_env_import`，仅用于风险提示，不构成执行门禁。
+- `API-011`: Workflow 运行参数契约已落地：模块可在 `module.yaml.workflows[].parameters[]` 声明 `string/text/integer/number/boolean/enum` 参数；宿主运行模板页按选中 Workflow 动态渲染控件，并把结果写入 `RunProfile.execution.params`，运行时继续通过 `ctx.runtime.execution_params` / `ctx.runtime.params` 进入模块。

@@ -18,6 +18,7 @@ Current module runtime architecture:
 - `packages/crawler4j/src/core/mms/service.py` loads and caches `ModuleRuntimeDescriptor`, executes workflows/tasks, dispatches hooks, and invokes env selectors.
 - `packages/crawler4j/src/core/mms/ui/module_ui_runtime.py` reads pages and UI-related hooks from the descriptor instead of asking the module root for UI declarations.
 - `packages/crawler4j/src/core/mms/scanner.py` enforces `module.yaml.runtime_api == core-native-v1`, `default_workflow`, and manifest/workflow consistency.
+- `module.yaml.workflows[].parameters[]` now declares Workflow run-template input schema; ATM `RunProfileDialog` renders it dynamically and persists values to `execution.params`.
 - Old modules are not a compatibility target. The host rejects missing or mismatched `runtime_api` instead of bridging.
 
 Current UI architecture:

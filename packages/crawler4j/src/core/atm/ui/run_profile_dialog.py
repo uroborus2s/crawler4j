@@ -54,6 +54,7 @@ from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.segmented_control import SegmentedOptionControl
+from src.ui.components.spin_box import StyledDoubleSpinBox as QDoubleSpinBox
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 from src.ui.components.text_edit import StyledPlainTextEdit as QPlainTextEdit
 from src.ui.components.yaml_code_editor import YamlCodeEditor
@@ -441,16 +442,20 @@ class RunProfileDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
+        validate_btn = StyledButton("验证模板", variant="secondary", min_height=32, min_width=92, border_radius=4)
+        validate_btn.clicked.connect(self._on_validate)
         cancel_btn = StyledButton("取消", variant="secondary", min_height=32, min_width=80, border_radius=4)
         cancel_btn.clicked.connect(self.reject)
         
         save_btn = StyledButton("保存运行模板", variant="success", min_height=32, min_width=116, border_radius=4)
         save_btn.clicked.connect(self._on_save)
         
+        btn_layout.addWidget(validate_btn)
         btn_layout.addWidget(cancel_btn)
         btn_layout.addWidget(save_btn)
         
         if self._read_only:
+             validate_btn.hide()
              save_btn.hide()
              cancel_btn.setText("关闭")
 
@@ -460,12 +465,22 @@ class RunProfileDialog(QDialog):
         """设置只读模式。"""
         # Disable all input widgets
         for widget in self.findChildren(
-            (QLineEdit, QPlainTextEdit, QSpinBox, QCheckBox, QComboBox, SegmentedOptionControl, YamlCodeEditor)
+            (
+                QLineEdit,
+                QPlainTextEdit,
+                QSpinBox,
+                QDoubleSpinBox,
+                QCheckBox,
+                ToggleSwitch,
+                QComboBox,
+                SegmentedOptionControl,
+                YamlCodeEditor,
+            )
         ):
              # QComboBox and QCheckBox use setEnabled
-             if isinstance(widget, (QComboBox, QCheckBox, SegmentedOptionControl)):
+             if isinstance(widget, (QComboBox, QCheckBox, ToggleSwitch, SegmentedOptionControl)):
                  widget.setEnabled(False)
-             elif isinstance(widget, (QLineEdit, QPlainTextEdit, QSpinBox, YamlCodeEditor)):
+             elif isinstance(widget, (QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, YamlCodeEditor)):
                  widget.setReadOnly(True)
         
         # Helper to disable WorkflowSelectors
@@ -1252,12 +1267,19 @@ class RunProfileDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
 
-        basic_group = QGroupBox("基础信息")
-        form = self._create_form_layout(basic_group)
+        self.basic_group = QGroupBox("一、模板信息")
+        form = self._create_form_layout(self.basic_group)
 
         self.script_selector = WorkflowSelector(show_module=True)
         self.script_selector.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        form.addRow("执行脚本:", self.script_selector)
+        form.addRow("模块 / 工作流:", self.script_selector)
+
+        self.workflow_params_widget = QWidget()
+        self.workflow_params_form = self._create_form_layout(self.workflow_params_widget)
+        self.workflow_params_form.setContentsMargins(0, 0, 0, 0)
+        self._workflow_param_widgets: dict[str, QWidget] = {}
+        self._workflow_param_specs: list[object] = []
+        form.addRow("Workflow 参数:", self.workflow_params_widget)
 
         self.execution_timeout_spin = QSpinBox()
         self.execution_timeout_spin.setRange(0, 7 * 24 * 60 * 60)
@@ -1265,10 +1287,10 @@ class RunProfileDialog(QDialog):
         self.execution_timeout_spin.setToolTip("0 表示不自动中断模块主体；2 天为 172800 秒，3 天为 259200 秒。")
         form.addRow("主体执行超时:", self._wrap_widget_with_suffix(self.execution_timeout_spin, "秒"))
 
-        layout.addWidget(basic_group)
+        layout.addWidget(self.basic_group)
 
-        sel_group = QGroupBox("资源定义")
-        self.resource_form = self._create_form_layout(sel_group)
+        self.resource_group = QGroupBox("二、环境与资源")
+        self.resource_form = self._create_form_layout(self.resource_group)
 
         self.resource_mode_combo = QComboBox()
         self.resource_mode_combo.addItem("创建环境", AcquisitionMode.CREATE)
@@ -1390,7 +1412,7 @@ class RunProfileDialog(QDialog):
         self.resource_mode_stack.addWidget(select_widget)
         self.resource_form.addRow("模式配置:", self.resource_mode_stack)
 
-        layout.addWidget(sel_group)
+        layout.addWidget(self.resource_group)
         layout.addStretch()
 
         scroll.setWidget(content_widget)
@@ -1399,8 +1421,10 @@ class RunProfileDialog(QDialog):
         self._load_ip_pools()
         self._load_provider_options("virtualbrowser")
         self.script_selector.module_combo.currentTextChanged.connect(self._on_script_module_changed)
+        self.script_selector.workflow_combo.currentIndexChanged.connect(self._on_workflow_selection_changed)
         self._selector_infos: dict[str, object] = {}
         self._load_selector_options()
+        self._sync_workflow_parameter_form()
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
     def _set_row_visible(self, widget: QWidget, visible: bool):
@@ -1879,9 +1903,205 @@ class RunProfileDialog(QDialog):
         previous = self.selector_name_combo.currentData()
         preferred = previous if isinstance(previous, str) else None
         self._load_selector_options(preferred=preferred)
+        self._sync_workflow_parameter_form()
 
     def _on_selector_name_changed(self, _index: int) -> None:
         self._update_selector_none_hint()
+
+    def _on_workflow_selection_changed(self, _index: int) -> None:
+        self._sync_workflow_parameter_form()
+
+    def _current_workflow_info(self) -> object | None:
+        module_name, workflow_name = self.script_selector.get_value()
+        if not module_name or not workflow_name:
+            return None
+        try:
+            module_info = get_module_registry().get_module(module_name)
+        except Exception:
+            return None
+        if not module_info:
+            return None
+        for workflow in getattr(module_info.manifest, "workflows", []) or []:
+            if str(getattr(workflow, "name", "") or "").strip() == workflow_name:
+                return workflow
+        return None
+
+    def _current_workflow_parameters(self) -> list[object]:
+        workflow = self._current_workflow_info()
+        if not workflow:
+            return []
+        return list(getattr(workflow, "parameters", []) or [])
+
+    def _clear_workflow_parameter_form(self) -> None:
+        while self.workflow_params_form.rowCount():
+            self.workflow_params_form.removeRow(0)
+        self._workflow_param_widgets = {}
+        self._workflow_param_specs = []
+
+    def _sync_workflow_parameter_form(self, values: dict | None = None) -> None:
+        if not hasattr(self, "workflow_params_form"):
+            return
+        params = self._current_workflow_parameters()
+        self._clear_workflow_parameter_form()
+        self._workflow_param_specs = params
+        self._set_row_visible(self.workflow_params_widget, bool(params))
+        if not params:
+            hint = QLabel("当前工作流未声明运行参数。")
+            hint.setStyleSheet("color: rgba(255, 255, 255, 0.55);")
+            self.workflow_params_form.addRow("", hint)
+            return
+
+        current_values = dict(values or {})
+        for parameter in params:
+            name = self._parameter_name(parameter)
+            if not name:
+                continue
+            value = current_values.get(name, self._parameter_default(parameter))
+            widget = self._create_workflow_parameter_widget(parameter, value)
+            self._workflow_param_widgets[name] = widget
+            label = self._parameter_label(parameter)
+            if self._parameter_required(parameter):
+                label = f"{label} *"
+            self.workflow_params_form.addRow(f"{label}:", widget)
+
+    def _parameter_name(self, parameter: object) -> str:
+        return str(getattr(parameter, "name", "") or "").strip()
+
+    def _parameter_label(self, parameter: object) -> str:
+        return str(getattr(parameter, "label", "") or "").strip() or self._parameter_name(parameter)
+
+    def _parameter_type(self, parameter: object) -> str:
+        return str(getattr(parameter, "type", "string") or "string").strip().lower()
+
+    def _parameter_default(self, parameter: object) -> object:
+        return getattr(parameter, "default", None)
+
+    def _parameter_required(self, parameter: object) -> bool:
+        return bool(getattr(parameter, "required", False))
+
+    def _parameter_options(self, parameter: object) -> list[tuple[str, object]]:
+        options: list[tuple[str, object]] = []
+        for option in getattr(parameter, "options", []) or []:
+            if isinstance(option, dict):
+                value = option.get("value")
+                raw_label = option.get("label")
+                label = str(value if raw_label is None else raw_label).strip()
+            else:
+                value = getattr(option, "value", option)
+                raw_label = getattr(option, "label", None)
+                label = str(value if raw_label is None else raw_label).strip()
+            if label:
+                options.append((label, value))
+        return options
+
+    def _create_workflow_parameter_widget(self, parameter: object, value: object) -> QWidget:
+        parameter_type = self._parameter_type(parameter)
+        name = self._parameter_name(parameter)
+        placeholder = str(getattr(parameter, "placeholder", "") or "").strip()
+
+        if parameter_type == "enum":
+            combo = QComboBox()
+            combo.setObjectName(f"workflowParam_{name}")
+            if not self._parameter_required(parameter) and value is None:
+                combo.addItem("不设置", None)
+            for label, option_value in self._parameter_options(parameter):
+                combo.addItem(label, option_value)
+            index = combo.findData(value)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            elif combo.count():
+                combo.setCurrentIndex(0)
+            return combo
+
+        if parameter_type == "integer":
+            spin = QSpinBox()
+            spin.setObjectName(f"workflowParam_{name}")
+            min_value = getattr(parameter, "min", None)
+            max_value = getattr(parameter, "max", None)
+            spin.setRange(
+                int(min_value) if min_value is not None else -1_000_000_000,
+                int(max_value) if max_value is not None else 1_000_000_000,
+            )
+            step = getattr(parameter, "step", None)
+            if step is not None:
+                spin.setSingleStep(max(1, int(step)))
+            if value is not None:
+                spin.setValue(int(value))
+            return spin
+
+        if parameter_type == "number":
+            spin = QDoubleSpinBox()
+            spin.setObjectName(f"workflowParam_{name}")
+            min_value = getattr(parameter, "min", None)
+            max_value = getattr(parameter, "max", None)
+            spin.setRange(
+                float(min_value) if min_value is not None else -1_000_000_000.0,
+                float(max_value) if max_value is not None else 1_000_000_000.0,
+            )
+            spin.setDecimals(6)
+            step = getattr(parameter, "step", None)
+            if step is not None:
+                spin.setSingleStep(float(step))
+            if value is not None:
+                spin.setValue(float(value))
+            return spin
+
+        if parameter_type == "boolean":
+            toggle = self._create_toggle_switch()
+            toggle.setObjectName(f"workflowParam_{name}")
+            toggle.setChecked(bool(value))
+            return toggle
+
+        if parameter_type == "text":
+            editor = QPlainTextEdit()
+            editor.setObjectName(f"workflowParam_{name}")
+            editor.setMinimumHeight(90)
+            editor.setPlainText("" if value is None else str(value))
+            if placeholder:
+                editor.setPlaceholderText(placeholder)
+            return editor
+
+        line_edit = QLineEdit()
+        line_edit.setObjectName(f"workflowParam_{name}")
+        line_edit.setText("" if value is None else str(value))
+        if placeholder:
+            line_edit.setPlaceholderText(placeholder)
+        return line_edit
+
+    def _workflow_parameter_widget_value(self, parameter: object, widget: QWidget) -> object:
+        parameter_type = self._parameter_type(parameter)
+        if parameter_type == "enum" and isinstance(widget, QComboBox):
+            return widget.currentData()
+        if parameter_type == "integer" and isinstance(widget, QSpinBox):
+            return widget.value()
+        if parameter_type == "number" and isinstance(widget, QDoubleSpinBox):
+            return widget.value()
+        if parameter_type == "boolean" and isinstance(widget, ToggleSwitch):
+            return widget.isChecked()
+        if parameter_type == "text" and isinstance(widget, QPlainTextEdit):
+            return widget.toPlainText()
+        if isinstance(widget, QLineEdit):
+            return widget.text()
+        return None
+
+    def _workflow_params_from_form(self, previous_params: dict[str, object]) -> dict[str, object]:
+        if not self._workflow_param_specs:
+            return dict(previous_params)
+
+        params: dict[str, object] = {}
+        for parameter in self._workflow_param_specs:
+            name = self._parameter_name(parameter)
+            widget = self._workflow_param_widgets.get(name)
+            if not name or widget is None:
+                continue
+            value = self._workflow_parameter_widget_value(parameter, widget)
+            if value is None:
+                continue
+            if self._parameter_required(parameter) and self._parameter_type(parameter) in {"string", "text", "enum"}:
+                if str(value).strip() == "":
+                    raise ValueError(f"Workflow 参数不能为空: {self._parameter_label(parameter)}")
+            params[name] = value
+        return params
 
     def _declared_resource_pool_options(self) -> list[tuple[str, str]]:
         module_name = self._current_script_module_name()
@@ -2024,6 +2244,7 @@ class RunProfileDialog(QDialog):
         if s.execution and s.execution.module:
             self.script_selector.set_value(s.execution.module, s.execution.workflow)
         self.execution_timeout_spin.setValue(s.execution.timeout if s.execution else self._default_execution_timeout())
+        self._sync_workflow_parameter_form(dict(s.execution.params) if s.execution else {})
         self._load_selector_options(acquisition.selector_name or None)
         self.wait_timeout_spin.setValue(acquisition.wait_timeout)
         self._set_resource_pool_value(acquisition.resource_pool or "")
@@ -2092,11 +2313,12 @@ class RunProfileDialog(QDialog):
         if not module_name or not workflow_name:
             raise ValueError("请选择执行脚本")
         previous_execution = self._run_profile.execution
+        previous_params = dict(previous_execution.params) if previous_execution else {}
         execution = ExecutionContext(
             module=module_name,
             workflow=workflow_name,
             hooks_module=previous_execution.hooks_module if previous_execution else "",
-            params=dict(previous_execution.params) if previous_execution else {},
+            params=self._workflow_params_from_form(previous_params),
             timeout=self.execution_timeout_spin.value(),
         )
         
@@ -2140,6 +2362,18 @@ class RunProfileDialog(QDialog):
             return False
 
         return True
+
+    def _on_validate(self):
+        try:
+            if self.stack.currentIndex() == 1:
+                if not self._yaml_to_form(show_error=True):
+                    return
+            else:
+                self._build_run_profile_from_form()
+        except Exception as exc:
+            MessageDialog.warning(self, "验证失败", f"运行模板配置无效：{exc}")
+            return
+        MessageDialog.information(self, "验证通过", "运行模板配置有效。")
 
     def _on_save(self):
         if self.stack.currentIndex() == 1:

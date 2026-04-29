@@ -15,7 +15,10 @@ from src.core.atm.run_profile import (
     RunProfile,
 )
 from src.ui.components.button import StyledButton
-from src.ui.components.check_box import StyledCheckBox
+from src.ui.components.check_box import StyledCheckBox, ToggleSwitch
+from src.ui.components.combo_box import StyledComboBox
+from src.ui.components.line_edit import StyledLineEdit
+from src.ui.components.spin_box import StyledDoubleSpinBox, StyledSpinBox
 from src.ui.components.text_edit import StyledPlainTextEdit
 from src.ui.components.yaml_code_editor import YamlCodeEditor
 
@@ -113,6 +116,104 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
             if module_name == "ctrip_crawler"
             else []
         )
+    monkeypatch.setattr(dialog_module, "get_module_service", module_service)
+    monkeypatch.setattr(controller_module, "get_module_service", module_service)
+
+
+def _patch_parameterized_dialog_dependencies(monkeypatch):
+    import src.core.atm.ui.run_profile_dialog as dialog_module
+    import src.core.atm.controller as controller_module
+
+    workflow = SimpleNamespace(
+        name="quiz_workflow",
+        display_name="统一做题",
+        parameters=[
+            SimpleNamespace(
+                name="member_tier",
+                label="会员类型",
+                type="enum",
+                required=True,
+                default="normal",
+                options=[
+                    SimpleNamespace(label="普通会员", value="normal"),
+                    SimpleNamespace(label="高级会员", value="premium"),
+                ],
+            ),
+            SimpleNamespace(
+                name="min_member_days",
+                label="会员天数下限",
+                type="integer",
+                default=30,
+                min=0,
+                max=365,
+                step=1,
+            ),
+            SimpleNamespace(
+                name="pass_score",
+                label="通过分数",
+                type="number",
+                default=90.5,
+                min=0,
+                max=100,
+                step=0.5,
+            ),
+            SimpleNamespace(
+                name="dry_run",
+                label="试运行",
+                type="boolean",
+                default=False,
+            ),
+            SimpleNamespace(
+                name="remark",
+                label="备注",
+                type="string",
+                default="普通会员30-90天",
+                placeholder="模板备注",
+            ),
+            SimpleNamespace(
+                name="instructions",
+                label="执行说明",
+                type="text",
+                default="",
+            ),
+        ],
+    )
+    module = SimpleNamespace(
+        name="ctrip_crawler",
+        manifest=SimpleNamespace(
+            workflows=[workflow],
+            resource_pools=[
+                SimpleNamespace(name="ctrip_account_pool", display_name="携程账号环境池"),
+            ],
+        ),
+    )
+    registry = SimpleNamespace(
+        list_modules=lambda: [module],
+        get_module=lambda name: module if name == "ctrip_crawler" else None,
+        refresh=lambda: None,
+    )
+
+    monkeypatch.setattr(dialog_module, "get_module_registry", lambda: registry)
+    monkeypatch.setattr(
+        dialog_module,
+        "get_ip_pool_manager",
+        lambda: SimpleNamespace(list_pools=lambda: []),
+    )
+
+    def module_service():
+        return SimpleNamespace(
+            list_env_selectors=lambda module_name: [
+                SimpleNamespace(
+                    name="normal_member_30_90_bound",
+                    display_name="普通会员 30-90 天已绑定环境",
+                    description="",
+                    returns_none=True,
+                )
+            ]
+            if module_name == "ctrip_crawler"
+            else []
+        )
+
     monkeypatch.setattr(dialog_module, "get_module_service", module_service)
     monkeypatch.setattr(controller_module, "get_module_service", module_service)
 
@@ -797,3 +898,87 @@ def test_run_profile_dialog_keeps_dialog_open_when_yaml_is_invalid_on_save(qtbot
     assert captured[0][1] == "YAML 无效"
     assert dialog.result() != int(QDialog.DialogCode.Accepted)
     assert dialog.stack.currentIndex() == 1
+
+
+def test_run_profile_dialog_renders_declared_workflow_parameters(qtbot, monkeypatch):
+    _patch_parameterized_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("ctrip_crawler", "quiz_workflow")
+
+    assert dialog.basic_group.title() == "一、模板信息"
+    assert dialog.resource_group.title() == "二、环境与资源"
+    assert isinstance(dialog._workflow_param_widgets["member_tier"], StyledComboBox)
+    assert isinstance(dialog._workflow_param_widgets["min_member_days"], StyledSpinBox)
+    assert isinstance(dialog._workflow_param_widgets["pass_score"], StyledDoubleSpinBox)
+    assert isinstance(dialog._workflow_param_widgets["dry_run"], ToggleSwitch)
+    assert isinstance(dialog._workflow_param_widgets["remark"], StyledLineEdit)
+    assert isinstance(dialog._workflow_param_widgets["instructions"], StyledPlainTextEdit)
+
+    member_tier = dialog._workflow_param_widgets["member_tier"]
+    min_days = dialog._workflow_param_widgets["min_member_days"]
+    pass_score = dialog._workflow_param_widgets["pass_score"]
+    dry_run = dialog._workflow_param_widgets["dry_run"]
+    remark = dialog._workflow_param_widgets["remark"]
+    instructions = dialog._workflow_param_widgets["instructions"]
+
+    member_tier.setCurrentIndex(member_tier.findData("premium"))
+    min_days.setValue(60)
+    pass_score.setValue(88.5)
+    dry_run.setChecked(True)
+    remark.setText("高级会员60天")
+    instructions.setPlainText("只处理已绑定环境。")
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.execution is not None
+    assert profile.execution.params == {
+        "member_tier": "premium",
+        "min_member_days": 60,
+        "pass_score": 88.5,
+        "dry_run": True,
+        "remark": "高级会员60天",
+        "instructions": "只处理已绑定环境。",
+    }
+
+
+def test_run_profile_dialog_loads_declared_workflow_parameters_from_run_profile(qtbot, monkeypatch):
+    _patch_parameterized_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                selector_name="normal_member_30_90_bound",
+                resource_pool="ctrip_account_pool",
+            ),
+        ),
+        execution=ExecutionContext(
+            module="ctrip_crawler",
+            workflow="quiz_workflow",
+            params={
+                "member_tier": "premium",
+                "min_member_days": 75,
+                "pass_score": 92.5,
+                "dry_run": True,
+                "remark": "已验证模板",
+                "instructions": "优先处理普通会员。",
+            },
+        ),
+    )
+
+    dialog = RunProfileDialog(run_profile=run_profile)
+    qtbot.addWidget(dialog)
+
+    assert dialog._workflow_param_widgets["member_tier"].currentData() == "premium"
+    assert dialog._workflow_param_widgets["min_member_days"].value() == 75
+    assert dialog._workflow_param_widgets["pass_score"].value() == 92.5
+    assert dialog._workflow_param_widgets["dry_run"].isChecked() is True
+    assert dialog._workflow_param_widgets["remark"].text() == "已验证模板"
+    assert dialog._workflow_param_widgets["instructions"].toPlainText() == "优先处理普通会员。"

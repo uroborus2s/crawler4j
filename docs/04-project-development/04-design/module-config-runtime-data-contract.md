@@ -24,7 +24,7 @@
 
 | 类别 | 事实源 | 模块读取方式 | 模块写入方式 | 说明 |
 |---|---|---|---|---|
-| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、工作流、页面导航、`resource_pools`，以及一次性初始化模板 `config_defaults` 和 `data` 数据契约 |
+| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、工作流、Workflow 运行参数、页面导航、`resource_pools`，以及一次性初始化模板 `config_defaults` 和 `data` 数据契约 |
 | 持久配置 | `config.db.module_config_entries` | `ctx.get_config()` / `ctx.config` | 禁止 | 宿主统一维护；模块运行时只读 |
 | 运行态元数据 | `ctx.runtime` | `ctx.runtime[...]` | 禁止 | 由 ATM / Debug / Core 注入 |
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
@@ -52,6 +52,65 @@
 - `resource_pools[]` 的正式字段只有 `name`、`display_name`、`description`。
 - `AcquisitionConfig.resource_pool` 只能引用当前模块已经声明过的池名。
 - 模块代码不得再把未声明池名当成正式契约写死在业务逻辑里。
+
+### 3.2 Workflow 运行参数声明
+
+模块可以在 `module.yaml.workflows[].parameters[]` 中声明运行模板参数。宿主运行模板页在用户选择模块与 Workflow 后，会按参数类型动态渲染表单控件；保存后写入 `RunProfile.execution.params`，运行时通过 `ctx.runtime["execution_params"]`、`ctx.runtime["params"]` 和 `ExecutionContext.params` 进入模块。
+
+声明字段：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `name` | 是 | 参数名，必须是小写 snake_case，同一 Workflow 内唯一 |
+| `type` | 否 | 参数类型，默认 `string` |
+| `label` | 否 | 表单显示名；为空时使用 `name` |
+| `description` | 否 | 参数说明 |
+| `required` | 否 | 是否必填，默认 `false` |
+| `default` | 否 | 表单初始值 |
+| `placeholder` | 否 | `string` / `text` 输入提示 |
+| `options` | `enum` 必填 | 枚举选项，元素格式为 `{label, value}` |
+| `min` / `max` / `step` | 否 | `integer` / `number` 的取值约束 |
+
+支持的数据类型：
+
+| 类型 | 表单控件 | 保存值 |
+|---|---|---|
+| `string` | 单行输入框 | 字符串 |
+| `text` | 多行文本框 | 字符串 |
+| `integer` | 整数步进输入 | 整数 |
+| `number` | 小数步进输入 | 数字 |
+| `boolean` | 开关 | 布尔值 |
+| `enum` | 下拉选择 | 选中项 `value` |
+
+示例：
+
+```yaml
+workflows:
+  - name: quiz_workflow
+    display_name: 统一做题
+    description: 携程题目处理流程
+    parameters:
+      - name: member_tier
+        label: 会员类型
+        type: enum
+        required: true
+        default: normal
+        options:
+          - label: 普通会员
+            value: normal
+          - label: 高级会员
+            value: premium
+      - name: min_member_days
+        label: 会员天数下限
+        type: integer
+        default: 30
+        min: 0
+        max: 365
+      - name: dry_run
+        label: 试运行
+        type: boolean
+        default: false
+```
 
 ## 4. 运行态元数据契约
 

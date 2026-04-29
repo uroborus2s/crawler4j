@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-04-23
+**最后更新：** 2026-04-29
 
 ## 1. 当前正式文档结构
 
@@ -71,6 +71,7 @@
 
 ## 5. 最近同步
 
+- 2026-04-30：Workflow 运行参数契约与运行模板 UI 已同步到开发者入口。`docs/03-developer-guide/{index.md,module-structure.md,reference-sdk-and-cli.md}` 与 `docs/04-project-development/04-design/module-config-runtime-data-contract.md` 现统一说明 `module.yaml.workflows[].parameters[]`、支持的数据类型、SDK 校验和 `RunProfile.execution.params` 注入链路；`.factory/memory/` 已同步登记。
 - 2026-04-25：公共 `MessageDialog` 已按“安装模块”面板视觉重做，`StyledButton` 增加成功态动作按钮；安装模块弹窗和多处简单提示/确认已改用公共组件。剩余未迁移的 `QMessageBox` 已收敛到环境/模块列表异步流程与任务中止三按钮流程，需后续补齐公共异步/多动作弹窗能力。
 - 2026-04-25：IP 测试结果弹窗已从局部 `QMessageBox` 收口到公共 `MessageDialog`，并同步移除 `env_ip_bindings` / `configs` 的初始化与运行依赖；已有用户库旧表只通过显式 SQL 清理，不写入启动迁移代码。
 - 2026-04-25：`docs/02-user-guide/usage.md`、`execution-log.md`、`test-plan.md` 与 `.factory/memory/` 已同步补记运行环境列表的 `env_metadata` 可用状态展示和 IP 测试结果深色面板。运行环境列表当前按 `scheduler.resource_pool` 资格卡片聚合展示可用状态，IP 测试结果弹窗固定深色背景。

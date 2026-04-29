@@ -78,6 +78,7 @@ uv run crawler4j module repair-init
 - `module.yaml.data` 存在且四段都是合法数组
 - `data.resources[]` 只允许 `id/storage_mode/record_key_field/schema/indexes/cleanup_policy/joins`；不要在资源项里写 `resource_id`
 - `default_workflow` 与 `module.yaml.workflows` 一致
+- `module.yaml.workflows[].parameters[]` 的参数名、类型、枚举选项和数字边界合法
 - `TaskSpec/WorkflowSpec/EnvSelectorSpec/PageSpec` 导出存在
 - 任务、工作流、环境选择器的文件名与声明名一致
 - `ui_extension.pages[]` 中的菜单页面存在对应页面文件；所有页面文件的 `PAGE.id` 为唯一扁平 snake_case

@@ -12,6 +12,8 @@ from src.core.mms.models import (
     UIPageInfo,
     UIExtensionInfo,
     WorkflowInfo,
+    WorkflowParameterInfo,
+    WorkflowParameterOptionInfo,
 )
 from src.core.mms.scanner import ModuleScanner
 
@@ -39,6 +41,28 @@ class TestModuleManifest:
                     "name": "login_flow",
                     "display_name": "登录流程",
                     "tasks": ["login_task"],
+                    "parameters": [
+                        {
+                            "name": "member_tier",
+                            "label": "会员类型",
+                            "type": "enum",
+                            "required": True,
+                            "default": "normal",
+                            "options": [
+                                {"label": "普通会员", "value": "normal"},
+                                {"label": "高级会员", "value": "premium"},
+                            ],
+                        },
+                        {
+                            "name": "min_member_days",
+                            "label": "会员天数下限",
+                            "type": "integer",
+                            "default": 30,
+                            "min": 0,
+                            "max": 365,
+                            "step": 1,
+                        },
+                    ],
                 }
             ],
             "ui_extension": {
@@ -83,6 +107,28 @@ class TestModuleManifest:
         assert len(manifest.workflows) == 1
         assert manifest.workflows[0].name == "login_flow"
         assert manifest.workflows[0].tasks == ["login_task"]
+        assert manifest.workflows[0].parameters == [
+            WorkflowParameterInfo(
+                name="member_tier",
+                label="会员类型",
+                type="enum",
+                required=True,
+                default="normal",
+                options=[
+                    WorkflowParameterOptionInfo(label="普通会员", value="normal"),
+                    WorkflowParameterOptionInfo(label="高级会员", value="premium"),
+                ],
+            ),
+            WorkflowParameterInfo(
+                name="min_member_days",
+                label="会员天数下限",
+                type="integer",
+                default=30,
+                min=0,
+                max=365,
+                step=1,
+            ),
+        ]
         assert manifest.upgrade_source.repo == "example/test_module"
         assert [page.id for page in manifest.ui_extension.pages] == ["dashboard", "accounts"]
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
@@ -102,7 +148,24 @@ class TestModuleManifest:
             name="test_module",
             runtime_api="core-native-v1",
             upgrade_source=UpgradeSourceInfo(repo="example/test_module"),
-            workflows=[WorkflowInfo(name="flow1", tasks=["example_task"])],
+            workflows=[
+                WorkflowInfo(
+                    name="flow1",
+                    tasks=["example_task"],
+                    parameters=[
+                        WorkflowParameterInfo(
+                            name="member_tier",
+                            label="会员类型",
+                            type="enum",
+                            required=True,
+                            default="normal",
+                            options=[
+                                WorkflowParameterOptionInfo(label="普通会员", value="normal"),
+                            ],
+                        ),
+                    ],
+                )
+            ],
             default_workflow="flow1",
             ui_extension=UIExtensionInfo(
                 pages=[
@@ -138,6 +201,16 @@ class TestModuleManifest:
         assert data["runtime_api"] == "core-native-v1"
         assert len(data["workflows"]) == 1
         assert data["workflows"][0]["tasks"] == ["example_task"]
+        assert data["workflows"][0]["parameters"] == [
+            {
+                "name": "member_tier",
+                "label": "会员类型",
+                "type": "enum",
+                "required": True,
+                "default": "normal",
+                "options": [{"label": "普通会员", "value": "normal"}],
+            }
+        ]
         assert "entry_class" not in data["workflows"][0]
         assert data["upgrade_source"] == {
             "type": "github_release",
@@ -192,6 +265,37 @@ class TestModuleManifest:
 
         with pytest.raises(ValueError, match="entry_class"):
             ModuleManifest.from_dict(data)
+
+    def test_from_dict_rejects_invalid_workflow_parameter(self):
+        data = {
+            "name": "test_module",
+            "runtime_api": "core-native-v1",
+            "version": "1.0.0",
+            "upgrade_source": {
+                "type": "github_release",
+                "repo": "example/test_module",
+            },
+            "workflows": [
+                {
+                    "name": "login_flow",
+                    "parameters": [
+                        {"name": "bad_param", "type": "object"},
+                    ],
+                }
+            ],
+            "default_workflow": "login_flow",
+            "data": _empty_data_contract(),
+        }
+
+        with pytest.raises(ValueError, match="parameters"):
+            ModuleManifest.from_dict(data)
+
+    def test_workflow_parameter_enum_options_allow_falsy_values(self):
+        option_zero = WorkflowParameterOptionInfo.from_dict({"value": 0})
+        option_false = WorkflowParameterOptionInfo.from_dict({"value": False})
+
+        assert option_zero == WorkflowParameterOptionInfo(label="0", value=0)
+        assert option_false == WorkflowParameterOptionInfo(label="False", value=False)
 
 
 class TestModuleScanner:

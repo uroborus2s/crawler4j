@@ -236,6 +236,7 @@ class ModuleScanner:
                 hint="default_workflow 必须指向已声明的 workflow 名称",
             )
 
+        self._validate_workflow_parameters(manifest)
         self._validate_upgrade_source(manifest)
         self._validate_config_defaults(manifest)
         self._validate_ui_extension(manifest)
@@ -243,6 +244,47 @@ class ModuleScanner:
         self._validate_data_contract(manifest, module_path)
 
         return warnings
+
+    def _validate_workflow_parameters(self, manifest: ModuleManifest) -> None:
+        for workflow in manifest.workflows:
+            seen_names: set[str] = set()
+            for parameter in workflow.parameters:
+                parameter_name = str(parameter.name or "").strip()
+                if not MANAGED_NAME_RE.match(parameter_name):
+                    raise ModuleValidationError(
+                        f"workflows[{workflow.name}].parameters.name 不符合命名规范: {parameter_name or '<empty>'}",
+                        stage="VALIDATE",
+                        hint="Workflow 参数名必须以小写字母开头，只允许小写字母、数字和下划线",
+                    )
+                if parameter_name in seen_names:
+                    raise ModuleValidationError(
+                        f"workflows[{workflow.name}].parameters.name 重复: {parameter_name}",
+                        stage="VALIDATE",
+                        hint="请确保同一个 workflow 内每个参数名称唯一",
+                    )
+                seen_names.add(parameter_name)
+
+                if parameter.type in {"integer", "number"}:
+                    for key in ("min", "max", "step"):
+                        value = getattr(parameter, key)
+                        if value is None:
+                            continue
+                        if parameter.type == "integer" and (
+                            not isinstance(value, int) or isinstance(value, bool)
+                        ):
+                            raise ModuleValidationError(
+                                f"workflows[{workflow.name}].parameters[{parameter_name}].{key} 必须是整数",
+                                stage="VALIDATE",
+                                hint="integer 类型参数的 min/max/step 必须使用整数",
+                            )
+                        if parameter.type == "number" and (
+                            not isinstance(value, (int, float)) or isinstance(value, bool)
+                        ):
+                            raise ModuleValidationError(
+                                f"workflows[{workflow.name}].parameters[{parameter_name}].{key} 必须是数字",
+                                stage="VALIDATE",
+                                hint="number 类型参数的 min/max/step 必须使用数字",
+                            )
 
     def _validate_upgrade_source(self, manifest: ModuleManifest) -> None:
         upgrade_source = manifest.upgrade_source
