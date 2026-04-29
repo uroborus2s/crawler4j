@@ -2,11 +2,56 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor, QFont, QFontDatabase, QFontMetricsF
 from PyQt6.Qsci import QsciLexerCustom, QsciScintilla
+
+_MONO_FONT_CANDIDATES = (
+    "SF Mono",
+    "Menlo",
+    "Consolas",
+    "Cascadia Mono",
+    "Monaco",
+    "JetBrains Mono",
+    "Courier New",
+)
+_EDITOR_FONT_POINT_SIZE = 15
+_MIN_EXTRA_LINE_SPACING = 3
+_EXTRA_LINE_SPACING_RATIO = 0.18
+
+
+def _available_fixed_monospace_families() -> list[str]:
+    families = set(QFontDatabase.families())
+    return [
+        family
+        for family in _MONO_FONT_CANDIDATES
+        if family in families and QFontDatabase.isFixedPitch(family)
+    ]
+
+
+def _build_monospace_font(point_size: int = _EDITOR_FONT_POINT_SIZE) -> QFont:
+    preferred_families = _available_fixed_monospace_families()
+    font = (
+        QFont(preferred_families[0])
+        if preferred_families
+        else QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+    )
+    if preferred_families and hasattr(font, "setFamilies"):
+        font.setFamilies(preferred_families)
+    font.setStyleHint(QFont.StyleHint.Monospace)
+    font.setFixedPitch(True)
+    font.setPointSize(point_size)
+    return font
+
+
+def _recommended_extra_line_spacing(font: QFont) -> int:
+    return max(
+        math.ceil(QFontMetricsF(font).lineSpacing() * _EXTRA_LINE_SPACING_RATIO),
+        _MIN_EXTRA_LINE_SPACING,
+    )
 
 
 class YamlDisplayLexer(QsciLexerCustom):
@@ -25,7 +70,7 @@ class YamlDisplayLexer(QsciLexerCustom):
 
     def __init__(self, parent: QsciScintilla | None = None):
         super().__init__(parent)
-        font = parent.font() if parent is not None else QFont("Menlo")
+        font = parent.font() if parent is not None else _build_monospace_font()
         self.setDefaultFont(font)
         self.setDefaultPaper(QColor("#0b1020"))
         self.setDefaultColor(QColor("#e5e7eb"))
@@ -140,7 +185,9 @@ class YamlCodeEditor(QsciScintilla):
     _ERROR_INDICATOR = 8
     _ERROR_MARKER = 1
     _EXTRA_ASCENT_MESSAGE = 2525
+    _GET_EXTRA_ASCENT_MESSAGE = 2526
     _EXTRA_DESCENT_MESSAGE = 2527
+    _GET_EXTRA_DESCENT_MESSAGE = 2528
     _SEQUENCE_INDENT_WIDTH = 4
 
     def __init__(self, parent=None):
@@ -151,12 +198,10 @@ class YamlCodeEditor(QsciScintilla):
         self.textChanged.connect(self.clear_validation_error)
 
     def _configure_editor(self) -> None:
-        font = QFont("Menlo")
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        font.setPointSize(15)
+        font = _build_monospace_font()
         self.setFont(font)
         self.setMarginsFont(font)
-        self._set_line_spacing(3)
+        self._set_line_spacing(_recommended_extra_line_spacing(font))
         self.setUtf8(True)
 
         self.setAutoIndent(True)

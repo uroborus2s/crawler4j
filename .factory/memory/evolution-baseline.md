@@ -11,6 +11,9 @@
 - Keep module-facing database access behind `TaskContext.db`; keep non-database Core extensions behind `TaskContext.tools`
 - Keep task lifecycle control behind one stable host-owned path (`hooks/*.py` + `TaskSignal`), not per-class callbacks, root shims, or run-profile teardown rules
 - Keep `on_cleanup` best-effort and never let stop-triggered `CancelledError` or hook failure block host-owned environment actions; module cleanup should avoid starting new subtasks after `TaskContext.should_stop()`
+- Keep qasync-driven async UI flows free of blocking dialog `exec()` calls; use async dialog helpers so failure handling cannot re-enter the event loop and spawn `Cannot enter into task` cascades
+- Keep QScintilla text surfaces on platform-available fixed-width fonts instead of hardcoding macOS-only families; derive extra line spacing from the chosen font metrics so Windows fallback fonts cannot collapse YAML rows
+- Keep GitHub Release asset downloads on dedicated streaming timeouts instead of the shared 30s session total timeout; write to `.part` files, remove partial artifacts on timeout/failure, and reject content-length mismatches before exposing the archive to MMS install flow
 - Treat fingerprint-browser CDP attachment as a warm-up phase: normalize host-returned endpoints first, then give Playwright multiple retries before declaring connect failure
 - Keep Hosted UI page registration and menu configuration separate: `pages/` owns routable `PAGE` modules, while `module.yaml.ui_extension.pages[]` only owns left-menu entries
 

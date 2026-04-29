@@ -10,7 +10,7 @@
 - 活跃工作项：21
 - 阻塞项：0
 - 开放风险：1
-- 当前源码版本基线：`crawler4j 0.3.1`、`crawler4j-sdk 0.6.1`、`crawler4j-contracts 0.4.0`；最近正式 Git tag：`v0.2.0`
+- 当前源码版本基线：`crawler4j 0.3.2`、`crawler4j-sdk 0.6.1`、`crawler4j-contracts 0.4.0`；最近正式 Git tag：`v0.2.0`
 - 最近交接包：无
 - 最近快照：无
 - 备注：2026-04-23 已按方案 A 完成模块运行时硬切换。Core 现为唯一运行时 owner，正式模块契约收口为 `module.yaml(runtime_api=core-native-v1)` + 宿主侧 runtime descriptor 扫描；Core 固定扫描 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/` 并直接调度 `TASK/execute`、`WORKFLOW/run`、`handle`、`SELECTOR/select`、`PAGE/handler`。2026-04-24 又补齐了宿主页源码物理分组协议与菜单解耦协议：页面路由仍保持扁平 `page_id`，运行时与 CLI 已允许 `pages/*.py` 和 `pages/<group>/*.py` 两种源码布局，`pages/` 是可路由页面注册表；`module.yaml.ui_extension.pages[]` 只控制左侧菜单，未配置为菜单的详情页/二级页仍可通过 `open_page.page_id` 打开。`crawler4j page create --group <group>` 会把页面骨架落到分组目录，`--no-menu` 会只创建页面文件不写入菜单配置。`crawler4j-contracts` 承载共享运行时契约、`ctx.db` fluent API 与 Hosted UI schema 归一化 helper；`crawler4j-sdk` 仅保留 CLI、脚手架、校验与开发辅助，不再导出 `ModuleAssembler`、`TaskScript`、`TaskFlow`、`env_selector`、资源池运行时 helper 或任何运行时 owner 身份。模块运行时代码只允许依赖 `crawler4j-contracts`；数据库唯一开发者入口为 `ctx.db`，旧 `ctx.tools.call("db.*")` 会被 SDK AST 扫描拒绝且运行时不注册；非数据库宿主能力仍走 `ctx.tools.call(...)`，资源池资格卡片通过宿主 `env.*` tools 维护，模块如需便捷函数只能在本模块内自封装薄 helper。缺少 `runtime_api: core-native-v1` 或仍保留旧运行薄壳的模块会被明确拒绝加载，不再提供兼容桥。历史主回归证据：2026-04-24 全量 `694 passed`、`ruff check .` 与 `uv lock --check` 通过；本轮文档/记忆同步未重新执行全量测试、打包或发布。

@@ -700,6 +700,6 @@ class ModuleDetailPage(QWidget):
 
             await get_module_release_service().verify_repo_accessible(repo, github_token=token)
         except Exception as exc:
-            MessageDialog.warning(self, "连接失败", str(exc))
+            await MessageDialog.warning_async(self, "连接失败", str(exc))
             return
-        MessageDialog.information(self, "连接成功", f"GitHub 仓库连接正常: {repo}")
+        await MessageDialog.information_async(self, "连接成功", f"GitHub 仓库连接正常: {repo}")

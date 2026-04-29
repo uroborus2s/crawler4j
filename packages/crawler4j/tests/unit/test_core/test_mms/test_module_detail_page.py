@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.Qsci import QsciScintilla
-from PyQt6.QtWidgets import QLabel, QPushButton, QScrollArea
+from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QScrollArea
 
 from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.models import ModuleInfo, ModuleSource
@@ -719,3 +719,52 @@ def test_module_detail_page_clear_repo_token_updates_status_label(qtbot, monkeyp
 
     assert page.repo_token_edit.text() == ""
     assert "未配置" in page.repo_token_status_label.text()
+
+
+@pytest.mark.asyncio
+async def test_module_detail_page_test_repo_token_async_uses_async_information_dialog(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+):
+    module = _make_hosted_ui_module(tmp_path)
+    module.manifest.upgrade_source.repo = "demo/repo"
+    shown_messages: list[tuple[str, str]] = []
+
+    async def fake_verify_repo_accessible(repo: str, *, github_token: str | None = None):  # noqa: ARG001
+        return {"full_name": repo}
+
+    async def fake_information_async(parent, title, message, **kwargs):  # noqa: ARG001
+        shown_messages.append((title, message))
+        return int(QDialog.DialogCode.Accepted)
+
+    monkeypatch.setattr(
+        "src.core.mms.release_service.get_module_release_service",
+        lambda: type(
+            "FakeService",
+            (),
+            {"verify_repo_accessible": staticmethod(fake_verify_repo_accessible)},
+        )(),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_detail_page.MessageDialog.information",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("blocking information dialog should not be used")
+        ),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_detail_page.MessageDialog.information_async",
+        fake_information_async,
+    )
+
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+    page.set_module(module)
+    page._select_menu("info")
+
+    assert page.repo_token_edit is not None
+    page.repo_token_edit.setText("ghp_saved")
+
+    await page._test_repo_token_async()
+
+    assert shown_messages == [("连接成功", "GitHub 仓库连接正常: demo/repo")]

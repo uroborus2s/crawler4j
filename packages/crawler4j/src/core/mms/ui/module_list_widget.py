@@ -764,11 +764,14 @@ class ModuleListWidget(QWidget):
             )
             self.load_data(force_refresh=True)
         except Exception as e:
-            await self._show_message_async(
-                "升级失败",
-                str(e),
-                kind="warning",
-            )
+            if str(e).strip():
+                await self._show_message_async(
+                    "升级失败",
+                    str(e),
+                    kind="warning",
+                )
+            else:
+                await self._show_install_error_async(e)
         finally:
             self._set_busy(False)
 

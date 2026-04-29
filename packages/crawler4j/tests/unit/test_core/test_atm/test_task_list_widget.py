@@ -424,6 +424,68 @@ async def test_task_list_widget_clears_run_once_lock_after_active_tasks_clear(qt
     assert widget.table.displayed_rows()[0]["status"]["text"] == "已暂停"
 
 
+@pytest.mark.asyncio
+async def test_task_list_widget_run_once_failure_uses_async_warning_dialog(qtbot, monkeypatch):
+    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
+
+    warning_async = AsyncMock(return_value=0)
+    warning_sync = MagicMock(side_effect=AssertionError("sync warning dialog should not be used"))
+    service = SimpleNamespace(run_job_once=AsyncMock(return_value=False))
+
+    monkeypatch.setattr(task_list_widget, "get_task_service", lambda: service)
+    monkeypatch.setattr(task_list_widget.MessageDialog, "warning_async", warning_async)
+    monkeypatch.setattr(task_list_widget.MessageDialog, "warning", warning_sync)
+
+    widget.load_data = MagicMock()
+    widget._refresh_table = MagicMock()
+    widget._jobs = [
+        Job(
+            id="job-manual",
+            name="manual-batch",
+            type=JobType.BATCH,
+            state=JobState.PAUSED,
+            trigger=TriggerConfig(type=TriggerType.MANUAL),
+        )
+    ]
+    widget._pending_run_once_job_ids.add("job-manual")
+    widget._run_once_requesting_job_ids.add("job-manual")
+
+    await widget._async_op("job-manual", "run_once")
+
+    service.run_job_once.assert_awaited_once_with("job-manual")
+    warning_async.assert_awaited_once_with(widget, "操作失败", "执行失败，请确认当前没有未结束的批次任务且运行模板可用。")
+    warning_sync.assert_not_called()
+    widget.load_data.assert_called_once_with()
+    assert "job-manual" not in widget._pending_run_once_job_ids
+    assert "job-manual" not in widget._run_once_requesting_job_ids
+
+
+@pytest.mark.asyncio
+async def test_task_list_widget_stop_run_once_failure_uses_async_warning_dialog(qtbot, monkeypatch):
+    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
+
+    warning_async = AsyncMock(return_value=0)
+    warning_sync = MagicMock(side_effect=AssertionError("sync warning dialog should not be used"))
+    service = SimpleNamespace(stop_run_once=AsyncMock(return_value=False))
+    env_action = object()
+
+    monkeypatch.setattr(task_list_widget, "get_task_service", lambda: service)
+    monkeypatch.setattr(task_list_widget.MessageDialog, "warning_async", warning_async)
+    monkeypatch.setattr(task_list_widget.MessageDialog, "warning", warning_sync)
+
+    widget.load_data = MagicMock()
+    widget._refresh_table = MagicMock()
+    widget._run_once_stopping_job_ids.add("job-manual")
+
+    await widget._async_stop_run_once("job-manual", env_action)
+
+    service.stop_run_once.assert_awaited_once_with("job-manual", env_action)
+    warning_async.assert_awaited_once_with(widget, "中止失败", "当前没有可中止的批次任务，或任务已经结束。")
+    warning_sync.assert_not_called()
+    widget.load_data.assert_called_once_with()
+    assert "job-manual" not in widget._run_once_stopping_job_ids
+
+
 def test_task_list_widget_row_click_opens_detail_dialog(qtbot, monkeypatch):
     import src.core.atm.ui.task_detail_dialog as detail_dialog_module
 

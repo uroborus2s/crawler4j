@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import aiohttp
+
 from src.core.foundation.logging import logger
 from src.core.foundation.network import AsyncHttpClient
 from src.core.mms.github_credentials import get_github_credential_store
@@ -24,6 +26,8 @@ from src.utils.paths import get_app_data_dir
 
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 MODULE_UPGRADE_LOCK_TTL = 10 * 60
+MODULE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS = 30
+MODULE_DOWNLOAD_READ_TIMEOUT_SECONDS = 120
 _module_upgrade_process_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -458,22 +462,55 @@ class ModuleReleaseService:
         )
         session = await AsyncHttpClient.get_session()
         proxy = AsyncHttpClient._get_proxy()
-        request_kwargs: dict[str, Any] = {"headers": headers}
+        request_kwargs: dict[str, Any] = {
+            "headers": headers,
+            "timeout": aiohttp.ClientTimeout(
+                total=None,
+                connect=MODULE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS,
+                sock_connect=MODULE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS,
+                sock_read=MODULE_DOWNLOAD_READ_TIMEOUT_SECONDS,
+            ),
+        }
         if proxy:
             request_kwargs["proxy"] = proxy
 
         download_url = str(release.asset_api_url or "").strip() or release.asset_download_url
-        async with session.get(download_url, **request_kwargs) as response:
-            if response.status >= 400:
-                message = await response.text()
-                raise ValueError(
-                    f"下载模块安装包失败 ({response.status}): {message or download_url}"
-                )
+        part_path = target_path.with_suffix(f"{target_path.suffix}.part")
+        bytes_written = 0
+        expected_length: int | None = None
+        try:
+            async with session.get(download_url, **request_kwargs) as response:
+                if response.status >= 400:
+                    message = await response.text()
+                    raise ValueError(
+                        f"下载模块安装包失败 ({response.status}): {message or download_url}"
+                    )
 
-            with target_path.open("wb") as fh:
-                async for chunk in response.content.iter_chunked(65536):
-                    fh.write(chunk)
+                expected_length = getattr(response, "content_length", None)
+                with part_path.open("wb") as fh:
+                    async for chunk in response.content.iter_chunked(65536):
+                        if not chunk:
+                            continue
+                        fh.write(chunk)
+                        bytes_written += len(chunk)
+        except asyncio.TimeoutError as exc:
+            if part_path.exists():
+                part_path.unlink(missing_ok=True)
+            raise ValueError(
+                f"下载模块安装包超时，请检查网络或代理设置后重试: {release.asset_name}"
+            ) from exc
+        except Exception:
+            if part_path.exists():
+                part_path.unlink(missing_ok=True)
+            raise
 
+        if expected_length is not None and bytes_written != expected_length:
+            part_path.unlink(missing_ok=True)
+            raise ValueError(
+                f"下载模块安装包不完整: 期望 {expected_length} 字节，实际 {bytes_written} 字节"
+            )
+
+        part_path.replace(target_path)
         return target_path
 
     def _validate_archive(self, path: Path) -> tuple[ModuleManifest, list[str]]:

@@ -532,7 +532,7 @@ class TaskListWidget(QWidget):
                 self._release_run_once_lock(job_id)
                 self._refresh_table()
                 self.load_data()
-            MessageDialog.warning(self, "操作失败", str(e))
+            await MessageDialog.warning_async(self, "操作失败", str(e))
             return
 
         if op == "run_once":
@@ -552,7 +552,7 @@ class TaskListWidget(QWidget):
             self._run_once_stopping_job_ids.discard(job_id)
             self._refresh_table()
             self.load_data()
-            MessageDialog.warning(self, "中止失败", str(e))
+            await MessageDialog.warning_async(self, "中止失败", str(e))
             return
 
         self._load_seq += 1
@@ -578,7 +578,7 @@ class TaskListWidget(QWidget):
             await get_task_service().update_job(job_id, **data)
             self.load_data()
         except Exception as e:
-            MessageDialog.error(self, "更新失败", str(e))
+            await MessageDialog.error_async(self, "更新失败", str(e))
 
     def _on_create_job(self):
         from src.core.atm.ui.task_create_dialog import TaskCreateDialog
@@ -592,7 +592,7 @@ class TaskListWidget(QWidget):
             await get_task_service().create_job(**data)
             self.load_data()
         except Exception as e:
-            MessageDialog.error(self, "创建失败", str(e))
+            await MessageDialog.error_async(self, "创建失败", str(e))
 
     def _resolve_debug_target(self, job: Job) -> JobDebugTarget | None:
         try:

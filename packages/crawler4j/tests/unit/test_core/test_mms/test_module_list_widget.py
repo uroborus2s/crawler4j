@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from PyQt6.QtWidgets import QDialog
@@ -494,6 +495,52 @@ async def test_install_module_async_uses_diagnostic_dialog_when_error_message_is
             remember_github_token=False,
         )
     )
+
+    diagnostics = observed["diagnostics"]
+    assert diagnostics.summary == "SilentError（异常未提供错误消息）"
+    assert diagnostics.stage == "未提供"
+    assert diagnostics.hint == "未提供"
+    assert "SilentError" in diagnostics.traceback_text
+
+
+@pytest.mark.asyncio
+async def test_upgrade_module_async_uses_diagnostic_dialog_when_error_message_is_empty(
+    qtbot,
+    tmp_path,
+    monkeypatch,
+):
+    observed: dict[str, object] = {}
+
+    class SilentError(Exception):
+        def __str__(self) -> str:
+            return ""
+
+    module = _make_module(tmp_path, source=ModuleSource.EXTERNAL)
+    registry = SimpleNamespace(get_module=lambda name: module if name == module.name else None)
+
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.get_module_registry",
+        lambda: registry,
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.module_list_widget.get_module_release_service",
+        lambda: SimpleNamespace(prepare_module_upgrade=AsyncMock(side_effect=SilentError())),
+    )
+
+    widget = ModuleListWidget()
+    qtbot.addWidget(widget)
+    widget._set_busy = lambda *args, **kwargs: None  # type: ignore[method-assign]
+
+    async def fake_show_message_async(*args, **kwargs):
+        raise AssertionError("blank upgrade errors should not go through generic warning dialog")
+
+    async def fake_show_install_error_async(exc):
+        observed["diagnostics"] = build_install_exception_diagnostics(exc)
+
+    widget._show_message_async = fake_show_message_async  # type: ignore[method-assign]
+    widget._show_install_error_async = fake_show_install_error_async  # type: ignore[method-assign]
+
+    await widget._upgrade_module_async(module.name)
 
     diagnostics = observed["diagnostics"]
     assert diagnostics.summary == "SilentError（异常未提供错误消息）"

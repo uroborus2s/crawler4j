@@ -246,6 +246,7 @@ V1 约定：
 | `等待环境` | UI / 运营层展示文案 |
 | `等待环境池工位: <pool>` | 固定池等待中的 `task.message` |
 | `等待环境池工位超时: <pool> (<seconds>s)` | 固定池等待超时后的失败错误 |
+| `Job paused before resource acquired` | 作业暂停时，对尚未拿到 `env_id/lease_id` 的等待席位直接写入的取消终态文案 |
 
 ## 11. V1 边界
 

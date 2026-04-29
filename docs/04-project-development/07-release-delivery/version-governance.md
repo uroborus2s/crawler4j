@@ -24,8 +24,8 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.3.1` | 当前仓库 HEAD 已切到下一轮正式发布目标版本 |
-| 根应用运行时版本 | `0.3.1` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.3.2` | 当前仓库 HEAD 已切到下一轮正式发布目标版本 |
+| 根应用运行时版本 | `0.3.2` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
 | SDK | `0.6.1` | 当前工作区 SDK 版本；CLI 命令树、脚手架与开发者文档已同步到 `0.6.1`，正式 build/publish 证据待补 |
 | Contracts | `0.4.0` | 当前工作区 Contracts 版本；共享契约与 SDK / Core README、发布文档口径已同步收口，正式 build/publish 证据待补 |
@@ -33,19 +33,19 @@
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前工作区已经切到 `0.3.1`，但 Git tag 仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为 `0.3.1` 已正式打 tag 并发布。
+- 当前工作区已经切到 `0.3.2`，但 Git tag 仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为 `0.3.2` 已正式打 tag 并发布。
 - 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.3.1`
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.3.2`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.3.1` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.3.2` Git tag 与正式 release 资产
 
 ## 5. 变更记录
 
@@ -57,3 +57,4 @@
 | 2026-04-22 | 将 SDK 版本提升到 `0.4.0`，并完成本地构建与 PyPI 发布 | Codex |
 | 2026-04-24 | 修正版本治理与发布文档的事实漂移：根应用 / 运行时更新到 `0.3.1`，最近正式 tag 更新为 `v0.2.0`，SDK / Contracts 当前版本同步为 `0.5.2` / `0.3.0` | Codex |
 | 2026-04-27 | 同步当前源码版本线：根应用 / 运行时保持 `0.3.1`，最近正式 tag 保持 `v0.2.0`，SDK / Contracts 当前版本同步为 `0.6.1` / `0.4.0`；本轮仍缺当前版本 build/publish 证据 | Codex |
+| 2026-04-29 | 将根应用当前源码版本提升到 `0.3.2`，同步 README / `.factory` / release 文档口径，并要求后续正式发布按 `0.3.2` 重新补齐 build、桌面打包与交付证据 | Codex |

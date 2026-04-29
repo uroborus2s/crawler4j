@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -224,6 +225,115 @@ async def test_download_release_asset_uses_asset_api_url_with_authorization(
     assert captured["url"] == release.asset_api_url
     assert captured["headers"]["Authorization"] == "Bearer stored-download-token"
     assert captured["headers"]["Accept"] == "application/octet-stream"
+
+
+@pytest.mark.asyncio
+async def test_download_release_asset_wraps_timeout_and_removes_partial_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = ModuleReleaseService()
+    release = ModuleReleaseInfo(
+        repo="example/demo_module",
+        tag_name="v1.2.0",
+        version="1.2.0",
+        title="v1.2.0",
+        release_notes="notes",
+        published_at="2026-04-17T00:00:00Z",
+        html_url="https://github.com/example/demo_module/releases/tag/v1.2.0",
+        asset_name="demo_module-1.2.0.zip",
+        asset_download_url="https://example.invalid/demo_module-1.2.0.zip",
+        asset_api_url="https://api.github.com/repos/example/demo_module/releases/assets/123",
+        prerelease=False,
+    )
+
+    class FakeContent:
+        async def iter_chunked(self, size: int):  # noqa: ARG002
+            yield b"partial zip bytes"
+            raise asyncio.TimeoutError()
+
+    class FakeResponse:
+        status = 200
+        content_length = 1024
+        content = FakeContent()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSession:
+        def get(self, url: str, **kwargs):  # noqa: ARG002
+            return FakeResponse()
+
+    async def fake_get_session():
+        return FakeSession()
+
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient.get_session", fake_get_session)
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient._get_proxy", lambda: None)
+    monkeypatch.setattr("src.core.mms.release_service.get_app_data_dir", lambda: tmp_path)
+
+    with pytest.raises(ValueError) as exc_info:
+        await service._download_release_asset(release)
+
+    assert "下载模块安装包超时" in str(exc_info.value)
+    target_dir = tmp_path / "downloads" / "modules" / "example__demo_module"
+    assert list(target_dir.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_download_release_asset_rejects_incomplete_archive_and_removes_partial_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = ModuleReleaseService()
+    release = ModuleReleaseInfo(
+        repo="example/demo_module",
+        tag_name="v1.2.0",
+        version="1.2.0",
+        title="v1.2.0",
+        release_notes="notes",
+        published_at="2026-04-17T00:00:00Z",
+        html_url="https://github.com/example/demo_module/releases/tag/v1.2.0",
+        asset_name="demo_module-1.2.0.zip",
+        asset_download_url="https://example.invalid/demo_module-1.2.0.zip",
+        asset_api_url="https://api.github.com/repos/example/demo_module/releases/assets/123",
+        prerelease=False,
+    )
+
+    class FakeContent:
+        async def iter_chunked(self, size: int):  # noqa: ARG002
+            yield b"1234"
+
+    class FakeResponse:
+        status = 200
+        content_length = 8
+        content = FakeContent()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSession:
+        def get(self, url: str, **kwargs):  # noqa: ARG002
+            return FakeResponse()
+
+    async def fake_get_session():
+        return FakeSession()
+
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient.get_session", fake_get_session)
+    monkeypatch.setattr("src.core.mms.release_service.AsyncHttpClient._get_proxy", lambda: None)
+    monkeypatch.setattr("src.core.mms.release_service.get_app_data_dir", lambda: tmp_path)
+
+    with pytest.raises(ValueError) as exc_info:
+        await service._download_release_asset(release)
+
+    assert "下载模块安装包不完整" in str(exc_info.value)
+    target_dir = tmp_path / "downloads" / "modules" / "example__demo_module"
+    assert list(target_dir.iterdir()) == []
 
 
 @pytest.mark.asyncio

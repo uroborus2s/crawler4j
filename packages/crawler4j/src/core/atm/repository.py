@@ -390,6 +390,77 @@ class TaskRepository:
                 )
                 return [self._row_to_task(row) for row in cursor.fetchall()]
         return await self._run_async(_do)
+
+    async def cancel_pending_tasks_without_resources(
+        self,
+        job_id: str,
+        *,
+        cancel_message: str,
+        result_message: str,
+        exclude_task_ids: List[str] | None = None,
+    ) -> List[Task]:
+        """取消尚未拿到环境与租约的 pending 任务。"""
+        exclude_task_ids = [task_id for task_id in (exclude_task_ids or []) if task_id]
+
+        def _do():
+            with get_connection(STATE_DB) as conn:
+                where_sql = """
+                    job_id = ?
+                    AND status = ?
+                    AND env_id IS NULL
+                    AND lease_id IS NULL
+                """
+                select_params: list[Any] = [job_id, TaskStatus.PENDING.value]
+                if exclude_task_ids:
+                    placeholders = ",".join("?" for _ in exclude_task_ids)
+                    where_sql += f" AND id NOT IN ({placeholders})"
+                    select_params.extend(exclude_task_ids)
+
+                rows = conn.execute(
+                    f"SELECT * FROM tasks WHERE {where_sql}",
+                    select_params,
+                ).fetchall()
+                if not rows:
+                    return []
+
+                task_ids = [str(row["id"]) for row in rows]
+                now = int(time.time())
+                placeholders = ",".join("?" for _ in task_ids)
+                conn.execute(
+                    f"""
+                    UPDATE tasks
+                    SET status = ?,
+                        result = ?,
+                        error = ?,
+                        signal_json = '',
+                        waiting_since = NULL,
+                        started_at = NULL,
+                        finished_at = ?
+                    WHERE id IN ({placeholders})
+                    """,
+                    [
+                        TaskStatus.CANCELLED.value,
+                        result_message,
+                        cancel_message,
+                        now,
+                        *task_ids,
+                    ],
+                )
+
+                tasks: list[Task] = []
+                for row in rows:
+                    task = self._row_to_task(row)
+                    task.status = TaskStatus.CANCELLED
+                    task.message = result_message
+                    task.error = cancel_message
+                    task.signal = None
+                    task.waiting_since = None
+                    task.started_at = None
+                    task.finished_at = now
+                    tasks.append(task)
+                return tasks
+
+        return await self._run_async(_do)
         
     async def mark_tasks_failed(self, task_ids: List[str], error_message: str) -> List[Task]:
         """批量将任务标记为 FAILED。"""

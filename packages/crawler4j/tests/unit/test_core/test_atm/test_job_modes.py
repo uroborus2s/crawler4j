@@ -8,6 +8,7 @@ import pytest
 from crawler4j_contracts import EnvAction, TaskSignal
 
 from src.core.atm.controller import JobController
+from src.core.atm.dispatcher import TaskDispatcher
 from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig, TriggerType
 from src.core.atm.repository import TaskRepository
 from src.core.atm.service import TaskService
@@ -740,6 +741,51 @@ async def test_pause_job_requests_stop_for_service_tasks():
     assert job.state == JobState.PAUSED
     service._repo.save_job.assert_awaited_once_with(job)
     service._controller.request_job_stop.assert_awaited_once_with(job.id)
+
+
+@pytest.mark.asyncio
+async def test_pause_job_cancels_persisted_pending_task_without_resource(temp_state_dir):
+    service = TaskService()
+    repo = TaskRepository()
+    dispatcher = TaskDispatcher()
+    dispatcher.repo = repo
+    dispatcher.rem = SimpleNamespace()
+
+    job = Job(
+        id="service-job-pending",
+        name="service-pending",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        concurrency_target=1,
+    )
+    pending_task = Task(
+        id="task-pending-no-resource",
+        job_id=job.id,
+        status=TaskStatus.PENDING,
+        message="等待环境池工位: bound_account_ready",
+        waiting_since=1_714_000_000,
+    )
+
+    await repo.save_job(job)
+    await repo.save_task(pending_task)
+
+    async def _request_job_stop(job_id: str, env_action=None):
+        await dispatcher.request_stop_for_job(job_id, env_action=env_action)
+
+    service._repo = repo
+    service._controller = SimpleNamespace(request_job_stop=AsyncMock(side_effect=_request_job_stop))
+
+    result = await service.pause_job(job.id)
+
+    assert result is True
+    updated_task = await repo.get_task(pending_task.id)
+    assert updated_task is not None
+    assert updated_task.status == TaskStatus.CANCELLED
+    assert updated_task.error == "Job paused"
+    assert updated_task.message == "Job paused before resource acquired"
+    assert updated_task.waiting_since is None
+    assert updated_task.finished_at is not None
 
 
 @pytest.mark.asyncio
