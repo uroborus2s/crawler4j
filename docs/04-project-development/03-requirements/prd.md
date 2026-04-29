@@ -93,7 +93,7 @@
 ### `REQ-006` 模块根入口应可由工具托管而无需开发者手工维护
 
 - 优先级：P1
-- 描述：新生成的模块根 `__init__.py` 应收敛为稳定薄壳，默认运行时组装逻辑由 SDK 统一提供，开发者无需在常规开发中手工维护根入口文件。
+- 描述：新生成的模块根 `__init__.py` 应收敛为稳定薄壳，默认根入口模板由 SDK CLI 生成，开发者无需在常规开发中手工维护根入口文件。
 - 用户故事：作为模块开发者，我希望模块根入口由工具托管，以便我在新增任务、工作流或调整默认运行方式时，不需要再手改根 `__init__.py`。
 - 前置条件：模块目录仍包含 `module.yaml` 与根 `__init__.py`
 - 业务规则：必须保持当前 Core 仍通过根 `__init__.py` 加载模块；旧模块升级路径统一为按最新方式重新初始化，不再为旧模板提供兼容承诺
@@ -103,7 +103,7 @@
 验收标准：
 
 - [ ] `UAT-012` `module init` 生成的新模块根 `__init__.py` 为固定薄壳，而不是内联完整调度逻辑
-- [ ] `UAT-013` 默认任务/工作流分发逻辑可由 SDK helper 提供，不再要求写在模块根 `__init__.py`
+- [ ] `UAT-013` 默认任务/工作流分发逻辑由 Core 扫描 `tasks/` / `workflows/` 承载，不再要求写在模块根 `__init__.py`
 - [ ] `UAT-014` 模块级自定义 hooks 或默认工作流可在独立文件中声明，而不是必须写在根 `__init__.py`
 - [ ] `UAT-015` 模块升级说明明确要求按最新模板重新初始化，而不是继续维护旧式根入口
 
@@ -132,10 +132,10 @@
 - 优先级：P1
 - 描述：宿主必须在快照型 dataset 之外，为模块提供 append-only 的审计事件写入与查询能力，用于记录账号状态流转、运行留痕和其他历史轨迹。
 - 用户故事：作为模块开发者，我希望宿主提供与快照数据分离的事件型存储能力，以便记录审计历史，而不是把事件流伪装成普通 dataset 全量覆盖写回。
-- 前置条件：模块通过 `TaskContext.tools` 调用宿主扩展能力。
+- 前置条件：模块通过 `TaskContext.db` 调用宿主数据能力。
 - 业务规则：
-  - 快照型数据继续通过 `db.list_records` / `db.replace_records` 落到 `data.db.module_datasets`。
-  - 审计事件通过 `db.append_event` / `db.query_events` 落到独立的 `data.db.module_audit_events`。
+  - 快照型数据继续通过 `ctx.db.from_` / `ctx.db.into(...).replace` 落到 `data.db.module_datasets` 或受控自定义表。
+  - 审计事件通过 `ctx.db.audit(...).append/query` 落到独立的 `data.db.module_audit_events`。
   - 模块写入的审计事件为 append-only；本轮不提供模块侧的更新/删除接口。
   - `core:data_table` 仍只服务快照型 dataset，不承担审计事件编辑。
   - retention / archive 暂不纳入本轮实现范围。
@@ -144,10 +144,10 @@
 
 验收标准：
 
-- [x] `UAT-019` 模块调用 `db.append_event` 时，宿主会为目标模块和 dataset 新增 1 条独立事件记录，而不是重写整包历史 JSON
-- [x] `UAT-020` 模块调用 `db.query_events` 时，可按 `dataset / entity_key / event_type / run_id / time range` 查询事件，并按时间顺序返回结果
-- [x] `UAT-021` 快照型 dataset 继续通过 `db.list_records` / `db.replace_records` 读写，事件工具不会污染 `module_datasets`
-- [x] `UAT-022` 新增事件工具后，模块仍通过统一的 `ctx.tools.call(...)` 能力面访问宿主，不需要直连数据库
+- [x] `UAT-019` 模块调用 `ctx.db.audit(...).append` 时，宿主会为目标模块和 dataset 新增 1 条独立事件记录，而不是重写整包历史 JSON
+- [x] `UAT-020` 模块调用 `ctx.db.audit(...).query` 时，可按 `dataset / entity_key / event_type / run_id / time range` 查询事件，并按时间顺序返回结果
+- [x] `UAT-021` 快照型 dataset 继续通过 `ctx.db.from_` / `ctx.db.into(...).replace` 读写，审计事件不会污染 `module_datasets`
+- [x] `UAT-022` 新增事件能力后，模块仍通过统一的 `ctx.db` 能力面访问宿主，不需要直连数据库
 - [x] `UAT-023` 宿主清理模块数据时，会同时清理该模块的快照数据、审计事件和托管数据表 schema
 
 ### `REQ-009` ATM 必须支持固定环境池 Service Job 的等待队列与模块资源池分配
@@ -175,7 +175,7 @@
 
 当前实现备注：
 
-- V1 已本地实现并验证队列语义、FIFO 补位、资源池隔离、资格卡片、等待席位自动超时收口与 SDK helper
+- V1 已本地实现并验证队列语义、FIFO 补位、资源池隔离、资格卡片、等待席位自动超时收口与宿主 `ctx.tools` 资源池能力
 - `UAT-028` 当前实现的错误文案为 `等待环境池工位超时: <pool> (<seconds>s)`，语义已从“环境选择返回 none”收敛为等待超时类错误
 
 ### `REQ-004` 项目必须具备可追溯的发布与文档链路

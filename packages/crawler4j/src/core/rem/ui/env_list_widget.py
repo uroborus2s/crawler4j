@@ -7,27 +7,33 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from src.core.foundation.logging import logger
+from src.core.rem.import_job_service import get_existing_env_import_job_service
 from src.core.rem import EnvKind, EnvStatus
+from src.core.rem.manager import RESOURCE_POOL_METADATA_NAMESPACE
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.pool import EnvPool
+from src.core.rem.ui.import_existing_env_dialog import ImportExistingEnvDialog
+from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.confirm_dialog import ConfirmDialog
+from src.ui.components.data_table import SkyDataTable
+from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.dialog_async import open_dialog_async
+from src.ui.components.dialog_window import configure_titled_dialog
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
+from src.ui.components.message_dialog import MessageDialog, MessageKind
+from src.ui.components.progress_dialog import ProgressDialog
 
 
 def get_create_env_default_name() -> str:
@@ -47,6 +53,7 @@ class CreateEnvDialog(QDialog):
         super().__init__(parent)
         self._suggested_name = ""
         self.setWindowTitle("创建环境")
+        configure_titled_dialog(self)
         self.setMinimumWidth(450)
         
         # 应用深色主题样式
@@ -57,30 +64,6 @@ class CreateEnvDialog(QDialog):
             QLabel {
                 color: #cdd6f4;
                 background-color: transparent;
-            }
-            QLineEdit {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #cdd6f4;
-            }
-            QLineEdit:focus {
-                border-color: #89b4fa;
-            }
-            QPushButton {
-                background-color: #45475a;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                color: #cdd6f4;
-            }
-            QPushButton:hover {
-                background-color: #585b70;
-            }
-            QDialogButtonBox QPushButton[text="OK"] {
-                background-color: #89b4fa;
-                color: #1e1e2e;
             }
             QGroupBox {
                 border: 1px solid #45475a;
@@ -172,13 +155,32 @@ class CreateEnvDialog(QDialog):
         
         layout.addLayout(self.form)
         
-        # 按钮区
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_btn = StyledButton(
+            "取消",
+            variant="secondary",
+            min_height=40,
+            min_width=92,
+            horizontal_padding=20,
         )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        cancel_btn.setObjectName("createEnvCancelButton")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        create_btn = StyledButton(
+            "创建",
+            variant="success",
+            min_height=40,
+            min_width=92,
+            horizontal_padding=20,
+        )
+        create_btn.setObjectName("createEnvSubmitButton")
+        create_btn.clicked.connect(self.accept)
+        button_row.addWidget(create_btn)
+        layout.addLayout(button_row)
         
         # 初始化显示状态
         self._sync_suggested_name()
@@ -303,16 +305,22 @@ class DataLoaderThread(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
     
-    def __init__(self, pool: EnvPool, run_gc: bool = False):
+    def __init__(self, pool: EnvPool, run_gc: bool = False, reload_from_db: bool = False):
         super().__init__()
         self._pool = pool
         self._run_gc = run_gc
+        self._reload_from_db = reload_from_db
     
     def run(self):
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
+            if self._reload_from_db:
+                reload_pool = getattr(self._pool, "reload_from_db", None)
+                if callable(reload_pool):
+                    loop.run_until_complete(reload_pool())
+
             # 仅在需要时执行 GC
             if self._run_gc:
                 from src.core.rem.manager import get_environment_manager
@@ -321,10 +329,33 @@ class DataLoaderThread(QThread):
 
             # 使用共享的 pool，无需重新加载
             envs = loop.run_until_complete(self._pool.list_all())
+            records = [
+                EnvLoadedRecord(env=env, env_metadata=self._load_env_metadata(env))
+                for env in envs
+            ]
             loop.close()
-            self.finished.emit(envs)
+            self.finished.emit(records)
         except Exception as e:
             self.error.emit(str(e))
+
+    def _load_env_metadata(self, env: Any) -> dict[str, Any]:
+        list_metadata = getattr(self._pool, "list_metadata", None)
+        if not callable(list_metadata):
+            return {}
+        try:
+            metadata = list_metadata(env.id)
+        except Exception as exc:
+            logger.warning(f"[REM] 读取环境元数据失败: env_id={getattr(env, 'id', '')} error={exc}")
+            return {}
+        return metadata if isinstance(metadata, dict) else {}
+
+
+@dataclass(frozen=True)
+class EnvLoadedRecord:
+    """环境列表加载结果。"""
+
+    env: Any
+    env_metadata: dict[str, Any]
 
 
 @dataclass
@@ -332,13 +363,35 @@ class EnvDisplayItem:
     """环境显示项包装。"""
     raw: Any # EnvInfo
     display_status_text: str
+    env_metadata: dict[str, Any]
+    availability: dict[str, Any]
 
 class EnvListWidget(QWidget):
     """环境列表组件。"""
     
     env_selected = pyqtSignal(str)
+    TABLE_SCHEMA = {
+        "columns": [
+            {"key": "id", "label": "ID", "type": "text", "width": 120},
+            {"key": "name", "label": "名称", "type": "text", "width": 160},
+            {"key": "kind", "label": "类型", "type": "text", "width": 100},
+            {"key": "provider", "label": "节点类型", "type": "text", "width": 110},
+            {"key": "status", "label": "状态", "type": "text", "width": 90},
+            {"key": "availability", "label": "可用状态", "type": "text", "width": 150},
+            {"key": "task", "label": "任务", "type": "text", "width": 160},
+            {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
+        ],
+        "features": {
+            "search": {"enabled": True, "placeholder": "搜索环境、Provider 或任务"},
+            "sort": {
+                "enabled": True,
+                "default": [{"field": "name", "direction": "asc"}],
+            },
+            "pagination": {"enabled": True, "page_size": 20, "page_size_options": [10, 20, 50, 100]},
+        },
+    }
     
-    COLUMNS = ["ID", "名称", "类型", "Provider", "状态", "任务", "操作"]
+    COLUMNS = ["ID", "名称", "类型", "Provider", "状态", "可用状态", "任务", "操作"]
     STATUS_COLORS = {
         EnvStatus.READY: "#4ade80",
         EnvStatus.BUSY: "#facc15",
@@ -362,17 +415,21 @@ class EnvListWidget(QWidget):
         # 使用全局 EnvironmentManager 的共享 pool 实例
         from src.core.rem.manager import get_environment_manager
         self._manager = get_environment_manager()
+        self._import_job_service = get_existing_env_import_job_service()
         self._pool = self._manager.pool
         self._loader_thread = None
         self._display_items: list[EnvDisplayItem] = []
         self._load_in_progress = False
         self._reload_requested = False
         self._reload_run_gc = False
+        self._reload_from_db = False
         self._operation_in_progress = False
         self._operation_task: asyncio.Task[Any] | None = None
         self._pending_tasks: set[asyncio.Task[Any]] = set()
+        self._table_rows: list[dict[str, Any]] = []
+        self._progress_dialog: ProgressDialog | None = None
         self._setup_ui()
-        self.destroyed.connect(lambda *_args: self._cancel_pending_tasks())
+        self.destroyed.connect(lambda *_args: (self._cancel_pending_tasks(), self._close_progress_dialog()))
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -386,45 +443,20 @@ class EnvListWidget(QWidget):
         header.addStretch()
         
         # 创建环境按钮
-        self.create_btn = QPushButton("➕ 创建环境")
-        self.create_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(74, 222, 128, 0.8);
-                color: black;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(74, 222, 128, 1); }
-        """)
+        self.create_btn = StyledButton("创建环境", variant="success", min_height=36)
         self.create_btn.clicked.connect(self._create_env)
         header.addWidget(self.create_btn)
+
+        self.import_existing_btn = StyledButton("从已有环境导入", variant="warning", min_height=36)
+        self.import_existing_btn.clicked.connect(self._import_existing_env)
+        header.addWidget(self.import_existing_btn)
         
-        self.refresh_btn = QPushButton("🔄")
-        self.refresh_btn.setFixedSize(32, 32)
-        self.refresh_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 16px;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-            QPushButton:disabled { background: rgba(99, 102, 241, 0.3); }
-        """)
-        self.refresh_btn.clicked.connect(lambda: self.load_data(run_gc=True))
+        self.refresh_btn = StyledButton("刷新", variant="primary", min_height=36)
+        self.refresh_btn.setMinimumWidth(64)
+        self.refresh_btn.clicked.connect(lambda: self.load_data(run_gc=True, reload_from_db=True))
         header.addWidget(self.refresh_btn)
         
         layout.addLayout(header)
-        
-        # Loading 指示器
-        self.loading_bar = QProgressBar()
-        self.loading_bar.setMaximum(0)
-        self.loading_bar.setTextVisible(False)
-        self.loading_bar.setFixedHeight(3)
-        self.loading_bar.hide()
-        layout.addWidget(self.loading_bar)
         
         # 错误提示
         self.error_label = QLabel()
@@ -432,21 +464,10 @@ class EnvListWidget(QWidget):
         self.error_label.hide()
         layout.addWidget(self.error_label)
         
-        # 表格 (SkyDataTable)
-        from src.ui.components.data_table import SkyDataTable
-        
-        columns = [
-            ("id", "ID", 120),
-            ("name", "名称", 160),
-            ("kind", "类型", 100),
-            ("provider", "节点类型", 110),
-            ("status", "状态", 90),
-            ("task", "任务", 160),
-            ("actions", "操作", None),
-        ]
-        
-        self.table = SkyDataTable(columns=columns)
-        self.table.set_render_callback(self._render_row)
+        self.table = SkyDataTable(schema=self.TABLE_SCHEMA)
+        self.table.query_requested.connect(self._on_table_query_requested)
+        self.table.row_clicked.connect(self._on_table_row_clicked)
+        self.table.row_action_requested.connect(self._on_table_action_requested)
         layout.addWidget(self.table)
         
         # 统计栏
@@ -454,17 +475,18 @@ class EnvListWidget(QWidget):
         self.stats_label.setStyleSheet("color: rgba(255, 255, 255, 0.7);")
         layout.addWidget(self.stats_label)
     
-    def load_data(self, run_gc: bool = False):
+    def load_data(self, run_gc: bool = False, reload_from_db: bool = False):
         """加载环境数据。"""
         if self._load_in_progress:
             self._reload_requested = True
             self._reload_run_gc = self._reload_run_gc or run_gc
+            self._reload_from_db = self._reload_from_db or reload_from_db
             return
         self._load_in_progress = True
         self.error_label.hide()
         self._apply_busy_state()
         
-        self._loader_thread = DataLoaderThread(self._pool, run_gc=run_gc)
+        self._loader_thread = DataLoaderThread(self._pool, run_gc=run_gc, reload_from_db=reload_from_db)
         self._loader_thread.finished.connect(self._on_data_loaded)
         self._loader_thread.error.connect(self._on_load_error)
         self._loader_thread.start()
@@ -479,11 +501,14 @@ class EnvListWidget(QWidget):
         busy_count = 0
         
         display_items = []
-        for env in envs:
+        for loaded in envs:
+            env, env_metadata = self._unpack_loaded_env(loaded)
             status_text = self.STATUS_TEXT.get(env.status, str(env.status.value))
             display_items.append(EnvDisplayItem(
                 raw=env,
-                display_status_text=str(status_text)
+                display_status_text=str(status_text),
+                env_metadata=env_metadata,
+                availability=self._build_availability_cell(env_metadata),
             ))
             
             if env.status == EnvStatus.READY:
@@ -491,144 +516,173 @@ class EnvListWidget(QWidget):
             elif env.status == EnvStatus.BUSY:
                 busy_count += 1
                 
-        self.table.set_data(display_items)
-        self._display_items = display_items  # 保存引用供编辑对话框使用
+        self._display_items = display_items
+        self._refresh_table()
         self._update_stats(len(envs), ready_count, busy_count)
         self._run_queued_reload_if_needed()
-        
-    def _render_row(self, row: int, item: EnvDisplayItem, table):
-        """渲染单行。"""
+
+    def _refresh_table(self) -> None:
+        self._table_rows = [self._build_table_row(item) for item in self._display_items]
+        self.table.request_refresh()
+
+    def _build_table_row(self, item: EnvDisplayItem) -> dict[str, Any]:
         env = item.raw
-        
-        # 0: ID
-        id_item = QTableWidgetItem(str(env.id))
-        id_item.setData(Qt.ItemDataRole.UserRole, env.id)
-        table.setItem(row, 0, id_item)
-        
-        # 1: 名称
-        name_text = env.name if env.name else "-"
-        table.setItem(row, 1, QTableWidgetItem(name_text))
-        
-        # 2: 类型
-        table.setItem(row, 2, QTableWidgetItem(env.kind.value))
-        
-        # 3: Provider
-        table.setItem(row, 3, QTableWidgetItem(env.provider))
-        
-        # 4: 状态
-        status_text = item.display_status_text
-        status_item = QTableWidgetItem(status_text)
-        if env.status in self.STATUS_COLORS:
-            status_item.setForeground(QColor(self.STATUS_COLORS[env.status]))
-        table.setItem(row, 4, status_item)
-        
-        # 5: 任务
-        task_id = env.task_run_id[:8] + "..." if env.task_run_id else "-"
-        table.setItem(row, 5, QTableWidgetItem(task_id))
-        
-        # 6: 操作按钮
-        action_widget = self._create_action_widget(env)
-        table.setCellWidget(row, 6, action_widget)
-        
-    def _create_action_widget(self, env) -> QWidget:
-        """创建操作按钮组。
-        
-        按钮布局:
-        - READY: [▶运行] [⏸暂停] [✏编辑] [🗑销毁]
-        - BUSY: [⏹停止]
-        - PAUSED: [▶启动] [✏编辑] [🗑销毁]
-        """
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(6)
-        
-        btn_style = """
-            QPushButton {
-                padding: 4px 8px;
-                border: none;
-                border-radius: 4px;
-                font-size: 12px;
-                min-width: 24px;
-                min-height: 24px;
+        task_text = f"{env.task_run_id[:8]}..." if env.task_run_id else "-"
+        return {
+            "env": env,
+            "env_metadata": item.env_metadata,
+            "env_id": str(env.id),
+            "id": str(env.id),
+            "name": env.name if env.name else "-",
+            "kind": env.kind.value,
+            "provider": env.provider,
+            "status": {
+                "text": item.display_status_text,
+                "tone": self._status_tone(env.status),
+            },
+            "availability": item.availability,
+            "task": task_text,
+            "actions": self._build_row_actions(env),
+        }
+
+    def _unpack_loaded_env(self, loaded: Any) -> tuple[Any, dict[str, Any]]:
+        if isinstance(loaded, EnvLoadedRecord):
+            return loaded.env, dict(loaded.env_metadata)
+        if isinstance(loaded, tuple) and len(loaded) == 2:
+            env, metadata = loaded
+            return env, metadata if isinstance(metadata, dict) else {}
+        return loaded, self._load_env_metadata_for_display(loaded)
+
+    def _load_env_metadata_for_display(self, env: Any) -> dict[str, Any]:
+        list_metadata = getattr(self._pool, "list_metadata", None)
+        if not callable(list_metadata):
+            return {}
+        try:
+            metadata = list_metadata(env.id)
+        except Exception:
+            return {}
+        return metadata if isinstance(metadata, dict) else {}
+
+    def _build_availability_cell(self, env_metadata: dict[str, Any]) -> dict[str, Any]:
+        cards = self._resource_pool_cards(env_metadata)
+        if not cards:
+            return {
+                "text": "未标记",
+                "tone": "neutral",
+                "sort_value": 0,
+                "search_text": "未标记 无资源池状态",
+                "tooltip": "env_metadata 中没有资源池可用状态",
             }
-            QPushButton:hover { opacity: 0.85; }
-        """
-                
-        if env.status == EnvStatus.READY:
-            # [▶运行]
-            run_btn = QPushButton("▶")
-            run_btn.setToolTip("运行")
-            run_btn.setStyleSheet(btn_style + "QPushButton { background: #4ade80; color: black; }")
-            run_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            run_btn.clicked.connect(lambda _, eid=env.id: self._start_env(eid))
-            layout.addWidget(run_btn)
-            
-            # [⏸暂停]
-            pause_btn = QPushButton("⏸")
-            pause_btn.setToolTip("暂停")
-            pause_btn.setStyleSheet(btn_style + "QPushButton { background: #facc15; color: black; }")
-            pause_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            pause_btn.clicked.connect(lambda _, eid=env.id: self._pause_env(eid))
-            layout.addWidget(pause_btn)
-            
-            # [✏编辑]
-            edit_btn = QPushButton("✏")
-            edit_btn.setToolTip("编辑")
-            edit_btn.setStyleSheet(btn_style + "QPushButton { background: #60a5fa; color: white; }")
-            edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            edit_btn.clicked.connect(lambda _, eid=env.id: self._edit_env(eid))
-            layout.addWidget(edit_btn)
-            
-            # [🗑销毁]
-            destroy_btn = QPushButton("🗑")
-            destroy_btn.setToolTip("销毁")
-            destroy_btn.setStyleSheet(btn_style + "QPushButton { background: #f87171; color: white; }")
-            destroy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            destroy_btn.clicked.connect(lambda _, eid=env.id: self._destroy_env(eid))
-            layout.addWidget(destroy_btn)
-            
-        elif env.status in (EnvStatus.RUNNING,EnvStatus.BUSY):
-            # [⏹停止]
-            stop_btn = QPushButton("⏹ 停止")
-            stop_btn.setStyleSheet(btn_style + "QPushButton { background: #f87171; color: white; }")
-            stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            stop_btn.clicked.connect(lambda _, eid=env.id: self._stop_env(eid))
-            layout.addWidget(stop_btn)
-            
-        elif env.status == EnvStatus.PAUSED:
-            # [▶启动]
-            resume_btn = QPushButton("▶")
-            resume_btn.setToolTip("启动")
-            resume_btn.setStyleSheet(btn_style + "QPushButton { background: #4ade80; color: black; }")
-            resume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            resume_btn.clicked.connect(lambda _, eid=env.id: self._resume_env(eid))
-            layout.addWidget(resume_btn)
-            
-            # [✏编辑]
-            edit_btn = QPushButton("✏")
-            edit_btn.setToolTip("编辑")
-            edit_btn.setStyleSheet(btn_style + "QPushButton { background: #60a5fa; color: white; }")
-            edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            edit_btn.clicked.connect(lambda _, eid=env.id: self._edit_env(eid))
-            layout.addWidget(edit_btn)
-            
-            # [🗑销毁]
-            destroy_btn = QPushButton("🗑")
-            destroy_btn.setToolTip("销毁")
-            destroy_btn.setStyleSheet(btn_style + "QPushButton { background: #f87171; color: white; }")
-            destroy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            destroy_btn.clicked.connect(lambda _, eid=env.id: self._destroy_env(eid))
-            layout.addWidget(destroy_btn)
-            
+
+        total_count = len(cards)
+        eligible_count = sum(1 for card in cards if bool(card.get("eligible")))
+        if eligible_count == total_count:
+            text = f"可用 ({eligible_count}/{total_count})"
+            tone = "success"
+            sort_value = 3
+        elif eligible_count > 0:
+            text = f"部分可用 ({eligible_count}/{total_count})"
+            tone = "warning"
+            sort_value = 2
         else:
-            # 其他状态：无操作
-            label = QLabel("-")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(label)
-            
-        layout.addStretch()
-        return widget
+            text = f"不可用 (0/{total_count})"
+            tone = "danger"
+            sort_value = 1
+
+        tooltip_lines = []
+        search_parts = [text]
+        for card in cards:
+            module_name = str(card.get("module_name") or "-")
+            pool_name = str(card.get("pool_name") or "-")
+            state_text = "可用" if bool(card.get("eligible")) else "不可用"
+            reason = str(card.get("reason") or "").strip()
+            suffix = f"：{reason}" if reason else ""
+            tooltip_lines.append(f"{module_name}/{pool_name}: {state_text}{suffix}")
+            search_parts.extend([module_name, pool_name, state_text, reason])
+
+        return {
+            "text": text,
+            "tone": tone,
+            "sort_value": sort_value,
+            "search_text": " ".join(part for part in search_parts if part),
+            "tooltip": "\n".join(tooltip_lines),
+        }
+
+    def _resource_pool_cards(self, env_metadata: dict[str, Any]) -> list[dict[str, Any]]:
+        namespace_payload = env_metadata.get(RESOURCE_POOL_METADATA_NAMESPACE)
+        if not isinstance(namespace_payload, dict):
+            return []
+        cards: list[dict[str, Any]] = []
+        for value in namespace_payload.values():
+            if isinstance(value, dict) and "eligible" in value:
+                cards.append(value)
+        cards.sort(
+            key=lambda card: (
+                str(card.get("module_name") or ""),
+                str(card.get("pool_name") or ""),
+            )
+        )
+        return cards
+
+    def _build_row_actions(self, env) -> list[dict[str, Any]]:
+        if env.status == EnvStatus.READY:
+            return [
+                {"id": "start", "label": "▶", "tooltip": "运行", "variant": "success"},
+                {"id": "pause", "label": "⏸", "tooltip": "暂停", "variant": "warning"},
+                {"id": "edit", "label": "✏", "tooltip": "编辑", "variant": "primary"},
+                {"id": "destroy", "label": "🗑", "tooltip": "销毁", "variant": "danger"},
+            ]
+        if env.status in (EnvStatus.RUNNING, EnvStatus.BUSY):
+            return [{"id": "stop", "label": "⏹ 停止", "variant": "danger"}]
+        if env.status == EnvStatus.PAUSED:
+            return [
+                {"id": "resume", "label": "▶", "tooltip": "启动", "variant": "success"},
+                {"id": "edit", "label": "✏", "tooltip": "编辑", "variant": "primary"},
+                {"id": "destroy", "label": "🗑", "tooltip": "销毁", "variant": "danger"},
+            ]
+        return []
+
+    def _status_tone(self, status: EnvStatus) -> str:
+        return {
+            EnvStatus.READY: "success",
+            EnvStatus.BUSY: "warning",
+            EnvStatus.RUNNING: "success",
+            EnvStatus.ERROR: "danger",
+            EnvStatus.CREATING: "info",
+            EnvStatus.PAUSED: "neutral",
+            EnvStatus.TERMINATING: "warning",
+            EnvStatus.DEAD: "neutral",
+        }.get(status, "neutral")
+
+    def _on_table_query_requested(self, request_id: int, query: dict[str, Any]) -> None:
+        result = resolve_local_data_table_result(
+            self._table_rows,
+            columns=self.TABLE_SCHEMA["columns"],
+            query=query,
+        )
+        self.table.apply_result(request_id, result)
+
+    def _on_table_row_clicked(self, row: dict[str, Any]) -> None:
+        env_id = str(row.get("env_id") or "")
+        if env_id:
+            self.env_selected.emit(env_id)
+
+    def _on_table_action_requested(self, action_id: str, row: dict[str, Any]) -> None:
+        env_id = str(row.get("env_id") or "")
+        if not env_id:
+            return
+        if action_id == "start":
+            self._start_env(env_id)
+        elif action_id == "pause":
+            self._pause_env(env_id)
+        elif action_id == "edit":
+            self._edit_env(env_id)
+        elif action_id == "destroy":
+            self._destroy_env(env_id)
+        elif action_id == "stop":
+            self._stop_env(env_id)
+        elif action_id == "resume":
+            self._resume_env(env_id)
     
     def _on_load_error(self, error: str):
         """加载出错。"""
@@ -643,9 +697,11 @@ class EnvListWidget(QWidget):
         if not self._reload_requested:
             return
         run_gc = self._reload_run_gc
+        reload_from_db = self._reload_from_db
         self._reload_requested = False
         self._reload_run_gc = False
-        QTimer.singleShot(0, lambda: self.load_data(run_gc=run_gc))
+        self._reload_from_db = False
+        QTimer.singleShot(0, lambda: self.load_data(run_gc=run_gc, reload_from_db=reload_from_db))
 
     def _cancel_pending_tasks(self) -> None:
         for task in list(self._pending_tasks):
@@ -659,100 +715,40 @@ class EnvListWidget(QWidget):
             close = getattr(coro, "close", None)
             if callable(close):
                 close()
-            QMessageBox.warning(self, "当前不可用", "当前界面没有可用的异步事件循环，无法执行该操作。")
+            MessageDialog.warning(self, "当前不可用", "当前界面没有可用的异步事件循环，无法执行该操作。")
             return
         self._pending_tasks.add(task)
         task.add_done_callback(self._pending_tasks.discard)
 
     async def _exec_dialog_async(self, dialog: QDialog) -> int:
-        loop = asyncio.get_running_loop()
-        result_future = loop.create_future()
-
-        def _resolve(result: int) -> None:
-            if not result_future.done():
-                result_future.set_result(int(result))
-
-        dialog.finished.connect(_resolve)
-        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dialog.open()
-        try:
-            return int(await result_future)
-        finally:
-            try:
-                dialog.finished.disconnect(_resolve)
-            except TypeError:
-                pass
+        return await open_dialog_async(dialog)
 
     async def _show_message_async(
         self,
         title: str,
         text: str,
         *,
-        icon: QMessageBox.Icon,
+        kind: MessageKind = "info",
     ) -> None:
-        dialog = QMessageBox(self)
-        dialog.setIcon(icon)
-        dialog.setWindowTitle(title)
-        dialog.setText(text)
-        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
-        await self._exec_dialog_async(dialog)
+        await MessageDialog.show_async(self, title, text, kind=kind)
 
     async def _confirm_async(self, title: str, text: str) -> bool:
-        dialog = QMessageBox(self)
-        dialog.setIcon(QMessageBox.Icon.Question)
-        dialog.setWindowTitle(title)
-        dialog.setText(text)
-        dialog.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        dialog.setDefaultButton(QMessageBox.StandardButton.No)
-        loop = asyncio.get_running_loop()
-        result_future = loop.create_future()
-
-        def _resolve(button) -> None:
-            if not result_future.done():
-                result_future.set_result(dialog.standardButton(button))
-
-        def _resolve_reject(_result: int) -> None:
-            if not result_future.done():
-                if _result == int(QMessageBox.StandardButton.Yes):
-                    result_future.set_result(QMessageBox.StandardButton.Yes)
-                    return
-                if _result == int(QMessageBox.StandardButton.No):
-                    result_future.set_result(QMessageBox.StandardButton.No)
-                    return
-                result_future.set_result(QMessageBox.StandardButton.No)
-
-        dialog.buttonClicked.connect(_resolve)
-        dialog.finished.connect(_resolve_reject)
-        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dialog.open()
-        try:
-            result = await result_future
-        finally:
-            try:
-                dialog.buttonClicked.disconnect(_resolve)
-            except TypeError:
-                pass
-            try:
-                dialog.finished.disconnect(_resolve_reject)
-            except TypeError:
-                pass
-        return result == QMessageBox.StandardButton.Yes
+        return await ConfirmDialog.confirm_async(self, title, text, confirm_text="确认")
 
     def _apply_busy_state(self):
         """同步按钮和表格的忙碌状态。"""
         self.create_btn.setEnabled(not self._operation_in_progress)
+        self.import_existing_btn.setEnabled(not self._operation_in_progress)
         self.refresh_btn.setEnabled(not self._load_in_progress and not self._operation_in_progress)
         self.table.set_loading(self._load_in_progress)
         if not self._load_in_progress:
             self.table.setEnabled(not self._operation_in_progress)
 
-    def _begin_operation(self) -> bool:
+    def _begin_operation(self, message: str = "正在处理环境操作...") -> bool:
         if self._operation_in_progress:
             return False
         self._operation_in_progress = True
-        self._show_loading(True)
+        self._show_loading(True, message)
         self._apply_busy_state()
         return True
 
@@ -762,8 +758,8 @@ class EnvListWidget(QWidget):
         self._show_loading(False)
         self._apply_busy_state()
 
-    def _schedule_operation(self, coro: Any) -> bool:
-        if not self._begin_operation():
+    def _schedule_operation(self, coro: Any, *, message: str = "正在处理环境操作...") -> bool:
+        if not self._begin_operation(message):
             close = getattr(coro, "close", None)
             if callable(close):
                 close()
@@ -772,7 +768,7 @@ class EnvListWidget(QWidget):
             loop = asyncio.get_running_loop()
         except RuntimeError:
             self._end_operation()
-            QMessageBox.critical(self, "错误", "当前 UI 异步事件循环未启动，无法执行环境操作。")
+            MessageDialog.error(self, "错误", "当前 UI 异步事件循环未启动，无法执行环境操作。")
             close = getattr(coro, "close", None)
             if callable(close):
                 close()
@@ -799,6 +795,24 @@ class EnvListWidget(QWidget):
             await self._show_operation_error(str(exc))
             return
         self._on_create_finished(env)
+
+    async def _async_import_existing_env_and_run(
+        self,
+        *,
+        provider_name: str,
+        env_names: list[str],
+        job_id: str,
+    ) -> None:
+        try:
+            await self._import_job_service.import_and_run_with_job(
+                provider_name=provider_name,
+                env_names=env_names,
+                job_id=job_id,
+            )
+        except Exception as exc:
+            await self._show_operation_error(str(exc))
+            return
+        self.load_data()
 
     async def _async_destroy_env(self, env_id: str):
         try:
@@ -835,7 +849,90 @@ class EnvListWidget(QWidget):
         if "proxy" in config:
             requirement.proxy_config = ProxyConfig.from_dict(config["proxy"])
 
-        self._schedule_operation(self._async_create_env(provider, config, requirement))
+        self._schedule_operation(
+            self._async_create_env(provider, config, requirement),
+            message=self._operation_message("create", provider=provider),
+        )
+
+    def _import_existing_env(self):
+        """从来源系统导入已有环境。"""
+        self._track_task(self._import_existing_env_async())
+
+    async def _import_existing_env_async(self) -> None:
+        sources = self._manager.list_existing_env_import_sources()
+        if not sources:
+            await self._show_message_async(
+                "当前不可用",
+                "当前没有可用的来源环境导入入口。",
+                kind="warning",
+            )
+            return
+
+        from src.core.atm.models import JobType, TriggerType
+        from src.core.atm.service import get_task_service
+        from src.core.mms.registry import get_module_registry
+
+        registry = get_module_registry()
+        modules = registry.get_enabled_modules()
+        if not modules:
+            await self._show_message_async(
+                "当前不可用",
+                "当前没有可用的已安装模块，无法执行导入后的 workflow。",
+                kind="warning",
+            )
+            return
+
+        service = get_task_service()
+        jobs = [
+            job
+            for job in await service.list_jobs()
+            if job.type == JobType.BATCH and job.trigger.type == TriggerType.MANUAL
+        ]
+        if not jobs:
+            await self._show_message_async(
+                "当前不可用",
+                "请先在任务监控中创建一个“执行一次”的批次任务，再导入环境并关联执行。",
+                kind="warning",
+            )
+            return
+
+        env_options_by_source: dict[str, list[Any]] = {}
+        if not self._begin_operation(self._operation_message("list_sources")):
+            return
+        list_error = ""
+        try:
+            for item in sources:
+                provider_name = str(item["provider"])
+                env_options_by_source[provider_name] = (
+                    await self._manager.list_unsynced_provider_envs(provider_name)
+                )
+        except Exception as exc:
+            list_error = str(exc)
+        finally:
+            self._end_operation()
+        if list_error:
+            await self._show_operation_error(list_error)
+            return
+
+        dialog = ImportExistingEnvDialog(
+            sources=sources,
+            modules=modules,
+            jobs=jobs,
+            env_options_by_source=env_options_by_source,
+            parent=self,
+        )
+        if await self._exec_dialog_async(dialog) != int(QDialog.DialogCode.Accepted):
+            return
+
+        values = dialog.get_values()
+        self._schedule_operation(
+            self._async_import_existing_env_and_run(
+                provider_name=values["provider"],
+                env_names=values["names"],
+                job_id=values["job_id"],
+            ),
+            message=self._operation_message("import", provider=values["provider"]),
+        )
     
     def _on_create_finished(self, env):
         """创建完成。"""
@@ -844,7 +941,7 @@ class EnvListWidget(QWidget):
     
     async def _show_operation_error(self, error: str):
         """工作线程出错。"""
-        await self._show_message_async("错误", f"操作失败: {error}", icon=QMessageBox.Icon.Critical)
+        await self._show_message_async("错误", f"操作失败: {error}", kind="error")
     
     def _destroy_env(self, env_id: str):
         """销毁环境。"""
@@ -853,35 +950,62 @@ class EnvListWidget(QWidget):
     async def _confirm_destroy_env_async(self, env_id: str) -> None:
         confirmed = await self._confirm_async("确认", f"确定要销毁环境 {env_id} ?")
         if confirmed:
-            self._schedule_operation(self._async_destroy_env(env_id))
+            self._schedule_operation(
+                self._async_destroy_env(env_id),
+                message=self._operation_message(
+                    "destroy",
+                    provider=self._env_provider_for_message(env_id),
+                    env_id=env_id,
+                ),
+            )
     
     async def _on_destroy_finished(self, success: bool):
         """销毁完成。"""
         if success:
-            await self._show_message_async("成功", "环境已销毁", icon=QMessageBox.Icon.Information)
+            await self._show_message_async("成功", "环境已销毁", kind="info")
         else:
+            reason = str(getattr(self._manager, "last_destroy_error", "") or "").strip()
+            message = "环境销毁失败，数据库记录已保留。请检查指纹浏览器连接后重试。"
+            if reason:
+                message = f"环境销毁失败，数据库记录已保留。\n原因：{reason}"
             await self._show_message_async(
                 "警告",
-                "环境销毁失败，数据库记录已保留。请检查指纹浏览器连接后重试。",
-                icon=QMessageBox.Icon.Warning,
+                message,
+                kind="warning",
             )
         self.load_data()
     
     def _start_env(self, env_id: str):
         """启动环境（打开窗口）。"""
-        self._schedule_operation(self._async_env_action(env_id, "start"))
+        self._schedule_operation(
+            self._async_env_action(env_id, "start"),
+            message=self._operation_message(
+                "start",
+                provider=self._env_provider_for_message(env_id),
+                env_id=env_id,
+            ),
+        )
     
     def _stop_env(self, env_id: str):
         """停止环境（关闭窗口）。"""
-        self._schedule_operation(self._async_env_action(env_id, "stop"))
+        self._schedule_operation(
+            self._async_env_action(env_id, "stop"),
+            message=self._operation_message("stop", env_id=env_id),
+        )
     
     def _pause_env(self, env_id: str):
         """暂停环境。"""
-        self._schedule_operation(self._async_env_action(env_id, "pause"))
+        self._schedule_operation(
+            self._async_env_action(env_id, "pause"),
+            message=self._operation_message("pause", env_id=env_id),
+        )
     
     def _resume_env(self, env_id: str):
         """恢复环境。"""
-        self._schedule_operation(self._async_env_action(env_id, "resume"))
+        self._schedule_operation(
+            self._async_env_action(env_id, "resume"),
+            message=self._operation_message("resume", env_id=env_id),
+        )
     
     def _edit_env(self, env_id: str):
         """编辑环境（弹出对话框）。"""
@@ -891,23 +1015,14 @@ class EnvListWidget(QWidget):
         """编辑环境（弹出对话框）。"""
         from src.core.rem.ui.edit_env_dialog import EditEnvDialog
         
-        # 从表格数据中查找环境
-        env = None
-        for i in range(self.table.rowCount()):
-            id_item = self.table.item(i, 0)
-            if id_item and id_item.data(Qt.ItemDataRole.UserRole) == env_id:
-                # 从 display_items 获取原始环境对象
-                items = getattr(self, "_display_items", [])
-                if i < len(items):
-                    env = items[i].raw
-                break
+        env = next((item.raw for item in self._display_items if str(item.raw.id) == env_id), None)
         
         if not env:
             # 如果找不到，从 pool 异步加载
             await self._show_message_async(
                 "错误",
                 f"未找到环境: {env_id}...",
-                icon=QMessageBox.Icon.Warning,
+                kind="warning",
             )
             return
         
@@ -925,22 +1040,64 @@ class EnvListWidget(QWidget):
             await self._show_message_async(
                 "操作失败",
                 f"{action} 环境失败，请稍后重试。",
-                icon=QMessageBox.Icon.Warning,
+                kind="warning",
             )
             return
         self.load_data()
     
-    def _show_loading(self, show: bool):
+    def _env_provider_for_message(self, env_id: str) -> str:
+        env = next((item.raw for item in self._display_items if str(item.raw.id) == env_id), None)
+        return str(getattr(env, "provider", "") or "")
+
+    def _operation_message(self, action: str, *, provider: str = "", env_id: str = "") -> str:
+        action_text = {
+            "create": "创建",
+            "destroy": "销毁",
+            "start": "启动",
+            "stop": "停止",
+            "pause": "暂停",
+            "resume": "恢复",
+            "import": "导入",
+            "list_sources": "读取来源",
+        }.get(action, "处理")
+        env_text = f" {env_id}" if env_id else ""
+        provider_label = {
+            "virtualbrowser": "VirtualBrowser",
+            "bitbrowser": "BitBrowser",
+        }.get(provider, provider)
+
+        if provider in CreateEnvDialog.FINGERPRINT_PROVIDERS:
+            return f"正在检查 {provider_label} API 并{action_text}环境{env_text}，最长约 30 秒..."
+        if action == "list_sources":
+            return "正在读取来源环境列表..."
+        return f"正在{action_text}环境{env_text}..."
+
+    def _show_loading(self, show: bool, message: str = ""):
         if show:
-            self.loading_bar.show()
+            if self._progress_dialog is None:
+                self._progress_dialog = ProgressDialog.open_progress(
+                    self,
+                    "环境操作中",
+                    message or "正在处理环境操作...",
+                )
+                self._progress_dialog.finished.connect(
+                    lambda *_args, dialog=self._progress_dialog: self._forget_progress_dialog(dialog)
+                )
+            else:
+                self._progress_dialog.set_message(message or "正在处理环境操作...")
         else:
-            self.loading_bar.hide()
-    
+            self._close_progress_dialog()
+
+    def _forget_progress_dialog(self, dialog: ProgressDialog) -> None:
+        if self._progress_dialog is dialog:
+            self._progress_dialog = None
+
+    def _close_progress_dialog(self) -> None:
+        if self._progress_dialog is None:
+            return
+        dialog = self._progress_dialog
+        self._progress_dialog = None
+        dialog.close_progress()
+
     def _update_stats(self, total: int, ready: int, busy: int):
         self.stats_label.setText(f"总计: {total} | 就绪: {ready} | 忙碌: {busy}")
-    
-    def _on_cell_clicked(self, row: int, col: int):
-        id_item = self.table.item(row, 0)
-        if id_item:
-            env_id = id_item.data(Qt.ItemDataRole.UserRole)
-            self.env_selected.emit(env_id)

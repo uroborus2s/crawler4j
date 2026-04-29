@@ -139,6 +139,9 @@ mkdocs:
             - title: ATM 模块资源池等待队列设计
               path: 04-project-development/04-design/atm-resource-pool-queue-design.md
               access: private
+            - title: 模块实体表视图与分析查询设计
+              path: 04-project-development/04-design/module-entity-table-view-design.md
+              access: private
             - title: 模块配置与数据契约
               path: 04-project-development/04-design/module-config-runtime-data-contract.md
               access: private

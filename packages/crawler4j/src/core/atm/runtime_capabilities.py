@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import re
-import time
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, distribution
@@ -24,63 +23,48 @@ from crawler4j_contracts.context import (
     ToolSpec,
     ToolsCapability,
 )
-from src.core.foundation.event_bus import Event, EventType, get_event_bus
-from src.core.persistence import get_kv_store, get_module_data_store
-from src.core.rem.ip_pool import IPEntry, get_ip_pool_manager
-from src.core.rem.manager import (
-    RESOURCE_POOL_METADATA_NAMESPACE,
-    build_resource_pool_card,
-    build_resource_pool_metadata_key,
-    get_environment_manager,
+from crawler4j_contracts.database import DatabaseClient
+from crawler4j_contracts.hosted_ui import (
+    normalize_page_schema as sdk_normalize_page_schema,
 )
+from src.core.foundation.event_bus import Event, EventType, get_event_bus
+from src.core.mms.data_contract import load_sql_file, validate_resource_sql
+from src.core.persistence import get_module_data_store
 from src.utils.paths import get_resource_path
 
 
 def _normalize_records(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
-        return []
+        raise ValueError("resource records must be a list of objects")
 
     normalized: list[dict[str, Any]] = []
-    for item in raw:
+    for index, item in enumerate(raw):
         if not isinstance(item, dict):
-            continue
+            raise ValueError(f"resource records[{index}] must be an object")
         normalized.append(dict(item))
 
     return normalized
 
 
 MANAGED_VIEW_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-ALLOWED_TABLE_SCHEMA_KEYS = {
-    "title",
-    "dataset",
-    "primary_key",
-    "lock_scope",
-    "lock_key",
-    "display_fields",
-    "create_fields",
-    "update_fields",
-    "create_handler",
-    "update_handler",
-    "columns",
+RUNTIME_SURFACE_FULL = "full"
+RUNTIME_SURFACE_HOSTED_UI_DECLARE = "hosted_ui_declare"
+RUNTIME_SURFACE_HOSTED_UI_READONLY = "hosted_ui_readonly"
+
+_RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
+    RUNTIME_SURFACE_FULL: None,
+    RUNTIME_SURFACE_HOSTED_UI_DECLARE: frozenset(
+        {
+            "ui.declare_page",
+        }
+    ),
+    RUNTIME_SURFACE_HOSTED_UI_READONLY: frozenset(
+        {
+            "ui.get_page",
+        }
+    ),
 }
-ALLOWED_TABLE_COLUMN_KEYS = {
-    "key",
-    "label",
-    "visible",
-    "required",
-    "type",
-    "options",
-    "default",
-}
-ALLOWED_TABLE_COLUMN_TYPES = {"text", "number", "int", "bool", "select"}
-BUSINESS_OCCUPANCY_COLUMN_KEYS = {
-    "occupied",
-    "occupied_label",
-    "is_occupied",
-    "lock_status",
-    "lock_status_label",
-}
-BUSINESS_OCCUPANCY_COLUMN_LABELS = {"占用中", "占用状态"}
+DECLARE_UI_SIDE_EFFECT_DB_TOOLS: set[str] = set()
 
 
 @lru_cache(maxsize=1)
@@ -125,244 +109,317 @@ def _validate_managed_identifier(value: str, *, field_name: str) -> str:
     return normalized
 
 
-def _normalize_table_field_list(raw: Any, *, field_name: str) -> list[str]:
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise ValueError(f"{field_name} 必须是字符串数组")
-
-    values: list[str] = []
-    for item in raw:
-        values.append(_validate_managed_identifier(str(item), field_name=field_name))
-    return values
-
-
-def _normalize_table_column(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValueError("数据表 columns 中的每一项都必须是对象")
-
-    unknown_keys = sorted(set(raw) - ALLOWED_TABLE_COLUMN_KEYS)
-    if unknown_keys:
-        raise ValueError(f"数据表列定义包含不支持的字段: {', '.join(unknown_keys)}")
-
-    key = _validate_managed_identifier(str(raw.get("key", "")), field_name="column.key")
-    label = str(raw.get("label") or key).strip()
-    if not label:
-        raise ValueError("数据表列定义必须提供 label")
-
-    col_type = str(raw.get("type") or "text").strip().lower()
-    if col_type not in ALLOWED_TABLE_COLUMN_TYPES:
-        raise ValueError(f"不支持的数据表列类型: {col_type}")
-
-    column: dict[str, Any] = {
-        "key": key,
-        "label": label,
-    }
-    if raw.get("visible") is not None:
-        column["visible"] = bool(raw["visible"])
-    if raw.get("required") is not None:
-        column["required"] = bool(raw["required"])
-    if col_type != "text":
-        column["type"] = col_type
-    if raw.get("default") is not None:
-        column["default"] = raw["default"]
-    if col_type == "select":
-        options = raw.get("options")
-        if not isinstance(options, list) or not options:
-            raise ValueError("select 列必须提供非空 options 数组")
-        column["options"] = [str(option) for option in options]
-    elif raw.get("options") is not None:
-        raise ValueError("只有 select 列允许配置 options")
-
-    return column
+def _normalize_resource_pool_names(declared_resource_pools: Any) -> frozenset[str]:
+    names: set[str] = set()
+    for item in declared_resource_pools or []:
+        if isinstance(item, str):
+            raw_name = item
+        elif isinstance(item, dict):
+            raw_name = item.get("name", "")
+        else:
+            raw_name = getattr(item, "name", "")
+        name = str(raw_name or "").strip()
+        if name:
+            names.add(name)
+    return frozenset(names)
 
 
-def _normalize_table_schema(view_id: str, schema: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(schema, dict):
-        raise ValueError("数据表 schema 必须是对象")
+def _load_declared_resource_pool_names(module_name: str) -> frozenset[str]:
+    try:
+        from src.core.mms.registry import get_module_registry
 
-    unknown_keys = sorted(set(schema) - ALLOWED_TABLE_SCHEMA_KEYS)
-    if unknown_keys:
-        raise ValueError(f"数据表 schema 包含不支持的字段: {', '.join(unknown_keys)}")
+        registry = get_module_registry()
+        module_root = (module_name or "").split(".")[0]
+        module_info = registry.get_module(module_name) or registry.get_module(module_root)
+    except Exception:
+        return frozenset()
 
-    dataset = str(schema.get("dataset") or view_id).strip()
-    if dataset != view_id:
-        raise ValueError("数据表 dataset 必须与 view_id 保持一致，由宿主统一管理")
-
-    raw_columns = schema.get("columns", [])
-    if not isinstance(raw_columns, list):
-        raise ValueError("数据表 columns 必须是数组")
-
-    normalized = {
-        "title": str(schema.get("title") or view_id).strip() or view_id,
-        "dataset": view_id,
-        "primary_key": _validate_managed_identifier(
-            str(schema.get("primary_key") or "id"),
-            field_name="primary_key",
-        ),
-        "columns": [_normalize_table_column(column) for column in raw_columns],
-    }
-
-    if schema.get("lock_scope") is not None:
-        normalized["lock_scope"] = _validate_managed_identifier(
-            str(schema.get("lock_scope")),
-            field_name="lock_scope",
-        )
-    if schema.get("lock_key") is not None:
-        normalized["lock_key"] = _validate_managed_identifier(
-            str(schema.get("lock_key")),
-            field_name="lock_key",
-        )
-    for list_field in ("display_fields", "create_fields", "update_fields"):
-        values = _normalize_table_field_list(schema.get(list_field), field_name=list_field)
-        if values:
-            normalized[list_field] = values
-    for handler_field in ("create_handler", "update_handler"):
-        if schema.get(handler_field) is not None:
-            normalized[handler_field] = _validate_managed_identifier(
-                str(schema.get(handler_field)),
-                field_name=handler_field,
-            )
-
-    _validate_lock_key_usage(normalized)
-    return normalized
+    if not module_info:
+        return frozenset()
+    manifest = getattr(module_info, "manifest", None)
+    return _normalize_resource_pool_names(getattr(manifest, "resource_pools", []))
 
 
-def _validate_lock_key_usage(schema: dict[str, Any]) -> None:
-    if not schema.get("lock_key"):
-        return
+def _raise_declare_ui_side_effect_error(tool_name: str) -> None:
+    raise RuntimeError(f"declare_ui 不允许调用 {tool_name}；UI 声明必须保持无副作用")
 
-    conflicts: list[str] = []
-    for column in schema.get("columns", []):
-        if not isinstance(column, dict):
-            continue
-        key = str(column.get("key", "")).strip()
-        label = str(column.get("label", "")).strip()
-        if key in BUSINESS_OCCUPANCY_COLUMN_KEYS or label in BUSINESS_OCCUPANCY_COLUMN_LABELS:
-            conflicts.append(key or label)
 
-    if conflicts:
-        rendered = ", ".join(dict.fromkeys(conflicts))
-        raise ValueError(
-            f"lock_key 只用于 Core 临时锁，不能与业务占用列同时声明；请删除这些列或移除 lock_key: {rendered}"
-        )
+def _get_ip_pool_manager():
+    from src.core.rem.ip_pool import get_ip_pool_manager
+
+    return get_ip_pool_manager()
+
+
+def _rem_manager_helpers():
+    from src.core.rem.manager import (
+        RESOURCE_POOL_METADATA_NAMESPACE,
+        build_resource_pool_card,
+        build_resource_pool_metadata_key,
+        get_environment_manager,
+    )
+
+    return (
+        get_environment_manager,
+        RESOURCE_POOL_METADATA_NAMESPACE,
+        build_resource_pool_card,
+        build_resource_pool_metadata_key,
+    )
+
+
+def _resolve_runtime_surface_tools(surface: str) -> frozenset[str] | None:
+    if surface not in _RUNTIME_SURFACE_TOOL_NAMES:
+        raise ValueError(f"Unknown runtime capability surface: {surface}")
+    return _RUNTIME_SURFACE_TOOL_NAMES[surface]
+
+
+class HostedUIDeclarationBuffer:
+    """声明期的 hosted UI staging buffer。"""
+
+    def __init__(self):
+        self.page_schemas: dict[str, dict[str, Any]] = {}
+        self._collecting = True
+
+    @property
+    def is_collecting(self) -> bool:
+        return self._collecting
+
+    def stage_page(self, page_id: str, schema: dict[str, Any]) -> None:
+        self.page_schemas[page_id] = dict(schema)
+
+    def seal(self) -> None:
+        self._collecting = False
 
 
 class CoreDatabaseTools:
     """Core 侧基础数据工具实现。"""
 
-    def __init__(self, module_name: str):
+    def __init__(self, module_name: str, *, enabled: bool = True, read_only: bool = False):
         self._module_name = module_name
         self._data_store = get_module_data_store()
-        self._kv = get_kv_store()
+        self._enabled = enabled
+        self._read_only = read_only
 
-    def _lock_key(self, scope: str, key: str) -> str:
-        return f"module:{self._module_name}:lock:{scope}:{key}"
+    @staticmethod
+    def _normalize_resource_name(resource: str | None) -> str:
+        name = str(resource or "").strip()
+        if not name:
+            raise ValueError("必须提供 resource")
+        return name
 
-    def list_records(self, dataset: str) -> list[dict[str, Any]]:
-        return self._data_store.read_dataset(self._module_name, dataset)
+    def _ensure_enabled(self) -> None:
+        if not self._enabled:
+            raise RuntimeError("ctx.db is not available in this runtime context")
 
-    def replace_records(self, dataset: str, records: list[dict[str, Any]]) -> bool:
-        return self._data_store.write_dataset(self._module_name, dataset, _normalize_records(records))
+    def _manifest_data(self) -> dict[str, Any]:
+        from src.core.mms.registry import get_module_registry
 
-    def append_event(
-        self,
-        dataset: str,
-        event_type: str,
-        *,
-        entity_key: str | None = None,
-        run_id: str | None = None,
-        previous_status: str | None = None,
-        next_status: str | None = None,
-        result: str | None = None,
-        reason: str | None = None,
-        payload: dict[str, Any] | None = None,
-        created_at: int | None = None,
-    ) -> bool:
-        self._data_store.append_audit_event(
+        module = get_module_registry().get_module(self._module_name)
+        manifest = getattr(module, "manifest", None) if module is not None else None
+        data = getattr(manifest, "data", None)
+        return data if isinstance(data, dict) else {"resources": [], "views": [], "queries": [], "seeds": []}
+
+    def _manifest_resource(self, resource_id: str) -> dict[str, Any] | None:
+        for resource in self._manifest_data().get("resources", []):
+            if isinstance(resource, dict) and resource.get("resource_id") == resource_id:
+                return resource
+        return None
+
+    def _joins_for_resource(self, resource_id: str) -> list[dict[str, Any]]:
+        resource = self._manifest_resource(resource_id)
+        joins = resource.get("joins", []) if isinstance(resource, dict) else []
+        return [dict(item) for item in joins if isinstance(item, dict)]
+
+    @staticmethod
+    def _columns_from_resource(resource: dict[str, Any]) -> list[dict[str, Any]]:
+        schema = resource.get("schema") if isinstance(resource.get("schema"), dict) else {}
+        raw_columns = schema.get("columns", []) if isinstance(schema, dict) else []
+        columns: list[dict[str, Any]] = []
+        for raw in raw_columns if isinstance(raw_columns, list) else []:
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("name") or raw.get("key") or "").strip()
+            if not name:
+                continue
+            columns.append(
+                {
+                    "name": name,
+                    "type": str(raw.get("type") or "text").strip().lower(),
+                    "nullable": bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required")),
+                }
+            )
+        return columns
+
+    def describe_source(self, source: str) -> dict[str, Any]:
+        self._ensure_enabled()
+        source_id = _validate_managed_identifier(str(source or "").strip(), field_name="source")
+        resources = {item["resource_id"]: item for item in self._data_store.list_data_resources(self._module_name)}
+        resource = resources.get(source_id)
+        if resource is not None:
+            source_kind = "relation" if resource["storage_mode"] == "custom_table" else "snapshot"
+            columns = self._columns_from_resource(resource)
+            if not columns:
+                raise ValueError(f"数据源缺少 schema.columns，不能进入 ctx.db 查询面: {source_id}")
+            if source_kind == "snapshot":
+                column_names = {column["name"] for column in columns}
+                for system_column, column_type in (
+                    ("run_status", "text"),
+                    ("record_status", "text"),
+                    ("created_at", "int"),
+                    ("updated_at", "int"),
+                ):
+                    if system_column not in column_names:
+                        columns.append({"name": system_column, "type": column_type, "nullable": True})
+            return {
+                "source": source_id,
+                "source_kind": source_kind,
+                "storage_mode": resource["storage_mode"],
+                "record_key_field": resource.get("record_key_field") or "id",
+                "columns": columns,
+                "joins": self._joins_for_resource(source_id) if source_kind == "relation" else [],
+            }
+
+        views = {item["view_id"]: item for item in self._data_store.list_db_views(self._module_name)}
+        view = views.get(source_id)
+        if view is not None:
+            return {
+                "source": source_id,
+                "source_kind": "read_model",
+                "columns": [dict(column) for column in view["columns"]],
+                "joins": [],
+            }
+        raise ValueError(f"未注册的数据源: {source_id}")
+
+    def execute_plan(self, plan: dict[str, Any]) -> Any:
+        self._ensure_enabled()
+        if not isinstance(plan, dict):
+            raise ValueError("query plan must be an object")
+        kind = str(plan.get("kind") or "select").strip()
+        if kind == "named_query":
+            return self._run_named_query(str(plan.get("query_id") or ""), params=dict(plan.get("params") or {}))
+        if kind == "append_audit_event":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._append_audit_event(
+                dataset=str(plan.get("dataset") or ""),
+                event=dict(plan.get("event") or {}),
+            )
+        if kind == "query_audit_events":
+            return self._query_audit_events(
+                dataset=str(plan.get("dataset") or ""),
+                entity_key=plan.get("entity_key"),
+                event_type=plan.get("event_type"),
+                run_id=plan.get("run_id"),
+                start_at=plan.get("start_at"),
+                end_at=plan.get("end_at"),
+                limit=plan.get("limit", 100),
+                offset=plan.get("offset", 0),
+                order=str(plan.get("order") or "desc"),
+            )
+        if kind == "replace_records":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._replace_resource_records(
+                resource=str(plan.get("resource") or ""),
+                records=_normalize_records(plan.get("records")),
+            )
+        if kind != "select":
+            raise ValueError(f"unsupported query plan kind: {kind}")
+        return self._data_store.execute_query_plan(
             self._module_name,
-            dataset,
-            {
-                "entity_key": entity_key,
-                "event_type": event_type,
-                "run_id": run_id,
-                "previous_status": previous_status,
-                "next_status": next_status,
-                "result": result,
-                "reason": reason,
-                "payload": dict(payload or {}),
-                "created_at": created_at,
-            },
+            plan,
+            describe_source=self.describe_source,
         )
-        return True
 
-    def query_events(
+    def _normalize_audit_dataset_name(self, dataset: str | None) -> str:
+        return _validate_managed_identifier(str(dataset or "").strip(), field_name="dataset")
+
+    def _replace_resource_records(
         self,
-        dataset: str,
         *,
-        entity_key: str | None = None,
-        event_type: str | None = None,
-        run_id: str | None = None,
-        start_at: int | None = None,
-        end_at: int | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        resource: str,
+        records: list[dict[str, Any]],
+    ) -> bool:
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.replace_resource_records(self._module_name, resource_name, _normalize_records(records))
+
+    def _append_audit_event(self, *, dataset: str, event: dict[str, Any]) -> str:
+        dataset_name = self._normalize_audit_dataset_name(dataset)
+        return self._data_store.append_audit_event(self._module_name, dataset_name, event)
+
+    def _query_audit_events(
+        self,
+        *,
+        dataset: str,
+        entity_key: Any = None,
+        event_type: Any = None,
+        run_id: Any = None,
+        start_at: Any = None,
+        end_at: Any = None,
+        limit: Any = 100,
+        offset: Any = 0,
         order: str = "desc",
     ) -> list[dict[str, Any]]:
+        dataset_name = self._normalize_audit_dataset_name(dataset)
         return self._data_store.query_audit_events(
             self._module_name,
-            dataset,
-            entity_key=entity_key,
-            event_type=event_type,
-            run_id=run_id,
-            start_at=start_at,
-            end_at=end_at,
-            limit=limit,
-            offset=offset,
+            dataset_name,
+            entity_key=None if entity_key is None else str(entity_key),
+            event_type=None if event_type is None else str(event_type),
+            run_id=None if run_id is None else str(run_id),
+            start_at=None if start_at is None else int(start_at),
+            end_at=None if end_at is None else int(end_at),
+            limit=int(limit),
+            offset=int(offset),
             order=order,
         )
 
-    def acquire_lock(
-        self,
-        scope: str,
-        key: str,
-        *,
-        ttl: int,
-        owner: dict[str, Any] | None = None,
-    ) -> bool:
-        lock_key = self._lock_key(scope, key)
-        if self._kv.exists(lock_key):
-            return False
-        payload = {
-            "module": self._module_name,
-            "scope": scope,
-            "key": key,
-            "owner": owner or {},
-            "claimed_at": int(time.time()),
-        }
-        return self._kv.set(lock_key, payload, ttl=ttl)
+    def _run_named_query(self, query_id: str, *, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        from src.core.mms.registry import get_module_registry
 
-    def release_lock(self, scope: str, key: str) -> bool:
-        return self._kv.delete(self._lock_key(scope, key))
+        normalized_query_id = _validate_managed_identifier(str(query_id or "").strip(), field_name="query_id")
+        module = get_module_registry().get_module(self._module_name)
+        if module is None or module.path is None:
+            raise RuntimeError(f"未找到模块数据契约: {self._module_name}")
 
-    def is_locked(self, scope: str, key: str) -> bool:
-        return self._kv.exists(self._lock_key(scope, key))
+        query_spec = next(
+            (item for item in module.manifest.data["queries"] if item["query_id"] == normalized_query_id),
+            None,
+        )
+        if query_spec is None:
+            raise ValueError(f"未注册的 query_id: {normalized_query_id}")
 
-    def get_state(self, key: str) -> Any:
-        return self._kv.get(key)
-
-    def set_state(self, key: str, value: Any, ttl: int | None = None) -> bool:
-        return self._kv.set(key, value, ttl=ttl)
-
-    def exists_state(self, key: str) -> bool:
-        return self._kv.exists(key)
+        sql = load_sql_file(module.path, query_spec["sql_file"], expected_prefix="data/sql/queries/")
+        validate_resource_sql(
+            sql,
+            source_resource_ids=query_spec["source_resource_ids"],
+            owner_label=f"data.queries[{normalized_query_id}]",
+        )
+        normalized_params = dict(params or {})
+        declared_params = {item["name"]: item for item in query_spec["params"]}
+        missing = sorted(
+            name
+            for name, spec in declared_params.items()
+            if spec["required"] and name not in normalized_params
+        )
+        if missing:
+            raise ValueError(f"query 参数缺失: {', '.join(missing)}")
+        extra = sorted(set(normalized_params) - set(declared_params))
+        if extra:
+            raise ValueError(f"query 参数未注册: {', '.join(extra)}")
+        return self._data_store.run_registered_query(
+            self._module_name,
+            source_resource_ids=query_spec["source_resource_ids"],
+            sql_template=sql,
+            columns=query_spec["columns"],
+            params=normalized_params,
+        )
 
 
 class CoreIPPoolTools:
     """Core 侧 IP 池工具实现。"""
 
-    def _iter_candidate_entries(self, pool_id: str | None) -> list[IPEntry]:
-        manager = get_ip_pool_manager()
+    def _iter_candidate_entries(self, pool_id: str | None) -> list[Any]:
+        manager = _get_ip_pool_manager()
         pools = []
         if pool_id:
             pool = manager.get_pool(pool_id)
@@ -371,7 +428,7 @@ class CoreIPPoolTools:
         else:
             pools = manager.list_pools()
 
-        entries: list[IPEntry] = []
+        entries: list[Any] = []
         for pool in pools:
             entries.extend(pool.entries)
         return entries
@@ -429,8 +486,23 @@ class CoreIPPoolTools:
 class CoreEnvTools:
     """Core 侧环境操作工具实现。"""
 
-    def __init__(self, module_name: str):
+    def __init__(self, module_name: str, *, declared_resource_pool_names: frozenset[str]):
         self._module_name = module_name
+        self._declared_resource_pool_names = declared_resource_pool_names
+
+    def _require_declared_resource_pool(self, pool_name: str) -> str:
+        normalized = str(pool_name or "").strip()
+        if not normalized:
+            raise ValueError("pool_name 不能为空")
+        if normalized in self._declared_resource_pool_names:
+            return normalized
+        if self._declared_resource_pool_names:
+            raise ValueError(
+                f"资源池未在 module.yaml.resource_pools 中声明: {self._module_name}.{normalized}"
+            )
+        raise ValueError(
+            f"当前模块未在 module.yaml.resource_pools 中声明资源池，不能使用: {self._module_name}.{normalized}"
+        )
 
     def _publish_resource_pool_updated(self, *, env_id: int, pool_name: str) -> None:
         get_event_bus().publish(
@@ -452,6 +524,7 @@ class CoreEnvTools:
         proxy_value: str | None = None,
         proxy_pool_id: str | None = None,
     ) -> bool:
+        get_environment_manager, _, _, _ = _rem_manager_helpers()
         manager = get_environment_manager()
         return await manager.update_env(
             env_id,
@@ -468,9 +541,11 @@ class CoreEnvTools:
         reason: str = "",
         exclusive: bool = True,
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
+        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
-        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
-        card = build_resource_pool_card(
+        metadata_key = build_key(self._module_name, pool_name)
+        card = build_card(
             self._module_name,
             pool_name,
             eligible=eligible,
@@ -479,7 +554,7 @@ class CoreEnvTools:
         )
         ok = await manager.set_metadata(
             int(env_id),
-            RESOURCE_POOL_METADATA_NAMESPACE,
+            namespace,
             metadata_key,
             card,
             value_type="json",
@@ -495,11 +570,13 @@ class CoreEnvTools:
         pool_name: str,
         reason: str = "",
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
+        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
-        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
-        current = await manager.get_metadata(int(env_id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+        metadata_key = build_key(self._module_name, pool_name)
+        current = await manager.get_metadata(int(env_id), namespace, metadata_key)
         exclusive = bool(current.get("exclusive", True)) if isinstance(current, dict) else True
-        card = build_resource_pool_card(
+        card = build_card(
             self._module_name,
             pool_name,
             eligible=True,
@@ -508,7 +585,7 @@ class CoreEnvTools:
         )
         ok = await manager.set_metadata(
             int(env_id),
-            RESOURCE_POOL_METADATA_NAMESPACE,
+            namespace,
             metadata_key,
             card,
             value_type="json",
@@ -524,11 +601,13 @@ class CoreEnvTools:
         pool_name: str,
         reason: str,
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
+        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
-        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
-        current = await manager.get_metadata(int(env_id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+        metadata_key = build_key(self._module_name, pool_name)
+        current = await manager.get_metadata(int(env_id), namespace, metadata_key)
         exclusive = bool(current.get("exclusive", True)) if isinstance(current, dict) else True
-        card = build_resource_pool_card(
+        card = build_card(
             self._module_name,
             pool_name,
             eligible=False,
@@ -537,7 +616,7 @@ class CoreEnvTools:
         )
         ok = await manager.set_metadata(
             int(env_id),
-            RESOURCE_POOL_METADATA_NAMESPACE,
+            namespace,
             metadata_key,
             card,
             value_type="json",
@@ -552,9 +631,11 @@ class CoreEnvTools:
         *,
         pool_name: str,
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
+        get_environment_manager, namespace, _, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
-        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
-        await manager.delete_metadata(int(env_id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+        metadata_key = build_key(self._module_name, pool_name)
+        await manager.delete_metadata(int(env_id), namespace, metadata_key)
         self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
         return True
 
@@ -564,14 +645,16 @@ class CoreEnvTools:
         pool_name: str,
         entries: list[dict[str, Any]],
     ) -> bool:
+        pool_name = self._require_declared_resource_pool(pool_name)
+        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
         manager = get_environment_manager()
-        metadata_key = build_resource_pool_metadata_key(self._module_name, pool_name)
+        metadata_key = build_key(self._module_name, pool_name)
         desired_env_ids: set[int] = set()
 
         for entry in entries:
             env_id = int(entry["env_id"])
             desired_env_ids.add(env_id)
-            card = build_resource_pool_card(
+            card = build_card(
                 self._module_name,
                 pool_name,
                 eligible=bool(entry.get("eligible", True)),
@@ -580,7 +663,7 @@ class CoreEnvTools:
             )
             await manager.set_metadata(
                 env_id,
-                RESOURCE_POOL_METADATA_NAMESPACE,
+                namespace,
                 metadata_key,
                 card,
                 value_type="json",
@@ -589,9 +672,9 @@ class CoreEnvTools:
         for env in await manager.list_envs():
             if int(env.id) in desired_env_ids:
                 continue
-            current = await manager.get_metadata(int(env.id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+            current = await manager.get_metadata(int(env.id), namespace, metadata_key)
             if current is not None:
-                await manager.delete_metadata(int(env.id), RESOURCE_POOL_METADATA_NAMESPACE, metadata_key)
+                await manager.delete_metadata(int(env.id), namespace, metadata_key)
                 self._publish_resource_pool_updated(env_id=int(env.id), pool_name=pool_name)
         for env_id in desired_env_ids:
             self._publish_resource_pool_updated(env_id=env_id, pool_name=pool_name)
@@ -601,17 +684,44 @@ class CoreEnvTools:
 class CoreUITools:
     """Core 侧 UI 声明工具实现。"""
 
-    def __init__(self, module_name: str):
+    def __init__(
+        self,
+        module_name: str,
+        *,
+        declaration_buffer: HostedUIDeclarationBuffer | None = None,
+        declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+        allow_persisted_pages: bool = True,
+    ):
         self._module_name = module_name
-        self._data_store = get_module_data_store()
+        self._allow_persisted_pages = allow_persisted_pages
+        self._data_store = get_module_data_store() if allow_persisted_pages else None
+        self._declaration_buffer = declaration_buffer
+        self._declared_page_schemas = (
+            {
+                str(page_id): dict(schema)
+                for page_id, schema in dict(declared_page_schemas or {}).items()
+                if isinstance(schema, dict)
+            }
+            if declared_page_schemas is not None
+            else None
+        )
 
-    def declare_data_table(self, view_id: str, schema: dict[str, Any]) -> bool:
-        managed_view_id = _validate_managed_identifier(view_id, field_name="view_id")
-        meta = _normalize_table_schema(managed_view_id, dict(schema or {}))
-        return self._data_store.write_data_table_schema(self._module_name, managed_view_id, meta)
+    def declare_page(self, page_id: str, schema: dict[str, Any]) -> bool:
+        managed_page_id = _validate_managed_identifier(page_id, field_name="page_id")
+        meta = sdk_normalize_page_schema(managed_page_id, dict(schema or {}))
+        if self._declaration_buffer and self._declaration_buffer.is_collecting:
+            self._declaration_buffer.stage_page(managed_page_id, meta)
+            return True
+        if not self._allow_persisted_pages or self._data_store is None:
+            raise RuntimeError("hosted UI declare surface 必须使用声明缓冲区，不能持久化页面 schema")
+        return self._data_store.write_page_schema(self._module_name, managed_page_id, meta)
 
-    def get_data_table(self, view_id: str) -> dict[str, Any]:
-        return self._data_store.read_data_table_schema(self._module_name, view_id)
+    def get_page(self, page_id: str) -> dict[str, Any]:
+        if self._declared_page_schemas is not None:
+            return dict(self._declared_page_schemas.get(str(page_id or "").strip(), {}))
+        if not self._allow_persisted_pages or self._data_store is None:
+            raise RuntimeError("hosted UI readonly surface 必须使用本轮声明的页面 schema")
+        return self._data_store.read_page_schema(self._module_name, page_id)
 
 
 def _solve_slider_with_sinanz(
@@ -732,25 +842,32 @@ class _ToolBinding:
 class CoreToolsCapabilityImpl(ToolsCapability):
     """Core 侧统一工具注册表。"""
 
-    def __init__(self, module_name: str):
+    def __init__(
+        self,
+        module_name: str,
+        *,
+        ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
+        allowed_tool_names: frozenset[str] | None = None,
+        declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+        declared_resource_pool_names: frozenset[str] | None = None,
+        allow_persisted_pages: bool = True,
+    ):
         self._bindings: dict[str, _ToolBinding] = {}
+        self._allowed_tool_names = allowed_tool_names
+        self._ui_declaration_buffer = ui_declaration_buffer
 
-        db_tools = CoreDatabaseTools(module_name)
         ip_pool_tools = CoreIPPoolTools()
-        env_tools = CoreEnvTools(module_name)
-        ui_tools = CoreUITools(module_name)
+        env_tools = CoreEnvTools(
+            module_name,
+            declared_resource_pool_names=declared_resource_pool_names or frozenset(),
+        )
+        ui_tools = CoreUITools(
+            module_name,
+            declaration_buffer=ui_declaration_buffer,
+            declared_page_schemas=declared_page_schemas,
+            allow_persisted_pages=allow_persisted_pages,
+        )
         captcha_tools = CoreCaptchaTools()
-
-        self._register("db.list_records", "读取模块数据集", db_tools.list_records)
-        self._register("db.replace_records", "全量覆盖模块数据集", db_tools.replace_records)
-        self._register("db.append_event", "追加模块审计事件", db_tools.append_event)
-        self._register("db.query_events", "查询模块审计事件", db_tools.query_events)
-        self._register("db.acquire_lock", "获取模块幂等锁", db_tools.acquire_lock)
-        self._register("db.release_lock", "释放模块幂等锁", db_tools.release_lock)
-        self._register("db.is_locked", "查询模块锁状态", db_tools.is_locked)
-        self._register("db.get_state", "读取轻量运行状态", db_tools.get_state)
-        self._register("db.set_state", "写入轻量运行状态", db_tools.set_state)
-        self._register("db.exists_state", "检查状态键是否存在", db_tools.exists_state)
 
         self._register("ip_pool.pick_proxy", "按条件挑选可用代理", ip_pool_tools.pick_proxy)
         self._register("env.set_proxy", "为当前环境设置代理", env_tools.set_proxy, is_async=True)
@@ -775,25 +892,42 @@ class CoreToolsCapabilityImpl(ToolsCapability):
             is_async=True,
         )
 
-        self._register("ui.declare_data_table", "声明数据表视图元数据", ui_tools.declare_data_table)
-        self._register("ui.get_data_table", "读取数据表视图元数据", ui_tools.get_data_table)
+        self._register("ui.declare_page", "声明宿主页 schema", ui_tools.declare_page)
+        self._register("ui.get_page", "读取宿主页 schema", ui_tools.get_page)
 
         self._register("captcha.match_slider", "识别滑块验证码缺口位置", captcha_tools.match_slider)
         self._register("captcha.match_click_targets", "识别点选验证码目标位置", captcha_tools.match_click_targets)
 
     def _register(self, name: str, description: str, handler: Callable[..., Any], *, is_async: bool = False) -> None:
+        if self._allowed_tool_names is not None and name not in self._allowed_tool_names:
+            return
         self._bindings[name] = _ToolBinding(
             spec=ToolSpec(name=name, description=description, is_async=is_async),
             handler=handler,
         )
 
+    def _blocks_side_effect_tool(self, tool_name: str) -> bool:
+        return bool(
+            self._ui_declaration_buffer
+            and self._ui_declaration_buffer.is_collecting
+            and tool_name in DECLARE_UI_SIDE_EFFECT_DB_TOOLS
+        )
+
     def has_tool(self, tool_name: str) -> bool:
+        if self._blocks_side_effect_tool(tool_name):
+            return False
         return tool_name in self._bindings
 
     def list_tools(self) -> list[ToolSpec]:
-        return [binding.spec for binding in sorted(self._bindings.values(), key=lambda item: item.spec.name)]
+        return [
+            binding.spec
+            for binding in sorted(self._bindings.values(), key=lambda item: item.spec.name)
+            if not self._blocks_side_effect_tool(binding.spec.name)
+        ]
 
     def call(self, tool_name: str, /, **kwargs: Any) -> Any:
+        if self._blocks_side_effect_tool(tool_name):
+            _raise_declare_ui_side_effect_error(tool_name)
         binding = self._bindings.get(tool_name)
         if binding is None:
             raise KeyError(f"Unknown core tool: {tool_name}")
@@ -803,8 +937,33 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 @dataclass
 class RuntimeCapabilities:
     tools: ToolsCapability
+    db: DatabaseClient
 
 
-def build_runtime_capabilities(task_name: str) -> RuntimeCapabilities:
+def build_runtime_capabilities(
+    task_name: str,
+    *,
+    ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
+    surface: str = RUNTIME_SURFACE_FULL,
+    declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+    declared_resource_pools: Any = None,
+) -> RuntimeCapabilities:
     module_name = (task_name or "").split(".")[0] or "default"
-    return RuntimeCapabilities(tools=CoreToolsCapabilityImpl(module_name))
+    db_enabled = surface != RUNTIME_SURFACE_HOSTED_UI_DECLARE
+    db_read_only = surface == RUNTIME_SURFACE_HOSTED_UI_READONLY
+    declared_resource_pool_names = (
+        _normalize_resource_pool_names(declared_resource_pools)
+        if declared_resource_pools is not None
+        else _load_declared_resource_pool_names(module_name)
+    )
+    return RuntimeCapabilities(
+        tools=CoreToolsCapabilityImpl(
+            module_name,
+            ui_declaration_buffer=ui_declaration_buffer,
+            allowed_tool_names=_resolve_runtime_surface_tools(surface),
+            declared_page_schemas=declared_page_schemas,
+            declared_resource_pool_names=declared_resource_pool_names,
+            allow_persisted_pages=surface == RUNTIME_SURFACE_FULL,
+        ),
+        db=DatabaseClient(CoreDatabaseTools(module_name, enabled=db_enabled, read_only=db_read_only)),
+    )

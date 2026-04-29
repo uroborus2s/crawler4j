@@ -26,10 +26,21 @@ from src.core.rem.models import (
     EnvUnavailableError,
 )
 from src.core.rem.pool import EnvPool, LeaseManager
-from src.core.rem.provider import BaseProvider, get_provider
+from src.core.rem.provider import BaseProvider, get_provider, list_providers
 
 FINGERPRINT_BROWSER_PROVIDERS = {"bitbrowser", "virtualbrowser"}
+DEFAULT_PROVIDER_RUNTIME_TIMEOUT = 30
+RECOVERY_PROVIDER_RUNTIME_TIMEOUT = 3
 RESOURCE_POOL_METADATA_NAMESPACE = "scheduler.resource_pool"
+EXISTING_ENV_IMPORT_METADATA_NAMESPACE = "existing_env_import"
+GC_REAPABLE_STATUSES = frozenset(
+    {
+        EnvStatus.CREATING,
+        EnvStatus.DEAD,
+        EnvStatus.ERROR,
+        EnvStatus.TERMINATING,
+    }
+)
 
 
 def _get_env_name_prefix(now: datetime | None = None) -> str:
@@ -102,6 +113,14 @@ def build_resource_pool_card(
     }
 
 
+def is_gc_reapable_status(status: EnvStatus) -> bool:
+    return status in GC_REAPABLE_STATUSES
+
+
+def _normalize_env_name(name: object) -> str:
+    return str(name or "").strip()
+
+
 class EnvironmentManager:
     """环境管理器。
     
@@ -122,28 +141,16 @@ class EnvironmentManager:
         await manager.release(lease)
     """
     
-    def __init__(
-        self,
-        gc_interval: int = 30,
-    ):
-        """初始化环境管理器。
+    def __init__(self):
+        """初始化环境管理器。"""
+        from src.core.system.config_center import get_config_center
         
-        Args:
-            gc_interval: 垃圾回收间隔（秒）
-        """
-        from src.core.system.preferences_service import (
-            PreferenceKey,
-            get_preferences_service,
-        )
-        
-        prefs = get_preferences_service()
-        max_instances = prefs.get(PreferenceKey.ENV_MAX_INSTANCES, 50)
+        max_instances = get_config_center().get("rem.max_instances")
         
         self.pool = EnvPool(max_instances=max_instances)
         self.lease_manager = LeaseManager(self.pool)
-        self._gc_interval = gc_interval
-        self._running = False
         self._reservation_lock = asyncio.Lock()
+        self.last_destroy_error = ""
     
     async def startup(self, *, recover_crashed: bool = True) -> None:
         """启动环境管理器。
@@ -151,7 +158,7 @@ class EnvironmentManager:
         执行：
             1. 从数据库恢复环境状态
             2. 处理崩溃残留
-            3. 启动 GC 循环
+            3. 完成基础依赖初始化
         """
         logger.info("[REM] 环境管理器启动中...")
         
@@ -165,8 +172,6 @@ class EnvironmentManager:
         if recover_crashed:
             await self._recover_crashed()
         
-        # 启动 GC
-        self._running = True
         logger.info(f"[REM] 环境管理器启动完成, 环境数: {len(await self.pool.list_all())}")
         
     async def acquire(
@@ -266,18 +271,16 @@ class EnvironmentManager:
         logger.info(f"[REM] 环境已回收: id={env.id}")
         return True
     
-    async def release(self, lease: EnvLease, dirty: bool = False) -> bool:
+    async def release(self, lease: EnvLease) -> bool:
         """释放环境租约。
         
         Release 流程：
             1. 验证令牌
             2. 关闭窗口
-            3. 执行清理
-            4. 恢复为 READY
+            3. 恢复为 READY
         
         Args:
             lease: 租约
-            dirty: 是否标记为脏（需要额外清理）
         
         Returns:
             是否释放成功
@@ -296,13 +299,129 @@ class EnvironmentManager:
         logger.info(f"[REM] 环境租约已释放并保持状态: id={env.id}, status={env.status.value}")
         return True
     
-    async def get_env(self, env_id: int) -> Environment | None:
+    async def get_env(self, env_id: int | str) -> Environment | None:
         """获取环境实例。"""
         return await self.pool.get(env_id)
     
     async def list_envs(self) -> list[Environment]:
         """列出所有环境。"""
         return await self.pool.list_all()
+
+    def list_existing_env_import_sources(self) -> list[dict[str, str]]:
+        """列出支持“从已有环境导入”的来源。"""
+        sources: list[dict[str, str]] = []
+        for provider_name in list_providers():
+            provider = get_provider(provider_name)
+            if provider and provider.supports_existing_env_import():
+                sources.append(
+                    {
+                        "provider": provider.name,
+                        "label": provider.display_name or provider.name,
+                    }
+                )
+        sources.sort(key=lambda item: item["label"].lower())
+        return sources
+
+    async def get_env_by_provider_name(
+        self,
+        provider_name: str,
+        name: str,
+    ) -> Environment | None:
+        """按 provider/name 查找宿主环境。"""
+        target_provider = str(provider_name or "").strip()
+        target_name = _normalize_env_name(name)
+        if not target_provider or not target_name:
+            return None
+        for env in await self.list_envs():
+            if env.provider == target_provider and _normalize_env_name(env.name) == target_name:
+                return env
+        return None
+
+    async def list_unsynced_provider_envs(self, provider_name: str):
+        """列出来源系统中尚未导入宿主环境表的环境。"""
+        provider = get_provider(provider_name)
+        if not provider or not provider.supports_existing_env_import():
+            raise ValueError(f"Provider 不支持已有环境导入: {provider_name}")
+        provider_key = str(getattr(provider, "name", provider_name) or provider_name).strip()
+        existing_names = {
+            (env.provider, _normalize_env_name(env.name))
+            for env in await self.list_envs()
+            if _normalize_env_name(env.name)
+        }
+        items = await provider.list_existing_envs()
+        return [
+            item
+            for item in items
+            if _normalize_env_name(item.name)
+            and (
+                str(item.provider or provider_key).strip(),
+                _normalize_env_name(item.name),
+            )
+            not in existing_names
+        ]
+
+    async def import_existing_env(self, provider_name: str, name: str) -> Environment:
+        """把来源系统中的已有环境导入到宿主环境表。"""
+        provider = get_provider(provider_name)
+        if not provider or not provider.supports_existing_env_import():
+            raise ValueError(f"Provider 不支持已有环境导入: {provider_name}")
+        provider_key = str(getattr(provider, "name", provider_name) or provider_name).strip()
+        target_name = _normalize_env_name(name)
+        if not target_name:
+            raise ValueError("来源环境名称不能为空")
+
+        existing = await self.get_env_by_provider_name(provider_key, target_name)
+        if existing:
+            return existing
+
+        info = await provider.get_existing_env(target_name)
+        if not info:
+            raise ValueError(f"来源环境不存在: {provider_name}/{target_name}")
+
+        source_name = _normalize_env_name(info.name)
+        if not source_name:
+            raise ValueError(f"来源环境名称不能为空: {provider_name}/{target_name}")
+        existing = await self.get_env_by_provider_name(provider_key, source_name)
+        if existing:
+            return existing
+
+        env = await provider.build_imported_environment(info)
+        env.provider = provider_key
+        env.external_id = str(info.external_id or "")
+        env.status = EnvStatus.READY
+        env.name = env.name or source_name
+
+        await self.pool.add(env)
+        return env
+
+    async def mark_existing_env_import_state(
+        self,
+        env_id: int,
+        *,
+        status: str,
+        module_name: str = "",
+        workflow_name: str = "",
+        task_id: str = "",
+        error: str = "",
+        message: str = "",
+    ) -> None:
+        """记录已有环境导入执行状态。"""
+        payload = {
+            "status": status,
+            "module_name": module_name,
+            "workflow_name": workflow_name,
+            "task_id": task_id,
+            "error": error,
+            "message": message,
+            "updated_at": int(time.time()),
+        }
+        await self.set_metadata(
+            env_id,
+            EXISTING_ENV_IMPORT_METADATA_NAMESPACE,
+            "latest",
+            payload,
+            value_type="json",
+        )
     
     async def run_gc(self) -> int:
         """手动触发垃圾回收。
@@ -312,7 +431,7 @@ class EnvironmentManager:
         """
         return await self._gc_once()
     
-    async def health_check(self, env_id: int) -> bool:
+    async def health_check(self, env_id: int | str) -> bool:
         """执行健康检查，失败则标记 ERROR。
         
         规格 FR-CORE-ENV-004: 周期性或按需检测环境是否可用，不可用时标记隔离。
@@ -388,40 +507,72 @@ class EnvironmentManager:
             proxy_config=proxy_config,
         )
 
-    async def ensure_provider_runtime(self, provider_name: str) -> None:
+    async def ensure_provider_runtime(
+        self,
+        provider_name: str,
+        *,
+        timeout: int = DEFAULT_PROVIDER_RUNTIME_TIMEOUT,
+    ) -> None:
         """确保指定 Provider 的外部运行时已就绪（按需启动）。"""
-        await self._ensure_external_provider_ready(provider_name)
+        await self._ensure_external_provider_ready(provider_name, timeout=timeout)
     
-    async def destroy_env(self, env_id: int) -> bool:
+    async def destroy_env(
+        self,
+        env_id: int | str,
+        *,
+        runtime_timeout: int = DEFAULT_PROVIDER_RUNTIME_TIMEOUT,
+    ) -> bool:
         """直接销毁环境（供 UI 调用）。
         
         Args:
             env_id: 环境 ID
+            runtime_timeout: 指纹浏览器 API 就绪等待超时（秒）
         
         Returns:
             是否销毁成功
         """
         env = await self.pool.get(env_id)
         if not env:
+            self.last_destroy_error = f"环境不存在: {env_id}"
             return False
 
         logger.info(f"[REM] 销毁环境: id={env.id}")
+        self.last_destroy_error = ""
 
         previous_status = env.status
         await self.pool.update_status(env.id, EnvStatus.TERMINATING)
+
+        browser_id = None
+        if env.handle and env.handle.browser_id:
+            browser_id = str(env.handle.browser_id).strip()
+        elif env.external_id:
+            browser_id = str(env.external_id).strip()
+
+        # CREATING 占位记录在 provider.create() 失败前可能尚未拿到 external_id，
+        # 这类记录没有外部资源可删，只需要直接清理本地状态。
+        if not browser_id:
+            await self.pool.remove(env.id)
+            logger.info(f"[REM] 无外部句柄，直接清理本地环境记录: id={env.id}")
+            return True
 
         provider = get_provider(env.provider)
         if provider:
             try:
                 if provider.name in FINGERPRINT_BROWSER_PROVIDERS:
-                    await self.ensure_provider_runtime(provider.name)
+                    await self.ensure_provider_runtime(provider.name, timeout=runtime_timeout)
 
                 destroyed = await provider.destroy(env)
                 if destroyed is False:
-                    logger.warning(f"[REM] 外部环境删除未成功，保留数据库记录: id={env.id}")
+                    self.last_destroy_error = (
+                        f"{provider.name} 未确认外部环境已删除，可能是外部浏览器仍在关闭或删除接口返回失败。"
+                    )
+                    logger.warning(
+                        f"[REM] 外部环境删除未成功，保留数据库记录: id={env.id} reason={self.last_destroy_error}"
+                    )
                     await self.pool.update_status(env.id, previous_status)
                     return False
             except Exception as e:
+                self.last_destroy_error = str(e) or e.__class__.__name__
                 logger.warning(f"[REM] 环境销毁失败: {e}")
                 await self.pool.update_status(env.id, previous_status)
                 return False
@@ -430,7 +581,7 @@ class EnvironmentManager:
         logger.info(f"[REM] 环境已销毁: id={env.id}")        
         return True
     
-    async def start_env(self, env_id: int) -> bool:
+    async def start_env(self, env_id: int | str) -> bool:
         """启动环境（READY/PAUSED → BUSY，打开窗口）。
         
         Args:
@@ -462,7 +613,7 @@ class EnvironmentManager:
             return await self._provider_operation(env, "connect")
         return False    
     
-    async def stop_env(self, env_id: int) -> bool:
+    async def stop_env(self, env_id: int | str) -> bool:
         """停止环境（BUSY → READY，关闭窗口）。
         
         Args:
@@ -476,7 +627,7 @@ class EnvironmentManager:
             return False
         return await self._provider_operation(env, "close")
     
-    async def pause_env(self, env_id: int) -> bool:
+    async def pause_env(self, env_id: int | str) -> bool:
         """暂停环境（READY → PAUSED）。
         
         Args:
@@ -490,7 +641,7 @@ class EnvironmentManager:
             return False
         return await self._provider_operation(env, "pause")
     
-    async def resume_env(self, env_id: int) -> bool:
+    async def resume_env(self, env_id: int | str) -> bool:
         """恢复环境（PAUSED → READY）。
         
         Args:
@@ -508,7 +659,7 @@ class EnvironmentManager:
     
     async def get_metadata(
         self, 
-        env_id: int, 
+        env_id: int | str,
         namespace: str, 
         key: str
     ) -> Any:
@@ -526,7 +677,7 @@ class EnvironmentManager:
     
     async def set_metadata(
         self,
-        env_id: int,
+        env_id: int | str,
         namespace: str,
         key: str,
         value: Any,
@@ -548,7 +699,7 @@ class EnvironmentManager:
     
     async def list_metadata(
         self,
-        env_id: int,
+        env_id: int | str,
         namespace: str | None = None,
     ) -> dict:
         """列出环境元数据。
@@ -590,7 +741,7 @@ class EnvironmentManager:
 
     async def delete_metadata(
         self,
-        env_id: int,
+        env_id: int | str,
         namespace: str,
         key: str | None = None,
     ) -> int:
@@ -610,7 +761,7 @@ class EnvironmentManager:
     
     async def update_env(
         self,
-        env_id: int,
+        env_id: int | str,
         *,
         name: str | None = None,
         proxy_value: str | None = None,
@@ -877,7 +1028,12 @@ class EnvironmentManager:
         
         return False
     
-    async def _ensure_external_provider_ready(self, provider_name: str) -> None:
+    async def _ensure_external_provider_ready(
+        self,
+        provider_name: str,
+        *,
+        timeout: int = DEFAULT_PROVIDER_RUNTIME_TIMEOUT,
+    ) -> None:
         """确保外部指纹浏览器软件已启动且 API 就绪。"""
         from src.core.system.external_app_service import ExternalApp, get_external_app_service
 
@@ -891,7 +1047,7 @@ class EnvironmentManager:
             return
 
         app_service = get_external_app_service()
-        result = await app_service.ensure_running(app)
+        result = await app_service.ensure_running(app, timeout=timeout)
         if not result.success:
             raise EnvUnavailableError(
                 result.error_message or f"{app.value} 启动失败",
@@ -900,7 +1056,7 @@ class EnvironmentManager:
             )
 
         # 防止“进程存在但 API 尚未可用”导致 create 阶段出现 502。
-        ready = await app_service.wait_until_ready(app, timeout=30)
+        ready = await app_service.wait_until_ready(app, timeout=timeout)
         if not ready:
             raise EnvUnavailableError(
                 f"{app.value} API 未就绪",
@@ -977,15 +1133,14 @@ class EnvironmentManager:
                     logger.warning(f"[REM] 环境绑定 IP 失败: id={env_id} pool={proxy_config.pool_id}")
             
             # 4. 调用 Provider 创建
-            if config is None:
-                config = {}
-            config["env_id"] = env_id
-            config["env_name"] = env_name
+            provider_config = dict(config) if config is not None else {}
+            provider_config["env_id"] = env_id
+            provider_config["env_name"] = env_name
             if proxy_config:
-                config["proxy"] = proxy_config.to_dict()
+                provider_config["proxy"] = proxy_config.to_dict()
             
             # create 仅负责创建记录，不再启动 (config["launch"] 已弃用或被忽略)
-            env = await provider.create(config)
+            env = await provider.create(provider_config)
             
             # 修正 id
             env.id = env_id
@@ -1029,7 +1184,10 @@ class EnvironmentManager:
         except Exception:
             # 如果创建失败，清理占位环境（未在外部创建成功）
             logger.error(f"[REM] 环境创建失败，清理预创建记录: id={env_id}")
-            await self.destroy_env(env_id)
+            await self.destroy_env(
+                env_id,
+                runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+            )
             raise
 
     async def _reserve_env_placeholder(
@@ -1076,8 +1234,7 @@ class EnvironmentManager:
                     INSERT INTO environments (
                         name, kind, provider, status, external_id, lease_id, task_run_id,
                         last_used_at, daily_usage_count, daily_usage_date,
-                        proxy_config_json,
-                        capabilities, created_at, updated_at
+                        proxy_config_json, capabilities, created_at, updated_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
@@ -1118,12 +1275,20 @@ class EnvironmentManager:
             provider = get_provider(env.provider)
             if not provider:
                 logger.error(f"[REM] 未找到 Provider: {env.provider}")
-                await self.destroy_env(env.id)
-            elif env.status == EnvStatus.CREATING or env.status == EnvStatus.DEAD:
+                await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                )
+            elif is_gc_reapable_status(env.status):
                 # 创建中的环境视为失败，需要同步关闭并删除
                 logger.warning(f"[REM] 发现未完成创建的环境: id={env.id}")
-                await self.destroy_env(env.id)
-                logger.info(f"[REM] 已删除未完成创建的环境记录: id={env.id}")
+                if await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                ):
+                    logger.info(f"[REM] 已删除未完成创建的环境记录: id={env.id}")
+                else:
+                    logger.warning(f"[REM] 未完成创建的环境记录保留，等待下次重试: id={env.id}")
             elif env.status in {EnvStatus.BUSY, EnvStatus.RUNNING}:
                 # 用户规范：崩溃时运行中的环境，重启后恢复为 READY
                 logger.warning(f"[REM] 发现崩溃时运行中的环境: id={env.id}")
@@ -1141,18 +1306,29 @@ class EnvironmentManager:
             provider = get_provider(env.provider)
             if not provider:
                 logger.error(f"[REM] 未找到 Provider: {env.provider}")
-                await self.destroy_env(env.id)
-                count = count + 1 
+                if await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                ):
+                    count = count + 1
+            elif is_gc_reapable_status(env.status):
+                logger.warning(f"[REM] 发现未完成创建的环境: id={env.id}")
+                if await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                ):
+                    count = count + 1
+                    logger.info(f"[REM] 已删除未完成创建的环境记录: id={env.id}")
+                else:
+                    logger.warning(f"[REM] 未完成创建的环境记录保留，等待下次重试: id={env.id}")
             elif not await provider.exists(env):
                 logger.warning(f"[REM] 发现不存在的环境: id={env.id}")
-                await self.destroy_env(env.id)
-                count = count + 1 
-                logger.info(f"[REM] 已删除不存在的环境记录: id={env.id}")
-            elif env.status == EnvStatus.CREATING or env.status == EnvStatus.DEAD:
-                logger.warning(f"[REM] 发现未完成创建的环境: id={env.id}")
-                await self.destroy_env(env.id)
-                count = count + 1 
-                logger.info(f"[REM] 已删除未完成创建的环境记录: id={env.id}")
+                if await self.destroy_env(
+                    env.id,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                ):
+                    count = count + 1
+                    logger.info(f"[REM] 已删除不存在的环境记录: id={env.id}")
             elif env.status in {EnvStatus.BUSY, EnvStatus.RUNNING}:
                 # 用户规范：崩溃时运行中的环境，重启后恢复为 READY
                 if not await provider.is_window_open(env):

@@ -1,59 +1,34 @@
-"""自动化任务管理 (Automation Task Management) V2.
+"""自动化任务管理 (Automation Task Management) V2."""
 
-规格参考: docs/03-solution/reference-design/task-engine-v2.md
+from __future__ import annotations
 
-导出:
-    - Job, Task: 核心实体
-    - JobState, TaskStatus: 状态枚举
-    - job_controller: 作业控制器
-    - task_service: 任务服务
-"""
+from importlib import import_module
+from typing import Any
 
-from src.core.atm.controller import (
-    JobController,
-    get_job_controller,
-)
-from src.core.atm.dispatcher import (
-    TaskDispatcher,
-    get_task_dispatcher,
-)
-from src.core.atm.models import (
-    Job,
-    JobState,
-    JobType,
-    Task,
-    TaskStatus,
-    TriggerConfig,
-)
-from src.core.atm.repository import (
-    TaskRepository,
-    get_task_repository,
-)
-from src.core.atm.service import (
-    TaskService,
-    get_task_service,
-)
+_EXPORT_MODULES = {
+    "Job": "src.core.atm.models",
+    "JobState": "src.core.atm.models",
+    "JobType": "src.core.atm.models",
+    "Task": "src.core.atm.models",
+    "TaskStatus": "src.core.atm.models",
+    "TriggerConfig": "src.core.atm.models",
+    "TaskRepository": "src.core.atm.repository",
+    "get_task_repository": "src.core.atm.repository",
+    "TaskService": "src.core.atm.service",
+    "get_task_service": "src.core.atm.service",
+    "JobController": "src.core.atm.controller",
+    "get_job_controller": "src.core.atm.controller",
+    "TaskDispatcher": "src.core.atm.dispatcher",
+    "get_task_dispatcher": "src.core.atm.dispatcher",
+}
 
-__all__ = [
-    # Models
-    "Job",
-    "JobState",
-    "JobType",
-    "Task",
-    "TaskStatus",
-    "TriggerConfig",
-    
-    # Repository
-    "TaskRepository",
-    "get_task_repository",
-    
-    # Service
-    "TaskService",
-    "get_task_service",
-    
-    # Internals (exposed for testing/admin)
-    "JobController",
-    "get_job_controller",
-    "TaskDispatcher",
-    "get_task_dispatcher",
-]
+__all__ = list(_EXPORT_MODULES)
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(name)
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value

@@ -19,6 +19,9 @@ from src.core.atm.run_profile import (
 )
 from src.core.debug.models import DebugSession, DebugSessionRequest, DebugSessionState
 from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource
+from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox
+from src.ui.components.text_edit import StyledTextEdit
 
 
 def _make_job() -> Job:
@@ -137,6 +140,30 @@ def test_job_debug_dialog_copies_attach_address(qtbot, tmp_path):
     assert QApplication.clipboard().text() == "127.0.0.1:5678"
 
 
+def test_job_debug_dialog_uses_public_controls(qtbot, tmp_path):
+    from src.core.atm.ui.task_debug_dialog import JobDebugDialog
+
+    page = JobDebugDialog(
+        _make_job(),
+        _make_run_profile(),
+        _make_module(tmp_path),
+        debug_service=SimpleNamespace(),
+    )
+    qtbot.addWidget(page)
+
+    assert isinstance(page.start_btn, StyledButton)
+    assert isinstance(page.restart_btn, StyledButton)
+    assert isinstance(page.stop_btn, StyledButton)
+    assert isinstance(page.vscode_btn, StyledButton)
+    assert isinstance(page.copy_attach_btn, StyledButton)
+    assert isinstance(page.close_btn, StyledButton)
+    assert isinstance(page.wait_for_attach_checkbox, StyledCheckBox)
+    assert isinstance(page.stop_on_entry_checkbox, StyledCheckBox)
+    assert isinstance(page.keep_environment_checkbox, StyledCheckBox)
+    assert isinstance(page.params_editor, StyledTextEdit)
+    assert isinstance(page.logs_view, StyledTextEdit)
+
+
 def test_job_debug_dialog_generate_vscode_config_uses_active_session_attach_target(
     qtbot,
     tmp_path,
@@ -177,8 +204,8 @@ def test_job_debug_dialog_generate_vscode_config_uses_active_session_attach_targ
         return Path(source_path) / ".vscode" / "launch.json"
 
     monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.ensure_vscode_attach_config", fake_ensure)
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.information", lambda *args: None)
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.warning", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.information", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.warning", lambda *args: None)
 
     page.generate_vscode_config()
 
@@ -227,8 +254,8 @@ def test_job_debug_dialog_generate_vscode_config_ignores_final_session_attach_ta
         return Path(source_path) / ".vscode" / "launch.json"
 
     monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.ensure_vscode_attach_config", fake_ensure)
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.information", lambda *args: None)
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.warning", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.information", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.warning", lambda *args: None)
 
     page.generate_vscode_config()
 
@@ -239,6 +266,7 @@ def test_job_debug_dialog_generate_vscode_config_ignores_final_session_attach_ta
 
 def test_job_debug_dialog_uses_dark_theme_controls(qtbot, tmp_path):
     from src.core.atm.ui.task_debug_dialog import JobDebugDialog
+    from src.ui.components.check_box import StyledCheckBox
     from src.ui.components.spin_box import StyledSpinBox
 
     page = JobDebugDialog(
@@ -254,7 +282,8 @@ def test_job_debug_dialog_uses_dark_theme_controls(qtbot, tmp_path):
     assert isinstance(page.scroll_area, QScrollArea)
     assert page.scroll_area.widgetResizable() is True
     assert "#1a1b26" in page.styleSheet()
-    assert "QCheckBox::indicator" in page.styleSheet()
+    assert isinstance(page.wait_for_attach_checkbox, StyledCheckBox)
+    assert "QCheckBox::indicator" in page.wait_for_attach_checkbox.styleSheet()
     assert page.close_btn.text() == "关闭"
     screen = page.screen() or QApplication.primaryScreen()
     if screen is not None:
@@ -333,7 +362,7 @@ def test_job_debug_dialog_restart_uses_current_form_values(qtbot, tmp_path, monk
     page.attach_port_spin.setValue(6789)
     page.stop_on_entry_checkbox.setChecked(True)
     monkeypatch.setattr(page, "_refresh", AsyncMock())
-    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.QMessageBox.warning", lambda *args: None)
+    monkeypatch.setattr("src.core.atm.ui.task_debug_dialog.MessageDialog.warning", lambda *args: None)
 
     import asyncio
 

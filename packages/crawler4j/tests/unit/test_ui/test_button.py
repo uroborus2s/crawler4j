@@ -1,6 +1,6 @@
 from PyQt6.QtGui import QFontInfo
 
-from src.ui.components.button import StyledButton
+from src.ui.components.button import StyledButton, create_action_button
 
 
 def test_styled_button_primary_uses_explicit_font_stack_and_size(qtbot):
@@ -24,3 +24,30 @@ def test_styled_button_secondary_uses_secondary_palette(qtbot):
     assert "rgba(255, 255, 255, 0.1)" in button.styleSheet()
     assert "font-weight: 500;" in button.styleSheet()
     assert "padding: 0px 20px;" in button.styleSheet()
+
+
+def test_styled_button_success_uses_module_dialog_action_palette(qtbot):
+    button = StyledButton("开始检查", variant="success", min_height=48, min_width=120)
+    qtbot.addWidget(button)
+
+    assert "background: #10d982;" in button.styleSheet()
+    assert "color: #04130c;" in button.styleSheet()
+    assert "font-weight: 700;" in button.styleSheet()
+
+
+def test_styled_button_warning_and_danger_variants(qtbot):
+    warning = StyledButton("导入", variant="warning")
+    danger = StyledButton("删除", variant="danger")
+    qtbot.addWidget(warning)
+    qtbot.addWidget(danger)
+
+    assert "background: #f59e0b;" in warning.styleSheet()
+    assert "rgba(248, 113, 113, 0.92)" in danger.styleSheet()
+
+
+def test_action_button_uses_fixed_table_cell_height(qtbot):
+    button = create_action_button("▶ 执行一次")
+    qtbot.addWidget(button)
+
+    assert button.minimumHeight() == 34
+    assert button.maximumHeight() == 34

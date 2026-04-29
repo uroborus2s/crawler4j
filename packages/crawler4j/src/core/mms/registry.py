@@ -29,7 +29,6 @@ from src.core.mms.models import (
 )
 from src.core.mms.scanner import ModuleScanner
 from src.core.mms.settings_store import ModuleSettingsStore, get_module_settings_store
-from src.core.persistence import get_module_data_store
 from src.utils.paths import get_app_data_dir
 
 class ModuleRegistry:
@@ -92,6 +91,7 @@ class ModuleRegistry:
             self._merge_loaded_module(module_info)
 
         self._initialize_loaded_module_configs()
+        self._sync_loaded_module_data()
         
         self._loaded = True
         logger.info(f"[MMS] 注册表加载完成: {len(self._modules)} 个模块")
@@ -143,6 +143,26 @@ class ModuleRegistry:
                 defaults.module,
                 defaults.workflows,
             )
+
+    def _sync_loaded_module_data(self) -> None:
+        from src.core.persistence import get_module_data_store
+
+        for module_info in self._modules.values():
+            if module_info.status not in {ModuleStatus.ENABLED, ModuleStatus.DISABLED}:
+                continue
+            if not module_info.path:
+                continue
+            try:
+                get_module_data_store().sync_manifest_data(
+                    module_info.name,
+                    Path(module_info.path),
+                    module_info.manifest.data,
+                )
+            except Exception as exc:
+                logger.error(f"[MMS] 模块数据契约同步失败 {module_info.name}: {exc}")
+                module_info.status = ModuleStatus.INVALID
+                module_info.error = str(exc)
+                module_info.hint = "请检查 module.yaml.data、data/sql 与 data/seeds 是否符合当前协议"
     
     def refresh(self) -> dict[str, list[str] | int]:
         """刷新注册表。
@@ -278,6 +298,10 @@ class ModuleRegistry:
             self._apply_persisted_module_status(module_info)
             self._modules[module_info.name] = module_info
             self._initialize_loaded_module_configs()
+            self._sync_loaded_module_data()
+            synced_module = self._modules.get(module_info.name)
+            if synced_module and synced_module.status == ModuleStatus.INVALID:
+                raise ModuleInstallError(synced_module.error or f"模块数据契约同步失败: {module_info.name}")
             logger.info(f"[MMS] 已安装: {module_info.name} v{module_info.manifest.version}")
 
             event_type = EventType.MODULE_UPGRADED if previous_module and previous_module.source == ModuleSource.EXTERNAL else EventType.MODULE_INSTALLED
@@ -489,6 +513,8 @@ class ModuleRegistry:
                 shutil.rmtree(module.path)
 
             self._settings_store.clear_module_records(module_name, keep_settings=keep_settings)
+            from src.core.persistence import get_module_data_store
+
             get_module_data_store().clear_module_data(module_name)
             
             # 从注册表移除

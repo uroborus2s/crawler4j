@@ -2,33 +2,33 @@
 
 - Root desktop app package lives under `packages/crawler4j/src/ui`.
 - Core runtime services live under `packages/crawler4j/src/core`.
-- External modules are loaded from module directories through `module.yaml` plus root `__init__.py`.
-- SDK and Contracts are split into standalone subpackages under `packages/crawler4j-sdk/` and `packages/crawler4j-contracts/`.
+- Shared contracts live under `packages/crawler4j-contracts/`.
+- SDK CLI and scaffolding live under `packages/crawler4j-sdk/`.
 - Factory control plane lives in `.factory/` plus numbered `docs/`.
 
 Current architecture facts:
 
-- Builtin business modules have been removed; `packages/crawler4j/modules/` is now a placeholder, while real modules come from installed packages or DevLink source directories.
+- Builtin business modules have been removed; real modules come from installed packages or DevLink source directories.
 - Module projects run inside the host runtime, not their own virtualenv.
-- `packages/crawler4j/src/core/mms/ui/module_data_table_page.py` now builds a UI-side `TaskContext` from module settings and reloads DevLink local hooks on refresh, so host data-table pages can replay `declare_ui` and local CRUD handlers during module debugging.
+- Core is now the sole runtime owner. External modules are loaded from module directories through `module.yaml` plus host-side runtime descriptor scanning, not through a module-owned assembler.
 
-Current module entry architecture:
+Current module runtime architecture:
 
-- `REQ-006` keeps root `__init__.py` as the host entrypoint, but shrinks it to a stable shim.
-- Default task/workflow discovery and module entry assembly now live in `crawler4j_sdk.assembler.ModuleAssembler`.
-- Module-specific runtime logic now lives in standard `module_runtime.py`, including lifecycle hooks and `@env_selector(...)` callbacks for ATM environment selection.
-- Old modules are not a compatibility target for the new contract; upgrades should rebuild the module skeleton from the latest template.
+- `packages/crawler4j/src/core/mms/runtime_descriptor.py` is the source of truth for `core-native-v1` discovery.
+- `packages/crawler4j/src/core/mms/service.py` loads and caches `ModuleRuntimeDescriptor`, executes workflows/tasks, dispatches hooks, and invokes env selectors.
+- `packages/crawler4j/src/core/mms/ui/module_ui_runtime.py` reads pages and UI-related hooks from the descriptor instead of asking the module root for UI declarations.
+- `packages/crawler4j/src/core/mms/scanner.py` enforces `module.yaml.runtime_api == core-native-v1`, `default_workflow`, and manifest/workflow consistency.
+- Old modules are not a compatibility target. The host rejects missing or mismatched `runtime_api` instead of bridging.
 
-Latest implemented design:
+Current UI architecture:
 
-- Fixed-pool Service jobs now move from “selector returned none => fail” to host-managed waiting seats when `resource_pool` is configured.
-- ATM reconciles service concurrency as `running + waiting = target`, with FIFO refill against current pool capacity.
-- REM remains the environment owner, while module-scoped pool eligibility is exposed to ATM through host-readable cards stored in `env_metadata`.
-- `REQ-009` / `TASK-023` is implemented locally and validated by ATM/SDK unit tests; PR closure is still pending.
+- `packages/crawler4j/src/core/mms/ui/managed_page_renderer.py` is the Hosted UI renderer.
+- Page schemas now come from `pages/*.py` or grouped `pages/<group>/*.py` exported `PAGE: PageSpec`, normalized by `crawler4j_contracts.hosted_ui`.
+- `DataTable` remains a page-scoped component. Data comes from page `load_handler` / `query_handler` plus `db.*` tools.
 
-Latest approved design (not yet implemented):
+Current pool/data architecture:
 
-- Module UI will move from `micro_app` / `ui:*` / direct `QWidget` injection to host-managed page schemas declared by `declare_ui(context)`.
-- The new hosted UI contract is intentionally narrow: modules may only declare `Page`, `Section`, `Text`, `Button`, and `DataTable`.
-- `DataTable` remains the only composite widget surface in V1, covering both readonly dashboard tables and host-managed CRUD tables.
-- Trust gate / allowlist / `trusted` will be deleted together with the old code-page loader, because the host will stop executing external UI code.
+- Fixed-pool Service jobs use host-managed waiting semantics when `resource_pool` is configured.
+- REM remains the environment owner, while ATM consumes module-provided env selectors and pool eligibility data.
+- REM now also owns existing-env import. Provider-side environments are deduplicated by `(provider, name)`, imported into REM, and then executed by ATM through a fixed `env_id` handoff instead of a module-owned sync path.
+- Module data resources, database views, and audit events remain Core-owned persistence capabilities exposed to modules only through `ctx.tools`.

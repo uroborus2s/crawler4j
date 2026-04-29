@@ -1,34 +1,15 @@
 # 快速开始
 
-这一页给你一条从零到可继续开发的最短路径。
+这一页只讲一条最短闭环：
 
-目标不是“看懂所有概念”，而是 5 到 10 分钟内得到一个可检查、可调试、可继续扩展的标准模块项目。
+1. 用 CLI 生成 `core-native-v1` 模块骨架
+2. 用 `crawler4j-contracts` 写任务、工作流、页面
+3. 用 DevLink 接到宿主里联调
+4. 构建 ZIP 并做安装验收
 
-## 开始前
+## 1. 初始化模块
 
-你至少需要:
-
-- Python `3.12+`
-- `uv`
-- 一个可写目录
-
-先确认基础环境:
-
-```bash
-python3 --version
-uv --version
-uvx --from crawler4j-sdk crawler4j --help
-```
-
-如果这三条都跑不通，不要继续。
-
-## 第一步: 初始化模块项目
-
-下面示例模块名用 `hotel_demo`。
-
-如果你还没有真正创建 GitHub 仓库，也可以先填一个最终准备使用的 `owner/repo` 占位值。
-当前 CLI 只要求它是合法的 `owner/repo` 形式；在你第一次做正式安装或发布前，再用
-`uv run crawler4j module set repo <real-owner>/<real-repo>` 改成真实仓库即可。
+下面以 `hotel_demo` 为例：
 
 ```bash
 cd /absolute/path/to/your/workspace
@@ -36,314 +17,177 @@ uvx --from crawler4j-sdk crawler4j module init hotel_demo \
   --repo your-org/hotel_demo \
   --no-git \
   --no-install
+
 cd /absolute/path/to/your/workspace/hotel_demo
 uv sync
+uv run crawler4j module show
 ```
 
-立即确认自己已经站在模块根目录:
+初始化后的关键事实：
 
-```bash
-pwd
-test -f module.yaml && echo "OK: 当前就在模块根目录" || echo "ERROR: 当前不在模块根目录"
-```
+- `module.yaml.runtime_api` 已固定为 `core-native-v1`
+- `module.yaml.data` 默认带空的 `resources/views/queries/seeds`
+- 运行时依赖只包含 `crawler4j-contracts`
+- `crawler4j-sdk` 只放在开发依赖里
+- Core 会扫描 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`
+- 宿主页源码既可以平铺在 `pages/`，也可以按单层分组放到 `pages/<group>/`
+- CLI 会同时创建 `data/sql/views`、`data/sql/queries`、`data/seeds`
 
-后面所有 `uv run crawler4j ...` 都默认在模块根目录执行。
-
-标准脚手架还会自带:
-
-- `tasks/example_task.py`
-- 一个初始 workflow 文件
-
-先把它们当参考样板即可。等你自己的 `fetch_hotels` 和 `hotel_sync` 跑通后，再决定是否删除示例文件。
-
-## 第二步: 生成开发骨架
+## 2. 生成业务骨架
 
 ```bash
 uv run crawler4j task create fetch_hotels
 uv run crawler4j workflow create hotel_sync --display-name "酒店同步"
 uv run crawler4j module set default-workflow hotel_sync
-uv run crawler4j data-table create hotels --label "Hotels"
-uv run crawler4j page create dashboard --display-name "Dashboard"
+uv run crawler4j page create dashboard --display-name "运营看板"
+uv run crawler4j page create account_detail --group account --no-menu
+uv run crawler4j hook create before_run
+uv run crawler4j env-selector create pick_ready
 uv run crawler4j check structure
 ```
 
-这些命令的真实副作用如下:
+这一步只负责生成标准文件和更新 `module.yaml`。不要手写兼容薄壳，也不要把运行时逻辑放回根包。
 
-| 命令 | 会改什么 |
-|---|---|
-| `uv run crawler4j task create fetch_hotels` | 生成 `tasks/fetch_hotels.py` |
-| `uv run crawler4j workflow create hotel_sync` | 生成 `workflows/hotel_sync.py`，并更新 `module.yaml.workflows` |
-| `uv run crawler4j module set default-workflow hotel_sync` | 把默认 workflow 从脚手架初始值切到 `hotel_sync` |
-| `uv run crawler4j data-table create hotels` | 更新 `module.yaml.ui_extension.detail_menu`，并在 `module_runtime.py` 追加数据表声明 helper |
-| `uv run crawler4j page create dashboard` | 生成 `ui/dashboard.py`，并更新 `ui_extension.entry` |
-| `uv run crawler4j check structure` | 不改文件，只做骨架级自检 |
+## 3. 写最小任务
 
-执行完后，模块根目录里已经有 5 个现成落点:
-
-- `module.yaml`
-- `tasks/fetch_hotels.py`
-- `workflows/hotel_sync.py`
-- `ui/dashboard.py`
-- 根目录同级的 `module_runtime.py`
-
-下面不是让你“再发明新文件”，而是直接改这几个现成文件。
-
-## 第三步: 改这 5 个现成文件
-
-### 1. `module.yaml`
-
-至少先改:
-
-- `display_name`
-- `description`
-- `upgrade_source.repo`
-- `workflows[*].display_name`
-- `config_defaults`
-
-最小示例:
-
-```yaml
-name: hotel_demo
-version: 0.1.0
-display_name: 酒店采集示例
-description: 酒店业务模块
-author: crawler4j
-upgrade_source:
-  type: github_release
-  repo: your-org/hotel_demo
-  allow_prerelease: false
-workflows:
-  - name: hotel_sync
-    display_name: 酒店同步
-    description: 抓取并刷新酒店列表
-ui_extension:
-  type: micro_app
-  entry: ui:DashboardPage
-  detail_menu:
-    - id: hotels
-      icon: 📋
-      label: Hotels
-      entry: core:data_table:hotels
-config_defaults:
-  module:
-    city: shanghai
-    page_size: 20
-  workflows:
-    hotel_sync:
-      retry_enabled: false
-```
-
-这里最容易抄错的一点:
-
-- `ui:DashboardPage` 不是文件路径
-- 它的意思是“`ui` 这个包导出的 `DashboardPage` 类”
-- `page create dashboard` 已经帮你把 `ui/dashboard.py` 里的页面类导出到 `ui/__init__.py`
-
-所以你通常不需要把它写成 `ui.dashboard:DashboardPage` 或 `ui/dashboard:DashboardPage`。
-
-### 2. `tasks/fetch_hotels.py`
+`tasks/fetch_hotels.py` 的正式导出是 `TASK` 和 `execute`：
 
 ```python
-from crawler4j_sdk import TaskContext, TaskResult, TaskScript
+from crawler4j_contracts import TaskContext, TaskResult, TaskSpec
+
+TASK = TaskSpec(
+    name="fetch_hotels",
+    display_name="抓取酒店",
+    description="抓取酒店列表",
+)
 
 
-class FetchHotelsTask(TaskScript):
-    name = "fetch_hotels"
-    display_name = "抓取酒店列表"
-    description = "抓取当前城市酒店列表"
-
-    async def execute(self, ctx: TaskContext) -> TaskResult:
-        city = ctx.get_config("city", "shanghai")
-        if not ctx.page:
-            return TaskResult.fail(
-                message="当前环境没有可用 Page",
-                error="page_not_available",
-            )
-
-        await ctx.page.goto(f"https://example.com/hotels?city={city}")
-        records = [{"id": "hotel-001", "name": "示例酒店", "city": city}]
-
-        if ctx.tools and ctx.tools.has_tool("db.replace_records"):
-            ctx.tools.call("db.replace_records", dataset="hotels", records=records)
-
-        return TaskResult.ok(
-            message="抓取完成",
-            data={"records": records},
-        )
+async def execute(ctx: TaskContext) -> TaskResult:
+    return TaskResult.ok(data={"count": 0, "message": "ok"})
 ```
 
-这里的两个工具名是宿主稳定契约，不是你自己发明的字符串:
+## 4. 写最小工作流
 
-- `db.replace_records`：同步写入快照数据集
-- `db.append_event`：追加审计事件
-- `ui.declare_data_table`：同步声明托管数据表 schema
-
-这段示例故意只写“当前酒店列表快照”。如果你还要记录“这次抓取发生了什么”，历史应单独走审计事件通道，不要把日志行混进 `hotels` dataset，也不要指望 `core:data_table` 直接充当事件流水表。
-
-完整工具列表和同步/异步语义，直接看 [Core 能力参考](reference-core-capabilities.md)。
-
-### 3. `workflows/hotel_sync.py`
+`workflows/hotel_sync.py` 的正式导出是 `WORKFLOW` 和 `run`：
 
 ```python
-from crawler4j_sdk import TaskContext, TaskFlow, TaskResult
+from crawler4j_contracts import TaskContext, WorkflowSpec
+
+WORKFLOW = WorkflowSpec(
+    name="hotel_sync",
+    display_name="酒店同步",
+    tasks=("fetch_hotels",),
+)
 
 
-class HotelSyncWorkflow(TaskFlow):
-    name = "hotel_sync"
-    display_name = "酒店同步"
-    description = "同步酒店列表"
-
-    async def run(self, ctx: TaskContext):
-        ctx.state["phase"] = "fetch_hotels"
-        payload = await ctx.run_subtask("fetch_hotels")
-        if payload is False:
-            return TaskResult.fail(
-                message="fetch_hotels 执行失败",
-                error="fetch_hotels_failed",
-            )
-
-        records = payload.get("records", []) if isinstance(payload, dict) else []
-        return {"records": records}
+async def run(ctx: TaskContext):
+    return await ctx.run_subtask("fetch_hotels")
 ```
 
-这段最短记忆只要记住一条:
+`module.yaml` 里必须同时满足：
 
-- `run_subtask(...)` 优先返回子任务 `TaskResult.data`
-- 如果子任务没有 `data`，它才退化成 `True` / `False`
+- `runtime_api: core-native-v1`
+- `default_workflow: hotel_sync`
+- `workflows` 数组里存在 `hotel_sync`
 
-所以这里先判断 `False`，再把成功载荷当 `dict` 读是故意的，不是魔法写法。
+## 5. 写最小页面
 
-### 4. `ui/dashboard.py`
-
-`page create dashboard` 已经生成了页面类文件。
-
-如果你暂时只想验证“页面入口能被宿主加载”，把它保留成最小版本即可；如果你想让模块详情页顶部真正展示业务页，就改这里。
-
-最小写法:
+`pages/dashboard.py` 的正式导出是 `PAGE` 和页面 handler。菜单入口来自 `module.yaml.ui_extension.pages[]`；通过 `--no-menu` 创建的页面不会出现在左侧菜单，但仍可被 `open_page.page_id` 打开：
 
 ```python
-from typing import Any
+from crawler4j_contracts import PageSpec, TaskContext
 
-from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+PAGE = PageSpec(
+    id="dashboard",
+    label="运营看板",
+    icon="📄",
+    schema={
+        "type": "Page",
+        "title": "运营看板",
+        "load_handler": "load_dashboard_page",
+        "children": [
+            {"type": "Text", "style": "title", "binding": "title"},
+        ],
+    },
+)
 
 
-class DashboardPage(QWidget):
-    def __init__(self, module: Any | None = None, parent=None):
-        super().__init__(parent)
-        self.module = module
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("酒店模块 Dashboard"))
+def load_dashboard_page(
+    context: TaskContext,
+    page_id: str,
+    params: dict | None = None,
+) -> dict:
+    del context, page_id, params
+    return {"title": "运营看板"}
 ```
 
-如果这里的类名不再叫 `DashboardPage`，记得同时改两处:
+这里不再有 `declare_ui()`。Core 会直接读取 `PAGE.schema`。
 
-1. `module.yaml.ui_extension.entry`
-2. `ui/__init__.py` 里的页面类导出
+## 6. 需要数据时再补契约
 
-少改任何一处，宿主加载页面入口时都会对不上。
-
-### 5. `module_runtime.py`
-
-当前 `module init` 一定会在模块根目录生成 `module_runtime.py`。
-如果你没看到这个文件，说明脚手架不是用当前 CLI 正确初始化出来的，先回到第一步重建。
-
-如果你刚执行过 `uv run crawler4j data-table create hotels`，CLI 已经做了两件事:
-
-1. 在 `module.yaml.ui_extension.detail_menu` 注册 `core:data_table:hotels`
-2. 在 `module_runtime.py` 里追加 `_declare_hotels_table(...)` helper，并让 `declare_ui(...)` 调它
-
-所以下面不是从零新建，而是直接修改 CLI 生成的 helper。
-
-下面这段示例只做一件事:
-
-- 让你先得到一个“只读数据表”最小链路
-
-它不会自动带上新增/编辑 handler。
-如果你需要 `新增` / `编辑`，再去看 [UI 与数据表](ui-and-data-table.md) 里的完整版本。
-
-把生成的 `_declare_hotels_table(...)` 改成这样:
-
-```python
-from crawler4j_sdk import TaskContext
-
-
-def _declare_hotels_table(ctx: TaskContext):
-    if not ctx.tools or not ctx.tools.has_tool("ui.declare_data_table"):
-        return None
-
-    return ctx.tools.call(
-        "ui.declare_data_table",
-        view_id="hotels",
-        schema={
-            "title": "酒店列表",
-            "dataset": "hotels",
-            "primary_key": "id",
-            "display_fields": ["name", "city"],
-            "columns": [
-                {"key": "id", "label": "ID", "visible": False},
-                {"key": "name", "label": "酒店名", "required": True},
-                {"key": "city", "label": "城市", "required": True},
-            ],
-        },
-    )
-```
-
-标准脚手架的根 `__init__.py` 会通过 `__getattr__` 自动转发 `module_runtime.py` 里的 hook。
-
-只要你没手工改坏根入口，这一步不需要再碰 `__init__.py`。
-
-这里声明的 `hotels` 也是“当前快照视图”，不是历史事件流。只要需求开始变成“我要回看每次变化”，就应该把历史转到审计事件通道，而不是继续扩张这张数据表。
-
-## 第四步: 做最小检查
-
-先在模块根目录跑:
+如果你的模块要保存快照数据、维护实体表、执行只读统计查询或导入种子，可以继续补标准骨架：
 
 ```bash
-uv run crawler4j check full
-uv run crawler4j module show
+uv run crawler4j data resource create accounts --storage-mode custom_table
+uv run crawler4j data query create get_account_by_id --source accounts
+uv run crawler4j data view create account_stats --source accounts
+uv run crawler4j data seed create accounts_seed --resource accounts
+uv run crawler4j data list
 ```
 
-你应该看到:
+需要记住两条：
 
-- `check full` 通过
-- `module show` 里能看到模块名、默认 workflow、任务、页面入口和数据表入口
+- 低频快照数据可以沿用默认 `managed_dataset`，但仍然必须先登记到 `module.yaml.data.resources[]`；视图和命名查询当前只允许建立在 `custom_table` 资源上。
+- SQL 和种子都要先落到 `data/sql`、`data/seeds`，运行时代码只调用 `ctx.db.from_(...)`、`ctx.db.named(...)`、`ctx.db.into(...).replace(...)`，不再声明资源或视图。
+- 文档示例统一使用 `ctx.db` fluent API；运行时不再接受旧 `ctx.tools.call("db.*")` 接入方式。
 
-## 第五步: 在宿主里做最小验证
+## 7. 校验并接入宿主
 
-这一段不再是 CLI 命令，而是宿主内验证步骤。
+在第一次联调前，至少跑：
 
-先只记两个名词:
+```bash
+uv run crawler4j config lint
+uv run crawler4j check full
+```
 
-- DevLink: 让宿主直接加载你的本地模块源码目录
-- ATM: 宿主里的 `📋 任务监控` 页面，负责创建作业、配置运行模板和执行任务
+然后切到宿主环境：
 
-如果你现在只想完成“脚手架生成 + 文件改完 + 自检通过”，可以先停在第四步。
+```bash
+uv run python -c "import src.core; print('ok: host runtime ready')"
+uv run crawler4j host devlink add /absolute/path/to/hotel_demo
+uv run crawler4j host debug config
+```
 
-如果你要确认模块真的能被宿主加载，再按下面的最短路径走。
+联调顺序：
 
-在宿主里按这个最短路径走:
+1. 打开 `📦 模块管理`，确认来源是 `开发链接`
+2. 打开 `📋 任务监控`，创建绑定 `hotel_demo` 的作业
+3. 选择 `hotel_sync`
+4. 先点 `▶ 执行一次`
+5. 需要断点时再点 `🐞 调试`
+6. 在模块详情页确认 `dashboard` 已出现
 
-1. `📦 模块管理` -> `🔗 添加开发模块`
-2. 模块详情页确认 `来源: 开发链接`
-3. `📋 任务监控` -> `+ 新建作业`
-4. `配置运行模板` 里选中 `hotel_demo / hotel_sync`
-5. 触发方式选 `执行一次`
-6. 回到列表点 `▶ 执行一次`
+## 8. 构建并安装
 
-如果你能看到任务实例、任务日志和阶段日志，说明最小链路已经通了。
+回到模块工程环境：
 
-第一次走宿主验证时，至少核对这 4 个事实:
+```bash
+uv run crawler4j package build
+uv run crawler4j package verify dist/hotel_demo-0.1.0.zip
+uv run crawler4j release publish --dry-run
+```
 
-1. 模块详情页显示 `来源: 开发链接`
-2. 作业运行模板里选中的确实是 `hotel_demo / hotel_sync`
-3. 回到任务监控列表后能看到 `▶ 执行一次`
-4. 执行后在作业详情里能看到 `任务实例 (Tasks)` 和 `任务日志`
+再回到宿主环境做安装验收：
 
-## 下一步看什么
+```bash
+uv run crawler4j host install preview dist/hotel_demo-0.1.0.zip --skip-remote-check
+uv run crawler4j host install apply dist/hotel_demo-0.1.0.zip --skip-remote-check
+```
 
-- 想理解模块到底是什么: 看 [核心概念](core-concepts.md)
-- 想搞清楚目录和 `module.yaml`: 看 [模块结构](module-structure.md)
-- 想开始认真写业务: 看 [构建模块](build-modules.md)
-- 想写页面或托管数据表: 看 [UI 与数据表](ui-and-data-table.md)
-- 想继续走调试和交付: 看 [调试模块](debugging.md) 和 [交付模块](shipping.md)
+## 记住这 5 条
+
+- 模块业务代码只 `import crawler4j-contracts`
+- Core 是唯一运行时 owner
+- 没有 `runtime_api: core-native-v1` 会直接拒绝加载
+- 表、视图、命名查询先写进 `module.yaml.data` 和 `data/` 资产，再在 handler 里调用 `ctx.db`
+- 即使运行时环境卸载 `crawler4j-sdk`，模块也必须能跑

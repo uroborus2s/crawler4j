@@ -6,10 +6,8 @@
     - init_database: 初始化数据库
     - get_connection: 获取数据库连接
     - KVStore / get_kv_store: KV 存储
-    - ConfigStore / get_config_store: 配置存储
 """
 
-from src.core.persistence.config_store import ConfigStore, get_config_store
 from src.core.persistence.database import (
     CONFIG_DB,
     DATA_DB,
@@ -35,7 +33,4 @@ __all__ = [
     # Module Data Store
     "ModuleDataStore",
     "get_module_data_store",
-    # Config Store
-    "ConfigStore",
-    "get_config_store",
 ]

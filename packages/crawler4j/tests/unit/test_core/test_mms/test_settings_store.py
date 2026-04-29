@@ -36,14 +36,46 @@ def _write_module(root: Path, name: str = "demo_module") -> Path:
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "module.yaml").write_text(
         "name: {name}\n"
+        "runtime_api: core-native-v1\n"
         "version: 1.0.0\n"
         "upgrade_source:\n"
         "  type: github_release\n"
-        "  repo: example/{name}\n".format(name=name),
+        "  repo: example/{name}\n"
+        "workflows:\n"
+        "  - name: default\n"
+        "default_workflow: default\n"
+        "data:\n"
+        "  resources: []\n"
+        "  views: []\n"
+        "  queries: []\n"
+        "  seeds: []\n".format(name=name),
         encoding="utf-8",
     )
     (module_dir / "__init__.py").write_text("VALUE = 'demo'\n", encoding="utf-8")
     return module_dir
+
+
+def _sync_managed_dataset_resource(data_store, module_dir: Path, *, module_name: str = "demo_module") -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [
+                {
+                    "id": "accounts",
+                    "storage_mode": "managed_dataset",
+                    "schema": {
+                        "version": 1,
+                        "columns": [{"name": "id", "type": "text", "required": True}],
+                    },
+                }
+            ],
+            "views": [],
+            "queries": [],
+            "seeds": [],
+        }
+    )
+    data_store.sync_manifest_data(module_name, module_dir, manifest_data)
 
 
 def test_settings_store_reads_writes_and_exports_module_and_workflow_settings(temp_data_dir):
@@ -205,48 +237,15 @@ def test_settings_store_default_init_rolls_back_when_a_write_fails(temp_data_dir
     assert store.is_config_defaults_initialized("demo_module") is False
 
 
-def test_settings_store_ignores_legacy_configs_rows(temp_data_dir):
-    from src.core.mms.settings_store import ModuleSettingsStore
+def test_init_database_does_not_create_legacy_configs_table(temp_data_dir):
     from src.core.persistence.database import CONFIG_DB, get_connection
 
     with get_connection(CONFIG_DB) as conn:
-        conn.execute(
-            """
-            INSERT INTO configs (key, value, created_at, updated_at)
-            VALUES (?, ?, 1, 1)
-            """,
-            (
-                "mms:module_settings:demo_module",
-                '{"auth": {"login_url": "https://legacy.example.com"}}',
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO configs (key, value, created_at, updated_at)
-            VALUES (?, ?, 1, 1)
-            """,
-            (
-                "mms:workflow_settings:demo_module:login",
-                '{"auth": {"headless": true}}',
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO configs (key, value, created_at, updated_at)
-            VALUES (?, ?, 1, 1)
-            """,
-            (
-                "mms:module_status:demo_module",
-                '"disabled"',
-            ),
-        )
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'configs'"
+        ).fetchone()
 
-    store = ModuleSettingsStore()
-
-    assert store.read_module_settings("demo_module") == {}
-    assert store.read_workflow_settings("demo_module", "login") == {}
-    assert store.build_task_config("demo_module", "login") == {}
-    assert store.get_module_status("demo_module") is None
+    assert table is None
 
 
 def test_registry_persists_module_status_across_reload(temp_data_dir):
@@ -306,12 +305,19 @@ def test_registry_initializes_manifest_config_defaults_only_on_first_load(temp_d
     (module_dir / "module.yaml").write_text(
         """
 name: demo_module
+runtime_api: core-native-v1
 version: 1.0.0
 upgrade_source:
   type: github_release
   repo: example/demo_module
 workflows:
   - name: default
+default_workflow: default
+data:
+  resources: []
+  views: []
+  queries: []
+  seeds: []
 config_defaults:
   module:
     base_url: https://example.com
@@ -339,12 +345,19 @@ config_defaults:
     (module_dir / "module.yaml").write_text(
         """
 name: demo_module
+runtime_api: core-native-v1
 version: 1.0.1
 upgrade_source:
   type: github_release
   repo: example/demo_module
 workflows:
   - name: default
+default_workflow: default
+data:
+  resources: []
+  views: []
+  queries: []
+  seeds: []
 config_defaults:
   module:
     base_url: https://changed.example.com
@@ -368,13 +381,18 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
     scan_root = temp_data_dir / "scan_root"
-    _write_module(scan_root)
+    module_dir = _write_module(scan_root)
     store = ModuleSettingsStore()
     data_store = ModuleDataStore()
+    _sync_managed_dataset_resource(data_store, module_dir)
     store.write_module_settings("demo_module", {"api_key": "secret"})
     store.write_workflow_settings("demo_module", "login", {"headless": False})
-    data_store.write_dataset("demo_module", "accounts", [{"id": "u1"}])
-    data_store.write_data_table_schema("demo_module", "accounts", {"title": "账号管理", "dataset": "accounts"})
+    data_store.replace_resource_records("demo_module", "accounts", [{"id": "u1"}])
+    data_store.write_page_schema(
+        "demo_module",
+        "dashboard",
+        {"type": "Page", "title": "账号管理", "load_handler": "load_dashboard_page", "children": []},
+    )
 
     registry = ModuleRegistry(
         scanner=ModuleScanner(scan_paths=[scan_root]),
@@ -383,14 +401,20 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
     )
     assert registry.uninstall("demo_module") is True
     assert store.export_module_settings("demo_module") == {"module": {}, "workflows": {}}
-    assert data_store.read_dataset("demo_module", "accounts") == []
-    assert data_store.read_data_table_schema("demo_module", "accounts") == {}
+    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
+        data_store.read_resource_records("demo_module", "accounts")
+    assert data_store.read_page_schema("demo_module", "dashboard") == {}
 
-    _write_module(scan_root)
+    module_dir = _write_module(scan_root)
+    _sync_managed_dataset_resource(data_store, module_dir)
     store.write_module_settings("demo_module", {"api_key": "secret"})
     store.write_workflow_settings("demo_module", "login", {"headless": False})
-    data_store.write_dataset("demo_module", "accounts", [{"id": "u2"}])
-    data_store.write_data_table_schema("demo_module", "accounts", {"title": "账号管理", "dataset": "accounts"})
+    data_store.replace_resource_records("demo_module", "accounts", [{"id": "u2"}])
+    data_store.write_page_schema(
+        "demo_module",
+        "dashboard",
+        {"type": "Page", "title": "账号管理", "load_handler": "load_dashboard_page", "children": []},
+    )
     registry = ModuleRegistry(
         scanner=ModuleScanner(scan_paths=[scan_root]),
         dev_link_store=_FakeDevLinkStore(),
@@ -402,5 +426,6 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
         "module": {"api_key": "secret"},
         "workflows": {"login": {"headless": False}},
     }
-    assert data_store.read_dataset("demo_module", "accounts") == []
-    assert data_store.read_data_table_schema("demo_module", "accounts") == {}
+    with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
+        data_store.read_resource_records("demo_module", "accounts")
+    assert data_store.read_page_schema("demo_module", "dashboard") == {}

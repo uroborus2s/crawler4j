@@ -7,6 +7,7 @@ from src.core.rem.models import (
     EnvKind,
     EnvLease,
     EnvRequirement,
+    ProviderEnvInfo,
     ProxyConfig,
     ProxyMode,
     EnvStatus,
@@ -57,6 +58,25 @@ class TestEnvironment:
         assert env.kind == EnvKind.BROWSER
         assert env.status == EnvStatus.READY
         assert env.capabilities == {"page", "cookies"}
+
+    def test_environment_roundtrip_uses_provider_and_name_only(self):
+        """测试环境来源唯一性只保留 provider/name。"""
+        env = Environment(
+            id=9,
+            name="imported-env",
+            kind=EnvKind.BROWSER,
+            provider="virtualbrowser",
+            status=EnvStatus.READY,
+            external_id="321",
+        )
+
+        restored = Environment.from_dict(env.to_dict())
+
+        assert restored.provider == "virtualbrowser"
+        assert restored.name == "imported-env"
+        assert restored.external_id == "321"
+        assert "provider_env_id" not in restored.to_dict()
+        assert "provider_env_name" not in restored.to_dict()
 
 
 class TestProxyConfig:
@@ -165,3 +185,28 @@ class TestEnvRequirement:
         env = Environment(kind=EnvKind.BROWSER, provider="bitbrowser", status=EnvStatus.READY)
 
         assert req.matches(env) is False
+
+
+class TestProviderEnvInfo:
+    """测试来源环境信息。"""
+
+    def test_proxy_summary_prefers_explicit_text(self):
+        info = ProviderEnvInfo(
+            provider="virtualbrowser",
+            provider_label="Virtual Browser",
+            external_id="101",
+            name="env-101",
+            proxy_summary="SOCKS5 127.0.0.1:1080",
+        )
+
+        assert info.proxy_summary_text == "SOCKS5 127.0.0.1:1080"
+
+    def test_proxy_summary_defaults_to_dash(self):
+        info = ProviderEnvInfo(
+            provider="virtualbrowser",
+            provider_label="Virtual Browser",
+            external_id="102",
+            name="env-102",
+        )
+
+        assert info.proxy_summary_text == "-"

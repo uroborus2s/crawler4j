@@ -8,6 +8,7 @@ from crawler4j_contracts import EnvAction, TaskResult, TaskSignal
 
 from src.core.atm.dispatcher import JobStopRequest, TaskDispatcher
 from src.core.atm.models import Job, Task, TaskStatus
+from src.core.atm.repository import TaskRepository
 from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
@@ -82,6 +83,62 @@ def _build_dispatcher(env: Environment, lease: EnvLease) -> TaskDispatcher:
         destroy_env=AsyncMock(return_value=True),
     )
     return dispatcher
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_save_task_update_publishes_task_started(monkeypatch):
+    published = []
+    dispatcher = TaskDispatcher.__new__(TaskDispatcher)
+    dispatcher.repo = SimpleNamespace(save_task=AsyncMock())
+
+    monkeypatch.setattr(
+        "src.core.atm.dispatcher.get_event_bus",
+        lambda: SimpleNamespace(publish=published.append),
+    )
+
+    task = Task(
+        id="task-running",
+        job_id="job-1",
+        status=TaskStatus.RUNNING,
+        env_id="42",
+    )
+
+    await dispatcher._save_task_update(task)
+
+    dispatcher.repo.save_task.assert_awaited_once_with(task)
+    assert len(published) == 1
+    assert published[0].type == EventType.TASK_STARTED
+    assert published[0].data["job_id"] == "job-1"
+    assert published[0].data["env_id"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_save_task_update_publishes_environment_starting_progress(monkeypatch):
+    published = []
+    dispatcher = TaskDispatcher.__new__(TaskDispatcher)
+    dispatcher.repo = SimpleNamespace(save_task=AsyncMock())
+
+    monkeypatch.setattr(
+        "src.core.atm.dispatcher.get_event_bus",
+        lambda: SimpleNamespace(publish=published.append),
+    )
+
+    task = Task(
+        id="task-pending",
+        job_id="job-1",
+        status=TaskStatus.PENDING,
+        env_id="42",
+        message="环境启动中",
+    )
+
+    await dispatcher._save_task_update(task)
+
+    dispatcher.repo.save_task.assert_awaited_once_with(task)
+    assert len(published) == 1
+    assert published[0].type == EventType.TASK_PROGRESS
+    assert published[0].data["phase"] == "environment_starting"
+    assert published[0].data["task_id"] == "task-pending"
+    assert published[0].data["job_id"] == "job-1"
 
 
 @pytest.mark.asyncio
@@ -332,6 +389,44 @@ async def test_dispatcher_request_stop_for_job_records_env_action_and_notifies_c
     assert dispatcher._is_stop_requested("job-1") is True
     assert dispatcher._resolve_stop_env_action("job-1") == EnvAction.RECYCLE
     stop_context.request_stop.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_request_stop_for_job_cancels_persisted_pending_task_without_resource(monkeypatch):
+    published = []
+    dispatcher = TaskDispatcher()
+    dispatcher.repo = TaskRepository()
+    dispatcher.rem = SimpleNamespace()
+
+    monkeypatch.setattr(
+        "src.core.atm.dispatcher.get_event_bus",
+        lambda: SimpleNamespace(publish=published.append),
+    )
+
+    await dispatcher.repo.save_job(Job(id="job-pending-stop", name="pending-stop"))
+
+    pending_task = Task(
+        id="task-pending-stop",
+        job_id="job-pending-stop",
+        status=TaskStatus.PENDING,
+        message="等待环境池工位: bound_account_ready",
+        waiting_since=1_714_000_000,
+    )
+    await dispatcher.repo.save_task(pending_task)
+
+    await dispatcher.request_stop_for_job("job-pending-stop")
+
+    updated_task = await dispatcher.repo.get_task(pending_task.id)
+    assert updated_task is not None
+    assert updated_task.status == TaskStatus.CANCELLED
+    assert updated_task.error == "Job paused"
+    assert updated_task.message == "Job paused before resource acquired"
+    assert updated_task.waiting_since is None
+    assert updated_task.finished_at is not None
+    assert len(published) == 1
+    assert published[0].type == EventType.TASK_CANCELLED
+    assert published[0].data["task_id"] == pending_task.id
+    assert published[0].data["job_id"] == pending_task.job_id
 
 
 @pytest.mark.asyncio

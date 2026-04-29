@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QPushButton
 
-ButtonVariant = Literal["primary", "secondary"]
+ButtonVariant = Literal["primary", "secondary", "success", "warning", "danger", "ghost", "text"]
 
 
 class StyledButton(QPushButton):
@@ -24,12 +25,49 @@ class StyledButton(QPushButton):
             "hover": "rgba(99, 102, 241, 1)",
             "border": "none",
             "weight": "600",
+            "color": "white",
         },
         "secondary": {
             "background": "rgba(255, 255, 255, 0.1)",
             "hover": "rgba(255, 255, 255, 0.2)",
             "border": "1px solid rgba(255, 255, 255, 0.2)",
             "weight": "500",
+            "color": "white",
+        },
+        "success": {
+            "background": "#10d982",
+            "hover": "#0fca79",
+            "border": "none",
+            "weight": "700",
+            "color": "#04130c",
+        },
+        "warning": {
+            "background": "#f59e0b",
+            "hover": "#d97706",
+            "border": "none",
+            "weight": "700",
+            "color": "#111827",
+        },
+        "danger": {
+            "background": "rgba(248, 113, 113, 0.92)",
+            "hover": "rgba(248, 113, 113, 1)",
+            "border": "none",
+            "weight": "700",
+            "color": "#19070a",
+        },
+        "ghost": {
+            "background": "transparent",
+            "hover": "rgba(255, 255, 255, 0.08)",
+            "border": "1px solid rgba(255, 255, 255, 0.12)",
+            "weight": "500",
+            "color": "rgba(255, 255, 255, 0.82)",
+        },
+        "text": {
+            "background": "transparent",
+            "hover": "transparent",
+            "border": "none",
+            "weight": "600",
+            "color": "#a78bfa",
         },
     }
 
@@ -53,13 +91,19 @@ class StyledButton(QPushButton):
         if min_width is not None:
             self.setMinimumWidth(min_width)
 
+    def set_variant(self, variant: ButtonVariant) -> None:
+        if variant == self._variant:
+            return
+        self._variant = variant
+        self._apply_style()
+
     def _apply_style(self) -> None:
         palette = self._VARIANT_STYLES[self._variant]
         self.setStyleSheet(
             f"""
             QPushButton {{
                 background: {palette["background"]};
-                color: white;
+                color: {palette["color"]};
                 border: {palette["border"]};
                 border-radius: {self._border_radius}px;
                 padding: 0px {self._horizontal_padding}px;
@@ -78,3 +122,46 @@ class StyledButton(QPushButton):
             }}
             """
         )
+
+
+def normalize_button_variant(
+    variant: str | None,
+    *,
+    default: ButtonVariant = "secondary",
+) -> ButtonVariant:
+    """Normalize schema/user supplied button variants to supported shared variants."""
+
+    value = str(variant or default).strip().lower()
+    if value == "ghost":
+        value = "secondary"
+    if value not in StyledButton._VARIANT_STYLES:
+        return default
+    return cast(ButtonVariant, value)
+
+
+def create_action_button(
+    text: str,
+    *,
+    variant: str | None = "secondary",
+    min_height: int = 34,
+    min_width: int | None = None,
+    horizontal_padding: int = 10,
+    border_radius: int = 4,
+    parent=None,
+) -> StyledButton:
+    """Create a compact action button with the shared StyledButton palette."""
+
+    button = StyledButton(
+        text,
+        variant=normalize_button_variant(variant),
+        min_height=min_height,
+        min_width=min_width,
+        horizontal_padding=horizontal_padding,
+        border_radius=border_radius,
+        parent=parent,
+    )
+    # Table cell widgets clip children that grow beyond their content rect. A
+    # fixed compact height keeps Chinese text and emoji labels stable.
+    button.setFixedHeight(max(0, int(min_height)))
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    return button

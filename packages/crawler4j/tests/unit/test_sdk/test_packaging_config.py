@@ -98,8 +98,105 @@ def test_sdk_runtime_version_matches_publish_metadata():
     version_helper = _load_version_helper(package_root)
 
     assert version_helper.get_version() == pyproject["project"]["version"]
-    assert version_helper.get_compatible_dependency_spec() == "crawler4j-sdk>=0.3.0,<0.4.0"
+    assert version_helper.get_compatible_dependency_spec() == _build_compatible_requirement(
+        "crawler4j-sdk",
+        pyproject["project"]["version"],
+    )
     assert _load_literal_module_version(package_root) is None
+
+
+def test_sdk_contracts_dependency_spec_matches_current_contracts_version():
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    version_helper = _load_version_helper(package_root)
+    contracts_pyproject = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "pyproject.toml")
+
+    assert version_helper.get_compatible_contracts_dependency_spec() == _build_compatible_requirement(
+        "crawler4j-contracts",
+        contracts_pyproject["project"]["version"],
+    )
+
+
+def test_sdk_pyproject_declares_same_contracts_range_as_version_helper():
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    version_helper = _load_version_helper(package_root)
+    sdk_pyproject = _load_pyproject(package_root / "pyproject.toml")
+
+    assert version_helper.get_compatible_contracts_dependency_spec() in sdk_pyproject["project"]["dependencies"]
+
+
+def test_sdk_contracts_dependency_spec_prefers_installed_contracts_metadata_when_repo_pyproject_missing(
+    tmp_path,
+    monkeypatch,
+):
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    version_helper = _load_version_helper(package_root)
+
+    def fake_version(name: str) -> str:
+        if name == version_helper.CONTRACTS_PACKAGE_NAME:
+            return "0.3.2"
+        if name == version_helper.PACKAGE_NAME:
+            return "0.5.0"
+        raise version_helper.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(version_helper.metadata, "version", fake_version)
+    monkeypatch.setattr(version_helper, "CONTRACTS_PYPROJECT_PATH", tmp_path / "missing-pyproject.toml")
+
+    assert version_helper.get_compatible_contracts_dependency_spec() == "crawler4j-contracts>=0.3.2,<0.4.0"
+
+
+def test_sdk_contracts_dependency_spec_prefers_source_pyproject_inside_repo_checkout(tmp_path, monkeypatch):
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    version_helper = _load_version_helper(package_root)
+    pyproject_path = tmp_path / "crawler4j-contracts.toml"
+    pyproject_path.write_text('[project]\nversion = "0.3.7"\n', encoding="utf-8")
+
+    def fake_version(name: str) -> str:
+        if name == version_helper.CONTRACTS_PACKAGE_NAME:
+            return "0.4.0"
+        if name == version_helper.PACKAGE_NAME:
+            return "0.5.0"
+        raise version_helper.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(version_helper.metadata, "version", fake_version)
+    monkeypatch.setattr(version_helper, "CONTRACTS_PYPROJECT_PATH", pyproject_path)
+
+    assert version_helper.get_compatible_contracts_dependency_spec() == "crawler4j-contracts>=0.3.7,<0.4.0"
+
+
+def test_sdk_readme_dependency_example_matches_generated_compatibility_ranges():
+    package_root = WORKSPACE_ROOT / "packages" / "crawler4j-sdk"
+    readme_text = (package_root / "README.md").read_text(encoding="utf-8")
+    sdk_pyproject = _load_pyproject(package_root / "pyproject.toml")
+    contracts_pyproject = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "pyproject.toml")
+
+    assert _build_compatible_requirement("crawler4j-contracts", contracts_pyproject["project"]["version"]) in readme_text
+    assert _build_compatible_requirement("crawler4j-sdk", sdk_pyproject["project"]["version"]) in readme_text
+    assert "crawler4j-contracts==<compatible-version>" not in readme_text
+    assert "crawler4j-sdk==<compatible-version>" not in readme_text
+
+
+def test_workspace_release_docs_reflect_current_versions_and_publish_order():
+    root_readme = (WORKSPACE_ROOT / "README.md").read_text(encoding="utf-8")
+    deployment_guide = (
+        WORKSPACE_ROOT / "docs" / "04-project-development" / "08-operations-maintenance" / "deployment-guide.md"
+    ).read_text(encoding="utf-8")
+    contracts_version = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "pyproject.toml")[
+        "project"
+    ]["version"]
+    sdk_version = _load_pyproject(WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "pyproject.toml")["project"][
+        "version"
+    ]
+    app_version = _load_pyproject(APP_ROOT / "pyproject.toml")["project"]["version"]
+
+    assert f"| `crawler4j` | `{app_version}` |" in root_readme
+    assert f"| `crawler4j-sdk` | `{sdk_version}` |" in root_readme
+    assert f"| `crawler4j-contracts` | `{contracts_version}` |" in root_readme
+    assert root_readme.index("uv run publish crawler4j-contracts") < root_readme.index(
+        "uv run publish crawler4j-sdk"
+    )
+    assert deployment_guide.index("uv run publish crawler4j-contracts") < deployment_guide.index(
+        "uv run publish crawler4j-sdk"
+    )
 
 
 def test_contracts_packaging_maps_flat_src_to_public_package_name():
@@ -216,6 +313,8 @@ def test_pyinstaller_spec_targets_real_ui_entry_and_runtime_assets():
     assert "def _load_project_version" in spec_text
     assert "from src.__version__ import VERSION" not in spec_text
     assert "src/main.py" not in spec_text
+    assert "dark_theme.qss" not in spec_text
+    assert 'src/ui/styles' not in spec_text
     assert "def get_docs_root() -> Path:" in paths_text
 
 
@@ -252,20 +351,20 @@ def test_workspace_build_script_targets_publishable_packages_and_dist_dirs():
     script = _load_script_module("build_workspace_packages.py")
 
     assert [target.package for target in script.BUILD_TARGETS] == [
+        "crawler4j-contracts",
         "crawler4j-sdk",
         "crawler4j",
-        "crawler4j-contracts",
     ]
     assert [target.dist_dir for target in script.BUILD_TARGETS] == [
+        WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "dist",
         WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "dist",
         WORKSPACE_ROOT / "packages" / "crawler4j" / "dist",
-        WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "dist",
     ]
 
 
 def test_workspace_build_script_uses_uv_clear_for_each_target():
     script = _load_script_module("build_workspace_packages.py")
-    target = script.BUILD_TARGETS[0]
+    target = next(target for target in script.BUILD_TARGETS if target.package == "crawler4j-sdk")
 
     assert script.build_command(target) == [
         "uv",
@@ -293,13 +392,13 @@ def test_workspace_build_script_preserves_desktop_subdir_for_root_package(tmp_pa
         assert check is True
         shutil.rmtree(dist_dir)
         dist_dir.mkdir(parents=True)
-        (dist_dir / "crawler4j-0.2.0-py3-none-any.whl").write_text("wheel", encoding="utf-8")
+        (dist_dir / "crawler4j-test.whl").write_text("wheel", encoding="utf-8")
 
     monkeypatch.setattr(script.subprocess, "run", fake_run)
 
     script.run_build(target)
 
-    assert (dist_dir / "crawler4j-0.2.0-py3-none-any.whl").read_text(encoding="utf-8") == "wheel"
+    assert (dist_dir / "crawler4j-test.whl").read_text(encoding="utf-8") == "wheel"
     assert kept_marker.read_text(encoding="utf-8") == "desktop artifact"
 
 
@@ -325,7 +424,7 @@ def test_workspace_build_script_parse_args_supports_publish_shorthand():
 
 def test_workspace_build_script_uses_package_local_dist_glob_for_publish():
     script = _load_script_module("build_workspace_packages.py")
-    target = script.BUILD_TARGETS[0]
+    target = next(target for target in script.BUILD_TARGETS if target.package == "crawler4j-sdk")
 
     assert script.publish_command(target) == [
         "uv",
@@ -450,6 +549,19 @@ def test_release_packaging_helper_resolve_runtime_env_merges_dotenv_os_and_expli
     assert env_map["SHARED_KEY"] == "call"
 
 
+def test_release_packaging_helper_reset_output_dir_removes_stale_files(tmp_path):
+    helper = _load_script_module("release_packaging_helpers.py")
+    output_dir = tmp_path / "updates"
+    output_dir.mkdir()
+    (output_dir / "stale.txt").write_text("stale", encoding="utf-8")
+
+    reset_dir = helper.reset_output_dir(output_dir)
+
+    assert reset_dir == output_dir.resolve()
+    assert reset_dir.exists()
+    assert not (reset_dir / "stale.txt").exists()
+
+
 def test_platform_release_scripts_reuse_shared_runtime_env_helpers(tmp_path, monkeypatch):
     helper = importlib.import_module("scripts.release_packaging_helpers")
     macos_script = _load_script_module("package_macos_internal_release.py")
@@ -541,6 +653,8 @@ def test_windows_release_build_vpk_pack_command_uses_global_vpk(tmp_path):
         "Crawler4j.exe",
         "--packTitle",
         script.package_desktop_app.APP_NAME,
+        "--icon",
+        str(script.WINDOWS_PACKAGE_ICON.resolve()),
     ]
 
 
@@ -567,6 +681,7 @@ def test_windows_release_build_vpk_pack_command_uses_dnx_when_requested(tmp_path
     assert command[:5] == ["dnx", "vpk", "--version", "0.0.1298", "pack"]
     assert "--packId" in command
     assert "--mainExe" in command
+    assert command[command.index("--icon") + 1] == str(script.WINDOWS_PACKAGE_ICON.resolve())
 
 
 def test_windows_release_normalizes_dev_velopack_version_for_dnx():
@@ -608,6 +723,7 @@ def test_windows_release_build_vpk_pack_command_wraps_batch_shims_with_cmd(tmp_p
         "pack",
     ]
     assert "--packId" in command
+    assert command[command.index("--icon") + 1] == str(script.WINDOWS_PACKAGE_ICON.resolve())
 
 
 def test_windows_release_build_vpk_pack_command_uses_normalized_dnx_version(tmp_path):
@@ -632,6 +748,57 @@ def test_windows_release_build_vpk_pack_command_uses_normalized_dnx_version(tmp_
 
     version_index = command.index("--version") + 1
     assert command[version_index] == "0.0.1589"
+    assert command[command.index("--icon") + 1] == str(script.WINDOWS_PACKAGE_ICON.resolve())
+
+
+def test_windows_release_build_release_artifacts_cleans_output_dir_before_packaging(tmp_path, monkeypatch):
+    script = _load_script_module("package_windows_release.py")
+    bundle_dir = tmp_path / "Crawler4j"
+    bundle_dir.mkdir()
+    output_dir = tmp_path / "updates"
+    output_dir.mkdir()
+    (output_dir / "stale.txt").write_text("stale", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    config = script.WindowsReleaseConfig(
+        feed_url="https://updates.example.com/win/releases.win.json",
+        pack_id="io.github.uroborus2s.crawler4j",
+        channel="win",
+        runtime="win-x64",
+    )
+
+    monkeypatch.setattr(script.release_packaging_helpers, "load_project_version", lambda: "0.2.0")
+    monkeypatch.setattr(script, "load_windows_release_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr(script, "windows_bundle_dir", lambda: bundle_dir)
+    monkeypatch.setattr(script, "write_windows_update_config", lambda bundle, release_config: bundle / script.UPDATE_CONFIG_FILENAME)
+
+    def fake_build_vpk_pack_command(bundle, destination, *, version, config, velopack_version=None):
+        observed["bundle_dir"] = bundle
+        observed["output_dir"] = destination
+        observed["version"] = version
+        return ["vpk", "pack"]
+
+    def fake_run(command, *, cwd, check):
+        observed["command"] = command
+        observed["cwd"] = cwd
+        observed["check"] = check
+
+    monkeypatch.setattr(script, "build_vpk_pack_command", fake_build_vpk_pack_command)
+    monkeypatch.setattr(script.subprocess, "run", fake_run)
+
+    args = script.parse_args(["--skip-build", "--output-dir", str(output_dir)])
+    artifacts = script.build_release_artifacts(args, env={script.VELOPACK_FEED_URL_ENV: config.feed_url})
+
+    assert artifacts.output_dir == output_dir.resolve()
+    assert artifacts.update_config_path == bundle_dir / script.UPDATE_CONFIG_FILENAME
+    assert observed["bundle_dir"] == bundle_dir
+    assert observed["output_dir"] == output_dir.resolve()
+    assert observed["version"] == "0.2.0"
+    assert observed["command"] == ["vpk", "pack"]
+    assert observed["cwd"] == script.WORKSPACE_ROOT
+    assert observed["check"] is True
+    assert output_dir.exists()
+    assert not (output_dir / "stale.txt").exists()
 
 
 def test_macos_internal_release_config_reads_env_and_vendor_layout(tmp_path, monkeypatch):
@@ -831,6 +998,50 @@ def test_macos_internal_release_build_release_artifacts_resigns_bundle_before_pa
         ("codesign", app_bundle),
         ("dmg", app_bundle),
     ]
+
+
+def test_macos_internal_release_build_release_artifacts_cleans_output_dir_before_packaging(tmp_path, monkeypatch):
+    script = _load_script_module("package_macos_internal_release.py")
+    app_bundle = tmp_path / "Crawler4j.app"
+    (app_bundle / "Contents").mkdir(parents=True)
+    output_dir = tmp_path / "updates"
+    output_dir.mkdir()
+    (output_dir / "stale.txt").write_text("stale", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    config = script.SparkleReleaseConfig(
+        sparkle_root=tmp_path / "sparkle",
+        feed_url="https://example.com/appcast.xml",
+        public_key="sparkle-public-key",
+        auto_check=True,
+    )
+
+    monkeypatch.setattr(script, "load_sparkle_release_config", lambda env=None, env_file=None: config)
+    monkeypatch.setattr(script.release_packaging_helpers, "load_project_version", lambda: "0.2.0")
+    monkeypatch.setattr(script, "app_bundle_path", lambda: app_bundle)
+    monkeypatch.setattr(script, "copy_sparkle_framework", lambda bundle, framework_source: bundle / "Contents" / "Frameworks" / "Sparkle.framework")
+    monkeypatch.setattr(script, "update_bundle_plist", lambda bundle, *, version, config: bundle / "Contents" / "Info.plist")
+    monkeypatch.setattr(script, "ad_hoc_sign_bundle", lambda bundle: None)
+
+    def fake_create_dmg(bundle, destination, *, version, volume_name):
+        observed["bundle"] = bundle
+        observed["output_dir"] = destination
+        observed["version"] = version
+        observed["volume_name"] = volume_name
+        return destination / "Crawler4j-0.2.0.dmg"
+
+    monkeypatch.setattr(script, "create_dmg", fake_create_dmg)
+
+    args = script.parse_args(["--skip-build", "--skip-appcast", "--output-dir", str(output_dir)])
+    artifacts = script.build_release_artifacts(args)
+
+    assert artifacts.output_dir == output_dir.resolve()
+    assert observed["bundle"] == app_bundle
+    assert observed["output_dir"] == output_dir.resolve()
+    assert observed["version"] == "0.2.0"
+    assert observed["volume_name"] == script.package_desktop_app.APP_NAME
+    assert output_dir.exists()
+    assert not (output_dir / "stale.txt").exists()
 
 
 def test_macos_internal_release_copies_sparkle_framework_into_bundle(tmp_path):
@@ -1148,6 +1359,7 @@ def test_deploy_windows_release_builds_sftp_commands_from_env(tmp_path):
         "-mkdir /srv/updates",
         "-mkdir /srv/updates/crawler4j",
         "-mkdir /srv/updates/crawler4j/win",
+        "cd /srv/updates/crawler4j/win",
         f"put {(source_dir / 'Setup.exe').resolve()} Setup.exe",
         f"put {(source_dir / 'releases.win.json').resolve()} releases.win.json",
     ]

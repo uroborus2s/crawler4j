@@ -1,301 +1,330 @@
 # UI 与数据表
 
-这一页只讲模块开发者真正会用到的两种 UI 形态:
+当前正式 UI 协议已经完全切到宿主扫描模式：
 
-1. 代码型页面
-2. 宿主管理的 `core:data_table`
+- `module.yaml.ui_extension.pages[]` 只声明左侧导航菜单入口
+- `pages/*.py` 或 `pages/<group>/*.py` 直接导出 `PAGE: PageSpec`，作为可路由页面注册表
+- Core 读取 `PAGE.schema` 并渲染
+- 页面数据和动作都走页面 handler
 
-## 什么时候选哪种 UI
+模块不再声明 UI 运行入口，宿主也不再让模块自己装配页面。
 
-| 需求 | 选什么 |
-|---|---|
-| 只是展示和编辑一批结构化记录 | `core:data_table` |
-| 需要复杂交互、业务面板、自定义组件布局 | 代码型页面 |
-| 想展示按条件查询出来的审计历史时间线 | 代码型页面 |
-| 既要业务页，又要结构化数据列表 | 两者都可以用 |
+## 页面入口放哪
 
-先把宿主里的落点心智模型记死:
+页面入口分两部分，职责不同：
 
-- `ui_extension.entry` 对应模块详情页顶部的代码型页面
-- `ui_extension.detail_menu` 对应详情页侧边或菜单里的数据表入口
-- 两者都可以共存，但它们不是同一个入口
+1. `module.yaml.ui_extension.pages[]`：左侧菜单入口
+2. `pages/<page>.py` 或 `pages/<group>/<file>.py`：可路由页面源码
 
-## 写代码型页面
-
-先生成页面:
-
-```bash
-uv run crawler4j page create dashboard
-uv run crawler4j check structure
-```
-
-这会做三件事:
-
-- 生成 `ui/dashboard.py`
-- 自动在 `ui/__init__.py` 里导出页面类
-- 把 `module.yaml.ui_extension.entry` 写成 `ui:DashboardPage`
-
-### 最小页面写法
-
-```python
-from typing import Any
-
-from PyQt6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
-
-
-class DashboardPage(QWidget):
-    def __init__(self, module: Any | None = None, parent=None):
-        super().__init__(parent)
-        self.module = module
-
-        layout = QVBoxLayout(self)
-        self.label = QLabel("酒店模块")
-        layout.addWidget(self.label)
-
-        btn = QPushButton("刷新数据")
-        btn.clicked.connect(self.on_refresh)
-        layout.addWidget(btn)
-
-    def on_refresh(self):
-        self.label.setText("酒店模块已刷新")
-```
-
-### 页面开发纪律
-
-- 页面类签名保持兼容宿主 loader：`__init__(self, module: Any | None = None, parent=None)`
-- 代码型页面默认只拿到 `module` 对象或无参实例化，不要假定宿主会传 `TaskContext`
-- 页面只做界面交互和轻量业务动作
-- 如果页面逻辑已经需要大量状态机、服务层、仓储层，说明页面职责已经写重了
-
-## 用托管数据表
-
-`core:data_table` 只适合简单记录列表和轻量 CRUD。
-
-适合:
-
-- 小型业务记录维护
-- 通用表格展示
-- 简单新增、编辑、删除
-- 配合锁显示“占用中”
-
-不适合:
-
-- 多步骤向导
-- 复杂审批流
-- 大量联动字段
-- 跨页面异步编排
-- append-only 审计历史
-
-## `core:data_table` 和审计事件怎么分工
-
-| 你要保留什么 | 正确落点 |
-|---|---|
-| 当前酒店列表、账号列表这类“现在长什么样”的数据 | `core:data_table` + `db.list_records` / `db.replace_records` |
-| 登录尝试、状态迁移、人工确认这类“发生过什么”的历史 | `db.append_event` / `db.query_events` |
-| 既要当前列表又要历史轨迹 | 两条都用，不要把历史事件行混进当前 dataset |
-
-`core:data_table` 的 schema、编辑弹窗和 CRUD 语义都默认你维护的是当前快照。它不是审计日志表，也不会替你管理 append-only 历史。
-
-## 新人照抄版
-
-执行完 `uv run crawler4j data-table create hotels` 之后，你通常只需要改一个文件:
-
-1. `module_runtime.py`
-
-正确顺序只有 4 步:
-
-1. 跑 `data-table create`，把入口写进 `module.yaml.ui_extension.detail_menu`
-2. 在 `module_runtime.py` 改 CLI 生成的同步 helper，必要时补同步 handler
-3. 确认根 `__init__.py` 仍是 SDK 托管薄壳，不要手改坏 `__getattr__`
-4. 回到宿主模块详情页，点数据表入口和 `刷新` 验证
-
-如果你做了别的事，比如再建 `services/`、再建 `repository/`、再写一套 UI schema 文件，通常都走偏了。
-
-## 第一步: 注册入口
-
-```bash
-uv run crawler4j data-table create hotels
-uv run crawler4j check structure
-```
-
-`module.yaml` 会出现:
+清单只放需要出现在左侧菜单里的页面：
 
 ```yaml
 ui_extension:
-  detail_menu:
-    - id: hotels
-      icon: 📋
-      label: Hotels
-      entry: core:data_table:hotels
+  pages:
+    - id: dashboard
+      label: Dashboard
+      icon: 📄
+    - id: accounts
+      label: Accounts
+      icon: 👤
 ```
 
-## 第二步: 在 `module_runtime.py` 改同步 hook
-
-当前宿主和 CLI 的真实调用链是:
-
-1. 打开模块详情页里的 `core:data_table:hotels`
-2. 宿主同步调用模块本地 `declare_ui(ctx)`
-3. `declare_ui` 内部调用 `ctx.tools.call("ui.declare_data_table", ...)`
-4. 如果 schema 声明了 `create_handler` / `update_handler`
-5. 宿主继续同步调用对应本地 hook
-
-所以这里有 4 条硬约束:
-
-1. `declare_ui` 必须是同步函数
-2. `create_handler` / `update_handler` 必须是同步函数
-3. handler 名必须和 schema 里的字符串完全一致
-4. 标准脚手架依赖根 `__init__.py` 的 `__getattr__` 自动转发，所以不要手改坏根薄壳
-
-补一条最容易抄错的签名规则:
-
-- `create_handler(ctx, payload)` 只收 `payload`
-- `update_handler(ctx, pk_value, payload)` 会先收到主键值，再收到编辑后的 `payload`
-
-### 推荐写法
+页面文件放真实 schema 和 handler。只要文件导出 `PAGE`，它就是可被 `open_page.page_id` 打开的页面；它不一定要出现在左侧菜单里：
 
 ```python
-from crawler4j_sdk import TaskContext
+from crawler4j_contracts import PageSpec, TaskContext
+
+PAGE = PageSpec(
+    id="dashboard",
+    label="Dashboard",
+    icon="📄",
+    schema={
+        "type": "Page",
+        "title": "Dashboard",
+        "load_handler": "load_dashboard_page",
+        "scroll": {"vertical": "hidden"},
+        "children": [
+            {"type": "Text", "style": "title", "binding": "title"},
+        ],
+    },
+)
 
 
-def declare_ui(ctx: TaskContext):
-    if not ctx.tools or not ctx.tools.has_tool("ui.declare_data_table"):
-        return None
-
-    return ctx.tools.call(
-        "ui.declare_data_table",
-        view_id="hotels",
-        schema={
-            "title": "酒店列表",
-            "dataset": "hotels",
-            "primary_key": "id",
-            "display_fields": ["name", "city", "status"],
-            "create_fields": ["name", "city", "status"],
-            "update_fields": ["status"],
-            "create_handler": "create_hotel_from_ui",
-            "update_handler": "update_hotel_from_ui",
-            "columns": [
-                {"key": "id", "label": "ID", "visible": False},
-                {"key": "name", "label": "酒店名", "required": True},
-                {"key": "city", "label": "城市", "required": True},
-                {
-                    "key": "status",
-                    "label": "状态",
-                    "required": True,
-                    "type": "select",
-                    "options": ["new", "active", "blocked"],
-                },
-            ],
-        },
-    )
-
-
-def create_hotel_from_ui(ctx: TaskContext, payload: dict):
-    rows = ctx.tools.call("db.list_records", dataset="hotels") or []
-    rows.append(
-        {
-            "id": payload["name"].lower(),
-            "name": payload["name"],
-            "city": payload["city"],
-            "status": payload["status"],
-        }
-    )
-    return ctx.tools.call("db.replace_records", dataset="hotels", records=rows)
-
-
-def update_hotel_from_ui(ctx: TaskContext, pk_value: str, payload: dict):
-    rows = ctx.tools.call("db.list_records", dataset="hotels") or []
-    for row in rows:
-        if row.get("id") == pk_value:
-            row["status"] = payload["status"]
-            break
-    return ctx.tools.call("db.replace_records", dataset="hotels", records=rows)
+def load_dashboard_page(
+    context: TaskContext,
+    page_id: str,
+    params: dict | None = None,
+) -> dict:
+    del context, page_id, params
+    return {"title": "Dashboard"}
 ```
 
-如果新增/编辑成功后还要留下操作历史，单独追加一条审计事件即可；不要把“谁改过、改了几次”继续塞回 `hotels` 这个快照 dataset。
+页面级滚动当前支持：
 
-## 第三步: 不要手改根 `__init__.py`
+- `scroll.vertical = "auto"`：默认值，宿主按内容需要显示竖向滚动条
+- `scroll.vertical = "hidden"`：隐藏 Hosted Page 外层竖向滚动槽，但仍保留滚轮/触控板滚动能力
 
-标准 CLI 脚手架已经会把 `module_runtime.py` 里的 hook 透传到根模块。
+## 接入主线
 
-这一步真正要确认的是:
+标准顺序：
 
-- 根 `__init__.py` 仍然是 SDK 托管薄壳
-- 没有人手工删掉 `__getattr__`
-- 你没有把数据表 hook 又搬回根入口
+1. `uv run crawler4j page create dashboard`
+2. 如果要创建详情页或二级页，可以用 `uv run crawler4j page create account_detail --group account --no-menu`
+3. CLI 默认更新 `module.yaml.ui_extension.pages[]` 和对应页面文件；加 `--no-menu` 时只写页面文件，不加入左侧菜单
+4. 你补 `PAGE.schema` 和 handler
+5. `uv run crawler4j check full`
+6. 用 DevLink 到宿主里验证
 
-## 第四步: 在 UI 里验证
+分组目录只影响源码组织，不影响页面路由：
 
-验证顺序不要乱:
+- `page_id` 仍然保持扁平，例如 `account_detail`
+- `open_page.page_id` 继续写扁平 ID
+- 左侧菜单只看 `module.yaml.ui_extension.pages[]`；未写入清单的页面仍可作为详情页、二级页或页面内部跳转目标
 
-1. 打开 `📦 模块管理`
-2. 进入目标模块详情页
-3. 点击详情菜单里对应的数据表入口
-4. 点击页面上的 `刷新`
-5. 确认表头、字段、按钮和 schema 对齐
-6. 点 `新增` / `编辑`，确认 handler 真正生效
+## 页面可以做什么
 
-如果入口有了但页面还是空的，先查这 4 件事:
+当前正式组件面固定为：
 
-1. `module_runtime.py` 里是否存在 `declare_ui`
-2. `declare_ui` 是否是同步函数
-3. `view_id`、`dataset`、`module.yaml.ui_extension.detail_menu[].id` 是否完全一致
-4. `create_handler` / `update_handler` 名字是否完全一致
+- `Page`
+- `Card`
+- `Section`
+- `Text`
+- `Button`
+- `DataTable`
 
-## 数据表排障最短分叉清单
+宿主负责渲染和交互分发；模块负责返回页面数据、实现查询和业务动作。
 
-不要在空白页前面瞎猜，直接按现象分叉:
+## `Card`：纯容器卡片
 
-1. 看不到菜单入口:
-   先查 `module.yaml.ui_extension.detail_menu`
-2. 点进去是空白页:
-   先查 `declare_ui` 是否存在且为同步函数
-3. 表头或字段不对:
-   先查 `ui.declare_data_table` 里的 schema
-4. `新增` / `编辑` 按钮没反应:
-   先查 `create_handler` / `update_handler` 名字和签名
-5. 改完代码没生效:
-   回到模块详情页重新打开入口，再点 `刷新`
+`Card` 是 Hosted UI 里的正式卡片容器。它只负责提供统一的卡片外壳和内容布局，不内置“标题 + 数值 + 趋势”这类业务模板，因此适合承载文字、按钮、数据表以及后续图表类组件。
 
-## 数据表 schema 的硬约束
+```python
+{
+    "type": "Card",
+    "title": "Payment Due",
+    "title_align": "left",
+    "content_align": "center",
+    "content_vertical_align": "center",
+    "min_height": 140,
+    "padding": 20,
+    "layout": {"direction": "column", "gap": 8},
+    "children": [
+        {"type": "Text", "style": "title", "text": "1 Apr"},
+        {"type": "Button", "label": "Pay Early", "action": {"type": "reload"}},
+    ],
+}
+```
 
-schema 顶层只允许这些字段:
+补充约定：
 
-- `title`
-- `dataset`
+- `Card` 是当前推荐的纯卡片容器
+- `Section` 仍保留给普通分组容器
+- 历史 `Section.variant="card"` 仍可用，但只作为兼容别名，新的页面 schema 优先直接写 `type="Card"`
+- `title_align` 支持 `left / center / right`
+- `content_align` 支持 `left / center / right`
+- `content_vertical_align` 支持 `top / center / bottom`
+- `min_height` 和 `padding` 用于控制卡片最小高度和统一内边距
+
+## `DataTable` 的 4 种数据源
+
+### 1. `binding`
+
+从 `load_handler` 返回值里取字段：
+
+```python
+from crawler4j_contracts import PageSpec, TaskContext
+
+PAGE = PageSpec(
+    id="accounts",
+    label="账号列表",
+    icon="👤",
+    schema={
+        "type": "Page",
+        "title": "账号列表",
+        "load_handler": "load_accounts_page",
+        "children": [
+            {
+                "type": "DataTable",
+                "table_id": "accounts",
+                "columns": [
+                    {"key": "account_id", "label": "账号", "type": "text"},
+                    {"key": "status", "label": "状态", "type": "badge"},
+                ],
+                "data_source": {"type": "binding", "binding": "rows"},
+            }
+        ],
+    },
+)
+
+
+def load_accounts_page(
+    context: TaskContext,
+    page_id: str,
+    params: dict | None = None,
+) -> dict:
+    del page_id, params
+    rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+    return {"rows": rows}
+```
+
+### 2. `rows`
+
+直接把静态或即时计算结果内联在 schema 里。适合很小的只读表。
+
+### 3. `query_handler`
+
+把搜索、排序、分页交给模块：
+
+```python
+def query_billing_stats_table(
+    context: TaskContext,
+    table_id: str,
+    query: dict,
+    params: dict | None = None,
+) -> dict:
+    del table_id, params
+    page_size = query.get("page_size", 20)
+    page = query.get("page", 1)
+    rows = (
+        context.db.from_("billing_stats")
+        .limit(page_size)
+        .offset(max(page - 1, 0) * page_size)
+        .execute()
+    )
+    return {
+        "rows": rows,
+        "total": len(rows),
+        "page": page,
+        "page_size": page_size,
+    }
+```
+
+正式签名固定为：
+
+```python
+(context, table_id, query, params=None)
+```
+
+### 4. `managed_resource`
+
+宿主直接读取已注册资源，并把搜索、排序、分页统一适配到共享 `SkyDataTable`。这个模式适合模块实体表，也允许叠加 `crud`：
+
+```python
+{
+    "type": "DataTable",
+    "table_id": "accounts",
+    "columns": [
+        {"key": "account_id", "label": "ID", "visible": False},
+        {"key": "name", "label": "账号名", "required": True},
+        {"key": "status", "label": "状态", "type": "badge"},
+    ],
+    "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+    "crud": {
+        "mode": "handlers",
+        "render": "row_actions",
+        "toolbar": {"create": True},
+        "primary_key": "account_id",
+        "form": {
+            "create_columns": ["name"],
+            "update_columns": ["name"],
+        },
+        "create_handler": "create_account_from_ui",
+        "update_handler": "update_account_from_ui",
+        "delete_handler": "delete_account_from_ui",
+    },
+}
+```
+
+这里的边界仍然不变：
+
+- `SkyDataTable` 只负责渲染 actions 列和发出 `row_action_requested`
+- 宿主 renderer 负责把 `crud.render="row_actions"` 适配成行内按钮
+- 模块真正的数据写入仍然只能发生在 `hooks/*.py`
+
+## `crud` 怎么配
+
+当前 `crud` 正式支持：
+
+- `mode`
+- `render`
+- `toolbar`
 - `primary_key`
-- `lock_scope`
-- `lock_key`
-- `display_fields`
-- `create_fields`
-- `update_fields`
+- `form`
 - `create_handler`
 - `update_handler`
-- `columns`
+- `delete_handler`
 
-列类型只允许:
+其中：
 
-- `text`
-- `number`
-- `int`
-- `bool`
-- `select`
+- `render="toolbar"`：编辑/删除默认出现在表头 toolbar
+- `render="row_actions"`：编辑/删除默认适配到 actions 列，新增默认仍可保留在 toolbar
+- `toolbar.create/update/delete`：按动作粒度覆盖 toolbar 放置，未声明时沿用默认放置策略
+- `form.create_columns/update_columns`：只声明要进入表单的字段，不需要把所有列都放进去
+- 非必填字段留空时会把 `None` 传给 hook，是否“清空字段”还是“保持原值”由 hook 自己决定
 
-额外硬约束:
+## 页面动作
 
-- `dataset` 必须和 `view_id` 完全一致
-- `view_id`、`dataset`、handler 名都必须是 `snake_case`
-- `select` 列必须提供非空 `options`
-- `options` 只能给 `select` 列使用
-- `lock_key` 只用于 Core 管理的临时锁；它会让宿主按 KV 锁状态追加一列通用“占用中”，并在删除/改主键时做锁保护
-- 如果模块已经自己维护 `occupied` / `occupied_label` 这类业务占用字段，就不要再声明 `lock_key`
-- 当前 Core 已显式拒绝“`lock_key` + 业务占用列”同时声明；`crawler4j check full` 也会提前报错
+当前正式动作只有两类：
 
-## 新手最容易误会的点
+- `reload`
+- `open_page`
 
-- `data-table create` 会注册入口并生成一个最小 helper，但 schema 细节仍要你自己改
-- schema 必须通过 `ui.declare_data_table` 声明，不能自己写到别的文件里
-- `dataset` 必须和 `view_id` 一致
-- `lock_key` 不是“业务占用中”开关，它表示 Core 的临时锁键
-- 当前本地数据表 hook 是同步调用链路，写成 `async def` 会直接失败
+表格行跳转示例：
 
-想继续调试，接着看 [调试模块](debugging.md)。
+```python
+{
+    "type": "DataTable",
+    "table_id": "accounts",
+    "columns": [...],
+    "data_source": {"type": "binding", "binding": "rows"},
+    "row_action": {
+        "type": "open_page",
+        "page_id": "account_detail",
+        "params": {
+            "account_id": {"binding": "account_id"},
+        },
+    },
+}
+```
+
+目标页会通过 `load_handler(context, page_id, params=None)` 收到这些参数。
+
+## 推荐落点
+
+| 需求 | 推荐做法 |
+|---|---|
+| Dashboard、概览页 | `Page + Card + Text + Button + DataTable` |
+| 快照列表 | `ctx.db.from_("resource_id")` + `binding` |
+| 统计查询 | `ctx.db.from_("custom_table").group_by(...).sum(...)` + `query_handler` |
+| 明细实体表 | `module.yaml.data.resources[]` + `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` |
+| 固定 SQL | `ctx.db.named("query_id").bind(...).execute()` |
+
+## 职责分工
+
+宿主负责：
+
+- schema 校验
+- 页面路由
+- 页面刷新
+- 统一渲染 `Page / Card / Section / Text / Button / DataTable`
+- 搜索、排序、分页交互分发
+
+模块负责：
+
+- `PAGE.schema`
+- `load_handler`
+- `query_handler`
+- 页面业务动作
+- `module.yaml.data` / `data/sql` / `data/seeds` 的声明与维护
+- 通过 `ctx.db` 读取和写入已注册模块数据
+
+## `check full` 会校验什么
+
+- `ui_extension.pages[]` 是否有效
+- `ui_extension.pages[]` 中的菜单页面是否存在对应页面文件
+- 每个页面文件是否导出合法且唯一的 `PAGE.id`
+- `PAGE.schema` 顶层是否是 `Page`
+- `load_handler` 是否存在且签名兼容
+- `query_handler` 是否存在且签名兼容
+
+如果页面显示不对，优先查 `pages/*.py`、`pages/<group>/*.py`，不要回退去找已经删除的旧 UI 壳。

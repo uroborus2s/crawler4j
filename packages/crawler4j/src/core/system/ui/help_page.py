@@ -10,7 +10,6 @@ from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices, QImage, QTextCharFormat, QTextCursor, QTextDocument
 from PyQt6.QtWidgets import (
     QHBoxLayout,
-    QPushButton,
     QTextBrowser,
     QTreeWidget,
     QTreeWidgetItem,
@@ -18,6 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.ui.components.button import StyledButton
 from src.utils.paths import get_docs_root
 
 
@@ -184,20 +184,17 @@ class HelpPage(QWidget):
         header.setSpacing(8)
         header.addStretch()
 
-        self.back_btn = QPushButton("← 后退")
-        self.back_btn.setStyleSheet(self._button_style())
+        self.back_btn = StyledButton("← 后退", variant="secondary", min_height=36, min_width=92)
         self.back_btn.clicked.connect(self._go_back)
         self.back_btn.setEnabled(False)
         header.addWidget(self.back_btn)
 
-        self.forward_btn = QPushButton("→ 前进")
-        self.forward_btn.setStyleSheet(self._button_style())
+        self.forward_btn = StyledButton("→ 前进", variant="secondary", min_height=36, min_width=92)
         self.forward_btn.clicked.connect(self._go_forward)
         self.forward_btn.setEnabled(False)
         header.addWidget(self.forward_btn)
 
-        self.home_btn = QPushButton("⌂ 首页")
-        self.home_btn.setStyleSheet(self._button_style())
+        self.home_btn = StyledButton("⌂ 首页", variant="secondary", min_height=36, min_width=92)
         self.home_btn.clicked.connect(self._go_home)
         header.addWidget(self.home_btn)
 
@@ -408,27 +405,6 @@ class HelpPage(QWidget):
             format_update.setForeground(QColor(self.LINK_COLOR))
             format_update.setFontUnderline(True)
             cursor.mergeCharFormat(format_update)
-
-    @staticmethod
-    def _button_style() -> str:
-        return """
-            QPushButton {
-                background: rgba(99, 102, 241, 0.16);
-                color: white;
-                border: 1px solid rgba(99, 102, 241, 0.4);
-                border-radius: 8px;
-                padding: 8px 14px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background: rgba(99, 102, 241, 0.24);
-            }
-            QPushButton:disabled {
-                color: rgba(255, 255, 255, 0.35);
-                border-color: rgba(255, 255, 255, 0.12);
-                background: rgba(255, 255, 255, 0.04);
-            }
-        """
 
     @staticmethod
     def _browser_widget_style() -> str:

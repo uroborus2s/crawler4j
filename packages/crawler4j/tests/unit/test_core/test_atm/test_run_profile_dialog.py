@@ -1,6 +1,5 @@
 import re
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 from PyQt6.QtWidgets import QDialog
@@ -15,10 +14,15 @@ from src.core.atm.run_profile import (
     ResourceConfig,
     RunProfile,
 )
+from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox
+from src.ui.components.text_edit import StyledPlainTextEdit
+from src.ui.components.yaml_code_editor import YamlCodeEditor
 
 
 def _patch_dialog_dependencies(monkeypatch):
     import src.core.atm.ui.run_profile_dialog as dialog_module
+    import src.core.atm.controller as controller_module
 
     module = SimpleNamespace(
         name="demo_module",
@@ -26,7 +30,10 @@ def _patch_dialog_dependencies(monkeypatch):
             workflows=[
                 SimpleNamespace(name="repair", display_name="修复流程"),
                 SimpleNamespace(name="collect", display_name=""),
-            ]
+            ],
+            resource_pools=[
+                SimpleNamespace(name="bound_account_ready", display_name="已绑定账号环境池"),
+            ],
         ),
     )
     registry = SimpleNamespace(
@@ -42,10 +49,8 @@ def _patch_dialog_dependencies(monkeypatch):
         "get_ip_pool_manager",
         lambda: SimpleNamespace(list_pools=lambda: [pool]),
     )
-    monkeypatch.setattr(
-        dialog_module,
-        "get_module_service",
-        lambda: SimpleNamespace(
+    def module_service():
+        return SimpleNamespace(
             list_env_selectors=lambda module_name: [
                 SimpleNamespace(
                     name="return_none",
@@ -62,19 +67,24 @@ def _patch_dialog_dependencies(monkeypatch):
             ]
             if module_name == "demo_module"
             else []
-        ),
-    )
+        )
+    monkeypatch.setattr(dialog_module, "get_module_service", module_service)
+    monkeypatch.setattr(controller_module, "get_module_service", module_service)
 
 
 def _patch_ctrip_dialog_dependencies(monkeypatch):
     import src.core.atm.ui.run_profile_dialog as dialog_module
+    import src.core.atm.controller as controller_module
 
     module = SimpleNamespace(
         name="ctrip_crawler",
         manifest=SimpleNamespace(
             workflows=[
                 SimpleNamespace(name="web_quiz_workflow", display_name="网页做题"),
-            ]
+            ],
+            resource_pools=[
+                SimpleNamespace(name="bound_account_ready", display_name="已绑定账号环境池"),
+            ],
         ),
     )
     registry = SimpleNamespace(
@@ -90,10 +100,8 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
         "get_ip_pool_manager",
         lambda: SimpleNamespace(list_pools=lambda: [pool]),
     )
-    monkeypatch.setattr(
-        dialog_module,
-        "get_module_service",
-        lambda: SimpleNamespace(
+    def module_service():
+        return SimpleNamespace(
             list_env_selectors=lambda module_name: [
                 SimpleNamespace(
                     name="reuse_bound_account_env",
@@ -104,8 +112,9 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
             ]
             if module_name == "ctrip_crawler"
             else []
-        ),
-    )
+        )
+    monkeypatch.setattr(dialog_module, "get_module_service", module_service)
+    monkeypatch.setattr(controller_module, "get_module_service", module_service)
 
 
 def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
@@ -176,6 +185,7 @@ def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
         "vendor": "Google Inc. (Intel Inc.)",
         "render": "ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics OpenGL Engine (1x6x8 (fused) LP, OpenGL 4.1)",
     }
+
     assert virtualbrowser["media"] == {"mode": 1}
     assert virtualbrowser["ua-language"] == {
         "mode": 1,
@@ -203,6 +213,18 @@ def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
     assert profile.execution is not None
     assert profile.execution.module == "demo_module"
     assert profile.execution.workflow == "repair"
+
+
+def test_run_profile_dialog_yaml_tab_uses_shared_yaml_editor(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog.yaml_editor, YamlCodeEditor)
+    assert dialog.yaml_editor.styleSheet() == ""
 
 
 def test_run_profile_dialog_removes_creation_lifecycle_control(qtbot, monkeypatch):
@@ -281,6 +303,26 @@ def test_run_profile_dialog_builds_select_mode_profile(qtbot, monkeypatch):
     assert profile.resource.acquisition.wait_timeout == 60
 
 
+def test_run_profile_dialog_separates_execution_timeout_from_wait_timeout(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("demo_module", "collect")
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("random_ready"))
+    dialog.wait_timeout_spin.setValue(30)
+    dialog.execution_timeout_spin.setValue(0)
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.resource.acquisition.wait_timeout == 30
+    assert profile.execution.timeout == 0
+
+
 def test_run_profile_dialog_builds_fixed_pool_select_profile_without_selector(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
@@ -292,7 +334,7 @@ def test_run_profile_dialog_builds_fixed_pool_select_profile_without_selector(qt
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
     dialog.selector_name_combo.setCurrentIndex(-1)
-    dialog.resource_pool_edit.setText("bound_account_ready")
+    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("bound_account_ready"))
 
     profile = dialog._build_run_profile_from_form()
 
@@ -300,6 +342,23 @@ def test_run_profile_dialog_builds_fixed_pool_select_profile_without_selector(qt
     assert profile.resource.acquisition.selector_name == ""
     assert profile.resource.acquisition.resource_pool == "bound_account_ready"
     assert profile.resource.acquisition.provider == ""
+
+
+def test_run_profile_dialog_lists_declared_resource_pools(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("demo_module", "collect")
+
+    assert dialog.resource_pool_combo.isEnabled() is True
+    assert dialog.resource_pool_combo.findData("") >= 0
+    pool_index = dialog.resource_pool_combo.findData("bound_account_ready")
+    assert pool_index >= 0
+    assert dialog.resource_pool_combo.itemText(pool_index) == "已绑定账号环境池 (bound_account_ready)"
 
 
 def test_run_profile_dialog_warns_when_selector_returns_none(qtbot, monkeypatch):
@@ -318,7 +377,7 @@ def test_run_profile_dialog_warns_when_selector_returns_none(qtbot, monkeypatch)
     assert "返回了 none" in dialog.selector_none_hint.text()
 
 
-def test_run_profile_dialog_autofills_required_pool_for_ctrip_reuse_selector(qtbot, monkeypatch):
+def test_run_profile_dialog_does_not_autofill_pool_for_returns_none_selector(qtbot, monkeypatch):
     _patch_ctrip_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -332,11 +391,12 @@ def test_run_profile_dialog_autofills_required_pool_for_ctrip_reuse_selector(qtb
 
     profile = dialog._build_run_profile_from_form()
 
-    assert dialog.resource_pool_edit.text() == "bound_account_ready"
-    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
+    assert dialog.selector_none_hint.isHidden() is False
+    assert dialog.resource_pool_combo.currentData() == ""
+    assert profile.resource.acquisition.resource_pool == ""
 
 
-def test_run_profile_dialog_requires_bound_pool_for_ctrip_reuse_selector(qtbot, monkeypatch):
+def test_run_profile_dialog_keeps_manual_pool_for_returns_none_selector(qtbot, monkeypatch):
     _patch_ctrip_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -347,9 +407,28 @@ def test_run_profile_dialog_requires_bound_pool_for_ctrip_reuse_selector(qtbot, 
     dialog.script_selector.set_value("ctrip_crawler", "web_quiz_workflow")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
     dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("reuse_bound_account_env"))
-    dialog.resource_pool_edit.clear()
+    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("bound_account_ready"))
 
-    with pytest.raises(ValueError, match="bound_account_ready"):
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
+
+
+def test_run_profile_dialog_rejects_undeclared_resource_pool(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("demo_module", "collect")
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.selector_name_combo.setCurrentIndex(-1)
+    dialog.resource_pool_combo.addItem("missing_pool", "missing_pool")
+    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("missing_pool"))
+
+    with pytest.raises(ValueError, match="未在 module.yaml.resource_pools 中声明"):
         dialog._build_run_profile_from_form()
 
 
@@ -416,6 +495,27 @@ def test_run_profile_dialog_toggle_switch_click_updates_state(qtbot, monkeypatch
 
     assert dialog.dnt_check.isChecked() is True
     assert dialog.hardware_accel_check.isChecked() is False
+
+
+def test_run_profile_dialog_uses_public_buttons_and_inputs(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog.form_btn, StyledButton)
+    assert isinstance(dialog.yaml_btn, StyledButton)
+    assert isinstance(dialog.ua_default_btn, StyledButton)
+    assert isinstance(dialog.ua_custom_btn, StyledButton)
+    assert isinstance(dialog.ua_random_btn, StyledButton)
+    assert isinstance(dialog.ua_value_edit, StyledPlainTextEdit)
+    assert isinstance(dialog.launch_args_edit, StyledPlainTextEdit)
+    assert isinstance(dialog.language_follow_ip_check, StyledCheckBox)
+    assert isinstance(dialog.timezone_follow_ip_check, StyledCheckBox)
+    assert isinstance(dialog.location_follow_ip_check, StyledCheckBox)
+    assert isinstance(dialog.randomize_fingerprint_check, StyledCheckBox)
 
 
 def test_run_profile_dialog_defaults_new_create_mode_to_random_fingerprint(qtbot, monkeypatch):
@@ -675,18 +775,25 @@ def test_run_profile_dialog_uses_60_percent_screen_width(qtbot, monkeypatch):
 def test_run_profile_dialog_keeps_dialog_open_when_yaml_is_invalid_on_save(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
+    import src.core.atm.ui.run_profile_dialog as dialog_module
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
 
     dialog = RunProfileDialog()
     qtbot.addWidget(dialog)
     dialog.stack.setCurrentIndex(1)
     dialog.yaml_editor.setPlainText("resource: [")
+    captured: list[tuple[object, str, str]] = []
 
-    with patch("PyQt6.QtWidgets.QMessageBox.warning") as warning:
-        dialog._on_save()
+    monkeypatch.setattr(
+        dialog_module.MessageDialog,
+        "warning",
+        lambda parent, title, message, **kwargs: captured.append((parent, title, message)),
+    )
 
-    warning.assert_called_once()
-    assert warning.call_args.args[0] is dialog
-    assert warning.call_args.args[1] == "YAML 无效"
+    dialog._on_save()
+
+    assert len(captured) == 1
+    assert captured[0][0] is dialog
+    assert captured[0][1] == "YAML 无效"
     assert dialog.result() != int(QDialog.DialogCode.Accepted)
     assert dialog.stack.currentIndex() == 1

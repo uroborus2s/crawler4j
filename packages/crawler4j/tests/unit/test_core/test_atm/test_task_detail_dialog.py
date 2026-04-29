@@ -12,6 +12,8 @@ from src.core.atm.run_profile import (
     ResourceConfig,
     RunProfile,
 )
+from src.ui.components.button import StyledButton
+from src.ui.components.text_edit import StyledTextEdit
 
 
 def _build_job() -> Job:
@@ -57,6 +59,21 @@ def test_task_confirmation_dialog_renders_structured_payload(qtbot):
     assert dialog.details_table.item(0, 1).text() == "demo-account"
     assert dialog.confirm_btn.text() == "确认放行"
     assert dialog.reject_btn.text() == "确认拦截"
+    assert isinstance(dialog.confirm_btn, StyledButton)
+    assert isinstance(dialog.reject_btn, StyledButton)
+    assert isinstance(dialog.message_edit, StyledTextEdit)
+
+
+def test_job_detail_dialog_uses_public_detail_controls(qtbot, monkeypatch):
+    import src.core.atm.ui.task_detail_dialog as dialog_module
+
+    monkeypatch.setattr(dialog_module.JobDetailDialog, "_load_data", lambda self: None)
+
+    dialog = dialog_module.JobDetailDialog("job-1")
+    qtbot.addWidget(dialog)
+
+    assert isinstance(dialog.debug_btn, StyledButton)
+    assert isinstance(dialog.config_text, StyledTextEdit)
 
 
 @pytest.mark.asyncio
@@ -205,7 +222,7 @@ async def test_job_detail_dialog_shows_timeout_reason_instead_of_waiting_message
 
     await dialog._load_data_async()
 
-    assert dialog.task_table.item(0, 6).text() == "等待环境池工位超时: bound_account_ready (30s)"
+    assert dialog.task_table.displayed_rows()[0]["result"] == "等待环境池工位超时: bound_account_ready (30s)"
 
 
 def test_job_detail_dialog_refreshes_on_task_failed_event(qtbot, monkeypatch):

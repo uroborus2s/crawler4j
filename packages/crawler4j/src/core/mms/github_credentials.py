@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import base64
 import hmac
-import json
 import os
 from pathlib import Path
 
-from src.core.persistence import get_config_store
 from src.utils import paths
 
 
-TOKEN_SETTING_PREFIX = "mms.github.repo_token."
+TOKEN_NAMESPACE = "mms.github"
+TOKEN_KEY_PREFIX = "repo_token."
 SECRET_DIRNAME = ".secrets"
 MASTER_KEY_FILENAME = "github_repo_tokens.key"
 MASTER_KEY_SIZE = 32
@@ -29,25 +28,27 @@ class GitHubCredentialStore:
     """按 GitHub repo 保存加密 token。"""
 
     def __init__(self) -> None:
-        self._config_store = get_config_store()
+        from src.core.system.config_center import get_config_center
+
+        self._config_center = get_config_center()
 
     def has_token(self, repo: str) -> bool:
-        return self._config_store.get_setting(self._setting_key(repo)) is not None
+        return self._config_center.get_internal(TOKEN_NAMESPACE, self._setting_key(repo)) is not None
 
     def get_token(self, repo: str) -> str | None:
-        raw = self._config_store.get_setting(self._setting_key(repo))
-        if raw is None:
+        payload = self._config_center.get_internal(TOKEN_NAMESPACE, self._setting_key(repo))
+        if payload is None:
             return None
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-            raise ValueError(f"仓库 {repo} 的 GitHub Token 存储已损坏，请重新配置") from exc
         if not isinstance(payload, dict):
             raise ValueError(f"仓库 {repo} 的 GitHub Token 存储已损坏，请重新配置")
         ciphertext = str(payload.get("ciphertext", "") or "").strip()
         if not ciphertext:
             raise ValueError(f"仓库 {repo} 的 GitHub Token 存储已损坏，请重新配置")
         return self._decrypt_token(ciphertext, repo)
+
+    # Compatibility aliases for older UI/tests that still speak in repo-token terms.
+    def get_repo_token(self, repo: str) -> str | None:
+        return self.get_token(repo)
 
     def set_token(self, repo: str, token: str) -> None:
         repo = str(repo or "").strip()
@@ -60,17 +61,20 @@ class GitHubCredentialStore:
             "version": PAYLOAD_VERSION,
             "ciphertext": self._encrypt_token(token),
         }
-        self._config_store.set_setting(
-            self._setting_key(repo),
-            json.dumps(payload, ensure_ascii=False),
-        )
+        self._config_center.set_internal(TOKEN_NAMESPACE, self._setting_key(repo), payload)
+
+    def set_repo_token(self, repo: str, token: str) -> None:
+        self.set_token(repo, token)
 
     def clear_token(self, repo: str) -> bool:
-        return self._config_store.delete_setting(self._setting_key(repo))
+        return self._config_center.delete_internal(TOKEN_NAMESPACE, self._setting_key(repo))
+
+    def remove_repo_token(self, repo: str) -> bool:
+        return self.clear_token(repo)
 
     @staticmethod
     def _setting_key(repo: str) -> str:
-        return TOKEN_SETTING_PREFIX + str(repo or "").strip().replace("/", "__")
+        return TOKEN_KEY_PREFIX + str(repo or "").strip().replace("/", "__")
 
     def _encrypt_token(self, token: str) -> str:
         plaintext = token.encode("utf-8")

@@ -6,8 +6,8 @@
 **主要读者：** Tech Lead | 开发 | QA | 发布负责人
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
-**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `CR-004`, `CR-005`, `CR-008`, `BUG-013`
-**最后更新：** 2026-04-22
+**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `API-010`, `BUG-013`
+**最后更新：** 2026-04-26
 
 ## 1. 用途与记录规则
 
@@ -38,9 +38,43 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-04-22 | 收口桌面应用图标终稿：将经确认的 AI 终稿做工程化清理后正式入包，去除了编辑控制点、保留“暖灰白底板 + 蓝色主徽记 + 放大镜轮廓 + 4j 主字标”的浅色品牌母版，并重新生成运行时 `app_icon.png` / macOS bundle `app_icon.icns`；同时把图标回归测试收口到“透明圆角 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言，避免 Dock 再出现黑边、融底或误带编辑痕迹的问题 | Codex |
+| 2026-04-26 | 继续优化模块配置 YAML 可读性：修正 PyYAML 默认 indentless sequence 导致数组显示为父级同列的问题，保存/展示时统一输出为父 key 下缩进的 `- item`；`YamlCodeEditor.setPlainText()` 也会兜底规范化旧的 `key:\n- item` 文本；编辑器字号提升到 15pt，并增加额外行高。定向回归 `21 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 收口模块详情页滚动条与 YAML 编辑器视觉：`YamlCodeEditor` 隐藏横向/纵向滚动条，折叠样式从树状连线改为 plain fold，并弱化缩进参考线；模块详情页左侧菜单、任务链页面、Hosted 页面滚动区和 `SkyDataTable` 也统一隐藏滚动条但保留滚轮/触控板滚动。定向回归 `22 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 跟进资源池声明契约调整客户端交互：ATM 运行模板里的“资源池”由手动文本输入改为下拉选择，选项直接来自当前模块 `module.yaml.resource_pools[]`；未声明资源池时控件禁用，有声明时保留“不使用资源池”选项并展示声明池显示名与池名，避免用户继续手填旧资源池名称。定向回归 `23 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 模块详情页配置编辑器改为 QScintilla YAML 编辑器：新增公共 `YamlCodeEditor`，提供行号、折叠、YAML lexer、错误行标记；新增独立 YAML 验证层，保存前统一校验 YAML 语法、顶层映射对象与重复键，并支持标准 YAML flow mapping 输入后规范化回块格式。定向回归 `28 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 收口固定环境池名称事实源：`ModuleManifest` 新增 `resource_pools[]`，MMS 扫描时校验命名与去重；宿主加载模块运行时时把声明池注入 `ctx.runtime["declared_resource_pools"]`，模块运行时代码可从运行时池名或单一声明池解析 `pool_name`；ATM 运行模板表单和 Job 启动前校验都会阻止引用未声明资源池。定向回归 `106 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-26 | 调整“从已有环境导入”执行模型：导入弹窗不再按环境自动新建一次性 Job，而是要求选择已配置的“执行一次”批次任务；可一次选择多个未同步环境，每个环境作为同一 Job 下的 Task 运行，实际并发窗口数由该 Job 的 `concurrency_target` 限制，剩余环境在后台排队补位。定向回归 `29 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-25 | 优化公共消息弹窗与公共组件使用：`MessageDialog` 放弃自绘假标题栏，改为对齐“安装模块”面板的原生窗口壳、深色内容区和右下角动作按钮；`StyledButton` 新增 `success` 状态；安装模块弹窗的输入框、浏览/取消/开始检查按钮与校验提示改用公共组件。同步审查 UI 弹窗用法后，已把 ATM/MMS/REM/System 中简单同步提示和确认从 `QMessageBox` 收口到 `MessageDialog` / `ConfirmDialog`。剩余 `QMessageBox` 为环境/模块列表异步 `open()` 流程和任务中止三按钮流程，后续需补公共异步/多动作弹窗能力再迁移 | Codex |
+| 2026-04-25 | 收口 IP 测试弹窗公共组件与无关表初始化：新增公共 `MessageDialog` 深色消息弹窗，`IPPoolTab` 的测试结果、普通提示和删除确认改用公共 `MessageDialog` / `ConfirmDialog`，不再直接使用局部 `QMessageBox`；`IPPoolManager` 不再持久化 `env_ip_bindings`，绑定/解绑只直接增减 `ip_entries.bound_count`；`init_database()` 不再创建遗留 `configs` 表。已有用户库中的旧表通过显式 SQL 清理，不写入启动迁移代码 | Codex |
+| 2026-04-25 | 运行环境列表补齐 `env_metadata` 可用状态展示：列表加载时合并每个环境的元数据，按 `scheduler.resource_pool` 资格卡片聚合展示 `可用 / 部分可用 / 不可用 / 未标记`，并在 tooltip/search 文本中保留模块、资源池和停发原因；IP 池条目测试结果弹窗改为显式深色背景，避免 macOS 默认浅色消息框导致测试结果低对比。定向回归 `20 passed` | Codex |
+| 2026-04-25 | 删除“从已有环境导入”的 provider 扩展字段：REM 环境表、`Environment` 模型与运行参数不再保留 provider 扩展元数据；未同步列表、重复导入复用与状态库唯一索引均改为按 `(provider, name)` 判断，来源名称不存在即视为未同步。定向组合回归 `38 passed`，REM 单测目录回归 `111 passed` | Codex |
+| 2026-04-24 | 修复 IP 池条目编辑“保存后重启恢复旧值”缺陷：根因是 `IPPoolManager._persist_entry()` 的 `ip_entries` upsert 只更新 `bound_count/safety_score/expires_at`，没有回写 `address/protocol/port/username/password/pool_id`；因此编辑后当前进程内因为直接修改了内存对象看起来已生效，但应用重启重新从 `state.db` 加载时仍读回旧记录。当前已补齐这些字段的 upsert 回写，并新增 `test_ip_pool.py` 锁定“编辑后重载数据库仍保留新代理字段”回归 | Codex |
+| 2026-04-24 | 修正 Hosted UI 页面注册与左侧菜单协议：`pages/` 现在是可路由页面注册表，`module.yaml.ui_extension.pages[]` 只控制左侧菜单；SDK `check full` 不再拒绝未写入菜单的合法页面文件，`page create --no-menu` 可创建详情页/二级页，模块详情页 `open_page` 可跳转到非菜单页面并复用参数刷新。定向回归已覆盖 SDK full 校验、CLI `--no-menu`、integration check 以及模块详情页 row action 跳转 | Codex |
+| 2026-04-24 | 继续收口“从已有环境导入”弹窗的风险提示：warning 区域现已改为单层提示卡，内层文字显式固定为 `background: transparent; border: none; padding: 0;`，不再出现额外内圈；同时将 warning 文案收敛为“未标注支持已有环境导入，请由配置者自行判断是否适合这个场景”。当前定向回归 `test_import_existing_env_dialog.py` 通过，且本地 Qt 直出截图 `/tmp/import-existing-env-dialog-fix-v2.png` 已确认无内圈、文案为新版本 | Codex |
+| 2026-04-24 | 修复桌面宿主入口与关闭阶段竞态：`src.ui.app` 不再在模块加载期提前拉起 debug worker/debugpy adapter/Shell 的深依赖，而是改为运行时懒加载，解除打包态启动早期的循环导入退出；同时主窗口显示后不再恢复 `quitOnLastWindowClosed`，改由 `lastWindowClosed` 驱动 `_run_application()` 的异步收尾，避免窗口关闭时 `qasync` 事件循环先停、`run_until_complete()` 抛出 `Event loop stopped before Future completed`。定向回归 `test_app.py` 为 `6 passed`，目标文件 `ruff check` 通过，重新打出的 macOS `.app` 已能越过原先的启动即退阶段 | Codex |
+| 2026-04-24 | 完成全局环境页“从已有环境导入”链路：`VirtualBrowser` 现可拉取“来源有、本地无”的未同步环境并导入；环境列表页新增 `从已有环境导入` 配置面板，用户可选择 `环境来源 / 目标模块 / 模块工作流 / 未同步环境` 后执行 `导入并执行`；ATM 复用固定 `env_id` 执行链路，模块在 `ctx.env_id`、`ctx.page` 与 `ctx.runtime.creation_params` 中收到来源标记与 `import_mode="existing_env"`。定向回归 `120 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-24 | 修复桌面打包遗留问题：删除 `packages/crawler4j/crawler4j.spec` 中已被清理的 `src/ui/styles/dark_theme.qss` data 引用，避免 Windows `package-windows-release` 在 PyInstaller data append 阶段因找不到旧资源而失败；同时补强 `test_packaging_config.py` 锁定 spec 不再引用已删除的 UI 样式目录，并把 README / release 文档 / `.factory` 版本事实源统一更新到 `crawler4j 0.3.1`、最近正式 tag `v0.2.0`。定向回归 `71 passed`，root build 产出 `crawler4j-0.3.1` wheel/sdist，`uv run package-desktop` 本机复验通过 | Codex |
+| 2026-04-24 | 按反馈继续收口桌面图标中心主组：在保持外底板 inset `(97, 96, 97, 96)` 不变的前提下，把圆形镜面保持在白底板几何正中，并将手柄从“短尾巴”延长到更接近右下边缘的安全区，但仍保留明显留白，不贴边、不越界；镜面继续保持约占底板宽度的 `80%`。对应图标回归继续锁定蓝色主徽记 bbox `(210, 210, 815, 815)`、左右上下 margin 仅允许 `1px` 误差，以及整组 focus bbox `(210, 210, 846, 850)`，`test_icon_packaging.py` 定向回归 `6 passed`、目标文件 `ruff check` 通过 | Codex |
+| 2026-04-23 | 完成代码洁净性专项审查第三轮收口：4 个审查子 agent 与主线程复核确认 `crawler4j-sdk/src/hosted_ui.py` 属于真实阻塞级重复实现，现已改为 `crawler4j_contracts.hosted_ui` 的兼容薄 re-export，并新增 `test_hosted_ui_reexport.py` 锁定 SDK/Contracts 同源实现；同时删除 `src/core/system/update_service.py` 中未被消费的 `UpdateInfo` 占位 dataclass，并清理 ATM 相关测试里对 `normalize_db_view_schema` 的过时兼容垫片。定向回归 `47 passed + 17 passed`，目标文件 `ruff check` 通过；旧安装目录迁移回滚、repo-token 旧命名别名、workflow 旧字段与默认工作流 fallback 作为兼容/契约面问题暂不在本轮删除 | Codex |
+| 2026-04-23 | 完成 UI 模块专项审阅收口：Hosted UI 运行时进一步硬化为“纯 UI 边界”，`declare_ui` / page / query handler 不再允许通过宿主能力做数据写入，`ManagedPageRenderer.refresh()` 改为只消费本轮 `declare_ui()` 的内存声明缓存，不再依赖 `module_pages` 持久化 schema；同时 SDK `check full` / `package build` / `package verify` / `page create` 现统一拒绝 legacy `ui/`、`config_schema.json`、`strategy.yaml` 与旧 `ui_extension` 字段。定向回归 `119 passed` | Codex |
+| 2026-04-23 | 完成 `TASK-028` / `CR-014`：宿主新增 `module_db_views` 作为数据库视图事实源，运行时提供 `db.declare_db_view` / `db.query_view`，Hosted UI `core:data_table` 新增 `data_source_kind="db_view"` 只读统计表模式并支持过滤、排序、分页；模块卸载提示会列出待删除的数据库视图。V1 当前正式支持 `sql_view`，相关定向回归 `122 passed`、目标文件 `ruff check` 通过 | Codex |
+| 2026-04-23 | 完成 `TASK-026` / `CR-012` 纠偏收口：新增 `module_data_resources` 统一登记 `managed_dataset/custom_table`，把 `module_datasets` 升级为支持 `record_key` / `run_status` / `record_status` 的 V3 结构，并把 `custom_table` 从泛型 `record_json` 容器修正为 `schema_version/schema_json/indexes_json` 驱动的受控实体表；`db.declare_data_resource`、`ui.declare_data_table` 与 `core:data_table` 已按资源模式读写托管 dataset 或受控实体表，模块卸载时会给出显著的数据清理提示；相关 unit/integration/acceptance 组合回归 `157 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-04-23 | 完成 `TASK-027` / `CR-013` 最终收口：Hosted UI 新增 `open_page.params`、表格 `row_action`、模块详情页缓存页参数替换，以及目标 `core:data_table` 的 `navigation_filters`；默认 CRUD 在过滤详情表下已改为对底层全量资源做定点写回，`row_action` 无 `params` 不再透传整行，同时保留显式 `data_resource` metadata 与 omitted `resource_id` alias 路由兼容；最终定向回归 `122 passed`、目标文件 `ruff check` 通过，测试团队结论 `PASS`、审查团队结论 `no blocking findings` | Codex |
+| 2026-04-23 | 继续按根因微调 Dock 图标外轮廓：在保持蓝色主徽记 bbox `(284, 258, 741, 715)` 不变的前提下，仅把参数化生成链的外白底板再收 1px；当前运行时回归锁定到底板 inset `(97, 96, 97, 96)`，避免再次把内层主徽记误当成“偏大”根因 | Codex |
+| 2026-04-23 | 继续按根因修正 Dock 光学尺寸：保留参数化“白底板 + 放大镜主徽记”两层生成链，只进一步缩小真正偏大的外白底板；当前运行时回归改为锁定到底板 inset `(96, 95, 96, 95)`，蓝色主徽记 bbox 保持 `(284, 258, 741, 715)` 不变 | Codex |
+| 2026-04-23 | 收口宿主表格默认“序号列”语义：`SkyDataTable` 已隐藏 Qt 垂直表头，避免把系统行头误显示成业务序号；同时为 `TaskListWidget` 与 `ModuleListWidget` 显式增加 `__index__` 列，并在 provider 侧按分页结果计算全局序号，确保第 2 页从 `3/4...` 继续递增 | Codex |
+| 2026-04-23 | 继续推进 `CR-015 / TASK-029` 共享表格基座重构：当前仓库正式宿主表格与 hosted page 内联 `DataTable` 已统一切到纯 UI `SkyDataTable`，并进一步删除 hosted UI 内联表格顶层 `binding` / `rows` 兼容写法，强制页面 schema 显式声明 `data_source`，避免新组件边界再次被旧 schema 渗透 | Codex |
+| 2026-04-22 | 继续微调桌面应用图标的壳层占比：将共享图标母版的导出缩放系数从 `0.965` 下调到 `0.964`，统一重建 `app_icon.png` / `app_icon.icns` / `app_icon.ico`，把 macOS Dock 与 Windows 壳层图标再缩小约 1px | Codex |
+| 2026-04-23 | 继续收口 Windows 打包版首窗启动竞态：`src.ui.app:_run_application` 在 `Shell.show()/showMinimized()` 之后不再立刻恢复 `quitOnLastWindowClosed`，而是先让 `qasync` 事件循环过一个 tick 再恢复，避免 Windows 安装态在主窗口完成首轮原生注册前就提前退出；对应启动顺序单测与项目记忆已同步更新 | Codex |
+| 2026-04-22 | 继续收口桌面应用图标的 Dock 外轮廓占比：新增 `app_icon_master.png -> scripts/rebuild_app_icon_assets.py -> app_icon.png/icns/ico` 的可重复生成链，统一把共享图标按固定比例回缩到更保守的安全区，避免 macOS Dock 中的外轮廓继续比浅色系统图标更大；同时修正图标回归测试里右/下 inset 计算口径，锁定四边安全区范围 | Codex |
+| 2026-04-22 | 发布打包目录清理收口：`package-windows-release` 与 `package-macos-internal-release` 现会在真正生成新发布物前先清空各自的 `dist/updates/<platform>/` 目录，避免本地打包或打包后上传继续复用旧 release 产物；对应单测已补齐 Windows/macOS 两条回归 | Codex |
+| 2026-04-22 | 修正 Windows 安装态启动与图标对齐：GUI 入口在异步启动阶段会先禁用 `quitOnLastWindowClosed`，等主窗口显示后再恢复，避免 Windows 打包版在首窗显示前提前停掉事件循环；同时 `package-windows-release` 现在会把 `app_icon.ico` 一并传给 Velopack，确保安装器/快捷方式与 `Crawler4j.exe` 图标一致 | Codex |
+| 2026-04-22 | 补齐 Windows 桌面壳层图标资源：在既有 `app_icon.png` / `app_icon.icns` 之外新增 `app_icon.ico`，并让 PyInstaller 在 macOS 继续绑定 `icns`、在 Windows 改绑 `ico`，避免 Windows `Crawler4j.exe` 继续显示旧图标；同时更新桌面发布说明与图标打包回归测试 | Codex |
+| 2026-04-22 | 完成 hosted UI V1 二轮问题收口：模块详情页对宿主页入口改为 lazy instantiate，避免详情页打开时提前执行未选中页面的 `declare_ui()` / `load_handler`，并在再次选中已有 hosted page 时自动 refresh；`ModuleUIRuntimeBridge` 改为“`declare_ui` session 仅供下一次 non-declare hook 单次消费”，data-table handler 执行前也会先刷新声明会话，并通过 UI 声明 staging buffer + `replace_declared_ui()` 保证 schema 原子替换；SDK `check full` / `package build` / `package verify` 现统一补齐 hosted page / data table handler 契约校验并阻断 legacy `ui/` 目录；相关 unit/integration/acceptance 合并回归 `130 passed`，定向 `ruff check` 通过 | Codex |
+| 2026-04-22 | 继续收口桌面应用图标的 Dock 光学尺寸：先对标本机系统圆角方形图标在 `1024x1024` 画布中的外轮廓占比，再在保持外底板占比不变的前提下单独缩小中心蓝色徽章与放大镜组，避免在 Dock 中比系统常见应用图标显得更大；同时把图标回归测试补成“透明圆角 + 中轴安全区 + 浅色暖灰底板 + 蓝色主徽记 + 中心主标”断言 | Codex |
 | 2026-04-21 | 对齐 VirtualBrowser `addBrowser` 官方代理口径：创建环境时把代理 `protocol` 统一转成大写 `HTTP/HTTPS/SOCKS5`，并在 `addBrowser` 返回非 2xx 或 `success=false` 时把状态码与响应正文透传到宿主日志和异常消息，便于继续定位代理/IP 池创建失败；同步补充 REM 单测锁定协议归一化与 `500` 正文回传 | Codex |
-| 2026-04-18 | 完成 `TASK-022` / `CR-008`：为模块新增 `module_audit_events`、`db.append_event`、`db.query_events`，并把快照数据与审计事件契约同步到正式文档、测试计划与 `.factory/memory/` | Codex |
+| 2026-04-26 | 统一任务启动进度处理：新增 Shell 级 `TaskProgressPresenter` 订阅 `TASK_PROGRESS` / `TASK_STARTED` / 终态事件，ATM 手动执行、REM 已有环境导入和导入队列均通过同一全局任务进度弹窗展示；环境页不再轮询导入 task 的 `PENDING -> RUNNING`，后台排队环境也会发布统一排队进度。聚焦回归 `59 passed`，ATM/REM/UI 宽回归 `351 passed`，全量 `747 passed`，`ruff check .` 通过 | Codex |
+| 2026-04-18 | 完成 `TASK-022` / `CR-008`：为模块新增 `module_audit_events`，后续收口为 `ctx.db.audit(...).append/query`，并把快照数据与审计事件契约同步到正式文档、测试计划与 `.factory/memory/` | Codex |
 | 2026-04-02 | 新增正式执行记录页并登记 Wave 11 文档治理整改结果 | Codex |
 | 2026-04-15 | 修复 VirtualBrowser 创建后 CDP 连接过早失败；补 REM post-create connect 语义与单测 | Codex |
 | 2026-04-15 | 收敛 REM 手动创建环境边界；移除 post-create workflow 配置并改为创建后保持 RUNNING | Codex |
@@ -70,6 +104,10 @@
 | 2026-04-16 | 完成 `TASK-021` / `CR-004`：为 `TaskSignal.wait_for_confirmation` 增加任务 signal 持久化、`task.signal` 事件和 ATM 详情页结构化确认面板，客户端可按 `payload.confirmation` 展示字段并调用既有确认服务完成任务收尾 | Codex |
 | 2026-04-16 | 调整模块自定义数据列表横向滚动表现：隐藏底部横向滚动条，但保留触控板/滚轮横向滑动能力，并补 `ModuleDataTablePage` 回归断言锁定滚动策略 | Codex |
 | 2026-04-16 | 完成 `BUG-013` / `CR-005`：`ModuleAssembler` 发现 `tasks/` / `workflows/` import 失败时改为输出异常上下文与 traceback，并在命中失败条目时向运行时回传 discovery hint；ATM 普通执行 `DevLink` 模块时也会显式开启一次性 reload，无需重启主客户端即可吃到最新源码 | Codex |
+| 2026-04-24 | 收口 Windows 打包态 `qasync` 停环竞态：宿主入口新增 `_ShutdownController`，显式拦截 `QEvent.Type.Quit` 并把真正退出延后到异步清理完成之后；同时补 `Quit`/`lastWindowClosed` 两条 UI 生命周期回归，避免桌面包再次弹出 `Event loop stopped before Future completed` | Codex |
+| 2026-04-24 | 收口共享表格删除确认框配色：`ConfirmDialog` 改为完整深色主题，补齐标题/正文/取消按钮/危险按钮的对象名与样式选择器，避免 macOS 下删除确认面板继续出现黑字/浅底等系统默认配色；同时新增组件级 UI 回归 `test_confirm_dialog.py` | Codex |
+| 2026-04-24 | 为 Hosted UI `Page` 增加页面级滚动配置：`crawler4j_contracts.hosted_ui.normalize_page_schema()` 现支持 `scroll.vertical = auto|hidden`，`ManagedPageRenderer` 会按页面 schema 切换外层 `QScrollArea` 的竖向滚动条策略；同时新增契约回归 `test_hosted_ui_card.py` 与隔离渲染回归 `test_managed_page_scroll.py`，用于收口“今日运营看板”右侧滚动槽 | Codex |
+| 2026-04-24 | 收口模块数据库开发者接口：运行时只向模块暴露 `ctx.db` fluent API，旧 `ctx.tools.call("db.*")` 工具面退出正式协议；同步补齐 managed/custom/view/named query 查询边界、旧调用扫描和定向回归 `159 passed` | Codex |
 
 ## 5. 2026-04-15 缺陷修复记录
 

@@ -1,107 +1,41 @@
-# crawler4j 模块开发者指南
+# 开发者指南
 
-为 `crawler4j` 构建轻量、可调试、可交付的业务模块。
+当前模块开发主线只有一套协议：`core-native-v1`。
 
-`crawler4j` 已经通过 SDK 和 Core 抽象好了配置、任务、工作流、环境、调试、托管数据表和交付链路。模块开发者不需要再搭一套自己的平台。你的工作只有一个: 用最少的抽象，把业务流程写清楚。
+关键边界：
 
-模块里的持久数据现在至少要按两条语义来理解:
+- Core 是唯一运行时 owner
+- 模块运行时代码只依赖 `crawler4j-contracts`
+- `crawler4j-sdk` 只保留 CLI、脚手架、校验和开发辅助
+- Core 通过扫描模块目录生成 runtime descriptor
+- 模块数据契约固定为 `module.yaml.data` + `data/sql` + `data/seeds`
+- `managed_dataset` / `custom_table` 都必须先在 `module.yaml.data.resources[]` 注册；未注册资源会直接 fail-fast
+- 不保留 `module_runtime.py`、`declare_ui()`、根模块 `run()` 的兼容桥
 
-- 当前快照继续走 `db.list_records` / `db.replace_records` 和 `core:data_table`
-- append-only 历史优先走独立审计事件通道，不再混进快照 dataset 或数据表 CRUD
+推荐阅读顺序：
 
-## 快速入口
+1. [核心概念](./core-concepts.md)
+2. [模块结构](./module-structure.md)
+3. [快速开始](./quickstart.md)
+4. [构建模块](./build-modules.md)
+5. [SDK 与 CLI 参考](./reference-sdk-and-cli.md)
+6. [Core 能力参考](./reference-core-capabilities.md)
+7. [UI 与数据表](./ui-and-data-table.md)
+8. [调试](./debugging.md)
+9. [交付](./shipping.md)
+10. [排障](./troubleshooting.md)
 
-### 5 分钟上手
+最重要的事实：
 
-- [快速开始](quickstart.md)
+- `module.yaml.runtime_api` 必须是 `core-native-v1`
+- `module.yaml.data` 必须存在，`resources/views/queries/seeds` 是唯一数据契约入口
+- 模块数据只能通过 `ctx.db` fluent API 访问：`from_()`、`named()`、`into(...).replace(...)`
+- `tasks/*.py` 导出 `TASK` 和 `execute`
+- `workflows/*.py` 导出 `WORKFLOW` 和 `run`
+- `hooks/*.py` 导出 `handle`
+- `env_selectors/*.py` 导出 `SELECTOR` 和 `select`
+- `pages/*.py`、`pages/<group>/*.py` 导出 `PAGE` 和页面处理函数
+- Hosted UI 正式组件面现为 `Page / Card / Section / Text / Button / DataTable`，新的卡片容器优先使用 `Card`
+- `Card` 现支持标题对齐、内容水平/垂直对齐、最小高度和 padding 等布局参数
 
-### 开始开发模块
-
-- [核心概念](core-concepts.md)
-- [模块结构](module-structure.md)
-- [构建模块](build-modules.md)
-- [UI 与数据表](ui-and-data-table.md)
-
-### 调试、交付与排错
-
-- [调试模块](debugging.md)
-- [交付模块](shipping.md)
-- [常见问题](troubleshooting.md)
-
-### 查手册
-
-- [SDK 与 CLI 参考](reference-sdk-and-cli.md)
-- [Core 能力参考](reference-core-capabilities.md)
-- [固定环境池与环境队列](reference-core-capabilities.md#固定环境池工具)
-
-## 命令与版本口径
-
-这份指南只写当前可用命令，不再在示例里固定 `crawler4j-sdk==某个版本`。
-
-- 获取最新 CLI:
-  `uvx --from crawler4j-sdk crawler4j --help`
-- 在模块项目里执行命令:
-  `uv run crawler4j ...`
-- 独立模块项目里的事实源:
-  `crawler4j --help`
-- 只有在 `crawler4j` Core 源码仓核对实现细节时，才回看
-  `packages/crawler4j-sdk/src/cli/commands.py`
-
-如果你在别处看到旧平铺命令、旧目录说明或过期版本号，不要跟着抄，统一以本章和当前 CLI 帮助输出为准。
-
-## 这份指南适合谁
-
-这份文档只服务两类读者:
-
-1. 第一次写 `crawler4j` 模块的开发者
-2. 需要快速查 CLI、SDK、Core 约束和交付方式的熟手
-
-如果你是宿主使用者或维护者，优先回到用户指南或项目开发文档，不要从这里开始。
-
-## 推荐阅读路径
-
-### 第一次开发模块
-
-1. [快速开始](quickstart.md)
-2. [核心概念](core-concepts.md)
-3. [模块结构](module-structure.md)
-4. [构建模块](build-modules.md)
-5. [固定环境池与环境队列](reference-core-capabilities.md#固定环境池工具)
-6. [UI 与数据表](ui-and-data-table.md)
-7. [调试模块](debugging.md)
-8. [交付模块](shipping.md)
-
-### 已经会写模块，只想查手册
-
-1. [SDK 与 CLI 参考](reference-sdk-and-cli.md)
-2. [Core 能力参考](reference-core-capabilities.md)
-3. [固定环境池与环境队列](reference-core-capabilities.md#固定环境池工具)
-4. [常见问题](troubleshooting.md)
-
-## 主题导航
-
-| 你要做什么 | 直接看哪里 |
-|---|---|
-| 从零创建第一个模块 | [快速开始](quickstart.md) |
-| 理解模块到底是什么 | [核心概念](core-concepts.md) |
-| 搞清楚目录、入口和 `module.yaml` | [模块结构](module-structure.md) |
-| 写 task 和 workflow | [构建模块](build-modules.md) |
-| 接入固定环境池 Service Job / 环境队列 | [构建模块](build-modules.md) / [Core 能力参考](reference-core-capabilities.md) / [调试模块](debugging.md)；当前只从 `READY + 无租约` 工位发号，抢位冲突会回等待 |
-| 写页面或托管数据表 | [UI 与数据表](ui-and-data-table.md) |
-| 搞清快照数据和审计历史怎么分工 | [核心概念](core-concepts.md) / [Core 能力参考](reference-core-capabilities.md) / [UI 与数据表](ui-and-data-table.md) |
-| 用 DevLink / ATM 调试 | [调试模块](debugging.md) |
-| 打 ZIP、安装、验收 | [交付模块](shipping.md) |
-| 查 CLI 命令和 SDK 类型 | [SDK 与 CLI 参考](reference-sdk-and-cli.md) |
-| 查 `db.*`、`ui.*`、`env.*` | [Core 能力参考](reference-core-capabilities.md) |
-| 查高频踩坑 | [常见问题](troubleshooting.md) |
-
-## 开发原则
-
-这一套文档只有一个立场:
-
-- 模块是轻量业务应用，不是二次框架
-- 相同逻辑先抽到 task
-- task 内部如果还有重复，再抽一层纯函数就够了
-- 重约束、轻抽象，比“架构看起来高级”更重要
-
-如果你准备好了，直接从 [快速开始](quickstart.md) 开始。
+如果你看到任何 `TaskScript`、`TaskFlow`、`ModuleAssembler`、`module_runtime.py`、`declare_ui()`、`@env_selector(...)`、`ctx.tools.call("db.*")`、`db.declare_data_resource(...)`、`db.declare_db_view(...)` 的旧写法，应视为历史资料，而不是当前正式协议。

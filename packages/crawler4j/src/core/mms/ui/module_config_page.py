@@ -2,22 +2,31 @@
 
 from __future__ import annotations
 
-import yaml
-
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QMessageBox,
-    QPushButton,
     QSplitter,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
+import yaml
+
+from src.core.mms.config_yaml_validation import YamlConfigValidationError, parse_yaml_config_mapping
 from src.core.mms.settings_store import get_module_settings_store
+from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
+from src.ui.components.confirm_dialog import ConfirmDialog
+from src.ui.components.message_dialog import MessageDialog
+from src.ui.components.yaml_code_editor import YamlCodeEditor
+
+
+class _IndentedSafeDumper(yaml.SafeDumper):
+    """PyYAML dumper that keeps block sequences indented under their parent key."""
+
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow=flow, indentless=False)
 
 
 class ModuleConfigPage(QWidget):
@@ -78,25 +87,8 @@ class ModuleConfigPage(QWidget):
         section._section_header = header
         return section
 
-    def _create_editor(self) -> QTextEdit:
-        editor = QTextEdit()
-        editor.setStyleSheet(
-            """
-            QTextEdit {
-                background: rgba(0, 0, 0, 0.3);
-                color: #4ade80;
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 4px;
-                font-family: 'Menlo', 'Monaco', monospace;
-                font-size: 13px;
-                padding: 8px;
-            }
-            """
-        )
-        editor.setAcceptRichText(False)
-        editor.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        editor.setMinimumHeight(120)
+    def _create_editor(self) -> YamlCodeEditor:
+        editor = YamlCodeEditor()
         return editor
 
     def _create_module_config_card(self) -> QWidget:
@@ -104,34 +96,22 @@ class ModuleConfigPage(QWidget):
         layout = self.module_config_section._section_layout
         header = self.module_config_section._section_header
 
-        self.restore_module_config_btn = QPushButton("恢复模块默认")
-        self.restore_module_config_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(245, 158, 11, 0.22);
-                color: #fbbf24;
-                border: 1px solid rgba(245, 158, 11, 0.35);
-                padding: 6px 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(245, 158, 11, 0.3); }
-            """
+        self.restore_module_config_btn = StyledButton(
+            "恢复模块默认",
+            variant="warning",
+            min_height=32,
+            horizontal_padding=14,
+            border_radius=4,
         )
         self.restore_module_config_btn.clicked.connect(self._restore_module_defaults)
         header.addWidget(self.restore_module_config_btn)
 
-        self.save_module_config_btn = QPushButton("保存模块配置")
-        self.save_module_config_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                padding: 6px 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-            """
+        self.save_module_config_btn = StyledButton(
+            "保存模块配置",
+            variant="primary",
+            min_height=32,
+            horizontal_padding=14,
+            border_radius=4,
         )
         self.save_module_config_btn.clicked.connect(self._save_module_config)
         header.addWidget(self.save_module_config_btn)
@@ -150,34 +130,22 @@ class ModuleConfigPage(QWidget):
         self.workflow_selector.currentIndexChanged.connect(self._load_selected_workflow_config)
         header.addWidget(self.workflow_selector)
 
-        self.restore_workflow_config_btn = QPushButton("恢复 Workflow 默认")
-        self.restore_workflow_config_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(245, 158, 11, 0.22);
-                color: #fbbf24;
-                border: 1px solid rgba(245, 158, 11, 0.35);
-                padding: 6px 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(245, 158, 11, 0.3); }
-            """
+        self.restore_workflow_config_btn = StyledButton(
+            "恢复 Workflow 默认",
+            variant="warning",
+            min_height=32,
+            horizontal_padding=14,
+            border_radius=4,
         )
         self.restore_workflow_config_btn.clicked.connect(self._restore_workflow_defaults)
         header.addWidget(self.restore_workflow_config_btn)
 
-        self.save_workflow_config_btn = QPushButton("保存 Workflow 配置")
-        self.save_workflow_config_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(99, 102, 241, 0.8);
-                color: white;
-                border: none;
-                padding: 6px 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover { background: rgba(99, 102, 241, 1); }
-            """
+        self.save_workflow_config_btn = StyledButton(
+            "保存 Workflow 配置",
+            variant="primary",
+            min_height=32,
+            horizontal_padding=14,
+            border_radius=4,
         )
         self.save_workflow_config_btn.clicked.connect(self._save_workflow_config)
         header.addWidget(self.save_workflow_config_btn)
@@ -214,29 +182,17 @@ class ModuleConfigPage(QWidget):
     def _dump(self, payload: dict) -> str:
         if not payload:
             return ""
-        return yaml.safe_dump(
+        raw = yaml.dump(
             payload,
+            Dumper=_IndentedSafeDumper,
             allow_unicode=True,
             sort_keys=False,
             default_flow_style=False,
         ).strip()
+        return YamlCodeEditor.normalize_yaml_layout(raw)
 
-    def _parse_editor_dict(self, editor: QTextEdit, scope_name: str) -> dict:
-        raw = editor.toPlainText()
-        stripped = raw.strip()
-        if not stripped:
-            return {}
-        if stripped.startswith("{"):
-            raise ValueError(f"{scope_name} 只支持 YAML 块格式，不支持 JSON/花括号对象字面量")
-        try:
-            payload = yaml.safe_load(raw)
-        except yaml.YAMLError as exc:
-            raise ValueError(f"{scope_name} YAML 格式错误: {exc}") from exc
-        if payload is None:
-            return {}
-        if not isinstance(payload, dict):
-            raise ValueError(f"{scope_name} 必须是 YAML 映射对象")
-        return payload
+    def _parse_editor_dict(self, editor: YamlCodeEditor, scope_name: str) -> dict:
+        return parse_yaml_config_mapping(editor.toPlainText(), scope_name=scope_name)
 
     def _selected_workflow_name(self) -> str:
         data = self.workflow_selector.currentData()
@@ -256,14 +212,13 @@ class ModuleConfigPage(QWidget):
         return dict(payload)
 
     def _confirm_restore(self, title: str, message: str) -> bool:
-        reply = QMessageBox.warning(
+        return ConfirmDialog.confirm(
             self,
             title,
             message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            confirm_text="恢复",
+            danger=True,
         )
-        return reply == QMessageBox.StandardButton.Yes
 
     def set_module(self, module) -> None:
         self._module = module
@@ -334,13 +289,14 @@ class ModuleConfigPage(QWidget):
             return
         try:
             payload = self._parse_editor_dict(self.module_config_editor, "模块配置")
-        except ValueError as exc:
-            QMessageBox.warning(self, "错误", str(exc))
+        except YamlConfigValidationError as exc:
+            self.module_config_editor.mark_validation_error(line=exc.line, column=exc.column)
+            MessageDialog.warning(self, "错误", str(exc))
             return
 
         self._store.write_module_settings(self._module.name, payload)
         self.module_config_editor.setPlainText(self._dump(payload))
-        QMessageBox.information(self, "成功", "模块配置已保存")
+        MessageDialog.information(self, "成功", "模块配置已保存")
 
     def _save_workflow_config(self) -> None:
         if not self._module:
@@ -351,13 +307,14 @@ class ModuleConfigPage(QWidget):
 
         try:
             payload = self._parse_editor_dict(self.workflow_config_editor, "Workflow 配置")
-        except ValueError as exc:
-            QMessageBox.warning(self, "错误", str(exc))
+        except YamlConfigValidationError as exc:
+            self.workflow_config_editor.mark_validation_error(line=exc.line, column=exc.column)
+            MessageDialog.warning(self, "错误", str(exc))
             return
 
         self._store.write_workflow_settings(self._module.name, workflow_name, payload)
         self.workflow_config_editor.setPlainText(self._dump(payload))
-        QMessageBox.information(self, "成功", f"Workflow 配置已保存: {workflow_name}")
+        MessageDialog.information(self, "成功", f"Workflow 配置已保存: {workflow_name}")
 
     def _restore_module_defaults(self) -> None:
         if not self._module:
@@ -371,7 +328,7 @@ class ModuleConfigPage(QWidget):
         payload = self._module_default_payload()
         self._store.write_module_settings(self._module.name, payload)
         self.module_config_editor.setPlainText(self._dump(payload))
-        QMessageBox.information(self, "成功", "模块配置已恢复为默认值")
+        MessageDialog.information(self, "成功", "模块配置已恢复为默认值")
 
     def _restore_workflow_defaults(self) -> None:
         if not self._module:
@@ -388,4 +345,4 @@ class ModuleConfigPage(QWidget):
         payload = self._workflow_default_payload(workflow_name)
         self._store.write_workflow_settings(self._module.name, workflow_name, payload)
         self.workflow_config_editor.setPlainText(self._dump(payload))
-        QMessageBox.information(self, "成功", f"Workflow 配置已恢复为默认值: {workflow_name}")
+        MessageDialog.information(self, "成功", f"Workflow 配置已恢复为默认值: {workflow_name}")

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import argparse
+import ast
+import asyncio
 import importlib
+import importlib.util
 import inspect
 import json
 import os
@@ -21,22 +23,31 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from crawler4j_contracts import TaskContext, ToolSpec
+from crawler4j_contracts import EnvSelectorSpec, PageSpec, TaskSpec, WorkflowSpec
+from crawler4j_contracts.hosted_ui import normalize_page_schema
 
-from crawler4j_sdk._version import get_compatible_dependency_spec
+from crawler4j_sdk._version import (
+    get_compatible_contracts_dependency_spec,
+    get_compatible_sdk_dependency_spec,
+)
 from crawler4j_sdk.cli.templates import (
-    DATA_TABLE_HELPER_TEMPLATE,
-    ENV_SELECTOR_TEMPLATE,
+    HOOK_NAMES,
     MODEL_GITIGNORE_TEMPLATE,
+    MODEL_HOOKS_INIT_TEMPLATE,
     MODEL_MANIFEST_TEMPLATE,
     MODEL_MODULE_INIT,
+    MODEL_PAGES_INIT_TEMPLATE,
     MODEL_PROJECT_PYPROJECT,
     MODEL_PROJECT_README,
-    MODEL_RUNTIME_TEMPLATE,
+    MODEL_SELECTORS_INIT_TEMPLATE,
     MODEL_TEST_TASK_TEMPLATE,
-    MODEL_UI_PAGES_TEMPLATE,
+    RANDOM_READY_SELECTOR_TEMPLATE,
+    RETURN_NONE_SELECTOR_TEMPLATE,
     SCRIPT_TEMPLATE,
     WORKFLOW_TEMPLATE,
+    render_hook_template,
+    render_page_template,
+    render_selector_template,
 )
 
 
@@ -52,25 +63,17 @@ SEMVER_RE = re.compile(
     r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-UI_ENTRY_RE = re.compile(r"^ui:[A-Za-z_][A-Za-z0-9_]*$")
 GITHUB_TOKEN_ENV_VARS = ("CRAWLER4J_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
-LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_KEYS = {
-    "occupied",
-    "occupied_label",
-    "is_occupied",
-    "lock_status",
-    "lock_status_label",
-}
-LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_LABELS = {"占用中", "占用状态"}
+LEGACY_HOSTED_UI_PATHS: tuple[tuple[str, str], ...] = (
+    ("ui", "dir"),
+    ("config_schema.json", "file"),
+    ("strategy.yaml", "file"),
+)
+REQUIRED_RUNTIME_API = "core-native-v1"
 
 
 class CLIError(RuntimeError):
     """Raised when a CLI action cannot be completed safely."""
-
-
-def to_class_name(name: str) -> str:
-    """Convert a snake_case identifier to PascalCase."""
-    return "".join(part.capitalize() for part in name.replace("-", "_").split("_"))
 
 
 def to_display_name(name: str) -> str:
@@ -159,17 +162,6 @@ def _ensure_package_dir(path: Path) -> None:
         init_file.write_text("", encoding="utf-8")
 
 
-def _ensure_package_export(init_file: Path, module_name: str, symbol_name: str) -> None:
-    export_line = f"from .{module_name} import {symbol_name}\n"
-    content = init_file.read_text(encoding="utf-8") if init_file.exists() else ""
-    if export_line in content:
-        return
-    if content and not content.endswith("\n"):
-        content += "\n"
-    content += export_line
-    init_file.write_text(content, encoding="utf-8")
-
-
 def find_module_root(start: Path | None = None) -> Path | None:
     """Locate the nearest parent directory containing module.yaml."""
     current = (start or Path.cwd()).resolve()
@@ -203,6 +195,22 @@ def save_manifest(module_root: Path, manifest: dict[str, Any]) -> None:
         yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
+
+
+def _module_display_name(module_root: Path, manifest: dict[str, Any]) -> str:
+    """Resolve the human-facing module display name."""
+    display_name = str(manifest.get("display_name", "") or "").strip()
+    if display_name:
+        return display_name
+    module_name = str(manifest.get("name", "") or "").strip() or module_root.name
+    return to_display_name(module_name)
+
+
+def _resolve_module_import_name(module_root: Path, manifest: dict[str, Any] | None = None) -> str:
+    module_name = str((manifest or {}).get("name", "") or "").strip()
+    if module_name:
+        return module_name
+    return module_root.name
 
 
 def _load_project_version(pyproject_path: Path) -> str:
@@ -250,37 +258,51 @@ def _set_project_version(pyproject_path: Path, version: str) -> None:
     pyproject_path.write_text(rendered, encoding="utf-8")
 
 
-def _list_python_modules(package_dir: Path) -> list[str]:
+def _list_python_modules(package_dir: Path, *, recursive: bool = False) -> list[str]:
     if not package_dir.exists():
         return []
+    paths = package_dir.rglob("*.py") if recursive else package_dir.glob("*.py")
     return sorted(
-        path.stem
-        for path in package_dir.glob("*.py")
-        if path.name != "__init__.py" and not path.name.startswith("_")
+        ".".join(path.relative_to(package_dir).with_suffix("").parts)
+        for path in paths
+        if path.name != "__init__.py"
+        and not path.name.startswith("_")
+        and not any(part.startswith("_") for part in path.relative_to(package_dir).parts[:-1])
     )
 
 
-def _read_default_workflow(runtime_path: Path) -> str:
-    if not runtime_path.exists():
+def _page_owner_label(page_module_name: str) -> str:
+    return f"pages/{page_module_name.replace('.', '/')}.py"
+
+
+def _normalize_page_group(group: str | None) -> str:
+    normalized_group = str(group or "").strip()
+    if not normalized_group:
         return ""
-    match = re.search(
-        r'(?m)^\s*DEFAULT_WORKFLOW\s*=\s*["\'](?P<name>[a-z][a-z0-9_]*)["\']\s*$',
-        runtime_path.read_text(encoding="utf-8"),
-    )
-    return match.group("name") if match else ""
+    if "/" in normalized_group or "\\" in normalized_group or "." in normalized_group:
+        raise CLIError("页面分组名必须是单层小写 snake_case")
+    if not is_valid_name(normalized_group):
+        raise CLIError("页面分组名必须是单层小写 snake_case")
+    return normalized_group
 
 
-def _set_default_workflow(runtime_path: Path, workflow_name: str) -> None:
-    text = runtime_path.read_text(encoding="utf-8")
-    replacement = f'DEFAULT_WORKFLOW = "{workflow_name}"'
-    pattern = re.compile(
-        r'(?m)^(?:#\s*)?DEFAULT_WORKFLOW\s*=\s*["\'][A-Za-z0-9_]+["\']\s*$'
-    )
-    if pattern.search(text):
-        text = pattern.sub(replacement, text, count=1)
-    else:
-        text += f"\n\n{replacement}\n"
-    runtime_path.write_text(text, encoding="utf-8")
+def _page_source_relative_path(page_id: str, *, group: str | None = None) -> Path:
+    normalized_page_id = str(page_id or "").strip()
+    normalized_group = _normalize_page_group(group)
+    if not normalized_group:
+        return Path("pages") / f"{normalized_page_id}.py"
+
+    prefix = f"{normalized_group}_"
+    file_stem = normalized_page_id
+    if normalized_page_id.startswith(prefix):
+        candidate = normalized_page_id[len(prefix) :].strip()
+        if candidate:
+            file_stem = candidate
+    return Path("pages") / normalized_group / f"{file_stem}.py"
+
+
+def _manifest_default_workflow(manifest: dict[str, Any]) -> str:
+    return str(manifest.get("default_workflow", "") or "").strip()
 
 
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:
@@ -292,15 +314,320 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _normalize_detail_menu(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+def _normalize_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     ui_extension = manifest.setdefault("ui_extension", {})
     if not isinstance(ui_extension, dict):
         raise CLIError("module.yaml.ui_extension 必须是映射对象")
-    detail_menu = ui_extension.setdefault("detail_menu", [])
-    if not isinstance(detail_menu, list):
-        raise CLIError("module.yaml.ui_extension.detail_menu 必须是数组")
-    return detail_menu
+    pages = ui_extension.setdefault("pages", [])
+    if not isinstance(pages, list):
+        raise CLIError("module.yaml.ui_extension.pages 必须是数组")
+    return pages
 
+
+def _normalize_data_section(manifest: dict[str, Any]) -> dict[str, Any]:
+    data = manifest.setdefault("data", {})
+    if not isinstance(data, dict):
+        raise CLIError("module.yaml.data 必须是映射对象")
+    for section in ("resources", "views", "queries", "seeds"):
+        value = data.setdefault(section, [])
+        if not isinstance(value, list):
+            raise CLIError(f"module.yaml.data.{section} 必须是数组")
+    return data
+
+
+def _manifest_data_entries(manifest: dict[str, Any], section: str) -> list[dict[str, Any]]:
+    data = _normalize_data_section(manifest)
+    entries = data[section]
+    assert isinstance(entries, list)
+    return entries
+
+
+def _manifest_resource_entry(manifest: dict[str, Any], resource_id: str) -> dict[str, Any] | None:
+    normalized_resource_id = str(resource_id or "").strip()
+    for item in _manifest_data_entries(manifest, "resources"):
+        if isinstance(item, dict) and str(item.get("id", "") or "").strip() == normalized_resource_id:
+            return item
+    return None
+
+
+def _resolve_custom_table_sources(
+    manifest: dict[str, Any],
+    raw_sources: list[str] | tuple[str, ...] | None,
+    *,
+    owner_label: str,
+) -> tuple[list[str], dict[str, Any]]:
+    source_ids = [str(item or "").strip() for item in list(raw_sources or []) if str(item or "").strip()]
+    if not source_ids or any(not is_valid_name(item) for item in source_ids):
+        raise CLIError("--source 至少提供一个已注册资源 ID，且必须是小写 snake_case")
+
+    first_resource: dict[str, Any] | None = None
+    for resource_id in source_ids:
+        resource = _manifest_resource_entry(manifest, resource_id)
+        if resource is None:
+            raise CLIError(f"未找到资源: {resource_id}")
+        if str(resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
+            raise CLIError(f"{owner_label}只能建立在 custom_table 资源上: {resource_id}")
+        if first_resource is None:
+            first_resource = resource
+
+    assert first_resource is not None
+    return source_ids, first_resource
+
+
+def _append_unique_data_entry(manifest: dict[str, Any], section: str, entry_id: str, payload: dict[str, Any]) -> None:
+    entries = _manifest_data_entries(manifest, section)
+    normalized_entry_id = str(entry_id or "").strip()
+    for item in entries:
+        if isinstance(item, dict) and str(item.get("id", "") or "").strip() == normalized_entry_id:
+            raise CLIError(f"module.yaml.data.{section} 已存在同名条目: {normalized_entry_id}")
+    entries.append(payload)
+
+
+def _validate_sql_file(module_root: Path, relative_path: str, *, expected_prefix: str) -> str | None:
+    normalized = str(relative_path or "").strip()
+    if not normalized:
+        return "SQL 文件路径不能为空"
+    if not normalized.startswith(expected_prefix):
+        return f"SQL 文件必须位于 {expected_prefix}"
+    target = (module_root / normalized).resolve()
+    if not str(target).startswith(str(module_root.resolve())):
+        return f"SQL 文件路径越界: {relative_path}"
+    if not target.is_file():
+        return f"找不到 SQL 文件: {relative_path}"
+    sql = target.read_text(encoding="utf-8").strip()
+    if not sql:
+        return f"SQL 文件为空: {relative_path}"
+    if ";" in sql:
+        return f"SQL 文件必须只包含单条语句: {relative_path}"
+    if re.search(r"\b(insert|update|delete|drop|alter|attach|detach|pragma|create|replace)\b", sql, re.IGNORECASE):
+        return f"SQL 文件包含被禁止的关键字: {relative_path}"
+    if not re.match(r"^\s*(with\b|select\b)", sql, flags=re.IGNORECASE):
+        return f"SQL 文件必须以 SELECT / WITH 开头: {relative_path}"
+    return None
+
+
+def _validate_sql_placeholders(sql: str, source_resource_ids: list[str], *, owner_label: str) -> str | None:
+    placeholder_re = re.compile(r"\{\{resource:([a-z][a-z0-9_]*)\}\}")
+    sql_ref_re = re.compile(r"\b(?:from|join)\s+([^\s,()]+)", re.IGNORECASE)
+    placeholders = placeholder_re.findall(sql)
+    if not placeholders:
+        return f"{owner_label} 必须至少引用一个 {{resource:<id>}} 占位符"
+    for token in sql_ref_re.findall(sql):
+        if not placeholder_re.fullmatch(token):
+            return f"{owner_label} 的 FROM/JOIN 只允许引用 {{resource:<id>}} 占位符"
+    if set(placeholders) != set(source_resource_ids):
+        return f"{owner_label} 的 SQL 占位符必须与 source_resource_ids 完全一致"
+    return None
+
+
+def _collect_data_contract_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
+    data = manifest.get("data")
+    if not isinstance(data, dict):
+        return ["module.yaml 缺少 data"]
+
+    errors: list[str] = []
+    resources = data.get("resources")
+    views = data.get("views")
+    queries = data.get("queries")
+    seeds = data.get("seeds")
+    if not isinstance(resources, list):
+        errors.append("module.yaml.data.resources 必须是数组")
+        resources = []
+    if not isinstance(views, list):
+        errors.append("module.yaml.data.views 必须是数组")
+        views = []
+    if not isinstance(queries, list):
+        errors.append("module.yaml.data.queries 必须是数组")
+        queries = []
+    if not isinstance(seeds, list):
+        errors.append("module.yaml.data.seeds 必须是数组")
+        seeds = []
+
+    allowed_resource_keys = {
+        "id",
+        "storage_mode",
+        "record_key_field",
+        "schema",
+        "indexes",
+        "cleanup_policy",
+        "joins",
+    }
+    resource_map: dict[str, dict[str, Any]] = {}
+    for item in resources:
+        if not isinstance(item, dict):
+            errors.append("data.resources 中的每一项都必须是对象")
+            continue
+        unknown_keys = sorted(set(item) - allowed_resource_keys)
+        if unknown_keys:
+            errors.append("data.resources 包含不支持的字段: " + ", ".join(unknown_keys))
+        resource_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(resource_id):
+            errors.append(f"无效的 data.resources[].id: {resource_id or '<empty>'}")
+            continue
+        if resource_id in resource_map:
+            errors.append(f"data.resources[].id 重复: {resource_id}")
+            continue
+        resource_map[resource_id] = item
+        storage_mode = str(item.get("storage_mode", "managed_dataset") or "managed_dataset").strip().lower()
+        if storage_mode not in {"managed_dataset", "custom_table"}:
+            errors.append(f"data.resources[{resource_id}].storage_mode 不支持: {storage_mode}")
+        schema = item.get("schema")
+        columns = schema.get("columns") if isinstance(schema, dict) else None
+        if not isinstance(columns, list) or not columns:
+            errors.append(f"data.resources[{resource_id}].schema.columns 不能为空")
+        joins = item.get("joins") or []
+        if storage_mode != "custom_table" and joins:
+            errors.append(f"data.resources[{resource_id}].joins 只允许 custom_table 声明")
+
+    for resource_id, item in resource_map.items():
+        joins = item.get("joins") or []
+        if not isinstance(joins, list):
+            errors.append(f"data.resources[{resource_id}].joins 必须是数组")
+            continue
+        for join in joins:
+            if not isinstance(join, dict):
+                errors.append(f"data.resources[{resource_id}].joins 中的每一项都必须是对象")
+                continue
+            target = str(join.get("target") or "").strip()
+            if not is_valid_name(target):
+                errors.append(f"data.resources[{resource_id}].joins[].target 必须是小写 snake_case")
+                continue
+            target_resource = resource_map.get(target)
+            if not target_resource:
+                errors.append(f"data.resources[{resource_id}].joins 引用了未声明资源: {target}")
+                continue
+            if str(target_resource.get("storage_mode", "managed_dataset")).strip().lower() != "custom_table":
+                errors.append(f"data.resources[{resource_id}].joins 只允许连接 custom_table: {target}")
+            on = join.get("on")
+            if not isinstance(on, dict) or not on:
+                errors.append(f"data.resources[{resource_id}].joins[{target}].on 不能为空")
+
+    for item in views:
+        if not isinstance(item, dict):
+            errors.append("data.views 中的每一项都必须是对象")
+            continue
+        view_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(view_id):
+            errors.append(f"无效的 data.views[].id: {view_id or '<empty>'}")
+            continue
+        source_resource_ids = [
+            str(raw or "").strip()
+            for raw in (item.get("source_resource_ids") or [])
+            if str(raw or "").strip()
+        ]
+        if not source_resource_ids:
+            errors.append(f"data.views[{view_id}].source_resource_ids 不能为空")
+            continue
+        for resource_id in source_resource_ids:
+            resource = resource_map.get(resource_id)
+            if not resource:
+                errors.append(f"data.views[{view_id}] 引用了未声明资源: {resource_id}")
+                continue
+            if str(resource.get("storage_mode", "managed_dataset")).strip().lower() != "custom_table":
+                errors.append(f"data.views[{view_id}] 只允许引用 custom_table 资源: {resource_id}")
+        sql_file = str(item.get("sql_file", "") or "").strip()
+        error = _validate_sql_file(module_root, sql_file, expected_prefix="data/sql/views/")
+        if error:
+            errors.append(error)
+        else:
+            sql = (module_root / sql_file).read_text(encoding="utf-8").strip()
+            placeholder_error = _validate_sql_placeholders(
+                sql,
+                source_resource_ids,
+                owner_label=f"data.views[{view_id}]",
+            )
+            if placeholder_error:
+                errors.append(placeholder_error)
+
+    for item in queries:
+        if not isinstance(item, dict):
+            errors.append("data.queries 中的每一项都必须是对象")
+            continue
+        query_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(query_id):
+            errors.append(f"无效的 data.queries[].id: {query_id or '<empty>'}")
+            continue
+        source_resource_ids = [
+            str(raw or "").strip()
+            for raw in (item.get("source_resource_ids") or [])
+            if str(raw or "").strip()
+        ]
+        if not source_resource_ids:
+            errors.append(f"data.queries[{query_id}].source_resource_ids 不能为空")
+            continue
+        for resource_id in source_resource_ids:
+            resource = resource_map.get(resource_id)
+            if not resource:
+                errors.append(f"data.queries[{query_id}] 引用了未声明资源: {resource_id}")
+                continue
+            if str(resource.get("storage_mode", "managed_dataset")).strip().lower() != "custom_table":
+                errors.append(f"data.queries[{query_id}] 只允许引用 custom_table 资源: {resource_id}")
+        sql_file = str(item.get("sql_file", "") or "").strip()
+        error = _validate_sql_file(module_root, sql_file, expected_prefix="data/sql/queries/")
+        if error:
+            errors.append(error)
+        else:
+            sql = (module_root / sql_file).read_text(encoding="utf-8").strip()
+            placeholder_error = _validate_sql_placeholders(
+                sql,
+                source_resource_ids,
+                owner_label=f"data.queries[{query_id}]",
+            )
+            if placeholder_error:
+                errors.append(placeholder_error)
+
+    for item in seeds:
+        if not isinstance(item, dict):
+            errors.append("data.seeds 中的每一项都必须是对象")
+            continue
+        seed_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(seed_id):
+            errors.append(f"无效的 data.seeds[].id: {seed_id or '<empty>'}")
+            continue
+        resource_id = str(item.get("resource_id", "") or "").strip()
+        if resource_id not in resource_map:
+            errors.append(f"data.seeds[{seed_id}] 引用了未声明资源: {resource_id or '<empty>'}")
+        seed_file = str(item.get("file", "") or "").strip()
+        if not seed_file.startswith("data/seeds/"):
+            errors.append(f"data.seeds[{seed_id}].file 必须位于 data/seeds/")
+            continue
+        target = (module_root / seed_file).resolve()
+        if not str(target).startswith(str(module_root.resolve())):
+            errors.append(f"data.seeds[{seed_id}].file 路径越界: {seed_file}")
+            continue
+        if not target.is_file():
+            errors.append(f"找不到种子文件: {seed_file}")
+            continue
+        try:
+            payload = json.loads(target.read_text(encoding='utf-8'))
+        except json.JSONDecodeError:
+            errors.append(f"种子文件不是合法 JSON: {seed_file}")
+            continue
+        if not isinstance(payload, list) or any(not isinstance(row, dict) for row in payload):
+            errors.append(f"种子文件必须是对象数组 JSON: {seed_file}")
+
+    return errors
+
+
+def _manifest_ui_extension(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    ui_extension = manifest.get("ui_extension")
+    if ui_extension is None:
+        return None
+    if not isinstance(ui_extension, dict):
+        raise CLIError("module.yaml.ui_extension 必须是映射对象")
+    return ui_extension
+
+
+def _manifest_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    ui_extension = _manifest_ui_extension(manifest)
+    if ui_extension is None:
+        return []
+    pages = ui_extension.get("pages")
+    if pages is None:
+        return []
+    if not isinstance(pages, list):
+        raise CLIError("module.yaml.ui_extension.pages 必须是数组")
+    return [item for item in pages if isinstance(item, dict)]
 
 def _normalize_config_defaults(manifest: dict[str, Any]) -> dict[str, Any]:
     config_defaults = manifest.setdefault("config_defaults", {})
@@ -335,6 +662,10 @@ def _manifest_workflow_names(manifest: dict[str, Any]) -> list[str]:
     return names
 
 
+def _is_known_hook(name: str) -> bool:
+    return name in HOOK_NAMES
+
+
 def _safe_run(cmd: list[str], *, cwd: Path) -> None:
     subprocess.run(cmd, cwd=str(cwd), check=True, capture_output=True)
 
@@ -343,21 +674,168 @@ def _run_async(awaitable):
     return asyncio.run(awaitable)
 
 
-def _import_module_root(module_root: Path) -> Any:
-    package_name = module_root.name
-    parent = str(module_root.parent)
-    if parent not in sys.path:
-        sys.path.insert(0, parent)
+def _purge_module_namespace(module_name: str) -> None:
+    prefix = f"{module_name}."
+    for loaded_name in list(sys.modules):
+        if loaded_name == module_name or loaded_name.startswith(prefix):
+            sys.modules.pop(loaded_name, None)
 
-    stale = [
-        name
-        for name in list(sys.modules)
-        if name == package_name or name.startswith(f"{package_name}.")
-    ]
-    for name in stale:
-        sys.modules.pop(name, None)
 
-    return importlib.import_module(package_name)
+def _import_module_root(module_root: Path, module_name: str) -> Any:
+    package_init = module_root / "__init__.py"
+    if not package_init.exists():
+        raise FileNotFoundError(package_init)
+
+    existing = sys.modules.get(module_name)
+    existing_file = getattr(existing, "__file__", "") if existing else ""
+    same_origin = bool(existing_file) and Path(existing_file).resolve() == package_init.resolve()
+    if same_origin:
+        return existing
+    if existing:
+        _purge_module_namespace(module_name)
+
+    importlib.invalidate_caches()
+    spec = importlib.util.spec_from_file_location(
+        module_name,
+        package_init,
+        submodule_search_locations=[str(module_root)],
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法从 `{module_root}` 构建模块加载规格")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _import_module_child(module_root: Path, module_name: str, subpackage: str, name: str) -> Any:
+    _import_module_root(module_root, module_name)
+    return importlib.import_module(f"{module_name}.{subpackage}.{name}")
+
+
+def _validate_exported_spec(
+    module: Any,
+    export_name: str,
+    spec_type: type[Any],
+    *,
+    owner_label: str,
+) -> str | None:
+    exported = getattr(module, export_name, None)
+    if not isinstance(exported, spec_type):
+        return f"{owner_label} 缺少 {export_name}，或类型不是 {spec_type.__name__}"
+    return None
+
+
+def _validate_task_module(module_root: Path, module_name: str, task_name: str) -> list[str]:
+    owner_label = f"tasks/{task_name}.py"
+    try:
+        module = _import_module_child(module_root, module_name, "tasks", task_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
+
+    errors: list[str] = []
+    spec_error = _validate_exported_spec(module, "TASK", TaskSpec, owner_label=owner_label)
+    if spec_error:
+        errors.append(spec_error)
+    elif str(module.TASK.name or "").strip() != task_name:
+        errors.append(f"{owner_label} 的 TASK.name 必须与文件名一致: {task_name}")
+
+    execute = getattr(module, "execute", None)
+    if execute is None or not callable(execute):
+        errors.append(f"{owner_label} 缺少可调用导出: execute")
+    return errors
+
+
+def _validate_workflow_module(module_root: Path, module_name: str, workflow_name: str) -> list[str]:
+    owner_label = f"workflows/{workflow_name}.py"
+    try:
+        module = _import_module_child(module_root, module_name, "workflows", workflow_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
+
+    errors: list[str] = []
+    spec_error = _validate_exported_spec(module, "WORKFLOW", WorkflowSpec, owner_label=owner_label)
+    if spec_error:
+        errors.append(spec_error)
+    elif str(module.WORKFLOW.name or "").strip() != workflow_name:
+        errors.append(f"{owner_label} 的 WORKFLOW.name 必须与文件名一致: {workflow_name}")
+
+    run_func = getattr(module, "run", None)
+    if run_func is None or not callable(run_func):
+        errors.append(f"{owner_label} 缺少可调用导出: run")
+    return errors
+
+
+def _validate_hook_module(module_root: Path, module_name: str, hook_name: str) -> list[str]:
+    owner_label = f"hooks/{hook_name}.py"
+    try:
+        module = _import_module_child(module_root, module_name, "hooks", hook_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
+    handle = getattr(module, "handle", None)
+    if handle is None or not callable(handle):
+        return [f"{owner_label} 缺少可调用导出: handle"]
+    return []
+
+
+def _validate_selector_module(module_root: Path, module_name: str, selector_name: str) -> list[str]:
+    owner_label = f"env_selectors/{selector_name}.py"
+    try:
+        module = _import_module_child(module_root, module_name, "env_selectors", selector_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
+
+    errors: list[str] = []
+    spec_error = _validate_exported_spec(module, "SELECTOR", EnvSelectorSpec, owner_label=owner_label)
+    if spec_error:
+        errors.append(spec_error)
+    elif str(module.SELECTOR.name or "").strip() != selector_name:
+        errors.append(f"{owner_label} 的 SELECTOR.name 必须与文件名一致: {selector_name}")
+
+    select = getattr(module, "select", None)
+    if select is None or not callable(select):
+        errors.append(f"{owner_label} 缺少可调用导出: select")
+    return errors
+
+
+def _validate_page_module(
+    module_root: Path,
+    module_name: str,
+    page_name: str,
+) -> tuple[list[str], str | None, dict[str, Any] | None]:
+    owner_label = _page_owner_label(page_name)
+    try:
+        module = _import_module_child(module_root, module_name, "pages", page_name)
+    except Exception as exc:
+        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"], None, None
+
+    errors: list[str] = []
+    spec_error = _validate_exported_spec(module, "PAGE", PageSpec, owner_label=owner_label)
+    if spec_error:
+        return [spec_error], None, None
+
+    page_spec = module.PAGE
+    page_id = str(page_spec.id or "").strip()
+    if not is_valid_name(page_id):
+        errors.append(f"{owner_label} 的 PAGE.id 必须是小写 snake_case: {page_id or '<empty>'}")
+        return errors, None, None
+
+    try:
+        schema = normalize_page_schema(page_id, dict(page_spec.schema or {}))
+    except ValueError as exc:
+        errors.append(f"宿主页 {page_id} schema 无效: {exc}")
+        return errors, None, None
+
+    load_handler_name = str(schema.get("load_handler", "") or "").strip()
+    load_handler = getattr(module, load_handler_name, None)
+    if load_handler is None or not callable(load_handler):
+        errors.append(f"宿主页 {page_id} 的 load_handler 未在 {owner_label} 中定义: {load_handler_name}")
+    elif inspect.iscoroutinefunction(load_handler):
+        errors.append(f"宿主页 {page_id} 的 load_handler 必须是同步函数: {load_handler_name}")
+
+    errors.extend(_validate_inline_table_handlers(module, page_id, schema, owner_label=owner_label))
+    return errors, page_id, schema
 
 
 def _render_yaml(data: Any) -> str:
@@ -495,44 +973,66 @@ def _print_module_info(module: Any) -> None:
 
 def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    ui_extension = manifest.get("ui_extension") or {}
+    ui_extension = manifest.get("ui_extension")
+    if ui_extension is None:
+        return errors
     if not isinstance(ui_extension, dict):
         return ["ui_extension 必须是 YAML 映射对象"]
 
-    ui_type = str(ui_extension.get("type", "none") or "none").strip() or "none"
-    if ui_type not in {"none", "micro_app"}:
-        errors.append(f"不支持的 ui_extension.type: {ui_type}")
+    unknown_keys = sorted(set(ui_extension) - {"pages"})
+    if unknown_keys:
+        errors.append("ui_extension 包含不支持的字段: " + ", ".join(unknown_keys))
 
-    entry = str(ui_extension.get("entry", "") or "").strip()
-    if entry:
-        if ui_type != "micro_app":
-            errors.append("声明 ui_extension.entry 时必须同时设置 ui_extension.type = micro_app")
-        if not UI_ENTRY_RE.match(entry):
-            errors.append(f"无效的 ui_extension.entry: {entry}")
-    elif ui_type == "micro_app":
-        errors.append("ui_extension.type = micro_app 时必须提供 ui_extension.entry")
-
-    detail_menu = ui_extension.get("detail_menu") or []
-    if not isinstance(detail_menu, list):
-        errors.append("ui_extension.detail_menu 必须是数组")
+    pages = ui_extension.get("pages")
+    if pages is None:
+        return errors
+    if not isinstance(pages, list):
+        errors.append("ui_extension.pages 必须是数组")
         return errors
 
     seen_ids: set[str] = set()
-    for item in detail_menu:
+    for item in pages:
         if not isinstance(item, dict):
-            errors.append("ui_extension.detail_menu 里的每一项都必须是对象")
+            errors.append("ui_extension.pages 里的每一项都必须是对象")
             continue
-        menu_id = str(item.get("id", "") or "").strip()
-        if not is_valid_name(menu_id):
-            errors.append(f"无效的 detail_menu.id: {menu_id or '<empty>'}")
+
+        unknown_keys = sorted(set(item) - {"id", "label", "icon"})
+        if unknown_keys:
+            page_label = str(item.get("id", "") or "").strip() or "<empty>"
+            errors.append(
+                f"ui_extension.pages[{page_label}] 包含不支持的字段: {', '.join(unknown_keys)}"
+            )
+
+        page_id = str(item.get("id", "") or "").strip()
+        if not is_valid_name(page_id):
+            errors.append(f"无效的 ui_extension.pages[].id: {page_id or '<empty>'}")
             continue
-        if menu_id in seen_ids:
-            errors.append(f"detail_menu.id 重复: {menu_id}")
-        seen_ids.add(menu_id)
-        expected_entry = f"core:data_table:{menu_id}"
-        actual_entry = str(item.get("entry", "") or "").strip()
-        if actual_entry != expected_entry:
-            errors.append(f"detail_menu.entry 不受支持: {actual_entry or '<empty>'}")
+        if page_id in seen_ids:
+            errors.append(f"ui_extension.pages[].id 重复: {page_id}")
+        seen_ids.add(page_id)
+
+        label = str(item.get("label", "") or "").strip()
+        if not label:
+            errors.append(f"ui_extension.pages[{page_id}].label 不能为空")
+    return errors
+
+
+def _collect_legacy_hosted_ui_errors(module_root: Path) -> list[str]:
+    errors: list[str] = []
+    for relative_path, expected_kind in LEGACY_HOSTED_UI_PATHS:
+        candidate = module_root / relative_path
+        if not candidate.exists():
+            continue
+        if expected_kind == "dir":
+            if candidate.is_dir():
+                errors.append(f"残留旧 UI 目录: {relative_path}/")
+            else:
+                errors.append(f"残留旧 UI 路径: {relative_path}")
+            continue
+        if candidate.is_file():
+            errors.append(f"残留旧 UI 文件: {relative_path}")
+        else:
+            errors.append(f"残留旧 UI 路径: {relative_path}")
     return errors
 
 
@@ -540,8 +1040,8 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
     """Collect structure-level validation errors."""
     errors: list[str] = []
 
-    required_files = ["module.yaml", "__init__.py", "module_runtime.py", "pyproject.toml"]
-    required_dirs = ["tasks", "workflows", "ui"]
+    required_files = ["module.yaml", "__init__.py"]
+    required_dirs = ["tasks", "workflows"]
     for name in required_files:
         if not (module_root / name).exists():
             errors.append(f"缺少关键文件: {name}")
@@ -551,12 +1051,12 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
 
     if not str(manifest.get("name", "")).strip():
         errors.append("module.yaml 缺少 name")
+    if str(manifest.get("runtime_api", "")).strip() != REQUIRED_RUNTIME_API:
+        errors.append(f"module.yaml.runtime_api 必须是 {REQUIRED_RUNTIME_API}")
+    if (module_root / "module_runtime.py").exists():
+        errors.append("core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py")
     if "sdk_version_range" in manifest:
         errors.append("module.yaml 不再允许声明 sdk_version_range")
-
-    for legacy_file in ["config_schema.json", "strategy.yaml"]:
-        if (module_root / legacy_file).exists():
-            errors.append(f"残留旧配置文件: {legacy_file}")
 
     workflow_names = _manifest_workflow_names(manifest)
     if not workflow_names:
@@ -569,12 +1069,20 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
             if not (module_root / "workflows" / f"{workflow_name}.py").exists():
                 errors.append(f"module.yaml 声明的 workflow 缺少源码文件: workflows/{workflow_name}.py")
 
+    default_workflow = _manifest_default_workflow(manifest)
+    if not default_workflow:
+        errors.append("module.yaml 缺少 default_workflow")
+    elif default_workflow not in workflow_names:
+        errors.append(f"default_workflow 未在 module.yaml.workflows 中声明: {default_workflow}")
+
     declared = set(workflow_names)
     files = set(_list_python_modules(module_root / "workflows"))
     for extra in sorted(files - declared):
         errors.append(f"workflows/{extra}.py 未写入 module.yaml.workflows")
 
     errors.extend(_validate_ui_extension(manifest))
+    errors.extend(_collect_data_contract_errors(module_root, manifest))
+    errors.extend(_collect_legacy_hosted_ui_errors(module_root))
     return errors
 
 
@@ -606,19 +1114,22 @@ def collect_release_errors(module_root: Path, manifest: dict[str, Any]) -> list[
     except CLIError as exc:
         errors.append(str(exc))
 
-    try:
-        project_version = _load_project_version(module_root / "pyproject.toml")
-    except CLIError as exc:
-        errors.append(str(exc))
-    else:
-        if project_version != version:
-            errors.append(
-                "pyproject.toml [project].version 必须与 module.yaml.version 一致: "
-                f"{project_version} != {version}"
-            )
+    pyproject_path = module_root / "pyproject.toml"
+    if pyproject_path.exists():
+        try:
+            project_version = _load_project_version(pyproject_path)
+        except CLIError as exc:
+            errors.append(str(exc))
+        else:
+            if project_version != version:
+                errors.append(
+                    "pyproject.toml [project].version 必须与 module.yaml.version 一致: "
+                    f"{project_version} != {version}"
+                )
 
-    if str(manifest.get("name", "")).strip() != module_root.name:
-        errors.append("module.yaml.name 必须与模块根目录名一致")
+    module_name = str(manifest.get("name", "")).strip()
+    if module_name and not is_valid_name(module_name):
+        errors.append("module.yaml.name 必须是可导入的 snake_case 包名")
     return errors
 
 
@@ -628,196 +1139,507 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
     if errors:
         return errors
 
+    module_name = _resolve_module_import_name(module_root, manifest)
     try:
-        module = _import_module_root(module_root)
+        _import_module_root(module_root, module_name)
     except Exception as exc:  # pragma: no cover - exercised by tests via failure paths
         return [f"模块无法导入: {exc.__class__.__name__}: {exc}"]
 
-    assembler = getattr(module, "assembler", None)
-    if not assembler:
-        errors.append("模块根入口缺少 assembler")
-        return errors
-
-    discovery_errors = getattr(assembler, "discovery_errors", {}) or {}
-    for message in discovery_errors.values():
-        errors.append(str(message))
-
     for task_name in _list_python_modules(module_root / "tasks"):
-        try:
-            importlib.import_module(f"{module_root.name}.tasks.{task_name}")
-        except Exception as exc:  # pragma: no cover - failure path
-            errors.append(f"tasks/{task_name}.py 无法导入: {exc.__class__.__name__}: {exc}")
+        errors.extend(_validate_task_module(module_root, module_name, task_name))
 
     workflow_names = _manifest_workflow_names(manifest)
     for workflow_name in workflow_names:
+        errors.extend(_validate_workflow_module(module_root, module_name, workflow_name))
+
+    for hook_name in _list_python_modules(module_root / "hooks"):
+        errors.extend(_validate_hook_module(module_root, module_name, hook_name))
+
+    selector_files = _list_python_modules(module_root / "env_selectors")
+    for selector_name in selector_files:
+        errors.extend(_validate_selector_module(module_root, module_name, selector_name))
         try:
-            importlib.import_module(f"{module_root.name}.workflows.{workflow_name}")
-        except Exception as exc:  # pragma: no cover - failure path
-            errors.append(
-                f"workflows/{workflow_name}.py 无法导入: {exc.__class__.__name__}: {exc}"
-            )
+            _import_module_child(module_root, module_name, "env_selectors", selector_name)
+        except Exception:
+            continue
 
-    module_runtime = None
-    try:
-        module_runtime = importlib.import_module(f"{module_root.name}.module_runtime")
-    except Exception as exc:  # pragma: no cover - failure path
-        errors.append(f"module_runtime.py 无法导入: {exc.__class__.__name__}: {exc}")
-    else:
-        errors.extend(_validate_declared_data_tables(module_root, module_runtime))
+    declared_pages = {
+        str(item.get("id", "")).strip()
+        for item in _manifest_ui_pages(manifest)
+        if str(item.get("id", "")).strip()
+    }
+    discovered_pages: dict[str, str] = {}
+    for page_name in _list_python_modules(module_root / "pages", recursive=True):
+        page_errors, page_id, schema = _validate_page_module(module_root, module_name, page_name)
+        errors.extend(page_errors)
+        if not page_id or not schema:
+            continue
+        owner_label = _page_owner_label(page_name)
+        previous_owner = discovered_pages.get(page_id)
+        if previous_owner and previous_owner != owner_label:
+            errors.append(f"宿主页 {page_id} 重复定义: {previous_owner}、{owner_label}")
+            continue
+        discovered_pages[page_id] = owner_label
 
-    ui_extension = manifest.get("ui_extension") or {}
-    if isinstance(ui_extension, dict):
-        entry = str(ui_extension.get("entry", "") or "").strip()
-        if entry:
-            class_name = entry.split(":", 1)[1]
-            try:
-                ui_package = importlib.import_module(f"{module_root.name}.ui")
-            except Exception as exc:  # pragma: no cover - failure path
-                errors.append(f"ui 包无法导入: {exc.__class__.__name__}: {exc}")
-            else:
-                if not hasattr(ui_package, class_name):
-                    errors.append(f"ui_extension.entry 指向的页面未从 ui 包导出: {class_name}")
-
-    assembler_workflows = set(getattr(assembler, "workflows", {}).keys())
-    for workflow_name in workflow_names:
-        if workflow_name not in assembler_workflows:
-            errors.append(f"工作流未被 assembler 发现: {workflow_name}")
+    missing_pages = sorted(declared_pages - set(discovered_pages))
+    errors.extend(
+        f"module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: {page_id}"
+        for page_id in missing_pages
+    )
+    errors.extend(_collect_legacy_db_tool_usage_errors(module_root))
+    errors.extend(_collect_removed_task_context_usage_errors(module_root))
 
     return errors
 
 
-def _collect_lock_key_conflicts(schema: dict[str, Any]) -> list[str]:
-    raw_columns = schema.get("columns", [])
-    if not isinstance(raw_columns, list):
-        return []
-
-    conflicts: list[str] = []
-    for item in raw_columns:
-        if not isinstance(item, dict):
+def _iter_module_python_trees(module_root: Path):
+    for path in sorted(module_root.rglob("*.py")):
+        relative = path.relative_to(module_root)
+        if any(part in {".venv", "__pycache__", ".pytest_cache", ".ruff_cache"} for part in relative.parts):
             continue
-        key = str(item.get("key", "")).strip()
-        label = str(item.get("label", "")).strip()
-        if key in LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_KEYS or label in LOCK_KEY_BUSINESS_OCCUPANCY_COLUMN_LABELS:
-            conflicts.append(key or label)
-    return list(dict.fromkeys(conflicts))
+        text = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(text, filename=str(path))
+        except SyntaxError:
+            continue
+        yield relative, tree
 
 
-def _validate_lock_key_usage_for_sdk(view_id: str, schema: dict[str, Any]) -> None:
-    lock_key = str(schema.get("lock_key", "") or "").strip()
-    if not lock_key:
-        return
+def _collect_legacy_db_tool_usage_errors(module_root: Path) -> list[str]:
+    errors: list[str] = []
+    for relative, tree in _iter_module_python_trees(module_root):
+        legacy_calls = sorted(_collect_legacy_db_tool_call_lines(tree), key=int)
+        errors.extend(
+            f"{relative}:{line_no} 使用了已删除的旧数据库工具入口；请改用 ctx.db fluent API"
+            for line_no in legacy_calls
+        )
+    return errors
 
-    conflicts = _collect_lock_key_conflicts(schema)
-    if conflicts:
-        rendered = ", ".join(conflicts)
-        raise CLIError(
-            f"数据表 {view_id} 误用 lock_key：lock_key 只用于 Core 临时锁，"
-            f"不能与业务占用列同时声明；请删除这些列或移除 lock_key: {rendered}"
+
+def _collect_legacy_db_tool_call_lines(tree: ast.AST) -> list[int]:
+    visitor = _LegacyDbToolUsageVisitor()
+    visitor.visit(tree)
+    return visitor.lines
+
+
+class _LegacyDbToolUsageVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.lines: list[int] = []
+        self._tool_alias_scopes: list[set[str]] = [set()]
+
+    @property
+    def _aliases(self) -> set[str]:
+        return self._tool_alias_scopes[-1]
+
+    def _push_scope(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef) -> None:
+        aliases = set(self._aliases)
+        for name in _bound_argument_names(node):
+            aliases.discard(name)
+        self._tool_alias_scopes.append(aliases)
+
+    def _pop_scope(self) -> None:
+        self._tool_alias_scopes.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._push_scope(node)
+        self.generic_visit(node)
+        self._pop_scope()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._push_scope(node)
+        self.generic_visit(node)
+        self._pop_scope()
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._push_scope(node)
+        self.generic_visit(node)
+        self._pop_scope()
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._push_scope(node)
+        self.generic_visit(node)
+        self._pop_scope()
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.visit(node.value)
+        is_tools_alias = _is_tools_reference(node.value, self._aliases)
+        for target in node.targets:
+            self._update_alias_target(target, is_tools_alias=is_tools_alias)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self.visit(node.value)
+        is_tools_alias = node.value is not None and _is_tools_reference(node.value, self._aliases)
+        self._update_alias_target(node.target, is_tools_alias=is_tools_alias)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        self.visit(node.value)
+        self._update_alias_target(
+            node.target,
+            is_tools_alias=_is_tools_reference(node.value, self._aliases),
         )
 
+    def visit_Call(self, node: ast.Call) -> None:
+        if _is_legacy_db_tool_call(node, self._aliases):
+            self.lines.append(node.args[0].lineno)
+        self.generic_visit(node)
 
-class _DeclareUICheckLogger:
-    def debug(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-    def info(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-    def warning(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-    def error(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-    def exception(self, message: str, environment_id: int | None = None) -> None:
-        return None
-
-
-class _DeclareUICheckTools:
-    def __init__(self) -> None:
-        self._schemas: dict[str, dict[str, Any]] = {}
-        self._datasets: dict[str, list[dict[str, Any]]] = {}
-        self._states: dict[str, Any] = {}
-        self._tool_specs = [
-            ToolSpec(name="db.acquire_lock", description="db.acquire_lock"),
-            ToolSpec(name="db.append_event", description="db.append_event"),
-            ToolSpec(name="db.exists_state", description="db.exists_state"),
-            ToolSpec(name="db.get_state", description="db.get_state"),
-            ToolSpec(name="db.is_locked", description="db.is_locked"),
-            ToolSpec(name="db.list_records", description="db.list_records"),
-            ToolSpec(name="db.query_events", description="db.query_events"),
-            ToolSpec(name="db.release_lock", description="db.release_lock"),
-            ToolSpec(name="db.replace_records", description="db.replace_records"),
-            ToolSpec(name="db.set_state", description="db.set_state"),
-            ToolSpec(name="ui.declare_data_table", description="ui.declare_data_table"),
-            ToolSpec(name="ui.get_data_table", description="ui.get_data_table"),
-        ]
-
-    def has_tool(self, tool_name: str) -> bool:
-        return tool_name in {spec.name for spec in self._tool_specs}
-
-    def list_tools(self) -> list[ToolSpec]:
-        return list(self._tool_specs)
-
-    def call(self, tool_name: str, /, **kwargs: Any) -> Any:
-        if tool_name == "ui.declare_data_table":
-            view_id = str(kwargs.get("view_id", "")).strip()
-            schema = dict(kwargs.get("schema") or {})
-            _validate_lock_key_usage_for_sdk(view_id, schema)
-            self._schemas[view_id] = schema
-            return True
-        if tool_name == "ui.get_data_table":
-            return dict(self._schemas.get(str(kwargs.get("view_id", "")).strip(), {}))
-        if tool_name == "db.list_records":
-            dataset = str(kwargs.get("dataset", "")).strip()
-            return [dict(row) for row in self._datasets.get(dataset, [])]
-        if tool_name == "db.replace_records":
-            dataset = str(kwargs.get("dataset", "")).strip()
-            records = kwargs.get("records") or []
-            self._datasets[dataset] = [dict(row) for row in records if isinstance(row, dict)]
-            return True
-        if tool_name == "db.append_event":
-            raise CLIError("declare_ui 不允许调用 db.append_event；UI 声明必须保持无副作用")
-        if tool_name == "db.query_events":
-            return []
-        if tool_name == "db.acquire_lock":
-            return True
-        if tool_name == "db.release_lock":
-            return True
-        if tool_name == "db.is_locked":
-            return False
-        if tool_name == "db.get_state":
-            return self._states.get(str(kwargs.get("key", "")).strip())
-        if tool_name == "db.set_state":
-            self._states[str(kwargs.get("key", "")).strip()] = kwargs.get("value")
-            return True
-        if tool_name == "db.exists_state":
-            return str(kwargs.get("key", "")).strip() in self._states
-        raise KeyError(f"Unknown check tool: {tool_name}")
+    def _update_alias_target(self, target: ast.AST, *, is_tools_alias: bool) -> None:
+        if isinstance(target, ast.Name):
+            if is_tools_alias:
+                self._aliases.add(target.id)
+            else:
+                self._aliases.discard(target.id)
+            return
+        if isinstance(target, ast.Starred):
+            self._update_alias_target(target.value, is_tools_alias=False)
+            return
+        if isinstance(target, ast.Tuple | ast.List):
+            for item in target.elts:
+                self._update_alias_target(item, is_tools_alias=False)
 
 
-def _validate_declared_data_tables(module_root: Path, module_runtime: Any) -> list[str]:
-    declare_ui = getattr(module_runtime, "declare_ui", None)
-    if declare_ui is None:
-        return []
-    if inspect.iscoroutinefunction(declare_ui):
-        return ["module_runtime.declare_ui 必须是同步函数"]
+def _bound_argument_names(node: ast.AST) -> set[str]:
+    args = getattr(node, "args", None)
+    if not isinstance(args, ast.arguments):
+        return set()
+    bound: set[str] = set()
+    for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+        bound.add(arg.arg)
+    if args.vararg:
+        bound.add(args.vararg.arg)
+    if args.kwarg:
+        bound.add(args.kwarg.arg)
+    return bound
 
-    context = TaskContext(
-        env_id=0,
-        task_name=module_root.name,
-        config={},
-        logger=_DeclareUICheckLogger(),
-        tools=_DeclareUICheckTools(),
-        runtime={},
+
+def _is_tools_reference(node: ast.AST, aliases: set[str]) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "tools"
+    ) or (isinstance(node, ast.Name) and node.id in aliases)
+
+
+def _is_legacy_db_tool_call(node: ast.AST, aliases: set[str] | None = None) -> bool:
+    tool_aliases = aliases or set()
+    if not isinstance(node, ast.Call):
+        return False
+    if not isinstance(node.func, ast.Attribute) or node.func.attr not in {"call", "has_tool"}:
+        return False
+    if not _is_tools_reference(node.func.value, tool_aliases):
+        return False
+    if not node.args:
+        return False
+    first_arg = node.args[0]
+    return isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str) and first_arg.value.startswith("db.")
+
+
+def _collect_removed_task_context_usage_errors(module_root: Path) -> list[str]:
+    errors: list[str] = []
+    for relative, tree in _iter_module_python_trees(module_root):
+        captured_data_accesses = sorted(
+            (node.lineno for node in ast.walk(tree) if _is_removed_captured_data_access(node)),
+            key=int,
+        )
+        errors.extend(
+            f"{relative}:{line_no} 使用了已删除的 ctx.captured_data；临时状态请用 ctx.state，任务输出请返回 TaskResult.data"
+            for line_no in captured_data_accesses
+        )
+    return errors
+
+
+def _is_removed_captured_data_access(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "captured_data"
+
+
+def _iter_inline_tables(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    tables: list[dict[str, Any]] = []
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        if str(child.get("type") or "") == "DataTable":
+            tables.append(child)
+            continue
+        nested = child.get("children")
+        if isinstance(nested, list):
+            tables.extend(_iter_inline_tables(nested))
+    return tables
+
+
+def _validate_inline_table_handlers(
+    owner_module: Any,
+    page_id: str,
+    page_schema: dict[str, Any],
+    *,
+    owner_label: str,
+) -> list[str]:
+    errors: list[str] = []
+    children = page_schema.get("children")
+    if not isinstance(children, list):
+        return errors
+    for table_schema in _iter_inline_tables(children):
+        data_source = table_schema.get("data_source")
+        if not isinstance(data_source, dict):
+            continue
+        if str(data_source.get("type") or "").strip().lower() != "query_handler":
+            continue
+        handler_name = str(data_source.get("handler") or "").strip()
+        if not handler_name:
+            continue
+        table_id = str(table_schema.get("table_id") or "").strip()
+        error = _validate_runtime_handler(
+            owner_module,
+            owner_label=f"{owner_label} 的内联表格 {table_id or '<empty>'}",
+            handler_field="data_source.handler",
+            handler_name=handler_name,
+            runtime_call_label="(context, table_id, query, params)",
+            call_args=(table_id, {}, None),
+        )
+        if error:
+            errors.append(error)
+    return errors
+
+
+def _validate_runtime_handler(
+    owner_module: Any,
+    *,
+    owner_label: str,
+    handler_field: str,
+    handler_name: str,
+    runtime_call_label: str,
+    call_args: tuple[Any, ...],
+) -> str | None:
+    handler = getattr(owner_module, handler_name, None)
+    if handler is None or not callable(handler):
+        return f"{owner_label} 的 {handler_field} 未定义: {handler_name}"
+    handler_call = getattr(handler, "__call__", None)
+    if inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(handler_call):
+        return f"{owner_label} 的 {handler_field} 必须是同步函数: {handler_name}"
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError) as exc:
+        return f"{owner_label} 的 {handler_field} 无法解析签名: {handler_name} ({exc})"
+    try:
+        signature.bind(object(), *call_args)
+    except TypeError:
+        return (
+            f"{owner_label} 的 {handler_field} 签名不兼容，"
+            f"运行时会按 {runtime_call_label} 调用: {handler_name}"
+        )
+    return None
+
+
+def cmd_data_list(args: argparse.Namespace) -> int:
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    data = _normalize_data_section(manifest)
+    for section in ("resources", "views", "queries", "seeds"):
+        entries = data[section]
+        labels = ", ".join(str(item.get("id", "")) for item in entries if isinstance(item, dict) and item.get("id"))
+        print(f"{section}: {labels or '(无)'}")
+    return 0
+
+
+def cmd_data_resource_create(args: argparse.Namespace) -> int:
+    module_root = require_module_root()
+    resource_id = str(args.name or "").strip()
+    if not is_valid_name(resource_id):
+        _print_error("资源名必须是小写 snake_case")
+        return 1
+    storage_mode = str(args.storage_mode or "managed_dataset").strip().lower()
+    if storage_mode not in {"managed_dataset", "custom_table"}:
+        _print_error("storage_mode 只支持 managed_dataset/custom_table")
+        return 1
+    record_key_field = str(args.record_key_field or "id").strip()
+    if not is_valid_name(record_key_field):
+        _print_error("record_key_field 必须是小写 snake_case")
+        return 1
+
+    manifest = load_manifest(module_root)
+    try:
+        payload: dict[str, Any] = {
+            "id": resource_id,
+            "storage_mode": storage_mode,
+            "record_key_field": record_key_field,
+            "indexes": {},
+            "cleanup_policy": "drop_table" if storage_mode == "custom_table" else "delete_rows",
+        }
+        if storage_mode == "custom_table":
+            payload["schema"] = {
+                "version": 1,
+                "columns": [
+                    {"key": record_key_field, "type": "text", "required": True},
+                ],
+            }
+        else:
+            payload["schema"] = {
+                "version": 1,
+                "columns": [
+                    {"key": record_key_field, "type": "text", "required": True},
+                ],
+            }
+        _append_unique_data_entry(manifest, "resources", resource_id, payload)
+        save_manifest(module_root, manifest)
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已登记数据资源: {resource_id}")
+    return 0
+
+
+def cmd_data_view_create(args: argparse.Namespace) -> int:
+    module_root = require_module_root()
+    view_id = str(args.name or "").strip()
+    if not is_valid_name(view_id):
+        _print_error("视图名必须是小写 snake_case")
+        return 1
+
+    manifest = load_manifest(module_root)
+    try:
+        source_ids, first_resource = _resolve_custom_table_sources(
+            manifest,
+            args.source,
+            owner_label="视图",
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    record_key_field = str(first_resource.get("record_key_field") or "id").strip() or "id"
+    sql_path = f"data/sql/views/{view_id}.sql"
+    sql_template = f"SELECT {record_key_field}\nFROM {{{{resource:{source_ids[0]}}}}}\n"
+
+    try:
+        _write_text(module_root / sql_path, sql_template, force=args.force)
+        _append_unique_data_entry(
+            manifest,
+            "views",
+            view_id,
+            {
+                "id": view_id,
+                "view_kind": "sql_view",
+                "source_resource_ids": source_ids,
+                "sql_file": sql_path,
+                "columns": [
+                    {
+                        "name": record_key_field,
+                        "type": "text",
+                        "nullable": False,
+                        "filterable": True,
+                        "sortable": True,
+                    }
+                ],
+                "cleanup_policy": "drop_view",
+                "schema_version": 1,
+            },
+        )
+        save_manifest(module_root, manifest)
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已创建视图骨架: {view_id}")
+    return 0
+
+
+def cmd_data_query_create(args: argparse.Namespace) -> int:
+    module_root = require_module_root()
+    query_id = str(args.name or "").strip()
+    if not is_valid_name(query_id):
+        _print_error("查询名必须是小写 snake_case")
+        return 1
+
+    manifest = load_manifest(module_root)
+    try:
+        source_ids, first_resource = _resolve_custom_table_sources(
+            manifest,
+            args.source,
+            owner_label="命名查询",
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    record_key_field = str(first_resource.get("record_key_field") or "id").strip() or "id"
+    sql_path = f"data/sql/queries/{query_id}.sql"
+    sql_template = (
+        f"SELECT {record_key_field}\n"
+        f"FROM {{{{resource:{source_ids[0]}}}}}\n"
+        f"WHERE {record_key_field} = :{record_key_field}\n"
+        "LIMIT 1\n"
     )
     try:
-        declare_ui(context)
+        _write_text(module_root / sql_path, sql_template, force=args.force)
+        _append_unique_data_entry(
+            manifest,
+            "queries",
+            query_id,
+            {
+                "id": query_id,
+                "source_resource_ids": source_ids,
+                "sql_file": sql_path,
+                "params": [
+                    {"name": record_key_field, "type": "text", "required": True},
+                ],
+                "columns": [
+                    {"name": record_key_field, "type": "text", "nullable": False},
+                ],
+            },
+        )
+        save_manifest(module_root, manifest)
     except CLIError as exc:
-        return [str(exc)]
-    except Exception as exc:
-        return [f"declare_ui 校验失败: {exc.__class__.__name__}: {exc}"]
-    return []
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已创建命名查询骨架: {query_id}")
+    return 0
+
+
+def cmd_data_seed_create(args: argparse.Namespace) -> int:
+    module_root = require_module_root()
+    seed_id = str(args.name or "").strip()
+    if not is_valid_name(seed_id):
+        _print_error("种子名必须是小写 snake_case")
+        return 1
+    resource_id = str(args.resource or "").strip()
+    if not is_valid_name(resource_id):
+        _print_error("--resource 必须是已注册资源 ID")
+        return 1
+
+    manifest = load_manifest(module_root)
+    resource = _manifest_resource_entry(manifest, resource_id)
+    if resource is None:
+        _print_error(f"未找到资源: {resource_id}")
+        return 1
+
+    seed_path = f"data/seeds/{seed_id}.json"
+    payload = []
+    if str(resource.get("storage_mode") or "").strip().lower() == "custom_table":
+        payload = [{str(resource.get("record_key_field") or "id"): "sample-id"}]
+
+    try:
+        _write_text(module_root / seed_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n", force=args.force)
+        _append_unique_data_entry(
+            manifest,
+            "seeds",
+            seed_id,
+            {
+                "id": seed_id,
+                "resource_id": resource_id,
+                "file": seed_path,
+                "format": "json",
+                "mode": str(args.mode or "replace_if_empty").strip().lower(),
+            },
+        )
+        save_manifest(module_root, manifest)
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已创建种子骨架: {seed_id}")
+    return 0
 
 
 def _run_check(level: str, module_root: Path) -> int:
@@ -841,7 +1663,7 @@ def _run_check(level: str, module_root: Path) -> int:
     return 0
 
 
-def _archive_members(module_root: Path) -> list[tuple[Path, str]]:
+def _archive_members(module_root: Path, archive_root: str) -> list[tuple[Path, str]]:
     ignored_dirs = {
         ".git",
         ".idea",
@@ -868,7 +1690,7 @@ def _archive_members(module_root: Path) -> list[tuple[Path, str]]:
             continue
         if path.suffix in {".pyc", ".pyo"}:
             continue
-        arcname = f"{module_root.name}/{relative.as_posix()}"
+        arcname = f"{archive_root}/{relative.as_posix()}"
         members.append((path, arcname))
     return members
 
@@ -971,9 +1793,6 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     if output_dir.exists() and not output_dir.is_dir():
         _print_error(f"目标路径不是目录: {output_dir}")
         return 1
-    if output_dir.name != module_name:
-        _print_error("输出目录名必须与模块名一致，避免 module.yaml.name 与包目录漂移")
-        return 1
     if output_dir.exists() and any(output_dir.iterdir()) and not args.force:
         _print_error(f"目标目录已存在且非空: {output_dir}")
         return 1
@@ -982,11 +1801,24 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     description = args.description or f"{display_name} 模块"
     workflow_display_name = args.workflow_display_name or to_display_name(args.workflow_name)
     workflow_description = args.workflow_description or f"{workflow_display_name} 工作流"
-    sdk_dependency_spec = get_compatible_dependency_spec()
+    contracts_dependency_spec = get_compatible_contracts_dependency_spec()
+    sdk_dependency_spec = get_compatible_sdk_dependency_spec()
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    for subdir in ["tasks", "workflows", "ui", "tests"]:
-        _ensure_package_dir(output_dir / subdir)
+    for subdir in [
+        "tasks",
+        "workflows",
+        "pages",
+        "hooks",
+        "env_selectors",
+        "tests",
+        "data",
+        "data/sql",
+        "data/sql/views",
+        "data/sql/queries",
+        "data/seeds",
+    ]:
+        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     try:
         _write_text(
@@ -996,6 +1828,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
                 version=args.version,
                 display_name=display_name,
                 python_version=args.python_version,
+                contracts_dependency_spec=contracts_dependency_spec,
                 sdk_dependency_spec=sdk_dependency_spec,
             ),
             force=args.force,
@@ -1011,8 +1844,28 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             force=args.force,
         )
         _write_text(
-            output_dir / "module_runtime.py",
-            MODEL_RUNTIME_TEMPLATE.format(display_name=display_name),
+            output_dir / "tasks" / "__init__.py",
+            "",
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "workflows" / "__init__.py",
+            "",
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "pages" / "__init__.py",
+            MODEL_PAGES_INIT_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "hooks" / "__init__.py",
+            MODEL_HOOKS_INIT_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "env_selectors" / "__init__.py",
+            MODEL_SELECTORS_INIT_TEMPLATE,
             force=args.force,
         )
         _write_text(
@@ -1033,7 +1886,6 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             output_dir / "tasks" / "example_task.py",
             SCRIPT_TEMPLATE.format(
                 name="example_task",
-                class_name="ExampleTask",
                 display_name="示例任务",
                 description="示例任务脚本",
             ),
@@ -1043,13 +1895,29 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             output_dir / "workflows" / f"{args.workflow_name}.py",
             WORKFLOW_TEMPLATE.format(
                 name=args.workflow_name,
-                class_name=f"{to_class_name(args.workflow_name)}Workflow",
                 display_name=workflow_display_name,
                 description=workflow_description,
             ),
             force=args.force,
         )
+        for hook_name in HOOK_NAMES:
+            _write_text(
+                output_dir / "hooks" / f"{hook_name}.py",
+                render_hook_template(hook_name),
+                force=args.force,
+            )
+        _write_text(
+            output_dir / "env_selectors" / "return_none.py",
+            RETURN_NONE_SELECTOR_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "env_selectors" / "random_ready.py",
+            RANDOM_READY_SELECTOR_TEMPLATE,
+            force=args.force,
+        )
         _write_text(output_dir / "tests" / "test_tasks.py", MODEL_TEST_TASK_TEMPLATE, force=args.force)
+        _write_text(output_dir / "tests" / "__init__.py", "", force=args.force)
         _write_text(output_dir / ".gitignore", MODEL_GITIGNORE_TEMPLATE, force=args.force)
         _write_text(output_dir / ".python-version", f"{args.python_version}\n", force=args.force)
     except CLIError as exc:
@@ -1069,6 +1937,11 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     print("  - 命令入口: `crawler4j module show`")
     print("  - 新建任务: `crawler4j task create <name>`")
     print("  - 新建工作流: `crawler4j workflow create <name>`")
+    print("  - 新建页面: `crawler4j page create <page_id>`")
+    print("  - 新建 Hook: `crawler4j hook create <hook_name>`")
+    print("  - 新建选择器: `crawler4j env-selector create <name>`")
+    print("  - 新建数据资源: `crawler4j data resource create <name>`")
+    print("  - 新建命名查询: `crawler4j data query create <name> --source <resource>`")
     print("  - 完整校验: `crawler4j check full`")
     return 0
 
@@ -1078,27 +1951,30 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    ui_extension = manifest.get("ui_extension") or {}
-    detail_menu = ui_extension.get("detail_menu") or []
+    hosted_pages = _manifest_ui_pages(manifest)
     workflow_names = _manifest_workflow_names(manifest)
-    runtime_path = module_root / "module_runtime.py"
-    default_workflow = _read_default_workflow(runtime_path) or (workflow_names[0] if workflow_names else "")
+    default_workflow = _manifest_default_workflow(manifest) or (workflow_names[0] if workflow_names else "")
 
     print(f"模块目录: {module_root}")
     print(f"模块名: {manifest.get('name', '')}")
+    print(f"运行时协议: {manifest.get('runtime_api', '')}")
     print(f"版本: {manifest.get('version', '')}")
     print(f"仓库: {(manifest.get('upgrade_source') or {}).get('repo', '')}")
     print(f"默认工作流: {default_workflow}")
     print(f"任务: {', '.join(_list_python_modules(module_root / 'tasks')) or '(无)'}")
     print(f"工作流: {', '.join(workflow_names) or '(无)'}")
-    print(f"页面入口: {ui_extension.get('entry', '') or '(无)'}")
     print(
-        "数据表入口: "
+        "宿主页: "
         + (
-            ", ".join(str(item.get("id", "")) for item in detail_menu if isinstance(item, dict))
+            ", ".join(str(item.get("id", "")) for item in hosted_pages if item.get("id"))
             or "(无)"
         )
     )
+    data = manifest.get("data") if isinstance(manifest.get("data"), dict) else {}
+    for section in ("resources", "views", "queries", "seeds"):
+        items = data.get(section)
+        count = len(items) if isinstance(items, list) else 0
+        print(f"数据 {section}: {count}")
     return 0
 
 
@@ -1140,15 +2016,34 @@ def cmd_module_set_version(args: argparse.Namespace) -> int:
 
 
 def cmd_module_set_default_workflow(args: argparse.Namespace) -> int:
-    """Set DEFAULT_WORKFLOW inside module_runtime.py."""
+    """Set module.yaml.default_workflow."""
     module_root = require_module_root()
     manifest = load_manifest(module_root)
     workflow_name = str(args.workflow or "").strip()
     if workflow_name not in _manifest_workflow_names(manifest):
         _print_error(f"未声明的 workflow: {workflow_name}")
         return 1
-    _set_default_workflow(module_root / "module_runtime.py", workflow_name)
+    manifest["default_workflow"] = workflow_name
+    save_manifest(module_root, manifest)
     _print_success(f"已设置默认工作流: {workflow_name}")
+    return 0
+
+
+def cmd_module_repair_init(args: argparse.Namespace) -> int:
+    """Rebuild the module root __init__.py from the current standard template."""
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    try:
+        _write_text(
+            module_root / "__init__.py",
+            MODEL_MODULE_INIT.format(display_name=_module_display_name(module_root, manifest)),
+            force=True,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+    _print_success("已重建模块根包文件: __init__.py")
     return 0
 
 
@@ -1164,7 +2059,6 @@ def cmd_task_create(args: argparse.Namespace) -> int:
             module_root / "tasks" / f"{name}.py",
             SCRIPT_TEMPLATE.format(
                 name=name,
-                class_name=f"{to_class_name(name)}Task",
                 display_name=to_display_name(name),
                 description=f"{to_display_name(name)} 任务",
             ),
@@ -1199,7 +2093,6 @@ def cmd_workflow_create(args: argparse.Namespace) -> int:
             module_root / "workflows" / f"{name}.py",
             WORKFLOW_TEMPLATE.format(
                 name=name,
-                class_name=f"{to_class_name(name)}Workflow",
                 display_name=args.display_name or to_display_name(name),
                 description=args.description or f"{to_display_name(name)} 工作流",
             ),
@@ -1218,7 +2111,9 @@ def cmd_workflow_create(args: argparse.Namespace) -> int:
                 "description": args.description or f"{to_display_name(name)} 工作流",
             }
         )
-        save_manifest(module_root, manifest)
+    if not _manifest_default_workflow(manifest):
+        manifest["default_workflow"] = name
+    save_manifest(module_root, manifest)
     _print_success(f"已创建工作流: workflows/{name}.py")
     return 0
 
@@ -1234,147 +2129,168 @@ def cmd_workflow_list(args: argparse.Namespace) -> int:
 
 
 def cmd_page_create(args: argparse.Namespace) -> int:
-    """Create a code page under ui/ and set it as ui_extension.entry."""
+    """Create a hosted page scaffold inside pages/ and optionally add it to navigation."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
     if not is_valid_name(name):
         _print_error("页面名必须是小写 snake_case")
         return 1
-    class_name = f"{to_class_name(name)}Page"
     try:
-        _write_text(
-            module_root / "ui" / f"{name}.py",
-            MODEL_UI_PAGES_TEMPLATE.format(
-                display_name=args.display_name or to_display_name(name),
-                description=args.description or f"{to_display_name(name)} 页面",
-                class_name=class_name,
-            ),
-            force=args.force,
-        )
-        _ensure_package_export(module_root / "ui" / "__init__.py", name, class_name)
+        page_relative_path = _page_source_relative_path(name, group=getattr(args, "group", None))
     except CLIError as exc:
         _print_error(str(exc))
         return 1
 
     manifest = load_manifest(module_root)
-    ui_extension = manifest.setdefault("ui_extension", {})
-    if not isinstance(ui_extension, dict):
-        _print_error("module.yaml.ui_extension 必须是映射对象")
+    ui_errors = _validate_ui_extension(manifest)
+    if ui_errors:
+        _print_error("module.yaml.ui_extension 不符合 Hosted UI V1 契约")
+        for item in ui_errors:
+            print(f"  - {item}")
         return 1
-    ui_extension["type"] = "micro_app"
-    ui_extension["entry"] = f"ui:{class_name}"
-    save_manifest(module_root, manifest)
-    _print_success(f"已创建代码型页面: ui/{name}.py")
+    legacy_ui_errors = _collect_legacy_hosted_ui_errors(module_root)
+    if legacy_ui_errors:
+        _print_error("检测到旧 Hosted UI 产物，请先移除后再创建宿主页")
+        for item in legacy_ui_errors:
+            print(f"  - {item}")
+        return 1
+    _ensure_package_dir(module_root / "pages")
+    no_menu = bool(getattr(args, "no_menu", False))
+    if not no_menu:
+        pages = _normalize_ui_pages(manifest)
+        existing_page = next(
+            (item for item in pages if isinstance(item, dict) and item.get("id") == name),
+            None,
+        )
+        if existing_page is not None:
+            if not args.force:
+                _print_error(f"页面入口已存在: {name}")
+                return 1
+            existing_page["label"] = args.display_name or to_display_name(name)
+            existing_page["icon"] = "📄"
+        else:
+            pages.append(
+                {
+                    "id": name,
+                    "label": args.display_name or to_display_name(name),
+                    "icon": "📄",
+                }
+            )
+    try:
+        _write_text(
+            module_root / page_relative_path,
+            render_page_template(
+                page_id=name,
+                display_name=args.display_name or to_display_name(name),
+                description=args.description or f"{to_display_name(name)} 宿主页",
+            ),
+            force=args.force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    if not no_menu:
+        save_manifest(module_root, manifest)
+    _print_success(f"已创建宿主页骨架: {page_relative_path.as_posix()}")
     return 0
 
 
 def cmd_page_list(args: argparse.Namespace) -> int:
-    """List code pages under ui/."""
+    """List left-menu hosted pages declared in module.yaml."""
     del args
     module_root = require_module_root()
-    pages = _list_python_modules(module_root / "ui")
+    manifest = load_manifest(module_root)
+    pages = [str(item.get("id", "")) for item in _manifest_ui_pages(manifest) if item.get("id")]
     print("\n".join(pages) if pages else "(无页面)")
     return 0
 
 
-def cmd_data_table_create(args: argparse.Namespace) -> int:
-    """Register a managed core:data_table view and append a declare_ui helper."""
-    module_root = require_module_root()
-    view_id = str(args.view_id or "").strip()
-    if not is_valid_name(view_id):
-        _print_error("数据表 ID 必须是小写 snake_case")
-        return 1
-
-    manifest = load_manifest(module_root)
-    detail_menu = _normalize_detail_menu(manifest)
-    if any(isinstance(item, dict) and item.get("id") == view_id for item in detail_menu):
-        _print_error(f"数据表入口已存在: {view_id}")
-        return 1
-
-    detail_menu.append(
-        {
-            "id": view_id,
-            "label": args.label or to_display_name(view_id),
-            "icon": args.icon or "📋",
-            "entry": f"core:data_table:{view_id}",
-        }
-    )
-    save_manifest(module_root, manifest)
-
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    helper_name = f"_declare_{view_id}_table"
-    if helper_name not in runtime_text:
-        runtime_text += DATA_TABLE_HELPER_TEMPLATE.format(
-            view_id=view_id,
-            display_name=args.label or to_display_name(view_id),
-        )
-
-    sentinel = "    # SDK-DATA-TABLES"
-    call_line = f"    {helper_name}(context)"
-    if call_line not in runtime_text and sentinel in runtime_text:
-        runtime_text = runtime_text.replace(sentinel, f"{call_line}\n{sentinel}", 1)
-
-    runtime_path.write_text(runtime_text, encoding="utf-8")
-    _print_success(f"已注册受控数据表入口: core:data_table:{view_id}")
-    return 0
-
-
-def cmd_data_table_list(args: argparse.Namespace) -> int:
-    """List managed data-table entries from module.yaml."""
-    del args
-    module_root = require_module_root()
-    manifest = load_manifest(module_root)
-    detail_menu = ((manifest.get("ui_extension") or {}).get("detail_menu") or [])
-    rows = [
-        str(item.get("id", ""))
-        for item in detail_menu
-        if isinstance(item, dict) and item.get("id")
-    ]
-    print("\n".join(rows) if rows else "(无数据表入口)")
-    return 0
-
-
 def cmd_env_selector_create(args: argparse.Namespace) -> int:
-    """Append a new env_selector function into module_runtime.py."""
+    """Create a new env-selector module under env_selectors/."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
+    force = bool(getattr(args, "force", False))
     if not is_valid_name(name):
         _print_error("环境选择器名必须是小写 snake_case")
         return 1
-    runtime_path = module_root / "module_runtime.py"
-    text = runtime_path.read_text(encoding="utf-8")
-    if f'name="{name}"' in text or f"name='{name}'" in text:
+    _ensure_package_dir(module_root / "env_selectors")
+    selector_path = module_root / "env_selectors" / f"{name}.py"
+    if selector_path.exists() and not force:
         _print_error(f"环境选择器已存在: {name}")
         return 1
-    text += ENV_SELECTOR_TEMPLATE.format(
-        name=name,
-        display_name=args.display_name or to_display_name(name),
-        description=args.description or f"{to_display_name(name)} 环境选择器",
-        function_name=f"{name}_selector",
-    )
-    runtime_path.write_text(text, encoding="utf-8")
-    _print_success(f"已创建环境选择器: {name}")
+    try:
+        _write_text(
+            selector_path,
+            render_selector_template(
+                name=name,
+                display_name=args.display_name or to_display_name(name),
+                description=args.description or f"{to_display_name(name)} 环境选择器",
+            ),
+            force=force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+    _print_success(f"已创建环境选择器: env_selectors/{name}.py")
     return 0
 
 
 def cmd_env_selector_list(args: argparse.Namespace) -> int:
-    """List env_selector declarations."""
+    """List env-selector declarations."""
     del args
     module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    module_name = _resolve_module_import_name(module_root, manifest)
+    selectors: list[str] = []
+    for selector_name in _list_python_modules(module_root / "env_selectors"):
+        try:
+            module = _import_module_child(module_root, module_name, "env_selectors", selector_name)
+        except Exception as exc:
+            _print_error(f"读取环境选择器失败: {exc.__class__.__name__}: {exc}")
+            return 1
+        selector = getattr(module, "SELECTOR", None)
+        if not isinstance(selector, EnvSelectorSpec):
+            _print_error(f"env_selectors/{selector_name}.py 缺少 SELECTOR")
+            return 1
+        selectors.append(selector.name)
+
+    print("\n".join(selectors) if selectors else "(无环境选择器)")
+    return 0
+
+
+def cmd_hook_create(args: argparse.Namespace) -> int:
+    """Create or refresh a lifecycle hook scaffold under hooks/."""
+    module_root = require_module_root()
+    name = str(args.name or "").strip()
+    force = bool(getattr(args, "force", False))
+    if not _is_known_hook(name):
+        _print_error("Hook 名必须是标准生命周期入口之一")
+        return 1
+
+    _ensure_package_dir(module_root / "hooks")
+
     try:
-        module = _import_module_root(module_root)
-        assembler = getattr(module, "assembler", None)
-        selectors = []
-        if assembler and hasattr(assembler, "list_env_selectors"):
-            selectors = [item.name for item in assembler.list_env_selectors()]
-        print("\n".join(selectors) if selectors else "(无环境选择器)")
-        return 0
-    except Exception:
-        runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
-        names = re.findall(r'name\s*=\s*["\']([a-z][a-z0-9_]*)["\']', runtime_text)
-        print("\n".join(sorted(set(names))) if names else "(无环境选择器)")
-        return 0
+        _write_text(
+            module_root / "hooks" / f"{name}.py",
+            render_hook_template(name),
+            force=force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
+    _print_success(f"已创建 Hook 骨架: hooks/{name}.py")
+    return 0
+
+
+def cmd_hook_list(args: argparse.Namespace) -> int:
+    """List lifecycle hook files in hooks/."""
+    del args
+    module_root = require_module_root()
+    hooks = _list_python_modules(module_root / "hooks")
+    print("\n".join(hooks) if hooks else "(无 Hook)")
+    return 0
 
 
 def cmd_config_show(args: argparse.Namespace) -> int:
@@ -1437,20 +2353,21 @@ def cmd_config_lint(args: argparse.Namespace) -> int:
 def cmd_package_build(args: argparse.Namespace) -> int:
     """Build an installable single-root ZIP package for the current module."""
     module_root = require_module_root()
-    if _run_check("release", module_root) != 0:
+    if _run_check("full", module_root) != 0:
         return 1
 
     manifest = load_manifest(module_root)
+    archive_root = _resolve_module_import_name(module_root, manifest)
     version = str(manifest.get("version", "") or "").strip()
     output = (
         Path(args.output).expanduser().resolve()
         if args.output
-        else module_root / "dist" / f"{module_root.name}-{version}.zip"
+        else module_root / "dist" / f"{archive_root}-{version}.zip"
     )
     output.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for source, arcname in _archive_members(module_root):
+        for source, arcname in _archive_members(module_root, archive_root):
             zf.write(source, arcname)
 
     try:
@@ -1475,7 +2392,7 @@ def cmd_package_verify(args: argparse.Namespace) -> int:
         _validate_archive_structure(archive_path)
         extracted_root = _extract_archive_to_temp(archive_path)
         manifest = load_manifest(extracted_root)
-        errors = collect_release_errors(extracted_root, manifest)
+        errors = collect_full_errors(extracted_root, manifest)
     except (CLIError, zipfile.BadZipFile) as exc:
         _print_error(str(exc))
         return 1
@@ -1499,9 +2416,10 @@ def cmd_release_status(args: argparse.Namespace) -> int:
     module_root = require_module_root()
     manifest = load_manifest(module_root)
     errors = collect_release_errors(module_root, manifest)
+    archive_root = _resolve_module_import_name(module_root, manifest)
     version = str(manifest.get("version", "") or "").strip()
     repo = str((manifest.get("upgrade_source") or {}).get("repo", "") or "").strip()
-    archive_path = module_root / "dist" / f"{module_root.name}-{version}.zip"
+    archive_path = module_root / "dist" / f"{archive_root}-{version}.zip"
 
     print(f"模块: {manifest.get('name', '')}")
     print(f"版本: {version}")
@@ -1556,6 +2474,7 @@ def cmd_release_publish(args: argparse.Namespace) -> int:
     """Publish the local ZIP asset to a GitHub Release via gh CLI."""
     module_root = require_module_root()
     manifest = load_manifest(module_root)
+    archive_root = _resolve_module_import_name(module_root, manifest)
     repo = str((manifest.get("upgrade_source") or {}).get("repo", "") or "").strip()
     version = str(manifest.get("version", "") or "").strip()
     if not is_valid_repo(repo):
@@ -1570,7 +2489,7 @@ def cmd_release_publish(args: argparse.Namespace) -> int:
     archive_path = (
         Path(args.archive).expanduser().resolve()
         if args.archive
-        else module_root / "dist" / f"{module_root.name}-{version}.zip"
+        else module_root / "dist" / f"{archive_root}-{version}.zip"
     )
 
     if args.rebuild or not archive_path.exists():
@@ -1911,7 +2830,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="crawler4j",
         description="Crawler4j SDK 模块工程 CLI",
     )
-    subparsers = parser.add_subparsers(dest="group")
+    subparsers = parser.add_subparsers(dest="command")
 
     module_parser = subparsers.add_parser(
         "module",
@@ -1921,7 +2840,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_init = module_sub.add_parser(
         "init",
-        help="初始化一个新的模块项目，生成标准骨架、module.yaml 和 module_runtime.py",
+        help="初始化一个新的模块项目，生成 core-native-v1 标准骨架与 module.yaml",
     )
     module_init.add_argument("name", help="模块包名，必须是 snake_case")
     module_init.add_argument("--repo", required=True, help="升级源 GitHub 仓库，格式 owner/repo")
@@ -1940,13 +2859,111 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_show = module_sub.add_parser(
         "show",
-        help="显示当前模块的版本、仓库、默认工作流、页面入口和数据表入口",
+        help="显示当前模块的版本、仓库、默认工作流和宿主页入口",
     )
     module_show.set_defaults(func=cmd_module_show)
 
+    module_repair_init = module_sub.add_parser(
+        "repair-init",
+        help="按当前标准模板重建模块根 __init__.py，不修改其他脚手架文件",
+    )
+    module_repair_init.set_defaults(func=cmd_module_repair_init)
+
+    data_parser = subparsers.add_parser(
+        "data",
+        help="数据契约操作：维护 module.yaml.data 以及 data/sql、data/seeds 脚手架",
+    )
+    data_sub = data_parser.add_subparsers(dest="action")
+
+    data_list = data_sub.add_parser(
+        "list",
+        help="列出当前模块已声明的数据资源、视图、命名查询和种子",
+    )
+    data_list.set_defaults(func=cmd_data_list)
+
+    data_resource = data_sub.add_parser(
+        "resource",
+        help="创建并登记 module.yaml.data.resources 条目",
+    )
+    data_resource_sub = data_resource.add_subparsers(dest="subaction")
+    data_resource_create = data_resource_sub.add_parser(
+        "create",
+        help="创建一个数据资源骨架",
+    )
+    data_resource_create.add_argument("name", help="资源名，snake_case")
+    data_resource_create.add_argument(
+        "--storage-mode",
+        default="managed_dataset",
+        help="存储模式：managed_dataset 或 custom_table",
+    )
+    data_resource_create.add_argument(
+        "--record-key-field",
+        default="id",
+        help="记录主键字段，默认 id",
+    )
+    data_resource_create.set_defaults(func=cmd_data_resource_create)
+
+    data_view = data_sub.add_parser(
+        "view",
+        help="创建并登记 module.yaml.data.views 条目及 SQL 文件",
+    )
+    data_view_sub = data_view.add_subparsers(dest="subaction")
+    data_view_create = data_view_sub.add_parser(
+        "create",
+        help="创建一个数据库视图骨架",
+    )
+    data_view_create.add_argument("name", help="视图名，snake_case")
+    data_view_create.add_argument(
+        "--source",
+        action="append",
+        required=True,
+        help="来源资源 ID，可重复传入多个；仅支持 custom_table",
+    )
+    data_view_create.add_argument("--force", action="store_true", help="允许覆盖已有 SQL 文件")
+    data_view_create.set_defaults(func=cmd_data_view_create)
+
+    data_query = data_sub.add_parser(
+        "query",
+        help="创建并登记 module.yaml.data.queries 条目及 SQL 文件",
+    )
+    data_query_sub = data_query.add_subparsers(dest="subaction")
+    data_query_create = data_query_sub.add_parser(
+        "create",
+        help="创建一个命名查询骨架",
+    )
+    data_query_create.add_argument("name", help="查询名，snake_case")
+    data_query_create.add_argument(
+        "--source",
+        action="append",
+        required=True,
+        help="来源资源 ID，可重复传入多个；仅支持 custom_table",
+    )
+    data_query_create.add_argument("--force", action="store_true", help="允许覆盖已有 SQL 文件")
+    data_query_create.set_defaults(func=cmd_data_query_create)
+
+    data_seed = data_sub.add_parser(
+        "seed",
+        help="创建并登记 module.yaml.data.seeds 条目及种子文件",
+    )
+    data_seed_sub = data_seed.add_subparsers(dest="subaction")
+    data_seed_create = data_seed_sub.add_parser(
+        "create",
+        help="创建一个种子文件骨架",
+    )
+    data_seed_create.add_argument("name", help="种子名，snake_case")
+    data_seed_create.add_argument("--resource", required=True, help="目标资源 ID")
+    data_seed_create.add_argument(
+        "--mode",
+        default="replace_if_empty",
+        choices=["replace", "replace_if_empty"],
+        help="导入模式",
+    )
+    data_seed_create.add_argument("--force", action="store_true", help="允许覆盖已有种子文件")
+    data_seed_create.set_defaults(func=cmd_data_seed_create)
+
     module_set = module_sub.add_parser(
         "set",
-        help="修改 module.yaml 或 module_runtime.py 中的关键字段",
+        help="修改 module.yaml 中的关键字段",
     )
     module_set_sub = module_set.add_subparsers(dest="field")
 
@@ -1966,19 +2983,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_set_default_workflow = module_set_sub.add_parser(
         "default-workflow",
-        help="设置 module_runtime.py 里的 DEFAULT_WORKFLOW",
+        help="设置 module.yaml.default_workflow",
     )
     module_set_default_workflow.add_argument("workflow", help="已声明的 workflow 名称")
     module_set_default_workflow.set_defaults(func=cmd_module_set_default_workflow)
 
     task_parser = subparsers.add_parser(
         "task",
-        help="任务脚本操作：在 tasks/ 下创建或列出 TaskScript 文件",
+        help="任务脚本操作：在 tasks/ 下创建或列出 TASK/execute 文件",
     )
     task_sub = task_parser.add_subparsers(dest="action")
     task_create = task_sub.add_parser(
         "create",
-        help="创建一个新的 TaskScript 文件，不会修改 module.yaml",
+        help="创建一个新的 TASK/execute 文件，不会修改 module.yaml",
     )
     task_create.add_argument("name", help="任务名，snake_case")
     task_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
@@ -2005,52 +3022,54 @@ def build_parser() -> argparse.ArgumentParser:
 
     page_parser = subparsers.add_parser(
         "page",
-        help="代码型页面操作：生成 ui 页面类并维护 ui_extension.entry",
+        help="宿主页操作：在 pages/ 生成 hosted page 骨架并按需维护 ui_extension.pages",
     )
     page_sub = page_parser.add_subparsers(dest="action")
     page_create = page_sub.add_parser(
         "create",
-        help="创建一个代码型页面，并把它设置为 ui_extension.entry",
+        help="创建一个宿主页骨架；默认注册到左侧菜单，可用 --no-menu 只创建可路由页面",
     )
     page_create.add_argument("name", help="页面名，snake_case")
+    page_create.add_argument("--group", help="可选源码分组目录，单层 snake_case；例如 account")
+    page_create.add_argument("--no-menu", action="store_true", help="只创建页面文件，不写入左侧菜单配置")
     page_create.add_argument("--display-name", help="页面显示名")
     page_create.add_argument("--description", help="页面说明")
     page_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     page_create.set_defaults(func=cmd_page_create)
-    page_list = page_sub.add_parser("list", help="列出 ui/ 下的代码型页面文件")
+    page_list = page_sub.add_parser("list", help="列出 ui_extension.pages 中的左侧菜单入口")
     page_list.set_defaults(func=cmd_page_list)
-
-    data_table_parser = subparsers.add_parser(
-        "data-table",
-        help="受控数据表操作：注册 core:data_table:<id> 入口并补 declare_ui 骨架",
-    )
-    data_table_sub = data_table_parser.add_subparsers(dest="action")
-    data_table_create = data_table_sub.add_parser(
-        "create",
-        help="创建一个受控数据表入口，会更新 detail_menu 并在 module_runtime.py 追加声明函数",
-    )
-    data_table_create.add_argument("view_id", help="数据表视图 ID，snake_case")
-    data_table_create.add_argument("--label", help="数据表显示名")
-    data_table_create.add_argument("--icon", help="数据表图标")
-    data_table_create.set_defaults(func=cmd_data_table_create)
-    data_table_list = data_table_sub.add_parser("list", help="列出 detail_menu 中的受控数据表入口")
-    data_table_list.set_defaults(func=cmd_data_table_list)
 
     selector_parser = subparsers.add_parser(
         "env-selector",
-        help="环境选择器操作：在 module_runtime.py 中声明 @env_selector(...) 函数",
+        help="环境选择器操作：在 env_selectors/ 中声明 SELECTOR/select 文件",
     )
     selector_sub = selector_parser.add_subparsers(dest="action")
     selector_create = selector_sub.add_parser(
         "create",
-        help="创建一个环境选择策略函数，用于 ATM 的“选择环境”模式",
+        help="创建一个环境选择策略文件，用于 ATM 的“选择环境”模式",
     )
     selector_create.add_argument("name", help="选择器名，snake_case")
     selector_create.add_argument("--display-name", help="显示名")
     selector_create.add_argument("--description", help="说明")
+    selector_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     selector_create.set_defaults(func=cmd_env_selector_create)
     selector_list = selector_sub.add_parser("list", help="列出模块声明的环境选择器")
     selector_list.set_defaults(func=cmd_env_selector_list)
+
+    hook_parser = subparsers.add_parser(
+        "hook",
+        help="生命周期 Hook 操作：在 hooks/ 中生成标准 Hook 文件",
+    )
+    hook_sub = hook_parser.add_subparsers(dest="action")
+    hook_create = hook_sub.add_parser(
+        "create",
+        help="创建或重建一个标准生命周期 Hook 文件",
+    )
+    hook_create.add_argument("name", choices=HOOK_NAMES, help="Hook 名")
+    hook_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    hook_create.set_defaults(func=cmd_hook_create)
+    hook_list = hook_sub.add_parser("list", help="列出 hooks/ 下已有的 Hook 文件")
+    hook_list.set_defaults(func=cmd_hook_list)
 
     config_parser = subparsers.add_parser(
         "config",
@@ -2261,7 +3280,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_sub = check_parser.add_subparsers(dest="level")
     check_structure = check_sub.add_parser(
         "structure",
-        help="检查 module.yaml、module_runtime.py、目录结构、workflow 声明和 UI 入口格式",
+        help="检查 module.yaml、core-native-v1 目录结构、workflow 声明和 UI 入口格式",
     )
     check_structure.set_defaults(func=cmd_check_structure)
     check_release = check_sub.add_parser(
@@ -2271,7 +3290,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_release.set_defaults(func=cmd_check_release)
     check_full = check_sub.add_parser(
         "full",
-        help="在 release 基础上再尝试导入模块、任务、工作流和页面入口，作为完整 gate",
+        help="在 release 基础上再尝试导入模块文件并校验 TASK/WORKFLOW/SELECTOR/PAGE 导出，作为完整 gate",
     )
     check_full.set_defaults(func=cmd_check_full)
 
@@ -2282,7 +3301,7 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point for the crawler4j CLI."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not getattr(args, "group", None):
+    if not getattr(args, "command", None):
         parser.print_help()
         return 0
     if not hasattr(args, "func"):

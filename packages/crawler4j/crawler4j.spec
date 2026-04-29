@@ -22,9 +22,9 @@ WORKSPACE_ROOT = PROJECT_ROOT.parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 PROJECT_METADATA = PROJECT_ROOT / "pyproject.toml"
 APP_ENTRY = PROJECT_ROOT / "src" / "ui" / "app.py"
-UI_STYLE = PROJECT_ROOT / "src" / "ui" / "styles" / "dark_theme.qss"
 RUNTIME_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "app_icon.png"
-BUNDLE_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "app_icon.icns"
+MACOS_BUNDLE_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "app_icon.icns"
+WINDOWS_BUNDLE_ICON = PROJECT_ROOT / "src" / "ui" / "assets" / "app_icon.ico"
 MODULES_DIR = PROJECT_ROOT / "modules"
 DOCS_ROOT = WORKSPACE_ROOT / "docs"
 PROJECT_VERSION = _load_project_version(PROJECT_METADATA)
@@ -32,6 +32,7 @@ PYINSTALLER_SUPPORT_ROOT = PROJECT_ROOT / "build" / "pyinstaller-support"
 DEBUGPY_ROOT = Path(debugpy.__file__).resolve().parent
 DEBUGPY_VENDORED_PYDEVD_ROOT = DEBUGPY_ROOT / "_vendored" / "pydevd"
 IS_MAC = sys.platform == "darwin"
+IS_WINDOWS = sys.platform.startswith("win")
 WORKSPACE_RUNTIME_DISTS = {
     "crawler4j_contracts": "crawler4j-contracts",
     "crawler4j_sdk": "crawler4j-sdk",
@@ -66,7 +67,6 @@ def _build_single_file_module_resource_datas() -> list[tuple[str, str]]:
 def _build_datas() -> list[tuple[str, str]]:
     datas = [
         (str(PROJECT_METADATA), "."),
-        (str(UI_STYLE), "src/ui/styles"),
         (str(RUNTIME_ICON), "src/ui/assets"),
         (str(DOCS_ROOT / "index.md"), "docs"),
         (str(DOCS_ROOT / "01-getting-started"), "docs/01-getting-started"),
@@ -162,7 +162,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    icon=str(BUNDLE_ICON) if IS_MAC else None,
+    icon=str(MACOS_BUNDLE_ICON) if IS_MAC else str(WINDOWS_BUNDLE_ICON) if IS_WINDOWS else None,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
@@ -182,7 +182,7 @@ if IS_MAC:
     app = BUNDLE(
         coll,
         name="Crawler4j.app",
-        icon=str(BUNDLE_ICON),
+        icon=str(MACOS_BUNDLE_ICON),
         bundle_identifier="com.crawler4j.app",
         version=PROJECT_VERSION,
     )

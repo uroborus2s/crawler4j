@@ -1,299 +1,146 @@
 # 调试模块
 
-当前正式支持的模块调试路径只有一条:
+模块调试主线固定为：
 
-1. 在 `📦 模块管理` 把本地模块目录注册成 DevLink
-2. 在 `📋 任务监控` 创建或选择作业
-3. 用 `▶ 执行一次` 或 `🐞 调试` 运行
-4. 看任务详情、任务日志和 `📊 仪表盘` 的系统实时日志
+1. 在模块工程里先跑本地校验
+2. 用 DevLink 把源码目录接到宿主
+3. 在 ATM 先执行一次
+4. 需要断点时再附加 `debugpy`
 
-不要再回退到旧的临时脚本调试模式。
-也不要把“主程序本身由 VS Code launch 调试启动”和“任务 worker 通过 `Attach to Crawler4j` 单独附加”混在同一轮里；任务 attach 调试默认假设宿主是正常启动，而不是另一条 VS Code debug 会话里的子进程。
+不要再单独维护模块根运行薄壳，也不要为调试临时发明第二套入口。
 
-先把两个词记死:
+## 1. 先在模块工程里自检
 
-- DevLink = 宿主直接加载你的本地模块源码目录
-- ATM = 宿主里的 `📋 任务监控`
+最小命令集：
 
-进入“可调试状态”的最小判据只有 3 个:
+```bash
+uv run crawler4j check structure
+uv run crawler4j check full
+uv run crawler4j task list
+uv run crawler4j workflow list
+uv run crawler4j page list
+uv run crawler4j env-selector list
+uv run crawler4j data list
+```
 
-1. 模块详情页显示 `来源: 开发链接`
-2. 任务监控里已经创建出绑定这个模块的作业
-3. 作业行上能看到 `▶ 执行一次`，DevLink 模块还能看到 `🐞 调试`
+这一层优先确认 5 件事：
 
-## 最短路径
+- `module.yaml.runtime_api == core-native-v1`
+- `default_workflow` 与 `module.yaml.workflows` 一致
+- Core 规定的导出对象都存在
+- `module.yaml.data`、`data/sql`、`data/seeds` 结构合法
+- `PAGE.id`、同步 `load_handler`、表格 `query_handler`、环境选择器都能通过 gate
 
-如果你只想照抄执行，按这个顺序走:
+## 2. 注册 DevLink
 
-1. `📦 模块管理` -> `🔗 添加开发模块`
-2. 模块详情页确认 `来源: 开发链接`
-3. `📋 任务监控` -> `+ 新建作业`
-4. `配置运行模板` 里选中目标模块和 workflow
-5. 触发方式选 `执行一次`
-6. 返回列表点 `▶ 执行一次`
-7. 需要断点时再点 `🐞 调试`
+切到宿主环境后：
 
-## DevLink 是什么
+```bash
+uv run python -c "import src.core; print('ok: host runtime ready')"
+uv run crawler4j host devlink add /abs/path/to/module
+```
 
-DevLink 的作用只有一个:
+进入开发调试态的最小判据：
 
-- 让宿主直接加载你的本地源码目录，便于反复修改和调试
+1. 模块详情页来源显示 `开发链接`
+2. ATM 能选到这个模块
+3. DevLink 模块可以执行 `执行一次`，也可以进入 `调试`
 
-DevLink 不是:
+## 3. 先执行一次，再断点
 
-- 正式交付方式
-- 生产安装方式
-- 替代 ZIP 的升级机制
+第一次联调建议只保留：
 
-## 第一步: 挂载 DevLink
+- 1 个工作流
+- 1 到 2 个任务
+- 明确的阶段日志
 
-在宿主里按这个路径点:
-
-1. 左侧导航进入 `📦 模块管理`
-2. 点击右上角 `🔗 添加开发模块`
-3. 选择本地模块目录
-4. 在预览弹窗里确认 `安装来源: 开发模块`
-5. 点击 `确认添加`
-
-成功后会出现两个可核对事实:
-
-1. 成功提示会写明“当前模块来源会切换为开发链接，可在 ATM 中发起任务调试”
-2. 模块详情页信息卡会显示 `来源: 开发链接`
-
-如果详情页里看到的还是 `来源: 外部` 或 `来源: 内置`，那就还没有真正切到 DevLink。
-
-## 第二步: 创建可调试作业
-
-在宿主里按这个路径点:
-
-1. 左侧导航进入 `📋 任务监控`
-2. 点击 `+ 新建作业`
-3. 普通调试通常选 `批次任务`；只有要验证固定环境池等待队列时，必须改选 `Service Job`
-4. 点击 `配置运行模板`
-5. 在运行模板里选择目标模块和 workflow
-6. 触发方式选 `执行一次`
-7. 保存并创建
-
-创建完成后，任务监控列表里会看到:
-
-- `▶ 执行一次`
-- 如果目标模块来源是 DevLink，还会看到 `🐞 调试`
-
-如果没有 `🐞 调试` 按钮，先回去检查模块详情页来源是不是 `开发链接`。
-
-## 固定环境池运行模板怎么验
-
-如果你的模块接了固定环境池等待队列，不要只看 helper 有没有调用成功，还要确认运行模板真的走到了同一条契约。
-
-最小检查顺序：
-
-1. 作业模式是 `Service Job`
-2. `配置运行模板` 里选择 `选择环境`
-3. `资源池` 填稳定池名，例如 `bound_account_ready`
-4. `回调函数` 可留空；留空时宿主不会调用 `select_env(...)`，而是直接取当前池内第一个可分配候选
-5. `等待超时` 保持正整数；它和执行阶段的 `execution.timeout` 不是一回事
-6. 保存后回到任务监控，确认作业摘要里出现 `资源池: <pool> | 选择器: <name 或 ->`
-
-固定环境池的最小观察口径：
-
-- 资源不足时，任务会先进入底层 `PENDING`
-- UI 对外会展示成 `等待环境`
-- `task.message` 当前会写成 `等待环境池工位: <pool>`
-- 超时失败时，错误会收口成 `等待环境池工位超时: <pool> (<seconds>s)`
-
-判断它是不是“固定池等待”时，不要只看 `PENDING` 或 `等待环境` 这几个字。至少同时确认：
-
-- 这份运行模板本来就是 `select + resource_pool`
-- 当前 `task.message` 带有 `等待环境池工位: <pool>`
-
-如果你填了 `selector_name`，还要再记一条：
-
-- 你真正写的是 `module_runtime.py` 里通过 `@env_selector(...)` 声明的 selector 函数，不是自己补一个叫 `select_env` 的业务 hook
-- 只有同时带 `resource_pool` 的路径里，`select_env(...)` 返回 `None` 才会回到等待
-- 没有 `resource_pool` 的旧选择模式里，`None` 仍然直接失败
-- `wait_timeout` 当前不会单独中断 `select_env(...)` 本身；selector 写慢了，体感上也会像“任务卡住”
-
-## 第三步: 先跑最小执行链路
-
-第一次调试建议只保留:
-
-- 1 个 workflow
-- 1 到 2 个 task
-- 清晰的阶段日志
-
-推荐最小日志写法:
+推荐最小日志：
 
 ```python
 ctx.state["phase"] = "login"
 ctx.logger.info("进入登录阶段")
 ```
 
-这样你至少能确认:
+先用一次普通执行确认：
 
-- 运行是否真的进入了目标 workflow
-- 卡在哪个阶段
-- 是业务失败，还是程序异常
+- 是否真的进入目标工作流
+- 哪个任务先失败
+- 是导入错误、清单错误，还是业务错误
 
-## 日志和状态去哪看
+## 4. 需要时再附加 IDE
 
-### 全局日志
-
-左侧导航进入 `📊 仪表盘`，下面有 `📋 系统实时日志`。
-
-适合看:
-
-- 模块是否真的启动
-- 全局错误
-- 调试会话状态变化
-
-### 作业级日志
-
-在 `📋 任务监控` 里点击某个作业行，会打开作业详情。
-
-作业详情里重点看两块:
-
-- `任务实例 (Tasks)` 列表
-- 下方的 `任务日志`
-
-点击具体 task 行后，下方日志会按 Task ID 过滤，这里最适合看:
-
-- `ctx.logger` 输出
-- 最终 `message`
-- 错误文本
-
-### 调试会话日志
-
-点击 `🐞 调试` 后会打开 `任务调试` 对话框。
-
-这个对话框里可以直接看到:
-
-- `状态`
-- `附加地址`
-- `Worker PID`
-- `环境 ID`
-- `最近错误`
-- 底部最近 200 行调试日志
-
-## 用 `debugpy` 附加
-
-只有 DevLink 模块支持这条链路。
-
-进入方式有两种:
-
-- 在 `📋 任务监控` 列表行点 `🐞 调试`
-- 在作业详情页点 `🐞 调试任务`
-
-打开 `任务调试` 对话框后，关键控件是:
-
-- `附加端口`
-- `执行超时`
-- `运行态参数`
-- `等待 IDE 附加`
-- `启动后立即断住`
-- `调试后保留环境`
-- `生成 VS Code 配置`
-- `复制附加地址`
-- `开始调试`
-
-调试日志框当前行为:
-
-- 当你停留在底部时，会自动跟随最新日志输出
-- 当你手动拖到中间查看旧日志时，轮询刷新不会再把位置强制打回顶部
-- 当你修改 `附加端口`、`等待 IDE 附加`、`启动后立即断住` 或运行态参数后，点击 `重新开始` 会按当前表单重新创建调试会话，而不是重用上一轮的旧参数
-- 当勾选 `等待 IDE 附加` 时，宿主会先等调试器附加，再刷新模块注册并进入真实执行链；`env_selector`、workflow 和 task 这类早期模块代码不再需要依赖“上一轮已导入”才能命中断点
-- `启动后立即断住` 仍然只控制“附加成功后是否立刻人为停住一次”；不勾选它时，正常断点仍然应该生效
-- `生成 VS Code 配置` 现在会为 `Attach to Crawler4j` 写入显式 `pathMappings`，把当前工作区映射到宿主实际加载的 DevLink 模块目录，避免“Attach 成功但断点不绑定”的路径漂移问题
-- `等待 IDE 附加` 的阻塞当前直接走 `debugpy.wait_for_client()`；在 IDE 真正完成 attach 前，不应再提前进入 `running`
-- 打包版桌面应用在点击 `开始调试` 时，本质上也会启动一个独立 debug worker 子进程；当前该子进程会走宿主内嵌 worker 入口，而不是再拉起一份新的 GUI 主窗口
-- 正式桌面包也必须随包带上 `debugpy`、其 `_vendored` 资源，以及 vendored `pydevd` 的 `.py` 运行时模块；如果你还在用旧包，任务调试可能会直接失败并看到 `debugpy/_vendored` 缺失、`_pydevd_bundle.pydevd_constants` 不存在，或 worker 退出码 `1`
-- 打包版里 `debugpy.listen()` 自己还会再拉起一个 adapter 子进程；当前宿主也已为这条链补了内嵌 `--crawler4j-debugpy-adapter` 入口，避免 frozen 环境下 adapter 再次误启动 GUI 主程序
-
-推荐顺序:
-
-1. 先填好 `运行态参数` JSON
-2. 需要 IDE 断点时勾选 `等待 IDE 附加`
-3. 点击 `开始调试`
-4. 当状态变成 `waiting_for_attach` 或看到可用的 `附加地址`
-5. 点击 `生成 VS Code 配置`
-6. 用 IDE 附加，再继续执行
-
-如果你习惯先生成一次 `launch.json` 再启动调试，也可以；但当宿主为了避开占用端口而改写了实际 attach 端口后，仍应在看到最新 `附加地址` 后再生成一次，确保 IDE 连到当前会话的真实地址。
-
-如果你本地已经有旧版 `launch.json`，并且之前出现过“Attach 成功但断点不进”，也要重新点一次 `生成 VS Code 配置`，把新的 `pathMappings` 写进去。
-如果你是用仓库根目录的 `Crawler4j: Start App` 从 VS Code 启动宿主，当前也应确保该启动配置显式关闭 `subProcess`，避免主程序调试链把 task debug worker 一起卷进来。
-
-最小 `运行态参数` 示例:
-
-```json
-{
-  "city": "shanghai",
-  "page_no": 1
-}
+```bash
+uv run crawler4j host debug config
 ```
 
-如果 `最近错误` 里出现 `debugpy is not installed`，说明缺的是“运行宿主调试 worker 的那个 Python 环境”里的 `debugpy`，不是你模块目录自己的任意虚拟环境。
+推荐顺序：
 
-最小成功判据:
+1. 在宿主里点击 `调试`
+2. 看到会话进入 `waiting_for_attach`
+3. 生成或刷新 IDE attach 配置
+4. 从 IDE 附加
+5. 再继续执行
 
-- 对话框状态进入 `waiting_for_attach` 或继续推进到执行中
-- IDE 能附加到文档里显示的地址
-- 断点命中，或调试日志继续向下滚动
+## 5. 怎么查目录扫描问题
 
-## `devel_mode` 的真实语义
+Core 的运行描述对象来自固定目录扫描，所以调试时按目录定位：
 
-当模块以 DevLink 方式运行时，宿主会在 `ctx.runtime` 里注入:
+| 类型 | 先看什么 |
+|---|---|
+| 任务 | `tasks/*.py` 是否导出 `TASK`、`execute` |
+| 工作流 | `workflows/*.py` 是否导出 `WORKFLOW`、`run` |
+| Hook | `hooks/<name>.py` 是否导出 `handle` |
+| 环境选择器 | `env_selectors/*.py` 是否导出 `SELECTOR`、`select` |
+| 页面 | `pages/*.py`、`pages/<group>/*.py` 是否导出 `PAGE` 和对应 handler |
 
-```python
-ctx.runtime["devel_mode"] is True
-```
+如果 `check full` 过了但宿主行为不对，优先确认：
 
-适合用来:
+- `TASK.name` / `WORKFLOW.name` / `SELECTOR.name` / `PAGE.id` 是否和预期一致
+- 如果目标要出现在左侧菜单，`module.yaml.ui_extension.pages[]` 是否声明了它
+- 如果目标只作为详情页或二级页，`pages/` 下是否存在对应 `PAGE.id`
+- `default_workflow` 是否指向你正在调的工作流
 
-- 区分调试态和正式安装态
-- 打开额外日志
+## 6. 页面调试
 
-不要做:
+页面问题优先按这条线查：
 
-- 把它写回配置
-- 把它当成正式业务开关
+1. `page list` 是否能列出页面
+2. 页面文件里的 `PAGE.schema` 是否有效
+3. `load_handler` / `query_handler` 是否真实存在于同一文件
+4. `query_handler` / `load_handler` 是否只通过 `ctx.db` 访问已注册的 `resource/view/query`
+5. 模块详情页打开对应页面后是否拿到最新数据
 
-## 数据表调试
+页面现在直接来自 `pages/*.py`、`pages/<group>/*.py`。宿主不会再等待模块根入口去声明页面。
 
-调试 `core:data_table` 时，按这个顺序查:
+## 7. 环境选择器调试
 
-1. `module.yaml.ui_extension.detail_menu` 是否已有 `core:data_table:<view_id>`
-2. `module_runtime.py` 里是否存在 `declare_ui`
-3. 根 `__init__.py` 是否仍保留 SDK 托管薄壳，没有被手工改坏
-4. `declare_ui` 是否是同步函数
-5. schema 里的 `create_handler` / `update_handler` 是否真的存在于 `module_runtime.py`
-6. handler 是否是同步函数
+环境选择器问题先看：
 
-刷新页面时，宿主会重新调用 `declare_ui`。这就是当前最新 schema 的主刷新路径。
+1. `env-selector list` 是否成功
+2. `SELECTOR.name` 是否和运行模板里配置的一致
+3. `select(context, candidates)` 返回的是 `env_id` 还是 `None`
+4. 作业是否配置了 `resource_pool`
 
-## 一条最小排查顺序
+当 `resource_pool` 已配置时，返回 `None` 会进入等待语义；没配池时会按失败处理。
 
-如果你怀疑“代码根本没跑到我写的逻辑”，按这个顺序排:
+## 8. 数据契约调试
 
-1. 模块详情页看 `来源` 是否为 `开发链接`
-2. 任务监控里确认作业运行模板选中了正确模块和 workflow
-3. 先点 `▶ 执行一次`，确认最小链路能跑
-4. 再看作业详情里的 `任务日志`
-5. 最后再进入 `🐞 调试`
+数据问题优先按这条线查：
 
-## 什么时候不要再猜
+1. `data list` / `module show` 能不能列出目标 `resources/views/queries/seeds`
+2. `module.yaml.data` 里是否真的声明了目标资源、视图或命名查询
+3. `data/sql/views/*.sql`、`data/sql/queries/*.sql` 是否只包含单条 `SELECT/WITH`
+4. `{{resource:<id>}}` 占位符是否和 `source_resource_ids` 完全一致
+5. 页面或任务代码是否还在调用旧 `db.declare_*`，或试图自己执行未注册 SQL
 
-出现下面任意一种情况时，不要继续靠猜:
+## 9. 常见误区
 
-- 任务状态和日志完全对不上
-- 明明改了源码，结果还是旧逻辑
-- 数据表入口存在但页面没有 schema
-- `TaskSignal` 行为和预期完全相反
+下面这些不是当前调试主线：
 
-这时应该直接回到最小复现:
+- 修改根包 `__init__.py` 试图接管运行时
+- 新增 `module_runtime.py`
+- 在运行时代码里 `import crawler4j_sdk`
+- 试图通过 `declare_ui()` 注册页面
+- 试图在运行时代码里调用 `db.declare_data_resource()` 或 `db.declare_db_view()`
 
-1. 只保留一个 workflow
-2. 只保留一个 task
-3. 删掉不必要抽象
-4. 用清晰日志重跑
-
-排不出来时，直接看 [常见问题](troubleshooting.md)。
+如果你发现自己在排这些问题，说明模块还停留在旧协议。

@@ -1,17 +1,18 @@
-"""SDK tools 导出与契约测试。"""
+"""SDK 数据能力契约测试。"""
+
+from __future__ import annotations
+
+from typing import Any
 
 import crawler4j_sdk
 import pytest
-from crawler4j_sdk import TaskContext, ToolSpec, ToolsCapability
+from crawler4j_contracts import DatabaseExecutor, TaskContext, ToolSpec, ToolsCapability
 
 
 class _FakeTools:
     def __init__(self, available_tools: set[str] | None = None):
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.available_tools = available_tools or {
-            "db.list_records",
-            "db.append_event",
-            "db.query_events",
             "captcha.match_slider",
             "env.set_proxy",
             "env.bind_resource_pool",
@@ -27,9 +28,6 @@ class _FakeTools:
     def list_tools(self) -> list[ToolSpec]:
         specs = [
             ToolSpec(name="captcha.match_slider", description="识别滑块验证码缺口位置"),
-            ToolSpec(name="db.append_event", description="追加模块审计事件"),
-            ToolSpec(name="db.list_records", description="读取模块数据集"),
-            ToolSpec(name="db.query_events", description="查询模块审计事件"),
             ToolSpec(name="env.bind_resource_pool", description="登记环境资源池资格", is_async=True),
             ToolSpec(name="env.mark_resource_pool_eligible", description="标记环境可接单", is_async=True),
             ToolSpec(name="env.mark_resource_pool_ineligible", description="标记环境不可接单", is_async=True),
@@ -44,35 +42,42 @@ class _FakeTools:
         return {"tool_name": tool_name, "kwargs": kwargs}
 
 
+class _FakeDbExecutor:
+    def __init__(self):
+        self.described: list[str] = []
+        self.plans: list[dict[str, Any]] = []
+
+    def describe_source(self, source: str) -> dict[str, Any]:
+        self.described.append(source)
+        return {
+            "source": source,
+            "source_kind": "relation",
+            "columns": [
+                {"name": "account_id", "type": "text"},
+                {"name": "amount", "type": "number"},
+                {"name": "status", "type": "text"},
+            ],
+            "joins": [
+                {
+                    "target": "account_profiles",
+                    "types": ["inner", "left"],
+                    "on": [{"left": "account_id", "right": "account_id"}],
+                }
+            ],
+        }
+
+    def execute_plan(self, plan: dict[str, Any]) -> Any:
+        self.plans.append(plan)
+        return [{"account_id": "A001", "total_amount": 10.5}]
+
+
 def test_sdk_exports_expected_stable_surface():
     fake_tools = _FakeTools()
     expected_exports = {
-        "BBox",
-        "ClickCaptchaDebugInfo",
-        "ClickCaptchaMatchResult",
-        "ClickCaptchaOrderedTarget",
-        "EnvAction",
-        "EnvCandidate",
-        "EnvSelectorInfo",
-        "ImageInput",
-        "ModuleAssembler",
-        "Point",
-        "SliderCaptchaDebugInfo",
-        "SliderCaptchaMatchResult",
-        "TaskContext",
-        "TaskFlow",
-        "TaskResult",
-        "TaskSignal",
-        "TaskSignalAction",
-        "TaskScript",
-        "ToolSpec",
-        "ToolsCapability",
-        "env_selector",
-        "bind_resource_pool",
-        "mark_resource_pool_eligible",
-        "mark_resource_pool_ineligible",
-        "remove_resource_pool",
-        "replace_resource_pool_snapshot",
+        "get_version",
+        "get_compatible_dependency_spec",
+        "get_compatible_sdk_dependency_spec",
+        "get_compatible_contracts_dependency_spec",
     }
 
     assert isinstance(fake_tools, ToolsCapability)
@@ -80,213 +85,140 @@ def test_sdk_exports_expected_stable_surface():
 
     ctx = TaskContext(env_id=1, task_name="demo", tools=fake_tools)
     assert ctx.tools is fake_tools
+    assert not any(spec.name.startswith("db.") for spec in fake_tools.list_tools())
 
 
-def test_tools_capability_calls_core_extensions():
-    fake_tools = _FakeTools()
+def test_task_context_db_fluent_api_builds_select_query_plan():
+    executor = _FakeDbExecutor()
+    assert isinstance(executor, DatabaseExecutor)
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
 
-    assert fake_tools.has_tool("db.list_records") is True
-    assert fake_tools.has_tool("db.append_event") is True
-    specs = fake_tools.list_tools()
-    assert [tool.name for tool in specs] == [
-        "captcha.match_slider",
-        "db.append_event",
-        "db.list_records",
-        "db.query_events",
-        "env.bind_resource_pool",
-        "env.mark_resource_pool_eligible",
-        "env.mark_resource_pool_ineligible",
-        "env.remove_resource_pool",
-        "env.replace_resource_pool_snapshot",
-        "env.set_proxy",
-    ]
-    assert {tool.name: tool.is_async for tool in specs} == {
-        "captcha.match_slider": False,
-        "db.append_event": False,
-        "db.list_records": False,
-        "db.query_events": False,
-        "env.bind_resource_pool": True,
-        "env.mark_resource_pool_eligible": True,
-        "env.mark_resource_pool_ineligible": True,
-        "env.remove_resource_pool": True,
-        "env.replace_resource_pool_snapshot": True,
-        "env.set_proxy": True,
-    }
-
-    ctx = TaskContext(env_id=1, task_name="demo", tools=fake_tools)
-    result = ctx.tools.call("db.list_records", dataset="orders")
-
-    assert result == {"tool_name": "db.list_records", "kwargs": {"dataset": "orders"}}
-    assert fake_tools.calls == [("db.list_records", {"dataset": "orders"})]
-
-
-def test_tools_capability_preserves_audit_event_kwargs():
-    fake_tools = _FakeTools()
-    ctx = TaskContext(env_id=1, task_name="demo", tools=fake_tools)
-
-    append_result = ctx.tools.call(
-        "db.append_event",
-        dataset="account_events",
-        event_type="status_changed",
-        entity_key="13800000001",
-        previous_status="active",
-        next_status="blocked",
-        result="failed",
-        reason="risk_control",
-        payload={"operator": "system"},
-        created_at=200,
-    )
-    query_result = ctx.tools.call(
-        "db.query_events",
-        dataset="account_events",
-        entity_key="13800000001",
-        event_type="status_changed",
-        run_id="run-001",
-        start_at=100,
-        end_at=300,
-        limit=20,
-        offset=5,
-        order="desc",
+    rows = (
+        ctx.db.from_("billing_entries")
+        .join("account_profiles", on={"account_id": "account_id"}, how="left")
+        .where("status", "eq", "done")
+        .group_by("account_id")
+        .sum("amount", alias="total_amount")
+        .count(alias="total_count")
+        .order_by("total_amount", "desc")
+        .limit(20)
+        .execute()
     )
 
-    assert append_result["kwargs"] == {
-        "dataset": "account_events",
-        "event_type": "status_changed",
-        "entity_key": "13800000001",
-        "previous_status": "active",
-        "next_status": "blocked",
-        "result": "failed",
-        "reason": "risk_control",
-        "payload": {"operator": "system"},
-        "created_at": 200,
-    }
-    assert query_result["kwargs"] == {
-        "dataset": "account_events",
-        "entity_key": "13800000001",
-        "event_type": "status_changed",
-        "run_id": "run-001",
-        "start_at": 100,
-        "end_at": 300,
-        "limit": 20,
-        "offset": 5,
-        "order": "desc",
-    }
-
-
-@pytest.mark.asyncio
-async def test_sdk_resource_pool_helpers_route_to_core_env_tools():
-    fake_tools = _FakeTools()
-    ctx = TaskContext(env_id=11, task_name="demo", tools=fake_tools)
-
-    await crawler4j_sdk.bind_resource_pool(ctx, pool_name="bound_account_ready")
-    await crawler4j_sdk.mark_resource_pool_eligible(ctx, pool_name="bound_account_ready")
-    await crawler4j_sdk.mark_resource_pool_ineligible(
-        ctx,
-        pool_name="bound_account_ready",
-        reason="blacklisted",
-    )
-    await crawler4j_sdk.remove_resource_pool(ctx, pool_name="bound_account_ready")
-    await crawler4j_sdk.replace_resource_pool_snapshot(
-        ctx,
-        pool_name="bound_account_ready",
-        entries=[{"env_id": 11, "eligible": True}],
-    )
-
-    assert fake_tools.calls == [
-        (
-            "env.bind_resource_pool",
-            {
-                "env_id": 11,
-                "pool_name": "bound_account_ready",
-                "eligible": True,
-                "reason": "",
-                "exclusive": True,
-            },
-        ),
-        (
-            "env.mark_resource_pool_eligible",
-            {
-                "env_id": 11,
-                "pool_name": "bound_account_ready",
-                "reason": "",
-            },
-        ),
-        (
-            "env.mark_resource_pool_ineligible",
-            {
-                "env_id": 11,
-                "pool_name": "bound_account_ready",
-                "reason": "blacklisted",
-            },
-        ),
-        (
-            "env.remove_resource_pool",
-            {
-                "env_id": 11,
-                "pool_name": "bound_account_ready",
-            },
-        ),
-        (
-            "env.replace_resource_pool_snapshot",
-            {
-                "pool_name": "bound_account_ready",
-                "entries": [{"env_id": 11, "eligible": True}],
-            },
-        ),
+    assert rows == [{"account_id": "A001", "total_amount": 10.5}]
+    assert executor.described == ["billing_entries"]
+    assert executor.plans == [
+        {
+            "kind": "select",
+            "base": {"source": "billing_entries"},
+            "joins": [
+                {
+                    "target": "account_profiles",
+                    "type": "left",
+                    "on": [{"left": "account_id", "right": "account_id"}],
+                }
+            ],
+            "select": [
+                {"kind": "aggregate", "func": "sum", "field": "amount", "alias": "total_amount"},
+                {"kind": "aggregate", "func": "count", "field": "*", "alias": "total_count"},
+            ],
+            "where": [{"field": "status", "op": "eq", "value": "done"}],
+            "group_by": ["account_id"],
+            "order_by": [{"field": "total_amount", "direction": "desc"}],
+            "limit": 20,
+            "offset": 0,
+        }
     ]
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("helper", "tool_name", "kwargs"),
+    ("method_name", "expected_alias"),
     [
-        (
-            crawler4j_sdk.bind_resource_pool,
-            "env.bind_resource_pool",
-            {"pool_name": "bound_account_ready"},
-        ),
-        (
-            crawler4j_sdk.mark_resource_pool_eligible,
-            "env.mark_resource_pool_eligible",
-            {"pool_name": "bound_account_ready"},
-        ),
-        (
-            crawler4j_sdk.mark_resource_pool_ineligible,
-            "env.mark_resource_pool_ineligible",
-            {"pool_name": "bound_account_ready", "reason": "blacklisted"},
-        ),
-        (
-            crawler4j_sdk.remove_resource_pool,
-            "env.remove_resource_pool",
-            {"pool_name": "bound_account_ready"},
-        ),
-        (
-            crawler4j_sdk.replace_resource_pool_snapshot,
-            "env.replace_resource_pool_snapshot",
-            {"pool_name": "bound_account_ready", "entries": []},
-        ),
+        ("sum", "sum_amount"),
+        ("avg", "avg_amount"),
+        ("min", "min_amount"),
+        ("max", "max_amount"),
     ],
 )
-async def test_sdk_resource_pool_helpers_raise_clear_error_when_capability_missing(
-    helper,
-    tool_name: str,
-    kwargs: dict[str, object],
-):
-    fake_tools = _FakeTools(
-        available_tools={
-            "db.list_records",
-            "db.append_event",
-            "db.query_events",
-            "captcha.match_slider",
-            "env.set_proxy",
-        }
+def test_task_context_db_aggregate_uses_default_alias(method_name, expected_alias):
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    getattr(ctx.db.from_("billing_entries"), method_name)("amount").execute()
+
+    assert executor.plans[0]["select"] == [
+        {"kind": "aggregate", "func": method_name, "field": "amount", "alias": expected_alias}
+    ]
+
+
+def test_task_context_db_supports_named_query_and_replace_plan():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.named("top_accounts").bind(start_date="2026-04-01").execute()
+    ctx.db.into("accounts").replace([{"account_id": "A001", "status": "ready"}])
+
+    assert executor.plans == [
+        {
+            "kind": "named_query",
+            "query_id": "top_accounts",
+            "params": {"start_date": "2026-04-01"},
+        },
+        {
+            "kind": "replace_records",
+            "resource": "accounts",
+            "records": [{"account_id": "A001", "status": "ready"}],
+        },
+    ]
+
+
+def test_task_context_db_supports_audit_event_plan():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.audit("account_events").append(
+        entity_key="13800138000",
+        event_type="status_changed",
+        previous_status="active",
+        next_status="blocked",
+        result="success",
+        reason="risk_control",
+        payload={"operator": "system"},
     )
-    ctx = TaskContext(env_id=11, task_name="demo", tools=fake_tools)
+    ctx.db.audit("account_events").query(
+        entity_key="13800138000",
+        event_type="status_changed",
+        run_id="run-1",
+        start_at=100,
+        end_at=200,
+        limit=20,
+        order="asc",
+    )
 
-    with pytest.raises(RuntimeError) as exc_info:
-        await helper(ctx, **kwargs)
-
-    message = str(exc_info.value)
-    assert tool_name in message
-    assert "ctx.tools.has_tool" in message
-    assert fake_tools.calls == []
+    assert executor.plans == [
+        {
+            "kind": "append_audit_event",
+            "dataset": "account_events",
+            "event": {
+                "entity_key": "13800138000",
+                "event_type": "status_changed",
+                "previous_status": "active",
+                "next_status": "blocked",
+                "result": "success",
+                "reason": "risk_control",
+                "payload": {"operator": "system"},
+            },
+        },
+        {
+            "kind": "query_audit_events",
+            "dataset": "account_events",
+            "entity_key": "13800138000",
+            "event_type": "status_changed",
+            "run_id": "run-1",
+            "start_at": 100,
+            "end_at": 200,
+            "limit": 20,
+            "offset": 0,
+            "order": "asc",
+        },
+    ]

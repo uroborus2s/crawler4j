@@ -5,12 +5,14 @@
 
 from PyQt6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
     QWidget,
 )
+
+from src.ui.components.button import StyledButton
+from src.ui.components.dialog_window import configure_titled_dialog
 
 
 class InstallPreviewDialog(QDialog):
@@ -46,6 +48,7 @@ class InstallPreviewDialog(QDialog):
     
     def _setup_ui(self):
         self.setWindowTitle(self._title)
+        configure_titled_dialog(self)
         self.setMinimumWidth(450)
         self.setStyleSheet("""
             QDialog {
@@ -142,33 +145,30 @@ class InstallPreviewDialog(QDialog):
             
             layout.addWidget(warning_container)
         
-        # 按钮
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_btn = StyledButton(
+            "取消",
+            variant="secondary",
+            min_height=40,
+            min_width=92,
+            horizontal_padding=20,
         )
-        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
-        if ok_btn:
-            ok_btn.setText(self._confirm_text)
-        if cancel_btn:
-            cancel_btn.setText("取消")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        
-        buttons.setStyleSheet("""
-            QPushButton {
-                padding: 8px 20px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton[text="%s"] {
-                background-color: #4ade80;
-                color: black;
-            }
-            QPushButton[text="取消"] {
-                background-color: rgba(255,255,255,0.1);
-                color: white;
-            }
-        """ % self._confirm_text)
-        
-        layout.addWidget(buttons)
+        cancel_btn.setObjectName("installPreviewCancelButton")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        ok_btn = StyledButton(
+            self._confirm_text,
+            variant="success",
+            min_height=40,
+            min_width=112,
+            horizontal_padding=20,
+        )
+        ok_btn.setObjectName("installPreviewConfirmButton")
+        ok_btn.clicked.connect(self.accept)
+        button_row.addWidget(ok_btn)
+
+        layout.addLayout(button_row)

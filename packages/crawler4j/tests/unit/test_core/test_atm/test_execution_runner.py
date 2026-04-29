@@ -84,7 +84,7 @@ def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[Ex
     return ExecutionRunner(rem=rem, mms=module_service), rem
 
 
-def test_execution_runner_uses_120_second_default_cleanup_timeout():
+def test_execution_runner_uses_configured_default_timeout_budgets():
     env, lease = _build_env()
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
@@ -93,171 +93,182 @@ def test_execution_runner_uses_120_second_default_cleanup_timeout():
 
     runner, _ = _build_runner(env, lease, module_service)
 
-    assert runner._terminal_hook_timeout_seconds == 8.0
-    assert runner._cleanup_hook_timeout_seconds == 120.0
+    assert runner._terminal_hook_timeout_seconds == 60.0
+    assert runner._cleanup_hook_timeout_seconds == 300.0
+    assert runner._env_action_timeout_seconds == 60.0
+
+
+def test_execution_runner_reads_timeout_budget_overrides_from_config_center():
+    from src.core.system.config_center import get_config_center
+
+    config = get_config_center()
+    config.set("atm.terminal_hook_timeout_seconds", 75)
+    config.set("atm.cleanup_hook_timeout_seconds", 240)
+    config.set("atm.env_action_timeout_seconds", 90)
+
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+        call_hook=AsyncMock(return_value=None),
+    )
+
+    runner, _ = _build_runner(env, lease, module_service)
+
+    assert runner._terminal_hook_timeout_seconds == 75.0
+    assert runner._cleanup_hook_timeout_seconds == 240.0
+    assert runner._env_action_timeout_seconds == 90.0
 
 
 def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
     module_dir = base_dir / module_name
     tasks_dir = module_dir / "tasks"
-    tasks_dir.mkdir(parents=True, exist_ok=True)
+    workflows_dir = module_dir / "workflows"
+    hooks_dir = module_dir / "hooks"
+    selectors_dir = module_dir / "env_selectors"
+    for package_dir in (module_dir, tasks_dir, workflows_dir, hooks_dir, selectors_dir):
+        package_dir.mkdir(parents=True, exist_ok=True)
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
 
-    (module_dir / "__init__.py").write_text(
+    (module_dir / "runtime_db.py").write_text(
         dedent(
             """
-            import importlib
-            from pathlib import Path
-
-            from crawler4j_sdk import EnvCandidate, ModuleAssembler, TaskContext, TaskResult
-
-            assembler = ModuleAssembler(
-                package_root=Path(__file__).parent,
-                module_name=__name__,
-                default_workflow="capture_page",
-            )
-
-
-            async def run(context: TaskContext) -> TaskResult:
-                return await assembler.run(context)
-
-
-            async def prepare_env(context, *args):
-                hook = assembler.get_hook("prepare_env")
-                return await hook(context, *args) if hook else None
-
-
-            async def init_env(context, *args):
-                hook = assembler.get_hook("init_env")
-                return await hook(context, *args) if hook else None
-
-
-            async def before_run(context, *args):
-                hook = assembler.get_hook("before_run")
-                return await hook(context, *args) if hook else None
-
-
-            async def select_env(context: TaskContext, candidates: list[EnvCandidate], selector_name: str):
-                return await assembler.run_env_selector(selector_name, context, candidates)
-
-
-            async def on_success(context, *args):
-                hook = assembler.get_hook("on_success")
-                return await hook(context, *args) if hook else None
-
-
-            async def on_failure(context, *args):
-                hook = assembler.get_hook("on_failure")
-                return await hook(context, *args) if hook else None
-
-
-            async def on_timeout(context, *args):
-                hook = assembler.get_hook("on_timeout")
-                return await hook(context, *args) if hook else None
-
-
-            async def on_cleanup(context, *args):
-                hook = assembler.get_hook("on_cleanup")
-                return await hook(context, *args) if hook else None
-
-
-            _runtime_module = None
-
-
-            def _load_runtime_module():
-                global _runtime_module
-                if _runtime_module is None:
-                    _runtime_module = importlib.import_module(f"{__name__}.module_runtime")
-                return _runtime_module
-
-
-            def __getattr__(name: str):
-                runtime_module = _load_runtime_module()
-                if hasattr(runtime_module, name):
-                    return getattr(runtime_module, name)
-                raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+            def record_event(context, event_type, *, entity_key=None, created_at=None, payload=None):
+                event_id = context.db.audit("runtime_events").append(
+                    event_type=event_type,
+                    entity_key=entity_key,
+                    created_at=created_at,
+                    payload=dict(payload or {}),
+                )
+                return {"id": event_id, "event_type": event_type}
             """
         ).strip()
         + "\n",
         encoding="utf-8",
     )
-    (module_dir / "module_runtime.py").write_text(
+    (selectors_dir / "pick_ready.py").write_text(
         dedent(
             """
-            from crawler4j_sdk import EnvCandidate, TaskContext, TaskResult, env_selector
+            from crawler4j_contracts import EnvCandidate, EnvSelectorSpec, TaskContext
+            from ..runtime_db import record_event
 
-
-            @env_selector(
+            SELECTOR = EnvSelectorSpec(
                 name="pick_ready",
                 display_name="选择可用页面环境",
                 description="优先选择具备 page 能力的 ready 环境。",
             )
-            def pick_ready(context: TaskContext, candidates: list[EnvCandidate]):
+
+
+            def select(context: TaskContext, candidates: list[EnvCandidate]):
                 candidate_ids = [candidate.env_id for candidate in candidates]
                 for candidate in candidates:
                     if "page" in candidate.capabilities:
-                        context.tools.call(
-                            "db.append_event",
-                            dataset="runtime_events",
-                            event_type="hook.select_env",
+                        record_event(
+                            context,
+                            "hook.select_env",
                             entity_key=candidate.env_id,
                             created_at=200,
                             payload={"candidate_ids": candidate_ids, "selected_env_id": candidate.env_id},
                         )
                         return candidate.env_id
                 return None
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "prepare_env.py").write_text(
+        dedent(
+            """
+            from crawler4j_contracts import TaskContext
+            from ..runtime_db import record_event
 
 
-            async def prepare_env(context: TaskContext):
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.prepare",
+            async def handle(context: TaskContext):
+                record_event(
+                    context,
+                    "hook.prepare",
                     created_at=100,
                     payload={"selector": context.runtime.get("selector_name")},
                 )
                 return {"wait_timeout": 42}
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "init_env.py").write_text(
+        dedent(
+            """
+            from crawler4j_contracts import TaskContext
+            from ..runtime_db import record_event
 
 
-            async def init_env(context: TaskContext):
+            async def handle(context: TaskContext):
                 context.state["hook_trace"] = ["init_env"]
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.init",
+                record_event(
+                    context,
+                    "hook.init",
                     entity_key=context.env_id,
                     created_at=300,
                     payload={"env_id": context.env_id},
                 )
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "before_run.py").write_text(
+        dedent(
+            """
+            from crawler4j_contracts import TaskContext
+            from ..runtime_db import record_event
 
 
-            async def before_run(context: TaskContext):
+            async def handle(context: TaskContext):
                 hook_trace = list(context.state.get("hook_trace") or [])
                 hook_trace.append("before_run")
                 context.state["hook_trace"] = hook_trace
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.before",
+                record_event(
+                    context,
+                    "hook.before",
                     created_at=400,
                     payload={"workflow": context.runtime.get("workflow")},
                 )
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "on_success.py").write_text(
+        dedent(
+            """
+            from crawler4j_contracts import TaskContext, TaskResult
+            from ..runtime_db import record_event
 
 
-            async def on_success(context: TaskContext, result: TaskResult):
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.success",
+            async def handle(context: TaskContext, result: TaskResult):
+                record_event(
+                    context,
+                    "hook.success",
                     created_at=600,
                     payload={"title": result.data.get("title")},
                 )
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "on_cleanup.py").write_text(
+        dedent(
+            """
+            from crawler4j_contracts import TaskContext
+            from ..runtime_db import record_event
 
 
-            async def on_cleanup(context: TaskContext):
-                context.tools.call(
-                    "db.append_event",
-                    dataset="runtime_events",
-                    event_type="hook.cleanup",
+            async def handle(context: TaskContext):
+                record_event(
+                    context,
+                    "hook.cleanup",
                     created_at=700,
                     payload={
                         "final_status": context.runtime.get("final_status"),
@@ -269,45 +280,58 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
         + "\n",
         encoding="utf-8",
     )
-    (tasks_dir / "__init__.py").write_text("", encoding="utf-8")
+    (workflows_dir / "default.py").write_text(
+        dedent(
+            """
+            from crawler4j_contracts import WorkflowSpec
+
+            WORKFLOW = WorkflowSpec(name="default", tasks=("capture_page",))
+
+
+            async def run(context):
+                return await context.run_subtask("capture_page")
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
     (tasks_dir / "capture_page.py").write_text(
         dedent(
             """
-            from crawler4j_sdk import TaskContext, TaskResult, TaskScript
+            from crawler4j_contracts import TaskContext, TaskResult, TaskSpec
+            from ..runtime_db import record_event
+
+            TASK = TaskSpec(name="capture_page")
 
 
-            class CapturePageTask(TaskScript):
-                name = "capture_page"
+            async def execute(ctx: TaskContext) -> TaskResult:
+                if not ctx.page:
+                    return TaskResult.fail(message="missing page", error="page_missing")
 
-                async def execute(self, ctx: TaskContext) -> TaskResult:
-                    if not ctx.page:
-                        return TaskResult.fail(message="missing page", error="page_missing")
+                start_url = ctx.get_config("start_url", "https://example.com/fallback")
+                await ctx.page.goto(start_url, wait_until="domcontentloaded")
+                title = await ctx.page.title()
+                html = await ctx.page.content()
 
-                    start_url = ctx.get_config("start_url", "https://example.com/fallback")
-                    await ctx.page.goto(start_url, wait_until="domcontentloaded")
-                    title = await ctx.page.title()
-                    html = await ctx.page.content()
+                record_event(
+                    ctx,
+                    "task.capture",
+                    entity_key=ctx.page.url,
+                    created_at=500,
+                    payload={"title": title, "html_length": len(html)},
+                )
 
-                    ctx.tools.call(
-                        "db.append_event",
-                        dataset="runtime_events",
-                        event_type="task.capture",
-                        entity_key=ctx.page.url,
-                        created_at=500,
-                        payload={"title": title, "html_length": len(html)},
-                    )
-
-                    return TaskResult.ok(
-                        message="page captured",
-                        data={
-                            "url": ctx.page.url,
-                            "title": title,
-                            "html": html,
-                            "hook_trace": list(ctx.state.get("hook_trace") or []),
-                            "selector_seen": list(ctx.state.get("selector_seen") or []),
-                            "selector_name": ctx.runtime.get("selector_name"),
-                        },
-                    )
+                return TaskResult.ok(
+                    message="page captured",
+                    data={
+                        "url": ctx.page.url,
+                        "title": title,
+                        "html": html,
+                        "hook_trace": list(ctx.state.get("hook_trace") or []),
+                        "selector_seen": list(ctx.state.get("selector_seen") or []),
+                        "selector_name": ctx.runtime.get("selector_name"),
+                    },
+                )
             """
         ).strip()
         + "\n",
@@ -525,6 +549,38 @@ async def test_execution_runner_times_out_hanging_cleanup_hook_and_still_release
 
 
 @pytest.mark.asyncio
+async def test_execution_runner_continues_env_action_when_stopped_cleanup_starts_subtask():
+    request = _build_request()
+    env, lease = _build_env()
+
+    async def run_and_request_stop(_module_name, context):
+        context._subtask_executor = AsyncMock(return_value=TaskResult.ok(message="recorded"))
+        context.request_stop()
+        return TaskResult.ok(message="ok")
+
+    async def hook(_module_name, hook_name, context, *args):
+        if hook_name == "on_cleanup":
+            await context.run_subtask("record_pipeline_task")
+        return None
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(side_effect=run_and_request_stop),
+        call_hook=AsyncMock(side_effect=hook),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
+    assert hook_names == ["prepare_env", "init_env", "before_run", "on_cleanup"]
+    assert request.task.status == TaskStatus.CANCELLED
+    assert request.task.error == "Job paused during execution"
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_execution_runner_cleans_up_created_env_when_acquisition_fails():
     request = _build_request()
     env, lease = _build_env()
@@ -551,18 +607,18 @@ async def test_execution_runner_selects_existing_env_via_callback():
     request.selector_name = "random_ready"
     env, lease = _build_env()
 
-    async def hook(module_name, hook_name, context, *args):
-        if hook_name == "select_env":
-            return env.id
-        return None
-
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook),
+        call_hook=AsyncMock(return_value=None),
+        run_env_selector=AsyncMock(return_value=env.id),
     )
     runner, rem = _build_runner(env, lease, module_service)
+    updates: list[tuple[TaskStatus, str]] = []
 
-    await runner.run(request)
+    async def on_task_update(task: Task):
+        updates.append((task.status, task.message))
+
+    await runner.run(request, on_task_update=on_task_update)
 
     rem.list_envs.assert_awaited_once()
     rem.lease_manager.acquire.assert_awaited_once_with(env, request.task.id, timeout=60)
@@ -571,6 +627,31 @@ async def test_execution_runner_selects_existing_env_via_callback():
     module_service.run_module.assert_awaited_once()
     rem.release.assert_awaited_once_with(lease)
     rem.destroy_env.assert_not_awaited()
+    assert request.task.status == TaskStatus.SUCCEEDED
+    assert updates[:2] == [(TaskStatus.PENDING, "环境启动中"), (TaskStatus.RUNNING, "")]
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_selects_fixed_env_without_module_selector():
+    request = _build_request(mode=AcquisitionMode.SELECT, lifecycle=CreationLifecycle.PERSISTENT)
+    request.fixed_env_id = 21
+    env, lease = _build_env()
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value="ok"),
+        call_hook=AsyncMock(return_value=None),
+        run_env_selector=AsyncMock(),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    rem.get_env.assert_any_await(env.id)
+    assert rem.get_env.await_count == 2
+    rem.list_envs.assert_not_awaited()
+    rem.lease_manager.acquire.assert_awaited_once_with(env, request.task.id, timeout=60)
+    module_service.run_env_selector.assert_not_awaited()
+    module_service.run_module.assert_awaited_once()
     assert request.task.status == TaskStatus.SUCCEEDED
 
 
@@ -913,12 +994,13 @@ async def test_execution_runner_runs_real_module_with_hooks_selectors_and_audit_
     fake_page = _FakePage()
     env.capabilities = {"page"}
     env.handle = SimpleNamespace(page=fake_page, context=SimpleNamespace(name="browser-context"))
+    manifest_data = {"resources": [], "views": [], "queries": [], "seeds": []}
 
     module_service = ModuleService()
     module_service.registry = SimpleNamespace(
         get_module=lambda name: ModuleInfo(
             name=module_name,
-            manifest=ModuleManifest(name=module_name),
+            manifest=ModuleManifest(name=module_name, data=manifest_data),
             path=module_dir,
         )
     )
@@ -933,7 +1015,7 @@ async def test_execution_runner_runs_real_module_with_hooks_selectors_and_audit_
     request = _build_request(mode=AcquisitionMode.SELECT, lifecycle=CreationLifecycle.PERSISTENT)
     request.module_name = module_name
     request.hooks_module = module_name
-    request.workflow_name = "capture_page"
+    request.workflow_name = "default"
     request.selector_name = "pick_ready"
 
     runner, rem = _build_runner(env, lease, module_service)

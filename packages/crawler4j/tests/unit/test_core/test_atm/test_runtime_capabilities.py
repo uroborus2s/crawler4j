@@ -10,6 +10,8 @@ import src.core.atm.runtime_capabilities as runtime_capabilities
 from src.core.atm.runtime_capabilities import (
     ClickCaptchaMatchResult,
     ClickCaptchaOrderedTarget,
+    RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+    RUNTIME_SURFACE_HOSTED_UI_READONLY,
     SliderCaptchaMatchResult,
     build_runtime_capabilities,
 )
@@ -26,37 +28,38 @@ def temp_data_dir(tmp_path):
         yield tmp_path
 
 
-class _FakeKV:
-    def __init__(self):
-        self._store: dict[str, object] = {}
+def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+    from src.core.persistence import get_module_data_store
 
-    def get(self, key: str):
-        return self._store.get(key)
-
-    def set(self, key: str, value, ttl: int | None = None):  # noqa: ARG002
-        self._store[key] = value
-        return True
-
-    def exists(self, key: str) -> bool:
-        return key in self._store
-
-    def delete(self, key: str) -> bool:
-        return self._store.pop(key, None) is not None
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [
+                {
+                    "id": resource_id,
+                    "storage_mode": "managed_dataset",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "text", "required": True},
+                        ],
+                    },
+                }
+            ],
+            "views": [],
+            "queries": [],
+            "seeds": [],
+        }
+    )
+    get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
 
 
 def test_runtime_tools_register_expected_surface():
-    caps = build_runtime_capabilities("demo_module")
+    caps = build_runtime_capabilities(
+        "demo_module",
+        declared_resource_pools=[{"name": "bound_account_ready"}],
+    )
 
-    assert caps.tools.has_tool("db.list_records") is True
-    assert caps.tools.has_tool("db.replace_records") is True
-    assert caps.tools.has_tool("db.append_event") is True
-    assert caps.tools.has_tool("db.query_events") is True
-    assert caps.tools.has_tool("db.acquire_lock") is True
-    assert caps.tools.has_tool("db.release_lock") is True
-    assert caps.tools.has_tool("db.is_locked") is True
-    assert caps.tools.has_tool("db.get_state") is True
-    assert caps.tools.has_tool("db.set_state") is True
-    assert caps.tools.has_tool("db.exists_state") is True
     assert caps.tools.has_tool("ip_pool.pick_proxy") is True
     assert caps.tools.has_tool("env.set_proxy") is True
     assert caps.tools.has_tool("env.bind_resource_pool") is True
@@ -64,80 +67,140 @@ def test_runtime_tools_register_expected_surface():
     assert caps.tools.has_tool("env.mark_resource_pool_ineligible") is True
     assert caps.tools.has_tool("env.remove_resource_pool") is True
     assert caps.tools.has_tool("env.replace_resource_pool_snapshot") is True
-    assert caps.tools.has_tool("ui.declare_data_table") is True
-    assert caps.tools.has_tool("ui.get_data_table") is True
+    assert caps.tools.has_tool("ui.declare_page") is True
+    assert caps.tools.has_tool("ui.get_page") is True
+    assert caps.tools.has_tool("ui.declare_data_table") is False
+    assert caps.tools.has_tool("ui.get_data_table") is False
     assert caps.tools.has_tool("captcha.match_slider") is True
     assert caps.tools.has_tool("captcha.match_click_targets") is True
 
     specs = caps.tools.list_tools()
     tool_names = [spec.name for spec in specs]
     assert tool_names == sorted(tool_names)
+    assert not any(name.startswith("db.") for name in tool_names)
     assert {spec.name: spec.is_async for spec in specs}["env.bind_resource_pool"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.mark_resource_pool_eligible"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.mark_resource_pool_ineligible"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.remove_resource_pool"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.replace_resource_pool_snapshot"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.set_proxy"] is True
-    assert {spec.name: spec.is_async for spec in specs}["db.append_event"] is False
-    assert {spec.name: spec.is_async for spec in specs}["db.list_records"] is False
 
 
-def test_db_tools_records_and_lock_are_generic(monkeypatch):
-    fake_kv = _FakeKV()
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
+def test_runtime_tools_register_hosted_ui_declare_surface():
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE)
+
+    assert [spec.name for spec in caps.tools.list_tools()] == ["ui.declare_page"]
+    assert caps.tools.has_tool("ui.declare_page") is True
+    assert caps.tools.has_tool("ui.get_page") is False
+    assert not any(spec.name.startswith("db.") for spec in caps.tools.list_tools())
+
+    with pytest.raises(KeyError, match=r"Unknown core tool: ui.get_page"):
+        caps.tools.call("ui.get_page", page_id="dashboard")
+
+
+def test_runtime_tools_hosted_ui_declare_surface_does_not_persist_page_schema():
+    from src.core.persistence import get_module_data_store
+
+    store = get_module_data_store()
+    legacy_page = {
+        "type": "Page",
+        "title": "旧看板",
+        "load_handler": "load_dashboard_page",
+        "children": [],
+    }
+    assert store.write_page_schema("demo_module", "dashboard", legacy_page) is True
+
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE)
+
+    with pytest.raises(RuntimeError, match="必须使用声明缓冲区"):
+        caps.tools.call(
+            "ui.declare_page",
+            page_id="dashboard",
+            schema={
+                "type": "Page",
+                "title": "新看板",
+                "load_handler": "load_dashboard_page",
+                "children": [],
+            },
+        )
+
+    assert store.read_page_schema("demo_module", "dashboard") == legacy_page
+
+
+def test_runtime_tools_register_hosted_ui_readonly_surface():
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_READONLY)
+
+    assert [spec.name for spec in caps.tools.list_tools()] == ["ui.get_page"]
+    assert caps.tools.has_tool("ui.get_page") is True
+    assert caps.tools.has_tool("ui.declare_page") is False
+    assert not any(spec.name.startswith("db.") for spec in caps.tools.list_tools())
+
+    with pytest.raises(KeyError, match=r"Unknown core tool: ui.unknown"):
+        caps.tools.call("ui.unknown", key="cursor", value=1)
+
+
+def test_runtime_tools_hosted_ui_readonly_surface_does_not_read_persisted_page_schema():
+    from src.core.persistence import get_module_data_store
+
+    store = get_module_data_store()
+    assert store.write_page_schema(
+        "demo_module",
+        "dashboard",
+        {
+            "type": "Page",
+            "title": "旧看板",
+            "load_handler": "load_dashboard_page",
+            "children": [],
+        },
+    ) is True
+
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_READONLY)
+
+    with pytest.raises(RuntimeError, match="必须使用本轮声明的页面 schema"):
+        caps.tools.call("ui.get_page", page_id="dashboard")
+
+
+def test_runtime_ctx_db_replaces_public_db_tools(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities(
+        "demo_module",
+        declared_resource_pools=[{"name": "bound_account_ready"}],
+    )
+
+    assert not any(spec.name.startswith("db.") for spec in caps.tools.list_tools())
+    assert caps.db.into("accounts").replace(
+        [
+            {"id": "u1", "run_status": "占用中", "record_status": "active"},
+            {"id": "u2", "run_status": "空闲", "record_status": "blocked"},
+        ]
+    ) is True
+
+    all_rows = caps.db.from_("accounts").limit(10).execute()
+    assert all({"run_status", "record_status", "created_at", "updated_at"} <= set(row) for row in all_rows)
+    assert all(isinstance(row["created_at"], int) for row in all_rows)
+    assert all(isinstance(row["updated_at"], int) for row in all_rows)
+    assert all_rows[0]["run_status"] == "占用中"
+    assert all_rows[0]["record_status"] == "active"
+
+    rows = (
+        caps.db.from_("accounts")
+        .select("id")
+        .where_eq("id", "u2")
+        .limit(10)
+        .execute()
+    )
+
+    assert rows == [{"id": "u2"}]
+
+
+def test_runtime_ctx_db_audit_uses_independent_audit_table(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
 
     caps = build_runtime_capabilities("demo_module")
-    assert caps.tools.call(
-        "db.replace_records",
-        dataset="accounts",
-        records=[
-            {"id": "u1", "phone_number": "13800000001", "country_code": "86"},
-            {"id": "u2", "phone_number": "13800000002", "country_code": "86"},
-        ],
-    )
-    records = caps.tools.call("db.list_records", dataset="accounts")
-    assert len(records) == 2
 
-    first = caps.tools.call(
-        "db.acquire_lock",
-        scope="accounts",
-        key="13800000001",
-        ttl=60,
-        owner={"task_id": "t1", "job_id": "j1"},
-    )
-    second = caps.tools.call(
-        "db.acquire_lock",
-        scope="accounts",
-        key="13800000001",
-        ttl=60,
-        owner={"task_id": "t2", "job_id": "j1"},
-    )
-    third = caps.tools.call("db.release_lock", scope="accounts", key="13800000001")
-
-    assert first is True
-    assert second is False
-    assert third is True
-
-
-def test_db_tools_append_and_query_events(monkeypatch):
-    fake_kv = _FakeKV()
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
-
-    caps = build_runtime_capabilities("demo_module")
-    first = caps.tools.call(
-        "db.append_event",
-        dataset="account_events",
-        event_type="created",
-        entity_key="13800000001",
-        next_status="active",
-        payload={"source": "import"},
-        created_at=100,
-    )
-    second = caps.tools.call(
-        "db.append_event",
-        dataset="account_events",
+    event_id = caps.db.audit("account_events").append(
+        entity_key="13800138000",
         event_type="status_changed",
-        entity_key="13800000001",
         previous_status="active",
         next_status="blocked",
         result="success",
@@ -145,32 +208,38 @@ def test_db_tools_append_and_query_events(monkeypatch):
         payload={"operator": "system"},
         created_at=200,
     )
+    events = caps.db.audit("account_events").query(entity_key="13800138000")
 
-    events = caps.tools.call("db.query_events", dataset="account_events")
-    created_only = caps.tools.call(
-        "db.query_events",
-        dataset="account_events",
-        entity_key="13800000001",
-        event_type="created",
-    )
-    records = caps.tools.call("db.list_records", dataset="account_events")
+    assert events == [
+        {
+            "id": event_id,
+            "module_name": "demo_module",
+            "dataset_name": "account_events",
+            "entity_key": "13800138000",
+            "event_type": "status_changed",
+            "run_id": None,
+            "previous_status": "active",
+            "next_status": "blocked",
+            "result": "success",
+            "reason": "risk_control",
+            "payload": {"operator": "system"},
+            "created_at": 200,
+        }
+    ]
+    with get_connection(DATA_DB) as conn:
+        dataset_rows = conn.execute(
+            "SELECT COUNT(*) AS count FROM module_datasets WHERE module_name = ?",
+            ("demo_module",),
+        ).fetchone()
+    assert dataset_rows["count"] == 0
 
-    assert first is True
-    assert second is True
-    assert [item["event_type"] for item in events] == ["status_changed", "created"]
-    assert created_only[0]["payload"] == {"source": "import"}
-    assert records == []
 
-
-def test_db_tools_state_roundtrip(monkeypatch):
-    fake_kv = _FakeKV()
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_kv_store", lambda: fake_kv)
-
+def test_runtime_ctx_db_rejects_complex_query_on_managed_dataset(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
     caps = build_runtime_capabilities("demo_module")
 
-    assert caps.tools.call("db.set_state", key="demo_module:cursor", value={"page": 2}, ttl=60) is True
-    assert caps.tools.call("db.get_state", key="demo_module:cursor") == {"page": 2}
-    assert caps.tools.call("db.exists_state", key="demo_module:cursor") is True
+    with pytest.raises(ValueError, match="managed_dataset\\(snapshot\\).*join"):
+        caps.db.from_("accounts").join("profiles", on={"id": "id"}).execute()
 
 
 def test_ip_pool_tool_picks_proxy_by_criteria(monkeypatch):
@@ -189,7 +258,7 @@ def test_ip_pool_tool_picks_proxy_by_criteria(monkeypatch):
     fake_manager = SimpleNamespace(
         get_pool=lambda pool_id: pool if pool_id == "p1" else None, list_pools=lambda: [pool]
     )
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_ip_pool_manager", lambda: fake_manager)
+    monkeypatch.setattr("src.core.atm.runtime_capabilities._get_ip_pool_manager", lambda: fake_manager)
 
     caps = build_runtime_capabilities("demo_module")
     selected = caps.tools.call(
@@ -216,7 +285,10 @@ async def test_env_tool_delegates_to_environment_manager(monkeypatch):
         return True
 
     fake_manager = SimpleNamespace(update_env=_update_env)
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_environment_manager", lambda: fake_manager)
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities._rem_manager_helpers",
+        lambda: (lambda: fake_manager, "scheduler.resource_pool", None, None),
+    )
 
     caps = build_runtime_capabilities("demo_module")
     ok = await caps.tools.call("env.set_proxy", env_id=12, proxy_value="http://1.1.1.1:8001", proxy_pool_id=None)
@@ -263,9 +335,31 @@ async def test_env_resource_pool_tools_manage_metadata_cards(monkeypatch):
         async def list_envs(self):
             return [SimpleNamespace(id=11), SimpleNamespace(id=12), SimpleNamespace(id=13)]
 
-    monkeypatch.setattr("src.core.atm.runtime_capabilities.get_environment_manager", lambda: _FakeManager())
+    fake_manager = _FakeManager()
 
-    caps = build_runtime_capabilities("demo_module")
+    def _build_card(module_name: str, pool_name: str, *, eligible: bool, reason: str, exclusive: bool):
+        return {
+            "module_name": module_name,
+            "pool_name": pool_name,
+            "eligible": eligible,
+            "reason": reason,
+            "exclusive": exclusive,
+        }
+
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities._rem_manager_helpers",
+        lambda: (
+            lambda: fake_manager,
+            "scheduler.resource_pool",
+            _build_card,
+            lambda module_name, pool_name: f"{module_name}:{pool_name}",
+        ),
+    )
+
+    caps = build_runtime_capabilities(
+        "demo_module",
+        declared_resource_pools=[{"name": "bound_account_ready"}],
+    )
     await caps.tools.call(
         "env.bind_resource_pool",
         env_id=11,
@@ -302,22 +396,210 @@ async def test_env_resource_pool_tools_manage_metadata_cards(monkeypatch):
     assert (13, "scheduler.resource_pool", "demo_module:bound_account_ready") not in store
 
 
-def test_ui_tools_persist_data_table_meta(monkeypatch):
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "kwargs"),
+    [
+        (
+            "env.bind_resource_pool",
+            {"env_id": 11, "pool_name": "undeclared_pool", "eligible": True},
+        ),
+        (
+            "env.mark_resource_pool_eligible",
+            {"env_id": 11, "pool_name": "undeclared_pool"},
+        ),
+        (
+            "env.mark_resource_pool_ineligible",
+            {"env_id": 11, "pool_name": "undeclared_pool", "reason": "blacklisted"},
+        ),
+        (
+            "env.remove_resource_pool",
+            {"env_id": 11, "pool_name": "undeclared_pool"},
+        ),
+        (
+            "env.replace_resource_pool_snapshot",
+            {"pool_name": "undeclared_pool", "entries": [{"env_id": 11}]},
+        ),
+    ],
+)
+async def test_env_resource_pool_tools_reject_undeclared_pool(monkeypatch, tool_name, kwargs):
+    def _unexpected_rem_call():
+        raise AssertionError("resource pool declaration must be checked before REM access")
+
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities._rem_manager_helpers",
+        _unexpected_rem_call,
+    )
+    caps = build_runtime_capabilities(
+        "demo_module",
+        declared_resource_pools=[{"name": "bound_account_ready"}],
+    )
+
+    with pytest.raises(ValueError, match="module.yaml.resource_pools"):
+        await caps.tools.call(tool_name, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_env_resource_pool_tools_reject_when_module_declares_no_pools(monkeypatch):
+    def _unexpected_rem_call():
+        raise AssertionError("resource pool declaration must be checked before REM access")
+
+    monkeypatch.setattr(
+        "src.core.atm.runtime_capabilities._rem_manager_helpers",
+        _unexpected_rem_call,
+    )
+    caps = build_runtime_capabilities("demo_module", declared_resource_pools=[])
+
+    with pytest.raises(ValueError, match="module.yaml.resource_pools"):
+        await caps.tools.call(
+            "env.bind_resource_pool",
+            env_id=11,
+            pool_name="bound_account_ready",
+        )
+
+
+def test_ui_tools_persist_page_meta(monkeypatch):
     caps = build_runtime_capabilities("demo_module")
     assert caps.tools.call(
-        "ui.declare_data_table",
-        view_id="accounts",
+        "ui.declare_page",
+        page_id="dashboard",
         schema={
-            "title": "示例账号",
-            "dataset": "accounts",
-            "columns": [{"key": "phone", "label": "手机号"}],
+            "type": "Page",
+            "load_handler": "load_dashboard_page",
+            "children": [
+                {"type": "Text", "style": "title", "binding": "title"},
+                {
+                    "type": "Button",
+                    "label": "打开详情页",
+                    "action": {
+                        "type": "open_page",
+                        "page_id": "details",
+                        "params": {
+                            "account_id": {"binding": "selected_account.id"},
+                        },
+                    },
+                },
+                {
+                    "type": "DataTable",
+                    "table_id": "stats",
+                    "title": "统计明细",
+                    "columns": [{"key": "name", "label": "名称"}],
+                    "data_source": {"type": "binding", "binding": "rows"},
+                    "row_action": {
+                        "type": "open_page",
+                        "page_id": "details",
+                        "params": {
+                            "account_id": {"binding": "id"},
+                        },
+                    },
+                },
+            ],
         },
     )
 
-    meta = caps.tools.call("ui.get_data_table", view_id="accounts")
-    assert meta["title"] == "示例账号"
-    assert meta["dataset"] == "accounts"
-    assert meta["columns"] == [{"key": "phone", "label": "手机号"}]
+    page = caps.tools.call("ui.get_page", page_id="dashboard")
+    assert page["load_handler"] == "load_dashboard_page"
+    assert page["children"][0] == {
+        "type": "Text",
+        "style": "title",
+        "binding": "title",
+    }
+    assert page["children"][1]["action"] == {
+        "type": "open_page",
+        "page_id": "details",
+        "params": {"account_id": {"binding": "selected_account.id"}},
+    }
+    assert page["children"][2]["table_id"] == "stats"
+    assert page["children"][2]["data_source"] == {"type": "binding", "binding": "rows"}
+    assert page["children"][2]["row_action"] == {
+        "type": "open_page",
+        "page_id": "details",
+        "params": {"account_id": {"binding": "id"}},
+    }
+
+
+def test_ui_tools_persist_navigation_params_with_page_ids():
+    caps = build_runtime_capabilities("demo_module")
+
+    assert caps.tools.call(
+        "ui.declare_page",
+        page_id="dashboard",
+        schema={
+            "type": "Page",
+            "load_handler": "load_dashboard_page",
+            "children": [
+                {
+                    "type": "Button",
+                    "label": "打开详情",
+                    "action": {
+                        "type": "open_page",
+                        "page_id": "account_details",
+                        "params": {
+                            "phone": {"binding": "selected.phone"},
+                            "source": {"value": "dashboard"},
+                        },
+                    },
+                },
+                {
+                    "type": "DataTable",
+                    "table_id": "accounts",
+                    "columns": [{"key": "phone", "label": "手机号"}],
+                    "data_source": {"type": "binding", "binding": "rows"},
+                    "row_action": {
+                        "type": "open_page",
+                        "page_id": "account_details",
+                        "params": {
+                            "phone": {"binding": "phone"},
+                        },
+                    },
+                },
+            ],
+        },
+    )
+
+    page = caps.tools.call("ui.get_page", page_id="dashboard")
+
+    assert page["children"][0]["action"] == {
+        "type": "open_page",
+        "page_id": "account_details",
+        "params": {
+            "phone": {"binding": "selected.phone"},
+            "source": {"value": "dashboard"},
+        },
+    }
+    assert page["children"][1]["row_action"] == {
+        "type": "open_page",
+        "page_id": "account_details",
+        "params": {
+            "phone": {"binding": "phone"},
+        },
+    }
+    assert page["children"][1]["table_id"] == "accounts"
+    assert page["children"][1]["data_source"] == {"type": "binding", "binding": "rows"}
+
+
+def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
+    page_calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_normalize_page_schema(page_id: str, schema: dict[str, object]) -> dict[str, object]:
+        page_calls.append((page_id, dict(schema)))
+        return {"type": "Page", "title": f"normalized:{page_id}", "children": []}
+
+    monkeypatch.setattr(runtime_capabilities, "sdk_normalize_page_schema", fake_normalize_page_schema)
+
+    caps = build_runtime_capabilities("demo_module")
+    assert caps.tools.call(
+        "ui.declare_page",
+        page_id="dashboard",
+        schema={"type": "Page", "children": []},
+    )
+
+    assert page_calls == [("dashboard", {"type": "Page", "children": []})]
+    assert caps.tools.call("ui.get_page", page_id="dashboard") == {
+        "type": "Page",
+        "title": "normalized:dashboard",
+        "children": [],
+    }
 
 
 def test_ui_tools_reject_unmanaged_schema_fields():
@@ -325,40 +607,52 @@ def test_ui_tools_reject_unmanaged_schema_fields():
 
     with pytest.raises(ValueError):
         caps.tools.call(
-            "ui.declare_data_table",
-            view_id="accounts",
-            schema={"title": "示例账号", "dataset": "other_dataset"},
+            "ui.declare_page",
+            page_id="Dashboard",
+            schema={"type": "Page", "children": []},
         )
 
     with pytest.raises(ValueError):
         caps.tools.call(
-            "ui.declare_data_table",
-            view_id="Accounts",
-            schema={"title": "示例账号"},
+            "ui.declare_page",
+            page_id="dashboard",
+            schema={"type": "Section", "children": []},
         )
 
     with pytest.raises(ValueError):
         caps.tools.call(
-            "ui.declare_data_table",
-            view_id="accounts",
-            schema={"title": "示例账号", "unknown": True},
-        )
-
-
-def test_ui_tools_reject_lock_key_with_business_occupancy_column():
-    caps = build_runtime_capabilities("demo_module")
-
-    with pytest.raises(ValueError, match="lock_key"):
-        caps.tools.call(
-            "ui.declare_data_table",
-            view_id="accounts",
+            "ui.declare_page",
+            page_id="dashboard",
             schema={
-                "title": "示例账号",
-                "dataset": "accounts",
-                "lock_key": "phone",
-                "columns": [
-                    {"key": "phone", "label": "手机号"},
-                    {"key": "occupied_label", "label": "占用中"},
+                "type": "Page",
+                "children": [
+                    {
+                        "type": "Button",
+                        "label": "打开",
+                        "action": {"type": "open_page", "page_id": "InvalidPage"},
+                    }
+                ],
+            },
+        )
+
+    with pytest.raises(ValueError):
+        caps.tools.call(
+            "ui.declare_page",
+            page_id="dashboard",
+            schema={
+                "type": "Page",
+                "load_handler": "load_dashboard_page",
+                "children": [
+                    {
+                        "type": "DataTable",
+                        "title": "统计明细",
+                        "rows": [{"id": "1"}],
+                        "row_action": {
+                            "type": "open_page",
+                            "page_id": "accounts",
+                            "params": {"account_id": {"binding": ""}},
+                        },
+                    }
                 ],
             },
         )

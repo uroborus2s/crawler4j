@@ -5,69 +5,56 @@ from types import SimpleNamespace
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QPushButton
 
-from src.core.system.preferences_service import PREFERENCE_DEFAULTS, PreferenceKey
 
+def test_about_page_contains_update_controls(qtbot, monkeypatch, tmp_path):
+    import src.core.system.ui.about_page as about_page_module
 
-class _DummyPreferences:
-    def __init__(self):
-        self.preference_changed = SimpleNamespace(connect=lambda _handler: None)
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    from src.core.persistence.database import init_database
 
-    def get(self, _key, default=None):
-        if isinstance(_key, PreferenceKey):
-            return PREFERENCE_DEFAULTS.get(_key, default)
-        return default
-
-
-def test_settings_about_page_embeds_full_about_content_without_details_button(qtbot, monkeypatch):
-    import src.core.system.ui.about_dialog as about_dialog_module
-    import src.core.system.ui.settings_page as settings_page_module
-
-    monkeypatch.setattr(settings_page_module, "get_preferences_service", lambda: _DummyPreferences())
+    init_database()
     monkeypatch.setattr(
-        about_dialog_module,
+        about_page_module,
         "get_version_service",
-        lambda: SimpleNamespace(get_build_info=lambda: SimpleNamespace(version="0.2.0", commit_hash=None)),
+        lambda: SimpleNamespace(get_build_info=lambda: SimpleNamespace(version="0.2.0", commit_hash="a1cd539")),
     )
     monkeypatch.setattr(
-        about_dialog_module,
+        about_page_module,
         "get_update_service",
-        lambda: SimpleNamespace(check_for_updates=lambda: True, availability_reason=""),
+        lambda: SimpleNamespace(
+            check_for_updates=lambda: True,
+            configure=lambda **_kwargs: None,
+            is_supported=True,
+            availability_reason="",
+            last_action_message="",
+        ),
     )
     pixmap = QPixmap(16, 16)
     pixmap.fill()
-    monkeypatch.setattr(about_dialog_module, "load_app_icon_pixmap", lambda _size: pixmap)
+    monkeypatch.setattr(about_page_module, "load_app_icon_pixmap", lambda _size: pixmap)
 
-    page = settings_page_module.SettingsPage()
+    page = about_page_module.AboutPage()
     qtbot.addWidget(page)
     page.show()
-    page.nav_list.setCurrentRow(3)
 
-    about_page = page._pages["about"]
-    label_texts = {label.text() for label in about_page.findChildren(QLabel)}
-    button_texts = {button.text() for button in about_page.findChildren(QPushButton)}
+    label_texts = {label.text() for label in page.findChildren(QLabel)}
+    button_texts = {button.text() for button in page.findChildren(QPushButton)}
 
-    assert "蛛行演略 · crawler4j" in label_texts
+    assert "自动检查更新" in label_texts
+    assert "更新操作" in label_texts
     assert "v0.2.0" in label_texts
-    assert "Development Build" in label_texts
-    assert "关于" not in label_texts
-    assert any(about_dialog_module.DOCS_URL in text for text in label_texts)
-    assert "🔍 检查更新" in button_texts
-    assert "📋 完整信息" not in button_texts
-    assert page.reset_btn.isHidden()
+    assert "Build a1cd539" in label_texts
+    assert "检查更新" in button_texts
+    assert "升级" in button_texts
 
 
-def test_about_dialog_still_provides_full_content(qtbot, monkeypatch):
+def test_about_dialog_provides_version_and_project_link_only(qtbot, monkeypatch):
     import src.core.system.ui.about_dialog as about_dialog_module
 
     monkeypatch.setattr(
         about_dialog_module,
         "get_version_service",
         lambda: SimpleNamespace(get_build_info=lambda: SimpleNamespace(version="0.2.0", commit_hash=None)),
-    )
-    monkeypatch.setattr(
-        about_dialog_module,
-        "get_update_service",
-        lambda: SimpleNamespace(check_for_updates=lambda: True, availability_reason=""),
     )
     pixmap = QPixmap(16, 16)
     pixmap.fill()
@@ -81,5 +68,7 @@ def test_about_dialog_still_provides_full_content(qtbot, monkeypatch):
 
     assert dialog.windowTitle() == "关于 蛛行演略"
     assert "蛛行演略 · crawler4j" in label_texts
+    assert "v0.2.0" in label_texts
+    assert "Development Build" in label_texts
     assert any(about_dialog_module.DOCS_URL in text for text in label_texts)
-    assert "🔍 检查更新" in button_texts
+    assert "检查更新" not in button_texts

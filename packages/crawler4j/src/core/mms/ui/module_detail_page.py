@@ -11,26 +11,24 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
-    QPushButton,
     QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from src.core.mms.models import DetailMenuItem, ModuleInfo, ModuleSource
+from src.core.mms.github_credentials import get_github_credential_store
+from src.core.mms.models import ModuleInfo, ModuleSource, UIPageInfo
+from src.core.mms.service import get_module_service
 from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.module_config_page import ModuleConfigPage
-from src.core.mms.github_credentials import get_github_credential_store
-from src.core.mms.ui_loader import (
-    ModuleUIAccessDenied,
-    ModuleUILoadError,
-    get_module_custom_page_loader,
-)
+from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
+from src.ui.components.button import StyledButton
+from src.ui.components.confirm_dialog import ConfirmDialog
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
+from src.ui.components.message_dialog import MessageDialog
 
 
 class ModuleDetailPage(QWidget):
@@ -48,13 +46,13 @@ class ModuleDetailPage(QWidget):
         ("config", "⚙️", "配置"),
         ("workflows", "⚡", "任务链"),
     ]
-    MICRO_APP_MENU_ID = "__micro_app__"
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self._module: ModuleInfo | None = None
         self._menu_pages: dict[str, QWidget] = {}
-        self._custom_page_loader = get_module_custom_page_loader()
+        self._hosted_page_infos: dict[str, UIPageInfo] = {}
+        self._menu_navigation_params: dict[str, dict[str, object]] = {}
         self._pending_tasks: set[asyncio.Task] = set()
         self.repo_token_status_label: QLabel | None = None
         self.repo_token_edit: QLineEdit | None = None
@@ -102,21 +100,7 @@ class ModuleDetailPage(QWidget):
         layout.setContentsMargins(16, 0, 16, 0)
         
         # 返回按钮
-        back_btn = QPushButton("← 返回")
-        back_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: rgba(255, 255, 255, 0.8);
-                border: none;
-                padding: 8px 12px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                color: white;
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 4px;
-            }
-        """)
+        back_btn = StyledButton("← 返回", variant="ghost", min_height=36, min_width=92)
         back_btn.clicked.connect(self.back_requested.emit)
         layout.addWidget(back_btn)
         
@@ -150,6 +134,8 @@ class ModuleDetailPage(QWidget):
         layout.setSpacing(0)
         
         self.menu_list = QListWidget()
+        self.menu_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.menu_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.menu_list.setStyleSheet("""
             QListWidget {
                 background: transparent;
@@ -177,13 +163,11 @@ class ModuleDetailPage(QWidget):
     def set_module(self, module: ModuleInfo):
         """设置要显示的模块。"""
         self._module = module
+        self._menu_navigation_params.clear()
         
         # 更新标题
-        icon = "📦"
-        if module.manifest.ui_extension.nav_item:
-            icon = module.manifest.ui_extension.nav_item.icon
         display = module.manifest.display_name or module.name
-        self.title_label.setText(f"{icon} {display}")
+        self.title_label.setText(f"{self._module_icon(module)} {display}")
         
         # 更新状态
         status_colors = {
@@ -209,6 +193,7 @@ class ModuleDetailPage(QWidget):
         """构建菜单列表。"""
         self.menu_list.clear()
         self._menu_pages.clear()
+        self._hosted_page_infos.clear()
         
         # 清除旧页面
         while self.content_stack.count() > 0:
@@ -229,41 +214,21 @@ class ModuleDetailPage(QWidget):
             self._menu_pages[menu_id] = page
             self.content_stack.addWidget(page)
         
-        # 自定义菜单
+        # 模块宿主页入口
         if self._module:
-            custom_items: list[DetailMenuItem] = []
-
-            ui_ext = self._module.manifest.ui_extension
-            root_entry = str(ui_ext.entry or "").strip()
-            if ui_ext.type == "micro_app" and root_entry:
-                nav_item = ui_ext.nav_item
-                custom_items.append(
-                    DetailMenuItem(
-                        id=self.MICRO_APP_MENU_ID,
-                        icon=nav_item.icon if nav_item else "🧩",
-                        label=nav_item.label if nav_item and nav_item.label else "模块页面",
-                        entry=root_entry,
-                    )
-                )
-
-            custom_items.extend(self._module.manifest.ui_extension.detail_menu)
-
-            if custom_items:
+            hosted_pages = list(self._module.manifest.ui_extension.pages)
+            if hosted_pages:
                 # 分隔符
                 separator = QListWidgetItem("────────")
                 separator.setData(Qt.ItemDataRole.UserRole, "__sep__")
                 separator.setFlags(separator.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 self.menu_list.addItem(separator)
                 
-                for menu_item in custom_items:
-                    item = QListWidgetItem(f"{menu_item.icon} {menu_item.label}")
-                    item.setData(Qt.ItemDataRole.UserRole, menu_item.id)
+                for page_info in hosted_pages:
+                    item = QListWidgetItem(f"{page_info.icon} {page_info.label}")
+                    item.setData(Qt.ItemDataRole.UserRole, page_info.id)
                     self.menu_list.addItem(item)
-                    
-                    # 创建自定义页面
-                    page = self._create_custom_page(menu_item)
-                    self._menu_pages[menu_item.id] = page
-                    self.content_stack.addWidget(page)
+                    self._hosted_page_infos[page_info.id] = page_info
     
     def _create_fixed_page(self, menu_id: str) -> QWidget:
         """创建固定页面。"""
@@ -274,6 +239,13 @@ class ModuleDetailPage(QWidget):
         elif menu_id == "workflows":
             return self._create_workflows_page()
         return QWidget()
+
+    @staticmethod
+    def _module_icon(module: ModuleInfo) -> str:
+        pages = list(module.manifest.ui_extension.pages)
+        if pages:
+            return str(pages[0].icon or "📦").strip() or "📦"
+        return "📦"
     
     def _create_info_page(self) -> QWidget:
         """创建基本信息页面。"""
@@ -353,26 +325,18 @@ class ModuleDetailPage(QWidget):
             self.repo_token_edit = QLineEdit()
             self.repo_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
             self.repo_token_edit.setPlaceholderText("输入该仓库的 GitHub Token")
-            self.repo_token_edit.setStyleSheet(
-                "background: rgba(255, 255, 255, 0.08);"
-                "border: 1px solid rgba(255, 255, 255, 0.16);"
-                "border-radius: 6px; padding: 8px 10px; color: white;"
-            )
             card_layout.addWidget(self.repo_token_edit)
 
             token_actions = QHBoxLayout()
-            save_token_btn = QPushButton("保存 Token")
-            save_token_btn.setStyleSheet(self._repo_action_btn_style("#4ade80", "#111827"))
+            save_token_btn = StyledButton("保存 Token", variant="success", min_height=34, min_width=108)
             save_token_btn.clicked.connect(self._save_repo_token)
             token_actions.addWidget(save_token_btn)
 
-            test_token_btn = QPushButton("测试连接")
-            test_token_btn.setStyleSheet(self._repo_action_btn_style("#60a5fa", "white"))
+            test_token_btn = StyledButton("测试连接", variant="primary", min_height=34, min_width=108)
             test_token_btn.clicked.connect(self._test_repo_token)
             token_actions.addWidget(test_token_btn)
 
-            clear_token_btn = QPushButton("清除 Token")
-            clear_token_btn.setStyleSheet(self._repo_action_btn_style("#f87171", "white"))
+            clear_token_btn = StyledButton("清除 Token", variant="danger", min_height=34, min_width=108)
             clear_token_btn.clicked.connect(self._clear_repo_token)
             token_actions.addWidget(clear_token_btn)
             token_actions.addStretch()
@@ -403,18 +367,7 @@ class ModuleDetailPage(QWidget):
             notice.setStyleSheet("color: rgba(255,255,255,0.72); font-size: 13px;")
             card_layout.addWidget(notice)
 
-            remove_btn = QPushButton("移除开发链接")
-            remove_btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(248, 113, 113, 0.85);
-                    color: white;
-                    border: none;
-                    padding: 8px 14px;
-                    border-radius: 4px;
-                    font-weight: bold;
-                }
-                QPushButton:hover { background: rgba(248, 113, 113, 1); }
-            """)
+            remove_btn = StyledButton("移除开发链接", variant="danger", min_height=34, min_width=136)
             remove_btn.clicked.connect(self._remove_dev_link)
             card_layout.addWidget(remove_btn)
         
@@ -445,6 +398,8 @@ class ModuleDetailPage(QWidget):
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         content = QWidget()
@@ -487,43 +442,36 @@ class ModuleDetailPage(QWidget):
         
         return page
 
-    def _create_custom_page(self, menu_item) -> QWidget:
-        """创建自定义页面（动态加载模块 UI）。"""
+    def _create_hosted_page(self, page_info: UIPageInfo) -> QWidget:
+        """创建宿主页入口页面。"""
         if not self._module:
             return QWidget()
 
-        if isinstance(menu_item.entry, str) and menu_item.entry.startswith("core:data_table:"):
-            view_id = menu_item.entry.split(":", 2)[-1].strip()
-            if not view_id:
-                view_id = menu_item.id
+        initial_params = self._menu_navigation_params.get(page_info.id)
+        return ManagedPageRenderer(
+            self._module.name,
+            page_info.id,
+            module_info=self._module,
+            open_page_callback=self._open_page,
+            initial_params=initial_params,
+        )
 
-            from src.core.mms.ui.module_data_table_page import ModuleDataTablePage
-
-            return ModuleDataTablePage(self._module.name, view_id)
-
-        try:
-            return self._custom_page_loader.load_widget(self._module, menu_item.entry)
-        except ModuleUIAccessDenied as exc:
-            return self._create_custom_page_placeholder(menu_item, "未通过 trust gate", str(exc))
-        except ModuleUILoadError as exc:
-            return self._create_custom_page_placeholder(menu_item, "模块 UI 加载失败", str(exc))
-
-    def _create_custom_page_placeholder(self, menu_item, title: str, message: str) -> QWidget:
+    def _create_custom_page_placeholder(self, page_info: UIPageInfo, title: str, message: str) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        icon = QLabel(menu_item.icon)
+        icon = QLabel(page_info.icon)
         icon.setStyleSheet("font-size: 48px;")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon)
         
-        label = QLabel(f"{menu_item.label}\n\n{title}")
+        label = QLabel(f"{page_info.label}\n\n{title}")
         label.setStyleSheet("color: rgba(255,255,255,0.75); font-size: 14px;")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label)
 
-        detail = QLabel(f"{message}\n\n入口: {menu_item.entry}")
+        detail = QLabel(f"{message}\n\n页面 ID: {page_info.id}")
         detail.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 12px;")
         detail.setWordWrap(True)
         detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -544,8 +492,27 @@ class ModuleDetailPage(QWidget):
         if menu_id == "__sep__":
             return
         
-        if menu_id in self._menu_pages:
-            self.content_stack.setCurrentWidget(self._menu_pages[menu_id])
+        page = self._ensure_menu_page(menu_id)
+        if page is not None:
+            self.content_stack.setCurrentWidget(page)
+
+    def _ensure_menu_page(self, menu_id: str) -> QWidget | None:
+        page = self._menu_pages.get(menu_id)
+        if page is not None:
+            if menu_id in self._hosted_page_infos and hasattr(page, "refresh"):
+                if hasattr(page, "set_navigation_params"):
+                    page.set_navigation_params(self._menu_navigation_params.get(menu_id), auto_refresh=False)
+                page.refresh()
+            return page
+
+        page_info = self._hosted_page_infos.get(menu_id)
+        if page_info is None:
+            return None
+
+        page = self._create_hosted_page(page_info)
+        self._menu_pages[menu_id] = page
+        self.content_stack.addWidget(page)
+        return page
 
     def _select_menu(self, menu_id: str):
         for row in range(self.menu_list.count()):
@@ -554,45 +521,100 @@ class ModuleDetailPage(QWidget):
                 self.menu_list.setCurrentRow(row)
                 break
 
+    @staticmethod
+    def _normalize_navigation_params(params: dict[str, object] | None) -> dict[str, object]:
+        if not isinstance(params, dict):
+            return {}
+        return dict(params)
+
+    def _resolve_hosted_page_info(self, page_id: str) -> UIPageInfo | None:
+        page_info = self._hosted_page_infos.get(page_id)
+        if page_info is not None:
+            return page_info
+        if not self._module:
+            return None
+
+        try:
+            descriptor = get_module_service().get_runtime_descriptor(
+                self._module.name,
+                force_reload=self._module.source != ModuleSource.BUILTIN,
+            )
+        except Exception:
+            return None
+
+        runtime_page = descriptor.pages.get(page_id)
+        if runtime_page is None:
+            return None
+
+        spec = runtime_page.spec
+        return UIPageInfo(
+            id=str(spec.id or page_id).strip() or page_id,
+            icon=str(spec.icon or "📋").strip() or "📋",
+            label=str(spec.label or page_id).strip() or page_id,
+        )
+
+    def _open_page(self, page_id: str, params: dict[str, object] | None = None) -> None:
+        normalized_page_id = str(page_id or "").strip()
+        page_info = self._resolve_hosted_page_info(normalized_page_id)
+        if page_info is None:
+            MessageDialog.warning(self, "页面跳转失败", f"未找到宿主页: {page_id}")
+            return
+        self._menu_navigation_params[normalized_page_id] = self._normalize_navigation_params(params)
+
+        if normalized_page_id not in self._hosted_page_infos:
+            page = self._menu_pages.get(normalized_page_id)
+            if page is None:
+                page = self._create_hosted_page(page_info)
+                self._menu_pages[normalized_page_id] = page
+                self.content_stack.addWidget(page)
+            else:
+                if hasattr(page, "set_navigation_params"):
+                    page.set_navigation_params(
+                        self._menu_navigation_params.get(normalized_page_id),
+                        auto_refresh=False,
+                    )
+                if hasattr(page, "refresh"):
+                    page.refresh()
+            self.content_stack.setCurrentWidget(page)
+            return
+
+        current_item = self.menu_list.currentItem()
+        current_menu_id = current_item.data(Qt.ItemDataRole.UserRole) if current_item else None
+        if current_menu_id == normalized_page_id:
+            page = self._ensure_menu_page(normalized_page_id)
+            if page is not None:
+                self.content_stack.setCurrentWidget(page)
+            return
+
+        self._select_menu(normalized_page_id)
+
     def _remove_dev_link(self):
         if not self._module or self._module.source != ModuleSource.DEV_LINK:
             return
 
-        reply = QMessageBox.question(
+        confirmed = ConfirmDialog.confirm(
             self,
             "移除开发链接",
             f"确定要移除开发模块 '{self._module.name}' 的开发链接吗？\n本地源码目录不会被删除。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            confirm_text="移除",
+            danger=True,
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
 
         try:
             result = remove_dev_link_and_describe(self._module.name)
         except Exception as exc:
-            QMessageBox.warning(self, "移除失败", str(exc))
+            MessageDialog.warning(self, "移除失败", str(exc))
             return
 
         if result.fallback:
             self.set_module(result.fallback)
-            QMessageBox.information(self, result.title, result.message)
+            MessageDialog.information(self, result.title, result.message)
             return
 
-        QMessageBox.information(self, result.title, result.message)
+        MessageDialog.information(self, result.title, result.message)
         self.back_requested.emit()
-
-    @staticmethod
-    def _repo_action_btn_style(background: str, foreground: str) -> str:
-        return (
-            "QPushButton {"
-            f"background: {background};"
-            f"color: {foreground};"
-            "border: none; padding: 8px 14px; border-radius: 4px; font-weight: bold;"
-            "}"
-            "QPushButton:hover {"
-            "border: 1px solid rgba(255, 255, 255, 0.18);"
-            "}"
-        )
 
     def _track_task(self, coroutine) -> None:
         task = asyncio.create_task(coroutine)
@@ -630,37 +652,38 @@ class ModuleDetailPage(QWidget):
             return
         token = self.repo_token_edit.text().strip()
         if not token:
-            QMessageBox.warning(self, "保存失败", "请输入 GitHub Token")
+            MessageDialog.warning(self, "保存失败", "请输入 GitHub Token")
             return
         try:
             repo = self._current_repo()
             get_github_credential_store().set_token(repo, token)
         except Exception as exc:
-            QMessageBox.warning(self, "保存失败", str(exc))
+            MessageDialog.warning(self, "保存失败", str(exc))
             return
         self.repo_token_edit.clear()
         self._refresh_repo_token_status()
-        QMessageBox.information(self, "保存成功", f"已保存仓库 {repo} 的 GitHub Token")
+        MessageDialog.information(self, "保存成功", f"已保存仓库 {repo} 的 GitHub Token")
 
     def _clear_repo_token(self) -> None:
         try:
             repo = self._current_repo()
         except Exception as exc:
-            QMessageBox.warning(self, "清除失败", str(exc))
+            MessageDialog.warning(self, "清除失败", str(exc))
             return
-        reply = QMessageBox.question(
+        confirmed = ConfirmDialog.confirm(
             self,
             "清除 GitHub Token",
             f"确定要清除仓库 {repo} 的 GitHub Token 吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            confirm_text="清除",
+            danger=True,
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
         get_github_credential_store().clear_token(repo)
         if self.repo_token_edit:
             self.repo_token_edit.clear()
         self._refresh_repo_token_status()
-        QMessageBox.information(self, "已清除", f"已清除仓库 {repo} 的 GitHub Token")
+        MessageDialog.information(self, "已清除", f"已清除仓库 {repo} 的 GitHub Token")
 
     def _test_repo_token(self) -> None:
         self._track_task(self._test_repo_token_async())
@@ -677,6 +700,6 @@ class ModuleDetailPage(QWidget):
 
             await get_module_release_service().verify_repo_accessible(repo, github_token=token)
         except Exception as exc:
-            QMessageBox.warning(self, "连接失败", str(exc))
+            await MessageDialog.warning_async(self, "连接失败", str(exc))
             return
-        QMessageBox.information(self, "连接成功", f"GitHub 仓库连接正常: {repo}")
+        await MessageDialog.information_async(self, "连接成功", f"GitHub 仓库连接正常: {repo}")

@@ -161,7 +161,8 @@ class Sidebar(QFrame):
         ("environments", "🖥️ 环境管理"),
         ("modules", "📦 模块管理"),
         ("help", "📘 使用文档"),
-        ("settings", "🔧 系统设置"),
+        ("settings", "🔧 配置中心"),
+        ("about", "ℹ️ 关于"),
     ]
     
     def __init__(self, parent=None):
@@ -281,6 +282,9 @@ class Shell(QMainWindow):
         # 顶栏状态
         self.status_bar = StatusIndicator()
         main_layout.addWidget(self.status_bar)
+        from src.core.atm.ui.task_progress_presenter import TaskProgressPresenter
+
+        self.task_progress_presenter = TaskProgressPresenter(self)
         
         # 主内容区
         content_area = QWidget()
@@ -336,10 +340,11 @@ class Shell(QMainWindow):
         self.module_detail_page.back_requested.connect(self._back_to_modules)
         
         # 系统设置 - System UI
-        from src.core.system.ui import HelpPage
-        from src.core.system.ui import SettingsPage
+        from src.core.system.ui import AboutPage, ConfigCenterPage, HelpPage
+
         self._add_page("help", HelpPage())
-        self._add_page("settings", SettingsPage())
+        self._add_page("settings", ConfigCenterPage())
+        self._add_page("about", AboutPage())
     
     def _add_page(self, page_id: str, widget: QWidget):
         self._pages[page_id] = widget

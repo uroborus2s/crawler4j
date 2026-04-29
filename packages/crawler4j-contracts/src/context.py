@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
+from crawler4j_contracts.database import DatabaseClient
 from crawler4j_contracts.result import TaskResult
 
 if TYPE_CHECKING:
@@ -46,6 +47,9 @@ class LoggerLike(Protocol):
         ...
 
     def info(self, message: str, environment_id: int | None = None) -> None:
+        ...
+
+    def json(self, label: str, payload: Any, environment_id: int | None = None) -> None:
         ...
 
     def warning(self, message: str, environment_id: int | None = None) -> None:
@@ -184,8 +188,8 @@ class TaskContext:
     logger: LoggerLike = field(default_factory=get_default_task_logger)
     http: HttpClient | None = None
     tools: ToolsCapability | None = None
+    db: DatabaseClient = field(default_factory=DatabaseClient)
 
-    captured_data: list[Any] = field(default_factory=list)
     state: dict[str, Any] = field(default_factory=dict)
     runtime: dict[str, Any] = field(default_factory=dict)
 
@@ -210,7 +214,7 @@ class TaskContext:
         screenshots_dir = Path("screenshots")
         screenshots_dir.mkdir(exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         path = screenshots_dir / f"{name}_{timestamp}.png"
 
         await self.page.screenshot(path=str(path))

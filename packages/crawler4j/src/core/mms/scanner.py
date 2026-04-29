@@ -8,10 +8,16 @@
     - 校验：命名、唯一性、受控字段约束
 """
 
+import json
 from pathlib import Path
 import re
 import yaml
 
+from src.core.mms.data_contract import (
+    load_sql_file,
+    validate_resource_sql,
+    validate_seed_file,
+)
 from src.core.foundation.logging import logger
 from src.core.mms.models import (
     ModuleInfo,
@@ -26,11 +32,10 @@ from src.utils.paths import get_builtin_modules_path, get_user_modules_path
 
 # 忽略的目录
 IGNORED_DIRS = {"__pycache__", ".git", ".venv", "node_modules"}
-LEGACY_MODULE_FILES = ("config_schema.json", "strategy.yaml")
 MANAGED_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-UI_ENTRY_RE = re.compile(r"^ui:[A-Z][A-Za-z0-9_]*$")
 GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REMOVED_MANIFEST_FIELDS = ("sdk_version_range",)
+REQUIRED_RUNTIME_API = "core-native-v1"
 
 
 class ModuleScanner:
@@ -133,12 +138,19 @@ class ModuleScanner:
                     hint="模块必须与当前宿主一起升级，请删除这些兼容范围声明后再继续"
                 )
 
+            if "data" not in data:
+                raise ModuleParseError(
+                    "module.yaml 缺少 data",
+                    stage="PARSE",
+                    hint="请按新协议在 module.yaml 中声明 data.resources / data.views / data.queries / data.seeds",
+                )
+
             return ModuleManifest.from_dict(data)
         except ValueError as e:
             raise ModuleParseError(
                 str(e),
                 stage="PARSE",
-                hint="请检查 module.yaml 中 config_defaults 的 YAML 结构是否正确",
+                hint="请检查 module.yaml 字段结构是否符合 core-native-v1 协议",
             )
         except yaml.YAMLError as e:
             raise ModuleParseError(
@@ -174,14 +186,14 @@ class ModuleScanner:
                 hint="请在 module.yaml 中添加 name 字段"
             )
 
-        for legacy_file in LEGACY_MODULE_FILES:
-            if (module_path / legacy_file).exists():
-                raise ModuleValidationError(
-                    f"检测到已废弃的模块声明文件: {legacy_file}",
-                    stage="VALIDATE",
-                    hint="模块配置与数据表入口已改为宿主集中管理，请删除旧声明式文件并改用 SDK CLI"
-                )
-        
+        runtime_api = str(manifest.runtime_api or "").strip()
+        if runtime_api != REQUIRED_RUNTIME_API:
+            raise ModuleValidationError(
+                f"module.yaml.runtime_api 必须是 {REQUIRED_RUNTIME_API}",
+                stage="VALIDATE",
+                hint="旧模块不再兼容，请迁移到 core-native-v1 协议后再加载",
+            )
+
         # 命名规范校验（小写字母、数字、下划线）
         if not manifest.name.replace("_", "").isalnum() or not manifest.name.islower():
             warnings.append(f"模块名 '{manifest.name}' 不符合命名规范（应为小写字母、数字、下划线）")
@@ -203,9 +215,32 @@ class ModuleScanner:
                 hint="请确保每个工作流有唯一的 name"
             )
 
+        if not workflow_names:
+            raise ModuleValidationError(
+                "module.yaml.workflows 不能为空",
+                stage="VALIDATE",
+                hint="至少声明一个 workflow，并让 default_workflow 指向其中之一",
+            )
+
+        default_workflow = str(manifest.default_workflow or "").strip()
+        if not default_workflow:
+            raise ModuleValidationError(
+                "缺少必填字段: default_workflow",
+                stage="VALIDATE",
+                hint="请在 module.yaml 中声明 default_workflow",
+            )
+        if default_workflow not in workflow_names:
+            raise ModuleValidationError(
+                f"default_workflow 未在 module.yaml.workflows 中声明: {default_workflow}",
+                stage="VALIDATE",
+                hint="default_workflow 必须指向已声明的 workflow 名称",
+            )
+
         self._validate_upgrade_source(manifest)
         self._validate_config_defaults(manifest)
         self._validate_ui_extension(manifest)
+        self._validate_resource_pools(manifest)
+        self._validate_data_contract(manifest, module_path)
 
         return warnings
 
@@ -251,61 +286,114 @@ class ModuleScanner:
 
     def _validate_ui_extension(self, manifest: ModuleManifest) -> None:
         ui_ext = manifest.ui_extension
-        ui_type = str(ui_ext.type or "none").strip() or "none"
-        if ui_type not in {"none", "micro_app"}:
-            raise ModuleValidationError(
-                f"不支持的 ui_extension.type: {ui_type}",
-                stage="VALIDATE",
-                hint="当前只允许 `none` 或 `micro_app`"
-            )
+        seen_page_ids: set[str] = set()
+        for item in ui_ext.pages:
+            page_id = str(item.id or "").strip()
+            if not MANAGED_NAME_RE.match(page_id):
+                raise ModuleValidationError(
+                    f"无效的 ui_extension.pages[].id: {page_id or '<empty>'}",
+                    stage="VALIDATE",
+                    hint="页面 ID 只能使用小写字母、数字和下划线，且必须以字母开头",
+                )
+            if page_id in seen_page_ids:
+                raise ModuleValidationError(
+                    f"ui_extension.pages[].id 重复: {page_id}",
+                    stage="VALIDATE",
+                    hint="请确保每个宿主页入口有唯一的 ID",
+                )
+            seen_page_ids.add(page_id)
 
-        entry = str(ui_ext.entry or "").strip()
-        if entry:
-            if ui_type != "micro_app":
+            if not str(item.label or "").strip():
                 raise ModuleValidationError(
-                    "声明 ui_extension.entry 时必须同时设置 ui_extension.type = micro_app",
+                    f"ui_extension.pages[{page_id}].label 不能为空",
                     stage="VALIDATE",
-                    hint="代码型页面只能通过 SDK `add-ui` 维护"
+                    hint="模块详情页导航标签必须显式声明",
                 )
-            if not UI_ENTRY_RE.match(entry):
-                raise ModuleValidationError(
-                    f"无效的 ui_extension.entry: {entry}",
-                    stage="VALIDATE",
-                    hint="代码型页面入口必须是 `ui:PageClass` 形式"
-                )
-        elif ui_type == "micro_app":
-            raise ModuleValidationError(
-                "ui_extension.type = micro_app 时必须提供 ui_extension.entry",
-                stage="VALIDATE",
-                hint="请使用 SDK CLI `add-ui <name>` 生成并维护代码型页面入口"
-            )
 
-        seen_menu_ids: set[str] = set()
-        for item in ui_ext.detail_menu:
-            menu_id = str(item.id or "").strip()
-            if not MANAGED_NAME_RE.match(menu_id):
+    def _validate_resource_pools(self, manifest: ModuleManifest) -> None:
+        seen_names: set[str] = set()
+        for item in manifest.resource_pools:
+            pool_name = str(item.name or "").strip()
+            if not pool_name:
                 raise ModuleValidationError(
-                    f"无效的 detail_menu.id: {menu_id or '<empty>'}",
+                    "resource_pools.name 不能为空",
                     stage="VALIDATE",
-                    hint="详情页数据表入口 ID 只能使用小写字母、数字和下划线，且必须以字母开头"
+                    hint="请在 module.yaml.resource_pools 中为每个资源池声明 name",
                 )
-            if menu_id in seen_menu_ids:
+            if not MANAGED_NAME_RE.match(pool_name):
                 raise ModuleValidationError(
-                    f"detail_menu.id 重复: {menu_id}",
+                    f"resource_pools.name 不符合命名规范: {pool_name}",
                     stage="VALIDATE",
-                    hint="请确保每个详情页数据表入口有唯一的 ID"
+                    hint="资源池名必须以小写字母开头，只允许小写字母、数字和下划线",
                 )
-            seen_menu_ids.add(menu_id)
+            if pool_name in seen_names:
+                raise ModuleValidationError(
+                    f"resource_pools.name 重复: {pool_name}",
+                    stage="VALIDATE",
+                    hint="请确保 module.yaml.resource_pools 中每个资源池名称唯一",
+                )
+            seen_names.add(pool_name)
 
-            expected_entry = f"core:data_table:{menu_id}"
-            actual_entry = str(item.entry or "").strip()
-            if actual_entry != expected_entry:
-                raise ModuleValidationError(
-                    f"detail_menu.entry 不受支持: {actual_entry or '<empty>'}",
-                    stage="VALIDATE",
-                    hint="详情页扩展入口现在只允许 Core 托管的数据表，且 entry 必须与 id 对齐为 `core:data_table:<id>`"
+    def _validate_data_contract(self, manifest: ModuleManifest, module_path: Path) -> None:
+        module_data = manifest.data
+        resources = {item["resource_id"]: item for item in module_data["resources"]}
+
+        for view in module_data["views"]:
+            for resource_id in view["source_resource_ids"]:
+                resource = resources[resource_id]
+                if resource["storage_mode"] != "custom_table":
+                    raise ModuleValidationError(
+                        f"data.views[{view['view_id']}] 只允许引用 custom_table 资源: {resource_id}",
+                        stage="VALIDATE",
+                        hint="视图 SQL 只能建立在模块自建表之上；托管快照源请走 ctx.db.from_(...) 单源查询",
+                    )
+            try:
+                sql = load_sql_file(module_path, view["sql_file"], expected_prefix="data/sql/views/")
+                validate_resource_sql(
+                    sql,
+                    source_resource_ids=view["source_resource_ids"],
+                    owner_label=f"data.views[{view['view_id']}]",
                 )
-    
+            except ValueError as exc:
+                raise ModuleValidationError(
+                    str(exc),
+                    stage="VALIDATE",
+                    hint="请检查视图 SQL 文件路径、占位符和 SELECT 语句边界是否符合新协议",
+                ) from exc
+
+        for query in module_data["queries"]:
+            for resource_id in query["source_resource_ids"]:
+                resource = resources[resource_id]
+                if resource["storage_mode"] != "custom_table":
+                    raise ModuleValidationError(
+                        f"data.queries[{query['query_id']}] 只允许引用 custom_table 资源: {resource_id}",
+                        stage="VALIDATE",
+                        hint="命名 SQL 查询只能建立在模块自建表之上；按主键/条件查托管快照请走标准记录接口",
+                    )
+            try:
+                sql = load_sql_file(module_path, query["sql_file"], expected_prefix="data/sql/queries/")
+                validate_resource_sql(
+                    sql,
+                    source_resource_ids=query["source_resource_ids"],
+                    owner_label=f"data.queries[{query['query_id']}]",
+                )
+            except ValueError as exc:
+                raise ModuleValidationError(
+                    str(exc),
+                    stage="VALIDATE",
+                    hint="请检查命名查询 SQL 文件路径、占位符和 SELECT 语句边界是否符合新协议",
+                ) from exc
+
+        for seed in module_data["seeds"]:
+            try:
+                validate_seed_file(module_path, seed["file"])
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:  # pragma: no cover
+                raise ModuleValidationError(
+                    str(exc),
+                    stage="VALIDATE",
+                    hint="请检查种子文件路径和 JSON 对象数组格式是否符合新协议",
+                ) from exc
+
     def load_module(
         self,
         module_path: Path,

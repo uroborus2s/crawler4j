@@ -215,7 +215,7 @@ class IPPoolManager:
     def __init__(self) -> None:
         """初始化 IP 池管理器。"""
         self._pools: dict[str, IPPool] = {}
-        self._env_bindings: dict[int, str] = {}  # env_id -> ip_id
+        self._env_bindings: dict[int, str] = {}  # 当前进程内 env_id -> ip_id
     
     async def startup(self) -> None:
         """启动管理器，从数据库加载数据。"""
@@ -290,7 +290,6 @@ class IPPoolManager:
         # 更新绑定
         ip.bound_count += 1
         self._env_bindings[int(env_id)] = ip.id
-        self._persist_binding(int(env_id), ip.id)
         self._persist_entry(ip)
         
         logger.info(f"[IPPool] 绑定 IP成功: env={env_id} ip={ip.address} (new_count={ip.bound_count})")
@@ -326,7 +325,6 @@ class IPPoolManager:
                 logger.info(f"[IPPool] 解绑 IP 成功: env={env_id} ip={ip.address} (new_count={ip.bound_count})")
                 break
         
-        self._delete_binding(eid)
         if not found:
             logger.warning(f"[IPPool] 解绑 IP 时未找到对应的 IP 条目: id={ip_id}")
             
@@ -383,6 +381,12 @@ class IPPoolManager:
                 INSERT INTO ip_entries (id, pool_id, address, protocol, port, username, password, bound_count, safety_score, expires_at, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    pool_id = excluded.pool_id,
+                    address = excluded.address,
+                    protocol = excluded.protocol,
+                    port = excluded.port,
+                    username = excluded.username,
+                    password = excluded.password,
                     bound_count = excluded.bound_count,
                     safety_score = excluded.safety_score,
                     expires_at = excluded.expires_at
@@ -401,25 +405,6 @@ class IPPoolManager:
                     entry.created_at,
                 )
             )
-    
-    def _persist_binding(self, env_id: int, ip_id: str) -> None:
-        """持久化绑定关系。"""
-        with get_connection(STATE_DB) as conn:
-            conn.execute(
-                """
-                INSERT INTO env_ip_bindings (env_id, ip_id, bound_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(env_id) DO UPDATE SET
-                    ip_id = excluded.ip_id,
-                    bound_at = excluded.bound_at
-                """,
-                (env_id, ip_id, int(time.time()))
-            )
-    
-    def _delete_binding(self, env_id: int) -> None:
-        """删除绑定关系。"""
-        with get_connection(STATE_DB) as conn:
-            conn.execute("DELETE FROM env_ip_bindings WHERE env_id = ?", (env_id,))
     
     async def _load_from_db(self) -> None:
         """从数据库加载数据。"""
@@ -457,17 +442,6 @@ class IPPoolManager:
                 pool = self._pools.get(entry.pool_id)
                 if pool:
                     pool.entries.append(entry)
-            
-            # 加载绑定
-            cursor = conn.execute("SELECT * FROM env_ip_bindings")
-            for row in cursor.fetchall():
-                try:
-                    # 强制转换为 int，因为数据库 schema 中 env_id 被定义为了 TEXT
-                    eid = int(row["env_id"])
-                    self._env_bindings[eid] = row["ip_id"]
-                except (ValueError, TypeError):
-                    # 如果实在转不动（非预期情况），保留原样
-                    self._env_bindings[row["env_id"]] = row["ip_id"]  # type: ignore
 
 
 # 全局单例

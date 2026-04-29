@@ -3,12 +3,12 @@
 提供 Framework Core 的基础系统能力：
 - VersionService: 版本管理
 - UpdateService: 应用更新
-- PreferencesService: 偏好设置
+- ConfigCenterService: 配置中心
 """
 
-from src.core.system.preferences_service import (
-    PreferencesService,
-    get_preferences_service,
+from src.core.system.config_center import (
+    ConfigCenterService,
+    get_config_center,
 )
 from src.core.system.update_service import (
     UpdateService,
@@ -28,7 +28,7 @@ __all__ = [
     # Update
     "UpdateService",
     "get_update_service",
-    # Preferences
-    "PreferencesService",
-    "get_preferences_service",
+    # Config Center
+    "ConfigCenterService",
+    "get_config_center",
 ]

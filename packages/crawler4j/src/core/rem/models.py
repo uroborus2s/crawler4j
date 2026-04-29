@@ -149,6 +149,27 @@ class EnvMetadataEntry:
 
 
 @dataclass
+class ProviderEnvInfo:
+    """来源系统中的环境摘要。"""
+
+    provider: str
+    provider_label: str
+    external_id: str
+    name: str
+    proxy_summary: str = ""
+    remark: str = ""
+    is_running: bool = False
+    running_status: str = ""
+    last_used_at: int | None = None
+
+    @property
+    def proxy_summary_text(self) -> str:
+        if self.proxy_summary:
+            return self.proxy_summary
+        return "-"
+
+
+@dataclass
 class Environment:
     """环境实例。
     
@@ -213,6 +234,7 @@ class Environment:
         """序列化为字典（用于持久化）。"""
         return {
             "id": self.id,
+            "name": self.name,
             "kind": self.kind.value,
             "provider": self.provider,
             "status": self.status.value,
@@ -237,6 +259,7 @@ class Environment:
         
         return cls(
             id=data["id"],
+            name=data.get("name", ""),
             kind=EnvKind(data["kind"]),
             provider=data["provider"],
             status=EnvStatus(data["status"]),

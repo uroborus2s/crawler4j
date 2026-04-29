@@ -143,7 +143,7 @@ class SparkleUpdater:
         return bool(self._updater.canCheckForUpdates())
 
     def set_automatically_checks_for_updates(self, enabled: bool) -> None:
-        """Mirror the app's persisted update preference into Sparkle."""
+        """Mirror the app's persisted update setting into Sparkle."""
         if bool(self._updater.automaticallyChecksForUpdates()) == bool(enabled):
             return
         self._updater.setAutomaticallyChecksForUpdates_(bool(enabled))

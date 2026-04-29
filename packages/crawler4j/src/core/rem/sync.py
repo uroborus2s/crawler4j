@@ -1,20 +1,13 @@
 """外部状态同步模块。
 
-设计参考: docs/03-solution/reference-design/module-01-runtime-environment.md §5.3
-
-提供外部指纹浏览器服务的状态同步功能：
-    - ExternalSyncManager: 外部状态同步管理器
+当前外部状态调和统一委托给 REM GC，避免再维护一套平行状态机。
 """
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import Awaitable, Callable
 
 from src.core.foundation.logging import logger
-from src.core.rem.models import EnvStatus
-
-if TYPE_CHECKING:
-    from src.core.rem.pool import EnvPool
-    from src.core.rem.provider import BaseProvider
+from src.core.rem.manager import get_environment_manager
 
 
 class ExternalSyncManager:
@@ -30,24 +23,14 @@ class ExternalSyncManager:
     
     def __init__(
         self,
-        pool: "EnvPool",
         sync_interval: int = 30,
+        gc_runner: Callable[[], Awaitable[int]] | None = None,
     ) -> None:
-        """初始化同步管理器。
-        
-        Args:
-            pool: 环境池
-            sync_interval: 同步间隔（秒）
-        """
-        self._pool = pool
+        """初始化同步管理器。"""
         self._sync_interval = sync_interval
         self._running = False
         self._sync_task: asyncio.Task | None = None
-        self._providers: dict[str, "BaseProvider"] = {}
-    
-    def register_provider(self, provider: "BaseProvider") -> None:
-        """注册需要同步的 Provider。"""
-        self._providers[provider.name] = provider
+        self._gc_runner = gc_runner or get_environment_manager().run_gc
     
     async def startup(self) -> None:
         """启动同步管理器。"""
@@ -75,65 +58,16 @@ class ExternalSyncManager:
         logger.info("[Sync] 外部状态同步已关闭")
     
     async def full_sync(self) -> dict[str, int]:
-        """执行全量同步。
-        
-        Returns:
-            每个 provider 的同步数量
-        """
-        results = {}
-        for provider_name, provider in self._providers.items():
-            try:
-                count = await self._sync_provider(provider)
-                results[provider_name] = count
-                if count > 0:
-                    logger.info(f"[Sync] 同步 {provider_name}: {count} 个环境状态变化")
-            except Exception as e:
-                logger.error(f"[Sync] 同步 {provider_name} 失败: {e}")
-                results[provider_name] = -1
-        return results
-    
-    async def _sync_provider(self, provider: "BaseProvider") -> int:
-        """同步单个 Provider 的状态。
-        
-        Args:
-            provider: Provider 实例
-            
-        Returns:
-            状态变化的环境数量
-        """
-        changed_count = 0
-        
-        # 获取该 Provider 的所有环境
-        envs = [
-            env for env in await self._pool.list_all()
-            if env.provider == provider.name and env.external_id
-        ]
-        
-        for env in envs:
-            try:
-                # 检查外部状态
-                is_running = await provider.is_running(env)
-                
-                if env.status == EnvStatus.BUSY and not is_running:
-                    # 外部已停止但本地仍为 BUSY
-                    logger.warning(
-                        f"[Sync] 环境外部已停止: id={env.id}... external={env.external_id}"
-                    )
-                    await self._pool.update_status(env.id, EnvStatus.ERROR)
-                    changed_count += 1
-                    
-                elif env.status == EnvStatus.READY and not is_running:
-                    # READY 状态但外部已停止
-                    logger.warning(
-                        f"[Sync] 环境外部不存在: id={env.id}... external={env.external_id}"
-                    )
-                    await self._pool.update_status(env.id, EnvStatus.DEAD)
-                    changed_count += 1
-                    
-            except Exception as e:
-                logger.error(f"[Sync] 检查环境状态失败: id={env.id}... error={e}")
-        
-        return changed_count
+        """执行全量同步。"""
+        try:
+            count = await self._gc_runner()
+        except Exception as e:
+            logger.error(f"[Sync] 执行 REM GC 同步失败: {e}")
+            return {"gc": -1}
+
+        if count > 0:
+            logger.info(f"[Sync] 通过 REM GC 收口 {count} 个环境漂移")
+        return {"gc": count}
     
     async def _sync_loop(self) -> None:
         """后台同步循环。"""

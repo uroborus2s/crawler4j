@@ -7,17 +7,17 @@
 **上游输入：** `docs/04-project-development/01-governance/project-charter.md` | `docs/04-project-development/03-requirements/prd.md` | `crawler4j-model` 技术画像
 **下游输出：** `system-architecture.md` | `module-boundaries.md` | `api-design.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **关联 ID：** `REQ-003`, `REQ-006`, `NFR-001`, `NFR-003`
-**最后更新：** 2026-04-22
+**最后更新：** 2026-04-27
 
 **当前阶段：** DESIGN
 **技术画像：** Crawler4j Model 项目画像
-**技术栈：** python + crawler4j sdk cli + model/module project
+**技术栈：** python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v1 module project
 **预设：** crawler4j-model
 **备注：** 移除固定版本并清理旧预设命令
 
 ## 技术画像摘要
 
-适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml` 契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。
+适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml`、`crawler4j-contracts` 运行时契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。
 
 ## 必须落地的项目范围
 
@@ -29,13 +29,14 @@
 - Python 3.12+
 - uv
 - crawler4j-sdk CLI
+- crawler4j-contracts runtime contracts
 - module.yaml
-- TaskScript / TaskFlow
+- core-native-v1 TaskSpec / WorkflowSpec / PageSpec
 - DevLink / ATM 调试链路
 
 ## 编码与工程规则
 
-- 创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`、`crawler4j data-table create`，不要先手写脚手架。
+- 创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`，不要先手写脚手架。
 - 模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。
 - 新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。
 - 调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。
@@ -62,7 +63,7 @@
 ## 初始化与安装动作
 
 - 优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo <owner/repo>` 创建模块项目，默认使用 PyPI 最新发布版本；脚本化场景可再加 `--defaults --no-git --no-install`。
-- 进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`；需要托管数据表时再执行 `uv run crawler4j data-table create <view_id>`。
+- 进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`。
 - 在 crawler4j Core 源码仓验证本地 CLI 时，优先执行 `uv run python -m crawler4j_sdk.cli.commands --help`。
 
 ## 设计/开发/Gate 同步要求
@@ -92,3 +93,4 @@
 - 2026-03-28 00:36:15: `Crawler4j Model 项目画像` | 负责人：AI 软件工厂 | 备注：修复预设合并后补写强制 skill
 - 2026-03-28 00:42:01: `Crawler4j Model 项目画像` | 负责人：AI 软件工厂 | 备注：改为默认使用 PyPI 最新 crawler4j-sdk
 - 2026-03-28 00:47:22: `Crawler4j Model 项目画像` | 负责人：AI 软件工厂 | 备注：移除固定版本并清理旧预设命令
+- 2026-04-27: 刷新当前技术画像事实，移除 `TaskScript / TaskFlow` 作为当前必选模块的误导表述，并补记运行时代码只依赖 `crawler4j-contracts`

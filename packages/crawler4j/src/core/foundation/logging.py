@@ -8,10 +8,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -39,12 +40,18 @@ class LogEntry:
         environment_id: int | None = None,
         task_id: str | None = None,
         timestamp: datetime | None = None,
+        structured_type: str | None = None,
+        structured_label: str | None = None,
+        structured_payload: Any | None = None,
     ):
         self.message = message
         self.level = level
         self.environment_id = environment_id
         self.task_id = task_id
         self.timestamp = timestamp or datetime.now()
+        self.structured_type = structured_type
+        self.structured_label = structured_label
+        self.structured_payload = structured_payload
 
     def __str__(self) -> str:
         """格式化日志条目用于显示。"""
@@ -55,13 +62,18 @@ class LogEntry:
 
     def to_dict(self) -> dict:
         """转换为字典用于存储。"""
-        return {
+        payload = {
             "message": self.message,
             "level": self.level,
             "environment_id": self.environment_id,
             "task_id": self.task_id,
             "created_at": self.timestamp.isoformat(),
         }
+        if self.structured_type:
+            payload["structured_type"] = self.structured_type
+            payload["structured_label"] = self.structured_label
+            payload["structured_payload"] = self.structured_payload
+        return payload
 
 
 class LogSignals(QObject):
@@ -88,6 +100,12 @@ def _level_name(level_no: int) -> str:
 
 _LOGGER_MIN_LEVEL_FLOORS: dict[str, int] = {
     "apscheduler": logging.WARNING,
+    # 调试模式应聚焦应用自身日志，避免底层事件循环/网络库把 UI 和文件日志打爆。
+    "asyncio": logging.WARNING,
+    "httpcore": logging.WARNING,
+    "httpx": logging.WARNING,
+    "qasync": logging.WARNING,
+    "urllib3": logging.WARNING,
 }
 
 
@@ -234,6 +252,9 @@ class AppLogger:
             environment_id=getattr(record, "environment_id", None),
             task_id=task_id,
             timestamp=datetime.fromtimestamp(record.created),
+            structured_type=getattr(record, "structured_type", None),
+            structured_label=getattr(record, "structured_label", None),
+            structured_payload=getattr(record, "structured_payload", None),
         )
 
         self._entries.append(entry)
@@ -262,11 +283,25 @@ class AppLogger:
             except Exception:
                 pass
 
-    def _log(self, level: int, message: str, environment_id: int | None = None, *, exc_info=None) -> None:
+    def _log(
+        self,
+        level: int,
+        message: str,
+        environment_id: int | None = None,
+        *,
+        exc_info=None,
+        structured_type: str | None = None,
+        structured_label: str | None = None,
+        structured_payload: Any | None = None,
+    ) -> None:
         extra = {"environment_id": environment_id}
         task_id = current_task_id.get()
         if task_id:
             extra["task_id"] = task_id
+        if structured_type is not None:
+            extra["structured_type"] = structured_type
+            extra["structured_label"] = structured_label
+            extra["structured_payload"] = structured_payload
         self._bridge_logger.log(level, message, extra=extra, exc_info=exc_info)
 
     def debug(self, message: str, environment_id: int | None = None) -> None:
@@ -274,6 +309,25 @@ class AppLogger:
 
     def info(self, message: str, environment_id: int | None = None) -> None:
         self._log(logging.INFO, message, environment_id)
+
+    def json(self, label: str, payload: Any, environment_id: int | None = None) -> None:
+        normalized_payload = json.loads(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        )
+        rendered = json.dumps(
+            normalized_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        self._log(
+            logging.INFO,
+            f"{label}:\n{rendered}",
+            environment_id,
+            structured_type="json",
+            structured_label=label,
+            structured_payload=normalized_payload,
+        )
 
     def warning(self, message: str, environment_id: int | None = None) -> None:
         self._log(logging.WARNING, message, environment_id)

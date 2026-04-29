@@ -8,7 +8,7 @@
 
 import json
 
-from crawler4j_sdk import EnvAction, TaskResult, TaskSignal
+from crawler4j_contracts import EnvAction, TaskResult, TaskSignal
 
 
 class TestTaskResultOk:

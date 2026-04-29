@@ -14,6 +14,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from src.core.mms.data_contract import normalize_manifest_data
+
 
 class ModuleStatus(StrEnum):
     """模块状态。
@@ -59,48 +61,145 @@ class WorkflowInfo:
     name: str
     display_name: str = ""
     description: str = ""
-    entry_class: str = ""
     tasks: list[str] = field(default_factory=list)
+    host_scenarios: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "display_name": self.display_name,
+            "description": self.description,
+            "tasks": self.tasks,
+            **({"host_scenarios": self.host_scenarios} if self.host_scenarios else {}),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "WorkflowInfo":
+        if not isinstance(data, dict):
+            raise ValueError("workflows 中的每一项都必须是 YAML 映射对象")
+        if "entry_class" in data:
+            raise ValueError("workflows 包含已移除字段: entry_class")
+
+        raw_tasks = data.get("tasks", [])
+        if raw_tasks is None:
+            raw_tasks = []
+        if not isinstance(raw_tasks, list):
+            raise ValueError("workflows.tasks 必须是数组")
+
+        raw_host_scenarios = data.get("host_scenarios", [])
+        if raw_host_scenarios is None:
+            raw_host_scenarios = []
+        if not isinstance(raw_host_scenarios, list):
+            raise ValueError("workflows.host_scenarios 必须是数组")
+
+        return cls(
+            name=str(data.get("name", "") or "").strip(),
+            display_name=str(data.get("display_name", "") or "").strip(),
+            description=str(data.get("description", "") or "").strip(),
+            tasks=[str(item) for item in raw_tasks],
+            host_scenarios=[str(item) for item in raw_host_scenarios],
+        )
 
 
 @dataclass
-class NavItemInfo:
-    """模块导航项信息。
-    
-    模块可声明自己的侧边栏导航项。
-    """
-    icon: str = "📦"  # 导航图标 (emoji 或图标名)
-    label: str = ""   # 导航标签
-    path: str = ""    # 路由路径 (默认为模块名)
+class ResourcePoolInfo:
+    """模块声明的资源池。"""
+
+    name: str
+    display_name: str = ""
+    description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "display_name": self.display_name,
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "ResourcePoolInfo":
+        if not isinstance(data, dict):
+            raise ValueError("resource_pools 中的每一项都必须是 YAML 映射对象")
+
+        allowed_keys = {"name", "display_name", "description"}
+        unknown_keys = sorted(set(data) - allowed_keys)
+        if unknown_keys:
+            raise ValueError("resource_pools 包含不支持的字段: " + ", ".join(unknown_keys))
+
+        return cls(
+            name=str(data.get("name", "") or "").strip(),
+            display_name=str(data.get("display_name", "") or "").strip(),
+            description=str(data.get("description", "") or "").strip(),
+        )
 
 
 @dataclass
-class DetailMenuItem:
-    """模块详情页自定义菜单项。
-    
-    模块可在详情页左侧二级导航中添加自定义菜单。
-    固定菜单（基本信息、任务链）由 Core 提供，无需声明。
-    """
-    id: str           # 菜单唯一 ID
-    icon: str = "📋"  # 菜单图标
-    label: str = ""   # 显示标签
-    entry: str = ""   # 入口类名 (模块内的 Widget 类，如 "ui:AccountConfigPage")
+class UIPageInfo:
+    """模块宿主页入口声明。"""
+
+    id: str
+    icon: str = "📋"
+    label: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "icon": self.icon,
+            "label": self.label,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "UIPageInfo":
+        if not isinstance(data, dict):
+            raise ValueError("ui_extension.pages 中的每一项都必须是 YAML 映射对象")
+
+        allowed_keys = {"id", "icon", "label"}
+        unknown_keys = sorted(set(data) - allowed_keys)
+        if unknown_keys:
+            raise ValueError(
+                "ui_extension.pages 包含不支持的字段: " + ", ".join(unknown_keys)
+            )
+
+        return cls(
+            id=str(data.get("id", "") or "").strip(),
+            icon=str(data.get("icon", "📋") or "📋").strip() or "📋",
+            label=str(data.get("label", "") or "").strip(),
+        )
 
 
 @dataclass
 class UIExtensionInfo:
     """UI 扩展信息。
-    
-    规格 5.1.3.3:
-        - micro_app: 代码型 UI
-        - none: 无 UI 扩展
+
+    当前只保留宿主页入口列表契约。
     """
-    type: str = "none"  # micro_app | none
-    entry: str = ""  # 入口类声明，如 "ui:AccountConfigPage"
-    trusted: bool = False  # 是否受信
-    available: bool = True  # 是否可用
-    nav_item: NavItemInfo | None = None  # 模块导航项 (可选，已弃用)
-    detail_menu: list[DetailMenuItem] = field(default_factory=list)  # 详情页自定义菜单
+
+    pages: list[UIPageInfo] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pages": [page.to_dict() for page in self.pages],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "UIExtensionInfo":
+        if data is None:
+            return cls()
+        if not isinstance(data, dict):
+            raise ValueError("ui_extension 必须是 YAML 映射对象")
+
+        allowed_keys = {"pages"}
+        unknown_keys = sorted(set(data) - allowed_keys)
+        if unknown_keys:
+            raise ValueError("ui_extension 包含不支持的字段: " + ", ".join(unknown_keys))
+
+        raw_pages = data.get("pages", [])
+        if raw_pages is None:
+            raw_pages = []
+        if not isinstance(raw_pages, list):
+            raise ValueError("ui_extension.pages 必须是数组")
+
+        return cls(pages=[UIPageInfo.from_dict(item) for item in raw_pages])
 
 
 @dataclass
@@ -187,59 +286,35 @@ class ModuleManifest:
     规格参考: 第 7 章模块规范
     """
     name: str
+    runtime_api: str = ""
     version: str = "1.0.0"
     display_name: str = ""
     description: str = ""
     author: str = ""
     workflows: list[WorkflowInfo] = field(default_factory=list)
+    default_workflow: str = ""
     ui_extension: UIExtensionInfo = field(default_factory=UIExtensionInfo)
     config_defaults: ConfigDefaultsInfo = field(default_factory=ConfigDefaultsInfo)
     upgrade_source: UpgradeSourceInfo = field(default_factory=UpgradeSourceInfo)
+    resource_pools: list[ResourcePoolInfo] = field(default_factory=list)
+    data: dict[str, Any] = field(default_factory=lambda: normalize_manifest_data(None))
     
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典。"""
         return {
             "name": self.name,
+            "runtime_api": self.runtime_api,
             "version": self.version,
             "display_name": self.display_name,
             "description": self.description,
             "author": self.author,
             "upgrade_source": self.upgrade_source.to_dict(),
-            "workflows": [
-                {
-                    "name": w.name,
-                    "display_name": w.display_name,
-                    "description": w.description,
-                    "entry_class": w.entry_class,
-                    "tasks": w.tasks,
-                }
-                for w in self.workflows
-            ],
-            "ui_extension": {
-                "type": self.ui_extension.type,
-                "entry": self.ui_extension.entry,
-                "trusted": self.ui_extension.trusted,
-                "available": self.ui_extension.available,
-                "nav_item": (
-                    {
-                        "icon": self.ui_extension.nav_item.icon,
-                        "label": self.ui_extension.nav_item.label,
-                        "path": self.ui_extension.nav_item.path,
-                    }
-                    if self.ui_extension.nav_item
-                    else None
-                ),
-                "detail_menu": [
-                    {
-                        "id": item.id,
-                        "icon": item.icon,
-                        "label": item.label,
-                        "entry": item.entry,
-                    }
-                    for item in self.ui_extension.detail_menu
-                ],
-            },
+            "workflows": [w.to_dict() for w in self.workflows],
+            "default_workflow": self.default_workflow,
+            "ui_extension": self.ui_extension.to_dict(),
             "config_defaults": self.config_defaults.to_dict(),
+            "resource_pools": [pool.to_dict() for pool in self.resource_pools],
+            "data": self.data,
         }
     
     @classmethod
@@ -247,55 +322,33 @@ class ModuleManifest:
         """从字典反序列化。"""
         workflows = []
         for w in data.get("workflows", []):
-            workflows.append(WorkflowInfo(
-                name=w.get("name", ""),
-                display_name=w.get("display_name", ""),
-                description=w.get("description", ""),
-                entry_class=w.get("entry_class", ""),
-                tasks=w.get("tasks", []),
-            ))
+            workflows.append(WorkflowInfo.from_dict(w))
         
-        ui_data = data.get("ui_extension", {})
-        nav_data = ui_data.get("nav_item")
-        nav_item = None
-        if nav_data:
-            nav_item = NavItemInfo(
-                icon=nav_data.get("icon", "📦"),
-                label=nav_data.get("label", ""),
-                path=nav_data.get("path", ""),
-            )
-        
-        # 解析详情页自定义菜单
-        detail_menu = []
-        for item in ui_data.get("detail_menu", []):
-            detail_menu.append(DetailMenuItem(
-                id=item.get("id", ""),
-                icon=item.get("icon", "📋"),
-                label=item.get("label", ""),
-                entry=item.get("entry", ""),
-            ))
-        
-        ui_extension = UIExtensionInfo(
-            type=ui_data.get("type", "none"),
-            entry=ui_data.get("entry", ""),
-            trusted=bool(ui_data.get("trusted", False)),
-            available=bool(ui_data.get("available", True)),
-            nav_item=nav_item,
-            detail_menu=detail_menu,
-        )
+        ui_extension = UIExtensionInfo.from_dict(data.get("ui_extension"))
         config_defaults = ConfigDefaultsInfo.from_dict(data.get("config_defaults"))
         upgrade_source = UpgradeSourceInfo.from_dict(data.get("upgrade_source"))
+        raw_resource_pools = data.get("resource_pools", [])
+        if raw_resource_pools is None:
+            raw_resource_pools = []
+        if not isinstance(raw_resource_pools, list):
+            raise ValueError("resource_pools 必须是数组")
+        resource_pools = [ResourcePoolInfo.from_dict(item) for item in raw_resource_pools]
+        module_data = normalize_manifest_data(data.get("data"))
 
         return cls(
             name=data.get("name", ""),
+            runtime_api=data.get("runtime_api", ""),
             version=data.get("version", "1.0.0"),
             display_name=data.get("display_name", ""),
             description=data.get("description", ""),
             author=data.get("author", ""),
             workflows=workflows,
+            default_workflow=data.get("default_workflow", ""),
             ui_extension=ui_extension,
             config_defaults=config_defaults,
             upgrade_source=upgrade_source,
+            resource_pools=resource_pools,
+            data=module_data,
         )
 
 

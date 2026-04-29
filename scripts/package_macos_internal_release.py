@@ -413,6 +413,7 @@ def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None
     """Build Sparkle-enabled DMG/appcast artifacts for internal macOS releases."""
     config = load_sparkle_release_config(env, env_file=args.env_file)
     version = release_packaging_helpers.load_project_version()
+    output_dir = release_packaging_helpers.reset_output_dir(args.output_dir)
 
     if args.skip_build:
         bundle = app_bundle_path()
@@ -429,7 +430,7 @@ def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None
     print(f"[sparkle] feed={config.feed_url}")
     print(f"[codesign] ad-hoc re-signed {bundle}")
 
-    dmg_path = create_dmg(bundle, args.output_dir, version=version, volume_name=args.volume_name)
+    dmg_path = create_dmg(bundle, output_dir, version=version, volume_name=args.volume_name)
     print(f"[dmg] {dmg_path}")
 
     appcast_generated = False
@@ -438,15 +439,15 @@ def build_release_artifacts(args: argparse.Namespace, env: dict[str, str] | None
             raise FileNotFoundError(
                 f"未找到 generate_appcast，请设置 {SPARKLE_APPCAST_TOOL_ENV} 或提供 Sparkle bin/ 目录。"
             )
-        run_generate_appcast(config.generate_appcast_tool, args.output_dir, config=config)
-        print(f"[appcast] generated under {args.output_dir}")
+        run_generate_appcast(config.generate_appcast_tool, output_dir, config=config)
+        print(f"[appcast] generated under {output_dir}")
         appcast_generated = True
 
-    print(f"[done] internal macOS Sparkle release artifacts are under {args.output_dir}")
+    print(f"[done] internal macOS Sparkle release artifacts are under {output_dir}")
     return SparkleReleaseArtifacts(
         version=version,
         app_bundle=bundle,
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         dmg_path=dmg_path,
         appcast_generated=appcast_generated,
     )

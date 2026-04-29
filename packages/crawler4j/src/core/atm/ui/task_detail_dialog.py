@@ -5,17 +5,13 @@
 
 import asyncio
 from datetime import datetime
+from typing import Any
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QPushButton,
-    QTableWidgetItem,
     QTabWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -27,13 +23,36 @@ from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.atm.ui.task_confirmation_dialog import TaskConfirmationDialog
+from src.ui.components.button import StyledButton
+from src.ui.components.data_table import SkyDataTable
+from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.log_console import LogConsoleWidget
-from src.ui.components.table import SkyTableWidget
+from src.ui.components.text_edit import StyledTextEdit
 
 
 class JobDetailDialog(QDialog):
     """作业详情对话框。"""
 
+    TASK_TABLE_SCHEMA = {
+        "columns": [
+            {"key": "task_short_id", "label": "Task ID", "type": "text", "width": 120},
+            {"key": "status", "label": "状态", "type": "text", "width": 120},
+            {"key": "env_id", "label": "环境ID", "type": "text", "width": 140},
+            {"key": "lease_id", "label": "环境租约", "type": "text", "width": 140},
+            {"key": "started_at", "label": "开始时间", "type": "text", "width": 100},
+            {"key": "finished_at", "label": "结束时间", "type": "text", "width": 100},
+            {"key": "result", "label": "结果/错误", "type": "text", "stretch": True},
+        ],
+        "features": {
+            "search": {"enabled": True, "placeholder": "搜索任务 ID、状态或错误"},
+            "sort": {
+                "enabled": True,
+                "default": [{"field": "started_at", "direction": "desc"}],
+            },
+            "pagination": {"enabled": True, "page_size": 10, "page_size_options": [10, 20, 50]},
+        },
+    }
     REFRESH_EVENTS = (
         EventType.TASK_FINISHED,
         EventType.TASK_FAILED,
@@ -51,7 +70,9 @@ class JobDetailDialog(QDialog):
         self._job: Job | None = None
         self._debug_target: JobDebugTarget | None = None
         self._auto_presented_confirmation_task_ids: set[str] = set()
+        self._task_rows: list[dict[str, Any]] = []
         self.setWindowTitle("作业详情 (V2)")
+        configure_titled_dialog(self)
         self.resize(1000, 700)
         self.setModal(True)
         
@@ -104,19 +125,7 @@ class JobDetailDialog(QDialog):
         self.runtime_label = QLabel("运行配置: -")
         info_layout.addWidget(self.runtime_label)
 
-        self.debug_btn = QPushButton("🐞 调试任务")
-        self.debug_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(245, 158, 11, 0.88);
-                color: black;
-                border: none;
-                padding: 8px 14px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(245, 158, 11, 1); }
-            QPushButton:disabled { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.4); }
-        """)
+        self.debug_btn = StyledButton("🐞 调试任务", variant="warning", min_height=36, min_width=120)
         self.debug_btn.clicked.connect(self._open_debug_dialog)
         self.debug_btn.hide()
         info_layout.addWidget(self.debug_btn)
@@ -140,7 +149,7 @@ class JobDetailDialog(QDialog):
         # 底部按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        close_btn = QPushButton("关闭")
+        close_btn = StyledButton("关闭", variant="secondary", min_height=36, min_width=92)
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
@@ -149,18 +158,13 @@ class JobDetailDialog(QDialog):
         layout = QVBoxLayout(self.tasks_tab)
         
         # Refresh Btn
-        refresh_btn = QPushButton("🔄 刷新列表")
+        refresh_btn = StyledButton("🔄 刷新列表", variant="secondary", min_height=36, min_width=108)
         refresh_btn.clicked.connect(lambda: self._load_data())
         layout.addWidget(refresh_btn)
 
-        # Task Table
-        self.task_table = SkyTableWidget()
-        columns = ["Task ID", "状态", "环境ID", "环境租约", "开始时间", "结束时间", "结果/错误"]
-        self.task_table.setColumnCount(len(columns))
-        self.task_table.setHorizontalHeaderLabels(columns)
-        self.task_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.task_table.cellClicked.connect(self._on_task_selected)
-        
+        self.task_table = SkyDataTable(schema=self.TASK_TABLE_SCHEMA)
+        self.task_table.query_requested.connect(self._on_task_query_requested)
+        self.task_table.row_clicked.connect(self._on_task_row_clicked)
         layout.addWidget(self.task_table, stretch=2)
         
         # Task Details (Log Console)
@@ -170,7 +174,7 @@ class JobDetailDialog(QDialog):
 
     def _setup_config_tab(self):
         layout = QVBoxLayout(self.config_tab)
-        self.config_text = QTextEdit()
+        self.config_text = StyledTextEdit(monospace=True)
         self.config_text.setReadOnly(True)
         layout.addWidget(self.config_text)
 
@@ -209,40 +213,55 @@ class JobDetailDialog(QDialog):
             self.name_label.setText(f"Error: {e}")
 
     def _render_tasks(self, tasks: list[Task]):
-        self.task_table.setRowCount(0)
-        for task in tasks:
-            row = self.task_table.rowCount()
-            self.task_table.insertRow(row)
-            
-            # ID
-            id_item = QTableWidgetItem(task.id[:8])
-            id_item.setData(Qt.ItemDataRole.UserRole, task) # Meta data store task object
-            self.task_table.setItem(row, 0, id_item)
-            
-            # Status
-            self.task_table.setItem(row, 1, QTableWidgetItem(task.status.value))
-            
-            # Env
-            self.task_table.setItem(row, 2, QTableWidgetItem(str(task.env_id or "-")))
-            
-            # Lease
-            self.task_table.setItem(row, 3, QTableWidgetItem(str(task.lease_id or "-")[:8]))
-            
-            # Start
-            start_str = "-"
-            if task.started_at:
-                start_str = datetime.fromtimestamp(task.started_at).strftime("%H:%M:%S")
-            self.task_table.setItem(row, 4, QTableWidgetItem(start_str))
-            
-            # End
-            end_str = "-"
-            if task.finished_at:
-                end_str = datetime.fromtimestamp(task.finished_at).strftime("%H:%M:%S")
-            self.task_table.setItem(row, 5, QTableWidgetItem(end_str))
-            
-            # Result
-            msg = task.message or task.error or "-"
-            self.task_table.setItem(row, 6, QTableWidgetItem(msg))
+        self._task_rows = [self._build_task_row(task) for task in tasks]
+        self.task_table.request_refresh()
+
+    def _build_task_row(self, task: Task) -> dict[str, Any]:
+        start_str = "-"
+        if task.started_at:
+            start_str = datetime.fromtimestamp(task.started_at).strftime("%H:%M:%S")
+        end_str = "-"
+        if task.finished_at:
+            end_str = datetime.fromtimestamp(task.finished_at).strftime("%H:%M:%S")
+        message = task.message or task.error or "-"
+        return {
+            "task": task,
+            "task_id": task.id,
+            "task_short_id": task.id[:8],
+            "status": {
+                "text": task.status.value,
+                "tone": self._task_status_tone(task.status),
+            },
+            "env_id": str(task.env_id or "-"),
+            "lease_id": str(task.lease_id or "-")[:8],
+            "started_at": {
+                "text": start_str,
+                "sort_value": float(task.started_at or 0),
+            },
+            "finished_at": {
+                "text": end_str,
+                "sort_value": float(task.finished_at or 0),
+            },
+            "result": message,
+        }
+
+    def _task_status_tone(self, status: TaskStatus) -> str:
+        return {
+            TaskStatus.SUCCEEDED: "success",
+            TaskStatus.FAILED: "danger",
+            TaskStatus.CANCELLED: "warning",
+            TaskStatus.WAITING_CONFIRMATION: "warning",
+            TaskStatus.RUNNING: "info",
+            TaskStatus.PENDING: "neutral",
+        }.get(status, "neutral")
+
+    def _on_task_query_requested(self, request_id: int, query: dict[str, Any]) -> None:
+        result = resolve_local_data_table_result(
+            self._task_rows,
+            columns=self.TASK_TABLE_SCHEMA["columns"],
+            query=query,
+        )
+        self.task_table.apply_result(request_id, result)
 
     def _update_info(self, job: Job):
         runtime_text, runtime_tooltip = describe_job_runtime(job)
@@ -300,9 +319,8 @@ class JobDetailDialog(QDialog):
         self._debug_target = None
         self.debug_btn.hide()
     
-    def _on_task_selected(self, row, col):
-        item = self.task_table.item(row, 0)
-        task = item.data(Qt.ItemDataRole.UserRole)
+    def _on_task_row_clicked(self, row: dict[str, Any]) -> None:
+        task = row.get("task")
         if task:
             # Set filter for log console
             self.log_console.set_filter(task.id)

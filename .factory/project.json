@@ -27,17 +27,17 @@
     "root_build": {
       "command": "uv build --package crawler4j --out-dir /tmp/crawler4j-build-check",
       "result": "passed",
-      "details": "workspace build reran on 2026-04-20 and produced crawler4j-0.2.0 wheel/sdist successfully"
+      "details": "workspace build reran on 2026-04-29 and produced crawler4j-0.3.2 wheel/sdist successfully"
     },
     "sdk_build": {
       "command": "uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check",
-      "result": "passed",
-      "details": "workspace build reran on 2026-04-20 and produced crawler4j_sdk-0.3.0 wheel/sdist successfully"
+      "result": "pending",
+      "details": "current source version is crawler4j-sdk 0.6.1; no wheel/sdist or publish evidence has been recorded for this version yet. Historical 0.5.2 evidence must not be reused as current release evidence"
     },
     "contracts_build": {
       "command": "uv build --package crawler4j-contracts --out-dir /tmp/crawler4j-contracts-build-check",
-      "result": "passed",
-      "details": "workspace build reran on 2026-04-20 and produced crawler4j_contracts-0.2.0 wheel/sdist successfully"
+      "result": "pending",
+      "details": "current source version is crawler4j-contracts 0.4.0; no wheel/sdist or publish evidence has been recorded for this version yet. Historical 0.3.0 evidence must not be reused as current release evidence"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",
@@ -56,8 +56,8 @@
     },
     "pyinstaller_bundle": {
       "command": "uv run package-desktop",
-      "result": "passed",
-      "details": "PyInstaller build completed successfully on 2026-04-20; desktop artifacts now have fixed output dirs under packages/crawler4j/dist/desktop/<platform>/ and packages/crawler4j/build/pyinstaller/<platform>/"
+      "result": "pending",
+      "details": "PyInstaller build passed on 2026-04-24 before the later QScintilla dependency line was introduced; current QScintilla package/bundle evidence is pending and must be rerun before release"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -75,18 +75,18 @@
       "details": "4 passed on 2026-03-26 covering module/workflow settings export, removed legacy KV ignore semantics, persisted module status, and uninstall cleanup policy"
     },
     "mms_custom_ui_tests": {
-      "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py -q",
+      "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py packages/crawler4j/tests/acceptance/test_sdk_cli_scaffold_package_acceptance.py",
       "result": "passed",
-      "details": "14 passed on 2026-03-26 covering DevLink trust, external-module blocking, allowlist override, and custom-page load fallback"
+      "details": "105 passed on 2026-04-22 covering hosted page renderer, module detail routing, runtime capabilities, declared UI persistence cleanup, CLI scaffold, integration, and acceptance on the new ui_extension.pages[] contract"
     }
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.2.0",
-    "runtime": "0.2.0",
+    "app_package_pyproject": "0.3.2",
+    "runtime": "0.3.2",
     "git_tag_latest": "v0.2.0",
-    "sdk": "0.3.0",
-    "contracts": "0.2.0"
+    "sdk": "0.6.1",
+    "contracts": "0.4.0"
   },
   "entrypoints": {
     "actual_ui_entry": "uv run python -m src.ui.app",
@@ -97,7 +97,9 @@
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
-    "Latest local validation is green, but release evidence still spans 2026-04-21 full-repo checks plus 2026-04-22 targeted packaging/update checks and has not been bound into one formal release batch."
+    "Latest local validation evidence is historical and must not be treated as a fresh full gate for the current dirty workspace.",
+    "QScintilla was added to the desktop dependency line after the last recorded PyInstaller package evidence, so desktop package/bundle verification is pending.",
+    "crawler4j-sdk 0.6.1 and crawler4j-contracts 0.4.0 still need current build/publish evidence if they are to be released."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",
@@ -110,8 +112,8 @@
   "technical_profile": {
     "id": "crawler4j-model",
     "title": "Crawler4j Model 项目画像",
-    "stack": "python + crawler4j sdk cli + model/module project",
-    "summary": "适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml` 契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。",
+    "stack": "python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v1 module project",
+    "summary": "适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml`、`crawler4j-contracts` 运行时契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。",
     "projects": [
       "Crawler4j 标准模块项目",
       "Crawler4j Core 模块开发与验证"
@@ -120,12 +122,13 @@
       "Python 3.12+",
       "uv",
       "crawler4j-sdk CLI",
+      "crawler4j-contracts runtime contracts",
       "module.yaml",
-      "TaskScript / TaskFlow",
+      "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
       "DevLink / ATM 调试链路"
     ],
     "rules": [
-      "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`、`crawler4j data-table create`，不要先手写脚手架。",
+      "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`，不要先手写脚手架。",
       "模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。",
       "新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。",
       "调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。",
@@ -134,7 +137,7 @@
     "admin_requirements": [],
     "commands": [
       "优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo owner/<module_name>` 创建模块项目，默认使用 PyPI 最新发布版本；脚本化场景按需加 `--no-git --no-install`。",
-      "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>` 或 `uv run crawler4j data-table create <view_id>`。",
+      "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`。",
       "在 crawler4j Core 源码仓验证本地 CLI 时，优先执行 `uv run python -m crawler4j_sdk.cli.commands --help`。"
     ],
     "guides": [
@@ -172,7 +175,7 @@
     "note": "移除固定版本并清理旧预设命令",
     "applied_at": "2026-03-28 00:47:22"
   },
-  "stack": "python + crawler4j sdk cli + model/module project",
+  "stack": "python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v1 module project",
   "technical_profile_history": [
     {
       "id": "crawler4j-model",
@@ -188,11 +191,11 @@
         "uv",
         "crawler4j-sdk CLI",
         "module.yaml",
-        "TaskScript / TaskFlow",
+        "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
         "DevLink / ATM 调试链路"
       ],
       "rules": [
-        "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`、`crawler4j data-table create`，不要先手写脚手架。",
+        "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`，不要先手写脚手架。",
         "模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。",
         "新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。",
         "调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。",
@@ -201,7 +204,7 @@
       "admin_requirements": [],
       "commands": [
         "优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo <owner/repo>` 创建模块项目；脚本化场景可再加 `--defaults --no-git --no-install`。",
-        "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`；需要托管数据表时再执行 `uv run crawler4j data-table create <view_id>`。",
+        "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`。",
         "在 crawler4j Core 源码仓验证本地 CLI 时，优先执行 `uv run python -m crawler4j_sdk.cli.commands --help`。"
       ],
       "guides": [
@@ -231,11 +234,11 @@
         "uv",
         "crawler4j-sdk CLI",
         "module.yaml",
-        "TaskScript / TaskFlow",
+        "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
         "DevLink / ATM 调试链路"
       ],
       "rules": [
-        "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`、`crawler4j data-table create`，不要先手写脚手架。",
+        "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`，不要先手写脚手架。",
         "模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。",
         "新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。",
         "调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。",
@@ -244,7 +247,7 @@
       "admin_requirements": [],
       "commands": [
         "优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo <owner/repo>` 创建模块项目；脚本化场景可再加 `--defaults --no-git --no-install`。",
-        "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`；需要托管数据表时再执行 `uv run crawler4j data-table create <view_id>`。",
+        "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`。",
         "在 crawler4j Core 源码仓验证本地 CLI 时，优先执行 `uv run python -m crawler4j_sdk.cli.commands --help`。"
       ],
       "guides": [
@@ -296,11 +299,11 @@
         "uv",
         "crawler4j-sdk CLI",
         "module.yaml",
-        "TaskScript / TaskFlow",
+        "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
         "DevLink / ATM 调试链路"
       ],
       "rules": [
-        "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`、`crawler4j data-table create`，不要先手写脚手架。",
+        "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`，不要先手写脚手架。",
         "模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。",
         "新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。",
         "调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。",
@@ -309,7 +312,7 @@
       "admin_requirements": [],
       "commands": [
         "优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo <owner/repo>` 创建模块项目，默认使用 PyPI 最新发布版本；脚本化场景可再加 `--defaults --no-git --no-install`。",
-        "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`；需要托管数据表时再执行 `uv run crawler4j data-table create <view_id>`。",
+        "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`。",
         "在 crawler4j Core 源码仓验证本地 CLI 时，优先执行 `uv run python -m crawler4j_sdk.cli.commands --help`。",
         "优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo <owner/repo>` 创建模块项目；脚本化场景可再加 `--defaults --no-git --no-install`。"
       ],
@@ -362,11 +365,11 @@
         "uv",
         "crawler4j-sdk CLI",
         "module.yaml",
-        "TaskScript / TaskFlow",
+        "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
         "DevLink / ATM 调试链路"
       ],
       "rules": [
-        "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`、`crawler4j data-table create`，不要先手写脚手架。",
+        "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`，不要先手写脚手架。",
         "模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。",
         "新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。",
         "调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。",
@@ -375,7 +378,7 @@
       "admin_requirements": [],
       "commands": [
         "优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo <owner/repo>` 创建模块项目，默认使用 PyPI 最新发布版本；脚本化场景可再加 `--defaults --no-git --no-install`。",
-        "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`；需要托管数据表时再执行 `uv run crawler4j data-table create <view_id>`。",
+        "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`。",
         "在 crawler4j Core 源码仓验证本地 CLI 时，优先执行 `uv run python -m crawler4j_sdk.cli.commands --help`。"
       ],
       "guides": [

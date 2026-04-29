@@ -2,59 +2,33 @@ from src.ui.theme.palette import Palette
 
 
 class StyleSheets:
-    """Centralized Stylesheets."""
-    
-    MAIN_WINDOW = f"""
-        QMainWindow {{
-            background-color: {Palette.BG_MAIN};
-        }}
-    """
-    
-    GLASS_CARD = f"""
-        QFrame.GlassCard {{
-            background-color: {Palette.BG_GLASS};
-            border: 1px solid {Palette.BORDER_LIGHT};
-            border-radius: 12px;
-        }}
-    """
-    
-    SIDEBAR = f"""
-        QWidget#Sidebar {{
-            background-color: {Palette.BG_SIDEBAR};
-            border-right: 1px solid {Palette.BORDER_LIGHT};
-        }}
-        QPushButton {{
-            text-align: left;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 8px;
-            color: {Palette.TEXT_SECONDARY};
-            background-color: transparent;
-            font-size: 14px;
-        }}
-        QPushButton:hover {{
-            background-color: rgba(255, 255, 255, 0.05);
-            color: {Palette.TEXT_PRIMARY};
-        }}
-        QPushButton:checked {{
-            background-color: {Palette.ACCENT_PRIMARY};
-            color: white;
-            font-weight: bold;
-        }}
-    """
+    """Shared stylesheet helpers."""
 
-    MODERN_BUTTON = f"""
-        QPushButton {{
-            background-color: {Palette.ACCENT_PRIMARY};
-            color: white;
-            border-radius: 6px;
-            padding: 8px 16px;
+    @staticmethod
+    def card(*, variant: str = "card") -> str:
+        normalized_variant = variant if variant in {"plain", "group", "card"} else "card"
+        if normalized_variant == "plain":
+            frame_style = "background: transparent; border: none;"
+        elif normalized_variant == "group":
+            frame_style = (
+                "background: rgba(255, 255, 255, 0.04); "
+                f"border: 1px solid {Palette.BORDER_LIGHT}; "
+                "border-radius: 14px;"
+            )
+        else:
+            frame_style = (
+                "background: rgba(17, 24, 39, 0.92); "
+                f"border: 1px solid {Palette.BORDER_LIGHT}; "
+                "border-radius: 18px;"
+            )
+
+        return f"""
+        QFrame#sharedCard {{
+            {frame_style}
+        }}
+        QLabel#cardTitle {{
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 13px;
             font-weight: 600;
         }}
-        QPushButton:hover {{
-            background-color: {Palette.ACCENT_HOVER};
-        }}
-        QPushButton:pressed {{
-            background-color: {Palette.ACCENT_PRIMARY}; /* darkened slightly */
-        }}
-    """
+        """

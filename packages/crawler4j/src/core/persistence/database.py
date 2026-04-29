@@ -8,6 +8,7 @@
     - data.db: 业务数据（只写/批量读）
 """
 
+import json
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -32,6 +33,11 @@ _MODULE_DATASET_V2_REQUIRED_COLUMNS = {
     "created_at",
     "updated_at",
 }
+_MODULE_DATASET_V3_REQUIRED_COLUMNS = _MODULE_DATASET_V2_REQUIRED_COLUMNS | {
+    "record_key",
+    "run_status",
+    "record_status",
+}
 _MODULE_DATASET_V2_PRIMARY_KEY = {
     "module_name": 1,
     "dataset_name": 2,
@@ -41,6 +47,33 @@ _MODULE_DATASET_LEGACY_REQUIRED_COLUMNS = {
     "module_name",
     "dataset_name",
     "records_json",
+    "created_at",
+    "updated_at",
+}
+_MODULE_DATA_RESOURCE_REQUIRED_COLUMNS = {
+    "module_name",
+    "resource_id",
+    "storage_mode",
+    "logical_name",
+    "physical_table_name",
+    "record_key_field",
+    "schema_version",
+    "schema_json",
+    "indexes_json",
+    "cleanup_policy",
+    "created_at",
+    "updated_at",
+}
+_MODULE_DB_VIEW_REQUIRED_COLUMNS = {
+    "module_name",
+    "view_id",
+    "view_kind",
+    "physical_view_name",
+    "source_resource_ids_json",
+    "select_sql_template",
+    "columns_json",
+    "schema_version",
+    "cleanup_policy",
     "created_at",
     "updated_at",
 }
@@ -74,7 +107,7 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
     
     Example:
         >>> with get_connection(CONFIG_DB) as conn:
-        ...     cursor = conn.execute("SELECT * FROM configs")
+        ...     cursor = conn.execute("SELECT * FROM config_entries")
         ...     rows = cursor.fetchall()
     """
     db_path = get_db_path(db_name)
@@ -125,6 +158,9 @@ def _create_module_datasets_table(conn: sqlite3.Connection, table_name: str = "m
             module_name TEXT NOT NULL,
             dataset_name TEXT NOT NULL,
             record_index INTEGER NOT NULL,
+            record_key TEXT,
+            run_status TEXT NOT NULL DEFAULT '不占用',
+            record_status TEXT NOT NULL DEFAULT '',
             record_json TEXT NOT NULL,
             created_at INTEGER DEFAULT (strftime('%s', 'now')),
             updated_at INTEGER DEFAULT (strftime('%s', 'now')),
@@ -134,21 +170,149 @@ def _create_module_datasets_table(conn: sqlite3.Connection, table_name: str = "m
     )
 
 
-def _create_module_dataset_manifests_table(
-    conn: sqlite3.Connection,
-    table_name: str = "module_dataset_manifests",
-) -> None:
-    conn.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
+def _create_module_data_resources_table(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS module_data_resources (
             module_name TEXT NOT NULL,
-            dataset_name TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            storage_mode TEXT NOT NULL CHECK (storage_mode IN ('managed_dataset', 'custom_table')),
+            logical_name TEXT NOT NULL,
+            physical_table_name TEXT NOT NULL,
+            record_key_field TEXT,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            schema_json TEXT NOT NULL DEFAULT '{}',
+            indexes_json TEXT NOT NULL DEFAULT '{}',
+            cleanup_policy TEXT NOT NULL CHECK (cleanup_policy IN ('delete_rows', 'drop_table', 'keep')),
             created_at INTEGER DEFAULT (strftime('%s', 'now')),
             updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-            PRIMARY KEY (module_name, dataset_name)
+            PRIMARY KEY (module_name, resource_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_module_data_resources_module
+        ON module_data_resources(module_name);
+
+        CREATE INDEX IF NOT EXISTS idx_module_data_resources_module_mode
+        ON module_data_resources(module_name, storage_mode);
+        """
+    )
+
+
+def _create_module_db_views_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS module_db_views (
+            module_name TEXT NOT NULL,
+            view_id TEXT NOT NULL,
+            view_kind TEXT NOT NULL CHECK (view_kind = 'sql_view'),
+            physical_view_name TEXT NOT NULL,
+            source_resource_ids_json TEXT NOT NULL DEFAULT '[]',
+            select_sql_template TEXT NOT NULL,
+            columns_json TEXT NOT NULL DEFAULT '[]',
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            cleanup_policy TEXT NOT NULL CHECK (cleanup_policy IN ('drop_view', 'keep')),
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (module_name, view_id)
         )
         """
     )
+
+
+def _create_module_db_views_indexes(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_module_db_views_module
+        ON module_db_views(module_name)
+        """
+    )
+
+
+def _module_db_views_uses_legacy_v1_schema(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'module_db_views'
+        """
+    ).fetchone()
+    table_sql = str(row["sql"] or "").lower() if row else ""
+    return "materialized_view" in table_sql or "drop_table" in table_sql
+
+
+def _module_db_views_has_legacy_rows(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM module_db_views
+        WHERE view_kind <> 'sql_view'
+           OR cleanup_policy NOT IN ('drop_view', 'keep')
+        LIMIT 1
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _rebuild_module_db_views_table_to_v1(conn: sqlite3.Connection) -> None:
+    temp_table_name = "module_db_views__v1"
+    conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
+    conn.execute(
+        f"""
+        CREATE TABLE {temp_table_name} (
+            module_name TEXT NOT NULL,
+            view_id TEXT NOT NULL,
+            view_kind TEXT NOT NULL CHECK (view_kind = 'sql_view'),
+            physical_view_name TEXT NOT NULL,
+            source_resource_ids_json TEXT NOT NULL DEFAULT '[]',
+            select_sql_template TEXT NOT NULL,
+            columns_json TEXT NOT NULL DEFAULT '[]',
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            cleanup_policy TEXT NOT NULL CHECK (cleanup_policy IN ('drop_view', 'keep')),
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (module_name, view_id)
+        )
+        """
+    )
+    conn.execute(
+        f"""
+        INSERT INTO {temp_table_name} (
+            module_name,
+            view_id,
+            view_kind,
+            physical_view_name,
+            source_resource_ids_json,
+            select_sql_template,
+            columns_json,
+            schema_version,
+            cleanup_policy,
+            created_at,
+            updated_at
+        )
+        SELECT
+            module_name,
+            view_id,
+            'sql_view',
+            physical_view_name,
+            source_resource_ids_json,
+            select_sql_template,
+            columns_json,
+            CASE
+                WHEN schema_version IS NULL OR schema_version < 1 THEN 1
+                ELSE schema_version
+            END,
+            CASE
+                WHEN cleanup_policy = 'keep' THEN 'keep'
+                ELSE 'drop_view'
+            END,
+            created_at,
+            updated_at
+        FROM module_db_views
+        """
+    )
+    conn.execute("DROP TABLE module_db_views")
+    conn.execute(f"ALTER TABLE {temp_table_name} RENAME TO module_db_views")
+    _create_module_db_views_indexes(conn)
 
 
 def _create_module_datasets_indexes(conn: sqlite3.Connection) -> None:
@@ -162,12 +326,6 @@ def _create_module_datasets_indexes(conn: sqlite3.Connection) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_module_datasets_dataset
         ON module_datasets(module_name, dataset_name)
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_module_dataset_manifests_module
-        ON module_dataset_manifests(module_name)
         """
     )
 
@@ -189,6 +347,84 @@ def _module_datasets_has_v2_schema(table_info_rows: list[sqlite3.Row]) -> bool:
     return primary_key == _MODULE_DATASET_V2_PRIMARY_KEY
 
 
+def _module_datasets_has_v3_schema(table_info_rows: list[sqlite3.Row]) -> bool:
+    existing_columns = {row["name"] for row in table_info_rows}
+    if existing_columns != _MODULE_DATASET_V3_REQUIRED_COLUMNS:
+        return False
+
+    primary_key = {
+        row["name"]: row["pk"]
+        for row in table_info_rows
+        if row["pk"]
+    }
+    return primary_key == _MODULE_DATASET_V2_PRIMARY_KEY
+
+
+def _upgrade_module_datasets_v2_to_v3(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE module_datasets ADD COLUMN record_key TEXT")
+    conn.execute("ALTER TABLE module_datasets ADD COLUMN run_status TEXT NOT NULL DEFAULT '不占用'")
+    conn.execute("ALTER TABLE module_datasets ADD COLUMN record_status TEXT NOT NULL DEFAULT ''")
+
+
+def _ensure_module_data_resources_table(conn: sqlite3.Connection) -> None:
+    table_exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'module_data_resources'
+        """
+    ).fetchone()
+    if not table_exists:
+        _create_module_data_resources_table(conn)
+        return
+
+    table_info_rows = _table_info_rows(conn, "module_data_resources")
+    existing_columns = {row["name"] for row in table_info_rows}
+    if "schema_version" not in existing_columns:
+        conn.execute("ALTER TABLE module_data_resources ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1")
+        table_info_rows = _table_info_rows(conn, "module_data_resources")
+        existing_columns = {row["name"] for row in table_info_rows}
+
+    missing_columns = _MODULE_DATA_RESOURCE_REQUIRED_COLUMNS - existing_columns
+    if missing_columns:
+        raise RuntimeError(
+            "Unexpected module_data_resources schema definition: "
+            f"missing_columns={sorted(missing_columns)}, existing_columns={sorted(existing_columns)}"
+        )
+
+    _create_module_data_resources_table(conn)
+
+
+def _ensure_module_db_views_table(conn: sqlite3.Connection) -> None:
+    table_exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'module_db_views'
+        """
+    ).fetchone()
+    if not table_exists:
+        _create_module_db_views_table(conn)
+        _create_module_db_views_indexes(conn)
+        return
+
+    table_info_rows = _table_info_rows(conn, "module_db_views")
+    existing_columns = {row["name"] for row in table_info_rows}
+    missing_columns = _MODULE_DB_VIEW_REQUIRED_COLUMNS - existing_columns
+    if missing_columns:
+        raise RuntimeError(
+            "Unexpected module_db_views schema definition: "
+            f"missing_columns={sorted(missing_columns)}, existing_columns={sorted(existing_columns)}"
+        )
+
+    if _module_db_views_uses_legacy_v1_schema(conn) or _module_db_views_has_legacy_rows(conn):
+        _rebuild_module_db_views_table_to_v1(conn)
+        return
+
+    _create_module_db_views_table(conn)
+    _create_module_db_views_indexes(conn)
+
+
 def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
     table_exists = conn.execute(
         """
@@ -204,7 +440,11 @@ def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
 
     table_info_rows = _table_info_rows(conn, "module_datasets")
     existing_columns = {row["name"] for row in table_info_rows}
+    if _module_datasets_has_v3_schema(table_info_rows):
+        _create_module_datasets_indexes(conn)
+        return
     if _module_datasets_has_v2_schema(table_info_rows):
+        _upgrade_module_datasets_v2_to_v3(conn)
         _create_module_datasets_indexes(conn)
         return
     if _MODULE_DATASET_LEGACY_REQUIRED_COLUMNS.issubset(existing_columns):
@@ -228,12 +468,16 @@ def _init_config_db() -> None:
     """初始化配置数据库。"""
     with get_connection(CONFIG_DB) as conn:
         conn.executescript("""
-            -- 配置表（模块配置、全局设置）
-            CREATE TABLE IF NOT EXISTS configs (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+            -- 宿主配置中心条目表（按 namespace + key_path 路径化存储）
+            CREATE TABLE IF NOT EXISTS config_entries (
+                namespace TEXT NOT NULL,
+                scope_type TEXT NOT NULL DEFAULT 'global',
+                scope_name TEXT NOT NULL DEFAULT '',
+                key_path TEXT NOT NULL,
+                value_json TEXT NOT NULL,
+                value_type TEXT NOT NULL,
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (namespace, scope_type, scope_name, key_path)
             );
 
             -- 模块配置条目表（按模块/工作流 + key_path 扁平化存储）
@@ -251,14 +495,80 @@ def _init_config_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_module_config_scope
             ON module_config_entries(module_name, scope_type, scope_name);
-            
-            -- 设置表（系统设置）
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-            );
         """)
+        _migrate_legacy_settings_to_config_entries(conn)
+        _delete_removed_host_config_entries(conn)
+
+
+def _split_legacy_setting_key(key: str) -> tuple[str, str]:
+    parts = [part for part in str(key or "").strip().split(".") if part]
+    if len(parts) >= 2 and parts[0] in {"browser", "mms"}:
+        return ".".join(parts[:2]), ".".join(parts[2:]) or parts[-1]
+    if len(parts) >= 2:
+        return parts[0], ".".join(parts[1:])
+    return "system", parts[0] if parts else "unknown"
+
+
+def _infer_legacy_setting_type(value_json: str) -> str:
+    try:
+        value = json.loads(value_json)
+    except Exception:
+        return "string"
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return "string"
+
+
+def _migrate_legacy_settings_to_config_entries(conn: sqlite3.Connection) -> None:
+    legacy_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
+    ).fetchone()
+    if legacy_table is None:
+        return
+    rows = conn.execute("SELECT key, value, updated_at FROM settings").fetchall()
+    for row in rows:
+        namespace, key_path = _split_legacy_setting_key(row["key"])
+        conn.execute(
+            """
+            INSERT INTO config_entries (
+                namespace, scope_type, scope_name, key_path, value_json, value_type, updated_at
+            ) VALUES (?, 'global', '', ?, ?, ?, ?)
+            ON CONFLICT(namespace, scope_type, scope_name, key_path) DO UPDATE SET
+                value_json = excluded.value_json,
+                value_type = excluded.value_type,
+                updated_at = excluded.updated_at
+            """,
+            (
+                namespace,
+                key_path,
+                row["value"],
+                _infer_legacy_setting_type(row["value"]),
+                row["updated_at"],
+            ),
+        )
+    conn.execute("DROP TABLE settings")
+
+
+def _delete_removed_host_config_entries(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        DELETE FROM config_entries
+        WHERE namespace = 'system'
+          AND scope_type = 'global'
+          AND scope_name = ''
+          AND key_path IN ('autostart', 'minimize_on_start')
+        """
+    )
 
 
 def _init_state_db() -> None:
@@ -327,17 +637,7 @@ def _init_state_db() -> None:
             
             CREATE INDEX IF NOT EXISTS idx_ip_pool ON ip_entries(pool_id);
             CREATE INDEX IF NOT EXISTS idx_ip_bound ON ip_entries(bound_count);
-            
-            -- 环境-IP 绑定表
-            CREATE TABLE IF NOT EXISTS env_ip_bindings (
-                env_id TEXT PRIMARY KEY REFERENCES environments(id) ON DELETE CASCADE,
-                ip_id TEXT NOT NULL REFERENCES ip_entries(id) ON DELETE CASCADE,
-                bound_at INTEGER NOT NULL
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_binding_ip ON env_ip_bindings(ip_id);
-            
-            
+
             -- 环境元数据表（动态扩展字段）
             CREATE TABLE IF NOT EXISTS env_metadata (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -355,15 +655,77 @@ def _init_state_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_meta_env ON env_metadata(env_id);
             CREATE INDEX IF NOT EXISTS idx_meta_ns_key ON env_metadata(namespace, key);
         """)
+        existing_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(environments)").fetchall()
+        }
+        obsolete_env_columns = {
+            "provider_env_id",
+            "provider_env_name",
+            "provider_group",
+            "provider_proxy",
+            "provider_raw_meta",
+            "imported_at",
+        }
+        conn.execute("DROP INDEX IF EXISTS idx_env_provider_env_id")
+        conn.execute("DROP INDEX IF EXISTS idx_env_provider_env_name")
+        conn.execute("DROP INDEX IF EXISTS idx_env_provider_source_key")
+        for column_name in obsolete_env_columns & existing_columns:
+            conn.execute(f"ALTER TABLE environments DROP COLUMN {column_name}")
+        conn.execute(
+            """
+            UPDATE environments
+            SET name = TRIM(name)
+            WHERE name IS NOT NULL
+            """
+        )
+        conn.execute(
+            """
+            UPDATE environments
+            SET name = NULL
+            WHERE name IS NOT NULL
+              AND name <> ''
+              AND id NOT IN (
+                  SELECT MIN(id)
+                  FROM environments
+                  WHERE name IS NOT NULL
+                    AND name <> ''
+                  GROUP BY provider, name
+              )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_env_provider_name
+            ON environments(provider, name)
+            WHERE name IS NOT NULL
+              AND name <> ''
+            """
+        )
 
 
 def _init_data_db() -> None:
     """初始化业务数据数据库。"""
     with get_connection(DATA_DB) as conn:
-        _create_module_dataset_manifests_table(conn)
+        _ensure_module_data_resources_table(conn)
+        _ensure_module_db_views_table(conn)
         _ensure_module_datasets_table(conn)
+        conn.execute("DROP TABLE IF EXISTS module_dataset_manifests")
         conn.executescript("""
-            -- 模块数据集（按 module + dataset + record_index 逐行存储）
+            -- 模块数据资源登记表统一管理 managed dataset 与 custom table。
+
+            -- 模块宿主页 schema
+            CREATE TABLE IF NOT EXISTS module_pages (
+                module_name TEXT NOT NULL,
+                page_id TEXT NOT NULL,
+                schema_json TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (module_name, page_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_module_pages_module
+            ON module_pages(module_name);
 
             -- 模块审计事件（append-only）
             CREATE TABLE IF NOT EXISTS module_audit_events (
@@ -389,17 +751,4 @@ def _init_data_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_module_audit_events_type_time
             ON module_audit_events(module_name, dataset_name, event_type, created_at DESC);
-
-            -- 模块数据表视图元数据
-            CREATE TABLE IF NOT EXISTS module_data_table_views (
-                module_name TEXT NOT NULL,
-                view_id TEXT NOT NULL,
-                schema_json TEXT NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-                PRIMARY KEY (module_name, view_id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_module_data_views_module
-            ON module_data_table_views(module_name);
         """)

@@ -34,3 +34,11 @@
   状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`REQ-009`, `CR-009`
 - `TASK-024-add-windows-velopack-release-pipeline` TASK-024 为 Windows 建立 PyInstaller onedir + Velopack 发布与宿主自更新闭环
   状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-001`, `REQ-004`, `NFR-003`, `CR-010`
+- `TASK-025-implement-hosted-module-ui-framework` TASK-025 实现模块宿主管理页框架 V1
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-002`, `REQ-003`, `API-008`, `CR-011`
+- `TASK-026-implement-module-data-resource-storage-modes` TASK-026 实现模块数据资源统一登记与存储模式
+  状态：DONE | 负责人：Codex | 预估：3.0 人/天 | 关联：`CR-012`, `API-005`, `API-006`
+- `TASK-027-implement-hosted-ui-master-detail-row-navigation` TASK-027 为 Hosted UI 补主从表行导航与关联详情表能力
+  状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`CR-013`, `API-008`
+- `TASK-028-implement-module-entity-table-view-query-capability` TASK-028 实现模块实体表视图与分析查询能力
+  状态：DONE | 负责人：Codex | 预估：4.0 人/天 | 关联：`CR-014`, `API-009`

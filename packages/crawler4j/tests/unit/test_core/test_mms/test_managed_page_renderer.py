@@ -1,0 +1,1103 @@
+from __future__ import annotations
+
+import builtins
+from contextlib import ExitStack
+from unittest.mock import patch
+
+import pytest
+from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QSizePolicy
+
+from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
+from src.core.persistence import get_module_data_store
+from src.ui.components.button import StyledButton
+
+from ._core_native_v1 import make_manifest, make_page_info, register_module, restore_module, write_module_tree
+
+
+@pytest.fixture(autouse=True)
+def temp_data_dir(tmp_path):
+    with ExitStack() as stack:
+        stack.enter_context(patch("src.utils.paths.get_app_data_dir", return_value=tmp_path))
+        from src.core.persistence.database import init_database
+
+        init_database()
+        yield tmp_path
+
+
+def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(qtbot, tmp_path):
+    module_name = "hosted_page_module"
+    load_key = "_hosted_page_module_load_count"
+    setattr(builtins, load_key, 0)
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": f"""
+            import builtins
+
+            from crawler4j_contracts import PageSpec, TaskContext
+
+            LOAD_COUNT_KEY = "{load_key}"
+
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
+                icon="📊",
+                schema={{
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [
+                        {{"type": "Text", "style": "title", "binding": "title"}},
+                        {{"type": "Text", "style": "body", "binding": "load_count_text"}},
+                        {{"type": "Button", "label": "刷新", "action": {{"type": "reload"}}}},
+                        {{"type": "Button", "label": "打开账号页", "action": {{"type": "open_page", "page_id": "accounts"}}}},
+                        {{
+                            "type": "DataTable",
+                            "table_id": "metrics",
+                            "title": "统计明细",
+                            "data_source": {{"type": "binding", "binding": "rows"}},
+                            "columns": [
+                                {{"key": "metric", "label": "指标"}},
+                                {{"key": "value", "label": "值"}},
+                            ],
+                        }},
+                    ],
+                }},
+            )
+
+
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                count = int(getattr(builtins, LOAD_COUNT_KEY, 0)) + 1
+                setattr(builtins, LOAD_COUNT_KEY, count)
+                return {{
+                    "title": "今日运营看板",
+                    "load_count_text": f"第 {{count}} 次加载",
+                    "rows": [{{"metric": "活跃账号", "value": str(10 + count)}}],
+                }}
+            """,
+            "pages/accounts.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
+
+            PAGE = PageSpec(
+                id="accounts",
+                label="Accounts",
+                icon="📋",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_accounts_page",
+                    "children": [{"type": "Text", "style": "title", "binding": "title"}],
+                },
+            )
+
+
+            def load_accounts_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                return {"title": "账号页"}
+            """,
+        },
+    )
+    manifest = make_manifest(
+        module_name,
+        pages=[
+            make_page_info("dashboard", label="今日运营看板", icon="📊"),
+            make_page_info("accounts", label="账号管理", icon="📋"),
+        ],
+    )
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    opened_pages: list[tuple[str, dict[str, object] | None]] = []
+
+    try:
+        page = ManagedPageRenderer(
+            module_name,
+            "dashboard",
+            module_info=module_info,
+            open_page_callback=lambda page_id, params=None: opened_pages.append((page_id, params)),
+        )
+        qtbot.addWidget(page)
+
+        assert any(label.text() == "今日运营看板" for label in page.findChildren(QLabel))
+        assert any(label.text() == "第 1 次加载" for label in page.findChildren(QLabel))
+        first_table = page._data_table_widgets["metrics"]
+        assert first_table.item(0, 0).text() == "活跃账号"
+        assert first_table.item(0, 1).text() == "11"
+
+        reload_button = next(button for button in page.findChildren(QPushButton) if button.text() == "刷新")
+        reload_button.click()
+        qtbot.waitUntil(lambda: any(label.text() == "第 2 次加载" for label in page.findChildren(QLabel)))
+
+        open_button = next(button for button in page.findChildren(QPushButton) if button.text() == "打开账号页")
+        open_button.click()
+        assert opened_pages == [("accounts", None)]
+    finally:
+        restore_module(service, original_registry, module_name)
+        delattr(builtins, load_key)
+
+
+def test_managed_page_renderer_keeps_header_icon_button_compact(qtbot, tmp_path):
+    module_name = "hosted_page_header_button_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/detail.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
+
+            PAGE = PageSpec(
+                id="detail",
+                label="明细",
+                icon="📄",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_detail_page",
+                    "children": [
+                        {
+                            "type": "Section",
+                            "variant": "plain",
+                            "layout": {"direction": "row", "gap": 8},
+                            "children": [
+                                {
+                                    "type": "Button",
+                                    "icon": "←",
+                                    "aria_label": "返回",
+                                    "size": "icon",
+                                    "variant": "ghost",
+                                    "action": {"type": "open_page", "page_id": "accounts"},
+                                },
+                                {"type": "Text", "style": "title", "text": "劳保计费明细"},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+            def load_detail_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                return {}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("detail", label="明细", icon="📄")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    try:
+        page = ManagedPageRenderer(module_name, "detail", module_info=module_info)
+        qtbot.addWidget(page)
+
+        back_button = next(button for button in page.findChildren(QPushButton) if button.text() == "←")
+        assert back_button.toolTip() == "返回"
+        assert back_button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
+        assert back_button.minimumWidth() <= 40
+        assert back_button.maximumWidth() <= 40
+        assert back_button.width() <= 40
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [
+                {
+                    "id": resource_id,
+                    "storage_mode": "managed_dataset",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "text", "required": True},
+                            {"name": "account_id", "type": "text"},
+                            {"name": "name", "type": "text"},
+                            {"name": "secret", "type": "text"},
+                            {"name": "status", "type": "text"},
+                        ],
+                    },
+                }
+            ],
+            "views": [],
+            "queries": [],
+            "seeds": [],
+        }
+    )
+    get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
+
+
+def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_page_crud_table_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="accounts",
+                label="账号管理",
+                icon="📋",
+                schema={
+                    "type": "Page",
+                    "title": "账号管理",
+                    "load_handler": "load_accounts_page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                            "crud": {
+                                "mode": "handlers",
+                                "primary_key": "account_id",
+                                "form": {
+                                    "create_columns": ["name", "secret"],
+                                    "update_columns": ["name", "secret"],
+                                },
+                                "create_handler": "create_account_from_ui",
+                                "update_handler": "update_account_from_ui",
+                                "delete_handler": "delete_account_from_ui",
+                            },
+                            "columns": [
+                                {"key": "account_id", "label": "ID", "visible": False},
+                                {"key": "name", "label": "账号名", "required": True},
+                                {"key": "secret", "label": "密码", "visible": False, "required": True},
+                                {"key": "status", "label": "状态", "readonly": True},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+            """,
+            "hooks/create_account_from_ui.py": """
+            def handle(context, payload):
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+                next_id = len(rows) + 1
+                row = {
+                    "account_id": str(next_id),
+                    "name": str(payload.get("name") or ""),
+                    "secret": str(payload.get("secret") or ""),
+                    "status": "active",
+                }
+                context.db.into("accounts").replace(rows + [row])
+                return {"record": row, "created": True}
+            """,
+            "hooks/update_account_from_ui.py": """
+            def handle(context, account_id, payload):
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+                updated_rows = []
+                updated = None
+                for row in rows:
+                    current = dict(row)
+                    if str(current.get("account_id")) == str(account_id):
+                        current.update(
+                            {
+                                "name": str(payload.get("name") or current.get("name") or ""),
+                                "secret": str(payload.get("secret") or current.get("secret") or ""),
+                            }
+                        )
+                        updated = dict(current)
+                    updated_rows.append(current)
+                context.db.into("accounts").replace(updated_rows)
+                return {"record": updated, "created": False}
+            """,
+            "hooks/delete_account_from_ui.py": """
+            def handle(context, account_id):
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+                remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
+                deleted = next((row for row in rows if str(row.get("account_id")) == str(account_id)), None)
+                context.db.into("accounts").replace(remaining)
+                return {"deleted": True, "record": deleted, "account_id": str(account_id)}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理", icon="📋")])
+    manifest.data = {
+        "resources": [
+            {
+                "resource_id": "accounts",
+                "storage_mode": "managed_dataset",
+                "record_key_field": "account_id",
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": "account_id", "type": "text", "required": True},
+                    ],
+                },
+                "indexes": {},
+                "cleanup_policy": "delete_rows",
+            }
+        ],
+        "views": [],
+        "queries": [],
+        "seeds": [],
+    }
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    store = get_module_data_store()
+    payloads = iter(
+        [
+            {"name": "beta", "secret": "secret-beta"},
+            {"name": "alpha-updated", "secret": "secret-alpha-2"},
+        ]
+    )
+
+    monkeypatch.setattr(
+        ManagedPageRenderer,
+        "_prompt_crud_form_payload",
+        lambda self, component, *, mode, row=None: dict(next(payloads)),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.managed_page_renderer.ConfirmDialog.delete_confirm",
+        lambda parent, item_name: True,
+    )
+
+    try:
+        _sync_managed_dataset(module_dir, module_name=module_name, resource_id="accounts")
+        assert store.replace_resource_records(
+            module_name,
+            "accounts",
+            [
+                {
+                    "account_id": "1",
+                    "name": "alpha",
+                    "secret": "secret-alpha",
+                    "status": "active",
+                }
+            ],
+        ) is True
+
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        table = page._data_table_widgets["accounts"]
+        qtbot.waitUntil(lambda: table.rowCount() == 1)
+
+        button_texts = [button.text() for button in page.findChildren(QPushButton)]
+        assert "新增" in button_texts
+        assert "编辑" in button_texts
+        assert "删除" in button_texts
+        assert table.columnCount() == 2
+        assert table.horizontalHeaderItem(0).text() == "账号名"
+        assert table.horizontalHeaderItem(1).text() == "状态"
+        assert table.item(0, 0).text() == "alpha"
+
+        add_button = next(button for button in page.findChildren(QPushButton) if button.text() == "新增")
+        edit_button = next(button for button in page.findChildren(QPushButton) if button.text() == "编辑")
+        delete_button = next(button for button in page.findChildren(QPushButton) if button.text() == "删除")
+        assert isinstance(add_button, StyledButton)
+        assert isinstance(edit_button, StyledButton)
+        assert isinstance(delete_button, StyledButton)
+        assert "font-family" in add_button.styleSheet()
+        assert "font-family" in edit_button.styleSheet()
+        assert "font-family" in delete_button.styleSheet()
+
+        add_button.click()
+        qtbot.waitUntil(lambda: table.rowCount() == 2)
+        names = {table.item(row, 0).text() for row in range(table.rowCount())}
+        assert names == {"alpha", "beta"}
+
+        alpha_row_index = next(
+            index
+            for index, row in enumerate(table.displayed_rows())
+            if str(row.get("name") or "") == "alpha"
+        )
+        table.selectRow(alpha_row_index)
+        edit_button.click()
+        qtbot.waitUntil(lambda: any(table.item(row, 0).text() == "alpha-updated" for row in range(table.rowCount())))
+        stored_rows = sorted(
+            store.list_records(module_name, "accounts", limit=1000, offset=0),
+            key=lambda row: str(row.get("account_id") or ""),
+        )
+        assert [
+            {
+                "account_id": str(row.get("account_id") or ""),
+                "name": str(row.get("name") or ""),
+                "secret": str(row.get("secret") or ""),
+                "status": str(row.get("status") or ""),
+            }
+            for row in stored_rows
+        ] == [
+            {
+                "account_id": "1",
+                "name": "alpha-updated",
+                "secret": "secret-alpha-2",
+                "status": "active",
+            },
+            {
+                "account_id": "2",
+                "name": "beta",
+                "secret": "secret-beta",
+                "status": "active",
+            },
+        ]
+
+        beta_row_index = next(
+            index
+            for index, row in enumerate(table.displayed_rows())
+            if str(row.get("name") or "") == "beta"
+        )
+        table.selectRow(beta_row_index)
+        delete_button.click()
+        qtbot.waitUntil(lambda: table.rowCount() == 1)
+        assert [
+            {
+                "account_id": str(row.get("account_id") or ""),
+                "name": str(row.get("name") or ""),
+                "secret": str(row.get("secret") or ""),
+                "status": str(row.get("status") or ""),
+            }
+            for row in store.list_records(module_name, "accounts", limit=1000, offset=0)
+        ] == [
+            {
+                "account_id": "1",
+                "name": "alpha-updated",
+                "secret": "secret-alpha-2",
+                "status": "active",
+            }
+        ]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_page_row_action_crud_table_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="accounts",
+                label="账号管理",
+                icon="📋",
+                schema={
+                    "type": "Page",
+                    "title": "账号管理",
+                    "load_handler": "load_accounts_page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                            "crud": {
+                                "mode": "handlers",
+                                "render": "row_actions",
+                                "toolbar": {"create": True},
+                                "primary_key": "account_id",
+                                "form": {
+                                    "create_columns": ["name", "secret"],
+                                    "update_columns": ["name", "secret"],
+                                },
+                                "create_handler": "create_account_from_ui",
+                                "update_handler": "update_account_from_ui",
+                                "delete_handler": "delete_account_from_ui",
+                            },
+                            "columns": [
+                                {"key": "account_id", "label": "ID", "visible": False},
+                                {"key": "name", "label": "账号名", "required": True},
+                                {"key": "secret", "label": "密码", "visible": False, "required": True},
+                                {"key": "status", "label": "状态", "readonly": True},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+            """,
+            "hooks/create_account_from_ui.py": """
+            def handle(context, payload):
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+                next_id = len(rows) + 1
+                row = {
+                    "account_id": str(next_id),
+                    "name": str(payload.get("name") or ""),
+                    "secret": str(payload.get("secret") or ""),
+                    "status": "active",
+                }
+                context.db.into("accounts").replace(rows + [row])
+                return {"record": row, "created": True}
+            """,
+            "hooks/update_account_from_ui.py": """
+            def handle(context, account_id, payload):
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+                updated_rows = []
+                updated = None
+                for row in rows:
+                    current = dict(row)
+                    if str(current.get("account_id")) == str(account_id):
+                        current.update(
+                            {
+                                "name": str(payload.get("name") or current.get("name") or ""),
+                                "secret": str(payload.get("secret") or current.get("secret") or ""),
+                            }
+                        )
+                        updated = dict(current)
+                    updated_rows.append(current)
+                context.db.into("accounts").replace(updated_rows)
+                return {"record": updated, "created": False}
+            """,
+            "hooks/delete_account_from_ui.py": """
+            def handle(context, account_id):
+                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+                remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
+                deleted = next((row for row in rows if str(row.get("account_id")) == str(account_id)), None)
+                context.db.into("accounts").replace(remaining)
+                return {"deleted": True, "record": deleted, "account_id": str(account_id)}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理", icon="📋")])
+    manifest.data = {
+        "resources": [
+            {
+                "resource_id": "accounts",
+                "storage_mode": "managed_dataset",
+                "record_key_field": "account_id",
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": "account_id", "type": "text", "required": True},
+                    ],
+                },
+                "indexes": {},
+                "cleanup_policy": "delete_rows",
+            }
+        ],
+        "views": [],
+        "queries": [],
+        "seeds": [],
+    }
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    store = get_module_data_store()
+    payloads = iter(
+        [
+            {"name": "beta", "secret": "secret-beta"},
+            {"name": "alpha-updated", "secret": "secret-alpha-2"},
+        ]
+    )
+
+    monkeypatch.setattr(
+        ManagedPageRenderer,
+        "_prompt_crud_form_payload",
+        lambda self, component, *, mode, row=None: dict(next(payloads)),
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.managed_page_renderer.ConfirmDialog.delete_confirm",
+        lambda parent, item_name: True,
+    )
+
+    try:
+        _sync_managed_dataset(module_dir, module_name=module_name, resource_id="accounts")
+        assert store.replace_resource_records(
+            module_name,
+            "accounts",
+            [
+                {
+                    "account_id": "1",
+                    "name": "alpha",
+                    "secret": "secret-alpha",
+                    "status": "active",
+                }
+            ],
+        ) is True
+
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        table = page._data_table_widgets["accounts"]
+        qtbot.waitUntil(lambda: table.rowCount() == 1)
+
+        assert table.columnCount() == 3
+        assert table.horizontalHeaderItem(0).text() == "账号名"
+        assert table.horizontalHeaderItem(1).text() == "状态"
+        assert table.horizontalHeaderItem(2).text() == "操作"
+        assert table.item(0, 0).text() == "alpha"
+        toolbar_button_texts = []
+        for index in range(table._toolbar.count()):
+            item = table._toolbar.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, QPushButton):
+                toolbar_button_texts.append(widget.text())
+        assert toolbar_button_texts == ["新增"]
+
+        add_button = next(button for button in page.findChildren(QPushButton) if button.text() == "新增")
+        add_button.click()
+        qtbot.waitUntil(lambda: table.rowCount() == 2)
+
+        action_cell = table.cellWidget(0, 2)
+        assert action_cell is not None
+        action_texts = [button.text() for button in action_cell.findChildren(QPushButton)]
+        assert action_texts == ["编辑", "删除"]
+
+        edit_button = next(button for button in action_cell.findChildren(QPushButton) if button.text() == "编辑")
+        edit_button.click()
+        qtbot.waitUntil(lambda: any(table.item(row, 0).text() == "alpha-updated" for row in range(table.rowCount())))
+
+        beta_row_index = next(
+            index
+            for index, row in enumerate(table.displayed_rows())
+            if str(row.get("name") or "") == "beta"
+        )
+        delete_button = next(
+            button
+            for button in table.cellWidget(beta_row_index, 2).findChildren(QPushButton)
+            if button.text() == "删除"
+        )
+        delete_button.click()
+        qtbot.waitUntil(lambda: table.rowCount() == 1)
+
+        assert [
+            {
+                "account_id": str(row.get("account_id") or ""),
+                "name": str(row.get("name") or ""),
+                "secret": str(row.get("secret") or ""),
+                "status": str(row.get("status") or ""),
+            }
+            for row in store.list_records(module_name, "accounts", limit=1000, offset=0)
+        ] == [
+            {
+                "account_id": "1",
+                "name": "alpha-updated",
+                "secret": "secret-alpha-2",
+                "status": "active",
+            }
+        ]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_managed_page_renderer_localizes_and_styles_crud_dialog(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_page_crud_dialog_style_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="accounts",
+                label="账号管理",
+                icon="📋",
+                schema={
+                    "type": "Page",
+                    "title": "账号管理",
+                    "load_handler": "load_accounts_page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {"type": "rows", "rows": []},
+                            "crud": {
+                                "mode": "handlers",
+                                "primary_key": "account_id",
+                                "form": {
+                                    "create_columns": ["name", "secret"],
+                                },
+                                "create_handler": "create_account_from_ui",
+                            },
+                            "columns": [
+                                {"key": "account_id", "label": "ID", "visible": False},
+                                {"key": "name", "label": "账号名", "required": True},
+                                {"key": "secret", "label": "密码", "required": True},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理", icon="📋")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    observed: dict[str, object] = {}
+
+    def _fake_exec(dialog: QDialog) -> int:
+        observed["title"] = dialog.windowTitle()
+        observed["button_texts"] = [button.text() for button in dialog.findChildren(QPushButton)]
+        observed["stylesheet"] = dialog.styleSheet()
+        return int(QDialog.DialogCode.Rejected)
+
+    monkeypatch.setattr(QDialog, "exec", _fake_exec)
+
+    try:
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        component = page._schema["children"][0]
+        payload = page._prompt_crud_form_payload(component, mode="create")
+
+        assert payload is None
+        assert observed["title"] == "新增账号管理"
+        assert "取消" in observed["button_texts"]
+        assert "确认" in observed["button_texts"]
+        assert "#1e1e2e" in observed["stylesheet"]
+        assert "QLabel" in observed["stylesheet"]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(qtbot, tmp_path):
+    module_name = "hosted_page_readonly_tools_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec, TaskContext
+
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [
+                        {"type": "Text", "style": "body", "binding": "load_tools"},
+                        {"type": "Text", "style": "body", "binding": "load_write_error"},
+                        {
+                            "type": "DataTable",
+                            "table_id": "stats",
+                            "title": "统计明细",
+                            "data_source": {"type": "query_handler", "handler": "query_stats_table"},
+                            "columns": [
+                                {"key": "metric", "label": "指标"},
+                                {"key": "value", "label": "值"},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                del page_id, params
+                load_tools = ",".join(spec.name for spec in context.tools.list_tools())
+                try:
+                    context.db.into("hosted_ui_load").replace([])
+                except Exception as exc:
+                    load_write_error = type(exc).__name__
+                return {
+                    "load_tools": load_tools,
+                    "load_write_error": load_write_error,
+                }
+
+
+            def query_stats_table(context: TaskContext, table_id: str, query, params=None):
+                del table_id, query, params
+                query_tools = ",".join(spec.name for spec in context.tools.list_tools())
+                try:
+                    context.db.into("hosted_ui_query").replace([])
+                except Exception as exc:
+                    query_write_error = type(exc).__name__
+                return {
+                    "rows": [
+                        {"metric": "query_tools", "value": query_tools},
+                        {"metric": "query_write_error", "value": query_write_error},
+                    ],
+                    "total": 2,
+                    "page": 1,
+                    "page_size": 20,
+                }
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    try:
+        page = ManagedPageRenderer(module_name, "dashboard", module_info=module_info)
+        qtbot.addWidget(page)
+
+        readonly_tools = "ui.get_page"
+        assert any(label.text() == readonly_tools for label in page.findChildren(QLabel))
+        assert any(label.text() == "RuntimeError" for label in page.findChildren(QLabel))
+
+        table = page._data_table_widgets["stats"]
+        qtbot.waitUntil(lambda: table.item(1, 1) is not None)
+
+        assert table.item(0, 0).text() == "query_tools"
+        assert table.item(0, 1).text() == readonly_tools
+        assert table.item(1, 0).text() == "query_write_error"
+        assert table.item(1, 1).text() == "RuntimeError"
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_path):
+    module_name = "hosted_page_row_action_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号总览",
+                            "data_source": {"type": "binding", "binding": "rows"},
+                            "columns": [
+                                {"key": "account_id", "label": "账号"},
+                                {"key": "status", "label": "状态"},
+                            ],
+                            "row_action": {
+                                "type": "open_page",
+                                "page_id": "details",
+                                "params": {
+                                    "account_id": {"binding": "account_id"},
+                                },
+                            },
+                        },
+                    ],
+                },
+            )
+
+
+            def load_dashboard_page(context, page_id, params=None):
+                del context, page_id, params
+                return {
+                    "rows": [
+                        {"account_id": "acct-001", "status": "active"},
+                        {"account_id": "acct-002", "status": "blocked"},
+                    ],
+                }
+            """,
+            "pages/details.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="details",
+                label="Details",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_details_page",
+                    "children": [{"type": "Text", "binding": "title"}],
+                },
+            )
+
+
+            def load_details_page(context, page_id, params=None):
+                del context, page_id, params
+                return {"title": "详情"}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard"), make_page_info("details")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    calls: list[tuple[str, dict[str, object] | None]] = []
+
+    try:
+        page = ManagedPageRenderer(
+            module_name,
+            "dashboard",
+            module_info=module_info,
+            open_page_callback=lambda page_id, params=None: calls.append((page_id, params)),
+        )
+        qtbot.addWidget(page)
+
+        page._data_table_widgets["accounts"].cellClicked.emit(1, 0)
+        assert calls == [("details", {"account_id": "acct-002"})]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_managed_page_renderer_row_action_without_params_does_not_forward_row_payload(qtbot, tmp_path):
+    module_name = "hosted_page_no_row_params_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号总览",
+                            "data_source": {"type": "binding", "binding": "rows"},
+                            "columns": [
+                                {"key": "account_id", "label": "账号"},
+                                {"key": "status", "label": "状态"},
+                            ],
+                            "row_action": {
+                                "type": "open_page",
+                                "page_id": "details",
+                            },
+                        },
+                    ],
+                },
+            )
+
+
+            def load_dashboard_page(context, page_id, params=None):
+                del context, page_id, params
+                return {
+                    "rows": [
+                        {"account_id": "acct-001", "status": "active"},
+                        {"account_id": "acct-002", "status": "blocked"},
+                    ],
+                }
+            """,
+            "pages/details.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="details",
+                label="Details",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_details_page",
+                    "children": [{"type": "Text", "binding": "title"}],
+                },
+            )
+
+
+            def load_details_page(context, page_id, params=None):
+                del context, page_id, params
+                return {"title": "详情"}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard"), make_page_info("details")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    calls: list[tuple[str, dict[str, object] | None]] = []
+
+    try:
+        page = ManagedPageRenderer(
+            module_name,
+            "dashboard",
+            module_info=module_info,
+            open_page_callback=lambda page_id, params=None: calls.append((page_id, params)),
+        )
+        qtbot.addWidget(page)
+
+        page._data_table_widgets["accounts"].cellClicked.emit(1, 0)
+        assert calls == [("details", None)]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtbot, tmp_path):
+    module_name = "hosted_page_navigation_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_dashboard_page",
+                    "children": [
+                        {"type": "Text", "style": "body", "binding": "selected_phone"},
+                        {
+                            "type": "Button",
+                            "label": "打开详情页",
+                            "action": {
+                                "type": "open_page",
+                                "page_id": "account_details",
+                                "params": {
+                                    "phone": {"binding": "selected.phone"},
+                                    "source": {"value": "dashboard"},
+                                },
+                            },
+                        },
+                    ],
+                },
+            )
+
+
+            def load_dashboard_page(context, page_id, params=None):
+                del context, page_id
+                selected_phone = "none"
+                params_state = "none" if params is None else "dict"
+                if isinstance(params, dict):
+                    selected_phone = str(params.get("phone") or "none")
+                return {
+                    "selected_phone": f"params:{params_state}|selected:{selected_phone}",
+                    "selected": {"phone": selected_phone},
+                }
+            """,
+            "pages/account_details.py": """
+            from crawler4j_contracts import PageSpec
+
+            PAGE = PageSpec(
+                id="account_details",
+                label="Account Details",
+                schema={
+                    "type": "Page",
+                    "load_handler": "load_account_details_page",
+                    "children": [{"type": "Text", "binding": "title"}],
+                },
+            )
+
+
+            def load_account_details_page(context, page_id, params=None):
+                del context, page_id, params
+                return {"title": "详情页"}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard"), make_page_info("account_details")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    opened_pages: list[tuple[str, dict[str, object] | None]] = []
+
+    try:
+        page = ManagedPageRenderer(
+            module_name,
+            "dashboard",
+            module_info=module_info,
+            open_page_callback=lambda page_id, params=None: opened_pages.append((page_id, params)),
+            initial_params={"phone": "13800138000"},
+        )
+        qtbot.addWidget(page)
+
+        assert any(
+            label.text() == "params:dict|selected:13800138000"
+            for label in page.findChildren(QLabel)
+        )
+
+        open_button = next(button for button in page.findChildren(QPushButton) if button.text() == "打开详情页")
+        open_button.click()
+
+        assert opened_pages == [("account_details", {"phone": "13800138000", "source": "dashboard"})]
+    finally:
+        restore_module(service, original_registry, module_name)

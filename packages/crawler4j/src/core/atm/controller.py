@@ -8,6 +8,7 @@
 
 import asyncio
 import time
+from collections.abc import Mapping
 from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,13 +22,31 @@ from src.core.atm.run_profile import AcquisitionMode
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
+from src.core.mms import get_module_registry
 from src.core.mms.service import get_module_service
 from src.core.mms.release_service import assert_module_upgrade_unlocked
-from src.core.rem.manager import get_environment_manager, normalize_resource_pool_module_name
+from src.core.rem.manager import (
+    RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+    get_environment_manager,
+    normalize_resource_pool_module_name,
+)
 
 
 class InvalidJobConfigurationError(ValueError):
     """作业运行模板组合无效。"""
+
+
+def selector_returns_none(selector_infos: Mapping[str, object] | list[object], selector_name: str) -> bool:
+    """纯谓词：给定 selector 元数据集合，判断目标 selector 是否以 `None` 表示“继续等待/无候选”。"""
+    normalized_selector = str(selector_name or "").strip()
+    if not normalized_selector:
+        return False
+
+    if isinstance(selector_infos, Mapping):
+        info = selector_infos.get(normalized_selector)
+    else:
+        info = next((item for item in selector_infos if item.name == normalized_selector), None)
+    return bool(info and getattr(info, "returns_none", False))
 
 
 class JobController:
@@ -99,6 +118,39 @@ class JobController:
         await self._ensure_runtime_for_job(job)
 
     @staticmethod
+    def _validate_resource_pool_declaration(run_profile) -> None:
+        acquisition = run_profile.resource.acquisition if run_profile.resource else None
+        if not acquisition:
+            return
+
+        resource_pool = str(acquisition.resource_pool or "").strip()
+        if not resource_pool:
+            return
+
+        module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
+        if not module_name:
+            return
+
+        normalized_module = normalize_resource_pool_module_name(module_name)
+        module_info = get_module_registry().get_module(normalized_module)
+        if not module_info:
+            raise InvalidJobConfigurationError(f"未找到模块定义，无法校验资源池: {normalized_module}")
+
+        declared_names = {
+            str(pool.name or "").strip()
+            for pool in getattr(module_info.manifest, "resource_pools", [])
+            if str(pool.name or "").strip()
+        }
+        if resource_pool not in declared_names:
+            if declared_names:
+                raise InvalidJobConfigurationError(
+                    f"resource_pool 未在 module.yaml.resource_pools 中声明: {normalized_module}.{resource_pool}"
+                )
+            raise InvalidJobConfigurationError(
+                f"module.yaml.resource_pools 未声明资源池，不能引用: {normalized_module}.{resource_pool}"
+            )
+
+    @staticmethod
     def _validate_service_select_wait_semantics(job: Job, run_profile) -> None:
         if job.type != JobType.SERVICE:
             return
@@ -116,13 +168,21 @@ class JobController:
         if not module_name:
             return
 
+        normalized_module = normalize_resource_pool_module_name(module_name)
         try:
-            selector_infos = get_module_service().list_env_selectors(module_name)
-        except Exception:
-            return
+            selector_infos = list(get_module_service().list_env_selectors(normalized_module))
+        except Exception as exc:
+            raise InvalidJobConfigurationError(
+                f"无法校验环境选择器是否允许空返回: {normalized_module}.{selector_name}"
+            ) from exc
 
         info = next((item for item in selector_infos if item.name == selector_name), None)
-        if info and getattr(info, "returns_none", False):
+        if info is None:
+            raise InvalidJobConfigurationError(
+                f"未找到环境选择器定义: {normalized_module}.{selector_name}"
+            )
+
+        if selector_returns_none(selector_infos, selector_name):
             raise InvalidJobConfigurationError(
                 f"Service Job 使用会返回 none 的环境选择器时必须配置 resource_pool: {module_name}.{selector_name}"
             )
@@ -142,8 +202,14 @@ class JobController:
         )
         return True
 
-    async def _ensure_runtime_for_job(self, job: Job):
+    async def _ensure_runtime_for_job(
+        self,
+        job: Job,
+        *,
+        runtime_timeout: int | None = None,
+    ):
         run_profile = resolve_job_run_profile(job)
+        self._validate_resource_pool_declaration(run_profile)
         self._validate_service_select_wait_semantics(job, run_profile)
         module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
         if module_name:
@@ -156,8 +222,11 @@ class JobController:
         if not provider_name:
             return
 
-        from src.core.rem.manager import get_environment_manager
-        await get_environment_manager().ensure_provider_runtime(provider_name)
+        rem = get_environment_manager()
+        if runtime_timeout is None:
+            await rem.ensure_provider_runtime(provider_name)
+        else:
+            await rem.ensure_provider_runtime(provider_name, timeout=runtime_timeout)
         
     async def _recover_zombies(self):
         """识别并清理上一轮非正常退出遗留的僵尸任务。"""
@@ -282,7 +351,10 @@ class JobController:
         jobs = await self.repo.list_active_jobs()
         for job in jobs:
             try:
-                await self._ensure_runtime_for_job(job)
+                await self._ensure_runtime_for_job(
+                    job,
+                    runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+                )
             except Exception as e:
                 if await self._pause_job_after_invalid_precheck(job, e, source="bootstrap"):
                     continue

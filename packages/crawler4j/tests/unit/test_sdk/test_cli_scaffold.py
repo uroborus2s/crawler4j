@@ -1,33 +1,46 @@
-"""CLI scaffold tests for the refactored crawler4j SDK command tree."""
+"""CLI scaffold tests for the core-native-v1 module protocol."""
 
 from __future__ import annotations
 
-import builtins
 import importlib
+import shutil
 import sys
 import tomllib
 from argparse import Namespace
 from pathlib import Path
-from types import SimpleNamespace
 
-import pytest
 import yaml
 
-from crawler4j_sdk._version import get_compatible_dependency_spec
+from crawler4j_sdk._version import (
+    get_compatible_contracts_dependency_spec,
+    get_compatible_sdk_dependency_spec,
+)
 from crawler4j_sdk.cli import commands
 
 
-def _import_generated_package(package_root: Path):
-    package_name = package_root.name
+def _import_generated_package(package_root: Path, *, package_name: str | None = None):
+    import_name = package_name or package_root.name
     parent = str(package_root.parent)
     if parent not in sys.path:
         sys.path.insert(0, parent)
 
-    stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
+    stale = [name for name in sys.modules if name == import_name or name.startswith(f"{import_name}.")]
     for name in stale:
         sys.modules.pop(name, None)
 
-    return importlib.import_module(package_name)
+    return importlib.import_module(import_name)
+
+
+def _import_module_child(
+    package_root: Path,
+    subpackage: str,
+    name: str,
+    *,
+    package_name: str | None = None,
+):
+    import_name = package_name or package_root.name
+    _import_generated_package(package_root, package_name=import_name)
+    return importlib.import_module(f"{import_name}.{subpackage}.{name}")
 
 
 def _read_manifest(module_root: Path) -> dict:
@@ -35,17 +48,21 @@ def _read_manifest(module_root: Path) -> dict:
         return yaml.safe_load(fh)
 
 
+def _write_manifest(module_root: Path, manifest: dict) -> None:
+    with (module_root / "module.yaml").open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(manifest, fh, allow_unicode=True, sort_keys=False)
+
+
 def _read_pyproject(module_root: Path) -> dict:
     with (module_root / "pyproject.toml").open("rb") as fh:
         return tomllib.load(fh)
 
 
-@pytest.fixture
-def module_root(tmp_path: Path) -> Path:
-    target = tmp_path / "demo_model"
+def _init_module(tmp_path: Path, *, module_name: str = "demo_model", output_name: str | None = None) -> Path:
+    target = tmp_path / (output_name or module_name)
     args = Namespace(
-        name="demo_model",
-        repo="demo/demo_model",
+        name=module_name,
+        repo=f"demo/{module_name}",
         output=str(target),
         display_name=None,
         description=None,
@@ -62,9 +79,10 @@ def module_root(tmp_path: Path) -> Path:
     return target
 
 
-def test_module_init_creates_complete_project(module_root: Path):
+def test_module_init_creates_core_native_project(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+
     assert (module_root / "__init__.py").exists()
-    assert (module_root / "module_runtime.py").exists()
     assert (module_root / "module.yaml").exists()
     assert (module_root / "pyproject.toml").exists()
     assert (module_root / "README.md").exists()
@@ -72,18 +90,21 @@ def test_module_init_creates_complete_project(module_root: Path):
     assert (module_root / ".python-version").exists()
     assert (module_root / "tasks" / "example_task.py").exists()
     assert (module_root / "workflows" / "main_workflow.py").exists()
-    assert (module_root / "ui" / "__init__.py").exists()
-    assert not (module_root / "data").exists()
+    assert (module_root / "pages" / "__init__.py").exists()
+    assert (module_root / "hooks" / "__init__.py").exists()
+    assert (module_root / "env_selectors" / "__init__.py").exists()
+    assert (module_root / "hooks" / "on_cleanup.py").exists()
+    assert (module_root / "env_selectors" / "return_none.py").exists()
+    assert (module_root / "env_selectors" / "random_ready.py").exists()
+    assert (module_root / "data" / "sql" / "views").is_dir()
+    assert (module_root / "data" / "sql" / "queries").is_dir()
+    assert (module_root / "data" / "seeds").is_dir()
+    assert not (module_root / "module_runtime.py").exists()
 
     manifest = _read_manifest(module_root)
     assert manifest["name"] == "demo_model"
-    assert manifest["version"] == "0.1.0"
-    assert manifest["upgrade_source"] == {
-        "type": "github_release",
-        "repo": "demo/demo_model",
-        "allow_prerelease": False,
-    }
-    assert manifest["config_defaults"] == {"module": {}, "workflows": {}}
+    assert manifest["runtime_api"] == "core-native-v1"
+    assert manifest["default_workflow"] == "main_workflow"
     assert manifest["workflows"] == [
         {
             "name": "main_workflow",
@@ -91,450 +112,566 @@ def test_module_init_creates_complete_project(module_root: Path):
             "description": "Main Workflow 工作流",
         }
     ]
-    assert "ui_extension" not in manifest
-    assert _read_pyproject(module_root)["project"]["version"] == manifest["version"]
+    assert manifest["ui_extension"] == {"pages": []}
+    assert manifest["data"] == {
+        "resources": [],
+        "views": [],
+        "queries": [],
+        "seeds": [],
+    }
 
-    runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
-    assert "该 Hook 会在 ATM 执行环境动作前触发" in runtime_text
-    assert 'context.runtime["env_action"]' in runtime_text
-
-    readme_text = (module_root / "README.md").read_text(encoding="utf-8")
-    assert "`on_cleanup` 会在 ATM 执行计划中的环境动作前调用" in readme_text
-
-
-def test_archive_members_excludes_nested_egg_info_contents(tmp_path: Path):
-    module_root = tmp_path / "demo_model"
-    module_root.mkdir()
-    nested_package = module_root / "nested"
-    nested_package.mkdir()
-    egg_info = nested_package / "demo_model.egg-info"
-    egg_info.mkdir()
-    (module_root / ".idea").mkdir()
-    (module_root / ".vscode").mkdir()
-
-    keep_file = module_root / "module.yaml"
-    keep_file.write_text("name: demo_model\nversion: 0.1.0\n", encoding="utf-8")
-    ignored_mac_file = module_root / ".DS_Store"
-    ignored_mac_file.write_text("junk", encoding="utf-8")
-    ignored_file = egg_info / "PKG-INFO"
-    ignored_file.write_text("metadata", encoding="utf-8")
-    ignored_idea_file = module_root / ".idea" / "workspace.xml"
-    ignored_idea_file.write_text("<xml />", encoding="utf-8")
-    ignored_vscode_file = module_root / ".vscode" / "settings.json"
-    ignored_vscode_file.write_text("{}", encoding="utf-8")
-
-    members = commands._archive_members(module_root)
-    archived_paths = {arcname for _, arcname in members}
-
-    assert "demo_model/module.yaml" in archived_paths
-    assert "demo_model/.DS_Store" not in archived_paths
-    assert "demo_model/.idea/workspace.xml" not in archived_paths
-    assert "demo_model/.vscode/settings.json" not in archived_paths
-    assert "demo_model/nested/demo_model.egg-info/PKG-INFO" not in archived_paths
-
-
-def test_module_init_generates_importable_package(module_root: Path):
-    module = _import_generated_package(module_root)
-
-    assert hasattr(module, "run")
-    assert hasattr(module, "prepare_env")
-    assert hasattr(module, "select_env")
-    assert hasattr(module, "declare_ui")
-    assert "example_task" in module.assembler.task_scripts
-    assert "main_workflow" in module.assembler.workflows
-    assert [selector.name for selector in module.assembler.list_env_selectors()] == [
-        "random_ready",
-        "return_none",
+    pyproject = _read_pyproject(module_root)
+    assert pyproject["project"]["dependencies"] == [get_compatible_contracts_dependency_spec()]
+    assert pyproject["dependency-groups"]["dev"] == [
+        get_compatible_sdk_dependency_spec(),
+        "pytest>=9.0.2",
+        "pytest-asyncio>=1.3.0",
     ]
 
+    root_text = (module_root / "__init__.py").read_text(encoding="utf-8")
+    assert "Core 会直接扫描" in root_text
+    assert "运行时装配逻辑" in root_text
 
-def test_generated_pyproject_uses_sdk_dependency_range(module_root: Path):
-    pyproject = _read_pyproject(module_root)
+    task_text = (module_root / "tasks" / "example_task.py").read_text(encoding="utf-8")
+    assert "TASK = TaskSpec(" in task_text
+    assert "async def execute(ctx: TaskContext)" in task_text
+    assert "captured_data" not in task_text
 
-    assert get_compatible_dependency_spec() == "crawler4j-sdk>=0.3.0,<0.4.0"
-    assert get_compatible_dependency_spec() in pyproject["project"]["dependencies"]
-    assert "scripts" not in pyproject["project"]
+    workflow_text = (module_root / "workflows" / "main_workflow.py").read_text(encoding="utf-8")
+    assert "WORKFLOW = WorkflowSpec(" in workflow_text
+    assert "async def run(ctx: TaskContext)" in workflow_text
+
+    page_init_text = (module_root / "pages" / "__init__.py").read_text(encoding="utf-8")
+    assert "Hosted UI 页面集合" in page_init_text
+
+    selector_text = (module_root / "env_selectors" / "random_ready.py").read_text(encoding="utf-8")
+    assert "SELECTOR = EnvSelectorSpec(" in selector_text
+    assert "def select(context: TaskContext, candidates: list[EnvCandidate])" in selector_text
+
+    readme_text = (module_root / "README.md").read_text(encoding="utf-8")
+    assert "模块运行时只依赖 `crawler4j-contracts`" in readme_text
+    assert "`crawler4j-sdk` 只作为 CLI / 校验 / 开发辅助存在" in readme_text
+    assert "不会调用模块根 `run()` 或 `declare_ui()`" in readme_text
 
 
-def test_module_set_commands_update_manifest_and_runtime(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+def test_generated_package_is_importable_without_runtime_shim(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+
+    module = _import_generated_package(module_root)
+    task_module = _import_module_child(module_root, "tasks", "example_task")
+    workflow_module = _import_module_child(module_root, "workflows", "main_workflow")
+    hook_module = _import_module_child(module_root, "hooks", "on_cleanup")
+    selector_module = _import_module_child(module_root, "env_selectors", "random_ready")
+
+    assert hasattr(module, "run") is False
+    assert hasattr(module, "declare_ui") is False
+    assert hasattr(task_module, "TASK")
+    assert hasattr(task_module, "execute")
+    assert hasattr(workflow_module, "WORKFLOW")
+    assert hasattr(workflow_module, "run")
+    assert hasattr(hook_module, "handle")
+    assert hasattr(selector_module, "SELECTOR")
+    assert hasattr(selector_module, "select")
+
+
+def test_module_repair_init_rewrites_root_package_file(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    init_path = module_root / "__init__.py"
+    init_path.write_text(
+        '"""旧入口。"""\n\n'
+        "def run():\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+
+    assert commands.cmd_module_repair_init(Namespace()) == 0
+
+    root_text = init_path.read_text(encoding="utf-8")
+    assert "Demo Model 模块包" in root_text
+    assert "Core 会直接扫描" in root_text
+    assert "模块根包不再承载运行时装配逻辑" in root_text
+    assert "def run" not in root_text
+
+    module = _import_generated_package(module_root)
+    assert module.__doc__ is not None
+    assert "Demo Model 模块包" in module.__doc__
+
+
+def test_module_repair_init_recreates_missing_root_package_file(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    init_path = module_root / "__init__.py"
+    init_path.unlink()
+
+    assert commands.cmd_module_repair_init(Namespace()) == 0
+
+    assert init_path.exists()
+    assert "模块根包不再承载运行时装配逻辑" in init_path.read_text(encoding="utf-8")
+
+
+def test_page_create_registers_manifest_and_generates_page_spec(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
 
-    assert commands.cmd_workflow_create(
-        Namespace(name="repair_orders", display_name=None, description=None, force=False)
-    ) == 0
-    assert commands.cmd_module_set_repo(Namespace(repo="demo/release_repo")) == 0
-    assert commands.cmd_module_set_version(Namespace(version="0.2.0")) == 0
-    assert commands.cmd_module_set_default_workflow(Namespace(workflow="repair_orders")) == 0
-
-    manifest = _read_manifest(module_root)
-    assert manifest["upgrade_source"]["repo"] == "demo/release_repo"
-    assert manifest["version"] == "0.2.0"
-    assert _read_pyproject(module_root)["project"]["version"] == "0.2.0"
-    runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
-    assert 'DEFAULT_WORKFLOW = "repair_orders"' in runtime_text
-
-
-def test_resource_commands_create_files_and_update_manifest(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.chdir(module_root)
-
-    assert commands.cmd_task_create(Namespace(name="extra_task", force=False)) == 0
-    assert commands.cmd_workflow_create(
-        Namespace(name="repair_orders", display_name=None, description=None, force=False)
-    ) == 0
     assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name=None, description=None, force=False)
+        Namespace(name="dashboard", display_name="Dashboard", description="Dashboard 页面", group=None, force=False)
     ) == 0
-    assert commands.cmd_data_table_create(Namespace(view_id="accounts", label=None, icon=None)) == 0
-    assert commands.cmd_env_selector_create(
-        Namespace(name="pick_ready", display_name=None, description=None)
-    ) == 0
-
-    assert (module_root / "tasks" / "extra_task.py").exists()
-    assert (module_root / "workflows" / "repair_orders.py").exists()
-    assert (module_root / "ui" / "dashboard.py").exists()
-
-    ui_init = (module_root / "ui" / "__init__.py").read_text(encoding="utf-8")
-    assert "from .dashboard import DashboardPage" in ui_init
 
     manifest = _read_manifest(module_root)
-    assert [item["name"] for item in manifest["workflows"]] == ["main_workflow", "repair_orders"]
-    assert manifest["ui_extension"]["type"] == "micro_app"
-    assert manifest["ui_extension"]["entry"] == "ui:DashboardPage"
-    assert manifest["ui_extension"]["detail_menu"] == [
+    assert manifest["ui_extension"]["pages"] == [
         {
-            "id": "accounts",
-            "label": "Accounts",
-            "icon": "📋",
-            "entry": "core:data_table:accounts",
+            "id": "dashboard",
+            "label": "Dashboard",
+            "icon": "📄",
         }
     ]
 
-    runtime_text = (module_root / "module_runtime.py").read_text(encoding="utf-8")
-    assert "_declare_accounts_table" in runtime_text
-    assert "_declare_accounts_table(context)" in runtime_text
-    assert 'name="pick_ready"' in runtime_text
+    page_text = (module_root / "pages" / "dashboard.py").read_text(encoding="utf-8")
+    assert "PAGE = PageSpec(" in page_text
+    assert 'id="dashboard"' in page_text
+    assert '"load_handler": "load_dashboard_page"' in page_text
+    assert "def load_dashboard_page(" in page_text
+    assert "declare_ui" not in page_text
 
 
-def test_page_scaffold_stays_importable_without_pyqt6(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+def test_page_create_supports_grouped_source_layout(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
+
     assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name=None, description=None, force=False)
+        Namespace(
+            name="account_detail",
+            display_name="Account Detail",
+            description="Account Detail 页面",
+            group="account",
+            force=False,
+        )
     ) == 0
 
-    generated_page = (module_root / "ui" / "dashboard.py").read_text(encoding="utf-8")
-    assert "except ModuleNotFoundError as exc" in generated_page
-    assert "PyQt6 is required to instantiate code pages" in generated_page
-
     manifest = _read_manifest(module_root)
-    package_name = module_root.name
-    stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
-    for name in stale:
-        sys.modules.pop(name, None)
+    assert manifest["ui_extension"]["pages"] == [
+        {
+            "id": "account_detail",
+            "label": "Account Detail",
+            "icon": "📄",
+        }
+    ]
 
-    real_import = builtins.__import__
+    page_path = module_root / "pages" / "account" / "detail.py"
+    assert page_path.exists()
+    page_text = page_path.read_text(encoding="utf-8")
+    assert 'id="account_detail"' in page_text
+    assert '"load_handler": "load_account_detail_page"' in page_text
+    assert "def load_account_detail_page(" in page_text
 
-    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "PyQt6.QtWidgets":
-            raise ModuleNotFoundError("No module named 'PyQt6'")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _fake_import)
-
-    assert commands.collect_full_errors(module_root, manifest) == []
+    page_module = _import_module_child(module_root, "pages", "account.detail")
+    assert page_module.PAGE.id == "account_detail"
 
 
-def test_page_scaffold_matches_host_loader_contract(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    qtbot,
-):
+def test_env_selector_list_reads_exported_selector_specs(tmp_path: Path, monkeypatch, capsys):
+    module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
-    assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name=None, description=None, force=False)
+
+    assert commands.cmd_env_selector_create(
+        Namespace(name="pick_ready", display_name="Pick Ready", description="Pick Ready 选择器", force=False)
     ) == 0
+    assert commands.cmd_env_selector_list(Namespace()) == 0
 
-    package_name = module_root.name
-    stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
-    for name in stale:
-        sys.modules.pop(name, None)
-
-    ui_module = importlib.import_module(f"{package_name}.ui")
-    page = ui_module.DashboardPage(SimpleNamespace(name="demo_model", manifest=SimpleNamespace(display_name="Demo Module")))
-    qtbot.addWidget(page)
-
-    page.on_refresh()
-
-    assert page.label.text()
-    assert "Demo Module" in page.label.text()
+    lines = [line.strip() for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert "return_none" in lines
+    assert "random_ready" in lines
+    assert "pick_ready" in lines
 
 
-def test_task_create_refuses_to_clobber_existing_files(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+def test_env_selector_list_fails_fast_on_import_error(tmp_path: Path, monkeypatch, capsys):
+    module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
-
-    assert commands.cmd_task_create(Namespace(name="sync_orders", force=False)) == 0
-    assert commands.cmd_task_create(Namespace(name="sync_orders", force=False)) == 1
-    assert commands.cmd_task_create(Namespace(name="sync_orders", force=True)) == 0
-
-
-def test_config_commands_update_manifest_and_lint(module_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.chdir(module_root)
-
-    module_defaults = tmp_path / "module_defaults.yaml"
-    workflow_defaults = tmp_path / "workflow_defaults.yaml"
-    module_defaults.write_text("base_url: https://example.com\nenabled: true\n", encoding="utf-8")
-    workflow_defaults.write_text("limit: 20\n", encoding="utf-8")
-
-    assert commands.cmd_config_set_module(Namespace(file=str(module_defaults))) == 0
-    assert commands.cmd_config_set_workflow(
-        Namespace(workflow="main_workflow", file=str(workflow_defaults))
-    ) == 0
-    assert commands.cmd_config_lint(Namespace()) == 0
-
-    manifest = _read_manifest(module_root)
-    assert manifest["config_defaults"]["module"] == {
-        "base_url": "https://example.com",
-        "enabled": True,
-    }
-    assert manifest["config_defaults"]["workflows"]["main_workflow"] == {"limit": 20}
-
-
-def test_check_full_passes_for_fresh_scaffold(module_root: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.chdir(module_root)
-    assert commands.cmd_check_full(Namespace()) == 0
-
-
-def test_check_rejects_missing_module_runtime(module_root: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.chdir(module_root)
-    (module_root / "module_runtime.py").unlink()
-
-    assert commands.cmd_check_structure(Namespace()) == 1
-
-
-def test_check_rejects_undeclared_workflow_defaults(module_root: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.chdir(module_root)
-    manifest = _read_manifest(module_root)
-    manifest["config_defaults"]["workflows"]["missing_workflow"] = {"limit": 1}
-    (module_root / "module.yaml").write_text(
-        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
-    )
-
-    assert commands.cmd_check_release(Namespace()) == 1
-
-
-def test_check_release_rejects_pyproject_version_drift(module_root: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.chdir(module_root)
-    pyproject_path = module_root / "pyproject.toml"
-    pyproject_path.write_text(
-        pyproject_path.read_text(encoding="utf-8").replace('version = "0.1.0"', 'version = "9.9.9"'),
-        encoding="utf-8",
-    )
-
-    assert commands.cmd_check_release(Namespace()) == 1
-
-
-def test_check_rejects_unregistered_workflow_file(module_root: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.chdir(module_root)
-    (module_root / "workflows" / "rogue.py").write_text("# rogue workflow\n", encoding="utf-8")
-
-    assert commands.cmd_check_structure(Namespace()) == 1
-
-
-def test_check_full_reports_module_runtime_import_error(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-):
-    monkeypatch.chdir(module_root)
-    (module_root / "module_runtime.py").write_text(
+    (module_root / "env_selectors" / "random_ready.py").write_text(
         "from missing_runtime_dependency import nope\n",
         encoding="utf-8",
     )
 
-    assert commands.cmd_check_full(Namespace()) == 1
+    assert commands.cmd_env_selector_list(Namespace()) == 1
+    output = capsys.readouterr().out
+    assert "读取环境选择器失败" in output
+    assert "missing_runtime_dependency" in output
 
-    captured = capsys.readouterr()
-    assert "module_runtime.py 无法导入" in captured.out
+
+def test_collect_structure_errors_requires_runtime_api_and_default_workflow(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    manifest = _read_manifest(module_root)
+    manifest.pop("runtime_api", None)
+    manifest["default_workflow"] = ""
+
+    errors = commands.collect_structure_errors(module_root, manifest)
+
+    assert "module.yaml.runtime_api 必须是 core-native-v1" in errors
+    assert "module.yaml 缺少 default_workflow" in errors
 
 
-def test_check_full_reports_ui_import_error(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-):
+def test_collect_structure_errors_rejects_legacy_module_runtime_for_core_native(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    (module_root / "module_runtime.py").write_text("# legacy runtime shim\n", encoding="utf-8")
+
+    errors = commands.collect_structure_errors(module_root, _read_manifest(module_root))
+
+    assert "core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py" in errors
+
+
+def test_collect_structure_errors_allow_optional_sdk_only_layout_bits(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    shutil.rmtree(module_root / "pages")
+    shutil.rmtree(module_root / "hooks")
+    shutil.rmtree(module_root / "env_selectors")
+    (module_root / "pyproject.toml").unlink()
+
+    errors = commands.collect_structure_errors(module_root, _read_manifest(module_root))
+
+    assert errors == []
+
+
+def test_collect_full_errors_rejects_manifest_page_missing_from_files(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
     assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name=None, description=None, force=False)
+        Namespace(name="dashboard", display_name=None, description=None, group=None, force=False)
     ) == 0
-    (module_root / "ui" / "__init__.py").write_text(
-        "from missing_ui_dependency import BrokenPage\n",
+    (module_root / "pages" / "dashboard.py").unlink()
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert "module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: dashboard" in errors
+
+
+def test_collect_full_errors_accepts_page_file_not_registered_as_menu_entry(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_page_create(
+        Namespace(name="dashboard", display_name=None, description=None, group=None, force=False)
+    ) == 0
+    manifest = _read_manifest(module_root)
+    manifest["ui_extension"]["pages"] = []
+    _write_manifest(module_root, manifest)
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert errors == []
+
+
+def test_collect_full_errors_still_validates_unlisted_page_files(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    (module_root / "pages" / "details.py").write_text(
+        "def load_details_page(context, page_id, params=None):\n"
+        "    return {}\n",
         encoding="utf-8",
     )
 
-    assert commands.cmd_check_full(Namespace()) == 1
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
 
-    captured = capsys.readouterr()
-    assert "ui 包无法导入" in captured.out
+    assert "pages/details.py 缺少 PAGE，或类型不是 PageSpec" in errors
 
 
-def test_check_full_rejects_lock_key_business_occupancy_conflict(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-):
+def test_collect_full_errors_accepts_grouped_page_source_layout(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    runtime_path.write_text(
-        runtime_text.replace(
-            "# SDK-DATA-TABLES\n    return None",
-            """context.tools.call(
-        "ui.declare_data_table",
-        view_id="accounts",
-        schema={
-            "title": "账号管理",
-            "dataset": "accounts",
-            "lock_key": "phone",
-            "columns": [
-                {"key": "phone", "label": "手机号"},
-                {"key": "occupied_label", "label": "占用中"},
-            ],
-        },
-    )
-    return None""",
+    assert commands.cmd_page_create(
+        Namespace(name="account_detail", display_name=None, description=None, group="account", force=False)
+    ) == 0
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert errors == []
+
+
+def test_collect_full_errors_rejects_multiline_legacy_db_tool_calls(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    task_path = module_root / "tasks" / "example_task.py"
+    task_text = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        task_text.replace(
+            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
+            '    if ctx.tools.has_tool(\n'
+            '        "db.list_records"\n'
+            "    ):\n"
+            "        ctx.tools.call(\n"
+            '            "db.get_record",\n'
+            '            resource="accounts",\n'
+            '            record_key="A001",\n'
+            "        )\n"
+            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
         ),
         encoding="utf-8",
     )
 
-    assert commands.cmd_check_full(Namespace()) == 1
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
 
-    captured = capsys.readouterr()
-    assert "误用 lock_key" in captured.out
+    legacy_errors = [error for error in errors if "使用了已删除的旧数据库工具入口" in error]
+    assert len(legacy_errors) == 2
+    assert all(error.startswith("tasks/example_task.py:") for error in legacy_errors)
 
 
-def test_check_full_rejects_audit_event_writes_in_declare_ui(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-):
-    monkeypatch.chdir(module_root)
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    runtime_path.write_text(
-        runtime_text.replace(
-            "# SDK-DATA-TABLES\n    return None",
-            """context.tools.call(
-        "db.append_event",
-        dataset="account_events",
-        event_type="declare_ui_checked",
-        entity_key="demo-account",
-        payload={"source": "sdk_check"},
-        created_at=1,
-    )
-    context.tools.call(
-        "db.query_events",
-        dataset="account_events",
-        entity_key="demo-account",
-        limit=10,
-    )
-    return None""",
+def test_collect_full_errors_rejects_aliased_legacy_db_tool_calls(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    task_path = module_root / "tasks" / "example_task.py"
+    task_text = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        task_text.replace(
+            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
+            "    tools = ctx.tools\n"
+            '    if tools.has_tool("db.*"):\n'
+            '        tools.call("db.get_record", resource="accounts", record_key="A001")\n'
+            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
         ),
         encoding="utf-8",
     )
 
-    assert commands.cmd_check_full(Namespace()) == 1
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
 
-    captured = capsys.readouterr()
-    assert "declare_ui 不允许调用 db.append_event" in captured.out
+    legacy_errors = [error for error in errors if "使用了已删除的旧数据库工具入口" in error]
+    assert len(legacy_errors) == 2
+    assert all(error.startswith("tasks/example_task.py:") for error in legacy_errors)
 
 
-def test_check_full_rejects_audit_event_writes_in_declare_ui_after_list_tools_discovery(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-):
+def test_collect_full_errors_rejects_removed_captured_data_usage(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    task_path = module_root / "tasks" / "example_task.py"
+    task_text = task_path.read_text(encoding="utf-8")
+    task_path.write_text(
+        task_text.replace(
+            '    result = {\n',
+            '    ctx.captured_data.append({"id": 1})\n'
+            '    result = {\n',
+        ),
+        encoding="utf-8",
+    )
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    captured_data_errors = [error for error in errors if "使用了已删除的 ctx.captured_data" in error]
+    assert len(captured_data_errors) == 1
+    assert captured_data_errors[0].startswith("tasks/example_task.py:")
+
+
+def test_page_create_can_create_non_menu_page_source(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    runtime_path.write_text(
-        runtime_text.replace(
-            "# SDK-DATA-TABLES\n    return None",
-            """tool_names = {spec.name for spec in context.tools.list_tools()}
-    if "db.append_event" in tool_names:
-        context.tools.call(
-            "db.append_event",
-            dataset="account_events",
-            event_type="declare_ui_checked",
-            entity_key="demo-account",
-            reason="sdk_check",
-            created_at=1,
+
+    assert commands.cmd_page_create(
+        Namespace(
+            name="account_detail",
+            display_name=None,
+            description=None,
+            group="account",
+            no_menu=True,
+            force=False,
         )
-    return None""",
-        ),
-        encoding="utf-8",
+    ) == 0
+
+    manifest = _read_manifest(module_root)
+    errors = commands.collect_full_errors(module_root, manifest)
+
+    assert (module_root / "pages" / "account" / "detail.py").exists()
+    assert manifest["ui_extension"]["pages"] == []
+    assert errors == []
+
+
+def test_collect_full_errors_rejects_resource_id_alias_in_data_resources(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_data_resource_create(
+        Namespace(
+            name="accounts",
+            storage_mode="custom_table",
+            record_key_field="account_id",
+        )
+    ) == 0
+    manifest = _read_manifest(module_root)
+    manifest["data"]["resources"][0]["resource_id"] = "accounts"
+    _write_manifest(module_root, manifest)
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert "data.resources 包含不支持的字段: resource_id" in errors
+
+
+def test_collect_full_errors_allow_manifest_name_to_differ_from_directory_name(tmp_path: Path):
+    module_root = _init_module(tmp_path, output_name="demo_model_pkg")
+    shutil.rmtree(module_root / "pages")
+    shutil.rmtree(module_root / "hooks")
+    shutil.rmtree(module_root / "env_selectors")
+    (module_root / "pyproject.toml").unlink()
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert errors == []
+
+
+def test_build_parser_registers_data_commands():
+    parser = commands.build_parser()
+
+    resource_args = parser.parse_args(
+        ["data", "resource", "create", "accounts", "--storage-mode", "custom_table"]
+    )
+    query_args = parser.parse_args(
+        ["data", "query", "create", "get_account_by_id", "--source", "accounts"]
+    )
+    seed_args = parser.parse_args(
+        ["data", "seed", "create", "accounts_seed", "--resource", "accounts"]
     )
 
-    assert commands.cmd_check_full(Namespace()) == 1
+    assert resource_args.func is commands.cmd_data_resource_create
+    assert resource_args.storage_mode == "custom_table"
+    assert query_args.func is commands.cmd_data_query_create
+    assert query_args.source == ["accounts"]
+    assert seed_args.func is commands.cmd_data_seed_create
+    assert seed_args.resource == "accounts"
 
-    captured = capsys.readouterr()
-    assert "declare_ui 不允许调用 db.append_event" in captured.out
+
+def test_build_parser_registers_module_repair_init():
+    parser = commands.build_parser()
+
+    args = parser.parse_args(["module", "repair-init"])
+
+    assert args.func is commands.cmd_module_repair_init
 
 
-def test_check_full_accepts_audit_event_queries_in_declare_ui(
-    module_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_build_parser_registers_page_group_argument():
+    parser = commands.build_parser()
+
+    args = parser.parse_args(["page", "create", "account_detail", "--group", "account"])
+
+    assert args.func is commands.cmd_page_create
+    assert args.group == "account"
+
+
+def test_data_commands_scaffold_manifest_sql_and_seed_files(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+
+    assert commands.cmd_data_resource_create(
+        Namespace(
+            name="accounts",
+            storage_mode="custom_table",
+            record_key_field="account_id",
+        )
+    ) == 0
+    assert commands.cmd_data_view_create(
+        Namespace(
+            name="account_stats",
+            source=["accounts"],
+            force=False,
+        )
+    ) == 0
+    assert commands.cmd_data_query_create(
+        Namespace(
+            name="get_account_by_id",
+            source=["accounts"],
+            force=False,
+        )
+    ) == 0
+    assert commands.cmd_data_seed_create(
+        Namespace(
+            name="accounts_seed",
+            resource="accounts",
+            mode="replace_if_empty",
+            force=False,
+        )
+    ) == 0
+
+    manifest = _read_manifest(module_root)
+    assert manifest["data"]["resources"] == [
+        {
+            "id": "accounts",
+            "storage_mode": "custom_table",
+            "record_key_field": "account_id",
+            "indexes": {},
+            "cleanup_policy": "drop_table",
+            "schema": {
+                "version": 1,
+                "columns": [
+                    {"key": "account_id", "type": "text", "required": True},
+                ],
+            },
+        }
+    ]
+    assert "resource_id" not in manifest["data"]["resources"][0]
+    assert manifest["data"]["views"] == [
+        {
+            "id": "account_stats",
+            "view_kind": "sql_view",
+            "source_resource_ids": ["accounts"],
+            "sql_file": "data/sql/views/account_stats.sql",
+            "columns": [
+                {
+                    "name": "account_id",
+                    "type": "text",
+                    "nullable": False,
+                    "filterable": True,
+                    "sortable": True,
+                }
+            ],
+            "cleanup_policy": "drop_view",
+            "schema_version": 1,
+        }
+    ]
+    assert manifest["data"]["queries"] == [
+        {
+            "id": "get_account_by_id",
+            "source_resource_ids": ["accounts"],
+            "sql_file": "data/sql/queries/get_account_by_id.sql",
+            "params": [{"name": "account_id", "type": "text", "required": True}],
+            "columns": [{"name": "account_id", "type": "text", "nullable": False}],
+        }
+    ]
+    assert manifest["data"]["seeds"] == [
+        {
+            "id": "accounts_seed",
+            "resource_id": "accounts",
+            "file": "data/seeds/accounts_seed.json",
+            "format": "json",
+            "mode": "replace_if_empty",
+        }
+    ]
+    assert (module_root / "data" / "sql" / "views" / "account_stats.sql").read_text(encoding="utf-8") == (
+        "SELECT account_id\nFROM {{resource:accounts}}\n"
+    )
+    assert (module_root / "data" / "sql" / "queries" / "get_account_by_id.sql").read_text(encoding="utf-8") == (
+        "SELECT account_id\n"
+        "FROM {{resource:accounts}}\n"
+        "WHERE account_id = :account_id\n"
+        "LIMIT 1\n"
+    )
+    assert (module_root / "data" / "seeds" / "accounts_seed.json").read_text(encoding="utf-8") == (
+        '[\n  {\n    "account_id": "sample-id"\n  }\n]\n'
+    )
+
+
+def test_data_view_and_query_source_validation_messages_are_stable(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
 ):
-    monkeypatch.chdir(module_root)
-    runtime_path = module_root / "module_runtime.py"
-    runtime_text = runtime_path.read_text(encoding="utf-8")
-    runtime_path.write_text(
-        runtime_text.replace(
-            "# SDK-DATA-TABLES\n    return None",
-            """context.tools.call(
-        "db.query_events",
-        dataset="account_events",
-        entity_key="demo-account",
-        limit=10,
-    )
-    return None""",
-        ),
-        encoding="utf-8",
-    )
-
-    assert commands.cmd_check_full(Namespace()) == 0
-
-
-def test_package_build_and_verify(module_root: Path, monkeypatch: pytest.MonkeyPatch):
+    module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
 
-    build_result = commands.cmd_package_build(Namespace(output=None))
-    assert build_result == 0
+    assert commands.cmd_data_view_create(Namespace(name="account_stats", source=[], force=False)) == 1
+    assert "--source 至少提供一个已注册资源 ID，且必须是小写 snake_case" in capsys.readouterr().out
 
-    archive = module_root / "dist" / "demo_model-0.1.0.zip"
-    assert archive.exists()
-    assert commands.cmd_package_verify(Namespace(archive=str(archive))) == 0
+    assert commands.cmd_data_query_create(Namespace(name="get_account", source=["missing"], force=False)) == 1
+    assert "未找到资源: missing" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["crawler4j", "init-model", "demo_model"],
-        ["crawler4j", "add", "task_name"],
-        ["crawler4j", "new", "task_name"],
-        ["crawler4j", "list"],
-        ["crawler4j", "add-workflow", "sync_orders"],
-        ["crawler4j", "add-ui", "dashboard"],
-        ["crawler4j", "add-data-table", "accounts"],
-        ["crawler4j", "add-data", "legacy_data"],
-    ],
-)
-def test_legacy_command_name_is_rejected(monkeypatch: pytest.MonkeyPatch, argv: list[str]):
-    monkeypatch.setattr(sys, "argv", argv)
+def test_archive_members_keep_generated_files_without_runtime_shim(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    (module_root / ".idea").mkdir()
+    (module_root / ".idea" / "workspace.xml").write_text("<xml />", encoding="utf-8")
 
-    with pytest.raises(SystemExit) as exc_info:
-        commands.main()
+    members = commands._archive_members(module_root, "demo_model")
+    archived_paths = {arcname for _, arcname in members}
 
-    assert exc_info.value.code == 2
+    assert "demo_model/module.yaml" in archived_paths
+    assert "demo_model/tasks/example_task.py" in archived_paths
+    assert "demo_model/workflows/main_workflow.py" in archived_paths
+    assert "demo_model/module_runtime.py" not in archived_paths
+    assert "demo_model/.idea/workspace.xml" not in archived_paths

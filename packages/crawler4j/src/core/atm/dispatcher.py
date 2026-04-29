@@ -125,9 +125,11 @@ class TaskDispatcher:
     async def request_stop_for_job(self, job_id: str, env_action: EnvAction | None = None):
         """向某个 Job 下的所有活动 Task 请求停止。"""
         self._job_stop_requests[job_id] = JobStopRequest(env_action=env_action)
+        live_task_ids: list[str] = []
         for task_id, running_job_id in list(self._task_jobs.items()):
             if running_job_id != job_id:
                 continue
+            live_task_ids.append(task_id)
             waiting_runtime = self._waiting_tasks.get(task_id)
             if waiting_runtime:
                 await self._cancel_waiting_task(
@@ -139,6 +141,17 @@ class TaskDispatcher:
             task_context = self._task_contexts.get(task_id)
             if task_context and hasattr(task_context, "request_stop"):
                 task_context.request_stop()
+
+        if hasattr(self.repo, "cancel_pending_tasks_without_resources"):
+            cancelled_tasks = await self.repo.cancel_pending_tasks_without_resources(
+                job_id,
+                cancel_message="Job paused",
+                result_message="Job paused before resource acquired",
+                exclude_task_ids=live_task_ids,
+            )
+            for task in cancelled_tasks:
+                logger.info(f"[ATM] Task {task.id} cancelled without resource acquisition: {task.error}")
+                self._publish_task_event(task)
 
     def clear_stop_for_job(self, job_id: str):
         """清除 Job 的停止请求标记（用于恢复运行）。"""
@@ -200,6 +213,7 @@ class TaskDispatcher:
             },
             provider_name=run_profile.resource.acquisition.provider,
             selector_name=run_profile.resource.acquisition.selector_name,
+            fixed_env_id=run_profile.resource.acquisition.env_id,
             resource_pool_name=run_profile.resource.acquisition.resource_pool,
             acquisition_mode=run_profile.resource.acquisition.mode,
             selector_wait_timeout=run_profile.resource.acquisition.wait_timeout,
@@ -220,7 +234,7 @@ class TaskDispatcher:
 
         execution_result = await runner.run(
             request,
-            on_task_update=self.repo.save_task,
+            on_task_update=self._save_task_update,
             on_context_ready=_remember_context,
             is_stop_requested=lambda: self._is_stop_requested(job.id),
             resolve_stop_env_action=lambda: self._resolve_stop_env_action(job.id),
@@ -289,7 +303,7 @@ class TaskDispatcher:
             env_created=waiting_runtime.env_created,
             creation_lifecycle=waiting_runtime.creation_lifecycle,
             env_action=env_action,
-            on_task_update=self.repo.save_task,
+            on_task_update=self._save_task_update,
         )
         self._cleanup_runtime_refs(task_id)
         self._publish_task_event(task)
@@ -317,7 +331,7 @@ class TaskDispatcher:
             creation_lifecycle=waiting_runtime.creation_lifecycle,
             confirmed=success,
             confirmation_message=message,
-            on_task_update=self.repo.save_task,
+            on_task_update=self._save_task_update,
         )
         self._cleanup_runtime_refs(task_id)
         self._publish_task_event(task)
@@ -344,6 +358,36 @@ class TaskDispatcher:
                     "env_id": task.env_id,
                     "error": task.error,
                 },
+            )
+        )
+
+    async def _save_task_update(self, task: Task) -> None:
+        await self.repo.save_task(task)
+        if task.status == TaskStatus.PENDING and task.message == "环境启动中":
+            event_type = EventType.TASK_PROGRESS
+            data = {
+                "phase": "environment_starting",
+                "task_id": task.id,
+                "job_id": task.job_id,
+                "status": task.status.value,
+                "env_id": task.env_id,
+                "message": task.message,
+            }
+        elif task.status == TaskStatus.RUNNING:
+            event_type = EventType.TASK_STARTED
+            data = {
+                "task_id": task.id,
+                "job_id": task.job_id,
+                "status": task.status.value,
+                "env_id": task.env_id,
+            }
+        else:
+            return
+        get_event_bus().publish(
+            Event(
+                type=event_type,
+                task_run_id=task.id,
+                data=data,
             )
         )
 

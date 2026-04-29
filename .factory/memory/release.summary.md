@@ -1,16 +1,17 @@
 # Release Summary
 
-- Latest formal release tag: `v0.1.1` on 2026-01-03
-- Current workspace root version: `0.2.0`
-- Runtime version file: `0.2.0`
-- SDK version: `0.3.0`
-- Contracts version: `0.2.0`
+- Latest formal release tag: `v0.2.0` on 2026-04-20
+- Current workspace root version: `0.0.0`
+- Current app package version: `0.3.2`
+- Runtime package version: `0.3.2`
+- SDK version: `0.6.1`
+- Contracts version: `0.4.0`
 
-Local verification on 2026-04-17:
+Evidence status:
 
-- Version-related tests: passed (`5 passed`)
-- Root build: passed (`crawler4j-0.2.0`)
-- SDK build: passed (`crawler4j_sdk-0.3.0`)
-- SDK publish: passed (`crawler4j-sdk 0.3.0` uploaded to PyPI on 2026-04-19)
-- Contracts build: passed (`crawler4j_contracts-0.2.0`)
-- Docs validate: passed (`docs-stratego source validate --repo-path .`)
+- Root build: passed on 2026-04-29 (`crawler4j-0.3.2`)
+- Desktop PyInstaller bundle: historical pass on 2026-04-24 before the QScintilla dependency line; current QScintilla package/bundle evidence is pending
+- SDK build/publish: pending for current `crawler4j-sdk 0.6.1`; historical `0.5.2` evidence is not current release evidence
+- Contracts build/publish: pending for current `crawler4j-contracts 0.4.0`; historical `0.3.0` evidence is not current release evidence
+- Full test/lint gate: not rerun in this documentation-memory sync turn
+- Docs validate: not rerun in this documentation-memory sync turn

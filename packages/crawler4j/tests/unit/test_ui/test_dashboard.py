@@ -4,6 +4,9 @@ from types import SimpleNamespace
 import pytest
 from PyQt6.QtWidgets import QSizePolicy
 
+from src.ui.components.button import StyledButton
+from src.ui.components.stat_card import StatCard
+
 
 def test_dashboard_compresses_summary_area_for_log_console(qtbot, monkeypatch):
     import src.ui.dashboard as dashboard_module
@@ -11,6 +14,8 @@ def test_dashboard_compresses_summary_area_for_log_console(qtbot, monkeypatch):
     monkeypatch.setattr(dashboard_module.DashboardPage, "_setup_timer", lambda self: None)
 
     page = dashboard_module.DashboardPage()
+    page.resize(1600, 900)
+    page._apply_card_layout()
     qtbot.addWidget(page)
 
     layout = page.layout()
@@ -18,10 +23,42 @@ def test_dashboard_compresses_summary_area_for_log_console(qtbot, monkeypatch):
 
     assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (20, 20, 20, 20)
     assert layout.spacing() == 16
-    assert page.running_card.minimumHeight() == 96
-    assert page.running_card.maximumHeight() == 108
-    assert page.log_console.minimumHeight() == 320
+    assert isinstance(page.running_card, StatCard)
+    assert page.cards_grid.itemAtPosition(0, 0).widget() is page.running_card
+    assert page.cards_grid.itemAtPosition(0, 5).widget() is page.modules_card
+    assert page.cards_grid.itemAtPosition(1, 0) is None
+    assert page.running_card.minimumHeight() == 76
+    assert page.running_card.maximumHeight() == 84
+    assert page.log_console.minimumHeight() == 520
     assert page.log_console.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+
+
+def test_dashboard_keeps_single_row_summary_on_narrow_width(qtbot, monkeypatch):
+    import src.ui.dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module.DashboardPage, "_setup_timer", lambda self: None)
+
+    page = dashboard_module.DashboardPage()
+    page.resize(900, 700)
+    page._apply_card_layout()
+    qtbot.addWidget(page)
+
+    assert page.cards_grid.itemAtPosition(0, 0).widget() is page.running_card
+    assert page.cards_grid.itemAtPosition(0, 2).widget() is page.failed_card
+    assert page.cards_grid.itemAtPosition(0, 3).widget() is page.env_ready_card
+    assert page.cards_grid.itemAtPosition(0, 5).widget() is page.modules_card
+    assert page.cards_grid.itemAtPosition(1, 0) is None
+
+
+def test_dashboard_uses_public_refresh_button(qtbot, monkeypatch):
+    import src.ui.dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module.DashboardPage, "_setup_timer", lambda self: None)
+
+    page = dashboard_module.DashboardPage()
+    qtbot.addWidget(page)
+
+    assert isinstance(page.refresh_btn, StyledButton)
 
 
 @pytest.mark.asyncio

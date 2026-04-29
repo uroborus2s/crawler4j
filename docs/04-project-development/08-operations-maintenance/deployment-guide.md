@@ -35,6 +35,10 @@ uv run python -m src.ui.app
 - 正式桌面打包入口统一为 `uv run package-desktop`
 - 当前 macOS 最终可分发产物固定为 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，不需要再额外携带旁边的 `Crawler4j/` collect 目录
 - 当前 Windows 正式发布入口固定为 `uv run package-windows-release`，它会先复用 `package-desktop` 产出的 `PyInstaller onedir` 宿主目录，再继续生成 Velopack 安装器与更新目录
+- 桌面壳层图标当前统一收口为同一套 `app_icon` 资源：运行时继续使用 `app_icon.png`，macOS bundle 使用 `app_icon.icns`，Windows `Crawler4j.exe` 使用 `app_icon.ico`
+- 图标母版固定为 `packages/crawler4j/src/ui/assets/app_icon_master.png`；当前 `scripts/rebuild_app_icon_assets.py` 会直接生成“白底板 + 放大镜主徽记”两层参数化图标，并同步写回 `master/png/icns/ico`。若继续微调 Dock 占比或品牌细节，统一执行 `uv run python scripts/rebuild_app_icon_assets.py`，不要再通过整张位图缩放去调光学尺寸
+- `package-windows-release` 会把同源 `app_icon.ico` 同时传给 Velopack，确保 `Setup.exe`、安装后快捷方式与 `Crawler4j.exe` 使用同一套 Windows 图标，而不是回退到默认安装器图标
+- `package-windows-release` 与 `package-macos-internal-release` 现在都会在生成新发布物前先清空各自的 `dist/updates/<platform>/` 输出目录；`deploy-windows-release` / `deploy-macos-internal-release` 因复用同一打包入口，也会继承这条清理行为
 - 若需要小范围内部 DMG 分发并启用 Sparkle 自动更新，使用 `uv run package-macos-internal-release`
 - PyInstaller 现已显式收集 `sinanz` 的共享 `resources/` 目录；滑块验证码运行时会从其中的 `resources/models/` 解析 `slider_gap_locator.onnx`
 
@@ -56,6 +60,7 @@ uv run deploy-windows-release
 - 该命令会先复用 `uv run package-desktop` 的 Windows `PyInstaller onedir` 结果，默认输入目录为 `packages/crawler4j/dist/desktop/windows/Crawler4j/`
 - 随后脚本会在 onedir 根目录写入 `crawler4j.update.json`，把 Windows 宿主运行时需要的 `feed_url / pack_id / channel` 收口为同一事实源
 - 默认 Velopack 输出目录为 `packages/crawler4j/dist/updates/windows/`，其中通常包含 `Setup.exe`、`releases.<channel>.json` 清单与 `.nupkg` 包
+- Velopack 打包阶段会继续复用仓库里的 `packages/crawler4j/src/ui/assets/app_icon.ico`，确保 `Setup.exe`、安装后桌面/开始菜单快捷方式与 `Crawler4j.exe` 的图标保持一致
 - `CRAWLER4J_VELOPACK_FEED_URL` 为必填项；正式口径建议固定为 `https://updates.example.com/win/releases.win.json`
 - `CRAWLER4J_VELOPACK_PACK_ID` 默认为 `io.github.uroborus2s.crawler4j`
 - `CRAWLER4J_VELOPACK_CHANNEL` 默认为 `win`
@@ -67,7 +72,7 @@ uv run deploy-windows-release
 - `uv run deploy-windows-release` 会在打包完成后继续调用系统 OpenSSH `sftp`，把 `packages/crawler4j/dist/updates/windows/` 上传到 `$CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`
 - `CRAWLER4J_UPDATE_UPLOAD_TARGET` 在 Windows 侧建议写成 `host:/var/www/crawler4j/` 这类 `host:path` 远端目录；若写成本地目录，脚本会改为直接复制文件
 - Velopack Windows 安装目录默认位于 `%LocalAppData%\\<packId>\\current`。更新时会整体替换 `current/`，所以任何可变文件都不能写在程序目录里；`crawler4j` 当前应用数据继续落在 `%APPDATA%/Crawler4j/`，与这条约束兼容
-- Windows 宿主自更新只对“通过 Velopack Setup 安装”的客户端生效；如果用户直接运行裸 `PyInstaller onedir` 目录，`检查更新` 会明确提示当前不是正式安装态
+- Windows 宿主自更新对 Velopack 正式发布产物生效，包括 `Setup.exe` 安装态和 `Portable.zip`；如果用户直接运行裸 `PyInstaller onedir` 目录，`检查更新` 会明确提示当前不是 Velopack 正式发布产物
 - Velopack 官方当前明确说明 Windows 不支持安装到 `C:\\Program Files` 这类特权目录；本仓当前也不提供管理员安装模式
 - 若要使用 `uv run deploy-windows-release`，Windows 机器只需要启用系统自带的 OpenSSH Client，确保 `sftp` 命令在 PATH 中可用；不再要求额外安装 `rsync`
 
@@ -135,25 +140,26 @@ uv run build
 
 说明：
 
-- 脚本会在 workspace 根目录顺序构建 `crawler4j-sdk`、`crawler4j`、`crawler4j-contracts`
+- 脚本会在 workspace 根目录按依赖顺序构建 `crawler4j-contracts`、`crawler4j-sdk`、`crawler4j`
 - 每个包在构建前都会通过 `uv build --clear` 清空自己的 `dist/`
-- 产物分别落到 `packages/crawler4j-sdk/dist/`、`packages/crawler4j/dist/`、`packages/crawler4j-contracts/dist/`
+- 产物分别落到 `packages/crawler4j-contracts/dist/`、`packages/crawler4j-sdk/dist/`、`packages/crawler4j/dist/`
 - 如果只想构建一个包，可直接写 `uv run build crawler4j`
 - 长命令 `uv run python scripts/build_workspace_packages.py ...` 仍可用，但正式口径优先使用短命令
 
 ### Publish SDK / Contracts to PyPI
 
 ```bash
-UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk
 UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-contracts
+UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk
 ```
 
 说明：
 
 - 若使用 PyPI token，优先设置 `UV_PUBLISH_TOKEN`
-- 需要预演时可先执行 `UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-sdk --dry-run`
+- 连续发布 workspace 包时，按 `crawler4j-contracts -> crawler4j-sdk -> crawler4j` 的顺序执行，避免先发布依赖方再发布被依赖方
+- 需要预演时可先执行 `UV_PUBLISH_TOKEN=<your-token> uv run publish crawler4j-contracts --dry-run`
 - 若仓库后续配置了带 `publish-url` 的 `tool.uv.index`，也可以改用 `uv publish --index <name> ...`
-- 脚本会自动把 `crawler4j-sdk` / `crawler4j-contracts` 映射到各自包目录下的 `dist/*`，不需要手写文件路径
+- 脚本会自动把 `crawler4j-contracts` / `crawler4j-sdk` / `crawler4j` 映射到各自包目录下的 `dist/*`，不需要手写文件路径
 
 ### SDK CLI
 
@@ -185,7 +191,9 @@ uv run python -m crawler4j_sdk.cli.commands --help
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-27 | 更正 Windows 自更新运行边界：宿主更新不再错误限定为“仅 Setup 安装态”，当前口径调整为“Velopack 正式发布产物（Setup / Portable）可更新，裸 onedir 不可更新” | Codex |
 | 2026-04-22 | 新增 Windows `PyInstaller onedir + Velopack` 发布口径，说明 `package-windows-release` 的环境变量、输出目录、安装边界和与 `%APPDATA%/Crawler4j/` 的持久化兼容关系 | Codex |
+| 2026-04-22 | 补记 Windows `package-windows-release` 会把 `app_icon.ico` 同时传给 Velopack，保证安装器、快捷方式与主程序图标一致 | Codex |
 | 2026-04-22 | 为 macOS Sparkle 内部分发补上“改写 bundle 后自动 ad-hoc 重签”与私钥来源配置：`generate_appcast` 现支持 keychain account、私钥文件或私钥串三种输入，不再只依赖默认 `ed25519` 账户 | Codex |
 | 2026-04-22 | 补记 macOS 内部 Sparkle unsigned 分发的签名口径：`package-macos-internal-release` 现会写入 `SUEnableCodeSigningValidation=false` 与空 `SUPackageSigningCertificate`，仅关闭宿主代码签名校验，继续保留更新包 EdDSA 校验 | Codex |
 | 2026-04-22 | 将 macOS 内部 DMG 构建改为固定 Finder 图标视图，打开后直接展示 `Crawler4j.app` 与 `Applications` 拖拽安装布局，并补记对 Finder 图形会话的依赖 | Codex |

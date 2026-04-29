@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tomllib
 from pathlib import Path
 
@@ -17,6 +18,13 @@ def load_project_version(pyproject_path: Path = PACKAGE_PYPROJECT) -> str:
     with pyproject_path.open("rb") as f:
         pyproject = tomllib.load(f)
     return str(pyproject["project"]["version"])
+
+
+def reset_output_dir(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    shutil.rmtree(resolved, ignore_errors=True)
+    resolved.mkdir(parents=True, exist_ok=True)
+    return resolved
 
 
 def load_dotenv_file(path: Path) -> dict[str, str]:

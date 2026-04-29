@@ -18,8 +18,10 @@ from crawler4j_contracts.context import (
     ToolSpec,
     ToolsCapability,
 )
+from crawler4j_contracts.database import DatabaseClient, DatabaseExecutor
 from crawler4j_contracts.result import TaskResult
 from crawler4j_contracts.signal import EnvAction, TaskSignal, TaskSignalAction
+from crawler4j_contracts.specs import EnvSelectorSpec, PageSpec, TaskSpec, WorkflowSpec
 
 __all__ = [
     "TaskContext",
@@ -33,10 +35,16 @@ __all__ = [
     "Point",
     "ToolSpec",
     "ToolsCapability",
+    "DatabaseClient",
+    "DatabaseExecutor",
     "SliderCaptchaDebugInfo",
     "SliderCaptchaMatchResult",
     "ClickCaptchaDebugInfo",
     "ClickCaptchaOrderedTarget",
     "ClickCaptchaMatchResult",
     "EnvCandidate",
+    "TaskSpec",
+    "WorkflowSpec",
+    "EnvSelectorSpec",
+    "PageSpec",
 ]

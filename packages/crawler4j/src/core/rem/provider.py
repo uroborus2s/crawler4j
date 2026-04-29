@@ -13,7 +13,7 @@ from typing import Any
 
 from src.core.foundation.logging import logger
 from src.core.rem.handle import BrowserHandle
-from src.core.rem.models import Environment, EnvKind
+from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo
 from src.core.rem.virtualbrowser_fingerprint import materialize_virtualbrowser_fingerprint
 
 VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS = tuple(range(146, 138, -1))
@@ -115,6 +115,7 @@ class BaseProvider(ABC):
     
     # 提供者标识
     name: str = ""
+    display_name: str = ""
     
     # 支持的环境类型
     kind: EnvKind = EnvKind.BROWSER
@@ -284,6 +285,30 @@ class BaseProvider(ABC):
         """
         return False
 
+    def supports_existing_env_import(self) -> bool:
+        """是否支持从来源系统导入已有环境。"""
+        return False
+
+    async def list_existing_envs(self) -> list[ProviderEnvInfo]:
+        """列出来源系统中的环境。"""
+        return []
+
+    async def get_existing_env(self, name: str) -> ProviderEnvInfo | None:
+        """按环境名称获取来源系统中的单个环境。"""
+        del name
+        return None
+
+    async def build_imported_environment(self, info: ProviderEnvInfo) -> Environment:
+        """把来源系统环境信息映射为宿主环境记录。"""
+        return Environment(
+            name=info.name,
+            kind=self.kind,
+            provider=self.name,
+            status=EnvStatus.READY,
+            external_id=info.external_id,
+            handle=BrowserHandle(browser_id=str(info.external_id)),
+        )
+
 # Provider 注册表
 _providers: dict[str, BaseProvider] = {}
 
@@ -315,6 +340,7 @@ class PlaywrightProvider(BaseProvider):
     """
     
     name = "playwright_local"
+    display_name = "Playwright Local"
     kind = EnvKind.BROWSER
     
     async def create(self, config: dict[str, Any] | None = None) -> Environment:
@@ -644,15 +670,16 @@ class BitBrowserProvider(BaseProvider):
     """BitBrowser 指纹浏览器提供者。"""
 
     name = "bitbrowser"
+    display_name = "BitBrowser"
     kind = EnvKind.BROWSER
     
     _client_cache: BitBrowserClient | None = None
     _client_port: int | None = None
     
     def _get_api_client(self) -> BitBrowserClient:
-        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
-        prefs = get_preferences_service()
-        port = prefs.get(PreferenceKey.BITBROWSER_PORT, 54345)
+        from src.core.system.config_center import get_config_center
+
+        port = get_config_center().get("browser.bitbrowser.port")
         
         # 配置变化时重建 Client
         if self._client_cache is None or self._client_port != port:
@@ -1282,18 +1309,62 @@ class VirtualBrowserClient:
             return None
         return self._find_browser_entry(data.get("data", []), browser_id)
 
-    async def get_browser_running_detail(self, browser_id: int) -> dict | None:
-        """获取运行中的浏览器详情。
+    async def list_browsers(self) -> list[dict[str, Any]]:
+        """获取全部浏览器环境列表。"""
+        client = await self._get_client()
+        resp = await client.get("/api/getBrowserList")
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            return []
+        payload = data.get("data", [])
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            nested = payload.get("data")
+            if isinstance(nested, list):
+                return nested
+        return []
 
-        运行列表通常比完整列表更接近实时状态，适合作为 CDP 入口兜底。
-        """
+    async def get_browser_full_parameters(
+        self,
+        browser_id: int | None = None,
+    ) -> list[dict[str, Any]] | dict[str, Any] | None:
+        """获取浏览器完整参数。"""
+        client = await self._get_client()
+        path = "/api/getBrowserFullParameters"
+        if browser_id is not None:
+            path = f"{path}?id={browser_id}"
+        resp = await client.get(path)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            return None
+        return data.get("data")
+
+    async def list_running_browsers(self) -> list[dict[str, Any]]:
+        """获取当前运行中的浏览器环境列表。"""
         client = await self._get_client()
         resp = await client.get("/api/getBrowserRunningList")
         resp.raise_for_status()
         data = resp.json()
         if not data.get("success"):
-            return None
-        return self._find_browser_entry(data.get("data", []), browser_id)
+            return []
+        payload = data.get("data", [])
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            nested = payload.get("data")
+            if isinstance(nested, list):
+                return nested
+        return []
+
+    async def get_browser_running_detail(self, browser_id: int) -> dict | None:
+        """获取运行中的浏览器详情。
+
+        运行列表通常比完整列表更接近实时状态，适合作为 CDP 入口兜底。
+        """
+        return self._find_browser_entry(await self.list_running_browsers(), browser_id)
 
     async def get_browser_runtime_detail(self, browser_id: int) -> dict | None:
         """获取可用于连接的运行时详情。
@@ -1352,16 +1423,18 @@ class VirtualBrowserProvider(BaseProvider):
     """VirtualBrowser 指纹浏览器提供者。"""
 
     name = "virtualbrowser"
+    display_name = "Virtual Browser"
     kind = EnvKind.BROWSER
     
     _client_cache: VirtualBrowserClient | None = None
     _client_config: tuple[int, str] | None = None  # (port, api_key)
 
     def _get_api_client(self) -> VirtualBrowserClient:
-        from src.core.system.preferences_service import PreferenceKey, get_preferences_service
-        prefs = get_preferences_service()
-        port = prefs.get(PreferenceKey.VIRTUALBROWSER_PORT, 9002)
-        api_key = prefs.get(PreferenceKey.VIRTUALBROWSER_API_KEY, "")
+        from src.core.system.config_center import get_config_center
+
+        config = get_config_center()
+        port = config.get("browser.virtualbrowser.port")
+        api_key = config.get("browser.virtualbrowser.apikey")
         
         current_config = (port, api_key)
         
@@ -1512,6 +1585,34 @@ class VirtualBrowserProvider(BaseProvider):
         
         return False
 
+    async def _wait_until_window_closed(
+        self,
+        env: Environment,
+        *,
+        attempts: int = 5,
+        delay: float = 0.3,
+    ) -> bool:
+        for attempt in range(attempts):
+            if not await self.is_window_open(env):
+                return True
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay)
+        return False
+
+    async def _wait_until_missing(
+        self,
+        env: Environment,
+        *,
+        attempts: int = 6,
+        delay: float = 0.5,
+    ) -> bool:
+        for attempt in range(attempts):
+            if not await self.exists(env):
+                return True
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay)
+        return False
+
     async def destroy(self, env: Environment) -> bool:
         """销毁: 断开连接 + 停止浏览器 + 删除配置。"""
         from src.core.foundation.logging import logger
@@ -1533,10 +1634,12 @@ class VirtualBrowserProvider(BaseProvider):
         # 2. API Stop & Delete
         client = self._get_api_client()
         try:
+            browser_id_int = int(browser_id)
             if await self.is_window_open(env):
-                await client.stop_browser(int(browser_id))
-            await client.delete_browser(int(browser_id))
-            if await self.exists(env):
+                await client.stop_browser(browser_id_int)
+                await self._wait_until_window_closed(env)
+            await client.delete_browser(browser_id_int)
+            if not await self._wait_until_missing(env):
                 logger.warning(f"[VirtualBrowser] 删除后环境仍存在: id={browser_id}")
                 return False
             logger.info(f"[VirtualBrowser] 环境已销毁: id={browser_id}")
@@ -1721,7 +1824,82 @@ class VirtualBrowserProvider(BaseProvider):
         except Exception as e:
             logger.warning(f"[VirtualBrowser] 检查环境存在失败: {e}")
             return False
-    
+
+    def supports_existing_env_import(self) -> bool:
+        return True
+
+    async def list_existing_envs(self) -> list[ProviderEnvInfo]:
+        client = self._get_api_client()
+        browser_rows = await client.list_browsers()
+        full_payload = await client.get_browser_full_parameters()
+        running_rows = await client.list_running_browsers()
+
+        full_map: dict[str, dict[str, Any]] = {}
+        if isinstance(full_payload, list):
+            for item in full_payload:
+                if isinstance(item, dict) and item.get("id") is not None:
+                    full_map[str(item["id"])] = item
+        elif isinstance(full_payload, dict) and full_payload.get("id") is not None:
+            full_map[str(full_payload["id"])] = full_payload
+
+        running_ids = {
+            str(item.get("id"))
+            for item in running_rows
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+
+        items: list[ProviderEnvInfo] = []
+        for entry in browser_rows:
+            if not isinstance(entry, dict) or entry.get("id") is None:
+                continue
+            external_id = str(entry["id"])
+            merged = dict(entry)
+            merged.update(full_map.get(external_id, {}))
+            proxy = merged.get("proxy") if isinstance(merged.get("proxy"), dict) else None
+            proxy_summary = "-"
+            if isinstance(proxy, dict):
+                protocol = str(proxy.get("protocol") or "").strip()
+                host = str(proxy.get("host") or "").strip()
+                port = str(proxy.get("port") or "").strip()
+                if host and port:
+                    proxy_summary = " ".join(part for part in (protocol, f"{host}:{port}") if part)
+            timestamp = merged.get("timestamp")
+            last_used_at = None
+            if timestamp is not None:
+                try:
+                    last_used_at = int(int(timestamp) / 1000)
+                except (TypeError, ValueError):
+                    last_used_at = None
+            is_running = bool(merged.get("isRunning")) or external_id in running_ids
+            items.append(
+                ProviderEnvInfo(
+                    provider=self.name,
+                    provider_label=self.display_name,
+                    external_id=external_id,
+                    name=str(merged.get("name") or external_id),
+                    proxy_summary=proxy_summary,
+                    remark=str(merged.get("remark") or ""),
+                    is_running=is_running,
+                    running_status="运行中" if is_running else "未运行",
+                    last_used_at=last_used_at,
+                )
+            )
+        items.sort(key=lambda item: (item.name.lower(), item.external_id))
+        return items
+
+    async def get_existing_env(self, name: str) -> ProviderEnvInfo | None:
+        target = str(name).strip()
+        for item in await self.list_existing_envs():
+            if item.name == target:
+                return item
+        return None
+
+    async def build_imported_environment(self, info: ProviderEnvInfo) -> Environment:
+        imported = await super().build_imported_environment(info)
+        imported.capabilities = {"page", "cookies", "fingerprint"}
+        imported.handle = BrowserHandle(browser_id=str(info.external_id))
+        return imported
+
     async def update(self, env: Environment, config: dict) -> bool:
         """更新 VirtualBrowser 环境配置。"""
         from src.core.foundation.logging import logger

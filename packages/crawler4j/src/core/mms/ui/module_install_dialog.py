@@ -6,19 +6,20 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QMessageBox,
-    QPushButton,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+
+from src.ui.components.button import StyledButton
+from src.ui.components.check_box import StyledCheckBox as QCheckBox
+from src.ui.components.dialog_window import configure_titled_dialog
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
+from src.ui.components.message_dialog import MessageDialog
 
 
 @dataclass(slots=True)
@@ -38,6 +39,7 @@ class ModuleInstallDialog(QDialog):
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("安装模块")
+        configure_titled_dialog(self)
         self.setMinimumWidth(520)
         self.setStyleSheet(
             """
@@ -45,13 +47,6 @@ class ModuleInstallDialog(QDialog):
                 background-color: #1e1e28;
             }
             QLabel {
-                color: white;
-            }
-            QLineEdit {
-                background: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.16);
-                border-radius: 6px;
-                padding: 8px 10px;
                 color: white;
             }
             QTabWidget::pane {
@@ -87,35 +82,32 @@ class ModuleInstallDialog(QDialog):
         self.tabs.addTab(self._build_github_tab(), "GitHub 源")
         layout.addWidget(self.tabs)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_btn = StyledButton(
+            "取消",
+            variant="secondary",
+            min_height=40,
+            min_width=92,
+            horizontal_padding=20,
         )
-        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        cancel_btn = buttons.button(QDialogButtonBox.StandardButton.Cancel)
-        if ok_btn:
-            ok_btn.setText("开始检查")
-        if cancel_btn:
-            cancel_btn.setText("取消")
-        buttons.accepted.connect(self._accept_if_valid)
-        buttons.rejected.connect(self.reject)
-        buttons.setStyleSheet(
-            """
-            QPushButton {
-                padding: 8px 20px;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton[text="开始检查"] {
-                background-color: #4ade80;
-                color: black;
-            }
-            QPushButton[text="取消"] {
-                background-color: rgba(255,255,255,0.1);
-                color: white;
-            }
-            """
+        cancel_btn.setObjectName("moduleInstallCancelButton")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        start_btn = StyledButton(
+            "开始检查",
+            variant="success",
+            min_height=40,
+            min_width=116,
+            horizontal_padding=20,
         )
-        layout.addWidget(buttons)
+        start_btn.setObjectName("moduleInstallStartButton")
+        start_btn.clicked.connect(self._accept_if_valid)
+        button_row.addWidget(start_btn)
+        layout.addLayout(button_row)
 
     def _build_local_tab(self) -> QWidget:
         widget = QWidget()
@@ -130,7 +122,14 @@ class ModuleInstallDialog(QDialog):
         row.setSpacing(10)
         self.local_path_input = QLineEdit()
         self.local_path_input.setPlaceholderText("选择模块 ZIP 安装包")
-        browse_btn = QPushButton("浏览…")
+        browse_btn = StyledButton(
+            "浏览...",
+            variant="secondary",
+            min_height=40,
+            min_width=104,
+            horizontal_padding=18,
+        )
+        browse_btn.setObjectName("moduleInstallBrowseButton")
         browse_btn.clicked.connect(self._browse_zip)
         row.addWidget(self.local_path_input, 1)
         row.addWidget(browse_btn)
@@ -153,7 +152,6 @@ class ModuleInstallDialog(QDialog):
         )
 
         self.local_remember_check = QCheckBox("保存这个 Token，后续更新这个模块时自动使用")
-        self.local_remember_check.setStyleSheet("color: rgba(255,255,255,0.72);")
         layout.addWidget(self.local_remember_check)
         layout.addWidget(
             self._build_hint_label(
@@ -189,7 +187,6 @@ class ModuleInstallDialog(QDialog):
         )
 
         self.repo_remember_check = QCheckBox("保存这个 Token，后续更新这个仓库时自动使用")
-        self.repo_remember_check.setStyleSheet("color: rgba(255,255,255,0.72);")
         layout.addWidget(self.repo_remember_check)
         layout.addWidget(
             self._build_hint_label(
@@ -228,7 +225,7 @@ class ModuleInstallDialog(QDialog):
         try:
             self.get_request()
         except ValueError as exc:
-            QMessageBox.warning(self, "输入无效", str(exc))
+            MessageDialog.warning(self, "输入无效", str(exc))
             return
         self.accept()
 

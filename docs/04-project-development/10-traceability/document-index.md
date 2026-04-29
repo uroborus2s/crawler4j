@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-04-22
+**最后更新：** 2026-04-23
 
 ## 1. 当前正式文档结构
 
@@ -71,6 +71,17 @@
 
 ## 5. 最近同步
 
+- 2026-04-25：公共 `MessageDialog` 已按“安装模块”面板视觉重做，`StyledButton` 增加成功态动作按钮；安装模块弹窗和多处简单提示/确认已改用公共组件。剩余未迁移的 `QMessageBox` 已收敛到环境/模块列表异步流程与任务中止三按钮流程，需后续补齐公共异步/多动作弹窗能力。
+- 2026-04-25：IP 测试结果弹窗已从局部 `QMessageBox` 收口到公共 `MessageDialog`，并同步移除 `env_ip_bindings` / `configs` 的初始化与运行依赖；已有用户库旧表只通过显式 SQL 清理，不写入启动迁移代码。
+- 2026-04-25：`docs/02-user-guide/usage.md`、`execution-log.md`、`test-plan.md` 与 `.factory/memory/` 已同步补记运行环境列表的 `env_metadata` 可用状态展示和 IP 测试结果深色面板。运行环境列表当前按 `scheduler.resource_pool` 资格卡片聚合展示可用状态，IP 测试结果弹窗固定深色背景。
+- 2026-04-24：模块数据库开发者接口已收口为唯一 `ctx.db` fluent API。`docs/03-developer-guide/`、`docs/04-project-development/04-design/{api-design.md,module-config-runtime-data-contract.md,module-hosted-ui-framework.md,module-entity-table-view-design.md}` 与 `.factory/memory/` 已同步删除旧数据库工具正式口径，并明确 `managed_dataset` 单源读取、`custom_table` 显式 join/group/aggregate、view 只读轻量查询和 named query 的边界。
+- 2026-04-24：`execution-log.md` 与 `.factory/memory/current-state.md` 已同步补记 IP 池条目编辑持久化缺陷的根因和修复：此前 `ip_entries` upsert 未回写地址/协议/端口/认证字段，现已补齐并新增数据库重载回归 `test_ip_pool.py`。
+- 2026-04-24：`docs/02-user-guide/{index.md,usage.md}` 已同步补记 IP 池条目级代理测试口径：当前 `环境管理 -> IP 池管理` 支持对单条 IP 执行真实代理探测，弹窗直接返回是否成功、出口 IP、耗时和失败阶段，且结果不做持久化。
+- 2026-04-24：Hosted UI `Card` 现已补齐布局参数口径。`docs/03-developer-guide/{index.md,ui-and-data-table.md}`、`docs/04-project-development/04-design/{module-hosted-ui-framework.md,api-design.md}`、`implementation-plan.md` 与 `.factory/memory/current-state.md` 已同步说明 `title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 的正式支持范围。
+- 2026-04-24：Hosted UI 现已正式补入 `Card` 容器组件，并明确收口“`Card` 是纯卡片容器、`Section.variant=\"card\"` 只是兼容别名”的口径；`docs/03-developer-guide/ui-and-data-table.md`、`docs/04-project-development/04-design/{module-hosted-ui-framework.md,api-design.md}`、`implementation-plan.md` 与 `.factory/memory/current-state.md` 已同步更新。
+- 2026-04-23：开发者指南与设计文档已补记 `managed_dataset` 的最终收口语义：`docs/03-developer-guide/{index.md,quickstart.md,reference-core-capabilities.md}` 与 `docs/04-project-development/04-design/{api-design.md,module-config-runtime-data-contract.md}` 现统一说明 `managed_dataset/custom_table` 都必须先在 `module.yaml.data.resources[]` 注册，未注册资源会被 `db.get_record` / `db.list_records` / `db.replace_records` 直接拒绝，不再按名称隐式创建托管表资源。
+- 2026-04-23：`docs/03-developer-guide/` 已把 manifest 驱动数据契约正式收口到开发者入口：`index.md`、`core-concepts.md`、`module-structure.md`、`quickstart.md`、`build-modules.md`、`reference-sdk-and-cli.md`、`debugging.md`、`troubleshooting.md` 现统一说明 `module.yaml.data + data/sql + data/seeds`、CLI `data` 命令组，以及 `db.get_record` / `db.run_query` / `db.query_view` 新正式口径；`docs/02-user-guide/` 同步补记管理员与现场支持对“旧协议模块包会被直接拒绝加载”的分诊口径。
+- 2026-04-22：`module-hosted-ui-framework.md` 已从“设计已批准”推进到“本地实现已落地”，对应的 `implementation-plan.md`、`test-plan.md`、`requirements-matrix.md`、`interface-matrix.md`、`.factory/workitems/` 与 `.factory/memory/` 已同步登记 `CR-011` / `TASK-025` / `TC-049`。
 - 2026-04-22：已新增 `module-hosted-ui-framework.md`，将“模块不得直接使用 `PyQt6`、宿主统一托管模块页面、最小化 UI 框架 V1 只公开 `Page/Section/Text/Button/DataTable`”正式沉淀为设计文档；`docs/index.md`、`module-boundaries.md`、`api-design.md`、`interface-matrix.md` 与 `.factory/memory/` 摘要已同步到同一口径。
 - 2026-04-22：`deployment-guide.md`、根 `README.md`、`packages/crawler4j/README.md` 与 `.env.example` 已同步补记 macOS Sparkle 内部分发的两项新口径：改写 bundle 后自动 ad-hoc 重签，以及 `generate_appcast` 可通过 keychain account / 私钥文件 / 私钥串读取 EdDSA 私钥，不再只依赖默认 `ed25519` 账户名。
 - 2026-04-22：`deployment-guide.md`、运维目录索引、根 `README.md` 与 `packages/crawler4j/README.md` 已同步补记 macOS Sparkle unsigned 内部分发的签名口径：`package-macos-internal-release` 当前会写入 `SUEnableCodeSigningValidation=false` 与空 `SUPackageSigningCertificate`，只关闭宿主 app 的苹果代码签名校验，更新包仍保留 EdDSA 校验。

@@ -32,8 +32,11 @@
 8. 当前最大剩余风险不是文档，而是 `ctrip` 真实站点 E2E 仍未回放。
 9. 客户端下拉框已统一走 `src.ui.components.combo_box.StyledComboBox`；新增 UI 时不要再直接实例化原生 `QComboBox`，也不要在页面级样式里覆盖整套 `QComboBox` 外观。
 10. 仓库根 `scripts/` 当前保留统一构建、桌面打包、Sparkle/Velopack 发布与上传、UI smoke 和数据库维护脚本；其中 `build_workspace_packages.py` 现在通过 root `pyproject.toml` 暴露为 `uv run build` / `uv run publish` 两个短命令，桌面发布统一走 `package-desktop`、`package-macos-internal-release`、`deploy-macos-internal-release`、`package-windows-release` 与 `deploy-windows-release`。
-11. 当前全系统日志已收口到一个统一日志服务：Core `logger`、模块 `ctx.logger` 和标准库 `logging` 都应汇入同一条链路；`系统设置 -> 资源` 修改日志级别/保留天数后应立即热更新，而不是等待重启。
+11. 当前全系统日志已收口到一个统一日志服务：Core `logger`、模块 `ctx.logger` 和标准库 `logging` 都应汇入同一条链路；`配置中心 -> 资源` 修改日志级别/保留天数后应立即热更新，而不是等待重启。调到 `DEBUG` 时，默认只放开 `crawler4j` 自身调试日志；`qasync`、`asyncio`、`httpx/httpcore`、`urllib3` 等第三方库仍保持 `WARNING` floor，避免底层事件循环/网络噪音把 UI 实时日志与文件日志打爆。
 12. Windows 正式发布已收口为 `PyInstaller onedir + Velopack`：`package-desktop` 只负责生成宿主目录，`package-windows-release` 才负责生成 Windows 安装器与更新目录；macOS 内部发布继续走 Sparkle。
+13. 在 `qasync` 驱动的异步 UI 协程里，不要直接调用 `MessageDialog.warning/error/information` 这类会 `exec()` 的同步弹窗；必须走 `warning_async/error_async/information_async` 或 `open_dialog_async`，否则失败路径里很容易触发 `Cannot enter into task` 这类事件循环重入错误。
+14. `QScintilla` 类文本面板不要硬编码 `Menlo` 这类平台专属字体；统一优先选择当前平台可用的固定宽字体，并按实际字体 `lineSpacing()` 计算 extra ascent/descent，否则 Windows 回退字体很容易把 YAML 行距压坏。
+15. 模块在线升级下载不要直接复用共享 HTTP session 的 `30s total timeout` 语义；Release ZIP 必须走独立 streaming timeout，并先写 `.part` 临时文件，下载超时或 `content-length` 不匹配时立即删除残留并给出明确错误，否则会把半截安装包留在 `downloads/modules/` 里，后续重试会很难排查。
 
 ## 3. 日常开发最常用命令
 

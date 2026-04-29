@@ -22,10 +22,11 @@ class BuildTarget:
     dist_dir: Path
 
 
+# Keep workspace build/publish order aligned with package dependencies.
 BUILD_TARGETS = (
+    BuildTarget("crawler4j-contracts", WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "dist"),
     BuildTarget("crawler4j-sdk", WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "dist"),
     BuildTarget("crawler4j", WORKSPACE_ROOT / "packages" / "crawler4j" / "dist"),
-    BuildTarget("crawler4j-contracts", WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "dist"),
 )
 TARGETS_BY_PACKAGE = {target.package: target for target in BUILD_TARGETS}
 SUPPORTED_ACTIONS = ("build", "publish")

@@ -48,13 +48,22 @@ def _load_velopack_module() -> Any:
     return velopack
 
 
-def _read_bool_attr(obj: Any, *names: str) -> bool:
-    for name in names:
-        if not hasattr(obj, name):
-            continue
-        value = getattr(obj, name)
-        return bool(value() if callable(value) else value)
-    return False
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def has_velopack_release_layout(bundle_dir: Path | None = None) -> bool:
+    """Detect the minimal Windows layout Velopack needs to self-update."""
+    root = bundle_dir or resolve_velopack_bundle_dir()
+    if root is None:
+        return False
+
+    installed_layout = _path_exists(root / "sq.version") and _path_exists(root.parent / "Update.exe")
+    portable_layout = _path_exists(root / "Update.exe") and _path_exists(root / "current" / "sq.version")
+    return installed_layout or portable_layout
 
 
 def resolve_velopack_bundle_dir() -> Path | None:
@@ -116,6 +125,8 @@ def velopack_availability() -> VelopackAvailability:
         return VelopackAvailability(False, "Velopack 仅支持 Windows 打包版。")
     if not getattr(sys, "frozen", False):
         return VelopackAvailability(False, "当前是源码开发模式，Velopack 仅在打包后的 Windows 客户端中启用。")
+    if not has_velopack_release_layout():
+        return VelopackAvailability(False, "当前 Windows 包不是 Velopack 正式发布产物，不能执行宿主自更新。")
 
     try:
         config = load_velopack_update_config()
@@ -125,8 +136,7 @@ def velopack_availability() -> VelopackAvailability:
     except Exception as exc:
         return VelopackAvailability(False, f"Velopack 初始化失败：{exc}")
 
-    if not _read_bool_attr(manager, "is_installed", "IsInstalled"):
-        return VelopackAvailability(False, "当前 Windows 包不是通过 Velopack Setup 安装，不能执行宿主自更新。")
+    del manager
 
     return VelopackAvailability(True, "")
 
@@ -136,9 +146,9 @@ class VelopackUpdater:
 
     def __init__(self):
         self._config = load_velopack_update_config()
+        if not has_velopack_release_layout():
+            raise VelopackError("当前 Windows 包不是 Velopack 正式发布产物，不能执行宿主自更新。")
         self._manager = _load_velopack_module().UpdateManager(self._config.feed_url)
-        if not _read_bool_attr(self._manager, "is_installed", "IsInstalled"):
-            raise VelopackError("当前 Windows 包不是通过 Velopack Setup 安装，不能执行宿主自更新。")
         self._auto_check = True
 
     def can_check_for_updates(self) -> bool:

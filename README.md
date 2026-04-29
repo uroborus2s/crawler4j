@@ -4,15 +4,17 @@
 
 ## Release Baseline
 
-当前源码版本线已收敛为 `crawler4j 0.2.0`、`crawler4j-sdk 0.3.0`、`crawler4j-contracts 0.2.0`，但最近一次正式 Git tag 仍是 `v0.1.1`。发布前请同时区分“当前源码版本”和“最近正式发布”：
+当前源码版本线已收敛为 `crawler4j 0.3.2`、`crawler4j-sdk 0.6.1`、`crawler4j-contracts 0.4.0`，最近一次正式 Git tag 为 `v0.2.0`。发布前请同时区分“当前源码版本”和“最近正式发布”：
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
 | `crawler4j-workspace` | `0.0.0` | workspace 开发元包，不作为正式发布物 |
-| `crawler4j` | `0.2.0` | 桌面宿主与 Core 运行时包 |
-| `crawler4j-sdk` | `0.3.0` | 模块开发 SDK 与 CLI |
-| `crawler4j-contracts` | `0.2.0` | Core / SDK / 模块共享契约 |
-| 最近正式 Git tag | `v0.1.1` | 仓库中最新已知正式 tag |
+| `crawler4j` | `0.3.2` | 桌面宿主与 Core 运行时包 |
+| `crawler4j-sdk` | `0.6.1` | 模块开发 SDK 与 CLI |
+| `crawler4j-contracts` | `0.4.0` | Core / SDK / 模块共享契约 |
+| 最近正式 Git tag | `v0.2.0` | 仓库中最新已知正式 tag |
+
+当前版本线不等于已经完成正式发布。`crawler4j-sdk 0.6.1`、`crawler4j-contracts 0.4.0` 的 build/publish 证据，以及 QScintilla 进入桌面依赖后的 PyInstaller 打包证据，仍需按发布流程补齐。
 
 ## Workspace Layout
 
@@ -56,9 +58,9 @@ uv run build
 # 只构建一个包，但仍然落到该包自己的 dist/
 uv run build crawler4j
 
-# 直接按包名发布 SDK / Contracts（脚本会自动指向各自 dist/*）
-uv run publish crawler4j-sdk
+# 直接按包名发布 workspace 包时，按依赖顺序先发 contracts，再发 sdk
 uv run publish crawler4j-contracts
+uv run publish crawler4j-sdk
 
 # 固定目录打包桌面应用
 uv run package-desktop
@@ -100,6 +102,7 @@ uv run deploy-windows-release
 - Windows Velopack 更新产物：`packages/crawler4j/dist/updates/windows/`
 
 其中 `build/pyinstaller/...` 只保存 PyInstaller 的分析缓存与中间文件，不是发布物；需要精简工作区时可以删除，下一次 `uv run package-desktop` 会自动重建。macOS 打包完成后，脚本会自动删除 PyInstaller 旁路生成的松散 `Crawler4j/` collect 目录，避免把非分发目录误当成必须随包携带的正式产物。
+桌面壳层图标的母版固定为 `packages/crawler4j/src/ui/assets/app_icon_master.png`；如需继续微调 Dock 占比或品牌细节，统一执行 `uv run python scripts/rebuild_app_icon_assets.py` 重建 `app_icon.png`、`app_icon.icns` 与 `app_icon.ico`，不要分别手工改三套导出物。
 
 若需要给小范围内部用户分发带自动更新能力的 macOS 包，继续以 `PyInstaller -> Crawler4j.app` 为底座，再通过 `uv run package-macos-internal-release` 把 `Sparkle.framework`、`SUFeedURL` / `SUPublicEDKey`、DMG 与 `appcast.xml` 串起来。当前生成的 DMG 会固定成 `Crawler4j.app + Applications` 的拖拽安装视图；打包脚本还会把 `SUEnableCodeSigningValidation=false` 和空的 `SUPackageSigningCertificate` 写进 `Info.plist`，并在生成 DMG 前自动对改写后的 bundle 做一次 ad-hoc 重签，仅关闭宿主 app 的苹果代码签名校验，更新包仍继续依赖 EdDSA 校验。该路径面向“首次手动拖到 `/Applications` 并允许未知开发者”场景，不要求 `Developer ID` / notarization。
 若本机尚未放置 Sparkle 分发目录，可先下载 Sparkle 官方 release archive，再运行 `uv run install-sparkle --archive /path/to/Sparkle-*.tar.xz` 把 `Sparkle.framework` 与 `bin/generate_appcast` 解压到仓库约定的 `packages/crawler4j/vendor/macos/sparkle/`。发布脚本现在会默认读取 workspace 根的 `.env`；仓库提供了 `.env.example` 模板，可先复制成 `.env` 再填 `CRAWLER4J_SPARKLE_FEED_URL`、`CRAWLER4J_SPARKLE_PUBLIC_ED_KEY`，以及一条私钥来源配置：`CRAWLER4J_SPARKLE_KEYCHAIN_ACCOUNT`、`CRAWLER4J_SPARKLE_PRIVATE_ED_KEY_FILE` 或 `CRAWLER4J_SPARKLE_PRIVATE_ED_KEY` 三选一。若要一键打包并推送到静态目录，则使用 `uv run deploy-macos-internal-release`，它会先复用现有 DMG/appcast 构建链，再通过 `rsync -av` 把 `packages/crawler4j/dist/updates/macos/` 下的产物同步到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`。服务器目录建议固定为同一发布根下的 `mac/` 与 `win/` 两个并列子目录。
@@ -114,14 +117,15 @@ uv run deploy-windows-release
 
 当前保留的脚本：
 
-- `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；构建时自动写回各包 `dist/`，发布时自动指向各包 `dist/*`
+- `scripts/build_workspace_packages.py`：`uv run build` / `uv run publish` 背后的统一包装器；按 `crawler4j-contracts -> crawler4j-sdk -> crawler4j` 的依赖顺序构建/发布，并自动写回各包 `dist/`
 - `scripts/deploy_macos_internal_release.py`：`uv run deploy-macos-internal-release` 背后的 macOS 内部发布+上传入口；复用 `package-macos-internal-release` 构建 DMG / `appcast.xml`，再用 `rsync` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`
 - `scripts/deploy_windows_release.py`：`uv run deploy-windows-release` 背后的 Windows 发布+上传入口；复用 `package-windows-release` 生成 Velopack 产物，再用 OpenSSH `sftp` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`
 - `scripts/install_sparkle_vendor.py`：`uv run install-sparkle` 背后的 Sparkle 安装辅助；把本地下载好的 Sparkle release archive 或已解压目录复制到 `packages/crawler4j/vendor/macos/sparkle/`
 - `scripts/package_desktop_app.py`：`uv run package-desktop` 背后的固定目录桌面打包入口；输出固定落在 `packages/crawler4j/dist/desktop/<platform>/`，其中 macOS 只保留最终可分发的 `Crawler4j.app`
 - `scripts/package_macos_internal_release.py`：`uv run package-macos-internal-release` 背后的 macOS 内部发布入口；要求本机可访问 Sparkle 分发目录、EdDSA 公钥与一条私钥来源配置，并在 `packages/crawler4j/dist/updates/macos/` 生成 DMG / `appcast.xml`
 - `scripts/package_windows_release.py`：`uv run package-windows-release` 背后的 Windows 发布入口；复用 `PyInstaller onedir` 目录，写入 Velopack 更新配置并生成 `Setup.exe` / `.nupkg` / `releases.<channel>.json`
+- `scripts/rebuild_app_icon_assets.py`：从 `packages/crawler4j/src/ui/assets/app_icon_master.png` 重建运行时 PNG、macOS ICNS 和 Windows ICO，统一控制 Dock 外轮廓安全区
 - `scripts/smoke_test_ui.py`：默认质量门里的 headless UI smoke
-- `scripts/db_cli.py`：本地维护用数据库初始化/重置脚本
+- `scripts/db_cli.py`：本地维护用 `config.db` / `state.db` / `data.db` 初始化与全量重置脚本
 
 详细背景和操作说明以仓库根目录 `docs/` 为准。

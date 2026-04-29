@@ -5,20 +5,55 @@ from types import SimpleNamespace
 
 import pytest
 
-from crawler4j_sdk import TaskContext
-from src.core.mms.models import ModuleInfo, ModuleManifest
+from crawler4j_contracts import TaskContext
+from src.core.mms.models import ModuleInfo, ModuleManifest, WorkflowInfo
 from src.core.mms.service import ModuleService
 
 
-def test_removed_runtime_packages_stay_unavailable():
-    app_root = Path(__file__).resolve().parents[4]
-    workspace_root = app_root.parents[1]
+def _assert_removed_module(module_name: str) -> None:
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        importlib.import_module(module_name)
+
+    assert exc_info.value.name == module_name
+
+
+def test_removed_legacy_runtime_and_ui_surface_stays_unavailable():
+    workspace_root = Path(__file__).resolve().parents[6]
     removed_paths = [
-        app_root / "src" / "automation",
-        app_root / "src" / "core" / "models",
-        workspace_root / "packages" / "crawler4j-sdk" / "crawler4j_sdk" / "extensions.py",
+        workspace_root / "packages" / "crawler4j-sdk" / "src" / "assembler.py",
+        workspace_root / "packages" / "crawler4j-sdk" / "src" / "base.py",
+        workspace_root / "packages" / "crawler4j-sdk" / "src" / "env_selector.py",
+        workspace_root / "packages" / "crawler4j-sdk" / "src" / "hosted_ui.py",
+        workspace_root / "packages" / "crawler4j-sdk" / "src" / "result.py",
+        workspace_root / "packages" / "crawler4j-sdk" / "src" / "resource_pool.py",
+        workspace_root / "packages" / "crawler4j-sdk" / "src" / "signal.py",
+        workspace_root / "packages" / "crawler4j-sdk" / "src" / "workflow.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "automation",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "core",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "sidebar.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "config_editor.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "log_viewer.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "components" / "status_bar.py",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "assets" / "arrow_down.svg",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "assets" / "arrow_up.svg",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "styles" / "dark_theme.qss",
+        workspace_root / "packages" / "crawler4j" / "src" / "ui" / "utils" / "syntax_highlighter.py",
     ]
     removed_modules = [
+        "crawler4j_sdk.assembler",
+        "crawler4j_sdk.base",
+        "crawler4j_sdk.env_selector",
+        "crawler4j_sdk.hosted_ui",
+        "crawler4j_sdk.result",
+        "crawler4j_sdk.resource_pool",
+        "crawler4j_sdk.signal",
+        "crawler4j_sdk.workflow",
+        "src.ui.core",
+        "src.ui.components.sidebar",
+        "src.ui.components.config_editor",
+        "src.ui.components.log_viewer",
+        "src.ui.components.status_bar",
+        "src.ui.utils.syntax_highlighter",
         "src.utils.async_utils",
         "src.utils.captcha_solver",
         "src.utils.fingerprint_generator",
@@ -31,8 +66,11 @@ def test_removed_runtime_packages_stay_unavailable():
         assert path.exists() is False
 
     for module_name in removed_modules:
-        with pytest.raises(ModuleNotFoundError):
-            importlib.import_module(module_name)
+        _assert_removed_module(module_name)
+
+    sdk_root = importlib.import_module("crawler4j_sdk")
+    assert hasattr(sdk_root, "TaskContext") is False
+    assert hasattr(sdk_root, "TaskResult") is False
 
 
 class _FakeLocator:
@@ -74,16 +112,32 @@ class _FakePage:
 
 
 def _write_demo_module(module_dir: Path) -> None:
-    module_dir.mkdir(parents=True, exist_ok=True)
+    tasks_dir = module_dir / "tasks"
+    workflows_dir = module_dir / "workflows"
+    hooks_dir = module_dir / "hooks"
+    for package_dir in (module_dir, tasks_dir, workflows_dir, hooks_dir):
+        package_dir.mkdir(parents=True, exist_ok=True)
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+
     (module_dir / "__init__.py").write_text(
+        dedent(
+            """
+            async def run(context):
+                raise AssertionError("module root run() should not be called")
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "init_env.py").write_text(
         dedent(
             """
             from types import SimpleNamespace
 
-            from crawler4j_sdk import TaskResult
+            from crawler4j_contracts import TaskContext
 
 
-            async def init_env(context):
+            async def handle(context: TaskContext):
                 account = context.get_config("accounts", [])[0]
                 context.selected_account = SimpleNamespace(
                     id=account["id"],
@@ -93,13 +147,24 @@ def _write_demo_module(module_dir: Path) -> None:
                 context.state["selected_account_phone"] = context.selected_account.phone_number
                 if context.page:
                     await context.page.goto(
-                        context.get_config("login_url", "https://example.com/login"),
+                        context.get_config("target_url", "https://example.com/start"),
                         wait_until="domcontentloaded",
                     )
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tasks_dir / "login_task.py").write_text(
+        dedent(
+            """
+            from crawler4j_contracts import TaskResult, TaskSpec
+
+            TASK = TaskSpec(name="login_task", display_name="Login Task")
 
 
-            async def run(context):
-                phone = context.selected_account.phone_number
+            async def execute(context):
+                phone = str(context.state.get("selected_account_phone") or "")
                 if context.page:
                     locator = context.page.locator("input[type='tel']")
                     if await locator.count() > 0:
@@ -111,20 +176,40 @@ def _write_demo_module(module_dir: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    (workflows_dir / "login_workflow.py").write_text(
+        dedent(
+            """
+            from crawler4j_contracts import WorkflowSpec
+
+            WORKFLOW = WorkflowSpec(name="login_workflow", tasks=("login_task",))
+
+
+            async def run(context):
+                return await context.run_subtask("login_task")
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _demo_registry(module_dir: Path):
     return SimpleNamespace(
         get_module=lambda name: ModuleInfo(
             name="demo_module",
-            manifest=ModuleManifest(name="demo_module"),
+            manifest=ModuleManifest(
+                name="demo_module",
+                runtime_api="core-native-v1",
+                workflows=[WorkflowInfo(name="login_workflow")],
+                default_workflow="login_workflow",
+            ),
             path=module_dir,
         )
     )
 
 
 @pytest.mark.asyncio
-async def test_module_init_hook_injects_account_and_opens_login_page(tmp_path):
+async def test_module_service_init_hook_prepares_account_and_opens_target_page(tmp_path):
     module_dir = tmp_path / "demo_module"
     _write_demo_module(module_dir)
 
@@ -137,7 +222,7 @@ async def test_module_init_hook_injects_account_and_opens_login_page(tmp_path):
         task_name="demo_module",
         config={
             "accounts": [{"id": "u1", "phone_number": "13800000001", "country_code": "86"}],
-            "login_url": "https://example.com/login",
+            "target_url": "https://example.com/start",
         },
         page=page,
     )
@@ -147,11 +232,11 @@ async def test_module_init_hook_injects_account_and_opens_login_page(tmp_path):
 
     assert getattr(ctx, "selected_account").phone_number == "13800000001"
     assert ctx.state["selected_account_phone"] == "13800000001"
-    assert page.goto_calls[-1] == "https://example.com/login"
+    assert page.goto_calls[-1] == "https://example.com/start"
 
 
 @pytest.mark.asyncio
-async def test_module_login_workflow_executes_login_script(tmp_path):
+async def test_module_service_runs_descriptor_workflow_without_calling_module_root_run(tmp_path):
     module_dir = tmp_path / "demo_module"
     _write_demo_module(module_dir)
 
@@ -163,9 +248,8 @@ async def test_module_login_workflow_executes_login_script(tmp_path):
         env_id=5,
         task_name="demo_module",
         config={
-            "workflow": "login_workflow",
             "accounts": [{"id": "u2", "phone_number": "13900000002", "country_code": "86"}],
-            "login_url": "https://example.com/login",
+            "target_url": "https://example.com/start",
         },
         page=page,
     )

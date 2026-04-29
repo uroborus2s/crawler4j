@@ -10,17 +10,17 @@ import asyncio
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QMessageBox,
-    QPushButton,
     QVBoxLayout,
 )
 
 from src.core.rem.models import Environment, ProxyMode
+from src.ui.components.button import StyledButton
+from src.ui.components.dialog_window import configure_titled_dialog
+from src.ui.components.line_edit import StyledLineEdit as QLineEdit
+from src.ui.components.message_dialog import MessageDialog
 
 
 class EditEnvWorker(QThread):
@@ -82,33 +82,17 @@ class EditEnvDialog(QDialog):
         self._worker = None
         
         self.setWindowTitle(f"编辑环境 - {env.id}")
+        configure_titled_dialog(self)
         self.setMinimumWidth(450)
         
         # 深色主题样式
         self.setStyleSheet("""
             QDialog { background-color: #1e1e2e; }
             QLabel { color: #cdd6f4; background-color: transparent; }
-            QLineEdit {
-                background-color: #313244;
-                border: 1px solid #45475a;
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: #cdd6f4;
-            }
-            QLineEdit:focus { border-color: #89b4fa; }
             QLineEdit:disabled { 
                 background-color: #1e1e2e; 
                 color: #6c7086;
             }
-            QPushButton {
-                background-color: #45475a;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                color: #cdd6f4;
-            }
-            QPushButton:hover { background-color: #585b70; }
-            QPushButton:disabled { background-color: #313244; color: #6c7086; }
         """)
         
         self._setup_ui()
@@ -156,8 +140,7 @@ class EditEnvDialog(QDialog):
         self.proxy_input.setPlaceholderText("socks5://user:pass@host:port")
         proxy_row.addWidget(self.proxy_input)
         
-        self.refresh_ip_btn = QPushButton("🔄 刷新")
-        self.refresh_ip_btn.setFixedWidth(80)
+        self.refresh_ip_btn = StyledButton("刷新", variant="secondary", min_height=40, min_width=80)
         self.refresh_ip_btn.setToolTip("从 IP 池重新分配")
         self.refresh_ip_btn.clicked.connect(self._refresh_proxy)
         proxy_row.addWidget(self.refresh_ip_btn)
@@ -175,7 +158,7 @@ class EditEnvDialog(QDialog):
         fp_row.addWidget(QLabel("点击刷新重新随机化指纹"))
         fp_row.addStretch()
         
-        self.refresh_fp_btn = QPushButton("🎲 刷新指纹")
+        self.refresh_fp_btn = StyledButton("刷新指纹", variant="secondary", min_height=40)
         self.refresh_fp_btn.clicked.connect(self._refresh_fingerprint)
         fp_row.addWidget(self.refresh_fp_btn)
         
@@ -184,13 +167,32 @@ class EditEnvDialog(QDialog):
         # 按钮区
         layout.addStretch()
         
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | 
-            QDialogButtonBox.StandardButton.Cancel
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+        button_row.addStretch()
+
+        cancel_btn = StyledButton(
+            "取消",
+            variant="secondary",
+            min_height=40,
+            min_width=92,
+            horizontal_padding=20,
         )
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        cancel_btn.setObjectName("editEnvCancelButton")
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        save_btn = StyledButton(
+            "保存",
+            variant="success",
+            min_height=40,
+            min_width=92,
+            horizontal_padding=20,
+        )
+        save_btn.setObjectName("editEnvSaveButton")
+        save_btn.clicked.connect(self._save)
+        button_row.addWidget(save_btn)
+        layout.addLayout(button_row)
     
     def _load_values(self):
         """加载当前环境配置。"""
@@ -263,10 +265,10 @@ class EditEnvDialog(QDialog):
         self._set_buttons_enabled(True)
         
         if success:
-            QMessageBox.information(self, "成功", message)
+            MessageDialog.information(self, "成功", message)
             self.accept()
         else:
-            QMessageBox.warning(self, "失败", message)
+            MessageDialog.warning(self, "失败", message)
     
     def _set_buttons_enabled(self, enabled: bool):
         """设置按钮启用状态。"""

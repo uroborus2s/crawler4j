@@ -2,7 +2,7 @@
 
 The desktop host now delegates macOS packaged-app updates to Sparkle and
 Windows installed-app updates to Velopack while keeping a small UI-facing
-wrapper for preference syncing.
+wrapper for config center syncing.
 """
 
 from __future__ import annotations
@@ -27,19 +27,6 @@ class UpdateChannel(str, Enum):
     STABLE = "stable"
     BETA = "beta"
     NIGHTLY = "nightly"
-
-
-@dataclass(slots=True)
-class UpdateInfo:
-    """Reserved update payload for non-Sparkle backends."""
-
-    version: str
-    channel: UpdateChannel
-    release_notes: str
-    download_url: str
-    file_size: int
-    sha256: str
-    is_critical: bool = False
 
 
 @dataclass(slots=True)
@@ -135,7 +122,7 @@ class UpdateService(QObject):
         return self._last_action_message
 
     def configure(self, *, auto_check: bool) -> None:
-        """Persist the desired auto-check preference and push it if active."""
+        """Persist the desired auto-check setting and push it if active."""
         self._desired_auto_check = bool(auto_check)
         if self._backend is not None:
             self._backend.set_automatically_checks_for_updates(self._desired_auto_check)

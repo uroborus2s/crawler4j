@@ -96,6 +96,51 @@ async def test_add_browser_defaults_to_no_proxy_when_proxy_not_provided():
 
 
 @pytest.mark.asyncio
+async def test_list_browsers_returns_browser_entries():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(
+        response_data=[
+            {"id": 1, "name": "env-1"},
+            {"id": 2, "name": "env-2"},
+        ]
+    )
+
+    async def _fake_get_client():
+        return dummy
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+
+    browsers = await client.list_browsers()
+
+    assert dummy.last_get_path == "/api/getBrowserList"
+    assert browsers == [{"id": 1, "name": "env-1"}, {"id": 2, "name": "env-2"}]
+
+
+@pytest.mark.asyncio
+async def test_get_browser_full_parameters_without_id_returns_all_rows():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(
+        response_data=[
+            {"id": 1, "name": "env-1", "remark": "demo"},
+            {"id": 2, "name": "env-2", "remark": "demo-2"},
+        ]
+    )
+
+    async def _fake_get_client():
+        return dummy
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+
+    payload = await client.get_browser_full_parameters()
+
+    assert dummy.last_get_path == "/api/getBrowserFullParameters"
+    assert payload == [
+        {"id": 1, "name": "env-1", "remark": "demo"},
+        {"id": 2, "name": "env-2", "remark": "demo-2"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_add_browser_uses_canonical_proxy_keys_and_enables_custom_mode():
     client = VirtualBrowserClient(port=9002, api_key="")
     dummy = _DummyHttpClient()

@@ -7,7 +7,7 @@
 **上游输入：** 当前代码 | 当前命令验证结果 | 当前正式文档
 **下游输出：** `.factory/workitems/` | `.factory/memory/current-state.md`
 **关联 ID：** `TASK-008`, `TASK-003`, `TASK-009`, `CR-003`
-**最后更新：** 2026-03-26
+**最后更新：** 2026-04-22
 
 ## 1. 审查范围与方法
 
@@ -33,12 +33,13 @@
 - `BUG-004`：`_install_from_zip()` 已改为临时目录校验 + 备份旧目录 + 原子替换，回归测试已覆盖旧文件不残留。
 - `BUG-005`：`hybrid` 已从策略模型与编辑器中移除，并补充了对应回归测试。
 
-### 3.2 `CR-003` 已在本轮关闭
+### 3.2 `CR-003` / `CR-011` 当前结论
 
 - `packages/crawler4j/src/core/mms/settings_store.py` 已提供模块级/工作流级 settings、导出与模块状态持久化
-- `packages/crawler4j/src/core/mms/ui_loader.py` 已补齐 trust gate / allowlist / 降级策略
-- `packages/crawler4j/src/core/mms/ui/module_detail_page.py` 已支持 `ui:SomePage` 的真实加载，不再只停留在占位页
-- `packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py` 已覆盖 DevLink 放行、外部模块默认拒绝、allowlist 放行和加载失败降级
+- 旧 `CR-003` 范围已停留在历史完成态；后续 2026-04-22 又以 `CR-011` 把模块 UI 正式切到 hosted page V1
+- `packages/crawler4j/src/core/mms/ui_loader.py`、trust gate / allowlist 与 `ui:*` 实时加载路径已从正式实现中移除
+- `packages/crawler4j/src/core/mms/ui/module_detail_page.py` 现在只消费 `core:page:<page_id>` 与 `core:data_table:<view_id>`，由宿主 `ManagedPageRenderer` 渲染 hosted page
+- `packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py`、`test_managed_page_renderer.py` 与 SDK / integration / acceptance 回归已覆盖 hosted page 契约
 
 ## 4. 当前验证结果摘要
 
