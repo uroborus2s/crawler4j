@@ -17,7 +17,6 @@ class JobDebugTarget:
     run_profile: RunProfile
     module: ModuleInfo
     workflow: str
-    hooks_module: str
     execution_params: dict = field(default_factory=dict)
     job_params: dict = field(default_factory=dict)
     runtime_params: dict = field(default_factory=dict)
@@ -51,7 +50,6 @@ def resolve_job_debug_target(
         run_profile=run_profile,
         module=module,
         workflow=run_profile.execution.workflow or "default",
-        hooks_module=run_profile.execution.hooks_module or run_profile.execution.module,
         execution_params=dict(run_profile.execution.params),
         job_params=dict(job.params),
         runtime_params={**run_profile.execution.params, **job.params},

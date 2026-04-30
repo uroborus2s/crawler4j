@@ -35,7 +35,6 @@ def _build_request() -> ExecutionRequest:
     return ExecutionRequest(
         task=Task(id="task-21", job_id="job-21"),
         module_name="demo.module",
-        hooks_module="demo.module",
         workflow_name="default",
         execution_params={},
         job_params={},
@@ -49,12 +48,8 @@ def _build_request() -> ExecutionRequest:
 
 
 def _build_module_service(candidate_ids):
-    async def default_hook(module_name, hook_name, context, *args):
-        return None
-
     return SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=default_hook),
         resolve_env_candidates=Mock(side_effect=candidate_ids if isinstance(candidate_ids, list) else None),
     )
 

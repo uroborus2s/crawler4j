@@ -63,7 +63,6 @@ class JobDebugDialog(QDialog):
             run_profile=run_profile,
             module=module,
             workflow=run_profile.execution.workflow if run_profile.execution else "default",
-            hooks_module=(run_profile.execution.hooks_module if run_profile.execution else "") or module.name,
             execution_params=dict((run_profile.execution.params if run_profile.execution else {}) or {}),
             job_params=dict(job.params or {}),
             runtime_params={

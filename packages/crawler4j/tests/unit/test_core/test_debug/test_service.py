@@ -102,7 +102,6 @@ def _make_run_profile(*, wait_timeout: int = 90, lifecycle: CreationLifecycle = 
         execution=ExecutionContext(
             module="demo_module",
             workflow="repair",
-            hooks_module="demo_module.hooks",
             params={"lang": "zh-CN"} if params is None else {"lang": "en-US"},
             timeout=timeout,
         ),
@@ -132,7 +131,6 @@ def _make_inline_job() -> Job:
                 "execution": ExecutionContext(
                     module="demo_module",
                     workflow="repair",
-                    hooks_module="demo_module.hooks",
                     params={"lang": "en-US"},
                     timeout=300,
                 )
@@ -158,7 +156,6 @@ def _make_candidate_job() -> Job:
             execution=ExecutionContext(
                 module="demo_module",
                 workflow="repair",
-                hooks_module="demo_module.hooks",
                 params={"lang": "zh-CN"},
                 timeout=120,
             ),
@@ -239,7 +236,6 @@ async def test_debug_service_tracks_worker_events_and_logs(monkeypatch, temp_dat
     assert "strategy_id" not in payload
     assert payload["module_name"] == "demo_module"
     assert payload["workflow"] == "repair"
-    assert payload["hooks_module"] == "demo_module.hooks"
     assert payload["provider"] == "virtualbrowser"
     assert payload["fixed_env_id"] is None
     assert payload["candidates"] == ""

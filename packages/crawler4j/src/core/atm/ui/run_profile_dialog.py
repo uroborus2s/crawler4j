@@ -2247,7 +2247,6 @@ class RunProfileDialog(QDialog):
         execution = ExecutionContext(
             module=module_name,
             workflow=workflow_name,
-            hooks_module=previous_execution.hooks_module if previous_execution else "",
             params=self._workflow_params_from_form(previous_params),
             object_bindings=dict(previous_execution.object_bindings) if previous_execution else {},
             object_params=dict(previous_execution.object_params) if previous_execution else {},

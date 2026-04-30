@@ -144,37 +144,6 @@ async def test_module_service_rejects_legacy_runtime_api(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_module_service_legacy_hooks_are_removed(tmp_path):
-    module_name = "legacy_module"
-    module_dir = tmp_path / module_name
-    _write_v2_module_package(module_dir, _workflow_source(module_name))
-
-    service = ModuleService()
-    service.registry = SimpleNamespace(
-        get_module=lambda name: ModuleInfo(
-            name=module_name,
-            manifest=_manifest(module_name, runtime_api="core-native-v1"),
-            path=module_dir,
-        )
-    )
-
-    with pytest.raises(ValueError, match="Legacy module hooks are removed"):
-        await service.call_hook(module_name, "prepare_env", TaskContext(env_id=0, task_name=module_name))
-
-
-@pytest.mark.asyncio
-async def test_module_service_noops_hooks_for_core_native_v2_modules(tmp_path):
-    module_name = "hookless_module"
-    module_dir = tmp_path / module_name
-    _write_v2_module_package(module_dir, _workflow_source(module_name))
-
-    service = _service_for_module(module_name, module_dir)
-    result = await service.call_hook(module_name, "prepare_env", TaskContext(env_id=0, task_name=module_name))
-
-    assert result is None
-
-
-@pytest.mark.asyncio
 async def test_module_service_reloads_dev_module_once_per_context(tmp_path):
     module_name = "reloadable_module"
     module_dir = tmp_path / module_name

@@ -189,7 +189,7 @@
 | 等待状态口径 | 候选等待复用底层 `TaskStatus.PENDING`；UI 展示为 `等待环境`，等待中的 `task.message` 为 `等待环境候选可用: <candidates>` |
 | 等待超时口径 | `wait_timeout` 同时用于环境租约获取与候选等待席位收口；候选等待从第一次写下 `waiting_since` 开始计时，`wait_timeout=0` 时当前不会自动超时收口；失败文案为 `等待环境候选超时: <candidates> (<seconds>s)`，且与 `execution.timeout` 分离 |
 | `KEEP_ALIVE` 环境口径 | `KEEP_ALIVE` 只表示保留现场，不表示重新可分配；保留后的 `RUNNING` 环境不会被候选队列当成可发号工位 |
-| `env_id` 口径 | 候选函数返回的 `env_id` 是宿主 `environments.id` 主键；`prepare_env` 阶段的 `TaskContext.env_id` 当前固定为 `0`，不应用于表达候选关系 |
+| `env_id` 口径 | 候选函数返回的 `env_id` 是宿主 `environments.id` 主键；候选函数执行时 `TaskContext.env_id` 固定为 `0`，不应用于表达候选关系 |
 
 ## `API-016` Env Cleanup Candidates Contract（0.4.0）
 
@@ -214,6 +214,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-30 | 清理旧生命周期 hook 运行链，`RunProfile.execution.hooks_module`、`ModuleService.call_hook()` 与 `prepare_env/init_env/before_run/on_*` 不再属于 0.4.0 契约 | Codex |
 | 2026-04-30 | 新增 `API-016`，提供 `cleanups/` + `@env_cleanup_candidates` 批量环境清理候选契约，复用 `EnvCandidates` DSL 但隔离运行候选和删除语义 | Codex |
 | 2026-04-30 | `API-007` 从固定资源池同步方案改为 `candidates/` + `@env_candidates` 纯函数实时候选方案，删除资源池资格卡片和同步工作流口径 | Codex |
 | 2026-04-30 | 新增 `API-013`，登记 docs-stratego 下使用者指南和开发者指南按版本分流、主文档指向当前发布版本、历史版本保留的契约 | Codex |
@@ -228,7 +229,7 @@
 | 2026-03-31 | 增补模块根入口自动托管的契约演进设计 | Codex |
 | 2026-04-08 | 补记 Hosted UI 本地声明 hook 与 DevLink 刷新调试语义 | Codex |
 | 2026-04-15 | 将 Core 扩展能力收敛到 `TaskContext.tools` 统一工具接口 | Codex |
-| 2026-04-15 | 固化 `on_cleanup` 终态规则，并补记 `TaskSignal` 为正式流程信号 | Codex |
+| 2026-04-15 | 历史记录：曾固化 `on_cleanup` 终态规则，并补记 `TaskSignal` 为正式流程信号；当前 0.4.0 已移除生命周期 hook 运行链 | Codex |
 | 2026-04-16 | 补记 `TaskSignal.wait_for_confirmation` 的结构化确认面板协议、任务快照持久化与 `task.signal` 事件 | Codex |
 | 2026-04-16 | 补记 `ModuleAssembler` 发现错误可见性，以及 DevLink 普通执行的一次性 reload 语义 | Codex |
 | 2026-04-17 | 增补 `API-005`，收口模块配置、运行态、共享内存与数据表契约 | Codex |

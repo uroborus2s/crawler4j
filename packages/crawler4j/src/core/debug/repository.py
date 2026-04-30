@@ -32,7 +32,6 @@ class DebugSessionRepository:
                     params_json TEXT NOT NULL,
                     object_bindings_json TEXT NOT NULL DEFAULT '{}',
                     object_params_json TEXT NOT NULL DEFAULT '{}',
-                    hooks_module TEXT NOT NULL,
                     provider TEXT NOT NULL,
                     acquisition_mode TEXT NOT NULL,
                     fixed_env_id INTEGER,
@@ -97,12 +96,12 @@ class DebugSessionRepository:
                     """
                     INSERT INTO debug_sessions (
                         id, job_id, job_name, module_name, source_path, workflow, execution_params_json, job_params_json,
-                        params_json, object_bindings_json, object_params_json, hooks_module,
+                        params_json, object_bindings_json, object_params_json,
                         provider, acquisition_mode, fixed_env_id, candidates, candidate_params_json,
                         creation_params_json, creation_lifecycle, wait_timeout, timeout,
                         attach_host, attach_port, wait_for_attach, stop_on_entry, keep_environment,
                         state, worker_pid, env_id, created_at, started_at, finished_at, last_error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         job_id = excluded.job_id,
                         job_name = excluded.job_name,
@@ -114,7 +113,6 @@ class DebugSessionRepository:
                         params_json = excluded.params_json,
                         object_bindings_json = excluded.object_bindings_json,
                         object_params_json = excluded.object_params_json,
-                        hooks_module = excluded.hooks_module,
                         provider = excluded.provider,
                         acquisition_mode = excluded.acquisition_mode,
                         fixed_env_id = excluded.fixed_env_id,
@@ -148,7 +146,6 @@ class DebugSessionRepository:
                         json.dumps(session.params, ensure_ascii=False),
                         json.dumps(session.object_bindings, ensure_ascii=False),
                         json.dumps(session.object_params, ensure_ascii=False),
-                        session.hooks_module,
                         session.provider,
                         session.acquisition_mode.value,
                         session.fixed_env_id,
@@ -211,7 +208,6 @@ class DebugSessionRepository:
             params=json.loads(row["params_json"]) if row["params_json"] else {},
             object_bindings=json.loads(row["object_bindings_json"]) if "object_bindings_json" in row.keys() and row["object_bindings_json"] else {},
             object_params=json.loads(row["object_params_json"]) if "object_params_json" in row.keys() and row["object_params_json"] else {},
-            hooks_module=row["hooks_module"],
             provider=row["provider"],
             acquisition_mode=row["acquisition_mode"],
             fixed_env_id=row["fixed_env_id"] if "fixed_env_id" in row.keys() else None,

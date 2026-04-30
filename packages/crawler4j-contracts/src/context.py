@@ -272,7 +272,7 @@ class TaskContext:
 
     def emit_signal(self, signal: "TaskSignal") -> None:
         """向 ATM 发出结构化控制信号。"""
-        allowed_phases = {"init_env", "before_run", "run_module"}
+        allowed_phases = {"run_module"}
         if self._signal_phase not in allowed_phases:
             raise RuntimeError(f"当前阶段不允许发出任务信号: {self._signal_phase or 'unknown'}")
         if self._task_signal is not None:

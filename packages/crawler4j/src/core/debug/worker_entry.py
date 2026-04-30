@@ -118,7 +118,6 @@ async def main_async(config_path: str) -> int:
     request = ExecutionRequest(
         task=Task(id=payload["id"], job_id=payload.get("job_id", f"debug:{payload['id']}")),
         module_name=payload["module_name"],
-        hooks_module=payload.get("hooks_module") or payload["module_name"],
         workflow_name=payload.get("workflow") or "default",
         execution_params=dict(payload.get("execution_params") or {}),
         job_params=dict(payload.get("job_params") or {}),

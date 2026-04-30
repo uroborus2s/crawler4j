@@ -100,7 +100,7 @@ def test_module_ui_runtime_bridge_reads_page_schema_and_handlers_from_descriptor
             "params": {"phone": "13800138000"},
             "mode": "unset",
         }
-        assert bridge.call_local_hook("create_account_from_ui", {"id": "u1"}) == {
+        assert bridge.call_page_action_sync("create_account_from_ui", {"id": "u1"}) == {
             "payload": {"id": "u1"},
             "mode": "unset",
         }
@@ -301,7 +301,7 @@ def test_module_ui_runtime_bridge_reloads_dev_link_descriptor_between_sessions(t
             },
         )
 
-        later_payload = bridge.call_local_hook("create_account_from_ui", {"id": "u1"})
+        later_payload = bridge.call_page_action_sync("create_account_from_ui", {"id": "u1"})
 
         assert first_payload == {"version": "v1", "mode": "old"}
         assert later_payload == {"version": "v2", "mode": "new", "payload": {"id": "u1"}}

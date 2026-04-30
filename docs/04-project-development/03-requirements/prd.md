@@ -104,7 +104,7 @@
 
 - [ ] `UAT-012` `module init` 生成的新模块根 `__init__.py` 为固定薄壳，而不是内联完整调度逻辑
 - [ ] `UAT-013` 默认任务/工作流分发逻辑由 Core 扫描 `tasks/` / `workflows/` 承载，不再要求写在模块根 `__init__.py`
-- [ ] `UAT-014` 模块级自定义 hooks 或默认工作流可在独立文件中声明，而不是必须写在根 `__init__.py`
+- [ ] `UAT-014` 默认工作流、页面动作、环境候选和清理候选可在独立文件中声明，而不是必须写在根 `__init__.py`；0.4.0 不提供模块级自定义生命周期 hooks
 - [ ] `UAT-015` 模块升级说明明确要求按最新模板重新初始化，而不是继续维护旧式根入口
 
 ### `REQ-007` ATM 必须能够根据信号展示结构化确认内容并等待客户端确认
@@ -114,7 +114,7 @@
 - 用户故事：作为 ATM 使用者，我希望当模块要求人工复核时，客户端能直接弹出带结构化信息的确认面板，以便我不需要翻日志或读原始 JSON 就能做出确认。
 - 前置条件：模块已发出 `wait_for_confirmation` 信号，且 `payload` 可选包含结构化展示说明。
 - 业务规则：
-  - `wait_for_confirmation` 仍只允许 `keep_alive` 语义保留环境，等待期间不进入终态 hooks。
+  - `wait_for_confirmation` 仍只允许 `keep_alive` 语义保留环境，等待期间不进入任务终态收口。
   - `payload.confirmation` 作为正式 UI 展示协议，至少支持 `title`、`description`、`fields`、`confirm_text`、`reject_text`。
   - 若模块未提供 `payload.confirmation`，客户端应回退为展示 `message` 和原始 payload 的键值内容。
   - 用户确认成功或失败后，ATM 继续走既有 `confirm_task_success/confirm_task_failure` 链路，不新增第二套确认入口。

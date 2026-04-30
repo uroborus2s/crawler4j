@@ -25,7 +25,6 @@ def test_run_profile_serialization_roundtrip_for_select_mode():
         execution=ExecutionContext(
             module="demo_module",
             workflow="repair",
-            hooks_module="demo_module.hooks",
             params={"city": "Shanghai"},
             timeout=300,
         ),
@@ -54,6 +53,15 @@ def test_run_profile_serialization_roundtrip_for_candidate_select_mode():
     loaded = RunProfile.from_yaml(run_profile.to_yaml())
 
     assert loaded == run_profile
+
+
+def test_execution_context_rejects_removed_hooks_module():
+    with pytest.raises(ValueError, match="hooks_module"):
+        ExecutionContext(
+            module="demo_module",
+            workflow="repair",
+            hooks_module="demo_module.hooks",
+        )
 
 
 def test_run_profile_serialization_roundtrip_for_create_mode():

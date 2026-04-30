@@ -45,7 +45,6 @@ def _build_run_profile(timeout: int = 0) -> RunProfile:
         execution=ExecutionContext(
             module="example_module",
             workflow="default",
-            hooks_module="example_module",
             timeout=timeout,
             params={"seed": 1},
         ),
@@ -142,17 +141,11 @@ async def test_dispatcher_save_task_update_publishes_environment_starting_progre
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_calls_success_hooks_and_merges_prepare_env(monkeypatch):
+async def test_dispatcher_runs_module_and_creates_env(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
     module_service = SimpleNamespace(run_module=AsyncMock(return_value={"status": "ok"}))
 
-    async def hook(module_name, hook_name, context, *args):
-        if hook_name == "prepare_env":
-            return {"creation_params": {"fingerprint": {"randomize_all": True}}}
-        return None
-
-    module_service.call_hook = AsyncMock(side_effect=hook)
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
     dispatcher = _build_dispatcher(env, lease)
@@ -165,21 +158,18 @@ async def test_dispatcher_calls_success_hooks_and_merges_prepare_env(monkeypatch
     assert dispatcher.rem.create_env.await_args.kwargs["ensure_runtime"] is False
     create_config = dispatcher.rem.create_env.await_args.kwargs["config"]
     assert create_config["creation_params"]["groups"] == ["default"]
-    assert create_config["creation_params"]["fingerprint"]["randomize_all"] is True
+    assert "fingerprint" not in create_config["creation_params"]
     dispatcher.rem.start_env.assert_not_awaited()
 
-    hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
-    assert hook_names == ["prepare_env", "init_env", "before_run", "on_success", "on_cleanup"]
     assert task.status == TaskStatus.SUCCEEDED
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_calls_failure_and_cleanup_hooks_on_error(monkeypatch):
+async def test_dispatcher_marks_failure_on_module_error(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
     module_service = SimpleNamespace(
         run_module=AsyncMock(side_effect=RuntimeError("boom")),
-        call_hook=AsyncMock(return_value=None),
     )
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
@@ -190,14 +180,12 @@ async def test_dispatcher_calls_failure_and_cleanup_hooks_on_error(monkeypatch):
 
     await dispatcher._run_logic(task, job)
 
-    hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
-    assert hook_names == ["prepare_env", "init_env", "before_run", "on_failure", "on_cleanup"]
     assert task.status == TaskStatus.FAILED
     assert "boom" in task.error
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_calls_timeout_and_cleanup_hooks_on_timeout(monkeypatch):
+async def test_dispatcher_marks_failure_on_timeout(monkeypatch):
     run_profile = _build_run_profile(timeout=1)
     env, lease = _build_env()
 
@@ -207,7 +195,6 @@ async def test_dispatcher_calls_timeout_and_cleanup_hooks_on_timeout(monkeypatch
 
     module_service = SimpleNamespace(
         run_module=AsyncMock(side_effect=slow_run),
-        call_hook=AsyncMock(return_value=None),
     )
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
@@ -218,8 +205,6 @@ async def test_dispatcher_calls_timeout_and_cleanup_hooks_on_timeout(monkeypatch
 
     await dispatcher._run_logic(task, job)
 
-    hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
-    assert hook_names == ["prepare_env", "init_env", "before_run", "on_timeout", "on_cleanup"]
     assert task.status == TaskStatus.FAILED
     assert "Timeout" in task.error
 
@@ -230,7 +215,6 @@ async def test_dispatcher_cleans_up_created_env_when_acquisition_fails(monkeypat
     env, lease = _build_env()
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value={"status": "ok"}),
-        call_hook=AsyncMock(return_value=None),
     )
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
@@ -254,12 +238,6 @@ async def test_dispatcher_cleans_up_created_env_when_acquisition_fails(monkeypat
 async def test_dispatcher_confirms_waiting_task_and_runs_cleanup(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
-    cleanup_env_actions: list[dict[str, object]] = []
-
-    async def hook(module_name, hook_name, context, *args):
-        if hook_name == "on_cleanup":
-            cleanup_env_actions.append(dict(context.runtime.get("env_action") or {}))
-        return None
 
     module_service = SimpleNamespace(
         run_module=AsyncMock(
@@ -271,7 +249,6 @@ async def test_dispatcher_confirms_waiting_task_and_runs_cleanup(monkeypatch):
                 ),
             )
         ),
-        call_hook=AsyncMock(side_effect=hook),
     )
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
@@ -299,16 +276,6 @@ async def test_dispatcher_confirms_waiting_task_and_runs_cleanup(monkeypatch):
     dispatcher.rem.release.assert_awaited_once_with(lease)
     dispatcher.rem.release_keep_alive.assert_not_awaited()
     dispatcher.rem.destroy_env.assert_not_awaited()
-    assert cleanup_env_actions == [
-        {
-            "action": "recycle",
-            "env_id": env.id,
-            "success": None,
-        }
-    ]
-
-    hook_names = [call.args[1] for call in module_service.call_hook.await_args_list]
-    assert hook_names == ["prepare_env", "init_env", "before_run", "on_failure", "on_cleanup"]
 
 
 def test_dispatcher_publish_task_terminal_event(monkeypatch):
@@ -433,12 +400,6 @@ async def test_dispatcher_request_stop_for_job_cancels_persisted_pending_task_wi
 async def test_dispatcher_request_stop_for_job_cancels_waiting_confirmation_task(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
-    cleanup_env_actions: list[dict[str, object]] = []
-
-    async def hook(module_name, hook_name, context, *args):
-        if hook_name == "on_cleanup":
-            cleanup_env_actions.append(dict(context.runtime.get("env_action") or {}))
-        return None
 
     module_service = SimpleNamespace(
         run_module=AsyncMock(
@@ -450,7 +411,6 @@ async def test_dispatcher_request_stop_for_job_cancels_waiting_confirmation_task
                 ),
             )
         ),
-        call_hook=AsyncMock(side_effect=hook),
     )
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
@@ -474,25 +434,14 @@ async def test_dispatcher_request_stop_for_job_cancels_waiting_confirmation_task
     dispatcher.rem.release.assert_not_awaited()
     dispatcher.rem.release_keep_alive.assert_awaited_once_with(lease)
     dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
-    assert cleanup_env_actions[-1] == {
-        "action": "destroy",
-        "env_id": env.id,
-        "success": None,
-    }
 
 
 @pytest.mark.asyncio
 async def test_dispatcher_request_stop_for_job_interrupts_running_module(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
-    cleanup_env_actions: list[dict[str, object]] = []
     module_started = asyncio.Event()
     module_cancelled = asyncio.Event()
-
-    async def hook(module_name, hook_name, context, *args):
-        if hook_name == "on_cleanup":
-            cleanup_env_actions.append(dict(context.runtime.get("env_action") or {}))
-        return None
 
     async def blocking_run(module_name, context):
         module_started.set()
@@ -504,7 +453,6 @@ async def test_dispatcher_request_stop_for_job_interrupts_running_module(monkeyp
 
     module_service = SimpleNamespace(
         run_module=AsyncMock(side_effect=blocking_run),
-        call_hook=AsyncMock(side_effect=hook),
     )
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -525,13 +473,6 @@ async def test_dispatcher_request_stop_for_job_interrupts_running_module(monkeyp
     dispatcher.rem.release.assert_not_awaited()
     dispatcher.rem.release_keep_alive.assert_awaited_once_with(lease)
     dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
-    assert cleanup_env_actions == [
-        {
-            "action": "destroy",
-            "env_id": env.id,
-            "success": None,
-        }
-    ]
 
 
 @pytest.mark.asyncio
@@ -546,10 +487,6 @@ async def test_dispatcher_marks_dev_link_tasks_for_reload(monkeypatch):
         path=Path("/tmp/example_module"),
     )
 
-    async def hook(module_name, hook_name, context, *args):
-        seen_runtimes.append(dict(context.runtime))
-        return None
-
     async def run_module(module_name, context):
         seen_runtimes.append(dict(context.runtime))
         return {"status": "ok"}
@@ -557,7 +494,6 @@ async def test_dispatcher_marks_dev_link_tasks_for_reload(monkeypatch):
     module_service = SimpleNamespace(
         registry=SimpleNamespace(get_module=lambda module_name: module_info),
         run_module=AsyncMock(side_effect=run_module),
-        call_hook=AsyncMock(side_effect=hook),
     )
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)

@@ -547,7 +547,6 @@ class JobController:
         caps = build_runtime_capabilities(module_name, surface=RUNTIME_SURFACE_ENV_CANDIDATES)
         runtime = {
             "module_name": module_name,
-            "hooks_module": execution.hooks_module or module_name,
             "workflow": workflow_name,
             "devel_mode": False,
             "execution_params": deepcopy(execution_params),

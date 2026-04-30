@@ -54,7 +54,6 @@ class DebugSession:
     params: dict[str, Any] = field(default_factory=dict)
     object_bindings: dict[str, str] = field(default_factory=dict)
     object_params: dict[str, dict[str, Any]] = field(default_factory=dict)
-    hooks_module: str = ""
     provider: str = "playwright_local"
     acquisition_mode: AcquisitionMode = AcquisitionMode.CREATE
     fixed_env_id: int | None = None
@@ -102,7 +101,6 @@ class DebugSession:
             "params": self.params,
             "object_bindings": self.object_bindings,
             "object_params": self.object_params,
-            "hooks_module": self.hooks_module,
             "provider": self.provider,
             "acquisition_mode": self.acquisition_mode.value,
             "fixed_env_id": self.fixed_env_id,

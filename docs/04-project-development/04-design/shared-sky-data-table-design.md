@@ -56,7 +56,7 @@
 `SkyDataTable` 不负责：
 
 - 查询数据库
-- 调模块 hook
+- 调模块 `@page_action`
 - 组装业务行数据
 - 决定 CRUD 行为
 

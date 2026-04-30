@@ -480,7 +480,7 @@ class ManagedPageRenderer(QWidget):
         if payload is None:
             return
         try:
-            self._bridge.call_local_hook(
+            self._bridge.call_page_action_sync(
                 handler_name,
                 payload,
                 capability_surface=_runtime_surface_full(),
@@ -505,7 +505,7 @@ class ManagedPageRenderer(QWidget):
         if payload is None:
             return
         try:
-            self._bridge.call_local_hook(
+            self._bridge.call_page_action_sync(
                 handler_name,
                 row_key,
                 payload,
@@ -531,7 +531,7 @@ class ManagedPageRenderer(QWidget):
         if not ConfirmDialog.delete_confirm(self, item_name):
             return
         try:
-            self._bridge.call_local_hook(
+            self._bridge.call_page_action_sync(
                 handler_name,
                 row_key,
                 capability_surface=_runtime_surface_full(),

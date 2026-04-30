@@ -16,7 +16,7 @@
 | `REQ-001` | 桌面 Core 可启动且入口一致 | 满足 | `start` 脚本已对齐 `src.ui.app:main`，headless smoke 与 PyInstaller 出包通过 |
 | `REQ-002` | 模块可执行目标工作流 | 基本满足 | 登录工作流可执行，`labor_workflow` 已恢复基础运行时兼容，但真实站点 E2E 未验证 |
 | `REQ-003` | SDK / Contracts / CLI 可用 | 基本满足 | SDK/Contracts build 成功，CLI help 可运行 |
-| `REQ-006` | 模块运行能力由 Core 扫描托管 | 满足 | 0.4.0 已切到 `core-native-v2`，运行能力事实源来自 `tasks/`、`workflows/`、`hooks/`、`candidates/`、`pages/` 等装饰器扫描，旧模块升级路径统一为按最新模板重新初始化 |
+| `REQ-006` | 模块运行能力由 Core 扫描托管 | 满足 | 0.4.0 已切到 `core-native-v2`，运行能力事实源来自 `tasks/`、`workflows/`、`candidates/`、`cleanups/`、`pages/` 等装饰器扫描；旧 `hooks/` 不再是运行契约，旧模块升级路径统一为按最新模板重新初始化 |
 | `REQ-007` | 信号驱动的结构化确认面板 | 本次完成 | `TaskSignal` 已持久化到任务快照，ATM 详情页可按 `payload.confirmation` 弹出确认面板，并回调既有确认服务 |
 | `REQ-008` | 模块审计事件独立存储 | 本次完成 | 宿主已新增 `module_audit_events` 与 `ctx.db.audit(...).append/query`，快照 dataset 继续保留原语义 |
 | `REQ-009` | 环境候选 Service Job 等待队列 | 本次完成 | 当前宿主已实现 `@env_candidates` 候选纯函数实时求值、`PENDING` 等待、FIFO 补位、模块环境授权、租约后复核和等待席位自动超时收口；资源池同步方案已退出正式契约 |

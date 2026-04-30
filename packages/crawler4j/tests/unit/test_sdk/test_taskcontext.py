@@ -326,7 +326,7 @@ class TestTaskContextSignals:
         assert basic_context.runtime["task_signal"]["action"] == "wait_for_confirmation"
 
     def test_clear_signal_removes_pending_signal(self, basic_context: TaskContext):
-        basic_context.set_signal_phase("before_run")
+        basic_context.set_signal_phase("run_module")
         basic_context.emit_signal(TaskSignal.succeed(message="完成"))
 
         basic_context.clear_signal()

@@ -45,24 +45,12 @@ class TaskStopRequested(Exception):
     """任务收到停止请求。"""
 
 
-def _deep_merge_dict(base: dict | None, override: dict | None) -> dict:
-    """递归合并字典，override 优先。"""
-    result = dict(base or {})
-    for key, value in (override or {}).items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _deep_merge_dict(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
 @dataclass
 class ExecutionRequest:
     """ExecutionRunner 的通用输入。"""
 
     task: Task
     module_name: str
-    hooks_module: str = ""
     workflow_name: str = "default"
     execution_params: dict[str, Any] = field(default_factory=dict)
     job_params: dict[str, Any] = field(default_factory=dict)
@@ -95,16 +83,14 @@ class ExecutionResult:
     env_id: int | None = None
     env_created: bool = False
     env_lease_id: str | None = None
-    prepare_result: dict[str, Any] | None = None
     signal: TaskSignal | None = None
-    hooks_module: str = ""
     creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
 
 
 class ExecutionRunner:
     """共享执行内核。
 
-    负责资源获取、TaskContext 注入、hooks 调用、模块执行与资源回收。
+    负责资源获取、TaskContext 注入、模块执行与资源回收。
     """
 
     def __init__(
@@ -122,13 +108,9 @@ class ExecutionRunner:
         self._config = config or get_config_center()
         self._runtime_capabilities_factory = runtime_capabilities_factory
         self._module_poll_interval = 0.1
-        self._terminal_hook_timeout_seconds = self._get_timeout_budget("atm.terminal_hook_timeout_seconds")
-        self._cleanup_hook_timeout_seconds = self._get_timeout_budget("atm.cleanup_hook_timeout_seconds")
         self._env_action_timeout_seconds = self._get_timeout_budget("atm.env_action_timeout_seconds")
         logger.debug(
             "[ATM] ExecutionRunner timeout budgets loaded: "
-            f"terminal_hook={self._terminal_hook_timeout_seconds:.1f}s "
-            f"cleanup_hook={self._cleanup_hook_timeout_seconds:.1f}s "
             f"env_action={self._env_action_timeout_seconds:.1f}s"
         )
 
@@ -139,10 +121,9 @@ class ExecutionRunner:
             logger.warning(f"[ATM] Failed to load timeout config {key}: {exc}")
             return float(self._config.registry.get_item(key).default)
 
-    def _build_runtime_payload(self, request: ExecutionRequest, hooks_module: str) -> dict[str, Any]:
+    def _build_runtime_payload(self, request: ExecutionRequest) -> dict[str, Any]:
         return {
             "module_name": request.module_name,
-            "hooks_module": hooks_module,
             "workflow": request.workflow_name or "default",
             "devel_mode": bool(request.devel_mode),
             "execution_params": deepcopy(request.execution_params),
@@ -175,11 +156,10 @@ class ExecutionRunner:
 
         task = request.task
         module_name = request.module_name
-        hooks_module = request.hooks_module or module_name
         runtime_caps = request.runtime_capabilities or self._runtime_capabilities_factory(module_name)
         task_config = self._settings_store.build_task_config(module_name, request.workflow_name)
 
-        prepare_context = TaskContext(
+        acquisition_context = TaskContext(
             env_id=0,
             task_name=module_name,
             config=deepcopy(task_config),
@@ -187,15 +167,8 @@ class ExecutionRunner:
             tools=runtime_caps.tools,
             db=runtime_caps.db,
             state=dict(request.state),
-            runtime=self._build_runtime_payload(request, hooks_module),
+            runtime=self._build_runtime_payload(request),
         )
-
-        prepare_result_raw = await self.mms.call_hook(hooks_module, "prepare_env", prepare_context)
-        if prepare_result_raw is not None and not isinstance(prepare_result_raw, dict):
-            raise ValueError("prepare_env must return dict or None")
-
-        prepare_result = dict(prepare_result_raw or {})
-        prepare_creation_params = prepare_result.get("creation_params", {})
 
         env_lease = None
         env_id = None
@@ -208,7 +181,7 @@ class ExecutionRunner:
         try:
             self._ensure_not_stopped(is_stop_requested)
 
-            wait_timeout = int(prepare_result.get("wait_timeout", request.wait_timeout))
+            wait_timeout = int(request.wait_timeout)
 
             if request.acquisition_mode == AcquisitionMode.SELECT:
                 if request.fixed_env_id is not None:
@@ -232,7 +205,7 @@ class ExecutionRunner:
                 else:
                     candidate_env_ids = await self._resolve_candidate_env_ids(
                         module_name=request.module_name,
-                        context=prepare_context,
+                        context=acquisition_context,
                         candidates_name=request.candidates_name,
                         candidate_params=request.candidate_params,
                     )
@@ -245,8 +218,6 @@ class ExecutionRunner:
                             task=task,
                             candidates_name=request.candidates_name,
                             on_task_update=on_task_update,
-                            prepare_result=prepare_result,
-                            hooks_module=hooks_module,
                             creation_lifecycle=request.creation_lifecycle,
                         )
                     allocatable_candidate_ids = {int(candidate.env_id) for candidate in candidates}
@@ -259,8 +230,6 @@ class ExecutionRunner:
                                 task=task,
                                 candidates_name=request.candidates_name,
                                 on_task_update=on_task_update,
-                                prepare_result=prepare_result,
-                                hooks_module=hooks_module,
                                 creation_lifecycle=request.creation_lifecycle,
                             )
                         raise RuntimeError("没有可用环境可供选择")
@@ -276,8 +245,6 @@ class ExecutionRunner:
                                 task=task,
                                 candidates_name=request.candidates_name,
                                 on_task_update=on_task_update,
-                                prepare_result=prepare_result,
-                                hooks_module=hooks_module,
                                 creation_lifecycle=request.creation_lifecycle,
                             )
                         raise RuntimeError(f"选择到的环境不存在: {selected_env_id}")
@@ -291,8 +258,6 @@ class ExecutionRunner:
                                 task=task,
                                 candidates_name=request.candidates_name,
                                 on_task_update=on_task_update,
-                                prepare_result=prepare_result,
-                                hooks_module=hooks_module,
                                 creation_lifecycle=request.creation_lifecycle,
                             )
                         raise
@@ -300,7 +265,7 @@ class ExecutionRunner:
                         still_allocatable = await self._is_candidate_env_allocatable(
                             env_id=selected_env_id,
                             module_name=request.module_name,
-                            context=prepare_context,
+                            context=acquisition_context,
                             candidates_name=request.candidates_name,
                             candidate_params=request.candidate_params,
                         )
@@ -313,20 +278,15 @@ class ExecutionRunner:
                                 task=task,
                                 candidates_name=request.candidates_name,
                                 on_task_update=on_task_update,
-                                prepare_result=prepare_result,
-                                hooks_module=hooks_module,
                                 creation_lifecycle=request.creation_lifecycle,
                             )
                     env_id = int(env_lease.env_id)
                     task.lease_id = env_lease.id
                     logger.info(f"[ATM] Task {task.id} selected env {env_id}")
             elif request.acquisition_mode == AcquisitionMode.CREATE:
-                merged_creation_params = _deep_merge_dict(
-                    request.creation_params,
-                    prepare_creation_params,
-                )
+                merged_creation_params = dict(request.creation_params)
                 effective_creation_params = deepcopy(merged_creation_params)
-                prepare_context.runtime["creation_params"] = deepcopy(merged_creation_params)
+                acquisition_context.runtime["creation_params"] = deepcopy(merged_creation_params)
                 proxy_config = self._extract_proxy_config(merged_creation_params)
                 create_params = {
                     "creation_params": merged_creation_params,
@@ -383,8 +343,6 @@ class ExecutionRunner:
                 env_id=env_id,
                 env_created=env_created,
                 env_lease_id=env_lease.id if env_lease else None,
-                prepare_result=prepare_result,
-                hooks_module=hooks_module,
                 creation_lifecycle=request.creation_lifecycle,
             )
 
@@ -407,7 +365,7 @@ class ExecutionRunner:
                 tools=runtime_caps.tools,
                 db=runtime_caps.db,
                 state=dict(request.state),
-                runtime=self._build_runtime_payload(request, hooks_module),
+                runtime=self._build_runtime_payload(request),
             )
             task_context.runtime.update(
                 {
@@ -418,18 +376,6 @@ class ExecutionRunner:
             )
             if on_context_ready:
                 on_context_ready(task_context)
-
-            await self._call_hook_with_signal_phase(hooks_module, "init_env", task_context)
-            signal = self._resolve_task_signal(task_context, None)
-            if signal:
-                result = self._signal_to_task_result(signal)
-                self._apply_signal_outcome(task, signal, result)
-            else:
-                await self._call_hook_with_signal_phase(hooks_module, "before_run", task_context)
-                signal = self._resolve_task_signal(task_context, None)
-                if signal:
-                    result = self._signal_to_task_result(signal)
-                    self._apply_signal_outcome(task, signal, result)
 
             if task.status == TaskStatus.RUNNING:
                 task_context.set_signal_phase("run_module")
@@ -470,17 +416,9 @@ class ExecutionRunner:
                     env_id=env_id,
                     env_created=env_created,
                     env_lease_id=env_lease.id if env_lease else None,
-                    prepare_result=prepare_result,
                     signal=signal,
-                    hooks_module=hooks_module,
                     creation_lifecycle=request.creation_lifecycle,
                 )
-
-            if task.status == TaskStatus.SUCCEEDED:
-                await self._call_terminal_hook(hooks_module, "on_success", task_context, result)
-            elif task.status == TaskStatus.FAILED:
-                failure = self._build_failure_exception(task.error or "Task failed")
-                await self._call_terminal_hook(hooks_module, "on_failure", task_context, failure)
         except asyncio.TimeoutError:
             logger.error(f"[ATM] Task {task.id} execution timed out")
             task.error = f"Execution Timeout: {request.execution_timeout}s"
@@ -489,7 +427,6 @@ class ExecutionRunner:
             if task_context:
                 task_context.runtime["final_status"] = task.status.value
                 task_context.runtime["task_error"] = task.error
-                await self._call_terminal_hook(hooks_module, "on_timeout", task_context)
         except asyncio.CancelledError as e:
             if task_context and (task_context.should_stop() or self._is_stop_requested(is_stop_requested)):
                 logger.info(f"[ATM] Task {task.id} cancelled: {e}")
@@ -511,7 +448,6 @@ class ExecutionRunner:
             if task_context:
                 task_context.runtime["final_status"] = task.status.value
                 task_context.runtime["task_error"] = task.error
-                await self._call_terminal_hook(hooks_module, "on_failure", task_context, e)
 
         task.finished_at = int(time.time())
 
@@ -533,9 +469,6 @@ class ExecutionRunner:
                     "env_id": int(task.env_id) if task.env_id else None,
                     "success": None,
                 }
-
-        if task_context:
-            await self._call_cleanup_hook(hooks_module, task_context)
 
         if env_lease:
             resolved_env_action = resolved_env_action or self._resolve_requested_env_action(
@@ -563,9 +496,7 @@ class ExecutionRunner:
             env_id=env_id,
             env_created=env_created,
             env_lease_id=env_lease.id if env_lease else None,
-            prepare_result=prepare_result,
             signal=signal,
-            hooks_module=hooks_module,
             creation_lifecycle=request.creation_lifecycle,
         )
 
@@ -574,7 +505,6 @@ class ExecutionRunner:
         *,
         task: Task,
         task_context: TaskContext,
-        hooks_module: str,
         env_lease: EnvLease | None,
         env_created: bool,
         creation_lifecycle: CreationLifecycle,
@@ -592,7 +522,6 @@ class ExecutionRunner:
             task.status = TaskStatus.SUCCEEDED
             task.message = result.message
             task.error = ""
-            await self._call_terminal_hook(hooks_module, "on_success", task_context, result)
         else:
             result = TaskResult.fail(
                 message=confirmation_message or task.message or "人工确认失败",
@@ -601,12 +530,6 @@ class ExecutionRunner:
             task.status = TaskStatus.FAILED
             task.message = result.message
             task.error = result.error or result.message
-            await self._call_terminal_hook(
-                hooks_module,
-                "on_failure",
-                task_context,
-                self._build_failure_exception(task.error or "Task confirmation failed"),
-            )
 
         task.finished_at = int(time.time())
         self._record_runtime_outcome(task_context, task, result, None)
@@ -618,15 +541,12 @@ class ExecutionRunner:
                 "success": None,
             }
         if env_lease:
-            await self._call_cleanup_hook(hooks_module, task_context)
             env_action_info = await self._apply_env_action(
                 env_lease=env_lease,
                 env_action=self._default_env_action(env_created, creation_lifecycle),
                 env_id=int(task.env_id) if task.env_id else None,
             )
             task_context.runtime["env_action"] = env_action_info
-        else:
-            await self._call_cleanup_hook(hooks_module, task_context)
         await self._publish_task_update(task, on_task_update)
 
         return ExecutionResult(
@@ -637,7 +557,6 @@ class ExecutionRunner:
             env_created=env_created,
             env_lease_id=env_lease.id if env_lease else None,
             signal=None,
-            hooks_module=hooks_module,
             creation_lifecycle=creation_lifecycle,
         )
 
@@ -646,7 +565,6 @@ class ExecutionRunner:
         *,
         task: Task,
         task_context: TaskContext,
-        hooks_module: str,
         env_lease: EnvLease | None,
         env_created: bool,
         creation_lifecycle: CreationLifecycle,
@@ -674,8 +592,6 @@ class ExecutionRunner:
                 "success": None,
             }
 
-        await self._call_cleanup_hook(hooks_module, task_context)
-
         if env_lease:
             env_action_info = await self._apply_env_action(
                 env_lease=env_lease,
@@ -694,7 +610,6 @@ class ExecutionRunner:
             env_created=env_created,
             env_lease_id=env_lease.id if env_lease else None,
             signal=None,
-            hooks_module=hooks_module,
             creation_lifecycle=creation_lifecycle,
         )
 
@@ -854,8 +769,6 @@ class ExecutionRunner:
         task: Task,
         candidates_name: str,
         on_task_update: TaskUpdateCallback | None,
-        prepare_result: dict[str, Any],
-        hooks_module: str,
         creation_lifecycle: CreationLifecycle,
     ) -> ExecutionResult:
         await self._mark_task_waiting_for_resource(
@@ -868,8 +781,6 @@ class ExecutionRunner:
             env_id=None,
             env_created=False,
             env_lease_id=None,
-            prepare_result=prepare_result,
-            hooks_module=hooks_module,
             creation_lifecycle=creation_lifecycle,
         )
 
@@ -957,94 +868,6 @@ class ExecutionRunner:
         if not callback:
             return False
         return bool(callback())
-
-    async def _call_hook_with_signal_phase(
-        self,
-        hooks_module: str,
-        hook_name: str,
-        task_context: TaskContext,
-        *args: Any,
-    ) -> Any:
-        task_context.set_signal_phase(hook_name)
-        try:
-            return await self.mms.call_hook(hooks_module, hook_name, task_context, *args)
-        finally:
-            task_context.set_signal_phase(None)
-
-    async def _call_terminal_hook(
-        self,
-        hooks_module: str,
-        hook_name: str,
-        task_context: TaskContext,
-        *args: Any,
-    ) -> None:
-        started_at = time.monotonic()
-        task_id = self._task_log_id(task_context)
-        logger.debug(
-            f"[ATM] Terminal hook start: task={task_id} module={hooks_module} "
-            f"hook={hook_name} budget={self._terminal_hook_timeout_seconds:.1f}s"
-        )
-        try:
-            await asyncio.wait_for(
-                self.mms.call_hook(hooks_module, hook_name, task_context, *args),
-                timeout=self._terminal_hook_timeout_seconds,
-            )
-            logger.debug(
-                f"[ATM] Terminal hook finished: task={task_id} module={hooks_module} "
-                f"hook={hook_name} duration={time.monotonic() - started_at:.3f}s"
-            )
-        except asyncio.TimeoutError:
-            logger.error(
-                f"[ATM] Terminal hook timeout: task={task_id} module={hooks_module} "
-                f"hook={hook_name} budget={self._terminal_hook_timeout_seconds:.1f}s "
-                f"duration={time.monotonic() - started_at:.3f}s"
-            )
-        except Exception as e:
-            logger.error(
-                f"[ATM] Terminal hook failed: task={task_id} module={hooks_module} "
-                f"hook={hook_name} duration={time.monotonic() - started_at:.3f}s error={e}"
-            )
-
-    async def _call_cleanup_hook(self, hooks_module: str, task_context: TaskContext) -> None:
-        started_at = time.monotonic()
-        task_id = self._task_log_id(task_context)
-        logger.debug(
-            f"[ATM] Cleanup hook start: task={task_id} module={hooks_module} "
-            f"budget={self._cleanup_hook_timeout_seconds:.1f}s"
-        )
-        try:
-            await asyncio.wait_for(
-                self.mms.call_hook(hooks_module, "on_cleanup", task_context),
-                timeout=self._cleanup_hook_timeout_seconds,
-            )
-            logger.debug(
-                f"[ATM] Cleanup hook finished: task={task_id} module={hooks_module} "
-                f"duration={time.monotonic() - started_at:.3f}s"
-            )
-        except asyncio.TimeoutError:
-            logger.error(
-                f"[ATM] Cleanup hook timeout: task={task_id} module={hooks_module} "
-                f"budget={self._cleanup_hook_timeout_seconds:.1f}s "
-                f"duration={time.monotonic() - started_at:.3f}s"
-            )
-        except asyncio.CancelledError as e:
-            current_task = asyncio.current_task()
-            if current_task and current_task.cancelling() and not task_context.should_stop():
-                raise
-            log_message = (
-                f"[ATM] Cleanup hook cancelled: task={task_id} module={hooks_module} "
-                f"duration={time.monotonic() - started_at:.3f}s "
-                f"error={str(e) or e.__class__.__name__}; continuing env action"
-            )
-            if task_context.should_stop():
-                logger.warning(log_message)
-            else:
-                logger.error(log_message)
-        except Exception as e:
-            logger.error(
-                f"[ATM] Cleanup hook failed: task={task_id} module={hooks_module} "
-                f"duration={time.monotonic() - started_at:.3f}s error={e}"
-            )
 
     async def _run_module_with_stop_guard(
         self,
@@ -1178,9 +1001,6 @@ class ExecutionRunner:
             task_context.runtime["task_result"] = result.to_dict()
         if signal:
             task_context.runtime["task_signal"] = signal.to_dict()
-
-    def _build_failure_exception(self, message: str) -> Exception:
-        return RuntimeError(message)
 
     def _default_env_action(
         self,

@@ -297,22 +297,6 @@ class ModuleService:
             logger.error(f"[MMS] Failed to execute module {module_name}: {e}")
             raise e
 
-    async def call_hook(self, module_name: str, hook_name: str, context: TaskContext, *args) -> Any:
-        """调用模块中的可选 hook；未实现时返回 None。"""
-        module_info = self._get_module_info(module_name)
-        if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
-            logger.debug(f"[MMS] core-native-v2 does not use legacy hook: {module_name}.{hook_name}")
-            return None
-        raise ValueError("Legacy module hooks are removed in crawler4j 0.4.0")
-
-    def call_local_hook(self, module_name: str, hook_name: str, context: TaskContext, *args) -> Any:
-        """在同步调用方中执行本地模块 hook。"""
-        module_info = self._get_module_info(module_name)
-        if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
-            logger.debug(f"[MMS] core-native-v2 does not use legacy local hook: {module_name}.{hook_name}")
-            return None
-        raise ValueError("Legacy module hooks are removed in crawler4j 0.4.0")
-
 # Global Singleton
 _service: ModuleService | None = None
 

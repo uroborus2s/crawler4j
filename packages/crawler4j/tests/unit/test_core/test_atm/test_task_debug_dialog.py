@@ -50,7 +50,6 @@ def _make_run_profile() -> RunProfile:
         execution=ExecutionContext(
             module="demo_module",
             workflow="repair",
-            hooks_module="demo_module.hooks",
             params={"lang": "zh-CN"},
             timeout=180,
         ),

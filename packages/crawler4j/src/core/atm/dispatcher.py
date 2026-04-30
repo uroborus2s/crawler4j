@@ -32,7 +32,6 @@ from src.core.rem.manager import get_environment_manager
 @dataclass
 class WaitingTaskRuntime:
     task_context: object
-    hooks_module: str
     env_created: bool
     creation_lifecycle: CreationLifecycle
 
@@ -201,7 +200,6 @@ class TaskDispatcher:
         request = ExecutionRequest(
             task=task,
             module_name=module_name,
-            hooks_module=run_profile.execution.hooks_module or module_name,
             workflow_name=workflow_name,
             execution_params=execution_params,
             job_params=job_params,
@@ -275,7 +273,6 @@ class TaskDispatcher:
             return
         self._waiting_tasks[execution_result.task.id] = WaitingTaskRuntime(
             task_context=execution_result.task_context,
-            hooks_module=execution_result.hooks_module,
             env_created=execution_result.env_created,
             creation_lifecycle=execution_result.creation_lifecycle,
         )
@@ -300,7 +297,6 @@ class TaskDispatcher:
         await runner.cancel_waiting(
             task=task,
             task_context=waiting_runtime.task_context,  # type: ignore[arg-type]
-            hooks_module=waiting_runtime.hooks_module,
             env_lease=env_lease,
             env_created=waiting_runtime.env_created,
             creation_lifecycle=waiting_runtime.creation_lifecycle,
@@ -327,7 +323,6 @@ class TaskDispatcher:
         await runner.finalize_waiting(
             task=task,
             task_context=waiting_runtime.task_context,  # type: ignore[arg-type]
-            hooks_module=waiting_runtime.hooks_module,
             env_lease=env_lease,
             env_created=waiting_runtime.env_created,
             creation_lifecycle=waiting_runtime.creation_lifecycle,

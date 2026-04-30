@@ -84,7 +84,6 @@ class DebugService:
             params=dict(request.params) if request.params else dict(target.runtime_params),
             object_bindings=dict(target.object_bindings),
             object_params=dict(target.object_params),
-            hooks_module=target.hooks_module,
             provider=target.run_profile.resource.acquisition.provider,
             acquisition_mode=target.run_profile.resource.acquisition.mode,
             fixed_env_id=target.run_profile.resource.acquisition.env_id,

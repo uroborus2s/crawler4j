@@ -27,7 +27,7 @@
 - 当前工作区已切到 `0.3.2` 源码版本线，但尚未补打对应正式 Git tag / release 资产
 - `crawler4j-sdk 0.6.1` 与 `crawler4j-contracts 0.4.0` 为当前源码版本线，正式发布资产仍需按发布流程补齐
 - SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
-- 当前工作区已进一步收敛到“`hooks/*.py` + `TaskSignal`”单一生命周期链；`TaskFlow.on_complete/on_error` 与 `TaskScript` 私有 callbacks 已删除且不属于当前技术画像
+- 当前 0.4.0 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult` 或发出 `TaskSignal`，环境动作由宿主按 `EnvAction` 收口
 
 ## 3. 当前证据状态
 

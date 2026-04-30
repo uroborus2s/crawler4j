@@ -18,13 +18,9 @@ def temp_data_dir(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def _build_module_service(hook=None, candidate_ids: list[int] | None = None):
-    async def default_hook(module_name, hook_name, context, *args):
-        return None
-
+def _build_module_service(candidate_ids: list[int] | None = None):
     service = SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
-        call_hook=AsyncMock(side_effect=hook or default_hook),
         resolve_env_candidates=Mock(return_value=list(candidate_ids or [])),
     )
     return service
