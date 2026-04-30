@@ -4,9 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import asyncio
 import pytest
-from crawler4j_contracts import EnvAction, TaskResult, TaskSignal
 
-from src.core.atm.dispatcher import JobStopRequest, TaskDispatcher
+from src.core.atm.dispatcher import TaskDispatcher
 from src.core.atm.models import Job, Task, TaskStatus
 from src.core.atm.repository import TaskRepository
 from src.core.atm.run_profile import (
@@ -63,11 +62,31 @@ def _build_env() -> tuple[Environment, EnvLease]:
     return env, lease
 
 
+def _module_service(**kwargs) -> SimpleNamespace:
+    kwargs.setdefault("get_runtime_descriptor_v2", MagicMock(return_value=SimpleNamespace(data_tables={})))
+    return SimpleNamespace(**kwargs)
+
+
 def _build_dispatcher(env: Environment, lease: EnvLease) -> TaskDispatcher:
+    metadata_store: dict[tuple[int, str, str], object] = {}
+
+    async def set_metadata(env_id: int, namespace: str, key: str, value, value_type: str = "string"):
+        metadata_store[(int(env_id), namespace, key)] = value
+
+    async def list_metadata(env_id: int, namespace: str):
+        return {
+            key: value
+            for (stored_env_id, stored_namespace, key), value in metadata_store.items()
+            if stored_env_id == int(env_id) and stored_namespace == namespace
+        }
+
     dispatcher = TaskDispatcher()
     dispatcher.repo = SimpleNamespace(save_task=AsyncMock())
     dispatcher.rem = SimpleNamespace(
         create_env=AsyncMock(return_value=env),
+        set_metadata=AsyncMock(side_effect=set_metadata),
+        list_metadata=AsyncMock(side_effect=list_metadata),
+        metadata_store=metadata_store,
         lease_manager=SimpleNamespace(
             acquire=AsyncMock(return_value=lease),
             claim_created_env=AsyncMock(return_value=lease),
@@ -143,7 +162,7 @@ async def test_dispatcher_save_task_update_publishes_environment_starting_progre
 async def test_dispatcher_runs_module_and_creates_env(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
-    module_service = SimpleNamespace(run_module=AsyncMock(return_value={"status": "ok"}))
+    module_service = _module_service(run_module=AsyncMock(return_value={"status": "ok"}))
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -167,7 +186,7 @@ async def test_dispatcher_runs_module_and_creates_env(monkeypatch):
 async def test_dispatcher_marks_failure_on_module_error(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
-    module_service = SimpleNamespace(
+    module_service = _module_service(
         run_module=AsyncMock(side_effect=RuntimeError("boom")),
     )
 
@@ -192,7 +211,7 @@ async def test_dispatcher_marks_failure_on_timeout(monkeypatch):
         await context.wait(1.2)
         return {"status": "late"}
 
-    module_service = SimpleNamespace(
+    module_service = _module_service(
         run_module=AsyncMock(side_effect=slow_run),
     )
 
@@ -212,7 +231,7 @@ async def test_dispatcher_marks_failure_on_timeout(monkeypatch):
 async def test_dispatcher_cleans_up_created_env_when_acquisition_fails(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
-    module_service = SimpleNamespace(
+    module_service = _module_service(
         run_module=AsyncMock(return_value={"status": "ok"}),
     )
 
@@ -231,50 +250,6 @@ async def test_dispatcher_cleans_up_created_env_when_acquisition_fails(monkeypat
     dispatcher.rem.recycle_env.assert_awaited_once_with(env)
     dispatcher.rem.destroy_env.assert_not_awaited()
     module_service.run_module.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_dispatcher_confirms_waiting_task_and_runs_cleanup(monkeypatch):
-    run_profile = _build_run_profile()
-    env, lease = _build_env()
-
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(
-            return_value=TaskResult.ok(
-                message="等待用户确认",
-                signal=TaskSignal.wait_for_confirmation(
-                    message="等待用户确认",
-                    env_action=EnvAction.KEEP_ALIVE,
-                ),
-            )
-        ),
-    )
-
-    monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
-
-    dispatcher = _build_dispatcher(env, lease)
-    task = Task(id="task-21", job_id="job-21")
-    dispatcher.repo.get_task = AsyncMock(return_value=task)
-    job = Job(id="job-21", name="job", run_profile=run_profile)
-
-    await dispatcher._run_logic(task, job)
-
-    assert task.status == TaskStatus.WAITING_CONFIRMATION
-    assert task.id in dispatcher._waiting_tasks
-    dispatcher.rem.release.assert_not_awaited()
-    dispatcher.rem.release_keep_alive.assert_not_awaited()
-    dispatcher.rem.destroy_env.assert_not_awaited()
-
-    confirmed = await dispatcher.confirm_task(task.id, success=False, message="黑号")
-
-    assert confirmed is True
-    assert task.status == TaskStatus.FAILED
-    assert task.error == "黑号"
-    assert task.id not in dispatcher._waiting_tasks
-    dispatcher.rem.lease_manager.get_lease.assert_awaited_once_with(lease.id)
-    dispatcher.rem.release.assert_awaited_once_with(lease)
-    dispatcher.rem.release_keep_alive.assert_not_awaited()
-    dispatcher.rem.destroy_env.assert_not_awaited()
 
 
 def test_dispatcher_publish_task_terminal_event(monkeypatch):
@@ -304,56 +279,23 @@ def test_dispatcher_publish_task_terminal_event(monkeypatch):
     assert third_event.type == EventType.TASK_CANCELLED
 
 
-def test_dispatcher_publish_waiting_confirmation_signal_event(monkeypatch):
-    dispatcher = TaskDispatcher()
-    publish = MagicMock()
-    monkeypatch.setattr("src.core.atm.dispatcher.get_event_bus", lambda: SimpleNamespace(publish=publish))
-
-    signal = TaskSignal.wait_for_confirmation(
-        message="等待人工确认",
-        env_action=EnvAction.KEEP_ALIVE,
-        payload={
-            "confirmation": {
-                "title": "账号复核",
-                "fields": [{"label": "账号", "value": "demo-account"}],
-            }
-        },
-    ).to_dict()
-    dispatcher._publish_task_signal_event(
-        Task(
-            id="task-wait-1",
-            job_id="job-1",
-            status=TaskStatus.WAITING_CONFIRMATION,
-            message="等待人工确认",
-            signal=signal,
-        )
-    )
-
-    event = publish.call_args.args[0]
-    assert event.type == EventType.TASK_SIGNAL
-    assert event.task_run_id == "task-wait-1"
-    assert event.data["job_id"] == "job-1"
-    assert event.data["signal"]["payload"]["confirmation"]["title"] == "账号复核"
-
-
 def test_dispatcher_clear_stop_for_job():
     dispatcher = TaskDispatcher()
-    dispatcher._job_stop_requests["job-1"] = JobStopRequest(env_action=EnvAction.RECYCLE)
+    dispatcher._job_stop_requests.add("job-1")
     dispatcher.clear_stop_for_job("job-1")
     assert "job-1" not in dispatcher._job_stop_requests
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_request_stop_for_job_records_env_action_and_notifies_context():
+async def test_dispatcher_request_stop_for_job_records_stop_and_notifies_context():
     dispatcher = TaskDispatcher()
     stop_context = SimpleNamespace(request_stop=MagicMock())
     dispatcher._task_jobs["task-1"] = "job-1"
     dispatcher._task_contexts["task-1"] = stop_context
 
-    await dispatcher.request_stop_for_job("job-1", env_action=EnvAction.RECYCLE)
+    await dispatcher.request_stop_for_job("job-1")
 
     assert dispatcher._is_stop_requested("job-1") is True
-    assert dispatcher._resolve_stop_env_action("job-1") == EnvAction.RECYCLE
     stop_context.request_stop.assert_called_once_with()
 
 
@@ -396,46 +338,6 @@ async def test_dispatcher_request_stop_for_job_cancels_persisted_pending_task_wi
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_request_stop_for_job_cancels_waiting_confirmation_task(monkeypatch):
-    run_profile = _build_run_profile()
-    env, lease = _build_env()
-
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(
-            return_value=TaskResult.ok(
-                message="等待用户确认",
-                signal=TaskSignal.wait_for_confirmation(
-                    message="等待用户确认",
-                    env_action=EnvAction.KEEP_ALIVE,
-                ),
-            )
-        ),
-    )
-
-    monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
-
-    dispatcher = _build_dispatcher(env, lease)
-    task = Task(id="task-wait-stop", job_id="job-wait-stop")
-    dispatcher.repo.get_task = AsyncMock(return_value=task)
-    job = Job(id="job-wait-stop", name="job", run_profile=run_profile)
-
-    await dispatcher._run_logic(task, job)
-
-    assert task.status == TaskStatus.WAITING_CONFIRMATION
-    dispatcher._task_jobs[task.id] = job.id
-    dispatcher._task_contexts[task.id] = dispatcher._waiting_tasks[task.id].task_context
-
-    await dispatcher.request_stop_for_job(job.id, env_action=EnvAction.DESTROY)
-
-    assert task.status == TaskStatus.CANCELLED
-    assert task.error == "Job paused"
-    assert task.id not in dispatcher._waiting_tasks
-    dispatcher.rem.release.assert_not_awaited()
-    dispatcher.rem.release_keep_alive.assert_awaited_once_with(lease)
-    dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
-
-
-@pytest.mark.asyncio
 async def test_dispatcher_request_stop_for_job_interrupts_running_module(monkeypatch):
     run_profile = _build_run_profile()
     env, lease = _build_env()
@@ -450,7 +352,7 @@ async def test_dispatcher_request_stop_for_job_interrupts_running_module(monkeyp
             module_cancelled.set()
             raise
 
-    module_service = SimpleNamespace(
+    module_service = _module_service(
         run_module=AsyncMock(side_effect=blocking_run),
     )
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
@@ -463,15 +365,15 @@ async def test_dispatcher_request_stop_for_job_interrupts_running_module(monkeyp
     run_task = asyncio.create_task(dispatcher._run_logic(task, job))
     await module_started.wait()
 
-    await dispatcher.request_stop_for_job(job.id, env_action=EnvAction.DESTROY)
+    await dispatcher.request_stop_for_job(job.id)
     await asyncio.wait_for(run_task, timeout=0.5)
 
     assert task.status == TaskStatus.CANCELLED
     assert task.error == "Job paused during execution"
     assert module_cancelled.is_set()
-    dispatcher.rem.release.assert_not_awaited()
-    dispatcher.rem.release_keep_alive.assert_awaited_once_with(lease)
-    dispatcher.rem.destroy_env.assert_awaited_once_with(env.id)
+    dispatcher.rem.release.assert_awaited_once_with(lease)
+    dispatcher.rem.release_keep_alive.assert_not_awaited()
+    dispatcher.rem.destroy_env.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -490,7 +392,7 @@ async def test_dispatcher_marks_dev_link_tasks_for_reload(monkeypatch):
         seen_runtimes.append(dict(context.runtime))
         return {"status": "ok"}
 
-    module_service = SimpleNamespace(
+    module_service = _module_service(
         registry=SimpleNamespace(get_module=lambda module_name: module_info),
         run_module=AsyncMock(side_effect=run_module),
     )

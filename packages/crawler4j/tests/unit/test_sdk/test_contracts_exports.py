@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
+
+import pytest
+
 import crawler4j_contracts
 
 
@@ -13,7 +17,6 @@ def test_contracts_root_exports_stable_surface():
         "ClickCaptchaOrderedTarget",
         "DatabaseClient",
         "DatabaseExecutor",
-        "EnvAction",
         "EnvCandidate",
         "EnvCandidates",
         "CRAWLER4J_META_ATTR",
@@ -32,9 +35,9 @@ def test_contracts_root_exports_stable_surface():
         "SliderCaptchaDebugInfo",
         "SliderCaptchaMatchResult",
         "TaskContext",
+        "TaskOutcome",
+        "TaskOutcomeStatus",
         "TaskResult",
-        "TaskSignal",
-        "TaskSignalAction",
         "ToolSpec",
         "ToolsCapability",
         "component",
@@ -59,5 +62,11 @@ def test_contracts_root_exports_stable_surface():
     assert crawler4j_contracts.DatabaseClient is not None
     assert crawler4j_contracts.DatabaseExecutor is not None
     assert crawler4j_contracts.TaskContext is not None
+    assert crawler4j_contracts.TaskOutcome is not None
+    assert crawler4j_contracts.TaskOutcomeStatus is not None
     assert crawler4j_contracts.TaskResult is not None
-    assert crawler4j_contracts.EnvAction is not None
+    assert not hasattr(crawler4j_contracts, "TaskSignal")
+    assert not hasattr(crawler4j_contracts, "TaskSignalAction")
+    assert not hasattr(crawler4j_contracts, "EnvAction")
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("crawler4j_contracts.signal")

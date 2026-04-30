@@ -22,7 +22,6 @@ class EventType(StrEnum):
     TASK_STARTED = "task.started"
     TASK_PROGRESS = "task.progress"
     TASK_LOG = "task.log"
-    TASK_SIGNAL = "task.signal"
     TASK_FINISHED = "task.finished"
     TASK_FAILED = "task.failed"
     TASK_CANCELLED = "task.cancelled"

@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from crawler4j_contracts import EnvAction, TaskContext, TaskResult, TaskSignal, ToolSpec, ToolsCapability
+from crawler4j_contracts import TaskContext, TaskResult, ToolSpec, ToolsCapability
 import crawler4j_contracts.context as contracts_context
 from crawler4j_sdk.context import DefaultHttpClient, HttpClient
 
@@ -305,34 +305,14 @@ class TestTaskContextStopControl:
         assert basic_context.should_stop() is True
 
 
-class TestTaskContextSignals:
-    """测试任务信号。"""
+class TestTaskContextHostBoundaries:
+    """测试模块侧不再暴露宿主流程控制入口。"""
 
-    def test_emit_signal_requires_allowed_phase(self, basic_context: TaskContext):
-        with pytest.raises(RuntimeError, match="当前阶段不允许发出任务信号"):
-            basic_context.emit_signal(TaskSignal.fail(message="失败"))
-
-    def test_emit_signal_records_runtime_payload(self, basic_context: TaskContext):
-        basic_context.set_signal_phase("run_module")
-
-        signal = TaskSignal.wait_for_confirmation(
-            message="等待人工确认",
-            payload={"ticket_id": "T-1"},
-            env_action=EnvAction.KEEP_ALIVE,
-        )
-        basic_context.emit_signal(signal)
-
-        assert basic_context.get_signal() == signal
-        assert basic_context.runtime["task_signal"]["action"] == "wait_for_confirmation"
-
-    def test_clear_signal_removes_pending_signal(self, basic_context: TaskContext):
-        basic_context.set_signal_phase("run_module")
-        basic_context.emit_signal(TaskSignal.succeed(message="完成"))
-
-        basic_context.clear_signal()
-
-        assert basic_context.get_signal() is None
-        assert "task_signal" not in basic_context.runtime
+    def test_signal_methods_are_not_part_of_task_context(self, basic_context: TaskContext):
+        assert not hasattr(basic_context, "emit_signal")
+        assert not hasattr(basic_context, "get_signal")
+        assert not hasattr(basic_context, "clear_signal")
+        assert not hasattr(basic_context, "set_signal_phase")
 
 
 # === 子任务调用测试 ===

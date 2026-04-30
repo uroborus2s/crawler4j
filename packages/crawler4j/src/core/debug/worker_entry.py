@@ -9,7 +9,6 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from crawler4j_contracts import EnvAction
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.debug.launcher import configure_debugpy_for_frozen_bundle
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
@@ -138,7 +137,6 @@ async def main_async(config_path: str) -> int:
         ),
         wait_timeout=int(payload.get("wait_timeout", 60)),
         execution_timeout=int(payload.get("timeout", 0)),
-        default_env_action=EnvAction.KEEP_ALIVE if payload.get("keep_environment") else None,
     )
 
     runner = ExecutionRunner()

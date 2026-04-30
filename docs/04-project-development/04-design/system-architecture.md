@@ -7,7 +7,7 @@
 **上游输入：** `technical-selection.md` | 现有 `packages/crawler4j/`, `packages/crawler4j-sdk/`, `packages/crawler4j-contracts/`  
 **下游输出：** `module-boundaries.md` | `api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **关联 ID：** `MOD-001`, `MOD-002`, `MOD-003`, `MOD-004`, `MOD-005`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-009`, `TASK-023`, `TASK-024`  
-**最后更新：** 2026-04-30
+**最后更新：** 2026-05-01
 
 ## 1. 总体结构
 
@@ -37,9 +37,9 @@ Maintainer
 
 1. `src.ui.app:main` 初始化数据库、日志、`qasync` 兼容层与核心服务；在 Windows 打包态且非内嵌 debug 子进程时，入口会先执行 Velopack bootstrap，再进入单次 `run_until_complete(_run_application(...))` 驱动的 UI 生命周期；主窗口创建后宿主会保持 `quitOnLastWindowClosed=False`，由 `lastWindowClosed` 触发异步收尾后再结束事件循环，以避免 `qasync` 在清理尚未完成时提前停环；其源码位于 `packages/crawler4j/src/ui/app.py`
 2. REM 管理运行环境生命周期与浏览器资源，负责 create/open/connect/stop/destroy，不负责任务工作流编排
-3. ATM 负责任务调度、派发、模块主体执行、`TaskSignal` 处理与环境动作收口
+3. ATM 负责任务调度、派发、模块主体执行、宿主停止处理与终态环境回收
 4. MMS 负责发现、解析、校验和执行模块
-5. 模块通过 `crawler4j_contracts` 暴露任务、工作流，并通过 `TaskSignal` 向 ATM 请求流程动作
+5. 模块通过 `crawler4j_contracts` 暴露工作流、对象、页面动作、数据和环境候选声明；模块不拥有流程控制或环境处置权
 6. Contracts 负责 Core 与模块共享数据结构；模块侧通过 `TaskContext.tools` 访问 Core 扩展能力，通过 `TaskContext.runtime` 读取运行态信息
 
 ## 3. 依赖方向与边界
@@ -58,8 +58,8 @@ Maintainer
 - Windows 正式发布层已收口为“`PyInstaller onedir` 生成宿主目录，Velopack 负责 installer / package feed / 宿主自更新”；macOS 内部发布继续走 “`PyInstaller.app + Sparkle`”
 - `packages/crawler4j-sdk` 与 `packages/crawler4j-contracts` 已经具备独立包形态
 - `TaskContext` 的数据库能力已收敛到唯一入口 `ctx.db`；非数据库类宿主能力仍通过 `ctx.tools.call("<namespace>.<action>", **kwargs)` 调用
-- 0.4.0 当前运行时不提供模块生命周期 hooks；模块流程控制统一由 workflow 主体返回或发出 `TaskSignal`，环境关闭/保留/删除由宿主按 `EnvAction` 收口
-- `TaskSignal` 已成为模块到 ATM 的正式流程控制通道；等待人工确认、失败后销毁环境等行为不再通过散落回调或 UI 清理策略表达
+- 0.4.0 当前运行时不提供模块生命周期 hooks；模块终态只通过 workflow 主体返回 `TaskResult` 表达，任务结束、失败、超时或被用户停止后的环境统一由宿主回收
+- Core 为每个 task/env 创建独立对象图，并在 workflow 成功、失败、超时、异常或被用户停止后按 workflow -> component 依赖反向顺序调用 `cleanup(ctx, outcome)`；对象清理失败只记日志，不阻断终态和环境回收
 - 外部模块运行时已收敛到 MMS 宿主扫描生成的 runtime descriptor，不再保留 `ModuleAssembler` 或 `src.automation.*` 旧兼容包
 - 宿主源码已不再承载业务辅助逻辑或业务模型；酒店匹配、短信平台与本地验证码回退逻辑以模块自带实现为准
 - 当前事实以当前代码和验证结果为准，不再保留并行的旧设计正文
@@ -91,13 +91,14 @@ Maintainer
 - 配置中心 UI 按 schema 自动渲染 `系统 / 网络 / 外部浏览器 / 任务运行 / 资源`，不再保留旧 `SettingsPage`、`PreferencesService` 或 `settings` 表。
 - 旧版 `settings` 表只在启动初始化时做一次迁移，迁入 `config_entries` 后立即删除；模块业务配置仍保留在 `module_config_entries` 和 MMS `settings_store`，不接入配置中心。
 - `system.auto_update` 仍作为兼容键存储，但 UI 已从配置中心迁出，改由左侧一级 `关于` 页承载，并同步驱动 Sparkle / Velopack 自动检查行为。
-- ATM 收尾保护预算由配置中心管理；当前只保留环境动作超时，模块主体业务超时由运行模板 `execution.timeout` 控制。
+- ATM 收尾保护预算由配置中心管理；当前只保留环境回收超时，模块主体业务超时由运行模板 `execution.timeout` 控制。
 
 ### ATM 环境候选等待队列
 
 - 环境候选的 Service Job 已不再把“当前轮没拿到环境”视为失败，而是把它建模成正式的等待席位。
 - ATM 现在按“服务席位”而不是“失败重试实例”维持目标并发；业务口径收口为“运行中 + 等待中 = 目标并发”。
 - REM 继续拥有环境生命周期；模块只通过 `candidates/*.py` 中的 `@env_candidates` 同步纯函数声明候选集合。
+- 未被模块业务表认领的孤岛环境、owner 模块缺失环境和模块内业务条件触发的废弃环境，都由宿主环境管理页的 `清理环境` 入口统一治理；模块只通过 `@env_cleanup_candidates` 声明已绑定且业务上可丢弃的候选。
 - 宿主每次调度实时求值候选函数，再从返回顺序中筛选 `READY + BROWSER + 无租约` 环境，不维护资源池资格卡片或同步快照。
 - 账号注册时间、会员等级、黑号等业务过滤由模块候选函数读取模块数据表实现；状态变化只需更新模块数据，下一轮候选求值自然生效。
 - 叫号与补位由宿主 FIFO 处理；控制器启动时会先对活跃 Service Job 做 bootstrap 调和，作业激活/更新时也会定向调和；后续再由任务终态事件、环境状态变化和运行在主 async loop 上的轻量异步兜底巡检补位等待席位。
@@ -110,6 +111,7 @@ Maintainer
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-05-01 | 收口 workflow/object 生命周期清理与宿主环境处置边界：模块不再导入 `TaskSignal` / `EnvAction`，对象图由 Core 统一收尾，任务终态环境统一回收，环境删除只走环境管理页 `清理环境` 链路 | Codex |
 | 2026-04-30 | 清理 0.4.0 旧生命周期 hook 运行链，ATM 不再调用 `prepare_env/init_env/before_run/on_*` | Codex |
 | 2026-04-30 | 将 ATM 等待队列架构从固定资源池同步方案改为 `@env_candidates` 纯函数候选方案 | Codex |
 | 2026-04-22 | 补记 Windows 桌面宿主发布层已新增 `PyInstaller onedir + Velopack` 双阶段链路，且 `src.ui.app:main` 在 Windows 打包态会先执行 Velopack bootstrap | Codex |

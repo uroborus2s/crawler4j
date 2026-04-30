@@ -4,8 +4,7 @@
 
 ## 包含内容
 
-- 提供 `TaskContext` / `TaskResult` 等契约类型
-- 提供 `TaskSignal` / `TaskSignalAction` / `EnvAction` 等流程控制信号
+- 提供 `TaskContext` / `TaskResult` / `TaskOutcome` 等模块运行和生命周期契约
 - 提供 `ToolsCapability` / `ToolSpec` / `HttpClient` 等宿主扩展能力契约
 - 提供 `DatabaseClient`，模块数据唯一正式入口为 `TaskContext.db`
 - 提供 `core-native-v2` 装饰器：`@interface`、`@component`、`@workflow`、`@page`、`@page_action`、`@data_table`、`@data_query`、`@env_candidates`、`@env_cleanup_candidates`
@@ -14,10 +13,11 @@
 - `object_param(...)` 支持 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`，并可通过 `schema` / `item_schema` 描述 `object` 与 `array` 的结构；`Literal[...]`、`list[T]`、`dict[str, T]`、`Optional[T]`、`datetime` 类型和 `pathlib.Path` 可被运行时注解推断
 - `TaskSpec` / `WorkflowSpec` / `EnvSelectorSpec` / `PageSpec` 已从 contracts 包移除；0.4.x 模块只能使用 v2 装饰器声明运行能力和页面
 - 不内置调度器、执行器、环境管理器、HTTP 客户端或其他第三方宿主适配器
-- `TaskContext` 仍保留少量与契约紧耦合的辅助方法（如等待、截图、停止/信号状态记录）
+- `TaskSignal` / `TaskSignalAction` / `EnvAction` 已从 contracts 移除；模块代码不得导入或发送这些流程/环境控制对象
+- `TaskContext` 仍保留少量与契约紧耦合的辅助方法（如等待、截图、停止状态记录）
 - `TaskContext.http` 为可选注入能力；contracts 包本身不再内置 aiohttp 风格默认实现
 - 供 `crawler4j`、`crawler4j-sdk` 与标准模块共同依赖
 
 模块运行时代码只应依赖本包。`crawler4j-sdk` 只作为开发依赖提供 CLI、脚手架、校验和打包辅助，不提供运行时 owner、`TaskScript` / `TaskFlow`、旧环境选择器或资源池 helper。
 
-非数据库类宿主能力继续通过 `TaskContext.tools` 调用。环境选择统一声明为 `candidates/*.py` 中的 `@env_candidates` 同步纯函数，账号状态、黑号、注册时间和会员等级等过滤由候选函数实时读取模块数据表完成，不使用资源池同步快照。批量环境清理候选统一声明为 `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数，复用 `EnvCandidates` 查询 DSL，但只表达待清理 env id，实际删除由宿主预览确认和安全校验后执行。
+非数据库类宿主能力继续通过 `TaskContext.tools` 调用。环境选择统一声明为 `candidates/*.py` 中的 `@env_candidates` 同步纯函数，账号状态、黑号、注册时间和会员等级等过滤由候选函数实时读取模块数据表完成，不使用资源池同步快照。需要被宿主识别为“已认领环境”的业务表必须通过 `@data_table(..., env_binding_field="env_id")` 声明绑定字段。批量环境清理候选统一声明为 `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数，复用 `EnvCandidates` 查询 DSL，但只表达已绑定且业务上可丢弃的 env id，实际删除由宿主环境管理页预览确认和安全校验后执行；模块 workflow 不能通过运行结果指定环境处置。workflow/component 如需收尾，只实现 `cleanup(ctx, outcome)`，其中 `outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。

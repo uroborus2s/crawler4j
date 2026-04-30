@@ -10,36 +10,20 @@
 import asyncio
 import time
 import traceback
-from dataclasses import dataclass
 
-from crawler4j_contracts import EnvAction
 from src.core.atm.job_runtime import resolve_job_run_profile
 from src.core.atm.execution_runner import (
     ExecutionRequest,
     ExecutionRunner,
-    ExecutionResult,
     TaskStopRequested,
 )
 from src.core.atm.models import Job, JobType, Task, TaskStatus
-from src.core.atm.run_profile import CreationLifecycle
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.context import current_task_id
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleSource
 from src.core.rem.manager import get_environment_manager
-
-@dataclass
-class WaitingTaskRuntime:
-    task_context: object
-    env_created: bool
-    creation_lifecycle: CreationLifecycle
-
-
-@dataclass
-class JobStopRequest:
-    env_action: EnvAction | None = None
-
 
 # MMS Service lazy load to avoid circular import
 # from src.core.mms.service import get_module_service
@@ -57,8 +41,7 @@ class TaskDispatcher:
         self._task_loops: dict[str, asyncio.Task] = {}
         self._task_jobs: dict[str, str] = {}
         self._task_contexts: dict[str, object] = {}
-        self._waiting_tasks: dict[str, WaitingTaskRuntime] = {}
-        self._job_stop_requests: dict[str, JobStopRequest] = {}
+        self._job_stop_requests: set[str] = set()
 
     @property
     def mms(self):
@@ -88,7 +71,7 @@ class TaskDispatcher:
         loop_task.add_done_callback(self._active_tasks.discard)
         self._task_loops[task.id] = loop_task
         self._task_jobs[task.id] = job.id
-        loop_task.add_done_callback(lambda _: self._cleanup_runtime_refs(task.id, preserve_waiting=task.status == TaskStatus.WAITING_CONFIRMATION))
+        loop_task.add_done_callback(lambda _: self._cleanup_runtime_refs(task.id))
         
         return task.id
 
@@ -104,7 +87,7 @@ class TaskDispatcher:
         loop_task.add_done_callback(self._active_tasks.discard)
         self._task_loops[task.id] = loop_task
         self._task_jobs[task.id] = job.id
-        loop_task.add_done_callback(lambda _: self._cleanup_runtime_refs(task.id, preserve_waiting=task.status == TaskStatus.WAITING_CONFIRMATION))
+        loop_task.add_done_callback(lambda _: self._cleanup_runtime_refs(task.id))
         return True
 
     def has_live_task_loop(self, task_id: str) -> bool:
@@ -121,22 +104,14 @@ class TaskDispatcher:
         await asyncio.gather(*self._active_tasks, return_exceptions=True)
         logger.info("[ATM] All actively dispatched tasks completed.")
 
-    async def request_stop_for_job(self, job_id: str, env_action: EnvAction | None = None):
+    async def request_stop_for_job(self, job_id: str):
         """向某个 Job 下的所有活动 Task 请求停止。"""
-        self._job_stop_requests[job_id] = JobStopRequest(env_action=env_action)
+        self._job_stop_requests.add(job_id)
         live_task_ids: list[str] = []
         for task_id, running_job_id in list(self._task_jobs.items()):
             if running_job_id != job_id:
                 continue
             live_task_ids.append(task_id)
-            waiting_runtime = self._waiting_tasks.get(task_id)
-            if waiting_runtime:
-                await self._cancel_waiting_task(
-                    task_id=task_id,
-                    waiting_runtime=waiting_runtime,
-                    env_action=env_action,
-                )
-                continue
             task_context = self._task_contexts.get(task_id)
             if task_context and hasattr(task_context, "request_stop"):
                 task_context.request_stop()
@@ -154,7 +129,7 @@ class TaskDispatcher:
 
     def clear_stop_for_job(self, job_id: str):
         """清除 Job 的停止请求标记（用于恢复运行）。"""
-        self._job_stop_requests.pop(job_id, None)
+        self._job_stop_requests.discard(job_id)
 
     async def _run_safe(self, task: Task, job: Job):
         """异常安全的执行包装。"""
@@ -226,22 +201,16 @@ class TaskDispatcher:
         def _remember_context(context):
             self._task_contexts[task.id] = context
 
-        execution_result = await runner.run(
+        await runner.run(
             request,
             on_task_update=self._save_task_update,
             on_context_ready=_remember_context,
             is_stop_requested=lambda: self._is_stop_requested(job.id),
-            resolve_stop_env_action=lambda: self._resolve_stop_env_action(job.id),
         )
-        self._remember_waiting_runtime(execution_result)
         logger.info(f"[ATM] Task {task.id} finished: {task.status}")
 
     def _is_stop_requested(self, job_id: str) -> bool:
         return job_id in self._job_stop_requests
-
-    def _resolve_stop_env_action(self, job_id: str) -> EnvAction | None:
-        request = self._job_stop_requests.get(job_id)
-        return request.env_action if request else None
 
     def _is_dev_link_module(self, module_name: str) -> bool:
         registry = getattr(self.mms, "registry", None)
@@ -252,81 +221,12 @@ class TaskDispatcher:
         module = registry.get_module(module_name) or registry.get_module(module_root)
         return bool(module and getattr(module, "source", None) == ModuleSource.DEV_LINK)
 
-    def _cleanup_runtime_refs(self, task_id: str, preserve_waiting: bool = False):
+    def _cleanup_runtime_refs(self, task_id: str):
         self._task_loops.pop(task_id, None)
-        if preserve_waiting:
-            return
         job_id = self._task_jobs.pop(task_id, None)
         self._task_contexts.pop(task_id, None)
-        self._waiting_tasks.pop(task_id, None)
         if job_id and all(current_job_id != job_id for current_job_id in self._task_jobs.values()):
-            self._job_stop_requests.pop(job_id, None)
-
-    def _remember_waiting_runtime(self, execution_result: ExecutionResult) -> None:
-        if execution_result.task.status != TaskStatus.WAITING_CONFIRMATION or not execution_result.task_context:
-            return
-        self._waiting_tasks[execution_result.task.id] = WaitingTaskRuntime(
-            task_context=execution_result.task_context,
-            env_created=execution_result.env_created,
-            creation_lifecycle=execution_result.creation_lifecycle,
-        )
-        self._publish_task_signal_event(execution_result.task)
-
-    async def _cancel_waiting_task(
-        self,
-        *,
-        task_id: str,
-        waiting_runtime: WaitingTaskRuntime,
-        env_action: EnvAction | None,
-    ) -> None:
-        task = await self.repo.get_task(task_id)
-        if not task or task.status != TaskStatus.WAITING_CONFIRMATION:
-            return
-
-        env_lease = None
-        if task.lease_id:
-            env_lease = await self.rem.lease_manager.get_lease(task.lease_id)
-
-        runner = ExecutionRunner(rem=self.rem, mms=self.mms)
-        await runner.cancel_waiting(
-            task=task,
-            task_context=waiting_runtime.task_context,  # type: ignore[arg-type]
-            env_lease=env_lease,
-            env_created=waiting_runtime.env_created,
-            creation_lifecycle=waiting_runtime.creation_lifecycle,
-            env_action=env_action,
-            on_task_update=self._save_task_update,
-        )
-        self._cleanup_runtime_refs(task_id)
-        self._publish_task_event(task)
-
-    async def confirm_task(self, task_id: str, *, success: bool, message: str = "") -> bool:
-        task = await self.repo.get_task(task_id)
-        if not task or task.status != TaskStatus.WAITING_CONFIRMATION:
-            return False
-
-        waiting_runtime = self._waiting_tasks.get(task_id)
-        if not waiting_runtime:
-            raise ValueError(f"Task {task_id} is waiting for confirmation but runtime context is unavailable")
-
-        env_lease = None
-        if task.lease_id:
-            env_lease = await self.rem.lease_manager.get_lease(task.lease_id)
-
-        runner = ExecutionRunner(rem=self.rem, mms=self.mms)
-        await runner.finalize_waiting(
-            task=task,
-            task_context=waiting_runtime.task_context,  # type: ignore[arg-type]
-            env_lease=env_lease,
-            env_created=waiting_runtime.env_created,
-            creation_lifecycle=waiting_runtime.creation_lifecycle,
-            confirmed=success,
-            confirmation_message=message,
-            on_task_update=self._save_task_update,
-        )
-        self._cleanup_runtime_refs(task_id)
-        self._publish_task_event(task)
-        return True
+            self._job_stop_requests.discard(job_id)
 
     def _publish_task_event(self, task: Task):
         if task.status == TaskStatus.SUCCEEDED:
@@ -379,26 +279,6 @@ class TaskDispatcher:
                 type=event_type,
                 task_run_id=task.id,
                 data=data,
-            )
-        )
-
-    def _publish_task_signal_event(self, task: Task) -> None:
-        if not task.signal:
-            return
-        get_event_bus().publish(
-            Event(
-                type=EventType.TASK_SIGNAL,
-                task_run_id=task.id,
-                data={
-                    "task_id": task.id,
-                    "job_id": task.job_id,
-                    "status": task.status.value,
-                    "env_id": task.env_id,
-                    "lease_id": task.lease_id,
-                    "message": task.message,
-                    "error": task.error,
-                    "signal": task.signal,
-                },
             )
         )
 

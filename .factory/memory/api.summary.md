@@ -2,7 +2,7 @@
 
 - `API-001`: Root desktop app entry contract remains `src.ui.app:main`.
 - `API-002`: 0.4.0 模块正式运行时契约已切到 `core-native-v2`。Core 0.4.0 只接受 `module.yaml(runtime_api=core-native-v2)` + v2 装饰器扫描 + `.crawler4j/manifest.lock.json`；`TaskSpec` / `WorkflowSpec` / `EnvSelectorSpec` 和 0.3.x 固定导出模式不在当前分支兼容。
-- `API-003`: `crawler4j-sdk` 0.4.x 只提供 CLI、脚手架、装饰器扫描、manifest lock、校验和开发辅助，不再导出运行时 owner 能力；`crawler4j-contracts` 0.4.x 负责 `TaskContext`、`TaskResult`、v2 装饰器、`ctx.db` fluent API 与 Hosted UI 归一化 helper。
+- `API-003`: `crawler4j-sdk` 0.4.x 只提供 CLI、脚手架、装饰器扫描、manifest lock、校验和开发辅助，不再导出运行时 owner 能力；`crawler4j-contracts` 0.4.x 负责 `TaskContext`、`TaskResult`、`TaskOutcome`、v2 装饰器、`ctx.db` fluent API 与 Hosted UI 归一化 helper。
 - `API-004`: Release metadata contract is aligned across app `pyproject.toml`, runtime version service, child package versions, and release docs.
 - `API-005`: 模块配置、运行态和数据边界已稳定：`module.yaml` 承载静态清单与 `config_defaults` 模板，当前配置落到 `config.db.module_config_entries`，`ctx.runtime` 承载宿主执行态元数据，`ctx.state` 仅用于单次运行内共享内存。
 - `API-006`: 模块数据开发者入口已统一为 `ctx.db` fluent API；0.4.0 数据表和命名查询由 `@data_table` / `@data_query` 声明并进入 manifest lock，再通过 `ctx.db.from_(...)`、`ctx.db.into(...).replace(...)`、`ctx.db.named(...)` 访问；审计历史通过独立 `ctx.db.audit(...).append/query` 访问 `data.db.module_audit_events`。旧 `ctx.tools.call("db.*")` 工具面不再作为模块接口。
@@ -15,4 +15,4 @@
 - `API-013`: docs-stratego 下的使用者指南和开发者指南版本契约已形成方案：`02-user-guide/v*/` 与 `03-developer-guide/v*/` 物理隔离不同版本；站点主文档指向当前已发布版本，旧版本保留为历史入口，未发布版本只作为开发版预览。
 - `API-014`: 0.4.0 component 对象参数类型已扩展到 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`。`ParameterSpec` 新增 `schema` / `item_schema`；Contracts 运行时注解和 SDK 静态 scanner 可从 `Literal[...]`、`list[T]`、`dict[str, T]`、`Optional[T]` / `T | None`、`datetime.date/datetime/time`、`pathlib.Path` 推断类型；Core `ObjectContainerV2` 会校验并归一日期/时间、路径、数组和对象参数。
 - `API-015`: 0.4.0 已彻底移除 `selector_name/env_selector/resource_pool` 调度接口和 `module.yaml.ui_extension` 页面注册接口。运行环境选择只允许显式 `env_id` 或模块声明的 `@env_candidates` 候选函数；Hosted UI 页面与页面操作必须来自 `@page` / `@page_action` 装饰器，页面操作以 kwargs 绑定参数并运行在 `hosted_ui_action` 能力面。
-- `API-016`: 0.4.0 批量环境清理契约新增为 `cleanups/*.py` + `@env_cleanup_candidates`。模块复用 `EnvCandidates` DSL 或直接返回 env id 列表，只声明待清理候选；宿主在只读、无 tools 运行面求值，客户端预览确认后由 REM 二次校验并调用 `destroy_env()` 删除。
+- `API-016`: 0.4.0 环境生命周期与批量清理契约已收口：任务创建环境后立即写入 `host.env_claim(pending)`，终态按 `@data_table(..., env_binding_field="env_id")` 扫描模块业务表并标记 `claimed/abandoned`；任务结束、失败、超时或用户中止后的环境统一回收。`cleanups/*.py` + `@env_cleanup_candidates` 只声明同模块、已认领、已绑定且业务上可丢弃的 env id；宿主环境管理页统一扫描孤岛、未认领、owner 缺失和模块候选，预览确认后由 REM 二次校验并调用 `destroy_env()` 删除。

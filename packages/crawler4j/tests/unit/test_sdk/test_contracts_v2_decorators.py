@@ -111,13 +111,17 @@ def test_v2_decorators_attach_metadata_without_instantiating_business_objects():
 
 
 def test_data_table_and_query_metadata_express_schema_indexes_and_output_schema():
-    table_schema = [{"name": "account_id", "type": "string", "required": True}]
+    table_schema = [
+        {"name": "env_id", "type": "integer", "required": True},
+        {"name": "account_id", "type": "string", "required": True},
+    ]
 
     @data_table(
         name="accounts",
         label="Accounts",
         storage_mode="managed_dataset",
         cleanup_policy="keep",
+        env_binding_field="env_id",
         schema=table_schema,
         indexes=[
             {"name": "by_account", "fields": ["account_id"], "unique": True},
@@ -142,6 +146,7 @@ def test_data_table_and_query_metadata_express_schema_indexes_and_output_schema(
     )
     assert getattr(AccountsTable, CRAWLER4J_META_ATTR).storage_mode == "managed_dataset"
     assert getattr(AccountsTable, CRAWLER4J_META_ATTR).cleanup_policy == "keep"
+    assert getattr(AccountsTable, CRAWLER4J_META_ATTR).env_binding_field == "env_id"
     assert getattr(ready_accounts, CRAWLER4J_META_ATTR).source == "accounts"
 
 
@@ -372,3 +377,7 @@ def test_v2_metadata_validation_rejects_unsupported_shapes():
         workflow(name="quiz_workflow", parameters=[{"name": "legacy", "type": "string"}])
     with pytest.raises(ValueError, match="schema"):
         data_table(name="accounts", schema=["account_id"])
+    with pytest.raises(ValueError, match="env_binding_field must exist"):
+        data_table(name="accounts", env_binding_field="env_id", schema=[{"name": "account_id", "type": "string"}])
+    with pytest.raises(ValueError, match="env_binding_field must be integer"):
+        data_table(name="accounts", env_binding_field="env_id", schema=[{"name": "env_id", "type": "string"}])

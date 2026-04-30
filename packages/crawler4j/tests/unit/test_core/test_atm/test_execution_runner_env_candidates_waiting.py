@@ -6,6 +6,12 @@ import pytest
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode
+from src.core.rem.env_claims import (
+    CLAIM_CLAIMED,
+    ENV_CLAIM_NAMESPACE,
+    ENV_CLAIM_OWNER_MODULE,
+    ENV_CLAIM_STATE,
+)
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus, EnvUnavailableError
 
 
@@ -48,6 +54,7 @@ def _build_module_service(candidate_ids):
     return SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
         resolve_env_candidates=Mock(side_effect=candidate_ids if isinstance(candidate_ids, list) else None),
+        get_runtime_descriptor_v2=Mock(return_value=SimpleNamespace(data_tables={})),
     )
 
 
@@ -58,8 +65,23 @@ def _build_runner(
     module_service,
     env_lookup: Environment | None = None,
 ):
+    metadata_store: dict[tuple[int, str, str], object] = {}
+
+    async def set_metadata(env_id: int, namespace: str, key: str, value, value_type: str = "string"):
+        metadata_store[(int(env_id), namespace, key)] = value
+
+    async def list_metadata(env_id: int, namespace: str):
+        return {
+            key: value
+            for (stored_env_id, stored_namespace, key), value in metadata_store.items()
+            if stored_env_id == int(env_id) and stored_namespace == namespace
+        }
+
     rem = SimpleNamespace(
         list_envs=AsyncMock(return_value=[env] if env else []),
+        set_metadata=AsyncMock(side_effect=set_metadata),
+        list_metadata=AsyncMock(side_effect=list_metadata),
+        metadata_store=metadata_store,
         lease_manager=SimpleNamespace(
             acquire=AsyncMock(return_value=lease),
         ),
@@ -78,6 +100,11 @@ def _candidate_service(*results: list[int]):
     if not results:
         service.resolve_env_candidates = Mock(return_value=[])
     return service
+
+
+async def _seed_claim(rem, env_id: int, owner: str, state: str = CLAIM_CLAIMED) -> None:
+    await rem.set_metadata(env_id, ENV_CLAIM_NAMESPACE, ENV_CLAIM_OWNER_MODULE, owner, "string")
+    await rem.set_metadata(env_id, ENV_CLAIM_NAMESPACE, ENV_CLAIM_STATE, state, "string")
 
 
 @pytest.mark.asyncio
@@ -116,12 +143,16 @@ async def test_execution_runner_records_waiting_since_when_env_candidates_enter_
 
 
 @pytest.mark.asyncio
-async def test_execution_runner_requeues_when_selected_candidate_disappears():
+async def test_execution_runner_requeues_when_selected_candidate_disappears(monkeypatch):
+    import src.core.atm.execution_runner as execution_runner
+
     request = _build_request()
     env, lease = _build_env()
 
     module_service = _candidate_service([21])
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service, env_lookup=None)
+    await _seed_claim(rem, 21, "demo.module")
+    monkeypatch.setattr(execution_runner, "is_env_bound_by_module", lambda *_args, **_kwargs: True)
     rem.get_env = AsyncMock(return_value=None)
 
     await runner.run(request)
@@ -141,8 +172,7 @@ async def test_execution_runner_ignores_candidate_env_bound_to_another_module():
 
     module_service = _candidate_service([21])
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
-    rem.get_metadata = AsyncMock(return_value="other.module")
-    rem.set_metadata = AsyncMock(return_value=True)
+    await _seed_claim(rem, 21, "other.module")
 
     await runner.run(request)
 
@@ -162,19 +192,11 @@ async def test_execution_runner_binds_fixed_env_to_module_after_lease():
 
     module_service = _candidate_service([])
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
-    rem.get_metadata = AsyncMock(return_value="")
-    rem.set_metadata = AsyncMock(return_value=True)
 
     await runner.run(request)
 
-    rem.get_metadata.assert_awaited()
-    rem.set_metadata.assert_awaited_with(
-        21,
-        "scheduler.env_candidates",
-        "module_name",
-        "demo.module",
-        "string",
-    )
+    assert rem.metadata_store[(21, ENV_CLAIM_NAMESPACE, ENV_CLAIM_OWNER_MODULE)] == "demo.module"
+    assert rem.metadata_store[(21, ENV_CLAIM_NAMESPACE, ENV_CLAIM_STATE)] == CLAIM_CLAIMED
 
 
 @pytest.mark.asyncio
@@ -186,6 +208,8 @@ async def test_execution_runner_fails_when_candidate_lease_acquire_raises():
 
     module_service = _candidate_service([21])
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
+    await _seed_claim(rem, 21, "demo.module")
+    runner._is_env_candidate_authorized = AsyncMock(return_value=True)
     rem.lease_manager.acquire = AsyncMock(side_effect=RuntimeError("lease failed"))
 
     await runner.run(request)
@@ -209,6 +233,8 @@ async def test_execution_runner_requeues_when_selected_env_is_taken(monkeypatch)
 
     module_service = _candidate_service([21])
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
+    await _seed_claim(rem, 21, "demo.module")
+    monkeypatch.setattr(execution_runner, "is_env_bound_by_module", lambda *_args, **_kwargs: True)
     rem.lease_manager.acquire = AsyncMock(
         side_effect=EnvUnavailableError("环境 21 已被占用", stage="LEASE")
     )
@@ -235,6 +261,8 @@ async def test_execution_runner_requeues_when_candidate_function_excludes_env_af
 
     module_service = _candidate_service([21], [])
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
+    await _seed_claim(rem, 21, "demo.module")
+    monkeypatch.setattr(execution_runner, "is_env_bound_by_module", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(execution_runner.time, "time", lambda: 1_710_000_190)
 
     await runner.run(request)

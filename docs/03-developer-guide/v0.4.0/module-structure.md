@@ -52,7 +52,7 @@ hotel_demo/
 
 环境选择统一写在 `candidates/` 下。模块开发者只实现 `@env_candidates` 同步纯函数，函数可以直接返回 env id 列表，也可以返回 `EnvCandidates` 链式查询。Core 每次调度都会实时求值，不要求模块同步或物化资源池。
 
-批量环境清理统一写在 `cleanups/` 下。模块开发者只实现 `@env_cleanup_candidates` 同步纯函数，函数同样可以返回 env id 列表或 `EnvCandidates` 链式查询。宿主客户端点击批量清理后会收集所有模块声明、生成预览清单、提示确认，并只删除当前仍满足安全条件的环境。
+批量环境清理统一写在 `cleanups/` 下。模块开发者只实现 `@env_cleanup_candidates` 同步纯函数，函数同样可以返回 env id 列表或 `EnvCandidates` 链式查询。宿主环境管理页点击 `清理环境` 后会统一收集孤岛环境、模块未认领环境、owner 模块缺失环境和模块清理候选，生成预览清单、提示确认，并只删除当前仍满足安全条件的环境。
 
 ## `module.yaml` 最小示例
 

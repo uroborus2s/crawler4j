@@ -94,7 +94,6 @@ def test_job_debug_dialog_builds_request_from_form(qtbot, tmp_path):
     page.timeout_spin.setValue(240)
     page.wait_for_attach_checkbox.setChecked(False)
     page.stop_on_entry_checkbox.setChecked(True)
-    page.keep_environment_checkbox.setChecked(True)
 
     request = page.build_request()
 
@@ -104,7 +103,6 @@ def test_job_debug_dialog_builds_request_from_form(qtbot, tmp_path):
     assert request.timeout == 240
     assert request.wait_for_attach is False
     assert request.stop_on_entry is True
-    assert request.keep_environment is True
 
 
 def test_job_debug_dialog_copies_attach_address(qtbot, tmp_path):
@@ -153,7 +151,7 @@ def test_job_debug_dialog_uses_public_controls(qtbot, tmp_path):
     assert isinstance(page.close_btn, StyledButton)
     assert isinstance(page.wait_for_attach_checkbox, StyledCheckBox)
     assert isinstance(page.stop_on_entry_checkbox, StyledCheckBox)
-    assert isinstance(page.keep_environment_checkbox, StyledCheckBox)
+    assert not hasattr(page, "keep_environment_checkbox")
     assert isinstance(page.logs_view, StyledTextEdit)
 
 

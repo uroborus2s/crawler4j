@@ -427,7 +427,7 @@ def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypat
 
     import asyncio
 
-    asyncio.run(widget._async_env_action("env-1", "start"))
+    asyncio.run(widget._async_env_operation("env-1", "start"))
 
     manager.start_env.assert_awaited_once_with("env-1")
     widget.load_data.assert_called_once_with()

@@ -37,7 +37,6 @@ class DebugSessionRequest:
     attach_port: int = 5678
     wait_for_attach: bool = True
     stop_on_entry: bool = False
-    keep_environment: bool = False
 
 
 @dataclass
@@ -63,7 +62,6 @@ class DebugSession:
     attach_port: int = 5678
     wait_for_attach: bool = True
     stop_on_entry: bool = False
-    keep_environment: bool = False
     state: DebugSessionState = DebugSessionState.CREATED
     worker_pid: int | None = None
     env_id: str | None = None
@@ -107,5 +105,4 @@ class DebugSession:
             "attach_port": self.attach_port,
             "wait_for_attach": self.wait_for_attach,
             "stop_on_entry": self.stop_on_entry,
-            "keep_environment": self.keep_environment,
         }

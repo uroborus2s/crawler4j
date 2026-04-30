@@ -19,7 +19,7 @@ Core 负责：
 - 实例化 workflow
 - 注入 `TaskContext`
 - 调度 page action、环境和数据库能力
-- 按依赖反向顺序清理 `close()` / `aclose()`
+- 按依赖反向顺序调用 `cleanup(ctx, outcome)`
 
 Core 可以缓存元数据、类引用和依赖图，但不能预创建业务对象实例。
 
@@ -31,8 +31,7 @@ Core 可以缓存元数据、类引用和依赖图，但不能预创建业务对
 
 - `TaskContext`
 - `TaskResult`
-- `TaskSignal`
-- `EnvAction`
+- `TaskOutcome`
 - `EnvCandidate`
 - `interface`
 - `component`
@@ -42,6 +41,8 @@ Core 可以缓存元数据、类引用和依赖图，但不能预创建业务对
 - `data_query`
 
 装饰器只挂载元数据，不创建实例。
+
+`TaskSignal`、`TaskSignalAction`、`EnvAction` 不再是模块运行时公开入口。模块 workflow 只能用 `TaskResult` 表达成功或失败；任务结束、失败、超时或用户中止后的环境统一由宿主回收。环境删除只走环境管理页的 `清理环境` 链路。
 
 ### SDK
 
@@ -143,7 +144,24 @@ class ApiLabor:
 - 不同 task/env 不共享 workflow 实例
 - descriptor 可以缓存，实例不能全局缓存
 
-如果对象需要释放资源，实现 `close()` 或 `aclose()`。Core 会在任务结束时按依赖反向顺序调用。
+如果 workflow 或 component 需要释放资源、打印终态日志或写审计事件，只实现 `cleanup(ctx, outcome)`。Core 会在 workflow 返回成功、返回失败、抛错、超时或被用户停止后统一收尾：先清理 workflow 实例，再按 component 依赖构造的反向顺序清理 component；某个对象清理失败只记录日志，不阻断任务终态和环境回收。`outcome.status` 只可能是 `succeeded`、`failed`、`timed_out` 或 `cancelled`。旧 `aclose()` / `close()` 不再是 0.4.0 对象生命周期契约。
+
+```python
+from crawler4j_contracts import TaskContext, TaskOutcome
+
+
+class HotelSyncWorkflow:
+    async def cleanup(self, ctx: TaskContext, outcome: TaskOutcome) -> None:
+        ctx.logger.info(f"workflow finished: {outcome.status}")
+        ctx.db.audit("workflow_events").append(
+            event_type=f"workflow.{outcome.status}",
+            entity_key=ctx.state.get("task_id"),
+            payload={
+                "error": outcome.error,
+                "duration_seconds": outcome.duration_seconds,
+            },
+        )
+```
 
 ## 数据入口
 

@@ -29,12 +29,12 @@ def test_config_center_page_renders_registered_config_items(qtbot, tmp_path: Pat
     assert "about" not in page._domain_buttons
     assert "update" not in page._domain_buttons
     assert "browser.virtualbrowser.port" in page._field_widgets
-    assert "atm.env_action_timeout_seconds" in page._field_widgets
+    assert "atm.env_recycle_timeout_seconds" in page._field_widgets
     assert "system.autostart" not in page._field_widgets
     assert "system.minimize_on_start" not in page._field_widgets
     assert isinstance(page._field_widgets["network.proxy_mode"], StyledComboBox)
     assert isinstance(page._field_widgets["browser.virtualbrowser.path"], StyledLineEdit)
-    assert isinstance(page._field_widgets["atm.env_action_timeout_seconds"], StyledSpinBox)
+    assert isinstance(page._field_widgets["atm.env_recycle_timeout_seconds"], StyledSpinBox)
     assert isinstance(page.reset_domain_btn, StyledButton)
     assert page.objectName() == "configCenterPage"
     assert page.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)

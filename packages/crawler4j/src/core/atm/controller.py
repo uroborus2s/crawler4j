@@ -14,7 +14,7 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from crawler4j_contracts import EnvAction, TaskContext
+from crawler4j_contracts import TaskContext
 from src.core.atm.job_runtime import resolve_job_run_profile
 from src.core.atm.dispatcher import get_task_dispatcher
 from src.core.atm.models import Job, JobState, JobType, TaskStatus, TriggerType
@@ -26,10 +26,9 @@ from src.core.foundation.logging import logger
 from src.core.mms.release_service import assert_module_upgrade_unlocked
 from src.core.mms.settings_store import get_module_settings_store
 from src.core.mms.service import get_module_service
+from src.core.rem.env_claims import CLAIM_CLAIMED, get_env_claim, is_env_bound_by_module, recover_pending_env_claims
 from src.core.rem.manager import RECOVERY_PROVIDER_RUNTIME_TIMEOUT, get_environment_manager
 
-CANDIDATE_OWNER_METADATA_NAMESPACE = "scheduler.env_candidates"
-CANDIDATE_OWNER_METADATA_KEY = "module_name"
 CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
 
 
@@ -65,6 +64,7 @@ class JobController:
         # 1. 开机自检 (Crash Recovery)
         try:
             await self._recover_zombies()
+            await recover_pending_env_claims(self.rem)
         except Exception as e:
             logger.error(f"[ATM] Failed to recover zombie tasks: {e}")
             
@@ -87,11 +87,11 @@ class JobController:
             
         logger.info("[ATM] JobController stopped")
 
-    async def request_job_stop(self, job_id: str, env_action: EnvAction | None = None):
+    async def request_job_stop(self, job_id: str):
         """停止某个 Job 的后续调度，并向活动 Task 请求停止。"""
         self._remove_batch_schedule(job_id)
         if hasattr(self.dispatcher, "request_stop_for_job"):
-            await self.dispatcher.request_stop_for_job(job_id, env_action=env_action)
+            await self.dispatcher.request_stop_for_job(job_id)
 
     async def request_job_resume(self, job_id: str):
         """恢复某个 Job 的调度状态。"""
@@ -569,15 +569,10 @@ class JobController:
         )
 
     async def _is_env_candidate_authorized(self, env_id: int, module_name: str) -> bool:
-        get_metadata = getattr(self.rem, "get_metadata", None)
-        if not callable(get_metadata):
-            return True
-        owner = await get_metadata(
-            int(env_id),
-            CANDIDATE_OWNER_METADATA_NAMESPACE,
-            CANDIDATE_OWNER_METADATA_KEY,
-        )
-        return str(owner or "").strip() == module_name
+        claim = await get_env_claim(self.rem, int(env_id))
+        if claim.owner_module != module_name or claim.state != CLAIM_CLAIMED:
+            return False
+        return is_env_bound_by_module(int(env_id), module_name, module_service=get_module_service())
 
     async def _fail_expired_candidate_waiting_tasks(self, job: Job) -> None:
         binding = self._candidate_binding(job)
@@ -621,7 +616,7 @@ class JobController:
         capacity = await self._count_candidate_capacity(job)
         running_like_count = await self.repo.count_tasks_by_statuses(
             job.id,
-            [TaskStatus.RUNNING, TaskStatus.WAITING_CONFIRMATION],
+            [TaskStatus.RUNNING],
         )
         remaining_target = job.concurrency_target - running_like_count
         resumable = min(max(remaining_target, 0), capacity)

@@ -275,8 +275,8 @@ DEFAULT_CONFIG_REGISTRY = ConfigRegistry(
             max_value=7 * 24 * 60 * 60,
         ),
         ConfigItemSpec(
-            key="atm.env_action_timeout_seconds",
-            label="环境动作超时",
+            key="atm.env_recycle_timeout_seconds",
+            label="环境回收超时",
             value_type="int",
             default=60,
             domain="atm",

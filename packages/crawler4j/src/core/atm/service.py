@@ -9,10 +9,9 @@ import time
 from typing import List
 
 from apscheduler.triggers.cron import CronTrigger
-from crawler4j_contracts import EnvAction
 
 from src.core.atm.job_runtime import resolve_job_run_profile
-from src.core.atm.run_profile import AcquisitionMode, RunProfile
+from src.core.atm.run_profile import RunProfile
 from src.core.atm.controller import get_job_controller
 from src.core.atm.models import Job, JobState, JobType, Task, TriggerConfig, TriggerType
 from src.core.atm.repository import get_task_repository
@@ -205,26 +204,21 @@ class TaskService:
             await self._controller.dispatcher.dispatch(job)
         return True
 
-    async def stop_run_once(self, job_id: str, env_action: EnvAction) -> bool:
-        """停止一次手动批次执行，并指定环境收口动作。"""
+    async def stop_run_once(self, job_id: str) -> bool:
+        """停止一次手动批次执行；环境由宿主统一回收。"""
         job = await self._repo.get_job(job_id)
         if not job:
             return False
         if job.type != JobType.BATCH or job.trigger.type != TriggerType.MANUAL:
             raise ValueError("只有“执行一次”模式的批次任务支持手动中止。")
 
-        run_profile = resolve_job_run_profile(job)
-        acquisition_mode = run_profile.resource.acquisition.mode if run_profile.resource else None
-        if env_action == EnvAction.DESTROY and acquisition_mode != AcquisitionMode.CREATE:
-            raise ValueError("当前运行模板是复用环境模式，不能删除环境。")
-
         current_count = await self._repo.count_active_tasks(job.id)
         if current_count <= 0:
             logger.info(f"[ATM] Job {job.id} stop ignored because no active tasks are running")
             return False
 
-        await self._controller.request_job_stop(job.id, env_action=env_action)
-        logger.info(f"[ATM] Job stop requested: {job.id} (env_action={env_action.value})")
+        await self._controller.request_job_stop(job.id)
+        logger.info(f"[ATM] Job stop requested: {job.id}")
         return True
 
     async def start_job(self, job_id: str) -> bool:
@@ -302,15 +296,6 @@ class TaskService:
     async def get_task(self, task_id: str) -> Task | None:
         """获取任务实例详情。"""
         return await self._repo.get_task(task_id)
-
-    async def confirm_task_success(self, task_id: str, message: str = "") -> bool:
-        """确认等待人工确认的任务成功完成。"""
-        return await self._controller.dispatcher.confirm_task(task_id, success=True, message=message)
-
-    async def confirm_task_failure(self, task_id: str, message: str = "") -> bool:
-        """确认等待人工确认的任务失败。"""
-        return await self._controller.dispatcher.confirm_task(task_id, success=False, message=message)
-
 
 # Global Singleton
 _service: TaskService | None = None

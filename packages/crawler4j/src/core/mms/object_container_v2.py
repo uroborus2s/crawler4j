@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import inspect
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from crawler4j_contracts import ParameterSpec
+from crawler4j_contracts import ParameterSpec, TaskContext, TaskOutcome
 
+from src.core.foundation.logging import logger
 from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptorV2, V2RuntimeEntry
 
 
@@ -32,6 +35,7 @@ class ObjectContainerV2:
         self._validate_object_param_owners()
         self.instances: dict[str, Any] = {}
         self._workflow_instance: Any | None = None
+        self._closed = False
 
     def build_workflow(self) -> Any:
         if self._workflow_instance is not None:
@@ -108,6 +112,58 @@ class ObjectContainerV2:
             raise RuntimeError(f"component {component_name} 构造失败: {exc.__class__.__name__}: {exc}") from exc
         self.instances[component_name] = instance
         return instance
+
+    async def cleanup(
+        self,
+        context: TaskContext,
+        outcome: TaskOutcome,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        """Run workflow/component cleanup methods owned by this task/env graph."""
+        if self._closed:
+            return
+        self._closed = True
+
+        finalizers: list[tuple[str, Any]] = []
+        if self._workflow_instance is not None:
+            finalizers.append((f"workflow {self.workflow_name}", self._workflow_instance))
+        finalizers.extend(
+            (f"component {component_name}", instance)
+            for component_name, instance in reversed(list(self.instances.items()))
+        )
+
+        for label, instance in finalizers:
+            await self._cleanup_instance(label, instance, context, outcome, timeout_seconds=timeout_seconds)
+
+    async def _cleanup_instance(
+        self,
+        label: str,
+        instance: Any,
+        context: TaskContext,
+        outcome: TaskOutcome,
+        *,
+        timeout_seconds: float | None,
+    ) -> None:
+        cleanup = getattr(instance, "cleanup", None)
+        if not callable(cleanup):
+            return
+        try:
+            operation = _invoke_cleanup(cleanup, context, outcome)
+            if timeout_seconds is not None and timeout_seconds > 0:
+                await asyncio.wait_for(operation, timeout=float(timeout_seconds))
+            else:
+                await operation
+        except asyncio.TimeoutError:
+            logger.error(
+                f"[MMS] Timed out cleaning v2 object: {label} "
+                f"method=cleanup timeout={timeout_seconds:.1f}s"
+            )
+        except Exception as exc:
+            logger.error(
+                f"[MMS] Failed to clean v2 object: {label} "
+                f"method=cleanup error={exc.__class__.__name__}: {exc}"
+            )
 
     def _build_inject_kwargs(self, entry: V2RuntimeEntry, *, parent_path: str) -> dict[str, Any]:
         kwargs: dict[str, Any] = {}
@@ -203,6 +259,12 @@ def _normalize_object_params(
             raise RuntimeError(f"object_params[{component_name}] 必须是映射对象")
         normalized[component_name] = dict(raw_params)
     return normalized
+
+
+async def _invoke_cleanup(cleanup: Any, context: TaskContext, outcome: TaskOutcome) -> None:
+    result = cleanup(context, outcome)
+    if inspect.isawaitable(result):
+        await result
 
 
 def _validate_parameter_value(component_name: str, parameter: ParameterSpec, value: Any) -> Any:

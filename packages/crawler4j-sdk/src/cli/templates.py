@@ -169,7 +169,9 @@ uv run crawler4j package build
 - `object_param(...)` 支持标量、enum、array、object、json、date/datetime/time、url、path、secret，并可从常见 Python 注解推断类型。
 - 表与命名查询统一由装饰器声明；旧 `module.yaml.data` 已不再是 0.4.x 运行契约；快照表需显式 `--storage-mode managed_dataset`。
 - 环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，不使用资源池同步或旧 `env_selectors/`。
-- 批量环境清理由 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数声明；模块只返回 env id，删除由宿主确认后执行。
+- 批量环境清理由 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数声明；模块只返回已绑定且业务上可丢弃的 env id，删除由宿主环境管理页确认后执行。
+- 模块不要导入 `TaskSignal` / `EnvAction`；流程终态用 `TaskResult` 表达，任务结束、失败、超时或被用户中止后的环境统一由宿主回收。
+- workflow/component 如需收尾，只实现 `cleanup(ctx, outcome)`；旧 `aclose()` / `close()` 不再是对象生命周期契约。
 """
 
 MODEL_TEST_TASK_TEMPLATE = '''"""测试页面操作。"""
@@ -259,6 +261,7 @@ from crawler4j_contracts import data_table
     label="{display_name}",
     description="{description}",
     storage_mode="{storage_mode}",
+    env_binding_field="env_id",
     schema=[
         {{"name": "env_id", "type": "integer", "required": True}},
         {{"name": "account_id", "type": "string", "required": True}},

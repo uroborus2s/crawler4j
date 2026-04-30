@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 from unittest.mock import patch
 
 import pytest
-from crawler4j_contracts import EnvAction, TaskSignal
 
 from src.core.atm.controller import JobController
 from src.core.atm.dispatcher import TaskDispatcher
@@ -444,8 +443,8 @@ async def test_count_candidate_capacity_uses_run_profile_context(monkeypatch):
         list_envs=AsyncMock(
             return_value=[SimpleNamespace(id=1, kind="browser", status="ready", lease_id=None)]
         ),
-        get_metadata=AsyncMock(return_value="demo_module"),
     )
+    controller._is_env_candidate_authorized = AsyncMock(return_value=True)
     run_profile = RunProfile(
         resource=ResourceConfig(
             acquisition=AcquisitionConfig(
@@ -775,8 +774,8 @@ async def test_pause_job_cancels_persisted_pending_task_without_resource(temp_st
     await repo.save_job(job)
     await repo.save_task(pending_task)
 
-    async def _request_job_stop(job_id: str, env_action=None):
-        await dispatcher.request_stop_for_job(job_id, env_action=env_action)
+    async def _request_job_stop(job_id: str):
+        await dispatcher.request_stop_for_job(job_id)
 
     service._repo = repo
     service._controller = SimpleNamespace(request_job_stop=AsyncMock(side_effect=_request_job_stop))
@@ -1136,7 +1135,7 @@ async def test_run_job_once_rechecks_runtime_before_dispatch():
 
 
 @pytest.mark.asyncio
-async def test_stop_run_once_requests_job_stop_with_selected_env_action():
+async def test_stop_run_once_requests_job_stop():
     service = TaskService()
     job = Job(
         id="batch-manual-job",
@@ -1153,34 +1152,10 @@ async def test_stop_run_once_requests_job_stop_with_selected_env_action():
     )
     service._controller = SimpleNamespace(request_job_stop=AsyncMock())
 
-    result = await service.stop_run_once(job.id, EnvAction.RECYCLE)
+    result = await service.stop_run_once(job.id)
 
     assert result is True
-    service._controller.request_job_stop.assert_awaited_once_with(job.id, env_action=EnvAction.RECYCLE)
-
-
-@pytest.mark.asyncio
-async def test_stop_run_once_rejects_destroy_for_selected_env_mode():
-    service = TaskService()
-    job = Job(
-        id="batch-manual-job",
-        name="manual-batch",
-        type=JobType.BATCH,
-        state=JobState.PAUSED,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-        run_profile=_build_select_run_profile(),
-        concurrency_target=2,
-    )
-    service._repo = SimpleNamespace(
-        get_job=AsyncMock(return_value=job),
-        count_active_tasks=AsyncMock(return_value=1),
-    )
-    service._controller = SimpleNamespace(request_job_stop=AsyncMock())
-
-    with pytest.raises(ValueError, match="不能删除环境"):
-        await service.stop_run_once(job.id, EnvAction.DESTROY)
-
-    service._controller.request_job_stop.assert_not_awaited()
+    service._controller.request_job_stop.assert_awaited_once_with(job.id)
 
 
 @pytest.mark.asyncio
@@ -1201,7 +1176,7 @@ async def test_stop_run_once_returns_false_when_no_active_tasks():
     )
     service._controller = SimpleNamespace(request_job_stop=AsyncMock())
 
-    result = await service.stop_run_once(job.id, EnvAction.RECYCLE)
+    result = await service.stop_run_once(job.id)
 
     assert result is False
     service._controller.request_job_stop.assert_not_awaited()
@@ -1258,38 +1233,6 @@ async def test_repository_roundtrip_preserves_run_profile_snapshot(temp_state_di
 
     assert loaded is not None
     assert loaded.run_profile == run_profile
-
-
-@pytest.mark.asyncio
-async def test_repository_roundtrip_preserves_task_signal(temp_state_dir):
-    repo = TaskRepository()
-    repo._run_async = AsyncMock(side_effect=lambda func, *args: func(*args))
-
-    job = Job(id="job-inline", name="inline")
-    await repo.save_job(job)
-
-    task = Task(
-        id="task-inline",
-        job_id="job-inline",
-        status=TaskStatus.WAITING_CONFIRMATION,
-        message="等待人工确认",
-        signal=TaskSignal.wait_for_confirmation(
-            message="等待人工确认",
-            env_action=EnvAction.KEEP_ALIVE,
-            payload={
-                "confirmation": {
-                    "title": "账号复核",
-                    "fields": [{"label": "账号", "value": "demo-account"}],
-                }
-            },
-        ).to_dict(),
-    )
-
-    await repo.save_task(task)
-    loaded = await repo.get_task(task.id)
-
-    assert loaded is not None
-    assert loaded.signal == task.signal
 
 
 @pytest.mark.asyncio

@@ -41,6 +41,8 @@ IGNORED_PATH_PARTS = {
 LEGACY_RUNTIME_DIRECTORIES = ("hooks", "env_selectors")
 LEGACY_SPEC_NAMES = {"TaskSpec", "WorkflowSpec", "EnvSelectorSpec", "PageSpec"}
 LEGACY_DECLARATION_NAMES = {"TASK", "WORKFLOW", "SELECTOR", "PAGE"}
+HOST_FLOW_CONTROL_NAMES = {"EnvAction", "TaskSignal", "TaskSignalAction"}
+REMOVED_OBJECT_LIFECYCLE_METHODS = {"aclose", "close"}
 DECORATOR_KINDS = {
     "interface": "interface",
     "component": "component",
@@ -82,6 +84,7 @@ class V2Declaration:
     meta: Crawler4jMeta
     target_kind: str
     annotations: tuple[str, ...] = ()
+    methods: tuple[str, ...] = ()
     target: Any = None
 
 
@@ -198,6 +201,7 @@ def _collect_static_diagnostics(module_root: Path) -> list[V2Diagnostic]:
     diagnostics: list[V2Diagnostic] = []
     seen_sdk_imports: set[str] = set()
     seen_legacy_imports: set[str] = set()
+    seen_host_flow_imports: set[str] = set()
     for directory_name in LEGACY_RUNTIME_DIRECTORIES:
         if (module_root / directory_name).exists():
             diagnostics.append(
@@ -228,6 +232,14 @@ def _collect_static_diagnostics(module_root: Path) -> list[V2Diagnostic]:
                 sdk_import = any(
                     alias.name == "crawler4j_sdk" or alias.name.startswith("crawler4j_sdk.") for alias in node.names
                 )
+                for alias in node.names:
+                    if alias.name == "crawler4j_contracts.signal":
+                        _append_host_flow_control_import_diagnostic(
+                            diagnostics,
+                            seen_host_flow_imports,
+                            relative.as_posix(),
+                            "crawler4j_contracts.signal",
+                        )
             elif isinstance(node, ast.ImportFrom):
                 module = str(node.module or "")
                 sdk_import = module == "crawler4j_sdk" or module.startswith("crawler4j_sdk.")
@@ -235,6 +247,20 @@ def _collect_static_diagnostics(module_root: Path) -> list[V2Diagnostic]:
                     legacy_specs.update(alias.name for alias in node.names if alias.name in LEGACY_SPEC_NAMES)
                 elif module == "crawler4j_contracts":
                     legacy_specs.update(alias.name for alias in node.names if alias.name in LEGACY_SPEC_NAMES)
+                if module in {"crawler4j_contracts", "crawler4j_contracts.signal"}:
+                    imported_names = {alias.name for alias in node.names}
+                    blocked_names = (
+                        HOST_FLOW_CONTROL_NAMES
+                        if "*" in imported_names
+                        else HOST_FLOW_CONTROL_NAMES.intersection(imported_names)
+                    )
+                    for blocked_name in sorted(blocked_names):
+                        _append_host_flow_control_import_diagnostic(
+                            diagnostics,
+                            seen_host_flow_imports,
+                            relative.as_posix(),
+                            blocked_name,
+                        )
             elif isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id in LEGACY_DECLARATION_NAMES:
@@ -271,6 +297,25 @@ def _collect_static_diagnostics(module_root: Path) -> list[V2Diagnostic]:
                     )
                 )
     return diagnostics
+
+
+def _append_host_flow_control_import_diagnostic(
+    diagnostics: list[V2Diagnostic],
+    seen: set[str],
+    location: str,
+    symbol: str,
+) -> None:
+    key = f"{location}:{symbol}"
+    if key in seen:
+        return
+    seen.add(key)
+    diagnostics.append(
+        V2Diagnostic(
+            code="V2_HOST_FLOW_CONTROL_IMPORT",
+            location=location,
+            message=f"{symbol} is host-owned and cannot be imported by module runtime code",
+        )
+    )
 
 
 def _resolve_module_import_name(module_root: Path, manifest: dict[str, Any]) -> str:
@@ -388,6 +433,7 @@ def _collect_declarations(
                     meta=meta,
                     target_kind=_target_kind(node),
                     annotations=_class_annotations(node) if isinstance(node, ast.ClassDef) else (),
+                    methods=_class_methods(node) if isinstance(node, ast.ClassDef) else (),
                 )
             )
     return declarations, diagnostics
@@ -436,6 +482,14 @@ def _class_annotations(node: ast.ClassDef) -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
+def _class_methods(node: ast.ClassDef) -> tuple[str, ...]:
+    names: list[str] = []
+    for item in node.body:
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.append(item.name)
+    return tuple(sorted(names))
+
+
 def _merge_annotation_metadata(meta: Crawler4jMeta, node: ast.ClassDef) -> Crawler4jMeta:
     inject, parameters = _annotation_metadata_from_class(node)
     if not inject and not parameters:
@@ -453,6 +507,7 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, node: ast.ClassDef) -> Crawl
         storage_mode=meta.storage_mode,
         record_key_field=meta.record_key_field,
         cleanup_policy=meta.cleanup_policy,
+        env_binding_field=meta.env_binding_field,
         source=meta.source,
         sql=meta.sql,
         output_schema=meta.output_schema,
@@ -783,9 +838,26 @@ def _validate_declarations(declarations: list[V2Declaration]) -> list[V2Diagnost
     diagnostics.extend(_validate_pages(declarations))
     diagnostics.extend(_validate_page_actions(declarations))
     diagnostics.extend(_validate_env_id_candidate_functions(declarations))
+    diagnostics.extend(_validate_object_lifecycle_methods(declarations))
     diagnostics.extend(_validate_parameters(declarations))
     diagnostics.extend(_validate_data_contracts(declarations))
     diagnostics.extend(_validate_dependency_cycles(declarations))
+    return diagnostics
+
+
+def _validate_object_lifecycle_methods(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    for declaration in declarations:
+        if declaration.kind not in {"workflow", "component"} or declaration.target_kind != "class":
+            continue
+        for method_name in sorted(REMOVED_OBJECT_LIFECYCLE_METHODS.intersection(declaration.methods)):
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_OBJECT_LIFECYCLE_METHOD_UNSUPPORTED",
+                    location=f"{declaration.symbol}.{method_name}",
+                    message="object lifecycle only supports cleanup(ctx, outcome); aclose/close are not called",
+                )
+            )
     return diagnostics
 
 

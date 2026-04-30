@@ -11,7 +11,6 @@ import time
 from asyncio.subprocess import PIPE, create_subprocess_exec
 from pathlib import Path
 
-from src.core.atm.run_profile import CreationLifecycle
 from src.core.debug.launcher import build_debug_worker_command
 from src.core.debug.models import (
     FINAL_DEBUG_STATES,
@@ -87,18 +86,13 @@ class DebugService:
             candidates=target.run_profile.resource.acquisition.candidates,
             candidate_params=dict(target.run_profile.resource.acquisition.candidate_params),
             creation_params=dict(target.run_profile.resource.acquisition.creation.params),
-            creation_lifecycle=(
-                target.run_profile.resource.acquisition.creation.lifecycle
-                if not request.keep_environment
-                else CreationLifecycle.PERSISTENT
-            ),
+            creation_lifecycle=target.run_profile.resource.acquisition.creation.lifecycle,
             wait_timeout=target.wait_timeout,
             timeout=request.timeout or target.timeout,
             attach_host=request.attach_host,
             attach_port=request.attach_port,
             wait_for_attach=request.wait_for_attach,
             stop_on_entry=request.stop_on_entry,
-            keep_environment=request.keep_environment,
         )
         self._sessions[session.id] = session
         await self.repo.save_session(session)

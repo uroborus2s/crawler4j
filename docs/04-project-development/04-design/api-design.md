@@ -7,7 +7,7 @@
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
 **关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-0400`, `TASK-0401`
-**最后更新：** 2026-04-30
+**最后更新：** 2026-05-01
 
 ## `API-001` Root App Entry Contract
 
@@ -32,11 +32,11 @@
 | 环境选择器 | 0.4.0 已移除 `selector_name/env_selector/resource_pool`；运行模板只能显式选择 `env_id` 或引用 `candidates/` 下的 `@env_candidates` |
 | 当前实现 | Core 通过 `ModuleRuntimeDescriptorV2` 扫描 `@interface/@component/@workflow/@page/@page_action/@data_table/@data_query/@env_candidates`，不依赖模块自有 assembler |
 | Core 扩展入口 | `context.tools.call("<namespace>.<action>", **kwargs)` |
-| 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。环境关闭/删除由宿主按任务结果和 `TaskSignal` / `EnvAction` 收口 |
+| 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。对象图由 Core 在 workflow 结束后统一清理，任务结束、失败、超时或用户中止后的环境统一由宿主回收；环境删除只走环境管理页清理链路 |
 | 默认工作流解析 | `context.runtime["workflow"]` -> 单 workflow 自动选择 -> `main_workflow` |
 | 发现错误可见性 | descriptor 扫描失败必须暴露具体 Python 文件、符号、异常类型与 traceback 摘要，不能降级为泛化 “not found” |
 | Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 中的 `@page(...)`；`@page(menu=True)` 控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象 |
-| `TaskSignal` UI 契约 | `TaskSignal.wait_for_confirmation(..., payload={"confirmation": ...})` 会把完整 `signal` 快照持久化到任务记录，并发布 `task.signal` 事件；ATM 详情页按 `payload.confirmation` 渲染结构化确认面板，若缺少该块则退回展示 `message` 与 payload 键值 |
+| 宿主确认契约 | 当前 0.4.0 模块运行时代码不发送 `TaskSignal`；人工确认若后续需要恢复，必须先在宿主状态机内重新设计，不复用模块信号入口 |
 | DevLink 调试语义 | 模块来源为 `DevLink` 时，descriptor 可强制 reload；正式安装模块读操作不做非必要 reload |
 | DevLink 普通执行语义 | ATM 普通执行 `DevLink` 模块时注入 `devel_mode=true`；`ModuleService` 对同一个 `TaskContext` 只在首次加载时强制 reload 一次 |
 | 升级策略 | 旧模块必须迁移到 `core-native-v2`；当前分支不为 0.3.x 运行薄壳、hooks 或 selector 提供兼容承诺 |
@@ -86,7 +86,7 @@
 | Manifest 边界 | `module.yaml` 不再声明 interfaces、objects、workflows、tasks、data resources、workflow parameters；只保留模块元信息和宿主级静态配置 |
 | Workflow 契约 | workflow 只通过构造函数接收宿主注入对象，不接收 `parameters[]` |
 | Component 契约 | component 声明 `implements`、`inject` 和对象创建参数；`inject` 与对象参数可写在装饰器参数、类属性注解或 `__init__` 参数注解上，最终归一为 `InjectSpec` / `ParameterSpec`；对象参数只用于宿主创建对象实例 |
-| 对象生命周期 | Core 按运行模板为每个 task/env 创建独立对象图，默认不共享业务对象实例 |
+| 对象生命周期 | Core 按运行模板为每个 task/env 创建独立对象图，默认不共享业务对象实例；workflow 返回成功、返回失败、超时、异常或被用户停止后按 workflow -> component 依赖反向顺序调用 `cleanup(ctx, outcome)`；`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`，旧 `aclose()` / `close()` 不再是生命周期契约 |
 | Page action 契约 | task 退化为 `@page_action` 纯函数；业务编排进入 workflow / orchestrator |
 | Data 契约 | 数据表和命名查询由 `@data_table` / `@data_query` 声明，并注册到现有 `ctx.db` 能力 |
 | 宿主保留字段 | SDK / Core / Contracts 共享宿主保留字段集合；第一版阻断模块自有数据列声明 `created_at`、`updated_at`，并阻断常见混淆字段 `create_at`、`update_at` |
@@ -121,7 +121,7 @@
 | 持久配置 | `config.db.module_config_entries`；模块运行时只通过 `ctx.get_config()` / `ctx.config` 读取 |
 | 配置编辑格式 | 模块详情页 `配置` 标签统一使用 QScintilla YAML 编辑器；保存前由独立验证层校验 YAML 语法、顶层映射对象与重复键，数据库仍是事实源 |
 | 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
-| 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`object_bindings`、`object_params`、`devel_mode`、`creation_params`、`candidates`、`candidate_params`、`env_action` |
+| 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`object_bindings`、`object_params`、`devel_mode`、`creation_params`、`candidates`、`candidate_params`、`env_recycle` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
 | 页面 schema | 来自运行时 descriptor 中扫描到的 `@page.schema`；`ui.get_page` 只读访问当前已注册 schema |
 | 快照型业务数据 | `@data_table` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`），`custom_table` 落在受控实体表 `module_name_resource_id`，并由装饰器 schema/indexes 描述真实列结构；业务数据统一通过 `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` 访问 |
@@ -188,19 +188,19 @@
 | 候选竞争语义 | 候选环境如果在租约阶段被其他任务抢走，或租约后重算发现已不在候选集合，当前任务回到等待席位，不直接记失败；真实异常进入失败收口 |
 | 等待状态口径 | 候选等待复用底层 `TaskStatus.PENDING`；UI 展示为 `等待环境`，等待中的 `task.message` 为 `等待环境候选可用: <candidates>` |
 | 等待超时口径 | `wait_timeout` 同时用于环境租约获取与候选等待席位收口；候选等待从第一次写下 `waiting_since` 开始计时，`wait_timeout=0` 时当前不会自动超时收口；失败文案为 `等待环境候选超时: <candidates> (<seconds>s)`，且与 `execution.timeout` 分离 |
-| `KEEP_ALIVE` 环境口径 | `KEEP_ALIVE` 只表示保留现场，不表示重新可分配；保留后的 `RUNNING` 环境不会被候选队列当成可发号工位 |
+| 环境回收口径 | 任务终态后的环境处置统一为回收；候选队列只从 `READY + BROWSER + 无租约 + 已由同模块声明绑定` 的环境中取数 |
 | `env_id` 口径 | 候选函数返回的 `env_id` 是宿主 `environments.id` 主键；候选函数执行时 `TaskContext.env_id` 固定为 `0`，不应用于表达候选关系 |
 
 ## `API-016` Env Cleanup Candidates Contract（0.4.0）
 
 | 项目 | 内容 |
 |---|---|
-| 适用场景 | 模块需要根据自己的账号表、黑号状态、过期策略或长期未使用规则，声明一批可以由宿主清理删除的环境 |
-| 目标语义 | 模块只声明待清理 env id；宿主负责预览、确认、二次安全校验、删除和结果反馈 |
+| 适用场景 | 宿主需要清理孤岛环境、模块未认领环境、owner 模块缺失环境，或模块根据自己的账号表、黑号状态、过期策略、长期未使用规则声明一批可以清理的环境 |
+| 目标语义 | 模块只声明“已绑定但业务上可丢弃”的 env id；宿主负责发现 host 侧候选、预览、确认、二次安全校验、删除和结果反馈 |
 | 候选声明 | 模块在 `cleanups/*.py` 中声明 `@env_cleanup_candidates(name=...)` 同步纯函数 |
-| 模块开发者职责 | 在清理候选纯函数中实时读取模块数据，返回 env id 列表或 `EnvCandidates` 链式查询；不要在模块内调用删除环境动作 |
-| 宿主职责 | 在只读 `ctx.db`、无工具面的清理候选运行面执行纯函数，按 env id 去重并保留来源，客户端展示预览后由用户确认 |
-| 安全门 | 删除前必须再次读取 REM 当前状态，只允许删除 `READY/PAUSED`、无租约、无关联任务的环境；`BUSY/RUNNING/CREATING/TERMINATING` 必须跳过 |
+| 模块开发者职责 | 在清理候选纯函数中实时读取模块数据，返回 env id 列表或 `EnvCandidates` 链式查询；不要在模块内调用删除环境操作；需要被宿主识别为“已认领环境”的业务表必须通过 `@data_table(..., env_binding_field="env_id")` 声明绑定字段 |
+| 宿主职责 | 在只读 `ctx.db`、无工具面的清理候选运行面执行纯函数，并只接受 `host.env_claim.owner_module == module`、`state == claimed` 且仍存在于模块 `env_binding_field` 表中的候选；同时扫描没有 owner、owner 模块缺失、`pending/abandoned` 且未被绑定的环境 |
+| 安全门 | 删除前必须再次读取 REM 当前状态，只允许删除 `READY/PAUSED`、无租约、无关联任务、无活跃 task 引用、未被运行模板固定引用的环境；`BUSY/RUNNING/CREATING/TERMINATING` 必须跳过 |
 | 执行动作 | 删除只通过宿主 REM `EnvironmentManager.destroy_env()` 执行，外部 provider 删除失败时保留数据库记录并返回失败原因 |
 | 与 `API-007` 的关系 | 复用 `EnvCandidates` 查询 DSL，但不复用 `@env_candidates` 注册入口；运行候选和清理候选是两个独立 descriptor bucket |
 
@@ -214,6 +214,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-05-01 | 收口环境处置为宿主边界：模块运行时代码不再导入或发送 `TaskSignal` / `EnvAction`，任务终态后环境统一回收，环境删除只由环境管理页清理链路执行，并通过 `host.env_claim` + `env_binding_field` 区分孤岛、未认领和模块业务清理候选 | Codex |
 | 2026-04-30 | 清理旧生命周期 hook 运行链，`RunProfile.execution.hooks_module`、`ModuleService.call_hook()` 与 `prepare_env/init_env/before_run/on_*` 不再属于 0.4.0 契约 | Codex |
 | 2026-04-30 | 新增 `API-016`，提供 `cleanups/` + `@env_cleanup_candidates` 批量环境清理候选契约，复用 `EnvCandidates` DSL 但隔离运行候选和删除语义 | Codex |
 | 2026-04-30 | `API-007` 从固定资源池同步方案改为 `candidates/` + `@env_candidates` 纯函数实时候选方案，删除资源池资格卡片和同步工作流口径 | Codex |

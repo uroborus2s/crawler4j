@@ -43,8 +43,8 @@ from crawler4j_contracts.decorators import (
     page_action,
     workflow,
 )
+from crawler4j_contracts.lifecycle import TaskOutcome, TaskOutcomeStatus
 from crawler4j_contracts.result import TaskResult
-from crawler4j_contracts.signal import EnvAction, TaskSignal, TaskSignalAction
 
 __all__ = [
     "CRAWLER4J_META_ATTR",
@@ -70,10 +70,9 @@ __all__ = [
     "page_action",
     "workflow",
     "TaskContext",
+    "TaskOutcome",
+    "TaskOutcomeStatus",
     "TaskResult",
-    "TaskSignal",
-    "TaskSignalAction",
-    "EnvAction",
     "HttpClient",
     "ImageInput",
     "BBox",

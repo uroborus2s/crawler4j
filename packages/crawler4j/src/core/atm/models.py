@@ -41,7 +41,6 @@ class TaskStatus(str, enum.Enum):
     """任务运行状态。"""
     PENDING = "pending"      # 等待资源 (排队中)
     RUNNING = "running"      # 执行中
-    WAITING_CONFIRMATION = "waiting_confirmation"  # 等待人工确认
     SUCCEEDED = "succeeded"  # 成功
     FAILED = "failed"        # 失败
     CANCELLED = "cancelled"  # 取消
@@ -121,7 +120,6 @@ class Task:
     # 执行结果
     message: str = ""
     error: str = ""
-    signal: Dict[str, Any] | None = None
     
     # 时间戳
     created_at: int = field(default_factory=lambda: int(time.time()))

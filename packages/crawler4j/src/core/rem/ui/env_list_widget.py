@@ -451,7 +451,7 @@ class EnvListWidget(QWidget):
         self.import_existing_btn.clicked.connect(self._import_existing_env)
         header.addWidget(self.import_existing_btn)
 
-        self.cleanup_btn = StyledButton("批量清理", variant="danger", min_height=36)
+        self.cleanup_btn = StyledButton("清理环境", variant="danger", min_height=36)
         self.cleanup_btn.clicked.connect(self._cleanup_envs)
         header.addWidget(self.cleanup_btn)
 
@@ -784,7 +784,7 @@ class EnvListWidget(QWidget):
         await self._show_message_async("批量清理", message, kind="info" if result.failed_count == 0 else "warning")
         self.load_data(run_gc=False, reload_from_db=True)
 
-    async def _async_env_action(self, env_id: str, action: str):
+    async def _async_env_operation(self, env_id: str, action: str):
         operation = getattr(self._manager, f"{action}_env")
         try:
             success = await operation(env_id)
@@ -821,7 +821,7 @@ class EnvListWidget(QWidget):
         self._track_task(self._import_existing_env_async())
 
     def _cleanup_envs(self):
-        """批量清理模块声明的可清理环境。"""
+        """清理宿主扫描出的孤岛、未认领和模块声明可清理环境。"""
         self._track_task(self._cleanup_envs_async())
 
     async def _cleanup_envs_async(self) -> None:
@@ -987,7 +987,7 @@ class EnvListWidget(QWidget):
     def _start_env(self, env_id: str):
         """启动环境（打开窗口）。"""
         self._schedule_operation(
-            self._async_env_action(env_id, "start"),
+            self._async_env_operation(env_id, "start"),
             message=self._operation_message(
                 "start",
                 provider=self._env_provider_for_message(env_id),
@@ -998,21 +998,21 @@ class EnvListWidget(QWidget):
     def _stop_env(self, env_id: str):
         """停止环境（关闭窗口）。"""
         self._schedule_operation(
-            self._async_env_action(env_id, "stop"),
+            self._async_env_operation(env_id, "stop"),
             message=self._operation_message("stop", env_id=env_id),
         )
     
     def _pause_env(self, env_id: str):
         """暂停环境。"""
         self._schedule_operation(
-            self._async_env_action(env_id, "pause"),
+            self._async_env_operation(env_id, "pause"),
             message=self._operation_message("pause", env_id=env_id),
         )
     
     def _resume_env(self, env_id: str):
         """恢复环境。"""
         self._schedule_operation(
-            self._async_env_action(env_id, "resume"),
+            self._async_env_operation(env_id, "resume"),
             message=self._operation_message("resume", env_id=env_id),
         )
     

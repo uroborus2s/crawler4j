@@ -6,10 +6,11 @@ from textwrap import dedent
 
 import pytest
 
+from crawler4j_contracts import Crawler4jMeta, InjectSpec, TaskContext, TaskOutcome
 from src.core.mms.models import ModuleManifest, UpgradeSourceInfo
 from src.core.mms.module_loader import purge_module_namespace
 from src.core.mms.object_container_v2 import ObjectContainerV2
-from src.core.mms.runtime_descriptor import load_runtime_descriptor_v2
+from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptorV2, V2RuntimeEntry, load_runtime_descriptor_v2
 
 
 def _manifest(module_name: str) -> ModuleManifest:
@@ -146,6 +147,165 @@ def test_object_container_builds_workflow_with_selected_components_and_params(tm
         assert workflow.kwargs == {}
     finally:
         purge_module_namespace(module_name)
+
+
+@pytest.mark.asyncio
+async def test_object_container_runs_cleanup_with_outcome_in_reverse_dependency_order():
+    events: list[str] = []
+
+    class Labor:
+        def close(self):
+            events.append("labor.close should not run")
+
+        def cleanup(self, ctx, outcome):
+            events.append(f"labor.cleanup:{ctx.task_name}:{outcome.status}")
+
+    class Orchestrator:
+        def __init__(self, labor):
+            self.labor = labor
+
+        async def aclose(self):
+            events.append("orchestrator.aclose should not run")
+
+        async def cleanup(self, ctx, outcome):
+            events.append(f"orchestrator.cleanup:{ctx.task_name}:{outcome.status}")
+
+    class QuizWorkflow:
+        def __init__(self, orchestrator):
+            self.orchestrator = orchestrator
+
+        def cleanup(self, ctx, outcome):
+            events.append(f"workflow.cleanup:{ctx.task_name}:{outcome.status}")
+
+    descriptor = ModuleRuntimeDescriptorV2(
+        interfaces={
+            "labor": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="interface", name="labor"),
+                target=object,
+                module_name="cleanup_module.interfaces.labor",
+                attr_name="Labor",
+                owner="interfaces/labor.py",
+            ),
+            "orchestrator": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="interface", name="orchestrator"),
+                target=object,
+                module_name="cleanup_module.interfaces.orchestrator",
+                attr_name="Orchestrator",
+                owner="interfaces/orchestrator.py",
+            ),
+        },
+        components={
+            "api_labor": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="component", name="api_labor", implements="labor"),
+                target=Labor,
+                module_name="cleanup_module.objects.api_labor",
+                attr_name="Labor",
+                owner="objects/api_labor.py",
+            ),
+            "quiz_orchestrator": V2RuntimeEntry(
+                meta=Crawler4jMeta(
+                    kind="component",
+                    name="quiz_orchestrator",
+                    implements="orchestrator",
+                    inject=(InjectSpec(name="labor", type="interface", target="labor"),),
+                ),
+                target=Orchestrator,
+                module_name="cleanup_module.objects.quiz_orchestrator",
+                attr_name="Orchestrator",
+                owner="objects/quiz_orchestrator.py",
+            ),
+        },
+        workflows={
+            "quiz_workflow": V2RuntimeEntry(
+                meta=Crawler4jMeta(
+                    kind="workflow",
+                    name="quiz_workflow",
+                    inject=(InjectSpec(name="orchestrator", type="interface", target="orchestrator"),),
+                ),
+                target=QuizWorkflow,
+                module_name="cleanup_module.workflows.quiz",
+                attr_name="QuizWorkflow",
+                owner="workflows/quiz.py",
+            ),
+        },
+        implementations={
+            "labor": ("api_labor",),
+            "orchestrator": ("quiz_orchestrator",),
+        },
+    )
+    container = ObjectContainerV2(descriptor, "quiz_workflow")
+    context = TaskContext(env_id=1, task_name="cleanup_module")
+    outcome = TaskOutcome(status="succeeded")
+
+    container.build_workflow()
+    await container.cleanup(context, outcome)
+    await container.cleanup(context, outcome)
+
+    assert events == [
+        "workflow.cleanup:cleanup_module:succeeded",
+        "orchestrator.cleanup:cleanup_module:succeeded",
+        "labor.cleanup:cleanup_module:succeeded",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_object_container_continues_cleanup_when_one_cleanup_fails():
+    events: list[str] = []
+
+    class Labor:
+        def cleanup(self, ctx, outcome):
+            events.append(f"labor.cleanup:{outcome.status}")
+
+    class Workflow:
+        def __init__(self, labor):
+            self.labor = labor
+
+        def cleanup(self, ctx, outcome):
+            events.append(f"workflow.cleanup:{outcome.status}")
+            raise RuntimeError("cleanup failed")
+
+    descriptor = ModuleRuntimeDescriptorV2(
+        interfaces={
+            "labor": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="interface", name="labor"),
+                target=object,
+                module_name="cleanup_error_module.interfaces.labor",
+                attr_name="Labor",
+                owner="interfaces/labor.py",
+            ),
+        },
+        components={
+            "api_labor": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="component", name="api_labor", implements="labor"),
+                target=Labor,
+                module_name="cleanup_error_module.objects.api_labor",
+                attr_name="Labor",
+                owner="objects/api_labor.py",
+            ),
+        },
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(
+                    kind="workflow",
+                    name="default",
+                    inject=(InjectSpec(name="labor", type="interface", target="labor"),),
+                ),
+                target=Workflow,
+                module_name="cleanup_error_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            ),
+        },
+        implementations={"labor": ("api_labor",)},
+    )
+    container = ObjectContainerV2(descriptor, "default")
+    context = TaskContext(env_id=1, task_name="cleanup_error_module")
+    outcome = TaskOutcome(status="failed", error="boom", error_type="RuntimeError")
+
+    container.build_workflow()
+    await container.cleanup(context, outcome)
+
+    assert events == ["workflow.cleanup:failed", "labor.cleanup:failed"]
 
 
 def test_object_container_builds_workflow_from_annotation_declared_metadata(tmp_path: Path):

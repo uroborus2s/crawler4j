@@ -3,8 +3,6 @@
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from crawler4j_contracts.signal import TaskSignal
-
 
 @dataclass
 class TaskResult:
@@ -15,7 +13,6 @@ class TaskResult:
     message: str = ""
     data: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
-    signal: TaskSignal | None = None
 
     @classmethod
     def ok(
@@ -23,7 +20,6 @@ class TaskResult:
         tasks_completed: int = 1,
         message: str = "成功",
         data: dict[str, Any] | None = None,
-        signal: TaskSignal | None = None,
         **kwargs: Any,
     ) -> "TaskResult":
         payload: dict[str, Any] = {}
@@ -36,7 +32,6 @@ class TaskResult:
             tasks_completed=tasks_completed,
             message=message,
             data=payload,
-            signal=signal,
         )
 
     @classmethod
@@ -45,7 +40,6 @@ class TaskResult:
         message: str,
         error: str | None = None,
         data: dict[str, Any] | None = None,
-        signal: TaskSignal | None = None,
         **kwargs: Any,
     ) -> "TaskResult":
         payload: dict[str, Any] = {}
@@ -59,13 +53,10 @@ class TaskResult:
             message=message,
             data=payload,
             error=error,
-            signal=signal,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        data = asdict(self)
-        data["signal"] = self.signal.to_dict() if self.signal else None
-        return data
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TaskResult":
@@ -75,5 +66,4 @@ class TaskResult:
             message=data.get("message", ""),
             data=data.get("data", {}),
             error=data.get("error"),
-            signal=TaskSignal.from_dict(data["signal"]) if data.get("signal") else None,
         )

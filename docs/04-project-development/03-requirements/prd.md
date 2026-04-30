@@ -107,25 +107,26 @@
 - [ ] `UAT-014` 默认工作流、页面动作、环境候选和清理候选可在独立文件中声明，而不是必须写在根 `__init__.py`；0.4.0 不提供模块级自定义生命周期 hooks
 - [ ] `UAT-015` 模块升级说明明确要求按最新模板重新初始化，而不是继续维护旧式根入口
 
-### `REQ-007` ATM 必须能够根据信号展示结构化确认内容并等待客户端确认
+### `REQ-007` ATM 生命周期与环境处置必须由宿主统一管理
 
 - 优先级：P1
-- 描述：当模块通过 `TaskSignal.wait_for_confirmation(...)` 发出等待确认信号时，Core 必须持久化该信号，桌面客户端必须能够读取并展示结构化确认内容，并在用户确认成功或失败后继续完成任务终态处理。
-- 用户故事：作为 ATM 使用者，我希望当模块要求人工复核时，客户端能直接弹出带结构化信息的确认面板，以便我不需要翻日志或读原始 JSON 就能做出确认。
-- 前置条件：模块已发出 `wait_for_confirmation` 信号，且 `payload` 可选包含结构化展示说明。
+- 描述：模块运行时代码不得发出流程控制或环境处置指令；Core 必须统一处理 workflow/object 收尾、任务终态环境回收和后续环境清理。
+- 用户故事：作为 ATM 使用者，我希望任务被中止、失败或成功结束后环境处置口径一致，并能在环境管理页集中删除孤岛或废弃环境，避免模块代码绕过宿主安全门。
+- 前置条件：运行模板已选定固定环境、候选环境或创建环境模式；模块按 0.4.0 装饰器契约声明 workflow、component 和数据表。
 - 业务规则：
-  - `wait_for_confirmation` 仍只允许 `keep_alive` 语义保留环境，等待期间不进入任务终态收口。
-  - `payload.confirmation` 作为正式 UI 展示协议，至少支持 `title`、`description`、`fields`、`confirm_text`、`reject_text`。
-  - 若模块未提供 `payload.confirmation`，客户端应回退为展示 `message` 和原始 payload 的键值内容。
-  - 用户确认成功或失败后，ATM 继续走既有 `confirm_task_success/confirm_task_failure` 链路，不新增第二套确认入口。
-- 依赖项：`packages/crawler4j/src/core/atm/{execution_runner,dispatcher,repository,ui/task_detail_dialog.py}`、`packages/crawler4j/src/core/foundation/event_bus.py`
-- 排除范围：本轮不实现跨进程/重启后的等待确认恢复执行；不扩展为任意自定义表单提交通道。
+  - workflow 只能通过 `TaskResult` 表达成功或失败，不提供模块侧信号确认入口。
+  - workflow/component 如需收尾，只实现 `cleanup(ctx, outcome)`；旧 `aclose()` / `close()` 不作为宿主生命周期契约。
+  - 任务终态和用户中止后的环境统一回收，不在中止弹窗或运行结果中提供保留/删除策略。
+  - 创建环境后宿主立即写入 `host.env_claim(pending)`；终态通过 `env_binding_field` 扫描模块业务表并标记 `claimed/abandoned`。
+  - 环境删除只通过环境管理页 `清理环境` 执行，候选来源包括孤岛环境、未认领环境、owner 缺失环境和同模块 `@env_cleanup_candidates` 返回的业务废弃环境。
+- 依赖项：`packages/crawler4j/src/core/atm/{execution_runner,dispatcher,repository,ui/task_list_widget.py}`、`packages/crawler4j/src/core/rem/{env_claims.py,cleanup_service.py}`、`packages/crawler4j-contracts/src/{context.py,result.py,lifecycle.py}`
+- 排除范围：本轮不恢复人工等待确认状态机；不允许模块发出环境保留、回收或删除指令。
 
 验收标准：
 
-- [x] `UAT-016` `TaskSignal.wait_for_confirmation` 的结构化内容可随任务状态一起持久化并重新读取
-- [x] `UAT-017` ATM 详情页在收到等待确认信号时会弹出结构化确认面板
-- [x] `UAT-018` 用户在确认面板中选择成功或失败后，会调用既有确认服务完成任务收尾
+- [x] `UAT-016` Contracts 不再导出 `TaskSignal` / `EnvAction`，SDK scanner 会阻断模块导入这些宿主控制对象
+- [x] `UAT-017` 任务终态、异常、超时和用户中止都会调用对象 `cleanup(ctx, outcome)` 后统一回收环境
+- [x] `UAT-018` 环境管理页 `清理环境` 能统一预览并删除孤岛、未认领、owner 缺失和模块业务废弃环境
 
 ### `REQ-008` 宿主必须为模块提供独立的审计事件持久化能力
 

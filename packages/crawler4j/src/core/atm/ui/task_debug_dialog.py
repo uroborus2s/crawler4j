@@ -190,13 +190,11 @@ class JobDebugDialog(QDialog):
         self.wait_for_attach_checkbox = QCheckBox("等待 IDE 附加")
         self.wait_for_attach_checkbox.setChecked(True)
         self.stop_on_entry_checkbox = QCheckBox("启动后立即断住")
-        self.keep_environment_checkbox = QCheckBox("调试后保留环境")
 
         form.addRow("附加端口", self.attach_port_spin)
         form.addRow("执行超时", self.timeout_spin)
         form.addRow("", self.wait_for_attach_checkbox)
         form.addRow("", self.stop_on_entry_checkbox)
-        form.addRow("", self.keep_environment_checkbox)
         layout.addWidget(config_card)
 
         action_row = QHBoxLayout()
@@ -287,7 +285,6 @@ class JobDebugDialog(QDialog):
             attach_port=self.attach_port_spin.value(),
             wait_for_attach=self.wait_for_attach_checkbox.isChecked(),
             stop_on_entry=self.stop_on_entry_checkbox.isChecked(),
-            keep_environment=self.keep_environment_checkbox.isChecked(),
         )
 
     def refresh_later(self) -> None:

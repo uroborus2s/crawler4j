@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from crawler4j_contracts import EnvAction, EnvCandidate, TaskContext, TaskResult, TaskSignal, TaskSignalAction
+from crawler4j_contracts import EnvCandidate, TaskContext, TaskResult
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 from src.core.atm.runtime_capabilities import (
@@ -19,6 +19,14 @@ from src.core.atm.runtime_capabilities import (
 from src.core.foundation.logging import logger
 from src.core.mms.settings_store import ModuleSettingsStore, get_module_settings_store
 from src.core.mms.service import ModuleService, get_module_service
+from src.core.rem.env_claims import (
+    CLAIM_CLAIMED,
+    get_env_claim,
+    is_env_bound_by_module,
+    refresh_env_claim_after_task,
+    set_claimed_env_claim,
+    set_pending_env_claim,
+)
 from src.core.rem.manager import EnvironmentManager, get_environment_manager
 from src.core.rem.models import (
     Environment,
@@ -34,10 +42,7 @@ from src.core.system.config_center import ConfigCenterService, get_config_center
 
 TaskUpdateCallback = Callable[[Task], Awaitable[None]]
 StopRequestedCallback = Callable[[], bool]
-StopEnvActionCallback = Callable[[], EnvAction | None]
 ContextReadyCallback = Callable[[TaskContext], None]
-CANDIDATE_OWNER_METADATA_NAMESPACE = "scheduler.env_candidates"
-CANDIDATE_OWNER_METADATA_KEY = "module_name"
 CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
 
 
@@ -66,7 +71,6 @@ class ExecutionRequest:
     creation_params: dict[str, Any] = field(default_factory=dict)
     creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
     execution_timeout: int = 0
-    default_env_action: EnvAction | None = None
     runtime_capabilities: RuntimeCapabilities | None = None
 
 
@@ -80,7 +84,6 @@ class ExecutionResult:
     env_id: int | None = None
     env_created: bool = False
     env_lease_id: str | None = None
-    signal: TaskSignal | None = None
     creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
 
 
@@ -105,10 +108,10 @@ class ExecutionRunner:
         self._config = config or get_config_center()
         self._runtime_capabilities_factory = runtime_capabilities_factory
         self._module_poll_interval = 0.1
-        self._env_action_timeout_seconds = self._get_timeout_budget("atm.env_action_timeout_seconds")
+        self._env_recycle_timeout_seconds = self._get_timeout_budget("atm.env_recycle_timeout_seconds")
         logger.debug(
             "[ATM] ExecutionRunner timeout budgets loaded: "
-            f"env_action={self._env_action_timeout_seconds:.1f}s"
+            f"env_recycle={self._env_recycle_timeout_seconds:.1f}s"
         )
 
     def _get_timeout_budget(self, key: str) -> float:
@@ -143,7 +146,6 @@ class ExecutionRunner:
         on_task_update: TaskUpdateCallback | None = None,
         on_context_ready: ContextReadyCallback | None = None,
         is_stop_requested: StopRequestedCallback | None = None,
-        resolve_stop_env_action: StopEnvActionCallback | None = None,
     ) -> ExecutionResult:
         """执行一次完整的模块运行生命周期。"""
 
@@ -168,7 +170,6 @@ class ExecutionRunner:
         env_created = False
         task_context = None
         result: TaskResult | None = None
-        signal: TaskSignal | None = None
         effective_creation_params = deepcopy(request.creation_params)
 
         try:
@@ -191,7 +192,7 @@ class ExecutionRunner:
                         )
                     else:
                         env_lease = await self.rem.lease_manager.acquire(env, task.id, timeout=wait_timeout)
-                    await self._bind_env_to_module(selected_env_id, request.module_name)
+                    await self._claim_fixed_env_for_module(selected_env_id, request.module_name, task.id)
                     env_id = int(env_lease.env_id)
                     task.lease_id = env_lease.id
                     logger.info(f"[ATM] Task {task.id} selected fixed env {env_id}")
@@ -294,7 +295,12 @@ class ExecutionRunner:
                 )
                 env_id = env.id
                 env_created = True
-                await self._bind_env_to_module(env_id, request.module_name)
+                await set_pending_env_claim(
+                    self.rem,
+                    env_id,
+                    owner_module=request.module_name,
+                    task_id=task.id,
+                )
                 logger.info(f"[ATM] Task {task.id} created env {env_id}")
 
                 env_lease = await self.rem.lease_manager.claim_created_env(env, task.id)
@@ -327,8 +333,8 @@ class ExecutionRunner:
                 env_lease=env_lease,
                 env_id=env_id,
                 env_created=env_created,
-                creation_lifecycle=request.creation_lifecycle,
-                resolve_stop_env_action=resolve_stop_env_action,
+                acquisition_context=acquisition_context,
+                module_name=request.module_name,
                 on_task_update=on_task_update,
             )
             return ExecutionResult(
@@ -371,25 +377,18 @@ class ExecutionRunner:
                 on_context_ready(task_context)
 
             if task.status == TaskStatus.RUNNING:
-                task_context.set_signal_phase("run_module")
-                try:
-                    raw_result = await self._run_module_with_stop_guard(
-                        module_name=module_name,
-                        task_context=task_context,
-                        execution_timeout=request.execution_timeout,
-                        is_stop_requested=is_stop_requested,
-                    )
-                finally:
-                    task_context.set_signal_phase(None)
+                raw_result = await self._run_module_with_stop_guard(
+                    module_name=module_name,
+                    task_context=task_context,
+                    execution_timeout=request.execution_timeout,
+                    is_stop_requested=is_stop_requested,
+                )
 
                 if task_context.should_stop() or self._is_stop_requested(is_stop_requested):
                     raise TaskStopRequested("Job paused during execution")
 
                 result = self._normalize_task_result(raw_result)
-                signal = self._resolve_task_signal(task_context, result)
-                if signal:
-                    self._apply_signal_outcome(task, signal, result)
-                elif result.success:
+                if result.success:
                     task.message = result.message or str(result.data or raw_result)
                     task.error = ""
                     task.status = TaskStatus.SUCCEEDED
@@ -398,20 +397,7 @@ class ExecutionRunner:
                     task.error = result.error or result.message
                     task.status = TaskStatus.FAILED
 
-            self._record_runtime_outcome(task_context, task, result, signal)
-
-            if task.status == TaskStatus.WAITING_CONFIRMATION:
-                await self._publish_task_update(task, on_task_update)
-                return ExecutionResult(
-                    task=task,
-                    task_context=task_context,
-                    result=result,
-                    env_id=env_id,
-                    env_created=env_created,
-                    env_lease_id=env_lease.id if env_lease else None,
-                    signal=signal,
-                    creation_lifecycle=request.creation_lifecycle,
-                )
+            self._record_runtime_outcome(task_context, task, result)
         except asyncio.TimeoutError:
             logger.error(f"[ATM] Task {task.id} execution timed out")
             task.error = f"Execution Timeout: {request.execution_timeout}s"
@@ -444,41 +430,25 @@ class ExecutionRunner:
 
         task.finished_at = int(time.time())
 
-        resolved_env_action = None
         if task_context:
             task_context.runtime["final_status"] = task.status.value
             task_context.runtime["task_error"] = task.error
-            resolved_env_action = self._resolve_requested_env_action(
-                task=task,
-                signal=signal,
-                env_created=env_created,
-                creation_lifecycle=request.creation_lifecycle,
-                default_env_action=request.default_env_action,
-                resolve_stop_env_action=resolve_stop_env_action,
-            )
-            if env_lease and resolved_env_action:
-                task_context.runtime["env_action"] = {
-                    "action": resolved_env_action.value,
-                    "env_id": int(task.env_id) if task.env_id else None,
-                    "success": None,
-                }
 
         if env_lease:
-            resolved_env_action = resolved_env_action or self._resolve_requested_env_action(
-                task=task,
-                signal=signal,
-                env_created=env_created,
-                creation_lifecycle=request.creation_lifecycle,
-                default_env_action=request.default_env_action,
-                resolve_stop_env_action=resolve_stop_env_action,
-            )
-            env_action_info = await self._apply_env_action(
+            recycle_info = await self._recycle_env_lease(
                 env_lease=env_lease,
-                env_action=resolved_env_action,
                 env_id=int(task.env_id) if task.env_id else None,
             )
             if task_context:
-                task_context.runtime["env_action"] = env_action_info
+                task_context.runtime["env_recycle"] = recycle_info
+
+        if env_created and task.env_id:
+            await self._refresh_created_env_claim(
+                env_id=int(task.env_id),
+                module_name=module_name,
+                task_id=task.id,
+                context=task_context or acquisition_context,
+            )
 
         await self._publish_task_update(task, on_task_update)
 
@@ -489,121 +459,7 @@ class ExecutionRunner:
             env_id=env_id,
             env_created=env_created,
             env_lease_id=env_lease.id if env_lease else None,
-            signal=signal,
             creation_lifecycle=request.creation_lifecycle,
-        )
-
-    async def finalize_waiting(
-        self,
-        *,
-        task: Task,
-        task_context: TaskContext,
-        env_lease: EnvLease | None,
-        env_created: bool,
-        creation_lifecycle: CreationLifecycle,
-        confirmed: bool,
-        confirmation_message: str = "",
-        on_task_update: TaskUpdateCallback | None = None,
-    ) -> ExecutionResult:
-        """完成等待人工确认的任务。"""
-
-        if task.status != TaskStatus.WAITING_CONFIRMATION:
-            raise ValueError(f"Task {task.id} is not waiting for confirmation")
-
-        if confirmed:
-            result = TaskResult.ok(message=confirmation_message or task.message or "人工确认成功")
-            task.status = TaskStatus.SUCCEEDED
-            task.message = result.message
-            task.error = ""
-        else:
-            result = TaskResult.fail(
-                message=confirmation_message or task.message or "人工确认失败",
-                error=confirmation_message or "user_confirmation_failed",
-            )
-            task.status = TaskStatus.FAILED
-            task.message = result.message
-            task.error = result.error or result.message
-
-        task.finished_at = int(time.time())
-        self._record_runtime_outcome(task_context, task, result, None)
-
-        if env_lease:
-            task_context.runtime["env_action"] = {
-                "action": self._default_env_action(env_created, creation_lifecycle).value,
-                "env_id": int(task.env_id) if task.env_id else None,
-                "success": None,
-            }
-        if env_lease:
-            env_action_info = await self._apply_env_action(
-                env_lease=env_lease,
-                env_action=self._default_env_action(env_created, creation_lifecycle),
-                env_id=int(task.env_id) if task.env_id else None,
-            )
-            task_context.runtime["env_action"] = env_action_info
-        await self._publish_task_update(task, on_task_update)
-
-        return ExecutionResult(
-            task=task,
-            task_context=task_context,
-            result=result,
-            env_id=int(task.env_id) if task.env_id else None,
-            env_created=env_created,
-            env_lease_id=env_lease.id if env_lease else None,
-            signal=None,
-            creation_lifecycle=creation_lifecycle,
-        )
-
-    async def cancel_waiting(
-        self,
-        *,
-        task: Task,
-        task_context: TaskContext,
-        env_lease: EnvLease | None,
-        env_created: bool,
-        creation_lifecycle: CreationLifecycle,
-        env_action: EnvAction | None = None,
-        cancel_message: str = "Job paused",
-        on_task_update: TaskUpdateCallback | None = None,
-    ) -> ExecutionResult:
-        """取消等待人工确认的任务，并执行统一 cleanup / 环境收口。"""
-
-        if task.status != TaskStatus.WAITING_CONFIRMATION:
-            raise ValueError(f"Task {task.id} is not waiting for confirmation")
-
-        result = TaskResult.fail(message=cancel_message, error=cancel_message)
-        task.status = TaskStatus.CANCELLED
-        task.message = ""
-        task.error = cancel_message
-        task.finished_at = int(time.time())
-        self._record_runtime_outcome(task_context, task, result, None)
-
-        resolved_env_action = env_action or self._default_env_action(env_created, creation_lifecycle)
-        if env_lease:
-            task_context.runtime["env_action"] = {
-                "action": resolved_env_action.value,
-                "env_id": int(task.env_id) if task.env_id else None,
-                "success": None,
-            }
-
-        if env_lease:
-            env_action_info = await self._apply_env_action(
-                env_lease=env_lease,
-                env_action=resolved_env_action,
-                env_id=int(task.env_id) if task.env_id else None,
-            )
-            task_context.runtime["env_action"] = env_action_info
-
-        await self._publish_task_update(task, on_task_update)
-
-        return ExecutionResult(
-            task=task,
-            task_context=task_context,
-            result=result,
-            env_id=int(task.env_id) if task.env_id else None,
-            env_created=env_created,
-            env_lease_id=env_lease.id if env_lease else None,
-            signal=None,
-            creation_lifecycle=creation_lifecycle,
         )
 
     def _extract_proxy_config(self, creation_params: dict[str, Any]) -> ProxyConfig | None:
@@ -703,40 +559,32 @@ class ExecutionRunner:
         return await self._is_env_candidate_authorized(int(env_id), module_name)
 
     async def _get_env_owner_module(self, env_id: int) -> str:
-        get_metadata = getattr(self.rem, "get_metadata", None)
-        if not callable(get_metadata):
-            return ""
-        owner = await get_metadata(
-            env_id,
-            CANDIDATE_OWNER_METADATA_NAMESPACE,
-            CANDIDATE_OWNER_METADATA_KEY,
-        )
-        return str(owner or "").strip()
+        claim = await get_env_claim(self.rem, int(env_id))
+        return claim.owner_module
 
     async def _assert_env_claimable_by_module(self, env_id: int, module_name: str) -> None:
-        owner = await self._get_env_owner_module(int(env_id))
+        claim = await get_env_claim(self.rem, int(env_id))
+        owner = claim.owner_module
         if owner and owner != module_name:
             raise RuntimeError(f"环境 {env_id} 已绑定到模块 {owner}，不能被 {module_name} 使用")
 
-    async def _bind_env_to_module(self, env_id: int, module_name: str) -> None:
-        set_metadata = getattr(self.rem, "set_metadata", None)
-        if not callable(set_metadata):
-            return
+    async def _claim_fixed_env_for_module(self, env_id: int, module_name: str, task_id: str) -> None:
         await self._assert_env_claimable_by_module(int(env_id), module_name)
-        await set_metadata(
-            int(env_id),
-            CANDIDATE_OWNER_METADATA_NAMESPACE,
-            CANDIDATE_OWNER_METADATA_KEY,
-            module_name,
-            "string",
-        )
+        claim = await get_env_claim(self.rem, int(env_id))
+        if not claim.owner_module:
+            await set_claimed_env_claim(self.rem, int(env_id), owner_module=module_name, task_id=task_id)
 
     async def _is_env_candidate_authorized(self, env_id: int, module_name: str) -> bool:
-        get_metadata = getattr(self.rem, "get_metadata", None)
-        if not callable(get_metadata):
-            return True
-        owner = await self._get_env_owner_module(int(env_id))
-        return owner == module_name
+        claim = await get_env_claim(self.rem, int(env_id))
+        if claim.owner_module != module_name or claim.state != CLAIM_CLAIMED:
+            return False
+        try:
+            return is_env_bound_by_module(int(env_id), module_name, module_service=self.mms)
+        except Exception as exc:
+            logger.warning(
+                f"[ATM] Candidate env {env_id} binding check failed for module {module_name}: {exc}"
+            )
+            return False
 
     async def _mark_task_waiting_for_resource(
         self,
@@ -796,26 +644,13 @@ class ExecutionRunner:
         env_lease,
         env_id: int | None,
         env_created: bool,
-        creation_lifecycle: CreationLifecycle,
-        resolve_stop_env_action: StopEnvActionCallback | None,
+        acquisition_context: TaskContext,
+        module_name: str,
         on_task_update: TaskUpdateCallback | None,
     ) -> None:
-        stop_env_action = None
-        if isinstance(error, TaskStopRequested):
-            stop_env_action = (
-                resolve_stop_env_action() if resolve_stop_env_action else None
-            ) or self._default_env_action(env_created, creation_lifecycle)
-
         if env_lease:
             try:
-                if stop_env_action is not None:
-                    await self._apply_env_action(
-                        env_lease=env_lease,
-                        env_action=stop_env_action,
-                        env_id=env_id,
-                    )
-                else:
-                    await self.rem.release(env_lease)
+                await self._recycle_env_lease(env_lease=env_lease, env_id=env_id)
             except Exception as release_error:
                 logger.error(
                     f"[ATM] Task {task.id} failed to release lease during acquisition error: {release_error}"
@@ -823,14 +658,22 @@ class ExecutionRunner:
 
         elif env_created and env_id is not None:
             try:
-                await self._apply_created_env_stop_action_without_lease(
-                    env_id=int(env_id),
-                    env_action=stop_env_action or self._default_env_action(env_created, creation_lifecycle),
-                )
+                await self._recycle_created_env_without_lease(env_id=int(env_id))
             except Exception as reset_error:
                 logger.error(
                     f"[ATM] Task {task.id} failed to clean env during acquisition error: {reset_error}"
                 )
+
+        if env_created and env_id is not None:
+            try:
+                await self._refresh_created_env_claim(
+                    env_id=int(env_id),
+                    module_name=module_name,
+                    task_id=task.id,
+                    context=acquisition_context,
+                )
+            except Exception as claim_error:
+                logger.warning(f"[ATM] Task {task.id} failed to refresh env claim: {claim_error}")
 
         if isinstance(error, TaskStopRequested):
             task.status = TaskStatus.CANCELLED
@@ -881,6 +724,7 @@ class ExecutionRunner:
                 if deadline is not None:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
+                        task_context.runtime["_module_cancel_reason"] = "timed_out"
                         await self._cancel_asyncio_task(module_task)
                         raise asyncio.TimeoutError
                     wait_timeout = min(wait_timeout, remaining)
@@ -891,6 +735,7 @@ class ExecutionRunner:
                     continue
                 except asyncio.CancelledError as exc:
                     if task_context.should_stop() or self._is_stop_requested(is_stop_requested):
+                        task_context.runtime["_module_cancel_reason"] = "cancelled"
                         await self._cancel_asyncio_task(module_task)
                         raise TaskStopRequested("Job paused during execution") from exc
                     raise
@@ -910,6 +755,7 @@ class ExecutionRunner:
         is_stop_requested: StopRequestedCallback | None,
     ) -> None:
         if task_context.should_stop() or self._is_stop_requested(is_stop_requested):
+            task_context.runtime["_module_cancel_reason"] = "cancelled"
             raise TaskStopRequested("Job paused during execution")
 
     def _normalize_task_result(self, result: Any) -> TaskResult:
@@ -921,219 +767,107 @@ class ExecutionRunner:
             return TaskResult.ok(message=str(result), data=result)
         return TaskResult.ok(message=str(result), data={"value": result})
 
-    def _resolve_task_signal(
-        self,
-        task_context: TaskContext,
-        task_result: TaskResult | None,
-    ) -> TaskSignal | None:
-        emitted_signal = task_context.get_signal()
-        result_signal = task_result.signal if task_result else None
-        if emitted_signal and result_signal and emitted_signal != result_signal:
-            raise ValueError("TaskContext.emit_signal 与 TaskResult.signal 同时存在且不一致")
-        task_context.clear_signal()
-        return result_signal or emitted_signal
-
-    def _signal_to_task_result(self, signal: TaskSignal) -> TaskResult:
-        if signal.action == TaskSignalAction.FAIL:
-            return TaskResult.fail(
-                message=signal.message or "任务失败",
-                error=signal.error,
-                data=dict(signal.payload),
-                signal=signal,
-            )
-        return TaskResult.ok(
-            message=signal.message or "任务完成",
-            data=dict(signal.payload),
-            signal=signal,
-        )
-
-    def _apply_signal_outcome(
-        self,
-        task: Task,
-        signal: TaskSignal,
-        result: TaskResult,
-    ) -> None:
-        task.signal = signal.to_dict()
-        task.message = signal.message or result.message
-        if signal.action == TaskSignalAction.SUCCEED:
-            task.error = ""
-            task.status = TaskStatus.SUCCEEDED
-            return
-        if signal.action == TaskSignalAction.FAIL:
-            task.error = signal.error or result.error or signal.message or result.message
-            task.status = TaskStatus.FAILED
-            return
-        if signal.action == TaskSignalAction.CANCEL:
-            task.error = signal.error or signal.message or ""
-            task.status = TaskStatus.CANCELLED
-            return
-        if signal.action == TaskSignalAction.WAIT_FOR_CONFIRMATION:
-            if signal.env_action not in {None, EnvAction.KEEP_ALIVE}:
-                raise ValueError("wait_for_confirmation 信号仅支持 keep_alive 环境语义")
-            task.error = ""
-            task.status = TaskStatus.WAITING_CONFIRMATION
-            return
-        raise ValueError(f"Unsupported task signal action: {signal.action}")
-
     def _record_runtime_outcome(
         self,
         task_context: TaskContext,
         task: Task,
         result: TaskResult | None,
-        signal: TaskSignal | None,
     ) -> None:
-        if signal:
-            task.signal = signal.to_dict()
-        elif task.status != TaskStatus.WAITING_CONFIRMATION:
-            task.signal = None
         if task.status != TaskStatus.PENDING:
             task.waiting_since = None
         task_context.runtime["final_status"] = task.status.value
         task_context.runtime["task_error"] = task.error
         if result:
             task_context.runtime["task_result"] = result.to_dict()
-        if signal:
-            task_context.runtime["task_signal"] = signal.to_dict()
 
-    def _default_env_action(
-        self,
-        _env_created: bool,
-        _creation_lifecycle: CreationLifecycle,
-    ) -> EnvAction:
-        # 默认仅关闭并回收环境；显式 DESTROY 信号才允许删除。
-        return EnvAction.RECYCLE
-
-    async def _await_env_action_step(self, label: str, operation: Awaitable[Any]) -> Any:
+    async def _await_env_recycle_step(self, label: str, operation: Awaitable[Any]) -> Any:
         started_at = time.monotonic()
         try:
             result = await asyncio.wait_for(
                 operation,
-                timeout=self._env_action_timeout_seconds,
+                timeout=self._env_recycle_timeout_seconds,
             )
             logger.debug(
-                f"[ATM] Env action step finished: step={label} "
-                f"budget={self._env_action_timeout_seconds:.1f}s "
+                f"[ATM] Env recycle step finished: step={label} "
+                f"budget={self._env_recycle_timeout_seconds:.1f}s "
                 f"duration={time.monotonic() - started_at:.3f}s"
             )
             return result
         except asyncio.TimeoutError as exc:
             logger.error(
-                f"[ATM] Env action step timeout: step={label} "
-                f"budget={self._env_action_timeout_seconds:.1f}s "
+                f"[ATM] Env recycle step timeout: step={label} "
+                f"budget={self._env_recycle_timeout_seconds:.1f}s "
                 f"duration={time.monotonic() - started_at:.3f}s"
             )
             raise TimeoutError(
-                f"{label} timed out after {self._env_action_timeout_seconds:.1f}s"
+                f"{label} timed out after {self._env_recycle_timeout_seconds:.1f}s"
             ) from exc
 
-    async def _apply_env_action(
+    async def _recycle_env_lease(
         self,
         *,
         env_lease: EnvLease,
-        env_action: EnvAction,
         env_id: int | None,
     ) -> dict[str, Any]:
         info = {
-            "action": env_action.value,
+            "action": "recycle",
             "env_id": env_id,
             "success": False,
         }
         logger.info(
-            f"[ATM] Applying env action: env_id={env_id} action={env_action.value} "
-            f"budget={self._env_action_timeout_seconds:.1f}s"
+            f"[ATM] Recycling env after task: env_id={env_id} "
+            f"budget={self._env_recycle_timeout_seconds:.1f}s"
         )
         try:
-            if env_action == EnvAction.RECYCLE:
-                info["success"] = await self._await_env_action_step(
-                    "release",
-                    self.rem.release(env_lease),
-                )
-                logger.info(
-                    f"[ATM] Env action finished: env_id={env_id} "
-                    f"action={env_action.value} success={info['success']}"
-                )
-                return info
-            if env_action == EnvAction.KEEP_ALIVE:
-                info["success"] = await self._await_env_action_step(
-                    "release_keep_alive",
-                    self.rem.release_keep_alive(env_lease),
-                )
-                logger.info(
-                    f"[ATM] Env action finished: env_id={env_id} "
-                    f"action={env_action.value} success={info['success']}"
-                )
-                return info
-            if env_action == EnvAction.DESTROY:
-                released = await self._await_env_action_step(
-                    "release_keep_alive",
-                    self.rem.release_keep_alive(env_lease),
-                )
-                destroyed = (
-                    released
-                    and bool(env_id is not None)
-                    and await self._await_env_action_step(
-                        "destroy_env",
-                        self.rem.destroy_env(int(env_id)),
-                    )
-                )
-                info["success"] = released and destroyed
-                info["released"] = released
-                info["destroyed"] = destroyed
-                logger.info(
-                    f"[ATM] Env action finished: env_id={env_id} action={env_action.value} "
-                    f"success={info['success']} released={released} destroyed={destroyed}"
-                )
-                return info
+            info["success"] = await self._await_env_recycle_step(
+                "release",
+                self.rem.release(env_lease),
+            )
+            logger.info(
+                f"[ATM] Env recycle finished: env_id={env_id} success={info['success']}"
+            )
+            return info
         except Exception as e:
-            logger.error(f"[ATM] Failed to apply env action {env_action.value} for env {env_id}: {e}")
+            logger.error(f"[ATM] Failed to recycle env {env_id}: {e}")
             info["error"] = str(e)
             return info
-        raise ValueError(f"Unsupported env action: {env_action}")
 
     def _task_log_id(self, task_context: TaskContext) -> str:
         runtime = getattr(task_context, "runtime", {}) or {}
         return str(runtime.get("task_id") or runtime.get("job_id") or task_context.task_name)
 
-    def _resolve_requested_env_action(
-        self,
-        *,
-        task: Task,
-        signal: TaskSignal | None,
-        env_created: bool,
-        creation_lifecycle: CreationLifecycle,
-        default_env_action: EnvAction | None,
-        resolve_stop_env_action: StopEnvActionCallback | None,
-    ) -> EnvAction:
-        if signal and signal.env_action is not None:
-            return signal.env_action
-        if task.status == TaskStatus.CANCELLED and resolve_stop_env_action:
-            requested = resolve_stop_env_action()
-            if requested is not None:
-                return requested
-        if default_env_action is not None:
-            return default_env_action
-        return self._default_env_action(env_created, creation_lifecycle)
-
-    async def _apply_created_env_stop_action_without_lease(
+    async def _recycle_created_env_without_lease(
         self,
         *,
         env_id: int,
-        env_action: EnvAction,
     ) -> None:
-        if env_action == EnvAction.KEEP_ALIVE:
-            return
-        if env_action == EnvAction.DESTROY:
-            await self._await_env_action_step(
-                "destroy_env",
-                self.rem.destroy_env(env_id),
-            )
-            return
-        env = await self._await_env_action_step(
+        env = await self._await_env_recycle_step(
             "get_env",
             self.rem.get_env(env_id),
         )
         if env:
-            await self._await_env_action_step(
+            await self._await_env_recycle_step(
                 "recycle_env",
                 self.rem.recycle_env(env),
             )
+
+    async def _refresh_created_env_claim(
+        self,
+        *,
+        env_id: int,
+        module_name: str,
+        task_id: str,
+        context: TaskContext,
+    ) -> None:
+        claim = await refresh_env_claim_after_task(
+            self.rem,
+            env_id,
+            module_name=module_name,
+            task_id=task_id,
+            module_service=self.mms,
+            context=context,
+        )
+        logger.info(
+            f"[ATM] Env claim refreshed after task: env_id={env_id} "
+            f"module={module_name} state={claim.state}"
+        )

@@ -9,13 +9,12 @@
 """
 
 import asyncio
-from copy import deepcopy
 import json
 import time
 from typing import Any, List
 
 from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig
-from src.core.atm.run_profile import AcquisitionConfig, CreationConfig, ExecutionContext, ResourceConfig, RunProfile
+from src.core.atm.run_profile import RunProfile
 from src.core.persistence.database import STATE_DB, get_connection, get_db_path
 
 
@@ -65,7 +64,6 @@ class TaskRepository:
                     lease_id TEXT,
                     result TEXT,
                     error TEXT,
-                    signal_json TEXT,
                     created_at INTEGER,
                     waiting_since INTEGER,
                     started_at INTEGER,
@@ -77,8 +75,6 @@ class TaskRepository:
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(tasks)").fetchall()
             }
-            if "signal_json" not in task_columns:
-                conn.execute("ALTER TABLE tasks ADD COLUMN signal_json TEXT")
             if "waiting_since" not in task_columns:
                 conn.execute("ALTER TABLE tasks ADD COLUMN waiting_since INTEGER")
                 conn.execute(
@@ -179,27 +175,25 @@ class TaskRepository:
                         lease_id,
                         result,
                         error,
-                        signal_json,
                         created_at,
                         waiting_since,
                         started_at,
                         finished_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         status = excluded.status,
                         env_id = excluded.env_id,
                         lease_id = excluded.lease_id,
                         result = excluded.result,
                         error = excluded.error,
-                        signal_json = excluded.signal_json,
                         waiting_since = excluded.waiting_since,
                         started_at = excluded.started_at,
                         finished_at = excluded.finished_at
                     """,
                     (
                         task.id, task.job_id, task.status.value, task.env_id, task.lease_id,
-                        task.message, task.error, json.dumps(task.signal, ensure_ascii=False) if task.signal else "",
+                        task.message, task.error,
                         task.created_at, waiting_since, task.started_at, task.finished_at
                     )
                 )
@@ -227,12 +221,11 @@ class TaskRepository:
         def _do():
             with get_connection(STATE_DB) as conn:
                 cursor = conn.execute(
-                    "SELECT COUNT(*) FROM tasks WHERE job_id = ? AND status IN (?, ?, ?)",
+                    "SELECT COUNT(*) FROM tasks WHERE job_id = ? AND status IN (?, ?)",
                     (
                         job_id,
                         TaskStatus.PENDING.value,
                         TaskStatus.RUNNING.value,
-                        TaskStatus.WAITING_CONFIRMATION.value,
                     )
                 )
                 return cursor.fetchone()[0]
@@ -243,12 +236,11 @@ class TaskRepository:
         def _do():
             with get_connection(STATE_DB) as conn:
                 cursor = conn.execute(
-                    "SELECT * FROM tasks WHERE job_id = ? AND status IN (?, ?, ?) ORDER BY created_at ASC LIMIT ?",
+                    "SELECT * FROM tasks WHERE job_id = ? AND status IN (?, ?) ORDER BY created_at ASC LIMIT ?",
                     (
                         job_id,
                         TaskStatus.PENDING.value,
                         TaskStatus.RUNNING.value,
-                        TaskStatus.WAITING_CONFIRMATION.value,
                         limit,
                     )
                 )
@@ -382,11 +374,10 @@ class TaskRepository:
         def _do():
             with get_connection(STATE_DB) as conn:
                 cursor = conn.execute(
-                    "SELECT * FROM tasks WHERE status IN (?, ?, ?)",
+                    "SELECT * FROM tasks WHERE status IN (?, ?)",
                     (
                         TaskStatus.PENDING.value,
                         TaskStatus.RUNNING.value,
-                        TaskStatus.WAITING_CONFIRMATION.value,
                     ),
                 )
                 return [self._row_to_task(row) for row in cursor.fetchall()]
@@ -433,7 +424,6 @@ class TaskRepository:
                     SET status = ?,
                         result = ?,
                         error = ?,
-                        signal_json = '',
                         waiting_since = NULL,
                         started_at = NULL,
                         finished_at = ?
@@ -454,7 +444,6 @@ class TaskRepository:
                     task.status = TaskStatus.CANCELLED
                     task.message = result_message
                     task.error = cancel_message
-                    task.signal = None
                     task.waiting_since = None
                     task.started_at = None
                     task.finished_at = now
@@ -472,14 +461,13 @@ class TaskRepository:
                 placeholders = ",".join("?" for _ in task_ids)
                 now = int(time.time())
 
-                params = [TaskStatus.FAILED.value, "", error_message, "", now, *task_ids]
+                params = [TaskStatus.FAILED.value, "", error_message, now, *task_ids]
                 conn.execute(
                     f"""
                     UPDATE tasks 
                     SET status = ?,
                         result = ?,
                         error = ?,
-                        signal_json = ?,
                         waiting_since = NULL,
                         finished_at = ?
                     WHERE id IN ({placeholders})
@@ -504,8 +492,6 @@ class TaskRepository:
             if "run_profile_json" in row.keys() and row["run_profile_json"]
             else None
         )
-        run_profile_data = _normalize_legacy_run_profile(run_profile_data)
-
         return Job(
             id=row["id"],
             name=row["name"],
@@ -528,7 +514,6 @@ class TaskRepository:
             lease_id=row["lease_id"],
             message=row["result"] or "",
             error=row["error"] or "",
-            signal=json.loads(row["signal_json"]) if "signal_json" in row.keys() and row["signal_json"] else None,
             created_at=row["created_at"],
             waiting_since=row["waiting_since"] if "waiting_since" in row.keys() else None,
             started_at=row["started_at"],
@@ -547,41 +532,3 @@ def get_task_repository() -> TaskRepository:
 
 def item_or_empty(item: Any) -> Any:
     return item if item else ""
-
-
-def _filter_model_fields(data: Any, model_cls: Any) -> Any:
-    if not isinstance(data, dict):
-        return data
-    allowed_fields = set(model_cls.model_fields)
-    return {key: value for key, value in data.items() if key in allowed_fields}
-
-
-def _normalize_legacy_run_profile(data: Any) -> Any:
-    """Drop removed 0.4.0 fields from persisted run profiles before validation."""
-    if not isinstance(data, dict):
-        return data
-
-    normalized = _filter_model_fields(deepcopy(data), RunProfile)
-    resource_data = normalized.get("resource")
-    if isinstance(resource_data, dict):
-        resource_data = _filter_model_fields(resource_data, ResourceConfig)
-        acquisition_data = resource_data.get("acquisition")
-        if isinstance(acquisition_data, dict):
-            if not acquisition_data.get("candidates"):
-                for legacy_key in ("selector_name", "env_selector", "resource_pool"):
-                    legacy_value = acquisition_data.get(legacy_key)
-                    if legacy_value:
-                        acquisition_data["candidates"] = legacy_value
-                        break
-            acquisition_data = _filter_model_fields(acquisition_data, AcquisitionConfig)
-            creation_data = acquisition_data.get("creation")
-            if isinstance(creation_data, dict):
-                acquisition_data["creation"] = _filter_model_fields(creation_data, CreationConfig)
-            resource_data["acquisition"] = acquisition_data
-        normalized["resource"] = resource_data
-
-    execution_data = normalized.get("execution")
-    if isinstance(execution_data, dict):
-        normalized["execution"] = _filter_model_fields(execution_data, ExecutionContext)
-
-    return normalized

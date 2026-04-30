@@ -132,9 +132,15 @@ event_id = ctx.db.audit("account_events").append(
 
 0.4.0 不再把 `hooks/`、`env_selectors/` 或 `EnvSelectorSpec` 作为 SDK / Contracts 主路径。生命周期和资源等待由 Core 0.4.0 的运行模板、对象容器和宿主调度负责；模块侧只声明 `@workflow`、`@component`、`@page_action`、`@data_table`、`@data_query`、`@env_candidates` 与 `@env_cleanup_candidates`。
 
+对象生命周期归宿主所有。Core 会在每个 task/env 内创建独立对象图，并在 workflow 成功、失败、超时、异常或被用户停止后清理 workflow 与 component 实例；清理顺序为 workflow 优先，然后 component 依赖反向顺序。模块对象只实现 `cleanup(ctx, outcome)`，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。清理异常只写日志，不覆盖任务终态或环境回收结果；旧 `aclose()` / `close()` 不再会被宿主调用。
+
 环境选择写在 `candidates/*.py` 中，使用 `@env_candidates` 装饰同步纯函数。函数可以直接返回 env id 列表，也可以返回 `EnvCandidates.from_table(...).filter(...).order(...).limit(...)` 这样的链式查询。账号注册时间、会员等级、黑号状态等模块业务过滤应存放在模块数据表中，并在候选纯函数里实时查询，不需要同步资源池。
 
-批量环境清理写在 `cleanups/*.py` 中，使用 `@env_cleanup_candidates` 装饰同步纯函数。函数返回待清理 env id 列表或同一个 `EnvCandidates` 链式查询对象；这个入口只表达“模块认为可清理的候选集合”。宿主客户端触发清理时会汇总所有模块来源，展示预览，用户确认后再二次校验 `READY/PAUSED`、无租约、无关联任务，最后由 REM 调用 `destroy_env()` 删除。清理候选运行面只有只读 `ctx.db`，不暴露 `ctx.tools`。
+模块数据表如果代表账号、登录态或其他环境绑定业务实体，必须在 `@data_table(..., env_binding_field="env_id")` 中声明绑定字段；字段必须存在于 schema 且为 integer。宿主只通过这些声明扫描“模块是否已经认领环境”。
+
+批量环境清理写在 `cleanups/*.py` 中，使用 `@env_cleanup_candidates` 装饰同步纯函数。函数返回待清理 env id 列表或同一个 `EnvCandidates` 链式查询对象；这个入口只表达“模块认为已绑定且业务上可丢弃的候选集合”。宿主客户端触发清理时会同时扫描孤岛环境、任务创建后未被模块数据表认领的环境、owner 模块已不存在的环境，以及模块清理候选；展示预览后再二次校验 `READY/PAUSED`、无租约、无关联任务、无活跃 task 引用、未被运行模板固定引用，最后由 REM 调用 `destroy_env()` 删除。清理候选运行面只有只读 `ctx.db`，不暴露 `ctx.tools`。
+
+模块 workflow 不允许导入或发送 `TaskSignal`、`TaskSignalAction`、`EnvAction` 这类流程/环境处置对象。单次运行结束、失败、超时或用户中止后的环境统一由宿主回收；模块若要表达“长期未使用”“黑号已废弃”“账号过期”等业务清理条件，只能通过 `@env_cleanup_candidates` 返回候选 env id，由宿主预览确认后执行。
 
 如果历史模块仍依赖 `hooks/*.py`、`env_selectors/*.py`、`TaskSpec` 或 `WorkflowSpec`，它属于 0.3.x 维护线，需要在 0.3.x 分支处理，不在当前 0.4.x SDK / Contracts 中兼容。
 

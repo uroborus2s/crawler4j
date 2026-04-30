@@ -148,6 +148,93 @@ def unused_accounts(ctx, params=None):
     assert accounts.meta.storage_mode == "custom_table"
 
 
+def test_scan_v2_module_rejects_module_flow_control_imports(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import EnvAction, TaskResult, TaskSignal, workflow
+from crawler4j_contracts.signal import TaskSignalAction
+
+
+@workflow(name="main_workflow")
+class MainWorkflow:
+    def run(self, ctx):
+        return TaskResult.ok(
+            signal=TaskSignal.succeed(message="ok", env_action=EnvAction.DESTROY),
+        )
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+    blocked = [diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_HOST_FLOW_CONTROL_IMPORT"]
+
+    assert {diagnostic.message for diagnostic in blocked} == {
+        "EnvAction is host-owned and cannot be imported by module runtime code",
+        "TaskSignal is host-owned and cannot be imported by module runtime code",
+        "TaskSignalAction is host-owned and cannot be imported by module runtime code",
+    }
+
+
+def test_scan_v2_module_rejects_removed_object_lifecycle_methods(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "interfaces" / "labor.py").write_text(
+        """
+from crawler4j_contracts import interface
+
+
+@interface(name="labor")
+class Labor:
+    pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "objects" / "api_labor.py").write_text(
+        """
+from crawler4j_contracts import component
+
+
+@component(name="api_labor", implements="labor")
+class ApiLabor:
+    async def aclose(self):
+        pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import workflow
+
+
+@workflow(name="main_workflow")
+class MainWorkflow:
+    def __init__(self, labor):
+        self.labor = labor
+
+    def close(self):
+        pass
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+    diagnostics = [
+        diagnostic for diagnostic in result.diagnostics
+        if diagnostic.code == "V2_OBJECT_LIFECYCLE_METHOD_UNSUPPORTED"
+    ]
+
+    assert {(diagnostic.location, diagnostic.message) for diagnostic in diagnostics} == {
+        (
+            "objects.api_labor.ApiLabor.aclose",
+            "object lifecycle only supports cleanup(ctx, outcome); aclose/close are not called",
+        ),
+        (
+            "workflows.main.MainWorkflow.close",
+            "object lifecycle only supports cleanup(ctx, outcome); aclose/close are not called",
+        ),
+    }
+
+
 def test_scan_v2_module_merges_class_and_init_annotation_metadata(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "objects" / "annotation_runtime.py").write_text(

@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from crawler4j_contracts import TaskContext
+from crawler4j_contracts import Crawler4jMeta, TaskContext, TaskResult
 
 from src.core.mms.models import (
     ConfigDefaultsInfo,
@@ -15,6 +15,7 @@ from src.core.mms.models import (
 )
 from src.core.mms.scanner import ModuleScanner
 from src.core.mms.service import ModuleService
+from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptorV2, V2RuntimeEntry
 
 
 def _empty_data_contract() -> dict[str, list[dict[str, object]]]:
@@ -217,6 +218,91 @@ async def test_resolve_env_cleanup_candidates_async_times_out_without_blocking_l
             "unused_accounts",
             timeout=0.01,
         )
+
+
+@pytest.mark.asyncio
+async def test_run_v2_workflow_runs_object_cleanup_after_workflow_run(monkeypatch):
+    cleanup_outcome = None
+
+    class Workflow:
+        def run(self, ctx: TaskContext):
+            return TaskResult.ok(message="ok")
+
+    class FakeContainer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def build_workflow(self):
+            return Workflow()
+
+        async def cleanup(self, _context, outcome, *, timeout_seconds=None):
+            nonlocal cleanup_outcome
+            cleanup_outcome = outcome
+
+    monkeypatch.setattr("src.core.mms.service.ObjectContainerV2", FakeContainer)
+    descriptor = ModuleRuntimeDescriptorV2(
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="workflow", name="default"),
+                target=Workflow,
+                module_name="demo_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            )
+        }
+    )
+
+    result = await ModuleService()._run_v2_workflow(
+        descriptor,
+        TaskContext(env_id=1, task_name="demo_module", runtime={"workflow": "default"}),
+    )
+
+    assert result.success is True
+    assert cleanup_outcome is not None
+    assert cleanup_outcome.status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_run_v2_workflow_runs_object_cleanup_after_workflow_error(monkeypatch):
+    cleanup_outcome = None
+
+    class Workflow:
+        def run(self, ctx: TaskContext):
+            raise RuntimeError("boom")
+
+    class FakeContainer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def build_workflow(self):
+            return Workflow()
+
+        async def cleanup(self, _context, outcome, *, timeout_seconds=None):
+            nonlocal cleanup_outcome
+            cleanup_outcome = outcome
+
+    monkeypatch.setattr("src.core.mms.service.ObjectContainerV2", FakeContainer)
+    descriptor = ModuleRuntimeDescriptorV2(
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="workflow", name="default"),
+                target=Workflow,
+                module_name="demo_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            )
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await ModuleService()._run_v2_workflow(
+            descriptor,
+            TaskContext(env_id=1, task_name="demo_module", runtime={"workflow": "default"}),
+        )
+
+    assert cleanup_outcome is not None
+    assert cleanup_outcome.status == "failed"
+    assert cleanup_outcome.error_type == "RuntimeError"
 
 
 class TestModuleScanner:

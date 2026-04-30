@@ -59,7 +59,7 @@
 | 项目 | 内容 |
 |---|---|
 | 目录 | `packages/crawler4j-sdk/`, `packages/crawler4j-contracts/` |
-| 职责 | `crawler4j-contracts` 提供 `TaskContext` / `TaskResult` / `TaskSignal` / `ToolsCapability` / `DatabaseClient`、v2 装饰器与 `object_param` / `object_inject` 注解 helper 等运行时契约；`crawler4j-sdk` 提供 CLI、脚手架、校验与打包发布辅助 |
+| 职责 | `crawler4j-contracts` 提供 `TaskContext` / `TaskResult` / `TaskOutcome` / `ToolsCapability` / `DatabaseClient`、v2 装饰器与 `object_param` / `object_inject` 注解 helper 等运行时契约；`crawler4j-sdk` 提供 CLI、脚手架、校验与打包发布辅助 |
 | 对外接口 | `crawler4j` CLI, Python 包 API |
 | 依赖 | `crawler4j-contracts`, aiohttp, pyyaml |
 | 不负责 | Root app UI、宿主运行时治理与模块业务语义 |

@@ -1,10 +1,11 @@
 import asyncio
 import inspect
+import time
 from functools import partial
 from pathlib import Path
 from typing import Any
 
-from crawler4j_contracts import EnvCandidates, TaskContext, TaskResult
+from crawler4j_contracts import EnvCandidates, TaskContext, TaskOutcome, TaskResult
 
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo, ModuleSource, ModuleStatus
@@ -18,6 +19,7 @@ from src.core.mms.runtime_descriptor import (
 )
 
 ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
+OBJECT_CLEANUP_TIMEOUT_SECONDS = 30.0
 
 
 class ModuleService:
@@ -258,6 +260,7 @@ class ModuleService:
 
     async def _run_v2_workflow(self, descriptor: ModuleRuntimeDescriptorV2, context: TaskContext) -> TaskResult:
         workflow_name = self._resolve_v2_workflow_name(context, descriptor)
+        started_at = time.monotonic()
         container = ObjectContainerV2(
             descriptor,
             workflow_name,
@@ -265,6 +268,7 @@ class ModuleService:
             object_params=self._runtime_mapping(context, "object_params"),
         )
         previous_page_action_executor = getattr(context, "_page_action_executor", None)
+        outcome: TaskOutcome | None = None
 
         async def _run_page_action(action_name: str, action_context: TaskContext, **kwargs: Any) -> Any:
             page_action = descriptor.page_actions.get(str(action_name or "").strip())
@@ -279,9 +283,62 @@ class ModuleService:
             if run is None:
                 raise ValueError(f"Workflow has no run method: {workflow_name}")
             result = await invoke_runtime_callable(run, context)
-            return normalize_result_payload(result, context)
+            normalized_result = normalize_result_payload(result, context)
+            outcome = self._outcome_from_result(normalized_result, started_at=started_at)
+            return normalized_result
+        except asyncio.CancelledError as exc:
+            outcome = self._outcome_from_cancelled(context, exc, started_at=started_at)
+            raise
+        except Exception as exc:
+            outcome = self._outcome_from_exception(exc, started_at=started_at)
+            raise
         finally:
             context._page_action_executor = previous_page_action_executor
+            await container.cleanup(
+                context,
+                outcome or self._outcome_from_exception(
+                    RuntimeError("workflow exited before outcome was resolved"),
+                    started_at=started_at,
+                ),
+                timeout_seconds=OBJECT_CLEANUP_TIMEOUT_SECONDS,
+            )
+
+    @staticmethod
+    def _duration_since(*, started_at: float) -> float:
+        return max(time.monotonic() - started_at, 0.0)
+
+    def _outcome_from_result(self, result: TaskResult, *, started_at: float) -> TaskOutcome:
+        return TaskOutcome(
+            status="succeeded" if result.success else "failed",
+            result=result,
+            error=result.error or "",
+            error_type="",
+            duration_seconds=self._duration_since(started_at=started_at),
+        )
+
+    def _outcome_from_exception(self, exc: Exception, *, started_at: float) -> TaskOutcome:
+        return TaskOutcome(
+            status="failed",
+            error=str(exc),
+            error_type=exc.__class__.__name__,
+            duration_seconds=self._duration_since(started_at=started_at),
+        )
+
+    def _outcome_from_cancelled(
+        self,
+        context: TaskContext,
+        exc: asyncio.CancelledError,
+        *,
+        started_at: float,
+    ) -> TaskOutcome:
+        cancel_reason = str(context.runtime.get("_module_cancel_reason") or "").strip()
+        status = "timed_out" if cancel_reason == "timed_out" else "cancelled"
+        return TaskOutcome(
+            status=status,
+            error=str(exc),
+            error_type=exc.__class__.__name__,
+            duration_seconds=self._duration_since(started_at=started_at),
+        )
 
     async def run_module(self, module_name: str, context: TaskContext) -> Any:
         """运行模块默认工作流或任务。"""

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from crawler4j_contracts import EnvAction, TaskResult, TaskSignal
+from crawler4j_contracts import TaskResult
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
@@ -62,10 +62,27 @@ def _build_request(
 
 
 def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[ExecutionRunner, SimpleNamespace]:
+    if not hasattr(module_service, "get_runtime_descriptor_v2"):
+        module_service.get_runtime_descriptor_v2 = Mock(return_value=SimpleNamespace(data_tables={}))
+    metadata_store: dict[tuple[int, str, str], object] = {}
+
+    async def set_metadata(env_id: int, namespace: str, key: str, value, value_type: str = "string"):
+        metadata_store[(int(env_id), namespace, key)] = value
+
+    async def list_metadata(env_id: int, namespace: str):
+        return {
+            key: value
+            for (stored_env_id, stored_namespace, key), value in metadata_store.items()
+            if stored_env_id == int(env_id) and stored_namespace == namespace
+        }
+
     rem = SimpleNamespace(
         acquire_atomic=AsyncMock(return_value=lease),
         create_env=AsyncMock(return_value=env),
         list_envs=AsyncMock(return_value=[env]),
+        set_metadata=AsyncMock(side_effect=set_metadata),
+        list_metadata=AsyncMock(side_effect=list_metadata),
+        metadata_store=metadata_store,
         lease_manager=SimpleNamespace(
             acquire=AsyncMock(return_value=lease),
             claim_created_env=AsyncMock(return_value=lease),
@@ -88,14 +105,14 @@ def test_execution_runner_uses_configured_default_timeout_budgets():
 
     runner, _ = _build_runner(env, lease, module_service)
 
-    assert runner._env_action_timeout_seconds == 60.0
+    assert runner._env_recycle_timeout_seconds == 60.0
 
 
 def test_execution_runner_reads_timeout_budget_overrides_from_config_center():
     from src.core.system.config_center import get_config_center
 
     config = get_config_center()
-    config.set("atm.env_action_timeout_seconds", 90)
+    config.set("atm.env_recycle_timeout_seconds", 90)
 
     env, lease = _build_env()
     module_service = SimpleNamespace(
@@ -104,7 +121,28 @@ def test_execution_runner_reads_timeout_budget_overrides_from_config_center():
 
     runner, _ = _build_runner(env, lease, module_service)
 
-    assert runner._env_action_timeout_seconds == 90.0
+    assert runner._env_recycle_timeout_seconds == 90.0
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_marks_module_cancel_reason_on_timeout():
+    request = _build_request(timeout=0.01)
+    env, lease = _build_env()
+    cancel_reasons: list[str | None] = []
+
+    async def run_module(_module_name, context):
+        try:
+            await asyncio.sleep(10)
+        finally:
+            cancel_reasons.append(context.runtime.get("_module_cancel_reason"))
+
+    module_service = SimpleNamespace(run_module=run_module)
+    runner, _ = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    assert request.task.status == TaskStatus.FAILED
+    assert cancel_reasons == ["timed_out"]
 
 
 def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
@@ -337,6 +375,7 @@ async def test_execution_runner_selects_first_ready_env_without_module_selector(
         resolve_env_candidates=Mock(return_value=[env.id]),
     )
     runner, rem = _build_runner(env, lease, module_service)
+    runner._is_env_candidate_authorized = AsyncMock(return_value=True)
     updates: list[tuple[TaskStatus, str]] = []
 
     async def on_task_update(task: Task):
@@ -395,46 +434,7 @@ async def test_execution_runner_marks_task_failed_for_taskresult_fail():
 
 
 @pytest.mark.asyncio
-async def test_execution_runner_wait_signal_keeps_task_waiting_confirmation():
-    request = _build_request()
-    env, lease = _build_env()
-    wait_signal = TaskSignal.wait_for_confirmation(
-        message="等待确认",
-        env_action=EnvAction.KEEP_ALIVE,
-        payload={
-            "confirmation": {
-                "title": "账号复核",
-                "fields": [
-                    {"label": "账号", "value": "demo-account"},
-                    {"label": "风险等级", "value": "high"},
-                ],
-            }
-        },
-    )
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(
-            return_value=TaskResult.ok(
-                message="等待确认",
-                signal=wait_signal,
-            )
-        ),
-    )
-    runner, rem = _build_runner(env, lease, module_service)
-
-    execution_result = await runner.run(request)
-
-    assert request.task.status == TaskStatus.WAITING_CONFIRMATION
-    assert request.task.finished_at is None
-    rem.release.assert_not_awaited()
-    rem.release_keep_alive.assert_not_awaited()
-    rem.destroy_env.assert_not_awaited()
-    assert execution_result.signal is not None
-    assert execution_result.signal.action.value == "wait_for_confirmation"
-    assert request.task.signal == wait_signal.to_dict()
-
-
-@pytest.mark.asyncio
-async def test_execution_runner_records_env_action_after_releasing_environment():
+async def test_execution_runner_records_env_recycle_after_releasing_environment():
     request = _build_request()
     env, lease = _build_env()
 
@@ -446,20 +446,20 @@ async def test_execution_runner_records_env_action_after_releasing_environment()
     result = await runner.run(request)
 
     assert result.task_context is not None
-    assert result.task_context.runtime["env_action"]["action"] == "recycle"
-    assert result.task_context.runtime["env_action"]["success"] is True
+    assert result.task_context.runtime["env_recycle"]["action"] == "recycle"
+    assert result.task_context.runtime["env_recycle"]["success"] is True
     rem.release.assert_awaited_once_with(lease)
 
 
 @pytest.mark.asyncio
-async def test_execution_runner_times_out_hanging_env_action_and_still_finishes_task():
+async def test_execution_runner_times_out_hanging_env_recycle_and_still_finishes_task():
     request = _build_request()
     env, lease = _build_env()
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
     )
     runner, rem = _build_runner(env, lease, module_service)
-    runner._env_action_timeout_seconds = 0.01
+    runner._env_recycle_timeout_seconds = 0.01
 
     async def hanging_release(*_args, **_kwargs):
         await asyncio.Event().wait()
@@ -470,16 +470,16 @@ async def test_execution_runner_times_out_hanging_env_action_and_still_finishes_
 
     assert request.task.status == TaskStatus.SUCCEEDED
     assert execution_result.task_context is not None
-    assert execution_result.task_context.runtime["env_action"]["action"] == "recycle"
-    assert execution_result.task_context.runtime["env_action"]["success"] is False
-    assert "timed out after" in execution_result.task_context.runtime["env_action"]["error"]
+    assert execution_result.task_context.runtime["env_recycle"]["action"] == "recycle"
+    assert execution_result.task_context.runtime["env_recycle"]["success"] is False
+    assert "timed out after" in execution_result.task_context.runtime["env_recycle"]["error"]
     rem.release.assert_awaited_once_with(lease)
     rem.release_keep_alive.assert_not_awaited()
     rem.destroy_env.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_execution_runner_uses_stop_env_action_for_cancelled_task():
+async def test_execution_runner_recycles_env_for_cancelled_task():
     request = _build_request()
     env, lease = _build_env()
     module_service = SimpleNamespace(
@@ -491,13 +491,12 @@ async def test_execution_runner_uses_stop_env_action_for_cancelled_task():
     await runner.run(
         request,
         is_stop_requested=lambda: next(stop_checks, True),
-        resolve_stop_env_action=lambda: EnvAction.DESTROY,
     )
 
     assert request.task.status == TaskStatus.CANCELLED
-    rem.release.assert_not_awaited()
-    rem.release_keep_alive.assert_awaited_once_with(lease)
-    rem.destroy_env.assert_awaited_once_with(env.id)
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -525,7 +524,6 @@ async def test_execution_runner_interrupts_running_module_when_stop_requested():
         runner.run(
             request,
             is_stop_requested=lambda: stop_requested,
-            resolve_stop_env_action=lambda: EnvAction.DESTROY,
         )
     )
 
@@ -536,13 +534,13 @@ async def test_execution_runner_interrupts_running_module_when_stop_requested():
     assert request.task.status == TaskStatus.CANCELLED
     assert request.task.error == "Job paused during execution"
     assert module_cancelled.is_set()
-    rem.release.assert_not_awaited()
-    rem.release_keep_alive.assert_awaited_once_with(lease)
-    rem.destroy_env.assert_awaited_once_with(env.id)
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
+    rem.destroy_env.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_execution_runner_uses_stop_env_action_during_acquisition_cleanup():
+async def test_execution_runner_recycles_env_during_acquisition_cleanup():
     request = _build_request()
     env, lease = _build_env()
     module_service = SimpleNamespace(
@@ -554,52 +552,13 @@ async def test_execution_runner_uses_stop_env_action_during_acquisition_cleanup(
     await runner.run(
         request,
         is_stop_requested=lambda: next(stop_checks, True),
-        resolve_stop_env_action=lambda: EnvAction.DESTROY,
     )
 
     assert request.task.status == TaskStatus.CANCELLED
-    rem.release.assert_not_awaited()
-    rem.release_keep_alive.assert_awaited_once_with(lease)
-    rem.destroy_env.assert_awaited_once_with(env.id)
-    module_service.run_module.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_execution_runner_destroys_env_only_when_signal_requests_it():
-    request = _build_request()
-    env, lease = _build_env()
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(
-            return_value=TaskResult.ok(
-                message="ok",
-                signal=TaskSignal.succeed(message="ok", env_action=EnvAction.DESTROY),
-            )
-        ),
-    )
-    runner, rem = _build_runner(env, lease, module_service)
-
-    await runner.run(request)
-
-    rem.release.assert_not_awaited()
-    rem.release_keep_alive.assert_awaited_once_with(lease)
-    rem.destroy_env.assert_awaited_once_with(env.id)
-
-
-@pytest.mark.asyncio
-async def test_execution_runner_honors_default_env_action_override():
-    request = _build_request()
-    request.default_env_action = EnvAction.KEEP_ALIVE
-    env, lease = _build_env()
-    module_service = SimpleNamespace(
-        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
-    )
-    runner, rem = _build_runner(env, lease, module_service)
-
-    await runner.run(request)
-
-    rem.release.assert_not_awaited()
-    rem.release_keep_alive.assert_awaited_once_with(lease)
+    rem.release.assert_awaited_once_with(lease)
+    rem.release_keep_alive.assert_not_awaited()
     rem.destroy_env.assert_not_awaited()
+    module_service.run_module.assert_not_awaited()
 
 
 @pytest.mark.asyncio

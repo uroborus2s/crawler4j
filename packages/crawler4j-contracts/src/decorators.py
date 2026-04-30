@@ -169,6 +169,7 @@ class Crawler4jMeta:
     storage_mode: str = ""
     record_key_field: str = ""
     cleanup_policy: str = ""
+    env_binding_field: str = ""
     source: str = ""
     sql: str = ""
     output_schema: tuple[dict[str, Any], ...] = field(default_factory=tuple)
@@ -209,12 +210,25 @@ class Crawler4jMeta:
         storage_mode = str(self.storage_mode or "").strip().lower()
         record_key_field = str(self.record_key_field or "").strip()
         cleanup_policy = str(self.cleanup_policy or "").strip().lower()
+        env_binding_field = str(self.env_binding_field or "").strip()
         if kind == "data_table":
             storage_mode = storage_mode or "custom_table"
             if storage_mode not in DATA_TABLE_STORAGE_MODES:
                 raise ValueError(f"data_table storage_mode must be managed_dataset or custom_table: {storage_mode}")
             if record_key_field and not _is_valid_name(record_key_field):
                 raise ValueError(f"data_table record_key_field must be snake_case: {record_key_field}")
+            if env_binding_field:
+                if not _is_valid_name(env_binding_field):
+                    raise ValueError(f"data_table env_binding_field must be snake_case: {env_binding_field}")
+                schema_field = next(
+                    (item for item in schema if str(item.get("name") or item.get("key") or "").strip() == env_binding_field),
+                    None,
+                )
+                if schema_field is None:
+                    raise ValueError(f"data_table env_binding_field must exist in schema: {env_binding_field}")
+                field_type = str(schema_field.get("type") or "").strip().lower()
+                if field_type not in {"integer", "int"}:
+                    raise ValueError(f"data_table env_binding_field must be integer: {env_binding_field}")
             cleanup_policy = cleanup_policy or ("delete_rows" if storage_mode == "managed_dataset" else "drop_table")
             if cleanup_policy not in DATA_TABLE_CLEANUP_POLICIES:
                 raise ValueError(f"data_table cleanup_policy must be delete_rows, drop_table or keep: {cleanup_policy}")
@@ -222,6 +236,7 @@ class Crawler4jMeta:
             storage_mode = ""
             record_key_field = ""
             cleanup_policy = ""
+            env_binding_field = ""
         implements = str(self.implements or "").strip()
         source = str(self.source or "").strip()
         object.__setattr__(self, "kind", kind)
@@ -236,6 +251,7 @@ class Crawler4jMeta:
         object.__setattr__(self, "storage_mode", storage_mode)
         object.__setattr__(self, "record_key_field", record_key_field)
         object.__setattr__(self, "cleanup_policy", cleanup_policy)
+        object.__setattr__(self, "env_binding_field", env_binding_field)
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "sql", str(self.sql or "").strip())
         object.__setattr__(self, "output_schema", output_schema)
@@ -422,6 +438,7 @@ def data_table(
     storage_mode: Literal["managed_dataset", "custom_table"] = "custom_table",
     record_key_field: str = "",
     cleanup_policy: Literal["delete_rows", "drop_table", "keep"] | str = "",
+    env_binding_field: str = "",
     indexes: Iterable[DataTableIndexSpec | Mapping[str, Any]] | None = None,
 ) -> Callable[[TargetT], TargetT]:
     """Declare a table-shaped data contract."""
@@ -434,6 +451,7 @@ def data_table(
             storage_mode=storage_mode,
             record_key_field=record_key_field,
             cleanup_policy=cleanup_policy,
+            env_binding_field=env_binding_field,
             schema=tuple(_as_tuple(schema)),
             indexes=tuple(_as_tuple(indexes)),
         )
@@ -494,6 +512,7 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, target: TargetT) -> Crawler4
         storage_mode=meta.storage_mode,
         record_key_field=meta.record_key_field,
         cleanup_policy=meta.cleanup_policy,
+        env_binding_field=meta.env_binding_field,
         source=meta.source,
         sql=meta.sql,
         output_schema=meta.output_schema,
