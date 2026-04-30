@@ -1,43 +1,42 @@
 # 开发者指南
 
-当前模块开发主线只有一套协议：`core-native-v1`。
+开发者指南按产品版本物理隔离。先确认你要开发的目标版本，再进入对应目录。
 
-关键边界：
+## 当前发布版本
 
-- Core 是唯一运行时 owner
-- 模块运行时代码只依赖 `crawler4j-contracts`
-- `crawler4j-sdk` 只保留 CLI、脚手架、校验和开发辅助
-- Core 通过扫描模块目录生成 runtime descriptor
-- Workflow 运行模板参数由 `module.yaml.workflows[].parameters[]` 声明
-- 模块数据契约固定为 `module.yaml.data` + `data/sql` + `data/seeds`
-- `managed_dataset` / `custom_table` 都必须先在 `module.yaml.data.resources[]` 注册；未注册资源会直接 fail-fast
-- 不保留 `module_runtime.py`、`declare_ui()`、根模块 `run()` 的兼容桥
+[开发者指南 0.3.0](./v0.3.0/index.md) 面向当前稳定模块契约：
 
-推荐阅读顺序：
+- Runtime API：`core-native-v1`
+- 运行能力事实源：`module.yaml` 与固定目录导出
+- 任务和工作流：`TASK/execute`、`WORKFLOW/run`
+- 数据契约：`module.yaml.data`、`data/sql`、`data/seeds`
 
-1. [核心概念](./core-concepts.md)
-2. [模块结构](./module-structure.md)
-3. [快速开始](./quickstart.md)
-4. [构建模块](./build-modules.md)
-5. [SDK 与 CLI 参考](./reference-sdk-and-cli.md)
-6. [Core 能力参考](./reference-core-capabilities.md)
-7. [UI 与数据表](./ui-and-data-table.md)
-8. [调试](./debugging.md)
-9. [交付](./shipping.md)
-10. [排障](./troubleshooting.md)
+维护 0.3.x 模块、修复已发布模块、或对接当前稳定宿主时，使用这一版。
 
-最重要的事实：
+## 开发中版本
 
-- `module.yaml.runtime_api` 必须是 `core-native-v1`
-- `module.yaml.workflows[].parameters[]` 可声明运行模板表单参数，当前支持 `string/text/integer/number/boolean/enum`
-- `module.yaml.data` 必须存在，`resources/views/queries/seeds` 是唯一数据契约入口
-- 模块数据只能通过 `ctx.db` fluent API 访问：`from_()`、`named()`、`into(...).replace(...)`
-- `tasks/*.py` 导出 `TASK` 和 `execute`
-- `workflows/*.py` 导出 `WORKFLOW` 和 `run`
-- `hooks/*.py` 导出 `handle`
-- `env_selectors/*.py` 导出 `SELECTOR` 和 `select`
-- `pages/*.py`、`pages/<group>/*.py` 导出 `PAGE` 和页面处理函数
-- Hosted UI 正式组件面现为 `Page / Card / Section / Text / Button / DataTable`，新的卡片容器优先使用 `Card`
-- `Card` 现支持标题对齐、内容水平/垂直对齐、最小高度和 padding 等布局参数
+[开发者指南 0.4.0](./v0.4.0/index.md) 面向开发中的新模块契约：
 
-如果你看到任何 `TaskScript`、`TaskFlow`、`ModuleAssembler`、`module_runtime.py`、`declare_ui()`、`@env_selector(...)`、`ctx.tools.call("db.*")`、`db.declare_data_resource(...)`、`db.declare_db_view(...)` 的旧写法，应视为历史资料，而不是当前正式协议。
+- Runtime API：`core-native-v2`
+- 运行能力事实源：代码装饰器
+- 对象装配：`@interface`、`@component`、`@workflow`
+- 页面操作：`@page_action`
+- 数据契约：`@data_table`、`@data_query`
+- 交付门禁：`crawler4j manifest lock` 与装饰器诊断
+
+开发 0.4.0 新模块、验证装饰器对象装配方案、或准备从 0.3.x 迁移时，使用这一版。0.4.0 未发布前只作为开发版预览，不替代当前发布版指南。
+
+## 兼容矩阵
+
+| 指南版本 | 覆盖产品线 | Runtime API | SDK / Contracts 口径 | 状态 | 是否用于生产模块 |
+|---|---|---|---|---|---|
+| `v0.3.0` | `crawler4j 0.3.x` 稳定契约；当前源码线为 `crawler4j 0.3.2` | `core-native-v1` | 当前 SDK CLI 与 contracts 运行契约 | 当前可执行 | 是 |
+| `v0.4.0` | `crawler4j 0.4.0` 目标契约 | `core-native-v2` | 目标 SDK / Contracts / Core 重构 | 设计预览 | 否 |
+
+`crawler4j-contracts` 包版本可能先于宿主产品版本增长。选择指南时以宿主 runtime API 和模块契约为准，不以单个子包版本号判断。
+
+## 版本选择规则
+
+- 不要把 0.4.0 装饰器写法回填到 0.3.0 模块。
+- 不要在 0.4.0 新模块里继续维护 `module.yaml.workflows[].parameters[]`、`TASK = TaskSpec(...)`、`WORKFLOW = WorkflowSpec(...)` 或 `module.yaml.data` 数据事实源。
+- 根目录只做版本选择；具体开发步骤都在 `v0.3.0/` 或 `v0.4.0/` 下维护。

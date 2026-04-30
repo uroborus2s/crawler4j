@@ -64,7 +64,7 @@
 
 确认：
 
-1. `DataTable.data_source.type` 是否是 `binding`、`rows` 或 `query_handler`
+1. `DataTable.data_source.type` 是否是 `binding`、`rows`、`query_handler` 或 `managed_resource`
 2. `load_handler` 返回值里是否真的有绑定字段
 3. `query_handler` 的签名是否是 `(context, table_id, query, params=None)`
 4. `ctx.db.from_(...)` / `ctx.db.named(...)` 返回值是否真的是你页面期望的结构

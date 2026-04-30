@@ -1,0 +1,161 @@
+# 核心概念
+
+> 状态：设计预览。本文描述 0.4.0 目标边界；当前源码仍以 `core-native-v1` descriptor、`TaskSpec` / `WorkflowSpec` 和 manifest 数据契约为可执行路径。
+
+0.4.0 的核心变化是：运行能力事实源从 YAML 和顶层 spec 导出切到代码装饰器。
+
+## 三个包的边界
+
+### Core
+
+0.4.0 目标中，Core 是唯一运行时 owner。
+
+Core 负责：
+
+- 扫描装饰器
+- 生成 `ModuleRuntimeDescriptorV2`
+- 根据运行模板创建对象图
+- 为每个 task/env 创建独立对象容器
+- 实例化 workflow
+- 注入 `TaskContext`
+- 调度 page action、Hook、环境和数据库能力
+- 按依赖反向顺序清理 `close()` / `aclose()`
+
+Core 可以缓存元数据、类引用和依赖图，但不能预创建业务对象实例。
+
+### Contracts
+
+`crawler4j-contracts` 是模块运行时代码唯一允许依赖的共享契约包。
+
+0.4.0 目标主路径导出：
+
+- `TaskContext`
+- `TaskResult`
+- `TaskSignal`
+- `EnvAction`
+- `EnvCandidate`
+- `interface`
+- `component`
+- `workflow`
+- `page_action`
+- `data_table`
+- `data_query`
+
+装饰器只挂载元数据，不创建实例。
+
+### SDK
+
+`crawler4j-sdk` 只负责开发阶段：
+
+- CLI
+- 脚手架
+- 装饰器扫描
+- 本地校验
+- 迁移辅助
+- manifest lock
+- 打包和发布辅助
+- DevLink / host 辅助命令
+
+SDK 不参与模块运行时装配。模块运行时代码不要 `import crawler4j_sdk`。
+
+## Runtime API
+
+`module.yaml` 只声明版本和宿主静态配置：
+
+```yaml
+runtime_api: core-native-v2
+name: hotel_demo
+version: 0.1.0
+upgrade_source:
+  repo: your-org/hotel_demo
+```
+
+`module.yaml` 不承载运行能力：
+
+- 接口和对象来自装饰器
+- workflow 来自装饰器
+- page action 来自装饰器
+- 数据表和命名查询来自装饰器
+- 扫描快照来自 manifest lock
+
+这些能力来自装饰器和 manifest lock。
+
+## 运行能力模型
+
+| 概念 | 声明方式 | 作用 |
+|---|---|---|
+| Interface | `@interface` | 可被实现的能力类型 |
+| Component | `@component` | 可被宿主实例化的业务对象 |
+| Workflow | `@workflow` | 宿主创建的 workflow 对象 |
+| Page Action | `@page_action` | 页面操作纯函数 |
+| Data Table | `@data_table` | 模块数据表声明 |
+| Data Query | `@data_query` | 命名查询声明 |
+| Manifest Lock | `crawler4j manifest lock` | SDK 扫描快照 |
+
+## 对象图
+
+workflow 是对象图根节点。Core 根据 workflow 的 `inject` 递归装配依赖：
+
+1. 读取 workflow 注入声明
+2. 遇到 interface，按运行模板选择 component 实现
+3. 递归创建 component 的依赖
+4. 把 component 参数传入对应构造函数
+5. 创建 workflow 实例
+6. 调用 `workflow.run(ctx)`
+
+选择实现的优先级：
+
+1. 运行模板绑定
+2. 唯一实现
+3. 默认实现
+4. 报错
+
+## workflow 没有 parameters
+
+workflow 只接收宿主注入对象：
+
+```python
+class HotelSyncWorkflow:
+    def __init__(self, orchestrator):
+        self.orchestrator = orchestrator
+```
+
+普通参数只属于 component：
+
+```python
+class ApiLabor:
+    def __init__(self, base_url: str, timeout: int = 30):
+        ...
+```
+
+不要让 workflow 自己接收普通参数，也不要从 `ctx.runtime` 读取对象选择。
+
+## 并发隔离
+
+默认 scope 是 `task_env`：
+
+- 同一 task/env 内共享同一个对象容器
+- 不同 task/env 不共享 component 实例
+- 不同 task/env 不共享 workflow 实例
+- descriptor 可以缓存，实例不能全局缓存
+
+如果对象需要释放资源，实现 `close()` 或 `aclose()`。Core 会在任务结束时按依赖反向顺序调用。
+
+## 数据入口
+
+数据契约用装饰器声明，运行时代码仍只通过 `ctx.db` 访问。
+
+```python
+rows = ctx.db.from_("hotels").limit(50).execute()
+detail = ctx.db.named("ready_hotels").bind(status="ready").execute()
+ctx.db.into("hotels").replace(rows)
+```
+
+不要用：
+
+- `ctx.tools.call("db.*")`
+- `db.declare_data_resource(...)`
+- `db.declare_db_view(...)`
+- 未注册 SQL
+
+`ctx.tools` 只用于非数据库宿主能力。

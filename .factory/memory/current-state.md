@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新文档：2026-04-30 已完成开发者指南版本分流和 0.4.0 开发版正文编制。`docs/03-developer-guide/index.md` 现在只做版本选择；0.3.0 稳定指南已冻结到 `docs/03-developer-guide/v0.3.0/`；0.4.0 开发者指南已写入 `docs/03-developer-guide/v0.4.0/`，固定讲 `core-native-v2` 装饰器对象装配、workflow 无 parameters、component object params、`@page_action`、`@data_table/@data_query`、manifest lock、SDK/Contracts/Core 边界、`ctx.db` 唯一数据库入口和宿主保留字段诊断。经开发者/读者审阅后，0.4.0 全目录已标为“设计预览”，明确当前源码仍不可执行 v2 CLI、DevLink 或 ZIP 验收。根 `docs/index.md` 与 `.factory/memory/doc-map.md` 已同步开发者指南版本路径。
 - 最新设计：2026-04-30 已形成使用者指南和开发者指南的 docs-stratego 版本分流方案。后续只对 `docs/02-user-guide/` 和 `docs/03-developer-guide/` 做版本化，根目录只保留版本选择页，正文进入 `v0.3.0/`、`v0.4.0/` 等目录；docs-stratego 网站主文档必须指向当前已发布版本，老版本保留为历史版本入口，0.4.0 未发布前只能作为开发版预览。内部 `04-project-development/` 不随版本复制。
 - 最新设计：2026-04-30 已形成 0.4.0 装饰器对象装配正式方案。`core-native-v2` 目标契约将运行能力事实源从 `module.yaml` 对象图切到代码装饰器：`@interface/@component/@workflow/@page_action/@data_table/@data_query`；workflow 不再声明 parameters，只通过构造函数接收宿主装配对象；对象参数只属于 component 创建；task 退化为页面操作纯函数；Core 负责按运行模板为每个 task/env 创建独立对象图，SDK/Contracts 负责装饰器、扫描、校验、迁移和 manifest lock；SDK 模块打开、DevLink、`check full` 与打包阶段必须前置阻断 `created_at` / `updated_at` / `create_at` / `update_at` 等宿主保留或混淆数据库字段。对应需求与架构文档已新增到 `docs/04-project-development/{03-requirements,04-design}`。
 - 最新开发：2026-04-30 已完成 4.0 首个新需求的 Workflow 运行参数与运行模板 UI。该实现保留为当前 0.4.0 分支已提交代码事实，但后续正式架构方向已调整为 `core-native-v2` 装饰器对象装配，workflow parameters 不再作为 v2 正式契约。聚焦回归 `81 passed`，全量回归 `828 passed`。
