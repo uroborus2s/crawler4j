@@ -442,6 +442,69 @@ def recent_accounts():
     }
 
 
+def test_scan_v2_module_reports_managed_dataset_system_fields(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "data" / "data_contracts.py").write_text(
+        """
+from crawler4j_contracts import data_table
+
+
+@data_table(
+    name="accounts",
+    storage_mode="managed_dataset",
+    schema=[
+        {"name": "account_id", "type": "string"},
+        {"name": "record_index", "type": "integer"},
+        {"name": "run_status", "type": "string"},
+    ],
+    indexes=[{"fields": ["record_status"]}],
+)
+class Accounts:
+    record_key: str
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    reserved_errors = [diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_RESERVED_DATA_FIELD"]
+    assert {diagnostic.location for diagnostic in reserved_errors} == {
+        "data.data_contracts.Accounts.schema[record_index]",
+        "data.data_contracts.Accounts.schema[run_status]",
+        "data.data_contracts.Accounts.indexes[record_status]",
+        "data.data_contracts.Accounts.annotations[record_key]",
+    }
+
+
+def test_scan_v2_module_allows_custom_table_fields_matching_managed_dataset_system_names(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "data" / "data_contracts.py").write_text(
+        """
+from crawler4j_contracts import data_table
+
+
+@data_table(
+    name="accounts",
+    storage_mode="custom_table",
+    schema=[
+        {"name": "record_key", "type": "string"},
+        {"name": "run_status", "type": "string"},
+    ],
+    indexes=[{"fields": ["record_status"]}],
+)
+class Accounts:
+    record_status: str
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    assert [diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_RESERVED_DATA_FIELD"] == []
+
+
 def test_scan_v2_module_rejects_named_query_over_managed_dataset(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "data" / "data_contracts.py").write_text(

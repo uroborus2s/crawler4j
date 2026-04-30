@@ -23,6 +23,7 @@ from crawler4j_contracts.database import DatabaseClient, DatabaseExecutor
 from crawler4j_contracts.decorators import (
     CRAWLER4J_META_ATTR,
     HOST_RESERVED_DATA_FIELDS,
+    MANAGED_DATASET_RESERVED_DATA_FIELDS,
     Crawler4jMeta,
     DataTableIndexSpec,
     InjectSpec,
@@ -48,6 +49,7 @@ from crawler4j_contracts.signal import EnvAction, TaskSignal, TaskSignalAction
 __all__ = [
     "CRAWLER4J_META_ATTR",
     "HOST_RESERVED_DATA_FIELDS",
+    "MANAGED_DATASET_RESERVED_DATA_FIELDS",
     "Crawler4jMeta",
     "DataTableIndexSpec",
     "InjectSpec",

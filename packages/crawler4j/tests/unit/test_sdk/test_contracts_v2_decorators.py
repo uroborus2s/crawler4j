@@ -12,6 +12,7 @@ from crawler4j_contracts import (
     CRAWLER4J_META_ATTR,
     EnvCandidates,
     HOST_RESERVED_DATA_FIELDS,
+    MANAGED_DATASET_RESERVED_DATA_FIELDS,
     Crawler4jMeta,
     DataTableIndexSpec,
     InjectSpec,
@@ -348,6 +349,16 @@ def test_object_param_annotation_infers_extended_builtin_types():
 
 def test_host_reserved_data_fields_are_exported_for_sdk_and_core_validation():
     assert {"created_at", "updated_at", "create_at", "update_at"} <= HOST_RESERVED_DATA_FIELDS
+    assert {
+        "created_at",
+        "updated_at",
+        "create_at",
+        "update_at",
+        "record_index",
+        "record_key",
+        "run_status",
+        "record_status",
+    } <= MANAGED_DATASET_RESERVED_DATA_FIELDS
 
 
 def test_v2_metadata_validation_rejects_unsupported_shapes():

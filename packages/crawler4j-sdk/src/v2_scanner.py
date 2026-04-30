@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from crawler4j_contracts import (
     HOST_RESERVED_DATA_FIELDS,
+    MANAGED_DATASET_RESERVED_DATA_FIELDS,
     Crawler4jMeta,
     InjectSpec,
     ParameterSpec,
@@ -1179,11 +1180,19 @@ def _validate_data_contracts(declarations: list[V2Declaration]) -> list[V2Diagno
     data_tables = {item.name: item for item in declarations if item.kind == "data_table"}
     for declaration in declarations:
         if declaration.kind == "data_table":
-            diagnostics.extend(_reserved_schema_field_diagnostics(declaration, declaration.meta.schema, "schema"))
-            diagnostics.extend(_reserved_annotation_field_diagnostics(declaration))
+            reserved_fields = _reserved_data_fields_for_table(declaration)
+            diagnostics.extend(
+                _reserved_schema_field_diagnostics(
+                    declaration,
+                    declaration.meta.schema,
+                    "schema",
+                    reserved_fields=reserved_fields,
+                )
+            )
+            diagnostics.extend(_reserved_annotation_field_diagnostics(declaration, reserved_fields=reserved_fields))
             for index in declaration.meta.indexes:
                 for field in index.fields:
-                    if field in HOST_RESERVED_DATA_FIELDS:
+                    if field in reserved_fields:
                         diagnostics.append(
                             V2Diagnostic(
                                 code="V2_RESERVED_DATA_FIELD",
@@ -1210,15 +1219,30 @@ def _validate_data_contracts(declarations: list[V2Declaration]) -> list[V2Diagno
                     )
                 )
             diagnostics.extend(
-                _reserved_schema_field_diagnostics(declaration, declaration.meta.output_schema, "output_schema")
+                _reserved_schema_field_diagnostics(
+                    declaration,
+                    declaration.meta.output_schema,
+                    "output_schema",
+                    reserved_fields=HOST_RESERVED_DATA_FIELDS,
+                )
             )
     return diagnostics
 
 
-def _reserved_annotation_field_diagnostics(declaration: V2Declaration) -> list[V2Diagnostic]:
+def _reserved_data_fields_for_table(declaration: V2Declaration) -> frozenset[str]:
+    if declaration.meta.storage_mode == "managed_dataset":
+        return MANAGED_DATASET_RESERVED_DATA_FIELDS
+    return HOST_RESERVED_DATA_FIELDS
+
+
+def _reserved_annotation_field_diagnostics(
+    declaration: V2Declaration,
+    *,
+    reserved_fields: frozenset[str],
+) -> list[V2Diagnostic]:
     diagnostics: list[V2Diagnostic] = []
     for field_name in declaration.annotations:
-        if not field_name or field_name not in HOST_RESERVED_DATA_FIELDS:
+        if not field_name or field_name not in reserved_fields:
             continue
         diagnostics.append(
             V2Diagnostic(
@@ -1234,11 +1258,13 @@ def _reserved_schema_field_diagnostics(
     declaration: V2Declaration,
     schema: tuple[dict[str, Any], ...],
     field_group: str,
+    *,
+    reserved_fields: frozenset[str],
 ) -> list[V2Diagnostic]:
     diagnostics: list[V2Diagnostic] = []
     for item in schema:
         field_name = _schema_field_name(item)
-        if not field_name or field_name not in HOST_RESERVED_DATA_FIELDS:
+        if not field_name or field_name not in reserved_fields:
             continue
         diagnostics.append(
             V2Diagnostic(

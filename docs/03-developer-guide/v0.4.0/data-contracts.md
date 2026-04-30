@@ -108,6 +108,17 @@ rows = (
 - `create_at`
 - `update_at`
 
+其中 `created_at` / `updated_at` 是宿主真实维护的创建、更新时间字段；`create_at` / `update_at` 是常见误写，也会被前置阻断，避免模块用近似字段绕过宿主语义。
+
+`managed_dataset` 还有一组托管快照系统字段，不要在 `@data_table(..., storage_mode="managed_dataset")` 的 schema、类注解或 indexes 中声明：
+
+- `record_index`
+- `record_key`
+- `run_status`
+- `record_status`
+
+这些字段由宿主的 `module_datasets` 物理表管理。`record_index` 由宿主按写入顺序生成；`record_key` 来自 `record_key_field`、记录里的 `record_key` 或 `id`；`run_status` / `record_status` 可以作为记录值写入并在快照查询结果中返回，但不属于模块业务 schema。
+
 这些字段会在以下入口被阻断：
 
 - 模块项目打开

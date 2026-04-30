@@ -15,6 +15,9 @@ from typing import Annotated, Any, Literal, TypeVar, Union, get_args, get_origin
 
 CRAWLER4J_META_ATTR = "__crawler4j_meta__"
 HOST_RESERVED_DATA_FIELDS = frozenset({"created_at", "updated_at", "create_at", "update_at"})
+MANAGED_DATASET_RESERVED_DATA_FIELDS = HOST_RESERVED_DATA_FIELDS | frozenset(
+    {"record_index", "record_key", "run_status", "record_status"}
+)
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 DATA_TABLE_STORAGE_MODES = frozenset({"managed_dataset", "custom_table"})
 DATA_TABLE_CLEANUP_POLICIES = frozenset({"delete_rows", "drop_table", "keep"})

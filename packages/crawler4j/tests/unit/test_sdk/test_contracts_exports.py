@@ -23,6 +23,7 @@ def test_contracts_root_exports_stable_surface():
         "HttpClient",
         "ImageInput",
         "InjectSpec",
+        "MANAGED_DATASET_RESERVED_DATA_FIELDS",
         "ObjectInjectAnnotation",
         "ObjectParamAnnotation",
         "ParameterOptionSpec",
