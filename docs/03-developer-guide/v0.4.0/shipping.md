@@ -1,6 +1,6 @@
 # 交付模块
 
-> 状态：设计预览。本文描述 0.4.0 目标交付链路；当前 ZIP 验证和宿主安装尚未支持 `core-native-v2` 模块。
+> 版本绑定：本文只适用于 0.4.x SDK / Contracts 与 Core 0.4.0。0.4.x ZIP 包不需要兼容 0.3.x 宿主安装链或旧模块结构。
 
 0.4.0 模块交付物仍是 ZIP。差异在发布前质量门：
 
@@ -14,7 +14,6 @@ DevLink 只服务开发联调，不是正式交付。
 ## 发布前检查
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 manifest lock
 uv run crawler4j check full
 uv run crawler4j manifest lock
 uv run crawler4j check release
@@ -35,7 +34,6 @@ uv run crawler4j check release
 ## 构建 ZIP
 
 ```bash
-# 目标命令：当前 package build / verify 尚未支持 core-native-v2 lock 验收
 uv run crawler4j package build
 uv run crawler4j package verify dist/<module>-<version>.zip
 ```
@@ -79,7 +77,6 @@ hotel_demo/
 本地验收：
 
 ```bash
-# 目标命令：当前 host install 尚未支持 core-native-v2 模块
 uv run crawler4j host install preview dist/<module>-<version>.zip --skip-remote-check
 uv run crawler4j host install apply dist/<module>-<version>.zip --skip-remote-check
 ```
@@ -87,7 +84,6 @@ uv run crawler4j host install apply dist/<module>-<version>.zip --skip-remote-ch
 正式发布：
 
 ```bash
-# 目标命令：当前 release / upgrade 尚未接入 core-native-v2 lock 验收
 uv run crawler4j release status
 uv run crawler4j release publish --dry-run
 uv run crawler4j release publish

@@ -1,6 +1,6 @@
 # 核心概念
 
-> 状态：设计预览。本文描述 0.4.0 目标边界；当前源码仍以 `core-native-v1` descriptor、`TaskSpec` / `WorkflowSpec` 和 manifest 数据契约为可执行路径。
+> 版本绑定：本文只描述 0.4.0 / `core-native-v2` 边界。0.4.x SDK 与 Contracts 是破坏性升级线，不兼容 `core-native-v1` 的 `TaskSpec` / `WorkflowSpec` 开发模式。
 
 0.4.0 的核心变化是：运行能力事实源从 YAML 和顶层 spec 导出切到代码装饰器。
 
@@ -8,7 +8,7 @@
 
 ### Core
 
-0.4.0 目标中，Core 是唯一运行时 owner。
+0.4.0 中，Core 是唯一运行时 owner。
 
 Core 负责：
 
@@ -27,7 +27,7 @@ Core 可以缓存元数据、类引用和依赖图，但不能预创建业务对
 
 `crawler4j-contracts` 是模块运行时代码唯一允许依赖的共享契约包。
 
-0.4.0 目标主路径导出：
+0.4.x Contracts 主路径导出：
 
 - `TaskContext`
 - `TaskResult`
@@ -57,6 +57,8 @@ Core 可以缓存元数据、类引用和依赖图，但不能预创建业务对
 - DevLink / host 辅助命令
 
 SDK 不参与模块运行时装配。模块运行时代码不要 `import crawler4j_sdk`。
+
+0.4.x SDK 只服务 Core 0.4.0，不保留 0.3.x CLI 命令、旧模板或旧模块开发模式。需要维护 0.3.x 模块时，切换到 0.3.x SDK / Contracts。
 
 ## Runtime API
 

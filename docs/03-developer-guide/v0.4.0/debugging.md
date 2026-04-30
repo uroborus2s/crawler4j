@@ -1,6 +1,6 @@
 # 调试模块
 
-> 状态：设计预览。本文描述 v2 目标调试顺序；当前 DevLink 与 Core scanner 尚不能加载 `core-native-v2` 模块。
+> 版本绑定：本文只适用于 0.4.x SDK / Contracts 与 Core 0.4.0。0.4.x 调试链不兼容 0.3.x DevLink 开发模式。
 
 0.4.0 调试主线：
 
@@ -15,7 +15,6 @@
 ## 本地自检
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 manifest/interface/component/page-action 命令
 uv run crawler4j check structure
 uv run crawler4j check full
 uv run crawler4j manifest lock

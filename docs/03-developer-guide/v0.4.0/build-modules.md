@@ -1,11 +1,10 @@
 # 构建模块
 
-> 状态：设计预览。本文中的 v2 CLI 是目标命令集；当前 SDK 仍以 `core-native-v1` 命令集为可执行主线。
+> 版本绑定：本文只适用于 0.4.x SDK / Contracts 与 Core 0.4.0。0.4.x SDK 是破坏性升级线，不兼容 0.3.x 的 CLI 命令、模板或模块开发模式。
 
 ## 1. 初始化
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 --runtime-api core-native-v2
 uvx --from crawler4j-sdk crawler4j module init demo_module \
   --repo example/demo_module \
   --runtime-api core-native-v2
@@ -17,7 +16,6 @@ uv sync
 ## 2. 创建装饰器骨架
 
 ```bash
-# 目标命令：当前 SDK 尚未实现这些 v2 命令组
 uv run crawler4j interface create labor
 uv run crawler4j component create api_labor --implements labor
 uv run crawler4j workflow create main_workflow
@@ -116,7 +114,6 @@ class Accounts:
 ## 7. 校验
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 manifest lock
 uv run crawler4j check full
 uv run crawler4j manifest lock
 ```

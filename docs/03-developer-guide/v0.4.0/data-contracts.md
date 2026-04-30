@@ -1,6 +1,6 @@
 # 数据契约
 
-> 状态：设计预览。本文描述 0.4.0 目标数据契约；当前可执行数据契约仍在 0.3.x 指南中通过 `module.yaml.data` 和 `data/sql` 维护。
+> 版本绑定：本文只适用于 0.4.x SDK / Contracts 与 Core 0.4.0。0.4.x SDK 不兼容 0.3.x 的 `module.yaml.data`、`data resource/view/seed` 命令或 `data/sql` 事实源。
 
 0.4.0 的数据契约由装饰器和 manifest lock 承载。
 
@@ -31,9 +31,9 @@ class AccountsTable:
 
 SDK 扫描 `@data_table` 后，把表声明写入 manifest lock。Core 安装或加载模块时按 lock 同步数据能力。
 
-## 从 v1 数据模型映射
+## 从 v1 数据模型重写
 
-| 0.3.x 数据对象 | 0.4.0 目标对象 | 说明 |
+| 0.3.x 数据对象 | 0.4.0 对象 | 说明 |
 |---|---|---|
 | `module.yaml.data.resources[]` | `@data_table` | 表名、schema、indexes 从装饰器进入 lock |
 | `data/sql/queries/*.sql` + `module.yaml.data.queries[]` | `@data_query(sql=...)` | SQL 和 output schema 跟随装饰器元数据 |

@@ -324,8 +324,8 @@ mkdocs:
 | 目标 | 阅读路径 |
 |---|---|
 | 新建或维护当前稳定模块 | [0.3.0 概览](03-developer-guide/v0.3.0/index.md) -> [0.3.0 快速开始](03-developer-guide/v0.3.0/quickstart.md) -> [0.3.0 交付模块](03-developer-guide/v0.3.0/shipping.md) |
-| 评估 0.4.0 未发布契约 | [0.4.0 概览](03-developer-guide/v0.4.0/index.md) -> [装饰器与对象装配](03-developer-guide/v0.4.0/decorators-and-object-assembly.md) -> [数据契约](03-developer-guide/v0.4.0/data-contracts.md) |
-| 评估从 0.3.x 迁移到 0.4.0（设计预览） | [从 0.3.0 迁移到 0.4.0](03-developer-guide/v0.4.0/migration-from-v0.3.0.md) |
+| 开发 0.4.0 破坏性升级模块 | [0.4.0 概览](03-developer-guide/v0.4.0/index.md) -> [装饰器与对象装配](03-developer-guide/v0.4.0/decorators-and-object-assembly.md) -> [数据契约](03-developer-guide/v0.4.0/data-contracts.md) |
+| 从 0.3.x 破坏性迁移到 0.4.0 | [从 0.3.0 迁移到 0.4.0](03-developer-guide/v0.4.0/migration-from-v0.3.0.md) |
 
 ### 发布 / 运维
 

@@ -1,6 +1,6 @@
 # Core 能力参考
 
-> 状态：设计预览。本文描述 0.4.0 目标 Core 能力；当前 Core 仍以 `core-native-v1` runtime descriptor 为可执行实现。
+> 版本绑定：本文只描述 Core 0.4.0 / `core-native-v2` 能力。Core 0.4.0 不把 0.3.x `TaskSpec` / `WorkflowSpec` 模块当作新协议兼容运行。
 
 模块运行时只有三类正式边界：
 
@@ -77,7 +77,7 @@ workflow 或 component 内调用：
 await ctx.run_page_action("open_login_page", url="https://example.com")
 ```
 
-`ctx.run_subtask(...)` 如仍存在，只作为旧名兼容，不作为 v2 新模块推荐 API。
+`ctx.run_subtask(...)` 不属于 0.4.0 新模块主路径。v2 编排对象应调用明确的 page action 或组件方法，不依赖旧子任务兼容名。
 
 ## `TaskContext.db`
 

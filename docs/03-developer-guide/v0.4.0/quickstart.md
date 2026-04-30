@@ -1,8 +1,8 @@
 # 快速开始
 
-> 状态：设计预览。本文展示 0.4.0 目标闭环；当前 SDK/Core 尚不能按这些命令完成初始化、DevLink 或 ZIP 安装。
+> 版本绑定：本文只适用于 0.4.x SDK / Contracts 与 Core 0.4.0。0.4.x SDK 不兼容 0.3.x 命令和开发模式；维护 0.3.x 模块时不要使用本页命令。
 
-这一页只走 0.4.0 目标最短闭环：
+这一页只走 0.4.0 最短闭环：
 
 1. 初始化 `core-native-v2` 模块
 2. 声明 interface / component / workflow
@@ -13,7 +13,6 @@
 ## 1. 初始化模块
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 --runtime-api core-native-v2
 cd /absolute/path/to/your/workspace
 uvx --from crawler4j-sdk crawler4j module init hotel_demo \
   --repo your-org/hotel_demo \
@@ -34,11 +33,11 @@ uv run crawler4j module show
 - manifest lock 由 SDK 生成，不手写
 - 运行时代码只依赖 `crawler4j-contracts`
 - SDK 只作为开发依赖
+- 0.4.x SDK 不生成 `TaskSpec`、`WorkflowSpec`、`module.yaml.data`、`hooks/` 或 `env_selectors/` 旧骨架
 
 ## 2. 创建能力骨架
 
 ```bash
-# 目标命令：当前 SDK 尚未实现这些 v2 命令组
 uv run crawler4j interface create labor
 uv run crawler4j component create api_labor --implements labor
 uv run crawler4j interface create orchestrator
@@ -185,7 +184,6 @@ def ready_hotels():
 ## 8. 校验并生成 lock
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 manifest lock
 uv run crawler4j check full
 uv run crawler4j manifest lock
 ```
@@ -200,7 +198,7 @@ uv run crawler4j manifest lock
 
 ## 9. 接入宿主联调
 
-这是 0.4.0 目标验收路径。当前 Core scanner 仍拒绝 `core-native-v2` 模块，不能用它验证当前源码。
+这是 0.4.0 验收路径，只适用于 Core 0.4.0。不要用 0.3.x 宿主或 0.3.x SDK 验证本页模块。
 
 切到宿主环境：
 
@@ -238,7 +236,6 @@ execution:
 ## 10. 构建 ZIP
 
 ```bash
-# 目标命令：当前 package build 尚未接入 v2 lock 校验
 uv run crawler4j check release
 uv run crawler4j package build
 uv run crawler4j package verify dist/hotel_demo-0.1.0.zip

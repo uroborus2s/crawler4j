@@ -1,6 +1,6 @@
 # 模块结构
 
-> 状态：设计预览。本文是 0.4.0 目标结构；当前 SDK 初始化出的模块仍是 `core-native-v1` 结构。
+> 版本绑定：本文是 0.4.0 专属结构。0.4.x SDK 初始化出的模块必须是 `core-native-v2` 结构，不生成也不维护 0.3.x 的固定导出开发模式。
 
 0.4.0 模块结构围绕装饰器扫描组织。目录名可以按团队习惯调整，但推荐使用下面的标准布局。
 
@@ -47,6 +47,8 @@ hotel_demo/
 | `pages/*.py` / `pages/<group>/*.py` | Hosted UI 页面 schema 与 handler |
 
 `tasks/` 在 v2 中承载 page action。保留这个目录名是为了迁移和工程习惯，但它不再表示 v1 `TaskSpec` 任务，也不再承载 `TASK/execute` 主路径。
+
+0.4.x SDK 不生成 `hooks/`、`env_selectors/`、`data/sql` 或 `data/seeds` 作为运行能力事实源。旧目录只可能出现在迁移前的历史模块中，迁移完成后不能作为 0.4.0 主路径保留。
 
 ## `module.yaml` 最小示例
 

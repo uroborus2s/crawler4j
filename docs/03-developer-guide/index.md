@@ -26,17 +26,18 @@
 
 开发 0.4.0 新模块、验证装饰器对象装配方案、或准备从 0.3.x 迁移时，使用这一版。0.4.0 未发布前只作为开发版预览，不替代当前发布版指南。
 
-## 兼容矩阵
+## 版本绑定矩阵
 
 | 指南版本 | 覆盖产品线 | Runtime API | SDK / Contracts 口径 | 状态 | 是否用于生产模块 |
 |---|---|---|---|---|---|
-| `v0.3.0` | `crawler4j 0.3.x` 稳定契约；当前源码线为 `crawler4j 0.3.2` | `core-native-v1` | 当前 SDK CLI 与 contracts 运行契约 | 当前可执行 | 是 |
-| `v0.4.0` | `crawler4j 0.4.0` 目标契约 | `core-native-v2` | 目标 SDK / Contracts / Core 重构 | 设计预览 | 否 |
+| `v0.3.0` | `crawler4j 0.3.x` 稳定契约 | `core-native-v1` | 只能使用 0.3.x SDK / Contracts 与 v1 CLI | 当前稳定 | 是 |
+| `v0.4.0` | `crawler4j 0.4.0` 破坏性升级契约 | `core-native-v2` | 只能使用 0.4.x SDK / Contracts 与 v2 CLI | 开发中 | 随 0.4.0 发布节奏决定 |
 
-`crawler4j-contracts` 包版本可能先于宿主产品版本增长。选择指南时以宿主 runtime API 和模块契约为准，不以单个子包版本号判断。
+SDK、Contracts 和 Core 按产品线绑定，不做跨大版本兼容。0.4.x SDK / Contracts 只面向 `crawler4j 0.4.0` 与 `core-native-v2`，不会保留 0.3.x 的 `task`、`workflow`、`env-selector`、`hook`、`data resource/view/seed` 等开发命令和模板。维护 0.3.x 模块时必须继续使用 0.3.x SDK / Contracts。
 
 ## 版本选择规则
 
 - 不要把 0.4.0 装饰器写法回填到 0.3.0 模块。
+- 不要用 0.4.x SDK / Contracts 开发或修复 0.3.x 模块；也不要期望 0.4.x CLI 兼容 0.3.x 命令。
 - 不要在 0.4.0 新模块里继续维护 `module.yaml.workflows[].parameters[]`、`TASK = TaskSpec(...)`、`WORKFLOW = WorkflowSpec(...)` 或 `module.yaml.data` 数据事实源。
 - 根目录只做版本选择；具体开发步骤都在 `v0.3.0/` 或 `v0.4.0/` 下维护。

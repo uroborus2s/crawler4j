@@ -1,6 +1,6 @@
 # UI 与数据表
 
-> 状态：设计预览。Hosted UI 基础页面仍沿用当前 `PageSpec` / handler；本文中的 `page_action` 按钮动作是 0.4.0 目标能力，当前 schema 仍只保证 `reload` / `open_page` 等既有动作。
+> 版本绑定：本文只适用于 0.4.x SDK / Contracts 与 Core 0.4.0。0.4.x 页面动作和数据读取按 `@page_action`、`@data_table`、`@data_query` 工作，不兼容 0.3.x 数据命令或任务按钮模式。
 
 0.4.0 的 UI 仍由宿主渲染，页面源码仍放在 `pages/`。变化在数据和动作来源：
 
@@ -55,7 +55,7 @@ def load_dashboard_page(
 
 ## 页面动作
 
-按钮目标上可以触发宿主动作，也可以触发 page action。当前已落地宿主动作仍以 `reload`、`open_page` 为主；`page_action` 属于 v2 目标 schema。
+按钮目标上可以触发宿主动作，也可以触发 page action。0.4.0 模块里的业务按钮优先绑定 `page_action`，不要回退到 0.3.x 任务按钮模式。
 
 ```python
 {

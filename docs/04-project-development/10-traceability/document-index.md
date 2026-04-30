@@ -72,7 +72,7 @@
 
 ## 5. 最近同步
 
-- 2026-04-30：开发者指南已按版本分流并补齐 0.4.0 开发版正文。`docs/03-developer-guide/index.md` 只保留版本选择；0.3.0 稳定指南冻结到 `docs/03-developer-guide/v0.3.0/`；0.4.0 开发者指南新增到 `docs/03-developer-guide/v0.4.0/`，主线为 `core-native-v2` 装饰器对象装配、manifest lock、`ctx.db` 数据契约和保留字段诊断，并已标明当前只是设计预览、不可按当前源码直接执行 v2 CLI/DevLink/ZIP 验收；根 `docs/index.md` 已更新开发者指南导航。
+- 2026-04-30：开发者指南已按版本分流并补齐 0.4.0 开发版正文。`docs/03-developer-guide/index.md` 只保留版本选择；0.3.0 稳定指南冻结到 `docs/03-developer-guide/v0.3.0/`；0.4.0 开发者指南新增到 `docs/03-developer-guide/v0.4.0/`，主线为 `core-native-v2` 装饰器对象装配、manifest lock、`ctx.db` 数据契约和保留字段诊断，并已明确 0.4.x SDK / Contracts 只服务 Core 0.4.0，不兼容 0.3.x 命令、模板或开发模式；根 `docs/index.md` 已更新开发者指南导航。
 - 2026-04-30：Workflow 运行参数契约与运行模板 UI 已同步到开发者入口。`docs/03-developer-guide/{index.md,module-structure.md,reference-sdk-and-cli.md}` 与 `docs/04-project-development/04-design/module-config-runtime-data-contract.md` 现统一说明 `module.yaml.workflows[].parameters[]`、支持的数据类型、SDK 校验和 `RunProfile.execution.params` 注入链路；`.factory/memory/` 已同步登记。
 - 2026-04-30：使用者指南与开发者指南版本分流方案已形成。新增 `docs/04-project-development/03-requirements/0.4.0-guide-versioning-requirements.md` 与 `docs/04-project-development/04-design/0.4.0-guide-versioning-architecture.md`，明确 docs-stratego 网站主文档必须指向当前已发布版本，旧版本指南保留为历史版本入口，0.4.0 未发布前只能作为开发版预览。
 - 2026-04-30：0.4.0 正式架构方向调整为装饰器对象装配。新增 `docs/04-project-development/03-requirements/0.4.0-decorator-object-assembly-requirements.md` 与 `docs/04-project-development/04-design/0.4.0-decorator-object-assembly-architecture.md`，明确 workflow 不再声明参数，参数归属 component 创建；interfaces/components/workflows/page actions/data tables 由装饰器扫描生成运行时对象图，Core 负责每任务环境对象装配，SDK/Contracts 同步进入 v2 重构；SDK 打开阶段、DevLink、`check full` 与打包阶段需前置阻断宿主保留数据库字段冲突。

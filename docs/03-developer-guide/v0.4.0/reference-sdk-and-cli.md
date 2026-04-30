@@ -1,8 +1,8 @@
 # SDK 与 CLI 参考
 
-> 状态：设计预览。本文列出 0.4.0 目标命令；当前 `crawler4j-sdk` 尚未提供这些 v2 命令组。
+> 版本绑定：本文列出 0.4.x SDK 命令。0.4.x SDK 只服务 Core 0.4.0 / `core-native-v2`，不兼容 0.3.x 的命令、模板或开发模式。
 
-`crawler4j-sdk` 在 0.4.0 只面向开发阶段。
+`crawler4j-sdk` 在 0.4.0 只面向 0.4.0 模块开发阶段。开发或维护 0.3.x 模块必须使用 0.3.x SDK。
 
 ## 命令入口
 
@@ -14,7 +14,7 @@
 
 | 命令组 | 关键命令 | 主要输出 |
 |---|---|---|
-| `module` | `module init` `module show` `module repair-init` `module set repo/version` | 模块根目录与 `module.yaml` |
+| `module` | `module init` `module show` `module set repo/version` | 0.4.0 模块根目录与 `module.yaml` |
 | `interface` | `interface create` `interface list` | `@interface` 模板 |
 | `component` | `component create` `component list` | `@component` 模板 |
 | `workflow` | `workflow create` `workflow list` | `@workflow` 模板 |
@@ -22,7 +22,7 @@
 | `page` | `page create` `page list` | Hosted UI 页面 |
 | `data` | `data table create` `data query create` `data list` | `@data_table` / `@data_query` |
 | `manifest` | `manifest lock` | `.crawler4j/manifest.lock.json` |
-| `migrate` | `migrate native-v2` | v0.3.0 到 v0.4.0 迁移报告 |
+| `migrate` | `migrate native-v2` | v0.3.0 到 v0.4.0 重写迁移报告 |
 | `check` | `check structure` `check release` `check full` | 本地校验 gate |
 | `package` | `package build` `package verify` | ZIP 包 |
 | `release` | `release status` `release check-remote` `release publish` | 发布辅助 |
@@ -31,7 +31,6 @@
 ## `module init`
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 --runtime-api core-native-v2
 uvx --from crawler4j-sdk crawler4j module init demo_module \
   --repo example/demo_module \
   --runtime-api core-native-v2
@@ -47,6 +46,16 @@ uvx --from crawler4j-sdk crawler4j module init demo_module \
 - 页面目录
 
 不会生成旧运行薄壳或重复运行能力清单。
+
+0.4.x SDK 也不会生成或维护 0.3.x 旧开发入口，包括：
+
+- `crawler4j task create`
+- `crawler4j env-selector create`
+- `crawler4j hook create`
+- `crawler4j data resource create`
+- `crawler4j data view create`
+- `crawler4j data seed create`
+- `crawler4j module set default-workflow`
 
 ## `check full`
 
@@ -70,7 +79,6 @@ uvx --from crawler4j-sdk crawler4j module init demo_module \
 ## `manifest lock`
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 manifest lock
 uv run crawler4j manifest lock
 ```
 
@@ -93,10 +101,9 @@ SDK 在这些入口必须执行同一套诊断：
 ## 迁移命令
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 migrate native-v2
 uv run crawler4j migrate native-v2
 ```
 
-迁移报告应提示旧运行能力、旧 workflow 参数和旧数据契约如何迁到装饰器与 component 参数，并指出哪些字段命中宿主保留字段。
+迁移报告应提示旧运行能力、旧 workflow 参数和旧数据契约如何重写到装饰器与 component 参数，并指出哪些字段命中宿主保留字段。迁移命令是一次性重写辅助，不代表 0.4.x SDK 兼容 0.3.x 开发模式。
 
 迁移命令可以生成建议补丁或报告，但最终仍以 `check full` 和 manifest lock 为准。

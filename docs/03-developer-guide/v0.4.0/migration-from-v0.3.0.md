@@ -1,6 +1,6 @@
 # 从 v0.3.0 迁移
 
-> 状态：设计预览。迁移命令和 v2 验收门禁尚未在当前 SDK/Core 中落地；本文描述目标迁移顺序。
+> 版本绑定：迁移是一次破坏性重写，不是兼容升级。先用 0.3.x SDK 保留和验证旧基线，再切到 0.4.x SDK / Contracts 重写为 `core-native-v2`；0.4.x SDK 不负责继续维护 0.3.x 开发模式。
 
 这一页只用于迁移。新模块不要先写 v0.3.0 结构再迁移。
 
@@ -24,18 +24,20 @@
 ## 一次迁移的推荐顺序
 
 1. 新建迁移分支，保留 v0.3.x 可运行基线
-2. 在 v0.3.x 状态下运行迁移诊断报告
-3. 把 workflow 迁到 `@workflow`
-4. 把业务编排迁到 `@component`
-5. 把 task 迁到 `@page_action`
-6. 把 `module.yaml.data` 迁到 `@data_table` / `@data_query`
-7. 修复装饰器扫描和保留字段诊断
-8. 最后再切 `runtime_api` 到 `core-native-v2`
-9. 生成 manifest lock
-10. 用 DevLink 回归运行模板和页面
+2. 用 0.3.x SDK 在 v0.3.x 状态下完成最后一次基线校验
+3. 切换开发环境到 0.4.x SDK / Contracts
+4. 运行 0.4.x 迁移诊断报告
+5. 把 workflow 迁到 `@workflow`
+6. 把业务编排迁到 `@component`
+7. 把 task 迁到 `@page_action`
+8. 把 `module.yaml.data` 迁到 `@data_table` / `@data_query`
+9. 移除旧 SDK 命令产物、旧固定导出和旧数据目录事实源
+10. 修复装饰器扫描和保留字段诊断
+11. 最后再切 `runtime_api` 到 `core-native-v2`
+12. 生成 manifest lock
+13. 用 Core 0.4.0 DevLink 回归运行模板和页面
 
 ```bash
-# 目标命令：当前 SDK 尚未实现 migrate native-v2 / manifest lock
 uv run crawler4j migrate native-v2
 uv run crawler4j check full
 uv run crawler4j manifest lock
@@ -177,6 +179,7 @@ uv run crawler4j package verify dist/<module>-<version>.zip
 迁移完成的最小判断：
 
 - `module.yaml` 不再承载对象图、workflow 参数和数据契约
+- 模块工程不再依赖 0.3.x SDK 命令生成的 `TaskSpec`、`WorkflowSpec`、`hooks/`、`env_selectors/` 或 `data/sql` 事实源
 - lock 来自当前源码扫描
 - 运行模板只展示对象装配和 component 参数
 - 数据访问只走 `ctx.db`
