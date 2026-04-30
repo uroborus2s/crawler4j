@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `TASK-024`, `TASK-026`, `TASK-028`
-**最后更新：** 2026-04-24
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-0400`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-0400`
+**最后更新：** 2026-04-30
 
 ## `API-001` Root App Entry Contract
 
@@ -75,6 +75,26 @@
 | 当前状态 | 已切到 manifest 驱动契约；旧 `db.declare_db_view` 运行时声明口已退出正式协议 |
 | 关联文档 | `module-entity-table-view-design.md` |
 | 关联项 | `CR-014`, `TASK-028` |
+
+## `API-012` Decorator-first Object Assembly Runtime（V2 方案）
+
+| 项目 | 内容 |
+|---|---|
+| 目标 | 0.4.0 新模块运行时从 `module.yaml` 对象图切到代码装饰器，降低模块开发者理解成本 |
+| Runtime API | `core-native-v2` |
+| 事实源 | `@interface`、`@component`、`@workflow`、`@page_action`、`@data_table`、`@data_query` |
+| Manifest 边界 | `module.yaml` 不再声明 interfaces、objects、workflows、tasks、data resources、workflow parameters；只保留模块元信息和宿主级静态配置 |
+| Workflow 契约 | workflow 只通过构造函数接收宿主注入对象，不接收 `parameters[]` |
+| Component 契约 | component 声明 `implements`、`inject` 和对象创建参数；对象参数只用于宿主创建对象实例 |
+| 对象生命周期 | Core 按运行模板为每个 task/env 创建独立对象图，默认不共享业务对象实例 |
+| Page action 契约 | task 退化为 `@page_action` 纯函数；业务编排进入 workflow / orchestrator |
+| Data 契约 | 数据表和命名查询由 `@data_table` / `@data_query` 声明，并注册到现有 `ctx.db` 能力 |
+| 宿主保留字段 | SDK / Core / Contracts 共享宿主保留字段集合；第一版阻断模块自有数据列声明 `created_at`、`updated_at`，并阻断常见混淆字段 `create_at`、`update_at` |
+| SDK 质量门 | 模块项目打开、DevLink 注册、`crawler4j check full`、`crawler4j manifest lock` 和 package build 均必须执行装饰器扫描、对象图校验和数据字段保留名诊断 |
+| 运行模板 UI | 根据 workflow 根注入对象递归展示实现选择和对象参数表单，保存为 `object_bindings` / `object_params` |
+| 关联文档 | `0.4.0-decorator-object-assembly-requirements.md`, `0.4.0-decorator-object-assembly-architecture.md` |
+| 当前状态 | 方案已形成，Core / SDK / Contracts 实施待拆分 |
+| 关联项 | `REQ-0400`, `TASK-0400` |
 
 ## `API-005` Module Config / Runtime / Data Contract
 
@@ -174,6 +194,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-30 | 新增 `API-012`，登记 0.4.0 装饰器对象装配运行时、SDK 打开阶段诊断和宿主保留字段校验契约 | Codex |
 | 2026-04-24 | 将 Hosted UI 页面契约修正为 `pages/` 注册可路由页面、`ui_extension.pages[]` 只控制左侧菜单，并允许 `open_page` 跳转到非菜单详情页 | Codex |
 | 2026-04-22 | 将 `API-008` 从“设计已定未落地”更新为 hosted page V1 已本地实现：`ui_extension.pages[]`、`ui.declare_page`、宿主页渲染器与 SDK CLI 已同步完成 | Codex |
 | 2026-04-22 | 新增 `API-008`，登记模块宿主管理页与最小化 UI 框架的目标契约 | Codex |
