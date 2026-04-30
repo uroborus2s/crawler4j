@@ -18,3 +18,5 @@
   Constraint: module-authored history is now modeled as registered resources and accessed through `ctx.db`; old append/query event tools are no longer module developer interfaces.
 - `REQ-009`: Fixed-pool Service jobs must wait for eligible module pool capacity instead of failing immediately | Priority: P1 | Status: VERIFIED
   Constraint: host-owned waiting seats, FIFO refill, pool eligibility cards, and queued waiting-timeout closeout are implemented locally.
+- `REQ-0400`: 0.4.0 module runtime must switch to decorator-first object assembly | Priority: P0 | Status: DESIGNED
+  Constraint: workflow cannot own parameters; decorators are the runtime capability source of truth, object parameters belong to components, Core assembles one object graph per task/env, SDK/Contracts provide decorators, scanning, validation, migration, and manifest lock.

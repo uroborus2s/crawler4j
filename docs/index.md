@@ -110,6 +110,9 @@ mkdocs:
             - title: 产品需求文档（PRD）
               path: 04-project-development/03-requirements/prd.md
               access: private
+            - title: 0.4.0 装饰器对象装配需求方案
+              path: 04-project-development/03-requirements/0.4.0-decorator-object-assembly-requirements.md
+              access: private
             - title: 需求分析
               path: 04-project-development/03-requirements/requirements-analysis.md
               access: private
@@ -144,6 +147,9 @@ mkdocs:
               access: private
             - title: 模块配置与数据契约
               path: 04-project-development/04-design/module-config-runtime-data-contract.md
+              access: private
+            - title: 0.4.0 装饰器对象装配架构方案
+              path: 04-project-development/04-design/0.4.0-decorator-object-assembly-architecture.md
               access: private
         - title: 开发过程文档
           children:

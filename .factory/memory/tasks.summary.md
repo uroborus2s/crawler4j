@@ -42,3 +42,5 @@
   状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`CR-013`, `API-008`
 - `TASK-028-implement-module-entity-table-view-query-capability` TASK-028 实现模块实体表视图与分析查询能力
   状态：DONE | 负责人：Codex | 预估：4.0 人/天 | 关联：`CR-014`, `API-009`
+- `TASK-0400-design-decorator-object-assembly-runtime` TASK-0400 形成 0.4.0 装饰器对象装配运行时方案
+  状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0400`, `API-012`
