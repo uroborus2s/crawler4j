@@ -117,6 +117,8 @@ MODEL_PROJECT_README = """# {display_name}
 - `tasks/`: 页面操作函数，使用 `@page_action`。
 - `data/`: 数据表与命名查询声明，使用 `@data_table` / `@data_query`。
 - `pages/`: Hosted UI 页面；可以平铺在 `pages/*.py`，也可以按单层业务分组放到 `pages/<group>/*.py`。
+- `candidates/`: 环境候选纯函数，使用 `@env_candidates`。
+- `cleanups/`: 环境清理候选纯函数，使用 `@env_cleanup_candidates`。
 - `.crawler4j/manifest.lock.json`: SDK 扫描生成的 v2 manifest lock。
 
 ## 常用命令
@@ -143,6 +145,12 @@ uv run crawler4j page create account_detail --group account --no-menu
 uv run crawler4j data table create accounts
 uv run crawler4j data query create get_account_by_id --source accounts
 
+# 创建环境候选函数
+uv run crawler4j candidate create ready_accounts
+
+# 创建环境清理候选函数
+uv run crawler4j cleanup create unused_accounts
+
 # 生成 manifest lock
 uv run crawler4j manifest lock
 
@@ -159,6 +167,8 @@ uv run crawler4j package build
 - 对象依赖和 component 参数可以写在装饰器参数里，也可以写成 `Annotated[..., object_inject(...)]` / `Annotated[..., object_param(...)]`。
 - `object_param(...)` 支持标量、enum、array、object、json、date/datetime/time、url、path、secret，并可从常见 Python 注解推断类型。
 - 表与命名查询统一由装饰器声明；旧 `module.yaml.data` 已不再是 0.4.x 运行契约。
+- 环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，不使用资源池同步或旧 `env_selectors/`。
+- 批量环境清理由 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数声明；模块只返回 env id，删除由宿主确认后执行。
 """
 
 MODEL_TEST_TASK_TEMPLATE = '''"""测试页面操作。"""
@@ -188,7 +198,7 @@ async def test_example_action_logic():
 
 MODEL_MODULE_INIT = '''"""{display_name} 模块包。
 
-Core 会直接扫描 `interfaces/`、`objects/`、`workflows/`、`tasks/`、`data/`、`pages/`。
+Core 会直接扫描 `interfaces/`、`objects/`、`workflows/`、`tasks/`、`data/`、`pages/`、`candidates/`。
 宿主页源码既可以平铺，也可以按单层分组放到 `pages/<group>/`。
 模块根包不再承载运行时装配逻辑。
 """
@@ -214,6 +224,8 @@ MODEL_WORKFLOWS_INIT_TEMPLATE = '"""v2 工作流声明集合。"""\n'
 MODEL_TASKS_INIT_TEMPLATE = '"""v2 页面操作集合。"""\n'
 MODEL_DATA_INIT_TEMPLATE = '"""v2 数据契约声明集合。"""\n'
 MODEL_PAGES_INIT_TEMPLATE = '"""Hosted UI 页面集合。"""\n'
+MODEL_CANDIDATES_INIT_TEMPLATE = '"""v2 环境候选函数集合。"""\n'
+MODEL_CLEANUPS_INIT_TEMPLATE = '"""v2 环境清理候选函数集合。"""\n'
 
 WORKFLOW_TEMPLATE = '''"""工作流: {display_name}
 
@@ -246,7 +258,10 @@ from crawler4j_contracts import data_table
     label="{display_name}",
     description="{description}",
     schema=[
+        {{"name": "env_id", "type": "integer", "required": True}},
         {{"name": "account_id", "type": "string", "required": True}},
+        {{"name": "status", "type": "string", "required": True}},
+        {{"name": "last_used_at", "type": "integer"}},
     ],
 )
 class {class_name}:
@@ -273,6 +288,54 @@ def {name}():
     """{display_name} 查询声明。"""
 '''
 
+ENV_CANDIDATES_TEMPLATE = '''"""环境候选函数: {display_name}
+
+{description}
+"""
+
+from crawler4j_contracts import EnvCandidates, env_candidates
+
+
+@env_candidates(name="{name}", label="{display_name}", description="{description}")
+def {name}(params: dict | None = None) -> EnvCandidates:
+    """返回可分配环境候选查询。
+
+    这里只描述候选集合；Core 会在运行时过滤 READY、浏览器类型和未被租约占用的环境。
+    """
+    params = params or {{}}
+    limit = int(params.get("limit", 100))
+    return (
+        EnvCandidates.from_table("accounts")
+        .filter(status="ready")
+        .exclude(status="blacklisted")
+        .order_by("last_used_at")
+        .limit(limit)
+    )
+'''
+
+ENV_CLEANUP_CANDIDATES_TEMPLATE = '''"""环境清理候选函数: {display_name}
+
+{description}
+"""
+
+from crawler4j_contracts import EnvCandidates, env_cleanup_candidates
+
+
+@env_cleanup_candidates(name="{name}", label="{display_name}", description="{description}")
+def {name}(params: dict | None = None) -> EnvCandidates:
+    """返回可清理环境候选查询。
+
+    这里只描述候选集合；Core 会在用户确认后再次校验环境状态和租约，再执行删除。
+    """
+    params = params or {{}}
+    limit = int(params.get("limit", 100))
+    return (
+        EnvCandidates.from_table("accounts")
+        .filter(status="unused")
+        .order_by("last_used_at")
+        .limit(limit)
+    )
+'''
 
 def render_page_template(
     *,

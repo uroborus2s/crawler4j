@@ -57,6 +57,9 @@ class DebugSession:
     hooks_module: str = ""
     provider: str = "playwright_local"
     acquisition_mode: AcquisitionMode = AcquisitionMode.CREATE
+    fixed_env_id: int | None = None
+    candidates: str = ""
+    candidate_params: dict[str, Any] = field(default_factory=dict)
     creation_params: dict[str, Any] = field(default_factory=dict)
     creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
     wait_timeout: int = 60
@@ -102,6 +105,9 @@ class DebugSession:
             "hooks_module": self.hooks_module,
             "provider": self.provider,
             "acquisition_mode": self.acquisition_mode.value,
+            "fixed_env_id": self.fixed_env_id,
+            "candidates": self.candidates,
+            "candidate_params": self.candidate_params,
             "creation_params": self.creation_params,
             "creation_lifecycle": self.creation_lifecycle.value,
             "wait_timeout": self.wait_timeout,

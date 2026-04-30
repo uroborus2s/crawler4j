@@ -32,8 +32,12 @@ from crawler4j_sdk.cli.templates import (
     COMPONENT_TEMPLATE,
     DATA_QUERY_TEMPLATE,
     DATA_TABLE_TEMPLATE,
+    ENV_CLEANUP_CANDIDATES_TEMPLATE,
+    ENV_CANDIDATES_TEMPLATE,
     INTERFACE_TEMPLATE,
     MODEL_GITIGNORE_TEMPLATE,
+    MODEL_CANDIDATES_INIT_TEMPLATE,
+    MODEL_CLEANUPS_INIT_TEMPLATE,
     MODEL_DATA_INIT_TEMPLATE,
     MODEL_INTERFACES_INIT_TEMPLATE,
     MODEL_MANIFEST_TEMPLATE,
@@ -645,7 +649,7 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
     errors: list[str] = []
 
     required_files = ["module.yaml", "__init__.py"]
-    required_dirs = ["interfaces", "objects", "workflows", "tasks", "data", "pages"]
+    required_dirs = ["interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates"]
     for name in required_files:
         if not (module_root / name).exists():
             errors.append(f"缺少关键文件: {name}")
@@ -668,6 +672,7 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
         "objects",
         "tasks",
         "ui_extension",
+        "resource_pools",
     ):
         if key in manifest:
             errors.append(f"module.yaml 不再允许声明 {key}；请使用 core-native-v2 装饰器")
@@ -1331,6 +1336,8 @@ def cmd_module_init(args: argparse.Namespace) -> int:
         "tasks",
         "workflows",
         "pages",
+        "candidates",
+        "cleanups",
         "tests",
         "data",
     ]:
@@ -1390,6 +1397,16 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             force=args.force,
         )
         _write_text(
+            output_dir / "candidates" / "__init__.py",
+            MODEL_CANDIDATES_INIT_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "cleanups" / "__init__.py",
+            MODEL_CLEANUPS_INIT_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
             output_dir / "interfaces" / "labor.py",
             INTERFACE_TEMPLATE.format(
                 name="labor",
@@ -1445,6 +1462,15 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             force=args.force,
         )
         _write_text(
+            output_dir / "candidates" / "ready_accounts.py",
+            ENV_CANDIDATES_TEMPLATE.format(
+                name="ready_accounts",
+                display_name="可用账号候选",
+                description="示例环境候选函数",
+            ),
+            force=args.force,
+        )
+        _write_text(
             output_dir / "tasks" / "example_action.py",
             SCRIPT_TEMPLATE.format(
                 name="example_action",
@@ -1490,6 +1516,8 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     print("  - 新建页面: `crawler4j page create <page_id>`")
     print("  - 新建数据表: `crawler4j data table create <name>`")
     print("  - 新建命名查询: `crawler4j data query create <name> --source <data_table>`")
+    print("  - 新建环境候选函数: `crawler4j candidate create <name>`")
+    print("  - 新建环境清理候选函数: `crawler4j cleanup create <name>`")
     print("  - 更新 lock: `crawler4j manifest lock`")
     print("  - 完整校验: `crawler4j check full`")
     return 0
@@ -1517,6 +1545,8 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     print(f"页面操作: {', '.join(sorted(declarations_by_kind.get('page_action', []))) or '(无)'}")
     print(f"数据表: {len(declarations_by_kind.get('data_table', []))}")
     print(f"命名查询: {len(declarations_by_kind.get('data_query', []))}")
+    print(f"环境候选: {', '.join(sorted(declarations_by_kind.get('env_candidates', []))) or '(无)'}")
+    print(f"环境清理候选: {', '.join(sorted(declarations_by_kind.get('env_cleanup_candidates', []))) or '(无)'}")
     if result.diagnostics:
         print(f"诊断: {len(result.diagnostics)}")
     return 0
@@ -1722,6 +1752,74 @@ def cmd_workflow_list(args: argparse.Namespace) -> int:
     manifest = load_manifest(module_root)
     names = _v2_declaration_names(module_root, manifest, "workflow")
     print("\n".join(names) if names else "(无工作流)")
+    return 0
+
+
+def cmd_candidate_create(args: argparse.Namespace) -> int:
+    """Create a pure env candidate function under candidates/."""
+    module_root = require_module_root()
+    name = str(args.name or "").strip()
+    if not is_valid_name(name):
+        _print_error("环境候选函数名必须是小写 snake_case")
+        return 1
+    try:
+        _write_text(
+            module_root / "candidates" / f"{name}.py",
+            ENV_CANDIDATES_TEMPLATE.format(
+                name=name,
+                display_name=args.display_name or to_display_name(name),
+                description=args.description or f"{to_display_name(name)} 环境候选函数",
+            ),
+            force=args.force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+    _print_success(f"已创建环境候选函数: candidates/{name}.py")
+    return 0
+
+
+def cmd_candidate_list(args: argparse.Namespace) -> int:
+    """List pure env candidate functions in the current module."""
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    names = _v2_declaration_names(module_root, manifest, "env_candidates")
+    print("\n".join(names) if names else "(无环境候选函数)")
+    return 0
+
+
+def cmd_cleanup_create(args: argparse.Namespace) -> int:
+    """Create a pure env cleanup candidate function under cleanups/."""
+    module_root = require_module_root()
+    name = str(args.name or "").strip()
+    if not is_valid_name(name):
+        _print_error("环境清理候选函数名必须是小写 snake_case")
+        return 1
+    try:
+        _write_text(
+            module_root / "cleanups" / f"{name}.py",
+            ENV_CLEANUP_CANDIDATES_TEMPLATE.format(
+                name=name,
+                display_name=args.display_name or to_display_name(name),
+                description=args.description or f"{to_display_name(name)} 环境清理候选函数",
+            ),
+            force=args.force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+    _print_success(f"已创建环境清理候选函数: cleanups/{name}.py")
+    return 0
+
+
+def cmd_cleanup_list(args: argparse.Namespace) -> int:
+    """List pure env cleanup candidate functions in the current module."""
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    names = _v2_declaration_names(module_root, manifest, "env_cleanup_candidates")
+    print("\n".join(names) if names else "(无环境清理候选函数)")
     return 0
 
 
@@ -2484,6 +2582,40 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_create.set_defaults(func=cmd_workflow_create)
     workflow_list = workflow_sub.add_parser("list", help="列出 @workflow 声明")
     workflow_list.set_defaults(func=cmd_workflow_list)
+
+    candidate_parser = subparsers.add_parser(
+        "candidate",
+        help="环境候选函数操作：在 candidates/ 下创建或列出 @env_candidates",
+    )
+    candidate_sub = candidate_parser.add_subparsers(dest="action")
+    candidate_create = candidate_sub.add_parser(
+        "create",
+        help="创建 @env_candidates 同步纯函数",
+    )
+    candidate_create.add_argument("name", help="候选函数名，snake_case")
+    candidate_create.add_argument("--display-name", help="显示名")
+    candidate_create.add_argument("--description", help="说明")
+    candidate_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    candidate_create.set_defaults(func=cmd_candidate_create)
+    candidate_list = candidate_sub.add_parser("list", help="列出 @env_candidates 声明")
+    candidate_list.set_defaults(func=cmd_candidate_list)
+
+    cleanup_parser = subparsers.add_parser(
+        "cleanup",
+        help="环境清理候选函数操作：在 cleanups/ 下创建或列出 @env_cleanup_candidates",
+    )
+    cleanup_sub = cleanup_parser.add_subparsers(dest="action")
+    cleanup_create = cleanup_sub.add_parser(
+        "create",
+        help="创建 @env_cleanup_candidates 同步纯函数",
+    )
+    cleanup_create.add_argument("name", help="清理候选函数名，snake_case")
+    cleanup_create.add_argument("--display-name", help="显示名")
+    cleanup_create.add_argument("--description", help="说明")
+    cleanup_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    cleanup_create.set_defaults(func=cmd_cleanup_create)
+    cleanup_list = cleanup_sub.add_parser("list", help="列出 @env_cleanup_candidates 声明")
+    cleanup_list.set_defaults(func=cmd_cleanup_list)
 
     page_parser = subparsers.add_parser(
         "page",

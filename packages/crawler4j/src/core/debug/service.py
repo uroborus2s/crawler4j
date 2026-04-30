@@ -87,6 +87,9 @@ class DebugService:
             hooks_module=target.hooks_module,
             provider=target.run_profile.resource.acquisition.provider,
             acquisition_mode=target.run_profile.resource.acquisition.mode,
+            fixed_env_id=target.run_profile.resource.acquisition.env_id,
+            candidates=target.run_profile.resource.acquisition.candidates,
+            candidate_params=dict(target.run_profile.resource.acquisition.candidate_params),
             creation_params=dict(target.run_profile.resource.acquisition.creation.params),
             creation_lifecycle=(
                 target.run_profile.resource.acquisition.creation.lifecycle

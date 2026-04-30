@@ -27,7 +27,6 @@ from crawler4j_contracts.database import DatabaseClient
 from crawler4j_contracts.hosted_ui import (
     normalize_page_schema as sdk_normalize_page_schema,
 )
-from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.mms.data_contract import load_sql_file, validate_resource_sql
 from src.core.persistence import get_module_data_store
 from src.utils.paths import get_resource_path
@@ -51,6 +50,8 @@ RUNTIME_SURFACE_FULL = "full"
 RUNTIME_SURFACE_HOSTED_UI_DECLARE = "hosted_ui_declare"
 RUNTIME_SURFACE_HOSTED_UI_READONLY = "hosted_ui_readonly"
 RUNTIME_SURFACE_HOSTED_UI_ACTION = "hosted_ui_action"
+RUNTIME_SURFACE_ENV_CANDIDATES = "env_candidates"
+RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES = "env_cleanup_candidates"
 
 _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
     RUNTIME_SURFACE_FULL: None,
@@ -69,6 +70,8 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
             "ui.get_page",
         }
     ),
+    RUNTIME_SURFACE_ENV_CANDIDATES: frozenset(),
+    RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES: frozenset(),
 }
 DECLARE_UI_SIDE_EFFECT_DB_TOOLS: set[str] = set()
 
@@ -115,37 +118,6 @@ def _validate_managed_identifier(value: str, *, field_name: str) -> str:
     return normalized
 
 
-def _normalize_resource_pool_names(declared_resource_pools: Any) -> frozenset[str]:
-    names: set[str] = set()
-    for item in declared_resource_pools or []:
-        if isinstance(item, str):
-            raw_name = item
-        elif isinstance(item, dict):
-            raw_name = item.get("name", "")
-        else:
-            raw_name = getattr(item, "name", "")
-        name = str(raw_name or "").strip()
-        if name:
-            names.add(name)
-    return frozenset(names)
-
-
-def _load_declared_resource_pool_names(module_name: str) -> frozenset[str]:
-    try:
-        from src.core.mms.registry import get_module_registry
-
-        registry = get_module_registry()
-        module_root = (module_name or "").split(".")[0]
-        module_info = registry.get_module(module_name) or registry.get_module(module_root)
-    except Exception:
-        return frozenset()
-
-    if not module_info:
-        return frozenset()
-    manifest = getattr(module_info, "manifest", None)
-    return _normalize_resource_pool_names(getattr(manifest, "resource_pools", []))
-
-
 def _raise_declare_ui_side_effect_error(tool_name: str) -> None:
     raise RuntimeError(f"declare_ui 不允许调用 {tool_name}；UI 声明必须保持无副作用")
 
@@ -154,22 +126,6 @@ def _get_ip_pool_manager():
     from src.core.rem.ip_pool import get_ip_pool_manager
 
     return get_ip_pool_manager()
-
-
-def _rem_manager_helpers():
-    from src.core.rem.manager import (
-        RESOURCE_POOL_METADATA_NAMESPACE,
-        build_resource_pool_card,
-        build_resource_pool_metadata_key,
-        get_environment_manager,
-    )
-
-    return (
-        get_environment_manager,
-        RESOURCE_POOL_METADATA_NAMESPACE,
-        build_resource_pool_card,
-        build_resource_pool_metadata_key,
-    )
 
 
 def _resolve_runtime_surface_tools(surface: str) -> frozenset[str] | None:
@@ -494,37 +450,6 @@ class CoreIPPoolTools:
 class CoreEnvTools:
     """Core 侧环境操作工具实现。"""
 
-    def __init__(self, module_name: str, *, declared_resource_pool_names: frozenset[str]):
-        self._module_name = module_name
-        self._declared_resource_pool_names = declared_resource_pool_names
-
-    def _require_declared_resource_pool(self, pool_name: str) -> str:
-        normalized = str(pool_name or "").strip()
-        if not normalized:
-            raise ValueError("pool_name 不能为空")
-        if normalized in self._declared_resource_pool_names:
-            return normalized
-        if self._declared_resource_pool_names:
-            raise ValueError(
-                f"资源池未在 module.yaml.resource_pools 中声明: {self._module_name}.{normalized}"
-            )
-        raise ValueError(
-            f"当前模块未在 module.yaml.resource_pools 中声明资源池，不能使用: {self._module_name}.{normalized}"
-        )
-
-    def _publish_resource_pool_updated(self, *, env_id: int, pool_name: str) -> None:
-        get_event_bus().publish(
-            Event(
-                type=EventType.ENV_RESOURCE_POOL_UPDATED,
-                data={
-                    "env_id": int(env_id),
-                    "module_name": self._module_name,
-                    "pool_name": str(pool_name or "").strip(),
-                },
-                module_name=self._module_name,
-            )
-        )
-
     async def set_proxy(
         self,
         env_id: int,
@@ -532,161 +457,14 @@ class CoreEnvTools:
         proxy_value: str | None = None,
         proxy_pool_id: str | None = None,
     ) -> bool:
-        get_environment_manager, _, _, _ = _rem_manager_helpers()
+        from src.core.rem.manager import get_environment_manager
+
         manager = get_environment_manager()
         return await manager.update_env(
             env_id,
             proxy_value=proxy_value or None,
             proxy_pool_id=proxy_pool_id or None,
         )
-
-    async def bind_resource_pool(
-        self,
-        env_id: int,
-        *,
-        pool_name: str,
-        eligible: bool = True,
-        reason: str = "",
-        exclusive: bool = True,
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        card = build_card(
-            self._module_name,
-            pool_name,
-            eligible=eligible,
-            reason=reason,
-            exclusive=exclusive,
-        )
-        ok = await manager.set_metadata(
-            int(env_id),
-            namespace,
-            metadata_key,
-            card,
-            value_type="json",
-        )
-        if ok:
-            self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
-        return ok
-
-    async def mark_resource_pool_eligible(
-        self,
-        env_id: int,
-        *,
-        pool_name: str,
-        reason: str = "",
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        current = await manager.get_metadata(int(env_id), namespace, metadata_key)
-        exclusive = bool(current.get("exclusive", True)) if isinstance(current, dict) else True
-        card = build_card(
-            self._module_name,
-            pool_name,
-            eligible=True,
-            reason=reason,
-            exclusive=exclusive,
-        )
-        ok = await manager.set_metadata(
-            int(env_id),
-            namespace,
-            metadata_key,
-            card,
-            value_type="json",
-        )
-        if ok:
-            self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
-        return ok
-
-    async def mark_resource_pool_ineligible(
-        self,
-        env_id: int,
-        *,
-        pool_name: str,
-        reason: str,
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        current = await manager.get_metadata(int(env_id), namespace, metadata_key)
-        exclusive = bool(current.get("exclusive", True)) if isinstance(current, dict) else True
-        card = build_card(
-            self._module_name,
-            pool_name,
-            eligible=False,
-            reason=reason,
-            exclusive=exclusive,
-        )
-        ok = await manager.set_metadata(
-            int(env_id),
-            namespace,
-            metadata_key,
-            card,
-            value_type="json",
-        )
-        if ok:
-            self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
-        return ok
-
-    async def remove_resource_pool(
-        self,
-        env_id: int,
-        *,
-        pool_name: str,
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, _, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        await manager.delete_metadata(int(env_id), namespace, metadata_key)
-        self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
-        return True
-
-    async def replace_resource_pool_snapshot(
-        self,
-        *,
-        pool_name: str,
-        entries: list[dict[str, Any]],
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        desired_env_ids: set[int] = set()
-
-        for entry in entries:
-            env_id = int(entry["env_id"])
-            desired_env_ids.add(env_id)
-            card = build_card(
-                self._module_name,
-                pool_name,
-                eligible=bool(entry.get("eligible", True)),
-                reason=str(entry.get("reason", "")),
-                exclusive=bool(entry.get("exclusive", True)),
-            )
-            await manager.set_metadata(
-                env_id,
-                namespace,
-                metadata_key,
-                card,
-                value_type="json",
-            )
-
-        for env in await manager.list_envs():
-            if int(env.id) in desired_env_ids:
-                continue
-            current = await manager.get_metadata(int(env.id), namespace, metadata_key)
-            if current is not None:
-                await manager.delete_metadata(int(env.id), namespace, metadata_key)
-                self._publish_resource_pool_updated(env_id=int(env.id), pool_name=pool_name)
-        for env_id in desired_env_ids:
-            self._publish_resource_pool_updated(env_id=env_id, pool_name=pool_name)
-        return True
 
 
 class CoreUITools:
@@ -857,7 +635,6 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
         allowed_tool_names: frozenset[str] | None = None,
         declared_page_schemas: dict[str, dict[str, Any]] | None = None,
-        declared_resource_pool_names: frozenset[str] | None = None,
         allow_persisted_pages: bool = True,
     ):
         self._bindings: dict[str, _ToolBinding] = {}
@@ -865,10 +642,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         self._ui_declaration_buffer = ui_declaration_buffer
 
         ip_pool_tools = CoreIPPoolTools()
-        env_tools = CoreEnvTools(
-            module_name,
-            declared_resource_pool_names=declared_resource_pool_names or frozenset(),
-        )
+        env_tools = CoreEnvTools()
         ui_tools = CoreUITools(
             module_name,
             declaration_buffer=ui_declaration_buffer,
@@ -879,26 +653,6 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
         self._register("ip_pool.pick_proxy", "按条件挑选可用代理", ip_pool_tools.pick_proxy)
         self._register("env.set_proxy", "为当前环境设置代理", env_tools.set_proxy, is_async=True)
-        self._register("env.bind_resource_pool", "登记环境资源池资格", env_tools.bind_resource_pool, is_async=True)
-        self._register(
-            "env.mark_resource_pool_eligible",
-            "标记环境资源池可接单",
-            env_tools.mark_resource_pool_eligible,
-            is_async=True,
-        )
-        self._register(
-            "env.mark_resource_pool_ineligible",
-            "标记环境资源池不可接单",
-            env_tools.mark_resource_pool_ineligible,
-            is_async=True,
-        )
-        self._register("env.remove_resource_pool", "移除环境资源池资格", env_tools.remove_resource_pool, is_async=True)
-        self._register(
-            "env.replace_resource_pool_snapshot",
-            "重建环境资源池资格快照",
-            env_tools.replace_resource_pool_snapshot,
-            is_async=True,
-        )
 
         self._register("ui.declare_page", "声明宿主页 schema", ui_tools.declare_page)
         self._register("ui.get_page", "读取宿主页 schema", ui_tools.get_page)
@@ -954,23 +708,20 @@ def build_runtime_capabilities(
     ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
     surface: str = RUNTIME_SURFACE_FULL,
     declared_page_schemas: dict[str, dict[str, Any]] | None = None,
-    declared_resource_pools: Any = None,
 ) -> RuntimeCapabilities:
     module_name = (task_name or "").split(".")[0] or "default"
     db_enabled = surface != RUNTIME_SURFACE_HOSTED_UI_DECLARE
-    db_read_only = surface == RUNTIME_SURFACE_HOSTED_UI_READONLY
-    declared_resource_pool_names = (
-        _normalize_resource_pool_names(declared_resource_pools)
-        if declared_resource_pools is not None
-        else _load_declared_resource_pool_names(module_name)
-    )
+    db_read_only = surface in {
+        RUNTIME_SURFACE_HOSTED_UI_READONLY,
+        RUNTIME_SURFACE_ENV_CANDIDATES,
+        RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES,
+    }
     return RuntimeCapabilities(
         tools=CoreToolsCapabilityImpl(
             module_name,
             ui_declaration_buffer=ui_declaration_buffer,
             allowed_tool_names=_resolve_runtime_surface_tools(surface),
             declared_page_schemas=declared_page_schemas,
-            declared_resource_pool_names=declared_resource_pool_names,
             allow_persisted_pages=surface == RUNTIME_SURFACE_FULL,
         ),
         db=DatabaseClient(CoreDatabaseTools(module_name, enabled=db_enabled, read_only=db_read_only)),

@@ -224,7 +224,6 @@ class ModuleScanner:
         self._validate_upgrade_source(manifest)
         self._validate_removed_v2_manifest_state(manifest)
         self._validate_config_defaults(manifest)
-        self._validate_resource_pools(manifest)
 
         return warnings
 
@@ -240,24 +239,6 @@ class ModuleScanner:
                 stage="VALIDATE",
                 hint="请删除 0.3 时代的 manifest 声明，运行时对象必须由装饰器声明",
             )
-
-    def _validate_resource_pools(self, manifest: ModuleManifest) -> None:
-        seen_names: set[str] = set()
-        for pool in manifest.resource_pools:
-            pool_name = str(pool.name or "").strip()
-            if not MANAGED_NAME_RE.match(pool_name):
-                raise ModuleValidationError(
-                    f"resource_pools.name 不符合命名规范: {pool_name or '<empty>'}",
-                    stage="VALIDATE",
-                    hint="resource_pools[].name 必须以小写字母开头，且只包含小写字母、数字和下划线",
-                )
-            if pool_name in seen_names:
-                raise ModuleValidationError(
-                    f"resource_pools.name 重复: {pool_name}",
-                    stage="VALIDATE",
-                    hint="请删除重复资源池声明，资源池名必须唯一",
-                )
-            seen_names.add(pool_name)
 
     def _validate_upgrade_source(self, manifest: ModuleManifest) -> None:
         upgrade_source = manifest.upgrade_source

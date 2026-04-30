@@ -17,7 +17,8 @@ def test_run_profile_serialization_roundtrip_for_select_mode():
         resource=ResourceConfig(
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.SELECT,
-                resource_pool="bound_account_ready",
+                candidates="ready_accounts",
+                candidate_params={"limit": 20},
                 wait_timeout=120,
             ),
         ),
@@ -35,12 +36,12 @@ def test_run_profile_serialization_roundtrip_for_select_mode():
     assert loaded == run_profile
 
 
-def test_run_profile_serialization_roundtrip_for_fixed_pool_select_mode():
+def test_run_profile_serialization_roundtrip_for_candidate_select_mode():
     run_profile = RunProfile(
         resource=ResourceConfig(
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.SELECT,
-                resource_pool="bound_account_ready",
+                candidates="ready_accounts",
                 wait_timeout=120,
             ),
         ),
@@ -85,7 +86,7 @@ def test_run_profile_rejects_unknown_fields():
 resource:
   acquisition:
     mode: select
-    resource_pool: bound_account_ready
+    candidates: ready_accounts
 execution:
   module: demo_module
   workflow: repair
@@ -101,7 +102,7 @@ def test_run_profile_rejects_removed_retry_field():
 resource:
   acquisition:
     mode: select
-    resource_pool: bound_account_ready
+    candidates: ready_accounts
 execution:
   module: demo_module
   workflow: repair
@@ -129,19 +130,28 @@ execution:
         RunProfile.from_yaml(invalid_yaml)
 
 
-def test_select_mode_requires_resource_pool_or_env_id():
-    with pytest.raises(ValueError, match="resource_pool or env_id"):
+def test_select_mode_requires_candidates_or_env_id():
+    with pytest.raises(ValueError, match="candidates or env_id"):
         AcquisitionConfig(
             mode=AcquisitionMode.SELECT,
-            resource_pool="",
+            candidates="",
         )
 
 
 def test_select_mode_rejects_removed_selector_name():
-    with pytest.raises(ValueError, match="selector_name/env_selector"):
+    with pytest.raises(ValueError, match="selector_name"):
         AcquisitionConfig(
             mode=AcquisitionMode.SELECT,
+            candidates="ready_accounts",
             selector_name="random_ready",
+        )
+
+
+def test_select_mode_rejects_removed_resource_pool():
+    with pytest.raises(ValueError, match="resource_pool"):
+        AcquisitionConfig(
+            mode=AcquisitionMode.SELECT,
+            resource_pool="bound_account_ready",
         )
 
 

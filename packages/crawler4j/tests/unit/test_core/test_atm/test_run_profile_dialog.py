@@ -23,6 +23,15 @@ from src.ui.components.text_edit import StyledPlainTextEdit
 from src.ui.components.yaml_code_editor import YamlCodeEditor
 
 
+def _candidate_descriptor(*entries: tuple[str, str]):
+    return SimpleNamespace(
+        env_candidates={
+            name: SimpleNamespace(meta=SimpleNamespace(label=label))
+            for name, label in entries
+        }
+    )
+
+
 def _patch_dialog_dependencies(monkeypatch):
     import src.core.atm.ui.run_profile_dialog as dialog_module
 
@@ -32,11 +41,7 @@ def _patch_dialog_dependencies(monkeypatch):
     ]
     module = SimpleNamespace(
         name="demo_module",
-        manifest=SimpleNamespace(
-            resource_pools=[
-                SimpleNamespace(name="bound_account_ready", display_name="已绑定账号环境池"),
-            ],
-        ),
+        manifest=SimpleNamespace(),
     )
     registry = SimpleNamespace(
         list_modules=lambda: [module],
@@ -47,6 +52,15 @@ def _patch_dialog_dependencies(monkeypatch):
     pool = SimpleNamespace(id="pool-1", name="主池")
 
     monkeypatch.setattr(dialog_module, "get_module_registry", lambda: registry)
+    monkeypatch.setattr(
+        dialog_module,
+        "get_module_service",
+        lambda: SimpleNamespace(
+            get_runtime_descriptor_v2=lambda name: _candidate_descriptor(
+                ("bound_account_ready", "已绑定账号环境池")
+            )
+        ),
+    )
     monkeypatch.setattr(
         dialog_module,
         "get_ip_pool_manager",
@@ -62,11 +76,7 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
     ]
     module = SimpleNamespace(
         name="ctrip_crawler",
-        manifest=SimpleNamespace(
-            resource_pools=[
-                SimpleNamespace(name="bound_account_ready", display_name="已绑定账号环境池"),
-            ],
-        ),
+        manifest=SimpleNamespace(),
     )
     registry = SimpleNamespace(
         list_modules=lambda: [module],
@@ -77,6 +87,15 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
     pool = SimpleNamespace(id="pool-1", name="主池")
 
     monkeypatch.setattr(dialog_module, "get_module_registry", lambda: registry)
+    monkeypatch.setattr(
+        dialog_module,
+        "get_module_service",
+        lambda: SimpleNamespace(
+            get_runtime_descriptor_v2=lambda name: _candidate_descriptor(
+                ("bound_account_ready", "已绑定账号环境池")
+            )
+        ),
+    )
     monkeypatch.setattr(
         dialog_module,
         "get_ip_pool_manager",
@@ -143,11 +162,7 @@ def _patch_parameterized_dialog_dependencies(monkeypatch):
     )
     module = SimpleNamespace(
         name="ctrip_crawler",
-        manifest=SimpleNamespace(
-            resource_pools=[
-                SimpleNamespace(name="ctrip_account_pool", display_name="携程账号环境池"),
-            ],
-        ),
+        manifest=SimpleNamespace(),
     )
     registry = SimpleNamespace(
         list_modules=lambda: [module],
@@ -157,6 +172,15 @@ def _patch_parameterized_dialog_dependencies(monkeypatch):
     )
 
     monkeypatch.setattr(dialog_module, "get_module_registry", lambda: registry)
+    monkeypatch.setattr(
+        dialog_module,
+        "get_module_service",
+        lambda: SimpleNamespace(
+            get_runtime_descriptor_v2=lambda name: _candidate_descriptor(
+                ("ctrip_account_pool", "携程账号环境池")
+            )
+        ),
+    )
     monkeypatch.setattr(
         dialog_module,
         "get_ip_pool_manager",
@@ -341,12 +365,12 @@ def test_run_profile_dialog_builds_select_mode_profile(qtbot, monkeypatch):
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("bound_account_ready"))
+    dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("bound_account_ready"))
 
     profile = dialog._build_run_profile_from_form()
 
     assert profile.resource.acquisition.mode == AcquisitionMode.SELECT
-    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
+    assert profile.resource.acquisition.candidates == "bound_account_ready"
     assert "selector_name" not in profile.resource.acquisition.model_dump()
     assert profile.resource.acquisition.provider == ""
     assert profile.resource.acquisition.wait_timeout == 60
@@ -362,7 +386,7 @@ def test_run_profile_dialog_separates_execution_timeout_from_wait_timeout(qtbot,
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("bound_account_ready"))
+    dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("bound_account_ready"))
     dialog.wait_timeout_spin.setValue(30)
     dialog.execution_timeout_spin.setValue(0)
 
@@ -372,7 +396,7 @@ def test_run_profile_dialog_separates_execution_timeout_from_wait_timeout(qtbot,
     assert profile.execution.timeout == 0
 
 
-def test_run_profile_dialog_builds_fixed_pool_select_profile_without_selector(qtbot, monkeypatch):
+def test_run_profile_dialog_builds_candidate_select_profile_without_selector(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -382,17 +406,17 @@ def test_run_profile_dialog_builds_fixed_pool_select_profile_without_selector(qt
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("bound_account_ready"))
+    dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("bound_account_ready"))
 
     profile = dialog._build_run_profile_from_form()
 
     assert profile.resource.acquisition.mode == AcquisitionMode.SELECT
     assert "selector_name" not in profile.resource.acquisition.model_dump()
-    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
+    assert profile.resource.acquisition.candidates == "bound_account_ready"
     assert profile.resource.acquisition.provider == ""
 
 
-def test_run_profile_dialog_lists_declared_resource_pools(qtbot, monkeypatch):
+def test_run_profile_dialog_lists_declared_env_candidates(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -402,11 +426,11 @@ def test_run_profile_dialog_lists_declared_resource_pools(qtbot, monkeypatch):
 
     dialog.script_selector.set_value("demo_module", "collect")
 
-    assert dialog.resource_pool_combo.isEnabled() is True
-    assert dialog.resource_pool_combo.findData("") == -1
-    pool_index = dialog.resource_pool_combo.findData("bound_account_ready")
-    assert pool_index >= 0
-    assert dialog.resource_pool_combo.itemText(pool_index) == "已绑定账号环境池 (bound_account_ready)"
+    assert dialog.candidates_combo.isEnabled() is True
+    assert dialog.candidates_combo.findData("") == -1
+    candidate_index = dialog.candidates_combo.findData("bound_account_ready")
+    assert candidate_index >= 0
+    assert dialog.candidates_combo.itemText(candidate_index) == "已绑定账号环境池 (bound_account_ready)"
 
 
 def test_run_profile_dialog_select_mode_has_no_selector_controls(qtbot, monkeypatch):
@@ -422,7 +446,7 @@ def test_run_profile_dialog_select_mode_has_no_selector_controls(qtbot, monkeypa
     assert not hasattr(dialog, "selector_empty_hint")
 
 
-def test_run_profile_dialog_selects_declared_pool_without_legacy_selector(qtbot, monkeypatch):
+def test_run_profile_dialog_selects_declared_candidate_without_legacy_selector(qtbot, monkeypatch):
     _patch_ctrip_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -435,11 +459,11 @@ def test_run_profile_dialog_selects_declared_pool_without_legacy_selector(qtbot,
 
     profile = dialog._build_run_profile_from_form()
 
-    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
+    assert profile.resource.acquisition.candidates == "bound_account_ready"
     assert "selector_name" not in profile.resource.acquisition.model_dump()
 
 
-def test_run_profile_dialog_rejects_undeclared_resource_pool(qtbot, monkeypatch):
+def test_run_profile_dialog_rejects_undeclared_env_candidates(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -449,10 +473,10 @@ def test_run_profile_dialog_rejects_undeclared_resource_pool(qtbot, monkeypatch)
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.resource_pool_combo.addItem("missing_pool", "missing_pool")
-    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("missing_pool"))
+    dialog.candidates_combo.addItem("missing_candidates", "missing_candidates")
+    dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("missing_candidates"))
 
-    with pytest.raises(ValueError, match="未在 module.yaml.resource_pools 中声明"):
+    with pytest.raises(ValueError, match="环境候选函数未声明"):
         dialog._build_run_profile_from_form()
 
 
@@ -878,7 +902,7 @@ def test_run_profile_dialog_loads_declared_workflow_parameters_from_run_profile(
         resource=ResourceConfig(
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.SELECT,
-                resource_pool="ctrip_account_pool",
+                candidates="ctrip_account_pool",
             ),
         ),
         execution=ExecutionContext(

@@ -123,14 +123,18 @@ event_id = ctx.db.audit("account_events").append(
 | 类别 | 示例 |
 |---|---|
 | Hosted UI | `ui.get_page` |
-| 环境与资源池 | `env.*`、`ip_pool.pick_proxy` |
+| 环境与代理 | `env.set_proxy`、`ip_pool.pick_proxy` |
 | 验证码 | `captcha.match_slider`、`captcha.match_click_targets` |
 
 `ctx.tools` 不注册 `db.*`。数据库能力全部走 `ctx.db`。
 
 ## 生命周期与环境
 
-0.4.0 不再把 `hooks/`、`env_selectors/` 或 `EnvSelectorSpec` 作为 SDK / Contracts 主路径。生命周期、环境选择和资源等待由 Core 0.4.0 的运行模板、对象容器和宿主调度负责；模块侧只声明 `@workflow`、`@component`、`@page_action`、`@data_table` 与 `@data_query`。
+0.4.0 不再把 `hooks/`、`env_selectors/` 或 `EnvSelectorSpec` 作为 SDK / Contracts 主路径。生命周期和资源等待由 Core 0.4.0 的运行模板、对象容器和宿主调度负责；模块侧只声明 `@workflow`、`@component`、`@page_action`、`@data_table`、`@data_query`、`@env_candidates` 与 `@env_cleanup_candidates`。
+
+环境选择写在 `candidates/*.py` 中，使用 `@env_candidates` 装饰同步纯函数。函数可以直接返回 env id 列表，也可以返回 `EnvCandidates.from_table(...).filter(...).order(...).limit(...)` 这样的链式查询。账号注册时间、会员等级、黑号状态等模块业务过滤应存放在模块数据表中，并在候选纯函数里实时查询，不需要同步资源池。
+
+批量环境清理写在 `cleanups/*.py` 中，使用 `@env_cleanup_candidates` 装饰同步纯函数。函数返回待清理 env id 列表或同一个 `EnvCandidates` 链式查询对象；这个入口只表达“模块认为可清理的候选集合”。宿主客户端触发清理时会汇总所有模块来源，展示预览，用户确认后再二次校验 `READY/PAUSED`、无租约、无关联任务，最后由 REM 调用 `destroy_env()` 删除。清理候选运行面只有只读 `ctx.db`，不暴露 `ctx.tools`。
 
 如果历史模块仍依赖 `hooks/*.py`、`env_selectors/*.py`、`TaskSpec` 或 `WorkflowSpec`，它属于 0.3.x 维护线，需要在 0.3.x 分支处理，不在当前 0.4.x SDK / Contracts 中兼容。
 

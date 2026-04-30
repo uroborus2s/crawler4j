@@ -30,9 +30,11 @@ Current UI architecture:
 - Page schemas now come from `pages/*.py` or grouped `pages/<group>/*.py` functions decorated with `@page(...)`, normalized by `crawler4j_contracts.hosted_ui`; `@page(menu=True)` is the only source for left-menu entries.
 - `DataTable` remains a page-scoped component. Data comes from page `load_handler` / `query_handler` plus `db.*` tools.
 
-Current pool/data architecture:
+Current env/data architecture:
 
-- Fixed-pool Service jobs use host-managed waiting semantics when `resource_pool` is configured.
-- REM remains the environment owner; 0.4.0 no longer treats module-provided `env_selectors/` as the SDK / Contracts public path.
+- Service jobs use host-managed waiting semantics when `AcquisitionConfig.candidates` references a declared `@env_candidates` pure function.
+- REM remains the environment owner; 0.4.0 no longer treats module-provided `env_selectors/` or `resource_pool` sync snapshots as the SDK / Contracts public path.
+- Module environment selection facts live in `candidates/*.py`; Core evaluates them in a read-only, toolless runtime surface and filters READY browser environments before leasing.
+- Module batch cleanup facts live in `cleanups/*.py`; Core evaluates `@env_cleanup_candidates` in a separate read-only, toolless runtime surface, while REM owns preview safety checks and final deletion through `EnvironmentManager.destroy_env()`.
 - REM now also owns existing-env import. Provider-side environments are deduplicated by `(provider, name)`, imported into REM, and then executed by ATM through a fixed `env_id` handoff instead of a module-owned sync path.
 - Module data tables, named queries, database access, and audit events remain Core-owned persistence capabilities exposed to modules through `ctx.db`; SDK rejects legacy `ctx.tools.call("db.*")` usage.

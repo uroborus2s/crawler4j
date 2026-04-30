@@ -26,7 +26,7 @@ def _init_v2_module(tmp_path: Path, *, module_name: str = "demo_v2") -> Path:
     module_root = tmp_path / module_name
     module_root.mkdir()
     (module_root / "__init__.py").write_text('"""Demo v2 module."""\n', encoding="utf-8")
-    for directory_name in ("interfaces", "objects", "workflows", "tasks", "data", "pages"):
+    for directory_name in ("interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates"):
         directory = module_root / directory_name
         directory.mkdir()
         (directory / "__init__.py").write_text("", encoding="utf-8")
@@ -103,10 +103,33 @@ class Accounts:
 )
 def ready_accounts():
     return []
+
 """,
         encoding="utf-8",
     )
+    (module_root / "candidates" / "accounts.py").write_text(
+        """
+from crawler4j_contracts import env_candidates
 
+
+@env_candidates(name="ctrip_gold_old_account", label="携程高等级老账号")
+def ctrip_gold_old_account(params):
+    return None
+""",
+        encoding="utf-8",
+    )
+    (module_root / "cleanups").mkdir(exist_ok=True)
+    (module_root / "cleanups" / "unused_accounts.py").write_text(
+        """
+from crawler4j_contracts import env_cleanup_candidates
+
+
+@env_cleanup_candidates(name="unused_accounts", label="长期未用账号环境")
+def unused_accounts(ctx, params=None):
+    return []
+""",
+        encoding="utf-8",
+    )
     result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
 
     assert result.diagnostics == ()
@@ -118,6 +141,8 @@ def ready_accounts():
         ("page_action", "open_login_page", "objects.runtime.open_login_page"),
         ("data_table", "accounts", "objects.runtime.Accounts"),
         ("data_query", "ready_accounts", "objects.runtime.ready_accounts"),
+        ("env_candidates", "ctrip_gold_old_account", "candidates.accounts.ctrip_gold_old_account"),
+        ("env_cleanup_candidates", "unused_accounts", "cleanups.unused_accounts.unused_accounts"),
     }
 
 

@@ -18,6 +18,7 @@ from crawler4j_contracts.context import (
     ToolSpec,
     ToolsCapability,
 )
+from crawler4j_contracts.candidate_query import EnvCandidates
 from crawler4j_contracts.database import DatabaseClient, DatabaseExecutor
 from crawler4j_contracts.decorators import (
     CRAWLER4J_META_ATTR,
@@ -32,6 +33,8 @@ from crawler4j_contracts.decorators import (
     component,
     data_query,
     data_table,
+    env_cleanup_candidates,
+    env_candidates,
     interface,
     object_inject,
     object_param,
@@ -55,6 +58,9 @@ __all__ = [
     "component",
     "data_query",
     "data_table",
+    "env_cleanup_candidates",
+    "env_candidates",
+    "EnvCandidates",
     "interface",
     "object_inject",
     "object_param",

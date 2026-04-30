@@ -409,7 +409,7 @@ async def test_dispatcher_request_stop_for_job_cancels_persisted_pending_task_wi
         id="task-pending-stop",
         job_id="job-pending-stop",
         status=TaskStatus.PENDING,
-        message="等待环境池工位: bound_account_ready",
+        message="等待环境候选可用: bound_account_ready",
         waiting_since=1_714_000_000,
     )
     await dispatcher.repo.save_task(pending_task)

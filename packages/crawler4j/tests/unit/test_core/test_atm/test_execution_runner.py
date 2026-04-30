@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -58,7 +58,7 @@ def _build_request(
         },
         provider_name="virtualbrowser",
         acquisition_mode=mode,
-        selector_wait_timeout=60,
+        wait_timeout=60,
         creation_params={"groups": ["default"]},
         creation_lifecycle=lifecycle,
         execution_timeout=timeout,
@@ -455,11 +455,13 @@ async def test_execution_runner_cleans_up_created_env_when_acquisition_fails():
 @pytest.mark.asyncio
 async def test_execution_runner_selects_first_ready_env_without_module_selector():
     request = _build_request(mode=AcquisitionMode.SELECT, lifecycle=CreationLifecycle.PERSISTENT)
+    request.candidates_name = "ready_accounts"
     env, lease = _build_env()
 
     module_service = SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
         call_hook=AsyncMock(return_value=None),
+        resolve_env_candidates=Mock(return_value=[env.id]),
     )
     runner, rem = _build_runner(env, lease, module_service)
     updates: list[tuple[TaskStatus, str]] = []

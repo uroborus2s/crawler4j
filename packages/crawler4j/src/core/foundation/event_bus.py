@@ -45,7 +45,6 @@ class EventType(StrEnum):
     ENV_ERROR = "env.error"
     ENV_CREATED = "env.created"
     ENV_DESTROYED = "env.destroyed"
-    ENV_RESOURCE_POOL_UPDATED = "env.resource_pool_updated"
     ENV_OPERATION_FAILED = "env.operation_failed"  # 操作失败（启动/连接等）
 
 

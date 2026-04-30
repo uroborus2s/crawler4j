@@ -12,19 +12,14 @@ from crawler4j_contracts import EnvAction, EnvCandidate, TaskContext, TaskResult
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 from src.core.atm.runtime_capabilities import (
+    RUNTIME_SURFACE_ENV_CANDIDATES,
     RuntimeCapabilities,
     build_runtime_capabilities,
 )
 from src.core.foundation.logging import logger
 from src.core.mms.settings_store import ModuleSettingsStore, get_module_settings_store
 from src.core.mms.service import ModuleService, get_module_service
-from src.core.rem.manager import (
-    EnvironmentManager,
-    RESOURCE_POOL_METADATA_NAMESPACE,
-    build_resource_pool_metadata_key,
-    get_environment_manager,
-    normalize_resource_pool_module_name,
-)
+from src.core.rem.manager import EnvironmentManager, get_environment_manager
 from src.core.rem.models import (
     Environment,
     EnvKind,
@@ -41,6 +36,9 @@ TaskUpdateCallback = Callable[[Task], Awaitable[None]]
 StopRequestedCallback = Callable[[], bool]
 StopEnvActionCallback = Callable[[], EnvAction | None]
 ContextReadyCallback = Callable[[TaskContext], None]
+CANDIDATE_OWNER_METADATA_NAMESPACE = "scheduler.env_candidates"
+CANDIDATE_OWNER_METADATA_KEY = "module_name"
+CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
 
 
 class TaskStopRequested(Exception):
@@ -75,9 +73,10 @@ class ExecutionRequest:
     state: dict[str, Any] = field(default_factory=dict)
     provider_name: str = ""
     fixed_env_id: int | None = None
-    resource_pool_name: str = ""
+    candidates_name: str = ""
+    candidate_params: dict[str, Any] = field(default_factory=dict)
     acquisition_mode: AcquisitionMode = AcquisitionMode.SELECT
-    selector_wait_timeout: int = 60
+    wait_timeout: int = 60
     wait_for_resource: bool = False
     creation_params: dict[str, Any] = field(default_factory=dict)
     creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
@@ -154,9 +153,10 @@ class ExecutionRunner:
             "object_params": deepcopy(request.object_params),
             "provider_name": request.provider_name,
             "fixed_env_id": request.fixed_env_id,
-            "resource_pool_name": request.resource_pool_name,
+            "candidates": request.candidates_name,
+            "candidate_params": deepcopy(request.candidate_params),
             "acquisition_mode": request.acquisition_mode.value,
-            "selector_wait_timeout": request.selector_wait_timeout,
+            "wait_timeout": request.wait_timeout,
             "wait_for_resource": bool(request.wait_for_resource),
             "creation_params": deepcopy(request.creation_params),
             "execution_timeout": request.execution_timeout,
@@ -208,7 +208,7 @@ class ExecutionRunner:
         try:
             self._ensure_not_stopped(is_stop_requested)
 
-            wait_timeout = int(prepare_result.get("wait_timeout", request.selector_wait_timeout))
+            wait_timeout = int(prepare_result.get("wait_timeout", request.wait_timeout))
 
             if request.acquisition_mode == AcquisitionMode.SELECT:
                 if request.fixed_env_id is not None:
@@ -216,6 +216,7 @@ class ExecutionRunner:
                     env = await self.rem.get_env(selected_env_id)
                     if not env:
                         raise RuntimeError(f"指定环境不存在: {selected_env_id}")
+                    await self._assert_env_claimable_by_module(selected_env_id, request.module_name)
                     if env.status == EnvStatus.RUNNING and env.lease_id is None:
                         env_lease = await self.rem.lease_manager.claim_created_env(
                             env,
@@ -224,24 +225,31 @@ class ExecutionRunner:
                         )
                     else:
                         env_lease = await self.rem.lease_manager.acquire(env, task.id, timeout=wait_timeout)
+                    await self._bind_env_to_module(selected_env_id, request.module_name)
                     env_id = int(env_lease.env_id)
                     task.lease_id = env_lease.id
                     logger.info(f"[ATM] Task {task.id} selected fixed env {env_id}")
                 else:
-                    candidates = await self._list_ready_env_candidates(
+                    candidate_env_ids = await self._resolve_candidate_env_ids(
                         module_name=request.module_name,
-                        resource_pool_name=request.resource_pool_name,
+                        context=prepare_context,
+                        candidates_name=request.candidates_name,
+                        candidate_params=request.candidate_params,
+                    )
+                    candidates = await self._list_ready_env_candidates(
+                        candidate_env_ids=candidate_env_ids,
+                        module_name=request.module_name,
                     )
                     if not candidates and request.wait_for_resource:
                         return await self._return_waiting_for_resource(
                             task=task,
-                            resource_pool_name=request.resource_pool_name,
+                            candidates_name=request.candidates_name,
                             on_task_update=on_task_update,
                             prepare_result=prepare_result,
                             hooks_module=hooks_module,
                             creation_lifecycle=request.creation_lifecycle,
                         )
-                    candidate_env_ids = {int(candidate.env_id) for candidate in candidates}
+                    allocatable_candidate_ids = {int(candidate.env_id) for candidate in candidates}
 
                     selected_env_id = candidates[0].env_id if candidates else None
 
@@ -249,7 +257,7 @@ class ExecutionRunner:
                         if request.wait_for_resource:
                             return await self._return_waiting_for_resource(
                                 task=task,
-                                resource_pool_name=request.resource_pool_name,
+                                candidates_name=request.candidates_name,
                                 on_task_update=on_task_update,
                                 prepare_result=prepare_result,
                                 hooks_module=hooks_module,
@@ -258,15 +266,15 @@ class ExecutionRunner:
                         raise RuntimeError("没有可用环境可供选择")
 
                     selected_env_id = int(selected_env_id)
-                    selected_from_candidates = selected_env_id in candidate_env_ids
+                    selected_from_candidates = selected_env_id in allocatable_candidate_ids
 
                     env = await self.rem.get_env(selected_env_id)
                     if not env:
                         if request.wait_for_resource and selected_from_candidates:
-                            logger.debug(f"[ATM] Task {task.id} lost fixed-pool env {selected_env_id} before lease; requeueing.")
+                            logger.debug(f"[ATM] Task {task.id} lost candidate env {selected_env_id} before lease; requeueing.")
                             return await self._return_waiting_for_resource(
                                 task=task,
-                                resource_pool_name=request.resource_pool_name,
+                                candidates_name=request.candidates_name,
                                 on_task_update=on_task_update,
                                 prepare_result=prepare_result,
                                 hooks_module=hooks_module,
@@ -278,10 +286,10 @@ class ExecutionRunner:
                         env_lease = await self.rem.lease_manager.acquire(env, task.id, timeout=wait_timeout)
                     except EnvUnavailableError:
                         if request.wait_for_resource and selected_from_candidates:
-                            logger.debug(f"[ATM] Task {task.id} lost fixed-pool env {selected_env_id} lease race; requeueing.")
+                            logger.debug(f"[ATM] Task {task.id} lost candidate env {selected_env_id} lease race; requeueing.")
                             return await self._return_waiting_for_resource(
                                 task=task,
-                                resource_pool_name=request.resource_pool_name,
+                                candidates_name=request.candidates_name,
                                 on_task_update=on_task_update,
                                 prepare_result=prepare_result,
                                 hooks_module=hooks_module,
@@ -289,19 +297,21 @@ class ExecutionRunner:
                             )
                         raise
                     if request.wait_for_resource and selected_from_candidates:
-                        still_allocatable = await self._is_fixed_pool_env_allocatable(
+                        still_allocatable = await self._is_candidate_env_allocatable(
                             env_id=selected_env_id,
                             module_name=request.module_name,
-                            resource_pool_name=request.resource_pool_name,
+                            context=prepare_context,
+                            candidates_name=request.candidates_name,
+                            candidate_params=request.candidate_params,
                         )
                         if not still_allocatable:
                             logger.debug(
-                                f"[ATM] Task {task.id} found fixed-pool env {selected_env_id} no longer allocatable after lease; requeueing."
+                                f"[ATM] Task {task.id} found candidate env {selected_env_id} no longer allocatable after lease; requeueing."
                             )
                             await self.rem.release(env_lease)
                             return await self._return_waiting_for_resource(
                                 task=task,
-                                resource_pool_name=request.resource_pool_name,
+                                candidates_name=request.candidates_name,
                                 on_task_update=on_task_update,
                                 prepare_result=prepare_result,
                                 hooks_module=hooks_module,
@@ -331,6 +341,7 @@ class ExecutionRunner:
                 )
                 env_id = env.id
                 env_created = True
+                await self._bind_env_to_module(env_id, request.module_name)
                 logger.info(f"[ATM] Task {task.id} created env {env_id}")
 
                 env_lease = await self.rem.lease_manager.claim_created_env(env, task.id)
@@ -709,53 +720,128 @@ class ExecutionRunner:
     async def _list_ready_env_candidates(
         self,
         *,
-        module_name: str = "",
-        resource_pool_name: str = "",
+        candidate_env_ids: list[int],
+        module_name: str,
     ) -> list[EnvCandidate]:
-        normalized_module = normalize_resource_pool_module_name(module_name)
-        normalized_pool = str(resource_pool_name or "").strip()
-        if normalized_module and normalized_pool and hasattr(self.rem, "list_allocatable_envs"):
-            environments = await self.rem.list_allocatable_envs(normalized_module, normalized_pool)
-        else:
-            environments = await self.rem.list_envs()
+        if not candidate_env_ids:
+            return []
+        wanted = [int(env_id) for env_id in candidate_env_ids]
+        wanted_set = set(wanted)
+        by_id = {int(env.id): env for env in await self.rem.list_envs() if int(env.id) in wanted_set}
         candidates: list[EnvCandidate] = []
-        for env in environments:
+        for env_id in wanted:
+            env = by_id.get(env_id)
+            if env is None:
+                continue
             if env.kind != EnvKind.BROWSER or env.status != EnvStatus.READY:
+                continue
+            if getattr(env, "lease_id", None):
+                continue
+            if not await self._is_env_candidate_authorized(env.id, module_name):
+                logger.warning(
+                    f"[ATM] Candidate env {env.id} ignored because it is not bound to module {module_name}"
+                )
                 continue
             candidates.append(self._to_env_candidate(env))
         return candidates
 
-    async def _is_fixed_pool_env_allocatable(
+    async def _resolve_candidate_env_ids(
+        self,
+        *,
+        module_name: str,
+        context: TaskContext,
+        candidates_name: str,
+        candidate_params: dict[str, Any],
+    ) -> list[int]:
+        candidate_caps = build_runtime_capabilities(module_name, surface=RUNTIME_SURFACE_ENV_CANDIDATES)
+        candidate_context = TaskContext(
+            env_id=0,
+            task_name=module_name,
+            config=deepcopy(context.config),
+            logger=context.logger,
+            tools=candidate_caps.tools,
+            db=candidate_caps.db,
+            state=dict(context.state),
+            runtime=deepcopy(context.runtime),
+        )
+        resolver = getattr(self.mms, "resolve_env_candidates_async", None)
+        if callable(resolver):
+            return await resolver(
+                module_name,
+                candidate_context,
+                candidates_name,
+                candidate_params,
+                timeout=CANDIDATE_EVALUATION_TIMEOUT_SECONDS,
+            )
+        return self.mms.resolve_env_candidates(module_name, candidate_context, candidates_name, candidate_params)
+
+    async def _is_candidate_env_allocatable(
         self,
         *,
         env_id: int,
         module_name: str,
-        resource_pool_name: str,
+        context: TaskContext,
+        candidates_name: str,
+        candidate_params: dict[str, Any],
     ) -> bool:
-        normalized_module = normalize_resource_pool_module_name(module_name)
-        normalized_pool = str(resource_pool_name or "").strip()
-        if not normalized_module or not normalized_pool or not hasattr(self.rem, "get_metadata"):
-            return True
-        metadata_key = build_resource_pool_metadata_key(normalized_module, normalized_pool)
-        card = await self.rem.get_metadata(
-            int(env_id),
-            RESOURCE_POOL_METADATA_NAMESPACE,
-            metadata_key,
+        candidate_env_ids = await self._resolve_candidate_env_ids(
+            module_name=module_name,
+            context=context,
+            candidates_name=candidates_name,
+            candidate_params=candidate_params,
         )
-        return isinstance(card, dict) and bool(card.get("eligible"))
+        if int(env_id) not in {int(candidate_id) for candidate_id in candidate_env_ids}:
+            return False
+        return await self._is_env_candidate_authorized(int(env_id), module_name)
+
+    async def _get_env_owner_module(self, env_id: int) -> str:
+        get_metadata = getattr(self.rem, "get_metadata", None)
+        if not callable(get_metadata):
+            return ""
+        owner = await get_metadata(
+            env_id,
+            CANDIDATE_OWNER_METADATA_NAMESPACE,
+            CANDIDATE_OWNER_METADATA_KEY,
+        )
+        return str(owner or "").strip()
+
+    async def _assert_env_claimable_by_module(self, env_id: int, module_name: str) -> None:
+        owner = await self._get_env_owner_module(int(env_id))
+        if owner and owner != module_name:
+            raise RuntimeError(f"环境 {env_id} 已绑定到模块 {owner}，不能被 {module_name} 使用")
+
+    async def _bind_env_to_module(self, env_id: int, module_name: str) -> None:
+        set_metadata = getattr(self.rem, "set_metadata", None)
+        if not callable(set_metadata):
+            return
+        await self._assert_env_claimable_by_module(int(env_id), module_name)
+        await set_metadata(
+            int(env_id),
+            CANDIDATE_OWNER_METADATA_NAMESPACE,
+            CANDIDATE_OWNER_METADATA_KEY,
+            module_name,
+            "string",
+        )
+
+    async def _is_env_candidate_authorized(self, env_id: int, module_name: str) -> bool:
+        get_metadata = getattr(self.rem, "get_metadata", None)
+        if not callable(get_metadata):
+            return True
+        owner = await self._get_env_owner_module(int(env_id))
+        return owner == module_name
 
     async def _mark_task_waiting_for_resource(
         self,
         task: Task,
-        resource_pool_name: str,
+        candidates_name: str,
         *,
         on_task_update: TaskUpdateCallback | None,
     ) -> None:
-        pool_label = str(resource_pool_name or "").strip() or "default"
+        candidates_label = str(candidates_name or "").strip() or "default"
         task.status = TaskStatus.PENDING
         task.env_id = None
         task.lease_id = None
-        task.message = f"等待环境池工位: {pool_label}"
+        task.message = f"等待环境候选可用: {candidates_label}"
         task.error = ""
         task.waiting_since = task.waiting_since or int(time.time())
         task.started_at = None
@@ -766,7 +852,7 @@ class ExecutionRunner:
         self,
         *,
         task: Task,
-        resource_pool_name: str,
+        candidates_name: str,
         on_task_update: TaskUpdateCallback | None,
         prepare_result: dict[str, Any],
         hooks_module: str,
@@ -774,7 +860,7 @@ class ExecutionRunner:
     ) -> ExecutionResult:
         await self._mark_task_waiting_for_resource(
             task,
-            resource_pool_name,
+            candidates_name,
             on_task_update=on_task_update,
         )
         return ExecutionResult(

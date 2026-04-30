@@ -10,6 +10,7 @@ import pytest
 
 from crawler4j_contracts import (
     CRAWLER4J_META_ATTR,
+    EnvCandidates,
     HOST_RESERVED_DATA_FIELDS,
     Crawler4jMeta,
     DataTableIndexSpec,
@@ -19,6 +20,8 @@ from crawler4j_contracts import (
     component,
     data_query,
     data_table,
+    env_cleanup_candidates,
+    env_candidates,
     interface,
     object_inject,
     object_param,
@@ -135,6 +138,102 @@ def test_data_table_and_query_metadata_express_schema_indexes_and_output_schema(
         DataTableIndexSpec(fields=("status",)),
     )
     assert getattr(ready_accounts, CRAWLER4J_META_ATTR).source == "accounts"
+
+
+def test_env_candidates_metadata_and_query_chain():
+    @env_candidates(name="ctrip_gold_old_account", label="携程高等级老账号")
+    def ctrip_gold_old_account(params):
+        return (
+            EnvCandidates.from_table("ctrip_accounts")
+            .filter(status="ready")
+            .intersect(EnvCandidates.from_table("ctrip_accounts").filter(member_level__in=["gold", "platinum"]))
+            .exclude(EnvCandidates.from_table("ctrip_accounts").filter(status="blacklisted"))
+            .order_by("last_used_at", "-registered_at")
+            .limit(params.get("limit", 100))
+        )
+
+    meta = getattr(ctrip_gold_old_account, CRAWLER4J_META_ATTR)
+    assert meta == Crawler4jMeta(
+        kind="env_candidates",
+        name="ctrip_gold_old_account",
+        label="携程高等级老账号",
+    )
+
+    query = ctrip_gold_old_account({"limit": 20})
+    assert query.to_plan() == {
+        "kind": "env_candidates",
+        "op": "minus",
+        "source": "ctrip_accounts",
+        "env_field": "env_id",
+        "left": {
+            "kind": "env_candidates",
+            "op": "intersect",
+            "source": "ctrip_accounts",
+            "env_field": "env_id",
+            "left": {
+                "kind": "env_candidates",
+                "op": "select",
+                "source": "ctrip_accounts",
+                "env_field": "env_id",
+                "where": [{"field": "status", "op": "eq", "value": "ready"}],
+                "order_by": [],
+                "limit": None,
+            },
+            "right": {
+                "kind": "env_candidates",
+                "op": "select",
+                "source": "ctrip_accounts",
+                "env_field": "env_id",
+                "where": [{"field": "member_level", "op": "in", "value": ["gold", "platinum"]}],
+                "order_by": [],
+                "limit": None,
+            },
+            "order_by": [],
+            "limit": None,
+        },
+        "right": {
+            "kind": "env_candidates",
+            "op": "select",
+            "source": "ctrip_accounts",
+            "env_field": "env_id",
+            "where": [{"field": "status", "op": "eq", "value": "blacklisted"}],
+            "order_by": [],
+            "limit": None,
+        },
+        "order_by": [
+            {"field": "last_used_at", "direction": "asc"},
+            {"field": "registered_at", "direction": "desc"},
+        ],
+        "limit": 20,
+    }
+
+
+def test_env_cleanup_candidates_metadata_reuses_env_candidates_query_chain():
+    @env_cleanup_candidates(name="unused_accounts", label="长期未用账号环境")
+    def unused_accounts(params):
+        return (
+            EnvCandidates.from_table("accounts")
+            .filter(status="unused")
+            .order_by("last_used_at")
+            .limit(params.get("limit", 50))
+        )
+
+    meta = getattr(unused_accounts, CRAWLER4J_META_ATTR)
+    assert meta == Crawler4jMeta(
+        kind="env_cleanup_candidates",
+        name="unused_accounts",
+        label="长期未用账号环境",
+    )
+
+    assert unused_accounts({"limit": 10}).to_plan() == {
+        "kind": "env_candidates",
+        "op": "select",
+        "source": "accounts",
+        "env_field": "env_id",
+        "where": [{"field": "status", "op": "eq", "value": "unused"}],
+        "order_by": [{"field": "last_used_at", "direction": "asc"}],
+        "limit": 10,
+    }
 
 
 def test_parameter_and_inject_specs_normalize_supported_shapes():

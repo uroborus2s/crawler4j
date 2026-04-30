@@ -21,6 +21,10 @@ hotel_demo/
 │   └── *.py
 ├── data/
 │   └── *.py
+├── candidates/
+│   └── *.py
+├── cleanups/
+│   └── *.py
 └── pages/
     ├── *.py
     └── <group>/
@@ -31,18 +35,24 @@ hotel_demo/
 
 | 路径 | 职责 |
 |---|---|
-| `module.yaml` | 模块元信息、`runtime_api`、升级源、资源池、配置默认值等宿主静态配置 |
+| `module.yaml` | 模块元信息、`runtime_api`、升级源、配置默认值等宿主静态配置 |
 | `.crawler4j/manifest.lock.json` | SDK 扫描装饰器生成的只读快照 |
 | `interfaces/*.py` | `@interface` 能力类型 |
 | `objects/*.py` | `@component` 业务对象和编排对象 |
 | `workflows/*.py` | `@workflow` workflow 类 |
 | `tasks/*.py` | `@page_action` 页面操作纯函数 |
 | `data/*.py` | `@data_table`、`@data_query` 数据契约 |
+| `candidates/*.py` | `@env_candidates` 环境候选纯函数 |
+| `cleanups/*.py` | `@env_cleanup_candidates` 环境清理候选纯函数 |
 | `pages/*.py` / `pages/<group>/*.py` | `@page` Hosted UI 页面 schema、菜单状态与 handler |
 
 `tasks/` 在 v2 中承载 page action。保留这个目录名是为了迁移和工程习惯，但它不再表示 v1 `TaskSpec` 任务，也不再承载 `TASK/execute` 主路径。
 
 0.4.x SDK 不生成 `hooks/`、`env_selectors/`、`data/sql` 或 `data/seeds` 作为运行能力事实源。当前分支只支持 0.4.0 的 `core-native-v2` 主路径，旧目录需要在 0.3.x 分支维护。
+
+环境选择统一写在 `candidates/` 下。模块开发者只实现 `@env_candidates` 同步纯函数，函数可以直接返回 env id 列表，也可以返回 `EnvCandidates` 链式查询。Core 每次调度都会实时求值，不要求模块同步或物化资源池。
+
+批量环境清理统一写在 `cleanups/` 下。模块开发者只实现 `@env_cleanup_candidates` 同步纯函数，函数同样可以返回 env id 列表或 `EnvCandidates` 链式查询。宿主客户端点击批量清理后会收集所有模块声明、生成预览清单、提示确认，并只删除当前仍满足安全条件的环境。
 
 ## `module.yaml` 最小示例
 
@@ -78,6 +88,8 @@ lock 内容来自装饰器扫描，通常包含：
 - pages
 - data tables
 - data queries
+- env candidates
+- env cleanup candidates
 - 注入关系
 - 对象参数 schema
 - 诊断摘要
@@ -108,6 +120,8 @@ lock 内容来自装饰器扫描，通常包含：
   "pages": [{"name": "dashboard", "source": "pages/dashboard.py", "menu": true}],
   "data_tables": [{"name": "hotels", "source": "data/hotels.py"}],
   "data_queries": [{"name": "ready_hotels", "source": "data/hotels.py"}],
+  "env_candidates": [{"name": "ready_accounts", "source": "candidates/ready_accounts.py"}],
+  "env_cleanup_candidates": [{"name": "unused_accounts", "source": "cleanups/unused_accounts.py"}],
   "diagnostics": []
 }
 ```

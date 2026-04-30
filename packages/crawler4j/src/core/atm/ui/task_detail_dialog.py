@@ -286,7 +286,10 @@ class JobDetailDialog(QDialog):
             if run_profile.resource.acquisition.mode.value == "create":
                 resource_text = f"Provider: {run_profile.resource.acquisition.provider}"
             else:
-                resource_text = f"资源池: {run_profile.resource.acquisition.resource_pool or '-'}"
+                if run_profile.resource.acquisition.env_id:
+                    resource_text = f"环境: {run_profile.resource.acquisition.env_id}"
+                else:
+                    resource_text = f"候选函数: {run_profile.resource.acquisition.candidates or '-'}"
         except Exception:
             execution_text = "-"
             resource_text = "-"

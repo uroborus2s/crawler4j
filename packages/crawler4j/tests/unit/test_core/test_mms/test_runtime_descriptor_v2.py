@@ -36,6 +36,8 @@ def _write_v2_module(base_dir: Path, module_name: str, files: dict[str, str]) ->
         module_dir / "tasks",
         module_dir / "data",
         module_dir / "pages",
+        module_dir / "candidates",
+        module_dir / "cleanups",
     ):
         package_dir.mkdir(parents=True, exist_ok=True)
         (package_dir / "__init__.py").write_text("", encoding="utf-8")
@@ -153,6 +155,13 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
                 def ready_accounts():
                     raise AssertionError("data query function must not be called during descriptor scan")
             """,
+            "cleanups/unused_accounts.py": """
+                from crawler4j_contracts import env_cleanup_candidates
+
+                @env_cleanup_candidates(name="unused_accounts", label="长期未用账号环境")
+                def unused_accounts(ctx, params=None):
+                    return []
+            """,
         },
     )
 
@@ -170,6 +179,7 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
         assert descriptor.page_actions["open_login_page"].target.__name__ == "open_login_page"
         assert descriptor.data_tables["accounts"].meta.kind == "data_table"
         assert descriptor.data_queries["ready_accounts"].meta.source == "accounts"
+        assert descriptor.env_cleanup_candidates["unused_accounts"].meta.kind == "env_cleanup_candidates"
         assert descriptor.implementations == {
             "labor": ("api_labor",),
             "orchestrator": ("quiz_orchestrator",),

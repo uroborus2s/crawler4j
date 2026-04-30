@@ -243,38 +243,6 @@ class WorkflowInfo:
 
 
 @dataclass
-class ResourcePoolInfo:
-    """模块声明的资源池。"""
-
-    name: str
-    display_name: str = ""
-    description: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "display_name": self.display_name,
-            "description": self.description,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Any) -> "ResourcePoolInfo":
-        if not isinstance(data, dict):
-            raise ValueError("resource_pools 中的每一项都必须是 YAML 映射对象")
-
-        allowed_keys = {"name", "display_name", "description"}
-        unknown_keys = sorted(set(data) - allowed_keys)
-        if unknown_keys:
-            raise ValueError("resource_pools 包含不支持的字段: " + ", ".join(unknown_keys))
-
-        return cls(
-            name=str(data.get("name", "") or "").strip(),
-            display_name=str(data.get("display_name", "") or "").strip(),
-            description=str(data.get("description", "") or "").strip(),
-        )
-
-
-@dataclass
 class UIPageInfo:
     """宿主页导航视图模型。"""
 
@@ -399,7 +367,6 @@ class ModuleManifest:
     default_workflow: str = ""
     config_defaults: ConfigDefaultsInfo = field(default_factory=ConfigDefaultsInfo)
     upgrade_source: UpgradeSourceInfo = field(default_factory=UpgradeSourceInfo)
-    resource_pools: list[ResourcePoolInfo] = field(default_factory=list)
     data: dict[str, Any] = field(default_factory=lambda: normalize_manifest_data(None))
     
     def to_dict(self) -> dict[str, Any]:
@@ -415,7 +382,6 @@ class ModuleManifest:
             "workflows": [w.to_dict() for w in self.workflows],
             "default_workflow": self.default_workflow,
             "config_defaults": self.config_defaults.to_dict(),
-            "resource_pools": [pool.to_dict() for pool in self.resource_pools],
             "data": self.data,
         }
     
@@ -424,6 +390,8 @@ class ModuleManifest:
         """从字典反序列化。"""
         if "ui_extension" in data:
             raise ValueError("ui_extension 已移除；页面请使用 @page(...) 装饰器声明")
+        if "resource_pools" in data:
+            raise ValueError("resource_pools 已移除；环境选择请使用 @env_candidates(...) 装饰器声明")
 
         workflows = []
         for w in data.get("workflows", []):
@@ -431,12 +399,6 @@ class ModuleManifest:
         
         config_defaults = ConfigDefaultsInfo.from_dict(data.get("config_defaults"))
         upgrade_source = UpgradeSourceInfo.from_dict(data.get("upgrade_source"))
-        raw_resource_pools = data.get("resource_pools", [])
-        if raw_resource_pools is None:
-            raw_resource_pools = []
-        if not isinstance(raw_resource_pools, list):
-            raise ValueError("resource_pools 必须是数组")
-        resource_pools = [ResourcePoolInfo.from_dict(item) for item in raw_resource_pools]
         module_data = normalize_manifest_data(data.get("data"))
 
         return cls(
@@ -450,7 +412,6 @@ class ModuleManifest:
             default_workflow=data.get("default_workflow", ""),
             config_defaults=config_defaults,
             upgrade_source=upgrade_source,
-            resource_pools=resource_pools,
             data=module_data,
         )
 

@@ -113,7 +113,7 @@ def test_task_list_widget_can_destroy_run_once_env_only_for_create_mode(qtbot, m
             resource=ResourceConfig(
                 acquisition=AcquisitionConfig(
                     mode=AcquisitionMode.SELECT,
-                    resource_pool="ready_pool",
+                    candidates="ready_pool",
                 )
             ),
             execution=ExecutionContext(module="demo_module"),
@@ -247,7 +247,7 @@ def test_task_list_widget_refreshes_on_task_failed_event(qtbot, monkeypatch):
             data={
                 "job_id": "job-timeout",
                 "task_id": "task-timeout",
-                "error": "等待环境池工位超时: bound_account_ready (30s)",
+                "error": "等待环境候选超时: bound_account_ready (30s)",
             },
             task_run_id="task-timeout",
         )

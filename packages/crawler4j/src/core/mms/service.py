@@ -1,7 +1,10 @@
+import asyncio
+import inspect
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from crawler4j_contracts import TaskContext, TaskResult
+from crawler4j_contracts import EnvCandidates, TaskContext, TaskResult
 
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo, ModuleSource, ModuleStatus
@@ -13,6 +16,8 @@ from src.core.mms.runtime_descriptor import (
     load_runtime_descriptor_v2,
     normalize_result_payload,
 )
+
+ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
 
 
 class ModuleService:
@@ -101,6 +106,132 @@ class ModuleService:
         force_reload: bool = False,
     ) -> ModuleRuntimeDescriptorV2:
         return self._load_descriptor_v2(module_name, context, force_reload=force_reload)
+
+    def resolve_env_candidates(
+        self,
+        module_name: str,
+        context: TaskContext,
+        candidates_name: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[int]:
+        """Run a core-native-v2 pure environment candidate provider."""
+        descriptor = self._load_descriptor_v2(module_name, context)
+        normalized_name = str(candidates_name or "").strip()
+        if not normalized_name:
+            raise ValueError("环境候选函数不能为空")
+        entry = descriptor.env_candidates.get(normalized_name)
+        if entry is None:
+            raise RuntimeError(f"env_candidates 不存在: {normalized_name}")
+
+        result = self._invoke_env_candidates(entry.target, context, dict(params or {}))
+        return self._normalize_env_id_provider_result(result, context, label="env_candidates")
+
+    async def resolve_env_candidates_async(
+        self,
+        module_name: str,
+        context: TaskContext,
+        candidates_name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS,
+    ) -> list[int]:
+        """Run env candidates outside the main async loop with a hard timeout."""
+
+        loop = asyncio.get_running_loop()
+        task = loop.run_in_executor(
+            None,
+            partial(self.resolve_env_candidates, module_name, context, candidates_name, params),
+        )
+        try:
+            if timeout is None or timeout <= 0:
+                return await task
+            return await asyncio.wait_for(task, timeout=float(timeout))
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"env_candidates 执行超时: {candidates_name} ({timeout:g}s)") from exc
+
+    @staticmethod
+    def _invoke_env_candidates(target: Any, context: TaskContext, params: dict[str, Any]) -> Any:
+        return ModuleService._invoke_env_id_provider(target, context, params, label="env_candidates")
+
+    def resolve_env_cleanup_candidates(
+        self,
+        module_name: str,
+        context: TaskContext,
+        cleanup_name: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[int]:
+        """Run a core-native-v2 pure environment cleanup candidate provider."""
+        descriptor = self._load_descriptor_v2(module_name, context)
+        normalized_name = str(cleanup_name or "").strip()
+        if not normalized_name:
+            raise ValueError("环境清理候选函数不能为空")
+        entry = descriptor.env_cleanup_candidates.get(normalized_name)
+        if entry is None:
+            raise RuntimeError(f"env_cleanup_candidates 不存在: {normalized_name}")
+
+        result = self._invoke_env_id_provider(
+            entry.target,
+            context,
+            dict(params or {}),
+            label="env_cleanup_candidates",
+        )
+        return self._normalize_env_id_provider_result(result, context, label="env_cleanup_candidates")
+
+    async def resolve_env_cleanup_candidates_async(
+        self,
+        module_name: str,
+        context: TaskContext,
+        cleanup_name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS,
+    ) -> list[int]:
+        """Run env cleanup candidates outside the main async loop with a hard timeout."""
+
+        loop = asyncio.get_running_loop()
+        task = loop.run_in_executor(
+            None,
+            partial(self.resolve_env_cleanup_candidates, module_name, context, cleanup_name, params),
+        )
+        try:
+            if timeout is None or timeout <= 0:
+                return await task
+            return await asyncio.wait_for(task, timeout=float(timeout))
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"env_cleanup_candidates 执行超时: {cleanup_name} ({timeout:g}s)") from exc
+
+    @staticmethod
+    def _invoke_env_id_provider(
+        target: Any,
+        context: TaskContext,
+        params: dict[str, Any],
+        *,
+        label: str,
+    ) -> Any:
+        if inspect.iscoroutinefunction(target):
+            raise RuntimeError(f"{label} 必须是同步纯函数")
+        signature = inspect.signature(target)
+        kwargs: dict[str, Any] = {}
+        for parameter in signature.parameters.values():
+            if parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
+                raise RuntimeError(f"{label} 不支持仅位置参数")
+            if parameter.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}:
+                raise RuntimeError(f"{label} 不支持 *args 或 **kwargs")
+            if parameter.name in {"ctx", "context"}:
+                kwargs[parameter.name] = context
+            elif parameter.name == "params":
+                kwargs[parameter.name] = params
+            elif parameter.default is inspect.Parameter.empty:
+                raise RuntimeError(f"{label} 包含不支持的必填参数: {parameter.name}")
+        return target(**kwargs)
+
+    @staticmethod
+    def _normalize_env_id_provider_result(result: Any, context: TaskContext, *, label: str) -> list[int]:
+        if isinstance(result, EnvCandidates):
+            return result.list(context)
+        if isinstance(result, (list, tuple, set)):
+            return [int(item) for item in result]
+        raise RuntimeError(f"{label} 必须返回 EnvCandidates 或 env_id 列表")
 
     @staticmethod
     def _resolve_v2_workflow_name(context: TaskContext, descriptor: ModuleRuntimeDescriptorV2) -> str:

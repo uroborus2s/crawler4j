@@ -33,13 +33,13 @@ def temp_state_dir(tmp_path):
         yield tmp_path
 
 
-def _build_select_run_profile(wait_timeout: int = 60, resource_pool: str = "") -> RunProfile:
+def _build_select_run_profile(wait_timeout: int = 60, candidates: str = "") -> RunProfile:
     acquisition_kwargs = {
         "mode": AcquisitionMode.SELECT,
         "wait_timeout": wait_timeout,
     }
-    if resource_pool:
-        acquisition_kwargs["resource_pool"] = resource_pool
+    if candidates:
+        acquisition_kwargs["candidates"] = candidates
     else:
         acquisition_kwargs["env_id"] = 1
     return RunProfile(
@@ -63,9 +63,24 @@ def _build_create_run_profile(provider: str = "virtualbrowser") -> RunProfile:
 
 
 @pytest.fixture(autouse=True)
+def patch_default_module_service(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.atm.controller.get_module_service",
+        lambda: SimpleNamespace(
+            get_runtime_descriptor_v2=lambda module_name: SimpleNamespace(
+                env_candidates={
+                    "bound_account_ready": SimpleNamespace(),
+                }
+            ),
+            resolve_env_candidates=lambda module_name, context, candidates_name, params=None: [1],
+        ),
+    )
+
+
+@pytest.fixture(autouse=True)
 def patch_default_module_registry(monkeypatch):
     monkeypatch.setattr(
-        "src.core.atm.controller.get_module_registry",
+        "src.core.mms.registry.get_module_registry",
         lambda: SimpleNamespace(
             get_module=lambda module_name: (
                 SimpleNamespace(
@@ -73,7 +88,6 @@ def patch_default_module_registry(monkeypatch):
                         name="demo_module",
                         runtime_api="core-native-v2",
                         upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
-                        resource_pools=[SimpleNamespace(name="bound_account_ready")],
                         data={"resources": [], "views": [], "queries": [], "seeds": []},
                     )
                 )
@@ -105,20 +119,12 @@ async def test_service_job_maintains_target_concurrency():
     assert controller.dispatcher.dispatch.await_count == 2
 
 
-def test_ensure_runtime_for_job_rejects_undeclared_resource_pool(monkeypatch):
+def test_ensure_runtime_for_job_rejects_undeclared_env_candidates(monkeypatch):
     controller = JobController()
     monkeypatch.setattr(
-        "src.core.atm.controller.get_module_registry",
+        "src.core.atm.controller.get_module_service",
         lambda: SimpleNamespace(
-            get_module=lambda module_name: SimpleNamespace(
-                manifest=ModuleManifest(
-                    name="demo_module",
-                    runtime_api="core-native-v2",
-                    upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
-                    resource_pools=[],
-                    data={"resources": [], "views": [], "queries": [], "seeds": []},
-                )
-            )
+            get_runtime_descriptor_v2=lambda module_name: SimpleNamespace(env_candidates={})
         ),
     )
 
@@ -127,12 +133,12 @@ def test_ensure_runtime_for_job_rejects_undeclared_resource_pool(monkeypatch):
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
         concurrency_target=1,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
 
-    with pytest.raises(ValueError, match="module.yaml.resource_pools"):
+    with pytest.raises(ValueError, match="env_candidates 未声明"):
         asyncio.run(controller._ensure_runtime_for_job(job))
 
 
@@ -330,7 +336,7 @@ async def test_service_job_scale_up_skips_when_runtime_check_fails_before_dispat
 
 
 @pytest.mark.asyncio
-async def test_service_job_fixed_pool_resumes_waiting_tasks_up_to_current_capacity():
+async def test_service_job_candidates_resume_waiting_tasks_up_to_current_capacity():
     controller = JobController()
     waiting_tasks = [
         Task(id="task-p1", job_id="service-job", status=TaskStatus.PENDING),
@@ -350,14 +356,14 @@ async def test_service_job_fixed_pool_resumes_waiting_tasks_up_to_current_capaci
         resume_task=AsyncMock(return_value=True),
         has_live_task_loop=MagicMock(return_value=False),
     )
-    controller._count_fixed_pool_capacity = AsyncMock(return_value=5)
+    controller._count_candidate_capacity = AsyncMock(return_value=5)
 
     job = Job(
         id="service-job",
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
         concurrency_target=10,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
@@ -371,7 +377,108 @@ async def test_service_job_fixed_pool_resumes_waiting_tasks_up_to_current_capaci
 
 
 @pytest.mark.asyncio
-async def test_fixed_pool_resource_pool_reconcile_is_serialized_to_avoid_over_dispatch():
+async def test_service_job_resumes_waiting_candidates_before_dispatching_new_tasks():
+    controller = JobController()
+    events: list[str] = []
+    waiting_task = Task(id="task-p1", job_id="service-job", status=TaskStatus.PENDING)
+
+    async def _resume_task(_task, _job):
+        events.append("resume")
+        return True
+
+    async def _dispatch(_job):
+        events.append("dispatch")
+
+    controller.repo = SimpleNamespace(
+        count_active_tasks=AsyncMock(return_value=1),
+        count_tasks_by_statuses=AsyncMock(return_value=0),
+        get_oldest_waiting_tasks=AsyncMock(return_value=[waiting_task]),
+    )
+    controller.dispatcher = SimpleNamespace(
+        dispatch=AsyncMock(side_effect=_dispatch),
+        resume_task=AsyncMock(side_effect=_resume_task),
+        has_live_task_loop=MagicMock(return_value=False),
+    )
+    controller._count_candidate_capacity = AsyncMock(return_value=1)
+
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
+        concurrency_target=2,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+
+    await controller._reconcile_job(job)
+
+    assert events == ["resume", "dispatch"]
+
+
+@pytest.mark.asyncio
+async def test_count_candidate_capacity_uses_run_profile_context(monkeypatch):
+    import src.core.atm.controller as controller_module
+
+    observed: dict[str, object] = {}
+
+    def _resolve_candidates(_module_name, context, _candidates_name, params=None):
+        observed["config"] = context.config
+        observed["runtime"] = dict(context.runtime)
+        observed["params"] = dict(params or {})
+        return [1]
+
+    monkeypatch.setattr(
+        controller_module,
+        "get_module_service",
+        lambda: SimpleNamespace(resolve_env_candidates=_resolve_candidates),
+    )
+    monkeypatch.setattr(
+        controller_module,
+        "get_module_settings_store",
+        lambda: SimpleNamespace(build_task_config=lambda _module_name, _workflow: {"token": "secret"}),
+    )
+
+    controller = controller_module.JobController()
+    controller.rem = SimpleNamespace(
+        list_envs=AsyncMock(
+            return_value=[SimpleNamespace(id=1, kind="browser", status="ready", lease_id=None)]
+        ),
+        get_metadata=AsyncMock(return_value="demo_module"),
+    )
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                candidates="bound_account_ready",
+                candidate_params={"tier": "gold"},
+            ),
+        ),
+        execution=ExecutionContext(
+            module="demo_module",
+            workflow="repair",
+            params={"lang": "zh-CN"},
+        ),
+    )
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=run_profile,
+        params={"city": "Shanghai"},
+    )
+
+    assert await controller._count_candidate_capacity(job) == 1
+    assert observed["config"] == {"token": "secret"}
+    assert observed["params"] == {"tier": "gold"}
+    runtime = observed["runtime"]
+    assert runtime["candidate_params"] == {"tier": "gold"}
+    assert runtime["params"] == {"lang": "zh-CN", "city": "Shanghai"}
+
+
+@pytest.mark.asyncio
+async def test_candidate_reconcile_is_serialized_to_avoid_over_dispatch():
     controller = JobController()
     active_count = 0
     count_calls = 0
@@ -402,7 +509,7 @@ async def test_fixed_pool_resource_pool_reconcile_is_serialized_to_avoid_over_di
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
         concurrency_target=2,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
@@ -414,10 +521,10 @@ async def test_fixed_pool_resource_pool_reconcile_is_serialized_to_avoid_over_di
         get_oldest_tasks_by_status=AsyncMock(return_value=[]),
     )
     controller.dispatcher = SimpleNamespace(dispatch=AsyncMock(side_effect=_dispatch))
-    controller._count_fixed_pool_capacity = AsyncMock(return_value=0)
+    controller._count_candidate_capacity = AsyncMock(return_value=0)
 
-    first_task = asyncio.create_task(controller._reconcile_resource_pool_jobs("demo_module", "bound_account_ready"))
-    second_task = asyncio.create_task(controller._reconcile_resource_pool_jobs("demo_module", "bound_account_ready"))
+    first_task = asyncio.create_task(controller._reconcile_job(job))
+    second_task = asyncio.create_task(controller._reconcile_job(job))
 
     await first_count_entered.wait()
     try:
@@ -433,7 +540,7 @@ async def test_fixed_pool_resource_pool_reconcile_is_serialized_to_avoid_over_di
 
 
 @pytest.mark.asyncio
-async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publishes_failed_event(
+async def test_service_job_candidates_wait_timeout_uses_waiting_since_and_publishes_failed_event(
     temp_state_dir,
     monkeypatch,
 ):
@@ -468,14 +575,14 @@ async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publis
         resume_task=AsyncMock(return_value=True),
         has_live_task_loop=MagicMock(return_value=False),
     )
-    controller._count_fixed_pool_capacity = AsyncMock(return_value=1)
+    controller._count_candidate_capacity = AsyncMock(return_value=1)
 
     job = Job(
         id="service-job",
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(wait_timeout=30, resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(wait_timeout=30, candidates="bound_account_ready"),
         concurrency_target=1,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
@@ -485,14 +592,14 @@ async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publis
         id="task-expired",
         job_id=job.id,
         status=TaskStatus.PENDING,
-        message="等待环境池工位: bound_account_ready",
+        message="等待环境候选可用: bound_account_ready",
         created_at=now - 300,
     )
     fresh_task = Task(
         id="task-fresh",
         job_id=job.id,
         status=TaskStatus.PENDING,
-        message="等待环境池工位: bound_account_ready",
+        message="等待环境候选可用: bound_account_ready",
         created_at=now - 240,
     )
     setattr(expired_task, "waiting_since", now - 31)
@@ -508,7 +615,7 @@ async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publis
     assert expired_loaded is not None
     assert expired_loaded.status == TaskStatus.FAILED
     assert expired_loaded.message == ""
-    assert expired_loaded.error == "等待环境池工位超时: bound_account_ready (30s)"
+    assert expired_loaded.error == "等待环境候选超时: bound_account_ready (30s)"
     assert expired_loaded.waiting_since is None
     assert fresh_loaded is not None
     assert fresh_loaded.status == TaskStatus.PENDING
@@ -522,7 +629,7 @@ async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publis
     assert event.task_run_id == expired_task.id
     assert event.data["task_id"] == expired_task.id
     assert event.data["job_id"] == job.id
-    assert event.data["error"] == "等待环境池工位超时: bound_account_ready (30s)"
+    assert event.data["error"] == "等待环境候选超时: bound_account_ready (30s)"
 
 
 @pytest.mark.asyncio
@@ -652,14 +759,14 @@ async def test_pause_job_cancels_persisted_pending_task_without_resource(temp_st
         name="service-pending",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
         concurrency_target=1,
     )
     pending_task = Task(
         id="task-pending-no-resource",
         job_id=job.id,
         status=TaskStatus.PENDING,
-        message="等待环境池工位: bound_account_ready",
+        message="等待环境候选可用: bound_account_ready",
         waiting_since=1_714_000_000,
     )
 
@@ -1282,7 +1389,7 @@ async def test_recover_zombies_marks_pending_and_running_tasks_failed(monkeypatc
         id="task-waiting",
         job_id="job-1",
         status=TaskStatus.PENDING,
-        message="等待环境池工位: bound_account_ready",
+        message="等待环境候选可用: bound_account_ready",
         waiting_since=123,
     )
     running = Task(id="task-running", job_id="job-1", status=TaskStatus.RUNNING, env_id="42")

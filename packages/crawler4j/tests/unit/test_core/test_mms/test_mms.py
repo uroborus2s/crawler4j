@@ -1,17 +1,21 @@
 """MMS 数据模型单元测试。"""
 
+import time
+
 import pytest
+
+from crawler4j_contracts import TaskContext
 
 from src.core.mms.models import (
     ConfigDefaultsInfo,
     ModuleManifest,
-    ResourcePoolInfo,
     ModuleSource,
     ModuleStatus,
     UpgradeSourceInfo,
     WorkflowParameterOptionInfo,
 )
 from src.core.mms.scanner import ModuleScanner
+from src.core.mms.service import ModuleService
 
 
 def _empty_data_contract() -> dict[str, list[dict[str, object]]]:
@@ -21,7 +25,7 @@ def _empty_data_contract() -> dict[str, list[dict[str, object]]]:
 def _write_v2_runtime_package(module_dir) -> None:
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "__init__.py").write_text("", encoding="utf-8")
-    for package_name in ("interfaces", "objects", "workflows", "tasks", "data"):
+    for package_name in ("interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates"):
         package_dir = module_dir / package_name
         package_dir.mkdir(exist_ok=True)
         (package_dir / "__init__.py").write_text("", encoding="utf-8")
@@ -53,13 +57,6 @@ class TestModuleManifest:
                     "base_url": "https://example.com",
                 },
             },
-            "resource_pools": [
-                {
-                    "name": "bound_account_ready",
-                    "display_name": "已绑定账号环境池",
-                    "description": "可复用的已绑定账号环境",
-                }
-            ],
             "data": _empty_data_contract(),
         }
         
@@ -73,13 +70,6 @@ class TestModuleManifest:
         assert manifest.upgrade_source.repo == "example/test_module"
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
         assert manifest.config_defaults.workflows == {}
-        assert manifest.resource_pools == [
-            ResourcePoolInfo(
-                name="bound_account_ready",
-                display_name="已绑定账号环境池",
-                description="可复用的已绑定账号环境",
-            )
-        ]
         assert manifest.data == _empty_data_contract()
     
     def test_to_dict(self):
@@ -91,13 +81,6 @@ class TestModuleManifest:
             config_defaults=ConfigDefaultsInfo(
                 module={"base_url": "https://example.com"},
             ),
-            resource_pools=[
-                ResourcePoolInfo(
-                    name="bound_account_ready",
-                    display_name="已绑定账号环境池",
-                    description="可复用的已绑定账号环境",
-                )
-            ],
             data=_empty_data_contract(),
         )
         
@@ -116,15 +99,25 @@ class TestModuleManifest:
             "module": {"base_url": "https://example.com"},
             "workflows": {},
         }
-        assert data["resource_pools"] == [
-            {
-                "name": "bound_account_ready",
-                "display_name": "已绑定账号环境池",
-                "description": "可复用的已绑定账号环境",
-            }
-        ]
+        assert "resource_pools" not in data
         assert data["default_workflow"] == ""
         assert data["data"] == _empty_data_contract()
+
+    def test_from_dict_rejects_removed_resource_pools(self):
+        with pytest.raises(ValueError, match="resource_pools"):
+            ModuleManifest.from_dict(
+                {
+                    "name": "test_module",
+                    "runtime_api": "core-native-v2",
+                    "upgrade_source": {
+                        "type": "github_release",
+                        "repo": "example/test_module",
+                    },
+                    "resource_pools": [
+                        {"name": "bound_account_ready"},
+                    ],
+                }
+            )
 
     def test_from_dict_rejects_removed_workflow_entry_class(self):
         """旧 workflows[].entry_class 入口不再是 manifest 兼容面。"""
@@ -179,6 +172,71 @@ class TestModuleManifest:
 
         assert option_zero == WorkflowParameterOptionInfo(label="0", value=0)
         assert option_false == WorkflowParameterOptionInfo(label="False", value=False)
+
+
+def test_env_candidates_invoke_uses_keyword_binding_for_params_after_optional_defaults():
+    def ready(limit: int = 100, params: dict | None = None):
+        return [int(params["env_id"]), limit]
+
+    result = ModuleService._invoke_env_candidates(
+        ready,
+        TaskContext(env_id=0, task_name="demo_module"),
+        {"env_id": 42},
+    )
+
+    assert result == [42, 100]
+
+
+def test_env_cleanup_candidates_invoke_uses_same_keyword_binding():
+    def cleanup(limit: int = 100, params: dict | None = None):
+        return [int(params["env_id"]), limit]
+
+    result = ModuleService._invoke_env_id_provider(
+        cleanup,
+        TaskContext(env_id=0, task_name="demo_module"),
+        {"env_id": 43},
+        label="env_cleanup_candidates",
+    )
+
+    assert result == [43, 100]
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_candidates_async_times_out_without_blocking_loop():
+    service = ModuleService()
+
+    def slow_resolve(*_args, **_kwargs):
+        time.sleep(0.2)
+        return [1]
+
+    service.resolve_env_candidates = slow_resolve  # type: ignore[method-assign]
+
+    with pytest.raises(TimeoutError, match="env_candidates 执行超时"):
+        await service.resolve_env_candidates_async(
+            "demo_module",
+            TaskContext(env_id=0, task_name="demo_module"),
+            "slow_accounts",
+            timeout=0.01,
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_cleanup_candidates_async_times_out_without_blocking_loop():
+    service = ModuleService()
+
+    def slow_resolve(*_args, **_kwargs):
+        time.sleep(0.2)
+        return [1]
+
+    service.resolve_env_cleanup_candidates = slow_resolve  # type: ignore[method-assign]
+
+    with pytest.raises(TimeoutError, match="env_cleanup_candidates 执行超时"):
+        await service.resolve_env_cleanup_candidates_async(
+            "demo_module",
+            TaskContext(env_id=0, task_name="demo_module"),
+            "unused_accounts",
+            timeout=0.01,
+        )
 
 
 class TestModuleScanner:
@@ -501,27 +559,3 @@ ui_extension:
             scanner.validate(manifest, tmp_path)
 
         assert "config_defaults.workflows" in str(exc_info.value)
-
-    def test_validate_rejects_duplicate_resource_pool_names(self, tmp_path):
-        from src.core.mms.models import ModuleValidationError
-
-        manifest = ModuleManifest.from_dict(
-            {
-                "name": "demo_module",
-                "runtime_api": "core-native-v2",
-                "upgrade_source": {
-                    "type": "github_release",
-                    "repo": "example/demo_module",
-                },
-                "resource_pools": [
-                    {"name": "bound_account_ready"},
-                    {"name": "bound_account_ready"},
-                ],
-            }
-        )
-        scanner = ModuleScanner(scan_paths=[tmp_path])
-
-        with pytest.raises(ModuleValidationError) as exc_info:
-            scanner.validate(manifest, tmp_path)
-
-        assert "resource_pools" in str(exc_info.value)

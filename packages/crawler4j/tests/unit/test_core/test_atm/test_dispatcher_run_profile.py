@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -18,13 +18,14 @@ def temp_data_dir(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def _build_module_service(hook=None):
+def _build_module_service(hook=None, candidate_ids: list[int] | None = None):
     async def default_hook(module_name, hook_name, context, *args):
         return None
 
     service = SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
         call_hook=AsyncMock(side_effect=hook or default_hook),
+        resolve_env_candidates=Mock(return_value=list(candidate_ids or [])),
     )
     return service
 
@@ -100,12 +101,12 @@ async def test_dispatcher_requires_run_profile():
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_service_fixed_pool_waits_when_no_candidates(monkeypatch):
+async def test_dispatcher_service_candidates_waits_when_no_candidates(monkeypatch):
     run_profile = RunProfile(
         resource={
             "acquisition": {
                 "mode": AcquisitionMode.SELECT,
-                "resource_pool": "bound_account_ready",
+                "candidates": "bound_account_ready",
                 "wait_timeout": 45,
             },
         },
@@ -121,7 +122,7 @@ async def test_dispatcher_service_fixed_pool_waits_when_no_candidates(monkeypatc
         external_id="18",
     )
 
-    module_service = _build_module_service()
+    module_service = _build_module_service(candidate_ids=[])
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -130,7 +131,6 @@ async def test_dispatcher_service_fixed_pool_waits_when_no_candidates(monkeypatc
     dispatcher.rem = SimpleNamespace(
         create_env=AsyncMock(return_value=env),
         list_envs=AsyncMock(return_value=[env]),
-        list_allocatable_envs=AsyncMock(return_value=[]),
         lease_manager=SimpleNamespace(acquire=AsyncMock(), claim_created_env=AsyncMock()),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=env),
@@ -144,7 +144,7 @@ async def test_dispatcher_service_fixed_pool_waits_when_no_candidates(monkeypatc
 
     await dispatcher._run_logic(task, job)
 
-    dispatcher.rem.list_allocatable_envs.assert_awaited_once_with("demo", "bound_account_ready")
+    dispatcher.rem.list_envs.assert_not_awaited()
     dispatcher.rem.lease_manager.acquire.assert_not_awaited()
     module_service.run_module.assert_not_awaited()
     assert task.status == TaskStatus.PENDING
@@ -153,12 +153,12 @@ async def test_dispatcher_service_fixed_pool_waits_when_no_candidates(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_service_fixed_pool_requeues_when_selected_candidate_disappears(monkeypatch):
+async def test_dispatcher_service_candidates_requeues_when_selected_candidate_disappears(monkeypatch):
     run_profile = RunProfile(
         resource={
             "acquisition": {
                 "mode": AcquisitionMode.SELECT,
-                "resource_pool": "bound_account_ready",
+                "candidates": "bound_account_ready",
                 "wait_timeout": 45,
             },
         },
@@ -174,7 +174,7 @@ async def test_dispatcher_service_fixed_pool_requeues_when_selected_candidate_di
         external_id="19",
     )
 
-    module_service = _build_module_service()
+    module_service = _build_module_service(candidate_ids=[19])
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -183,7 +183,6 @@ async def test_dispatcher_service_fixed_pool_requeues_when_selected_candidate_di
     dispatcher.rem = SimpleNamespace(
         create_env=AsyncMock(return_value=env),
         list_envs=AsyncMock(return_value=[env]),
-        list_allocatable_envs=AsyncMock(return_value=[env]),
         lease_manager=SimpleNamespace(acquire=AsyncMock(), claim_created_env=AsyncMock()),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=None),
@@ -197,21 +196,21 @@ async def test_dispatcher_service_fixed_pool_requeues_when_selected_candidate_di
 
     await dispatcher._run_logic(task, job)
 
-    dispatcher.rem.list_allocatable_envs.assert_awaited_once_with("demo", "bound_account_ready")
+    dispatcher.rem.list_envs.assert_awaited_once()
     dispatcher.rem.lease_manager.acquire.assert_not_awaited()
     module_service.run_module.assert_not_awaited()
     assert task.status == TaskStatus.PENDING
     assert task.error == ""
-    assert task.message == "等待环境池工位: bound_account_ready"
+    assert task.message == "等待环境候选可用: bound_account_ready"
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_service_fixed_pool_requeues_when_candidate_lookup_misses(monkeypatch):
+async def test_dispatcher_service_candidates_requeues_when_candidate_lookup_misses(monkeypatch):
     run_profile = RunProfile(
         resource={
             "acquisition": {
                 "mode": AcquisitionMode.SELECT,
-                "resource_pool": "bound_account_ready",
+                "candidates": "bound_account_ready",
                 "wait_timeout": 45,
             },
         },
@@ -227,7 +226,7 @@ async def test_dispatcher_service_fixed_pool_requeues_when_candidate_lookup_miss
         external_id="19",
     )
 
-    module_service = _build_module_service()
+    module_service = _build_module_service(candidate_ids=[19])
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -236,7 +235,6 @@ async def test_dispatcher_service_fixed_pool_requeues_when_candidate_lookup_miss
     dispatcher.rem = SimpleNamespace(
         create_env=AsyncMock(return_value=candidate_env),
         list_envs=AsyncMock(return_value=[candidate_env]),
-        list_allocatable_envs=AsyncMock(return_value=[candidate_env]),
         lease_manager=SimpleNamespace(acquire=AsyncMock(), claim_created_env=AsyncMock()),
         start_env=AsyncMock(return_value=True),
         get_env=AsyncMock(return_value=None),
@@ -250,21 +248,21 @@ async def test_dispatcher_service_fixed_pool_requeues_when_candidate_lookup_miss
 
     await dispatcher._run_logic(task, job)
 
-    dispatcher.rem.list_allocatable_envs.assert_awaited_once_with("demo", "bound_account_ready")
+    dispatcher.rem.list_envs.assert_awaited_once()
     dispatcher.rem.lease_manager.acquire.assert_not_awaited()
     module_service.run_module.assert_not_awaited()
     assert task.status == TaskStatus.PENDING
     assert task.error == ""
-    assert task.message == "等待环境池工位: bound_account_ready"
+    assert task.message == "等待环境候选可用: bound_account_ready"
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_service_fixed_pool_fails_when_lease_acquire_raises(monkeypatch):
+async def test_dispatcher_service_candidates_fails_when_lease_acquire_raises(monkeypatch):
     run_profile = RunProfile(
         resource={
             "acquisition": {
                 "mode": AcquisitionMode.SELECT,
-                "resource_pool": "bound_account_ready",
+                "candidates": "bound_account_ready",
                 "wait_timeout": 45,
             },
         },
@@ -280,7 +278,7 @@ async def test_dispatcher_service_fixed_pool_fails_when_lease_acquire_raises(mon
         external_id="20",
     )
 
-    module_service = _build_module_service()
+    module_service = _build_module_service(candidate_ids=[20])
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
 
@@ -289,7 +287,6 @@ async def test_dispatcher_service_fixed_pool_fails_when_lease_acquire_raises(mon
     dispatcher.rem = SimpleNamespace(
         create_env=AsyncMock(return_value=env),
         list_envs=AsyncMock(return_value=[env]),
-        list_allocatable_envs=AsyncMock(return_value=[env]),
         lease_manager=SimpleNamespace(
             acquire=AsyncMock(side_effect=RuntimeError("lease failed")),
             claim_created_env=AsyncMock(),
@@ -306,7 +303,7 @@ async def test_dispatcher_service_fixed_pool_fails_when_lease_acquire_raises(mon
 
     await dispatcher._run_logic(task, job)
 
-    dispatcher.rem.list_allocatable_envs.assert_awaited_once_with("demo", "bound_account_ready")
+    dispatcher.rem.list_envs.assert_awaited_once()
     dispatcher.rem.lease_manager.acquire.assert_awaited_once_with(env, task.id, timeout=45)
     module_service.run_module.assert_not_awaited()
     assert task.status == TaskStatus.FAILED

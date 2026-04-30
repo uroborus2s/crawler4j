@@ -15,11 +15,6 @@ class _FakeTools:
         self.available_tools = available_tools or {
             "captcha.match_slider",
             "env.set_proxy",
-            "env.bind_resource_pool",
-            "env.mark_resource_pool_eligible",
-            "env.mark_resource_pool_ineligible",
-            "env.remove_resource_pool",
-            "env.replace_resource_pool_snapshot",
         }
 
     def has_tool(self, tool_name: str) -> bool:
@@ -28,11 +23,6 @@ class _FakeTools:
     def list_tools(self) -> list[ToolSpec]:
         specs = [
             ToolSpec(name="captcha.match_slider", description="识别滑块验证码缺口位置"),
-            ToolSpec(name="env.bind_resource_pool", description="登记环境资源池资格", is_async=True),
-            ToolSpec(name="env.mark_resource_pool_eligible", description="标记环境可接单", is_async=True),
-            ToolSpec(name="env.mark_resource_pool_ineligible", description="标记环境不可接单", is_async=True),
-            ToolSpec(name="env.remove_resource_pool", description="移除环境资源池资格", is_async=True),
-            ToolSpec(name="env.replace_resource_pool_snapshot", description="重建环境资源池资格快照", is_async=True),
             ToolSpec(name="env.set_proxy", description="为当前环境设置代理", is_async=True),
         ]
         return [spec for spec in specs if spec.name in self.available_tools]

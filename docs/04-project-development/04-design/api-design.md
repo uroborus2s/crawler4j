@@ -24,13 +24,13 @@
 
 | 项目 | 内容 |
 |---|---|
-| Manifest 文件 | `module.yaml` 只保留模块元信息、升级源、`config_defaults.module` 和 `resource_pools[]` |
+| Manifest 文件 | `module.yaml` 只保留模块元信息、升级源和 `config_defaults.module` |
 | 宿主入口文件 | 模块根 `__init__.py` 仅作为 Python 包入口，不承载运行能力 |
 | 必需入口 | `runtime_api: core-native-v2` + 装饰器扫描声明 |
 | 标准运行时文件 | 无 `module_runtime.py` 主路径 |
 | 可选 hooks | 0.4.0 不提供旧 hook 兼容路径 |
-| 环境选择器 | 0.4.0 已移除 `selector_name/env_selector`；运行模板只能显式选择 `env_id` 或引用 `resource_pool` |
-| 当前实现 | Core 通过 `ModuleRuntimeDescriptorV2` 扫描 `@interface/@component/@workflow/@page/@page_action/@data_table/@data_query`，不依赖模块自有 assembler |
+| 环境选择器 | 0.4.0 已移除 `selector_name/env_selector/resource_pool`；运行模板只能显式选择 `env_id` 或引用 `candidates/` 下的 `@env_candidates` |
+| 当前实现 | Core 通过 `ModuleRuntimeDescriptorV2` 扫描 `@interface/@component/@workflow/@page/@page_action/@data_table/@data_query/@env_candidates`，不依赖模块自有 assembler |
 | Core 扩展入口 | `context.tools.call("<namespace>.<action>", **kwargs)` |
 | 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。环境关闭/删除由宿主按任务结果和 `TaskSignal` / `EnvAction` 收口 |
 | 默认工作流解析 | `context.runtime["workflow"]` -> 单 workflow 自动选择 -> `main_workflow` |
@@ -117,7 +117,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 静态清单 | `module.yaml`，只承载模块发现、升级源、资源池声明和只读初始化模板 `config_defaults.module`；运行能力来自装饰器 |
+| 静态清单 | `module.yaml`，只承载模块发现、升级源和只读初始化模板 `config_defaults.module`；运行能力来自装饰器 |
 | 持久配置 | `config.db.module_config_entries`；模块运行时只通过 `ctx.get_config()` / `ctx.config` 读取 |
 | 配置编辑格式 | 模块详情页 `配置` 标签统一使用 QScintilla YAML 编辑器；保存前由独立验证层校验 YAML 语法、顶层映射对象与重复键，数据库仍是事实源 |
 | 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
@@ -171,35 +171,38 @@
 | 当前状态 | 已收口：当前工作区版本与最近正式发布已被明确区分 |
 | 关联项 | `CR-001`, `TASK-004` |
 
-## `API-007` Fixed-Pool Service Queue Contract（V1 已实现，本地验证通过）
+## `API-007` Env Candidates Service Queue Contract（0.4.0）
 
 | 项目 | 内容 |
 |---|---|
-| 适用场景 | 固定环境池 + Service Job 保活并发，不再适合“拿不到环境就失败”的运行模式 |
+| 适用场景 | 模块需要按业务账号、状态、等级、注册时间等实时筛选可用环境，并让 Service Job 在候选暂时不可用时等待 |
 | 目标语义 | `运行中 + 等待中 = 目标并发`；资源不足属于正常等待，不属于失败 |
-| 进入队列前提 | 只有 `JobType.SERVICE + AcquisitionConfig.mode=select + resource_pool 非空` 时才进入固定池等待语义；0.4.0 不再接受 `selector_name` |
-| 资源池声明 | 固定环境池名称必须先在模块 `module.yaml.resource_pools[]` 中声明；运行模板里的 `resource_pool` 只能引用已声明池 |
-| 资源池定位 | 宿主只在“当前模块 + 当前资源池 + `eligible=true` + `READY` + 无租约占用”的环境集合里分配环境 |
-| 卡片存储 | 宿主内部 `env_metadata`；建议 `namespace=scheduler.resource_pool`，key 由宿主按“根模块名归一化 + pool_name”拼接，例如 `demo.foo` -> `demo:<pool>` |
-| 卡片字段 | 至少包含 `module_name`、`pool_name`、`eligible`、`reason`、`exclusive`、`updated_at` |
-| 模块开发者职责 | 在 `module.yaml.resource_pools[]` 声明池名，通过宿主注入的 `ctx.tools` 资源池能力维护资格卡片，并提供全量重建；不负责排队、轮询和补位 |
-| 宿主职责 | FIFO 等待队列、容量变化补位、环境租约治理、终态收口 |
-| 运行态注入 | 宿主会把 `ctx.runtime["resource_pool_name"]` 注入当前任务绑定池，并把 `ctx.runtime["declared_resource_pools"]` 注入为 manifest 声明池清单 |
-| 当前 V1 形态 | `module.yaml.resource_pools[]` + `AcquisitionConfig.resource_pool` + `env.bind_resource_pool` / `env.mark_resource_pool_eligible` / `env.mark_resource_pool_ineligible` / `env.remove_resource_pool` / `env.replace_resource_pool_snapshot` + Service Job `PENDING` 等待补位 |
-| `replace_resource_pool_snapshot` 语义 | `entries` 是当前资源池的完整权威列表；未出现的环境卡片会被删除，不是增量 patch |
-| 容量变化触发 | 环境释放、新环境可分配、异常/暂停环境恢复、模块更新资格卡片；控制器启动时还会先做 bootstrap 调和，作业激活/更新时会定向调和，另有运行在主 async loop 上的轻量异步巡检兜底 |
-| 环境占用规则 | 占用不移出资源池；资源池归属和运行中占用分离 |
-| 黑号规则 | 先把环境标成 `eligible=false` 并写入原因，再按业务策略销毁或保留待人工处理 |
-| 候选选择 | `resource_pool` 做宿主级粗筛；宿主直接在当前池内可分配候选中取一个环境，不再调用模块 selector |
-| selector 作者入口 | 无；`selector_name/env_selector` 是 0.3.x 维护线概念 |
-| 队列模式下无命中语义 | 只有 `resource_pool` 非空路径里，当前轮没命中才回到等待；未配置 `resource_pool` 时必须指定 `env_id`，否则运行模板校验失败 |
-| 候选竞争语义 | 固定池候选如果在 `get_env` / 租约阶段被其他任务先抢走，或候选在快照之后被资源池卡片改成不可发号，当前任务回到等待席位，不直接记失败；其他真实异常进入失败收口 |
-| 等待状态口径 | 固定池等待会复用底层 `TaskStatus.PENDING`；UI 展示为 `等待环境`，等待中的 `task.message` 为 `等待环境池工位: <pool>` |
-| 等待超时口径 | `wait_timeout` 同时用于环境租约获取与固定环境池 `PENDING` 等待席位收口；固定池等待从第一次写下 `waiting_since` 开始计时，`wait_timeout=0` 时当前不会自动超时收口；当前实现不会单独用它中断 `select_env(...)` 本身；失败文案为 `等待环境池工位超时: <pool> (<seconds>s)`，且与 `execution.timeout` 分离 |
-| `KEEP_ALIVE` 环境口径 | `KEEP_ALIVE` 只表示保留现场，不表示重新回池；保留后的 `RUNNING` 环境不会被固定池当成可发号工位 |
-| `exclusive` 当前语义 | V1 只把它写进资格卡片；当前分配器不依据它改变调度路径，不应把它当成路由开关 |
-| `env_id` 口径 | helper 使用的 `env_id` 是宿主 `environments.id` 主键；`prepare_env` 阶段的 `TaskContext.env_id` 当前固定为 `0`，不应用于写资源池卡片 |
-| 运行时代码解析池名 | 模块自有 helper 可显式传 `pool_name`；未传时可优先取 `ctx.runtime["resource_pool_name"]`，否则在仅声明一个资源池时自动回退到该池；若存在多个声明池则要求显式指定 |
+| 进入队列前提 | 只有 `JobType.SERVICE + AcquisitionConfig.mode=select + candidates 非空` 时才进入候选等待语义；固定 `env_id` 直接派发，不排队 |
+| 候选声明 | 模块在 `candidates/*.py` 中声明 `@env_candidates(name=...)` 同步纯函数，运行模板的 `AcquisitionConfig.candidates` 只能引用已声明函数 |
+| 模块开发者职责 | 在候选纯函数中实时读取模块数据，返回 env id 列表或 `EnvCandidates` 链式查询；账号黑名单、注册时间、会员等级等过滤都写在这个函数里 |
+| 唯一开发路径 | 不提供 `module.yaml.resource_pools[]`、资源池资格卡片、资源池同步任务或 `env.*resource_pool*` 工具；0.4.0 不兼容 `selector_name/env_selector/resource_pool` |
+| 宿主职责 | 在只读 `ctx.db`、无工具面的候选运行面执行纯函数，按返回顺序筛选 `READY + BROWSER + 无租约` 环境，租约成功后再次求值确认候选仍有效，并维护 FIFO 等待与超时收口 |
+| 候选组合 | `EnvCandidates` 支持 `filter()`、`exclude()`、`intersect()`、`union()`、`minus()`、`order()`、`limit()`、`list(ctx)` 链式调用；每个函数既能直接返回查询对象，也能被组合复用 |
+| 容量变化触发 | 环境释放、新环境可分配、异常/暂停环境恢复、作业激活/更新，以及主 async loop 上的轻量异步巡检都会触发候选容量重算 |
+| 黑号规则 | 黑号、封禁、账号状态变化写入模块业务表；候选纯函数实时过滤这些状态，不同步到宿主资源池 |
+| 候选竞争语义 | 候选环境如果在租约阶段被其他任务抢走，或租约后重算发现已不在候选集合，当前任务回到等待席位，不直接记失败；真实异常进入失败收口 |
+| 等待状态口径 | 候选等待复用底层 `TaskStatus.PENDING`；UI 展示为 `等待环境`，等待中的 `task.message` 为 `等待环境候选可用: <candidates>` |
+| 等待超时口径 | `wait_timeout` 同时用于环境租约获取与候选等待席位收口；候选等待从第一次写下 `waiting_since` 开始计时，`wait_timeout=0` 时当前不会自动超时收口；失败文案为 `等待环境候选超时: <candidates> (<seconds>s)`，且与 `execution.timeout` 分离 |
+| `KEEP_ALIVE` 环境口径 | `KEEP_ALIVE` 只表示保留现场，不表示重新可分配；保留后的 `RUNNING` 环境不会被候选队列当成可发号工位 |
+| `env_id` 口径 | 候选函数返回的 `env_id` 是宿主 `environments.id` 主键；`prepare_env` 阶段的 `TaskContext.env_id` 当前固定为 `0`，不应用于表达候选关系 |
+
+## `API-016` Env Cleanup Candidates Contract（0.4.0）
+
+| 项目 | 内容 |
+|---|---|
+| 适用场景 | 模块需要根据自己的账号表、黑号状态、过期策略或长期未使用规则，声明一批可以由宿主清理删除的环境 |
+| 目标语义 | 模块只声明待清理 env id；宿主负责预览、确认、二次安全校验、删除和结果反馈 |
+| 候选声明 | 模块在 `cleanups/*.py` 中声明 `@env_cleanup_candidates(name=...)` 同步纯函数 |
+| 模块开发者职责 | 在清理候选纯函数中实时读取模块数据，返回 env id 列表或 `EnvCandidates` 链式查询；不要在模块内调用删除环境动作 |
+| 宿主职责 | 在只读 `ctx.db`、无工具面的清理候选运行面执行纯函数，按 env id 去重并保留来源，客户端展示预览后由用户确认 |
+| 安全门 | 删除前必须再次读取 REM 当前状态，只允许删除 `READY/PAUSED`、无租约、无关联任务的环境；`BUSY/RUNNING/CREATING/TERMINATING` 必须跳过 |
+| 执行动作 | 删除只通过宿主 REM `EnvironmentManager.destroy_env()` 执行，外部 provider 删除失败时保留数据库记录并返回失败原因 |
+| 与 `API-007` 的关系 | 复用 `EnvCandidates` 查询 DSL，但不复用 `@env_candidates` 注册入口；运行候选和清理候选是两个独立 descriptor bucket |
 
 ## 设计结论
 
@@ -211,6 +214,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-30 | 新增 `API-016`，提供 `cleanups/` + `@env_cleanup_candidates` 批量环境清理候选契约，复用 `EnvCandidates` DSL 但隔离运行候选和删除语义 | Codex |
+| 2026-04-30 | `API-007` 从固定资源池同步方案改为 `candidates/` + `@env_candidates` 纯函数实时候选方案，删除资源池资格卡片和同步工作流口径 | Codex |
 | 2026-04-30 | 新增 `API-013`，登记 docs-stratego 下使用者指南和开发者指南按版本分流、主文档指向当前发布版本、历史版本保留的契约 | Codex |
 | 2026-04-30 | 收口 `API-002/API-003/API-005/API-007/API-008/API-009` 到当前 0.4.0 破坏性实现：无 `selector_name/env_selector`、无 `PageSpec/ui_extension`、无 `module.yaml.data` 事实源，运行能力只来自装饰器和 manifest lock | Codex |
 | 2026-04-30 | 新增 `API-012`，登记 0.4.0 装饰器对象装配运行时、SDK 打开阶段诊断和宿主保留字段校验契约 | Codex |
@@ -228,9 +233,9 @@
 | 2026-04-16 | 补记 `ModuleAssembler` 发现错误可见性，以及 DevLink 普通执行的一次性 reload 语义 | Codex |
 | 2026-04-17 | 增补 `API-005`，收口模块配置、运行态、共享内存与数据表契约 | Codex |
 | 2026-04-18 | 新增 `API-006`，将模块快照数据与审计事件拆成两条正式持久化契约 | Codex |
-| 2026-04-19 | 新增 `API-007`，收口固定环境池 Service Job 的等待队列与资源池资格卡片契约 | Codex |
-| 2026-04-19 | `API-007` V1 落地：宿主等待席位、资源池资格能力与运行模板 `resource_pool` 契约已实现；2026-04-26 起资源池维护口径收敛为宿主 `ctx.tools` 的 `env.*` 能力，SDK 不再提供运行时 helper | Codex |
-| 2026-04-26 | 刷新 `API-007`：资源池名称改为必须在 `module.yaml.resource_pools[]` 声明，并补记 `ctx.runtime` 与模块自有 helper 的池名解析口径 | Codex |
+| 2026-04-19 | 历史记录：曾新增固定环境池 Service Job 的等待队列与资源池资格卡片契约；该方案已在 2026-04-30 被 `@env_candidates` 纯函数候选方案取代 | Codex |
+| 2026-04-19 | 历史记录：曾落地 `resource_pool` 与资源池资格能力；该运行契约已在 0.4.0 当前分支移除 | Codex |
+| 2026-04-26 | 历史记录：曾要求 `module.yaml.resource_pools[]` 声明资源池；该 manifest 字段已在 0.4.0 当前分支作为已移除字段拒绝 | Codex |
 | 2026-04-26 | 刷新 `API-005`：模块配置页切换为 QScintilla YAML 编辑器，并把 YAML 格式校验、顶层映射校验与重复键校验收口到独立验证层 | Codex |
 | 2026-04-21 | 刷新 `API-005` 的文档元数据，确认 `module_datasets` 逐行持久化已进入正式契约口径 | Codex |
 | 2026-04-23 | 刷新 `API-005`：移除 `module_dataset_manifests`，`managed_dataset` 只保留 `module_datasets` 作为记录事实源 | Codex |

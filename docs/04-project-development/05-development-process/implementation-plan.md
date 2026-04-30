@@ -7,12 +7,12 @@
 **上游输入：** `docs/04-project-development/03-requirements/` | `docs/04-project-development/04-design/` | 当前文档治理缺口审计  
 **下游输出：** `docs/04-project-development/05-development-process/execution-log.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/07-release-delivery/release-notes.md`  
 **关联 ID：** `TASK-002`, `TASK-003`, `TASK-004`, `TASK-005`, `TASK-006`, `TASK-007`, `TASK-008`, `TASK-009`, `TASK-010`, `TASK-011`, `TASK-012`, `TASK-013`, `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-023`, `TASK-024`, `TASK-025`, `TASK-027`, `TASK-028`, `TASK-029`, `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `CR-001`, `CR-002`, `CR-003`, `CR-004`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `API-009`, `API-010`
-**最后更新：** 2026-04-24
+**最后更新：** 2026-04-30
 
 ## 1. 实施目标
 
 - 把历史项目从“可运行但发布/治理漂移”的状态推进到“入口、关键模块、版本规则可验证”的状态。
-- 已完成波次优先修复根入口、关键模块运行时和版本治理；Wave 14 已补齐固定环境池 Service Job 的宿主等待队列能力。
+- 已完成波次优先修复根入口、关键模块运行时和版本治理；Wave 14 已补齐环境候选 Service Job 的宿主等待队列能力。
 - 在不改变 Core 当前模块加载契约的前提下，为模块开发链路补齐“根 `__init__.py` 自动托管”的最小演进方案。
 - 在不改动现有 macOS Sparkle 线路的前提下，为 Windows 桌面宿主补齐正式安装器与自更新主方案。
 - 已完成把模块 UI 从 `micro_app` / `ui:*` 切换到 hosted page V1；模块详情页、SDK CLI、测试夹具与开发者文档已统一到 `ui_extension.pages[] + ui.declare_page/ui.declare_data_table` 契约。
@@ -34,7 +34,7 @@
 | Wave 11 | `TASK-014` ~ `TASK-020` | 文档规范审计、根导航覆盖检查、最小文档包缺口 | 生产级文档入口收口、缺失正式页补齐、索引与 memory 同步 | 进行中：以四大模块结构为单一入口，补齐发布/运维/追踪关键页 |
 | Wave 12 | `TASK-021` | `REQ-007`、`api-design.md`、现有 `TaskSignal` / ATM / UI 实现 | 信号驱动的结构化确认面板、任务 signal 持久化与客户端确认闭环 | 已完成：任务 signal 已持久化并发布 `task.signal` 事件，ATM 详情页可展示结构化确认面板并回调既有确认服务 |
 | Wave 13 | `TASK-022` | `REQ-008`、`API-005`、模块数据持久化现状 | 模块审计事件独立存储、事件能力与契约文档同步 | 已完成：`module_audit_events`、`ctx.db.audit(...).append/query` 与对应测试/文档已落地 |
-| Wave 14 | `TASK-023` | `REQ-009`、`API-007`、`atm-resource-pool-queue-design.md` | 固定环境池 Service Job 的宿主等待队列、资源池资格卡片、FIFO 补位与 `ctx.tools` 资源池能力 | 已完成：宿主不再把固定环境池场景的“当前轮没命中”直接判失败，模块资源池资格同步、测试与文档同步完成 |
+| Wave 14 | `TASK-023` | `REQ-009`、`API-007`、`atm-resource-pool-queue-design.md` | 环境候选 Service Job 的宿主等待队列、`@env_candidates` 纯函数候选、FIFO 补位与模块环境授权 | 已完成：宿主不再把候选环境暂时不可用直接判失败，资源池同步方案已被 `candidates/` 纯函数候选方案取代 |
 | Wave 15 | `TASK-024` | `CR-010`、当前 `package-desktop`、`UpdateService`、Windows 发布缺口 | Windows `PyInstaller onedir + Velopack` 发布与宿主自更新闭环 | 已完成：新增 Windows Velopack 发布脚本、宿主更新后端分派、README/运维/测试计划同步 |
 | Wave 16 | `TASK-025` | `CR-011`、`API-008`、`module-hosted-ui-framework.md` | Hosted module UI V1：`ui_extension.pages[]`、`ui.declare_page`、宿主页渲染器、SDK CLI/测试/文档同步 | 已完成：宿主不再执行外部 `PyQt6` 页面类，详情页/CLI/回归夹具已统一切到 hosted page V1 |
 | Wave 17 | `TASK-027` | `CR-013`、`API-008`、`module-hosted-ui-framework.md`、当前 Hosted UI V1 路由链 | Hosted UI 主从表行导航：`row_action`、`open_page.params`、缓存页参数替换、详情表 `navigation_filters` | 已完成：主表点击可打开关联详情页/详情表，目标页收到 params，目标 `core:data_table` 可按参数过滤关联记录 |
@@ -63,7 +63,7 @@
 - UI 静态资源也要做引用面扫描；未被任何入口加载的 QSS / SVG 不应继续留在仓库里伪装成可用资源
 - Wave 10 已完成：ModuleAssembler 与 Shim 落地并经全量测试验证
 - Wave 9 后续回归已补强：`core:data_table` 页面会在刷新时重放 `declare_ui`，并验证 `create_handler` / `update_handler` 与 DevLink 调试上下文
-- Wave 14 额外需要验证固定环境池 Service Job 的“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、黑号停发号与环境删除后的资格卡片级联清理
+- Wave 14 额外需要验证环境候选 Service Job 的“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、候选纯函数实时过滤、模块环境授权与等待超时收口
 - Wave 16 额外需要验证 hosted page renderer、模块详情页入口跳转、CLI 骨架生成、`check full` hosted UI gate，以及 integration/acceptance 对新契约的覆盖
 - Wave 17 额外需要验证 row click 导航、`open_page.params`、已缓存目标页参数替换，以及目标 `core:data_table` 的 `navigation_filters`
 
@@ -79,7 +79,7 @@
 | `TASK-019` | 补齐追踪与索引同步 | `interface-matrix.md`、`document-index.md`、`.factory/memory/doc-map.md` | 文档索引、接口矩阵和 memory 映射一致 | P1 | 已完成 |
 | `TASK-020` | 治理演进与结构验证收口 | `skill-evolution-plan.md`、结构校验记录 | 空壳页清理完毕，根导航覆盖与链接检查通过 | P1 | 已完成 |
 | `TASK-021` | 建立 ATM 信号驱动的结构化确认面板闭环 | `TaskSignal`、ATM 详情页、任务快照持久化 | `wait_for_confirmation` 信号可展示结构化内容，客户端确认后调用既有确认服务完成任务收尾 | P1 | 已完成 |
-| `TASK-023` | 建立 ATM 固定环境池 Service Job 等待队列与资源池资格分配闭环 | `execution_runner`、`controller`、REM `env_metadata` 资格卡片、`ctx.tools` 资源池能力、运行模板/UI 文案 | 固定环境池场景支持“运行中 + 等待中 = 目标并发”，宿主只从当前模块资源池可分配工位里 FIFO 补位，黑号先停发号再销毁 | P1 | 已完成 |
+| `TASK-023` | 建立 ATM 环境候选 Service Job 等待队列与模块候选分配闭环 | `execution_runner`、`controller`、MMS env candidates resolver、Contracts `EnvCandidates` DSL、SDK `candidates/` 脚手架、运行模板/UI 文案 | 候选环境场景支持“运行中 + 等待中 = 目标并发”，宿主实时执行当前模块候选纯函数并只从已授权、READY、未租约占用的浏览器环境里 FIFO 补位 | P1 | 已完成 |
 | `TASK-024` | 建立 Windows `PyInstaller onedir + Velopack` 正式发布与宿主自更新闭环 | Windows 发布脚本、宿主更新桥接、README/运维/测试计划同步 | `uv run package-windows-release` 能产出 Velopack 安装器/更新目录，宿主 `检查更新` 在 Windows 安装态可用 | P0 | 已完成 |
 | `TASK-025` | 建立 hosted module UI V1 并删掉旧 `micro_app/ui:*` 路径 | hosted page runtime capability、schema 存储、`ManagedPageRenderer`、SDK CLI/开发者文档同步 | 模块详情页只消费 `core:page` / `core:data_table`，CLI 不再生成 `ui/` 页面类，相关回归通过 | P0 | 已完成 |
 | `TASK-027` | 为 Hosted UI 补主从表行导航与关联详情表能力 | `row_action`、`open_page.params`、`navigation_filters`、模块详情页路由参数复用 | 点击主表记录可打开关联详情页/详情表，目标页参数不残留旧值，定向回归通过 | P0 | 已完成 |
@@ -111,8 +111,9 @@
 | 2026-04-23 | 新增 Wave 19 / `TASK-029`，重构共享表格组件 `SkyDataTable` 并统一宿主/模块表格边界 | Codex |
 | 2026-04-22 | 新增 Wave 15 / `TASK-024`，为 Windows 建立 `PyInstaller onedir + Velopack` 正式发布与宿主自更新闭环 | Codex |
 | 2026-04-22 | 完成 Wave 15 / `TASK-024` 实现与本地回归验证 | Codex |
-| 2026-04-19 | 新增 Wave 14 / `TASK-023`，为固定环境池 Service Job 补宿主等待队列与资源池资格分配能力 | Codex |
-| 2026-04-19 | 完成 Wave 14 / `TASK-023` 实现与本地回归验证 | Codex |
+| 2026-04-30 | 将 Wave 14 / `TASK-023` 正式口径改为 `candidates/` + `@env_candidates` 纯函数候选；资源池同步和 `ctx.tools` 资源池能力退出 0.4.0 契约 | Codex |
+| 2026-04-19 | 历史记录：曾新增 Wave 14 / `TASK-023` 固定资源池等待队列；该方案已被 2026-04-30 环境候选方案替代 | Codex |
+| 2026-04-19 | 历史记录：曾完成固定资源池 V1 本地回归；当前正式回归以环境候选方案为准 | Codex |
 | 2026-04-08 | 补强 Wave 9 的 `core:data_table` 声明刷新、CRUD hook 与 DevLink 调试回路验证 | Codex |
 | 2026-04-18 | 新增 Wave 13 / `TASK-022`，为模块建立快照数据与审计事件分层存储契约 | Codex |
 | 2026-04-02 | 新增 Wave 11 文档治理整改波次，并补写任务表 | Codex |

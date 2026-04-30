@@ -133,11 +133,14 @@ async def main_async(config_path: str) -> int:
         },
         provider_name=payload.get("provider") or "playwright_local",
         acquisition_mode=AcquisitionMode(payload.get("acquisition_mode", AcquisitionMode.CREATE.value)),
+        fixed_env_id=payload.get("fixed_env_id"),
+        candidates_name=str(payload.get("candidates") or ""),
+        candidate_params=dict(payload.get("candidate_params") or {}),
         creation_params=dict(payload.get("creation_params") or {}),
         creation_lifecycle=CreationLifecycle(
             payload.get("creation_lifecycle", CreationLifecycle.PERSISTENT.value)
         ),
-        selector_wait_timeout=int(payload.get("wait_timeout", 60)),
+        wait_timeout=int(payload.get("wait_timeout", 60)),
         execution_timeout=int(payload.get("timeout", 0)),
         default_env_action=EnvAction.KEEP_ALIVE if payload.get("keep_environment") else None,
     )

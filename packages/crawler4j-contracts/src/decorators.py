@@ -172,7 +172,17 @@ class Crawler4jMeta:
     def __post_init__(self) -> None:
         kind = str(self.kind or "").strip()
         name = str(self.name or "").strip()
-        if kind not in {"interface", "component", "workflow", "page", "page_action", "data_table", "data_query"}:
+        if kind not in {
+            "interface",
+            "component",
+            "workflow",
+            "page",
+            "page_action",
+            "data_table",
+            "data_query",
+            "env_candidates",
+            "env_cleanup_candidates",
+        }:
             raise ValueError(f"unsupported decorator kind: {kind or '<empty>'}")
         if not _is_valid_name(name):
             raise ValueError(f"{kind} name must be snake_case: {name or '<empty>'}")
@@ -329,6 +339,26 @@ def page_action(
             parameters=tuple(_as_tuple(parameters)),
         )
     )
+
+
+def env_candidates(
+    *,
+    name: str,
+    label: str = "",
+    description: str = "",
+) -> Callable[[TargetT], TargetT]:
+    """Declare a pure environment candidate provider."""
+    return _decorate(Crawler4jMeta(kind="env_candidates", name=name, label=label, description=description))
+
+
+def env_cleanup_candidates(
+    *,
+    name: str,
+    label: str = "",
+    description: str = "",
+) -> Callable[[TargetT], TargetT]:
+    """Declare a pure environment cleanup candidate provider."""
+    return _decorate(Crawler4jMeta(kind="env_cleanup_candidates", name=name, label=label, description=description))
 
 
 def page(

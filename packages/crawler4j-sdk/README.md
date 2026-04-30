@@ -21,9 +21,12 @@
 - `page_action`
 - `data_table`
 - `data_query`
+- `env_candidates`
+- `env_cleanup_candidates`
+- `EnvCandidates`
 - `crawler4j_contracts.hosted_ui` 中的 Hosted UI schema/helper
 
-`crawler4j-sdk` 不导出运行时 owner、`TaskScript`、`TaskFlow`、`ModuleAssembler` 或旧资源池 helper。
+`crawler4j-sdk` 不导出运行时 owner、`TaskScript`、`TaskFlow`、`ModuleAssembler`、旧环境选择器或资源池 helper。
 
 ## 核心协议
 
@@ -57,6 +60,8 @@ demo_module/
 ├── workflows/
 ├── tasks/
 ├── data/
+├── candidates/
+├── cleanups/
 └── pages/
 ```
 
@@ -67,6 +72,8 @@ demo_module/
 - `workflows/*.py` 声明 `@workflow`
 - `tasks/*.py` 声明 `@page_action`
 - `data/*.py` 声明 `@data_table` / `@data_query`
+- `candidates/*.py` 声明 `@env_candidates`
+- `cleanups/*.py` 声明 `@env_cleanup_candidates`
 - `pages/*.py` 或 `pages/<group>/*.py` 声明 `@page(...)`
 
 ## CLI
@@ -86,6 +93,8 @@ uv run crawler4j workflow create main_workflow
 uv run crawler4j page-action create open_login_page
 uv run crawler4j data table create accounts
 uv run crawler4j data query create get_account_by_id --source accounts
+uv run crawler4j candidate create ready_accounts
+uv run crawler4j cleanup create unused_accounts
 uv run crawler4j page create dashboard
 uv run crawler4j manifest lock
 uv run crawler4j check full
@@ -125,4 +134,4 @@ CLI 脚手架生成的 `pyproject.toml` 会默认写入同样的兼容范围。
 
 ## 开发辅助
 
-SDK 仍保留 `crawler4j_sdk.context.DefaultHttpClient` 作为本地开发辅助。模块运行时代码不得依赖 `crawler4j-sdk`；资源池等非数据库宿主能力继续通过 `ctx.tools.has_tool(...)` / `ctx.tools.call(...)` 调用，数据库唯一入口为 `ctx.db`。
+SDK 仍保留 `crawler4j_sdk.context.DefaultHttpClient` 作为本地开发辅助。模块运行时代码不得依赖 `crawler4j-sdk`；数据库唯一入口为 `ctx.db`。环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，可以直接返回 env id 列表，也可以返回 `EnvCandidates` 链式查询；不要维护资源池同步快照。批量环境清理候选写在 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数中，复用同一个 `EnvCandidates` DSL，但不复用运行候选入口；模块只声明待清理 env id，宿主负责预览、确认、二次校验和删除。

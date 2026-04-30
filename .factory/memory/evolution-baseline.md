@@ -5,7 +5,7 @@
 - Use `uv` consistently
 - Keep numbered `docs/` and `.factory/memory/` as the authoritative baseline
 - Validate runtime entrypoints directly instead of trusting build metadata blindly
-- When a service job relies on an env selector that can legally return `None`, require a stable `resource_pool` binding or pause the job at runtime precheck to avoid dispatch storms on startup
+- When a service job relies on dynamic environment selection, require a declared `@env_candidates` pure function and let the host queue on empty candidates; do not reintroduce selector `None` loops or resource-pool sync snapshots
 - Keep real-time log widgets resilient to bursty duplicate warnings by batching UI flushes instead of appending one QTextEdit block per signal
 - When PyInstaller bundles third-party single-file modules, explicitly collect their shared resource trees and pass the consumer-expected subdirectory instead of assuming `collect_data_files()` or a generic asset root will line up automatically
 - Keep module-facing database access behind `TaskContext.db`; keep non-database Core extensions behind `TaskContext.tools`

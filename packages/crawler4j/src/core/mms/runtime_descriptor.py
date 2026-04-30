@@ -20,7 +20,7 @@ from src.core.mms.models import ModuleManifest
 from src.core.mms.module_loader import load_root_module_from_path
 
 V2_RUNTIME_API = "core-native-v2"
-V2_SCAN_DIRECTORIES = ("interfaces", "objects", "workflows", "tasks", "data", "pages")
+V2_SCAN_DIRECTORIES = ("interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates", "cleanups")
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,8 @@ class ModuleRuntimeDescriptorV2:
     pages: dict[str, PageRuntimeEntry] = field(default_factory=dict)
     data_tables: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     data_queries: dict[str, V2RuntimeEntry] = field(default_factory=dict)
+    env_candidates: dict[str, V2RuntimeEntry] = field(default_factory=dict)
+    env_cleanup_candidates: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     implementations: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
@@ -137,6 +139,8 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
     pages: dict[str, PageRuntimeEntry] = {}
     data_tables: dict[str, V2RuntimeEntry] = {}
     data_queries: dict[str, V2RuntimeEntry] = {}
+    env_candidates: dict[str, V2RuntimeEntry] = {}
+    env_cleanup_candidates: dict[str, V2RuntimeEntry] = {}
     page_owners: dict[str, str] = {}
 
     for entry in entries:
@@ -159,6 +163,14 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
             _add_v2_entry(data_tables, entry, label="data_table")
         elif kind == "data_query":
             _add_v2_entry(data_queries, entry, label="data_query")
+        elif kind == "env_candidates":
+            if not inspect.isfunction(entry.target) or inspect.iscoroutinefunction(entry.target):
+                raise RuntimeError(f"{entry.owner} 的 env_candidates {entry.meta.name} 必须是同步纯函数")
+            _add_v2_entry(env_candidates, entry, label="env_candidates")
+        elif kind == "env_cleanup_candidates":
+            if not inspect.isfunction(entry.target) or inspect.iscoroutinefunction(entry.target):
+                raise RuntimeError(f"{entry.owner} 的 env_cleanup_candidates {entry.meta.name} 必须是同步纯函数")
+            _add_v2_entry(env_cleanup_candidates, entry, label="env_cleanup_candidates")
         else:  # pragma: no cover
             raise RuntimeError(f"{entry.owner} 包含不支持的装饰器类型: {kind}")
 
@@ -170,6 +182,8 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
         pages=pages,
         data_tables=data_tables,
         data_queries=data_queries,
+        env_candidates=env_candidates,
+        env_cleanup_candidates=env_cleanup_candidates,
         implementations=_build_implementations(interfaces, components),
     )
     _validate_v2_inject_targets(descriptor)

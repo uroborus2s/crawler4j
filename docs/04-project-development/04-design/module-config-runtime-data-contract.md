@@ -5,7 +5,7 @@
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **关联 ID：** `API-005`, `API-006`, `API-008`, `API-009`, `API-010`
-**最后更新：** 2026-04-26
+**最后更新：** 2026-04-30
 
 ## 1. 设计目标
 
@@ -24,7 +24,7 @@
 
 | 类别 | 事实源 | 模块读取方式 | 模块写入方式 | 说明 |
 |---|---|---|---|---|
-| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、`resource_pools`，以及一次性初始化模板 `config_defaults`；运行能力和页面不再写入清单 |
+| 静态清单 | `module.yaml` | 宿主扫描和装配 | 禁止 | 放模块名、版本、升级源，以及一次性初始化模板 `config_defaults`；运行能力、页面和环境候选不再写入清单 |
 | 持久配置 | `config.db.module_config_entries` | `ctx.get_config()` / `ctx.config` | 禁止 | 宿主统一维护；模块运行时只读 |
 | 运行态元数据 | `ctx.runtime` | `ctx.runtime[...]` | 禁止 | 由 ATM / Debug / Core 注入 |
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
@@ -39,19 +39,28 @@
 
 ## 3. 配置契约
 
-- `module.yaml` 是唯一模块清单，可额外声明只读默认模板 `config_defaults`、`resource_pools` 与 `data` 数据契约，但不是可变配置存储。
+- `module.yaml` 是唯一模块清单，可额外声明只读默认模板 `config_defaults`，但不是可变配置存储。
 - 模块可变配置统一持久化到 `config.db.module_config_entries`。
 - 模块运行时代码只能通过 `ctx.get_config()` 或 `ctx.config` 读取配置。
 - 模块不得自行读取宿主配置数据库。
 - 除 `module.yaml.config_defaults` 外，不再承认模块目录里的第二套配置事实源，例如 `module.settings.yml`、`strategy.yaml`、`config_schema.json`。
 - 宿主模块详情页的“配置”标签只承担配置编辑入口：前端使用 QScintilla YAML 编辑器提供行号、折叠、语法高亮与校验错误标记；保存前统一调用独立 YAML 验证层，要求顶层为 YAML 映射对象并拒绝重复键，保存后再规范化为块格式 YAML 展示。
 
-### 3.1 资源池声明
+### 3.1 环境候选声明
 
-- 固定环境池名称必须在 `module.yaml.resource_pools[]` 中声明。
-- `resource_pools[]` 的正式字段只有 `name`、`display_name`、`description`。
-- `AcquisitionConfig.resource_pool` 只能引用当前模块已经声明过的池名。
-- 模块代码不得再把未声明池名当成正式契约写死在业务逻辑里。
+- 环境候选必须在 `candidates/*.py` 中声明，入口是 `@env_candidates(name=...)` 同步纯函数。
+- `AcquisitionConfig.candidates` 只能引用当前模块已经声明过的候选函数。
+- 候选函数可以直接返回 env id 列表，也可以返回 `EnvCandidates` 链式查询对象。
+- 模块内账号状态、黑号状态、注册时间、会员等级等过滤条件必须写在候选纯函数或它组合调用的本模块纯函数中，通过 `ctx.db` 实时读取模块业务表。
+- `module.yaml.resource_pools[]`、`AcquisitionConfig.resource_pool`、资源池资格卡片和资源池同步工作流不再是 0.4.0 正式契约。
+
+### 3.1.1 环境清理候选声明
+
+- 环境清理候选必须在 `cleanups/*.py` 中声明，入口是 `@env_cleanup_candidates(name=...)` 同步纯函数。
+- 清理候选函数可以直接返回 env id 列表，也可以返回 `EnvCandidates` 链式查询对象。
+- 清理候选函数运行面只允许只读 `ctx.db`，不暴露 `ctx.tools`；模块只声明候选集合，不执行删除动作。
+- 宿主客户端触发批量清理时会汇总所有模块声明，按 env id 去重，展示来源模块和候选函数，用户确认后再执行。
+- 删除前宿主必须二次校验 REM 当前状态，只允许删除 `READY/PAUSED`、无租约、无关联任务的环境。
 
 ### 3.2 Workflow 运行参数声明
 
@@ -124,8 +133,8 @@ workflows:
 | `params` | `execution_params + job_params` 合并后的有效输入 |
 | `devel_mode` | 当前是否为 DevLink 开发态 |
 | `creation_params` | 本次环境创建参数；已有环境导入时也通过这里透传来源元数据 |
-| `resource_pool_name` | 当前任务运行模板绑定的资源池名；仅在调度侧已选择固定池时注入 |
-| `declared_resource_pools` | 当前模块在 `module.yaml.resource_pools[]` 中声明的资源池列表 |
+| `candidates` | 当前运行模板绑定的环境候选函数名；仅在 `mode=select` 且非固定 `env_id` 时注入 |
+| `candidate_params` | 当前运行模板传给候选函数的参数字典 |
 | `env_action` | 本次终态环境动作结果 |
 
 约束：
@@ -133,8 +142,8 @@ workflows:
 - 模块不得覆盖或重写这些键。
 - `workflow`、`devel_mode`、`creation_params` 不能再混进 `ctx.config`。
 - 本次执行的临时变量也不要写入 `ctx.runtime`，应放到局部变量或 `ctx.state`。
-- 资源池名的事实源仍然是 `module.yaml.resource_pools[]`；`ctx.runtime["resource_pool_name"]` 只表示“本次任务当前正在消费哪个已声明池”。
-- `ctx.runtime["declared_resource_pools"]` 由宿主注入，作用是让模块运行时代码或模块自有 helper 可以读取 manifest 已声明池，而不是要求模块自己重新解析 `module.yaml`。
+- `ctx.runtime["candidates"]` 只表示“本次任务通过哪个已声明候选函数拿环境”，不是模块业务配置事实源。
+- `ctx.runtime["candidate_params"]` 只承载运行模板传入候选函数的参数；候选函数仍应从模块业务表实时读取账号状态。
 
 ### 4.1 已有环境导入场景
 
@@ -262,7 +271,7 @@ workflows:
 - 把 `workflow`、`devel_mode`、`creation_params` 写进 `ctx.config`
 - 把大批量业务数据写进 `ctx.state`
 - 绕过 `@data_table` / manifest lock 私自读写模块数据
-- 绕过 `module.yaml.resource_pools[]` 引用或写入未声明资源池
+- 绕过 `@env_candidates` 私自恢复 `selector_name/env_selector/resource_pool` 环境选择路径
 - 在模块目录里再维护一份正式 `*.yml` 配置事实源
 - 把页面 schema 当成模块配置保存
 - 重新引入独立数据表页面契约

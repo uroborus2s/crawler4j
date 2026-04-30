@@ -156,7 +156,7 @@ async def test_job_detail_dialog_confirms_waiting_task_after_dialog_accept(qtbot
 
 
 @pytest.mark.asyncio
-async def test_job_detail_dialog_shows_resource_pool_binding(qtbot, monkeypatch):
+async def test_job_detail_dialog_shows_candidate_binding(qtbot, monkeypatch):
     import src.core.atm.ui.task_detail_dialog as dialog_module
 
     job = Job(
@@ -166,7 +166,7 @@ async def test_job_detail_dialog_shows_resource_pool_binding(qtbot, monkeypatch)
             resource=ResourceConfig(
                 acquisition=AcquisitionConfig(
                     mode=AcquisitionMode.SELECT,
-                    resource_pool="bound_account_ready",
+                    candidates="bound_account_ready",
                     wait_timeout=60,
                 ),
             ),
@@ -190,7 +190,7 @@ async def test_job_detail_dialog_shows_resource_pool_binding(qtbot, monkeypatch)
 
     await dialog._load_data_async()
 
-    assert "资源池: bound_account_ready" in dialog.config_text.toPlainText()
+    assert "候选函数: bound_account_ready" in dialog.config_text.toPlainText()
     assert "选择器" not in dialog.config_text.toPlainText()
 
 
@@ -203,7 +203,7 @@ async def test_job_detail_dialog_shows_timeout_reason_instead_of_waiting_message
         job_id="job-1",
         status=TaskStatus.FAILED,
         message="",
-        error="等待环境池工位超时: bound_account_ready (30s)",
+        error="等待环境候选超时: bound_account_ready (30s)",
     )
     service = SimpleNamespace(
         get_job=AsyncMock(return_value=_build_job()),
@@ -222,7 +222,7 @@ async def test_job_detail_dialog_shows_timeout_reason_instead_of_waiting_message
 
     await dialog._load_data_async()
 
-    assert dialog.task_table.displayed_rows()[0]["result"] == "等待环境池工位超时: bound_account_ready (30s)"
+    assert dialog.task_table.displayed_rows()[0]["result"] == "等待环境候选超时: bound_account_ready (30s)"
 
 
 def test_job_detail_dialog_refreshes_on_task_failed_event(qtbot, monkeypatch):
@@ -262,7 +262,7 @@ def test_job_detail_dialog_refreshes_on_task_failed_event(qtbot, monkeypatch):
             data={
                 "job_id": "job-1",
                 "task_id": "task-timeout",
-                "error": "等待环境池工位超时: bound_account_ready (30s)",
+                "error": "等待环境候选超时: bound_account_ready (30s)",
             },
             task_run_id="task-timeout",
         )

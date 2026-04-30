@@ -22,7 +22,7 @@ from crawler4j_contracts.hosted_ui import normalize_page_schema
 
 CORE_NATIVE_V2_RUNTIME_API = "core-native-v2"
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-V2_SCAN_DIRECTORIES = ("interfaces", "objects", "workflows", "tasks", "data", "pages")
+V2_SCAN_DIRECTORIES = ("interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates", "cleanups")
 IGNORED_PATH_PARTS = {
     ".git",
     ".idea",
@@ -48,6 +48,8 @@ DECORATOR_KINDS = {
     "page_action": "page_action",
     "data_table": "data_table",
     "data_query": "data_query",
+    "env_candidates": "env_candidates",
+    "env_cleanup_candidates": "env_cleanup_candidates",
 }
 _MISSING = object()
 
@@ -177,6 +179,7 @@ def _collect_manifest_diagnostics(manifest: dict[str, Any]) -> list[V2Diagnostic
         ("interfaces", "V2_MANIFEST_LEGACY_INTERFACES"),
         ("tasks", "V2_MANIFEST_LEGACY_TASKS"),
         ("ui_extension", "V2_MANIFEST_LEGACY_UI_EXTENSION"),
+        ("resource_pools", "V2_MANIFEST_LEGACY_RESOURCE_POOLS"),
     ):
         if key in manifest:
             diagnostics.append(
@@ -775,6 +778,7 @@ def _validate_declarations(declarations: list[V2Declaration]) -> list[V2Diagnost
     diagnostics.extend(_validate_injection_targets(declarations))
     diagnostics.extend(_validate_pages(declarations))
     diagnostics.extend(_validate_page_actions(declarations))
+    diagnostics.extend(_validate_env_id_candidate_functions(declarations))
     diagnostics.extend(_validate_parameters(declarations))
     diagnostics.extend(_validate_data_contracts(declarations))
     diagnostics.extend(_validate_dependency_cycles(declarations))
@@ -869,6 +873,29 @@ def _validate_page_actions(declarations: list[V2Declaration]) -> list[V2Diagnost
                 code="V2_PAGE_ACTION_INVALID_TARGET",
                 location=declaration.symbol,
                 message="page action must decorate a function or async function",
+            )
+        )
+    return diagnostics
+
+
+def _validate_env_id_candidate_functions(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    for declaration in declarations:
+        if declaration.kind not in {"env_candidates", "env_cleanup_candidates"}:
+            continue
+        if declaration.target_kind == "function":
+            continue
+        label = "env cleanup candidates" if declaration.kind == "env_cleanup_candidates" else "env candidates"
+        code = (
+            "V2_ENV_CLEANUP_CANDIDATES_INVALID_TARGET"
+            if declaration.kind == "env_cleanup_candidates"
+            else "V2_ENV_CANDIDATES_INVALID_TARGET"
+        )
+        diagnostics.append(
+            V2Diagnostic(
+                code=code,
+                location=declaration.symbol,
+                message=f"{label} must decorate a pure sync function",
             )
         )
     return diagnostics

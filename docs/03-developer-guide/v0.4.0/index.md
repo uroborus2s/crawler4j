@@ -12,6 +12,8 @@
 - workflow 只接收宿主注入对象
 - 页面操作使用 `@page_action` 纯函数
 - 数据表和命名查询使用 `@data_table` / `@data_query`
+- 环境选择使用 `candidates/` 下的 `@env_candidates` 同步纯函数
+- 批量环境清理使用 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数
 
 0.4.0 新模块只按本目录的装饰器路径编写。历史契约只在迁移和排障页面作为旧概念出现，不作为新版 SDK 的兼容入口。
 
@@ -44,6 +46,8 @@
 - Core 为每个 task/env 创建独立对象图，不共享业务对象实例
 - 数据库唯一入口仍是 `ctx.db`
 - `ctx.tools.call("db.*")` 不是正式能力
+- 环境候选唯一入口是 `candidates/*.py` + `@env_candidates`；不要写 `env_selectors/`，也不要维护资源池同步数据
+- 环境清理候选入口是 `cleanups/*.py` + `@env_cleanup_candidates`；模块只返回 env id，删除由宿主确认和校验后执行
 - `created_at`、`updated_at`、`create_at`、`update_at` 是阻断诊断字段，不要声明为模块业务列
 
 如果你维护的是 0.3.x 稳定模块，请读 `../v0.3.0/` 并使用 0.3.x SDK / Contracts，不要把本目录的 0.4.x 工具链套回稳定版。
@@ -57,4 +61,5 @@
 | Workflow 参数 | `module.yaml.workflows[].parameters[]` | 移到具体 component 的 `parameters` 或 `object_param(...)` 注解 |
 | 数据表 / 查询 | `module.yaml.data` + `data/sql` | `@data_table` / `@data_query` + manifest lock |
 | 页面 | `pages/*.py` 使用 `@page` 装饰 load handler | 页面仍由宿主 schema 渲染，菜单由 `@page(menu=True)` 控制，页面动作接入 `@page_action` |
-| Hook / 环境选择器 | `hooks/`、`env_selectors/` 固定导出 | 0.4.x SDK 不提供旧命令；如需等价能力必须走 0.4.0 专属 API 设计 |
+| Hook / 环境选择器 | `hooks/`、`env_selectors/` 固定导出 | 环境选择写成 `candidates/*.py` 中的 `@env_candidates` 同步纯函数；不提供 hook 兼容路径 |
+| 批量环境清理 | 无一等模块契约 | `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数返回待清理 env id，宿主统一预览、确认、二次安全校验和删除 |

@@ -197,7 +197,7 @@ def test_module_init_creates_core_native_v2_project(tmp_path: Path):
     assert (module_root / ".gitignore").exists()
     assert (module_root / ".python-version").exists()
     assert (module_root / ".crawler4j" / "manifest.lock.json").exists()
-    for dirname in ("interfaces", "objects", "workflows", "tasks", "data", "pages", "tests"):
+    for dirname in ("interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates", "tests"):
         assert (module_root / dirname / "__init__.py").exists()
 
     assert (module_root / "interfaces" / "labor.py").exists()
@@ -206,6 +206,7 @@ def test_module_init_creates_core_native_v2_project(tmp_path: Path):
     assert (module_root / "tasks" / "example_action.py").exists()
     assert (module_root / "data" / "accounts.py").exists()
     assert (module_root / "data" / "get_account_by_id.py").exists()
+    assert (module_root / "candidates" / "ready_accounts.py").exists()
     assert not (module_root / "module_runtime.py").exists()
     assert not (module_root / "hooks").exists()
     assert not (module_root / "env_selectors").exists()
@@ -234,11 +235,14 @@ def test_module_init_creates_core_native_v2_project(tmp_path: Path):
     workflow_text = (module_root / "workflows" / "main_workflow.py").read_text(encoding="utf-8")
     assert "@workflow(" in workflow_text
     assert "WorkflowSpec" not in workflow_text
+    candidates_text = (module_root / "candidates" / "ready_accounts.py").read_text(encoding="utf-8")
+    assert "@env_candidates(" in candidates_text
 
     assert _lock_declaration_keys(module_root) == {
         ("component", "api_labor"),
         ("data_query", "get_account_by_id"),
         ("data_table", "accounts"),
+        ("env_candidates", "ready_accounts"),
         ("interface", "labor"),
         ("page_action", "example_action"),
         ("workflow", "main_workflow"),
@@ -256,6 +260,7 @@ def test_generated_package_is_importable_without_runtime_shim(tmp_path: Path):
     action_module = _import_module_child(module_root, "tasks", "example_action")
     data_table_module = _import_module_child(module_root, "data", "accounts")
     data_query_module = _import_module_child(module_root, "data", "get_account_by_id")
+    candidates_module = _import_module_child(module_root, "candidates", "ready_accounts")
 
     assert hasattr(module, "run") is False
     assert hasattr(module, "declare_ui") is False
@@ -265,6 +270,7 @@ def test_generated_package_is_importable_without_runtime_shim(tmp_path: Path):
     assert getattr(action_module.example_action, CRAWLER4J_META_ATTR).kind == "page_action"
     assert getattr(data_table_module.Accounts, CRAWLER4J_META_ATTR).kind == "data_table"
     assert getattr(data_query_module.get_account_by_id, CRAWLER4J_META_ATTR).kind == "data_query"
+    assert getattr(candidates_module.ready_accounts, CRAWLER4J_META_ATTR).kind == "env_candidates"
 
 
 def test_module_repair_init_rewrites_root_package_file(tmp_path: Path, monkeypatch):
@@ -414,6 +420,12 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
         )
         == 0
     )
+    assert (
+        commands.cmd_candidate_create(
+            Namespace(name="gold_accounts", display_name=None, description=None, force=False)
+        )
+        == 0
+    )
     assert commands.cmd_manifest_lock(Namespace()) == 0
 
     assert commands.cmd_interface_list(Namespace()) == 0
@@ -421,6 +433,7 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
     assert commands.cmd_workflow_list(Namespace()) == 0
     assert commands.cmd_task_list(Namespace()) == 0
     assert commands.cmd_data_list(Namespace()) == 0
+    assert commands.cmd_candidate_list(Namespace()) == 0
     output = capsys.readouterr().out
     assert "account_store" in output
     assert "sqlite_account_store" in output
@@ -428,6 +441,7 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
     assert "open_home_page" in output
     assert "orders" in output
     assert "get_order_by_id" in output
+    assert "gold_accounts" in output
 
     assert ("interface", "account_store") in _lock_declaration_keys(module_root)
     assert ("component", "sqlite_account_store") in _lock_declaration_keys(module_root)
@@ -435,6 +449,7 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
     assert ("page_action", "open_home_page") in _lock_declaration_keys(module_root)
     assert ("data_table", "orders") in _lock_declaration_keys(module_root)
     assert ("data_query", "get_order_by_id") in _lock_declaration_keys(module_root)
+    assert ("env_candidates", "gold_accounts") in _lock_declaration_keys(module_root)
     assert commands.collect_full_errors(module_root, _read_manifest(module_root), require_manifest_lock=True) == []
 
 
@@ -497,6 +512,7 @@ def test_build_parser_registers_v2_commands():
     interface_args = parser.parse_args(["interface", "create", "labor"])
     component_args = parser.parse_args(["component", "create", "api_labor", "--implements", "labor"])
     action_args = parser.parse_args(["page-action", "create", "open_home_page"])
+    candidate_args = parser.parse_args(["candidate", "create", "ready_accounts"])
     table_args = parser.parse_args(["data", "table", "create", "accounts"])
     query_args = parser.parse_args(["data", "query", "create", "get_account_by_id", "--source", "accounts"])
     lock_args = parser.parse_args(["manifest", "lock"])
@@ -504,6 +520,7 @@ def test_build_parser_registers_v2_commands():
     assert interface_args.func is commands.cmd_interface_create
     assert component_args.func is commands.cmd_component_create
     assert action_args.func is commands.cmd_task_create
+    assert candidate_args.func is commands.cmd_candidate_create
     assert table_args.func is commands.cmd_data_table_create
     assert query_args.func is commands.cmd_data_query_create
     assert query_args.source == "accounts"
@@ -544,6 +561,7 @@ def test_archive_members_keep_v2_files_and_manifest_lock_without_runtime_shim(tm
     assert "demo_model/workflows/main_workflow.py" in archived_paths
     assert "demo_model/data/accounts.py" in archived_paths
     assert "demo_model/data/get_account_by_id.py" in archived_paths
+    assert "demo_model/candidates/ready_accounts.py" in archived_paths
     assert "demo_model/module_runtime.py" not in archived_paths
     assert "demo_model/hooks/__init__.py" not in archived_paths
     assert "demo_model/env_selectors/__init__.py" not in archived_paths

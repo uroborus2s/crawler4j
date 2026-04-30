@@ -215,13 +215,14 @@ class TaskDispatcher:
             },
             provider_name=run_profile.resource.acquisition.provider,
             fixed_env_id=run_profile.resource.acquisition.env_id,
-            resource_pool_name=run_profile.resource.acquisition.resource_pool,
+            candidates_name=run_profile.resource.acquisition.candidates,
+            candidate_params=dict(run_profile.resource.acquisition.candidate_params),
             acquisition_mode=run_profile.resource.acquisition.mode,
-            selector_wait_timeout=run_profile.resource.acquisition.wait_timeout,
+            wait_timeout=run_profile.resource.acquisition.wait_timeout,
             wait_for_resource=(
                 job.type == JobType.SERVICE
                 and run_profile.resource.acquisition.mode.value == "select"
-                and bool(str(run_profile.resource.acquisition.resource_pool or "").strip())
+                and bool(str(run_profile.resource.acquisition.candidates or "").strip())
             ),
             creation_params=dict(run_profile.resource.acquisition.creation.params),
             creation_lifecycle=run_profile.resource.acquisition.creation.lifecycle,

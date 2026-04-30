@@ -35,6 +35,9 @@ class DebugSessionRepository:
                     hooks_module TEXT NOT NULL,
                     provider TEXT NOT NULL,
                     acquisition_mode TEXT NOT NULL,
+                    fixed_env_id INTEGER,
+                    candidates TEXT NOT NULL DEFAULT '',
+                    candidate_params_json TEXT NOT NULL DEFAULT '{}',
                     creation_params_json TEXT NOT NULL,
                     creation_lifecycle TEXT NOT NULL DEFAULT 'ephemeral',
                     wait_timeout INTEGER NOT NULL,
@@ -76,6 +79,11 @@ class DebugSessionRepository:
                 "creation_lifecycle": (
                     "ALTER TABLE debug_sessions ADD COLUMN creation_lifecycle TEXT NOT NULL DEFAULT 'ephemeral'"
                 ),
+                "fixed_env_id": "ALTER TABLE debug_sessions ADD COLUMN fixed_env_id INTEGER",
+                "candidates": "ALTER TABLE debug_sessions ADD COLUMN candidates TEXT NOT NULL DEFAULT ''",
+                "candidate_params_json": (
+                    "ALTER TABLE debug_sessions ADD COLUMN candidate_params_json TEXT NOT NULL DEFAULT '{}'"
+                ),
             }
             for column, sql in migrations.items():
                 if column not in existing_columns:
@@ -90,10 +98,11 @@ class DebugSessionRepository:
                     INSERT INTO debug_sessions (
                         id, job_id, job_name, module_name, source_path, workflow, execution_params_json, job_params_json,
                         params_json, object_bindings_json, object_params_json, hooks_module,
-                        provider, acquisition_mode, creation_params_json, creation_lifecycle, wait_timeout, timeout,
+                        provider, acquisition_mode, fixed_env_id, candidates, candidate_params_json,
+                        creation_params_json, creation_lifecycle, wait_timeout, timeout,
                         attach_host, attach_port, wait_for_attach, stop_on_entry, keep_environment,
                         state, worker_pid, env_id, created_at, started_at, finished_at, last_error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         job_id = excluded.job_id,
                         job_name = excluded.job_name,
@@ -108,6 +117,9 @@ class DebugSessionRepository:
                         hooks_module = excluded.hooks_module,
                         provider = excluded.provider,
                         acquisition_mode = excluded.acquisition_mode,
+                        fixed_env_id = excluded.fixed_env_id,
+                        candidates = excluded.candidates,
+                        candidate_params_json = excluded.candidate_params_json,
                         creation_params_json = excluded.creation_params_json,
                         creation_lifecycle = excluded.creation_lifecycle,
                         wait_timeout = excluded.wait_timeout,
@@ -139,6 +151,9 @@ class DebugSessionRepository:
                         session.hooks_module,
                         session.provider,
                         session.acquisition_mode.value,
+                        session.fixed_env_id,
+                        session.candidates,
+                        json.dumps(session.candidate_params, ensure_ascii=False),
                         json.dumps(session.creation_params, ensure_ascii=False),
                         session.creation_lifecycle.value,
                         session.wait_timeout,
@@ -199,6 +214,13 @@ class DebugSessionRepository:
             hooks_module=row["hooks_module"],
             provider=row["provider"],
             acquisition_mode=row["acquisition_mode"],
+            fixed_env_id=row["fixed_env_id"] if "fixed_env_id" in row.keys() else None,
+            candidates=row["candidates"] if "candidates" in row.keys() else "",
+            candidate_params=(
+                json.loads(row["candidate_params_json"])
+                if "candidate_params_json" in row.keys() and row["candidate_params_json"]
+                else {}
+            ),
             creation_params=json.loads(row["creation_params_json"]) if row["creation_params_json"] else {},
             creation_lifecycle=row["creation_lifecycle"] or "ephemeral",
             wait_timeout=row["wait_timeout"],
