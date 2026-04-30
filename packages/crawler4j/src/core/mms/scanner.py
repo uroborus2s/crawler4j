@@ -38,7 +38,6 @@ V2_REMOVED_MANIFEST_FIELDS = (
     "interfaces",
     "objects",
     "tasks",
-    "resource_pools",
 )
 REQUIRED_RUNTIME_API = "core-native-v2"
 
@@ -206,8 +205,12 @@ class ModuleScanner:
             )
 
         # 命名规范校验（小写字母、数字、下划线）
-        if not manifest.name.replace("_", "").isalnum() or not manifest.name.islower():
-            warnings.append(f"模块名 '{manifest.name}' 不符合命名规范（应为小写字母、数字、下划线）")
+        if not MANAGED_NAME_RE.match(manifest.name):
+            raise ModuleValidationError(
+                f"模块名不符合命名规范: {manifest.name}",
+                stage="VALIDATE",
+                hint="module.yaml.name 必须以小写字母开头，且只包含小写字母、数字和下划线",
+            )
 
         version = str(manifest.version or "").strip()
         if not is_valid_semver(version):
@@ -220,6 +223,7 @@ class ModuleScanner:
         self._validate_upgrade_source(manifest)
         self._validate_removed_v2_manifest_state(manifest)
         self._validate_config_defaults(manifest)
+        self._validate_resource_pools(manifest)
         self._validate_ui_extension(manifest)
 
         return warnings
@@ -230,14 +234,30 @@ class ModuleScanner:
             removed_fields.append("default_workflow")
         if manifest.workflows:
             removed_fields.append("workflows")
-        if manifest.resource_pools:
-            removed_fields.append("resource_pools")
         if removed_fields:
             raise ModuleValidationError(
                 f"core-native-v2 不支持 manifest 字段: {', '.join(removed_fields)}",
                 stage="VALIDATE",
                 hint="请删除 0.3 时代的 manifest 声明，运行时对象必须由装饰器声明",
             )
+
+    def _validate_resource_pools(self, manifest: ModuleManifest) -> None:
+        seen_names: set[str] = set()
+        for pool in manifest.resource_pools:
+            pool_name = str(pool.name or "").strip()
+            if not MANAGED_NAME_RE.match(pool_name):
+                raise ModuleValidationError(
+                    f"resource_pools.name 不符合命名规范: {pool_name or '<empty>'}",
+                    stage="VALIDATE",
+                    hint="resource_pools[].name 必须以小写字母开头，且只包含小写字母、数字和下划线",
+                )
+            if pool_name in seen_names:
+                raise ModuleValidationError(
+                    f"resource_pools.name 重复: {pool_name}",
+                    stage="VALIDATE",
+                    hint="请删除重复资源池声明，资源池名必须唯一",
+                )
+            seen_names.add(pool_name)
 
     def _validate_upgrade_source(self, manifest: ModuleManifest) -> None:
         upgrade_source = manifest.upgrade_source
