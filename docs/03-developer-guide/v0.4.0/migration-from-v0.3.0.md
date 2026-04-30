@@ -90,14 +90,18 @@ workflows:
 新写法：
 
 ```python
+from typing import Annotated
+
+from crawler4j_contracts import component, object_param
+
+
 @component(
     name="api_labor",
     implements="labor",
-    parameters=[
-        {"name": "base_url", "type": "string", "required": True},
-    ],
 )
 class ApiLabor:
+    base_url: Annotated[str, object_param()]
+
     def __init__(self, base_url: str):
         self.base_url = base_url
 ```

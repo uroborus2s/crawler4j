@@ -53,7 +53,7 @@
 如果你需要配置 API 地址、超时、账号策略等普通值：
 
 1. 找到真正需要这个值的 component
-2. 在 `@component(parameters=[...])` 声明
+2. 在 `@component(parameters=[...])` 声明，或用 `Annotated[..., object_param(...)]` 写到 component 类属性 / `__init__` 参数
 3. 让运行模板在对象节点下渲染参数表单
 
 不要恢复 `module.yaml.workflows[].parameters[]`。
@@ -75,6 +75,7 @@
 
 - `inject.name` 与 `__init__` 参数名一致
 - component `parameters[].name` 与 `__init__` 参数名一致
+- 使用注解 helper 时，类属性名或 `__init__` 参数名会作为默认 `inject.name` / parameter name
 - 必填参数已在运行模板填写
 - workflow 构造函数没有普通业务参数
 - 构造函数里没有直接依赖 `ctx`

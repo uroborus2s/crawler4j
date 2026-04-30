@@ -66,14 +66,26 @@ def _write_quiz_module(tmp_path: Path, module_name: str, *, constructor_body: st
                     implements="labor",
                     parameters=[
                         {{"name": "base_url", "type": "string", "required": True}},
-                        {{"name": "timeout", "type": "integer", "default": 30}},
+                        {{"name": "timeout", "type": "integer", "default": 30, "min": 1, "max": 120}},
+                        {{
+                            "name": "mode",
+                            "type": "enum",
+                            "default": "sync",
+                            "options": [
+                                {{"label": "Sync", "value": "sync"}},
+                                {{"label": "Async", "value": "async"}},
+                            ],
+                        }},
+                        {{"name": "enabled", "type": "boolean", "default": True}},
                     ],
                 )
                 class ApiLabor:
-                    def __init__(self, base_url, timeout):
+                    def __init__(self, base_url, timeout, mode, enabled):
                         {constructor_body or "pass"}
                         self.base_url = base_url
                         self.timeout = timeout
+                        self.mode = mode
+                        self.enabled = enabled
             """,
             "objects/quiz_orchestrator.py": """
                 from crawler4j_contracts import component
@@ -121,7 +133,6 @@ def test_object_container_builds_workflow_with_selected_components_and_params(tm
                     "base_url": "https://labor.example.com",
                     "timeout": 10,
                 },
-                "quiz_workflow": {"must_not_leak": True},
             },
         )
 
@@ -129,7 +140,105 @@ def test_object_container_builds_workflow_with_selected_components_and_params(tm
 
         assert workflow.orchestrator.labor.base_url == "https://labor.example.com"
         assert workflow.orchestrator.labor.timeout == 10
+        assert workflow.orchestrator.labor.mode == "sync"
+        assert workflow.orchestrator.labor.enabled is True
         assert workflow.kwargs == {}
+    finally:
+        purge_module_namespace(module_name)
+
+
+def test_object_container_builds_workflow_from_annotation_declared_metadata(tmp_path: Path):
+    module_name = "container_annotation_module"
+    module_dir = _write_v2_module(
+        tmp_path,
+        module_name,
+        {
+            "interfaces/labor.py": """
+                from crawler4j_contracts import interface
+
+                @interface(name="labor")
+                class Labor:
+                    pass
+            """,
+            "interfaces/orchestrator.py": """
+                from crawler4j_contracts import interface
+
+                @interface(name="orchestrator")
+                class Orchestrator:
+                    pass
+            """,
+            "objects/api_labor.py": """
+                from typing import Annotated
+
+                from crawler4j_contracts import component, object_param
+
+                @component(name="api_labor", implements="labor")
+                class ApiLabor:
+                    base_url: Annotated[str, object_param(label="Base URL")]
+
+                    def __init__(
+                        self,
+                        base_url,
+                        timeout: Annotated[int, object_param(min=1, max=120)] = 30,
+                    ):
+                        self.base_url = base_url
+                        self.timeout = timeout
+            """,
+            "objects/quiz_orchestrator.py": """
+                from typing import Annotated
+
+                from crawler4j_contracts import component, object_inject
+
+                from ..interfaces.labor import Labor
+
+                @component(name="quiz_orchestrator", implements="orchestrator")
+                class QuizOrchestrator:
+                    labor: Annotated[Labor, object_inject(type="interface", target="labor")]
+
+                    def __init__(self, labor):
+                        self.labor = labor
+            """,
+            "workflows/quiz.py": """
+                from typing import Annotated
+
+                from crawler4j_contracts import object_inject, workflow
+
+                from ..interfaces.orchestrator import Orchestrator
+
+                @workflow(name="quiz_workflow")
+                class QuizWorkflow:
+                    def __init__(
+                        self,
+                        orchestrator: Annotated[
+                            Orchestrator,
+                            object_inject(type="interface", target="orchestrator"),
+                        ],
+                    ):
+                        self.orchestrator = orchestrator
+            """,
+        },
+    )
+
+    try:
+        descriptor = load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
+        container = ObjectContainerV2(
+            descriptor,
+            "quiz_workflow",
+            object_bindings={
+                "orchestrator": "quiz_orchestrator",
+                "orchestrator.labor": "api_labor",
+            },
+            object_params={
+                "api_labor": {
+                    "base_url": "https://labor.example.com",
+                },
+            },
+        )
+
+        workflow = container.build_workflow()
+
+        assert workflow.orchestrator.labor.base_url == "https://labor.example.com"
+        assert workflow.orchestrator.labor.timeout == 30
     finally:
         purge_module_namespace(module_name)
 
@@ -250,6 +359,87 @@ def test_object_container_reports_missing_required_component_parameter(tmp_path:
         )
 
         with pytest.raises(RuntimeError, match="api_labor.*base_url"):
+            container.build_workflow()
+    finally:
+        purge_module_namespace(module_name)
+
+
+def test_object_container_rejects_unknown_object_param_component(tmp_path: Path):
+    module_name = "container_unknown_param_component_module"
+    module_dir = _write_quiz_module(tmp_path, module_name)
+
+    try:
+        descriptor = load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
+
+        with pytest.raises(RuntimeError, match="object_params 引用了未声明 component: ghost"):
+            ObjectContainerV2(
+                descriptor,
+                "quiz_workflow",
+                object_params={"ghost": {"base_url": "https://labor.example.com"}},
+            )
+    finally:
+        purge_module_namespace(module_name)
+
+
+def test_object_container_rejects_unknown_component_parameter(tmp_path: Path):
+    module_name = "container_unknown_param_module"
+    module_dir = _write_quiz_module(tmp_path, module_name)
+
+    try:
+        descriptor = load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
+        container = ObjectContainerV2(
+            descriptor,
+            "quiz_workflow",
+            object_bindings={
+                "orchestrator": "quiz_orchestrator",
+                "orchestrator.labor": "api_labor",
+            },
+            object_params={
+                "api_labor": {
+                    "base_url": "https://labor.example.com",
+                    "unknown": True,
+                }
+            },
+        )
+
+        with pytest.raises(RuntimeError, match="api_labor.*未声明对象参数: unknown"):
+            container.build_workflow()
+    finally:
+        purge_module_namespace(module_name)
+
+
+@pytest.mark.parametrize(
+    ("params", "message"),
+    [
+        ({"base_url": 123}, "base_url 必须是字符串"),
+        ({"base_url": "https://labor.example.com", "timeout": "fast"}, "timeout 必须是整数"),
+        ({"base_url": "https://labor.example.com", "timeout": 0}, "timeout 不能小于 1"),
+        ({"base_url": "https://labor.example.com", "timeout": 121}, "timeout 不能大于 120"),
+        ({"base_url": "https://labor.example.com", "mode": "batch"}, "mode 不在允许范围"),
+        ({"base_url": "https://labor.example.com", "enabled": "yes"}, "enabled 必须是布尔值"),
+    ],
+)
+def test_object_container_validates_component_parameter_values(
+    tmp_path: Path,
+    params: dict[str, object],
+    message: str,
+):
+    module_name = "container_invalid_param_values_module"
+    module_dir = _write_quiz_module(tmp_path, module_name)
+
+    try:
+        descriptor = load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
+        container = ObjectContainerV2(
+            descriptor,
+            "quiz_workflow",
+            object_bindings={
+                "orchestrator": "quiz_orchestrator",
+                "orchestrator.labor": "api_labor",
+            },
+            object_params={"api_labor": params},
+        )
+
+        with pytest.raises(RuntimeError, match=message):
             container.build_workflow()
     finally:
         purge_module_namespace(module_name)

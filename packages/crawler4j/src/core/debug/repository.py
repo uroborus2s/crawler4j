@@ -30,6 +30,8 @@ class DebugSessionRepository:
                     execution_params_json TEXT NOT NULL DEFAULT '{}',
                     job_params_json TEXT NOT NULL DEFAULT '{}',
                     params_json TEXT NOT NULL,
+                    object_bindings_json TEXT NOT NULL DEFAULT '{}',
+                    object_params_json TEXT NOT NULL DEFAULT '{}',
                     hooks_module TEXT NOT NULL,
                     provider TEXT NOT NULL,
                     selector_name TEXT NOT NULL DEFAULT '',
@@ -66,6 +68,12 @@ class DebugSessionRepository:
                 "job_params_json": (
                     "ALTER TABLE debug_sessions ADD COLUMN job_params_json TEXT NOT NULL DEFAULT '{}'"
                 ),
+                "object_bindings_json": (
+                    "ALTER TABLE debug_sessions ADD COLUMN object_bindings_json TEXT NOT NULL DEFAULT '{}'"
+                ),
+                "object_params_json": (
+                    "ALTER TABLE debug_sessions ADD COLUMN object_params_json TEXT NOT NULL DEFAULT '{}'"
+                ),
                 "creation_lifecycle": (
                     "ALTER TABLE debug_sessions ADD COLUMN creation_lifecycle TEXT NOT NULL DEFAULT 'ephemeral'"
                 ),
@@ -82,11 +90,12 @@ class DebugSessionRepository:
                 conn.execute(
                     """
                     INSERT INTO debug_sessions (
-                        id, job_id, job_name, module_name, source_path, workflow, execution_params_json, job_params_json, params_json, hooks_module,
+                        id, job_id, job_name, module_name, source_path, workflow, execution_params_json, job_params_json,
+                        params_json, object_bindings_json, object_params_json, hooks_module,
                         provider, selector_name, acquisition_mode, creation_params_json, creation_lifecycle, wait_timeout, timeout,
                         attach_host, attach_port, wait_for_attach, stop_on_entry, keep_environment,
                         state, worker_pid, env_id, created_at, started_at, finished_at, last_error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         job_id = excluded.job_id,
                         job_name = excluded.job_name,
@@ -96,6 +105,8 @@ class DebugSessionRepository:
                         execution_params_json = excluded.execution_params_json,
                         job_params_json = excluded.job_params_json,
                         params_json = excluded.params_json,
+                        object_bindings_json = excluded.object_bindings_json,
+                        object_params_json = excluded.object_params_json,
                         hooks_module = excluded.hooks_module,
                         provider = excluded.provider,
                         selector_name = excluded.selector_name,
@@ -126,6 +137,8 @@ class DebugSessionRepository:
                         json.dumps(session.execution_params, ensure_ascii=False),
                         json.dumps(session.job_params, ensure_ascii=False),
                         json.dumps(session.params, ensure_ascii=False),
+                        json.dumps(session.object_bindings, ensure_ascii=False),
+                        json.dumps(session.object_params, ensure_ascii=False),
                         session.hooks_module,
                         session.provider,
                         session.selector_name,
@@ -185,6 +198,8 @@ class DebugSessionRepository:
             execution_params=json.loads(row["execution_params_json"]) if row["execution_params_json"] else {},
             job_params=json.loads(row["job_params_json"]) if row["job_params_json"] else {},
             params=json.loads(row["params_json"]) if row["params_json"] else {},
+            object_bindings=json.loads(row["object_bindings_json"]) if "object_bindings_json" in row.keys() and row["object_bindings_json"] else {},
+            object_params=json.loads(row["object_params_json"]) if "object_params_json" in row.keys() and row["object_params_json"] else {},
             hooks_module=row["hooks_module"],
             provider=row["provider"],
             selector_name=row["selector_name"] or "",

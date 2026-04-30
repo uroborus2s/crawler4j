@@ -82,6 +82,8 @@ class DebugService:
             execution_params=dict(target.execution_params),
             job_params=dict(target.job_params),
             params=dict(request.params) if request.params else dict(target.runtime_params),
+            object_bindings=dict(target.object_bindings),
+            object_params=dict(target.object_params),
             hooks_module=target.hooks_module,
             provider=target.run_profile.resource.acquisition.provider,
             selector_name=target.run_profile.resource.acquisition.selector_name,

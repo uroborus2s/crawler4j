@@ -46,6 +46,11 @@ class ModuleUIRuntimeBridge:
         module = self._resolve_module_info()
         return bool(module and module.source == ModuleSource.DEV_LINK)
 
+    def _is_v2_module(self) -> bool:
+        module = self._resolve_module_info()
+        runtime_api = str(getattr(getattr(module, "manifest", None), "runtime_api", "") or "").strip()
+        return runtime_api == "core-native-v2"
+
     def build_task_context(
         self,
         *,
@@ -90,11 +95,18 @@ class ModuleUIRuntimeBridge:
             capability_surface=capability_surface,
             declared_page_schemas=declared_page_schemas,
         )
-        descriptor = self._mms.get_runtime_descriptor(
-            self._module_name,
-            context,
-            force_reload=force_reload,
-        )
+        if self._is_v2_module():
+            descriptor = self._mms.get_hosted_page_descriptor(
+                self._module_name,
+                context,
+                force_reload=force_reload,
+            )
+        else:
+            descriptor = self._mms.get_runtime_descriptor(
+                self._module_name,
+                context,
+                force_reload=force_reload,
+            )
         return _HookSession(context=context, descriptor=descriptor)
 
     def _set_context_tools(
@@ -176,14 +188,17 @@ class ModuleUIRuntimeBridge:
                 declared_page_schemas=self._declared_page_schemas or None,
             )
         try:
-            hook = session.descriptor.hooks.get(handler_name)
-            with self._override_runtime(session.context, runtime_extra):
-                return self._run_sync_callable(
-                    hook,
-                    owner=f"{self._module_name}.hooks.{handler_name}",
-                    context=session.context,
-                    args=args,
-                )
+            if self._is_v2_module():
+                descriptor = self._mms.get_runtime_descriptor_v2(self._module_name, session.context)
+                page_action = descriptor.page_actions.get(handler_name)
+                with self._override_runtime(session.context, runtime_extra):
+                    return self._run_sync_callable(
+                        page_action.target if page_action else None,
+                        owner=f"{self._module_name}.page_action.{handler_name}",
+                        context=session.context,
+                        args=args,
+                    )
+            raise RuntimeError("Legacy hosted UI hook handlers are removed in crawler4j 0.4.0")
         finally:
             if self._active_session is session:
                 self._active_session = None

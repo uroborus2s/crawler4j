@@ -36,22 +36,25 @@ def _write_module(root: Path, name: str = "demo_module") -> Path:
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "module.yaml").write_text(
         "name: {name}\n"
-        "runtime_api: core-native-v1\n"
+        "runtime_api: core-native-v2\n"
         "version: 1.0.0\n"
         "upgrade_source:\n"
         "  type: github_release\n"
-        "  repo: example/{name}\n"
-        "workflows:\n"
-        "  - name: default\n"
-        "default_workflow: default\n"
-        "data:\n"
-        "  resources: []\n"
-        "  views: []\n"
-        "  queries: []\n"
-        "  seeds: []\n".format(name=name),
+        "  repo: example/{name}\n".format(name=name),
         encoding="utf-8",
     )
-    (module_dir / "__init__.py").write_text("VALUE = 'demo'\n", encoding="utf-8")
+    (module_dir / "__init__.py").write_text("", encoding="utf-8")
+    for package_name in ("interfaces", "objects", "workflows", "tasks", "data"):
+        package_dir = module_dir / package_name
+        package_dir.mkdir(exist_ok=True)
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    (module_dir / "workflows" / "default.py").write_text(
+        "from crawler4j_contracts import workflow\n\n"
+        "@workflow(name='default')\n"
+        "class DefaultWorkflow:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
     return module_dir
 
 
@@ -305,26 +308,15 @@ def test_registry_initializes_manifest_config_defaults_only_on_first_load(temp_d
     (module_dir / "module.yaml").write_text(
         """
 name: demo_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 version: 1.0.0
 upgrade_source:
   type: github_release
   repo: example/demo_module
-workflows:
-  - name: default
-default_workflow: default
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 config_defaults:
   module:
     base_url: https://example.com
     retry: 3
-  workflows:
-    default:
-      headless: false
 """.strip(),
         encoding="utf-8",
     )
@@ -339,32 +331,21 @@ config_defaults:
     registry.get_module("demo_module")
     assert store.export_module_settings("demo_module") == {
         "module": {"base_url": "https://example.com", "retry": 3},
-        "workflows": {"default": {"headless": False}},
+        "workflows": {},
     }
 
     (module_dir / "module.yaml").write_text(
         """
 name: demo_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 version: 1.0.1
 upgrade_source:
   type: github_release
   repo: example/demo_module
-workflows:
-  - name: default
-default_workflow: default
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 config_defaults:
   module:
     base_url: https://changed.example.com
     retry: 5
-  workflows:
-    default:
-      headless: true
 """.strip(),
         encoding="utf-8",
     )
@@ -372,7 +353,7 @@ config_defaults:
     registry.refresh()
     assert store.export_module_settings("demo_module") == {
         "module": {"base_url": "https://example.com", "retry": 3},
-        "workflows": {"default": {"headless": False}},
+        "workflows": {},
     }
 
 

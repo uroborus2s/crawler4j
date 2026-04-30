@@ -22,6 +22,22 @@ def _empty_data_contract() -> dict[str, list[dict[str, object]]]:
     return {"resources": [], "views": [], "queries": [], "seeds": []}
 
 
+def _write_v2_runtime_package(module_dir) -> None:
+    module_dir.mkdir(parents=True, exist_ok=True)
+    (module_dir / "__init__.py").write_text("", encoding="utf-8")
+    for package_name in ("interfaces", "objects", "workflows", "tasks", "data"):
+        package_dir = module_dir / package_name
+        package_dir.mkdir(exist_ok=True)
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    (module_dir / "workflows" / "default.py").write_text(
+        "from crawler4j_contracts import workflow\n\n"
+        "@workflow(name='default')\n"
+        "class DefaultWorkflow:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+
+
 class TestModuleManifest:
     """测试 ModuleManifest。"""
     
@@ -351,21 +367,12 @@ class TestModuleScanner:
         
         manifest_content = """
 name: test_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 version: 2.0.0
 display_name: 测试模块
 upgrade_source:
   type: github_release
   repo: example/test_module
-workflows:
-  - name: main_flow
-    display_name: 主流程
-default_workflow: main_flow
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 """
         (module_dir / "module.yaml").write_text(manifest_content)
         
@@ -375,7 +382,24 @@ data:
         
         assert manifest.name == "test_module"
         assert manifest.version == "2.0.0"
-        assert len(manifest.workflows) == 1
+        assert manifest.runtime_api == "core-native-v2"
+
+    def test_parse_manifest_rejects_duplicate_yaml_keys(self, tmp_path):
+        from src.core.mms.models import ModuleParseError
+
+        module_dir = tmp_path / "test_module"
+        module_dir.mkdir()
+        (module_dir / "module.yaml").write_text(
+            "name: test_module\n"
+            "runtime_api: core-native-v2\n"
+            "name: shadow_module\n",
+            encoding="utf-8",
+        )
+
+        scanner = ModuleScanner(scan_paths=[tmp_path])
+
+        with pytest.raises(ModuleParseError, match="重复键: name"):
+            scanner.parse_manifest(module_dir)
 
     def test_parse_manifest_rejects_removed_sdk_version_range(self, tmp_path):
         from src.core.mms.models import ModuleParseError
@@ -400,24 +424,13 @@ data:
         (module_dir / "module.yaml").write_text(
             """
 name: test_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 upgrade_source:
   type: github_release
   repo: example/test_module
-workflows:
-  - name: default
-default_workflow: default
 config_defaults:
   module:
     base_url: https://example.com
-  workflows:
-    default:
-      headless: false
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 """.strip(),
             encoding="utf-8",
         )
@@ -426,7 +439,7 @@ data:
         manifest = scanner.parse_manifest(module_dir)
 
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
-        assert manifest.config_defaults.workflows == {"default": {"headless": False}}
+        assert manifest.config_defaults.workflows == {}
 
     def test_parse_manifest_rejects_unsupported_ui_extension_fields(self, tmp_path):
         from src.core.mms.models import ModuleParseError
@@ -436,21 +449,13 @@ data:
         (module_dir / "module.yaml").write_text(
             """
 name: test_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 version: 1.0.0
 upgrade_source:
   type: github_release
   repo: example/test_module
 ui_extension:
   extra: unsupported
-workflows:
-  - name: default
-default_workflow: default
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 """.strip(),
             encoding="utf-8",
         )
@@ -468,9 +473,7 @@ data:
         
         manifest = ModuleManifest(
             name="",
-            runtime_api="core-native-v1",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
+            runtime_api="core-native-v2",
             upgrade_source=UpgradeSourceInfo(repo="example/test_module"),
             data=_empty_data_contract(),
         )
@@ -486,9 +489,7 @@ data:
 
         manifest = ModuleManifest(
             name="demo_module",
-            runtime_api="core-native-v1",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
+            runtime_api="core-native-v2",
             data=_empty_data_contract(),
         )
         scanner = ModuleScanner(scan_paths=[tmp_path])
@@ -503,9 +504,7 @@ data:
 
         manifest = ModuleManifest(
             name="demo_module",
-            runtime_api="core-native-v1",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
+            runtime_api="core-native-v2",
             upgrade_source=UpgradeSourceInfo(repo="https://github.com/example/demo_module"),
             data=_empty_data_contract(),
         )
@@ -521,10 +520,8 @@ data:
 
         manifest = ModuleManifest(
             name="demo_module",
-            runtime_api="core-native-v1",
+            runtime_api="core-native-v2",
             version="1.0",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
             upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
             data=_empty_data_contract(),
         )
@@ -538,23 +535,15 @@ data:
     def test_load_module_success(self, tmp_path):
         """测试成功加载模块。"""
         module_dir = tmp_path / "good_module"
-        module_dir.mkdir()
+        _write_v2_runtime_package(module_dir)
         
         manifest_content = """
 name: good_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 version: 1.0.0
 upgrade_source:
   type: github_release
   repo: example/good_module
-workflows:
-  - name: default
-default_workflow: default
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 """
         (module_dir / "module.yaml").write_text(manifest_content)
         
@@ -579,12 +568,11 @@ data:
         assert module_info.error != ""
 
     def test_validate_allows_additional_module_files(self, tmp_path):
-        (tmp_path / "config_schema.json").write_text("{}", encoding="utf-8")
+        _write_v2_runtime_package(tmp_path)
+        (tmp_path / "README.md").write_text("# demo_module\n", encoding="utf-8")
         manifest = ModuleManifest(
             name="demo_module",
-            runtime_api="core-native-v1",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
+            runtime_api="core-native-v2",
             upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
             data=_empty_data_contract(),
         )
@@ -613,13 +601,11 @@ data:
         manifest = ModuleManifest.from_dict(
             {
                 "name": "demo_module",
-                "runtime_api": "core-native-v1",
+                "runtime_api": "core-native-v2",
                 "upgrade_source": {
                     "type": "github_release",
                     "repo": "example/demo_module",
                 },
-                "workflows": [{"name": "default"}],
-                "default_workflow": "default",
                 "config_defaults": {
                     "workflows": {
                         "missing_workflow": {
@@ -627,7 +613,6 @@ data:
                         }
                     }
                 },
-                "data": _empty_data_contract(),
             }
         )
         scanner = ModuleScanner(scan_paths=[tmp_path])
@@ -635,7 +620,7 @@ data:
         with pytest.raises(ModuleValidationError) as exc_info:
             scanner.validate(manifest, tmp_path)
 
-        assert "missing_workflow" in str(exc_info.value)
+        assert "config_defaults.workflows" in str(exc_info.value)
 
     def test_validate_rejects_duplicate_resource_pool_names(self, tmp_path):
         from src.core.mms.models import ModuleValidationError
@@ -643,18 +628,15 @@ data:
         manifest = ModuleManifest.from_dict(
             {
                 "name": "demo_module",
-                "runtime_api": "core-native-v1",
+                "runtime_api": "core-native-v2",
                 "upgrade_source": {
                     "type": "github_release",
                     "repo": "example/demo_module",
                 },
-                "workflows": [{"name": "default"}],
-                "default_workflow": "default",
                 "resource_pools": [
                     {"name": "bound_account_ready"},
                     {"name": "bound_account_ready"},
                 ],
-                "data": _empty_data_contract(),
             }
         )
         scanner = ModuleScanner(scan_paths=[tmp_path])

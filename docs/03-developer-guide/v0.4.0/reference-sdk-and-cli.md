@@ -31,6 +31,19 @@
 ## `module init`
 
 ```bash
+uvx --from crawler4j-sdk crawler4j module init
+```
+
+无参模式会交互式询问模块包名和升级源仓库，其余选项使用默认值：
+
+```text
+模块包名（snake_case）: demo_module
+升级源 GitHub 仓库（owner/repo）: example/demo_module
+```
+
+需要脚本化或显式控制时仍可完整传参：
+
+```bash
 uvx --from crawler4j-sdk crawler4j module init demo_module \
   --repo example/demo_module \
   --runtime-api core-native-v2
@@ -62,14 +75,14 @@ uvx --from crawler4j-sdk crawler4j module init demo_module \
 0.4.0 会校验：
 
 - `runtime_api == core-native-v2`
-- 装饰器元数据字段合法
+- 装饰器参数、类属性注解和 `__init__` 参数注解元数据字段合法
 - 名称为小写 snake_case
 - interface / component / workflow / data query 名称唯一
 - interface 至少有实现
 - workflow inject 目标存在
 - component inject 目标存在
 - object graph 无环
-- component parameters 类型合法
+- component parameters 类型合法；`object_param(...)` 可从 `str/int/float/bool` 注解推断类型
 - workflow 没有 parameters
 - page action 是函数或 async 函数
 - data table 字段、索引、query output 不使用宿主保留字段

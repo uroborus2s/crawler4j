@@ -17,20 +17,23 @@ def _write_module(module_dir: Path, name: str, version: str) -> None:
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "module.yaml").write_text(
         "name: {name}\n"
-        "runtime_api: core-native-v1\n"
+        "runtime_api: core-native-v2\n"
         "version: {version}\n"
-        "default_workflow: default\n"
-        "workflows:\n"
-        "  - name: default\n"
-        "    display_name: Default\n"
         "upgrade_source:\n"
         "  type: github_release\n"
-        "  repo: example/{name}\n"
-        "data:\n"
-        "  resources: []\n"
-        "  views: []\n"
-        "  queries: []\n"
-        "  seeds: []\n".format(name=name, version=version),
+        "  repo: example/{name}\n".format(name=name, version=version),
+        encoding="utf-8",
+    )
+    (module_dir / "__init__.py").write_text("", encoding="utf-8")
+    for package_name in ("interfaces", "objects", "workflows", "tasks", "data"):
+        package_dir = module_dir / package_name
+        package_dir.mkdir(exist_ok=True)
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    (module_dir / "workflows" / "default.py").write_text(
+        "from crawler4j_contracts import workflow\n\n"
+        "@workflow(name='default')\n"
+        "class DefaultWorkflow:\n"
+        "    pass\n",
         encoding="utf-8",
     )
 

@@ -144,11 +144,11 @@ def scaffold_module(base_dir: Path, *, module_name: str = MODULE_NAME, repo: str
 
 def enrich_module(module_root: Path) -> Path:
     commands = (
-        ("task", "create", "extra_task"),
+        ("page-action", "create", "extra_task"),
         ("workflow", "create", "repair_orders"),
         ("page", "create", "dashboard"),
         ("page", "create", "accounts"),
-        ("env-selector", "create", "pick_ready"),
+        ("manifest", "lock"),
     )
     for argv in commands:
         result = run_cli(*argv, cwd=module_root)

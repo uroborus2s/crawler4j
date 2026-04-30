@@ -19,11 +19,47 @@ from crawler4j_contracts.context import (
     ToolsCapability,
 )
 from crawler4j_contracts.database import DatabaseClient, DatabaseExecutor
+from crawler4j_contracts.decorators import (
+    CRAWLER4J_META_ATTR,
+    HOST_RESERVED_DATA_FIELDS,
+    Crawler4jMeta,
+    DataTableIndexSpec,
+    InjectSpec,
+    ObjectInjectAnnotation,
+    ObjectParamAnnotation,
+    ParameterOptionSpec,
+    ParameterSpec,
+    component,
+    data_query,
+    data_table,
+    interface,
+    object_inject,
+    object_param,
+    page_action,
+    workflow,
+)
 from crawler4j_contracts.result import TaskResult
 from crawler4j_contracts.signal import EnvAction, TaskSignal, TaskSignalAction
-from crawler4j_contracts.specs import EnvSelectorSpec, PageSpec, TaskSpec, WorkflowSpec
+from crawler4j_contracts.specs import PageSpec
 
 __all__ = [
+    "CRAWLER4J_META_ATTR",
+    "HOST_RESERVED_DATA_FIELDS",
+    "Crawler4jMeta",
+    "DataTableIndexSpec",
+    "InjectSpec",
+    "ObjectInjectAnnotation",
+    "ObjectParamAnnotation",
+    "ParameterOptionSpec",
+    "ParameterSpec",
+    "component",
+    "data_query",
+    "data_table",
+    "interface",
+    "object_inject",
+    "object_param",
+    "page_action",
+    "workflow",
     "TaskContext",
     "TaskResult",
     "TaskSignal",
@@ -43,8 +79,5 @@ __all__ = [
     "ClickCaptchaOrderedTarget",
     "ClickCaptchaMatchResult",
     "EnvCandidate",
-    "TaskSpec",
-    "WorkflowSpec",
-    "EnvSelectorSpec",
     "PageSpec",
 ]

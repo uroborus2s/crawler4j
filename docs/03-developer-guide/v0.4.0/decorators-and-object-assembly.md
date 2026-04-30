@@ -17,6 +17,8 @@
 
 装饰器只挂元数据。实例创建由 Core 完成。
 
+`@component` / `@workflow` 的对象依赖和 component 对象参数可以继续写在装饰器参数里，也可以写成类属性注解或 `__init__` 参数注解。三种写法最终都会归一成同一份 `InjectSpec` / `ParameterSpec` 元数据，SDK scanner、manifest lock 和 Core 对象容器使用同一条链路。
+
 ## Interface
 
 ```python
@@ -53,6 +55,29 @@ class ApiLabor:
 
 `parameters` 只用于创建这个 component。它不是 workflow 参数。
 
+等价的注解写法：
+
+```python
+from typing import Annotated
+
+from crawler4j_contracts import component, object_param
+
+
+@component(name="api_labor", label="API 劳保对象", implements="labor")
+class ApiLabor:
+    base_url: Annotated[str, object_param(label="Base URL")]
+
+    def __init__(
+        self,
+        base_url: str,
+        timeout: Annotated[int, object_param(min=1, max=120)] = 30,
+    ):
+        self.base_url = base_url
+        self.timeout = timeout
+```
+
+未提供默认值的 `object_param()` 默认视为必填；带 Python 默认值或 `object_param(default=...)` 的参数默认视为可选。`str/int/float/bool` 会分别推断为 `string/integer/number/boolean`，也可以用 `object_param(type="enum", options=[...])` 显式声明。
+
 ## Component 注入其他对象
 
 ```python
@@ -72,6 +97,24 @@ class QuizOrchestrator:
 ```
 
 `type=interface` 表示由运行模板选择实现。`type=object` 表示固定注入某个 component。
+
+注入也可以写成类属性注解：
+
+```python
+from typing import Annotated
+
+from crawler4j_contracts import component, object_inject
+
+
+@component(name="quiz_orchestrator", label="做题编排器", implements="orchestrator")
+class QuizOrchestrator:
+    labor: Annotated[object, object_inject(type="interface", target="labor")]
+    client: Annotated[object, object_inject(type="object", target="ctrip_client")]
+
+    def __init__(self, labor, client):
+        self.labor = labor
+        self.client = client
+```
 
 ## Workflow
 
@@ -95,6 +138,29 @@ class QuizWorkflow:
 ```
 
 workflow 不允许声明 `parameters`。需要普通参数时，把参数放在具体 component 上。
+
+workflow 注入也可以写到 `__init__` 参数注解：
+
+```python
+from typing import Annotated
+
+from crawler4j_contracts import object_inject, workflow
+
+
+@workflow(name="quiz_workflow", label="统一做题")
+class QuizWorkflow:
+    def __init__(
+        self,
+        orchestrator: Annotated[
+            object,
+            object_inject(type="interface", target="orchestrator"),
+        ],
+    ):
+        self.orchestrator = orchestrator
+
+    async def run(self, ctx):
+        return await self.orchestrator.run(ctx)
+```
 
 ## Page Action
 
@@ -175,6 +241,7 @@ workflow 构造函数只能接收：
 - inject 目标不存在
 - interface 没有可选实现
 - 对象图有环
+- 注解 helper 使用了非字面量元数据或非法名称
 - 用户输入任意 import path
 - page action 不是函数
 - 装饰器名称重复

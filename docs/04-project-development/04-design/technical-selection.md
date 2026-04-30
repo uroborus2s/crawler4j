@@ -11,13 +11,13 @@
 
 **当前阶段：** DESIGN
 **技术画像：** Crawler4j Model 项目画像
-**技术栈：** python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v1 module project
+**技术栈：** python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v2 module project
 **预设：** crawler4j-model
 **备注：** 移除固定版本并清理旧预设命令
 
 ## 技术画像摘要
 
-适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml`、`crawler4j-contracts` 运行时契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。
+适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml(runtime_api=core-native-v2)`、`crawler4j-contracts` 运行时契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。
 
 ## 必须落地的项目范围
 
@@ -31,12 +31,12 @@
 - crawler4j-sdk CLI
 - crawler4j-contracts runtime contracts
 - module.yaml
-- core-native-v1 TaskSpec / WorkflowSpec / PageSpec
+- core-native-v2 decorators / object_param / object_inject / PageSpec
 - DevLink / ATM 调试链路
 
 ## 编码与工程规则
 
-- 创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`，不要先手写脚手架。
+- 创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j interface create`、`crawler4j component create`、`crawler4j workflow create`、`crawler4j page-action create`、`crawler4j page create`，不要先手写脚手架。
 - 模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。
 - 新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。
 - 调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。
@@ -62,9 +62,10 @@
 
 ## 初始化与安装动作
 
-- 优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo <owner/repo>` 创建模块项目，默认使用 PyPI 最新发布版本；脚本化场景可再加 `--defaults --no-git --no-install`。
+- 优先执行 `uvx --from crawler4j-sdk crawler4j module init` 创建模块项目，交互式输入模块名与升级源仓库；脚本化场景使用 `crawler4j module init <module_name> --repo <owner/repo> --runtime-api core-native-v2 --no-git --no-install`。
 - 进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`。
 - 在 crawler4j Core 源码仓验证本地 CLI 时，优先执行 `uv run python -m crawler4j_sdk.cli.commands --help`。
+- 对象依赖和 component 对象参数可以写在装饰器参数里，也可以通过 `Annotated[..., object_inject(...)]` / `Annotated[..., object_param(...)]` 写在类属性或 `__init__` 参数上；SDK scanner 与 Core descriptor 必须把两者归一到同一份元数据。
 
 ## 设计/开发/Gate 同步要求
 
@@ -94,3 +95,4 @@
 - 2026-03-28 00:42:01: `Crawler4j Model 项目画像` | 负责人：AI 软件工厂 | 备注：改为默认使用 PyPI 最新 crawler4j-sdk
 - 2026-03-28 00:47:22: `Crawler4j Model 项目画像` | 负责人：AI 软件工厂 | 备注：移除固定版本并清理旧预设命令
 - 2026-04-27: 刷新当前技术画像事实，移除 `TaskScript / TaskFlow` 作为当前必选模块的误导表述，并补记运行时代码只依赖 `crawler4j-contracts`
+- 2026-04-30: 刷新 0.4.0 v2 对象装配注解入口，登记 `object_param` / `object_inject` 类属性与 `__init__` 参数注解归一规则

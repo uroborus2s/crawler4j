@@ -206,6 +206,8 @@ class TaskDispatcher:
             execution_params=execution_params,
             job_params=job_params,
             runtime_params=runtime_params,
+            object_bindings=dict(run_profile.execution.object_bindings),
+            object_params=dict(run_profile.execution.object_params),
             devel_mode=is_dev_link,
             state={
                 "job_id": job.id,

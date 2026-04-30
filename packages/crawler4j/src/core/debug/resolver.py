@@ -21,6 +21,8 @@ class JobDebugTarget:
     execution_params: dict = field(default_factory=dict)
     job_params: dict = field(default_factory=dict)
     runtime_params: dict = field(default_factory=dict)
+    object_bindings: dict = field(default_factory=dict)
+    object_params: dict = field(default_factory=dict)
     timeout: int = 0
     wait_timeout: int = 60
 
@@ -53,6 +55,8 @@ def resolve_job_debug_target(
         execution_params=dict(run_profile.execution.params),
         job_params=dict(job.params),
         runtime_params={**run_profile.execution.params, **job.params},
+        object_bindings=dict(run_profile.execution.object_bindings),
+        object_params=dict(run_profile.execution.object_params),
         timeout=run_profile.execution.timeout,
         wait_timeout=run_profile.resource.acquisition.wait_timeout,
     )

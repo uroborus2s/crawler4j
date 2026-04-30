@@ -1,18 +1,18 @@
-import inspect
 from pathlib import Path
 from typing import Any
 
-from crawler4j_contracts import EnvSelectorSpec, TaskContext, TaskResult
+from crawler4j_contracts import TaskContext, TaskResult
 
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo, ModuleSource, ModuleStatus
+from src.core.mms.object_container_v2 import ObjectContainerV2
 from src.core.mms.registry import get_module_registry
 from src.core.mms.runtime_descriptor import (
     ModuleRuntimeDescriptor,
-    TaskRuntimeEntry,
-    WorkflowRuntimeEntry,
+    ModuleRuntimeDescriptorV2,
     invoke_runtime_callable,
-    load_runtime_descriptor,
+    load_hosted_page_descriptor,
+    load_runtime_descriptor_v2,
     normalize_result_payload,
 )
 
@@ -25,7 +25,8 @@ class ModuleService:
 
     def __init__(self):
         self.registry = get_module_registry()
-        self._descriptor_cache: dict[str, ModuleRuntimeDescriptor] = {}
+        self._page_descriptor_cache: dict[str, ModuleRuntimeDescriptor] = {}
+        self._descriptor_cache_v2: dict[str, ModuleRuntimeDescriptorV2] = {}
 
     def _should_force_reload(self, module_name: str, context: TaskContext | None = None) -> bool:
         if not context or not context.runtime.get("devel_mode", False):
@@ -56,18 +57,7 @@ class ModuleService:
             raise ValueError(f"Module '{module_name}' has no valid path")
         return module_info
 
-    @staticmethod
-    def _inject_manifest_runtime(module_info: ModuleInfo, context: TaskContext | None) -> None:
-        if context is None:
-            return
-        if not isinstance(context.runtime, dict):
-            context.runtime = {}
-        context.runtime["declared_resource_pools"] = [
-            pool.to_dict()
-            for pool in getattr(module_info.manifest, "resource_pools", [])
-        ]
-
-    def _load_descriptor(
+    def _load_hosted_page_descriptor(
         self,
         module_name: str,
         context: TaskContext | None = None,
@@ -75,19 +65,38 @@ class ModuleService:
         force_reload: bool = False,
     ) -> ModuleRuntimeDescriptor:
         module_info = self._get_module_info(module_name)
-        self._inject_manifest_runtime(module_info, context)
         force_reload = force_reload or self._should_force_reload(module_info.name, context)
 
-        if force_reload or module_info.name not in self._descriptor_cache:
-            descriptor = load_runtime_descriptor(
+        if force_reload or module_info.name not in self._page_descriptor_cache:
+            descriptor = load_hosted_page_descriptor(
+                module_info.name,
+                Path(module_info.path),
+                force_reload=force_reload or module_info.source != ModuleSource.BUILTIN,
+            )
+            self._page_descriptor_cache[module_info.name] = descriptor
+
+        return self._page_descriptor_cache[module_info.name]
+
+    def _load_descriptor_v2(
+        self,
+        module_name: str,
+        context: TaskContext | None = None,
+        *,
+        force_reload: bool = False,
+    ) -> ModuleRuntimeDescriptorV2:
+        module_info = self._get_module_info(module_name)
+        force_reload = force_reload or self._should_force_reload(module_info.name, context)
+
+        if force_reload or module_info.name not in self._descriptor_cache_v2:
+            descriptor = load_runtime_descriptor_v2(
                 module_info.name,
                 Path(module_info.path),
                 module_info.manifest,
                 force_reload=force_reload or module_info.source != ModuleSource.BUILTIN,
             )
-            self._descriptor_cache[module_info.name] = descriptor
+            self._descriptor_cache_v2[module_info.name] = descriptor
 
-        return self._descriptor_cache[module_info.name]
+        return self._descriptor_cache_v2[module_info.name]
 
     def get_runtime_descriptor(
         self,
@@ -96,83 +105,93 @@ class ModuleService:
         *,
         force_reload: bool = False,
     ) -> ModuleRuntimeDescriptor:
-        return self._load_descriptor(module_name, context, force_reload=force_reload)
+        return self._load_hosted_page_descriptor(module_name, context, force_reload=force_reload)
+
+    def get_runtime_descriptor_v2(
+        self,
+        module_name: str,
+        context: TaskContext | None = None,
+        *,
+        force_reload: bool = False,
+    ) -> ModuleRuntimeDescriptorV2:
+        return self._load_descriptor_v2(module_name, context, force_reload=force_reload)
+
+    def get_hosted_page_descriptor(
+        self,
+        module_name: str,
+        context: TaskContext | None = None,
+        *,
+        force_reload: bool = False,
+    ) -> ModuleRuntimeDescriptor:
+        return self._load_hosted_page_descriptor(module_name, context, force_reload=force_reload)
 
     @staticmethod
-    def _resolve_workflow_name(context: TaskContext, default_workflow: str) -> str:
+    def _resolve_v2_workflow_name(context: TaskContext, descriptor: ModuleRuntimeDescriptorV2) -> str:
         runtime = getattr(context, "runtime", None)
         if isinstance(runtime, dict):
             workflow_name = runtime.get("workflow")
             if isinstance(workflow_name, str) and workflow_name.strip():
-                return workflow_name
-        return default_workflow
+                return workflow_name.strip()
+        if len(descriptor.workflows) == 1:
+            return next(iter(descriptor.workflows))
+        if "main_workflow" in descriptor.workflows:
+            return "main_workflow"
+        raise ValueError("Workflow not specified for core-native-v2 module")
 
-    async def _run_task_entry(self, task: TaskRuntimeEntry, context: TaskContext) -> TaskResult:
-        result = await invoke_runtime_callable(task.execute, context)
+    @staticmethod
+    def _runtime_mapping(context: TaskContext, key: str) -> dict[str, Any]:
+        runtime = getattr(context, "runtime", None)
+        value = runtime.get(key) if isinstance(runtime, dict) else None
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError(f"context.runtime[{key}] must be a mapping")
+        return dict(value)
+
+    async def _run_v2_workflow(self, descriptor: ModuleRuntimeDescriptorV2, context: TaskContext) -> TaskResult:
+        workflow_name = self._resolve_v2_workflow_name(context, descriptor)
+        container = ObjectContainerV2(
+            descriptor,
+            workflow_name,
+            object_bindings=self._runtime_mapping(context, "object_bindings"),
+            object_params=self._runtime_mapping(context, "object_params"),
+        )
+        workflow = container.build_workflow()
+        run = getattr(workflow, "run", None)
+        if run is None:
+            raise ValueError(f"Workflow has no run method: {workflow_name}")
+        result = await invoke_runtime_callable(run, context)
         return normalize_result_payload(result, context)
-
-    async def _run_workflow_entry(
-        self,
-        descriptor: ModuleRuntimeDescriptor,
-        workflow: WorkflowRuntimeEntry,
-        context: TaskContext,
-    ) -> TaskResult:
-        context._subtask_executor = lambda task_name, ctx: self._run_subtask(descriptor, task_name, ctx)
-        result = await invoke_runtime_callable(workflow.run, context)
-        return normalize_result_payload(result, context)
-
-    async def _run_subtask(
-        self,
-        descriptor: ModuleRuntimeDescriptor,
-        task_name: str,
-        context: TaskContext,
-    ) -> TaskResult:
-        task = descriptor.tasks.get(task_name)
-        if not task:
-            raise ValueError(f"Unknown subtask: {task_name}")
-        return await self._run_task_entry(task, context)
 
     async def run_module(self, module_name: str, context: TaskContext) -> Any:
         """运行模块默认工作流或任务。"""
         try:
-            descriptor = self._load_descriptor(module_name, context)
-            workflow_name = self._resolve_workflow_name(context, descriptor.default_workflow)
-            logger.info(f"[MMS] Executing module: {module_name} workflow={workflow_name}")
+            module_info = self._get_module_info(module_name)
+            if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
+                descriptor_v2 = self._load_descriptor_v2(module_name, context)
+                logger.info(f"[MMS] Executing v2 module: {module_name}")
+                return await self._run_v2_workflow(descriptor_v2, context)
 
-            workflow = descriptor.workflows.get(workflow_name)
-            if workflow:
-                return await self._run_workflow_entry(descriptor, workflow, context)
-
-            raise ValueError(f"Workflow not found: {workflow_name or '<empty>'}")
+            raise ValueError("Only core-native-v2 modules are executable in crawler4j 0.4.0")
         except Exception as e:
             logger.error(f"[MMS] Failed to execute module {module_name}: {e}")
             raise e
 
     async def call_hook(self, module_name: str, hook_name: str, context: TaskContext, *args) -> Any:
         """调用模块中的可选 hook；未实现时返回 None。"""
-        descriptor = self._load_descriptor(module_name, context)
-        hook = descriptor.hooks.get(hook_name)
-        if not hook:
-            logger.debug(f"[MMS] Hook not implemented: {module_name}.{hook_name}")
+        module_info = self._get_module_info(module_name)
+        if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
+            logger.debug(f"[MMS] core-native-v2 does not use legacy hook: {module_name}.{hook_name}")
             return None
-
-        logger.info(f"[MMS] Executing hook: {module_name}.{hook_name}")
-        return await invoke_runtime_callable(hook, context, *args)
+        raise ValueError("Legacy module hooks are removed in crawler4j 0.4.0")
 
     def call_local_hook(self, module_name: str, hook_name: str, context: TaskContext, *args) -> Any:
         """在同步调用方中执行本地模块 hook。"""
-        descriptor = self._load_descriptor(module_name, context)
-        hook = descriptor.hooks.get(hook_name)
-        if not hook:
-            logger.debug(f"[MMS] Hook not implemented: {module_name}.{hook_name}")
+        module_info = self._get_module_info(module_name)
+        if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
+            logger.debug(f"[MMS] core-native-v2 does not use legacy local hook: {module_name}.{hook_name}")
             return None
-
-        logger.info(f"[MMS] Executing local hook: {module_name}.{hook_name}")
-        if inspect.iscoroutinefunction(hook):
-            raise RuntimeError(
-                f"Module hook '{module_name}.{hook_name}' is async and cannot be executed from a sync caller"
-            )
-        return hook(context, *args)
+        raise ValueError("Legacy module hooks are removed in crawler4j 0.4.0")
 
     async def run_env_selector(
         self,
@@ -181,20 +200,17 @@ class ModuleService:
         context: TaskContext,
         candidates: list[Any],
     ) -> Any:
-        descriptor = self._load_descriptor(module_name, context)
-        selector = descriptor.env_selectors.get(selector_name)
-        if not selector:
-            raise ValueError(f"Env selector not found: {selector_name}")
-        logger.info(f"[MMS] Executing env selector: {module_name}.{selector_name}")
-        return await invoke_runtime_callable(selector.select, context, candidates)
+        module_info = self._get_module_info(module_name)
+        if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
+            raise ValueError("core-native-v2 不支持旧 env_selector 入口")
+        raise ValueError("Legacy env_selector entries are removed in crawler4j 0.4.0")
 
-    def list_env_selectors(self, module_name: str) -> list[EnvSelectorSpec]:
+    def list_env_selectors(self, module_name: str) -> list[Any]:
         """列出模块声明的环境选择器。"""
-        descriptor = self._load_descriptor(module_name)
-        return [
-            descriptor.env_selectors[name].spec
-            for name in sorted(descriptor.env_selectors)
-        ]
+        module_info = self._get_module_info(module_name)
+        if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
+            return []
+        raise ValueError("Legacy env_selector entries are removed in crawler4j 0.4.0")
 
 
 # Global Singleton

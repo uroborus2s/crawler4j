@@ -74,21 +74,24 @@ def _find_marker_line(source: str, marker: str) -> int:
 
 def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int]:
     module_dir = base_dir / "demo_module"
+    data_dir = module_dir / "data"
+    interfaces_dir = module_dir / "interfaces"
+    objects_dir = module_dir / "objects"
+    pages_dir = module_dir / "pages"
     tasks_dir = module_dir / "tasks"
     workflows_dir = module_dir / "workflows"
-    hooks_dir = module_dir / "hooks"
-    for package_dir in (module_dir, tasks_dir, workflows_dir, hooks_dir):
+    for package_dir in (module_dir, data_dir, interfaces_dir, objects_dir, pages_dir, tasks_dir, workflows_dir):
         package_dir.mkdir(parents=True, exist_ok=True)
         (package_dir / "__init__.py").write_text("", encoding="utf-8")
 
-    task_source = dedent(
-        """
-        from crawler4j_contracts import TaskResult, TaskSpec
+    task_source = (
+        dedent(
+            """
+        from crawler4j_contracts import TaskContext, TaskResult, page_action
 
-        TASK = TaskSpec(name="login_task", display_name="登录任务")
 
-
-        async def execute(context):
+        @page_action(name="login_task", label="登录任务")
+        async def login_task(context: TaskContext):
             runtime_params = context.runtime.get("params", {})
             accounts = runtime_params.get("accounts", [])
             phone = accounts[0]["phone_number"] if accounts else ""
@@ -100,54 +103,41 @@ def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int
             selected_phone = phone  # BREAKPOINT
             return TaskResult.ok(phone=selected_phone)
         """
-    ).strip() + "\n"
-    workflow_source = dedent(
-        """
-        from crawler4j_contracts import WorkflowSpec
-
-        WORKFLOW = WorkflowSpec(name="login_workflow", tasks=("login_task",))
-
-
-        async def run(context):
-            return await context.run_subtask("login_task")  # MODULE_FRAME
-        """
-    ).strip() + "\n"
-    hook_source = dedent(
-        """
-        from crawler4j_contracts import TaskContext
+        ).strip()
+        + "\n"
+    )
+    workflow_source = (
+        dedent(
+            """
+        from crawler4j_contracts import TaskContext, workflow
+        from demo_module.tasks.login_task import login_task
 
 
-        async def handle(context: TaskContext):
-            runtime_params = context.runtime.get("params", {})
-            accounts = runtime_params.get("accounts", [])
-            if accounts:
-                context.state["selected_account_phone"] = accounts[0]["phone_number"]
+        @workflow(name="login_workflow")
+        class LoginWorkflow:
+            async def run(self, context: TaskContext):
+                return await login_task(context)  # MODULE_FRAME
         """
-    ).strip() + "\n"
-    manifest_source = dedent(
-        """
+        ).strip()
+        + "\n"
+    )
+    manifest_source = (
+        dedent(
+            """
         name: demo_module
-        runtime_api: core-native-v1
+        runtime_api: core-native-v2
         version: 1.0.0
         upgrade_source:
           type: github_release
           repo: example/demo_module
-        default_workflow: login_workflow
-        workflows:
-          - name: login_workflow
-            display_name: 登录流程
-        data:
-          resources: []
-          views: []
-          queries: []
-          seeds: []
         """
-    ).strip() + "\n"
+        ).strip()
+        + "\n"
+    )
 
     (module_dir / "module.yaml").write_text(manifest_source, encoding="utf-8")
     (tasks_dir / "login_task.py").write_text(task_source, encoding="utf-8")
     (workflows_dir / "login_workflow.py").write_text(workflow_source, encoding="utf-8")
-    (hooks_dir / "init_env.py").write_text(hook_source, encoding="utf-8")
 
     breakpoint_file = tasks_dir / "login_task.py"
     module_frame = workflows_dir / "login_workflow.py"
@@ -205,10 +195,7 @@ def _set_exception_breakpoints(client: _DapClient) -> None:
     client.send("setExceptionBreakpoints", {"filters": []})
     _wait_for_message(
         client,
-        lambda msg: (
-            msg.get("type") == "response"
-            and msg.get("command") == "setExceptionBreakpoints"
-        ),
+        lambda msg: (msg.get("type") == "response" and msg.get("command") == "setExceptionBreakpoints"),
     )
 
 
@@ -464,11 +451,7 @@ async def test_task_debug_session_hits_module_breakpoint(tmp_path, monkeypatch):
     assert Path(top_frame["source"]["path"]) == breakpoint_file
     assert top_frame["line"] == breakpoint_line
 
-    module_frames = [
-        frame
-        for frame in stack_frames
-        if Path(frame["source"]["path"]) == module_frame
-    ]
+    module_frames = [frame for frame in stack_frames if Path(frame["source"]["path"]) == module_frame]
     assert module_frames
     assert any(frame["line"] == module_line for frame in module_frames)
 

@@ -10,7 +10,6 @@ from src.core.mms.models import (
     ModuleSource,
     UIExtensionInfo,
     UIPageInfo,
-    WorkflowInfo,
 )
 from src.core.mms.module_loader import purge_module_namespace
 from src.core.mms.service import get_module_service
@@ -27,20 +26,17 @@ def make_page_info(page_id: str, *, label: str | None = None, icon: str = "📄"
 def make_manifest(
     module_name: str,
     *,
-    workflows: tuple[str, ...] = ("main_workflow",),
-    default_workflow: str | None = None,
+    workflows: tuple[str, ...] = ("main_workflow",),  # noqa: ARG001
+    default_workflow: str | None = None,  # noqa: ARG001
     pages: list[UIPageInfo] | None = None,
     display_name: str | None = None,
     description: str = "",
 ) -> ModuleManifest:
-    resolved_default = default_workflow or workflows[0]
     return ModuleManifest(
         name=module_name,
-        runtime_api="core-native-v1",
+        runtime_api="core-native-v2",
         display_name=display_name or module_name.replace("_", " ").title(),
         description=description,
-        workflows=[WorkflowInfo(name=name, display_name=name.replace("_", " ").title()) for name in workflows],
-        default_workflow=resolved_default,
         ui_extension=UIExtensionInfo(pages=list(pages or [])),
     )
 
@@ -49,10 +45,11 @@ def write_module_tree(base_dir: Path, module_name: str, *, files: dict[str, str]
     module_dir = base_dir / module_name
     for package_dir in (
         module_dir,
+        module_dir / "interfaces",
+        module_dir / "objects",
         module_dir / "tasks",
         module_dir / "workflows",
-        module_dir / "hooks",
-        module_dir / "env_selectors",
+        module_dir / "data",
         module_dir / "pages",
     ):
         package_dir.mkdir(parents=True, exist_ok=True)
@@ -82,7 +79,8 @@ def register_module(
         source=source,
     )
     service = get_module_service()
-    service._descriptor_cache.pop(module_name, None)
+    service._page_descriptor_cache.pop(module_name, None)
+    service._descriptor_cache_v2.pop(module_name, None)
     original_registry = service.registry
     service.registry = SimpleNamespace(
         get_module=lambda name: module_info
@@ -93,6 +91,7 @@ def register_module(
 
 
 def restore_module(service: object, original_registry: object, module_name: str) -> None:
-    service._descriptor_cache.pop(module_name, None)
+    service._page_descriptor_cache.pop(module_name, None)
+    service._descriptor_cache_v2.pop(module_name, None)
     service.registry = original_registry
     purge_module_namespace(module_name)

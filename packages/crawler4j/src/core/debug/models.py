@@ -52,6 +52,8 @@ class DebugSession:
     execution_params: dict[str, Any] = field(default_factory=dict)
     job_params: dict[str, Any] = field(default_factory=dict)
     params: dict[str, Any] = field(default_factory=dict)
+    object_bindings: dict[str, str] = field(default_factory=dict)
+    object_params: dict[str, dict[str, Any]] = field(default_factory=dict)
     hooks_module: str = ""
     provider: str = "playwright_local"
     selector_name: str = ""
@@ -96,6 +98,8 @@ class DebugSession:
             "execution_params": self.execution_params,
             "job_params": self.job_params,
             "params": self.params,
+            "object_bindings": self.object_bindings,
+            "object_params": self.object_params,
             "hooks_module": self.hooks_module,
             "provider": self.provider,
             "selector_name": self.selector_name,

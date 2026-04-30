@@ -46,3 +46,21 @@
   状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0400`, `API-012`
 - `TASK-0401-design-versioned-user-developer-guides` TASK-0401 形成 docs-stratego 使用者/开发者指南版本分流方案
   状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0401`, `API-013`
+- `TASK-0402-contracts-v2-decorators` TASK-0402 建立 Contracts v2 装饰器契约
+  状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-001`
+- `TASK-0403-sdk-v2-scanner-diagnostics` TASK-0403 建立 SDK v2 装饰器扫描与统一诊断
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-002`
+- `TASK-0404-sdk-v2-cli-templates-lock` TASK-0404 建立 SDK v2 CLI 模板与 manifest lock
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-003`
+- `TASK-0405-core-mms-v2-descriptor` TASK-0405 建立 Core MMS v2 runtime descriptor
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-004`
+- `TASK-0406-core-object-container-execution` TASK-0406 建立 Core v2 对象容器与执行链
+  状态：IN_PROGRESS | 负责人：Codex Core worker | 预估：3.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-005` | 最新：已补齐 `object_param` / `object_inject` 类属性与 `__init__` 参数注解入口，并归一到 v2 descriptor 元数据
+- `TASK-0407-atm-object-assembly-profile-ui` TASK-0407 建立 ATM v2 对象装配运行模板 UI
+  状态：TODO | 负责人：待分配 | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-006`
+- `TASK-0408-data-decorators-db-registration` TASK-0408 接入 data decorators 到 ctx.db 注册
+  状态：TODO | 负责人：待分配 | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-007`
+- `TASK-0409-page-action-runtime` TASK-0409 建立 page action runtime
+  状态：TODO | 负责人：待分配 | 预估：1.5 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-008`
+- `TASK-0410-remove-v1-runtime-surface` TASK-0410 清理 v1 runtime surface 与兼容代码
+  状态：IN_PROGRESS | 负责人：全开发团队 | 预估：持续门禁 | 关联：`REQ-0400`, `API-012`

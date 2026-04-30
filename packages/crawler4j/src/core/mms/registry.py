@@ -15,6 +15,7 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from src.core.mms.dev_links import DevModuleLinkStore, get_dev_module_link_store
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
@@ -27,9 +28,90 @@ from src.core.mms.models import (
     ModuleStatus,
     WorkflowInfo,
 )
+from src.core.mms.manifest_lock import verify_manifest_lock
+from src.core.mms.runtime_descriptor import load_runtime_descriptor_v2
 from src.core.mms.scanner import ModuleScanner
 from src.core.mms.settings_store import ModuleSettingsStore, get_module_settings_store
+from src.core.mms.zip_safety import safe_extract_zip
 from src.utils.paths import get_app_data_dir
+
+_V2_DATA_TYPE_MAP = {
+    "string": "text",
+    "text": "text",
+    "integer": "int",
+    "int": "int",
+    "number": "number",
+    "boolean": "bool",
+    "bool": "bool",
+    "json": "json",
+}
+
+
+def _v2_column(raw: dict[str, Any]) -> dict[str, Any]:
+    name = str(raw.get("name") or raw.get("key") or "").strip()
+    column_type = _V2_DATA_TYPE_MAP.get(str(raw.get("type") or "text").strip().lower(), "text")
+    return {
+        "name": name,
+        "type": column_type,
+        "nullable": bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required")),
+    }
+
+
+def _v2_parameter(raw) -> dict[str, Any]:
+    return {
+        "name": raw.name,
+        "type": _V2_DATA_TYPE_MAP.get(raw.type, raw.type),
+        "required": bool(raw.required),
+    }
+
+
+def _v2_index_name(fields: tuple[str, ...], fallback_index: int) -> str:
+    return "idx_" + "_".join(fields) if fields else f"idx_{fallback_index}"
+
+
+def _v2_data_contract_for_module(module_info: ModuleInfo) -> dict[str, Any]:
+    runtime_api = str(module_info.manifest.runtime_api or "").strip()
+    if runtime_api != "core-native-v2" or not module_info.path:
+        return module_info.manifest.data
+
+    descriptor = load_runtime_descriptor_v2(
+        module_info.name,
+        Path(module_info.path),
+        module_info.manifest,
+        force_reload=module_info.source != ModuleSource.BUILTIN,
+    )
+    resources = []
+    for table_name, entry in sorted(descriptor.data_tables.items()):
+        columns = [_v2_column(dict(item)) for item in entry.meta.schema]
+        record_key_field = columns[0]["name"]
+        indexes: dict[str, list[str]] = {}
+        for index_number, index in enumerate(entry.meta.indexes, start=1):
+            fields = tuple(index.fields)
+            indexes[index.name or _v2_index_name(fields, index_number)] = list(fields)
+        resources.append(
+            {
+                "resource_id": table_name,
+                "storage_mode": "custom_table",
+                "record_key_field": record_key_field,
+                "schema": {"version": 1, "columns": columns},
+                "indexes": indexes,
+                "cleanup_policy": "drop_table",
+            }
+        )
+
+    queries = [
+        {
+            "query_id": query_name,
+            "source_resource_ids": [entry.meta.source],
+            "sql": entry.meta.sql,
+            "params": [_v2_parameter(parameter) for parameter in entry.meta.parameters],
+            "columns": [_v2_column(dict(item)) for item in entry.meta.output_schema],
+        }
+        for query_name, entry in sorted(descriptor.data_queries.items())
+    ]
+    data_contract = {"resources": resources, "views": [], "queries": queries, "seeds": []}
+    module_info.manifest.data = data_contract
+    return data_contract
 
 class ModuleRegistry:
     """模块注册表。
@@ -153,16 +235,17 @@ class ModuleRegistry:
             if not module_info.path:
                 continue
             try:
+                manifest_data = _v2_data_contract_for_module(module_info)
                 get_module_data_store().sync_manifest_data(
                     module_info.name,
                     Path(module_info.path),
-                    module_info.manifest.data,
+                    manifest_data,
                 )
             except Exception as exc:
                 logger.error(f"[MMS] 模块数据契约同步失败 {module_info.name}: {exc}")
                 module_info.status = ModuleStatus.INVALID
                 module_info.error = str(exc)
-                module_info.hint = "请检查 module.yaml.data、data/sql 与 data/seeds 是否符合当前协议"
+                module_info.hint = "请检查 core-native-v2 数据装饰器、SQL 与 data/seeds 是否符合当前协议"
     
     def refresh(self) -> dict[str, list[str] | int]:
         """刷新注册表。
@@ -221,18 +304,12 @@ class ModuleRegistry:
                 temp_path = Path(temp_dir)
                 
                 with zipfile.ZipFile(source_path, 'r') as zf:
-                    # 安全检查
-                    for member in zf.namelist():
-                        if member.startswith('/') or '..' in member:
-                            raise ModuleInstallError(f"检测到路径穿越攻击: {member}")
-                    
-                    # 获取根目录
                     root_dirs = {name.split('/')[0] for name in zf.namelist() if '/' in name}
                     if len(root_dirs) != 1:
                         raise ModuleInstallError("ZIP 包结构无效，应仅包含一个根目录")
                     
                     module_name = root_dirs.pop()
-                    zf.extractall(temp_path)
+                    safe_extract_zip(zf, temp_path)
                     module_path = temp_path / module_name
             else:
                 module_path = source_path
@@ -240,6 +317,7 @@ class ModuleRegistry:
             # 解析并校验 manifest
             manifest = self._scanner.parse_manifest(module_path)
             warnings = self._scanner.validate(manifest, module_path)
+            verify_manifest_lock(module_path, manifest)
             
             # 检查是否已安装同名模块
             existing = self.get_module(manifest.name)
@@ -353,20 +431,14 @@ class ModuleRegistry:
         extracted_module_dir: Path | None = None
 
         try:
-            # 防御 zip slip 攻击
             with zipfile.ZipFile(zip_path, 'r') as zf:
-                for member in zf.namelist():
-                    if member.startswith('/') or '..' in member:
-                        raise ModuleInstallError(f"检测到路径穿越攻击: {member}")
-
-                # 提取模块目录（假设 ZIP 根目录是模块目录）
                 root_dirs = {name.split('/')[0] for name in zf.namelist() if '/' in name}
                 if len(root_dirs) != 1:
                     raise ModuleInstallError("ZIP 包结构无效，应仅包含一个根目录")
 
                 module_dir_name = root_dirs.pop()
                 extracted_module_dir = temp_dir / module_dir_name
-                zf.extractall(temp_dir)
+                safe_extract_zip(zf, temp_dir)
 
             if not extracted_module_dir or not extracted_module_dir.exists():
                 raise ModuleInstallError("ZIP 安装失败：未找到解压后的模块目录")
@@ -391,6 +463,7 @@ class ModuleRegistry:
     def _preflight_installable_module(self, module_dir: Path) -> ModuleManifest:
         manifest = self._scanner.parse_manifest(module_dir)
         warnings = self._scanner.validate(manifest, module_dir)
+        verify_manifest_lock(module_dir, manifest)
         for warning in warnings:
             logger.warning(f"[MMS] {module_dir.name}: {warning}")
         self._probe_module_import(manifest.name, module_dir)

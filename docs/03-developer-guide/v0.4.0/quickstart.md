@@ -14,6 +14,19 @@
 
 ```bash
 cd /absolute/path/to/your/workspace
+uvx --from crawler4j-sdk crawler4j module init
+```
+
+交互式输入必填项，其余使用 0.4.x 默认值：
+
+```text
+模块包名（snake_case）: hotel_demo
+升级源 GitHub 仓库（owner/repo）: your-org/hotel_demo
+```
+
+资深开发者也可以一次性传入参数：
+
+```bash
 uvx --from crawler4j-sdk crawler4j module init hotel_demo \
   --repo your-org/hotel_demo \
   --runtime-api core-native-v2 \
@@ -55,7 +68,9 @@ uv run crawler4j data query create ready_hotels --source hotels
 目标文件：`interfaces/labor.py`、`objects/api_labor.py`。
 
 ```python
-from crawler4j_contracts import component, interface
+from typing import Annotated
+
+from crawler4j_contracts import component, interface, object_param
 
 
 @interface(name="labor", label="劳保能力")
@@ -67,13 +82,15 @@ class Labor:
     name="api_labor",
     label="API 劳保对象",
     implements="labor",
-    parameters=[
-        {"name": "base_url", "type": "string", "required": True},
-        {"name": "timeout", "type": "integer", "default": 30},
-    ],
 )
 class ApiLabor:
-    def __init__(self, base_url: str, timeout: int = 30):
+    base_url: Annotated[str, object_param(label="Base URL")]
+
+    def __init__(
+        self,
+        base_url: str,
+        timeout: Annotated[int, object_param(min=1, max=120)] = 30,
+    ):
         self.base_url = base_url
         self.timeout = timeout
 ```
@@ -85,18 +102,19 @@ class ApiLabor:
 目标文件：`objects/hotel_orchestrator.py`。
 
 ```python
-from crawler4j_contracts import component
+from typing import Annotated
+
+from crawler4j_contracts import component, object_inject
 
 
 @component(
     name="hotel_orchestrator",
     label="酒店同步编排器",
     implements="orchestrator",
-    inject=[
-        {"name": "labor", "type": "interface", "target": "labor"},
-    ],
 )
 class HotelOrchestrator:
+    labor: Annotated[object, object_inject(type="interface", target="labor")]
+
     def __init__(self, labor):
         self.labor = labor
 
@@ -112,18 +130,17 @@ class HotelOrchestrator:
 目标文件：`workflows/hotel_sync.py`。
 
 ```python
-from crawler4j_contracts import workflow
+from typing import Annotated
+
+from crawler4j_contracts import object_inject, workflow
 
 
-@workflow(
-    name="hotel_sync",
-    label="酒店同步",
-    inject=[
-        {"name": "orchestrator", "type": "interface", "target": "orchestrator"},
-    ],
-)
+@workflow(name="hotel_sync", label="酒店同步")
 class HotelSyncWorkflow:
-    def __init__(self, orchestrator):
+    def __init__(
+        self,
+        orchestrator: Annotated[object, object_inject(type="interface", target="orchestrator")],
+    ):
         self.orchestrator = orchestrator
 
     async def run(self, ctx):

@@ -69,6 +69,8 @@ class ExecutionRequest:
     execution_params: dict[str, Any] = field(default_factory=dict)
     job_params: dict[str, Any] = field(default_factory=dict)
     runtime_params: dict[str, Any] = field(default_factory=dict)
+    object_bindings: dict[str, str] = field(default_factory=dict)
+    object_params: dict[str, dict[str, Any]] = field(default_factory=dict)
     devel_mode: bool = False
     state: dict[str, Any] = field(default_factory=dict)
     provider_name: str = ""
@@ -149,6 +151,8 @@ class ExecutionRunner:
             "job_params": deepcopy(request.job_params),
             "runtime_params": deepcopy(request.runtime_params),
             "params": deepcopy(request.runtime_params),
+            "object_bindings": deepcopy(request.object_bindings),
+            "object_params": deepcopy(request.object_params),
             "provider_name": request.provider_name,
             "selector_name": request.selector_name,
             "fixed_env_id": request.fixed_env_id,

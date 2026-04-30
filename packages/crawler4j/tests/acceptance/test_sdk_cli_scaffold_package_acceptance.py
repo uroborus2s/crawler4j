@@ -40,8 +40,9 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
         generated_pyproject = tomllib.load(fh)
     assert manifest["name"] == "demo_model"
     assert manifest["version"] == MODULE_VERSION
-    assert manifest["runtime_api"] == "core-native-v1"
-    assert manifest["default_workflow"] == "main_workflow"
+    assert manifest["runtime_api"] == "core-native-v2"
+    for legacy_key in ("default_workflow", "workflows", "data", "objects", "interfaces", "tasks"):
+        assert legacy_key not in manifest
     assert generated_pyproject["project"]["dependencies"] == [get_compatible_contracts_dependency_spec()]
     assert generated_pyproject["dependency-groups"]["dev"] == [
         get_compatible_sdk_dependency_spec(),
@@ -60,15 +61,15 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
             "icon": "📄",
         },
     ]
-    assert [item["name"] for item in manifest["workflows"]] == ["main_workflow", "repair_orders"]
 
     members = archive_members(built_archive)
     assert "demo_model/module.yaml" in members
+    assert "demo_model/.crawler4j/manifest.lock.json" in members
     assert "demo_model/pages/dashboard.py" in members
     assert "demo_model/pages/accounts.py" in members
-    assert "demo_model/env_selectors/pick_ready.py" in members
     assert "demo_model/tasks/extra_task.py" in members
     assert "demo_model/workflows/repair_orders.py" in members
+    assert "demo_model/env_selectors/pick_ready.py" not in members
     assert "demo_model/module_runtime.py" not in members
 
 
@@ -83,12 +84,14 @@ def test_sdk_cli_scaffold_package_verify_rejects_legacy_module_runtime_acceptanc
 
     verify_result = run_cli("package", "verify", str(archive_path), cwd=module_root)
     verify_result.assert_failed()
-    verify_result.assert_stdout_contains("core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py")
+    verify_result.assert_stdout_contains("core-native-v2 模块不允许保留旧运行时薄壳: module_runtime.py")
 
 
 def test_sdk_cli_scaffold_supports_grouped_page_source_layout_acceptance(module_root: Path):
     page_result = run_cli("page", "create", "account_detail", "--group", "account", cwd=module_root)
     page_result.assert_ok()
+    lock_result = run_cli("manifest", "lock", cwd=module_root)
+    lock_result.assert_ok()
 
     check_result = run_cli("check", "full", cwd=module_root)
     check_result.assert_ok()

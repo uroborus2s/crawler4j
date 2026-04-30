@@ -64,6 +64,8 @@ class ExecutionContext(BaseModel):
     workflow: str = "default"
     hooks_module: str = ""
     params: Dict[str, Any] = Field(default_factory=dict)
+    object_bindings: Dict[str, str] = Field(default_factory=dict)
+    object_params: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     timeout: int = Field(default=600, ge=0)
 
 

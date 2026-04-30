@@ -5,6 +5,12 @@
 ## 1. 初始化
 
 ```bash
+uvx --from crawler4j-sdk crawler4j module init
+```
+
+按提示输入模块名和升级源仓库；其他参数保持 0.4.x 默认值。需要脚本化时仍可完整传参：
+
+```bash
 uvx --from crawler4j-sdk crawler4j module init demo_module \
   --repo example/demo_module \
   --runtime-api core-native-v2
@@ -28,47 +34,63 @@ uv run crawler4j data query create ready_accounts --source accounts
 
 ## 3. 写对象依赖
 
-对象依赖写在 `inject` 里：
+对象依赖可以写在 `inject` 里，也可以写成类属性注解。推荐新模块优先用类属性注解，构造函数参数名保持一致：
 
 ```python
+from typing import Annotated
+
+from crawler4j_contracts import component, object_inject
+
+
 @component(
     name="account_orchestrator",
     implements="orchestrator",
-    inject=[
-        {"name": "labor", "type": "interface", "target": "labor"},
-    ],
 )
 class AccountOrchestrator:
+    labor: Annotated[object, object_inject(type="interface", target="labor")]
+
     def __init__(self, labor):
         self.labor = labor
 ```
 
-对象参数写在 `parameters` 里：
+对象参数可以写在 `parameters` 里，也可以写到类属性或 `__init__` 参数注解里。未提供默认值的 `object_param()` 默认是必填参数：
 
 ```python
+from typing import Annotated
+
+from crawler4j_contracts import component, object_param
+
+
 @component(
     name="api_labor",
     implements="labor",
-    parameters=[
-        {"name": "base_url", "type": "string", "required": True},
-    ],
 )
 class ApiLabor:
-    def __init__(self, base_url: str):
+    base_url: Annotated[str, object_param(label="Base URL")]
+
+    def __init__(
+        self,
+        base_url: str,
+        timeout: Annotated[int, object_param(min=1, max=120)] = 30,
+    ):
         self.base_url = base_url
+        self.timeout = timeout
 ```
 
 ## 4. 写 workflow
 
 ```python
-@workflow(
-    name="main_workflow",
-    inject=[
-        {"name": "orchestrator", "type": "interface", "target": "orchestrator"},
-    ],
-)
+from typing import Annotated
+
+from crawler4j_contracts import object_inject, workflow
+
+
+@workflow(name="main_workflow")
 class MainWorkflow:
-    def __init__(self, orchestrator):
+    def __init__(
+        self,
+        orchestrator: Annotated[object, object_inject(type="interface", target="orchestrator")],
+    ):
         self.orchestrator = orchestrator
 
     async def run(self, ctx):

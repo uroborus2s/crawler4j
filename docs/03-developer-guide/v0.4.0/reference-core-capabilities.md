@@ -37,6 +37,8 @@ Core 扫描模块 Python 文件，读取装饰器挂载的元数据。
 - 已创建 component 实例
 - workflow 实例
 
+descriptor 中的对象注入和对象参数由 SDK/Core 扫描归一：装饰器参数、类属性 `Annotated[..., object_inject/object_param]`、`__init__` 参数 `Annotated[..., object_inject/object_param]` 都会进入同一份元数据。
+
 生命周期：
 
 - task/env 开始时创建

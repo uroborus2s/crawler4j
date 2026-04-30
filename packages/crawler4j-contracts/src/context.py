@@ -8,6 +8,7 @@ contracts 层承载共享协议、数据类型与 TaskContext 的轻量辅助方
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -27,39 +28,31 @@ if TYPE_CHECKING:
 class HttpClient(Protocol):
     """HTTP 客户端协议。"""
 
-    async def get(self, url: str, **kwargs: Any) -> dict[str, Any]:
-        ...
+    async def get(self, url: str, **kwargs: Any) -> dict[str, Any]: ...
 
     async def post(
         self,
         url: str,
         data: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
 
 @runtime_checkable
 class LoggerLike(Protocol):
     """任务上下文可用的最小日志接口。"""
 
-    def debug(self, message: str, environment_id: int | None = None) -> None:
-        ...
+    def debug(self, message: str, environment_id: int | None = None) -> None: ...
 
-    def info(self, message: str, environment_id: int | None = None) -> None:
-        ...
+    def info(self, message: str, environment_id: int | None = None) -> None: ...
 
-    def json(self, label: str, payload: Any, environment_id: int | None = None) -> None:
-        ...
+    def json(self, label: str, payload: Any, environment_id: int | None = None) -> None: ...
 
-    def warning(self, message: str, environment_id: int | None = None) -> None:
-        ...
+    def warning(self, message: str, environment_id: int | None = None) -> None: ...
 
-    def error(self, message: str, environment_id: int | None = None) -> None:
-        ...
+    def error(self, message: str, environment_id: int | None = None) -> None: ...
 
-    def exception(self, message: str, environment_id: int | None = None) -> None:
-        ...
+    def exception(self, message: str, environment_id: int | None = None) -> None: ...
 
 
 ImageInput = str | Path | bytes
@@ -152,8 +145,40 @@ class EnvCandidate:
     proxy: dict[str, Any] | None = None
 
 
+class _StdTaskLogger:
+    """Default lightweight logger satisfying the TaskContext logging protocol."""
+
+    def __init__(self) -> None:
+        self._logger = logging.getLogger("task")
+
+    def debug(self, message: str, environment_id: int | None = None) -> None:
+        self._logger.debug(self._format(message, environment_id))
+
+    def info(self, message: str, environment_id: int | None = None) -> None:
+        self._logger.info(self._format(message, environment_id))
+
+    def json(self, label: str, payload: Any, environment_id: int | None = None) -> None:
+        rendered = json.dumps(payload, ensure_ascii=False, default=str)
+        self._logger.info(self._format(f"{label}: {rendered}", environment_id))
+
+    def warning(self, message: str, environment_id: int | None = None) -> None:
+        self._logger.warning(self._format(message, environment_id))
+
+    def error(self, message: str, environment_id: int | None = None) -> None:
+        self._logger.error(self._format(message, environment_id))
+
+    def exception(self, message: str, environment_id: int | None = None) -> None:
+        self._logger.exception(self._format(message, environment_id))
+
+    @staticmethod
+    def _format(message: str, environment_id: int | None) -> str:
+        if environment_id is None:
+            return message
+        return f"[env:{environment_id}] {message}"
+
+
 def _build_std_task_logger() -> LoggerLike:
-    return logging.getLogger("task")
+    return _StdTaskLogger()
 
 
 _task_logger_factory: Callable[[], LoggerLike] = _build_std_task_logger
@@ -248,9 +273,7 @@ class TaskContext:
         """向 ATM 发出结构化控制信号。"""
         allowed_phases = {"init_env", "before_run", "run_module"}
         if self._signal_phase not in allowed_phases:
-            raise RuntimeError(
-                f"当前阶段不允许发出任务信号: {self._signal_phase or 'unknown'}"
-            )
+            raise RuntimeError(f"当前阶段不允许发出任务信号: {self._signal_phase or 'unknown'}")
         if self._task_signal is not None:
             raise RuntimeError("当前任务上下文已经存在未处理的任务信号")
         self._task_signal = signal

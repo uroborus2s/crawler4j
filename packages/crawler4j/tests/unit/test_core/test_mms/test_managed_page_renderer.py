@@ -274,7 +274,11 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                 del context, page_id, params
                 return {}
             """,
-            "hooks/create_account_from_ui.py": """
+            "tasks/create_account_from_ui.py": """
+            from crawler4j_contracts import page_action
+
+
+            @page_action(name="create_account_from_ui")
             def handle(context, payload):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 next_id = len(rows) + 1
@@ -287,7 +291,11 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                 context.db.into("accounts").replace(rows + [row])
                 return {"record": row, "created": True}
             """,
-            "hooks/update_account_from_ui.py": """
+            "tasks/update_account_from_ui.py": """
+            from crawler4j_contracts import page_action
+
+
+            @page_action(name="update_account_from_ui")
             def handle(context, account_id, payload):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 updated_rows = []
@@ -306,7 +314,11 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                 context.db.into("accounts").replace(updated_rows)
                 return {"record": updated, "created": False}
             """,
-            "hooks/delete_account_from_ui.py": """
+            "tasks/delete_account_from_ui.py": """
+            from crawler4j_contracts import page_action
+
+
+            @page_action(name="delete_account_from_ui")
             def handle(context, account_id):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
@@ -516,7 +528,11 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                 del context, page_id, params
                 return {}
             """,
-            "hooks/create_account_from_ui.py": """
+            "tasks/create_account_from_ui.py": """
+            from crawler4j_contracts import page_action
+
+
+            @page_action(name="create_account_from_ui")
             def handle(context, payload):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 next_id = len(rows) + 1
@@ -529,7 +545,11 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                 context.db.into("accounts").replace(rows + [row])
                 return {"record": row, "created": True}
             """,
-            "hooks/update_account_from_ui.py": """
+            "tasks/update_account_from_ui.py": """
+            from crawler4j_contracts import page_action
+
+
+            @page_action(name="update_account_from_ui")
             def handle(context, account_id, payload):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 updated_rows = []
@@ -548,7 +568,11 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                 context.db.into("accounts").replace(updated_rows)
                 return {"record": updated, "created": False}
             """,
-            "hooks/delete_account_from_ui.py": """
+            "tasks/delete_account_from_ui.py": """
+            from crawler4j_contracts import page_action
+
+
+            @page_action(name="delete_account_from_ui")
             def handle(context, account_id):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]

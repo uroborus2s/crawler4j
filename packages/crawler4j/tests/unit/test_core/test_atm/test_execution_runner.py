@@ -121,11 +121,15 @@ def test_execution_runner_reads_timeout_budget_overrides_from_config_center():
 
 def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
     module_dir = base_dir / module_name
-    tasks_dir = module_dir / "tasks"
     workflows_dir = module_dir / "workflows"
-    hooks_dir = module_dir / "hooks"
-    selectors_dir = module_dir / "env_selectors"
-    for package_dir in (module_dir, tasks_dir, workflows_dir, hooks_dir, selectors_dir):
+    for package_dir in (
+        module_dir,
+        module_dir / "interfaces",
+        module_dir / "objects",
+        workflows_dir,
+        module_dir / "tasks",
+        module_dir / "data",
+    ):
         package_dir.mkdir(parents=True, exist_ok=True)
         (package_dir / "__init__.py").write_text("", encoding="utf-8")
 
@@ -145,193 +149,40 @@ def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
         + "\n",
         encoding="utf-8",
     )
-    (selectors_dir / "pick_ready.py").write_text(
-        dedent(
-            """
-            from crawler4j_contracts import EnvCandidate, EnvSelectorSpec, TaskContext
-            from ..runtime_db import record_event
-
-            SELECTOR = EnvSelectorSpec(
-                name="pick_ready",
-                display_name="选择可用页面环境",
-                description="优先选择具备 page 能力的 ready 环境。",
-            )
-
-
-            def select(context: TaskContext, candidates: list[EnvCandidate]):
-                candidate_ids = [candidate.env_id for candidate in candidates]
-                for candidate in candidates:
-                    if "page" in candidate.capabilities:
-                        record_event(
-                            context,
-                            "hook.select_env",
-                            entity_key=candidate.env_id,
-                            created_at=200,
-                            payload={"candidate_ids": candidate_ids, "selected_env_id": candidate.env_id},
-                        )
-                        return candidate.env_id
-                return None
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    (hooks_dir / "prepare_env.py").write_text(
-        dedent(
-            """
-            from crawler4j_contracts import TaskContext
-            from ..runtime_db import record_event
-
-
-            async def handle(context: TaskContext):
-                record_event(
-                    context,
-                    "hook.prepare",
-                    created_at=100,
-                    payload={"selector": context.runtime.get("selector_name")},
-                )
-                return {"wait_timeout": 42}
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    (hooks_dir / "init_env.py").write_text(
-        dedent(
-            """
-            from crawler4j_contracts import TaskContext
-            from ..runtime_db import record_event
-
-
-            async def handle(context: TaskContext):
-                context.state["hook_trace"] = ["init_env"]
-                record_event(
-                    context,
-                    "hook.init",
-                    entity_key=context.env_id,
-                    created_at=300,
-                    payload={"env_id": context.env_id},
-                )
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    (hooks_dir / "before_run.py").write_text(
-        dedent(
-            """
-            from crawler4j_contracts import TaskContext
-            from ..runtime_db import record_event
-
-
-            async def handle(context: TaskContext):
-                hook_trace = list(context.state.get("hook_trace") or [])
-                hook_trace.append("before_run")
-                context.state["hook_trace"] = hook_trace
-                record_event(
-                    context,
-                    "hook.before",
-                    created_at=400,
-                    payload={"workflow": context.runtime.get("workflow")},
-                )
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    (hooks_dir / "on_success.py").write_text(
-        dedent(
-            """
-            from crawler4j_contracts import TaskContext, TaskResult
-            from ..runtime_db import record_event
-
-
-            async def handle(context: TaskContext, result: TaskResult):
-                record_event(
-                    context,
-                    "hook.success",
-                    created_at=600,
-                    payload={"title": result.data.get("title")},
-                )
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    (hooks_dir / "on_cleanup.py").write_text(
-        dedent(
-            """
-            from crawler4j_contracts import TaskContext
-            from ..runtime_db import record_event
-
-
-            async def handle(context: TaskContext):
-                record_event(
-                    context,
-                    "hook.cleanup",
-                    created_at=700,
-                    payload={
-                        "final_status": context.runtime.get("final_status"),
-                        "env_action": (context.runtime.get("env_action") or {}).get("action"),
-                    },
-                )
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
     (workflows_dir / "default.py").write_text(
         dedent(
             """
-            from crawler4j_contracts import WorkflowSpec
-
-            WORKFLOW = WorkflowSpec(name="default", tasks=("capture_page",))
-
-
-            async def run(context):
-                return await context.run_subtask("capture_page")
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    (tasks_dir / "capture_page.py").write_text(
-        dedent(
-            """
-            from crawler4j_contracts import TaskContext, TaskResult, TaskSpec
+            from crawler4j_contracts import TaskContext, TaskResult, workflow
             from ..runtime_db import record_event
 
-            TASK = TaskSpec(name="capture_page")
 
+            @workflow(name="default")
+            class DefaultWorkflow:
+                async def run(self, ctx: TaskContext) -> TaskResult:
+                    if not ctx.page:
+                        return TaskResult.fail(message="missing page", error="page_missing")
 
-            async def execute(ctx: TaskContext) -> TaskResult:
-                if not ctx.page:
-                    return TaskResult.fail(message="missing page", error="page_missing")
+                    start_url = ctx.get_config("start_url", "https://example.com/fallback")
+                    await ctx.page.goto(start_url, wait_until="domcontentloaded")
+                    title = await ctx.page.title()
+                    html = await ctx.page.content()
 
-                start_url = ctx.get_config("start_url", "https://example.com/fallback")
-                await ctx.page.goto(start_url, wait_until="domcontentloaded")
-                title = await ctx.page.title()
-                html = await ctx.page.content()
+                    record_event(
+                        ctx,
+                        "workflow.capture",
+                        entity_key=ctx.page.url,
+                        created_at=500,
+                        payload={"title": title, "html_length": len(html)},
+                    )
 
-                record_event(
-                    ctx,
-                    "task.capture",
-                    entity_key=ctx.page.url,
-                    created_at=500,
-                    payload={"title": title, "html_length": len(html)},
-                )
-
-                return TaskResult.ok(
-                    message="page captured",
-                    data={
-                        "url": ctx.page.url,
-                        "title": title,
-                        "html": html,
-                        "hook_trace": list(ctx.state.get("hook_trace") or []),
-                        "selector_seen": list(ctx.state.get("selector_seen") or []),
-                        "selector_name": ctx.runtime.get("selector_name"),
-                    },
-                )
+                    return TaskResult.ok(
+                        message="page captured",
+                        data={
+                            "url": ctx.page.url,
+                            "title": title,
+                            "html": html,
+                        },
+                    )
             """
         ).strip()
         + "\n",
@@ -964,7 +815,7 @@ async def test_execution_runner_promotes_proxy_binding_from_creation_params():
 
 
 @pytest.mark.asyncio
-async def test_execution_runner_runs_real_module_with_hooks_selectors_and_audit_events(tmp_path):
+async def test_execution_runner_runs_real_core_native_v2_module_and_audit_events(tmp_path):
     from src.core.mms.models import ModuleInfo, ModuleManifest
     from src.core.mms.service import ModuleService
     from src.core.mms.settings_store import ModuleSettingsStore
@@ -1000,23 +851,18 @@ async def test_execution_runner_runs_real_module_with_hooks_selectors_and_audit_
     module_service.registry = SimpleNamespace(
         get_module=lambda name: ModuleInfo(
             name=module_name,
-            manifest=ModuleManifest(name=module_name, data=manifest_data),
+            manifest=ModuleManifest(name=module_name, runtime_api="core-native-v2", data=manifest_data),
             path=module_dir,
         )
     )
 
-    selectors = module_service.list_env_selectors(module_name)
-    assert [selector.name for selector in selectors] == ["pick_ready"]
-    assert selectors[0].display_name == "选择可用页面环境"
-
     store = ModuleSettingsStore()
     store.write_module_settings(module_name, {"start_url": "https://example.com/runtime"})
 
-    request = _build_request(mode=AcquisitionMode.SELECT, lifecycle=CreationLifecycle.PERSISTENT)
+    request = _build_request(mode=AcquisitionMode.CREATE, lifecycle=CreationLifecycle.PERSISTENT)
     request.module_name = module_name
     request.hooks_module = module_name
     request.workflow_name = "default"
-    request.selector_name = "pick_ready"
 
     runner, rem = _build_runner(env, lease, module_service)
 
@@ -1031,40 +877,20 @@ async def test_execution_runner_runs_real_module_with_hooks_selectors_and_audit_
         "url": "https://example.com/runtime",
         "title": "Module Runtime Title",
         "html": "<html><body><h1>Runtime Content</h1></body></html>",
-        "hook_trace": ["init_env", "before_run"],
-        "selector_seen": [],
-        "selector_name": "pick_ready",
     }
     assert fake_page.visits == [("https://example.com/runtime", "domcontentloaded")]
 
-    rem.list_envs.assert_awaited_once()
-    rem.lease_manager.acquire.assert_awaited_once_with(env, request.task.id, timeout=42)
-    rem.start_env.assert_awaited_once_with(env.id)
+    rem.create_env.assert_awaited_once()
+    rem.lease_manager.claim_created_env.assert_awaited_once_with(env, request.task.id)
     rem.release.assert_awaited_once_with(lease)
     rem.release_keep_alive.assert_not_awaited()
     rem.destroy_env.assert_not_awaited()
 
     events = get_module_data_store().query_audit_events(module_name, "runtime_events", order="asc")
-    assert [event["event_type"] for event in events] == [
-        "hook.prepare",
-        "hook.select_env",
-        "hook.init",
-        "hook.before",
-        "task.capture",
-        "hook.success",
-        "hook.cleanup",
-    ]
-    assert events[1]["payload"] == {
-        "candidate_ids": [env.id],
-        "selected_env_id": env.id,
-    }
-    assert events[4]["dataset_name"] == "runtime_events"
-    assert events[4]["entity_key"] == "https://example.com/runtime"
-    assert events[4]["payload"] == {
+    assert [event["event_type"] for event in events] == ["workflow.capture"]
+    assert events[0]["dataset_name"] == "runtime_events"
+    assert events[0]["entity_key"] == "https://example.com/runtime"
+    assert events[0]["payload"] == {
         "title": "Module Runtime Title",
         "html_length": len("<html><body><h1>Runtime Content</h1></body></html>"),
-    }
-    assert events[-1]["payload"] == {
-        "final_status": "succeeded",
-        "env_action": "recycle",
     }

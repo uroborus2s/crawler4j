@@ -388,7 +388,9 @@ class CoreDatabaseTools:
         if query_spec is None:
             raise ValueError(f"未注册的 query_id: {normalized_query_id}")
 
-        sql = load_sql_file(module.path, query_spec["sql_file"], expected_prefix="data/sql/queries/")
+        sql = str(query_spec.get("sql") or "").strip()
+        if not sql:
+            sql = load_sql_file(module.path, query_spec["sql_file"], expected_prefix="data/sql/queries/")
         validate_resource_sql(
             sql,
             source_resource_ids=query_spec["source_resource_ids"],

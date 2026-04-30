@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import zipfile
 from contextlib import ExitStack
 from pathlib import Path
@@ -42,53 +44,130 @@ class _FakeDevLinkStore:
 
 
 def _module_yaml(module_name: str, version: str) -> str:
-    return dedent(
-        f"""
+    return (
+        dedent(
+            f"""
         name: {module_name}
-        runtime_api: core-native-v1
+        runtime_api: core-native-v2
         version: {version}
         upgrade_source:
           type: github_release
           repo: example/{module_name}
-        default_workflow: default
-        workflows:
-          - name: default
-            display_name: Default
-            description: Default workflow
-        data:
-          resources: []
-          views: []
-          queries: []
-          seeds: []
         """
-    ).strip() + "\n"
+        ).strip()
+        + "\n"
+    )
 
 
 def _task_file(module_name: str) -> str:
-    return dedent(
-        f"""
-        from crawler4j_contracts import TaskResult, TaskSpec
+    return (
+        dedent(
+            f"""
+        from crawler4j_contracts import TaskContext, TaskResult, page_action
 
-        TASK = TaskSpec(name="external_task", display_name="External Task")
 
-
-        async def execute(context):
+        @page_action(name="external_task", label="External Task")
+        async def external_task(context: TaskContext):
             return TaskResult.ok(module="{module_name}", source="external")
         """
-    ).strip() + "\n"
+        ).strip()
+        + "\n"
+    )
 
 
-WORKFLOW_FILE = dedent(
+WORKFLOW_FILE = (
+    dedent(
+        """
+    from crawler4j_contracts import TaskContext, TaskResult, workflow
+
+
+    @workflow(name="default")
+    class DefaultWorkflow:
+        async def run(self, context: TaskContext):
+            return TaskResult.ok(
+                module=context.runtime.get("module_name", "demo_module"),
+                source="external",
+            )
     """
-    from crawler4j_contracts import WorkflowSpec
+    ).strip()
+    + "\n"
+)
 
-    WORKFLOW = WorkflowSpec(name="default", tasks=("external_task",))
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-    async def run(context):
-        return await context.run_subtask("external_task")
-    """
-).strip() + "\n"
+def _iter_lock_files(package_root: Path) -> list[Path]:
+    ignored_dirs = {
+        ".git",
+        ".idea",
+        ".venv",
+        ".vscode",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "__pycache__",
+        "build",
+        "dist",
+    }
+    files: list[Path] = []
+    for path in package_root.rglob("*"):
+        relative = path.relative_to(package_root)
+        relative_posix = relative.as_posix()
+        if any(part in ignored_dirs or part.endswith(".egg-info") for part in relative.parts):
+            continue
+        if path.is_dir() or path.suffix in {".pyc", ".pyo"}:
+            continue
+        if relative_posix == ".crawler4j/manifest.lock.json" or path.name == ".DS_Store":
+            continue
+        files.append(path)
+    return sorted(files, key=lambda item: item.relative_to(package_root).as_posix())
+
+
+def _write_manifest_lock(package_root: Path, *, module_name: str, version: str) -> None:
+    lock_dir = package_root / ".crawler4j"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "runtime_api": "core-native-v2",
+        "module": module_name,
+        "version": version,
+        "declarations": [
+            {
+                "kind": "workflow",
+                "name": "default",
+                "symbol": "workflows.default.DefaultWorkflow",
+                "source_path": "workflows/default.py",
+                "metadata": {"name": "default"},
+            }
+        ],
+        "files": [
+            {
+                "path": path.relative_to(package_root).as_posix(),
+                "size": path.stat().st_size,
+                "sha256": _hash_file(path),
+            }
+            for path in _iter_lock_files(package_root)
+        ],
+    }
+    (lock_dir / "manifest.lock.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _archive_package(root: Path, package_root: Path, archive_name: str) -> Path:
+    archive_path = root / archive_name
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        archive_files = {file_path for file_path in package_root.rglob("*") if file_path.is_file()}
+        for file_path in sorted(archive_files, key=lambda item: item.relative_to(package_root).as_posix()):
+            zf.write(file_path, arcname=str(file_path.relative_to(root)))
+    return archive_path
 
 
 def _build_module_dir(
@@ -98,11 +177,16 @@ def _build_module_dir(
     module_name: str,
     version: str = "1.0.0",
     extra_files: dict[str, str] | None = None,
+    write_lock: bool = True,
 ) -> Path:
     package_root = root / package_dir_name
+    data_dir = package_root / "data"
+    interfaces_dir = package_root / "interfaces"
+    objects_dir = package_root / "objects"
+    pages_dir = package_root / "pages"
     tasks_dir = package_root / "tasks"
     workflows_dir = package_root / "workflows"
-    for package_dir in (package_root, tasks_dir, workflows_dir):
+    for package_dir in (package_root, data_dir, interfaces_dir, objects_dir, pages_dir, tasks_dir, workflows_dir):
         package_dir.mkdir(parents=True, exist_ok=True)
         (package_dir / "__init__.py").write_text("", encoding="utf-8")
 
@@ -119,6 +203,8 @@ def _build_module_dir(
         file_path = package_root / relative_path
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
+    if write_lock:
+        _write_manifest_lock(package_root, module_name=module_name, version=version)
     return package_root
 
 
@@ -129,6 +215,7 @@ def _build_module_archive(
     module_name: str,
     version: str = "1.0.0",
     extra_files: dict[str, str] | None = None,
+    write_lock: bool = True,
 ) -> Path:
     package_root = _build_module_dir(
         root,
@@ -136,14 +223,10 @@ def _build_module_archive(
         module_name=module_name,
         version=version,
         extra_files=dict(extra_files or {}),
+        write_lock=write_lock,
     )
 
-    archive_path = root / f"{package_dir_name}-{version}.zip"
-    with zipfile.ZipFile(archive_path, "w") as zf:
-        for file_path in package_root.rglob("*"):
-            if file_path.is_file():
-                zf.write(file_path, arcname=str(file_path.relative_to(root)))
-    return archive_path
+    return _archive_package(root, package_root, f"{package_dir_name}-{version}.zip")
 
 
 @pytest.mark.asyncio
@@ -163,7 +246,10 @@ async def test_registry_installs_packaged_module_and_module_service_runs_it(temp
 
     service = ModuleService()
     service.registry = registry
-    result = await service.run_module("demo_module", TaskContext(env_id=1, task_name="demo_module", config={}))
+    result = await service.run_module(
+        "demo_module",
+        TaskContext(env_id=1, task_name="demo_module", config={}, runtime={"module_name": "demo_module"}),
+    )
 
     assert result.success is True
     assert result.data["module"] == "demo_module"
@@ -171,6 +257,86 @@ async def test_registry_installs_packaged_module_and_module_service_runs_it(temp
 
     assert registry.uninstall("demo_module") is True
     assert registry.get_module("demo_module") is None
+
+
+def test_install_rejects_missing_manifest_lock(temp_data_dir):
+    archive = _build_module_archive(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+        write_lock=False,
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+
+    with pytest.raises(ModuleInstallError, match="缺少 manifest lock"):
+        registry.install(archive)
+
+
+def test_install_rejects_stale_manifest_lock_file_hashes(temp_data_dir):
+    package_root = _build_module_dir(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+    )
+    (package_root / "tasks" / "tampered.py").write_text("# unlocked file\n", encoding="utf-8")
+    archive = _archive_package(temp_data_dir, package_root, "demo_module_pkg-1.0.0.zip")
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+
+    with pytest.raises(ModuleInstallError, match="文件完整性校验失败"):
+        registry.install(archive)
+
+
+def test_install_rejects_zip_path_traversal(temp_data_dir):
+    archive = temp_data_dir / "evil.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("../escape.txt", "escape")
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+
+    with pytest.raises(ModuleInstallError, match="非法路径"):
+        registry.install(archive)
+
+
+def test_registry_syncs_v2_data_decorators_to_manifest_data(temp_data_dir):
+    archive = _build_module_archive(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+        extra_files={
+            "data/accounts.py": """
+from crawler4j_contracts import data_query, data_table
+
+
+@data_table(
+    name="accounts",
+    schema=[{"name": "account_id", "type": "string", "required": True}],
+    indexes=[{"fields": ["account_id"], "unique": True}],
+)
+class Accounts:
+    pass
+
+
+@data_query(
+    name="ready_accounts",
+    source="accounts",
+    sql="SELECT account_id FROM {{resource:accounts}}",
+    output_schema=[{"name": "account_id", "type": "string"}],
+)
+def ready_accounts():
+    pass
+""",
+        },
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    module = registry.install(archive)
+
+    assert module.manifest.data["resources"][0]["resource_id"] == "accounts"
+    assert module.manifest.data["resources"][0]["record_key_field"] == "account_id"
+    assert module.manifest.data["queries"][0]["query_id"] == "ready_accounts"
+    assert module.manifest.data["queries"][0]["sql"] == "SELECT account_id FROM {{resource:accounts}}"
 
 
 @pytest.mark.asyncio
@@ -203,12 +369,12 @@ async def test_installing_packaged_module_removes_same_name_dev_link_and_uses_in
 
     service = ModuleService()
     service.registry = registry
-    descriptor = service.get_runtime_descriptor(
+    descriptor = service.get_runtime_descriptor_v2(
         "demo_module",
         TaskContext(env_id=1, task_name="demo_module", config={}),
     )
 
-    task_file = Path(descriptor.tasks["external_task"].execute.__globals__["__file__"]).resolve()
+    task_file = Path(descriptor.page_actions["external_task"].target.__globals__["__file__"]).resolve()
     assert task_file == (temp_data_dir / "modules" / "demo_module" / "tasks" / "external_task.py").resolve()
 
 
@@ -310,7 +476,7 @@ def test_zip_upgrade_rolls_back_when_new_package_fails_import(temp_data_dir):
     registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
     registry.install(first_archive)
 
-    with pytest.raises(ModuleInstallError, match="模块导入预检失败"):
+    with pytest.raises(ModuleInstallError, match="broken module"):
         registry.install(bad_archive)
 
     current = registry.get_module("demo_module")
@@ -340,7 +506,7 @@ def test_dir_install_rolls_back_when_copied_module_fails_import(temp_data_dir):
     registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
     registry.install(first_dir)
 
-    with pytest.raises(ModuleInstallError, match="模块导入预检失败"):
+    with pytest.raises(ModuleInstallError, match="broken copied module"):
         registry.install(bad_dir)
 
     current = registry.get_module("demo_module")
@@ -369,7 +535,7 @@ def test_zip_upgrade_rolls_back_to_legacy_dir_when_canonical_migration_fails(tem
     registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
     registry.load(force=True)
 
-    with pytest.raises(ModuleInstallError, match="模块导入预检失败"):
+    with pytest.raises(ModuleInstallError, match="broken migrated module"):
         registry.install(bad_archive)
 
     current = registry.get_module("demo_module")

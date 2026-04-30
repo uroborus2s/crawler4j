@@ -5,13 +5,12 @@ from __future__ import annotations
 import argparse
 import ast
 import asyncio
-import importlib
-import importlib.util
-import inspect
+import hashlib
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -19,11 +18,11 @@ import tomllib
 import urllib.error
 import urllib.request
 import zipfile
-from pathlib import Path
+from dataclasses import asdict
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
-from crawler4j_contracts import EnvSelectorSpec, PageSpec, TaskSpec, WorkflowSpec
 from crawler4j_contracts.hosted_ui import normalize_page_schema
 
 from crawler4j_sdk._version import (
@@ -31,24 +30,27 @@ from crawler4j_sdk._version import (
     get_compatible_sdk_dependency_spec,
 )
 from crawler4j_sdk.cli.templates import (
-    HOOK_NAMES,
+    COMPONENT_TEMPLATE,
+    DATA_QUERY_TEMPLATE,
+    DATA_TABLE_TEMPLATE,
+    INTERFACE_TEMPLATE,
     MODEL_GITIGNORE_TEMPLATE,
-    MODEL_HOOKS_INIT_TEMPLATE,
+    MODEL_DATA_INIT_TEMPLATE,
+    MODEL_INTERFACES_INIT_TEMPLATE,
     MODEL_MANIFEST_TEMPLATE,
     MODEL_MODULE_INIT,
+    MODEL_OBJECTS_INIT_TEMPLATE,
     MODEL_PAGES_INIT_TEMPLATE,
     MODEL_PROJECT_PYPROJECT,
     MODEL_PROJECT_README,
-    MODEL_SELECTORS_INIT_TEMPLATE,
+    MODEL_TASKS_INIT_TEMPLATE,
     MODEL_TEST_TASK_TEMPLATE,
-    RANDOM_READY_SELECTOR_TEMPLATE,
-    RETURN_NONE_SELECTOR_TEMPLATE,
+    MODEL_WORKFLOWS_INIT_TEMPLATE,
     SCRIPT_TEMPLATE,
     WORKFLOW_TEMPLATE,
-    render_hook_template,
     render_page_template,
-    render_selector_template,
 )
+from crawler4j_sdk.v2_scanner import CORE_NATIVE_V2_RUNTIME_API, V2_SCAN_DIRECTORIES, scan_v2_module
 
 
 DEFAULT_PYTHON_VERSION = "3.12"
@@ -69,31 +71,46 @@ LEGACY_HOSTED_UI_PATHS: tuple[tuple[str, str], ...] = (
     ("config_schema.json", "file"),
     ("strategy.yaml", "file"),
 )
-REQUIRED_RUNTIME_API = "core-native-v1"
-WORKFLOW_PARAMETER_TYPES = {"string", "text", "integer", "number", "boolean", "enum"}
-WORKFLOW_PARAMETER_KEYS = {
-    "name",
-    "label",
-    "type",
-    "description",
-    "required",
-    "default",
-    "options",
-    "min",
-    "max",
-    "step",
-    "placeholder",
-}
-WORKFLOW_PARAMETER_OPTION_KEYS = {"label", "value"}
+REQUIRED_RUNTIME_API = CORE_NATIVE_V2_RUNTIME_API
+MAX_ZIP_ENTRIES = 10_000
+MAX_ZIP_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 
 
 class CLIError(RuntimeError):
     """Raised when a CLI action cannot be completed safely."""
 
 
+class _UniqueKeySafeLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_mapping_without_duplicate_keys(loader, node, deep=False):
+    loader.flatten_mapping(node)
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            mark = getattr(key_node, "start_mark", None)
+            location = f" line {mark.line + 1}, column {mark.column + 1}" if mark is not None else ""
+            raise CLIError(f"YAML contains duplicate key: {key}{location}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_mapping_without_duplicate_keys,
+)
+
+
 def to_display_name(name: str) -> str:
     """Convert an identifier to a readable title."""
     return name.replace("_", " ").replace("-", " ").title()
+
+
+def to_class_name(name: str) -> str:
+    """Convert a snake_case identifier to PascalCase."""
+    return "".join(part.capitalize() for part in re.split(r"[_-]+", str(name or "")) if part)
 
 
 def is_valid_name(name: str) -> bool:
@@ -197,7 +214,7 @@ def require_module_root(start: Path | None = None) -> Path:
 def load_manifest(module_root: Path) -> dict[str, Any]:
     """Load module.yaml as a mutable dictionary."""
     manifest_path = module_root / "module.yaml"
-    data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    data = yaml.load(manifest_path.read_text(encoding="utf-8"), Loader=_UniqueKeySafeLoader) or {}
     if not isinstance(data, dict):
         raise CLIError("module.yaml 顶层必须是 YAML 映射对象")
     return data
@@ -316,12 +333,8 @@ def _page_source_relative_path(page_id: str, *, group: str | None = None) -> Pat
     return Path("pages") / normalized_group / f"{file_stem}.py"
 
 
-def _manifest_default_workflow(manifest: dict[str, Any]) -> str:
-    return str(manifest.get("default_workflow", "") or "").strip()
-
-
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeySafeLoader)
     if payload is None:
         return {}
     if not isinstance(payload, dict):
@@ -337,291 +350,6 @@ def _normalize_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(pages, list):
         raise CLIError("module.yaml.ui_extension.pages 必须是数组")
     return pages
-
-
-def _normalize_data_section(manifest: dict[str, Any]) -> dict[str, Any]:
-    data = manifest.setdefault("data", {})
-    if not isinstance(data, dict):
-        raise CLIError("module.yaml.data 必须是映射对象")
-    for section in ("resources", "views", "queries", "seeds"):
-        value = data.setdefault(section, [])
-        if not isinstance(value, list):
-            raise CLIError(f"module.yaml.data.{section} 必须是数组")
-    return data
-
-
-def _manifest_data_entries(manifest: dict[str, Any], section: str) -> list[dict[str, Any]]:
-    data = _normalize_data_section(manifest)
-    entries = data[section]
-    assert isinstance(entries, list)
-    return entries
-
-
-def _manifest_resource_entry(manifest: dict[str, Any], resource_id: str) -> dict[str, Any] | None:
-    normalized_resource_id = str(resource_id or "").strip()
-    for item in _manifest_data_entries(manifest, "resources"):
-        if isinstance(item, dict) and str(item.get("id", "") or "").strip() == normalized_resource_id:
-            return item
-    return None
-
-
-def _resolve_custom_table_sources(
-    manifest: dict[str, Any],
-    raw_sources: list[str] | tuple[str, ...] | None,
-    *,
-    owner_label: str,
-) -> tuple[list[str], dict[str, Any]]:
-    source_ids = [str(item or "").strip() for item in list(raw_sources or []) if str(item or "").strip()]
-    if not source_ids or any(not is_valid_name(item) for item in source_ids):
-        raise CLIError("--source 至少提供一个已注册资源 ID，且必须是小写 snake_case")
-
-    first_resource: dict[str, Any] | None = None
-    for resource_id in source_ids:
-        resource = _manifest_resource_entry(manifest, resource_id)
-        if resource is None:
-            raise CLIError(f"未找到资源: {resource_id}")
-        if str(resource.get("storage_mode") or "managed_dataset").strip().lower() != "custom_table":
-            raise CLIError(f"{owner_label}只能建立在 custom_table 资源上: {resource_id}")
-        if first_resource is None:
-            first_resource = resource
-
-    assert first_resource is not None
-    return source_ids, first_resource
-
-
-def _append_unique_data_entry(manifest: dict[str, Any], section: str, entry_id: str, payload: dict[str, Any]) -> None:
-    entries = _manifest_data_entries(manifest, section)
-    normalized_entry_id = str(entry_id or "").strip()
-    for item in entries:
-        if isinstance(item, dict) and str(item.get("id", "") or "").strip() == normalized_entry_id:
-            raise CLIError(f"module.yaml.data.{section} 已存在同名条目: {normalized_entry_id}")
-    entries.append(payload)
-
-
-def _validate_sql_file(module_root: Path, relative_path: str, *, expected_prefix: str) -> str | None:
-    normalized = str(relative_path or "").strip()
-    if not normalized:
-        return "SQL 文件路径不能为空"
-    if not normalized.startswith(expected_prefix):
-        return f"SQL 文件必须位于 {expected_prefix}"
-    target = (module_root / normalized).resolve()
-    if not str(target).startswith(str(module_root.resolve())):
-        return f"SQL 文件路径越界: {relative_path}"
-    if not target.is_file():
-        return f"找不到 SQL 文件: {relative_path}"
-    sql = target.read_text(encoding="utf-8").strip()
-    if not sql:
-        return f"SQL 文件为空: {relative_path}"
-    if ";" in sql:
-        return f"SQL 文件必须只包含单条语句: {relative_path}"
-    if re.search(r"\b(insert|update|delete|drop|alter|attach|detach|pragma|create|replace)\b", sql, re.IGNORECASE):
-        return f"SQL 文件包含被禁止的关键字: {relative_path}"
-    if not re.match(r"^\s*(with\b|select\b)", sql, flags=re.IGNORECASE):
-        return f"SQL 文件必须以 SELECT / WITH 开头: {relative_path}"
-    return None
-
-
-def _validate_sql_placeholders(sql: str, source_resource_ids: list[str], *, owner_label: str) -> str | None:
-    placeholder_re = re.compile(r"\{\{resource:([a-z][a-z0-9_]*)\}\}")
-    sql_ref_re = re.compile(r"\b(?:from|join)\s+([^\s,()]+)", re.IGNORECASE)
-    placeholders = placeholder_re.findall(sql)
-    if not placeholders:
-        return f"{owner_label} 必须至少引用一个 {{resource:<id>}} 占位符"
-    for token in sql_ref_re.findall(sql):
-        if not placeholder_re.fullmatch(token):
-            return f"{owner_label} 的 FROM/JOIN 只允许引用 {{resource:<id>}} 占位符"
-    if set(placeholders) != set(source_resource_ids):
-        return f"{owner_label} 的 SQL 占位符必须与 source_resource_ids 完全一致"
-    return None
-
-
-def _collect_data_contract_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
-    data = manifest.get("data")
-    if not isinstance(data, dict):
-        return ["module.yaml 缺少 data"]
-
-    errors: list[str] = []
-    resources = data.get("resources")
-    views = data.get("views")
-    queries = data.get("queries")
-    seeds = data.get("seeds")
-    if not isinstance(resources, list):
-        errors.append("module.yaml.data.resources 必须是数组")
-        resources = []
-    if not isinstance(views, list):
-        errors.append("module.yaml.data.views 必须是数组")
-        views = []
-    if not isinstance(queries, list):
-        errors.append("module.yaml.data.queries 必须是数组")
-        queries = []
-    if not isinstance(seeds, list):
-        errors.append("module.yaml.data.seeds 必须是数组")
-        seeds = []
-
-    allowed_resource_keys = {
-        "id",
-        "storage_mode",
-        "record_key_field",
-        "schema",
-        "indexes",
-        "cleanup_policy",
-        "joins",
-    }
-    resource_map: dict[str, dict[str, Any]] = {}
-    for item in resources:
-        if not isinstance(item, dict):
-            errors.append("data.resources 中的每一项都必须是对象")
-            continue
-        unknown_keys = sorted(set(item) - allowed_resource_keys)
-        if unknown_keys:
-            errors.append("data.resources 包含不支持的字段: " + ", ".join(unknown_keys))
-        resource_id = str(item.get("id", "") or "").strip()
-        if not is_valid_name(resource_id):
-            errors.append(f"无效的 data.resources[].id: {resource_id or '<empty>'}")
-            continue
-        if resource_id in resource_map:
-            errors.append(f"data.resources[].id 重复: {resource_id}")
-            continue
-        resource_map[resource_id] = item
-        storage_mode = str(item.get("storage_mode", "managed_dataset") or "managed_dataset").strip().lower()
-        if storage_mode not in {"managed_dataset", "custom_table"}:
-            errors.append(f"data.resources[{resource_id}].storage_mode 不支持: {storage_mode}")
-        schema = item.get("schema")
-        columns = schema.get("columns") if isinstance(schema, dict) else None
-        if not isinstance(columns, list) or not columns:
-            errors.append(f"data.resources[{resource_id}].schema.columns 不能为空")
-        joins = item.get("joins") or []
-        if storage_mode != "custom_table" and joins:
-            errors.append(f"data.resources[{resource_id}].joins 只允许 custom_table 声明")
-
-    for resource_id, item in resource_map.items():
-        joins = item.get("joins") or []
-        if not isinstance(joins, list):
-            errors.append(f"data.resources[{resource_id}].joins 必须是数组")
-            continue
-        for join in joins:
-            if not isinstance(join, dict):
-                errors.append(f"data.resources[{resource_id}].joins 中的每一项都必须是对象")
-                continue
-            target = str(join.get("target") or "").strip()
-            if not is_valid_name(target):
-                errors.append(f"data.resources[{resource_id}].joins[].target 必须是小写 snake_case")
-                continue
-            target_resource = resource_map.get(target)
-            if not target_resource:
-                errors.append(f"data.resources[{resource_id}].joins 引用了未声明资源: {target}")
-                continue
-            if str(target_resource.get("storage_mode", "managed_dataset")).strip().lower() != "custom_table":
-                errors.append(f"data.resources[{resource_id}].joins 只允许连接 custom_table: {target}")
-            on = join.get("on")
-            if not isinstance(on, dict) or not on:
-                errors.append(f"data.resources[{resource_id}].joins[{target}].on 不能为空")
-
-    for item in views:
-        if not isinstance(item, dict):
-            errors.append("data.views 中的每一项都必须是对象")
-            continue
-        view_id = str(item.get("id", "") or "").strip()
-        if not is_valid_name(view_id):
-            errors.append(f"无效的 data.views[].id: {view_id or '<empty>'}")
-            continue
-        source_resource_ids = [
-            str(raw or "").strip()
-            for raw in (item.get("source_resource_ids") or [])
-            if str(raw or "").strip()
-        ]
-        if not source_resource_ids:
-            errors.append(f"data.views[{view_id}].source_resource_ids 不能为空")
-            continue
-        for resource_id in source_resource_ids:
-            resource = resource_map.get(resource_id)
-            if not resource:
-                errors.append(f"data.views[{view_id}] 引用了未声明资源: {resource_id}")
-                continue
-            if str(resource.get("storage_mode", "managed_dataset")).strip().lower() != "custom_table":
-                errors.append(f"data.views[{view_id}] 只允许引用 custom_table 资源: {resource_id}")
-        sql_file = str(item.get("sql_file", "") or "").strip()
-        error = _validate_sql_file(module_root, sql_file, expected_prefix="data/sql/views/")
-        if error:
-            errors.append(error)
-        else:
-            sql = (module_root / sql_file).read_text(encoding="utf-8").strip()
-            placeholder_error = _validate_sql_placeholders(
-                sql,
-                source_resource_ids,
-                owner_label=f"data.views[{view_id}]",
-            )
-            if placeholder_error:
-                errors.append(placeholder_error)
-
-    for item in queries:
-        if not isinstance(item, dict):
-            errors.append("data.queries 中的每一项都必须是对象")
-            continue
-        query_id = str(item.get("id", "") or "").strip()
-        if not is_valid_name(query_id):
-            errors.append(f"无效的 data.queries[].id: {query_id or '<empty>'}")
-            continue
-        source_resource_ids = [
-            str(raw or "").strip()
-            for raw in (item.get("source_resource_ids") or [])
-            if str(raw or "").strip()
-        ]
-        if not source_resource_ids:
-            errors.append(f"data.queries[{query_id}].source_resource_ids 不能为空")
-            continue
-        for resource_id in source_resource_ids:
-            resource = resource_map.get(resource_id)
-            if not resource:
-                errors.append(f"data.queries[{query_id}] 引用了未声明资源: {resource_id}")
-                continue
-            if str(resource.get("storage_mode", "managed_dataset")).strip().lower() != "custom_table":
-                errors.append(f"data.queries[{query_id}] 只允许引用 custom_table 资源: {resource_id}")
-        sql_file = str(item.get("sql_file", "") or "").strip()
-        error = _validate_sql_file(module_root, sql_file, expected_prefix="data/sql/queries/")
-        if error:
-            errors.append(error)
-        else:
-            sql = (module_root / sql_file).read_text(encoding="utf-8").strip()
-            placeholder_error = _validate_sql_placeholders(
-                sql,
-                source_resource_ids,
-                owner_label=f"data.queries[{query_id}]",
-            )
-            if placeholder_error:
-                errors.append(placeholder_error)
-
-    for item in seeds:
-        if not isinstance(item, dict):
-            errors.append("data.seeds 中的每一项都必须是对象")
-            continue
-        seed_id = str(item.get("id", "") or "").strip()
-        if not is_valid_name(seed_id):
-            errors.append(f"无效的 data.seeds[].id: {seed_id or '<empty>'}")
-            continue
-        resource_id = str(item.get("resource_id", "") or "").strip()
-        if resource_id not in resource_map:
-            errors.append(f"data.seeds[{seed_id}] 引用了未声明资源: {resource_id or '<empty>'}")
-        seed_file = str(item.get("file", "") or "").strip()
-        if not seed_file.startswith("data/seeds/"):
-            errors.append(f"data.seeds[{seed_id}].file 必须位于 data/seeds/")
-            continue
-        target = (module_root / seed_file).resolve()
-        if not str(target).startswith(str(module_root.resolve())):
-            errors.append(f"data.seeds[{seed_id}].file 路径越界: {seed_file}")
-            continue
-        if not target.is_file():
-            errors.append(f"找不到种子文件: {seed_file}")
-            continue
-        try:
-            payload = json.loads(target.read_text(encoding='utf-8'))
-        except json.JSONDecodeError:
-            errors.append(f"种子文件不是合法 JSON: {seed_file}")
-            continue
-        if not isinstance(payload, list) or any(not isinstance(row, dict) for row in payload):
-            errors.append(f"种子文件必须是对象数组 JSON: {seed_file}")
-
-    return errors
 
 
 def _manifest_ui_extension(manifest: dict[str, Any]) -> dict[str, Any] | None:
@@ -644,6 +372,7 @@ def _manifest_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
         raise CLIError("module.yaml.ui_extension.pages 必须是数组")
     return [item for item in pages if isinstance(item, dict)]
 
+
 def _normalize_config_defaults(manifest: dict[str, Any]) -> dict[str, Any]:
     config_defaults = manifest.setdefault("config_defaults", {})
     if config_defaults is None:
@@ -660,25 +389,129 @@ def _normalize_config_defaults(manifest: dict[str, Any]) -> dict[str, Any]:
     return config_defaults
 
 
-def _manifest_workflows(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    workflows = manifest.setdefault("workflows", [])
-    if not isinstance(workflows, list):
-        raise CLIError("module.yaml.workflows 必须是数组")
-    return workflows
+def _v2_scan(module_root: Path, manifest: dict[str, Any]):
+    return scan_v2_module(module_root, manifest)
 
 
-def _manifest_workflow_names(manifest: dict[str, Any]) -> list[str]:
-    names: list[str] = []
-    for item in _manifest_workflows(manifest):
-        if isinstance(item, dict):
-            name = str(item.get("name", "")).strip()
-            if name:
-                names.append(name)
-    return names
+def _v2_declaration_names(module_root: Path, manifest: dict[str, Any], kind: str) -> list[str]:
+    result = _v2_scan(module_root, manifest)
+    return sorted(declaration.name for declaration in result.declarations if declaration.kind == kind)
 
 
-def _is_known_hook(name: str) -> bool:
-    return name in HOOK_NAMES
+def _iter_manifest_lock_files(module_root: Path) -> list[Path]:
+    ignored_dirs = {
+        ".git",
+        ".idea",
+        ".venv",
+        ".vscode",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "__pycache__",
+        "build",
+        "dist",
+    }
+    ignored_files = {".DS_Store", ".crawler4j/manifest.lock.json"}
+    root = module_root.resolve()
+    files: list[Path] = []
+    for path in module_root.rglob("*"):
+        relative = path.relative_to(module_root)
+        relative_posix = relative.as_posix()
+        if any(part in ignored_dirs or part.endswith(".egg-info") for part in relative.parts):
+            continue
+        if path.is_symlink():
+            raise CLIError(f"模块文件不能是符号链接: {relative_posix}")
+        if path.is_dir():
+            continue
+        if path.name in ignored_files or relative_posix in ignored_files:
+            continue
+        if path.suffix in {".pyc", ".pyo"}:
+            continue
+        try:
+            path.resolve().relative_to(root)
+        except ValueError as exc:
+            raise CLIError(f"模块文件路径越界: {relative_posix}") from exc
+        files.append(path)
+    return sorted(files, key=lambda item: item.relative_to(module_root).as_posix())
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _manifest_lock_files(module_root: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "path": path.relative_to(module_root).as_posix(),
+            "size": path.stat().st_size,
+            "sha256": _hash_file(path),
+        }
+        for path in _iter_manifest_lock_files(module_root)
+    ]
+
+
+def _manifest_lock_payload(module_root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    result = _v2_scan(module_root, manifest)
+    declarations = [
+        {
+            "kind": declaration.kind,
+            "name": declaration.name,
+            "symbol": declaration.symbol,
+            "source_path": declaration.source_path,
+            "metadata": asdict(declaration.meta),
+        }
+        for declaration in sorted(
+            result.declarations,
+            key=lambda item: (item.kind, item.name, item.source_path, item.symbol),
+        )
+    ]
+    return {
+        "schema_version": 1,
+        "runtime_api": CORE_NATIVE_V2_RUNTIME_API,
+        "module": str(manifest.get("name", "") or module_root.name).strip(),
+        "version": str(manifest.get("version", "") or "").strip(),
+        "declarations": declarations,
+        "files": _manifest_lock_files(module_root),
+    }
+
+
+def _collect_manifest_lock_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
+    lock_path = module_root / ".crawler4j" / "manifest.lock.json"
+    if not lock_path.exists():
+        return ["缺少 manifest lock: .crawler4j/manifest.lock.json，请运行 `crawler4j manifest lock`"]
+    try:
+        actual = json.loads(lock_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [f"manifest lock 不是合法 JSON: {exc}"]
+
+    try:
+        expected = json.loads(
+            json.dumps(
+                _manifest_lock_payload(module_root, manifest),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+    except CLIError as exc:
+        return [str(exc)]
+    if actual != expected:
+        return ["manifest lock 已过期，请运行 `crawler4j manifest lock` 更新 .crawler4j/manifest.lock.json"]
+    return []
+
+
+def _write_manifest_lock(module_root: Path, manifest: dict[str, Any]) -> Path:
+    lock_dir = module_root / ".crawler4j"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / "manifest.lock.json"
+    lock_path.write_text(
+        json.dumps(_manifest_lock_payload(module_root, manifest), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return lock_path
 
 
 def _safe_run(cmd: list[str], *, cwd: Path) -> None:
@@ -689,168 +522,93 @@ def _run_async(awaitable):
     return asyncio.run(awaitable)
 
 
-def _purge_module_namespace(module_name: str) -> None:
-    prefix = f"{module_name}."
-    for loaded_name in list(sys.modules):
-        if loaded_name == module_name or loaded_name.startswith(prefix):
-            sys.modules.pop(loaded_name, None)
-
-
-def _import_module_root(module_root: Path, module_name: str) -> Any:
-    package_init = module_root / "__init__.py"
-    if not package_init.exists():
-        raise FileNotFoundError(package_init)
-
-    existing = sys.modules.get(module_name)
-    existing_file = getattr(existing, "__file__", "") if existing else ""
-    same_origin = bool(existing_file) and Path(existing_file).resolve() == package_init.resolve()
-    if same_origin:
-        return existing
-    if existing:
-        _purge_module_namespace(module_name)
-
-    importlib.invalidate_caches()
-    spec = importlib.util.spec_from_file_location(
-        module_name,
-        package_init,
-        submodule_search_locations=[str(module_root)],
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"无法从 `{module_root}` 构建模块加载规格")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _import_module_child(module_root: Path, module_name: str, subpackage: str, name: str) -> Any:
-    _import_module_root(module_root, module_name)
-    return importlib.import_module(f"{module_name}.{subpackage}.{name}")
-
-
-def _validate_exported_spec(
-    module: Any,
-    export_name: str,
-    spec_type: type[Any],
-    *,
-    owner_label: str,
-) -> str | None:
-    exported = getattr(module, export_name, None)
-    if not isinstance(exported, spec_type):
-        return f"{owner_label} 缺少 {export_name}，或类型不是 {spec_type.__name__}"
-    return None
-
-
-def _validate_task_module(module_root: Path, module_name: str, task_name: str) -> list[str]:
-    owner_label = f"tasks/{task_name}.py"
-    try:
-        module = _import_module_child(module_root, module_name, "tasks", task_name)
-    except Exception as exc:
-        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
-
-    errors: list[str] = []
-    spec_error = _validate_exported_spec(module, "TASK", TaskSpec, owner_label=owner_label)
-    if spec_error:
-        errors.append(spec_error)
-    elif str(module.TASK.name or "").strip() != task_name:
-        errors.append(f"{owner_label} 的 TASK.name 必须与文件名一致: {task_name}")
-
-    execute = getattr(module, "execute", None)
-    if execute is None or not callable(execute):
-        errors.append(f"{owner_label} 缺少可调用导出: execute")
-    return errors
-
-
-def _validate_workflow_module(module_root: Path, module_name: str, workflow_name: str) -> list[str]:
-    owner_label = f"workflows/{workflow_name}.py"
-    try:
-        module = _import_module_child(module_root, module_name, "workflows", workflow_name)
-    except Exception as exc:
-        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
-
-    errors: list[str] = []
-    spec_error = _validate_exported_spec(module, "WORKFLOW", WorkflowSpec, owner_label=owner_label)
-    if spec_error:
-        errors.append(spec_error)
-    elif str(module.WORKFLOW.name or "").strip() != workflow_name:
-        errors.append(f"{owner_label} 的 WORKFLOW.name 必须与文件名一致: {workflow_name}")
-
-    run_func = getattr(module, "run", None)
-    if run_func is None or not callable(run_func):
-        errors.append(f"{owner_label} 缺少可调用导出: run")
-    return errors
-
-
-def _validate_hook_module(module_root: Path, module_name: str, hook_name: str) -> list[str]:
-    owner_label = f"hooks/{hook_name}.py"
-    try:
-        module = _import_module_child(module_root, module_name, "hooks", hook_name)
-    except Exception as exc:
-        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
-    handle = getattr(module, "handle", None)
-    if handle is None or not callable(handle):
-        return [f"{owner_label} 缺少可调用导出: handle"]
-    return []
-
-
-def _validate_selector_module(module_root: Path, module_name: str, selector_name: str) -> list[str]:
-    owner_label = f"env_selectors/{selector_name}.py"
-    try:
-        module = _import_module_child(module_root, module_name, "env_selectors", selector_name)
-    except Exception as exc:
-        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"]
-
-    errors: list[str] = []
-    spec_error = _validate_exported_spec(module, "SELECTOR", EnvSelectorSpec, owner_label=owner_label)
-    if spec_error:
-        errors.append(spec_error)
-    elif str(module.SELECTOR.name or "").strip() != selector_name:
-        errors.append(f"{owner_label} 的 SELECTOR.name 必须与文件名一致: {selector_name}")
-
-    select = getattr(module, "select", None)
-    if select is None or not callable(select):
-        errors.append(f"{owner_label} 缺少可调用导出: select")
-    return errors
-
-
 def _validate_page_module(
     module_root: Path,
-    module_name: str,
     page_name: str,
 ) -> tuple[list[str], str | None, dict[str, Any] | None]:
     owner_label = _page_owner_label(page_name)
+    page_path = module_root / "pages" / Path(*page_name.split(".")).with_suffix(".py")
     try:
-        module = _import_module_child(module_root, module_name, "pages", page_name)
-    except Exception as exc:
-        return [f"{owner_label} 无法导入: {exc.__class__.__name__}: {exc}"], None, None
+        tree = ast.parse(page_path.read_text(encoding="utf-8"), filename=str(page_path))
+    except SyntaxError as exc:
+        return [f"{owner_label} 语法错误: {exc}"], None, None
+    except OSError as exc:
+        return [f"{owner_label} 无法读取: {exc}"], None, None
 
     errors: list[str] = []
-    spec_error = _validate_exported_spec(module, "PAGE", PageSpec, owner_label=owner_label)
+    handlers = _collect_page_handlers(tree)
+    page_spec, spec_error = _extract_page_spec(tree)
     if spec_error:
         return [spec_error], None, None
+    if page_spec is None:
+        return [f"{owner_label} 缺少 PAGE，或类型不是 PageSpec"], None, None
 
-    page_spec = module.PAGE
-    page_id = str(page_spec.id or "").strip()
+    page_id = str(page_spec.get("id") or "").strip()
     if not is_valid_name(page_id):
         errors.append(f"{owner_label} 的 PAGE.id 必须是小写 snake_case: {page_id or '<empty>'}")
         return errors, None, None
 
     try:
-        schema = normalize_page_schema(page_id, dict(page_spec.schema or {}))
+        schema = normalize_page_schema(page_id, dict(page_spec.get("schema") or {}))
     except ValueError as exc:
         errors.append(f"宿主页 {page_id} schema 无效: {exc}")
         return errors, None, None
 
     load_handler_name = str(schema.get("load_handler", "") or "").strip()
-    load_handler = getattr(module, load_handler_name, None)
-    if load_handler is None or not callable(load_handler):
+    load_handler = handlers.get(load_handler_name)
+    if load_handler is None:
         errors.append(f"宿主页 {page_id} 的 load_handler 未在 {owner_label} 中定义: {load_handler_name}")
-    elif inspect.iscoroutinefunction(load_handler):
+    elif isinstance(load_handler, ast.AsyncFunctionDef):
         errors.append(f"宿主页 {page_id} 的 load_handler 必须是同步函数: {load_handler_name}")
 
-    errors.extend(_validate_inline_table_handlers(module, page_id, schema, owner_label=owner_label))
+    errors.extend(_validate_inline_table_handlers(handlers, page_id, schema, owner_label=owner_label))
     return errors, page_id, schema
+
+
+def _collect_page_handlers(tree: ast.Module) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    handlers: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            handlers[node.name] = node
+    return handlers
+
+
+def _extract_page_spec(tree: ast.Module) -> tuple[dict[str, Any] | None, str | None]:
+    for node in tree.body:
+        value: ast.expr | None = None
+        if isinstance(node, ast.Assign):
+            if any(isinstance(target, ast.Name) and target.id == "PAGE" for target in node.targets):
+                value = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "PAGE":
+            value = node.value
+        if value is None:
+            continue
+        return _literal_pagespec(value)
+    return None, None
+
+
+def _literal_pagespec(node: ast.expr) -> tuple[dict[str, Any] | None, str | None]:
+    if not isinstance(node, ast.Call) or _call_name(node.func) != "PageSpec":
+        return None, "PAGE 必须直接声明为 PageSpec(...)"
+    if node.args:
+        return None, "PAGE 的 PageSpec 声明不支持位置参数"
+    values: dict[str, Any] = {}
+    for keyword in node.keywords:
+        if keyword.arg is None:
+            return None, "PAGE 的 PageSpec 声明不支持 **kwargs"
+        try:
+            values[keyword.arg] = ast.literal_eval(keyword.value)
+        except (TypeError, ValueError) as exc:
+            return None, f"PAGE.{keyword.arg} 必须使用字面量声明: {exc}"
+    return values, None
+
+
+def _call_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
 
 
 def _render_yaml(data: Any) -> str:
@@ -926,9 +684,7 @@ def _load_host_runtime() -> dict[str, Any]:
         from src.core.mms import get_module_registry, get_module_release_service
         from src.core.debug import ensure_vscode_attach_config
     except ImportError as exc:  # pragma: no cover - depends on runtime environment
-        raise CLIError(
-            "当前环境缺少 crawler4j 宿主运行时；host 命令只能在安装了 crawler4j 客户端的环境里使用"
-        ) from exc
+        raise CLIError("当前环境缺少 crawler4j 宿主运行时；host 命令只能在安装了 crawler4j 客户端的环境里使用") from exc
 
     runtime: dict[str, Any] = {
         "init_database": init_database,
@@ -1014,9 +770,7 @@ def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
         unknown_keys = sorted(set(item) - {"id", "label", "icon"})
         if unknown_keys:
             page_label = str(item.get("id", "") or "").strip() or "<empty>"
-            errors.append(
-                f"ui_extension.pages[{page_label}] 包含不支持的字段: {', '.join(unknown_keys)}"
-            )
+            errors.append(f"ui_extension.pages[{page_label}] 包含不支持的字段: {', '.join(unknown_keys)}")
 
         page_id = str(item.get("id", "") or "").strip()
         if not is_valid_name(page_id):
@@ -1051,103 +805,12 @@ def _collect_legacy_hosted_ui_errors(module_root: Path) -> list[str]:
     return errors
 
 
-def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _collect_workflow_parameter_errors(manifest: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    workflows = manifest.get("workflows", [])
-    if not isinstance(workflows, list):
-        return errors
-
-    for workflow in workflows:
-        if not isinstance(workflow, dict):
-            continue
-        workflow_name = str(workflow.get("name", "") or "<unknown>").strip() or "<unknown>"
-        raw_parameters = workflow.get("parameters", [])
-        if raw_parameters is None:
-            continue
-        if not isinstance(raw_parameters, list):
-            errors.append(f"workflows[{workflow_name}].parameters 必须是数组")
-            continue
-
-        seen_names: set[str] = set()
-        for index, parameter in enumerate(raw_parameters):
-            owner = f"workflows[{workflow_name}].parameters[{index}]"
-            if not isinstance(parameter, dict):
-                errors.append(f"{owner} 必须是 YAML 映射对象")
-                continue
-
-            unknown_keys = sorted(set(parameter) - WORKFLOW_PARAMETER_KEYS)
-            if unknown_keys:
-                errors.append(f"{owner} 包含不支持的字段: {', '.join(unknown_keys)}")
-
-            parameter_name = str(parameter.get("name", "") or "").strip()
-            parameter_owner = (
-                f"workflows[{workflow_name}].parameters[{parameter_name}]"
-                if parameter_name
-                else owner
-            )
-            if not is_valid_name(parameter_name):
-                errors.append(f"{owner}.name 必须是小写 snake_case")
-            elif parameter_name in seen_names:
-                errors.append(f"workflows[{workflow_name}].parameters.name 重复: {parameter_name}")
-            else:
-                seen_names.add(parameter_name)
-
-            parameter_type = str(parameter.get("type", "string") or "string").strip().lower()
-            if parameter_type not in WORKFLOW_PARAMETER_TYPES:
-                errors.append(f"{parameter_owner}.type 不受支持: {parameter_type}")
-                continue
-
-            options = parameter.get("options", [])
-            if options is None:
-                options = []
-            if parameter_type == "enum":
-                if not isinstance(options, list):
-                    errors.append(f"{parameter_owner}.options 必须是数组")
-                elif not options:
-                    errors.append(f"{parameter_owner}.options 不能为空")
-                else:
-                    seen_values: set[str] = set()
-                    for option_index, option in enumerate(options):
-                        option_owner = f"{parameter_owner}.options[{option_index}]"
-                        if isinstance(option, dict):
-                            unknown_option_keys = sorted(set(option) - WORKFLOW_PARAMETER_OPTION_KEYS)
-                            if unknown_option_keys:
-                                errors.append(
-                                    f"{option_owner} 包含不支持的字段: {', '.join(unknown_option_keys)}"
-                                )
-                            if "value" not in option:
-                                errors.append(f"{option_owner}.value 不能为空")
-                                continue
-                            value_key = json.dumps(option.get("value"), ensure_ascii=False, sort_keys=True)
-                        else:
-                            value_key = json.dumps(option, ensure_ascii=False, sort_keys=True)
-                        if value_key in seen_values:
-                            errors.append(f"{parameter_owner}.options.value 不能重复: {value_key}")
-                        seen_values.add(value_key)
-
-            if parameter_type in {"integer", "number"}:
-                for numeric_key in ("min", "max", "step"):
-                    if numeric_key in parameter and parameter[numeric_key] is not None:
-                        value = parameter[numeric_key]
-                        if parameter_type == "integer":
-                            if not isinstance(value, int) or isinstance(value, bool):
-                                errors.append(f"{parameter_owner}.{numeric_key} 必须是整数")
-                        elif not _is_number(value):
-                            errors.append(f"{parameter_owner}.{numeric_key} 必须是数字")
-
-    return errors
-
-
 def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
     """Collect structure-level validation errors."""
     errors: list[str] = []
 
     required_files = ["module.yaml", "__init__.py"]
-    required_dirs = ["tasks", "workflows"]
+    required_dirs = ["interfaces", "objects", "workflows", "tasks", "data", "pages"]
     for name in required_files:
         if not (module_root / name).exists():
             errors.append(f"缺少关键文件: {name}")
@@ -1160,35 +823,11 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
     if str(manifest.get("runtime_api", "")).strip() != REQUIRED_RUNTIME_API:
         errors.append(f"module.yaml.runtime_api 必须是 {REQUIRED_RUNTIME_API}")
     if (module_root / "module_runtime.py").exists():
-        errors.append("core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py")
-    if "sdk_version_range" in manifest:
-        errors.append("module.yaml 不再允许声明 sdk_version_range")
-
-    workflow_names = _manifest_workflow_names(manifest)
-    if not workflow_names:
-        errors.append("module.yaml.workflows 不能为空")
-    else:
-        for workflow_name in workflow_names:
-            if not is_valid_name(workflow_name):
-                errors.append(f"无效的 workflow 名称: {workflow_name}")
-                continue
-            if not (module_root / "workflows" / f"{workflow_name}.py").exists():
-                errors.append(f"module.yaml 声明的 workflow 缺少源码文件: workflows/{workflow_name}.py")
-
-    default_workflow = _manifest_default_workflow(manifest)
-    if not default_workflow:
-        errors.append("module.yaml 缺少 default_workflow")
-    elif default_workflow not in workflow_names:
-        errors.append(f"default_workflow 未在 module.yaml.workflows 中声明: {default_workflow}")
-
-    declared = set(workflow_names)
-    files = set(_list_python_modules(module_root / "workflows"))
-    for extra in sorted(files - declared):
-        errors.append(f"workflows/{extra}.py 未写入 module.yaml.workflows")
-
-    errors.extend(_collect_workflow_parameter_errors(manifest))
+        errors.append("core-native-v2 模块不允许保留旧运行时薄壳: module_runtime.py")
+    for key in ("sdk_version_range", "default_workflow", "workflows", "data", "interfaces", "objects", "tasks"):
+        if key in manifest:
+            errors.append(f"module.yaml 不再允许声明 {key}；请使用 core-native-v2 装饰器")
     errors.extend(_validate_ui_extension(manifest))
-    errors.extend(_collect_data_contract_errors(module_root, manifest))
     errors.extend(_collect_legacy_hosted_ui_errors(module_root))
     return errors
 
@@ -1214,10 +853,9 @@ def collect_release_errors(module_root: Path, manifest: dict[str, Any]) -> list[
 
     try:
         config_defaults = _normalize_config_defaults(dict(manifest))
-        declared_workflows = set(_manifest_workflow_names(manifest))
-        for workflow_name in config_defaults["workflows"]:
-            if workflow_name not in declared_workflows:
-                errors.append(f"config_defaults.workflows 包含未声明的 workflow: {workflow_name}")
+        workflow_defaults = config_defaults.get("workflows", {})
+        if workflow_defaults:
+            errors.append("core-native-v2 不再支持 config_defaults.workflows；对象参数应保存在运行模板")
     except CLIError as exc:
         errors.append(str(exc))
 
@@ -1230,8 +868,7 @@ def collect_release_errors(module_root: Path, manifest: dict[str, Any]) -> list[
         else:
             if project_version != version:
                 errors.append(
-                    "pyproject.toml [project].version 必须与 module.yaml.version 一致: "
-                    f"{project_version} != {version}"
+                    f"pyproject.toml [project].version 必须与 module.yaml.version 一致: {project_version} != {version}"
                 )
 
     module_name = str(manifest.get("name", "")).strip()
@@ -1240,44 +877,14 @@ def collect_release_errors(module_root: Path, manifest: dict[str, Any]) -> list[
     return errors
 
 
-def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
-    """Collect importability and runtime-level validation errors."""
-    errors = collect_release_errors(module_root, manifest)
-    if errors:
-        return errors
-
-    module_name = _resolve_module_import_name(module_root, manifest)
-    try:
-        _import_module_root(module_root, module_name)
-    except Exception as exc:  # pragma: no cover - exercised by tests via failure paths
-        return [f"模块无法导入: {exc.__class__.__name__}: {exc}"]
-
-    for task_name in _list_python_modules(module_root / "tasks"):
-        errors.extend(_validate_task_module(module_root, module_name, task_name))
-
-    workflow_names = _manifest_workflow_names(manifest)
-    for workflow_name in workflow_names:
-        errors.extend(_validate_workflow_module(module_root, module_name, workflow_name))
-
-    for hook_name in _list_python_modules(module_root / "hooks"):
-        errors.extend(_validate_hook_module(module_root, module_name, hook_name))
-
-    selector_files = _list_python_modules(module_root / "env_selectors")
-    for selector_name in selector_files:
-        errors.extend(_validate_selector_module(module_root, module_name, selector_name))
-        try:
-            _import_module_child(module_root, module_name, "env_selectors", selector_name)
-        except Exception:
-            continue
-
+def _collect_hosted_page_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
     declared_pages = {
-        str(item.get("id", "")).strip()
-        for item in _manifest_ui_pages(manifest)
-        if str(item.get("id", "")).strip()
+        str(item.get("id", "")).strip() for item in _manifest_ui_pages(manifest) if str(item.get("id", "")).strip()
     }
     discovered_pages: dict[str, str] = {}
     for page_name in _list_python_modules(module_root / "pages", recursive=True):
-        page_errors, page_id, schema = _validate_page_module(module_root, module_name, page_name)
+        page_errors, page_id, schema = _validate_page_module(module_root, page_name)
         errors.extend(page_errors)
         if not page_id or not schema:
             continue
@@ -1289,18 +896,41 @@ def collect_full_errors(module_root: Path, manifest: dict[str, Any]) -> list[str
         discovered_pages[page_id] = owner_label
 
     missing_pages = sorted(declared_pages - set(discovered_pages))
-    errors.extend(
-        f"module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: {page_id}"
-        for page_id in missing_pages
-    )
-    errors.extend(_collect_legacy_db_tool_usage_errors(module_root))
-    errors.extend(_collect_removed_task_context_usage_errors(module_root))
-
+    errors.extend(f"module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: {page_id}" for page_id in missing_pages)
     return errors
 
 
-def _iter_module_python_trees(module_root: Path):
-    for path in sorted(module_root.rglob("*.py")):
+def collect_full_errors(
+    module_root: Path,
+    manifest: dict[str, Any],
+    *,
+    require_manifest_lock: bool = False,
+) -> list[str]:
+    """Collect importability and runtime-level validation errors."""
+    errors = collect_release_errors(module_root, manifest)
+    errors.extend(scan_v2_module(module_root, manifest).error_messages())
+    errors.extend(_collect_hosted_page_errors(module_root, manifest))
+    errors.extend(_collect_legacy_db_tool_usage_errors(module_root, v2_runtime=True))
+    errors.extend(_collect_removed_task_context_usage_errors(module_root, v2_runtime=True))
+    if require_manifest_lock and not errors:
+        errors.extend(_collect_manifest_lock_errors(module_root, manifest))
+    return errors
+
+
+def _iter_module_python_trees(module_root: Path, *, v2_runtime: bool = False):
+    if v2_runtime:
+        paths: list[Path] = []
+        root_init = module_root / "__init__.py"
+        if root_init.exists():
+            paths.append(root_init)
+        for directory_name in V2_SCAN_DIRECTORIES:
+            directory = module_root / directory_name
+            if directory.exists():
+                paths.extend(path for path in directory.rglob("*.py") if path.name != "__init__.py")
+    else:
+        paths = list(module_root.rglob("*.py"))
+
+    for path in sorted(paths):
         relative = path.relative_to(module_root)
         if any(part in {".venv", "__pycache__", ".pytest_cache", ".ruff_cache"} for part in relative.parts):
             continue
@@ -1312,13 +942,12 @@ def _iter_module_python_trees(module_root: Path):
         yield relative, tree
 
 
-def _collect_legacy_db_tool_usage_errors(module_root: Path) -> list[str]:
+def _collect_legacy_db_tool_usage_errors(module_root: Path, *, v2_runtime: bool = False) -> list[str]:
     errors: list[str] = []
-    for relative, tree in _iter_module_python_trees(module_root):
+    for relative, tree in _iter_module_python_trees(module_root, v2_runtime=v2_runtime):
         legacy_calls = sorted(_collect_legacy_db_tool_call_lines(tree), key=int)
         errors.extend(
-            f"{relative}:{line_no} 使用了已删除的旧数据库工具入口；请改用 ctx.db fluent API"
-            for line_no in legacy_calls
+            f"{relative}:{line_no} 使用了已删除的旧数据库工具入口；请改用 ctx.db fluent API" for line_no in legacy_calls
         )
     return errors
 
@@ -1421,10 +1050,9 @@ def _bound_argument_names(node: ast.AST) -> set[str]:
 
 
 def _is_tools_reference(node: ast.AST, aliases: set[str]) -> bool:
-    return (
-        isinstance(node, ast.Attribute)
-        and node.attr == "tools"
-    ) or (isinstance(node, ast.Name) and node.id in aliases)
+    return (isinstance(node, ast.Attribute) and node.attr == "tools") or (
+        isinstance(node, ast.Name) and node.id in aliases
+    )
 
 
 def _is_legacy_db_tool_call(node: ast.AST, aliases: set[str] | None = None) -> bool:
@@ -1438,12 +1066,14 @@ def _is_legacy_db_tool_call(node: ast.AST, aliases: set[str] | None = None) -> b
     if not node.args:
         return False
     first_arg = node.args[0]
-    return isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str) and first_arg.value.startswith("db.")
+    return (
+        isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str) and first_arg.value.startswith("db.")
+    )
 
 
-def _collect_removed_task_context_usage_errors(module_root: Path) -> list[str]:
+def _collect_removed_task_context_usage_errors(module_root: Path, *, v2_runtime: bool = False) -> list[str]:
     errors: list[str] = []
-    for relative, tree in _iter_module_python_trees(module_root):
+    for relative, tree in _iter_module_python_trees(module_root, v2_runtime=v2_runtime):
         captured_data_accesses = sorted(
             (node.lineno for node in ast.walk(tree) if _is_removed_captured_data_access(node)),
             key=int,
@@ -1474,7 +1104,7 @@ def _iter_inline_tables(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _validate_inline_table_handlers(
-    owner_module: Any,
+    handlers: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     page_id: str,
     page_schema: dict[str, Any],
     *,
@@ -1495,7 +1125,7 @@ def _validate_inline_table_handlers(
             continue
         table_id = str(table_schema.get("table_id") or "").strip()
         error = _validate_runtime_handler(
-            owner_module,
+            handlers,
             owner_label=f"{owner_label} 的内联表格 {table_id or '<empty>'}",
             handler_field="data_source.handler",
             handler_name=handler_name,
@@ -1508,7 +1138,7 @@ def _validate_inline_table_handlers(
 
 
 def _validate_runtime_handler(
-    owner_module: Any,
+    handlers: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     *,
     owner_label: str,
     handler_field: str,
@@ -1516,138 +1146,55 @@ def _validate_runtime_handler(
     runtime_call_label: str,
     call_args: tuple[Any, ...],
 ) -> str | None:
-    handler = getattr(owner_module, handler_name, None)
-    if handler is None or not callable(handler):
+    handler = handlers.get(handler_name)
+    if handler is None:
         return f"{owner_label} 的 {handler_field} 未定义: {handler_name}"
-    handler_call = getattr(handler, "__call__", None)
-    if inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(handler_call):
+    if isinstance(handler, ast.AsyncFunctionDef):
         return f"{owner_label} 的 {handler_field} 必须是同步函数: {handler_name}"
-    try:
-        signature = inspect.signature(handler)
-    except (TypeError, ValueError) as exc:
-        return f"{owner_label} 的 {handler_field} 无法解析签名: {handler_name} ({exc})"
-    try:
-        signature.bind(object(), *call_args)
-    except TypeError:
-        return (
-            f"{owner_label} 的 {handler_field} 签名不兼容，"
-            f"运行时会按 {runtime_call_label} 调用: {handler_name}"
-        )
+    if not _function_accepts_positional_count(handler, len(call_args) + 1):
+        return f"{owner_label} 的 {handler_field} 签名不兼容，运行时会按 {runtime_call_label} 调用: {handler_name}"
     return None
+
+
+def _function_accepts_positional_count(node: ast.FunctionDef, positional_count: int) -> bool:
+    args = node.args
+    positional_args = list(args.posonlyargs) + list(args.args)
+    required_count = len(positional_args) - len(args.defaults)
+    if positional_count < required_count:
+        return False
+    return bool(args.vararg) or positional_count <= len(positional_args)
 
 
 def cmd_data_list(args: argparse.Namespace) -> int:
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    data = _normalize_data_section(manifest)
-    for section in ("resources", "views", "queries", "seeds"):
-        entries = data[section]
-        labels = ", ".join(str(item.get("id", "")) for item in entries if isinstance(item, dict) and item.get("id"))
-        print(f"{section}: {labels or '(无)'}")
+    print("tables: " + (", ".join(_v2_declaration_names(module_root, manifest, "data_table")) or "(无)"))
+    print("queries: " + (", ".join(_v2_declaration_names(module_root, manifest, "data_query")) or "(无)"))
     return 0
 
 
-def cmd_data_resource_create(args: argparse.Namespace) -> int:
+def cmd_data_table_create(args: argparse.Namespace) -> int:
     module_root = require_module_root()
-    resource_id = str(args.name or "").strip()
-    if not is_valid_name(resource_id):
-        _print_error("资源名必须是小写 snake_case")
+    name = str(args.name or "").strip()
+    if not is_valid_name(name):
+        _print_error("数据表名必须是小写 snake_case")
         return 1
-    storage_mode = str(args.storage_mode or "managed_dataset").strip().lower()
-    if storage_mode not in {"managed_dataset", "custom_table"}:
-        _print_error("storage_mode 只支持 managed_dataset/custom_table")
-        return 1
-    record_key_field = str(args.record_key_field or "id").strip()
-    if not is_valid_name(record_key_field):
-        _print_error("record_key_field 必须是小写 snake_case")
-        return 1
-
-    manifest = load_manifest(module_root)
     try:
-        payload: dict[str, Any] = {
-            "id": resource_id,
-            "storage_mode": storage_mode,
-            "record_key_field": record_key_field,
-            "indexes": {},
-            "cleanup_policy": "drop_table" if storage_mode == "custom_table" else "delete_rows",
-        }
-        if storage_mode == "custom_table":
-            payload["schema"] = {
-                "version": 1,
-                "columns": [
-                    {"key": record_key_field, "type": "text", "required": True},
-                ],
-            }
-        else:
-            payload["schema"] = {
-                "version": 1,
-                "columns": [
-                    {"key": record_key_field, "type": "text", "required": True},
-                ],
-            }
-        _append_unique_data_entry(manifest, "resources", resource_id, payload)
-        save_manifest(module_root, manifest)
-    except CLIError as exc:
-        _print_error(str(exc))
-        return 1
-
-    _print_success(f"已登记数据资源: {resource_id}")
-    return 0
-
-
-def cmd_data_view_create(args: argparse.Namespace) -> int:
-    module_root = require_module_root()
-    view_id = str(args.name or "").strip()
-    if not is_valid_name(view_id):
-        _print_error("视图名必须是小写 snake_case")
-        return 1
-
-    manifest = load_manifest(module_root)
-    try:
-        source_ids, first_resource = _resolve_custom_table_sources(
-            manifest,
-            args.source,
-            owner_label="视图",
+        _write_text(
+            module_root / "data" / f"{name}.py",
+            DATA_TABLE_TEMPLATE.format(
+                name=name,
+                class_name=to_class_name(name),
+                display_name=args.display_name or to_display_name(name),
+                description=args.description or f"{to_display_name(name)} 数据表",
+            ),
+            force=args.force,
         )
     except CLIError as exc:
         _print_error(str(exc))
         return 1
-
-    record_key_field = str(first_resource.get("record_key_field") or "id").strip() or "id"
-    sql_path = f"data/sql/views/{view_id}.sql"
-    sql_template = f"SELECT {record_key_field}\nFROM {{{{resource:{source_ids[0]}}}}}\n"
-
-    try:
-        _write_text(module_root / sql_path, sql_template, force=args.force)
-        _append_unique_data_entry(
-            manifest,
-            "views",
-            view_id,
-            {
-                "id": view_id,
-                "view_kind": "sql_view",
-                "source_resource_ids": source_ids,
-                "sql_file": sql_path,
-                "columns": [
-                    {
-                        "name": record_key_field,
-                        "type": "text",
-                        "nullable": False,
-                        "filterable": True,
-                        "sortable": True,
-                    }
-                ],
-                "cleanup_policy": "drop_view",
-                "schema_version": 1,
-            },
-        )
-        save_manifest(module_root, manifest)
-    except CLIError as exc:
-        _print_error(str(exc))
-        return 1
-
-    _print_success(f"已创建视图骨架: {view_id}")
+    _print_success(f"已创建数据表声明: data/{name}.py")
     return 0
 
 
@@ -1657,95 +1204,31 @@ def cmd_data_query_create(args: argparse.Namespace) -> int:
     if not is_valid_name(query_id):
         _print_error("查询名必须是小写 snake_case")
         return 1
-
+    raw_source = args.source[0] if isinstance(args.source, list) else args.source
+    source = str(raw_source or "").strip()
+    if not is_valid_name(source):
+        _print_error("--source 必须是已声明数据表名，且必须是小写 snake_case")
+        return 1
     manifest = load_manifest(module_root)
+    if source not in _v2_declaration_names(module_root, manifest, "data_table"):
+        _print_error(f"未找到数据表声明: {source}")
+        return 1
     try:
-        source_ids, first_resource = _resolve_custom_table_sources(
-            manifest,
-            args.source,
-            owner_label="命名查询",
+        _write_text(
+            module_root / "data" / f"{query_id}.py",
+            DATA_QUERY_TEMPLATE.format(
+                name=query_id,
+                source=source,
+                display_name=args.display_name or to_display_name(query_id),
+                description=args.description or f"{to_display_name(query_id)} 命名查询",
+            ),
+            force=args.force,
         )
     except CLIError as exc:
         _print_error(str(exc))
         return 1
 
-    record_key_field = str(first_resource.get("record_key_field") or "id").strip() or "id"
-    sql_path = f"data/sql/queries/{query_id}.sql"
-    sql_template = (
-        f"SELECT {record_key_field}\n"
-        f"FROM {{{{resource:{source_ids[0]}}}}}\n"
-        f"WHERE {record_key_field} = :{record_key_field}\n"
-        "LIMIT 1\n"
-    )
-    try:
-        _write_text(module_root / sql_path, sql_template, force=args.force)
-        _append_unique_data_entry(
-            manifest,
-            "queries",
-            query_id,
-            {
-                "id": query_id,
-                "source_resource_ids": source_ids,
-                "sql_file": sql_path,
-                "params": [
-                    {"name": record_key_field, "type": "text", "required": True},
-                ],
-                "columns": [
-                    {"name": record_key_field, "type": "text", "nullable": False},
-                ],
-            },
-        )
-        save_manifest(module_root, manifest)
-    except CLIError as exc:
-        _print_error(str(exc))
-        return 1
-
-    _print_success(f"已创建命名查询骨架: {query_id}")
-    return 0
-
-
-def cmd_data_seed_create(args: argparse.Namespace) -> int:
-    module_root = require_module_root()
-    seed_id = str(args.name or "").strip()
-    if not is_valid_name(seed_id):
-        _print_error("种子名必须是小写 snake_case")
-        return 1
-    resource_id = str(args.resource or "").strip()
-    if not is_valid_name(resource_id):
-        _print_error("--resource 必须是已注册资源 ID")
-        return 1
-
-    manifest = load_manifest(module_root)
-    resource = _manifest_resource_entry(manifest, resource_id)
-    if resource is None:
-        _print_error(f"未找到资源: {resource_id}")
-        return 1
-
-    seed_path = f"data/seeds/{seed_id}.json"
-    payload = []
-    if str(resource.get("storage_mode") or "").strip().lower() == "custom_table":
-        payload = [{str(resource.get("record_key_field") or "id"): "sample-id"}]
-
-    try:
-        _write_text(module_root / seed_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n", force=args.force)
-        _append_unique_data_entry(
-            manifest,
-            "seeds",
-            seed_id,
-            {
-                "id": seed_id,
-                "resource_id": resource_id,
-                "file": seed_path,
-                "format": "json",
-                "mode": str(args.mode or "replace_if_empty").strip().lower(),
-            },
-        )
-        save_manifest(module_root, manifest)
-    except CLIError as exc:
-        _print_error(str(exc))
-        return 1
-
-    _print_success(f"已创建种子骨架: {seed_id}")
+    _print_success(f"已创建命名查询声明: data/{query_id}.py")
     return 0
 
 
@@ -1756,7 +1239,7 @@ def _run_check(level: str, module_root: Path) -> int:
     elif level == "release":
         errors = collect_release_errors(module_root, manifest)
     elif level == "full":
-        errors = collect_full_errors(module_root, manifest)
+        errors = collect_full_errors(module_root, manifest, require_manifest_lock=True)
     else:  # pragma: no cover - parser guards this
         raise CLIError(f"未知校验级别: {level}")
 
@@ -1784,9 +1267,12 @@ def _archive_members(module_root: Path, archive_root: str) -> list[tuple[Path, s
         "dist",
     }
     ignored_files = {".DS_Store"}
+    root = module_root.resolve()
     members: list[tuple[Path, str]] = []
     for path in module_root.rglob("*"):
         relative = path.relative_to(module_root)
+        if path.is_symlink():
+            raise CLIError(f"模块文件不能是符号链接: {relative.as_posix()}")
         if any(part in ignored_dirs for part in relative.parts):
             continue
         if any(part.endswith(".egg-info") for part in relative.parts):
@@ -1797,6 +1283,10 @@ def _archive_members(module_root: Path, archive_root: str) -> list[tuple[Path, s
             continue
         if path.suffix in {".pyc", ".pyo"}:
             continue
+        try:
+            path.resolve().relative_to(root)
+        except ValueError as exc:
+            raise CLIError(f"模块文件路径越界: {relative.as_posix()}") from exc
         arcname = f"{archive_root}/{relative.as_posix()}"
         members.append((path, arcname))
     return members
@@ -1814,10 +1304,56 @@ def _validate_archive_structure(archive_path: Path) -> tuple[str, list[str]]:
         return root_dir, names
 
 
+def _validate_zip_member(info: zipfile.ZipInfo, *, seen: set[str]) -> str:
+    name = info.filename
+    if not name or name.startswith("__MACOSX/"):
+        return ""
+    if "\\" in name:
+        raise CLIError(f"ZIP 包含非法反斜杠路径: {name}")
+    pure = PurePosixPath(name)
+    if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
+        raise CLIError(f"ZIP 包含非法路径: {name}")
+    normalized = pure.as_posix()
+    if normalized in seen:
+        raise CLIError(f"ZIP 包含重复路径: {normalized}")
+    seen.add(normalized)
+    mode = info.external_attr >> 16
+    if stat.S_ISLNK(mode):
+        raise CLIError(f"ZIP 包含不允许的符号链接: {normalized}")
+    return normalized
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, target_dir: Path) -> None:
+    infos = zf.infolist()
+    if len(infos) > MAX_ZIP_ENTRIES:
+        raise CLIError(f"ZIP 条目过多: {len(infos)} > {MAX_ZIP_ENTRIES}")
+    seen: set[str] = set()
+    total_size = 0
+    root = target_dir.resolve()
+    for info in infos:
+        normalized = _validate_zip_member(info, seen=seen)
+        if not normalized:
+            continue
+        total_size += int(info.file_size)
+        if total_size > MAX_ZIP_UNCOMPRESSED_BYTES:
+            raise CLIError("ZIP 解压后体积超过限制")
+        destination = (root / normalized).resolve()
+        try:
+            destination.relative_to(root)
+        except ValueError as exc:
+            raise CLIError(f"ZIP 解压路径越界: {normalized}") from exc
+        if info.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info, "r") as source, destination.open("wb") as target:
+            shutil.copyfileobj(source, target)
+
+
 def _extract_archive_to_temp(archive_path: Path) -> Path:
     temp_dir = Path(tempfile.mkdtemp(prefix="crawler4j_sdk_verify_"))
     with zipfile.ZipFile(archive_path, "r") as zf:
-        zf.extractall(temp_dir)
+        _safe_extract_zip(zf, temp_dir)
     root_dir, _ = _validate_archive_structure(archive_path)
     return temp_dir / root_dir
 
@@ -1879,10 +1415,67 @@ def _fetch_latest_release(
     raise CLIError(f"仓库 {repo} 没有稳定版 GitHub Release")
 
 
+def _prompt_required_value(
+    prompt: str,
+    *,
+    validator,
+    invalid_message: str,
+) -> str:
+    while True:
+        try:
+            value = input(f"{prompt}: ").strip()
+        except EOFError as exc:
+            raise CLIError(
+                f"缺少必填参数: {prompt}。可在交互式终端运行 `crawler4j module init`，"
+                "或一次性传入 `crawler4j module init <name> --repo owner/repo`。"
+            ) from exc
+        if not value:
+            _print_error(f"{prompt} 是必填项")
+            continue
+        if not validator(value):
+            _print_error(invalid_message)
+            continue
+        return value
+
+
+def _resolve_module_init_args(args: argparse.Namespace) -> tuple[str, str]:
+    module_name = str(getattr(args, "name", "") or "").strip()
+    if not module_name:
+        module_name = _prompt_required_value(
+            "模块包名（snake_case）",
+            validator=is_valid_name,
+            invalid_message="模块名必须是小写 snake_case，并且能作为 Python 包名导入",
+        )
+
+    repo = str(getattr(args, "repo", "") or "").strip()
+    if not repo:
+        repo = _prompt_required_value(
+            "升级源 GitHub 仓库（owner/repo）",
+            validator=is_valid_repo,
+            invalid_message="仓库必须是 owner/repo 形式",
+        )
+
+    runtime_api = str(getattr(args, "runtime_api", None) or CORE_NATIVE_V2_RUNTIME_API).strip()
+    if runtime_api != CORE_NATIVE_V2_RUNTIME_API:
+        raise CLIError(f"--runtime-api 只支持 {CORE_NATIVE_V2_RUNTIME_API}")
+
+    args.name = module_name
+    args.repo = repo
+    args.runtime_api = runtime_api
+    args.version = str(getattr(args, "version", None) or DEFAULT_MODULE_VERSION).strip()
+    args.workflow_name = str(getattr(args, "workflow_name", None) or "main_workflow").strip()
+    args.python_version = str(getattr(args, "python_version", None) or DEFAULT_PYTHON_VERSION).strip()
+    return module_name, repo
+
+
 def cmd_module_init(args: argparse.Namespace) -> int:
     """Initialize a new module project."""
-    module_name = str(args.name or "").strip()
-    repo = str(args.repo or "").strip()
+    try:
+        module_name, repo = _resolve_module_init_args(args)
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+
     if not is_valid_name(module_name):
         _print_error("模块名必须是小写 snake_case，并且能作为 Python 包名导入")
         return 1
@@ -1890,7 +1483,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
         _print_error("`--repo` 必须是 owner/repo 形式")
         return 1
     if not is_valid_name(args.workflow_name):
-        _print_error("默认工作流名必须是小写 snake_case")
+        _print_error("初始工作流名必须是小写 snake_case")
         return 1
     if not is_valid_semver(args.version):
         _print_error("模块版本必须是合法语义化版本号")
@@ -1913,17 +1506,14 @@ def cmd_module_init(args: argparse.Namespace) -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     for subdir in [
+        ".crawler4j",
+        "interfaces",
+        "objects",
         "tasks",
         "workflows",
         "pages",
-        "hooks",
-        "env_selectors",
         "tests",
         "data",
-        "data/sql",
-        "data/sql/views",
-        "data/sql/queries",
-        "data/seeds",
     ]:
         (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -1952,12 +1542,27 @@ def cmd_module_init(args: argparse.Namespace) -> int:
         )
         _write_text(
             output_dir / "tasks" / "__init__.py",
-            "",
+            MODEL_TASKS_INIT_TEMPLATE,
             force=args.force,
         )
         _write_text(
             output_dir / "workflows" / "__init__.py",
-            "",
+            MODEL_WORKFLOWS_INIT_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "interfaces" / "__init__.py",
+            MODEL_INTERFACES_INIT_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "objects" / "__init__.py",
+            MODEL_OBJECTS_INIT_TEMPLATE,
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "data" / "__init__.py",
+            MODEL_DATA_INIT_TEMPLATE,
             force=args.force,
         )
         _write_text(
@@ -1966,13 +1571,24 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             force=args.force,
         )
         _write_text(
-            output_dir / "hooks" / "__init__.py",
-            MODEL_HOOKS_INIT_TEMPLATE,
+            output_dir / "interfaces" / "labor.py",
+            INTERFACE_TEMPLATE.format(
+                name="labor",
+                class_name="Labor",
+                display_name="示例能力",
+                description="示例可注入能力接口",
+            ),
             force=args.force,
         )
         _write_text(
-            output_dir / "env_selectors" / "__init__.py",
-            MODEL_SELECTORS_INIT_TEMPLATE,
+            output_dir / "objects" / "api_labor.py",
+            COMPONENT_TEMPLATE.format(
+                name="api_labor",
+                implements="labor",
+                class_name="ApiLabor",
+                display_name="示例能力实现",
+                description="示例可注入组件实现",
+            ),
             force=args.force,
         )
         _write_text(
@@ -1990,11 +1606,31 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             force=args.force,
         )
         _write_text(
-            output_dir / "tasks" / "example_task.py",
+            output_dir / "data" / "accounts.py",
+            DATA_TABLE_TEMPLATE.format(
+                name="accounts",
+                class_name="Accounts",
+                display_name="示例账号",
+                description="示例账号数据表",
+            ),
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "data" / "get_account_by_id.py",
+            DATA_QUERY_TEMPLATE.format(
+                name="get_account_by_id",
+                source="accounts",
+                display_name="按 ID 获取账号",
+                description="示例账号命名查询",
+            ),
+            force=args.force,
+        )
+        _write_text(
+            output_dir / "tasks" / "example_action.py",
             SCRIPT_TEMPLATE.format(
-                name="example_task",
-                display_name="示例任务",
-                description="示例任务脚本",
+                name="example_action",
+                display_name="示例页面操作",
+                description="示例页面操作函数",
             ),
             force=args.force,
         )
@@ -2002,31 +1638,17 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             output_dir / "workflows" / f"{args.workflow_name}.py",
             WORKFLOW_TEMPLATE.format(
                 name=args.workflow_name,
+                class_name=to_class_name(args.workflow_name),
                 display_name=workflow_display_name,
                 description=workflow_description,
             ),
-            force=args.force,
-        )
-        for hook_name in HOOK_NAMES:
-            _write_text(
-                output_dir / "hooks" / f"{hook_name}.py",
-                render_hook_template(hook_name),
-                force=args.force,
-            )
-        _write_text(
-            output_dir / "env_selectors" / "return_none.py",
-            RETURN_NONE_SELECTOR_TEMPLATE,
-            force=args.force,
-        )
-        _write_text(
-            output_dir / "env_selectors" / "random_ready.py",
-            RANDOM_READY_SELECTOR_TEMPLATE,
             force=args.force,
         )
         _write_text(output_dir / "tests" / "test_tasks.py", MODEL_TEST_TASK_TEMPLATE, force=args.force)
         _write_text(output_dir / "tests" / "__init__.py", "", force=args.force)
         _write_text(output_dir / ".gitignore", MODEL_GITIGNORE_TEMPLATE, force=args.force)
         _write_text(output_dir / ".python-version", f"{args.python_version}\n", force=args.force)
+        _write_manifest_lock(output_dir, load_manifest(output_dir))
     except CLIError as exc:
         _print_error(str(exc))
         return 1
@@ -2042,13 +1664,14 @@ def cmd_module_init(args: argparse.Namespace) -> int:
 
     _print_success(f"已初始化模块项目: {output_dir}")
     print("  - 命令入口: `crawler4j module show`")
-    print("  - 新建任务: `crawler4j task create <name>`")
+    print("  - 新建接口: `crawler4j interface create <name>`")
+    print("  - 新建组件: `crawler4j component create <name> --implements <interface>`")
     print("  - 新建工作流: `crawler4j workflow create <name>`")
+    print("  - 新建页面操作: `crawler4j page-action create <name>`")
     print("  - 新建页面: `crawler4j page create <page_id>`")
-    print("  - 新建 Hook: `crawler4j hook create <hook_name>`")
-    print("  - 新建选择器: `crawler4j env-selector create <name>`")
-    print("  - 新建数据资源: `crawler4j data resource create <name>`")
-    print("  - 新建命名查询: `crawler4j data query create <name> --source <resource>`")
+    print("  - 新建数据表: `crawler4j data table create <name>`")
+    print("  - 新建命名查询: `crawler4j data query create <name> --source <data_table>`")
+    print("  - 更新 lock: `crawler4j manifest lock`")
     print("  - 完整校验: `crawler4j check full`")
     return 0
 
@@ -2059,29 +1682,25 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     module_root = require_module_root()
     manifest = load_manifest(module_root)
     hosted_pages = _manifest_ui_pages(manifest)
-    workflow_names = _manifest_workflow_names(manifest)
-    default_workflow = _manifest_default_workflow(manifest) or (workflow_names[0] if workflow_names else "")
+    result = _v2_scan(module_root, manifest)
+    declarations_by_kind: dict[str, list[str]] = {}
+    for declaration in result.declarations:
+        declarations_by_kind.setdefault(declaration.kind, []).append(declaration.name)
 
     print(f"模块目录: {module_root}")
     print(f"模块名: {manifest.get('name', '')}")
     print(f"运行时协议: {manifest.get('runtime_api', '')}")
     print(f"版本: {manifest.get('version', '')}")
     print(f"仓库: {(manifest.get('upgrade_source') or {}).get('repo', '')}")
-    print(f"默认工作流: {default_workflow}")
-    print(f"任务: {', '.join(_list_python_modules(module_root / 'tasks')) or '(无)'}")
-    print(f"工作流: {', '.join(workflow_names) or '(无)'}")
-    print(
-        "宿主页: "
-        + (
-            ", ".join(str(item.get("id", "")) for item in hosted_pages if item.get("id"))
-            or "(无)"
-        )
-    )
-    data = manifest.get("data") if isinstance(manifest.get("data"), dict) else {}
-    for section in ("resources", "views", "queries", "seeds"):
-        items = data.get(section)
-        count = len(items) if isinstance(items, list) else 0
-        print(f"数据 {section}: {count}")
+    print(f"接口: {', '.join(sorted(declarations_by_kind.get('interface', []))) or '(无)'}")
+    print(f"组件: {', '.join(sorted(declarations_by_kind.get('component', []))) or '(无)'}")
+    print(f"工作流: {', '.join(sorted(declarations_by_kind.get('workflow', []))) or '(无)'}")
+    print(f"页面操作: {', '.join(sorted(declarations_by_kind.get('page_action', []))) or '(无)'}")
+    print("宿主页: " + (", ".join(str(item.get("id", "")) for item in hosted_pages if item.get("id")) or "(无)"))
+    print(f"数据表: {len(declarations_by_kind.get('data_table', []))}")
+    print(f"命名查询: {len(declarations_by_kind.get('data_query', []))}")
+    if result.diagnostics:
+        print(f"诊断: {len(result.diagnostics)}")
     return 0
 
 
@@ -2122,20 +1741,6 @@ def cmd_module_set_version(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_module_set_default_workflow(args: argparse.Namespace) -> int:
-    """Set module.yaml.default_workflow."""
-    module_root = require_module_root()
-    manifest = load_manifest(module_root)
-    workflow_name = str(args.workflow or "").strip()
-    if workflow_name not in _manifest_workflow_names(manifest):
-        _print_error(f"未声明的 workflow: {workflow_name}")
-        return 1
-    manifest["default_workflow"] = workflow_name
-    save_manifest(module_root, manifest)
-    _print_success(f"已设置默认工作流: {workflow_name}")
-    return 0
-
-
 def cmd_module_repair_init(args: argparse.Namespace) -> int:
     """Rebuild the module root __init__.py from the current standard template."""
     del args
@@ -2154,12 +1759,91 @@ def cmd_module_repair_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_task_create(args: argparse.Namespace) -> int:
-    """Create a task script under tasks/."""
+def cmd_interface_create(args: argparse.Namespace) -> int:
+    """Create a core-native-v2 interface declaration."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
     if not is_valid_name(name):
-        _print_error("任务名必须是小写 snake_case")
+        _print_error("接口名必须是小写 snake_case")
+        return 1
+    try:
+        _write_text(
+            module_root / "interfaces" / f"{name}.py",
+            INTERFACE_TEMPLATE.format(
+                name=name,
+                class_name=to_class_name(name),
+                display_name=args.display_name or to_display_name(name),
+                description=args.description or f"{to_display_name(name)} 接口",
+            ),
+            force=args.force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+    _print_success(f"已创建接口声明: interfaces/{name}.py")
+    return 0
+
+
+def cmd_interface_list(args: argparse.Namespace) -> int:
+    """List core-native-v2 interface declarations."""
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    names = _v2_declaration_names(module_root, manifest, "interface")
+    print("\n".join(names) if names else "(无接口)")
+    return 0
+
+
+def cmd_component_create(args: argparse.Namespace) -> int:
+    """Create a core-native-v2 component declaration."""
+    module_root = require_module_root()
+    name = str(args.name or "").strip()
+    implements = str(args.implements or "").strip()
+    if not is_valid_name(name):
+        _print_error("组件名必须是小写 snake_case")
+        return 1
+    if not is_valid_name(implements):
+        _print_error("--implements 必须是已声明接口名，且必须是小写 snake_case")
+        return 1
+    manifest = load_manifest(module_root)
+    if implements not in _v2_declaration_names(module_root, manifest, "interface"):
+        _print_error(f"未找到接口声明: {implements}")
+        return 1
+    try:
+        _write_text(
+            module_root / "objects" / f"{name}.py",
+            COMPONENT_TEMPLATE.format(
+                name=name,
+                implements=implements,
+                class_name=to_class_name(name),
+                display_name=args.display_name or to_display_name(name),
+                description=args.description or f"{to_display_name(name)} 组件",
+            ),
+            force=args.force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+    _print_success(f"已创建组件声明: objects/{name}.py")
+    return 0
+
+
+def cmd_component_list(args: argparse.Namespace) -> int:
+    """List core-native-v2 component declarations."""
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    names = _v2_declaration_names(module_root, manifest, "component")
+    print("\n".join(names) if names else "(无组件)")
+    return 0
+
+
+def cmd_task_create(args: argparse.Namespace) -> int:
+    """Create a page action under tasks/."""
+    module_root = require_module_root()
+    name = str(args.name or "").strip()
+    if not is_valid_name(name):
+        _print_error("页面操作名必须是小写 snake_case")
         return 1
     try:
         _write_text(
@@ -2167,39 +1851,40 @@ def cmd_task_create(args: argparse.Namespace) -> int:
             SCRIPT_TEMPLATE.format(
                 name=name,
                 display_name=to_display_name(name),
-                description=f"{to_display_name(name)} 任务",
+                description=f"{to_display_name(name)} 页面操作",
             ),
             force=args.force,
         )
     except CLIError as exc:
         _print_error(str(exc))
         return 1
-    _print_success(f"已创建任务脚本: tasks/{name}.py")
+    _print_success(f"已创建页面操作: tasks/{name}.py")
     return 0
 
 
 def cmd_task_list(args: argparse.Namespace) -> int:
-    """List task scripts in the current module."""
+    """List page actions in the current module."""
     del args
     module_root = require_module_root()
-    tasks = _list_python_modules(module_root / "tasks")
-    print("\n".join(tasks) if tasks else "(无任务)")
+    manifest = load_manifest(module_root)
+    tasks = _v2_declaration_names(module_root, manifest, "page_action")
+    print("\n".join(tasks) if tasks else "(无页面操作)")
     return 0
 
 
 def cmd_workflow_create(args: argparse.Namespace) -> int:
-    """Create a workflow file and register it in module.yaml."""
+    """Create a core-native-v2 workflow declaration."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
     if not is_valid_name(name):
         _print_error("工作流名必须是小写 snake_case")
         return 1
-    manifest = load_manifest(module_root)
     try:
         _write_text(
             module_root / "workflows" / f"{name}.py",
             WORKFLOW_TEMPLATE.format(
                 name=name,
+                class_name=to_class_name(name),
                 display_name=args.display_name or to_display_name(name),
                 description=args.description or f"{to_display_name(name)} 工作流",
             ),
@@ -2208,29 +1893,16 @@ def cmd_workflow_create(args: argparse.Namespace) -> int:
     except CLIError as exc:
         _print_error(str(exc))
         return 1
-
-    workflows = _manifest_workflows(manifest)
-    if not any(isinstance(item, dict) and item.get("name") == name for item in workflows):
-        workflows.append(
-            {
-                "name": name,
-                "display_name": args.display_name or to_display_name(name),
-                "description": args.description or f"{to_display_name(name)} 工作流",
-            }
-        )
-    if not _manifest_default_workflow(manifest):
-        manifest["default_workflow"] = name
-    save_manifest(module_root, manifest)
     _print_success(f"已创建工作流: workflows/{name}.py")
     return 0
 
 
 def cmd_workflow_list(args: argparse.Namespace) -> int:
-    """List workflows declared in module.yaml."""
+    """List core-native-v2 workflow declarations."""
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    names = _manifest_workflow_names(manifest)
+    names = _v2_declaration_names(module_root, manifest, "workflow")
     print("\n".join(names) if names else "(无工作流)")
     return 0
 
@@ -2313,99 +1985,12 @@ def cmd_page_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_env_selector_create(args: argparse.Namespace) -> int:
-    """Create a new env-selector module under env_selectors/."""
-    module_root = require_module_root()
-    name = str(args.name or "").strip()
-    force = bool(getattr(args, "force", False))
-    if not is_valid_name(name):
-        _print_error("环境选择器名必须是小写 snake_case")
-        return 1
-    _ensure_package_dir(module_root / "env_selectors")
-    selector_path = module_root / "env_selectors" / f"{name}.py"
-    if selector_path.exists() and not force:
-        _print_error(f"环境选择器已存在: {name}")
-        return 1
-    try:
-        _write_text(
-            selector_path,
-            render_selector_template(
-                name=name,
-                display_name=args.display_name or to_display_name(name),
-                description=args.description or f"{to_display_name(name)} 环境选择器",
-            ),
-            force=force,
-        )
-    except CLIError as exc:
-        _print_error(str(exc))
-        return 1
-    _print_success(f"已创建环境选择器: env_selectors/{name}.py")
-    return 0
-
-
-def cmd_env_selector_list(args: argparse.Namespace) -> int:
-    """List env-selector declarations."""
-    del args
-    module_root = require_module_root()
-    manifest = load_manifest(module_root)
-    module_name = _resolve_module_import_name(module_root, manifest)
-    selectors: list[str] = []
-    for selector_name in _list_python_modules(module_root / "env_selectors"):
-        try:
-            module = _import_module_child(module_root, module_name, "env_selectors", selector_name)
-        except Exception as exc:
-            _print_error(f"读取环境选择器失败: {exc.__class__.__name__}: {exc}")
-            return 1
-        selector = getattr(module, "SELECTOR", None)
-        if not isinstance(selector, EnvSelectorSpec):
-            _print_error(f"env_selectors/{selector_name}.py 缺少 SELECTOR")
-            return 1
-        selectors.append(selector.name)
-
-    print("\n".join(selectors) if selectors else "(无环境选择器)")
-    return 0
-
-
-def cmd_hook_create(args: argparse.Namespace) -> int:
-    """Create or refresh a lifecycle hook scaffold under hooks/."""
-    module_root = require_module_root()
-    name = str(args.name or "").strip()
-    force = bool(getattr(args, "force", False))
-    if not _is_known_hook(name):
-        _print_error("Hook 名必须是标准生命周期入口之一")
-        return 1
-
-    _ensure_package_dir(module_root / "hooks")
-
-    try:
-        _write_text(
-            module_root / "hooks" / f"{name}.py",
-            render_hook_template(name),
-            force=force,
-        )
-    except CLIError as exc:
-        _print_error(str(exc))
-        return 1
-
-    _print_success(f"已创建 Hook 骨架: hooks/{name}.py")
-    return 0
-
-
-def cmd_hook_list(args: argparse.Namespace) -> int:
-    """List lifecycle hook files in hooks/."""
-    del args
-    module_root = require_module_root()
-    hooks = _list_python_modules(module_root / "hooks")
-    print("\n".join(hooks) if hooks else "(无 Hook)")
-    return 0
-
-
 def cmd_config_show(args: argparse.Namespace) -> int:
     """Show config_defaults from module.yaml."""
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    config_defaults = manifest.get("config_defaults") or {"module": {}, "workflows": {}}
+    config_defaults = manifest.get("config_defaults") or {"module": {}}
     print(_render_yaml(config_defaults))
     return 0
 
@@ -2421,23 +2006,6 @@ def cmd_config_set_module(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_config_set_workflow(args: argparse.Namespace) -> int:
-    """Set workflow-level default config from a YAML file."""
-    module_root = require_module_root()
-    manifest = load_manifest(module_root)
-    workflow_name = str(args.workflow or "").strip()
-    if workflow_name not in _manifest_workflow_names(manifest):
-        _print_error(f"未声明的 workflow: {workflow_name}")
-        return 1
-    config_defaults = _normalize_config_defaults(manifest)
-    config_defaults["workflows"][workflow_name] = _load_yaml_mapping(
-        Path(args.file).expanduser().resolve()
-    )
-    save_manifest(module_root, manifest)
-    _print_success(f"已更新工作流默认配置: {workflow_name}")
-    return 0
-
-
 def cmd_config_lint(args: argparse.Namespace) -> int:
     """Validate config_defaults structure and workflow references."""
     del args
@@ -2447,13 +2015,31 @@ def cmd_config_lint(args: argparse.Namespace) -> int:
     test_manifest = dict(manifest)
     test_manifest["config_defaults"] = config_defaults
     errors = collect_release_errors(module_root, test_manifest)
-    config_errors = [item for item in errors if item.startswith("config_defaults")]
+    config_errors = [
+        item for item in errors if item.startswith("config_defaults") or "config_defaults.workflows" in item
+    ]
     if config_errors:
         _print_error("默认配置校验失败")
         for item in config_errors:
             print(f"  - {item}")
         return 1
     _print_success("默认配置校验通过")
+    return 0
+
+
+def cmd_manifest_lock(args: argparse.Namespace) -> int:
+    """Write .crawler4j/manifest.lock.json from v2 decorator scan."""
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    errors = collect_full_errors(module_root, manifest)
+    if errors:
+        _print_error("manifest lock 生成失败")
+        for item in errors:
+            print(f"  - {item}")
+        return 1
+    lock_path = _write_manifest_lock(module_root, manifest)
+    _print_success(f"已更新 manifest lock: {lock_path.relative_to(module_root).as_posix()}")
     return 0
 
 
@@ -2464,6 +2050,7 @@ def cmd_package_build(args: argparse.Namespace) -> int:
         return 1
 
     manifest = load_manifest(module_root)
+    _write_manifest_lock(module_root, manifest)
     archive_root = _resolve_module_import_name(module_root, manifest)
     version = str(manifest.get("version", "") or "").strip()
     output = (
@@ -2499,7 +2086,7 @@ def cmd_package_verify(args: argparse.Namespace) -> int:
         _validate_archive_structure(archive_path)
         extracted_root = _extract_archive_to_temp(archive_path)
         manifest = load_manifest(extracted_root)
-        errors = collect_full_errors(extracted_root, manifest)
+        errors = collect_full_errors(extracted_root, manifest, require_manifest_lock=True)
     except (CLIError, zipfile.BadZipFile) as exc:
         _print_error(str(exc))
         return 1
@@ -2898,11 +2485,7 @@ def cmd_host_upgrade_apply(args: argparse.Namespace) -> int:
 def cmd_host_debug_config(args: argparse.Namespace) -> int:
     """Generate or update a VS Code attach configuration for module debugging."""
     runtime = _load_host_runtime()
-    source_path = (
-        Path(args.module_root).expanduser().resolve()
-        if args.module_root
-        else require_module_root()
-    )
+    source_path = Path(args.module_root).expanduser().resolve() if args.module_root else require_module_root()
     launch_path = runtime["ensure_vscode_attach_config"](
         source_path,
         host=args.host,
@@ -2947,10 +2530,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_init = module_sub.add_parser(
         "init",
-        help="初始化一个新的模块项目，生成 core-native-v1 标准骨架与 module.yaml",
+        help="初始化一个新的模块项目，生成 core-native-v2 标准骨架与 module.yaml",
     )
-    module_init.add_argument("name", help="模块包名，必须是 snake_case")
-    module_init.add_argument("--repo", required=True, help="升级源 GitHub 仓库，格式 owner/repo")
+    module_init.add_argument("name", nargs="?", help="模块包名，必须是 snake_case；省略时进入交互式输入")
+    module_init.add_argument("--repo", help="升级源 GitHub 仓库，格式 owner/repo；省略时进入交互式输入")
     module_init.add_argument("--output", help="输出目录，默认在当前目录下创建同名目录")
     module_init.add_argument("--display-name", help="模块显示名")
     module_init.add_argument("--description", help="模块说明")
@@ -2959,6 +2542,12 @@ def build_parser() -> argparse.ArgumentParser:
     module_init.add_argument("--workflow-display-name", help="初始工作流显示名")
     module_init.add_argument("--workflow-description", help="初始工作流说明")
     module_init.add_argument("--python-version", default=DEFAULT_PYTHON_VERSION, help="目标 Python 版本")
+    module_init.add_argument(
+        "--runtime-api",
+        default=CORE_NATIVE_V2_RUNTIME_API,
+        choices=[CORE_NATIVE_V2_RUNTIME_API],
+        help="运行时协议；0.4.x 只支持 core-native-v2",
+    )
     module_init.add_argument("--no-git", action="store_true", help="不要执行 git init")
     module_init.add_argument("--no-install", action="store_true", help="不要执行 uv sync")
     module_init.add_argument("--force", action="store_true", help="允许覆盖脚手架管理文件")
@@ -2966,7 +2555,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     module_show = module_sub.add_parser(
         "show",
-        help="显示当前模块的版本、仓库、默认工作流和宿主页入口",
+        help="显示当前模块的版本、仓库、v2 声明和宿主页入口",
     )
     module_show.set_defaults(func=cmd_module_show)
 
@@ -2978,60 +2567,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     data_parser = subparsers.add_parser(
         "data",
-        help="数据契约操作：维护 module.yaml.data 以及 data/sql、data/seeds 脚手架",
+        help="数据契约操作：创建 core-native-v2 data_table / data_query 装饰器声明",
     )
     data_sub = data_parser.add_subparsers(dest="action")
 
     data_list = data_sub.add_parser(
         "list",
-        help="列出当前模块已声明的数据资源、视图、命名查询和种子",
+        help="列出当前模块已声明的数据表和命名查询",
     )
     data_list.set_defaults(func=cmd_data_list)
 
-    data_resource = data_sub.add_parser(
-        "resource",
-        help="创建并登记 module.yaml.data.resources 条目",
+    data_table = data_sub.add_parser(
+        "table",
+        help="创建 @data_table 声明文件",
     )
-    data_resource_sub = data_resource.add_subparsers(dest="subaction")
-    data_resource_create = data_resource_sub.add_parser(
+    data_table_sub = data_table.add_subparsers(dest="subaction")
+    data_table_create = data_table_sub.add_parser(
         "create",
-        help="创建一个数据资源骨架",
+        help="创建一个数据表声明",
     )
-    data_resource_create.add_argument("name", help="资源名，snake_case")
-    data_resource_create.add_argument(
-        "--storage-mode",
-        default="managed_dataset",
-        help="存储模式：managed_dataset 或 custom_table",
-    )
-    data_resource_create.add_argument(
-        "--record-key-field",
-        default="id",
-        help="记录主键字段，默认 id",
-    )
-    data_resource_create.set_defaults(func=cmd_data_resource_create)
-
-    data_view = data_sub.add_parser(
-        "view",
-        help="创建并登记 module.yaml.data.views 条目及 SQL 文件",
-    )
-    data_view_sub = data_view.add_subparsers(dest="subaction")
-    data_view_create = data_view_sub.add_parser(
-        "create",
-        help="创建一个数据库视图骨架",
-    )
-    data_view_create.add_argument("name", help="视图名，snake_case")
-    data_view_create.add_argument(
-        "--source",
-        action="append",
-        required=True,
-        help="来源资源 ID，可重复传入多个；仅支持 custom_table",
-    )
-    data_view_create.add_argument("--force", action="store_true", help="允许覆盖已有 SQL 文件")
-    data_view_create.set_defaults(func=cmd_data_view_create)
+    data_table_create.add_argument("name", help="数据表名，snake_case")
+    data_table_create.add_argument("--display-name", help="显示名")
+    data_table_create.add_argument("--description", help="说明")
+    data_table_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    data_table_create.set_defaults(func=cmd_data_table_create)
 
     data_query = data_sub.add_parser(
         "query",
-        help="创建并登记 module.yaml.data.queries 条目及 SQL 文件",
+        help="创建 @data_query 声明文件",
     )
     data_query_sub = data_query.add_subparsers(dest="subaction")
     data_query_create = data_query_sub.add_parser(
@@ -3041,32 +2604,13 @@ def build_parser() -> argparse.ArgumentParser:
     data_query_create.add_argument("name", help="查询名，snake_case")
     data_query_create.add_argument(
         "--source",
-        action="append",
         required=True,
-        help="来源资源 ID，可重复传入多个；仅支持 custom_table",
+        help="来源 data_table 名称",
     )
-    data_query_create.add_argument("--force", action="store_true", help="允许覆盖已有 SQL 文件")
+    data_query_create.add_argument("--display-name", help="显示名")
+    data_query_create.add_argument("--description", help="说明")
+    data_query_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     data_query_create.set_defaults(func=cmd_data_query_create)
-
-    data_seed = data_sub.add_parser(
-        "seed",
-        help="创建并登记 module.yaml.data.seeds 条目及种子文件",
-    )
-    data_seed_sub = data_seed.add_subparsers(dest="subaction")
-    data_seed_create = data_seed_sub.add_parser(
-        "create",
-        help="创建一个种子文件骨架",
-    )
-    data_seed_create.add_argument("name", help="种子名，snake_case")
-    data_seed_create.add_argument("--resource", required=True, help="目标资源 ID")
-    data_seed_create.add_argument(
-        "--mode",
-        default="replace_if_empty",
-        choices=["replace", "replace_if_empty"],
-        help="导入模式",
-    )
-    data_seed_create.add_argument("--force", action="store_true", help="允许覆盖已有种子文件")
-    data_seed_create.set_defaults(func=cmd_data_seed_create)
 
     module_set = module_sub.add_parser(
         "set",
@@ -3088,43 +2632,62 @@ def build_parser() -> argparse.ArgumentParser:
     module_set_version.add_argument("version", help="语义化版本号")
     module_set_version.set_defaults(func=cmd_module_set_version)
 
-    module_set_default_workflow = module_set_sub.add_parser(
-        "default-workflow",
-        help="设置 module.yaml.default_workflow",
+    interface_parser = subparsers.add_parser(
+        "interface",
+        help="接口声明操作：在 interfaces/ 中创建或列出 @interface",
     )
-    module_set_default_workflow.add_argument("workflow", help="已声明的 workflow 名称")
-    module_set_default_workflow.set_defaults(func=cmd_module_set_default_workflow)
+    interface_sub = interface_parser.add_subparsers(dest="action")
+    interface_create = interface_sub.add_parser("create", help="创建 @interface 声明")
+    interface_create.add_argument("name", help="接口名，snake_case")
+    interface_create.add_argument("--display-name", help="显示名")
+    interface_create.add_argument("--description", help="说明")
+    interface_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    interface_create.set_defaults(func=cmd_interface_create)
+    interface_list = interface_sub.add_parser("list", help="列出 @interface 声明")
+    interface_list.set_defaults(func=cmd_interface_list)
 
-    task_parser = subparsers.add_parser(
-        "task",
-        help="任务脚本操作：在 tasks/ 下创建或列出 TASK/execute 文件",
+    component_parser = subparsers.add_parser(
+        "component",
+        help="组件声明操作：在 objects/ 中创建或列出 @component",
     )
-    task_sub = task_parser.add_subparsers(dest="action")
-    task_create = task_sub.add_parser(
-        "create",
-        help="创建一个新的 TASK/execute 文件，不会修改 module.yaml",
+    component_sub = component_parser.add_subparsers(dest="action")
+    component_create = component_sub.add_parser("create", help="创建 @component 声明")
+    component_create.add_argument("name", help="组件名，snake_case")
+    component_create.add_argument("--implements", required=True, help="实现的接口名")
+    component_create.add_argument("--display-name", help="显示名")
+    component_create.add_argument("--description", help="说明")
+    component_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    component_create.set_defaults(func=cmd_component_create)
+    component_list = component_sub.add_parser("list", help="列出 @component 声明")
+    component_list.set_defaults(func=cmd_component_list)
+
+    page_action_parser = subparsers.add_parser(
+        "page-action",
+        help="页面操作：在 tasks/ 下创建或列出 @page_action 函数",
     )
-    task_create.add_argument("name", help="任务名，snake_case")
-    task_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
-    task_create.set_defaults(func=cmd_task_create)
-    task_list = task_sub.add_parser("list", help="列出 tasks/ 下的任务脚本")
-    task_list.set_defaults(func=cmd_task_list)
+    page_action_sub = page_action_parser.add_subparsers(dest="action")
+    page_action_create = page_action_sub.add_parser("create", help="创建一个新的 @page_action 函数")
+    page_action_create.add_argument("name", help="页面操作名，snake_case")
+    page_action_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    page_action_create.set_defaults(func=cmd_task_create)
+    page_action_list = page_action_sub.add_parser("list", help="列出 @page_action")
+    page_action_list.set_defaults(func=cmd_task_list)
 
     workflow_parser = subparsers.add_parser(
         "workflow",
-        help="工作流操作：创建 workflow 文件并维护 module.yaml.workflows",
+        help="工作流操作：在 workflows/ 下创建或列出 @workflow",
     )
     workflow_sub = workflow_parser.add_subparsers(dest="action")
     workflow_create = workflow_sub.add_parser(
         "create",
-        help="创建工作流文件，并把 workflow 注册进 module.yaml",
+        help="创建 @workflow 声明文件",
     )
     workflow_create.add_argument("name", help="工作流名，snake_case")
     workflow_create.add_argument("--display-name", help="工作流显示名")
     workflow_create.add_argument("--description", help="工作流说明")
     workflow_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     workflow_create.set_defaults(func=cmd_workflow_create)
-    workflow_list = workflow_sub.add_parser("list", help="列出 module.yaml 中声明的工作流")
+    workflow_list = workflow_sub.add_parser("list", help="列出 @workflow 声明")
     workflow_list.set_defaults(func=cmd_workflow_list)
 
     page_parser = subparsers.add_parser(
@@ -3146,38 +2709,6 @@ def build_parser() -> argparse.ArgumentParser:
     page_list = page_sub.add_parser("list", help="列出 ui_extension.pages 中的左侧菜单入口")
     page_list.set_defaults(func=cmd_page_list)
 
-    selector_parser = subparsers.add_parser(
-        "env-selector",
-        help="环境选择器操作：在 env_selectors/ 中声明 SELECTOR/select 文件",
-    )
-    selector_sub = selector_parser.add_subparsers(dest="action")
-    selector_create = selector_sub.add_parser(
-        "create",
-        help="创建一个环境选择策略文件，用于 ATM 的“选择环境”模式",
-    )
-    selector_create.add_argument("name", help="选择器名，snake_case")
-    selector_create.add_argument("--display-name", help="显示名")
-    selector_create.add_argument("--description", help="说明")
-    selector_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
-    selector_create.set_defaults(func=cmd_env_selector_create)
-    selector_list = selector_sub.add_parser("list", help="列出模块声明的环境选择器")
-    selector_list.set_defaults(func=cmd_env_selector_list)
-
-    hook_parser = subparsers.add_parser(
-        "hook",
-        help="生命周期 Hook 操作：在 hooks/ 中生成标准 Hook 文件",
-    )
-    hook_sub = hook_parser.add_subparsers(dest="action")
-    hook_create = hook_sub.add_parser(
-        "create",
-        help="创建或重建一个标准生命周期 Hook 文件",
-    )
-    hook_create.add_argument("name", choices=HOOK_NAMES, help="Hook 名")
-    hook_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
-    hook_create.set_defaults(func=cmd_hook_create)
-    hook_list = hook_sub.add_parser("list", help="列出 hooks/ 下已有的 Hook 文件")
-    hook_list.set_defaults(func=cmd_hook_list)
-
     config_parser = subparsers.add_parser(
         "config",
         help="默认配置操作：管理 module.yaml.config_defaults",
@@ -3187,7 +2718,7 @@ def build_parser() -> argparse.ArgumentParser:
     config_show.set_defaults(func=cmd_config_show)
     config_set = config_sub.add_parser(
         "set",
-        help="从 YAML 文件写入模块级或工作流级默认配置",
+        help="从 YAML 文件写入模块级默认配置",
     )
     config_set_sub = config_set.add_subparsers(dest="scope")
     config_set_module = config_set_sub.add_parser(
@@ -3196,18 +2727,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     config_set_module.add_argument("--file", required=True, help="YAML 文件路径")
     config_set_module.set_defaults(func=cmd_config_set_module)
-    config_set_workflow = config_set_sub.add_parser(
-        "workflow",
-        help="把 YAML 文件写入 config_defaults.workflows.<workflow>",
-    )
-    config_set_workflow.add_argument("workflow", help="已声明的 workflow 名称")
-    config_set_workflow.add_argument("--file", required=True, help="YAML 文件路径")
-    config_set_workflow.set_defaults(func=cmd_config_set_workflow)
     config_lint = config_sub.add_parser(
         "lint",
-        help="校验 config_defaults 的 YAML 结构和 workflow 引用是否正确",
+        help="校验 config_defaults 的 YAML 结构是否正确",
     )
     config_lint.set_defaults(func=cmd_config_lint)
+
+    manifest_parser = subparsers.add_parser(
+        "manifest",
+        help="manifest 辅助操作",
+    )
+    manifest_sub = manifest_parser.add_subparsers(dest="action")
+    manifest_lock = manifest_sub.add_parser(
+        "lock",
+        help="扫描 core-native-v2 装饰器并生成 .crawler4j/manifest.lock.json",
+    )
+    manifest_lock.set_defaults(func=cmd_manifest_lock)
 
     package_parser = subparsers.add_parser(
         "package",
@@ -3216,7 +2751,7 @@ def build_parser() -> argparse.ArgumentParser:
     package_sub = package_parser.add_subparsers(dest="action")
     package_build = package_sub.add_parser(
         "build",
-        help="构建正式安装 ZIP；会先执行 release 级校验",
+        help="构建正式安装 ZIP；会先执行 full gate 并刷新 manifest lock",
     )
     package_build.add_argument("--output", help="输出 ZIP 路径，默认 dist/<module>-<version>.zip")
     package_build.set_defaults(func=cmd_package_build)
@@ -3387,7 +2922,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_sub = check_parser.add_subparsers(dest="level")
     check_structure = check_sub.add_parser(
         "structure",
-        help="检查 module.yaml、core-native-v1 目录结构、workflow 声明和 UI 入口格式",
+        help="检查 module.yaml、core-native-v2 目录结构和 UI 入口格式",
     )
     check_structure.set_defaults(func=cmd_check_structure)
     check_release = check_sub.add_parser(
@@ -3397,7 +2932,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_release.set_defaults(func=cmd_check_release)
     check_full = check_sub.add_parser(
         "full",
-        help="在 release 基础上再尝试导入模块文件并校验 TASK/WORKFLOW/SELECTOR/PAGE 导出，作为完整 gate",
+        help="在 release 基础上扫描 v2 装饰器并执行完整 gate",
     )
     check_full.set_defaults(func=cmd_check_full)
 

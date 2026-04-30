@@ -39,7 +39,8 @@
 - 0.4.x SDK 不提供 0.3.x 开发命令；不要在 0.4.0 模块里使用 `task create`、`env-selector create`、`hook create` 或 `data resource/view/seed create`
 - Core 是唯一运行时 owner
 - workflow 不接收 `parameters`
-- 普通参数只属于 `@component(parameters=...)` 的对象创建
+- 普通参数只属于 component 对象创建，可写在 `@component(parameters=...)`，也可写成 `Annotated[..., object_param(...)]`
+- 对象注入可写在 `inject=[...]`，也可写成 `Annotated[..., object_inject(...)]`
 - Core 为每个 task/env 创建独立对象图，不共享业务对象实例
 - 数据库唯一入口仍是 `ctx.db`
 - `ctx.tools.call("db.*")` 不是正式能力
@@ -53,7 +54,7 @@
 |---|---|---|
 | 任务 | `tasks/*.py` 导出 `TASK` / `execute` | `tasks/*.py` 承载 `@page_action` 纯函数 |
 | 工作流 | `workflows/*.py` 导出 `WORKFLOW` / `run` | `@workflow` 类，构造函数只接收注入对象 |
-| Workflow 参数 | `module.yaml.workflows[].parameters[]` | 移到具体 `@component(parameters=...)` |
+| Workflow 参数 | `module.yaml.workflows[].parameters[]` | 移到具体 component 的 `parameters` 或 `object_param(...)` 注解 |
 | 数据表 / 查询 | `module.yaml.data` + `data/sql` | `@data_table` / `@data_query` + manifest lock |
 | 页面 | `pages/*.py` 导出 `PAGE` / handler | 页面仍由宿主 schema 渲染，页面动作接入 `@page_action` |
 | Hook / 环境选择器 | `hooks/`、`env_selectors/` 固定导出 | 0.4.x SDK 不提供旧命令；如需等价能力必须走 0.4.0 专属 API 设计 |

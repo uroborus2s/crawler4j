@@ -387,15 +387,7 @@ class ModuleDetailPage(QWidget):
             return page
         
         workflows = self._module.manifest.workflows
-        
-        if not workflows:
-            empty = QLabel("暂无任务链")
-            empty.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 14px;")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(empty)
-            layout.addStretch()
-            return page
-        
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -405,6 +397,16 @@ class ModuleDetailPage(QWidget):
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setSpacing(12)
+
+        if not workflows:
+            empty = QLabel("暂无任务链")
+            empty.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 14px;")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            content_layout.addWidget(empty)
+            content_layout.addStretch()
+            scroll.setWidget(content)
+            layout.addWidget(scroll)
+            return page
         
         for wf in workflows:
             card = QFrame()

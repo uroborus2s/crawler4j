@@ -15,25 +15,42 @@ def test_contracts_root_exports_stable_surface():
         "DatabaseExecutor",
         "EnvAction",
         "EnvCandidate",
-        "EnvSelectorSpec",
+        "CRAWLER4J_META_ATTR",
+        "Crawler4jMeta",
+        "DataTableIndexSpec",
+        "HOST_RESERVED_DATA_FIELDS",
         "HttpClient",
         "ImageInput",
+        "InjectSpec",
+        "ObjectInjectAnnotation",
+        "ObjectParamAnnotation",
         "PageSpec",
+        "ParameterOptionSpec",
+        "ParameterSpec",
         "Point",
         "SliderCaptchaDebugInfo",
         "SliderCaptchaMatchResult",
         "TaskContext",
         "TaskResult",
-        "TaskSpec",
         "TaskSignal",
         "TaskSignalAction",
         "ToolSpec",
         "ToolsCapability",
-        "WorkflowSpec",
+        "component",
+        "data_query",
+        "data_table",
+        "interface",
+        "object_inject",
+        "object_param",
+        "page_action",
+        "workflow",
     }
 
     assert set(crawler4j_contracts.__all__) == expected_exports
     assert not hasattr(crawler4j_contracts, "DefaultHttpClient")
+    assert not hasattr(crawler4j_contracts, "TaskSpec")
+    assert not hasattr(crawler4j_contracts, "WorkflowSpec")
+    assert not hasattr(crawler4j_contracts, "EnvSelectorSpec")
     assert crawler4j_contracts.DatabaseClient is not None
     assert crawler4j_contracts.DatabaseExecutor is not None
     assert crawler4j_contracts.TaskContext is not None

@@ -71,10 +71,11 @@ def test_module_ui_runtime_bridge_reads_page_schema_and_handlers_from_descriptor
             def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None = None):
                 return {"page_id": page_id, "params": params, "mode": context.config.get("mode", "unset")}
             """,
-            "hooks/create_account_from_ui.py": """
-            from crawler4j_contracts import TaskContext
+            "tasks/create_account_from_ui.py": """
+            from crawler4j_contracts import TaskContext, page_action
 
 
+            @page_action(name="create_account_from_ui")
             def handle(context: TaskContext, payload: dict):
                 return {"payload": dict(payload), "mode": context.config.get("mode", "unset")}
             """,
@@ -231,10 +232,11 @@ def test_module_ui_runtime_bridge_reloads_dev_link_descriptor_between_sessions(t
             def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                 return {"version": "v1", "mode": context.config.get("mode")}
             """,
-            "hooks/create_account_from_ui.py": """
-            from crawler4j_contracts import TaskContext
+            "tasks/create_account_from_ui.py": """
+            from crawler4j_contracts import TaskContext, page_action
 
 
+            @page_action(name="create_account_from_ui")
             def handle(context: TaskContext, payload: dict):
                 return {"version": "v1", "mode": context.config.get("mode"), "payload": dict(payload)}
             """,
@@ -275,10 +277,11 @@ def test_module_ui_runtime_bridge_reloads_dev_link_descriptor_between_sessions(t
                 def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                     return {"version": "v2", "mode": context.config.get("mode")}
                 """,
-                "hooks/create_account_from_ui.py": """
-                from crawler4j_contracts import TaskContext
+                "tasks/create_account_from_ui.py": """
+                from crawler4j_contracts import TaskContext, page_action
 
 
+                @page_action(name="create_account_from_ui")
                 def handle(context: TaskContext, payload: dict):
                     return {"version": "v2", "mode": context.config.get("mode"), "payload": dict(payload)}
                 """,

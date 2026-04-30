@@ -70,6 +70,8 @@ class JobDebugDialog(QDialog):
                 **((run_profile.execution.params if run_profile.execution else {}) or {}),
                 **(job.params or {}),
             },
+            object_bindings=dict(run_profile.execution.object_bindings if run_profile.execution else {}),
+            object_params=dict(run_profile.execution.object_params if run_profile.execution else {}),
             timeout=run_profile.execution.timeout if run_profile.execution else 0,
             wait_timeout=run_profile.resource.acquisition.wait_timeout,
         )

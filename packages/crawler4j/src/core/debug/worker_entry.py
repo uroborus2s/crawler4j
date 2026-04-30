@@ -123,6 +123,8 @@ async def main_async(config_path: str) -> int:
         execution_params=dict(payload.get("execution_params") or {}),
         job_params=dict(payload.get("job_params") or {}),
         runtime_params=dict(payload.get("params") or {}),
+        object_bindings=dict(payload.get("object_bindings") or {}),
+        object_params=dict(payload.get("object_params") or {}),
         devel_mode=bool(payload.get("devel_mode", True)),
         state={
             "debug_session_id": payload["id"],
