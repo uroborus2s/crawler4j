@@ -412,7 +412,10 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
     )
     assert commands.cmd_task_create(Namespace(name="open_home_page", force=False)) == 0
     assert (
-        commands.cmd_data_table_create(Namespace(name="orders", display_name=None, description=None, force=False)) == 0
+        commands.cmd_data_table_create(
+            Namespace(name="orders", display_name=None, description=None, storage_mode="custom_table", force=False)
+        )
+        == 0
     )
     assert (
         commands.cmd_data_query_create(
@@ -480,6 +483,27 @@ def test_component_and_query_create_require_declared_targets(tmp_path: Path, mon
     assert "未找到数据表声明: missing_table" in capsys.readouterr().out
 
 
+def test_data_table_create_can_generate_managed_dataset_declaration(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+
+    assert (
+        commands.cmd_data_table_create(
+            Namespace(
+                name="accounts_snapshot",
+                display_name=None,
+                description=None,
+                storage_mode="managed_dataset",
+                force=False,
+            )
+        )
+        == 0
+    )
+
+    table_text = (module_root / "data" / "accounts_snapshot.py").read_text(encoding="utf-8")
+    assert 'storage_mode="managed_dataset"' in table_text
+
+
 def test_manifest_lock_stale_state_blocks_check_and_package_until_refreshed(
     tmp_path: Path,
     monkeypatch,
@@ -515,6 +539,7 @@ def test_build_parser_registers_v2_commands():
     candidate_args = parser.parse_args(["candidate", "create", "ready_accounts"])
     table_args = parser.parse_args(["data", "table", "create", "accounts"])
     query_args = parser.parse_args(["data", "query", "create", "get_account_by_id", "--source", "accounts"])
+    managed_table_args = parser.parse_args(["data", "table", "create", "snapshots", "--storage-mode", "managed_dataset"])
     lock_args = parser.parse_args(["manifest", "lock"])
 
     assert interface_args.func is commands.cmd_interface_create
@@ -522,6 +547,7 @@ def test_build_parser_registers_v2_commands():
     assert action_args.func is commands.cmd_task_create
     assert candidate_args.func is commands.cmd_candidate_create
     assert table_args.func is commands.cmd_data_table_create
+    assert managed_table_args.storage_mode == "managed_dataset"
     assert query_args.func is commands.cmd_data_query_create
     assert query_args.source == "accounts"
     assert lock_args.func is commands.cmd_manifest_lock

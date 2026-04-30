@@ -59,6 +59,7 @@ from crawler4j_sdk.v2_scanner import CORE_NATIVE_V2_RUNTIME_API, V2_SCAN_DIRECTO
 DEFAULT_PYTHON_VERSION = "3.12"
 DEFAULT_MODULE_VERSION = "0.1.0"
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+DATA_TABLE_STORAGE_MODES = {"managed_dataset", "custom_table"}
 SEMVER_RE = re.compile(
     r"^v?"
     r"(?P<major>0|[1-9]\d*)\."
@@ -1004,6 +1005,10 @@ def cmd_data_table_create(args: argparse.Namespace) -> int:
     if not is_valid_name(name):
         _print_error("数据表名必须是小写 snake_case")
         return 1
+    storage_mode = str(getattr(args, "storage_mode", "custom_table") or "custom_table").strip().lower()
+    if storage_mode not in DATA_TABLE_STORAGE_MODES:
+        _print_error("storage_mode 只支持 managed_dataset/custom_table")
+        return 1
     try:
         _write_text(
             module_root / "data" / f"{name}.py",
@@ -1012,6 +1017,7 @@ def cmd_data_table_create(args: argparse.Namespace) -> int:
                 class_name=to_class_name(name),
                 display_name=args.display_name or to_display_name(name),
                 description=args.description or f"{to_display_name(name)} 数据表",
+                storage_mode=storage_mode,
             ),
             force=args.force,
         )
@@ -1448,6 +1454,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
                 class_name="Accounts",
                 display_name="示例账号",
                 description="示例账号数据表",
+                storage_mode="custom_table",
             ),
             force=args.force,
         )
@@ -2480,6 +2487,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="创建一个数据表声明",
     )
     data_table_create.add_argument("name", help="数据表名，snake_case")
+    data_table_create.add_argument(
+        "--storage-mode",
+        choices=sorted(DATA_TABLE_STORAGE_MODES),
+        default="custom_table",
+        help="存储模式，默认 custom_table；低频快照可选 managed_dataset",
+    )
     data_table_create.add_argument("--display-name", help="显示名")
     data_table_create.add_argument("--description", help="说明")
     data_table_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")

@@ -1,5 +1,4 @@
 import inspect
-import json
 from unittest.mock import AsyncMock
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,7 +28,6 @@ def _make_job() -> Job:
         id="job-1",
         name="Demo Job",
         run_profile=_make_run_profile(),
-        params={"city": "Shanghai"},
     )
 
 
@@ -50,7 +48,6 @@ def _make_run_profile() -> RunProfile:
         execution=ExecutionContext(
             module="demo_module",
             workflow="repair",
-            params={"lang": "zh-CN"},
             timeout=180,
         ),
     )
@@ -98,7 +95,6 @@ def test_job_debug_dialog_builds_request_from_form(qtbot, tmp_path):
     page.wait_for_attach_checkbox.setChecked(False)
     page.stop_on_entry_checkbox.setChecked(True)
     page.keep_environment_checkbox.setChecked(True)
-    page.params_editor.setPlainText(json.dumps({"lang": "en", "city": "Paris"}, ensure_ascii=False))
 
     request = page.build_request()
 
@@ -109,7 +105,6 @@ def test_job_debug_dialog_builds_request_from_form(qtbot, tmp_path):
     assert request.wait_for_attach is False
     assert request.stop_on_entry is True
     assert request.keep_environment is True
-    assert request.params == {"lang": "en", "city": "Paris"}
 
 
 def test_job_debug_dialog_copies_attach_address(qtbot, tmp_path):
@@ -159,7 +154,6 @@ def test_job_debug_dialog_uses_public_controls(qtbot, tmp_path):
     assert isinstance(page.wait_for_attach_checkbox, StyledCheckBox)
     assert isinstance(page.stop_on_entry_checkbox, StyledCheckBox)
     assert isinstance(page.keep_environment_checkbox, StyledCheckBox)
-    assert isinstance(page.params_editor, StyledTextEdit)
     assert isinstance(page.logs_view, StyledTextEdit)
 
 

@@ -449,6 +449,9 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, node: ast.ClassDef) -> Crawl
         parameters=_merge_named_specs(meta.parameters, parameters),
         schema=meta.schema,
         indexes=meta.indexes,
+        storage_mode=meta.storage_mode,
+        record_key_field=meta.record_key_field,
+        cleanup_policy=meta.cleanup_policy,
         source=meta.source,
         sql=meta.sql,
         output_schema=meta.output_schema,
@@ -1173,7 +1176,7 @@ def _is_json_like(value: Any) -> bool:
 
 def _validate_data_contracts(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
     diagnostics: list[V2Diagnostic] = []
-    data_tables = {item.name for item in declarations if item.kind == "data_table"}
+    data_tables = {item.name: item for item in declarations if item.kind == "data_table"}
     for declaration in declarations:
         if declaration.kind == "data_table":
             diagnostics.extend(_reserved_schema_field_diagnostics(declaration, declaration.meta.schema, "schema"))
@@ -1189,12 +1192,21 @@ def _validate_data_contracts(declarations: list[V2Declaration]) -> list[V2Diagno
                             )
                         )
         elif declaration.kind == "data_query":
-            if declaration.meta.source and declaration.meta.source not in data_tables:
+            source_table = data_tables.get(declaration.meta.source)
+            if declaration.meta.source and source_table is None:
                 diagnostics.append(
                     V2Diagnostic(
                         code="V2_QUERY_SOURCE_MISSING",
                         location=f"{declaration.symbol}.source",
                         message=f"data query source table is not declared: {declaration.meta.source}",
+                    )
+                )
+            elif source_table is not None and source_table.meta.storage_mode != "custom_table":
+                diagnostics.append(
+                    V2Diagnostic(
+                        code="V2_QUERY_SOURCE_NOT_RELATION",
+                        location=f"{declaration.symbol}.source",
+                        message=f"data query source must be custom_table: {declaration.meta.source}",
                     )
                 )
             diagnostics.extend(

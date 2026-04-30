@@ -32,7 +32,6 @@ FINAL_DEBUG_STATES = {
 @dataclass
 class DebugSessionRequest:
     job_id: str
-    params: dict[str, Any] = field(default_factory=dict)
     timeout: int = 0
     attach_host: str = "127.0.0.1"
     attach_port: int = 5678
@@ -49,9 +48,6 @@ class DebugSession:
     module_name: str = ""
     source_path: str = ""
     workflow: str = "default"
-    execution_params: dict[str, Any] = field(default_factory=dict)
-    job_params: dict[str, Any] = field(default_factory=dict)
-    params: dict[str, Any] = field(default_factory=dict)
     object_bindings: dict[str, str] = field(default_factory=dict)
     object_params: dict[str, dict[str, Any]] = field(default_factory=dict)
     provider: str = "playwright_local"
@@ -96,9 +92,6 @@ class DebugSession:
             "module_name": self.module_name,
             "source_path": self.source_path,
             "workflow": self.workflow,
-            "execution_params": self.execution_params,
-            "job_params": self.job_params,
-            "params": self.params,
             "object_bindings": self.object_bindings,
             "object_params": self.object_params,
             "provider": self.provider,

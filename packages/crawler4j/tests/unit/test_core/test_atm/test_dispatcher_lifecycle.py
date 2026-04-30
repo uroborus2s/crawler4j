@@ -46,7 +46,6 @@ def _build_run_profile(timeout: int = 0) -> RunProfile:
             module="example_module",
             workflow="default",
             timeout=timeout,
-            params={"seed": 1},
         ),
     )
 

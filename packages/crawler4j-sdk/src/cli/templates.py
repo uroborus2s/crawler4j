@@ -143,6 +143,7 @@ uv run crawler4j page create account_detail --group account --no-menu
 
 # 创建数据表 / 查询
 uv run crawler4j data table create accounts
+uv run crawler4j data table create account_snapshots --storage-mode managed_dataset
 uv run crawler4j data query create get_account_by_id --source accounts
 
 # 创建环境候选函数
@@ -166,7 +167,7 @@ uv run crawler4j package build
 - Core 会自行扫描 v2 装饰器生成运行时 descriptor，不会调用模块根 `run()` 或 `declare_ui()`。
 - 对象依赖和 component 参数可以写在装饰器参数里，也可以写成 `Annotated[..., object_inject(...)]` / `Annotated[..., object_param(...)]`。
 - `object_param(...)` 支持标量、enum、array、object、json、date/datetime/time、url、path、secret，并可从常见 Python 注解推断类型。
-- 表与命名查询统一由装饰器声明；旧 `module.yaml.data` 已不再是 0.4.x 运行契约。
+- 表与命名查询统一由装饰器声明；旧 `module.yaml.data` 已不再是 0.4.x 运行契约；快照表需显式 `--storage-mode managed_dataset`。
 - 环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，不使用资源池同步或旧 `env_selectors/`。
 - 批量环境清理由 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数声明；模块只返回 env id，删除由宿主确认后执行。
 """
@@ -257,6 +258,7 @@ from crawler4j_contracts import data_table
     name="{name}",
     label="{display_name}",
     description="{description}",
+    storage_mode="{storage_mode}",
     schema=[
         {{"name": "env_id", "type": "integer", "required": True}},
         {{"name": "account_id", "type": "string", "required": True}},

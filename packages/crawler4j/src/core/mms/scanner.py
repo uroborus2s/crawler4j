@@ -222,23 +222,9 @@ class ModuleScanner:
             )
 
         self._validate_upgrade_source(manifest)
-        self._validate_removed_v2_manifest_state(manifest)
         self._validate_config_defaults(manifest)
 
         return warnings
-
-    def _validate_removed_v2_manifest_state(self, manifest: ModuleManifest) -> None:
-        removed_fields: list[str] = []
-        if manifest.default_workflow:
-            removed_fields.append("default_workflow")
-        if manifest.workflows:
-            removed_fields.append("workflows")
-        if removed_fields:
-            raise ModuleValidationError(
-                f"core-native-v2 不支持 manifest 字段: {', '.join(removed_fields)}",
-                stage="VALIDATE",
-                hint="请删除 0.3 时代的 manifest 声明，运行时对象必须由装饰器声明",
-            )
 
     def _validate_upgrade_source(self, manifest: ModuleManifest) -> None:
         upgrade_source = manifest.upgrade_source

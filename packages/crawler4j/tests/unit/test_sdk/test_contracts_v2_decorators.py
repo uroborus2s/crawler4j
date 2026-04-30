@@ -115,6 +115,8 @@ def test_data_table_and_query_metadata_express_schema_indexes_and_output_schema(
     @data_table(
         name="accounts",
         label="Accounts",
+        storage_mode="managed_dataset",
+        cleanup_policy="keep",
         schema=table_schema,
         indexes=[
             {"name": "by_account", "fields": ["account_id"], "unique": True},
@@ -137,6 +139,8 @@ def test_data_table_and_query_metadata_express_schema_indexes_and_output_schema(
         DataTableIndexSpec(name="by_account", fields=("account_id",), unique=True),
         DataTableIndexSpec(fields=("status",)),
     )
+    assert getattr(AccountsTable, CRAWLER4J_META_ATTR).storage_mode == "managed_dataset"
+    assert getattr(AccountsTable, CRAWLER4J_META_ATTR).cleanup_policy == "keep"
     assert getattr(ready_accounts, CRAWLER4J_META_ATTR).source == "accounts"
 
 

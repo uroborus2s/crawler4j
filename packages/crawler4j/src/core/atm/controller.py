@@ -540,19 +540,12 @@ class JobController:
         execution = run_profile.execution
         acquisition = run_profile.resource.acquisition
         workflow_name = execution.workflow or "default"
-        execution_params = dict(execution.params)
-        job_params = dict(job.params)
-        runtime_params = {**execution_params, **job_params}
         task_config = get_module_settings_store().build_task_config(module_name, workflow_name)
         caps = build_runtime_capabilities(module_name, surface=RUNTIME_SURFACE_ENV_CANDIDATES)
         runtime = {
             "module_name": module_name,
             "workflow": workflow_name,
             "devel_mode": False,
-            "execution_params": deepcopy(execution_params),
-            "job_params": deepcopy(job_params),
-            "runtime_params": deepcopy(runtime_params),
-            "params": deepcopy(runtime_params),
             "object_bindings": deepcopy(execution.object_bindings),
             "object_params": deepcopy(execution.object_params),
             "provider_name": acquisition.provider,

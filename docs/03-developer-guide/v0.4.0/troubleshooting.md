@@ -107,7 +107,7 @@
 
 确认：
 
-1. `@data_table(name="accounts")` 是否被扫描进 lock
+1. `@data_table(name="accounts", storage_mode=...)` 是否被扫描进 lock；旧快照表需要显式 `managed_dataset`
 2. `DataTable.data_source.resource_id` 是否写 `accounts`
 3. handler 是否通过 `ctx.db.from_("accounts")` 查询
 4. 命名查询是否通过 `ctx.db.named(...).bind(...).execute()` 调用

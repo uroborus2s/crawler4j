@@ -121,13 +121,13 @@
 | 持久配置 | `config.db.module_config_entries`；模块运行时只通过 `ctx.get_config()` / `ctx.config` 读取 |
 | 配置编辑格式 | 模块详情页 `配置` 标签统一使用 QScintilla YAML 编辑器；保存前由独立验证层校验 YAML 语法、顶层映射对象与重复键，数据库仍是事实源 |
 | 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
-| 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
+| 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`object_bindings`、`object_params`、`devel_mode`、`creation_params`、`candidates`、`candidate_params`、`env_action` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
 | 页面 schema | 来自运行时 descriptor 中扫描到的 `@page.schema`；`ui.get_page` 只读访问当前已注册 schema |
 | 快照型业务数据 | `@data_table` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`），`custom_table` 落在受控实体表 `module_name_resource_id`，并由装饰器 schema/indexes 描述真实列结构；业务数据统一通过 `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` 访问 |
 | 事件型审计数据 | `data.db.module_audit_events` 独立承载 append-only 审计事件；通过 `ctx.db.audit("dataset")` 访问，不进入 `module_datasets` |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
-| 当前实现说明 | `ctx.db` 已统一要求资源先由 `@data_table` 注册并进入 manifest lock，再按 `storage_mode` 路由；`managed_dataset` 不再按名称隐式落库，且只允许单源读取；`custom_table` 继续使用 schema 驱动的受控实体表，并可在装饰器显式声明后联表、分组和聚合。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单 |
+| 当前实现说明 | `ctx.db` 已统一要求资源先由 `@data_table` 注册并进入 manifest lock，再按 `storage_mode` 路由；`@data_table` 默认 `custom_table`，需要旧快照语义时显式写 `storage_mode="managed_dataset"`；`managed_dataset` 不再按名称隐式落库，且只允许单源读取；`custom_table` 继续使用 schema 驱动的受控实体表，并可在装饰器显式声明后联表、分组和聚合。`@data_query` 只允许引用 `custom_table`。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单 |
 | 关联文档 | `module-config-runtime-data-contract.md` |
 | 关联项 | `CR-003`, `CR-012`, `TASK-026` |
 

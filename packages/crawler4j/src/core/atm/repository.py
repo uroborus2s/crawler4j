@@ -9,12 +9,13 @@
 """
 
 import asyncio
+from copy import deepcopy
 import json
 import time
 from typing import Any, List
 
 from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig
-from src.core.atm.run_profile import RunProfile
+from src.core.atm.run_profile import AcquisitionConfig, CreationConfig, ExecutionContext, ResourceConfig, RunProfile
 from src.core.persistence.database import STATE_DB, get_connection, get_db_path
 
 
@@ -503,6 +504,7 @@ class TaskRepository:
             if "run_profile_json" in row.keys() and row["run_profile_json"]
             else None
         )
+        run_profile_data = _normalize_legacy_run_profile(run_profile_data)
 
         return Job(
             id=row["id"],
@@ -545,3 +547,41 @@ def get_task_repository() -> TaskRepository:
 
 def item_or_empty(item: Any) -> Any:
     return item if item else ""
+
+
+def _filter_model_fields(data: Any, model_cls: Any) -> Any:
+    if not isinstance(data, dict):
+        return data
+    allowed_fields = set(model_cls.model_fields)
+    return {key: value for key, value in data.items() if key in allowed_fields}
+
+
+def _normalize_legacy_run_profile(data: Any) -> Any:
+    """Drop removed 0.4.0 fields from persisted run profiles before validation."""
+    if not isinstance(data, dict):
+        return data
+
+    normalized = _filter_model_fields(deepcopy(data), RunProfile)
+    resource_data = normalized.get("resource")
+    if isinstance(resource_data, dict):
+        resource_data = _filter_model_fields(resource_data, ResourceConfig)
+        acquisition_data = resource_data.get("acquisition")
+        if isinstance(acquisition_data, dict):
+            if not acquisition_data.get("candidates"):
+                for legacy_key in ("selector_name", "env_selector", "resource_pool"):
+                    legacy_value = acquisition_data.get(legacy_key)
+                    if legacy_value:
+                        acquisition_data["candidates"] = legacy_value
+                        break
+            acquisition_data = _filter_model_fields(acquisition_data, AcquisitionConfig)
+            creation_data = acquisition_data.get("creation")
+            if isinstance(creation_data, dict):
+                acquisition_data["creation"] = _filter_model_fields(creation_data, CreationConfig)
+            resource_data["acquisition"] = acquisition_data
+        normalized["resource"] = resource_data
+
+    execution_data = normalized.get("execution")
+    if isinstance(execution_data, dict):
+        normalized["execution"] = _filter_model_fields(execution_data, ExecutionContext)
+
+    return normalized

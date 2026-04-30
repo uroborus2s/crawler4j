@@ -275,8 +275,6 @@ class ModuleUIRuntimeBridge:
         runtime_extra: dict[str, Any] = {}
         if page_id:
             runtime_extra["page_id"] = page_id
-        if params is not None:
-            runtime_extra["params"] = dict(params)
 
         buffer = HostedUIDeclarationBuffer()
         session = self._create_session(
@@ -321,7 +319,6 @@ class ModuleUIRuntimeBridge:
                 session.context,
                 {
                     "page_id": page_id,
-                    "params": normalized_params,
                 },
             ):
                 return self._run_sync_callable(
@@ -360,7 +357,6 @@ class ModuleUIRuntimeBridge:
                 {
                     "page_id": page_id,
                     "table_id": table_id,
-                    "params": normalized_params,
                 },
             ):
                 return self._run_sync_callable(

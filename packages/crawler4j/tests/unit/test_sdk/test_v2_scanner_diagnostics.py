@@ -144,6 +144,8 @@ def unused_accounts(ctx, params=None):
         ("env_candidates", "ctrip_gold_old_account", "candidates.accounts.ctrip_gold_old_account"),
         ("env_cleanup_candidates", "unused_accounts", "cleanups.unused_accounts.unused_accounts"),
     }
+    accounts = next(item for item in result.declarations if item.kind == "data_table")
+    assert accounts.meta.storage_mode == "custom_table"
 
 
 def test_scan_v2_module_merges_class_and_init_annotation_metadata(tmp_path: Path):
@@ -438,6 +440,43 @@ def recent_accounts():
         "data.data_contracts.Accounts.annotations[update_at]",
         "data.data_contracts.recent_accounts.output_schema[update_at]",
     }
+
+
+def test_scan_v2_module_rejects_named_query_over_managed_dataset(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "data" / "data_contracts.py").write_text(
+        """
+from crawler4j_contracts import data_query, data_table
+
+
+@data_table(
+    name="accounts",
+    storage_mode="managed_dataset",
+    schema=[{"name": "account_id", "type": "string"}],
+)
+class Accounts:
+    pass
+
+
+@data_query(
+    name="ready_accounts",
+    source="accounts",
+    sql="SELECT account_id FROM {{resource:accounts}}",
+    output_schema=[{"name": "account_id", "type": "string"}],
+)
+def ready_accounts():
+    return []
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    assert any(
+        diagnostic.code == "V2_QUERY_SOURCE_NOT_RELATION"
+        and diagnostic.location == "data.data_contracts.ready_accounts.source"
+        for diagnostic in result.diagnostics
+    )
 
 
 def test_scan_v2_module_ignores_decorators_outside_standard_v2_directories(tmp_path: Path):

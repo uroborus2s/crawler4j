@@ -16,6 +16,8 @@ from typing import Annotated, Any, Literal, TypeVar, Union, get_args, get_origin
 CRAWLER4J_META_ATTR = "__crawler4j_meta__"
 HOST_RESERVED_DATA_FIELDS = frozenset({"created_at", "updated_at", "create_at", "update_at"})
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+DATA_TABLE_STORAGE_MODES = frozenset({"managed_dataset", "custom_table"})
+DATA_TABLE_CLEANUP_POLICIES = frozenset({"delete_rows", "drop_table", "keep"})
 TargetT = TypeVar("TargetT")
 _MISSING = object()
 
@@ -161,6 +163,9 @@ class Crawler4jMeta:
     parameters: tuple[ParameterSpec, ...] = field(default_factory=tuple)
     schema: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     indexes: tuple[DataTableIndexSpec, ...] = field(default_factory=tuple)
+    storage_mode: str = ""
+    record_key_field: str = ""
+    cleanup_policy: str = ""
     source: str = ""
     sql: str = ""
     output_schema: tuple[dict[str, Any], ...] = field(default_factory=tuple)
@@ -198,6 +203,22 @@ class Crawler4jMeta:
         output_schema = tuple(
             _normalize_schema_item(item, field_name="output_schema") for item in _as_tuple(self.output_schema)
         )
+        storage_mode = str(self.storage_mode or "").strip().lower()
+        record_key_field = str(self.record_key_field or "").strip()
+        cleanup_policy = str(self.cleanup_policy or "").strip().lower()
+        if kind == "data_table":
+            storage_mode = storage_mode or "custom_table"
+            if storage_mode not in DATA_TABLE_STORAGE_MODES:
+                raise ValueError(f"data_table storage_mode must be managed_dataset or custom_table: {storage_mode}")
+            if record_key_field and not _is_valid_name(record_key_field):
+                raise ValueError(f"data_table record_key_field must be snake_case: {record_key_field}")
+            cleanup_policy = cleanup_policy or ("delete_rows" if storage_mode == "managed_dataset" else "drop_table")
+            if cleanup_policy not in DATA_TABLE_CLEANUP_POLICIES:
+                raise ValueError(f"data_table cleanup_policy must be delete_rows, drop_table or keep: {cleanup_policy}")
+        else:
+            storage_mode = ""
+            record_key_field = ""
+            cleanup_policy = ""
         implements = str(self.implements or "").strip()
         source = str(self.source or "").strip()
         object.__setattr__(self, "kind", kind)
@@ -209,6 +230,9 @@ class Crawler4jMeta:
         object.__setattr__(self, "parameters", parameters)
         object.__setattr__(self, "schema", schema)
         object.__setattr__(self, "indexes", indexes)
+        object.__setattr__(self, "storage_mode", storage_mode)
+        object.__setattr__(self, "record_key_field", record_key_field)
+        object.__setattr__(self, "cleanup_policy", cleanup_policy)
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "sql", str(self.sql or "").strip())
         object.__setattr__(self, "output_schema", output_schema)
@@ -389,9 +413,12 @@ def page(
 def data_table(
     *,
     name: str,
+    schema: Iterable[Mapping[str, Any]],
     label: str = "",
     description: str = "",
-    schema: Iterable[Mapping[str, Any]],
+    storage_mode: Literal["managed_dataset", "custom_table"] = "custom_table",
+    record_key_field: str = "",
+    cleanup_policy: Literal["delete_rows", "drop_table", "keep"] | str = "",
     indexes: Iterable[DataTableIndexSpec | Mapping[str, Any]] | None = None,
 ) -> Callable[[TargetT], TargetT]:
     """Declare a table-shaped data contract."""
@@ -401,6 +428,9 @@ def data_table(
             name=name,
             label=label,
             description=description,
+            storage_mode=storage_mode,
+            record_key_field=record_key_field,
+            cleanup_policy=cleanup_policy,
             schema=tuple(_as_tuple(schema)),
             indexes=tuple(_as_tuple(indexes)),
         )
@@ -458,6 +488,9 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, target: TargetT) -> Crawler4
         parameters=_merge_named_specs(meta.parameters, annotation_parameters),
         schema=meta.schema,
         indexes=meta.indexes,
+        storage_mode=meta.storage_mode,
+        record_key_field=meta.record_key_field,
+        cleanup_policy=meta.cleanup_policy,
         source=meta.source,
         sql=meta.sql,
         output_schema=meta.output_schema,

@@ -27,6 +27,7 @@ uv run crawler4j component create api_labor --implements labor
 uv run crawler4j workflow create main_workflow
 uv run crawler4j page-action create open_login_page
 uv run crawler4j data table create accounts
+uv run crawler4j data table create account_snapshots --storage-mode managed_dataset
 uv run crawler4j data query create ready_accounts --source accounts
 ```
 
@@ -115,6 +116,7 @@ page action 是页面操作纯函数。不要在这里保存账号状态、缓�
 ```python
 @data_table(
     name="accounts",
+    storage_mode="custom_table",
     schema=[
         {"name": "account_id", "type": "string", "required": True},
         {"name": "status", "type": "string"},

@@ -457,7 +457,6 @@ async def test_count_candidate_capacity_uses_run_profile_context(monkeypatch):
         execution=ExecutionContext(
             module="demo_module",
             workflow="repair",
-            params={"lang": "zh-CN"},
         ),
     )
     job = Job(
@@ -474,7 +473,10 @@ async def test_count_candidate_capacity_uses_run_profile_context(monkeypatch):
     assert observed["params"] == {"tier": "gold"}
     runtime = observed["runtime"]
     assert runtime["candidate_params"] == {"tier": "gold"}
-    assert runtime["params"] == {"lang": "zh-CN", "city": "Shanghai"}
+    assert "params" not in runtime
+    assert "execution_params" not in runtime
+    assert "job_params" not in runtime
+    assert "runtime_params" not in runtime
 
 
 @pytest.mark.asyncio

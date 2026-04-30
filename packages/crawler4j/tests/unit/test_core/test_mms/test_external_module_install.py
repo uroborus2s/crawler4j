@@ -352,9 +352,63 @@ def ready_accounts():
     module = registry.install(archive)
 
     assert module.manifest.data["resources"][0]["resource_id"] == "accounts"
+    assert module.manifest.data["resources"][0]["storage_mode"] == "custom_table"
     assert module.manifest.data["resources"][0]["record_key_field"] == "account_id"
     assert module.manifest.data["queries"][0]["query_id"] == "ready_accounts"
     assert module.manifest.data["queries"][0]["sql"] == "SELECT account_id FROM {{resource:accounts}}"
+
+
+def test_registry_syncs_v2_managed_data_table_to_module_datasets(temp_data_dir):
+    archive = _build_module_archive(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+        extra_files={
+            "data/accounts.py": """
+from crawler4j_contracts import data_table
+
+
+@data_table(
+    name="accounts",
+    storage_mode="managed_dataset",
+    schema=[{"name": "account_id", "type": "string", "required": True}],
+)
+class Accounts:
+    pass
+""",
+        },
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    module = registry.install(archive)
+
+    resource = module.manifest.data["resources"][0]
+    assert resource["resource_id"] == "accounts"
+    assert resource["storage_mode"] == "managed_dataset"
+    assert resource["cleanup_policy"] == "delete_rows"
+
+    from src.core.persistence import get_module_data_store
+
+    data_store = get_module_data_store()
+    synced_resource = data_store.list_data_resources("demo_module")[0]
+    assert synced_resource["storage_mode"] == "managed_dataset"
+    assert synced_resource["physical_table_name"] == "module_datasets"
+
+    data_store.replace_resource_records(
+        "demo_module",
+        "accounts",
+        [{"account_id": "A001", "status": "ready"}],
+    )
+
+    assert data_store.read_resource_records("demo_module", "accounts") == [
+        {
+            "account_id": "A001",
+            "status": "ready",
+            "record_key": "A001",
+            "run_status": "不占用",
+            "record_status": "",
+        }
+    ]
 
 
 def test_registry_syncs_v2_data_decorators_to_runtime_named_queries(temp_data_dir, monkeypatch):

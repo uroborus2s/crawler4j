@@ -25,7 +25,6 @@ def test_run_profile_serialization_roundtrip_for_select_mode():
         execution=ExecutionContext(
             module="demo_module",
             workflow="repair",
-            params={"city": "Shanghai"},
             timeout=300,
         ),
     )
@@ -61,6 +60,15 @@ def test_execution_context_rejects_removed_hooks_module():
             module="demo_module",
             workflow="repair",
             hooks_module="demo_module.hooks",
+        )
+
+
+def test_execution_context_rejects_removed_params():
+    with pytest.raises(ValueError, match="params"):
+        ExecutionContext(
+            module="demo_module",
+            workflow="repair",
+            params={"city": "Shanghai"},
         )
 
 

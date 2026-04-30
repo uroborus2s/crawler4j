@@ -92,12 +92,10 @@ def _write_debuggable_module(base_dir: Path) -> tuple[Path, Path, int, Path, int
 
         @page_action(name="login_task", label="登录任务")
         async def login_task(context: TaskContext):
-            runtime_params = context.runtime.get("params", {})
-            accounts = runtime_params.get("accounts", [])
-            phone = accounts[0]["phone_number"] if accounts else ""
+            phone = context.get_config("phone_number", "13800000001")
             if context.page:
                 await context.page.goto(
-                    runtime_params.get("login_url", "about:blank"),
+                    context.get_config("login_url", "about:blank"),
                     wait_until="domcontentloaded",
                 )
             selected_phone = phone  # BREAKPOINT
@@ -378,11 +376,6 @@ async def test_task_debug_session_hits_module_breakpoint(tmp_path, monkeypatch):
         execution=ExecutionContext(
             module="demo_module",
             workflow="login_workflow",
-            params={
-                "login_url": "about:blank",
-                "accounts": [{"id": "u1", "phone_number": "13800000001", "country_code": "86"}],
-                "auto_click_send_code": False,
-            },
             timeout=60,
         ),
     )
@@ -392,7 +385,6 @@ async def test_task_debug_session_hits_module_breakpoint(tmp_path, monkeypatch):
         name="Debug E2E Module",
         job_type="service",
         run_profile=run_profile,
-        params={"start_url": "about:blank"},
     )
 
     debug_service = DebugService(
@@ -505,11 +497,6 @@ async def test_task_debug_session_hits_module_breakpoint_without_stop_on_entry(t
         execution=ExecutionContext(
             module="demo_module",
             workflow="login_workflow",
-            params={
-                "login_url": "about:blank",
-                "accounts": [{"id": "u1", "phone_number": "13800000001", "country_code": "86"}],
-                "auto_click_send_code": False,
-            },
             timeout=60,
         ),
     )
@@ -519,7 +506,6 @@ async def test_task_debug_session_hits_module_breakpoint_without_stop_on_entry(t
         name="Debug E2E Module Without Stop On Entry",
         job_type="service",
         run_profile=run_profile,
-        params={"start_url": "about:blank"},
     )
 
     debug_service = DebugService(
@@ -635,11 +621,6 @@ async def test_task_debug_session_waits_for_configuration_done_before_running(tm
         execution=ExecutionContext(
             module="demo_module",
             workflow="login_workflow",
-            params={
-                "login_url": "about:blank",
-                "accounts": [{"id": "u1", "phone_number": "13800000001", "country_code": "86"}],
-                "auto_click_send_code": False,
-            },
             timeout=60,
         ),
     )
@@ -649,7 +630,6 @@ async def test_task_debug_session_waits_for_configuration_done_before_running(tm
         name="Debug E2E Wait Config",
         job_type="service",
         run_profile=run_profile,
-        params={"start_url": "about:blank"},
     )
 
     debug_service = DebugService(
@@ -738,11 +718,6 @@ async def test_task_debug_session_waits_for_dap_handshake_before_running(tmp_pat
         execution=ExecutionContext(
             module="demo_module",
             workflow="login_workflow",
-            params={
-                "login_url": "about:blank",
-                "accounts": [{"id": "u1", "phone_number": "13800000001", "country_code": "86"}],
-                "auto_click_send_code": False,
-            },
             timeout=60,
         ),
     )
@@ -752,7 +727,6 @@ async def test_task_debug_session_waits_for_dap_handshake_before_running(tmp_pat
         name="Debug E2E Wait Handshake",
         job_type="service",
         run_profile=run_profile,
-        params={"start_url": "about:blank"},
     )
 
     debug_service = DebugService(

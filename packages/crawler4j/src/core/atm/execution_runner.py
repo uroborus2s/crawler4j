@@ -52,9 +52,6 @@ class ExecutionRequest:
     task: Task
     module_name: str
     workflow_name: str = "default"
-    execution_params: dict[str, Any] = field(default_factory=dict)
-    job_params: dict[str, Any] = field(default_factory=dict)
-    runtime_params: dict[str, Any] = field(default_factory=dict)
     object_bindings: dict[str, str] = field(default_factory=dict)
     object_params: dict[str, dict[str, Any]] = field(default_factory=dict)
     devel_mode: bool = False
@@ -126,10 +123,6 @@ class ExecutionRunner:
             "module_name": request.module_name,
             "workflow": request.workflow_name or "default",
             "devel_mode": bool(request.devel_mode),
-            "execution_params": deepcopy(request.execution_params),
-            "job_params": deepcopy(request.job_params),
-            "runtime_params": deepcopy(request.runtime_params),
-            "params": deepcopy(request.runtime_params),
             "object_bindings": deepcopy(request.object_bindings),
             "object_params": deepcopy(request.object_params),
             "provider_name": request.provider_name,

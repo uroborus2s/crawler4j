@@ -458,13 +458,13 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
         assert page_payload["load_tools"] == ["ui.get_page"]
         assert page_payload["load_has_get_page"] is True
         assert page_payload["load_page_id"] == "dashboard"
-        assert page_payload["load_params"] == {"phone": "13800138000"}
+        assert page_payload["load_params"] is None
         assert page_payload["load_schema_type"] == "Page"
         assert page_payload["load_write_error"] == "RuntimeError"
         assert query_payload["observed"]["query_tools"] == ["ui.get_page"]
         assert query_payload["observed"]["query_page_id"] == "dashboard"
         assert query_payload["observed"]["query_table_id"] == "metrics"
-        assert query_payload["observed"]["query_params"] == {"phone": "13800138000"}
+        assert query_payload["observed"]["query_params"] is None
         assert query_payload["observed"]["query_rows_before"] == []
         assert query_payload["observed"]["query_write_error"] == "RuntimeError"
     finally:

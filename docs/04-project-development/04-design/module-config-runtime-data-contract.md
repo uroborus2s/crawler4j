@@ -62,64 +62,19 @@
 - 宿主客户端触发批量清理时会汇总所有模块声明，按 env id 去重，展示来源模块和候选函数，用户确认后再执行。
 - 删除前宿主必须二次校验 REM 当前状态，只允许删除 `READY/PAUSED`、无租约、无关联任务的环境。
 
-### 3.2 Workflow 运行参数声明
+### 3.2 Workflow 与运行模板对象配置
 
-模块可以在 `module.yaml.workflows[].parameters[]` 中声明运行模板参数。宿主运行模板页在用户选择模块与 Workflow 后，会按参数类型动态渲染表单控件；保存后写入 `RunProfile.execution.params`，运行时通过 `ctx.runtime["execution_params"]`、`ctx.runtime["params"]` 和 `ExecutionContext.params` 进入模块。
+Workflow 不在 `module.yaml` 中声明 `parameters[]`。0.4.0 正式契约中，Workflow 只通过构造函数接收宿主装配对象，普通可配置值下沉到 component 的 `object_param(...)`，对象依赖通过 `object_inject(...)` 或装饰器 `inject` 声明。
 
-声明字段：
+运行模板页按 workflow 根对象递归展示实现选择和 component 对象参数表单；保存后写入 `RunProfile.execution.object_bindings` 与 `RunProfile.execution.object_params`。运行时由 Core 为每个 task/env 创建独立对象图，模块代码不通过 `ctx.runtime["params"]` 读取 workflow 入参。
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
-| `name` | 是 | 参数名，必须是小写 snake_case，同一 Workflow 内唯一 |
-| `type` | 否 | 参数类型，默认 `string` |
-| `label` | 否 | 表单显示名；为空时使用 `name` |
-| `description` | 否 | 参数说明 |
-| `required` | 否 | 是否必填，默认 `false` |
-| `default` | 否 | 表单初始值 |
-| `placeholder` | 否 | `string` / `text` 输入提示 |
-| `options` | `enum` 必填 | 枚举选项，元素格式为 `{label, value}` |
-| `min` / `max` / `step` | 否 | `integer` / `number` 的取值约束 |
+约束：
 
-支持的数据类型：
-
-| 类型 | 表单控件 | 保存值 |
-|---|---|---|
-| `string` | 单行输入框 | 字符串 |
-| `text` | 多行文本框 | 字符串 |
-| `integer` | 整数步进输入 | 整数 |
-| `number` | 小数步进输入 | 数字 |
-| `boolean` | 开关 | 布尔值 |
-| `enum` | 下拉选择 | 选中项 `value` |
-
-示例：
-
-```yaml
-workflows:
-  - name: quiz_workflow
-    display_name: 统一做题
-    description: 携程题目处理流程
-    parameters:
-      - name: member_tier
-        label: 会员类型
-        type: enum
-        required: true
-        default: normal
-        options:
-          - label: 普通会员
-            value: normal
-          - label: 高级会员
-            value: premium
-      - name: min_member_days
-        label: 会员天数下限
-        type: integer
-        default: 30
-        min: 0
-        max: 365
-      - name: dry_run
-        label: 试运行
-        type: boolean
-        default: false
-```
+- `module.yaml.workflows[].parameters[]` 不是 0.4.0 正式字段。
+- `module.yaml` 不承载 workflow parameters、data、`ui_extension` 或 `resource_pools`。
+- `object_bindings` 只记录接口到具体 component 的绑定。
+- `object_params` 只记录 component 创建所需参数。
+- 业务过滤条件优先写入模块数据表，由 `@env_candidates` 或 workflow 主体通过 `ctx.db` 读取。
 
 ## 4. 运行态元数据契约
 
@@ -128,9 +83,8 @@ workflows:
 | 键 | 含义 |
 |---|---|
 | `workflow` | 本次执行命中的工作流名 |
-| `execution_params` | 运行模板上的默认输入 |
-| `job_params` | 当前作业的一次性覆盖输入 |
-| `params` | `execution_params + job_params` 合并后的有效输入 |
+| `object_bindings` | 运行模板保存的接口实现绑定 |
+| `object_params` | 运行模板保存的 component 对象参数 |
 | `devel_mode` | 当前是否为 DevLink 开发态 |
 | `creation_params` | 本次环境创建参数；已有环境导入时也通过这里透传来源元数据 |
 | `candidates` | 当前运行模板绑定的环境候选函数名；仅在 `mode=select` 且非固定 `env_id` 时注入 |
@@ -141,6 +95,7 @@ workflows:
 
 - 模块不得覆盖或重写这些键。
 - `workflow`、`devel_mode`、`creation_params` 不能再混进 `ctx.config`。
+- 模块不得把 `object_bindings` / `object_params` 当成 workflow 入参字典读取；它们只服务 Core 对象图装配。
 - 本次执行的临时变量也不要写入 `ctx.runtime`，应放到局部变量或 `ctx.state`。
 - `ctx.runtime["candidates"]` 只表示“本次任务通过哪个已声明候选函数拿环境”，不是模块业务配置事实源。
 - `ctx.runtime["candidate_params"]` 只承载运行模板传入候选函数的参数；候选函数仍应从模块业务表实时读取账号状态。
@@ -161,7 +116,7 @@ workflows:
 
 - 宿主仍必须保证 `ctx.env_id` 与 `ctx.page` 可用，模块不需要自己重新绑定浏览器上下文。
 - 宿主用 `(provider, name)` 判定导入唯一性；来源系统中的其他扩展元数据不写入环境表，也不作为重复导入判断依据。
-- `module.yaml.workflows[].host_scenarios` 可选声明 `existing_env_import` 作为适配提示；宿主未命中该声明时只显示风险提示，不作为执行门禁。
+- 0.4.0 不再通过 `module.yaml.workflows[].host_scenarios` 声明适配提示；已有环境导入能力由宿主流程和 `creation_params.import_mode` 表达。
 - 多环境导入时，宿主把每个环境作为同一 Job 下的一条 Task 运行实例；并发上限来自该 Job 的 `concurrency_target`，不会按选择环境数量无限制打开窗口。
 
 ## 5. 页面 schema 契约
@@ -242,6 +197,12 @@ workflows:
 | 基于实体表的统计汇总、条件筛选、排序分页 | `@data_table(storage_mode="custom_table")` + 装饰器索引/查询声明 + fluent aggregate | 查询构造器下推到受控实体表 |
 | 固定复杂 SQL | `@data_query` + `ctx.db.named(...).bind(...).execute()` | 只允许执行已注册命名查询 |
 | 只追加的历史记录、状态迁移、操作痕迹 | `ctx.db.audit("dataset").append(...)` / `.query(...)` | 独立审计表 append-only，不污染快照资源 |
+
+补充约束：
+
+- `@data_table` 的默认 `storage_mode` 是 `custom_table`，用于保持 0.4.x 装饰器路径的当前行为。
+- 需要旧快照语义时必须显式写 `@data_table(storage_mode="managed_dataset")`。
+- `@data_query` 只允许引用 `custom_table`；`managed_dataset` 不进入 SQL 模板、视图、join、group 或 aggregate 路径。
 
 ### 6.4 明确删除的旧边界
 

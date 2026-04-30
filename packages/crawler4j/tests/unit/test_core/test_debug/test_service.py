@@ -102,7 +102,6 @@ def _make_run_profile(*, wait_timeout: int = 90, lifecycle: CreationLifecycle = 
         execution=ExecutionContext(
             module="demo_module",
             workflow="repair",
-            params={"lang": "zh-CN"} if params is None else {"lang": "en-US"},
             timeout=timeout,
         ),
     )
@@ -131,7 +130,6 @@ def _make_inline_job() -> Job:
                 "execution": ExecutionContext(
                     module="demo_module",
                     workflow="repair",
-                    params={"lang": "en-US"},
                     timeout=300,
                 )
             }
@@ -156,7 +154,6 @@ def _make_candidate_job() -> Job:
             execution=ExecutionContext(
                 module="demo_module",
                 workflow="repair",
-                params={"lang": "zh-CN"},
                 timeout=120,
             ),
         ),
@@ -242,9 +239,9 @@ async def test_debug_service_tracks_worker_events_and_logs(monkeypatch, temp_dat
     assert payload["candidate_params"] == {}
     assert payload["wait_timeout"] == 90
     assert payload["timeout"] == 180
-    assert payload["execution_params"] == {"lang": "zh-CN"}
-    assert payload["job_params"] == {"city": "Shanghai"}
-    assert payload["params"] == {"lang": "zh-CN", "city": "Shanghai"}
+    assert "execution_params" not in payload
+    assert "job_params" not in payload
+    assert "params" not in payload
     assert payload["creation_params"] == {"region": "cn"}
 
 
@@ -345,9 +342,9 @@ async def test_debug_service_supports_inline_run_profile(monkeypatch, temp_data_
     assert payload["provider"] == "virtualbrowser"
     assert payload["wait_timeout"] == 45
     assert payload["timeout"] == 300
-    assert payload["execution_params"] == {"lang": "en-US"}
-    assert payload["job_params"] == {"city": "Singapore"}
-    assert payload["params"] == {"lang": "en-US", "city": "Singapore"}
+    assert "execution_params" not in payload
+    assert "job_params" not in payload
+    assert "params" not in payload
     assert payload["creation_params"] == {"region": "sg"}
 
 

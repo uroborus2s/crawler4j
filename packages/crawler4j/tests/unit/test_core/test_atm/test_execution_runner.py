@@ -48,9 +48,6 @@ def _build_request(
         task=Task(id="task-21", job_id="job-21"),
         module_name="example_module",
         workflow_name="default",
-        execution_params={"seed": 1},
-        job_params={"city": "Shanghai"},
-        runtime_params={"seed": 1, "city": "Shanghai"},
         state={
             "job_id": "job-21",
             "task_id": "task-21",
@@ -229,9 +226,10 @@ async def test_execution_runner_runs_module_and_recycles_environment():
         "region": "cn",
     }
     assert contexts[0].runtime["workflow"] == "default"
-    assert contexts[0].runtime["params"] == {"seed": 1, "city": "Shanghai"}
-    assert contexts[0].runtime["execution_params"] == {"seed": 1}
-    assert contexts[0].runtime["job_params"] == {"city": "Shanghai"}
+    assert "params" not in contexts[0].runtime
+    assert "execution_params" not in contexts[0].runtime
+    assert "job_params" not in contexts[0].runtime
+    assert "runtime_params" not in contexts[0].runtime
     assert contexts[0].logger is app_logger
     assert contexts[0].tools is not None
     rem.release.assert_awaited_once_with(lease)

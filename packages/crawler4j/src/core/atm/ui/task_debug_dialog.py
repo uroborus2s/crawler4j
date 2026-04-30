@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
@@ -63,12 +62,6 @@ class JobDebugDialog(QDialog):
             run_profile=run_profile,
             module=module,
             workflow=run_profile.execution.workflow if run_profile.execution else "default",
-            execution_params=dict((run_profile.execution.params if run_profile.execution else {}) or {}),
-            job_params=dict(job.params or {}),
-            runtime_params={
-                **((run_profile.execution.params if run_profile.execution else {}) or {}),
-                **(job.params or {}),
-            },
             object_bindings=dict(run_profile.execution.object_bindings if run_profile.execution else {}),
             object_params=dict(run_profile.execution.object_params if run_profile.execution else {}),
             timeout=run_profile.execution.timeout if run_profile.execution else 0,
@@ -199,12 +192,8 @@ class JobDebugDialog(QDialog):
         self.stop_on_entry_checkbox = QCheckBox("启动后立即断住")
         self.keep_environment_checkbox = QCheckBox("调试后保留环境")
 
-        self.params_editor = StyledTextEdit(monospace=True)
-        self.params_editor.setMinimumHeight(180)
-
         form.addRow("附加端口", self.attach_port_spin)
         form.addRow("执行超时", self.timeout_spin)
-        form.addRow("运行态参数", self.params_editor)
         form.addRow("", self.wait_for_attach_checkbox)
         form.addRow("", self.stop_on_entry_checkbox)
         form.addRow("", self.keep_environment_checkbox)
@@ -290,21 +279,10 @@ class JobDebugDialog(QDialog):
 
     def _load_defaults(self) -> None:
         self.timeout_spin.setValue(self._target.timeout)
-        self.params_editor.setPlainText(json.dumps(self._target.runtime_params, ensure_ascii=False, indent=2))
 
     def build_request(self) -> DebugSessionRequest:
-        raw = self.params_editor.toPlainText().strip() or "{}"
-        try:
-            params = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"调试参数不是合法 JSON: {exc}") from exc
-
-        if not isinstance(params, dict):
-            raise ValueError("调试参数必须是 JSON 对象")
-
         return DebugSessionRequest(
             job_id=self._job.id,
-            params=params,
             timeout=self.timeout_spin.value(),
             attach_port=self.attach_port_spin.value(),
             wait_for_attach=self.wait_for_attach_checkbox.isChecked(),

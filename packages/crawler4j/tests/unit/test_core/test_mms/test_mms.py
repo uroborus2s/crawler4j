@@ -12,7 +12,6 @@ from src.core.mms.models import (
     ModuleSource,
     ModuleStatus,
     UpgradeSourceInfo,
-    WorkflowParameterOptionInfo,
 )
 from src.core.mms.scanner import ModuleScanner
 from src.core.mms.service import ModuleService
@@ -57,20 +56,19 @@ class TestModuleManifest:
                     "base_url": "https://example.com",
                 },
             },
-            "data": _empty_data_contract(),
         }
-        
+
         manifest = ModuleManifest.from_dict(data)
-        
+
         assert manifest.name == "test_module"
         assert manifest.version == "1.0.0"
         assert manifest.runtime_api == "core-native-v2"
-        assert manifest.workflows == []
-        assert manifest.default_workflow == ""
         assert manifest.upgrade_source.repo == "example/test_module"
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
         assert manifest.config_defaults.workflows == {}
         assert manifest.data == _empty_data_contract()
+        assert not hasattr(manifest, "workflows")
+        assert not hasattr(manifest, "default_workflow")
     
     def test_to_dict(self):
         """测试序列化。"""
@@ -88,7 +86,6 @@ class TestModuleManifest:
 
         assert data["name"] == "test_module"
         assert data["runtime_api"] == "core-native-v2"
-        assert data["workflows"] == []
         assert data["upgrade_source"] == {
             "type": "github_release",
             "repo": "example/test_module",
@@ -100,8 +97,9 @@ class TestModuleManifest:
             "workflows": {},
         }
         assert "resource_pools" not in data
-        assert data["default_workflow"] == ""
-        assert data["data"] == _empty_data_contract()
+        assert "workflows" not in data
+        assert "default_workflow" not in data
+        assert "data" not in data
 
     def test_from_dict_rejects_removed_resource_pools(self):
         with pytest.raises(ValueError, match="resource_pools"):
@@ -119,8 +117,8 @@ class TestModuleManifest:
                 }
             )
 
-    def test_from_dict_rejects_removed_workflow_entry_class(self):
-        """旧 workflows[].entry_class 入口不再是 manifest 兼容面。"""
+    def test_from_dict_rejects_removed_workflows(self):
+        """workflows 不再是 module.yaml 的兼容面。"""
         data = {
             "name": "test_module",
             "runtime_api": "core-native-v2",
@@ -135,14 +133,12 @@ class TestModuleManifest:
                     "entry_class": "legacy.LoginWorkflow",
                 }
             ],
-            "default_workflow": "login_flow",
-            "data": _empty_data_contract(),
         }
 
-        with pytest.raises(ValueError, match="entry_class"):
+        with pytest.raises(ValueError, match="workflows"):
             ModuleManifest.from_dict(data)
 
-    def test_from_dict_rejects_invalid_workflow_parameter(self):
+    def test_from_dict_rejects_removed_data_contract_cache(self):
         data = {
             "name": "test_module",
             "runtime_api": "core-native-v2",
@@ -151,27 +147,11 @@ class TestModuleManifest:
                 "type": "github_release",
                 "repo": "example/test_module",
             },
-            "workflows": [
-                {
-                    "name": "login_flow",
-                    "parameters": [
-                        {"name": "bad_param", "type": "object"},
-                    ],
-                }
-            ],
-            "default_workflow": "login_flow",
             "data": _empty_data_contract(),
         }
 
-        with pytest.raises(ValueError, match="parameters"):
+        with pytest.raises(ValueError, match="data"):
             ModuleManifest.from_dict(data)
-
-    def test_workflow_parameter_enum_options_allow_falsy_values(self):
-        option_zero = WorkflowParameterOptionInfo.from_dict({"value": 0})
-        option_false = WorkflowParameterOptionInfo.from_dict({"value": False})
-
-        assert option_zero == WorkflowParameterOptionInfo(label="0", value=0)
-        assert option_false == WorkflowParameterOptionInfo(label="False", value=False)
 
 
 def test_env_candidates_invoke_uses_keyword_binding_for_params_after_optional_defaults():

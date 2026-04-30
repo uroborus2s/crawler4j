@@ -79,8 +79,10 @@ def _v2_index_name(fields: tuple[str, ...], fallback_index: int) -> str:
 
 def _v2_data_contract_for_module(module_info: ModuleInfo) -> dict[str, Any]:
     runtime_api = str(module_info.manifest.runtime_api or "").strip()
-    if runtime_api != "core-native-v2" or not module_info.path:
-        return module_info.manifest.data
+    if runtime_api != "core-native-v2":
+        raise ValueError("旧 module.yaml.data 数据契约路径已移除；请迁移到 core-native-v2 @data_table/@data_query")
+    if not module_info.path:
+        return {"resources": [], "views": [], "queries": [], "seeds": []}
 
     descriptor = load_runtime_descriptor_v2(
         module_info.name,
@@ -89,34 +91,44 @@ def _v2_data_contract_for_module(module_info: ModuleInfo) -> dict[str, Any]:
         force_reload=module_info.source == ModuleSource.DEV_LINK,
     )
     resources = []
+    table_storage_modes: dict[str, str] = {}
     for table_name, entry in sorted(descriptor.data_tables.items()):
         columns = [_v2_column(dict(item)) for item in entry.meta.schema]
-        record_key_field = columns[0]["name"]
+        record_key_field = entry.meta.record_key_field or columns[0]["name"]
         indexes: dict[str, list[str]] = {}
         for index_number, index in enumerate(entry.meta.indexes, start=1):
             fields = tuple(index.fields)
             indexes[index.name or _v2_index_name(fields, index_number)] = list(fields)
+        storage_mode = entry.meta.storage_mode or "custom_table"
+        cleanup_policy = entry.meta.cleanup_policy or (
+            "delete_rows" if storage_mode == "managed_dataset" else "drop_table"
+        )
+        table_storage_modes[table_name] = storage_mode
         resources.append(
             {
                 "resource_id": table_name,
-                "storage_mode": "custom_table",
+                "storage_mode": storage_mode,
                 "record_key_field": record_key_field,
                 "schema": {"version": 1, "columns": columns},
                 "indexes": indexes,
-                "cleanup_policy": "drop_table",
+                "cleanup_policy": cleanup_policy,
             }
         )
 
-    queries = [
-        {
-            "query_id": query_name,
-            "source_resource_ids": [entry.meta.source],
-            "sql": entry.meta.sql,
-            "params": [_v2_parameter(parameter) for parameter in entry.meta.parameters],
-            "columns": [_v2_column(dict(item)) for item in entry.meta.output_schema],
-        }
-        for query_name, entry in sorted(descriptor.data_queries.items())
-    ]
+    queries = []
+    for query_name, entry in sorted(descriptor.data_queries.items()):
+        source = entry.meta.source
+        if table_storage_modes.get(source) != "custom_table":
+            raise ValueError(f"@data_query source must reference custom_table: {query_name} -> {source}")
+        queries.append(
+            {
+                "query_id": query_name,
+                "source_resource_ids": [source],
+                "sql": entry.meta.sql,
+                "params": [_v2_parameter(parameter) for parameter in entry.meta.parameters],
+                "columns": [_v2_column(dict(item)) for item in entry.meta.output_schema],
+            }
+        )
     data_contract = {"resources": resources, "views": [], "queries": queries, "seeds": []}
     module_info.manifest.data = data_contract
     return data_contract

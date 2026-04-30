@@ -20,7 +20,7 @@
 | `workflow` | `workflow create` `workflow list` | `@workflow` 模板 |
 | `page-action` | `page-action create` `page-action list` | `@page_action` 函数 |
 | `page` | `page create` `page list` | `@page` Hosted UI 页面 |
-| `data` | `data table create` `data query create` `data list` | `@data_table` / `@data_query` |
+| `data` | `data table create [--storage-mode custom_table\|managed_dataset]` `data query create` `data list` | `@data_table` / `@data_query` |
 | `manifest` | `manifest lock` | `.crawler4j/manifest.lock.json` |
 | `migrate` | `migrate native-v2` | v0.3.0 到 v0.4.0 重写迁移报告 |
 | `check` | `check structure` `check release` `check full` | 本地校验 gate |

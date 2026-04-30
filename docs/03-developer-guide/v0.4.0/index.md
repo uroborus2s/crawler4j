@@ -59,7 +59,7 @@
 | 任务 | `tasks/*.py` 导出 `TASK` / `execute` | `tasks/*.py` 承载 `@page_action` 纯函数 |
 | 工作流 | `workflows/*.py` 导出 `WORKFLOW` / `run` | `@workflow` 类，构造函数只接收注入对象 |
 | Workflow 参数 | `module.yaml.workflows[].parameters[]` | 移到具体 component 的 `parameters` 或 `object_param(...)` 注解 |
-| 数据表 / 查询 | `module.yaml.data` + `data/sql` | `@data_table` / `@data_query` + manifest lock |
+| 数据表 / 查询 | `module.yaml.data` + `data/sql` | `@data_table(storage_mode=...)` / `@data_query` + manifest lock；`managed_dataset` 必须显式声明 |
 | 页面 | `pages/*.py` 使用 `@page` 装饰 load handler | 页面仍由宿主 schema 渲染，菜单由 `@page(menu=True)` 控制，页面动作接入 `@page_action` |
 | Hook / 环境选择器 | `hooks/`、`env_selectors/` 固定导出 | 环境选择写成 `candidates/*.py` 中的 `@env_candidates` 同步纯函数；不提供 hook 兼容路径 |
 | 批量环境清理 | 无一等模块契约 | `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数返回待清理 env id，宿主统一预览、确认、二次安全校验和删除 |

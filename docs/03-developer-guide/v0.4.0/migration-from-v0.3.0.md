@@ -147,6 +147,7 @@ data:
 ```python
 @data_table(
     name="accounts",
+    storage_mode="custom_table",
     schema=[
         {"name": "account_id", "type": "string", "required": True},
         {"name": "status", "type": "string"},
@@ -156,7 +157,7 @@ class Accounts:
     pass
 ```
 
-命名查询迁到 `@data_query`。SQL 继续只能引用 `{{resource:<id>}}`。
+如果旧资源是 `managed_dataset`，新写法改为 `@data_table(storage_mode="managed_dataset", ...)`，数据仍落到 `module_datasets`。命名查询迁到 `@data_query`，但 SQL 继续只能引用 `custom_table` 的 `{{resource:<id>}}`。
 
 ## 数据字段改名
 

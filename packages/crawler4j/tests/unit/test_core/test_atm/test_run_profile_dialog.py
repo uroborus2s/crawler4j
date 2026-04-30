@@ -103,6 +103,98 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
     )
 
 
+def _object_assembly_descriptor():
+    def inject(name: str, inject_type: str, target: str):
+        return SimpleNamespace(name=name, type=inject_type, target=target)
+
+    def parameter(name: str, parameter_type: str, **kwargs):
+        return SimpleNamespace(name=name, type=parameter_type, **kwargs)
+
+    def option(label: str, value: object):
+        return SimpleNamespace(label=label, value=value)
+
+    def entry(
+        name: str,
+        *,
+        kind: str,
+        label: str = "",
+        implements: str = "",
+        inject_specs: tuple[object, ...] = (),
+        parameters: tuple[object, ...] = (),
+    ):
+        return SimpleNamespace(
+            meta=SimpleNamespace(
+                kind=kind,
+                name=name,
+                label=label,
+                implements=implements,
+                inject=inject_specs,
+                parameters=parameters,
+            )
+        )
+
+    return SimpleNamespace(
+        interfaces={
+            "orchestrator": entry("orchestrator", kind="interface", label="Orchestrator"),
+            "labor": entry("labor", kind="interface", label="Labor"),
+        },
+        components={
+            "quiz_orchestrator": entry(
+                "quiz_orchestrator",
+                kind="component",
+                label="Quiz Orchestrator",
+                implements="orchestrator",
+                inject_specs=(inject("labor", "interface", "labor"),),
+            ),
+            "api_labor": entry(
+                "api_labor",
+                kind="component",
+                label="API Labor",
+                implements="labor",
+                parameters=(
+                    parameter("base_url", "string", label="Base URL", required=True, default="https://api.example.com"),
+                    parameter("timeout", "integer", label="Timeout", default=30, min=1, max=120, step=1),
+                    parameter(
+                        "mode",
+                        "enum",
+                        label="Mode",
+                        default="sync",
+                        options=(option("Sync", "sync"), option("Async", "async")),
+                    ),
+                    parameter("enabled", "boolean", label="Enabled", default=True),
+                    parameter("notes", "text", label="Notes", default=""),
+                    parameter("ratio", "number", label="Ratio", default=0.5, min=0, max=1, step=0.1),
+                    parameter("raw_payload", "json", label="Raw Payload", default='{"limit": 10}'),
+                ),
+            ),
+            "local_labor": entry(
+                "local_labor",
+                kind="component",
+                label="Local Labor",
+                implements="labor",
+            ),
+        },
+        workflows={
+            "quiz_workflow": entry(
+                "quiz_workflow",
+                kind="workflow",
+                label="统一做题",
+                inject_specs=(inject("orchestrator", "interface", "orchestrator"),),
+                parameters=(
+                    parameter("member_tier", "enum", label="会员类型", default="normal"),
+                ),
+            ),
+        },
+        env_candidates={
+            "ctrip_account_pool": SimpleNamespace(meta=SimpleNamespace(label="携程账号环境池")),
+        },
+        implementations={
+            "orchestrator": ("quiz_orchestrator",),
+            "labor": ("api_labor", "local_labor"),
+        },
+    )
+
+
 def _patch_parameterized_dialog_dependencies(monkeypatch):
     import src.core.atm.ui.run_profile_dialog as dialog_module
 
@@ -176,9 +268,7 @@ def _patch_parameterized_dialog_dependencies(monkeypatch):
         dialog_module,
         "get_module_service",
         lambda: SimpleNamespace(
-            get_runtime_descriptor_v2=lambda name: _candidate_descriptor(
-                ("ctrip_account_pool", "携程账号环境池")
-            )
+            get_runtime_descriptor_v2=lambda name: _object_assembly_descriptor()
         ),
     )
     monkeypatch.setattr(
@@ -847,7 +937,7 @@ def test_run_profile_dialog_keeps_dialog_open_when_yaml_is_invalid_on_save(qtbot
     assert dialog.stack.currentIndex() == 1
 
 
-def test_run_profile_dialog_renders_declared_workflow_parameters(qtbot, monkeypatch):
+def test_run_profile_dialog_renders_object_assembly_and_ignores_workflow_parameters(qtbot, monkeypatch):
     _patch_parameterized_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -859,41 +949,51 @@ def test_run_profile_dialog_renders_declared_workflow_parameters(qtbot, monkeypa
 
     assert dialog.basic_group.title() == "一、模板信息"
     assert dialog.resource_group.title() == "二、环境与资源"
-    assert isinstance(dialog._workflow_param_widgets["member_tier"], StyledComboBox)
-    assert isinstance(dialog._workflow_param_widgets["min_member_days"], StyledSpinBox)
-    assert isinstance(dialog._workflow_param_widgets["pass_score"], StyledDoubleSpinBox)
-    assert isinstance(dialog._workflow_param_widgets["dry_run"], ToggleSwitch)
-    assert isinstance(dialog._workflow_param_widgets["remark"], StyledLineEdit)
-    assert isinstance(dialog._workflow_param_widgets["instructions"], StyledPlainTextEdit)
+    assert not hasattr(dialog, "_workflow_param_widgets")
+    assert "member_tier" not in dialog._object_param_widgets
+    assert isinstance(dialog._object_binding_widgets["orchestrator"], StyledComboBox)
+    assert isinstance(dialog._object_binding_widgets["orchestrator.labor"], StyledComboBox)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["base_url"], StyledLineEdit)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["timeout"], StyledSpinBox)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["ratio"], StyledDoubleSpinBox)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["enabled"], ToggleSwitch)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["mode"], StyledComboBox)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["notes"], StyledPlainTextEdit)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["raw_payload"], StyledLineEdit)
 
-    member_tier = dialog._workflow_param_widgets["member_tier"]
-    min_days = dialog._workflow_param_widgets["min_member_days"]
-    pass_score = dialog._workflow_param_widgets["pass_score"]
-    dry_run = dialog._workflow_param_widgets["dry_run"]
-    remark = dialog._workflow_param_widgets["remark"]
-    instructions = dialog._workflow_param_widgets["instructions"]
-
-    member_tier.setCurrentIndex(member_tier.findData("premium"))
-    min_days.setValue(60)
-    pass_score.setValue(88.5)
-    dry_run.setChecked(True)
-    remark.setText("高级会员60天")
-    instructions.setPlainText("只处理已绑定环境。")
+    labor_combo = dialog._object_binding_widgets["orchestrator.labor"]
+    labor_combo.setCurrentIndex(labor_combo.findData("api_labor"))
+    dialog._object_param_widgets["api_labor"]["base_url"].setText("https://labor.example.com")
+    dialog._object_param_widgets["api_labor"]["timeout"].setValue(60)
+    dialog._object_param_widgets["api_labor"]["ratio"].setValue(0.8)
+    dialog._object_param_widgets["api_labor"]["enabled"].setChecked(False)
+    dialog._object_param_widgets["api_labor"]["mode"].setCurrentIndex(
+        dialog._object_param_widgets["api_labor"]["mode"].findData("async")
+    )
+    dialog._object_param_widgets["api_labor"]["notes"].setPlainText("只处理已绑定环境。")
+    dialog._object_param_widgets["api_labor"]["raw_payload"].setText('{"limit": 20}')
 
     profile = dialog._build_run_profile_from_form()
 
     assert profile.execution is not None
-    assert profile.execution.params == {
-        "member_tier": "premium",
-        "min_member_days": 60,
-        "pass_score": 88.5,
-        "dry_run": True,
-        "remark": "高级会员60天",
-        "instructions": "只处理已绑定环境。",
+    assert profile.execution.object_bindings == {
+        "orchestrator": "quiz_orchestrator",
+        "orchestrator.labor": "api_labor",
+    }
+    assert profile.execution.object_params == {
+        "api_labor": {
+            "base_url": "https://labor.example.com",
+            "timeout": 60,
+            "mode": "async",
+            "enabled": False,
+            "notes": "只处理已绑定环境。",
+            "ratio": 0.8,
+            "raw_payload": '{"limit": 20}',
+        }
     }
 
 
-def test_run_profile_dialog_loads_declared_workflow_parameters_from_run_profile(qtbot, monkeypatch):
+def test_run_profile_dialog_loads_object_assembly_from_run_profile(qtbot, monkeypatch):
     _patch_parameterized_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -908,13 +1008,20 @@ def test_run_profile_dialog_loads_declared_workflow_parameters_from_run_profile(
         execution=ExecutionContext(
             module="ctrip_crawler",
             workflow="quiz_workflow",
-            params={
-                "member_tier": "premium",
-                "min_member_days": 75,
-                "pass_score": 92.5,
-                "dry_run": True,
-                "remark": "已验证模板",
-                "instructions": "优先处理普通会员。",
+            object_bindings={
+                "orchestrator": "quiz_orchestrator",
+                "orchestrator.labor": "api_labor",
+            },
+            object_params={
+                "api_labor": {
+                    "base_url": "https://saved.example.com",
+                    "timeout": 75,
+                    "mode": "async",
+                    "enabled": False,
+                    "notes": "优先处理普通会员。",
+                    "ratio": 0.9,
+                    "raw_payload": '{"limit": 30}',
+                }
             },
         ),
     )
@@ -922,9 +1029,16 @@ def test_run_profile_dialog_loads_declared_workflow_parameters_from_run_profile(
     dialog = RunProfileDialog(run_profile=run_profile)
     qtbot.addWidget(dialog)
 
-    assert dialog._workflow_param_widgets["member_tier"].currentData() == "premium"
-    assert dialog._workflow_param_widgets["min_member_days"].value() == 75
-    assert dialog._workflow_param_widgets["pass_score"].value() == 92.5
-    assert dialog._workflow_param_widgets["dry_run"].isChecked() is True
-    assert dialog._workflow_param_widgets["remark"].text() == "已验证模板"
-    assert dialog._workflow_param_widgets["instructions"].toPlainText() == "优先处理普通会员。"
+    assert dialog._object_binding_widgets["orchestrator"].currentData() == "quiz_orchestrator"
+    assert dialog._object_binding_widgets["orchestrator.labor"].currentData() == "api_labor"
+    assert dialog._object_param_widgets["api_labor"]["base_url"].text() == "https://saved.example.com"
+    assert dialog._object_param_widgets["api_labor"]["timeout"].value() == 75
+    assert dialog._object_param_widgets["api_labor"]["mode"].currentData() == "async"
+    assert dialog._object_param_widgets["api_labor"]["enabled"].isChecked() is False
+    assert dialog._object_param_widgets["api_labor"]["notes"].toPlainText() == "优先处理普通会员。"
+    assert dialog._object_param_widgets["api_labor"]["ratio"].value() == 0.9
+    assert dialog._object_param_widgets["api_labor"]["raw_payload"].text() == '{"limit": 30}'
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.execution is not None

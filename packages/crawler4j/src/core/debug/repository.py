@@ -27,9 +27,6 @@ class DebugSessionRepository:
                     module_name TEXT NOT NULL,
                     source_path TEXT NOT NULL,
                     workflow TEXT NOT NULL,
-                    execution_params_json TEXT NOT NULL DEFAULT '{}',
-                    job_params_json TEXT NOT NULL DEFAULT '{}',
-                    params_json TEXT NOT NULL,
                     object_bindings_json TEXT NOT NULL DEFAULT '{}',
                     object_params_json TEXT NOT NULL DEFAULT '{}',
                     provider TEXT NOT NULL,
@@ -63,12 +60,6 @@ class DebugSessionRepository:
             migrations = {
                 "job_id": "ALTER TABLE debug_sessions ADD COLUMN job_id TEXT NOT NULL DEFAULT ''",
                 "job_name": "ALTER TABLE debug_sessions ADD COLUMN job_name TEXT NOT NULL DEFAULT ''",
-                "execution_params_json": (
-                    "ALTER TABLE debug_sessions ADD COLUMN execution_params_json TEXT NOT NULL DEFAULT '{}'"
-                ),
-                "job_params_json": (
-                    "ALTER TABLE debug_sessions ADD COLUMN job_params_json TEXT NOT NULL DEFAULT '{}'"
-                ),
                 "object_bindings_json": (
                     "ALTER TABLE debug_sessions ADD COLUMN object_bindings_json TEXT NOT NULL DEFAULT '{}'"
                 ),
@@ -87,6 +78,101 @@ class DebugSessionRepository:
             for column, sql in migrations.items():
                 if column not in existing_columns:
                     conn.execute(sql)
+            existing_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(debug_sessions)").fetchall()
+            }
+            self._drop_removed_columns(conn, existing_columns)
+
+    def _drop_removed_columns(self, conn, existing_columns: set[str]) -> None:
+        removed_columns = {
+            "hooks_module",
+            "execution_params_json",
+            "job_params_json",
+            "params_json",
+        } & existing_columns
+        if not removed_columns:
+            return
+
+        current_columns = [
+            "id",
+            "job_id",
+            "job_name",
+            "module_name",
+            "source_path",
+            "workflow",
+            "object_bindings_json",
+            "object_params_json",
+            "provider",
+            "acquisition_mode",
+            "fixed_env_id",
+            "candidates",
+            "candidate_params_json",
+            "creation_params_json",
+            "creation_lifecycle",
+            "wait_timeout",
+            "timeout",
+            "attach_host",
+            "attach_port",
+            "wait_for_attach",
+            "stop_on_entry",
+            "keep_environment",
+            "state",
+            "worker_pid",
+            "env_id",
+            "created_at",
+            "started_at",
+            "finished_at",
+            "last_error",
+        ]
+        copied_columns = [column for column in current_columns if column in existing_columns]
+        insert_columns = ", ".join(copied_columns)
+        select_columns = ", ".join(copied_columns)
+
+        conn.execute("ALTER TABLE debug_sessions RENAME TO debug_sessions_legacy")
+        conn.execute(
+            """
+            CREATE TABLE debug_sessions (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL DEFAULT '',
+                job_name TEXT NOT NULL DEFAULT '',
+                module_name TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                workflow TEXT NOT NULL,
+                object_bindings_json TEXT NOT NULL DEFAULT '{}',
+                object_params_json TEXT NOT NULL DEFAULT '{}',
+                provider TEXT NOT NULL,
+                acquisition_mode TEXT NOT NULL,
+                fixed_env_id INTEGER,
+                candidates TEXT NOT NULL DEFAULT '',
+                candidate_params_json TEXT NOT NULL DEFAULT '{}',
+                creation_params_json TEXT NOT NULL,
+                creation_lifecycle TEXT NOT NULL DEFAULT 'ephemeral',
+                wait_timeout INTEGER NOT NULL,
+                timeout INTEGER NOT NULL,
+                attach_host TEXT NOT NULL,
+                attach_port INTEGER NOT NULL,
+                wait_for_attach INTEGER NOT NULL,
+                stop_on_entry INTEGER NOT NULL,
+                keep_environment INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                worker_pid INTEGER,
+                env_id TEXT,
+                created_at INTEGER NOT NULL,
+                started_at INTEGER,
+                finished_at INTEGER,
+                last_error TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            f"""
+            INSERT INTO debug_sessions ({insert_columns})
+            SELECT {select_columns}
+            FROM debug_sessions_legacy
+            """
+        )
+        conn.execute("DROP TABLE debug_sessions_legacy")
 
     async def save_session(self, session: DebugSession) -> None:
         def _do():
@@ -95,22 +181,19 @@ class DebugSessionRepository:
                 conn.execute(
                     """
                     INSERT INTO debug_sessions (
-                        id, job_id, job_name, module_name, source_path, workflow, execution_params_json, job_params_json,
-                        params_json, object_bindings_json, object_params_json,
+                        id, job_id, job_name, module_name, source_path, workflow,
+                        object_bindings_json, object_params_json,
                         provider, acquisition_mode, fixed_env_id, candidates, candidate_params_json,
                         creation_params_json, creation_lifecycle, wait_timeout, timeout,
                         attach_host, attach_port, wait_for_attach, stop_on_entry, keep_environment,
                         state, worker_pid, env_id, created_at, started_at, finished_at, last_error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         job_id = excluded.job_id,
                         job_name = excluded.job_name,
                         module_name = excluded.module_name,
                         source_path = excluded.source_path,
                         workflow = excluded.workflow,
-                        execution_params_json = excluded.execution_params_json,
-                        job_params_json = excluded.job_params_json,
-                        params_json = excluded.params_json,
                         object_bindings_json = excluded.object_bindings_json,
                         object_params_json = excluded.object_params_json,
                         provider = excluded.provider,
@@ -141,9 +224,6 @@ class DebugSessionRepository:
                         session.module_name,
                         session.source_path,
                         session.workflow,
-                        json.dumps(session.execution_params, ensure_ascii=False),
-                        json.dumps(session.job_params, ensure_ascii=False),
-                        json.dumps(session.params, ensure_ascii=False),
                         json.dumps(session.object_bindings, ensure_ascii=False),
                         json.dumps(session.object_params, ensure_ascii=False),
                         session.provider,
@@ -203,11 +283,16 @@ class DebugSessionRepository:
             module_name=row["module_name"],
             source_path=row["source_path"],
             workflow=row["workflow"],
-            execution_params=json.loads(row["execution_params_json"]) if row["execution_params_json"] else {},
-            job_params=json.loads(row["job_params_json"]) if row["job_params_json"] else {},
-            params=json.loads(row["params_json"]) if row["params_json"] else {},
-            object_bindings=json.loads(row["object_bindings_json"]) if "object_bindings_json" in row.keys() and row["object_bindings_json"] else {},
-            object_params=json.loads(row["object_params_json"]) if "object_params_json" in row.keys() and row["object_params_json"] else {},
+            object_bindings=(
+                json.loads(row["object_bindings_json"])
+                if "object_bindings_json" in row.keys() and row["object_bindings_json"]
+                else {}
+            ),
+            object_params=(
+                json.loads(row["object_params_json"])
+                if "object_params_json" in row.keys() and row["object_params_json"]
+                else {}
+            ),
             provider=row["provider"],
             acquisition_mode=row["acquisition_mode"],
             fixed_env_id=row["fixed_env_id"] if "fixed_env_id" in row.keys() else None,

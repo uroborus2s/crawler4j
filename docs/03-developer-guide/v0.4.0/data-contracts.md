@@ -15,6 +15,7 @@ from crawler4j_contracts import data_table
 @data_table(
     name="accounts",
     label="账号",
+    storage_mode="custom_table",
     schema=[
         {"name": "account_id", "type": "string", "required": True},
         {"name": "status", "type": "string"},
@@ -29,7 +30,12 @@ class AccountsTable:
     pass
 ```
 
-SDK 扫描 `@data_table` 后，把表声明写入 manifest lock。Core 安装或加载模块时按 lock 同步数据能力。
+SDK 扫描 `@data_table` 后，把表声明写入 manifest lock。Core 安装或加载模块时按 lock 同步数据能力。`storage_mode` 支持：
+
+- `custom_table`：默认模式，落到模块受控物理表，支持命名查询、联表、分组和聚合。
+- `managed_dataset`：快照模式，落到 `data.db.module_datasets`，只支持单源 `select/where/order/limit/offset` 和整包 `replace`。
+
+`@data_query` 只能引用 `custom_table` 数据表；`managed_dataset` 使用 `ctx.db.from_(...)` 查询。
 
 ## 从 v1 数据模型重写
 
@@ -37,7 +43,7 @@ SDK 扫描 `@data_table` 后，把表声明写入 manifest lock。Core 安装或
 |---|---|---|
 | `module.yaml.data.resources[]` | `@data_table` | 表名、schema、indexes 从装饰器进入 lock |
 | `data/sql/queries/*.sql` + `module.yaml.data.queries[]` | `@data_query(sql=...)` | SQL 和 output schema 跟随装饰器元数据 |
-| `managed_dataset` / `custom_table` | `@data_table` 的存储策略字段 | 目标实现需要在装饰器 metadata 中保留该语义 |
+| `managed_dataset` / `custom_table` | `@data_table(storage_mode=...)` | 存储策略进入装饰器 metadata，`module.yaml.data` 不再兜底 |
 | `ctx.db.from_(...)` / `ctx.db.named(...)` | 继续保留 | 运行时代码入口不变，事实源从 manifest 改为 lock |
 
 ## 声明命名查询

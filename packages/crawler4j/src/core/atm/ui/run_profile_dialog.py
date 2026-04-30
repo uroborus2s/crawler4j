@@ -1271,12 +1271,14 @@ class RunProfileDialog(QDialog):
         self.script_selector.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         form.addRow("模块 / 工作流:", self.script_selector)
 
-        self.workflow_params_widget = QWidget()
-        self.workflow_params_form = self._create_form_layout(self.workflow_params_widget)
-        self.workflow_params_form.setContentsMargins(0, 0, 0, 0)
-        self._workflow_param_widgets: dict[str, QWidget] = {}
-        self._workflow_param_specs: list[object] = []
-        form.addRow("Workflow 参数:", self.workflow_params_widget)
+        self.object_assembly_widget = QWidget()
+        self.object_assembly_form = self._create_form_layout(self.object_assembly_widget)
+        self.object_assembly_form.setContentsMargins(0, 0, 0, 0)
+        self._object_binding_widgets: dict[str, QComboBox] = {}
+        self._object_param_widgets: dict[str, dict[str, QWidget]] = {}
+        self._object_param_specs: dict[str, dict[str, object]] = {}
+        self._rendered_object_components: set[str] = set()
+        form.addRow("对象装配:", self.object_assembly_widget)
 
         self.execution_timeout_spin = QSpinBox()
         self.execution_timeout_spin.setRange(0, 7 * 24 * 60 * 60)
@@ -1404,7 +1406,7 @@ class RunProfileDialog(QDialog):
         self.script_selector.module_combo.currentTextChanged.connect(self._on_script_module_changed)
         self.script_selector.workflow_combo.currentIndexChanged.connect(self._on_workflow_selection_changed)
         self._sync_candidates_options()
-        self._sync_workflow_parameter_form()
+        self._sync_object_assembly_form()
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
     def _set_row_visible(self, widget: QWidget, visible: bool):
@@ -1847,61 +1849,248 @@ class RunProfileDialog(QDialog):
         previous_candidates = self.candidates_combo.currentData()
         preferred = previous_candidates if isinstance(previous_candidates, str) else None
         self._sync_candidates_options(preferred=preferred)
-        self._sync_workflow_parameter_form()
+        self._sync_object_assembly_form()
 
     def _on_workflow_selection_changed(self, _index: int) -> None:
-        self._sync_workflow_parameter_form()
+        self._sync_object_assembly_form()
 
-    def _current_workflow_info(self) -> object | None:
-        module_name, workflow_name = self.script_selector.get_value()
-        if not module_name or not workflow_name:
+    def _current_runtime_descriptor(self) -> object | None:
+        module_name, _workflow_name = self.script_selector.get_value()
+        if not module_name:
             return None
         try:
-            workflows = get_module_registry().get_workflows(module_name)
-        except Exception:
+            return get_module_service().get_runtime_descriptor_v2(module_name)
+        except Exception as exc:
+            logger.warning(f"[ATM] 加载模块对象装配描述失败: module={module_name} error={exc}")
             return None
-        for workflow in workflows:
-            if str(getattr(workflow, "name", "") or "").strip() == workflow_name:
-                return workflow
+
+    def _current_workflow_entry(self, descriptor: object) -> object | None:
+        _module_name, workflow_name = self.script_selector.get_value()
+        if not workflow_name:
+            return None
+        workflows = getattr(descriptor, "workflows", {}) or {}
+        if isinstance(workflows, dict):
+            return workflows.get(workflow_name)
         return None
 
-    def _current_workflow_parameters(self) -> list[object]:
-        workflow = self._current_workflow_info()
-        if not workflow:
-            return []
-        return list(getattr(workflow, "parameters", []) or [])
+    def _clear_object_assembly_form(self) -> None:
+        while self.object_assembly_form.rowCount():
+            self.object_assembly_form.removeRow(0)
+        self._object_binding_widgets = {}
+        self._object_param_widgets = {}
+        self._object_param_specs = {}
+        self._rendered_object_components = set()
 
-    def _clear_workflow_parameter_form(self) -> None:
-        while self.workflow_params_form.rowCount():
-            self.workflow_params_form.removeRow(0)
-        self._workflow_param_widgets = {}
-        self._workflow_param_specs = []
-
-    def _sync_workflow_parameter_form(self, values: dict | None = None) -> None:
-        if not hasattr(self, "workflow_params_form"):
+    def _sync_object_assembly_form(self, values: dict | None = None) -> None:
+        if not hasattr(self, "object_assembly_form"):
             return
-        params = self._current_workflow_parameters()
-        self._clear_workflow_parameter_form()
-        self._workflow_param_specs = params
-        self._set_row_visible(self.workflow_params_widget, bool(params))
-        if not params:
-            hint = QLabel("当前工作流未声明运行参数。")
-            hint.setStyleSheet("color: rgba(255, 255, 255, 0.55);")
-            self.workflow_params_form.addRow("", hint)
+        current_values = values if values is not None else self._initial_object_assembly_values()
+        descriptor = self._current_runtime_descriptor()
+        workflow_entry = self._current_workflow_entry(descriptor) if descriptor is not None else None
+
+        self._clear_object_assembly_form()
+        if workflow_entry is None:
+            self._set_row_visible(self.object_assembly_widget, False)
             return
 
-        current_values = dict(values or {})
-        for parameter in params:
+        inject_specs = list(getattr(workflow_entry.meta, "inject", ()) or ())
+        if not inject_specs:
+            self._set_row_visible(self.object_assembly_widget, False)
+            return
+
+        self._set_row_visible(self.object_assembly_widget, True)
+        self._render_inject_specs(
+            descriptor,
+            inject_specs,
+            parent_path="",
+            values=current_values,
+            seen_components=set(),
+        )
+
+    def _initial_object_assembly_values(self) -> dict[str, dict]:
+        execution = self._run_profile.execution
+        if execution is None:
+            return {"object_bindings": {}, "object_params": {}}
+        return {
+            "object_bindings": dict(execution.object_bindings),
+            "object_params": {
+                component_name: dict(params)
+                for component_name, params in dict(execution.object_params).items()
+                if isinstance(params, dict)
+            },
+        }
+
+    def _current_object_assembly_values(self) -> dict[str, dict]:
+        object_bindings: dict[str, str] = {}
+        for inject_path, widget in self._object_binding_widgets.items():
+            value = widget.currentData()
+            if isinstance(value, str) and value.strip():
+                object_bindings[inject_path] = value.strip()
+
+        object_params: dict[str, dict[str, object]] = {}
+        for component_name, parameter_specs in self._object_param_specs.items():
+            component_params: dict[str, object] = {}
+            for parameter_name, parameter in parameter_specs.items():
+                widget = self._object_param_widgets.get(component_name, {}).get(parameter_name)
+                if widget is None:
+                    continue
+                value = self._parameter_widget_value(parameter, widget)
+                if value is None:
+                    continue
+                if self._parameter_required(parameter) and self._parameter_type(parameter) in {"string", "text", "enum"}:
+                    if str(value).strip() == "":
+                        raise ValueError(f"对象参数不能为空: {self._parameter_label(parameter)}")
+                component_params[parameter_name] = value
+            if component_params:
+                object_params[component_name] = component_params
+        return {"object_bindings": object_bindings, "object_params": object_params}
+
+    def _on_object_binding_changed(self) -> None:
+        try:
+            values = self._current_object_assembly_values()
+        except Exception:
+            values = self._initial_object_assembly_values()
+        self._sync_object_assembly_form(values)
+
+    def _render_inject_specs(
+        self,
+        descriptor: object,
+        inject_specs: list[object],
+        *,
+        parent_path: str,
+        values: dict,
+        seen_components: set[str],
+    ) -> None:
+        for inject in inject_specs:
+            inject_name = str(getattr(inject, "name", "") or "").strip()
+            inject_type = str(getattr(inject, "type", "") or "").strip().lower()
+            inject_target = str(getattr(inject, "target", "") or "").strip()
+            if not inject_name or not inject_target:
+                continue
+            inject_path = f"{parent_path}.{inject_name}" if parent_path else inject_name
+            if inject_type == "interface":
+                selected_component = self._render_interface_binding(
+                    descriptor,
+                    inject_path=inject_path,
+                    interface_name=inject_target,
+                    values=values,
+                )
+                if selected_component:
+                    self._render_component(
+                        descriptor,
+                        selected_component,
+                        parent_path=inject_path,
+                        values=values,
+                        seen_components=seen_components,
+                    )
+                continue
+            if inject_type == "object":
+                self._render_component(
+                    descriptor,
+                    inject_target,
+                    parent_path=inject_path,
+                    values=values,
+                    seen_components=seen_components,
+                )
+
+    def _render_interface_binding(
+        self,
+        descriptor: object,
+        *,
+        inject_path: str,
+        interface_name: str,
+        values: dict,
+    ) -> str:
+        combo = QComboBox()
+        combo.setObjectName(f"objectBinding_{inject_path.replace('.', '__')}")
+        implementations = tuple((getattr(descriptor, "implementations", {}) or {}).get(interface_name, ()) or ())
+        components = getattr(descriptor, "components", {}) or {}
+        for component_name in implementations:
+            component_entry = components.get(component_name) if isinstance(components, dict) else None
+            combo.addItem(self._entry_label(component_entry, component_name), component_name)
+
+        object_bindings = dict(values.get("object_bindings") or {})
+        selected = str(object_bindings.get(inject_path) or object_bindings.get(interface_name) or "").strip()
+        if selected and combo.findData(selected) < 0:
+            combo.addItem(f"{selected} (未声明)", selected)
+        if not selected and combo.count() == 1:
+            selected = str(combo.itemData(0) or "")
+
+        index = combo.findData(selected)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.setEnabled(combo.count() > 1 and not self._read_only)
+        combo.currentIndexChanged.connect(lambda _index: self._on_object_binding_changed())
+        self._object_binding_widgets[inject_path] = combo
+
+        label = self._interface_label(descriptor, interface_name) or interface_name
+        self.object_assembly_form.addRow(f"{inject_path} / {label}:", combo)
+        current = combo.currentData()
+        return current if isinstance(current, str) else ""
+
+    def _render_component(
+        self,
+        descriptor: object,
+        component_name: str,
+        *,
+        parent_path: str,
+        values: dict,
+        seen_components: set[str],
+    ) -> None:
+        components = getattr(descriptor, "components", {}) or {}
+        component_entry = components.get(component_name) if isinstance(components, dict) else None
+        if component_entry is None or component_name in seen_components:
+            return
+
+        next_seen = {*seen_components, component_name}
+        if component_name not in self._rendered_object_components:
+            self._render_component_parameters(component_name, component_entry, values)
+            self._rendered_object_components.add(component_name)
+
+        inject_specs = list(getattr(component_entry.meta, "inject", ()) or ())
+        if inject_specs:
+            self._render_inject_specs(
+                descriptor,
+                inject_specs,
+                parent_path=parent_path,
+                values=values,
+                seen_components=next_seen,
+            )
+
+    def _render_component_parameters(self, component_name: str, component_entry: object, values: dict) -> None:
+        parameters = list(getattr(component_entry.meta, "parameters", ()) or ())
+        if not parameters:
+            return
+        title = QLabel(f"{self._entry_label(component_entry, component_name)} 参数")
+        title.setStyleSheet("color: rgba(255, 255, 255, 0.65); font-weight: bold;")
+        self.object_assembly_form.addRow("", title)
+
+        component_values = dict((values.get("object_params") or {}).get(component_name, {}) or {})
+        self._object_param_widgets.setdefault(component_name, {})
+        self._object_param_specs.setdefault(component_name, {})
+        for parameter in parameters:
             name = self._parameter_name(parameter)
             if not name:
                 continue
-            value = current_values.get(name, self._parameter_default(parameter))
-            widget = self._create_workflow_parameter_widget(parameter, value)
-            self._workflow_param_widgets[name] = widget
+            value = component_values.get(name, self._parameter_default(parameter))
+            widget = self._create_parameter_widget(parameter, value, object_name_prefix=f"objectParam_{component_name}")
+            self._object_param_widgets[component_name][name] = widget
+            self._object_param_specs[component_name][name] = parameter
             label = self._parameter_label(parameter)
             if self._parameter_required(parameter):
                 label = f"{label} *"
-            self.workflow_params_form.addRow(f"{label}:", widget)
+            self.object_assembly_form.addRow(f"{label}:", widget)
+
+    def _entry_label(self, entry: object | None, fallback: str) -> str:
+        if entry is None:
+            return fallback
+        label = str(getattr(entry.meta, "label", "") or "").strip()
+        name = str(getattr(entry.meta, "name", "") or fallback).strip()
+        return f"{label} ({name})" if label and label != name else name
+
+    def _interface_label(self, descriptor: object, interface_name: str) -> str:
+        interfaces = getattr(descriptor, "interfaces", {}) or {}
+        entry = interfaces.get(interface_name) if isinstance(interfaces, dict) else None
+        return self._entry_label(entry, interface_name)
 
     def _parameter_name(self, parameter: object) -> str:
         return str(getattr(parameter, "name", "") or "").strip()
@@ -1933,14 +2122,14 @@ class RunProfileDialog(QDialog):
                 options.append((label, value))
         return options
 
-    def _create_workflow_parameter_widget(self, parameter: object, value: object) -> QWidget:
+    def _create_parameter_widget(self, parameter: object, value: object, *, object_name_prefix: str) -> QWidget:
         parameter_type = self._parameter_type(parameter)
         name = self._parameter_name(parameter)
         placeholder = str(getattr(parameter, "placeholder", "") or "").strip()
 
         if parameter_type == "enum":
             combo = QComboBox()
-            combo.setObjectName(f"workflowParam_{name}")
+            combo.setObjectName(f"{object_name_prefix}_{name}")
             if not self._parameter_required(parameter) and value is None:
                 combo.addItem("不设置", None)
             for label, option_value in self._parameter_options(parameter):
@@ -1954,7 +2143,7 @@ class RunProfileDialog(QDialog):
 
         if parameter_type == "integer":
             spin = QSpinBox()
-            spin.setObjectName(f"workflowParam_{name}")
+            spin.setObjectName(f"{object_name_prefix}_{name}")
             min_value = getattr(parameter, "min", None)
             max_value = getattr(parameter, "max", None)
             spin.setRange(
@@ -1970,7 +2159,7 @@ class RunProfileDialog(QDialog):
 
         if parameter_type == "number":
             spin = QDoubleSpinBox()
-            spin.setObjectName(f"workflowParam_{name}")
+            spin.setObjectName(f"{object_name_prefix}_{name}")
             min_value = getattr(parameter, "min", None)
             max_value = getattr(parameter, "max", None)
             spin.setRange(
@@ -1987,13 +2176,13 @@ class RunProfileDialog(QDialog):
 
         if parameter_type == "boolean":
             toggle = self._create_toggle_switch()
-            toggle.setObjectName(f"workflowParam_{name}")
+            toggle.setObjectName(f"{object_name_prefix}_{name}")
             toggle.setChecked(bool(value))
             return toggle
 
         if parameter_type == "text":
             editor = QPlainTextEdit()
-            editor.setObjectName(f"workflowParam_{name}")
+            editor.setObjectName(f"{object_name_prefix}_{name}")
             editor.setMinimumHeight(90)
             editor.setPlainText("" if value is None else str(value))
             if placeholder:
@@ -2001,13 +2190,13 @@ class RunProfileDialog(QDialog):
             return editor
 
         line_edit = QLineEdit()
-        line_edit.setObjectName(f"workflowParam_{name}")
+        line_edit.setObjectName(f"{object_name_prefix}_{name}")
         line_edit.setText("" if value is None else str(value))
         if placeholder:
             line_edit.setPlaceholderText(placeholder)
         return line_edit
 
-    def _workflow_parameter_widget_value(self, parameter: object, widget: QWidget) -> object:
+    def _parameter_widget_value(self, parameter: object, widget: QWidget) -> object:
         parameter_type = self._parameter_type(parameter)
         if parameter_type == "enum" and isinstance(widget, QComboBox):
             return widget.currentData()
@@ -2022,25 +2211,6 @@ class RunProfileDialog(QDialog):
         if isinstance(widget, QLineEdit):
             return widget.text()
         return None
-
-    def _workflow_params_from_form(self, previous_params: dict[str, object]) -> dict[str, object]:
-        if not self._workflow_param_specs:
-            return dict(previous_params)
-
-        params: dict[str, object] = {}
-        for parameter in self._workflow_param_specs:
-            name = self._parameter_name(parameter)
-            widget = self._workflow_param_widgets.get(name)
-            if not name or widget is None:
-                continue
-            value = self._workflow_parameter_widget_value(parameter, widget)
-            if value is None:
-                continue
-            if self._parameter_required(parameter) and self._parameter_type(parameter) in {"string", "text", "enum"}:
-                if str(value).strip() == "":
-                    raise ValueError(f"Workflow 参数不能为空: {self._parameter_label(parameter)}")
-            params[name] = value
-        return params
 
     def _declared_env_candidate_options(self) -> list[tuple[str, str]]:
         module_name = self._current_script_module_name()
@@ -2184,7 +2354,14 @@ class RunProfileDialog(QDialog):
         if s.execution and s.execution.module:
             self.script_selector.set_value(s.execution.module, s.execution.workflow)
         self.execution_timeout_spin.setValue(s.execution.timeout if s.execution else self._default_execution_timeout())
-        self._sync_workflow_parameter_form(dict(s.execution.params) if s.execution else {})
+        self._sync_object_assembly_form(
+            {
+                "object_bindings": dict(s.execution.object_bindings),
+                "object_params": dict(s.execution.object_params),
+            }
+            if s.execution
+            else None
+        )
         self._sync_candidates_options(acquisition.candidates or "")
         self.wait_timeout_spin.setValue(acquisition.wait_timeout)
         self._set_candidates_value(acquisition.candidates or "")
@@ -2242,14 +2419,12 @@ class RunProfileDialog(QDialog):
         module_name, workflow_name = self.script_selector.get_value()
         if not module_name or not workflow_name:
             raise ValueError("请选择执行脚本")
-        previous_execution = self._run_profile.execution
-        previous_params = dict(previous_execution.params) if previous_execution else {}
+        object_assembly = self._current_object_assembly_values()
         execution = ExecutionContext(
             module=module_name,
             workflow=workflow_name,
-            params=self._workflow_params_from_form(previous_params),
-            object_bindings=dict(previous_execution.object_bindings) if previous_execution else {},
-            object_params=dict(previous_execution.object_params) if previous_execution else {},
+            object_bindings=object_assembly["object_bindings"],
+            object_params=object_assembly["object_params"],
             timeout=self.execution_timeout_spin.value(),
         )
         

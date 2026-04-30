@@ -58,6 +58,7 @@ uv run crawler4j component create hotel_orchestrator --implements orchestrator
 uv run crawler4j workflow create hotel_sync
 uv run crawler4j page-action create open_home_page
 uv run crawler4j data table create hotels
+uv run crawler4j data table create hotel_snapshots --storage-mode managed_dataset
 uv run crawler4j data query create ready_hotels --source hotels
 ```
 
@@ -176,6 +177,7 @@ from crawler4j_contracts import data_query, data_table
 @data_table(
     name="hotels",
     label="酒店",
+    storage_mode="custom_table",
     schema=[
         {"name": "hotel_id", "type": "string", "required": True},
         {"name": "name", "type": "string"},
