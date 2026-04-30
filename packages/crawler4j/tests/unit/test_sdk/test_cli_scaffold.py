@@ -215,7 +215,7 @@ def test_module_init_creates_core_native_v2_project(tmp_path: Path):
     manifest = _read_manifest(module_root)
     assert manifest["name"] == "demo_model"
     assert manifest["runtime_api"] == "core-native-v2"
-    assert manifest["ui_extension"] == {"pages": []}
+    assert "ui_extension" not in manifest
     assert manifest["config_defaults"] == {"module": {}}
     for legacy_key in ("default_workflow", "workflows", "data", "objects", "interfaces", "tasks"):
         assert legacy_key not in manifest
@@ -320,39 +320,32 @@ def test_page_create_registers_menu_page_and_supports_grouped_non_menu_page(
     )
 
     manifest = _read_manifest(module_root)
-    assert manifest["ui_extension"]["pages"] == [
-        {
-            "id": "dashboard",
-            "label": "Dashboard",
-            "icon": "📄",
-        }
-    ]
-    assert (module_root / "pages" / "dashboard.py").exists()
-    assert (module_root / "pages" / "account" / "detail.py").exists()
+    assert "ui_extension" not in manifest
+    dashboard_path = module_root / "pages" / "dashboard.py"
+    detail_path = module_root / "pages" / "account" / "detail.py"
+    assert dashboard_path.exists()
+    assert detail_path.exists()
+    dashboard_text = dashboard_path.read_text(encoding="utf-8")
+    detail_text = detail_path.read_text(encoding="utf-8")
+    assert "from crawler4j_contracts import TaskContext, page" in dashboard_text
+    assert "@page(" in dashboard_text
+    assert 'name="dashboard"' in dashboard_text
+    assert "menu=True" in dashboard_text
+    assert 'name="account_detail"' in detail_text
+    assert "menu=False" in detail_text
     assert commands.collect_full_errors(module_root, manifest) == []
 
 
-def test_check_full_rejects_missing_registered_page_file(tmp_path: Path, monkeypatch):
+def test_check_full_rejects_removed_manifest_ui_extension(tmp_path: Path, monkeypatch):
     module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
-    assert (
-        commands.cmd_page_create(
-            Namespace(
-                name="dashboard",
-                display_name=None,
-                description=None,
-                group=None,
-                no_menu=False,
-                force=False,
-            )
-        )
-        == 0
-    )
-    (module_root / "pages" / "dashboard.py").unlink()
+    manifest = _read_manifest(module_root)
+    manifest["ui_extension"] = {"pages": [{"id": "dashboard", "label": "Dashboard", "icon": "📄"}]}
+    _write_manifest(module_root, manifest)
 
     errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
 
-    assert "module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: dashboard" in errors
+    assert any("module.yaml 不再允许声明 ui_extension" in error for error in errors)
 
 
 def test_check_full_rejects_legacy_v1_manifest_sections(tmp_path: Path, monkeypatch, capsys):

@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.models import ModuleInfo, ModuleSource, UIPageInfo
+from src.core.mms.registry import get_module_registry
 from src.core.mms.service import get_module_service
 from src.core.mms.ui.dev_link_actions import remove_dev_link_and_describe
 from src.core.mms.ui.module_config_page import ModuleConfigPage
@@ -216,7 +217,7 @@ class ModuleDetailPage(QWidget):
         
         # 模块宿主页入口
         if self._module:
-            hosted_pages = list(self._module.manifest.ui_extension.pages)
+            hosted_pages = self._hosted_menu_pages()
             if hosted_pages:
                 # 分隔符
                 separator = QListWidgetItem("────────")
@@ -242,10 +243,47 @@ class ModuleDetailPage(QWidget):
 
     @staticmethod
     def _module_icon(module: ModuleInfo) -> str:
-        pages = list(module.manifest.ui_extension.pages)
+        try:
+            descriptor = get_module_service().get_runtime_descriptor_v2(
+                module.name,
+                force_reload=module.source == ModuleSource.DEV_LINK,
+            )
+        except Exception:
+            return "📦"
+        pages = [
+            page.spec
+            for page in descriptor.pages.values()
+            if page.spec.menu
+        ]
+        pages.sort(key=lambda item: (item.order, item.id))
         if pages:
             return str(pages[0].icon or "📦").strip() or "📦"
         return "📦"
+
+    def _hosted_menu_pages(self) -> list[UIPageInfo]:
+        if not self._module:
+            return []
+        try:
+            descriptor = get_module_service().get_runtime_descriptor_v2(
+                self._module.name,
+                force_reload=self._module.source == ModuleSource.DEV_LINK,
+            )
+        except Exception:
+            return []
+        pages = [
+            page.spec
+            for page in descriptor.pages.values()
+            if page.spec.menu
+        ]
+        pages.sort(key=lambda item: (item.order, item.id))
+        return [
+            UIPageInfo(
+                id=str(page.id or "").strip(),
+                icon=str(page.icon or "📋").strip() or "📋",
+                label=str(page.label or page.id).strip() or str(page.id),
+            )
+            for page in pages
+        ]
     
     def _create_info_page(self) -> QWidget:
         """创建基本信息页面。"""
@@ -386,7 +424,7 @@ class ModuleDetailPage(QWidget):
         if not self._module:
             return page
         
-        workflows = self._module.manifest.workflows
+        workflows = get_module_registry().get_workflows(self._module.name)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -537,9 +575,9 @@ class ModuleDetailPage(QWidget):
             return None
 
         try:
-            descriptor = get_module_service().get_runtime_descriptor(
+            descriptor = get_module_service().get_runtime_descriptor_v2(
                 self._module.name,
-                force_reload=self._module.source != ModuleSource.BUILTIN,
+                force_reload=self._module.source == ModuleSource.DEV_LINK,
             )
         except Exception:
             return None

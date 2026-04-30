@@ -24,55 +24,55 @@
 
 | 项目 | 内容 |
 |---|---|
-| Manifest 文件 | `module.yaml`（可附带 `config_defaults` 初始化模板） |
-| 宿主入口文件 | 模块根 `__init__.py` |
-| 必需入口 | `run(context)` |
-| 标准运行时文件 | `module_runtime.py` |
-| 可选 hooks | `prepare_env`, `init_env`, `before_run`, `on_success`, `on_failure`, `on_timeout`, `on_cleanup` |
-| 环境选择器 | 通过 `@env_selector(...)` 在 `module_runtime.py` 中声明，供 ATM “选择环境”模式调用 |
-| 当前实现 | 根 `__init__.py` 已收敛为稳定薄壳，默认入口组装逻辑由 `ModuleAssembler` 提供；选择环境不再接受规则树，只接受模块回调 |
+| Manifest 文件 | `module.yaml` 只保留模块元信息、升级源、`config_defaults.module` 和 `resource_pools[]` |
+| 宿主入口文件 | 模块根 `__init__.py` 仅作为 Python 包入口，不承载运行能力 |
+| 必需入口 | `runtime_api: core-native-v2` + 装饰器扫描声明 |
+| 标准运行时文件 | 无 `module_runtime.py` 主路径 |
+| 可选 hooks | 0.4.0 不提供旧 hook 兼容路径 |
+| 环境选择器 | 0.4.0 已移除 `selector_name/env_selector`；运行模板只能显式选择 `env_id` 或引用 `resource_pool` |
+| 当前实现 | Core 通过 `ModuleRuntimeDescriptorV2` 扫描 `@interface/@component/@workflow/@page/@page_action/@data_table/@data_query`，不依赖模块自有 assembler |
 | Core 扩展入口 | `context.tools.call("<namespace>.<action>", **kwargs)` |
-| 生命周期规则 | `on_cleanup` 是终态清理 hook；对已建立 `TaskContext` 的任务，ATM 会先执行 `on_cleanup`，再执行环境关闭/删除；cleanup 期间 `context.runtime["env_action"]` 先暴露计划动作（`success=None`），环境动作完成后再写回最终结果；若任务在环境申请/启动阶段就失败，不保证会进入 `on_cleanup`；手动中止运行中任务时，ATM 会主动 cancel 当前模块协程，`TaskContext.wait()` / `run_subtask()` 会尽快抛出 `asyncio.CancelledError` 以配合收口；`on_cleanup` 是 best-effort 收尾，模块应避免在 stop 状态下继续启动 `run_subtask()`，宿主会记录 cleanup 的超时、异常或 stop 触发的 `CancelledError` 并继续执行环境动作；`on_success` / `on_failure` / `on_timeout` / `on_cleanup` 与环境动作均受宿主超时保护，避免终态收尾把任务永久卡在 `running`；当前默认预算由配置中心管理：终态 hook `60s`，`on_cleanup` `300s`，环境动作 `60s` |
-| 默认工作流解析 | `context.runtime["workflow"]` -> `module_runtime.DEFAULT_WORKFLOW` -> `module.yaml.workflows[0].name` |
-| 发现错误可见性 | `ModuleAssembler` 发现 `tasks/` / `workflows/` import 失败时，必须记录 import 目标、异常类型与 traceback；若当前请求命中失败条目，`run()` 需附带 discovery hint，而不是只报泛化的“not found” |
-| Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 导出的 `PAGE`；`module.yaml.ui_extension.pages[]` 只控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象 |
+| 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。环境关闭/删除由宿主按任务结果和 `TaskSignal` / `EnvAction` 收口 |
+| 默认工作流解析 | `context.runtime["workflow"]` -> 单 workflow 自动选择 -> `main_workflow` |
+| 发现错误可见性 | descriptor 扫描失败必须暴露具体 Python 文件、符号、异常类型与 traceback 摘要，不能降级为泛化 “not found” |
+| Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 中的 `@page(...)`；`@page(menu=True)` 控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象 |
 | `TaskSignal` UI 契约 | `TaskSignal.wait_for_confirmation(..., payload={"confirmation": ...})` 会把完整 `signal` 快照持久化到任务记录，并发布 `task.signal` 事件；ATM 详情页按 `payload.confirmation` 渲染结构化确认面板，若缺少该块则退回展示 `message` 与 payload 键值 |
-| DevLink 调试语义 | 模块来源为 `DevLink` 时，详情页数据表刷新会以 `devel_mode=true` 重建本地 hook 上下文，便于联调最新 UI 声明 |
-| DevLink 普通执行语义 | ATM 普通执行 `DevLink` 模块时，也会注入 `devel_mode=true`；`ModuleService` 对同一个 `TaskContext` 只在首次加载时强制 reload 一次，后续 hook / `run()` 复用同次执行内已加载模块 |
-| 升级策略 | 旧模块统一按最新模板重新初始化；不再为旧式完整 `__init__.py` 模板提供兼容承诺 |
+| DevLink 调试语义 | 模块来源为 `DevLink` 时，descriptor 可强制 reload；正式安装模块读操作不做非必要 reload |
+| DevLink 普通执行语义 | ATM 普通执行 `DevLink` 模块时注入 `devel_mode=true`；`ModuleService` 对同一个 `TaskContext` 只在首次加载时强制 reload 一次 |
+| 升级策略 | 旧模块必须迁移到 `core-native-v2`；当前分支不为 0.3.x 运行薄壳、hooks 或 selector 提供兼容承诺 |
 | 当前风险 | 真实站点 E2E 仍未覆盖；动态加载的模块扩展点仍需依赖回归测试保持稳定 |
 | 关联项 | `TASK-003`, `TASK-013` |
 
-## `API-008` Hosted Module UI Contract（V1 已实现）
+## `API-008` Hosted Module UI Contract（0.4.0 注解模式）
 
 | 项目 | 内容 |
 |---|---|
 | 目标 | 模块 UI 不再直接导出 `PyQt6` 页面，而是声明宿主管理页 schema，由宿主统一渲染 |
-| Manifest 形态 | `ui_extension.pages[]` 只声明左侧菜单入口，每项只允许 `id`、`label`、`icon` |
-| 模块 UI 声明入口 | `pages/*.py` 或 `pages/<group>/*.py` 导出 `PAGE: PageSpec` |
-| 页面路由 | `open_page.page_id` 可以打开任意已注册 `PAGE`，包括未出现在左侧菜单的详情页或二级页 |
+| Manifest 形态 | `module.yaml` 不声明 UI；`ui_extension` 是已移除字段 |
+| 模块 UI 声明入口 | `pages/*.py` 或 `pages/<group>/*.py` 使用 `@page(...)` 装饰页面 load handler |
+| 页面路由 | `open_page.page_id` 可以打开任意已注册 `@page`，包括 `menu=False` 的详情页或二级页 |
 | 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Button`、`DataTable` |
 | `Card` V1 范围 | 纯容器卡片；支持 `title`、`title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 与子组件布局 |
 | `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
-| 宿主动作范围 | `Button.action` 第一版只开放 `reload`、`open_page` |
-| 明确删除 | `micro_app`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_page`、`ui.declare_data_table` |
+| 宿主动作范围 | `Button.action` 开放 `reload`、`open_page` 和指向 `@page_action` 的 `page_action` |
+| 明确删除 | `micro_app`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_page`、`ui.declare_data_table`、`PageSpec` |
 | 设计输入 | `module-hosted-ui-framework.md` |
-| 当前验证基线 | Core / SDK / integration / acceptance 已跑通 hosted page V1 定向回归；模块详情页、CLI 和 schema gate 已统一到 `pages/` 页面注册 + `ui_extension.pages[]` 菜单配置的新契约 |
-| 当前状态 | 已本地实现并通过定向验证；PR 收口与真实业务模块接入验证待继续推进 |
+| 当前验证基线 | Core / SDK / integration / acceptance 已跑通 `@page` 注解模式定向回归；模块详情页、CLI 和 schema gate 已统一到 `pages/` 页面注册 + `@page(menu=True)` 菜单配置的新契约 |
+| 当前状态 | 已本地实现并通过定向验证；真实业务模块接入验证待继续推进 |
 | 关联项 | `CR-011`, `TASK-025` |
 
 ## `API-009` Module Entity Table View Contract
 
 | 项目 | 内容 |
 |---|---|
-| 目标 | 在模块 `custom_table` 实体表之上提供 manifest 驱动的数据库视图和命名查询能力 |
-| 新事实源 | `module.yaml.data.views[]`、`module.yaml.data.queries[]`、`data.db.module_db_views` |
-| 注册入口 | `module.yaml.data` + `data/sql/views/*.sql` + `data/sql/queries/*.sql` |
+| 目标 | 在模块 `custom_table` 实体表之上提供装饰器驱动的数据库视图和命名查询能力 |
+| 新事实源 | `@data_table` / `@data_query` 装饰器声明 + `.crawler4j/manifest.lock.json` |
+| 注册入口 | `data/*.py` 中的装饰器声明；0.4.0 不再接受 `module.yaml.data` 作为运行事实源 |
 | 查询接口 | `ctx.db.from_(...)`、`ctx.db.named(...).bind(...).execute()` |
-| SQL 契约 | 模块只能执行宿主已注册的 `SELECT/WITH SELECT` SQL；源表通过 `{{resource:<resource_id>}}` 占位引用；禁止未注册 SQL |
+| SQL 契约 | 模块只能执行由 `@data_query` 注册的 `SELECT/WITH SELECT` SQL；源表通过 `{{resource:<resource_id>}}` 占位引用；禁止未注册 SQL |
 | UI 接入 | 模块页面通过内联 `DataTable(query_handler)` 调用 `ctx.db` fluent API，宿主只负责表格交互与渲染 |
 | 生命周期 | 宿主在模块加载/安装时校验、同步、建表、建视图、导种子，并在卸载时统一清理 |
-| 当前状态 | 已切到 manifest 驱动契约；旧 `db.declare_db_view` 运行时声明口已退出正式协议 |
+| 当前状态 | 已切到装饰器驱动契约；旧 `db.declare_db_view` 和 `module.yaml.data` 运行声明口已退出正式协议 |
 | 关联文档 | `module-entity-table-view-design.md` |
 | 关联项 | `CR-014`, `TASK-028` |
 
@@ -117,17 +117,17 @@
 
 | 项目 | 内容 |
 |---|---|
-| 静态清单 | `module.yaml`，承载模块发现、UI / workflow 声明，以及只读初始化模板 `config_defaults` |
+| 静态清单 | `module.yaml`，只承载模块发现、升级源、资源池声明和只读初始化模板 `config_defaults.module`；运行能力来自装饰器 |
 | 持久配置 | `config.db.module_config_entries`；模块运行时只通过 `ctx.get_config()` / `ctx.config` 读取 |
 | 配置编辑格式 | 模块详情页 `配置` 标签统一使用 QScintilla YAML 编辑器；保存前由独立验证层校验 YAML 语法、顶层映射对象与重复键，数据库仍是事实源 |
 | 配置初始化规则 | 仅首次加载模块时按 `module.yaml.config_defaults` 初始化一次；后续升级不自动覆盖，手动恢复默认需用户确认 |
 | 运行态元数据 | `ctx.runtime`；当前固定承载 `workflow`、`execution_params`、`job_params`、`params`、`devel_mode`、`creation_params`、`env_action` |
 | 运行中共享内存 | `ctx.state`；仅用于当前一次任务 / workflow 运行内共享变量 |
-| 页面 schema | 来自运行时 descriptor 中扫描到的 `PAGE.schema`；`ui.get_page` 只读访问当前已注册 schema |
-| 快照型业务数据 | `module.yaml.data.resources[]` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`），`custom_table` 落在受控实体表 `module_name_resource_id`，并由 `schema_version` / `schema_json` / `indexes_json` 描述真实列结构；业务数据统一通过 `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` 访问 |
+| 页面 schema | 来自运行时 descriptor 中扫描到的 `@page.schema`；`ui.get_page` 只读访问当前已注册 schema |
+| 快照型业务数据 | `@data_table` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`），`custom_table` 落在受控实体表 `module_name_resource_id`，并由装饰器 schema/indexes 描述真实列结构；业务数据统一通过 `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` 访问 |
 | 事件型审计数据 | `data.db.module_audit_events` 独立承载 append-only 审计事件；通过 `ctx.db.audit("dataset")` 访问，不进入 `module_datasets` |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
-| 当前实现说明 | `ctx.db` 已统一要求资源先在 `module.yaml.data.resources[]` 注册，再按 `storage_mode` 路由；`managed_dataset` 不再按名称隐式落库，且只允许单源读取；`custom_table` 继续使用 schema 驱动的受控实体表，并可在 manifest 显式声明后联表、分组和聚合。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单 |
+| 当前实现说明 | `ctx.db` 已统一要求资源先由 `@data_table` 注册并进入 manifest lock，再按 `storage_mode` 路由；`managed_dataset` 不再按名称隐式落库，且只允许单源读取；`custom_table` 继续使用 schema 驱动的受控实体表，并可在装饰器显式声明后联表、分组和聚合。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单 |
 | 关联文档 | `module-config-runtime-data-contract.md` |
 | 关联项 | `CR-003`, `CR-012`, `TASK-026` |
 
@@ -153,8 +153,8 @@
 | SDK 包名 | `crawler4j-sdk` |
 | Contracts 包名 | `crawler4j-contracts` |
 | CLI 入口 | `crawler4j_sdk.cli.commands:main` |
-| 当前能力 | `ModuleAssembler` 已作为统一模块入口组装 helper 落地；`TaskContext` 已收敛为 `tools` 统一扩展入口；`TaskSignal` 已成为模块到 ATM 的正式流程信号；CLI 已重构为 `module / task / workflow / page / env-selector / config / package / release / host / check` 分组体系 |
-| 当前状态 | 本地 build 成功，help 可运行；模块入口自动托管、重初始化路径与集成测试已完成 |
+| 当前能力 | `crawler4j-contracts` 提供 `TaskContext`、`TaskResult`、`ctx.db`、v2 装饰器和 Hosted UI schema helper；`crawler4j-sdk` 只提供 CLI、模板、静态扫描、manifest lock、迁移报告、打包与宿主联调辅助 |
+| 当前状态 | 0.4.x SDK/Contracts 只服务 Core 0.4.0 / `core-native-v2`；不再导出 `ModuleAssembler`、`TaskScript`、`TaskFlow`、`env_selector` 或运行时 owner helper |
 | 关联项 | `REQ-003`, `REQ-006` |
 
 ## `API-004` Release Metadata Contract
@@ -177,7 +177,7 @@
 |---|---|
 | 适用场景 | 固定环境池 + Service Job 保活并发，不再适合“拿不到环境就失败”的运行模式 |
 | 目标语义 | `运行中 + 等待中 = 目标并发`；资源不足属于正常等待，不属于失败 |
-| 进入队列前提 | 只有 `JobType.SERVICE + AcquisitionConfig.mode=select + resource_pool 非空` 时才进入固定池等待语义；`selector_name` 可选，但 `selector_name` 和 `resource_pool` 不能同时为空 |
+| 进入队列前提 | 只有 `JobType.SERVICE + AcquisitionConfig.mode=select + resource_pool 非空` 时才进入固定池等待语义；0.4.0 不再接受 `selector_name` |
 | 资源池声明 | 固定环境池名称必须先在模块 `module.yaml.resource_pools[]` 中声明；运行模板里的 `resource_pool` 只能引用已声明池 |
 | 资源池定位 | 宿主只在“当前模块 + 当前资源池 + `eligible=true` + `READY` + 无租约占用”的环境集合里分配环境 |
 | 卡片存储 | 宿主内部 `env_metadata`；建议 `namespace=scheduler.resource_pool`，key 由宿主按“根模块名归一化 + pool_name”拼接，例如 `demo.foo` -> `demo:<pool>` |
@@ -190,10 +190,10 @@
 | 容量变化触发 | 环境释放、新环境可分配、异常/暂停环境恢复、模块更新资格卡片；控制器启动时还会先做 bootstrap 调和，作业激活/更新时会定向调和，另有运行在主 async loop 上的轻量异步巡检兜底 |
 | 环境占用规则 | 占用不移出资源池；资源池归属和运行中占用分离 |
 | 黑号规则 | 先把环境标成 `eligible=false` 并写入原因，再按业务策略销毁或保留待人工处理 |
-| 选择器分层 | `resource_pool` 做宿主级粗筛；若配置了 `selector_name`，宿主只把当前池内候选交给它做细粒度选择；若 `selector_name` 为空，则不会调用 `select_env`，宿主直接取当前池内第一个可分配候选；这对从旧 selector 模块迁移来说是显式行为变化，不是无害默认，且当前实现不承诺额外业务排序 |
-| selector 作者入口 | `selector_name` 指向 `module_runtime.py` 里通过 `@env_selector(...)` 声明的 selector；运行时 `select_env(...)` 是框架包装壳，不是模块作者另写的新 hook |
-| 队列模式下无命中语义 | 只有 `resource_pool` 非空路径里，当前轮没命中才回到等待；没有 `resource_pool` 的旧选择模式里，`selector` 返回 `None` 仍然直接失败 |
-| 候选竞争语义 | 固定池候选如果在 `get_env` / 租约阶段被其他任务先抢走，或候选在快照之后被资源池卡片改成不可发号，当前任务回到等待席位，不直接记失败；只有 selector 选了候选集外环境或其他真实异常才进入失败收口 |
+| 候选选择 | `resource_pool` 做宿主级粗筛；宿主直接在当前池内可分配候选中取一个环境，不再调用模块 selector |
+| selector 作者入口 | 无；`selector_name/env_selector` 是 0.3.x 维护线概念 |
+| 队列模式下无命中语义 | 只有 `resource_pool` 非空路径里，当前轮没命中才回到等待；未配置 `resource_pool` 时必须指定 `env_id`，否则运行模板校验失败 |
+| 候选竞争语义 | 固定池候选如果在 `get_env` / 租约阶段被其他任务先抢走，或候选在快照之后被资源池卡片改成不可发号，当前任务回到等待席位，不直接记失败；其他真实异常进入失败收口 |
 | 等待状态口径 | 固定池等待会复用底层 `TaskStatus.PENDING`；UI 展示为 `等待环境`，等待中的 `task.message` 为 `等待环境池工位: <pool>` |
 | 等待超时口径 | `wait_timeout` 同时用于环境租约获取与固定环境池 `PENDING` 等待席位收口；固定池等待从第一次写下 `waiting_since` 开始计时，`wait_timeout=0` 时当前不会自动超时收口；当前实现不会单独用它中断 `select_env(...)` 本身；失败文案为 `等待环境池工位超时: <pool> (<seconds>s)`，且与 `execution.timeout` 分离 |
 | `KEEP_ALIVE` 环境口径 | `KEEP_ALIVE` 只表示保留现场，不表示重新回池；保留后的 `RUNNING` 环境不会被固定池当成可发号工位 |
@@ -212,6 +212,7 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-04-30 | 新增 `API-013`，登记 docs-stratego 下使用者指南和开发者指南按版本分流、主文档指向当前发布版本、历史版本保留的契约 | Codex |
+| 2026-04-30 | 收口 `API-002/API-003/API-005/API-007/API-008/API-009` 到当前 0.4.0 破坏性实现：无 `selector_name/env_selector`、无 `PageSpec/ui_extension`、无 `module.yaml.data` 事实源，运行能力只来自装饰器和 manifest lock | Codex |
 | 2026-04-30 | 新增 `API-012`，登记 0.4.0 装饰器对象装配运行时、SDK 打开阶段诊断和宿主保留字段校验契约 | Codex |
 | 2026-04-30 | 扩展 `API-012`：登记 `object_param` / `object_inject` 注解 helper 与统一元数据归一规则 | Codex |
 | 2026-04-24 | 将 Hosted UI 页面契约修正为 `pages/` 注册可路由页面、`ui_extension.pages[]` 只控制左侧菜单，并允许 `open_page` 跳转到非菜单详情页 | Codex |

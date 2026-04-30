@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import ast
+import datetime as dt
 import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 from crawler4j_contracts import (
     HOST_RESERVED_DATA_FIELDS,
@@ -16,10 +18,11 @@ from crawler4j_contracts import (
     InjectSpec,
     ParameterSpec,
 )
+from crawler4j_contracts.hosted_ui import normalize_page_schema
 
 CORE_NATIVE_V2_RUNTIME_API = "core-native-v2"
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-V2_SCAN_DIRECTORIES = ("interfaces", "objects", "workflows", "tasks", "data")
+V2_SCAN_DIRECTORIES = ("interfaces", "objects", "workflows", "tasks", "data", "pages")
 IGNORED_PATH_PARTS = {
     ".git",
     ".idea",
@@ -35,12 +38,13 @@ IGNORED_PATH_PARTS = {
     "tests",
 }
 LEGACY_RUNTIME_DIRECTORIES = ("hooks", "env_selectors")
-LEGACY_SPEC_NAMES = {"TaskSpec", "WorkflowSpec", "EnvSelectorSpec"}
-LEGACY_DECLARATION_NAMES = {"TASK", "WORKFLOW", "SELECTOR"}
+LEGACY_SPEC_NAMES = {"TaskSpec", "WorkflowSpec", "EnvSelectorSpec", "PageSpec"}
+LEGACY_DECLARATION_NAMES = {"TASK", "WORKFLOW", "SELECTOR", "PAGE"}
 DECORATOR_KINDS = {
     "interface": "interface",
     "component": "component",
     "workflow": "workflow",
+    "page": "page",
     "page_action": "page_action",
     "data_table": "data_table",
     "data_query": "data_query",
@@ -172,6 +176,7 @@ def _collect_manifest_diagnostics(manifest: dict[str, Any]) -> list[V2Diagnostic
         ("objects", "V2_MANIFEST_LEGACY_OBJECTS"),
         ("interfaces", "V2_MANIFEST_LEGACY_INTERFACES"),
         ("tasks", "V2_MANIFEST_LEGACY_TASKS"),
+        ("ui_extension", "V2_MANIFEST_LEGACY_UI_EXTENSION"),
     ):
         if key in manifest:
             diagnostics.append(
@@ -444,6 +449,10 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, node: ast.ClassDef) -> Crawl
         source=meta.source,
         sql=meta.sql,
         output_schema=meta.output_schema,
+        icon=meta.icon,
+        menu=meta.menu,
+        order=meta.order,
+        page_schema=meta.page_schema,
     )
 
 
@@ -584,26 +593,80 @@ def _parameter_from_annotation(
     type_expr: ast.expr | None,
     fallback_default: Any,
 ) -> ParameterSpec:
+    inferred = _parameter_shape_from_annotation(type_expr)
     default_marker = kwargs.get("default", _MISSING)
     default_supplied = default_marker is not _MISSING or fallback_default is not _MISSING
     default = default_marker if default_marker is not _MISSING else fallback_default
     if default is _MISSING:
         default = None
     required_value = kwargs.get("required", _MISSING)
-    required = bool(required_value) if required_value is not _MISSING else not default_supplied
+    required = bool(required_value) if required_value is not _MISSING else not default_supplied and not inferred["optional"]
+    options = tuple(_as_tuple(kwargs.get("options"))) or tuple(_as_tuple(inferred["options"]))
     return ParameterSpec(
         name=str(kwargs.get("name") or fallback_name),
-        type=str(kwargs.get("type") or _infer_parameter_type(type_expr) or "string"),
+        type=str(kwargs.get("type") or inferred["type"] or "string"),
         label=str(kwargs.get("label") or ""),
         description=str(kwargs.get("description") or ""),
         required=required,
         default=default,
-        options=tuple(_as_tuple(kwargs.get("options"))),
+        options=options,
         min=kwargs.get("min"),
         max=kwargs.get("max"),
         step=kwargs.get("step"),
         placeholder=str(kwargs.get("placeholder") or ""),
+        schema=dict(kwargs.get("schema") or inferred["schema"] or {}),
+        item_schema=dict(kwargs.get("item_schema") or inferred["item_schema"] or {}),
     )
+
+
+def _parameter_shape_from_annotation(node: ast.expr | None) -> dict[str, Any]:
+    inferred: dict[str, Any] = {
+        "type": _infer_parameter_type(node),
+        "schema": {},
+        "item_schema": {},
+        "options": (),
+        "optional": False,
+    }
+    if node is None:
+        return inferred
+
+    union_items = _union_items(node)
+    if union_items is not None:
+        concrete_items = tuple(item for item in union_items if not _is_none_annotation(item))
+        if len(concrete_items) != len(union_items):
+            inferred["optional"] = True
+        if len(concrete_items) == 1:
+            nested = _parameter_shape_from_annotation(concrete_items[0])
+            nested["optional"] = bool(inferred["optional"] or nested["optional"])
+            return nested
+
+    if isinstance(node, ast.Subscript):
+        type_name = _annotation_name(node.value)
+        elements = _subscript_elements(node.slice)
+        if type_name == "Literal":
+            values = tuple(ast.literal_eval(item) for item in elements)
+            inferred.update(
+                {
+                    "type": "enum",
+                    "options": tuple({"label": str(value), "value": value} for value in values),
+                }
+            )
+            return inferred
+        if type_name in {"list", "List", "Sequence", "tuple", "Tuple", "set", "Set"}:
+            item_expr = _homogeneous_collection_item(elements)
+            if item_expr is not None:
+                inferred["item_schema"] = _schema_from_annotation(item_expr)
+            inferred["type"] = "array"
+            return inferred
+        if type_name in {"dict", "Dict", "Mapping"}:
+            if len(elements) >= 2:
+                value_schema = _schema_from_annotation(elements[1])
+                if value_schema.get("type"):
+                    inferred["schema"] = {"additional_type": value_schema["type"]}
+            inferred["type"] = "object"
+            return inferred
+
+    return inferred
 
 
 def _infer_parameter_type(node: ast.expr | None) -> str:
@@ -615,7 +678,52 @@ def _infer_parameter_type(node: ast.expr | None) -> str:
         "int": "integer",
         "float": "number",
         "bool": "boolean",
+        "list": "array",
+        "List": "array",
+        "tuple": "array",
+        "Tuple": "array",
+        "dict": "object",
+        "Dict": "object",
+        "Mapping": "object",
+        "date": "date",
+        "datetime": "datetime",
+        "time": "time",
+        "Path": "path",
     }.get(type_name, "")
+
+
+def _schema_from_annotation(node: ast.expr | None) -> dict[str, Any]:
+    shape = _parameter_shape_from_annotation(node)
+    schema: dict[str, Any] = {"type": shape["type"] or "string"}
+    if shape["schema"]:
+        schema["schema"] = shape["schema"]
+    if shape["item_schema"]:
+        schema["item_schema"] = shape["item_schema"]
+    return schema
+
+
+def _homogeneous_collection_item(elements: list[ast.expr]) -> ast.expr | None:
+    if not elements:
+        return None
+    if len(elements) == 2 and isinstance(elements[1], ast.Constant) and elements[1].value is Ellipsis:
+        return elements[0]
+    if len(elements) == 1:
+        return elements[0]
+    return None
+
+
+def _union_items(node: ast.expr) -> tuple[ast.expr, ...] | None:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        left = _union_items(node.left) or (node.left,)
+        right = _union_items(node.right) or (node.right,)
+        return (*left, *right)
+    if isinstance(node, ast.Subscript) and _annotation_name(node.value) in {"Optional", "Union"}:
+        return tuple(_subscript_elements(node.slice))
+    return None
+
+
+def _is_none_annotation(node: ast.expr) -> bool:
+    return isinstance(node, ast.Constant) and node.value is None or _annotation_name(node) == "None"
 
 
 def _literal_or_missing(node: ast.expr | None) -> Any:
@@ -665,6 +773,7 @@ def _validate_declarations(declarations: list[V2Declaration]) -> list[V2Diagnost
     diagnostics.extend(_validate_duplicate_names(declarations))
     diagnostics.extend(_validate_interface_implementations(declarations))
     diagnostics.extend(_validate_injection_targets(declarations))
+    diagnostics.extend(_validate_pages(declarations))
     diagnostics.extend(_validate_page_actions(declarations))
     diagnostics.extend(_validate_parameters(declarations))
     diagnostics.extend(_validate_data_contracts(declarations))
@@ -765,6 +874,47 @@ def _validate_page_actions(declarations: list[V2Declaration]) -> list[V2Diagnost
     return diagnostics
 
 
+def _validate_pages(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    for declaration in declarations:
+        if declaration.kind != "page":
+            continue
+        if declaration.target_kind not in {"function", "async_function"}:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_INVALID_TARGET",
+                    location=declaration.symbol,
+                    message="page must decorate a function or async function",
+                )
+            )
+            continue
+
+        raw_schema = dict(declaration.meta.page_schema)
+        load_handler = str(raw_schema.get("load_handler") or "").strip()
+        function_name = declaration.symbol.rsplit(".", 1)[-1]
+        if load_handler and load_handler != function_name:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_LOAD_HANDLER_MISMATCH",
+                    location=f"{declaration.symbol}.schema.load_handler",
+                    message="@page load_handler must match the decorated function",
+                )
+            )
+            continue
+        raw_schema["load_handler"] = function_name
+        try:
+            normalize_page_schema(declaration.name, raw_schema)
+        except ValueError as exc:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_SCHEMA_INVALID",
+                    location=f"{declaration.symbol}.schema",
+                    message=str(exc),
+                )
+            )
+    return diagnostics
+
+
 def _validate_parameters(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
     diagnostics: list[V2Diagnostic] = []
     for declaration in declarations:
@@ -851,47 +1001,147 @@ def _validate_parameters(declarations: list[V2Declaration]) -> list[V2Diagnostic
 
 def _validate_parameter_default(parameter: Any, location: str) -> list[V2Diagnostic]:
     diagnostics: list[V2Diagnostic] = []
-    value = parameter.default
-    parameter_type = parameter.type
-    if parameter_type in {"string", "text"}:
-        valid = isinstance(value, str)
-    elif parameter_type == "integer":
-        valid = isinstance(value, int) and not isinstance(value, bool)
-    elif parameter_type == "number":
-        valid = isinstance(value, (int, float)) and not isinstance(value, bool)
-    elif parameter_type == "boolean":
-        valid = isinstance(value, bool)
-    elif parameter_type == "enum":
-        valid = value in [option.value for option in parameter.options]
-    else:
-        valid = False
-    if not valid:
+    try:
+        _validate_default_value(parameter, parameter.default)
+    except ValueError as exc:
         diagnostics.append(
             V2Diagnostic(
                 code="V2_INVALID_PARAMETER_DEFAULT",
                 location=f"{location}.default",
-                message=f"default value does not match parameter type: {parameter_type}",
+                message=str(exc),
             )
         )
         return diagnostics
+    return diagnostics
+
+
+def _validate_default_value(parameter: ParameterSpec, value: Any) -> None:
+    parameter_type = parameter.type
+    if parameter_type in {"string", "text", "secret"}:
+        valid = isinstance(value, str)
+    elif parameter_type == "integer":
+        valid = isinstance(value, int) and not isinstance(value, bool)
+    elif parameter_type == "number":
+        valid = _is_number(value)
+    elif parameter_type == "boolean":
+        valid = isinstance(value, bool)
+    elif parameter_type == "enum":
+        valid = value in [option.value for option in parameter.options]
+    elif parameter_type == "array":
+        valid = isinstance(value, (list, tuple))
+    elif parameter_type == "object":
+        valid = isinstance(value, dict)
+    elif parameter_type == "json":
+        valid = _is_json_like(value)
+    elif parameter_type == "date":
+        valid = isinstance(value, dt.date) and not isinstance(value, dt.datetime) or _is_iso_date(value)
+    elif parameter_type == "datetime":
+        valid = isinstance(value, dt.datetime) or _is_iso_datetime(value)
+    elif parameter_type == "time":
+        valid = isinstance(value, dt.time) or _is_iso_time(value)
+    elif parameter_type == "url":
+        valid = isinstance(value, str) and _is_url(value)
+    elif parameter_type == "path":
+        valid = isinstance(value, (str, Path))
+    else:
+        valid = False
+    if not valid:
+        raise ValueError(f"default value does not match parameter type: {parameter_type}")
+
     if parameter_type in {"integer", "number"}:
         if parameter.min is not None and value < parameter.min:
-            diagnostics.append(
-                V2Diagnostic(
-                    code="V2_INVALID_PARAMETER_DEFAULT",
-                    location=f"{location}.default",
-                    message="default value is lower than min",
-                )
-            )
+            raise ValueError("default value is lower than min")
         if parameter.max is not None and value > parameter.max:
-            diagnostics.append(
-                V2Diagnostic(
-                    code="V2_INVALID_PARAMETER_DEFAULT",
-                    location=f"{location}.default",
-                    message="default value is greater than max",
-                )
-            )
-    return diagnostics
+            raise ValueError("default value is greater than max")
+    if parameter_type == "array" and parameter.item_schema:
+        for item in value:
+            _validate_default_value(_schema_parameter(parameter.item_schema), item)
+    if parameter_type == "object":
+        _validate_object_default(parameter, value)
+
+
+def _validate_object_default(parameter: ParameterSpec, value: dict[Any, Any]) -> None:
+    if not all(isinstance(key, str) for key in value):
+        raise ValueError("default value does not match parameter type: object")
+    fields = parameter.schema.get("fields")
+    if isinstance(fields, list):
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            field_name = str(field.get("name") or field.get("key") or "").strip()
+            if not field_name:
+                continue
+            if field_name not in value:
+                if bool(field.get("required")):
+                    raise ValueError(f"default object field is required: {field_name}")
+                continue
+            _validate_default_value(_schema_parameter(field), value[field_name])
+    additional_type = str(parameter.schema.get("additional_type") or "").strip()
+    if additional_type:
+        additional_parameter = ParameterSpec(name="value", type=additional_type)
+        for item in value.values():
+            _validate_default_value(additional_parameter, item)
+
+
+def _schema_parameter(schema: dict[str, Any]) -> ParameterSpec:
+    return ParameterSpec(
+        name=str(schema.get("name") or schema.get("key") or "value"),
+        type=str(schema.get("type") or "string"),
+        required=bool(schema.get("required")),
+        options=tuple(_as_tuple(schema.get("options"))),
+        min=schema.get("min"),
+        max=schema.get("max"),
+        step=schema.get("step"),
+        schema=dict(schema.get("schema") or {}),
+        item_schema=dict(schema.get("item_schema") or {}),
+    )
+
+
+def _is_iso_date(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        dt.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_iso_datetime(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+def _is_iso_time(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        dt.time.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return bool(parsed.scheme and parsed.netloc)
+
+
+def _is_json_like(value: Any) -> bool:
+    if value is None or isinstance(value, (str, bool)):
+        return True
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return True
+    if isinstance(value, list):
+        return all(_is_json_like(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _is_json_like(item) for key, item in value.items())
+    return False
 
 
 def _validate_data_contracts(declarations: list[V2Declaration]) -> list[V2Diagnostic]:

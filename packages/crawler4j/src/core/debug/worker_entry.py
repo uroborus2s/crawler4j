@@ -132,7 +132,6 @@ async def main_async(config_path: str) -> int:
             "task_id": payload["id"],
         },
         provider_name=payload.get("provider") or "playwright_local",
-        selector_name=payload.get("selector_name", ""),
         acquisition_mode=AcquisitionMode(payload.get("acquisition_mode", AcquisitionMode.CREATE.value)),
         creation_params=dict(payload.get("creation_params") or {}),
         creation_lifecycle=CreationLifecycle(

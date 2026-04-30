@@ -191,7 +191,7 @@ async def test_job_detail_dialog_shows_resource_pool_binding(qtbot, monkeypatch)
     await dialog._load_data_async()
 
     assert "资源池: bound_account_ready" in dialog.config_text.toPlainText()
-    assert "选择器: -" in dialog.config_text.toPlainText()
+    assert "选择器" not in dialog.config_text.toPlainText()
 
 
 @pytest.mark.asyncio

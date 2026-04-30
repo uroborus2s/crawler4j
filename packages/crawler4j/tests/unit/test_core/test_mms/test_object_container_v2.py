@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime, time
 from pathlib import Path
 from textwrap import dedent
 
@@ -243,6 +244,203 @@ def test_object_container_builds_workflow_from_annotation_declared_metadata(tmp_
         purge_module_namespace(module_name)
 
 
+def test_object_container_validates_and_coerces_extended_parameter_types(tmp_path: Path):
+    module_name = "container_typed_param_module"
+    module_dir = _write_v2_module(
+        tmp_path,
+        module_name,
+        {
+            "interfaces/labor.py": """
+                from crawler4j_contracts import interface
+
+                @interface(name="labor")
+                class Labor:
+                    pass
+            """,
+            "objects/typed_labor.py": """
+                from crawler4j_contracts import component
+
+                @component(
+                    name="typed_labor",
+                    implements="labor",
+                    parameters=[
+                        {"name": "start_date", "type": "date", "required": True},
+                        {"name": "deadline", "type": "datetime", "required": True},
+                        {"name": "run_at", "type": "time", "required": True},
+                        {"name": "download_dir", "type": "path", "required": True},
+                        {"name": "tags", "type": "array", "item_schema": {"type": "string"}, "default": ["core"]},
+                        {
+                            "name": "limits",
+                            "type": "object",
+                            "schema": {
+                                "fields": [
+                                    {"name": "daily", "type": "integer", "required": True},
+                                    {"name": "burst", "type": "number"},
+                                ]
+                            },
+                            "required": True,
+                        },
+                        {"name": "endpoint", "type": "url", "required": True},
+                        {"name": "token", "type": "secret", "required": True},
+                        {"name": "payload", "type": "json", "required": True},
+                    ],
+                )
+                class TypedLabor:
+                    def __init__(
+                        self,
+                        start_date,
+                        deadline,
+                        run_at,
+                        download_dir,
+                        tags,
+                        limits,
+                        endpoint,
+                        token,
+                        payload,
+                    ):
+                        self.start_date = start_date
+                        self.deadline = deadline
+                        self.run_at = run_at
+                        self.download_dir = download_dir
+                        self.tags = tags
+                        self.limits = limits
+                        self.endpoint = endpoint
+                        self.token = token
+                        self.payload = payload
+            """,
+            "workflows/quiz.py": """
+                from crawler4j_contracts import workflow
+
+                @workflow(name="quiz_workflow", inject=[{"name": "labor", "type": "interface", "target": "labor"}])
+                class QuizWorkflow:
+                    def __init__(self, labor):
+                        self.labor = labor
+            """,
+        },
+    )
+
+    try:
+        descriptor = load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
+        container = ObjectContainerV2(
+            descriptor,
+            "quiz_workflow",
+            object_params={
+                "typed_labor": {
+                    "start_date": "2026-05-01",
+                    "deadline": "2026-05-01T12:30:00",
+                    "run_at": "08:45:00",
+                    "download_dir": "/tmp/downloads",
+                    "tags": ("alpha", "beta"),
+                    "limits": {"daily": 10, "burst": 2.5},
+                    "endpoint": "https://api.example.com/v1",
+                    "token": "secret-token",
+                    "payload": {"enabled": True, "ids": [1, "2"]},
+                }
+            },
+        )
+
+        workflow = container.build_workflow()
+
+        assert workflow.labor.start_date == date(2026, 5, 1)
+        assert workflow.labor.deadline == datetime(2026, 5, 1, 12, 30)
+        assert workflow.labor.run_at == time(8, 45)
+        assert workflow.labor.download_dir == Path("/tmp/downloads")
+        assert workflow.labor.tags == ["alpha", "beta"]
+        assert workflow.labor.limits == {"daily": 10, "burst": 2.5}
+        assert workflow.labor.endpoint == "https://api.example.com/v1"
+        assert workflow.labor.token == "secret-token"
+        assert workflow.labor.payload == {"enabled": True, "ids": [1, "2"]}
+    finally:
+        purge_module_namespace(module_name)
+
+
+@pytest.mark.parametrize(
+    ("params", "message"),
+    [
+        ({"start_date": "2026-13-01"}, "start_date 必须是 ISO date"),
+        ({"endpoint": "api.example.com"}, "endpoint 必须是 URL"),
+        ({"tags": [1]}, r"tags\[0\] 必须是字符串"),
+        ({"limits": {"burst": 2.5}}, "limits.daily 不能为空"),
+        ({"payload": {1: "bad"}}, "payload 必须是 JSON-like 值"),
+    ],
+)
+def test_object_container_rejects_invalid_extended_parameter_values(
+    tmp_path: Path,
+    params: dict[str, object],
+    message: str,
+):
+    module_name = "container_invalid_typed_param_module"
+    module_dir = _write_v2_module(
+        tmp_path,
+        module_name,
+        {
+            "interfaces/labor.py": """
+                from crawler4j_contracts import interface
+
+                @interface(name="labor")
+                class Labor:
+                    pass
+            """,
+            "objects/typed_labor.py": """
+                from crawler4j_contracts import component
+
+                @component(
+                    name="typed_labor",
+                    implements="labor",
+                    parameters=[
+                        {"name": "start_date", "type": "date", "required": True},
+                        {"name": "endpoint", "type": "url", "required": True},
+                        {"name": "tags", "type": "array", "item_schema": {"type": "string"}, "required": True},
+                        {
+                            "name": "limits",
+                            "type": "object",
+                            "schema": {"fields": [{"name": "daily", "type": "integer", "required": True}]},
+                            "required": True,
+                        },
+                        {"name": "payload", "type": "json", "required": True},
+                    ],
+                )
+                class TypedLabor:
+                    def __init__(self, start_date, endpoint, tags, limits, payload):
+                        self.start_date = start_date
+                        self.endpoint = endpoint
+                        self.tags = tags
+                        self.limits = limits
+                        self.payload = payload
+            """,
+            "workflows/quiz.py": """
+                from crawler4j_contracts import workflow
+
+                @workflow(name="quiz_workflow", inject=[{"name": "labor", "type": "interface", "target": "labor"}])
+                class QuizWorkflow:
+                    def __init__(self, labor):
+                        self.labor = labor
+            """,
+        },
+    )
+    valid_params = {
+        "start_date": "2026-05-01",
+        "endpoint": "https://api.example.com/v1",
+        "tags": ["alpha"],
+        "limits": {"daily": 10},
+        "payload": {"enabled": True},
+    }
+    valid_params.update(params)
+
+    try:
+        descriptor = load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
+        container = ObjectContainerV2(
+            descriptor,
+            "quiz_workflow",
+            object_params={"typed_labor": valid_params},
+        )
+
+        with pytest.raises(RuntimeError, match=message):
+            container.build_workflow()
+    finally:
+        purge_module_namespace(module_name)
+
+
 def test_object_container_shares_instances_in_one_graph_and_isolates_graphs(tmp_path: Path):
     module_name = "container_scope_module"
     module_dir = _write_v2_module(
@@ -327,6 +525,19 @@ def test_object_container_shares_instances_in_one_graph_and_isolates_graphs(tmp_
 def test_object_container_requires_explicit_interface_selection(tmp_path: Path):
     module_name = "container_missing_binding_module"
     module_dir = _write_quiz_module(tmp_path, module_name)
+    (module_dir / "objects" / "browser_labor.py").write_text(
+        dedent(
+            """
+            from crawler4j_contracts import component
+
+            @component(name="browser_labor", implements="labor")
+            class BrowserLabor:
+                pass
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
     try:
         descriptor = load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
@@ -339,6 +550,43 @@ def test_object_container_requires_explicit_interface_selection(tmp_path: Path):
 
         with pytest.raises(RuntimeError, match="缺少实现选择.*orchestrator\\.labor.*labor"):
             container.build_workflow()
+    finally:
+        purge_module_namespace(module_name)
+
+
+def test_object_container_auto_binds_single_interface_implementation(tmp_path: Path):
+    module_name = "container_single_impl_module"
+    module_dir = _write_quiz_module(tmp_path, module_name)
+
+    try:
+        descriptor = load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
+        container = ObjectContainerV2(
+            descriptor,
+            "quiz_workflow",
+            object_params={"api_labor": {"base_url": "https://labor.example.com"}},
+        )
+
+        workflow = container.build_workflow()
+
+        assert workflow.orchestrator.labor.base_url == "https://labor.example.com"
+    finally:
+        purge_module_namespace(module_name)
+
+
+def test_object_container_rejects_unknown_object_binding_key_even_with_single_implementation(tmp_path: Path):
+    module_name = "container_unknown_binding_module"
+    module_dir = _write_quiz_module(tmp_path, module_name)
+
+    try:
+        descriptor = load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
+
+        with pytest.raises(RuntimeError, match=r"object_bindings 包含未知注入路径: orchestrator\.laobr"):
+            ObjectContainerV2(
+                descriptor,
+                "quiz_workflow",
+                object_bindings={"orchestrator.laobr": "api_labor"},
+                object_params={"api_labor": {"base_url": "https://labor.example.com"}},
+            )
     finally:
         purge_module_namespace(module_name)
 

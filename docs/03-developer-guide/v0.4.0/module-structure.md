@@ -31,14 +31,14 @@ hotel_demo/
 
 | 路径 | 职责 |
 |---|---|
-| `module.yaml` | 模块元信息、`runtime_api`、升级源、页面菜单、资源池、配置默认值等宿主静态配置 |
+| `module.yaml` | 模块元信息、`runtime_api`、升级源、资源池、配置默认值等宿主静态配置 |
 | `.crawler4j/manifest.lock.json` | SDK 扫描装饰器生成的只读快照 |
 | `interfaces/*.py` | `@interface` 能力类型 |
 | `objects/*.py` | `@component` 业务对象和编排对象 |
 | `workflows/*.py` | `@workflow` workflow 类 |
 | `tasks/*.py` | `@page_action` 页面操作纯函数 |
 | `data/*.py` | `@data_table`、`@data_query` 数据契约 |
-| `pages/*.py` / `pages/<group>/*.py` | Hosted UI 页面 schema 与 handler |
+| `pages/*.py` / `pages/<group>/*.py` | `@page` Hosted UI 页面 schema、菜单状态与 handler |
 
 `tasks/` 在 v2 中承载 page action。保留这个目录名是为了迁移和工程习惯，但它不再表示 v1 `TaskSpec` 任务，也不再承载 `TASK/execute` 主路径。
 
@@ -53,11 +53,6 @@ display_name: 酒店示例
 version: 0.1.0
 upgrade_source:
   repo: your-org/hotel_demo
-ui_extension:
-  pages:
-    - id: dashboard
-      label: Dashboard
-      icon: chart
 ```
 
 运行能力不要写进 `module.yaml`。它们来自装饰器扫描和 manifest lock。
@@ -80,6 +75,7 @@ lock 内容来自装饰器扫描，通常包含：
 - components
 - workflows
 - page actions
+- pages
 - data tables
 - data queries
 - 注入关系
@@ -109,6 +105,7 @@ lock 内容来自装饰器扫描，通常包含：
   ],
   "workflows": [{"name": "hotel_sync", "source": "workflows/hotel_sync.py"}],
   "page_actions": [{"name": "open_home_page", "source": "tasks/open_home_page.py"}],
+  "pages": [{"name": "dashboard", "source": "pages/dashboard.py", "menu": true}],
   "data_tables": [{"name": "hotels", "source": "data/hotels.py"}],
   "data_queries": [{"name": "ready_hotels", "source": "data/hotels.py"}],
   "diagnostics": []

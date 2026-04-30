@@ -21,7 +21,7 @@ from src.core.atm.run_profile import (
     RunProfile,
 )
 from src.core.rem.manager import RECOVERY_PROVIDER_RUNTIME_TIMEOUT
-from src.core.mms.models import ModuleManifest, UpgradeSourceInfo, WorkflowInfo
+from src.core.mms.models import ModuleManifest, UpgradeSourceInfo
 
 
 @pytest.fixture
@@ -34,14 +34,17 @@ def temp_state_dir(tmp_path):
 
 
 def _build_select_run_profile(wait_timeout: int = 60, resource_pool: str = "") -> RunProfile:
+    acquisition_kwargs = {
+        "mode": AcquisitionMode.SELECT,
+        "wait_timeout": wait_timeout,
+    }
+    if resource_pool:
+        acquisition_kwargs["resource_pool"] = resource_pool
+    else:
+        acquisition_kwargs["env_id"] = 1
     return RunProfile(
         resource=ResourceConfig(
-            acquisition=AcquisitionConfig(
-                mode=AcquisitionMode.SELECT,
-                selector_name="random_ready",
-                resource_pool=resource_pool,
-                wait_timeout=wait_timeout,
-            ),
+            acquisition=AcquisitionConfig(**acquisition_kwargs),
         ),
         execution=ExecutionContext(module="demo_module", workflow="repair"),
     )
@@ -60,18 +63,7 @@ def _build_create_run_profile(provider: str = "virtualbrowser") -> RunProfile:
 
 
 @pytest.fixture(autouse=True)
-def patch_default_selector_metadata(monkeypatch):
-    monkeypatch.setattr(
-        "src.core.atm.controller.get_module_service",
-        lambda: SimpleNamespace(
-            list_env_selectors=lambda module_name: [
-                SimpleNamespace(name="random_ready", returns_none=False),
-                SimpleNamespace(name="return_none", returns_none=True),
-            ]
-            if module_name == "demo_module"
-            else []
-        ),
-    )
+def patch_default_module_registry(monkeypatch):
     monkeypatch.setattr(
         "src.core.atm.controller.get_module_registry",
         lambda: SimpleNamespace(
@@ -79,10 +71,8 @@ def patch_default_selector_metadata(monkeypatch):
                 SimpleNamespace(
                     manifest=ModuleManifest(
                         name="demo_module",
-                        runtime_api="core-native-v1",
+                        runtime_api="core-native-v2",
                         upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
-                        workflows=[WorkflowInfo(name="repair")],
-                        default_workflow="repair",
                         resource_pools=[SimpleNamespace(name="bound_account_ready")],
                         data={"resources": [], "views": [], "queries": [], "seeds": []},
                     )
@@ -123,10 +113,8 @@ def test_ensure_runtime_for_job_rejects_undeclared_resource_pool(monkeypatch):
             get_module=lambda module_name: SimpleNamespace(
                 manifest=ModuleManifest(
                     name="demo_module",
-                    runtime_api="core-native-v1",
+                    runtime_api="core-native-v2",
                     upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
-                    workflows=[WorkflowInfo(name="repair")],
-                    default_workflow="repair",
                     resource_pools=[],
                     data={"resources": [], "views": [], "queries": [], "seeds": []},
                 )
@@ -339,98 +327,6 @@ async def test_service_job_scale_up_skips_when_runtime_check_fails_before_dispat
     await controller._reconcile_job(job)
 
     controller.dispatcher.dispatch.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_service_job_with_returns_none_selector_without_pool_is_paused(monkeypatch):
-    controller = JobController()
-    job = Job(
-        id="service-job-invalid-selector",
-        name="service-invalid-selector",
-        type=JobType.SERVICE,
-        state=JobState.ACTIVE,
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.SELECT,
-                    selector_name="return_none",
-                    resource_pool="",
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
-        concurrency_target=1,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-    )
-    controller.repo = SimpleNamespace(
-        get_job=AsyncMock(return_value=job),
-        count_active_tasks=AsyncMock(return_value=0),
-        save_job=AsyncMock(),
-    )
-    controller.dispatcher = SimpleNamespace(
-        dispatch=AsyncMock(),
-        request_stop_for_job=AsyncMock(),
-    )
-    monkeypatch.setattr(
-        "src.core.atm.controller.get_module_service",
-        lambda: SimpleNamespace(
-            list_env_selectors=lambda module_name: [
-                SimpleNamespace(name="return_none", returns_none=True),
-            ]
-        ),
-    )
-
-    await controller._reconcile_job(job)
-
-    assert job.state == JobState.PAUSED
-    controller.repo.save_job.assert_awaited_once_with(job)
-    controller.dispatcher.dispatch.assert_not_awaited()
-    controller.dispatcher.request_stop_for_job.assert_awaited_once_with(job.id, env_action=None)
-
-
-@pytest.mark.asyncio
-async def test_service_job_selector_validation_fails_closed_when_selector_metadata_load_fails(monkeypatch):
-    controller = JobController()
-    job = Job(
-        id="service-job-selector-metadata-error",
-        name="service-selector-metadata-error",
-        type=JobType.SERVICE,
-        state=JobState.ACTIVE,
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.SELECT,
-                    selector_name="return_none",
-                    resource_pool="",
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
-        concurrency_target=1,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-    )
-    controller.repo = SimpleNamespace(
-        get_job=AsyncMock(return_value=job),
-        count_active_tasks=AsyncMock(return_value=0),
-        save_job=AsyncMock(),
-    )
-    controller.dispatcher = SimpleNamespace(
-        dispatch=AsyncMock(),
-        request_stop_for_job=AsyncMock(),
-    )
-    monkeypatch.setattr(
-        "src.core.atm.controller.get_module_service",
-        lambda: SimpleNamespace(
-            list_env_selectors=lambda module_name: (_ for _ in ()).throw(RuntimeError("selector metadata unavailable"))
-        ),
-    )
-
-    await controller._reconcile_job(job)
-
-    assert job.state == JobState.PAUSED
-    controller.repo.save_job.assert_awaited_once_with(job)
-    controller.dispatcher.dispatch.assert_not_awaited()
-    controller.dispatcher.request_stop_for_job.assert_awaited_once_with(job.id, env_action=None)
 
 
 @pytest.mark.asyncio

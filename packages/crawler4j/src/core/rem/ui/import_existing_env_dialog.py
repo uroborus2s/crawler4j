@@ -8,6 +8,7 @@ from typing import Any
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import QDialog, QFormLayout, QHBoxLayout, QLabel, QVBoxLayout
 
+from src.core.mms import get_module_registry
 from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.data_table import SkyDataTable
@@ -171,10 +172,11 @@ class ImportExistingEnvDialog(QDialog):
 
     def _selected_workflow(self):
         module_name, workflow_name = self._selected_job_module_workflow()
-        module = self._modules_by_name.get(module_name)
-        if not module:
-            return None
-        for workflow in module.manifest.workflows:
+        workflows = list(get_module_registry().get_workflows(module_name))
+        if not workflows:
+            module = self._modules_by_name.get(module_name)
+            workflows = list(getattr(module.manifest, "workflows", []) or []) if module else []
+        for workflow in workflows:
             if workflow.name == workflow_name:
                 return workflow
         return None

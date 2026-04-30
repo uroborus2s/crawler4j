@@ -57,7 +57,7 @@ def test_scan_v2_module_discovers_decorator_metadata(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "objects" / "runtime.py").write_text(
         """
-from crawler4j_contracts import component, data_query, data_table, interface, page_action, workflow
+from crawler4j_contracts import component, data_query, data_table, interface, page, page_action, workflow
 
 
 @interface(name="labor", label="Labor")
@@ -78,6 +78,16 @@ class MainWorkflow:
 @page_action(name="open_login_page", label="Open login page")
 async def open_login_page(ctx, url: str):
     return {"url": url}
+
+
+@page(
+    name="dashboard",
+    label="Dashboard",
+    icon="chart",
+    schema={"type": "Page", "title": "Dashboard", "children": []},
+)
+def load_dashboard_page(ctx, page_id: str, params=None):
+    return {"page_id": page_id}
 
 
 @data_table(name="accounts", schema=[{"name": "account_id", "type": "string"}])
@@ -104,6 +114,7 @@ def ready_accounts():
         ("interface", "labor", "objects.runtime.Labor"),
         ("component", "api_labor", "objects.runtime.ApiLabor"),
         ("workflow", "main_workflow", "objects.runtime.MainWorkflow"),
+        ("page", "dashboard", "objects.runtime.load_dashboard_page"),
         ("page_action", "open_login_page", "objects.runtime.open_login_page"),
         ("data_table", "accounts", "objects.runtime.Accounts"),
         ("data_query", "ready_accounts", "objects.runtime.ready_accounts"),
@@ -164,6 +175,69 @@ class MainWorkflow:
         ("timeout", "integer", False, 30),
     ]
     assert [item.name for item in workflow_meta.inject] == ["labor"]
+
+
+def test_scan_v2_module_infers_extended_object_param_annotation_types(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "objects" / "typed_runtime.py").write_text(
+        """
+from datetime import date, datetime, time
+from pathlib import Path
+from typing import Annotated, Literal
+
+from crawler4j_contracts import component, interface, object_param, workflow
+
+
+@interface(name="labor")
+class Labor:
+    pass
+
+
+@component(name="api_labor", implements="labor")
+class ApiLabor:
+    start_date: Annotated[date, object_param()]
+    mode: Annotated[Literal["sync", "async"], object_param(default="sync")]
+    tags: Annotated[list[str], object_param(default=["default"])]
+    limits: Annotated[dict[str, int], object_param(default={"daily": 10})]
+    download_dir: Annotated[Path, object_param()]
+    optional_count: Annotated[int | None, object_param()]
+
+    def __init__(
+        self,
+        deadline: Annotated[datetime, object_param()],
+        run_at: Annotated[time, object_param()],
+    ):
+        self.deadline = deadline
+        self.run_at = run_at
+
+
+@workflow(name="main_workflow")
+class MainWorkflow:
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    assert result.diagnostics == ()
+    component_meta = next(item.meta for item in result.declarations if item.name == "api_labor")
+    parameters = {item.name: item for item in component_meta.parameters}
+    assert parameters["start_date"].type == "date"
+    assert parameters["deadline"].type == "datetime"
+    assert parameters["run_at"].type == "time"
+    assert parameters["download_dir"].type == "path"
+    assert parameters["tags"].type == "array"
+    assert parameters["tags"].item_schema == {"type": "string"}
+    assert parameters["limits"].type == "object"
+    assert parameters["limits"].schema == {"additional_type": "integer"}
+    assert parameters["optional_count"].type == "integer"
+    assert parameters["optional_count"].required is False
+    assert parameters["mode"].type == "enum"
+    assert [(item.label, item.value) for item in parameters["mode"].options] == [
+        ("sync", "sync"),
+        ("async", "async"),
+    ]
 
 
 def test_scan_v2_module_reports_duplicate_names_missing_injection_cycles_and_invalid_parameters(tmp_path: Path):

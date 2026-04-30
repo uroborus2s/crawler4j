@@ -124,6 +124,39 @@ def test_normalize_page_schema_supports_parameterized_icon_button():
     }
 
 
+def test_normalize_page_schema_supports_page_action_button():
+    schema = normalize_page_schema(
+        "dashboard",
+        {
+            "type": "Page",
+            "load_handler": "load_dashboard_page",
+            "children": [
+                {
+                    "type": "Button",
+                    "label": "创建账号",
+                    "action": {
+                        "type": "page_action",
+                        "name": "create_account_from_ui",
+                        "params": {
+                            "account_id": {"binding": "selected.id"},
+                            "source": {"value": "dashboard"},
+                        },
+                    },
+                },
+            ],
+        },
+    )
+
+    assert schema["children"][0]["action"] == {
+        "type": "page_action",
+        "name": "create_account_from_ui",
+        "params": {
+            "account_id": {"binding": "selected.id"},
+            "source": {"value": "dashboard"},
+        },
+    }
+
+
 def test_normalize_page_schema_requires_accessible_label_for_icon_button():
     with pytest.raises(ValueError, match="aria_label"):
         normalize_page_schema(

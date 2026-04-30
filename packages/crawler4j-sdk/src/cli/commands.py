@@ -23,7 +23,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
-from crawler4j_contracts.hosted_ui import normalize_page_schema
 
 from crawler4j_sdk._version import (
     get_compatible_contracts_dependency_spec,
@@ -342,37 +341,6 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _normalize_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    ui_extension = manifest.setdefault("ui_extension", {})
-    if not isinstance(ui_extension, dict):
-        raise CLIError("module.yaml.ui_extension 必须是映射对象")
-    pages = ui_extension.setdefault("pages", [])
-    if not isinstance(pages, list):
-        raise CLIError("module.yaml.ui_extension.pages 必须是数组")
-    return pages
-
-
-def _manifest_ui_extension(manifest: dict[str, Any]) -> dict[str, Any] | None:
-    ui_extension = manifest.get("ui_extension")
-    if ui_extension is None:
-        return None
-    if not isinstance(ui_extension, dict):
-        raise CLIError("module.yaml.ui_extension 必须是映射对象")
-    return ui_extension
-
-
-def _manifest_ui_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    ui_extension = _manifest_ui_extension(manifest)
-    if ui_extension is None:
-        return []
-    pages = ui_extension.get("pages")
-    if pages is None:
-        return []
-    if not isinstance(pages, list):
-        raise CLIError("module.yaml.ui_extension.pages 必须是数组")
-    return [item for item in pages if isinstance(item, dict)]
-
-
 def _normalize_config_defaults(manifest: dict[str, Any]) -> dict[str, Any]:
     config_defaults = manifest.setdefault("config_defaults", {})
     if config_defaults is None:
@@ -522,95 +490,6 @@ def _run_async(awaitable):
     return asyncio.run(awaitable)
 
 
-def _validate_page_module(
-    module_root: Path,
-    page_name: str,
-) -> tuple[list[str], str | None, dict[str, Any] | None]:
-    owner_label = _page_owner_label(page_name)
-    page_path = module_root / "pages" / Path(*page_name.split(".")).with_suffix(".py")
-    try:
-        tree = ast.parse(page_path.read_text(encoding="utf-8"), filename=str(page_path))
-    except SyntaxError as exc:
-        return [f"{owner_label} 语法错误: {exc}"], None, None
-    except OSError as exc:
-        return [f"{owner_label} 无法读取: {exc}"], None, None
-
-    errors: list[str] = []
-    handlers = _collect_page_handlers(tree)
-    page_spec, spec_error = _extract_page_spec(tree)
-    if spec_error:
-        return [spec_error], None, None
-    if page_spec is None:
-        return [f"{owner_label} 缺少 PAGE，或类型不是 PageSpec"], None, None
-
-    page_id = str(page_spec.get("id") or "").strip()
-    if not is_valid_name(page_id):
-        errors.append(f"{owner_label} 的 PAGE.id 必须是小写 snake_case: {page_id or '<empty>'}")
-        return errors, None, None
-
-    try:
-        schema = normalize_page_schema(page_id, dict(page_spec.get("schema") or {}))
-    except ValueError as exc:
-        errors.append(f"宿主页 {page_id} schema 无效: {exc}")
-        return errors, None, None
-
-    load_handler_name = str(schema.get("load_handler", "") or "").strip()
-    load_handler = handlers.get(load_handler_name)
-    if load_handler is None:
-        errors.append(f"宿主页 {page_id} 的 load_handler 未在 {owner_label} 中定义: {load_handler_name}")
-    elif isinstance(load_handler, ast.AsyncFunctionDef):
-        errors.append(f"宿主页 {page_id} 的 load_handler 必须是同步函数: {load_handler_name}")
-
-    errors.extend(_validate_inline_table_handlers(handlers, page_id, schema, owner_label=owner_label))
-    return errors, page_id, schema
-
-
-def _collect_page_handlers(tree: ast.Module) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
-    handlers: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            handlers[node.name] = node
-    return handlers
-
-
-def _extract_page_spec(tree: ast.Module) -> tuple[dict[str, Any] | None, str | None]:
-    for node in tree.body:
-        value: ast.expr | None = None
-        if isinstance(node, ast.Assign):
-            if any(isinstance(target, ast.Name) and target.id == "PAGE" for target in node.targets):
-                value = node.value
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "PAGE":
-            value = node.value
-        if value is None:
-            continue
-        return _literal_pagespec(value)
-    return None, None
-
-
-def _literal_pagespec(node: ast.expr) -> tuple[dict[str, Any] | None, str | None]:
-    if not isinstance(node, ast.Call) or _call_name(node.func) != "PageSpec":
-        return None, "PAGE 必须直接声明为 PageSpec(...)"
-    if node.args:
-        return None, "PAGE 的 PageSpec 声明不支持位置参数"
-    values: dict[str, Any] = {}
-    for keyword in node.keywords:
-        if keyword.arg is None:
-            return None, "PAGE 的 PageSpec 声明不支持 **kwargs"
-        try:
-            values[keyword.arg] = ast.literal_eval(keyword.value)
-        except (TypeError, ValueError) as exc:
-            return None, f"PAGE.{keyword.arg} 必须使用字面量声明: {exc}"
-    return values, None
-
-
-def _call_name(node: ast.expr) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
-
-
 def _render_yaml(data: Any) -> str:
     return yaml.safe_dump(data, allow_unicode=True, sort_keys=False).strip() or "{}"
 
@@ -742,50 +621,6 @@ def _print_module_info(module: Any) -> None:
     print(f"路径: {getattr(module, 'path', '')}")
 
 
-def _validate_ui_extension(manifest: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    ui_extension = manifest.get("ui_extension")
-    if ui_extension is None:
-        return errors
-    if not isinstance(ui_extension, dict):
-        return ["ui_extension 必须是 YAML 映射对象"]
-
-    unknown_keys = sorted(set(ui_extension) - {"pages"})
-    if unknown_keys:
-        errors.append("ui_extension 包含不支持的字段: " + ", ".join(unknown_keys))
-
-    pages = ui_extension.get("pages")
-    if pages is None:
-        return errors
-    if not isinstance(pages, list):
-        errors.append("ui_extension.pages 必须是数组")
-        return errors
-
-    seen_ids: set[str] = set()
-    for item in pages:
-        if not isinstance(item, dict):
-            errors.append("ui_extension.pages 里的每一项都必须是对象")
-            continue
-
-        unknown_keys = sorted(set(item) - {"id", "label", "icon"})
-        if unknown_keys:
-            page_label = str(item.get("id", "") or "").strip() or "<empty>"
-            errors.append(f"ui_extension.pages[{page_label}] 包含不支持的字段: {', '.join(unknown_keys)}")
-
-        page_id = str(item.get("id", "") or "").strip()
-        if not is_valid_name(page_id):
-            errors.append(f"无效的 ui_extension.pages[].id: {page_id or '<empty>'}")
-            continue
-        if page_id in seen_ids:
-            errors.append(f"ui_extension.pages[].id 重复: {page_id}")
-        seen_ids.add(page_id)
-
-        label = str(item.get("label", "") or "").strip()
-        if not label:
-            errors.append(f"ui_extension.pages[{page_id}].label 不能为空")
-    return errors
-
-
 def _collect_legacy_hosted_ui_errors(module_root: Path) -> list[str]:
     errors: list[str] = []
     for relative_path, expected_kind in LEGACY_HOSTED_UI_PATHS:
@@ -824,10 +659,18 @@ def collect_structure_errors(module_root: Path, manifest: dict[str, Any]) -> lis
         errors.append(f"module.yaml.runtime_api 必须是 {REQUIRED_RUNTIME_API}")
     if (module_root / "module_runtime.py").exists():
         errors.append("core-native-v2 模块不允许保留旧运行时薄壳: module_runtime.py")
-    for key in ("sdk_version_range", "default_workflow", "workflows", "data", "interfaces", "objects", "tasks"):
+    for key in (
+        "sdk_version_range",
+        "default_workflow",
+        "workflows",
+        "data",
+        "interfaces",
+        "objects",
+        "tasks",
+        "ui_extension",
+    ):
         if key in manifest:
             errors.append(f"module.yaml 不再允许声明 {key}；请使用 core-native-v2 装饰器")
-    errors.extend(_validate_ui_extension(manifest))
     errors.extend(_collect_legacy_hosted_ui_errors(module_root))
     return errors
 
@@ -877,29 +720,6 @@ def collect_release_errors(module_root: Path, manifest: dict[str, Any]) -> list[
     return errors
 
 
-def _collect_hosted_page_errors(module_root: Path, manifest: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    declared_pages = {
-        str(item.get("id", "")).strip() for item in _manifest_ui_pages(manifest) if str(item.get("id", "")).strip()
-    }
-    discovered_pages: dict[str, str] = {}
-    for page_name in _list_python_modules(module_root / "pages", recursive=True):
-        page_errors, page_id, schema = _validate_page_module(module_root, page_name)
-        errors.extend(page_errors)
-        if not page_id or not schema:
-            continue
-        owner_label = _page_owner_label(page_name)
-        previous_owner = discovered_pages.get(page_id)
-        if previous_owner and previous_owner != owner_label:
-            errors.append(f"宿主页 {page_id} 重复定义: {previous_owner}、{owner_label}")
-            continue
-        discovered_pages[page_id] = owner_label
-
-    missing_pages = sorted(declared_pages - set(discovered_pages))
-    errors.extend(f"module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: {page_id}" for page_id in missing_pages)
-    return errors
-
-
 def collect_full_errors(
     module_root: Path,
     manifest: dict[str, Any],
@@ -909,7 +729,6 @@ def collect_full_errors(
     """Collect importability and runtime-level validation errors."""
     errors = collect_release_errors(module_root, manifest)
     errors.extend(scan_v2_module(module_root, manifest).error_messages())
-    errors.extend(_collect_hosted_page_errors(module_root, manifest))
     errors.extend(_collect_legacy_db_tool_usage_errors(module_root, v2_runtime=True))
     errors.extend(_collect_removed_task_context_usage_errors(module_root, v2_runtime=True))
     if require_manifest_lock and not errors:
@@ -1681,7 +1500,6 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    hosted_pages = _manifest_ui_pages(manifest)
     result = _v2_scan(module_root, manifest)
     declarations_by_kind: dict[str, list[str]] = {}
     for declaration in result.declarations:
@@ -1695,8 +1513,8 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     print(f"接口: {', '.join(sorted(declarations_by_kind.get('interface', []))) or '(无)'}")
     print(f"组件: {', '.join(sorted(declarations_by_kind.get('component', []))) or '(无)'}")
     print(f"工作流: {', '.join(sorted(declarations_by_kind.get('workflow', []))) or '(无)'}")
+    print(f"宿主页: {', '.join(sorted(declarations_by_kind.get('page', []))) or '(无)'}")
     print(f"页面操作: {', '.join(sorted(declarations_by_kind.get('page_action', []))) or '(无)'}")
-    print("宿主页: " + (", ".join(str(item.get("id", "")) for item in hosted_pages if item.get("id")) or "(无)"))
     print(f"数据表: {len(declarations_by_kind.get('data_table', []))}")
     print(f"命名查询: {len(declarations_by_kind.get('data_query', []))}")
     if result.diagnostics:
@@ -1908,7 +1726,7 @@ def cmd_workflow_list(args: argparse.Namespace) -> int:
 
 
 def cmd_page_create(args: argparse.Namespace) -> int:
-    """Create a hosted page scaffold inside pages/ and optionally add it to navigation."""
+    """Create a hosted page scaffold inside pages/ with a @page decorator."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
     if not is_valid_name(name):
@@ -1921,11 +1739,8 @@ def cmd_page_create(args: argparse.Namespace) -> int:
         return 1
 
     manifest = load_manifest(module_root)
-    ui_errors = _validate_ui_extension(manifest)
-    if ui_errors:
-        _print_error("module.yaml.ui_extension 不符合 Hosted UI V1 契约")
-        for item in ui_errors:
-            print(f"  - {item}")
+    if "ui_extension" in manifest:
+        _print_error("core-native-v2 不再使用 module.yaml.ui_extension；页面菜单请写在 @page(menu=True) 中")
         return 1
     legacy_ui_errors = _collect_legacy_hosted_ui_errors(module_root)
     if legacy_ui_errors:
@@ -1935,26 +1750,6 @@ def cmd_page_create(args: argparse.Namespace) -> int:
         return 1
     _ensure_package_dir(module_root / "pages")
     no_menu = bool(getattr(args, "no_menu", False))
-    if not no_menu:
-        pages = _normalize_ui_pages(manifest)
-        existing_page = next(
-            (item for item in pages if isinstance(item, dict) and item.get("id") == name),
-            None,
-        )
-        if existing_page is not None:
-            if not args.force:
-                _print_error(f"页面入口已存在: {name}")
-                return 1
-            existing_page["label"] = args.display_name or to_display_name(name)
-            existing_page["icon"] = "📄"
-        else:
-            pages.append(
-                {
-                    "id": name,
-                    "label": args.display_name or to_display_name(name),
-                    "icon": "📄",
-                }
-            )
     try:
         _write_text(
             module_root / page_relative_path,
@@ -1962,6 +1757,7 @@ def cmd_page_create(args: argparse.Namespace) -> int:
                 page_id=name,
                 display_name=args.display_name or to_display_name(name),
                 description=args.description or f"{to_display_name(name)} 宿主页",
+                menu=not no_menu,
             ),
             force=args.force,
         )
@@ -1969,18 +1765,17 @@ def cmd_page_create(args: argparse.Namespace) -> int:
         _print_error(str(exc))
         return 1
 
-    if not no_menu:
-        save_manifest(module_root, manifest)
     _print_success(f"已创建宿主页骨架: {page_relative_path.as_posix()}")
     return 0
 
 
 def cmd_page_list(args: argparse.Namespace) -> int:
-    """List left-menu hosted pages declared in module.yaml."""
+    """List left-menu hosted pages declared with @page."""
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
-    pages = [str(item.get("id", "")) for item in _manifest_ui_pages(manifest) if item.get("id")]
+    result = _v2_scan(module_root, manifest)
+    pages = [item.name for item in result.declarations if item.kind == "page" and item.meta.menu]
     print("\n".join(pages) if pages else "(无页面)")
     return 0
 
@@ -2692,21 +2487,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     page_parser = subparsers.add_parser(
         "page",
-        help="宿主页操作：在 pages/ 生成 hosted page 骨架并按需维护 ui_extension.pages",
+        help="宿主页操作：在 pages/ 生成 @page 宿主页骨架",
     )
     page_sub = page_parser.add_subparsers(dest="action")
     page_create = page_sub.add_parser(
         "create",
-        help="创建一个宿主页骨架；默认注册到左侧菜单，可用 --no-menu 只创建可路由页面",
+        help="创建一个 @page 宿主页骨架；默认进入左侧菜单，可用 --no-menu 只创建可路由页面",
     )
     page_create.add_argument("name", help="页面名，snake_case")
     page_create.add_argument("--group", help="可选源码分组目录，单层 snake_case；例如 account")
-    page_create.add_argument("--no-menu", action="store_true", help="只创建页面文件，不写入左侧菜单配置")
+    page_create.add_argument("--no-menu", action="store_true", help="生成 @page(menu=False)，不进入左侧菜单")
     page_create.add_argument("--display-name", help="页面显示名")
     page_create.add_argument("--description", help="页面说明")
     page_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     page_create.set_defaults(func=cmd_page_create)
-    page_list = page_sub.add_parser("list", help="列出 ui_extension.pages 中的左侧菜单入口")
+    page_list = page_sub.add_parser("list", help="列出 @page(menu=True) 左侧菜单入口")
     page_list.set_defaults(func=cmd_page_list)
 
     config_parser = subparsers.add_parser(

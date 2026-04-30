@@ -50,6 +50,7 @@ MANAGED_VIEW_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 RUNTIME_SURFACE_FULL = "full"
 RUNTIME_SURFACE_HOSTED_UI_DECLARE = "hosted_ui_declare"
 RUNTIME_SURFACE_HOSTED_UI_READONLY = "hosted_ui_readonly"
+RUNTIME_SURFACE_HOSTED_UI_ACTION = "hosted_ui_action"
 
 _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
     RUNTIME_SURFACE_FULL: None,
@@ -59,6 +60,11 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
         }
     ),
     RUNTIME_SURFACE_HOSTED_UI_READONLY: frozenset(
+        {
+            "ui.get_page",
+        }
+    ),
+    RUNTIME_SURFACE_HOSTED_UI_ACTION: frozenset(
         {
             "ui.get_page",
         }

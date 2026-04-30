@@ -63,7 +63,7 @@ ALLOWED_TEXT_SCHEMA_KEYS = {"type", "text", "binding", "style"}
 ALLOWED_BUTTON_SCHEMA_KEYS = {"type", "label", "icon", "aria_label", "size", "variant", "action"}
 ALLOWED_BUTTON_SIZES = {"md", "sm", "icon"}
 ALLOWED_BUTTON_VARIANTS = {"primary", "secondary", "ghost"}
-ALLOWED_BUTTON_ACTION_KEYS = {"type", "page_id", "params"}
+ALLOWED_BUTTON_ACTION_KEYS = {"type", "page_id", "name", "params"}
 ALLOWED_ACTION_PARAM_SPEC_KEYS = {"binding", "value"}
 ALLOWED_FEATURES_KEYS = {"search", "sort", "pagination"}
 ALLOWED_SEARCH_FEATURE_KEYS = {"enabled", "placeholder"}
@@ -261,8 +261,8 @@ def _normalize_button_action(raw: Any, *, field_name: str) -> dict[str, Any]:
         raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
 
     action_type = str(raw.get("type") or "").strip()
-    if action_type not in {"reload", "open_page"}:
-        raise ValueError(f"{field_name}.type 只支持 reload / open_page")
+    if action_type not in {"reload", "open_page", "page_action"}:
+        raise ValueError(f"{field_name}.type 只支持 reload / open_page / page_action")
 
     action: dict[str, Any] = {"type": action_type}
     if action_type == "open_page":
@@ -273,8 +273,18 @@ def _normalize_button_action(raw: Any, *, field_name: str) -> dict[str, Any]:
         params = _normalize_action_params(raw.get("params"), field_name=f"{field_name}.params")
         if params:
             action["params"] = params
-    elif any(raw.get(key) is not None for key in ("page_id", "params")):
-        raise ValueError(f"{field_name}.type=reload 时不能再传 page_id/params")
+    elif action_type == "page_action":
+        action["name"] = _validate_managed_identifier(
+            str(raw.get("name") or ""),
+            field_name=f"{field_name}.name",
+        )
+        params = _normalize_action_params(raw.get("params"), field_name=f"{field_name}.params")
+        if params:
+            action["params"] = params
+        if raw.get("page_id") is not None:
+            raise ValueError(f"{field_name}.type=page_action 时不能再传 page_id")
+    elif any(raw.get(key) is not None for key in ("page_id", "name", "params")):
+        raise ValueError(f"{field_name}.type=reload 时不能再传 page_id/name/params")
 
     return action
 

@@ -56,7 +56,6 @@ class DebugSession:
     object_params: dict[str, dict[str, Any]] = field(default_factory=dict)
     hooks_module: str = ""
     provider: str = "playwright_local"
-    selector_name: str = ""
     acquisition_mode: AcquisitionMode = AcquisitionMode.CREATE
     creation_params: dict[str, Any] = field(default_factory=dict)
     creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
@@ -102,7 +101,6 @@ class DebugSession:
             "object_params": self.object_params,
             "hooks_module": self.hooks_module,
             "provider": self.provider,
-            "selector_name": self.selector_name,
             "acquisition_mode": self.acquisition_mode.value,
             "creation_params": self.creation_params,
             "creation_lifecycle": self.creation_lifecycle.value,

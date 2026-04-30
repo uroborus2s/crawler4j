@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import ast
+import datetime as dt
 import inspect
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Annotated, Any, TypeVar, get_args, get_origin, get_type_hints
+from pathlib import Path
+from types import UnionType
+from typing import Annotated, Any, Literal, TypeVar, Union, get_args, get_origin, get_type_hints
 
 
 CRAWLER4J_META_ATTR = "__crawler4j_meta__"
@@ -40,17 +43,23 @@ class ParameterSpec:
     max: int | float | None = None
     step: int | float | None = None
     placeholder: str = ""
+    schema: dict[str, Any] = field(default_factory=dict)
+    item_schema: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         name = str(self.name or "").strip()
         parameter_type = str(self.type or "string").strip().lower()
         options = tuple(_normalize_parameter_option(item) for item in _as_tuple(self.options))
+        schema = _normalize_parameter_schema(self.schema, field_name="schema")
+        item_schema = _normalize_parameter_schema(self.item_schema, field_name="item_schema")
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "type", parameter_type)
         object.__setattr__(self, "label", str(self.label or "").strip())
         object.__setattr__(self, "description", str(self.description or "").strip())
         object.__setattr__(self, "options", options)
         object.__setattr__(self, "placeholder", str(self.placeholder or "").strip())
+        object.__setattr__(self, "schema", schema)
+        object.__setattr__(self, "item_schema", item_schema)
         if parameter_type == "enum" and not options:
             raise ValueError(f"enum parameter must declare options: {name}")
 
@@ -70,6 +79,8 @@ class ObjectParamAnnotation:
     max: int | float | None = None
     step: int | float | None = None
     placeholder: str = ""
+    schema: Mapping[str, Any] | None = None
+    item_schema: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -153,17 +164,26 @@ class Crawler4jMeta:
     source: str = ""
     sql: str = ""
     output_schema: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    icon: str = ""
+    menu: bool = False
+    order: int = 0
+    page_schema: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         kind = str(self.kind or "").strip()
         name = str(self.name or "").strip()
-        if kind not in {"interface", "component", "workflow", "page_action", "data_table", "data_query"}:
+        if kind not in {"interface", "component", "workflow", "page", "page_action", "data_table", "data_query"}:
             raise ValueError(f"unsupported decorator kind: {kind or '<empty>'}")
         if not _is_valid_name(name):
             raise ValueError(f"{kind} name must be snake_case: {name or '<empty>'}")
         inject = tuple(_normalize_inject(item) for item in _as_tuple(self.inject))
         parameters = tuple(_normalize_parameter(item) for item in _as_tuple(self.parameters))
-        schema = tuple(_normalize_schema_item(item, field_name="schema") for item in _as_tuple(self.schema))
+        page_schema = _normalize_page_schema_metadata(self.page_schema)
+        if kind == "page" and not page_schema and isinstance(self.schema, Mapping):
+            page_schema = _normalize_page_schema_metadata(self.schema)
+            schema = ()
+        else:
+            schema = tuple(_normalize_schema_item(item, field_name="schema") for item in _as_tuple(self.schema))
         indexes = tuple(_normalize_index(item) for item in _as_tuple(self.indexes))
         output_schema = tuple(
             _normalize_schema_item(item, field_name="output_schema") for item in _as_tuple(self.output_schema)
@@ -182,8 +202,14 @@ class Crawler4jMeta:
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "sql", str(self.sql or "").strip())
         object.__setattr__(self, "output_schema", output_schema)
+        object.__setattr__(self, "icon", str(self.icon or "").strip())
+        object.__setattr__(self, "menu", bool(self.menu))
+        object.__setattr__(self, "order", int(self.order or 0))
+        object.__setattr__(self, "page_schema", page_schema)
         if kind == "component" and not _is_valid_name(implements):
             raise ValueError("component implements must reference an interface")
+        if kind == "page" and not page_schema:
+            raise ValueError("page schema cannot be empty")
         if kind == "data_table" and not schema:
             raise ValueError("data_table schema cannot be empty")
         if kind == "data_query" and not source:
@@ -236,6 +262,8 @@ def object_param(
     max: int | float | None = None,
     step: int | float | None = None,
     placeholder: str = "",
+    schema: Mapping[str, Any] | None = None,
+    item_schema: Mapping[str, Any] | None = None,
 ) -> ObjectParamAnnotation:
     """Declare a component object parameter on a class attribute or ``__init__`` argument."""
     return ObjectParamAnnotation(
@@ -250,6 +278,8 @@ def object_param(
         max=max,
         step=step,
         placeholder=placeholder,
+        schema=schema,
+        item_schema=item_schema,
     )
 
 
@@ -297,6 +327,31 @@ def page_action(
             description=description,
             inject=tuple(_as_tuple(inject)),
             parameters=tuple(_as_tuple(parameters)),
+        )
+    )
+
+
+def page(
+    *,
+    name: str,
+    label: str = "",
+    description: str = "",
+    icon: str = "📄",
+    menu: bool = True,
+    order: int = 0,
+    schema: Mapping[str, Any],
+) -> Callable[[TargetT], TargetT]:
+    """Declare a hosted UI page with the decorated function as its load handler."""
+    return _decorate(
+        Crawler4jMeta(
+            kind="page",
+            name=name,
+            label=label,
+            description=description,
+            icon=icon,
+            menu=menu,
+            order=order,
+            page_schema=dict(schema),
         )
     )
 
@@ -376,6 +431,10 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, target: TargetT) -> Crawler4
         source=meta.source,
         sql=meta.sql,
         output_schema=meta.output_schema,
+        icon=meta.icon,
+        menu=meta.menu,
+        order=meta.order,
+        page_schema=meta.page_schema,
     )
 
 
@@ -533,24 +592,115 @@ def _parameter_from_annotation(
     type_hint: Any,
     fallback_default: Any,
 ) -> ParameterSpec:
+    inferred = _parameter_shape_from_type(type_hint)
     default_supplied = marker.default is not _MISSING or fallback_default is not _MISSING
     default = marker.default if marker.default is not _MISSING else fallback_default
     if default is _MISSING:
         default = None
-    required = marker.required if marker.required is not None else not default_supplied
+    required = marker.required if marker.required is not None else not default_supplied and not inferred["optional"]
+    options = tuple(_as_tuple(marker.options)) or tuple(_as_tuple(inferred["options"]))
     return ParameterSpec(
         name=marker.name or fallback_name,
-        type=marker.type or _infer_parameter_type(type_hint) or "string",
+        type=marker.type or inferred["type"] or "string",
         label=marker.label,
         description=marker.description,
         required=bool(required),
         default=default,
-        options=tuple(_as_tuple(marker.options)),
+        options=options,
         min=marker.min,
         max=marker.max,
         step=marker.step,
         placeholder=marker.placeholder,
+        schema=dict(marker.schema or inferred["schema"] or {}),
+        item_schema=dict(marker.item_schema or inferred["item_schema"] or {}),
     )
+
+
+def _parameter_shape_from_type(type_hint: Any) -> dict[str, Any]:
+    inferred: dict[str, Any] = {
+        "type": _infer_parameter_type(type_hint),
+        "schema": {},
+        "item_schema": {},
+        "options": (),
+        "optional": False,
+    }
+    if isinstance(type_hint, str):
+        return _parameter_shape_from_string(type_hint, inferred)
+
+    origin = get_origin(type_hint)
+    args = get_args(type_hint)
+    if origin in {Union, UnionType}:
+        concrete_args = tuple(item for item in args if item is not type(None))
+        if len(concrete_args) != len(args):
+            inferred["optional"] = True
+        if len(concrete_args) == 1:
+            nested = _parameter_shape_from_type(concrete_args[0])
+            nested["optional"] = bool(inferred["optional"] or nested["optional"])
+            return nested
+
+    if origin is Literal:
+        options = tuple(ParameterOptionSpec(label=str(item), value=item) for item in args)
+        inferred.update({"type": "enum", "options": options})
+        return inferred
+
+    if origin in {list, tuple, set, frozenset}:
+        item_type = _homogeneous_collection_item(args)
+        if item_type is not None:
+            inferred["item_schema"] = _schema_from_type(item_type)
+        inferred["type"] = "array"
+        return inferred
+
+    if origin in {dict, Mapping}:
+        if len(args) >= 2:
+            value_schema = _schema_from_type(args[1])
+            if value_schema.get("type"):
+                inferred["schema"] = {"additional_type": value_schema["type"]}
+        inferred["type"] = "object"
+        return inferred
+
+    return inferred
+
+
+def _parameter_shape_from_string(type_hint: str, inferred: dict[str, Any]) -> dict[str, Any]:
+    text = type_hint.strip()
+    lower_text = text.lower()
+    if lower_text.endswith(" | none") or lower_text.startswith("optional["):
+        inferred["optional"] = True
+    if lower_text.startswith(("list[", "tuple[", "set[")):
+        inferred["type"] = "array"
+        inner = text[text.find("[") + 1 : -1].strip()
+        item_schema = _schema_from_type(inner)
+        if item_schema.get("type"):
+            inferred["item_schema"] = item_schema
+    elif lower_text.startswith(("dict[", "mapping[")):
+        inferred["type"] = "object"
+        inner = text[text.find("[") + 1 : -1].strip()
+        parts = [item.strip() for item in inner.split(",", 1)]
+        if len(parts) == 2:
+            value_schema = _schema_from_type(parts[1])
+            if value_schema.get("type"):
+                inferred["schema"] = {"additional_type": value_schema["type"]}
+    return inferred
+
+
+def _schema_from_type(type_hint: Any) -> dict[str, Any]:
+    shape = _parameter_shape_from_type(type_hint)
+    schema: dict[str, Any] = {"type": shape["type"] or "string"}
+    if shape["schema"]:
+        schema["schema"] = shape["schema"]
+    if shape["item_schema"]:
+        schema["item_schema"] = shape["item_schema"]
+    return schema
+
+
+def _homogeneous_collection_item(args: tuple[Any, ...]) -> Any | None:
+    if not args:
+        return None
+    if len(args) == 2 and args[1] is Ellipsis:
+        return args[0]
+    if len(args) == 1:
+        return args[0]
+    return None
 
 
 def _infer_parameter_type(type_hint: Any) -> str:
@@ -559,10 +709,30 @@ def _infer_parameter_type(type_hint: Any) -> str:
         int: "integer",
         float: "number",
         bool: "boolean",
+        list: "array",
+        tuple: "array",
+        dict: "object",
+        Mapping: "object",
+        dt.date: "date",
+        dt.datetime: "datetime",
+        dt.time: "time",
+        Path: "path",
         "str": "string",
         "int": "integer",
         "float": "number",
         "bool": "boolean",
+        "list": "array",
+        "List": "array",
+        "tuple": "array",
+        "Tuple": "array",
+        "dict": "object",
+        "Dict": "object",
+        "Mapping": "object",
+        "date": "date",
+        "datetime": "datetime",
+        "time": "time",
+        "Path": "path",
+        "pathlib.Path": "path",
     }
     return mapping.get(type_hint, "")
 
@@ -595,6 +765,22 @@ def _normalize_parameter(value: ParameterSpec | Mapping[str, Any]) -> ParameterS
     if not isinstance(value, Mapping):
         raise ValueError("parameters must contain ParameterSpec or mapping items")
     return ParameterSpec(**dict(value))
+
+
+def _normalize_parameter_schema(value: Mapping[str, Any] | None, *, field_name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"parameter {field_name} must be a mapping")
+    return dict(value)
+
+
+def _normalize_page_schema_metadata(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError("page schema must be a mapping")
+    return dict(value)
 
 
 def _normalize_parameter_option(value: ParameterOptionSpec | Mapping[str, Any] | Any) -> ParameterOptionSpec:

@@ -11,7 +11,6 @@ from typing import Any, Callable
 from crawler4j_contracts import (
     CRAWLER4J_META_ATTR,
     Crawler4jMeta,
-    PageSpec,
     TaskContext,
     TaskResult,
 )
@@ -21,22 +20,28 @@ from src.core.mms.models import ModuleManifest
 from src.core.mms.module_loader import load_root_module_from_path
 
 V2_RUNTIME_API = "core-native-v2"
-V2_SCAN_DIRECTORIES = ("interfaces", "objects", "workflows", "tasks", "data")
+V2_SCAN_DIRECTORIES = ("interfaces", "objects", "workflows", "tasks", "data", "pages")
+
+
+@dataclass(frozen=True)
+class PageRuntimeSpec:
+    id: str
+    label: str = ""
+    icon: str = "📋"
+    menu: bool = False
+    order: int = 0
+    schema: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class PageRuntimeEntry:
-    spec: PageSpec
+    spec: PageRuntimeSpec
     module_name: str
+    target: Callable[..., Any] | None = None
     handlers: dict[str, Callable[..., Any]] = field(default_factory=dict)
 
     def get_handler(self, handler_name: str) -> Callable[..., Any] | None:
         return self.handlers.get(handler_name)
-
-
-@dataclass(frozen=True)
-class ModuleRuntimeDescriptor:
-    pages: dict[str, PageRuntimeEntry] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -54,25 +59,10 @@ class ModuleRuntimeDescriptorV2:
     components: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     workflows: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     page_actions: dict[str, V2RuntimeEntry] = field(default_factory=dict)
+    pages: dict[str, PageRuntimeEntry] = field(default_factory=dict)
     data_tables: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     data_queries: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     implementations: dict[str, tuple[str, ...]] = field(default_factory=dict)
-
-
-def _iter_page_modules(package_dir: Path) -> list[tuple[str, str]]:
-    if not package_dir.exists():
-        return []
-    page_modules: list[tuple[str, str]] = []
-    for path in sorted(package_dir.rglob("*.py")):
-        if path.name == "__init__.py" or path.name.startswith("_"):
-            continue
-        relative = path.relative_to(package_dir)
-        if any(part.startswith("_") for part in relative.parts[:-1]):
-            continue
-        module_name = ".".join(relative.with_suffix("").parts)
-        owner = f"pages/{relative.as_posix()}"
-        page_modules.append((module_name, owner))
-    return page_modules
 
 
 def _iter_python_modules(package_dir: Path, directory_name: str) -> list[tuple[str, str]]:
@@ -91,27 +81,12 @@ def _iter_python_modules(package_dir: Path, directory_name: str) -> list[tuple[s
     return modules
 
 
-def _import_submodule(module_name: str, subpackage: str, item_name: str) -> Any:
-    import_target = f"{module_name}.{subpackage}.{item_name}"
-    try:
-        return importlib.import_module(import_target)
-    except Exception as exc:  # pragma: no cover - exercised by caller tests
-        raise RuntimeError(f"{subpackage}/{item_name}.py 无法导入: {exc.__class__.__name__}: {exc}") from exc
-
-
 def _import_v2_submodule(module_name: str, directory_name: str, item_name: str, owner: str) -> Any:
     import_target = f"{module_name}.{directory_name}.{item_name}"
     try:
         return importlib.import_module(import_target)
     except Exception as exc:  # pragma: no cover - exercised by caller tests
         raise RuntimeError(f"{owner} 无法导入: {exc.__class__.__name__}: {exc}") from exc
-
-
-def _require_spec(module: Any, export_name: str, spec_type: type[Any], *, owner: str) -> Any:
-    spec = getattr(module, export_name, None)
-    if not isinstance(spec, spec_type):
-        raise RuntimeError(f"{owner} 缺少 {export_name}，或类型不是 {spec_type.__name__}")
-    return spec
 
 
 def _iter_decorated_entries(module: Any, owner: str) -> list[V2RuntimeEntry]:
@@ -159,8 +134,10 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
     components: dict[str, V2RuntimeEntry] = {}
     workflows: dict[str, V2RuntimeEntry] = {}
     page_actions: dict[str, V2RuntimeEntry] = {}
+    pages: dict[str, PageRuntimeEntry] = {}
     data_tables: dict[str, V2RuntimeEntry] = {}
     data_queries: dict[str, V2RuntimeEntry] = {}
+    page_owners: dict[str, str] = {}
 
     for entry in entries:
         kind = entry.meta.kind
@@ -170,6 +147,12 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
             _add_v2_entry(components, entry, label="component")
         elif kind == "workflow":
             _add_v2_entry(workflows, entry, label="workflow")
+        elif kind == "page":
+            previous_owner = page_owners.get(entry.meta.name)
+            if previous_owner and previous_owner != entry.owner:
+                raise RuntimeError(f"宿主页 {entry.meta.name} 重复定义: {previous_owner}、{entry.owner}")
+            page_owners[entry.meta.name] = entry.owner
+            pages[entry.meta.name] = _page_entry_from_v2_entry(entry)
         elif kind == "page_action":
             _add_v2_entry(page_actions, entry, label="page_action")
         elif kind == "data_table":
@@ -184,6 +167,7 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
         components=components,
         workflows=workflows,
         page_actions=page_actions,
+        pages=pages,
         data_tables=data_tables,
         data_queries=data_queries,
         implementations=_build_implementations(interfaces, components),
@@ -262,32 +246,29 @@ def _page_handlers(module: Any) -> dict[str, Callable[..., Any]]:
     return handlers
 
 
-def _discover_pages(module_name: str, package_root: Path) -> dict[str, PageRuntimeEntry]:
-    pages: dict[str, PageRuntimeEntry] = {}
-    page_owners: dict[str, str] = {}
-    for item_name, owner in _iter_page_modules(package_root / "pages"):
-        module = _import_submodule(module_name, "pages", item_name)
-        spec = _require_spec(module, "PAGE", PageSpec, owner=owner)
-        page_id = str(spec.id or "").strip()
-        if not page_id:
-            raise RuntimeError(f"{owner} 的 PAGE.id 不能为空")
-        previous_owner = page_owners.get(page_id)
-        if previous_owner and previous_owner != owner:
-            raise RuntimeError(f"宿主页 {page_id} 重复定义: {previous_owner}、{owner}")
-        normalized_schema = normalize_page_schema(page_id, dict(spec.schema or {}))
-        normalized_spec = PageSpec(
+def _page_entry_from_v2_entry(entry: V2RuntimeEntry) -> PageRuntimeEntry:
+    page_id = str(entry.meta.name or "").strip()
+    raw_schema = dict(entry.meta.page_schema or {})
+    load_handler = str(raw_schema.get("load_handler") or "").strip()
+    if load_handler and load_handler != entry.attr_name:
+        raise RuntimeError(f"{entry.owner} 的 @page load_handler 必须与装饰函数一致: {entry.attr_name}")
+    raw_schema["load_handler"] = entry.attr_name
+    normalized_schema = normalize_page_schema(page_id, raw_schema)
+    module = inspect.getmodule(entry.target)
+    handlers = _page_handlers(module) if module is not None else {}
+    return PageRuntimeEntry(
+        spec=PageRuntimeSpec(
             id=page_id,
-            label=str(spec.label or "").strip() or page_id,
-            icon=str(spec.icon or "📋").strip() or "📋",
+            label=str(entry.meta.label or page_id).strip() or page_id,
+            icon=str(entry.meta.icon or "📋").strip() or "📋",
+            menu=bool(entry.meta.menu),
+            order=int(entry.meta.order or 0),
             schema=normalized_schema,
-        )
-        page_owners[page_id] = owner
-        pages[page_id] = PageRuntimeEntry(
-            spec=normalized_spec,
-            module_name=module.__name__,
-            handlers=_page_handlers(module),
-        )
-    return pages
+        ),
+        module_name=entry.module_name,
+        target=entry.target if callable(entry.target) else None,
+        handlers=handlers,
+    )
 
 
 def normalize_result_payload(result: object, context: TaskContext) -> TaskResult:
@@ -300,21 +281,11 @@ def normalize_result_payload(result: object, context: TaskContext) -> TaskResult
     return TaskResult.ok(data={"value": result})
 
 
-async def invoke_runtime_callable(func: Callable[..., Any], *args: Any) -> Any:
-    result = func(*args)
+async def invoke_runtime_callable(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    result = func(*args, **kwargs)
     if inspect.isawaitable(result):
         return await result
     return result
-
-
-def load_hosted_page_descriptor(
-    module_name: str,
-    package_root: Path,
-    *,
-    force_reload: bool = False,
-) -> ModuleRuntimeDescriptor:
-    load_root_module_from_path(module_name, package_root, force_reload=force_reload)
-    return ModuleRuntimeDescriptor(pages=_discover_pages(module_name, package_root))
 
 
 def load_runtime_descriptor_v2(

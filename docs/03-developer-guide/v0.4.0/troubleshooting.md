@@ -11,7 +11,7 @@
 3. 运行模板没有对象树：看 workflow inject 和 component implements
 4. workflow 构造失败：看构造函数参数名
 5. 数据扫描失败：看保留字段诊断
-6. 页面不出来：看 `pages/*.py` 和 `ui_extension.pages[]`
+6. 页面不出来：看 `pages/*.py`、`@page(...)` 和 manifest lock
 7. 安装失败：看 ZIP 结构和 manifest lock
 
 ## Core 拒绝加载模块
@@ -117,10 +117,10 @@
 
 确认：
 
-1. 页面文件是否导出 `PAGE`
-2. `PAGE.id` 是否唯一
-3. `PAGE.schema` 顶层是否是 `Page`
-4. `load_handler` 是否存在
+1. 页面文件是否使用 `@page(...)`
+2. `@page.name` 是否唯一
+3. `@page.schema` 顶层是否是 `Page`
+4. 被 `@page` 装饰的 `load_handler` 是否存在且签名正确
 5. 表格 `query_handler` 是否存在且签名正确
 6. 页面动作是否引用已扫描的 `@page_action`
 

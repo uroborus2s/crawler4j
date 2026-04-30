@@ -35,12 +35,12 @@ from crawler4j_contracts.decorators import (
     interface,
     object_inject,
     object_param,
+    page,
     page_action,
     workflow,
 )
 from crawler4j_contracts.result import TaskResult
 from crawler4j_contracts.signal import EnvAction, TaskSignal, TaskSignalAction
-from crawler4j_contracts.specs import PageSpec
 
 __all__ = [
     "CRAWLER4J_META_ATTR",
@@ -58,6 +58,7 @@ __all__ = [
     "interface",
     "object_inject",
     "object_param",
+    "page",
     "page_action",
     "workflow",
     "TaskContext",
@@ -79,5 +80,4 @@ __all__ = [
     "ClickCaptchaOrderedTarget",
     "ClickCaptchaMatchResult",
     "EnvCandidate",
-    "PageSpec",
 ]

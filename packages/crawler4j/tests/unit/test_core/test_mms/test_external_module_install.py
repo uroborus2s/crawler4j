@@ -14,6 +14,7 @@ from crawler4j_contracts import TaskContext
 from src.core.mms.models import DevModuleLink, ModuleInstallError, ModuleSource
 from src.core.mms.registry import ModuleRegistry
 from src.core.mms.service import ModuleService
+from src.core.atm.runtime_capabilities import build_runtime_capabilities
 
 
 @pytest.fixture(autouse=True)
@@ -288,6 +289,23 @@ def test_install_rejects_stale_manifest_lock_file_hashes(temp_data_dir):
         registry.install(archive)
 
 
+def test_install_rejects_symlink_even_inside_ignored_directory(temp_data_dir):
+    package_root = _build_module_dir(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+    )
+    ignored_dir = package_root / "dist"
+    ignored_dir.mkdir(exist_ok=True)
+    (ignored_dir / "outside_link").symlink_to(temp_data_dir)
+    _write_manifest_lock(package_root, module_name="demo_module", version="1.0.0")
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+
+    with pytest.raises(ModuleInstallError, match="符号链接"):
+        registry.install(package_root)
+
+
 def test_install_rejects_zip_path_traversal(temp_data_dir):
     archive = temp_data_dir / "evil.zip"
     with zipfile.ZipFile(archive, "w") as zf:
@@ -337,6 +355,100 @@ def ready_accounts():
     assert module.manifest.data["resources"][0]["record_key_field"] == "account_id"
     assert module.manifest.data["queries"][0]["query_id"] == "ready_accounts"
     assert module.manifest.data["queries"][0]["sql"] == "SELECT account_id FROM {{resource:accounts}}"
+
+
+def test_registry_syncs_v2_data_decorators_to_runtime_named_queries(temp_data_dir, monkeypatch):
+    archive = _build_module_archive(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+        extra_files={
+            "data/accounts.py": """
+from crawler4j_contracts import data_query, data_table
+
+
+@data_table(
+    name="accounts",
+    schema=[{"name": "account_id", "type": "string", "required": True}],
+)
+class Accounts:
+    pass
+
+
+@data_query(
+    name="ready_accounts",
+    source="accounts",
+    sql="SELECT account_id FROM {{resource:accounts}}",
+    output_schema=[{"name": "account_id", "type": "string"}],
+)
+def ready_accounts():
+    pass
+""",
+        },
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    registry.install(archive)
+    monkeypatch.setattr("src.core.mms.registry._registry", registry)
+
+    capabilities = build_runtime_capabilities("demo_module")
+    assert capabilities.db.into("accounts").replace([{"account_id": "acct-001"}]) is True
+    assert capabilities.db.named("ready_accounts").execute() == [{"account_id": "acct-001"}]
+
+
+def test_registry_marks_installed_module_invalid_when_manifest_lock_drifts_on_reload(temp_data_dir):
+    archive = _build_module_archive(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    module = registry.install(archive)
+    (module.path / "tasks" / "tampered.py").write_text("# drift after install\n", encoding="utf-8")
+
+    reloaded = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    reloaded.load(force=True)
+
+    current = reloaded.get_module("demo_module")
+    assert current is not None
+    assert current.status.value == "invalid"
+    assert "文件完整性校验失败" in (current.error or "")
+
+
+def test_registry_marks_installed_module_invalid_when_install_dir_is_symlink_escape(temp_data_dir):
+    archive = _build_module_archive(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    module = registry.install(archive)
+    escaped_dir = temp_data_dir / "escaped_module"
+    module.path.rename(escaped_dir)
+    module.path.symlink_to(escaped_dir, target_is_directory=True)
+
+    reloaded = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    reloaded.load(force=True)
+
+    current = reloaded.get_module("demo_module")
+    assert current is not None
+    assert current.status.value == "invalid"
+    assert "符号链接" in (current.error or "")
+
+
+def test_install_rejects_module_name_that_would_escape_install_dir(temp_data_dir):
+    archive = _build_module_archive(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="bad/../escape",
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+
+    with pytest.raises(ModuleInstallError, match="模块名不符合命名规范"):
+        registry.install(archive)
 
 
 @pytest.mark.asyncio

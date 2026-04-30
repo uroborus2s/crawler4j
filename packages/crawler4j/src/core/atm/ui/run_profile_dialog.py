@@ -21,7 +21,6 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.mms import get_module_registry
-from src.core.mms.service import get_module_service
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.provider import (
     VIRTUALBROWSER_DEFAULT_CHROME_VERSION,
@@ -43,7 +42,6 @@ from src.core.atm.run_profile import (
     RunProfile,
     ResourceConfig,
 )
-from src.core.atm.controller import selector_returns_none
 from src.core.foundation.logging import logger
 from src.core.system.config_center import get_config_center
 from src.ui.components.button import StyledButton
@@ -156,17 +154,15 @@ class WorkflowSelector(QWidget):
             
         try:
             registry = get_module_registry()
-            module = registry.get_module(module_name)
-            if module and module.manifest.workflows:
-                for wf in module.manifest.workflows:
+            workflows = registry.get_workflows(module_name)
+            if workflows:
+                for wf in workflows:
                     self.workflow_combo.addItem(wf.display_name or wf.name, wf.name)
-            elif not module:
+            else:
                 # Try refresh ?
                 registry.refresh()
-                module = registry.get_module(module_name)
-                if module and module.manifest.workflows:
-                    for wf in module.manifest.workflows:
-                        self.workflow_combo.addItem(wf.display_name or wf.name, wf.name)
+                for wf in registry.get_workflows(module_name):
+                    self.workflow_combo.addItem(wf.display_name or wf.name, wf.name)
         except Exception:
             pass
 
@@ -1378,10 +1374,6 @@ class RunProfileDialog(QDialog):
         select_form_widget = QWidget()
         self.select_form = self._create_form_layout(select_form_widget)
 
-        self.selector_name_combo = QComboBox()
-        self.selector_name_combo.setPlaceholderText("选择环境回调函数")
-        self.selector_name_combo.currentIndexChanged.connect(self._on_selector_name_changed)
-        self.select_form.addRow("回调函数:", self.selector_name_combo)
         self.resource_pool_combo = QComboBox()
         self.resource_pool_combo.setPlaceholderText("选择资源池")
         self.select_form.addRow("资源池:", self.resource_pool_combo)
@@ -1391,19 +1383,7 @@ class RunProfileDialog(QDialog):
         )
         select_layout.addWidget(select_form_widget)
 
-        self.selector_none_hint = QLabel("当前环境选择回调函数返回了 none。普通选择模式会直接失败；固定资源池 Service Job 会继续等待。")
-        self.selector_none_hint.setWordWrap(True)
-        self.selector_none_hint.setStyleSheet("color: #f59e0b;")
-        self.selector_none_hint.hide()
-        select_layout.addWidget(self.selector_none_hint)
-
-        self.selector_empty_hint = QLabel("当前模块未声明可用的环境选择回调函数。")
-        self.selector_empty_hint.setWordWrap(True)
-        self.selector_empty_hint.setStyleSheet("color: rgba(255, 255, 255, 0.6);")
-        self.selector_empty_hint.hide()
-        select_layout.addWidget(self.selector_empty_hint)
-
-        select_desc = QLabel("可选先按资源池做宿主级粗筛，再把当前池内候选交给模块回调做细粒度选择。")
+        select_desc = QLabel("选择模式使用 module.yaml.resource_pools 声明的资源池，由宿主按池内就绪环境分配。")
         select_desc.setWordWrap(True)
         select_desc.setStyleSheet("color: rgba(255, 255, 255, 0.72);")
         select_layout.addWidget(select_desc)
@@ -1422,8 +1402,7 @@ class RunProfileDialog(QDialog):
         self._load_provider_options("virtualbrowser")
         self.script_selector.module_combo.currentTextChanged.connect(self._on_script_module_changed)
         self.script_selector.workflow_combo.currentIndexChanged.connect(self._on_workflow_selection_changed)
-        self._selector_infos: dict[str, object] = {}
-        self._load_selector_options()
+        self._sync_resource_pool_options()
         self._sync_workflow_parameter_form()
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
@@ -1863,50 +1842,11 @@ class RunProfileDialog(QDialog):
             return module_name
         return self.script_selector.module_combo.currentText().strip()
 
-    def _load_selector_options(self, preferred: str | None = None) -> None:
-        module_name = self._current_script_module_name()
-        selectors = []
-        if module_name:
-            try:
-                selectors = list(get_module_service().list_env_selectors(module_name))
-            except Exception:
-                selectors = []
-
-        self._selector_infos = {selector.name: selector for selector in selectors}
-
-        self.selector_name_combo.blockSignals(True)
-        self.selector_name_combo.clear()
-        for selector in selectors:
-            label = selector.display_name or selector.name
-            self.selector_name_combo.addItem(label, selector.name)
-
-        if preferred:
-            index = self.selector_name_combo.findData(preferred)
-            self.selector_name_combo.setCurrentIndex(index if index >= 0 else -1)
-        else:
-            self.selector_name_combo.setCurrentIndex(-1)
-        self.selector_name_combo.blockSignals(False)
-
-        has_selectors = bool(selectors)
-        self.selector_empty_hint.setVisible(bool(module_name) and not has_selectors)
-        self._update_selector_none_hint()
-        self._sync_resource_pool_options()
-
-    def _update_selector_none_hint(self) -> None:
-        selector_name = self.selector_name_combo.currentData()
-        normalized_selector = selector_name if isinstance(selector_name, str) else ""
-        self.selector_none_hint.setVisible(
-            selector_returns_none(self._selector_infos, normalized_selector)
-        )
-
     def _on_script_module_changed(self, _module_name: str) -> None:
-        previous = self.selector_name_combo.currentData()
-        preferred = previous if isinstance(previous, str) else None
-        self._load_selector_options(preferred=preferred)
+        previous_pool = self.resource_pool_combo.currentData()
+        preferred = previous_pool if isinstance(previous_pool, str) else None
+        self._sync_resource_pool_options(preferred=preferred)
         self._sync_workflow_parameter_form()
-
-    def _on_selector_name_changed(self, _index: int) -> None:
-        self._update_selector_none_hint()
 
     def _on_workflow_selection_changed(self, _index: int) -> None:
         self._sync_workflow_parameter_form()
@@ -1916,12 +1856,10 @@ class RunProfileDialog(QDialog):
         if not module_name or not workflow_name:
             return None
         try:
-            module_info = get_module_registry().get_module(module_name)
+            workflows = get_module_registry().get_workflows(module_name)
         except Exception:
             return None
-        if not module_info:
-            return None
-        for workflow in getattr(module_info.manifest, "workflows", []) or []:
+        for workflow in workflows:
             if str(getattr(workflow, "name", "") or "").strip() == workflow_name:
                 return workflow
         return None
@@ -2136,7 +2074,6 @@ class RunProfileDialog(QDialog):
             return
 
         self.resource_pool_combo.setEnabled(True)
-        self.resource_pool_combo.addItem("不使用资源池", "")
         for pool_name, display_name in pool_options:
             label = f"{display_name} ({pool_name})" if display_name and display_name != pool_name else pool_name
             self.resource_pool_combo.addItem(label, pool_name)
@@ -2245,15 +2182,9 @@ class RunProfileDialog(QDialog):
             self.script_selector.set_value(s.execution.module, s.execution.workflow)
         self.execution_timeout_spin.setValue(s.execution.timeout if s.execution else self._default_execution_timeout())
         self._sync_workflow_parameter_form(dict(s.execution.params) if s.execution else {})
-        self._load_selector_options(acquisition.selector_name or None)
+        self._sync_resource_pool_options(acquisition.resource_pool or "")
         self.wait_timeout_spin.setValue(acquisition.wait_timeout)
         self._set_resource_pool_value(acquisition.resource_pool or "")
-
-        selector_index = self.selector_name_combo.findData(acquisition.selector_name)
-        if selector_index >= 0:
-            self.selector_name_combo.setCurrentIndex(selector_index)
-        elif acquisition.mode == AcquisitionMode.SELECT:
-            self.selector_name_combo.setCurrentIndex(-1)
 
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
@@ -2263,7 +2194,6 @@ class RunProfileDialog(QDialog):
         provider = self.resource_provider_combo.currentText().strip() or "virtualbrowser"
         env_type = self._provider_to_env_type(provider)
         creation_params: dict = {}
-        selector_name = ""
         resource_pool = ""
 
         if acquisition_mode == AcquisitionMode.CREATE and env_type in {EnvType.BIT_BROWSER, EnvType.VIRTUAL_BROWSER}:
@@ -2279,12 +2209,10 @@ class RunProfileDialog(QDialog):
                 creation_params["proxy"] = proxy_config
 
         if acquisition_mode == AcquisitionMode.SELECT:
-            selector_data = self.selector_name_combo.currentData()
-            selector_name = selector_data.strip() if isinstance(selector_data, str) else ""
             resource_pool_data = self.resource_pool_combo.currentData()
             resource_pool = resource_pool_data.strip() if isinstance(resource_pool_data, str) else ""
-            if not selector_name and not resource_pool:
-                raise ValueError("请选择环境选择回调函数或填写资源池")
+            if not resource_pool:
+                raise ValueError("请选择资源池")
             declared_resource_pools = self._declared_resource_pool_names()
             if resource_pool:
                 if not declared_resource_pools:
@@ -2299,7 +2227,6 @@ class RunProfileDialog(QDialog):
                 mode=acquisition_mode,
                 provider=provider,
                 env_type=env_type,
-                selector_name=selector_name,
                 resource_pool=resource_pool,
                 wait_timeout=self.wait_timeout_spin.value(),
                 creation=CreationConfig(

@@ -274,7 +274,6 @@ class TaskCreateDialog(QDialog):
             lines.append(f"环境: {run_profile.resource.acquisition.env_type.value}")
         else:
             lines.append(f"资源池: {run_profile.resource.acquisition.resource_pool or '-'}")
-            lines.append(f"选择器: {run_profile.resource.acquisition.selector_name or '-'}")
         if run_profile.execution:
             lines.append(f"执行: {run_profile.execution.module}/{run_profile.execution.workflow or 'default'}")
         self.inline_preview.setText(" | ".join(lines))

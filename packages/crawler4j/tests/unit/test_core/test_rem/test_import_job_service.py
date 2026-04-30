@@ -24,7 +24,8 @@ async def test_import_job_service_builds_fixed_env_run_profile():
             manifest=SimpleNamespace(
                 workflows=[SimpleNamespace(name="main_flow")],
             ),
-        )
+        ),
+        get_workflows=lambda module_name: [SimpleNamespace(name="main_flow")],
     )
     repo = SimpleNamespace(
         save_job=AsyncMock(),
@@ -105,7 +106,8 @@ async def test_import_job_service_reuses_manual_job_and_respects_concurrency(mon
             manifest=SimpleNamespace(
                 workflows=[SimpleNamespace(name="import_flow")],
             ),
-        )
+        ),
+        get_workflows=lambda module_name: [SimpleNamespace(name="import_flow")],
     )
     repo = SimpleNamespace(
         get_job=AsyncMock(return_value=job),

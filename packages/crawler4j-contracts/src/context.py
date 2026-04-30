@@ -220,6 +220,7 @@ class TaskContext:
 
     _stop_requested: bool = field(default=False, repr=False)
     _subtask_executor: Callable[..., Any] | None = field(default=None, repr=False)
+    _page_action_executor: Callable[..., Any] | None = field(default=None, repr=False)
     _task_signal: "TaskSignal | None" = field(default=None, repr=False)
     _signal_phase: str = field(default="", repr=False)
 
@@ -299,6 +300,26 @@ class TaskContext:
 
         self.logger.info(f"▶ 执行子任务: {task_name}")
         result = await self._subtask_executor(task_name, self)
+
+        if isinstance(result, TaskResult):
+            if result.success:
+                if result.data:
+                    return result.data
+                return True
+            return _SubtaskFailurePayload.from_task_result(result)
+        return result
+
+    async def run_page_action(self, action_name: str, **kwargs: Any) -> Any:
+        """在 v2 workflow 中调用同模块的 `@page_action`。"""
+        if not self._page_action_executor:
+            raise RuntimeError("页面动作执行器未注入，请确保通过框架运行")
+        self._raise_if_stop_requested()
+
+        normalized_action = str(action_name or "").strip()
+        if not normalized_action:
+            raise ValueError("页面动作名称不能为空")
+        self.logger.info(f"▶ 执行页面动作: {normalized_action}")
+        result = await self._page_action_executor(normalized_action, self, **kwargs)
 
         if isinstance(result, TaskResult):
             if result.success:

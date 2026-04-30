@@ -35,6 +35,7 @@ def _write_v2_module(base_dir: Path, module_name: str, files: dict[str, str]) ->
         module_dir / "workflows",
         module_dir / "tasks",
         module_dir / "data",
+        module_dir / "pages",
     ):
         package_dir.mkdir(parents=True, exist_ok=True)
         (package_dir / "__init__.py").write_text("", encoding="utf-8")
@@ -111,14 +112,26 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
                         self.orchestrator = orchestrator
             """,
             "tasks/open_login.py": """
-                from crawler4j_contracts import PageSpec, page_action
+                from crawler4j_contracts import page_action
 
                 TASK = object()
-                PAGE = PageSpec(id="legacy_page")
+                PAGE = object()
 
                 @page_action(name="open_login_page", label="Open login")
                 async def open_login_page(ctx, url: str):
                     return {"url": url}
+            """,
+            "pages/dashboard.py": """
+                from crawler4j_contracts import page
+
+                @page(
+                    name="dashboard",
+                    label="Dashboard",
+                    icon="chart",
+                    schema={"type": "Page", "title": "Dashboard", "children": []},
+                )
+                def load_dashboard_page(ctx, page_id: str, params=None):
+                    return {"page_id": page_id}
             """,
             "data/accounts.py": """
                 from crawler4j_contracts import data_query, data_table
@@ -152,6 +165,8 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
             InjectSpec(name="labor", type="interface", target="labor"),
         )
         assert descriptor.workflows["quiz_workflow"].target.__name__ == "QuizWorkflow"
+        assert descriptor.pages["dashboard"].spec.label == "Dashboard"
+        assert descriptor.pages["dashboard"].spec.menu is True
         assert descriptor.page_actions["open_login_page"].target.__name__ == "open_login_page"
         assert descriptor.data_tables["accounts"].meta.kind == "data_table"
         assert descriptor.data_queries["ready_accounts"].meta.source == "accounts"

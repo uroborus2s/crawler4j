@@ -72,7 +72,7 @@ class ExistingEnvImportJobService:
         if not module or module.status != ModuleStatus.ENABLED:
             raise ValueError(f"目标模块不可用: {module_name}")
 
-        workflow_names = {workflow.name for workflow in module.manifest.workflows}
+        workflow_names = {workflow.name for workflow in self.registry.get_workflows(module_name)}
         if workflow_name not in workflow_names:
             raise ValueError(f"目标 workflow 不存在: {module_name}/{workflow_name}")
 
@@ -192,7 +192,7 @@ class ExistingEnvImportJobService:
         module = self.registry.get_module(module_name)
         if not module or module.status != ModuleStatus.ENABLED:
             raise ValueError(f"目标模块不可用: {module_name}")
-        workflow_names = {workflow.name for workflow in module.manifest.workflows}
+        workflow_names = {workflow.name for workflow in self.registry.get_workflows(module_name)}
         if workflow_name not in workflow_names:
             raise ValueError(f"目标 workflow 不存在: {module_name}/{workflow_name}")
 

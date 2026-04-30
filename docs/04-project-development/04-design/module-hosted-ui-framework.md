@@ -5,7 +5,7 @@
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | Core 开发 | SDK 开发 | QA | 模块开发者  
 **关联 ID：** `API-002`, `API-008`  
-**最后更新：** 2026-04-24
+**最后更新：** 2026-04-30
 
 ## 1. 结论
 
@@ -13,10 +13,11 @@
 
 唯一正式契约如下：
 
-- `module.yaml.ui_extension.pages[]` 只声明左侧导航菜单入口：`id`、`label`、`icon`
-- `pages/*.py` 或 `pages/<group>/*.py` 直接导出 `PAGE: PageSpec`，作为可路由页面注册表
+- `pages/*.py` 或 `pages/<group>/*.py` 使用 `@page(...)` 装饰页面 load handler，作为唯一页面注册表
+- `@page(menu=True)` 声明左侧导航菜单入口；`menu=False` 只注册可路由页面
 - 页面 schema 只允许使用宿主提供的 `Page`、`Section`、`Text`、`Button`、`DataTable`
 - 页面数据全部由 `load_handler` 或 `DataTable.query_handler` 返回结构化对象
+- 页面业务按钮通过 `@page_action` 声明的函数执行，参数按 kwargs 绑定
 - 宿主只负责 schema 校验、路由、渲染和通用交互，不再负责模块业务数据语义
 
 本次设计明确删除：
@@ -25,6 +26,8 @@
 - `core:data_table`
 - `ui.declare_data_table`
 - `ui.get_data_table`
+- `module.yaml.ui_extension`
+- `PageSpec`
 - 独立数据表页面持久化
 - 任何兼容桥或旧边界保留措施
 
@@ -66,39 +69,48 @@
 ### 4.1 Manifest
 
 ```yaml
-ui_extension:
-  pages:
-    - id: dashboard
-      label: 今日运营看板
-      icon: "📊"
-    - id: accounts
-      label: 账号管理
-      icon: "👤"
+runtime_api: core-native-v2
+name: hotel_demo
+version: 0.1.0
+upgrade_source:
+  repo: your-org/hotel_demo
 ```
 
 约束：
 
-- `id` 必须是 `snake_case`
-- 允许字段只有 `id`、`label`、`icon`
-- 清单只描述“宿主导航里有哪些页面”，不描述路由类型
+- `module.yaml` 不再声明页面、菜单或 UI 扩展
+- 运行能力和页面都由装饰器扫描发现
+- 如果出现 `ui_extension`，SDK/Core 应按已移除字段拒绝
 
 ### 4.2 页面源码入口
 
-模块统一在 `pages/*.py` 或 `pages/<group>/*.py` 里导出 `PAGE`：
+模块统一在 `pages/*.py` 或 `pages/<group>/*.py` 里用 `@page` 装饰页面 load handler：
 
 ```python
-from crawler4j_contracts import PageSpec
+from crawler4j_contracts import TaskContext, page
 
-PAGE = PageSpec(
-    id="dashboard",
+@page(
+    name="dashboard",
     label="今日运营看板",
     icon="📊",
-    schema=build_dashboard_page_schema(),
+    menu=True,
+    schema={
+        "type": "Page",
+        "title": "今日运营看板",
+        "children": [],
+    },
 )
+def load_dashboard_page(
+    context: TaskContext,
+    page_id: str,
+    params: dict | None = None,
+) -> dict:
+    ...
 ```
 
 不再存在：
 
+- `PAGE: PageSpec`
 - `module_runtime.py` 里的 `declare_ui`
 - `ui.declare_page`
 - `ui.declare_data_table`
@@ -156,9 +168,9 @@ PAGE = PageSpec(
 
 ### 5.1 宿主负责
 
-- 扫描 `pages/` 下的 `PAGE` 页面注册表
-- 只用 `ui_extension.pages[]` 渲染左侧菜单
-- 校验 `PAGE.schema`
+- 扫描 `pages/` 下的 `@page` 页面声明
+- 只用 `@page(menu=True)` 渲染左侧菜单
+- 校验 `@page.schema`
 - 基于 `page_id` 做页面路由和刷新，允许跳转到未出现在左侧菜单的详情页或二级页
 - 渲染宿主控件
 - 执行通用表格交互和按钮动作
@@ -173,8 +185,8 @@ PAGE = PageSpec(
 
 ### 5.3 Core 其它能力负责
 
-- `module.yaml.data.resources[]` + `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)`
-- `module.yaml.data.views[]` / `queries[]` + `ctx.db.from_(...)` / `ctx.db.named(...).bind(...).execute()`
+- `@data_table` + `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)`
+- `@data_query` + `ctx.db.named(...).bind(...).execute()`
 - `custom_table` 的已声明联表、分组和聚合查询
 
 这些能力负责数据事实源，但不拥有模块页面结构。
@@ -183,7 +195,7 @@ PAGE = PageSpec(
 
 ### 6.1 页面 schema 生命周期
 
-正式 Hosted UI 链路直接扫描 `pages/` 下导出的 `PAGE`，并把所有页面注册到运行时 descriptor。`module.yaml.ui_extension.pages[]` 只影响左侧菜单，不是页面注册表。
+正式 Hosted UI 链路直接扫描 `pages/` 下的 `@page` 装饰器，并把所有页面注册到 v2 运行时 descriptor。`@page(menu=True)` 只影响左侧菜单，不是页面注册表边界。
 
 不再把以下对象作为正式渲染事实源：
 
@@ -206,10 +218,10 @@ PAGE = PageSpec(
 
 模块详情页只按 `page_id` 打开页面：
 
-- 菜单项来自 `ui_extension.pages[]`
-- 页面实例来自 `pages/` 中导出的 `PAGE`
+- 菜单项来自 `@page(menu=True)`
+- 页面实例来自 `pages/` 中的 `@page` 声明
 - 页面跳转统一走 `open_page(page_id, params)`
-- `open_page` 可打开任意已注册 `PAGE`，不要求目标页面配置为菜单项
+- `open_page` 可打开任意已注册页面，不要求目标页面配置为菜单项
 
 ## 7. `DataTable` 的位置
 
@@ -232,7 +244,7 @@ PAGE = PageSpec(
 
 CLI 只保留：
 
-- `page create`，默认创建菜单页面；`--no-menu` 只创建可路由页面文件
+- `page create`，默认生成 `@page(menu=True)`；`--no-menu` 生成 `@page(menu=False)`
 - `page list`
 
 删除：
@@ -242,9 +254,9 @@ CLI 只保留：
 
 `check full` 需要校验：
 
-- `ui_extension.pages[]` 是否合法
-- `ui_extension.pages[]` 中的菜单页面是否存在对应 `PAGE`
-- 每个页面文件是否导出合法且唯一的 `PAGE`
+- `module.yaml` 没有 `ui_extension`
+- 每个页面文件是否声明合法且唯一的 `@page`
+- `@page.schema` 是否合法
 - `load_handler` 是否存在且同步
 - 内联表格 `query_handler` 是否存在且同步
 

@@ -43,7 +43,15 @@ _V2_DATA_TYPE_MAP = {
     "number": "number",
     "boolean": "bool",
     "bool": "bool",
+    "array": "json",
+    "object": "json",
     "json": "json",
+    "date": "text",
+    "datetime": "text",
+    "time": "text",
+    "url": "text",
+    "path": "text",
+    "secret": "text",
 }
 
 
@@ -78,7 +86,7 @@ def _v2_data_contract_for_module(module_info: ModuleInfo) -> dict[str, Any]:
         module_info.name,
         Path(module_info.path),
         module_info.manifest,
-        force_reload=module_info.source != ModuleSource.BUILTIN,
+        force_reload=module_info.source == ModuleSource.DEV_LINK,
     )
     resources = []
     for table_name, entry in sorted(descriptor.data_tables.items()):
@@ -180,6 +188,7 @@ class ModuleRegistry:
 
     def _merge_loaded_module(self, module_info: ModuleInfo) -> None:
         self._apply_persisted_module_status(module_info)
+        self._verify_loaded_module_integrity(module_info)
         existing = self._modules.get(module_info.name)
         if not existing:
             self._modules[module_info.name] = module_info
@@ -213,6 +222,34 @@ class ModuleRegistry:
         persisted = self._settings_store.get_module_status(module_info.name)
         if persisted is not None:
             module_info.status = persisted
+        return module_info
+
+    def _verify_loaded_module_integrity(self, module_info: ModuleInfo) -> ModuleInfo:
+        if module_info.source != ModuleSource.EXTERNAL:
+            return module_info
+        if module_info.status not in {ModuleStatus.ENABLED, ModuleStatus.DISABLED}:
+            return module_info
+        if not module_info.path:
+            return module_info
+        module_path = Path(module_info.path)
+        try:
+            module_path.absolute().relative_to(self._install_dir.absolute())
+        except ValueError:
+            return module_info
+        try:
+            module_path.resolve().relative_to(self._install_dir.resolve())
+        except ValueError:
+            module_info.status = ModuleStatus.INVALID
+            module_info.error = "安装模块目录不能通过符号链接指向安装根目录之外"
+            module_info.hint = "请重新安装模块；模块目录必须位于安装目录内"
+            return module_info
+        try:
+            verify_manifest_lock(module_path, module_info.manifest)
+        except Exception as exc:
+            logger.error(f"[MMS] 模块完整性校验失败 {module_info.name}: {exc}")
+            module_info.status = ModuleStatus.INVALID
+            module_info.error = str(exc)
+            module_info.hint = "请重新安装模块；已安装文件与 manifest.lock 不一致"
         return module_info
 
     def _initialize_loaded_module_configs(self) -> None:
@@ -454,7 +491,7 @@ class ModuleRegistry:
         staged_dir = temp_dir / dir_path.name
 
         try:
-            shutil.copytree(dir_path, staged_dir)
+            shutil.copytree(dir_path, staged_dir, symlinks=True)
             manifest = self._preflight_installable_module(staged_dir)
             return self._activate_staged_module(staged_dir, manifest)
         finally:
@@ -470,7 +507,13 @@ class ModuleRegistry:
         return manifest
 
     def _resolve_install_target_dir(self, manifest: ModuleManifest) -> Path:
-        return self._install_dir / manifest.name
+        install_root = self._install_dir.resolve()
+        target_dir = (install_root / manifest.name).resolve()
+        try:
+            target_dir.relative_to(install_root)
+        except ValueError as exc:
+            raise ModuleInstallError(f"模块安装目录越界: {manifest.name}") from exc
+        return target_dir
 
     def _collect_existing_install_dirs(self, manifest: ModuleManifest, target_dir: Path) -> list[Path]:
         install_dirs: list[Path] = []
@@ -625,7 +668,26 @@ class ModuleRegistry:
         """获取模块的工作流列表。"""
         module = self.get_module(module_name)
         if module and module.status == ModuleStatus.ENABLED:
-            return module.manifest.workflows
+            if str(module.manifest.runtime_api or "").strip() == "core-native-v2" and module.path:
+                try:
+                    descriptor = load_runtime_descriptor_v2(
+                        module.name,
+                        Path(module.path),
+                        module.manifest,
+                        force_reload=module.source == ModuleSource.DEV_LINK,
+                    )
+                except Exception as exc:
+                    logger.warning(f"[MMS] 获取 v2 工作流失败 {module.name}: {exc}")
+                    return []
+                return [
+                    WorkflowInfo(
+                        name=entry.meta.name,
+                        display_name=entry.meta.label or entry.meta.name,
+                        description=entry.meta.description,
+                    )
+                    for entry in descriptor.workflows.values()
+                ]
+            return []
         return []
     
     def get_enabled_modules(self) -> list[ModuleInfo]:

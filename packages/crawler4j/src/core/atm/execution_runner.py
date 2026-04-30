@@ -74,7 +74,6 @@ class ExecutionRequest:
     devel_mode: bool = False
     state: dict[str, Any] = field(default_factory=dict)
     provider_name: str = ""
-    selector_name: str = ""
     fixed_env_id: int | None = None
     resource_pool_name: str = ""
     acquisition_mode: AcquisitionMode = AcquisitionMode.SELECT
@@ -154,7 +153,6 @@ class ExecutionRunner:
             "object_bindings": deepcopy(request.object_bindings),
             "object_params": deepcopy(request.object_params),
             "provider_name": request.provider_name,
-            "selector_name": request.selector_name,
             "fixed_env_id": request.fixed_env_id,
             "resource_pool_name": request.resource_pool_name,
             "acquisition_mode": request.acquisition_mode.value,
@@ -198,7 +196,6 @@ class ExecutionRunner:
 
         prepare_result = dict(prepare_result_raw or {})
         prepare_creation_params = prepare_result.get("creation_params", {})
-        prepare_context.runtime["env_selector_name"] = request.selector_name
 
         env_lease = None
         env_id = None
@@ -246,15 +243,7 @@ class ExecutionRunner:
                         )
                     candidate_env_ids = {int(candidate.env_id) for candidate in candidates}
 
-                    if request.selector_name:
-                        selected_env_id = await self.mms.run_env_selector(
-                            hooks_module,
-                            request.selector_name,
-                            prepare_context,
-                            candidates,
-                        )
-                    else:
-                        selected_env_id = candidates[0].env_id if candidates else None
+                    selected_env_id = candidates[0].env_id if candidates else None
 
                     if selected_env_id is None:
                         if request.wait_for_resource:
@@ -266,7 +255,7 @@ class ExecutionRunner:
                                 hooks_module=hooks_module,
                                 creation_lifecycle=request.creation_lifecycle,
                             )
-                        raise RuntimeError(f"环境选择回调函数返回了 none: {request.selector_name}")
+                        raise RuntimeError("没有可用环境可供选择")
 
                     selected_env_id = int(selected_env_id)
                     selected_from_candidates = selected_env_id in candidate_env_ids
@@ -283,7 +272,7 @@ class ExecutionRunner:
                                 hooks_module=hooks_module,
                                 creation_lifecycle=request.creation_lifecycle,
                             )
-                        raise RuntimeError(f"环境选择回调函数返回了不存在的环境: {selected_env_id}")
+                        raise RuntimeError(f"选择到的环境不存在: {selected_env_id}")
 
                     try:
                         env_lease = await self.rem.lease_manager.acquire(env, task.id, timeout=wait_timeout)
@@ -320,9 +309,7 @@ class ExecutionRunner:
                             )
                     env_id = int(env_lease.env_id)
                     task.lease_id = env_lease.id
-                    logger.info(
-                        f"[ATM] Task {task.id} selected env {env_id} by selector {request.selector_name}"
-                    )
+                    logger.info(f"[ATM] Task {task.id} selected env {env_id}")
             elif request.acquisition_mode == AcquisitionMode.CREATE:
                 merged_creation_params = _deep_merge_dict(
                     request.creation_params,

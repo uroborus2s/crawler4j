@@ -24,7 +24,6 @@ def test_contracts_root_exports_stable_surface():
         "InjectSpec",
         "ObjectInjectAnnotation",
         "ObjectParamAnnotation",
-        "PageSpec",
         "ParameterOptionSpec",
         "ParameterSpec",
         "Point",
@@ -42,6 +41,7 @@ def test_contracts_root_exports_stable_surface():
         "interface",
         "object_inject",
         "object_param",
+        "page",
         "page_action",
         "workflow",
     }
@@ -51,6 +51,7 @@ def test_contracts_root_exports_stable_surface():
     assert not hasattr(crawler4j_contracts, "TaskSpec")
     assert not hasattr(crawler4j_contracts, "WorkflowSpec")
     assert not hasattr(crawler4j_contracts, "EnvSelectorSpec")
+    assert not hasattr(crawler4j_contracts, "PageSpec")
     assert crawler4j_contracts.DatabaseClient is not None
     assert crawler4j_contracts.DatabaseExecutor is not None
     assert crawler4j_contracts.TaskContext is not None

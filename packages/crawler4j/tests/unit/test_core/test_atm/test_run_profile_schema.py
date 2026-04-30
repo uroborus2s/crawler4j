@@ -17,7 +17,7 @@ def test_run_profile_serialization_roundtrip_for_select_mode():
         resource=ResourceConfig(
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.SELECT,
-                selector_name="random_ready",
+                resource_pool="bound_account_ready",
                 wait_timeout=120,
             ),
         ),
@@ -85,7 +85,7 @@ def test_run_profile_rejects_unknown_fields():
 resource:
   acquisition:
     mode: select
-    selector_name: random_ready
+    resource_pool: bound_account_ready
 execution:
   module: demo_module
   workflow: repair
@@ -101,7 +101,7 @@ def test_run_profile_rejects_removed_retry_field():
 resource:
   acquisition:
     mode: select
-    selector_name: random_ready
+    resource_pool: bound_account_ready
 execution:
   module: demo_module
   workflow: repair
@@ -129,12 +129,19 @@ execution:
         RunProfile.from_yaml(invalid_yaml)
 
 
-def test_select_mode_requires_selector_or_resource_pool():
-    with pytest.raises(ValueError, match="selector_name or resource_pool"):
+def test_select_mode_requires_resource_pool_or_env_id():
+    with pytest.raises(ValueError, match="resource_pool or env_id"):
         AcquisitionConfig(
             mode=AcquisitionMode.SELECT,
-            selector_name="",
             resource_pool="",
+        )
+
+
+def test_select_mode_rejects_removed_selector_name():
+    with pytest.raises(ValueError, match="selector_name/env_selector"):
+        AcquisitionConfig(
+            mode=AcquisitionMode.SELECT,
+            selector_name="random_ready",
         )
 
 

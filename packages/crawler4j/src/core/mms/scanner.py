@@ -38,6 +38,7 @@ V2_REMOVED_MANIFEST_FIELDS = (
     "interfaces",
     "objects",
     "tasks",
+    "ui_extension",
 )
 REQUIRED_RUNTIME_API = "core-native-v2"
 
@@ -224,7 +225,6 @@ class ModuleScanner:
         self._validate_removed_v2_manifest_state(manifest)
         self._validate_config_defaults(manifest)
         self._validate_resource_pools(manifest)
-        self._validate_ui_extension(manifest)
 
         return warnings
 
@@ -296,32 +296,6 @@ class ModuleScanner:
                 stage="VALIDATE",
                 hint="对象参数应保存在运行模板，不再通过 module.yaml 绑定到 workflow",
             )
-
-    def _validate_ui_extension(self, manifest: ModuleManifest) -> None:
-        ui_ext = manifest.ui_extension
-        seen_page_ids: set[str] = set()
-        for item in ui_ext.pages:
-            page_id = str(item.id or "").strip()
-            if not MANAGED_NAME_RE.match(page_id):
-                raise ModuleValidationError(
-                    f"无效的 ui_extension.pages[].id: {page_id or '<empty>'}",
-                    stage="VALIDATE",
-                    hint="页面 ID 只能使用小写字母、数字和下划线，且必须以字母开头",
-                )
-            if page_id in seen_page_ids:
-                raise ModuleValidationError(
-                    f"ui_extension.pages[].id 重复: {page_id}",
-                    stage="VALIDATE",
-                    hint="请确保每个宿主页入口有唯一的 ID",
-                )
-            seen_page_ids.add(page_id)
-
-            if not str(item.label or "").strip():
-                raise ModuleValidationError(
-                    f"ui_extension.pages[{page_id}].label 不能为空",
-                    stage="VALIDATE",
-                    hint="模块详情页导航标签必须显式声明",
-                )
 
     def load_module(
         self,

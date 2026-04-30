@@ -8,7 +8,6 @@ from src.core.mms.models import (
     ModuleInfo,
     ModuleManifest,
     ModuleSource,
-    UIExtensionInfo,
     UIPageInfo,
 )
 from src.core.mms.module_loader import purge_module_namespace
@@ -28,7 +27,7 @@ def make_manifest(
     *,
     workflows: tuple[str, ...] = ("main_workflow",),  # noqa: ARG001
     default_workflow: str | None = None,  # noqa: ARG001
-    pages: list[UIPageInfo] | None = None,
+    pages: list[UIPageInfo] | None = None,  # noqa: ARG001
     display_name: str | None = None,
     description: str = "",
 ) -> ModuleManifest:
@@ -37,7 +36,6 @@ def make_manifest(
         runtime_api="core-native-v2",
         display_name=display_name or module_name.replace("_", " ").title(),
         description=description,
-        ui_extension=UIExtensionInfo(pages=list(pages or [])),
     )
 
 
@@ -79,7 +77,6 @@ def register_module(
         source=source,
     )
     service = get_module_service()
-    service._page_descriptor_cache.pop(module_name, None)
     service._descriptor_cache_v2.pop(module_name, None)
     original_registry = service.registry
     service.registry = SimpleNamespace(
@@ -91,7 +88,6 @@ def register_module(
 
 
 def restore_module(service: object, original_registry: object, module_name: str) -> None:
-    service._page_descriptor_cache.pop(module_name, None)
     service._descriptor_cache_v2.pop(module_name, None)
     service.registry = original_registry
     purge_module_namespace(module_name)

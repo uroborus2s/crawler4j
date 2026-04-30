@@ -214,7 +214,6 @@ class TaskDispatcher:
                 "task_id": task.id,
             },
             provider_name=run_profile.resource.acquisition.provider,
-            selector_name=run_profile.resource.acquisition.selector_name,
             fixed_env_id=run_profile.resource.acquisition.env_id,
             resource_pool_name=run_profile.resource.acquisition.resource_pool,
             acquisition_mode=run_profile.resource.acquisition.mode,

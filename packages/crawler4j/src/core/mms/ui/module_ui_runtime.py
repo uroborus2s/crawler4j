@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -12,13 +13,14 @@ from crawler4j_contracts import TaskContext
 from src.core.atm.runtime_capabilities import (
     HostedUIDeclarationBuffer,
     RUNTIME_SURFACE_FULL,
+    RUNTIME_SURFACE_HOSTED_UI_ACTION,
     RUNTIME_SURFACE_HOSTED_UI_DECLARE,
     RUNTIME_SURFACE_HOSTED_UI_READONLY,
     build_runtime_capabilities,
 )
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo, ModuleSource
-from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptor, PageRuntimeEntry
+from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptorV2, PageRuntimeEntry, invoke_runtime_callable
 from src.core.mms.service import get_module_service
 from src.core.mms.settings_store import get_module_settings_store
 
@@ -26,7 +28,7 @@ from src.core.mms.settings_store import get_module_settings_store
 @dataclass
 class _HookSession:
     context: TaskContext
-    descriptor: ModuleRuntimeDescriptor
+    descriptor: ModuleRuntimeDescriptorV2
 
 
 class ModuleUIRuntimeBridge:
@@ -95,18 +97,11 @@ class ModuleUIRuntimeBridge:
             capability_surface=capability_surface,
             declared_page_schemas=declared_page_schemas,
         )
-        if self._is_v2_module():
-            descriptor = self._mms.get_hosted_page_descriptor(
-                self._module_name,
-                context,
-                force_reload=force_reload,
-            )
-        else:
-            descriptor = self._mms.get_runtime_descriptor(
-                self._module_name,
-                context,
-                force_reload=force_reload,
-            )
+        descriptor = self._mms.get_runtime_descriptor_v2(
+            self._module_name,
+            context,
+            force_reload=force_reload,
+        )
         return _HookSession(context=context, descriptor=descriptor)
 
     def _set_context_tools(
@@ -152,12 +147,20 @@ class ModuleUIRuntimeBridge:
         owner: str,
         context: TaskContext,
         args: tuple[Any, ...],
+        kwargs: dict[str, Any] | None = None,
     ) -> Any:
         if func is None or not callable(func):
             raise RuntimeError(f"{owner} 未定义或不可调用")
-        if inspect.iscoroutinefunction(func):
-            raise RuntimeError(f"{owner} 是 async，不能从同步宿主页调用")
-        return func(context, *args)
+        result = func(context, *args, **dict(kwargs or {}))
+        if inspect.isawaitable(result):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(result)
+            if inspect.iscoroutine(result):
+                result.close()
+            raise RuntimeError(f"{owner} 是 async，当前同步宿主页调用缺少可等待的执行入口")
+        return result
 
     def _resolve_page_entry(self, session: _HookSession, page_id: str) -> PageRuntimeEntry:
         page = session.descriptor.pages.get(page_id)
@@ -202,6 +205,63 @@ class ModuleUIRuntimeBridge:
         finally:
             if self._active_session is session:
                 self._active_session = None
+
+    async def call_page_action_async(
+        self,
+        action_name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        runtime_extra: dict[str, Any] | None = None,
+        capability_surface: str = RUNTIME_SURFACE_HOSTED_UI_ACTION,
+    ) -> Any:
+        normalized_action = str(action_name or "").strip()
+        if not normalized_action:
+            raise RuntimeError("page_action 名称不能为空")
+        normalized_params = dict(params or {}) if isinstance(params, dict) else {}
+        session = self._active_session
+        if session is None:
+            session = self._create_session(
+                force_reload=self._is_dev_link(),
+                capability_surface=capability_surface,
+                declared_page_schemas=self._declared_page_schemas or None,
+            )
+        else:
+            self._set_context_tools(
+                session.context,
+                capability_surface=capability_surface,
+                declared_page_schemas=self._declared_page_schemas or None,
+            )
+        try:
+            descriptor = self._mms.get_runtime_descriptor_v2(self._module_name, session.context)
+            page_action = descriptor.page_actions.get(normalized_action)
+            if page_action is None:
+                raise RuntimeError(f"page_action 不存在: {normalized_action}")
+            with self._override_runtime(session.context, runtime_extra):
+                return await invoke_runtime_callable(page_action.target, session.context, **normalized_params)
+        finally:
+            if self._active_session is session:
+                self._active_session = None
+
+    def call_page_action(
+        self,
+        action_name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        runtime_extra: dict[str, Any] | None = None,
+        capability_surface: str = RUNTIME_SURFACE_HOSTED_UI_ACTION,
+    ) -> Any:
+        coroutine = self.call_page_action_async(
+            action_name,
+            params,
+            runtime_extra=runtime_extra,
+            capability_surface=capability_surface,
+        )
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coroutine)
+        coroutine.close()
+        raise RuntimeError("page_action 是 async，当前同步宿主页调用缺少可等待的执行入口")
 
     def get_declared_page(self, page_id: str) -> dict[str, Any]:
         return dict(self._declared_page_schemas.get(str(page_id or "").strip(), {}))

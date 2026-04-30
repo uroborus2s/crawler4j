@@ -35,17 +35,16 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
             "pages/dashboard.py": f"""
             import builtins
 
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
             LOAD_COUNT_KEY = "{load_key}"
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 icon="📊",
                 schema={{
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {{"type": "Text", "style": "title", "binding": "title"}},
                         {{"type": "Text", "style": "body", "binding": "load_count_text"}},
@@ -64,8 +63,6 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
                     ],
                 }},
             )
-
-
             def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                 del context, page_id, params
                 count = int(getattr(builtins, LOAD_COUNT_KEY, 0)) + 1
@@ -77,20 +74,17 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
                 }}
             """,
             "pages/accounts.py": """
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
-            PAGE = PageSpec(
-                id="accounts",
+            @page(
+                name="accounts",
                 label="Accounts",
                 icon="📋",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_accounts_page",
                     "children": [{"type": "Text", "style": "title", "binding": "title"}],
                 },
             )
-
-
             def load_accounts_page(context: TaskContext, page_id: str, params=None):
                 del context, page_id, params
                 return {"title": "账号页"}
@@ -134,6 +128,69 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
         delattr(builtins, load_key)
 
 
+def test_managed_page_renderer_handles_page_action_button(qtbot, tmp_path):
+    module_name = "hosted_page_action_button_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import TaskContext, page
+
+            @page(
+                name="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "Button",
+                            "label": "创建账号",
+                            "action": {
+                                "type": "page_action",
+                                "name": "create_account_from_ui",
+                                "params": {"account_id": {"value": "acct-001"}},
+                            },
+                        },
+                        {"type": "Text", "style": "body", "binding": "created"},
+                    ],
+                },
+            )
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                return {"created": "未创建"}
+            """,
+            "tasks/create_account.py": """
+            from crawler4j_contracts import TaskContext, page_action
+
+            CALLS = []
+
+            @page_action(name="create_account_from_ui")
+            async def create_account_from_ui(context: TaskContext, account_id: str):
+                del context
+                CALLS.append({"account_id": account_id})
+                return {"ok": True}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    try:
+        page = ManagedPageRenderer(module_name, "dashboard", module_info=module_info)
+        qtbot.addWidget(page)
+
+        action_button = next(button for button in page.findChildren(QPushButton) if button.text() == "创建账号")
+        action_button.click()
+
+        import importlib
+
+        task_module = importlib.import_module(f"{module_name}.tasks.create_account")
+        assert task_module.CALLS == [{"account_id": "acct-001"}]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
 def test_managed_page_renderer_keeps_header_icon_button_compact(qtbot, tmp_path):
     module_name = "hosted_page_header_button_module"
     module_dir = write_module_tree(
@@ -141,15 +198,14 @@ def test_managed_page_renderer_keeps_header_icon_button_compact(qtbot, tmp_path)
         module_name,
         files={
             "pages/detail.py": """
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
-            PAGE = PageSpec(
-                id="detail",
+            @page(
+                name="detail",
                 label="明细",
                 icon="📄",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_detail_page",
                     "children": [
                         {
                             "type": "Section",
@@ -170,8 +226,6 @@ def test_managed_page_renderer_keeps_header_icon_button_compact(qtbot, tmp_path)
                     ],
                 },
             )
-
-
             def load_detail_page(context: TaskContext, page_id: str, params=None):
                 del context, page_id, params
                 return {}
@@ -231,16 +285,15 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         module_name,
         files={
             "pages/accounts.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="accounts",
+            @page(
+                name="accounts",
                 label="账号管理",
                 icon="📋",
                 schema={
                     "type": "Page",
                     "title": "账号管理",
-                    "load_handler": "load_accounts_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -268,8 +321,6 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                     ],
                 },
             )
-
-
             def load_accounts_page(context, page_id, params=None):
                 del context, page_id, params
                 return {}
@@ -483,16 +534,15 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
         module_name,
         files={
             "pages/accounts.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="accounts",
+            @page(
+                name="accounts",
                 label="账号管理",
                 icon="📋",
                 schema={
                     "type": "Page",
                     "title": "账号管理",
-                    "load_handler": "load_accounts_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -522,8 +572,6 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                     ],
                 },
             )
-
-
             def load_accounts_page(context, page_id, params=None):
                 del context, page_id, params
                 return {}
@@ -709,16 +757,15 @@ def test_managed_page_renderer_localizes_and_styles_crud_dialog(qtbot, tmp_path,
         module_name,
         files={
             "pages/accounts.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="accounts",
+            @page(
+                name="accounts",
                 label="账号管理",
                 icon="📋",
                 schema={
                     "type": "Page",
                     "title": "账号管理",
-                    "load_handler": "load_accounts_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -742,8 +789,6 @@ def test_managed_page_renderer_localizes_and_styles_crud_dialog(qtbot, tmp_path,
                     ],
                 },
             )
-
-
             def load_accounts_page(context, page_id, params=None):
                 del context, page_id, params
                 return {}
@@ -786,14 +831,13 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {"type": "Text", "style": "body", "binding": "load_tools"},
                         {"type": "Text", "style": "body", "binding": "load_write_error"},
@@ -810,8 +854,6 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
                     ],
                 },
             )
-
-
             def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                 del page_id, params
                 load_tools = ",".join(spec.name for spec in context.tools.list_tools())
@@ -873,14 +915,13 @@ def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -902,8 +943,6 @@ def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_
                     ],
                 },
             )
-
-
             def load_dashboard_page(context, page_id, params=None):
                 del context, page_id, params
                 return {
@@ -914,19 +953,16 @@ def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_
                 }
             """,
             "pages/details.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="details",
+            @page(
+                name="details",
                 label="Details",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_details_page",
                     "children": [{"type": "Text", "binding": "title"}],
                 },
             )
-
-
             def load_details_page(context, page_id, params=None):
                 del context, page_id, params
                 return {"title": "详情"}
@@ -959,14 +995,13 @@ def test_managed_page_renderer_row_action_without_params_does_not_forward_row_pa
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -985,8 +1020,6 @@ def test_managed_page_renderer_row_action_without_params_does_not_forward_row_pa
                     ],
                 },
             )
-
-
             def load_dashboard_page(context, page_id, params=None):
                 del context, page_id, params
                 return {
@@ -997,19 +1030,16 @@ def test_managed_page_renderer_row_action_without_params_does_not_forward_row_pa
                 }
             """,
             "pages/details.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="details",
+            @page(
+                name="details",
                 label="Details",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_details_page",
                     "children": [{"type": "Text", "binding": "title"}],
                 },
             )
-
-
             def load_details_page(context, page_id, params=None):
                 del context, page_id, params
                 return {"title": "详情"}
@@ -1042,14 +1072,13 @@ def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtb
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {"type": "Text", "style": "body", "binding": "selected_phone"},
                         {
@@ -1067,8 +1096,6 @@ def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtb
                     ],
                 },
             )
-
-
             def load_dashboard_page(context, page_id, params=None):
                 del context, page_id
                 selected_phone = "none"
@@ -1081,19 +1108,16 @@ def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtb
                 }
             """,
             "pages/account_details.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="account_details",
+            @page(
+                name="account_details",
                 label="Account Details",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_account_details_page",
                     "children": [{"type": "Text", "binding": "title"}],
                 },
             )
-
-
             def load_account_details_page(context, page_id, params=None):
                 del context, page_id, params
                 return {"title": "详情页"}

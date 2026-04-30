@@ -9,10 +9,6 @@ from src.core.mms.models import (
     ModuleSource,
     ModuleStatus,
     UpgradeSourceInfo,
-    UIPageInfo,
-    UIExtensionInfo,
-    WorkflowInfo,
-    WorkflowParameterInfo,
     WorkflowParameterOptionInfo,
 )
 from src.core.mms.scanner import ModuleScanner
@@ -45,64 +41,16 @@ class TestModuleManifest:
         """测试从字典反序列化。"""
         data = {
             "name": "test_module",
-            "runtime_api": "core-native-v1",
+            "runtime_api": "core-native-v2",
             "version": "1.0.0",
             "display_name": "测试模块",
             "upgrade_source": {
                 "type": "github_release",
                 "repo": "example/test_module",
             },
-            "workflows": [
-                {
-                    "name": "login_flow",
-                    "display_name": "登录流程",
-                    "tasks": ["login_task"],
-                    "parameters": [
-                        {
-                            "name": "member_tier",
-                            "label": "会员类型",
-                            "type": "enum",
-                            "required": True,
-                            "default": "normal",
-                            "options": [
-                                {"label": "普通会员", "value": "normal"},
-                                {"label": "高级会员", "value": "premium"},
-                            ],
-                        },
-                        {
-                            "name": "min_member_days",
-                            "label": "会员天数下限",
-                            "type": "integer",
-                            "default": 30,
-                            "min": 0,
-                            "max": 365,
-                            "step": 1,
-                        },
-                    ],
-                }
-            ],
-            "ui_extension": {
-                "pages": [
-                    {
-                        "id": "dashboard",
-                        "icon": "📊",
-                        "label": "今日运营看板",
-                    },
-                    {
-                        "id": "accounts",
-                        "icon": "📋",
-                        "label": "账号管理",
-                    },
-                ],
-            },
             "config_defaults": {
                 "module": {
                     "base_url": "https://example.com",
-                },
-                "workflows": {
-                    "login_flow": {
-                        "headless": False,
-                    }
                 },
             },
             "resource_pools": [
@@ -112,7 +60,6 @@ class TestModuleManifest:
                     "description": "可复用的已绑定账号环境",
                 }
             ],
-            "default_workflow": "login_flow",
             "data": _empty_data_contract(),
         }
         
@@ -120,35 +67,12 @@ class TestModuleManifest:
         
         assert manifest.name == "test_module"
         assert manifest.version == "1.0.0"
-        assert len(manifest.workflows) == 1
-        assert manifest.workflows[0].name == "login_flow"
-        assert manifest.workflows[0].tasks == ["login_task"]
-        assert manifest.workflows[0].parameters == [
-            WorkflowParameterInfo(
-                name="member_tier",
-                label="会员类型",
-                type="enum",
-                required=True,
-                default="normal",
-                options=[
-                    WorkflowParameterOptionInfo(label="普通会员", value="normal"),
-                    WorkflowParameterOptionInfo(label="高级会员", value="premium"),
-                ],
-            ),
-            WorkflowParameterInfo(
-                name="min_member_days",
-                label="会员天数下限",
-                type="integer",
-                default=30,
-                min=0,
-                max=365,
-                step=1,
-            ),
-        ]
+        assert manifest.runtime_api == "core-native-v2"
+        assert manifest.workflows == []
+        assert manifest.default_workflow == ""
         assert manifest.upgrade_source.repo == "example/test_module"
-        assert [page.id for page in manifest.ui_extension.pages] == ["dashboard", "accounts"]
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
-        assert manifest.config_defaults.workflows == {"login_flow": {"headless": False}}
+        assert manifest.config_defaults.workflows == {}
         assert manifest.resource_pools == [
             ResourcePoolInfo(
                 name="bound_account_ready",
@@ -162,44 +86,10 @@ class TestModuleManifest:
         """测试序列化。"""
         manifest = ModuleManifest(
             name="test_module",
-            runtime_api="core-native-v1",
+            runtime_api="core-native-v2",
             upgrade_source=UpgradeSourceInfo(repo="example/test_module"),
-            workflows=[
-                WorkflowInfo(
-                    name="flow1",
-                    tasks=["example_task"],
-                    parameters=[
-                        WorkflowParameterInfo(
-                            name="member_tier",
-                            label="会员类型",
-                            type="enum",
-                            required=True,
-                            default="normal",
-                            options=[
-                                WorkflowParameterOptionInfo(label="普通会员", value="normal"),
-                            ],
-                        ),
-                    ],
-                )
-            ],
-            default_workflow="flow1",
-            ui_extension=UIExtensionInfo(
-                pages=[
-                    UIPageInfo(
-                        id="dashboard",
-                        icon="📊",
-                        label="今日运营看板",
-                    ),
-                    UIPageInfo(
-                        id="accounts",
-                        icon="📋",
-                        label="账号管理",
-                    ),
-                ],
-            ),
             config_defaults=ConfigDefaultsInfo(
                 module={"base_url": "https://example.com"},
-                workflows={"flow1": {"headless": False}},
             ),
             resource_pools=[
                 ResourcePoolInfo(
@@ -214,40 +104,17 @@ class TestModuleManifest:
         data = manifest.to_dict()
 
         assert data["name"] == "test_module"
-        assert data["runtime_api"] == "core-native-v1"
-        assert len(data["workflows"]) == 1
-        assert data["workflows"][0]["tasks"] == ["example_task"]
-        assert data["workflows"][0]["parameters"] == [
-            {
-                "name": "member_tier",
-                "label": "会员类型",
-                "type": "enum",
-                "required": True,
-                "default": "normal",
-                "options": [{"label": "普通会员", "value": "normal"}],
-            }
-        ]
-        assert "entry_class" not in data["workflows"][0]
+        assert data["runtime_api"] == "core-native-v2"
+        assert data["workflows"] == []
         assert data["upgrade_source"] == {
             "type": "github_release",
             "repo": "example/test_module",
             "allow_prerelease": False,
         }
-        assert data["ui_extension"]["pages"] == [
-            {
-                "id": "dashboard",
-                "icon": "📊",
-                "label": "今日运营看板",
-            },
-            {
-                "id": "accounts",
-                "icon": "📋",
-                "label": "账号管理",
-            },
-        ]
+        assert "ui_extension" not in data
         assert data["config_defaults"] == {
             "module": {"base_url": "https://example.com"},
-            "workflows": {"flow1": {"headless": False}},
+            "workflows": {},
         }
         assert data["resource_pools"] == [
             {
@@ -256,14 +123,14 @@ class TestModuleManifest:
                 "description": "可复用的已绑定账号环境",
             }
         ]
-        assert data["default_workflow"] == "flow1"
+        assert data["default_workflow"] == ""
         assert data["data"] == _empty_data_contract()
 
     def test_from_dict_rejects_removed_workflow_entry_class(self):
         """旧 workflows[].entry_class 入口不再是 manifest 兼容面。"""
         data = {
             "name": "test_module",
-            "runtime_api": "core-native-v1",
+            "runtime_api": "core-native-v2",
             "version": "1.0.0",
             "upgrade_source": {
                 "type": "github_release",
@@ -285,7 +152,7 @@ class TestModuleManifest:
     def test_from_dict_rejects_invalid_workflow_parameter(self):
         data = {
             "name": "test_module",
-            "runtime_api": "core-native-v1",
+            "runtime_api": "core-native-v2",
             "version": "1.0.0",
             "upgrade_source": {
                 "type": "github_release",
@@ -580,20 +447,33 @@ upgrade_source:
 
         assert scanner.validate(manifest, tmp_path) == []
 
-    def test_validate_rejects_unsupported_page_extra_field(self):
-        manifest = ModuleManifest(
-            name="demo_module",
-            upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
-            ui_extension=UIExtensionInfo(
-                pages=[
-                    UIPageInfo(id="custom_page", label="自定义页面")
-                ],
-            ),
+    def test_parse_manifest_rejects_removed_ui_extension_pages(self, tmp_path):
+        from src.core.mms.models import ModuleParseError
+
+        module_dir = tmp_path / "test_module"
+        module_dir.mkdir()
+        (module_dir / "module.yaml").write_text(
+            """
+name: test_module
+runtime_api: core-native-v2
+version: 1.0.0
+upgrade_source:
+  type: github_release
+  repo: example/test_module
+ui_extension:
+  pages:
+    - id: custom_page
+      label: 自定义页面
+""".strip(),
+            encoding="utf-8",
         )
-        manifest_dict = manifest.to_dict()
-        manifest_dict["ui_extension"]["pages"][0]["extra"] = "unsupported"
-        with pytest.raises(ValueError):
-            ModuleManifest.from_dict(manifest_dict)
+
+        scanner = ModuleScanner(scan_paths=[tmp_path])
+
+        with pytest.raises(ModuleParseError) as exc_info:
+            scanner.parse_manifest(module_dir)
+
+        assert "ui_extension" in str(exc_info.value)
 
     def test_validate_rejects_unknown_workflow_in_config_defaults(self, tmp_path):
         from src.core.mms.models import ModuleValidationError

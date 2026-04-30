@@ -20,6 +20,7 @@ Core 扫描模块 Python 文件，读取装饰器挂载的元数据。
 | Component | `@component` | 任务环境级对象 |
 | Workflow | `@workflow` | workflow 根对象 |
 | Page Action | `@page_action` | 页面操作函数 |
+| Page | `@page` | Hosted UI 页面 schema、菜单状态与 load handler |
 | Data Table | `@data_table` | 数据表声明 |
 | Data Query | `@data_query` | 命名查询声明 |
 
@@ -135,23 +136,30 @@ event_id = ctx.db.audit("account_events").append(
 
 ## Hosted UI
 
-页面文件导出 `PAGE`：
+页面文件使用 `@page` 装饰页面 load handler：
 
 ```python
-from crawler4j_contracts import PageSpec
+from crawler4j_contracts import TaskContext, page
 
-PAGE = PageSpec(
-    id="dashboard",
+@page(
+    name="dashboard",
     label="Dashboard",
-    schema={...},
+    menu=True,
+    schema={
+        "type": "Page",
+        "title": "Dashboard",
+        "children": [],
+    },
 )
+def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None = None) -> dict:
+    ...
 ```
 
 正式约束：
 
-- `PAGE.id` 是唯一扁平 snake_case
-- `module.yaml.ui_extension.pages[]` 只控制左侧菜单
-- `PAGE.schema` 顶层是 `Page`
-- `load_handler` 指向真实函数
+- `@page.name` 是唯一扁平 snake_case
+- `@page(menu=True)` 控制左侧菜单，`menu=False` 只注册可路由页面
+- `schema` 顶层是 `Page`
+- 被 `@page` 装饰的函数就是页面 `load_handler`
 - `DataTable(query_handler)` 指向真实函数
 - `open_page.page_id` 可以跳到未进菜单的页面

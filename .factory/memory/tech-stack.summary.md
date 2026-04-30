@@ -35,7 +35,7 @@
 
 - 创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j interface create`、`crawler4j component create`、`crawler4j workflow create`、`crawler4j page-action create`、`crawler4j page create`、`crawler4j data table/query create`，不要先手写脚手架。
 - 正式模块协议是 `module.yaml(runtime_api=core-native-v2)` + v2 装饰器扫描 + `.crawler4j/manifest.lock.json`，不依赖根包运行入口或 0.3.x 顶层 spec 导出。
-- 对象依赖和 component 对象参数可写在装饰器参数、类属性注解或 `__init__` 参数注解上；SDK scanner 与 Core descriptor 必须归一到同一份元数据。
+- 对象依赖和 component 对象参数可写在装饰器参数、类属性注解或 `__init__` 参数注解上；SDK scanner 与 Core descriptor 必须归一到同一份元数据。对象参数类型覆盖标量、enum、array、object、json、date/datetime/time、url、path、secret，结构化约束写入 `ParameterSpec.schema/item_schema`。
 - 模块运行时代码只 import `crawler4j-contracts`；`crawler4j-sdk` 仅限开发期使用。
 - 新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。
 - 调试与验收优先走 DevLink / ATM 调试与 ZIP 安装 smoke。

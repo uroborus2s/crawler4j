@@ -163,7 +163,7 @@ def test_task_create_dialog_preview_shows_resource_pool_for_select_mode(qtbot):
     dialog._update_inline_preview()
 
     assert "资源池: bound_account_ready" in dialog.inline_preview.text()
-    assert "选择器: -" in dialog.inline_preview.text()
+    assert "选择器" not in dialog.inline_preview.text()
 
 
 def test_task_create_dialog_preview_keeps_spacing_above_inline_button(qtbot):
@@ -176,7 +176,6 @@ def test_task_create_dialog_preview_keeps_spacing_above_inline_button(qtbot):
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.SELECT,
                 resource_pool="reuse_bound_account_env",
-                selector_name="bound_account_selector",
                 wait_timeout=45,
             ),
         ),

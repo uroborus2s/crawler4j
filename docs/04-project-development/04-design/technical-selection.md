@@ -31,7 +31,7 @@
 - crawler4j-sdk CLI
 - crawler4j-contracts runtime contracts
 - module.yaml
-- core-native-v2 decorators / object_param / object_inject / PageSpec
+- core-native-v2 decorators / object_param / object_inject / @page
 - DevLink / ATM 调试链路
 
 ## 编码与工程规则

@@ -31,10 +31,10 @@ def _iter_manifest_lock_files(module_root: Path) -> list[Path]:
     for path in module_root.rglob("*"):
         relative = path.relative_to(module_root)
         relative_posix = relative.as_posix()
-        if any(part in ignored_dirs or part.endswith(".egg-info") for part in relative.parts):
-            continue
         if path.is_symlink():
             raise ModuleInstallError(f"模块文件不能是符号链接: {relative_posix}")
+        if any(part in ignored_dirs or part.endswith(".egg-info") for part in relative.parts):
+            continue
         if path.is_dir():
             continue
         if path.name in ignored_files or relative_posix in ignored_files:

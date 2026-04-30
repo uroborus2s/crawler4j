@@ -11,6 +11,7 @@
 | `@interface` | 声明能力接口 |
 | `@component` | 声明可创建业务对象 |
 | `@workflow` | 声明 workflow 类 |
+| `@page` | 声明 Hosted UI 页面和 load handler |
 | `@page_action` | 声明页面操作纯函数 |
 | `@data_table` | 声明数据表 |
 | `@data_query` | 声明命名查询 |
@@ -76,7 +77,64 @@ class ApiLabor:
         self.timeout = timeout
 ```
 
-未提供默认值的 `object_param()` 默认视为必填；带 Python 默认值或 `object_param(default=...)` 的参数默认视为可选。`str/int/float/bool` 会分别推断为 `string/integer/number/boolean`，也可以用 `object_param(type="enum", options=[...])` 显式声明。
+未提供默认值的 `object_param()` 默认视为必填；带 Python 默认值、`object_param(default=...)` 或 `Optional[T]` / `T | None` 的参数默认视为可选。
+
+`object_param(...)` 支持的元数据字段：
+
+- `name`、`type`、`label`、`description`、`required`、`default`
+- `options`：`enum` 可选项，支持 `{"label": "...", "value": ...}` 或直接写字面量值
+- `min`、`max`、`step`：仅用于 `integer` / `number`
+- `placeholder`
+- `schema`：`object` 的字段 schema，或 `dict[str, T]` 推断出的 `additional_type`
+- `item_schema`：`array` 的元素 schema
+
+`object_param` 支持的参数类型为：
+
+| 类型 | Python 注解推断 | 运行时值 |
+|---|---|---|
+| `string` | `str` | `str` |
+| `text` | 显式 `type="text"` | `str` |
+| `integer` | `int` | `int`，不接受 `bool` |
+| `number` | `float` | `int` / `float`，不接受 `bool` |
+| `boolean` | `bool` | `bool` |
+| `enum` | `Literal[...]` 或显式 `type="enum"` | 必须命中 `options` |
+| `array` | `list[T]` / `tuple[T, ...]` | `list` / `tuple`，会按 `item_schema` 校验并归一为 `list` |
+| `object` | `dict[str, T]` | `Mapping`，会按 `schema.fields` 或 `additional_type` 校验并归一为 `dict` |
+| `json` | 显式 `type="json"` | JSON-like 值：`None`、字符串、数字、布尔、数组、字符串键对象 |
+| `date` | `datetime.date` | `date` 或 ISO date 字符串，运行时归一为 `date` |
+| `datetime` | `datetime.datetime` | `datetime` 或 ISO datetime 字符串，运行时归一为 `datetime` |
+| `time` | `datetime.time` | `time` 或 ISO time 字符串，运行时归一为 `time` |
+| `url` | 显式 `type="url"` | 含 scheme 与 netloc 的 URL 字符串 |
+| `path` | `pathlib.Path` | `str` / `Path`，运行时归一为 `Path` |
+| `secret` | 显式 `type="secret"` | `str`；用于 UI/模板侧按敏感值处理 |
+
+示例：
+
+```python
+from datetime import date, datetime, time
+from pathlib import Path
+from typing import Annotated, Literal
+
+from crawler4j_contracts import component, object_param
+
+
+@component(name="api_labor", implements="labor")
+class ApiLabor:
+    mode: Annotated[Literal["sync", "async"], object_param(default="sync")]
+    tags: Annotated[list[str], object_param(default=["default"])]
+    limits: Annotated[dict[str, int], object_param(default={"daily": 10})]
+    download_dir: Annotated[Path, object_param()]
+
+    def __init__(
+        self,
+        start_date: Annotated[date, object_param()],
+        deadline: Annotated[datetime, object_param()],
+        run_at: Annotated[time, object_param()],
+    ):
+        self.start_date = start_date
+        self.deadline = deadline
+        self.run_at = run_at
+```
 
 ## Component 注入其他对象
 
@@ -161,6 +219,42 @@ class QuizWorkflow:
     async def run(self, ctx):
         return await self.orchestrator.run(ctx)
 ```
+
+## Page
+
+```python
+from crawler4j_contracts import TaskContext, page
+
+
+@page(
+    name="dashboard",
+    label="Dashboard",
+    icon="chart",
+    menu=True,
+    schema={
+        "type": "Page",
+        "title": "Dashboard",
+        "children": [
+            {"type": "Text", "style": "title", "binding": "title"},
+        ],
+    },
+)
+def load_dashboard_page(
+    context: TaskContext,
+    page_id: str,
+    params: dict | None = None,
+) -> dict:
+    del context, page_id, params
+    return {"title": "Dashboard"}
+```
+
+page 规则：
+
+- 必须装饰函数或 async 函数
+- `name` 是唯一扁平 snake_case
+- `menu=True` 进入左侧菜单；`menu=False` 只注册可路由页面
+- `schema` 顶层必须是 `Page`
+- 被装饰函数就是页面 `load_handler`
 
 ## Page Action
 

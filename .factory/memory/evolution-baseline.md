@@ -15,7 +15,7 @@
 - Keep QScintilla text surfaces on platform-available fixed-width fonts instead of hardcoding macOS-only families; derive extra line spacing from the chosen font metrics so Windows fallback fonts cannot collapse YAML rows
 - Keep GitHub Release asset downloads on dedicated streaming timeouts instead of the shared 30s session total timeout; write to `.part` files, remove partial artifacts on timeout/failure, and reject content-length mismatches before exposing the archive to MMS install flow
 - Treat fingerprint-browser CDP attachment as a warm-up phase: normalize host-returned endpoints first, then give Playwright multiple retries before declaring connect failure
-- Keep Hosted UI page registration and menu configuration separate: `pages/` owns routable `PAGE` modules, while `module.yaml.ui_extension.pages[]` only owns left-menu entries
+- Keep Hosted UI page registration and menu configuration inside `@page(...)`: `pages/` owns routable pages, and `@page(menu=True)` is the only left-menu source
 
 ## What To Improve First
 

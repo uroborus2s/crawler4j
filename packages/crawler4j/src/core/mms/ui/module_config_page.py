@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 import yaml
 
 from src.core.mms.config_yaml_validation import YamlConfigValidationError, parse_yaml_config_mapping
+from src.core.mms.registry import get_module_registry
 from src.core.mms.settings_store import get_module_settings_store
 from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
@@ -252,7 +253,7 @@ class ModuleConfigPage(QWidget):
 
         self.workflow_selector.blockSignals(True)
         self.workflow_selector.clear()
-        workflows = list(self._module.manifest.workflows or [])
+        workflows = list(get_module_registry().get_workflows(self._module.name))
         for workflow in workflows:
             label = workflow.display_name or workflow.name
             self.workflow_selector.addItem(label, workflow.name)

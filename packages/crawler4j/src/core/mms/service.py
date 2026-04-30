@@ -8,10 +8,8 @@ from src.core.mms.models import ModuleInfo, ModuleSource, ModuleStatus
 from src.core.mms.object_container_v2 import ObjectContainerV2
 from src.core.mms.registry import get_module_registry
 from src.core.mms.runtime_descriptor import (
-    ModuleRuntimeDescriptor,
     ModuleRuntimeDescriptorV2,
     invoke_runtime_callable,
-    load_hosted_page_descriptor,
     load_runtime_descriptor_v2,
     normalize_result_payload,
 )
@@ -25,7 +23,6 @@ class ModuleService:
 
     def __init__(self):
         self.registry = get_module_registry()
-        self._page_descriptor_cache: dict[str, ModuleRuntimeDescriptor] = {}
         self._descriptor_cache_v2: dict[str, ModuleRuntimeDescriptorV2] = {}
 
     def _should_force_reload(self, module_name: str, context: TaskContext | None = None) -> bool:
@@ -57,26 +54,6 @@ class ModuleService:
             raise ValueError(f"Module '{module_name}' has no valid path")
         return module_info
 
-    def _load_hosted_page_descriptor(
-        self,
-        module_name: str,
-        context: TaskContext | None = None,
-        *,
-        force_reload: bool = False,
-    ) -> ModuleRuntimeDescriptor:
-        module_info = self._get_module_info(module_name)
-        force_reload = force_reload or self._should_force_reload(module_info.name, context)
-
-        if force_reload or module_info.name not in self._page_descriptor_cache:
-            descriptor = load_hosted_page_descriptor(
-                module_info.name,
-                Path(module_info.path),
-                force_reload=force_reload or module_info.source != ModuleSource.BUILTIN,
-            )
-            self._page_descriptor_cache[module_info.name] = descriptor
-
-        return self._page_descriptor_cache[module_info.name]
-
     def _load_descriptor_v2(
         self,
         module_name: str,
@@ -92,7 +69,7 @@ class ModuleService:
                 module_info.name,
                 Path(module_info.path),
                 module_info.manifest,
-                force_reload=force_reload or module_info.source != ModuleSource.BUILTIN,
+                force_reload=force_reload or module_info.source == ModuleSource.DEV_LINK,
             )
             self._descriptor_cache_v2[module_info.name] = descriptor
 
@@ -104,8 +81,8 @@ class ModuleService:
         context: TaskContext | None = None,
         *,
         force_reload: bool = False,
-    ) -> ModuleRuntimeDescriptor:
-        return self._load_hosted_page_descriptor(module_name, context, force_reload=force_reload)
+    ) -> ModuleRuntimeDescriptorV2:
+        return self._load_descriptor_v2(module_name, context, force_reload=force_reload)
 
     def get_runtime_descriptor_v2(
         self,
@@ -122,8 +99,8 @@ class ModuleService:
         context: TaskContext | None = None,
         *,
         force_reload: bool = False,
-    ) -> ModuleRuntimeDescriptor:
-        return self._load_hosted_page_descriptor(module_name, context, force_reload=force_reload)
+    ) -> ModuleRuntimeDescriptorV2:
+        return self._load_descriptor_v2(module_name, context, force_reload=force_reload)
 
     @staticmethod
     def _resolve_v2_workflow_name(context: TaskContext, descriptor: ModuleRuntimeDescriptorV2) -> str:
@@ -156,12 +133,24 @@ class ModuleService:
             object_bindings=self._runtime_mapping(context, "object_bindings"),
             object_params=self._runtime_mapping(context, "object_params"),
         )
-        workflow = container.build_workflow()
-        run = getattr(workflow, "run", None)
-        if run is None:
-            raise ValueError(f"Workflow has no run method: {workflow_name}")
-        result = await invoke_runtime_callable(run, context)
-        return normalize_result_payload(result, context)
+        previous_page_action_executor = getattr(context, "_page_action_executor", None)
+
+        async def _run_page_action(action_name: str, action_context: TaskContext, **kwargs: Any) -> Any:
+            page_action = descriptor.page_actions.get(str(action_name or "").strip())
+            if page_action is None:
+                raise RuntimeError(f"page_action 不存在: {action_name}")
+            return await invoke_runtime_callable(page_action.target, action_context, **kwargs)
+
+        try:
+            context._page_action_executor = _run_page_action
+            workflow = container.build_workflow()
+            run = getattr(workflow, "run", None)
+            if run is None:
+                raise ValueError(f"Workflow has no run method: {workflow_name}")
+            result = await invoke_runtime_callable(run, context)
+            return normalize_result_payload(result, context)
+        finally:
+            context._page_action_executor = previous_page_action_executor
 
     async def run_module(self, module_name: str, context: TaskContext) -> Any:
         """运行模块默认工作流或任务。"""
@@ -192,26 +181,6 @@ class ModuleService:
             logger.debug(f"[MMS] core-native-v2 does not use legacy local hook: {module_name}.{hook_name}")
             return None
         raise ValueError("Legacy module hooks are removed in crawler4j 0.4.0")
-
-    async def run_env_selector(
-        self,
-        module_name: str,
-        selector_name: str,
-        context: TaskContext,
-        candidates: list[Any],
-    ) -> Any:
-        module_info = self._get_module_info(module_name)
-        if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
-            raise ValueError("core-native-v2 不支持旧 env_selector 入口")
-        raise ValueError("Legacy env_selector entries are removed in crawler4j 0.4.0")
-
-    def list_env_selectors(self, module_name: str) -> list[Any]:
-        """列出模块声明的环境选择器。"""
-        module_info = self._get_module_info(module_name)
-        if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
-            return []
-        raise ValueError("Legacy env_selector entries are removed in crawler4j 0.4.0")
-
 
 # Global Singleton
 _service: ModuleService | None = None

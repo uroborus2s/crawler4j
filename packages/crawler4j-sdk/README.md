@@ -12,12 +12,12 @@
 - `TaskResult`
 - `TaskSignal`
 - `EnvAction`
-- `PageSpec`
 - `interface`
 - `component`
 - `workflow`
 - `object_param`
 - `object_inject`
+- `page`
 - `page_action`
 - `data_table`
 - `data_query`
@@ -39,11 +39,9 @@ upgrade_source:
   allow_prerelease: false
 config_defaults:
   module: {}
-ui_extension:
-  pages: []
 ```
 
-`module.yaml` 不再声明 `default_workflow`、`workflows`、`data`、`interfaces`、`objects` 或 `tasks`。这些能力都由代码装饰器声明并由 SDK/Core 扫描。
+`module.yaml` 不再声明 `default_workflow`、`workflows`、`data`、`interfaces`、`objects`、`tasks` 或 `ui_extension`。这些能力都由代码装饰器声明并由 SDK/Core 扫描。
 
 ## 模块目录
 
@@ -69,7 +67,7 @@ demo_module/
 - `workflows/*.py` 声明 `@workflow`
 - `tasks/*.py` 声明 `@page_action`
 - `data/*.py` 声明 `@data_table` / `@data_query`
-- `pages/*.py` 或 `pages/<group>/*.py` 仍导出 `PAGE = PageSpec(...)`
+- `pages/*.py` 或 `pages/<group>/*.py` 声明 `@page(...)`
 
 ## CLI
 
@@ -102,6 +100,8 @@ SDK scanner 同时支持两类对象装配声明：
 - 注解 helper：类属性或 `__init__` 参数上的 `Annotated[..., object_param(...)]` / `Annotated[..., object_inject(...)]`
 
 两类声明都会进入同一份 `.crawler4j/manifest.lock.json` 元数据；不要在同一对象里用两个入口重复声明同名参数或同名注入。
+
+`object_param(...)` 当前支持 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`。SDK 静态扫描可从 `str/int/float/bool`、`Literal[...]`、`list[T]`、`dict[str, T]`、`Optional[T]` / `T | None`、`datetime.date/datetime/time`、`pathlib.Path` 推断类型，并会把 `schema` / `item_schema` 写入 manifest lock。
 
 ## 运行期依赖
 

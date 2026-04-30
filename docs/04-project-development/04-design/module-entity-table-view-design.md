@@ -9,7 +9,7 @@
 **关联 ID：** `API-005`, `API-008`, `API-009`, `CR-014`, `TASK-028`  
 **最后更新：** 2026-04-23
 
-> 注：本设计文档的“运行时声明视图”方案已被后续破坏性升级收口为 manifest 驱动实现。当前正式事实源以 `api-design.md` 和 `module-config-runtime-data-contract.md` 为准：表、视图、命名查询统一登记在 `module.yaml.data`，SQL 位于 `data/sql/*`，运行时只保留 `ctx.db` fluent API，不再接受旧数据库工具。
+> 注：本设计文档的“运行时声明视图”方案已被后续破坏性升级收口为 0.4.0 装饰器驱动实现。当前正式事实源以 `api-design.md` 和 `module-config-runtime-data-contract.md` 为准：表和命名查询统一由 `@data_table` / `@data_query` 声明并进入 manifest lock，运行时只保留 `ctx.db` fluent API，不再接受旧数据库工具或 `module.yaml.data` 事实源。
 
 ## 1. 背景
 

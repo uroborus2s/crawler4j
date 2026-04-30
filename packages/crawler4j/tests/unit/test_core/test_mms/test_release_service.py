@@ -49,6 +49,24 @@ def test_compare_versions_treats_stable_as_newer_than_prerelease():
     assert service._compare_versions("1.2.0-rc.1", "1.2.0-rc.1") == 0
 
 
+def test_parse_release_rejects_zip_asset_name_path_traversal():
+    service = ModuleReleaseService()
+
+    with pytest.raises(ValueError, match="资产名称"):
+        service._parse_release(
+            "example/demo_module",
+            {
+                "tag_name": "v1.2.0",
+                "assets": [
+                    {
+                        "name": "../demo_module-1.2.0.zip",
+                        "browser_download_url": "https://example.invalid/demo.zip",
+                    }
+                ],
+            },
+        )
+
+
 @pytest.mark.asyncio
 async def test_prepare_dev_link_warns_when_repo_check_fails_but_still_returns_manifest(
     tmp_path: Path,

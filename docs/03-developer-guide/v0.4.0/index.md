@@ -56,5 +56,5 @@
 | 工作流 | `workflows/*.py` 导出 `WORKFLOW` / `run` | `@workflow` 类，构造函数只接收注入对象 |
 | Workflow 参数 | `module.yaml.workflows[].parameters[]` | 移到具体 component 的 `parameters` 或 `object_param(...)` 注解 |
 | 数据表 / 查询 | `module.yaml.data` + `data/sql` | `@data_table` / `@data_query` + manifest lock |
-| 页面 | `pages/*.py` 导出 `PAGE` / handler | 页面仍由宿主 schema 渲染，页面动作接入 `@page_action` |
+| 页面 | `pages/*.py` 使用 `@page` 装饰 load handler | 页面仍由宿主 schema 渲染，菜单由 `@page(menu=True)` 控制，页面动作接入 `@page_action` |
 | Hook / 环境选择器 | `hooks/`、`env_selectors/` 固定导出 | 0.4.x SDK 不提供旧命令；如需等价能力必须走 0.4.0 专属 API 设计 |

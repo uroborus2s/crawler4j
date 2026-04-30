@@ -19,7 +19,7 @@
 | `component` | `component create` `component list` | `@component` 模板 |
 | `workflow` | `workflow create` `workflow list` | `@workflow` 模板 |
 | `page-action` | `page-action create` `page-action list` | `@page_action` 函数 |
-| `page` | `page create` `page list` | Hosted UI 页面 |
+| `page` | `page create` `page list` | `@page` Hosted UI 页面 |
 | `data` | `data table create` `data query create` `data list` | `@data_table` / `@data_query` |
 | `manifest` | `manifest lock` | `.crawler4j/manifest.lock.json` |
 | `migrate` | `migrate native-v2` | v0.3.0 到 v0.4.0 重写迁移报告 |
@@ -82,8 +82,10 @@ uvx --from crawler4j-sdk crawler4j module init demo_module \
 - workflow inject 目标存在
 - component inject 目标存在
 - object graph 无环
-- component parameters 类型合法；`object_param(...)` 可从 `str/int/float/bool` 注解推断类型
+- component parameters 类型合法；`object_param(...)` 可从 `str/int/float/bool`、`Literal[...]`、`list[T]`、`dict[str, T]`、`Optional[T]` / `T | None`、`datetime.date/datetime/time`、`pathlib.Path` 注解推断类型
+- component parameters 支持 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`；`array` 可用 `item_schema` 校验元素，`object` 可用 `schema.fields` / `schema.additional_type` 校验结构
 - workflow 没有 parameters
+- page 使用 `@page(...)` 装饰函数；`menu=True` 进入左侧菜单，`menu=False` 只注册可路由页面
 - page action 是函数或 async 函数
 - data table 字段、索引、query output 不使用宿主保留字段
 - `module.yaml` 不含 v2 禁止字段

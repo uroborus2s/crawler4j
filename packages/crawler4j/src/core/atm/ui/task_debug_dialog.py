@@ -153,7 +153,7 @@ class JobDebugDialog(QDialog):
                 "资源",
                 self._run_profile.resource.acquisition.provider
                 if self._run_profile.resource.acquisition.mode == AcquisitionMode.CREATE
-                else self._run_profile.resource.acquisition.selector_name or "-",
+                else self._run_profile.resource.acquisition.resource_pool or "-",
             ),
             ("获取模式", self._run_profile.resource.acquisition.mode.value),
         ]

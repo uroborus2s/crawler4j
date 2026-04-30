@@ -41,7 +41,6 @@ def _build_request() -> ExecutionRequest:
         job_params={},
         runtime_params={},
         state={"job_id": "job-21", "task_id": "task-21"},
-        selector_name="fixed_pool_selector",
         resource_pool_name="bound_account_ready",
         acquisition_mode=AcquisitionMode.SELECT,
         selector_wait_timeout=60,
@@ -57,11 +56,6 @@ def _build_module_service(selector_hook=None):
         run_module=AsyncMock(return_value="ok"),
         call_hook=AsyncMock(side_effect=selector_hook or default_hook),
     )
-
-    async def run_env_selector(module_name, selector_name, context, candidates):
-        return await service.call_hook(module_name, "select_env", context, candidates, selector_name)
-
-    service.run_env_selector = AsyncMock(side_effect=run_env_selector)
     return service
 
 
@@ -149,12 +143,7 @@ async def test_execution_runner_fixed_pool_requeues_when_selected_candidate_disa
     request = _build_request()
     env, lease = _build_env()
 
-    async def hook(module_name, hook_name, context, *args):
-        if hook_name == "select_env":
-            return env.id
-        return None
-
-    module_service = _build_module_service(hook)
+    module_service = _build_module_service()
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service, env_lookup=None)
     rem.get_env = AsyncMock(return_value=None)
 
@@ -175,12 +164,7 @@ async def test_execution_runner_fixed_pool_fails_when_lease_acquire_raises():
     request.task.waiting_since = 1_710_000_090
     env, lease = _build_env()
 
-    async def hook(module_name, hook_name, context, *args):
-        if hook_name == "select_env":
-            return env.id
-        return None
-
-    module_service = _build_module_service(hook)
+    module_service = _build_module_service()
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
     rem.lease_manager.acquire = AsyncMock(side_effect=RuntimeError("lease failed"))
 
@@ -203,12 +187,7 @@ async def test_execution_runner_fixed_pool_requeues_when_selected_env_is_taken(m
     request.task.waiting_since = 1_710_000_090
     env, lease = _build_env()
 
-    async def hook(module_name, hook_name, context, *args):
-        if hook_name == "select_env":
-            return env.id
-        return None
-
-    module_service = _build_module_service(hook)
+    module_service = _build_module_service()
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
     rem.lease_manager.acquire = AsyncMock(
         side_effect=EnvUnavailableError("环境 21 已被占用", stage="LEASE")
@@ -234,12 +213,7 @@ async def test_execution_runner_fixed_pool_requeues_when_pool_card_turns_ineligi
     request.task.waiting_since = 1_710_000_090
     env, lease = _build_env()
 
-    async def hook(module_name, hook_name, context, *args):
-        if hook_name == "select_env":
-            return env.id
-        return None
-
-    module_service = _build_module_service(hook)
+    module_service = _build_module_service()
     runner, rem = _build_runner(
         env=env,
         lease=lease,

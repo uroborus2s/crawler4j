@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Callable
 
 from PyQt6.QtCore import Qt
@@ -40,6 +41,12 @@ def _runtime_surface_full():
     from src.core.atm.runtime_capabilities import RUNTIME_SURFACE_FULL
 
     return RUNTIME_SURFACE_FULL
+
+
+def _runtime_surface_hosted_ui_action():
+    from src.core.atm.runtime_capabilities import RUNTIME_SURFACE_HOSTED_UI_ACTION
+
+    return RUNTIME_SURFACE_HOSTED_UI_ACTION
 
 
 class ManagedPageRenderer(QWidget):
@@ -829,9 +836,46 @@ class ManagedPageRenderer(QWidget):
         return payload if isinstance(payload, dict) else {}
 
     def _handle_button_action(self, action: dict[str, Any]) -> None:
+        action_type = str(action.get("type") or "").strip()
+        if action_type == "page_action":
+            self._handle_page_action(action)
+            return
         page_id = str(action.get("page_id") or "").strip()
         params = self._resolve_action_params(action, self._payload)
         self._open_page(page_id, params or None)
+
+    def _handle_page_action(self, action: dict[str, Any]) -> None:
+        action_name = str(action.get("name") or "").strip()
+        if not action_name:
+            return
+        params = self._resolve_action_params(action, self._payload)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                self._bridge.call_page_action(
+                    action_name,
+                    params,
+                    capability_surface=_runtime_surface_hosted_ui_action(),
+                )
+            except Exception as exc:
+                MessageDialog.warning(self, "操作失败", str(exc))
+            return
+
+        task = loop.create_task(
+            self._bridge.call_page_action_async(
+                action_name,
+                params,
+                capability_surface=_runtime_surface_hosted_ui_action(),
+            )
+        )
+        task.add_done_callback(self._handle_page_action_task_result)
+
+    def _handle_page_action_task_result(self, task) -> None:
+        try:
+            task.result()
+        except Exception as exc:
+            MessageDialog.warning(self, "操作失败", str(exc))
 
     def _handle_row_action(self, action: dict[str, Any], row: dict[str, Any]) -> None:
         page_id = str(action.get("page_id") or "").strip()

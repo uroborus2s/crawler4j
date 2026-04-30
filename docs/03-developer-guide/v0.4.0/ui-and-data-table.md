@@ -4,41 +4,31 @@
 
 0.4.0 的 UI 仍由宿主渲染，页面源码仍放在 `pages/`。变化在数据和动作来源：
 
-- 页面 schema 来自页面文件
+- 页面 schema 来自 `@page` 装饰器
 - 页面动作优先调用 `@page_action`
 - 数据表读取 `@data_table` / `@data_query` 注册后的 `ctx.db`
-- `module.yaml.ui_extension.pages[]` 只决定左侧菜单
+- 左侧菜单由 `@page(menu=True)` 决定，`module.yaml` 不再声明 UI
 
 ## 页面入口
-
-```yaml
-ui_extension:
-  pages:
-    - id: dashboard
-      label: Dashboard
-      icon: chart
-```
 
 页面文件：
 
 ```python
-from crawler4j_contracts import PageSpec, TaskContext
+from crawler4j_contracts import TaskContext, page
 
-
-PAGE = PageSpec(
-    id="dashboard",
+@page(
+    name="dashboard",
     label="Dashboard",
+    icon="chart",
+    menu=True,
     schema={
         "type": "Page",
         "title": "Dashboard",
-        "load_handler": "load_dashboard_page",
         "children": [
             {"type": "Text", "style": "title", "binding": "title"},
         ],
     },
 )
-
-
 def load_dashboard_page(
     context: TaskContext,
     page_id: str,
@@ -50,8 +40,10 @@ def load_dashboard_page(
 
 菜单和路由是两件事：
 
-- 写入 `ui_extension.pages[]`：出现在左侧菜单
-- 只导出 `PAGE`：可通过 `open_page.page_id` 打开，但不进菜单
+- `@page(menu=True)`：页面进入左侧菜单，也可路由打开
+- `@page(menu=False)`：页面可通过 `open_page.page_id` 打开，但不进菜单
+
+`@page` 装饰的函数就是页面 `load_handler`。如需显式写 `schema["load_handler"]`，它必须与被装饰函数名一致。
 
 ## 页面动作
 

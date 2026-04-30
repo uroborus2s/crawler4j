@@ -4,7 +4,7 @@
 - 当前阶段：IMPLEMENTATION
 - 活跃任务：1
 - 活跃变更：1
-- 活跃缺陷：5
+- 活跃缺陷：0
 - 活跃 PR：0
 
 - 角色目录总数：9
@@ -17,6 +17,9 @@
 
 ## 最近条目
 
+- 最新开发：2026-04-30 已完成 0.4.0 破坏性重构首轮开发-测试-审查闭环。最终范围包括：ATM/Debug 移除 `selector_name/env_selector` 运行路径并强制 `resource_pool/env_id`；Contracts 根导出保留 `@page`、移除 `PageSpec/specs`；SDK/CLI 清除 `module.yaml.ui_extension` 页面登记兼容路径；Hosted UI `page_action` 改为 kwargs 调用并限制到 `hosted_ui_action` 能力面；Core v2 workflow 在异常路径也会恢复 `_page_action_executor`；DevLink 才强制 reload descriptor；外部模块 manifest lock 会拒绝 ignored 目录内的 symlink；`ObjectContainerV2` 会拒绝拼写错误的 `object_bindings` 注入路径。最终验证：`uv run pytest packages/crawler4j/tests -q` => `874 passed`；`uv run ruff check packages/crawler4j packages/crawler4j-sdk packages/crawler4j-contracts` => 通过。
+- 最新开发：2026-04-30 已完成 0.4.0 Hosted UI 破坏性收口到注解模式。`crawler4j-contracts` 新增根导出 `@page(...)` 并移除 `PageSpec` 公共入口；SDK/CLI/manifest lock/Core v2 descriptor 已把 `pages/` 纳入装饰器扫描，`module.yaml.ui_extension` 被视为已移除字段；页面菜单改由 `@page(menu=True)` 控制，`menu=False` 页面仍可通过 `open_page.page_id` 路由。开发者指南、Hosted UI 设计文档与 memory 已同步到注解模式。阶段性验证：SDK 全量单测 `174 passed`，Contracts/scanner/Core v2 descriptor 聚焦 `24 passed`，SDK CLI/MMS manifest 聚焦 `44 passed`，Hosted UI runtime/detail/renderer/card/scroll 拆分回归 `42 passed`，CLI integration + acceptance `18 passed`，相关目录 `ruff check` 与 `git diff --check` 通过。
+- 最新开发：2026-04-30 已扩展 0.4.0 v2 component 对象参数类型。`ParameterSpec` 新增 `schema` / `item_schema`，`object_param(...)` 支持 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`；Contracts 运行时注解和 SDK 静态 scanner 可从 `Literal[...]`、`list[T]`、`dict[str, T]`、`Optional[T]` / `T | None`、`datetime.date/datetime/time`、`pathlib.Path` 推断类型；Core `ObjectContainerV2` 会校验并归一 ISO 日期/时间、路径、数组、对象、URL、secret 和 JSON-like 值。开发者指南、SDK/Contracts README、SDK 模板与 memory 已同步。阶段性验证：聚焦 v2 contracts/scanner/container `41 passed`，Core v2 descriptor/container `27 passed`，相关文件 `ruff check` 与 `git diff --check` 通过；后续 Hosted UI 注解模式收口已覆盖当时的页面契约漂移。
 - 最新开发：2026-04-30 已补齐 0.4.0 v2 对象装配的类属性注解与 `__init__` 参数注解入口。`crawler4j-contracts` 新增并导出 `object_param(...)` / `object_inject(...)`，会把类属性或构造函数参数上的 `Annotated[..., object_param/object_inject]` 归一到既有 `ParameterSpec` / `InjectSpec`；SDK v2 scanner 静态解析同一语法并写入 manifest lock；Core descriptor/container 使用归一后的元数据完成对象注入和对象参数校验。装饰器参数写法继续兼容。本轮验证：SDK 单测 `171 passed`、Core v2 descriptor/container `20 passed`、acceptance `19 passed`、SDK CLI integration `11 passed`、相关目录 `ruff check` 与 `git diff --check` 通过。
 - 最新文档：2026-04-30 已完成开发者指南版本分流和 0.4.0 开发版正文编制。`docs/03-developer-guide/index.md` 现在只做版本选择；0.3.0 稳定指南已冻结到 `docs/03-developer-guide/v0.3.0/`；0.4.0 开发者指南已写入 `docs/03-developer-guide/v0.4.0/`，固定讲 `core-native-v2` 装饰器对象装配、workflow 无 parameters、component object params、`@page_action`、`@data_table/@data_query`、manifest lock、SDK/Contracts/Core 边界、`ctx.db` 唯一数据库入口和宿主保留字段诊断。0.4.0 文档口径已收口为 SDK / Contracts / Core 按产品线绑定，0.4.x SDK / Contracts 只服务 Core 0.4.0，不兼容 0.3.x 命令、模板或开发模式。根 `docs/index.md` 与 `.factory/memory/doc-map.md` 已同步开发者指南版本路径。
 - 最新开发：2026-04-30 已完成 0.4.0 SDK / Contracts / Core 破坏性升级首轮实施：源码版本线统一为 `crawler4j 0.4.0`、`crawler4j-sdk 0.4.0`、`crawler4j-contracts 0.4.0`；Contracts 根导出 v2 装饰器并移除根导出的 `TaskSpec/WorkflowSpec/EnvSelectorSpec`；SDK CLI、模板、scanner、`check full`、manifest lock、package build/verify 已切到 `core-native-v2`，不再暴露 0.3.x `task/env-selector/hook/data resource` 主命令；Core MMS 已新增 `ModuleRuntimeDescriptorV2/load_runtime_descriptor_v2`，Core `ModuleScanner` / DevLink / install preflight 已接受 v2 清单并拒绝旧 `module.yaml.data/workflows/default_workflow` 运行事实源；`ObjectContainerV2` 已具备单次对象图装配、实例隔离和 object params 类型/enum/min/max/未知字段校验。当前阶段门禁 `acceptance + unit SDK + Core v2 descriptor/container` 为 `202 passed`，ruff 与 `git diff --check` 通过。本分支只服务 Core 0.4.0，旧 SDK / Contracts 版本在 0.3.x 分支维护。

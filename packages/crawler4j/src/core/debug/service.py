@@ -86,7 +86,6 @@ class DebugService:
             object_params=dict(target.object_params),
             hooks_module=target.hooks_module,
             provider=target.run_profile.resource.acquisition.provider,
-            selector_name=target.run_profile.resource.acquisition.selector_name,
             acquisition_mode=target.run_profile.resource.acquisition.mode,
             creation_params=dict(target.run_profile.resource.acquisition.creation.params),
             creation_lifecycle=(

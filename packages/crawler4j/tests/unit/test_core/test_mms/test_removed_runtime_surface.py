@@ -3,9 +3,6 @@ from pathlib import Path
 
 import pytest
 
-import crawler4j_contracts.specs as contract_specs
-
-
 def _assert_removed_module(module_name: str) -> None:
     with pytest.raises(ModuleNotFoundError) as exc_info:
         importlib.import_module(module_name)
@@ -70,7 +67,4 @@ def test_removed_legacy_runtime_and_ui_surface_stays_unavailable():
 
 
 def test_legacy_declaration_specs_are_removed_from_contracts_package():
-    assert not hasattr(contract_specs, "TaskSpec")
-    assert not hasattr(contract_specs, "WorkflowSpec")
-    assert not hasattr(contract_specs, "EnvSelectorSpec")
-    assert hasattr(contract_specs, "PageSpec")
+    _assert_removed_module("crawler4j_contracts.specs")

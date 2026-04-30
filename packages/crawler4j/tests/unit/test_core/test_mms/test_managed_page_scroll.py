@@ -40,7 +40,6 @@ def test_managed_page_renderer_hides_vertical_scrollbar_when_page_scroll_is_hidd
         declared_page={
             "type": "Page",
             "title": "今日运营看板",
-            "load_handler": "load_dashboard_page",
             "scroll": {"vertical": "hidden"},
             "children": [{"type": "Text", "style": "title", "text": "今日运营看板"}],
         },
@@ -59,7 +58,6 @@ def test_managed_page_renderer_uses_vertical_auto_scroll_by_default(qtbot, monke
         declared_page={
             "type": "Page",
             "title": "今日运营看板",
-            "load_handler": "load_dashboard_page",
             "children": [{"type": "Text", "style": "title", "text": "今日运营看板"}],
         },
     )
@@ -77,7 +75,6 @@ def test_managed_page_renderer_uses_vertical_auto_scroll_when_declared(qtbot, mo
         declared_page={
             "type": "Page",
             "title": "今日运营看板",
-            "load_handler": "load_dashboard_page",
             "scroll": {"vertical": "auto"},
             "children": [{"type": "Text", "style": "title", "text": "今日运营看板"}],
         },

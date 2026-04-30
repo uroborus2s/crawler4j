@@ -34,8 +34,8 @@
 | 项目 | 内容 |
 |---|---|
 | 目录 | `packages/crawler4j/modules/README.md`（仓内占位）、`<app-data>/modules`（正式安装）、DevLink 源码目录（开发调试） |
-| 职责 | 定义模块根目录、`module.yaml`（含只读 `config_defaults` 初始化模板）、根 `__init__.py`、任务、工作流与宿主管理 UI 声明的运行边界 |
-| 对外接口 | `tasks/*.py` / `workflows/*.py` / `hooks/*.py` / `env_selectors/*.py` / `pages/*.py` 的 `Spec + handler` 导出 |
+| 职责 | 定义模块根目录、`module.yaml`（含只读 `config_defaults` 初始化模板）、根 `__init__.py`、装饰器声明与宿主管理 UI 声明的运行边界 |
+| 对外接口 | `interfaces/*.py` / `objects/*.py` / `workflows/*.py` / `tasks/*.py` / `data/*.py` / `pages/*.py` 的 v2 装饰器声明 |
 | 依赖 | `crawler4j_contracts`, Core runtime |
 | 不负责 | Core 基础设施、SDK 公共契约、宿主内部 `PyQt6` 组件实现 |
 
@@ -48,9 +48,9 @@
 当前最小演进边界：
 
 - 根 `__init__.py` 只保留普通 Python 包入口，不再承载宿主入口、`run()` 或兼容桥。
-- 任务/工作流/hook/环境选择器/页面由 Core 直接扫描固定目录并生成 runtime descriptor，不再由 SDK 统一入口组装器提供。
-- 模块级可变行为放在 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`，不再要求模块作者维护 `module_runtime.py`。
-- 模块 UI 不再导出 `QWidget` 或 `ui:*` 页面类；模块只能通过 `pages/*.py` / `pages/<group>/*.py` 导出的 `PageSpec` 和页面 handler 声明 Hosted UI。
+- interface、component、workflow、page action、data、page 由 Core 直接扫描固定目录并生成 v2 runtime descriptor，不再由 SDK 统一入口组装器提供。
+- 模块级可变行为放在 `interfaces/`、`objects/`、`workflows/`、`tasks/`、`data/`、`pages/`，不再要求模块作者维护 `module_runtime.py`。
+- 模块 UI 不再导出 `QWidget` 或 `ui:*` 页面类；模块只能通过 `pages/*.py` / `pages/<group>/*.py` 中的 `@page(...)` 声明 Hosted UI。
 - 宿主允许模块使用的公开 UI 面固定为最小化 UI 框架 V1，而不是开放任意 `PyQt6` 组件能力。
 - 旧模块不再作为新契约的兼容目标；升级时统一按最新模板重新初始化模块骨架。
 

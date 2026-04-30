@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from datetime import date, datetime, time
+from pathlib import Path
+from typing import Annotated, Literal
 
 import pytest
 
@@ -20,6 +22,7 @@ from crawler4j_contracts import (
     interface,
     object_inject,
     object_param,
+    page,
     page_action,
     workflow,
 )
@@ -61,6 +64,15 @@ def test_v2_decorators_attach_metadata_without_instantiating_business_objects():
     async def open_login_page(ctx, url: str):
         return {"url": url}
 
+    @page(
+        name="dashboard",
+        label="Dashboard",
+        icon="chart",
+        schema={"type": "Page", "title": "Dashboard", "children": []},
+    )
+    def load_dashboard_page(ctx, page_id: str, params: dict | None = None):
+        return {"page_id": page_id}
+
     assert instantiated == {"component": 0, "workflow": 0}
     assert getattr(Labor, CRAWLER4J_META_ATTR) == Crawler4jMeta(
         kind="interface",
@@ -84,6 +96,14 @@ def test_v2_decorators_attach_metadata_without_instantiating_business_objects():
         inject=(InjectSpec(name="labor", type="interface", target="labor"),),
     )
     assert getattr(open_login_page, CRAWLER4J_META_ATTR).kind == "page_action"
+    assert getattr(load_dashboard_page, CRAWLER4J_META_ATTR) == Crawler4jMeta(
+        kind="page",
+        name="dashboard",
+        label="Dashboard",
+        icon="chart",
+        menu=True,
+        page_schema={"type": "Page", "title": "Dashboard", "children": []},
+    )
 
 
 def test_data_table_and_query_metadata_express_schema_indexes_and_output_schema():
@@ -183,6 +203,44 @@ def test_component_and_workflow_merge_class_and_init_annotation_metadata():
     assert getattr(QuizWorkflow, CRAWLER4J_META_ATTR).inject == (
         InjectSpec(name="labor", type="interface", target="labor"),
     )
+
+
+def test_object_param_annotation_infers_extended_builtin_types():
+    @component(name="api_labor", implements="labor")
+    class ApiLabor:
+        start_date: Annotated[date, object_param()]
+        mode: Annotated[Literal["sync", "async"], object_param(default="sync")]
+        tags: Annotated[list[str], object_param(default=["default"])]
+        limits: Annotated[dict[str, int], object_param(default={"daily": 10})]
+        download_dir: Annotated[Path, object_param()]
+        optional_count: Annotated[int | None, object_param()]
+
+        def __init__(
+            self,
+            deadline: Annotated[datetime, object_param()],
+            run_at: Annotated[time, object_param()],
+        ) -> None:
+            self.deadline = deadline
+            self.run_at = run_at
+
+    parameters = {item.name: item for item in getattr(ApiLabor, CRAWLER4J_META_ATTR).parameters}
+
+    assert parameters["start_date"].type == "date"
+    assert parameters["start_date"].required is True
+    assert parameters["deadline"].type == "datetime"
+    assert parameters["run_at"].type == "time"
+    assert parameters["download_dir"].type == "path"
+    assert parameters["tags"].type == "array"
+    assert parameters["tags"].item_schema == {"type": "string"}
+    assert parameters["limits"].type == "object"
+    assert parameters["limits"].schema == {"additional_type": "integer"}
+    assert parameters["optional_count"].type == "integer"
+    assert parameters["optional_count"].required is False
+    assert parameters["mode"].type == "enum"
+    assert [(item.label, item.value) for item in parameters["mode"].options] == [
+        ("sync", "sync"),
+        ("async", "async"),
+    ]
 
 
 def test_host_reserved_data_fields_are_exported_for_sdk_and_core_validation():

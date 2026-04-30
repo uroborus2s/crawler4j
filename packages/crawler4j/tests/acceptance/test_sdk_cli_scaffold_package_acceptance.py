@@ -49,18 +49,7 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
         "pytest>=9.0.2",
         "pytest-asyncio>=1.3.0",
     ]
-    assert manifest["ui_extension"]["pages"] == [
-        {
-            "id": "dashboard",
-            "label": "Dashboard",
-            "icon": "📄",
-        },
-        {
-            "id": "accounts",
-            "label": "Accounts",
-            "icon": "📄",
-        },
-    ]
+    assert "ui_extension" not in manifest
 
     members = archive_members(built_archive)
     assert "demo_model/module.yaml" in members
@@ -106,13 +95,7 @@ def test_sdk_cli_scaffold_supports_grouped_page_source_layout_acceptance(module_
     verify_result.assert_ok()
 
     manifest = load_manifest(module_root)
-    assert manifest["ui_extension"]["pages"] == [
-        {
-            "id": "account_detail",
-            "label": "Account Detail",
-            "icon": "📄",
-        }
-    ]
+    assert "ui_extension" not in manifest
 
     members = archive_members(archive_path)
     assert "demo_model/pages/account/detail.py" in members

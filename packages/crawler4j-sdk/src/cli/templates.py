@@ -157,6 +157,7 @@ uv run crawler4j package build
 - `crawler4j-sdk` 只作为 CLI / 校验 / 开发辅助存在。
 - Core 会自行扫描 v2 装饰器生成运行时 descriptor，不会调用模块根 `run()` 或 `declare_ui()`。
 - 对象依赖和 component 参数可以写在装饰器参数里，也可以写成 `Annotated[..., object_inject(...)]` / `Annotated[..., object_param(...)]`。
+- `object_param(...)` 支持标量、enum、array、object、json、date/datetime/time、url、path、secret，并可从常见 Python 注解推断类型。
 - 表与命名查询统一由装饰器声明；旧 `module.yaml.data` 已不再是 0.4.x 运行契约。
 """
 
@@ -205,8 +206,6 @@ upgrade_source:
   allow_prerelease: false
 config_defaults:
   module: {{}}
-ui_extension:
-  pages: []
 """
 
 MODEL_INTERFACES_INIT_TEMPLATE = '"""v2 接口声明集合。"""\n'
@@ -280,6 +279,7 @@ def render_page_template(
     page_id: str,
     display_name: str,
     description: str,
+    menu: bool = True,
 ) -> str:
     return '''"""Hosted UI 页面: {display_name}
 
@@ -288,16 +288,17 @@ def render_page_template(
 
 from __future__ import annotations
 
-from crawler4j_contracts import PageSpec, TaskContext
+from crawler4j_contracts import TaskContext, page
 
-PAGE = PageSpec(
-    id="{page_id}",
+
+@page(
+    name="{page_id}",
     label="{display_name}",
     icon="📄",
+    menu={menu},
     schema={{
         "type": "Page",
         "title": "{display_name}",
-        "load_handler": "load_{page_id}_page",
         "layout": {{"direction": "column", "gap": 16}},
         "children": [
             {{
@@ -321,8 +322,6 @@ PAGE = PageSpec(
         ],
     }},
 )
-
-
 def load_{page_id}_page(
     context: TaskContext,
     page_id: str,
@@ -338,4 +337,5 @@ def load_{page_id}_page(
         page_id=page_id,
         display_name=display_name,
         description=description,
+        menu=menu,
     )

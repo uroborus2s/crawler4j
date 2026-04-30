@@ -33,23 +33,30 @@ class CreationConfig(BaseModel):
 
 
 class AcquisitionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     mode: AcquisitionMode = Field(default=AcquisitionMode.CREATE)
     provider: str = Field(default="virtualbrowser")
     env_type: EnvType = Field(default=EnvType.VIRTUAL_BROWSER)
     env_id: int | None = Field(default=None, ge=1)
-    selector_name: str = Field(default="")
     resource_pool: str = Field(default="")
     wait_timeout: int = Field(default=60, ge=0)
     creation: CreationConfig = Field(default_factory=CreationConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_selector_fields(cls, data):
+        if isinstance(data, dict) and "selector_name" in data:
+            raise ValueError("selector_name/env_selector 已在 0.4.0 移除，请使用 resource_pool 或 env_id")
+        return data
 
     @model_validator(mode="after")
     def _validate_mode_specific_fields(self) -> "AcquisitionConfig":
         if self.mode == AcquisitionMode.SELECT:
             has_env_id = self.env_id is not None
-            has_selector = bool(self.selector_name.strip())
             has_resource_pool = bool(self.resource_pool.strip())
-            if not has_env_id and not has_selector and not has_resource_pool:
-                raise ValueError("selector_name or resource_pool or env_id is required when acquisition.mode=select")
+            if not has_env_id and not has_resource_pool:
+                raise ValueError("resource_pool or env_id is required when acquisition.mode=select")
         if self.mode == AcquisitionMode.CREATE and not self.provider.strip():
             raise ValueError("provider is required when acquisition.mode=create")
         return self

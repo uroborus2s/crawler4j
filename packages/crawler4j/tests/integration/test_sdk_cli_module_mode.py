@@ -128,14 +128,13 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
         "repo": "demo/demo_model",
         "allow_prerelease": False,
     }
-    assert manifest["ui_extension"]["pages"] == [
-        {"id": "dashboard", "label": "Dashboard", "icon": "📄"},
-        {"id": "accounts", "label": "Accounts", "icon": "📄"},
-    ]
+    assert "ui_extension" not in manifest
     lock = json.loads((target / ".crawler4j" / "manifest.lock.json").read_text(encoding="utf-8"))
     lock_names = {(item["kind"], item["name"]) for item in lock["declarations"]}
     assert ("page_action", "extra_task") in lock_names
     assert ("workflow", "repair_orders") in lock_names
+    assert ("page", "dashboard") in lock_names
+    assert ("page", "accounts") in lock_names
 
     with zipfile.ZipFile(archive) as zf:
         members = set(zf.namelist())
@@ -198,17 +197,20 @@ def test_cli_check_and_package_reject_legacy_module_runtime(tmp_path: Path):
     assert "core-native-v2 模块不允许保留旧运行时薄壳: module_runtime.py" in package_result.stdout
 
 
-def test_cli_check_full_rejects_manifest_page_missing_page_file(tmp_path: Path):
+def test_cli_check_full_rejects_removed_manifest_ui_extension(tmp_path: Path):
     target = tmp_path / "demo_model"
     _init_demo_module(target)
 
-    page_result = _run_cli("page", "create", "dashboard", cwd=target)
-    assert page_result.returncode == 0, page_result.stderr
-    (target / "pages" / "dashboard.py").unlink()
+    manifest_path = target / "module.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["ui_extension"] = {
+        "pages": [{"id": "dashboard", "label": "Dashboard", "icon": "📄"}],
+    }
+    manifest_path.write_text(yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
     check_result = _run_cli("check", "full", cwd=target)
     assert check_result.returncode == 1
-    assert "module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: dashboard" in check_result.stdout
+    assert "module.yaml 不再允许声明 ui_extension" in check_result.stdout
 
 
 def test_cli_check_full_accepts_page_source_not_registered_as_menu_entry(tmp_path: Path):
@@ -233,7 +235,7 @@ def test_cli_check_full_accepts_page_source_not_registered_as_menu_entry(tmp_pat
 
     with (target / "module.yaml").open("r", encoding="utf-8") as fh:
         manifest = yaml.safe_load(fh)
-    assert manifest["ui_extension"]["pages"] == []
+    assert "ui_extension" not in manifest
     assert (target / "pages" / "account" / "detail.py").exists()
     with zipfile.ZipFile(archive) as zf:
         members = set(zf.namelist())
@@ -264,9 +266,7 @@ def test_cli_page_create_supports_grouped_source_layout_and_packaging(tmp_path: 
 
     with (target / "module.yaml").open("r", encoding="utf-8") as fh:
         manifest = yaml.safe_load(fh)
-    assert manifest["ui_extension"]["pages"] == [
-        {"id": "account_detail", "label": "Account Detail", "icon": "📄"},
-    ]
+    assert "ui_extension" not in manifest
 
     with zipfile.ZipFile(archive) as zf:
         members = set(zf.namelist())
