@@ -113,6 +113,9 @@ mkdocs:
             - title: 0.4.0 装饰器对象装配需求方案
               path: 04-project-development/03-requirements/0.4.0-decorator-object-assembly-requirements.md
               access: private
+            - title: 0.4.0 使用者/开发者指南版本分流需求方案
+              path: 04-project-development/03-requirements/0.4.0-guide-versioning-requirements.md
+              access: private
             - title: 需求分析
               path: 04-project-development/03-requirements/requirements-analysis.md
               access: private
@@ -150,6 +153,9 @@ mkdocs:
               access: private
             - title: 0.4.0 装饰器对象装配架构方案
               path: 04-project-development/04-design/0.4.0-decorator-object-assembly-architecture.md
+              access: private
+            - title: 0.4.0 使用者/开发者指南版本分流架构方案
+              path: 04-project-development/04-design/0.4.0-guide-versioning-architecture.md
               access: private
         - title: 开发过程文档
           children:

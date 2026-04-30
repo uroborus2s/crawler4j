@@ -20,3 +20,5 @@
   Constraint: host-owned waiting seats, FIFO refill, pool eligibility cards, and queued waiting-timeout closeout are implemented locally.
 - `REQ-0400`: 0.4.0 module runtime must switch to decorator-first object assembly | Priority: P0 | Status: DESIGNED
   Constraint: workflow cannot own parameters; decorators are the runtime capability source of truth, object parameters belong to components, Core assembles one object graph per task/env, SDK/Contracts provide decorators, scanning, validation, migration, manifest lock, and opening-phase reserved host DB field diagnostics.
+- `REQ-0401`: User and developer guides must be versioned for docs-stratego | Priority: P0 | Status: DESIGNED
+  Constraint: website main docs point to the current released guide version; old user/developer guides stay available under versioned paths; unreleased 0.4.0 docs are preview-only until release.

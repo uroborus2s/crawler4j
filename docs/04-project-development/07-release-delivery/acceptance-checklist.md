@@ -6,8 +6,8 @@
 **主要读者：** 发布负责人 | QA | Tech Lead
 **上游输入：** `version-governance.md` | `release-notes.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** `delivery-package.md` | 发布决策 | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
-**关联 ID：** `REL-003`, `REL-004`, `TASK-017`, `REQ-009`, `NFR-003`
-**最后更新：** 2026-04-22
+**关联 ID：** `REL-003`, `REL-004`, `TASK-017`, `REQ-009`, `REQ-0401`, `NFR-003`
+**最后更新：** 2026-04-30
 
 ## 1. 使用范围
 
@@ -27,6 +27,7 @@
 | 业务 | `ctrip` 真实站点 E2E 完成并记录结果 | `ctrip-real-site-e2e-closeout.md` + 真实环境验证记录 | 阻塞（当前只补齐了 DevLink 活跃事实、fresh ZIP 预检与历史登录日志，仍未完成本轮 DevLink + ZIP 双链真实站点闭环） |
 | 业务 | 若本次批次包含固定环境池 Service Job 队列能力，则已验证“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、资源池隔离、等待超时收口和黑号停发号 | `test-plan.md` + 对应测试记录 | 已具备（当前 HEAD 已纳入 `TASK-023` / `REQ-009` 变更，`TC-026` / `TC-027` 本地回归已完成；正式切版时仍需把这组证据绑定到发布批次） |
 | 文档 | 根导航、文档索引、memory 映射同步完成 | `docs/index.md`、`document-index.md`、`.factory/memory/doc-map.md` | 已具备 |
+| 文档 | docs-stratego 主文档指向当前已发布版本，未发布版本只在开发版入口，历史版本入口仍可访问 | `version-governance.md`、`0.4.0-guide-versioning-architecture.md` | 待实施 |
 | 运维 | 部署说明、运行手册、管理员指南可独立阅读 | `deployment-guide.md`、`operations-runbook.md`、`admin-guide.md` | 已具备 |
 | 交付 | 交付包内容、签收对象和阻塞项清楚 | `delivery-package.md` | 待正式发布 |
 
@@ -46,6 +47,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-30 | 增补 docs-stratego 文档主版本 gate：发布前必须确认主入口指向当前已发布版本，历史版本保留，开发中版本不得成为默认主文档 | Codex |
 | 2026-04-22 | 追加 Windows 发布链现状：`package-windows-release` 与 Velopack 宿主更新入口已落地，但正式 gate 仍缺 Windows 真机签名、安装、升级证据，因此结论继续保持 `No-Go` | Codex |
 | 2026-04-21 | 追加本轮 fresh gate：`523 passed`、lint、强化后的 UI smoke 与 workspace build 已复验；MMS 安装回滚与 UI 异步刷新验证已补齐，但 `ctrip` 真站 E2E、远端 release/交付批次闭环与 Windows 桌面包仍阻塞，因此结论继续保持 `No-Go` | Codex |
 | 2026-04-20 | 追加本轮最终 gate 结论：`485 passed`、lint、UI smoke、三包构建与 macOS PyInstaller bundle 已复验，但 `ctrip` 真站 E2E、tag/release、交付批次与 Windows 桌面包仍阻塞，结论继续保持 `No-Go` | Codex |

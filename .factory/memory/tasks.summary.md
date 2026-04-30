@@ -44,3 +44,5 @@
   状态：DONE | 负责人：Codex | 预估：4.0 人/天 | 关联：`CR-014`, `API-009`
 - `TASK-0400-design-decorator-object-assembly-runtime` TASK-0400 形成 0.4.0 装饰器对象装配运行时方案
   状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0400`, `API-012`
+- `TASK-0401-design-versioned-user-developer-guides` TASK-0401 形成 docs-stratego 使用者/开发者指南版本分流方案
+  状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0401`, `API-013`

@@ -4,10 +4,10 @@
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 发布负责人 | Tech Lead | Dev | QA  
-**上游输入：** `packages/crawler4j/pyproject.toml` | Git tag | 子包 `pyproject.toml`  
-**下游输出：** `release-notes.md` | `deployment-guide.md` | `.factory/project.json`  
-**关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `NFR-002`  
-**最后更新：** 2026-04-24  
+**上游输入：** `packages/crawler4j/pyproject.toml` | Git tag | 子包 `pyproject.toml` | docs-stratego 源仓导航
+**下游输出：** `release-notes.md` | `deployment-guide.md` | `docs/index.md` | `.factory/project.json`
+**关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `REQ-0401`, `NFR-002`
+**最后更新：** 2026-04-30
 
 ## 1. 规则
 
@@ -19,6 +19,8 @@
    - 当前工作区版本
    - 最近一次正式发布 tag
    - SDK / Contracts 当前发布版本
+6. docs-stratego 网站主文档必须指向当前已发布版本的使用者指南和开发者指南，不得默认指向未发布的开发中版本。
+7. 旧版本使用者指南和开发者指南必须保留在版本目录中，通过历史版本入口继续访问。
 
 ## 2. 当前版本事实
 
@@ -29,6 +31,7 @@
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
 | SDK | `0.6.1` | 当前工作区 SDK 版本；CLI 命令树、脚手架与开发者文档已同步到 `0.6.1`，正式 build/publish 证据待补 |
 | Contracts | `0.4.0` | 当前工作区 Contracts 版本；共享契约与 SDK / Core README、发布文档口径已同步收口，正式 build/publish 证据待补 |
+| docs-stratego 主文档版本 | `0.3.0` | 当前发布版本的使用者指南和开发者指南应作为站点主入口；0.4.0 未发布前只能作为开发版 / 预览版入口 |
 
 ## 3. 为什么这样定义
 
@@ -46,6 +49,7 @@
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
 6. 为根应用补打对应 `0.3.2` Git tag 与正式 release 资产
+7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
 
@@ -58,3 +62,4 @@
 | 2026-04-24 | 修正版本治理与发布文档的事实漂移：根应用 / 运行时更新到 `0.3.1`，最近正式 tag 更新为 `v0.2.0`，SDK / Contracts 当前版本同步为 `0.5.2` / `0.3.0` | Codex |
 | 2026-04-27 | 同步当前源码版本线：根应用 / 运行时保持 `0.3.1`，最近正式 tag 保持 `v0.2.0`，SDK / Contracts 当前版本同步为 `0.6.1` / `0.4.0`；本轮仍缺当前版本 build/publish 证据 | Codex |
 | 2026-04-29 | 将根应用当前源码版本提升到 `0.3.2`，同步 README / `.factory` / release 文档口径，并要求后续正式发布按 `0.3.2` 重新补齐 build、桌面打包与交付证据 | Codex |
+| 2026-04-30 | 补充 docs-stratego 文档版本治理：站点主文档必须指向当前已发布版本，旧版本使用者/开发者指南保留为历史版本入口，未发布版本只能作为开发版预览 | Codex |

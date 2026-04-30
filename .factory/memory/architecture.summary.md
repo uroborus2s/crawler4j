@@ -11,6 +11,7 @@ Current architecture facts:
 - Builtin business modules have been removed; real modules come from installed packages or DevLink source directories.
 - Module projects run inside the host runtime, not their own virtualenv.
 - Core is now the sole runtime owner. External modules are loaded from module directories through `module.yaml` plus host-side runtime descriptor scanning, not through a module-owned assembler.
+- 0.4.0 documentation architecture direction keeps project-development docs unversioned, but versions user/developer guides for docs-stratego: current released guides become the website main docs, archived guides stay accessible, and unreleased 0.4.0 guides are preview-only.
 
 Current module runtime architecture:
 

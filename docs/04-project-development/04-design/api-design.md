@@ -6,7 +6,7 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-0400`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-0400`
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-0400`, `TASK-0401`
 **最后更新：** 2026-04-30
 
 ## `API-001` Root App Entry Contract
@@ -95,6 +95,23 @@
 | 关联文档 | `0.4.0-decorator-object-assembly-requirements.md`, `0.4.0-decorator-object-assembly-architecture.md` |
 | 当前状态 | 方案已形成，Core / SDK / Contracts 实施待拆分 |
 | 关联项 | `REQ-0400`, `TASK-0400` |
+
+## `API-013` Versioned User / Developer Guide Contract
+
+| 项目 | 内容 |
+|---|---|
+| 目标 | docs-stratego 网站主文档默认展示当前已发布版本，同时保留旧版本使用者指南和开发者指南 |
+| 范围 | 仅覆盖 `docs/02-user-guide/` 和 `docs/03-developer-guide/` |
+| 版本路径 | `docs/02-user-guide/v<version>/`、`docs/03-developer-guide/v<version>/` |
+| 根入口 | `docs/02-user-guide/index.md` 与 `docs/03-developer-guide/index.md` 只作为版本选择页，不承载具体操作步骤 |
+| 站点主文档 | `docs/index.md` 的 docs-stratego 导航中，“当前发布版本”必须指向 `site_role=main` 的版本 |
+| 开发版入口 | 未发布版本使用 `status=development`、`site_role=preview`，只能出现在“开发中版本”导航组 |
+| 历史版本 | 旧版本使用 `status=archived`、`site_role=archive`，目录保留，不删除，不覆盖 |
+| 版本元数据 | 每个版本目录包含 `version.yaml`，至少记录 `doc_version/product_version/status/site_role/runtime_api/audience` |
+| 发布提升动作 | 新版本发布时，只调整 `version.yaml` 和根导航分组；旧版本目录转入历史入口 |
+| 设计文档 | `0.4.0-guide-versioning-architecture.md` |
+| 当前状态 | 方案已形成，目录迁移待实施 |
+| 关联项 | `REQ-0401`, `TASK-0401` |
 
 ## `API-005` Module Config / Runtime / Data Contract
 
@@ -194,6 +211,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-04-30 | 新增 `API-013`，登记 docs-stratego 下使用者指南和开发者指南按版本分流、主文档指向当前发布版本、历史版本保留的契约 | Codex |
 | 2026-04-30 | 新增 `API-012`，登记 0.4.0 装饰器对象装配运行时、SDK 打开阶段诊断和宿主保留字段校验契约 | Codex |
 | 2026-04-24 | 将 Hosted UI 页面契约修正为 `pages/` 注册可路由页面、`ui_extension.pages[]` 只控制左侧菜单，并允许 `open_page` 跳转到非菜单详情页 | Codex |
 | 2026-04-22 | 将 `API-008` 从“设计已定未落地”更新为 hosted page V1 已本地实现：`ui_extension.pages[]`、`ui.declare_page`、宿主页渲染器与 SDK CLI 已同步完成 | Codex |
