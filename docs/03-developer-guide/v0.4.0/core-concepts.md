@@ -18,7 +18,7 @@ Core 负责：
 - 为每个 task/env 创建独立对象容器
 - 实例化 workflow
 - 注入 `TaskContext`
-- 调度 page action、Hook、环境和数据库能力
+- 调度 page action、环境和数据库能力
 - 按依赖反向顺序清理 `close()` / `aclose()`
 
 Core 可以缓存元数据、类引用和依赖图，但不能预创建业务对象实例。

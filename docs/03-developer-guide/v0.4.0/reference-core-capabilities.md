@@ -125,46 +125,11 @@ event_id = ctx.db.audit("account_events").append(
 
 `ctx.tools` 不注册 `db.*`。数据库能力全部走 `ctx.db`。
 
-## 生命周期 Hook
+## 生命周期与环境
 
-Hook 仍由宿主调度。每个 Hook 文件导出：
+0.4.0 不再把 `hooks/`、`env_selectors/` 或 `EnvSelectorSpec` 作为 SDK / Contracts 主路径。生命周期、环境选择和资源等待由 Core 0.4.0 的运行模板、对象容器和宿主调度负责；模块侧只声明 `@workflow`、`@component`、`@page_action`、`@data_table` 与 `@data_query`。
 
-```python
-async def handle(context: TaskContext):
-    ...
-```
-
-常见 Hook：
-
-- `prepare_env`
-- `init_env`
-- `before_run`
-- `on_success`
-- `on_failure`
-- `on_timeout`
-- `on_cleanup`
-
-`on_cleanup` 是 best-effort。任务已暂停或中止时，不要从 cleanup 再启动新的 page action 或旧子任务。
-
-## 环境选择器
-
-环境选择器仍用于宿主环境选择：
-
-```python
-from crawler4j_contracts import EnvCandidate, EnvSelectorSpec, TaskContext
-
-SELECTOR = EnvSelectorSpec(name="pick_ready")
-
-def select(context: TaskContext, candidates: list[EnvCandidate]):
-    ...
-```
-
-返回：
-
-- `env_id`：宿主绑定环境
-- `None`：当前轮未选中
-
-当作业配置 `resource_pool` 时，`None` 进入等待语义；没有资源池时按失败处理。
+如果历史模块仍依赖 `hooks/*.py`、`env_selectors/*.py`、`TaskSpec` 或 `WorkflowSpec`，它属于 0.3.x 维护线，需要在 0.3.x 分支处理，不在当前 0.4.x SDK / Contracts 中兼容。
 
 ## Hosted UI
 

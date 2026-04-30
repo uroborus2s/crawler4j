@@ -21,10 +21,6 @@ hotel_demo/
 │   └── *.py
 ├── data/
 │   └── *.py
-├── hooks/
-│   └── *.py
-├── env_selectors/
-│   └── *.py
 └── pages/
     ├── *.py
     └── <group>/
@@ -42,13 +38,11 @@ hotel_demo/
 | `workflows/*.py` | `@workflow` workflow 类 |
 | `tasks/*.py` | `@page_action` 页面操作纯函数 |
 | `data/*.py` | `@data_table`、`@data_query` 数据契约 |
-| `hooks/*.py` | 生命周期 Hook |
-| `env_selectors/*.py` | 环境选择器 |
 | `pages/*.py` / `pages/<group>/*.py` | Hosted UI 页面 schema 与 handler |
 
 `tasks/` 在 v2 中承载 page action。保留这个目录名是为了迁移和工程习惯，但它不再表示 v1 `TaskSpec` 任务，也不再承载 `TASK/execute` 主路径。
 
-0.4.x SDK 不生成 `hooks/`、`env_selectors/`、`data/sql` 或 `data/seeds` 作为运行能力事实源。旧目录只可能出现在迁移前的历史模块中，迁移完成后不能作为 0.4.0 主路径保留。
+0.4.x SDK 不生成 `hooks/`、`env_selectors/`、`data/sql` 或 `data/seeds` 作为运行能力事实源。当前分支只支持 0.4.0 的 `core-native-v2` 主路径，旧目录需要在 0.3.x 分支维护。
 
 ## `module.yaml` 最小示例
 
