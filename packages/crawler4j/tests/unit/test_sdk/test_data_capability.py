@@ -162,6 +162,62 @@ def test_task_context_db_supports_named_query_and_replace_plan():
     ]
 
 
+def test_task_context_db_supports_concurrency_safe_write_plans():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.into("accounts").upsert([{"account_id": "A001", "status": "ready"}])
+    ctx.db.into("accounts").update_where({"status": "used"}, where={"account_id": "A001"})
+    ctx.db.into("accounts").delete_where("status", "eq", "expired")
+
+    assert executor.plans == [
+        {
+            "kind": "upsert_records",
+            "resource": "accounts",
+            "records": [{"account_id": "A001", "status": "ready"}],
+        },
+        {
+            "kind": "update_records",
+            "resource": "accounts",
+            "fields": {"status": "used"},
+            "where": [{"field": "account_id", "op": "eq", "value": "A001"}],
+        },
+        {
+            "kind": "delete_records",
+            "resource": "accounts",
+            "where": [{"field": "status", "op": "eq", "value": "expired"}],
+        },
+    ]
+
+
+def test_task_context_db_supports_batch_write_plan():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).audit(
+        "account_events",
+        {"entity_key": "A001", "event_type": "status_changed"},
+    ).execute()
+
+    assert executor.plans == [
+        {
+            "kind": "batch",
+            "operations": [
+                {
+                    "kind": "upsert_records",
+                    "resource": "accounts",
+                    "records": [{"account_id": "A001", "status": "ready"}],
+                },
+                {
+                    "kind": "append_audit_event",
+                    "dataset": "account_events",
+                    "event": {"entity_key": "A001", "event_type": "status_changed"},
+                },
+            ],
+        }
+    ]
+
+
 def test_task_context_db_supports_audit_event_plan():
     executor = _FakeDbExecutor()
     ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))

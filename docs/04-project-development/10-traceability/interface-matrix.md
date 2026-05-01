@@ -14,10 +14,10 @@
 | 接口 ID | 契约内容 | 提供方 | 消费方 | 版本 / 来源 | 验证方式 | 运维责任 |
 |---|---|---|---|---|---|---|
 | `API-001` | Root App Entry Contract | Root app metadata | 维护者 / 打包流程 | `packages/crawler4j/pyproject.toml`、`src.ui.app:main` | workspace 入口检查、UI smoke、PyInstaller build | Core 维护者 |
-| `API-002` | Module Runtime Contract | Core + Module runtime | 最终用户 / 模块维护者 | `module.yaml`、模块根 `__init__.py`、`ModuleAssembler` | 单元/集成测试、关键工作流验证；真实站点 E2E 仍待完成 | Core 维护者 |
+| `API-002` | Module Runtime Contract | Core + Module runtime | 最终用户 / 模块维护者 | `module.yaml(runtime_api=core-native-v2)`、代码装饰器、`.crawler4j/manifest.lock.json`、模块根 `__init__.py` | 单元/集成测试、关键工作流验证；真实站点 E2E 仍待完成 | Core 维护者 |
 | `API-003` | SDK / Contracts Package Contract | `crawler4j_sdk`、`crawler4j_contracts` | 模块开发者 | `packages/crawler4j-sdk/pyproject.toml`、`packages/crawler4j-contracts/pyproject.toml`、CLI 入口 | build、CLI help、脚手架测试 | SDK / Core 维护者 |
 | `API-004` | Release Metadata Contract | Release metadata | 发布负责人 / 维护者 | `packages/crawler4j/pyproject.toml`、运行时版本服务、Git tag、子包版本 | 版本对照检查、release notes 校验 | 发布负责人 |
-| `API-008` | Hosted Module UI Contract（V1） | Core MMS + SDK + `pages/` 页面注册 | 模块开发者 / 模块详情页 / QA | `pages/*.py`、`pages/<group>/*.py`、`ui_extension.pages[]`、`module-hosted-ui-framework.md` | CLI / 宿主页集成测试、模块详情页二级页回归 | Core / SDK 维护者 |
+| `API-008` | Hosted Module UI Contract（V2） | Core MMS + SDK + `pages/` 页面注册 | 模块开发者 / 模块详情页 / QA | `pages/*.py`、`pages/<group>/*.py`、`@page(menu=True)`、`module-hosted-ui-framework.md` | CLI / 宿主页集成测试、模块详情页二级页回归 | Core / SDK 维护者 |
 | `API-012` | Decorator-first Object Assembly Runtime（V2） | Core MMS + ATM + SDK + Contracts | 模块开发者 / 运行模板 / QA | `@interface/@component/@workflow/@page_action/@data_table/@data_query`、`.crawler4j/manifest.lock.json`、`0.4.0-decorator-object-assembly-architecture.md` | Contracts 装饰器单测、SDK 扫描/check full/module-open/DevLink/manifest lock、宿主保留字段诊断、Core descriptor v2、运行模板对象图 UI、执行器对象隔离测试 | Core / SDK / Contracts 维护者 |
 | `API-013` | Versioned User / Developer Guide Contract | docs-stratego source docs | 使用者 / 模块开发者 / 文档维护者 | `docs/index.md`、`02-user-guide/v*/version.yaml`、`03-developer-guide/v*/version.yaml`、`0.4.0-guide-versioning-architecture.md` | docs-stratego validate、主文档版本 gate、版本元数据校验、跨版本链接校验 | 文档维护者 |
 
@@ -27,9 +27,9 @@
 |---|---|---|
 | `API-002` | 真实站点 E2E 尚未完成，运行契约仍缺最终现场验证 | 未闭环 |
 | `API-004` | 正式发布尚未切版，交付包仍需绑定实际发布批次 | 未闭环 |
-| `API-008` | hosted page V1 已在本地实现，但真实业务模块接入验证与 PR 收口仍待继续推进 | 已本地验证，PR 待收口 |
-| `API-012` | 方案已形成但尚未实现；需拆分 Core、SDK、Contracts 重构任务，迁移当前 workflow parameters 实现，并实现模块打开阶段宿主保留字段诊断 | 设计完成，实施待拆分 |
-| `API-013` | 方案已形成但尚未迁移目录；当前 docs-stratego 主入口仍是单套指南，后续需实施版本目录和导航切换 | 设计完成，实施待拆分 |
+| `API-008` | hosted page 已收口为 `@page(...)` 装饰器入口，但真实业务模块接入验证仍待继续推进 | 已本地验证，真实模块 E2E 待闭环 |
+| `API-012` | core-native-v2 已实现；发布前仍需真实业务模块 E2E 与打包链路验证 | 已实现，发布验证待闭环 |
+| `API-013` | 使用者指南和开发者指南已按版本分流；发布前需确认 docs-stratego 站点主入口切到 0.4.0 | 已实现，站点发布验证待闭环 |
 
 ## 3. 使用规则
 

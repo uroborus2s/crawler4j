@@ -6,6 +6,7 @@ import pytest
 from src.core.atm.dispatcher import TaskDispatcher
 from src.core.atm.models import Job, JobType, Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode, ExecutionContext, RunProfile
+from src.core.rem.env_claims import CLAIM_CLAIMED, ENV_CLAIM_OWNER_MODULE, ENV_CLAIM_STATE
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 
 
@@ -18,12 +19,41 @@ def temp_data_dir(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def _build_module_service(candidate_ids: list[int] | None = None):
+def _build_module_service(
+    candidate_ids: list[int] | None = None,
+    *,
+    bound_env_ids: list[int] | None = None,
+):
     service = SimpleNamespace(
         run_module=AsyncMock(return_value="ok"),
         resolve_env_candidates=Mock(return_value=list(candidate_ids or [])),
+        get_runtime_descriptor_v2=Mock(
+            return_value=SimpleNamespace(
+                data_tables={
+                    "accounts": SimpleNamespace(meta=SimpleNamespace(env_binding_field="env_id")),
+                }
+                if bound_env_ids
+                else {}
+            )
+        ),
     )
     return service
+
+
+def _binding_capabilities(bound_env_ids: list[int]):
+    class _BindingQuery:
+        def select(self, field_name: str):
+            self._field_name = field_name
+            return self
+
+        def execute(self):
+            return [{self._field_name: env_id} for env_id in bound_env_ids]
+
+    class _BindingDb:
+        def from_(self, _table_name: str):
+            return _BindingQuery()
+
+    return SimpleNamespace(db=_BindingDb(), tools=SimpleNamespace())
 
 
 @pytest.mark.asyncio
@@ -274,15 +304,25 @@ async def test_dispatcher_service_candidates_fails_when_lease_acquire_raises(mon
         external_id="20",
     )
 
-    module_service = _build_module_service(candidate_ids=[20])
+    module_service = _build_module_service(candidate_ids=[20], bound_env_ids=[20])
 
     monkeypatch.setattr("src.core.mms.service.get_module_service", lambda: module_service)
+    monkeypatch.setattr(
+        "src.core.rem.env_claims.build_runtime_capabilities",
+        lambda _module_name: _binding_capabilities([20]),
+    )
 
     dispatcher = TaskDispatcher()
     dispatcher.repo = SimpleNamespace(save_task=AsyncMock())
     dispatcher.rem = SimpleNamespace(
         create_env=AsyncMock(return_value=env),
         list_envs=AsyncMock(return_value=[env]),
+        list_metadata=AsyncMock(
+            return_value={
+                ENV_CLAIM_OWNER_MODULE: "demo.module",
+                ENV_CLAIM_STATE: CLAIM_CLAIMED,
+            }
+        ),
         lease_manager=SimpleNamespace(
             acquire=AsyncMock(side_effect=RuntimeError("lease failed")),
             claim_created_env=AsyncMock(),

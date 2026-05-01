@@ -332,6 +332,8 @@ def test_pyinstaller_spec_collects_workspace_runtime_packages_for_desktop_bundle
     assert 'datas.extend(collect_data_files("debugpy"))' in spec_text
     assert 'datas.extend(collect_data_files("debugpy", include_py_files=True))' in spec_text
     assert '"debugpy",' in spec_text
+    assert '"ddddocr",' not in spec_text
+    assert '"cv2",' not in spec_text
     assert 'hiddenimports.extend(collect_submodules("debugpy"))' in spec_text
     assert "hiddenimports.extend(_build_debugpy_vendored_hiddenimports())" in spec_text
     assert "def _build_debugpy_vendored_hiddenimports() -> list[str]:" in spec_text

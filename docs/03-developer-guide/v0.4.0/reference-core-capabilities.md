@@ -99,6 +99,9 @@ rows = (
 detail = ctx.db.named("ready_accounts").bind(status="ready").execute()
 
 ctx.db.into("accounts").replace(rows)
+ctx.db.into("accounts").upsert([{"account_id": "A001", "status": "ready"}])
+ctx.db.into("accounts").update_where({"status": "used"}, where={"account_id": "A001"})
+ctx.db.into("accounts").delete_where("status", "eq", "expired")
 
 event_id = ctx.db.audit("account_events").append(
     entity_key="A001",
@@ -106,9 +109,15 @@ event_id = ctx.db.audit("account_events").append(
     result="success",
     payload={"operator": "system"},
 )
+
+ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).audit(
+    "account_events",
+    {"entity_key": "A001", "event_type": "status_changed"},
+).execute()
 ```
 
 数据表和命名查询必须先由 `@data_table` / `@data_query` 声明并进入 manifest lock。
+模块不需要管理数据库锁、事务提交或回滚；所有写入由宿主包装成短事务并自动排队、重试、提交或回滚。`replace()` 是全量覆盖语义，并发任务更新同一实体时优先使用 `custom_table` 的 `upsert/update_where/delete_where` 或 `batch()`。
 
 ## `TaskContext.tools`
 

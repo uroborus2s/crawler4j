@@ -15,7 +15,7 @@ def describe_job_runtime(
         return "未配置", str(exc)
 
     module_name = run_profile.execution.module if run_profile.execution and run_profile.execution.module else "-"
-    workflow_name = run_profile.execution.workflow if run_profile.execution and run_profile.execution.workflow else "default"
+    workflow_name = run_profile.execution.workflow if run_profile.execution and run_profile.execution.workflow else "自动解析"
     acquisition = run_profile.resource.acquisition
     if acquisition.mode == AcquisitionMode.CREATE:
         mode_text = "创建环境"

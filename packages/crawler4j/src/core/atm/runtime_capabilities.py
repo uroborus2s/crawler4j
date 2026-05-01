@@ -54,7 +54,14 @@ RUNTIME_SURFACE_ENV_CANDIDATES = "env_candidates"
 RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES = "env_cleanup_candidates"
 
 _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
-    RUNTIME_SURFACE_FULL: None,
+    RUNTIME_SURFACE_FULL: frozenset(
+        {
+            "ip_pool.pick_proxy",
+            "env.set_proxy",
+            "captcha.match_slider",
+            "captcha.match_click_targets",
+        }
+    ),
     RUNTIME_SURFACE_HOSTED_UI_DECLARE: frozenset(
         {
             "ui.declare_page",
@@ -265,6 +272,16 @@ class CoreDatabaseTools:
                 dataset=str(plan.get("dataset") or ""),
                 event=dict(plan.get("event") or {}),
             )
+        if kind == "batch":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            operations = plan.get("operations")
+            if not isinstance(operations, list):
+                raise ValueError("batch operations must be a list")
+            return self._data_store.execute_write_batch(
+                self._module_name,
+                [dict(item) for item in operations if isinstance(item, dict)],
+            )
         if kind == "query_audit_events":
             return self._query_audit_events(
                 dataset=str(plan.get("dataset") or ""),
@@ -283,6 +300,28 @@ class CoreDatabaseTools:
             return self._replace_resource_records(
                 resource=str(plan.get("resource") or ""),
                 records=_normalize_records(plan.get("records")),
+            )
+        if kind == "upsert_records":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._upsert_resource_records(
+                resource=str(plan.get("resource") or ""),
+                records=_normalize_records(plan.get("records")),
+            )
+        if kind == "update_records":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._update_resource_records(
+                resource=str(plan.get("resource") or ""),
+                fields=dict(plan.get("fields") or {}),
+                where=plan.get("where"),
+            )
+        if kind == "delete_records":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._delete_resource_records(
+                resource=str(plan.get("resource") or ""),
+                where=plan.get("where"),
             )
         if kind != "select":
             raise ValueError(f"unsupported query plan kind: {kind}")
@@ -303,6 +342,34 @@ class CoreDatabaseTools:
     ) -> bool:
         resource_name = self._normalize_resource_name(resource)
         return self._data_store.replace_resource_records(self._module_name, resource_name, _normalize_records(records))
+
+    def _upsert_resource_records(
+        self,
+        *,
+        resource: str,
+        records: list[dict[str, Any]],
+    ) -> bool:
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.upsert_resource_records(self._module_name, resource_name, _normalize_records(records))
+
+    def _update_resource_records(
+        self,
+        *,
+        resource: str,
+        fields: dict[str, Any],
+        where: Any,
+    ) -> int:
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.update_resource_records(self._module_name, resource_name, dict(fields), where=where)
+
+    def _delete_resource_records(
+        self,
+        *,
+        resource: str,
+        where: Any,
+    ) -> int:
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.delete_resource_records(self._module_name, resource_name, where=where)
 
     def _append_audit_event(self, *, dataset: str, event: dict[str, Any]) -> str:
         dataset_name = self._normalize_audit_dataset_name(dataset)
@@ -722,7 +789,7 @@ def build_runtime_capabilities(
             ui_declaration_buffer=ui_declaration_buffer,
             allowed_tool_names=_resolve_runtime_surface_tools(surface),
             declared_page_schemas=declared_page_schemas,
-            allow_persisted_pages=surface == RUNTIME_SURFACE_FULL,
+            allow_persisted_pages=False,
         ),
         db=DatabaseClient(CoreDatabaseTools(module_name, enabled=db_enabled, read_only=db_read_only)),
     )

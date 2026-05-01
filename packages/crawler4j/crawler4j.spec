@@ -89,8 +89,6 @@ def _build_hiddenimports() -> list[str]:
         "debugpy",
         "playwright",
         "pandas",
-        "ddddocr",
-        "cv2",
         "numpy",
         "sqlite3",
     ]

@@ -46,7 +46,7 @@ class DebugSession:
     job_name: str = ""
     module_name: str = ""
     source_path: str = ""
-    workflow: str = "default"
+    workflow: str = ""
     object_bindings: dict[str, str] = field(default_factory=dict)
     object_params: dict[str, dict[str, Any]] = field(default_factory=dict)
     provider: str = "playwright_local"

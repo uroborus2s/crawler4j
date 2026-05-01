@@ -145,6 +145,23 @@ async def test_execution_runner_marks_module_cancel_reason_on_timeout():
     assert cancel_reasons == ["timed_out"]
 
 
+@pytest.mark.asyncio
+async def test_execution_runner_preserves_blank_workflow_for_v2_descriptor_resolution():
+    request = _build_request()
+    request.workflow_name = ""
+    env, lease = _build_env()
+    contexts = []
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(side_effect=lambda _module_name, context: contexts.append(context) or TaskResult.ok()),
+    )
+    runner, _ = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    assert request.task.status == TaskStatus.SUCCEEDED
+    assert contexts[0].runtime["workflow"] == ""
+
+
 def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
     module_dir = base_dir / module_name
     workflows_dir = module_dir / "workflows"

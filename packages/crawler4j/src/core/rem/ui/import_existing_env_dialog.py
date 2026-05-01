@@ -189,7 +189,7 @@ class ImportExistingEnvDialog(QDialog):
             return "", ""
         return (
             str(getattr(execution, "module", "") or "").strip(),
-            str(getattr(execution, "workflow", "") or "default").strip(),
+            str(getattr(execution, "workflow", "") or "").strip(),
         )
 
     def _job_label(self, job: Any) -> str:
@@ -198,7 +198,7 @@ class ImportExistingEnvDialog(QDialog):
         execution = getattr(run_profile, "execution", None)
         if execution:
             module_name = str(getattr(execution, "module", "") or "").strip()
-            workflow_name = str(getattr(execution, "workflow", "") or "default").strip()
+            workflow_name = str(getattr(execution, "workflow", "") or "自动解析").strip()
         concurrency = max(1, int(getattr(job, "concurrency_target", 1) or 1))
         runtime = f"{module_name}/{workflow_name}" if module_name else "未配置运行模板"
         return f"{getattr(job, 'name', '') or job.id} | {runtime} | 并发 {concurrency}"

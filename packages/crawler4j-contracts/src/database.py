@@ -44,6 +44,9 @@ class DatabaseClient:
     def audit(self, dataset: str) -> "AuditEventClient":
         return AuditEventClient(self, _normalize_name(dataset, "dataset"))
 
+    def batch(self) -> "DatabaseBatchWriter":
+        return DatabaseBatchWriter(self)
+
     def _describe_source(self, source: str) -> dict[str, Any]:
         if self._executor is None:
             raise RuntimeError("ctx.db is not available in this runtime context")
@@ -309,9 +312,137 @@ class ResourceWriter:
             }
         )
 
+    def upsert(self, records: list[dict[str, Any]]) -> Any:
+        return self._client._execute_plan(
+            {
+                "kind": "upsert_records",
+                "resource": self._resource,
+                "records": list(records),
+            }
+        )
+
+    def update_where(self, fields: dict[str, Any], *, where: dict[str, Any]) -> Any:
+        return self._client._execute_plan(
+            {
+                "kind": "update_records",
+                "resource": self._resource,
+                "fields": dict(fields),
+                "where": _where_eq_mapping(where),
+            }
+        )
+
+    def delete_where(self, field: str, op: str = "eq", value: Any = None) -> Any:
+        normalized_op = str(op or "eq").strip().lower()
+        if normalized_op not in {"eq", "in", "gt", "gte", "lt", "lte", "between", "like", "is_null"}:
+            raise ValueError(f"unsupported where op: {normalized_op}")
+        item = {"field": _normalize_name(field, "field"), "op": normalized_op}
+        if normalized_op != "is_null":
+            item["value"] = value
+        return self._client._execute_plan(
+            {
+                "kind": "delete_records",
+                "resource": self._resource,
+                "where": [item],
+            }
+        )
+
+
+class DatabaseBatchWriter:
+    """Host-owned atomic write batch builder."""
+
+    def __init__(self, client: DatabaseClient):
+        self._client = client
+        self._operations: list[dict[str, Any]] = []
+
+    def replace(self, resource: str, records: list[dict[str, Any]]) -> "DatabaseBatchWriter":
+        self._operations.append(
+            {
+                "kind": "replace_records",
+                "resource": _normalize_name(resource, "resource"),
+                "records": list(records),
+            }
+        )
+        return self
+
+    def upsert(self, resource: str, records: list[dict[str, Any]]) -> "DatabaseBatchWriter":
+        self._operations.append(
+            {
+                "kind": "upsert_records",
+                "resource": _normalize_name(resource, "resource"),
+                "records": list(records),
+            }
+        )
+        return self
+
+    def update_where(
+        self,
+        resource: str,
+        fields: dict[str, Any],
+        *,
+        where: dict[str, Any],
+    ) -> "DatabaseBatchWriter":
+        self._operations.append(
+            {
+                "kind": "update_records",
+                "resource": _normalize_name(resource, "resource"),
+                "fields": dict(fields),
+                "where": _where_eq_mapping(where),
+            }
+        )
+        return self
+
+    def delete_where(self, resource: str, field: str, op: str = "eq", value: Any = None) -> "DatabaseBatchWriter":
+        normalized_op = str(op or "eq").strip().lower()
+        if normalized_op not in {"eq", "in", "gt", "gte", "lt", "lte", "between", "like", "is_null"}:
+            raise ValueError(f"unsupported where op: {normalized_op}")
+        item = {"field": _normalize_name(field, "field"), "op": normalized_op}
+        if normalized_op != "is_null":
+            item["value"] = value
+        self._operations.append(
+            {
+                "kind": "delete_records",
+                "resource": _normalize_name(resource, "resource"),
+                "where": [item],
+            }
+        )
+        return self
+
+    def audit(self, dataset: str, event: dict[str, Any] | None = None, **fields: Any) -> "DatabaseBatchWriter":
+        payload = dict(event or {})
+        payload.update(fields)
+        self._operations.append(
+            {
+                "kind": "append_audit_event",
+                "dataset": _normalize_name(dataset, "dataset"),
+                "event": payload,
+            }
+        )
+        return self
+
+    def execute(self) -> Any:
+        return self._client._execute_plan(
+            {
+                "kind": "batch",
+                "operations": [dict(item) for item in self._operations],
+            }
+        )
+
 
 def _normalize_name(value: str, field_name: str) -> str:
     text = str(value or "").strip()
     if not text:
         raise ValueError(f"{field_name} is required")
     return text
+
+
+def _where_eq_mapping(where: dict[str, Any]) -> list[dict[str, Any]]:
+    if not isinstance(where, dict) or not where:
+        raise ValueError("where must be a non-empty mapping")
+    return [
+        {
+            "field": _normalize_name(field, "field"),
+            "op": "eq",
+            "value": value,
+        }
+        for field, value in where.items()
+    ]

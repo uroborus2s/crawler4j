@@ -273,7 +273,7 @@ class JobDetailDialog(QDialog):
         try:
             run_profile = resolve_job_run_profile(job)
             execution_text = (
-                f"{run_profile.execution.module}/{run_profile.execution.workflow or 'default'}"
+                f"{run_profile.execution.module}/{run_profile.execution.workflow or '自动解析'}"
                 if run_profile.execution and run_profile.execution.module
                 else "-"
             )
@@ -293,7 +293,7 @@ class JobDetailDialog(QDialog):
         info += f"执行目标: {execution_text}\n"
         info += f"资源: {resource_text}\n"
         info += f"触发: {trigger_text}\n"
-        info += f"Params: {job.params}\n"
+        info += f"Legacy metadata: {job.params}\n"
         info += f"Created: {datetime.fromtimestamp(job.created_at)}\n"
         self.config_text.setText(info)
 

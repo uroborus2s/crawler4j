@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 from contextlib import ExitStack
 from pathlib import Path
@@ -113,6 +114,36 @@ def _declare_managed_dataset(
                     "columns": [
                         {"name": record_key_field, "type": "text", "required": True},
                         {"name": "phone", "type": "text"},
+                    ],
+                },
+            }
+        ],
+    )
+
+
+def _declare_custom_accounts(
+    store,
+    module_root: Path,
+    *,
+    module_name: str = "demo_module",
+    resource_id: str = "accounts",
+) -> bool:
+    return _sync_manifest_data(
+        store,
+        module_root,
+        module_name=module_name,
+        resources=[
+            {
+                "id": resource_id,
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": "id", "type": "text", "required": True},
+                        {"name": "phone", "type": "text"},
+                        {"name": "status", "type": "text"},
+                        {"name": "balance", "type": "number"},
                     ],
                 },
             }
@@ -1336,6 +1367,134 @@ def test_module_data_store_creates_and_routes_custom_table_resources(temp_data_d
         "phone": "13800138000",
         "status": "active",
     }
+
+
+def test_module_data_store_upserts_updates_and_deletes_custom_table_rows(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_custom_accounts(store, temp_data_dir)
+
+    assert store.upsert_resource_records(
+        "demo_module",
+        "accounts",
+        [
+            {"id": "u1", "phone": "13800138000", "status": "new", "balance": 1.5},
+            {"id": "u2", "phone": "13900139000", "status": "expired", "balance": 2.0},
+        ],
+    ) is True
+    assert store.upsert_resource_records(
+        "demo_module",
+        "accounts",
+        [
+            {"id": "u1", "phone": "13800138001", "status": "ready", "balance": 3.5},
+            {"id": "u3", "phone": "13700137000", "status": "ready", "balance": 4.0},
+        ],
+    ) is True
+
+    assert store.update_resource_records(
+        "demo_module",
+        "accounts",
+        {"status": "used"},
+        where=[{"field": "id", "op": "eq", "value": "u1"}],
+    ) == 1
+    assert store.delete_resource_records(
+        "demo_module",
+        "accounts",
+        where=[{"field": "status", "op": "eq", "value": "expired"}],
+    ) == 1
+
+    assert store.read_resource_records("demo_module", "accounts") == [
+        {"id": "u1", "phone": "13800138001", "status": "used", "balance": 3.5},
+        {"id": "u3", "phone": "13700137000", "status": "ready", "balance": 4.0},
+    ]
+
+
+def test_module_data_store_batch_write_is_atomic(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_custom_accounts(store, temp_data_dir)
+
+    with pytest.raises(ValueError, match="未注册的数据资源: missing"):
+        store.execute_write_batch(
+            "demo_module",
+            [
+                {
+                    "kind": "upsert_records",
+                    "resource": "accounts",
+                    "records": [{"id": "u1", "phone": "13800138000", "status": "ready"}],
+                },
+                {
+                    "kind": "upsert_records",
+                    "resource": "missing",
+                    "records": [{"id": "u2"}],
+                },
+            ],
+        )
+    assert store.read_resource_records("demo_module", "accounts") == []
+
+    results = store.execute_write_batch(
+        "demo_module",
+        [
+            {
+                "kind": "upsert_records",
+                "resource": "accounts",
+                "records": [{"id": "u1", "phone": "13800138000", "status": "ready"}],
+            },
+            {
+                "kind": "append_audit_event",
+                "dataset": "account_events",
+                "event": {"entity_key": "u1", "event_type": "created", "created_at": 100},
+            },
+        ],
+    )
+
+    assert results[0] is True
+    assert isinstance(results[1], str)
+    assert store.read_resource_records("demo_module", "accounts") == [
+        {"id": "u1", "phone": "13800138000", "status": "ready", "balance": None}
+    ]
+    assert store.query_audit_events("demo_module", "account_events", limit=10) == [
+        {
+            "id": results[1],
+            "module_name": "demo_module",
+            "dataset_name": "account_events",
+            "entity_key": "u1",
+            "event_type": "created",
+            "run_id": None,
+            "previous_status": None,
+            "next_status": None,
+            "result": None,
+            "reason": None,
+            "payload": {},
+            "created_at": 100,
+        }
+    ]
+
+
+def test_module_data_store_serializes_concurrent_audit_appends(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+
+    def append_event(index: int) -> str:
+        return store.append_audit_event(
+            "demo_module",
+            "account_events",
+            {
+                "entity_key": f"u{index}",
+                "event_type": "created",
+                "created_at": index,
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        event_ids = list(executor.map(append_event, range(30)))
+
+    events = store.query_audit_events("demo_module", "account_events", limit=100, order="asc")
+    assert [event["id"] for event in events] == event_ids
+    assert [event["created_at"] for event in events] == list(range(30))
 
 
 def test_module_data_store_lists_registered_data_resources(temp_data_dir):

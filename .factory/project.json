@@ -12,7 +12,7 @@
     "tests": {
       "command": "uv run pytest -q",
       "result": "passed",
-      "details": "485 passed on 2026-04-20 after resolving the REM UI async-loop blocker, the standalone page-scaffold import blocker, the pre-1.0 dependency-range risk, and the default env-name reservation race"
+      "details": "886 passed on 2026-05-01 after the 0.4.0 comprehensive review fixes"
     },
     "docs": {
       "command": "Review docs/ markdown tree",
@@ -26,18 +26,18 @@
     },
     "root_build": {
       "command": "uv build --package crawler4j --out-dir /tmp/crawler4j-build-check",
-      "result": "pending",
-      "details": "current source version is crawler4j 0.4.0; historical 0.3.2 wheel/sdist evidence is not current release evidence"
+      "result": "passed",
+      "details": "uv run build regenerated crawler4j 0.4.0 wheel/sdist under packages/crawler4j/dist on 2026-05-01"
     },
     "sdk_build": {
       "command": "uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check",
-      "result": "pending",
-      "details": "current source version is crawler4j-sdk 0.4.0; no wheel/sdist or publish evidence has been recorded for this version yet. Historical 0.5.x/0.6.x evidence must not be reused as current release evidence"
+      "result": "passed",
+      "details": "uv run build regenerated crawler4j-sdk 0.4.0 wheel/sdist under packages/crawler4j-sdk/dist on 2026-05-01; publish evidence is still pending"
     },
     "contracts_build": {
       "command": "uv build --package crawler4j-contracts --out-dir /tmp/crawler4j-contracts-build-check",
-      "result": "pending",
-      "details": "current source version is crawler4j-contracts 0.4.0; no wheel/sdist or publish evidence has been recorded for this version yet. Historical 0.3.0 evidence must not be reused as current release evidence"
+      "result": "passed",
+      "details": "uv run build regenerated crawler4j-contracts 0.4.0 wheel/sdist under packages/crawler4j-contracts/dist on 2026-05-01; publish evidence is still pending"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",
@@ -52,12 +52,12 @@
     "ui_smoke": {
       "command": "uv run python scripts/smoke_test_ui.py",
       "result": "passed",
-      "details": "Smoke passed on 2026-04-20; QApplication, Shell import, and Shell instantiation succeeded"
+      "details": "Smoke passed on 2026-05-01; Shell navigation/content stack and Dashboard async refresh verified"
     },
     "pyinstaller_bundle": {
       "command": "uv run package-desktop",
-      "result": "pending",
-      "details": "PyInstaller build passed on 2026-04-24 before the later QScintilla dependency line was introduced; current QScintilla package/bundle evidence is pending and must be rerun before release"
+      "result": "passed",
+      "details": "macOS PyInstaller bundle passed on 2026-05-01 after QScintilla dependency line; output packages/crawler4j/dist/desktop/macos/Crawler4j.app"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -77,7 +77,7 @@
     "mms_custom_ui_tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py packages/crawler4j/tests/acceptance/test_sdk_cli_scaffold_package_acceptance.py",
       "result": "passed",
-      "details": "105 passed on 2026-04-22 covering hosted page renderer, module detail routing, runtime capabilities, declared UI persistence cleanup, CLI scaffold, integration, and acceptance on the new ui_extension.pages[] contract"
+      "details": "Historical 2026-04-22 hosted page V1 gate has been superseded by the current 0.4.0 @page/manifest-lock gate; latest comprehensive 2026-05-01 gate is recorded under tests and release summary"
     }
   },
   "versions": {
@@ -95,11 +95,9 @@
   },
   "known_risks": [
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
-    "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
-    "Latest local validation evidence is historical and must not be treated as a fresh full gate for the current dirty workspace.",
-    "QScintilla was added to the desktop dependency line after the last recorded PyInstaller package evidence, so desktop package/bundle verification is pending.",
-    "crawler4j 0.4.0, crawler4j-sdk 0.4.0, and crawler4j-contracts 0.4.0 still need current build/publish evidence if they are to be released."
+    "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
+    "crawler4j-sdk 0.4.0 and crawler4j-contracts 0.4.0 still need publish evidence if they are to be released externally."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",

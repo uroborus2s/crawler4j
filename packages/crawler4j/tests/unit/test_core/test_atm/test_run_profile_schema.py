@@ -72,6 +72,12 @@ def test_execution_context_rejects_removed_params():
         )
 
 
+def test_execution_context_allows_blank_workflow_for_v2_descriptor_resolution():
+    context = ExecutionContext(module="demo_module")
+
+    assert context.workflow == ""
+
+
 def test_run_profile_serialization_roundtrip_for_create_mode():
     run_profile = RunProfile(
         resource=ResourceConfig(

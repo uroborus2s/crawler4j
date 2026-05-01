@@ -185,7 +185,7 @@ class ExistingEnvImportJobService:
         if not job.run_profile or not job.run_profile.execution:
             raise ValueError("关联任务必须配置运行模板")
         module_name = str(job.run_profile.execution.module or "").strip()
-        workflow_name = str(job.run_profile.execution.workflow or "default").strip()
+        workflow_name = str(job.run_profile.execution.workflow or "").strip()
         if not module_name:
             raise ValueError("关联任务运行模板缺少模块名")
 
@@ -193,8 +193,13 @@ class ExistingEnvImportJobService:
         if not module or module.status != ModuleStatus.ENABLED:
             raise ValueError(f"目标模块不可用: {module_name}")
         workflow_names = {workflow.name for workflow in self.registry.get_workflows(module_name)}
+        if not workflow_name and len(workflow_names) == 1:
+            workflow_name = next(iter(workflow_names))
+        if not workflow_name and "main_workflow" in workflow_names:
+            workflow_name = "main_workflow"
         if workflow_name not in workflow_names:
-            raise ValueError(f"目标 workflow 不存在: {module_name}/{workflow_name}")
+            target = workflow_name or "<auto>"
+            raise ValueError(f"目标 workflow 不存在: {module_name}/{target}")
 
     async def _dispatch_available_import_envs(self, job: Job, envs: list[Environment]) -> list[str]:
         if not envs:
@@ -307,7 +312,7 @@ class ExistingEnvImportJobService:
             return "", ""
         return (
             str(job.run_profile.execution.module or "").strip(),
-            str(job.run_profile.execution.workflow or "default").strip(),
+            str(job.run_profile.execution.workflow or "").strip(),
         )
 
     def _track_watch_task(self, coro) -> None:

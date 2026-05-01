@@ -56,7 +56,7 @@ class ExecutionRequest:
 
     task: Task
     module_name: str
-    workflow_name: str = "default"
+    workflow_name: str = ""
     object_bindings: dict[str, str] = field(default_factory=dict)
     object_params: dict[str, dict[str, Any]] = field(default_factory=dict)
     devel_mode: bool = False
@@ -124,7 +124,7 @@ class ExecutionRunner:
     def _build_runtime_payload(self, request: ExecutionRequest) -> dict[str, Any]:
         return {
             "module_name": request.module_name,
-            "workflow": request.workflow_name or "default",
+            "workflow": str(request.workflow_name or "").strip(),
             "devel_mode": bool(request.devel_mode),
             "object_bindings": deepcopy(request.object_bindings),
             "object_params": deepcopy(request.object_params),

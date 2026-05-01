@@ -277,7 +277,7 @@ class TaskCreateDialog(QDialog):
         else:
             lines.append(f"候选函数: {run_profile.resource.acquisition.candidates or '-'}")
         if run_profile.execution:
-            lines.append(f"执行: {run_profile.execution.module}/{run_profile.execution.workflow or 'default'}")
+            lines.append(f"执行: {run_profile.execution.module}/{run_profile.execution.workflow or '自动解析'}")
         self.inline_preview.setText(" | ".join(lines))
         self.inline_config_btn.setText("重新编辑运行模板")
         self._sync_inline_config_button_width()

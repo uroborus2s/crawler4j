@@ -539,7 +539,7 @@ class JobController:
     ) -> TaskContext:
         execution = run_profile.execution
         acquisition = run_profile.resource.acquisition
-        workflow_name = execution.workflow or "default"
+        workflow_name = execution.workflow
         task_config = get_module_settings_store().build_task_config(module_name, workflow_name)
         caps = build_runtime_capabilities(module_name, surface=RUNTIME_SURFACE_ENV_CANDIDATES)
         runtime = {

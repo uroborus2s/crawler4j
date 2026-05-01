@@ -39,7 +39,7 @@ mkdocs:
         - title: 版本选择
           path: 03-developer-guide/index.md
           access: private
-        - title: 当前发布版本：开发者指南 0.3.0
+        - title: 历史维护版本：开发者指南 0.3.0
           children:
             - title: 概览
               path: 03-developer-guide/v0.3.0/index.md
@@ -74,7 +74,7 @@ mkdocs:
             - title: Core 能力参考
               path: 03-developer-guide/v0.3.0/reference-core-capabilities.md
               access: private
-        - title: 开发中版本：开发者指南 0.4.0
+        - title: 当前 0.4.0 版本：开发者指南
           children:
             - title: 概览
               path: 03-developer-guide/v0.4.0/index.md
@@ -323,8 +323,8 @@ mkdocs:
 
 | 目标 | 阅读路径 |
 |---|---|
-| 新建或维护当前稳定模块 | [0.3.0 概览](03-developer-guide/v0.3.0/index.md) -> [0.3.0 快速开始](03-developer-guide/v0.3.0/quickstart.md) -> [0.3.0 交付模块](03-developer-guide/v0.3.0/shipping.md) |
-| 开发 0.4.0 破坏性升级模块 | [0.4.0 概览](03-developer-guide/v0.4.0/index.md) -> [装饰器与对象装配](03-developer-guide/v0.4.0/decorators-and-object-assembly.md) -> [数据契约](03-developer-guide/v0.4.0/data-contracts.md) |
+| 新建或维护当前 0.4.0 模块 | [0.4.0 概览](03-developer-guide/v0.4.0/index.md) -> [装饰器与对象装配](03-developer-guide/v0.4.0/decorators-and-object-assembly.md) -> [数据契约](03-developer-guide/v0.4.0/data-contracts.md) |
+| 维护历史 0.3.x 模块 | [0.3.0 概览](03-developer-guide/v0.3.0/index.md) -> [0.3.0 快速开始](03-developer-guide/v0.3.0/quickstart.md) -> [0.3.0 交付模块](03-developer-guide/v0.3.0/shipping.md) |
 | 从 0.3.x 破坏性迁移到 0.4.0 | [从 0.3.0 迁移到 0.4.0](03-developer-guide/v0.4.0/migration-from-v0.3.0.md) |
 
 ### 发布 / 运维

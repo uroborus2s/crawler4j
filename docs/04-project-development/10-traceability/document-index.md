@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-04-30
+**最后更新：** 2026-05-01
 
 ## 1. 当前正式文档结构
 
@@ -20,7 +20,7 @@
 | `docs/03-developer-guide/` | 开发者指南；在本项目中即 module 开发指南 | 模块开发者 / 做模块集成的 Core 成员 |
 | `docs/04-project-development/` | 治理、需求、设计、计划、测试、发布、运维和追踪等正式内部文档 | Tech Lead / Dev / QA / 发布 |
 
-后续 0.4.0 文档版本分流实施后，`docs/02-user-guide/` 和 `docs/03-developer-guide/` 根目录只保留版本选择页；实际正文进入 `v0.3.0/`、`v0.4.0/` 等版本目录。docs-stratego 网站主入口必须指向当前已发布版本，历史版本继续保留。
+当前 0.4.0 文档版本分流已在开发者指南入口落地：`docs/03-developer-guide/` 根目录保留版本选择页，0.4.0 是当前主线，0.3.x 只作为历史维护入口。docs-stratego 发布站点仍需在正式发布前按版本治理确认主入口、历史入口和开发中入口的发布策略。
 
 ## 2. 按角色快速阅读
 
@@ -36,13 +36,13 @@
 ### 模块开发者
 
 1. [开发者指南总览](../../03-developer-guide/index.md)
-2. [0.3.0 稳定契约概览](../../03-developer-guide/v0.3.0/index.md)
-3. [0.3.0 快速开始](../../03-developer-guide/v0.3.0/quickstart.md)
-4. [0.3.0 构建模块](../../03-developer-guide/v0.3.0/build-modules.md)
-5. [0.3.0 交付模块](../../03-developer-guide/v0.3.0/shipping.md)
-6. [0.4.0 设计预览](../../03-developer-guide/v0.4.0/index.md)
-7. [0.4.0 装饰器与对象装配](../../03-developer-guide/v0.4.0/decorators-and-object-assembly.md)
-8. [从 0.3.0 迁移到 0.4.0](../../03-developer-guide/v0.4.0/migration-from-v0.3.0.md)
+2. [0.4.0 当前契约概览](../../03-developer-guide/v0.4.0/index.md)
+3. [0.4.0 装饰器与对象装配](../../03-developer-guide/v0.4.0/decorators-and-object-assembly.md)
+4. [从 0.3.0 迁移到 0.4.0](../../03-developer-guide/v0.4.0/migration-from-v0.3.0.md)
+5. [0.3.0 历史契约概览](../../03-developer-guide/v0.3.0/index.md)
+6. [0.3.0 快速开始](../../03-developer-guide/v0.3.0/quickstart.md)
+7. [0.3.0 构建模块](../../03-developer-guide/v0.3.0/build-modules.md)
+8. [0.3.0 交付模块](../../03-developer-guide/v0.3.0/shipping.md)
 
 ### 发布 / 运维
 
@@ -72,9 +72,11 @@
 
 ## 5. 最近同步
 
+- 2026-05-01：0.4.0 全面审查后同步文档入口和发布证据。`docs/03-developer-guide/index.md` 与根 `docs/index.md` 已把 0.4.0 标为当前主线、0.3.x 标为历史维护；发布与测试记忆登记本轮 `886 passed`、ruff、三包构建、SDK CLI help、UI smoke 与 macOS `package-desktop` 通过。正式发布裁决仍为 No-Go，阻塞项为 `ctrip` 真实站点 DevLink + ZIP 双链 E2E、Windows 真机签名/安装/自更新和正式交付批次。
+- 2026-05-01：`ctx.db` 写入并发底座第一阶段已同步到开发者指南和设计契约。`docs/03-developer-guide/v0.4.0/reference-core-capabilities.md` 与 `docs/04-project-development/04-design/module-config-runtime-data-contract.md` 现明确模块开发者不管理锁、事务或提交/回滚；宿主负责短事务、busy timeout、写协调器排队与重试；`custom_table` 新增 `upsert/update_where/delete_where` 和 `batch()` 写入语义，`replace()` 保留全量覆盖语义。
 - 2026-04-30：开发者指南已按版本分流并补齐 0.4.0 开发版正文。`docs/03-developer-guide/index.md` 只保留版本选择；0.3.0 稳定指南冻结到 `docs/03-developer-guide/v0.3.0/`；0.4.0 开发者指南新增到 `docs/03-developer-guide/v0.4.0/`，主线为 `core-native-v2` 装饰器对象装配、manifest lock、`ctx.db` 数据契约和保留字段诊断，并已明确 0.4.x SDK / Contracts 只服务 Core 0.4.0，不兼容 0.3.x 命令、模板或开发模式；根 `docs/index.md` 已更新开发者指南导航。
 - 2026-04-30：Workflow 运行参数契约与运行模板 UI 已同步到开发者入口。`docs/03-developer-guide/{index.md,module-structure.md,reference-sdk-and-cli.md}` 与 `docs/04-project-development/04-design/module-config-runtime-data-contract.md` 现统一说明 `module.yaml.workflows[].parameters[]`、支持的数据类型、SDK 校验和 `RunProfile.execution.params` 注入链路；`.factory/memory/` 已同步登记。
-- 2026-04-30：使用者指南与开发者指南版本分流方案已形成。新增 `docs/04-project-development/03-requirements/0.4.0-guide-versioning-requirements.md` 与 `docs/04-project-development/04-design/0.4.0-guide-versioning-architecture.md`，明确 docs-stratego 网站主文档必须指向当前已发布版本，旧版本指南保留为历史版本入口，0.4.0 未发布前只能作为开发版预览。
+- 2026-04-30：使用者指南与开发者指南版本分流方案已形成。新增 `docs/04-project-development/03-requirements/0.4.0-guide-versioning-requirements.md` 与 `docs/04-project-development/04-design/0.4.0-guide-versioning-architecture.md`，明确 docs-stratego 网站主文档必须指向当前已发布版本，旧版本指南保留为历史版本入口；0.4.0 源码文档入口的当前主线状态已在 2026-05-01 同步覆盖。
 - 2026-04-30：0.4.0 正式架构方向调整为装饰器对象装配。新增 `docs/04-project-development/03-requirements/0.4.0-decorator-object-assembly-requirements.md` 与 `docs/04-project-development/04-design/0.4.0-decorator-object-assembly-architecture.md`，明确 workflow 不再声明参数，参数归属 component 创建；interfaces/components/workflows/page actions/data tables 由装饰器扫描生成运行时对象图，Core 负责每任务环境对象装配，SDK/Contracts 同步进入 v2 重构；SDK 打开阶段、DevLink、`check full` 与打包阶段需前置阻断宿主保留数据库字段冲突。
 - 2026-04-25：公共 `MessageDialog` 已按“安装模块”面板视觉重做，`StyledButton` 增加成功态动作按钮；安装模块弹窗和多处简单提示/确认已改用公共组件。剩余未迁移的 `QMessageBox` 已收敛到环境/模块列表异步流程与任务中止三按钮流程，需后续补齐公共异步/多动作弹窗能力。
 - 2026-04-25：IP 测试结果弹窗已从局部 `QMessageBox` 收口到公共 `MessageDialog`，并同步移除 `env_ip_bindings` / `configs` 的初始化与运行依赖；已有用户库旧表只通过显式 SQL 清理，不写入启动迁移代码。
@@ -104,7 +106,7 @@
 - 2026-04-17：按用户要求执行了 3 个专业产品文档子 agent 分工重写和 6 个普通用户子 agent 两轮苛刻复核。普通用户首轮反馈为 `3 PASS / 3 FAIL`，集中指出入口顺序、参数来源、运行模板入口、状态决策和结果入口收束仍不够傻瓜；二次修订后，第二轮 6 个普通用户子 agent 全部给出 `PASS`，并明确表示愿意将当前 `docs/02-user-guide/` 原样发给新同事使用。
 - 2026-04-17：`docs/04-project-development/06-testing-verification/` 新增 `ctrip-real-site-e2e-closeout.md`，把真实站点 E2E 的前置条件、Phase A/B/C 执行顺序、证据要求与放行条件收敛为单一正式入口；发布/运维阅读路径已同步纳入该页。
 - 2026-04-17：`docs/03-developer-guide/` 已从旧多层目录重排为产品式平铺结构，首页改为正式开发者入口页，`Quick Start`、`Guide`、`Reference`、调试、交付与排障全部一级直达；旧迁移页与对应入口已下线。
-- 2026-04-17：开发者指南中的 CLI 命令面已再次对齐到当前本地 `crawler4j-sdk` 实现，统一使用 `module/task/workflow/page/data-table/env-selector/config/package/release/host/check` 分组命令；文档不再固定 `crawler4j-sdk==某个版本`，`reference-sdk-and-cli.md` 的总表与最小安全顺序已补成完整可复制命令。
+- 2026-04-17：历史记录：开发者指南中的 CLI 命令面当时对齐到 0.3.x `crawler4j-sdk`，使用 `module/task/workflow/page/data-table/env-selector/config/package/release/host/check` 分组命令；当前 0.4.0 命令面以 `docs/03-developer-guide/v0.4.0/` 和 2026-05-01 CLI help 证据为准。
 - 2026-04-17：`docs/03-developer-guide/` 已根据 6 个“小白模块开发者”子 agent 的两轮苛刻复核继续补强：新增 `--repo` 占位值说明、`module set default-workflow`、`ui:DashboardPage` / `ui/__init__.py` 导出关系、`TaskResult.data` / `run_subtask()` 真实语义、CLI 宿主桥接与宿主 UI 安装的互斥路径、DevLink/ATM 最短调试判据，以及 `core:data_table` / 调试 / 排障分叉清单；最终 6 个子 agent 全部给出 PASS。
 - 2026-04-17：`docs/02-user-guide/configuration.md`、`docs/04-project-development/04-design/module-config-runtime-data-contract.md` 与开发者指南相关章节已统一模块配置 / 运行态 / 单次运行内状态 / 数据表边界；`core:data_table` schema / records 当前只读写 `data.db`，运行时代码不包含旧 `state.db.kv_store` 自动迁移逻辑。
 - 2026-04-18：开发者指南与模块运行时数据契约已补齐“快照数据 vs 审计事件”的统一口径：`db.list_records` / `db.replace_records` 与 `core:data_table` 继续只服务当前快照，append-only 历史单独归到审计事件通道；精确工具签名和持久化表名继续以当前宿主实现为准。

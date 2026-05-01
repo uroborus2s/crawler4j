@@ -10,6 +10,7 @@ import src.core.atm.runtime_capabilities as runtime_capabilities
 from src.core.atm.runtime_capabilities import (
     ClickCaptchaMatchResult,
     ClickCaptchaOrderedTarget,
+    HostedUIDeclarationBuffer,
     RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES,
     RUNTIME_SURFACE_ENV_CANDIDATES,
     RUNTIME_SURFACE_HOSTED_UI_DECLARE,
@@ -56,6 +57,34 @@ def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) ->
     get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
 
 
+def _sync_custom_accounts(module_root, *, module_name: str, resource_id: str = "accounts") -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+    from src.core.persistence import get_module_data_store
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [
+                {
+                    "id": resource_id,
+                    "storage_mode": "custom_table",
+                    "record_key_field": "id",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "text", "required": True},
+                            {"name": "status", "type": "text"},
+                        ],
+                    },
+                }
+            ],
+            "views": [],
+            "queries": [],
+            "seeds": [],
+        }
+    )
+    get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
+
+
 def test_runtime_tools_register_expected_surface():
     caps = build_runtime_capabilities("demo_module")
 
@@ -66,8 +95,8 @@ def test_runtime_tools_register_expected_surface():
     assert caps.tools.has_tool("env.mark_resource_pool_ineligible") is False
     assert caps.tools.has_tool("env.remove_resource_pool") is False
     assert caps.tools.has_tool("env.replace_resource_pool_snapshot") is False
-    assert caps.tools.has_tool("ui.declare_page") is True
-    assert caps.tools.has_tool("ui.get_page") is True
+    assert caps.tools.has_tool("ui.declare_page") is False
+    assert caps.tools.has_tool("ui.get_page") is False
     assert caps.tools.has_tool("ui.declare_data_table") is False
     assert caps.tools.has_tool("ui.get_data_table") is False
     assert caps.tools.has_tool("captcha.match_slider") is True
@@ -206,6 +235,51 @@ def test_runtime_ctx_db_replaces_public_db_tools(temp_data_dir):
     assert rows == [{"id": "u2"}]
 
 
+def test_runtime_ctx_db_supports_upsert_update_delete_and_batch(temp_data_dir):
+    _sync_custom_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert caps.db.into("accounts").upsert(
+        [
+            {"id": "u1", "status": "new"},
+            {"id": "u2", "status": "expired"},
+        ]
+    ) is True
+    assert caps.db.into("accounts").update_where(
+        {"status": "ready"},
+        where={"id": "u1"},
+    ) == 1
+    assert caps.db.into("accounts").delete_where("status", "eq", "expired") == 1
+
+    results = caps.db.batch().upsert("accounts", [{"id": "u3", "status": "ready"}]).audit(
+        "account_events",
+        {"entity_key": "u3", "event_type": "created", "created_at": 100},
+    ).execute()
+
+    assert results[0] is True
+    assert isinstance(results[1], str)
+    assert caps.db.from_("accounts").order_by("id").execute() == [
+        {"id": "u1", "status": "ready"},
+        {"id": "u3", "status": "ready"},
+    ]
+    assert caps.db.audit("account_events").query(entity_key="u3") == [
+        {
+            "id": results[1],
+            "module_name": "demo_module",
+            "dataset_name": "account_events",
+            "entity_key": "u3",
+            "event_type": "created",
+            "run_id": None,
+            "previous_status": None,
+            "next_status": None,
+            "result": None,
+            "reason": None,
+            "payload": {},
+            "created_at": 100,
+        }
+    ]
+
+
 def test_runtime_ctx_db_audit_uses_independent_audit_table(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
 
@@ -324,8 +398,25 @@ def test_env_resource_pool_tools_are_removed(tool_name):
         caps.tools.call(tool_name)
 
 
-def test_ui_tools_persist_page_meta(monkeypatch):
+def test_full_surface_rejects_legacy_hosted_ui_tools():
     caps = build_runtime_capabilities("demo_module")
+
+    assert caps.tools.has_tool("ui.declare_page") is False
+    assert caps.tools.has_tool("ui.get_page") is False
+
+    with pytest.raises(KeyError, match=r"Unknown core tool: ui.declare_page"):
+        caps.tools.call("ui.declare_page", page_id="dashboard", schema={"type": "Page", "children": []})
+    with pytest.raises(KeyError, match=r"Unknown core tool: ui.get_page"):
+        caps.tools.call("ui.get_page", page_id="dashboard")
+
+
+def test_ui_tools_stage_page_meta_in_declare_buffer(monkeypatch):
+    buffer = HostedUIDeclarationBuffer()
+    caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+        ui_declaration_buffer=buffer,
+    )
     assert caps.tools.call(
         "ui.declare_page",
         page_id="dashboard",
@@ -363,7 +454,12 @@ def test_ui_tools_persist_page_meta(monkeypatch):
         },
     )
 
-    page = caps.tools.call("ui.get_page", page_id="dashboard")
+    readonly_caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
+        declared_page_schemas=buffer.page_schemas,
+    )
+    page = readonly_caps.tools.call("ui.get_page", page_id="dashboard")
     assert page["load_handler"] == "load_dashboard_page"
     assert page["children"][0] == {
         "type": "Text",
@@ -384,8 +480,13 @@ def test_ui_tools_persist_page_meta(monkeypatch):
     }
 
 
-def test_ui_tools_persist_navigation_params_with_page_ids():
-    caps = build_runtime_capabilities("demo_module")
+def test_ui_tools_stage_navigation_params_with_page_ids():
+    buffer = HostedUIDeclarationBuffer()
+    caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+        ui_declaration_buffer=buffer,
+    )
 
     assert caps.tools.call(
         "ui.declare_page",
@@ -423,7 +524,12 @@ def test_ui_tools_persist_navigation_params_with_page_ids():
         },
     )
 
-    page = caps.tools.call("ui.get_page", page_id="dashboard")
+    readonly_caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
+        declared_page_schemas=buffer.page_schemas,
+    )
+    page = readonly_caps.tools.call("ui.get_page", page_id="dashboard")
 
     assert page["children"][0]["action"] == {
         "type": "open_page",
@@ -453,7 +559,12 @@ def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
 
     monkeypatch.setattr(runtime_capabilities, "sdk_normalize_page_schema", fake_normalize_page_schema)
 
-    caps = build_runtime_capabilities("demo_module")
+    buffer = HostedUIDeclarationBuffer()
+    caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+        ui_declaration_buffer=buffer,
+    )
     assert caps.tools.call(
         "ui.declare_page",
         page_id="dashboard",
@@ -461,7 +572,7 @@ def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
     )
 
     assert page_calls == [("dashboard", {"type": "Page", "children": []})]
-    assert caps.tools.call("ui.get_page", page_id="dashboard") == {
+    assert buffer.page_schemas["dashboard"] == {
         "type": "Page",
         "title": "normalized:dashboard",
         "children": [],
@@ -469,7 +580,12 @@ def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
 
 
 def test_ui_tools_reject_unmanaged_schema_fields():
-    caps = build_runtime_capabilities("demo_module")
+    buffer = HostedUIDeclarationBuffer()
+    caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+        ui_declaration_buffer=buffer,
+    )
 
     with pytest.raises(ValueError):
         caps.tools.call(

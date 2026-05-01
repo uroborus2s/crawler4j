@@ -46,7 +46,7 @@ def resolve_job_debug_target(
         job=job,
         run_profile=run_profile,
         module=module,
-        workflow=run_profile.execution.workflow or "default",
+        workflow=run_profile.execution.workflow,
         object_bindings=dict(run_profile.execution.object_bindings),
         object_params=dict(run_profile.execution.object_params),
         timeout=run_profile.execution.timeout,

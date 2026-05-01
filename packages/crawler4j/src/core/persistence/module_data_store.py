@@ -11,6 +11,7 @@ from typing import Any
 
 from src.core.mms.data_contract import load_sql_file, validate_resource_sql, validate_seed_file
 from src.core.persistence.database import DATA_DB, get_connection
+from src.core.persistence.write_coordinator import get_db_write_coordinator
 
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _STORAGE_MODES = {"managed_dataset", "custom_table"}
@@ -381,6 +382,66 @@ def _normalize_plan_offset(raw: Any) -> int:
     return value
 
 
+def _normalize_write_fields(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("write fields must be a non-empty object")
+    return {
+        _validate_snake_case_identifier(str(field)): value
+        for field, value in raw.items()
+    }
+
+
+def _render_custom_table_where_clause(
+    column_map: dict[str, dict[str, Any]],
+    where: Any,
+    *,
+    require_where: bool,
+) -> tuple[str, list[Any]]:
+    normalized_where = _normalize_plan_where(where)
+    if require_where and not normalized_where:
+        raise ValueError("write where must not be empty")
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    for item in normalized_where:
+        field = item["field"]
+        column = column_map.get(field)
+        if column is None:
+            raise ValueError(f"write where field not found: {field}")
+        field_sql = _quote_identifier(field)
+        op = item["op"]
+        if op == "is_null":
+            clauses.append(f"{field_sql} IS NULL")
+        elif op == "eq":
+            clauses.append(f"{field_sql} = ?")
+            params.append(_sqlite_value_for_custom_table_column(item.get("value"), column_type=column["type"]))
+        elif op == "in":
+            values = list(item.get("value") or [])
+            if not values:
+                clauses.append("1 = 0")
+            else:
+                clauses.append(f"{field_sql} IN ({', '.join(['?'] * len(values))})")
+                params.extend(
+                    _sqlite_value_for_custom_table_column(value, column_type=column["type"])
+                    for value in values
+                )
+        elif op == "between":
+            values = list(item.get("value") or [])
+            if len(values) != 2:
+                raise ValueError("between filter value must contain two items")
+            clauses.append(f"{field_sql} BETWEEN ? AND ?")
+            params.extend(
+                _sqlite_value_for_custom_table_column(value, column_type=column["type"])
+                for value in values
+            )
+        else:
+            sql_op = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<=", "like": "LIKE"}[op]
+            clauses.append(f"{field_sql} {sql_op} ?")
+            params.append(_sqlite_value_for_custom_table_column(item.get("value"), column_type=column["type"]))
+
+    return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), params
+
+
 def _plan_has_aggregate(select_items: list[dict[str, Any]]) -> bool:
     return any(item.get("kind") == "aggregate" for item in select_items)
 
@@ -590,6 +651,22 @@ def _python_value_for_custom_table_column(value: Any, *, column_type: str) -> An
         except (TypeError, ValueError):
             return value
     return value
+
+
+def _resource_write_lock_key(module_name: str, resource_id: str) -> str:
+    return f"data:{module_name}:{resource_id}"
+
+
+def _audit_write_lock_key(module_name: str, dataset_name: str) -> str:
+    return f"audit:{module_name}:{dataset_name}"
+
+
+def _module_write_lock_key(module_name: str) -> str:
+    return f"module:{module_name}"
+
+
+def _page_write_lock_key(module_name: str, page_id: str) -> str:
+    return f"page:{module_name}:{page_id}"
 
 
 class ModuleDataStore:
@@ -1271,6 +1348,145 @@ class ModuleDataStore:
                 prepared_rows,
             )
 
+    def _upsert_custom_table_rows_with_conn(
+        self,
+        conn,
+        resource: dict[str, Any],
+        records: list[dict[str, Any]],
+        *,
+        now: int,
+    ) -> None:
+        physical_table_name = resource["physical_table_name"]
+        table_identifier = _quote_identifier(physical_table_name)
+        self._ensure_custom_table_with_conn(conn, resource)
+        column_defs = self._custom_table_schema_columns(resource)
+        column_names = [column["name"] for column in column_defs]
+        record_key_field = resource["record_key_field"]
+        seen_keys: set[str] = set()
+        prepared_rows: list[tuple[Any, ...]] = []
+        for record_index, original_record in enumerate(records):
+            record = dict(original_record)
+            record_key = _record_key_for_write(
+                record,
+                record_index,
+                record_key_field=record_key_field,
+                require_key=True,
+            )
+            if record_key is None:
+                raise ValueError("custom table records require a record_key")
+            if record_key in seen_keys:
+                raise ValueError(f"duplicate custom table record_key: {record_key}")
+            seen_keys.add(record_key)
+            if record_key_field not in record:
+                record[record_key_field] = record_key
+
+            unexpected_fields = sorted(set(record) - set(column_names))
+            if unexpected_fields:
+                raise ValueError(
+                    f"custom table records contain undefined columns for {physical_table_name}: "
+                    f"{', '.join(unexpected_fields)}"
+                )
+
+            row_values: list[Any] = []
+            for column in column_defs:
+                column_name = column["name"]
+                if column_name not in record:
+                    if not column["nullable"]:
+                        raise ValueError(
+                            f"custom table records missing required column {column_name} for {physical_table_name}"
+                        )
+                    row_values.append(None)
+                    continue
+                row_values.append(
+                    _sqlite_value_for_custom_table_column(record[column_name], column_type=column["type"])
+                )
+            prepared_rows.append(tuple(row_values + [now, now]))
+
+        if not prepared_rows:
+            return
+
+        insert_columns = [_quote_identifier(column) for column in column_names] + ["created_at", "updated_at"]
+        insert_params = ", ".join(["?"] * (len(column_names) + 2))
+        update_columns = [
+            f"{_quote_identifier(column)} = excluded.{_quote_identifier(column)}"
+            for column in column_names
+            if column != record_key_field
+        ]
+        update_columns.append("updated_at = excluded.updated_at")
+        conn.executemany(
+            f"""
+            INSERT INTO {table_identifier} ({", ".join(insert_columns)})
+            VALUES ({insert_params})
+            ON CONFLICT({_quote_identifier(record_key_field)}) DO UPDATE SET
+                {", ".join(update_columns)}
+            """,
+            prepared_rows,
+        )
+
+    def _update_custom_table_rows_with_conn(
+        self,
+        conn,
+        resource: dict[str, Any],
+        fields: dict[str, Any],
+        *,
+        where: Any,
+        now: int,
+    ) -> int:
+        self._ensure_custom_table_with_conn(conn, resource)
+        column_defs = self._custom_table_schema_columns(resource)
+        column_map = {column["name"]: column for column in column_defs}
+        record_key_field = resource["record_key_field"]
+        normalized_fields = _normalize_write_fields(fields)
+        if record_key_field in normalized_fields:
+            raise ValueError(f"custom table record key cannot be updated: {record_key_field}")
+        unexpected_fields = sorted(set(normalized_fields) - set(column_map))
+        if unexpected_fields:
+            raise ValueError(
+                f"custom table update contains undefined columns for {resource['physical_table_name']}: "
+                f"{', '.join(unexpected_fields)}"
+            )
+
+        assignments: list[str] = []
+        params: list[Any] = []
+        for field, value in normalized_fields.items():
+            column = column_map[field]
+            assignments.append(f"{_quote_identifier(field)} = ?")
+            params.append(_sqlite_value_for_custom_table_column(value, column_type=column["type"]))
+        assignments.append("updated_at = ?")
+        params.append(now)
+        where_sql, where_params = _render_custom_table_where_clause(column_map, where, require_where=True)
+        table_identifier = _quote_identifier(resource["physical_table_name"])
+        cursor = conn.execute(
+            f"""
+            UPDATE {table_identifier}
+            SET {", ".join(assignments)}
+            {where_sql}
+            """,
+            tuple(params + where_params),
+        )
+        return int(cursor.rowcount or 0)
+
+    def _delete_custom_table_rows_with_conn(
+        self,
+        conn,
+        resource: dict[str, Any],
+        *,
+        where: Any,
+    ) -> int:
+        self._ensure_custom_table_with_conn(conn, resource)
+        column_defs = self._custom_table_schema_columns(resource)
+        column_map = {column["name"]: column for column in column_defs}
+        where_sql, where_params = _render_custom_table_where_clause(column_map, where, require_where=True)
+        table_identifier = _quote_identifier(resource["physical_table_name"])
+        cursor = conn.execute(
+            f"""
+            DELETE FROM {table_identifier}
+            {where_sql}
+            """,
+            tuple(where_params),
+        )
+        return int(cursor.rowcount or 0)
+
     def _read_custom_table_rows_with_conn(
         self,
         conn,
@@ -1300,20 +1516,196 @@ class ModuleDataStore:
 
     def _replace_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
         now = int(time.time())
-        with get_connection(DATA_DB) as conn:
-            resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
-            if resource["storage_mode"] == "custom_table":
-                self._write_custom_table_rows_with_conn(conn, resource, records, now=now)
-            else:
-                self._write_managed_dataset_rows_with_conn(
-                    conn,
-                    module_name,
-                    resource["logical_name"],
-                    records,
-                    record_key_field=resource["record_key_field"],
-                    now=now,
-                )
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_resource_write_lock_key(module_name, resource_id)],
+            operation=lambda conn: self._replace_resource_records_with_conn(
+                conn,
+                module_name,
+                resource_id,
+                records,
+                now=now,
+            ),
+        )
+
+    def _replace_resource_records_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource_id: str,
+        records: list[dict[str, Any]],
+        *,
+        now: int,
+    ) -> bool:
+        resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
+        if resource["storage_mode"] == "custom_table":
+            self._write_custom_table_rows_with_conn(conn, resource, records, now=now)
+        else:
+            self._write_managed_dataset_rows_with_conn(
+                conn,
+                module_name,
+                resource["logical_name"],
+                records,
+                record_key_field=resource["record_key_field"],
+                now=now,
+            )
         return True
+
+    def _upsert_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
+        now = int(time.time())
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_resource_write_lock_key(module_name, resource_id)],
+            operation=lambda conn: self._upsert_resource_records_with_conn(
+                conn,
+                module_name,
+                resource_id,
+                records,
+                now=now,
+            ),
+        )
+
+    def _upsert_resource_records_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource_id: str,
+        records: list[dict[str, Any]],
+        *,
+        now: int,
+    ) -> bool:
+        resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
+        if resource["storage_mode"] != "custom_table":
+            raise ValueError(f"upsert only supports custom_table resources: {resource_id}")
+        self._upsert_custom_table_rows_with_conn(conn, resource, records, now=now)
+        return True
+
+    def _update_resource_records(
+        self,
+        module_name: str,
+        resource_id: str,
+        fields: dict[str, Any],
+        *,
+        where: Any,
+    ) -> int:
+        now = int(time.time())
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_resource_write_lock_key(module_name, resource_id)],
+            operation=lambda conn: self._update_resource_records_with_conn(
+                conn,
+                module_name,
+                resource_id,
+                fields,
+                where=where,
+                now=now,
+            ),
+        )
+
+    def _update_resource_records_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource_id: str,
+        fields: dict[str, Any],
+        *,
+        where: Any,
+        now: int,
+    ) -> int:
+        resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
+        if resource["storage_mode"] != "custom_table":
+            raise ValueError(f"update_where only supports custom_table resources: {resource_id}")
+        return self._update_custom_table_rows_with_conn(conn, resource, fields, where=where, now=now)
+
+    def _delete_resource_records(self, module_name: str, resource_id: str, *, where: Any) -> int:
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_resource_write_lock_key(module_name, resource_id)],
+            operation=lambda conn: self._delete_resource_records_with_conn(
+                conn,
+                module_name,
+                resource_id,
+                where=where,
+            ),
+        )
+
+    def _delete_resource_records_with_conn(self, conn, module_name: str, resource_id: str, *, where: Any) -> int:
+        resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
+        if resource["storage_mode"] != "custom_table":
+            raise ValueError(f"delete_where only supports custom_table resources: {resource_id}")
+        return self._delete_custom_table_rows_with_conn(conn, resource, where=where)
+
+    def _execute_write_operation_with_conn(
+        self,
+        conn,
+        module_name: str,
+        operation: dict[str, Any],
+        *,
+        now: int,
+    ) -> Any:
+        kind = str(operation.get("kind") or "")
+        if kind == "replace_records":
+            return self._replace_resource_records_with_conn(
+                conn,
+                module_name,
+                str(operation.get("resource") or ""),
+                _normalize_records_for_write(operation.get("records")),
+                now=now,
+            )
+        if kind == "upsert_records":
+            return self._upsert_resource_records_with_conn(
+                conn,
+                module_name,
+                str(operation.get("resource") or ""),
+                _normalize_records_for_write(operation.get("records")),
+                now=now,
+            )
+        if kind == "update_records":
+            return self._update_resource_records_with_conn(
+                conn,
+                module_name,
+                str(operation.get("resource") or ""),
+                _normalize_write_fields(operation.get("fields")),
+                where=operation.get("where"),
+                now=now,
+            )
+        if kind == "delete_records":
+            return self._delete_resource_records_with_conn(
+                conn,
+                module_name,
+                str(operation.get("resource") or ""),
+                where=operation.get("where"),
+            )
+        if kind == "append_audit_event":
+            return self._append_audit_event_row_with_conn(
+                conn,
+                module_name,
+                str(operation.get("dataset") or ""),
+                dict(operation.get("event") or {}),
+            )
+        raise ValueError(f"unsupported write operation kind: {kind}")
+
+    def _execute_write_batch(self, module_name: str, operations: list[dict[str, Any]]) -> list[Any]:
+        now = int(time.time())
+        lock_keys = [_module_write_lock_key(module_name)]
+        for operation in operations:
+            lock_keys.extend(self._write_operation_lock_keys(module_name, operation))
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=lock_keys,
+            operation=lambda conn: [
+                self._execute_write_operation_with_conn(conn, module_name, operation, now=now)
+                for operation in operations
+            ],
+        )
+
+    def _write_operation_lock_keys(self, module_name: str, operation: dict[str, Any]) -> list[str]:
+        kind = str(operation.get("kind") or "")
+        if kind in {"replace_records", "upsert_records", "update_records", "delete_records"}:
+            return [_resource_write_lock_key(module_name, str(operation.get("resource") or ""))]
+        if kind == "append_audit_event":
+            return [_audit_write_lock_key(module_name, str(operation.get("dataset") or ""))]
+        return [_module_write_lock_key(module_name)]
 
     def _read_resource_records(self, module_name: str, resource_id: str) -> list[dict[str, Any]] | None:
         with get_connection(DATA_DB) as conn:
@@ -1323,6 +1715,13 @@ class ModuleDataStore:
             return self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"])
 
     def _append_audit_event_row(self, module_name: str, dataset_name: str, event: dict[str, Any]) -> str:
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_audit_write_lock_key(module_name, dataset_name)],
+            operation=lambda conn: self._append_audit_event_row_with_conn(conn, module_name, dataset_name, event),
+        )
+
+    def _append_audit_event_row_with_conn(self, conn, module_name: str, dataset_name: str, event: dict[str, Any]) -> str:
         event_type = _normalize_text(event.get("event_type"))
         if event_type is None:
             raise ValueError("audit event_type is required")
@@ -1330,40 +1729,39 @@ class ModuleDataStore:
         event_id = _normalize_text(event.get("id")) or str(uuid.uuid4())
         payload = _normalize_payload(event.get("payload"))
         created_at = _normalize_timestamp(event.get("created_at"))
-        with get_connection(DATA_DB) as conn:
-            conn.execute(
-                """
-                INSERT INTO module_audit_events (
-                    id,
-                    module_name,
-                    dataset_name,
-                    entity_key,
-                    event_type,
-                    run_id,
-                    previous_status,
-                    next_status,
-                    result,
-                    reason,
-                    payload_json,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    module_name,
-                    dataset_name,
-                    _normalize_text(event.get("entity_key")),
-                    event_type,
-                    _normalize_text(event.get("run_id")),
-                    _normalize_text(event.get("previous_status")),
-                    _normalize_text(event.get("next_status")),
-                    _normalize_text(event.get("result")),
-                    _normalize_text(event.get("reason")),
-                    json.dumps(payload, ensure_ascii=False),
-                    created_at,
-                ),
+        conn.execute(
+            """
+            INSERT INTO module_audit_events (
+                id,
+                module_name,
+                dataset_name,
+                entity_key,
+                event_type,
+                run_id,
+                previous_status,
+                next_status,
+                result,
+                reason,
+                payload_json,
+                created_at
             )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                module_name,
+                dataset_name,
+                _normalize_text(event.get("entity_key")),
+                event_type,
+                _normalize_text(event.get("run_id")),
+                _normalize_text(event.get("previous_status")),
+                _normalize_text(event.get("next_status")),
+                _normalize_text(event.get("result")),
+                _normalize_text(event.get("reason")),
+                json.dumps(payload, ensure_ascii=False),
+                created_at,
+            ),
+        )
         return event_id
 
     def _query_audit_event_rows(
@@ -1459,9 +1857,11 @@ class ModuleDataStore:
 
     def _write_page_row(self, module_name: str, page_id: str, schema: dict[str, Any]) -> bool:
         now = int(time.time())
-        with get_connection(DATA_DB) as conn:
-            self._write_page_row_with_conn(conn, module_name, page_id, schema, now=now)
-        return True
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_page_write_lock_key(module_name, page_id)],
+            operation=lambda conn: self._write_page_row_with_conn(conn, module_name, page_id, schema, now=now) or True,
+        )
 
     def _write_page_row_with_conn(
         self,
@@ -2048,6 +2448,30 @@ class ModuleDataStore:
     def replace_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
         return self._replace_resource_records(module_name, resource_id, _normalize_records_for_write(records))
 
+    def upsert_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
+        return self._upsert_resource_records(module_name, resource_id, _normalize_records_for_write(records))
+
+    def update_resource_records(
+        self,
+        module_name: str,
+        resource_id: str,
+        fields: dict[str, Any],
+        *,
+        where: Any,
+    ) -> int:
+        return self._update_resource_records(module_name, resource_id, fields, where=where)
+
+    def delete_resource_records(self, module_name: str, resource_id: str, *, where: Any) -> int:
+        return self._delete_resource_records(module_name, resource_id, where=where)
+
+    def execute_write_batch(self, module_name: str, operations: list[dict[str, Any]]) -> list[Any]:
+        if not isinstance(operations, list):
+            raise ValueError("write batch operations must be a list")
+        return self._execute_write_batch(
+            module_name,
+            [dict(operation) for operation in operations if isinstance(operation, dict)],
+        )
+
     def append_audit_event(
         self,
         module_name: str,
@@ -2101,6 +2525,8 @@ class ModuleDataStore:
         view_ids = {item["view_id"] for item in manifest_data["views"]}
 
         with get_connection(DATA_DB) as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             for resource in manifest_data["resources"]:
                 current = self._read_resource_row_with_conn(conn, module_name, resource["resource_id"])
                 updated = self._write_resource_row_with_conn(
@@ -2231,6 +2657,8 @@ class ModuleDataStore:
         changed = bool(normalized_pages)
         now = int(time.time())
         with get_connection(DATA_DB) as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
                 "DELETE FROM module_pages WHERE module_name = ?",
                 (module_name,),
@@ -2246,6 +2674,8 @@ class ModuleDataStore:
         changed = False
 
         with get_connection(DATA_DB) as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             for db_view in self._list_db_view_rows_with_conn(conn, module_name):
                 physical_view_name = db_view["physical_view_name"]
                 cleanup_policy = str(db_view.get("cleanup_policy") or "")

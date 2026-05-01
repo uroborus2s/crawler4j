@@ -21,6 +21,8 @@ from src.utils import paths
 CONFIG_DB = "config.db"
 STATE_DB = "state.db"
 DATA_DB = "data.db"
+DB_BUSY_TIMEOUT_SECONDS = 5.0
+DB_BUSY_TIMEOUT_MS = int(DB_BUSY_TIMEOUT_SECONDS * 1000)
 
 # 线程本地存储
 _thread_local = threading.local()
@@ -126,9 +128,10 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
         conn = None
     
     if conn is None:
-        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        conn = sqlite3.connect(str(db_path), timeout=DB_BUSY_TIMEOUT_SECONDS, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS}")
         conn.execute("PRAGMA foreign_keys=ON")
         setattr(_thread_local, conn_key, conn)
         setattr(_thread_local, conn_path_key, str(db_path))

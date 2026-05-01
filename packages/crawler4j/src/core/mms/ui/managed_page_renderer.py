@@ -50,7 +50,7 @@ def _runtime_surface_hosted_ui_action():
 
 
 class ManagedPageRenderer(QWidget):
-    """Render `ui.declare_page` declared hosted pages."""
+    """Render hosted pages declared with @page decorators."""
 
     def __init__(
         self,

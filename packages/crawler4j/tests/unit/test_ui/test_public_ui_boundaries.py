@@ -9,7 +9,7 @@ CORE_UI_ROOT = PROJECT_ROOT / "packages" / "crawler4j" / "src" / "core"
 PUBLIC_UI_REFACTORED_PAGES = (
     PROJECT_ROOT / "packages" / "crawler4j" / "src" / "ui" / "dashboard.py",
     CORE_UI_ROOT / "atm" / "ui" / "run_profile_dialog.py",
-    CORE_UI_ROOT / "atm" / "ui" / "task_confirmation_dialog.py",
+    CORE_UI_ROOT / "atm" / "ui" / "task_create_dialog.py",
     CORE_UI_ROOT / "atm" / "ui" / "task_detail_dialog.py",
     CORE_UI_ROOT / "atm" / "ui" / "task_debug_dialog.py",
     CORE_UI_ROOT / "mms" / "ui" / "module_detail_page.py",

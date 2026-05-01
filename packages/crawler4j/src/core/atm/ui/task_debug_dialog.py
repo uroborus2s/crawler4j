@@ -61,7 +61,7 @@ class JobDebugDialog(QDialog):
             job=job,
             run_profile=run_profile,
             module=module,
-            workflow=run_profile.execution.workflow if run_profile.execution else "default",
+            workflow=run_profile.execution.workflow if run_profile.execution else "",
             object_bindings=dict(run_profile.execution.object_bindings if run_profile.execution else {}),
             object_params=dict(run_profile.execution.object_params if run_profile.execution else {}),
             timeout=run_profile.execution.timeout if run_profile.execution else 0,
@@ -140,7 +140,7 @@ class JobDebugDialog(QDialog):
             ("作业 ID", self._job.id),
             ("运行配置", self._runtime_label),
             ("模块", self._target.module.name),
-            ("工作流", self._target.workflow or "default"),
+            ("工作流", self._target.workflow or "自动解析"),
             (
                 "资源",
                 self._run_profile.resource.acquisition.provider

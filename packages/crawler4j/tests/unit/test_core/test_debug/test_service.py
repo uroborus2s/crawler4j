@@ -138,6 +138,22 @@ def _make_inline_job() -> Job:
     )
 
 
+def _make_auto_workflow_job() -> Job:
+    return Job(
+        id="job-auto",
+        name="Auto Workflow Job",
+        run_profile=_make_run_profile().model_copy(
+            update={
+                "execution": ExecutionContext(
+                    module="demo_module",
+                    workflow="",
+                    timeout=300,
+                )
+            }
+        ),
+    )
+
+
 def _make_candidate_job() -> Job:
     return Job(
         id="job-candidate",
@@ -243,6 +259,22 @@ async def test_debug_service_tracks_worker_events_and_logs(monkeypatch, temp_dat
     assert "job_params" not in payload
     assert "params" not in payload
     assert payload["creation_params"] == {"region": "cn"}
+
+
+@pytest.mark.asyncio
+async def test_debug_service_preserves_blank_workflow_for_v2_descriptor_resolution(temp_data_dir):
+    from src.core.debug.models import DebugSessionRequest
+    from src.core.debug.service import DebugService
+
+    job = _make_auto_workflow_job()
+    service = DebugService(
+        registry=_make_registry(temp_data_dir / "demo_module"),
+        task_service=SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None),
+    )
+
+    session = await service.create_session(DebugSessionRequest(job_id=job.id))
+
+    assert session.workflow == ""
 
 
 @pytest.mark.asyncio

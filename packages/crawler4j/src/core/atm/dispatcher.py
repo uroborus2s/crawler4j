@@ -166,7 +166,7 @@ class TaskDispatcher:
         if not module_name:
             raise ValueError("Execution module name is empty. Cannot dispatch task.")
 
-        workflow_name = run_profile.execution.workflow or "default"
+        workflow_name = run_profile.execution.workflow
         is_dev_link = self._is_dev_link_module(module_name)
 
         request = ExecutionRequest(

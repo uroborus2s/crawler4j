@@ -84,7 +84,7 @@ class Job:
     trigger: TriggerConfig = field(default_factory=TriggerConfig)
     concurrency_target: int = 1  # 期望并发数
     
-    # 运行时参数 (覆盖 RunProfile 默认值)
+    # 旧作业元数据；0.4.0 不会注入 ctx.runtime 或 workflow。
     params: Dict[str, Any] = field(default_factory=dict)
     
     # 状态

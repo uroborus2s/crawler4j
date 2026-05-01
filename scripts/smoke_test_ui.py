@@ -32,8 +32,8 @@ async def _check_shell_structure(qt_app) -> None:
             qt_app.processEvents()
             await asyncio.sleep(0)
             assert shell.windowTitle() == "蛛行演略 · crawler4j"
-            assert shell.sidebar.nav_list.count() == 6
-            assert shell.content_stack.count() == 7
+            assert shell.sidebar.nav_list.count() == len(shell.sidebar.NAV_ITEMS)
+            assert shell.content_stack.count() == len(shell._pages)
             print("Shell structure verified.")
         finally:
             shell.close()
