@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import textwrap
 from dataclasses import dataclass
 from typing import Any
 
@@ -296,6 +297,198 @@ class CreateEnvDialog(QDialog):
             provider,
             config,
         )
+
+
+class CleanupPreviewDialog(QDialog):
+    """批量清理确认弹窗。"""
+
+    TABLE_SCHEMA = {
+        "columns": [
+            {"key": "__index__", "label": "#", "type": "int", "width": 56, "align": "center"},
+            {"key": "env_id", "label": "环境ID", "type": "int", "width": 84, "align": "center"},
+            {"key": "env_name", "label": "环境名", "type": "text", "stretch": True},
+            {"key": "provider", "label": "Provider", "type": "text", "width": 150},
+            {"key": "sources", "label": "来源", "type": "text", "width": 240},
+        ],
+        "row_height": 72,
+        "selection_mode": "none",
+        "features": {
+            "search": {"enabled": True, "placeholder": "搜索环境ID / 环境名 / 来源…"},
+            "sort": {"enabled": True, "default": [{"field": "env_id", "direction": "asc"}]},
+            "pagination": {"enabled": True, "page_size": 10, "page_size_options": [10, 20, 50]},
+            "loading": {"inline": False, "disable_interaction": False},
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        eligible_items: list[Any],
+        skipped_count: int,
+        error_count: int,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._eligible_items = list(eligible_items)
+        self._skipped_count = max(0, int(skipped_count))
+        self._error_count = max(0, int(error_count))
+        self.setWindowTitle("确认批量清理")
+        self.setModal(True)
+        self.setMinimumSize(980, 560)
+        configure_titled_dialog(self)
+        self.setStyleSheet(self._build_stylesheet())
+        self._setup_ui()
+
+    @staticmethod
+    def _build_stylesheet() -> str:
+        return """
+            QDialog {
+                background-color: #1e1e2e;
+            }
+            QLabel {
+                background-color: transparent;
+            }
+            QLabel#cleanupConfirmTitle {
+                color: #f7f7fb;
+                font-size: 18px;
+                font-weight: 800;
+            }
+            QLabel#cleanupConfirmSummary {
+                color: rgba(255, 255, 255, 0.78);
+                font-size: 14px;
+                line-height: 1.45;
+            }
+            QLabel#cleanupConfirmHint {
+                color: rgba(255, 255, 255, 0.56);
+                font-size: 12px;
+                line-height: 1.5;
+            }
+        """
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        title_label = QLabel("确认批量清理")
+        title_label.setObjectName("cleanupConfirmTitle")
+        layout.addWidget(title_label)
+
+        summary_label = QLabel(self._build_summary_text())
+        summary_label.setObjectName("cleanupConfirmSummary")
+        summary_label.setWordWrap(True)
+        layout.addWidget(summary_label)
+
+        hint_label = QLabel("下表只展示当前通过安全校验、实际会被删除的环境。")
+        if self._error_count > 0:
+            hint_label.setText(
+                f"{hint_label.text()} 另有 {self._error_count} 个来源扫描失败，本次未纳入删除。"
+            )
+        hint_label.setObjectName("cleanupConfirmHint")
+        hint_label.setWordWrap(True)
+        layout.addWidget(hint_label)
+
+        self.preview_table = SkyDataTable(schema=self.TABLE_SCHEMA)
+        self.preview_table.set_query(
+            {
+                "search_text": "",
+                "sort": [{"field": "env_id", "direction": "asc"}],
+                "page": 1,
+                "page_size": 10,
+                "params": {},
+            }
+        )
+        rows = self._build_rows()
+        result = resolve_local_data_table_result(
+            rows,
+            columns=list(self.TABLE_SCHEMA["columns"]),
+            query=dict(self.preview_table._query),
+        )
+        self.preview_table.apply_result(0, result)
+        self.preview_table.table.resizeRowsToContents()
+        layout.addWidget(self.preview_table)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(12)
+        buttons.addStretch()
+
+        cancel_btn = StyledButton(
+            "取消",
+            variant="secondary",
+            min_height=40,
+            min_width=96,
+            horizontal_padding=20,
+        )
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(cancel_btn)
+
+        confirm_btn = StyledButton(
+            "确认",
+            variant="success",
+            min_height=40,
+            min_width=96,
+            horizontal_padding=20,
+        )
+        confirm_btn.clicked.connect(self.accept)
+        buttons.addWidget(confirm_btn)
+
+        layout.addLayout(buttons)
+
+    def _build_summary_text(self) -> str:
+        summary = f"将删除 {len(self._eligible_items)} 个环境，跳过 {self._skipped_count} 个不安全候选。"
+        if self._error_count > 0:
+            summary = f"{summary} 扫描失败来源 {self._error_count} 个。"
+        return summary
+
+    def _build_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for index, item in enumerate(self._eligible_items, start=1):
+            env_name = str(item.env_name or "-").strip() or "-"
+            provider = self._provider_label(str(item.provider or "-").strip() or "-")
+            source_lines = [f"{source.module_name}.{source.cleanup_name}" for source in item.sources]
+            source_text = "\n".join(source_lines) if source_lines else "-"
+            rows.append(
+                {
+                    "__index__": index,
+                    "env_id": item.env_id,
+                    "env_name": self._wrapped_cell(env_name, width=42),
+                    "provider": {"text": provider, "tooltip": str(item.provider or "")},
+                    "sources": self._wrapped_cell(source_text, width=28),
+                }
+            )
+        return rows
+
+    def _wrapped_cell(self, text: str, *, width: int) -> dict[str, Any]:
+        value = str(text or "-").strip() or "-"
+        wrapped = self._wrap_text(value, width=width)
+        return {
+            "text": wrapped,
+            "search_text": value.replace("\n", " "),
+            "sort_value": value,
+            "tooltip": value,
+        }
+
+    @staticmethod
+    def _wrap_text(text: str, *, width: int) -> str:
+        lines = []
+        for raw_line in str(text or "").splitlines() or ["-"]:
+            wrapped = textwrap.wrap(
+                raw_line,
+                width=width,
+                break_long_words=False,
+                break_on_hyphens=True,
+            )
+            lines.extend(wrapped or [raw_line])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _provider_label(provider: str) -> str:
+        labels = {
+            "bitbrowser": "BitBrowser",
+            "playwright_local": "Playwright Local",
+            "virtualbrowser": "VirtualBrowser",
+        }
+        return labels.get(provider, provider or "-")
 
 
 class DataLoaderThread(QThread):
@@ -676,6 +869,16 @@ class EnvListWidget(QWidget):
     async def _confirm_async(self, title: str, text: str) -> bool:
         return await ConfirmDialog.confirm_async(self, title, text, confirm_text="确认")
 
+    async def _confirm_cleanup_plan_async(self, plan: Any) -> bool:
+        eligible_items = [item for item in plan.items if item.eligible]
+        dialog = CleanupPreviewDialog(
+            eligible_items=eligible_items,
+            skipped_count=len(plan.items) - len(eligible_items),
+            error_count=len(plan.errors),
+            parent=self,
+        )
+        return await self._exec_dialog_async(dialog) == int(QDialog.DialogCode.Accepted)
+
     def _apply_busy_state(self):
         """同步按钮和表格的忙碌状态。"""
         self.create_btn.setEnabled(not self._operation_in_progress)
@@ -847,19 +1050,7 @@ class EnvListWidget(QWidget):
             await self._show_message_async("批量清理", "当前候选环境均不满足清理安全条件。", kind="warning")
             return
 
-        preview_lines = []
-        for item in eligible_items[:10]:
-            sources = ", ".join(f"{source.module_name}.{source.cleanup_name}" for source in item.sources)
-            preview_lines.append(f"- {item.env_id} {item.env_name or '-'} [{item.provider or '-'}] 来源：{sources}")
-        if len(eligible_items) > 10:
-            preview_lines.append(f"- 另外 {len(eligible_items) - 10} 个环境")
-        skipped_count = len(plan.items) - len(eligible_items)
-        error_text = f"\n扫描失败来源：{len(plan.errors)} 个" if plan.errors else ""
-        question = (
-            f"将删除 {len(eligible_items)} 个环境，跳过 {skipped_count} 个不安全候选。"
-            f"{error_text}\n\n" + "\n".join(preview_lines)
-        )
-        if not await self._confirm_async("确认批量清理", question):
+        if not await self._confirm_cleanup_plan_async(plan):
             return
 
         self._schedule_operation(

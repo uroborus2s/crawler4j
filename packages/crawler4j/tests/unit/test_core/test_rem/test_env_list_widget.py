@@ -185,6 +185,34 @@ def test_create_env_dialog_uses_styled_combo_boxes(qtbot, monkeypatch):
     assert "QComboBox {" not in dialog.styleSheet()
 
 
+def test_cleanup_preview_dialog_renders_cleanup_targets_as_table(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    source = EnvCleanupSource(module_name="host", cleanup_name="orphan")
+
+    dialog = env_list_widget.CleanupPreviewDialog(
+        eligible_items=[
+            EnvCleanupPreviewItem(
+                env_id=352,
+                sources=(source,),
+                env_name="task-480788ce-3632-4799-a56f-5eecec4ffdf6-1776840410",
+                provider="virtualbrowser",
+                status="ready",
+                eligible=True,
+            ),
+        ],
+        skipped_count=1,
+        error_count=0,
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.windowTitle() == "确认批量清理"
+    assert dialog.preview_table.table.rowCount() == 1
+    assert dialog.preview_table.table.item(0, 1).text() == "352"
+    assert dialog.preview_table.table.item(0, 2).text().startswith("task-480788ce-3632-4799")
+    assert dialog.preview_table.table.item(0, 3).text() == "VirtualBrowser"
+    assert dialog.preview_table.table.item(0, 4).text() == "host.orphan"
+
+
 def test_env_list_widget_create_finished_refreshes_without_success_dialog(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
 
@@ -348,7 +376,7 @@ async def test_env_list_widget_cleanup_confirms_executes_and_refreshes(qtbot, mo
     widget = env_list_widget.EnvListWidget()
     qtbot.addWidget(widget)
     widget._show_loading = MagicMock()
-    widget._confirm_async = AsyncMock(return_value=True)
+    widget._confirm_cleanup_plan_async = AsyncMock(return_value=True)
     widget._show_message_async = AsyncMock()
     widget.load_data = MagicMock()
 
@@ -357,7 +385,7 @@ async def test_env_list_widget_cleanup_confirms_executes_and_refreshes(qtbot, mo
 
     assert service.preview_calls == 1
     assert service.cleanup_calls == 1
-    widget._confirm_async.assert_awaited_once()
+    widget._confirm_cleanup_plan_async.assert_awaited_once()
     widget._show_message_async.assert_awaited_once()
     widget.load_data.assert_called_once_with(run_gc=False, reload_from_db=True)
 
@@ -394,14 +422,14 @@ async def test_env_list_widget_cleanup_skips_without_safe_candidates(qtbot, monk
     widget = env_list_widget.EnvListWidget()
     qtbot.addWidget(widget)
     widget._show_loading = MagicMock()
-    widget._confirm_async = AsyncMock(return_value=True)
+    widget._confirm_cleanup_plan_async = AsyncMock(return_value=True)
     widget._show_message_async = AsyncMock()
 
     await widget._cleanup_envs_async()
 
     assert service.preview_calls == 1
     assert service.cleanup_calls == 0
-    widget._confirm_async.assert_not_awaited()
+    widget._confirm_cleanup_plan_async.assert_not_awaited()
     widget._show_message_async.assert_awaited_once_with(
         "批量清理",
         "当前候选环境均不满足清理安全条件。",
