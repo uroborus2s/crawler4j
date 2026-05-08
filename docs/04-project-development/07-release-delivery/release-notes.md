@@ -27,7 +27,7 @@
 - 当前工作区已切到 `0.4.0` 源码版本线，但尚未补打对应正式 Git tag / release 资产
 - `crawler4j-sdk 0.4.0` 与 `crawler4j-contracts 0.4.0` 已完成本地 wheel/sdist 构建，正式 publish 资产仍需按发布流程补齐
 - SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
-- 当前 0.4.0 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult`，workflow/component 收尾统一实现 `cleanup(ctx, outcome)`，环境回收由宿主收口
+- 当前 0.4.0 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult`，workflow/component 可选实现 `setup(ctx, workflow)` 和 `cleanup(ctx, outcome)`，环境回收由宿主收口
 
 ## 3. 当前证据状态
 

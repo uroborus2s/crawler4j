@@ -40,6 +40,7 @@ def test_contracts_root_exports_stable_surface():
         "TaskResult",
         "ToolSpec",
         "ToolsCapability",
+        "WorkflowLifecycleInfo",
         "component",
         "data_query",
         "data_table",
@@ -65,6 +66,7 @@ def test_contracts_root_exports_stable_surface():
     assert crawler4j_contracts.TaskOutcome is not None
     assert crawler4j_contracts.TaskOutcomeStatus is not None
     assert crawler4j_contracts.TaskResult is not None
+    assert crawler4j_contracts.WorkflowLifecycleInfo is not None
     assert not hasattr(crawler4j_contracts, "TaskSignal")
     assert not hasattr(crawler4j_contracts, "TaskSignalAction")
     assert not hasattr(crawler4j_contracts, "EnvAction")

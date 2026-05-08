@@ -235,6 +235,9 @@ async def test_run_v2_workflow_runs_object_cleanup_after_workflow_run(monkeypatc
         def build_workflow(self):
             return Workflow()
 
+        async def setup(self, _context, _workflow, *, timeout_seconds=None):
+            pass
+
         async def cleanup(self, _context, outcome, *, timeout_seconds=None):
             nonlocal cleanup_outcome
             cleanup_outcome = outcome
@@ -277,6 +280,9 @@ async def test_run_v2_workflow_runs_object_cleanup_after_workflow_error(monkeypa
         def build_workflow(self):
             return Workflow()
 
+        async def setup(self, _context, _workflow, *, timeout_seconds=None):
+            pass
+
         async def cleanup(self, _context, outcome, *, timeout_seconds=None):
             nonlocal cleanup_outcome
             cleanup_outcome = outcome
@@ -303,6 +309,72 @@ async def test_run_v2_workflow_runs_object_cleanup_after_workflow_error(monkeypa
     assert cleanup_outcome is not None
     assert cleanup_outcome.status == "failed"
     assert cleanup_outcome.error_type == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_run_v2_workflow_runs_cleanup_after_setup_error_without_run(monkeypatch):
+    run_called = False
+    cleanup_outcome = None
+    setup_workflow = None
+
+    class Workflow:
+        def run(self, ctx: TaskContext):
+            nonlocal run_called
+            run_called = True
+            return TaskResult.ok(message="should not run")
+
+    class FakeContainer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def build_workflow(self):
+            return Workflow()
+
+        async def setup(self, _context, workflow, *, timeout_seconds=None):
+            nonlocal setup_workflow
+            setup_workflow = workflow
+            raise RuntimeError("setup failed")
+
+        async def cleanup(self, _context, outcome, *, timeout_seconds=None):
+            nonlocal cleanup_outcome
+            cleanup_outcome = outcome
+
+    monkeypatch.setattr("src.core.mms.service.ObjectContainerV2", FakeContainer)
+    descriptor = ModuleRuntimeDescriptorV2(
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(
+                    kind="workflow",
+                    name="default",
+                    label="Default workflow",
+                    description="Default workflow description",
+                ),
+                target=Workflow,
+                module_name="demo_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            )
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="setup failed"):
+        await ModuleService()._run_v2_workflow(
+            descriptor,
+            TaskContext(env_id=1, task_name="demo_module", runtime={"workflow": "default"}),
+        )
+
+    assert run_called is False
+    assert setup_workflow is not None
+    assert setup_workflow.module_name == "demo_module"
+    assert setup_workflow.workflow_name == "default"
+    assert setup_workflow.workflow_label == "Default workflow"
+    assert setup_workflow.workflow_description == "Default workflow description"
+    assert setup_workflow.workflow_module_name == "demo_module.workflows.default"
+    assert setup_workflow.workflow_symbol == "Workflow"
+    assert cleanup_outcome is not None
+    assert cleanup_outcome.status == "failed"
+    assert cleanup_outcome.error_type == "RuntimeError"
+    assert cleanup_outcome.workflow == setup_workflow
 
 
 class TestModuleScanner:

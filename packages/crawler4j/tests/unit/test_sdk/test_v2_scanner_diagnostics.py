@@ -235,6 +235,76 @@ class MainWorkflow:
     }
 
 
+def test_scan_v2_module_validates_object_lifecycle_signatures(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "interfaces" / "labor.py").write_text(
+        """
+from crawler4j_contracts import interface
+
+
+@interface(name="labor")
+class Labor:
+    pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "objects" / "api_labor.py").write_text(
+        """
+from crawler4j_contracts import component
+
+
+@component(name="api_labor", implements="labor")
+class ApiLabor:
+    def setup(self, ctx):
+        pass
+
+    def cleanup(self, ctx):
+        pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import workflow
+
+
+@workflow(name="main_workflow")
+class MainWorkflow:
+    def setup(self, ctx, workflow, extra):
+        pass
+
+    def cleanup(self, ctx, outcome, extra):
+        pass
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+    diagnostics = [
+        diagnostic for diagnostic in result.diagnostics
+        if diagnostic.code == "V2_OBJECT_LIFECYCLE_METHOD_SIGNATURE_INVALID"
+    ]
+
+    assert {(diagnostic.location, diagnostic.message) for diagnostic in diagnostics} == {
+        (
+            "objects.api_labor.ApiLabor.setup",
+            "setup lifecycle method must accept (self, ctx, workflow)",
+        ),
+        (
+            "objects.api_labor.ApiLabor.cleanup",
+            "cleanup lifecycle method must accept (self, ctx, outcome)",
+        ),
+        (
+            "workflows.main.MainWorkflow.setup",
+            "setup lifecycle method must accept (self, ctx, workflow)",
+        ),
+        (
+            "workflows.main.MainWorkflow.cleanup",
+            "cleanup lifecycle method must accept (self, ctx, outcome)",
+        ),
+    }
+
+
 def test_scan_v2_module_merges_class_and_init_annotation_metadata(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "objects" / "annotation_runtime.py").write_text(

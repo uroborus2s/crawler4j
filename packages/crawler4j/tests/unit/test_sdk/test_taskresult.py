@@ -8,7 +8,7 @@
 
 import json
 
-from crawler4j_contracts import TaskOutcome, TaskResult
+from crawler4j_contracts import TaskOutcome, TaskResult, WorkflowLifecycleInfo
 
 
 class TestTaskResultOk:
@@ -176,8 +176,17 @@ class TestTaskOutcome:
 
     def test_to_dict_serializes_nested_task_result(self):
         result = TaskResult.fail(message="失败", error="boom", retryable=False)
+        workflow = WorkflowLifecycleInfo(
+            module_name="demo_module",
+            workflow_name="main_workflow",
+            workflow_label="Main workflow",
+            workflow_description="Main workflow description",
+            workflow_module_name="demo_module.workflows.main",
+            workflow_symbol="MainWorkflow",
+        )
         outcome = TaskOutcome(
             status="failed",
+            workflow=workflow,
             result=result,
             error="boom",
             error_type="RuntimeError",
@@ -186,6 +195,7 @@ class TestTaskOutcome:
 
         assert outcome.to_dict() == {
             "status": "failed",
+            "workflow": workflow.to_dict(),
             "result": result.to_dict(),
             "error": "boom",
             "error_type": "RuntimeError",

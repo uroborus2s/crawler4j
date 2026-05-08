@@ -6,7 +6,7 @@ from textwrap import dedent
 
 import pytest
 
-from crawler4j_contracts import Crawler4jMeta, InjectSpec, TaskContext, TaskOutcome
+from crawler4j_contracts import Crawler4jMeta, InjectSpec, TaskContext, TaskOutcome, WorkflowLifecycleInfo
 from src.core.mms.models import ModuleManifest, UpgradeSourceInfo
 from src.core.mms.module_loader import purge_module_namespace
 from src.core.mms.object_container_v2 import ObjectContainerV2
@@ -150,10 +150,13 @@ def test_object_container_builds_workflow_with_selected_components_and_params(tm
 
 
 @pytest.mark.asyncio
-async def test_object_container_runs_cleanup_with_outcome_in_reverse_dependency_order():
+async def test_object_container_runs_setup_and_cleanup_in_lifecycle_order():
     events: list[str] = []
 
     class Labor:
+        def setup(self, ctx, workflow):
+            events.append(f"labor.setup:{ctx.task_name}:{workflow.workflow_name}")
+
         def close(self):
             events.append("labor.close should not run")
 
@@ -167,12 +170,18 @@ async def test_object_container_runs_cleanup_with_outcome_in_reverse_dependency_
         async def aclose(self):
             events.append("orchestrator.aclose should not run")
 
+        async def setup(self, ctx, workflow):
+            events.append(f"orchestrator.setup:{ctx.task_name}:{workflow.workflow_label}")
+
         async def cleanup(self, ctx, outcome):
             events.append(f"orchestrator.cleanup:{ctx.task_name}:{outcome.status}")
 
     class QuizWorkflow:
         def __init__(self, orchestrator):
             self.orchestrator = orchestrator
+
+        def setup(self, ctx, workflow):
+            events.append(f"workflow.setup:{ctx.task_name}:{workflow.workflow_symbol}")
 
         def cleanup(self, ctx, outcome):
             events.append(f"workflow.cleanup:{ctx.task_name}:{outcome.status}")
@@ -220,6 +229,8 @@ async def test_object_container_runs_cleanup_with_outcome_in_reverse_dependency_
                 meta=Crawler4jMeta(
                     kind="workflow",
                     name="quiz_workflow",
+                    label="Quiz workflow",
+                    description="Run quiz workflow",
                     inject=(InjectSpec(name="orchestrator", type="interface", target="orchestrator"),),
                 ),
                 target=QuizWorkflow,
@@ -235,16 +246,29 @@ async def test_object_container_runs_cleanup_with_outcome_in_reverse_dependency_
     )
     container = ObjectContainerV2(descriptor, "quiz_workflow")
     context = TaskContext(env_id=1, task_name="cleanup_module")
-    outcome = TaskOutcome(status="succeeded")
+    workflow = WorkflowLifecycleInfo(
+        module_name="cleanup_module",
+        workflow_name="quiz_workflow",
+        workflow_label="Quiz workflow",
+        workflow_description="Run quiz workflow",
+        workflow_module_name="cleanup_module.workflows.quiz",
+        workflow_symbol="QuizWorkflow",
+    )
+    outcome = TaskOutcome(status="succeeded", workflow=workflow)
 
     container.build_workflow()
+    await container.setup(context, workflow)
+    await container.setup(context, workflow)
     await container.cleanup(context, outcome)
     await container.cleanup(context, outcome)
 
     assert events == [
-        "workflow.cleanup:cleanup_module:succeeded",
+        "labor.setup:cleanup_module:quiz_workflow",
+        "orchestrator.setup:cleanup_module:Quiz workflow",
+        "workflow.setup:cleanup_module:QuizWorkflow",
         "orchestrator.cleanup:cleanup_module:succeeded",
         "labor.cleanup:cleanup_module:succeeded",
+        "workflow.cleanup:cleanup_module:succeeded",
     ]
 
 
@@ -255,6 +279,7 @@ async def test_object_container_continues_cleanup_when_one_cleanup_fails():
     class Labor:
         def cleanup(self, ctx, outcome):
             events.append(f"labor.cleanup:{outcome.status}")
+            raise RuntimeError("cleanup failed")
 
     class Workflow:
         def __init__(self, labor):
@@ -262,7 +287,6 @@ async def test_object_container_continues_cleanup_when_one_cleanup_fails():
 
         def cleanup(self, ctx, outcome):
             events.append(f"workflow.cleanup:{outcome.status}")
-            raise RuntimeError("cleanup failed")
 
     descriptor = ModuleRuntimeDescriptorV2(
         interfaces={
@@ -305,7 +329,7 @@ async def test_object_container_continues_cleanup_when_one_cleanup_fails():
     container.build_workflow()
     await container.cleanup(context, outcome)
 
-    assert events == ["workflow.cleanup:failed", "labor.cleanup:failed"]
+    assert events == ["labor.cleanup:failed", "workflow.cleanup:failed"]
 
 
 def test_object_container_builds_workflow_from_annotation_declared_metadata(tmp_path: Path):

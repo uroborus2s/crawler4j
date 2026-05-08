@@ -58,8 +58,8 @@ Maintainer
 - Windows 正式发布层已收口为“`PyInstaller onedir` 生成宿主目录，Velopack 负责 installer / package feed / 宿主自更新”；macOS 内部发布继续走 “`PyInstaller.app + Sparkle`”
 - `packages/crawler4j-sdk` 与 `packages/crawler4j-contracts` 已经具备独立包形态
 - `TaskContext` 的数据库能力已收敛到唯一入口 `ctx.db`；非数据库类宿主能力仍通过 `ctx.tools.call("<namespace>.<action>", **kwargs)` 调用
-- 0.4.0 当前运行时不提供模块生命周期 hooks；模块终态只通过 workflow 主体返回 `TaskResult` 表达，任务结束、失败、超时或被用户停止后的环境统一由宿主回收
-- Core 为每个 task/env 创建独立对象图，并在 workflow 成功、失败、超时、异常或被用户停止后按 workflow -> component 依赖反向顺序调用 `cleanup(ctx, outcome)`；对象清理失败只记日志，不阻断终态和环境回收
+- 0.4.0 当前运行时不提供模块级生命周期 hooks；模块流程控制只通过 workflow 主体返回 `TaskResult` 表达，任务结束、失败、超时或被用户停止后的环境统一由宿主回收
+- Core 为每个 task/env 创建独立对象图，在 `workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`，并在终态按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`；对象 cleanup 失败只记日志，不阻断终态和环境回收
 - 外部模块运行时已收敛到 MMS 宿主扫描生成的 runtime descriptor，不再保留 `ModuleAssembler` 或 `src.automation.*` 旧兼容包
 - 宿主源码已不再承载业务辅助逻辑或业务模型；酒店匹配、短信平台与本地验证码回退逻辑以模块自带实现为准
 - 当前事实以当前代码和验证结果为准，不再保留并行的旧设计正文
@@ -111,6 +111,7 @@ Maintainer
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-05-02 | 补齐对象图运行前 `setup(ctx, workflow)` 生命周期，扩充 `TaskOutcome.workflow`，并把 cleanup 顺序收口为 component 依赖反向顺序后再 workflow | Codex |
 | 2026-05-01 | 收口 workflow/object 生命周期清理与宿主环境处置边界：模块不再导入 `TaskSignal` / `EnvAction`，对象图由 Core 统一收尾，任务终态环境统一回收，环境删除只走环境管理页 `清理环境` 链路 | Codex |
 | 2026-04-30 | 清理 0.4.0 旧生命周期 hook 运行链，ATM 不再调用 `prepare_env/init_env/before_run/on_*` | Codex |
 | 2026-04-30 | 将 ATM 等待队列架构从固定资源池同步方案改为 `@env_candidates` 纯函数候选方案 | Codex |

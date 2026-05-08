@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from crawler4j_contracts import ParameterSpec, TaskContext, TaskOutcome
+from crawler4j_contracts import ParameterSpec, TaskContext, TaskOutcome, WorkflowLifecycleInfo
 
 from src.core.foundation.logging import logger
 from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptorV2, V2RuntimeEntry
@@ -35,6 +35,7 @@ class ObjectContainerV2:
         self._validate_object_param_owners()
         self.instances: dict[str, Any] = {}
         self._workflow_instance: Any | None = None
+        self._setup_done = False
         self._closed = False
 
     def build_workflow(self) -> Any:
@@ -113,6 +114,60 @@ class ObjectContainerV2:
         self.instances[component_name] = instance
         return instance
 
+    async def setup(
+        self,
+        context: TaskContext,
+        workflow: WorkflowLifecycleInfo,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        """Run workflow/component setup methods owned by this task/env graph."""
+        if self._setup_done:
+            return
+        self._setup_done = True
+        if self._workflow_instance is None:
+            self.build_workflow()
+
+        initializers: list[tuple[str, Any]] = [
+            (f"component {component_name}", instance) for component_name, instance in self.instances.items()
+        ]
+        if self._workflow_instance is not None:
+            initializers.append((f"workflow {self.workflow_name}", self._workflow_instance))
+
+        for label, instance in initializers:
+            await self._setup_instance(label, instance, context, workflow, timeout_seconds=timeout_seconds)
+
+    async def _setup_instance(
+        self,
+        label: str,
+        instance: Any,
+        context: TaskContext,
+        workflow: WorkflowLifecycleInfo,
+        *,
+        timeout_seconds: float | None,
+    ) -> None:
+        setup = getattr(instance, "setup", None)
+        if not callable(setup):
+            return
+        try:
+            operation = _invoke_setup(setup, context, workflow)
+            if timeout_seconds is not None and timeout_seconds > 0:
+                await asyncio.wait_for(operation, timeout=float(timeout_seconds))
+            else:
+                await operation
+        except asyncio.TimeoutError:
+            logger.error(
+                f"[MMS] Timed out setting up v2 object: {label} "
+                f"method=setup timeout={timeout_seconds:.1f}s"
+            )
+            raise
+        except Exception as exc:
+            logger.error(
+                f"[MMS] Failed to set up v2 object: {label} "
+                f"method=setup error={exc.__class__.__name__}: {exc}"
+            )
+            raise
+
     async def cleanup(
         self,
         context: TaskContext,
@@ -125,13 +180,11 @@ class ObjectContainerV2:
             return
         self._closed = True
 
-        finalizers: list[tuple[str, Any]] = []
+        finalizers: list[tuple[str, Any]] = [
+            (f"component {component_name}", instance) for component_name, instance in reversed(list(self.instances.items()))
+        ]
         if self._workflow_instance is not None:
             finalizers.append((f"workflow {self.workflow_name}", self._workflow_instance))
-        finalizers.extend(
-            (f"component {component_name}", instance)
-            for component_name, instance in reversed(list(self.instances.items()))
-        )
 
         for label, instance in finalizers:
             await self._cleanup_instance(label, instance, context, outcome, timeout_seconds=timeout_seconds)
@@ -263,6 +316,12 @@ def _normalize_object_params(
 
 async def _invoke_cleanup(cleanup: Any, context: TaskContext, outcome: TaskOutcome) -> None:
     result = cleanup(context, outcome)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _invoke_setup(setup: Any, context: TaskContext, workflow: WorkflowLifecycleInfo) -> None:
+    result = setup(context, workflow)
     if inspect.isawaitable(result):
         await result
 

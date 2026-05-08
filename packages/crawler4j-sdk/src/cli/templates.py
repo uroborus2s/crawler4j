@@ -23,16 +23,16 @@ async def {name}(ctx: TaskContext, start_url: str = "https://example.com") -> Ta
     """执行页面操作。"""
     ctx.logger.info(f"开始执行任务，目标地址: {{start_url}}")
 
-    if not ctx.page:
+    if not ctx.tools or not ctx.tools.has_tool("browser.goto"):
         return TaskResult.fail(
-            message="当前运行环境没有可用的浏览器 Page",
-            error="page_not_available",
+            message="当前运行环境没有可用的 browser.goto 宿主能力",
+            error="browser_tool_not_available",
         )
 
-    await ctx.page.goto(start_url, wait_until="domcontentloaded")
-    title = await ctx.page.title()
+    goto_result = await ctx.tools.call("browser.goto", url=start_url)
+    title = await ctx.page.title() if ctx.page else None
     result = {{
-        "url": ctx.page.url,
+        "url": goto_result.get("url", start_url),
         "title": title,
     }}
 
@@ -171,7 +171,7 @@ uv run crawler4j package build
 - 环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，不使用资源池同步或旧 `env_selectors/`。
 - 批量环境清理由 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数声明；模块只返回已绑定且业务上可丢弃的 env id，删除由宿主环境管理页确认后执行。
 - 模块不要导入 `TaskSignal` / `EnvAction`；流程终态用 `TaskResult` 表达，任务结束、失败、超时或被用户中止后的环境统一由宿主回收。
-- workflow/component 如需收尾，只实现 `cleanup(ctx, outcome)`；旧 `aclose()` / `close()` 不再是对象生命周期契约。
+- workflow/component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 做终态收尾；旧 `aclose()` / `close()` 不再是对象生命周期契约。
 """
 
 MODEL_TEST_TASK_TEMPLATE = '''"""测试页面操作。"""
@@ -187,15 +187,18 @@ from tasks.example_action import example_action
 async def test_example_action_logic():
     ctx = MagicMock(spec=TaskContext)
     ctx.logger = MagicMock()
+    ctx.tools = MagicMock()
+    ctx.tools.has_tool = MagicMock(return_value=True)
+    ctx.tools.call = AsyncMock(return_value={"url": "https://mock.url"})
     ctx.page = MagicMock()
-    ctx.page.goto = AsyncMock()
+    ctx.page.url = "https://mock.url"
     ctx.page.title = AsyncMock(return_value="Mock Title")
 
     result = await example_action(ctx, "https://mock.url")
 
     assert result.success is True
     assert result.data["title"] == "Mock Title"
-    ctx.page.goto.assert_awaited_once_with("https://mock.url", wait_until="domcontentloaded")
+    ctx.tools.call.assert_awaited_once_with("browser.goto", url="https://mock.url")
     ctx.page.title.assert_awaited_once()
 '''
 

@@ -32,7 +32,7 @@
 | 环境选择器 | 0.4.0 已移除 `selector_name/env_selector/resource_pool`；运行模板只能显式选择 `env_id` 或引用 `candidates/` 下的 `@env_candidates` |
 | 当前实现 | Core 通过 `ModuleRuntimeDescriptorV2` 扫描 `@interface/@component/@workflow/@page/@page_action/@data_table/@data_query/@env_candidates`，不依赖模块自有 assembler |
 | Core 扩展入口 | `context.tools.call("<namespace>.<action>", **kwargs)` |
-| 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。对象图由 Core 在 workflow 结束后统一清理，任务结束、失败、超时或用户中止后的环境统一由宿主回收；环境删除只走环境管理页清理链路 |
+| 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。对象图由 Core 在 `workflow.run(ctx)` 前统一执行可选 `setup(ctx, workflow)`，并在终态统一执行可选 `cleanup(ctx, outcome)`；任务结束、失败、超时或用户中止后的环境统一由宿主回收，环境删除只走环境管理页清理链路 |
 | 默认工作流解析 | `context.runtime["workflow"]` -> 单 workflow 自动选择 -> `main_workflow` |
 | 发现错误可见性 | descriptor 扫描失败必须暴露具体 Python 文件、符号、异常类型与 traceback 摘要，不能降级为泛化 “not found” |
 | Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 中的 `@page(...)`；`@page(menu=True)` 控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象 |
@@ -86,7 +86,7 @@
 | Manifest 边界 | `module.yaml` 不再声明 interfaces、objects、workflows、tasks、data resources、workflow parameters；只保留模块元信息和宿主级静态配置 |
 | Workflow 契约 | workflow 只通过构造函数接收宿主注入对象，不接收 `parameters[]` |
 | Component 契约 | component 声明 `implements`、`inject` 和对象创建参数；`inject` 与对象参数可写在装饰器参数、类属性注解或 `__init__` 参数注解上，最终归一为 `InjectSpec` / `ParameterSpec`；对象参数只用于宿主创建对象实例 |
-| 对象生命周期 | Core 按运行模板为每个 task/env 创建独立对象图，默认不共享业务对象实例；workflow 返回成功、返回失败、超时、异常或被用户停止后按 workflow -> component 依赖反向顺序调用 `cleanup(ctx, outcome)`；`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`，旧 `aclose()` / `close()` 不再是生命周期契约 |
+| 对象生命周期 | Core 按运行模板为每个 task/env 创建独立对象图，默认不共享业务对象实例；`workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`；workflow 返回成功、返回失败、超时、异常、setup 失败或被用户停止后按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`；`workflow` 与 `outcome.workflow` 为当前 workflow 元信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`，旧 `aclose()` / `close()` 不再是生命周期契约 |
 | Page action 契约 | task 退化为 `@page_action` 纯函数；业务编排进入 workflow / orchestrator |
 | Data 契约 | 数据表和命名查询由 `@data_table` / `@data_query` 声明，并注册到现有 `ctx.db` 能力 |
 | 宿主保留字段 | SDK / Core / Contracts 共享宿主保留字段集合；第一版阻断模块自有数据列声明 `created_at`、`updated_at`，并阻断常见混淆字段 `create_at`、`update_at` |
@@ -156,6 +156,12 @@
 | 当前能力 | `crawler4j-contracts` 提供 `TaskContext`、`TaskResult`、`ctx.db`、v2 装饰器和 Hosted UI schema helper；`crawler4j-sdk` 只提供 CLI、模板、静态扫描、manifest lock、迁移报告、打包与宿主联调辅助 |
 | 当前状态 | 0.4.x SDK/Contracts 只服务 Core 0.4.0 / `core-native-v2`；不再导出 `ModuleAssembler`、`TaskScript`、`TaskFlow`、`env_selector` 或运行时 owner helper |
 | 关联项 | `REQ-003`, `REQ-006` |
+
+补充运行时协议：
+
+- 数据库唯一入口固定为 `ctx.db`
+- 标准浏览器交互固定为 `ctx.tools.call("browser.*", ...)`
+- `ctx.page` 保留为浏览器读取和宿主未覆盖能力的直接句柄，不再作为正式拟人化交互主路径
 
 ## `API-004` Release Metadata Contract
 

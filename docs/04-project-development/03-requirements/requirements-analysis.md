@@ -17,7 +17,7 @@
 | `REQ-002` | 模块可执行目标工作流 | 基本满足 | 登录工作流可执行，`labor_workflow` 已恢复基础运行时兼容，但真实站点 E2E 未验证 |
 | `REQ-003` | SDK / Contracts / CLI 可用 | 基本满足 | SDK/Contracts build 成功，CLI help 可运行 |
 | `REQ-006` | 模块运行能力由 Core 扫描托管 | 满足 | 0.4.0 已切到 `core-native-v2`，运行能力事实源来自 `tasks/`、`workflows/`、`candidates/`、`cleanups/`、`pages/` 等装饰器扫描；旧 `hooks/` 不再是运行契约，旧模块升级路径统一为按最新模板重新初始化 |
-| `REQ-007` | 宿主生命周期与环境处置边界 | 已替代旧信号方案 | 0.4.0 当前实现已删除模块 `TaskSignal` / `EnvAction` 入口；workflow 只返回 `TaskResult`，对象只实现 `cleanup(ctx, outcome)`，任务终态环境统一回收 |
+| `REQ-007` | 宿主生命周期与环境处置边界 | 已替代旧信号方案 | 0.4.0 当前实现已删除模块 `TaskSignal` / `EnvAction` 入口；workflow 只返回 `TaskResult`，对象可选实现 `setup(ctx, workflow)` 与 `cleanup(ctx, outcome)`，任务终态环境统一回收 |
 | `REQ-008` | 模块审计事件独立存储 | 本次完成 | 宿主已新增 `module_audit_events` 与 `ctx.db.audit(...).append/query`，快照 dataset 继续保留原语义 |
 | `REQ-009` | 环境候选 Service Job 等待队列 | 本次完成 | 当前宿主已实现 `@env_candidates` 候选纯函数实时求值、`PENDING` 等待、FIFO 补位、模块环境授权、租约后复核和等待席位自动超时收口；资源池同步方案已退出正式契约 |
 | `REQ-004` | 发布与文档链路可追溯 | 满足 | 根应用工作区版本、运行时版本服务、最近正式 tag 与 release 文档口径已明确分层 |
@@ -51,7 +51,7 @@
 ### `REQ-007`
 
 - 旧的 `TaskSignal.wait_for_confirmation` 方案已被 0.4.0 当前边界替代；模块运行时代码不再拥有流程控制或环境处置入口。
-- 当前唯一模块终态表达是 workflow 返回 `TaskResult`；对象收尾只允许 `cleanup(ctx, outcome)`，用于日志、审计或业务资源释放。
+- 当前唯一模块终态表达是 workflow 返回 `TaskResult`；对象运行前准备只允许 `setup(ctx, workflow)`，对象收尾只允许 `cleanup(ctx, outcome)`，用于资源初始化、日志、审计或业务资源释放。
 - 任务结束、失败、超时或被用户中止后的环境统一由宿主回收；环境删除只通过环境管理页 `清理环境` 手动触发。
 - 任务创建环境后，宿主立即写入 `host.env_claim(pending)`；终态再通过 `env_binding_field` 扫描模块业务表并标记 `claimed` 或 `abandoned`，用于后续孤岛环境识别。
 

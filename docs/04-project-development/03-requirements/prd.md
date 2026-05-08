@@ -115,7 +115,7 @@
 - 前置条件：运行模板已选定固定环境、候选环境或创建环境模式；模块按 0.4.0 装饰器契约声明 workflow、component 和数据表。
 - 业务规则：
   - workflow 只能通过 `TaskResult` 表达成功或失败，不提供模块侧信号确认入口。
-  - workflow/component 如需收尾，只实现 `cleanup(ctx, outcome)`；旧 `aclose()` / `close()` 不作为宿主生命周期契约。
+  - workflow/component 如需运行前准备，可选实现 `setup(ctx, workflow)`；如需收尾，可选实现 `cleanup(ctx, outcome)`；旧 `aclose()` / `close()` 不作为宿主生命周期契约。
   - 任务终态和用户中止后的环境统一回收，不在中止弹窗或运行结果中提供保留/删除策略。
   - 创建环境后宿主立即写入 `host.env_claim(pending)`；终态通过 `env_binding_field` 扫描模块业务表并标记 `claimed/abandoned`。
   - 环境删除只通过环境管理页 `清理环境` 执行，候选来源包括孤岛环境、未认领环境、owner 缺失环境和同模块 `@env_cleanup_candidates` 返回的业务废弃环境。
@@ -125,7 +125,7 @@
 验收标准：
 
 - [x] `UAT-016` Contracts 不再导出 `TaskSignal` / `EnvAction`，SDK scanner 会阻断模块导入这些宿主控制对象
-- [x] `UAT-017` 任务终态、异常、超时和用户中止都会调用对象 `cleanup(ctx, outcome)` 后统一回收环境
+- [x] `UAT-017` `workflow.run(ctx)` 前会按对象图组合顺序调用可选 `setup(ctx, workflow)`；任务终态、setup 异常、运行异常、超时和用户中止都会调用对象 `cleanup(ctx, outcome)` 后统一回收环境
 - [x] `UAT-018` 环境管理页 `清理环境` 能统一预览并删除孤岛、未认领、owner 缺失和模块业务废弃环境
 
 ### `REQ-008` 宿主必须为模块提供独立的审计事件持久化能力

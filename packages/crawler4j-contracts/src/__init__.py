@@ -43,7 +43,7 @@ from crawler4j_contracts.decorators import (
     page_action,
     workflow,
 )
-from crawler4j_contracts.lifecycle import TaskOutcome, TaskOutcomeStatus
+from crawler4j_contracts.lifecycle import TaskOutcome, TaskOutcomeStatus, WorkflowLifecycleInfo
 from crawler4j_contracts.result import TaskResult
 
 __all__ = [
@@ -73,6 +73,7 @@ __all__ = [
     "TaskOutcome",
     "TaskOutcomeStatus",
     "TaskResult",
+    "WorkflowLifecycleInfo",
     "HttpClient",
     "ImageInput",
     "BBox",

@@ -85,7 +85,17 @@ class V2Declaration:
     target_kind: str
     annotations: tuple[str, ...] = ()
     methods: tuple[str, ...] = ()
+    method_signatures: tuple["V2MethodSignature", ...] = ()
     target: Any = None
+
+
+@dataclass(frozen=True)
+class V2MethodSignature:
+    """Static method signature shape used by scanner diagnostics."""
+
+    name: str
+    positional_args: tuple[str, ...]
+    has_varargs: bool = False
 
 
 @dataclass(frozen=True)
@@ -434,6 +444,7 @@ def _collect_declarations(
                     target_kind=_target_kind(node),
                     annotations=_class_annotations(node) if isinstance(node, ast.ClassDef) else (),
                     methods=_class_methods(node) if isinstance(node, ast.ClassDef) else (),
+                    method_signatures=_class_method_signatures(node) if isinstance(node, ast.ClassDef) else (),
                 )
             )
     return declarations, diagnostics
@@ -488,6 +499,22 @@ def _class_methods(node: ast.ClassDef) -> tuple[str, ...]:
         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
             names.append(item.name)
     return tuple(sorted(names))
+
+
+def _class_method_signatures(node: ast.ClassDef) -> tuple[V2MethodSignature, ...]:
+    signatures: list[V2MethodSignature] = []
+    for item in node.body:
+        if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        positional_args = (*item.args.posonlyargs, *item.args.args)
+        signatures.append(
+            V2MethodSignature(
+                name=item.name,
+                positional_args=tuple(arg.arg for arg in positional_args),
+                has_varargs=item.args.vararg is not None,
+            )
+        )
+    return tuple(sorted(signatures, key=lambda item: item.name))
 
 
 def _merge_annotation_metadata(meta: Crawler4jMeta, node: ast.ClassDef) -> Crawler4jMeta:
@@ -839,6 +866,7 @@ def _validate_declarations(declarations: list[V2Declaration]) -> list[V2Diagnost
     diagnostics.extend(_validate_page_actions(declarations))
     diagnostics.extend(_validate_env_id_candidate_functions(declarations))
     diagnostics.extend(_validate_object_lifecycle_methods(declarations))
+    diagnostics.extend(_validate_object_lifecycle_method_signatures(declarations))
     diagnostics.extend(_validate_parameters(declarations))
     diagnostics.extend(_validate_data_contracts(declarations))
     diagnostics.extend(_validate_dependency_cycles(declarations))
@@ -858,6 +886,33 @@ def _validate_object_lifecycle_methods(declarations: list[V2Declaration]) -> lis
                     message="object lifecycle only supports cleanup(ctx, outcome); aclose/close are not called",
                 )
             )
+    return diagnostics
+
+
+def _validate_object_lifecycle_method_signatures(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    expected = {
+        "setup": ("self", "ctx", "workflow"),
+        "cleanup": ("self", "ctx", "outcome"),
+    }
+    for declaration in declarations:
+        if declaration.kind not in {"workflow", "component"} or declaration.target_kind != "class":
+            continue
+        for signature in declaration.method_signatures:
+            expected_args = expected.get(signature.name)
+            if expected_args is None:
+                continue
+            if signature.has_varargs or len(signature.positional_args) != len(expected_args):
+                diagnostics.append(
+                    V2Diagnostic(
+                        code="V2_OBJECT_LIFECYCLE_METHOD_SIGNATURE_INVALID",
+                        location=f"{declaration.symbol}.{signature.name}",
+                        message=(
+                            f"{signature.name} lifecycle method must accept "
+                            f"({', '.join(expected_args)})"
+                        ),
+                    )
+                )
     return diagnostics
 
 

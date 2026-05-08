@@ -4,7 +4,7 @@
 
 ## 包含内容
 
-- 提供 `TaskContext` / `TaskResult` / `TaskOutcome` 等模块运行和生命周期契约
+- 提供 `TaskContext` / `TaskResult` / `TaskOutcome` / `WorkflowLifecycleInfo` 等模块运行和生命周期契约
 - 提供 `ToolsCapability` / `ToolSpec` / `HttpClient` 等宿主扩展能力契约
 - 提供 `DatabaseClient`，模块数据唯一正式入口为 `TaskContext.db`
 - 提供 `core-native-v2` 装饰器：`@interface`、`@component`、`@workflow`、`@page`、`@page_action`、`@data_table`、`@data_query`、`@env_candidates`、`@env_cleanup_candidates`
@@ -20,4 +20,4 @@
 
 模块运行时代码只应依赖本包。`crawler4j-sdk` 只作为开发依赖提供 CLI、脚手架、校验和打包辅助，不提供运行时 owner、`TaskScript` / `TaskFlow`、旧环境选择器或资源池 helper。
 
-非数据库类宿主能力继续通过 `TaskContext.tools` 调用。环境选择统一声明为 `candidates/*.py` 中的 `@env_candidates` 同步纯函数，账号状态、黑号、注册时间和会员等级等过滤由候选函数实时读取模块数据表完成，不使用资源池同步快照。需要被宿主识别为“已认领环境”的业务表必须通过 `@data_table(..., env_binding_field="env_id")` 声明绑定字段。批量环境清理候选统一声明为 `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数，复用 `EnvCandidates` 查询 DSL，但只表达已绑定且业务上可丢弃的 env id，实际删除由宿主环境管理页预览确认和安全校验后执行；模块 workflow 不能通过运行结果指定环境处置。workflow/component 如需收尾，只实现 `cleanup(ctx, outcome)`，其中 `outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。
+非数据库类宿主能力继续通过 `TaskContext.tools` 调用。环境选择统一声明为 `candidates/*.py` 中的 `@env_candidates` 同步纯函数，账号状态、黑号、注册时间和会员等级等过滤由候选函数实时读取模块数据表完成，不使用资源池同步快照。需要被宿主识别为“已认领环境”的业务表必须通过 `@data_table(..., env_binding_field="env_id")` 声明绑定字段。批量环境清理候选统一声明为 `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数，复用 `EnvCandidates` 查询 DSL，但只表达已绑定且业务上可丢弃的 env id，实际删除由宿主环境管理页预览确认和安全校验后执行；模块 workflow 不能通过运行结果指定环境处置。workflow/component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 做终态收尾；`workflow` 为当前 workflow 元信息，`outcome.workflow` 保存同一份信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。

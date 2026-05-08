@@ -5,7 +5,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from crawler4j_contracts import EnvCandidates, TaskContext, TaskOutcome, TaskResult
+from crawler4j_contracts import EnvCandidates, TaskContext, TaskOutcome, TaskResult, WorkflowLifecycleInfo
 
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo, ModuleSource, ModuleStatus
@@ -19,6 +19,7 @@ from src.core.mms.runtime_descriptor import (
 )
 
 ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
+OBJECT_SETUP_TIMEOUT_SECONDS = 30.0
 OBJECT_CLEANUP_TIMEOUT_SECONDS = 30.0
 
 
@@ -260,6 +261,7 @@ class ModuleService:
 
     async def _run_v2_workflow(self, descriptor: ModuleRuntimeDescriptorV2, context: TaskContext) -> TaskResult:
         workflow_name = self._resolve_v2_workflow_name(context, descriptor)
+        workflow_info = self._workflow_lifecycle_info(descriptor, workflow_name, context)
         started_at = time.monotonic()
         container = ObjectContainerV2(
             descriptor,
@@ -279,18 +281,23 @@ class ModuleService:
         try:
             context._page_action_executor = _run_page_action
             workflow = container.build_workflow()
+            await container.setup(
+                context,
+                workflow_info,
+                timeout_seconds=OBJECT_SETUP_TIMEOUT_SECONDS,
+            )
             run = getattr(workflow, "run", None)
             if run is None:
                 raise ValueError(f"Workflow has no run method: {workflow_name}")
             result = await invoke_runtime_callable(run, context)
             normalized_result = normalize_result_payload(result, context)
-            outcome = self._outcome_from_result(normalized_result, started_at=started_at)
+            outcome = self._outcome_from_result(normalized_result, started_at=started_at, workflow=workflow_info)
             return normalized_result
         except asyncio.CancelledError as exc:
-            outcome = self._outcome_from_cancelled(context, exc, started_at=started_at)
+            outcome = self._outcome_from_cancelled(context, exc, started_at=started_at, workflow=workflow_info)
             raise
         except Exception as exc:
-            outcome = self._outcome_from_exception(exc, started_at=started_at)
+            outcome = self._outcome_from_exception(exc, started_at=started_at, workflow=workflow_info)
             raise
         finally:
             context._page_action_executor = previous_page_action_executor
@@ -299,6 +306,7 @@ class ModuleService:
                 outcome or self._outcome_from_exception(
                     RuntimeError("workflow exited before outcome was resolved"),
                     started_at=started_at,
+                    workflow=workflow_info,
                 ),
                 timeout_seconds=OBJECT_CLEANUP_TIMEOUT_SECONDS,
             )
@@ -307,18 +315,49 @@ class ModuleService:
     def _duration_since(*, started_at: float) -> float:
         return max(time.monotonic() - started_at, 0.0)
 
-    def _outcome_from_result(self, result: TaskResult, *, started_at: float) -> TaskOutcome:
+    def _workflow_lifecycle_info(
+        self,
+        descriptor: ModuleRuntimeDescriptorV2,
+        workflow_name: str,
+        context: TaskContext,
+    ) -> WorkflowLifecycleInfo:
+        entry = descriptor.workflows.get(workflow_name)
+        meta = entry.meta if entry is not None else None
+        return WorkflowLifecycleInfo(
+            module_name=str(context.task_name or "").strip(),
+            workflow_name=str(workflow_name or "").strip(),
+            workflow_label=str(getattr(meta, "label", "") or "").strip(),
+            workflow_description=str(getattr(meta, "description", "") or "").strip(),
+            workflow_module_name=str(getattr(entry, "module_name", "") or "").strip(),
+            workflow_symbol=str(getattr(entry, "attr_name", "") or "").strip(),
+        )
+
+    def _outcome_from_result(
+        self,
+        result: TaskResult,
+        *,
+        started_at: float,
+        workflow: WorkflowLifecycleInfo,
+    ) -> TaskOutcome:
         return TaskOutcome(
             status="succeeded" if result.success else "failed",
+            workflow=workflow,
             result=result,
             error=result.error or "",
             error_type="",
             duration_seconds=self._duration_since(started_at=started_at),
         )
 
-    def _outcome_from_exception(self, exc: Exception, *, started_at: float) -> TaskOutcome:
+    def _outcome_from_exception(
+        self,
+        exc: Exception,
+        *,
+        started_at: float,
+        workflow: WorkflowLifecycleInfo,
+    ) -> TaskOutcome:
         return TaskOutcome(
             status="failed",
+            workflow=workflow,
             error=str(exc),
             error_type=exc.__class__.__name__,
             duration_seconds=self._duration_since(started_at=started_at),
@@ -330,11 +369,13 @@ class ModuleService:
         exc: asyncio.CancelledError,
         *,
         started_at: float,
+        workflow: WorkflowLifecycleInfo,
     ) -> TaskOutcome:
         cancel_reason = str(context.runtime.get("_module_cancel_reason") or "").strip()
         status = "timed_out" if cancel_reason == "timed_out" else "cancelled"
         return TaskOutcome(
             status=status,
+            workflow=workflow,
             error=str(exc),
             error_type=exc.__class__.__name__,
             duration_seconds=self._duration_since(started_at=started_at),
