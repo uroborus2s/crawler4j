@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, available_timezones
 
+import yaml
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QApplication,
@@ -61,6 +62,77 @@ from src.ui.components.text_edit import StyledPlainTextEdit as QPlainTextEdit
 from src.ui.components.yaml_code_editor import YamlCodeEditor
 
 
+class CandidateParamsDialog(QDialog):
+    """候选函数参数编辑弹窗。"""
+
+    def __init__(self, params: dict[str, object] | None = None, parent=None, read_only: bool = False):
+        super().__init__(parent)
+        self._params = dict(params or {})
+        self._read_only = read_only
+        self._setup_ui()
+        self.editor.setPlainText(self._params_to_yaml(self._params))
+
+    def _setup_ui(self) -> None:
+        self.setWindowTitle("配置候选参数")
+        configure_titled_dialog(self)
+        self.resize(560, 420)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        self.editor = YamlCodeEditor()
+        self.editor.setReadOnly(self._read_only)
+        layout.addWidget(self.editor, 1)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        cancel_btn = StyledButton(
+            "关闭" if self._read_only else "取消",
+            variant="secondary",
+            min_height=32,
+            min_width=80,
+            border_radius=4,
+        )
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        if not self._read_only:
+            save_btn = StyledButton("保存参数", variant="success", min_height=32, min_width=92, border_radius=4)
+            save_btn.clicked.connect(self._on_save)
+            button_layout.addWidget(save_btn)
+
+        layout.addLayout(button_layout)
+
+    @staticmethod
+    def _params_to_yaml(params: dict[str, object]) -> str:
+        if not params:
+            return "{}\n"
+        return yaml.safe_dump(params, allow_unicode=True, sort_keys=False)
+
+    def _parse_candidate_params(self) -> dict[str, object]:
+        raw_text = self.editor.toPlainText()
+        if not raw_text.strip():
+            return {}
+        parsed = yaml.safe_load(raw_text)
+        if parsed is None:
+            return {}
+        if not isinstance(parsed, dict):
+            raise ValueError("候选参数必须是 YAML 对象")
+        return dict(parsed)
+
+    def _on_save(self) -> None:
+        try:
+            self._params = self._parse_candidate_params()
+        except Exception as exc:
+            MessageDialog.warning(self, "候选参数无效", str(exc))
+            return
+        self.accept()
+
+    def get_params(self) -> dict[str, object]:
+        return dict(self._params)
+
+
 class WorkflowSelector(QWidget):
     """工作流选择组合控件 (Module + Workflow)。"""
 
@@ -75,7 +147,7 @@ class WorkflowSelector(QWidget):
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0) # Remove spacing to behave like a single control when module is hidden
+        layout.setSpacing(0)  # Remove spacing to behave like a single control when module is hidden
 
         # 模块下拉框
         self.module_combo = QComboBox()
@@ -85,7 +157,7 @@ class WorkflowSelector(QWidget):
         self.module_combo.setMinimumWidth(120)
         self.module_combo.currentTextChanged.connect(self._on_module_changed)
         layout.addWidget(self.module_combo)
-        
+
         # Spacer if both are visible
         self.spacer = QWidget()
         self.spacer.setFixedWidth(8)
@@ -98,7 +170,7 @@ class WorkflowSelector(QWidget):
         # Match "Scaling Mode" combo box behavior (Preferred instead of Expanding)
         self.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.workflow_combo)
-        
+
         if not self._show_module:
             self.module_combo.hide()
             self.spacer.hide()
@@ -106,14 +178,14 @@ class WorkflowSelector(QWidget):
     def set_module_filter(self, module_name: str | None):
         """设置模块过滤器。"""
         current_wf = self._current_workflow_value()
-        
+
         self._filter_module = module_name
-        
+
         if self._show_module:
             has_filter = bool(module_name)
             self.module_combo.setVisible(not has_filter)
             self.spacer.setVisible(not has_filter)
-            
+
             if module_name:
                 # Force module selection
                 index = self.module_combo.findText(module_name)
@@ -124,7 +196,7 @@ class WorkflowSelector(QWidget):
                 self.module_combo.setCurrentIndex(-1)
         else:
             # Pure workflow mode: just load workflows for this module
-             self._on_module_changed(module_name)
+            self._on_module_changed(module_name)
 
         if current_wf:
             idx = self._find_workflow_index(current_wf)
@@ -136,8 +208,8 @@ class WorkflowSelector(QWidget):
             registry = get_module_registry()
             # Force refresh might be needed if registry is empty
             if not registry.list_modules():
-                registry.refresh() 
-            
+                registry.refresh()
+
             modules = registry.list_modules()
             self.module_combo.clear()
             for m in modules:
@@ -148,13 +220,13 @@ class WorkflowSelector(QWidget):
 
     def _on_module_changed(self, module_name):
         self.workflow_combo.clear()
-        
+
         if self._show_none_option:
             self.workflow_combo.addItem("不执行 (None)", "")
 
         if not module_name:
             return
-            
+
         try:
             registry = get_module_registry()
             workflows = registry.get_workflows(module_name)
@@ -191,10 +263,10 @@ class WorkflowSelector(QWidget):
             wf = current_data
         else:
             wf = self.workflow_combo.currentText()
-        
+
         if not self._show_module:
             return getattr(self, "_filter_module", "") or "", wf
-            
+
         return self.module_combo.currentText(), wf
 
     def set_value(self, module: str, workflow: str):
@@ -202,7 +274,7 @@ class WorkflowSelector(QWidget):
             index = self.module_combo.findText(module)
             if index >= 0:
                 self.module_combo.setCurrentIndex(index)
-            
+
         wf_index = self._find_workflow_index(workflow)
         if wf_index >= 0:
             self.workflow_combo.setCurrentIndex(wf_index)
@@ -348,18 +420,21 @@ class RunProfileDialog(QDialog):
     def __init__(self, run_profile: RunProfile | None = None, parent=None, read_only: bool = False):
         super().__init__(parent)
         self._run_profile = run_profile or self._default_run_profile()
+        self._candidate_params: dict[str, object] = dict(
+            self._run_profile.resource.acquisition.candidate_params or {}
+        )
         self._is_new = run_profile is None
         self._read_only = read_only
         self._setup_ui()
         self._load_run_profile()
-        
+
         if self._read_only:
-             self._set_read_only()
+            self._set_read_only()
 
     def _setup_ui(self):
         self.setWindowTitle("配置运行模板")
         configure_titled_dialog(self)
-        
+
         # Responsive sizing (60% width, 95% height of screen)
         screen = QApplication.primaryScreen()
         if screen:
@@ -369,9 +444,9 @@ class RunProfileDialog(QDialog):
         else:
             # Fallback for headless or special cases
             w, h = 960, 700
-            
+
         self.resize(w, h)
-        
+
         self.setStyleSheet("""
             QDialog { background: rgb(30, 30, 40); }
             QLabel { color: rgba(255, 255, 255, 0.9); font-size: 13px; }
@@ -425,7 +500,7 @@ class RunProfileDialog(QDialog):
 
         # 堆叠挂件
         self.stack = QStackedWidget()
-        
+
         # 1. 表单模式
         self.form_tabs = QTabWidget()
         self._setup_form_tabs()
@@ -445,18 +520,18 @@ class RunProfileDialog(QDialog):
         validate_btn.clicked.connect(self._on_validate)
         cancel_btn = StyledButton("取消", variant="secondary", min_height=32, min_width=80, border_radius=4)
         cancel_btn.clicked.connect(self.reject)
-        
+
         save_btn = StyledButton("保存运行模板", variant="success", min_height=32, min_width=116, border_radius=4)
         save_btn.clicked.connect(self._on_save)
-        
+
         btn_layout.addWidget(validate_btn)
         btn_layout.addWidget(cancel_btn)
         btn_layout.addWidget(save_btn)
-        
+
         if self._read_only:
-             validate_btn.hide()
-             save_btn.hide()
-             cancel_btn.setText("关闭")
+            validate_btn.hide()
+            save_btn.hide()
+            cancel_btn.setText("关闭")
 
         layout.addLayout(btn_layout)
 
@@ -476,18 +551,18 @@ class RunProfileDialog(QDialog):
                 YamlCodeEditor,
             )
         ):
-             # QComboBox and QCheckBox use setEnabled
-             if isinstance(widget, (QComboBox, QCheckBox, ToggleSwitch, SegmentedOptionControl)):
-                 widget.setEnabled(False)
-             elif isinstance(widget, (QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, YamlCodeEditor)):
-                 widget.setReadOnly(True)
-        
+            # QComboBox and QCheckBox use setEnabled
+            if isinstance(widget, (QComboBox, QCheckBox, ToggleSwitch, SegmentedOptionControl)):
+                widget.setEnabled(False)
+            elif isinstance(widget, (QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, YamlCodeEditor)):
+                widget.setReadOnly(True)
+
         # Helper to disable WorkflowSelectors
         # We need to explicitly call setEnabled on them because they are complex widgets
         # Or better, let's implement set_read_only on WorkflowSelector if they are custom
         # But for now, let's just find them by type if we can, or manually access them.
         # findChildren might not find them if they are wrapped.
-        
+
         self.script_selector.setEnabled(False)
         for button_name in (
             "ua_default_btn",
@@ -498,13 +573,14 @@ class RunProfileDialog(QDialog):
             "sec_ch_ua_add_btn",
             "device_name_regen_btn",
             "mac_regen_btn",
+            "candidate_params_btn",
         ):
             button = getattr(self, button_name, None)
             if button is not None:
                 button.setEnabled(False)
         for row_widget in getattr(self, "_sec_ch_ua_rows", []):
             row_widget.remove_btn.setEnabled(False)
-        
+
     def _default_run_profile(self) -> RunProfile:
         return RunProfile(
             resource=ResourceConfig(
@@ -1387,6 +1463,26 @@ class RunProfileDialog(QDialog):
         self.candidates_combo = QComboBox()
         self.candidates_combo.setPlaceholderText("选择候选函数")
         self.select_form.addRow("候选函数:", self.candidates_combo)
+
+        candidate_params_widget = QWidget()
+        candidate_params_layout = QHBoxLayout(candidate_params_widget)
+        candidate_params_layout.setContentsMargins(0, 0, 0, 0)
+        candidate_params_layout.setSpacing(8)
+        self.candidate_params_summary = QLabel("未配置")
+        self.candidate_params_summary.setStyleSheet("color: rgba(255, 255, 255, 0.72);")
+        self.candidate_params_summary.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        candidate_params_layout.addWidget(self.candidate_params_summary, 1)
+        self.candidate_params_btn = StyledButton(
+            "配置参数",
+            variant="secondary",
+            min_height=32,
+            min_width=88,
+            border_radius=4,
+        )
+        self.candidate_params_btn.clicked.connect(self._open_candidate_params_dialog)
+        candidate_params_layout.addWidget(self.candidate_params_btn)
+        self.select_form.addRow("候选参数:", candidate_params_widget)
+
         self.select_form.addRow(
             "等待超时:",
             self._wrap_widget_with_suffix(self.wait_timeout_spin, "秒"),
@@ -2291,6 +2387,25 @@ class RunProfileDialog(QDialog):
             return widget.text()
         return None
 
+    def _sync_candidate_params_summary(self) -> None:
+        if not hasattr(self, "candidate_params_summary"):
+            return
+        keys = [str(key) for key in self._candidate_params.keys()]
+        if not keys:
+            self.candidate_params_summary.setText("未配置")
+            return
+        preview = ", ".join(keys[:3])
+        if len(keys) > 3:
+            preview = f"{preview} 等 {len(keys)} 项"
+        self.candidate_params_summary.setText(preview)
+
+    def _open_candidate_params_dialog(self) -> None:
+        dialog = CandidateParamsDialog(self._candidate_params, parent=self, read_only=self._read_only)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._candidate_params = dialog.get_params()
+        self._sync_candidate_params_summary()
+
     def _declared_env_candidate_options(self) -> list[tuple[str, str]]:
         module_name = self._current_script_module_name()
         if not module_name:
@@ -2444,6 +2559,8 @@ class RunProfileDialog(QDialog):
         self._sync_candidates_options(acquisition.candidates or "")
         self.wait_timeout_spin.setValue(acquisition.wait_timeout)
         self._set_candidates_value(acquisition.candidates or "")
+        self._candidate_params = dict(acquisition.candidate_params or {})
+        self._sync_candidate_params_summary()
 
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
@@ -2487,6 +2604,7 @@ class RunProfileDialog(QDialog):
                 provider=provider,
                 env_type=env_type,
                 candidates=candidates_name,
+                candidate_params=dict(self._candidate_params) if acquisition_mode == AcquisitionMode.SELECT else {},
                 wait_timeout=self.wait_timeout_spin.value(),
                 creation=CreationConfig(
                     lifecycle=CreationLifecycle.PERSISTENT,
@@ -2494,7 +2612,7 @@ class RunProfileDialog(QDialog):
                 ),
             ),
         )
-        
+
         module_name, workflow_name = self.script_selector.get_value()
         if not module_name or not workflow_name:
             raise ValueError("请选择执行脚本")
@@ -2506,7 +2624,7 @@ class RunProfileDialog(QDialog):
             object_params=object_assembly["object_params"],
             timeout=self.execution_timeout_spin.value(),
         )
-        
+
         return RunProfile(
             resource=resource,
             execution=execution,
@@ -2566,7 +2684,7 @@ class RunProfileDialog(QDialog):
                 return
         else:
             self._run_profile = self._build_run_profile_from_form()
-            
+
         self.accept()
 
     def get_run_profile(self) -> RunProfile:

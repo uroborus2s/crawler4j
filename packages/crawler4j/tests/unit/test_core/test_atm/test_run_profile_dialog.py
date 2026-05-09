@@ -466,6 +466,58 @@ def test_run_profile_dialog_builds_select_mode_profile(qtbot, monkeypatch):
     assert profile.resource.acquisition.wait_timeout == 60
 
 
+def test_run_profile_dialog_preserves_loaded_candidate_params(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                provider="",
+                env_type=EnvType.VIRTUAL_BROWSER,
+                candidates="bound_account_ready",
+                candidate_params={"tier": "gold", "limit": 20},
+            ),
+        ),
+        execution=ExecutionContext(module="demo_module", workflow="collect"),
+    )
+    dialog = RunProfileDialog(run_profile=run_profile)
+    qtbot.addWidget(dialog)
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.resource.acquisition.candidate_params == {"tier": "gold", "limit": 20}
+
+
+def test_candidate_params_dialog_parses_mapping_yaml(qtbot):
+    from src.core.atm.ui.run_profile_dialog import CandidateParamsDialog
+
+    dialog = CandidateParamsDialog({"limit": 5})
+    qtbot.addWidget(dialog)
+
+    dialog.editor.setPlainText("tier: gold\nlimit: 20\nregion:\n  code: hk\n")
+
+    assert dialog._parse_candidate_params() == {
+        "tier": "gold",
+        "limit": 20,
+        "region": {"code": "hk"},
+    }
+
+
+def test_candidate_params_dialog_rejects_non_mapping_yaml(qtbot):
+    from src.core.atm.ui.run_profile_dialog import CandidateParamsDialog
+
+    dialog = CandidateParamsDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.editor.setPlainText("- tier\n- limit\n")
+
+    with pytest.raises(ValueError, match="候选参数必须是 YAML 对象"):
+        dialog._parse_candidate_params()
+
+
 def test_run_profile_dialog_separates_execution_timeout_from_wait_timeout(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
