@@ -110,6 +110,7 @@ ctx.db.into("accounts").update_where({"status": "used"}, where=["account_id", "=
 ctx.db.into("accounts").delete_where(where=["status", "=", "expired"])
 ctx.db.into("accounts").update_where({"status": "used"}, where=lambda q: q.where("account_id", "=", "A001"))
 ctx.db.into("accounts").delete_where(where=lambda q: q.where(["status", "=", "expired"]))
+ctx.db.into("accounts").delete_where(where="A001")
 
 event_id = ctx.db.audit("account_events").append(
     entity_key="A001",
@@ -123,6 +124,8 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
     {"entity_key": "A001", "event_type": "status_changed"},
 ).execute()
 ```
+
+`delete_where(where=<主键值>)` 是主键删除快捷写法。`custom_table` 会按数据源描述中的 `record_key_field` 匹配；`managed_dataset` 会按宿主物理字段 `record_key` 匹配。需要按非主键字段删除时，继续使用 `where=["field", "=", value]`、`where={"field": value}` 或 callable 条件。
 
 数据表和只读视图必须先由 `@data_table` / `@data_view` 声明并进入 manifest lock。
 `ctx.db.describe(source)` 读取宿主归一化后的数据源契约；`source` 是逻辑数据源名，不是 SQLite 物理表名。返回值包含 `kind`、`source_kind`、`storage_mode`、`record_key_field`、`columns`、`system_fields`、`writable_fields`、`required_fields` 和 `read_only_fields`。模块侧需要生成 repository 写入契约时，应优先使用这个宿主描述。

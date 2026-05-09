@@ -432,6 +432,23 @@ def test_runtime_ctx_db_update_delete_accept_query_builder_callable_where(temp_d
     assert caps.db.from_("accounts").order_by("id").execute() == [{"id": "u1", "status": "ready"}]
 
 
+def test_runtime_ctx_db_delete_where_accepts_custom_table_record_key_value(temp_data_dir):
+    _sync_custom_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").upsert(
+            [
+                {"id": "u1", "status": "ready"},
+                {"id": "u2", "status": "expired"},
+            ]
+        )
+        is True
+    )
+    assert caps.db.into("accounts").delete_where(where="u2") == 1
+    assert caps.db.from_("accounts").order_by("id").execute() == [{"id": "u1", "status": "ready"}]
+
+
 def test_runtime_ctx_db_add_supports_custom_table_auto_increment_ids(temp_data_dir):
     _sync_custom_auto_increment_accounts(temp_data_dir, module_name="demo_module")
     caps = build_runtime_capabilities("demo_module")
@@ -469,10 +486,10 @@ def test_runtime_ctx_db_managed_dataset_supports_incremental_writes(temp_data_di
     )
     assert caps.db.into("accounts").update_where({"phone": "13600136000"}, where=["id", "=", "u1"]) == 1
     assert caps.db.into("accounts").delete_where(where=["phone", "=", "13700137000"]) == 1
+    assert caps.db.into("accounts").delete_where(where="u2") == 1
 
     assert caps.db.from_("accounts").select(["id", "phone", "record_index"]).order_by("record_index").execute() == [
         {"id": "u1", "phone": "13600136000", "record_index": 0},
-        {"id": "u2", "phone": "13999999999", "record_index": 1},
     ]
 
 

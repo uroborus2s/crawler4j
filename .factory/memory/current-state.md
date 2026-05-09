@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新开发：2026-05-09 已为 `ctx.db.into(...).delete_where` 与 `ctx.db.batch().delete_where` 增加主键值快捷删除。模块可写 `delete_where(where="A001")`；Contracts 会先读取数据源描述，`custom_table` 映射到 `record_key_field`，`managed_dataset` 映射到宿主物理 `record_key`，普通结构化 where 与 callable where 保持原语义。开发者指南已同步，Contracts plan 与 Runtime capabilities 定向测试已覆盖。
 - 最新开发：2026-05-09 已为 `ctx.db.into(...).update_where/delete_where` 与 `ctx.db.batch().update_where/delete_where` 增加 callable `where` 构造入口。模块可写 `where=lambda q: q.where("id", "=", value)` 复用现有 `DatabaseQueryBuilder.where(...)` 条件语法；callable 只收集 where 条件，不触发额外数据源描述，也会拒绝未添加任何条件的更新/删除。开发者指南已同步，Contracts plan 单测与 Runtime capabilities 定向测试已覆盖。
 - 最新开发：2026-05-09 已为 `ctx.db` 增加公开 `describe(source)` 数据源描述入口。`source` 使用 `@data_table/@data_view` 逻辑名，宿主返回归一化后的 `kind/source_kind/storage_mode/record_key_field/columns/system_fields/writable_fields/required_fields/read_only_fields`。`custom_table` 非自增主键会作为必填可写字段返回，自增主键作为只读生成字段返回；`managed_dataset` 业务字段在 `columns`，`record_index/record_key/run_status/record_status/created_at/updated_at` 在 `system_fields`，其中只有 `run_status/record_status` 可写。新增 Contracts 与 ModuleDataStore 定向覆盖，开发者指南已同步。
 - 最新开发：2026-05-09 已为 `managed_dataset` 增加 `where` 后行数统计。`ctx.db.from_("accounts").where(...).count(alias="total").execute()` 对托管快照表返回 `[{"total": n}]`，where 继续支持 schema 业务字段和 `run_status` / `record_status` 等宿主物理字段；该能力只开放单个 `count(*)` aggregate，不支持 `join`、`group_by`、混合列选择或 `sum/avg/min/max`。新增 ModuleDataStore 与 Runtime capabilities 定向覆盖。

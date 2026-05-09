@@ -311,7 +311,7 @@ class ResourceWriter:
             {
                 "kind": "delete_records",
                 "resource": self._resource,
-                "where": _normalize_writer_where(where, self._client, self._resource),
+                "where": _normalize_delete_where(where, self._client, self._resource),
             }
         )
 
@@ -377,7 +377,7 @@ class DatabaseBatchWriter:
             {
                 "kind": "delete_records",
                 "resource": normalized_resource,
-                "where": _normalize_writer_where(where, self._client, normalized_resource),
+                "where": _normalize_delete_where(where, self._client, normalized_resource),
             }
         )
         return self
@@ -453,6 +453,27 @@ def _normalize_writer_where(where: Any, client: DatabaseClient, resource: str) -
     if not builder._where:
         raise ValueError("where callable must add at least one condition")
     return list(builder._where)
+
+
+def _normalize_delete_where(where: Any, client: DatabaseClient, resource: str) -> list[dict[str, Any]]:
+    if _is_record_key_value(where):
+        return [{"field": _delete_record_key_field(client, resource), "op": "eq", "value": where}]
+    return _normalize_writer_where(where, client, resource)
+
+
+def _is_record_key_value(value: Any) -> bool:
+    if value is None or callable(value) or isinstance(value, bool):
+        return False
+    return not isinstance(value, (dict, list, tuple, set))
+
+
+def _delete_record_key_field(client: DatabaseClient, resource: str) -> str:
+    descriptor = client._describe_source(resource)
+    storage_mode = str(descriptor.get("storage_mode") or "").strip()
+    if storage_mode == "managed_dataset":
+        return "record_key"
+    record_key_field = str(descriptor.get("record_key_field") or "").strip()
+    return _normalize_name(record_key_field or "id", "record_key_field")
 
 
 def _normalize_condition(condition: Any) -> dict[str, Any]:

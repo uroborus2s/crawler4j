@@ -42,6 +42,8 @@ class _FakeDbExecutor:
         return {
             "source": source,
             "source_kind": "relation",
+            "storage_mode": "custom_table",
+            "record_key_field": "account_id",
             "columns": [
                 {"name": "account_id", "type": "text"},
                 {"name": "amount", "type": "number"},
@@ -294,6 +296,33 @@ def test_task_context_db_writer_where_callable_must_add_conditions():
 
     with pytest.raises(ValueError, match="where callable must add at least one condition"):
         ctx.db.into("accounts").delete_where(where=lambda query: query)
+
+
+def test_task_context_db_delete_where_accepts_record_key_value():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.into("accounts").delete_where(where="A001")
+    ctx.db.batch().delete_where("accounts", where="A002").execute()
+
+    assert executor.described == ["accounts", "accounts"]
+    assert executor.plans == [
+        {
+            "kind": "delete_records",
+            "resource": "accounts",
+            "where": [{"field": "account_id", "op": "eq", "value": "A001"}],
+        },
+        {
+            "kind": "batch",
+            "operations": [
+                {
+                    "kind": "delete_records",
+                    "resource": "accounts",
+                    "where": [{"field": "account_id", "op": "eq", "value": "A002"}],
+                }
+            ],
+        },
+    ]
 
 
 def test_task_context_db_supports_batch_write_plan():
