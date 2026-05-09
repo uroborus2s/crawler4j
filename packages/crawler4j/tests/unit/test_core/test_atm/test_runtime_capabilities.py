@@ -402,6 +402,36 @@ def test_runtime_ctx_db_supports_upsert_update_delete_and_batch(temp_data_dir):
     ]
 
 
+def test_runtime_ctx_db_update_delete_accept_query_builder_callable_where(temp_data_dir):
+    _sync_custom_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").upsert(
+            [
+                {"id": "u1", "status": "new"},
+                {"id": "u2", "status": "expired"},
+                {"id": "u3", "status": "reserved"},
+            ]
+        )
+        is True
+    )
+    assert (
+        caps.db.into("accounts").update_where(
+            {"status": "ready"},
+            where=lambda query: query.where("id", "=", "u1"),
+        )
+        == 1
+    )
+    assert (
+        caps.db.into("accounts").delete_where(
+            where=lambda query: query.where(["or", ["status", "=", "expired"], ["status", "=", "reserved"]]),
+        )
+        == 2
+    )
+    assert caps.db.from_("accounts").order_by("id").execute() == [{"id": "u1", "status": "ready"}]
+
+
 def test_runtime_ctx_db_add_supports_custom_table_auto_increment_ids(temp_data_dir):
     _sync_custom_auto_increment_accounts(temp_data_dir, module_name="demo_module")
     caps = build_runtime_capabilities("demo_module")

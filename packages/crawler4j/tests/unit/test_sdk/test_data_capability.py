@@ -251,6 +251,51 @@ def test_task_context_db_supports_concurrency_safe_write_plans():
     ]
 
 
+def test_task_context_db_writer_where_accepts_query_builder_callable():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.into("accounts").update_where(
+        {"status": "used"},
+        where=lambda query: query.where("account_id", "=", "A001"),
+    )
+    ctx.db.into("accounts").delete_where(
+        where=lambda query: query.where(["or", ["status", "=", "expired"], ["amount", ">", 100]]),
+    )
+
+    assert executor.described == []
+    assert executor.plans == [
+        {
+            "kind": "update_records",
+            "resource": "accounts",
+            "fields": {"status": "used"},
+            "where": [{"field": "account_id", "op": "eq", "value": "A001"}],
+        },
+        {
+            "kind": "delete_records",
+            "resource": "accounts",
+            "where": [
+                {
+                    "kind": "group",
+                    "operator": "or",
+                    "conditions": [
+                        {"field": "status", "op": "eq", "value": "expired"},
+                        {"field": "amount", "op": "gt", "value": 100},
+                    ],
+                }
+            ],
+        },
+    ]
+
+
+def test_task_context_db_writer_where_callable_must_add_conditions():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    with pytest.raises(ValueError, match="where callable must add at least one condition"):
+        ctx.db.into("accounts").delete_where(where=lambda query: query)
+
+
 def test_task_context_db_supports_batch_write_plan():
     executor = _FakeDbExecutor()
     ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
@@ -258,6 +303,10 @@ def test_task_context_db_supports_batch_write_plan():
     ctx.db.batch().add("accounts", [{"status": "new"}]).upsert(
         "accounts",
         [{"account_id": "A001", "status": "ready"}],
+    ).update_where(
+        "accounts",
+        {"status": "used"},
+        where=lambda query: query.where("account_id", "=", "A001"),
     ).delete_where(
         "accounts",
         where=["status", "=", "expired"],
@@ -279,6 +328,12 @@ def test_task_context_db_supports_batch_write_plan():
                     "kind": "upsert_records",
                     "resource": "accounts",
                     "records": [{"account_id": "A001", "status": "ready"}],
+                },
+                {
+                    "kind": "update_records",
+                    "resource": "accounts",
+                    "fields": {"status": "used"},
+                    "where": [{"field": "account_id", "op": "eq", "value": "A001"}],
                 },
                 {
                     "kind": "delete_records",

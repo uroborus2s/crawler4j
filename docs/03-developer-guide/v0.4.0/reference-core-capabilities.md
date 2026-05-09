@@ -108,6 +108,8 @@ ctx.db.into("account_events").add([{"account_id": "A001", "event_type": "login"}
 ctx.db.into("accounts").upsert([{"account_id": "A001", "status": "ready"}])
 ctx.db.into("accounts").update_where({"status": "used"}, where=["account_id", "=", "A001"])
 ctx.db.into("accounts").delete_where(where=["status", "=", "expired"])
+ctx.db.into("accounts").update_where({"status": "used"}, where=lambda q: q.where("account_id", "=", "A001"))
+ctx.db.into("accounts").delete_where(where=lambda q: q.where(["status", "=", "expired"]))
 
 event_id = ctx.db.audit("account_events").append(
     entity_key="A001",

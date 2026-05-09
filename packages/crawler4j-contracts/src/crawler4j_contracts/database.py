@@ -302,7 +302,7 @@ class ResourceWriter:
                 "kind": "update_records",
                 "resource": self._resource,
                 "fields": dict(fields),
-                "where": _normalize_where(where),
+                "where": _normalize_writer_where(where, self._client, self._resource),
             }
         )
 
@@ -311,7 +311,7 @@ class ResourceWriter:
             {
                 "kind": "delete_records",
                 "resource": self._resource,
-                "where": _normalize_where(where),
+                "where": _normalize_writer_where(where, self._client, self._resource),
             }
         )
 
@@ -360,22 +360,24 @@ class DatabaseBatchWriter:
         *,
         where: Any,
     ) -> "DatabaseBatchWriter":
+        normalized_resource = _normalize_name(resource, "resource")
         self._operations.append(
             {
                 "kind": "update_records",
-                "resource": _normalize_name(resource, "resource"),
+                "resource": normalized_resource,
                 "fields": dict(fields),
-                "where": _normalize_where(where),
+                "where": _normalize_writer_where(where, self._client, normalized_resource),
             }
         )
         return self
 
     def delete_where(self, resource: str, *, where: Any) -> "DatabaseBatchWriter":
+        normalized_resource = _normalize_name(resource, "resource")
         self._operations.append(
             {
                 "kind": "delete_records",
-                "resource": _normalize_name(resource, "resource"),
-                "where": _normalize_where(where),
+                "resource": normalized_resource,
+                "where": _normalize_writer_where(where, self._client, normalized_resource),
             }
         )
         return self
@@ -436,6 +438,21 @@ def _normalize_where(where: Any) -> list[dict[str, Any]]:
     if normalized.get("kind") == "group" and normalized.get("operator") == "and":
         return list(normalized["conditions"])
     return [normalized]
+
+
+def _normalize_writer_where(where: Any, client: DatabaseClient, resource: str) -> list[dict[str, Any]]:
+    if not callable(where):
+        return _normalize_where(where)
+
+    builder = DatabaseQueryBuilder(client, resource, descriptor={})
+    result = where(builder)
+    if result is None:
+        result = builder
+    if result is not builder:
+        raise ValueError("where callable must return the provided DatabaseQueryBuilder")
+    if not builder._where:
+        raise ValueError("where callable must add at least one condition")
+    return list(builder._where)
 
 
 def _normalize_condition(condition: Any) -> dict[str, Any]:
