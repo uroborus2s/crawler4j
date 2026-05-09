@@ -57,10 +57,10 @@
 - `TASK-0406-core-object-container-execution` TASK-0406 建立 Core v2 对象容器与执行链
   状态：IN_PROGRESS | 负责人：Codex Core worker | 预估：3.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-005` | 最新：已补齐 `object_param` / `object_inject` 类属性与 `__init__` 参数注解入口，并归一到 v2 descriptor 元数据
 - `TASK-0407-atm-object-assembly-profile-ui` TASK-0407 建立 ATM v2 对象装配运行模板 UI
-  状态：TODO | 负责人：待分配 | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-006`
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-object-assembly-tree-ui` | 最新：运行模板对象装配区已收敛为公共 `ObjectGraphTree`，按 `workflow -> interface 绑定行 -> 子 interface/参数` 树形展示，左侧显示 interface label，右侧下拉显示 component label，并继续保存 `object_bindings/object_params`
 - `TASK-0408-data-decorators-db-registration` TASK-0408 接入 data decorators 到 ctx.db 注册
-  状态：TODO | 负责人：待分配 | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-007`
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-007`, `TC-0400-custom-table-auto-increment`, `TC-0400-managed-dataset-count` | 最新：`@data_table/@data_view` 已进入 manifest lock 和 Core 数据注册链，`custom_table` 支持 integer `record_key_field` 自增主键与 `ctx.db.into(...).add(...)` 省略 id 新增；`managed_dataset` 支持 `where` 后 `count(*)` 统计
 - `TASK-0409-page-action-runtime` TASK-0409 建立 page action runtime
-  状态：TODO | 负责人：待分配 | 预估：1.5 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-008`
+  状态：DONE | 负责人：Codex | 预估：1.5 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-008`, `TC-0400-ui-action-contract` | 最新：已拆分 Hosted UI 用户入口 `@ui_action` 与浏览器页面动作 `@page_action`，并在 workflow page action executor 中拒绝 `page_action -> page_action` 嵌套调用
 - `TASK-0410-remove-v1-runtime-surface` TASK-0410 清理 v1 runtime surface 与兼容代码
   状态：IN_PROGRESS | 负责人：全开发团队 | 预估：持续门禁 | 关联：`REQ-0400`, `API-012`

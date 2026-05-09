@@ -135,42 +135,42 @@ def _object_assembly_descriptor():
 
     return SimpleNamespace(
         interfaces={
-            "orchestrator": entry("orchestrator", kind="interface", label="Orchestrator"),
-            "labor": entry("labor", kind="interface", label="Labor"),
+            "orchestrator": entry("orchestrator", kind="interface", label="编排能力"),
+            "labor": entry("labor", kind="interface", label="劳保能力"),
         },
         components={
             "quiz_orchestrator": entry(
                 "quiz_orchestrator",
                 kind="component",
-                label="Quiz Orchestrator",
+                label="做题编排组件",
                 implements="orchestrator",
                 inject_specs=(inject("labor", "interface", "labor"),),
             ),
             "api_labor": entry(
                 "api_labor",
                 kind="component",
-                label="API Labor",
+                label="API 劳保组件",
                 implements="labor",
                 parameters=(
-                    parameter("base_url", "string", label="Base URL", required=True, default="https://api.example.com"),
-                    parameter("timeout", "integer", label="Timeout", default=30, min=1, max=120, step=1),
+                    parameter("base_url", "string", label="接口地址", required=True, default="https://api.example.com"),
+                    parameter("timeout", "integer", label="超时时间", default=30, min=1, max=120, step=1),
                     parameter(
                         "mode",
                         "enum",
-                        label="Mode",
+                        label="模式",
                         default="sync",
                         options=(option("Sync", "sync"), option("Async", "async")),
                     ),
-                    parameter("enabled", "boolean", label="Enabled", default=True),
-                    parameter("notes", "text", label="Notes", default=""),
-                    parameter("ratio", "number", label="Ratio", default=0.5, min=0, max=1, step=0.1),
-                    parameter("raw_payload", "json", label="Raw Payload", default='{"limit": 10}'),
+                    parameter("enabled", "boolean", label="启用", default=True),
+                    parameter("notes", "text", label="备注", default=""),
+                    parameter("ratio", "number", label="比例", default=0.5, min=0, max=1, step=0.1),
+                    parameter("raw_payload", "json", label="原始载荷", default='{"limit": 10}'),
                 ),
             ),
             "local_labor": entry(
                 "local_labor",
                 kind="component",
-                label="Local Labor",
+                label="本地劳保组件",
                 implements="labor",
             ),
         },
@@ -961,6 +961,21 @@ def test_run_profile_dialog_renders_object_assembly_and_ignores_workflow_paramet
     assert isinstance(dialog._object_param_widgets["api_labor"]["notes"], StyledPlainTextEdit)
     assert isinstance(dialog._object_param_widgets["api_labor"]["raw_payload"], StyledLineEdit)
 
+    tree = dialog.object_assembly_tree
+    assert tree.topLevelItemCount() == 1
+    workflow_item = tree.topLevelItem(0)
+    assert workflow_item.text(0) == "工作流: 统一做题 (quiz_workflow)"
+    orchestrator_item = workflow_item.child(0)
+    assert orchestrator_item.text(0) == "编排能力 (orchestrator)"
+    assert tree.itemWidget(orchestrator_item, 1) is dialog._object_binding_widgets["orchestrator"]
+    assert dialog._object_binding_widgets["orchestrator"].currentText() == "做题编排组件 (quiz_orchestrator)"
+    labor_item = orchestrator_item.child(0)
+    assert labor_item.text(0) == "劳保能力 (labor)"
+    assert tree.itemWidget(labor_item, 1) is dialog._object_binding_widgets["orchestrator.labor"]
+    assert dialog._object_binding_widgets["orchestrator.labor"].currentText() == "API 劳保组件 (api_labor)"
+    assert labor_item.child(0).text(0) == "参数: 接口地址 *"
+    assert tree.itemWidget(labor_item.child(0), 1) is dialog._object_param_widgets["api_labor"]["base_url"]
+
     labor_combo = dialog._object_binding_widgets["orchestrator.labor"]
     labor_combo.setCurrentIndex(labor_combo.findData("api_labor"))
     dialog._object_param_widgets["api_labor"]["base_url"].setText("https://labor.example.com")
@@ -991,6 +1006,39 @@ def test_run_profile_dialog_renders_object_assembly_and_ignores_workflow_paramet
             "raw_payload": '{"limit": 20}',
         }
     }
+
+
+def test_run_profile_dialog_defers_object_assembly_rerender_during_binding_change(qtbot, monkeypatch):
+    _patch_parameterized_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+    dialog.script_selector.set_value("ctrip_crawler", "quiz_workflow")
+
+    labor_combo = dialog._object_binding_widgets["orchestrator.labor"]
+    target_index = labor_combo.findData("local_labor")
+    assert target_index >= 0
+
+    calls: list[dict | None] = []
+    original_sync = dialog._sync_object_assembly_form
+
+    def wrapped_sync(values=None):
+        calls.append(values)
+        return original_sync(values)
+
+    monkeypatch.setattr(dialog, "_sync_object_assembly_form", wrapped_sync)
+
+    labor_combo.setCurrentIndex(target_index)
+
+    assert calls == []
+
+    qtbot.waitUntil(lambda: len(calls) == 1, timeout=1000)
+
+    assert len(calls) == 1
+    assert dialog._object_binding_widgets["orchestrator.labor"].currentData() == "local_labor"
+    assert "api_labor" not in dialog._object_param_widgets
 
 
 def test_run_profile_dialog_loads_object_assembly_from_run_profile(qtbot, monkeypatch):

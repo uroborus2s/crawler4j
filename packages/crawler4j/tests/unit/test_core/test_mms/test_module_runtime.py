@@ -125,6 +125,39 @@ async def test_module_service_injects_run_page_action_for_v2_workflows(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_module_service_rejects_nested_page_action_calls(tmp_path):
+    module_name = "nested_page_action_module"
+    module_dir = tmp_path / module_name
+    _write_v2_module_package_with_files(
+        module_dir,
+        {
+            "tasks/open_login.py": (
+                "from crawler4j_contracts import TaskContext, page_action\n\n"
+                "@page_action(name='open_login_page')\n"
+                "async def open_login_page(ctx: TaskContext, url: str):\n"
+                "    return await ctx.run_page_action('fill_login_form', url=url)\n\n"
+                "@page_action(name='fill_login_form')\n"
+                "async def fill_login_form(ctx: TaskContext, url: str):\n"
+                "    return {'filled': url}\n"
+            ),
+            "workflows/main_workflow.py": (
+                "from crawler4j_contracts import TaskContext, workflow\n\n"
+                "@workflow(name='main_workflow')\n"
+                "class MainWorkflow:\n"
+                "    async def run(self, ctx: TaskContext):\n"
+                "        return await ctx.run_page_action('open_login_page', url='https://example.com/login')\n"
+            ),
+        },
+    )
+
+    service = _service_for_module(module_name, module_dir)
+    ctx = TaskContext(env_id=1, task_name=module_name, config={})
+
+    with pytest.raises(RuntimeError, match="page_action 不能嵌套调用"):
+        await service.run_module(module_name, ctx)
+
+
+@pytest.mark.asyncio
 async def test_module_service_rejects_legacy_runtime_api(tmp_path):
     module_name = "legacy_module"
     module_dir = tmp_path / module_name

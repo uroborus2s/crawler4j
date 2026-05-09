@@ -39,8 +39,9 @@ Core 可以缓存元数据、类引用和依赖图，但不能预创建业务对
 - `component`
 - `workflow`
 - `page_action`
+- `ui_action`
 - `data_table`
-- `data_query`
+- `data_view`
 
 装饰器只挂载元数据，不创建实例。
 
@@ -80,7 +81,7 @@ upgrade_source:
 - 接口和对象来自装饰器
 - workflow 来自装饰器
 - page action 来自装饰器
-- 数据表和命名查询来自装饰器
+- 数据表和只读视图来自装饰器
 - 扫描快照来自 manifest lock
 
 这些能力来自装饰器和 manifest lock。
@@ -93,8 +94,9 @@ upgrade_source:
 | Component | `@component` | 可被宿主实例化的业务对象 |
 | Workflow | `@workflow` | 宿主创建的 workflow 对象 |
 | Page Action | `@page_action` | 页面操作纯函数 |
+| UI Action | `@ui_action` | Hosted UI 用户操作函数 |
 | Data Table | `@data_table` | 模块数据表声明 |
-| Data Query | `@data_query` | 命名查询声明 |
+| Data View | `@data_view` | 只读数据库视图声明 |
 | Manifest Lock | `crawler4j manifest lock` | SDK 扫描快照 |
 
 ## 对象图
@@ -177,7 +179,7 @@ class HotelSyncWorkflow:
 
 ```python
 rows = ctx.db.from_("hotels").limit(50).execute()
-detail = ctx.db.named("ready_hotels").bind(status="ready").execute()
+ready = ctx.db.from_("hotel_overview").where(["status", "=", "ready"]).execute()
 ctx.db.into("hotels").replace(rows)
 ```
 

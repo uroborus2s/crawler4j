@@ -21,6 +21,7 @@ MANAGED_DATASET_RESERVED_DATA_FIELDS = HOST_RESERVED_DATA_FIELDS | frozenset(
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 DATA_TABLE_STORAGE_MODES = frozenset({"managed_dataset", "custom_table"})
 DATA_TABLE_CLEANUP_POLICIES = frozenset({"delete_rows", "drop_table", "keep"})
+DATA_VIEW_CLEANUP_POLICIES = frozenset({"drop_view", "keep"})
 TargetT = TypeVar("TargetT")
 _MISSING = object()
 
@@ -171,8 +172,8 @@ class Crawler4jMeta:
     cleanup_policy: str = ""
     env_binding_field: str = ""
     source: str = ""
+    sources: tuple[str, ...] = field(default_factory=tuple)
     sql: str = ""
-    output_schema: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     icon: str = ""
     menu: bool = False
     order: int = 0
@@ -187,8 +188,9 @@ class Crawler4jMeta:
             "workflow",
             "page",
             "page_action",
+            "ui_action",
             "data_table",
-            "data_query",
+            "data_view",
             "env_candidates",
             "env_cleanup_candidates",
         }:
@@ -204,9 +206,6 @@ class Crawler4jMeta:
         else:
             schema = tuple(_normalize_schema_item(item, field_name="schema") for item in _as_tuple(self.schema))
         indexes = tuple(_normalize_index(item) for item in _as_tuple(self.indexes))
-        output_schema = tuple(
-            _normalize_schema_item(item, field_name="output_schema") for item in _as_tuple(self.output_schema)
-        )
         storage_mode = str(self.storage_mode or "").strip().lower()
         record_key_field = str(self.record_key_field or "").strip()
         cleanup_policy = str(self.cleanup_policy or "").strip().lower()
@@ -217,11 +216,33 @@ class Crawler4jMeta:
                 raise ValueError(f"data_table storage_mode must be managed_dataset or custom_table: {storage_mode}")
             if record_key_field and not _is_valid_name(record_key_field):
                 raise ValueError(f"data_table record_key_field must be snake_case: {record_key_field}")
+            effective_record_key_field = record_key_field
+            if not effective_record_key_field and schema:
+                effective_record_key_field = str(schema[0].get("name") or schema[0].get("key") or "").strip()
+            auto_increment_fields = [item for item in schema if bool(item.get("auto_increment"))]
+            if auto_increment_fields:
+                if storage_mode != "custom_table":
+                    raise ValueError("data_table auto_increment is only supported for custom_table")
+                if len(auto_increment_fields) > 1:
+                    raise ValueError("data_table auto_increment can only be declared on the record_key_field")
+                auto_increment_field = auto_increment_fields[0]
+                auto_increment_name = str(
+                    auto_increment_field.get("name") or auto_increment_field.get("key") or ""
+                ).strip()
+                if auto_increment_name != effective_record_key_field:
+                    raise ValueError("data_table auto_increment can only be declared on the record_key_field")
+                auto_increment_type = str(auto_increment_field.get("type") or "").strip().lower()
+                if auto_increment_type not in {"integer", "int"}:
+                    raise ValueError("data_table auto_increment record_key_field must be integer")
             if env_binding_field:
                 if not _is_valid_name(env_binding_field):
                     raise ValueError(f"data_table env_binding_field must be snake_case: {env_binding_field}")
                 schema_field = next(
-                    (item for item in schema if str(item.get("name") or item.get("key") or "").strip() == env_binding_field),
+                    (
+                        item
+                        for item in schema
+                        if str(item.get("name") or item.get("key") or "").strip() == env_binding_field
+                    ),
                     None,
                 )
                 if schema_field is None:
@@ -232,6 +253,12 @@ class Crawler4jMeta:
             cleanup_policy = cleanup_policy or ("delete_rows" if storage_mode == "managed_dataset" else "drop_table")
             if cleanup_policy not in DATA_TABLE_CLEANUP_POLICIES:
                 raise ValueError(f"data_table cleanup_policy must be delete_rows, drop_table or keep: {cleanup_policy}")
+        elif kind == "data_view":
+            if any(bool(item.get("auto_increment")) for item in schema):
+                raise ValueError("data_view schema does not support auto_increment")
+            cleanup_policy = cleanup_policy or "drop_view"
+            if cleanup_policy not in DATA_VIEW_CLEANUP_POLICIES:
+                raise ValueError(f"data_view cleanup_policy must be drop_view or keep: {cleanup_policy}")
         else:
             storage_mode = ""
             record_key_field = ""
@@ -239,6 +266,10 @@ class Crawler4jMeta:
             env_binding_field = ""
         implements = str(self.implements or "").strip()
         source = str(self.source or "").strip()
+        sources = tuple(str(item or "").strip() for item in _as_tuple(self.sources))
+        for source_name in sources:
+            if not _is_valid_name(source_name):
+                raise ValueError(f"{kind} source must be snake_case: {source_name or '<empty>'}")
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "label", str(self.label or "").strip())
@@ -253,8 +284,8 @@ class Crawler4jMeta:
         object.__setattr__(self, "cleanup_policy", cleanup_policy)
         object.__setattr__(self, "env_binding_field", env_binding_field)
         object.__setattr__(self, "source", source)
+        object.__setattr__(self, "sources", sources)
         object.__setattr__(self, "sql", str(self.sql or "").strip())
-        object.__setattr__(self, "output_schema", output_schema)
         object.__setattr__(self, "icon", str(self.icon or "").strip())
         object.__setattr__(self, "menu", bool(self.menu))
         object.__setattr__(self, "order", int(self.order or 0))
@@ -265,8 +296,13 @@ class Crawler4jMeta:
             raise ValueError("page schema cannot be empty")
         if kind == "data_table" and not schema:
             raise ValueError("data_table schema cannot be empty")
-        if kind == "data_query" and not source:
-            raise ValueError("data_query source cannot be empty")
+        if kind == "data_view":
+            if not sources:
+                raise ValueError("data_view sources cannot be empty")
+            if not schema:
+                raise ValueError("data_view schema cannot be empty")
+            if not str(self.sql or "").strip():
+                raise ValueError("data_view sql cannot be empty")
 
 
 def interface(
@@ -371,10 +407,31 @@ def page_action(
     inject: Iterable[InjectSpec | Mapping[str, Any]] | None = None,
     parameters: Iterable[ParameterSpec | Mapping[str, Any]] | None = None,
 ) -> Callable[[TargetT], TargetT]:
-    """Declare a hosted-page action function."""
+    """Declare an automated browser page action function."""
     return _decorate(
         Crawler4jMeta(
             kind="page_action",
+            name=name,
+            label=label,
+            description=description,
+            inject=tuple(_as_tuple(inject)),
+            parameters=tuple(_as_tuple(parameters)),
+        )
+    )
+
+
+def ui_action(
+    *,
+    name: str,
+    label: str = "",
+    description: str = "",
+    inject: Iterable[InjectSpec | Mapping[str, Any]] | None = None,
+    parameters: Iterable[ParameterSpec | Mapping[str, Any]] | None = None,
+) -> Callable[[TargetT], TargetT]:
+    """Declare a hosted UI command function."""
+    return _decorate(
+        Crawler4jMeta(
+            kind="ui_action",
             name=name,
             label=label,
             description=description,
@@ -458,27 +515,28 @@ def data_table(
     )
 
 
-def data_query(
+def data_view(
     *,
     name: str,
-    source: str,
+    sources: Iterable[str] | str,
     sql: str,
+    schema: Iterable[Mapping[str, Any]],
     label: str = "",
     description: str = "",
-    parameters: Iterable[ParameterSpec | Mapping[str, Any]] | None = None,
-    output_schema: Iterable[Mapping[str, Any]] | None = None,
+    cleanup_policy: Literal["drop_view", "keep"] | str = "drop_view",
 ) -> Callable[[TargetT], TargetT]:
-    """Declare a named query over a v2 data table."""
+    """Declare a read-only SQL view over custom_table resources."""
+    normalized_sources = (sources,) if isinstance(sources, str) else tuple(_as_tuple(sources))
     return _decorate(
         Crawler4jMeta(
-            kind="data_query",
+            kind="data_view",
             name=name,
             label=label,
             description=description,
-            source=source,
+            sources=tuple(str(item or "").strip() for item in normalized_sources),
             sql=sql,
-            parameters=tuple(_as_tuple(parameters)),
-            output_schema=tuple(_as_tuple(output_schema)),
+            schema=tuple(_as_tuple(schema)),
+            cleanup_policy=cleanup_policy,
         )
     )
 
@@ -514,8 +572,8 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, target: TargetT) -> Crawler4
         cleanup_policy=meta.cleanup_policy,
         env_binding_field=meta.env_binding_field,
         source=meta.source,
+        sources=meta.sources,
         sql=meta.sql,
-        output_schema=meta.output_schema,
         icon=meta.icon,
         menu=meta.menu,
         order=meta.order,

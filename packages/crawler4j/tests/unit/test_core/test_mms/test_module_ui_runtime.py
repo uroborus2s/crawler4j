@@ -39,7 +39,6 @@ def _sync_managed_dataset(module_name: str, module_root, resource_id: str) -> No
                 }
             ],
             "views": [],
-            "queries": [],
             "seeds": [],
         }
     )
@@ -129,6 +128,62 @@ def test_module_ui_runtime_bridge_calls_async_page_action(tmp_path):
 
     try:
         assert bridge.call_page_action("create_account_from_ui", {"id": "u1"}) == {
+            "payload": {"id": "u1"},
+            "mode": "unset",
+        }
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_module_ui_runtime_bridge_calls_sync_ui_action(tmp_path):
+    module_name = "sync_ui_action_bridge_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/actions.py": """
+            from crawler4j_contracts import TaskContext, ui_action
+
+
+            @ui_action(name="create_account_from_ui")
+            def handle(context: TaskContext, payload: dict):
+                return {"payload": dict(payload), "mode": context.config.get("mode", "unset")}
+            """,
+        },
+    )
+    service, original_registry, _ = register_module(module_name, module_dir, manifest=make_manifest(module_name))
+    bridge = ModuleUIRuntimeBridge(module_name)
+
+    try:
+        assert bridge.call_ui_action_sync("create_account_from_ui", {"id": "u1"}) == {
+            "payload": {"id": "u1"},
+            "mode": "unset",
+        }
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_module_ui_runtime_bridge_calls_async_ui_action(tmp_path):
+    module_name = "async_ui_action_bridge_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/actions.py": """
+            from crawler4j_contracts import TaskContext, ui_action
+
+
+            @ui_action(name="create_account_from_ui")
+            async def handle(context: TaskContext, id: str):
+                return {"payload": {"id": id}, "mode": context.config.get("mode", "unset")}
+            """,
+        },
+    )
+    service, original_registry, _ = register_module(module_name, module_dir, manifest=make_manifest(module_name))
+    bridge = ModuleUIRuntimeBridge(module_name)
+
+    try:
+        assert bridge.call_ui_action("create_account_from_ui", {"id": "u1"}) == {
             "payload": {"id": "u1"},
             "mode": "unset",
         }
@@ -433,7 +488,6 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
             }
         ],
         "views": [],
-        "queries": [],
         "seeds": [],
     }
     service, original_registry, _ = register_module(module_name, module_dir, manifest=manifest)
@@ -508,7 +562,6 @@ def test_module_ui_runtime_bridge_scopes_page_actions_to_action_surface(tmp_path
             }
         ],
         "views": [],
-        "queries": [],
         "seeds": [],
     }
     service, original_registry, _ = register_module(module_name, module_dir, manifest=manifest)

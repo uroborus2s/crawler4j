@@ -48,18 +48,15 @@ def _sync_manifest_data(
     module_name: str = "demo_module",
     resources: list[dict[str, object]] | None = None,
     views: list[dict[str, object]] | None = None,
-    queries: list[dict[str, object]] | None = None,
     seeds: list[dict[str, object]] | None = None,
 ) -> bool:
     from src.core.mms.data_contract import normalize_manifest_data
 
     (module_root / "data" / "sql" / "views").mkdir(parents=True, exist_ok=True)
-    (module_root / "data" / "sql" / "queries").mkdir(parents=True, exist_ok=True)
     (module_root / "data" / "seeds").mkdir(parents=True, exist_ok=True)
 
     raw_resources = [dict(item) for item in (resources or [])]
     raw_views = [dict(item) for item in (views or [])]
-    raw_queries = [dict(item) for item in (queries or [])]
     raw_seeds = [dict(item) for item in (seeds or [])]
 
     for view in raw_views:
@@ -67,12 +64,6 @@ def _sync_manifest_data(
         sql_file = str(view.get("sql_file") or f"data/sql/views/{view_id}.sql")
         (module_root / sql_file).write_text(str(view.pop("sql", "")).strip() + "\n", encoding="utf-8")
         view["sql_file"] = sql_file
-
-    for query in raw_queries:
-        query_id = str(query["id"])
-        sql_file = str(query.get("sql_file") or f"data/sql/queries/{query_id}.sql")
-        (module_root / sql_file).write_text(str(query.pop("sql", "")).strip() + "\n", encoding="utf-8")
-        query["sql_file"] = sql_file
 
     for seed in raw_seeds:
         seed_id = str(seed["id"])
@@ -85,7 +76,6 @@ def _sync_manifest_data(
         {
             "resources": raw_resources,
             "views": raw_views,
-            "queries": raw_queries,
             "seeds": raw_seeds,
         }
     )
@@ -99,7 +89,14 @@ def _declare_managed_dataset(
     module_name: str = "demo_module",
     resource_id: str = "accounts",
     record_key_field: str = "id",
+    include_status: bool = False,
 ) -> bool:
+    columns = [
+        {"name": record_key_field, "type": "text", "required": True},
+        {"name": "phone", "type": "text"},
+    ]
+    if include_status:
+        columns.append({"name": "status", "type": "text"})
     return _sync_manifest_data(
         store,
         module_root,
@@ -111,14 +108,38 @@ def _declare_managed_dataset(
                 "record_key_field": record_key_field,
                 "schema": {
                     "version": 1,
-                    "columns": [
-                        {"name": record_key_field, "type": "text", "required": True},
-                        {"name": "phone", "type": "text"},
-                    ],
+                    "columns": columns,
                 },
             }
         ],
     )
+
+
+def _query_records_for_assertion(
+    store,
+    *,
+    module_name: str = "demo_module",
+    resource_id: str = "accounts",
+    where=None,
+    order_by: list[dict[str, str]] | None = None,
+) -> list[dict[str, object]]:
+    resources = {item["resource_id"]: item for item in store.list_data_resources(module_name)}
+    resource = resources[resource_id]
+    if order_by is None:
+        if resource["storage_mode"] == "managed_dataset":
+            order_by = [{"field": "record_index", "direction": "asc"}]
+        else:
+            order_by = [{"field": resource.get("record_key_field") or "id", "direction": "asc"}]
+    rows = store.query_resource_records(
+        module_name,
+        resource_id,
+        select=["*"],
+        where=where,
+        order_by=order_by,
+        limit=2_147_483_647,
+        offset=0,
+    )
+    return [{key: value for key, value in row.items() if key not in {"created_at", "updated_at"}} for row in rows]
 
 
 def _declare_custom_accounts(
@@ -161,7 +182,7 @@ def _legacy_db_view_row(*, cleanup_policy: str = "drop_table", view_kind: str = 
         "SELECT entry_id FROM {{resource:billing_entries}}",
         json.dumps(
             [
-                {"name": "entry_id", "type": "text", "nullable": True, "filterable": True, "sortable": True},
+                {"name": "entry_id", "type": "text", "nullable": True},
             ],
             ensure_ascii=False,
         ),
@@ -170,6 +191,14 @@ def _legacy_db_view_row(*, cleanup_policy: str = "drop_table", view_kind: str = 
         100,
         200,
     )
+
+
+def test_module_data_store_legacy_read_wrappers_are_removed():
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    for method_name in ("get_record", "list_records", "read_resource_records", "query_db_view"):
+        assert not hasattr(store, method_name)
 
 
 def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
@@ -185,15 +214,32 @@ def test_module_data_store_reads_and_writes_only_data_db(temp_data_dir):
     ]
 
     assert store.replace_resource_records("demo_module", "accounts", records) is True
-    assert store.write_page_schema(
-        "demo_module",
-        "dashboard",
-        {"type": "Page", "title": "账号管理", "load_handler": "load_dashboard_page", "children": []},
-    ) is True
+    assert (
+        store.write_page_schema(
+            "demo_module",
+            "dashboard",
+            {"type": "Page", "title": "账号管理", "load_handler": "load_dashboard_page", "children": []},
+        )
+        is True
+    )
 
-    assert store.read_resource_records("demo_module", "accounts") == [
-        {"id": "u1", "phone": "13800138000", "record_key": "u1", "run_status": "不占用", "record_status": ""},
-        {"id": "u2", "phone": "13900139000", "record_key": "u2", "run_status": "不占用", "record_status": ""},
+    assert _query_records_for_assertion(store) == [
+        {
+            "id": "u1",
+            "phone": "13800138000",
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "不占用",
+            "record_status": "",
+        },
+        {
+            "id": "u2",
+            "phone": "13900139000",
+            "record_index": 1,
+            "record_key": "u2",
+            "run_status": "不占用",
+            "record_status": "",
+        },
     ]
     assert store.read_page_schema("demo_module", "dashboard") == {
         "type": "Page",
@@ -231,14 +277,166 @@ def test_module_data_store_rejects_access_to_undeclared_resource(temp_data_dir):
         store.replace_resource_records("demo_module", "accounts", [{"id": "u1"}])
 
     with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
-        store.read_resource_records("demo_module", "accounts")
+        store.query_resource_records("demo_module", "accounts")
+
+
+def test_module_data_store_describes_managed_dataset_write_contract(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "accounts",
+                "storage_mode": "managed_dataset",
+                "record_key_field": "phone",
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": "account_id", "type": "int"},
+                        {"name": "phone", "type": "text", "required": True},
+                        {"name": "status_reason", "type": "text"},
+                    ],
+                },
+                "indexes": {"by_account_id": ["account_id"]},
+                "cleanup_policy": "delete_rows",
+            }
+        ],
+    )
+
+    descriptor = store.describe_data_source("demo_module", "accounts")
+
+    assert descriptor["kind"] == "data_table"
+    assert descriptor["source_kind"] == "snapshot"
+    assert descriptor["storage_mode"] == "managed_dataset"
+    assert descriptor["record_key_field"] == "phone"
+    assert descriptor["columns"] == [
+        {
+            "name": "account_id",
+            "type": "int",
+            "nullable": True,
+            "required": False,
+            "writable": True,
+        },
+        {
+            "name": "phone",
+            "type": "text",
+            "nullable": False,
+            "required": True,
+            "writable": True,
+        },
+        {
+            "name": "status_reason",
+            "type": "text",
+            "nullable": True,
+            "required": False,
+            "writable": True,
+        },
+    ]
+    assert descriptor["system_fields"] == [
+        {"name": "record_index", "type": "int", "writable": False, "generated": True},
+        {"name": "record_key", "type": "text", "writable": False, "generated": True},
+        {"name": "run_status", "type": "text", "writable": True, "generated": False},
+        {"name": "record_status", "type": "text", "writable": True, "generated": False},
+        {"name": "created_at", "type": "int", "writable": False, "generated": True},
+        {"name": "updated_at", "type": "int", "writable": False, "generated": True},
+    ]
+    assert descriptor["writable_fields"] == [
+        "account_id",
+        "phone",
+        "status_reason",
+        "run_status",
+        "record_status",
+    ]
+    assert descriptor["required_fields"] == ["phone"]
+    assert descriptor["read_only_fields"] == ["record_index", "record_key", "created_at", "updated_at"]
+    assert descriptor["indexes"] == {"by_account_id": ["account_id"]}
+
+
+def test_module_data_store_describes_custom_table_auto_increment_write_contract(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "ctrip_account_daily_audits",
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {
+                    "version": 1,
+                    "columns": [
+                        {"name": "id", "type": "int", "auto_increment": True},
+                        {"name": "ctrip_account_id", "type": "int"},
+                        {"name": "ctrip_account", "type": "text", "required": True},
+                        {"name": "audit_date", "type": "text", "required": True},
+                    ],
+                },
+                "indexes": {
+                    "by_ctrip_account": ["ctrip_account"],
+                    "by_audit_date": ["audit_date"],
+                },
+                "cleanup_policy": "drop_table",
+            }
+        ],
+    )
+
+    descriptor = store.describe_data_source("demo_module", "ctrip_account_daily_audits")
+
+    assert descriptor["kind"] == "data_table"
+    assert descriptor["source_kind"] == "relation"
+    assert descriptor["storage_mode"] == "custom_table"
+    assert descriptor["record_key_field"] == "id"
+    assert descriptor["columns"][0] == {
+        "name": "id",
+        "type": "int",
+        "nullable": False,
+        "required": False,
+        "writable": False,
+        "auto_increment": True,
+    }
+    assert descriptor["writable_fields"] == ["ctrip_account_id", "ctrip_account", "audit_date"]
+    assert descriptor["required_fields"] == ["ctrip_account", "audit_date"]
+    assert descriptor["read_only_fields"] == ["id", "created_at", "updated_at"]
+    assert descriptor["system_fields"] == [
+        {"name": "created_at", "type": "int", "writable": False, "generated": True},
+        {"name": "updated_at", "type": "int", "writable": False, "generated": True},
+    ]
+    assert descriptor["indexes"] == {
+        "by_ctrip_account": ["ctrip_account"],
+        "by_audit_date": ["audit_date"],
+    }
+
+
+def test_module_data_store_describes_custom_table_manual_key_as_required_writable(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_custom_accounts(store, temp_data_dir)
+
+    descriptor = store.describe_data_source("demo_module", "accounts")
+
+    assert descriptor["columns"][0] == {
+        "name": "id",
+        "type": "text",
+        "nullable": False,
+        "required": True,
+        "writable": True,
+    }
+    assert descriptor["writable_fields"] == ["id", "phone", "status", "balance"]
+    assert descriptor["required_fields"] == ["id"]
+    assert descriptor["read_only_fields"] == ["created_at", "updated_at"]
 
 
 def test_module_data_store_executes_managed_dataset_query_plan(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
-    _declare_managed_dataset(store, temp_data_dir)
+    _declare_managed_dataset(store, temp_data_dir, include_status=True)
     store.replace_resource_records(
         "demo_module",
         "accounts",
@@ -264,7 +462,7 @@ def test_module_data_store_executes_managed_dataset_query_plan(temp_data_dir):
             "kind": "select",
             "base": {"source": "accounts"},
             "select": [{"kind": "column", "field": "phone"}],
-            "where": [{"field": "status", "op": "eq", "value": "ready"}],
+            "where": ["status", "=", "ready"],
             "order_by": [{"field": "phone", "direction": "desc"}],
             "limit": 10,
             "offset": 0,
@@ -273,6 +471,266 @@ def test_module_data_store_executes_managed_dataset_query_plan(temp_data_dir):
     )
 
     assert rows == [{"phone": "13800138000"}]
+
+
+def test_module_data_store_executes_managed_dataset_count_plan_after_where(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir, include_status=True)
+    store.replace_resource_records(
+        "demo_module",
+        "accounts",
+        [
+            {"id": "u1", "phone": "13800138000", "status": "ready"},
+            {"id": "u2", "phone": "13900139000", "status": "ready", "run_status": "占用中"},
+            {"id": "u3", "phone": "13700137000", "status": "blocked", "run_status": "占用中"},
+        ],
+    )
+    descriptor = {
+        "source": "accounts",
+        "source_kind": "snapshot",
+        "columns": [
+            {"name": "id", "type": "text"},
+            {"name": "phone", "type": "text"},
+            {"name": "status", "type": "text"},
+        ],
+        "joins": [],
+    }
+
+    rows = store.execute_query_plan(
+        "demo_module",
+        {
+            "kind": "select",
+            "base": {"source": "accounts"},
+            "select": [{"kind": "aggregate", "func": "count", "field": "*", "alias": "total"}],
+            "where": ["status", "=", "ready"],
+            "order_by": [{"field": "phone", "direction": "desc"}],
+            "limit": 1,
+            "offset": 1,
+        },
+        describe_source=lambda source: descriptor,
+    )
+    occupied_rows = store.execute_query_plan(
+        "demo_module",
+        {
+            "kind": "select",
+            "base": {"source": "accounts"},
+            "select": [{"kind": "aggregate", "func": "count", "field": "*", "alias": "occupied_total"}],
+            "where": ["run_status", "=", "占用中"],
+        },
+        describe_source=lambda source: descriptor,
+    )
+    empty_rows = store.execute_query_plan(
+        "demo_module",
+        {
+            "kind": "select",
+            "base": {"source": "accounts"},
+            "select": [{"kind": "aggregate", "func": "count", "field": "*", "alias": "total"}],
+            "where": ["status", "=", "missing"],
+        },
+        describe_source=lambda source: descriptor,
+    )
+
+    assert rows == [{"total": 2}]
+    assert occupied_rows == [{"occupied_total": 2}]
+    assert empty_rows == [{"total": 0}]
+
+
+def test_module_data_store_rejects_managed_dataset_non_count_aggregate_plan(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir, include_status=True)
+    descriptor = {
+        "source": "accounts",
+        "source_kind": "snapshot",
+        "columns": [
+            {"name": "id", "type": "text"},
+            {"name": "phone", "type": "text"},
+            {"name": "status", "type": "text"},
+        ],
+        "joins": [],
+    }
+
+    with pytest.raises(ValueError, match="managed_dataset\\(snapshot\\).*only supports count"):
+        store.execute_query_plan(
+            "demo_module",
+            {
+                "kind": "select",
+                "base": {"source": "accounts"},
+                "select": [
+                    {"kind": "column", "field": "status"},
+                    {"kind": "aggregate", "func": "count", "field": "*", "alias": "total"},
+                ],
+            },
+            describe_source=lambda source: descriptor,
+        )
+
+    with pytest.raises(ValueError, match="managed_dataset\\(snapshot\\).*group_by is not supported"):
+        store.execute_query_plan(
+            "demo_module",
+            {
+                "kind": "select",
+                "base": {"source": "accounts"},
+                "select": [{"kind": "aggregate", "func": "count", "field": "*", "alias": "total"}],
+                "group_by": ["status"],
+            },
+            describe_source=lambda source: descriptor,
+        )
+
+    with pytest.raises(ValueError, match="managed_dataset\\(snapshot\\).*only supports count"):
+        store.execute_query_plan(
+            "demo_module",
+            {
+                "kind": "select",
+                "base": {"source": "accounts"},
+                "select": [{"kind": "aggregate", "func": "sum", "field": "phone", "alias": "total"}],
+            },
+            describe_source=lambda source: descriptor,
+        )
+
+
+def test_module_data_store_executes_managed_dataset_physical_and_json_filters(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir, include_status=True)
+    store.replace_resource_records(
+        "demo_module",
+        "accounts",
+        [
+            {"id": "u1", "phone": "13800138000", "status": "ready"},
+            {"id": "u2", "phone": "13900139000", "status": "ready", "run_status": "占用中"},
+            {"id": "u3", "phone": "13700137000", "status": "blocked", "run_status": "占用中"},
+        ],
+    )
+    descriptor = {
+        "source": "accounts",
+        "source_kind": "snapshot",
+        "columns": [
+            {"name": "id", "type": "text"},
+            {"name": "phone", "type": "text"},
+            {"name": "status", "type": "text"},
+        ],
+        "joins": [],
+    }
+
+    rows = store.execute_query_plan(
+        "demo_module",
+        {
+            "kind": "select",
+            "base": {"source": "accounts"},
+            "select": [
+                {"kind": "column", "field": "record_index"},
+                {"kind": "column", "field": "record_key"},
+                {"kind": "column", "field": "status"},
+                {"kind": "column", "field": "run_status"},
+            ],
+            "where": [
+                "and",
+                ["record_key", "in", ["u1", "u2"]],
+                ["or", ["status", "=", "ready"], ["phone", "=", "000"]],
+            ],
+            "order_by": [{"field": "phone", "direction": "desc"}],
+            "limit": 10,
+            "offset": 0,
+        },
+        describe_source=lambda source: descriptor,
+    )
+
+    assert rows == [
+        {"record_index": 1, "record_key": "u2", "status": "ready", "run_status": "占用中"},
+        {"record_index": 0, "record_key": "u1", "status": "ready", "run_status": "不占用"},
+    ]
+
+
+def test_module_data_store_queries_resource_records_with_managed_dataset_json_and_physical_fields(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir, include_status=True)
+    store.replace_resource_records(
+        "demo_module",
+        "accounts",
+        [
+            {"id": "u1", "phone": "13800138000", "status": "ready"},
+            {"id": "u2", "phone": "13900139000", "status": "blocked", "run_status": "占用中"},
+        ],
+    )
+
+    assert store.query_resource_records(
+        "demo_module",
+        "accounts",
+        select=["record_key", "id", "status", "run_status"],
+        where=["status", "=", "ready"],
+        order_by=[{"field": "phone", "direction": "desc"}],
+        limit=10,
+        offset=0,
+    ) == [{"record_key": "u1", "id": "u1", "status": "ready", "run_status": "不占用"}]
+
+    wildcard_rows = store.query_resource_records(
+        "demo_module",
+        "accounts",
+        select=["*"],
+        order_by=[{"field": "record_index", "direction": "asc"}],
+        limit=1,
+        offset=0,
+    )
+    assert wildcard_rows == [
+        {
+            "id": "u1",
+            "phone": "13800138000",
+            "status": "ready",
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "不占用",
+            "record_status": "",
+            "created_at": wildcard_rows[0]["created_at"],
+            "updated_at": wildcard_rows[0]["updated_at"],
+        }
+    ]
+
+
+def test_module_data_store_query_resource_records_keeps_json_field_filter_and_sort(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir, include_status=True)
+    store.replace_resource_records(
+        "demo_module",
+        "accounts",
+        [
+            {"id": "u1", "phone": "13800138000", "status": "ready"},
+            {"id": "u2", "phone": "13900139000", "status": "blocked"},
+            {"id": "u3", "phone": "13700137000", "status": "ready"},
+        ],
+    )
+
+    assert _query_records_for_assertion(
+        store,
+        where={"status": "ready"},
+        order_by=[{"field": "phone", "direction": "asc"}],
+    ) == [
+        {
+            "id": "u3",
+            "phone": "13700137000",
+            "status": "ready",
+            "record_index": 2,
+            "record_key": "u3",
+            "run_status": "不占用",
+            "record_status": "",
+        },
+        {
+            "id": "u1",
+            "phone": "13800138000",
+            "status": "ready",
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "不占用",
+            "record_status": "",
+        },
+    ]
 
 
 def test_module_data_store_rejects_managed_dataset_join_plan(temp_data_dir):
@@ -393,7 +851,7 @@ def test_module_data_store_executes_custom_table_join_aggregate_plan(temp_data_d
                     "on": [{"left": "account_id", "right": "account_id"}],
                 }
             ],
-            "where": [{"field": "status", "op": "eq", "value": "done"}],
+            "where": ["and", ["status", "=", "done"], ["or", ["account_id", "=", "A001"], ["account_id", "=", "A002"]]],
             "group_by": ["account_id"],
             "select": [
                 {"kind": "aggregate", "func": "sum", "field": "amount", "alias": "total_amount"},
@@ -413,14 +871,8 @@ def test_init_database_creates_module_data_resources_table(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
 
     with get_connection(DATA_DB) as conn:
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(module_data_resources)").fetchall()
-        }
-        indexes = {
-            row["name"]
-            for row in conn.execute("PRAGMA index_list(module_data_resources)").fetchall()
-        }
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(module_data_resources)").fetchall()}
+        indexes = {row["name"] for row in conn.execute("PRAGMA index_list(module_data_resources)").fetchall()}
 
     assert {
         "module_name",
@@ -444,14 +896,8 @@ def test_init_database_creates_module_db_views_table(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
 
     with get_connection(DATA_DB) as conn:
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(module_db_views)").fetchall()
-        }
-        indexes = {
-            row["name"]
-            for row in conn.execute("PRAGMA index_list(module_db_views)").fetchall()
-        }
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(module_db_views)").fetchall()}
+        indexes = {row["name"] for row in conn.execute("PRAGMA index_list(module_db_views)").fetchall()}
         create_sql = conn.execute(
             """
             SELECT sql
@@ -496,10 +942,9 @@ def test_init_database_does_not_create_module_dataset_manifests_table(temp_data_
     assert table_row is None
 
 
-def test_init_database_normalizes_legacy_module_db_view_metadata(temp_data_dir):
+def test_init_database_rejects_legacy_module_db_view_schema(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.database import init_database
-    from src.core.persistence.module_data_store import ModuleDataStore
 
     with get_connection(DATA_DB) as conn:
         _recreate_legacy_module_db_views_table(conn)
@@ -523,34 +968,10 @@ def test_init_database_normalizes_legacy_module_db_view_metadata(temp_data_dir):
             _legacy_db_view_row(),
         )
 
-    init_database()
-
-    store = ModuleDataStore()
-    assert store.list_db_views("demo_module") == [
-        {
-            "module_name": "demo_module",
-            "view_id": "billing_stats",
-            "view_kind": "sql_view",
-            "physical_view_name": "demo_module_view_billing_stats",
-            "source_resource_ids": ["billing_entries"],
-            "select_sql_template": "SELECT entry_id FROM {{resource:billing_entries}}",
-            "columns": [
-                {"name": "entry_id", "type": "text", "nullable": True, "filterable": True, "sortable": True},
-            ],
-            "schema_version": 1,
-            "cleanup_policy": "drop_view",
-        }
-    ]
+    with pytest.raises(RuntimeError, match="0.4.0 module_db_views schema"):
+        init_database()
 
     with get_connection(DATA_DB) as conn:
-        row = conn.execute(
-            """
-            SELECT view_kind, cleanup_policy, created_at, updated_at
-            FROM module_db_views
-            WHERE module_name = ? AND view_id = ?
-            """,
-            ("demo_module", "billing_stats"),
-        ).fetchone()
         create_sql = conn.execute(
             """
             SELECT sql
@@ -559,17 +980,11 @@ def test_init_database_normalizes_legacy_module_db_view_metadata(temp_data_dir):
             """
         ).fetchone()["sql"]
 
-    assert dict(row) == {
-        "view_kind": "sql_view",
-        "cleanup_policy": "drop_view",
-        "created_at": 100,
-        "updated_at": 200,
-    }
-    assert "materialized_view" not in create_sql
-    assert "drop_table" not in create_sql
+    assert "materialized_view" in create_sql
+    assert "drop_table" in create_sql
 
 
-def test_init_database_upgrades_v2_module_dataset_schema_to_v3(temp_data_dir):
+def test_init_database_rejects_v2_module_dataset_schema(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.database import init_database
 
@@ -603,28 +1018,23 @@ def test_init_database_upgrades_v2_module_dataset_schema_to_v3(temp_data_dir):
             ("demo_module", "accounts", 0, json.dumps({"id": "legacy"}, ensure_ascii=False), 100, 200),
         )
 
-    init_database()
+    with pytest.raises(RuntimeError, match="0.4.0 module_datasets schema"):
+        init_database()
 
     with get_connection(DATA_DB) as conn:
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(module_datasets)").fetchall()
-        }
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(module_datasets)").fetchall()}
         row = conn.execute(
             """
-            SELECT record_index, record_key, run_status, record_status, record_json, created_at, updated_at
+            SELECT record_index, record_json, created_at, updated_at
             FROM module_datasets
             WHERE module_name = ? AND dataset_name = ?
             """,
             ("demo_module", "accounts"),
         ).fetchone()
 
-    assert {"record_key", "run_status", "record_status"}.issubset(columns)
+    assert "record_key" not in columns
     assert row is not None
     assert row["record_index"] == 0
-    assert row["record_key"] is None
-    assert row["run_status"] == "不占用"
-    assert row["record_status"] == ""
     assert json.loads(row["record_json"]) == {"id": "legacy"}
     assert row["created_at"] == 100
     assert row["updated_at"] == 200
@@ -656,14 +1066,11 @@ def test_init_database_rejects_legacy_module_dataset_schema(temp_data_dir):
             ("demo_module", "legacy_accounts", json.dumps([{"id": "legacy"}], ensure_ascii=False), 100, 200),
         )
 
-    with pytest.raises(RuntimeError, match="Legacy module_datasets schema is no longer supported"):
+    with pytest.raises(RuntimeError, match="0.4.0 module_datasets schema"):
         init_database()
 
     with get_connection(DATA_DB) as conn:
-        existing_columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(module_datasets)").fetchall()
-        }
+        existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(module_datasets)").fetchall()}
         legacy_row = conn.execute(
             """
             SELECT records_json
@@ -699,7 +1106,7 @@ def test_init_database_rejects_hybrid_module_dataset_schema_with_legacy_column(t
             """
         )
 
-    with pytest.raises(RuntimeError, match="Legacy module_datasets schema is no longer supported"):
+    with pytest.raises(RuntimeError, match="0.4.0 module_datasets schema"):
         init_database()
 
 
@@ -745,11 +1152,11 @@ FROM {{resource:billing_entries}}
 GROUP BY execution_date, labor_account, bill_batch
 """,
                 "columns": [
-                    {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
-                    {"name": "labor_account", "type": "text", "filterable": True, "sortable": True},
-                    {"name": "bill_batch", "type": "text", "filterable": True, "sortable": True},
-                    {"name": "total_count", "type": "int", "sortable": True},
-                    {"name": "total_amount", "type": "number", "sortable": True},
+                    {"name": "execution_date", "type": "text"},
+                    {"name": "labor_account", "type": "text"},
+                    {"name": "bill_batch", "type": "text"},
+                    {"name": "total_count", "type": "int"},
+                    {"name": "total_amount", "type": "number"},
                 ],
             }
         ],
@@ -788,39 +1195,39 @@ GROUP BY execution_date, labor_account, bill_batch
     assert declared["view_kind"] == "sql_view"
     assert declared["source_resource_ids"] == ["billing_entries"]
 
-    queried = store.query_db_view(
+    queried = store.execute_query_plan(
         "demo_module",
-        "labor_billing_stats",
-        filters={
-            "execution_date": "2026-04-23",
-            "bill_batch": "batch-001",
+        {
+            "kind": "select",
+            "base": {"source": "labor_billing_stats"},
+            "select": [{"kind": "column", "field": "*"}],
+            "where": [
+                ["execution_date", "=", "2026-04-23"],
+                ["bill_batch", "=", "batch-001"],
+            ],
+            "order_by": [{"field": "total_count", "direction": "desc"}],
+            "limit": 10,
+            "offset": 0,
         },
-        sort=[{"field": "total_count", "direction": "desc"}],
-        limit=10,
-        offset=0,
+        describe_source=lambda source: store.describe_data_source("demo_module", source),
     )
 
-    assert queried == {
-        "rows": [
-            {
-                "execution_date": "2026-04-23",
-                "labor_account": "acct-001",
-                "bill_batch": "batch-001",
-                "total_count": 2,
-                "total_amount": 5.5,
-            },
-            {
-                "execution_date": "2026-04-23",
-                "labor_account": "acct-002",
-                "bill_batch": "batch-001",
-                "total_count": 1,
-                "total_amount": 1.5,
-            },
-        ],
-        "total": 2,
-        "limit": 10,
-        "offset": 0,
-    }
+    assert queried == [
+        {
+            "execution_date": "2026-04-23",
+            "labor_account": "acct-001",
+            "bill_batch": "batch-001",
+            "total_count": 2,
+            "total_amount": 5.5,
+        },
+        {
+            "execution_date": "2026-04-23",
+            "labor_account": "acct-002",
+            "bill_batch": "batch-001",
+            "total_count": 1,
+            "total_amount": 1.5,
+        },
+    ]
 
     with get_connection(DATA_DB) as conn:
         manifest_row = conn.execute(
@@ -876,7 +1283,7 @@ SELECT phone
 FROM {{resource:accounts}}
 """,
                     "columns": [
-                        {"name": "phone", "type": "text", "filterable": True, "sortable": True},
+                        {"name": "phone", "type": "text"},
                     ],
                 }
             ],
@@ -910,13 +1317,39 @@ def test_module_data_store_rejects_legacy_db_view_v1_options(temp_data_dir, kwar
                         "source_resource_ids": ["billing_entries"],
                         "sql_file": "data/sql/views/billing_stats.sql",
                         "columns": [
-                            {"name": "entry_id", "type": "text", "filterable": True, "sortable": True},
+                            {"name": "entry_id", "type": "text"},
                         ],
                         **kwargs,
                     }
                 ],
-                "queries": [],
                 "seeds": [],
+            }
+        )
+
+
+@pytest.mark.parametrize("removed_key", ["filterable", "sortable"])
+def test_module_data_store_rejects_removed_column_query_flags(temp_data_dir, removed_key):
+    from src.core.mms.data_contract import normalize_manifest_data
+
+    with pytest.raises(ValueError, match=f"不支持的字段: {removed_key}"):
+        normalize_manifest_data(
+            {
+                "resources": [
+                    {
+                        "id": "billing_entries",
+                        "storage_mode": "custom_table",
+                        "record_key_field": "entry_id",
+                        "schema": {"columns": [{"name": "entry_id", "type": "text", "required": True}]},
+                    }
+                ],
+                "views": [
+                    {
+                        "id": "billing_stats",
+                        "source_resource_ids": ["billing_entries"],
+                        "sql_file": "data/sql/views/billing_stats.sql",
+                        "columns": [{"name": "entry_id", "type": "text", removed_key: True}],
+                    }
+                ],
             }
         )
 
@@ -942,34 +1375,35 @@ def test_module_data_store_rejects_db_view_reading_undeclared_table(temp_data_di
                     "id": "account_stats",
                     "source_resource_ids": ["accounts"],
                     "sql": "SELECT id FROM {{resource:accounts}}, module_datasets",
-                    "columns": [{"name": "id", "type": "text", "filterable": True, "sortable": True}],
+                    "columns": [{"name": "id", "type": "text"}],
                 }
             ],
         )
 
 
-def test_module_data_store_rejects_named_query_reading_undeclared_table(temp_data_dir):
-    from src.core.persistence.module_data_store import ModuleDataStore
+def test_data_contract_rejects_data_view_over_managed_dataset(temp_data_dir):
+    from src.core.mms.data_contract import normalize_manifest_data
 
-    store = ModuleDataStore()
-    _sync_manifest_data(
-        store,
-        temp_data_dir,
-        resources=[
+    with pytest.raises(ValueError, match="只允许引用 custom_table"):
+        normalize_manifest_data(
             {
-                "id": "accounts",
-                "storage_mode": "custom_table",
-                "record_key_field": "id",
-                "schema": {"columns": [{"name": "id", "type": "text", "required": True}]},
+                "resources": [
+                    {
+                        "id": "accounts",
+                        "storage_mode": "managed_dataset",
+                        "record_key_field": "id",
+                        "schema": {"columns": [{"name": "id", "type": "text", "required": True}]},
+                    }
+                ],
+                "views": [
+                    {
+                        "id": "account_stats",
+                        "source_resource_ids": ["accounts"],
+                        "sql": "SELECT id FROM {{resource:accounts}}",
+                        "columns": [{"name": "id", "type": "text"}],
+                    }
+                ],
             }
-        ],
-    )
-    with pytest.raises(ValueError, match="只能读取已声明的数据资源|FROM/JOIN 只允许引用"):
-        store.run_registered_query(
-            "demo_module",
-            source_resource_ids=["accounts"],
-            sql_template="SELECT id FROM {{resource:accounts}}, module_datasets",
-            columns=[{"name": "id", "type": "text"}],
         )
 
 
@@ -1023,7 +1457,7 @@ SELECT execution_date
 FROM {{resource:billing_entries}}
 """,
                 "columns": [
-                    {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
+                    {"name": "execution_date", "type": "text"},
                 ],
             }
         ],
@@ -1050,80 +1484,6 @@ FROM {{resource:billing_entries}}
     assert sqlite_view is None
 
 
-def test_module_data_store_clear_module_data_treats_legacy_drop_table_view_as_view(temp_data_dir):
-    from src.core.persistence import DATA_DB, get_connection
-    from src.core.persistence.module_data_store import ModuleDataStore
-
-    store = ModuleDataStore()
-    _sync_manifest_data(
-        store,
-        temp_data_dir,
-        resources=[
-            {
-                "id": "billing_entries",
-                "storage_mode": "custom_table",
-                "record_key_field": "entry_id",
-                "schema": {"columns": [{"name": "entry_id", "type": "text", "required": True}]},
-            }
-        ],
-        views=[
-            {
-                "id": "billing_stats",
-                "source_resource_ids": ["billing_entries"],
-                "sql": "SELECT entry_id FROM {{resource:billing_entries}}",
-                "columns": [
-                    {"name": "entry_id", "type": "text", "filterable": True, "sortable": True},
-                ],
-            }
-        ],
-    )
-
-    with get_connection(DATA_DB) as conn:
-        _recreate_legacy_module_db_views_table(conn)
-        conn.execute(
-            """
-            INSERT INTO module_db_views (
-                module_name,
-                view_id,
-                view_kind,
-                physical_view_name,
-                source_resource_ids_json,
-                select_sql_template,
-                columns_json,
-                schema_version,
-                cleanup_policy,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            _legacy_db_view_row(cleanup_policy="drop_table", view_kind="sql_view"),
-        )
-        sqlite_view = conn.execute(
-            """
-            SELECT 1
-            FROM sqlite_master
-            WHERE type = 'view' AND name = ?
-            """,
-            ("demo_module_view_billing_stats",),
-        ).fetchone()
-
-    assert sqlite_view is not None
-    assert store.clear_module_data("demo_module") is True
-
-    with get_connection(DATA_DB) as conn:
-        sqlite_view = conn.execute(
-            """
-            SELECT 1
-            FROM sqlite_master
-            WHERE type = 'view' AND name = ?
-            """,
-            ("demo_module_view_billing_stats",),
-        ).fetchone()
-
-    assert sqlite_view is None
-
-
 def test_module_data_store_rewrite_preserves_created_at_and_reindexes_rows(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.module_data_store import ModuleDataStore
@@ -1132,15 +1492,25 @@ def test_module_data_store_rewrite_preserves_created_at_and_reindexes_rows(temp_
     _declare_managed_dataset(store, temp_data_dir)
 
     with patch("src.core.persistence.module_data_store.time.time", side_effect=[100, 200]):
-        assert store.replace_resource_records(
-            "demo_module",
-            "accounts",
-            [{"id": "u1"}, {"id": "u2"}, {"id": "u3"}],
-        ) is True
+        assert (
+            store.replace_resource_records(
+                "demo_module",
+                "accounts",
+                [{"id": "u1"}, {"id": "u2"}, {"id": "u3"}],
+            )
+            is True
+        )
         assert store.replace_resource_records("demo_module", "accounts", [{"id": "u9"}]) is True
 
-    assert store.read_resource_records("demo_module", "accounts") == [
-        {"id": "u9", "record_key": "u9", "run_status": "不占用", "record_status": ""}
+    assert _query_records_for_assertion(store) == [
+        {
+            "id": "u9",
+            "phone": None,
+            "record_index": 0,
+            "record_key": "u9",
+            "run_status": "不占用",
+            "record_status": "",
+        },
     ]
 
     with get_connection(DATA_DB) as conn:
@@ -1161,7 +1531,7 @@ def test_module_data_store_rewrite_preserves_created_at_and_reindexes_rows(temp_
     assert dataset_rows[0]["updated_at"] == 200
 
 
-def test_module_data_store_roundtrips_record_key_and_status_columns(temp_data_dir):
+def test_module_data_store_roundtrips_status_columns_without_record_json_leakage(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
     from src.core.persistence.module_data_store import ModuleDataStore
 
@@ -1169,13 +1539,13 @@ def test_module_data_store_roundtrips_record_key_and_status_columns(temp_data_di
     _declare_managed_dataset(store, temp_data_dir)
     records = [
         {
-            "record_key": "account:1",
+            "id": "account:1",
             "run_status": "queued",
             "record_status": "active",
             "phone": "13800138000",
         },
         {
-            "record_key": "account:2",
+            "id": "account:2",
             "run_status": "done",
             "record_status": "blocked",
             "phone": "13900139000",
@@ -1184,11 +1554,28 @@ def test_module_data_store_roundtrips_record_key_and_status_columns(temp_data_di
 
     assert store.replace_resource_records("demo_module", "accounts", records) is True
 
-    assert store.read_resource_records("demo_module", "accounts") == records
+    assert _query_records_for_assertion(store) == [
+        {
+            "id": "account:1",
+            "phone": "13800138000",
+            "record_index": 0,
+            "record_key": "account:1",
+            "run_status": "queued",
+            "record_status": "active",
+        },
+        {
+            "id": "account:2",
+            "phone": "13900139000",
+            "record_index": 1,
+            "record_key": "account:2",
+            "run_status": "done",
+            "record_status": "blocked",
+        },
+    ]
     with get_connection(DATA_DB) as conn:
         rows = conn.execute(
             """
-            SELECT record_key, run_status, record_status
+            SELECT record_key, run_status, record_status, record_json
             FROM module_datasets
             WHERE module_name = ? AND dataset_name = ?
             ORDER BY record_index ASC
@@ -1196,10 +1583,81 @@ def test_module_data_store_roundtrips_record_key_and_status_columns(temp_data_di
             ("demo_module", "accounts"),
         ).fetchall()
 
-    assert [dict(row) for row in rows] == [
-        {"record_key": "account:1", "run_status": "queued", "record_status": "active"},
-        {"record_key": "account:2", "run_status": "done", "record_status": "blocked"},
+    assert [
+        {
+            "record_key": row["record_key"],
+            "run_status": row["run_status"],
+            "record_status": row["record_status"],
+            "record_json": json.loads(row["record_json"]),
+        }
+        for row in rows
+    ] == [
+        {
+            "record_key": "account:1",
+            "run_status": "queued",
+            "record_status": "active",
+            "record_json": {"id": "account:1", "phone": "13800138000"},
+        },
+        {
+            "record_key": "account:2",
+            "run_status": "done",
+            "record_status": "blocked",
+            "record_json": {"id": "account:2", "phone": "13900139000"},
+        },
     ]
+
+
+@pytest.mark.parametrize("field_name", ["record_key", "record_index", "created_at", "updated_at"])
+def test_module_data_store_ignores_managed_dataset_generated_host_fields_on_replace_and_upsert(
+    temp_data_dir,
+    field_name,
+):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
+
+    assert (
+        store.replace_resource_records(
+            "demo_module",
+            "accounts",
+            [{"id": "u1", "phone": "13800138000", field_name: "host-owned"}],
+        )
+        is True
+    )
+    assert (
+        store.upsert_resource_records(
+            "demo_module",
+            "accounts",
+            [{"id": "u1", "phone": "13900139000", field_name: "host-owned"}],
+        )
+        is True
+    )
+
+    assert _query_records_for_assertion(store) == [
+        {
+            "id": "u1",
+            "phone": "13900139000",
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "不占用",
+            "record_status": "",
+        }
+    ]
+    with get_connection(DATA_DB) as conn:
+        row = conn.execute(
+            """
+            SELECT record_key, record_index, record_json
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            """,
+            ("demo_module", "accounts"),
+        ).fetchone()
+    assert row is not None
+    assert row["record_key"] == "u1"
+    assert row["record_index"] == 0
+    assert json.loads(row["record_json"]) == {"id": "u1", "phone": "13900139000"}
 
 
 def test_module_data_store_write_empty_dataset_clears_rows(temp_data_dir):
@@ -1213,7 +1671,7 @@ def test_module_data_store_write_empty_dataset_clears_rows(temp_data_dir):
         assert store.replace_resource_records("demo_module", "accounts", [{"id": "u1"}]) is True
         assert store.replace_resource_records("demo_module", "accounts", []) is True
 
-    assert store.read_resource_records("demo_module", "accounts") == []
+    assert _query_records_for_assertion(store) == []
 
     with get_connection(DATA_DB) as conn:
         dataset_rows = conn.execute(
@@ -1270,8 +1728,15 @@ def test_module_data_store_rejects_invalid_write_dataset_without_clobbering_rows
     with pytest.raises(ValueError, match=r"records\[1\]"):
         store.replace_resource_records("demo_module", "accounts", [{"id": "u2"}, "bad"])
 
-    assert store.read_resource_records("demo_module", "accounts") == [
-        {"id": "u1", "record_key": "u1", "run_status": "不占用", "record_status": ""}
+    assert _query_records_for_assertion(store) == [
+        {
+            "id": "u1",
+            "phone": None,
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "不占用",
+            "record_status": "",
+        }
     ]
 
     with get_connection(DATA_DB) as conn:
@@ -1288,6 +1753,209 @@ def test_module_data_store_rejects_invalid_write_dataset_without_clobbering_rows
     assert len(rows) == 1
     assert rows[0]["record_index"] == 0
     assert json.loads(rows[0]["record_json"]) == {"id": "u1"}
+
+
+def test_module_data_store_rejects_managed_dataset_schema_extra_fields_without_clobbering_rows(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
+    assert (
+        store.replace_resource_records(
+            "demo_module",
+            "accounts",
+            [{"id": "u1", "phone": "13800138000"}],
+        )
+        is True
+    )
+
+    with pytest.raises(ValueError, match="fields outside schema.*phone_masked"):
+        store.replace_resource_records(
+            "demo_module",
+            "accounts",
+            [{"id": "u1", "phone": "13800138000", "phone_masked": "138****8000"}],
+        )
+
+    with pytest.raises(ValueError, match="fields outside schema.*phone_masked"):
+        store.upsert_resource_records(
+            "demo_module",
+            "accounts",
+            [{"id": "u2", "phone": "13900139000", "phone_masked": "139****9000"}],
+        )
+
+    with pytest.raises(ValueError, match="fields outside schema.*phone_masked"):
+        store.update_resource_records(
+            "demo_module",
+            "accounts",
+            {"phone_masked": "138****8000"},
+            where=["id", "=", "u1"],
+        )
+
+    assert _query_records_for_assertion(store) == [
+        {
+            "id": "u1",
+            "phone": "13800138000",
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "不占用",
+            "record_status": "",
+        }
+    ]
+
+    with get_connection(DATA_DB) as conn:
+        rows = conn.execute(
+            """
+            SELECT record_json
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            ORDER BY record_index ASC
+            """,
+            ("demo_module", "accounts"),
+        ).fetchall()
+
+    assert [json.loads(row["record_json"]) for row in rows] == [
+        {"id": "u1", "phone": "13800138000"},
+    ]
+
+
+def test_module_data_store_does_not_implicit_record_key_field_into_managed_schema(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    assert (
+        store.sync_manifest_data(
+            "demo_module",
+            temp_data_dir,
+            {
+                "resources": [
+                    {
+                        "resource_id": "accounts",
+                        "storage_mode": "managed_dataset",
+                        "record_key_field": "id",
+                        "schema": {"version": 1, "columns": [{"name": "phone", "type": "text"}]},
+                        "indexes": {},
+                        "cleanup_policy": "delete_rows",
+                    }
+                ],
+                "views": [],
+                "seeds": [],
+            },
+        )
+        is True
+    )
+
+    descriptor = store.describe_data_source("demo_module", "accounts")
+    assert "id" not in {column["name"] for column in descriptor["columns"]}
+
+    with pytest.raises(ValueError, match="fields outside schema.*id"):
+        store.replace_resource_records(
+            "demo_module",
+            "accounts",
+            [{"id": "u1", "phone": "13800138000"}],
+        )
+
+    assert (
+        store.replace_resource_records(
+            "demo_module",
+            "accounts",
+            [{"record_key": "u1", "phone": "13800138000"}],
+        )
+        is True
+    )
+
+    descriptor = store.describe_data_source("demo_module", "accounts")
+    assert "id" not in {column["name"] for column in descriptor["columns"]}
+    assert store.query_resource_records("demo_module", "accounts", select=["record_key", "phone"]) == [
+        {"record_key": "u1", "phone": "13800138000"}
+    ]
+    with pytest.raises(ValueError, match="query select field not found: id"):
+        store.query_resource_records("demo_module", "accounts", select=["id"])
+
+    with get_connection(DATA_DB) as conn:
+        row = conn.execute(
+            """
+            SELECT record_json
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            """,
+            ("demo_module", "accounts"),
+        ).fetchone()
+    assert json.loads(row["record_json"]) == {"phone": "13800138000"}
+
+
+def test_module_data_store_ignores_historical_undeclared_json_fields_in_managed_dataset_queries(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
+    assert (
+        store.replace_resource_records(
+            "demo_module",
+            "accounts",
+            [{"id": "u1", "phone": "13800138000"}],
+        )
+        is True
+    )
+
+    with get_connection(DATA_DB) as conn:
+        conn.execute(
+            """
+            UPDATE module_datasets
+            SET record_json = ?
+            WHERE module_name = ? AND dataset_name = ? AND record_index = 0
+            """,
+            (
+                json.dumps({"id": "u1", "phone": "13800138000", "phone_masked": "138****8000"}),
+                "demo_module",
+                "accounts",
+            ),
+        )
+
+    assert _query_records_for_assertion(store) == [
+        {
+            "id": "u1",
+            "phone": "13800138000",
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "不占用",
+            "record_status": "",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="query select field not found: phone_masked"):
+        store.query_resource_records("demo_module", "accounts", select=["phone_masked"])
+    with pytest.raises(ValueError, match="query filter field not found: phone_masked"):
+        store.query_resource_records("demo_module", "accounts", where=["phone_masked", "=", "138****8000"])
+    with pytest.raises(ValueError, match="query sort field not found: phone_masked"):
+        store.query_resource_records(
+            "demo_module",
+            "accounts",
+            select=["id"],
+            order_by=[{"field": "phone_masked", "direction": "asc"}],
+        )
+
+    assert (
+        store.update_resource_records(
+            "demo_module",
+            "accounts",
+            {"phone": "13800138001"},
+            where=["id", "=", "u1"],
+        )
+        == 1
+    )
+    with get_connection(DATA_DB) as conn:
+        row = conn.execute(
+            """
+            SELECT record_json
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ? AND record_index = 0
+            """,
+            ("demo_module", "accounts"),
+        ).fetchone()
+    assert json.loads(row["record_json"]) == {"id": "u1", "phone": "13800138001"}
 
 
 def test_module_data_store_creates_and_routes_custom_table_resources(temp_data_dir):
@@ -1324,12 +1992,12 @@ def test_module_data_store_creates_and_routes_custom_table_resources(temp_data_d
         "schema_version": 1,
         "schema": {
             "version": 1,
-                "columns": [
-                    {"name": "id", "type": "text", "nullable": False},
-                    {"name": "phone", "type": "text", "nullable": True},
-                    {"name": "status", "type": "text", "nullable": True},
-                ],
-            },
+            "columns": [
+                {"name": "id", "type": "text", "nullable": False},
+                {"name": "phone", "type": "text", "nullable": True},
+                {"name": "status", "type": "text", "nullable": True},
+            ],
+        },
         "indexes": {},
         "cleanup_policy": "drop_table",
     }
@@ -1343,7 +2011,7 @@ def test_module_data_store_creates_and_routes_custom_table_resources(temp_data_d
     ]
     assert store.replace_resource_records("demo_module", "accounts", records) is True
 
-    assert store.read_resource_records("demo_module", "accounts") == records
+    assert _query_records_for_assertion(store) == records
     with get_connection(DATA_DB) as conn:
         dataset_rows = conn.execute(
             """
@@ -1369,45 +2037,232 @@ def test_module_data_store_creates_and_routes_custom_table_resources(temp_data_d
     }
 
 
+def test_module_data_store_adds_custom_table_rows_with_auto_increment_key(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "accounts",
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {
+                    "columns": [
+                        {"name": "id", "type": "int", "auto_increment": True},
+                        {"name": "phone", "type": "text"},
+                        {"name": "status", "type": "text"},
+                    ]
+                },
+                "cleanup_policy": "drop_table",
+            }
+        ],
+    )
+
+    assert store.list_data_resources("demo_module")[0]["schema"]["columns"][0] == {
+        "name": "id",
+        "type": "int",
+        "nullable": False,
+        "auto_increment": True,
+    }
+
+    inserted_ids = store.add_resource_records(
+        "demo_module",
+        "accounts",
+        [
+            {"phone": "13800138000", "status": "new"},
+            {"phone": "13900139000", "status": "ready"},
+        ],
+    )
+
+    assert inserted_ids == [1, 2]
+    assert _query_records_for_assertion(store) == [
+        {"id": 1, "phone": "13800138000", "status": "new"},
+        {"id": 2, "phone": "13900139000", "status": "ready"},
+    ]
+    with get_connection(DATA_DB) as conn:
+        table_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+            ("demo_module_accounts",),
+        ).fetchone()["sql"]
+    assert "AUTOINCREMENT" in table_sql
+
+    with pytest.raises(ValueError, match="custom table records require a record_key"):
+        store.upsert_resource_records("demo_module", "accounts", [{"phone": "13700137000"}])
+
+
 def test_module_data_store_upserts_updates_and_deletes_custom_table_rows(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
     _declare_custom_accounts(store, temp_data_dir)
 
-    assert store.upsert_resource_records(
-        "demo_module",
-        "accounts",
-        [
-            {"id": "u1", "phone": "13800138000", "status": "new", "balance": 1.5},
-            {"id": "u2", "phone": "13900139000", "status": "expired", "balance": 2.0},
-        ],
-    ) is True
-    assert store.upsert_resource_records(
-        "demo_module",
-        "accounts",
-        [
-            {"id": "u1", "phone": "13800138001", "status": "ready", "balance": 3.5},
-            {"id": "u3", "phone": "13700137000", "status": "ready", "balance": 4.0},
-        ],
-    ) is True
+    assert (
+        store.upsert_resource_records(
+            "demo_module",
+            "accounts",
+            [
+                {"id": "u1", "phone": "13800138000", "status": "new", "balance": 1.5},
+                {"id": "u2", "phone": "13900139000", "status": "expired", "balance": 2.0},
+            ],
+        )
+        is True
+    )
+    assert (
+        store.upsert_resource_records(
+            "demo_module",
+            "accounts",
+            [
+                {"id": "u1", "phone": "13800138001", "status": "ready", "balance": 3.5},
+                {"id": "u3", "phone": "13700137000", "status": "ready", "balance": 4.0},
+            ],
+        )
+        is True
+    )
 
-    assert store.update_resource_records(
-        "demo_module",
-        "accounts",
-        {"status": "used"},
-        where=[{"field": "id", "op": "eq", "value": "u1"}],
-    ) == 1
-    assert store.delete_resource_records(
-        "demo_module",
-        "accounts",
-        where=[{"field": "status", "op": "eq", "value": "expired"}],
-    ) == 1
+    assert (
+        store.update_resource_records(
+            "demo_module",
+            "accounts",
+            {"status": "used"},
+            where=["id", "=", "u1"],
+        )
+        == 1
+    )
+    assert (
+        store.delete_resource_records(
+            "demo_module",
+            "accounts",
+            where=["status", "=", "expired"],
+        )
+        == 1
+    )
 
-    assert store.read_resource_records("demo_module", "accounts") == [
+    assert _query_records_for_assertion(store) == [
         {"id": "u1", "phone": "13800138001", "status": "used", "balance": 3.5},
         {"id": "u3", "phone": "13700137000", "status": "ready", "balance": 4.0},
     ]
+
+
+def test_module_data_store_upserts_updates_and_deletes_managed_dataset_rows(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
+
+    assert (
+        store.replace_resource_records(
+            "demo_module",
+            "accounts",
+            [
+                {"id": "u1", "phone": "13800138000"},
+                {"id": "u2", "phone": "13900139000"},
+            ],
+        )
+        is True
+    )
+    assert (
+        store.upsert_resource_records(
+            "demo_module",
+            "accounts",
+            [
+                {"id": "u2", "phone": "13999999999"},
+                {"id": "u3", "phone": "13700137000"},
+            ],
+        )
+        is True
+    )
+    assert (
+        store.update_resource_records(
+            "demo_module",
+            "accounts",
+            {"phone": "13600136000", "run_status": "占用中", "record_status": "active"},
+            where=["id", "=", "u1"],
+        )
+        == 1
+    )
+    assert store.delete_resource_records("demo_module", "accounts", where=["id", "=", "u3"]) == 1
+
+    assert _query_records_for_assertion(store) == [
+        {
+            "id": "u1",
+            "phone": "13600136000",
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "占用中",
+            "record_status": "active",
+        },
+        {
+            "id": "u2",
+            "phone": "13999999999",
+            "record_index": 1,
+            "record_key": "u2",
+            "run_status": "不占用",
+            "record_status": "",
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["record_key", "record_index", "created_at", "updated_at"],
+)
+def test_module_data_store_rejects_managed_dataset_reserved_update_fields(temp_data_dir, field_name):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
+    store.replace_resource_records("demo_module", "accounts", [{"id": "u1", "phone": "13800138000"}])
+
+    with pytest.raises(ValueError, match=f"reserved host fields.*{field_name}"):
+        store.update_resource_records("demo_module", "accounts", {field_name: "u9"}, where=["id", "=", "u1"])
+
+
+def test_module_data_store_update_where_updates_status_columns_without_record_json_leakage(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir)
+    store.replace_resource_records("demo_module", "accounts", [{"id": "u1", "phone": "13800138000"}])
+
+    assert (
+        store.update_resource_records(
+            "demo_module",
+            "accounts",
+            {"run_status": "占用中", "record_status": "active"},
+            where=["id", "=", "u1"],
+        )
+        == 1
+    )
+
+    assert _query_records_for_assertion(store) == [
+        {
+            "id": "u1",
+            "phone": "13800138000",
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "占用中",
+            "record_status": "active",
+        }
+    ]
+
+    with get_connection(DATA_DB) as conn:
+        row = conn.execute(
+            """
+            SELECT run_status, record_status, record_json
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ? AND record_key = ?
+            """,
+            ("demo_module", "accounts", "u1"),
+        ).fetchone()
+
+    assert row["run_status"] == "占用中"
+    assert row["record_status"] == "active"
+    assert json.loads(row["record_json"]) == {"id": "u1", "phone": "13800138000"}
 
 
 def test_module_data_store_batch_write_is_atomic(temp_data_dir):
@@ -1432,7 +2287,7 @@ def test_module_data_store_batch_write_is_atomic(temp_data_dir):
                 },
             ],
         )
-    assert store.read_resource_records("demo_module", "accounts") == []
+    assert _query_records_for_assertion(store) == []
 
     results = store.execute_write_batch(
         "demo_module",
@@ -1452,7 +2307,7 @@ def test_module_data_store_batch_write_is_atomic(temp_data_dir):
 
     assert results[0] is True
     assert isinstance(results[1], str)
-    assert store.read_resource_records("demo_module", "accounts") == [
+    assert _query_records_for_assertion(store) == [
         {"id": "u1", "phone": "13800138000", "status": "ready", "balance": None}
     ]
     assert store.query_audit_events("demo_module", "account_events", limit=10) == [
@@ -1529,19 +2384,27 @@ def test_module_data_store_rejects_unsafe_custom_table_names(temp_data_dir):
             {
                 "resources": [{"id": "accounts;drop", "storage_mode": "custom_table"}],
                 "views": [],
-                "queries": [],
                 "seeds": [],
             }
         )
 
 
-def test_module_data_store_get_record_returns_none_for_empty_managed_dataset(temp_data_dir):
+def test_module_data_store_query_returns_empty_for_missing_managed_dataset_record(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
     store = ModuleDataStore()
     _declare_managed_dataset(store, temp_data_dir)
 
-    assert store.get_record("demo_module", "accounts", "missing") is None
+    assert (
+        store.query_resource_records(
+            "demo_module",
+            "accounts",
+            where=["record_key", "=", "missing"],
+            limit=1,
+            offset=0,
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -1584,7 +2447,7 @@ def test_init_database_rejects_incompatible_module_dataset_schema(temp_data_dir,
         conn.execute("DROP TABLE module_datasets")
         conn.execute(create_sql)
 
-    with pytest.raises(RuntimeError, match="Unexpected module_datasets schema definition"):
+    with pytest.raises(RuntimeError, match="0.4.0 module_datasets schema"):
         init_database()
 
 
@@ -1747,7 +2610,7 @@ def test_module_data_store_clear_module_data_removes_data_db_rows_only(temp_data
 
     assert store.clear_module_data("demo_module") is True
     with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
-        store.read_resource_records("demo_module", "accounts")
+        store.query_resource_records("demo_module", "accounts")
     assert store.read_page_schema("demo_module", "dashboard") == {}
     assert store.query_audit_events("demo_module", "account_events") == []
     assert kv.get("module:demo_module:dataset:legacy_accounts") == [{"id": "legacy"}]
@@ -1845,5 +2708,5 @@ def test_module_data_store_ignores_legacy_kv_rows(temp_data_dir):
 
     _declare_managed_dataset(store, temp_data_dir)
 
-    assert store.read_resource_records("demo_module", "accounts") == []
+    assert _query_records_for_assertion(store) == []
     assert kv.get("module:demo_module:dataset:accounts") == [{"id": "legacy"}]

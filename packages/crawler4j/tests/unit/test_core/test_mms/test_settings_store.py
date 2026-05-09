@@ -74,7 +74,6 @@ def _sync_managed_dataset_resource(data_store, module_dir: Path, *, module_name:
                 }
             ],
             "views": [],
-            "queries": [],
             "seeds": [],
         }
     )
@@ -383,7 +382,7 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
     assert registry.uninstall("demo_module") is True
     assert store.export_module_settings("demo_module") == {"module": {}, "workflows": {}}
     with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
-        data_store.read_resource_records("demo_module", "accounts")
+        data_store.query_resource_records("demo_module", "accounts")
     assert data_store.read_page_schema("demo_module", "dashboard") == {}
 
     module_dir = _write_module(scan_root)
@@ -408,5 +407,5 @@ def test_uninstall_clears_settings_by_default_and_can_keep_them(temp_data_dir):
         "workflows": {"login": {"headless": False}},
     }
     with pytest.raises(ValueError, match="未注册的数据资源: accounts"):
-        data_store.read_resource_records("demo_module", "accounts")
+        data_store.query_resource_records("demo_module", "accounts")
     assert data_store.read_page_schema("demo_module", "dashboard") == {}

@@ -43,14 +43,16 @@ LEGACY_SPEC_NAMES = {"TaskSpec", "WorkflowSpec", "EnvSelectorSpec", "PageSpec"}
 LEGACY_DECLARATION_NAMES = {"TASK", "WORKFLOW", "SELECTOR", "PAGE"}
 HOST_FLOW_CONTROL_NAMES = {"EnvAction", "TaskSignal", "TaskSignalAction"}
 REMOVED_OBJECT_LIFECYCLE_METHODS = {"aclose", "close"}
+MANAGED_DATASET_DERIVED_FIELD_SUFFIXES = ("_label", "_display", "_masked")
 DECORATOR_KINDS = {
     "interface": "interface",
     "component": "component",
     "workflow": "workflow",
     "page": "page",
     "page_action": "page_action",
+    "ui_action": "ui_action",
     "data_table": "data_table",
-    "data_query": "data_query",
+    "data_view": "data_view",
     "env_candidates": "env_candidates",
     "env_cleanup_candidates": "env_cleanup_candidates",
 }
@@ -536,8 +538,8 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, node: ast.ClassDef) -> Crawl
         cleanup_policy=meta.cleanup_policy,
         env_binding_field=meta.env_binding_field,
         source=meta.source,
+        sources=meta.sources,
         sql=meta.sql,
-        output_schema=meta.output_schema,
         icon=meta.icon,
         menu=meta.menu,
         order=meta.order,
@@ -864,6 +866,7 @@ def _validate_declarations(declarations: list[V2Declaration]) -> list[V2Diagnost
     diagnostics.extend(_validate_injection_targets(declarations))
     diagnostics.extend(_validate_pages(declarations))
     diagnostics.extend(_validate_page_actions(declarations))
+    diagnostics.extend(_validate_ui_actions(declarations))
     diagnostics.extend(_validate_env_id_candidate_functions(declarations))
     diagnostics.extend(_validate_object_lifecycle_methods(declarations))
     diagnostics.extend(_validate_object_lifecycle_method_signatures(declarations))
@@ -1004,6 +1007,23 @@ def _validate_page_actions(declarations: list[V2Declaration]) -> list[V2Diagnost
                 code="V2_PAGE_ACTION_INVALID_TARGET",
                 location=declaration.symbol,
                 message="page action must decorate a function or async function",
+            )
+        )
+    return diagnostics
+
+
+def _validate_ui_actions(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    for declaration in declarations:
+        if declaration.kind != "ui_action":
+            continue
+        if declaration.target_kind in {"function", "async_function"}:
+            continue
+        diagnostics.append(
+            V2Diagnostic(
+                code="V2_UI_ACTION_INVALID_TARGET",
+                location=declaration.symbol,
+                message="ui action must decorate a function or async function",
             )
         )
     return diagnostics
@@ -1317,6 +1337,8 @@ def _validate_data_contracts(declarations: list[V2Declaration]) -> list[V2Diagno
                 )
             )
             diagnostics.extend(_reserved_annotation_field_diagnostics(declaration, reserved_fields=reserved_fields))
+            if declaration.meta.storage_mode == "managed_dataset":
+                diagnostics.extend(_derived_managed_dataset_field_diagnostics(declaration))
             for index in declaration.meta.indexes:
                 for field in index.fields:
                     if field in reserved_fields:
@@ -1327,29 +1349,30 @@ def _validate_data_contracts(declarations: list[V2Declaration]) -> list[V2Diagno
                                 message=f"host-reserved data field is not allowed: {field}",
                             )
                         )
-        elif declaration.kind == "data_query":
-            source_table = data_tables.get(declaration.meta.source)
-            if declaration.meta.source and source_table is None:
-                diagnostics.append(
-                    V2Diagnostic(
-                        code="V2_QUERY_SOURCE_MISSING",
-                        location=f"{declaration.symbol}.source",
-                        message=f"data query source table is not declared: {declaration.meta.source}",
+        elif declaration.kind == "data_view":
+            for source_name in declaration.meta.sources:
+                source_table = data_tables.get(source_name)
+                if source_table is None:
+                    diagnostics.append(
+                        V2Diagnostic(
+                            code="V2_VIEW_SOURCE_MISSING",
+                            location=f"{declaration.symbol}.sources[{source_name}]",
+                            message=f"data view source table is not declared: {source_name}",
+                        )
                     )
-                )
-            elif source_table is not None and source_table.meta.storage_mode != "custom_table":
-                diagnostics.append(
-                    V2Diagnostic(
-                        code="V2_QUERY_SOURCE_NOT_RELATION",
-                        location=f"{declaration.symbol}.source",
-                        message=f"data query source must be custom_table: {declaration.meta.source}",
+                elif source_table.meta.storage_mode != "custom_table":
+                    diagnostics.append(
+                        V2Diagnostic(
+                            code="V2_VIEW_SOURCE_NOT_RELATION",
+                            location=f"{declaration.symbol}.sources[{source_name}]",
+                            message=f"data view source must be custom_table: {source_name}",
+                        )
                     )
-                )
             diagnostics.extend(
                 _reserved_schema_field_diagnostics(
                     declaration,
-                    declaration.meta.output_schema,
-                    "output_schema",
+                    declaration.meta.schema,
+                    "schema",
                     reserved_fields=HOST_RESERVED_DATA_FIELDS,
                 )
             )
@@ -1360,6 +1383,42 @@ def _reserved_data_fields_for_table(declaration: V2Declaration) -> frozenset[str
     if declaration.meta.storage_mode == "managed_dataset":
         return MANAGED_DATASET_RESERVED_DATA_FIELDS
     return HOST_RESERVED_DATA_FIELDS
+
+
+def _derived_managed_dataset_field_diagnostics(declaration: V2Declaration) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    for item in declaration.meta.schema:
+        field_name = _schema_field_name(item)
+        if _looks_like_derived_data_field(field_name):
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_DERIVED_DATA_FIELD",
+                    location=f"{declaration.symbol}.schema[{field_name}]",
+                    message=(
+                        "managed_dataset schema should declare persisted business fields only; "
+                        f"move derived UI field out of @data_table.schema: {field_name}"
+                    ),
+                    severity="warning",
+                )
+            )
+    for field_name in declaration.annotations:
+        if _looks_like_derived_data_field(field_name):
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_DERIVED_DATA_FIELD",
+                    location=f"{declaration.symbol}.annotations[{field_name}]",
+                    message=(
+                        "managed_dataset schema should declare persisted business fields only; "
+                        f"move derived UI field out of data annotations: {field_name}"
+                    ),
+                    severity="warning",
+                )
+            )
+    return diagnostics
+
+
+def _looks_like_derived_data_field(field_name: str) -> bool:
+    return bool(field_name) and field_name.endswith(MANAGED_DATASET_DERIVED_FIELD_SUFFIXES)
 
 
 def _reserved_annotation_field_diagnostics(

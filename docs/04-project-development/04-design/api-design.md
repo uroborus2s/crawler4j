@@ -7,7 +7,7 @@
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
 **关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-0400`, `TASK-0401`
-**最后更新：** 2026-05-01
+**最后更新：** 2026-05-08
 
 ## `API-001` Root App Entry Contract
 
@@ -30,12 +30,12 @@
 | 标准运行时文件 | 无 `module_runtime.py` 主路径 |
 | 可选 hooks | 0.4.0 不提供旧 hook 兼容路径 |
 | 环境选择器 | 0.4.0 已移除 `selector_name/env_selector/resource_pool`；运行模板只能显式选择 `env_id` 或引用 `candidates/` 下的 `@env_candidates` |
-| 当前实现 | Core 通过 `ModuleRuntimeDescriptorV2` 扫描 `@interface/@component/@workflow/@page/@page_action/@data_table/@data_query/@env_candidates`，不依赖模块自有 assembler |
+| 当前实现 | Core 通过 `ModuleRuntimeDescriptorV2` 扫描 `@interface/@component/@workflow/@page/@page_action/@ui_action/@data_table/@data_view/@env_candidates`，不依赖模块自有 assembler |
 | Core 扩展入口 | `context.tools.call("<namespace>.<action>", **kwargs)` |
 | 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。对象图由 Core 在 `workflow.run(ctx)` 前统一执行可选 `setup(ctx, workflow)`，并在终态统一执行可选 `cleanup(ctx, outcome)`；任务结束、失败、超时或用户中止后的环境统一由宿主回收，环境删除只走环境管理页清理链路 |
 | 默认工作流解析 | `context.runtime["workflow"]` -> 单 workflow 自动选择 -> `main_workflow` |
 | 发现错误可见性 | descriptor 扫描失败必须暴露具体 Python 文件、符号、异常类型与 traceback 摘要，不能降级为泛化 “not found” |
-| Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 中的 `@page(...)`；`@page(menu=True)` 控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象 |
+| Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 中的 `@page(...)` 与 `@ui_action(...)`；`@page(menu=True)` 控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象，按钮和 CRUD handler 通过 `type="ui_action"` 调用 UI action |
 | 宿主确认契约 | 当前 0.4.0 模块运行时代码不发送 `TaskSignal`；人工确认若后续需要恢复，必须先在宿主状态机内重新设计，不复用模块信号入口 |
 | DevLink 调试语义 | 模块来源为 `DevLink` 时，descriptor 可强制 reload；正式安装模块读操作不做非必要 reload |
 | DevLink 普通执行语义 | ATM 普通执行 `DevLink` 模块时注入 `devel_mode=true`；`ModuleService` 对同一个 `TaskContext` 只在首次加载时强制 reload 一次 |
@@ -54,7 +54,7 @@
 | 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Button`、`DataTable` |
 | `Card` V1 范围 | 纯容器卡片；支持 `title`、`title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 与子组件布局 |
 | `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
-| 宿主动作范围 | `Button.action` 开放 `reload`、`open_page` 和指向 `@page_action` 的 `page_action` |
+| 宿主动作范围 | `Button.action` 正式开放 `reload`、`open_page` 和指向 `@ui_action` 的 `ui_action`；`page_action` 仅保留给旧页面 schema 迁移，不作为 Hosted UI 新入口 |
 | 明确删除 | `micro_app`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_page`、`ui.declare_data_table`、`PageSpec` |
 | 设计输入 | `module-hosted-ui-framework.md` |
 | 当前验证基线 | Core / SDK / integration / acceptance 已跑通 `@page` 注解模式定向回归；模块详情页、CLI 和 schema gate 已统一到 `pages/` 页面注册 + `@page(menu=True)` 菜单配置的新契约 |
@@ -65,11 +65,11 @@
 
 | 项目 | 内容 |
 |---|---|
-| 目标 | 在模块 `custom_table` 实体表之上提供装饰器驱动的数据库视图和命名查询能力 |
-| 新事实源 | `@data_table` / `@data_query` 装饰器声明 + `.crawler4j/manifest.lock.json` |
+| 目标 | 在模块 `custom_table` 实体表之上提供装饰器驱动的数据库视图和只读视图能力 |
+| 新事实源 | `@data_table` / `@data_view` 装饰器声明 + `.crawler4j/manifest.lock.json` |
 | 注册入口 | `data/*.py` 中的装饰器声明；0.4.0 不再接受 `module.yaml.data` 作为运行事实源 |
-| 查询接口 | `ctx.db.from_(...)`、`ctx.db.named(...).bind(...).execute()` |
-| SQL 契约 | 模块只能执行由 `@data_query` 注册的 `SELECT/WITH SELECT` SQL；源表通过 `{{resource:<resource_id>}}` 占位引用；禁止未注册 SQL |
+| 查询接口 | `ctx.db.from_(...)`、`ctx.db.from_("view_id").execute()` |
+| SQL 契约 | 模块只能执行由 `@data_view` 注册的 `SELECT/WITH SELECT` SQL；源表通过 `{{resource:<resource_id>}}` 占位引用；禁止未注册 SQL |
 | UI 接入 | 模块页面通过内联 `DataTable(query_handler)` 调用 `ctx.db` fluent API，宿主只负责表格交互与渲染 |
 | 生命周期 | 宿主在模块加载/安装时校验、同步、建表、建视图、导种子，并在卸载时统一清理 |
 | 当前状态 | 已切到装饰器驱动契约；旧 `db.declare_db_view` 和 `module.yaml.data` 运行声明口已退出正式协议 |
@@ -82,13 +82,13 @@
 |---|---|
 | 目标 | 0.4.0 新模块运行时从 `module.yaml` 对象图切到代码装饰器，降低模块开发者理解成本 |
 | Runtime API | `core-native-v2` |
-| 事实源 | `@interface`、`@component`、`@workflow`、`@page_action`、`@data_table`、`@data_query`；对象依赖和 component 参数可通过 `object_inject` / `object_param` 注解 helper 补充 |
+| 事实源 | `@interface`、`@component`、`@workflow`、`@page`、`@page_action`、`@ui_action`、`@data_table`、`@data_view`；对象依赖和 component 参数可通过 `object_inject` / `object_param` 注解 helper 补充 |
 | Manifest 边界 | `module.yaml` 不再声明 interfaces、objects、workflows、tasks、data resources、workflow parameters；只保留模块元信息和宿主级静态配置 |
 | Workflow 契约 | workflow 只通过构造函数接收宿主注入对象，不接收 `parameters[]` |
 | Component 契约 | component 声明 `implements`、`inject` 和对象创建参数；`inject` 与对象参数可写在装饰器参数、类属性注解或 `__init__` 参数注解上，最终归一为 `InjectSpec` / `ParameterSpec`；对象参数只用于宿主创建对象实例 |
 | 对象生命周期 | Core 按运行模板为每个 task/env 创建独立对象图，默认不共享业务对象实例；`workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`；workflow 返回成功、返回失败、超时、异常、setup 失败或被用户停止后按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`；`workflow` 与 `outcome.workflow` 为当前 workflow 元信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`，旧 `aclose()` / `close()` 不再是生命周期契约 |
-| Page action 契约 | task 退化为 `@page_action` 纯函数；业务编排进入 workflow / orchestrator |
-| Data 契约 | 数据表和命名查询由 `@data_table` / `@data_query` 声明，并注册到现有 `ctx.db` 能力 |
+| Page action 契约 | task 退化为 `@page_action` 浏览器页面操作纯函数；只由 workflow / component 通过 `ctx.run_page_action(...)` 调用，不作为 Hosted UI 用户按钮入口，也不允许在 `@page_action` 内再次调用 `ctx.run_page_action(...)` 拆公共步骤 |
+| Data 契约 | 数据表和只读视图由 `@data_table` / `@data_view` 声明，并注册到现有 `ctx.db` 能力 |
 | 宿主保留字段 | SDK / Core / Contracts 共享宿主保留字段集合；第一版阻断模块自有数据列声明 `created_at`、`updated_at`，并阻断常见混淆字段 `create_at`、`update_at` |
 | SDK 质量门 | 模块项目打开、DevLink 注册、`crawler4j check full`、`crawler4j manifest lock` 和 package build 均必须执行装饰器扫描、对象图校验和数据字段保留名诊断 |
 | 运行模板 UI | 根据 workflow 根注入对象递归展示实现选择和对象参数表单，保存为 `object_bindings` / `object_params` |
@@ -127,7 +127,7 @@
 | 快照型业务数据 | `@data_table` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`），`custom_table` 落在受控实体表 `module_name_resource_id`，并由装饰器 schema/indexes 描述真实列结构；业务数据统一通过 `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` 访问 |
 | 事件型审计数据 | `data.db.module_audit_events` 独立承载 append-only 审计事件；通过 `ctx.db.audit("dataset")` 访问，不进入 `module_datasets` |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
-| 当前实现说明 | `ctx.db` 已统一要求资源先由 `@data_table` 注册并进入 manifest lock，再按 `storage_mode` 路由；`@data_table` 默认 `custom_table`，需要旧快照语义时显式写 `storage_mode="managed_dataset"`；`managed_dataset` 不再按名称隐式落库，且只允许单源读取；`custom_table` 继续使用 schema 驱动的受控实体表，并可在装饰器显式声明后联表、分组和聚合。`@data_query` 只允许引用 `custom_table`。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单 |
+| 当前实现说明 | `ctx.db` 已统一要求资源先由 `@data_table` 注册并进入 manifest lock，再按 `storage_mode` 路由；`@data_table` 默认 `custom_table`，需要旧快照语义时显式写 `storage_mode="managed_dataset"`；`managed_dataset` 不再按名称隐式落库，且只允许单源读取；`custom_table` 继续使用 schema 驱动的受控实体表，并可在装饰器显式声明后联表、分组和聚合。`@data_view` 只允许引用 `custom_table`。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单 |
 | 关联文档 | `module-config-runtime-data-contract.md` |
 | 关联项 | `CR-003`, `CR-012`, `TASK-026` |
 

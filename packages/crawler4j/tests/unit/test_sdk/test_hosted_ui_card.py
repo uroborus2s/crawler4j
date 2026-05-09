@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from crawler4j_contracts.hosted_ui import normalize_page_schema
+from crawler4j_contracts.hosted_ui import normalize_db_view_schema, normalize_page_schema
 
 
 def test_normalize_page_schema_supports_card_component():
@@ -46,6 +46,20 @@ def test_normalize_page_schema_supports_card_component():
             ],
         }
     ]
+
+
+@pytest.mark.parametrize("removed_key", ["filterable", "sortable"])
+def test_normalize_db_view_schema_rejects_removed_query_flags(removed_key):
+    with pytest.raises(ValueError, match=f"不支持的字段: {removed_key}"):
+        normalize_db_view_schema(
+            "billing_stats",
+            {
+                "view_kind": "sql_view",
+                "source_resource_ids": ["billing_entries"],
+                "select_sql_template": "SELECT entry_id FROM {{resource:billing_entries}}",
+                "columns": [{"name": "entry_id", "type": "text", removed_key: True}],
+            },
+        )
 
 
 def test_normalize_page_schema_rejects_invalid_card_vertical_alignment():
@@ -149,6 +163,39 @@ def test_normalize_page_schema_supports_page_action_button():
 
     assert schema["children"][0]["action"] == {
         "type": "page_action",
+        "name": "create_account_from_ui",
+        "params": {
+            "account_id": {"binding": "selected.id"},
+            "source": {"value": "dashboard"},
+        },
+    }
+
+
+def test_normalize_page_schema_supports_ui_action_button():
+    schema = normalize_page_schema(
+        "dashboard",
+        {
+            "type": "Page",
+            "load_handler": "load_dashboard_page",
+            "children": [
+                {
+                    "type": "Button",
+                    "label": "创建账号",
+                    "action": {
+                        "type": "ui_action",
+                        "name": "create_account_from_ui",
+                        "params": {
+                            "account_id": {"binding": "selected.id"},
+                            "source": {"value": "dashboard"},
+                        },
+                    },
+                },
+            ],
+        },
+    )
+
+    assert schema["children"][0]["action"] == {
+        "type": "ui_action",
         "name": "create_account_from_ui",
         "params": {
             "account_id": {"binding": "selected.id"},

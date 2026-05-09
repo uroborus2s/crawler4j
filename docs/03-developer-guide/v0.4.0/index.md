@@ -11,7 +11,8 @@
 - 由 Core 在每个 task/env 启动时创建独立对象图
 - workflow 只接收宿主注入对象
 - 页面操作使用 `@page_action` 纯函数
-- 数据表和命名查询使用 `@data_table` / `@data_query`
+- Hosted UI 用户操作使用 `@ui_action` 函数
+- 数据表和只读视图使用 `@data_table` / `@data_view`
 - 环境选择使用 `candidates/` 下的 `@env_candidates` 同步纯函数
 - 批量环境清理使用 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数
 
@@ -20,18 +21,19 @@
 ## 推荐阅读顺序
 
 1. [核心概念](./core-concepts.md)
-2. [模块结构](./module-structure.md)
-3. [装饰器与对象装配](./decorators-and-object-assembly.md)
-4. [数据契约](./data-contracts.md)
-5. [快速开始](./quickstart.md)
-6. [UI 与数据表](./ui-and-data-table.md)
-7. [构建模块](./build-modules.md)
-8. [调试](./debugging.md)
-9. [交付](./shipping.md)
-10. [从 v0.3.0 迁移](./migration-from-v0.3.0.md)
-11. [排障](./troubleshooting.md)
-12. [SDK 与 CLI 参考](./reference-sdk-and-cli.md)
-13. [Core 能力参考](./reference-core-capabilities.md)
+2. [模块架构规则](./architecture-rules.md)
+3. [模块结构](./module-structure.md)
+4. [装饰器与对象装配](./decorators-and-object-assembly.md)
+5. [数据契约](./data-contracts.md)
+6. [快速开始](./quickstart.md)
+7. [UI 与数据表](./ui-and-data-table.md)
+8. [构建模块](./build-modules.md)
+9. [调试](./debugging.md)
+10. [交付](./shipping.md)
+11. [从 v0.3.0 迁移](./migration-from-v0.3.0.md)
+12. [排障](./troubleshooting.md)
+13. [SDK 与 CLI 参考](./reference-sdk-and-cli.md)
+14. [Core 能力参考](./reference-core-capabilities.md)
 
 ## 记住这些边界
 
@@ -44,8 +46,11 @@
 - 普通参数只属于 component 对象创建，可写在 `@component(parameters=...)`，也可写成 `Annotated[..., object_param(...)]`
 - 对象注入可写在 `inject=[...]`，也可写成 `Annotated[..., object_inject(...)]`
 - Core 为每个 task/env 创建独立对象图，不共享业务对象实例
-- 数据库唯一入口仍是 `ctx.db`
+- 数据库唯一入口仍是 `ctx.db`；读取数据源契约使用 `ctx.db.describe("logical_source")`
 - `ctx.tools.call("db.*")` 不是正式能力
+- 标准页面交互优先走 `ctx.tools.call("browser.*", ...)`；`ctx.page` 主要保留给读取和宿主未覆盖能力
+- `@page_action` 只由 workflow/component 通过 `ctx.run_page_action(...)` 调用，不在 `@page_action` 内嵌套调用另一个 `@page_action`
+- Hosted UI 按钮、CRUD handler 和表单提交使用 `@ui_action`，不要接到 `@page_action`
 - 环境候选唯一入口是 `candidates/*.py` + `@env_candidates`；不要写 `env_selectors/`，也不要维护资源池同步数据
 - 环境清理候选入口是 `cleanups/*.py` + `@env_cleanup_candidates`；模块只返回 env id，删除由宿主确认和校验后执行
 - `created_at`、`updated_at`、`create_at`、`update_at` 是阻断诊断字段，不要声明为模块业务列
@@ -59,7 +64,7 @@
 | 任务 | `tasks/*.py` 导出 `TASK` / `execute` | `tasks/*.py` 承载 `@page_action` 纯函数 |
 | 工作流 | `workflows/*.py` 导出 `WORKFLOW` / `run` | `@workflow` 类，构造函数只接收注入对象 |
 | Workflow 参数 | `module.yaml.workflows[].parameters[]` | 移到具体 component 的 `parameters` 或 `object_param(...)` 注解 |
-| 数据表 / 查询 | `module.yaml.data` + `data/sql` | `@data_table(storage_mode=...)` / `@data_query` + manifest lock；`managed_dataset` 必须显式声明 |
-| 页面 | `pages/*.py` 使用 `@page` 装饰 load handler | 页面仍由宿主 schema 渲染，菜单由 `@page(menu=True)` 控制，页面动作接入 `@page_action` |
+| 数据表 / 视图 | `module.yaml.data` + `data/sql` | `@data_table(storage_mode=...)` / `@data_view` + manifest lock；`managed_dataset` 必须显式声明，视图只引用 `custom_table` |
+| 页面 | `pages/*.py` 使用 `@page` 装饰 load handler | 页面仍由宿主 schema 渲染，菜单由 `@page(menu=True)` 控制，用户操作接入 `@ui_action`，浏览器页面动作接入 `@page_action` |
 | Hook / 环境选择器 | `hooks/`、`env_selectors/` 固定导出 | 环境选择写成 `candidates/*.py` 中的 `@env_candidates` 同步纯函数；不提供 hook 兼容路径 |
 | 批量环境清理 | 无一等模块契约 | `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数返回待清理 env id，宿主统一预览、确认、二次安全校验和删除 |

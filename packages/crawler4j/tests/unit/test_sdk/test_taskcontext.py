@@ -169,6 +169,31 @@ class TestTaskContextInjection:
         basic_context.tools = fake_tools
         assert basic_context.tools is fake_tools
 
+    def test_task_context_binds_tools_that_support_runtime_binding(self):
+        """验证 TaskContext 初始化时会把自己绑定给支持运行时上下文的 tools。"""
+
+        observed: dict[str, object] = {}
+
+        class _BindableTools:
+            def bind_task_context(self, context: TaskContext) -> None:
+                observed["context"] = context
+
+            def has_tool(self, tool_name: str) -> bool:
+                del tool_name
+                return False
+
+            def list_tools(self) -> list[ToolSpec]:
+                return []
+
+            def call(self, tool_name: str, /, **kwargs):
+                return {"tool_name": tool_name, "kwargs": kwargs}
+
+        tools = _BindableTools()
+
+        ctx = TaskContext(env_id=7, task_name="bindable_task", tools=tools)
+
+        assert observed["context"] is ctx
+
 
 class TestMockContext:
     """测试 Mock Context 创建。"""

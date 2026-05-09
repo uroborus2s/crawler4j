@@ -87,7 +87,7 @@ def patch_default_module_registry(monkeypatch):
                         name="demo_module",
                         runtime_api="core-native-v2",
                         upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
-                        data={"resources": [], "views": [], "queries": [], "seeds": []},
+                        data={"resources": [], "views": [], "seeds": []},
                     )
                 )
                 if module_name == "demo_module"

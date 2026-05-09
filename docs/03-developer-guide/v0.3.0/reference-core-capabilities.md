@@ -78,7 +78,7 @@ stats = (
     .execute()
 )
 
-detail = ctx.db.named("get_account_detail").bind(account_id="A001").execute()
+detail = ctx.db.from_("get_account_detail").execute()
 
 ctx.db.into("accounts").replace(rows)
 
@@ -102,7 +102,7 @@ events = ctx.db.audit("account_events").query(entity_key="A001", limit=20)
 | `managed_dataset` | 单源 `select/where/order_by/limit/offset`；禁止 `join/group_by/aggregate` |
 | `custom_table` | 支持 `select/where/order_by/limit/offset`；只允许使用 `module.yaml.data.resources[].joins` 中声明过的 `join`；支持 `group_by` 与聚合 |
 | `view` | 只读 read model；支持轻量筛选、排序、分页；不承载复杂聚合 |
-| `named query` | 通过 `ctx.db.named(...).bind(...).execute()` 执行已注册 SQL |
+| `read-only view` | 通过 `ctx.db.from_("view_id").execute()` 执行已注册 SQL |
 | `audit` | 通过 `ctx.db.audit(...).append/query` 访问独立审计表；不进入 `module_datasets` |
 
 ## 任务与工作流
@@ -242,7 +242,7 @@ def query_orders_table(
 
 - 快照列表：`ctx.db.from_("resource_id")` + `binding`
 - 统计查询：内联 `DataTable(query_handler)` + `ctx.db.from_("custom_table")`
-- 命名 SQL：`ctx.db.named("query_id").bind(...).execute()`
+- 只读视图 SQL：`ctx.db.from_("view_id").execute()`
 - 页面动作写入：在 `hooks/*.py` 中调用 `ctx.db.into("resource_id").replace(records)`
 - 审计事件：`ctx.db.audit("dataset").append(...)` / `.query(...)`
 
@@ -252,18 +252,18 @@ def query_orders_table(
 
 `ctx.db.into(...).replace(records)` 的语义只有一个：全量覆盖，不是 patch 或 upsert。
 
-模块不能在运行时代码里声明表或视图。表、视图、命名查询统一来自：
+模块不能在运行时代码里声明表或视图。表、视图、只读视图统一来自：
 
 - `module.yaml.data`
 - `data/sql/views/*.sql`
-- `data/sql/queries/*.sql`
+- `data/sql/views/*.sql`
 - `data/seeds/*.json`
 
 未在 `module.yaml.data.resources[]` 注册的 `resource_id` 会直接报错；`managed_dataset` 也不再按 `dataset` 名自动创建托管表资源。
 
-`ctx.db.named(...)` 当前只支持：
+`ctx.db.from_("view_id")` 当前只支持：
 
-- 宿主已注册的 `query_id`
+- 宿主已注册的 `view_id`
 - 受控 `SELECT` / `WITH ... SELECT`
 - 通过 `{{resource:<resource_id>}}` 引用已在 `module.yaml.data.resources[]` 注册的资源
 - 不允许执行未注册 SQL

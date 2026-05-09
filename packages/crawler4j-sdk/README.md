@@ -19,8 +19,9 @@
 - `object_inject`
 - `page`
 - `page_action`
+- `ui_action`
 - `data_table`
-- `data_query`
+- `data_view`
 - `env_candidates`
 - `env_cleanup_candidates`
 - `EnvCandidates`
@@ -70,11 +71,11 @@ demo_module/
 - `interfaces/*.py` 声明 `@interface`
 - `objects/*.py` 声明 `@component`
 - `workflows/*.py` 声明 `@workflow`
-- `tasks/*.py` 声明 `@page_action`
-- `data/*.py` 声明 `@data_table` / `@data_query`
+- `tasks/*.py` 声明 workflow/component 调用的 `@page_action`
+- `data/*.py` 声明 `@data_table` / `@data_view`
 - `candidates/*.py` 声明 `@env_candidates`
 - `cleanups/*.py` 声明 `@env_cleanup_candidates`
-- `pages/*.py` 或 `pages/<group>/*.py` 声明 `@page(...)`
+- `pages/*.py` 或 `pages/<group>/*.py` 声明 `@page(...)` 与 Hosted UI 用户操作 `@ui_action`
 
 ## CLI
 
@@ -91,8 +92,9 @@ uv run crawler4j interface create labor
 uv run crawler4j component create api_labor --implements labor
 uv run crawler4j workflow create main_workflow
 uv run crawler4j page-action create open_login_page
+uv run crawler4j ui-action create create_account_from_ui
 uv run crawler4j data table create accounts
-uv run crawler4j data query create get_account_by_id --source accounts
+uv run crawler4j data view create account_overview --source accounts
 uv run crawler4j candidate create ready_accounts
 uv run crawler4j cleanup create unused_accounts
 uv run crawler4j page create dashboard

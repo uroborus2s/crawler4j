@@ -59,9 +59,10 @@ class ModuleRuntimeDescriptorV2:
     components: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     workflows: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     page_actions: dict[str, V2RuntimeEntry] = field(default_factory=dict)
+    ui_actions: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     pages: dict[str, PageRuntimeEntry] = field(default_factory=dict)
     data_tables: dict[str, V2RuntimeEntry] = field(default_factory=dict)
-    data_queries: dict[str, V2RuntimeEntry] = field(default_factory=dict)
+    data_views: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     env_candidates: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     env_cleanup_candidates: dict[str, V2RuntimeEntry] = field(default_factory=dict)
     implementations: dict[str, tuple[str, ...]] = field(default_factory=dict)
@@ -136,9 +137,10 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
     components: dict[str, V2RuntimeEntry] = {}
     workflows: dict[str, V2RuntimeEntry] = {}
     page_actions: dict[str, V2RuntimeEntry] = {}
+    ui_actions: dict[str, V2RuntimeEntry] = {}
     pages: dict[str, PageRuntimeEntry] = {}
     data_tables: dict[str, V2RuntimeEntry] = {}
-    data_queries: dict[str, V2RuntimeEntry] = {}
+    data_views: dict[str, V2RuntimeEntry] = {}
     env_candidates: dict[str, V2RuntimeEntry] = {}
     env_cleanup_candidates: dict[str, V2RuntimeEntry] = {}
     page_owners: dict[str, str] = {}
@@ -159,10 +161,12 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
             pages[entry.meta.name] = _page_entry_from_v2_entry(entry)
         elif kind == "page_action":
             _add_v2_entry(page_actions, entry, label="page_action")
+        elif kind == "ui_action":
+            _add_v2_entry(ui_actions, entry, label="ui_action")
         elif kind == "data_table":
             _add_v2_entry(data_tables, entry, label="data_table")
-        elif kind == "data_query":
-            _add_v2_entry(data_queries, entry, label="data_query")
+        elif kind == "data_view":
+            _add_v2_entry(data_views, entry, label="data_view")
         elif kind == "env_candidates":
             if not inspect.isfunction(entry.target) or inspect.iscoroutinefunction(entry.target):
                 raise RuntimeError(f"{entry.owner} 的 env_candidates {entry.meta.name} 必须是同步纯函数")
@@ -179,9 +183,10 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
         components=components,
         workflows=workflows,
         page_actions=page_actions,
+        ui_actions=ui_actions,
         pages=pages,
         data_tables=data_tables,
-        data_queries=data_queries,
+        data_views=data_views,
         env_candidates=env_candidates,
         env_cleanup_candidates=env_cleanup_candidates,
         implementations=_build_implementations(interfaces, components),

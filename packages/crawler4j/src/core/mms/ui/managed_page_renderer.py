@@ -729,9 +729,10 @@ class ManagedPageRenderer(QWidget):
                 resource_id = str(data_source.get("resource_id") or "").strip()
                 if not resource_id:
                     raise ValueError("managed_resource 数据源必须提供 resource_id")
-                rows = get_module_data_store().list_records(
+                rows = get_module_data_store().query_resource_records(
                     self._module_name,
                     resource_id,
+                    select=["*"],
                     limit=1000,
                     offset=0,
                 )
@@ -840,9 +841,39 @@ class ManagedPageRenderer(QWidget):
         if action_type == "page_action":
             self._handle_page_action(action)
             return
+        if action_type == "ui_action":
+            self._handle_ui_action(action)
+            return
         page_id = str(action.get("page_id") or "").strip()
         params = self._resolve_action_params(action, self._payload)
         self._open_page(page_id, params or None)
+
+    def _handle_ui_action(self, action: dict[str, Any]) -> None:
+        action_name = str(action.get("name") or "").strip()
+        if not action_name:
+            return
+        params = self._resolve_action_params(action, self._payload)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                self._bridge.call_ui_action(
+                    action_name,
+                    params,
+                    capability_surface=_runtime_surface_hosted_ui_action(),
+                )
+            except Exception as exc:
+                MessageDialog.warning(self, "操作失败", str(exc))
+            return
+
+        task = loop.create_task(
+            self._bridge.call_ui_action_async(
+                action_name,
+                params,
+                capability_surface=_runtime_surface_hosted_ui_action(),
+            )
+        )
+        task.add_done_callback(self._handle_page_action_task_result)
 
     def _handle_page_action(self, action: dict[str, Any]) -> None:
         action_name = str(action.get("name") or "").strip()

@@ -55,22 +55,17 @@ _V2_DATA_TYPE_MAP = {
 }
 
 
-def _v2_column(raw: dict[str, Any]) -> dict[str, Any]:
+def _v2_column(raw: dict[str, Any], *, allow_auto_increment: bool = False) -> dict[str, Any]:
     name = str(raw.get("name") or raw.get("key") or "").strip()
     column_type = _V2_DATA_TYPE_MAP.get(str(raw.get("type") or "text").strip().lower(), "text")
-    return {
+    column = {
         "name": name,
         "type": column_type,
         "nullable": bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required")),
     }
-
-
-def _v2_parameter(raw) -> dict[str, Any]:
-    return {
-        "name": raw.name,
-        "type": _V2_DATA_TYPE_MAP.get(raw.type, raw.type),
-        "required": bool(raw.required),
-    }
+    if allow_auto_increment and bool(raw.get("auto_increment")):
+        column["auto_increment"] = True
+    return column
 
 
 def _v2_index_name(fields: tuple[str, ...], fallback_index: int) -> str:
@@ -80,9 +75,9 @@ def _v2_index_name(fields: tuple[str, ...], fallback_index: int) -> str:
 def _v2_data_contract_for_module(module_info: ModuleInfo) -> dict[str, Any]:
     runtime_api = str(module_info.manifest.runtime_api or "").strip()
     if runtime_api != "core-native-v2":
-        raise ValueError("旧 module.yaml.data 数据契约路径已移除；请迁移到 core-native-v2 @data_table/@data_query")
+        raise ValueError("旧 module.yaml.data 数据契约路径已移除；请迁移到 core-native-v2 @data_table/@data_view")
     if not module_info.path:
-        return {"resources": [], "views": [], "queries": [], "seeds": []}
+        return {"resources": [], "views": [], "seeds": []}
 
     descriptor = load_runtime_descriptor_v2(
         module_info.name,
@@ -93,8 +88,11 @@ def _v2_data_contract_for_module(module_info: ModuleInfo) -> dict[str, Any]:
     resources = []
     table_storage_modes: dict[str, str] = {}
     for table_name, entry in sorted(descriptor.data_tables.items()):
-        columns = [_v2_column(dict(item)) for item in entry.meta.schema]
+        columns = [_v2_column(dict(item), allow_auto_increment=True) for item in entry.meta.schema]
         record_key_field = entry.meta.record_key_field or columns[0]["name"]
+        for column in columns:
+            if column["name"] == record_key_field:
+                column["nullable"] = False
         indexes: dict[str, list[str]] = {}
         for index_number, index in enumerate(entry.meta.indexes, start=1):
             fields = tuple(index.fields)
@@ -115,31 +113,34 @@ def _v2_data_contract_for_module(module_info: ModuleInfo) -> dict[str, Any]:
             }
         )
 
-    queries = []
-    for query_name, entry in sorted(descriptor.data_queries.items()):
-        source = entry.meta.source
-        if table_storage_modes.get(source) != "custom_table":
-            raise ValueError(f"@data_query source must reference custom_table: {query_name} -> {source}")
-        queries.append(
+    views = []
+    for view_name, entry in sorted(descriptor.data_views.items()):
+        for source in entry.meta.sources:
+            if table_storage_modes.get(source) != "custom_table":
+                raise ValueError(f"@data_view sources must reference custom_table: {view_name} -> {source}")
+        views.append(
             {
-                "query_id": query_name,
-                "source_resource_ids": [source],
+                "view_id": view_name,
+                "view_kind": "sql_view",
+                "source_resource_ids": list(entry.meta.sources),
                 "sql": entry.meta.sql,
-                "params": [_v2_parameter(parameter) for parameter in entry.meta.parameters],
-                "columns": [_v2_column(dict(item)) for item in entry.meta.output_schema],
+                "columns": [_v2_column(dict(item)) for item in entry.meta.schema],
+                "cleanup_policy": entry.meta.cleanup_policy or "drop_view",
+                "schema_version": 1,
             }
         )
-    data_contract = {"resources": resources, "views": [], "queries": queries, "seeds": []}
+    data_contract = {"resources": resources, "views": views, "seeds": []}
     module_info.manifest.data = data_contract
     return data_contract
 
+
 class ModuleRegistry:
     """模块注册表。
-    
+
     规格 5.1.3.3: 维护模块注册表，支持查询/列表/刷新。
     规格 5.1.4.4: 支持安装/卸载/刷新。
     """
-    
+
     def __init__(
         self,
         scanner: ModuleScanner | None = None,
@@ -147,7 +148,7 @@ class ModuleRegistry:
         settings_store: ModuleSettingsStore | None = None,
     ):
         """初始化注册表。
-        
+
         Args:
             scanner: 模块扫描器（可选，用于测试注入）
         """
@@ -157,18 +158,18 @@ class ModuleRegistry:
         self._modules: dict[str, ModuleInfo] = {}
         self._loaded = False
         self._install_dir = get_app_data_dir() / "modules"
-    
+
     def load(self, force: bool = False) -> None:
         """加载所有模块。
-        
+
         Args:
             force: 是否强制重新加载
         """
         if self._loaded and not force:
             return
-        
+
         import sys
-        
+
         # 注入用户模块父目录到 Python 搜索路径，确保 modules 包可被 import
         user_data_path = str(get_app_data_dir())
         if user_data_path not in sys.path:
@@ -176,10 +177,10 @@ class ModuleRegistry:
             logger.info(f"[MMS] 已注入模块搜索路径: {user_data_path}")
 
         self._modules.clear()
-        
+
         # 发现并加载模块
         candidates = self._scanner.discover()
-        
+
         for module_path, source in candidates:
             module_info = self._scanner.load_module(module_path, source)
             self._merge_loaded_module(module_info)
@@ -194,7 +195,7 @@ class ModuleRegistry:
 
         self._initialize_loaded_module_configs()
         self._sync_loaded_module_data()
-        
+
         self._loaded = True
         logger.info(f"[MMS] 注册表加载完成: {len(self._modules)} 个模块")
 
@@ -295,116 +296,116 @@ class ModuleRegistry:
                 module_info.status = ModuleStatus.INVALID
                 module_info.error = str(exc)
                 module_info.hint = "请检查 core-native-v2 数据装饰器、SQL 与 data/seeds 是否符合当前协议"
-    
+
     def refresh(self) -> dict[str, list[str] | int]:
         """刷新注册表。
-        
+
         规格 5.1.4.4: 重新扫描并更新注册表，输出变更摘要。
-        
+
         Returns:
             变更摘要 {"added": [...], "removed": [...], "total": int}
         """
         old_modules = set(self._modules.keys())
-        
+
         self.load(force=True)
-        
+
         new_modules = set(self._modules.keys())
-        
+
         added = new_modules - old_modules
         removed = old_modules - new_modules
-        
+
         summary = {
             "added": list(added),
             "removed": list(removed),
             "total": len(self._modules),
         }
-        
+
         logger.info(f"[MMS] 刷新完成: +{len(added)} -{len(removed)}")
         return summary
-    
+
     # === 安装预览 ===
-    
+
     def validate_source(self, source: str | Path) -> tuple[ModuleManifest, list[str]]:
         """校验模块源并返回预览信息（不执行安装）。
-        
+
         用于安装前预览模块信息，供用户确认后再安装。
-        
+
         Args:
             source: 模块源路径（目录或 .zip 文件）
-        
+
         Returns:
             (manifest, warnings) - 模块清单和警告列表
-        
+
         Raises:
             ModuleInstallError: 校验失败
         """
         import tempfile
-        
+
         source_path = Path(source)
-        
+
         if not source_path.exists():
             raise ModuleInstallError(f"源路径不存在: {source}")
-        
+
         temp_dir = None
         try:
             if source_path.suffix == ".zip":
                 # 解压到临时目录进行校验
                 temp_dir = tempfile.mkdtemp(prefix="mms_validate_")
                 temp_path = Path(temp_dir)
-                
-                with zipfile.ZipFile(source_path, 'r') as zf:
-                    root_dirs = {name.split('/')[0] for name in zf.namelist() if '/' in name}
+
+                with zipfile.ZipFile(source_path, "r") as zf:
+                    root_dirs = {name.split("/")[0] for name in zf.namelist() if "/" in name}
                     if len(root_dirs) != 1:
                         raise ModuleInstallError("ZIP 包结构无效，应仅包含一个根目录")
-                    
+
                     module_name = root_dirs.pop()
                     safe_extract_zip(zf, temp_path)
                     module_path = temp_path / module_name
             else:
                 module_path = source_path
-            
+
             # 解析并校验 manifest
             manifest = self._scanner.parse_manifest(module_path)
             warnings = self._scanner.validate(manifest, module_path)
             verify_manifest_lock(module_path, manifest)
-            
+
             # 检查是否已安装同名模块
             existing = self.get_module(manifest.name)
             if existing:
                 warnings.append(f"将覆盖已安装的模块 '{manifest.name}' (v{existing.manifest.version})")
-            
+
             return manifest, warnings
-            
+
         finally:
             # 清理临时目录
             if temp_dir:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-    
+
     # === 安装/卸载 ===
-    
+
     def install(self, source: str | Path) -> ModuleInfo:
         """安装模块。
-        
+
         规格 5.1.4.4: 将模块包复制/解压到受控目录并更新注册表。
-        
+
         Args:
             source: 模块源路径（目录或 .zip 文件）
-        
+
         Returns:
             安装后的模块信息
-        
+
         Raises:
             ModuleInstallError: 安装失败
         """
         source_path = Path(source)
-        
+
         if not source_path.exists():
             raise ModuleInstallError(f"源路径不存在: {source}")
-        
+
         # 确保安装目录存在
         self._install_dir.mkdir(parents=True, exist_ok=True)
         previous_module = None
-        
+
         try:
             if source_path.suffix == ".zip":
                 # 解压 ZIP 包
@@ -420,7 +421,7 @@ class ModuleRegistry:
             # 安装正式模块时，移除同名开发链接，避免运行时继续优先落到源码目录。
             if self._dev_link_store.delete_link(module_info.name):
                 logger.info(f"[MMS] 已移除同名开发链接，切换到安装模块: {module_info.name}")
-            
+
             # 更新注册表
             self._apply_persisted_module_status(module_info)
             self._modules[module_info.name] = module_info
@@ -431,19 +432,25 @@ class ModuleRegistry:
                 raise ModuleInstallError(synced_module.error or f"模块数据契约同步失败: {module_info.name}")
             logger.info(f"[MMS] 已安装: {module_info.name} v{module_info.manifest.version}")
 
-            event_type = EventType.MODULE_UPGRADED if previous_module and previous_module.source == ModuleSource.EXTERNAL else EventType.MODULE_INSTALLED
-            get_event_bus().publish(Event(
-                type=event_type,
-                module_name=module_info.name,
-                data={
-                    "module_name": module_info.name,
-                    "version": module_info.manifest.version,
-                    "source": module_info.source.value,
-                },
-            ))
-            
+            event_type = (
+                EventType.MODULE_UPGRADED
+                if previous_module and previous_module.source == ModuleSource.EXTERNAL
+                else EventType.MODULE_INSTALLED
+            )
+            get_event_bus().publish(
+                Event(
+                    type=event_type,
+                    module_name=module_info.name,
+                    data={
+                        "module_name": module_info.name,
+                        "version": module_info.manifest.version,
+                        "source": module_info.source.value,
+                    },
+                )
+            )
+
             return module_info
-            
+
         except Exception as e:
             logger.error(f"[MMS] 安装失败: {e}")
             raise ModuleInstallError(f"安装失败: {e}") from e
@@ -473,15 +480,15 @@ class ModuleRegistry:
 
     def list_dev_links(self):
         return self._dev_link_store.list_links()
-    
+
     def _install_from_zip(self, zip_path: Path) -> ModuleInfo:
         """从 ZIP 安装。"""
         temp_dir = Path(tempfile.mkdtemp(prefix="mms_install_", dir=str(self._install_dir)))
         extracted_module_dir: Path | None = None
 
         try:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                root_dirs = {name.split('/')[0] for name in zf.namelist() if '/' in name}
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                root_dirs = {name.split("/")[0] for name in zf.namelist() if "/" in name}
                 if len(root_dirs) != 1:
                     raise ModuleInstallError("ZIP 包结构无效，应仅包含一个根目录")
 
@@ -496,7 +503,7 @@ class ModuleRegistry:
             return self._activate_staged_module(extracted_module_dir, manifest)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
-    
+
     def _install_from_dir(self, dir_path: Path) -> ModuleInfo:
         """从目录安装。"""
         temp_dir = Path(tempfile.mkdtemp(prefix="mms_install_dir_", dir=str(self._install_dir)))
@@ -612,16 +619,16 @@ class ModuleRegistry:
                 if loaded_name == module_name or loaded_name.startswith(prefix):
                     sys.modules.pop(loaded_name, None)
             sys.modules.update(previous_modules)
-    
+
     def uninstall(self, module_name: str, keep_settings: bool = False) -> bool:
         """卸载模块。
-        
+
         规格 5.1.4.4: 移除模块目录与注册表条目。
-        
+
         Args:
             module_name: 模块名
             keep_settings: 是否保留配置
-        
+
         Returns:
             是否卸载成功
         """
@@ -629,12 +636,12 @@ class ModuleRegistry:
         if not module:
             logger.warning(f"[MMS] 模块不存在: {module_name}")
             return False
-        
+
         # 内置模块不可卸载
         if module.source == ModuleSource.BUILTIN:
             logger.warning(f"[MMS] 无法卸载内置模块: {module_name}")
             return False
-        
+
         try:
             # 删除目录
             if module.path and module.path.exists():
@@ -644,30 +651,32 @@ class ModuleRegistry:
             from src.core.persistence import get_module_data_store
 
             get_module_data_store().clear_module_data(module_name)
-            
+
             # 从注册表移除
             del self._modules[module_name]
 
-            get_event_bus().publish(Event(
-                type=EventType.MODULE_UNINSTALLED,
-                module_name=module_name,
-                data={"module_name": module_name},
-            ))
-            
+            get_event_bus().publish(
+                Event(
+                    type=EventType.MODULE_UNINSTALLED,
+                    module_name=module_name,
+                    data={"module_name": module_name},
+                )
+            )
+
             logger.info(f"[MMS] 已卸载: {module_name}")
             return True
-            
+
         except Exception as e:
             logger.error(f"[MMS] 卸载失败: {e}")
             return False
-    
+
     # === 查询接口 ===
-    
+
     def list_modules(self) -> list[ModuleInfo]:
         """列出所有模块。"""
         self.load()
         return list(self._modules.values())
-    
+
     def get_module(self, module_name: str) -> ModuleInfo | None:
         """获取指定模块。"""
         cached = self._modules.get(module_name)
@@ -675,7 +684,7 @@ class ModuleRegistry:
             return cached
         self.load()
         return self._modules.get(module_name)
-    
+
     def get_workflows(self, module_name: str) -> list[WorkflowInfo]:
         """获取模块的工作流列表。"""
         module = self.get_module(module_name)
@@ -701,54 +710,50 @@ class ModuleRegistry:
                 ]
             return []
         return []
-    
+
     def get_enabled_modules(self) -> list[ModuleInfo]:
         """获取所有启用的模块。"""
         self.load()
         return [m for m in self._modules.values() if m.status == ModuleStatus.ENABLED]
-    
+
     # === 状态管理 ===
-    
+
     def enable_module(self, module_name: str) -> bool:
         """启用模块。"""
         module = self.get_module(module_name)
         if not module:
             return False
-        
+
         if module.status == ModuleStatus.INVALID:
             logger.warning(f"[MMS] 无法启用无效模块: {module_name}")
             return False
-        
+
         module.status = ModuleStatus.ENABLED
         self._settings_store.set_module_status(module_name, ModuleStatus.ENABLED)
         logger.info(f"[MMS] 已启用: {module_name}")
-        
+
         # 发布事件
-        get_event_bus().publish(Event(
-            type=EventType.MODULE_ENABLED,
-            module_name=module_name,
-            data={"module_name": module_name}
-        ))
-        
+        get_event_bus().publish(
+            Event(type=EventType.MODULE_ENABLED, module_name=module_name, data={"module_name": module_name})
+        )
+
         return True
-    
+
     def disable_module(self, module_name: str) -> bool:
         """禁用模块。"""
         module = self.get_module(module_name)
         if not module:
             return False
-        
+
         module.status = ModuleStatus.DISABLED
         self._settings_store.set_module_status(module_name, ModuleStatus.DISABLED)
         logger.info(f"[MMS] 已禁用: {module_name}")
-        
+
         # 发布事件，通知 ATM 挂起相关任务
-        get_event_bus().publish(Event(
-            type=EventType.MODULE_DISABLED,
-            module_name=module_name,
-            data={"module_name": module_name}
-        ))
-        
+        get_event_bus().publish(
+            Event(type=EventType.MODULE_DISABLED, module_name=module_name, data={"module_name": module_name})
+        )
+
         return True
 
 

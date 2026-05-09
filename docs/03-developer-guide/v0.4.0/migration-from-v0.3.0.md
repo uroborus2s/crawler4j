@@ -30,7 +30,7 @@
 5. 把 workflow 迁到 `@workflow`
 6. 把业务编排迁到 `@component`
 7. 把 task 迁到 `@page_action`
-8. 把 `module.yaml.data` 迁到 `@data_table` / `@data_query`
+8. 把 `module.yaml.data` 迁到 `@data_table` / `@data_view`
 9. 移除旧 SDK 命令产物、旧固定导出和旧数据目录事实源
 10. 修复装饰器扫描和保留字段诊断
 11. 最后再切 `runtime_api` 到 `core-native-v2`
@@ -125,8 +125,8 @@ async def execute(ctx):
 ```python
 @page_action(name="open_login_page")
 async def open_login_page(ctx, url: str):
-    await ctx.page.goto(url)
-    return {"opened": True}
+    await ctx.tools.call("browser.goto", url=url)
+    return {"opened": True, "title": await ctx.page.title() if ctx.page else None}
 ```
 
 如果旧 task 里有业务编排，把编排代码移入 orchestrator component。
@@ -157,7 +157,7 @@ class Accounts:
     pass
 ```
 
-如果旧资源是 `managed_dataset`，新写法改为 `@data_table(storage_mode="managed_dataset", ...)`，数据仍落到 `module_datasets`。命名查询迁到 `@data_query`，但 SQL 继续只能引用 `custom_table` 的 `{{resource:<id>}}`。
+如果旧资源是 `managed_dataset`，新写法改为 `@data_table(storage_mode="managed_dataset", ...)`，数据仍落到 `module_datasets`。旧只读视图不再作为运行时入口保留；需要物化为只读 read model 的 SQL 应迁到 `@data_view`，且只能引用 `custom_table` 的 `{{resource:<id>}}`。
 
 ## 数据字段改名
 

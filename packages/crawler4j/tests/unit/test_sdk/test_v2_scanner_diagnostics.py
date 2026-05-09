@@ -57,7 +57,7 @@ def test_scan_v2_module_discovers_decorator_metadata(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "objects" / "runtime.py").write_text(
         """
-from crawler4j_contracts import component, data_query, data_table, interface, page, page_action, workflow
+from crawler4j_contracts import component, data_table, data_view, interface, page, page_action, ui_action, workflow
 
 
 @interface(name="labor", label="Labor")
@@ -80,6 +80,11 @@ async def open_login_page(ctx, url: str):
     return {"url": url}
 
 
+@ui_action(name="create_account_from_ui", label="Create account")
+def create_account_from_ui(ctx, payload: dict):
+    return {"payload": payload}
+
+
 @page(
     name="dashboard",
     label="Dashboard",
@@ -95,13 +100,13 @@ class Accounts:
     pass
 
 
-@data_query(
-    name="ready_accounts",
-    source="accounts",
+@data_view(
+    name="account_overview",
+    sources=["accounts"],
     sql="SELECT account_id FROM {{resource:accounts}}",
-    output_schema=[{"name": "account_id", "type": "string"}],
+    schema=[{"name": "account_id", "type": "string"}],
 )
-def ready_accounts():
+def account_overview():
     return []
 
 """,
@@ -139,8 +144,9 @@ def unused_accounts(ctx, params=None):
         ("workflow", "main_workflow", "objects.runtime.MainWorkflow"),
         ("page", "dashboard", "objects.runtime.load_dashboard_page"),
         ("page_action", "open_login_page", "objects.runtime.open_login_page"),
+        ("ui_action", "create_account_from_ui", "objects.runtime.create_account_from_ui"),
         ("data_table", "accounts", "objects.runtime.Accounts"),
-        ("data_query", "ready_accounts", "objects.runtime.ready_accounts"),
+        ("data_view", "account_overview", "objects.runtime.account_overview"),
         ("env_candidates", "ctrip_gold_old_account", "candidates.accounts.ctrip_gold_old_account"),
         ("env_cleanup_candidates", "unused_accounts", "cleanups.unused_accounts.unused_accounts"),
     }
@@ -563,7 +569,7 @@ def test_scan_v2_module_reports_host_reserved_data_fields(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "data" / "data_contracts.py").write_text(
         """
-from crawler4j_contracts import data_query, data_table
+from crawler4j_contracts import data_table, data_view
 
 
 @data_table(
@@ -576,11 +582,11 @@ class Accounts:
     pass
 
 
-@data_query(
+@data_view(
     name="recent_accounts",
-    source="accounts",
+    sources=["accounts"],
     sql="SELECT account_id, update_at FROM {{resource:accounts}}",
-    output_schema=[{"name": "update_at", "type": "string"}],
+    schema=[{"name": "update_at", "type": "string"}],
 )
 def recent_accounts():
     return []
@@ -595,7 +601,7 @@ def recent_accounts():
         "data.data_contracts.Accounts.schema[created_at]",
         "data.data_contracts.Accounts.indexes[updated_at]",
         "data.data_contracts.Accounts.annotations[update_at]",
-        "data.data_contracts.recent_accounts.output_schema[update_at]",
+        "data.data_contracts.recent_accounts.schema[update_at]",
     }
 
 
@@ -662,11 +668,50 @@ class Accounts:
     assert [diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_RESERVED_DATA_FIELD"] == []
 
 
-def test_scan_v2_module_rejects_named_query_over_managed_dataset(tmp_path: Path):
+def test_scan_v2_module_warns_for_managed_dataset_derived_display_fields(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "data" / "data_contracts.py").write_text(
         """
-from crawler4j_contracts import data_query, data_table
+from crawler4j_contracts import data_table
+
+
+@data_table(
+    name="accounts",
+    storage_mode="managed_dataset",
+    schema=[
+        {"name": "phone", "type": "string"},
+        {"name": "phone_masked", "type": "string"},
+        {"name": "status_label", "type": "string"},
+        {"name": "updated_at_display", "type": "string"},
+    ],
+)
+class Accounts:
+    status_display: str
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    derived_warnings = [
+        diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_DERIVED_DATA_FIELD"
+    ]
+    assert {diagnostic.location for diagnostic in derived_warnings} == {
+        "data.data_contracts.Accounts.schema[phone_masked]",
+        "data.data_contracts.Accounts.schema[status_label]",
+        "data.data_contracts.Accounts.schema[updated_at_display]",
+        "data.data_contracts.Accounts.annotations[status_display]",
+    }
+    assert {diagnostic.severity for diagnostic in derived_warnings} == {"warning"}
+    assert not any("V2_DERIVED_DATA_FIELD" in error for error in result.error_messages())
+
+
+def test_scan_v2_module_rejects_data_view_over_managed_dataset(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "data" / "data_contracts.py").write_text(
+        """
+from crawler4j_contracts import data_table, data_view
 
 
 @data_table(
@@ -678,13 +723,13 @@ class Accounts:
     pass
 
 
-@data_query(
-    name="ready_accounts",
-    source="accounts",
+@data_view(
+    name="account_overview",
+    sources=["accounts"],
     sql="SELECT account_id FROM {{resource:accounts}}",
-    output_schema=[{"name": "account_id", "type": "string"}],
+    schema=[{"name": "account_id", "type": "string"}],
 )
-def ready_accounts():
+def account_overview():
     return []
 """,
         encoding="utf-8",
@@ -693,8 +738,8 @@ def ready_accounts():
     result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
 
     assert any(
-        diagnostic.code == "V2_QUERY_SOURCE_NOT_RELATION"
-        and diagnostic.location == "data.data_contracts.ready_accounts.source"
+        diagnostic.code == "V2_VIEW_SOURCE_NOT_RELATION"
+        and diagnostic.location == "data.data_contracts.account_overview.sources[accounts]"
         for diagnostic in result.diagnostics
     )
 

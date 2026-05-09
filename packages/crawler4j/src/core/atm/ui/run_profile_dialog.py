@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, available_timezones
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QStackedWidget,
     QTabWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +53,7 @@ from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
+from src.ui.components.object_graph_tree import ObjectGraphTree
 from src.ui.components.segmented_control import SegmentedOptionControl
 from src.ui.components.spin_box import StyledDoubleSpinBox as QDoubleSpinBox
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
@@ -1272,12 +1274,17 @@ class RunProfileDialog(QDialog):
         form.addRow("模块 / 工作流:", self.script_selector)
 
         self.object_assembly_widget = QWidget()
-        self.object_assembly_form = self._create_form_layout(self.object_assembly_widget)
-        self.object_assembly_form.setContentsMargins(0, 0, 0, 0)
+        object_assembly_layout = QVBoxLayout(self.object_assembly_widget)
+        object_assembly_layout.setContentsMargins(0, 0, 0, 0)
+        object_assembly_layout.setSpacing(0)
+        self.object_assembly_tree = ObjectGraphTree()
+        object_assembly_layout.addWidget(self.object_assembly_tree)
         self._object_binding_widgets: dict[str, QComboBox] = {}
         self._object_param_widgets: dict[str, dict[str, QWidget]] = {}
         self._object_param_specs: dict[str, dict[str, object]] = {}
         self._rendered_object_components: set[str] = set()
+        self._object_assembly_refresh_pending = False
+        self._pending_object_assembly_values: dict | None = None
         form.addRow("对象装配:", self.object_assembly_widget)
 
         self.execution_timeout_spin = QSpinBox()
@@ -1874,15 +1881,14 @@ class RunProfileDialog(QDialog):
         return None
 
     def _clear_object_assembly_form(self) -> None:
-        while self.object_assembly_form.rowCount():
-            self.object_assembly_form.removeRow(0)
+        self.object_assembly_tree.clear()
         self._object_binding_widgets = {}
         self._object_param_widgets = {}
         self._object_param_specs = {}
         self._rendered_object_components = set()
 
     def _sync_object_assembly_form(self, values: dict | None = None) -> None:
-        if not hasattr(self, "object_assembly_form"):
+        if not hasattr(self, "object_assembly_tree"):
             return
         current_values = values if values is not None else self._initial_object_assembly_values()
         descriptor = self._current_runtime_descriptor()
@@ -1899,13 +1905,20 @@ class RunProfileDialog(QDialog):
             return
 
         self._set_row_visible(self.object_assembly_widget, True)
+        _module_name, workflow_name = self.script_selector.get_value()
+        workflow_item = self.object_assembly_tree.add_node(
+            f"工作流: {self._entry_label(workflow_entry, workflow_name)}",
+            role="workflow",
+        )
         self._render_inject_specs(
             descriptor,
             inject_specs,
             parent_path="",
             values=current_values,
             seen_components=set(),
+            parent_item=workflow_item,
         )
+        self.object_assembly_tree.finalize()
 
     def _initial_object_assembly_values(self) -> dict[str, dict]:
         execution = self._run_profile.execution
@@ -1950,6 +1963,19 @@ class RunProfileDialog(QDialog):
             values = self._current_object_assembly_values()
         except Exception:
             values = self._initial_object_assembly_values()
+        self._schedule_object_assembly_refresh(values)
+
+    def _schedule_object_assembly_refresh(self, values: dict | None = None) -> None:
+        self._pending_object_assembly_values = values
+        if self._object_assembly_refresh_pending:
+            return
+        self._object_assembly_refresh_pending = True
+        QTimer.singleShot(0, self._flush_object_assembly_refresh)
+
+    def _flush_object_assembly_refresh(self) -> None:
+        self._object_assembly_refresh_pending = False
+        values = self._pending_object_assembly_values
+        self._pending_object_assembly_values = None
         self._sync_object_assembly_form(values)
 
     def _render_inject_specs(
@@ -1960,6 +1986,7 @@ class RunProfileDialog(QDialog):
         parent_path: str,
         values: dict,
         seen_components: set[str],
+        parent_item: QTreeWidgetItem,
     ) -> None:
         for inject in inject_specs:
             inject_name = str(getattr(inject, "name", "") or "").strip()
@@ -1969,19 +1996,21 @@ class RunProfileDialog(QDialog):
                 continue
             inject_path = f"{parent_path}.{inject_name}" if parent_path else inject_name
             if inject_type == "interface":
-                selected_component = self._render_interface_binding(
+                selected_component, component_item = self._render_interface_binding(
                     descriptor,
                     inject_path=inject_path,
                     interface_name=inject_target,
                     values=values,
+                    parent_item=parent_item,
                 )
                 if selected_component:
-                    self._render_component(
+                    self._render_component_body(
                         descriptor,
                         selected_component,
                         parent_path=inject_path,
                         values=values,
                         seen_components=seen_components,
+                        component_item=component_item,
                     )
                 continue
             if inject_type == "object":
@@ -1991,6 +2020,8 @@ class RunProfileDialog(QDialog):
                     parent_path=inject_path,
                     values=values,
                     seen_components=seen_components,
+                    parent_item=parent_item,
+                    tooltip=f"注入路径: {inject_path}\n固定对象: {inject_target}",
                 )
 
     def _render_interface_binding(
@@ -2000,9 +2031,11 @@ class RunProfileDialog(QDialog):
         inject_path: str,
         interface_name: str,
         values: dict,
-    ) -> str:
+        parent_item: QTreeWidgetItem,
+    ) -> tuple[str, QTreeWidgetItem]:
         combo = QComboBox()
         combo.setObjectName(f"objectBinding_{inject_path.replace('.', '__')}")
+        combo.setMinimumWidth(220)
         implementations = tuple((getattr(descriptor, "implementations", {}) or {}).get(interface_name, ()) or ())
         components = getattr(descriptor, "components", {}) or {}
         for component_name in implementations:
@@ -2023,9 +2056,16 @@ class RunProfileDialog(QDialog):
         self._object_binding_widgets[inject_path] = combo
 
         label = self._interface_label(descriptor, interface_name) or interface_name
-        self.object_assembly_form.addRow(f"{inject_path} / {label}:", combo)
         current = combo.currentData()
-        return current if isinstance(current, str) else ""
+        component_name = current if isinstance(current, str) else ""
+        item = self.object_assembly_tree.add_node(
+            label,
+            parent=parent_item,
+            role="interface",
+            tooltip=f"注入路径: {inject_path}\n接口: {interface_name}",
+        )
+        self.object_assembly_tree.set_config_widget(item, combo)
+        return component_name, item
 
     def _render_component(
         self,
@@ -2035,17 +2075,44 @@ class RunProfileDialog(QDialog):
         parent_path: str,
         values: dict,
         seen_components: set[str],
+        parent_item: QTreeWidgetItem,
+        tooltip: str = "",
     ) -> None:
         components = getattr(descriptor, "components", {}) or {}
         component_entry = components.get(component_name) if isinstance(components, dict) else None
         if component_entry is None or component_name in seen_components:
             return
 
-        next_seen = {*seen_components, component_name}
-        if component_name not in self._rendered_object_components:
-            self._render_component_parameters(component_name, component_entry, values)
-            self._rendered_object_components.add(component_name)
+        component_item = self.object_assembly_tree.add_node(
+            self._entry_label(component_entry, component_name),
+            parent=parent_item,
+            role="component",
+            tooltip=tooltip,
+        )
+        self._render_component_body(
+            descriptor,
+            component_name,
+            parent_path=parent_path,
+            values=values,
+            seen_components=seen_components,
+            component_item=component_item,
+        )
 
+    def _render_component_body(
+        self,
+        descriptor: object,
+        component_name: str,
+        *,
+        parent_path: str,
+        values: dict,
+        seen_components: set[str],
+        component_item: QTreeWidgetItem,
+    ) -> None:
+        components = getattr(descriptor, "components", {}) or {}
+        component_entry = components.get(component_name) if isinstance(components, dict) else None
+        if component_entry is None or component_name in seen_components:
+            return
+        next_seen = {*seen_components, component_name}
         inject_specs = list(getattr(component_entry.meta, "inject", ()) or ())
         if inject_specs:
             self._render_inject_specs(
@@ -2054,15 +2121,22 @@ class RunProfileDialog(QDialog):
                 parent_path=parent_path,
                 values=values,
                 seen_components=next_seen,
+                parent_item=component_item,
             )
+        if component_name not in self._rendered_object_components:
+            self._render_component_parameters(component_name, component_entry, values, component_item)
+            self._rendered_object_components.add(component_name)
 
-    def _render_component_parameters(self, component_name: str, component_entry: object, values: dict) -> None:
+    def _render_component_parameters(
+        self,
+        component_name: str,
+        component_entry: object,
+        values: dict,
+        parent_item: QTreeWidgetItem,
+    ) -> None:
         parameters = list(getattr(component_entry.meta, "parameters", ()) or ())
         if not parameters:
             return
-        title = QLabel(f"{self._entry_label(component_entry, component_name)} 参数")
-        title.setStyleSheet("color: rgba(255, 255, 255, 0.65); font-weight: bold;")
-        self.object_assembly_form.addRow("", title)
 
         component_values = dict((values.get("object_params") or {}).get(component_name, {}) or {})
         self._object_param_widgets.setdefault(component_name, {})
@@ -2078,7 +2152,12 @@ class RunProfileDialog(QDialog):
             label = self._parameter_label(parameter)
             if self._parameter_required(parameter):
                 label = f"{label} *"
-            self.object_assembly_form.addRow(f"{label}:", widget)
+            parameter_item = self.object_assembly_tree.add_node(
+                f"参数: {label}",
+                parent=parent_item,
+                role="parameter",
+            )
+            self.object_assembly_tree.set_config_widget(parameter_item, widget)
 
     def _entry_label(self, entry: object | None, fallback: str) -> str:
         if entry is None:

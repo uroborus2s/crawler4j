@@ -205,7 +205,7 @@ def test_module_init_creates_core_native_v2_project(tmp_path: Path):
     assert (module_root / "workflows" / "main_workflow.py").exists()
     assert (module_root / "tasks" / "example_action.py").exists()
     assert (module_root / "data" / "accounts.py").exists()
-    assert (module_root / "data" / "get_account_by_id.py").exists()
+    assert (module_root / "data" / "account_overview.py").exists()
     assert (module_root / "candidates" / "ready_accounts.py").exists()
     assert not (module_root / "module_runtime.py").exists()
     assert not (module_root / "hooks").exists()
@@ -232,6 +232,8 @@ def test_module_init_creates_core_native_v2_project(tmp_path: Path):
     task_text = (module_root / "tasks" / "example_action.py").read_text(encoding="utf-8")
     assert "@page_action(" in task_text
     assert "TaskSpec" not in task_text
+    assert 'ctx.tools.call("browser.goto"' in task_text
+    assert "ctx.page.goto(" not in task_text
     workflow_text = (module_root / "workflows" / "main_workflow.py").read_text(encoding="utf-8")
     assert "@workflow(" in workflow_text
     assert "WorkflowSpec" not in workflow_text
@@ -240,8 +242,8 @@ def test_module_init_creates_core_native_v2_project(tmp_path: Path):
 
     assert _lock_declaration_keys(module_root) == {
         ("component", "api_labor"),
-        ("data_query", "get_account_by_id"),
         ("data_table", "accounts"),
+        ("data_view", "account_overview"),
         ("env_candidates", "ready_accounts"),
         ("interface", "labor"),
         ("page_action", "example_action"),
@@ -259,7 +261,7 @@ def test_generated_package_is_importable_without_runtime_shim(tmp_path: Path):
     workflow_module = _import_module_child(module_root, "workflows", "main_workflow")
     action_module = _import_module_child(module_root, "tasks", "example_action")
     data_table_module = _import_module_child(module_root, "data", "accounts")
-    data_query_module = _import_module_child(module_root, "data", "get_account_by_id")
+    data_view_module = _import_module_child(module_root, "data", "account_overview")
     candidates_module = _import_module_child(module_root, "candidates", "ready_accounts")
 
     assert hasattr(module, "run") is False
@@ -269,7 +271,7 @@ def test_generated_package_is_importable_without_runtime_shim(tmp_path: Path):
     assert getattr(workflow_module.MainWorkflow, CRAWLER4J_META_ATTR).kind == "workflow"
     assert getattr(action_module.example_action, CRAWLER4J_META_ATTR).kind == "page_action"
     assert getattr(data_table_module.Accounts, CRAWLER4J_META_ATTR).kind == "data_table"
-    assert getattr(data_query_module.get_account_by_id, CRAWLER4J_META_ATTR).kind == "data_query"
+    assert getattr(data_view_module.account_overview, CRAWLER4J_META_ATTR).kind == "data_view"
     assert getattr(candidates_module.ready_accounts, CRAWLER4J_META_ATTR).kind == "env_candidates"
 
 
@@ -411,6 +413,7 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
         == 0
     )
     assert commands.cmd_task_create(Namespace(name="open_home_page", force=False)) == 0
+    assert commands.cmd_ui_action_create(Namespace(name="create_account_from_ui", force=False)) == 0
     assert (
         commands.cmd_data_table_create(
             Namespace(name="orders", display_name=None, description=None, storage_mode="custom_table", force=False)
@@ -418,8 +421,8 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
         == 0
     )
     assert (
-        commands.cmd_data_query_create(
-            Namespace(name="get_order_by_id", source="orders", display_name=None, description=None, force=False)
+        commands.cmd_data_view_create(
+            Namespace(name="order_overview", source="orders", display_name=None, description=None, force=False)
         )
         == 0
     )
@@ -435,6 +438,7 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
     assert commands.cmd_component_list(Namespace()) == 0
     assert commands.cmd_workflow_list(Namespace()) == 0
     assert commands.cmd_task_list(Namespace()) == 0
+    assert commands.cmd_ui_action_list(Namespace()) == 0
     assert commands.cmd_data_list(Namespace()) == 0
     assert commands.cmd_candidate_list(Namespace()) == 0
     output = capsys.readouterr().out
@@ -442,21 +446,23 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
     assert "sqlite_account_store" in output
     assert "sync_accounts" in output
     assert "open_home_page" in output
+    assert "create_account_from_ui" in output
     assert "orders" in output
-    assert "get_order_by_id" in output
+    assert "order_overview" in output
     assert "gold_accounts" in output
 
     assert ("interface", "account_store") in _lock_declaration_keys(module_root)
     assert ("component", "sqlite_account_store") in _lock_declaration_keys(module_root)
     assert ("workflow", "sync_accounts") in _lock_declaration_keys(module_root)
     assert ("page_action", "open_home_page") in _lock_declaration_keys(module_root)
+    assert ("ui_action", "create_account_from_ui") in _lock_declaration_keys(module_root)
     assert ("data_table", "orders") in _lock_declaration_keys(module_root)
-    assert ("data_query", "get_order_by_id") in _lock_declaration_keys(module_root)
+    assert ("data_view", "order_overview") in _lock_declaration_keys(module_root)
     assert ("env_candidates", "gold_accounts") in _lock_declaration_keys(module_root)
     assert commands.collect_full_errors(module_root, _read_manifest(module_root), require_manifest_lock=True) == []
 
 
-def test_component_and_query_create_require_declared_targets(tmp_path: Path, monkeypatch, capsys):
+def test_component_and_view_create_require_declared_targets(tmp_path: Path, monkeypatch, capsys):
     module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
 
@@ -475,8 +481,8 @@ def test_component_and_query_create_require_declared_targets(tmp_path: Path, mon
     assert "未找到接口声明: ghost" in capsys.readouterr().out
 
     assert (
-        commands.cmd_data_query_create(
-            Namespace(name="missing_query", source="missing_table", display_name=None, description=None, force=False)
+        commands.cmd_data_view_create(
+            Namespace(name="missing_view", source="missing_table", display_name=None, description=None, force=False)
         )
         == 1
     )
@@ -536,20 +542,22 @@ def test_build_parser_registers_v2_commands():
     interface_args = parser.parse_args(["interface", "create", "labor"])
     component_args = parser.parse_args(["component", "create", "api_labor", "--implements", "labor"])
     action_args = parser.parse_args(["page-action", "create", "open_home_page"])
+    ui_action_args = parser.parse_args(["ui-action", "create", "create_account_from_ui"])
     candidate_args = parser.parse_args(["candidate", "create", "ready_accounts"])
     table_args = parser.parse_args(["data", "table", "create", "accounts"])
-    query_args = parser.parse_args(["data", "query", "create", "get_account_by_id", "--source", "accounts"])
+    view_args = parser.parse_args(["data", "view", "create", "account_overview", "--source", "accounts"])
     managed_table_args = parser.parse_args(["data", "table", "create", "snapshots", "--storage-mode", "managed_dataset"])
     lock_args = parser.parse_args(["manifest", "lock"])
 
     assert interface_args.func is commands.cmd_interface_create
     assert component_args.func is commands.cmd_component_create
     assert action_args.func is commands.cmd_task_create
+    assert ui_action_args.func is commands.cmd_ui_action_create
     assert candidate_args.func is commands.cmd_candidate_create
     assert table_args.func is commands.cmd_data_table_create
     assert managed_table_args.storage_mode == "managed_dataset"
-    assert query_args.func is commands.cmd_data_query_create
-    assert query_args.source == "accounts"
+    assert view_args.func is commands.cmd_data_view_create
+    assert view_args.source == "accounts"
     assert lock_args.func is commands.cmd_manifest_lock
 
 
@@ -559,7 +567,7 @@ def test_build_parser_rejects_removed_v1_commands():
     removed_commands = [
         ["task", "create", "open_home_page"],
         ["data", "resource", "create", "accounts"],
-        ["data", "view", "create", "account_stats", "--source", "accounts"],
+        ["data", "query", "create", "account_stats", "--source", "accounts"],
         ["data", "seed", "create", "accounts_seed", "--resource", "accounts"],
         ["env-selector", "create", "random_ready"],
         ["hook", "create", "before_run"],
@@ -586,7 +594,7 @@ def test_archive_members_keep_v2_files_and_manifest_lock_without_runtime_shim(tm
     assert "demo_model/tasks/example_action.py" in archived_paths
     assert "demo_model/workflows/main_workflow.py" in archived_paths
     assert "demo_model/data/accounts.py" in archived_paths
-    assert "demo_model/data/get_account_by_id.py" in archived_paths
+    assert "demo_model/data/account_overview.py" in archived_paths
     assert "demo_model/candidates/ready_accounts.py" in archived_paths
     assert "demo_model/module_runtime.py" not in archived_paths
     assert "demo_model/hooks/__init__.py" not in archived_paths

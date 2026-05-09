@@ -86,7 +86,8 @@ def test_task_context_db_fluent_api_builds_select_query_plan():
     rows = (
         ctx.db.from_("billing_entries")
         .join("account_profiles", on={"account_id": "account_id"}, how="left")
-        .where("status", "eq", "done")
+        .where(["status", "=", "done"])
+        .where(["or", ["account_id", "=", "A001"], ["account_id", "=", "A002"]])
         .group_by("account_id")
         .sum("amount", alias="total_amount")
         .count(alias="total_count")
@@ -112,13 +113,36 @@ def test_task_context_db_fluent_api_builds_select_query_plan():
                 {"kind": "aggregate", "func": "sum", "field": "amount", "alias": "total_amount"},
                 {"kind": "aggregate", "func": "count", "field": "*", "alias": "total_count"},
             ],
-            "where": [{"field": "status", "op": "eq", "value": "done"}],
+            "where": [
+                {"field": "status", "op": "eq", "value": "done"},
+                {
+                    "kind": "group",
+                    "operator": "or",
+                    "conditions": [
+                        {"field": "account_id", "op": "eq", "value": "A001"},
+                        {"field": "account_id", "op": "eq", "value": "A002"},
+                    ],
+                },
+            ],
             "group_by": ["account_id"],
             "order_by": [{"field": "total_amount", "direction": "desc"}],
             "limit": 20,
             "offset": 0,
         }
     ]
+
+
+def test_task_context_db_describe_returns_host_descriptor():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    descriptor = ctx.db.describe("billing_entries")
+
+    assert descriptor["source"] == "billing_entries"
+    assert descriptor["source_kind"] == "relation"
+    assert descriptor["columns"][0] == {"name": "account_id", "type": "text"}
+    assert executor.described == ["billing_entries"]
+    assert executor.plans == []
 
 
 @pytest.mark.parametrize(
@@ -141,18 +165,49 @@ def test_task_context_db_aggregate_uses_default_alias(method_name, expected_alia
     ]
 
 
-def test_task_context_db_supports_named_query_and_replace_plan():
+def test_task_context_db_select_accepts_field_array_and_nested_where_plan():
     executor = _FakeDbExecutor()
     ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
 
-    ctx.db.named("top_accounts").bind(start_date="2026-04-01").execute()
+    ctx.db.from_("billing_entries").select(["account_id", "status"]).where(
+        ["and", ["amount", ">", 10], ["or", ["status", "=", "ready"], ["status", "=", "pending"]]]
+    ).execute()
+
+    assert executor.plans[0]["select"] == [
+        {"kind": "column", "field": "account_id"},
+        {"kind": "column", "field": "status"},
+    ]
+    assert executor.plans[0]["where"] == [
+        {"field": "amount", "op": "gt", "value": 10},
+        {
+            "kind": "group",
+            "operator": "or",
+            "conditions": [
+                {"field": "status", "op": "eq", "value": "ready"},
+                {"field": "status", "op": "eq", "value": "pending"},
+            ],
+        },
+    ]
+
+
+def test_task_context_db_supports_view_select_and_replace_plan():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.from_("account_overview").select(["account_id"]).where(["status", "=", "ready"]).execute()
     ctx.db.into("accounts").replace([{"account_id": "A001", "status": "ready"}])
 
     assert executor.plans == [
         {
-            "kind": "named_query",
-            "query_id": "top_accounts",
-            "params": {"start_date": "2026-04-01"},
+            "kind": "select",
+            "base": {"source": "account_overview"},
+            "joins": [],
+            "select": [{"kind": "column", "field": "account_id"}],
+            "where": [{"field": "status", "op": "eq", "value": "ready"}],
+            "group_by": [],
+            "order_by": [],
+            "limit": None,
+            "offset": 0,
         },
         {
             "kind": "replace_records",
@@ -166,11 +221,17 @@ def test_task_context_db_supports_concurrency_safe_write_plans():
     executor = _FakeDbExecutor()
     ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
 
+    ctx.db.into("accounts").add([{"status": "new"}])
     ctx.db.into("accounts").upsert([{"account_id": "A001", "status": "ready"}])
-    ctx.db.into("accounts").update_where({"status": "used"}, where={"account_id": "A001"})
-    ctx.db.into("accounts").delete_where("status", "eq", "expired")
+    ctx.db.into("accounts").update_where({"status": "used"}, where=["account_id", "=", "A001"])
+    ctx.db.into("accounts").delete_where(where=["status", "=", "expired"])
 
     assert executor.plans == [
+        {
+            "kind": "add_records",
+            "resource": "accounts",
+            "records": [{"status": "new"}],
+        },
         {
             "kind": "upsert_records",
             "resource": "accounts",
@@ -194,7 +255,13 @@ def test_task_context_db_supports_batch_write_plan():
     executor = _FakeDbExecutor()
     ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
 
-    ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).audit(
+    ctx.db.batch().add("accounts", [{"status": "new"}]).upsert(
+        "accounts",
+        [{"account_id": "A001", "status": "ready"}],
+    ).delete_where(
+        "accounts",
+        where=["status", "=", "expired"],
+    ).audit(
         "account_events",
         {"entity_key": "A001", "event_type": "status_changed"},
     ).execute()
@@ -204,9 +271,19 @@ def test_task_context_db_supports_batch_write_plan():
             "kind": "batch",
             "operations": [
                 {
+                    "kind": "add_records",
+                    "resource": "accounts",
+                    "records": [{"status": "new"}],
+                },
+                {
                     "kind": "upsert_records",
                     "resource": "accounts",
                     "records": [{"account_id": "A001", "status": "ready"}],
+                },
+                {
+                    "kind": "delete_records",
+                    "resource": "accounts",
+                    "where": [{"field": "status", "op": "eq", "value": "expired"}],
                 },
                 {
                     "kind": "append_audit_event",

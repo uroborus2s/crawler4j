@@ -220,6 +220,11 @@ class TaskContext:
     _subtask_executor: Callable[..., Any] | None = field(default=None, repr=False)
     _page_action_executor: Callable[..., Any] | None = field(default=None, repr=False)
 
+    def __post_init__(self) -> None:
+        binder = getattr(self.tools, "bind_task_context", None)
+        if callable(binder):
+            binder(self)
+
     async def wait(self, seconds: float) -> None:
         remaining = max(float(seconds), 0.0)
         while remaining > 0:

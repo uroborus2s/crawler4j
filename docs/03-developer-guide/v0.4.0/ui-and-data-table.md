@@ -1,12 +1,13 @@
 # UI 与数据表
 
-> 版本绑定：本文只适用于 0.4.x SDK / Contracts 与 Core 0.4.0。0.4.x 页面动作和数据读取按 `@page_action`、`@data_table`、`@data_query` 工作，不兼容 0.3.x 数据命令或任务按钮模式。
+> 版本绑定：本文只适用于 0.4.x SDK / Contracts 与 Core 0.4.0。0.4.x Hosted UI、页面动作和数据读取按 `@page`、`@ui_action`、`@page_action`、`@data_table`、`@data_view` 工作，不兼容 0.3.x 数据命令或任务按钮模式。
 
 0.4.0 的 UI 仍由宿主渲染，页面源码仍放在 `pages/`。变化在数据和动作来源：
 
 - 页面 schema 来自 `@page` 装饰器
-- 页面动作优先调用 `@page_action`
-- 数据表读取 `@data_table` / `@data_query` 注册后的 `ctx.db`
+- 用户按钮和 CRUD 优先调用 `@ui_action`
+- workflow 浏览器自动化动作调用 `@page_action`
+- 数据表和视图读取 `@data_table` / `@data_view` 注册后的 `ctx.db`
 - 左侧菜单由 `@page(menu=True)` 决定，`module.yaml` 不再声明 UI
 
 ## 页面入口
@@ -45,35 +46,37 @@ def load_dashboard_page(
 
 `@page` 装饰的函数就是页面 `load_handler`。如需显式写 `schema["load_handler"]`，它必须与被装饰函数名一致。
 
-## 页面动作
+## UI 操作
 
-按钮目标上可以触发宿主动作，也可以触发 page action。0.4.0 模块里的业务按钮优先绑定 `page_action`，不要回退到 0.3.x 任务按钮模式。
+按钮目标上可以触发宿主动作，也可以触发 UI action。Hosted UI 用户操作优先绑定 `ui_action`，不要把按钮、CRUD 或表单提交继续塞进 `@page_action`。
 
 ```python
 {
     "type": "Button",
-    "label": "打开登录页",
+    "label": "创建账号",
     "action": {
-        "type": "page_action",
-        "name": "open_login_page",
-        "params": {"url": "https://example.com"},
+        "type": "ui_action",
+        "name": "create_account_from_ui",
+        "params": {"account_id": {"binding": "selected.id"}},
     },
 }
 ```
 
-page action 示例：
+UI action 示例：
 
 ```python
-from crawler4j_contracts import page_action
+from crawler4j_contracts import TaskContext, ui_action
 
 
-@page_action(name="open_login_page")
-async def open_login_page(ctx, url: str):
-    await ctx.page.goto(url)
-    return {"opened": True}
+@ui_action(name="create_account_from_ui")
+def create_account_from_ui(ctx: TaskContext, payload: dict):
+    ctx.db.into("accounts").upsert([payload])
+    return {"ok": True}
 ```
 
-复杂编排不要放在 button handler 或 page action 里。放到 workflow 注入的 orchestrator component。
+`@ui_action` 不依赖浏览器页面，不调用 `ctx.run_page_action(...)`。它适合 Hosted UI 按钮、CRUD handler、刷新、导出和表单提交。需要操作真实浏览器页面时，把动作写成 `@page_action`，并由 workflow/component 通过 `ctx.run_page_action(...)` 调用。
+
+`@page_action` 内部不要再调用另一个 `@page_action` 拆公共步骤。公共页面动作应抽成普通函数、browser adapter 或 use case；多个可观测页面动作的顺序由 workflow/component 编排。
 
 ## DataTable 数据源
 
@@ -154,7 +157,7 @@ def query_accounts_table(
 
 ## CRUD
 
-如果表格需要增删改，schema 只声明交互，真正写入仍走 handler 和 `ctx.db`：
+如果表格需要增删改，schema 只声明交互，真正写入仍走 `@ui_action` handler 和 `ctx.db`：
 
 ```python
 {
@@ -198,4 +201,4 @@ def create_account(context: TaskContext, payload: dict) -> dict:
 - 运行时代码声明表或视图
 - `ctx.tools.call("db.*")`
 
-0.4.0 新页面只通过页面 schema、handler、page action 和 `ctx.db` 工作。
+0.4.0 新页面只通过页面 schema、handler、ui action、page action 和 `ctx.db` 工作。

@@ -159,7 +159,7 @@ class EnvCandidates:
     def _order_ids(self, ctx: Any, env_ids: list[int]) -> list[int]:
         if not env_ids:
             return []
-        query = ctx.db.from_(self.source).select(self.env_field).where_in(self.env_field, env_ids)
+        query = ctx.db.from_(self.source).select(self.env_field).where([self.env_field, "in", env_ids])
         for item in self.order_by_items:
             query = query.order_by(item["field"], item["direction"])
         return _ids_from_rows(query.execute(), self.env_field)
@@ -190,27 +190,15 @@ def _split_condition_name(raw_name: str) -> tuple[str, str]:
 def _apply_condition(query: Any, item: dict[str, Any]) -> Any:
     field_name = item["field"]
     op = item["op"]
-    if op == "eq":
-        return query.where_eq(field_name, item.get("value"))
-    if op == "in":
-        return query.where_in(field_name, list(item.get("value") or []))
-    if op == "gt":
-        return query.where_gt(field_name, item.get("value"))
-    if op == "gte":
-        return query.where_gte(field_name, item.get("value"))
-    if op == "lt":
-        return query.where_lt(field_name, item.get("value"))
-    if op == "lte":
-        return query.where_lte(field_name, item.get("value"))
     if op == "between":
         value = list(item.get("value") or [])
         if len(value) != 2:
             raise ValueError(f"{field_name}__between requires two values")
-        return query.where_between(field_name, value[0], value[1])
-    if op == "like":
-        return query.where_like(field_name, str(item.get("value") or ""))
+        return query.where([field_name, op, value])
     if op == "is_null":
-        return query.where_is_null(field_name)
+        return query.where([field_name, op])
+    if op in _FILTER_OPS:
+        return query.where([field_name, op, item.get("value")])
     raise ValueError(f"unsupported env candidate filter op: {op}")
 
 

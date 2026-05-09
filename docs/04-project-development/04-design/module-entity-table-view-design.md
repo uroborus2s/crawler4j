@@ -9,7 +9,7 @@
 **关联 ID：** `API-005`, `API-008`, `API-009`, `CR-014`, `TASK-028`  
 **最后更新：** 2026-04-23
 
-> 注：本设计文档的“运行时声明视图”方案已被后续破坏性升级收口为 0.4.0 装饰器驱动实现。当前正式事实源以 `api-design.md` 和 `module-config-runtime-data-contract.md` 为准：表和命名查询统一由 `@data_table` / `@data_query` 声明并进入 manifest lock，运行时只保留 `ctx.db` fluent API，不再接受旧数据库工具或 `module.yaml.data` 事实源。
+> 注：本设计文档的“运行时声明视图”方案已被后续破坏性升级收口为 0.4.0 装饰器驱动实现。当前正式事实源以 `api-design.md` 和 `module-config-runtime-data-contract.md` 为准：表和只读视图统一由 `@data_table` / `@data_view` 声明并进入 manifest lock，运行时只保留 `ctx.db` fluent API，不再接受旧数据库工具或 `module.yaml.data` 事实源。
 
 ## 1. 背景
 
@@ -164,7 +164,7 @@ ON module_db_views(module_name);
 | `physical_view_name` | 宿主生成的真实数据库对象名，推荐 `module_name_view_<view_id>` |
 | `source_resource_ids_json` | 当前视图允许引用的实体表资源 ID 列表 |
 | `select_sql_template` | 模块登记的 `SELECT` SQL 模板，使用 `{{resource:<resource_id>}}` 占位 |
-| `columns_json` | 视图查询返回列定义与查询能力元数据 |
+| `columns_json` | 视图查询返回列定义 |
 | `schema_version` | 视图定义版本 |
 | `cleanup_policy` | 模块卸载时对视图对象的处理策略；V1 只允许 `drop_view` / `keep` |
 
@@ -177,30 +177,22 @@ ON module_db_views(module_name);
   {
     "name": "execution_date",
     "type": "text",
-    "nullable": false,
-    "filterable": true,
-    "sortable": true
+    "nullable": false
   },
   {
     "name": "labor_account",
     "type": "text",
-    "nullable": false,
-    "filterable": true,
-    "sortable": true
+    "nullable": false
   },
   {
     "name": "bill_batch",
     "type": "text",
-    "nullable": false,
-    "filterable": true,
-    "sortable": true
+    "nullable": false
   },
   {
     "name": "total_count",
     "type": "int",
-    "nullable": false,
-    "filterable": false,
-    "sortable": true
+    "nullable": false
   }
 ]
 ```
@@ -209,7 +201,7 @@ ON module_db_views(module_name);
 
 - `name` 必须 `snake_case`
 - `type` 与实体表列类型体系保持一致：`text/int/number/bool/json`
-- `filterable` / `sortable` 只表达宿主允许开放给查询层的能力，不等于 SQL 本身天然支持
+- `filterable` / `sortable` 已退出数据库视图列契约；能否筛选、排序由统一查询执行器按字段存在性和数据源类型校验
 
 ## 5. SQL 模板契约
 
@@ -292,11 +284,11 @@ FROM {{resource:labor_billing_entries}}
 GROUP BY execution_date, labor_account, bill_batch
 """,
     columns=[
-        {"name": "execution_date", "type": "text", "filterable": True, "sortable": True},
-        {"name": "labor_account", "type": "text", "filterable": True, "sortable": True},
-        {"name": "bill_batch", "type": "text", "filterable": True, "sortable": True},
-        {"name": "total_count", "type": "int", "filterable": False, "sortable": True},
-        {"name": "total_amount", "type": "number", "filterable": False, "sortable": True},
+        {"name": "execution_date", "type": "text"},
+        {"name": "labor_account", "type": "text"},
+        {"name": "bill_batch", "type": "text"},
+        {"name": "total_count", "type": "int"},
+        {"name": "total_amount", "type": "number"},
     ],
     cleanup_policy="drop_view",
 )
@@ -348,8 +340,8 @@ ctx.tools.call(
 V1 约束：
 
 - 过滤只支持等值匹配
-- 只能过滤 `columns_json.filterable = true` 的字段
-- 只能排序 `columns_json.sortable = true` 的字段
+- 只能过滤 `columns_json` 中存在的字段
+- 只能排序 `columns_json` 中存在的字段
 - `direction` 只支持 `asc/desc`
 
 ### 6.3 后续可扩展项
@@ -381,8 +373,7 @@ V1 规则：
 
 - 首次加载和翻页时，宿主调用页面内联 `DataTable` 的 `query_handler`
 - `query_handler` 再调用 `ctx.db.from_(...)`
-- 顶部过滤条只下推 `columns_json.filterable = true` 的字段
-- 排序只下推 `columns_json.sortable = true` 的字段
+- 顶部过滤条和排序只下推 `columns_json` 中存在的字段
 - 页面参数或导航参数需要参与筛选时，也由 `query_handler` 统一合并到 `ctx.db` 查询条件
 - 数据表行为固定只读
 

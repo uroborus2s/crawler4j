@@ -53,9 +53,9 @@ hotel_demo/
 | `interfaces/` | `@interface` | 能力接口目录。这里声明“模块需要什么能力类型”，例如账号服务、酒店检索服务或订单提交能力。接口只表达协议和类型边界，不放具体业务流程、浏览器动作或数据库写入。 |
 | `objects/` | `@component` | 组件对象目录。这里放接口实现、业务客户端、编排器、适配器等可被对象图装配的对象。组件可以声明 `implements`、`inject` 和 `object_param(...)`，也可以按需实现 `setup(ctx, workflow)` / `cleanup(ctx, outcome)`。Core 会为每个 task/env 创建独立对象图。 |
 | `workflows/` | `@workflow` | 工作流目录。这里放一次任务运行的主编排类，构造函数只接收注入对象，不接收普通运行参数；业务流程通过 `run(ctx)` 执行并返回 `TaskResult`。一个模块可以有多个 workflow，运行模板选择其中一个。 |
-| `tasks/` | `@page_action` | 页面操作目录。v2 里的 `tasks/` 只承载 Hosted UI 或工作流可复用的页面动作纯函数，例如打开页面、点击按钮、读取 DOM 或触发一次业务动作。它不再表示 v1 `TaskSpec` 任务，也不再承载 `TASK/execute` 主路径。 |
-| `data/` | `@data_table`、`@data_query` | 数据契约目录。这里声明模块实体表、托管快照表和命名查询。`@data_table` 默认是 `custom_table`，旧快照语义必须显式写 `storage_mode="managed_dataset"`；运行时代码通过 `ctx.db` 读写，不能把数据契约再写回 `module.yaml.data`、`data/sql` 或 `data/seeds`。 |
-| `pages/` | `@page` | Hosted UI 页面目录。这里声明仪表盘、列表页、详情页等宿主页 schema、菜单状态和 handler。可平铺为 `pages/*.py`，也可用一层业务分组 `pages/<group>/*.py`；是否出现在左侧菜单只由 `@page(menu=True)` 决定。 |
+| `tasks/` | `@page_action` | 页面操作目录。v2 里的 `tasks/` 只承载 workflow/component 通过 `ctx.run_page_action(...)` 调用的浏览器页面动作，例如打开页面、点击按钮、读取 DOM 或抓包。它不再表示 v1 `TaskSpec` 任务，也不再承载 Hosted UI 按钮/CRUD 用户操作。 |
+| `data/` | `@data_table`、`@data_view` | 数据契约目录。这里声明模块实体表、托管快照表和只读视图。`@data_table` 默认是 `custom_table`，旧快照语义必须显式写 `storage_mode="managed_dataset"`；`@data_view` 只允许引用 `custom_table` 并由宿主创建只读 SQLite view；运行时代码通过 `ctx.db` 读写表或读取视图，不能把数据契约再写回 `module.yaml.data`、`data/sql` 或 `data/seeds`。 |
+| `pages/` | `@page`、`@ui_action` | Hosted UI 页面目录。这里声明仪表盘、列表页、详情页等宿主页 schema、菜单状态、load/query handler 和 UI 用户操作。可平铺为 `pages/*.py`，也可用一层业务分组 `pages/<group>/*.py`；是否出现在左侧菜单只由 `@page(menu=True)` 决定。 |
 | `candidates/` | `@env_candidates` | 环境候选目录。这里放同步纯函数，返回可用于运行的 env id 列表或 `EnvCandidates` 链式查询。Core 每次调度实时求值，模块不维护资源池同步快照，也不直接处置环境生命周期。 |
 | `cleanups/` | `@env_cleanup_candidates` | 环境清理候选目录。这里放同步纯函数，只表达“模块认为已绑定且业务上可丢弃”的环境候选。真正删除由宿主环境管理页预览、确认和二次安全校验后执行，模块函数不直接删除环境。 |
 
@@ -104,7 +104,7 @@ lock 内容来自装饰器扫描，通常包含：
 - page actions
 - pages
 - data tables
-- data queries
+- data views
 - env candidates
 - env cleanup candidates
 - 注入关系
@@ -134,9 +134,10 @@ lock 内容来自装饰器扫描，通常包含：
   ],
   "workflows": [{"name": "hotel_sync", "source": "workflows/hotel_sync.py"}],
   "page_actions": [{"name": "open_home_page", "source": "tasks/open_home_page.py"}],
+  "ui_actions": [{"name": "create_account_from_ui", "source": "pages/create_account_from_ui.py"}],
   "pages": [{"name": "dashboard", "source": "pages/dashboard.py", "menu": true}],
   "data_tables": [{"name": "hotels", "source": "data/hotels.py"}],
-  "data_queries": [{"name": "ready_hotels", "source": "data/hotels.py"}],
+  "data_views": [{"name": "hotel_overview", "source": "data/hotels.py"}],
   "env_candidates": [{"name": "ready_accounts", "source": "candidates/ready_accounts.py"}],
   "env_cleanup_candidates": [{"name": "unused_accounts", "source": "cleanups/unused_accounts.py"}],
   "diagnostics": []

@@ -120,6 +120,9 @@ class ModuleUIRuntimeBridge:
         )
         context.tools = capabilities.tools
         context.db = capabilities.db
+        binder = getattr(context.tools, "bind_task_context", None)
+        if callable(binder):
+            binder(context)
 
     @contextmanager
     def _override_runtime(self, context: TaskContext, runtime_extra: dict[str, Any] | None = None):
@@ -241,6 +244,99 @@ class ModuleUIRuntimeBridge:
         finally:
             if self._active_session is session:
                 self._active_session = None
+
+    def call_ui_action_sync(
+        self,
+        action_name: str,
+        *args: Any,
+        runtime_extra: dict[str, Any] | None = None,
+        capability_surface: str | None = None,
+    ) -> Any:
+        if capability_surface is None:
+            capability_surface = RUNTIME_SURFACE_HOSTED_UI_ACTION
+        session = self._active_session
+        if session is None:
+            session = self._create_session(
+                force_reload=self._is_dev_link(),
+                capability_surface=capability_surface,
+                declared_page_schemas=self._declared_page_schemas or None,
+            )
+        else:
+            self._set_context_tools(
+                session.context,
+                capability_surface=capability_surface,
+                declared_page_schemas=self._declared_page_schemas or None,
+            )
+        try:
+            descriptor = self._mms.get_runtime_descriptor_v2(self._module_name, session.context)
+            ui_action = descriptor.ui_actions.get(str(action_name or "").strip())
+            with self._override_runtime(session.context, runtime_extra):
+                return self._run_sync_callable(
+                    ui_action.target if ui_action else None,
+                    owner=f"{self._module_name}.ui_action.{action_name}",
+                    context=session.context,
+                    args=args,
+                )
+        finally:
+            if self._active_session is session:
+                self._active_session = None
+
+    async def call_ui_action_async(
+        self,
+        action_name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        runtime_extra: dict[str, Any] | None = None,
+        capability_surface: str = RUNTIME_SURFACE_HOSTED_UI_ACTION,
+    ) -> Any:
+        normalized_action = str(action_name or "").strip()
+        if not normalized_action:
+            raise RuntimeError("ui_action 名称不能为空")
+        normalized_params = dict(params or {}) if isinstance(params, dict) else {}
+        session = self._active_session
+        if session is None:
+            session = self._create_session(
+                force_reload=self._is_dev_link(),
+                capability_surface=capability_surface,
+                declared_page_schemas=self._declared_page_schemas or None,
+            )
+        else:
+            self._set_context_tools(
+                session.context,
+                capability_surface=capability_surface,
+                declared_page_schemas=self._declared_page_schemas or None,
+            )
+        try:
+            descriptor = self._mms.get_runtime_descriptor_v2(self._module_name, session.context)
+            ui_action = descriptor.ui_actions.get(normalized_action)
+            if ui_action is None:
+                raise RuntimeError(f"ui_action 不存在: {normalized_action}")
+            with self._override_runtime(session.context, runtime_extra):
+                return await invoke_runtime_callable(ui_action.target, session.context, **normalized_params)
+        finally:
+            if self._active_session is session:
+                self._active_session = None
+
+    def call_ui_action(
+        self,
+        action_name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        runtime_extra: dict[str, Any] | None = None,
+        capability_surface: str = RUNTIME_SURFACE_HOSTED_UI_ACTION,
+    ) -> Any:
+        coroutine = self.call_ui_action_async(
+            action_name,
+            params,
+            runtime_extra=runtime_extra,
+            capability_surface=capability_surface,
+        )
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coroutine)
+        coroutine.close()
+        raise RuntimeError("ui_action 是 async，当前同步宿主页调用缺少可等待的执行入口")
 
     def call_page_action(
         self,

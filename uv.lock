@@ -370,14 +370,12 @@ requires-dist = [
 name = "crawler4j-workspace"
 version = "0.0.0"
 source = { editable = "." }
-dependencies = [
-    { name = "crawler4j" },
-    { name = "crawler4j-contracts" },
-    { name = "crawler4j-sdk" },
-]
 
 [package.dev-dependencies]
 dev = [
+    { name = "crawler4j" },
+    { name = "crawler4j-contracts" },
+    { name = "crawler4j-sdk" },
     { name = "pyinstaller" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -386,14 +384,12 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "crawler4j", editable = "packages/crawler4j" },
-    { name = "crawler4j-contracts", editable = "packages/crawler4j-contracts" },
-    { name = "crawler4j-sdk", editable = "packages/crawler4j-sdk" },
-]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "crawler4j", editable = "packages/crawler4j" },
+    { name = "crawler4j-contracts", editable = "packages/crawler4j-contracts" },
+    { name = "crawler4j-sdk", editable = "packages/crawler4j-sdk" },
     { name = "pyinstaller", specifier = ">=6.17.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },

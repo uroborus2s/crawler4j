@@ -27,7 +27,7 @@ from crawler4j_contracts.database import DatabaseClient
 from crawler4j_contracts.hosted_ui import (
     normalize_page_schema as sdk_normalize_page_schema,
 )
-from src.core.mms.data_contract import load_sql_file, validate_resource_sql
+from src.core.atm.browser_tools import CoreBrowserTools
 from src.core.persistence import get_module_data_store
 from src.utils.paths import get_resource_path
 
@@ -53,6 +53,22 @@ RUNTIME_SURFACE_HOSTED_UI_ACTION = "hosted_ui_action"
 RUNTIME_SURFACE_ENV_CANDIDATES = "env_candidates"
 RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES = "env_cleanup_candidates"
 
+BROWSER_TOOL_NAMES = frozenset(
+    {
+        "browser.pause",
+        "browser.goto",
+        "browser.move",
+        "browser.click",
+        "browser.hover",
+        "browser.type",
+        "browser.press",
+        "browser.drag",
+        "browser.scroll",
+        "browser.page_down",
+        "browser.page_up",
+    }
+)
+
 _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
     RUNTIME_SURFACE_FULL: frozenset(
         {
@@ -61,6 +77,7 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
             "captcha.match_slider",
             "captcha.match_click_targets",
         }
+        | BROWSER_TOOL_NAMES
     ),
     RUNTIME_SURFACE_HOSTED_UI_DECLARE: frozenset(
         {
@@ -185,7 +202,7 @@ class CoreDatabaseTools:
         module = get_module_registry().get_module(self._module_name)
         manifest = getattr(module, "manifest", None) if module is not None else None
         data = getattr(manifest, "data", None)
-        return data if isinstance(data, dict) else {"resources": [], "views": [], "queries": [], "seeds": []}
+        return data if isinstance(data, dict) else {"resources": [], "views": [], "seeds": []}
 
     def _manifest_resource(self, resource_id: str) -> dict[str, Any] | None:
         for resource in self._manifest_data().get("resources", []):
@@ -198,73 +215,20 @@ class CoreDatabaseTools:
         joins = resource.get("joins", []) if isinstance(resource, dict) else []
         return [dict(item) for item in joins if isinstance(item, dict)]
 
-    @staticmethod
-    def _columns_from_resource(resource: dict[str, Any]) -> list[dict[str, Any]]:
-        schema = resource.get("schema") if isinstance(resource.get("schema"), dict) else {}
-        raw_columns = schema.get("columns", []) if isinstance(schema, dict) else []
-        columns: list[dict[str, Any]] = []
-        for raw in raw_columns if isinstance(raw_columns, list) else []:
-            if not isinstance(raw, dict):
-                continue
-            name = str(raw.get("name") or raw.get("key") or "").strip()
-            if not name:
-                continue
-            columns.append(
-                {
-                    "name": name,
-                    "type": str(raw.get("type") or "text").strip().lower(),
-                    "nullable": bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required")),
-                }
-            )
-        return columns
-
     def describe_source(self, source: str) -> dict[str, Any]:
         self._ensure_enabled()
         source_id = _validate_managed_identifier(str(source or "").strip(), field_name="source")
-        resources = {item["resource_id"]: item for item in self._data_store.list_data_resources(self._module_name)}
-        resource = resources.get(source_id)
-        if resource is not None:
-            source_kind = "relation" if resource["storage_mode"] == "custom_table" else "snapshot"
-            columns = self._columns_from_resource(resource)
-            if not columns:
-                raise ValueError(f"数据源缺少 schema.columns，不能进入 ctx.db 查询面: {source_id}")
-            if source_kind == "snapshot":
-                column_names = {column["name"] for column in columns}
-                for system_column, column_type in (
-                    ("run_status", "text"),
-                    ("record_status", "text"),
-                    ("created_at", "int"),
-                    ("updated_at", "int"),
-                ):
-                    if system_column not in column_names:
-                        columns.append({"name": system_column, "type": column_type, "nullable": True})
-            return {
-                "source": source_id,
-                "source_kind": source_kind,
-                "storage_mode": resource["storage_mode"],
-                "record_key_field": resource.get("record_key_field") or "id",
-                "columns": columns,
-                "joins": self._joins_for_resource(source_id) if source_kind == "relation" else [],
-            }
-
-        views = {item["view_id"]: item for item in self._data_store.list_db_views(self._module_name)}
-        view = views.get(source_id)
-        if view is not None:
-            return {
-                "source": source_id,
-                "source_kind": "read_model",
-                "columns": [dict(column) for column in view["columns"]],
-                "joins": [],
-            }
-        raise ValueError(f"未注册的数据源: {source_id}")
+        return self._data_store.describe_data_source(
+            self._module_name,
+            source_id,
+            joins=self._joins_for_resource(source_id),
+        )
 
     def execute_plan(self, plan: dict[str, Any]) -> Any:
         self._ensure_enabled()
         if not isinstance(plan, dict):
             raise ValueError("query plan must be an object")
         kind = str(plan.get("kind") or "select").strip()
-        if kind == "named_query":
-            return self._run_named_query(str(plan.get("query_id") or ""), params=dict(plan.get("params") or {}))
         if kind == "append_audit_event":
             if self._read_only:
                 raise RuntimeError("ctx.db 当前运行面不允许写入")
@@ -298,6 +262,13 @@ class CoreDatabaseTools:
             if self._read_only:
                 raise RuntimeError("ctx.db 当前运行面不允许写入")
             return self._replace_resource_records(
+                resource=str(plan.get("resource") or ""),
+                records=_normalize_records(plan.get("records")),
+            )
+        if kind == "add_records":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._add_resource_records(
                 resource=str(plan.get("resource") or ""),
                 records=_normalize_records(plan.get("records")),
             )
@@ -342,6 +313,15 @@ class CoreDatabaseTools:
     ) -> bool:
         resource_name = self._normalize_resource_name(resource)
         return self._data_store.replace_resource_records(self._module_name, resource_name, _normalize_records(records))
+
+    def _add_resource_records(
+        self,
+        *,
+        resource: str,
+        records: list[dict[str, Any]],
+    ) -> list[Any]:
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.add_resource_records(self._module_name, resource_name, _normalize_records(records))
 
     def _upsert_resource_records(
         self,
@@ -400,49 +380,6 @@ class CoreDatabaseTools:
             limit=int(limit),
             offset=int(offset),
             order=order,
-        )
-
-    def _run_named_query(self, query_id: str, *, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        from src.core.mms.registry import get_module_registry
-
-        normalized_query_id = _validate_managed_identifier(str(query_id or "").strip(), field_name="query_id")
-        module = get_module_registry().get_module(self._module_name)
-        if module is None or module.path is None:
-            raise RuntimeError(f"未找到模块数据契约: {self._module_name}")
-
-        query_spec = next(
-            (item for item in module.manifest.data["queries"] if item["query_id"] == normalized_query_id),
-            None,
-        )
-        if query_spec is None:
-            raise ValueError(f"未注册的 query_id: {normalized_query_id}")
-
-        sql = str(query_spec.get("sql") or "").strip()
-        if not sql:
-            sql = load_sql_file(module.path, query_spec["sql_file"], expected_prefix="data/sql/queries/")
-        validate_resource_sql(
-            sql,
-            source_resource_ids=query_spec["source_resource_ids"],
-            owner_label=f"data.queries[{normalized_query_id}]",
-        )
-        normalized_params = dict(params or {})
-        declared_params = {item["name"]: item for item in query_spec["params"]}
-        missing = sorted(
-            name
-            for name, spec in declared_params.items()
-            if spec["required"] and name not in normalized_params
-        )
-        if missing:
-            raise ValueError(f"query 参数缺失: {', '.join(missing)}")
-        extra = sorted(set(normalized_params) - set(declared_params))
-        if extra:
-            raise ValueError(f"query 参数未注册: {', '.join(extra)}")
-        return self._data_store.run_registered_query(
-            self._module_name,
-            source_resource_ids=query_spec["source_resource_ids"],
-            sql_template=sql,
-            columns=query_spec["columns"],
-            params=normalized_params,
         )
 
 
@@ -707,6 +644,8 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         self._bindings: dict[str, _ToolBinding] = {}
         self._allowed_tool_names = allowed_tool_names
         self._ui_declaration_buffer = ui_declaration_buffer
+        self._task_context: Any | None = None
+        self._browser_tools = CoreBrowserTools()
 
         ip_pool_tools = CoreIPPoolTools()
         env_tools = CoreEnvTools()
@@ -726,6 +665,21 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
         self._register("captcha.match_slider", "识别滑块验证码缺口位置", captcha_tools.match_slider)
         self._register("captcha.match_click_targets", "识别点选验证码目标位置", captcha_tools.match_click_targets)
+        self._register("browser.pause", "执行拟人化停顿", self._browser_tools.pause, is_async=True)
+        self._register("browser.goto", "以拟人化节奏导航到目标页面", self._browser_tools.goto, is_async=True)
+        self._register("browser.move", "以拟人化轨迹移动鼠标", self._browser_tools.move, is_async=True)
+        self._register("browser.click", "以拟人化轨迹点击页面元素或坐标", self._browser_tools.click, is_async=True)
+        self._register("browser.hover", "以拟人化轨迹悬停页面元素或坐标", self._browser_tools.hover, is_async=True)
+        self._register("browser.type", "以拟人化节奏输入文本", self._browser_tools.type, is_async=True)
+        self._register("browser.press", "以拟人化节奏按下键盘按键", self._browser_tools.press, is_async=True)
+        self._register("browser.drag", "以拟人化轨迹拖拽页面元素或坐标", self._browser_tools.drag, is_async=True)
+        self._register("browser.scroll", "以拟人化节奏滚动页面", self._browser_tools.scroll, is_async=True)
+        self._register("browser.page_down", "执行一段拟人化向下滚动", self._browser_tools.page_down, is_async=True)
+        self._register("browser.page_up", "执行一段拟人化向上滚动", self._browser_tools.page_up, is_async=True)
+
+    def bind_task_context(self, context: Any) -> None:
+        self._task_context = context
+        self._browser_tools.bind_task_context(context)
 
     def _register(self, name: str, description: str, handler: Callable[..., Any], *, is_async: bool = False) -> None:
         if self._allowed_tool_names is not None and name not in self._allowed_tool_names:
@@ -742,8 +696,13 @@ class CoreToolsCapabilityImpl(ToolsCapability):
             and tool_name in DECLARE_UI_SIDE_EFFECT_DB_TOOLS
         )
 
+    def _blocks_browser_tool(self, tool_name: str) -> bool:
+        if tool_name not in BROWSER_TOOL_NAMES:
+            return False
+        return not self._browser_tools.is_available()
+
     def has_tool(self, tool_name: str) -> bool:
-        if self._blocks_side_effect_tool(tool_name):
+        if self._blocks_side_effect_tool(tool_name) or self._blocks_browser_tool(tool_name):
             return False
         return tool_name in self._bindings
 
@@ -751,12 +710,14 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         return [
             binding.spec
             for binding in sorted(self._bindings.values(), key=lambda item: item.spec.name)
-            if not self._blocks_side_effect_tool(binding.spec.name)
+            if not self._blocks_side_effect_tool(binding.spec.name) and not self._blocks_browser_tool(binding.spec.name)
         ]
 
     def call(self, tool_name: str, /, **kwargs: Any) -> Any:
         if self._blocks_side_effect_tool(tool_name):
             _raise_declare_ui_side_effect_error(tool_name)
+        if self._blocks_browser_tool(tool_name):
+            raise RuntimeError(f"{tool_name} 需要当前运行上下文绑定可用的浏览器 Page")
         binding = self._bindings.get(tool_name)
         if binding is None:
             raise KeyError(f"Unknown core tool: {tool_name}")

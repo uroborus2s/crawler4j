@@ -32,7 +32,7 @@ uv run crawler4j env-selector create pick_ready
 uv run crawler4j page create dashboard
 uv run crawler4j page create account_detail --group account --no-menu
 uv run crawler4j data resource create accounts --storage-mode custom_table
-uv run crawler4j data query create get_account_by_id --source accounts
+uv run crawler4j data view create get_account_by_id --source accounts
 uv run crawler4j data view create account_stats --source accounts
 uv run crawler4j data seed create accounts_seed --resource accounts
 ```

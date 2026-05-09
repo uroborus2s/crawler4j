@@ -8,6 +8,26 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 
+_UNSET = object()
+_FILTER_OP_ALIASES = {
+    "=": "eq",
+    "==": "eq",
+    "eq": "eq",
+    "in": "in",
+    ">": "gt",
+    "gt": "gt",
+    ">=": "gte",
+    "gte": "gte",
+    "<": "lt",
+    "lt": "lt",
+    "<=": "lte",
+    "lte": "lte",
+    "between": "between",
+    "like": "like",
+    "is_null": "is_null",
+}
+
+
 @runtime_checkable
 class DatabaseExecutor(Protocol):
     """宿主注入给 `ctx.db` 的执行器。"""
@@ -35,8 +55,10 @@ class DatabaseClient:
         descriptor = self._describe_source(normalized_source)
         return DatabaseQueryBuilder(self, normalized_source, descriptor=descriptor)
 
-    def named(self, query_id: str) -> "NamedQueryBuilder":
-        return NamedQueryBuilder(self, _normalize_name(query_id, "query_id"))
+    def describe(self, source: str) -> dict[str, Any]:
+        """Return the host-owned descriptor for a declared data source."""
+        normalized_source = _normalize_name(source, "source")
+        return dict(self._describe_source(normalized_source))
 
     def into(self, resource: str) -> "ResourceWriter":
         return ResourceWriter(self, _normalize_name(resource, "resource"))
@@ -73,47 +95,18 @@ class DatabaseQueryBuilder:
         self._limit: int | None = None
         self._offset = 0
 
-    def select(self, *fields: str) -> "DatabaseQueryBuilder":
-        self._select = [
-            {"kind": "column", "field": _normalize_name(field, "field")}
-            for field in fields
-        ]
+    def select(self, *fields: Any) -> "DatabaseQueryBuilder":
+        normalized_fields = _normalize_select_fields(fields)
+        self._select = [{"kind": "column", "field": _normalize_name(field, "field")} for field in normalized_fields]
         return self
 
-    def where_eq(self, field: str, value: Any) -> "DatabaseQueryBuilder":
-        return self._add_where(field, "eq", value=value)
-
-    def where(self, field: str, op: str = "eq", value: Any = None) -> "DatabaseQueryBuilder":
-        normalized_op = str(op or "eq").strip().lower()
-        if normalized_op not in {"eq", "in", "gt", "gte", "lt", "lte", "between", "like", "is_null"}:
-            raise ValueError(f"unsupported where op: {normalized_op}")
-        if normalized_op == "is_null":
-            return self._add_where(field, normalized_op)
-        return self._add_where(field, normalized_op, value=value)
-
-    def where_in(self, field: str, values: list[Any] | tuple[Any, ...]) -> "DatabaseQueryBuilder":
-        return self._add_where(field, "in", value=list(values))
-
-    def where_gt(self, field: str, value: Any) -> "DatabaseQueryBuilder":
-        return self._add_where(field, "gt", value=value)
-
-    def where_gte(self, field: str, value: Any) -> "DatabaseQueryBuilder":
-        return self._add_where(field, "gte", value=value)
-
-    def where_lt(self, field: str, value: Any) -> "DatabaseQueryBuilder":
-        return self._add_where(field, "lt", value=value)
-
-    def where_lte(self, field: str, value: Any) -> "DatabaseQueryBuilder":
-        return self._add_where(field, "lte", value=value)
-
-    def where_between(self, field: str, start: Any, end: Any) -> "DatabaseQueryBuilder":
-        return self._add_where(field, "between", value=[start, end])
-
-    def where_like(self, field: str, value: str) -> "DatabaseQueryBuilder":
-        return self._add_where(field, "like", value=value)
-
-    def where_is_null(self, field: str) -> "DatabaseQueryBuilder":
-        return self._add_where(field, "is_null")
+    def where(self, condition: Any, op: str = "eq", value: Any = _UNSET) -> "DatabaseQueryBuilder":
+        if value is _UNSET and op == "eq" and not isinstance(condition, str):
+            self._where.extend(_normalize_where(condition))
+            return self
+        normalized_value = None if value is _UNSET else value
+        self._where.extend(_normalize_where([condition, op, normalized_value]))
+        return self
 
     def join(
         self,
@@ -211,13 +204,6 @@ class DatabaseQueryBuilder:
             }
         )
 
-    def _add_where(self, field: str, op: str, *, value: Any = None) -> "DatabaseQueryBuilder":
-        item = {"field": _normalize_name(field, "field"), "op": op}
-        if op != "is_null":
-            item["value"] = value
-        self._where.append(item)
-        return self
-
     def _add_aggregate(self, func: str, field: str, alias: str | None) -> "DatabaseQueryBuilder":
         normalized_field = _normalize_name(field, "field")
         normalized_alias = _normalize_name(alias or f"{func}_{normalized_field}", "alias")
@@ -230,26 +216,6 @@ class DatabaseQueryBuilder:
             }
         )
         return self
-
-
-class NamedQueryBuilder:
-    def __init__(self, client: DatabaseClient, query_id: str):
-        self._client = client
-        self._query_id = query_id
-        self._params: dict[str, Any] = {}
-
-    def bind(self, **params: Any) -> "NamedQueryBuilder":
-        self._params.update(params)
-        return self
-
-    def execute(self) -> Any:
-        return self._client._execute_plan(
-            {
-                "kind": "named_query",
-                "query_id": self._query_id,
-                "params": dict(self._params),
-            }
-        )
 
 
 class AuditEventClient:
@@ -303,6 +269,15 @@ class ResourceWriter:
         self._client = client
         self._resource = resource
 
+    def add(self, records: list[dict[str, Any]]) -> Any:
+        return self._client._execute_plan(
+            {
+                "kind": "add_records",
+                "resource": self._resource,
+                "records": list(records),
+            }
+        )
+
     def replace(self, records: list[dict[str, Any]]) -> Any:
         return self._client._execute_plan(
             {
@@ -321,28 +296,22 @@ class ResourceWriter:
             }
         )
 
-    def update_where(self, fields: dict[str, Any], *, where: dict[str, Any]) -> Any:
+    def update_where(self, fields: dict[str, Any], *, where: Any) -> Any:
         return self._client._execute_plan(
             {
                 "kind": "update_records",
                 "resource": self._resource,
                 "fields": dict(fields),
-                "where": _where_eq_mapping(where),
+                "where": _normalize_where(where),
             }
         )
 
-    def delete_where(self, field: str, op: str = "eq", value: Any = None) -> Any:
-        normalized_op = str(op or "eq").strip().lower()
-        if normalized_op not in {"eq", "in", "gt", "gte", "lt", "lte", "between", "like", "is_null"}:
-            raise ValueError(f"unsupported where op: {normalized_op}")
-        item = {"field": _normalize_name(field, "field"), "op": normalized_op}
-        if normalized_op != "is_null":
-            item["value"] = value
+    def delete_where(self, *, where: Any) -> Any:
         return self._client._execute_plan(
             {
                 "kind": "delete_records",
                 "resource": self._resource,
-                "where": [item],
+                "where": _normalize_where(where),
             }
         )
 
@@ -353,6 +322,16 @@ class DatabaseBatchWriter:
     def __init__(self, client: DatabaseClient):
         self._client = client
         self._operations: list[dict[str, Any]] = []
+
+    def add(self, resource: str, records: list[dict[str, Any]]) -> "DatabaseBatchWriter":
+        self._operations.append(
+            {
+                "kind": "add_records",
+                "resource": _normalize_name(resource, "resource"),
+                "records": list(records),
+            }
+        )
+        return self
 
     def replace(self, resource: str, records: list[dict[str, Any]]) -> "DatabaseBatchWriter":
         self._operations.append(
@@ -379,30 +358,24 @@ class DatabaseBatchWriter:
         resource: str,
         fields: dict[str, Any],
         *,
-        where: dict[str, Any],
+        where: Any,
     ) -> "DatabaseBatchWriter":
         self._operations.append(
             {
                 "kind": "update_records",
                 "resource": _normalize_name(resource, "resource"),
                 "fields": dict(fields),
-                "where": _where_eq_mapping(where),
+                "where": _normalize_where(where),
             }
         )
         return self
 
-    def delete_where(self, resource: str, field: str, op: str = "eq", value: Any = None) -> "DatabaseBatchWriter":
-        normalized_op = str(op or "eq").strip().lower()
-        if normalized_op not in {"eq", "in", "gt", "gte", "lt", "lte", "between", "like", "is_null"}:
-            raise ValueError(f"unsupported where op: {normalized_op}")
-        item = {"field": _normalize_name(field, "field"), "op": normalized_op}
-        if normalized_op != "is_null":
-            item["value"] = value
+    def delete_where(self, resource: str, *, where: Any) -> "DatabaseBatchWriter":
         self._operations.append(
             {
                 "kind": "delete_records",
                 "resource": _normalize_name(resource, "resource"),
-                "where": [item],
+                "where": _normalize_where(where),
             }
         )
         return self
@@ -435,14 +408,84 @@ def _normalize_name(value: str, field_name: str) -> str:
     return text
 
 
-def _where_eq_mapping(where: dict[str, Any]) -> list[dict[str, Any]]:
-    if not isinstance(where, dict) or not where:
-        raise ValueError("where must be a non-empty mapping")
-    return [
-        {
-            "field": _normalize_name(field, "field"),
-            "op": "eq",
-            "value": value,
+def _normalize_select_fields(raw_fields: tuple[Any, ...]) -> list[Any]:
+    if len(raw_fields) == 1 and isinstance(raw_fields[0], (list, tuple)):
+        return list(raw_fields[0])
+    return list(raw_fields)
+
+
+def _normalize_filter_op(op: Any) -> str:
+    normalized = str(op or "eq").strip().lower()
+    if normalized not in _FILTER_OP_ALIASES:
+        raise ValueError(f"unsupported where op: {normalized}")
+    return _FILTER_OP_ALIASES[normalized]
+
+
+def _normalize_where(where: Any) -> list[dict[str, Any]]:
+    if isinstance(where, dict):
+        if "field" in where:
+            return [_normalize_condition(where)]
+        if "operator" in where or "conditions" in where:
+            return [_normalize_condition(where)]
+        if not where:
+            raise ValueError("where must be non-empty")
+        return [
+            {"field": _normalize_name(field, "field"), "op": "eq", "value": value} for field, value in where.items()
+        ]
+    normalized = _normalize_condition(where)
+    if normalized.get("kind") == "group" and normalized.get("operator") == "and":
+        return list(normalized["conditions"])
+    return [normalized]
+
+
+def _normalize_condition(condition: Any) -> dict[str, Any]:
+    if isinstance(condition, dict):
+        if "operator" in condition or "conditions" in condition:
+            operator = str(condition.get("operator") or "and").strip().lower()
+            if operator not in {"and", "or"}:
+                raise ValueError(f"unsupported where group operator: {operator}")
+            conditions = [_normalize_condition(item) for item in condition.get("conditions") or []]
+            if not conditions:
+                raise ValueError("where group must contain conditions")
+            return {"kind": "group", "operator": operator, "conditions": conditions}
+        field = _normalize_name(condition.get("field"), "field")
+        op = _normalize_filter_op(condition.get("op"))
+        item = {"field": field, "op": op}
+        if op != "is_null":
+            item["value"] = condition.get("value")
+        return item
+    if not isinstance(condition, (list, tuple)):
+        raise ValueError("where condition must be a list, tuple, dict, or mapping")
+    items = list(condition)
+    if not items:
+        raise ValueError("where condition must be non-empty")
+    first = items[0]
+    if isinstance(first, str) and first.strip().lower() in {"and", "or"}:
+        operator = first.strip().lower()
+        conditions = [_normalize_condition(item) for item in items[1:]]
+        if not conditions:
+            raise ValueError("where group must contain conditions")
+        return {"kind": "group", "operator": operator, "conditions": conditions}
+    if len(items) >= 2 and isinstance(items[0], str):
+        field = _normalize_name(items[0], "field")
+        op = _normalize_filter_op(items[1])
+        item = {"field": field, "op": op}
+        if op == "between":
+            if len(items) == 4:
+                item["value"] = [items[2], items[3]]
+            elif len(items) == 3:
+                item["value"] = items[2]
+            else:
+                raise ValueError("between where condition requires bounds")
+        elif op != "is_null":
+            if len(items) < 3:
+                raise ValueError(f"{op} where condition requires a value")
+            item["value"] = items[2]
+        return item
+    if all(isinstance(item, (dict, list, tuple)) for item in items):
+        return {
+            "kind": "group",
+            "operator": "and",
+            "conditions": [_normalize_condition(item) for item in items],
         }
-        for field, value in where.items()
-    ]
+    raise ValueError("invalid where condition")

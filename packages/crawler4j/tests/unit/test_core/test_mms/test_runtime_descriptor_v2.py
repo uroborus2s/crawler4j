@@ -19,8 +19,7 @@ def _manifest(module_name: str) -> ModuleManifest:
         upgrade_source=UpgradeSourceInfo(repo=f"example/{module_name}"),
         data={
             "resources": [{"name": "legacy_manifest_table"}],
-            "views": [],
-            "queries": [{"name": "legacy_manifest_query"}],
+            "views": [{"name": "legacy_manifest_view"}],
             "seeds": [],
         },
     )
@@ -123,6 +122,13 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
                 async def open_login_page(ctx, url: str):
                     return {"url": url}
             """,
+            "pages/actions.py": """
+                from crawler4j_contracts import ui_action
+
+                @ui_action(name="create_account_from_ui", label="Create account")
+                def create_account_from_ui(ctx, payload: dict):
+                    return {"payload": payload}
+            """,
             "pages/dashboard.py": """
                 from crawler4j_contracts import page
 
@@ -136,7 +142,7 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
                     return {"page_id": page_id}
             """,
             "data/accounts.py": """
-                from crawler4j_contracts import data_query, data_table
+                from crawler4j_contracts import data_table, data_view
 
                 @data_table(
                     name="accounts",
@@ -146,14 +152,14 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
                 class AccountsTable:
                     pass
 
-                @data_query(
-                    name="ready_accounts",
-                    source="accounts",
+                @data_view(
+                    name="account_overview",
+                    sources=["accounts"],
                     sql="SELECT account_id FROM {{resource:accounts}}",
-                    output_schema=[{"name": "account_id", "type": "string"}],
+                    schema=[{"name": "account_id", "type": "string"}],
                 )
-                def ready_accounts():
-                    raise AssertionError("data query function must not be called during descriptor scan")
+                def account_overview():
+                    raise AssertionError("data view function must not be called during descriptor scan")
             """,
             "cleanups/unused_accounts.py": """
                 from crawler4j_contracts import env_cleanup_candidates
@@ -177,8 +183,9 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
         assert descriptor.pages["dashboard"].spec.label == "Dashboard"
         assert descriptor.pages["dashboard"].spec.menu is True
         assert descriptor.page_actions["open_login_page"].target.__name__ == "open_login_page"
+        assert descriptor.ui_actions["create_account_from_ui"].target.__name__ == "create_account_from_ui"
         assert descriptor.data_tables["accounts"].meta.kind == "data_table"
-        assert descriptor.data_queries["ready_accounts"].meta.source == "accounts"
+        assert descriptor.data_views["account_overview"].meta.sources == ("accounts",)
         assert descriptor.env_cleanup_candidates["unused_accounts"].meta.kind == "env_cleanup_candidates"
         assert descriptor.implementations == {
             "labor": ("api_labor",),
@@ -187,7 +194,7 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
         assert "legacy_task" not in descriptor.page_actions
         assert "legacy_workflow" not in descriptor.workflows
         assert "legacy_manifest_table" not in descriptor.data_tables
-        assert "legacy_manifest_query" not in descriptor.data_queries
+        assert "legacy_manifest_view" not in descriptor.data_views
         assert sys.modules[f"{module_name}.objects.api_labor"].created == 0
         assert sys.modules[f"{module_name}.objects.quiz_orchestrator"].created == 0
         assert sys.modules[f"{module_name}.workflows.quiz"].created == 0

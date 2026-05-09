@@ -9,6 +9,8 @@
 - Keep real-time log widgets resilient to bursty duplicate warnings by batching UI flushes instead of appending one QTextEdit block per signal
 - When PyInstaller bundles third-party single-file modules, explicitly collect their shared resource trees and pass the consumer-expected subdirectory instead of assuming `collect_data_files()` or a generic asset root will line up automatically
 - Keep module-facing database access behind `TaskContext.db`; keep non-database Core extensions behind `TaskContext.tools`
+- Keep module data-source introspection host-owned through `ctx.db.describe(source)`; module repositories should consume the host-normalized descriptor instead of re-deriving writable and read-only field semantics from decorator metadata when a host runtime is available.
+- Keep `managed_dataset` field semantics schema-only: only `@data_table.schema` business fields may be persisted in `record_json` or queried through SQLite `json_extract(...)`; schema-external JSON keys must not be selectable/filterable/sortable, and only `run_status` / `record_status` host physical fields may be module-updated as status columns.
 - Keep standard browser interaction host-owned behind `ctx.tools.call("browser.*", ...)`; do not push humanized click/type/drag orchestration back into per-module local helpers as the primary protocol
 - Keep browser humanization behavior modelled and testable in Core: segmented pauses, idle/navigation scan motion, target-size-aware trajectories, mouse/key dwell, controlled typing correction, sensitive-input no-correction defaults, and inertial scroll traces should stay host-owned.
 - Keep task lifecycle control behind workflow `TaskResult` return values, optional object `setup(ctx, workflow)`, and optional object `cleanup(ctx, outcome)`; do not reintroduce module lifecycle hooks, root shims, `TaskSignal`, or run-profile teardown rules
@@ -19,6 +21,7 @@
 - Keep GitHub Release asset downloads on dedicated streaming timeouts instead of the shared 30s session total timeout; write to `.part` files, remove partial artifacts on timeout/failure, and reject content-length mismatches before exposing the archive to MMS install flow
 - Treat fingerprint-browser CDP attachment as a warm-up phase: normalize host-returned endpoints first, then give Playwright multiple retries before declaring connect failure
 - Keep Hosted UI page registration and menu configuration inside `@page(...)`: `pages/` owns routable pages, and `@page(menu=True)` is the only left-menu source
+- Keep Hosted UI user commands behind `@ui_action` and browser automation behind workflow/component-called `@page_action`; do not use nested `page_action -> page_action` calls as a decomposition mechanism
 
 ## What To Improve First
 

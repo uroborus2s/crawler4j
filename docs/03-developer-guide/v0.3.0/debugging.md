@@ -127,9 +127,9 @@ Core 的运行描述对象来自固定目录扫描，所以调试时按目录定
 
 数据问题优先按这条线查：
 
-1. `data list` / `module show` 能不能列出目标 `resources/views/queries/seeds`
-2. `module.yaml.data` 里是否真的声明了目标资源、视图或命名查询
-3. `data/sql/views/*.sql`、`data/sql/queries/*.sql` 是否只包含单条 `SELECT/WITH`
+1. `data list` / `module show` 能不能列出目标 `resources/views/seeds`
+2. `module.yaml.data` 里是否真的声明了目标资源、视图或只读视图
+3. `data/sql/views/*.sql`、`data/sql/views/*.sql` 是否只包含单条 `SELECT/WITH`
 4. `{{resource:<id>}}` 占位符是否和 `source_resource_ids` 完全一致
 5. 页面或任务代码是否还在调用旧 `db.declare_*`，或试图自己执行未注册 SQL
 

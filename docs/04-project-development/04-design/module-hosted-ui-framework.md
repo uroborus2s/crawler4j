@@ -5,7 +5,7 @@
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | Core 开发 | SDK 开发 | QA | 模块开发者  
 **关联 ID：** `API-002`, `API-008`  
-**最后更新：** 2026-04-30
+**最后更新：** 2026-05-08
 
 ## 1. 结论
 
@@ -17,7 +17,8 @@
 - `@page(menu=True)` 声明左侧导航菜单入口；`menu=False` 只注册可路由页面
 - 页面 schema 只允许使用宿主提供的 `Page`、`Section`、`Text`、`Button`、`DataTable`
 - 页面数据全部由 `load_handler` 或 `DataTable.query_handler` 返回结构化对象
-- 页面业务按钮通过 `@page_action` 声明的函数执行，参数按 kwargs 绑定
+- 页面业务按钮和 CRUD handler 通过 `@ui_action` 声明的函数执行，参数按 kwargs 绑定
+- `@page_action` 只服务 workflow/component 驱动的浏览器页面操作，不作为 Hosted UI 新按钮入口
 - 宿主只负责 schema 校验、路由、渲染和通用交互，不再负责模块业务数据语义
 
 本次设计明确删除：
@@ -186,7 +187,7 @@ def load_dashboard_page(
 ### 5.3 Core 其它能力负责
 
 - `@data_table` + `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)`
-- `@data_query` + `ctx.db.named(...).bind(...).execute()`
+- `@data_view` + `ctx.db.from_("view_id").execute()`
 - `custom_table` 的已声明联表、分组和聚合查询
 
 这些能力负责数据事实源，但不拥有模块页面结构。

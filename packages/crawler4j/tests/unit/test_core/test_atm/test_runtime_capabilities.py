@@ -45,12 +45,13 @@ def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) ->
                         "version": 1,
                         "columns": [
                             {"name": "id", "type": "text", "required": True},
+                            {"name": "phone", "type": "text"},
+                            {"name": "tier", "type": "text"},
                         ],
                     },
                 }
             ],
             "views": [],
-            "queries": [],
             "seeds": [],
         }
     )
@@ -78,7 +79,33 @@ def _sync_custom_accounts(module_root, *, module_name: str, resource_id: str = "
                 }
             ],
             "views": [],
-            "queries": [],
+            "seeds": [],
+        }
+    )
+    get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
+
+
+def _sync_custom_auto_increment_accounts(module_root, *, module_name: str, resource_id: str = "accounts") -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+    from src.core.persistence import get_module_data_store
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [
+                {
+                    "id": resource_id,
+                    "storage_mode": "custom_table",
+                    "record_key_field": "id",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "int", "auto_increment": True},
+                            {"name": "status", "type": "text"},
+                        ],
+                    },
+                }
+            ],
+            "views": [],
             "seeds": [],
         }
     )
@@ -188,16 +215,19 @@ def test_runtime_tools_hosted_ui_readonly_surface_does_not_read_persisted_page_s
     from src.core.persistence import get_module_data_store
 
     store = get_module_data_store()
-    assert store.write_page_schema(
-        "demo_module",
-        "dashboard",
-        {
-            "type": "Page",
-            "title": "旧看板",
-            "load_handler": "load_dashboard_page",
-            "children": [],
-        },
-    ) is True
+    assert (
+        store.write_page_schema(
+            "demo_module",
+            "dashboard",
+            {
+                "type": "Page",
+                "title": "旧看板",
+                "load_handler": "load_dashboard_page",
+                "children": [],
+            },
+        )
+        is True
+    )
 
     caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_READONLY)
 
@@ -210,12 +240,15 @@ def test_runtime_ctx_db_replaces_public_db_tools(temp_data_dir):
     caps = build_runtime_capabilities("demo_module")
 
     assert not any(spec.name.startswith("db.") for spec in caps.tools.list_tools())
-    assert caps.db.into("accounts").replace(
-        [
-            {"id": "u1", "run_status": "占用中", "record_status": "active"},
-            {"id": "u2", "run_status": "空闲", "record_status": "blocked"},
-        ]
-    ) is True
+    assert (
+        caps.db.into("accounts").replace(
+            [
+                {"id": "u1", "run_status": "占用中", "record_status": "active"},
+                {"id": "u2", "run_status": "空闲", "record_status": "blocked"},
+            ]
+        )
+        is True
+    )
 
     all_rows = caps.db.from_("accounts").limit(10).execute()
     assert all({"run_status", "record_status", "created_at", "updated_at"} <= set(row) for row in all_rows)
@@ -224,37 +257,126 @@ def test_runtime_ctx_db_replaces_public_db_tools(temp_data_dir):
     assert all_rows[0]["run_status"] == "占用中"
     assert all_rows[0]["record_status"] == "active"
 
+    rows = caps.db.from_("accounts").select("id").where(["id", "=", "u2"]).limit(10).execute()
+
+    assert rows == [{"id": "u2"}]
+
+
+def test_runtime_ctx_db_managed_dataset_where_can_use_physical_and_schema_fields(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+    from src.core.persistence import get_module_data_store
+
+    assert (
+        caps.db.into("accounts").replace(
+            [
+                {"id": "u1", "phone": "13800138000", "tier": "vip"},
+                {"id": "u2", "phone": "13900139000", "tier": "standard"},
+            ]
+        )
+        is True
+    )
+
+    expected = get_module_data_store().query_resource_records(
+        "demo_module",
+        "accounts",
+        select=["id", "tier"],
+        where=["tier", "=", "standard"],
+        limit=10,
+        offset=0,
+    )
+    assert expected == [{"id": "u2", "tier": "standard"}]
+
+    assert (caps.db.from_("accounts").select(["id", "tier"]).where(["tier", "=", "standard"]).execute()) == expected
+    with pytest.raises(ValueError, match="query select field not found: unseen_flag"):
+        caps.db.from_("accounts").select(["id", "unseen_flag"]).where(["unseen_flag", "=", "yes"]).execute()
+    with pytest.raises(ValueError, match="query select field not found: unseen_flag"):
+        get_module_data_store().query_resource_records(
+            "demo_module",
+            "accounts",
+            select=["id", "unseen_flag"],
+            where=["unseen_flag", "=", "yes"],
+            limit=100,
+            offset=0,
+        )
+
     rows = (
         caps.db.from_("accounts")
-        .select("id")
-        .where_eq("id", "u2")
-        .limit(10)
+        .select(["record_key", "id"])
+        .where(["record_key", "=", "u2"])
+        .where(["id", "=", "u2"])
         .execute()
     )
 
-    assert rows == [{"id": "u2"}]
+    assert rows == [{"record_key": "u2", "id": "u2"}]
+
+    all_rows = caps.db.from_("accounts").select("*").order_by("phone", "desc").execute()
+    assert [row["id"] for row in all_rows] == ["u2", "u1"]
+    assert {
+        "id",
+        "phone",
+        "record_index",
+        "record_key",
+        "run_status",
+        "record_status",
+        "created_at",
+        "updated_at",
+    } <= set(all_rows[0])
+
+
+def test_runtime_ctx_db_managed_dataset_count_returns_filtered_row_total(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").replace(
+            [
+                {"id": "u1", "phone": "13800138000", "tier": "vip"},
+                {"id": "u2", "phone": "13900139000", "tier": "standard", "run_status": "占用中"},
+                {"id": "u3", "phone": "13700137000", "tier": "standard", "run_status": "占用中"},
+            ]
+        )
+        is True
+    )
+
+    rows = caps.db.from_("accounts").where(["tier", "=", "standard"]).count(alias="total").execute()
+    occupied_rows = caps.db.from_("accounts").where(["run_status", "=", "占用中"]).count(alias="occupied_total").execute()
+
+    assert rows == [{"total": 2}]
+    assert occupied_rows == [{"occupied_total": 2}]
 
 
 def test_runtime_ctx_db_supports_upsert_update_delete_and_batch(temp_data_dir):
     _sync_custom_accounts(temp_data_dir, module_name="demo_module")
     caps = build_runtime_capabilities("demo_module")
 
-    assert caps.db.into("accounts").upsert(
-        [
-            {"id": "u1", "status": "new"},
-            {"id": "u2", "status": "expired"},
-        ]
-    ) is True
-    assert caps.db.into("accounts").update_where(
-        {"status": "ready"},
-        where={"id": "u1"},
-    ) == 1
-    assert caps.db.into("accounts").delete_where("status", "eq", "expired") == 1
+    assert (
+        caps.db.into("accounts").upsert(
+            [
+                {"id": "u1", "status": "new"},
+                {"id": "u2", "status": "expired"},
+            ]
+        )
+        is True
+    )
+    assert (
+        caps.db.into("accounts").update_where(
+            {"status": "ready"},
+            where=["id", "=", "u1"],
+        )
+        == 1
+    )
+    assert caps.db.into("accounts").delete_where(where=["status", "=", "expired"]) == 1
 
-    results = caps.db.batch().upsert("accounts", [{"id": "u3", "status": "ready"}]).audit(
-        "account_events",
-        {"entity_key": "u3", "event_type": "created", "created_at": 100},
-    ).execute()
+    results = (
+        caps.db.batch()
+        .upsert("accounts", [{"id": "u3", "status": "ready"}])
+        .audit(
+            "account_events",
+            {"entity_key": "u3", "event_type": "created", "created_at": 100},
+        )
+        .execute()
+    )
 
     assert results[0] is True
     assert isinstance(results[1], str)
@@ -278,6 +400,59 @@ def test_runtime_ctx_db_supports_upsert_update_delete_and_batch(temp_data_dir):
             "created_at": 100,
         }
     ]
+
+
+def test_runtime_ctx_db_add_supports_custom_table_auto_increment_ids(temp_data_dir):
+    _sync_custom_auto_increment_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+
+    inserted_ids = caps.db.into("accounts").add([{"status": "new"}, {"status": "ready"}])
+
+    assert inserted_ids == [1, 2]
+    assert caps.db.from_("accounts").order_by("id").execute() == [
+        {"id": 1, "status": "new"},
+        {"id": 2, "status": "ready"},
+    ]
+
+
+def test_runtime_ctx_db_managed_dataset_supports_incremental_writes(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").replace(
+            [
+                {"id": "u1", "phone": "13800138000"},
+                {"id": "u2", "phone": "13900139000"},
+            ]
+        )
+        is True
+    )
+    assert (
+        caps.db.into("accounts").upsert(
+            [
+                {"id": "u2", "phone": "13999999999"},
+                {"id": "u3", "phone": "13700137000"},
+            ]
+        )
+        is True
+    )
+    assert caps.db.into("accounts").update_where({"phone": "13600136000"}, where=["id", "=", "u1"]) == 1
+    assert caps.db.into("accounts").delete_where(where=["phone", "=", "13700137000"]) == 1
+
+    assert caps.db.from_("accounts").select(["id", "phone", "record_index"]).order_by("record_index").execute() == [
+        {"id": "u1", "phone": "13600136000", "record_index": 0},
+        {"id": "u2", "phone": "13999999999", "record_index": 1},
+    ]
+
+
+def test_runtime_ctx_db_managed_dataset_rejects_reserved_update_fields(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+    caps.db.into("accounts").replace([{"id": "u1", "phone": "13800138000"}])
+
+    with pytest.raises(ValueError, match="reserved host fields"):
+        caps.db.into("accounts").update_where({"updated_at": 1}, where=["id", "=", "u1"])
 
 
 def test_runtime_ctx_db_audit_uses_independent_audit_table(temp_data_dir):

@@ -29,7 +29,7 @@
 - 当前目录下有 `module.yaml`
 - `module.yaml.version` 是合法语义化版本
 - `module.yaml.upgrade_source.repo` 是合法 `owner/repo`
-- `module.yaml.data` 存在且 `resources/views/queries/seeds` 结构正确
+- `module.yaml.data` 存在且 `resources/views/seeds` 结构正确
 - `tasks/`、`workflows/`、`pages/` 目录结构存在
 - `data/sql`、`data/seeds` 文件路径和内容合法
 - 运行时代码没有 import `crawler4j-sdk`
@@ -67,7 +67,7 @@
 1. `DataTable.data_source.type` 是否是 `binding`、`rows`、`query_handler` 或 `managed_resource`
 2. `load_handler` 返回值里是否真的有绑定字段
 3. `query_handler` 的签名是否是 `(context, table_id, query, params=None)`
-4. `ctx.db.from_(...)` / `ctx.db.named(...)` 返回值是否真的是你页面期望的结构
+4. `ctx.db.from_(...)` / `ctx.db.from_("view_id")` 返回值是否真的是你页面期望的结构
 
 ## 数据契约或查询报错
 
@@ -76,7 +76,7 @@
 1. `module.yaml.data` 是否真的声明了目标 `resource/view/query`
 2. `data list` / `module show` 是否能看到对应数量
 3. `view` / `query` 是否只引用 `custom_table` 资源
-4. SQL 文件是否位于 `data/sql/views`、`data/sql/queries`，且只包含单条 `SELECT/WITH`
+4. SQL 文件是否位于 `data/sql/views`、`data/sql/views`，且只包含单条 `SELECT/WITH`
 5. `{{resource:<id>}}` 是否和 `source_resource_ids` 完全一致
 6. 运行时代码是否还在调用旧 `db.declare_*`，或试图自己执行未注册 SQL
 

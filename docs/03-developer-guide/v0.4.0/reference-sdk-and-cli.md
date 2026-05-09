@@ -19,8 +19,9 @@
 | `component` | `component create` `component list` | `@component` 模板 |
 | `workflow` | `workflow create` `workflow list` | `@workflow` 模板 |
 | `page-action` | `page-action create` `page-action list` | `@page_action` 函数 |
+| `ui-action` | `ui-action create` `ui-action list` | `@ui_action` 函数 |
 | `page` | `page create` `page list` | `@page` Hosted UI 页面 |
-| `data` | `data table create [--storage-mode custom_table\|managed_dataset]` `data query create` `data list` | `@data_table` / `@data_query` |
+| `data` | `data table create [--storage-mode custom_table\|managed_dataset]` `data view create` `data list` | `@data_table` / `@data_view` |
 | `manifest` | `manifest lock` | `.crawler4j/manifest.lock.json` |
 | `migrate` | `migrate native-v2` | v0.3.0 到 v0.4.0 重写迁移报告 |
 | `check` | `check structure` `check release` `check full` | 本地校验 gate |
@@ -66,7 +67,6 @@ uvx --from crawler4j-sdk crawler4j module init demo_module \
 - `crawler4j env-selector create`
 - `crawler4j hook create`
 - `crawler4j data resource create`
-- `crawler4j data view create`
 - `crawler4j data seed create`
 - `crawler4j module set default-workflow`
 
@@ -77,7 +77,7 @@ uvx --from crawler4j-sdk crawler4j module init demo_module \
 - `runtime_api == core-native-v2`
 - 装饰器参数、类属性注解和 `__init__` 参数注解元数据字段合法
 - 名称为小写 snake_case
-- interface / component / workflow / data query 名称唯一
+- interface / component / workflow / data table / data view 名称唯一
 - interface 至少有实现
 - workflow inject 目标存在
 - component inject 目标存在
@@ -87,7 +87,8 @@ uvx --from crawler4j-sdk crawler4j module init demo_module \
 - workflow 没有 parameters
 - page 使用 `@page(...)` 装饰函数；`menu=True` 进入左侧菜单，`menu=False` 只注册可路由页面
 - page action 是函数或 async 函数
-- data table 字段、索引、query output 不使用宿主保留字段
+- ui action 是函数或 async 函数
+- data table 字段、索引、data view schema 不使用宿主保留字段
 - `module.yaml` 不含 v2 禁止字段
 - 运行时代码没有依赖 `crawler4j-sdk`
 

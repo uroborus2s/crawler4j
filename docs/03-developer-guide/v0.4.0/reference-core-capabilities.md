@@ -20,9 +20,10 @@ Core 扫描模块 Python 文件，读取装饰器挂载的元数据。
 | Component | `@component` | 任务环境级对象 |
 | Workflow | `@workflow` | workflow 根对象 |
 | Page Action | `@page_action` | 页面操作函数 |
+| UI Action | `@ui_action` | Hosted UI 用户操作函数 |
 | Page | `@page` | Hosted UI 页面 schema、菜单状态与 load handler |
 | Data Table | `@data_table` | 数据表声明 |
-| Data Query | `@data_query` | 命名查询声明 |
+| Data View | `@data_view` | 只读数据库视图声明 |
 
 扫描阶段可以缓存 descriptor，不创建业务实例。
 
@@ -91,19 +92,22 @@ await ctx.run_page_action("open_login_page", url="https://example.com")
 ```python
 rows = (
     ctx.db.from_("accounts")
-    .select("account_id", "status")
-    .where_eq("status", "ready")
+    .select(["account_id", "status"])
+    .where(["status", "=", "ready"])
     .order_by("account_id")
     .limit(50)
     .execute()
 )
 
-detail = ctx.db.named("ready_accounts").bind(status="ready").execute()
+overview = ctx.db.from_("account_overview").where(["status", "=", "ready"]).execute()
+total = ctx.db.from_("accounts").where(["status", "=", "ready"]).count(alias="total").execute()[0]["total"]
+contract = ctx.db.describe("accounts")
 
 ctx.db.into("accounts").replace(rows)
+ctx.db.into("account_events").add([{"account_id": "A001", "event_type": "login"}])
 ctx.db.into("accounts").upsert([{"account_id": "A001", "status": "ready"}])
-ctx.db.into("accounts").update_where({"status": "used"}, where={"account_id": "A001"})
-ctx.db.into("accounts").delete_where("status", "eq", "expired")
+ctx.db.into("accounts").update_where({"status": "used"}, where=["account_id", "=", "A001"])
+ctx.db.into("accounts").delete_where(where=["status", "=", "expired"])
 
 event_id = ctx.db.audit("account_events").append(
     entity_key="A001",
@@ -118,8 +122,13 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
 ).execute()
 ```
 
-数据表和命名查询必须先由 `@data_table` / `@data_query` 声明并进入 manifest lock。
-模块不需要管理数据库锁、事务提交或回滚；所有写入由宿主包装成短事务并自动排队、重试、提交或回滚。`replace()` 是全量覆盖语义，并发任务更新同一实体时优先使用 `custom_table` 的 `upsert/update_where/delete_where` 或 `batch()`。
+数据表和只读视图必须先由 `@data_table` / `@data_view` 声明并进入 manifest lock。
+`ctx.db.describe(source)` 读取宿主归一化后的数据源契约；`source` 是逻辑数据源名，不是 SQLite 物理表名。返回值包含 `kind`、`source_kind`、`storage_mode`、`record_key_field`、`columns`、`system_fields`、`writable_fields`、`required_fields` 和 `read_only_fields`。模块侧需要生成 repository 写入契约时，应优先使用这个宿主描述。
+`custom_table` 可以在 `record_key_field` 对应的 integer schema 字段上声明 `auto_increment=True`；这种表用 `ctx.db.into(...).add(...)` 新增记录，新增时可以省略 id，返回值是生成的 id 列表。`upsert` 仍然要求提供主键。
+`where` 条件统一写成数组：`["field", "=", value]`、`["field", ">", value]`、`["field", "in", [...]]`、`["field", "between", [start, end]]`、`["field", "is_null"]`。多个条件默认 `AND`；需要组合时使用 `["or", condition, condition]` 或 `["and", condition, condition]`，例如 `["and", ["or", ["status", "=", "ready"], ["status", "=", "pending"]], ["age", ">=", 18]]`。
+`managed_dataset` 的 `where/select/order_by` 会分成两类字段处理：宿主物理列包括 `record_index`、`record_key`、`run_status`、`record_status`、`created_at`、`updated_at`；schema 业务字段下推为 SQLite `json_extract(record_json, '$.<field>')` 查询。模块可以按 schema 字段过滤、排序和选择，也可以用 `where(...).count(alias="total")` 统计过滤后的记录条数；这个 count 只支持 `count(*)`，不支持 `group_by`、`join` 或其它 aggregate。模块不能查询嵌套 JSON path、schema 外 JSON key 或 raw `record_json`；正式 `ctx.db` 查询面与宿主内部 `query_resource_records()` 使用同一份数据源描述，返回时会把 schema 业务字段和物理字段展开成同一行记录。写入时只有 schema 业务字段会合并进 `record_json`；`run_status` / `record_status` 可通过 replace/upsert/update_where 更新物理状态列，其余宿主生成型物理字段仍由宿主管理。
+数据表和只读视图的列契约不再提供 `filterable` / `sortable` 开关；筛选和排序由统一查询执行器按字段存在性、数据源类型和表达式校验。
+模块不需要管理数据库锁、事务提交或回滚；所有写入由宿主包装成短事务并自动排队、重试、提交或回滚。并发处理保持宿主 `DbWriteCoordinator` 现有策略。
 
 ## `TaskContext.tools`
 
@@ -149,7 +158,7 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
 
 ## 生命周期与环境
 
-0.4.0 不再把 `hooks/`、`env_selectors/` 或 `EnvSelectorSpec` 作为 SDK / Contracts 主路径。生命周期和资源等待由 Core 0.4.0 的运行模板、对象容器和宿主调度负责；模块侧只声明 `@workflow`、`@component`、`@page_action`、`@data_table`、`@data_query`、`@env_candidates` 与 `@env_cleanup_candidates`。
+0.4.0 不再把 `hooks/`、`env_selectors/` 或 `EnvSelectorSpec` 作为 SDK / Contracts 主路径。生命周期和资源等待由 Core 0.4.0 的运行模板、对象容器和宿主调度负责；模块侧只声明 `@workflow`、`@component`、`@page_action`、`@ui_action`、`@data_table`、`@data_view`、`@env_candidates` 与 `@env_cleanup_candidates`。
 
 对象生命周期归宿主所有。Core 会在每个 task/env 内创建独立对象图，并在 `workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`；`workflow` 为 `WorkflowLifecycleInfo`，包含当前 workflow 名称、标签、描述和代码符号。终态时按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`，`outcome.workflow` 保存同一份 workflow 信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。setup 失败会阻止 `workflow.run(ctx)` 并进入 cleanup；cleanup 异常只写日志，不覆盖任务终态或环境回收结果；旧 `aclose()` / `close()` 不再会被宿主调用。
 
@@ -192,3 +201,4 @@ def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None 
 - 被 `@page` 装饰的函数就是页面 `load_handler`
 - `DataTable(query_handler)` 指向真实函数
 - `open_page.page_id` 可以跳到未进菜单的页面
+- Hosted UI 按钮和 CRUD handler 使用 `type: "ui_action"` 调用 `@ui_action`

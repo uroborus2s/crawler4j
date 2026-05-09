@@ -19,8 +19,8 @@ from crawler4j_contracts import (
     ParameterOptionSpec,
     ParameterSpec,
     component,
-    data_query,
     data_table,
+    data_view,
     env_cleanup_candidates,
     env_candidates,
     interface,
@@ -28,6 +28,7 @@ from crawler4j_contracts import (
     object_param,
     page,
     page_action,
+    ui_action,
     workflow,
 )
 
@@ -68,6 +69,10 @@ def test_v2_decorators_attach_metadata_without_instantiating_business_objects():
     async def open_login_page(ctx, url: str):
         return {"url": url}
 
+    @ui_action(name="create_account_from_ui", label="Create account")
+    def create_account_from_ui(ctx, payload: dict):
+        return {"payload": payload}
+
     @page(
         name="dashboard",
         label="Dashboard",
@@ -100,6 +105,11 @@ def test_v2_decorators_attach_metadata_without_instantiating_business_objects():
         inject=(InjectSpec(name="labor", type="interface", target="labor"),),
     )
     assert getattr(open_login_page, CRAWLER4J_META_ATTR).kind == "page_action"
+    assert getattr(create_account_from_ui, CRAWLER4J_META_ATTR) == Crawler4jMeta(
+        kind="ui_action",
+        name="create_account_from_ui",
+        label="Create account",
+    )
     assert getattr(load_dashboard_page, CRAWLER4J_META_ATTR) == Crawler4jMeta(
         kind="page",
         name="dashboard",
@@ -110,7 +120,7 @@ def test_v2_decorators_attach_metadata_without_instantiating_business_objects():
     )
 
 
-def test_data_table_and_query_metadata_express_schema_indexes_and_output_schema():
+def test_data_table_and_view_metadata_express_schema_indexes_and_view_schema():
     table_schema = [
         {"name": "env_id", "type": "integer", "required": True},
         {"name": "account_id", "type": "string", "required": True},
@@ -131,13 +141,13 @@ def test_data_table_and_query_metadata_express_schema_indexes_and_output_schema(
     class AccountsTable:
         pass
 
-    @data_query(
-        name="ready_accounts",
-        source="accounts",
+    @data_view(
+        name="account_overview",
+        sources=["accounts"],
         sql="SELECT account_id FROM {{resource:accounts}}",
-        output_schema=[{"name": "account_id", "type": "string"}],
+        schema=[{"name": "account_id", "type": "string"}],
     )
-    def ready_accounts():
+    def account_overview():
         pass
 
     assert getattr(AccountsTable, CRAWLER4J_META_ATTR).indexes == (
@@ -147,7 +157,76 @@ def test_data_table_and_query_metadata_express_schema_indexes_and_output_schema(
     assert getattr(AccountsTable, CRAWLER4J_META_ATTR).storage_mode == "managed_dataset"
     assert getattr(AccountsTable, CRAWLER4J_META_ATTR).cleanup_policy == "keep"
     assert getattr(AccountsTable, CRAWLER4J_META_ATTR).env_binding_field == "env_id"
-    assert getattr(ready_accounts, CRAWLER4J_META_ATTR).source == "accounts"
+    assert getattr(account_overview, CRAWLER4J_META_ATTR).sources == ("accounts",)
+    assert getattr(account_overview, CRAWLER4J_META_ATTR).cleanup_policy == "drop_view"
+
+
+def test_data_table_custom_table_supports_auto_increment_record_key_schema():
+    @data_table(
+        name="accounts",
+        record_key_field="id",
+        schema=[
+            {"name": "id", "type": "integer", "auto_increment": True},
+            {"name": "account_id", "type": "string"},
+        ],
+    )
+    class AccountsTable:
+        pass
+
+    meta = getattr(AccountsTable, CRAWLER4J_META_ATTR)
+    assert meta.storage_mode == "custom_table"
+    assert meta.schema[0] == {"name": "id", "type": "integer", "auto_increment": True}
+
+
+def test_data_table_rejects_invalid_auto_increment_schema():
+    with pytest.raises(ValueError, match="auto_increment.*record_key_field"):
+
+        @data_table(
+            name="accounts",
+            record_key_field="account_id",
+            schema=[
+                {"name": "id", "type": "integer", "auto_increment": True},
+                {"name": "account_id", "type": "string"},
+            ],
+        )
+        class InvalidNonKeyAutoIncrement:
+            pass
+
+    with pytest.raises(ValueError, match="auto_increment.*integer"):
+
+        @data_table(
+            name="accounts",
+            record_key_field="id",
+            schema=[
+                {"name": "id", "type": "string", "auto_increment": True},
+            ],
+        )
+        class InvalidTextAutoIncrement:
+            pass
+
+    with pytest.raises(ValueError, match="auto_increment.*custom_table"):
+
+        @data_table(
+            name="accounts",
+            storage_mode="managed_dataset",
+            record_key_field="id",
+            schema=[
+                {"name": "id", "type": "integer", "auto_increment": True},
+            ],
+        )
+        class InvalidManagedAutoIncrement:
+            pass
+
+    with pytest.raises(ValueError, match="data_view.*auto_increment"):
+
+        @data_view(
+            name="account_overview",
+            sources=["accounts"],
+            sql="SELECT id FROM {{resource:accounts}}",
+            schema=[{"name": "id", "type": "integer", "auto_increment": True}],
+        )
+        def invalid_view():
+            pass
 
 
 def test_env_candidates_metadata_and_query_chain():

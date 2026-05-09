@@ -43,6 +43,27 @@ async def {name}(ctx: TaskContext, start_url: str = "https://example.com") -> Ta
     )
 '''
 
+UI_ACTION_TEMPLATE = '''"""Hosted UI 操作: {display_name}
+
+{description}
+"""
+
+from typing import Any
+
+from crawler4j_contracts import TaskContext, ui_action
+
+
+@ui_action(
+    name="{name}",
+    label="{display_name}",
+    description="{description}",
+)
+def {name}(ctx: TaskContext, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """执行宿主页用户操作。"""
+    del ctx
+    return {{"ok": True, "payload": dict(payload or {{}})}}
+'''
+
 INTERFACE_TEMPLATE = '''"""接口声明: {display_name}
 
 {description}
@@ -115,7 +136,7 @@ MODEL_PROJECT_README = """# {display_name}
 - `objects/`: 组件实现，使用 `@component`。
 - `workflows/`: 工作流对象，使用 `@workflow`。
 - `tasks/`: 页面操作函数，使用 `@page_action`。
-- `data/`: 数据表与命名查询声明，使用 `@data_table` / `@data_query`。
+- `data/`: 数据表与只读视图声明，使用 `@data_table` / `@data_view`。
 - `pages/`: Hosted UI 页面；可以平铺在 `pages/*.py`，也可以按单层业务分组放到 `pages/<group>/*.py`。
 - `candidates/`: 环境候选纯函数，使用 `@env_candidates`。
 - `cleanups/`: 环境清理候选纯函数，使用 `@env_cleanup_candidates`。
@@ -141,10 +162,10 @@ uv run crawler4j page-action create <name>
 uv run crawler4j page create dashboard
 uv run crawler4j page create account_detail --group account --no-menu
 
-# 创建数据表 / 查询
+# 创建数据表 / 视图
 uv run crawler4j data table create accounts
 uv run crawler4j data table create account_snapshots --storage-mode managed_dataset
-uv run crawler4j data query create get_account_by_id --source accounts
+uv run crawler4j data view create account_overview --source accounts
 
 # 创建环境候选函数
 uv run crawler4j candidate create ready_accounts
@@ -167,7 +188,7 @@ uv run crawler4j package build
 - Core 会自行扫描 v2 装饰器生成运行时 descriptor，不会调用模块根 `run()` 或 `declare_ui()`。
 - 对象依赖和 component 参数可以写在装饰器参数里，也可以写成 `Annotated[..., object_inject(...)]` / `Annotated[..., object_param(...)]`。
 - `object_param(...)` 支持标量、enum、array、object、json、date/datetime/time、url、path、secret，并可从常见 Python 注解推断类型。
-- 表与命名查询统一由装饰器声明；旧 `module.yaml.data` 已不再是 0.4.x 运行契约；快照表需显式 `--storage-mode managed_dataset`。
+- 表与只读视图统一由装饰器声明；旧 `module.yaml.data` 已不再是 0.4.x 运行契约；快照表需显式 `--storage-mode managed_dataset`。
 - 环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，不使用资源池同步或旧 `env_selectors/`。
 - 批量环境清理由 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数声明；模块只返回已绑定且业务上可丢弃的 env id，删除由宿主环境管理页确认后执行。
 - 模块不要导入 `TaskSignal` / `EnvAction`；流程终态用 `TaskResult` 表达，任务结束、失败、超时或被用户中止后的环境统一由宿主回收。
@@ -276,24 +297,25 @@ class {class_name}:
     """{display_name} 表。"""
 '''
 
-DATA_QUERY_TEMPLATE = '''"""数据查询声明: {display_name}
+DATA_VIEW_TEMPLATE = '''"""数据视图声明: {display_name}
 
 {description}
 """
 
-from crawler4j_contracts import data_query
+from crawler4j_contracts import data_view
 
 
-@data_query(
+@data_view(
     name="{name}",
-    source="{source}",
-    sql="SELECT account_id FROM {{{{resource:{source}}}}} WHERE account_id = :account_id LIMIT 1",
-    output_schema=[
+    sources=["{source}"],
+    sql="SELECT account_id, status FROM {{{{resource:{source}}}}}",
+    schema=[
         {{"name": "account_id", "type": "string"}},
+        {{"name": "status", "type": "string"}},
     ],
 )
 def {name}():
-    """{display_name} 查询声明。"""
+    """{display_name} 视图声明。"""
 '''
 
 ENV_CANDIDATES_TEMPLATE = '''"""环境候选函数: {display_name}

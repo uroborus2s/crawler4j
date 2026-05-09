@@ -18,7 +18,7 @@
 | `page` | `page create` `page list` | `pages/<page>.py` 或 `pages/<group>/<file>.py`；`ui_extension.pages[]` 只控制左侧菜单 |
 | `hook` | `hook create` `hook list` | `hooks/<hook>.py` |
 | `env-selector` | `env-selector create` `env-selector list` | `env_selectors/<name>.py` |
-| `data` | `data list` `data resource create` `data view create` `data query create` `data seed create` | `module.yaml.data`、`data/sql/*`、`data/seeds/*` |
+| `data` | `data list` `data resource create` `data view create` `data view create` `data seed create` | `module.yaml.data`、`data/sql/*`、`data/seeds/*` |
 | `config` | `config show` `config set ...` `config lint` | `module.yaml.config_defaults` |
 | `check` | `check structure` `check release` `check full` | 本地校验 gate |
 | `package` | `package build` `package verify` | ZIP 包 |
@@ -31,11 +31,11 @@
 
 - `runtime_api: core-native-v1`
 - `default_workflow`
-- `module.yaml.data.resources/views/queries/seeds`
+- `module.yaml.data.resources/views/seeds`
 - contracts-only 运行时依赖
 - sdk-only 开发依赖
 - `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`
-- `data/sql/views`、`data/sql/queries`、`data/seeds`
+- `data/sql/views`、`data/sql/views`、`data/seeds`
 
 不会再生成：
 
@@ -43,7 +43,7 @@
 - 根包运行薄壳
 - 任何兼容桥
 
-`module show` 现在还会额外打印 `resources/views/queries/seeds` 数量，方便你快速确认当前模块的数据契约规模。
+`module show` 现在还会额外打印 `resources/views/seeds` 数量，方便你快速确认当前模块的数据契约规模。
 
 ## `module repair-init`
 
@@ -59,14 +59,14 @@ uv run crawler4j module repair-init
 
 - `data resource create <name> [--storage-mode managed_dataset|custom_table]`
 - `data view create <view_id> --source <resource_id>`
-- `data query create <query_id> --source <resource_id>`
+- `data view create <view_id> --source <resource_id>`
 - `data seed create <seed_id> --resource <resource_id>`
 - `data list`
 
 当前约束：
 
 - `view` / `query` 只允许引用已经登记的 `custom_table` 资源
-- SQL 文件会固定写到 `data/sql/views`、`data/sql/queries`
+- SQL 文件会固定写到 `data/sql/views`、`data/sql/views`
 - `seed` 固定写到 `data/seeds/*.json`
 
 ## `check full`
@@ -83,7 +83,7 @@ uv run crawler4j module repair-init
 - 任务、工作流、环境选择器的文件名与声明名一致
 - `ui_extension.pages[]` 中的菜单页面存在对应页面文件；所有页面文件的 `PAGE.id` 为唯一扁平 snake_case
 - 页面 `load_handler` 必须是同步函数；内联 `query_handler` 需要存在且签名兼容
-- 视图/命名查询只引用 `custom_table` 资源
+- 视图/只读视图只引用 `custom_table` 资源
 - `data/sql` / `data/seeds` 文件路径、格式和占位符合法
 - SQL 只能是单条 `SELECT/WITH`，且 `{{resource:<id>}}` 必须与 `source_resource_ids` 一致
 - legacy `ui/`、`config_schema.json`、`strategy.yaml` 已清理

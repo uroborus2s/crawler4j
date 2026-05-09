@@ -25,6 +25,9 @@ class BrowserToolConfig:
     mouse_down_dwell_range: tuple[float, float] = (0.045, 0.135)
     hover_dwell_range: tuple[float, float] = (0.18, 0.52)
     press_dwell_range: tuple[float, float] = (0.035, 0.12)
+    pause_segments_range: tuple[int, int] = (2, 4)
+    idle_motion_radius_range: tuple[float, float] = (4.0, 14.0)
+    navigation_scan_radius_range: tuple[float, float] = (8.0, 24.0)
     click_margin_ratio: float = 0.18
     drag_margin_ratio: float = 0.14
     entry_point_x_range: tuple[float, float] = (92.0, 262.0)
@@ -34,6 +37,7 @@ class BrowserToolConfig:
     drag_overshoot_ratio: tuple[float, float] = (0.035, 0.075)
     drag_recover_ratio: tuple[float, float] = (0.12, 0.22)
     scroll_wobble_ratio: float = 0.18
+    viewport_margin: float = 1.0
     select_all_shortcut: str | None = None
 
     def __post_init__(self) -> None:
@@ -78,16 +82,31 @@ class TypingTrace:
     correction_attempted: bool
     correction_probability: float
     sensitive_input: bool
+    sensitive_reasons: list[str]
+    field_context: dict[str, Any] | None
+
+
+@dataclass(slots=True)
+class PauseTrace:
+    scheduled_delay: float
+    idle_motion_duration: float
+    effective_delay: float
+    total_delay: float
+    segments: list[float]
+    idle_motion: dict[str, Any] | None
 
 
 @dataclass(slots=True)
 class MoveTrace:
     start: tuple[float, float]
     target: tuple[float, float]
+    requested_target: tuple[float, float]
     distance: float
     steps: int
     duration: float
     target_size: dict[str, float] | None
+    acquisition_index: float
+    viewport: dict[str, float] | None
 
 
 @dataclass(slots=True)
@@ -95,9 +114,12 @@ class DragTrace:
     start: tuple[float, float]
     probe: tuple[float, float]
     approach: tuple[float, float]
-    overshoot: tuple[float, float]
+    overshoot: tuple[float, float] | None
+    settle: tuple[float, float] | None
     target: tuple[float, float]
     steps: tuple[int, int, int, int]
+    down_dwell: float
+    release_pause: float
 
 
 @dataclass(slots=True)
@@ -106,6 +128,9 @@ class ScrollTrace:
     pauses: list[float]
     inertia: bool
     correction: tuple[float, float] | None
+    before: dict[str, Any] | None
+    after: dict[str, Any] | None
+    boundary: dict[str, bool] | None
 
 
 class CoreBrowserTools:
@@ -139,11 +164,30 @@ class CoreBrowserTools:
     def is_available(self) -> bool:
         return self._page_or_none() is not None
 
-    async def pause(self, minimum: float | None = None, maximum: float | None = None) -> dict[str, Any]:
+    async def pause(
+        self,
+        minimum: float | None = None,
+        maximum: float | None = None,
+        *,
+        idle_motion: bool = True,
+    ) -> dict[str, Any]:
+        self._validate_optional_range("browser.pause", minimum, maximum)
         low, high = self._pick_range(minimum, maximum, default=self._session_profile.pause_range)
         delay = self._rand_float(low, high)
-        await asyncio.sleep(delay)
-        return {"delay": delay, "session": self._session_metadata()}
+        idle_trace = await self._idle_micro_motion() if idle_motion else None
+        idle_duration = self._trace_duration(idle_trace)
+        segments = self._split_pause_segments(delay)
+        for segment in segments:
+            await asyncio.sleep(segment)
+        trace = PauseTrace(
+            scheduled_delay=delay,
+            idle_motion_duration=idle_duration,
+            effective_delay=delay + idle_duration,
+            total_delay=delay + idle_duration,
+            segments=segments,
+            idle_motion=idle_trace,
+        )
+        return {"delay": delay, "trace": asdict(trace), "session": self._session_metadata()}
 
     async def goto(
         self,
@@ -157,9 +201,13 @@ class CoreBrowserTools:
         page = self._page()
         self._validate_range("before_pause", before_pause)
         self._validate_range("after_pause", after_pause)
-        before = await self.pause(*before_pause)
+        pre_scan = await self._idle_micro_motion(radius_range=self._config.navigation_scan_radius_range)
+        before = await self.pause(*before_pause, idle_motion=False)
         await page.goto(url, wait_until=wait_until, timeout=timeout)
-        after = await self.pause(*after_pause)
+        self._current_position = self._random_entry_point()
+        self._has_moved = False
+        after = await self.pause(*after_pause, idle_motion=False)
+        post_scan = await self._idle_micro_motion(radius_range=self._config.navigation_scan_radius_range)
         settle_delay = self._rand_float(0.08, 0.22)
         await asyncio.sleep(settle_delay)
         return {
@@ -171,6 +219,8 @@ class CoreBrowserTools:
                 "pre_navigation_delay": before["delay"],
                 "post_navigation_delay": after["delay"],
                 "settle_delay": settle_delay,
+                "pre_scan": pre_scan,
+                "post_scan": post_scan,
             },
             "session": self._session_metadata(),
         }
@@ -228,7 +278,7 @@ class CoreBrowserTools:
             target_y = float(y)
         await self._move_to(target_x, target_y, steps=steps, target_size=target_size)
         move_trace = self._move_trace_dict()
-        await self._settle_around_point(target_x, target_y)
+        settle_trace = await self._settle_around_point(target_x, target_y)
         pre_click_pause = self._rand_float(*self._session_profile.click_pause_range)
         await asyncio.sleep(pre_click_pause)
         dwells: list[float] = []
@@ -247,6 +297,7 @@ class CoreBrowserTools:
             "selector": selector_hint or selector,
             "trace": {
                 "move": move_trace,
+                "settle": settle_trace,
                 "target_size": target_size,
                 "pre_click_pause": pre_click_pause,
                 "dwell": dwells[0] if dwells else 0.0,
@@ -279,13 +330,15 @@ class CoreBrowserTools:
         if x is None or y is None:
             raise ValueError("browser.hover 需要 selector / locator 或 x+y 坐标")
         target = await self._move_to(float(x), float(y), target_size=target_size)
+        move_trace = self._move_trace_dict()
         dwell = self._rand_float(*self._config.hover_dwell_range)
+        drift = await self._hover_drift(target[0], target[1], target_size=target_size)
         await asyncio.sleep(dwell)
         return {
             "point": {"x": target[0], "y": target[1]},
             "selector": selector_hint or selector,
             "pause": dwell,
-            "trace": {"move": self._move_trace_dict(), "target_size": target_size, "dwell": dwell},
+            "trace": {"move": move_trace, "target_size": target_size, "dwell": dwell, "drift": drift},
             "session": self._session_metadata(),
         }
 
@@ -316,15 +369,18 @@ class CoreBrowserTools:
             if not selector:
                 raise ValueError("browser.type 需要 selector 或 locator")
             locator = self._page().locator(selector).first
-        await self.click(locator=locator, selector_hint=selector)
+        field_context = await self._field_context(locator, selector_hint=selector)
+        focus_click = await self.click(locator=locator, selector_hint=selector)
         initial_pause_range = start_pause_range or self._session_profile.typing_start_pause_range
-        await asyncio.sleep(self._rand_float(*initial_pause_range))
+        start_pause = self._rand_float(*initial_pause_range)
+        await asyncio.sleep(start_pause)
         if mode == "exact":
             trace = await self._type_exact(
                 text=text,
                 clear=clear,
                 chunk_pause_range=chunk_pause_range,
                 chunk_range=chunk_range,
+                field_context=field_context,
             )
         else:
             trace = await self._type_natural(
@@ -332,27 +388,39 @@ class CoreBrowserTools:
                 clear=clear,
                 chunk_pause_range=chunk_pause_range,
                 allow_correction=allow_correction,
+                field_context=field_context,
             )
+        enter_pause: float | None = None
         if press_enter:
-            await asyncio.sleep(self._rand_float(0.04, 0.12))
+            enter_pause = self._rand_float(0.04, 0.12)
+            await asyncio.sleep(enter_pause)
             await self._page().keyboard.press("Enter")
+        trace_payload = asdict(trace)
+        trace_payload.update(
+            {
+                "focus_click": focus_click["trace"],
+                "start_pause": start_pause,
+                "enter_pause": enter_pause,
+            }
+        )
         return {
             "text": text,
             "mode": mode,
             "press_enter": press_enter,
-            "trace": asdict(trace),
+            "trace": trace_payload,
             "session": self._session_metadata(),
         }
 
     async def press(self, *, key: str) -> dict[str, Any]:
         before = self._rand_float(0.035, 0.11)
         await asyncio.sleep(before)
-        dwell = await self._press_key_down_up(key)
+        key_trace = await self._press_key_down_up(key)
         after = self._rand_float(0.025, 0.085)
         await asyncio.sleep(after)
+        key_trace.update({"before": before, "after": after})
         return {
             "key": key,
-            "trace": {"strategy": "down_up", "before": before, "dwell": dwell, "after": after},
+            "trace": key_trace,
             "session": self._session_metadata(),
         }
 
@@ -433,7 +501,8 @@ class CoreBrowserTools:
         weight_total = sum(weights)
         pauses: list[float] = []
         chunks_recorded: list[tuple[float, float]] = []
-        await self.pause(0.01, 0.05)
+        before = await self._scroll_snapshot()
+        await self.pause(0.01, 0.05, idle_motion=False)
         for index, weight in enumerate(weights):
             if index == chunk_count - 1:
                 chunk_x = remaining_x
@@ -459,7 +528,16 @@ class CoreBrowserTools:
             chunks_recorded.append(correction)
             pauses.append(pause)
             await asyncio.sleep(pause)
-        trace = ScrollTrace(chunks=chunks_recorded, pauses=pauses, inertia=True, correction=correction)
+        after = await self._scroll_snapshot()
+        trace = ScrollTrace(
+            chunks=chunks_recorded,
+            pauses=pauses,
+            inertia=True,
+            correction=correction,
+            before=before,
+            after=after,
+            boundary=self._scroll_boundary(before=before, after=after, delta_y=float(delta_y)),
+        )
         return {
             "delta_x": float(delta_x),
             "delta_y": float(delta_y),
@@ -468,10 +546,34 @@ class CoreBrowserTools:
         }
 
     async def page_down(self) -> dict[str, Any]:
-        return await self.scroll(delta_y=self._rand_float(520.0, 960.0))
+        viewport_height = self._viewport_height(default=self._rand_float(720.0, 960.0))
+        ratio = self._rand_float(0.72, 0.92)
+        delta_y = viewport_height * ratio
+        result = await self.scroll(delta_y=delta_y)
+        result["trace"].update(
+            {
+                "action": "page_down",
+                "viewport_height": viewport_height,
+                "distance_ratio": ratio,
+                "derived_delta_y": delta_y,
+            }
+        )
+        return result
 
     async def page_up(self) -> dict[str, Any]:
-        return await self.scroll(delta_y=-self._rand_float(520.0, 960.0))
+        viewport_height = self._viewport_height(default=self._rand_float(720.0, 960.0))
+        ratio = self._rand_float(0.72, 0.92)
+        delta_y = -(viewport_height * ratio)
+        result = await self.scroll(delta_y=delta_y)
+        result["trace"].update(
+            {
+                "action": "page_up",
+                "viewport_height": viewport_height,
+                "distance_ratio": ratio,
+                "derived_delta_y": delta_y,
+            }
+        )
+        return result
 
     def current_url(self) -> str:
         page = self._page_or_none()
@@ -503,6 +605,7 @@ class CoreBrowserTools:
         clear: bool,
         chunk_pause_range: tuple[float, float] | None,
         chunk_range: tuple[int, int] | None,
+        field_context: dict[str, Any] | None,
     ) -> TypingTrace:
         if clear:
             await self._page().keyboard.press(self._config.select_all_shortcut or "Control+A")
@@ -513,6 +616,7 @@ class CoreBrowserTools:
             chunk_max = 4 if len(text) >= 6 else max(2, len(text))
         else:
             chunk_min, chunk_max = chunk_range
+        sensitive_reasons = self._sensitive_reasons(text, field_context=field_context)
         trace = TypingTrace(
             mode="exact",
             clear_strategy="select_all" if clear else "none",
@@ -521,7 +625,9 @@ class CoreBrowserTools:
             correction_allowed=False,
             correction_attempted=False,
             correction_probability=0.0,
-            sensitive_input=self._looks_sensitive(text),
+            sensitive_input=bool(sensitive_reasons),
+            sensitive_reasons=sensitive_reasons,
+            field_context=field_context,
         )
         pauses = chunk_pause_range or self._session_profile.typing_chunk_pause_range
         for index, chunk in enumerate(trace.chunks):
@@ -537,6 +643,7 @@ class CoreBrowserTools:
         clear: bool,
         chunk_pause_range: tuple[float, float] | None,
         allow_correction: bool | None,
+        field_context: dict[str, Any] | None,
     ) -> TypingTrace:
         if clear:
             await self._page().keyboard.press(self._config.select_all_shortcut or "Control+A")
@@ -546,7 +653,8 @@ class CoreBrowserTools:
         chunks = self._chunk_text(text, *self._typing_chunk_range_for_mode(mode)) or ([text] if text else [])
         corrections: list[str] = []
         pauses = chunk_pause_range or self._session_profile.typing_chunk_pause_range
-        sensitive_input = self._looks_sensitive(text)
+        sensitive_reasons = self._sensitive_reasons(text, field_context=field_context)
+        sensitive_input = bool(sensitive_reasons)
         correction_allowed = (not sensitive_input) if allow_correction is None else allow_correction
         correction_probability = self._session_profile.typing_correction_probability if correction_allowed else 0.0
         correction_attempted = (
@@ -573,6 +681,8 @@ class CoreBrowserTools:
             correction_attempted=correction_attempted,
             correction_probability=correction_probability,
             sensitive_input=sensitive_input,
+            sensitive_reasons=sensitive_reasons,
+            field_context=field_context,
         )
 
     async def _type_with_rewrite(
@@ -634,31 +744,39 @@ class CoreBrowserTools:
         await self._move_to(start_x, start_y)
         await asyncio.sleep(self._rand_float(*self._session_profile.drag_pre_pause_range))
         await self._page().mouse.down()
-        await asyncio.sleep(self._rand_float(0.05, 0.13))
+        down_dwell = self._rand_float(0.05, 0.13)
+        release_pause_delay = 0.0
+        await asyncio.sleep(down_dwell)
         total_steps = steps if steps is not None else self._rand_int(*self._session_profile.drag_steps_range)
         probe_steps = max(2, int(total_steps * 0.12))
         approach_steps = max(4, int(total_steps * 0.34))
         overshoot_steps = max(3, int(total_steps * 0.34))
         recover_steps = max(3, int(total_steps * 0.2))
-        await self._move_to(probe_x, probe_y, steps=probe_steps)
-        await asyncio.sleep(self._rand_float(0.03, 0.08))
-        await self._move_to(approach_x, approach_y, steps=approach_steps)
-        await asyncio.sleep(self._rand_float(0.03, 0.08))
-        await self._move_to(overshoot_x, overshoot_y, steps=overshoot_steps)
-        await asyncio.sleep(self._rand_float(0.03, 0.08))
-        await self._move_to(recover_x, recover_y, steps=recover_steps)
-        await asyncio.sleep(self._rand_float(0.02, 0.06))
-        await self._move_to(target_x, target_y, steps=max(2, recover_steps // 2))
-        await self._page().mouse.up()
+        try:
+            await self._move_to(probe_x, probe_y, steps=probe_steps)
+            await asyncio.sleep(self._rand_float(0.03, 0.08))
+            await self._move_to(approach_x, approach_y, steps=approach_steps)
+            await asyncio.sleep(self._rand_float(0.03, 0.08))
+            await self._move_to(overshoot_x, overshoot_y, steps=overshoot_steps)
+            await asyncio.sleep(self._rand_float(0.03, 0.08))
+            await self._move_to(recover_x, recover_y, steps=recover_steps)
+            await asyncio.sleep(self._rand_float(0.02, 0.06))
+            await self._move_to(target_x, target_y, steps=max(2, recover_steps // 2))
+        finally:
+            await self._page().mouse.up()
         if release_pause:
-            await asyncio.sleep(self._rand_float(0.1, 0.22))
+            release_pause_delay = self._rand_float(0.1, 0.22)
+            await asyncio.sleep(release_pause_delay)
         trace = DragTrace(
             start=(start_x, start_y),
             probe=(probe_x, probe_y),
             approach=(approach_x, approach_y),
             overshoot=(overshoot_x, overshoot_y),
+            settle=(recover_x, recover_y),
             target=(target_x, target_y),
             steps=(probe_steps, approach_steps, overshoot_steps, recover_steps),
+            down_dwell=down_dwell,
+            release_pause=release_pause_delay,
         )
         self._current_position = (target_x, target_y)
         return (target_x, target_y), trace
@@ -694,29 +812,37 @@ class CoreBrowserTools:
         await self._move_to(start_x, start_y)
         await asyncio.sleep(self._rand_float(*self._session_profile.drag_pre_pause_range))
         await self._page().mouse.down()
-        await asyncio.sleep(self._rand_float(0.05, 0.12))
+        down_dwell = self._rand_float(0.05, 0.12)
+        release_pause_delay = 0.0
+        await asyncio.sleep(down_dwell)
         total_steps = steps if steps is not None else self._rand_int(*self._session_profile.drag_steps_range)
         probe_steps = max(2, int(total_steps * 0.16))
         approach_steps = max(4, int(total_steps * 0.44))
         settle_steps = max(3, int(total_steps * 0.26))
         final_steps = max(2, int(total_steps * 0.14))
-        await self._move_to_precise(probe_x, probe_y, steps=probe_steps)
-        await asyncio.sleep(self._rand_float(0.02, 0.06))
-        await self._move_to_precise(approach_x, approach_y, steps=approach_steps)
-        await asyncio.sleep(self._rand_float(0.02, 0.05))
-        await self._move_to_precise(pre_target_x, pre_target_y, steps=settle_steps)
-        await asyncio.sleep(self._rand_float(0.015, 0.04))
-        await self._move_to_precise(target_x, target_y, steps=final_steps)
-        await self._page().mouse.up()
+        try:
+            await self._move_to_precise(probe_x, probe_y, steps=probe_steps)
+            await asyncio.sleep(self._rand_float(0.02, 0.06))
+            await self._move_to_precise(approach_x, approach_y, steps=approach_steps)
+            await asyncio.sleep(self._rand_float(0.02, 0.05))
+            await self._move_to_precise(pre_target_x, pre_target_y, steps=settle_steps)
+            await asyncio.sleep(self._rand_float(0.015, 0.04))
+            await self._move_to_precise(target_x, target_y, steps=final_steps)
+        finally:
+            await self._page().mouse.up()
         if release_pause:
-            await asyncio.sleep(self._rand_float(0.09, 0.18))
+            release_pause_delay = self._rand_float(0.09, 0.18)
+            await asyncio.sleep(release_pause_delay)
         trace = DragTrace(
             start=(start_x, start_y),
             probe=(probe_x, probe_y),
             approach=(approach_x, approach_y),
-            overshoot=(pre_target_x, pre_target_y),
+            overshoot=None,
+            settle=(pre_target_x, pre_target_y),
             target=(target_x, target_y),
             steps=(probe_steps, approach_steps, settle_steps, final_steps),
+            down_dwell=down_dwell,
+            release_pause=release_pause_delay,
         )
         self._current_position = (target_x, target_y)
         return (target_x, target_y), trace
@@ -738,6 +864,89 @@ class CoreBrowserTools:
             return None
         return box
 
+    async def _field_context(self, locator: Any, *, selector_hint: str | None) -> dict[str, Any] | None:
+        if locator is None:
+            return None
+        context: dict[str, Any] = {"selector": selector_hint}
+        for name in ("type", "name", "id", "autocomplete", "inputmode", "placeholder", "aria-label"):
+            value = await self._locator_attribute(locator, name)
+            if value not in (None, ""):
+                context[name.replace("-", "_")] = str(value)
+        if len(context) == 1 and context.get("selector") is None:
+            return None
+        return context
+
+    async def _locator_attribute(self, locator: Any, name: str) -> str | None:
+        getter = getattr(locator, "get_attribute", None)
+        if callable(getter):
+            try:
+                value = await getter(name)
+            except Exception:
+                value = None
+            if value not in (None, ""):
+                return str(value)
+        evaluator = getattr(locator, "evaluate", None)
+        if callable(evaluator):
+            try:
+                value = await evaluator("(element, name) => element.getAttribute(name)", name)
+            except TypeError:
+                try:
+                    value = await evaluator(f"(element) => element.getAttribute({name!r})")
+                except Exception:
+                    value = None
+            except Exception:
+                value = None
+            if value not in (None, ""):
+                return str(value)
+        return None
+
+    async def _scroll_snapshot(self) -> dict[str, Any] | None:
+        page = self._page_or_none()
+        evaluator = getattr(page, "evaluate", None) if page is not None else None
+        if not callable(evaluator):
+            return None
+        try:
+            snapshot = await evaluator(
+                """() => ({
+                    x: window.scrollX,
+                    y: window.scrollY,
+                    maxY: Math.max(0, document.documentElement.scrollHeight - window.innerHeight),
+                    maxX: Math.max(0, document.documentElement.scrollWidth - window.innerWidth)
+                })"""
+            )
+        except Exception:
+            return None
+        if not isinstance(snapshot, dict):
+            return None
+        normalized: dict[str, Any] = {}
+        for key in ("x", "y", "maxX", "maxY"):
+            value = snapshot.get(key)
+            if isinstance(value, int | float):
+                normalized[key] = float(value)
+        return normalized or None
+
+    def _scroll_boundary(
+        self,
+        *,
+        before: dict[str, Any] | None,
+        after: dict[str, Any] | None,
+        delta_y: float,
+    ) -> dict[str, bool] | None:
+        if not before or not after:
+            return None
+        y = float(after.get("y", 0.0))
+        max_y = float(after.get("maxY", 0.0))
+        moved = abs(y - float(before.get("y", 0.0))) > 0.5
+        at_top = y <= 0.5
+        at_bottom = y >= max(0.0, max_y - 0.5)
+        blocked = (delta_y < 0 and at_top and not moved) or (delta_y > 0 and at_bottom and not moved)
+        return {
+            "moved": moved,
+            "at_top": at_top,
+            "at_bottom": at_bottom,
+            "blocked": blocked,
+        }
+
     async def _move_to(
         self,
         x: float,
@@ -747,11 +956,15 @@ class CoreBrowserTools:
         target_size: dict[str, float] | None = None,
     ) -> tuple[float, float]:
         start_x, start_y = self._ensure_position()
+        requested_x, requested_y = x, y
+        viewport = self._viewport_size()
+        x, y = self._clamp_to_viewport(x, y, viewport=viewport)
         if not self._has_moved:
             await self._page().mouse.move(start_x, start_y)
             await asyncio.sleep(self._rand_float(0.01, 0.03))
             self._has_moved = True
         step_count = self._planned_move_steps(start_x, start_y, x, y, steps=steps, target_size=target_size)
+        planned_duration = self._planned_move_duration(start_x, start_y, x, y, target_size=target_size)
         control_1_x, control_1_y = self._curve_control_point(
             start_x, start_y, x, y, 0.24, self._session_profile.motion_curve
         )
@@ -765,17 +978,20 @@ class CoreBrowserTools:
             px += wobble * self._session_profile.scroll_wobble_ratio
             py += wobble * self._session_profile.scroll_wobble_ratio
             await self._page().mouse.move(px, py)
-            pause = self._rand_float(0.004, 0.015)
+            pause = max(0.003, (planned_duration / step_count) * self._rand_float(0.72, 1.28))
             duration += pause
             await asyncio.sleep(pause)
         self._current_position = (x, y)
         self._last_move_trace = MoveTrace(
             start=(start_x, start_y),
             target=(x, y),
+            requested_target=(requested_x, requested_y),
             distance=self._distance(start_x, start_y, x, y),
             steps=step_count,
             duration=duration,
             target_size=target_size,
+            acquisition_index=self._target_acquisition_index(start_x, start_y, x, y, target_size=target_size),
+            viewport=viewport,
         )
         return x, y
 
@@ -788,11 +1004,15 @@ class CoreBrowserTools:
         target_size: dict[str, float] | None = None,
     ) -> tuple[float, float]:
         start_x, start_y = self._ensure_position()
+        requested_x, requested_y = x, y
+        viewport = self._viewport_size()
+        x, y = self._clamp_to_viewport(x, y, viewport=viewport)
         if not self._has_moved:
             await self._page().mouse.move(start_x, start_y)
             await asyncio.sleep(self._rand_float(0.01, 0.03))
             self._has_moved = True
         step_count = self._planned_move_steps(start_x, start_y, x, y, steps=steps, target_size=target_size)
+        planned_duration = self._planned_move_duration(start_x, start_y, x, y, target_size=target_size, precise=True)
         min_x = min(start_x, x)
         max_x = max(start_x, x)
         min_y = min(start_y, y) - 0.8
@@ -808,28 +1028,89 @@ class CoreBrowserTools:
             px = self._clamp_between(px, min_x, max_x)
             py = self._clamp_between(py, min_y, max_y)
             await self._page().mouse.move(px, py)
-            pause = self._rand_float(0.004, 0.012)
+            pause = max(0.003, (planned_duration / step_count) * self._rand_float(0.78, 1.18))
             duration += pause
             await asyncio.sleep(pause)
         self._current_position = (x, y)
         self._last_move_trace = MoveTrace(
             start=(start_x, start_y),
             target=(x, y),
+            requested_target=(requested_x, requested_y),
             distance=self._distance(start_x, start_y, x, y),
             steps=step_count,
             duration=duration,
             target_size=target_size,
+            acquisition_index=self._target_acquisition_index(start_x, start_y, x, y, target_size=target_size),
+            viewport=viewport,
         )
         return x, y
 
-    async def _settle_around_point(self, x: float, y: float) -> None:
+    async def _settle_around_point(self, x: float, y: float) -> list[dict[str, Any]]:
         if self._rand_float(0.0, 1.0) > 0.68:
-            return
+            return []
         settle_x = x + self._rand_float(-2.8, 2.8)
         settle_y = y + self._rand_float(-2.4, 2.4)
         await self._move_to(settle_x, settle_y, steps=max(2, self._rand_int(2, 4)))
+        outward = self._move_trace_dict()
         await asyncio.sleep(self._rand_float(0.01, 0.04))
         await self._move_to(x, y, steps=max(2, self._rand_int(2, 4)))
+        back = self._move_trace_dict()
+        return [trace for trace in (outward, back) if trace is not None]
+
+    async def _idle_micro_motion(
+        self,
+        *,
+        radius_range: tuple[float, float] | None = None,
+    ) -> dict[str, Any] | None:
+        if self._page_or_none() is None:
+            return None
+        low, high = radius_range or self._config.idle_motion_radius_range
+        radius = self._rand_float(low, high)
+        angle = self._rand_float(0.0, math.tau)
+        start_x, start_y = self._ensure_position()
+        drift_x = start_x + math.cos(angle) * radius
+        drift_y = start_y + math.sin(angle) * radius
+        await self._move_to_precise(drift_x, drift_y, steps=self._rand_int(2, 5))
+        outward = self._move_trace_dict()
+        dwell = self._rand_float(0.012, 0.045)
+        await asyncio.sleep(dwell)
+        await self._move_to_precise(start_x, start_y, steps=self._rand_int(2, 4))
+        back = self._move_trace_dict()
+        return {
+            "start": {"x": start_x, "y": start_y},
+            "drift": {"x": drift_x, "y": drift_y},
+            "radius": radius,
+            "dwell": dwell,
+            "outward": outward,
+            "back": back,
+            "duration": self._trace_duration({"outward": outward, "back": back, "dwell": dwell}),
+        }
+
+    async def _hover_drift(
+        self,
+        x: float,
+        y: float,
+        *,
+        target_size: dict[str, float] | None,
+    ) -> list[dict[str, Any]]:
+        drift_count = self._rand_int(1, 2)
+        target_width = min(target_size["width"], target_size["height"]) if target_size else 24.0
+        radius = self._clamp_between(target_width * self._rand_float(0.03, 0.08), 0.8, 4.5)
+        traces: list[dict[str, Any]] = []
+        for _ in range(drift_count):
+            angle = self._rand_float(0.0, math.tau)
+            drift_x = x + math.cos(angle) * radius
+            drift_y = y + math.sin(angle) * radius
+            await self._move_to_precise(drift_x, drift_y, steps=self._rand_int(2, 4), target_size=target_size)
+            trace = self._move_trace_dict()
+            if trace is not None:
+                traces.append(trace)
+            await asyncio.sleep(self._rand_float(0.018, 0.055))
+        await self._move_to_precise(x, y, steps=self._rand_int(2, 4), target_size=target_size)
+        trace = self._move_trace_dict()
+        if trace is not None:
+            traces.append(trace)
+        return traces
 
     def _ensure_position(self) -> tuple[float, float]:
         if self._current_position is None:
@@ -945,20 +1226,55 @@ class CoreBrowserTools:
             return steps
         distance = self._distance(start_x, start_y, target_x, target_y)
         base_steps = self._rand_int(*self._session_profile.move_steps_range)
-        distance_steps = int(max(1.0, distance / self._rand_float(12.0, 18.0)))
-        target_factor = 1.0
-        if target_size is not None:
-            min_dimension = max(1.0, min(target_size["width"], target_size["height"]))
-            if min_dimension < 18.0:
-                target_factor = 1.75
-            elif min_dimension < 36.0:
-                target_factor = 1.35
-            elif min_dimension > 96.0:
-                target_factor = 0.72
-            elif min_dimension > 56.0:
-                target_factor = 0.86
-        planned = max(base_steps, int(round(distance_steps * target_factor)))
+        acquisition_index = self._target_acquisition_index(
+            start_x,
+            start_y,
+            target_x,
+            target_y,
+            target_size=target_size,
+        )
+        distance_steps = int(max(1.0, distance / self._rand_float(14.0, 22.0)))
+        planned = max(base_steps, int(round(distance_steps + acquisition_index * self._rand_float(3.8, 5.8))))
         return max(1, int(round(planned * self._session_profile.motion_speed)))
+
+    def _planned_move_duration(
+        self,
+        start_x: float,
+        start_y: float,
+        target_x: float,
+        target_y: float,
+        *,
+        target_size: dict[str, float] | None,
+        precise: bool = False,
+    ) -> float:
+        distance = self._distance(start_x, start_y, target_x, target_y)
+        acquisition_index = self._target_acquisition_index(
+            start_x,
+            start_y,
+            target_x,
+            target_y,
+            target_size=target_size,
+        )
+        base = 0.08 + distance / self._rand_float(1450.0, 2100.0)
+        precision_cost = acquisition_index * self._rand_float(0.018, 0.032)
+        if precise:
+            precision_cost *= 1.18
+        return max(0.035, (base + precision_cost) / self._session_profile.motion_speed)
+
+    def _target_acquisition_index(
+        self,
+        start_x: float,
+        start_y: float,
+        target_x: float,
+        target_y: float,
+        *,
+        target_size: dict[str, float] | None,
+    ) -> float:
+        distance = self._distance(start_x, start_y, target_x, target_y)
+        width = 24.0
+        if target_size is not None:
+            width = max(3.0, min(float(target_size["width"]), float(target_size["height"])))
+        return math.log2((distance / width) + 1.0)
 
     def _distance(self, start_x: float, start_y: float, target_x: float, target_y: float) -> float:
         return math.hypot(target_x - start_x, target_y - start_y)
@@ -1021,6 +1337,87 @@ class CoreBrowserTools:
             return max(2, low), max(2, high)
         return max(2, low + 1), max(2, high + 1)
 
+    def _split_pause_segments(self, delay: float) -> list[float]:
+        low, high = self._config.pause_segments_range
+        segment_count = self._rand_int(max(1, low), max(1, high))
+        if segment_count <= 1 or delay <= 0.015:
+            return [delay]
+        weights = [self._rand_float(0.65, 1.45) for _ in range(segment_count)]
+        weight_total = sum(weights)
+        remaining = delay
+        segments: list[float] = []
+        for index, weight in enumerate(weights):
+            if index == segment_count - 1:
+                segment = remaining
+            else:
+                segment = delay * (weight / weight_total)
+                remaining -= segment
+            segments.append(max(0.0, segment))
+        return segments
+
+    def _trace_duration(self, trace: dict[str, Any] | None) -> float:
+        if not trace:
+            return 0.0
+        duration = trace.get("duration")
+        if isinstance(duration, int | float):
+            return float(duration)
+        total = 0.0
+        dwell = trace.get("dwell")
+        if isinstance(dwell, int | float):
+            total += float(dwell)
+        for key in ("outward", "back"):
+            child = trace.get(key)
+            if isinstance(child, dict) and isinstance(child.get("duration"), int | float):
+                total += float(child["duration"])
+        return total
+
+    def _viewport_height(self, *, default: float) -> float:
+        page = self._page_or_none()
+        viewport = getattr(page, "viewport_size", None) if page is not None else None
+        if callable(viewport):
+            try:
+                viewport = viewport()
+            except Exception:
+                viewport = None
+        if isinstance(viewport, dict):
+            height = viewport.get("height")
+            if isinstance(height, int | float) and height > 0:
+                return float(height)
+        return float(default)
+
+    def _viewport_size(self) -> dict[str, float] | None:
+        page = self._page_or_none()
+        viewport = getattr(page, "viewport_size", None) if page is not None else None
+        if callable(viewport):
+            try:
+                viewport = viewport()
+            except Exception:
+                viewport = None
+        if not isinstance(viewport, dict):
+            return None
+        width = viewport.get("width")
+        height = viewport.get("height")
+        if not isinstance(width, int | float) or not isinstance(height, int | float):
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return {"width": float(width), "height": float(height)}
+
+    def _clamp_to_viewport(
+        self,
+        x: float,
+        y: float,
+        *,
+        viewport: dict[str, float] | None,
+    ) -> tuple[float, float]:
+        if viewport is None:
+            return x, y
+        margin = max(0.0, float(self._config.viewport_margin))
+        return (
+            self._clamp_between(float(x), margin, max(margin, viewport["width"] - margin)),
+            self._clamp_between(float(y), margin, max(margin, viewport["height"] - margin)),
+        )
+
     async def _mouse_down(self, button: str) -> None:
         mouse = self._page().mouse
         try:
@@ -1035,7 +1432,7 @@ class CoreBrowserTools:
         except TypeError:
             await mouse.up()
 
-    async def _press_key_down_up(self, key: str) -> float:
+    async def _press_key_down_up(self, key: str) -> dict[str, Any]:
         keyboard = self._page().keyboard
         parts = [part.strip() for part in key.split("+") if part.strip()]
         if not parts:
@@ -1044,26 +1441,96 @@ class CoreBrowserTools:
         if not hasattr(keyboard, "down") or not hasattr(keyboard, "up"):
             await keyboard.press(key)
             await asyncio.sleep(dwell)
-            return dwell
+            return {
+                "strategy": "press",
+                "dwell": dwell,
+                "down_sequence": [],
+                "up_sequence": [],
+                "fallback": False,
+            }
+        pressed: list[str] = []
         try:
             for part in parts:
                 await keyboard.down(part)
+                pressed.append(part)
                 await asyncio.sleep(self._rand_float(0.006, 0.025))
             await asyncio.sleep(dwell)
-            for part in reversed(parts):
+            released: list[str] = []
+            for part in reversed(pressed):
                 await keyboard.up(part)
+                released.append(part)
                 await asyncio.sleep(self._rand_float(0.005, 0.02))
+            return {
+                "strategy": "down_up",
+                "dwell": dwell,
+                "down_sequence": list(pressed),
+                "up_sequence": released,
+                "fallback": False,
+            }
         except Exception:
+            for part in reversed(pressed):
+                try:
+                    await keyboard.up(part)
+                except Exception:
+                    pass
             await keyboard.press(key)
-        return dwell
+            return {
+                "strategy": "press",
+                "dwell": dwell,
+                "down_sequence": list(pressed),
+                "up_sequence": [],
+                "fallback": True,
+            }
 
-    def _looks_sensitive(self, text: str) -> bool:
+    def _sensitive_reasons(
+        self,
+        text: str,
+        *,
+        field_context: dict[str, Any] | None,
+    ) -> list[str]:
+        reasons: list[str] = []
         stripped = text.strip()
         if len(stripped) >= 6 and sum(char.isdigit() for char in stripped) / max(1, len(stripped)) >= 0.6:
-            return True
+            reasons.append("numeric_like")
         if "@" in stripped and "." in stripped:
-            return True
-        return any(token in stripped.lower() for token in ("password", "token", "secret"))
+            reasons.append("email_like")
+        lowered_text = stripped.lower()
+        if any(token in lowered_text for token in ("password", "token", "secret")):
+            reasons.append("secret_text")
+        if field_context:
+            searchable = " ".join(str(value).lower() for value in field_context.values() if value)
+            field_type = str(field_context.get("type") or "").strip().lower()
+            autocomplete = str(field_context.get("autocomplete") or "").strip().lower()
+            if field_type in {"password", "email", "tel"}:
+                reasons.append(f"field_type:{field_type}")
+            if field_type in {"number"} and len(stripped) >= 4:
+                reasons.append("field_type:number")
+            for token in (
+                "password",
+                "passwd",
+                "pwd",
+                "token",
+                "secret",
+                "otp",
+                "one-time-code",
+                "captcha",
+                "verify",
+                "verification",
+                "code",
+                "phone",
+                "mobile",
+                "email",
+                "credit",
+                "card",
+            ):
+                if token in searchable:
+                    reasons.append(f"field_hint:{token}")
+            if autocomplete in {"current-password", "new-password", "one-time-code", "cc-number", "email", "tel"}:
+                reasons.append(f"autocomplete:{autocomplete}")
+        return sorted(set(reasons))
+
+    def _looks_sensitive(self, text: str) -> bool:
+        return bool(self._sensitive_reasons(text, field_context=None))
 
     def _validate_mode(self, label: str, mode: str, allowed: set[str]) -> None:
         if mode not in allowed:
@@ -1088,8 +1555,17 @@ class CoreBrowserTools:
 
     def _validate_range(self, label: str, pair: tuple[float, float]) -> None:
         low, high = pair
-        if low < 0 or high < 0 or high < low:
+        if not math.isfinite(float(low)) or not math.isfinite(float(high)) or low < 0 or high < 0 or high < low:
             raise ValueError(f"{label} 必须是非负且递增的二元范围")
+
+    def _validate_optional_range(self, label: str, minimum: float | None, maximum: float | None) -> None:
+        for name, value in (("minimum", minimum), ("maximum", maximum)):
+            if value is None:
+                continue
+            if not isinstance(value, int | float) or not math.isfinite(float(value)) or value < 0:
+                raise ValueError(f"{label} {name} 必须是非负有限数字")
+        if minimum is not None and maximum is not None and maximum < minimum:
+            raise ValueError(f"{label} minimum 不能大于 maximum")
 
     def _validate_int_range(self, label: str, pair: tuple[int, int]) -> None:
         low, high = pair

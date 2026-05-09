@@ -30,8 +30,8 @@ from crawler4j_sdk._version import (
 )
 from crawler4j_sdk.cli.templates import (
     COMPONENT_TEMPLATE,
-    DATA_QUERY_TEMPLATE,
     DATA_TABLE_TEMPLATE,
+    DATA_VIEW_TEMPLATE,
     ENV_CLEANUP_CANDIDATES_TEMPLATE,
     ENV_CANDIDATES_TEMPLATE,
     INTERFACE_TEMPLATE,
@@ -50,6 +50,7 @@ from crawler4j_sdk.cli.templates import (
     MODEL_TEST_TASK_TEMPLATE,
     MODEL_WORKFLOWS_INIT_TEMPLATE,
     SCRIPT_TEMPLATE,
+    UI_ACTION_TEMPLATE,
     WORKFLOW_TEMPLATE,
     render_page_template,
 )
@@ -995,7 +996,7 @@ def cmd_data_list(args: argparse.Namespace) -> int:
     module_root = require_module_root()
     manifest = load_manifest(module_root)
     print("tables: " + (", ".join(_v2_declaration_names(module_root, manifest, "data_table")) or "(无)"))
-    print("queries: " + (", ".join(_v2_declaration_names(module_root, manifest, "data_query")) or "(无)"))
+    print("views: " + (", ".join(_v2_declaration_names(module_root, manifest, "data_view")) or "(无)"))
     return 0
 
 
@@ -1028,11 +1029,11 @@ def cmd_data_table_create(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_data_query_create(args: argparse.Namespace) -> int:
+def cmd_data_view_create(args: argparse.Namespace) -> int:
     module_root = require_module_root()
-    query_id = str(args.name or "").strip()
-    if not is_valid_name(query_id):
-        _print_error("查询名必须是小写 snake_case")
+    view_id = str(args.name or "").strip()
+    if not is_valid_name(view_id):
+        _print_error("视图名必须是小写 snake_case")
         return 1
     raw_source = args.source[0] if isinstance(args.source, list) else args.source
     source = str(raw_source or "").strip()
@@ -1045,12 +1046,12 @@ def cmd_data_query_create(args: argparse.Namespace) -> int:
         return 1
     try:
         _write_text(
-            module_root / "data" / f"{query_id}.py",
-            DATA_QUERY_TEMPLATE.format(
-                name=query_id,
+            module_root / "data" / f"{view_id}.py",
+            DATA_VIEW_TEMPLATE.format(
+                name=view_id,
                 source=source,
-                display_name=args.display_name or to_display_name(query_id),
-                description=args.description or f"{to_display_name(query_id)} 命名查询",
+                display_name=args.display_name or to_display_name(view_id),
+                description=args.description or f"{to_display_name(view_id)} 只读视图",
             ),
             force=args.force,
         )
@@ -1058,7 +1059,7 @@ def cmd_data_query_create(args: argparse.Namespace) -> int:
         _print_error(str(exc))
         return 1
 
-    _print_success(f"已创建命名查询声明: data/{query_id}.py")
+    _print_success(f"已创建只读视图声明: data/{view_id}.py")
     return 0
 
 
@@ -1459,12 +1460,12 @@ def cmd_module_init(args: argparse.Namespace) -> int:
             force=args.force,
         )
         _write_text(
-            output_dir / "data" / "get_account_by_id.py",
-            DATA_QUERY_TEMPLATE.format(
-                name="get_account_by_id",
+            output_dir / "data" / "account_overview.py",
+            DATA_VIEW_TEMPLATE.format(
+                name="account_overview",
                 source="accounts",
-                display_name="按 ID 获取账号",
-                description="示例账号命名查询",
+                display_name="账号概览",
+                description="示例账号只读视图",
             ),
             force=args.force,
         )
@@ -1522,7 +1523,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
     print("  - 新建页面操作: `crawler4j page-action create <name>`")
     print("  - 新建页面: `crawler4j page create <page_id>`")
     print("  - 新建数据表: `crawler4j data table create <name>`")
-    print("  - 新建命名查询: `crawler4j data query create <name> --source <data_table>`")
+    print("  - 新建只读视图: `crawler4j data view create <name> --source <data_table>`")
     print("  - 新建环境候选函数: `crawler4j candidate create <name>`")
     print("  - 新建环境清理候选函数: `crawler4j cleanup create <name>`")
     print("  - 更新 lock: `crawler4j manifest lock`")
@@ -1550,8 +1551,9 @@ def cmd_module_show(args: argparse.Namespace) -> int:
     print(f"工作流: {', '.join(sorted(declarations_by_kind.get('workflow', []))) or '(无)'}")
     print(f"宿主页: {', '.join(sorted(declarations_by_kind.get('page', []))) or '(无)'}")
     print(f"页面操作: {', '.join(sorted(declarations_by_kind.get('page_action', []))) or '(无)'}")
+    print(f"UI 操作: {', '.join(sorted(declarations_by_kind.get('ui_action', []))) or '(无)'}")
     print(f"数据表: {len(declarations_by_kind.get('data_table', []))}")
-    print(f"命名查询: {len(declarations_by_kind.get('data_query', []))}")
+    print(f"只读视图: {len(declarations_by_kind.get('data_view', []))}")
     print(f"环境候选: {', '.join(sorted(declarations_by_kind.get('env_candidates', []))) or '(无)'}")
     print(f"环境清理候选: {', '.join(sorted(declarations_by_kind.get('env_cleanup_candidates', []))) or '(无)'}")
     if result.diagnostics:
@@ -1724,6 +1726,40 @@ def cmd_task_list(args: argparse.Namespace) -> int:
     manifest = load_manifest(module_root)
     tasks = _v2_declaration_names(module_root, manifest, "page_action")
     print("\n".join(tasks) if tasks else "(无页面操作)")
+    return 0
+
+
+def cmd_ui_action_create(args: argparse.Namespace) -> int:
+    """Create a hosted UI action under pages/."""
+    module_root = require_module_root()
+    name = str(args.name or "").strip()
+    if not is_valid_name(name):
+        _print_error("UI 操作名必须是小写 snake_case")
+        return 1
+    try:
+        _write_text(
+            module_root / "pages" / f"{name}.py",
+            UI_ACTION_TEMPLATE.format(
+                name=name,
+                display_name=to_display_name(name),
+                description=f"{to_display_name(name)} UI 操作",
+            ),
+            force=args.force,
+        )
+    except CLIError as exc:
+        _print_error(str(exc))
+        return 1
+    _print_success(f"已创建 UI 操作: pages/{name}.py")
+    return 0
+
+
+def cmd_ui_action_list(args: argparse.Namespace) -> int:
+    """List hosted UI actions in the current module."""
+    del args
+    module_root = require_module_root()
+    manifest = load_manifest(module_root)
+    actions = _v2_declaration_names(module_root, manifest, "ui_action")
+    print("\n".join(actions) if actions else "(无 UI 操作)")
     return 0
 
 
@@ -2467,13 +2503,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     data_parser = subparsers.add_parser(
         "data",
-        help="数据契约操作：创建 core-native-v2 data_table / data_query 装饰器声明",
+        help="数据契约操作：创建 core-native-v2 data_table / data_view 装饰器声明",
     )
     data_sub = data_parser.add_subparsers(dest="action")
 
     data_list = data_sub.add_parser(
         "list",
-        help="列出当前模块已声明的数据表和命名查询",
+        help="列出当前模块已声明的数据表和只读视图",
     )
     data_list.set_defaults(func=cmd_data_list)
 
@@ -2498,25 +2534,25 @@ def build_parser() -> argparse.ArgumentParser:
     data_table_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     data_table_create.set_defaults(func=cmd_data_table_create)
 
-    data_query = data_sub.add_parser(
-        "query",
-        help="创建 @data_query 声明文件",
+    data_view = data_sub.add_parser(
+        "view",
+        help="创建 @data_view 声明文件",
     )
-    data_query_sub = data_query.add_subparsers(dest="subaction")
-    data_query_create = data_query_sub.add_parser(
+    data_view_sub = data_view.add_subparsers(dest="subaction")
+    data_view_create = data_view_sub.add_parser(
         "create",
-        help="创建一个命名查询骨架",
+        help="创建一个只读视图骨架",
     )
-    data_query_create.add_argument("name", help="查询名，snake_case")
-    data_query_create.add_argument(
+    data_view_create.add_argument("name", help="视图名，snake_case")
+    data_view_create.add_argument(
         "--source",
         required=True,
         help="来源 data_table 名称",
     )
-    data_query_create.add_argument("--display-name", help="显示名")
-    data_query_create.add_argument("--description", help="说明")
-    data_query_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
-    data_query_create.set_defaults(func=cmd_data_query_create)
+    data_view_create.add_argument("--display-name", help="显示名")
+    data_view_create.add_argument("--description", help="说明")
+    data_view_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    data_view_create.set_defaults(func=cmd_data_view_create)
 
     module_set = module_sub.add_parser(
         "set",
@@ -2578,6 +2614,18 @@ def build_parser() -> argparse.ArgumentParser:
     page_action_create.set_defaults(func=cmd_task_create)
     page_action_list = page_action_sub.add_parser("list", help="列出 @page_action")
     page_action_list.set_defaults(func=cmd_task_list)
+
+    ui_action_parser = subparsers.add_parser(
+        "ui-action",
+        help="UI 操作：在 pages/ 下创建或列出 @ui_action 函数",
+    )
+    ui_action_sub = ui_action_parser.add_subparsers(dest="action")
+    ui_action_create = ui_action_sub.add_parser("create", help="创建一个新的 @ui_action 函数")
+    ui_action_create.add_argument("name", help="UI 操作名，snake_case")
+    ui_action_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
+    ui_action_create.set_defaults(func=cmd_ui_action_create)
+    ui_action_list = ui_action_sub.add_parser("list", help="列出 @ui_action")
+    ui_action_list.set_defaults(func=cmd_ui_action_list)
 
     workflow_parser = subparsers.add_parser(
         "workflow",

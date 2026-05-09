@@ -191,6 +191,68 @@ def test_managed_page_renderer_handles_page_action_button(qtbot, tmp_path):
         restore_module(service, original_registry, module_name)
 
 
+def test_managed_page_renderer_handles_ui_action_button(qtbot, tmp_path):
+    module_name = "hosted_ui_action_button_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import TaskContext, page
+
+            @page(
+                name="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "Button",
+                            "label": "创建账号",
+                            "action": {
+                                "type": "ui_action",
+                                "name": "create_account_from_ui",
+                                "params": {"account_id": {"value": "acct-001"}},
+                            },
+                        },
+                    ],
+                },
+            )
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                return {}
+            """,
+            "pages/actions.py": """
+            from crawler4j_contracts import TaskContext, ui_action
+
+            CALLS = []
+
+            @ui_action(name="create_account_from_ui")
+            async def create_account_from_ui(context: TaskContext, account_id: str):
+                del context
+                CALLS.append({"account_id": account_id})
+                return {"ok": True}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    try:
+        page = ManagedPageRenderer(module_name, "dashboard", module_info=module_info)
+        qtbot.addWidget(page)
+
+        action_button = next(button for button in page.findChildren(QPushButton) if button.text() == "创建账号")
+        action_button.click()
+
+        import importlib
+
+        action_module = importlib.import_module(f"{module_name}.pages.actions")
+        assert action_module.CALLS == [{"account_id": "acct-001"}]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
 def test_managed_page_renderer_keeps_header_icon_button_compact(qtbot, tmp_path):
     module_name = "hosted_page_header_button_module"
     module_dir = write_module_tree(
@@ -271,7 +333,6 @@ def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) ->
                 }
             ],
             "views": [],
-            "queries": [],
             "seeds": [],
         }
     )
@@ -397,7 +458,6 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
             }
         ],
         "views": [],
-        "queries": [],
         "seeds": [],
     }
     service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
@@ -473,7 +533,7 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         edit_button.click()
         qtbot.waitUntil(lambda: any(table.item(row, 0).text() == "alpha-updated" for row in range(table.rowCount())))
         stored_rows = sorted(
-            store.list_records(module_name, "accounts", limit=1000, offset=0),
+            store.query_resource_records(module_name, "accounts", select=["*"], limit=1000, offset=0),
             key=lambda row: str(row.get("account_id") or ""),
         )
         assert [
@@ -514,7 +574,7 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                 "secret": str(row.get("secret") or ""),
                 "status": str(row.get("status") or ""),
             }
-            for row in store.list_records(module_name, "accounts", limit=1000, offset=0)
+            for row in store.query_resource_records(module_name, "accounts", select=["*"], limit=1000, offset=0)
         ] == [
             {
                 "account_id": "1",
@@ -648,7 +708,6 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
             }
         ],
         "views": [],
-        "queries": [],
         "seeds": [],
     }
     service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
@@ -737,7 +796,7 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                 "secret": str(row.get("secret") or ""),
                 "status": str(row.get("status") or ""),
             }
-            for row in store.list_records(module_name, "accounts", limit=1000, offset=0)
+            for row in store.query_resource_records(module_name, "accounts", select=["*"], limit=1000, offset=0)
         ] == [
             {
                 "account_id": "1",

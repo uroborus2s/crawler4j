@@ -631,7 +631,7 @@ async def test_execution_runner_runs_real_core_native_v2_module_and_audit_events
     fake_page = _FakePage()
     env.capabilities = {"page"}
     env.handle = SimpleNamespace(page=fake_page, context=SimpleNamespace(name="browser-context"))
-    manifest_data = {"resources": [], "views": [], "queries": [], "seeds": []}
+    manifest_data = {"resources": [], "views": [], "seeds": []}
 
     module_service = ModuleService()
     module_service.registry = SimpleNamespace(

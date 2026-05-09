@@ -33,7 +33,7 @@
 - `module.yaml.version` 是合法语义化版本
 - `module.yaml.upgrade_source.repo` 是合法 `owner/repo`
 - 装饰器名称使用 snake_case
-- interface、component、workflow、data query 名称唯一
+- interface、component、workflow、data table、data view 名称唯一
 - workflow inject 目标存在
 - component inject 目标存在
 - 对象图无环
@@ -101,7 +101,7 @@
 - `@data_table.schema`
 - 类注解字段
 - indexes
-- `@data_query.output_schema`
+- `@data_view.schema`
 
 ## 表格没有数据
 
@@ -110,7 +110,7 @@
 1. `@data_table(name="accounts", storage_mode=...)` 是否被扫描进 lock；旧快照表需要显式 `managed_dataset`
 2. `DataTable.data_source.resource_id` 是否写 `accounts`
 3. handler 是否通过 `ctx.db.from_("accounts")` 查询
-4. 命名查询是否通过 `ctx.db.named(...).bind(...).execute()` 调用
+4. 只读视图是否通过 `ctx.db.from_("view_id")` 调用，且视图来源是 `custom_table`
 5. 运行时代码是否还在走 `ctx.tools.call("db.*")`
 
 ## 页面是空白

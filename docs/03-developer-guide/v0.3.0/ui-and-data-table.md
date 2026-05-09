@@ -297,7 +297,7 @@ def query_billing_stats_table(
 | 快照列表 | `ctx.db.from_("resource_id")` + `binding` |
 | 统计查询 | `ctx.db.from_("custom_table").group_by(...).sum(...)` + `query_handler` |
 | 明细实体表 | `module.yaml.data.resources[]` + `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` |
-| 固定 SQL | `ctx.db.named("query_id").bind(...).execute()` |
+| 固定 SQL | `ctx.db.from_("view_id").execute()` |
 
 ## 职责分工
 

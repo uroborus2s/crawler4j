@@ -204,14 +204,17 @@ def test_contracts_packaging_maps_flat_src_to_public_package_name():
     setuptools_cfg = pyproject["tool"]["setuptools"]
     assert pyproject["build-system"]["build-backend"] == "setuptools.build_meta"
     assert pyproject["project"]["dependencies"] == []
-    assert setuptools_cfg["packages"] == ["crawler4j_contracts"]
-    assert setuptools_cfg["package-dir"]["crawler4j_contracts"] == "src"
+    assert setuptools_cfg["package-dir"][""] == "src"
+    assert setuptools_cfg["packages"]["find"] == {
+        "where": ["src"],
+        "include": ["crawler4j_contracts*"],
+    }
     assert setuptools_cfg["package-data"]["crawler4j_contracts"] == ["py.typed"]
 
 
 def test_contracts_package_no_longer_ships_default_http_runtime():
     package_root = WORKSPACE_ROOT / "packages" / "crawler4j-contracts"
-    context_path = package_root / "src" / "context.py"
+    context_path = package_root / "src" / "crawler4j_contracts" / "context.py"
     tree = ast.parse(context_path.read_text(encoding="utf-8"), filename=str(context_path))
 
     assert all(
@@ -225,7 +228,15 @@ def test_contracts_runtime_version_matches_publish_metadata():
     pyproject = _load_pyproject(package_root / "pyproject.toml")
     assert pyproject["project"]["version"]
     assert not (package_root / "src" / "_version.py").exists()
-    assert _load_literal_module_version(package_root) is None
+    module_path = package_root / "src" / "crawler4j_contracts" / "__init__.py"
+    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    assert all(
+        not (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
+        )
+        for node in tree.body
+    )
 
 
 def test_root_app_package_does_not_reexport_sdk_cli_command():

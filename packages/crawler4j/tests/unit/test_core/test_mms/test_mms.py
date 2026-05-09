@@ -19,7 +19,7 @@ from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptorV2, V2Runtime
 
 
 def _empty_data_contract() -> dict[str, list[dict[str, object]]]:
-    return {"resources": [], "views": [], "queries": [], "seeds": []}
+    return {"resources": [], "views": [], "seeds": []}
 
 
 def _write_v2_runtime_package(module_dir) -> None:

@@ -8,7 +8,7 @@
 
 ## 目标
 
-- 在 `crawler4j-contracts` 中提供 `@interface/@component/@workflow/@page_action/@data_table/@data_query`。
+- 在 `crawler4j-contracts` 中提供 `@interface/@component/@workflow/@page_action/@data_table/@data_view`。
 - 装饰器只附加元数据，不实例化业务对象。
 - 0.4.x 根导出面不再暴露 `TaskSpec` / `WorkflowSpec` / `EnvSelectorSpec`。
 

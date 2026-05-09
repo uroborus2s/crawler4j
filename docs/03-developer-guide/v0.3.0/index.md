@@ -32,7 +32,7 @@
 
 - `module.yaml.runtime_api` 必须是 `core-native-v1`
 - `module.yaml.workflows[].parameters[]` 可声明运行模板表单参数，当前支持 `string/text/integer/number/boolean/enum`
-- `module.yaml.data` 必须存在，`resources/views/queries/seeds` 是唯一数据契约入口
+- `module.yaml.data` 必须存在，`resources/views/seeds` 是唯一数据契约入口
 - 模块数据只能通过 `ctx.db` fluent API 访问：`from_()`、`named()`、`into(...).replace(...)`
 - `tasks/*.py` 导出 `TASK` 和 `execute`
 - `workflows/*.py` 导出 `WORKFLOW` 和 `run`

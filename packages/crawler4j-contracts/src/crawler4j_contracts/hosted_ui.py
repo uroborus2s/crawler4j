@@ -100,7 +100,7 @@ ALLOWED_DB_VIEW_SCHEMA_KEYS = {
 }
 ALLOWED_DB_VIEW_KINDS = {"sql_view"}
 ALLOWED_DB_VIEW_CLEANUP_POLICIES = {"drop_view", "keep"}
-ALLOWED_DB_VIEW_COLUMN_KEYS = {"name", "label", "type", "nullable", "filterable", "sortable"}
+ALLOWED_DB_VIEW_COLUMN_KEYS = {"name", "label", "type", "nullable"}
 ALLOWED_DB_VIEW_COLUMN_TYPES = {"text", "int", "number", "bool", "json"}
 
 
@@ -261,8 +261,8 @@ def _normalize_button_action(raw: Any, *, field_name: str) -> dict[str, Any]:
         raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
 
     action_type = str(raw.get("type") or "").strip()
-    if action_type not in {"reload", "open_page", "page_action"}:
-        raise ValueError(f"{field_name}.type 只支持 reload / open_page / page_action")
+    if action_type not in {"reload", "open_page", "page_action", "ui_action"}:
+        raise ValueError(f"{field_name}.type 只支持 reload / open_page / page_action / ui_action")
 
     action: dict[str, Any] = {"type": action_type}
     if action_type == "open_page":
@@ -273,7 +273,7 @@ def _normalize_button_action(raw: Any, *, field_name: str) -> dict[str, Any]:
         params = _normalize_action_params(raw.get("params"), field_name=f"{field_name}.params")
         if params:
             action["params"] = params
-    elif action_type == "page_action":
+    elif action_type in {"page_action", "ui_action"}:
         action["name"] = _validate_managed_identifier(
             str(raw.get("name") or ""),
             field_name=f"{field_name}.name",
@@ -282,7 +282,7 @@ def _normalize_button_action(raw: Any, *, field_name: str) -> dict[str, Any]:
         if params:
             action["params"] = params
         if raw.get("page_id") is not None:
-            raise ValueError(f"{field_name}.type=page_action 时不能再传 page_id")
+            raise ValueError(f"{field_name}.type={action_type} 时不能再传 page_id")
     elif any(raw.get(key) is not None for key in ("page_id", "name", "params")):
         raise ValueError(f"{field_name}.type=reload 时不能再传 page_id/name/params")
 
@@ -538,8 +538,6 @@ def _normalize_db_view_column(raw: Any, *, field_name: str) -> dict[str, Any]:
         "name": name,
         "type": column_type,
         "nullable": bool(raw.get("nullable", True)),
-        "filterable": bool(raw.get("filterable", False)),
-        "sortable": bool(raw.get("sortable", False)),
     }
     return column
 

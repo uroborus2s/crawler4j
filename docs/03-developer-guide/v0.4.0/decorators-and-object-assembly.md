@@ -13,8 +13,9 @@
 | `@workflow` | 声明 workflow 类 |
 | `@page` | 声明 Hosted UI 页面和 load handler |
 | `@page_action` | 声明页面操作纯函数 |
+| `@ui_action` | 声明 Hosted UI 用户操作函数 |
 | `@data_table` | 声明数据表 |
-| `@data_query` | 声明命名查询 |
+| `@data_view` | 声明只读数据库视图 |
 
 装饰器只挂元数据。实例创建由 Core 完成。
 
@@ -264,8 +265,8 @@ from crawler4j_contracts import page_action
 
 @page_action(name="open_login_page", label="打开登录页")
 async def open_login_page(ctx, url: str):
-    await ctx.page.goto(url)
-    return {"url": url}
+    await ctx.tools.call("browser.goto", url=url)
+    return {"url": url, "title": await ctx.page.title() if ctx.page else None}
 ```
 
 page action 规则：
@@ -275,11 +276,51 @@ page action 规则：
 - 不由 Core 实例化
 - 不保存跨任务状态
 - 返回 `TaskResult` 或 JSON-like dict
+- 只由 workflow 或 component 通过 `ctx.run_page_action(...)` 调用，不作为 Hosted UI 按钮入口
 
 workflow 或编排对象通过 `ctx.run_page_action(...)` 调用：
 
 ```python
 await ctx.run_page_action("open_login_page", url="https://example.com")
+```
+
+标准页面交互优先走 `ctx.tools.call("browser.*", ...)`。`ctx.page` 继续保留给读取类操作和宿主暂未抽象的浏览器能力。
+
+不要在 `@page_action` 函数里再调用另一个 `@page_action` 来拆公共步骤。公共页面操作应抽成普通 helper、browser adapter 或 application use case；多个可观测页面动作的顺序编排应留在 workflow/component。
+
+## UI Action
+
+```python
+from crawler4j_contracts import ui_action
+
+
+@ui_action(name="create_account_from_ui", label="创建账号")
+def create_account_from_ui(ctx, payload: dict):
+    ctx.db.into("accounts").upsert([payload])
+    return {"ok": True}
+```
+
+UI action 规则：
+
+- 必须是函数或 async 函数
+- 第一个参数是 `ctx`
+- 面向 Hosted UI 按钮、CRUD handler 和用户命令
+- 不依赖 `ctx.page`，不执行浏览器自动化，不调用 `ctx.run_page_action(...)`
+- 可使用 `ctx.db` 读写模块数据
+- 返回 JSON-like dict/list/标量
+
+Hosted UI schema 使用 `type: "ui_action"`：
+
+```python
+{
+    "type": "Button",
+    "label": "创建账号",
+    "action": {
+        "type": "ui_action",
+        "name": "create_account_from_ui",
+        "params": {"account_id": {"binding": "selected.id"}},
+    },
+}
 ```
 
 ## 运行模板保存什么
@@ -299,6 +340,8 @@ execution:
       base_url: https://labor.example.com
       timeout: 30
 ```
+
+运行模板 UI 会按 `workflow -> interface 绑定行 -> 子 interface/参数` 展示树形对象图。interface 绑定行左侧显示 interface 的 `label(name)`，右侧下拉框显示可选 component 的 `label(name)`；注入路径只作为绑定 key 与提示信息保留，不再额外显示一行“注入对象”。interface 与 component 都优先显示装饰器 `label`，因此可以写成中文；选择实现时写入 `object_bindings`；在绑定行下填写的 `object_param(...)` 创建参数写入 `object_params`。
 
 运行模板不保存 workflow 普通参数。
 

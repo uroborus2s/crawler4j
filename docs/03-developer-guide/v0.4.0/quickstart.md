@@ -59,7 +59,7 @@ uv run crawler4j workflow create hotel_sync
 uv run crawler4j page-action create open_home_page
 uv run crawler4j data table create hotels
 uv run crawler4j data table create hotel_snapshots --storage-mode managed_dataset
-uv run crawler4j data query create ready_hotels --source hotels
+uv run crawler4j data view create hotel_overview --source hotels
 ```
 
 这一步创建装饰器模板。不要手写第二套运行能力清单。
@@ -160,18 +160,20 @@ from crawler4j_contracts import page_action
 
 @page_action(name="open_home_page", label="打开首页")
 async def open_home_page(ctx, url: str):
-    await ctx.page.goto(url)
-    return {"opened": url}
+    if not ctx.tools or not ctx.tools.has_tool("browser.goto"):
+        return {"opened": False, "error": "browser.goto_unavailable"}
+    await ctx.tools.call("browser.goto", url=url)
+    return {"opened": url, "title": await ctx.page.title() if ctx.page else None}
 ```
 
-page action 必须是函数或 async 函数。它不保存业务状态，也不承担 workflow 编排。
+page action 必须是函数或 async 函数。它不保存业务状态，也不承担 workflow 编排。标准页面交互优先通过 `ctx.tools.call("browser.*", ...)` 调用宿主拟人化能力；`ctx.page` 保留给标题、HTML、可见性等读取或宿主未覆盖能力。
 
 ## 7. 声明数据契约
 
 目标文件：`data/hotels.py`。
 
 ```python
-from crawler4j_contracts import data_query, data_table
+from crawler4j_contracts import data_table, data_view
 
 
 @data_table(
@@ -189,12 +191,16 @@ class HotelsTable:
     pass
 
 
-@data_query(
-    name="ready_hotels",
-    source="hotels",
+@data_view(
+    name="hotel_overview",
+    sources=["hotels"],
     sql="SELECT hotel_id, name FROM {{resource:hotels}}",
+    schema=[
+        {"name": "hotel_id", "type": "string"},
+        {"name": "name", "type": "string"},
+    ],
 )
-def ready_hotels():
+def hotel_overview():
     pass
 ```
 

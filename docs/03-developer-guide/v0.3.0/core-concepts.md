@@ -55,8 +55,8 @@ default_workflow: main_workflow
 还要接受一条数据约束：
 
 - `module.yaml.data` 必须存在，即使四段暂时都是空数组
-- 表、视图、命名查询和种子统一登记在 `module.yaml.data.resources/views/queries/seeds`
-- SQL 文件固定放 `data/sql/views/*.sql`、`data/sql/queries/*.sql`，种子固定放 `data/seeds/*.json`
+- 表、视图、只读视图和种子统一登记在 `module.yaml.data.resources/views/seeds`
+- SQL 文件固定放 `data/sql/views/*.sql`、`data/sql/views/*.sql`，种子固定放 `data/seeds/*.json`
 
 ## 目录扫描规则
 

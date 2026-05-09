@@ -10,7 +10,7 @@
 - 运行能力事实源：代码装饰器
 - 对象装配：`@interface`、`@component`、`@workflow`
 - 页面操作：`@page_action`
-- 数据契约：`@data_table`、`@data_query`
+- 数据契约：`@data_table`、`@data_view`
 - 交付门禁：`crawler4j manifest lock` 与装饰器诊断
 
 开发 0.4.0 新模块、验证装饰器对象装配方案、或准备从 0.3.x 迁移时，使用这一版。

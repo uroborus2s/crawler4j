@@ -11,7 +11,7 @@ demo_module/
 │   ├── sql/
 │   │   ├── views/
 │   │   │   └── *.sql
-│   │   └── queries/
+│   │   └── views/
 │   │       └── *.sql
 │   └── seeds/
 │       └── *.json
@@ -36,7 +36,7 @@ demo_module/
 | `module.yaml` | 静态清单、`runtime_api`、工作流列表、Workflow 运行参数、默认工作流、左侧页面菜单元信息、`resource_pools`、`data` 数据契约 |
 | `__init__.py` | 普通包入口，不再承载运行时装配 |
 | `data/sql/views/*.sql` | 已注册统计视图的 SQL 文件 |
-| `data/sql/queries/*.sql` | 已注册命名查询的 SQL 文件 |
+| `data/sql/views/*.sql` | 已注册只读视图的 SQL 文件 |
 | `data/seeds/*.json` | 已注册种子数据 |
 | `tasks/*.py` | 单个任务声明与实现 |
 | `workflows/*.py` | 单个工作流声明与实现 |

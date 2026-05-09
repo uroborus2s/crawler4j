@@ -324,25 +324,29 @@ def test_registry_syncs_v2_data_decorators_to_manifest_data(temp_data_dir):
         module_name="demo_module",
         extra_files={
             "data/accounts.py": """
-from crawler4j_contracts import data_query, data_table
+from crawler4j_contracts import data_table, data_view
 
 
 @data_table(
     name="accounts",
-    schema=[{"name": "account_id", "type": "string", "required": True}],
+    record_key_field="id",
+    schema=[
+        {"name": "id", "type": "integer", "auto_increment": True},
+        {"name": "account_id", "type": "string", "required": True},
+    ],
     indexes=[{"fields": ["account_id"], "unique": True}],
 )
 class Accounts:
     pass
 
 
-@data_query(
-    name="ready_accounts",
-    source="accounts",
+@data_view(
+    name="account_overview",
+    sources=["accounts"],
     sql="SELECT account_id FROM {{resource:accounts}}",
-    output_schema=[{"name": "account_id", "type": "string"}],
+    schema=[{"name": "account_id", "type": "string"}],
 )
-def ready_accounts():
+def account_overview():
     pass
 """,
         },
@@ -353,9 +357,15 @@ def ready_accounts():
 
     assert module.manifest.data["resources"][0]["resource_id"] == "accounts"
     assert module.manifest.data["resources"][0]["storage_mode"] == "custom_table"
-    assert module.manifest.data["resources"][0]["record_key_field"] == "account_id"
-    assert module.manifest.data["queries"][0]["query_id"] == "ready_accounts"
-    assert module.manifest.data["queries"][0]["sql"] == "SELECT account_id FROM {{resource:accounts}}"
+    assert module.manifest.data["resources"][0]["record_key_field"] == "id"
+    assert module.manifest.data["resources"][0]["schema"]["columns"][0] == {
+        "name": "id",
+        "type": "int",
+        "nullable": False,
+        "auto_increment": True,
+    }
+    assert module.manifest.data["views"][0]["view_id"] == "account_overview"
+    assert module.manifest.data["views"][0]["sql"] == "SELECT account_id FROM {{resource:accounts}}"
 
 
 def test_registry_syncs_v2_managed_data_table_to_module_datasets(temp_data_dir):
@@ -371,7 +381,10 @@ from crawler4j_contracts import data_table
 @data_table(
     name="accounts",
     storage_mode="managed_dataset",
-    schema=[{"name": "account_id", "type": "string", "required": True}],
+    schema=[
+        {"name": "account_id", "type": "string", "required": True},
+        {"name": "status", "type": "string"},
+    ],
 )
 class Accounts:
     pass
@@ -400,7 +413,18 @@ class Accounts:
         [{"account_id": "A001", "status": "ready"}],
     )
 
-    assert data_store.read_resource_records("demo_module", "accounts") == [
+    rows = data_store.query_resource_records(
+        "demo_module",
+        "accounts",
+        select=["*"],
+        order_by=[{"field": "record_index", "direction": "asc"}],
+        limit=100,
+        offset=0,
+    )
+    assert [
+        {key: value for key, value in row.items() if key not in {"record_index", "created_at", "updated_at"}}
+        for row in rows
+    ] == [
         {
             "account_id": "A001",
             "status": "ready",
@@ -411,14 +435,14 @@ class Accounts:
     ]
 
 
-def test_registry_syncs_v2_data_decorators_to_runtime_named_queries(temp_data_dir, monkeypatch):
+def test_registry_syncs_v2_data_views_to_runtime_select_source(temp_data_dir, monkeypatch):
     archive = _build_module_archive(
         temp_data_dir,
         package_dir_name="demo_module_pkg",
         module_name="demo_module",
         extra_files={
             "data/accounts.py": """
-from crawler4j_contracts import data_query, data_table
+from crawler4j_contracts import data_table, data_view
 
 
 @data_table(
@@ -429,13 +453,13 @@ class Accounts:
     pass
 
 
-@data_query(
-    name="ready_accounts",
-    source="accounts",
+@data_view(
+    name="account_overview",
+    sources=["accounts"],
     sql="SELECT account_id FROM {{resource:accounts}}",
-    output_schema=[{"name": "account_id", "type": "string"}],
+    schema=[{"name": "account_id", "type": "string"}],
 )
-def ready_accounts():
+def account_overview():
     pass
 """,
         },
@@ -447,7 +471,7 @@ def ready_accounts():
 
     capabilities = build_runtime_capabilities("demo_module")
     assert capabilities.db.into("accounts").replace([{"account_id": "acct-001"}]) is True
-    assert capabilities.db.named("ready_accounts").execute() == [{"account_id": "acct-001"}]
+    assert capabilities.db.from_("account_overview").select(["account_id"]).execute() == [{"account_id": "acct-001"}]
 
 
 def test_registry_marks_installed_module_invalid_when_manifest_lock_drifts_on_reload(temp_data_dir):

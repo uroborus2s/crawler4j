@@ -42,8 +42,8 @@ def test_contracts_root_exports_stable_surface():
         "ToolsCapability",
         "WorkflowLifecycleInfo",
         "component",
-        "data_query",
         "data_table",
+        "data_view",
         "env_cleanup_candidates",
         "env_candidates",
         "interface",
@@ -51,6 +51,7 @@ def test_contracts_root_exports_stable_surface():
         "object_param",
         "page",
         "page_action",
+        "ui_action",
         "workflow",
     }
 

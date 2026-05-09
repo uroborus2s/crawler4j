@@ -273,10 +273,23 @@ class ModuleService:
         outcome: TaskOutcome | None = None
 
         async def _run_page_action(action_name: str, action_context: TaskContext, **kwargs: Any) -> Any:
-            page_action = descriptor.page_actions.get(str(action_name or "").strip())
+            normalized_action = str(action_name or "").strip()
+            active_action = str(action_context.runtime.get("_active_page_action") or "").strip()
+            if active_action:
+                raise RuntimeError(f"page_action 不能嵌套调用: {active_action} -> {normalized_action}")
+            page_action = descriptor.page_actions.get(normalized_action)
             if page_action is None:
                 raise RuntimeError(f"page_action 不存在: {action_name}")
-            return await invoke_runtime_callable(page_action.target, action_context, **kwargs)
+            had_previous_active = "_active_page_action" in action_context.runtime
+            previous_active = action_context.runtime.get("_active_page_action")
+            action_context.runtime["_active_page_action"] = normalized_action
+            try:
+                return await invoke_runtime_callable(page_action.target, action_context, **kwargs)
+            finally:
+                if had_previous_active:
+                    action_context.runtime["_active_page_action"] = previous_active
+                else:
+                    action_context.runtime.pop("_active_page_action", None)
 
         try:
             context._page_action_executor = _run_page_action
