@@ -96,31 +96,6 @@ def test_normalize_page_schema_supports_page_scroll_vertical_hidden():
     assert schema["scroll"] == {"vertical": "hidden"}
 
 
-def test_normalize_page_schema_preserves_table_column_visibility():
-    schema = normalize_page_schema(
-        "accounts",
-        {
-            "type": "Page",
-            "load_handler": "load_accounts_page",
-            "children": [
-                {
-                    "type": "DataTable",
-                    "table_id": "accounts",
-                    "columns": [
-                        {"key": "id", "label": "ID", "visible": False},
-                        {"key": "account_id", "label": "账号"},
-                    ],
-                    "data_source": {"type": "rows", "rows": []},
-                },
-            ],
-        },
-    )
-
-    columns = schema["children"][0]["columns"]
-    assert columns[0]["visible"] is False
-    assert "visible" not in columns[1]
-
-
 def test_normalize_page_schema_rejects_invalid_page_scroll_vertical_value():
     with pytest.raises(ValueError, match="scroll\\.vertical 不受支持"):
         normalize_page_schema(

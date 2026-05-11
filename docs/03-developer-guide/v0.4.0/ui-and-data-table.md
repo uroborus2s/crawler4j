@@ -15,7 +15,7 @@
 页面文件：
 
 ```python
-from crawler4j_contracts import HostedPageLoadResult, HostedPageParams, TaskContext, page
+from crawler4j_contracts import TaskContext, page
 
 @page(
     name="dashboard",
@@ -33,8 +33,8 @@ from crawler4j_contracts import HostedPageLoadResult, HostedPageParams, TaskCont
 def load_dashboard_page(
     context: TaskContext,
     page_id: str,
-    params: HostedPageParams | None = None,
-) -> HostedPageLoadResult:
+    params: dict | None = None,
+) -> dict:
     del context, page_id, params
     return {"title": "Dashboard"}
 ```
@@ -89,7 +89,6 @@ def create_account_from_ui(ctx: TaskContext, payload: dict):
     "type": "DataTable",
     "table_id": "accounts",
     "columns": [
-        {"key": "id", "label": "ID", "visible": False},
         {"key": "account_id", "label": "账号"},
         {"key": "status", "label": "状态", "type": "badge"},
     ],
@@ -98,11 +97,7 @@ def create_account_from_ui(ctx: TaskContext, payload: dict):
 ```
 
 ```python
-def load_accounts_page(
-    context: TaskContext,
-    page_id: str,
-    params: HostedPageParams | None = None,
-) -> HostedPageLoadResult:
+def load_accounts_page(context: TaskContext, page_id: str, params: dict | None = None) -> dict:
     del page_id, params
     rows = context.db.from_("accounts").limit(100).execute()
     return {"rows": rows}
@@ -113,28 +108,12 @@ def load_accounts_page(
 把分页、筛选、排序交给页面 handler：
 
 ```python
-from typing import TypedDict
-
-from crawler4j_contracts import (
-    HostedDataTableQuery,
-    HostedDataTableQueryResult,
-    HostedPageParams,
-    TaskContext,
-)
-
-
-class AccountRow(TypedDict):
-    id: int
-    account_id: str
-    status: str
-
-
 def query_accounts_table(
     context: TaskContext,
     table_id: str,
-    query: HostedDataTableQuery,
-    params: HostedPageParams | None = None,
-) -> HostedDataTableQueryResult[AccountRow]:
+    query: dict,
+    params: dict | None = None,
+) -> dict:
     del table_id, params
     page_size = query.get("page_size", 20)
     page = query.get("page", 1)
@@ -155,20 +134,8 @@ def query_accounts_table(
 正式签名固定为：
 
 ```python
-def query_handler(
-    context: TaskContext,
-    table_id: str,
-    query: HostedDataTableQuery,
-    params: HostedPageParams | None = None,
-) -> HostedDataTableQueryResult[RowType]:
-    ...
+(context, table_id, query, params=None)
 ```
-
-`crawler4j check full` 会拒绝未使用上述参数名、同步函数形态、参数类型或返回类型的 `query_handler`。
-
-`HostedDataTableQueryResult` 中的 `page` / `page_size` 可省略；省略时宿主会沿用本次 `query` 里的分页值，不会把回调查询结果重置到默认页。
-
-`rows` 的字段名和 `columns[].key` 对齐；`columns[].visible` 默认是可见，显式写 `visible=False` 时该列不渲染，但 row 里的字段仍会保留，可用于 `row_action.params`、CRUD 主键或详情页跳转。
 
 ### managed_resource
 

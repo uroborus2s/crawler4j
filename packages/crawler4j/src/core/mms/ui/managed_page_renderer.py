@@ -680,25 +680,19 @@ class ManagedPageRenderer(QWidget):
             return text.lower() in {"1", "true", "yes", "on", "是"}
         return text
 
-    def _normalize_inline_query_result(
-        self,
-        raw: Any,
-        *,
-        query: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    def _normalize_inline_query_result(self, raw: Any) -> dict[str, Any]:
         if not isinstance(raw, dict):
             raise ValueError("query_handler 必须返回对象")
         rows = raw.get("rows")
         if not isinstance(rows, list):
             raise ValueError("query_handler 返回值必须包含 rows 数组")
         normalized_rows = [dict(row) for row in rows if isinstance(row, dict)]
-        query_payload = dict(query or {})
         return {
             "rows": normalized_rows,
             "total": int(raw.get("total", len(normalized_rows))),
-            "page": int(raw.get("page", query_payload.get("page", 1))),
-            "page_size": int(raw.get("page_size", query_payload.get("page_size", 20))),
-            "sort": list(raw.get("sort", query_payload.get("sort", [])) or []),
+            "page": int(raw.get("page", 1)),
+            "page_size": int(raw.get("page_size", 20)),
+            "sort": list(raw.get("sort") or []),
         }
 
     def _on_inline_table_query(
@@ -758,8 +752,7 @@ class ManagedPageRenderer(QWidget):
                         merged_query,
                         dict(self._navigation_params) if self._navigation_params else None,
                         page_id=self._page_id,
-                    ),
-                    query=merged_query,
+                    )
                 )
         except Exception as exc:
             table.apply_error(request_id, str(exc))

@@ -44,15 +44,6 @@ from crawler4j_contracts.decorators import (
     ui_action,
     workflow,
 )
-from crawler4j_contracts.hosted_ui import (
-    HostedDataTableQuery,
-    HostedDataTableQueryHandler,
-    HostedDataTableQueryResult,
-    HostedDataTableSortSpec,
-    HostedPageLoadHandler,
-    HostedPageLoadResult,
-    HostedPageParams,
-)
 from crawler4j_contracts.lifecycle import TaskOutcome, TaskOutcomeStatus, WorkflowLifecycleInfo
 from crawler4j_contracts.result import TaskResult
 
@@ -80,13 +71,6 @@ __all__ = [
     "page_action",
     "ui_action",
     "workflow",
-    "HostedDataTableQuery",
-    "HostedDataTableQueryHandler",
-    "HostedDataTableQueryResult",
-    "HostedDataTableSortSpec",
-    "HostedPageLoadHandler",
-    "HostedPageLoadResult",
-    "HostedPageParams",
     "TaskContext",
     "TaskOutcome",
     "TaskOutcomeStatus",

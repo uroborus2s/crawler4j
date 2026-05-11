@@ -57,14 +57,6 @@ DECORATOR_KINDS = {
     "env_cleanup_candidates": "env_cleanup_candidates",
 }
 _MISSING = object()
-_QUERY_HANDLER_ARGUMENTS = ("context", "table_id", "query", "params")
-_QUERY_HANDLER_PARAM_TYPES = {
-    "context": "TaskContext",
-    "table_id": "str",
-    "query": "HostedDataTableQuery",
-    "params": "HostedPageParams | None",
-}
-_QUERY_HANDLER_RETURN_TYPE = "HostedDataTableQueryResult"
 
 
 @dataclass(frozen=True)
@@ -96,7 +88,6 @@ class V2Declaration:
     annotations: tuple[str, ...] = ()
     methods: tuple[str, ...] = ()
     method_signatures: tuple["V2MethodSignature", ...] = ()
-    function_signatures: tuple["V2FunctionSignature", ...] = ()
     target: Any = None
 
 
@@ -107,29 +98,6 @@ class V2MethodSignature:
     name: str
     positional_args: tuple[str, ...]
     has_varargs: bool = False
-
-
-@dataclass(frozen=True)
-class V2FunctionParameter:
-    """Static top-level function parameter shape for page handler validation."""
-
-    name: str
-    annotation: str
-    has_default: bool = False
-    default_text: str = ""
-
-
-@dataclass(frozen=True)
-class V2FunctionSignature:
-    """Static top-level function signature used by Hosted UI handler diagnostics."""
-
-    name: str
-    parameters: tuple[V2FunctionParameter, ...]
-    return_annotation: str
-    is_async: bool = False
-    has_varargs: bool = False
-    has_kwargs: bool = False
-    kwonly_args: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -440,7 +408,6 @@ def _collect_declarations(
         if relative.parts == ("__init__.py",):
             continue
         module_name = _import_name_for_path(package_name, relative)
-        function_signatures = _function_signatures(module)
         for node in module.body:
             if not isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -480,7 +447,6 @@ def _collect_declarations(
                     annotations=_class_annotations(node) if isinstance(node, ast.ClassDef) else (),
                     methods=_class_methods(node) if isinstance(node, ast.ClassDef) else (),
                     method_signatures=_class_method_signatures(node) if isinstance(node, ast.ClassDef) else (),
-                    function_signatures=function_signatures,
                 )
             )
     return declarations, diagnostics
@@ -551,54 +517,6 @@ def _class_method_signatures(node: ast.ClassDef) -> tuple[V2MethodSignature, ...
             )
         )
     return tuple(sorted(signatures, key=lambda item: item.name))
-
-
-def _function_signatures(module: ast.Module) -> tuple[V2FunctionSignature, ...]:
-    signatures: list[V2FunctionSignature] = []
-    for item in module.body:
-        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            signatures.append(_function_signature(item))
-    return tuple(sorted(signatures, key=lambda item: item.name))
-
-
-def _function_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> V2FunctionSignature:
-    positional_args = [*node.args.posonlyargs, *node.args.args]
-    defaults_start = len(positional_args) - len(node.args.defaults)
-    default_texts: dict[str, str] = {}
-    if node.args.defaults:
-        default_args = positional_args[-len(node.args.defaults) :]
-        for arg, default in zip(default_args, node.args.defaults, strict=True):
-            default_texts[arg.arg] = _expression_text(default)
-    parameters = tuple(
-        V2FunctionParameter(
-            name=arg.arg,
-            annotation=_annotation_text(arg.annotation),
-            has_default=index >= defaults_start,
-            default_text=default_texts.get(arg.arg, ""),
-        )
-        for index, arg in enumerate(positional_args)
-    )
-    return V2FunctionSignature(
-        name=node.name,
-        parameters=parameters,
-        return_annotation=_annotation_text(node.returns),
-        is_async=isinstance(node, ast.AsyncFunctionDef),
-        has_varargs=node.args.vararg is not None,
-        has_kwargs=node.args.kwarg is not None,
-        kwonly_args=tuple(arg.arg for arg in node.args.kwonlyargs),
-    )
-
-
-def _annotation_text(annotation: ast.expr | None) -> str:
-    if annotation is None:
-        return ""
-    return ast.unparse(annotation).strip()
-
-
-def _expression_text(expression: ast.expr | None) -> str:
-    if expression is None:
-        return ""
-    return ast.unparse(expression).strip()
 
 
 def _merge_annotation_metadata(meta: Crawler4jMeta, node: ast.ClassDef) -> Crawler4jMeta:
@@ -1139,12 +1057,12 @@ def _validate_pages(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
     for declaration in declarations:
         if declaration.kind != "page":
             continue
-        if declaration.target_kind != "function":
+        if declaration.target_kind not in {"function", "async_function"}:
             diagnostics.append(
                 V2Diagnostic(
                     code="V2_PAGE_INVALID_TARGET",
                     location=declaration.symbol,
-                    message="page must decorate a sync function",
+                    message="page must decorate a function or async function",
                 )
             )
             continue
@@ -1172,112 +1090,7 @@ def _validate_pages(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
                     message=str(exc),
                 )
             )
-            continue
-        diagnostics.extend(_validate_page_query_handlers(declaration, raw_schema))
     return diagnostics
-
-
-def _validate_page_query_handlers(declaration: V2Declaration, page_schema: dict[str, Any]) -> list[V2Diagnostic]:
-    diagnostics: list[V2Diagnostic] = []
-    handlers = {signature.name: signature for signature in declaration.function_signatures}
-    for table_schema in _iter_page_inline_tables(page_schema.get("children")):
-        data_source = table_schema.get("data_source")
-        if not isinstance(data_source, dict):
-            continue
-        if str(data_source.get("type") or "").strip().lower() != "query_handler":
-            continue
-        handler_name = str(data_source.get("handler") or "").strip()
-        if not handler_name:
-            continue
-        handler = handlers.get(handler_name)
-        if handler is None:
-            diagnostics.append(
-                V2Diagnostic(
-                    code="V2_PAGE_QUERY_HANDLER_MISSING",
-                    location=f"{declaration.symbol}.schema.data_source.handler",
-                    message=f"page query_handler is not defined in the same module: {handler_name}",
-                )
-            )
-            continue
-        error = _query_handler_signature_error(handler)
-        if error:
-            diagnostics.append(
-                V2Diagnostic(
-                    code="V2_PAGE_QUERY_HANDLER_SIGNATURE_INVALID",
-                    location=f"{_source_module_label(declaration.source_path)}.{handler_name}",
-                    message=error,
-                )
-            )
-    return diagnostics
-
-
-def _iter_page_inline_tables(children: Any) -> list[dict[str, Any]]:
-    if not isinstance(children, list):
-        return []
-    tables: list[dict[str, Any]] = []
-    for child in children:
-        if not isinstance(child, dict):
-            continue
-        if str(child.get("type") or "") == "DataTable":
-            tables.append(child)
-        tables.extend(_iter_page_inline_tables(child.get("children")))
-    return tables
-
-
-def _query_handler_signature_error(handler: V2FunctionSignature) -> str:
-    expected_signature = (
-        "def query_handler(context: TaskContext, table_id: str, "
-        "query: HostedDataTableQuery, params: HostedPageParams | None = None) "
-        "-> HostedDataTableQueryResult"
-    )
-    parameters = handler.parameters
-    if handler.is_async:
-        return f"page query_handler must be a sync function with signature: {expected_signature}"
-    if handler.has_varargs or handler.has_kwargs or handler.kwonly_args:
-        return f"page query_handler must not use *args, **kwargs, or keyword-only parameters: {expected_signature}"
-    if tuple(parameter.name for parameter in parameters) != _QUERY_HANDLER_ARGUMENTS:
-        return f"page query_handler parameters must be exactly context, table_id, query, params: {expected_signature}"
-    if len(parameters) != 4:
-        return f"page query_handler must declare exactly four parameters: {expected_signature}"
-    if any(parameter.has_default for parameter in parameters[:3]) or not parameters[3].has_default:
-        return f"page query_handler defaults must only set params=None: {expected_signature}"
-    if parameters[3].default_text != "None":
-        return f"page query_handler params default must be None: {expected_signature}"
-    for parameter in parameters:
-        expected = _QUERY_HANDLER_PARAM_TYPES[parameter.name]
-        if not _annotation_matches(parameter.annotation, expected):
-            return f"page query_handler parameter {parameter.name} must be annotated as {expected}: {expected_signature}"
-    if not _annotation_matches(handler.return_annotation, _QUERY_HANDLER_RETURN_TYPE):
-        return f"page query_handler return type must be annotated as {_QUERY_HANDLER_RETURN_TYPE}: {expected_signature}"
-    return ""
-
-
-def _annotation_matches(actual: str, expected: str) -> bool:
-    normalized_actual = _normalize_type_annotation(actual)
-    normalized_expected = _normalize_type_annotation(expected)
-    if normalized_actual == normalized_expected:
-        return True
-    if normalized_expected == "HostedDataTableQueryResult":
-        return normalized_actual.startswith("HostedDataTableQueryResult[") and normalized_actual.endswith("]")
-    if normalized_expected == "HostedPageParams | None":
-        return normalized_actual in {"HostedPageParams | None", "None | HostedPageParams", "Optional[HostedPageParams]"}
-    return False
-
-
-def _normalize_type_annotation(annotation: str) -> str:
-    normalized = str(annotation or "").strip()
-    if not normalized:
-        return ""
-    for prefix in ("typing.", "crawler4j_contracts."):
-        normalized = normalized.replace(prefix, "")
-    return " ".join(normalized.split())
-
-
-def _source_module_label(source_path: str) -> str:
-    path = Path(source_path)
-    if path.suffix == ".py":
-        path = path.with_suffix("")
-    return ".".join(path.parts)
 
 
 def _validate_parameters(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
