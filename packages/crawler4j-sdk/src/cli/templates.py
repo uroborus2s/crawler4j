@@ -381,7 +381,7 @@ def render_page_template(
 
 from __future__ import annotations
 
-from crawler4j_contracts import TaskContext, page
+from crawler4j_contracts import HostedPageLoadResult, HostedPageParams, TaskContext, page
 
 
 @page(
@@ -418,8 +418,8 @@ from crawler4j_contracts import TaskContext, page
 def load_{page_id}_page(
     context: TaskContext,
     page_id: str,
-    params: dict | None = None,
-) -> dict:
+    params: HostedPageParams | None = None,
+) -> HostedPageLoadResult:
     """同步加载 `{page_id}` 页面数据。"""
     del context, page_id, params
     return {{

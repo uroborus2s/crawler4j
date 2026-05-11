@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-05-11 已收紧 Hosted UI 内联 `DataTable(query_handler)` 签名契约。`crawler4j-contracts` 根导出 `HostedDataTableQuery`、泛型 `HostedDataTableQueryResult[RowType]`、`HostedPageParams` 等页面 handler 类型；SDK scanner 现在会拒绝未按 `query_handler(context: TaskContext, table_id: str, query: HostedDataTableQuery, params: HostedPageParams | None = None) -> HostedDataTableQueryResult[RowType]` 实现的查询 handler，并继续要求 `@page` load handler 为同步函数。运行时在 handler 返回结果省略 `page/page_size` 时会沿用本次 `HostedDataTableQuery` 里的分页值，不再回退成固定 `1/20`。`columns[].visible` 已确认为默认可见、显式 `False` 隐藏展示但保留 row 字段。CLI 页面脚手架和 v0.4.0 开发者文档已同步。
 - 最新修复：2026-05-11 已修正 ATM 运行模板对象装配树的展示行为。公共 `ObjectGraphTree` 现在按当前可见树节点动态收缩/展开高度，避免少量对象图节点时出现大块空白；展开/收起按钮改为组件自绘浅色 chevron，不再沿用 Qt 原生深色 branch indicator。定向回归：`uv run pytest packages/crawler4j/tests/unit/test_ui/test_object_graph_tree.py -q` => `3 passed`，`uv run pytest packages/crawler4j/tests/unit/test_core/test_atm/test_run_profile_dialog.py -q` => `32 passed`；目标 `ruff check` 通过。
 - 最新修复：2026-05-11 已调整 ATM 运行模板候选参数配置窗口的空值展示。空 `candidate_params` 现在打开时显示为空白编辑器，不再默认显示 `{}`；留空保存仍解析为空字典，已有非空参数继续按 YAML 对象展示。用户指南、候选队列设计与运行模板 UI 单测已同步。
 - 最新开发：2026-05-09 已为 ATM 运行模板选择环境模式补齐 `candidate_params` 图形配置入口。运行模板表单现在在候选函数下方显示“候选参数”配置窗口，使用 YAML 对象编辑并校验，保存后写入 `RunProfile.resource.acquisition.candidate_params`；从已有运行模板加载再通过表单保存不会再丢失候选参数，调试会话继续从运行模板派生同一份 payload。用户指南、候选队列设计与开发者指南已同步，运行模板 UI 单测覆盖加载保留与 YAML 校验。

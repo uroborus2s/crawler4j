@@ -85,6 +85,7 @@
 |---|---|---|
 | `TC-052` | `module_db_views`、manifest 视图注册、视图 SQL 模板校验与卸载清理：仅允许单条 `SELECT/WITH SELECT`，只允许 `{{resource:<resource_id>}}` 占位引用当前模块 `custom_table`，并能按 `cleanup_policy` 正确 `DROP VIEW` | 持久层单测 + runtime capability 单测 |
 | `TC-053` | `ctx.db.from_(view_or_resource)` 与 hosted page 内联 `DataTable` 只读查询：按受控字段过滤、排序、分页，`query_handler` 正确路由查询参数并保持无 CRUD | MMS 单测 + SDK CLI 契约单测 + integration/acceptance |
+| `TC-057` | Hosted UI 内联 `DataTable(query_handler)` 签名类型契约：必须使用 `TaskContext`、`HostedDataTableQuery`、`HostedPageParams`、泛型 `HostedDataTableQueryResult[RowType]`，并拒绝未标注或参数名漂移的 handler；`columns[].visible` 默认可见、显式隐藏仍保留 row 字段 | Contracts 导出单测 + SDK scanner 诊断单测 + Hosted UI schema 单测 |
 | `TC-054` | 新 `SkyDataTable` 组件：搜索、排序、分页、request_id 丢弃过期结果、行点击和 actions 事件统一从查询契约驱动 | `packages/crawler4j/tests/unit/test_ui/test_data_table.py` |
 | `TC-055` | 宿主/模块统一接入：宿主页与模块内联 `DataTable` 全部切到新组件与新 schema，旧组件与旧 schema 被移除 | MMS/ATM/REM 定向单测 + SDK CLI 契约回归 + acceptance |
 

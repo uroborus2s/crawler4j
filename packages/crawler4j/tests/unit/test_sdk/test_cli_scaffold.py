@@ -335,7 +335,7 @@ def test_page_create_registers_menu_page_and_supports_grouped_non_menu_page(
     assert detail_path.exists()
     dashboard_text = dashboard_path.read_text(encoding="utf-8")
     detail_text = detail_path.read_text(encoding="utf-8")
-    assert "from crawler4j_contracts import TaskContext, page" in dashboard_text
+    assert "from crawler4j_contracts import HostedPageLoadResult, HostedPageParams, TaskContext, page" in dashboard_text
     assert "@page(" in dashboard_text
     assert 'name="dashboard"' in dashboard_text
     assert "menu=True" in dashboard_text

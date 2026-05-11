@@ -147,14 +147,15 @@ def load_dashboard_page(
 
 页面数据只有两种正式入口：
 
-1. `load_handler(context, page_id, params=None) -> dict`
-2. `query_handler(context, table_id, query, params=None) -> dict`
+1. `load_handler(context: TaskContext, page_id: str, params: HostedPageParams | None = None) -> HostedPageLoadResult`
+2. `query_handler(context: TaskContext, table_id: str, query: HostedDataTableQuery, params: HostedPageParams | None = None) -> HostedDataTableQueryResult[RowType]`
 
 其中：
 
 - `load_handler` 为页面整体提供数据
 - `DataTable` 通过 `binding`、`rows` 或 `query_handler` 获取表格数据
-- `query_handler` 负责搜索、排序、分页等表格查询逻辑
+- `query_handler` 负责搜索、排序、分页等表格查询逻辑，SDK scanner 会拒绝缺少上述参数名、参数类型或返回类型的实现
+- `columns[].visible` 默认可见；显式 `visible=False` 只隐藏列展示，不删除 row 中同名字段
 
 ### 4.5 动作入口
 

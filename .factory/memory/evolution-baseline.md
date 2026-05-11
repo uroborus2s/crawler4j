@@ -22,6 +22,8 @@
 - Treat fingerprint-browser CDP attachment as a warm-up phase: normalize host-returned endpoints first, then give Playwright multiple retries before declaring connect failure
 - Keep Hosted UI page registration and menu configuration inside `@page(...)`: `pages/` owns routable pages, and `@page(menu=True)` is the only left-menu source
 - Keep Hosted UI user commands behind `@ui_action` and browser automation behind workflow/component-called `@page_action`; do not use nested `page_action -> page_action` calls as a decomposition mechanism
+- Keep Hosted UI inline `DataTable(query_handler)` signatures typed and scanner-enforced with `TaskContext`, `HostedDataTableQuery`, `HostedPageParams`, and generic `HostedDataTableQueryResult[RowType]`; do not let module pages define ad hoc untyped query callbacks, and preserve the callback query `page/page_size` when a handler omits those optional result fields.
+- Keep `columns[].visible` semantics stable: columns are visible by default, and `visible=False` only hides rendering while preserving same-key row fields for actions, CRUD, and navigation.
 
 ## What To Improve First
 

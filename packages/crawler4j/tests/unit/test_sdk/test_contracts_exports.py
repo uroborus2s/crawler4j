@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from typing import TypedDict, get_args, get_origin
 
 import pytest
 
@@ -24,6 +25,13 @@ def test_contracts_root_exports_stable_surface():
         "DataTableIndexSpec",
         "HOST_RESERVED_DATA_FIELDS",
         "HttpClient",
+        "HostedDataTableQuery",
+        "HostedDataTableQueryHandler",
+        "HostedDataTableQueryResult",
+        "HostedDataTableSortSpec",
+        "HostedPageLoadHandler",
+        "HostedPageLoadResult",
+        "HostedPageParams",
         "ImageInput",
         "InjectSpec",
         "MANAGED_DATASET_RESERVED_DATA_FIELDS",
@@ -73,3 +81,14 @@ def test_contracts_root_exports_stable_surface():
     assert not hasattr(crawler4j_contracts, "EnvAction")
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("crawler4j_contracts.signal")
+
+
+def test_hosted_data_table_query_result_is_generic():
+    class AccountRow(TypedDict):
+        id: int
+        account_id: str
+
+    result_type = crawler4j_contracts.HostedDataTableQueryResult[AccountRow]
+
+    assert get_origin(result_type) is crawler4j_contracts.HostedDataTableQueryResult
+    assert get_args(result_type) == (AccountRow,)

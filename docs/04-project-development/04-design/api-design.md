@@ -35,7 +35,7 @@
 | 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。对象图由 Core 在 `workflow.run(ctx)` 前统一执行可选 `setup(ctx, workflow)`，并在终态统一执行可选 `cleanup(ctx, outcome)`；任务结束、失败、超时或用户中止后的环境统一由宿主回收，环境删除只走环境管理页清理链路 |
 | 默认工作流解析 | `context.runtime["workflow"]` -> 单 workflow 自动选择 -> `main_workflow` |
 | 发现错误可见性 | descriptor 扫描失败必须暴露具体 Python 文件、符号、异常类型与 traceback 摘要，不能降级为泛化 “not found” |
-| Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 中的 `@page(...)` 与 `@ui_action(...)`；`@page(menu=True)` 控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象，按钮和 CRUD handler 通过 `type="ui_action"` 调用 UI action |
+| Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 中的 `@page(...)` 与 `@ui_action(...)`；`@page(menu=True)` 控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / 类型受限的 `query_handler` 返回纯结构化对象，按钮和 CRUD handler 通过 `type="ui_action"` 调用 UI action |
 | 宿主确认契约 | 当前 0.4.0 模块运行时代码不发送 `TaskSignal`；人工确认若后续需要恢复，必须先在宿主状态机内重新设计，不复用模块信号入口 |
 | DevLink 调试语义 | 模块来源为 `DevLink` 时，descriptor 可强制 reload；正式安装模块读操作不做非必要 reload |
 | DevLink 普通执行语义 | ATM 普通执行 `DevLink` 模块时注入 `devel_mode=true`；`ModuleService` 对同一个 `TaskContext` 只在首次加载时强制 reload 一次 |

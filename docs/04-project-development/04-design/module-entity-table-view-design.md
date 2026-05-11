@@ -120,7 +120,7 @@ V1 只允许数据库视图引用：
 - `declare_ui()` 调用 `ui.declare_page`
 - 页面 schema 在 `children[]` 中内联 `DataTable`
 - `DataTable.data_source.type = "query_handler"`
-- `query_handler(context, table_id, query, params=None)` 内部调用 `ctx.db`
+- `query_handler(context: TaskContext, table_id: str, query: HostedDataTableQuery, params: HostedPageParams | None = None) -> HostedDataTableQueryResult` 内部调用 `ctx.db`
 
 V1 仅支持只读统计表：
 

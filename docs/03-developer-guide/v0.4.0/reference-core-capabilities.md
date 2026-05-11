@@ -182,7 +182,7 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
 页面文件使用 `@page` 装饰页面 load handler：
 
 ```python
-from crawler4j_contracts import TaskContext, page
+from crawler4j_contracts import HostedPageLoadResult, HostedPageParams, TaskContext, page
 
 @page(
     name="dashboard",
@@ -194,7 +194,11 @@ from crawler4j_contracts import TaskContext, page
         "children": [],
     },
 )
-def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None = None) -> dict:
+def load_dashboard_page(
+    context: TaskContext,
+    page_id: str,
+    params: HostedPageParams | None = None,
+) -> HostedPageLoadResult:
     ...
 ```
 
@@ -204,6 +208,7 @@ def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None 
 - `@page(menu=True)` 控制左侧菜单，`menu=False` 只注册可路由页面
 - `schema` 顶层是 `Page`
 - 被 `@page` 装饰的函数就是页面 `load_handler`
-- `DataTable(query_handler)` 指向真实函数
+- `DataTable(query_handler)` 指向同文件内真实同步函数，签名固定为 `query_handler(context: TaskContext, table_id: str, query: HostedDataTableQuery, params: HostedPageParams | None = None) -> HostedDataTableQueryResult[RowType]`
+- `columns[].visible` 默认可见；显式 `False` 只隐藏展示，不删除 row 字段
 - `open_page.page_id` 可以跳到未进菜单的页面
 - Hosted UI 按钮和 CRUD handler 使用 `type: "ui_action"` 调用 `@ui_action`

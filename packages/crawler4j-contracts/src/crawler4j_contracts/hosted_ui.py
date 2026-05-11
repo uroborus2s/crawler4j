@@ -3,7 +3,48 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Generic, Literal, NotRequired, TypeAlias, TypeVar, TypedDict
+
+from crawler4j_contracts.context import TaskContext
+
+HostedPageParams: TypeAlias = dict[str, Any]
+HostedPageLoadResult: TypeAlias = dict[str, Any]
+HostedPageLoadHandler: TypeAlias = Callable[[TaskContext, str, HostedPageParams | None], HostedPageLoadResult]
+_RowT = TypeVar("_RowT")
+
+
+class HostedDataTableSortSpec(TypedDict):
+    """Sort item sent by Hosted UI DataTable query requests."""
+
+    field: str
+    direction: Literal["asc", "desc"]
+
+
+class HostedDataTableQuery(TypedDict, total=False):
+    """Query payload passed to a Hosted UI DataTable query handler."""
+
+    page: int
+    page_size: int
+    search_text: str
+    sort: list[HostedDataTableSortSpec]
+    params: HostedPageParams
+
+
+class HostedDataTableQueryResult(TypedDict, Generic[_RowT]):
+    """Structured result returned by a Hosted UI DataTable query handler."""
+
+    rows: list[_RowT]
+    total: NotRequired[int]
+    page: NotRequired[int]
+    page_size: NotRequired[int]
+    sort: NotRequired[list[HostedDataTableSortSpec]]
+
+
+HostedDataTableQueryHandler: TypeAlias = Callable[
+    [TaskContext, str, HostedDataTableQuery, HostedPageParams | None],
+    HostedDataTableQueryResult[_RowT],
+]
 
 MANAGED_VIEW_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 

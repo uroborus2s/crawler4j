@@ -224,7 +224,7 @@ class QuizWorkflow:
 ## Page
 
 ```python
-from crawler4j_contracts import TaskContext, page
+from crawler4j_contracts import HostedPageLoadResult, HostedPageParams, TaskContext, page
 
 
 @page(
@@ -243,15 +243,15 @@ from crawler4j_contracts import TaskContext, page
 def load_dashboard_page(
     context: TaskContext,
     page_id: str,
-    params: dict | None = None,
-) -> dict:
+    params: HostedPageParams | None = None,
+) -> HostedPageLoadResult:
     del context, page_id, params
     return {"title": "Dashboard"}
 ```
 
 page 规则：
 
-- 必须装饰函数或 async 函数
+- 必须装饰同步函数
 - `name` 是唯一扁平 snake_case
 - `menu=True` 进入左侧菜单；`menu=False` 只注册可路由页面
 - `schema` 顶层必须是 `Page`
