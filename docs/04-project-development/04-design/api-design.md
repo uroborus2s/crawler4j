@@ -35,7 +35,7 @@
 | 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。对象图由 Core 在 `workflow.run(ctx)` 前统一执行可选 `setup(ctx, workflow)`，并在终态统一执行可选 `cleanup(ctx, outcome)`；任务结束、失败、超时或用户中止后的环境统一由宿主回收，环境删除只走环境管理页清理链路 |
 | 默认工作流解析 | `context.runtime["workflow"]` -> 单 workflow 自动选择 -> `main_workflow` |
 | 发现错误可见性 | descriptor 扫描失败必须暴露具体 Python 文件、符号、异常类型与 traceback 摘要，不能降级为泛化 “not found” |
-| Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 中的 `@page(...)` 与 `@ui_action(...)`；`@page(menu=True)` 控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象，按钮和 CRUD handler 通过 `type="ui_action"` 调用 UI action |
+| Hosted UI 契约 | Core 扫描 `pages/*.py` 与 `pages/<group>/*.py` 中的 `@page(...)` 与 `@ui_action(...)`；`@page(menu=True)` 控制左侧菜单，`DataTable` 仅作为页面内组件，页面数据由 `load_handler` / `query_handler` 返回纯结构化对象，按钮和 CRUD handler 通过 `type="ui_action"` 调用 UI action；表格查询固定为 `HostedDataTableQuery -> HostedDataTableQueryResult` |
 | 宿主确认契约 | 当前 0.4.0 模块运行时代码不发送 `TaskSignal`；人工确认若后续需要恢复，必须先在宿主状态机内重新设计，不复用模块信号入口 |
 | DevLink 调试语义 | 模块来源为 `DevLink` 时，descriptor 可强制 reload；正式安装模块读操作不做非必要 reload |
 | DevLink 普通执行语义 | ATM 普通执行 `DevLink` 模块时注入 `devel_mode=true`；`ModuleService` 对同一个 `TaskContext` 只在首次加载时强制 reload 一次 |
@@ -53,8 +53,8 @@
 | 页面路由 | `open_page.page_id` 可以打开任意已注册 `@page`，包括 `menu=False` 的详情页或二级页 |
 | 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Button`、`DataTable` |
 | `Card` V1 范围 | 纯容器卡片；支持 `title`、`title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 与子组件布局 |
-| `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
-| 宿主动作范围 | `Button.action` 正式开放 `reload`、`open_page` 和指向 `@ui_action` 的 `ui_action`；`page_action` 仅保留给旧页面 schema 迁移，不作为 Hosted UI 新入口 |
+| `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；`query_handler` 不接收 `table_id`，必须返回 `HostedDataTableQueryResult`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
+| 宿主动作范围 | `Button.action` 正式开放 `reload`、`open_page` 和指向 `@ui_action` 的 `ui_action`；Hosted UI schema 不再接受 `page_action` |
 | 明确删除 | `micro_app`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_page`、`ui.declare_data_table`、`PageSpec` |
 | 设计输入 | `module-hosted-ui-framework.md` |
 | 当前验证基线 | Core / SDK / integration / acceptance 已跑通 `@page` 注解模式定向回归；模块详情页、CLI 和 schema gate 已统一到 `pages/` 页面注册 + `@page(menu=True)` 菜单配置的新契约 |
@@ -70,7 +70,7 @@
 | 注册入口 | `data/*.py` 中的装饰器声明；0.4.0 不再接受 `module.yaml.data` 作为运行事实源 |
 | 查询接口 | `ctx.db.from_(...)`、`ctx.db.from_("view_id").execute()` |
 | SQL 契约 | 模块只能执行由 `@data_view` 注册的 `SELECT/WITH SELECT` SQL；源表通过 `{{resource:<resource_id>}}` 占位引用；禁止未注册 SQL |
-| UI 接入 | 模块页面通过内联 `DataTable(query_handler)` 调用 `ctx.db` fluent API，宿主只负责表格交互与渲染 |
+| UI 接入 | 模块页面通过内联 `DataTable(query_handler)` 调用 `ctx.db` fluent API 并返回 `HostedDataTableQueryResult`；宿主只负责表格交互与渲染，`table_id` 只作为页面内组件 ID |
 | 生命周期 | 宿主在模块加载/安装时校验、同步、建表、建视图、导种子，并在卸载时统一清理 |
 | 当前状态 | 已切到装饰器驱动契约；旧 `db.declare_db_view` 和 `module.yaml.data` 运行声明口已退出正式协议 |
 | 关联文档 | `module-entity-table-view-design.md` |
@@ -127,7 +127,7 @@
 | 快照型业务数据 | `@data_table` 统一声明 `managed_dataset` / `custom_table`；其中 `managed_dataset` 实际落在 `data.db.module_datasets`（V3：`record_key` / `run_status` / `record_status`），`custom_table` 落在受控实体表 `module_name_resource_id`，并由装饰器 schema/indexes 描述真实列结构；业务数据统一通过 `ctx.db.from_(...)` / `ctx.db.into(...).replace(...)` 访问 |
 | 事件型审计数据 | `data.db.module_audit_events` 独立承载 append-only 审计事件；通过 `ctx.db.audit("dataset")` 访问，不进入 `module_datasets` |
 | 短期状态与锁 | `state.db.kv_store`；只承载轻量状态与锁，不再作为正式业务表存储 |
-| 当前实现说明 | `ctx.db` 已统一要求资源先由 `@data_table` 注册并进入 manifest lock，再按 `storage_mode` 路由；`@data_table` 默认 `custom_table`，需要旧快照语义时显式写 `storage_mode="managed_dataset"`；`managed_dataset` 不再按名称隐式落库，且只允许单源读取；`custom_table` 继续使用 schema 驱动的受控实体表，并可在装饰器显式声明后联表、分组和聚合。`@data_view` 只允许引用 `custom_table`。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单 |
+| 当前实现说明 | `ctx.db` 已统一要求资源先由 `@data_table` 注册并进入 manifest lock，再按 `storage_mode` 路由；`@data_table` 默认 `custom_table`，需要旧快照语义时显式写 `storage_mode="managed_dataset"`；`managed_dataset` 不再按名称隐式落库，且只允许单源读取；`custom_table` 继续使用 schema 驱动的受控实体表，并可在装饰器显式声明后联表、分组和聚合。`ctx.db.from_(...).execute()` 没有隐式分页上限，未调用 `limit/offset` 时读取满足条件的全部行；表格和可增长数据源必须显式分页。`@data_view` 只允许引用 `custom_table`。卸载时宿主会按 `cleanup_policy` 统一删除托管记录、删除/保留自定义物理表并在客户端列出高风险清理清单 |
 | 关联文档 | `module-config-runtime-data-contract.md` |
 | 关联项 | `CR-003`, `CR-012`, `TASK-026` |
 

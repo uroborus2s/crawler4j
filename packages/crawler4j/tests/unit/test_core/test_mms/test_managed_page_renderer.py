@@ -24,6 +24,11 @@ def temp_data_dir(tmp_path):
         yield tmp_path
 
 
+def test_managed_page_renderer_requires_fixed_query_result_contract():
+    with pytest.raises(ValueError, match="HostedDataTableQueryResult"):
+        ManagedPageRenderer._normalize_inline_query_result(None, {"rows": []})  # type: ignore[arg-type]
+
+
 def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(qtbot, tmp_path):
     module_name = "hosted_page_module"
     load_key = "_hosted_page_module_load_count"
@@ -126,69 +131,6 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
     finally:
         restore_module(service, original_registry, module_name)
         delattr(builtins, load_key)
-
-
-def test_managed_page_renderer_handles_page_action_button(qtbot, tmp_path):
-    module_name = "hosted_page_action_button_module"
-    module_dir = write_module_tree(
-        tmp_path,
-        module_name,
-        files={
-            "pages/dashboard.py": """
-            from crawler4j_contracts import TaskContext, page
-
-            @page(
-                name="dashboard",
-                label="Dashboard",
-                schema={
-                    "type": "Page",
-                    "children": [
-                        {
-                            "type": "Button",
-                            "label": "创建账号",
-                            "action": {
-                                "type": "page_action",
-                                "name": "create_account_from_ui",
-                                "params": {"account_id": {"value": "acct-001"}},
-                            },
-                        },
-                        {"type": "Text", "style": "body", "binding": "created"},
-                    ],
-                },
-            )
-            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
-                del context, page_id, params
-                return {"created": "未创建"}
-            """,
-            "tasks/create_account.py": """
-            from crawler4j_contracts import TaskContext, page_action
-
-            CALLS = []
-
-            @page_action(name="create_account_from_ui")
-            async def create_account_from_ui(context: TaskContext, account_id: str):
-                del context
-                CALLS.append({"account_id": account_id})
-                return {"ok": True}
-            """,
-        },
-    )
-    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
-    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
-
-    try:
-        page = ManagedPageRenderer(module_name, "dashboard", module_info=module_info)
-        qtbot.addWidget(page)
-
-        action_button = next(button for button in page.findChildren(QPushButton) if button.text() == "创建账号")
-        action_button.click()
-
-        import importlib
-
-        task_module = importlib.import_module(f"{module_name}.tasks.create_account")
-        assert task_module.CALLS == [{"account_id": "acct-001"}]
-    finally:
-        restore_module(service, original_registry, module_name)
 
 
 def test_managed_page_renderer_handles_ui_action_button(qtbot, tmp_path):
@@ -346,7 +288,7 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         module_name,
         files={
             "pages/accounts.py": """
-            from crawler4j_contracts import page
+            from crawler4j_contracts import page, ui_action
 
             @page(
                 name="accounts",
@@ -385,13 +327,10 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
             def load_accounts_page(context, page_id, params=None):
                 del context, page_id, params
                 return {}
-            """,
-            "tasks/create_account_from_ui.py": """
-            from crawler4j_contracts import page_action
 
 
-            @page_action(name="create_account_from_ui")
-            def handle(context, payload):
+            @ui_action(name="create_account_from_ui")
+            def create_account_from_ui(context, payload):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 next_id = len(rows) + 1
                 row = {
@@ -402,13 +341,10 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                 }
                 context.db.into("accounts").replace(rows + [row])
                 return {"record": row, "created": True}
-            """,
-            "tasks/update_account_from_ui.py": """
-            from crawler4j_contracts import page_action
 
 
-            @page_action(name="update_account_from_ui")
-            def handle(context, account_id, payload):
+            @ui_action(name="update_account_from_ui")
+            def update_account_from_ui(context, account_id, payload):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 updated_rows = []
                 updated = None
@@ -425,13 +361,10 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                     updated_rows.append(current)
                 context.db.into("accounts").replace(updated_rows)
                 return {"record": updated, "created": False}
-            """,
-            "tasks/delete_account_from_ui.py": """
-            from crawler4j_contracts import page_action
 
 
-            @page_action(name="delete_account_from_ui")
-            def handle(context, account_id):
+            @ui_action(name="delete_account_from_ui")
+            def delete_account_from_ui(context, account_id):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
                 deleted = next((row for row in rows if str(row.get("account_id")) == str(account_id)), None)
@@ -481,18 +414,21 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
 
     try:
         _sync_managed_dataset(module_dir, module_name=module_name, resource_id="accounts")
-        assert store.replace_resource_records(
-            module_name,
-            "accounts",
-            [
-                {
-                    "account_id": "1",
-                    "name": "alpha",
-                    "secret": "secret-alpha",
-                    "status": "active",
-                }
-            ],
-        ) is True
+        assert (
+            store.replace_resource_records(
+                module_name,
+                "accounts",
+                [
+                    {
+                        "account_id": "1",
+                        "name": "alpha",
+                        "secret": "secret-alpha",
+                        "status": "active",
+                    }
+                ],
+            )
+            is True
+        )
 
         page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
         qtbot.addWidget(page)
@@ -525,9 +461,7 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         assert names == {"alpha", "beta"}
 
         alpha_row_index = next(
-            index
-            for index, row in enumerate(table.displayed_rows())
-            if str(row.get("name") or "") == "alpha"
+            index for index, row in enumerate(table.displayed_rows()) if str(row.get("name") or "") == "alpha"
         )
         table.selectRow(alpha_row_index)
         edit_button.click()
@@ -560,9 +494,7 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         ]
 
         beta_row_index = next(
-            index
-            for index, row in enumerate(table.displayed_rows())
-            if str(row.get("name") or "") == "beta"
+            index for index, row in enumerate(table.displayed_rows()) if str(row.get("name") or "") == "beta"
         )
         table.selectRow(beta_row_index)
         delete_button.click()
@@ -594,7 +526,7 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
         module_name,
         files={
             "pages/accounts.py": """
-            from crawler4j_contracts import page
+            from crawler4j_contracts import page, ui_action
 
             @page(
                 name="accounts",
@@ -635,13 +567,10 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
             def load_accounts_page(context, page_id, params=None):
                 del context, page_id, params
                 return {}
-            """,
-            "tasks/create_account_from_ui.py": """
-            from crawler4j_contracts import page_action
 
 
-            @page_action(name="create_account_from_ui")
-            def handle(context, payload):
+            @ui_action(name="create_account_from_ui")
+            def create_account_from_ui(context, payload):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 next_id = len(rows) + 1
                 row = {
@@ -652,13 +581,10 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                 }
                 context.db.into("accounts").replace(rows + [row])
                 return {"record": row, "created": True}
-            """,
-            "tasks/update_account_from_ui.py": """
-            from crawler4j_contracts import page_action
 
 
-            @page_action(name="update_account_from_ui")
-            def handle(context, account_id, payload):
+            @ui_action(name="update_account_from_ui")
+            def update_account_from_ui(context, account_id, payload):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 updated_rows = []
                 updated = None
@@ -675,13 +601,10 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                     updated_rows.append(current)
                 context.db.into("accounts").replace(updated_rows)
                 return {"record": updated, "created": False}
-            """,
-            "tasks/delete_account_from_ui.py": """
-            from crawler4j_contracts import page_action
 
 
-            @page_action(name="delete_account_from_ui")
-            def handle(context, account_id):
+            @ui_action(name="delete_account_from_ui")
+            def delete_account_from_ui(context, account_id):
                 rows = context.db.from_("accounts").limit(1000).offset(0).execute()
                 remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
                 deleted = next((row for row in rows if str(row.get("account_id")) == str(account_id)), None)
@@ -731,18 +654,21 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
 
     try:
         _sync_managed_dataset(module_dir, module_name=module_name, resource_id="accounts")
-        assert store.replace_resource_records(
-            module_name,
-            "accounts",
-            [
-                {
-                    "account_id": "1",
-                    "name": "alpha",
-                    "secret": "secret-alpha",
-                    "status": "active",
-                }
-            ],
-        ) is True
+        assert (
+            store.replace_resource_records(
+                module_name,
+                "accounts",
+                [
+                    {
+                        "account_id": "1",
+                        "name": "alpha",
+                        "secret": "secret-alpha",
+                        "status": "active",
+                    }
+                ],
+            )
+            is True
+        )
 
         page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
         qtbot.addWidget(page)
@@ -777,9 +703,7 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
         qtbot.waitUntil(lambda: any(table.item(row, 0).text() == "alpha-updated" for row in range(table.rowCount())))
 
         beta_row_index = next(
-            index
-            for index, row in enumerate(table.displayed_rows())
-            if str(row.get("name") or "") == "beta"
+            index for index, row in enumerate(table.displayed_rows()) if str(row.get("name") or "") == "beta"
         )
         delete_button = next(
             button
@@ -890,7 +814,7 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import TaskContext, page
+            from crawler4j_contracts import HostedDataTableQuery, HostedDataTableQueryResult, TaskContext, page
 
             @page(
                 name="dashboard",
@@ -906,7 +830,7 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
                             "title": "统计明细",
                             "data_source": {"type": "query_handler", "handler": "query_stats_table"},
                             "columns": [
-                                {"key": "metric", "label": "指标"},
+                                {"key": "metric", "label": "指标", "searchable": True},
                                 {"key": "value", "label": "值"},
                             ],
                         },
@@ -926,22 +850,24 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
                 }
 
 
-            def query_stats_table(context: TaskContext, table_id: str, query, params=None):
-                del table_id, query, params
+            def query_stats_table(context: TaskContext, query: HostedDataTableQuery):
                 query_tools = ",".join(spec.name for spec in context.tools.list_tools())
                 try:
                     context.db.into("hosted_ui_query").replace([])
                 except Exception as exc:
                     query_write_error = type(exc).__name__
-                return {
-                    "rows": [
+                return HostedDataTableQueryResult(
+                    rows=[
                         {"metric": "query_tools", "value": query_tools},
                         {"metric": "query_write_error", "value": query_write_error},
+                        {"metric": "query_type", "value": type(query).__name__},
+                        {"metric": "query_search_fields", "value": ",".join(query.search_fields)},
+                        {"metric": "query_sort", "value": ",".join(item.field for item in query.sort)},
                     ],
-                    "total": 2,
-                    "page": 1,
-                    "page_size": 20,
-                }
+                    total=5,
+                    page=query.page,
+                    page_size=query.page_size,
+                )
             """,
         },
     )
@@ -963,6 +889,31 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
         assert table.item(0, 1).text() == readonly_tools
         assert table.item(1, 0).text() == "query_write_error"
         assert table.item(1, 1).text() == "RuntimeError"
+        assert table.item(2, 0).text() == "query_type"
+        assert table.item(2, 1).text() == "HostedDataTableQuery"
+        assert table.item(3, 0).text() == "query_search_fields"
+        assert table.item(3, 1).text() == "metric"
+        assert table.item(4, 0).text() == "query_sort"
+        assert table.item(4, 1).text() == ""
+
+        component = page._schema["children"][2]
+        assert (
+            page._normalize_table_query_for_handler(
+                component,
+                {"sort": [{"field": "metric", "direction": "asc"}]},
+            )["sort"]
+            == []
+        )
+
+        sortable_component = dict(component)
+        sortable_component["columns"] = [
+            {**dict(component["columns"][0]), "sortable": True},
+            dict(component["columns"][1]),
+        ]
+        assert page._normalize_table_query_for_handler(
+            sortable_component,
+            {"sort": [{"field": "metric", "direction": "asc"}]},
+        )["sort"] == [{"field": "metric", "direction": "asc"}]
     finally:
         restore_module(service, original_registry, module_name)
 
@@ -1197,10 +1148,7 @@ def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtb
         )
         qtbot.addWidget(page)
 
-        assert any(
-            label.text() == "params:dict|selected:13800138000"
-            for label in page.findChildren(QLabel)
-        )
+        assert any(label.text() == "params:dict|selected:13800138000" for label in page.findChildren(QLabel))
 
         open_button = next(button for button in page.findChildren(QPushButton) if button.text() == "打开详情页")
         open_button.click()

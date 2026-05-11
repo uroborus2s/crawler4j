@@ -224,7 +224,7 @@ class ModuleListWidget(QWidget):
         "columns": [
             {"key": "__index__", "label": "序号", "type": "number", "width": 72, "align": "right", "sortable": False, "searchable": False},
             {"key": "name", "label": "名称", "type": "text", "width": 160},
-            {"key": "display_name", "label": "显示名", "type": "text", "width": 240},
+            {"key": "display_name", "label": "显示名", "type": "text", "width": 240, "sortable": True},
             {"key": "version", "label": "版本", "type": "text", "width": 150},
             {"key": "status", "label": "状态", "type": "text", "width": 120},
             {"key": "actions", "label": "操作", "type": "actions", "stretch": True},

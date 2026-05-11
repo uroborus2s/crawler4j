@@ -346,6 +346,37 @@ def test_runtime_ctx_db_managed_dataset_count_returns_filtered_row_total(temp_da
     assert occupied_rows == [{"occupied_total": 2}]
 
 
+def test_runtime_ctx_db_reads_all_managed_dataset_rows_when_pagination_is_absent(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+    records = [
+        {"id": f"u{index:03}", "phone": f"13800138{index:03}", "tier": "standard"}
+        for index in range(125)
+    ]
+
+    assert caps.db.into("accounts").replace(records) is True
+
+    rows = caps.db.from_("accounts").select(["id"]).order_by("id").execute()
+
+    assert len(rows) == 125
+    assert rows[0] == {"id": "u000"}
+    assert rows[-1] == {"id": "u124"}
+
+
+def test_runtime_ctx_db_reads_all_custom_table_rows_when_pagination_is_absent(temp_data_dir):
+    _sync_custom_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+    records = [{"id": f"u{index:03}", "status": "ready"} for index in range(125)]
+
+    assert caps.db.into("accounts").upsert(records) is True
+
+    rows = caps.db.from_("accounts").select(["id"]).order_by("id").execute()
+
+    assert len(rows) == 125
+    assert rows[0] == {"id": "u000"}
+    assert rows[-1] == {"id": "u124"}
+
+
 def test_runtime_ctx_db_supports_upsert_update_delete_and_batch(temp_data_dir):
     _sync_custom_accounts(temp_data_dir, module_name="demo_module")
     caps = build_runtime_capabilities("demo_module")

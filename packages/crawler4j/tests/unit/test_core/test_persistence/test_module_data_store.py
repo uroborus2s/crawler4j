@@ -2265,6 +2265,61 @@ def test_module_data_store_update_where_updates_status_columns_without_record_js
     assert json.loads(row["record_json"]) == {"id": "u1", "phone": "13800138000"}
 
 
+def test_module_data_store_status_only_update_uses_single_sql_without_record_json_read(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_managed_dataset(store, temp_data_dir, include_status=True)
+    store.replace_resource_records(
+        "demo_module",
+        "accounts",
+        [
+            {"id": "u1", "phone": "13800138000", "status": "ready"},
+            {"id": "u2", "phone": "13900139000", "status": "blocked"},
+        ],
+    )
+
+    statements: list[str] = []
+    with get_connection(DATA_DB) as conn:
+        conn.set_trace_callback(lambda sql: statements.append(" ".join(sql.lower().split())))
+        try:
+            affected = store.update_resource_records(
+                "demo_module",
+                "accounts",
+                {"run_status": "占用中"},
+                where=["status", "=", "ready"],
+            )
+        finally:
+            conn.set_trace_callback(None)
+
+    assert affected == 1
+    update_statements = [statement for statement in statements if statement.startswith("update module_datasets")]
+    assert len(update_statements) == 1
+    assert "set run_status" in update_statements[0]
+    assert not any("select record_index, record_json" in statement for statement in statements)
+    assert _query_records_for_assertion(store, order_by=[{"field": "id", "direction": "asc"}]) == [
+        {
+            "id": "u1",
+            "phone": "13800138000",
+            "status": "ready",
+            "record_index": 0,
+            "record_key": "u1",
+            "run_status": "占用中",
+            "record_status": "",
+        },
+        {
+            "id": "u2",
+            "phone": "13900139000",
+            "status": "blocked",
+            "record_index": 1,
+            "record_key": "u2",
+            "run_status": "不占用",
+            "record_status": "",
+        },
+    ]
+
+
 def test_module_data_store_batch_write_is_atomic(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 

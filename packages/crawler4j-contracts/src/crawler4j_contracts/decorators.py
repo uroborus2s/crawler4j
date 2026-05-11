@@ -12,6 +12,8 @@ from pathlib import Path
 from types import UnionType
 from typing import Annotated, Any, Literal, TypeVar, Union, get_args, get_origin, get_type_hints
 
+from crawler4j_contracts.hosted_ui import PageSchema
+
 
 CRAWLER4J_META_ATTR = "__crawler4j_meta__"
 HOST_RESERVED_DATA_FIELDS = frozenset({"created_at", "updated_at", "create_at", "update_at"})
@@ -469,7 +471,7 @@ def page(
     icon: str = "📄",
     menu: bool = True,
     order: int = 0,
-    schema: Mapping[str, Any],
+    schema: PageSchema | Mapping[str, Any],
 ) -> Callable[[TargetT], TargetT]:
     """Declare a hosted UI page with the decorated function as its load handler."""
     return _decorate(

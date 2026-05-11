@@ -949,14 +949,13 @@ def _validate_inline_table_handlers(
         handler_name = str(data_source.get("handler") or "").strip()
         if not handler_name:
             continue
-        table_id = str(table_schema.get("table_id") or "").strip()
         error = _validate_runtime_handler(
             handlers,
-            owner_label=f"{owner_label} 的内联表格 {table_id or '<empty>'}",
+            owner_label=f"{owner_label} 的内联表格",
             handler_field="data_source.handler",
             handler_name=handler_name,
-            runtime_call_label="(context, table_id, query, params)",
-            call_args=(table_id, {}, None),
+            runtime_call_label="(context, query)",
+            call_args=({},),
         )
         if error:
             errors.append(error)

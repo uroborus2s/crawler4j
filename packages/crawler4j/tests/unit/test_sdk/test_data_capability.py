@@ -129,9 +129,25 @@ def test_task_context_db_fluent_api_builds_select_query_plan():
             "group_by": ["account_id"],
             "order_by": [{"field": "total_amount", "direction": "desc"}],
             "limit": 20,
-            "offset": 0,
+            "offset": None,
         }
     ]
+
+
+def test_task_context_db_select_plan_leaves_pagination_absent_until_called():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.from_("billing_entries").execute()
+    ctx.db.from_("billing_entries").limit(20).execute()
+    ctx.db.from_("billing_entries").offset(10).execute()
+
+    assert executor.plans[0]["limit"] is None
+    assert executor.plans[0]["offset"] is None
+    assert executor.plans[1]["limit"] == 20
+    assert executor.plans[1]["offset"] is None
+    assert executor.plans[2]["limit"] is None
+    assert executor.plans[2]["offset"] == 10
 
 
 def test_task_context_db_describe_returns_host_descriptor():
@@ -209,7 +225,7 @@ def test_task_context_db_supports_view_select_and_replace_plan():
             "group_by": [],
             "order_by": [],
             "limit": None,
-            "offset": 0,
+            "offset": None,
         },
         {
             "kind": "replace_records",

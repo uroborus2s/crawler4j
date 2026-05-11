@@ -305,7 +305,7 @@ class CleanupPreviewDialog(QDialog):
     TABLE_SCHEMA = {
         "columns": [
             {"key": "__index__", "label": "#", "type": "int", "width": 56, "align": "center"},
-            {"key": "env_id", "label": "环境ID", "type": "int", "width": 84, "align": "center"},
+            {"key": "env_id", "label": "环境ID", "type": "int", "width": 84, "align": "center", "sortable": True},
             {"key": "env_name", "label": "环境名", "type": "text", "stretch": True},
             {"key": "provider", "label": "Provider", "type": "text", "width": 150},
             {"key": "sources", "label": "来源", "type": "text", "width": 240},
@@ -564,7 +564,7 @@ class EnvListWidget(QWidget):
     TABLE_SCHEMA = {
         "columns": [
             {"key": "id", "label": "ID", "type": "text", "width": 120},
-            {"key": "name", "label": "名称", "type": "text", "width": 160},
+            {"key": "name", "label": "名称", "type": "text", "width": 160, "sortable": True},
             {"key": "kind", "label": "类型", "type": "text", "width": 100},
             {"key": "provider", "label": "节点类型", "type": "text", "width": 110},
             {"key": "status", "label": "状态", "type": "text", "width": 90},

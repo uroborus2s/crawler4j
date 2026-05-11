@@ -224,7 +224,16 @@ class QuizWorkflow:
 ## Page
 
 ```python
-from crawler4j_contracts import TaskContext, page
+from crawler4j_contracts import PageSchema, TaskContext, page
+
+
+dashboard_schema: PageSchema = {
+    "type": "Page",
+    "title": "Dashboard",
+    "children": [
+        {"type": "Text", "style": "title", "binding": "title"},
+    ],
+}
 
 
 @page(
@@ -232,13 +241,7 @@ from crawler4j_contracts import TaskContext, page
     label="Dashboard",
     icon="chart",
     menu=True,
-    schema={
-        "type": "Page",
-        "title": "Dashboard",
-        "children": [
-            {"type": "Text", "style": "title", "binding": "title"},
-        ],
-    },
+    schema=dashboard_schema,
 )
 def load_dashboard_page(
     context: TaskContext,
@@ -255,6 +258,7 @@ page 规则：
 - `name` 是唯一扁平 snake_case
 - `menu=True` 进入左侧菜单；`menu=False` 只注册可路由页面
 - `schema` 顶层必须是 `Page`
+- `schema` 可用 `crawler4j_contracts.PageSchema` 标注，`Button.action.type` 只允许 `reload`、`open_page`、`ui_action`
 - 被装饰函数就是页面 `load_handler`
 
 ## Page Action
@@ -295,8 +299,8 @@ from crawler4j_contracts import ui_action
 
 
 @ui_action(name="create_account_from_ui", label="创建账号")
-def create_account_from_ui(ctx, payload: dict):
-    ctx.db.into("accounts").upsert([payload])
+def create_account_from_ui(ctx, account_id: str):
+    ctx.db.into("accounts").update_where({"status": "active"}, where=account_id)
     return {"ok": True}
 ```
 
@@ -322,6 +326,8 @@ Hosted UI schema 使用 `type: "ui_action"`：
     },
 }
 ```
+
+`Button.action.params` 会解析成 `@ui_action` 的命名参数。DataTable CRUD handler 也指向 `@ui_action` 名称：create 传 `payload`，update 传 `crud.primary_key` 同名参数和 `payload`，delete 传 `crud.primary_key` 同名参数。
 
 ## 运行模板保存什么
 

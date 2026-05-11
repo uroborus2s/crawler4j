@@ -83,7 +83,9 @@ workflow 或 component 内调用：
 await ctx.run_page_action("open_login_page", url="https://example.com")
 ```
 
-`ctx.run_subtask(...)` 不属于 0.4.0 新模块主路径。v2 编排对象应调用明确的 page action 或组件方法，不依赖旧子任务兼容名。
+`ctx.run_subtask(...)` 已从 0.4.0 Contracts 公共面移除。v2 编排对象应调用明确的 page action 或组件方法，不依赖旧子任务兼容名。
+
+`TaskContext` 不提供 `screenshot()`。截图属于浏览器宿主副作用能力，应由 Core 暴露的工具能力或测试宿主直接提供，而不是放进 contracts。
 
 ## `TaskContext.db`
 
@@ -131,6 +133,7 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
 `ctx.db.describe(source)` 读取宿主归一化后的数据源契约；`source` 是逻辑数据源名，不是 SQLite 物理表名。返回值包含 `kind`、`source_kind`、`storage_mode`、`record_key_field`、`columns`、`system_fields`、`writable_fields`、`required_fields` 和 `read_only_fields`。模块侧需要生成 repository 写入契约时，应优先使用这个宿主描述。
 `custom_table` 可以在 `record_key_field` 对应的 integer schema 字段上声明 `auto_increment=True`；这种表用 `ctx.db.into(...).add(...)` 新增记录，新增时可以省略 id，返回值是生成的 id 列表。`upsert` 仍然要求提供主键。
 `where` 条件统一写成数组：`["field", "=", value]`、`["field", ">", value]`、`["field", "in", [...]]`、`["field", "between", [start, end]]`、`["field", "is_null"]`。多个条件默认 `AND`；需要组合时使用 `["or", condition, condition]` 或 `["and", condition, condition]`，例如 `["and", ["or", ["status", "=", "ready"], ["status", "=", "pending"]], ["age", ">=", 18]]`。
+`ctx.db.from_(...).execute()` 没有隐式分页上限；未调用 `.limit(...)` / `.offset(...)` 时，宿主不会追加 `LIMIT/OFFSET`，会读取满足条件的全部行。列表页、表格页和可增长数据源必须显式分页。
 `managed_dataset` 的 `where/select/order_by` 会分成两类字段处理：宿主物理列包括 `record_index`、`record_key`、`run_status`、`record_status`、`created_at`、`updated_at`；schema 业务字段下推为 SQLite `json_extract(record_json, '$.<field>')` 查询。模块可以按 schema 字段过滤、排序和选择，也可以用 `where(...).count(alias="total")` 统计过滤后的记录条数；这个 count 只支持 `count(*)`，不支持 `group_by`、`join` 或其它 aggregate。模块不能查询嵌套 JSON path、schema 外 JSON key 或 raw `record_json`；正式 `ctx.db` 查询面与宿主内部 `query_resource_records()` 使用同一份数据源描述，返回时会把 schema 业务字段和物理字段展开成同一行记录。写入时只有 schema 业务字段会合并进 `record_json`；`run_status` / `record_status` 可通过 replace/upsert/update_where 更新物理状态列，其余宿主生成型物理字段仍由宿主管理。
 数据表和只读视图的列契约不再提供 `filterable` / `sortable` 开关；筛选和排序由统一查询执行器按字段存在性、数据源类型和表达式校验。
 模块不需要管理数据库锁、事务提交或回滚；所有写入由宿主包装成短事务并自动排队、重试、提交或回滚。并发处理保持宿主 `DbWriteCoordinator` 现有策略。
@@ -204,6 +207,6 @@ def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None 
 - `@page(menu=True)` 控制左侧菜单，`menu=False` 只注册可路由页面
 - `schema` 顶层是 `Page`
 - 被 `@page` 装饰的函数就是页面 `load_handler`
-- `DataTable(query_handler)` 指向真实函数
+- `DataTable(query_handler)` 指向真实函数，签名固定为 `context, HostedDataTableQuery`，返回 `HostedDataTableQueryResult`
 - `open_page.page_id` 可以跳到未进菜单的页面
 - Hosted UI 按钮和 CRUD handler 使用 `type: "ui_action"` 调用 `@ui_action`

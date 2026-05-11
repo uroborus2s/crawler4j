@@ -39,7 +39,7 @@ class JobDetailDialog(QDialog):
             {"key": "status", "label": "状态", "type": "text", "width": 120},
             {"key": "env_id", "label": "环境ID", "type": "text", "width": 140},
             {"key": "lease_id", "label": "环境租约", "type": "text", "width": 140},
-            {"key": "started_at", "label": "开始时间", "type": "text", "width": 100},
+            {"key": "started_at", "label": "开始时间", "type": "text", "width": 100, "sortable": True},
             {"key": "finished_at", "label": "结束时间", "type": "text", "width": 100},
             {"key": "result", "label": "结果/错误", "type": "text", "stretch": True},
         ],

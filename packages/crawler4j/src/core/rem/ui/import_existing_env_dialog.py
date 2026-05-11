@@ -25,7 +25,7 @@ class ImportExistingEnvDialog(QDialog):
     RISK_CONTENT_PADDING = (12, 10, 12, 10)
     TABLE_SCHEMA = {
         "columns": [
-            {"key": "name", "label": "环境名称", "type": "text", "width": 180},
+            {"key": "name", "label": "环境名称", "type": "text", "width": 180, "sortable": True},
             {"key": "external_id", "label": "外部 ID", "type": "text", "width": 130},
             {"key": "remark", "label": "备注", "type": "text", "width": 150},
             {"key": "proxy_summary", "label": "代理/IP 摘要", "type": "text", "width": 180},

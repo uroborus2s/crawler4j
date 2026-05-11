@@ -1,8 +1,8 @@
 """TaskContext 任务执行上下文契约。
 
-本模块定义 Crawler4j Core 与 SDK 共享的稳定契约：TaskContext。
-contracts 层承载共享协议、数据类型与 TaskContext 的轻量辅助方法，
-但不内置运行时 HTTP 实现或第三方宿主适配器。
+本模块定义 Crawler4j Core、SDK 与模块共享的稳定运行时契约。
+contracts 层只承载无宿主副作用的协议、数据类型与轻量辅助方法；
+截图、浏览器控制、环境管理、数据库落库等宿主能力由 Core 注入。
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
@@ -217,7 +216,6 @@ class TaskContext:
     runtime: dict[str, Any] = field(default_factory=dict)
 
     _stop_requested: bool = field(default=False, repr=False)
-    _subtask_executor: Callable[..., Any] | None = field(default=None, repr=False)
     _page_action_executor: Callable[..., Any] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -234,20 +232,6 @@ class TaskContext:
             remaining -= sleep_for
         self._raise_if_stop_requested()
 
-    async def screenshot(self, name: str) -> str:
-        if not self.page:
-            raise RuntimeError("Page 未初始化，无法截图")
-
-        screenshots_dir = Path("screenshots")
-        screenshots_dir.mkdir(exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        path = screenshots_dir / f"{name}_{timestamp}.png"
-
-        await self.page.screenshot(path=str(path))
-        self.logger.info(f"📸 截图已保存: {path}")
-        return str(path)
-
     def get_config(self, key: str, default: Any = None) -> Any:
         """读取宿主持久化的模块配置项。"""
         return self.config.get(key, default)
@@ -262,25 +246,6 @@ class TaskContext:
     def _raise_if_stop_requested(self) -> None:
         if self._stop_requested:
             raise asyncio.CancelledError("Task stop requested")
-
-    async def run_subtask(self, task_name: str, **kwargs: Any) -> Any:
-        if not self._subtask_executor:
-            raise RuntimeError("子任务执行器未注入，请确保通过框架运行")
-        self._raise_if_stop_requested()
-
-        if kwargs:
-            self.state.update(kwargs)
-
-        self.logger.info(f"▶ 执行子任务: {task_name}")
-        result = await self._subtask_executor(task_name, self)
-
-        if isinstance(result, TaskResult):
-            if result.success:
-                if result.data:
-                    return result.data
-                return True
-            return _SubtaskFailurePayload.from_task_result(result)
-        return result
 
     async def run_page_action(self, action_name: str, **kwargs: Any) -> Any:
         """在 v2 workflow 中调用同模块的 `@page_action`。"""
@@ -299,18 +264,18 @@ class TaskContext:
                 if result.data:
                     return result.data
                 return True
-            return _SubtaskFailurePayload.from_task_result(result)
+            return _ActionFailurePayload.from_task_result(result)
         return result
 
 
-class _SubtaskFailurePayload(dict[str, Any]):
-    """A falsey mapping that preserves failed subtask details for workflows."""
+class _ActionFailurePayload(dict[str, Any]):
+    """A falsey mapping that preserves failed action details for workflows."""
 
     def __bool__(self) -> bool:
         return False
 
     @classmethod
-    def from_task_result(cls, result: TaskResult) -> "_SubtaskFailurePayload":
+    def from_task_result(cls, result: TaskResult) -> "_ActionFailurePayload":
         payload = dict(result.data or {})
         payload.setdefault("status", "failed")
         payload.setdefault("success", False)

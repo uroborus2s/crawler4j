@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from crawler4j_contracts import TaskContext
+from crawler4j_contracts import HostedDataTableQuery, TaskContext
 
 from src.core.atm.runtime_capabilities import (
     HostedUIDeclarationBuffer,
@@ -430,14 +430,15 @@ class ModuleUIRuntimeBridge:
     def call_query_handler(
         self,
         handler_name: str,
-        table_id: str,
-        query: dict[str, Any] | None,
-        params: dict[str, Any] | None = None,
+        query: HostedDataTableQuery | dict[str, Any] | None,
         *,
         page_id: str,
     ) -> Any:
-        normalized_query = dict(query or {})
-        normalized_params = dict(params) if isinstance(params, dict) else None
+        normalized_query = (
+            query
+            if isinstance(query, HostedDataTableQuery)
+            else HostedDataTableQuery.from_mapping(query if isinstance(query, dict) else None)
+        )
         session = self._active_session
         if session is None:
             session = self._create_session(
@@ -452,14 +453,13 @@ class ModuleUIRuntimeBridge:
                 session.context,
                 {
                     "page_id": page_id,
-                    "table_id": table_id,
                 },
             ):
                 return self._run_sync_callable(
                     handler,
                     owner=f"{page.module_name}.{handler_name}",
                     context=session.context,
-                    args=(table_id, normalized_query, normalized_params),
+                    args=(normalized_query,),
                 )
         finally:
             if self._active_session is session:

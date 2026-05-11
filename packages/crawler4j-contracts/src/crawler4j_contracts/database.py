@@ -93,7 +93,7 @@ class DatabaseQueryBuilder:
         self._group_by: list[str] = []
         self._order_by: list[dict[str, str]] = []
         self._limit: int | None = None
-        self._offset = 0
+        self._offset: int | None = None
 
     def select(self, *fields: Any) -> "DatabaseQueryBuilder":
         normalized_fields = _normalize_select_fields(fields)

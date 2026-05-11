@@ -17,8 +17,8 @@
 - `@page(menu=True)` 声明左侧导航菜单入口；`menu=False` 只注册可路由页面
 - 页面 schema 只允许使用宿主提供的 `Page`、`Section`、`Text`、`Button`、`DataTable`
 - 页面数据全部由 `load_handler` 或 `DataTable.query_handler` 返回结构化对象
-- 页面业务按钮和 CRUD handler 通过 `@ui_action` 声明的函数执行，参数按 kwargs 绑定
-- `@page_action` 只服务 workflow/component 驱动的浏览器页面操作，不作为 Hosted UI 新按钮入口
+- 页面业务按钮和 CRUD handler 通过 `@ui_action` 声明的函数执行，参数按 kwargs 绑定；CRUD 的主键参数名来自 `crud.primary_key`
+- `@page_action` 只服务 workflow/component 驱动的浏览器页面操作，Hosted UI schema 不接受 `page_action`
 - 宿主只负责 schema 校验、路由、渲染和通用交互，不再负责模块业务数据语义
 
 本次设计明确删除：
@@ -148,13 +148,13 @@ def load_dashboard_page(
 页面数据只有两种正式入口：
 
 1. `load_handler(context, page_id, params=None) -> dict`
-2. `query_handler(context, table_id, query, params=None) -> dict`
+2. `query_handler(context, query: HostedDataTableQuery) -> HostedDataTableQueryResult`
 
 其中：
 
 - `load_handler` 为页面整体提供数据
 - `DataTable` 通过 `binding`、`rows` 或 `query_handler` 获取表格数据
-- `query_handler` 负责搜索、排序、分页等表格查询逻辑
+- `query_handler` 负责搜索、排序、分页等表格查询逻辑；`DataTable.columns` 中的搜索和排序列必须分别显式声明 `searchable=True` / `sortable=True`；`DataTable.table_id` 只用于宿主识别页面内组件，不作为 handler 入参，也不表示数据库资源名
 
 ### 4.5 动作入口
 

@@ -40,7 +40,7 @@ def resolve_local_data_table_result(
     column_map = {str(column.get("key")): column for column in columns if isinstance(column, dict)}
     searchable_columns = [
         column for column in columns
-        if isinstance(column, dict) and column.get("type") != "actions" and column.get("searchable", True)
+        if isinstance(column, dict) and column.get("type") != "actions" and column.get("searchable") is True
     ]
     filtered = [dict(row) for row in rows if isinstance(row, dict)]
 
@@ -63,7 +63,7 @@ def resolve_local_data_table_result(
             field = str(sort_spec.get("field") or "").strip()
             direction = str(sort_spec.get("direction") or "asc").strip().lower()
             column = column_map.get(field)
-            if not field or column is None or not column.get("sortable", column.get("type") != "actions"):
+            if not field or column is None or column.get("type") == "actions" or column.get("sortable") is not True:
                 continue
             reverse = direction == "desc"
             filtered.sort(

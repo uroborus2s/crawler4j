@@ -121,7 +121,7 @@
 2. `@page.name` 是否唯一
 3. `@page.schema` 顶层是否是 `Page`
 4. 被 `@page` 装饰的 `load_handler` 是否存在且签名正确
-5. 表格 `query_handler` 是否存在且签名正确
+5. 表格 `query_handler` 是否存在且签名为 `context, HostedDataTableQuery`，返回 `HostedDataTableQueryResult`
 6. 页面动作是否引用已扫描的 `@page_action`
 
 ## 安装或升级失败

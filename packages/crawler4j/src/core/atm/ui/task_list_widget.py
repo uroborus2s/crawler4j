@@ -45,7 +45,7 @@ class TaskListWidget(QWidget):
     TABLE_SCHEMA = {
         "columns": [
             {"key": "__index__", "label": "序号", "type": "number", "width": 72, "align": "right", "sortable": False, "searchable": False},
-            {"key": "name", "label": "作业名称", "type": "text", "width": 240},
+            {"key": "name", "label": "作业名称", "type": "text", "width": 240, "sortable": True},
             {"key": "type", "label": "类型", "type": "text", "width": 100},
             {"key": "runtime", "label": "运行配置", "type": "text", "width": 140},
             {"key": "concurrency", "label": "目标并发", "type": "number", "width": 80, "align": "right"},

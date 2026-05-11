@@ -109,7 +109,7 @@ class IPPoolTab(QWidget):
     
     POOL_TABLE_SCHEMA = {
         "columns": [
-            {"key": "name", "label": "名称", "type": "text", "width": 220},
+            {"key": "name", "label": "名称", "type": "text", "width": 220, "sortable": True},
             {"key": "strategy", "label": "策略", "type": "text", "width": 220},
             {"key": "ip_count", "label": "IP数量", "type": "number", "width": 160, "align": "right"},
             {"key": "in_use", "label": "在用", "type": "number", "width": 120, "align": "right"},
@@ -130,7 +130,7 @@ class IPPoolTab(QWidget):
             {"key": "port", "label": "端口", "type": "number", "width": 120, "align": "right"},
             {"key": "bound_count", "label": "绑定数", "type": "number", "width": 100, "align": "right"},
             {"key": "safety_score", "label": "安全度", "type": "number", "width": 100, "align": "right"},
-            {"key": "expires", "label": "过期时间", "type": "text", "width": 220},
+            {"key": "expires", "label": "过期时间", "type": "text", "width": 220, "sortable": True},
             {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
         ],
         "features": {

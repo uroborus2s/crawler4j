@@ -44,7 +44,7 @@ workflow/component -> ctx.run_page_action("action_name", **kwargs) -> @page_acti
 ```text
 @page_action -> ctx.run_page_action(...) -> @page_action
 @ui_action -> ctx.run_page_action(...) -> @page_action
-Hosted UI Button -> type="page_action"  # 仅保留旧 schema 迁移，不作为新模块规则
+Hosted UI Button -> type="page_action"
 ```
 
 如果一个页面动作需要拆公共步骤，不要把公共步骤也声明成 `@page_action`。使用以下方式：
@@ -58,7 +58,7 @@ Hosted UI Button -> type="page_action"  # 仅保留旧 schema 迁移，不作为
 
 ## Hosted UI 规则
 
-页面 schema 由 `@page` 返回，按钮和 CRUD handler 使用 `type: "ui_action"`：
+页面 schema 由 `@page` 返回，按钮和 CRUD handler 使用 `type: "ui_action"`。`@page(schema=...)` 可用 `crawler4j_contracts.PageSchema` 标注；合法按钮 action type 只有 `reload`、`open_page` 和 `ui_action`。
 
 ```python
 {
@@ -69,6 +69,8 @@ Hosted UI Button -> type="page_action"  # 仅保留旧 schema 迁移，不作为
 ```
 
 `@ui_action` 可以读取表单参数、调用 `ctx.db`、调用 component 级业务服务，最后返回 JSON-like 结果。涉及真实浏览器页面时，应由 workflow/component 调用 `@page_action`，不要从 Hosted UI 直接驱动浏览器。
+
+DataTable CRUD handler 名称仍写在 `crud.create_handler`、`crud.update_handler`、`crud.delete_handler`，但这些字段指向的是 `@ui_action` 名称。入参固定为：create 接收 `payload`，update 接收 `crud.primary_key` 同名参数和 `payload`，delete 接收 `crud.primary_key` 同名参数。
 
 ## ctrip_crawler 迁移规则
 

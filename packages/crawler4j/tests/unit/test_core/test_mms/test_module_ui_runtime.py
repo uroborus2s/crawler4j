@@ -416,7 +416,7 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import TaskContext, page
+            from crawler4j_contracts import HostedDataTableQuery, HostedDataTableQueryResult, TaskContext, page
 
             OBSERVED = {}
 
@@ -452,23 +452,25 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
                 return dict(OBSERVED)
 
 
-            def query_dashboard_metrics(context: TaskContext, table_id: str, query, params=None):
+            def query_dashboard_metrics(context: TaskContext, query: HostedDataTableQuery):
                 OBSERVED["query_tools"] = [spec.name for spec in context.tools.list_tools()]
                 OBSERVED["query_page_id"] = context.runtime.get("page_id")
                 OBSERVED["query_table_id"] = context.runtime.get("table_id")
                 OBSERVED["query_params"] = context.runtime.get("params")
+                OBSERVED["query_object_type"] = type(query).__name__
+                OBSERVED["query_offset"] = query.offset
+                OBSERVED["query_params_value"] = query.params
                 OBSERVED["query_rows_before"] = context.db.from_("metrics").execute()
                 try:
                     context.db.into("metrics").replace([])
                 except Exception as exc:
                     OBSERVED["query_write_error"] = type(exc).__name__
-                return {
-                    "rows": [],
-                    "total": 0,
-                    "page": 1,
-                    "page_size": 20,
-                    "observed": dict(OBSERVED),
-                }
+                return HostedDataTableQueryResult(
+                    rows=[{"metric": key, "value": value} for key, value in OBSERVED.items()],
+                    total=len(OBSERVED),
+                    page=query.page,
+                    page_size=query.page_size,
+                )
             """,
         },
     )
@@ -503,9 +505,13 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
         )
         query_payload = bridge.call_query_handler(
             "query_dashboard_metrics",
-            "metrics",
-            {"page": 1, "page_size": 20, "sort": []},
-            {"phone": "13800138000"},
+            {
+                "page": 2,
+                "page_size": 20,
+                "search_fields": ["metric", "value"],
+                "sort": [],
+                "params": {"phone": "13800138000"},
+            },
             page_id="dashboard",
         )
 
@@ -515,12 +521,16 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
         assert page_payload["load_params"] is None
         assert page_payload["load_schema_type"] == "Page"
         assert page_payload["load_write_error"] == "RuntimeError"
-        assert query_payload["observed"]["query_tools"] == ["ui.get_page"]
-        assert query_payload["observed"]["query_page_id"] == "dashboard"
-        assert query_payload["observed"]["query_table_id"] == "metrics"
-        assert query_payload["observed"]["query_params"] is None
-        assert query_payload["observed"]["query_rows_before"] == []
-        assert query_payload["observed"]["query_write_error"] == "RuntimeError"
+        observed = {row["metric"]: row["value"] for row in query_payload.rows}
+        assert observed["query_tools"] == ["ui.get_page"]
+        assert observed["query_page_id"] == "dashboard"
+        assert observed["query_table_id"] is None
+        assert observed["query_params"] is None
+        assert observed["query_object_type"] == "HostedDataTableQuery"
+        assert observed["query_offset"] == 20
+        assert observed["query_params_value"] == {"phone": "13800138000"}
+        assert observed["query_rows_before"] == []
+        assert observed["query_write_error"] == "RuntimeError"
     finally:
         restore_module(service, original_registry, module_name)
 

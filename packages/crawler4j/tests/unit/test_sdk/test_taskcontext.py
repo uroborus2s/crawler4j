@@ -4,14 +4,12 @@
     - TC_SDK_001: 能力注入测试
     - TC_SDK_012: Mock Context 创建测试
     - 工具方法测试
-    - 子任务调用测试
+    - 页面动作调用测试
 """
 
 import asyncio
-import time
 import sys
-from datetime import datetime
-from pathlib import Path
+import time
 from types import SimpleNamespace
 
 from unittest.mock import AsyncMock, MagicMock
@@ -19,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from crawler4j_contracts import TaskContext, TaskResult, ToolSpec, ToolsCapability
-import crawler4j_contracts.context as contracts_context
 from crawler4j_sdk.context import DefaultHttpClient, HttpClient
 
 # === 测试夹具 ===
@@ -32,21 +29,6 @@ def basic_context() -> TaskContext:
         task_name="test_task",
         config={"timeout": 30, "retry": 3},
     )
-
-
-@pytest.fixture
-def mock_context_with_page() -> TaskContext:
-    """创建带 Mock Page 的 TaskContext。"""
-    ctx = TaskContext(
-        env_id=1,
-        task_name="test_task",
-        config={},
-    )
-    ctx.page = MagicMock()
-    ctx.page.screenshot = AsyncMock()
-    ctx.page.goto = AsyncMock()
-    ctx.logger = MagicMock()
-    return ctx
 
 
 # === 能力注入测试 ===
@@ -263,53 +245,6 @@ class TestTaskContextUtilities:
         await stopper
 
         assert elapsed < 0.5
-    
-    @pytest.mark.asyncio
-    async def test_screenshot_without_page_raises_error(self, basic_context: TaskContext):
-        """验证没有 Page 时 screenshot 抛出错误。"""
-        with pytest.raises(RuntimeError, match="Page 未初始化"):
-            await basic_context.screenshot("test")
-    
-    @pytest.mark.asyncio
-    async def test_screenshot_with_page(self, mock_context_with_page: TaskContext):
-        """验证有 Page 时 screenshot 正常工作。"""
-        path = await mock_context_with_page.screenshot("test_shot")
-        
-        assert "test_shot" in path
-        assert path.endswith(".png")
-        mock_context_with_page.page.screenshot.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_screenshot_same_second_keeps_unique_filenames(
-        self,
-        monkeypatch,
-        mock_context_with_page: TaskContext,
-        tmp_path,
-    ):
-        """验证同秒连续截图不会互相覆盖。"""
-        monkeypatch.chdir(tmp_path)
-        timestamps = [
-            datetime(2026, 4, 23, 12, 0, 0, 123456),
-            datetime(2026, 4, 23, 12, 0, 0, 789012),
-        ]
-
-        class _FakeDateTime:
-            @classmethod
-            def now(cls):
-                return timestamps.pop(0)
-
-        monkeypatch.setattr(contracts_context, "datetime", _FakeDateTime)
-
-        first_path = await mock_context_with_page.screenshot("test_shot")
-        second_path = await mock_context_with_page.screenshot("test_shot")
-
-        assert first_path != second_path
-        assert (tmp_path / first_path).parent == tmp_path / "screenshots"
-        assert (tmp_path / second_path).parent == tmp_path / "screenshots"
-        assert Path(first_path).name.startswith("test_shot_20260423_120000_")
-        assert Path(second_path).name.startswith("test_shot_20260423_120000_")
-        assert mock_context_with_page.page.screenshot.call_args_list[0].kwargs["path"] == first_path
-        assert mock_context_with_page.page.screenshot.call_args_list[1].kwargs["path"] == second_path
 
 
 # === 停止/取消测试 ===
@@ -331,7 +266,7 @@ class TestTaskContextStopControl:
 
 
 class TestTaskContextHostBoundaries:
-    """测试模块侧不再暴露宿主流程控制入口。"""
+    """测试模块侧不再暴露宿主流程控制或副作用入口。"""
 
     def test_signal_methods_are_not_part_of_task_context(self, basic_context: TaskContext):
         assert not hasattr(basic_context, "emit_signal")
@@ -339,61 +274,71 @@ class TestTaskContextHostBoundaries:
         assert not hasattr(basic_context, "clear_signal")
         assert not hasattr(basic_context, "set_signal_phase")
 
+    def test_legacy_subtask_and_screenshot_helpers_are_not_part_of_task_context(
+        self,
+        basic_context: TaskContext,
+    ):
+        assert not hasattr(basic_context, "screenshot")
+        assert not hasattr(basic_context, "run_subtask")
+        assert not hasattr(basic_context, "_subtask_executor")
 
-# === 子任务调用测试 ===
 
-class TestTaskContextSubtask:
-    """测试子任务调用。"""
-    
+# === 页面动作调用测试 ===
+
+class TestTaskContextPageAction:
+    """测试 v2 页面动作调用。"""
+
     @pytest.mark.asyncio
-    async def test_run_subtask_without_executor_raises_error(self, basic_context: TaskContext):
+    async def test_run_page_action_without_executor_raises_error(self, basic_context: TaskContext):
         """验证没有执行器时抛出错误。"""
-        with pytest.raises(RuntimeError, match="子任务执行器未注入"):
-            await basic_context.run_subtask("some_task")
-    
+        with pytest.raises(RuntimeError, match="页面动作执行器未注入"):
+            await basic_context.run_page_action("some_action")
+
     @pytest.mark.asyncio
-    async def test_run_subtask_with_executor(self, basic_context: TaskContext):
-        """验证有执行器时正常调用子任务。"""
+    async def test_run_page_action_rejects_empty_action_name(self, basic_context: TaskContext):
+        """验证空页面动作名称会被拒绝。"""
+        basic_context._page_action_executor = AsyncMock(return_value=TaskResult.ok())
+
+        with pytest.raises(ValueError, match="页面动作名称不能为空"):
+            await basic_context.run_page_action("  ")
+
+        basic_context._page_action_executor.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_page_action_with_executor(self, basic_context: TaskContext):
+        """验证有执行器时正常调用页面动作。"""
         basic_context.logger = MagicMock()
-        
+
         # 设置 Mock 执行器
         mock_result = TaskResult.ok(data={"result": "success"})
         mock_executor = AsyncMock(return_value=mock_result)
-        basic_context._subtask_executor = mock_executor
-        
-        result = await basic_context.run_subtask("sub_task")
-        
+        basic_context._page_action_executor = mock_executor
+
+        result = await basic_context.run_page_action(" open_page ", url="https://example.com")
+
         assert result == {"result": "success"}
-        mock_executor.assert_called_once_with("sub_task", basic_context)
-    
-    @pytest.mark.asyncio
-    async def test_run_subtask_merges_kwargs_to_state(self, basic_context: TaskContext):
-        """验证子任务参数合并到 state。"""
-        basic_context.logger = MagicMock()
-        basic_context._subtask_executor = AsyncMock(return_value=TaskResult.ok())
-
-        await basic_context.run_subtask("sub_task", param1="value1", param2=123)
-
-        assert basic_context.state["param1"] == "value1"
-        assert basic_context.state["param2"] == 123
+        mock_executor.assert_called_once_with("open_page", basic_context, url="https://example.com")
 
     @pytest.mark.asyncio
-    async def test_run_subtask_returns_true_for_success_without_payload(self, basic_context: TaskContext):
+    async def test_run_page_action_returns_true_for_success_without_payload(
+        self,
+        basic_context: TaskContext,
+    ):
         """验证成功但无 data 时返回 True，便于工作流按布尔语义判断。"""
         basic_context.logger = MagicMock()
-        basic_context._subtask_executor = AsyncMock(return_value=TaskResult.ok())
+        basic_context._page_action_executor = AsyncMock(return_value=TaskResult.ok())
 
-        result = await basic_context.run_subtask("sub_task")
+        result = await basic_context.run_page_action("open_page")
 
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_run_subtask_returns_false_for_failed_result(self, basic_context: TaskContext):
+    async def test_run_page_action_returns_false_for_failed_result(self, basic_context: TaskContext):
         """验证失败结果返回 falsey 的结构化 payload。"""
         basic_context.logger = MagicMock()
-        basic_context._subtask_executor = AsyncMock(return_value=TaskResult.fail(message="failed"))
+        basic_context._page_action_executor = AsyncMock(return_value=TaskResult.fail(message="failed"))
 
-        result = await basic_context.run_subtask("sub_task")
+        result = await basic_context.run_page_action("open_page")
 
         assert isinstance(result, dict)
         assert not result
@@ -402,10 +347,10 @@ class TestTaskContextSubtask:
         assert result["success"] is False
 
     @pytest.mark.asyncio
-    async def test_run_subtask_preserves_failed_result_details(self, basic_context: TaskContext):
+    async def test_run_page_action_preserves_failed_result_details(self, basic_context: TaskContext):
         """验证失败结果会保留 error 和原始 data。"""
         basic_context.logger = MagicMock()
-        basic_context._subtask_executor = AsyncMock(
+        basic_context._page_action_executor = AsyncMock(
             return_value=TaskResult.fail(
                 message="labor login failed",
                 error="invalid_labor_credentials",
@@ -413,7 +358,7 @@ class TestTaskContextSubtask:
             )
         )
 
-        result = await basic_context.run_subtask("sub_task")
+        result = await basic_context.run_page_action("open_page")
 
         assert isinstance(result, dict)
         assert not result
@@ -423,16 +368,19 @@ class TestTaskContextSubtask:
         assert result["current_url"] == "https://frontend.lobaobao97.com/login"
 
     @pytest.mark.asyncio
-    async def test_run_subtask_raises_cancelled_error_when_stop_requested(self, basic_context: TaskContext):
-        """验证 stop 后不会继续启动新的子任务。"""
+    async def test_run_page_action_raises_cancelled_error_when_stop_requested(
+        self,
+        basic_context: TaskContext,
+    ):
+        """验证 stop 后不会继续启动新的页面动作。"""
         basic_context.logger = MagicMock()
-        basic_context._subtask_executor = AsyncMock(return_value=TaskResult.ok())
+        basic_context._page_action_executor = AsyncMock(return_value=TaskResult.ok())
         basic_context.request_stop()
 
         with pytest.raises(asyncio.CancelledError):
-            await basic_context.run_subtask("sub_task")
+            await basic_context.run_page_action("open_page")
 
-        basic_context._subtask_executor.assert_not_called()
+        basic_context._page_action_executor.assert_not_called()
 
 
 # === 状态共享测试 ===

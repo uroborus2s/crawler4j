@@ -117,10 +117,10 @@ V1 只允许数据库视图引用：
 
 正式页面链路固定为：
 
-- `declare_ui()` 调用 `ui.declare_page`
+- `@page(...)` 声明页面 schema
 - 页面 schema 在 `children[]` 中内联 `DataTable`
 - `DataTable.data_source.type = "query_handler"`
-- `query_handler(context, table_id, query, params=None)` 内部调用 `ctx.db`
+- `query_handler(context, query: HostedDataTableQuery) -> HostedDataTableQueryResult` 内部调用 `ctx.db`
 
 V1 仅支持只读统计表：
 
@@ -358,10 +358,9 @@ V1 约束：
 
 正式页面链路如下：
 
-- `declare_ui()` 只调用 `ui.declare_page`
-- `ui.declare_page` 产出的 `Page.children[]` 内联 `DataTable`
+- `@page(...)` 产出的 `Page.children[]` 内联 `DataTable`
 - `DataTable.data_source.type = "query_handler"`
-- `query_handler` 内部把 `query.filters / query.sort / query.limit / query.offset` 路由到 `ctx.db`
+- `query_handler` 内部把 `HostedDataTableQuery.search_text / sort / limit / offset / params` 路由到 `ctx.db`
 
 V1 规则：
 
@@ -373,16 +372,19 @@ V1 规则：
 
 - 首次加载和翻页时，宿主调用页面内联 `DataTable` 的 `query_handler`
 - `query_handler` 再调用 `ctx.db.from_(...)`
-- 顶部过滤条和排序只下推 `columns_json` 中存在的字段
+- 顶部过滤条和排序只下推 `columns_json` 中存在、且在 `DataTable.columns` 显式声明 `searchable=True` / `sortable=True` 的字段
 - 页面参数或导航参数需要参与筛选时，也由 `query_handler` 统一合并到 `ctx.db` 查询条件
 - 数据表行为固定只读
 
 ### 7.3 UI 绑定示例
 
 ```python
-ctx.tools.call(
-    "ui.declare_page",
-    page_id="billing_stats",
+from crawler4j_contracts import HostedDataTableQuery, HostedDataTableQueryResult, TaskContext, page
+
+
+@page(
+    name="billing_stats",
+    label="劳保账号统计",
     schema={
         "type": "Page",
         "title": "劳保账号统计",
@@ -407,16 +409,27 @@ ctx.tools.call(
         ],
     },
 )
+def load_billing_stats_page(context: TaskContext, page_id: str, params=None):
+    del context, page_id, params
+    return {}
 
 
-def query_billing_stats(context, table_id, query, params=None):
-    return context.tools.call(
-        "ctx.db.from_(...)",
-        view_id="labor_billing_stats",
-        filters=query.get("filters") or {},
-        sort=query.get("sort") or [{"field": "total_count", "direction": "desc"}],
-        limit=query.get("limit", 50),
-        offset=query.get("offset", 0),
+def query_billing_stats(
+    context: TaskContext,
+    query: HostedDataTableQuery,
+) -> HostedDataTableQueryResult:
+    rows = (
+        context.db.from_("labor_billing_stats")
+        .order_by("total_count", "desc")
+        .limit(query.limit)
+        .offset(query.offset)
+        .execute()
+    )
+    return HostedDataTableQueryResult(
+        rows=rows,
+        total=len(rows),
+        page=query.page,
+        page_size=query.page_size,
     )
 ```
 

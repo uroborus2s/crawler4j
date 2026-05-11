@@ -58,6 +58,8 @@ async def run(ctx):
     return await ctx.run_subtask("fetch_hotels")
 ```
 
+`ctx.run_subtask(...)` 是旧 `WorkflowSpec.tasks` 路径的名字，0.4.0 Contracts 不再提供。迁移时把可观测页面步骤改成 `@page_action`，把业务编排放进 workflow/component。
+
 新写法：
 
 ```python

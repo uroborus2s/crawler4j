@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import QAbstractItemView
 
 from src.ui.components.button import StyledButton
 from src.ui.components.data_table import SkyDataTable
+from src.ui.components.data_table_query import resolve_local_data_table_result
 
 
 def _build_table() -> SkyDataTable:
@@ -67,6 +68,88 @@ def test_sky_data_table_emits_query_with_search_sort_and_pagination(qtbot):
     assert queries[1][1]["search_text"] == "alpha"
     assert queries[2][1]["sort"] == [{"field": "name", "direction": "asc"}]
     assert queries[3][1]["page"] == 2
+
+
+def test_sky_data_table_sort_requires_explicit_sortable_column(qtbot):
+    table = SkyDataTable(
+        {
+            "columns": [
+                {"key": "name", "label": "名称"},
+                {"key": "status", "label": "状态", "sortable": True},
+            ],
+            "features": {"sort": {"enabled": True}, "pagination": {"enabled": False}},
+        }
+    )
+    qtbot.addWidget(table)
+
+    queries: list[tuple[int, dict]] = []
+    table.query_requested.connect(lambda request_id, query: queries.append((request_id, dict(query))))
+    table.request_refresh()
+
+    table.table.horizontalHeader().sectionClicked.emit(0)
+    assert len(queries) == 1
+
+    table.table.horizontalHeader().sectionClicked.emit(1)
+    assert queries[-1][1]["sort"] == [{"field": "status", "direction": "asc"}]
+
+
+def test_resolve_local_data_table_search_requires_explicit_searchable_column():
+    result = resolve_local_data_table_result(
+        [
+            {"name": "alpha", "status": "ready"},
+            {"name": "beta", "status": "pending"},
+        ],
+        columns=[
+            {"key": "name", "label": "名称"},
+            {"key": "status", "label": "状态", "searchable": True},
+        ],
+        query={"search_text": "alpha", "page": 1, "page_size": 20},
+    )
+
+    assert result["rows"] == []
+
+    result = resolve_local_data_table_result(
+        [
+            {"name": "alpha", "status": "ready"},
+            {"name": "beta", "status": "pending"},
+        ],
+        columns=[
+            {"key": "name", "label": "名称"},
+            {"key": "status", "label": "状态", "searchable": True},
+        ],
+        query={"search_text": "ready", "page": 1, "page_size": 20},
+    )
+
+    assert result["rows"] == [{"name": "alpha", "status": "ready"}]
+
+
+def test_resolve_local_data_table_sort_requires_explicit_sortable_column():
+    rows = [
+        {"name": "alpha", "status": "ready"},
+        {"name": "beta", "status": "pending"},
+    ]
+
+    result = resolve_local_data_table_result(
+        rows,
+        columns=[
+            {"key": "name", "label": "名称"},
+            {"key": "status", "label": "状态", "sortable": True},
+        ],
+        query={"sort": [{"field": "name", "direction": "desc"}], "page": 1, "page_size": 20},
+    )
+
+    assert result["rows"] == rows
+
+    result = resolve_local_data_table_result(
+        rows,
+        columns=[
+            {"key": "name", "label": "名称"},
+            {"key": "status", "label": "状态", "sortable": True},
+        ],
+        query={"sort": [{"field": "status", "direction": "asc"}], "page": 1, "page_size": 20},
+    )
+
+    assert [row["status"] for row in result["rows"]] == ["pending", "ready"]
 
 
 def test_sky_data_table_hides_qt_vertical_header(qtbot):

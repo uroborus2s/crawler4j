@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable
 
+from crawler4j_contracts import HostedDataTableQueryResult
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFrame,
@@ -35,12 +36,6 @@ from src.ui.components.message_dialog import MessageDialog
 CRUD_ROW_ACTION_EDIT = "__crud_update__"
 CRUD_ROW_ACTION_DELETE = "__crud_delete__"
 CRUD_ACTION_COLUMN_KEY = "__crud_actions__"
-
-
-def _runtime_surface_full():
-    from src.core.atm.runtime_capabilities import RUNTIME_SURFACE_FULL
-
-    return RUNTIME_SURFACE_FULL
 
 
 def _runtime_surface_hosted_ui_action():
@@ -157,9 +152,7 @@ class ManagedPageRenderer(QWidget):
             scroll = {}
         vertical = str(scroll.get("vertical") or "auto").strip().lower()
         vertical_policy = (
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-            if vertical == "hidden"
-            else Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff if vertical == "hidden" else Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self._scroll.setVerticalScrollBarPolicy(vertical_policy)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -232,7 +225,9 @@ class ManagedPageRenderer(QWidget):
         if action.get("type") == "reload":
             button.clicked.connect(self.refresh)
         else:
-            button.clicked.connect(lambda _checked=False, current_action=dict(action): self._handle_button_action(current_action))
+            button.clicked.connect(
+                lambda _checked=False, current_action=dict(action): self._handle_button_action(current_action)
+            )
         return button
 
     def _build_data_table(self, component: dict[str, Any]) -> QWidget:
@@ -297,6 +292,45 @@ class ManagedPageRenderer(QWidget):
         columns = [dict(column) for column in list(component.get("columns") or []) if isinstance(column, dict)]
         visible_columns = [column for column in columns if column.get("visible", True) is not False]
         return visible_columns or columns
+
+    def _table_search_fields(self, component: dict[str, Any]) -> list[str]:
+        fields: list[str] = []
+        for column in self._visible_table_columns(component):
+            field_name = str(column.get("key") or "").strip()
+            column_type = str(column.get("type") or "text").strip().lower()
+            if field_name and column_type != "actions" and column.get("searchable") is True:
+                fields.append(field_name)
+        return fields
+
+    def _table_sort_fields(self, component: dict[str, Any]) -> set[str]:
+        fields: set[str] = set()
+        for column in self._visible_table_columns(component):
+            field_name = str(column.get("key") or "").strip()
+            column_type = str(column.get("type") or "text").strip().lower()
+            if field_name and column_type != "actions" and column.get("sortable") is True:
+                fields.add(field_name)
+        return fields
+
+    def _normalize_table_query_for_handler(
+        self,
+        component: dict[str, Any],
+        query: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = dict(query or {})
+        normalized["params"] = dict(self._navigation_params)
+        normalized["search_fields"] = self._table_search_fields(component)
+
+        sort_fields = self._table_sort_fields(component)
+        normalized_sort: list[dict[str, str]] = []
+        for item in list(normalized.get("sort") or []):
+            if not isinstance(item, dict):
+                continue
+            field = str(item.get("field") or "").strip()
+            direction = str(item.get("direction") or "asc").strip().lower()
+            if field in sort_fields and direction in {"asc", "desc"}:
+                normalized_sort.append({"field": field, "direction": direction})
+        normalized["sort"] = normalized_sort
+        return normalized
 
     def _prepare_table_component(self, component: dict[str, Any]) -> dict[str, Any]:
         prepared = dict(component)
@@ -400,7 +434,11 @@ class ManagedPageRenderer(QWidget):
                 continue
             updated_row = dict(row)
             existing_actions = updated_row.get(action_key)
-            merged_actions = [dict(item) for item in existing_actions if isinstance(item, dict)] if isinstance(existing_actions, list) else []
+            merged_actions = (
+                [dict(item) for item in existing_actions if isinstance(item, dict)]
+                if isinstance(existing_actions, list)
+                else []
+            )
             merged_actions.extend(dict(action) for action in actions)
             updated_row[action_key] = merged_actions
             updated_rows.append(updated_row)
@@ -479,16 +517,12 @@ class ManagedPageRenderer(QWidget):
         payload = self._prompt_crud_form_payload(component, mode="create")
         if payload is None:
             return
-        try:
-            self._bridge.call_page_action_sync(
-                handler_name,
-                payload,
-                capability_surface=_runtime_surface_full(),
-            )
-        except Exception as exc:
-            MessageDialog.warning(self, "新增失败", str(exc))
-            return
-        table.request_refresh()
+        self._invoke_ui_action(
+            handler_name,
+            {"payload": payload},
+            error_title="新增失败",
+            on_success=table.request_refresh,
+        )
 
     def _handle_update_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
         crud = dict(component.get("crud") or {})
@@ -504,17 +538,15 @@ class ManagedPageRenderer(QWidget):
         payload = self._prompt_crud_form_payload(component, mode="update", row=selected_row)
         if payload is None:
             return
-        try:
-            self._bridge.call_page_action_sync(
-                handler_name,
-                row_key,
-                payload,
-                capability_surface=_runtime_surface_full(),
-            )
-        except Exception as exc:
-            MessageDialog.warning(self, "编辑失败", str(exc))
-            return
-        table.request_refresh()
+        self._invoke_ui_action(
+            handler_name,
+            {
+                primary_key: row_key,
+                "payload": payload,
+            },
+            error_title="编辑失败",
+            on_success=table.request_refresh,
+        )
 
     def _handle_delete_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
         crud = dict(component.get("crud") or {})
@@ -527,19 +559,17 @@ class ManagedPageRenderer(QWidget):
         if row_key in (None, ""):
             MessageDialog.warning(self, "删除失败", f"当前记录缺少主键字段: {primary_key}")
             return
-        item_name = str(selected_row.get("name") or selected_row.get("account") or selected_row.get(primary_key) or "当前记录")
+        item_name = str(
+            selected_row.get("name") or selected_row.get("account") or selected_row.get(primary_key) or "当前记录"
+        )
         if not ConfirmDialog.delete_confirm(self, item_name):
             return
-        try:
-            self._bridge.call_page_action_sync(
-                handler_name,
-                row_key,
-                capability_surface=_runtime_surface_full(),
-            )
-        except Exception as exc:
-            MessageDialog.warning(self, "删除失败", str(exc))
-            return
-        table.request_refresh()
+        self._invoke_ui_action(
+            handler_name,
+            {primary_key: row_key},
+            error_title="删除失败",
+            on_success=table.request_refresh,
+        )
 
     def _prompt_crud_form_payload(
         self,
@@ -681,19 +711,9 @@ class ManagedPageRenderer(QWidget):
         return text
 
     def _normalize_inline_query_result(self, raw: Any) -> dict[str, Any]:
-        if not isinstance(raw, dict):
-            raise ValueError("query_handler 必须返回对象")
-        rows = raw.get("rows")
-        if not isinstance(rows, list):
-            raise ValueError("query_handler 返回值必须包含 rows 数组")
-        normalized_rows = [dict(row) for row in rows if isinstance(row, dict)]
-        return {
-            "rows": normalized_rows,
-            "total": int(raw.get("total", len(normalized_rows))),
-            "page": int(raw.get("page", 1)),
-            "page_size": int(raw.get("page_size", 20)),
-            "sort": list(raw.get("sort") or []),
-        }
+        if not isinstance(raw, HostedDataTableQueryResult):
+            raise ValueError("query_handler 必须返回 HostedDataTableQueryResult")
+        return raw.to_dict()
 
     def _on_inline_table_query(
         self,
@@ -704,8 +724,7 @@ class ManagedPageRenderer(QWidget):
     ) -> None:
         data_source = component.get("data_source") or {}
         source_type = str(data_source.get("type") or "").strip().lower()
-        merged_query = dict(query or {})
-        merged_query["params"] = dict(self._navigation_params)
+        merged_query = self._normalize_table_query_for_handler(component, query)
         try:
             if source_type == "binding":
                 rows = self._resolve_binding(str(data_source.get("binding") or ""))
@@ -748,9 +767,7 @@ class ManagedPageRenderer(QWidget):
                 result = self._normalize_inline_query_result(
                     self._bridge.call_query_handler(
                         handler_name,
-                        str(component.get("table_id") or ""),
                         merged_query,
-                        dict(self._navigation_params) if self._navigation_params else None,
                         page_id=self._page_id,
                     )
                 )
@@ -803,9 +820,7 @@ class ManagedPageRenderer(QWidget):
             min_height=int(min_height) if min_height is not None else None,
             padding=int(padding) if padding is not None else (18, 16, 18, 16),
         )
-        card.content_layout.addWidget(
-            self._build_layout_widget(component.get("children", []), layout_spec)
-        )
+        card.content_layout.addWidget(self._build_layout_widget(component.get("children", []), layout_spec))
         return card
 
     def _build_component(self, component: dict[str, Any]) -> QWidget:
@@ -838,9 +853,6 @@ class ManagedPageRenderer(QWidget):
 
     def _handle_button_action(self, action: dict[str, Any]) -> None:
         action_type = str(action.get("type") or "").strip()
-        if action_type == "page_action":
-            self._handle_page_action(action)
-            return
         if action_type == "ui_action":
             self._handle_ui_action(action)
             return
@@ -853,6 +865,16 @@ class ManagedPageRenderer(QWidget):
         if not action_name:
             return
         params = self._resolve_action_params(action, self._payload)
+        self._invoke_ui_action(action_name, params, error_title="操作失败")
+
+    def _invoke_ui_action(
+        self,
+        action_name: str,
+        params: dict[str, Any],
+        *,
+        error_title: str,
+        on_success: Callable[[], None] | None = None,
+    ) -> bool:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -863,8 +885,11 @@ class ManagedPageRenderer(QWidget):
                     capability_surface=_runtime_surface_hosted_ui_action(),
                 )
             except Exception as exc:
-                MessageDialog.warning(self, "操作失败", str(exc))
-            return
+                MessageDialog.warning(self, error_title, str(exc))
+                return False
+            if on_success is not None:
+                on_success()
+            return True
 
         task = loop.create_task(
             self._bridge.call_ui_action_async(
@@ -873,40 +898,29 @@ class ManagedPageRenderer(QWidget):
                 capability_surface=_runtime_surface_hosted_ui_action(),
             )
         )
-        task.add_done_callback(self._handle_page_action_task_result)
-
-    def _handle_page_action(self, action: dict[str, Any]) -> None:
-        action_name = str(action.get("name") or "").strip()
-        if not action_name:
-            return
-        params = self._resolve_action_params(action, self._payload)
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            try:
-                self._bridge.call_page_action(
-                    action_name,
-                    params,
-                    capability_surface=_runtime_surface_hosted_ui_action(),
-                )
-            except Exception as exc:
-                MessageDialog.warning(self, "操作失败", str(exc))
-            return
-
-        task = loop.create_task(
-            self._bridge.call_page_action_async(
-                action_name,
-                params,
-                capability_surface=_runtime_surface_hosted_ui_action(),
+        task.add_done_callback(
+            lambda done_task: self._handle_action_task_result(
+                done_task,
+                error_title=error_title,
+                on_success=on_success,
             )
         )
-        task.add_done_callback(self._handle_page_action_task_result)
+        return True
 
-    def _handle_page_action_task_result(self, task) -> None:
+    def _handle_action_task_result(
+        self,
+        task: Any,
+        *,
+        error_title: str,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
         try:
             task.result()
         except Exception as exc:
-            MessageDialog.warning(self, "操作失败", str(exc))
+            MessageDialog.warning(self, error_title, str(exc))
+            return
+        if on_success is not None:
+            on_success()
 
     def _handle_row_action(self, action: dict[str, Any], row: dict[str, Any]) -> None:
         page_id = str(action.get("page_id") or "").strip()

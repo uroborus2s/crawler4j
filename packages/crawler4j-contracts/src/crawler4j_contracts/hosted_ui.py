@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Generic, Literal, NotRequired, Required, TypeAlias, TypedDict, TypeVar
+
+from crawler4j_contracts.database import DatabaseQueryBuilder
 
 MANAGED_VIEW_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -102,6 +106,402 @@ ALLOWED_DB_VIEW_KINDS = {"sql_view"}
 ALLOWED_DB_VIEW_CLEANUP_POLICIES = {"drop_view", "keep"}
 ALLOWED_DB_VIEW_COLUMN_KEYS = {"name", "label", "type", "nullable"}
 ALLOWED_DB_VIEW_COLUMN_TYPES = {"text", "int", "number", "bool", "json"}
+
+TRow = TypeVar("TRow", bound=Mapping[str, Any])
+QueryCallback: TypeAlias = Callable[[DatabaseQueryBuilder], DatabaseQueryBuilder]
+
+
+class ActionBindingParamSpec(TypedDict):
+    """Bind an action parameter from the current Hosted UI payload."""
+
+    binding: str
+
+
+class ActionValueParamSpec(TypedDict):
+    """Pass a literal value as an action parameter."""
+
+    value: Any
+
+
+ActionParamSpec: TypeAlias = ActionBindingParamSpec | ActionValueParamSpec
+ActionParamsSchema: TypeAlias = Mapping[str, ActionParamSpec | Any]
+
+
+class ReloadActionSchema(TypedDict):
+    type: Literal["reload"]
+
+
+class OpenPageActionSchema(TypedDict):
+    type: Literal["open_page"]
+    page_id: str
+    params: NotRequired[ActionParamsSchema]
+
+
+class UiActionSchema(TypedDict):
+    type: Literal["ui_action"]
+    name: str
+    params: NotRequired[ActionParamsSchema]
+
+
+ButtonActionSchema: TypeAlias = ReloadActionSchema | OpenPageActionSchema | UiActionSchema
+RowActionSchema: TypeAlias = OpenPageActionSchema
+
+
+class PageLayoutSchema(TypedDict, total=False):
+    direction: Literal["column", "row"]
+    kind: Literal["grid"]
+    columns: int
+    gap: int
+
+
+class PageScrollSchema(TypedDict, total=False):
+    vertical: Literal["auto", "hidden"]
+
+
+class TextSchema(TypedDict, total=False):
+    type: Required[Literal["Text"]]
+    text: str
+    binding: str
+    style: Literal["title", "subtitle", "body", "meta"]
+
+
+class ButtonSchema(TypedDict, total=False):
+    type: Required[Literal["Button"]]
+    label: str
+    icon: str
+    aria_label: str
+    size: Literal["md", "sm", "icon"]
+    variant: Literal["primary", "secondary", "ghost"]
+    action: Required[ButtonActionSchema]
+
+
+class SectionSchema(TypedDict, total=False):
+    type: Required[Literal["Section"]]
+    title: str
+    children: Sequence["PageComponentSchema"]
+    variant: str
+    layout: PageLayoutSchema
+
+
+class CardSchema(TypedDict, total=False):
+    type: Required[Literal["Card"]]
+    title: str
+    children: Sequence["PageComponentSchema"]
+    layout: PageLayoutSchema
+    title_align: Literal["left", "center", "right"]
+    content_align: Literal["left", "center", "right"]
+    content_vertical_align: Literal["top", "center", "bottom"]
+    min_height: int
+    padding: int
+
+
+class DataTableColumnSchema(TypedDict, total=False):
+    key: Required[str]
+    label: str
+    visible: bool
+    required: bool
+    readonly: bool
+    type: Literal["text", "number", "int", "bool", "select", "badge", "actions"]
+    options: Sequence[str]
+    default: Any
+    sortable: bool
+    searchable: bool
+    width: int
+    stretch: bool
+    align: Literal["left", "center", "right"]
+
+
+class DataTableSearchFeatureSchema(TypedDict, total=False):
+    enabled: bool
+    placeholder: str
+
+
+class DataTableSortSpecSchema(TypedDict):
+    field: str
+    direction: NotRequired[Literal["asc", "desc"]]
+
+
+class DataTableSortFeatureSchema(TypedDict, total=False):
+    enabled: bool
+    default: Sequence[DataTableSortSpecSchema]
+
+
+class DataTablePaginationFeatureSchema(TypedDict, total=False):
+    enabled: bool
+    page_size: int
+    page_size_options: Sequence[int]
+
+
+class DataTableFeaturesSchema(TypedDict, total=False):
+    search: DataTableSearchFeatureSchema
+    sort: DataTableSortFeatureSchema
+    pagination: DataTablePaginationFeatureSchema
+
+
+class BindingDataSourceSchema(TypedDict):
+    type: Literal["binding"]
+    binding: str
+
+
+class RowsDataSourceSchema(TypedDict):
+    type: Literal["rows"]
+    rows: Sequence[Mapping[str, Any]]
+
+
+class QueryHandlerDataSourceSchema(TypedDict):
+    type: Literal["query_handler"]
+    handler: str
+
+
+class ManagedResourceDataSourceSchema(TypedDict):
+    type: Literal["managed_resource"]
+    resource_id: str
+
+
+DataTableDataSourceSchema: TypeAlias = (
+    BindingDataSourceSchema | RowsDataSourceSchema | QueryHandlerDataSourceSchema | ManagedResourceDataSourceSchema
+)
+
+
+class DataTableCrudToolbarSchema(TypedDict, total=False):
+    create: bool
+    update: bool
+    delete: bool
+
+
+class DataTableCrudFormSchema(TypedDict, total=False):
+    create_columns: Sequence[str]
+    update_columns: Sequence[str]
+
+
+class DataTableCrudSchema(TypedDict, total=False):
+    mode: Literal["handlers"]
+    render: Literal["toolbar", "row_actions"]
+    toolbar: DataTableCrudToolbarSchema
+    primary_key: Required[str]
+    form: DataTableCrudFormSchema
+    create_handler: str
+    update_handler: str
+    delete_handler: str
+
+
+class DataTableSchema(TypedDict, total=False):
+    type: Required[Literal["DataTable"]]
+    table_id: str
+    title: str
+    columns: Required[Sequence[DataTableColumnSchema | str]]
+    features: DataTableFeaturesSchema
+    data_source: Required[DataTableDataSourceSchema]
+    row_action: RowActionSchema
+    empty_text: str
+    crud: DataTableCrudSchema
+
+
+PageComponentSchema: TypeAlias = SectionSchema | CardSchema | TextSchema | ButtonSchema | DataTableSchema
+
+
+class PageSchema(TypedDict, total=False):
+    type: Required[Literal["Page"]]
+    title: str
+    load_handler: str
+    children: Sequence[PageComponentSchema]
+    layout: PageLayoutSchema
+    scroll: PageScrollSchema
+
+
+@dataclass(frozen=True)
+class HostedDataTableSortSpec:
+    """Hosted UI DataTable sort descriptor passed to query handlers."""
+
+    field: str
+    direction: str = "asc"
+
+    def __post_init__(self) -> None:
+        field = str(self.field or "").strip()
+        if not field:
+            raise ValueError("sort field is required")
+        direction = str(self.direction or "asc").strip().lower()
+        if direction not in {"asc", "desc"}:
+            raise ValueError(f"unsupported sort direction: {direction}")
+        object.__setattr__(self, "field", field)
+        object.__setattr__(self, "direction", direction)
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, Any]) -> "HostedDataTableSortSpec":
+        return cls(
+            field=str(raw.get("field") or ""),
+            direction=str(raw.get("direction") or "asc"),
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {"field": self.field, "direction": self.direction}
+
+
+@dataclass(frozen=True)
+class HostedDataTableQuery:
+    """Fixed query object passed to Hosted UI DataTable query handlers."""
+
+    search_text: str = ""
+    search_fields: tuple[str, ...] = field(default_factory=tuple)
+    sort: tuple[HostedDataTableSortSpec, ...] = field(default_factory=tuple)
+    page: int = 1
+    page_size: int = 20
+    params: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "search_text", str(self.search_text or ""))
+        object.__setattr__(self, "search_fields", _normalize_hosted_table_field_tuple(self.search_fields))
+        object.__setattr__(self, "sort", _normalize_hosted_table_sort_tuple(self.sort))
+        object.__setattr__(self, "page", max(1, int(self.page)))
+        object.__setattr__(self, "page_size", max(1, int(self.page_size)))
+        object.__setattr__(self, "params", dict(self.params or {}))
+
+    @property
+    def limit(self) -> int:
+        return self.page_size
+
+    @property
+    def offset(self) -> int:
+        return (self.page - 1) * self.page_size
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, Any] | None) -> "HostedDataTableQuery":
+        query = dict(raw or {})
+        return cls(
+            search_text=str(query.get("search_text") or ""),
+            search_fields=_normalize_hosted_table_field_tuple(query.get("search_fields") or ()),
+            sort=tuple(
+                HostedDataTableSortSpec.from_mapping(item)
+                for item in query.get("sort") or []
+                if isinstance(item, Mapping)
+            ),
+            page=int(query.get("page", 1)),
+            page_size=int(query.get("page_size", 20)),
+            params=dict(query.get("params") or {}),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "search_text": self.search_text,
+            "search_fields": list(self.search_fields),
+            "sort": [item.to_dict() for item in self.sort],
+            "page": self.page,
+            "page_size": self.page_size,
+            "params": dict(self.params),
+        }
+
+    def to_query_callback(
+        self,
+        field_map: Mapping[str, str],
+        *,
+        sort: Callable[[str], bool] | None = None,
+        like: Callable[[str], bool] | None = None,
+        eq: Callable[[str], bool] | None = None,
+    ) -> QueryCallback:
+        """Convert the Hosted UI table query into a `ctx.db.from_(...)` callback."""
+
+        normalized_field_map = _normalize_hosted_query_field_map(field_map)
+
+        def callback(query: DatabaseQueryBuilder) -> DatabaseQueryBuilder:
+            search_text = self.search_text.strip()
+            if search_text:
+                like_conditions = [
+                    [mapped_field, "like", f"%{search_text}%"]
+                    for mapped_field in (
+                        _map_hosted_query_field(field_name, normalized_field_map) for field_name in self.search_fields
+                    )
+                    if mapped_field and _hosted_query_field_allowed(mapped_field, like)
+                ]
+                if len(like_conditions) == 1:
+                    query = query.where(like_conditions[0])
+                elif like_conditions:
+                    query = query.where(["or", *like_conditions])
+
+            for param_name, param_value in self.params.items():
+                mapped_field = _map_hosted_query_field(param_name, normalized_field_map)
+                if mapped_field and _hosted_query_field_allowed(mapped_field, eq):
+                    query = query.where([mapped_field, "=", param_value])
+
+            for sort_spec in self.sort:
+                mapped_field = _map_hosted_query_field(sort_spec.field, normalized_field_map)
+                if mapped_field and _hosted_query_field_allowed(mapped_field, sort):
+                    query = query.order_by(mapped_field, sort_spec.direction)
+
+            return query.limit(self.limit).offset(self.offset)
+
+        return callback
+
+
+@dataclass(frozen=True)
+class HostedDataTableQueryResult(Generic[TRow]):
+    """Fixed result object returned by Hosted UI DataTable query handlers."""
+
+    rows: Sequence[TRow]
+    total: int | None = None
+    page: int = 1
+    page_size: int = 20
+
+    def __post_init__(self) -> None:
+        if not all(isinstance(item, Mapping) for item in self.rows):
+            raise ValueError("rows items must be mappings")
+        rows = tuple(self.rows)
+        object.__setattr__(self, "rows", rows)
+        object.__setattr__(self, "total", len(rows) if self.total is None else max(0, int(self.total)))
+        object.__setattr__(self, "page", max(1, int(self.page)))
+        object.__setattr__(self, "page_size", max(1, int(self.page_size)))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rows": [dict(row) for row in self.rows],
+            "total": int(self.total or 0),
+            "page": self.page,
+            "page_size": self.page_size,
+        }
+
+
+def _normalize_hosted_table_field_tuple(raw: Any) -> tuple[str, ...]:
+    fields: list[str] = []
+    for item in raw or ():
+        field_name = str(item or "").strip()
+        if field_name:
+            fields.append(field_name)
+    return tuple(dict.fromkeys(fields))
+
+
+def _normalize_hosted_table_sort_tuple(raw: Any) -> tuple[HostedDataTableSortSpec, ...]:
+    items = raw or ()
+    normalized: list[HostedDataTableSortSpec] = []
+    for item in items:
+        if isinstance(item, HostedDataTableSortSpec):
+            normalized.append(item)
+        elif isinstance(item, Mapping):
+            normalized.append(HostedDataTableSortSpec.from_mapping(item))
+        else:
+            raise ValueError("sort items must be HostedDataTableSortSpec or mapping")
+    return tuple(normalized)
+
+
+def _normalize_hosted_query_field_map(raw: Mapping[str, str]) -> dict[str, str]:
+    if not isinstance(raw, Mapping):
+        raise ValueError("field_map must be a mapping")
+    normalized: dict[str, str] = {}
+    for source_field, target_field in raw.items():
+        source_name = str(source_field or "").strip()
+        target_name = str(target_field or "").strip()
+        if source_name and target_name:
+            normalized[source_name] = target_name
+    return normalized
+
+
+def _map_hosted_query_field(field_name: Any, field_map: Mapping[str, str]) -> str | None:
+    normalized = str(field_name or "").strip()
+    if not normalized:
+        return None
+    return field_map.get(normalized)
+
+
+def _hosted_query_field_allowed(field_name: str, predicate: Callable[[str], bool] | None) -> bool:
+    return True if predicate is None else bool(predicate(field_name))
 
 
 def _validate_managed_identifier(value: str, *, field_name: str) -> str:
@@ -228,9 +628,7 @@ def _normalize_action_params(raw: Any, *, field_name: str) -> dict[str, Any]:
         if isinstance(value, dict):
             unknown_keys = sorted(set(value) - ALLOWED_ACTION_PARAM_SPEC_KEYS)
             if unknown_keys:
-                raise ValueError(
-                    f"{field_name}.{param_name} 包含不支持的字段: {', '.join(unknown_keys)}"
-                )
+                raise ValueError(f"{field_name}.{param_name} 包含不支持的字段: {', '.join(unknown_keys)}")
 
             has_binding = value.get("binding") is not None
             has_value = "value" in value
@@ -261,8 +659,8 @@ def _normalize_button_action(raw: Any, *, field_name: str) -> dict[str, Any]:
         raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
 
     action_type = str(raw.get("type") or "").strip()
-    if action_type not in {"reload", "open_page", "page_action", "ui_action"}:
-        raise ValueError(f"{field_name}.type 只支持 reload / open_page / page_action / ui_action")
+    if action_type not in {"reload", "open_page", "ui_action"}:
+        raise ValueError(f"{field_name}.type 只支持 reload / open_page / ui_action")
 
     action: dict[str, Any] = {"type": action_type}
     if action_type == "open_page":
@@ -273,7 +671,7 @@ def _normalize_button_action(raw: Any, *, field_name: str) -> dict[str, Any]:
         params = _normalize_action_params(raw.get("params"), field_name=f"{field_name}.params")
         if params:
             action["params"] = params
-    elif action_type in {"page_action", "ui_action"}:
+    elif action_type == "ui_action":
         action["name"] = _validate_managed_identifier(
             str(raw.get("name") or ""),
             field_name=f"{field_name}.name",
@@ -451,8 +849,7 @@ def _normalize_crud_form_columns(raw: Any, *, field_name: str) -> list[str]:
     if not isinstance(raw, list):
         raise ValueError(f"{field_name} 必须是数组")
     return [
-        _validate_managed_identifier(str(item), field_name=f"{field_name}[{index}]")
-        for index, item in enumerate(raw)
+        _validate_managed_identifier(str(item), field_name=f"{field_name}[{index}]") for index, item in enumerate(raw)
     ]
 
 
@@ -464,11 +861,7 @@ def _normalize_table_crud_toolbar(raw: Any, *, field_name: str) -> dict[str, boo
     unknown_keys = sorted(set(raw) - ALLOWED_TABLE_CRUD_TOOLBAR_KEYS)
     if unknown_keys:
         raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
-    return {
-        key: bool(raw.get(key))
-        for key in ("create", "update", "delete")
-        if key in raw
-    }
+    return {key: bool(raw.get(key)) for key in ("create", "update", "delete") if key in raw}
 
 
 def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
@@ -578,8 +971,7 @@ def normalize_db_view_schema(view_id: str, schema: Any) -> dict[str, Any]:
         "source_resource_ids": source_resource_ids,
         "select_sql_template": select_sql_template,
         "columns": [
-            _normalize_db_view_column(item, field_name=f"columns[{index}]")
-            for index, item in enumerate(columns)
+            _normalize_db_view_column(item, field_name=f"columns[{index}]") for index, item in enumerate(columns)
         ],
         "cleanup_policy": cleanup_policy,
         "schema_version": schema_version,
@@ -838,4 +1230,44 @@ def normalize_page_schema(page_id: str, schema: Any) -> dict[str, Any]:
     return normalized
 
 
-__all__ = ["normalize_data_resource", "normalize_db_view_schema", "normalize_page_schema"]
+__all__ = [
+    "ActionBindingParamSpec",
+    "ActionParamSpec",
+    "ActionParamsSchema",
+    "ActionValueParamSpec",
+    "BindingDataSourceSchema",
+    "ButtonActionSchema",
+    "ButtonSchema",
+    "CardSchema",
+    "DataTableColumnSchema",
+    "DataTableCrudFormSchema",
+    "DataTableCrudSchema",
+    "DataTableCrudToolbarSchema",
+    "DataTableDataSourceSchema",
+    "DataTableFeaturesSchema",
+    "DataTablePaginationFeatureSchema",
+    "DataTableSchema",
+    "DataTableSearchFeatureSchema",
+    "DataTableSortFeatureSchema",
+    "DataTableSortSpecSchema",
+    "HostedDataTableQuery",
+    "HostedDataTableQueryResult",
+    "HostedDataTableSortSpec",
+    "ManagedResourceDataSourceSchema",
+    "OpenPageActionSchema",
+    "PageComponentSchema",
+    "PageLayoutSchema",
+    "PageSchema",
+    "PageScrollSchema",
+    "QueryCallback",
+    "QueryHandlerDataSourceSchema",
+    "ReloadActionSchema",
+    "RowActionSchema",
+    "RowsDataSourceSchema",
+    "SectionSchema",
+    "TextSchema",
+    "UiActionSchema",
+    "normalize_data_resource",
+    "normalize_db_view_schema",
+    "normalize_page_schema",
+]

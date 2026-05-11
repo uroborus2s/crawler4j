@@ -464,7 +464,7 @@ def _normalize_plan_condition(raw: Any) -> dict[str, Any]:
             return {"kind": "group", "operator": operator, "conditions": conditions}
         field = _validate_snake_case_identifier(str(raw.get("field") or ""))
         op = _normalize_filter_op(raw.get("op"))
-        item = {"field": field, "op": op}
+        item: dict[str, Any] = {"field": field, "op": op}
         if op != "is_null":
             item["value"] = raw.get("value")
         return item
@@ -483,7 +483,7 @@ def _normalize_plan_condition(raw: Any) -> dict[str, Any]:
     if len(items) >= 2 and isinstance(items[0], str):
         field = _validate_snake_case_identifier(str(items[0]))
         op = _normalize_filter_op(items[1])
-        item = {"field": field, "op": op}
+        item: dict[str, Any] = {"field": field, "op": op}
         if op == "between":
             if len(items) == 4:
                 item["value"] = [items[2], items[3]]
@@ -548,22 +548,34 @@ def _render_where_condition(condition: dict[str, Any], render_predicate) -> tupl
     return render_predicate(condition)
 
 
-def _normalize_plan_limit(raw: Any) -> int:
+def _normalize_plan_limit(raw: Any) -> int | None:
     if raw in (None, ""):
-        return 100
+        return None
     value = int(raw)
     if value < 1:
         raise ValueError("query plan limit must be >= 1")
     return value
 
 
-def _normalize_plan_offset(raw: Any) -> int:
+def _normalize_plan_offset(raw: Any) -> int | None:
     if raw in (None, ""):
-        return 0
+        return None
     value = int(raw)
     if value < 0:
         raise ValueError("query plan offset must be >= 0")
     return value
+
+
+def _render_plan_pagination(raw_limit: Any, raw_offset: Any) -> tuple[str, list[Any]]:
+    limit = _normalize_plan_limit(raw_limit)
+    offset = _normalize_plan_offset(raw_offset)
+    if limit is None and offset is None:
+        return "", []
+    if limit is None:
+        return " LIMIT -1 OFFSET ?", [offset]
+    if offset is None:
+        return " LIMIT ?", [limit]
+    return " LIMIT ? OFFSET ?", [limit, offset]
 
 
 def _normalize_resource_query_select(raw: Any) -> list[dict[str, str]]:
@@ -1493,6 +1505,28 @@ class ModuleDataStore:
             require_where=True,
         )
         filter_sql = f" AND {where_sql.removeprefix(' WHERE ')}"
+        if set(normalized_fields).issubset(_MANAGED_DATASET_STATUS_WRITE_FIELDS):
+            set_clauses: list[str] = []
+            set_params: list[Any] = []
+            if "run_status" in normalized_fields:
+                set_clauses.append("run_status = ?")
+                set_params.append(_normalize_text(normalized_fields["run_status"]) or _DEFAULT_RUN_STATUS)
+            if "record_status" in normalized_fields:
+                set_clauses.append("record_status = ?")
+                set_params.append(_normalize_text(normalized_fields["record_status"]) or _DEFAULT_RECORD_STATUS)
+            set_clauses.append("updated_at = ?")
+            set_params.append(now)
+            cursor = conn.execute(
+                f"""
+                UPDATE module_datasets
+                SET {", ".join(set_clauses)}
+                WHERE module_name = ? AND dataset_name = ?
+                {filter_sql}
+                """,
+                (*set_params, module_name, resource["logical_name"], *where_params),
+            )
+            return int(cursor.rowcount or 0)
+
         rows = conn.execute(
             f"""
             SELECT record_index, record_json
@@ -2861,8 +2895,7 @@ class ModuleDataStore:
                 f"{_managed_dataset_field_sql(item['field'], json_column_names=json_column_names)} {item['direction'].upper()}"
                 for item in order_by
             )
-        offset = _normalize_plan_offset(plan.get("offset"))
-        limit = _normalize_plan_limit(plan.get("limit"))
+        pagination_sql, pagination_params = _render_plan_pagination(plan.get("limit"), plan.get("offset"))
         rows = conn.execute(
             f"""
             SELECT {select_sql}
@@ -2870,14 +2903,13 @@ class ModuleDataStore:
             WHERE module_name = ? AND dataset_name = ?
             {filter_sql}
             {order_sql}
-            LIMIT ? OFFSET ?
+            {pagination_sql}
             """,
             (
                 module_name,
                 resource["logical_name"],
                 *params,
-                limit,
-                offset,
+                *pagination_params,
             ),
         ).fetchall()
 
@@ -3082,9 +3114,8 @@ class ModuleDataStore:
                 else:
                     parts.append(f"{resolve_field(field)} {item['direction'].upper()}")
             order_sql = " ORDER BY " + ", ".join(parts)
-        limit = _normalize_plan_limit(plan.get("limit"))
-        offset = _normalize_plan_offset(plan.get("offset"))
-        params.extend([limit, offset])
+        pagination_sql, pagination_params = _render_plan_pagination(plan.get("limit"), plan.get("offset"))
+        params.extend(pagination_params)
 
         rows = conn.execute(
             f"""
@@ -3094,7 +3125,7 @@ class ModuleDataStore:
             {where_sql}
             {group_sql}
             {order_sql}
-            LIMIT ? OFFSET ?
+            {pagination_sql}
             """,
             tuple(params),
         ).fetchall()
@@ -3109,8 +3140,8 @@ class ModuleDataStore:
         select: Any = None,
         where: Any = None,
         order_by: list[dict[str, Any]] | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
         select_items = _normalize_resource_query_select(select)
         normalized_where = _normalize_plan_where(where)
@@ -3153,8 +3184,8 @@ class ModuleDataStore:
         select: Any = None,
         where: Any = None,
         order_by: list[dict[str, Any]] | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
         with get_connection(DATA_DB) as conn:
             resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
