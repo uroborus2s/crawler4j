@@ -63,16 +63,16 @@ Hosted UI Button -> type="page_action"
 ```python
 {
     "type": "Button",
-    "text": "创建账号",
+    "label": "创建账号",
     "action": {"type": "ui_action", "name": "create_account_from_ui"},
 }
 ```
 
-`@ui_action` 可以读取表单参数、调用 `ctx.db`、调用 component 级业务服务，最后返回 JSON-like 结果。涉及真实浏览器页面时，应由 workflow/component 调用 `@page_action`，不要从 Hosted UI 直接驱动浏览器。
+`@ui_action` 可以读取表单参数、调用 `ctx.db` 或普通服务函数，最后返回 JSON-like 结果。它不是 workflow/component 对象图节点，不能通过装饰器注入 component；需要复用业务逻辑时，把逻辑放到普通函数、服务对象或正式运行面里。涉及真实浏览器页面时，应由 workflow/component 调用 `@page_action`，不要从 Hosted UI 直接驱动浏览器。
 
 DataTable CRUD handler 名称仍写在 `crud.create_handler`、`crud.update_handler`、`crud.delete_handler`，但这些字段指向的是 `@ui_action` 名称。入参固定为：create 接收 `payload`，update 接收 `crud.primary_key` 同名参数和 `payload`，delete 接收 `crud.primary_key` 同名参数。
 
-## ctrip_crawler 迁移规则
+## 旧模块迁移规则
 
 迁移旧模块时，根目录 `adapters/` 和 `helpers/` 不保留。
 

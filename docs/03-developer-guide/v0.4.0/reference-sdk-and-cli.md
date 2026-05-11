@@ -6,8 +6,9 @@
 
 ## 命令入口
 
-- 模块项目内：`uv run crawler4j ...`
+- 模块项目内：`uv run crawler4j ...`，用于 `module`、装饰器骨架、`manifest`、`check`、`package` 和 `release` 等模块工程命令
 - 不安装直接用：`uvx --from crawler4j-sdk crawler4j ...`
+- Core 源码仓或已安装宿主环境内：`uv run crawler4j host ...`，用于 DevLink、ZIP 安装、升级和调试配置；这些命令需要宿主运行时，不能在只有 SDK/Contracts 依赖的模块工程里当作普通模块命令执行
 - 在 Core 源码仓验证本地 CLI：`uv run python -m crawler4j_sdk.cli.commands ...`
 
 ## 模块工程命令
@@ -22,12 +23,14 @@
 | `ui-action` | `ui-action create` `ui-action list` | `@ui_action` 函数 |
 | `page` | `page create` `page list` | `@page` Hosted UI 页面 |
 | `data` | `data table create [--storage-mode custom_table\|managed_dataset]` `data view create` `data list` | `@data_table` / `@data_view` |
+| `candidate` | `candidate create` `candidate list` | `@env_candidates` 同步纯函数 |
+| `cleanup` | `cleanup create` `cleanup list` | `@env_cleanup_candidates` 同步纯函数 |
+| `config` | `config show` `config set module --file <yaml>` `config lint` | `module.yaml.config_defaults` |
 | `manifest` | `manifest lock` | `.crawler4j/manifest.lock.json` |
-| `migrate` | `migrate native-v2` | v0.3.0 到 v0.4.0 重写迁移报告 |
 | `check` | `check structure` `check release` `check full` | 本地校验 gate |
 | `package` | `package build` `package verify` | ZIP 包 |
 | `release` | `release status` `release check-remote` `release publish` | 发布辅助 |
-| `host` | `host devlink ...` `host install ...` `host upgrade ...` `host debug config` | 宿主联调辅助 |
+| `host` | `host devlink ...` `host install ...` `host upgrade ...` `host debug config` | 宿主联调辅助；在 Core 源码仓或已安装宿主环境执行 |
 
 ## `module init`
 
@@ -91,6 +94,7 @@ uvx --from crawler4j-sdk crawler4j module init demo_module \
 - data table 字段、索引、data view schema 不使用宿主保留字段
 - `module.yaml` 不含 v2 禁止字段
 - 运行时代码没有依赖 `crawler4j-sdk`
+- `.crawler4j/manifest.lock.json` 存在且与当前源码一致
 
 ## `manifest lock`
 
@@ -100,7 +104,7 @@ uv run crawler4j manifest lock
 
 生成 `.crawler4j/manifest.lock.json`。
 
-生成前会复用 `check full` 的核心诊断。阻断错误存在时不会写 lock。
+生成前会复用 full gate 的装饰器、对象图和运行时代码诊断，但不要求已有 lock。阻断错误存在时不会写 lock。正常顺序是 `check structure` -> `manifest lock` -> `check full`。
 
 ## 模块打开阶段诊断
 
@@ -108,18 +112,12 @@ SDK 在这些入口必须执行同一套诊断：
 
 - 模块项目打开
 - DevLink 注册
-- `crawler4j check full`
 - `crawler4j manifest lock`
+- `crawler4j check full`
 - `crawler4j package build`
 
 保留字段冲突必须在开发阶段阻断，不能等到运行时失败。
 
-## 迁移命令
+## 迁移边界
 
-```bash
-uv run crawler4j migrate native-v2
-```
-
-迁移报告应提示旧运行能力、旧 workflow 参数和旧数据契约如何重写到装饰器与 component 参数，并指出哪些字段命中宿主保留字段。迁移命令是一次性重写辅助，不代表 0.4.x SDK 兼容 0.3.x 开发模式。
-
-迁移命令可以生成建议补丁或报告，但最终仍以 `check full` 和 manifest lock 为准。
+当前 0.4.x SDK 没有自动迁移命令。v0.3.0 模块需要按 [从 v0.3.0 迁移](./migration-from-v0.3.0.md) 的清单手工重写：把旧固定导出、workflow 参数、数据契约、页面入口和环境选择器迁到 0.4.0 装饰器路径。最终 gate 只认 `manifest lock`、`check full`、`check release`、`package build`、`package verify` 和宿主联调结果；`package verify` 必须验证已经构建出的 ZIP。

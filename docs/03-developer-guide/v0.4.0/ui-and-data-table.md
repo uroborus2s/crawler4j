@@ -114,6 +114,18 @@ def load_accounts_page(context: TaskContext, page_id: str, params: dict | None =
 把分页、筛选、排序交给页面 handler。`DataTable.table_id` 只是页面内组件实例 ID，用于宿主渲染和刷新定位；它不是数据库资源名，也不会作为 handler 入参。一个表格可以由多个 `@data_table` / `@data_view` 查询结果组装而成。
 
 ```python
+{
+    "type": "DataTable",
+    "table_id": "accounts",
+    "columns": [
+        {"key": "account_id", "label": "账号", "searchable": True},
+        {"key": "status", "label": "状态", "type": "badge", "sortable": True},
+    ],
+    "data_source": {"type": "query_handler", "handler": "query_accounts_table"},
+}
+```
+
+```python
 from crawler4j_contracts import HostedDataTableQuery, HostedDataTableQueryResult, TaskContext
 
 

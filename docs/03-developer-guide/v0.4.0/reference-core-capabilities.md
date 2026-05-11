@@ -151,11 +151,12 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
 | 类别 | 示例 |
 |---|---|
 | 浏览器交互 | `browser.goto`、`browser.click`、`browser.hover`、`browser.type`、`browser.press`、`browser.drag`、`browser.scroll`、`browser.pause` |
-| Hosted UI | `ui.get_page` |
 | 环境与代理 | `env.set_proxy`、`ip_pool.pick_proxy` |
 | 验证码 | `captcha.match_slider`、`captcha.match_click_targets` |
 
 `ctx.tools` 不注册 `db.*`。数据库能力全部走 `ctx.db`。
+
+Hosted UI 的页面读取、渲染和 action 调用属于宿主 UI surface，不作为 workflow/page action 的普通 `TaskContext.tools` 能力示例。
 
 浏览器相关正式边界：
 
@@ -170,13 +171,47 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
 
 对象生命周期归宿主所有。Core 会在每个 task/env 内创建独立对象图，并在 `workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`；`workflow` 为 `WorkflowLifecycleInfo`，包含当前 workflow 名称、标签、描述和代码符号。终态时按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`，`outcome.workflow` 保存同一份 workflow 信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。setup 失败会阻止 `workflow.run(ctx)` 并进入 cleanup；cleanup 异常只写日志，不覆盖任务终态或环境回收结果；旧 `aclose()` / `close()` 不再会被宿主调用。
 
-环境选择写在 `candidates/*.py` 中，使用 `@env_candidates` 装饰同步纯函数。函数可以直接返回 env id 列表，也可以返回 `EnvCandidates.from_table(...).filter(...).order(...).limit(...)` 这样的链式查询。账号注册时间、会员等级、黑号状态等模块业务过滤应存放在模块数据表中，并在候选纯函数里实时查询，不需要同步资源池。运行模板的选择环境模式会保存候选函数名和可选 `candidate_params` 字典，UI 中可通过“候选参数”配置窗口填写 YAML 对象。
+环境选择写在 `candidates/*.py` 中，使用 `@env_candidates` 装饰同步纯函数。函数可以直接返回 env id 列表，也可以返回 `EnvCandidates.from_table(...).filter(...).order_by(...).limit(...)` 这样的链式查询。账号注册时间、会员等级、黑号状态等模块业务过滤应存放在模块数据表中，并在候选纯函数里实时查询，不需要同步资源池。运行模板的选择环境模式会保存候选函数名和可选 `candidate_params` 字典，UI 中可通过“候选参数”配置窗口填写 YAML 对象。
+
+```python
+from crawler4j_contracts import EnvCandidates, env_candidates
+
+
+@env_candidates(name="ready_accounts")
+def ready_accounts(params: dict | None = None) -> EnvCandidates:
+    params = params or {}
+    min_score = int(params.get("min_score", 80))
+    limit = int(params.get("limit", 10))
+    return (
+        EnvCandidates.from_table("accounts")
+        .filter(status="ready", score__gte=min_score)
+        .order_by("last_used_at")
+        .limit(limit)
+    )
+```
+
+候选函数是同步纯函数，可以声明 `params` 接收运行模板候选参数，也可以声明 `ctx` 或 `context` 读取只读 `ctx.db`。候选函数不暴露 `ctx.tools`，也不创建、启动或销毁环境。
 
 模块数据表如果代表账号、登录态或其他环境绑定业务实体，必须在 `@data_table(..., env_binding_field="env_id")` 中声明绑定字段；字段必须存在于 schema 且为 integer。宿主只通过这些声明扫描“模块是否已经认领环境”。
 
 固定选择环境运行时，宿主会先临时标记该环境归属当前模块；任务终态后仍会按 `env_binding_field` 重新扫描业务表。如果没有任何业务数据绑定该环境，claim 会转为 abandoned，避免固定环境长期卡在“已归属但未认领”的中间态；已有业务绑定的环境继续保持 claimed。
 
 批量环境清理写在 `cleanups/*.py` 中，使用 `@env_cleanup_candidates` 装饰同步纯函数。函数返回待清理 env id 列表或同一个 `EnvCandidates` 链式查询对象；这个入口只表达“模块认为已绑定且业务上可丢弃的候选集合”。宿主客户端触发清理时会同时扫描孤岛环境、任务创建后未被模块数据表认领的环境、owner 模块已不存在的环境，以及模块清理候选；展示预览后再二次校验 `READY/PAUSED`、无租约、无关联任务、无活跃 task 引用、未被运行模板固定引用，最后由 REM 调用 `destroy_env()` 删除。清理候选运行面只有只读 `ctx.db`，不暴露 `ctx.tools`。
+
+```python
+from crawler4j_contracts import env_cleanup_candidates
+
+
+@env_cleanup_candidates(name="expired_accounts")
+def expired_accounts(ctx) -> list[int]:
+    rows = (
+        ctx.db.from_("accounts")
+        .select(["env_id"])
+        .where(["status", "=", "expired"])
+        .execute()
+    )
+    return [int(row["env_id"]) for row in rows if row.get("env_id") is not None]
+```
 
 模块 workflow 不允许导入或发送 `TaskSignal`、`TaskSignalAction`、`EnvAction` 这类流程/环境处置对象。单次运行结束、失败、超时或用户中止后的环境统一由宿主回收；模块若要表达“长期未使用”“黑号已废弃”“账号过期”等业务清理条件，只能通过 `@env_cleanup_candidates` 返回候选 env id，由宿主预览确认后执行。
 

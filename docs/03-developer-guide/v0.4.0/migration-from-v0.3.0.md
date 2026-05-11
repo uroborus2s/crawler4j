@@ -26,7 +26,7 @@
 1. 新建迁移分支，保留 v0.3.x 可运行基线
 2. 用 0.3.x SDK 在 v0.3.x 状态下完成最后一次基线校验
 3. 切换开发环境到 0.4.x SDK / Contracts
-4. 运行 0.4.x 迁移诊断报告
+4. 按本页清单手工重写运行能力
 5. 把 workflow 迁到 `@workflow`
 6. 把业务编排迁到 `@component`
 7. 把 task 迁到 `@page_action`
@@ -38,10 +38,12 @@
 13. 用 Core 0.4.0 DevLink 回归运行模板和页面
 
 ```bash
-uv run crawler4j migrate native-v2
-uv run crawler4j check full
+uv run crawler4j check structure
 uv run crawler4j manifest lock
+uv run crawler4j check full
 ```
+
+当前 0.4.x SDK 没有自动迁移命令。迁移完成与否不看转换脚本输出，只看 `manifest lock`、`check full`、`package verify` 和宿主联调结果。
 
 ## WorkflowSpec 到 @workflow
 
@@ -178,8 +180,10 @@ class Accounts:
 ## 最后检查
 
 ```bash
-uv run crawler4j check full
 uv run crawler4j manifest lock
+uv run crawler4j check full
+uv run crawler4j check release
+uv run crawler4j package build
 uv run crawler4j package verify dist/<module>-<version>.zip
 ```
 
@@ -188,5 +192,6 @@ uv run crawler4j package verify dist/<module>-<version>.zip
 - `module.yaml` 不再承载对象图、workflow 参数和数据契约
 - 模块工程不再依赖 0.3.x SDK 命令生成的 `TaskSpec`、`WorkflowSpec`、`hooks/`、`env_selectors/` 或 `data/sql` 事实源
 - lock 来自当前源码扫描
+- ZIP 来自当前源码构建并通过 `package verify`
 - 运行模板只展示对象装配和 component 参数
 - 数据访问只走 `ctx.db`

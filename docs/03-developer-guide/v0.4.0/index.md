@@ -18,22 +18,25 @@
 
 0.4.0 新模块只按本目录的装饰器路径编写。历史契约只在迁移和排障页面作为旧概念出现，不作为新版 SDK 的兼容入口。
 
-## 推荐阅读顺序
+## 第一次闭环路径
+
+1. [快速开始](./quickstart.md)
+2. [构建模块](./build-modules.md)
+3. [UI 与数据表](./ui-and-data-table.md)
+4. [调试](./debugging.md)
+5. [交付](./shipping.md)
+6. [排障](./troubleshooting.md)
+
+## 深入理解路径
 
 1. [核心概念](./core-concepts.md)
 2. [模块架构规则](./architecture-rules.md)
 3. [模块结构](./module-structure.md)
 4. [装饰器与对象装配](./decorators-and-object-assembly.md)
 5. [数据契约](./data-contracts.md)
-6. [快速开始](./quickstart.md)
-7. [UI 与数据表](./ui-and-data-table.md)
-8. [构建模块](./build-modules.md)
-9. [调试](./debugging.md)
-10. [交付](./shipping.md)
-11. [从 v0.3.0 迁移](./migration-from-v0.3.0.md)
-12. [排障](./troubleshooting.md)
-13. [SDK 与 CLI 参考](./reference-sdk-and-cli.md)
-14. [Core 能力参考](./reference-core-capabilities.md)
+6. [Core 能力参考](./reference-core-capabilities.md)
+7. [SDK 与 CLI 参考](./reference-sdk-and-cli.md)
+8. [从 v0.3.0 迁移](./migration-from-v0.3.0.md)
 
 ## 记住这些边界
 
@@ -51,6 +54,7 @@
 - 标准页面交互优先走 `ctx.tools.call("browser.*", ...)`；`ctx.page` 主要保留给读取和宿主未覆盖能力
 - `@page_action` 只由 workflow/component 通过 `ctx.run_page_action(...)` 调用，不在 `@page_action` 内嵌套调用另一个 `@page_action`
 - Hosted UI 按钮、CRUD handler 和表单提交使用 `@ui_action`，不要接到 `@page_action`
+- `@ui_action` 不是对象图节点，不支持注入 component；复用业务逻辑时放普通函数、服务对象，或通过 `ctx.db` 等正式运行面调用
 - 环境候选唯一入口是 `candidates/*.py` + `@env_candidates`；不要写 `env_selectors/`，也不要维护资源池同步数据
 - 环境清理候选入口是 `cleanups/*.py` + `@env_cleanup_candidates`；模块只返回 env id，删除由宿主确认和校验后执行
 - `created_at`、`updated_at`、`create_at`、`update_at` 是阻断诊断字段，不要声明为模块业务列

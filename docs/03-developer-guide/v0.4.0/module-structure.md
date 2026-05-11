@@ -109,38 +109,49 @@ lock 内容来自装饰器扫描，通常包含：
 - env cleanup candidates
 - 注入关系
 - 对象参数 schema
-- 诊断摘要
 
-不要手写 lock。打包前如果源码装饰器和 lock 不一致，SDK 应阻断。
+不要手写 lock。阻断诊断需要先修复；能写入的 lock 只保存扫描声明和文件完整性列表。打包前如果源码装饰器或文件内容和 lock 不一致，SDK 应阻断。
 
 最小结构示例：
 
 ```json
 {
-  "lock_version": 1,
+  "schema_version": 1,
   "runtime_api": "core-native-v2",
   "module": "hotel_demo",
-  "source_hash": "sha256:...",
-  "generated_at": "2026-04-30T00:00:00Z",
-  "interfaces": [{"name": "labor", "source": "interfaces/labor.py"}],
-  "components": [
+  "version": "0.1.0",
+  "declarations": [
     {
+      "kind": "interface",
+      "name": "labor",
+      "symbol": "Labor",
+      "source_path": "interfaces/labor.py",
+      "metadata": {"name": "labor", "label": "劳保能力"}
+    },
+    {
+      "kind": "component",
       "name": "api_labor",
-      "implements": "labor",
-      "source": "objects/api_labor.py",
-      "parameters": [{"name": "base_url", "type": "string"}],
-      "inject": []
+      "symbol": "ApiLabor",
+      "source_path": "objects/api_labor.py",
+      "metadata": {
+        "name": "api_labor",
+        "implements": "labor",
+        "parameters": [{"name": "base_url", "type": "string"}],
+        "inject": []
+      }
+    },
+    {
+      "kind": "data_table",
+      "name": "hotels",
+      "symbol": "HotelsTable",
+      "source_path": "data/hotels.py",
+      "metadata": {"name": "hotels", "storage_mode": "custom_table"}
     }
   ],
-  "workflows": [{"name": "hotel_sync", "source": "workflows/hotel_sync.py"}],
-  "page_actions": [{"name": "open_home_page", "source": "tasks/open_home_page.py"}],
-  "ui_actions": [{"name": "create_account_from_ui", "source": "pages/create_account_from_ui.py"}],
-  "pages": [{"name": "dashboard", "source": "pages/dashboard.py", "menu": true}],
-  "data_tables": [{"name": "hotels", "source": "data/hotels.py"}],
-  "data_views": [{"name": "hotel_overview", "source": "data/hotels.py"}],
-  "env_candidates": [{"name": "ready_accounts", "source": "candidates/ready_accounts.py"}],
-  "env_cleanup_candidates": [{"name": "unused_accounts", "source": "cleanups/unused_accounts.py"}],
-  "diagnostics": []
+  "files": [
+    {"path": "module.yaml", "size": 180, "sha256": "..."},
+    {"path": "data/hotels.py", "size": 420, "sha256": "..."}
+  ]
 }
 ```
 

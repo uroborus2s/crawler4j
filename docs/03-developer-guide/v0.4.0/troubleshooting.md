@@ -6,7 +6,7 @@
 
 ## 最短定位顺序
 
-1. CLI 不通过：跑 `uv run crawler4j check full`
+1. CLI 不通过：先跑 `uv run crawler4j check structure`
 2. Core 拒绝加载：看 `module.yaml.runtime_api`
 3. 运行模板没有对象树：看 workflow inject 和 component implements
 4. workflow 构造失败：看构造函数参数名
@@ -40,9 +40,11 @@
 - workflow 没有 `parameters`
 - `module.yaml` 没有 v2 禁止字段
 - 运行时代码没有 import `crawler4j-sdk`
+- `.crawler4j/manifest.lock.json` 已生成且与当前源码一致
 
 处理方式：
 
+- 如果错误提示缺少或过期 manifest lock，先运行 `uv run crawler4j manifest lock`，再重新运行 `uv run crawler4j check full`
 - 先修扫描和对象图，再继续写业务逻辑
 - 不要带着 gate 错误去跑宿主联调
 
@@ -122,7 +124,8 @@
 3. `@page.schema` 顶层是否是 `Page`
 4. 被 `@page` 装饰的 `load_handler` 是否存在且签名正确
 5. 表格 `query_handler` 是否存在且签名为 `context, HostedDataTableQuery`，返回 `HostedDataTableQueryResult`
-6. 页面动作是否引用已扫描的 `@page_action`
+6. Hosted UI 按钮或 CRUD handler 是否引用已扫描的 `@ui_action`
+7. workflow/component 调用的浏览器动作是否引用已扫描的 `@page_action`
 
 ## 安装或升级失败
 
@@ -133,7 +136,8 @@
 3. 根目录是否有 `.crawler4j/manifest.lock.json`
 4. `runtime_api` 是否为 `core-native-v2`
 5. lock 是否与源码一致
-6. ZIP 是否混入 v0.3.0 旧结构
+6. ZIP 是否包含标准扫描目录 `interfaces/`、`objects/`、`workflows/`、`tasks/`、`data/`、`pages/`、`candidates/`、`cleanups/`
+7. ZIP 是否混入 v0.3.0 旧结构
 
 必要时先执行：
 

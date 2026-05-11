@@ -14,8 +14,9 @@ DevLink 只服务开发联调，不是正式交付。
 ## 发布前检查
 
 ```bash
-uv run crawler4j check full
+uv run crawler4j check structure
 uv run crawler4j manifest lock
+uv run crawler4j check full
 uv run crawler4j check release
 ```
 
@@ -30,6 +31,8 @@ uv run crawler4j check release
 - 数据表、索引、查询输出不使用宿主保留字段
 - manifest lock 与源码一致
 - 运行时代码没有依赖 `crawler4j-sdk`
+
+`package build` 会先执行 full gate 再刷新 lock；因为 full gate 要求已有 lock 且未过期，发布前必须先运行 `manifest lock`。
 
 ## 构建 ZIP
 
@@ -61,6 +64,8 @@ hotel_demo/
   tasks/
   data/
   pages/
+  candidates/
+  cleanups/
 ```
 
 关键约束：
@@ -69,6 +74,8 @@ hotel_demo/
 - 根目录下有 `module.yaml`
 - `runtime_api` 是 `core-native-v2`
 - `.crawler4j/manifest.lock.json` 存在且未过期
+- `candidates/` 存在；它是结构校验要求目录
+- `cleanups/` 存在；它是标准扫描目录，建议随模块骨架保留
 - `module.yaml.upgrade_source.repo` 是合法 `owner/repo`
 - 运行时代码只依赖 `crawler4j-contracts`
 
@@ -77,9 +84,13 @@ hotel_demo/
 本地验收：
 
 ```bash
-uv run crawler4j host install preview dist/<module>-<version>.zip --skip-remote-check
-uv run crawler4j host install apply dist/<module>-<version>.zip --skip-remote-check
+# Shell B: crawler4j 宿主源码仓或已安装宿主环境
+cd /absolute/path/to/crawler4j-host
+uv run crawler4j host install preview /absolute/path/to/module/dist/<module>-<version>.zip --skip-remote-check
+uv run crawler4j host install apply /absolute/path/to/module/dist/<module>-<version>.zip --skip-remote-check
 ```
+
+这里安装的是 ZIP，不是 DevLink 源码目录。先在模块根完成 `package build` 和 `package verify`，再把 ZIP 的绝对路径交给宿主安装命令。
 
 正式发布：
 

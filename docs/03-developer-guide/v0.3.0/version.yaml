@@ -1,6 +1,6 @@
 doc_version: "0.3.0"
 product_version: "0.3.0"
-status: "current"
-site_role: "main"
+status: "maintenance"
+site_role: "archive"
 runtime_api: "core-native-v1"
 audience: "developer"

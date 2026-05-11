@@ -300,7 +300,7 @@ from crawler4j_contracts import ui_action
 
 @ui_action(name="create_account_from_ui", label="创建账号")
 def create_account_from_ui(ctx, account_id: str):
-    ctx.db.into("accounts").update_where({"status": "active"}, where=account_id)
+    ctx.db.into("accounts").update_where({"status": "active"}, where=["account_id", "=", account_id])
     return {"ok": True}
 ```
 
@@ -311,6 +311,7 @@ UI action 规则：
 - 面向 Hosted UI 按钮、CRUD handler 和用户命令
 - 不依赖 `ctx.page`，不执行浏览器自动化，不调用 `ctx.run_page_action(...)`
 - 可使用 `ctx.db` 读写模块数据
+- 不是对象图节点，不支持通过 `@ui_action` 注入 component
 - 返回 JSON-like dict/list/标量
 
 Hosted UI schema 使用 `type: "ui_action"`：
@@ -327,7 +328,7 @@ Hosted UI schema 使用 `type: "ui_action"`：
 }
 ```
 
-`Button.action.params` 会解析成 `@ui_action` 的命名参数。DataTable CRUD handler 也指向 `@ui_action` 名称：create 传 `payload`，update 传 `crud.primary_key` 同名参数和 `payload`，delete 传 `crud.primary_key` 同名参数。
+`Button.action.params` 会解析成 `@ui_action` 的命名参数。DataTable CRUD handler 也指向 `@ui_action` 名称：create 传 `payload`，update 传 `crud.primary_key` 同名参数和 `payload`，delete 传 `crud.primary_key` 同名参数。需要复用业务逻辑时，把逻辑放到普通函数、服务对象或 `ctx.db` 等正式运行面里，不要把 UI action 当成 component 注入点。
 
 ## 运行模板保存什么
 
@@ -358,8 +359,9 @@ execution:
 3. 递归装配 component 的 `inject`
 4. 用 `object_params` 创建 component
 5. 创建 workflow 实例
-6. 调用 `workflow.run(ctx)`
-7. 任务结束后反向清理对象
+6. 按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`
+7. 调用 `workflow.run(ctx)`
+8. 任务结束后按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`
 
 不同 task/env 会创建不同对象实例。不要把业务状态放到模块全局变量里。
 
@@ -374,7 +376,7 @@ workflow 构造函数只能接收：
 
 - `inject.name` 对应对象
 
-第一版不自动把 `ctx` 注入构造函数。需要上下文时，在 `run(ctx)` 或业务方法中传入。
+Core 不向构造函数注入 `ctx`。需要上下文时，在 `run(ctx)`、`setup(ctx, workflow)`、`cleanup(ctx, outcome)` 或业务方法中传入。
 
 ## 诊断
 

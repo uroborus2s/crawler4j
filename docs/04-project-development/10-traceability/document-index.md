@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-05-11
+**最后更新：** 2026-05-12
 
 ## 1. 当前正式文档结构
 
@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-05-12：0.4.0 开发者指南审阅意见已并入正式正文。`docs/03-developer-guide/v0.4.0/` 现统一校正阅读路径、quickstart 的 DevLink + ZIP install 闭环、`check structure -> manifest lock -> check full` 校验顺序、candidate/cleanup CLI 入口、manifest lock 当前结构、UI Action 与 Page Action 边界、DataTable total/count 示例、ZIP 标准目录和手工迁移边界；`v0.4.0/version.yaml` 已标为当前主线，`v0.3.0/version.yaml` 已标为历史维护。
 - 2026-05-11：Hosted UI 内联 `DataTable` 查询契约已同步为固定类型。`crawler4j-contracts` 新增 `HostedDataTableQuery`、泛型 `HostedDataTableQueryResult[RowT]`、`HostedDataTableSortSpec`；`docs/03-developer-guide/v0.4.0/{ui-and-data-table,reference-core-capabilities,troubleshooting}.md` 与 `docs/04-project-development/04-design/{api-design,module-config-runtime-data-contract,module-hosted-ui-framework,module-entity-table-view-design}.md` 已明确 `query_handler(context, query)`、返回 `HostedDataTableQueryResult`，且 `DataTable.table_id` 只作为 UI 组件实例 ID。`search_fields` 只从显式 `searchable=True` 的 `DataTable.columns` 生成，未声明列默认不可搜索，结果不再回传 `sort`。
 - 2026-05-11：`TaskContext` 边界清理已同步。`packages/crawler4j-contracts/src/crawler4j_contracts/context.py` 删除 `screenshot()`、`run_subtask()` 与 `_subtask_executor`，`run_page_action()` 仍由 `packages/crawler4j/src/core/mms/service.py` 注入 `_page_action_executor` 后调用 `@page_action`；Core 未发现真实截图工具实现，REM 能力示例注释已移除 screenshot。`docs/03-developer-guide/v0.4.0/{reference-core-capabilities,migration-from-v0.3.0}.md` 与 `docs/04-project-development/04-design/0.4.0-decorator-object-assembly-architecture.md` 已同步。
 - 2026-05-11：`ctx.db.from_(...).execute()` 默认分页语义已修正并同步。`packages/crawler4j-contracts/src/crawler4j_contracts/database.py` 现在只在显式调用 `.limit(...)` / `.offset(...)` 时把分页值写入 plan；`packages/crawler4j/src/core/persistence/module_data_store.py` 缺省分页时不再追加 `LIMIT/OFFSET`。`docs/03-developer-guide/v0.4.0/{data-contracts,reference-core-capabilities}.md` 与 `docs/04-project-development/04-design/api-design.md` 已明确未显式分页会读取满足条件的全部行，表格和可增长数据源必须显式分页；`.factory/memory/` 已同步测试和当前状态。

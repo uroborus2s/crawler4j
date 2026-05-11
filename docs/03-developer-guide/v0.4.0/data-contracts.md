@@ -64,7 +64,7 @@ class AccountEventsTable:
 
 `@data_view` 只能引用 `custom_table` 数据表；`managed_dataset` 使用 `ctx.db.from_(...)` 查询，不进入 SQL 视图。
 
-数据表和只读视图的列契约只描述字段本身，不声明 `filterable` / `sortable`。能否过滤、排序由 `ctx.db` 和宿主内部查询执行器按字段存在性、数据源类型和表达式统一校验；继续声明这两个旧字段会在 manifest / schema 归一化阶段报错。
+数据表和只读视图的列契约只描述字段本身，不声明 `filterable` / `sortable`。这两个旧字段不是 0.4.0 数据契约能力，不会驱动数据层过滤或排序；能否过滤、排序由 `ctx.db` 和宿主内部查询执行器按字段存在性、数据源类型和表达式统一校验。Hosted UI 表格的搜索与排序能力写在 `DataTable.columns` 的 `searchable` / `sortable` 上，而不是写进 `@data_table` 或 `@data_view` 的 schema。
 
 Core 0.4.0 只接受当前 `data.db` 表结构。旧版 `module_datasets`、`module_db_views` 或 `module_data_resources` schema 不再自动迁移，宿主启动时会直接报错，旧数据需要在升级前由运维脚本离线整理到 0.4.0 结构。
 
@@ -308,33 +308,46 @@ lock 是 SDK 的扫描快照，通常记录：
 - 只读视图
 - SQL 占位符
 - 视图 schema
-- 保留字段诊断结果
-- `managed_dataset` 中疑似 UI 派生字段的 warning，例如 `*_label`、`*_display`、`*_masked`
 
-不要手写 `.crawler4j/manifest.lock.json`。源码变化后重新生成。
+不要手写 `.crawler4j/manifest.lock.json`。阻断错误会阻止 lock 写入；能写入的 lock 只保存扫描声明和文件完整性列表。源码变化后重新生成。
 
 最小 lock 片段：
 
 ```json
 {
-  "lock_version": 1,
-  "data_tables": [
+  "schema_version": 1,
+  "runtime_api": "core-native-v2",
+  "module": "account_demo",
+  "version": "0.1.0",
+  "declarations": [
     {
+      "kind": "data_table",
       "name": "accounts",
-      "source": "data/accounts.py",
-      "schema": [{"name": "account_id", "type": "string"}],
-      "indexes": [{"fields": ["account_id"], "unique": true}]
-    }
-  ],
-  "data_views": [
+      "symbol": "AccountsTable",
+      "source_path": "data/accounts.py",
+      "metadata": {
+        "name": "accounts",
+        "storage_mode": "custom_table",
+        "schema": [{"name": "account_id", "type": "string"}],
+        "indexes": [{"fields": ["account_id"], "unique": true}]
+      }
+    },
     {
+      "kind": "data_view",
       "name": "account_overview",
-      "source": "data/accounts.py",
-      "sql_hash": "sha256:...",
-      "source_resource_ids": ["accounts"]
+      "symbol": "account_overview",
+      "source_path": "data/accounts.py",
+      "metadata": {
+        "name": "account_overview",
+        "sources": ["accounts"],
+        "sql": "SELECT account_id FROM {{resource:accounts}}"
+      }
     }
   ],
-  "diagnostics": []
+  "files": [
+    {"path": "module.yaml", "size": 180, "sha256": "..."},
+    {"path": "data/accounts.py", "size": 720, "sha256": "..."}
+  ]
 }
 ```
 
