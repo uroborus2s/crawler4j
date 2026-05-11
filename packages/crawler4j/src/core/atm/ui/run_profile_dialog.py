@@ -107,7 +107,7 @@ class CandidateParamsDialog(QDialog):
     @staticmethod
     def _params_to_yaml(params: dict[str, object]) -> str:
         if not params:
-            return "{}\n"
+            return ""
         return yaml.safe_dump(params, allow_unicode=True, sort_keys=False)
 
     def _parse_candidate_params(self) -> dict[str, object]:

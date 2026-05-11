@@ -506,6 +506,16 @@ def test_candidate_params_dialog_parses_mapping_yaml(qtbot):
     }
 
 
+def test_candidate_params_dialog_starts_blank_for_empty_params(qtbot):
+    from src.core.atm.ui.run_profile_dialog import CandidateParamsDialog
+
+    dialog = CandidateParamsDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.editor.toPlainText() == ""
+    assert dialog._parse_candidate_params() == {}
+
+
 def test_candidate_params_dialog_rejects_non_mapping_yaml(qtbot):
     from src.core.atm.ui.run_profile_dialog import CandidateParamsDialog
 

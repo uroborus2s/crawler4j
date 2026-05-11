@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-05-11 已调整 ATM 运行模板候选参数配置窗口的空值展示。空 `candidate_params` 现在打开时显示为空白编辑器，不再默认显示 `{}`；留空保存仍解析为空字典，已有非空参数继续按 YAML 对象展示。用户指南、候选队列设计与运行模板 UI 单测已同步。
 - 最新开发：2026-05-09 已为 ATM 运行模板选择环境模式补齐 `candidate_params` 图形配置入口。运行模板表单现在在候选函数下方显示“候选参数”配置窗口，使用 YAML 对象编辑并校验，保存后写入 `RunProfile.resource.acquisition.candidate_params`；从已有运行模板加载再通过表单保存不会再丢失候选参数，调试会话继续从运行模板派生同一份 payload。用户指南、候选队列设计与开发者指南已同步，运行模板 UI 单测覆盖加载保留与 YAML 校验。
 - 最新开发：2026-05-09 已为 `ctx.db.into(...).delete_where` 与 `ctx.db.batch().delete_where` 增加主键值快捷删除。模块可写 `delete_where(where="A001")`；Contracts 会先读取数据源描述，`custom_table` 映射到 `record_key_field`，`managed_dataset` 映射到宿主物理 `record_key`，普通结构化 where 与 callable where 保持原语义。开发者指南已同步，Contracts plan 与 Runtime capabilities 定向测试已覆盖。
 - 最新开发：2026-05-09 已为 `ctx.db.into(...).update_where/delete_where` 与 `ctx.db.batch().update_where/delete_where` 增加 callable `where` 构造入口。模块可写 `where=lambda q: q.where("id", "=", value)` 复用现有 `DatabaseQueryBuilder.where(...)` 条件语法；callable 只收集 where 条件，不触发额外数据源描述，也会拒绝未添加任何条件的更新/删除。开发者指南已同步，Contracts plan 单测与 Runtime capabilities 定向测试已覆盖。
