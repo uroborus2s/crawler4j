@@ -70,13 +70,13 @@ from crawler4j_contracts import TaskContext, ui_action
 
 @ui_action(name="create_account_from_ui")
 def create_account_from_ui(ctx: TaskContext, account_id: str):
-    ctx.db.into("accounts").update_where({"status": "active"}, where=account_id)
+    ctx.db.into("accounts").update_where({"status": "active"}, where=["account_id", "=", account_id])
     return {"ok": True}
 ```
 
 `Button.action.params` 会被解析成 `@ui_action` 的命名参数。`{"account_id": {"binding": "selected.id"}}` 会从当前页面 `load_handler` 返回的 payload 里读取 `selected.id`，然后调用 `create_account_from_ui(ctx, account_id=...)`。
 
-`@ui_action` 不依赖浏览器页面，不调用 `ctx.run_page_action(...)`。它适合 Hosted UI 按钮、CRUD handler、刷新、导出和表单提交。需要操作真实浏览器页面时，把动作写成 `@page_action`，并由 workflow/component 通过 `ctx.run_page_action(...)` 调用。
+`@ui_action` 不依赖浏览器页面，不调用 `ctx.run_page_action(...)`。它适合 Hosted UI 按钮、CRUD handler、刷新、导出和表单提交。它不是 workflow/component 对象图节点，不支持通过 `@ui_action` 注入 component；需要复用业务逻辑时，把逻辑放到普通函数、服务对象或 `ctx.db` 等正式运行面里。需要操作真实浏览器页面时，把动作写成 `@page_action`，并由 workflow/component 通过 `ctx.run_page_action(...)` 调用。
 
 `@page_action` 内部不要再调用另一个 `@page_action` 拆公共步骤。公共页面动作应抽成普通函数、browser adapter 或 use case；多个可观测页面动作的顺序由 workflow/component 编排。
 
@@ -107,6 +107,8 @@ def load_accounts_page(context: TaskContext, page_id: str, params: dict | None =
     return {"rows": rows}
 ```
 
+`DataTable.data_source` 也支持短小静态行：`{"type": "rows", "rows": [...]}`。固定枚举、示例数据或空状态可以用它；会增长的数据仍应使用 binding、query_handler 或 managed_resource。
+
 ### query_handler
 
 把分页、筛选、排序交给页面 handler。`DataTable.table_id` 只是页面内组件实例 ID，用于宿主渲染和刷新定位；它不是数据库资源名，也不会作为 handler 入参。一个表格可以由多个 `@data_table` / `@data_view` 查询结果组装而成。
@@ -125,9 +127,10 @@ def query_accounts_table(
         .offset(query.offset)
         .execute()
     )
+    total = context.db.from_("accounts").count(alias="total").execute()[0]["total"]
     return HostedDataTableQueryResult(
         rows=rows,
-        total=len(rows),
+        total=total,
         page=query.page,
         page_size=query.page_size,
     )
@@ -167,17 +170,23 @@ def query_accounts_table(
     context: TaskContext,
     query: HostedDataTableQuery,
 ) -> HostedDataTableQueryResult:
-    callback = query.to_query_callback(
+    row_callback = query.to_query_callback(
         FIELD_MAP,
         sort=lambda field: field in {"created_at"},
         like=lambda field: field in {"account_id", "account_status"},
         eq=lambda field: field in {"account_id"},
     )
-    rows = callback(context.db.from_("accounts")).execute()
-    return HostedDataTableQueryResult(rows=rows, total=len(rows), page=query.page, page_size=query.page_size)
+    count_callback = query.to_count_query_callback(
+        FIELD_MAP,
+        like=lambda field: field in {"account_id", "account_status"},
+        eq=lambda field: field in {"account_id"},
+    )
+    rows = row_callback(context.db.from_("accounts")).execute()
+    total = count_callback(context.db.from_("accounts")).count(alias="total").execute()[0]["total"]
+    return HostedDataTableQueryResult(rows=rows, total=total, page=query.page, page_size=query.page_size)
 ```
 
-`FIELD_MAP` 的 key 是 UI 表格字段，value 是 `ctx.db` 数据源字段；它只转换映射里显式声明的字段，没有出现在映射里的 `search_fields`、`sort.field` 和 `params` 字段会按原字段名保留并继续下推到数据库。`like`、`sort`、`eq` 三个可选函数用于二次判断转换后的字段是否合法：输入字段名，返回 `True` 才会生成对应的 `LIKE` 搜索、`order_by` 排序或 `=` 参数过滤。`search_text` 会按有效 `search_fields` 生成 OR `LIKE` 条件，`params` 会生成 `=` 条件，分页会生成 `limit(query.page_size).offset(query.offset)`。
+`FIELD_MAP` 的 key 是 UI 表格字段，value 是 `ctx.db` 数据源字段；它只转换映射里显式声明的字段，没有出现在映射里的 `search_fields`、`sort.field` 和 `params` 字段会按原字段名保留并继续下推到数据库。`like`、`sort`、`eq` 三个可选函数用于二次判断转换后的字段是否合法：输入字段名，返回 `True` 才会生成对应的 `LIKE` 搜索、`order_by` 排序或 `=` 参数过滤。`search_text` 会按有效 `search_fields` 生成 OR `LIKE` 条件，`params` 会生成 `=` 条件，分页会生成 `limit(query.page_size).offset(query.offset)`。如果需要为 `total` 单独计算过滤后的总数，使用 `to_count_query_callback(...)` 生成 count 专用回调；它只复用搜索与参数过滤，不生成 `order_by`、`limit` 或 `offset`，可接到 `ctx.db.from_(...).count(alias="total")` 上。
 
 SDK 会在扫描阶段校验 `query_handler`：handler 必须定义在同一个 `pages/*.py` 模块中，必须是同步函数，并且签名能按 `(context, query)` 位置参数调用。缺失、异步或签名不兼容会在 `crawler4j check full` / manifest lock / 打包前被诊断出来。
 
@@ -207,6 +216,12 @@ SDK 会在扫描阶段校验 `query_handler`：handler 必须定义在同一个 
 {
     "type": "DataTable",
     "table_id": "accounts",
+    "columns": [
+        {"key": "account_id", "label": "账号", "sortable": True},
+        {"key": "name", "label": "名称", "searchable": True},
+        {"key": "secret", "label": "密钥"},
+        {"key": "actions", "label": "操作", "type": "actions"},
+    ],
     "data_source": {"type": "managed_resource", "resource_id": "accounts"},
     "crud": {
         "mode": "handlers",
@@ -236,7 +251,7 @@ def create_account(context: TaskContext, payload: dict) -> dict:
 
 @ui_action(name="update_account")
 def update_account(context: TaskContext, account_id: str, payload: dict) -> dict:
-    context.db.into("accounts").update_where(payload, where=account_id)
+    context.db.into("accounts").update_where(payload, where=["account_id", "=", account_id])
     return {"ok": True}
 
 

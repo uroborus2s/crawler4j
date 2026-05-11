@@ -7,7 +7,7 @@
 - 提供 `TaskContext` / `TaskResult` / `TaskOutcome` / `WorkflowLifecycleInfo` 等模块运行和生命周期契约
 - 提供 `ToolsCapability` / `ToolSpec` / `HttpClient` 等宿主扩展能力契约
 - 提供 `DatabaseClient`，模块数据唯一正式入口为 `TaskContext.db`
-- 提供 Hosted UI 页面 schema 类型 `PageSchema` 及组件/action/CRUD TypedDict，并提供表格查询契约 `HostedDataTableQuery`、泛型 `HostedDataTableQueryResult[RowT]`、`HostedDataTableSortSpec` 与 `QueryCallback`，`HostedDataTableQuery.to_query_callback(...)` 可把搜索、排序、分页和导航参数转换为 `ctx.db.from_(...)` 查询回调；`query_handler` 不接收 `table_id`，返回值不使用普通 `dict`
+- 提供 Hosted UI 页面 schema 类型 `PageSchema` 及组件/action/CRUD TypedDict，并提供表格查询契约 `HostedDataTableQuery`、泛型 `HostedDataTableQueryResult[RowT]`、`HostedDataTableSortSpec` 与 `QueryCallback`，`HostedDataTableQuery.to_query_callback(...)` 可把搜索、排序、分页和导航参数转换为 `ctx.db.from_(...)` 查询回调，`to_count_query_callback(...)` 可生成不带排序和分页的 count 过滤回调；`query_handler` 不接收 `table_id`，返回值不使用普通 `dict`
 - 提供 `core-native-v2` 装饰器：`@interface`、`@component`、`@workflow`、`@page`、`@page_action`、`@ui_action`、`@data_table`、`@data_view`、`@env_candidates`、`@env_cleanup_candidates`
 - 提供 `EnvCandidates` 链式环境候选查询 DSL，支持 `filter()`、`exclude()`、`intersect()`、`union()`、`minus()`、`order()`、`limit()` 与 `list(ctx)`
 - 提供对象装配注解 helper：`object_param(...)`、`object_inject(...)`。它们可用于 component 类属性或 `__init__` 参数注解，最终归一为 `ParameterSpec` / `InjectSpec`

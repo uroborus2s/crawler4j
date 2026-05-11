@@ -400,6 +400,42 @@ class HostedDataTableQuery:
     ) -> QueryCallback:
         """Convert the Hosted UI table query into a `ctx.db.from_(...)` callback."""
 
+        return self._to_query_callback(
+            field_map,
+            sort=sort,
+            like=like,
+            eq=eq,
+            include_order=True,
+            include_pagination=True,
+        )
+
+    def to_count_query_callback(
+        self,
+        field_map: Mapping[str, str],
+        *,
+        like: Callable[[str], bool] | None = None,
+        eq: Callable[[str], bool] | None = None,
+    ) -> QueryCallback:
+        """Convert the Hosted UI table query into a count-safe filter callback."""
+
+        return self._to_query_callback(
+            field_map,
+            like=like,
+            eq=eq,
+            include_order=False,
+            include_pagination=False,
+        )
+
+    def _to_query_callback(
+        self,
+        field_map: Mapping[str, str],
+        *,
+        sort: Callable[[str], bool] | None = None,
+        like: Callable[[str], bool] | None = None,
+        eq: Callable[[str], bool] | None = None,
+        include_order: bool,
+        include_pagination: bool,
+    ) -> QueryCallback:
         normalized_field_map = _normalize_hosted_query_field_map(field_map)
 
         def callback(query: DatabaseQueryBuilder) -> DatabaseQueryBuilder:
@@ -422,12 +458,15 @@ class HostedDataTableQuery:
                 if mapped_field and _hosted_query_field_allowed(mapped_field, eq):
                     query = query.where([mapped_field, "=", param_value])
 
-            for sort_spec in self.sort:
-                mapped_field = _map_hosted_query_field(sort_spec.field, normalized_field_map)
-                if mapped_field and _hosted_query_field_allowed(mapped_field, sort):
-                    query = query.order_by(mapped_field, sort_spec.direction)
+            if include_order:
+                for sort_spec in self.sort:
+                    mapped_field = _map_hosted_query_field(sort_spec.field, normalized_field_map)
+                    if mapped_field and _hosted_query_field_allowed(mapped_field, sort):
+                        query = query.order_by(mapped_field, sort_spec.direction)
 
-            return query.limit(self.limit).offset(self.offset)
+            if include_pagination:
+                return query.limit(self.limit).offset(self.offset)
+            return query
 
         return callback
 

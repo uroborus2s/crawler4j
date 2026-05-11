@@ -177,6 +177,58 @@ def test_hosted_data_table_query_callback_preserves_falsey_eq_values():
     ]
 
 
+def test_hosted_data_table_query_builds_count_query_callback_without_order_or_pagination():
+    executor = _FakeDbExecutor()
+    query = HostedDataTableQuery.from_mapping(
+        {
+            "search_text": " ready ",
+            "search_fields": ["account_id", "status", "blocked_search"],
+            "sort": [{"field": "createdAt", "direction": "desc"}],
+            "page": 3,
+            "page_size": 15,
+            "params": {"account_id": "A001", "blocked_eq": "nope"},
+        }
+    )
+
+    callback = query.to_count_query_callback(
+        {
+            "account_id": "account_id",
+            "status": "account_status",
+            "createdAt": "created_at",
+            "blocked_search": "secret",
+            "blocked_eq": "secret",
+        },
+        like=lambda field: field != "secret",
+        eq=lambda field: field != "secret",
+    )
+
+    callback(DatabaseClient(executor).from_("accounts")).count(alias="total").execute()
+
+    assert executor.plans == [
+        {
+            "kind": "select",
+            "base": {"source": "accounts"},
+            "joins": [],
+            "select": [{"kind": "aggregate", "func": "count", "field": "*", "alias": "total"}],
+            "where": [
+                {
+                    "kind": "group",
+                    "operator": "or",
+                    "conditions": [
+                        {"field": "account_id", "op": "like", "value": "%ready%"},
+                        {"field": "account_status", "op": "like", "value": "%ready%"},
+                    ],
+                },
+                {"field": "account_id", "op": "eq", "value": "A001"},
+            ],
+            "group_by": [],
+            "order_by": [],
+            "limit": None,
+            "offset": None,
+        }
+    ]
+
+
 def test_hosted_data_table_query_result_uses_fixed_contract_shape():
     result = HostedDataTableQueryResult[AccountTableRow](
         rows=[{"account_id": "A001", "status": "ready"}],
