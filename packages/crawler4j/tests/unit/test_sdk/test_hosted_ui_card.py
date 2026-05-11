@@ -111,7 +111,7 @@ def test_hosted_data_table_query_builds_database_query_callback():
             "params": {
                 "account_id": "A001",
                 "blocked_eq": "nope",
-                "unmapped_param": "ignored",
+                "unmapped_param": "kept",
             },
         }
     )
@@ -146,12 +146,17 @@ def test_hosted_data_table_query_builds_database_query_callback():
                     "conditions": [
                         {"field": "account_id", "op": "like", "value": "%ready%"},
                         {"field": "account_status", "op": "like", "value": "%ready%"},
+                        {"field": "unmapped_search", "op": "like", "value": "%ready%"},
                     ],
                 },
                 {"field": "account_id", "op": "eq", "value": "A001"},
+                {"field": "unmapped_param", "op": "eq", "value": "kept"},
             ],
             "group_by": [],
-            "order_by": [{"field": "created_at", "direction": "desc"}],
+            "order_by": [
+                {"field": "created_at", "direction": "desc"},
+                {"field": "unmapped_sort", "direction": "asc"},
+            ],
             "limit": 10,
             "offset": 10,
         }

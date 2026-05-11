@@ -177,7 +177,9 @@ def query_accounts_table(
     return HostedDataTableQueryResult(rows=rows, total=len(rows), page=query.page, page_size=query.page_size)
 ```
 
-`FIELD_MAP` 的 key 是 UI 表格字段，value 是 `ctx.db` 数据源字段；`search_fields`、`sort.field` 和 `params` 中没有出现在映射里的字段会被忽略，不会下推到数据库。`like`、`sort`、`eq` 三个可选函数用于二次判断映射后的字段是否合法：输入字段名，返回 `True` 才会生成对应的 `LIKE` 搜索、`order_by` 排序或 `=` 参数过滤。`search_text` 会按有效 `search_fields` 生成 OR `LIKE` 条件，`params` 会生成 `=` 条件，分页会生成 `limit(query.page_size).offset(query.offset)`。
+`FIELD_MAP` 的 key 是 UI 表格字段，value 是 `ctx.db` 数据源字段；它只转换映射里显式声明的字段，没有出现在映射里的 `search_fields`、`sort.field` 和 `params` 字段会按原字段名保留并继续下推到数据库。`like`、`sort`、`eq` 三个可选函数用于二次判断转换后的字段是否合法：输入字段名，返回 `True` 才会生成对应的 `LIKE` 搜索、`order_by` 排序或 `=` 参数过滤。`search_text` 会按有效 `search_fields` 生成 OR `LIKE` 条件，`params` 会生成 `=` 条件，分页会生成 `limit(query.page_size).offset(query.offset)`。
+
+SDK 会在扫描阶段校验 `query_handler`：handler 必须定义在同一个 `pages/*.py` 模块中，必须是同步函数，并且签名能按 `(context, query)` 位置参数调用。缺失、异步或签名不兼容会在 `crawler4j check full` / manifest lock / 打包前被诊断出来。
 
 ### managed_resource
 
@@ -195,7 +197,7 @@ def query_accounts_table(
 }
 ```
 
-`resource_id` 必须来自装饰器扫描和 manifest lock。
+`resource_id` 必须来自装饰器扫描和 manifest lock。宿主会把搜索、排序和分页下推到模块数据存储，不会先固定读取前 1000 行再在内存中过滤；表格 `total` 应反映满足当前搜索条件的完整记录数。
 
 ## CRUD
 

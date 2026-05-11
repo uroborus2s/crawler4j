@@ -67,11 +67,11 @@ def test_module_ui_runtime_bridge_reads_page_schema_and_handlers_from_descriptor
             def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None = None):
                 return {"page_id": page_id, "params": params, "mode": context.config.get("mode", "unset")}
             """,
-            "tasks/create_account_from_ui.py": """
-            from crawler4j_contracts import TaskContext, page_action
+            "pages/actions.py": """
+            from crawler4j_contracts import TaskContext, ui_action
 
 
-            @page_action(name="create_account_from_ui")
+            @ui_action(name="create_account_from_ui")
             def handle(context: TaskContext, payload: dict):
                 return {"payload": dict(payload), "mode": context.config.get("mode", "unset")}
             """,
@@ -99,7 +99,7 @@ def test_module_ui_runtime_bridge_reads_page_schema_and_handlers_from_descriptor
             "params": {"phone": "13800138000"},
             "mode": "unset",
         }
-        assert bridge.call_page_action_sync("create_account_from_ui", {"id": "u1"}) == {
+        assert bridge.call_ui_action_sync("create_account_from_ui", {"id": "u1"}) == {
             "payload": {"id": "u1"},
             "mode": "unset",
         }
@@ -107,32 +107,12 @@ def test_module_ui_runtime_bridge_reads_page_schema_and_handlers_from_descriptor
         restore_module(service, original_registry, module_name)
 
 
-def test_module_ui_runtime_bridge_calls_async_page_action(tmp_path):
-    module_name = "async_page_action_bridge_module"
-    module_dir = write_module_tree(
-        tmp_path,
-        module_name,
-        files={
-            "tasks/create_account_from_ui.py": """
-            from crawler4j_contracts import TaskContext, page_action
+def test_module_ui_runtime_bridge_no_longer_exposes_hosted_page_action_calls():
+    bridge = ModuleUIRuntimeBridge("legacy_page_action_bridge_module")
 
-
-            @page_action(name="create_account_from_ui")
-            async def handle(context: TaskContext, id: str):
-                return {"payload": {"id": id}, "mode": context.config.get("mode", "unset")}
-            """,
-        },
-    )
-    service, original_registry, _ = register_module(module_name, module_dir, manifest=make_manifest(module_name))
-    bridge = ModuleUIRuntimeBridge(module_name)
-
-    try:
-        assert bridge.call_page_action("create_account_from_ui", {"id": "u1"}) == {
-            "payload": {"id": "u1"},
-            "mode": "unset",
-        }
-    finally:
-        restore_module(service, original_registry, module_name)
+    assert not hasattr(bridge, "call_page_action")
+    assert not hasattr(bridge, "call_page_action_sync")
+    assert not hasattr(bridge, "call_page_action_async")
 
 
 def test_module_ui_runtime_bridge_calls_sync_ui_action(tmp_path):
@@ -303,11 +283,11 @@ def test_module_ui_runtime_bridge_reloads_dev_link_descriptor_between_sessions(t
             def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                 return {"version": "v1", "mode": context.config.get("mode")}
             """,
-            "tasks/create_account_from_ui.py": """
-            from crawler4j_contracts import TaskContext, page_action
+            "pages/actions.py": """
+            from crawler4j_contracts import TaskContext, ui_action
 
 
-            @page_action(name="create_account_from_ui")
+            @ui_action(name="create_account_from_ui")
             def handle(context: TaskContext, payload: dict):
                 return {"version": "v1", "mode": context.config.get("mode"), "payload": dict(payload)}
             """,
@@ -345,18 +325,18 @@ def test_module_ui_runtime_bridge_reloads_dev_link_descriptor_between_sessions(t
                 def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                     return {"version": "v2", "mode": context.config.get("mode")}
                 """,
-                "tasks/create_account_from_ui.py": """
-                from crawler4j_contracts import TaskContext, page_action
+                "pages/actions.py": """
+                from crawler4j_contracts import TaskContext, ui_action
 
 
-                @page_action(name="create_account_from_ui")
+                @ui_action(name="create_account_from_ui")
                 def handle(context: TaskContext, payload: dict):
                     return {"version": "v2", "mode": context.config.get("mode"), "payload": dict(payload)}
                 """,
             },
         )
 
-        later_payload = bridge.call_page_action_sync("create_account_from_ui", {"id": "u1"})
+        later_payload = bridge.call_ui_action_sync("create_account_from_ui", {"id": "u1"})
 
         assert first_payload == {"version": "v1", "mode": "old"}
         assert later_payload == {"version": "v2", "mode": "new", "payload": {"id": "u1"}}
@@ -535,17 +515,17 @@ def test_module_ui_runtime_bridge_scopes_page_and_query_handlers_to_readonly_too
         restore_module(service, original_registry, module_name)
 
 
-def test_module_ui_runtime_bridge_scopes_page_actions_to_action_surface(tmp_path):
-    module_name = "scoped_page_action_bridge_module"
+def test_module_ui_runtime_bridge_scopes_ui_actions_to_action_surface(tmp_path):
+    module_name = "scoped_ui_action_bridge_module"
     module_dir = write_module_tree(
         tmp_path,
         module_name,
         files={
-            "tasks/create_metric.py": """
-            from crawler4j_contracts import TaskContext, page_action
+            "pages/actions.py": """
+            from crawler4j_contracts import TaskContext, ui_action
 
 
-            @page_action(name="create_metric")
+            @ui_action(name="create_metric")
             async def create_metric(context: TaskContext, id: str):
                 rows = context.db.from_("metrics").execute()
                 context.db.into("metrics").replace(rows + [{"id": id}])
@@ -579,7 +559,7 @@ def test_module_ui_runtime_bridge_scopes_page_actions_to_action_surface(tmp_path
 
     try:
         _sync_managed_dataset(module_name, module_dir, "metrics")
-        payload = bridge.call_page_action("create_metric", {"id": "m1"})
+        payload = bridge.call_ui_action("create_metric", {"id": "m1"})
 
         assert payload["tools"] == ["ui.get_page"]
         assert [row["id"] for row in payload["rows"]] == ["m1"]

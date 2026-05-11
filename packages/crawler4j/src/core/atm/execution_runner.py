@@ -168,6 +168,7 @@ class ExecutionRunner:
         env_lease = None
         env_id = None
         env_created = False
+        env_claim_refresh_required = False
         task_context = None
         result: TaskResult | None = None
         effective_creation_params = deepcopy(request.creation_params)
@@ -193,6 +194,7 @@ class ExecutionRunner:
                     else:
                         env_lease = await self.rem.lease_manager.acquire(env, task.id, timeout=wait_timeout)
                     await self._claim_fixed_env_for_module(selected_env_id, request.module_name, task.id)
+                    env_claim_refresh_required = True
                     env_id = int(env_lease.env_id)
                     task.lease_id = env_lease.id
                     logger.info(f"[ATM] Task {task.id} selected fixed env {env_id}")
@@ -301,6 +303,7 @@ class ExecutionRunner:
                     owner_module=request.module_name,
                     task_id=task.id,
                 )
+                env_claim_refresh_required = True
                 logger.info(f"[ATM] Task {task.id} created env {env_id}")
 
                 env_lease = await self.rem.lease_manager.claim_created_env(env, task.id)
@@ -333,6 +336,7 @@ class ExecutionRunner:
                 env_lease=env_lease,
                 env_id=env_id,
                 env_created=env_created,
+                env_claim_refresh_required=env_claim_refresh_required,
                 acquisition_context=acquisition_context,
                 module_name=request.module_name,
                 on_task_update=on_task_update,
@@ -442,8 +446,8 @@ class ExecutionRunner:
             if task_context:
                 task_context.runtime["env_recycle"] = recycle_info
 
-        if env_created and task.env_id:
-            await self._refresh_created_env_claim(
+        if env_claim_refresh_required and task.env_id:
+            await self._refresh_env_claim_after_task(
                 env_id=int(task.env_id),
                 module_name=module_name,
                 task_id=task.id,
@@ -644,6 +648,7 @@ class ExecutionRunner:
         env_lease,
         env_id: int | None,
         env_created: bool,
+        env_claim_refresh_required: bool,
         acquisition_context: TaskContext,
         module_name: str,
         on_task_update: TaskUpdateCallback | None,
@@ -664,9 +669,9 @@ class ExecutionRunner:
                     f"[ATM] Task {task.id} failed to clean env during acquisition error: {reset_error}"
                 )
 
-        if env_created and env_id is not None:
+        if env_claim_refresh_required and env_id is not None:
             try:
-                await self._refresh_created_env_claim(
+                await self._refresh_env_claim_after_task(
                     env_id=int(env_id),
                     module_name=module_name,
                     task_id=task.id,
@@ -851,7 +856,7 @@ class ExecutionRunner:
                 self.rem.recycle_env(env),
             )
 
-    async def _refresh_created_env_claim(
+    async def _refresh_env_claim_after_task(
         self,
         *,
         env_id: int,

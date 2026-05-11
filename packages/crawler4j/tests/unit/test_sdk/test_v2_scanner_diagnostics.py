@@ -225,8 +225,7 @@ class MainWorkflow:
 
     result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
     diagnostics = [
-        diagnostic for diagnostic in result.diagnostics
-        if diagnostic.code == "V2_OBJECT_LIFECYCLE_METHOD_UNSUPPORTED"
+        diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_OBJECT_LIFECYCLE_METHOD_UNSUPPORTED"
     ]
 
     assert {(diagnostic.location, diagnostic.message) for diagnostic in diagnostics} == {
@@ -287,7 +286,8 @@ class MainWorkflow:
 
     result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
     diagnostics = [
-        diagnostic for diagnostic in result.diagnostics
+        diagnostic
+        for diagnostic in result.diagnostics
         if diagnostic.code == "V2_OBJECT_LIFECYCLE_METHOD_SIGNATURE_INVALID"
     ]
 
@@ -565,6 +565,161 @@ class LegacyStatefulAction:
     assert "V2_RUNTIME_SDK_IMPORT" in codes
 
 
+def test_scan_v2_module_validates_page_query_handler_diagnostics(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import workflow
+
+
+@workflow(name="main_workflow")
+class MainWorkflow:
+    pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "pages" / "other.py").write_text(
+        """
+def other_module_handler(context, query):
+    return None
+""",
+        encoding="utf-8",
+    )
+    (module_root / "pages" / "dashboard.py").write_text(
+        """
+from crawler4j_contracts import page
+
+
+@page(
+    name="dashboard",
+    schema={
+        "type": "Page",
+        "title": "Dashboard",
+        "children": [
+            {
+                "type": "DataTable",
+                "table_id": "missing_name",
+                "columns": ["id"],
+                "data_source": {"type": "query_handler", "handler": "missing_handler"},
+            },
+            {
+                "type": "DataTable",
+                "table_id": "missing_field",
+                "columns": ["id"],
+                "data_source": {"type": "query_handler"},
+            },
+            {
+                "type": "DataTable",
+                "table_id": "async_table",
+                "columns": ["id"],
+                "data_source": {"type": "query_handler", "handler": "async_handler"},
+            },
+            {
+                "type": "DataTable",
+                "table_id": "bad_signature",
+                "columns": ["id"],
+                "data_source": {"type": "query_handler", "handler": "bad_signature"},
+            },
+            {
+                "type": "DataTable",
+                "table_id": "other_module",
+                "columns": ["id"],
+                "data_source": {"type": "query_handler", "handler": "other_module_handler"},
+            },
+        ],
+    },
+)
+def load_dashboard(context, page_id, params=None):
+    return {}
+
+
+async def async_handler(context, query):
+    return None
+
+
+def bad_signature(context):
+    return None
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    diagnostics = [
+        diagnostic for diagnostic in result.diagnostics if diagnostic.code.startswith("V2_PAGE_QUERY_HANDLER_")
+    ]
+    assert [(diagnostic.code, diagnostic.message) for diagnostic in diagnostics] == [
+        (
+            "V2_PAGE_QUERY_HANDLER_MISSING",
+            "DataTable query_handler must reference a sync function in the same page module: missing_handler",
+        ),
+        (
+            "V2_PAGE_QUERY_HANDLER_MISSING",
+            "DataTable query_handler must declare data_source.handler",
+        ),
+        (
+            "V2_PAGE_QUERY_HANDLER_ASYNC",
+            "DataTable query_handler must be a sync function: async_handler",
+        ),
+        (
+            "V2_PAGE_QUERY_HANDLER_SIGNATURE_INVALID",
+            "DataTable query_handler signature must accept (context, query): bad_signature",
+        ),
+        (
+            "V2_PAGE_QUERY_HANDLER_MISSING",
+            "DataTable query_handler must reference a sync function in the same page module: other_module_handler",
+        ),
+    ]
+
+
+def test_scan_v2_module_accepts_sync_page_query_handler(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import workflow
+
+
+@workflow(name="main_workflow")
+class MainWorkflow:
+    pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "pages" / "dashboard.py").write_text(
+        """
+from crawler4j_contracts import page
+
+
+@page(
+    name="dashboard",
+    schema={
+        "type": "Page",
+        "title": "Dashboard",
+        "children": [
+            {
+                "type": "DataTable",
+                "table_id": "accounts",
+                "columns": ["id"],
+                "data_source": {"type": "query_handler", "handler": "load_accounts"},
+            },
+        ],
+    },
+)
+def load_dashboard(context, page_id, params=None):
+    return {}
+
+
+def load_accounts(context, query):
+    return None
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    assert result.diagnostics == ()
+
+
 def test_scan_v2_module_reports_host_reserved_data_fields(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "data" / "data_contracts.py").write_text(
@@ -694,9 +849,7 @@ class Accounts:
 
     result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
 
-    derived_warnings = [
-        diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_DERIVED_DATA_FIELD"
-    ]
+    derived_warnings = [diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_DERIVED_DATA_FIELD"]
     assert {diagnostic.location for diagnostic in derived_warnings} == {
         "data.data_contracts.Accounts.schema[phone_masked]",
         "data.data_contracts.Accounts.schema[status_label]",

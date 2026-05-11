@@ -7,6 +7,7 @@ from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode
 from src.core.rem.env_claims import (
+    CLAIM_ABANDONED,
     CLAIM_CLAIMED,
     ENV_CLAIM_NAMESPACE,
     ENV_CLAIM_OWNER_MODULE,
@@ -102,6 +103,22 @@ def _candidate_service(*results: list[int]):
     return service
 
 
+def _binding_capabilities(bound_env_ids: list[int]):
+    class _BindingQuery:
+        def select(self, field_name: str):
+            self._field_name = field_name
+            return self
+
+        def execute(self):
+            return [{self._field_name: env_id} for env_id in bound_env_ids]
+
+    class _BindingDb:
+        def from_(self, _table_name: str):
+            return _BindingQuery()
+
+    return SimpleNamespace(db=_BindingDb(), tools=SimpleNamespace())
+
+
 async def _seed_claim(rem, env_id: int, owner: str, state: str = CLAIM_CLAIMED) -> None:
     await rem.set_metadata(env_id, ENV_CLAIM_NAMESPACE, ENV_CLAIM_OWNER_MODULE, owner, "string")
     await rem.set_metadata(env_id, ENV_CLAIM_NAMESPACE, ENV_CLAIM_STATE, state, "string")
@@ -184,13 +201,37 @@ async def test_execution_runner_ignores_candidate_env_bound_to_another_module():
 
 
 @pytest.mark.asyncio
-async def test_execution_runner_binds_fixed_env_to_module_after_lease():
+async def test_execution_runner_refreshes_unbound_fixed_env_claim_after_task():
     request = _build_request()
     request.fixed_env_id = 21
     request.candidates_name = ""
     env, lease = _build_env()
 
     module_service = _candidate_service([])
+    runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
+
+    await runner.run(request)
+
+    assert rem.metadata_store[(21, ENV_CLAIM_NAMESPACE, ENV_CLAIM_OWNER_MODULE)] == "demo.module"
+    assert rem.metadata_store[(21, ENV_CLAIM_NAMESPACE, ENV_CLAIM_STATE)] == CLAIM_ABANDONED
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_keeps_fixed_env_claimed_when_business_binding_exists():
+    request = _build_request()
+    request.fixed_env_id = 21
+    request.candidates_name = ""
+    request.runtime_capabilities = _binding_capabilities([21])
+    env, lease = _build_env()
+
+    module_service = _candidate_service([])
+    module_service.get_runtime_descriptor_v2 = Mock(
+        return_value=SimpleNamespace(
+            data_tables={
+                "accounts": SimpleNamespace(meta=SimpleNamespace(env_binding_field="env_id")),
+            }
+        )
+    )
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
 
     await runner.run(request)

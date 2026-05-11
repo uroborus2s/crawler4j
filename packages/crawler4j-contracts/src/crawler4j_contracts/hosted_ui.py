@@ -497,7 +497,7 @@ def _map_hosted_query_field(field_name: Any, field_map: Mapping[str, str]) -> st
     normalized = str(field_name or "").strip()
     if not normalized:
         return None
-    return field_map.get(normalized)
+    return field_map.get(normalized, normalized)
 
 
 def _hosted_query_field_allowed(field_name: str, predicate: Callable[[str], bool] | None) -> bool:

@@ -31,6 +31,8 @@ _CUSTOM_TABLE_TYPE_MAP = {
     "bool": "INTEGER",
     "json": "TEXT",
 }
+_CUSTOM_TABLE_BOOL_TRUE_STRINGS = {"true", "1", "yes", "on"}
+_CUSTOM_TABLE_BOOL_FALSE_STRINGS = {"false", "0", "no", "off"}
 _LEGACY_CUSTOM_TABLE_COLUMNS = {
     "record_key",
     "run_status",
@@ -920,7 +922,7 @@ def _sqlite_value_for_custom_table_column(value: Any, *, column_type: str) -> An
     if value is None:
         return None
     if column_type == "bool":
-        return 1 if bool(value) else 0
+        return _sqlite_bool_value_for_custom_table_column(value)
     if column_type in {"int", "integer"}:
         return int(value)
     if column_type in {"number", "real"}:
@@ -928,6 +930,23 @@ def _sqlite_value_for_custom_table_column(value: Any, *, column_type: str) -> An
     if column_type == "json":
         return json.dumps(value, ensure_ascii=False)
     return value
+
+
+def _sqlite_bool_value_for_custom_table_column(value: Any) -> int:
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _CUSTOM_TABLE_BOOL_TRUE_STRINGS:
+            return 1
+        if normalized in _CUSTOM_TABLE_BOOL_FALSE_STRINGS:
+            return 0
+        raise ValueError(f"invalid custom table bool value: {value!r}")
+    if isinstance(value, int) and value in {0, 1}:
+        return int(value)
+    if isinstance(value, float) and value in {0.0, 1.0}:
+        return int(value)
+    raise ValueError(f"invalid custom table bool value: {value!r}")
 
 
 def _python_value_for_custom_table_column(value: Any, *, column_type: str) -> Any:

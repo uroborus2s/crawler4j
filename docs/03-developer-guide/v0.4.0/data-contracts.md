@@ -37,6 +37,8 @@ SDK 扫描 `@data_table` 后，把表声明写入 manifest lock。Core 安装或
 
 `@data_table.schema` 声明稳定业务字段和开发期校验基线。对 `managed_dataset` 来说，schema 也是 `record_json` 的持久化白名单；replace/upsert/update_where 只能写 schema 中声明的业务字段，`record_json` 不接受模块随意扩展字段。`custom_table` 仍必须写入实际物理表列。
 
+`custom_table` 的 bool 字段写入时只接受明确布尔语义：`True/False`、`1/0`，或字符串 `true/false/1/0/yes/no/on/off`。未知字符串会直接报错，不会按 Python 的 `bool("false") == True` 规则静默写成真值。
+
 `custom_table` 的主键由 `record_key_field` 指向 schema 中的某个字段；未显式声明时使用 schema 第一列。需要宿主自增主键时，只能把 `auto_increment=True` 声明在 `record_key_field` 对应的 integer 字段上：
 
 ```python

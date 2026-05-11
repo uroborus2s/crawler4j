@@ -29,6 +29,7 @@ from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
+from src.ui.components.dialog_async import open_dialog_async
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit
 from src.ui.components.message_dialog import MessageDialog
@@ -106,6 +107,23 @@ class ManagedPageRenderer(QWidget):
         if not isinstance(params, dict):
             return {}
         return dict(params)
+
+    @staticmethod
+    def _running_loop() -> asyncio.AbstractEventLoop | None:
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+
+    def _show_warning(self, title: str, message: str) -> None:
+        loop = self._running_loop()
+        if loop is None:
+            MessageDialog.warning(self, title, message)
+            return
+        loop.create_task(MessageDialog.warning_async(self, title, message))
+
+    async def _show_warning_async(self, title: str, message: str) -> None:
+        await MessageDialog.warning_async(self, title, message)
 
     def set_navigation_params(self, params: dict[str, Any] | None, *, auto_refresh: bool = True) -> None:
         self._navigation_params = self._normalize_navigation_params(params)
@@ -510,6 +528,11 @@ class ManagedPageRenderer(QWidget):
             return
 
     def _handle_create_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
+        loop = self._running_loop()
+        if loop is not None:
+            loop.create_task(self._handle_create_action_async(component, table))
+            return
+
         crud = dict(component.get("crud") or {})
         handler_name = str(crud.get("create_handler") or "").strip()
         if not handler_name:
@@ -524,7 +547,27 @@ class ManagedPageRenderer(QWidget):
             on_success=table.request_refresh,
         )
 
+    async def _handle_create_action_async(self, component: dict[str, Any], table: SkyDataTable) -> None:
+        crud = dict(component.get("crud") or {})
+        handler_name = str(crud.get("create_handler") or "").strip()
+        if not handler_name:
+            return
+        payload = await self._prompt_crud_form_payload_async(component, mode="create")
+        if payload is None:
+            return
+        await self._invoke_ui_action_async(
+            handler_name,
+            {"payload": payload},
+            error_title="新增失败",
+            on_success=table.request_refresh,
+        )
+
     def _handle_update_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
+        loop = self._running_loop()
+        if loop is not None:
+            loop.create_task(self._handle_update_action_async(component, table))
+            return
+
         crud = dict(component.get("crud") or {})
         handler_name = str(crud.get("update_handler") or "").strip()
         primary_key = str(crud.get("primary_key") or "").strip()
@@ -533,7 +576,7 @@ class ManagedPageRenderer(QWidget):
             return
         row_key = selected_row.get(primary_key)
         if row_key in (None, ""):
-            MessageDialog.warning(self, "编辑失败", f"当前记录缺少主键字段: {primary_key}")
+            self._show_warning("编辑失败", f"当前记录缺少主键字段: {primary_key}")
             return
         payload = self._prompt_crud_form_payload(component, mode="update", row=selected_row)
         if payload is None:
@@ -548,7 +591,36 @@ class ManagedPageRenderer(QWidget):
             on_success=table.request_refresh,
         )
 
+    async def _handle_update_action_async(self, component: dict[str, Any], table: SkyDataTable) -> None:
+        crud = dict(component.get("crud") or {})
+        handler_name = str(crud.get("update_handler") or "").strip()
+        primary_key = str(crud.get("primary_key") or "").strip()
+        selected_row = table.selected_row()
+        if not handler_name or not primary_key or not isinstance(selected_row, dict):
+            return
+        row_key = selected_row.get(primary_key)
+        if row_key in (None, ""):
+            await self._show_warning_async("编辑失败", f"当前记录缺少主键字段: {primary_key}")
+            return
+        payload = await self._prompt_crud_form_payload_async(component, mode="update", row=selected_row)
+        if payload is None:
+            return
+        await self._invoke_ui_action_async(
+            handler_name,
+            {
+                primary_key: row_key,
+                "payload": payload,
+            },
+            error_title="编辑失败",
+            on_success=table.request_refresh,
+        )
+
     def _handle_delete_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
+        loop = self._running_loop()
+        if loop is not None:
+            loop.create_task(self._handle_delete_action_async(component, table))
+            return
+
         crud = dict(component.get("crud") or {})
         handler_name = str(crud.get("delete_handler") or "").strip()
         primary_key = str(crud.get("primary_key") or "").strip()
@@ -557,7 +629,7 @@ class ManagedPageRenderer(QWidget):
             return
         row_key = selected_row.get(primary_key)
         if row_key in (None, ""):
-            MessageDialog.warning(self, "删除失败", f"当前记录缺少主键字段: {primary_key}")
+            self._show_warning("删除失败", f"当前记录缺少主键字段: {primary_key}")
             return
         item_name = str(
             selected_row.get("name") or selected_row.get("account") or selected_row.get(primary_key) or "当前记录"
@@ -571,18 +643,42 @@ class ManagedPageRenderer(QWidget):
             on_success=table.request_refresh,
         )
 
-    def _prompt_crud_form_payload(
+    async def _handle_delete_action_async(self, component: dict[str, Any], table: SkyDataTable) -> None:
+        crud = dict(component.get("crud") or {})
+        handler_name = str(crud.get("delete_handler") or "").strip()
+        primary_key = str(crud.get("primary_key") or "").strip()
+        selected_row = table.selected_row()
+        if not handler_name or not primary_key or not isinstance(selected_row, dict):
+            return
+        row_key = selected_row.get(primary_key)
+        if row_key in (None, ""):
+            await self._show_warning_async("删除失败", f"当前记录缺少主键字段: {primary_key}")
+            return
+        item_name = str(
+            selected_row.get("name") or selected_row.get("account") or selected_row.get(primary_key) or "当前记录"
+        )
+        if not await ConfirmDialog.delete_confirm_async(self, item_name):
+            return
+        await self._invoke_ui_action_async(
+            handler_name,
+            {primary_key: row_key},
+            error_title="删除失败",
+            on_success=table.request_refresh,
+        )
+
+    def _build_crud_form_dialog(
         self,
         component: dict[str, Any],
         *,
         mode: str,
         row: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> tuple[QDialog, dict[str, tuple[QWidget, dict[str, Any]]]]:
         crud = dict(component.get("crud") or {})
         form = dict(crud.get("form") or {})
         field_names = list(form.get("create_columns" if mode == "create" else "update_columns") or [])
         if not field_names:
-            return {}
+            dialog = QDialog(self)
+            return dialog, {}
 
         columns_by_key = {
             str(column.get("key") or ""): dict(column)
@@ -640,17 +736,57 @@ class ManagedPageRenderer(QWidget):
         ok_button.clicked.connect(dialog.accept)
         button_row.addWidget(ok_button)
         layout.addLayout(button_row)
+        return dialog, widgets
 
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
-
+    def _collect_crud_form_payload(
+        self,
+        widgets: dict[str, tuple[QWidget, dict[str, Any]]],
+    ) -> tuple[dict[str, Any] | None, tuple[str, str] | None]:
         payload: dict[str, Any] = {}
         for field_name, (widget, column) in widgets.items():
             value = self._read_crud_input_value(widget, column)
             if column.get("required") and value in (None, ""):
-                MessageDialog.warning(self, "表单不完整", f"{column.get('label') or field_name} 不能为空")
-                return None
+                return None, ("表单不完整", f"{column.get('label') or field_name} 不能为空")
             payload[field_name] = value
+        return payload, None
+
+    def _prompt_crud_form_payload(
+        self,
+        component: dict[str, Any],
+        *,
+        mode: str,
+        row: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        dialog, widgets = self._build_crud_form_dialog(component, mode=mode, row=row)
+        if not widgets:
+            return {}
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        payload, error = self._collect_crud_form_payload(widgets)
+        if error is not None:
+            title, message = error
+            MessageDialog.warning(self, title, message)
+            return None
+        return payload
+
+    async def _prompt_crud_form_payload_async(
+        self,
+        component: dict[str, Any],
+        *,
+        mode: str,
+        row: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        dialog, widgets = self._build_crud_form_dialog(component, mode=mode, row=row)
+        if not widgets:
+            return {}
+        result = await open_dialog_async(dialog)
+        if result != int(QDialog.DialogCode.Accepted):
+            return None
+        payload, error = self._collect_crud_form_payload(widgets)
+        if error is not None:
+            title, message = error
+            await self._show_warning_async(title, message)
+            return None
         return payload
 
     def _build_crud_input_widget(self, column: dict[str, Any], *, value: Any) -> QWidget:
@@ -715,6 +851,99 @@ class ManagedPageRenderer(QWidget):
             raise ValueError("query_handler 必须返回 HostedDataTableQueryResult")
         return raw.to_dict()
 
+    @staticmethod
+    def _safe_positive_int(raw: Any, default: int) -> int:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return default
+        return max(1, value)
+
+    def _managed_resource_allowed_fields(self, resource_id: str) -> set[str]:
+        descriptor = get_module_data_store().describe_data_source(self._module_name, resource_id)
+        fields: set[str] = set()
+        for group_name in ("columns", "system_fields"):
+            for column in list(descriptor.get(group_name) or []):
+                if not isinstance(column, dict):
+                    continue
+                name = str(column.get("name") or column.get("field") or "").strip()
+                if name:
+                    fields.add(name)
+        return fields
+
+    def _managed_resource_search_where(
+        self,
+        query: dict[str, Any],
+        *,
+        allowed_fields: set[str],
+    ) -> Any:
+        search_text = str(query.get("search_text") or "").strip()
+        if not search_text:
+            return None
+        search_fields = [
+            str(field or "").strip()
+            for field in list(query.get("search_fields") or [])
+            if str(field or "").strip() in allowed_fields
+        ]
+        if not search_fields:
+            return None
+        conditions = [[field, "like", f"%{search_text}%"] for field in search_fields]
+        return conditions[0] if len(conditions) == 1 else ["or", *conditions]
+
+    def _managed_resource_order_by(
+        self,
+        query: dict[str, Any],
+        *,
+        allowed_fields: set[str],
+    ) -> list[dict[str, str]]:
+        order_by: list[dict[str, str]] = []
+        for item in list(query.get("sort") or []):
+            if not isinstance(item, dict):
+                continue
+            field = str(item.get("field") or "").strip()
+            direction = str(item.get("direction") or "asc").strip().lower()
+            if field in allowed_fields and direction in {"asc", "desc"}:
+                order_by.append({"field": field, "direction": direction})
+        return order_by
+
+    def _query_managed_resource_table_result(
+        self,
+        resource_id: str,
+        query: dict[str, Any],
+    ) -> dict[str, Any]:
+        store = get_module_data_store()
+        allowed_fields = self._managed_resource_allowed_fields(resource_id)
+        where = self._managed_resource_search_where(query, allowed_fields=allowed_fields)
+        order_by = self._managed_resource_order_by(query, allowed_fields=allowed_fields)
+
+        total = len(
+            store.query_resource_records(
+                self._module_name,
+                resource_id,
+                select=["*"],
+                where=where,
+            )
+        )
+        page_size = self._safe_positive_int(query.get("page_size"), 20)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = min(self._safe_positive_int(query.get("page"), 1), total_pages)
+        rows = store.query_resource_records(
+            self._module_name,
+            resource_id,
+            select=["*"],
+            where=where,
+            order_by=order_by,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+        )
+        return {
+            "rows": [dict(row) for row in rows if isinstance(row, dict)],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "sort": order_by,
+        }
+
     def _on_inline_table_query(
         self,
         table: SkyDataTable,
@@ -748,18 +977,7 @@ class ManagedPageRenderer(QWidget):
                 resource_id = str(data_source.get("resource_id") or "").strip()
                 if not resource_id:
                     raise ValueError("managed_resource 数据源必须提供 resource_id")
-                rows = get_module_data_store().query_resource_records(
-                    self._module_name,
-                    resource_id,
-                    select=["*"],
-                    limit=1000,
-                    offset=0,
-                )
-                result = resolve_local_data_table_result(
-                    [dict(row) for row in rows if isinstance(row, dict)],
-                    columns=list(component.get("columns") or []),
-                    query=merged_query,
-                )
+                result = self._query_managed_resource_table_result(resource_id, merged_query)
             else:
                 handler_name = str(data_source.get("handler") or "").strip()
                 if not handler_name:
@@ -885,7 +1103,7 @@ class ManagedPageRenderer(QWidget):
                     capability_surface=_runtime_surface_hosted_ui_action(),
                 )
             except Exception as exc:
-                MessageDialog.warning(self, error_title, str(exc))
+                self._show_warning(error_title, str(exc))
                 return False
             if on_success is not None:
                 on_success()
@@ -907,6 +1125,27 @@ class ManagedPageRenderer(QWidget):
         )
         return True
 
+    async def _invoke_ui_action_async(
+        self,
+        action_name: str,
+        params: dict[str, Any],
+        *,
+        error_title: str,
+        on_success: Callable[[], None] | None = None,
+    ) -> bool:
+        try:
+            await self._bridge.call_ui_action_async(
+                action_name,
+                params,
+                capability_surface=_runtime_surface_hosted_ui_action(),
+            )
+        except Exception as exc:
+            await self._show_warning_async(error_title, str(exc))
+            return False
+        if on_success is not None:
+            on_success()
+        return True
+
     def _handle_action_task_result(
         self,
         task: Any,
@@ -917,7 +1156,7 @@ class ManagedPageRenderer(QWidget):
         try:
             task.result()
         except Exception as exc:
-            MessageDialog.warning(self, error_title, str(exc))
+            self._show_warning(error_title, str(exc))
             return
         if on_success is not None:
             on_success()

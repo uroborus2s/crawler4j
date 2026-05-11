@@ -20,7 +20,7 @@ def test_help_page_loads_default_markdown_and_resolves_relative_links(qtbot, mon
         "# 开始使用\n\n点击这里看 [日常使用](usage.md)。\n",
     )
     _write_doc(docs_root / "02-user-guide" / "usage.md", "# 日常使用\n\n已切换到 usage。\n")
-    _write_doc(docs_root / "03-developer-guide" / "index.md", "# 开发指南概览\n")
+    _write_doc(docs_root / "03-developer-guide" / "v0.4.0" / "index.md", "# 开发指南概览\n")
 
     monkeypatch.setattr(help_page_module, "get_docs_root", lambda: docs_root)
 
@@ -56,7 +56,7 @@ def test_help_page_hides_scrollbars_and_applies_doc_styles(qtbot, monkeypatch, t
     docs_root = tmp_path / "docs"
     _write_doc(docs_root / "01-getting-started" / "index.md", "# 开始前\n")
     _write_doc(docs_root / "02-user-guide" / "user-guide.md", "# 开始使用\n\n![截图](guide.png)\n")
-    _write_doc(docs_root / "03-developer-guide" / "index.md", "# 开发指南概览\n")
+    _write_doc(docs_root / "03-developer-guide" / "v0.4.0" / "index.md", "# 开发指南概览\n")
 
     monkeypatch.setattr(help_page_module, "get_docs_root", lambda: docs_root)
 
@@ -89,7 +89,7 @@ def test_help_page_scales_large_images_to_viewport_width(qtbot, monkeypatch, tmp
     assert image.save(str(image_path))
 
     _write_doc(docs_root / "01-getting-started" / "index.md", "# 开始前\n\n![大图](../assets/large.png)\n")
-    _write_doc(docs_root / "03-developer-guide" / "index.md", "# 开发指南概览\n")
+    _write_doc(docs_root / "03-developer-guide" / "v0.4.0" / "index.md", "# 开发指南概览\n")
 
     monkeypatch.setattr(help_page_module, "get_docs_root", lambda: docs_root)
 
@@ -108,8 +108,8 @@ def test_help_page_includes_developer_guide_entries(qtbot, monkeypatch, tmp_path
 
     docs_root = tmp_path / "docs"
     _write_doc(docs_root / "01-getting-started" / "index.md", "# 开始前\n")
-    _write_doc(docs_root / "03-developer-guide" / "index.md", "# 开发指南概览\n")
-    _write_doc(docs_root / "03-developer-guide" / "quickstart.md", "# 快速开始\n")
+    _write_doc(docs_root / "03-developer-guide" / "v0.4.0" / "index.md", "# 开发指南概览\n")
+    _write_doc(docs_root / "03-developer-guide" / "v0.4.0" / "quickstart.md", "# 快速开始\n")
 
     monkeypatch.setattr(help_page_module, "get_docs_root", lambda: docs_root)
 
@@ -122,6 +122,8 @@ def test_help_page_includes_developer_guide_entries(qtbot, monkeypatch, tmp_path
     assert developer_group.childCount() >= 2
     assert developer_group.child(0).data(0, Qt.ItemDataRole.UserRole) == "developer-index"
     assert developer_group.child(1).data(0, Qt.ItemDataRole.UserRole) == "developer-quickstart"
+    developer_entries = [entry for entry in help_page_module.HelpPage.DOC_ENTRIES if entry.group_id == "developer-guide"]
+    assert all(entry.relative_path.startswith("03-developer-guide/v0.4.0/") for entry in developer_entries)
 
     page._on_nav_clicked(developer_group, 0)
 

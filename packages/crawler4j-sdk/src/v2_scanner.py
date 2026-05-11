@@ -101,6 +101,19 @@ class V2MethodSignature:
 
 
 @dataclass(frozen=True)
+class V2FunctionSignature:
+    """Top-level runtime function signature discovered in a module."""
+
+    name: str
+    source_path: str
+    is_async: bool
+    positional_args: tuple[str, ...]
+    positional_default_count: int = 0
+    required_kwonly_args: tuple[str, ...] = ()
+    has_varargs: bool = False
+
+
+@dataclass(frozen=True)
 class V2ScanResult:
     """Result returned by the core-native-v2 scanner."""
 
@@ -126,10 +139,11 @@ def scan_v2_module(module_root: Path, manifest: dict[str, Any] | None = None) ->
     module_name = _resolve_module_import_name(root, resolved_manifest)
     parsed_modules, parse_diagnostics = _parse_python_modules(root)
     diagnostics.extend(parse_diagnostics)
+    module_functions = _collect_module_function_signatures(parsed_modules)
     collected_declarations, declaration_diagnostics = _collect_declarations(module_name, parsed_modules)
     declarations.extend(collected_declarations)
     diagnostics.extend(declaration_diagnostics)
-    diagnostics.extend(_validate_declarations(declarations))
+    diagnostics.extend(_validate_declarations(declarations, module_functions))
 
     return V2ScanResult(
         module_root=root,
@@ -452,6 +466,34 @@ def _collect_declarations(
     return declarations, diagnostics
 
 
+def _collect_module_function_signatures(
+    parsed_modules: list[tuple[Path, ast.Module]],
+) -> dict[str, dict[str, V2FunctionSignature]]:
+    functions_by_path: dict[str, dict[str, V2FunctionSignature]] = {}
+    for relative, module in parsed_modules:
+        module_functions: dict[str, V2FunctionSignature] = {}
+        for node in module.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            positional_args = (*node.args.posonlyargs, *node.args.args)
+            required_kwonly_args = tuple(
+                arg.arg
+                for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True)
+                if default is None
+            )
+            module_functions[node.name] = V2FunctionSignature(
+                name=node.name,
+                source_path=relative.as_posix(),
+                is_async=isinstance(node, ast.AsyncFunctionDef),
+                positional_args=tuple(arg.arg for arg in positional_args),
+                positional_default_count=len(node.args.defaults),
+                required_kwonly_args=required_kwonly_args,
+                has_varargs=node.args.vararg is not None,
+            )
+        functions_by_path[relative.as_posix()] = module_functions
+    return functions_by_path
+
+
 def _metadata_from_decorators(decorators: list[ast.expr]) -> Crawler4jMeta | None:
     for decorator in decorators:
         if not isinstance(decorator, ast.Call):
@@ -691,7 +733,9 @@ def _parameter_from_annotation(
     if default is _MISSING:
         default = None
     required_value = kwargs.get("required", _MISSING)
-    required = bool(required_value) if required_value is not _MISSING else not default_supplied and not inferred["optional"]
+    required = (
+        bool(required_value) if required_value is not _MISSING else not default_supplied and not inferred["optional"]
+    )
     options = tuple(_as_tuple(kwargs.get("options"))) or tuple(_as_tuple(inferred["options"]))
     return ParameterSpec(
         name=str(kwargs.get("name") or fallback_name),
@@ -858,13 +902,16 @@ def _symbol_label(package_name: str, module_name: str, attr_name: str) -> str:
     return f"{module_label}.{attr_name}"
 
 
-def _validate_declarations(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
+def _validate_declarations(
+    declarations: list[V2Declaration],
+    module_functions: dict[str, dict[str, V2FunctionSignature]],
+) -> list[V2Diagnostic]:
     diagnostics: list[V2Diagnostic] = []
     diagnostics.extend(_validate_required_workflow(declarations))
     diagnostics.extend(_validate_duplicate_names(declarations))
     diagnostics.extend(_validate_interface_implementations(declarations))
     diagnostics.extend(_validate_injection_targets(declarations))
-    diagnostics.extend(_validate_pages(declarations))
+    diagnostics.extend(_validate_pages(declarations, module_functions))
     diagnostics.extend(_validate_page_actions(declarations))
     diagnostics.extend(_validate_ui_actions(declarations))
     diagnostics.extend(_validate_env_id_candidate_functions(declarations))
@@ -910,10 +957,7 @@ def _validate_object_lifecycle_method_signatures(declarations: list[V2Declaratio
                     V2Diagnostic(
                         code="V2_OBJECT_LIFECYCLE_METHOD_SIGNATURE_INVALID",
                         location=f"{declaration.symbol}.{signature.name}",
-                        message=(
-                            f"{signature.name} lifecycle method must accept "
-                            f"({', '.join(expected_args)})"
-                        ),
+                        message=(f"{signature.name} lifecycle method must accept ({', '.join(expected_args)})"),
                     )
                 )
     return diagnostics
@@ -1052,7 +1096,10 @@ def _validate_env_id_candidate_functions(declarations: list[V2Declaration]) -> l
     return diagnostics
 
 
-def _validate_pages(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
+def _validate_pages(
+    declarations: list[V2Declaration],
+    module_functions: dict[str, dict[str, V2FunctionSignature]],
+) -> list[V2Diagnostic]:
     diagnostics: list[V2Diagnostic] = []
     for declaration in declarations:
         if declaration.kind != "page":
@@ -1080,8 +1127,9 @@ def _validate_pages(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
             )
             continue
         raw_schema["load_handler"] = function_name
+        query_handler_schema = raw_schema
         try:
-            normalize_page_schema(declaration.name, raw_schema)
+            query_handler_schema = normalize_page_schema(declaration.name, raw_schema)
         except ValueError as exc:
             diagnostics.append(
                 V2Diagnostic(
@@ -1090,7 +1138,95 @@ def _validate_pages(declarations: list[V2Declaration]) -> list[V2Diagnostic]:
                     message=str(exc),
                 )
             )
+        diagnostics.extend(_validate_page_query_handlers(declaration, query_handler_schema, module_functions))
     return diagnostics
+
+
+def _validate_page_query_handlers(
+    declaration: V2Declaration,
+    page_schema: dict[str, Any],
+    module_functions: dict[str, dict[str, V2FunctionSignature]],
+) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    handlers = module_functions.get(declaration.source_path, {})
+    for table_schema, table_path in _iter_page_data_tables(page_schema.get("children"), "schema.children"):
+        data_source = table_schema.get("data_source")
+        if not isinstance(data_source, dict):
+            continue
+        if str(data_source.get("type") or "").strip().lower() != "query_handler":
+            continue
+
+        location = f"{declaration.symbol}.{table_path}.data_source.handler"
+        handler_name = str(data_source.get("handler") or "").strip()
+        if not handler_name:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_QUERY_HANDLER_MISSING",
+                    location=location,
+                    message="DataTable query_handler must declare data_source.handler",
+                )
+            )
+            continue
+
+        handler = handlers.get(handler_name)
+        if handler is None:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_QUERY_HANDLER_MISSING",
+                    location=location,
+                    message=(
+                        "DataTable query_handler must reference a sync function "
+                        f"in the same page module: {handler_name}"
+                    ),
+                )
+            )
+            continue
+
+        if handler.is_async:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_QUERY_HANDLER_ASYNC",
+                    location=location,
+                    message=f"DataTable query_handler must be a sync function: {handler_name}",
+                )
+            )
+            continue
+
+        if not _function_accepts_runtime_positional_call(handler, 2):
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_QUERY_HANDLER_SIGNATURE_INVALID",
+                    location=location,
+                    message=f"DataTable query_handler signature must accept (context, query): {handler_name}",
+                )
+            )
+    return diagnostics
+
+
+def _iter_page_data_tables(children: Any, path: str) -> list[tuple[dict[str, Any], str]]:
+    if not isinstance(children, list):
+        return []
+
+    tables: list[tuple[dict[str, Any], str]] = []
+    for index, child in enumerate(children):
+        child_path = f"{path}[{index}]"
+        if not isinstance(child, dict):
+            continue
+        if str(child.get("type") or "") == "DataTable":
+            tables.append((child, child_path))
+        nested = child.get("children")
+        if isinstance(nested, list):
+            tables.extend(_iter_page_data_tables(nested, f"{child_path}.children"))
+    return tables
+
+
+def _function_accepts_runtime_positional_call(signature: V2FunctionSignature, positional_count: int) -> bool:
+    required_count = len(signature.positional_args) - signature.positional_default_count
+    if positional_count < required_count:
+        return False
+    if not signature.has_varargs and positional_count > len(signature.positional_args):
+        return False
+    return not signature.required_kwonly_args
 
 
 def _validate_parameters(declarations: list[V2Declaration]) -> list[V2Diagnostic]:

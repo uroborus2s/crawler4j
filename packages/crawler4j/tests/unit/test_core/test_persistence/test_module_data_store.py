@@ -2094,6 +2094,87 @@ def test_module_data_store_adds_custom_table_rows_with_auto_increment_key(temp_d
         store.upsert_resource_records("demo_module", "accounts", [{"phone": "13700137000"}])
 
 
+def test_module_data_store_parses_custom_table_bool_strings_on_write(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "flags",
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {
+                    "columns": [
+                        {"name": "id", "type": "text", "required": True},
+                        {"name": "active", "type": "bool"},
+                        {"name": "status", "type": "text"},
+                    ]
+                },
+            }
+        ],
+    )
+
+    assert (
+        store.replace_resource_records(
+            "demo_module",
+            "flags",
+            [
+                {"id": "bool_false", "active": False, "status": "raw"},
+                {"id": "false_word", "active": "false", "status": "raw"},
+                {"id": "yes_word", "active": "yes", "status": "raw"},
+                {"id": "zero_string", "active": "0", "status": "raw"},
+            ],
+        )
+        is True
+    )
+
+    assert (
+        store.update_resource_records(
+            "demo_module",
+            "flags",
+            {"status": "matched_false"},
+            where=["active", "=", "0"],
+        )
+        == 3
+    )
+
+    assert _query_records_for_assertion(store, resource_id="flags") == [
+        {"id": "bool_false", "active": False, "status": "matched_false"},
+        {"id": "false_word", "active": False, "status": "matched_false"},
+        {"id": "yes_word", "active": True, "status": "raw"},
+        {"id": "zero_string", "active": False, "status": "matched_false"},
+    ]
+
+
+def test_module_data_store_rejects_unknown_custom_table_bool_string(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _sync_manifest_data(
+        store,
+        temp_data_dir,
+        resources=[
+            {
+                "id": "flags",
+                "storage_mode": "custom_table",
+                "record_key_field": "id",
+                "schema": {
+                    "columns": [
+                        {"name": "id", "type": "text", "required": True},
+                        {"name": "active", "type": "bool"},
+                    ]
+                },
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="invalid custom table bool value"):
+        store.replace_resource_records("demo_module", "flags", [{"id": "bad", "active": "maybe"}])
+
+
 def test_module_data_store_upserts_updates_and_deletes_custom_table_rows(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 
