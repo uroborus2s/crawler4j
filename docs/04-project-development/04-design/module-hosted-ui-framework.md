@@ -17,7 +17,7 @@
 - `@page(menu=True)` 声明左侧导航菜单入口；`menu=False` 只注册可路由页面
 - 页面 schema 只允许使用宿主提供的 `Page`、`Section`、`Text`、`Button`、`DataTable`
 - 页面数据全部由 `load_handler` 或 `DataTable.query_handler` 返回结构化对象
-- 页面业务按钮和 CRUD handler 通过 `@ui_action` 声明的函数执行，参数按 kwargs 绑定；CRUD 的主键参数名来自 `crud.primary_key`
+- 页面业务按钮和 CRUD handler 通过 `@ui_action` 声明的函数执行，参数按 kwargs 绑定；CRUD 的主键参数名来自 `crud.primary_key`，SDK 扫描期校验 create/update/delete handler 的确定签名和输入类型注解
 - `@page_action` 只服务 workflow/component 驱动的浏览器页面操作，Hosted UI schema 不接受 `page_action`
 - 宿主只负责 schema 校验、路由、渲染和通用交互，不再负责模块业务数据语义
 

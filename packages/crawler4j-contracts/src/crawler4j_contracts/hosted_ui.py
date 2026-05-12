@@ -274,6 +274,21 @@ class DataTableCrudFormSchema(TypedDict, total=False):
     update_columns: Sequence[str]
 
 
+class DataTableCrudCreatePayload(TypedDict, total=False):
+    """Base marker for module-defined DataTable create form payload TypedDicts."""
+
+
+class DataTableCrudUpdatePayload(TypedDict, total=False):
+    """Base marker for module-defined DataTable update form payload TypedDicts."""
+
+
+class DataTableCrudResult(TypedDict, total=False):
+    """Common JSON-like result shape returned by DataTable CRUD handlers."""
+
+    ok: bool
+    message: str
+
+
 class DataTableCrudSchema(TypedDict, total=False):
     mode: Literal["handlers"]
     render: Literal["toolbar", "row_actions"]
@@ -1279,9 +1294,12 @@ __all__ = [
     "ButtonSchema",
     "CardSchema",
     "DataTableColumnSchema",
+    "DataTableCrudCreatePayload",
     "DataTableCrudFormSchema",
+    "DataTableCrudResult",
     "DataTableCrudSchema",
     "DataTableCrudToolbarSchema",
+    "DataTableCrudUpdatePayload",
     "DataTableDataSourceSchema",
     "DataTableFeaturesSchema",
     "DataTablePaginationFeatureSchema",

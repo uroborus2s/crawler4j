@@ -109,8 +109,11 @@ class V2FunctionSignature:
     is_async: bool
     positional_args: tuple[str, ...]
     positional_default_count: int = 0
+    kwonly_args: tuple[str, ...] = ()
     required_kwonly_args: tuple[str, ...] = ()
     has_varargs: bool = False
+    has_varkw: bool = False
+    parameter_annotations: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -476,6 +479,7 @@ def _collect_module_function_signatures(
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             positional_args = (*node.args.posonlyargs, *node.args.args)
+            all_args = (*positional_args, *node.args.kwonlyargs)
             required_kwonly_args = tuple(
                 arg.arg
                 for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True)
@@ -487,8 +491,13 @@ def _collect_module_function_signatures(
                 is_async=isinstance(node, ast.AsyncFunctionDef),
                 positional_args=tuple(arg.arg for arg in positional_args),
                 positional_default_count=len(node.args.defaults),
+                kwonly_args=tuple(arg.arg for arg in node.args.kwonlyargs),
                 required_kwonly_args=required_kwonly_args,
                 has_varargs=node.args.vararg is not None,
+                has_varkw=node.args.kwarg is not None,
+                parameter_annotations={
+                    arg.arg: _annotation_to_source(arg.annotation) for arg in all_args if arg.annotation is not None
+                },
             )
         functions_by_path[relative.as_posix()] = module_functions
     return functions_by_path
@@ -711,6 +720,13 @@ def _annotation_name(node: ast.expr) -> str:
     if isinstance(node, ast.Attribute):
         return node.attr
     return ""
+
+
+def _annotation_to_source(node: ast.expr) -> str:
+    try:
+        return ast.unparse(node)
+    except Exception:
+        return _annotation_name(node)
 
 
 def _subscript_elements(node: ast.expr) -> list[ast.expr]:
@@ -1101,6 +1117,7 @@ def _validate_pages(
     module_functions: dict[str, dict[str, V2FunctionSignature]],
 ) -> list[V2Diagnostic]:
     diagnostics: list[V2Diagnostic] = []
+    ui_action_signatures = _collect_ui_action_function_signatures(declarations, module_functions)
     for declaration in declarations:
         if declaration.kind != "page":
             continue
@@ -1139,6 +1156,7 @@ def _validate_pages(
                 )
             )
         diagnostics.extend(_validate_page_query_handlers(declaration, query_handler_schema, module_functions))
+        diagnostics.extend(_validate_page_crud_handlers(declaration, query_handler_schema, ui_action_signatures))
     return diagnostics
 
 
@@ -1201,6 +1219,167 @@ def _validate_page_query_handlers(
                 )
             )
     return diagnostics
+
+
+def _collect_ui_action_function_signatures(
+    declarations: list[V2Declaration],
+    module_functions: dict[str, dict[str, V2FunctionSignature]],
+) -> dict[str, V2FunctionSignature]:
+    signatures: dict[str, V2FunctionSignature] = {}
+    for declaration in declarations:
+        if declaration.kind != "ui_action":
+            continue
+        function_name = declaration.symbol.rsplit(".", 1)[-1]
+        signature = module_functions.get(declaration.source_path, {}).get(function_name)
+        if signature is not None:
+            signatures[declaration.name] = signature
+    return signatures
+
+
+def _validate_page_crud_handlers(
+    declaration: V2Declaration,
+    page_schema: dict[str, Any],
+    ui_action_signatures: dict[str, V2FunctionSignature],
+) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    for table_schema, table_path in _iter_page_data_tables(page_schema.get("children"), "schema.children"):
+        crud = table_schema.get("crud")
+        if not isinstance(crud, dict):
+            continue
+        primary_key = str(crud.get("primary_key") or "").strip()
+        handler_specs = (
+            ("create_handler", ("payload",), ("payload",)),
+            ("update_handler", (primary_key, "payload"), (primary_key, "payload")),
+            ("delete_handler", (primary_key,), (primary_key,)),
+        )
+        for handler_key, expected_params, type_checked_params in handler_specs:
+            handler_name = str(crud.get(handler_key) or "").strip()
+            if not handler_name:
+                continue
+            location = f"{declaration.symbol}.{table_path}.crud.{handler_key}"
+            handler = ui_action_signatures.get(handler_name)
+            if handler is None:
+                diagnostics.append(
+                    V2Diagnostic(
+                        code="V2_PAGE_CRUD_HANDLER_MISSING",
+                        location=location,
+                        message=f"DataTable {handler_key} must reference a @ui_action function: {handler_name}",
+                    )
+                )
+                continue
+            if not _function_accepts_exact_crud_keyword_call(handler, expected_params):
+                diagnostics.append(
+                    V2Diagnostic(
+                        code="V2_PAGE_CRUD_HANDLER_SIGNATURE_INVALID",
+                        location=location,
+                        message=(
+                            f"DataTable {handler_key} signature must accept "
+                            f"(context, {', '.join(expected_params)}): {handler_name}"
+                        ),
+                    )
+                )
+                continue
+            diagnostics.extend(
+                _crud_handler_type_diagnostics(
+                    handler,
+                    handler_key=handler_key,
+                    parameter_names=type_checked_params,
+                    location=location,
+                )
+            )
+    return diagnostics
+
+
+def _function_accepts_exact_crud_keyword_call(
+    signature: V2FunctionSignature,
+    expected_params_after_context: tuple[str, ...],
+) -> bool:
+    expected_count = 1 + len(expected_params_after_context)
+    return (
+        not signature.has_varargs
+        and not signature.has_varkw
+        and not signature.kwonly_args
+        and signature.positional_default_count == 0
+        and len(signature.positional_args) == expected_count
+        and tuple(signature.positional_args[1:]) == expected_params_after_context
+    )
+
+
+def _crud_handler_type_diagnostics(
+    signature: V2FunctionSignature,
+    *,
+    handler_key: str,
+    parameter_names: tuple[str, ...],
+    location: str,
+) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    annotations = signature.parameter_annotations or {}
+    for parameter_name in parameter_names:
+        annotation = str(annotations.get(parameter_name) or "").strip()
+        if parameter_name == "payload":
+            if _is_loose_crud_payload_annotation(annotation):
+                diagnostics.append(
+                    V2Diagnostic(
+                        code="V2_PAGE_CRUD_HANDLER_TYPE_INVALID",
+                        location=f"{location}.{parameter_name}",
+                        message=(
+                            f"DataTable {handler_key} payload must use a concrete "
+                            "TypedDict/dataclass-style payload type, not dict/Mapping/Any: "
+                            f"{signature.name}.{parameter_name}"
+                        ),
+                    )
+                )
+            continue
+
+        if _is_loose_crud_scalar_annotation(annotation):
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_CRUD_HANDLER_TYPE_INVALID",
+                    location=f"{location}.{parameter_name}",
+                    message=(
+                        f"DataTable {handler_key} {parameter_name} must declare a concrete scalar type: "
+                        f"{signature.name}.{parameter_name}"
+                    ),
+                )
+            )
+    return diagnostics
+
+
+def _is_loose_crud_payload_annotation(annotation: str) -> bool:
+    root = _annotation_root(annotation)
+    return not annotation or _annotation_mentions_any(annotation) or root in {"Any", "object", "dict", "Dict", "Mapping", "MutableMapping"}
+
+
+def _is_loose_crud_scalar_annotation(annotation: str) -> bool:
+    root = _annotation_root(annotation)
+    return not annotation or _annotation_mentions_any(annotation) or root in {
+        "Any",
+        "object",
+        "dict",
+        "Dict",
+        "Mapping",
+        "MutableMapping",
+        "list",
+        "List",
+        "Sequence",
+        "MutableSequence",
+        "tuple",
+        "Tuple",
+        "set",
+        "Set",
+    }
+
+
+def _annotation_root(annotation: str) -> str:
+    compact = annotation.replace("typing.", "").replace("collections.abc.", "").replace(" ", "")
+    if not compact:
+        return ""
+    return compact.split("[", 1)[0].rsplit(".", 1)[-1]
+
+
+def _annotation_mentions_any(annotation: str) -> bool:
+    compact = annotation.replace("typing.", "").replace(" ", "")
+    return any(part == "Any" for part in re.split(r"[^A-Za-z0-9_]+", compact))
 
 
 def _iter_page_data_tables(children: Any, path: str) -> list[tuple[dict[str, Any], str]]:

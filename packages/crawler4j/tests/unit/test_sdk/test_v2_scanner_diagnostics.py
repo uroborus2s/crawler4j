@@ -672,6 +672,208 @@ def bad_signature(context):
     ]
 
 
+def test_scan_v2_module_validates_page_crud_handler_contract(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import workflow
+
+
+@workflow(name="main_workflow")
+class MainWorkflow:
+    pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "pages" / "dashboard.py").write_text(
+        """
+from typing import Any, Mapping, TypedDict
+
+from crawler4j_contracts import page, ui_action
+
+
+class AccountCreatePayload(TypedDict):
+    name: str
+
+
+class AccountUpdatePayload(TypedDict, total=False):
+    name: str
+
+
+@page(
+    name="dashboard",
+    schema={
+        "type": "Page",
+        "title": "Dashboard",
+        "children": [
+            {
+                "type": "DataTable",
+                "table_id": "accounts",
+                "columns": ["account_id", "name"],
+                "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                "crud": {
+                    "mode": "handlers",
+                    "primary_key": "account_id",
+                    "create_handler": "missing_create",
+                    "update_handler": "bad_update",
+                    "delete_handler": "bad_delete",
+                },
+            },
+            {
+                "type": "DataTable",
+                "table_id": "profiles",
+                "columns": ["profile_id", "name"],
+                "data_source": {"type": "managed_resource", "resource_id": "profiles"},
+                "crud": {
+                    "mode": "handlers",
+                    "primary_key": "profile_id",
+                    "create_handler": "loose_create",
+                    "update_handler": "untyped_update",
+                    "delete_handler": "good_delete",
+                },
+            },
+        ],
+    },
+)
+def load_dashboard(context, page_id, params=None):
+    return {}
+
+
+@ui_action(name="bad_update")
+def bad_update(context, payload: AccountUpdatePayload, account_id: str):
+    return {"ok": True}
+
+
+@ui_action(name="bad_delete")
+def bad_delete(context):
+    return {"ok": True}
+
+
+@ui_action(name="loose_create")
+def loose_create(context, payload: Mapping[str, Any]):
+    return {"ok": True}
+
+
+@ui_action(name="untyped_update")
+def untyped_update(context, profile_id, payload: AccountUpdatePayload):
+    return {"ok": True}
+
+
+@ui_action(name="good_delete")
+def good_delete(context, profile_id: str):
+    return {"ok": True}
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    diagnostics = [
+        diagnostic for diagnostic in result.diagnostics if diagnostic.code.startswith("V2_PAGE_CRUD_HANDLER_")
+    ]
+    assert [(diagnostic.code, diagnostic.message) for diagnostic in diagnostics] == [
+        (
+            "V2_PAGE_CRUD_HANDLER_MISSING",
+            "DataTable create_handler must reference a @ui_action function: missing_create",
+        ),
+        (
+            "V2_PAGE_CRUD_HANDLER_SIGNATURE_INVALID",
+            "DataTable update_handler signature must accept (context, account_id, payload): bad_update",
+        ),
+        (
+            "V2_PAGE_CRUD_HANDLER_SIGNATURE_INVALID",
+            "DataTable delete_handler signature must accept (context, account_id): bad_delete",
+        ),
+        (
+            "V2_PAGE_CRUD_HANDLER_TYPE_INVALID",
+            "DataTable create_handler payload must use a concrete TypedDict/dataclass-style payload type, "
+            "not dict/Mapping/Any: loose_create.payload",
+        ),
+        (
+            "V2_PAGE_CRUD_HANDLER_TYPE_INVALID",
+            "DataTable update_handler profile_id must declare a concrete scalar type: untyped_update.profile_id",
+        ),
+    ]
+
+
+def test_scan_v2_module_accepts_typed_page_crud_handlers(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import workflow
+
+
+@workflow(name="main_workflow")
+class MainWorkflow:
+    pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "pages" / "dashboard.py").write_text(
+        """
+from typing import TypedDict
+
+from crawler4j_contracts import page, ui_action
+
+
+class AccountCreatePayload(TypedDict):
+    name: str
+    secret: str
+
+
+class AccountUpdatePayload(TypedDict, total=False):
+    name: str
+    secret: str
+
+
+@page(
+    name="dashboard",
+    schema={
+        "type": "Page",
+        "title": "Dashboard",
+        "children": [
+            {
+                "type": "DataTable",
+                "table_id": "accounts",
+                "columns": ["account_id", "name"],
+                "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                "crud": {
+                    "mode": "handlers",
+                    "primary_key": "account_id",
+                    "create_handler": "create_account",
+                    "update_handler": "update_account",
+                    "delete_handler": "delete_account",
+                },
+            },
+        ],
+    },
+)
+def load_dashboard(context, page_id, params=None):
+    return {}
+
+
+@ui_action(name="create_account")
+def create_account(context, payload: AccountCreatePayload):
+    return {"ok": True}
+
+
+@ui_action(name="update_account")
+def update_account(context, account_id: str, payload: AccountUpdatePayload):
+    return {"ok": True}
+
+
+@ui_action(name="delete_account")
+def delete_account(context, account_id: str):
+    return {"ok": True}
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    assert not [diagnostic for diagnostic in result.diagnostics if diagnostic.code.startswith("V2_PAGE_CRUD_HANDLER_")]
+
+
 def test_scan_v2_module_accepts_sync_page_query_handler(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "workflows" / "main.py").write_text(

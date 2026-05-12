@@ -1665,6 +1665,7 @@ def cmd_ui_action_create(args: argparse.Namespace) -> int:
             module_root / "pages" / f"{name}.py",
             UI_ACTION_TEMPLATE.format(
                 name=name,
+                class_name=to_class_name(name),
                 display_name=to_display_name(name),
                 description=f"{to_display_name(name)} UI 操作",
             ),

@@ -21,6 +21,6 @@
 
 模块运行时代码只应依赖本包。`crawler4j-sdk` 只作为开发依赖提供 CLI、脚手架、校验和打包辅助，不提供运行时 owner、`TaskScript` / `TaskFlow`、旧环境选择器或资源池 helper。
 
-Hosted UI 用户按钮、CRUD handler 和表单提交使用 `@ui_action`；Hosted UI schema 不接受 `Button.action.type="page_action"`。浏览器页面自动化使用 `@page_action`，并由 workflow/component 通过 `ctx.run_page_action(...)` 调用。`@page_action` 不是内部拆分单元，不能在另一个 `@page_action` 中嵌套调用。
+Hosted UI 用户按钮、CRUD handler 和表单提交使用 `@ui_action`；Hosted UI schema 不接受 `Button.action.type="page_action"`。DataTable CRUD handler 的 create/update/delete 入参必须是确定签名，`payload` 应使用模块自定义 `TypedDict` / dataclass 风格输入类型，不要用 `Mapping[str, Any]` 或裸 `dict`。浏览器页面自动化使用 `@page_action`，并由 workflow/component 通过 `ctx.run_page_action(...)` 调用。`@page_action` 不是内部拆分单元，不能在另一个 `@page_action` 中嵌套调用。
 
 非数据库类宿主能力继续通过 `TaskContext.tools` 调用。环境选择统一声明为 `candidates/*.py` 中的 `@env_candidates` 同步纯函数，账号状态、黑号、注册时间和会员等级等过滤由候选函数实时读取模块数据表完成，不使用资源池同步快照。需要被宿主识别为“已认领环境”的业务表必须通过 `@data_table(..., env_binding_field="env_id")` 声明绑定字段。批量环境清理候选统一声明为 `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数，复用 `EnvCandidates` 查询 DSL，但只表达已绑定且业务上可丢弃的 env id，实际删除由宿主环境管理页预览确认和安全校验后执行；模块 workflow 不能通过运行结果指定环境处置。workflow/component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 做终态收尾；`workflow` 为当前 workflow 元信息，`outcome.workflow` 保存同一份信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。

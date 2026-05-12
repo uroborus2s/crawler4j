@@ -328,7 +328,7 @@ Hosted UI schema 使用 `type: "ui_action"`：
 }
 ```
 
-`Button.action.params` 会解析成 `@ui_action` 的命名参数。DataTable CRUD handler 也指向 `@ui_action` 名称：create 传 `payload`，update 传 `crud.primary_key` 同名参数和 `payload`，delete 传 `crud.primary_key` 同名参数。需要复用业务逻辑时，把逻辑放到普通函数、服务对象或 `ctx.db` 等正式运行面里，不要把 UI action 当成 component 注入点。
+`Button.action.params` 会解析成 `@ui_action` 的命名参数。DataTable CRUD handler 也指向 `@ui_action` 名称：create 传 `payload`，update 传 `crud.primary_key` 同名参数和 `payload`，delete 传 `crud.primary_key` 同名参数。CRUD handler 会在 SDK 扫描期校验签名；`payload` 要使用模块自定义 `TypedDict` / dataclass 风格输入类型，不要写成 `Mapping[str, Any]` 或裸 `dict`。需要复用业务逻辑时，把逻辑放到普通函数、服务对象或 `ctx.db` 等正式运行面里，不要把 UI action 当成 component 注入点。
 
 ## 运行模板保存什么
 

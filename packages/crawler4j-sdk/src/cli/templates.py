@@ -48,9 +48,13 @@ UI_ACTION_TEMPLATE = '''"""Hosted UI 操作: {display_name}
 {description}
 """
 
-from typing import Any
+from typing import TypedDict
 
-from crawler4j_contracts import TaskContext, ui_action
+from crawler4j_contracts import DataTableCrudResult, TaskContext, ui_action
+
+
+class {class_name}Payload(TypedDict, total=False):
+    """输入载荷。请按实际表单字段补充强类型字段。"""
 
 
 @ui_action(
@@ -58,10 +62,11 @@ from crawler4j_contracts import TaskContext, ui_action
     label="{display_name}",
     description="{description}",
 )
-def {name}(ctx: TaskContext, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def {name}(ctx: TaskContext, payload: {class_name}Payload) -> DataTableCrudResult:
     """执行宿主页用户操作。"""
     del ctx
-    return {{"ok": True, "payload": dict(payload or {{}})}}
+    del payload
+    return {{"ok": True}}
 '''
 
 INTERFACE_TEMPLATE = '''"""接口声明: {display_name}

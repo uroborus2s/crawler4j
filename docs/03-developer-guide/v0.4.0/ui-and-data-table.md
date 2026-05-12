@@ -252,23 +252,39 @@ SDK 会在扫描阶段校验 `query_handler`：handler 必须定义在同一个 
 ```
 
 ```python
-from crawler4j_contracts import TaskContext, ui_action
+from typing import TypedDict
+
+from crawler4j_contracts import DataTableCrudResult, TaskContext, ui_action
+
+
+class AccountCreatePayload(TypedDict):
+    name: str
+    secret: str
+
+
+class AccountUpdatePayload(TypedDict, total=False):
+    name: str
+    secret: str
 
 
 @ui_action(name="create_account")
-def create_account(context: TaskContext, payload: dict) -> dict:
+def create_account(context: TaskContext, payload: AccountCreatePayload) -> DataTableCrudResult:
     context.db.into("accounts").add([payload])
     return {"ok": True}
 
 
 @ui_action(name="update_account")
-def update_account(context: TaskContext, account_id: str, payload: dict) -> dict:
+def update_account(
+    context: TaskContext,
+    account_id: str,
+    payload: AccountUpdatePayload,
+) -> DataTableCrudResult:
     context.db.into("accounts").update_where(payload, where=["account_id", "=", account_id])
     return {"ok": True}
 
 
 @ui_action(name="delete_account")
-def delete_account(context: TaskContext, account_id: str) -> dict:
+def delete_account(context: TaskContext, account_id: str) -> DataTableCrudResult:
     context.db.into("accounts").delete_where(where=account_id)
     return {"ok": True}
 ```
@@ -278,6 +294,12 @@ CRUD 参数来源固定：
 - `create_handler`：调用 `create_account(ctx, payload=form_payload)`；`payload` 来自 `crud.form.create_columns` 弹窗表单。
 - `update_handler`：调用 `update_account(ctx, account_id=row_key, payload=form_payload)`；`account_id` 这个参数名来自 `crud.primary_key`，`row_key` 来自当前选中行的 `selected_row[primary_key]`。
 - `delete_handler`：调用 `delete_account(ctx, account_id=row_key)`；参数名同样来自 `crud.primary_key`。
+
+CRUD handler 签名必须写成确定参数，不允许用 `**kwargs` 或 `Mapping[str, Any]` 模糊接收输入：
+
+- `create_handler`：`(context, payload)`，`payload` 建议使用模块自定义 `TypedDict`，字段应覆盖 `crud.form.create_columns`。
+- `update_handler`：`(context, <primary_key>, payload)`，主键参数名必须等于 `crud.primary_key`，`payload` 建议使用模块自定义 `TypedDict`，字段应覆盖 `crud.form.update_columns`。
+- `delete_handler`：`(context, <primary_key>)`，主键参数名必须等于 `crud.primary_key`，主键参数要标注具体标量类型，例如 `str` 或 `int`。
 
 `@page(schema=...)` 的类型提示由 `crawler4j_contracts.PageSchema` 提供；`DataTable.crud.primary_key`、`create_handler`、`update_handler`、`delete_handler` 和 `form.create_columns/update_columns` 都在这个 schema 类型里声明。
 
