@@ -8,10 +8,10 @@
 
 | Check | Result | Detail |
 |---|---|---|
-| `uv run pytest -q -p no:cacheprovider` | PASS | `991 passed` for the 0.4.1 release candidate |
-| `uv run ruff check .` | PASS | Full repo lint rechecked for the 0.4.1 release candidate |
+| `uv run pytest -q -p no:cacheprovider` | PASS | `992 passed` for the 0.4.2 root version bump |
+| `uv run ruff check .` | PASS | Full repo lint rechecked for the 0.4.2 root version bump |
 | UI smoke | PASS | `uv run python scripts/smoke_test_ui.py` covers Shell navigation/content stack + Dashboard async refresh |
-| Workspace build | PASS | `uv run build` generated root, SDK, and Contracts 0.4.1 wheel/sdist artifacts |
+| Workspace build | PARTIAL | Historical `uv run build` generated root, SDK, and Contracts 0.4.1 wheel/sdist artifacts; root 0.4.2 still needs a fresh build before release |
 | SDK / Contracts PyPI publish | PASS | `uv run publish crawler4j-contracts` then `uv run publish crawler4j-sdk` uploaded 0.4.1 artifacts to PyPI |
 | SDK CLI help | PASS | `uv run python -m crawler4j_sdk.cli.commands --help` rendered the current v2 command surface |
 | macOS PyInstaller / Sparkle bundle | PASS | `uv run deploy-macos-internal-release` generated `Crawler4j.app`, `Crawler4j-0.4.1.dmg`, `appcast.xml`, and uploaded the macOS update directory |
@@ -24,6 +24,6 @@
 
 ## Interpretation
 
-- Current repo is green for the 0.4.1 release candidate scope after the version bump, package build, PyPI publish, and macOS client upgrade package upload.
+- Current repo is green for the 0.4.2 root version bump scope. Fresh root 0.4.2 client build artifacts are still required before release.
 - Formal SDK CLI and host ZIP preview chains remain reproducible on the retained `2026-04-19` baseline evidence.
 - Current production release gate remains `No-Go` because `ctrip` fresh real-site E2E evidence is incomplete, Git tag / GitHub release / formal delivery batch evidence is not closed in this pass, and Windows still lacks real-machine signing / install / self-update evidence in the current batch.

@@ -12,7 +12,7 @@
     "tests": {
       "command": "uv run pytest -q -p no:cacheprovider",
       "result": "passed",
-      "details": "991 passed on 2026-05-18 for the 0.4.1 release candidate"
+      "details": "992 passed on 2026-05-18 for the 0.4.2 root version bump"
     },
     "docs": {
       "command": "Review docs/ markdown tree",
@@ -22,12 +22,12 @@
     "lint": {
       "command": "uv run ruff check .",
       "result": "passed",
-      "details": "uv run ruff check . passed on 2026-05-18 for the 0.4.1 release candidate; historical manual/debug/verify/analyze scripts are explicitly excluded from the default lint gate"
+      "details": "uv run ruff check . passed on 2026-05-18 for the 0.4.2 root version bump; historical manual/debug/verify/analyze scripts are explicitly excluded from the default lint gate"
     },
     "root_build": {
       "command": "uv run build",
-      "result": "passed",
-      "details": "crawler4j 0.4.1 wheel/sdist generated under packages/crawler4j/dist on 2026-05-18"
+      "result": "pending",
+      "details": "crawler4j root package version is now 0.4.2; 0.4.2 wheel/sdist still needs a fresh build before release"
     },
     "sdk_build": {
       "command": "uv run publish crawler4j-sdk",
@@ -56,8 +56,8 @@
     },
     "pyinstaller_bundle": {
       "command": "uv run deploy-macos-internal-release",
-      "result": "passed",
-      "details": "macOS PyInstaller app, Crawler4j-0.4.1.dmg, and appcast.xml generated and uploaded through the configured Sparkle update target on 2026-05-18"
+      "result": "pending",
+      "details": "macOS PyInstaller app, Crawler4j-0.4.1.dmg, and appcast.xml generated and uploaded through the configured Sparkle update target on 2026-05-18; 0.4.2 client bundles still need a fresh build"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -82,8 +82,8 @@
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.4.1",
-    "runtime": "0.4.1",
+    "app_package_pyproject": "0.4.2",
+    "runtime": "0.4.2",
     "git_tag_latest": "v0.2.0",
     "sdk": "0.4.1",
     "contracts": "0.4.1"
@@ -97,7 +97,7 @@
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
-    "0.4.1 release candidate still needs PR closure into main and formal Git tag / GitHub release assets."
+    "0.4.2 root client release still needs fresh client build artifacts, Windows real-machine upgrade evidence, PR closure into main, and formal Git tag / GitHub release assets."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",
