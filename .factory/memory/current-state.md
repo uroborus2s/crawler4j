@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-05-18 Windows 客户端点击 `关于 -> 检查更新/升级` 后长时间“未响应”的问题已定位为 UI 主线程同步执行 Velopack `check_for_updates/download_updates/apply_updates_and_restart`。当前已改为后台 `QThread` 执行宿主自更新流程，执行期间按钮禁用并显示下载提示，完成后恢复按钮和结果文案；新增回归锁定更新流程不得在 UI 线程运行。
 - 发布计划：2026-05-18 发布候选版本已从 `0.4.0` 提升到 `0.4.1`，用于绕开 PyPI 0.4.0 删除文件名不可复用阻塞。三包版本线已同步为 `crawler4j 0.4.1`、`crawler4j-sdk 0.4.1`、`crawler4j-contracts 0.4.1`；模块模板依赖下限同步抬到 `crawler4j-contracts>=0.4.1,<0.5.0` 与 `crawler4j-sdk>=0.4.1,<0.5.0`。本批次已发布 SDK / Contracts 到 PyPI 并生成上传 macOS 客户端升级包，后续推送 `0.4.0` 分支并向 `main` 创建 PR。
 - 发布阻塞：2026-05-18 已重建 `crawler4j-contracts 0.4.0` / `crawler4j-sdk 0.4.0` wheel 与 sdist，并尝试按依赖顺序执行 `uv run publish crawler4j-contracts`。PyPI 返回 `400 This filename was previously used by a file that has since been deleted`，说明 `crawler4j_contracts-0.4.0-py3-none-any.whl` 曾上传后删除，PyPI 不允许复用同一文件名；因此 `crawler4j-contracts 0.4.0` 不能重发，`crawler4j-sdk 0.4.0` 暂不发布以避免依赖 `crawler4j-contracts>=0.4.0,<0.5.0` 无法解析。后续外部发布需改发新版本号或通过 PyPI 项目管理侧处理历史删除记录。
 - 最新修复：2026-05-18 已排查 `ctx.db.into(...).delete_where(...)` 删除慢的问题。delete 路径最终是单条 SQL 并由 `DbWriteCoordinator` 包装短事务；本轮发现 managed_dataset 按主键快捷删除会落到物理 `record_key`，但 `module_datasets` 原先只有 `(module_name)` 和 `(module_name, dataset_name)` 索引，缺少 `(module_name, dataset_name, record_key)` 复合索引。现已补齐 `idx_module_datasets_record_key`，旧库启动时也会通过 `CREATE INDEX IF NOT EXISTS` 补上；开发者指南同步建议高频主键删除使用 `delete_where(where=<主键值>)`。
