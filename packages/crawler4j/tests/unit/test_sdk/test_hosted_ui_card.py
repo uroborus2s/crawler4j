@@ -95,7 +95,14 @@ def test_hosted_data_table_query_uses_fixed_contract_shape():
     assert query.params == {"account_id": "A001"}
 
 
-def test_hosted_data_table_query_builds_database_query_callback():
+def test_hosted_data_table_query_removes_legacy_callback_helpers():
+    query = HostedDataTableQuery()
+
+    assert not hasattr(query, "to_query_callback")
+    assert not hasattr(query, "to_count_query_callback")
+
+
+def test_hosted_data_table_query_executes_rows_and_count_callbacks():
     executor = _FakeDbExecutor()
     query = HostedDataTableQuery.from_mapping(
         {
@@ -116,23 +123,102 @@ def test_hosted_data_table_query_builds_database_query_callback():
         }
     )
 
-    callback: QueryCallback = query.to_query_callback(
-        {
+    def rows_query(callback: QueryCallback):
+        return callback(DatabaseClient(executor).from_("accounts")).execute()
+
+    def count_query(callback: QueryCallback) -> int:
+        callback(DatabaseClient(executor).from_("accounts")).count(alias="total").execute()
+        return 42
+
+    total, rows = query.to_query(
+        rows_query,
+        count_query,
+        search_transform=lambda field: {
             "account_id": "account_id",
             "status": "account_status",
+            "unmapped_search": "unmapped_search",
+        }.get(field),
+        sort_transform=lambda field: {
             "createdAt": "created_at",
-            "blocked_search": "secret",
-            "blocked_sort": "secret",
-            "blocked_eq": "secret",
-        },
-        sort=lambda field: field != "secret",
-        like=lambda field: field != "secret",
-        eq=lambda field: field != "secret",
+            "unmapped_sort": "unmapped_sort",
+        }.get(field),
+        filter_transform=lambda key, value: {
+            "account_id": "account_id",
+            "unmapped_param": (key, value),
+        }.get(key),
     )
 
-    result = callback(DatabaseClient(executor).from_("accounts")).execute()
+    assert rows == []
+    assert total == 42
+    assert executor.plans[0] == {
+        "kind": "select",
+        "base": {"source": "accounts"},
+        "joins": [],
+        "select": [],
+        "where": [
+            {
+                "kind": "group",
+                "operator": "or",
+                "conditions": [
+                    {"field": "account_id", "op": "like", "value": "%ready%"},
+                    {"field": "account_status", "op": "like", "value": "%ready%"},
+                    {"field": "unmapped_search", "op": "like", "value": "%ready%"},
+                ],
+            },
+            {"field": "account_id", "op": "eq", "value": "A001"},
+            {"field": "unmapped_param", "op": "eq", "value": "kept"},
+        ],
+        "group_by": [],
+        "order_by": [
+            {"field": "created_at", "direction": "desc"},
+            {"field": "unmapped_sort", "direction": "asc"},
+        ],
+        "limit": 10,
+        "offset": 10,
+    }
+    assert executor.plans[1] == {
+        "kind": "select",
+        "base": {"source": "accounts"},
+        "joins": [],
+        "select": [{"kind": "aggregate", "func": "count", "field": "*", "alias": "total"}],
+        "where": [
+            {
+                "kind": "group",
+                "operator": "or",
+                "conditions": [
+                    {"field": "account_id", "op": "like", "value": "%ready%"},
+                    {"field": "account_status", "op": "like", "value": "%ready%"},
+                    {"field": "unmapped_search", "op": "like", "value": "%ready%"},
+                ],
+            },
+            {"field": "account_id", "op": "eq", "value": "A001"},
+            {"field": "unmapped_param", "op": "eq", "value": "kept"},
+        ],
+        "group_by": [],
+        "order_by": [],
+        "limit": None,
+        "offset": None,
+    }
 
-    assert result == []
+
+def test_hosted_data_table_query_without_transforms_preserves_fields():
+    executor = _FakeDbExecutor()
+    query = HostedDataTableQuery.from_mapping(
+        {
+            "search_text": " ready ",
+            "search_fields": ["account_id"],
+            "sort": [{"field": "created_at", "direction": "desc"}],
+            "page": 1,
+            "page_size": 5,
+            "params": {"status": "ready"},
+        }
+    )
+
+    query.to_query(
+        lambda callback: callback(DatabaseClient(executor).from_("accounts")).execute(),
+        lambda callback: 0,
+    )
+
     assert executor.plans == [
         {
             "kind": "select",
@@ -140,36 +226,28 @@ def test_hosted_data_table_query_builds_database_query_callback():
             "joins": [],
             "select": [],
             "where": [
-                {
-                    "kind": "group",
-                    "operator": "or",
-                    "conditions": [
-                        {"field": "account_id", "op": "like", "value": "%ready%"},
-                        {"field": "account_status", "op": "like", "value": "%ready%"},
-                        {"field": "unmapped_search", "op": "like", "value": "%ready%"},
-                    ],
-                },
-                {"field": "account_id", "op": "eq", "value": "A001"},
-                {"field": "unmapped_param", "op": "eq", "value": "kept"},
+                {"field": "account_id", "op": "like", "value": "%ready%"},
+                {"field": "status", "op": "eq", "value": "ready"},
             ],
             "group_by": [],
             "order_by": [
                 {"field": "created_at", "direction": "desc"},
-                {"field": "unmapped_sort", "direction": "asc"},
             ],
-            "limit": 10,
-            "offset": 10,
+            "limit": 5,
+            "offset": 0,
         }
     ]
 
 
-def test_hosted_data_table_query_callback_preserves_falsey_eq_values():
+def test_hosted_data_table_query_preserves_falsey_filter_values():
     executor = _FakeDbExecutor()
     query = HostedDataTableQuery(params={"enabled": False, "priority": 0})
 
-    query.to_query_callback({"enabled": "is_enabled", "priority": "priority"})(
-        DatabaseClient(executor).from_("accounts")
-    ).execute()
+    query.to_query(
+        lambda callback: callback(DatabaseClient(executor).from_("accounts")).execute(),
+        lambda callback: 0,
+        filter_transform=lambda key, value: {"enabled": "is_enabled", "priority": "priority"}.get(key),
+    )
 
     assert executor.plans[0]["where"] == [
         {"field": "is_enabled", "op": "eq", "value": False},
@@ -177,7 +255,7 @@ def test_hosted_data_table_query_callback_preserves_falsey_eq_values():
     ]
 
 
-def test_hosted_data_table_query_builds_count_query_callback_without_order_or_pagination():
+def test_hosted_data_table_query_count_callback_omits_order_and_pagination():
     executor = _FakeDbExecutor()
     query = HostedDataTableQuery.from_mapping(
         {
@@ -190,19 +268,20 @@ def test_hosted_data_table_query_builds_count_query_callback_without_order_or_pa
         }
     )
 
-    callback = query.to_count_query_callback(
-        {
+    query.to_query(
+        lambda callback: [],
+        lambda callback: callback(DatabaseClient(executor).from_("accounts")).count(alias="total").execute() or 7,
+        search_transform=lambda field: {
             "account_id": "account_id",
             "status": "account_status",
+        }.get(field),
+        sort_transform=lambda field: {
             "createdAt": "created_at",
-            "blocked_search": "secret",
-            "blocked_eq": "secret",
-        },
-        like=lambda field: field != "secret",
-        eq=lambda field: field != "secret",
+        }.get(field),
+        filter_transform=lambda key, value: {
+            "account_id": "account_id",
+        }.get(key),
     )
-
-    callback(DatabaseClient(executor).from_("accounts")).count(alias="total").execute()
 
     assert executor.plans == [
         {
@@ -227,6 +306,48 @@ def test_hosted_data_table_query_builds_count_query_callback_without_order_or_pa
             "offset": None,
         }
     ]
+
+
+def test_hosted_data_table_query_result_from_query_transforms_rows():
+    query = HostedDataTableQuery(page=2, page_size=10)
+
+    result = HostedDataTableQueryResult.from_query(
+        query,
+        (
+            3,
+            [
+                {"account_id": "A001", "status": "ready"},
+                {"account_id": "A002", "status": "hidden"},
+            ],
+        ),
+        lambda row: (
+            {"accountId": row["account_id"], "status": row["status"]}
+            if row["status"] != "hidden"
+            else None
+        ),
+    )
+
+    assert result.rows == ({"accountId": "A001", "status": "ready"},)
+    assert result.total == 3
+    assert result.page == 2
+    assert result.page_size == 10
+
+
+def test_hosted_data_table_query_to_result_combines_query_and_row_transform():
+    query = HostedDataTableQuery(page=3, page_size=20)
+
+    result = query.to_result(
+        lambda callback: [{"account_id": "A001", "status": "ready"}],
+        lambda callback: 9,
+        lambda row: {"accountId": row["account_id"], "status": row["status"]},
+    )
+
+    assert result.to_dict() == {
+        "rows": [{"accountId": "A001", "status": "ready"}],
+        "total": 9,
+        "page": 3,
+        "page_size": 20,
+    }
 
 
 def test_hosted_data_table_query_result_uses_fixed_contract_shape():

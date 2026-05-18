@@ -107,6 +107,7 @@ ALLOWED_DB_VIEW_CLEANUP_POLICIES = {"drop_view", "keep"}
 ALLOWED_DB_VIEW_COLUMN_KEYS = {"name", "label", "type", "nullable"}
 ALLOWED_DB_VIEW_COLUMN_TYPES = {"text", "int", "number", "bool", "json"}
 
+TRepoRow = TypeVar("TRepoRow", bound=Mapping[str, Any])
 TRow = TypeVar("TRow", bound=Mapping[str, Any])
 QueryCallback: TypeAlias = Callable[[DatabaseQueryBuilder], DatabaseQueryBuilder]
 
@@ -405,63 +406,77 @@ class HostedDataTableQuery:
             "params": dict(self.params),
         }
 
-    def to_query_callback(
+    def to_query(
         self,
-        field_map: Mapping[str, str],
+        rows_query: Callable[[QueryCallback], Sequence[TRepoRow]],
+        count_query: Callable[[QueryCallback], int],
         *,
-        sort: Callable[[str], bool] | None = None,
-        like: Callable[[str], bool] | None = None,
-        eq: Callable[[str], bool] | None = None,
-    ) -> QueryCallback:
-        """Convert the Hosted UI table query into a `ctx.db.from_(...)` callback."""
+        search_transform: Callable[[str], str | None] | None = None,
+        sort_transform: Callable[[str], str | None] | None = None,
+        filter_transform: Callable[[str, Any], str | tuple[str, Any] | None] | None = None,
+    ) -> tuple[int, list[TRepoRow]]:
+        """Execute rows and count queries with normalized Hosted UI table callbacks."""
 
-        return self._to_query_callback(
-            field_map,
-            sort=sort,
-            like=like,
-            eq=eq,
+        row_callback = self._build_query_callback(
+            search_transform=search_transform,
+            sort_transform=sort_transform,
+            filter_transform=filter_transform,
             include_order=True,
             include_pagination=True,
         )
-
-    def to_count_query_callback(
-        self,
-        field_map: Mapping[str, str],
-        *,
-        like: Callable[[str], bool] | None = None,
-        eq: Callable[[str], bool] | None = None,
-    ) -> QueryCallback:
-        """Convert the Hosted UI table query into a count-safe filter callback."""
-
-        return self._to_query_callback(
-            field_map,
-            like=like,
-            eq=eq,
+        count_callback = self._build_query_callback(
+            search_transform=search_transform,
+            filter_transform=filter_transform,
             include_order=False,
             include_pagination=False,
         )
+        rows = list(rows_query(row_callback))
+        total = max(0, int(count_query(count_callback)))
+        return total, rows
 
-    def _to_query_callback(
+    def to_result(
         self,
-        field_map: Mapping[str, str],
+        rows_query: Callable[[QueryCallback], Sequence[TRepoRow]],
+        count_query: Callable[[QueryCallback], int],
+        transform: Callable[[TRepoRow], TRow | None],
         *,
-        sort: Callable[[str], bool] | None = None,
-        like: Callable[[str], bool] | None = None,
-        eq: Callable[[str], bool] | None = None,
+        search_transform: Callable[[str], str | None] | None = None,
+        sort_transform: Callable[[str], str | None] | None = None,
+        filter_transform: Callable[[str, Any], str | tuple[str, Any] | None] | None = None,
+    ) -> "HostedDataTableQueryResult[TRow]":
+        """Execute table queries and normalize repository rows into UI table rows."""
+
+        return HostedDataTableQueryResult.from_query(
+            self,
+            self.to_query(
+                rows_query,
+                count_query,
+                search_transform=search_transform,
+                sort_transform=sort_transform,
+                filter_transform=filter_transform,
+            ),
+            transform,
+        )
+
+    def _build_query_callback(
+        self,
+        *,
+        search_transform: Callable[[str], str | None] | None = None,
+        sort_transform: Callable[[str], str | None] | None = None,
+        filter_transform: Callable[[str, Any], str | tuple[str, Any] | None] | None = None,
         include_order: bool,
         include_pagination: bool,
     ) -> QueryCallback:
-        normalized_field_map = _normalize_hosted_query_field_map(field_map)
-
         def callback(query: DatabaseQueryBuilder) -> DatabaseQueryBuilder:
             search_text = self.search_text.strip()
             if search_text:
                 like_conditions = [
                     [mapped_field, "like", f"%{search_text}%"]
                     for mapped_field in (
-                        _map_hosted_query_field(field_name, normalized_field_map) for field_name in self.search_fields
+                        _apply_hosted_query_field_transform(field_name, search_transform)
+                        for field_name in self.search_fields
                     )
-                    if mapped_field and _hosted_query_field_allowed(mapped_field, like)
+                    if mapped_field
                 ]
                 if len(like_conditions) == 1:
                     query = query.where(like_conditions[0])
@@ -469,14 +484,15 @@ class HostedDataTableQuery:
                     query = query.where(["or", *like_conditions])
 
             for param_name, param_value in self.params.items():
-                mapped_field = _map_hosted_query_field(param_name, normalized_field_map)
-                if mapped_field and _hosted_query_field_allowed(mapped_field, eq):
-                    query = query.where([mapped_field, "=", param_value])
+                mapped_filter = _apply_hosted_query_filter_transform(param_name, param_value, filter_transform)
+                if mapped_filter is not None:
+                    mapped_field, mapped_value = mapped_filter
+                    query = query.where([mapped_field, "=", mapped_value])
 
             if include_order:
                 for sort_spec in self.sort:
-                    mapped_field = _map_hosted_query_field(sort_spec.field, normalized_field_map)
-                    if mapped_field and _hosted_query_field_allowed(mapped_field, sort):
+                    mapped_field = _apply_hosted_query_field_transform(sort_spec.field, sort_transform)
+                    if mapped_field:
                         query = query.order_by(mapped_field, sort_spec.direction)
 
             if include_pagination:
@@ -503,6 +519,19 @@ class HostedDataTableQueryResult(Generic[TRow]):
         object.__setattr__(self, "total", len(rows) if self.total is None else max(0, int(self.total)))
         object.__setattr__(self, "page", max(1, int(self.page)))
         object.__setattr__(self, "page_size", max(1, int(self.page_size)))
+
+    @classmethod
+    def from_query(
+        cls,
+        query: HostedDataTableQuery,
+        query_result: tuple[int, Sequence[TRepoRow]],
+        transform: Callable[[TRepoRow], TRow | None],
+    ) -> "HostedDataTableQueryResult[TRow]":
+        """Normalize a `HostedDataTableQuery.to_query(...)` result into table rows."""
+
+        total, repo_rows = query_result
+        rows = [mapped for row in repo_rows if (mapped := transform(row)) is not None]
+        return cls(rows=rows, total=total, page=query.page, page_size=query.page_size)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -535,27 +564,49 @@ def _normalize_hosted_table_sort_tuple(raw: Any) -> tuple[HostedDataTableSortSpe
     return tuple(normalized)
 
 
-def _normalize_hosted_query_field_map(raw: Mapping[str, str]) -> dict[str, str]:
-    if not isinstance(raw, Mapping):
-        raise ValueError("field_map must be a mapping")
-    normalized: dict[str, str] = {}
-    for source_field, target_field in raw.items():
-        source_name = str(source_field or "").strip()
-        target_name = str(target_field or "").strip()
-        if source_name and target_name:
-            normalized[source_name] = target_name
-    return normalized
-
-
-def _map_hosted_query_field(field_name: Any, field_map: Mapping[str, str]) -> str | None:
+def _apply_hosted_query_field_transform(
+    field_name: Any,
+    transform: Callable[[str], str | None] | None,
+) -> str | None:
     normalized = str(field_name or "").strip()
     if not normalized:
         return None
-    return field_map.get(normalized, normalized)
+    if transform is None:
+        return normalized
+    mapped = transform(normalized)
+    if mapped is None:
+        return None
+    if not isinstance(mapped, str):
+        raise ValueError("field transform must return a field name or None")
+    mapped_field = mapped.strip()
+    return mapped_field or None
 
 
-def _hosted_query_field_allowed(field_name: str, predicate: Callable[[str], bool] | None) -> bool:
-    return True if predicate is None else bool(predicate(field_name))
+def _apply_hosted_query_filter_transform(
+    field_name: Any,
+    value: Any,
+    transform: Callable[[str, Any], str | tuple[str, Any] | None] | None,
+) -> tuple[str, Any] | None:
+    normalized = str(field_name or "").strip()
+    if not normalized:
+        return None
+    if transform is None:
+        return normalized, value
+    mapped = transform(normalized, value)
+    if mapped is None:
+        return None
+    if isinstance(mapped, tuple):
+        if len(mapped) != 2:
+            raise ValueError("filter transform tuple result must contain field and value")
+        mapped_field, mapped_value = mapped
+    elif isinstance(mapped, str):
+        mapped_field, mapped_value = mapped, value
+    else:
+        raise ValueError("filter transform must return a field name, (field, value), or None")
+    normalized_field = str(mapped_field or "").strip()
+    if not normalized_field:
+        return None
+    return normalized_field, mapped_value
 
 
 def _validate_managed_identifier(value: str, *, field_name: str) -> str:

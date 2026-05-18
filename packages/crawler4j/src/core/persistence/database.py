@@ -235,6 +235,12 @@ def _create_module_datasets_indexes(conn: sqlite3.Connection) -> None:
         ON module_datasets(module_name, dataset_name)
         """
     )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_module_datasets_record_key
+        ON module_datasets(module_name, dataset_name, record_key)
+        """
+    )
 
 
 def _table_info_rows(conn: sqlite3.Connection, table_name: str) -> list[sqlite3.Row]:

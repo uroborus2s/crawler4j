@@ -168,37 +168,55 @@ def query_accounts_table(
 
 返回值必须是 `HostedDataTableQueryResult[RowT]`，`RowT` 是一行数据的泛型 mapping 类型；结果字段固定为 `rows`、`total`、`page`、`page_size`。结果不再回传 `sort`，排序状态由发起查询时的 `HostedDataTableQuery.sort` 表达；宿主渲染层不再接受普通 `dict` 作为 query handler 返回值。
 
-如果 handler 只是把表格查询下推到 `ctx.db.from_(...)`，可以用 `HostedDataTableQuery.to_query_callback(...)` 生成查询回调：
+如果 handler 只是把表格查询下推到 `ctx.db.from_(...)`，可以用 `HostedDataTableQuery.to_result(...)` 归一化 rows/count 查询和 UI 行转换：
 
 ```python
-FIELD_MAP = {
-    "account_id": "account_id",
-    "status": "account_status",
-    "createdAt": "created_at",
-}
+def map_search_field(field: str) -> str | None:
+    return {
+        "account_id": "account_id",
+        "status": "account_status",
+    }.get(field)
+
+
+def map_sort_field(field: str) -> str | None:
+    return {
+        "createdAt": "created_at",
+    }.get(field)
+
+
+def map_filter_field(key: str, value: object) -> str | tuple[str, object] | None:
+    if key == "account_id":
+        return "account_id"
+    if key == "enabled":
+        return ("is_enabled", str(value).strip().lower() in {"1", "true", "yes", "on"})
+    return None
+
+
+def to_table_row(row: dict[str, object]) -> dict[str, object]:
+    return {
+        "account_id": row["account_id"],
+        "status": row["account_status"],
+        "createdAt": row["created_at"],
+    }
 
 
 def query_accounts_table(
     context: TaskContext,
     query: HostedDataTableQuery,
 ) -> HostedDataTableQueryResult:
-    row_callback = query.to_query_callback(
-        FIELD_MAP,
-        sort=lambda field: field in {"created_at"},
-        like=lambda field: field in {"account_id", "account_status"},
-        eq=lambda field: field in {"account_id"},
+    return query.to_result(
+        lambda callback: callback(context.db.from_("accounts")).execute(),
+        lambda callback: callback(context.db.from_("accounts")).count(alias="total").execute()[0]["total"],
+        to_table_row,
+        search_transform=map_search_field,
+        sort_transform=map_sort_field,
+        filter_transform=map_filter_field,
     )
-    count_callback = query.to_count_query_callback(
-        FIELD_MAP,
-        like=lambda field: field in {"account_id", "account_status"},
-        eq=lambda field: field in {"account_id"},
-    )
-    rows = row_callback(context.db.from_("accounts")).execute()
-    total = count_callback(context.db.from_("accounts")).count(alias="total").execute()[0]["total"]
-    return HostedDataTableQueryResult(rows=rows, total=total, page=query.page, page_size=query.page_size)
 ```
 
-`FIELD_MAP` 的 key 是 UI 表格字段，value 是 `ctx.db` 数据源字段；它只转换映射里显式声明的字段，没有出现在映射里的 `search_fields`、`sort.field` 和 `params` 字段会按原字段名保留并继续下推到数据库。`like`、`sort`、`eq` 三个可选函数用于二次判断转换后的字段是否合法：输入字段名，返回 `True` 才会生成对应的 `LIKE` 搜索、`order_by` 排序或 `=` 参数过滤。`search_text` 会按有效 `search_fields` 生成 OR `LIKE` 条件，`params` 会生成 `=` 条件，分页会生成 `limit(query.page_size).offset(query.offset)`。如果需要为 `total` 单独计算过滤后的总数，使用 `to_count_query_callback(...)` 生成 count 专用回调；它只复用搜索与参数过滤，不生成 `order_by`、`limit` 或 `offset`，可接到 `ctx.db.from_(...).count(alias="total")` 上。
+`search_transform` 和 `sort_transform` 都是单字段回调：输入 UI 字段名，返回数据库字段名；返回 `None` 或空字符串表示过滤该字段。`sort_transform` 只能改字段名或过滤字段，排序方向始终保留 `HostedDataTableSortSpec.direction` 原值。`filter_transform` 是单参数回调：输入 `params` 中的 `key, value`，返回字段名表示只改 key、返回 `(new_key, new_value)` 表示同时改 key/value、返回 `None` 表示过滤该参数。未提供 transform 时，字段按原名下推。`search_text` 会按有效 `search_fields` 生成 OR `LIKE` 条件，`params` 会生成 `=` 条件，rows 查询会生成 `order_by/limit/offset`，count 查询只复用搜索与参数过滤，不生成排序或分页。
+
+如果需要分开处理仓储查询和结果归一化，也可以先调用 `query.to_query(...)` 得到 `(total, rows)`，再用 `HostedDataTableQueryResult.from_query(query, query_result, to_table_row)` 生成标准返回值。`to_result(...)` 只是把这两个步骤合在一起，`page/page_size` 会直接来自当前 `HostedDataTableQuery`，不需要额外传入。
 
 SDK 会在扫描阶段校验 `query_handler`：handler 必须定义在同一个 `pages/*.py` 模块中，必须是同步函数，并且签名能按 `(context, query)` 位置参数调用。缺失、异步或签名不兼容会在 `crawler4j check full` / manifest lock / 打包前被诊断出来。
 

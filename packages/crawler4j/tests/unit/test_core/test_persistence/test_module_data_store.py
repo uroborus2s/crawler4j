@@ -892,6 +892,20 @@ def test_init_database_creates_module_data_resources_table(temp_data_dir):
     assert "idx_module_data_resources_module_mode" in indexes
 
 
+def test_init_database_creates_module_datasets_record_key_index(temp_data_dir):
+    from src.core.persistence import DATA_DB, get_connection
+
+    with get_connection(DATA_DB) as conn:
+        indexes = {row["name"] for row in conn.execute("PRAGMA index_list(module_datasets)").fetchall()}
+        index_columns = [
+            row["name"]
+            for row in conn.execute("PRAGMA index_info(idx_module_datasets_record_key)").fetchall()
+        ]
+
+    assert "idx_module_datasets_record_key" in indexes
+    assert index_columns == ["module_name", "dataset_name", "record_key"]
+
+
 def test_init_database_creates_module_db_views_table(temp_data_dir):
     from src.core.persistence import DATA_DB, get_connection
 
