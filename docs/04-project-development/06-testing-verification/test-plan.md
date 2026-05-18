@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
 **关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `API-008`, `API-009`, `API-010`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `NFR-003`
-**最后更新：** 2026-05-01
+**最后更新：** 2026-05-18
 
 ## 1. 测试目标
 
@@ -29,12 +29,12 @@
 
 | 测试项 | 结果 | 备注 |
 |---|---|---|
-| `TC-001` `uv run pytest -q` | 通过 | 2026-05-01 复验为 `886 passed`，覆盖 0.4.0 全面审查修复后的当前工作区 |
-| `TC-002` 根包 / SDK / Contracts build | 通过 | 2026-05-01 `uv run build` 复验通过，产出 0.4.0 三包 wheel/sdist；当前仅证明可构建，不等于可运行 |
+| `TC-001` `uv run pytest -q` | 通过 | 2026-05-18 复验为 `991 passed`，覆盖 0.4.1 发布候选工作区 |
+| `TC-002` 根包 / SDK / Contracts build | 通过 | 2026-05-18 `uv run build` 已生成 `crawler4j 0.4.1`、`crawler4j-sdk 0.4.1`、`crawler4j-contracts 0.4.1` wheel/sdist |
 | `TC-003` `uv sync --all-packages` + `uv run python -m src.ui.app` | 通过 | workspace 根可直接启动应用包里的真实入口 |
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | 2026-05-01 headless UI smoke 复验通过，覆盖 Shell 导航/页面数量与 Dashboard 异步刷新 |
-| `TC-005` PyInstaller build | 通过 | 2026-05-01 `uv run package-desktop` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，并清理旧 `ddddocr` / `cv2` 隐藏导入 |
-| `TC-006` `uv run ruff check .` | 通过 | 2026-05-01 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
+| `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
+| `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
 | `TC-0400-release-review-final` 0.4.0 全面审查回归 | 通过 | 2026-05-01 复验：Full runtime surface 负向拒绝旧 Hosted UI 工具、空 workflow 自动解析、dispatcher env claim/binding 失败路径、UI smoke 与 PyInstaller spec 清理；全量 `886 passed`，打包配置 `62 passed` |
 | `TC-010` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py -q` | 通过 | 2026-04-20 口径已收敛到当前仍存在的正式回归文件，覆盖 `declare_ui` 刷新、`create_handler` / `update_handler` 路由、DevLink 页面上下文与真实模块 UI 链路 |
 | `TC-011` `uv run pytest packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py packages/crawler4j/tests/unit/test_core/test_atm/test_dispatcher_lifecycle.py packages/crawler4j/tests/unit/test_core/test_atm/test_job_modes.py packages/crawler4j/tests/unit/test_core/test_atm/test_task_detail_dialog.py -q` | 通过 | 2026-04-30 覆盖等待确认信号持久化、`task.signal` 事件、结构化确认面板、客户端确认回调，以及 0.4.0 不再调用生命周期 hooks 的执行链 |
@@ -94,7 +94,7 @@
 - `REQ-009` 当前已完成实现级单测与 SDK 契约回归，但仍缺真实业务模块接入和更高层集成验证
 - `CR-010` 当前只完成本地脚本/单元级验证，仍缺 Windows 真机打包、安装、升级与签名验证
 - QScintilla 已进入桌面依赖线，macOS PyInstaller 打包态证据已在 2026-05-01 补齐；Windows 打包态仍需真机验证
-- `crawler4j-sdk 0.4.0` 与 `crawler4j-contracts 0.4.0` 已记录当前版本 build 证据，publish 证据仍待补
+- `crawler4j-sdk 0.4.1` 与 `crawler4j-contracts 0.4.1` 已记录当前版本 build / publish 证据；后续仍需补齐正式 Git tag / GitHub release 资产
 - 真实站点 E2E 的执行口径现已单独收敛到 `ctrip-real-site-e2e-closeout.md`
 
 ## 6.1 `REQ-006` 已完成覆盖
@@ -125,6 +125,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-05-18 | 发布候选提升到 `0.4.1` 后完成 fresh gate：`uv lock --check`、全量 `991 passed`、`ruff check .`、三包 `uv run build`、SDK/Contracts PyPI publish 与 macOS Sparkle 客户端升级包发布均通过；正式发布仍缺 `ctrip` 真站 E2E、Windows 真机证据与 Git tag / GitHub release 资产 | Codex |
 | 2026-04-27 | 历史记录：当时仅同步文档/记忆/版本事实，未新增全量测试、包构建、PyInstaller 打包或发布证据；该缺口已在 2026-05-01 对 0.4.0 build 与 macOS package-desktop 补证，publish 仍待补 | Codex |
 | 2026-04-26 | 补充模块配置 YAML 数组缩进与可读性回归：`test_module_detail_page.py` 锁定 `ModuleConfigPage._dump()` 输出数组时使用父 key 下缩进的 block sequence，锁定 `YamlCodeEditor.setPlainText()` 兜底规范化旧 indentless sequence，并锁定编辑器字号提升；`test_config_yaml_validation.py` 继续覆盖缩进数组的解析契约。定向回归 `21 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-26 | 补充模块详情页滚动条与 YAML 编辑器视觉回归：`test_module_detail_page.py` 锁定模块配置/Workflow 配置编辑器隐藏横向和纵向滚动条、使用 plain fold 样式，并锁定左侧菜单与任务链滚动区隐藏滚动条；`test_managed_page_scroll.py` 锁定 Hosted 页面默认隐藏双向滚动条；`test_data_table.py` 锁定 `SkyDataTable` 隐藏双向滚动条。定向回归 `22 passed`，目标文件 `ruff check` 通过 | Codex |
