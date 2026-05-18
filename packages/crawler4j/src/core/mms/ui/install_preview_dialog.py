@@ -108,17 +108,6 @@ class InstallPreviewDialog(QDialog):
                 source_layout.addLayout(row)
             layout.addLayout(source_layout)
         
-        # 工作流列表
-        if self._manifest.workflows:
-            wf_title = QLabel(f"📋 包含 {len(self._manifest.workflows)} 个工作流:")
-            wf_title.setStyleSheet("color: rgba(255,255,255,0.8); margin-top: 8px;")
-            layout.addWidget(wf_title)
-            
-            for wf in self._manifest.workflows:
-                wf_label = QLabel(f"  • {wf.display_name or wf.name}")
-                wf_label.setStyleSheet("color: rgba(255,255,255,0.6);")
-                layout.addWidget(wf_label)
-        
         # 警告信息
         if self._warnings:
             warning_container = QWidget()

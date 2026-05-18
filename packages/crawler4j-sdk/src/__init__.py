@@ -1,4 +1,4 @@
-"""Crawler4j SDK - CLI and development helpers for core-native-v1 modules."""
+"""Crawler4j SDK - CLI and development helpers for core-native-v2 modules."""
 
 from crawler4j_sdk._version import (
     get_compatible_contracts_dependency_spec,

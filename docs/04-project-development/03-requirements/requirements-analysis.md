@@ -7,7 +7,7 @@
 **上游输入：** `prd.md` | `current-state-analysis.md`  
 **下游输出：** `requirements-verification.md` | `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/`  
 **关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `BUG-001`, `CR-001`, `CR-002`, `CR-004`, `CR-008`, `CR-009`
-**最后更新：** 2026-04-21
+**最后更新：** 2026-05-01
 
 ## 1. 需求实现现状判断
 
@@ -16,10 +16,10 @@
 | `REQ-001` | 桌面 Core 可启动且入口一致 | 满足 | `start` 脚本已对齐 `src.ui.app:main`，headless smoke 与 PyInstaller 出包通过 |
 | `REQ-002` | 模块可执行目标工作流 | 基本满足 | 登录工作流可执行，`labor_workflow` 已恢复基础运行时兼容，但真实站点 E2E 未验证 |
 | `REQ-003` | SDK / Contracts / CLI 可用 | 基本满足 | SDK/Contracts build 成功，CLI help 可运行 |
-| `REQ-006` | 模块根入口可由工具托管 | 满足 | 根 `__init__.py` 已收敛为稳定薄壳，`ModuleAssembler` 负责默认发现与分发，旧模块升级路径统一为按最新模板重新初始化 |
-| `REQ-007` | 信号驱动的结构化确认面板 | 本次完成 | `TaskSignal` 已持久化到任务快照，ATM 详情页可按 `payload.confirmation` 弹出确认面板，并回调既有确认服务 |
+| `REQ-006` | 模块运行能力由 Core 扫描托管 | 满足 | 0.4.0 已切到 `core-native-v2`，运行能力事实源来自 `tasks/`、`workflows/`、`candidates/`、`cleanups/`、`pages/` 等装饰器扫描；旧 `hooks/` 不再是运行契约，旧模块升级路径统一为按最新模板重新初始化 |
+| `REQ-007` | 宿主生命周期与环境处置边界 | 已替代旧信号方案 | 0.4.0 当前实现已删除模块 `TaskSignal` / `EnvAction` 入口；workflow 只返回 `TaskResult`，对象可选实现 `setup(ctx, workflow)` 与 `cleanup(ctx, outcome)`，任务终态环境统一回收 |
 | `REQ-008` | 模块审计事件独立存储 | 本次完成 | 宿主已新增 `module_audit_events` 与 `ctx.db.audit(...).append/query`，快照 dataset 继续保留原语义 |
-| `REQ-009` | 固定环境池 Service Job 等待队列 | 本次完成 | 当前宿主已实现固定环境池 Service Job 的 `PENDING` 等待、FIFO 补位、资源池隔离、等待席位自动超时收口，以及资源池资格 helper / REM 筛选入口 |
+| `REQ-009` | 环境候选 Service Job 等待队列 | 本次完成 | 当前宿主已实现 `@env_candidates` 候选纯函数实时求值、`PENDING` 等待、FIFO 补位、模块环境授权、租约后复核和等待席位自动超时收口；资源池同步方案已退出正式契约 |
 | `REQ-004` | 发布与文档链路可追溯 | 满足 | 根应用工作区版本、运行时版本服务、最近正式 tag 与 release 文档口径已明确分层 |
 | `REQ-005` | 软件工厂治理基线存在 | 本次建立 | `AGENTS.md`、`GEMINI.md`、`.factory/`、编号文档已新增 |
 
@@ -43,17 +43,17 @@
 
 ### `REQ-006`
 
-- 根 `__init__.py` 已固定为托管薄壳，运行时组装逻辑收敛到 SDK 的 `ModuleAssembler`。
-- 默认工作流解析顺序已经稳定为 `context.runtime["workflow"] -> module_runtime.DEFAULT_WORKFLOW -> module.yaml.workflows[0].name`。
-- `module_runtime.py` 已收敛为标准模块文件，默认脚手架会生成；环境选择能力通过其中的 `@env_selector(...)` 回调声明，ATM“选择环境”模式不再接受规则树。
-- 本轮不再把“兼容旧模块模板”作为目标，旧模块升级路径统一为按最新脚手架重新初始化。
+- 0.4.0 已切到 `core-native-v2`，运行能力事实源来自装饰器扫描和 manifest lock，不再由根 `__init__.py`、`ModuleAssembler` 或 `module_runtime.py` 承载。
+- 默认工作流解析顺序稳定为 `ctx.runtime["workflow"] -> 单 workflow 自动选择 -> main_workflow`。
+- 环境选择能力通过 `candidates/*.py` 中的 `@env_candidates` 同步纯函数声明；ATM“选择环境”模式只接受固定 `env_id` 或候选函数名。
+- 本轮不再把“兼容旧模块模板”作为目标，旧模块升级路径统一为按 0.4.0 脚手架重新初始化。
 
 ### `REQ-007`
 
-- 当前 `TaskSignal.wait_for_confirmation` 只解决“让任务停住”，没有解决“客户端应该展示什么、从哪里读、如何确认”。
-- 原有缺口集中在三层：任务表没有持久化 signal payload、事件总线没有信号专用事件、ATM 详情页没有结构化确认面板。
-- 最小可落地方案是保持 `TaskSignal.payload` 为通用字典，但把 `payload.confirmation` 固化为正式 UI 展示协议，同时保留对旧 payload 的键值回退显示。
-- 继续复用 `confirm_task_success/confirm_task_failure` 作为唯一确认入口，可以避免再引入一条新的任务收尾路径。
+- 旧的 `TaskSignal.wait_for_confirmation` 方案已被 0.4.0 当前边界替代；模块运行时代码不再拥有流程控制或环境处置入口。
+- 当前唯一模块终态表达是 workflow 返回 `TaskResult`；对象运行前准备只允许 `setup(ctx, workflow)`，对象收尾只允许 `cleanup(ctx, outcome)`，用于资源初始化、日志、审计或业务资源释放。
+- 任务结束、失败、超时或被用户中止后的环境统一由宿主回收；环境删除只通过环境管理页 `清理环境` 手动触发。
+- 任务创建环境后，宿主立即写入 `host.env_claim(pending)`；终态再通过 `env_binding_field` 扫描模块业务表并标记 `claimed` 或 `abandoned`，用于后续孤岛环境识别。
 
 ### `REQ-008`
 
@@ -64,13 +64,13 @@
 
 ### `REQ-009`
 
-- 当前 V1 已把固定环境池 Service Job 中“当前轮没命中环境”的核心语义从硬失败收敛为等待，并由宿主按 `wait_timeout` 对长期等待席位做自动超时收口。
-- 当目标并发大于当前可用环境数时，宿主现已能把容量不足收敛为稳定候场队列，而不是制造失败风暴和反复补单。
-- 当前实现边界是：宿主维护等待席位，模块只维护资源池资格卡片，宿主按 FIFO 和容量变化补位。
+- 当前 0.4.0 已把候选 Service Job 中“当前轮没命中环境”的核心语义从硬失败收敛为等待，并由宿主按 `wait_timeout` 对长期等待席位做自动超时收口。
+- 当目标并发大于当前可用候选环境数时，宿主现已能把容量不足收敛为稳定候场队列，而不是制造失败风暴和反复补单。
+- 当前实现边界是：宿主维护等待席位、环境授权、租约和 FIFO 补位；模块只维护业务数据表和 `@env_candidates` 候选纯函数。
 - 该需求的核心不是“再起更多模块实例”，而是把并发目标收敛为服务席位，把资源不足收敛为“等待环境”这一条正式业务状态。
-- 当前 REM 分配入口已经收口为 `EnvironmentManager.list_allocatable_envs(module_name, pool_name)`；它只从“当前模块 + 当前资源池 + `eligible=true` + `READY` + 未租约占用”的环境集合里挑选候选。
-- 黑号/封禁场景的当前正式收口是“先用 `mark_resource_pool_ineligible(...)` 停发号，再按需 `destroy_env`”；环境记录删除后，对应 `env_metadata` 会随外键级联自动清理。
-- 这轮不应让宿主直接读取模块私有业务表；更稳的边界是模块通过宿主注入的 `ctx.tools` 资源池能力把资格快照同步到宿主 `env_metadata`，模块可在自身仓库内封装薄 helper，但不得依赖 `crawler4j-sdk` 参与运行。
+- 当前 REM 分配入口不再维护模块资源池资格快照；ATM 每次调度通过 MMS 执行当前模块声明的 `@env_candidates` 同步纯函数，并在候选结果上叠加“已绑定当前模块 + `READY` + 浏览器 + 未租约占用”的宿主约束。
+- 黑号/封禁、账号注册时间、会员等级等业务状态由模块写入自身数据表，候选函数实时读取这些数据并返回可用 env id 列表或 `EnvCandidates` 链式查询结果；不引入资源池同步工作流。
+- 这轮不让宿主读取模块私有业务表，也不让模块同步宿主资源池快照；唯一边界是模块纯函数产出候选集合，宿主负责授权、租约、FIFO 等待与超时收口。
 
 ### `REQ-004`
 
@@ -89,7 +89,7 @@
 | P1 | `REQ-006` / `TASK-013` 模块根入口自动托管 | 影响模块开发体验、模板稳定性与后续契约演进成本 |
 | P1 | `REQ-007` / `TASK-021` 信号驱动结构化确认面板 | 影响人工复核场景可用性、任务可观测性与 ATM/模块契约完整性 |
 | P1 | `REQ-008` / `TASK-022` 模块审计事件独立存储 | 影响模块数据契约清晰度、长期运行写放大风险与后续扩展空间 |
-| P1 | `REQ-009` / `TASK-023` 固定环境池 Service Job 等待队列 | 影响固定环境池服务的稳定性、保活并发语义与宿主/模块责任边界 |
+| P1 | `REQ-009` / `TASK-023` 环境候选 Service Job 等待队列 | 影响候选环境服务的稳定性、保活并发语义与宿主/模块责任边界 |
 
 ## 4. 结论
 

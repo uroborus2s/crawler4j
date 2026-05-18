@@ -84,64 +84,24 @@ def test_task_list_widget_renders_manual_batch_run_once_button(qtbot, monkeypatc
     assert "▶ 启动" not in button_texts
 
 
-def test_task_list_widget_can_destroy_run_once_env_only_for_create_mode(qtbot, monkeypatch):
-    _task_list_widget, widget = _build_widget(qtbot, monkeypatch)
-
-    create_job = Job(
-        id="job-create",
-        name="manual-create",
-        type=JobType.BATCH,
-        state=JobState.PAUSED,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.CREATE,
-                    creation=CreationConfig(params={"groups": ["default"]}),
-                )
-            ),
-            execution=ExecutionContext(module="demo_module"),
-        ),
-    )
-    select_job = Job(
-        id="job-select",
-        name="manual-select",
-        type=JobType.BATCH,
-        state=JobState.PAUSED,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.SELECT,
-                    selector_name="pick_ready",
-                )
-            ),
-            execution=ExecutionContext(module="demo_module"),
-        ),
-    )
-
-    assert widget._can_destroy_run_once_env(create_job) is True
-    assert widget._can_destroy_run_once_env(select_job) is False
-
-
-def test_task_list_widget_stop_run_once_uses_public_choice_dialog(qtbot, monkeypatch):
+def test_task_list_widget_stop_run_once_uses_confirm_dialog(qtbot, monkeypatch):
     task_list_widget, widget = _build_widget(qtbot, monkeypatch)
     created_tasks = []
-    selected_choices: list[tuple[str, list[str]]] = []
+    prompts: list[tuple[str, str, str, bool]] = []
 
-    def _fake_choose(parent, title, message, *, choices, detail="", cancel_text="取消"):
+    def _fake_confirm(parent, title, message, *, confirm_text="确定", danger=False):
         assert parent is widget
         assert title == "中止任务"
         assert "manual-create" in message
-        selected_choices.append((detail, [choice.id for choice in choices]))
-        return "destroy"
+        prompts.append((title, message, confirm_text, danger))
+        return True
 
     def _fake_create_task(coro):
         created_tasks.append(coro)
         coro.close()
         return MagicMock()
 
-    monkeypatch.setattr(task_list_widget.ChoiceDialog, "choose", _fake_choose)
+    monkeypatch.setattr(task_list_widget.ConfirmDialog, "confirm", _fake_confirm)
     monkeypatch.setattr(task_list_widget.asyncio, "create_task", _fake_create_task)
 
     job = Job(
@@ -173,9 +133,7 @@ def test_task_list_widget_stop_run_once_uses_public_choice_dialog(qtbot, monkeyp
 
     widget._stop_run_once("job-create")
 
-    assert selected_choices == [
-        ("保留环境会关闭环境但不删除；删除环境会删除本次创建的环境。", ["recycle", "destroy"])
-    ]
+    assert prompts == [("中止任务", "要中止“manual-create”这次手动执行吗？环境会统一关闭并回收。", "中止", True)]
     assert "job-create" in widget._run_once_stopping_job_ids
     assert created_tasks
 
@@ -247,7 +205,7 @@ def test_task_list_widget_refreshes_on_task_failed_event(qtbot, monkeypatch):
             data={
                 "job_id": "job-timeout",
                 "task_id": "task-timeout",
-                "error": "等待环境池工位超时: bound_account_ready (30s)",
+                "error": "等待环境候选超时: bound_account_ready (30s)",
             },
             task_run_id="task-timeout",
         )
@@ -467,7 +425,6 @@ async def test_task_list_widget_stop_run_once_failure_uses_async_warning_dialog(
     warning_async = AsyncMock(return_value=0)
     warning_sync = MagicMock(side_effect=AssertionError("sync warning dialog should not be used"))
     service = SimpleNamespace(stop_run_once=AsyncMock(return_value=False))
-    env_action = object()
 
     monkeypatch.setattr(task_list_widget, "get_task_service", lambda: service)
     monkeypatch.setattr(task_list_widget.MessageDialog, "warning_async", warning_async)
@@ -477,9 +434,9 @@ async def test_task_list_widget_stop_run_once_failure_uses_async_warning_dialog(
     widget._refresh_table = MagicMock()
     widget._run_once_stopping_job_ids.add("job-manual")
 
-    await widget._async_stop_run_once("job-manual", env_action)
+    await widget._async_stop_run_once("job-manual")
 
-    service.stop_run_once.assert_awaited_once_with("job-manual", env_action)
+    service.stop_run_once.assert_awaited_once_with("job-manual")
     warning_async.assert_awaited_once_with(widget, "中止失败", "当前没有可中止的批次任务，或任务已经结束。")
     warning_sync.assert_not_called()
     widget.load_data.assert_called_once_with()

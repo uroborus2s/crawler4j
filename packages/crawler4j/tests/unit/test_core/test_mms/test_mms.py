@@ -1,23 +1,41 @@
 """MMS 数据模型单元测试。"""
 
+import time
+
 import pytest
+
+from crawler4j_contracts import Crawler4jMeta, TaskContext, TaskResult
 
 from src.core.mms.models import (
     ConfigDefaultsInfo,
     ModuleManifest,
-    ResourcePoolInfo,
     ModuleSource,
     ModuleStatus,
     UpgradeSourceInfo,
-    UIPageInfo,
-    UIExtensionInfo,
-    WorkflowInfo,
 )
 from src.core.mms.scanner import ModuleScanner
+from src.core.mms.service import ModuleService
+from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptorV2, V2RuntimeEntry
 
 
 def _empty_data_contract() -> dict[str, list[dict[str, object]]]:
-    return {"resources": [], "views": [], "queries": [], "seeds": []}
+    return {"resources": [], "views": [], "seeds": []}
+
+
+def _write_v2_runtime_package(module_dir) -> None:
+    module_dir.mkdir(parents=True, exist_ok=True)
+    (module_dir / "__init__.py").write_text("", encoding="utf-8")
+    for package_name in ("interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates"):
+        package_dir = module_dir / package_name
+        package_dir.mkdir(exist_ok=True)
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    (module_dir / "workflows" / "default.py").write_text(
+        "from crawler4j_contracts import workflow\n\n"
+        "@workflow(name='default')\n"
+        "class DefaultWorkflow:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
 
 
 class TestModuleManifest:
@@ -27,154 +45,84 @@ class TestModuleManifest:
         """测试从字典反序列化。"""
         data = {
             "name": "test_module",
-            "runtime_api": "core-native-v1",
+            "runtime_api": "core-native-v2",
             "version": "1.0.0",
             "display_name": "测试模块",
             "upgrade_source": {
                 "type": "github_release",
                 "repo": "example/test_module",
             },
-            "workflows": [
-                {
-                    "name": "login_flow",
-                    "display_name": "登录流程",
-                    "tasks": ["login_task"],
-                }
-            ],
-            "ui_extension": {
-                "pages": [
-                    {
-                        "id": "dashboard",
-                        "icon": "📊",
-                        "label": "今日运营看板",
-                    },
-                    {
-                        "id": "accounts",
-                        "icon": "📋",
-                        "label": "账号管理",
-                    },
-                ],
-            },
             "config_defaults": {
                 "module": {
                     "base_url": "https://example.com",
                 },
-                "workflows": {
-                    "login_flow": {
-                        "headless": False,
-                    }
-                },
             },
-            "resource_pools": [
-                {
-                    "name": "bound_account_ready",
-                    "display_name": "已绑定账号环境池",
-                    "description": "可复用的已绑定账号环境",
-                }
-            ],
-            "default_workflow": "login_flow",
-            "data": _empty_data_contract(),
         }
-        
+
         manifest = ModuleManifest.from_dict(data)
-        
+
         assert manifest.name == "test_module"
         assert manifest.version == "1.0.0"
-        assert len(manifest.workflows) == 1
-        assert manifest.workflows[0].name == "login_flow"
-        assert manifest.workflows[0].tasks == ["login_task"]
+        assert manifest.runtime_api == "core-native-v2"
         assert manifest.upgrade_source.repo == "example/test_module"
-        assert [page.id for page in manifest.ui_extension.pages] == ["dashboard", "accounts"]
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
-        assert manifest.config_defaults.workflows == {"login_flow": {"headless": False}}
-        assert manifest.resource_pools == [
-            ResourcePoolInfo(
-                name="bound_account_ready",
-                display_name="已绑定账号环境池",
-                description="可复用的已绑定账号环境",
-            )
-        ]
+        assert manifest.config_defaults.workflows == {}
         assert manifest.data == _empty_data_contract()
+        assert not hasattr(manifest, "workflows")
+        assert not hasattr(manifest, "default_workflow")
     
     def test_to_dict(self):
         """测试序列化。"""
         manifest = ModuleManifest(
             name="test_module",
-            runtime_api="core-native-v1",
+            runtime_api="core-native-v2",
             upgrade_source=UpgradeSourceInfo(repo="example/test_module"),
-            workflows=[WorkflowInfo(name="flow1", tasks=["example_task"])],
-            default_workflow="flow1",
-            ui_extension=UIExtensionInfo(
-                pages=[
-                    UIPageInfo(
-                        id="dashboard",
-                        icon="📊",
-                        label="今日运营看板",
-                    ),
-                    UIPageInfo(
-                        id="accounts",
-                        icon="📋",
-                        label="账号管理",
-                    ),
-                ],
-            ),
             config_defaults=ConfigDefaultsInfo(
                 module={"base_url": "https://example.com"},
-                workflows={"flow1": {"headless": False}},
             ),
-            resource_pools=[
-                ResourcePoolInfo(
-                    name="bound_account_ready",
-                    display_name="已绑定账号环境池",
-                    description="可复用的已绑定账号环境",
-                )
-            ],
             data=_empty_data_contract(),
         )
         
         data = manifest.to_dict()
 
         assert data["name"] == "test_module"
-        assert data["runtime_api"] == "core-native-v1"
-        assert len(data["workflows"]) == 1
-        assert data["workflows"][0]["tasks"] == ["example_task"]
-        assert "entry_class" not in data["workflows"][0]
+        assert data["runtime_api"] == "core-native-v2"
         assert data["upgrade_source"] == {
             "type": "github_release",
             "repo": "example/test_module",
             "allow_prerelease": False,
         }
-        assert data["ui_extension"]["pages"] == [
-            {
-                "id": "dashboard",
-                "icon": "📊",
-                "label": "今日运营看板",
-            },
-            {
-                "id": "accounts",
-                "icon": "📋",
-                "label": "账号管理",
-            },
-        ]
+        assert "ui_extension" not in data
         assert data["config_defaults"] == {
             "module": {"base_url": "https://example.com"},
-            "workflows": {"flow1": {"headless": False}},
+            "workflows": {},
         }
-        assert data["resource_pools"] == [
-            {
-                "name": "bound_account_ready",
-                "display_name": "已绑定账号环境池",
-                "description": "可复用的已绑定账号环境",
-            }
-        ]
-        assert data["default_workflow"] == "flow1"
-        assert data["data"] == _empty_data_contract()
+        assert "resource_pools" not in data
+        assert "workflows" not in data
+        assert "default_workflow" not in data
+        assert "data" not in data
 
-    def test_from_dict_rejects_removed_workflow_entry_class(self):
-        """旧 workflows[].entry_class 入口不再是 manifest 兼容面。"""
+    def test_from_dict_rejects_removed_resource_pools(self):
+        with pytest.raises(ValueError, match="resource_pools"):
+            ModuleManifest.from_dict(
+                {
+                    "name": "test_module",
+                    "runtime_api": "core-native-v2",
+                    "upgrade_source": {
+                        "type": "github_release",
+                        "repo": "example/test_module",
+                    },
+                    "resource_pools": [
+                        {"name": "bound_account_ready"},
+                    ],
+                }
+            )
+
+    def test_from_dict_rejects_removed_workflows(self):
+        """workflows 不再是 module.yaml 的兼容面。"""
         data = {
             "name": "test_module",
-            "runtime_api": "core-native-v1",
+            "runtime_api": "core-native-v2",
             "version": "1.0.0",
             "upgrade_source": {
                 "type": "github_release",
@@ -186,12 +134,247 @@ class TestModuleManifest:
                     "entry_class": "legacy.LoginWorkflow",
                 }
             ],
-            "default_workflow": "login_flow",
+        }
+
+        with pytest.raises(ValueError, match="workflows"):
+            ModuleManifest.from_dict(data)
+
+    def test_from_dict_rejects_removed_data_contract_cache(self):
+        data = {
+            "name": "test_module",
+            "runtime_api": "core-native-v2",
+            "version": "1.0.0",
+            "upgrade_source": {
+                "type": "github_release",
+                "repo": "example/test_module",
+            },
             "data": _empty_data_contract(),
         }
 
-        with pytest.raises(ValueError, match="entry_class"):
+        with pytest.raises(ValueError, match="data"):
             ModuleManifest.from_dict(data)
+
+
+def test_env_candidates_invoke_uses_keyword_binding_for_params_after_optional_defaults():
+    def ready(limit: int = 100, params: dict | None = None):
+        return [int(params["env_id"]), limit]
+
+    result = ModuleService._invoke_env_candidates(
+        ready,
+        TaskContext(env_id=0, task_name="demo_module"),
+        {"env_id": 42},
+    )
+
+    assert result == [42, 100]
+
+
+def test_env_cleanup_candidates_invoke_uses_same_keyword_binding():
+    def cleanup(limit: int = 100, params: dict | None = None):
+        return [int(params["env_id"]), limit]
+
+    result = ModuleService._invoke_env_id_provider(
+        cleanup,
+        TaskContext(env_id=0, task_name="demo_module"),
+        {"env_id": 43},
+        label="env_cleanup_candidates",
+    )
+
+    assert result == [43, 100]
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_candidates_async_times_out_without_blocking_loop():
+    service = ModuleService()
+
+    def slow_resolve(*_args, **_kwargs):
+        time.sleep(0.2)
+        return [1]
+
+    service.resolve_env_candidates = slow_resolve  # type: ignore[method-assign]
+
+    with pytest.raises(TimeoutError, match="env_candidates 执行超时"):
+        await service.resolve_env_candidates_async(
+            "demo_module",
+            TaskContext(env_id=0, task_name="demo_module"),
+            "slow_accounts",
+            timeout=0.01,
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_cleanup_candidates_async_times_out_without_blocking_loop():
+    service = ModuleService()
+
+    def slow_resolve(*_args, **_kwargs):
+        time.sleep(0.2)
+        return [1]
+
+    service.resolve_env_cleanup_candidates = slow_resolve  # type: ignore[method-assign]
+
+    with pytest.raises(TimeoutError, match="env_cleanup_candidates 执行超时"):
+        await service.resolve_env_cleanup_candidates_async(
+            "demo_module",
+            TaskContext(env_id=0, task_name="demo_module"),
+            "unused_accounts",
+            timeout=0.01,
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_v2_workflow_runs_object_cleanup_after_workflow_run(monkeypatch):
+    cleanup_outcome = None
+
+    class Workflow:
+        def run(self, ctx: TaskContext):
+            return TaskResult.ok(message="ok")
+
+    class FakeContainer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def build_workflow(self):
+            return Workflow()
+
+        async def setup(self, _context, _workflow, *, timeout_seconds=None):
+            pass
+
+        async def cleanup(self, _context, outcome, *, timeout_seconds=None):
+            nonlocal cleanup_outcome
+            cleanup_outcome = outcome
+
+    monkeypatch.setattr("src.core.mms.service.ObjectContainerV2", FakeContainer)
+    descriptor = ModuleRuntimeDescriptorV2(
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="workflow", name="default"),
+                target=Workflow,
+                module_name="demo_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            )
+        }
+    )
+
+    result = await ModuleService()._run_v2_workflow(
+        descriptor,
+        TaskContext(env_id=1, task_name="demo_module", runtime={"workflow": "default"}),
+    )
+
+    assert result.success is True
+    assert cleanup_outcome is not None
+    assert cleanup_outcome.status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_run_v2_workflow_runs_object_cleanup_after_workflow_error(monkeypatch):
+    cleanup_outcome = None
+
+    class Workflow:
+        def run(self, ctx: TaskContext):
+            raise RuntimeError("boom")
+
+    class FakeContainer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def build_workflow(self):
+            return Workflow()
+
+        async def setup(self, _context, _workflow, *, timeout_seconds=None):
+            pass
+
+        async def cleanup(self, _context, outcome, *, timeout_seconds=None):
+            nonlocal cleanup_outcome
+            cleanup_outcome = outcome
+
+    monkeypatch.setattr("src.core.mms.service.ObjectContainerV2", FakeContainer)
+    descriptor = ModuleRuntimeDescriptorV2(
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="workflow", name="default"),
+                target=Workflow,
+                module_name="demo_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            )
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await ModuleService()._run_v2_workflow(
+            descriptor,
+            TaskContext(env_id=1, task_name="demo_module", runtime={"workflow": "default"}),
+        )
+
+    assert cleanup_outcome is not None
+    assert cleanup_outcome.status == "failed"
+    assert cleanup_outcome.error_type == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_run_v2_workflow_runs_cleanup_after_setup_error_without_run(monkeypatch):
+    run_called = False
+    cleanup_outcome = None
+    setup_workflow = None
+
+    class Workflow:
+        def run(self, ctx: TaskContext):
+            nonlocal run_called
+            run_called = True
+            return TaskResult.ok(message="should not run")
+
+    class FakeContainer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def build_workflow(self):
+            return Workflow()
+
+        async def setup(self, _context, workflow, *, timeout_seconds=None):
+            nonlocal setup_workflow
+            setup_workflow = workflow
+            raise RuntimeError("setup failed")
+
+        async def cleanup(self, _context, outcome, *, timeout_seconds=None):
+            nonlocal cleanup_outcome
+            cleanup_outcome = outcome
+
+    monkeypatch.setattr("src.core.mms.service.ObjectContainerV2", FakeContainer)
+    descriptor = ModuleRuntimeDescriptorV2(
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(
+                    kind="workflow",
+                    name="default",
+                    label="Default workflow",
+                    description="Default workflow description",
+                ),
+                target=Workflow,
+                module_name="demo_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            )
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="setup failed"):
+        await ModuleService()._run_v2_workflow(
+            descriptor,
+            TaskContext(env_id=1, task_name="demo_module", runtime={"workflow": "default"}),
+        )
+
+    assert run_called is False
+    assert setup_workflow is not None
+    assert setup_workflow.module_name == "demo_module"
+    assert setup_workflow.workflow_name == "default"
+    assert setup_workflow.workflow_label == "Default workflow"
+    assert setup_workflow.workflow_description == "Default workflow description"
+    assert setup_workflow.workflow_module_name == "demo_module.workflows.default"
+    assert setup_workflow.workflow_symbol == "Workflow"
+    assert cleanup_outcome is not None
+    assert cleanup_outcome.status == "failed"
+    assert cleanup_outcome.error_type == "RuntimeError"
+    assert cleanup_outcome.workflow == setup_workflow
 
 
 class TestModuleScanner:
@@ -247,21 +430,12 @@ class TestModuleScanner:
         
         manifest_content = """
 name: test_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 version: 2.0.0
 display_name: 测试模块
 upgrade_source:
   type: github_release
   repo: example/test_module
-workflows:
-  - name: main_flow
-    display_name: 主流程
-default_workflow: main_flow
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 """
         (module_dir / "module.yaml").write_text(manifest_content)
         
@@ -271,7 +445,24 @@ data:
         
         assert manifest.name == "test_module"
         assert manifest.version == "2.0.0"
-        assert len(manifest.workflows) == 1
+        assert manifest.runtime_api == "core-native-v2"
+
+    def test_parse_manifest_rejects_duplicate_yaml_keys(self, tmp_path):
+        from src.core.mms.models import ModuleParseError
+
+        module_dir = tmp_path / "test_module"
+        module_dir.mkdir()
+        (module_dir / "module.yaml").write_text(
+            "name: test_module\n"
+            "runtime_api: core-native-v2\n"
+            "name: shadow_module\n",
+            encoding="utf-8",
+        )
+
+        scanner = ModuleScanner(scan_paths=[tmp_path])
+
+        with pytest.raises(ModuleParseError, match="重复键: name"):
+            scanner.parse_manifest(module_dir)
 
     def test_parse_manifest_rejects_removed_sdk_version_range(self, tmp_path):
         from src.core.mms.models import ModuleParseError
@@ -296,24 +487,13 @@ data:
         (module_dir / "module.yaml").write_text(
             """
 name: test_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 upgrade_source:
   type: github_release
   repo: example/test_module
-workflows:
-  - name: default
-default_workflow: default
 config_defaults:
   module:
     base_url: https://example.com
-  workflows:
-    default:
-      headless: false
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 """.strip(),
             encoding="utf-8",
         )
@@ -322,7 +502,7 @@ data:
         manifest = scanner.parse_manifest(module_dir)
 
         assert manifest.config_defaults.module == {"base_url": "https://example.com"}
-        assert manifest.config_defaults.workflows == {"default": {"headless": False}}
+        assert manifest.config_defaults.workflows == {}
 
     def test_parse_manifest_rejects_unsupported_ui_extension_fields(self, tmp_path):
         from src.core.mms.models import ModuleParseError
@@ -332,21 +512,13 @@ data:
         (module_dir / "module.yaml").write_text(
             """
 name: test_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 version: 1.0.0
 upgrade_source:
   type: github_release
   repo: example/test_module
 ui_extension:
   extra: unsupported
-workflows:
-  - name: default
-default_workflow: default
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 """.strip(),
             encoding="utf-8",
         )
@@ -364,9 +536,7 @@ data:
         
         manifest = ModuleManifest(
             name="",
-            runtime_api="core-native-v1",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
+            runtime_api="core-native-v2",
             upgrade_source=UpgradeSourceInfo(repo="example/test_module"),
             data=_empty_data_contract(),
         )
@@ -382,9 +552,7 @@ data:
 
         manifest = ModuleManifest(
             name="demo_module",
-            runtime_api="core-native-v1",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
+            runtime_api="core-native-v2",
             data=_empty_data_contract(),
         )
         scanner = ModuleScanner(scan_paths=[tmp_path])
@@ -399,9 +567,7 @@ data:
 
         manifest = ModuleManifest(
             name="demo_module",
-            runtime_api="core-native-v1",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
+            runtime_api="core-native-v2",
             upgrade_source=UpgradeSourceInfo(repo="https://github.com/example/demo_module"),
             data=_empty_data_contract(),
         )
@@ -417,10 +583,8 @@ data:
 
         manifest = ModuleManifest(
             name="demo_module",
-            runtime_api="core-native-v1",
+            runtime_api="core-native-v2",
             version="1.0",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
             upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
             data=_empty_data_contract(),
         )
@@ -434,23 +598,15 @@ data:
     def test_load_module_success(self, tmp_path):
         """测试成功加载模块。"""
         module_dir = tmp_path / "good_module"
-        module_dir.mkdir()
+        _write_v2_runtime_package(module_dir)
         
         manifest_content = """
 name: good_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 version: 1.0.0
 upgrade_source:
   type: github_release
   repo: example/good_module
-workflows:
-  - name: default
-default_workflow: default
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
 """
         (module_dir / "module.yaml").write_text(manifest_content)
         
@@ -475,12 +631,11 @@ data:
         assert module_info.error != ""
 
     def test_validate_allows_additional_module_files(self, tmp_path):
-        (tmp_path / "config_schema.json").write_text("{}", encoding="utf-8")
+        _write_v2_runtime_package(tmp_path)
+        (tmp_path / "README.md").write_text("# demo_module\n", encoding="utf-8")
         manifest = ModuleManifest(
             name="demo_module",
-            runtime_api="core-native-v1",
-            workflows=[WorkflowInfo(name="default")],
-            default_workflow="default",
+            runtime_api="core-native-v2",
             upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
             data=_empty_data_contract(),
         )
@@ -488,20 +643,33 @@ data:
 
         assert scanner.validate(manifest, tmp_path) == []
 
-    def test_validate_rejects_unsupported_page_extra_field(self):
-        manifest = ModuleManifest(
-            name="demo_module",
-            upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
-            ui_extension=UIExtensionInfo(
-                pages=[
-                    UIPageInfo(id="custom_page", label="自定义页面")
-                ],
-            ),
+    def test_parse_manifest_rejects_removed_ui_extension_pages(self, tmp_path):
+        from src.core.mms.models import ModuleParseError
+
+        module_dir = tmp_path / "test_module"
+        module_dir.mkdir()
+        (module_dir / "module.yaml").write_text(
+            """
+name: test_module
+runtime_api: core-native-v2
+version: 1.0.0
+upgrade_source:
+  type: github_release
+  repo: example/test_module
+ui_extension:
+  pages:
+    - id: custom_page
+      label: 自定义页面
+""".strip(),
+            encoding="utf-8",
         )
-        manifest_dict = manifest.to_dict()
-        manifest_dict["ui_extension"]["pages"][0]["extra"] = "unsupported"
-        with pytest.raises(ValueError):
-            ModuleManifest.from_dict(manifest_dict)
+
+        scanner = ModuleScanner(scan_paths=[tmp_path])
+
+        with pytest.raises(ModuleParseError) as exc_info:
+            scanner.parse_manifest(module_dir)
+
+        assert "ui_extension" in str(exc_info.value)
 
     def test_validate_rejects_unknown_workflow_in_config_defaults(self, tmp_path):
         from src.core.mms.models import ModuleValidationError
@@ -509,13 +677,11 @@ data:
         manifest = ModuleManifest.from_dict(
             {
                 "name": "demo_module",
-                "runtime_api": "core-native-v1",
+                "runtime_api": "core-native-v2",
                 "upgrade_source": {
                     "type": "github_release",
                     "repo": "example/demo_module",
                 },
-                "workflows": [{"name": "default"}],
-                "default_workflow": "default",
                 "config_defaults": {
                     "workflows": {
                         "missing_workflow": {
@@ -523,7 +689,6 @@ data:
                         }
                     }
                 },
-                "data": _empty_data_contract(),
             }
         )
         scanner = ModuleScanner(scan_paths=[tmp_path])
@@ -531,31 +696,4 @@ data:
         with pytest.raises(ModuleValidationError) as exc_info:
             scanner.validate(manifest, tmp_path)
 
-        assert "missing_workflow" in str(exc_info.value)
-
-    def test_validate_rejects_duplicate_resource_pool_names(self, tmp_path):
-        from src.core.mms.models import ModuleValidationError
-
-        manifest = ModuleManifest.from_dict(
-            {
-                "name": "demo_module",
-                "runtime_api": "core-native-v1",
-                "upgrade_source": {
-                    "type": "github_release",
-                    "repo": "example/demo_module",
-                },
-                "workflows": [{"name": "default"}],
-                "default_workflow": "default",
-                "resource_pools": [
-                    {"name": "bound_account_ready"},
-                    {"name": "bound_account_ready"},
-                ],
-                "data": _empty_data_contract(),
-            }
-        )
-        scanner = ModuleScanner(scan_paths=[tmp_path])
-
-        with pytest.raises(ModuleValidationError) as exc_info:
-            scanner.validate(manifest, tmp_path)
-
-        assert "resource_pools" in str(exc_info.value)
+        assert "config_defaults.workflows" in str(exc_info.value)

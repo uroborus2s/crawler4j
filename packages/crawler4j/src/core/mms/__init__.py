@@ -23,7 +23,6 @@ from src.core.mms.models import (
     UIPageInfo,
     UpgradeSourceInfo,
     ModuleValidationError,
-    UIExtensionInfo,
     WorkflowInfo,
 )
 from src.core.mms.release_service import (
@@ -52,7 +51,6 @@ __all__ = [
     "WorkflowInfo",
     "DevModuleLink",
     "UIPageInfo",
-    "UIExtensionInfo",
     "UpgradeSourceInfo",
     # 错误
     "ModuleError",

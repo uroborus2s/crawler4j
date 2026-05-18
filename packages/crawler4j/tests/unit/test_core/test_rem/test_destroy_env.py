@@ -278,9 +278,9 @@ async def test_destroy_env_cascades_env_metadata_cleanup_after_row_delete(
 
     await persistent_manager.set_metadata(
         doomed_env.id,
-        "scheduler.resource_pool",
-        "demo_module:bound_account_ready",
-        {"eligible": False, "reason": "blacklisted"},
+        "demo.custom",
+        "status",
+        {"state": "blacklisted"},
         value_type="json",
     )
     await persistent_manager.set_metadata(
@@ -292,9 +292,9 @@ async def test_destroy_env_cascades_env_metadata_cleanup_after_row_delete(
     )
     await persistent_manager.set_metadata(
         survivor_env.id,
-        "scheduler.resource_pool",
-        "demo_module:bound_account_ready",
-        {"eligible": True, "reason": ""},
+        "demo.custom",
+        "status",
+        {"state": "ready"},
         value_type="json",
     )
 

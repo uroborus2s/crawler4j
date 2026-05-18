@@ -7,7 +7,6 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from crawler4j_contracts import EnvAction
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -18,13 +17,11 @@ from PyQt6.QtWidgets import (
 
 from src.core.atm.job_runtime import describe_job_runtime
 from src.core.atm.models import Job, JobState, JobType, TaskStatus, TriggerType
-from src.core.atm.run_profile import AcquisitionMode
 from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.ui.components.button import StyledButton
-from src.ui.components.choice_dialog import ChoiceDialog, DialogChoice
 from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import attach_display_index, resolve_local_data_table_result
@@ -48,7 +45,7 @@ class TaskListWidget(QWidget):
     TABLE_SCHEMA = {
         "columns": [
             {"key": "__index__", "label": "序号", "type": "number", "width": 72, "align": "right", "sortable": False, "searchable": False},
-            {"key": "name", "label": "作业名称", "type": "text", "width": 240},
+            {"key": "name", "label": "作业名称", "type": "text", "width": 240, "sortable": True},
             {"key": "type", "label": "类型", "type": "text", "width": 100},
             {"key": "runtime", "label": "运行配置", "type": "text", "width": 140},
             {"key": "concurrency", "label": "目标并发", "type": "number", "width": 80, "align": "right"},
@@ -68,7 +65,6 @@ class TaskListWidget(QWidget):
     }
     REFRESH_EVENTS = (
         EventType.TASK_STARTED,
-        EventType.TASK_SIGNAL,
         EventType.TASK_FINISHED,
         EventType.TASK_FAILED,
         EventType.TASK_CANCELLED,
@@ -142,13 +138,6 @@ class TaskListWidget(QWidget):
         self._pending_run_once_job_ids.discard(job_id)
         self._run_once_requesting_job_ids.discard(job_id)
         self._run_once_stopping_job_ids.discard(job_id)
-
-    @staticmethod
-    def _can_destroy_run_once_env(job: Job) -> bool:
-        run_profile = getattr(job, "run_profile", None)
-        if not run_profile or not run_profile.resource:
-            return False
-        return run_profile.resource.acquisition.mode == AcquisitionMode.CREATE
 
     @staticmethod
     def _normalize_state(state: JobState | str) -> JobState:
@@ -344,9 +333,9 @@ class TaskListWidget(QWidget):
             is_stopping = item.run_once_phase == "stopping"
             tooltip = "立即执行一次当前批次任务。"
             if is_starting:
-                tooltip = "环境正在启动；可以手动中止并选择关闭或删除本次环境。"
+                tooltip = "环境正在启动；可以手动中止本次执行。"
             elif is_running:
-                tooltip = "当前批次仍在执行；可以手动中止并选择关闭或删除本次环境。"
+                tooltip = "当前批次仍在执行；可以手动中止本次执行。"
             elif is_stopping:
                 tooltip = "已发出中止请求，等待任务执行 cleanup 并回收环境。"
             actions.append(
@@ -463,35 +452,19 @@ class TaskListWidget(QWidget):
         job = next((candidate for candidate in self._jobs if candidate.id == job_id), None)
         if not job:
             return
-
-        choices = [
-            DialogChoice("recycle", "保留环境中止", "warning"),
-        ]
-        if self._can_destroy_run_once_env(job):
-            detail = "保留环境会关闭环境但不删除；删除环境会删除本次创建的环境。"
-            choices.append(DialogChoice("destroy", "删除环境中止", "danger"))
-        else:
-            detail = "当前运行模板是复用环境模式，只支持关闭环境但不删除。"
-
-        selected = ChoiceDialog.choose(
+        confirmed = ConfirmDialog.confirm(
             self,
             "中止任务",
-            f"要中止“{job.name}”这次手动执行吗？",
-            choices=choices,
-            detail=detail,
+            f"要中止“{job.name}”这次手动执行吗？环境会统一关闭并回收。",
+            confirm_text="中止",
+            danger=True,
         )
-        if selected is None:
-            return
-        if selected == "recycle":
-            env_action = EnvAction.RECYCLE
-        elif selected == "destroy":
-            env_action = EnvAction.DESTROY
-        else:
+        if not confirmed:
             return
 
         self._run_once_stopping_job_ids.add(job_id)
         self._refresh_table()
-        asyncio.create_task(self._async_stop_run_once(job_id, env_action))
+        asyncio.create_task(self._async_stop_run_once(job_id))
 
     def _delete_job(self, job_id: str):
         confirmed = ConfirmDialog.confirm(
@@ -542,10 +515,10 @@ class TaskListWidget(QWidget):
         self._load_seq += 1
         await self._load_data_async(self._load_seq)
 
-    async def _async_stop_run_once(self, job_id: str, env_action: EnvAction):
+    async def _async_stop_run_once(self, job_id: str):
         service = get_task_service()
         try:
-            success = await service.stop_run_once(job_id, env_action)
+            success = await service.stop_run_once(job_id)
             if not success:
                 raise RuntimeError("当前没有可中止的批次任务，或任务已经结束。")
         except Exception as e:

@@ -16,15 +16,14 @@ def test_managed_page_renderer_supports_hosted_card(qtbot, tmp_path):
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 icon="📊",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "layout": {"direction": "column", "gap": 16},
                     "children": [
                         {
@@ -54,8 +53,6 @@ def test_managed_page_renderer_supports_hosted_card(qtbot, tmp_path):
                     ],
                 },
             )
-
-
             def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                 del context, page_id, params
                 return {

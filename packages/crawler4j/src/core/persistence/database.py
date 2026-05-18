@@ -21,34 +21,27 @@ from src.utils import paths
 CONFIG_DB = "config.db"
 STATE_DB = "state.db"
 DATA_DB = "data.db"
+DB_BUSY_TIMEOUT_SECONDS = 5.0
+DB_BUSY_TIMEOUT_MS = int(DB_BUSY_TIMEOUT_SECONDS * 1000)
 
 # 线程本地存储
 _thread_local = threading.local()
 
-_MODULE_DATASET_V2_REQUIRED_COLUMNS = {
+_MODULE_DATASET_REQUIRED_COLUMNS = {
     "module_name",
     "dataset_name",
     "record_index",
+    "record_key",
+    "run_status",
+    "record_status",
     "record_json",
     "created_at",
     "updated_at",
 }
-_MODULE_DATASET_V3_REQUIRED_COLUMNS = _MODULE_DATASET_V2_REQUIRED_COLUMNS | {
-    "record_key",
-    "run_status",
-    "record_status",
-}
-_MODULE_DATASET_V2_PRIMARY_KEY = {
+_MODULE_DATASET_PRIMARY_KEY = {
     "module_name": 1,
     "dataset_name": 2,
     "record_index": 3,
-}
-_MODULE_DATASET_LEGACY_REQUIRED_COLUMNS = {
-    "module_name",
-    "dataset_name",
-    "records_json",
-    "created_at",
-    "updated_at",
 }
 _MODULE_DATA_RESOURCE_REQUIRED_COLUMNS = {
     "module_name",
@@ -126,9 +119,10 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
         conn = None
     
     if conn is None:
-        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        conn = sqlite3.connect(str(db_path), timeout=DB_BUSY_TIMEOUT_SECONDS, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS}")
         conn.execute("PRAGMA foreign_keys=ON")
         setattr(_thread_local, conn_key, conn)
         setattr(_thread_local, conn_path_key, str(db_path))
@@ -228,93 +222,6 @@ def _create_module_db_views_indexes(conn: sqlite3.Connection) -> None:
     )
 
 
-def _module_db_views_uses_legacy_v1_schema(conn: sqlite3.Connection) -> bool:
-    row = conn.execute(
-        """
-        SELECT sql
-        FROM sqlite_master
-        WHERE type = 'table' AND name = 'module_db_views'
-        """
-    ).fetchone()
-    table_sql = str(row["sql"] or "").lower() if row else ""
-    return "materialized_view" in table_sql or "drop_table" in table_sql
-
-
-def _module_db_views_has_legacy_rows(conn: sqlite3.Connection) -> bool:
-    row = conn.execute(
-        """
-        SELECT 1
-        FROM module_db_views
-        WHERE view_kind <> 'sql_view'
-           OR cleanup_policy NOT IN ('drop_view', 'keep')
-        LIMIT 1
-        """
-    ).fetchone()
-    return row is not None
-
-
-def _rebuild_module_db_views_table_to_v1(conn: sqlite3.Connection) -> None:
-    temp_table_name = "module_db_views__v1"
-    conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
-    conn.execute(
-        f"""
-        CREATE TABLE {temp_table_name} (
-            module_name TEXT NOT NULL,
-            view_id TEXT NOT NULL,
-            view_kind TEXT NOT NULL CHECK (view_kind = 'sql_view'),
-            physical_view_name TEXT NOT NULL,
-            source_resource_ids_json TEXT NOT NULL DEFAULT '[]',
-            select_sql_template TEXT NOT NULL,
-            columns_json TEXT NOT NULL DEFAULT '[]',
-            schema_version INTEGER NOT NULL DEFAULT 1,
-            cleanup_policy TEXT NOT NULL CHECK (cleanup_policy IN ('drop_view', 'keep')),
-            created_at INTEGER DEFAULT (strftime('%s', 'now')),
-            updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-            PRIMARY KEY (module_name, view_id)
-        )
-        """
-    )
-    conn.execute(
-        f"""
-        INSERT INTO {temp_table_name} (
-            module_name,
-            view_id,
-            view_kind,
-            physical_view_name,
-            source_resource_ids_json,
-            select_sql_template,
-            columns_json,
-            schema_version,
-            cleanup_policy,
-            created_at,
-            updated_at
-        )
-        SELECT
-            module_name,
-            view_id,
-            'sql_view',
-            physical_view_name,
-            source_resource_ids_json,
-            select_sql_template,
-            columns_json,
-            CASE
-                WHEN schema_version IS NULL OR schema_version < 1 THEN 1
-                ELSE schema_version
-            END,
-            CASE
-                WHEN cleanup_policy = 'keep' THEN 'keep'
-                ELSE 'drop_view'
-            END,
-            created_at,
-            updated_at
-        FROM module_db_views
-        """
-    )
-    conn.execute("DROP TABLE module_db_views")
-    conn.execute(f"ALTER TABLE {temp_table_name} RENAME TO module_db_views")
-    _create_module_db_views_indexes(conn)
-
-
 def _create_module_datasets_indexes(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -328,15 +235,21 @@ def _create_module_datasets_indexes(conn: sqlite3.Connection) -> None:
         ON module_datasets(module_name, dataset_name)
         """
     )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_module_datasets_record_key
+        ON module_datasets(module_name, dataset_name, record_key)
+        """
+    )
 
 
 def _table_info_rows(conn: sqlite3.Connection, table_name: str) -> list[sqlite3.Row]:
     return conn.execute(f"PRAGMA table_info({table_name})").fetchall()
 
 
-def _module_datasets_has_v2_schema(table_info_rows: list[sqlite3.Row]) -> bool:
+def _module_datasets_matches_current_schema(table_info_rows: list[sqlite3.Row]) -> bool:
     existing_columns = {row["name"] for row in table_info_rows}
-    if existing_columns != _MODULE_DATASET_V2_REQUIRED_COLUMNS:
+    if existing_columns != _MODULE_DATASET_REQUIRED_COLUMNS:
         return False
 
     primary_key = {
@@ -344,26 +257,7 @@ def _module_datasets_has_v2_schema(table_info_rows: list[sqlite3.Row]) -> bool:
         for row in table_info_rows
         if row["pk"]
     }
-    return primary_key == _MODULE_DATASET_V2_PRIMARY_KEY
-
-
-def _module_datasets_has_v3_schema(table_info_rows: list[sqlite3.Row]) -> bool:
-    existing_columns = {row["name"] for row in table_info_rows}
-    if existing_columns != _MODULE_DATASET_V3_REQUIRED_COLUMNS:
-        return False
-
-    primary_key = {
-        row["name"]: row["pk"]
-        for row in table_info_rows
-        if row["pk"]
-    }
-    return primary_key == _MODULE_DATASET_V2_PRIMARY_KEY
-
-
-def _upgrade_module_datasets_v2_to_v3(conn: sqlite3.Connection) -> None:
-    conn.execute("ALTER TABLE module_datasets ADD COLUMN record_key TEXT")
-    conn.execute("ALTER TABLE module_datasets ADD COLUMN run_status TEXT NOT NULL DEFAULT '不占用'")
-    conn.execute("ALTER TABLE module_datasets ADD COLUMN record_status TEXT NOT NULL DEFAULT ''")
+    return primary_key == _MODULE_DATASET_PRIMARY_KEY
 
 
 def _ensure_module_data_resources_table(conn: sqlite3.Connection) -> None:
@@ -380,16 +274,10 @@ def _ensure_module_data_resources_table(conn: sqlite3.Connection) -> None:
 
     table_info_rows = _table_info_rows(conn, "module_data_resources")
     existing_columns = {row["name"] for row in table_info_rows}
-    if "schema_version" not in existing_columns:
-        conn.execute("ALTER TABLE module_data_resources ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1")
-        table_info_rows = _table_info_rows(conn, "module_data_resources")
-        existing_columns = {row["name"] for row in table_info_rows}
-
-    missing_columns = _MODULE_DATA_RESOURCE_REQUIRED_COLUMNS - existing_columns
-    if missing_columns:
+    if existing_columns != _MODULE_DATA_RESOURCE_REQUIRED_COLUMNS:
         raise RuntimeError(
-            "Unexpected module_data_resources schema definition: "
-            f"missing_columns={sorted(missing_columns)}, existing_columns={sorted(existing_columns)}"
+            "Only crawler4j 0.4.0 module_data_resources schema is supported: "
+            f"existing_columns={sorted(existing_columns)}"
         )
 
     _create_module_data_resources_table(conn)
@@ -410,16 +298,22 @@ def _ensure_module_db_views_table(conn: sqlite3.Connection) -> None:
 
     table_info_rows = _table_info_rows(conn, "module_db_views")
     existing_columns = {row["name"] for row in table_info_rows}
-    missing_columns = _MODULE_DB_VIEW_REQUIRED_COLUMNS - existing_columns
-    if missing_columns:
+    if existing_columns != _MODULE_DB_VIEW_REQUIRED_COLUMNS:
         raise RuntimeError(
-            "Unexpected module_db_views schema definition: "
-            f"missing_columns={sorted(missing_columns)}, existing_columns={sorted(existing_columns)}"
+            "Only crawler4j 0.4.0 module_db_views schema is supported: "
+            f"existing_columns={sorted(existing_columns)}"
         )
 
-    if _module_db_views_uses_legacy_v1_schema(conn) or _module_db_views_has_legacy_rows(conn):
-        _rebuild_module_db_views_table_to_v1(conn)
-        return
+    row = conn.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'module_db_views'
+        """
+    ).fetchone()
+    table_sql = str(row["sql"] or "").lower() if row else ""
+    if "materialized_view" in table_sql or "drop_table" in table_sql:
+        raise RuntimeError("Only crawler4j 0.4.0 module_db_views schema is supported")
 
     _create_module_db_views_table(conn)
     _create_module_db_views_indexes(conn)
@@ -440,18 +334,9 @@ def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
 
     table_info_rows = _table_info_rows(conn, "module_datasets")
     existing_columns = {row["name"] for row in table_info_rows}
-    if _module_datasets_has_v3_schema(table_info_rows):
+    if _module_datasets_matches_current_schema(table_info_rows):
         _create_module_datasets_indexes(conn)
         return
-    if _module_datasets_has_v2_schema(table_info_rows):
-        _upgrade_module_datasets_v2_to_v3(conn)
-        _create_module_datasets_indexes(conn)
-        return
-    if _MODULE_DATASET_LEGACY_REQUIRED_COLUMNS.issubset(existing_columns):
-        raise RuntimeError(
-            "Legacy module_datasets schema is no longer supported; "
-            "please migrate records_json datasets manually before starting the host"
-        )
 
     primary_key = {
         row["name"]: row["pk"]
@@ -459,7 +344,7 @@ def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
         if row["pk"]
     }
     raise RuntimeError(
-        "Unexpected module_datasets schema definition: "
+        "Only crawler4j 0.4.0 module_datasets schema is supported: "
         f"columns={sorted(existing_columns)}, primary_key={primary_key}"
     )
 

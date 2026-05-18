@@ -19,7 +19,7 @@
 
 | 领域 | 结论 | 证据 |
 |---|---|---|
-| Task Engine V2 的共享执行内核 | 已实现 | `ExecutionRunner` 已从 Dispatcher 中抽出，并统一承担环境获取、上下文注入、hooks 和清理流程，见 `packages/crawler4j/src/core/atm/execution_runner.py` 与 `packages/crawler4j/src/core/atm/dispatcher.py` |
+| Task Engine V2 的共享执行内核 | 已实现 | `ExecutionRunner` 已从 Dispatcher 中抽出，并统一承担环境获取、上下文注入、workflow 执行、对象 `setup(ctx, workflow)` / `cleanup(ctx, outcome)` 触发和环境回收收口，见 `packages/crawler4j/src/core/atm/execution_runner.py`、`packages/crawler4j/src/core/mms/service.py` 与 `packages/crawler4j/src/core/mms/object_container_v2.py` |
 | Job Controller 的 crash recovery | 已实现 | `packages/crawler4j/src/core/atm/controller.py` 启动时会恢复僵尸任务并清理残留环境 |
 | 外部模块打包安装主链路 | 已实现 | 内置业务模块已删除；`ModuleRegistry.install()` + `ModuleService` 已可从外部 zip 安装并加载模块；隔离 smoke 已验证安装后从应用受控目录加载 |
 | 调试会话采用 Core 真实执行链 | 基本满足 | `DebugService`、worker 进程、`ExecutionRunner` 和 dev-link 调试路径已经落地，整体方向与 `DBG-01` 设计一致 |

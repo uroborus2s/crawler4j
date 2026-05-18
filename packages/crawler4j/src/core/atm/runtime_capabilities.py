@@ -27,8 +27,7 @@ from crawler4j_contracts.database import DatabaseClient
 from crawler4j_contracts.hosted_ui import (
     normalize_page_schema as sdk_normalize_page_schema,
 )
-from src.core.foundation.event_bus import Event, EventType, get_event_bus
-from src.core.mms.data_contract import load_sql_file, validate_resource_sql
+from src.core.atm.browser_tools import CoreBrowserTools
 from src.core.persistence import get_module_data_store
 from src.utils.paths import get_resource_path
 
@@ -50,9 +49,36 @@ MANAGED_VIEW_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 RUNTIME_SURFACE_FULL = "full"
 RUNTIME_SURFACE_HOSTED_UI_DECLARE = "hosted_ui_declare"
 RUNTIME_SURFACE_HOSTED_UI_READONLY = "hosted_ui_readonly"
+RUNTIME_SURFACE_HOSTED_UI_ACTION = "hosted_ui_action"
+RUNTIME_SURFACE_ENV_CANDIDATES = "env_candidates"
+RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES = "env_cleanup_candidates"
+
+BROWSER_TOOL_NAMES = frozenset(
+    {
+        "browser.pause",
+        "browser.goto",
+        "browser.move",
+        "browser.click",
+        "browser.hover",
+        "browser.type",
+        "browser.press",
+        "browser.drag",
+        "browser.scroll",
+        "browser.page_down",
+        "browser.page_up",
+    }
+)
 
 _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
-    RUNTIME_SURFACE_FULL: None,
+    RUNTIME_SURFACE_FULL: frozenset(
+        {
+            "ip_pool.pick_proxy",
+            "env.set_proxy",
+            "captcha.match_slider",
+            "captcha.match_click_targets",
+        }
+        | BROWSER_TOOL_NAMES
+    ),
     RUNTIME_SURFACE_HOSTED_UI_DECLARE: frozenset(
         {
             "ui.declare_page",
@@ -63,6 +89,13 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
             "ui.get_page",
         }
     ),
+    RUNTIME_SURFACE_HOSTED_UI_ACTION: frozenset(
+        {
+            "ui.get_page",
+        }
+    ),
+    RUNTIME_SURFACE_ENV_CANDIDATES: frozenset(),
+    RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES: frozenset(),
 }
 DECLARE_UI_SIDE_EFFECT_DB_TOOLS: set[str] = set()
 
@@ -109,37 +142,6 @@ def _validate_managed_identifier(value: str, *, field_name: str) -> str:
     return normalized
 
 
-def _normalize_resource_pool_names(declared_resource_pools: Any) -> frozenset[str]:
-    names: set[str] = set()
-    for item in declared_resource_pools or []:
-        if isinstance(item, str):
-            raw_name = item
-        elif isinstance(item, dict):
-            raw_name = item.get("name", "")
-        else:
-            raw_name = getattr(item, "name", "")
-        name = str(raw_name or "").strip()
-        if name:
-            names.add(name)
-    return frozenset(names)
-
-
-def _load_declared_resource_pool_names(module_name: str) -> frozenset[str]:
-    try:
-        from src.core.mms.registry import get_module_registry
-
-        registry = get_module_registry()
-        module_root = (module_name or "").split(".")[0]
-        module_info = registry.get_module(module_name) or registry.get_module(module_root)
-    except Exception:
-        return frozenset()
-
-    if not module_info:
-        return frozenset()
-    manifest = getattr(module_info, "manifest", None)
-    return _normalize_resource_pool_names(getattr(manifest, "resource_pools", []))
-
-
 def _raise_declare_ui_side_effect_error(tool_name: str) -> None:
     raise RuntimeError(f"declare_ui 不允许调用 {tool_name}；UI 声明必须保持无副作用")
 
@@ -148,22 +150,6 @@ def _get_ip_pool_manager():
     from src.core.rem.ip_pool import get_ip_pool_manager
 
     return get_ip_pool_manager()
-
-
-def _rem_manager_helpers():
-    from src.core.rem.manager import (
-        RESOURCE_POOL_METADATA_NAMESPACE,
-        build_resource_pool_card,
-        build_resource_pool_metadata_key,
-        get_environment_manager,
-    )
-
-    return (
-        get_environment_manager,
-        RESOURCE_POOL_METADATA_NAMESPACE,
-        build_resource_pool_card,
-        build_resource_pool_metadata_key,
-    )
 
 
 def _resolve_runtime_surface_tools(surface: str) -> frozenset[str] | None:
@@ -216,7 +202,7 @@ class CoreDatabaseTools:
         module = get_module_registry().get_module(self._module_name)
         manifest = getattr(module, "manifest", None) if module is not None else None
         data = getattr(manifest, "data", None)
-        return data if isinstance(data, dict) else {"resources": [], "views": [], "queries": [], "seeds": []}
+        return data if isinstance(data, dict) else {"resources": [], "views": [], "seeds": []}
 
     def _manifest_resource(self, resource_id: str) -> dict[str, Any] | None:
         for resource in self._manifest_data().get("resources", []):
@@ -229,79 +215,36 @@ class CoreDatabaseTools:
         joins = resource.get("joins", []) if isinstance(resource, dict) else []
         return [dict(item) for item in joins if isinstance(item, dict)]
 
-    @staticmethod
-    def _columns_from_resource(resource: dict[str, Any]) -> list[dict[str, Any]]:
-        schema = resource.get("schema") if isinstance(resource.get("schema"), dict) else {}
-        raw_columns = schema.get("columns", []) if isinstance(schema, dict) else []
-        columns: list[dict[str, Any]] = []
-        for raw in raw_columns if isinstance(raw_columns, list) else []:
-            if not isinstance(raw, dict):
-                continue
-            name = str(raw.get("name") or raw.get("key") or "").strip()
-            if not name:
-                continue
-            columns.append(
-                {
-                    "name": name,
-                    "type": str(raw.get("type") or "text").strip().lower(),
-                    "nullable": bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required")),
-                }
-            )
-        return columns
-
     def describe_source(self, source: str) -> dict[str, Any]:
         self._ensure_enabled()
         source_id = _validate_managed_identifier(str(source or "").strip(), field_name="source")
-        resources = {item["resource_id"]: item for item in self._data_store.list_data_resources(self._module_name)}
-        resource = resources.get(source_id)
-        if resource is not None:
-            source_kind = "relation" if resource["storage_mode"] == "custom_table" else "snapshot"
-            columns = self._columns_from_resource(resource)
-            if not columns:
-                raise ValueError(f"数据源缺少 schema.columns，不能进入 ctx.db 查询面: {source_id}")
-            if source_kind == "snapshot":
-                column_names = {column["name"] for column in columns}
-                for system_column, column_type in (
-                    ("run_status", "text"),
-                    ("record_status", "text"),
-                    ("created_at", "int"),
-                    ("updated_at", "int"),
-                ):
-                    if system_column not in column_names:
-                        columns.append({"name": system_column, "type": column_type, "nullable": True})
-            return {
-                "source": source_id,
-                "source_kind": source_kind,
-                "storage_mode": resource["storage_mode"],
-                "record_key_field": resource.get("record_key_field") or "id",
-                "columns": columns,
-                "joins": self._joins_for_resource(source_id) if source_kind == "relation" else [],
-            }
-
-        views = {item["view_id"]: item for item in self._data_store.list_db_views(self._module_name)}
-        view = views.get(source_id)
-        if view is not None:
-            return {
-                "source": source_id,
-                "source_kind": "read_model",
-                "columns": [dict(column) for column in view["columns"]],
-                "joins": [],
-            }
-        raise ValueError(f"未注册的数据源: {source_id}")
+        return self._data_store.describe_data_source(
+            self._module_name,
+            source_id,
+            joins=self._joins_for_resource(source_id),
+        )
 
     def execute_plan(self, plan: dict[str, Any]) -> Any:
         self._ensure_enabled()
         if not isinstance(plan, dict):
             raise ValueError("query plan must be an object")
         kind = str(plan.get("kind") or "select").strip()
-        if kind == "named_query":
-            return self._run_named_query(str(plan.get("query_id") or ""), params=dict(plan.get("params") or {}))
         if kind == "append_audit_event":
             if self._read_only:
                 raise RuntimeError("ctx.db 当前运行面不允许写入")
             return self._append_audit_event(
                 dataset=str(plan.get("dataset") or ""),
                 event=dict(plan.get("event") or {}),
+            )
+        if kind == "batch":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            operations = plan.get("operations")
+            if not isinstance(operations, list):
+                raise ValueError("batch operations must be a list")
+            return self._data_store.execute_write_batch(
+                self._module_name,
+                [dict(item) for item in operations if isinstance(item, dict)],
             )
         if kind == "query_audit_events":
             return self._query_audit_events(
@@ -322,6 +265,35 @@ class CoreDatabaseTools:
                 resource=str(plan.get("resource") or ""),
                 records=_normalize_records(plan.get("records")),
             )
+        if kind == "add_records":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._add_resource_records(
+                resource=str(plan.get("resource") or ""),
+                records=_normalize_records(plan.get("records")),
+            )
+        if kind == "upsert_records":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._upsert_resource_records(
+                resource=str(plan.get("resource") or ""),
+                records=_normalize_records(plan.get("records")),
+            )
+        if kind == "update_records":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._update_resource_records(
+                resource=str(plan.get("resource") or ""),
+                fields=dict(plan.get("fields") or {}),
+                where=plan.get("where"),
+            )
+        if kind == "delete_records":
+            if self._read_only:
+                raise RuntimeError("ctx.db 当前运行面不允许写入")
+            return self._delete_resource_records(
+                resource=str(plan.get("resource") or ""),
+                where=plan.get("where"),
+            )
         if kind != "select":
             raise ValueError(f"unsupported query plan kind: {kind}")
         return self._data_store.execute_query_plan(
@@ -341,6 +313,43 @@ class CoreDatabaseTools:
     ) -> bool:
         resource_name = self._normalize_resource_name(resource)
         return self._data_store.replace_resource_records(self._module_name, resource_name, _normalize_records(records))
+
+    def _add_resource_records(
+        self,
+        *,
+        resource: str,
+        records: list[dict[str, Any]],
+    ) -> list[Any]:
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.add_resource_records(self._module_name, resource_name, _normalize_records(records))
+
+    def _upsert_resource_records(
+        self,
+        *,
+        resource: str,
+        records: list[dict[str, Any]],
+    ) -> bool:
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.upsert_resource_records(self._module_name, resource_name, _normalize_records(records))
+
+    def _update_resource_records(
+        self,
+        *,
+        resource: str,
+        fields: dict[str, Any],
+        where: Any,
+    ) -> int:
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.update_resource_records(self._module_name, resource_name, dict(fields), where=where)
+
+    def _delete_resource_records(
+        self,
+        *,
+        resource: str,
+        where: Any,
+    ) -> int:
+        resource_name = self._normalize_resource_name(resource)
+        return self._data_store.delete_resource_records(self._module_name, resource_name, where=where)
 
     def _append_audit_event(self, *, dataset: str, event: dict[str, Any]) -> str:
         dataset_name = self._normalize_audit_dataset_name(dataset)
@@ -371,47 +380,6 @@ class CoreDatabaseTools:
             limit=int(limit),
             offset=int(offset),
             order=order,
-        )
-
-    def _run_named_query(self, query_id: str, *, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        from src.core.mms.registry import get_module_registry
-
-        normalized_query_id = _validate_managed_identifier(str(query_id or "").strip(), field_name="query_id")
-        module = get_module_registry().get_module(self._module_name)
-        if module is None or module.path is None:
-            raise RuntimeError(f"未找到模块数据契约: {self._module_name}")
-
-        query_spec = next(
-            (item for item in module.manifest.data["queries"] if item["query_id"] == normalized_query_id),
-            None,
-        )
-        if query_spec is None:
-            raise ValueError(f"未注册的 query_id: {normalized_query_id}")
-
-        sql = load_sql_file(module.path, query_spec["sql_file"], expected_prefix="data/sql/queries/")
-        validate_resource_sql(
-            sql,
-            source_resource_ids=query_spec["source_resource_ids"],
-            owner_label=f"data.queries[{normalized_query_id}]",
-        )
-        normalized_params = dict(params or {})
-        declared_params = {item["name"]: item for item in query_spec["params"]}
-        missing = sorted(
-            name
-            for name, spec in declared_params.items()
-            if spec["required"] and name not in normalized_params
-        )
-        if missing:
-            raise ValueError(f"query 参数缺失: {', '.join(missing)}")
-        extra = sorted(set(normalized_params) - set(declared_params))
-        if extra:
-            raise ValueError(f"query 参数未注册: {', '.join(extra)}")
-        return self._data_store.run_registered_query(
-            self._module_name,
-            source_resource_ids=query_spec["source_resource_ids"],
-            sql_template=sql,
-            columns=query_spec["columns"],
-            params=normalized_params,
         )
 
 
@@ -486,37 +454,6 @@ class CoreIPPoolTools:
 class CoreEnvTools:
     """Core 侧环境操作工具实现。"""
 
-    def __init__(self, module_name: str, *, declared_resource_pool_names: frozenset[str]):
-        self._module_name = module_name
-        self._declared_resource_pool_names = declared_resource_pool_names
-
-    def _require_declared_resource_pool(self, pool_name: str) -> str:
-        normalized = str(pool_name or "").strip()
-        if not normalized:
-            raise ValueError("pool_name 不能为空")
-        if normalized in self._declared_resource_pool_names:
-            return normalized
-        if self._declared_resource_pool_names:
-            raise ValueError(
-                f"资源池未在 module.yaml.resource_pools 中声明: {self._module_name}.{normalized}"
-            )
-        raise ValueError(
-            f"当前模块未在 module.yaml.resource_pools 中声明资源池，不能使用: {self._module_name}.{normalized}"
-        )
-
-    def _publish_resource_pool_updated(self, *, env_id: int, pool_name: str) -> None:
-        get_event_bus().publish(
-            Event(
-                type=EventType.ENV_RESOURCE_POOL_UPDATED,
-                data={
-                    "env_id": int(env_id),
-                    "module_name": self._module_name,
-                    "pool_name": str(pool_name or "").strip(),
-                },
-                module_name=self._module_name,
-            )
-        )
-
     async def set_proxy(
         self,
         env_id: int,
@@ -524,161 +461,14 @@ class CoreEnvTools:
         proxy_value: str | None = None,
         proxy_pool_id: str | None = None,
     ) -> bool:
-        get_environment_manager, _, _, _ = _rem_manager_helpers()
+        from src.core.rem.manager import get_environment_manager
+
         manager = get_environment_manager()
         return await manager.update_env(
             env_id,
             proxy_value=proxy_value or None,
             proxy_pool_id=proxy_pool_id or None,
         )
-
-    async def bind_resource_pool(
-        self,
-        env_id: int,
-        *,
-        pool_name: str,
-        eligible: bool = True,
-        reason: str = "",
-        exclusive: bool = True,
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        card = build_card(
-            self._module_name,
-            pool_name,
-            eligible=eligible,
-            reason=reason,
-            exclusive=exclusive,
-        )
-        ok = await manager.set_metadata(
-            int(env_id),
-            namespace,
-            metadata_key,
-            card,
-            value_type="json",
-        )
-        if ok:
-            self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
-        return ok
-
-    async def mark_resource_pool_eligible(
-        self,
-        env_id: int,
-        *,
-        pool_name: str,
-        reason: str = "",
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        current = await manager.get_metadata(int(env_id), namespace, metadata_key)
-        exclusive = bool(current.get("exclusive", True)) if isinstance(current, dict) else True
-        card = build_card(
-            self._module_name,
-            pool_name,
-            eligible=True,
-            reason=reason,
-            exclusive=exclusive,
-        )
-        ok = await manager.set_metadata(
-            int(env_id),
-            namespace,
-            metadata_key,
-            card,
-            value_type="json",
-        )
-        if ok:
-            self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
-        return ok
-
-    async def mark_resource_pool_ineligible(
-        self,
-        env_id: int,
-        *,
-        pool_name: str,
-        reason: str,
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        current = await manager.get_metadata(int(env_id), namespace, metadata_key)
-        exclusive = bool(current.get("exclusive", True)) if isinstance(current, dict) else True
-        card = build_card(
-            self._module_name,
-            pool_name,
-            eligible=False,
-            reason=reason,
-            exclusive=exclusive,
-        )
-        ok = await manager.set_metadata(
-            int(env_id),
-            namespace,
-            metadata_key,
-            card,
-            value_type="json",
-        )
-        if ok:
-            self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
-        return ok
-
-    async def remove_resource_pool(
-        self,
-        env_id: int,
-        *,
-        pool_name: str,
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, _, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        await manager.delete_metadata(int(env_id), namespace, metadata_key)
-        self._publish_resource_pool_updated(env_id=int(env_id), pool_name=pool_name)
-        return True
-
-    async def replace_resource_pool_snapshot(
-        self,
-        *,
-        pool_name: str,
-        entries: list[dict[str, Any]],
-    ) -> bool:
-        pool_name = self._require_declared_resource_pool(pool_name)
-        get_environment_manager, namespace, build_card, build_key = _rem_manager_helpers()
-        manager = get_environment_manager()
-        metadata_key = build_key(self._module_name, pool_name)
-        desired_env_ids: set[int] = set()
-
-        for entry in entries:
-            env_id = int(entry["env_id"])
-            desired_env_ids.add(env_id)
-            card = build_card(
-                self._module_name,
-                pool_name,
-                eligible=bool(entry.get("eligible", True)),
-                reason=str(entry.get("reason", "")),
-                exclusive=bool(entry.get("exclusive", True)),
-            )
-            await manager.set_metadata(
-                env_id,
-                namespace,
-                metadata_key,
-                card,
-                value_type="json",
-            )
-
-        for env in await manager.list_envs():
-            if int(env.id) in desired_env_ids:
-                continue
-            current = await manager.get_metadata(int(env.id), namespace, metadata_key)
-            if current is not None:
-                await manager.delete_metadata(int(env.id), namespace, metadata_key)
-                self._publish_resource_pool_updated(env_id=int(env.id), pool_name=pool_name)
-        for env_id in desired_env_ids:
-            self._publish_resource_pool_updated(env_id=env_id, pool_name=pool_name)
-        return True
 
 
 class CoreUITools:
@@ -849,18 +639,16 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
         allowed_tool_names: frozenset[str] | None = None,
         declared_page_schemas: dict[str, dict[str, Any]] | None = None,
-        declared_resource_pool_names: frozenset[str] | None = None,
         allow_persisted_pages: bool = True,
     ):
         self._bindings: dict[str, _ToolBinding] = {}
         self._allowed_tool_names = allowed_tool_names
         self._ui_declaration_buffer = ui_declaration_buffer
+        self._task_context: Any | None = None
+        self._browser_tools = CoreBrowserTools()
 
         ip_pool_tools = CoreIPPoolTools()
-        env_tools = CoreEnvTools(
-            module_name,
-            declared_resource_pool_names=declared_resource_pool_names or frozenset(),
-        )
+        env_tools = CoreEnvTools()
         ui_tools = CoreUITools(
             module_name,
             declaration_buffer=ui_declaration_buffer,
@@ -871,32 +659,27 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
         self._register("ip_pool.pick_proxy", "按条件挑选可用代理", ip_pool_tools.pick_proxy)
         self._register("env.set_proxy", "为当前环境设置代理", env_tools.set_proxy, is_async=True)
-        self._register("env.bind_resource_pool", "登记环境资源池资格", env_tools.bind_resource_pool, is_async=True)
-        self._register(
-            "env.mark_resource_pool_eligible",
-            "标记环境资源池可接单",
-            env_tools.mark_resource_pool_eligible,
-            is_async=True,
-        )
-        self._register(
-            "env.mark_resource_pool_ineligible",
-            "标记环境资源池不可接单",
-            env_tools.mark_resource_pool_ineligible,
-            is_async=True,
-        )
-        self._register("env.remove_resource_pool", "移除环境资源池资格", env_tools.remove_resource_pool, is_async=True)
-        self._register(
-            "env.replace_resource_pool_snapshot",
-            "重建环境资源池资格快照",
-            env_tools.replace_resource_pool_snapshot,
-            is_async=True,
-        )
 
         self._register("ui.declare_page", "声明宿主页 schema", ui_tools.declare_page)
         self._register("ui.get_page", "读取宿主页 schema", ui_tools.get_page)
 
         self._register("captcha.match_slider", "识别滑块验证码缺口位置", captcha_tools.match_slider)
         self._register("captcha.match_click_targets", "识别点选验证码目标位置", captcha_tools.match_click_targets)
+        self._register("browser.pause", "执行拟人化停顿", self._browser_tools.pause, is_async=True)
+        self._register("browser.goto", "以拟人化节奏导航到目标页面", self._browser_tools.goto, is_async=True)
+        self._register("browser.move", "以拟人化轨迹移动鼠标", self._browser_tools.move, is_async=True)
+        self._register("browser.click", "以拟人化轨迹点击页面元素或坐标", self._browser_tools.click, is_async=True)
+        self._register("browser.hover", "以拟人化轨迹悬停页面元素或坐标", self._browser_tools.hover, is_async=True)
+        self._register("browser.type", "以拟人化节奏输入文本", self._browser_tools.type, is_async=True)
+        self._register("browser.press", "以拟人化节奏按下键盘按键", self._browser_tools.press, is_async=True)
+        self._register("browser.drag", "以拟人化轨迹拖拽页面元素或坐标", self._browser_tools.drag, is_async=True)
+        self._register("browser.scroll", "以拟人化节奏滚动页面", self._browser_tools.scroll, is_async=True)
+        self._register("browser.page_down", "执行一段拟人化向下滚动", self._browser_tools.page_down, is_async=True)
+        self._register("browser.page_up", "执行一段拟人化向上滚动", self._browser_tools.page_up, is_async=True)
+
+    def bind_task_context(self, context: Any) -> None:
+        self._task_context = context
+        self._browser_tools.bind_task_context(context)
 
     def _register(self, name: str, description: str, handler: Callable[..., Any], *, is_async: bool = False) -> None:
         if self._allowed_tool_names is not None and name not in self._allowed_tool_names:
@@ -913,8 +696,13 @@ class CoreToolsCapabilityImpl(ToolsCapability):
             and tool_name in DECLARE_UI_SIDE_EFFECT_DB_TOOLS
         )
 
+    def _blocks_browser_tool(self, tool_name: str) -> bool:
+        if tool_name not in BROWSER_TOOL_NAMES:
+            return False
+        return not self._browser_tools.is_available()
+
     def has_tool(self, tool_name: str) -> bool:
-        if self._blocks_side_effect_tool(tool_name):
+        if self._blocks_side_effect_tool(tool_name) or self._blocks_browser_tool(tool_name):
             return False
         return tool_name in self._bindings
 
@@ -922,12 +710,14 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         return [
             binding.spec
             for binding in sorted(self._bindings.values(), key=lambda item: item.spec.name)
-            if not self._blocks_side_effect_tool(binding.spec.name)
+            if not self._blocks_side_effect_tool(binding.spec.name) and not self._blocks_browser_tool(binding.spec.name)
         ]
 
     def call(self, tool_name: str, /, **kwargs: Any) -> Any:
         if self._blocks_side_effect_tool(tool_name):
             _raise_declare_ui_side_effect_error(tool_name)
+        if self._blocks_browser_tool(tool_name):
+            raise RuntimeError(f"{tool_name} 需要当前运行上下文绑定可用的浏览器 Page")
         binding = self._bindings.get(tool_name)
         if binding is None:
             raise KeyError(f"Unknown core tool: {tool_name}")
@@ -946,24 +736,21 @@ def build_runtime_capabilities(
     ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
     surface: str = RUNTIME_SURFACE_FULL,
     declared_page_schemas: dict[str, dict[str, Any]] | None = None,
-    declared_resource_pools: Any = None,
 ) -> RuntimeCapabilities:
     module_name = (task_name or "").split(".")[0] or "default"
     db_enabled = surface != RUNTIME_SURFACE_HOSTED_UI_DECLARE
-    db_read_only = surface == RUNTIME_SURFACE_HOSTED_UI_READONLY
-    declared_resource_pool_names = (
-        _normalize_resource_pool_names(declared_resource_pools)
-        if declared_resource_pools is not None
-        else _load_declared_resource_pool_names(module_name)
-    )
+    db_read_only = surface in {
+        RUNTIME_SURFACE_HOSTED_UI_READONLY,
+        RUNTIME_SURFACE_ENV_CANDIDATES,
+        RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES,
+    }
     return RuntimeCapabilities(
         tools=CoreToolsCapabilityImpl(
             module_name,
             ui_declaration_buffer=ui_declaration_buffer,
             allowed_tool_names=_resolve_runtime_surface_tools(surface),
             declared_page_schemas=declared_page_schemas,
-            declared_resource_pool_names=declared_resource_pool_names,
-            allow_persisted_pages=surface == RUNTIME_SURFACE_FULL,
+            allow_persisted_pages=False,
         ),
         db=DatabaseClient(CoreDatabaseTools(module_name, enabled=db_enabled, read_only=db_read_only)),
     )

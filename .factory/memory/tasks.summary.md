@@ -42,3 +42,25 @@
   状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`CR-013`, `API-008`
 - `TASK-028-implement-module-entity-table-view-query-capability` TASK-028 实现模块实体表视图与分析查询能力
   状态：DONE | 负责人：Codex | 预估：4.0 人/天 | 关联：`CR-014`, `API-009`
+- `TASK-0400-design-decorator-object-assembly-runtime` TASK-0400 形成 0.4.0 装饰器对象装配运行时方案
+  状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0400`, `API-012`
+- `TASK-0401-design-versioned-user-developer-guides` TASK-0401 形成 docs-stratego 使用者/开发者指南版本分流方案
+  状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0401`, `API-013`
+- `TASK-0402-contracts-v2-decorators` TASK-0402 建立 Contracts v2 装饰器契约
+  状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-001`
+- `TASK-0403-sdk-v2-scanner-diagnostics` TASK-0403 建立 SDK v2 装饰器扫描与统一诊断
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-002`
+- `TASK-0404-sdk-v2-cli-templates-lock` TASK-0404 建立 SDK v2 CLI 模板与 manifest lock
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-003`
+- `TASK-0405-core-mms-v2-descriptor` TASK-0405 建立 Core MMS v2 runtime descriptor
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-004`
+- `TASK-0406-core-object-container-execution` TASK-0406 建立 Core v2 对象容器与执行链
+  状态：IN_PROGRESS | 负责人：Codex Core worker | 预估：3.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-005` | 最新：已补齐 `object_param` / `object_inject` 类属性与 `__init__` 参数注解入口，并归一到 v2 descriptor 元数据
+- `TASK-0407-atm-object-assembly-profile-ui` TASK-0407 建立 ATM v2 对象装配运行模板 UI
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-object-assembly-tree-ui` | 最新：运行模板对象装配区已收敛为公共 `ObjectGraphTree`，按 `workflow -> interface 绑定行 -> 子 interface/参数` 树形展示，左侧显示 interface label，右侧下拉显示 component label，并继续保存 `object_bindings/object_params`
+- `TASK-0408-data-decorators-db-registration` TASK-0408 接入 data decorators 到 ctx.db 注册
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-007`, `TC-0400-custom-table-auto-increment`, `TC-0400-managed-dataset-count` | 最新：`@data_table/@data_view` 已进入 manifest lock 和 Core 数据注册链，`custom_table` 支持 integer `record_key_field` 自增主键与 `ctx.db.into(...).add(...)` 省略 id 新增；`managed_dataset` 支持 `where` 后 `count(*)` 统计
+- `TASK-0409-page-action-runtime` TASK-0409 建立 page action runtime
+  状态：DONE | 负责人：Codex | 预估：1.5 人/天 | 关联：`REQ-0400`, `API-012`, `TC-0400-008`, `TC-0400-ui-action-contract` | 最新：已拆分 Hosted UI 用户入口 `@ui_action` 与浏览器页面动作 `@page_action`，并在 workflow page action executor 中拒绝 `page_action -> page_action` 嵌套调用
+- `TASK-0410-remove-v1-runtime-surface` TASK-0410 清理 v1 runtime surface 与兼容代码
+  状态：IN_PROGRESS | 负责人：全开发团队 | 预估：持续门禁 | 关联：`REQ-0400`, `API-012`

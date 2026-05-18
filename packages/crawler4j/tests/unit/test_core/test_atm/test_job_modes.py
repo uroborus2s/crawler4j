@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 from unittest.mock import patch
 
 import pytest
-from crawler4j_contracts import EnvAction, TaskSignal
 
 from src.core.atm.controller import JobController
 from src.core.atm.dispatcher import TaskDispatcher
@@ -21,7 +20,7 @@ from src.core.atm.run_profile import (
     RunProfile,
 )
 from src.core.rem.manager import RECOVERY_PROVIDER_RUNTIME_TIMEOUT
-from src.core.mms.models import ModuleManifest, UpgradeSourceInfo, WorkflowInfo
+from src.core.mms.models import ModuleManifest, UpgradeSourceInfo
 
 
 @pytest.fixture
@@ -33,15 +32,18 @@ def temp_state_dir(tmp_path):
         yield tmp_path
 
 
-def _build_select_run_profile(wait_timeout: int = 60, resource_pool: str = "") -> RunProfile:
+def _build_select_run_profile(wait_timeout: int = 60, candidates: str = "") -> RunProfile:
+    acquisition_kwargs = {
+        "mode": AcquisitionMode.SELECT,
+        "wait_timeout": wait_timeout,
+    }
+    if candidates:
+        acquisition_kwargs["candidates"] = candidates
+    else:
+        acquisition_kwargs["env_id"] = 1
     return RunProfile(
         resource=ResourceConfig(
-            acquisition=AcquisitionConfig(
-                mode=AcquisitionMode.SELECT,
-                selector_name="random_ready",
-                resource_pool=resource_pool,
-                wait_timeout=wait_timeout,
-            ),
+            acquisition=AcquisitionConfig(**acquisition_kwargs),
         ),
         execution=ExecutionContext(module="demo_module", workflow="repair"),
     )
@@ -60,31 +62,32 @@ def _build_create_run_profile(provider: str = "virtualbrowser") -> RunProfile:
 
 
 @pytest.fixture(autouse=True)
-def patch_default_selector_metadata(monkeypatch):
+def patch_default_module_service(monkeypatch):
     monkeypatch.setattr(
         "src.core.atm.controller.get_module_service",
         lambda: SimpleNamespace(
-            list_env_selectors=lambda module_name: [
-                SimpleNamespace(name="random_ready", returns_none=False),
-                SimpleNamespace(name="return_none", returns_none=True),
-            ]
-            if module_name == "demo_module"
-            else []
+            get_runtime_descriptor_v2=lambda module_name: SimpleNamespace(
+                env_candidates={
+                    "bound_account_ready": SimpleNamespace(),
+                }
+            ),
+            resolve_env_candidates=lambda module_name, context, candidates_name, params=None: [1],
         ),
     )
+
+
+@pytest.fixture(autouse=True)
+def patch_default_module_registry(monkeypatch):
     monkeypatch.setattr(
-        "src.core.atm.controller.get_module_registry",
+        "src.core.mms.registry.get_module_registry",
         lambda: SimpleNamespace(
             get_module=lambda module_name: (
                 SimpleNamespace(
                     manifest=ModuleManifest(
                         name="demo_module",
-                        runtime_api="core-native-v1",
+                        runtime_api="core-native-v2",
                         upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
-                        workflows=[WorkflowInfo(name="repair")],
-                        default_workflow="repair",
-                        resource_pools=[SimpleNamespace(name="bound_account_ready")],
-                        data={"resources": [], "views": [], "queries": [], "seeds": []},
+                        data={"resources": [], "views": [], "seeds": []},
                     )
                 )
                 if module_name == "demo_module"
@@ -115,22 +118,12 @@ async def test_service_job_maintains_target_concurrency():
     assert controller.dispatcher.dispatch.await_count == 2
 
 
-def test_ensure_runtime_for_job_rejects_undeclared_resource_pool(monkeypatch):
+def test_ensure_runtime_for_job_rejects_undeclared_env_candidates(monkeypatch):
     controller = JobController()
     monkeypatch.setattr(
-        "src.core.atm.controller.get_module_registry",
+        "src.core.atm.controller.get_module_service",
         lambda: SimpleNamespace(
-            get_module=lambda module_name: SimpleNamespace(
-                manifest=ModuleManifest(
-                    name="demo_module",
-                    runtime_api="core-native-v1",
-                    upgrade_source=UpgradeSourceInfo(repo="example/demo_module"),
-                    workflows=[WorkflowInfo(name="repair")],
-                    default_workflow="repair",
-                    resource_pools=[],
-                    data={"resources": [], "views": [], "queries": [], "seeds": []},
-                )
-            )
+            get_runtime_descriptor_v2=lambda module_name: SimpleNamespace(env_candidates={})
         ),
     )
 
@@ -139,12 +132,12 @@ def test_ensure_runtime_for_job_rejects_undeclared_resource_pool(monkeypatch):
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
         concurrency_target=1,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
 
-    with pytest.raises(ValueError, match="module.yaml.resource_pools"):
+    with pytest.raises(ValueError, match="env_candidates 未声明"):
         asyncio.run(controller._ensure_runtime_for_job(job))
 
 
@@ -342,99 +335,7 @@ async def test_service_job_scale_up_skips_when_runtime_check_fails_before_dispat
 
 
 @pytest.mark.asyncio
-async def test_service_job_with_returns_none_selector_without_pool_is_paused(monkeypatch):
-    controller = JobController()
-    job = Job(
-        id="service-job-invalid-selector",
-        name="service-invalid-selector",
-        type=JobType.SERVICE,
-        state=JobState.ACTIVE,
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.SELECT,
-                    selector_name="return_none",
-                    resource_pool="",
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
-        concurrency_target=1,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-    )
-    controller.repo = SimpleNamespace(
-        get_job=AsyncMock(return_value=job),
-        count_active_tasks=AsyncMock(return_value=0),
-        save_job=AsyncMock(),
-    )
-    controller.dispatcher = SimpleNamespace(
-        dispatch=AsyncMock(),
-        request_stop_for_job=AsyncMock(),
-    )
-    monkeypatch.setattr(
-        "src.core.atm.controller.get_module_service",
-        lambda: SimpleNamespace(
-            list_env_selectors=lambda module_name: [
-                SimpleNamespace(name="return_none", returns_none=True),
-            ]
-        ),
-    )
-
-    await controller._reconcile_job(job)
-
-    assert job.state == JobState.PAUSED
-    controller.repo.save_job.assert_awaited_once_with(job)
-    controller.dispatcher.dispatch.assert_not_awaited()
-    controller.dispatcher.request_stop_for_job.assert_awaited_once_with(job.id, env_action=None)
-
-
-@pytest.mark.asyncio
-async def test_service_job_selector_validation_fails_closed_when_selector_metadata_load_fails(monkeypatch):
-    controller = JobController()
-    job = Job(
-        id="service-job-selector-metadata-error",
-        name="service-selector-metadata-error",
-        type=JobType.SERVICE,
-        state=JobState.ACTIVE,
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.SELECT,
-                    selector_name="return_none",
-                    resource_pool="",
-                ),
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="repair"),
-        ),
-        concurrency_target=1,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-    )
-    controller.repo = SimpleNamespace(
-        get_job=AsyncMock(return_value=job),
-        count_active_tasks=AsyncMock(return_value=0),
-        save_job=AsyncMock(),
-    )
-    controller.dispatcher = SimpleNamespace(
-        dispatch=AsyncMock(),
-        request_stop_for_job=AsyncMock(),
-    )
-    monkeypatch.setattr(
-        "src.core.atm.controller.get_module_service",
-        lambda: SimpleNamespace(
-            list_env_selectors=lambda module_name: (_ for _ in ()).throw(RuntimeError("selector metadata unavailable"))
-        ),
-    )
-
-    await controller._reconcile_job(job)
-
-    assert job.state == JobState.PAUSED
-    controller.repo.save_job.assert_awaited_once_with(job)
-    controller.dispatcher.dispatch.assert_not_awaited()
-    controller.dispatcher.request_stop_for_job.assert_awaited_once_with(job.id, env_action=None)
-
-
-@pytest.mark.asyncio
-async def test_service_job_fixed_pool_resumes_waiting_tasks_up_to_current_capacity():
+async def test_service_job_candidates_resume_waiting_tasks_up_to_current_capacity():
     controller = JobController()
     waiting_tasks = [
         Task(id="task-p1", job_id="service-job", status=TaskStatus.PENDING),
@@ -454,14 +355,14 @@ async def test_service_job_fixed_pool_resumes_waiting_tasks_up_to_current_capaci
         resume_task=AsyncMock(return_value=True),
         has_live_task_loop=MagicMock(return_value=False),
     )
-    controller._count_fixed_pool_capacity = AsyncMock(return_value=5)
+    controller._count_candidate_capacity = AsyncMock(return_value=5)
 
     job = Job(
         id="service-job",
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
         concurrency_target=10,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
@@ -475,7 +376,110 @@ async def test_service_job_fixed_pool_resumes_waiting_tasks_up_to_current_capaci
 
 
 @pytest.mark.asyncio
-async def test_fixed_pool_resource_pool_reconcile_is_serialized_to_avoid_over_dispatch():
+async def test_service_job_resumes_waiting_candidates_before_dispatching_new_tasks():
+    controller = JobController()
+    events: list[str] = []
+    waiting_task = Task(id="task-p1", job_id="service-job", status=TaskStatus.PENDING)
+
+    async def _resume_task(_task, _job):
+        events.append("resume")
+        return True
+
+    async def _dispatch(_job):
+        events.append("dispatch")
+
+    controller.repo = SimpleNamespace(
+        count_active_tasks=AsyncMock(return_value=1),
+        count_tasks_by_statuses=AsyncMock(return_value=0),
+        get_oldest_waiting_tasks=AsyncMock(return_value=[waiting_task]),
+    )
+    controller.dispatcher = SimpleNamespace(
+        dispatch=AsyncMock(side_effect=_dispatch),
+        resume_task=AsyncMock(side_effect=_resume_task),
+        has_live_task_loop=MagicMock(return_value=False),
+    )
+    controller._count_candidate_capacity = AsyncMock(return_value=1)
+
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
+        concurrency_target=2,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+
+    await controller._reconcile_job(job)
+
+    assert events == ["resume", "dispatch"]
+
+
+@pytest.mark.asyncio
+async def test_count_candidate_capacity_uses_run_profile_context(monkeypatch):
+    import src.core.atm.controller as controller_module
+
+    observed: dict[str, object] = {}
+
+    def _resolve_candidates(_module_name, context, _candidates_name, params=None):
+        observed["config"] = context.config
+        observed["runtime"] = dict(context.runtime)
+        observed["params"] = dict(params or {})
+        return [1]
+
+    monkeypatch.setattr(
+        controller_module,
+        "get_module_service",
+        lambda: SimpleNamespace(resolve_env_candidates=_resolve_candidates),
+    )
+    monkeypatch.setattr(
+        controller_module,
+        "get_module_settings_store",
+        lambda: SimpleNamespace(build_task_config=lambda _module_name, _workflow: {"token": "secret"}),
+    )
+
+    controller = controller_module.JobController()
+    controller.rem = SimpleNamespace(
+        list_envs=AsyncMock(
+            return_value=[SimpleNamespace(id=1, kind="browser", status="ready", lease_id=None)]
+        ),
+    )
+    controller._is_env_candidate_authorized = AsyncMock(return_value=True)
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                candidates="bound_account_ready",
+                candidate_params={"tier": "gold"},
+            ),
+        ),
+        execution=ExecutionContext(
+            module="demo_module",
+            workflow="repair",
+        ),
+    )
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=run_profile,
+        params={"city": "Shanghai"},
+    )
+
+    assert await controller._count_candidate_capacity(job) == 1
+    assert observed["config"] == {"token": "secret"}
+    assert observed["params"] == {"tier": "gold"}
+    runtime = observed["runtime"]
+    assert runtime["candidate_params"] == {"tier": "gold"}
+    assert "params" not in runtime
+    assert "execution_params" not in runtime
+    assert "job_params" not in runtime
+    assert "runtime_params" not in runtime
+
+
+@pytest.mark.asyncio
+async def test_candidate_reconcile_is_serialized_to_avoid_over_dispatch():
     controller = JobController()
     active_count = 0
     count_calls = 0
@@ -506,7 +510,7 @@ async def test_fixed_pool_resource_pool_reconcile_is_serialized_to_avoid_over_di
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
         concurrency_target=2,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
@@ -518,10 +522,10 @@ async def test_fixed_pool_resource_pool_reconcile_is_serialized_to_avoid_over_di
         get_oldest_tasks_by_status=AsyncMock(return_value=[]),
     )
     controller.dispatcher = SimpleNamespace(dispatch=AsyncMock(side_effect=_dispatch))
-    controller._count_fixed_pool_capacity = AsyncMock(return_value=0)
+    controller._count_candidate_capacity = AsyncMock(return_value=0)
 
-    first_task = asyncio.create_task(controller._reconcile_resource_pool_jobs("demo_module", "bound_account_ready"))
-    second_task = asyncio.create_task(controller._reconcile_resource_pool_jobs("demo_module", "bound_account_ready"))
+    first_task = asyncio.create_task(controller._reconcile_job(job))
+    second_task = asyncio.create_task(controller._reconcile_job(job))
 
     await first_count_entered.wait()
     try:
@@ -537,7 +541,7 @@ async def test_fixed_pool_resource_pool_reconcile_is_serialized_to_avoid_over_di
 
 
 @pytest.mark.asyncio
-async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publishes_failed_event(
+async def test_service_job_candidates_wait_timeout_uses_waiting_since_and_publishes_failed_event(
     temp_state_dir,
     monkeypatch,
 ):
@@ -572,14 +576,14 @@ async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publis
         resume_task=AsyncMock(return_value=True),
         has_live_task_loop=MagicMock(return_value=False),
     )
-    controller._count_fixed_pool_capacity = AsyncMock(return_value=1)
+    controller._count_candidate_capacity = AsyncMock(return_value=1)
 
     job = Job(
         id="service-job",
         name="service",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(wait_timeout=30, resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(wait_timeout=30, candidates="bound_account_ready"),
         concurrency_target=1,
         trigger=TriggerConfig(type=TriggerType.MANUAL),
     )
@@ -589,14 +593,14 @@ async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publis
         id="task-expired",
         job_id=job.id,
         status=TaskStatus.PENDING,
-        message="等待环境池工位: bound_account_ready",
+        message="等待环境候选可用: bound_account_ready",
         created_at=now - 300,
     )
     fresh_task = Task(
         id="task-fresh",
         job_id=job.id,
         status=TaskStatus.PENDING,
-        message="等待环境池工位: bound_account_ready",
+        message="等待环境候选可用: bound_account_ready",
         created_at=now - 240,
     )
     setattr(expired_task, "waiting_since", now - 31)
@@ -612,7 +616,7 @@ async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publis
     assert expired_loaded is not None
     assert expired_loaded.status == TaskStatus.FAILED
     assert expired_loaded.message == ""
-    assert expired_loaded.error == "等待环境池工位超时: bound_account_ready (30s)"
+    assert expired_loaded.error == "等待环境候选超时: bound_account_ready (30s)"
     assert expired_loaded.waiting_since is None
     assert fresh_loaded is not None
     assert fresh_loaded.status == TaskStatus.PENDING
@@ -626,7 +630,7 @@ async def test_service_job_fixed_pool_wait_timeout_uses_waiting_since_and_publis
     assert event.task_run_id == expired_task.id
     assert event.data["task_id"] == expired_task.id
     assert event.data["job_id"] == job.id
-    assert event.data["error"] == "等待环境池工位超时: bound_account_ready (30s)"
+    assert event.data["error"] == "等待环境候选超时: bound_account_ready (30s)"
 
 
 @pytest.mark.asyncio
@@ -756,22 +760,22 @@ async def test_pause_job_cancels_persisted_pending_task_without_resource(temp_st
         name="service-pending",
         type=JobType.SERVICE,
         state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(resource_pool="bound_account_ready"),
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
         concurrency_target=1,
     )
     pending_task = Task(
         id="task-pending-no-resource",
         job_id=job.id,
         status=TaskStatus.PENDING,
-        message="等待环境池工位: bound_account_ready",
+        message="等待环境候选可用: bound_account_ready",
         waiting_since=1_714_000_000,
     )
 
     await repo.save_job(job)
     await repo.save_task(pending_task)
 
-    async def _request_job_stop(job_id: str, env_action=None):
-        await dispatcher.request_stop_for_job(job_id, env_action=env_action)
+    async def _request_job_stop(job_id: str):
+        await dispatcher.request_stop_for_job(job_id)
 
     service._repo = repo
     service._controller = SimpleNamespace(request_job_stop=AsyncMock(side_effect=_request_job_stop))
@@ -1131,7 +1135,7 @@ async def test_run_job_once_rechecks_runtime_before_dispatch():
 
 
 @pytest.mark.asyncio
-async def test_stop_run_once_requests_job_stop_with_selected_env_action():
+async def test_stop_run_once_requests_job_stop():
     service = TaskService()
     job = Job(
         id="batch-manual-job",
@@ -1148,34 +1152,10 @@ async def test_stop_run_once_requests_job_stop_with_selected_env_action():
     )
     service._controller = SimpleNamespace(request_job_stop=AsyncMock())
 
-    result = await service.stop_run_once(job.id, EnvAction.RECYCLE)
+    result = await service.stop_run_once(job.id)
 
     assert result is True
-    service._controller.request_job_stop.assert_awaited_once_with(job.id, env_action=EnvAction.RECYCLE)
-
-
-@pytest.mark.asyncio
-async def test_stop_run_once_rejects_destroy_for_selected_env_mode():
-    service = TaskService()
-    job = Job(
-        id="batch-manual-job",
-        name="manual-batch",
-        type=JobType.BATCH,
-        state=JobState.PAUSED,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-        run_profile=_build_select_run_profile(),
-        concurrency_target=2,
-    )
-    service._repo = SimpleNamespace(
-        get_job=AsyncMock(return_value=job),
-        count_active_tasks=AsyncMock(return_value=1),
-    )
-    service._controller = SimpleNamespace(request_job_stop=AsyncMock())
-
-    with pytest.raises(ValueError, match="不能删除环境"):
-        await service.stop_run_once(job.id, EnvAction.DESTROY)
-
-    service._controller.request_job_stop.assert_not_awaited()
+    service._controller.request_job_stop.assert_awaited_once_with(job.id)
 
 
 @pytest.mark.asyncio
@@ -1196,7 +1176,7 @@ async def test_stop_run_once_returns_false_when_no_active_tasks():
     )
     service._controller = SimpleNamespace(request_job_stop=AsyncMock())
 
-    result = await service.stop_run_once(job.id, EnvAction.RECYCLE)
+    result = await service.stop_run_once(job.id)
 
     assert result is False
     service._controller.request_job_stop.assert_not_awaited()
@@ -1253,38 +1233,6 @@ async def test_repository_roundtrip_preserves_run_profile_snapshot(temp_state_di
 
     assert loaded is not None
     assert loaded.run_profile == run_profile
-
-
-@pytest.mark.asyncio
-async def test_repository_roundtrip_preserves_task_signal(temp_state_dir):
-    repo = TaskRepository()
-    repo._run_async = AsyncMock(side_effect=lambda func, *args: func(*args))
-
-    job = Job(id="job-inline", name="inline")
-    await repo.save_job(job)
-
-    task = Task(
-        id="task-inline",
-        job_id="job-inline",
-        status=TaskStatus.WAITING_CONFIRMATION,
-        message="等待人工确认",
-        signal=TaskSignal.wait_for_confirmation(
-            message="等待人工确认",
-            env_action=EnvAction.KEEP_ALIVE,
-            payload={
-                "confirmation": {
-                    "title": "账号复核",
-                    "fields": [{"label": "账号", "value": "demo-account"}],
-                }
-            },
-        ).to_dict(),
-    )
-
-    await repo.save_task(task)
-    loaded = await repo.get_task(task.id)
-
-    assert loaded is not None
-    assert loaded.signal == task.signal
 
 
 @pytest.mark.asyncio
@@ -1386,7 +1334,7 @@ async def test_recover_zombies_marks_pending_and_running_tasks_failed(monkeypatc
         id="task-waiting",
         job_id="job-1",
         status=TaskStatus.PENDING,
-        message="等待环境池工位: bound_account_ready",
+        message="等待环境候选可用: bound_account_ready",
         waiting_since=123,
     )
     running = Task(id="task-running", job_id="job-1", status=TaskStatus.RUNNING, env_id="42")

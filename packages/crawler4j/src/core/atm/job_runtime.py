@@ -15,15 +15,15 @@ def describe_job_runtime(
         return "未配置", str(exc)
 
     module_name = run_profile.execution.module if run_profile.execution and run_profile.execution.module else "-"
-    workflow_name = run_profile.execution.workflow if run_profile.execution and run_profile.execution.workflow else "default"
+    workflow_name = run_profile.execution.workflow if run_profile.execution and run_profile.execution.workflow else "自动解析"
     acquisition = run_profile.resource.acquisition
     if acquisition.mode == AcquisitionMode.CREATE:
         mode_text = "创建环境"
         detail = f"Provider: {acquisition.provider}"
     else:
         mode_text = "选择环境"
-        pool_text = acquisition.resource_pool or "-"
-        detail = f"资源池: {pool_text} | 选择器: {acquisition.selector_name or '-'}"
+        candidates_text = acquisition.candidates or "-"
+        detail = f"候选查询: {candidates_text}"
     return ("运行模板", f"{module_name}/{workflow_name} | {mode_text} | {detail}")
 
 

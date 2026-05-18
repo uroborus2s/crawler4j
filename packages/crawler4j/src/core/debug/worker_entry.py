@@ -9,7 +9,6 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from crawler4j_contracts import EnvAction
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.debug.launcher import configure_debugpy_for_frozen_bundle
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
@@ -118,11 +117,9 @@ async def main_async(config_path: str) -> int:
     request = ExecutionRequest(
         task=Task(id=payload["id"], job_id=payload.get("job_id", f"debug:{payload['id']}")),
         module_name=payload["module_name"],
-        hooks_module=payload.get("hooks_module") or payload["module_name"],
-        workflow_name=payload.get("workflow") or "default",
-        execution_params=dict(payload.get("execution_params") or {}),
-        job_params=dict(payload.get("job_params") or {}),
-        runtime_params=dict(payload.get("params") or {}),
+        workflow_name=str(payload.get("workflow") or "").strip(),
+        object_bindings=dict(payload.get("object_bindings") or {}),
+        object_params=dict(payload.get("object_params") or {}),
         devel_mode=bool(payload.get("devel_mode", True)),
         state={
             "debug_session_id": payload["id"],
@@ -130,15 +127,16 @@ async def main_async(config_path: str) -> int:
             "task_id": payload["id"],
         },
         provider_name=payload.get("provider") or "playwright_local",
-        selector_name=payload.get("selector_name", ""),
         acquisition_mode=AcquisitionMode(payload.get("acquisition_mode", AcquisitionMode.CREATE.value)),
+        fixed_env_id=payload.get("fixed_env_id"),
+        candidates_name=str(payload.get("candidates") or ""),
+        candidate_params=dict(payload.get("candidate_params") or {}),
         creation_params=dict(payload.get("creation_params") or {}),
         creation_lifecycle=CreationLifecycle(
             payload.get("creation_lifecycle", CreationLifecycle.PERSISTENT.value)
         ),
-        selector_wait_timeout=int(payload.get("wait_timeout", 60)),
+        wait_timeout=int(payload.get("wait_timeout", 60)),
         execution_timeout=int(payload.get("timeout", 0)),
-        default_env_action=EnvAction.KEEP_ALIVE if payload.get("keep_environment") else None,
     )
 
     runner = ExecutionRunner()

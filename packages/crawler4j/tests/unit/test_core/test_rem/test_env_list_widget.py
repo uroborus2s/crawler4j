@@ -9,6 +9,13 @@ from PyQt6.QtWidgets import QDialog
 
 from src.core.atm.models import Job, JobType, TriggerConfig, TriggerType
 from src.core.atm.run_profile import ExecutionContext, RunProfile
+from src.core.rem.cleanup_service import (
+    EnvCleanupExecutionItem,
+    EnvCleanupExecutionResult,
+    EnvCleanupPreview,
+    EnvCleanupPreviewItem,
+    EnvCleanupSource,
+)
 from src.core.rem import EnvKind, EnvStatus
 from src.core.rem.models import ProxyMode
 from src.ui.components.combo_box import StyledComboBox
@@ -100,6 +107,28 @@ class _ControlledLoaderThread:
         self.error.emit(message)
 
 
+class _FakeCleanupService:
+    def __init__(self, preview: EnvCleanupPreview, result: EnvCleanupExecutionResult | None = None):
+        self.preview_result = preview
+        self.cleanup_result = result or EnvCleanupExecutionResult()
+        self.preview_calls = 0
+        self.cleanup_calls = 0
+
+    async def preview(self):
+        self.preview_calls += 1
+        return self.preview_result
+
+    async def cleanup(self):
+        self.cleanup_calls += 1
+        return self.cleanup_result
+
+
+def _patch_cleanup_service(monkeypatch, service: _FakeCleanupService) -> None:
+    import src.core.rem.cleanup_service as cleanup_module
+
+    monkeypatch.setattr(cleanup_module, "get_env_cleanup_service", lambda: service)
+
+
 def test_create_env_dialog_prefills_suggested_name_without_submitting_override(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
 
@@ -154,6 +183,34 @@ def test_create_env_dialog_uses_styled_combo_boxes(qtbot, monkeypatch):
     assert isinstance(dialog.proxy_source_combo, StyledComboBox)
     assert isinstance(dialog.pool_combo, StyledComboBox)
     assert "QComboBox {" not in dialog.styleSheet()
+
+
+def test_cleanup_preview_dialog_renders_cleanup_targets_as_table(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    source = EnvCleanupSource(module_name="host", cleanup_name="orphan")
+
+    dialog = env_list_widget.CleanupPreviewDialog(
+        eligible_items=[
+            EnvCleanupPreviewItem(
+                env_id=352,
+                sources=(source,),
+                env_name="task-480788ce-3632-4799-a56f-5eecec4ffdf6-1776840410",
+                provider="virtualbrowser",
+                status="ready",
+                eligible=True,
+            ),
+        ],
+        skipped_count=1,
+        error_count=0,
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.windowTitle() == "确认批量清理"
+    assert dialog.preview_table.table.rowCount() == 1
+    assert dialog.preview_table.table.item(0, 1).text() == "352"
+    assert dialog.preview_table.table.item(0, 2).text().startswith("task-480788ce-3632-4799")
+    assert dialog.preview_table.table.item(0, 3).text() == "VirtualBrowser"
+    assert dialog.preview_table.table.item(0, 4).text() == "host.orphan"
 
 
 def test_env_list_widget_create_finished_refreshes_without_success_dialog(qtbot, monkeypatch):
@@ -270,9 +327,114 @@ def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
 
     assert widget.create_btn.isEnabled() is True
     assert widget.import_existing_btn.isEnabled() is True
+    assert widget.cleanup_btn.isEnabled() is True
     assert widget.refresh_btn.isEnabled() is True
     assert widget.table.isEnabled() is True
     assert widget._progress_dialog is None
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_cleanup_confirms_executes_and_refreshes(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    source = EnvCleanupSource(module_name="demo_module", cleanup_name="unused_accounts")
+    service = _FakeCleanupService(
+        EnvCleanupPreview(
+            items=(
+                EnvCleanupPreviewItem(
+                    env_id=1,
+                    sources=(source,),
+                    env_name="env-1",
+                    provider="virtualbrowser",
+                    status="ready",
+                    eligible=True,
+                ),
+            )
+        ),
+        EnvCleanupExecutionResult(
+            items=(
+                EnvCleanupExecutionItem(
+                    env_id=1,
+                    outcome="deleted",
+                    sources=(source,),
+                    env_name="env-1",
+                    provider="virtualbrowser",
+                    status="ready",
+                ),
+            )
+        ),
+    )
+    _patch_cleanup_service(monkeypatch, service)
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget._show_loading = MagicMock()
+    widget._confirm_cleanup_plan_async = AsyncMock(return_value=True)
+    widget._show_message_async = AsyncMock()
+    widget.load_data = MagicMock()
+
+    await widget._cleanup_envs_async()
+    await _drain_widget_tasks(widget)
+
+    assert service.preview_calls == 1
+    assert service.cleanup_calls == 1
+    widget._confirm_cleanup_plan_async.assert_awaited_once()
+    widget._show_message_async.assert_awaited_once()
+    widget.load_data.assert_called_once_with(run_gc=False, reload_from_db=True)
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_cleanup_skips_without_safe_candidates(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    source = EnvCleanupSource(module_name="demo_module", cleanup_name="unused_accounts")
+    service = _FakeCleanupService(
+        EnvCleanupPreview(
+            items=(
+                EnvCleanupPreviewItem(
+                    env_id=2,
+                    sources=(source,),
+                    env_name="env-2",
+                    provider="virtualbrowser",
+                    status="running",
+                    eligible=False,
+                    reason="状态不允许清理: running",
+                ),
+            )
+        )
+    )
+    _patch_cleanup_service(monkeypatch, service)
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget._show_loading = MagicMock()
+    widget._confirm_cleanup_plan_async = AsyncMock(return_value=True)
+    widget._show_message_async = AsyncMock()
+
+    await widget._cleanup_envs_async()
+
+    assert service.preview_calls == 1
+    assert service.cleanup_calls == 0
+    widget._confirm_cleanup_plan_async.assert_not_awaited()
+    widget._show_message_async.assert_awaited_once_with(
+        "批量清理",
+        "当前候选环境均不满足清理安全条件。",
+        kind="warning",
+    )
 
 
 def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypatch):
@@ -293,7 +455,7 @@ def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypat
 
     import asyncio
 
-    asyncio.run(widget._async_env_action("env-1", "start"))
+    asyncio.run(widget._async_env_operation("env-1", "start"))
 
     manager.start_env.assert_awaited_once_with("env-1")
     widget.load_data.assert_called_once_with()
@@ -349,29 +511,14 @@ def test_env_list_widget_rows_expose_actions_and_row_click_signal(qtbot, monkeyp
     assert selected == ["env-1"]
 
 
-def test_env_list_widget_merges_env_metadata_into_availability(qtbot, monkeypatch):
+def test_env_list_widget_preserves_env_metadata_without_resource_pool_availability(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
-
-    from src.core.rem.manager import (
-        RESOURCE_POOL_METADATA_NAMESPACE,
-        build_resource_pool_card,
-    )
 
     metadata_by_env = {
         101: {
-            RESOURCE_POOL_METADATA_NAMESPACE: {
-                "demo_module:ready_pool": build_resource_pool_card(
-                    "demo_module",
-                    "ready_pool",
-                    eligible=True,
-                ),
-                "demo_module:blocked_pool": build_resource_pool_card(
-                    "demo_module",
-                    "blocked_pool",
-                    eligible=False,
-                    reason="manual_disabled",
-                ),
-            }
+            "demo.custom": {
+                "account_status": {"state": "ready"},
+            },
         },
         102: {},
     }
@@ -396,13 +543,9 @@ def test_env_list_widget_merges_env_metadata_into_availability(qtbot, monkeypatc
     ])
     rows = widget.table.displayed_rows()
 
-    assert rows[0]["availability"]["text"] == "部分可用 (1/2)"
-    assert rows[0]["availability"]["tone"] == "warning"
     assert rows[0]["env_metadata"] == metadata_by_env[101]
-    assert "demo_module/ready_pool: 可用" in rows[0]["availability"]["tooltip"]
-    assert "demo_module/blocked_pool: 不可用：manual_disabled" in rows[0]["availability"]["tooltip"]
-    assert "demo_module" in rows[0]["availability"]["search_text"]
-    assert rows[1]["availability"]["text"] == "未标记"
+    assert "availability" not in rows[0]
+    assert rows[1]["env_metadata"] == {}
 
 
 @pytest.mark.asyncio

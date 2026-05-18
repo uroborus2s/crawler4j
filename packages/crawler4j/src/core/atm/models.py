@@ -41,7 +41,6 @@ class TaskStatus(str, enum.Enum):
     """任务运行状态。"""
     PENDING = "pending"      # 等待资源 (排队中)
     RUNNING = "running"      # 执行中
-    WAITING_CONFIRMATION = "waiting_confirmation"  # 等待人工确认
     SUCCEEDED = "succeeded"  # 成功
     FAILED = "failed"        # 失败
     CANCELLED = "cancelled"  # 取消
@@ -85,7 +84,7 @@ class Job:
     trigger: TriggerConfig = field(default_factory=TriggerConfig)
     concurrency_target: int = 1  # 期望并发数
     
-    # 运行时参数 (覆盖 RunProfile 默认值)
+    # 旧作业元数据；0.4.0 不会注入 ctx.runtime 或 workflow。
     params: Dict[str, Any] = field(default_factory=dict)
     
     # 状态
@@ -121,7 +120,6 @@ class Task:
     # 执行结果
     message: str = ""
     error: str = ""
-    signal: Dict[str, Any] | None = None
     
     # 时间戳
     created_at: int = field(default_factory=lambda: int(time.time()))

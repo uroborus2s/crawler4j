@@ -15,30 +15,38 @@ from src.core.atm.run_profile import (
     RunProfile,
 )
 from src.ui.components.button import StyledButton
-from src.ui.components.check_box import StyledCheckBox
+from src.ui.components.check_box import StyledCheckBox, ToggleSwitch
+from src.ui.components.combo_box import StyledComboBox
+from src.ui.components.line_edit import StyledLineEdit
+from src.ui.components.spin_box import StyledDoubleSpinBox, StyledSpinBox
 from src.ui.components.text_edit import StyledPlainTextEdit
 from src.ui.components.yaml_code_editor import YamlCodeEditor
 
 
+def _candidate_descriptor(*entries: tuple[str, str]):
+    return SimpleNamespace(
+        env_candidates={
+            name: SimpleNamespace(meta=SimpleNamespace(label=label))
+            for name, label in entries
+        }
+    )
+
+
 def _patch_dialog_dependencies(monkeypatch):
     import src.core.atm.ui.run_profile_dialog as dialog_module
-    import src.core.atm.controller as controller_module
 
+    workflows = [
+        SimpleNamespace(name="repair", display_name="修复流程"),
+        SimpleNamespace(name="collect", display_name=""),
+    ]
     module = SimpleNamespace(
         name="demo_module",
-        manifest=SimpleNamespace(
-            workflows=[
-                SimpleNamespace(name="repair", display_name="修复流程"),
-                SimpleNamespace(name="collect", display_name=""),
-            ],
-            resource_pools=[
-                SimpleNamespace(name="bound_account_ready", display_name="已绑定账号环境池"),
-            ],
-        ),
+        manifest=SimpleNamespace(),
     )
     registry = SimpleNamespace(
         list_modules=lambda: [module],
         get_module=lambda name: module if name == "demo_module" else None,
+        get_workflows=lambda name: workflows if name == "demo_module" else [],
         refresh=lambda: None,
     )
     pool = SimpleNamespace(id="pool-1", name="主池")
@@ -46,50 +54,34 @@ def _patch_dialog_dependencies(monkeypatch):
     monkeypatch.setattr(dialog_module, "get_module_registry", lambda: registry)
     monkeypatch.setattr(
         dialog_module,
+        "get_module_service",
+        lambda: SimpleNamespace(
+            get_runtime_descriptor_v2=lambda name: _candidate_descriptor(
+                ("bound_account_ready", "已绑定账号环境池")
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        dialog_module,
         "get_ip_pool_manager",
         lambda: SimpleNamespace(list_pools=lambda: [pool]),
     )
-    def module_service():
-        return SimpleNamespace(
-            list_env_selectors=lambda module_name: [
-                SimpleNamespace(
-                    name="return_none",
-                    display_name="返回 None",
-                    description="占位选择器",
-                    returns_none=True,
-                ),
-                SimpleNamespace(
-                    name="random_ready",
-                    display_name="随机选择就绪环境",
-                    description="随机选择已就绪环境",
-                    returns_none=False,
-                ),
-            ]
-            if module_name == "demo_module"
-            else []
-        )
-    monkeypatch.setattr(dialog_module, "get_module_service", module_service)
-    monkeypatch.setattr(controller_module, "get_module_service", module_service)
 
 
 def _patch_ctrip_dialog_dependencies(monkeypatch):
     import src.core.atm.ui.run_profile_dialog as dialog_module
-    import src.core.atm.controller as controller_module
 
+    workflows = [
+        SimpleNamespace(name="web_quiz_workflow", display_name="网页做题"),
+    ]
     module = SimpleNamespace(
         name="ctrip_crawler",
-        manifest=SimpleNamespace(
-            workflows=[
-                SimpleNamespace(name="web_quiz_workflow", display_name="网页做题"),
-            ],
-            resource_pools=[
-                SimpleNamespace(name="bound_account_ready", display_name="已绑定账号环境池"),
-            ],
-        ),
+        manifest=SimpleNamespace(),
     )
     registry = SimpleNamespace(
         list_modules=lambda: [module],
         get_module=lambda name: module if name == "ctrip_crawler" else None,
+        get_workflows=lambda name: workflows if name == "ctrip_crawler" else [],
         refresh=lambda: None,
     )
     pool = SimpleNamespace(id="pool-1", name="主池")
@@ -97,24 +89,194 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
     monkeypatch.setattr(dialog_module, "get_module_registry", lambda: registry)
     monkeypatch.setattr(
         dialog_module,
+        "get_module_service",
+        lambda: SimpleNamespace(
+            get_runtime_descriptor_v2=lambda name: _candidate_descriptor(
+                ("bound_account_ready", "已绑定账号环境池")
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        dialog_module,
         "get_ip_pool_manager",
         lambda: SimpleNamespace(list_pools=lambda: [pool]),
     )
-    def module_service():
+
+
+def _object_assembly_descriptor():
+    def inject(name: str, inject_type: str, target: str):
+        return SimpleNamespace(name=name, type=inject_type, target=target)
+
+    def parameter(name: str, parameter_type: str, **kwargs):
+        return SimpleNamespace(name=name, type=parameter_type, **kwargs)
+
+    def option(label: str, value: object):
+        return SimpleNamespace(label=label, value=value)
+
+    def entry(
+        name: str,
+        *,
+        kind: str,
+        label: str = "",
+        implements: str = "",
+        inject_specs: tuple[object, ...] = (),
+        parameters: tuple[object, ...] = (),
+    ):
         return SimpleNamespace(
-            list_env_selectors=lambda module_name: [
-                SimpleNamespace(
-                    name="reuse_bound_account_env",
-                    display_name="复用已绑定账号环境",
-                    description="在当前资源池候选内复用已绑定账号环境",
-                    returns_none=True,
-                ),
-            ]
-            if module_name == "ctrip_crawler"
-            else []
+            meta=SimpleNamespace(
+                kind=kind,
+                name=name,
+                label=label,
+                implements=implements,
+                inject=inject_specs,
+                parameters=parameters,
+            )
         )
-    monkeypatch.setattr(dialog_module, "get_module_service", module_service)
-    monkeypatch.setattr(controller_module, "get_module_service", module_service)
+
+    return SimpleNamespace(
+        interfaces={
+            "orchestrator": entry("orchestrator", kind="interface", label="编排能力"),
+            "labor": entry("labor", kind="interface", label="劳保能力"),
+        },
+        components={
+            "quiz_orchestrator": entry(
+                "quiz_orchestrator",
+                kind="component",
+                label="做题编排组件",
+                implements="orchestrator",
+                inject_specs=(inject("labor", "interface", "labor"),),
+            ),
+            "api_labor": entry(
+                "api_labor",
+                kind="component",
+                label="API 劳保组件",
+                implements="labor",
+                parameters=(
+                    parameter("base_url", "string", label="接口地址", required=True, default="https://api.example.com"),
+                    parameter("timeout", "integer", label="超时时间", default=30, min=1, max=120, step=1),
+                    parameter(
+                        "mode",
+                        "enum",
+                        label="模式",
+                        default="sync",
+                        options=(option("Sync", "sync"), option("Async", "async")),
+                    ),
+                    parameter("enabled", "boolean", label="启用", default=True),
+                    parameter("notes", "text", label="备注", default=""),
+                    parameter("ratio", "number", label="比例", default=0.5, min=0, max=1, step=0.1),
+                    parameter("raw_payload", "json", label="原始载荷", default='{"limit": 10}'),
+                ),
+            ),
+            "local_labor": entry(
+                "local_labor",
+                kind="component",
+                label="本地劳保组件",
+                implements="labor",
+            ),
+        },
+        workflows={
+            "quiz_workflow": entry(
+                "quiz_workflow",
+                kind="workflow",
+                label="统一做题",
+                inject_specs=(inject("orchestrator", "interface", "orchestrator"),),
+                parameters=(
+                    parameter("member_tier", "enum", label="会员类型", default="normal"),
+                ),
+            ),
+        },
+        env_candidates={
+            "ctrip_account_pool": SimpleNamespace(meta=SimpleNamespace(label="携程账号环境池")),
+        },
+        implementations={
+            "orchestrator": ("quiz_orchestrator",),
+            "labor": ("api_labor", "local_labor"),
+        },
+    )
+
+
+def _patch_parameterized_dialog_dependencies(monkeypatch):
+    import src.core.atm.ui.run_profile_dialog as dialog_module
+
+    workflow = SimpleNamespace(
+        name="quiz_workflow",
+        display_name="统一做题",
+        parameters=[
+            SimpleNamespace(
+                name="member_tier",
+                label="会员类型",
+                type="enum",
+                required=True,
+                default="normal",
+                options=[
+                    SimpleNamespace(label="普通会员", value="normal"),
+                    SimpleNamespace(label="高级会员", value="premium"),
+                ],
+            ),
+            SimpleNamespace(
+                name="min_member_days",
+                label="会员天数下限",
+                type="integer",
+                default=30,
+                min=0,
+                max=365,
+                step=1,
+            ),
+            SimpleNamespace(
+                name="pass_score",
+                label="通过分数",
+                type="number",
+                default=90.5,
+                min=0,
+                max=100,
+                step=0.5,
+            ),
+            SimpleNamespace(
+                name="dry_run",
+                label="试运行",
+                type="boolean",
+                default=False,
+            ),
+            SimpleNamespace(
+                name="remark",
+                label="备注",
+                type="string",
+                default="普通会员30-90天",
+                placeholder="模板备注",
+            ),
+            SimpleNamespace(
+                name="instructions",
+                label="执行说明",
+                type="text",
+                default="",
+            ),
+        ],
+    )
+    module = SimpleNamespace(
+        name="ctrip_crawler",
+        manifest=SimpleNamespace(),
+    )
+    registry = SimpleNamespace(
+        list_modules=lambda: [module],
+        get_module=lambda name: module if name == "ctrip_crawler" else None,
+        get_workflows=lambda name: [workflow] if name == "ctrip_crawler" else [],
+        refresh=lambda: None,
+    )
+
+    monkeypatch.setattr(dialog_module, "get_module_registry", lambda: registry)
+    monkeypatch.setattr(
+        dialog_module,
+        "get_module_service",
+        lambda: SimpleNamespace(
+            get_runtime_descriptor_v2=lambda name: _object_assembly_descriptor()
+        ),
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "get_ip_pool_manager",
+        lambda: SimpleNamespace(list_pools=lambda: []),
+    )
+
 
 
 def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
@@ -293,14 +455,77 @@ def test_run_profile_dialog_builds_select_mode_profile(qtbot, monkeypatch):
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("random_ready"))
+    dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("bound_account_ready"))
 
     profile = dialog._build_run_profile_from_form()
 
     assert profile.resource.acquisition.mode == AcquisitionMode.SELECT
-    assert profile.resource.acquisition.selector_name == "random_ready"
+    assert profile.resource.acquisition.candidates == "bound_account_ready"
+    assert "selector_name" not in profile.resource.acquisition.model_dump()
     assert profile.resource.acquisition.provider == ""
     assert profile.resource.acquisition.wait_timeout == 60
+
+
+def test_run_profile_dialog_preserves_loaded_candidate_params(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                provider="",
+                env_type=EnvType.VIRTUAL_BROWSER,
+                candidates="bound_account_ready",
+                candidate_params={"tier": "gold", "limit": 20},
+            ),
+        ),
+        execution=ExecutionContext(module="demo_module", workflow="collect"),
+    )
+    dialog = RunProfileDialog(run_profile=run_profile)
+    qtbot.addWidget(dialog)
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.resource.acquisition.candidate_params == {"tier": "gold", "limit": 20}
+
+
+def test_candidate_params_dialog_parses_mapping_yaml(qtbot):
+    from src.core.atm.ui.run_profile_dialog import CandidateParamsDialog
+
+    dialog = CandidateParamsDialog({"limit": 5})
+    qtbot.addWidget(dialog)
+
+    dialog.editor.setPlainText("tier: gold\nlimit: 20\nregion:\n  code: hk\n")
+
+    assert dialog._parse_candidate_params() == {
+        "tier": "gold",
+        "limit": 20,
+        "region": {"code": "hk"},
+    }
+
+
+def test_candidate_params_dialog_starts_blank_for_empty_params(qtbot):
+    from src.core.atm.ui.run_profile_dialog import CandidateParamsDialog
+
+    dialog = CandidateParamsDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.editor.toPlainText() == ""
+    assert dialog._parse_candidate_params() == {}
+
+
+def test_candidate_params_dialog_rejects_non_mapping_yaml(qtbot):
+    from src.core.atm.ui.run_profile_dialog import CandidateParamsDialog
+
+    dialog = CandidateParamsDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.editor.setPlainText("- tier\n- limit\n")
+
+    with pytest.raises(ValueError, match="候选参数必须是 YAML 对象"):
+        dialog._parse_candidate_params()
 
 
 def test_run_profile_dialog_separates_execution_timeout_from_wait_timeout(qtbot, monkeypatch):
@@ -313,7 +538,7 @@ def test_run_profile_dialog_separates_execution_timeout_from_wait_timeout(qtbot,
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("random_ready"))
+    dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("bound_account_ready"))
     dialog.wait_timeout_spin.setValue(30)
     dialog.execution_timeout_spin.setValue(0)
 
@@ -323,7 +548,7 @@ def test_run_profile_dialog_separates_execution_timeout_from_wait_timeout(qtbot,
     assert profile.execution.timeout == 0
 
 
-def test_run_profile_dialog_builds_fixed_pool_select_profile_without_selector(qtbot, monkeypatch):
+def test_run_profile_dialog_builds_candidate_select_profile_without_selector(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -333,18 +558,17 @@ def test_run_profile_dialog_builds_fixed_pool_select_profile_without_selector(qt
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.selector_name_combo.setCurrentIndex(-1)
-    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("bound_account_ready"))
+    dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("bound_account_ready"))
 
     profile = dialog._build_run_profile_from_form()
 
     assert profile.resource.acquisition.mode == AcquisitionMode.SELECT
-    assert profile.resource.acquisition.selector_name == ""
-    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
+    assert "selector_name" not in profile.resource.acquisition.model_dump()
+    assert profile.resource.acquisition.candidates == "bound_account_ready"
     assert profile.resource.acquisition.provider == ""
 
 
-def test_run_profile_dialog_lists_declared_resource_pools(qtbot, monkeypatch):
+def test_run_profile_dialog_lists_declared_env_candidates(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -354,14 +578,14 @@ def test_run_profile_dialog_lists_declared_resource_pools(qtbot, monkeypatch):
 
     dialog.script_selector.set_value("demo_module", "collect")
 
-    assert dialog.resource_pool_combo.isEnabled() is True
-    assert dialog.resource_pool_combo.findData("") >= 0
-    pool_index = dialog.resource_pool_combo.findData("bound_account_ready")
-    assert pool_index >= 0
-    assert dialog.resource_pool_combo.itemText(pool_index) == "已绑定账号环境池 (bound_account_ready)"
+    assert dialog.candidates_combo.isEnabled() is True
+    assert dialog.candidates_combo.findData("") == -1
+    candidate_index = dialog.candidates_combo.findData("bound_account_ready")
+    assert candidate_index >= 0
+    assert dialog.candidates_combo.itemText(candidate_index) == "已绑定账号环境池 (bound_account_ready)"
 
 
-def test_run_profile_dialog_warns_when_selector_returns_none(qtbot, monkeypatch):
+def test_run_profile_dialog_select_mode_has_no_selector_controls(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -369,15 +593,12 @@ def test_run_profile_dialog_warns_when_selector_returns_none(qtbot, monkeypatch)
     dialog = RunProfileDialog()
     qtbot.addWidget(dialog)
 
-    dialog.script_selector.set_value("demo_module", "collect")
-    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("return_none"))
-
-    assert dialog.selector_none_hint.isHidden() is False
-    assert "返回了 none" in dialog.selector_none_hint.text()
+    assert not hasattr(dialog, "selector_name_combo")
+    assert not hasattr(dialog, "selector_none_hint")
+    assert not hasattr(dialog, "selector_empty_hint")
 
 
-def test_run_profile_dialog_does_not_autofill_pool_for_returns_none_selector(qtbot, monkeypatch):
+def test_run_profile_dialog_selects_declared_candidate_without_legacy_selector(qtbot, monkeypatch):
     _patch_ctrip_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -387,34 +608,14 @@ def test_run_profile_dialog_does_not_autofill_pool_for_returns_none_selector(qtb
 
     dialog.script_selector.set_value("ctrip_crawler", "web_quiz_workflow")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("reuse_bound_account_env"))
 
     profile = dialog._build_run_profile_from_form()
 
-    assert dialog.selector_none_hint.isHidden() is False
-    assert dialog.resource_pool_combo.currentData() == ""
-    assert profile.resource.acquisition.resource_pool == ""
+    assert profile.resource.acquisition.candidates == "bound_account_ready"
+    assert "selector_name" not in profile.resource.acquisition.model_dump()
 
 
-def test_run_profile_dialog_keeps_manual_pool_for_returns_none_selector(qtbot, monkeypatch):
-    _patch_ctrip_dialog_dependencies(monkeypatch)
-
-    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
-
-    dialog = RunProfileDialog()
-    qtbot.addWidget(dialog)
-
-    dialog.script_selector.set_value("ctrip_crawler", "web_quiz_workflow")
-    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.selector_name_combo.setCurrentIndex(dialog.selector_name_combo.findData("reuse_bound_account_env"))
-    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("bound_account_ready"))
-
-    profile = dialog._build_run_profile_from_form()
-
-    assert profile.resource.acquisition.resource_pool == "bound_account_ready"
-
-
-def test_run_profile_dialog_rejects_undeclared_resource_pool(qtbot, monkeypatch):
+def test_run_profile_dialog_rejects_undeclared_env_candidates(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 
     from src.core.atm.ui.run_profile_dialog import RunProfileDialog
@@ -424,11 +625,10 @@ def test_run_profile_dialog_rejects_undeclared_resource_pool(qtbot, monkeypatch)
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
-    dialog.selector_name_combo.setCurrentIndex(-1)
-    dialog.resource_pool_combo.addItem("missing_pool", "missing_pool")
-    dialog.resource_pool_combo.setCurrentIndex(dialog.resource_pool_combo.findData("missing_pool"))
+    dialog.candidates_combo.addItem("missing_candidates", "missing_candidates")
+    dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("missing_candidates"))
 
-    with pytest.raises(ValueError, match="未在 module.yaml.resource_pools 中声明"):
+    with pytest.raises(ValueError, match="环境候选函数未声明"):
         dialog._build_run_profile_from_form()
 
 
@@ -797,3 +997,158 @@ def test_run_profile_dialog_keeps_dialog_open_when_yaml_is_invalid_on_save(qtbot
     assert captured[0][1] == "YAML 无效"
     assert dialog.result() != int(QDialog.DialogCode.Accepted)
     assert dialog.stack.currentIndex() == 1
+
+
+def test_run_profile_dialog_renders_object_assembly_and_ignores_workflow_parameters(qtbot, monkeypatch):
+    _patch_parameterized_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("ctrip_crawler", "quiz_workflow")
+
+    assert dialog.basic_group.title() == "一、模板信息"
+    assert dialog.resource_group.title() == "二、环境与资源"
+    assert not hasattr(dialog, "_workflow_param_widgets")
+    assert "member_tier" not in dialog._object_param_widgets
+    assert isinstance(dialog._object_binding_widgets["orchestrator"], StyledComboBox)
+    assert isinstance(dialog._object_binding_widgets["orchestrator.labor"], StyledComboBox)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["base_url"], StyledLineEdit)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["timeout"], StyledSpinBox)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["ratio"], StyledDoubleSpinBox)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["enabled"], ToggleSwitch)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["mode"], StyledComboBox)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["notes"], StyledPlainTextEdit)
+    assert isinstance(dialog._object_param_widgets["api_labor"]["raw_payload"], StyledLineEdit)
+
+    tree = dialog.object_assembly_tree
+    assert tree.topLevelItemCount() == 1
+    workflow_item = tree.topLevelItem(0)
+    assert workflow_item.text(0) == "工作流: 统一做题 (quiz_workflow)"
+    orchestrator_item = workflow_item.child(0)
+    assert orchestrator_item.text(0) == "编排能力 (orchestrator)"
+    assert tree.itemWidget(orchestrator_item, 1) is dialog._object_binding_widgets["orchestrator"]
+    assert dialog._object_binding_widgets["orchestrator"].currentText() == "做题编排组件 (quiz_orchestrator)"
+    labor_item = orchestrator_item.child(0)
+    assert labor_item.text(0) == "劳保能力 (labor)"
+    assert tree.itemWidget(labor_item, 1) is dialog._object_binding_widgets["orchestrator.labor"]
+    assert dialog._object_binding_widgets["orchestrator.labor"].currentText() == "API 劳保组件 (api_labor)"
+    assert labor_item.child(0).text(0) == "参数: 接口地址 *"
+    assert tree.itemWidget(labor_item.child(0), 1) is dialog._object_param_widgets["api_labor"]["base_url"]
+
+    labor_combo = dialog._object_binding_widgets["orchestrator.labor"]
+    labor_combo.setCurrentIndex(labor_combo.findData("api_labor"))
+    dialog._object_param_widgets["api_labor"]["base_url"].setText("https://labor.example.com")
+    dialog._object_param_widgets["api_labor"]["timeout"].setValue(60)
+    dialog._object_param_widgets["api_labor"]["ratio"].setValue(0.8)
+    dialog._object_param_widgets["api_labor"]["enabled"].setChecked(False)
+    dialog._object_param_widgets["api_labor"]["mode"].setCurrentIndex(
+        dialog._object_param_widgets["api_labor"]["mode"].findData("async")
+    )
+    dialog._object_param_widgets["api_labor"]["notes"].setPlainText("只处理已绑定环境。")
+    dialog._object_param_widgets["api_labor"]["raw_payload"].setText('{"limit": 20}')
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.execution is not None
+    assert profile.execution.object_bindings == {
+        "orchestrator": "quiz_orchestrator",
+        "orchestrator.labor": "api_labor",
+    }
+    assert profile.execution.object_params == {
+        "api_labor": {
+            "base_url": "https://labor.example.com",
+            "timeout": 60,
+            "mode": "async",
+            "enabled": False,
+            "notes": "只处理已绑定环境。",
+            "ratio": 0.8,
+            "raw_payload": '{"limit": 20}',
+        }
+    }
+
+
+def test_run_profile_dialog_defers_object_assembly_rerender_during_binding_change(qtbot, monkeypatch):
+    _patch_parameterized_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+    dialog.script_selector.set_value("ctrip_crawler", "quiz_workflow")
+
+    labor_combo = dialog._object_binding_widgets["orchestrator.labor"]
+    target_index = labor_combo.findData("local_labor")
+    assert target_index >= 0
+
+    calls: list[dict | None] = []
+    original_sync = dialog._sync_object_assembly_form
+
+    def wrapped_sync(values=None):
+        calls.append(values)
+        return original_sync(values)
+
+    monkeypatch.setattr(dialog, "_sync_object_assembly_form", wrapped_sync)
+
+    labor_combo.setCurrentIndex(target_index)
+
+    assert calls == []
+
+    qtbot.waitUntil(lambda: len(calls) == 1, timeout=1000)
+
+    assert len(calls) == 1
+    assert dialog._object_binding_widgets["orchestrator.labor"].currentData() == "local_labor"
+    assert "api_labor" not in dialog._object_param_widgets
+
+
+def test_run_profile_dialog_loads_object_assembly_from_run_profile(qtbot, monkeypatch):
+    _patch_parameterized_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    run_profile = RunProfile(
+        resource=ResourceConfig(
+            acquisition=AcquisitionConfig(
+                mode=AcquisitionMode.SELECT,
+                candidates="ctrip_account_pool",
+            ),
+        ),
+        execution=ExecutionContext(
+            module="ctrip_crawler",
+            workflow="quiz_workflow",
+            object_bindings={
+                "orchestrator": "quiz_orchestrator",
+                "orchestrator.labor": "api_labor",
+            },
+            object_params={
+                "api_labor": {
+                    "base_url": "https://saved.example.com",
+                    "timeout": 75,
+                    "mode": "async",
+                    "enabled": False,
+                    "notes": "优先处理普通会员。",
+                    "ratio": 0.9,
+                    "raw_payload": '{"limit": 30}',
+                }
+            },
+        ),
+    )
+
+    dialog = RunProfileDialog(run_profile=run_profile)
+    qtbot.addWidget(dialog)
+
+    assert dialog._object_binding_widgets["orchestrator"].currentData() == "quiz_orchestrator"
+    assert dialog._object_binding_widgets["orchestrator.labor"].currentData() == "api_labor"
+    assert dialog._object_param_widgets["api_labor"]["base_url"].text() == "https://saved.example.com"
+    assert dialog._object_param_widgets["api_labor"]["timeout"].value() == 75
+    assert dialog._object_param_widgets["api_labor"]["mode"].currentData() == "async"
+    assert dialog._object_param_widgets["api_labor"]["enabled"].isChecked() is False
+    assert dialog._object_param_widgets["api_labor"]["notes"].toPlainText() == "优先处理普通会员。"
+    assert dialog._object_param_widgets["api_labor"]["ratio"].value() == 0.9
+    assert dialog._object_param_widgets["api_labor"]["raw_payload"].text() == '{"limit": 30}'
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.execution is not None

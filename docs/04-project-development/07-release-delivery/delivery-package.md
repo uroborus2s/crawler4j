@@ -7,7 +7,7 @@
 **上游输入：** `acceptance-checklist.md` | `release-notes.md` | `version-governance.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** 交付签收 | `docs/02-user-guide/admin-guide.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-005`, `REL-006`, `TASK-017`, `REQ-004`
-**最后更新：** 2026-04-22
+**最后更新：** 2026-05-18
 
 ## 1. 用途
 
@@ -31,10 +31,10 @@
 | 发布说明基线 | 已具备 | 已能区分当前工作区和最近正式发布 |
 | 验收清单模板 | 已具备 | 可直接用于下一次正式发布 Gate |
 | 部署与运行文档 | 已具备 | 部署说明、运行手册、管理员指南已补齐 |
-| macOS 桌面包 | 已具备本地构建验证 | `uv run package-desktop` 现固定把 macOS bundle 生成到 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`，且分发目录只保留该 `.app`；PyInstaller 中间产物固定放在 `packages/crawler4j/build/pyinstaller/macos/` |
-| macOS 内部 Sparkle 更新包 | 已具备本地构建/上传脚手架 | `uv run install-sparkle --archive ...` 可先把 Sparkle release archive 落到仓库约定目录；`uv run package-macos-internal-release` 生成内部 DMG 与 `appcast.xml`；`uv run deploy-macos-internal-release` 则会继续把 `packages/crawler4j/dist/updates/macos/` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/` |
+| macOS 桌面包 | 已按 0.4.1 重建 | 2026-05-18 `uv run deploy-macos-internal-release` 已重新生成 `packages/crawler4j/dist/desktop/macos/Crawler4j.app` |
+| macOS 内部 Sparkle 更新包 | 已生成并上传 | 2026-05-18 `uv run deploy-macos-internal-release` 已生成 `packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传到配置的 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/` |
 | Windows 桌面包 | 已具备发布脚手架，待正式批次补齐证据 | 仓库已具备 `PyInstaller onedir + Velopack` 发布链，`uv run package-windows-release` 可生成 `Setup.exe` / `.nupkg` / `releases.<channel>.json`，`uv run deploy-windows-release` 可继续通过 OpenSSH `sftp` 把 `packages/crawler4j/dist/updates/windows/` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`；但当前批次仍缺 Windows 真机签名、安装、升级留证与正式下载地址 |
-| 正式交付产物 | 待发布时补齐 | 当前只有本地验证产物，不等于已形成可对外下载的正式发布物 |
+| 正式交付产物 | 部分补齐 | SDK / Contracts PyPI 与 macOS 内部更新包已完成；Git tag / GitHub release、Windows 真机安装/升级证据和正式交付签收仍待补齐 |
 
 ## 4. 使用规则
 
@@ -46,6 +46,9 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-05-18 | 完成 0.4.1 发布批次的 SDK / Contracts PyPI 发布与 macOS Sparkle 更新包构建上传；正式交付仍需 Git tag / GitHub release、Windows 真机证据和签收闭环 | Codex |
+| 2026-05-01 | 补记 0.4.0 本地交付证据：三包 build 和 macOS `package-desktop` 已重新通过；正式交付仍需 Windows 真机证据、publish/远端 release 与交付批次闭环 | Codex |
+| 2026-05-18 | 版本提升到 `0.4.1`，原 0.4.0 本地包证据不再作为当前发布批次证据；SDK / Contracts / 客户端升级包需重建发布 | Codex |
 | 2026-04-22 | 补记 Windows 发布能力边界：当前仓库已具备 `package-windows-release` 与 Velopack 更新目录脚手架，但仍未形成带真机留证的正式 Windows 下载包 | Codex |
 | 2026-04-21 | 补记 macOS 内部 Sparkle 更新包：当前仓库已具备 DMG / `appcast.xml` 生成脚手架，但仍依赖本机提供 Sparkle 分发目录与 EdDSA 发布配置 | Codex |
 | 2026-04-20 | 补记当前交付能力边界：macOS PyInstaller bundle 已完成本地复验，Windows 桌面包仍缺打包链与正式产物 | Codex |

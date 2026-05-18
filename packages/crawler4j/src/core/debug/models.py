@@ -32,13 +32,11 @@ FINAL_DEBUG_STATES = {
 @dataclass
 class DebugSessionRequest:
     job_id: str
-    params: dict[str, Any] = field(default_factory=dict)
     timeout: int = 0
     attach_host: str = "127.0.0.1"
     attach_port: int = 5678
     wait_for_attach: bool = True
     stop_on_entry: bool = False
-    keep_environment: bool = False
 
 
 @dataclass
@@ -48,14 +46,14 @@ class DebugSession:
     job_name: str = ""
     module_name: str = ""
     source_path: str = ""
-    workflow: str = "default"
-    execution_params: dict[str, Any] = field(default_factory=dict)
-    job_params: dict[str, Any] = field(default_factory=dict)
-    params: dict[str, Any] = field(default_factory=dict)
-    hooks_module: str = ""
+    workflow: str = ""
+    object_bindings: dict[str, str] = field(default_factory=dict)
+    object_params: dict[str, dict[str, Any]] = field(default_factory=dict)
     provider: str = "playwright_local"
-    selector_name: str = ""
     acquisition_mode: AcquisitionMode = AcquisitionMode.CREATE
+    fixed_env_id: int | None = None
+    candidates: str = ""
+    candidate_params: dict[str, Any] = field(default_factory=dict)
     creation_params: dict[str, Any] = field(default_factory=dict)
     creation_lifecycle: CreationLifecycle = CreationLifecycle.PERSISTENT
     wait_timeout: int = 60
@@ -64,7 +62,6 @@ class DebugSession:
     attach_port: int = 5678
     wait_for_attach: bool = True
     stop_on_entry: bool = False
-    keep_environment: bool = False
     state: DebugSessionState = DebugSessionState.CREATED
     worker_pid: int | None = None
     env_id: str | None = None
@@ -93,13 +90,13 @@ class DebugSession:
             "module_name": self.module_name,
             "source_path": self.source_path,
             "workflow": self.workflow,
-            "execution_params": self.execution_params,
-            "job_params": self.job_params,
-            "params": self.params,
-            "hooks_module": self.hooks_module,
+            "object_bindings": self.object_bindings,
+            "object_params": self.object_params,
             "provider": self.provider,
-            "selector_name": self.selector_name,
             "acquisition_mode": self.acquisition_mode.value,
+            "fixed_env_id": self.fixed_env_id,
+            "candidates": self.candidates,
+            "candidate_params": self.candidate_params,
             "creation_params": self.creation_params,
             "creation_lifecycle": self.creation_lifecycle.value,
             "wait_timeout": self.wait_timeout,
@@ -108,5 +105,4 @@ class DebugSession:
             "attach_port": self.attach_port,
             "wait_for_attach": self.wait_for_attach,
             "stop_on_entry": self.stop_on_entry,
-            "keep_environment": self.keep_environment,
         }

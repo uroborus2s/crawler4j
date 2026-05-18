@@ -1,9 +1,9 @@
-"""End-to-end CLI tests for the core-native-v1 module protocol."""
+"""End-to-end CLI tests for the core-native-v2 module protocol."""
 
 from __future__ import annotations
 
+import json
 import os
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -70,8 +70,9 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     assert not (target / "module_runtime.py").exists()
     assert (target / "module.yaml").exists()
     assert (target / "pages" / "__init__.py").exists()
-    assert (target / "hooks" / "__init__.py").exists()
-    assert (target / "env_selectors" / "__init__.py").exists()
+    assert (target / ".crawler4j" / "manifest.lock.json").exists()
+    assert not (target / "hooks").exists()
+    assert not (target / "env_selectors").exists()
 
     with (target / "pyproject.toml").open("rb") as fh:
         generated_pyproject = tomllib.load(fh)
@@ -82,8 +83,8 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
         "pytest-asyncio>=1.3.0",
     ]
 
-    task_result = _run_cli("task", "create", "extra_task", cwd=target)
-    assert task_result.returncode == 0, task_result.stderr
+    action_result = _run_cli("page-action", "create", "extra_task", cwd=target)
+    assert action_result.returncode == 0, action_result.stderr
     assert (target / "tasks" / "extra_task.py").exists()
 
     workflow_result = _run_cli("workflow", "create", "repair_orders", cwd=target)
@@ -95,10 +96,8 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     table_result = _run_cli("page", "create", "accounts", cwd=target)
     assert table_result.returncode == 0, table_result.stderr
 
-    selector_result = _run_cli("env-selector", "create", "pick_ready", cwd=target)
-    assert selector_result.returncode == 0, selector_result.stderr
-    hook_result = _run_cli("hook", "create", "on_cleanup", "--force", cwd=target)
-    assert hook_result.returncode == 0, hook_result.stderr
+    lock_result = _run_cli("manifest", "lock", cwd=target)
+    assert lock_result.returncode == 0, lock_result.stderr
 
     check_result = _run_cli("check", "full", cwd=target)
     assert check_result.returncode == 0, check_result.stderr
@@ -121,25 +120,29 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     with (target / "module.yaml").open("r", encoding="utf-8") as fh:
         manifest = yaml.safe_load(fh)
 
-    assert manifest["runtime_api"] == "core-native-v1"
-    assert manifest["default_workflow"] == "main_workflow"
+    assert manifest["runtime_api"] == "core-native-v2"
+    assert "default_workflow" not in manifest
+    assert "workflows" not in manifest
     assert manifest["upgrade_source"] == {
         "type": "github_release",
         "repo": "demo/demo_model",
         "allow_prerelease": False,
     }
-    assert manifest["ui_extension"]["pages"] == [
-        {"id": "dashboard", "label": "Dashboard", "icon": "📄"},
-        {"id": "accounts", "label": "Accounts", "icon": "📄"},
-    ]
-    assert [item["name"] for item in manifest["workflows"]] == ["main_workflow", "repair_orders"]
+    assert "ui_extension" not in manifest
+    lock = json.loads((target / ".crawler4j" / "manifest.lock.json").read_text(encoding="utf-8"))
+    lock_names = {(item["kind"], item["name"]) for item in lock["declarations"]}
+    assert ("page_action", "extra_task") in lock_names
+    assert ("workflow", "repair_orders") in lock_names
+    assert ("page", "dashboard") in lock_names
+    assert ("page", "accounts") in lock_names
 
     with zipfile.ZipFile(archive) as zf:
         members = set(zf.namelist())
     assert "demo_model/module.yaml" in members
+    assert "demo_model/.crawler4j/manifest.lock.json" in members
     assert "demo_model/pages/dashboard.py" in members
     assert "demo_model/pages/accounts.py" in members
-    assert "demo_model/env_selectors/pick_ready.py" in members
+    assert "demo_model/env_selectors/pick_ready.py" not in members
     assert "demo_model/tasks/extra_task.py" in members
     assert "demo_model/workflows/repair_orders.py" in members
     assert "demo_model/module_runtime.py" not in members
@@ -149,6 +152,7 @@ def test_cli_rejects_removed_commands(tmp_path: Path):
     removed_cases = [
         ("init-model", "removed_command_project"),
         ("add", "task_name"),
+        ("task", "create", "task_name"),
         ("new", "task_name"),
         ("list",),
         ("add-workflow", "sync_orders"),
@@ -176,7 +180,7 @@ def test_cli_check_full_rejects_missing_runtime_api(tmp_path: Path):
 
     check_result = _run_cli("check", "full", cwd=target)
     assert check_result.returncode == 1
-    assert "module.yaml.runtime_api 必须是 core-native-v1" in check_result.stdout
+    assert "module.yaml.runtime_api 必须是 core-native-v2" in check_result.stdout
 
 
 def test_cli_check_and_package_reject_legacy_module_runtime(tmp_path: Path):
@@ -186,24 +190,27 @@ def test_cli_check_and_package_reject_legacy_module_runtime(tmp_path: Path):
 
     check_result = _run_cli("check", "full", cwd=target)
     assert check_result.returncode == 1
-    assert "core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py" in check_result.stdout
+    assert "core-native-v2 模块不允许保留旧运行时薄壳: module_runtime.py" in check_result.stdout
 
     package_result = _run_cli("package", "build", cwd=target)
     assert package_result.returncode == 1
-    assert "core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py" in package_result.stdout
+    assert "core-native-v2 模块不允许保留旧运行时薄壳: module_runtime.py" in package_result.stdout
 
 
-def test_cli_check_full_rejects_manifest_page_missing_page_file(tmp_path: Path):
+def test_cli_check_full_rejects_removed_manifest_ui_extension(tmp_path: Path):
     target = tmp_path / "demo_model"
     _init_demo_module(target)
 
-    page_result = _run_cli("page", "create", "dashboard", cwd=target)
-    assert page_result.returncode == 0, page_result.stderr
-    (target / "pages" / "dashboard.py").unlink()
+    manifest_path = target / "module.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["ui_extension"] = {
+        "pages": [{"id": "dashboard", "label": "Dashboard", "icon": "📄"}],
+    }
+    manifest_path.write_text(yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
     check_result = _run_cli("check", "full", cwd=target)
     assert check_result.returncode == 1
-    assert "module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: dashboard" in check_result.stdout
+    assert "module.yaml 不再允许声明 ui_extension" in check_result.stdout
 
 
 def test_cli_check_full_accepts_page_source_not_registered_as_menu_entry(tmp_path: Path):
@@ -212,6 +219,8 @@ def test_cli_check_full_accepts_page_source_not_registered_as_menu_entry(tmp_pat
 
     page_result = _run_cli("page", "create", "account_detail", "--group", "account", "--no-menu", cwd=target)
     assert page_result.returncode == 0, page_result.stderr
+    lock_result = _run_cli("manifest", "lock", cwd=target)
+    assert lock_result.returncode == 0, lock_result.stdout
 
     check_result = _run_cli("check", "full", cwd=target)
     assert check_result.returncode == 0, check_result.stdout
@@ -226,7 +235,7 @@ def test_cli_check_full_accepts_page_source_not_registered_as_menu_entry(tmp_pat
 
     with (target / "module.yaml").open("r", encoding="utf-8") as fh:
         manifest = yaml.safe_load(fh)
-    assert manifest["ui_extension"]["pages"] == []
+    assert "ui_extension" not in manifest
     assert (target / "pages" / "account" / "detail.py").exists()
     with zipfile.ZipFile(archive) as zf:
         members = set(zf.namelist())
@@ -241,6 +250,8 @@ def test_cli_page_create_supports_grouped_source_layout_and_packaging(tmp_path: 
     page_result = _run_cli("page", "create", "account_detail", "--group", "account", cwd=target)
     assert page_result.returncode == 0, page_result.stderr
     assert (target / "pages" / "account" / "detail.py").exists()
+    lock_result = _run_cli("manifest", "lock", cwd=target)
+    assert lock_result.returncode == 0, lock_result.stdout
 
     check_result = _run_cli("check", "full", cwd=target)
     assert check_result.returncode == 0, check_result.stdout
@@ -255,9 +266,7 @@ def test_cli_page_create_supports_grouped_source_layout_and_packaging(tmp_path: 
 
     with (target / "module.yaml").open("r", encoding="utf-8") as fh:
         manifest = yaml.safe_load(fh)
-    assert manifest["ui_extension"]["pages"] == [
-        {"id": "account_detail", "label": "Account Detail", "icon": "📄"},
-    ]
+    assert "ui_extension" not in manifest
 
     with zipfile.ZipFile(archive) as zf:
         members = set(zf.namelist())
@@ -269,10 +278,9 @@ def test_cli_check_and_package_allow_manifest_name_to_differ_from_directory_name
     archive = target / "dist" / "mismatch-layout.zip"
 
     _init_demo_module(target, module_name="demo_model")
-    shutil.rmtree(target / "pages")
-    shutil.rmtree(target / "hooks")
-    shutil.rmtree(target / "env_selectors")
     (target / "pyproject.toml").unlink()
+    lock_result = _run_cli("manifest", "lock", cwd=target)
+    assert lock_result.returncode == 0, lock_result.stdout
 
     check_result = _run_cli("check", "full", cwd=target)
     assert check_result.returncode == 0, check_result.stdout
@@ -287,27 +295,12 @@ def test_cli_check_and_package_allow_manifest_name_to_differ_from_directory_name
     with zipfile.ZipFile(archive) as zf:
         members = set(zf.namelist())
     assert "demo_model/module.yaml" in members
-    assert "demo_model/tasks/example_task.py" in members
+    assert "demo_model/tasks/example_action.py" in members
     assert "demo_model/workflows/main_workflow.py" in members
     assert "demo_model/pyproject.toml" not in members
-    assert "demo_model/pages/__init__.py" not in members
+    assert "demo_model/pages/__init__.py" in members
     assert "demo_model/hooks/__init__.py" not in members
     assert "demo_model/env_selectors/__init__.py" not in members
-
-
-def test_cli_env_selector_list_fails_fast_on_import_error(tmp_path: Path):
-    target = tmp_path / "demo_model"
-
-    _init_demo_module(target)
-    (target / "env_selectors" / "random_ready.py").write_text(
-        "from missing_runtime_dependency import nope\n",
-        encoding="utf-8",
-    )
-
-    result = _run_cli("env-selector", "list", cwd=target)
-    assert result.returncode == 1
-    assert "读取环境选择器失败" in result.stdout
-    assert "missing_runtime_dependency" in result.stdout
 
 
 @pytest.mark.parametrize("extra_name", ["ui/", "config_schema.json", "strategy.yaml"])

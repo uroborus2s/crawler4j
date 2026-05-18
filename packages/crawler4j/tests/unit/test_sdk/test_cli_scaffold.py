@@ -1,16 +1,19 @@
-"""CLI scaffold tests for the core-native-v1 module protocol."""
+"""CLI scaffold tests for the core-native-v2 module protocol."""
 
 from __future__ import annotations
 
 import importlib
-import shutil
+import json
 import sys
 import tomllib
+import zipfile
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
 import yaml
 
+from crawler4j_contracts import CRAWLER4J_META_ATTR
 from crawler4j_sdk._version import (
     get_compatible_contracts_dependency_spec,
     get_compatible_sdk_dependency_spec,
@@ -58,6 +61,14 @@ def _read_pyproject(module_root: Path) -> dict:
         return tomllib.load(fh)
 
 
+def _read_lock(module_root: Path) -> dict:
+    return json.loads((module_root / ".crawler4j" / "manifest.lock.json").read_text(encoding="utf-8"))
+
+
+def _lock_declaration_keys(module_root: Path) -> set[tuple[str, str]]:
+    return {(str(item["kind"]), str(item["name"])) for item in _read_lock(module_root).get("declarations", [])}
+
+
 def _init_module(tmp_path: Path, *, module_name: str = "demo_model", output_name: str | None = None) -> Path:
     target = tmp_path / (output_name or module_name)
     args = Namespace(
@@ -71,6 +82,7 @@ def _init_module(tmp_path: Path, *, module_name: str = "demo_model", output_name
         workflow_display_name=None,
         workflow_description=None,
         python_version="3.12",
+        runtime_api="core-native-v2",
         no_git=True,
         no_install=True,
         force=False,
@@ -79,7 +91,103 @@ def _init_module(tmp_path: Path, *, module_name: str = "demo_model", output_name
     return target
 
 
-def test_module_init_creates_core_native_project(tmp_path: Path):
+def test_module_init_parser_supports_interactive_and_full_argument_modes():
+    parser = commands.build_parser()
+
+    interactive_args = parser.parse_args(["module", "init"])
+    assert interactive_args.name is None
+    assert interactive_args.repo is None
+    assert interactive_args.runtime_api == "core-native-v2"
+
+    full_args = parser.parse_args(
+        [
+            "module",
+            "init",
+            "hotel_demo",
+            "--repo",
+            "your-org/hotel_demo",
+            "--runtime-api",
+            "core-native-v2",
+            "--no-git",
+            "--no-install",
+        ]
+    )
+    assert full_args.name == "hotel_demo"
+    assert full_args.repo == "your-org/hotel_demo"
+    assert full_args.no_git is True
+    assert full_args.no_install is True
+
+
+def test_module_init_prompts_for_missing_required_values_and_uses_defaults(
+    tmp_path: Path,
+    monkeypatch,
+):
+    answers = iter(["hotel_demo", "your-org/hotel_demo"])
+    prompts: list[str] = []
+
+    def fake_input(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(answers)
+
+    target = tmp_path / "hotel_demo"
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    args = Namespace(
+        name=None,
+        repo=None,
+        output=str(target),
+        display_name=None,
+        description=None,
+        version=None,
+        workflow_name=None,
+        workflow_display_name=None,
+        workflow_description=None,
+        python_version=None,
+        runtime_api=None,
+        no_git=True,
+        no_install=True,
+        force=False,
+    )
+
+    assert commands.cmd_module_init(args) == 0
+
+    assert len(prompts) == 2
+    manifest = _read_manifest(target)
+    assert manifest["name"] == "hotel_demo"
+    assert manifest["runtime_api"] == "core-native-v2"
+    assert manifest["version"] == commands.DEFAULT_MODULE_VERSION
+    assert manifest["upgrade_source"]["repo"] == "your-org/hotel_demo"
+    assert (target / "workflows" / "main_workflow.py").exists()
+    assert (target / ".python-version").read_text(encoding="utf-8").strip() == commands.DEFAULT_PYTHON_VERSION
+
+
+def test_module_init_reports_missing_required_prompt_input(tmp_path: Path, monkeypatch, capsys):
+    def fake_input(_prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    args = Namespace(
+        name=None,
+        repo=None,
+        output=str(tmp_path / "hotel_demo"),
+        display_name=None,
+        description=None,
+        version=None,
+        workflow_name=None,
+        workflow_display_name=None,
+        workflow_description=None,
+        python_version=None,
+        runtime_api=None,
+        no_git=True,
+        no_install=True,
+        force=False,
+    )
+
+    assert commands.cmd_module_init(args) == 1
+    assert "缺少必填参数" in capsys.readouterr().out
+
+
+def test_module_init_creates_core_native_v2_project(tmp_path: Path):
     module_root = _init_module(tmp_path)
 
     assert (module_root / "__init__.py").exists()
@@ -88,37 +196,30 @@ def test_module_init_creates_core_native_project(tmp_path: Path):
     assert (module_root / "README.md").exists()
     assert (module_root / ".gitignore").exists()
     assert (module_root / ".python-version").exists()
-    assert (module_root / "tasks" / "example_task.py").exists()
+    assert (module_root / ".crawler4j" / "manifest.lock.json").exists()
+    for dirname in ("interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates", "tests"):
+        assert (module_root / dirname / "__init__.py").exists()
+
+    assert (module_root / "interfaces" / "labor.py").exists()
+    assert (module_root / "objects" / "api_labor.py").exists()
     assert (module_root / "workflows" / "main_workflow.py").exists()
-    assert (module_root / "pages" / "__init__.py").exists()
-    assert (module_root / "hooks" / "__init__.py").exists()
-    assert (module_root / "env_selectors" / "__init__.py").exists()
-    assert (module_root / "hooks" / "on_cleanup.py").exists()
-    assert (module_root / "env_selectors" / "return_none.py").exists()
-    assert (module_root / "env_selectors" / "random_ready.py").exists()
-    assert (module_root / "data" / "sql" / "views").is_dir()
-    assert (module_root / "data" / "sql" / "queries").is_dir()
-    assert (module_root / "data" / "seeds").is_dir()
+    assert (module_root / "tasks" / "example_action.py").exists()
+    assert (module_root / "data" / "accounts.py").exists()
+    assert (module_root / "data" / "account_overview.py").exists()
+    assert (module_root / "candidates" / "ready_accounts.py").exists()
     assert not (module_root / "module_runtime.py").exists()
+    assert not (module_root / "hooks").exists()
+    assert not (module_root / "env_selectors").exists()
+    assert not (module_root / "data" / "sql").exists()
+    assert not (module_root / "data" / "seeds").exists()
 
     manifest = _read_manifest(module_root)
     assert manifest["name"] == "demo_model"
-    assert manifest["runtime_api"] == "core-native-v1"
-    assert manifest["default_workflow"] == "main_workflow"
-    assert manifest["workflows"] == [
-        {
-            "name": "main_workflow",
-            "display_name": "Main Workflow",
-            "description": "Main Workflow 工作流",
-        }
-    ]
-    assert manifest["ui_extension"] == {"pages": []}
-    assert manifest["data"] == {
-        "resources": [],
-        "views": [],
-        "queries": [],
-        "seeds": [],
-    }
+    assert manifest["runtime_api"] == "core-native-v2"
+    assert "ui_extension" not in manifest
+    assert manifest["config_defaults"] == {"module": {}}
+    for legacy_key in ("default_workflow", "workflows", "data", "objects", "interfaces", "tasks"):
+        assert legacy_key not in manifest
 
     pyproject = _read_pyproject(module_root)
     assert pyproject["project"]["dependencies"] == [get_compatible_contracts_dependency_spec()]
@@ -128,50 +229,50 @@ def test_module_init_creates_core_native_project(tmp_path: Path):
         "pytest-asyncio>=1.3.0",
     ]
 
-    root_text = (module_root / "__init__.py").read_text(encoding="utf-8")
-    assert "Core 会直接扫描" in root_text
-    assert "运行时装配逻辑" in root_text
-
-    task_text = (module_root / "tasks" / "example_task.py").read_text(encoding="utf-8")
-    assert "TASK = TaskSpec(" in task_text
-    assert "async def execute(ctx: TaskContext)" in task_text
-    assert "captured_data" not in task_text
-
+    task_text = (module_root / "tasks" / "example_action.py").read_text(encoding="utf-8")
+    assert "@page_action(" in task_text
+    assert "TaskSpec" not in task_text
+    assert 'ctx.tools.call("browser.goto"' in task_text
+    assert "ctx.page.goto(" not in task_text
     workflow_text = (module_root / "workflows" / "main_workflow.py").read_text(encoding="utf-8")
-    assert "WORKFLOW = WorkflowSpec(" in workflow_text
-    assert "async def run(ctx: TaskContext)" in workflow_text
+    assert "@workflow(" in workflow_text
+    assert "WorkflowSpec" not in workflow_text
+    candidates_text = (module_root / "candidates" / "ready_accounts.py").read_text(encoding="utf-8")
+    assert "@env_candidates(" in candidates_text
 
-    page_init_text = (module_root / "pages" / "__init__.py").read_text(encoding="utf-8")
-    assert "Hosted UI 页面集合" in page_init_text
-
-    selector_text = (module_root / "env_selectors" / "random_ready.py").read_text(encoding="utf-8")
-    assert "SELECTOR = EnvSelectorSpec(" in selector_text
-    assert "def select(context: TaskContext, candidates: list[EnvCandidate])" in selector_text
-
-    readme_text = (module_root / "README.md").read_text(encoding="utf-8")
-    assert "模块运行时只依赖 `crawler4j-contracts`" in readme_text
-    assert "`crawler4j-sdk` 只作为 CLI / 校验 / 开发辅助存在" in readme_text
-    assert "不会调用模块根 `run()` 或 `declare_ui()`" in readme_text
+    assert _lock_declaration_keys(module_root) == {
+        ("component", "api_labor"),
+        ("data_table", "accounts"),
+        ("data_view", "account_overview"),
+        ("env_candidates", "ready_accounts"),
+        ("interface", "labor"),
+        ("page_action", "example_action"),
+        ("workflow", "main_workflow"),
+    }
+    assert commands.collect_full_errors(module_root, manifest, require_manifest_lock=True) == []
 
 
 def test_generated_package_is_importable_without_runtime_shim(tmp_path: Path):
     module_root = _init_module(tmp_path)
 
     module = _import_generated_package(module_root)
-    task_module = _import_module_child(module_root, "tasks", "example_task")
+    interface_module = _import_module_child(module_root, "interfaces", "labor")
+    component_module = _import_module_child(module_root, "objects", "api_labor")
     workflow_module = _import_module_child(module_root, "workflows", "main_workflow")
-    hook_module = _import_module_child(module_root, "hooks", "on_cleanup")
-    selector_module = _import_module_child(module_root, "env_selectors", "random_ready")
+    action_module = _import_module_child(module_root, "tasks", "example_action")
+    data_table_module = _import_module_child(module_root, "data", "accounts")
+    data_view_module = _import_module_child(module_root, "data", "account_overview")
+    candidates_module = _import_module_child(module_root, "candidates", "ready_accounts")
 
     assert hasattr(module, "run") is False
     assert hasattr(module, "declare_ui") is False
-    assert hasattr(task_module, "TASK")
-    assert hasattr(task_module, "execute")
-    assert hasattr(workflow_module, "WORKFLOW")
-    assert hasattr(workflow_module, "run")
-    assert hasattr(hook_module, "handle")
-    assert hasattr(selector_module, "SELECTOR")
-    assert hasattr(selector_module, "select")
+    assert getattr(interface_module.Labor, CRAWLER4J_META_ATTR).kind == "interface"
+    assert getattr(component_module.ApiLabor, CRAWLER4J_META_ATTR).kind == "component"
+    assert getattr(workflow_module.MainWorkflow, CRAWLER4J_META_ATTR).kind == "workflow"
+    assert getattr(action_module.example_action, CRAWLER4J_META_ATTR).kind == "page_action"
+    assert getattr(data_table_module.Accounts, CRAWLER4J_META_ATTR).kind == "data_table"
+    assert getattr(data_view_module.account_overview, CRAWLER4J_META_ATTR).kind == "data_view"
+    assert getattr(candidates_module.ready_accounts, CRAWLER4J_META_ATTR).kind == "env_candidates"
 
 
 def test_module_repair_init_rewrites_root_package_file(tmp_path: Path, monkeypatch):
@@ -179,9 +280,7 @@ def test_module_repair_init_rewrites_root_package_file(tmp_path: Path, monkeypat
     monkeypatch.chdir(module_root)
     init_path = module_root / "__init__.py"
     init_path.write_text(
-        '"""旧入口。"""\n\n'
-        "def run():\n"
-        "    return None\n",
+        '"""旧入口。"""\n\ndef run():\n    return None\n',
         encoding="utf-8",
     )
 
@@ -193,461 +292,99 @@ def test_module_repair_init_rewrites_root_package_file(tmp_path: Path, monkeypat
     assert "模块根包不再承载运行时装配逻辑" in root_text
     assert "def run" not in root_text
 
-    module = _import_generated_package(module_root)
-    assert module.__doc__ is not None
-    assert "Demo Model 模块包" in module.__doc__
 
-
-def test_module_repair_init_recreates_missing_root_package_file(tmp_path: Path, monkeypatch):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-    init_path = module_root / "__init__.py"
-    init_path.unlink()
-
-    assert commands.cmd_module_repair_init(Namespace()) == 0
-
-    assert init_path.exists()
-    assert "模块根包不再承载运行时装配逻辑" in init_path.read_text(encoding="utf-8")
-
-
-def test_page_create_registers_manifest_and_generates_page_spec(tmp_path: Path, monkeypatch):
+def test_page_create_registers_menu_page_and_supports_grouped_non_menu_page(
+    tmp_path: Path,
+    monkeypatch,
+):
     module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
 
-    assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name="Dashboard", description="Dashboard 页面", group=None, force=False)
-    ) == 0
-
-    manifest = _read_manifest(module_root)
-    assert manifest["ui_extension"]["pages"] == [
-        {
-            "id": "dashboard",
-            "label": "Dashboard",
-            "icon": "📄",
-        }
-    ]
-
-    page_text = (module_root / "pages" / "dashboard.py").read_text(encoding="utf-8")
-    assert "PAGE = PageSpec(" in page_text
-    assert 'id="dashboard"' in page_text
-    assert '"load_handler": "load_dashboard_page"' in page_text
-    assert "def load_dashboard_page(" in page_text
-    assert "declare_ui" not in page_text
-
-
-def test_page_create_supports_grouped_source_layout(tmp_path: Path, monkeypatch):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-
-    assert commands.cmd_page_create(
-        Namespace(
-            name="account_detail",
-            display_name="Account Detail",
-            description="Account Detail 页面",
-            group="account",
-            force=False,
+    assert (
+        commands.cmd_page_create(
+            Namespace(
+                name="dashboard",
+                display_name="Dashboard",
+                description="Dashboard 页面",
+                group=None,
+                no_menu=False,
+                force=False,
+            )
         )
-    ) == 0
-
-    manifest = _read_manifest(module_root)
-    assert manifest["ui_extension"]["pages"] == [
-        {
-            "id": "account_detail",
-            "label": "Account Detail",
-            "icon": "📄",
-        }
-    ]
-
-    page_path = module_root / "pages" / "account" / "detail.py"
-    assert page_path.exists()
-    page_text = page_path.read_text(encoding="utf-8")
-    assert 'id="account_detail"' in page_text
-    assert '"load_handler": "load_account_detail_page"' in page_text
-    assert "def load_account_detail_page(" in page_text
-
-    page_module = _import_module_child(module_root, "pages", "account.detail")
-    assert page_module.PAGE.id == "account_detail"
-
-
-def test_env_selector_list_reads_exported_selector_specs(tmp_path: Path, monkeypatch, capsys):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-
-    assert commands.cmd_env_selector_create(
-        Namespace(name="pick_ready", display_name="Pick Ready", description="Pick Ready 选择器", force=False)
-    ) == 0
-    assert commands.cmd_env_selector_list(Namespace()) == 0
-
-    lines = [line.strip() for line in capsys.readouterr().out.splitlines() if line.strip()]
-    assert "return_none" in lines
-    assert "random_ready" in lines
-    assert "pick_ready" in lines
-
-
-def test_env_selector_list_fails_fast_on_import_error(tmp_path: Path, monkeypatch, capsys):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-    (module_root / "env_selectors" / "random_ready.py").write_text(
-        "from missing_runtime_dependency import nope\n",
-        encoding="utf-8",
+        == 0
+    )
+    assert (
+        commands.cmd_page_create(
+            Namespace(
+                name="account_detail",
+                display_name=None,
+                description=None,
+                group="account",
+                no_menu=True,
+                force=False,
+            )
+        )
+        == 0
     )
 
-    assert commands.cmd_env_selector_list(Namespace()) == 1
+    manifest = _read_manifest(module_root)
+    assert "ui_extension" not in manifest
+    dashboard_path = module_root / "pages" / "dashboard.py"
+    detail_path = module_root / "pages" / "account" / "detail.py"
+    assert dashboard_path.exists()
+    assert detail_path.exists()
+    dashboard_text = dashboard_path.read_text(encoding="utf-8")
+    detail_text = detail_path.read_text(encoding="utf-8")
+    assert "from crawler4j_contracts import TaskContext, page" in dashboard_text
+    assert "@page(" in dashboard_text
+    assert 'name="dashboard"' in dashboard_text
+    assert "menu=True" in dashboard_text
+    assert 'name="account_detail"' in detail_text
+    assert "menu=False" in detail_text
+    assert commands.collect_full_errors(module_root, manifest) == []
+
+
+def test_check_full_rejects_removed_manifest_ui_extension(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    manifest = _read_manifest(module_root)
+    manifest["ui_extension"] = {"pages": [{"id": "dashboard", "label": "Dashboard", "icon": "📄"}]}
+    _write_manifest(module_root, manifest)
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert any("module.yaml 不再允许声明 ui_extension" in error for error in errors)
+
+
+def test_check_full_rejects_legacy_v1_manifest_sections(tmp_path: Path, monkeypatch, capsys):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    manifest = _read_manifest(module_root)
+    manifest["default_workflow"] = "main_workflow"
+    manifest["workflows"] = [{"name": "main_workflow", "parameters": [{"name": "legacy_param"}]}]
+    manifest["data"] = {"resources": []}
+    manifest["objects"] = []
+    manifest["interfaces"] = []
+    manifest["tasks"] = []
+    _write_manifest(module_root, manifest)
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
+
+    assert any("V2_MANIFEST_LEGACY_DEFAULT_WORKFLOW" in error for error in errors)
+    assert any("V2_MANIFEST_LEGACY_WORKFLOWS" in error for error in errors)
+    assert any("V2_MANIFEST_LEGACY_WORKFLOW_PARAMETERS" in error for error in errors)
+    assert any("V2_MANIFEST_LEGACY_DATA" in error for error in errors)
+    assert any("V2_MANIFEST_LEGACY_OBJECTS" in error for error in errors)
+    assert any("V2_MANIFEST_LEGACY_INTERFACES" in error for error in errors)
+    assert any("V2_MANIFEST_LEGACY_TASKS" in error for error in errors)
+
+    assert commands.cmd_check_full(Namespace()) == 1
     output = capsys.readouterr().out
-    assert "读取环境选择器失败" in output
-    assert "missing_runtime_dependency" in output
+    assert "full 校验失败" in output
+    assert "V2_MANIFEST_LEGACY_WORKFLOW_PARAMETERS" in output
 
 
-def test_collect_structure_errors_requires_runtime_api_and_default_workflow(tmp_path: Path):
-    module_root = _init_module(tmp_path)
-    manifest = _read_manifest(module_root)
-    manifest.pop("runtime_api", None)
-    manifest["default_workflow"] = ""
-
-    errors = commands.collect_structure_errors(module_root, manifest)
-
-    assert "module.yaml.runtime_api 必须是 core-native-v1" in errors
-    assert "module.yaml 缺少 default_workflow" in errors
-
-
-def test_collect_structure_errors_rejects_legacy_module_runtime_for_core_native(tmp_path: Path):
-    module_root = _init_module(tmp_path)
-    (module_root / "module_runtime.py").write_text("# legacy runtime shim\n", encoding="utf-8")
-
-    errors = commands.collect_structure_errors(module_root, _read_manifest(module_root))
-
-    assert "core-native-v1 模块不允许保留旧运行时薄壳: module_runtime.py" in errors
-
-
-def test_collect_structure_errors_allow_optional_sdk_only_layout_bits(tmp_path: Path):
-    module_root = _init_module(tmp_path)
-    shutil.rmtree(module_root / "pages")
-    shutil.rmtree(module_root / "hooks")
-    shutil.rmtree(module_root / "env_selectors")
-    (module_root / "pyproject.toml").unlink()
-
-    errors = commands.collect_structure_errors(module_root, _read_manifest(module_root))
-
-    assert errors == []
-
-
-def test_collect_full_errors_rejects_manifest_page_missing_from_files(tmp_path: Path, monkeypatch):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-    assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name=None, description=None, group=None, force=False)
-    ) == 0
-    (module_root / "pages" / "dashboard.py").unlink()
-
-    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
-
-    assert "module.yaml.ui_extension.pages 声明的宿主页缺少页面文件: dashboard" in errors
-
-
-def test_collect_full_errors_accepts_page_file_not_registered_as_menu_entry(tmp_path: Path, monkeypatch):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-    assert commands.cmd_page_create(
-        Namespace(name="dashboard", display_name=None, description=None, group=None, force=False)
-    ) == 0
-    manifest = _read_manifest(module_root)
-    manifest["ui_extension"]["pages"] = []
-    _write_manifest(module_root, manifest)
-
-    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
-
-    assert errors == []
-
-
-def test_collect_full_errors_still_validates_unlisted_page_files(tmp_path: Path):
-    module_root = _init_module(tmp_path)
-    (module_root / "pages" / "details.py").write_text(
-        "def load_details_page(context, page_id, params=None):\n"
-        "    return {}\n",
-        encoding="utf-8",
-    )
-
-    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
-
-    assert "pages/details.py 缺少 PAGE，或类型不是 PageSpec" in errors
-
-
-def test_collect_full_errors_accepts_grouped_page_source_layout(tmp_path: Path, monkeypatch):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-    assert commands.cmd_page_create(
-        Namespace(name="account_detail", display_name=None, description=None, group="account", force=False)
-    ) == 0
-
-    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
-
-    assert errors == []
-
-
-def test_collect_full_errors_rejects_multiline_legacy_db_tool_calls(tmp_path: Path):
-    module_root = _init_module(tmp_path)
-    task_path = module_root / "tasks" / "example_task.py"
-    task_text = task_path.read_text(encoding="utf-8")
-    task_path.write_text(
-        task_text.replace(
-            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
-            '    if ctx.tools.has_tool(\n'
-            '        "db.list_records"\n'
-            "    ):\n"
-            "        ctx.tools.call(\n"
-            '            "db.get_record",\n'
-            '            resource="accounts",\n'
-            '            record_key="A001",\n'
-            "        )\n"
-            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
-        ),
-        encoding="utf-8",
-    )
-
-    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
-
-    legacy_errors = [error for error in errors if "使用了已删除的旧数据库工具入口" in error]
-    assert len(legacy_errors) == 2
-    assert all(error.startswith("tasks/example_task.py:") for error in legacy_errors)
-
-
-def test_collect_full_errors_rejects_aliased_legacy_db_tool_calls(tmp_path: Path):
-    module_root = _init_module(tmp_path)
-    task_path = module_root / "tasks" / "example_task.py"
-    task_text = task_path.read_text(encoding="utf-8")
-    task_path.write_text(
-        task_text.replace(
-            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
-            "    tools = ctx.tools\n"
-            '    if tools.has_tool("db.*"):\n'
-            '        tools.call("db.get_record", resource="accounts", record_key="A001")\n'
-            '    start_url = ctx.get_config("start_url", "https://example.com")\n',
-        ),
-        encoding="utf-8",
-    )
-
-    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
-
-    legacy_errors = [error for error in errors if "使用了已删除的旧数据库工具入口" in error]
-    assert len(legacy_errors) == 2
-    assert all(error.startswith("tasks/example_task.py:") for error in legacy_errors)
-
-
-def test_collect_full_errors_rejects_removed_captured_data_usage(tmp_path: Path):
-    module_root = _init_module(tmp_path)
-    task_path = module_root / "tasks" / "example_task.py"
-    task_text = task_path.read_text(encoding="utf-8")
-    task_path.write_text(
-        task_text.replace(
-            '    result = {\n',
-            '    ctx.captured_data.append({"id": 1})\n'
-            '    result = {\n',
-        ),
-        encoding="utf-8",
-    )
-
-    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
-
-    captured_data_errors = [error for error in errors if "使用了已删除的 ctx.captured_data" in error]
-    assert len(captured_data_errors) == 1
-    assert captured_data_errors[0].startswith("tasks/example_task.py:")
-
-
-def test_page_create_can_create_non_menu_page_source(tmp_path: Path, monkeypatch):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-
-    assert commands.cmd_page_create(
-        Namespace(
-            name="account_detail",
-            display_name=None,
-            description=None,
-            group="account",
-            no_menu=True,
-            force=False,
-        )
-    ) == 0
-
-    manifest = _read_manifest(module_root)
-    errors = commands.collect_full_errors(module_root, manifest)
-
-    assert (module_root / "pages" / "account" / "detail.py").exists()
-    assert manifest["ui_extension"]["pages"] == []
-    assert errors == []
-
-
-def test_collect_full_errors_rejects_resource_id_alias_in_data_resources(tmp_path: Path, monkeypatch):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-    assert commands.cmd_data_resource_create(
-        Namespace(
-            name="accounts",
-            storage_mode="custom_table",
-            record_key_field="account_id",
-        )
-    ) == 0
-    manifest = _read_manifest(module_root)
-    manifest["data"]["resources"][0]["resource_id"] = "accounts"
-    _write_manifest(module_root, manifest)
-
-    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
-
-    assert "data.resources 包含不支持的字段: resource_id" in errors
-
-
-def test_collect_full_errors_allow_manifest_name_to_differ_from_directory_name(tmp_path: Path):
-    module_root = _init_module(tmp_path, output_name="demo_model_pkg")
-    shutil.rmtree(module_root / "pages")
-    shutil.rmtree(module_root / "hooks")
-    shutil.rmtree(module_root / "env_selectors")
-    (module_root / "pyproject.toml").unlink()
-
-    errors = commands.collect_full_errors(module_root, _read_manifest(module_root))
-
-    assert errors == []
-
-
-def test_build_parser_registers_data_commands():
-    parser = commands.build_parser()
-
-    resource_args = parser.parse_args(
-        ["data", "resource", "create", "accounts", "--storage-mode", "custom_table"]
-    )
-    query_args = parser.parse_args(
-        ["data", "query", "create", "get_account_by_id", "--source", "accounts"]
-    )
-    seed_args = parser.parse_args(
-        ["data", "seed", "create", "accounts_seed", "--resource", "accounts"]
-    )
-
-    assert resource_args.func is commands.cmd_data_resource_create
-    assert resource_args.storage_mode == "custom_table"
-    assert query_args.func is commands.cmd_data_query_create
-    assert query_args.source == ["accounts"]
-    assert seed_args.func is commands.cmd_data_seed_create
-    assert seed_args.resource == "accounts"
-
-
-def test_build_parser_registers_module_repair_init():
-    parser = commands.build_parser()
-
-    args = parser.parse_args(["module", "repair-init"])
-
-    assert args.func is commands.cmd_module_repair_init
-
-
-def test_build_parser_registers_page_group_argument():
-    parser = commands.build_parser()
-
-    args = parser.parse_args(["page", "create", "account_detail", "--group", "account"])
-
-    assert args.func is commands.cmd_page_create
-    assert args.group == "account"
-
-
-def test_data_commands_scaffold_manifest_sql_and_seed_files(tmp_path: Path, monkeypatch):
-    module_root = _init_module(tmp_path)
-    monkeypatch.chdir(module_root)
-
-    assert commands.cmd_data_resource_create(
-        Namespace(
-            name="accounts",
-            storage_mode="custom_table",
-            record_key_field="account_id",
-        )
-    ) == 0
-    assert commands.cmd_data_view_create(
-        Namespace(
-            name="account_stats",
-            source=["accounts"],
-            force=False,
-        )
-    ) == 0
-    assert commands.cmd_data_query_create(
-        Namespace(
-            name="get_account_by_id",
-            source=["accounts"],
-            force=False,
-        )
-    ) == 0
-    assert commands.cmd_data_seed_create(
-        Namespace(
-            name="accounts_seed",
-            resource="accounts",
-            mode="replace_if_empty",
-            force=False,
-        )
-    ) == 0
-
-    manifest = _read_manifest(module_root)
-    assert manifest["data"]["resources"] == [
-        {
-            "id": "accounts",
-            "storage_mode": "custom_table",
-            "record_key_field": "account_id",
-            "indexes": {},
-            "cleanup_policy": "drop_table",
-            "schema": {
-                "version": 1,
-                "columns": [
-                    {"key": "account_id", "type": "text", "required": True},
-                ],
-            },
-        }
-    ]
-    assert "resource_id" not in manifest["data"]["resources"][0]
-    assert manifest["data"]["views"] == [
-        {
-            "id": "account_stats",
-            "view_kind": "sql_view",
-            "source_resource_ids": ["accounts"],
-            "sql_file": "data/sql/views/account_stats.sql",
-            "columns": [
-                {
-                    "name": "account_id",
-                    "type": "text",
-                    "nullable": False,
-                    "filterable": True,
-                    "sortable": True,
-                }
-            ],
-            "cleanup_policy": "drop_view",
-            "schema_version": 1,
-        }
-    ]
-    assert manifest["data"]["queries"] == [
-        {
-            "id": "get_account_by_id",
-            "source_resource_ids": ["accounts"],
-            "sql_file": "data/sql/queries/get_account_by_id.sql",
-            "params": [{"name": "account_id", "type": "text", "required": True}],
-            "columns": [{"name": "account_id", "type": "text", "nullable": False}],
-        }
-    ]
-    assert manifest["data"]["seeds"] == [
-        {
-            "id": "accounts_seed",
-            "resource_id": "accounts",
-            "file": "data/seeds/accounts_seed.json",
-            "format": "json",
-            "mode": "replace_if_empty",
-        }
-    ]
-    assert (module_root / "data" / "sql" / "views" / "account_stats.sql").read_text(encoding="utf-8") == (
-        "SELECT account_id\nFROM {{resource:accounts}}\n"
-    )
-    assert (module_root / "data" / "sql" / "queries" / "get_account_by_id.sql").read_text(encoding="utf-8") == (
-        "SELECT account_id\n"
-        "FROM {{resource:accounts}}\n"
-        "WHERE account_id = :account_id\n"
-        "LIMIT 1\n"
-    )
-    assert (module_root / "data" / "seeds" / "accounts_seed.json").read_text(encoding="utf-8") == (
-        '[\n  {\n    "account_id": "sample-id"\n  }\n]\n'
-    )
-
-
-def test_data_view_and_query_source_validation_messages_are_stable(
+def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
     tmp_path: Path,
     monkeypatch,
     capsys,
@@ -655,14 +392,194 @@ def test_data_view_and_query_source_validation_messages_are_stable(
     module_root = _init_module(tmp_path)
     monkeypatch.chdir(module_root)
 
-    assert commands.cmd_data_view_create(Namespace(name="account_stats", source=[], force=False)) == 1
-    assert "--source 至少提供一个已注册资源 ID，且必须是小写 snake_case" in capsys.readouterr().out
+    assert (
+        commands.cmd_interface_create(Namespace(name="account_store", display_name=None, description=None, force=False))
+        == 0
+    )
+    assert (
+        commands.cmd_component_create(
+            Namespace(
+                name="sqlite_account_store",
+                implements="account_store",
+                display_name=None,
+                description=None,
+                force=False,
+            )
+        )
+        == 0
+    )
+    assert (
+        commands.cmd_workflow_create(Namespace(name="sync_accounts", display_name=None, description=None, force=False))
+        == 0
+    )
+    assert commands.cmd_task_create(Namespace(name="open_home_page", force=False)) == 0
+    assert commands.cmd_ui_action_create(Namespace(name="create_account_from_ui", force=False)) == 0
+    assert (
+        commands.cmd_data_table_create(
+            Namespace(name="orders", display_name=None, description=None, storage_mode="custom_table", force=False)
+        )
+        == 0
+    )
+    assert (
+        commands.cmd_data_view_create(
+            Namespace(name="order_overview", source="orders", display_name=None, description=None, force=False)
+        )
+        == 0
+    )
+    assert (
+        commands.cmd_candidate_create(
+            Namespace(name="gold_accounts", display_name=None, description=None, force=False)
+        )
+        == 0
+    )
+    assert commands.cmd_manifest_lock(Namespace()) == 0
 
-    assert commands.cmd_data_query_create(Namespace(name="get_account", source=["missing"], force=False)) == 1
-    assert "未找到资源: missing" in capsys.readouterr().out
+    assert commands.cmd_interface_list(Namespace()) == 0
+    assert commands.cmd_component_list(Namespace()) == 0
+    assert commands.cmd_workflow_list(Namespace()) == 0
+    assert commands.cmd_task_list(Namespace()) == 0
+    assert commands.cmd_ui_action_list(Namespace()) == 0
+    assert commands.cmd_data_list(Namespace()) == 0
+    assert commands.cmd_candidate_list(Namespace()) == 0
+    output = capsys.readouterr().out
+    assert "account_store" in output
+    assert "sqlite_account_store" in output
+    assert "sync_accounts" in output
+    assert "open_home_page" in output
+    assert "create_account_from_ui" in output
+    assert "orders" in output
+    assert "order_overview" in output
+    assert "gold_accounts" in output
+
+    assert ("interface", "account_store") in _lock_declaration_keys(module_root)
+    assert ("component", "sqlite_account_store") in _lock_declaration_keys(module_root)
+    assert ("workflow", "sync_accounts") in _lock_declaration_keys(module_root)
+    assert ("page_action", "open_home_page") in _lock_declaration_keys(module_root)
+    assert ("ui_action", "create_account_from_ui") in _lock_declaration_keys(module_root)
+    assert ("data_table", "orders") in _lock_declaration_keys(module_root)
+    assert ("data_view", "order_overview") in _lock_declaration_keys(module_root)
+    assert ("env_candidates", "gold_accounts") in _lock_declaration_keys(module_root)
+    assert commands.collect_full_errors(module_root, _read_manifest(module_root), require_manifest_lock=True) == []
 
 
-def test_archive_members_keep_generated_files_without_runtime_shim(tmp_path: Path):
+def test_component_and_view_create_require_declared_targets(tmp_path: Path, monkeypatch, capsys):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+
+    assert (
+        commands.cmd_component_create(
+            Namespace(
+                name="ghost_component",
+                implements="ghost",
+                display_name=None,
+                description=None,
+                force=False,
+            )
+        )
+        == 1
+    )
+    assert "未找到接口声明: ghost" in capsys.readouterr().out
+
+    assert (
+        commands.cmd_data_view_create(
+            Namespace(name="missing_view", source="missing_table", display_name=None, description=None, force=False)
+        )
+        == 1
+    )
+    assert "未找到数据表声明: missing_table" in capsys.readouterr().out
+
+
+def test_data_table_create_can_generate_managed_dataset_declaration(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+
+    assert (
+        commands.cmd_data_table_create(
+            Namespace(
+                name="accounts_snapshot",
+                display_name=None,
+                description=None,
+                storage_mode="managed_dataset",
+                force=False,
+            )
+        )
+        == 0
+    )
+
+    table_text = (module_root / "data" / "accounts_snapshot.py").read_text(encoding="utf-8")
+    assert 'storage_mode="managed_dataset"' in table_text
+
+
+def test_manifest_lock_stale_state_blocks_check_and_package_until_refreshed(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    assert (
+        commands.cmd_data_table_create(Namespace(name="new_accounts", display_name=None, description=None, force=False))
+        == 0
+    )
+
+    errors = commands.collect_full_errors(module_root, _read_manifest(module_root), require_manifest_lock=True)
+
+    assert any("manifest lock 已过期" in error for error in errors)
+    assert commands.cmd_check_full(Namespace()) == 1
+    assert "manifest lock 已过期" in capsys.readouterr().out
+    assert commands.cmd_package_build(Namespace(output=None)) == 1
+    assert "manifest lock 已过期" in capsys.readouterr().out
+
+    assert commands.cmd_manifest_lock(Namespace()) == 0
+    assert commands.cmd_check_full(Namespace()) == 0
+    assert commands.cmd_package_build(Namespace(output=None)) == 0
+    assert ("data_table", "new_accounts") in _lock_declaration_keys(module_root)
+
+
+def test_build_parser_registers_v2_commands():
+    parser = commands.build_parser()
+
+    interface_args = parser.parse_args(["interface", "create", "labor"])
+    component_args = parser.parse_args(["component", "create", "api_labor", "--implements", "labor"])
+    action_args = parser.parse_args(["page-action", "create", "open_home_page"])
+    ui_action_args = parser.parse_args(["ui-action", "create", "create_account_from_ui"])
+    candidate_args = parser.parse_args(["candidate", "create", "ready_accounts"])
+    table_args = parser.parse_args(["data", "table", "create", "accounts"])
+    view_args = parser.parse_args(["data", "view", "create", "account_overview", "--source", "accounts"])
+    managed_table_args = parser.parse_args(["data", "table", "create", "snapshots", "--storage-mode", "managed_dataset"])
+    lock_args = parser.parse_args(["manifest", "lock"])
+
+    assert interface_args.func is commands.cmd_interface_create
+    assert component_args.func is commands.cmd_component_create
+    assert action_args.func is commands.cmd_task_create
+    assert ui_action_args.func is commands.cmd_ui_action_create
+    assert candidate_args.func is commands.cmd_candidate_create
+    assert table_args.func is commands.cmd_data_table_create
+    assert managed_table_args.storage_mode == "managed_dataset"
+    assert view_args.func is commands.cmd_data_view_create
+    assert view_args.source == "accounts"
+    assert lock_args.func is commands.cmd_manifest_lock
+
+
+def test_build_parser_rejects_removed_v1_commands():
+    parser = commands.build_parser()
+
+    removed_commands = [
+        ["task", "create", "open_home_page"],
+        ["data", "resource", "create", "accounts"],
+        ["data", "query", "create", "account_stats", "--source", "accounts"],
+        ["data", "seed", "create", "accounts_seed", "--resource", "accounts"],
+        ["env-selector", "create", "random_ready"],
+        ["hook", "create", "before_run"],
+        ["module", "set", "default-workflow", "main_workflow"],
+    ]
+    for argv in removed_commands:
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(argv)
+        assert exc_info.value.code == 2
+
+
+def test_archive_members_keep_v2_files_and_manifest_lock_without_runtime_shim(tmp_path: Path):
     module_root = _init_module(tmp_path)
     (module_root / ".idea").mkdir()
     (module_root / ".idea" / "workspace.xml").write_text("<xml />", encoding="utf-8")
@@ -671,7 +588,54 @@ def test_archive_members_keep_generated_files_without_runtime_shim(tmp_path: Pat
     archived_paths = {arcname for _, arcname in members}
 
     assert "demo_model/module.yaml" in archived_paths
-    assert "demo_model/tasks/example_task.py" in archived_paths
+    assert "demo_model/.crawler4j/manifest.lock.json" in archived_paths
+    assert "demo_model/interfaces/labor.py" in archived_paths
+    assert "demo_model/objects/api_labor.py" in archived_paths
+    assert "demo_model/tasks/example_action.py" in archived_paths
     assert "demo_model/workflows/main_workflow.py" in archived_paths
+    assert "demo_model/data/accounts.py" in archived_paths
+    assert "demo_model/data/account_overview.py" in archived_paths
+    assert "demo_model/candidates/ready_accounts.py" in archived_paths
     assert "demo_model/module_runtime.py" not in archived_paths
+    assert "demo_model/hooks/__init__.py" not in archived_paths
+    assert "demo_model/env_selectors/__init__.py" not in archived_paths
     assert "demo_model/.idea/workspace.xml" not in archived_paths
+
+
+def test_archive_members_rejects_symlinked_module_files(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    link_path = module_root / "data" / "linked_accounts.py"
+    try:
+        link_path.symlink_to(module_root / "data" / "accounts.py")
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+
+    with pytest.raises(commands.CLIError, match="符号链接"):
+        commands._archive_members(module_root, "demo_model")
+
+
+def test_package_verify_rejects_zip_path_traversal(tmp_path: Path, capsys):
+    archive_path = tmp_path / "evil.zip"
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr("../module.yaml", "name: evil\nruntime_api: core-native-v2\n")
+
+    assert commands.cmd_package_verify(Namespace(archive=str(archive_path))) == 1
+    assert "非法路径" in capsys.readouterr().out
+
+
+def test_package_verify_rejects_stale_lock_inside_zip(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    assert commands.cmd_package_build(Namespace(output=None)) == 0
+    archive_path = module_root / "dist" / "demo_model-0.1.0.zip"
+
+    with zipfile.ZipFile(archive_path, "a", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "demo_model/data/unlocked_table.py",
+            "from crawler4j_contracts import data_table\n\n"
+            '@data_table(name="unlocked_table", schema=[{"name": "id", "type": "string"}])\n'
+            "class UnlockedTable:\n"
+            "    pass\n",
+        )
+
+    assert commands.cmd_package_verify(Namespace(archive=str(archive_path))) == 1

@@ -1,49 +1,33 @@
 # Crawler4j SDK
 
-`crawler4j-sdk` 现在只负责 4 类能力：
+`crawler4j-sdk` 0.4.x 只面向 `core-native-v2` 模块开发，不兼容 0.3.x 的 `TaskSpec` / `WorkflowSpec` / `EnvSelectorSpec` 模式。
 
-- CLI
-- 模块脚手架
-- 本地校验
-- 开发辅助
-
-运行时 owner 只有 Core。模块在运行时环境里只需要安装 `crawler4j-contracts`，不再依赖 `crawler4j-sdk`。
+运行时 owner 只有 Core。模块运行时代码只依赖 `crawler4j-contracts`，`crawler4j-sdk` 只作为开发依赖提供 CLI、脚手架、扫描、校验、manifest lock、打包与发布辅助。
 
 ## 包边界
 
-### `crawler4j-contracts`
-
-模块运行时代码只从这里导入稳定契约：
+模块运行时代码从 `crawler4j-contracts` 导入：
 
 - `TaskContext`
 - `TaskResult`
-- `TaskSignal`
-- `EnvAction`
-- `EnvCandidate`
-- `TaskSpec`
-- `WorkflowSpec`
-- `EnvSelectorSpec`
-- `PageSpec`
-- `crawler4j_contracts.hosted_ui` 里的 Hosted UI schema/helper
+- `TaskOutcome`
+- `WorkflowLifecycleInfo`
+- `interface`
+- `component`
+- `workflow`
+- `object_param`
+- `object_inject`
+- `page`
+- `page_action`
+- `ui_action`
+- `data_table`
+- `data_view`
+- `env_candidates`
+- `env_cleanup_candidates`
+- `EnvCandidates`
+- `crawler4j_contracts.hosted_ui` 中的 Hosted UI schema/helper
 
-### `crawler4j-sdk`
-
-这里只保留：
-
-- `crawler4j` CLI
-- 模块模板生成
-- `check structure/release/full`
-- 打包与发布辅助
-- 少量开发期 helper，例如 `DefaultHttpClient`
-
-不再导出：
-
-- `ModuleAssembler`
-- `TaskScript`
-- `TaskFlow`
-- `env_selector`
-- `hosted_ui`
-- 任何运行时 owner 角色
+`TaskSignal`、`TaskSignalAction`、`EnvAction` 已退出模块运行时代码入口；SDK scanner 会阻断模块导入这些名字。`crawler4j-sdk` 不导出运行时 owner、`TaskScript`、`TaskFlow`、`ModuleAssembler`、旧环境选择器或资源池 helper。
 
 ## 核心协议
 
@@ -51,179 +35,86 @@
 
 ```yaml
 name: demo_module
-runtime_api: core-native-v1
+runtime_api: core-native-v2
 version: 0.1.0
 upgrade_source:
   type: github_release
   repo: example/demo_module
-default_workflow: main_workflow
-workflows:
-  - name: main_workflow
-    display_name: Main Workflow
-    description: 默认工作流
-ui_extension:
-  pages: []
+  allow_prerelease: false
+config_defaults:
+  module: {}
 ```
 
-没有 `runtime_api: core-native-v1`，或值不是这个，Core 会直接拒绝加载。
+`module.yaml` 不再声明 `default_workflow`、`workflows`、`data`、`interfaces`、`objects`、`tasks` 或 `ui_extension`。这些能力都由代码装饰器声明并由 SDK/Core 扫描。
 
 ## 模块目录
 
 ```text
 demo_module/
+├── .crawler4j/
+│   └── manifest.lock.json
 ├── __init__.py
 ├── module.yaml
 ├── pyproject.toml
-├── tasks/
-│   └── *.py
+├── interfaces/
+├── objects/
 ├── workflows/
-│   └── *.py
-├── hooks/
-│   └── *.py
-├── env_selectors/
-│   └── *.py
+├── tasks/
+├── data/
+├── candidates/
+├── cleanups/
 └── pages/
-    ├── *.py
-    └── <group>/
-        └── *.py
 ```
-
-Core 会自行扫描目录并生成 runtime descriptor。它不会调用模块根 `run()`，也不会再调用 `declare_ui()`。
 
 固定扫描规则：
 
-- `tasks/*.py` 导出 `TASK` 和 `execute`
-- `workflows/*.py` 导出 `WORKFLOW` 和 `run`
-- `hooks/*.py` 导出 `handle`
-- `env_selectors/*.py` 导出 `SELECTOR` 和 `select`
-- `pages/*.py` 或 `pages/<group>/*.py` 导出 `PAGE` 和页面处理函数
-
-## 最小示例
-
-### 任务
-
-```python
-from crawler4j_contracts import TaskContext, TaskResult, TaskSpec
-
-TASK = TaskSpec(
-    name="example_task",
-    display_name="示例任务",
-    description="最小任务示例",
-)
-
-
-async def execute(ctx: TaskContext) -> TaskResult:
-    if not ctx.page:
-        return TaskResult.fail(message="当前运行环境没有可用的浏览器 Page")
-    await ctx.page.goto("https://example.com", wait_until="domcontentloaded")
-    return TaskResult.ok(data={"url": ctx.page.url})
-```
-
-### 工作流
-
-```python
-from crawler4j_contracts import TaskContext, WorkflowSpec
-
-WORKFLOW = WorkflowSpec(
-    name="main_workflow",
-    display_name="Main Workflow",
-    tasks=("example_task",),
-)
-
-
-async def run(ctx: TaskContext):
-    return await ctx.run_subtask("example_task")
-```
-
-### Hook
-
-```python
-from crawler4j_contracts import TaskContext
-
-
-async def handle(context: TaskContext):
-    return None
-```
-
-### 环境选择器
-
-```python
-from crawler4j_contracts import EnvCandidate, EnvSelectorSpec, TaskContext
-
-SELECTOR = EnvSelectorSpec(
-    name="pick_ready",
-    display_name="选择 ready 环境",
-)
-
-
-def select(context: TaskContext, candidates: list[EnvCandidate]):
-    del context
-    ready = [item for item in candidates if item.status == "ready"]
-    return ready[0].env_id if ready else None
-```
-
-### 宿主页
-
-```python
-from crawler4j_contracts import PageSpec, TaskContext
-
-PAGE = PageSpec(
-    id="dashboard",
-    label="Dashboard",
-    icon="📄",
-    schema={
-        "type": "Page",
-        "load_handler": "load_dashboard_page",
-        "children": [
-            {"type": "Text", "style": "title", "binding": "title"},
-        ],
-    },
-)
-
-
-def load_dashboard_page(context: TaskContext, page_id: str, params: dict | None = None) -> dict:
-    del context, page_id, params
-    return {"title": "Dashboard"}
-```
+- `interfaces/*.py` 声明 `@interface`
+- `objects/*.py` 声明 `@component`
+- `workflows/*.py` 声明 `@workflow`
+- `tasks/*.py` 声明 workflow/component 调用的 `@page_action`
+- `data/*.py` 声明 `@data_table` / `@data_view`
+- `candidates/*.py` 声明 `@env_candidates`
+- `cleanups/*.py` 声明 `@env_cleanup_candidates`
+- `pages/*.py` 或 `pages/<group>/*.py` 声明 `@page(...)` 与 Hosted UI 用户操作 `@ui_action`
 
 ## CLI
 
-### 初始化模块
-
 ```bash
-uvx --from crawler4j-sdk crawler4j module init demo_module --repo example/demo_module
+uvx --from crawler4j-sdk crawler4j module init
 ```
 
-### 常用命令
+交互式输入模块名和升级源仓库，其他选项使用默认值。脚本化场景仍支持完整参数：
 
 ```bash
-uv run crawler4j module show
-uv run crawler4j module repair-init
-uv run crawler4j task create example_task
-uv run crawler4j workflow create repair_orders
+uvx --from crawler4j-sdk crawler4j module init demo_module --repo example/demo_module --runtime-api core-native-v2
+
+uv run crawler4j interface create labor
+uv run crawler4j component create api_labor --implements labor
+uv run crawler4j workflow create main_workflow
+uv run crawler4j page-action create open_login_page
+uv run crawler4j ui-action create create_account_from_ui
+uv run crawler4j data table create accounts
+uv run crawler4j data view create account_overview --source accounts
+uv run crawler4j candidate create ready_accounts
+uv run crawler4j cleanup create unused_accounts
 uv run crawler4j page create dashboard
-uv run crawler4j page create account_detail --group account --no-menu
-uv run crawler4j env-selector create pick_ready
-uv run crawler4j hook create on_cleanup
+uv run crawler4j manifest lock
 uv run crawler4j check full
 uv run crawler4j package build
 ```
 
-`module repair-init` 会只重建模块根 `__init__.py`，适合在清理旧 `run()` / `declare_ui()` 残留后，把根包恢复到当前标准模板；它不会覆盖 `module.yaml`、任务、工作流或页面源码。
+`check full` 会拒绝运行时代码 import `crawler4j-sdk`、旧 `ctx.tools.call("db.*")`、`ctx.captured_data`、旧 manifest 区段，以及 v2 装饰器扫描中的重复名、缺失注入目标、循环依赖和数据契约错误。
 
-## 校验规则
+SDK scanner 同时支持两类对象装配声明：
 
-`check full` 当前会校验：
+- 传统装饰器参数：`@component(inject=[...], parameters=[...])`、`@workflow(inject=[...])`
+- 注解 helper：类属性或 `__init__` 参数上的 `Annotated[..., object_param(...)]` / `Annotated[..., object_inject(...)]`
 
-- `module.yaml.runtime_api == core-native-v1`
-- `default_workflow` 与 `module.yaml.workflows` 一致
-- `data.resources[]` 不包含 `resource_id` 等未知字段；资源项公开字段使用 `id`
-- `TaskSpec/WorkflowSpec/EnvSelectorSpec/PageSpec` 导出是否存在
-- `TASK.name` / `WORKFLOW.name` / `SELECTOR.name` 是否与文件名一致
-- `ui_extension.pages[]` 中的菜单页面是否有对应页面文件
-- `pages/*.py`、`pages/<group>/*.py` 是否导出唯一且合法的 `PAGE.id`
-- 页面 `load_handler` 和内联表格 `query_handler` 是否存在且签名兼容
-- legacy `ui/`、`config_schema.json`、`strategy.yaml` 是否已清理
+两类声明都会进入同一份 `.crawler4j/manifest.lock.json` 元数据；不要在同一对象里用两个入口重复声明同名参数或同名注入。
+
+`object_param(...)` 当前支持 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`。SDK 静态扫描可从 `str/int/float/bool`、`Literal[...]`、`list[T]`、`dict[str, T]`、`Optional[T]` / `T | None`、`datetime.date/datetime/time`、`pathlib.Path` 推断类型，并会把 `schema` / `item_schema` 写入 manifest lock。
+
+workflow 和 component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 释放资源、打印终态日志或写审计事件。Core 会在对象图构造完成后按 component 组合顺序再到 workflow 调用 `setup`，然后调用 `workflow.run(ctx)`；终态时按 component 依赖反向顺序再到 workflow 调用 `cleanup`。`workflow` 是当前 workflow 元信息，`outcome.workflow` 保存同一份信息，`outcome.status` 只可能是 `succeeded`、`failed`、`timed_out` 或 `cancelled`。旧 `aclose()` / `close()` 不再是对象生命周期契约，`check full` 会阻断这两个旧方法名。
 
 ## 运行期依赖
 
@@ -232,12 +123,12 @@ uv run crawler4j package build
 ```toml
 [project]
 dependencies = [
-  "crawler4j-contracts>=0.4.0,<0.5.0",
+  "crawler4j-contracts>=0.4.1,<0.5.0",
 ]
 
 [dependency-groups]
 dev = [
-  "crawler4j-sdk>=0.6.1,<0.7.0",
+  "crawler4j-sdk>=0.4.1,<0.5.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
 ]
@@ -245,22 +136,6 @@ dev = [
 
 CLI 脚手架生成的 `pyproject.toml` 会默认写入同样的兼容范围。
 
-意思是：
+## 开发辅助
 
-- 运行时只要 contracts
-- 本地开发和脚手架才需要 sdk
-
-## 资源池与 HTTP helper
-
-SDK 仍保留 `crawler4j_sdk.context.DefaultHttpClient` 作为本地开发辅助。
-
-模块运行时代码不得依赖 `crawler4j-sdk`。资源池运行时能力由宿主注入到 `ctx.tools`，模块如果需要绑定、标记或移除资源池，应通过 `ctx.tools.has_tool(...)` / `ctx.tools.call(...)` 调用宿主工具，例如：
-
-```python
-if ctx.tools.has_tool("env.bind_resource_pool"):
-    await ctx.tools.call(
-        "env.bind_resource_pool",
-        env_id=ctx.env_id,
-        pool_name="default",
-    )
-```
+SDK 仍保留 `crawler4j_sdk.context.DefaultHttpClient` 作为本地开发辅助。模块运行时代码不得依赖 `crawler4j-sdk`；数据库唯一入口为 `ctx.db`。标准页面交互走 `ctx.tools.call("browser.*", ...)`，例如 `browser.goto`、`browser.click`、`browser.type`、`browser.drag`、`browser.scroll`；`ctx.page` 主要保留给读取标题、HTML、locator 状态或宿主尚未抽象的浏览器能力。环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，可以直接返回 env id 列表，也可以返回 `EnvCandidates` 链式查询；不要维护资源池同步快照。模块账号或业务表若要认领环境，必须在 `@data_table(..., env_binding_field="env_id")` 中声明绑定字段。批量环境清理候选写在 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数中，复用同一个 `EnvCandidates` DSL，但不复用运行候选入口；模块只声明已绑定且业务上可丢弃的 env id，宿主负责预览、确认、二次校验和删除。单次 workflow 结束、失败、超时或被用户中止后的环境统一由宿主回收，模块不得发送环境处置指令。

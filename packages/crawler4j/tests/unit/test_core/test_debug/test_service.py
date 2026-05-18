@@ -102,8 +102,6 @@ def _make_run_profile(*, wait_timeout: int = 90, lifecycle: CreationLifecycle = 
         execution=ExecutionContext(
             module="demo_module",
             workflow="repair",
-            hooks_module="demo_module.hooks",
-            params={"lang": "zh-CN"} if params is None else {"lang": "en-US"},
             timeout=timeout,
         ),
     )
@@ -132,13 +130,50 @@ def _make_inline_job() -> Job:
                 "execution": ExecutionContext(
                     module="demo_module",
                     workflow="repair",
-                    hooks_module="demo_module.hooks",
-                    params={"lang": "en-US"},
                     timeout=300,
                 )
             }
         ),
         params={"city": "Singapore"},
+    )
+
+
+def _make_auto_workflow_job() -> Job:
+    return Job(
+        id="job-auto",
+        name="Auto Workflow Job",
+        run_profile=_make_run_profile().model_copy(
+            update={
+                "execution": ExecutionContext(
+                    module="demo_module",
+                    workflow="",
+                    timeout=300,
+                )
+            }
+        ),
+    )
+
+
+def _make_candidate_job() -> Job:
+    return Job(
+        id="job-candidate",
+        name="Candidate Job",
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.SELECT,
+                    candidates="ready_accounts",
+                    candidate_params={"tier": "gold", "limit": 5},
+                    wait_timeout=30,
+                ),
+            ),
+            execution=ExecutionContext(
+                module="demo_module",
+                workflow="repair",
+                timeout=120,
+            ),
+        ),
+        params={"city": "Shanghai"},
     )
 
 
@@ -214,14 +249,32 @@ async def test_debug_service_tracks_worker_events_and_logs(monkeypatch, temp_dat
     assert "strategy_id" not in payload
     assert payload["module_name"] == "demo_module"
     assert payload["workflow"] == "repair"
-    assert payload["hooks_module"] == "demo_module.hooks"
     assert payload["provider"] == "virtualbrowser"
+    assert payload["fixed_env_id"] is None
+    assert payload["candidates"] == ""
+    assert payload["candidate_params"] == {}
     assert payload["wait_timeout"] == 90
     assert payload["timeout"] == 180
-    assert payload["execution_params"] == {"lang": "zh-CN"}
-    assert payload["job_params"] == {"city": "Shanghai"}
-    assert payload["params"] == {"lang": "zh-CN", "city": "Shanghai"}
+    assert "execution_params" not in payload
+    assert "job_params" not in payload
+    assert "params" not in payload
     assert payload["creation_params"] == {"region": "cn"}
+
+
+@pytest.mark.asyncio
+async def test_debug_service_preserves_blank_workflow_for_v2_descriptor_resolution(temp_data_dir):
+    from src.core.debug.models import DebugSessionRequest
+    from src.core.debug.service import DebugService
+
+    job = _make_auto_workflow_job()
+    service = DebugService(
+        registry=_make_registry(temp_data_dir / "demo_module"),
+        task_service=SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None),
+    )
+
+    session = await service.create_session(DebugSessionRequest(job_id=job.id))
+
+    assert session.workflow == ""
 
 
 @pytest.mark.asyncio
@@ -321,10 +374,49 @@ async def test_debug_service_supports_inline_run_profile(monkeypatch, temp_data_
     assert payload["provider"] == "virtualbrowser"
     assert payload["wait_timeout"] == 45
     assert payload["timeout"] == 300
-    assert payload["execution_params"] == {"lang": "en-US"}
-    assert payload["job_params"] == {"city": "Singapore"}
-    assert payload["params"] == {"lang": "en-US", "city": "Singapore"}
+    assert "execution_params" not in payload
+    assert "job_params" not in payload
+    assert "params" not in payload
     assert payload["creation_params"] == {"region": "sg"}
+
+
+@pytest.mark.asyncio
+async def test_debug_service_payload_preserves_candidate_selection(monkeypatch, temp_data_dir):
+    from src.core.debug.models import DebugSessionRequest, DebugSessionState
+    from src.core.debug.protocol import encode_debug_event
+    from src.core.debug.service import DebugService
+
+    worker = _FakeProcess(pid=5678)
+
+    async def fake_exec(*args, **kwargs):
+        return worker
+
+    job = _make_candidate_job()
+    service = DebugService(
+        registry=_make_registry(temp_data_dir / "demo_module"),
+        task_service=SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None),
+        stop_timeout=0.01,
+    )
+
+    monkeypatch.setattr("src.core.debug.service.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(service, "_allocate_attach_port", lambda host, port: port)
+
+    session = await service.create_session(DebugSessionRequest(job_id=job.id))
+    await service.start_session(session.id)
+
+    worker.stdout.feed_line(
+        encode_debug_event({"type": "state", "state": DebugSessionState.SUCCEEDED.value, "env_id": "31"}) + "\n"
+    )
+    worker.finish(0)
+
+    await asyncio.sleep(0.05)
+
+    payload = json.loads(service.get_session_file(session.id).read_text(encoding="utf-8"))
+    assert payload["acquisition_mode"] == "select"
+    assert payload["fixed_env_id"] is None
+    assert payload["candidates"] == "ready_accounts"
+    assert payload["candidate_params"] == {"tier": "gold", "limit": 5}
+    assert payload["wait_timeout"] == 30
 
 
 @pytest.mark.asyncio

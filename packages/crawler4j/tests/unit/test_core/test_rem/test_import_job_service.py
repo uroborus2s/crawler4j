@@ -24,7 +24,8 @@ async def test_import_job_service_builds_fixed_env_run_profile():
             manifest=SimpleNamespace(
                 workflows=[SimpleNamespace(name="main_flow")],
             ),
-        )
+        ),
+        get_workflows=lambda module_name: [SimpleNamespace(name="main_flow")],
     )
     repo = SimpleNamespace(
         save_job=AsyncMock(),
@@ -105,7 +106,8 @@ async def test_import_job_service_reuses_manual_job_and_respects_concurrency(mon
             manifest=SimpleNamespace(
                 workflows=[SimpleNamespace(name="import_flow")],
             ),
-        )
+        ),
+        get_workflows=lambda module_name: [SimpleNamespace(name="import_flow")],
     )
     repo = SimpleNamespace(
         get_job=AsyncMock(return_value=job),
@@ -153,3 +155,32 @@ async def test_import_job_service_reuses_manual_job_and_respects_concurrency(mon
     assert published[0].data["job_id"] == "job-import"
     assert published[0].data["job_name"] == "Import Ctrip Env"
     assert published[0].data["queued_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_import_job_service_allows_blank_workflow_when_single_v2_workflow_exists():
+    job = Job(
+        id="job-import",
+        name="Import Ctrip Env",
+        type=JobType.BATCH,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=RunProfile(
+            resource=ResourceConfig(),
+            execution=ExecutionContext(module="demo_module"),
+        ),
+    )
+    registry = SimpleNamespace(
+        get_module=lambda module_name: SimpleNamespace(
+            name=module_name,
+            status=ModuleStatus.ENABLED,
+        ),
+        get_workflows=lambda module_name: [SimpleNamespace(name="import_flow")],
+    )
+    service = ExistingEnvImportJobService(
+        registry=registry,
+        repo=SimpleNamespace(),
+        dispatcher=SimpleNamespace(),
+        rem=SimpleNamespace(),
+    )
+
+    service._validate_manual_import_job(job)

@@ -8,7 +8,7 @@
 
 import json
 
-from crawler4j_contracts import EnvAction, TaskResult, TaskSignal
+from crawler4j_contracts import TaskOutcome, TaskResult, WorkflowLifecycleInfo
 
 
 class TestTaskResultOk:
@@ -37,15 +37,6 @@ class TestTaskResultOk:
         assert result.message == "处理完成"
         assert result.data == {"processed": 5}
 
-    def test_ok_can_carry_signal(self):
-        signal = TaskSignal.wait_for_confirmation(
-            message="等待人工确认",
-            env_action=EnvAction.KEEP_ALIVE,
-        )
-        result = TaskResult.ok(message="暂停等待", signal=signal)
-
-        assert result.signal == signal
-    
     def test_ok_with_kwargs(self):
         """验证 kwargs 合并到 data。"""
         result = TaskResult.ok(
@@ -96,17 +87,6 @@ class TestTaskResultFail:
         assert result.data["error_code"] == "SDK-AUTH-TOKEN-EXPIRED"
         assert result.data["retryable"] is True
 
-    def test_fail_can_carry_signal(self):
-        signal = TaskSignal.fail(
-            message="黑号",
-            reason="black_account",
-            env_action=EnvAction.DESTROY,
-        )
-        result = TaskResult.fail(message="失败", signal=signal)
-
-        assert result.signal == signal
-
-
 class TestTaskResultSerialization:
     """测试 TaskResult 序列化。"""
     
@@ -126,7 +106,7 @@ class TestTaskResultSerialization:
         assert d["message"] == "完成"
         assert d["data"] == {"key": "value"}
         assert d["error"] is None
-        assert d["signal"] is None
+        assert "signal" not in d
     
     def test_to_dict_json_serializable(self):
         """验证 to_dict 结果可 JSON 序列化。"""
@@ -177,11 +157,6 @@ class TestTaskResultSerialization:
             message="错误",
             error="详细错误信息",
             error_code="SDK-ERR-001",
-            signal=TaskSignal.fail(
-                message="黑号",
-                reason="black_account",
-                env_action=EnvAction.DESTROY,
-            ),
         )
         
         # 序列化
@@ -194,7 +169,38 @@ class TestTaskResultSerialization:
         assert restored.message == original.message
         assert restored.error == original.error
         assert restored.data == original.data
-        assert restored.signal == original.signal
+
+
+class TestTaskOutcome:
+    """测试 TaskOutcome 生命周期结果。"""
+
+    def test_to_dict_serializes_nested_task_result(self):
+        result = TaskResult.fail(message="失败", error="boom", retryable=False)
+        workflow = WorkflowLifecycleInfo(
+            module_name="demo_module",
+            workflow_name="main_workflow",
+            workflow_label="Main workflow",
+            workflow_description="Main workflow description",
+            workflow_module_name="demo_module.workflows.main",
+            workflow_symbol="MainWorkflow",
+        )
+        outcome = TaskOutcome(
+            status="failed",
+            workflow=workflow,
+            result=result,
+            error="boom",
+            error_type="RuntimeError",
+            duration_seconds=1.25,
+        )
+
+        assert outcome.to_dict() == {
+            "status": "failed",
+            "workflow": workflow.to_dict(),
+            "result": result.to_dict(),
+            "error": "boom",
+            "error_type": "RuntimeError",
+            "duration_seconds": 1.25,
+        }
 
 
 class TestTaskResultFields:
@@ -209,6 +215,7 @@ class TestTaskResultFields:
         assert result.message == ""
         assert result.data == {}
         assert result.error is None
+        assert not hasattr(result, "signal")
     
     def test_data_is_mutable(self):
         """验证 data 字段可修改。"""

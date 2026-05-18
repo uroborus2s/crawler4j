@@ -34,8 +34,8 @@
 | 项目 | 内容 |
 |---|---|
 | 目录 | `packages/crawler4j/modules/README.md`（仓内占位）、`<app-data>/modules`（正式安装）、DevLink 源码目录（开发调试） |
-| 职责 | 定义模块根目录、`module.yaml`（含只读 `config_defaults` 初始化模板）、根 `__init__.py`、任务、工作流与宿主管理 UI 声明的运行边界 |
-| 对外接口 | `tasks/*.py` / `workflows/*.py` / `hooks/*.py` / `env_selectors/*.py` / `pages/*.py` 的 `Spec + handler` 导出 |
+| 职责 | 定义模块根目录、`module.yaml`（含只读 `config_defaults` 初始化模板）、根 `__init__.py`、装饰器声明与宿主管理 UI 声明的运行边界 |
+| 对外接口 | `interfaces/*.py` / `objects/*.py` / `workflows/*.py` / `tasks/*.py` / `data/*.py` / `pages/*.py` 的 v2 装饰器声明 |
 | 依赖 | `crawler4j_contracts`, Core runtime |
 | 不负责 | Core 基础设施、SDK 公共契约、宿主内部 `PyQt6` 组件实现 |
 
@@ -48,9 +48,9 @@
 当前最小演进边界：
 
 - 根 `__init__.py` 只保留普通 Python 包入口，不再承载宿主入口、`run()` 或兼容桥。
-- 任务/工作流/hook/环境选择器/页面由 Core 直接扫描固定目录并生成 runtime descriptor，不再由 SDK 统一入口组装器提供。
-- 模块级可变行为放在 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`，不再要求模块作者维护 `module_runtime.py`。
-- 模块 UI 不再导出 `QWidget` 或 `ui:*` 页面类；模块只能通过 `pages/*.py` / `pages/<group>/*.py` 导出的 `PageSpec` 和页面 handler 声明 Hosted UI。
+- interface、component、workflow、page action、data、page 由 Core 直接扫描固定目录并生成 v2 runtime descriptor，不再由 SDK 统一入口组装器提供。
+- 模块级可变行为放在 `interfaces/`、`objects/`、`workflows/`、`tasks/`、`data/`、`pages/`，不再要求模块作者维护 `module_runtime.py`。
+- 模块 UI 不再导出 `QWidget` 或 `ui:*` 页面类；模块只能通过 `pages/*.py` / `pages/<group>/*.py` 中的 `@page(...)` 声明 Hosted UI。
 - 宿主允许模块使用的公开 UI 面固定为最小化 UI 框架 V1，而不是开放任意 `PyQt6` 组件能力。
 - 旧模块不再作为新契约的兼容目标；升级时统一按最新模板重新初始化模块骨架。
 
@@ -59,7 +59,7 @@
 | 项目 | 内容 |
 |---|---|
 | 目录 | `packages/crawler4j-sdk/`, `packages/crawler4j-contracts/` |
-| 职责 | `crawler4j-contracts` 提供 `TaskContext` / `TaskResult` / `TaskSignal` / `TaskSpec` / `WorkflowSpec` / `ToolsCapability` / `DatabaseClient` 等运行时契约；`crawler4j-sdk` 提供 CLI、脚手架、校验与打包发布辅助 |
+| 职责 | `crawler4j-contracts` 提供 `TaskContext` / `TaskResult` / `TaskOutcome` / `WorkflowLifecycleInfo` / `ToolsCapability` / `DatabaseClient`、v2 装饰器与 `object_param` / `object_inject` 注解 helper 等运行时契约；`crawler4j-sdk` 提供 CLI、脚手架、校验与打包发布辅助 |
 | 对外接口 | `crawler4j` CLI, Python 包 API |
 | 依赖 | `crawler4j-contracts`, aiohttp, pyyaml |
 | 不负责 | Root app UI、宿主运行时治理与模块业务语义 |
@@ -85,6 +85,7 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-04-27 | 刷新 SDK / Contracts 边界：运行时代码只依赖 contracts，SDK 不再承载 `TaskScript` / `TaskFlow`、ModuleAssembler 或资源池 helper | Codex |
+| 2026-04-30 | 补记 v2 对象装配注解 helper：对象依赖和 component 参数可从类属性 / `__init__` 参数注解归一到运行时元数据 | Codex |
 | 2026-04-22 | 补记模块 UI 边界：模块不再直接导出 `PyQt6` 页面，只能声明宿主管理页与宿主数据表 | Codex |
 | 2026-03-26 | 建立当前代码边界摘要 | Codex |
 | 2026-03-31 | 登记模块根入口自动托管的目标边界 | Codex |

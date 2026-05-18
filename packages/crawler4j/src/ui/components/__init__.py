@@ -8,9 +8,10 @@ from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit
 from src.ui.components.message_dialog import MessageDialog
 from src.ui.components.notice_panel import NoticePanel
+from src.ui.components.object_graph_tree import ObjectGraphTree
 from src.ui.components.progress_dialog import ProgressDialog
 from src.ui.components.segmented_control import SegmentedOptionControl
-from src.ui.components.spin_box import StyledSpinBox
+from src.ui.components.spin_box import StyledDoubleSpinBox, StyledSpinBox
 from src.ui.components.text_edit import StyledPlainTextEdit, StyledTextEdit
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "DialogChoice",
     "MessageDialog",
     "NoticePanel",
+    "ObjectGraphTree",
     "ProgressDialog",
     "SegmentedOptionControl",
     "StyledButton",
@@ -26,6 +28,7 @@ __all__ = [
     "StyledComboBox",
     "StyledLineEdit",
     "StyledPlainTextEdit",
+    "StyledDoubleSpinBox",
     "StyledSpinBox",
     "StyledTextEdit",
     "ToggleSwitch",

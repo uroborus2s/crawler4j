@@ -1,22 +1,24 @@
 [project]
 name = "crawler4j-contracts"
-version = "0.4.0"
+version = "0.4.1"
 description = "Crawler4j shared contracts for Core, SDK, and external modules"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-]
+dependencies = []
 
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["crawler4j_contracts"]
 include-package-data = true
 
 [tool.setuptools.package-dir]
-crawler4j_contracts = "src"
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["crawler4j_contracts*"]
 
 [tool.setuptools.package-data]
 crawler4j_contracts = ["py.typed"]

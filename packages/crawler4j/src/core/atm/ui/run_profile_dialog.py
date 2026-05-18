@@ -4,7 +4,8 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, available_timezones
 
-from PyQt6.QtCore import Qt
+import yaml
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QStackedWidget,
     QTabWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -43,7 +45,6 @@ from src.core.atm.run_profile import (
     RunProfile,
     ResourceConfig,
 )
-from src.core.atm.controller import selector_returns_none
 from src.core.foundation.logging import logger
 from src.core.system.config_center import get_config_center
 from src.ui.components.button import StyledButton
@@ -53,10 +54,83 @@ from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
+from src.ui.components.object_graph_tree import ObjectGraphTree
 from src.ui.components.segmented_control import SegmentedOptionControl
+from src.ui.components.spin_box import StyledDoubleSpinBox as QDoubleSpinBox
 from src.ui.components.spin_box import StyledSpinBox as QSpinBox
 from src.ui.components.text_edit import StyledPlainTextEdit as QPlainTextEdit
 from src.ui.components.yaml_code_editor import YamlCodeEditor
+
+
+class CandidateParamsDialog(QDialog):
+    """候选函数参数编辑弹窗。"""
+
+    def __init__(self, params: dict[str, object] | None = None, parent=None, read_only: bool = False):
+        super().__init__(parent)
+        self._params = dict(params or {})
+        self._read_only = read_only
+        self._setup_ui()
+        self.editor.setPlainText(self._params_to_yaml(self._params))
+
+    def _setup_ui(self) -> None:
+        self.setWindowTitle("配置候选参数")
+        configure_titled_dialog(self)
+        self.resize(560, 420)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        self.editor = YamlCodeEditor()
+        self.editor.setReadOnly(self._read_only)
+        layout.addWidget(self.editor, 1)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        cancel_btn = StyledButton(
+            "关闭" if self._read_only else "取消",
+            variant="secondary",
+            min_height=32,
+            min_width=80,
+            border_radius=4,
+        )
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        if not self._read_only:
+            save_btn = StyledButton("保存参数", variant="success", min_height=32, min_width=92, border_radius=4)
+            save_btn.clicked.connect(self._on_save)
+            button_layout.addWidget(save_btn)
+
+        layout.addLayout(button_layout)
+
+    @staticmethod
+    def _params_to_yaml(params: dict[str, object]) -> str:
+        if not params:
+            return ""
+        return yaml.safe_dump(params, allow_unicode=True, sort_keys=False)
+
+    def _parse_candidate_params(self) -> dict[str, object]:
+        raw_text = self.editor.toPlainText()
+        if not raw_text.strip():
+            return {}
+        parsed = yaml.safe_load(raw_text)
+        if parsed is None:
+            return {}
+        if not isinstance(parsed, dict):
+            raise ValueError("候选参数必须是 YAML 对象")
+        return dict(parsed)
+
+    def _on_save(self) -> None:
+        try:
+            self._params = self._parse_candidate_params()
+        except Exception as exc:
+            MessageDialog.warning(self, "候选参数无效", str(exc))
+            return
+        self.accept()
+
+    def get_params(self) -> dict[str, object]:
+        return dict(self._params)
 
 
 class WorkflowSelector(QWidget):
@@ -73,7 +147,7 @@ class WorkflowSelector(QWidget):
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0) # Remove spacing to behave like a single control when module is hidden
+        layout.setSpacing(0)  # Remove spacing to behave like a single control when module is hidden
 
         # 模块下拉框
         self.module_combo = QComboBox()
@@ -83,7 +157,7 @@ class WorkflowSelector(QWidget):
         self.module_combo.setMinimumWidth(120)
         self.module_combo.currentTextChanged.connect(self._on_module_changed)
         layout.addWidget(self.module_combo)
-        
+
         # Spacer if both are visible
         self.spacer = QWidget()
         self.spacer.setFixedWidth(8)
@@ -96,7 +170,7 @@ class WorkflowSelector(QWidget):
         # Match "Scaling Mode" combo box behavior (Preferred instead of Expanding)
         self.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.workflow_combo)
-        
+
         if not self._show_module:
             self.module_combo.hide()
             self.spacer.hide()
@@ -104,14 +178,14 @@ class WorkflowSelector(QWidget):
     def set_module_filter(self, module_name: str | None):
         """设置模块过滤器。"""
         current_wf = self._current_workflow_value()
-        
+
         self._filter_module = module_name
-        
+
         if self._show_module:
             has_filter = bool(module_name)
             self.module_combo.setVisible(not has_filter)
             self.spacer.setVisible(not has_filter)
-            
+
             if module_name:
                 # Force module selection
                 index = self.module_combo.findText(module_name)
@@ -122,7 +196,7 @@ class WorkflowSelector(QWidget):
                 self.module_combo.setCurrentIndex(-1)
         else:
             # Pure workflow mode: just load workflows for this module
-             self._on_module_changed(module_name)
+            self._on_module_changed(module_name)
 
         if current_wf:
             idx = self._find_workflow_index(current_wf)
@@ -134,8 +208,8 @@ class WorkflowSelector(QWidget):
             registry = get_module_registry()
             # Force refresh might be needed if registry is empty
             if not registry.list_modules():
-                registry.refresh() 
-            
+                registry.refresh()
+
             modules = registry.list_modules()
             self.module_combo.clear()
             for m in modules:
@@ -146,26 +220,24 @@ class WorkflowSelector(QWidget):
 
     def _on_module_changed(self, module_name):
         self.workflow_combo.clear()
-        
+
         if self._show_none_option:
             self.workflow_combo.addItem("不执行 (None)", "")
 
         if not module_name:
             return
-            
+
         try:
             registry = get_module_registry()
-            module = registry.get_module(module_name)
-            if module and module.manifest.workflows:
-                for wf in module.manifest.workflows:
+            workflows = registry.get_workflows(module_name)
+            if workflows:
+                for wf in workflows:
                     self.workflow_combo.addItem(wf.display_name or wf.name, wf.name)
-            elif not module:
+            else:
                 # Try refresh ?
                 registry.refresh()
-                module = registry.get_module(module_name)
-                if module and module.manifest.workflows:
-                    for wf in module.manifest.workflows:
-                        self.workflow_combo.addItem(wf.display_name or wf.name, wf.name)
+                for wf in registry.get_workflows(module_name):
+                    self.workflow_combo.addItem(wf.display_name or wf.name, wf.name)
         except Exception:
             pass
 
@@ -191,10 +263,10 @@ class WorkflowSelector(QWidget):
             wf = current_data
         else:
             wf = self.workflow_combo.currentText()
-        
+
         if not self._show_module:
             return getattr(self, "_filter_module", "") or "", wf
-            
+
         return self.module_combo.currentText(), wf
 
     def set_value(self, module: str, workflow: str):
@@ -202,7 +274,7 @@ class WorkflowSelector(QWidget):
             index = self.module_combo.findText(module)
             if index >= 0:
                 self.module_combo.setCurrentIndex(index)
-            
+
         wf_index = self._find_workflow_index(workflow)
         if wf_index >= 0:
             self.workflow_combo.setCurrentIndex(wf_index)
@@ -348,18 +420,21 @@ class RunProfileDialog(QDialog):
     def __init__(self, run_profile: RunProfile | None = None, parent=None, read_only: bool = False):
         super().__init__(parent)
         self._run_profile = run_profile or self._default_run_profile()
+        self._candidate_params: dict[str, object] = dict(
+            self._run_profile.resource.acquisition.candidate_params or {}
+        )
         self._is_new = run_profile is None
         self._read_only = read_only
         self._setup_ui()
         self._load_run_profile()
-        
+
         if self._read_only:
-             self._set_read_only()
+            self._set_read_only()
 
     def _setup_ui(self):
         self.setWindowTitle("配置运行模板")
         configure_titled_dialog(self)
-        
+
         # Responsive sizing (60% width, 95% height of screen)
         screen = QApplication.primaryScreen()
         if screen:
@@ -369,9 +444,9 @@ class RunProfileDialog(QDialog):
         else:
             # Fallback for headless or special cases
             w, h = 960, 700
-            
+
         self.resize(w, h)
-        
+
         self.setStyleSheet("""
             QDialog { background: rgb(30, 30, 40); }
             QLabel { color: rgba(255, 255, 255, 0.9); font-size: 13px; }
@@ -425,7 +500,7 @@ class RunProfileDialog(QDialog):
 
         # 堆叠挂件
         self.stack = QStackedWidget()
-        
+
         # 1. 表单模式
         self.form_tabs = QTabWidget()
         self._setup_form_tabs()
@@ -441,18 +516,22 @@ class RunProfileDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
+        validate_btn = StyledButton("验证模板", variant="secondary", min_height=32, min_width=92, border_radius=4)
+        validate_btn.clicked.connect(self._on_validate)
         cancel_btn = StyledButton("取消", variant="secondary", min_height=32, min_width=80, border_radius=4)
         cancel_btn.clicked.connect(self.reject)
-        
+
         save_btn = StyledButton("保存运行模板", variant="success", min_height=32, min_width=116, border_radius=4)
         save_btn.clicked.connect(self._on_save)
-        
+
+        btn_layout.addWidget(validate_btn)
         btn_layout.addWidget(cancel_btn)
         btn_layout.addWidget(save_btn)
-        
+
         if self._read_only:
-             save_btn.hide()
-             cancel_btn.setText("关闭")
+            validate_btn.hide()
+            save_btn.hide()
+            cancel_btn.setText("关闭")
 
         layout.addLayout(btn_layout)
 
@@ -460,20 +539,30 @@ class RunProfileDialog(QDialog):
         """设置只读模式。"""
         # Disable all input widgets
         for widget in self.findChildren(
-            (QLineEdit, QPlainTextEdit, QSpinBox, QCheckBox, QComboBox, SegmentedOptionControl, YamlCodeEditor)
+            (
+                QLineEdit,
+                QPlainTextEdit,
+                QSpinBox,
+                QDoubleSpinBox,
+                QCheckBox,
+                ToggleSwitch,
+                QComboBox,
+                SegmentedOptionControl,
+                YamlCodeEditor,
+            )
         ):
-             # QComboBox and QCheckBox use setEnabled
-             if isinstance(widget, (QComboBox, QCheckBox, SegmentedOptionControl)):
-                 widget.setEnabled(False)
-             elif isinstance(widget, (QLineEdit, QPlainTextEdit, QSpinBox, YamlCodeEditor)):
-                 widget.setReadOnly(True)
-        
+            # QComboBox and QCheckBox use setEnabled
+            if isinstance(widget, (QComboBox, QCheckBox, ToggleSwitch, SegmentedOptionControl)):
+                widget.setEnabled(False)
+            elif isinstance(widget, (QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, YamlCodeEditor)):
+                widget.setReadOnly(True)
+
         # Helper to disable WorkflowSelectors
         # We need to explicitly call setEnabled on them because they are complex widgets
         # Or better, let's implement set_read_only on WorkflowSelector if they are custom
         # But for now, let's just find them by type if we can, or manually access them.
         # findChildren might not find them if they are wrapped.
-        
+
         self.script_selector.setEnabled(False)
         for button_name in (
             "ua_default_btn",
@@ -484,13 +573,14 @@ class RunProfileDialog(QDialog):
             "sec_ch_ua_add_btn",
             "device_name_regen_btn",
             "mac_regen_btn",
+            "candidate_params_btn",
         ):
             button = getattr(self, button_name, None)
             if button is not None:
                 button.setEnabled(False)
         for row_widget in getattr(self, "_sec_ch_ua_rows", []):
             row_widget.remove_btn.setEnabled(False)
-        
+
     def _default_run_profile(self) -> RunProfile:
         return RunProfile(
             resource=ResourceConfig(
@@ -1252,12 +1342,26 @@ class RunProfileDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
 
-        basic_group = QGroupBox("基础信息")
-        form = self._create_form_layout(basic_group)
+        self.basic_group = QGroupBox("一、模板信息")
+        form = self._create_form_layout(self.basic_group)
 
         self.script_selector = WorkflowSelector(show_module=True)
         self.script_selector.workflow_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        form.addRow("执行脚本:", self.script_selector)
+        form.addRow("模块 / 工作流:", self.script_selector)
+
+        self.object_assembly_widget = QWidget()
+        object_assembly_layout = QVBoxLayout(self.object_assembly_widget)
+        object_assembly_layout.setContentsMargins(0, 0, 0, 0)
+        object_assembly_layout.setSpacing(0)
+        self.object_assembly_tree = ObjectGraphTree()
+        object_assembly_layout.addWidget(self.object_assembly_tree)
+        self._object_binding_widgets: dict[str, QComboBox] = {}
+        self._object_param_widgets: dict[str, dict[str, QWidget]] = {}
+        self._object_param_specs: dict[str, dict[str, object]] = {}
+        self._rendered_object_components: set[str] = set()
+        self._object_assembly_refresh_pending = False
+        self._pending_object_assembly_values: dict | None = None
+        form.addRow("对象装配:", self.object_assembly_widget)
 
         self.execution_timeout_spin = QSpinBox()
         self.execution_timeout_spin.setRange(0, 7 * 24 * 60 * 60)
@@ -1265,10 +1369,10 @@ class RunProfileDialog(QDialog):
         self.execution_timeout_spin.setToolTip("0 表示不自动中断模块主体；2 天为 172800 秒，3 天为 259200 秒。")
         form.addRow("主体执行超时:", self._wrap_widget_with_suffix(self.execution_timeout_spin, "秒"))
 
-        layout.addWidget(basic_group)
+        layout.addWidget(self.basic_group)
 
-        sel_group = QGroupBox("资源定义")
-        self.resource_form = self._create_form_layout(sel_group)
+        self.resource_group = QGroupBox("二、环境与资源")
+        self.resource_form = self._create_form_layout(self.resource_group)
 
         self.resource_mode_combo = QComboBox()
         self.resource_mode_combo.addItem("创建环境", AcquisitionMode.CREATE)
@@ -1356,32 +1460,36 @@ class RunProfileDialog(QDialog):
         select_form_widget = QWidget()
         self.select_form = self._create_form_layout(select_form_widget)
 
-        self.selector_name_combo = QComboBox()
-        self.selector_name_combo.setPlaceholderText("选择环境回调函数")
-        self.selector_name_combo.currentIndexChanged.connect(self._on_selector_name_changed)
-        self.select_form.addRow("回调函数:", self.selector_name_combo)
-        self.resource_pool_combo = QComboBox()
-        self.resource_pool_combo.setPlaceholderText("选择资源池")
-        self.select_form.addRow("资源池:", self.resource_pool_combo)
+        self.candidates_combo = QComboBox()
+        self.candidates_combo.setPlaceholderText("选择候选函数")
+        self.select_form.addRow("候选函数:", self.candidates_combo)
+
+        candidate_params_widget = QWidget()
+        candidate_params_layout = QHBoxLayout(candidate_params_widget)
+        candidate_params_layout.setContentsMargins(0, 0, 0, 0)
+        candidate_params_layout.setSpacing(8)
+        self.candidate_params_summary = QLabel("未配置")
+        self.candidate_params_summary.setStyleSheet("color: rgba(255, 255, 255, 0.72);")
+        self.candidate_params_summary.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        candidate_params_layout.addWidget(self.candidate_params_summary, 1)
+        self.candidate_params_btn = StyledButton(
+            "配置参数",
+            variant="secondary",
+            min_height=32,
+            min_width=88,
+            border_radius=4,
+        )
+        self.candidate_params_btn.clicked.connect(self._open_candidate_params_dialog)
+        candidate_params_layout.addWidget(self.candidate_params_btn)
+        self.select_form.addRow("候选参数:", candidate_params_widget)
+
         self.select_form.addRow(
             "等待超时:",
             self._wrap_widget_with_suffix(self.wait_timeout_spin, "秒"),
         )
         select_layout.addWidget(select_form_widget)
 
-        self.selector_none_hint = QLabel("当前环境选择回调函数返回了 none。普通选择模式会直接失败；固定资源池 Service Job 会继续等待。")
-        self.selector_none_hint.setWordWrap(True)
-        self.selector_none_hint.setStyleSheet("color: #f59e0b;")
-        self.selector_none_hint.hide()
-        select_layout.addWidget(self.selector_none_hint)
-
-        self.selector_empty_hint = QLabel("当前模块未声明可用的环境选择回调函数。")
-        self.selector_empty_hint.setWordWrap(True)
-        self.selector_empty_hint.setStyleSheet("color: rgba(255, 255, 255, 0.6);")
-        self.selector_empty_hint.hide()
-        select_layout.addWidget(self.selector_empty_hint)
-
-        select_desc = QLabel("可选先按资源池做宿主级粗筛，再把当前池内候选交给模块回调做细粒度选择。")
+        select_desc = QLabel("选择模式使用 candidates/ 下的 @env_candidates 纯函数，由宿主实时求值后分配就绪环境。")
         select_desc.setWordWrap(True)
         select_desc.setStyleSheet("color: rgba(255, 255, 255, 0.72);")
         select_layout.addWidget(select_desc)
@@ -1390,7 +1498,7 @@ class RunProfileDialog(QDialog):
         self.resource_mode_stack.addWidget(select_widget)
         self.resource_form.addRow("模式配置:", self.resource_mode_stack)
 
-        layout.addWidget(sel_group)
+        layout.addWidget(self.resource_group)
         layout.addStretch()
 
         scroll.setWidget(content_widget)
@@ -1399,8 +1507,9 @@ class RunProfileDialog(QDialog):
         self._load_ip_pools()
         self._load_provider_options("virtualbrowser")
         self.script_selector.module_combo.currentTextChanged.connect(self._on_script_module_changed)
-        self._selector_infos: dict[str, object] = {}
-        self._load_selector_options()
+        self.script_selector.workflow_combo.currentIndexChanged.connect(self._on_workflow_selection_changed)
+        self._sync_candidates_options()
+        self._sync_object_assembly_form()
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
     def _set_row_visible(self, widget: QWidget, visible: bool):
@@ -1839,95 +1948,510 @@ class RunProfileDialog(QDialog):
             return module_name
         return self.script_selector.module_combo.currentText().strip()
 
-    def _load_selector_options(self, preferred: str | None = None) -> None:
-        module_name = self._current_script_module_name()
-        selectors = []
-        if module_name:
-            try:
-                selectors = list(get_module_service().list_env_selectors(module_name))
-            except Exception:
-                selectors = []
+    def _on_script_module_changed(self, _module_name: str) -> None:
+        previous_candidates = self.candidates_combo.currentData()
+        preferred = previous_candidates if isinstance(previous_candidates, str) else None
+        self._sync_candidates_options(preferred=preferred)
+        self._sync_object_assembly_form()
 
-        self._selector_infos = {selector.name: selector for selector in selectors}
+    def _on_workflow_selection_changed(self, _index: int) -> None:
+        self._sync_object_assembly_form()
 
-        self.selector_name_combo.blockSignals(True)
-        self.selector_name_combo.clear()
-        for selector in selectors:
-            label = selector.display_name or selector.name
-            self.selector_name_combo.addItem(label, selector.name)
+    def _current_runtime_descriptor(self) -> object | None:
+        module_name, _workflow_name = self.script_selector.get_value()
+        if not module_name:
+            return None
+        try:
+            return get_module_service().get_runtime_descriptor_v2(module_name)
+        except Exception as exc:
+            logger.warning(f"[ATM] 加载模块对象装配描述失败: module={module_name} error={exc}")
+            return None
 
-        if preferred:
-            index = self.selector_name_combo.findData(preferred)
-            self.selector_name_combo.setCurrentIndex(index if index >= 0 else -1)
-        else:
-            self.selector_name_combo.setCurrentIndex(-1)
-        self.selector_name_combo.blockSignals(False)
+    def _current_workflow_entry(self, descriptor: object) -> object | None:
+        _module_name, workflow_name = self.script_selector.get_value()
+        if not workflow_name:
+            return None
+        workflows = getattr(descriptor, "workflows", {}) or {}
+        if isinstance(workflows, dict):
+            return workflows.get(workflow_name)
+        return None
 
-        has_selectors = bool(selectors)
-        self.selector_empty_hint.setVisible(bool(module_name) and not has_selectors)
-        self._update_selector_none_hint()
-        self._sync_resource_pool_options()
+    def _clear_object_assembly_form(self) -> None:
+        self.object_assembly_tree.clear()
+        self._object_binding_widgets = {}
+        self._object_param_widgets = {}
+        self._object_param_specs = {}
+        self._rendered_object_components = set()
 
-    def _update_selector_none_hint(self) -> None:
-        selector_name = self.selector_name_combo.currentData()
-        normalized_selector = selector_name if isinstance(selector_name, str) else ""
-        self.selector_none_hint.setVisible(
-            selector_returns_none(self._selector_infos, normalized_selector)
+    def _sync_object_assembly_form(self, values: dict | None = None) -> None:
+        if not hasattr(self, "object_assembly_tree"):
+            return
+        current_values = values if values is not None else self._initial_object_assembly_values()
+        descriptor = self._current_runtime_descriptor()
+        workflow_entry = self._current_workflow_entry(descriptor) if descriptor is not None else None
+
+        self._clear_object_assembly_form()
+        if workflow_entry is None:
+            self._set_row_visible(self.object_assembly_widget, False)
+            return
+
+        inject_specs = list(getattr(workflow_entry.meta, "inject", ()) or ())
+        if not inject_specs:
+            self._set_row_visible(self.object_assembly_widget, False)
+            return
+
+        self._set_row_visible(self.object_assembly_widget, True)
+        _module_name, workflow_name = self.script_selector.get_value()
+        workflow_item = self.object_assembly_tree.add_node(
+            f"工作流: {self._entry_label(workflow_entry, workflow_name)}",
+            role="workflow",
+        )
+        self._render_inject_specs(
+            descriptor,
+            inject_specs,
+            parent_path="",
+            values=current_values,
+            seen_components=set(),
+            parent_item=workflow_item,
+        )
+        self.object_assembly_tree.finalize()
+
+    def _initial_object_assembly_values(self) -> dict[str, dict]:
+        execution = self._run_profile.execution
+        if execution is None:
+            return {"object_bindings": {}, "object_params": {}}
+        return {
+            "object_bindings": dict(execution.object_bindings),
+            "object_params": {
+                component_name: dict(params)
+                for component_name, params in dict(execution.object_params).items()
+                if isinstance(params, dict)
+            },
+        }
+
+    def _current_object_assembly_values(self) -> dict[str, dict]:
+        object_bindings: dict[str, str] = {}
+        for inject_path, widget in self._object_binding_widgets.items():
+            value = widget.currentData()
+            if isinstance(value, str) and value.strip():
+                object_bindings[inject_path] = value.strip()
+
+        object_params: dict[str, dict[str, object]] = {}
+        for component_name, parameter_specs in self._object_param_specs.items():
+            component_params: dict[str, object] = {}
+            for parameter_name, parameter in parameter_specs.items():
+                widget = self._object_param_widgets.get(component_name, {}).get(parameter_name)
+                if widget is None:
+                    continue
+                value = self._parameter_widget_value(parameter, widget)
+                if value is None:
+                    continue
+                if self._parameter_required(parameter) and self._parameter_type(parameter) in {"string", "text", "enum"}:
+                    if str(value).strip() == "":
+                        raise ValueError(f"对象参数不能为空: {self._parameter_label(parameter)}")
+                component_params[parameter_name] = value
+            if component_params:
+                object_params[component_name] = component_params
+        return {"object_bindings": object_bindings, "object_params": object_params}
+
+    def _on_object_binding_changed(self) -> None:
+        try:
+            values = self._current_object_assembly_values()
+        except Exception:
+            values = self._initial_object_assembly_values()
+        self._schedule_object_assembly_refresh(values)
+
+    def _schedule_object_assembly_refresh(self, values: dict | None = None) -> None:
+        self._pending_object_assembly_values = values
+        if self._object_assembly_refresh_pending:
+            return
+        self._object_assembly_refresh_pending = True
+        QTimer.singleShot(0, self._flush_object_assembly_refresh)
+
+    def _flush_object_assembly_refresh(self) -> None:
+        self._object_assembly_refresh_pending = False
+        values = self._pending_object_assembly_values
+        self._pending_object_assembly_values = None
+        self._sync_object_assembly_form(values)
+
+    def _render_inject_specs(
+        self,
+        descriptor: object,
+        inject_specs: list[object],
+        *,
+        parent_path: str,
+        values: dict,
+        seen_components: set[str],
+        parent_item: QTreeWidgetItem,
+    ) -> None:
+        for inject in inject_specs:
+            inject_name = str(getattr(inject, "name", "") or "").strip()
+            inject_type = str(getattr(inject, "type", "") or "").strip().lower()
+            inject_target = str(getattr(inject, "target", "") or "").strip()
+            if not inject_name or not inject_target:
+                continue
+            inject_path = f"{parent_path}.{inject_name}" if parent_path else inject_name
+            if inject_type == "interface":
+                selected_component, component_item = self._render_interface_binding(
+                    descriptor,
+                    inject_path=inject_path,
+                    interface_name=inject_target,
+                    values=values,
+                    parent_item=parent_item,
+                )
+                if selected_component:
+                    self._render_component_body(
+                        descriptor,
+                        selected_component,
+                        parent_path=inject_path,
+                        values=values,
+                        seen_components=seen_components,
+                        component_item=component_item,
+                    )
+                continue
+            if inject_type == "object":
+                self._render_component(
+                    descriptor,
+                    inject_target,
+                    parent_path=inject_path,
+                    values=values,
+                    seen_components=seen_components,
+                    parent_item=parent_item,
+                    tooltip=f"注入路径: {inject_path}\n固定对象: {inject_target}",
+                )
+
+    def _render_interface_binding(
+        self,
+        descriptor: object,
+        *,
+        inject_path: str,
+        interface_name: str,
+        values: dict,
+        parent_item: QTreeWidgetItem,
+    ) -> tuple[str, QTreeWidgetItem]:
+        combo = QComboBox()
+        combo.setObjectName(f"objectBinding_{inject_path.replace('.', '__')}")
+        combo.setMinimumWidth(220)
+        implementations = tuple((getattr(descriptor, "implementations", {}) or {}).get(interface_name, ()) or ())
+        components = getattr(descriptor, "components", {}) or {}
+        for component_name in implementations:
+            component_entry = components.get(component_name) if isinstance(components, dict) else None
+            combo.addItem(self._entry_label(component_entry, component_name), component_name)
+
+        object_bindings = dict(values.get("object_bindings") or {})
+        selected = str(object_bindings.get(inject_path) or object_bindings.get(interface_name) or "").strip()
+        if selected and combo.findData(selected) < 0:
+            combo.addItem(f"{selected} (未声明)", selected)
+        if not selected and combo.count() == 1:
+            selected = str(combo.itemData(0) or "")
+
+        index = combo.findData(selected)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.setEnabled(combo.count() > 1 and not self._read_only)
+        combo.currentIndexChanged.connect(lambda _index: self._on_object_binding_changed())
+        self._object_binding_widgets[inject_path] = combo
+
+        label = self._interface_label(descriptor, interface_name) or interface_name
+        current = combo.currentData()
+        component_name = current if isinstance(current, str) else ""
+        item = self.object_assembly_tree.add_node(
+            label,
+            parent=parent_item,
+            role="interface",
+            tooltip=f"注入路径: {inject_path}\n接口: {interface_name}",
+        )
+        self.object_assembly_tree.set_config_widget(item, combo)
+        return component_name, item
+
+    def _render_component(
+        self,
+        descriptor: object,
+        component_name: str,
+        *,
+        parent_path: str,
+        values: dict,
+        seen_components: set[str],
+        parent_item: QTreeWidgetItem,
+        tooltip: str = "",
+    ) -> None:
+        components = getattr(descriptor, "components", {}) or {}
+        component_entry = components.get(component_name) if isinstance(components, dict) else None
+        if component_entry is None or component_name in seen_components:
+            return
+
+        component_item = self.object_assembly_tree.add_node(
+            self._entry_label(component_entry, component_name),
+            parent=parent_item,
+            role="component",
+            tooltip=tooltip,
+        )
+        self._render_component_body(
+            descriptor,
+            component_name,
+            parent_path=parent_path,
+            values=values,
+            seen_components=seen_components,
+            component_item=component_item,
         )
 
-    def _on_script_module_changed(self, _module_name: str) -> None:
-        previous = self.selector_name_combo.currentData()
-        preferred = previous if isinstance(previous, str) else None
-        self._load_selector_options(preferred=preferred)
+    def _render_component_body(
+        self,
+        descriptor: object,
+        component_name: str,
+        *,
+        parent_path: str,
+        values: dict,
+        seen_components: set[str],
+        component_item: QTreeWidgetItem,
+    ) -> None:
+        components = getattr(descriptor, "components", {}) or {}
+        component_entry = components.get(component_name) if isinstance(components, dict) else None
+        if component_entry is None or component_name in seen_components:
+            return
+        next_seen = {*seen_components, component_name}
+        inject_specs = list(getattr(component_entry.meta, "inject", ()) or ())
+        if inject_specs:
+            self._render_inject_specs(
+                descriptor,
+                inject_specs,
+                parent_path=parent_path,
+                values=values,
+                seen_components=next_seen,
+                parent_item=component_item,
+            )
+        if component_name not in self._rendered_object_components:
+            self._render_component_parameters(component_name, component_entry, values, component_item)
+            self._rendered_object_components.add(component_name)
 
-    def _on_selector_name_changed(self, _index: int) -> None:
-        self._update_selector_none_hint()
+    def _render_component_parameters(
+        self,
+        component_name: str,
+        component_entry: object,
+        values: dict,
+        parent_item: QTreeWidgetItem,
+    ) -> None:
+        parameters = list(getattr(component_entry.meta, "parameters", ()) or ())
+        if not parameters:
+            return
 
-    def _declared_resource_pool_options(self) -> list[tuple[str, str]]:
+        component_values = dict((values.get("object_params") or {}).get(component_name, {}) or {})
+        self._object_param_widgets.setdefault(component_name, {})
+        self._object_param_specs.setdefault(component_name, {})
+        for parameter in parameters:
+            name = self._parameter_name(parameter)
+            if not name:
+                continue
+            value = component_values.get(name, self._parameter_default(parameter))
+            widget = self._create_parameter_widget(parameter, value, object_name_prefix=f"objectParam_{component_name}")
+            self._object_param_widgets[component_name][name] = widget
+            self._object_param_specs[component_name][name] = parameter
+            label = self._parameter_label(parameter)
+            if self._parameter_required(parameter):
+                label = f"{label} *"
+            parameter_item = self.object_assembly_tree.add_node(
+                f"参数: {label}",
+                parent=parent_item,
+                role="parameter",
+            )
+            self.object_assembly_tree.set_config_widget(parameter_item, widget)
+
+    def _entry_label(self, entry: object | None, fallback: str) -> str:
+        if entry is None:
+            return fallback
+        label = str(getattr(entry.meta, "label", "") or "").strip()
+        name = str(getattr(entry.meta, "name", "") or fallback).strip()
+        return f"{label} ({name})" if label and label != name else name
+
+    def _interface_label(self, descriptor: object, interface_name: str) -> str:
+        interfaces = getattr(descriptor, "interfaces", {}) or {}
+        entry = interfaces.get(interface_name) if isinstance(interfaces, dict) else None
+        return self._entry_label(entry, interface_name)
+
+    def _parameter_name(self, parameter: object) -> str:
+        return str(getattr(parameter, "name", "") or "").strip()
+
+    def _parameter_label(self, parameter: object) -> str:
+        return str(getattr(parameter, "label", "") or "").strip() or self._parameter_name(parameter)
+
+    def _parameter_type(self, parameter: object) -> str:
+        return str(getattr(parameter, "type", "string") or "string").strip().lower()
+
+    def _parameter_default(self, parameter: object) -> object:
+        return getattr(parameter, "default", None)
+
+    def _parameter_required(self, parameter: object) -> bool:
+        return bool(getattr(parameter, "required", False))
+
+    def _parameter_options(self, parameter: object) -> list[tuple[str, object]]:
+        options: list[tuple[str, object]] = []
+        for option in getattr(parameter, "options", []) or []:
+            if isinstance(option, dict):
+                value = option.get("value")
+                raw_label = option.get("label")
+                label = str(value if raw_label is None else raw_label).strip()
+            else:
+                value = getattr(option, "value", option)
+                raw_label = getattr(option, "label", None)
+                label = str(value if raw_label is None else raw_label).strip()
+            if label:
+                options.append((label, value))
+        return options
+
+    def _create_parameter_widget(self, parameter: object, value: object, *, object_name_prefix: str) -> QWidget:
+        parameter_type = self._parameter_type(parameter)
+        name = self._parameter_name(parameter)
+        placeholder = str(getattr(parameter, "placeholder", "") or "").strip()
+
+        if parameter_type == "enum":
+            combo = QComboBox()
+            combo.setObjectName(f"{object_name_prefix}_{name}")
+            if not self._parameter_required(parameter) and value is None:
+                combo.addItem("不设置", None)
+            for label, option_value in self._parameter_options(parameter):
+                combo.addItem(label, option_value)
+            index = combo.findData(value)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            elif combo.count():
+                combo.setCurrentIndex(0)
+            return combo
+
+        if parameter_type == "integer":
+            spin = QSpinBox()
+            spin.setObjectName(f"{object_name_prefix}_{name}")
+            min_value = getattr(parameter, "min", None)
+            max_value = getattr(parameter, "max", None)
+            spin.setRange(
+                int(min_value) if min_value is not None else -1_000_000_000,
+                int(max_value) if max_value is not None else 1_000_000_000,
+            )
+            step = getattr(parameter, "step", None)
+            if step is not None:
+                spin.setSingleStep(max(1, int(step)))
+            if value is not None:
+                spin.setValue(int(value))
+            return spin
+
+        if parameter_type == "number":
+            spin = QDoubleSpinBox()
+            spin.setObjectName(f"{object_name_prefix}_{name}")
+            min_value = getattr(parameter, "min", None)
+            max_value = getattr(parameter, "max", None)
+            spin.setRange(
+                float(min_value) if min_value is not None else -1_000_000_000.0,
+                float(max_value) if max_value is not None else 1_000_000_000.0,
+            )
+            spin.setDecimals(6)
+            step = getattr(parameter, "step", None)
+            if step is not None:
+                spin.setSingleStep(float(step))
+            if value is not None:
+                spin.setValue(float(value))
+            return spin
+
+        if parameter_type == "boolean":
+            toggle = self._create_toggle_switch()
+            toggle.setObjectName(f"{object_name_prefix}_{name}")
+            toggle.setChecked(bool(value))
+            return toggle
+
+        if parameter_type == "text":
+            editor = QPlainTextEdit()
+            editor.setObjectName(f"{object_name_prefix}_{name}")
+            editor.setMinimumHeight(90)
+            editor.setPlainText("" if value is None else str(value))
+            if placeholder:
+                editor.setPlaceholderText(placeholder)
+            return editor
+
+        line_edit = QLineEdit()
+        line_edit.setObjectName(f"{object_name_prefix}_{name}")
+        line_edit.setText("" if value is None else str(value))
+        if placeholder:
+            line_edit.setPlaceholderText(placeholder)
+        return line_edit
+
+    def _parameter_widget_value(self, parameter: object, widget: QWidget) -> object:
+        parameter_type = self._parameter_type(parameter)
+        if parameter_type == "enum" and isinstance(widget, QComboBox):
+            return widget.currentData()
+        if parameter_type == "integer" and isinstance(widget, QSpinBox):
+            return widget.value()
+        if parameter_type == "number" and isinstance(widget, QDoubleSpinBox):
+            return widget.value()
+        if parameter_type == "boolean" and isinstance(widget, ToggleSwitch):
+            return widget.isChecked()
+        if parameter_type == "text" and isinstance(widget, QPlainTextEdit):
+            return widget.toPlainText()
+        if isinstance(widget, QLineEdit):
+            return widget.text()
+        return None
+
+    def _sync_candidate_params_summary(self) -> None:
+        if not hasattr(self, "candidate_params_summary"):
+            return
+        keys = [str(key) for key in self._candidate_params.keys()]
+        if not keys:
+            self.candidate_params_summary.setText("未配置")
+            return
+        preview = ", ".join(keys[:3])
+        if len(keys) > 3:
+            preview = f"{preview} 等 {len(keys)} 项"
+        self.candidate_params_summary.setText(preview)
+
+    def _open_candidate_params_dialog(self) -> None:
+        dialog = CandidateParamsDialog(self._candidate_params, parent=self, read_only=self._read_only)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._candidate_params = dialog.get_params()
+        self._sync_candidate_params_summary()
+
+    def _declared_env_candidate_options(self) -> list[tuple[str, str]]:
         module_name = self._current_script_module_name()
         if not module_name:
             return []
-        module_info = get_module_registry().get_module(module_name)
-        if not module_info:
+        try:
+            descriptor = get_module_service().get_runtime_descriptor_v2(module_name)
+        except Exception as exc:
+            logger.warning(f"[ATM] 加载模块环境候选函数失败: module={module_name} error={exc}")
             return []
-        return [
-            (
-                str(pool.name or "").strip(),
-                str(getattr(pool, "display_name", "") or "").strip(),
-            )
-            for pool in getattr(module_info.manifest, "resource_pools", [])
-            if str(pool.name or "").strip()
-        ]
+        options: list[tuple[str, str]] = []
+        for name, entry in sorted(descriptor.env_candidates.items()):
+            normalized_name = str(name or "").strip()
+            if not normalized_name:
+                continue
+            display_name = str(getattr(entry.meta, "label", "") or "").strip()
+            options.append((normalized_name, display_name))
+        return options
 
-    def _declared_resource_pool_names(self) -> list[str]:
-        return [name for name, _display_name in self._declared_resource_pool_options()]
+    def _declared_env_candidate_names(self) -> list[str]:
+        return [name for name, _display_name in self._declared_env_candidate_options()]
 
-    def _sync_resource_pool_options(self, preferred: str | None = None) -> None:
-        current_data = self.resource_pool_combo.currentData()
+    def _sync_candidates_options(self, preferred: str | None = None) -> None:
+        current_data = self.candidates_combo.currentData()
         current = preferred if preferred is not None else current_data if isinstance(current_data, str) else ""
-        pool_options = self._declared_resource_pool_options()
+        candidate_options = self._declared_env_candidate_options()
 
-        self.resource_pool_combo.blockSignals(True)
-        self.resource_pool_combo.clear()
-        if not pool_options:
-            self.resource_pool_combo.addItem("当前模块未声明资源池", "")
-            self.resource_pool_combo.setEnabled(False)
-            self.resource_pool_combo.blockSignals(False)
+        self.candidates_combo.blockSignals(True)
+        self.candidates_combo.clear()
+        if not candidate_options:
+            self.candidates_combo.addItem("当前模块未声明候选函数", "")
+            self.candidates_combo.setEnabled(False)
+            self.candidates_combo.blockSignals(False)
             return
 
-        self.resource_pool_combo.setEnabled(True)
-        self.resource_pool_combo.addItem("不使用资源池", "")
-        for pool_name, display_name in pool_options:
-            label = f"{display_name} ({pool_name})" if display_name and display_name != pool_name else pool_name
-            self.resource_pool_combo.addItem(label, pool_name)
+        self.candidates_combo.setEnabled(True)
+        for candidates_name, display_name in candidate_options:
+            label = f"{display_name} ({candidates_name})" if display_name and display_name != candidates_name else candidates_name
+            self.candidates_combo.addItem(label, candidates_name)
 
-        index = self.resource_pool_combo.findData(current)
-        self.resource_pool_combo.setCurrentIndex(index if index >= 0 else 0)
-        self.resource_pool_combo.blockSignals(False)
+        index = self.candidates_combo.findData(current)
+        self.candidates_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.candidates_combo.blockSignals(False)
 
-    def _set_resource_pool_value(self, pool_name: str) -> None:
-        index = self.resource_pool_combo.findData(pool_name)
-        self.resource_pool_combo.setCurrentIndex(index if index >= 0 else 0)
+    def _set_candidates_value(self, candidates_name: str) -> None:
+        index = self.candidates_combo.findData(candidates_name)
+        self.candidates_combo.setCurrentIndex(index if index >= 0 else 0)
 
     def _create_yaml_widget(self) -> QWidget:
         widget = QWidget()
@@ -2024,15 +2548,19 @@ class RunProfileDialog(QDialog):
         if s.execution and s.execution.module:
             self.script_selector.set_value(s.execution.module, s.execution.workflow)
         self.execution_timeout_spin.setValue(s.execution.timeout if s.execution else self._default_execution_timeout())
-        self._load_selector_options(acquisition.selector_name or None)
+        self._sync_object_assembly_form(
+            {
+                "object_bindings": dict(s.execution.object_bindings),
+                "object_params": dict(s.execution.object_params),
+            }
+            if s.execution
+            else None
+        )
+        self._sync_candidates_options(acquisition.candidates or "")
         self.wait_timeout_spin.setValue(acquisition.wait_timeout)
-        self._set_resource_pool_value(acquisition.resource_pool or "")
-
-        selector_index = self.selector_name_combo.findData(acquisition.selector_name)
-        if selector_index >= 0:
-            self.selector_name_combo.setCurrentIndex(selector_index)
-        elif acquisition.mode == AcquisitionMode.SELECT:
-            self.selector_name_combo.setCurrentIndex(-1)
+        self._set_candidates_value(acquisition.candidates or "")
+        self._candidate_params = dict(acquisition.candidate_params or {})
+        self._sync_candidate_params_summary()
 
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
@@ -2042,8 +2570,7 @@ class RunProfileDialog(QDialog):
         provider = self.resource_provider_combo.currentText().strip() or "virtualbrowser"
         env_type = self._provider_to_env_type(provider)
         creation_params: dict = {}
-        selector_name = ""
-        resource_pool = ""
+        candidates_name = ""
 
         if acquisition_mode == AcquisitionMode.CREATE and env_type in {EnvType.BIT_BROWSER, EnvType.VIRTUAL_BROWSER}:
             provider_params = self._build_virtualbrowser_params() if provider == "virtualbrowser" else {}
@@ -2058,18 +2585,16 @@ class RunProfileDialog(QDialog):
                 creation_params["proxy"] = proxy_config
 
         if acquisition_mode == AcquisitionMode.SELECT:
-            selector_data = self.selector_name_combo.currentData()
-            selector_name = selector_data.strip() if isinstance(selector_data, str) else ""
-            resource_pool_data = self.resource_pool_combo.currentData()
-            resource_pool = resource_pool_data.strip() if isinstance(resource_pool_data, str) else ""
-            if not selector_name and not resource_pool:
-                raise ValueError("请选择环境选择回调函数或填写资源池")
-            declared_resource_pools = self._declared_resource_pool_names()
-            if resource_pool:
-                if not declared_resource_pools:
-                    raise ValueError("当前模块未在 module.yaml.resource_pools 中声明资源池")
-                if resource_pool not in declared_resource_pools:
-                    raise ValueError(f"资源池未在 module.yaml.resource_pools 中声明: {resource_pool}")
+            candidates_data = self.candidates_combo.currentData()
+            candidates_name = candidates_data.strip() if isinstance(candidates_data, str) else ""
+            if not candidates_name:
+                raise ValueError("请选择环境候选函数")
+            declared_candidates = self._declared_env_candidate_names()
+            if candidates_name:
+                if not declared_candidates:
+                    raise ValueError("当前模块未声明 @env_candidates 候选函数")
+                if candidates_name not in declared_candidates:
+                    raise ValueError(f"环境候选函数未声明: {candidates_name}")
             provider = ""
             env_type = EnvType.VIRTUAL_BROWSER
 
@@ -2078,8 +2603,8 @@ class RunProfileDialog(QDialog):
                 mode=acquisition_mode,
                 provider=provider,
                 env_type=env_type,
-                selector_name=selector_name,
-                resource_pool=resource_pool,
+                candidates=candidates_name,
+                candidate_params=dict(self._candidate_params) if acquisition_mode == AcquisitionMode.SELECT else {},
                 wait_timeout=self.wait_timeout_spin.value(),
                 creation=CreationConfig(
                     lifecycle=CreationLifecycle.PERSISTENT,
@@ -2087,19 +2612,19 @@ class RunProfileDialog(QDialog):
                 ),
             ),
         )
-        
+
         module_name, workflow_name = self.script_selector.get_value()
         if not module_name or not workflow_name:
             raise ValueError("请选择执行脚本")
-        previous_execution = self._run_profile.execution
+        object_assembly = self._current_object_assembly_values()
         execution = ExecutionContext(
             module=module_name,
             workflow=workflow_name,
-            hooks_module=previous_execution.hooks_module if previous_execution else "",
-            params=dict(previous_execution.params) if previous_execution else {},
+            object_bindings=object_assembly["object_bindings"],
+            object_params=object_assembly["object_params"],
             timeout=self.execution_timeout_spin.value(),
         )
-        
+
         return RunProfile(
             resource=resource,
             execution=execution,
@@ -2141,13 +2666,25 @@ class RunProfileDialog(QDialog):
 
         return True
 
+    def _on_validate(self):
+        try:
+            if self.stack.currentIndex() == 1:
+                if not self._yaml_to_form(show_error=True):
+                    return
+            else:
+                self._build_run_profile_from_form()
+        except Exception as exc:
+            MessageDialog.warning(self, "验证失败", f"运行模板配置无效：{exc}")
+            return
+        MessageDialog.information(self, "验证通过", "运行模板配置有效。")
+
     def _on_save(self):
         if self.stack.currentIndex() == 1:
             if not self._yaml_to_form(show_error=True):
                 return
         else:
             self._run_profile = self._build_run_profile_from_form()
-            
+
         self.accept()
 
     def get_run_profile(self) -> RunProfile:

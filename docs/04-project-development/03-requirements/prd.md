@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/02-discovery/input.md` | `docs/04-project-development/02-discovery/current-state-analysis.md` | `docs/04-project-development/01-governance/project-charter.md`  
 **下游输出：** `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/` | `docs/04-project-development/06-testing-verification/test-plan.md`  
 **关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`
-**最后更新：** 2026-04-19
+**最后更新：** 2026-04-30
 
 ## 1. 背景与目标
 
@@ -22,7 +22,7 @@
 - 将历史仓库纳入软件工厂阶段化治理。
 - 为下一批修复和迭代建立可追踪工作项。
 - 降低模块根入口契约的维护成本，让新模块不再手工维护根 `__init__.py`。
-- 让固定环境池的 Service Job 在资源不足时进入稳定候场，而不是制造反复失败与重建噪声。
+- 让环境候选 Service Job 在候选环境暂时不足时进入稳定候场，而不是制造反复失败与重建噪声。
 
 ### 成功指标
 
@@ -32,7 +32,7 @@
 | 入口与版本治理清晰 | 达成 | 关闭 `BUG-001`、`CR-001` 后复验 |
 | 模块关键流程可恢复 | 达成 | `TASK-003` 完成后复验 |
 | 模块根入口维护成本降低 | 达成 | 新脚手架生成的模块无需手工维护根 `__init__.py` |
-| 固定环境池服务不再因容量不足形成假失败风暴 | 本地达成 | `REQ-009` 已完成等待队列、FIFO 补位、资源池隔离与等待席位自动超时收口的本地回归 |
+| 环境候选服务不再因候选容量不足形成假失败风暴 | 本地达成 | `REQ-009` 已完成候选纯函数、等待队列、FIFO 补位、模块环境授权与等待席位自动超时收口的本地回归 |
 
 ## 2. 用户与场景
 
@@ -104,28 +104,29 @@
 
 - [ ] `UAT-012` `module init` 生成的新模块根 `__init__.py` 为固定薄壳，而不是内联完整调度逻辑
 - [ ] `UAT-013` 默认任务/工作流分发逻辑由 Core 扫描 `tasks/` / `workflows/` 承载，不再要求写在模块根 `__init__.py`
-- [ ] `UAT-014` 模块级自定义 hooks 或默认工作流可在独立文件中声明，而不是必须写在根 `__init__.py`
+- [ ] `UAT-014` 默认工作流、页面动作、环境候选和清理候选可在独立文件中声明，而不是必须写在根 `__init__.py`；0.4.0 不提供模块级自定义生命周期 hooks
 - [ ] `UAT-015` 模块升级说明明确要求按最新模板重新初始化，而不是继续维护旧式根入口
 
-### `REQ-007` ATM 必须能够根据信号展示结构化确认内容并等待客户端确认
+### `REQ-007` ATM 生命周期与环境处置必须由宿主统一管理
 
 - 优先级：P1
-- 描述：当模块通过 `TaskSignal.wait_for_confirmation(...)` 发出等待确认信号时，Core 必须持久化该信号，桌面客户端必须能够读取并展示结构化确认内容，并在用户确认成功或失败后继续完成任务终态处理。
-- 用户故事：作为 ATM 使用者，我希望当模块要求人工复核时，客户端能直接弹出带结构化信息的确认面板，以便我不需要翻日志或读原始 JSON 就能做出确认。
-- 前置条件：模块已发出 `wait_for_confirmation` 信号，且 `payload` 可选包含结构化展示说明。
+- 描述：模块运行时代码不得发出流程控制或环境处置指令；Core 必须统一处理 workflow/object 收尾、任务终态环境回收和后续环境清理。
+- 用户故事：作为 ATM 使用者，我希望任务被中止、失败或成功结束后环境处置口径一致，并能在环境管理页集中删除孤岛或废弃环境，避免模块代码绕过宿主安全门。
+- 前置条件：运行模板已选定固定环境、候选环境或创建环境模式；模块按 0.4.0 装饰器契约声明 workflow、component 和数据表。
 - 业务规则：
-  - `wait_for_confirmation` 仍只允许 `keep_alive` 语义保留环境，等待期间不进入终态 hooks。
-  - `payload.confirmation` 作为正式 UI 展示协议，至少支持 `title`、`description`、`fields`、`confirm_text`、`reject_text`。
-  - 若模块未提供 `payload.confirmation`，客户端应回退为展示 `message` 和原始 payload 的键值内容。
-  - 用户确认成功或失败后，ATM 继续走既有 `confirm_task_success/confirm_task_failure` 链路，不新增第二套确认入口。
-- 依赖项：`packages/crawler4j/src/core/atm/{execution_runner,dispatcher,repository,ui/task_detail_dialog.py}`、`packages/crawler4j/src/core/foundation/event_bus.py`
-- 排除范围：本轮不实现跨进程/重启后的等待确认恢复执行；不扩展为任意自定义表单提交通道。
+  - workflow 只能通过 `TaskResult` 表达成功或失败，不提供模块侧信号确认入口。
+  - workflow/component 如需运行前准备，可选实现 `setup(ctx, workflow)`；如需收尾，可选实现 `cleanup(ctx, outcome)`；旧 `aclose()` / `close()` 不作为宿主生命周期契约。
+  - 任务终态和用户中止后的环境统一回收，不在中止弹窗或运行结果中提供保留/删除策略。
+  - 创建环境后宿主立即写入 `host.env_claim(pending)`；终态通过 `env_binding_field` 扫描模块业务表并标记 `claimed/abandoned`。
+  - 环境删除只通过环境管理页 `清理环境` 执行，候选来源包括孤岛环境、未认领环境、owner 缺失环境和同模块 `@env_cleanup_candidates` 返回的业务废弃环境。
+- 依赖项：`packages/crawler4j/src/core/atm/{execution_runner,dispatcher,repository,ui/task_list_widget.py}`、`packages/crawler4j/src/core/rem/{env_claims.py,cleanup_service.py}`、`packages/crawler4j-contracts/src/{context.py,result.py,lifecycle.py}`
+- 排除范围：本轮不恢复人工等待确认状态机；不允许模块发出环境保留、回收或删除指令。
 
 验收标准：
 
-- [x] `UAT-016` `TaskSignal.wait_for_confirmation` 的结构化内容可随任务状态一起持久化并重新读取
-- [x] `UAT-017` ATM 详情页在收到等待确认信号时会弹出结构化确认面板
-- [x] `UAT-018` 用户在确认面板中选择成功或失败后，会调用既有确认服务完成任务收尾
+- [x] `UAT-016` Contracts 不再导出 `TaskSignal` / `EnvAction`，SDK scanner 会阻断模块导入这些宿主控制对象
+- [x] `UAT-017` `workflow.run(ctx)` 前会按对象图组合顺序调用可选 `setup(ctx, workflow)`；任务终态、setup 异常、运行异常、超时和用户中止都会调用对象 `cleanup(ctx, outcome)` 后统一回收环境
+- [x] `UAT-018` 环境管理页 `清理环境` 能统一预览并删除孤岛、未认领、owner 缺失和模块业务废弃环境
 
 ### `REQ-008` 宿主必须为模块提供独立的审计事件持久化能力
 
@@ -150,33 +151,34 @@
 - [x] `UAT-022` 新增事件能力后，模块仍通过统一的 `ctx.db` 能力面访问宿主，不需要直连数据库
 - [x] `UAT-023` 宿主清理模块数据时，会同时清理该模块的快照数据、审计事件和托管数据表 schema
 
-### `REQ-009` ATM 必须支持固定环境池 Service Job 的等待队列与模块资源池分配
+### `REQ-009` ATM 必须支持环境候选 Service Job 的等待队列与模块候选分配
 
 - 优先级：P1
-- 描述：对于使用固定环境池的 Service Job，宿主必须把“暂时没有可用环境”建模为正式等待状态，而不是直接失败；宿主只应在“当前模块 + 当前资源池 + 资格有效”的环境集合里分配环境，并按队列语义维持目标并发。
-- 用户故事：作为服务运营者或模块开发者，我希望当目标并发大于当前可用环境数时，系统能稳定表现为“运行中 + 等待中”，以便固定环境池服务不会因为资源暂时不足而不断失败和重建。
-- 前置条件：任务以固定环境池 Service Job 方式运行，模块已向宿主同步当前资源池资格。
+- 描述：对于使用 `@env_candidates` 的 Service Job，宿主必须把“暂时没有可用候选环境”建模为正式等待状态，而不是直接失败；宿主只应从当前模块声明的候选函数返回集合中分配已授权、就绪且未租约占用的浏览器环境，并按队列语义维持目标并发。
+- 用户故事：作为服务运营者或模块开发者，我希望当目标并发大于当前可用候选环境数时，系统能稳定表现为“运行中 + 等待中”，以便服务不会因为账号状态、黑号或环境容量暂时不足而不断失败和重建。
+- 前置条件：任务以 Service Job 方式运行，`AcquisitionConfig.mode=select`，运行模板引用当前模块 `candidates/*.py` 中已声明的 `@env_candidates` 同步纯函数。
 - 业务规则：
-  - 固定环境池场景下，“当前轮没拿到环境”属于等待，不属于失败。
+  - 候选环境场景下，“当前轮没拿到环境”属于等待，不属于失败。
   - 目标并发按服务席位表达，业务口径统一为 `运行中 + 等待中 = 目标并发`。
-  - 宿主只从“当前模块 + 当前资源池 + `eligible=true`”的环境集合里叫号，不从全局环境池盲抢。
+  - 宿主实时执行候选纯函数，候选函数可直接返回 env id 列表或 `EnvCandidates` 链式查询。
+  - 宿主只从“当前模块候选集合 + 已绑定当前模块 + `READY` + 浏览器 + 无租约”的环境集合里叫号，不从全局环境池盲抢。
   - 容量扩张时按 FIFO 连续补位；容量收缩时停止继续补位，但不抢占已在运行中的任务。
-  - 黑号或风控失效环境必须先停发号，再按业务策略销毁或保留人工处理。
+  - 黑号、风控失效、会员等级、注册时间等业务状态必须写入模块业务数据表，并由候选纯函数实时过滤。
 - 依赖项：`packages/crawler4j/src/core/atm/`, `packages/crawler4j/src/core/rem/`, `packages/crawler4j-sdk/`, `docs/04-project-development/04-design/atm-resource-pool-queue-design.md`
-- 排除范围：本轮不实现优先级队列、多租户抢占策略、模块自写等待轮询或在通用 `Environment` 上新增强绑定 `module_id`
+- 排除范围：本轮不实现优先级队列、多租户抢占策略、模块自写等待轮询、资源池同步快照或 `selector_name/env_selector/resource_pool` 兼容路径。
 
 验收标准：
 
-- [ ] `UAT-024` 给定目标并发 10、当前可用工位 2，当宿主调和固定环境池 Service Job，则系统稳定表现为“运行中 2、等待中 8”，且不会制造 8 个反复失败实例
-- [ ] `UAT-025` 给定当前状态为“运行中 2、等待中 8”，当同一资源池可用工位从 2 增长到 5，则宿主会一次性补位 3 个，结果表现为“运行中 5、等待中 5”
-- [ ] `UAT-026` 给定环境列表中同时存在其他模块或其他资源池的工位，当宿主为当前固定环境池 Service Job 分配环境，则只会从“当前模块 + 当前资源池 + 资格有效”的候选中分配
-- [ ] `UAT-027` 给定某个工位被标记为黑号或不可接单，当宿主后续调和等待席位，则该工位不会再被叫号；若随后环境被销毁，对应资格卡片会自动消失
+- [x] `UAT-024` 给定目标并发 10、当前可用候选 2，当宿主调和候选 Service Job，则系统稳定表现为“运行中 2、等待中 8”，且不会制造 8 个反复失败实例
+- [x] `UAT-025` 给定当前状态为“运行中 2、等待中 8”，当同一候选函数可用环境从 2 增长到 5，则宿主会按 FIFO 补位 3 个，结果表现为“运行中 5、等待中 5”
+- [x] `UAT-026` 给定环境列表中同时存在其他模块已绑定环境，当宿主为当前候选 Service Job 分配环境，则只会从当前模块已授权候选中分配
+- [x] `UAT-027` 给定某个账号被标记为黑号或不可接单，当候选函数实时过滤该账号对应环境，则宿主后续调和等待席位不会再叫号该环境
 - [ ] `UAT-028` 给定等待时间超过明确上限，当宿主结束该等待席位，则失败原因收敛为“等待环境超时”类错误，而不是“环境选择返回 none”
 
 当前实现备注：
 
-- V1 已本地实现并验证队列语义、FIFO 补位、资源池隔离、资格卡片、等待席位自动超时收口与宿主 `ctx.tools` 资源池能力
-- `UAT-028` 当前实现的错误文案为 `等待环境池工位超时: <pool> (<seconds>s)`，语义已从“环境选择返回 none”收敛为等待超时类错误
+- 0.4.0 当前实现已切到 `candidates/` + `@env_candidates` 纯函数候选方案，资源池同步快照和宿主资源池工具已移除。
+- `UAT-028` 当前实现的错误文案为 `等待环境候选超时: <candidates> (<seconds>s)`，语义已从“环境选择返回 none”收敛为等待超时类错误。
 
 ### `REQ-004` 项目必须具备可追溯的发布与文档链路
 

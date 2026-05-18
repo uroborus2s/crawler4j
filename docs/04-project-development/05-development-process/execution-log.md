@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `API-010`, `BUG-013`
-**最后更新：** 2026-04-26
+**最后更新：** 2026-05-11
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,10 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-05-11 | 收口 Hosted UI 内联 `DataTable` 查询契约：Contracts 新增固定 `HostedDataTableQuery` / 泛型 `HostedDataTableQueryResult[RowT]` / `HostedDataTableSortSpec`；runtime bridge 按 `(context, query)` 调用 query handler，不再传 `table_id`；renderer 只从显式 `searchable=True` 的 `DataTable.columns` 推导搜索字段并过滤非法排序字段，未声明列默认不可搜索；要求返回 `HostedDataTableQueryResult`，普通 dict 返回值 fail-fast，结果不再回传 `sort`；同步 SDK 校验、开发者指南、设计文档和 `.factory/memory/`；定向回归 `65 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
+| 2026-05-11 | 收口 `TaskContext` 边界：Contracts 删除 `screenshot()`、`run_subtask()` 和 `_subtask_executor`，保留 Core MMS 实际注入的 `run_page_action()`；核查 Core 未发现真实截图工具实现，REM 能力示例注释不再列 screenshot；同步开发者指南、设计说明和 `.factory/memory/`；定向回归 `31 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
+| 2026-05-11 | 修正 `ctx.db.from_(...).execute()` 默认分页语义：Contracts 仅在显式调用 `.limit(...)` / `.offset(...)` 后写入分页值，Core SQL 渲染缺省分页时不再追加 `LIMIT/OFFSET`，默认读取满足条件的全部行；新增 managed_dataset/custom_table 超过 100 行默认全量读取回归，开发者指南和 `.factory/memory/` 已同步；定向回归 `121 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
+| 2026-05-02 | 收口 REM 批量环境清理确认可读性：环境列表页的“确认批量清理”弹窗不再把待删环境拼成长文本，而是改为表格预览，按 `环境ID / 环境名 / Provider / 来源` 分列展示，并保留搜索与分页，便于核对长任务名和多来源环境；定向回归 `uv run pytest packages/crawler4j/tests/unit/test_core/test_rem/test_env_list_widget.py -q` 为 `23 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-26 | 继续优化模块配置 YAML 可读性：修正 PyYAML 默认 indentless sequence 导致数组显示为父级同列的问题，保存/展示时统一输出为父 key 下缩进的 `- item`；`YamlCodeEditor.setPlainText()` 也会兜底规范化旧的 `key:\n- item` 文本；编辑器字号提升到 15pt，并增加额外行高。定向回归 `21 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-26 | 收口模块详情页滚动条与 YAML 编辑器视觉：`YamlCodeEditor` 隐藏横向/纵向滚动条，折叠样式从树状连线改为 plain fold，并弱化缩进参考线；模块详情页左侧菜单、任务链页面、Hosted 页面滚动区和 `SkyDataTable` 也统一隐藏滚动条但保留滚轮/触控板滚动。定向回归 `22 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-04-26 | 跟进资源池声明契约调整客户端交互：ATM 运行模板里的“资源池”由手动文本输入改为下拉选择，选项直接来自当前模块 `module.yaml.resource_pools[]`；未声明资源池时控件禁用，有声明时保留“不使用资源池”选项并展示声明池显示名与池名，避免用户继续手填旧资源池名称。定向回归 `23 passed`，目标文件 `ruff check` 通过 | Codex |
@@ -107,7 +111,7 @@
 | 2026-04-24 | 收口 Windows 打包态 `qasync` 停环竞态：宿主入口新增 `_ShutdownController`，显式拦截 `QEvent.Type.Quit` 并把真正退出延后到异步清理完成之后；同时补 `Quit`/`lastWindowClosed` 两条 UI 生命周期回归，避免桌面包再次弹出 `Event loop stopped before Future completed` | Codex |
 | 2026-04-24 | 收口共享表格删除确认框配色：`ConfirmDialog` 改为完整深色主题，补齐标题/正文/取消按钮/危险按钮的对象名与样式选择器，避免 macOS 下删除确认面板继续出现黑字/浅底等系统默认配色；同时新增组件级 UI 回归 `test_confirm_dialog.py` | Codex |
 | 2026-04-24 | 为 Hosted UI `Page` 增加页面级滚动配置：`crawler4j_contracts.hosted_ui.normalize_page_schema()` 现支持 `scroll.vertical = auto|hidden`，`ManagedPageRenderer` 会按页面 schema 切换外层 `QScrollArea` 的竖向滚动条策略；同时新增契约回归 `test_hosted_ui_card.py` 与隔离渲染回归 `test_managed_page_scroll.py`，用于收口“今日运营看板”右侧滚动槽 | Codex |
-| 2026-04-24 | 收口模块数据库开发者接口：运行时只向模块暴露 `ctx.db` fluent API，旧 `ctx.tools.call("db.*")` 工具面退出正式协议；同步补齐 managed/custom/view/named query 查询边界、旧调用扫描和定向回归 `159 passed` | Codex |
+| 2026-04-24 | 收口模块数据库开发者接口：运行时只向模块暴露 `ctx.db` fluent API，旧 `ctx.tools.call("db.*")` 工具面退出正式协议；同步补齐 managed/custom/view/read-only view 查询边界、旧调用扫描和定向回归 `159 passed` | Codex |
 
 ## 5. 2026-04-15 缺陷修复记录
 

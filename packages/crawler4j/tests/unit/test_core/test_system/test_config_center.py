@@ -23,8 +23,8 @@ def test_config_center_reads_defaults_and_persists_typed_values():
     config = get_config_center()
 
     assert config.get("browser.virtualbrowser.port") == 9002
-    assert config.get("atm.terminal_hook_timeout_seconds") == 60
     assert config.get("atm.default_execution_timeout_seconds") == 600
+    assert config.get("atm.env_recycle_timeout_seconds") == 60
     with pytest.raises(KeyError):
         config.registry.get_item("system.autostart")
     with pytest.raises(KeyError):
@@ -62,7 +62,7 @@ def test_config_center_validates_ranges_and_choices():
     config = get_config_center()
 
     with pytest.raises(ConfigValidationError):
-        config.set("atm.cleanup_hook_timeout_seconds", 0)
+        config.set("atm.env_recycle_timeout_seconds", 0)
 
     with pytest.raises(ConfigValidationError):
         config.set("network.proxy_mode", "bad-mode")

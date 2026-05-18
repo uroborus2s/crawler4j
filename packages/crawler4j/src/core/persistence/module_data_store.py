@@ -11,6 +11,7 @@ from typing import Any
 
 from src.core.mms.data_contract import load_sql_file, validate_resource_sql, validate_seed_file
 from src.core.persistence.database import DATA_DB, get_connection
+from src.core.persistence.write_coordinator import get_db_write_coordinator
 
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _STORAGE_MODES = {"managed_dataset", "custom_table"}
@@ -30,6 +31,8 @@ _CUSTOM_TABLE_TYPE_MAP = {
     "bool": "INTEGER",
     "json": "TEXT",
 }
+_CUSTOM_TABLE_BOOL_TRUE_STRINGS = {"true", "1", "yes", "on"}
+_CUSTOM_TABLE_BOOL_FALSE_STRINGS = {"false", "0", "no", "off"}
 _LEGACY_CUSTOM_TABLE_COLUMNS = {
     "record_key",
     "run_status",
@@ -38,6 +41,39 @@ _LEGACY_CUSTOM_TABLE_COLUMNS = {
     "created_at",
     "updated_at",
 }
+_MANAGED_DATASET_PHYSICAL_COLUMN_TYPES = {
+    "record_index": "int",
+    "record_key": "text",
+    "run_status": "text",
+    "record_status": "text",
+    "created_at": "int",
+    "updated_at": "int",
+}
+_CUSTOM_TABLE_SYSTEM_COLUMN_TYPES = {
+    "created_at": "int",
+    "updated_at": "int",
+}
+_MANAGED_DATASET_RESERVED_WRITE_FIELDS = set(_MANAGED_DATASET_PHYSICAL_COLUMN_TYPES)
+_MANAGED_DATASET_STATUS_WRITE_FIELDS = {"run_status", "record_status"}
+_MANAGED_DATASET_GENERATED_WRITE_FIELDS = _MANAGED_DATASET_RESERVED_WRITE_FIELDS - _MANAGED_DATASET_STATUS_WRITE_FIELDS
+_FILTER_OP_ALIASES = {
+    "=": "eq",
+    "==": "eq",
+    "eq": "eq",
+    "in": "in",
+    ">": "gt",
+    "gt": "gt",
+    ">=": "gte",
+    "gte": "gte",
+    "<": "lt",
+    "lt": "lt",
+    "<=": "lte",
+    "lte": "lte",
+    "between": "between",
+    "like": "like",
+    "is_null": "is_null",
+}
+_SQL_FILTER_OPS = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<=", "like": "LIKE"}
 _DB_VIEW_RESOURCE_PLACEHOLDER_RE = re.compile(r"\{\{resource:([a-z][a-z0-9_]*)\}\}")
 _DB_VIEW_SQL_REF_RE = re.compile(r"\b(?:from|join)\s+([^\s,()]+)", re.IGNORECASE)
 _DB_VIEW_BLOCKED_SQL_RE = re.compile(
@@ -187,6 +223,103 @@ def _custom_table_name(module_name: str, resource_id: str) -> str:
     return _validate_snake_case_identifier(f"{module_name}_{resource_id}")
 
 
+def _data_source_column_descriptor(
+    raw: dict[str, Any],
+    *,
+    storage_mode: str,
+    record_key_field: str | None,
+    writable: bool = True,
+) -> dict[str, Any]:
+    name = _validate_snake_case_identifier(str(raw.get("name") or raw.get("key") or ""))
+    column_type = str(raw.get("type") or "text").strip() or "text"
+    auto_increment = bool(raw.get("auto_increment"))
+    nullable = bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required"))
+    if storage_mode == "custom_table" and record_key_field and name == record_key_field:
+        nullable = False
+    if auto_increment:
+        nullable = False
+    required = (bool(raw.get("required")) or nullable is False) and not auto_increment
+    column = {
+        "name": name,
+        "type": column_type,
+        "nullable": nullable,
+        "required": required,
+        "writable": bool(writable and not auto_increment),
+    }
+    if auto_increment:
+        column["auto_increment"] = True
+    return column
+
+
+def _read_only_column_descriptor(raw: dict[str, Any]) -> dict[str, Any]:
+    name = _validate_snake_case_identifier(str(raw.get("name") or raw.get("key") or ""))
+    nullable = bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required"))
+    return {
+        "name": name,
+        "type": str(raw.get("type") or "text").strip() or "text",
+        "nullable": nullable,
+        "required": False,
+        "writable": False,
+    }
+
+
+def _system_field_descriptor(
+    name: str,
+    column_type: str,
+    *,
+    writable: bool,
+    generated: bool,
+) -> dict[str, Any]:
+    return {
+        "name": _validate_snake_case_identifier(name),
+        "type": column_type,
+        "writable": writable,
+        "generated": generated,
+    }
+
+
+def _managed_dataset_system_fields() -> list[dict[str, Any]]:
+    return [
+        _system_field_descriptor(
+            name,
+            column_type,
+            writable=name in _MANAGED_DATASET_STATUS_WRITE_FIELDS,
+            generated=name in _MANAGED_DATASET_GENERATED_WRITE_FIELDS,
+        )
+        for name, column_type in _MANAGED_DATASET_PHYSICAL_COLUMN_TYPES.items()
+    ]
+
+
+def _custom_table_system_fields() -> list[dict[str, Any]]:
+    return [
+        _system_field_descriptor(name, column_type, writable=False, generated=True)
+        for name, column_type in _CUSTOM_TABLE_SYSTEM_COLUMN_TYPES.items()
+    ]
+
+
+def _with_data_source_write_contract(descriptor: dict[str, Any]) -> dict[str, Any]:
+    columns = [dict(column) for column in descriptor.get("columns", []) if isinstance(column, dict)]
+    system_fields = [dict(field) for field in descriptor.get("system_fields", []) if isinstance(field, dict)]
+    descriptor["columns"] = columns
+    descriptor["system_fields"] = system_fields
+    descriptor["writable_fields"] = [
+        str(item["name"])
+        for item in [*columns, *system_fields]
+        if item.get("writable") is True and item.get("name")
+    ]
+    descriptor["required_fields"] = [
+        str(column["name"])
+        for column in columns
+        if column.get("required") is True and column.get("name")
+    ]
+    descriptor["read_only_fields"] = [
+        str(item["name"])
+        for item in [*columns, *system_fields]
+        if item.get("writable") is not True and item.get("name")
+    ]
+    return descriptor
+
+
 def _db_view_name(module_name: str, view_id: str) -> str:
     _validate_snake_case_identifier(module_name)
     _validate_snake_case_identifier(view_id)
@@ -200,25 +333,12 @@ def _record_status_columns(record: dict[str, Any]) -> tuple[str, str]:
     )
 
 
-def _record_json_payload(record: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(record)
-    payload.pop("run_status", None)
-    payload.pop("record_status", None)
-    return payload
-
-
-def _record_from_storage_row(row, *, include_system_fields: bool = False) -> dict[str, Any]:
-    record = _normalize_records([json.loads(row["record_json"])])
-    payload = record[0] if record else {}
-    record_key = _normalize_text(row["record_key"])
-    if record_key is not None:
-        payload.setdefault("record_key", record_key)
-    payload["run_status"] = _normalize_text(row["run_status"]) or _DEFAULT_RUN_STATUS
-    payload["record_status"] = _normalize_text(row["record_status"]) or _DEFAULT_RECORD_STATUS
-    if include_system_fields:
-        payload["created_at"] = row["created_at"]
-        payload["updated_at"] = row["updated_at"]
-    return payload
+def _record_json_payload(record: dict[str, Any], *, json_column_names: set[str]) -> dict[str, Any]:
+    return {
+        field: value
+        for field, value in record.items()
+        if _validate_snake_case_identifier(str(field)) in json_column_names
+    }
 
 
 def _record_key_for_write(
@@ -228,11 +348,7 @@ def _record_key_for_write(
     record_key_field: str | None,
     require_key: bool,
 ) -> str | None:
-    candidate_fields = [
-        field
-        for field in (record_key_field, "record_key", "id")
-        if field
-    ]
+    candidate_fields = [field for field in (record_key_field, "record_key", "id") if field]
     for field in dict.fromkeys(candidate_fields):
         if field in record:
             record_key = _normalize_text(record.get(field))
@@ -266,8 +382,6 @@ def _normalize_db_view_column(raw: Any) -> dict[str, Any]:
         "name": name,
         "type": _normalize_db_view_column_type(raw.get("type")),
         "nullable": bool(raw.get("nullable")) if "nullable" in raw else True,
-        "filterable": bool(raw.get("filterable")),
-        "sortable": bool(raw.get("sortable")),
     }
     return column
 
@@ -281,10 +395,7 @@ def _normalize_db_view_columns(raw: Any) -> list[dict[str, Any]]:
 def _normalize_db_view_source_resource_ids(raw: Any) -> list[str]:
     if not isinstance(raw, list) or not raw:
         raise ValueError("db view source_resource_ids must be a non-empty list")
-    return [
-        _validate_snake_case_identifier(str(item))
-        for item in raw
-    ]
+    return [_validate_snake_case_identifier(str(item)) for item in raw]
 
 
 def _normalize_db_view_schema_version(raw: Any) -> int:
@@ -316,98 +427,333 @@ def _normalize_db_view_sort(raw: Any) -> list[dict[str, str]]:
     return normalized
 
 
-def _apply_record_query(
-    records: list[dict[str, Any]] | None,
-    *,
-    filters: dict[str, Any] | None = None,
-    sort: list[dict[str, Any]] | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[dict[str, Any]]:
-    filtered = list(records or [])
-    for field, value in dict(filters or {}).items():
-        normalized_field = _validate_snake_case_identifier(str(field))
-        if value is None:
-            filtered = [item for item in filtered if item.get(normalized_field) is None]
-        else:
-            filtered = [item for item in filtered if item.get(normalized_field) == value]
-
-    for item in reversed(_normalize_db_view_sort(sort or [])):
-        filtered.sort(
-            key=lambda row: row.get(item["field"]),
-            reverse=item["direction"] == "desc",
-        )
-
-    normalized_offset = max(int(offset), 0)
-    normalized_limit = max(int(limit), 1)
-    return filtered[normalized_offset : normalized_offset + normalized_limit]
+def _normalize_filter_op(raw: Any) -> str:
+    normalized = str(raw or "eq").strip().lower()
+    if normalized not in _FILTER_OP_ALIASES:
+        raise ValueError(f"unsupported query filter op: {normalized}")
+    return _FILTER_OP_ALIASES[normalized]
 
 
 def _normalize_plan_where(raw: Any) -> list[dict[str, Any]]:
     if raw in (None, ""):
         return []
-    if not isinstance(raw, list):
-        raise ValueError("query plan where must be a list")
-    normalized: list[dict[str, Any]] = []
-    for index, item in enumerate(raw):
-        if not isinstance(item, dict):
-            raise ValueError(f"query plan where[{index}] must be an object")
-        field = _validate_snake_case_identifier(str(item.get("field") or ""))
-        op = str(item.get("op") or "eq").strip().lower()
-        if op not in {"eq", "in", "gt", "gte", "lt", "lte", "between", "like", "is_null"}:
-            raise ValueError(f"unsupported query filter op: {op}")
-        payload = {"field": field, "op": op}
+    if isinstance(raw, (list, tuple)) and not raw:
+        return []
+    if isinstance(raw, dict):
+        if "field" in raw or "operator" in raw or "conditions" in raw:
+            return [_normalize_plan_condition(raw)]
+        if not raw:
+            return []
+        return [
+            {"field": _validate_snake_case_identifier(str(field)), "op": "eq", "value": value}
+            for field, value in raw.items()
+        ]
+    condition = _normalize_plan_condition(raw)
+    if condition.get("kind") == "group" and condition.get("operator") == "and":
+        return list(condition["conditions"])
+    return [condition]
+
+
+def _normalize_plan_condition(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        if "operator" in raw or "conditions" in raw:
+            operator = str(raw.get("operator") or "and").strip().lower()
+            if operator not in {"and", "or"}:
+                raise ValueError(f"unsupported query filter group operator: {operator}")
+            conditions = [_normalize_plan_condition(item) for item in raw.get("conditions") or []]
+            if not conditions:
+                raise ValueError("query filter group must contain conditions")
+            return {"kind": "group", "operator": operator, "conditions": conditions}
+        field = _validate_snake_case_identifier(str(raw.get("field") or ""))
+        op = _normalize_filter_op(raw.get("op"))
+        item: dict[str, Any] = {"field": field, "op": op}
         if op != "is_null":
-            payload["value"] = item.get("value")
-        normalized.append(payload)
-    return normalized
+            item["value"] = raw.get("value")
+        return item
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError("query plan where must be a condition list")
+    items = list(raw)
+    if not items:
+        raise ValueError("query filter condition must be non-empty")
+    first = items[0]
+    if isinstance(first, str) and first.strip().lower() in {"and", "or"}:
+        operator = first.strip().lower()
+        conditions = [_normalize_plan_condition(item) for item in items[1:]]
+        if not conditions:
+            raise ValueError("query filter group must contain conditions")
+        return {"kind": "group", "operator": operator, "conditions": conditions}
+    if len(items) >= 2 and isinstance(items[0], str):
+        field = _validate_snake_case_identifier(str(items[0]))
+        op = _normalize_filter_op(items[1])
+        item: dict[str, Any] = {"field": field, "op": op}
+        if op == "between":
+            if len(items) == 4:
+                item["value"] = [items[2], items[3]]
+            elif len(items) == 3:
+                item["value"] = items[2]
+            else:
+                raise ValueError("between filter value must contain two items")
+        elif op != "is_null":
+            if len(items) < 3:
+                raise ValueError(f"{op} filter requires a value")
+            item["value"] = items[2]
+        return item
+    if all(isinstance(item, (dict, list, tuple)) for item in items):
+        return {
+            "kind": "group",
+            "operator": "and",
+            "conditions": [_normalize_plan_condition(item) for item in items],
+        }
+    raise ValueError("invalid query filter condition")
 
 
-def _normalize_plan_limit(raw: Any) -> int:
+def _iter_where_predicates(where: list[dict[str, Any]]):
+    for item in where:
+        if item.get("kind") == "group":
+            yield from _iter_where_predicates(item["conditions"])
+        else:
+            yield item
+
+
+def _render_where_conditions(
+    where: list[dict[str, Any]],
+    render_predicate,
+    *,
+    require_where: bool = False,
+) -> tuple[str, list[Any]]:
+    if require_where and not where:
+        raise ValueError("write where must not be empty")
+    clauses: list[str] = []
+    params: list[Any] = []
+    for item in where:
+        clause, clause_params = _render_where_condition(item, render_predicate)
+        clauses.append(clause)
+        params.extend(clause_params)
+    return (f" WHERE {' AND '.join(clauses)}" if clauses else ""), params
+
+
+def _render_where_condition(condition: dict[str, Any], render_predicate) -> tuple[str, list[Any]]:
+    if condition.get("kind") == "group":
+        operator = str(condition.get("operator") or "and").strip().lower()
+        if operator not in {"and", "or"}:
+            raise ValueError(f"unsupported query filter group operator: {operator}")
+        parts: list[str] = []
+        params: list[Any] = []
+        for item in condition.get("conditions") or []:
+            part, item_params = _render_where_condition(item, render_predicate)
+            parts.append(part)
+            params.extend(item_params)
+        if not parts:
+            raise ValueError("query filter group must contain conditions")
+        joiner = f" {operator.upper()} "
+        return f"({joiner.join(parts)})", params
+    return render_predicate(condition)
+
+
+def _normalize_plan_limit(raw: Any) -> int | None:
     if raw in (None, ""):
-        return 100
+        return None
     value = int(raw)
     if value < 1:
         raise ValueError("query plan limit must be >= 1")
     return value
 
 
-def _normalize_plan_offset(raw: Any) -> int:
+def _normalize_plan_offset(raw: Any) -> int | None:
     if raw in (None, ""):
-        return 0
+        return None
     value = int(raw)
     if value < 0:
         raise ValueError("query plan offset must be >= 0")
     return value
 
 
+def _render_plan_pagination(raw_limit: Any, raw_offset: Any) -> tuple[str, list[Any]]:
+    limit = _normalize_plan_limit(raw_limit)
+    offset = _normalize_plan_offset(raw_offset)
+    if limit is None and offset is None:
+        return "", []
+    if limit is None:
+        return " LIMIT -1 OFFSET ?", [offset]
+    if offset is None:
+        return " LIMIT ?", [limit]
+    return " LIMIT ? OFFSET ?", [limit, offset]
+
+
+def _normalize_resource_query_select(raw: Any) -> list[dict[str, str]]:
+    if raw in (None, ""):
+        return []
+    if raw == "*":
+        return [{"kind": "column", "field": "*"}]
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError("resource query select must be a list")
+    select_items: list[dict[str, str]] = []
+    for item in raw:
+        field = str(item or "")
+        if field == "*":
+            select_items.append({"kind": "column", "field": "*"})
+            continue
+        select_items.append({"kind": "column", "field": _validate_snake_case_identifier(field)})
+    return select_items
+
+
+def _normalize_write_fields(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("write fields must be a non-empty object")
+    return {_validate_snake_case_identifier(str(field)): value for field, value in raw.items()}
+
+
+def _render_custom_table_where_clause(
+    column_map: dict[str, dict[str, Any]],
+    where: Any,
+    *,
+    require_where: bool,
+) -> tuple[str, list[Any]]:
+    normalized_where = _normalize_plan_where(where)
+
+    def render_predicate(item: dict[str, Any]) -> tuple[str, list[Any]]:
+        field = item["field"]
+        column = column_map.get(field)
+        if column is None:
+            raise ValueError(f"write where field not found: {field}")
+        field_sql = _quote_identifier(field)
+        op = item["op"]
+        if op == "is_null":
+            return f"{field_sql} IS NULL", []
+        if op == "eq":
+            return f"{field_sql} = ?", [
+                _sqlite_value_for_custom_table_column(item.get("value"), column_type=column["type"])
+            ]
+        if op == "in":
+            values = list(item.get("value") or [])
+            if not values:
+                return "1 = 0", []
+            return f"{field_sql} IN ({', '.join(['?'] * len(values))})", [
+                *(_sqlite_value_for_custom_table_column(value, column_type=column["type"]) for value in values)
+            ]
+        if op == "between":
+            values = list(item.get("value") or [])
+            if len(values) != 2:
+                raise ValueError("between filter value must contain two items")
+            return f"{field_sql} BETWEEN ? AND ?", [
+                *(_sqlite_value_for_custom_table_column(value, column_type=column["type"]) for value in values)
+            ]
+        sql_op = _SQL_FILTER_OPS[op]
+        return f"{field_sql} {sql_op} ?", [
+            _sqlite_value_for_custom_table_column(item.get("value"), column_type=column["type"])
+        ]
+
+    return _render_where_conditions(normalized_where, render_predicate, require_where=require_where)
+
+
 def _plan_has_aggregate(select_items: list[dict[str, Any]]) -> bool:
     return any(item.get("kind") == "aggregate" for item in select_items)
 
 
-def _filter_record_value(current: Any, op: str, expected: Any) -> bool:
-    if op == "eq":
-        return current == expected
-    if op == "in":
-        return current in list(expected or [])
-    if op == "gt":
-        return current is not None and current > expected
-    if op == "gte":
-        return current is not None and current >= expected
-    if op == "lt":
-        return current is not None and current < expected
-    if op == "lte":
-        return current is not None and current <= expected
-    if op == "between":
-        bounds = list(expected or [])
-        if len(bounds) != 2:
-            raise ValueError("between filter value must contain two items")
-        return current is not None and bounds[0] <= current <= bounds[1]
-    if op == "like":
-        return expected is not None and str(expected) in str(current or "")
-    if op == "is_null":
-        return current is None
-    raise ValueError(f"unsupported query filter op: {op}")
+def _managed_dataset_count_alias(select_items: list[dict[str, Any]]) -> str | None:
+    if len(select_items) != 1:
+        return None
+    item = select_items[0]
+    if item.get("kind") != "aggregate":
+        return None
+    func = str(item.get("func") or "").strip().lower()
+    field = str(item.get("field") or "*")
+    if func != "count" or field != "*":
+        return None
+    return _validate_snake_case_identifier(str(item.get("alias") or "count"))
+
+
+def _collect_plan_column_fields(
+    select_items: list[dict[str, Any]],
+    where: list[dict[str, Any]],
+    order_by: list[dict[str, Any]],
+) -> list[str]:
+    fields: list[str] = []
+
+    def add(raw_field: Any) -> None:
+        if str(raw_field or "") == "*":
+            return
+        field = _validate_snake_case_identifier(str(raw_field or ""))
+        if field in _MANAGED_DATASET_RESERVED_WRITE_FIELDS or field in fields:
+            return
+        fields.append(field)
+
+    for item in select_items:
+        if item.get("kind", "column") == "column":
+            add(item.get("field"))
+    for item in _iter_where_predicates(where):
+        add(item.get("field"))
+    for item in order_by:
+        add(item.get("field"))
+    return fields
+
+
+def _managed_dataset_json_column_names(descriptor: dict[str, Any]) -> set[str]:
+    return {
+        str(column.get("name") or "")
+        for column in descriptor.get("columns", [])
+        if isinstance(column, dict) and str(column.get("name") or "") not in _MANAGED_DATASET_PHYSICAL_COLUMN_TYPES
+    }
+
+
+def _managed_dataset_all_fields(descriptor: dict[str, Any]) -> list[str]:
+    fields: list[str] = []
+    for column in descriptor.get("columns", []):
+        if not isinstance(column, dict):
+            continue
+        name = str(column.get("name") or "")
+        if name and name not in fields:
+            fields.append(name)
+    for field in _MANAGED_DATASET_PHYSICAL_COLUMN_TYPES:
+        if field not in fields:
+            fields.append(field)
+    return fields
+
+
+def _managed_dataset_field_mode(field: str, *, json_column_names: set[str]) -> str | None:
+    if field in _MANAGED_DATASET_PHYSICAL_COLUMN_TYPES:
+        return "physical"
+    if field in json_column_names:
+        return "json"
+    return None
+
+
+def _managed_dataset_field_sql(field: str, *, json_column_names: set[str]) -> str:
+    mode = _managed_dataset_field_mode(field, json_column_names=json_column_names)
+    if mode == "physical":
+        return _quote_identifier(field)
+    if mode == "json":
+        return f"json_extract(record_json, '$.{field}')"
+    raise ValueError(f"query field not found: {field}")
+
+
+def _render_managed_dataset_where_clause(
+    where: list[dict[str, Any]],
+    *,
+    json_column_names: set[str],
+    require_where: bool = False,
+) -> tuple[str, list[Any]]:
+    def render_predicate(item: dict[str, Any]) -> tuple[str, list[Any]]:
+        field_sql = _managed_dataset_field_sql(item["field"], json_column_names=json_column_names)
+        op = item["op"]
+        if op == "is_null":
+            return f"{field_sql} IS NULL", []
+        if op == "eq":
+            return f"{field_sql} = ?", [item.get("value")]
+        if op == "in":
+            values = list(item.get("value") or [])
+            if not values:
+                return "1 = 0", []
+            return f"{field_sql} IN ({', '.join(['?'] * len(values))})", values
+        if op == "between":
+            values = list(item.get("value") or [])
+            if len(values) != 2:
+                raise ValueError("between filter value must contain two items")
+            return f"{field_sql} BETWEEN ? AND ?", values
+        sql_op = _SQL_FILTER_OPS[op]
+        return f"{field_sql} {sql_op} ?", [item.get("value")]
+
+    return _render_where_conditions(where, render_predicate, require_where=require_where)
 
 
 def _normalize_db_view_sql_template(raw: Any) -> str:
@@ -432,13 +778,23 @@ def _normalize_custom_table_column(raw: Any, *, record_key_field: str | None) ->
     )
     column_type = _normalize_custom_table_type(raw.get("type"))
     nullable = bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required"))
+    auto_increment = bool(raw.get("auto_increment"))
+    if auto_increment:
+        if name != record_key_field:
+            raise ValueError("custom table auto_increment column must be the record_key_field")
+        if column_type not in {"int", "integer"}:
+            raise ValueError("custom table auto_increment record_key_field must be integer")
+        nullable = False
     if record_key_field and name == record_key_field:
         nullable = False
-    return {
+    column = {
         "name": name,
         "type": column_type,
         "nullable": nullable,
     }
+    if auto_increment:
+        column["auto_increment"] = True
+    return column
 
 
 def _normalize_custom_table_schema(raw: Any, *, record_key_field: str | None) -> dict[str, Any]:
@@ -450,14 +806,14 @@ def _normalize_custom_table_schema(raw: Any, *, record_key_field: str | None) ->
     if not isinstance(raw_columns, list):
         raise ValueError("custom table schema columns must be a list")
 
-    columns = [
-        _normalize_custom_table_column(column, record_key_field=record_key_field)
-        for column in raw_columns
-    ]
+    columns = [_normalize_custom_table_column(column, record_key_field=record_key_field) for column in raw_columns]
     if record_key_field and columns:
         names = {column["name"] for column in columns}
         if record_key_field not in names:
             raise ValueError(f"custom table schema must include record_key_field column: {record_key_field}")
+    auto_increment_columns = [column for column in columns if column.get("auto_increment")]
+    if len(auto_increment_columns) > 1:
+        raise ValueError("custom table schema can only declare one auto_increment column")
     return {
         "version": version,
         "columns": columns,
@@ -487,10 +843,7 @@ def _normalize_custom_table_indexes(raw: Any, *, column_names: set[str]) -> dict
         index_name = _validate_snake_case_identifier(str(raw_name))
         if not isinstance(raw_columns, list) or not raw_columns:
             raise ValueError(f"custom table index {index_name} must declare a non-empty column list")
-        columns = [
-            _validate_snake_case_identifier(str(column))
-            for column in raw_columns
-        ]
+        columns = [_validate_snake_case_identifier(str(column)) for column in raw_columns]
         missing_columns = [column for column in columns if column not in column_names]
         if missing_columns:
             raise ValueError(
@@ -569,7 +922,7 @@ def _sqlite_value_for_custom_table_column(value: Any, *, column_type: str) -> An
     if value is None:
         return None
     if column_type == "bool":
-        return 1 if bool(value) else 0
+        return _sqlite_bool_value_for_custom_table_column(value)
     if column_type in {"int", "integer"}:
         return int(value)
     if column_type in {"number", "real"}:
@@ -577,6 +930,23 @@ def _sqlite_value_for_custom_table_column(value: Any, *, column_type: str) -> An
     if column_type == "json":
         return json.dumps(value, ensure_ascii=False)
     return value
+
+
+def _sqlite_bool_value_for_custom_table_column(value: Any) -> int:
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _CUSTOM_TABLE_BOOL_TRUE_STRINGS:
+            return 1
+        if normalized in _CUSTOM_TABLE_BOOL_FALSE_STRINGS:
+            return 0
+        raise ValueError(f"invalid custom table bool value: {value!r}")
+    if isinstance(value, int) and value in {0, 1}:
+        return int(value)
+    if isinstance(value, float) and value in {0.0, 1.0}:
+        return int(value)
+    raise ValueError(f"invalid custom table bool value: {value!r}")
 
 
 def _python_value_for_custom_table_column(value: Any, *, column_type: str) -> Any:
@@ -590,6 +960,33 @@ def _python_value_for_custom_table_column(value: Any, *, column_type: str) -> An
         except (TypeError, ValueError):
             return value
     return value
+
+
+def _custom_table_record_key_column(
+    columns: list[dict[str, Any]],
+    *,
+    record_key_field: str,
+) -> dict[str, Any]:
+    for column in columns:
+        if column["name"] == record_key_field:
+            return column
+    raise ValueError(f"custom table schema must include record_key_field column: {record_key_field}")
+
+
+def _resource_write_lock_key(module_name: str, resource_id: str) -> str:
+    return f"data:{module_name}:{resource_id}"
+
+
+def _audit_write_lock_key(module_name: str, dataset_name: str) -> str:
+    return f"audit:{module_name}:{dataset_name}"
+
+
+def _module_write_lock_key(module_name: str) -> str:
+    return f"module:{module_name}"
+
+
+def _page_write_lock_key(module_name: str, page_id: str) -> str:
+    return f"page:{module_name}:{page_id}"
 
 
 class ModuleDataStore:
@@ -674,10 +1071,7 @@ class ModuleDataStore:
             "view_id": row["view_id"],
             "view_kind": "sql_view",
             "physical_view_name": row["physical_view_name"],
-            "source_resource_ids": [
-                _validate_snake_case_identifier(str(item))
-                for item in raw_source_resource_ids
-            ],
+            "source_resource_ids": [_validate_snake_case_identifier(str(item)) for item in raw_source_resource_ids],
             "select_sql_template": str(row["select_sql_template"] or "").strip(),
             "columns": _normalize_db_view_columns(raw_columns),
             "schema_version": _normalize_db_view_schema_version(row["schema_version"]),
@@ -806,13 +1200,22 @@ class ModuleDataStore:
         self,
         conn,
         module_name: str,
-        dataset_name: str,
+        resource: dict[str, Any],
         records: list[dict[str, Any]],
         *,
-        record_key_field: str | None,
         now: int,
     ) -> None:
+        dataset_name = resource["logical_name"]
+        record_key_field = resource.get("record_key_field")
         normalized_records = [dict(record) for record in records]
+        json_column_names = self._managed_dataset_json_column_names_from_resource(resource)
+        for record in normalized_records:
+            self._validate_managed_dataset_schema_write_fields(
+                resource,
+                record,
+                operation="records",
+                ignore_generated_fields=True,
+            )
         row = conn.execute(
             """
             SELECT MIN(created_at) AS created_at
@@ -858,7 +1261,10 @@ class ModuleDataStore:
                             require_key=False,
                         ),
                         *_record_status_columns(record),
-                        json.dumps(_record_json_payload(record), ensure_ascii=False),
+                        json.dumps(
+                            _record_json_payload(record, json_column_names=json_column_names),
+                            ensure_ascii=False,
+                        ),
                         created_at,
                         now,
                     )
@@ -866,26 +1272,349 @@ class ModuleDataStore:
                 ],
             )
 
-    def _read_managed_dataset_rows_with_conn(
+    def _managed_dataset_json_column_names_from_resource(self, resource: dict[str, Any]) -> set[str]:
+        schema = _normalize_schema(resource.get("schema") or {})
+        columns = schema.get("columns") or []
+        names = {
+            _validate_snake_case_identifier(str(column.get("name") or ""))
+            for column in columns
+            if isinstance(column, dict)
+        }
+        return names - _MANAGED_DATASET_RESERVED_WRITE_FIELDS
+
+    def _validate_managed_dataset_schema_write_fields(
+        self,
+        resource: dict[str, Any],
+        fields: dict[str, Any],
+        *,
+        operation: str,
+        allow_status_fields: bool = True,
+        ignore_generated_fields: bool = False,
+    ) -> None:
+        allowed_physical_fields = _MANAGED_DATASET_STATUS_WRITE_FIELDS if allow_status_fields else set()
+        ignored_physical_fields = _MANAGED_DATASET_GENERATED_WRITE_FIELDS if ignore_generated_fields else set()
+        reserved_fields = sorted(
+            field
+            for field in (_validate_snake_case_identifier(str(raw_field)) for raw_field in fields)
+            if field in _MANAGED_DATASET_RESERVED_WRITE_FIELDS
+            and field not in allowed_physical_fields
+            and field not in ignored_physical_fields
+        )
+        if reserved_fields:
+            raise ValueError(
+                f"managed_dataset {operation} contains reserved host fields for "
+                f"{resource['resource_id']}: {', '.join(reserved_fields)}"
+            )
+        allowed_fields = (
+            self._managed_dataset_json_column_names_from_resource(resource)
+            | allowed_physical_fields
+            | ignored_physical_fields
+        )
+        unknown_fields = sorted(
+            field
+            for field in (_validate_snake_case_identifier(str(raw_field)) for raw_field in fields)
+            if field not in allowed_fields
+        )
+        if unknown_fields:
+            raise ValueError(
+                f"managed_dataset {operation} contains fields outside schema for "
+                f"{resource['resource_id']}: {', '.join(unknown_fields)}"
+            )
+
+    def _managed_dataset_resource_columns_with_conn(
         self,
         conn,
         module_name: str,
-        dataset_name: str,
+        resource: dict[str, Any],
         *,
-        include_system_fields: bool = False,
-    ) -> list[dict[str, Any]] | None:
-        rows = conn.execute(
+        extra_fields: list[str] | None = None,
+        include_schema_fields: bool = True,
+    ) -> list[dict[str, Any]]:
+        del conn, module_name, extra_fields
+        schema = _normalize_schema(resource.get("schema") or {})
+        schema_columns = [column for column in schema.get("columns") or [] if isinstance(column, dict)]
+        schema_types: dict[str, str] = {}
+        schema_flags: dict[str, dict[str, Any]] = {}
+        ordered_fields: list[str] = []
+
+        def add_json_field(
+            raw_field: Any,
+            *,
+            column_type: str = "text",
+            nullable: bool = True,
+            required: bool = False,
+        ) -> None:
+            try:
+                field = _validate_snake_case_identifier(str(raw_field or ""))
+            except ValueError:
+                return
+            if field in _MANAGED_DATASET_RESERVED_WRITE_FIELDS:
+                return
+            schema_types.setdefault(field, column_type)
+            schema_flags.setdefault(field, {"nullable": nullable, "required": required})
+            if field not in ordered_fields:
+                ordered_fields.append(field)
+
+        if include_schema_fields:
+            for column in schema_columns:
+                nullable = bool(column.get("nullable")) if "nullable" in column else not bool(column.get("required"))
+                add_json_field(
+                    column.get("name"),
+                    column_type=str(column.get("type") or "text"),
+                    nullable=nullable,
+                    required=bool(column.get("required")),
+                )
+
+        return [
+            _data_source_column_descriptor(
+                {
+                    "name": field,
+                    "type": schema_types.get(field, "text"),
+                    **schema_flags.get(field, {}),
+                },
+                storage_mode="managed_dataset",
+                record_key_field=resource.get("record_key_field"),
+            )
+            for field in ordered_fields
+        ]
+
+    def _upsert_managed_dataset_rows_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource: dict[str, Any],
+        records: list[dict[str, Any]],
+        *,
+        now: int,
+    ) -> None:
+        dataset_name = resource["logical_name"]
+        record_key_field = resource.get("record_key_field")
+        existing_rows = conn.execute(
             """
-            SELECT record_key, run_status, record_status, record_json, created_at, updated_at
+            SELECT record_index, record_key, run_status, record_status, record_json, created_at
             FROM module_datasets
             WHERE module_name = ? AND dataset_name = ?
             ORDER BY record_index ASC
             """,
             (module_name, dataset_name),
         ).fetchall()
-        if not rows:
-            return None
-        return [_record_from_storage_row(row, include_system_fields=include_system_fields) for row in rows]
+        existing_by_key = {
+            _normalize_text(row["record_key"]): row
+            for row in existing_rows
+            if _normalize_text(row["record_key"]) is not None
+        }
+        json_column_names = self._managed_dataset_json_column_names_from_resource(resource)
+        next_record_index = max([int(row["record_index"]) for row in existing_rows] or [-1]) + 1
+        seen_keys: set[str] = set()
+        for record_index, original_record in enumerate(records):
+            record = dict(original_record)
+            record_key = _record_key_for_write(
+                record,
+                record_index,
+                record_key_field=record_key_field,
+                require_key=True,
+            )
+            if record_key is None:
+                raise ValueError("managed_dataset records require a record_key")
+            if record_key in seen_keys:
+                raise ValueError(f"duplicate managed_dataset record_key: {record_key}")
+            seen_keys.add(record_key)
+            if record_key_field and record_key_field not in record:
+                record[record_key_field] = record_key
+            self._validate_managed_dataset_schema_write_fields(
+                resource,
+                record,
+                operation="records",
+                ignore_generated_fields=True,
+            )
+
+            existing = existing_by_key.get(record_key)
+            payload = _record_json_payload(record, json_column_names=json_column_names)
+            if existing is not None:
+                try:
+                    existing_payload = json.loads(existing["record_json"])
+                except (TypeError, ValueError):
+                    existing_payload = {}
+                if not isinstance(existing_payload, dict):
+                    existing_payload = {}
+                existing_payload = {
+                    field: value for field, value in existing_payload.items() if field in json_column_names
+                }
+                existing_payload.update(payload)
+                run_status = _normalize_text(record.get("run_status")) or existing["run_status"] or _DEFAULT_RUN_STATUS
+                record_status = (
+                    _normalize_text(record.get("record_status")) or existing["record_status"] or _DEFAULT_RECORD_STATUS
+                )
+                conn.execute(
+                    """
+                    UPDATE module_datasets
+                    SET run_status = ?,
+                        record_status = ?,
+                        record_json = ?,
+                        updated_at = ?
+                    WHERE module_name = ?
+                      AND dataset_name = ?
+                      AND record_index = ?
+                    """,
+                    (
+                        run_status,
+                        record_status,
+                        json.dumps(existing_payload, ensure_ascii=False),
+                        now,
+                        module_name,
+                        dataset_name,
+                        existing["record_index"],
+                    ),
+                )
+                continue
+
+            conn.execute(
+                """
+                INSERT INTO module_datasets (
+                    module_name,
+                    dataset_name,
+                    record_index,
+                    record_key,
+                    run_status,
+                    record_status,
+                    record_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    module_name,
+                    dataset_name,
+                    next_record_index,
+                    record_key,
+                    *_record_status_columns(record),
+                    json.dumps(payload, ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            )
+            next_record_index += 1
+
+    def _update_managed_dataset_rows_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource: dict[str, Any],
+        fields: dict[str, Any],
+        *,
+        where: Any,
+        now: int,
+    ) -> int:
+        normalized_fields = _normalize_write_fields(fields)
+        reserved_fields = sorted(set(normalized_fields) & _MANAGED_DATASET_GENERATED_WRITE_FIELDS)
+        if reserved_fields:
+            raise ValueError(f"managed_dataset update contains reserved host fields: {', '.join(reserved_fields)}")
+        self._validate_managed_dataset_schema_write_fields(
+            resource,
+            normalized_fields,
+            operation="update",
+            allow_status_fields=True,
+        )
+        normalized_where = _normalize_plan_where(where)
+        json_column_names = self._managed_dataset_json_column_names_from_resource(resource)
+        where_sql, where_params = _render_managed_dataset_where_clause(
+            normalized_where,
+            json_column_names=json_column_names,
+            require_where=True,
+        )
+        filter_sql = f" AND {where_sql.removeprefix(' WHERE ')}"
+        if set(normalized_fields).issubset(_MANAGED_DATASET_STATUS_WRITE_FIELDS):
+            set_clauses: list[str] = []
+            set_params: list[Any] = []
+            if "run_status" in normalized_fields:
+                set_clauses.append("run_status = ?")
+                set_params.append(_normalize_text(normalized_fields["run_status"]) or _DEFAULT_RUN_STATUS)
+            if "record_status" in normalized_fields:
+                set_clauses.append("record_status = ?")
+                set_params.append(_normalize_text(normalized_fields["record_status"]) or _DEFAULT_RECORD_STATUS)
+            set_clauses.append("updated_at = ?")
+            set_params.append(now)
+            cursor = conn.execute(
+                f"""
+                UPDATE module_datasets
+                SET {", ".join(set_clauses)}
+                WHERE module_name = ? AND dataset_name = ?
+                {filter_sql}
+                """,
+                (*set_params, module_name, resource["logical_name"], *where_params),
+            )
+            return int(cursor.rowcount or 0)
+
+        rows = conn.execute(
+            f"""
+            SELECT record_index, record_json
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            {filter_sql}
+            """,
+            (module_name, resource["logical_name"], *where_params),
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["record_json"])
+            except (TypeError, ValueError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload = {field: value for field, value in payload.items() if field in json_column_names}
+            json_updates = {field: value for field, value in normalized_fields.items() if field in json_column_names}
+            payload.update(json_updates)
+            set_clauses: list[str] = []
+            set_params: list[Any] = []
+            if "run_status" in normalized_fields:
+                set_clauses.append("run_status = ?")
+                set_params.append(_normalize_text(normalized_fields["run_status"]) or _DEFAULT_RUN_STATUS)
+            if "record_status" in normalized_fields:
+                set_clauses.append("record_status = ?")
+                set_params.append(_normalize_text(normalized_fields["record_status"]) or _DEFAULT_RECORD_STATUS)
+            if json_updates:
+                set_clauses.append("record_json = ?")
+                set_params.append(json.dumps(payload, ensure_ascii=False))
+            set_clauses.append("updated_at = ?")
+            set_params.append(now)
+            conn.execute(
+                f"""
+                UPDATE module_datasets
+                SET {", ".join(set_clauses)}
+                WHERE module_name = ?
+                  AND dataset_name = ?
+                  AND record_index = ?
+                """,
+                (*set_params, module_name, resource["logical_name"], row["record_index"]),
+            )
+        return len(rows)
+
+    def _delete_managed_dataset_rows_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource: dict[str, Any],
+        *,
+        where: Any,
+    ) -> int:
+        normalized_where = _normalize_plan_where(where)
+        json_column_names = self._managed_dataset_json_column_names_from_resource(resource)
+        where_sql, where_params = _render_managed_dataset_where_clause(
+            normalized_where,
+            json_column_names=json_column_names,
+            require_where=True,
+        )
+        filter_sql = f" AND {where_sql.removeprefix(' WHERE ')}"
+        cursor = conn.execute(
+            f"""
+            DELETE FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            {filter_sql}
+            """,
+            (module_name, resource["logical_name"], *where_params),
+        )
+        return int(cursor.rowcount or 0)
 
     def _custom_table_schema_columns(self, resource: dict[str, Any]) -> list[dict[str, Any]]:
         schema = _normalize_custom_table_schema(
@@ -896,47 +1625,149 @@ class ModuleDataStore:
             raise ValueError(f"custom table resource {resource['resource_id']} missing schema columns")
         return schema["columns"]
 
-    def _expected_custom_table_column_map(self, resource: dict[str, Any]) -> dict[str, tuple[str, bool, bool]]:
-        expected: dict[str, tuple[str, bool, bool]] = {}
+    def _resource_query_descriptor_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource: dict[str, Any],
+        *,
+        extra_fields: list[str] | None = None,
+        joins: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        if resource["storage_mode"] == "custom_table":
+            self._ensure_custom_table_with_conn(conn, resource)
+            columns = [
+                _data_source_column_descriptor(
+                    column,
+                    storage_mode="custom_table",
+                    record_key_field=resource.get("record_key_field") or "id",
+                )
+                for column in self._custom_table_schema_columns(resource)
+            ]
+            return _with_data_source_write_contract(
+                {
+                    "source": resource["resource_id"],
+                    "kind": "data_table",
+                    "source_kind": "relation",
+                    "storage_mode": resource["storage_mode"],
+                    "record_key_field": resource.get("record_key_field") or "id",
+                    "columns": columns,
+                    "system_fields": _custom_table_system_fields(),
+                    "writable_fields": [],
+                    "required_fields": [],
+                    "read_only_fields": [],
+                    "indexes": dict(resource.get("indexes") or {}),
+                    "joins": [dict(item) for item in joins or [] if isinstance(item, dict)],
+                }
+            )
+        return _with_data_source_write_contract(
+            {
+                "source": resource["resource_id"],
+                "kind": "data_table",
+                "source_kind": "snapshot",
+                "storage_mode": resource["storage_mode"],
+                "record_key_field": resource.get("record_key_field") or "id",
+                "columns": self._managed_dataset_resource_columns_with_conn(
+                    conn,
+                    module_name,
+                    resource,
+                    extra_fields=extra_fields,
+                ),
+                "system_fields": _managed_dataset_system_fields(),
+                "writable_fields": [],
+                "required_fields": [],
+                "read_only_fields": [],
+                "indexes": dict(resource.get("indexes") or {}),
+                "joins": [],
+            }
+        )
+
+    def _coerce_custom_table_query_rows(
+        self,
+        resource: dict[str, Any],
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        column_map = {column["name"]: column for column in self._custom_table_schema_columns(resource)}
+        rendered: list[dict[str, Any]] = []
+        for row in rows:
+            payload: dict[str, Any] = {}
+            for field, value in row.items():
+                column = column_map.get(field)
+                if column is None:
+                    payload[field] = value
+                    continue
+                payload[field] = _python_value_for_custom_table_column(value, column_type=column["type"])
+            rendered.append(payload)
+        return rendered
+
+    def _resource_has_records_with_conn(self, conn, module_name: str, resource: dict[str, Any]) -> bool:
+        if resource["storage_mode"] == "custom_table":
+            self._ensure_custom_table_with_conn(conn, resource)
+            table_identifier = _quote_identifier(resource["physical_table_name"])
+            row = conn.execute(f"SELECT 1 FROM {table_identifier} LIMIT 1").fetchone()
+            return row is not None
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            LIMIT 1
+            """,
+            (module_name, resource["logical_name"]),
+        ).fetchone()
+        return row is not None
+
+    def _expected_custom_table_column_map(self, resource: dict[str, Any]) -> dict[str, tuple[str, bool, bool, bool]]:
+        expected: dict[str, tuple[str, bool, bool, bool]] = {}
         record_key_field = resource.get("record_key_field")
         for column in self._custom_table_schema_columns(resource):
             expected[column["name"]] = (
                 _CUSTOM_TABLE_TYPE_MAP[column["type"]],
                 bool(column["nullable"]),
                 column["name"] == record_key_field,
+                bool(column.get("auto_increment")),
             )
-        expected["created_at"] = ("INTEGER", True, False)
-        expected["updated_at"] = ("INTEGER", True, False)
+        expected["created_at"] = ("INTEGER", True, False, False)
+        expected["updated_at"] = ("INTEGER", True, False, False)
         return expected
 
     def _assert_custom_table_matches_resource(self, conn, resource: dict[str, Any]) -> None:
         physical_table_name = resource["physical_table_name"]
         table_info = conn.execute(f"PRAGMA table_info({_quote_identifier(physical_table_name)})").fetchall()
+        table_sql_row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (physical_table_name,),
+        ).fetchone()
+        table_sql = str(table_sql_row["sql"] or "").upper() if table_sql_row else ""
         existing = {
             row["name"]: (
                 str(row["type"] or "").upper(),
                 not bool(row["notnull"]),
                 bool(row["pk"]),
+                bool(row["pk"]) and "AUTOINCREMENT" in table_sql,
             )
             for row in table_info
         }
         if set(existing) == _LEGACY_CUSTOM_TABLE_COLUMNS:
-            raise RuntimeError(
-                f"legacy generic custom table schema is no longer supported: {physical_table_name}"
-            )
+            raise RuntimeError(f"legacy generic custom table schema is no longer supported: {physical_table_name}")
         expected = self._expected_custom_table_column_map(resource)
         if set(existing) != set(expected):
             raise RuntimeError(
                 f"custom table schema mismatch for {physical_table_name}: "
                 f"expected_columns={sorted(expected)}, existing_columns={sorted(existing)}"
             )
-        for column_name, (expected_type, expected_nullable, expected_pk) in expected.items():
-            existing_type, existing_nullable, existing_pk = existing[column_name]
-            if existing_type != expected_type or existing_nullable != expected_nullable or existing_pk != expected_pk:
+        for column_name, (expected_type, expected_nullable, expected_pk, expected_auto_increment) in expected.items():
+            existing_type, existing_nullable, existing_pk, existing_auto_increment = existing[column_name]
+            if (
+                existing_type != expected_type
+                or existing_nullable != expected_nullable
+                or existing_pk != expected_pk
+                or existing_auto_increment != expected_auto_increment
+            ):
                 raise RuntimeError(
                     f"custom table column mismatch for {physical_table_name}.{column_name}: "
-                    f"expected={(expected_type, expected_nullable, expected_pk)}, "
-                    f"existing={(existing_type, existing_nullable, existing_pk)}"
+                    f"expected={(expected_type, expected_nullable, expected_pk, expected_auto_increment)}, "
+                    f"existing={(existing_type, existing_nullable, existing_pk, existing_auto_increment)}"
                 )
 
     def _ensure_custom_table_indexes_with_conn(self, conn, resource: dict[str, Any]) -> None:
@@ -950,7 +1781,7 @@ class ModuleDataStore:
             rendered_columns = ", ".join(_quote_identifier(column) for column in columns)
             conn.execute(
                 f"""
-                CREATE INDEX IF NOT EXISTS {_quote_identifier(f'idx_{physical_table_name}_{index_name}')}
+                CREATE INDEX IF NOT EXISTS {_quote_identifier(f"idx_{physical_table_name}_{index_name}")}
                 ON {table_identifier}({rendered_columns})
                 """
             )
@@ -974,6 +1805,8 @@ class ModuleDataStore:
                 rendered = f"{_quote_identifier(column['name'])} {sqlite_type}"
                 if column["name"] == record_key_field:
                     rendered += " NOT NULL PRIMARY KEY"
+                    if column.get("auto_increment"):
+                        rendered += " AUTOINCREMENT"
                 elif not column["nullable"]:
                     rendered += " NOT NULL"
                 column_defs.append(rendered)
@@ -1012,9 +1845,7 @@ class ModuleDataStore:
     ) -> tuple[str, set[str]]:
         placeholders = self._validate_db_view_resource_refs(select_sql_template)
         if set(placeholders) != set(source_resource_ids):
-            raise ValueError(
-                "db view placeholders must exactly match source_resource_ids"
-            )
+            raise ValueError("db view placeholders must exactly match source_resource_ids")
 
         resolved_sql = select_sql_template
         allowed_tables: set[str] = set()
@@ -1188,6 +2019,93 @@ class ModuleDataStore:
                 raise ValueError(f"db view not found: {view_id}")
         return manifest
 
+    def _add_custom_table_rows_with_conn(
+        self,
+        conn,
+        resource: dict[str, Any],
+        records: list[dict[str, Any]],
+        *,
+        now: int,
+    ) -> list[Any]:
+        physical_table_name = resource["physical_table_name"]
+        table_identifier = _quote_identifier(physical_table_name)
+        self._ensure_custom_table_with_conn(conn, resource)
+        column_defs = self._custom_table_schema_columns(resource)
+        column_names = [column["name"] for column in column_defs]
+        record_key_field = resource["record_key_field"]
+        record_key_column = _custom_table_record_key_column(column_defs, record_key_field=record_key_field)
+        auto_increment_key = bool(record_key_column.get("auto_increment"))
+        seen_keys: set[str] = set()
+        inserted_keys: list[Any] = []
+
+        for record_index, original_record in enumerate(records):
+            record = dict(original_record)
+            if auto_increment_key and _normalize_text(record.get(record_key_field)) is None:
+                record.pop(record_key_field, None)
+
+            record_key = _record_key_for_write(
+                record,
+                record_index,
+                record_key_field=record_key_field,
+                require_key=not auto_increment_key,
+            )
+            generated_record_key = auto_increment_key and record_key is None
+            if record_key is None and not auto_increment_key:
+                raise ValueError("custom table records require a record_key")
+            if record_key is not None:
+                if record_key in seen_keys:
+                    raise ValueError(f"duplicate custom table record_key: {record_key}")
+                seen_keys.add(record_key)
+                if record_key_field not in record:
+                    record[record_key_field] = record_key
+
+            unexpected_fields = sorted(set(record) - set(column_names))
+            if unexpected_fields:
+                raise ValueError(
+                    f"custom table records contain undefined columns for {physical_table_name}: "
+                    f"{', '.join(unexpected_fields)}"
+                )
+
+            insert_column_names: list[str] = []
+            row_values: list[Any] = []
+            for column in column_defs:
+                column_name = column["name"]
+                if generated_record_key and column_name == record_key_field:
+                    continue
+                insert_column_names.append(column_name)
+                if column_name not in record:
+                    if not column["nullable"]:
+                        raise ValueError(
+                            f"custom table records missing required column {column_name} for {physical_table_name}"
+                        )
+                    row_values.append(None)
+                    continue
+                row_values.append(
+                    _sqlite_value_for_custom_table_column(record[column_name], column_type=column["type"])
+                )
+
+            insert_columns = ", ".join(
+                [_quote_identifier(column) for column in insert_column_names] + ["created_at", "updated_at"]
+            )
+            insert_params = ", ".join(["?"] * (len(insert_column_names) + 2))
+            cursor = conn.execute(
+                f"""
+                INSERT INTO {table_identifier} ({insert_columns})
+                VALUES ({insert_params})
+                """,
+                tuple(row_values + [now, now]),
+            )
+            if generated_record_key:
+                inserted_keys.append(cursor.lastrowid)
+            else:
+                inserted_keys.append(
+                    _sqlite_value_for_custom_table_column(
+                        record[record_key_field], column_type=record_key_column["type"]
+                    )
+                )
+
+        return inserted_keys
+
     def _write_custom_table_rows_with_conn(
         self,
         conn,
@@ -1271,58 +2189,384 @@ class ModuleDataStore:
                 prepared_rows,
             )
 
-    def _read_custom_table_rows_with_conn(
+    def _upsert_custom_table_rows_with_conn(
         self,
         conn,
         resource: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        table_identifier = _quote_identifier(resource["physical_table_name"])
+        records: list[dict[str, Any]],
+        *,
+        now: int,
+    ) -> None:
+        physical_table_name = resource["physical_table_name"]
+        table_identifier = _quote_identifier(physical_table_name)
         self._ensure_custom_table_with_conn(conn, resource)
         column_defs = self._custom_table_schema_columns(resource)
-        select_columns = ", ".join(_quote_identifier(column["name"]) for column in column_defs)
-        rows = conn.execute(
-            f"""
-            SELECT {select_columns}
-            FROM {table_identifier}
-            ORDER BY rowid ASC
-            """
-        ).fetchall()
-        rendered_rows: list[dict[str, Any]] = []
-        for row in rows:
-            payload: dict[str, Any] = {}
-            for column in column_defs:
-                payload[column["name"]] = _python_value_for_custom_table_column(
-                    row[column["name"]],
-                    column_type=column["type"],
+        column_names = [column["name"] for column in column_defs]
+        record_key_field = resource["record_key_field"]
+        seen_keys: set[str] = set()
+        prepared_rows: list[tuple[Any, ...]] = []
+        for record_index, original_record in enumerate(records):
+            record = dict(original_record)
+            record_key = _record_key_for_write(
+                record,
+                record_index,
+                record_key_field=record_key_field,
+                require_key=True,
+            )
+            if record_key is None:
+                raise ValueError("custom table records require a record_key")
+            if record_key in seen_keys:
+                raise ValueError(f"duplicate custom table record_key: {record_key}")
+            seen_keys.add(record_key)
+            if record_key_field not in record:
+                record[record_key_field] = record_key
+
+            unexpected_fields = sorted(set(record) - set(column_names))
+            if unexpected_fields:
+                raise ValueError(
+                    f"custom table records contain undefined columns for {physical_table_name}: "
+                    f"{', '.join(unexpected_fields)}"
                 )
-            rendered_rows.append(payload)
-        return rendered_rows
+
+            row_values: list[Any] = []
+            for column in column_defs:
+                column_name = column["name"]
+                if column_name not in record:
+                    if not column["nullable"]:
+                        raise ValueError(
+                            f"custom table records missing required column {column_name} for {physical_table_name}"
+                        )
+                    row_values.append(None)
+                    continue
+                row_values.append(
+                    _sqlite_value_for_custom_table_column(record[column_name], column_type=column["type"])
+                )
+            prepared_rows.append(tuple(row_values + [now, now]))
+
+        if not prepared_rows:
+            return
+
+        insert_columns = [_quote_identifier(column) for column in column_names] + ["created_at", "updated_at"]
+        insert_params = ", ".join(["?"] * (len(column_names) + 2))
+        update_columns = [
+            f"{_quote_identifier(column)} = excluded.{_quote_identifier(column)}"
+            for column in column_names
+            if column != record_key_field
+        ]
+        update_columns.append("updated_at = excluded.updated_at")
+        conn.executemany(
+            f"""
+            INSERT INTO {table_identifier} ({", ".join(insert_columns)})
+            VALUES ({insert_params})
+            ON CONFLICT({_quote_identifier(record_key_field)}) DO UPDATE SET
+                {", ".join(update_columns)}
+            """,
+            prepared_rows,
+        )
+
+    def _update_custom_table_rows_with_conn(
+        self,
+        conn,
+        resource: dict[str, Any],
+        fields: dict[str, Any],
+        *,
+        where: Any,
+        now: int,
+    ) -> int:
+        self._ensure_custom_table_with_conn(conn, resource)
+        column_defs = self._custom_table_schema_columns(resource)
+        column_map = {column["name"]: column for column in column_defs}
+        record_key_field = resource["record_key_field"]
+        normalized_fields = _normalize_write_fields(fields)
+        if record_key_field in normalized_fields:
+            raise ValueError(f"custom table record key cannot be updated: {record_key_field}")
+        unexpected_fields = sorted(set(normalized_fields) - set(column_map))
+        if unexpected_fields:
+            raise ValueError(
+                f"custom table update contains undefined columns for {resource['physical_table_name']}: "
+                f"{', '.join(unexpected_fields)}"
+            )
+
+        assignments: list[str] = []
+        params: list[Any] = []
+        for field, value in normalized_fields.items():
+            column = column_map[field]
+            assignments.append(f"{_quote_identifier(field)} = ?")
+            params.append(_sqlite_value_for_custom_table_column(value, column_type=column["type"]))
+        assignments.append("updated_at = ?")
+        params.append(now)
+        where_sql, where_params = _render_custom_table_where_clause(column_map, where, require_where=True)
+        table_identifier = _quote_identifier(resource["physical_table_name"])
+        cursor = conn.execute(
+            f"""
+            UPDATE {table_identifier}
+            SET {", ".join(assignments)}
+            {where_sql}
+            """,
+            tuple(params + where_params),
+        )
+        return int(cursor.rowcount or 0)
+
+    def _delete_custom_table_rows_with_conn(
+        self,
+        conn,
+        resource: dict[str, Any],
+        *,
+        where: Any,
+    ) -> int:
+        self._ensure_custom_table_with_conn(conn, resource)
+        column_defs = self._custom_table_schema_columns(resource)
+        column_map = {column["name"]: column for column in column_defs}
+        where_sql, where_params = _render_custom_table_where_clause(column_map, where, require_where=True)
+        table_identifier = _quote_identifier(resource["physical_table_name"])
+        cursor = conn.execute(
+            f"""
+            DELETE FROM {table_identifier}
+            {where_sql}
+            """,
+            tuple(where_params),
+        )
+        return int(cursor.rowcount or 0)
 
     def _replace_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
         now = int(time.time())
-        with get_connection(DATA_DB) as conn:
-            resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
-            if resource["storage_mode"] == "custom_table":
-                self._write_custom_table_rows_with_conn(conn, resource, records, now=now)
-            else:
-                self._write_managed_dataset_rows_with_conn(
-                    conn,
-                    module_name,
-                    resource["logical_name"],
-                    records,
-                    record_key_field=resource["record_key_field"],
-                    now=now,
-                )
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_resource_write_lock_key(module_name, resource_id)],
+            operation=lambda conn: self._replace_resource_records_with_conn(
+                conn,
+                module_name,
+                resource_id,
+                records,
+                now=now,
+            ),
+        )
+
+    def _replace_resource_records_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource_id: str,
+        records: list[dict[str, Any]],
+        *,
+        now: int,
+    ) -> bool:
+        resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
+        if resource["storage_mode"] == "custom_table":
+            self._write_custom_table_rows_with_conn(conn, resource, records, now=now)
+        else:
+            self._write_managed_dataset_rows_with_conn(
+                conn,
+                module_name,
+                resource,
+                records,
+                now=now,
+            )
         return True
 
-    def _read_resource_records(self, module_name: str, resource_id: str) -> list[dict[str, Any]] | None:
-        with get_connection(DATA_DB) as conn:
-            resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
-            if resource["storage_mode"] == "custom_table":
-                return self._read_custom_table_rows_with_conn(conn, resource)
-            return self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"])
+    def _add_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> list[Any]:
+        now = int(time.time())
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_resource_write_lock_key(module_name, resource_id)],
+            operation=lambda conn: self._add_resource_records_with_conn(
+                conn,
+                module_name,
+                resource_id,
+                records,
+                now=now,
+            ),
+        )
+
+    def _add_resource_records_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource_id: str,
+        records: list[dict[str, Any]],
+        *,
+        now: int,
+    ) -> list[Any]:
+        resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
+        if resource["storage_mode"] != "custom_table":
+            raise ValueError("add_records only supports custom_table resources")
+        return self._add_custom_table_rows_with_conn(conn, resource, records, now=now)
+
+    def _upsert_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
+        now = int(time.time())
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_resource_write_lock_key(module_name, resource_id)],
+            operation=lambda conn: self._upsert_resource_records_with_conn(
+                conn,
+                module_name,
+                resource_id,
+                records,
+                now=now,
+            ),
+        )
+
+    def _upsert_resource_records_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource_id: str,
+        records: list[dict[str, Any]],
+        *,
+        now: int,
+    ) -> bool:
+        resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
+        if resource["storage_mode"] == "custom_table":
+            self._upsert_custom_table_rows_with_conn(conn, resource, records, now=now)
+        else:
+            self._upsert_managed_dataset_rows_with_conn(conn, module_name, resource, records, now=now)
+        return True
+
+    def _update_resource_records(
+        self,
+        module_name: str,
+        resource_id: str,
+        fields: dict[str, Any],
+        *,
+        where: Any,
+    ) -> int:
+        now = int(time.time())
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_resource_write_lock_key(module_name, resource_id)],
+            operation=lambda conn: self._update_resource_records_with_conn(
+                conn,
+                module_name,
+                resource_id,
+                fields,
+                where=where,
+                now=now,
+            ),
+        )
+
+    def _update_resource_records_with_conn(
+        self,
+        conn,
+        module_name: str,
+        resource_id: str,
+        fields: dict[str, Any],
+        *,
+        where: Any,
+        now: int,
+    ) -> int:
+        resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
+        if resource["storage_mode"] == "custom_table":
+            return self._update_custom_table_rows_with_conn(conn, resource, fields, where=where, now=now)
+        return self._update_managed_dataset_rows_with_conn(conn, module_name, resource, fields, where=where, now=now)
+
+    def _delete_resource_records(self, module_name: str, resource_id: str, *, where: Any) -> int:
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_resource_write_lock_key(module_name, resource_id)],
+            operation=lambda conn: self._delete_resource_records_with_conn(
+                conn,
+                module_name,
+                resource_id,
+                where=where,
+            ),
+        )
+
+    def _delete_resource_records_with_conn(self, conn, module_name: str, resource_id: str, *, where: Any) -> int:
+        resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
+        if resource["storage_mode"] == "custom_table":
+            return self._delete_custom_table_rows_with_conn(conn, resource, where=where)
+        return self._delete_managed_dataset_rows_with_conn(conn, module_name, resource, where=where)
+
+    def _execute_write_operation_with_conn(
+        self,
+        conn,
+        module_name: str,
+        operation: dict[str, Any],
+        *,
+        now: int,
+    ) -> Any:
+        kind = str(operation.get("kind") or "")
+        if kind == "replace_records":
+            return self._replace_resource_records_with_conn(
+                conn,
+                module_name,
+                str(operation.get("resource") or ""),
+                _normalize_records_for_write(operation.get("records")),
+                now=now,
+            )
+        if kind == "add_records":
+            return self._add_resource_records_with_conn(
+                conn,
+                module_name,
+                str(operation.get("resource") or ""),
+                _normalize_records_for_write(operation.get("records")),
+                now=now,
+            )
+        if kind == "upsert_records":
+            return self._upsert_resource_records_with_conn(
+                conn,
+                module_name,
+                str(operation.get("resource") or ""),
+                _normalize_records_for_write(operation.get("records")),
+                now=now,
+            )
+        if kind == "update_records":
+            return self._update_resource_records_with_conn(
+                conn,
+                module_name,
+                str(operation.get("resource") or ""),
+                _normalize_write_fields(operation.get("fields")),
+                where=operation.get("where"),
+                now=now,
+            )
+        if kind == "delete_records":
+            return self._delete_resource_records_with_conn(
+                conn,
+                module_name,
+                str(operation.get("resource") or ""),
+                where=operation.get("where"),
+            )
+        if kind == "append_audit_event":
+            return self._append_audit_event_row_with_conn(
+                conn,
+                module_name,
+                str(operation.get("dataset") or ""),
+                dict(operation.get("event") or {}),
+            )
+        raise ValueError(f"unsupported write operation kind: {kind}")
+
+    def _execute_write_batch(self, module_name: str, operations: list[dict[str, Any]]) -> list[Any]:
+        now = int(time.time())
+        lock_keys = [_module_write_lock_key(module_name)]
+        for operation in operations:
+            lock_keys.extend(self._write_operation_lock_keys(module_name, operation))
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=lock_keys,
+            operation=lambda conn: [
+                self._execute_write_operation_with_conn(conn, module_name, operation, now=now)
+                for operation in operations
+            ],
+        )
+
+    def _write_operation_lock_keys(self, module_name: str, operation: dict[str, Any]) -> list[str]:
+        kind = str(operation.get("kind") or "")
+        if kind in {"replace_records", "add_records", "upsert_records", "update_records", "delete_records"}:
+            return [_resource_write_lock_key(module_name, str(operation.get("resource") or ""))]
+        if kind == "append_audit_event":
+            return [_audit_write_lock_key(module_name, str(operation.get("dataset") or ""))]
+        return [_module_write_lock_key(module_name)]
 
     def _append_audit_event_row(self, module_name: str, dataset_name: str, event: dict[str, Any]) -> str:
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_audit_write_lock_key(module_name, dataset_name)],
+            operation=lambda conn: self._append_audit_event_row_with_conn(conn, module_name, dataset_name, event),
+        )
+
+    def _append_audit_event_row_with_conn(
+        self, conn, module_name: str, dataset_name: str, event: dict[str, Any]
+    ) -> str:
         event_type = _normalize_text(event.get("event_type"))
         if event_type is None:
             raise ValueError("audit event_type is required")
@@ -1330,40 +2574,39 @@ class ModuleDataStore:
         event_id = _normalize_text(event.get("id")) or str(uuid.uuid4())
         payload = _normalize_payload(event.get("payload"))
         created_at = _normalize_timestamp(event.get("created_at"))
-        with get_connection(DATA_DB) as conn:
-            conn.execute(
-                """
-                INSERT INTO module_audit_events (
-                    id,
-                    module_name,
-                    dataset_name,
-                    entity_key,
-                    event_type,
-                    run_id,
-                    previous_status,
-                    next_status,
-                    result,
-                    reason,
-                    payload_json,
-                    created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    module_name,
-                    dataset_name,
-                    _normalize_text(event.get("entity_key")),
-                    event_type,
-                    _normalize_text(event.get("run_id")),
-                    _normalize_text(event.get("previous_status")),
-                    _normalize_text(event.get("next_status")),
-                    _normalize_text(event.get("result")),
-                    _normalize_text(event.get("reason")),
-                    json.dumps(payload, ensure_ascii=False),
-                    created_at,
-                ),
+        conn.execute(
+            """
+            INSERT INTO module_audit_events (
+                id,
+                module_name,
+                dataset_name,
+                entity_key,
+                event_type,
+                run_id,
+                previous_status,
+                next_status,
+                result,
+                reason,
+                payload_json,
+                created_at
             )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                module_name,
+                dataset_name,
+                _normalize_text(event.get("entity_key")),
+                event_type,
+                _normalize_text(event.get("run_id")),
+                _normalize_text(event.get("previous_status")),
+                _normalize_text(event.get("next_status")),
+                _normalize_text(event.get("result")),
+                _normalize_text(event.get("reason")),
+                json.dumps(payload, ensure_ascii=False),
+                created_at,
+            ),
+        )
         return event_id
 
     def _query_audit_event_rows(
@@ -1459,9 +2702,11 @@ class ModuleDataStore:
 
     def _write_page_row(self, module_name: str, page_id: str, schema: dict[str, Any]) -> bool:
         now = int(time.time())
-        with get_connection(DATA_DB) as conn:
-            self._write_page_row_with_conn(conn, module_name, page_id, schema, now=now)
-        return True
+        return get_db_write_coordinator().run_write(
+            DATA_DB,
+            lock_keys=[_page_write_lock_key(module_name, page_id)],
+            operation=lambda conn: self._write_page_row_with_conn(conn, module_name, page_id, schema, now=now) or True,
+        )
 
     def _write_page_row_with_conn(
         self,
@@ -1511,89 +2756,42 @@ class ModuleDataStore:
         with get_connection(DATA_DB) as conn:
             return self._list_db_view_rows_with_conn(conn, module_name)
 
-    def query_db_view(
+    def describe_data_source(
         self,
         module_name: str,
-        view_id: str,
+        source_id: str,
         *,
-        filters: dict[str, Any] | None = None,
-        sort: list[dict[str, Any]] | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        extra_fields: list[str] | None = None,
+        joins: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        normalized_filters = dict(filters or {})
-        normalized_sort = _normalize_db_view_sort(sort or [])
-        normalized_limit = max(int(limit), 1)
-        normalized_offset = max(int(offset), 0)
-
+        normalized_source_id = _validate_snake_case_identifier(str(source_id or ""))
         with get_connection(DATA_DB) as conn:
-            manifest = self._ensure_db_view_with_conn(conn, module_name, view_id)
-            physical_view_name = manifest["physical_view_name"]
-            view_identifier = _quote_identifier(physical_view_name)
-            column_defs = manifest["columns"]
-            column_map = {column["name"]: column for column in column_defs}
-            rendered_columns = ", ".join(_quote_identifier(column["name"]) for column in column_defs)
-
-            where_clauses: list[str] = []
-            params: list[Any] = []
-            for field, value in normalized_filters.items():
-                normalized_field = _validate_snake_case_identifier(str(field))
-                column = column_map.get(normalized_field)
-                if column is None:
-                    raise ValueError(f"db view filter field not found: {normalized_field}")
-                if not column.get("filterable"):
-                    raise ValueError(f"db view field is not filterable: {normalized_field}")
-                if value is None:
-                    where_clauses.append(f"{_quote_identifier(normalized_field)} IS NULL")
-                    continue
-                where_clauses.append(f"{_quote_identifier(normalized_field)} = ?")
-                params.append(value)
-
-            order_by = ""
-            if normalized_sort:
-                order_parts: list[str] = []
-                for item in normalized_sort:
-                    column = column_map.get(item["field"])
-                    if column is None:
-                        raise ValueError(f"db view sort field not found: {item['field']}")
-                    if not column.get("sortable"):
-                        raise ValueError(f"db view field is not sortable: {item['field']}")
-                    order_parts.append(f"{_quote_identifier(item['field'])} {item['direction'].upper()}")
-                order_by = f" ORDER BY {', '.join(order_parts)}"
-
-            where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-            rows = conn.execute(
-                f"""
-                SELECT {rendered_columns}
-                FROM {view_identifier}
-                {where_sql}
-                {order_by}
-                LIMIT ? OFFSET ?
-                """,
-                tuple(params + [normalized_limit, normalized_offset]),
-            ).fetchall()
-            total = int(
-                conn.execute(
-                    f"SELECT COUNT(*) AS total FROM {view_identifier}{where_sql}",
-                    tuple(params),
-                ).fetchone()["total"]
-            )
-
-        rendered_rows: list[dict[str, Any]] = []
-        for row in rows:
-            payload: dict[str, Any] = {}
-            for column in column_defs:
-                payload[column["name"]] = _python_value_for_custom_table_column(
-                    row[column["name"]],
-                    column_type=column["type"],
+            resource = self._read_resource_row_with_conn(conn, module_name, normalized_source_id)
+            if resource is not None:
+                return self._resource_query_descriptor_with_conn(
+                    conn,
+                    module_name,
+                    resource,
+                    extra_fields=extra_fields,
+                    joins=joins,
                 )
-            rendered_rows.append(payload)
-        return {
-            "rows": rendered_rows,
-            "total": total,
-            "limit": normalized_limit,
-            "offset": normalized_offset,
-        }
+            view = self._read_db_view_row_with_conn(conn, module_name, normalized_source_id)
+            if view is not None:
+                view = self._ensure_db_view_with_conn(conn, module_name, normalized_source_id)
+                return _with_data_source_write_contract(
+                    {
+                        "source": normalized_source_id,
+                        "kind": "data_view",
+                        "source_kind": "read_model",
+                        "columns": [_read_only_column_descriptor(dict(column)) for column in view["columns"]],
+                        "system_fields": [],
+                        "writable_fields": [],
+                        "required_fields": [],
+                        "read_only_fields": [],
+                        "joins": [],
+                    }
+                )
+        raise ValueError(f"未注册的数据源: {normalized_source_id}")
 
     def execute_query_plan(
         self,
@@ -1612,14 +2810,21 @@ class ModuleDataStore:
         select_items = [dict(item) for item in plan.get("select") or [] if isinstance(item, dict)]
         group_by = [_validate_snake_case_identifier(str(item)) for item in plan.get("group_by") or []]
         has_aggregate = _plan_has_aggregate(select_items)
+        managed_dataset_count_alias = (
+            _managed_dataset_count_alias(select_items) if source_kind == "snapshot" and has_aggregate else None
+        )
         if source_kind != "relation" and (joins or group_by or has_aggregate):
             label = "managed_dataset(snapshot)" if source_kind == "snapshot" else "view(read_model)"
             if joins:
                 raise ValueError(f"source '{source_id}' is {label}; join is only supported for custom_table(relation)")
             if group_by:
                 raise ValueError(f"source '{source_id}' is {label}; group_by is not supported")
-            raise ValueError(f"source '{source_id}' is {label}; aggregate is not supported")
+            if managed_dataset_count_alias is None:
+                if source_kind == "snapshot":
+                    raise ValueError(f"source '{source_id}' is {label}; only supports count(*) aggregate")
+                raise ValueError(f"source '{source_id}' is {label}; aggregate is not supported")
         if source_kind == "snapshot":
+            descriptor = self.describe_data_source(module_name, source_id)
             return self._execute_snapshot_plan(module_name, source_id, descriptor, plan)
         if source_kind == "read_model":
             return self._execute_view_plan(module_name, source_id, descriptor, plan)
@@ -1634,52 +2839,100 @@ class ModuleDataStore:
         descriptor: dict[str, Any],
         plan: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        column_names = {column["name"] for column in descriptor["columns"]}
+        with get_connection(DATA_DB) as conn:
+            return self._execute_snapshot_plan_with_conn(conn, module_name, source_id, descriptor, plan)
+
+    def _execute_snapshot_plan_with_conn(
+        self,
+        conn,
+        module_name: str,
+        source_id: str,
+        descriptor: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        json_column_names = _managed_dataset_json_column_names(descriptor)
         where = _normalize_plan_where(plan.get("where"))
         order_by = _normalize_db_view_sort(plan.get("order_by") or [])
         select_items = [dict(item) for item in plan.get("select") or [] if isinstance(item, dict)]
-        selected_fields = [
-            _validate_snake_case_identifier(str(item.get("field") or ""))
-            for item in select_items
-            if item.get("kind", "column") == "column"
-        ]
-        for field in selected_fields:
-            if field not in column_names:
-                raise ValueError(f"query select field not found: {field}")
-        for item in where:
-            if item["field"] not in column_names:
-                raise ValueError(f"query filter field not found: {item['field']}")
-        for item in order_by:
-            if item["field"] not in column_names:
-                raise ValueError(f"query sort field not found: {item['field']}")
-
-        with get_connection(DATA_DB) as conn:
+        count_alias = _managed_dataset_count_alias(select_items)
+        if count_alias is not None:
+            for item in _iter_where_predicates(where):
+                if _managed_dataset_field_mode(item["field"], json_column_names=json_column_names) is None:
+                    raise ValueError(f"query filter field not found: {item['field']}")
             resource = self._require_resource_row_with_conn(conn, module_name, source_id)
-            rows = (
-                self._read_managed_dataset_rows_with_conn(
-                    conn,
+            where_sql, params = _render_managed_dataset_where_clause(where, json_column_names=json_column_names)
+            filter_sql = f" AND {where_sql.removeprefix(' WHERE ')}" if where_sql else ""
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS {_quote_identifier(count_alias)}
+                FROM module_datasets
+                WHERE module_name = ? AND dataset_name = ?
+                {filter_sql}
+                """,
+                (
                     module_name,
                     resource["logical_name"],
-                    include_system_fields=True,
-                )
-                or []
-            )
+                    *params,
+                ),
+            ).fetchone()
+            return [{count_alias: int(row[count_alias] if row else 0)}]
 
-        filtered = rows
-        for item in where:
-            filtered = [
-                row
-                for row in filtered
-                if _filter_record_value(row.get(item["field"]), item["op"], item.get("value"))
-            ]
-        for item in reversed(order_by):
-            filtered.sort(key=lambda row: row.get(item["field"]), reverse=item["direction"] == "desc")
-        offset = _normalize_plan_offset(plan.get("offset"))
-        limit = _normalize_plan_limit(plan.get("limit"))
-        page = filtered[offset : offset + limit]
+        selected_fields: list[str] = []
+        has_wildcard_select = False
+        for item in select_items:
+            if item.get("kind", "column") != "column":
+                continue
+            raw_field = str(item.get("field") or "")
+            if raw_field == "*":
+                has_wildcard_select = True
+                continue
+            selected_fields.append(_validate_snake_case_identifier(raw_field))
+        if has_wildcard_select:
+            selected_fields = _managed_dataset_all_fields(descriptor)
+        for field in selected_fields:
+            if _managed_dataset_field_mode(field, json_column_names=json_column_names) is None:
+                raise ValueError(f"query select field not found: {field}")
+        for item in _iter_where_predicates(where):
+            if _managed_dataset_field_mode(item["field"], json_column_names=json_column_names) is None:
+                raise ValueError(f"query filter field not found: {item['field']}")
+        for item in order_by:
+            if _managed_dataset_field_mode(item["field"], json_column_names=json_column_names) is None:
+                raise ValueError(f"query sort field not found: {item['field']}")
+
+        resource = self._require_resource_row_with_conn(conn, module_name, source_id)
         if not selected_fields:
-            selected_fields = [column["name"] for column in descriptor["columns"]]
-        return [{field: row.get(field) for field in selected_fields} for row in page]
+            selected_fields = _managed_dataset_all_fields(descriptor)
+        select_sql = ", ".join(
+            f"{_managed_dataset_field_sql(field, json_column_names=json_column_names)} AS {_quote_identifier(field)}"
+            for field in selected_fields
+        )
+        where_sql, params = _render_managed_dataset_where_clause(where, json_column_names=json_column_names)
+        filter_sql = f" AND {where_sql.removeprefix(' WHERE ')}" if where_sql else ""
+        order_sql = ""
+        if order_by:
+            order_sql = " ORDER BY " + ", ".join(
+                f"{_managed_dataset_field_sql(item['field'], json_column_names=json_column_names)} {item['direction'].upper()}"
+                for item in order_by
+            )
+        pagination_sql, pagination_params = _render_plan_pagination(plan.get("limit"), plan.get("offset"))
+        rows = conn.execute(
+            f"""
+            SELECT {select_sql}
+            FROM module_datasets
+            WHERE module_name = ? AND dataset_name = ?
+            {filter_sql}
+            {order_sql}
+            {pagination_sql}
+            """,
+            (
+                module_name,
+                resource["logical_name"],
+                *params,
+                *pagination_params,
+            ),
+        ).fetchall()
+
+        return [dict(row) for row in rows]
 
     def _execute_view_plan(
         self,
@@ -1787,23 +3040,34 @@ class ModuleDataStore:
         order_by = _normalize_db_view_sort(plan.get("order_by") or [])
         select_items = [dict(item) for item in plan.get("select") or [] if isinstance(item, dict)]
         group_by = [_validate_snake_case_identifier(str(item)) for item in plan.get("group_by") or []]
-        params: list[Any] = []
 
         select_sql: list[str] = []
+        selected_aliases: set[str] = set()
         for field in group_by:
             select_sql.append(f"{resolve_field(field)} AS {_quote_identifier(field)}")
+            selected_aliases.add(field)
         if not select_items and not group_by:
             select_sql = [
                 f"base.{_quote_identifier(column['name'])} AS {_quote_identifier(column['name'])}"
                 for column in descriptor["columns"]
             ]
+            selected_aliases.update(column["name"] for column in descriptor["columns"])
         for item in select_items:
             kind = str(item.get("kind") or "column")
             if kind == "column":
-                field = _validate_snake_case_identifier(str(item.get("field") or ""))
+                raw_field = str(item.get("field") or "")
+                if raw_field == "*":
+                    for column in descriptor["columns"]:
+                        field = column["name"]
+                        if field not in selected_aliases:
+                            select_sql.append(f"{resolve_field(field)} AS {_quote_identifier(field)}")
+                            selected_aliases.add(field)
+                    continue
+                field = _validate_snake_case_identifier(raw_field)
                 if field in group_by:
                     continue
                 select_sql.append(f"{resolve_field(field)} AS {_quote_identifier(field)}")
+                selected_aliases.add(field)
                 continue
             if kind != "aggregate":
                 raise ValueError(f"unsupported select item kind: {kind}")
@@ -1815,7 +3079,9 @@ class ModuleDataStore:
             if func == "count" and field == "*":
                 select_sql.append(f"COUNT(*) AS {_quote_identifier(alias)}")
             else:
-                select_sql.append(f"{func.upper()}({resolve_field(_validate_snake_case_identifier(field))}) AS {_quote_identifier(alias)}")
+                select_sql.append(
+                    f"{func.upper()}({resolve_field(_validate_snake_case_identifier(field))}) AS {_quote_identifier(alias)}"
+                )
         if not select_sql:
             raise ValueError("query plan select cannot be empty")
 
@@ -1829,40 +3095,34 @@ class ModuleDataStore:
             join_keyword = "LEFT JOIN" if join["type"] == "left" else "JOIN"
             join_sql.append(f"{join_keyword} {table_identifier} AS {join['alias']} ON {on_sql}")
 
-        where_sql_parts: list[str] = []
-        for item in where:
+        def render_predicate(item: dict[str, Any]) -> tuple[str, list[Any]]:
             field_sql = resolve_field(item["field"])
             op = item["op"]
             if op == "is_null":
-                where_sql_parts.append(f"{field_sql} IS NULL")
-            elif op == "eq":
-                where_sql_parts.append(f"{field_sql} = ?")
-                params.append(item.get("value"))
-            elif op == "in":
+                return f"{field_sql} IS NULL", []
+            if op == "eq":
+                return f"{field_sql} = ?", [item.get("value")]
+            if op == "in":
                 values = list(item.get("value") or [])
                 if not values:
-                    where_sql_parts.append("1 = 0")
-                else:
-                    where_sql_parts.append(f"{field_sql} IN ({', '.join(['?'] * len(values))})")
-                    params.extend(values)
-            elif op == "between":
+                    return "1 = 0", []
+                return f"{field_sql} IN ({', '.join(['?'] * len(values))})", values
+            if op == "between":
                 values = list(item.get("value") or [])
                 if len(values) != 2:
                     raise ValueError("between filter value must contain two items")
-                where_sql_parts.append(f"{field_sql} BETWEEN ? AND ?")
-                params.extend(values)
-            else:
-                sql_op = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<=", "like": "LIKE"}[op]
-                where_sql_parts.append(f"{field_sql} {sql_op} ?")
-                params.append(item.get("value"))
+                return f"{field_sql} BETWEEN ? AND ?", values
+            sql_op = _SQL_FILTER_OPS[op]
+            return f"{field_sql} {sql_op} ?", [item.get("value")]
+
+        where_sql, params = _render_where_conditions(where, render_predicate)
 
         group_sql = ""
         if group_by:
             group_sql = " GROUP BY " + ", ".join(resolve_field(field) for field in group_by)
-        rendered_select_aliases = {
-            str(item.get("alias") or item.get("field") or "")
-            for item in select_items
-        } | set(group_by)
+        rendered_select_aliases = {str(item.get("alias") or item.get("field") or "") for item in select_items} | set(
+            group_by
+        )
         order_sql = ""
         if order_by:
             parts = []
@@ -1873,180 +3133,121 @@ class ModuleDataStore:
                 else:
                     parts.append(f"{resolve_field(field)} {item['direction'].upper()}")
             order_sql = " ORDER BY " + ", ".join(parts)
-        limit = _normalize_plan_limit(plan.get("limit"))
-        offset = _normalize_plan_offset(plan.get("offset"))
-        params.extend([limit, offset])
+        pagination_sql, pagination_params = _render_plan_pagination(plan.get("limit"), plan.get("offset"))
+        params.extend(pagination_params)
 
         rows = conn.execute(
             f"""
             SELECT {", ".join(select_sql)}
             FROM {source_identifier} AS base
             {" ".join(join_sql)}
-            {"WHERE " + " AND ".join(where_sql_parts) if where_sql_parts else ""}
+            {where_sql}
             {group_sql}
             {order_sql}
-            LIMIT ? OFFSET ?
+            {pagination_sql}
             """,
             tuple(params),
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def _list_custom_table_records_with_conn(
+    def _query_resource_records_with_conn(
         self,
         conn,
+        module_name: str,
         resource: dict[str, Any],
         *,
-        filters: dict[str, Any] | None = None,
-        sort: list[dict[str, Any]] | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        select: Any = None,
+        where: Any = None,
+        order_by: list[dict[str, Any]] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
-        self._ensure_custom_table_with_conn(conn, resource)
-        column_defs = self._custom_table_schema_columns(resource)
-        column_map = {column["name"]: column for column in column_defs}
-        table_identifier = _quote_identifier(resource["physical_table_name"])
-        rendered_columns = ", ".join(_quote_identifier(column["name"]) for column in column_defs)
-
-        where_clauses: list[str] = []
-        params: list[Any] = []
-        for field, value in dict(filters or {}).items():
-            normalized_field = _validate_snake_case_identifier(str(field))
-            if normalized_field not in column_map:
-                raise ValueError(f"resource filter field not found: {normalized_field}")
-            if value is None:
-                where_clauses.append(f"{_quote_identifier(normalized_field)} IS NULL")
-            else:
-                where_clauses.append(f"{_quote_identifier(normalized_field)} = ?")
-                params.append(value)
-
-        order_by = ""
-        normalized_sort = _normalize_db_view_sort(sort or [])
-        if normalized_sort:
-            order_by = " ORDER BY " + ", ".join(
-                f"{_quote_identifier(item['field'])} {item['direction'].upper()}"
-                for item in normalized_sort
+        select_items = _normalize_resource_query_select(select)
+        normalized_where = _normalize_plan_where(where)
+        normalized_order_by = _normalize_db_view_sort(order_by or [])
+        descriptor = self._resource_query_descriptor_with_conn(
+            conn,
+            module_name,
+            resource,
+        )
+        plan = {
+            "kind": "select",
+            "base": {"source": resource["resource_id"]},
+            "select": select_items,
+            "where": normalized_where,
+            "order_by": normalized_order_by,
+            "limit": limit,
+            "offset": offset,
+        }
+        if resource["storage_mode"] == "managed_dataset":
+            return self._execute_snapshot_plan_with_conn(
+                conn,
+                module_name,
+                resource["resource_id"],
+                descriptor,
+                plan,
             )
-        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        rows = conn.execute(
-            f"""
-            SELECT {rendered_columns}
-            FROM {table_identifier}
-            {where_sql}
-            {order_by}
-            LIMIT ? OFFSET ?
-            """,
-            tuple(params + [max(int(limit), 1), max(int(offset), 0)]),
-        ).fetchall()
-        rendered: list[dict[str, Any]] = []
-        for row in rows:
-            payload: dict[str, Any] = {}
-            for column in column_defs:
-                payload[column["name"]] = _python_value_for_custom_table_column(
-                    row[column["name"]],
-                    column_type=column["type"],
-                )
-            rendered.append(payload)
-        return rendered
+        rows = self._execute_sql_source_plan_with_conn(
+            conn,
+            source_identifier=_quote_identifier(resource["physical_table_name"]),
+            descriptor=descriptor,
+            plan=plan,
+        )
+        return self._coerce_custom_table_query_rows(resource, rows)
 
-    def get_record(self, module_name: str, resource_id: str, key: Any) -> dict[str, Any] | None:
-        normalized_key = _normalize_text(key)
-        if normalized_key is None:
-            return None
-        with get_connection(DATA_DB) as conn:
-            resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
-            record_key_field = resource.get("record_key_field") or "id"
-            if resource["storage_mode"] == "custom_table":
-                rows = self._list_custom_table_records_with_conn(
-                    conn,
-                    resource,
-                    filters={record_key_field: normalized_key},
-                    limit=1,
-                    offset=0,
-                )
-                return rows[0] if rows else None
-
-            rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"]) or []
-            for row in rows:
-                row_key = _normalize_text(row.get(record_key_field) or row.get("record_key") or row.get("id"))
-                if row_key == normalized_key:
-                    return row
-        return None
-
-    def list_records(
+    def query_resource_records(
         self,
         module_name: str,
         resource_id: str,
         *,
-        filters: dict[str, Any] | None = None,
-        sort: list[dict[str, Any]] | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        select: Any = None,
+        where: Any = None,
+        order_by: list[dict[str, Any]] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
         with get_connection(DATA_DB) as conn:
             resource = self._require_resource_row_with_conn(conn, module_name, resource_id)
-            if resource["storage_mode"] == "custom_table":
-                return self._list_custom_table_records_with_conn(
-                    conn,
-                    resource,
-                    filters=filters,
-                    sort=sort,
-                    limit=limit,
-                    offset=offset,
-                )
-            rows = self._read_managed_dataset_rows_with_conn(conn, module_name, resource["logical_name"])
-            return _apply_record_query(rows, filters=filters, sort=sort, limit=limit, offset=offset)
-
-    def run_registered_query(
-        self,
-        module_name: str,
-        *,
-        source_resource_ids: list[str],
-        sql_template: str,
-        columns: list[dict[str, Any]],
-        params: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
-        normalized_sql = _normalize_db_view_sql_template(sql_template)
-        normalized_columns = _normalize_db_view_columns(columns)
-        normalized_params = dict(params or {})
-
-        with get_connection(DATA_DB) as conn:
-            resolved_sql, allowed_tables = self._resolve_db_view_sql_with_conn(
+            return self._query_resource_records_with_conn(
                 conn,
                 module_name,
-                source_resource_ids=source_resource_ids,
-                select_sql_template=normalized_sql,
+                resource,
+                select=select,
+                where=where,
+                order_by=order_by,
+                limit=limit,
+                offset=offset,
             )
-            cursor = _execute_with_read_authorizer(
-                conn,
-                resolved_sql,
-                normalized_params,
-                allowed_tables=allowed_tables,
-            )
-            actual_columns = [str(item[0]) for item in cursor.description or []]
-            expected_columns = [column["name"] for column in normalized_columns]
-            if actual_columns != expected_columns:
-                raise ValueError(
-                    f"registered query columns do not match query output: expected={expected_columns}, actual={actual_columns}"
-                )
-            rows = cursor.fetchall()
-
-        rendered_rows: list[dict[str, Any]] = []
-        for row in rows:
-            payload: dict[str, Any] = {}
-            for column in normalized_columns:
-                payload[column["name"]] = _python_value_for_custom_table_column(
-                    row[column["name"]],
-                    column_type=column["type"],
-                )
-            rendered_rows.append(payload)
-        return rendered_rows
-
-    def read_resource_records(self, module_name: str, resource_id: str) -> list[dict[str, Any]]:
-        records = self._read_resource_records(module_name, resource_id)
-        return records if records is not None else []
 
     def replace_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
         return self._replace_resource_records(module_name, resource_id, _normalize_records_for_write(records))
+
+    def add_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> list[Any]:
+        return self._add_resource_records(module_name, resource_id, _normalize_records_for_write(records))
+
+    def upsert_resource_records(self, module_name: str, resource_id: str, records: list[dict[str, Any]]) -> bool:
+        return self._upsert_resource_records(module_name, resource_id, _normalize_records_for_write(records))
+
+    def update_resource_records(
+        self,
+        module_name: str,
+        resource_id: str,
+        fields: dict[str, Any],
+        *,
+        where: Any,
+    ) -> int:
+        return self._update_resource_records(module_name, resource_id, fields, where=where)
+
+    def delete_resource_records(self, module_name: str, resource_id: str, *, where: Any) -> int:
+        return self._delete_resource_records(module_name, resource_id, where=where)
+
+    def execute_write_batch(self, module_name: str, operations: list[dict[str, Any]]) -> list[Any]:
+        if not isinstance(operations, list):
+            raise ValueError("write batch operations must be a list")
+        return self._execute_write_batch(
+            module_name,
+            [dict(operation) for operation in operations if isinstance(operation, dict)],
+        )
 
     def append_audit_event(
         self,
@@ -2101,6 +3302,8 @@ class ModuleDataStore:
         view_ids = {item["view_id"] for item in manifest_data["views"]}
 
         with get_connection(DATA_DB) as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             for resource in manifest_data["resources"]:
                 current = self._read_resource_row_with_conn(conn, module_name, resource["resource_id"])
                 updated = self._write_resource_row_with_conn(
@@ -2159,7 +3362,9 @@ class ModuleDataStore:
                 changed = bool(cursor.rowcount) or changed
 
             for view in manifest_data["views"]:
-                sql = load_sql_file(module_root, view["sql_file"], expected_prefix="data/sql/views/")
+                sql = str(view.get("sql") or "").strip()
+                if not sql:
+                    sql = load_sql_file(module_root, view["sql_file"], expected_prefix="data/sql/views/")
                 validate_resource_sql(
                     sql,
                     source_resource_ids=view["source_resource_ids"],
@@ -2182,35 +3387,23 @@ class ModuleDataStore:
 
             for seed in manifest_data["seeds"]:
                 records = validate_seed_file(module_root, seed["file"])
-                current_resource = self._read_resource_row_with_conn(conn, module_name, seed["resource_id"])
-                if current_resource and current_resource["storage_mode"] == "custom_table":
-                    current_rows = self._list_custom_table_records_with_conn(
-                        conn,
-                        current_resource,
-                        limit=1,
-                        offset=0,
-                    )
-                else:
-                    logical_name = current_resource["logical_name"] if current_resource else seed["resource_id"]
-                    current_rows = _apply_record_query(
-                        self._read_managed_dataset_rows_with_conn(conn, module_name, logical_name),
-                        limit=1,
-                        offset=0,
-                )
-                if seed["mode"] == "replace_if_empty" and current_rows:
-                    continue
-                target_resource = current_resource or self._read_resource_row_with_conn(conn, module_name, seed["resource_id"])
+                target_resource = self._read_resource_row_with_conn(conn, module_name, seed["resource_id"])
                 if target_resource is None:
                     raise ValueError(f"seed target resource not found: {seed['resource_id']}")
+                if seed["mode"] == "replace_if_empty" and self._resource_has_records_with_conn(
+                    conn,
+                    module_name,
+                    target_resource,
+                ):
+                    continue
                 if target_resource["storage_mode"] == "custom_table":
                     self._write_custom_table_rows_with_conn(conn, target_resource, records, now=now)
                 else:
                     self._write_managed_dataset_rows_with_conn(
                         conn,
                         module_name,
-                        target_resource["logical_name"],
+                        target_resource,
                         records,
-                        record_key_field=target_resource["record_key_field"],
                         now=now,
                     )
                 changed = bool(records) or changed
@@ -2224,13 +3417,14 @@ class ModuleDataStore:
         page_schemas: dict[str, dict[str, Any]],
     ) -> bool:
         normalized_pages = {
-            str(page_id): _normalize_schema(schema)
-            for page_id, schema in dict(page_schemas or {}).items()
+            str(page_id): _normalize_schema(schema) for page_id, schema in dict(page_schemas or {}).items()
         }
 
         changed = bool(normalized_pages)
         now = int(time.time())
         with get_connection(DATA_DB) as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
                 "DELETE FROM module_pages WHERE module_name = ?",
                 (module_name,),
@@ -2246,6 +3440,8 @@ class ModuleDataStore:
         changed = False
 
         with get_connection(DATA_DB) as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             for db_view in self._list_db_view_rows_with_conn(conn, module_name):
                 physical_view_name = db_view["physical_view_name"]
                 cleanup_policy = str(db_view.get("cleanup_policy") or "")

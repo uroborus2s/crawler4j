@@ -187,7 +187,7 @@ class Environment:
         provider: 提供者标识 (如 "playwright_local", "fingerprint_browser")
         status: 当前状态
         external_id: 外部系统环境 ID（用于状态同步）
-        capabilities: 能力集合 (如 {"page", "cookies", "screenshot"})
+        capabilities: 能力集合 (如 {"page", "cookies"})
         handle: 物理句柄 (内存对象，不序列化)
         lease_id: 当前租约ID (若 BUSY)
         task_run_id: 关联的任务运行ID

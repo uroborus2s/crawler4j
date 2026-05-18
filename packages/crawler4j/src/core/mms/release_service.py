@@ -31,6 +31,17 @@ MODULE_DOWNLOAD_READ_TIMEOUT_SECONDS = 120
 _module_upgrade_process_locks: dict[str, asyncio.Lock] = {}
 
 
+def _normalize_release_asset_name(name: str) -> str:
+    normalized = str(name or "").strip()
+    if not normalized:
+        raise ValueError("Release 资产名称不能为空")
+    if "/" in normalized or "\\" in normalized or Path(normalized).name != normalized:
+        raise ValueError(f"Release 资产名称不能包含路径: {normalized}")
+    if normalized in {".", ".."} or not normalized.lower().endswith(".zip"):
+        raise ValueError(f"Release 资产名称必须是 ZIP 文件名: {normalized}")
+    return normalized
+
+
 @dataclass(slots=True)
 class ModuleReleaseInfo:
     repo: str
@@ -453,7 +464,12 @@ class ModuleReleaseService:
     ) -> Path:
         target_dir = get_app_data_dir() / "downloads" / "modules" / release.repo.replace("/", "__")
         target_dir.mkdir(parents=True, exist_ok=True)
-        target_path = target_dir / release.asset_name
+        asset_name = _normalize_release_asset_name(release.asset_name)
+        target_path = (target_dir / asset_name).resolve()
+        try:
+            target_path.relative_to(target_dir.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Release 资产名称不能写出下载目录: {release.asset_name}") from exc
 
         headers = self._build_github_headers(
             accept="application/octet-stream",
@@ -566,6 +582,7 @@ class ModuleReleaseService:
 
         asset = zip_assets[0]
         version = self._extract_release_version(payload)
+        asset_name = _normalize_release_asset_name(str(asset.get("name", "") or ""))
         return ModuleReleaseInfo(
             repo=repo,
             tag_name=str(payload.get("tag_name", "") or "").strip(),
@@ -574,7 +591,7 @@ class ModuleReleaseService:
             release_notes=str(payload.get("body", "") or "").strip(),
             published_at=str(payload.get("published_at", "") or "").strip(),
             html_url=str(payload.get("html_url", "") or "").strip(),
-            asset_name=str(asset.get("name", "") or "").strip(),
+            asset_name=asset_name,
             asset_download_url=str(asset.get("browser_download_url", "") or "").strip(),
             asset_api_url=str(asset.get("url", "") or "").strip(),
             prerelease=bool(payload.get("prerelease", False)),

@@ -22,7 +22,6 @@ from src.core.debug.resolver import JobDebugTarget, resolve_job_debug_target
 from src.core.mms.models import ModuleSource
 from src.core.atm.service import get_task_service
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
-from src.core.atm.ui.task_confirmation_dialog import TaskConfirmationDialog
 from src.ui.components.button import StyledButton
 from src.ui.components.data_table import SkyDataTable
 from src.ui.components.data_table_query import resolve_local_data_table_result
@@ -40,7 +39,7 @@ class JobDetailDialog(QDialog):
             {"key": "status", "label": "状态", "type": "text", "width": 120},
             {"key": "env_id", "label": "环境ID", "type": "text", "width": 140},
             {"key": "lease_id", "label": "环境租约", "type": "text", "width": 140},
-            {"key": "started_at", "label": "开始时间", "type": "text", "width": 100},
+            {"key": "started_at", "label": "开始时间", "type": "text", "width": 100, "sortable": True},
             {"key": "finished_at", "label": "结束时间", "type": "text", "width": 100},
             {"key": "result", "label": "结果/错误", "type": "text", "stretch": True},
         ],
@@ -69,7 +68,6 @@ class JobDetailDialog(QDialog):
         self.job_id = job_id
         self._job: Job | None = None
         self._debug_target: JobDebugTarget | None = None
-        self._auto_presented_confirmation_task_ids: set[str] = set()
         self._task_rows: list[dict[str, Any]] = []
         self.setWindowTitle("作业详情 (V2)")
         configure_titled_dialog(self)
@@ -180,13 +178,11 @@ class JobDetailDialog(QDialog):
 
     def _subscribe_events(self) -> None:
         bus = get_event_bus()
-        bus.subscribe(EventType.TASK_SIGNAL, self._on_task_signal)
         for event_type in self.REFRESH_EVENTS:
             bus.subscribe(event_type, self._on_task_changed)
 
     def _unsubscribe_events(self) -> None:
         bus = get_event_bus()
-        bus.unsubscribe(EventType.TASK_SIGNAL, self._on_task_signal)
         for event_type in self.REFRESH_EVENTS:
             bus.unsubscribe(event_type, self._on_task_changed)
 
@@ -208,7 +204,6 @@ class JobDetailDialog(QDialog):
             # Sort by created_at desc
             tasks.sort(key=lambda x: x.created_at, reverse=True)
             self._render_tasks(tasks)
-            self._present_latest_waiting_confirmation(tasks)
         except Exception as e:
             self.name_label.setText(f"Error: {e}")
 
@@ -250,7 +245,6 @@ class JobDetailDialog(QDialog):
             TaskStatus.SUCCEEDED: "success",
             TaskStatus.FAILED: "danger",
             TaskStatus.CANCELLED: "warning",
-            TaskStatus.WAITING_CONFIRMATION: "warning",
             TaskStatus.RUNNING: "info",
             TaskStatus.PENDING: "neutral",
         }.get(status, "neutral")
@@ -279,17 +273,17 @@ class JobDetailDialog(QDialog):
         try:
             run_profile = resolve_job_run_profile(job)
             execution_text = (
-                f"{run_profile.execution.module}/{run_profile.execution.workflow or 'default'}"
+                f"{run_profile.execution.module}/{run_profile.execution.workflow or '自动解析'}"
                 if run_profile.execution and run_profile.execution.module
                 else "-"
             )
             if run_profile.resource.acquisition.mode.value == "create":
                 resource_text = f"Provider: {run_profile.resource.acquisition.provider}"
             else:
-                resource_text = (
-                    f"资源池: {run_profile.resource.acquisition.resource_pool or '-'} | "
-                    f"选择器: {run_profile.resource.acquisition.selector_name or '-'}"
-                )
+                if run_profile.resource.acquisition.env_id:
+                    resource_text = f"环境: {run_profile.resource.acquisition.env_id}"
+                else:
+                    resource_text = f"候选函数: {run_profile.resource.acquisition.candidates or '-'}"
         except Exception:
             execution_text = "-"
             resource_text = "-"
@@ -299,7 +293,7 @@ class JobDetailDialog(QDialog):
         info += f"执行目标: {execution_text}\n"
         info += f"资源: {resource_text}\n"
         info += f"触发: {trigger_text}\n"
-        info += f"Params: {job.params}\n"
+        info += f"Legacy metadata: {job.params}\n"
         info += f"Created: {datetime.fromtimestamp(job.created_at)}\n"
         self.config_text.setText(info)
 
@@ -324,51 +318,6 @@ class JobDetailDialog(QDialog):
         if task:
             # Set filter for log console
             self.log_console.set_filter(task.id)
-            if task.status == TaskStatus.WAITING_CONFIRMATION and task.signal:
-                self._present_confirmation_task(task)
-
-    def _present_latest_waiting_confirmation(self, tasks: list[Task]) -> None:
-        for task in tasks:
-            if task.status != TaskStatus.WAITING_CONFIRMATION or not task.signal:
-                continue
-            if task.id in self._auto_presented_confirmation_task_ids:
-                continue
-            self._auto_presented_confirmation_task_ids.add(task.id)
-            self._present_confirmation_task(task)
-            break
-
-    def _present_confirmation_task(self, task: Task) -> None:
-        dialog = TaskConfirmationDialog(task, parent=self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        service = get_task_service()
-        if dialog.confirmed:
-            asyncio.create_task(service.confirm_task_success(task.id, dialog.get_message()))
-        else:
-            asyncio.create_task(service.confirm_task_failure(task.id, dialog.get_message()))
-        self._load_data()
-
-    def _on_task_signal(self, event: Event) -> None:
-        if event.data.get("job_id") != self.job_id:
-            return
-        signal = event.data.get("signal")
-        if not isinstance(signal, dict):
-            return
-        task = Task(
-            id=event.data.get("task_id") or event.task_run_id or "",
-            job_id=event.data.get("job_id") or "",
-            status=TaskStatus(event.data.get("status", TaskStatus.WAITING_CONFIRMATION.value)),
-            env_id=event.data.get("env_id"),
-            lease_id=event.data.get("lease_id"),
-            message=event.data.get("message") or "",
-            error=event.data.get("error") or "",
-            signal=signal,
-        )
-        if task.id and task.id not in self._auto_presented_confirmation_task_ids:
-            self._auto_presented_confirmation_task_ids.add(task.id)
-        self._present_confirmation_task(task)
-        self._load_data()
 
     def _on_task_changed(self, event: Event) -> None:
         if event.data.get("job_id") != self.job_id:

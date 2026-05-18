@@ -3,7 +3,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QStyle, QStyleOptionComboBox, QStyleOptionSpinBox
 
 from src.ui.components.combo_box import StyledComboBox
-from src.ui.components.spin_box import StyledSpinBox
+from src.ui.components.spin_box import StyledDoubleSpinBox, StyledSpinBox
 
 
 def _count_light_pixels(image, rect, *, min_lightness: int = 170) -> int:
@@ -89,5 +89,39 @@ def test_styled_spin_box_uses_css_triangle_arrows(qtbot):
     assert "border: none;" in style
     assert "width: 0px;" in style
     assert "height: 0px;" in style
+    assert _count_light_pixels(image, up_rect) >= 4
+    assert _count_light_pixels(image, down_rect) >= 4
+
+
+def test_styled_double_spin_box_uses_css_triangle_arrows(qtbot):
+    spin = StyledDoubleSpinBox()
+    qtbot.addWidget(spin)
+    spin.resize(160, 36)
+    spin.show()
+    qtbot.waitExposed(spin)
+
+    option = QStyleOptionSpinBox()
+    spin.initStyleOption(option)
+    up_rect = spin.style().subControlRect(
+        QStyle.ComplexControl.CC_SpinBox,
+        option,
+        QStyle.SubControl.SC_SpinBoxUp,
+        spin,
+    )
+    down_rect = spin.style().subControlRect(
+        QStyle.ComplexControl.CC_SpinBox,
+        option,
+        QStyle.SubControl.SC_SpinBoxDown,
+        spin,
+    )
+    pixmap = spin.grab()
+    image = pixmap.toImage()
+    up_rect = _scale_rect_for_image(up_rect, pixmap.devicePixelRatio())
+    down_rect = _scale_rect_for_image(down_rect, pixmap.devicePixelRatio())
+
+    style = spin.styleSheet()
+
+    assert "QDoubleSpinBox::up-arrow" in style
+    assert "QDoubleSpinBox::down-arrow" in style
     assert _count_light_pixels(image, up_rect) >= 4
     assert _count_light_pixels(image, down_rect) >= 4

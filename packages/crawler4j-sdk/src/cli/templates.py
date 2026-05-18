@@ -3,49 +3,99 @@
 from __future__ import annotations
 
 
-SCRIPT_TEMPLATE = '''"""任务脚本: {display_name}
+SCRIPT_TEMPLATE = '''"""页面操作: {display_name}
 
 {description}
 """
 
-from crawler4j_contracts import TaskContext, TaskResult, TaskSpec
+from crawler4j_contracts import TaskContext, TaskResult, page_action
 
-TASK = TaskSpec(
+
+@page_action(
     name="{name}",
-    display_name="{display_name}",
+    label="{display_name}",
     description="{description}",
-    default_config={{
-        "start_url": "https://example.com",
-    }},
+    parameters=[
+        {{"name": "start_url", "type": "string", "required": True, "default": "https://example.com"}},
+    ],
 )
-
-
-async def execute(ctx: TaskContext) -> TaskResult:
-    """执行任务。"""
-    start_url = ctx.get_config("start_url", "https://example.com")
+async def {name}(ctx: TaskContext, start_url: str = "https://example.com") -> TaskResult:
+    """执行页面操作。"""
     ctx.logger.info(f"开始执行任务，目标地址: {{start_url}}")
 
-    if not ctx.page:
+    if not ctx.tools or not ctx.tools.has_tool("browser.goto"):
         return TaskResult.fail(
-            message="当前运行环境没有可用的浏览器 Page",
-            error="page_not_available",
+            message="当前运行环境没有可用的 browser.goto 宿主能力",
+            error="browser_tool_not_available",
         )
 
-    await ctx.page.goto(start_url, wait_until="domcontentloaded")
-    title = await ctx.page.title()
+    goto_result = await ctx.tools.call("browser.goto", url=start_url)
+    title = await ctx.page.title() if ctx.page else None
     result = {{
-        "url": ctx.page.url,
+        "url": goto_result.get("url", start_url),
         "title": title,
     }}
 
     return TaskResult.ok(
         tasks_completed=1,
-        message="任务完成",
+        message="页面操作完成",
         data=result,
     )
 '''
 
-MODEL_GITIGNORE_TEMPLATE = '''.DS_Store
+UI_ACTION_TEMPLATE = '''"""Hosted UI 操作: {display_name}
+
+{description}
+"""
+
+from typing import TypedDict
+
+from crawler4j_contracts import DataTableCrudResult, TaskContext, ui_action
+
+
+class {class_name}Payload(TypedDict, total=False):
+    """输入载荷。请按实际表单字段补充强类型字段。"""
+
+
+@ui_action(
+    name="{name}",
+    label="{display_name}",
+    description="{description}",
+)
+def {name}(ctx: TaskContext, payload: {class_name}Payload) -> DataTableCrudResult:
+    """执行宿主页用户操作。"""
+    del ctx
+    del payload
+    return {{"ok": True}}
+'''
+
+INTERFACE_TEMPLATE = '''"""接口声明: {display_name}
+
+{description}
+"""
+
+from crawler4j_contracts import interface
+
+
+@interface(name="{name}", label="{display_name}", description="{description}")
+class {class_name}:
+    """{display_name} 接口。"""
+'''
+
+COMPONENT_TEMPLATE = '''"""组件声明: {display_name}
+
+{description}
+"""
+
+from crawler4j_contracts import component
+
+
+@component(name="{name}", implements="{implements}", label="{display_name}", description="{description}")
+class {class_name}:
+    """{display_name} 组件。"""
+'''
+
+MODEL_GITIGNORE_TEMPLATE = """.DS_Store
 .idea/
 .vscode/
 .venv/
@@ -56,9 +106,9 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-'''
+"""
 
-MODEL_PROJECT_PYPROJECT = '''[project]
+MODEL_PROJECT_PYPROJECT = """[project]
 name = "{project_name}"
 version = "{version}"
 description = "{display_name} 模块项目"
@@ -80,19 +130,22 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
-'''
+"""
 
-MODEL_PROJECT_README = '''# {display_name}
+MODEL_PROJECT_README = """# {display_name}
 
-这是一个 `core-native-v1` 协议模块项目，核心文件如下：
+这是一个 `core-native-v2` 协议模块项目，核心文件如下：
 
 - `module.yaml`: 模块清单与 `runtime_api` 声明。
-- `tasks/`: 原子任务，一个文件导出一个 `TASK` 与 `execute(ctx)`。
-- `workflows/`: 工作流，一个文件导出一个 `WORKFLOW` 与 `run(ctx)`。
-- `hooks/`: 生命周期 Hook，一个文件导出一个 `handle(...)`。
-- `env_selectors/`: 环境选择器，一个文件导出一个 `SELECTOR` 与 `select(ctx, candidates)`。
+- `interfaces/`: 可注入接口声明，使用 `@interface`。
+- `objects/`: 组件实现，使用 `@component`。
+- `workflows/`: 工作流对象，使用 `@workflow`。
+- `tasks/`: 页面操作函数，使用 `@page_action`。
+- `data/`: 数据表与只读视图声明，使用 `@data_table` / `@data_view`。
 - `pages/`: Hosted UI 页面；可以平铺在 `pages/*.py`，也可以按单层业务分组放到 `pages/<group>/*.py`。
-- `data/`: 数据契约附属资产，存放种子数据与已注册 SQL 文件。
+- `candidates/`: 环境候选纯函数，使用 `@env_candidates`。
+- `cleanups/`: 环境清理候选纯函数，使用 `@env_cleanup_candidates`。
+- `.crawler4j/manifest.lock.json`: SDK 扫描生成的 v2 manifest lock。
 
 ## 常用命令
 
@@ -100,27 +153,33 @@ MODEL_PROJECT_README = '''# {display_name}
 # 查看模块概况
 uv run crawler4j module show
 
-# 创建任务脚本
-uv run crawler4j task create <name>
+# 创建接口与组件
+uv run crawler4j interface create labor
+uv run crawler4j component create api_labor --implements labor
 
 # 创建工作流
 uv run crawler4j workflow create <name>
+
+# 创建页面操作
+uv run crawler4j page-action create <name>
 
 # 创建宿主页
 uv run crawler4j page create dashboard
 uv run crawler4j page create account_detail --group account --no-menu
 
-# 创建环境选择器
-uv run crawler4j env-selector create pick_ready
+# 创建数据表 / 视图
+uv run crawler4j data table create accounts
+uv run crawler4j data table create account_snapshots --storage-mode managed_dataset
+uv run crawler4j data view create account_overview --source accounts
 
-# 创建数据资源 / 视图 / 查询 / 种子
-uv run crawler4j data resource create accounts
-uv run crawler4j data query create get_account_by_id --source accounts
-uv run crawler4j data view create account_stats --source accounts
-uv run crawler4j data seed create accounts_seed --resource accounts
+# 创建环境候选函数
+uv run crawler4j candidate create ready_accounts
 
-# 重建某个 Hook 骨架
-uv run crawler4j hook create on_cleanup --force
+# 创建环境清理候选函数
+uv run crawler4j cleanup create unused_accounts
+
+# 生成 manifest lock
+uv run crawler4j manifest lock
 
 # 完整校验并打包
 uv run crawler4j check full
@@ -131,46 +190,54 @@ uv run crawler4j package build
 
 - 模块运行时只依赖 `crawler4j-contracts`。
 - `crawler4j-sdk` 只作为 CLI / 校验 / 开发辅助存在。
-- Core 会自行扫描目录生成运行时 descriptor，不会调用模块根 `run()` 或 `declare_ui()`。
-- 表、视图、命名查询统一注册在 `module.yaml.data`；模块代码不允许执行未注册 SQL。
-'''
+- Core 会自行扫描 v2 装饰器生成运行时 descriptor，不会调用模块根 `run()` 或 `declare_ui()`。
+- 对象依赖和 component 参数可以写在装饰器参数里，也可以写成 `Annotated[..., object_inject(...)]` / `Annotated[..., object_param(...)]`。
+- `object_param(...)` 支持标量、enum、array、object、json、date/datetime/time、url、path、secret，并可从常见 Python 注解推断类型。
+- 表与只读视图统一由装饰器声明；旧 `module.yaml.data` 已不再是 0.4.x 运行契约；快照表需显式 `--storage-mode managed_dataset`。
+- 环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，不使用资源池同步或旧 `env_selectors/`。
+- 批量环境清理由 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数声明；模块只返回已绑定且业务上可丢弃的 env id，删除由宿主环境管理页确认后执行。
+- 模块不要导入 `TaskSignal` / `EnvAction`；流程终态用 `TaskResult` 表达，任务结束、失败、超时或被用户中止后的环境统一由宿主回收。
+- workflow/component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 做终态收尾；旧 `aclose()` / `close()` 不再是对象生命周期契约。
+"""
 
-MODEL_TEST_TASK_TEMPLATE = '''"""测试任务脚本。"""
+MODEL_TEST_TASK_TEMPLATE = '''"""测试页面操作。"""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from crawler4j_contracts import TaskContext
-from tasks.example_task import execute
+from tasks.example_action import example_action
 
 
 @pytest.mark.asyncio
-async def test_example_task_logic():
+async def test_example_action_logic():
     ctx = MagicMock(spec=TaskContext)
-    ctx.get_config.return_value = "https://mock.url"
     ctx.logger = MagicMock()
+    ctx.tools = MagicMock()
+    ctx.tools.has_tool = MagicMock(return_value=True)
+    ctx.tools.call = AsyncMock(return_value={"url": "https://mock.url"})
     ctx.page = MagicMock()
-    ctx.page.goto = AsyncMock()
+    ctx.page.url = "https://mock.url"
     ctx.page.title = AsyncMock(return_value="Mock Title")
 
-    result = await execute(ctx)
+    result = await example_action(ctx, "https://mock.url")
 
     assert result.success is True
     assert result.data["title"] == "Mock Title"
-    ctx.page.goto.assert_awaited_once_with("https://mock.url", wait_until="domcontentloaded")
+    ctx.tools.call.assert_awaited_once_with("browser.goto", url="https://mock.url")
     ctx.page.title.assert_awaited_once()
 '''
 
 MODEL_MODULE_INIT = '''"""{display_name} 模块包。
 
-Core 会直接扫描 `tasks/`、`workflows/`、`hooks/`、`env_selectors/`、`pages/`。
+Core 会直接扫描 `interfaces/`、`objects/`、`workflows/`、`tasks/`、`data/`、`pages/`、`candidates/`。
 宿主页源码既可以平铺，也可以按单层分组放到 `pages/<group>/`。
 模块根包不再承载运行时装配逻辑。
 """
 '''
 
-MODEL_MANIFEST_TEMPLATE = '''name: {module_name}
-runtime_api: core-native-v1
+MODEL_MANIFEST_TEMPLATE = """name: {module_name}
+runtime_api: core-native-v2
 version: {version}
 display_name: {display_name}
 description: {description}
@@ -181,191 +248,136 @@ upgrade_source:
   allow_prerelease: false
 config_defaults:
   module: {{}}
-  workflows: {{}}
-default_workflow: {workflow_name}
-workflows:
-  - name: {workflow_name}
-    display_name: {workflow_display_name}
-    description: {workflow_description}
-ui_extension:
-  pages: []
-data:
-  resources: []
-  views: []
-  queries: []
-  seeds: []
-'''
+"""
 
-MODEL_HOOKS_INIT_TEMPLATE = '"""模块生命周期 Hook 集合。"""\n'
-MODEL_SELECTORS_INIT_TEMPLATE = '"""环境选择器集合。"""\n'
+MODEL_INTERFACES_INIT_TEMPLATE = '"""v2 接口声明集合。"""\n'
+MODEL_OBJECTS_INIT_TEMPLATE = '"""v2 组件声明集合。"""\n'
+MODEL_WORKFLOWS_INIT_TEMPLATE = '"""v2 工作流声明集合。"""\n'
+MODEL_TASKS_INIT_TEMPLATE = '"""v2 页面操作集合。"""\n'
+MODEL_DATA_INIT_TEMPLATE = '"""v2 数据契约声明集合。"""\n'
 MODEL_PAGES_INIT_TEMPLATE = '"""Hosted UI 页面集合。"""\n'
+MODEL_CANDIDATES_INIT_TEMPLATE = '"""v2 环境候选函数集合。"""\n'
+MODEL_CLEANUPS_INIT_TEMPLATE = '"""v2 环境清理候选函数集合。"""\n'
 
 WORKFLOW_TEMPLATE = '''"""工作流: {display_name}
 
 {description}
 """
 
-from crawler4j_contracts import TaskContext, WorkflowSpec
-
-WORKFLOW = WorkflowSpec(
-    name="{name}",
-    display_name="{display_name}",
-    description="{description}",
-    tasks=("example_task",),
-)
+from crawler4j_contracts import TaskContext, workflow
 
 
-async def run(ctx: TaskContext):
-    """执行工作流。"""
-    ctx.state["phase"] = "{name}"
-    return await ctx.run_subtask("example_task")
+@workflow(name="{name}", label="{display_name}", description="{description}")
+class {class_name}:
+    """{display_name} 工作流。"""
+
+    async def run(self, ctx: TaskContext):
+        """执行工作流。"""
+        ctx.state["phase"] = "{name}"
+        return {{"phase": "{name}"}}
 '''
 
-HOOK_NAMES = (
-    "prepare_env",
-    "init_env",
-    "before_run",
-    "on_success",
-    "on_failure",
-    "on_timeout",
-    "on_cleanup",
-)
-
-_HOOK_TEMPLATE_SPECS = {
-    "prepare_env": {
-        "imports": "TaskContext",
-        "signature": "async def handle(context: TaskContext):",
-        "body": "    return None",
-    },
-    "init_env": {
-        "imports": "TaskContext",
-        "signature": "async def handle(context: TaskContext):",
-        "body": "    return None",
-    },
-    "before_run": {
-        "imports": "TaskContext",
-        "signature": "async def handle(context: TaskContext):",
-        "body": "    return None",
-    },
-    "on_success": {
-        "imports": "TaskContext, TaskResult",
-        "signature": "async def handle(context: TaskContext, result: TaskResult):",
-        "body": "    return None",
-    },
-    "on_failure": {
-        "imports": "TaskContext",
-        "signature": "async def handle(context: TaskContext, error: Exception):",
-        "body": "    return None",
-    },
-    "on_timeout": {
-        "imports": "TaskContext",
-        "signature": "async def handle(context: TaskContext):",
-        "body": "    return None",
-    },
-    "on_cleanup": {
-        "imports": "TaskContext",
-        "signature": "async def handle(context: TaskContext):",
-        "body": '    _ = context.runtime.get("env_action")\n    return None',
-    },
-}
-
-RETURN_NONE_SELECTOR_TEMPLATE = '''"""环境选择器: 返回 None。"""
-
-from crawler4j_contracts import EnvCandidate, EnvSelectorSpec, TaskContext
-
-SELECTOR = EnvSelectorSpec(
-    name="return_none",
-    display_name="返回 None",
-    description="占位选择器，默认直接返回 None。",
-    returns_none=True,
-)
-
-
-def select(context: TaskContext, candidates: list[EnvCandidate]):
-    """占位环境选择器。"""
-    del context, candidates
-    return None
-'''
-
-RANDOM_READY_SELECTOR_TEMPLATE = '''"""环境选择器: 随机选择就绪环境。"""
-
-import random
-
-from crawler4j_contracts import EnvCandidate, EnvSelectorSpec, TaskContext
-
-SELECTOR = EnvSelectorSpec(
-    name="random_ready",
-    display_name="随机选择就绪环境",
-    description="从当前 ready 候选里随机挑选一个环境。",
-)
-
-
-def select(context: TaskContext, candidates: list[EnvCandidate]):
-    """示例环境选择器。"""
-    del context
-    ready_candidates = [candidate for candidate in candidates if candidate.status == "ready"]
-    if not ready_candidates:
-        return None
-    return random.choice(ready_candidates).env_id
-'''
-
-
-def render_hook_template(hook_name: str) -> str:
-    spec = _HOOK_TEMPLATE_SPECS[hook_name]
-    return '''"""生命周期 Hook: {hook_name}。"""
-
-from crawler4j_contracts import {imports}
-
-
-{signature}
-{body}
-'''.format(
-        hook_name=hook_name,
-        imports=spec["imports"],
-        signature=spec["signature"],
-        body=spec["body"],
-    )
-
-
-def render_selector_template(
-    *,
-    name: str,
-    display_name: str,
-    description: str,
-) -> str:
-    return '''"""环境选择器: {display_name}
+DATA_TABLE_TEMPLATE = '''"""数据表声明: {display_name}
 
 {description}
 """
 
-from crawler4j_contracts import EnvCandidate, EnvSelectorSpec, TaskContext
+from crawler4j_contracts import data_table
 
-SELECTOR = EnvSelectorSpec(
+
+@data_table(
     name="{name}",
-    display_name="{display_name}",
+    label="{display_name}",
     description="{description}",
+    storage_mode="{storage_mode}",
+    env_binding_field="env_id",
+    schema=[
+        {{"name": "env_id", "type": "integer", "required": True}},
+        {{"name": "account_id", "type": "string", "required": True}},
+        {{"name": "status", "type": "string", "required": True}},
+        {{"name": "last_used_at", "type": "integer"}},
+    ],
 )
+class {class_name}:
+    """{display_name} 表。"""
+'''
+
+DATA_VIEW_TEMPLATE = '''"""数据视图声明: {display_name}
+
+{description}
+"""
+
+from crawler4j_contracts import data_view
 
 
-def select(context: TaskContext, candidates: list[EnvCandidate]):
-    """{display_name}。"""
-    del context
-    ready_candidates = [candidate for candidate in candidates if candidate.status == "ready"]
-    if not ready_candidates:
-        return None
-    return ready_candidates[0].env_id
-'''.format(
-        name=name,
-        display_name=display_name,
-        description=description,
+@data_view(
+    name="{name}",
+    sources=["{source}"],
+    sql="SELECT account_id, status FROM {{{{resource:{source}}}}}",
+    schema=[
+        {{"name": "account_id", "type": "string"}},
+        {{"name": "status", "type": "string"}},
+    ],
+)
+def {name}():
+    """{display_name} 视图声明。"""
+'''
+
+ENV_CANDIDATES_TEMPLATE = '''"""环境候选函数: {display_name}
+
+{description}
+"""
+
+from crawler4j_contracts import EnvCandidates, env_candidates
+
+
+@env_candidates(name="{name}", label="{display_name}", description="{description}")
+def {name}(params: dict | None = None) -> EnvCandidates:
+    """返回可分配环境候选查询。
+
+    这里只描述候选集合；Core 会在运行时过滤 READY、浏览器类型和未被租约占用的环境。
+    """
+    params = params or {{}}
+    limit = int(params.get("limit", 100))
+    return (
+        EnvCandidates.from_table("accounts")
+        .filter(status="ready")
+        .exclude(status="blacklisted")
+        .order_by("last_used_at")
+        .limit(limit)
     )
+'''
 
+ENV_CLEANUP_CANDIDATES_TEMPLATE = '''"""环境清理候选函数: {display_name}
+
+{description}
+"""
+
+from crawler4j_contracts import EnvCandidates, env_cleanup_candidates
+
+
+@env_cleanup_candidates(name="{name}", label="{display_name}", description="{description}")
+def {name}(params: dict | None = None) -> EnvCandidates:
+    """返回可清理环境候选查询。
+
+    这里只描述候选集合；Core 会在用户确认后再次校验环境状态和租约，再执行删除。
+    """
+    params = params or {{}}
+    limit = int(params.get("limit", 100))
+    return (
+        EnvCandidates.from_table("accounts")
+        .filter(status="unused")
+        .order_by("last_used_at")
+        .limit(limit)
+    )
+'''
 
 def render_page_template(
     *,
     page_id: str,
     display_name: str,
     description: str,
+    menu: bool = True,
 ) -> str:
     return '''"""Hosted UI 页面: {display_name}
 
@@ -374,16 +386,17 @@ def render_page_template(
 
 from __future__ import annotations
 
-from crawler4j_contracts import PageSpec, TaskContext
+from crawler4j_contracts import TaskContext, page
 
-PAGE = PageSpec(
-    id="{page_id}",
+
+@page(
+    name="{page_id}",
     label="{display_name}",
     icon="📄",
+    menu={menu},
     schema={{
         "type": "Page",
         "title": "{display_name}",
-        "load_handler": "load_{page_id}_page",
         "layout": {{"direction": "column", "gap": 16}},
         "children": [
             {{
@@ -407,8 +420,6 @@ PAGE = PageSpec(
         ],
     }},
 )
-
-
 def load_{page_id}_page(
     context: TaskContext,
     page_id: str,
@@ -417,11 +428,12 @@ def load_{page_id}_page(
     """同步加载 `{page_id}` 页面数据。"""
     del context, page_id, params
     return {{
-        "summary": "{display_name} 页面已由 core-native-v1 加载。",
+        "summary": "{display_name} 页面已由 core-native-v2 加载。",
         "updated_at": "待接入真实数据",
     }}
 '''.format(
         page_id=page_id,
         display_name=display_name,
         description=description,
+        menu=menu,
     )

@@ -25,7 +25,6 @@ def _make_run_profile() -> RunProfile:
         execution=ExecutionContext(
             module="demo_module",
             workflow="repair",
-            hooks_module="demo_module.hooks",
         ),
     )
 
@@ -140,14 +139,14 @@ def test_task_create_dialog_initializes_manual_batch_job_mode(qtbot):
     assert dialog.trigger_stack.currentIndex() == 0
 
 
-def test_task_create_dialog_preview_shows_resource_pool_for_select_mode(qtbot):
+def test_task_create_dialog_preview_shows_candidates_for_select_mode(qtbot):
     from src.core.atm.ui.task_create_dialog import TaskCreateDialog
 
     run_profile = RunProfile(
         resource=ResourceConfig(
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.SELECT,
-                resource_pool="bound_account_ready",
+                candidates="bound_account_ready",
                 wait_timeout=45,
             ),
         ),
@@ -162,8 +161,8 @@ def test_task_create_dialog_preview_shows_resource_pool_for_select_mode(qtbot):
     dialog._inline_run_profile = run_profile
     dialog._update_inline_preview()
 
-    assert "资源池: bound_account_ready" in dialog.inline_preview.text()
-    assert "选择器: -" in dialog.inline_preview.text()
+    assert "候选函数: bound_account_ready" in dialog.inline_preview.text()
+    assert "选择器" not in dialog.inline_preview.text()
 
 
 def test_task_create_dialog_preview_keeps_spacing_above_inline_button(qtbot):
@@ -175,8 +174,7 @@ def test_task_create_dialog_preview_keeps_spacing_above_inline_button(qtbot):
         resource=ResourceConfig(
             acquisition=AcquisitionConfig(
                 mode=AcquisitionMode.SELECT,
-                resource_pool="reuse_bound_account_env",
-                selector_name="bound_account_selector",
+                candidates="reuse_bound_account_env",
                 wait_timeout=45,
             ),
         ),

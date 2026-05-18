@@ -1,8 +1,8 @@
 {
   "id": "crawler4j-model",
   "title": "Crawler4j Model 项目画像",
-  "stack": "python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v1 module project",
-  "summary": "适用于使用 crawler4j SDK CLI 创建和维护标准 model/模块项目，强调 `module.yaml`、`crawler4j-contracts` 运行时契约、CLI 脚手架、DevLink/ATM 调试和 zip 安装验收。",
+  "stack": "python + crawler4j-sdk CLI + crawler4j-contracts + core-native-v2 module project",
+  "summary": "适用于使用 crawler4j SDK CLI 创建和维护 0.4.x 标准 model/模块项目，强调 `module.yaml(runtime_api=core-native-v2)`、`crawler4j-contracts` 装饰器契约、CLI 脚手架、manifest lock、DevLink/ATM 调试和 zip 安装验收。",
   "projects": [
     "Crawler4j 标准模块项目",
     "Crawler4j Core 模块开发与验证"
@@ -13,11 +13,11 @@
     "crawler4j-sdk CLI",
     "crawler4j-contracts runtime contracts",
     "module.yaml",
-    "core-native-v1 TaskSpec / WorkflowSpec / PageSpec",
+    "core-native-v2 decorators / manifest lock / @page",
     "DevLink / ATM 调试链路"
   ],
   "rules": [
-    "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j task create`、`crawler4j workflow create`、`crawler4j page create`，不要先手写脚手架。",
+    "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j interface create`、`crawler4j component create`、`crawler4j workflow create`、`crawler4j page-action create`、`crawler4j page create`、`crawler4j data table/query create`，不要先手写脚手架。",
     "模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。",
     "新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。",
     "调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。",
@@ -25,8 +25,8 @@
   ],
   "admin_requirements": [],
   "commands": [
-    "优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo owner/<module_name>` 创建模块项目，默认使用 PyPI 最新发布版本；脚本化场景按需加 `--no-git --no-install`。",
-    "进入模块项目后优先执行 `uv run crawler4j task create <task_name>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page create <page_name>`。",
+    "优先执行 `uvx --from crawler4j-sdk crawler4j module init <module_name> --repo owner/<module_name>` 创建 0.4.x 模块项目，默认使用 PyPI 最新发布版本；脚本化场景按需加 `--no-git --no-install`。",
+    "进入模块项目后优先执行 `uv run crawler4j interface create <name>`、`uv run crawler4j component create <name> --implements <interface>`、`uv run crawler4j workflow create <workflow_name>`、`uv run crawler4j page-action create <action_name>`、`uv run crawler4j data table/query create ...`、`uv run crawler4j manifest lock`。",
     "在 crawler4j Core 源码仓验证本地 CLI 时，优先执行 `uv run python -m crawler4j_sdk.cli.commands --help`。"
   ],
   "guides": [

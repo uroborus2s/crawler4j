@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import textwrap
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,7 +21,6 @@ from PyQt6.QtWidgets import (
 from src.core.foundation.logging import logger
 from src.core.rem.import_job_service import get_existing_env_import_job_service
 from src.core.rem import EnvKind, EnvStatus
-from src.core.rem.manager import RESOURCE_POOL_METADATA_NAMESPACE
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.pool import EnvPool
 from src.core.rem.ui.import_existing_env_dialog import ImportExistingEnvDialog
@@ -299,6 +299,198 @@ class CreateEnvDialog(QDialog):
         )
 
 
+class CleanupPreviewDialog(QDialog):
+    """批量清理确认弹窗。"""
+
+    TABLE_SCHEMA = {
+        "columns": [
+            {"key": "__index__", "label": "#", "type": "int", "width": 56, "align": "center"},
+            {"key": "env_id", "label": "环境ID", "type": "int", "width": 84, "align": "center", "sortable": True},
+            {"key": "env_name", "label": "环境名", "type": "text", "stretch": True},
+            {"key": "provider", "label": "Provider", "type": "text", "width": 150},
+            {"key": "sources", "label": "来源", "type": "text", "width": 240},
+        ],
+        "row_height": 72,
+        "selection_mode": "none",
+        "features": {
+            "search": {"enabled": True, "placeholder": "搜索环境ID / 环境名 / 来源…"},
+            "sort": {"enabled": True, "default": [{"field": "env_id", "direction": "asc"}]},
+            "pagination": {"enabled": True, "page_size": 10, "page_size_options": [10, 20, 50]},
+            "loading": {"inline": False, "disable_interaction": False},
+        },
+    }
+
+    def __init__(
+        self,
+        *,
+        eligible_items: list[Any],
+        skipped_count: int,
+        error_count: int,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._eligible_items = list(eligible_items)
+        self._skipped_count = max(0, int(skipped_count))
+        self._error_count = max(0, int(error_count))
+        self.setWindowTitle("确认批量清理")
+        self.setModal(True)
+        self.setMinimumSize(980, 560)
+        configure_titled_dialog(self)
+        self.setStyleSheet(self._build_stylesheet())
+        self._setup_ui()
+
+    @staticmethod
+    def _build_stylesheet() -> str:
+        return """
+            QDialog {
+                background-color: #1e1e2e;
+            }
+            QLabel {
+                background-color: transparent;
+            }
+            QLabel#cleanupConfirmTitle {
+                color: #f7f7fb;
+                font-size: 18px;
+                font-weight: 800;
+            }
+            QLabel#cleanupConfirmSummary {
+                color: rgba(255, 255, 255, 0.78);
+                font-size: 14px;
+                line-height: 1.45;
+            }
+            QLabel#cleanupConfirmHint {
+                color: rgba(255, 255, 255, 0.56);
+                font-size: 12px;
+                line-height: 1.5;
+            }
+        """
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        title_label = QLabel("确认批量清理")
+        title_label.setObjectName("cleanupConfirmTitle")
+        layout.addWidget(title_label)
+
+        summary_label = QLabel(self._build_summary_text())
+        summary_label.setObjectName("cleanupConfirmSummary")
+        summary_label.setWordWrap(True)
+        layout.addWidget(summary_label)
+
+        hint_label = QLabel("下表只展示当前通过安全校验、实际会被删除的环境。")
+        if self._error_count > 0:
+            hint_label.setText(
+                f"{hint_label.text()} 另有 {self._error_count} 个来源扫描失败，本次未纳入删除。"
+            )
+        hint_label.setObjectName("cleanupConfirmHint")
+        hint_label.setWordWrap(True)
+        layout.addWidget(hint_label)
+
+        self.preview_table = SkyDataTable(schema=self.TABLE_SCHEMA)
+        self.preview_table.set_query(
+            {
+                "search_text": "",
+                "sort": [{"field": "env_id", "direction": "asc"}],
+                "page": 1,
+                "page_size": 10,
+                "params": {},
+            }
+        )
+        rows = self._build_rows()
+        result = resolve_local_data_table_result(
+            rows,
+            columns=list(self.TABLE_SCHEMA["columns"]),
+            query=dict(self.preview_table._query),
+        )
+        self.preview_table.apply_result(0, result)
+        self.preview_table.table.resizeRowsToContents()
+        layout.addWidget(self.preview_table)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(12)
+        buttons.addStretch()
+
+        cancel_btn = StyledButton(
+            "取消",
+            variant="secondary",
+            min_height=40,
+            min_width=96,
+            horizontal_padding=20,
+        )
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(cancel_btn)
+
+        confirm_btn = StyledButton(
+            "确认",
+            variant="success",
+            min_height=40,
+            min_width=96,
+            horizontal_padding=20,
+        )
+        confirm_btn.clicked.connect(self.accept)
+        buttons.addWidget(confirm_btn)
+
+        layout.addLayout(buttons)
+
+    def _build_summary_text(self) -> str:
+        summary = f"将删除 {len(self._eligible_items)} 个环境，跳过 {self._skipped_count} 个不安全候选。"
+        if self._error_count > 0:
+            summary = f"{summary} 扫描失败来源 {self._error_count} 个。"
+        return summary
+
+    def _build_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for index, item in enumerate(self._eligible_items, start=1):
+            env_name = str(item.env_name or "-").strip() or "-"
+            provider = self._provider_label(str(item.provider or "-").strip() or "-")
+            source_lines = [f"{source.module_name}.{source.cleanup_name}" for source in item.sources]
+            source_text = "\n".join(source_lines) if source_lines else "-"
+            rows.append(
+                {
+                    "__index__": index,
+                    "env_id": item.env_id,
+                    "env_name": self._wrapped_cell(env_name, width=42),
+                    "provider": {"text": provider, "tooltip": str(item.provider or "")},
+                    "sources": self._wrapped_cell(source_text, width=28),
+                }
+            )
+        return rows
+
+    def _wrapped_cell(self, text: str, *, width: int) -> dict[str, Any]:
+        value = str(text or "-").strip() or "-"
+        wrapped = self._wrap_text(value, width=width)
+        return {
+            "text": wrapped,
+            "search_text": value.replace("\n", " "),
+            "sort_value": value,
+            "tooltip": value,
+        }
+
+    @staticmethod
+    def _wrap_text(text: str, *, width: int) -> str:
+        lines = []
+        for raw_line in str(text or "").splitlines() or ["-"]:
+            wrapped = textwrap.wrap(
+                raw_line,
+                width=width,
+                break_long_words=False,
+                break_on_hyphens=True,
+            )
+            lines.extend(wrapped or [raw_line])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _provider_label(provider: str) -> str:
+        labels = {
+            "bitbrowser": "BitBrowser",
+            "playwright_local": "Playwright Local",
+            "virtualbrowser": "VirtualBrowser",
+        }
+        return labels.get(provider, provider or "-")
+
+
 class DataLoaderThread(QThread):
     """数据加载线程。"""
     
@@ -364,7 +556,6 @@ class EnvDisplayItem:
     raw: Any # EnvInfo
     display_status_text: str
     env_metadata: dict[str, Any]
-    availability: dict[str, Any]
 
 class EnvListWidget(QWidget):
     """环境列表组件。"""
@@ -373,11 +564,10 @@ class EnvListWidget(QWidget):
     TABLE_SCHEMA = {
         "columns": [
             {"key": "id", "label": "ID", "type": "text", "width": 120},
-            {"key": "name", "label": "名称", "type": "text", "width": 160},
+            {"key": "name", "label": "名称", "type": "text", "width": 160, "sortable": True},
             {"key": "kind", "label": "类型", "type": "text", "width": 100},
             {"key": "provider", "label": "节点类型", "type": "text", "width": 110},
             {"key": "status", "label": "状态", "type": "text", "width": 90},
-            {"key": "availability", "label": "可用状态", "type": "text", "width": 150},
             {"key": "task", "label": "任务", "type": "text", "width": 160},
             {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
         ],
@@ -391,7 +581,7 @@ class EnvListWidget(QWidget):
         },
     }
     
-    COLUMNS = ["ID", "名称", "类型", "Provider", "状态", "可用状态", "任务", "操作"]
+    COLUMNS = ["ID", "名称", "类型", "Provider", "状态", "任务", "操作"]
     STATUS_COLORS = {
         EnvStatus.READY: "#4ade80",
         EnvStatus.BUSY: "#facc15",
@@ -415,6 +605,9 @@ class EnvListWidget(QWidget):
         # 使用全局 EnvironmentManager 的共享 pool 实例
         from src.core.rem.manager import get_environment_manager
         self._manager = get_environment_manager()
+        from src.core.rem.cleanup_service import get_env_cleanup_service
+
+        self._cleanup_service = get_env_cleanup_service()
         self._import_job_service = get_existing_env_import_job_service()
         self._pool = self._manager.pool
         self._loader_thread = None
@@ -450,7 +643,11 @@ class EnvListWidget(QWidget):
         self.import_existing_btn = StyledButton("从已有环境导入", variant="warning", min_height=36)
         self.import_existing_btn.clicked.connect(self._import_existing_env)
         header.addWidget(self.import_existing_btn)
-        
+
+        self.cleanup_btn = StyledButton("清理环境", variant="danger", min_height=36)
+        self.cleanup_btn.clicked.connect(self._cleanup_envs)
+        header.addWidget(self.cleanup_btn)
+
         self.refresh_btn = StyledButton("刷新", variant="primary", min_height=36)
         self.refresh_btn.setMinimumWidth(64)
         self.refresh_btn.clicked.connect(lambda: self.load_data(run_gc=True, reload_from_db=True))
@@ -508,7 +705,6 @@ class EnvListWidget(QWidget):
                 raw=env,
                 display_status_text=str(status_text),
                 env_metadata=env_metadata,
-                availability=self._build_availability_cell(env_metadata),
             ))
             
             if env.status == EnvStatus.READY:
@@ -540,7 +736,6 @@ class EnvListWidget(QWidget):
                 "text": item.display_status_text,
                 "tone": self._status_tone(env.status),
             },
-            "availability": item.availability,
             "task": task_text,
             "actions": self._build_row_actions(env),
         }
@@ -562,67 +757,6 @@ class EnvListWidget(QWidget):
         except Exception:
             return {}
         return metadata if isinstance(metadata, dict) else {}
-
-    def _build_availability_cell(self, env_metadata: dict[str, Any]) -> dict[str, Any]:
-        cards = self._resource_pool_cards(env_metadata)
-        if not cards:
-            return {
-                "text": "未标记",
-                "tone": "neutral",
-                "sort_value": 0,
-                "search_text": "未标记 无资源池状态",
-                "tooltip": "env_metadata 中没有资源池可用状态",
-            }
-
-        total_count = len(cards)
-        eligible_count = sum(1 for card in cards if bool(card.get("eligible")))
-        if eligible_count == total_count:
-            text = f"可用 ({eligible_count}/{total_count})"
-            tone = "success"
-            sort_value = 3
-        elif eligible_count > 0:
-            text = f"部分可用 ({eligible_count}/{total_count})"
-            tone = "warning"
-            sort_value = 2
-        else:
-            text = f"不可用 (0/{total_count})"
-            tone = "danger"
-            sort_value = 1
-
-        tooltip_lines = []
-        search_parts = [text]
-        for card in cards:
-            module_name = str(card.get("module_name") or "-")
-            pool_name = str(card.get("pool_name") or "-")
-            state_text = "可用" if bool(card.get("eligible")) else "不可用"
-            reason = str(card.get("reason") or "").strip()
-            suffix = f"：{reason}" if reason else ""
-            tooltip_lines.append(f"{module_name}/{pool_name}: {state_text}{suffix}")
-            search_parts.extend([module_name, pool_name, state_text, reason])
-
-        return {
-            "text": text,
-            "tone": tone,
-            "sort_value": sort_value,
-            "search_text": " ".join(part for part in search_parts if part),
-            "tooltip": "\n".join(tooltip_lines),
-        }
-
-    def _resource_pool_cards(self, env_metadata: dict[str, Any]) -> list[dict[str, Any]]:
-        namespace_payload = env_metadata.get(RESOURCE_POOL_METADATA_NAMESPACE)
-        if not isinstance(namespace_payload, dict):
-            return []
-        cards: list[dict[str, Any]] = []
-        for value in namespace_payload.values():
-            if isinstance(value, dict) and "eligible" in value:
-                cards.append(value)
-        cards.sort(
-            key=lambda card: (
-                str(card.get("module_name") or ""),
-                str(card.get("pool_name") or ""),
-            )
-        )
-        return cards
 
     def _build_row_actions(self, env) -> list[dict[str, Any]]:
         if env.status == EnvStatus.READY:
@@ -735,10 +869,21 @@ class EnvListWidget(QWidget):
     async def _confirm_async(self, title: str, text: str) -> bool:
         return await ConfirmDialog.confirm_async(self, title, text, confirm_text="确认")
 
+    async def _confirm_cleanup_plan_async(self, plan: Any) -> bool:
+        eligible_items = [item for item in plan.items if item.eligible]
+        dialog = CleanupPreviewDialog(
+            eligible_items=eligible_items,
+            skipped_count=len(plan.items) - len(eligible_items),
+            error_count=len(plan.errors),
+            parent=self,
+        )
+        return await self._exec_dialog_async(dialog) == int(QDialog.DialogCode.Accepted)
+
     def _apply_busy_state(self):
         """同步按钮和表格的忙碌状态。"""
         self.create_btn.setEnabled(not self._operation_in_progress)
         self.import_existing_btn.setEnabled(not self._operation_in_progress)
+        self.cleanup_btn.setEnabled(not self._operation_in_progress)
         self.refresh_btn.setEnabled(not self._load_in_progress and not self._operation_in_progress)
         self.table.set_loading(self._load_in_progress)
         if not self._load_in_progress:
@@ -822,7 +967,27 @@ class EnvListWidget(QWidget):
             return
         await self._on_destroy_finished(success)
 
-    async def _async_env_action(self, env_id: str, action: str):
+    async def _async_cleanup_envs(self):
+        try:
+            result = await self._cleanup_service.cleanup()
+        except Exception as exc:
+            await self._show_operation_error(str(exc))
+            return
+
+        message = (
+            f"批量清理完成：删除 {result.deleted_count} 个，"
+            f"跳过 {result.skipped_count} 个，失败 {result.failed_count} 个。"
+        )
+        failed = [item for item in result.items if item.outcome == "failed"]
+        if failed:
+            details = "\n".join(f"- {item.env_id}: {item.reason}" for item in failed[:8])
+            message = f"{message}\n{details}"
+        if result.errors:
+            message = f"{message}\n扫描失败来源：{len(result.errors)} 个"
+        await self._show_message_async("批量清理", message, kind="info" if result.failed_count == 0 else "warning")
+        self.load_data(run_gc=False, reload_from_db=True)
+
+    async def _async_env_operation(self, env_id: str, action: str):
         operation = getattr(self._manager, f"{action}_env")
         try:
             success = await operation(env_id)
@@ -857,6 +1022,41 @@ class EnvListWidget(QWidget):
     def _import_existing_env(self):
         """从来源系统导入已有环境。"""
         self._track_task(self._import_existing_env_async())
+
+    def _cleanup_envs(self):
+        """清理宿主扫描出的孤岛、未认领和模块声明可清理环境。"""
+        self._track_task(self._cleanup_envs_async())
+
+    async def _cleanup_envs_async(self) -> None:
+        if not self._begin_operation("正在扫描可清理环境..."):
+            return
+        try:
+            plan = await self._cleanup_service.preview()
+        except Exception as exc:
+            self._end_operation()
+            await self._show_operation_error(str(exc))
+            return
+        self._end_operation()
+
+        if not plan.items:
+            message = "暂无可清理环境。"
+            if plan.errors:
+                message = f"{message}\n扫描失败来源：{len(plan.errors)} 个"
+            await self._show_message_async("批量清理", message, kind="warning" if plan.errors else "info")
+            return
+
+        eligible_items = [item for item in plan.items if item.eligible]
+        if not eligible_items:
+            await self._show_message_async("批量清理", "当前候选环境均不满足清理安全条件。", kind="warning")
+            return
+
+        if not await self._confirm_cleanup_plan_async(plan):
+            return
+
+        self._schedule_operation(
+            self._async_cleanup_envs(),
+            message=self._operation_message("cleanup"),
+        )
 
     async def _import_existing_env_async(self) -> None:
         sources = self._manager.list_existing_env_import_sources()
@@ -978,7 +1178,7 @@ class EnvListWidget(QWidget):
     def _start_env(self, env_id: str):
         """启动环境（打开窗口）。"""
         self._schedule_operation(
-            self._async_env_action(env_id, "start"),
+            self._async_env_operation(env_id, "start"),
             message=self._operation_message(
                 "start",
                 provider=self._env_provider_for_message(env_id),
@@ -989,21 +1189,21 @@ class EnvListWidget(QWidget):
     def _stop_env(self, env_id: str):
         """停止环境（关闭窗口）。"""
         self._schedule_operation(
-            self._async_env_action(env_id, "stop"),
+            self._async_env_operation(env_id, "stop"),
             message=self._operation_message("stop", env_id=env_id),
         )
     
     def _pause_env(self, env_id: str):
         """暂停环境。"""
         self._schedule_operation(
-            self._async_env_action(env_id, "pause"),
+            self._async_env_operation(env_id, "pause"),
             message=self._operation_message("pause", env_id=env_id),
         )
     
     def _resume_env(self, env_id: str):
         """恢复环境。"""
         self._schedule_operation(
-            self._async_env_action(env_id, "resume"),
+            self._async_env_operation(env_id, "resume"),
             message=self._operation_message("resume", env_id=env_id),
         )
     
@@ -1058,6 +1258,7 @@ class EnvListWidget(QWidget):
             "pause": "暂停",
             "resume": "恢复",
             "import": "导入",
+            "cleanup": "批量清理",
             "list_sources": "读取来源",
         }.get(action, "处理")
         env_text = f" {env_id}" if env_id else ""

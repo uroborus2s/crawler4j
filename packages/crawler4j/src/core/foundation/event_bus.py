@@ -22,7 +22,6 @@ class EventType(StrEnum):
     TASK_STARTED = "task.started"
     TASK_PROGRESS = "task.progress"
     TASK_LOG = "task.log"
-    TASK_SIGNAL = "task.signal"
     TASK_FINISHED = "task.finished"
     TASK_FAILED = "task.failed"
     TASK_CANCELLED = "task.cancelled"
@@ -45,7 +44,6 @@ class EventType(StrEnum):
     ENV_ERROR = "env.error"
     ENV_CREATED = "env.created"
     ENV_DESTROYED = "env.destroyed"
-    ENV_RESOURCE_POOL_UPDATED = "env.resource_pool_updated"
     ENV_OPERATION_FAILED = "env.operation_failed"  # 操作失败（启动/连接等）
 
 

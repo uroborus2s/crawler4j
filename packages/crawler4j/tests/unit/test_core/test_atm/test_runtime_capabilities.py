@@ -10,6 +10,9 @@ import src.core.atm.runtime_capabilities as runtime_capabilities
 from src.core.atm.runtime_capabilities import (
     ClickCaptchaMatchResult,
     ClickCaptchaOrderedTarget,
+    HostedUIDeclarationBuffer,
+    RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES,
+    RUNTIME_SURFACE_ENV_CANDIDATES,
     RUNTIME_SURFACE_HOSTED_UI_DECLARE,
     RUNTIME_SURFACE_HOSTED_UI_READONLY,
     SliderCaptchaMatchResult,
@@ -42,12 +45,67 @@ def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) ->
                         "version": 1,
                         "columns": [
                             {"name": "id", "type": "text", "required": True},
+                            {"name": "phone", "type": "text"},
+                            {"name": "tier", "type": "text"},
                         ],
                     },
                 }
             ],
             "views": [],
-            "queries": [],
+            "seeds": [],
+        }
+    )
+    get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
+
+
+def _sync_custom_accounts(module_root, *, module_name: str, resource_id: str = "accounts") -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+    from src.core.persistence import get_module_data_store
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [
+                {
+                    "id": resource_id,
+                    "storage_mode": "custom_table",
+                    "record_key_field": "id",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "text", "required": True},
+                            {"name": "status", "type": "text"},
+                        ],
+                    },
+                }
+            ],
+            "views": [],
+            "seeds": [],
+        }
+    )
+    get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
+
+
+def _sync_custom_auto_increment_accounts(module_root, *, module_name: str, resource_id: str = "accounts") -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+    from src.core.persistence import get_module_data_store
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [
+                {
+                    "id": resource_id,
+                    "storage_mode": "custom_table",
+                    "record_key_field": "id",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "int", "auto_increment": True},
+                            {"name": "status", "type": "text"},
+                        ],
+                    },
+                }
+            ],
+            "views": [],
             "seeds": [],
         }
     )
@@ -55,20 +113,17 @@ def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) ->
 
 
 def test_runtime_tools_register_expected_surface():
-    caps = build_runtime_capabilities(
-        "demo_module",
-        declared_resource_pools=[{"name": "bound_account_ready"}],
-    )
+    caps = build_runtime_capabilities("demo_module")
 
     assert caps.tools.has_tool("ip_pool.pick_proxy") is True
     assert caps.tools.has_tool("env.set_proxy") is True
-    assert caps.tools.has_tool("env.bind_resource_pool") is True
-    assert caps.tools.has_tool("env.mark_resource_pool_eligible") is True
-    assert caps.tools.has_tool("env.mark_resource_pool_ineligible") is True
-    assert caps.tools.has_tool("env.remove_resource_pool") is True
-    assert caps.tools.has_tool("env.replace_resource_pool_snapshot") is True
-    assert caps.tools.has_tool("ui.declare_page") is True
-    assert caps.tools.has_tool("ui.get_page") is True
+    assert caps.tools.has_tool("env.bind_resource_pool") is False
+    assert caps.tools.has_tool("env.mark_resource_pool_eligible") is False
+    assert caps.tools.has_tool("env.mark_resource_pool_ineligible") is False
+    assert caps.tools.has_tool("env.remove_resource_pool") is False
+    assert caps.tools.has_tool("env.replace_resource_pool_snapshot") is False
+    assert caps.tools.has_tool("ui.declare_page") is False
+    assert caps.tools.has_tool("ui.get_page") is False
     assert caps.tools.has_tool("ui.declare_data_table") is False
     assert caps.tools.has_tool("ui.get_data_table") is False
     assert caps.tools.has_tool("captcha.match_slider") is True
@@ -78,11 +133,6 @@ def test_runtime_tools_register_expected_surface():
     tool_names = [spec.name for spec in specs]
     assert tool_names == sorted(tool_names)
     assert not any(name.startswith("db.") for name in tool_names)
-    assert {spec.name: spec.is_async for spec in specs}["env.bind_resource_pool"] is True
-    assert {spec.name: spec.is_async for spec in specs}["env.mark_resource_pool_eligible"] is True
-    assert {spec.name: spec.is_async for spec in specs}["env.mark_resource_pool_ineligible"] is True
-    assert {spec.name: spec.is_async for spec in specs}["env.remove_resource_pool"] is True
-    assert {spec.name: spec.is_async for spec in specs}["env.replace_resource_pool_snapshot"] is True
     assert {spec.name: spec.is_async for spec in specs}["env.set_proxy"] is True
 
 
@@ -139,20 +189,45 @@ def test_runtime_tools_register_hosted_ui_readonly_surface():
         caps.tools.call("ui.unknown", key="cursor", value=1)
 
 
+def test_runtime_tools_register_env_candidates_surface_as_readonly_toolless(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_ENV_CANDIDATES)
+
+    assert caps.tools.list_tools() == []
+    assert caps.db.from_("accounts").limit(10).execute() == []
+    with pytest.raises(RuntimeError, match="不允许写入"):
+        caps.db.into("accounts").replace([])
+
+
+def test_runtime_tools_register_env_cleanup_candidates_surface_as_readonly_toolless(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+
+    caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES)
+
+    assert caps.tools.list_tools() == []
+    assert caps.db.from_("accounts").limit(10).execute() == []
+    with pytest.raises(RuntimeError, match="不允许写入"):
+        caps.db.into("accounts").replace([])
+
+
 def test_runtime_tools_hosted_ui_readonly_surface_does_not_read_persisted_page_schema():
     from src.core.persistence import get_module_data_store
 
     store = get_module_data_store()
-    assert store.write_page_schema(
-        "demo_module",
-        "dashboard",
-        {
-            "type": "Page",
-            "title": "旧看板",
-            "load_handler": "load_dashboard_page",
-            "children": [],
-        },
-    ) is True
+    assert (
+        store.write_page_schema(
+            "demo_module",
+            "dashboard",
+            {
+                "type": "Page",
+                "title": "旧看板",
+                "load_handler": "load_dashboard_page",
+                "children": [],
+            },
+        )
+        is True
+    )
 
     caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_HOSTED_UI_READONLY)
 
@@ -162,18 +237,18 @@ def test_runtime_tools_hosted_ui_readonly_surface_does_not_read_persisted_page_s
 
 def test_runtime_ctx_db_replaces_public_db_tools(temp_data_dir):
     _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
-    caps = build_runtime_capabilities(
-        "demo_module",
-        declared_resource_pools=[{"name": "bound_account_ready"}],
-    )
+    caps = build_runtime_capabilities("demo_module")
 
     assert not any(spec.name.startswith("db.") for spec in caps.tools.list_tools())
-    assert caps.db.into("accounts").replace(
-        [
-            {"id": "u1", "run_status": "占用中", "record_status": "active"},
-            {"id": "u2", "run_status": "空闲", "record_status": "blocked"},
-        ]
-    ) is True
+    assert (
+        caps.db.into("accounts").replace(
+            [
+                {"id": "u1", "run_status": "占用中", "record_status": "active"},
+                {"id": "u2", "run_status": "空闲", "record_status": "blocked"},
+            ]
+        )
+        is True
+    )
 
     all_rows = caps.db.from_("accounts").limit(10).execute()
     assert all({"run_status", "record_status", "created_at", "updated_at"} <= set(row) for row in all_rows)
@@ -182,15 +257,280 @@ def test_runtime_ctx_db_replaces_public_db_tools(temp_data_dir):
     assert all_rows[0]["run_status"] == "占用中"
     assert all_rows[0]["record_status"] == "active"
 
+    rows = caps.db.from_("accounts").select("id").where(["id", "=", "u2"]).limit(10).execute()
+
+    assert rows == [{"id": "u2"}]
+
+
+def test_runtime_ctx_db_managed_dataset_where_can_use_physical_and_schema_fields(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+    from src.core.persistence import get_module_data_store
+
+    assert (
+        caps.db.into("accounts").replace(
+            [
+                {"id": "u1", "phone": "13800138000", "tier": "vip"},
+                {"id": "u2", "phone": "13900139000", "tier": "standard"},
+            ]
+        )
+        is True
+    )
+
+    expected = get_module_data_store().query_resource_records(
+        "demo_module",
+        "accounts",
+        select=["id", "tier"],
+        where=["tier", "=", "standard"],
+        limit=10,
+        offset=0,
+    )
+    assert expected == [{"id": "u2", "tier": "standard"}]
+
+    assert (caps.db.from_("accounts").select(["id", "tier"]).where(["tier", "=", "standard"]).execute()) == expected
+    with pytest.raises(ValueError, match="query select field not found: unseen_flag"):
+        caps.db.from_("accounts").select(["id", "unseen_flag"]).where(["unseen_flag", "=", "yes"]).execute()
+    with pytest.raises(ValueError, match="query select field not found: unseen_flag"):
+        get_module_data_store().query_resource_records(
+            "demo_module",
+            "accounts",
+            select=["id", "unseen_flag"],
+            where=["unseen_flag", "=", "yes"],
+            limit=100,
+            offset=0,
+        )
+
     rows = (
         caps.db.from_("accounts")
-        .select("id")
-        .where_eq("id", "u2")
-        .limit(10)
+        .select(["record_key", "id"])
+        .where(["record_key", "=", "u2"])
+        .where(["id", "=", "u2"])
         .execute()
     )
 
-    assert rows == [{"id": "u2"}]
+    assert rows == [{"record_key": "u2", "id": "u2"}]
+
+    all_rows = caps.db.from_("accounts").select("*").order_by("phone", "desc").execute()
+    assert [row["id"] for row in all_rows] == ["u2", "u1"]
+    assert {
+        "id",
+        "phone",
+        "record_index",
+        "record_key",
+        "run_status",
+        "record_status",
+        "created_at",
+        "updated_at",
+    } <= set(all_rows[0])
+
+
+def test_runtime_ctx_db_managed_dataset_count_returns_filtered_row_total(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").replace(
+            [
+                {"id": "u1", "phone": "13800138000", "tier": "vip"},
+                {"id": "u2", "phone": "13900139000", "tier": "standard", "run_status": "占用中"},
+                {"id": "u3", "phone": "13700137000", "tier": "standard", "run_status": "占用中"},
+            ]
+        )
+        is True
+    )
+
+    rows = caps.db.from_("accounts").where(["tier", "=", "standard"]).count(alias="total").execute()
+    occupied_rows = caps.db.from_("accounts").where(["run_status", "=", "占用中"]).count(alias="occupied_total").execute()
+
+    assert rows == [{"total": 2}]
+    assert occupied_rows == [{"occupied_total": 2}]
+
+
+def test_runtime_ctx_db_reads_all_managed_dataset_rows_when_pagination_is_absent(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+    records = [
+        {"id": f"u{index:03}", "phone": f"13800138{index:03}", "tier": "standard"}
+        for index in range(125)
+    ]
+
+    assert caps.db.into("accounts").replace(records) is True
+
+    rows = caps.db.from_("accounts").select(["id"]).order_by("id").execute()
+
+    assert len(rows) == 125
+    assert rows[0] == {"id": "u000"}
+    assert rows[-1] == {"id": "u124"}
+
+
+def test_runtime_ctx_db_reads_all_custom_table_rows_when_pagination_is_absent(temp_data_dir):
+    _sync_custom_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+    records = [{"id": f"u{index:03}", "status": "ready"} for index in range(125)]
+
+    assert caps.db.into("accounts").upsert(records) is True
+
+    rows = caps.db.from_("accounts").select(["id"]).order_by("id").execute()
+
+    assert len(rows) == 125
+    assert rows[0] == {"id": "u000"}
+    assert rows[-1] == {"id": "u124"}
+
+
+def test_runtime_ctx_db_supports_upsert_update_delete_and_batch(temp_data_dir):
+    _sync_custom_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").upsert(
+            [
+                {"id": "u1", "status": "new"},
+                {"id": "u2", "status": "expired"},
+            ]
+        )
+        is True
+    )
+    assert (
+        caps.db.into("accounts").update_where(
+            {"status": "ready"},
+            where=["id", "=", "u1"],
+        )
+        == 1
+    )
+    assert caps.db.into("accounts").delete_where(where=["status", "=", "expired"]) == 1
+
+    results = (
+        caps.db.batch()
+        .upsert("accounts", [{"id": "u3", "status": "ready"}])
+        .audit(
+            "account_events",
+            {"entity_key": "u3", "event_type": "created", "created_at": 100},
+        )
+        .execute()
+    )
+
+    assert results[0] is True
+    assert isinstance(results[1], str)
+    assert caps.db.from_("accounts").order_by("id").execute() == [
+        {"id": "u1", "status": "ready"},
+        {"id": "u3", "status": "ready"},
+    ]
+    assert caps.db.audit("account_events").query(entity_key="u3") == [
+        {
+            "id": results[1],
+            "module_name": "demo_module",
+            "dataset_name": "account_events",
+            "entity_key": "u3",
+            "event_type": "created",
+            "run_id": None,
+            "previous_status": None,
+            "next_status": None,
+            "result": None,
+            "reason": None,
+            "payload": {},
+            "created_at": 100,
+        }
+    ]
+
+
+def test_runtime_ctx_db_update_delete_accept_query_builder_callable_where(temp_data_dir):
+    _sync_custom_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").upsert(
+            [
+                {"id": "u1", "status": "new"},
+                {"id": "u2", "status": "expired"},
+                {"id": "u3", "status": "reserved"},
+            ]
+        )
+        is True
+    )
+    assert (
+        caps.db.into("accounts").update_where(
+            {"status": "ready"},
+            where=lambda query: query.where("id", "=", "u1"),
+        )
+        == 1
+    )
+    assert (
+        caps.db.into("accounts").delete_where(
+            where=lambda query: query.where(["or", ["status", "=", "expired"], ["status", "=", "reserved"]]),
+        )
+        == 2
+    )
+    assert caps.db.from_("accounts").order_by("id").execute() == [{"id": "u1", "status": "ready"}]
+
+
+def test_runtime_ctx_db_delete_where_accepts_custom_table_record_key_value(temp_data_dir):
+    _sync_custom_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").upsert(
+            [
+                {"id": "u1", "status": "ready"},
+                {"id": "u2", "status": "expired"},
+            ]
+        )
+        is True
+    )
+    assert caps.db.into("accounts").delete_where(where="u2") == 1
+    assert caps.db.from_("accounts").order_by("id").execute() == [{"id": "u1", "status": "ready"}]
+
+
+def test_runtime_ctx_db_add_supports_custom_table_auto_increment_ids(temp_data_dir):
+    _sync_custom_auto_increment_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+
+    inserted_ids = caps.db.into("accounts").add([{"status": "new"}, {"status": "ready"}])
+
+    assert inserted_ids == [1, 2]
+    assert caps.db.from_("accounts").order_by("id").execute() == [
+        {"id": 1, "status": "new"},
+        {"id": 2, "status": "ready"},
+    ]
+
+
+def test_runtime_ctx_db_managed_dataset_supports_incremental_writes(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").replace(
+            [
+                {"id": "u1", "phone": "13800138000"},
+                {"id": "u2", "phone": "13900139000"},
+            ]
+        )
+        is True
+    )
+    assert (
+        caps.db.into("accounts").upsert(
+            [
+                {"id": "u2", "phone": "13999999999"},
+                {"id": "u3", "phone": "13700137000"},
+            ]
+        )
+        is True
+    )
+    assert caps.db.into("accounts").update_where({"phone": "13600136000"}, where=["id", "=", "u1"]) == 1
+    assert caps.db.into("accounts").delete_where(where=["phone", "=", "13700137000"]) == 1
+    assert caps.db.into("accounts").delete_where(where="u2") == 1
+
+    assert caps.db.from_("accounts").select(["id", "phone", "record_index"]).order_by("record_index").execute() == [
+        {"id": "u1", "phone": "13600136000", "record_index": 0},
+    ]
+
+
+def test_runtime_ctx_db_managed_dataset_rejects_reserved_update_fields(temp_data_dir):
+    _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
+    caps = build_runtime_capabilities("demo_module")
+    caps.db.into("accounts").replace([{"id": "u1", "phone": "13800138000"}])
+
+    with pytest.raises(ValueError, match="reserved host fields"):
+        caps.db.into("accounts").update_where({"updated_at": 1}, where=["id", "=", "u1"])
 
 
 def test_runtime_ctx_db_audit_uses_independent_audit_table(temp_data_dir):
@@ -285,10 +625,7 @@ async def test_env_tool_delegates_to_environment_manager(monkeypatch):
         return True
 
     fake_manager = SimpleNamespace(update_env=_update_env)
-    monkeypatch.setattr(
-        "src.core.atm.runtime_capabilities._rem_manager_helpers",
-        lambda: (lambda: fake_manager, "scheduler.resource_pool", None, None),
-    )
+    monkeypatch.setattr("src.core.rem.manager.get_environment_manager", lambda: fake_manager)
 
     caps = build_runtime_capabilities("demo_module")
     ok = await caps.tools.call("env.set_proxy", env_id=12, proxy_value="http://1.1.1.1:8001", proxy_pool_id=None)
@@ -297,169 +634,42 @@ async def test_env_tool_delegates_to_environment_manager(monkeypatch):
     assert calls == [(12, "http://1.1.1.1:8001", None)]
 
 
-@pytest.mark.asyncio
-async def test_env_resource_pool_tools_manage_metadata_cards(monkeypatch):
-    store: dict[tuple[int, str, str], object] = {
-        (13, "scheduler.resource_pool", "demo_module:bound_account_ready"): {
-            "module_name": "demo_module",
-            "pool_name": "bound_account_ready",
-            "eligible": True,
-            "reason": "",
-            "exclusive": True,
-            "updated_at": 1,
-        }
-    }
-
-    class _FakeManager:
-        async def update_env(self, env_id: int, *, proxy_value: str | None = None, proxy_pool_id: str | None = None):
-            return True
-
-        async def set_metadata(self, env_id: int, namespace: str, key: str, value, value_type: str = "string"):
-            store[(env_id, namespace, key)] = value
-            return True
-
-        async def get_metadata(self, env_id: int, namespace: str, key: str):
-            return store.get((env_id, namespace, key))
-
-        async def delete_metadata(self, env_id: int, namespace: str, key: str | None = None):
-            removed = 0
-            for entry_key in list(store):
-                same_env = entry_key[0] == env_id
-                same_namespace = entry_key[1] == namespace
-                same_key = key is None or entry_key[2] == key
-                if same_env and same_namespace and same_key:
-                    store.pop(entry_key, None)
-                    removed += 1
-            return removed
-
-        async def list_envs(self):
-            return [SimpleNamespace(id=11), SimpleNamespace(id=12), SimpleNamespace(id=13)]
-
-    fake_manager = _FakeManager()
-
-    def _build_card(module_name: str, pool_name: str, *, eligible: bool, reason: str, exclusive: bool):
-        return {
-            "module_name": module_name,
-            "pool_name": pool_name,
-            "eligible": eligible,
-            "reason": reason,
-            "exclusive": exclusive,
-        }
-
-    monkeypatch.setattr(
-        "src.core.atm.runtime_capabilities._rem_manager_helpers",
-        lambda: (
-            lambda: fake_manager,
-            "scheduler.resource_pool",
-            _build_card,
-            lambda module_name, pool_name: f"{module_name}:{pool_name}",
-        ),
-    )
-
-    caps = build_runtime_capabilities(
-        "demo_module",
-        declared_resource_pools=[{"name": "bound_account_ready"}],
-    )
-    await caps.tools.call(
-        "env.bind_resource_pool",
-        env_id=11,
-        pool_name="bound_account_ready",
-        eligible=True,
-        reason="",
-        exclusive=True,
-    )
-    await caps.tools.call(
-        "env.mark_resource_pool_ineligible",
-        env_id=11,
-        pool_name="bound_account_ready",
-        reason="blacklisted",
-    )
-    await caps.tools.call(
-        "env.replace_resource_pool_snapshot",
-        pool_name="bound_account_ready",
-        entries=[
-            {"env_id": 11, "eligible": True, "reason": "", "exclusive": True},
-            {"env_id": 12, "eligible": False, "reason": "manual_disabled", "exclusive": True},
-        ],
-    )
-    await caps.tools.call(
-        "env.remove_resource_pool",
-        env_id=12,
-        pool_name="bound_account_ready",
-    )
-
-    card_11 = store[(11, "scheduler.resource_pool", "demo_module:bound_account_ready")]
-    assert card_11["module_name"] == "demo_module"
-    assert card_11["pool_name"] == "bound_account_ready"
-    assert card_11["eligible"] is True
-    assert (12, "scheduler.resource_pool", "demo_module:bound_account_ready") not in store
-    assert (13, "scheduler.resource_pool", "demo_module:bound_account_ready") not in store
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("tool_name", "kwargs"),
+    "tool_name",
     [
-        (
-            "env.bind_resource_pool",
-            {"env_id": 11, "pool_name": "undeclared_pool", "eligible": True},
-        ),
-        (
-            "env.mark_resource_pool_eligible",
-            {"env_id": 11, "pool_name": "undeclared_pool"},
-        ),
-        (
-            "env.mark_resource_pool_ineligible",
-            {"env_id": 11, "pool_name": "undeclared_pool", "reason": "blacklisted"},
-        ),
-        (
-            "env.remove_resource_pool",
-            {"env_id": 11, "pool_name": "undeclared_pool"},
-        ),
-        (
-            "env.replace_resource_pool_snapshot",
-            {"pool_name": "undeclared_pool", "entries": [{"env_id": 11}]},
-        ),
+        "env.bind_resource_pool",
+        "env.mark_resource_pool_eligible",
+        "env.mark_resource_pool_ineligible",
+        "env.remove_resource_pool",
+        "env.replace_resource_pool_snapshot",
     ],
 )
-async def test_env_resource_pool_tools_reject_undeclared_pool(monkeypatch, tool_name, kwargs):
-    def _unexpected_rem_call():
-        raise AssertionError("resource pool declaration must be checked before REM access")
+def test_env_resource_pool_tools_are_removed(tool_name):
+    caps = build_runtime_capabilities("demo_module")
 
-    monkeypatch.setattr(
-        "src.core.atm.runtime_capabilities._rem_manager_helpers",
-        _unexpected_rem_call,
-    )
+    with pytest.raises(KeyError, match="Unknown core tool"):
+        caps.tools.call(tool_name)
+
+
+def test_full_surface_rejects_legacy_hosted_ui_tools():
+    caps = build_runtime_capabilities("demo_module")
+
+    assert caps.tools.has_tool("ui.declare_page") is False
+    assert caps.tools.has_tool("ui.get_page") is False
+
+    with pytest.raises(KeyError, match=r"Unknown core tool: ui.declare_page"):
+        caps.tools.call("ui.declare_page", page_id="dashboard", schema={"type": "Page", "children": []})
+    with pytest.raises(KeyError, match=r"Unknown core tool: ui.get_page"):
+        caps.tools.call("ui.get_page", page_id="dashboard")
+
+
+def test_ui_tools_stage_page_meta_in_declare_buffer(monkeypatch):
+    buffer = HostedUIDeclarationBuffer()
     caps = build_runtime_capabilities(
         "demo_module",
-        declared_resource_pools=[{"name": "bound_account_ready"}],
+        surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+        ui_declaration_buffer=buffer,
     )
-
-    with pytest.raises(ValueError, match="module.yaml.resource_pools"):
-        await caps.tools.call(tool_name, **kwargs)
-
-
-@pytest.mark.asyncio
-async def test_env_resource_pool_tools_reject_when_module_declares_no_pools(monkeypatch):
-    def _unexpected_rem_call():
-        raise AssertionError("resource pool declaration must be checked before REM access")
-
-    monkeypatch.setattr(
-        "src.core.atm.runtime_capabilities._rem_manager_helpers",
-        _unexpected_rem_call,
-    )
-    caps = build_runtime_capabilities("demo_module", declared_resource_pools=[])
-
-    with pytest.raises(ValueError, match="module.yaml.resource_pools"):
-        await caps.tools.call(
-            "env.bind_resource_pool",
-            env_id=11,
-            pool_name="bound_account_ready",
-        )
-
-
-def test_ui_tools_persist_page_meta(monkeypatch):
-    caps = build_runtime_capabilities("demo_module")
     assert caps.tools.call(
         "ui.declare_page",
         page_id="dashboard",
@@ -497,7 +707,12 @@ def test_ui_tools_persist_page_meta(monkeypatch):
         },
     )
 
-    page = caps.tools.call("ui.get_page", page_id="dashboard")
+    readonly_caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
+        declared_page_schemas=buffer.page_schemas,
+    )
+    page = readonly_caps.tools.call("ui.get_page", page_id="dashboard")
     assert page["load_handler"] == "load_dashboard_page"
     assert page["children"][0] == {
         "type": "Text",
@@ -518,8 +733,13 @@ def test_ui_tools_persist_page_meta(monkeypatch):
     }
 
 
-def test_ui_tools_persist_navigation_params_with_page_ids():
-    caps = build_runtime_capabilities("demo_module")
+def test_ui_tools_stage_navigation_params_with_page_ids():
+    buffer = HostedUIDeclarationBuffer()
+    caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+        ui_declaration_buffer=buffer,
+    )
 
     assert caps.tools.call(
         "ui.declare_page",
@@ -557,7 +777,12 @@ def test_ui_tools_persist_navigation_params_with_page_ids():
         },
     )
 
-    page = caps.tools.call("ui.get_page", page_id="dashboard")
+    readonly_caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_READONLY,
+        declared_page_schemas=buffer.page_schemas,
+    )
+    page = readonly_caps.tools.call("ui.get_page", page_id="dashboard")
 
     assert page["children"][0]["action"] == {
         "type": "open_page",
@@ -587,7 +812,12 @@ def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
 
     monkeypatch.setattr(runtime_capabilities, "sdk_normalize_page_schema", fake_normalize_page_schema)
 
-    caps = build_runtime_capabilities("demo_module")
+    buffer = HostedUIDeclarationBuffer()
+    caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+        ui_declaration_buffer=buffer,
+    )
     assert caps.tools.call(
         "ui.declare_page",
         page_id="dashboard",
@@ -595,7 +825,7 @@ def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
     )
 
     assert page_calls == [("dashboard", {"type": "Page", "children": []})]
-    assert caps.tools.call("ui.get_page", page_id="dashboard") == {
+    assert buffer.page_schemas["dashboard"] == {
         "type": "Page",
         "title": "normalized:dashboard",
         "children": [],
@@ -603,7 +833,12 @@ def test_ui_tools_delegate_normalization_to_sdk(monkeypatch):
 
 
 def test_ui_tools_reject_unmanaged_schema_fields():
-    caps = build_runtime_capabilities("demo_module")
+    buffer = HostedUIDeclarationBuffer()
+    caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+        ui_declaration_buffer=buffer,
+    )
 
     with pytest.raises(ValueError):
         caps.tools.call(

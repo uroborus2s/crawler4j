@@ -71,15 +71,14 @@ def _make_hosted_ui_module(
         ],
         files={
             "pages/dashboard.py": f"""
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="今日运营看板",
                 icon="📊",
                 schema={{
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {{"type": "Text", "style": "title", "binding": "title"}},
                         {{"type": "Text", "style": "body", "binding": "summary"}},
@@ -101,8 +100,6 @@ def _make_hosted_ui_module(
                     ],
                 }},
             )
-
-
             def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                 del context, page_id, params
                 return {{
@@ -112,15 +109,14 @@ def _make_hosted_ui_module(
                 }}
             """,
             "pages/accounts.py": """
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
-            PAGE = PageSpec(
-                id="accounts",
+            @page(
+                name="accounts",
                 label="账号管理",
                 icon="📋",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_accounts_page",
                     "children": [
                         {"type": "Text", "style": "title", "binding": "title"},
                         {
@@ -133,8 +129,6 @@ def _make_hosted_ui_module(
                     ],
                 },
             )
-
-
             def load_accounts_page(context: TaskContext, page_id: str, params=None):
                 del context, page_id, params
                 return {
@@ -330,7 +324,7 @@ def test_module_detail_page_defers_hosted_page_loading_until_selected(qtbot, tmp
             "pages/dashboard.py": f"""
             from pathlib import Path
 
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
             EVENTS_PATH = Path({str(events_path)!r})
 
@@ -340,18 +334,15 @@ def test_module_detail_page_defers_hosted_page_loading_until_selected(qtbot, tmp
                 EVENTS_PATH.write_text(previous + event + "\\n", encoding="utf-8")
 
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="懒加载看板",
                 icon="📊",
                 schema={{
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [{{"type": "Text", "binding": "title"}}],
                 }},
             )
-
-
             def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                 _record("load_handler")
                 return {{"title": "懒加载看板"}}
@@ -413,20 +404,17 @@ def test_module_detail_page_reloads_dev_link_hosted_page_after_source_change(qtb
         (module_dir / "pages" / "dashboard.py").write_text(
             dedent(
                 """
-                from crawler4j_contracts import PageSpec
+                from crawler4j_contracts import page
 
-                PAGE = PageSpec(
-                    id="dashboard",
+                @page(
+                    name="dashboard",
                     label="今日运营看板",
                     icon="📊",
                     schema={
                         "type": "Page",
-                        "load_handler": "load_dashboard_page",
                         "children": [{"type": "Text", "style": "title", "binding": "title"}],
                     },
                 )
-
-
                 def load_dashboard_page(context, page_id, params=None):
                     del context, page_id, params
                     return {"title": "已重新加载看板"}
@@ -464,15 +452,14 @@ def test_module_detail_page_refreshes_existing_hosted_page_when_reselected(qtbot
         (module_dir / "pages" / "accounts.py").write_text(
             dedent(
                 """
-                from crawler4j_contracts import PageSpec
+                from crawler4j_contracts import page
 
-                PAGE = PageSpec(
-                    id="accounts",
+                @page(
+                    name="accounts",
                     label="账号管理",
                     icon="📋",
                     schema={
                         "type": "Page",
-                        "load_handler": "load_accounts_page",
                         "children": [
                             {"type": "Text", "style": "title", "binding": "title"},
                             {
@@ -485,8 +472,6 @@ def test_module_detail_page_refreshes_existing_hosted_page_when_reselected(qtbot
                         ],
                     },
                 )
-
-
                 def load_accounts_page(context, page_id, params=None):
                     del context, page_id, params
                     return {
@@ -550,15 +535,14 @@ def test_module_detail_page_row_action_refreshes_cached_target_with_new_params(q
         ],
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="主表",
                 icon="📊",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -577,14 +561,12 @@ def test_module_detail_page_row_action_refreshes_cached_target_with_new_params(q
                     ],
                 },
             )
-
-
             def load_dashboard_page(context, page_id, params=None):
                 del context, page_id, params
                 return {"rows": [{"account_id": "acct-001"}, {"account_id": "acct-002"}]}
             """,
             "pages/details.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
             DETAIL_ROWS = {
                 "acct-001": [{"account_id": "acct-001", "detail_id": "detail-1"}],
@@ -594,13 +576,13 @@ def test_module_detail_page_row_action_refreshes_cached_target_with_new_params(q
                 ],
             }
 
-            PAGE = PageSpec(
-                id="details",
+            @page(
+                name="details",
                 label="详情页",
                 icon="📋",
+                menu=False,
                 schema={
                     "type": "Page",
-                    "load_handler": "load_details_page",
                     "children": [
                         {"type": "Text", "binding": "title"},
                         {
@@ -616,8 +598,6 @@ def test_module_detail_page_row_action_refreshes_cached_target_with_new_params(q
                     ],
                 },
             )
-
-
             def load_details_page(context, page_id, params=None):
                 del context, page_id
                 account_id = ""

@@ -12,9 +12,13 @@
   Constraint: code, docs, tests, and `.factory/memory/` must stay synchronized.
 - `REQ-006`: Module root entry should be tool-managed and no longer require manual `__init__.py` maintenance | Priority: P1 | Status: VERIFIED
   Constraint: Core must still load modules through root `__init__.py`; old modules can restore the latest root template with `crawler4j module repair-init`.
-- `REQ-007`: ATM must persist and present structured confirmation signals to the desktop client | Priority: P1 | Status: VERIFIED
-  Constraint: `TaskSignal.wait_for_confirmation(...)` keeps one confirmation path through existing confirm services.
+- `REQ-007`: ATM lifecycle and environment disposal must stay host-owned | Priority: P1 | Status: VERIFIED
+  Constraint: module workflow only returns `TaskResult`, object setup only uses `setup(ctx, workflow)`, object cleanup only uses `cleanup(ctx, outcome)`, task terminal paths always recycle environments, and deletion only runs from the environment management cleanup flow.
 - `REQ-008`: Host must keep module history data separate from UI table rendering semantics | Priority: P1 | Status: VERIFIED
   Constraint: module-authored history is now modeled as registered resources and accessed through `ctx.db`; old append/query event tools are no longer module developer interfaces.
 - `REQ-009`: Fixed-pool Service jobs must wait for eligible module pool capacity instead of failing immediately | Priority: P1 | Status: VERIFIED
   Constraint: host-owned waiting seats, FIFO refill, pool eligibility cards, and queued waiting-timeout closeout are implemented locally.
+- `REQ-0400`: 0.4.0 module runtime must switch to decorator-first object assembly | Priority: P0 | Status: DESIGNED
+  Constraint: workflow cannot own parameters; decorators are the runtime capability source of truth, object parameters belong to components, Core assembles one object graph per task/env, SDK/Contracts provide decorators, scanning, validation, migration, manifest lock, and opening-phase reserved host DB field diagnostics.
+- `REQ-0401`: User and developer guides must be versioned for docs-stratego | Priority: P0 | Status: DESIGNED
+  Constraint: website main docs point to the current released guide version; old user/developer guides stay available under versioned paths; unreleased 0.4.0 docs are preview-only until release.

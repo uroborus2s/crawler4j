@@ -8,45 +8,32 @@
 
 import asyncio
 import time
-from collections.abc import Mapping
+from copy import deepcopy
 from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from crawler4j_contracts import EnvAction
+from crawler4j_contracts import TaskContext
 from src.core.atm.job_runtime import resolve_job_run_profile
 from src.core.atm.dispatcher import get_task_dispatcher
 from src.core.atm.models import Job, JobState, JobType, TaskStatus, TriggerType
 from src.core.atm.run_profile import AcquisitionMode
+from src.core.atm.runtime_capabilities import RUNTIME_SURFACE_ENV_CANDIDATES, build_runtime_capabilities
 from src.core.atm.repository import get_task_repository
 from src.core.foundation.event_bus import Event, EventType, get_event_bus
 from src.core.foundation.logging import logger
-from src.core.mms import get_module_registry
-from src.core.mms.service import get_module_service
 from src.core.mms.release_service import assert_module_upgrade_unlocked
-from src.core.rem.manager import (
-    RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
-    get_environment_manager,
-    normalize_resource_pool_module_name,
-)
+from src.core.mms.settings_store import get_module_settings_store
+from src.core.mms.service import get_module_service
+from src.core.rem.env_claims import CLAIM_CLAIMED, get_env_claim, is_env_bound_by_module, recover_pending_env_claims
+from src.core.rem.manager import RECOVERY_PROVIDER_RUNTIME_TIMEOUT, get_environment_manager
+
+CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
 
 
 class InvalidJobConfigurationError(ValueError):
     """作业运行模板组合无效。"""
-
-
-def selector_returns_none(selector_infos: Mapping[str, object] | list[object], selector_name: str) -> bool:
-    """纯谓词：给定 selector 元数据集合，判断目标 selector 是否以 `None` 表示“继续等待/无候选”。"""
-    normalized_selector = str(selector_name or "").strip()
-    if not normalized_selector:
-        return False
-
-    if isinstance(selector_infos, Mapping):
-        info = selector_infos.get(normalized_selector)
-    else:
-        info = next((item for item in selector_infos if item.name == normalized_selector), None)
-    return bool(info and getattr(info, "returns_none", False))
 
 
 class JobController:
@@ -77,6 +64,7 @@ class JobController:
         # 1. 开机自检 (Crash Recovery)
         try:
             await self._recover_zombies()
+            await recover_pending_env_claims(self.rem)
         except Exception as e:
             logger.error(f"[ATM] Failed to recover zombie tasks: {e}")
             
@@ -99,11 +87,11 @@ class JobController:
             
         logger.info("[ATM] JobController stopped")
 
-    async def request_job_stop(self, job_id: str, env_action: EnvAction | None = None):
+    async def request_job_stop(self, job_id: str):
         """停止某个 Job 的后续调度，并向活动 Task 请求停止。"""
         self._remove_batch_schedule(job_id)
         if hasattr(self.dispatcher, "request_stop_for_job"):
-            await self.dispatcher.request_stop_for_job(job_id, env_action=env_action)
+            await self.dispatcher.request_stop_for_job(job_id)
 
     async def request_job_resume(self, job_id: str):
         """恢复某个 Job 的调度状态。"""
@@ -118,74 +106,22 @@ class JobController:
         await self._ensure_runtime_for_job(job)
 
     @staticmethod
-    def _validate_resource_pool_declaration(run_profile) -> None:
+    def _validate_candidates_declaration(run_profile) -> None:
         acquisition = run_profile.resource.acquisition if run_profile.resource else None
         if not acquisition:
             return
 
-        resource_pool = str(acquisition.resource_pool or "").strip()
-        if not resource_pool:
+        candidates_name = str(acquisition.candidates or "").strip()
+        if not candidates_name:
             return
 
         module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
         if not module_name:
             return
 
-        normalized_module = normalize_resource_pool_module_name(module_name)
-        module_info = get_module_registry().get_module(normalized_module)
-        if not module_info:
-            raise InvalidJobConfigurationError(f"未找到模块定义，无法校验资源池: {normalized_module}")
-
-        declared_names = {
-            str(pool.name or "").strip()
-            for pool in getattr(module_info.manifest, "resource_pools", [])
-            if str(pool.name or "").strip()
-        }
-        if resource_pool not in declared_names:
-            if declared_names:
-                raise InvalidJobConfigurationError(
-                    f"resource_pool 未在 module.yaml.resource_pools 中声明: {normalized_module}.{resource_pool}"
-                )
-            raise InvalidJobConfigurationError(
-                f"module.yaml.resource_pools 未声明资源池，不能引用: {normalized_module}.{resource_pool}"
-            )
-
-    @staticmethod
-    def _validate_service_select_wait_semantics(job: Job, run_profile) -> None:
-        if job.type != JobType.SERVICE:
-            return
-
-        acquisition = run_profile.resource.acquisition if run_profile.resource else None
-        if not acquisition or acquisition.mode != AcquisitionMode.SELECT:
-            return
-
-        selector_name = str(acquisition.selector_name or "").strip()
-        resource_pool = str(acquisition.resource_pool or "").strip()
-        if not selector_name or resource_pool:
-            return
-
-        module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
-        if not module_name:
-            return
-
-        normalized_module = normalize_resource_pool_module_name(module_name)
-        try:
-            selector_infos = list(get_module_service().list_env_selectors(normalized_module))
-        except Exception as exc:
-            raise InvalidJobConfigurationError(
-                f"无法校验环境选择器是否允许空返回: {normalized_module}.{selector_name}"
-            ) from exc
-
-        info = next((item for item in selector_infos if item.name == selector_name), None)
-        if info is None:
-            raise InvalidJobConfigurationError(
-                f"未找到环境选择器定义: {normalized_module}.{selector_name}"
-            )
-
-        if selector_returns_none(selector_infos, selector_name):
-            raise InvalidJobConfigurationError(
-                f"Service Job 使用会返回 none 的环境选择器时必须配置 resource_pool: {module_name}.{selector_name}"
-            )
+        descriptor = get_module_service().get_runtime_descriptor_v2(module_name)
+        if candidates_name not in descriptor.env_candidates:
+            raise InvalidJobConfigurationError(f"env_candidates 未声明: {module_name}.{candidates_name}")
 
     async def _pause_job_after_invalid_precheck(self, job: Job, error: Exception, *, source: str) -> bool:
         if not isinstance(error, InvalidJobConfigurationError):
@@ -209,8 +145,7 @@ class JobController:
         runtime_timeout: int | None = None,
     ):
         run_profile = resolve_job_run_profile(job)
-        self._validate_resource_pool_declaration(run_profile)
-        self._validate_service_select_wait_semantics(job, run_profile)
+        self._validate_candidates_declaration(run_profile)
         module_name = str(run_profile.execution.module or "").strip() if run_profile.execution else ""
         if module_name:
             assert_module_upgrade_unlocked(module_name)
@@ -246,7 +181,7 @@ class JobController:
         ]
         if waiting_tasks:
             logger.info(
-                "[ATM] Preserving %s fixed-pool waiting tasks across restart recovery.",
+                "[ATM] Preserving %s env-candidate waiting tasks across restart recovery.",
                 len(waiting_tasks),
             )
         if not stuck_tasks:
@@ -307,7 +242,8 @@ class JobController:
                     return
                 job = persisted_job
 
-            await self._fail_expired_fixed_pool_waiting_tasks(job)
+            await self._fail_expired_candidate_waiting_tasks(job)
+            await self._resume_candidate_waiting_tasks(job)
 
             current_count = await self.repo.count_active_tasks(job.id)
             target = job.concurrency_target
@@ -324,7 +260,6 @@ class JobController:
                 logger.debug(f"[ATM] Job {job.id} scaling up: {current_count} -> {target} (+{needed})")
                 for _ in range(needed):
                     await self.dispatcher.dispatch(job)
-            await self._resume_fixed_pool_waiting_tasks(job)
 
     async def _on_batch_cron_fire(self, job_id: str):
         """Cron 触发批次执行：上一批未结束则跳过。"""
@@ -466,8 +401,6 @@ class JobController:
         self._event_bus.subscribe(EventType.TASK_FINISHED, self._on_task_terminal_event)
         self._event_bus.subscribe(EventType.TASK_FAILED, self._on_task_terminal_event)
         self._event_bus.subscribe(EventType.TASK_CANCELLED, self._on_task_terminal_event)
-        if hasattr(EventType, "ENV_RESOURCE_POOL_UPDATED"):
-            self._event_bus.subscribe(EventType.ENV_RESOURCE_POOL_UPDATED, self._on_resource_pool_updated_event)
         self._event_handlers_registered = True
 
     def _unsubscribe_task_events(self):
@@ -476,8 +409,6 @@ class JobController:
         self._event_bus.unsubscribe(EventType.TASK_FINISHED, self._on_task_terminal_event)
         self._event_bus.unsubscribe(EventType.TASK_FAILED, self._on_task_terminal_event)
         self._event_bus.unsubscribe(EventType.TASK_CANCELLED, self._on_task_terminal_event)
-        if hasattr(EventType, "ENV_RESOURCE_POOL_UPDATED"):
-            self._event_bus.unsubscribe(EventType.ENV_RESOURCE_POOL_UPDATED, self._on_resource_pool_updated_event)
         self._event_handlers_registered = False
 
     def _on_task_terminal_event(self, event: Event):
@@ -536,30 +467,7 @@ class JobController:
             except Exception as e:
                 logger.error(f"[ATM] Failed to reconcile service job {job.id} on periodic tick: {e}")
 
-    def _on_resource_pool_updated_event(self, event: Event):
-        if not self._running:
-            return
-        module_name = str(event.data.get("module_name", "")).strip()
-        pool_name = str(event.data.get("pool_name", "")).strip()
-        if not module_name or not pool_name:
-            return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        loop.create_task(self._reconcile_resource_pool_jobs(module_name, pool_name))
-
-    async def _reconcile_resource_pool_jobs(self, module_name: str, pool_name: str):
-        jobs = await self.repo.list_active_jobs()
-        for job in jobs:
-            binding = self._fixed_pool_binding(job)
-            if not binding:
-                continue
-            if binding != (normalize_resource_pool_module_name(module_name), pool_name):
-                continue
-            await self._reconcile_service_job(job)
-
-    def _fixed_pool_binding(self, job: Job) -> tuple[str, str] | None:
+    def _candidate_binding(self, job: Job) -> tuple[str, str, dict] | None:
         if job.type != JobType.SERVICE:
             return None
         try:
@@ -569,23 +477,105 @@ class JobController:
         if not run_profile.execution or not run_profile.execution.module:
             return None
         acquisition = run_profile.resource.acquisition
-        resource_pool = str(acquisition.resource_pool or "").strip()
-        if acquisition.mode != AcquisitionMode.SELECT or not resource_pool:
+        candidates_name = str(acquisition.candidates or "").strip()
+        if acquisition.mode != AcquisitionMode.SELECT or not candidates_name:
             return None
-        module_name = normalize_resource_pool_module_name(run_profile.execution.module)
+        module_name = str(run_profile.execution.module or "").strip()
         if not module_name:
             return None
-        return module_name, resource_pool
+        return module_name, candidates_name, dict(acquisition.candidate_params)
 
-    async def _count_fixed_pool_capacity(self, job: Job) -> int:
-        binding = self._fixed_pool_binding(job)
+    async def _count_candidate_capacity(self, job: Job) -> int:
+        binding = self._candidate_binding(job)
         if not binding:
             return 0
-        module_name, pool_name = binding
-        return await self.rem.count_allocatable_envs(module_name, pool_name)
+        module_name, candidates_name, candidate_params = binding
+        run_profile = resolve_job_run_profile(job)
+        context = self._build_candidate_context(job, run_profile, module_name, candidates_name, candidate_params)
+        service = get_module_service()
+        try:
+            resolver = getattr(service, "resolve_env_candidates_async", None)
+            if callable(resolver):
+                candidate_ids = await resolver(
+                    module_name,
+                    context,
+                    candidates_name,
+                    candidate_params,
+                    timeout=CANDIDATE_EVALUATION_TIMEOUT_SECONDS,
+                )
+            else:
+                candidate_ids = service.resolve_env_candidates(
+                    module_name,
+                    context,
+                    candidates_name,
+                    candidate_params,
+                )
+        except Exception as exc:
+            logger.warning(f"[ATM] Failed to evaluate env candidates {module_name}.{candidates_name}: {exc}")
+            return 0
+        wanted = {int(env_id) for env_id in candidate_ids}
+        capacity = 0
+        for env in await self.rem.list_envs():
+            if int(env.id) not in wanted:
+                continue
+            if str(getattr(getattr(env, "kind", None), "value", getattr(env, "kind", ""))) != "browser":
+                continue
+            if str(getattr(getattr(env, "status", None), "value", getattr(env, "status", ""))) != "ready":
+                continue
+            if getattr(env, "lease_id", None):
+                continue
+            if not await self._is_env_candidate_authorized(int(env.id), module_name):
+                continue
+            capacity += 1
+        return capacity
 
-    async def _fail_expired_fixed_pool_waiting_tasks(self, job: Job) -> None:
-        binding = self._fixed_pool_binding(job)
+    def _build_candidate_context(
+        self,
+        job: Job,
+        run_profile,
+        module_name: str,
+        candidates_name: str,
+        candidate_params: dict,
+    ) -> TaskContext:
+        execution = run_profile.execution
+        acquisition = run_profile.resource.acquisition
+        workflow_name = execution.workflow
+        task_config = get_module_settings_store().build_task_config(module_name, workflow_name)
+        caps = build_runtime_capabilities(module_name, surface=RUNTIME_SURFACE_ENV_CANDIDATES)
+        runtime = {
+            "module_name": module_name,
+            "workflow": workflow_name,
+            "devel_mode": False,
+            "object_bindings": deepcopy(execution.object_bindings),
+            "object_params": deepcopy(execution.object_params),
+            "provider_name": acquisition.provider,
+            "fixed_env_id": acquisition.env_id,
+            "candidates": candidates_name,
+            "candidate_params": deepcopy(candidate_params),
+            "acquisition_mode": acquisition.mode.value,
+            "wait_timeout": acquisition.wait_timeout,
+            "wait_for_resource": True,
+            "creation_params": deepcopy(acquisition.creation.params),
+            "execution_timeout": execution.timeout,
+        }
+        return TaskContext(
+            env_id=0,
+            task_name=module_name,
+            config=deepcopy(task_config),
+            tools=caps.tools,
+            db=caps.db,
+            state={"job_id": job.id},
+            runtime=runtime,
+        )
+
+    async def _is_env_candidate_authorized(self, env_id: int, module_name: str) -> bool:
+        claim = await get_env_claim(self.rem, int(env_id))
+        if claim.owner_module != module_name or claim.state != CLAIM_CLAIMED:
+            return False
+        return is_env_bound_by_module(int(env_id), module_name, module_service=get_module_service())
+
+    async def _fail_expired_candidate_waiting_tasks(self, job: Job) -> None:
+        binding = self._candidate_binding(job)
         if not binding or not hasattr(self.repo, "get_oldest_waiting_tasks_before"):
             return
 
@@ -593,7 +583,7 @@ class JobController:
         if wait_timeout <= 0:
             return
 
-        pool_name = binding[1]
+        candidates_name = binding[1]
         expired_tasks = await self.repo.get_oldest_waiting_tasks_before(
             job.id,
             [TaskStatus.PENDING],
@@ -613,20 +603,20 @@ class JobController:
 
         failed_tasks = await self.repo.mark_tasks_failed(
             expired_task_ids,
-            f"等待环境池工位超时: {pool_name} ({wait_timeout}s)",
+            f"等待环境候选超时: {candidates_name} ({wait_timeout}s)",
         )
         for task in failed_tasks:
             self._publish_task_terminal_event(task)
 
-    async def _resume_fixed_pool_waiting_tasks(self, job: Job) -> None:
-        binding = self._fixed_pool_binding(job)
+    async def _resume_candidate_waiting_tasks(self, job: Job) -> None:
+        binding = self._candidate_binding(job)
         if not binding:
             return
 
-        capacity = await self._count_fixed_pool_capacity(job)
+        capacity = await self._count_candidate_capacity(job)
         running_like_count = await self.repo.count_tasks_by_statuses(
             job.id,
-            [TaskStatus.RUNNING, TaskStatus.WAITING_CONFIRMATION],
+            [TaskStatus.RUNNING],
         )
         remaining_target = job.concurrency_target - running_like_count
         resumable = min(max(remaining_target, 0), capacity)

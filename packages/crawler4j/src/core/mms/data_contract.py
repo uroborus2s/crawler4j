@@ -13,7 +13,6 @@ _RESOURCE_STORAGE_MODES = {"managed_dataset", "custom_table"}
 _RESOURCE_CLEANUP_POLICIES = {"delete_rows", "drop_table", "keep"}
 _VIEW_CLEANUP_POLICIES = {"drop_view", "keep"}
 _COLUMN_TYPES = {"text", "int", "number", "bool", "json"}
-_QUERY_PARAM_TYPES = {"text", "int", "number", "bool", "json"}
 _BLOCKED_SQL_RE = re.compile(
     r"\b(insert|update|delete|drop|alter|attach|detach|pragma|create|replace)\b",
     re.IGNORECASE,
@@ -45,33 +44,50 @@ def _normalize_list(raw: Any, *, field_name: str) -> list[Any]:
     return list(raw)
 
 
-def _normalize_column(raw: Any, *, field_name: str) -> dict[str, Any]:
+def _normalize_column(raw: Any, *, field_name: str, allow_auto_increment: bool = False) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError(f"{field_name} 中的每一项都必须是对象")
+    allowed_keys = {"name", "key", "type", "nullable", "required"}
+    if allow_auto_increment:
+        allowed_keys.add("auto_increment")
+    unknown_keys = sorted(set(raw) - allowed_keys)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
     name = _normalize_identifier(raw.get("name") or raw.get("key"), field_name=f"{field_name}.name")
     column_type = str(raw.get("type") or "text").strip().lower()
     if column_type not in _COLUMN_TYPES:
         raise ValueError(f"{field_name}.{name}.type 不支持: {column_type}")
-    default_filterable = column_type != "json"
-    default_sortable = column_type != "json"
-    return {
+    column = {
         "name": name,
         "type": column_type,
         "nullable": bool(raw.get("nullable")) if "nullable" in raw else not bool(raw.get("required")),
-        "filterable": bool(raw.get("filterable")) if "filterable" in raw else default_filterable,
-        "sortable": bool(raw.get("sortable")) if "sortable" in raw else default_sortable,
     }
+    if allow_auto_increment and bool(raw.get("auto_increment")):
+        column["auto_increment"] = True
+    return column
 
 
 def _normalize_custom_table_schema(raw: Any, *, record_key_field: str) -> dict[str, Any]:
     schema = _normalize_mapping(raw, field_name="data.resources[].schema")
     raw_columns = _normalize_list(schema.get("columns"), field_name="data.resources[].schema.columns")
-    columns = [_normalize_column(item, field_name="data.resources[].schema.columns") for item in raw_columns]
+    columns = [
+        _normalize_column(item, field_name="data.resources[].schema.columns", allow_auto_increment=True)
+        for item in raw_columns
+    ]
     if not columns:
         raise ValueError("custom_table 资源必须声明 schema.columns")
     column_names = {column["name"] for column in columns}
     if record_key_field not in column_names:
         raise ValueError(f"custom_table 资源必须包含主键列: {record_key_field}")
+    auto_increment_columns = [column for column in columns if column.get("auto_increment")]
+    if auto_increment_columns:
+        if len(auto_increment_columns) > 1:
+            raise ValueError("custom_table 资源最多只能声明一个 auto_increment 字段")
+        auto_increment_column = auto_increment_columns[0]
+        if auto_increment_column["name"] != record_key_field:
+            raise ValueError("custom_table auto_increment 字段必须是 record_key_field")
+        if auto_increment_column["type"] != "int":
+            raise ValueError("custom_table auto_increment record_key_field 必须是 int")
     normalized_columns: list[dict[str, Any]] = []
     for column in columns:
         payload = dict(column)
@@ -91,12 +107,17 @@ def _normalize_custom_table_schema(raw: Any, *, record_key_field: str) -> dict[s
 def _normalize_resource_schema(raw: Any, *, record_key_field: str) -> dict[str, Any]:
     schema = _normalize_mapping(raw, field_name="data.resources[].schema")
     raw_columns = _normalize_list(schema.get("columns"), field_name="data.resources[].schema.columns")
-    columns = [_normalize_column(item, field_name="data.resources[].schema.columns") for item in raw_columns]
+    columns = [
+        _normalize_column(item, field_name="data.resources[].schema.columns", allow_auto_increment=True)
+        for item in raw_columns
+    ]
     if not columns:
         raise ValueError("data.resources[].schema.columns 不能为空")
     column_names = {column["name"] for column in columns}
     if record_key_field not in column_names:
         raise ValueError(f"data.resources[].schema.columns 必须包含主键列: {record_key_field}")
+    if any(column.get("auto_increment") for column in columns):
+        raise ValueError("managed_dataset 不支持 auto_increment 字段")
     normalized_columns: list[dict[str, Any]] = []
     for column in columns:
         payload = dict(column)
@@ -177,9 +198,11 @@ def _normalize_resource_entry(raw: Any) -> dict[str, Any]:
         raw.get("record_key_field") or "id",
         field_name=f"data.resources[{resource_id}].record_key_field",
     )
-    cleanup_policy = str(
-        raw.get("cleanup_policy") or ("delete_rows" if storage_mode == "managed_dataset" else "drop_table")
-    ).strip().lower()
+    cleanup_policy = (
+        str(raw.get("cleanup_policy") or ("delete_rows" if storage_mode == "managed_dataset" else "drop_table"))
+        .strip()
+        .lower()
+    )
     if cleanup_policy not in _RESOURCE_CLEANUP_POLICIES:
         raise ValueError(f"data.resources[{resource_id}].cleanup_policy 不支持: {cleanup_policy}")
 
@@ -220,6 +243,7 @@ def _normalize_view_entry(raw: Any) -> dict[str, Any]:
         "view_kind",
         "source_resource_ids",
         "sql_file",
+        "sql",
         "columns",
         "cleanup_policy",
         "schema_version",
@@ -234,13 +258,16 @@ def _normalize_view_entry(raw: Any) -> dict[str, Any]:
         raise ValueError(f"data.views[{view_id}].view_kind 只支持 sql_view")
     source_resource_ids = [
         _normalize_identifier(item, field_name=f"data.views[{view_id}].source_resource_ids")
-        for item in _normalize_list(raw.get("source_resource_ids"), field_name=f"data.views[{view_id}].source_resource_ids")
+        for item in _normalize_list(
+            raw.get("source_resource_ids"), field_name=f"data.views[{view_id}].source_resource_ids"
+        )
     ]
     if not source_resource_ids:
         raise ValueError(f"data.views[{view_id}].source_resource_ids 不能为空")
     sql_file = str(raw.get("sql_file") or "").strip()
-    if not sql_file:
-        raise ValueError(f"data.views[{view_id}].sql_file 不能为空")
+    sql = str(raw.get("sql") or "").strip()
+    if not sql_file and not sql:
+        raise ValueError(f"data.views[{view_id}].sql_file 或 sql 不能为空")
     columns = [
         _normalize_column(item, field_name=f"data.views[{view_id}].columns")
         for item in _normalize_list(raw.get("columns"), field_name=f"data.views[{view_id}].columns")
@@ -261,65 +288,10 @@ def _normalize_view_entry(raw: Any) -> dict[str, Any]:
         "view_kind": view_kind,
         "source_resource_ids": source_resource_ids,
         "sql_file": sql_file,
+        "sql": sql,
         "columns": columns,
         "cleanup_policy": cleanup_policy,
         "schema_version": schema_version,
-    }
-
-
-def _normalize_query_params(raw: Any, *, query_id: str) -> list[dict[str, Any]]:
-    params = _normalize_list(raw, field_name=f"data.queries[{query_id}].params")
-    normalized: list[dict[str, Any]] = []
-    seen_names: set[str] = set()
-    for item in params:
-        if not isinstance(item, dict):
-            raise ValueError(f"data.queries[{query_id}].params 中的每一项都必须是对象")
-        allowed_keys = {"name", "type", "required"}
-        unknown_keys = sorted(set(item) - allowed_keys)
-        if unknown_keys:
-            raise ValueError(
-                f"data.queries[{query_id}].params 包含不支持的字段: " + ", ".join(unknown_keys)
-            )
-        name = _normalize_identifier(item.get("name"), field_name=f"data.queries[{query_id}].params[].name")
-        if name in seen_names:
-            raise ValueError(f"data.queries[{query_id}].params 参数重复: {name}")
-        seen_names.add(name)
-        param_type = str(item.get("type") or "text").strip().lower()
-        if param_type not in _QUERY_PARAM_TYPES:
-            raise ValueError(f"data.queries[{query_id}].params[{name}].type 不支持: {param_type}")
-        normalized.append({"name": name, "type": param_type, "required": bool(item.get("required", True))})
-    return normalized
-
-
-def _normalize_query_entry(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValueError("data.queries 中的每一项都必须是对象")
-    allowed_keys = {"id", "source_resource_ids", "sql_file", "params", "columns"}
-    unknown_keys = sorted(set(raw) - allowed_keys)
-    if unknown_keys:
-        raise ValueError("data.queries 包含不支持的字段: " + ", ".join(unknown_keys))
-    query_id = _normalize_identifier(raw.get("id"), field_name="data.queries[].id")
-    source_resource_ids = [
-        _normalize_identifier(item, field_name=f"data.queries[{query_id}].source_resource_ids")
-        for item in _normalize_list(raw.get("source_resource_ids"), field_name=f"data.queries[{query_id}].source_resource_ids")
-    ]
-    if not source_resource_ids:
-        raise ValueError(f"data.queries[{query_id}].source_resource_ids 不能为空")
-    sql_file = str(raw.get("sql_file") or "").strip()
-    if not sql_file:
-        raise ValueError(f"data.queries[{query_id}].sql_file 不能为空")
-    columns = [
-        _normalize_column(item, field_name=f"data.queries[{query_id}].columns")
-        for item in _normalize_list(raw.get("columns"), field_name=f"data.queries[{query_id}].columns")
-    ]
-    if not columns:
-        raise ValueError(f"data.queries[{query_id}].columns 不能为空")
-    return {
-        "query_id": query_id,
-        "source_resource_ids": source_resource_ids,
-        "sql_file": sql_file,
-        "params": _normalize_query_params(raw.get("params"), query_id=query_id),
-        "columns": columns,
     }
 
 
@@ -352,29 +324,27 @@ def _normalize_seed_entry(raw: Any) -> dict[str, Any]:
 
 def normalize_manifest_data(raw: Any) -> dict[str, Any]:
     if raw is None:
-        return {"resources": [], "views": [], "queries": [], "seeds": []}
+        return {"resources": [], "views": [], "seeds": []}
     if not isinstance(raw, dict):
         raise ValueError("data 必须是 YAML 映射对象")
-    allowed_keys = {"resources", "views", "queries", "seeds"}
+    allowed_keys = {"resources", "views", "seeds"}
     unknown_keys = sorted(set(raw) - allowed_keys)
     if unknown_keys:
         raise ValueError("data 包含不支持的字段: " + ", ".join(unknown_keys))
 
-    resources = [_normalize_resource_entry(item) for item in _normalize_list(raw.get("resources"), field_name="data.resources")]
+    resources = [
+        _normalize_resource_entry(item) for item in _normalize_list(raw.get("resources"), field_name="data.resources")
+    ]
     views = [_normalize_view_entry(item) for item in _normalize_list(raw.get("views"), field_name="data.views")]
-    queries = [_normalize_query_entry(item) for item in _normalize_list(raw.get("queries"), field_name="data.queries")]
     seeds = [_normalize_seed_entry(item) for item in _normalize_list(raw.get("seeds"), field_name="data.seeds")]
 
     resource_ids = {item["resource_id"] for item in resources}
     view_ids = {item["view_id"] for item in views}
-    query_ids = {item["query_id"] for item in queries}
     seed_ids = {item["seed_id"] for item in seeds}
     if len(resource_ids) != len(resources):
         raise ValueError("data.resources[].id 不能重复")
     if len(view_ids) != len(views):
         raise ValueError("data.views[].id 不能重复")
-    if len(query_ids) != len(queries):
-        raise ValueError("data.queries[].id 不能重复")
     if len(seed_ids) != len(seeds):
         raise ValueError("data.seeds[].id 不能重复")
     duplicated_sources = sorted(resource_ids & view_ids)
@@ -388,23 +358,27 @@ def normalize_manifest_data(raw: Any) -> dict[str, Any]:
             if target is None:
                 raise ValueError(f"data.resources[{resource['resource_id']}].joins 引用了未声明资源: {join['target']}")
             if target["storage_mode"] != "custom_table":
-                raise ValueError(f"data.resources[{resource['resource_id']}].joins 只允许连接 custom_table: {join['target']}")
+                raise ValueError(
+                    f"data.resources[{resource['resource_id']}].joins 只允许连接 custom_table: {join['target']}"
+                )
             left_columns = {column["name"] for column in resource["schema"]["columns"]}
             right_columns = {column["name"] for column in target["schema"]["columns"]}
             for pair in join["on"]:
                 if pair["left"] not in left_columns:
-                    raise ValueError(f"data.resources[{resource['resource_id']}].joins 引用了未声明字段: {pair['left']}")
+                    raise ValueError(
+                        f"data.resources[{resource['resource_id']}].joins 引用了未声明字段: {pair['left']}"
+                    )
                 if pair["right"] not in right_columns:
-                    raise ValueError(f"data.resources[{resource['resource_id']}].joins 引用了目标未声明字段: {pair['right']}")
+                    raise ValueError(
+                        f"data.resources[{resource['resource_id']}].joins 引用了目标未声明字段: {pair['right']}"
+                    )
 
     for view in views:
         for resource_id in view["source_resource_ids"]:
             if resource_id not in resource_ids:
                 raise ValueError(f"data.views[{view['view_id']}] 引用了未声明资源: {resource_id}")
-    for query in queries:
-        for resource_id in query["source_resource_ids"]:
-            if resource_id not in resource_ids:
-                raise ValueError(f"data.queries[{query['query_id']}] 引用了未声明资源: {resource_id}")
+            if resource_map[resource_id]["storage_mode"] != "custom_table":
+                raise ValueError(f"data.views[{view['view_id']}] 只允许引用 custom_table: {resource_id}")
     for seed in seeds:
         if seed["resource_id"] not in resource_ids:
             raise ValueError(f"data.seeds[{seed['seed_id']}] 引用了未声明资源: {seed['resource_id']}")
@@ -412,7 +386,6 @@ def normalize_manifest_data(raw: Any) -> dict[str, Any]:
     return {
         "resources": resources,
         "views": views,
-        "queries": queries,
         "seeds": seeds,
     }
 

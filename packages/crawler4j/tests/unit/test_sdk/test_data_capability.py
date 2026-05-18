@@ -15,11 +15,6 @@ class _FakeTools:
         self.available_tools = available_tools or {
             "captcha.match_slider",
             "env.set_proxy",
-            "env.bind_resource_pool",
-            "env.mark_resource_pool_eligible",
-            "env.mark_resource_pool_ineligible",
-            "env.remove_resource_pool",
-            "env.replace_resource_pool_snapshot",
         }
 
     def has_tool(self, tool_name: str) -> bool:
@@ -28,11 +23,6 @@ class _FakeTools:
     def list_tools(self) -> list[ToolSpec]:
         specs = [
             ToolSpec(name="captcha.match_slider", description="识别滑块验证码缺口位置"),
-            ToolSpec(name="env.bind_resource_pool", description="登记环境资源池资格", is_async=True),
-            ToolSpec(name="env.mark_resource_pool_eligible", description="标记环境可接单", is_async=True),
-            ToolSpec(name="env.mark_resource_pool_ineligible", description="标记环境不可接单", is_async=True),
-            ToolSpec(name="env.remove_resource_pool", description="移除环境资源池资格", is_async=True),
-            ToolSpec(name="env.replace_resource_pool_snapshot", description="重建环境资源池资格快照", is_async=True),
             ToolSpec(name="env.set_proxy", description="为当前环境设置代理", is_async=True),
         ]
         return [spec for spec in specs if spec.name in self.available_tools]
@@ -52,6 +42,8 @@ class _FakeDbExecutor:
         return {
             "source": source,
             "source_kind": "relation",
+            "storage_mode": "custom_table",
+            "record_key_field": "account_id",
             "columns": [
                 {"name": "account_id", "type": "text"},
                 {"name": "amount", "type": "number"},
@@ -96,7 +88,8 @@ def test_task_context_db_fluent_api_builds_select_query_plan():
     rows = (
         ctx.db.from_("billing_entries")
         .join("account_profiles", on={"account_id": "account_id"}, how="left")
-        .where("status", "eq", "done")
+        .where(["status", "=", "done"])
+        .where(["or", ["account_id", "=", "A001"], ["account_id", "=", "A002"]])
         .group_by("account_id")
         .sum("amount", alias="total_amount")
         .count(alias="total_count")
@@ -122,13 +115,52 @@ def test_task_context_db_fluent_api_builds_select_query_plan():
                 {"kind": "aggregate", "func": "sum", "field": "amount", "alias": "total_amount"},
                 {"kind": "aggregate", "func": "count", "field": "*", "alias": "total_count"},
             ],
-            "where": [{"field": "status", "op": "eq", "value": "done"}],
+            "where": [
+                {"field": "status", "op": "eq", "value": "done"},
+                {
+                    "kind": "group",
+                    "operator": "or",
+                    "conditions": [
+                        {"field": "account_id", "op": "eq", "value": "A001"},
+                        {"field": "account_id", "op": "eq", "value": "A002"},
+                    ],
+                },
+            ],
             "group_by": ["account_id"],
             "order_by": [{"field": "total_amount", "direction": "desc"}],
             "limit": 20,
-            "offset": 0,
+            "offset": None,
         }
     ]
+
+
+def test_task_context_db_select_plan_leaves_pagination_absent_until_called():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.from_("billing_entries").execute()
+    ctx.db.from_("billing_entries").limit(20).execute()
+    ctx.db.from_("billing_entries").offset(10).execute()
+
+    assert executor.plans[0]["limit"] is None
+    assert executor.plans[0]["offset"] is None
+    assert executor.plans[1]["limit"] == 20
+    assert executor.plans[1]["offset"] is None
+    assert executor.plans[2]["limit"] is None
+    assert executor.plans[2]["offset"] == 10
+
+
+def test_task_context_db_describe_returns_host_descriptor():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    descriptor = ctx.db.describe("billing_entries")
+
+    assert descriptor["source"] == "billing_entries"
+    assert descriptor["source_kind"] == "relation"
+    assert descriptor["columns"][0] == {"name": "account_id", "type": "text"}
+    assert executor.described == ["billing_entries"]
+    assert executor.plans == []
 
 
 @pytest.mark.parametrize(
@@ -151,24 +183,215 @@ def test_task_context_db_aggregate_uses_default_alias(method_name, expected_alia
     ]
 
 
-def test_task_context_db_supports_named_query_and_replace_plan():
+def test_task_context_db_select_accepts_field_array_and_nested_where_plan():
     executor = _FakeDbExecutor()
     ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
 
-    ctx.db.named("top_accounts").bind(start_date="2026-04-01").execute()
+    ctx.db.from_("billing_entries").select(["account_id", "status"]).where(
+        ["and", ["amount", ">", 10], ["or", ["status", "=", "ready"], ["status", "=", "pending"]]]
+    ).execute()
+
+    assert executor.plans[0]["select"] == [
+        {"kind": "column", "field": "account_id"},
+        {"kind": "column", "field": "status"},
+    ]
+    assert executor.plans[0]["where"] == [
+        {"field": "amount", "op": "gt", "value": 10},
+        {
+            "kind": "group",
+            "operator": "or",
+            "conditions": [
+                {"field": "status", "op": "eq", "value": "ready"},
+                {"field": "status", "op": "eq", "value": "pending"},
+            ],
+        },
+    ]
+
+
+def test_task_context_db_supports_view_select_and_replace_plan():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.from_("account_overview").select(["account_id"]).where(["status", "=", "ready"]).execute()
     ctx.db.into("accounts").replace([{"account_id": "A001", "status": "ready"}])
 
     assert executor.plans == [
         {
-            "kind": "named_query",
-            "query_id": "top_accounts",
-            "params": {"start_date": "2026-04-01"},
+            "kind": "select",
+            "base": {"source": "account_overview"},
+            "joins": [],
+            "select": [{"kind": "column", "field": "account_id"}],
+            "where": [{"field": "status", "op": "eq", "value": "ready"}],
+            "group_by": [],
+            "order_by": [],
+            "limit": None,
+            "offset": None,
         },
         {
             "kind": "replace_records",
             "resource": "accounts",
             "records": [{"account_id": "A001", "status": "ready"}],
         },
+    ]
+
+
+def test_task_context_db_supports_concurrency_safe_write_plans():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.into("accounts").add([{"status": "new"}])
+    ctx.db.into("accounts").upsert([{"account_id": "A001", "status": "ready"}])
+    ctx.db.into("accounts").update_where({"status": "used"}, where=["account_id", "=", "A001"])
+    ctx.db.into("accounts").delete_where(where=["status", "=", "expired"])
+
+    assert executor.plans == [
+        {
+            "kind": "add_records",
+            "resource": "accounts",
+            "records": [{"status": "new"}],
+        },
+        {
+            "kind": "upsert_records",
+            "resource": "accounts",
+            "records": [{"account_id": "A001", "status": "ready"}],
+        },
+        {
+            "kind": "update_records",
+            "resource": "accounts",
+            "fields": {"status": "used"},
+            "where": [{"field": "account_id", "op": "eq", "value": "A001"}],
+        },
+        {
+            "kind": "delete_records",
+            "resource": "accounts",
+            "where": [{"field": "status", "op": "eq", "value": "expired"}],
+        },
+    ]
+
+
+def test_task_context_db_writer_where_accepts_query_builder_callable():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.into("accounts").update_where(
+        {"status": "used"},
+        where=lambda query: query.where("account_id", "=", "A001"),
+    )
+    ctx.db.into("accounts").delete_where(
+        where=lambda query: query.where(["or", ["status", "=", "expired"], ["amount", ">", 100]]),
+    )
+
+    assert executor.described == []
+    assert executor.plans == [
+        {
+            "kind": "update_records",
+            "resource": "accounts",
+            "fields": {"status": "used"},
+            "where": [{"field": "account_id", "op": "eq", "value": "A001"}],
+        },
+        {
+            "kind": "delete_records",
+            "resource": "accounts",
+            "where": [
+                {
+                    "kind": "group",
+                    "operator": "or",
+                    "conditions": [
+                        {"field": "status", "op": "eq", "value": "expired"},
+                        {"field": "amount", "op": "gt", "value": 100},
+                    ],
+                }
+            ],
+        },
+    ]
+
+
+def test_task_context_db_writer_where_callable_must_add_conditions():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    with pytest.raises(ValueError, match="where callable must add at least one condition"):
+        ctx.db.into("accounts").delete_where(where=lambda query: query)
+
+
+def test_task_context_db_delete_where_accepts_record_key_value():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.into("accounts").delete_where(where="A001")
+    ctx.db.batch().delete_where("accounts", where="A002").execute()
+
+    assert executor.described == ["accounts", "accounts"]
+    assert executor.plans == [
+        {
+            "kind": "delete_records",
+            "resource": "accounts",
+            "where": [{"field": "account_id", "op": "eq", "value": "A001"}],
+        },
+        {
+            "kind": "batch",
+            "operations": [
+                {
+                    "kind": "delete_records",
+                    "resource": "accounts",
+                    "where": [{"field": "account_id", "op": "eq", "value": "A002"}],
+                }
+            ],
+        },
+    ]
+
+
+def test_task_context_db_supports_batch_write_plan():
+    executor = _FakeDbExecutor()
+    ctx = TaskContext(env_id=1, task_name="demo", db=TaskContext(0, "inner").db.bind(executor))
+
+    ctx.db.batch().add("accounts", [{"status": "new"}]).upsert(
+        "accounts",
+        [{"account_id": "A001", "status": "ready"}],
+    ).update_where(
+        "accounts",
+        {"status": "used"},
+        where=lambda query: query.where("account_id", "=", "A001"),
+    ).delete_where(
+        "accounts",
+        where=["status", "=", "expired"],
+    ).audit(
+        "account_events",
+        {"entity_key": "A001", "event_type": "status_changed"},
+    ).execute()
+
+    assert executor.plans == [
+        {
+            "kind": "batch",
+            "operations": [
+                {
+                    "kind": "add_records",
+                    "resource": "accounts",
+                    "records": [{"status": "new"}],
+                },
+                {
+                    "kind": "upsert_records",
+                    "resource": "accounts",
+                    "records": [{"account_id": "A001", "status": "ready"}],
+                },
+                {
+                    "kind": "update_records",
+                    "resource": "accounts",
+                    "fields": {"status": "used"},
+                    "where": [{"field": "account_id", "op": "eq", "value": "A001"}],
+                },
+                {
+                    "kind": "delete_records",
+                    "resource": "accounts",
+                    "where": [{"field": "status", "op": "eq", "value": "expired"}],
+                },
+                {
+                    "kind": "append_audit_event",
+                    "dataset": "account_events",
+                    "event": {"entity_key": "A001", "event_type": "status_changed"},
+                },
+            ],
+        }
     ]
 
 

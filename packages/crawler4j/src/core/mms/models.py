@@ -57,53 +57,7 @@ class DevModuleLink:
 
 @dataclass
 class WorkflowInfo:
-    """工作流信息。"""
-    name: str
-    display_name: str = ""
-    description: str = ""
-    tasks: list[str] = field(default_factory=list)
-    host_scenarios: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "display_name": self.display_name,
-            "description": self.description,
-            "tasks": self.tasks,
-            **({"host_scenarios": self.host_scenarios} if self.host_scenarios else {}),
-        }
-
-    @classmethod
-    def from_dict(cls, data: Any) -> "WorkflowInfo":
-        if not isinstance(data, dict):
-            raise ValueError("workflows 中的每一项都必须是 YAML 映射对象")
-        if "entry_class" in data:
-            raise ValueError("workflows 包含已移除字段: entry_class")
-
-        raw_tasks = data.get("tasks", [])
-        if raw_tasks is None:
-            raw_tasks = []
-        if not isinstance(raw_tasks, list):
-            raise ValueError("workflows.tasks 必须是数组")
-
-        raw_host_scenarios = data.get("host_scenarios", [])
-        if raw_host_scenarios is None:
-            raw_host_scenarios = []
-        if not isinstance(raw_host_scenarios, list):
-            raise ValueError("workflows.host_scenarios 必须是数组")
-
-        return cls(
-            name=str(data.get("name", "") or "").strip(),
-            display_name=str(data.get("display_name", "") or "").strip(),
-            description=str(data.get("description", "") or "").strip(),
-            tasks=[str(item) for item in raw_tasks],
-            host_scenarios=[str(item) for item in raw_host_scenarios],
-        )
-
-
-@dataclass
-class ResourcePoolInfo:
-    """模块声明的资源池。"""
+    """core-native-v2 descriptor 生成的工作流视图模型。"""
 
     name: str
     display_name: str = ""
@@ -115,27 +69,11 @@ class ResourcePoolInfo:
             "display_name": self.display_name,
             "description": self.description,
         }
-
-    @classmethod
-    def from_dict(cls, data: Any) -> "ResourcePoolInfo":
-        if not isinstance(data, dict):
-            raise ValueError("resource_pools 中的每一项都必须是 YAML 映射对象")
-
-        allowed_keys = {"name", "display_name", "description"}
-        unknown_keys = sorted(set(data) - allowed_keys)
-        if unknown_keys:
-            raise ValueError("resource_pools 包含不支持的字段: " + ", ".join(unknown_keys))
-
-        return cls(
-            name=str(data.get("name", "") or "").strip(),
-            display_name=str(data.get("display_name", "") or "").strip(),
-            description=str(data.get("description", "") or "").strip(),
-        )
 
 
 @dataclass
 class UIPageInfo:
-    """模块宿主页入口声明。"""
+    """宿主页导航视图模型。"""
 
     id: str
     icon: str = "📋"
@@ -151,55 +89,18 @@ class UIPageInfo:
     @classmethod
     def from_dict(cls, data: Any) -> "UIPageInfo":
         if not isinstance(data, dict):
-            raise ValueError("ui_extension.pages 中的每一项都必须是 YAML 映射对象")
+            raise ValueError("页面导航项必须是 YAML 映射对象")
 
         allowed_keys = {"id", "icon", "label"}
         unknown_keys = sorted(set(data) - allowed_keys)
         if unknown_keys:
-            raise ValueError(
-                "ui_extension.pages 包含不支持的字段: " + ", ".join(unknown_keys)
-            )
+            raise ValueError("页面导航项包含不支持的字段: " + ", ".join(unknown_keys))
 
         return cls(
             id=str(data.get("id", "") or "").strip(),
             icon=str(data.get("icon", "📋") or "📋").strip() or "📋",
             label=str(data.get("label", "") or "").strip(),
         )
-
-
-@dataclass
-class UIExtensionInfo:
-    """UI 扩展信息。
-
-    当前只保留宿主页入口列表契约。
-    """
-
-    pages: list[UIPageInfo] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "pages": [page.to_dict() for page in self.pages],
-        }
-
-    @classmethod
-    def from_dict(cls, data: Any) -> "UIExtensionInfo":
-        if data is None:
-            return cls()
-        if not isinstance(data, dict):
-            raise ValueError("ui_extension 必须是 YAML 映射对象")
-
-        allowed_keys = {"pages"}
-        unknown_keys = sorted(set(data) - allowed_keys)
-        if unknown_keys:
-            raise ValueError("ui_extension 包含不支持的字段: " + ", ".join(unknown_keys))
-
-        raw_pages = data.get("pages", [])
-        if raw_pages is None:
-            raw_pages = []
-        if not isinstance(raw_pages, list):
-            raise ValueError("ui_extension.pages 必须是数组")
-
-        return cls(pages=[UIPageInfo.from_dict(item) for item in raw_pages])
 
 
 @dataclass
@@ -291,12 +192,9 @@ class ModuleManifest:
     display_name: str = ""
     description: str = ""
     author: str = ""
-    workflows: list[WorkflowInfo] = field(default_factory=list)
-    default_workflow: str = ""
-    ui_extension: UIExtensionInfo = field(default_factory=UIExtensionInfo)
     config_defaults: ConfigDefaultsInfo = field(default_factory=ConfigDefaultsInfo)
     upgrade_source: UpgradeSourceInfo = field(default_factory=UpgradeSourceInfo)
-    resource_pools: list[ResourcePoolInfo] = field(default_factory=list)
+    # Runtime-derived data contract cache. It is not serialized back into module.yaml.
     data: dict[str, Any] = field(default_factory=lambda: normalize_manifest_data(None))
     
     def to_dict(self) -> dict[str, Any]:
@@ -309,31 +207,23 @@ class ModuleManifest:
             "description": self.description,
             "author": self.author,
             "upgrade_source": self.upgrade_source.to_dict(),
-            "workflows": [w.to_dict() for w in self.workflows],
-            "default_workflow": self.default_workflow,
-            "ui_extension": self.ui_extension.to_dict(),
             "config_defaults": self.config_defaults.to_dict(),
-            "resource_pools": [pool.to_dict() for pool in self.resource_pools],
-            "data": self.data,
         }
     
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ModuleManifest":
         """从字典反序列化。"""
-        workflows = []
-        for w in data.get("workflows", []):
-            workflows.append(WorkflowInfo.from_dict(w))
-        
-        ui_extension = UIExtensionInfo.from_dict(data.get("ui_extension"))
+        if "ui_extension" in data:
+            raise ValueError("ui_extension 已移除；页面请使用 @page(...) 装饰器声明")
+        if "resource_pools" in data:
+            raise ValueError("resource_pools 已移除；环境选择请使用 @env_candidates(...) 装饰器声明")
+        removed_v2_fields = {"workflows", "default_workflow", "data", "interfaces", "objects", "tasks"} & set(data)
+        if removed_v2_fields:
+            removed = ", ".join(sorted(removed_v2_fields))
+            raise ValueError(f"core-native-v2 不支持 module.yaml 字段: {removed}")
+
         config_defaults = ConfigDefaultsInfo.from_dict(data.get("config_defaults"))
         upgrade_source = UpgradeSourceInfo.from_dict(data.get("upgrade_source"))
-        raw_resource_pools = data.get("resource_pools", [])
-        if raw_resource_pools is None:
-            raw_resource_pools = []
-        if not isinstance(raw_resource_pools, list):
-            raise ValueError("resource_pools 必须是数组")
-        resource_pools = [ResourcePoolInfo.from_dict(item) for item in raw_resource_pools]
-        module_data = normalize_manifest_data(data.get("data"))
 
         return cls(
             name=data.get("name", ""),
@@ -342,13 +232,8 @@ class ModuleManifest:
             display_name=data.get("display_name", ""),
             description=data.get("description", ""),
             author=data.get("author", ""),
-            workflows=workflows,
-            default_workflow=data.get("default_workflow", ""),
-            ui_extension=ui_extension,
             config_defaults=config_defaults,
             upgrade_source=upgrade_source,
-            resource_pools=resource_pools,
-            data=module_data,
         )
 
 

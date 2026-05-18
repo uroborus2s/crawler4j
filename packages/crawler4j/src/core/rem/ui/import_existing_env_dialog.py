@@ -8,6 +8,7 @@ from typing import Any
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import QDialog, QFormLayout, QHBoxLayout, QLabel, QVBoxLayout
 
+from src.core.mms import get_module_registry
 from src.ui.components.button import StyledButton
 from src.ui.components.combo_box import StyledComboBox as QComboBox
 from src.ui.components.data_table import SkyDataTable
@@ -24,7 +25,7 @@ class ImportExistingEnvDialog(QDialog):
     RISK_CONTENT_PADDING = (12, 10, 12, 10)
     TABLE_SCHEMA = {
         "columns": [
-            {"key": "name", "label": "环境名称", "type": "text", "width": 180},
+            {"key": "name", "label": "环境名称", "type": "text", "width": 180, "sortable": True},
             {"key": "external_id", "label": "外部 ID", "type": "text", "width": 130},
             {"key": "remark", "label": "备注", "type": "text", "width": 150},
             {"key": "proxy_summary", "label": "代理/IP 摘要", "type": "text", "width": 180},
@@ -171,10 +172,11 @@ class ImportExistingEnvDialog(QDialog):
 
     def _selected_workflow(self):
         module_name, workflow_name = self._selected_job_module_workflow()
-        module = self._modules_by_name.get(module_name)
-        if not module:
-            return None
-        for workflow in module.manifest.workflows:
+        workflows = list(get_module_registry().get_workflows(module_name))
+        if not workflows:
+            module = self._modules_by_name.get(module_name)
+            workflows = list(getattr(module.manifest, "workflows", []) or []) if module else []
+        for workflow in workflows:
             if workflow.name == workflow_name:
                 return workflow
         return None
@@ -187,7 +189,7 @@ class ImportExistingEnvDialog(QDialog):
             return "", ""
         return (
             str(getattr(execution, "module", "") or "").strip(),
-            str(getattr(execution, "workflow", "") or "default").strip(),
+            str(getattr(execution, "workflow", "") or "").strip(),
         )
 
     def _job_label(self, job: Any) -> str:
@@ -196,7 +198,7 @@ class ImportExistingEnvDialog(QDialog):
         execution = getattr(run_profile, "execution", None)
         if execution:
             module_name = str(getattr(execution, "module", "") or "").strip()
-            workflow_name = str(getattr(execution, "workflow", "") or "default").strip()
+            workflow_name = str(getattr(execution, "workflow", "") or "自动解析").strip()
         concurrency = max(1, int(getattr(job, "concurrency_target", 1) or 1))
         runtime = f"{module_name}/{workflow_name}" if module_name else "未配置运行模板"
         return f"{getattr(job, 'name', '') or job.id} | {runtime} | 并发 {concurrency}"

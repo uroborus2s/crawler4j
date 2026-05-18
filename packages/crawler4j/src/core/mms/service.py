@@ -1,20 +1,26 @@
+import asyncio
 import inspect
+import time
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from crawler4j_contracts import EnvSelectorSpec, TaskContext, TaskResult
+from crawler4j_contracts import EnvCandidates, TaskContext, TaskOutcome, TaskResult, WorkflowLifecycleInfo
 
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo, ModuleSource, ModuleStatus
+from src.core.mms.object_container_v2 import ObjectContainerV2
 from src.core.mms.registry import get_module_registry
 from src.core.mms.runtime_descriptor import (
-    ModuleRuntimeDescriptor,
-    TaskRuntimeEntry,
-    WorkflowRuntimeEntry,
+    ModuleRuntimeDescriptorV2,
     invoke_runtime_callable,
-    load_runtime_descriptor,
+    load_runtime_descriptor_v2,
     normalize_result_payload,
 )
+
+ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
+OBJECT_SETUP_TIMEOUT_SECONDS = 30.0
+OBJECT_CLEANUP_TIMEOUT_SECONDS = 30.0
 
 
 class ModuleService:
@@ -25,7 +31,7 @@ class ModuleService:
 
     def __init__(self):
         self.registry = get_module_registry()
-        self._descriptor_cache: dict[str, ModuleRuntimeDescriptor] = {}
+        self._descriptor_cache_v2: dict[str, ModuleRuntimeDescriptorV2] = {}
 
     def _should_force_reload(self, module_name: str, context: TaskContext | None = None) -> bool:
         if not context or not context.runtime.get("devel_mode", False):
@@ -56,38 +62,26 @@ class ModuleService:
             raise ValueError(f"Module '{module_name}' has no valid path")
         return module_info
 
-    @staticmethod
-    def _inject_manifest_runtime(module_info: ModuleInfo, context: TaskContext | None) -> None:
-        if context is None:
-            return
-        if not isinstance(context.runtime, dict):
-            context.runtime = {}
-        context.runtime["declared_resource_pools"] = [
-            pool.to_dict()
-            for pool in getattr(module_info.manifest, "resource_pools", [])
-        ]
-
-    def _load_descriptor(
+    def _load_descriptor_v2(
         self,
         module_name: str,
         context: TaskContext | None = None,
         *,
         force_reload: bool = False,
-    ) -> ModuleRuntimeDescriptor:
+    ) -> ModuleRuntimeDescriptorV2:
         module_info = self._get_module_info(module_name)
-        self._inject_manifest_runtime(module_info, context)
         force_reload = force_reload or self._should_force_reload(module_info.name, context)
 
-        if force_reload or module_info.name not in self._descriptor_cache:
-            descriptor = load_runtime_descriptor(
+        if force_reload or module_info.name not in self._descriptor_cache_v2:
+            descriptor = load_runtime_descriptor_v2(
                 module_info.name,
                 Path(module_info.path),
                 module_info.manifest,
-                force_reload=force_reload or module_info.source != ModuleSource.BUILTIN,
+                force_reload=force_reload or module_info.source == ModuleSource.DEV_LINK,
             )
-            self._descriptor_cache[module_info.name] = descriptor
+            self._descriptor_cache_v2[module_info.name] = descriptor
 
-        return self._descriptor_cache[module_info.name]
+        return self._descriptor_cache_v2[module_info.name]
 
     def get_runtime_descriptor(
         self,
@@ -95,107 +89,324 @@ class ModuleService:
         context: TaskContext | None = None,
         *,
         force_reload: bool = False,
-    ) -> ModuleRuntimeDescriptor:
-        return self._load_descriptor(module_name, context, force_reload=force_reload)
+    ) -> ModuleRuntimeDescriptorV2:
+        return self._load_descriptor_v2(module_name, context, force_reload=force_reload)
+
+    def get_runtime_descriptor_v2(
+        self,
+        module_name: str,
+        context: TaskContext | None = None,
+        *,
+        force_reload: bool = False,
+    ) -> ModuleRuntimeDescriptorV2:
+        return self._load_descriptor_v2(module_name, context, force_reload=force_reload)
+
+    def get_hosted_page_descriptor(
+        self,
+        module_name: str,
+        context: TaskContext | None = None,
+        *,
+        force_reload: bool = False,
+    ) -> ModuleRuntimeDescriptorV2:
+        return self._load_descriptor_v2(module_name, context, force_reload=force_reload)
+
+    def resolve_env_candidates(
+        self,
+        module_name: str,
+        context: TaskContext,
+        candidates_name: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[int]:
+        """Run a core-native-v2 pure environment candidate provider."""
+        descriptor = self._load_descriptor_v2(module_name, context)
+        normalized_name = str(candidates_name or "").strip()
+        if not normalized_name:
+            raise ValueError("环境候选函数不能为空")
+        entry = descriptor.env_candidates.get(normalized_name)
+        if entry is None:
+            raise RuntimeError(f"env_candidates 不存在: {normalized_name}")
+
+        result = self._invoke_env_candidates(entry.target, context, dict(params or {}))
+        return self._normalize_env_id_provider_result(result, context, label="env_candidates")
+
+    async def resolve_env_candidates_async(
+        self,
+        module_name: str,
+        context: TaskContext,
+        candidates_name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS,
+    ) -> list[int]:
+        """Run env candidates outside the main async loop with a hard timeout."""
+
+        loop = asyncio.get_running_loop()
+        task = loop.run_in_executor(
+            None,
+            partial(self.resolve_env_candidates, module_name, context, candidates_name, params),
+        )
+        try:
+            if timeout is None or timeout <= 0:
+                return await task
+            return await asyncio.wait_for(task, timeout=float(timeout))
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"env_candidates 执行超时: {candidates_name} ({timeout:g}s)") from exc
 
     @staticmethod
-    def _resolve_workflow_name(context: TaskContext, default_workflow: str) -> str:
+    def _invoke_env_candidates(target: Any, context: TaskContext, params: dict[str, Any]) -> Any:
+        return ModuleService._invoke_env_id_provider(target, context, params, label="env_candidates")
+
+    def resolve_env_cleanup_candidates(
+        self,
+        module_name: str,
+        context: TaskContext,
+        cleanup_name: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[int]:
+        """Run a core-native-v2 pure environment cleanup candidate provider."""
+        descriptor = self._load_descriptor_v2(module_name, context)
+        normalized_name = str(cleanup_name or "").strip()
+        if not normalized_name:
+            raise ValueError("环境清理候选函数不能为空")
+        entry = descriptor.env_cleanup_candidates.get(normalized_name)
+        if entry is None:
+            raise RuntimeError(f"env_cleanup_candidates 不存在: {normalized_name}")
+
+        result = self._invoke_env_id_provider(
+            entry.target,
+            context,
+            dict(params or {}),
+            label="env_cleanup_candidates",
+        )
+        return self._normalize_env_id_provider_result(result, context, label="env_cleanup_candidates")
+
+    async def resolve_env_cleanup_candidates_async(
+        self,
+        module_name: str,
+        context: TaskContext,
+        cleanup_name: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS,
+    ) -> list[int]:
+        """Run env cleanup candidates outside the main async loop with a hard timeout."""
+
+        loop = asyncio.get_running_loop()
+        task = loop.run_in_executor(
+            None,
+            partial(self.resolve_env_cleanup_candidates, module_name, context, cleanup_name, params),
+        )
+        try:
+            if timeout is None or timeout <= 0:
+                return await task
+            return await asyncio.wait_for(task, timeout=float(timeout))
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"env_cleanup_candidates 执行超时: {cleanup_name} ({timeout:g}s)") from exc
+
+    @staticmethod
+    def _invoke_env_id_provider(
+        target: Any,
+        context: TaskContext,
+        params: dict[str, Any],
+        *,
+        label: str,
+    ) -> Any:
+        if inspect.iscoroutinefunction(target):
+            raise RuntimeError(f"{label} 必须是同步纯函数")
+        signature = inspect.signature(target)
+        kwargs: dict[str, Any] = {}
+        for parameter in signature.parameters.values():
+            if parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
+                raise RuntimeError(f"{label} 不支持仅位置参数")
+            if parameter.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}:
+                raise RuntimeError(f"{label} 不支持 *args 或 **kwargs")
+            if parameter.name in {"ctx", "context"}:
+                kwargs[parameter.name] = context
+            elif parameter.name == "params":
+                kwargs[parameter.name] = params
+            elif parameter.default is inspect.Parameter.empty:
+                raise RuntimeError(f"{label} 包含不支持的必填参数: {parameter.name}")
+        return target(**kwargs)
+
+    @staticmethod
+    def _normalize_env_id_provider_result(result: Any, context: TaskContext, *, label: str) -> list[int]:
+        if isinstance(result, EnvCandidates):
+            return result.list(context)
+        if isinstance(result, (list, tuple, set)):
+            return [int(item) for item in result]
+        raise RuntimeError(f"{label} 必须返回 EnvCandidates 或 env_id 列表")
+
+    @staticmethod
+    def _resolve_v2_workflow_name(context: TaskContext, descriptor: ModuleRuntimeDescriptorV2) -> str:
         runtime = getattr(context, "runtime", None)
         if isinstance(runtime, dict):
             workflow_name = runtime.get("workflow")
             if isinstance(workflow_name, str) and workflow_name.strip():
-                return workflow_name
-        return default_workflow
+                return workflow_name.strip()
+        if len(descriptor.workflows) == 1:
+            return next(iter(descriptor.workflows))
+        if "main_workflow" in descriptor.workflows:
+            return "main_workflow"
+        raise ValueError("Workflow not specified for core-native-v2 module")
 
-    async def _run_task_entry(self, task: TaskRuntimeEntry, context: TaskContext) -> TaskResult:
-        result = await invoke_runtime_callable(task.execute, context)
-        return normalize_result_payload(result, context)
+    @staticmethod
+    def _runtime_mapping(context: TaskContext, key: str) -> dict[str, Any]:
+        runtime = getattr(context, "runtime", None)
+        value = runtime.get(key) if isinstance(runtime, dict) else None
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError(f"context.runtime[{key}] must be a mapping")
+        return dict(value)
 
-    async def _run_workflow_entry(
+    async def _run_v2_workflow(self, descriptor: ModuleRuntimeDescriptorV2, context: TaskContext) -> TaskResult:
+        workflow_name = self._resolve_v2_workflow_name(context, descriptor)
+        workflow_info = self._workflow_lifecycle_info(descriptor, workflow_name, context)
+        started_at = time.monotonic()
+        container = ObjectContainerV2(
+            descriptor,
+            workflow_name,
+            object_bindings=self._runtime_mapping(context, "object_bindings"),
+            object_params=self._runtime_mapping(context, "object_params"),
+        )
+        previous_page_action_executor = getattr(context, "_page_action_executor", None)
+        outcome: TaskOutcome | None = None
+
+        async def _run_page_action(action_name: str, action_context: TaskContext, **kwargs: Any) -> Any:
+            normalized_action = str(action_name or "").strip()
+            active_action = str(action_context.runtime.get("_active_page_action") or "").strip()
+            if active_action:
+                raise RuntimeError(f"page_action 不能嵌套调用: {active_action} -> {normalized_action}")
+            page_action = descriptor.page_actions.get(normalized_action)
+            if page_action is None:
+                raise RuntimeError(f"page_action 不存在: {action_name}")
+            had_previous_active = "_active_page_action" in action_context.runtime
+            previous_active = action_context.runtime.get("_active_page_action")
+            action_context.runtime["_active_page_action"] = normalized_action
+            try:
+                return await invoke_runtime_callable(page_action.target, action_context, **kwargs)
+            finally:
+                if had_previous_active:
+                    action_context.runtime["_active_page_action"] = previous_active
+                else:
+                    action_context.runtime.pop("_active_page_action", None)
+
+        try:
+            context._page_action_executor = _run_page_action
+            workflow = container.build_workflow()
+            await container.setup(
+                context,
+                workflow_info,
+                timeout_seconds=OBJECT_SETUP_TIMEOUT_SECONDS,
+            )
+            run = getattr(workflow, "run", None)
+            if run is None:
+                raise ValueError(f"Workflow has no run method: {workflow_name}")
+            result = await invoke_runtime_callable(run, context)
+            normalized_result = normalize_result_payload(result, context)
+            outcome = self._outcome_from_result(normalized_result, started_at=started_at, workflow=workflow_info)
+            return normalized_result
+        except asyncio.CancelledError as exc:
+            outcome = self._outcome_from_cancelled(context, exc, started_at=started_at, workflow=workflow_info)
+            raise
+        except Exception as exc:
+            outcome = self._outcome_from_exception(exc, started_at=started_at, workflow=workflow_info)
+            raise
+        finally:
+            context._page_action_executor = previous_page_action_executor
+            await container.cleanup(
+                context,
+                outcome or self._outcome_from_exception(
+                    RuntimeError("workflow exited before outcome was resolved"),
+                    started_at=started_at,
+                    workflow=workflow_info,
+                ),
+                timeout_seconds=OBJECT_CLEANUP_TIMEOUT_SECONDS,
+            )
+
+    @staticmethod
+    def _duration_since(*, started_at: float) -> float:
+        return max(time.monotonic() - started_at, 0.0)
+
+    def _workflow_lifecycle_info(
         self,
-        descriptor: ModuleRuntimeDescriptor,
-        workflow: WorkflowRuntimeEntry,
+        descriptor: ModuleRuntimeDescriptorV2,
+        workflow_name: str,
         context: TaskContext,
-    ) -> TaskResult:
-        context._subtask_executor = lambda task_name, ctx: self._run_subtask(descriptor, task_name, ctx)
-        result = await invoke_runtime_callable(workflow.run, context)
-        return normalize_result_payload(result, context)
+    ) -> WorkflowLifecycleInfo:
+        entry = descriptor.workflows.get(workflow_name)
+        meta = entry.meta if entry is not None else None
+        return WorkflowLifecycleInfo(
+            module_name=str(context.task_name or "").strip(),
+            workflow_name=str(workflow_name or "").strip(),
+            workflow_label=str(getattr(meta, "label", "") or "").strip(),
+            workflow_description=str(getattr(meta, "description", "") or "").strip(),
+            workflow_module_name=str(getattr(entry, "module_name", "") or "").strip(),
+            workflow_symbol=str(getattr(entry, "attr_name", "") or "").strip(),
+        )
 
-    async def _run_subtask(
+    def _outcome_from_result(
         self,
-        descriptor: ModuleRuntimeDescriptor,
-        task_name: str,
+        result: TaskResult,
+        *,
+        started_at: float,
+        workflow: WorkflowLifecycleInfo,
+    ) -> TaskOutcome:
+        return TaskOutcome(
+            status="succeeded" if result.success else "failed",
+            workflow=workflow,
+            result=result,
+            error=result.error or "",
+            error_type="",
+            duration_seconds=self._duration_since(started_at=started_at),
+        )
+
+    def _outcome_from_exception(
+        self,
+        exc: Exception,
+        *,
+        started_at: float,
+        workflow: WorkflowLifecycleInfo,
+    ) -> TaskOutcome:
+        return TaskOutcome(
+            status="failed",
+            workflow=workflow,
+            error=str(exc),
+            error_type=exc.__class__.__name__,
+            duration_seconds=self._duration_since(started_at=started_at),
+        )
+
+    def _outcome_from_cancelled(
+        self,
         context: TaskContext,
-    ) -> TaskResult:
-        task = descriptor.tasks.get(task_name)
-        if not task:
-            raise ValueError(f"Unknown subtask: {task_name}")
-        return await self._run_task_entry(task, context)
+        exc: asyncio.CancelledError,
+        *,
+        started_at: float,
+        workflow: WorkflowLifecycleInfo,
+    ) -> TaskOutcome:
+        cancel_reason = str(context.runtime.get("_module_cancel_reason") or "").strip()
+        status = "timed_out" if cancel_reason == "timed_out" else "cancelled"
+        return TaskOutcome(
+            status=status,
+            workflow=workflow,
+            error=str(exc),
+            error_type=exc.__class__.__name__,
+            duration_seconds=self._duration_since(started_at=started_at),
+        )
 
     async def run_module(self, module_name: str, context: TaskContext) -> Any:
         """运行模块默认工作流或任务。"""
         try:
-            descriptor = self._load_descriptor(module_name, context)
-            workflow_name = self._resolve_workflow_name(context, descriptor.default_workflow)
-            logger.info(f"[MMS] Executing module: {module_name} workflow={workflow_name}")
+            module_info = self._get_module_info(module_name)
+            if str(module_info.manifest.runtime_api or "").strip() == "core-native-v2":
+                descriptor_v2 = self._load_descriptor_v2(module_name, context)
+                logger.info(f"[MMS] Executing v2 module: {module_name}")
+                return await self._run_v2_workflow(descriptor_v2, context)
 
-            workflow = descriptor.workflows.get(workflow_name)
-            if workflow:
-                return await self._run_workflow_entry(descriptor, workflow, context)
-
-            raise ValueError(f"Workflow not found: {workflow_name or '<empty>'}")
+            raise ValueError("Only core-native-v2 modules are executable in crawler4j 0.4.0")
         except Exception as e:
             logger.error(f"[MMS] Failed to execute module {module_name}: {e}")
             raise e
-
-    async def call_hook(self, module_name: str, hook_name: str, context: TaskContext, *args) -> Any:
-        """调用模块中的可选 hook；未实现时返回 None。"""
-        descriptor = self._load_descriptor(module_name, context)
-        hook = descriptor.hooks.get(hook_name)
-        if not hook:
-            logger.debug(f"[MMS] Hook not implemented: {module_name}.{hook_name}")
-            return None
-
-        logger.info(f"[MMS] Executing hook: {module_name}.{hook_name}")
-        return await invoke_runtime_callable(hook, context, *args)
-
-    def call_local_hook(self, module_name: str, hook_name: str, context: TaskContext, *args) -> Any:
-        """在同步调用方中执行本地模块 hook。"""
-        descriptor = self._load_descriptor(module_name, context)
-        hook = descriptor.hooks.get(hook_name)
-        if not hook:
-            logger.debug(f"[MMS] Hook not implemented: {module_name}.{hook_name}")
-            return None
-
-        logger.info(f"[MMS] Executing local hook: {module_name}.{hook_name}")
-        if inspect.iscoroutinefunction(hook):
-            raise RuntimeError(
-                f"Module hook '{module_name}.{hook_name}' is async and cannot be executed from a sync caller"
-            )
-        return hook(context, *args)
-
-    async def run_env_selector(
-        self,
-        module_name: str,
-        selector_name: str,
-        context: TaskContext,
-        candidates: list[Any],
-    ) -> Any:
-        descriptor = self._load_descriptor(module_name, context)
-        selector = descriptor.env_selectors.get(selector_name)
-        if not selector:
-            raise ValueError(f"Env selector not found: {selector_name}")
-        logger.info(f"[MMS] Executing env selector: {module_name}.{selector_name}")
-        return await invoke_runtime_callable(selector.select, context, candidates)
-
-    def list_env_selectors(self, module_name: str) -> list[EnvSelectorSpec]:
-        """列出模块声明的环境选择器。"""
-        descriptor = self._load_descriptor(module_name)
-        return [
-            descriptor.env_selectors[name].spec
-            for name in sorted(descriptor.env_selectors)
-        ]
-
 
 # Global Singleton
 _service: ModuleService | None = None

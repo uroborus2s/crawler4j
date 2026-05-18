@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import builtins
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -10,6 +11,7 @@ from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QSizePolicy
 from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
 from src.core.persistence import get_module_data_store
 from src.ui.components.button import StyledButton
+from src.ui.components.line_edit import StyledLineEdit
 
 from ._core_native_v1 import make_manifest, make_page_info, register_module, restore_module, write_module_tree
 
@@ -24,6 +26,11 @@ def temp_data_dir(tmp_path):
         yield tmp_path
 
 
+def test_managed_page_renderer_requires_fixed_query_result_contract():
+    with pytest.raises(ValueError, match="HostedDataTableQueryResult"):
+        ManagedPageRenderer._normalize_inline_query_result(None, {"rows": []})  # type: ignore[arg-type]
+
+
 def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(qtbot, tmp_path):
     module_name = "hosted_page_module"
     load_key = "_hosted_page_module_load_count"
@@ -35,17 +42,16 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
             "pages/dashboard.py": f"""
             import builtins
 
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
             LOAD_COUNT_KEY = "{load_key}"
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 icon="📊",
                 schema={{
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {{"type": "Text", "style": "title", "binding": "title"}},
                         {{"type": "Text", "style": "body", "binding": "load_count_text"}},
@@ -64,8 +70,6 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
                     ],
                 }},
             )
-
-
             def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                 del context, page_id, params
                 count = int(getattr(builtins, LOAD_COUNT_KEY, 0)) + 1
@@ -77,20 +81,17 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
                 }}
             """,
             "pages/accounts.py": """
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
-            PAGE = PageSpec(
-                id="accounts",
+            @page(
+                name="accounts",
                 label="Accounts",
                 icon="📋",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_accounts_page",
                     "children": [{"type": "Text", "style": "title", "binding": "title"}],
                 },
             )
-
-
             def load_accounts_page(context: TaskContext, page_id: str, params=None):
                 del context, page_id, params
                 return {"title": "账号页"}
@@ -134,6 +135,306 @@ def test_managed_page_renderer_loads_page_data_refreshes_and_handles_open_page(q
         delattr(builtins, load_key)
 
 
+def test_managed_page_renderer_handles_ui_action_button(qtbot, tmp_path):
+    module_name = "hosted_ui_action_button_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import TaskContext, page
+
+            @page(
+                name="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "Button",
+                            "label": "创建账号",
+                            "action": {
+                                "type": "ui_action",
+                                "name": "create_account_from_ui",
+                                "params": {"account_id": {"value": "acct-001"}},
+                            },
+                        },
+                    ],
+                },
+            )
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                return {}
+            """,
+            "pages/actions.py": """
+            from crawler4j_contracts import TaskContext, ui_action
+
+            CALLS = []
+
+            @ui_action(name="create_account_from_ui")
+            async def create_account_from_ui(context: TaskContext, account_id: str):
+                del context
+                CALLS.append({"account_id": account_id})
+                return {"ok": True}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    try:
+        page = ManagedPageRenderer(module_name, "dashboard", module_info=module_info)
+        qtbot.addWidget(page)
+
+        action_button = next(button for button in page.findChildren(QPushButton) if button.text() == "创建账号")
+        action_button.click()
+
+        import importlib
+
+        action_module = importlib.import_module(f"{module_name}.pages.actions")
+        assert action_module.CALLS == [{"account_id": "acct-001"}]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+@pytest.mark.asyncio
+async def test_managed_page_renderer_async_ui_action_failure_uses_async_warning(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_ui_action_failure_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/dashboard.py": """
+            from crawler4j_contracts import TaskContext, page, ui_action
+
+            @page(
+                name="dashboard",
+                label="Dashboard",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "Button",
+                            "label": "失败操作",
+                            "action": {"type": "ui_action", "name": "fail_from_ui"},
+                        },
+                    ],
+                },
+            )
+            def load_dashboard_page(context: TaskContext, page_id: str, params=None):
+                del context, page_id, params
+                return {}
+
+
+            @ui_action(name="fail_from_ui")
+            async def fail_from_ui(context: TaskContext):
+                del context
+                raise RuntimeError("action failed")
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("dashboard")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    warnings: list[tuple[str, str]] = []
+
+    def fail_sync_warning(*_args, **_kwargs):
+        raise AssertionError("blocking warning should not be used in async Hosted UI action flow")
+
+    async def fake_warning_async(_parent, title, message, **_kwargs):
+        warnings.append((title, message))
+        return int(QDialog.DialogCode.Accepted)
+
+    monkeypatch.setattr("src.core.mms.ui.managed_page_renderer.MessageDialog.warning", fail_sync_warning)
+    monkeypatch.setattr("src.core.mms.ui.managed_page_renderer.MessageDialog.warning_async", fake_warning_async)
+
+    try:
+        page = ManagedPageRenderer(module_name, "dashboard", module_info=module_info)
+        qtbot.addWidget(page)
+
+        action_button = next(button for button in page.findChildren(QPushButton) if button.text() == "失败操作")
+        action_button.click()
+
+        for _ in range(50):
+            if warnings:
+                break
+            await asyncio.sleep(0.01)
+
+        assert warnings == [("操作失败", "action failed")]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+@pytest.mark.asyncio
+async def test_managed_page_renderer_crud_create_uses_async_dialog_without_exec(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_page_async_crud_create_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import page, ui_action
+
+            CALLS = []
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {"type": "rows", "rows": []},
+                            "crud": {
+                                "mode": "handlers",
+                                "primary_key": "account_id",
+                                "form": {"create_columns": ["name", "secret"]},
+                                "create_handler": "create_account_from_ui",
+                            },
+                            "columns": [
+                                {"key": "account_id", "label": "ID", "visible": False},
+                                {"key": "name", "label": "账号名", "required": True},
+                                {"key": "secret", "label": "密码", "required": True},
+                            ],
+                        },
+                    ],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+
+
+            @ui_action(name="create_account_from_ui")
+            async def create_account_from_ui(context, payload):
+                del context
+                CALLS.append(dict(payload))
+                return {"ok": True}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    def fail_exec(self):
+        raise AssertionError("blocking exec should not be used in async Hosted UI CRUD flow")
+
+    def fake_show(dialog: QDialog):
+        qtbot.addWidget(dialog)
+        if dialog.windowTitle() == "新增账号管理":
+            edits = dialog.findChildren(StyledLineEdit)
+            assert len(edits) == 2
+            edits[0].setText("alpha")
+            edits[1].setText("secret-alpha")
+        asyncio.get_running_loop().call_soon(lambda: dialog.done(int(QDialog.DialogCode.Accepted)))
+
+    monkeypatch.setattr(QDialog, "exec", fail_exec)
+    monkeypatch.setattr(QDialog, "show", fake_show)
+
+    try:
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        component = page._schema["children"][0]
+        table = page._data_table_widgets["accounts"]
+        await page._handle_create_action_async(component, table)
+
+        import importlib
+
+        actions_module = importlib.import_module(f"{module_name}.pages.accounts")
+        assert actions_module.CALLS == [{"name": "alpha", "secret": "secret-alpha"}]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+@pytest.mark.asyncio
+async def test_managed_page_renderer_crud_delete_uses_async_confirm(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_page_async_crud_delete_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import page, ui_action
+
+            CALLS = []
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {
+                                "type": "rows",
+                                "rows": [{"account_id": "acct-001", "name": "alpha"}],
+                            },
+                            "crud": {
+                                "mode": "handlers",
+                                "primary_key": "account_id",
+                                "delete_handler": "delete_account_from_ui",
+                            },
+                            "columns": [
+                                {"key": "account_id", "label": "ID"},
+                                {"key": "name", "label": "账号名"},
+                            ],
+                        },
+                    ],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+
+
+            @ui_action(name="delete_account_from_ui")
+            async def delete_account_from_ui(context, account_id):
+                del context
+                CALLS.append(str(account_id))
+                return {"ok": True}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    def fail_sync_confirm(*_args, **_kwargs):
+        raise AssertionError("blocking delete confirm should not be used in async Hosted UI CRUD flow")
+
+    async def fake_delete_confirm_async(_parent, item_name):
+        assert item_name == "alpha"
+        return True
+
+    monkeypatch.setattr("src.core.mms.ui.managed_page_renderer.ConfirmDialog.delete_confirm", fail_sync_confirm)
+    monkeypatch.setattr(
+        "src.core.mms.ui.managed_page_renderer.ConfirmDialog.delete_confirm_async",
+        fake_delete_confirm_async,
+    )
+
+    try:
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        table = page._data_table_widgets["accounts"]
+        qtbot.waitUntil(lambda: table.rowCount() == 1)
+        table.selectRow(0)
+        component = page._schema["children"][0]
+        await page._handle_delete_action_async(component, table)
+
+        import importlib
+
+        actions_module = importlib.import_module(f"{module_name}.pages.accounts")
+        assert actions_module.CALLS == ["acct-001"]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
 def test_managed_page_renderer_keeps_header_icon_button_compact(qtbot, tmp_path):
     module_name = "hosted_page_header_button_module"
     module_dir = write_module_tree(
@@ -141,15 +442,14 @@ def test_managed_page_renderer_keeps_header_icon_button_compact(qtbot, tmp_path)
         module_name,
         files={
             "pages/detail.py": """
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import TaskContext, page
 
-            PAGE = PageSpec(
-                id="detail",
+            @page(
+                name="detail",
                 label="明细",
                 icon="📄",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_detail_page",
                     "children": [
                         {
                             "type": "Section",
@@ -170,8 +470,6 @@ def test_managed_page_renderer_keeps_header_icon_button_compact(qtbot, tmp_path)
                     ],
                 },
             )
-
-
             def load_detail_page(context: TaskContext, page_id: str, params=None):
                 del context, page_id, params
                 return {}
@@ -217,11 +515,89 @@ def _sync_managed_dataset(module_root, *, module_name: str, resource_id: str) ->
                 }
             ],
             "views": [],
-            "queries": [],
             "seeds": [],
         }
     )
     get_module_data_store().sync_manifest_data(module_name, module_root, manifest_data)
+
+
+def test_managed_page_renderer_managed_resource_query_is_not_limited_to_first_1000_rows(qtbot, tmp_path):
+    module_name = "hosted_page_large_managed_resource_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import page
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                            "features": {"pagination": {"page_size": 20}},
+                            "columns": [
+                                {
+                                    "key": "account_id",
+                                    "label": "ID",
+                                    "searchable": True,
+                                    "sortable": True,
+                                },
+                                {
+                                    "key": "name",
+                                    "label": "账号名",
+                                    "searchable": True,
+                                    "sortable": True,
+                                },
+                                {"key": "status", "label": "状态"},
+                            ],
+                        },
+                    ],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    store = get_module_data_store()
+
+    try:
+        _sync_managed_dataset(module_dir, module_name=module_name, resource_id="accounts")
+        rows = [
+            {
+                "id": str(index),
+                "account_id": f"acct-{index:04d}",
+                "name": f"account {index}",
+                "status": "active",
+            }
+            for index in range(1, 1006)
+        ]
+        assert store.replace_resource_records(module_name, "accounts", rows) is True
+
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        table = page._data_table_widgets["accounts"]
+        qtbot.waitUntil(lambda: table.info_label.text() == "共 1005 条")
+        assert table.rowCount() == 20
+
+        table.search_input.setText("account 1005")
+        qtbot.waitUntil(lambda: table.info_label.text() == "共 1 条")
+        assert table.rowCount() == 1
+        assert table.item(0, 0).text() == "acct-1005"
+        assert table.item(0, 1).text() == "account 1005"
+    finally:
+        restore_module(service, original_registry, module_name)
 
 
 def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_path, monkeypatch):
@@ -231,16 +607,15 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         module_name,
         files={
             "pages/accounts.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page, ui_action
 
-            PAGE = PageSpec(
-                id="accounts",
+            @page(
+                name="accounts",
                 label="账号管理",
                 icon="📋",
                 schema={
                     "type": "Page",
                     "title": "账号管理",
-                    "load_handler": "load_accounts_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -268,15 +643,14 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                     ],
                 },
             )
-
-
             def load_accounts_page(context, page_id, params=None):
                 del context, page_id, params
                 return {}
-            """,
-            "hooks/create_account_from_ui.py": """
-            def handle(context, payload):
-                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+
+
+            @ui_action(name="create_account_from_ui")
+            def create_account_from_ui(context, payload):
+                rows = context.db.from_("accounts").execute()
                 next_id = len(rows) + 1
                 row = {
                     "account_id": str(next_id),
@@ -286,10 +660,11 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                 }
                 context.db.into("accounts").replace(rows + [row])
                 return {"record": row, "created": True}
-            """,
-            "hooks/update_account_from_ui.py": """
-            def handle(context, account_id, payload):
-                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+
+
+            @ui_action(name="update_account_from_ui")
+            def update_account_from_ui(context, account_id, payload):
+                rows = context.db.from_("accounts").execute()
                 updated_rows = []
                 updated = None
                 for row in rows:
@@ -305,10 +680,11 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                     updated_rows.append(current)
                 context.db.into("accounts").replace(updated_rows)
                 return {"record": updated, "created": False}
-            """,
-            "hooks/delete_account_from_ui.py": """
-            def handle(context, account_id):
-                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+
+
+            @ui_action(name="delete_account_from_ui")
+            def delete_account_from_ui(context, account_id):
+                rows = context.db.from_("accounts").execute()
                 remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
                 deleted = next((row for row in rows if str(row.get("account_id")) == str(account_id)), None)
                 context.db.into("accounts").replace(remaining)
@@ -334,7 +710,6 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
             }
         ],
         "views": [],
-        "queries": [],
         "seeds": [],
     }
     service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
@@ -358,18 +733,21 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
 
     try:
         _sync_managed_dataset(module_dir, module_name=module_name, resource_id="accounts")
-        assert store.replace_resource_records(
-            module_name,
-            "accounts",
-            [
-                {
-                    "account_id": "1",
-                    "name": "alpha",
-                    "secret": "secret-alpha",
-                    "status": "active",
-                }
-            ],
-        ) is True
+        assert (
+            store.replace_resource_records(
+                module_name,
+                "accounts",
+                [
+                    {
+                        "account_id": "1",
+                        "name": "alpha",
+                        "secret": "secret-alpha",
+                        "status": "active",
+                    }
+                ],
+            )
+            is True
+        )
 
         page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
         qtbot.addWidget(page)
@@ -402,15 +780,13 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         assert names == {"alpha", "beta"}
 
         alpha_row_index = next(
-            index
-            for index, row in enumerate(table.displayed_rows())
-            if str(row.get("name") or "") == "alpha"
+            index for index, row in enumerate(table.displayed_rows()) if str(row.get("name") or "") == "alpha"
         )
         table.selectRow(alpha_row_index)
         edit_button.click()
         qtbot.waitUntil(lambda: any(table.item(row, 0).text() == "alpha-updated" for row in range(table.rowCount())))
         stored_rows = sorted(
-            store.list_records(module_name, "accounts", limit=1000, offset=0),
+            store.query_resource_records(module_name, "accounts", select=["*"]),
             key=lambda row: str(row.get("account_id") or ""),
         )
         assert [
@@ -437,9 +813,7 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
         ]
 
         beta_row_index = next(
-            index
-            for index, row in enumerate(table.displayed_rows())
-            if str(row.get("name") or "") == "beta"
+            index for index, row in enumerate(table.displayed_rows()) if str(row.get("name") or "") == "beta"
         )
         table.selectRow(beta_row_index)
         delete_button.click()
@@ -451,7 +825,7 @@ def test_managed_page_renderer_supports_managed_resource_crud_tables(qtbot, tmp_
                 "secret": str(row.get("secret") or ""),
                 "status": str(row.get("status") or ""),
             }
-            for row in store.list_records(module_name, "accounts", limit=1000, offset=0)
+            for row in store.query_resource_records(module_name, "accounts", select=["*"])
         ] == [
             {
                 "account_id": "1",
@@ -471,16 +845,15 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
         module_name,
         files={
             "pages/accounts.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page, ui_action
 
-            PAGE = PageSpec(
-                id="accounts",
+            @page(
+                name="accounts",
                 label="账号管理",
                 icon="📋",
                 schema={
                     "type": "Page",
                     "title": "账号管理",
-                    "load_handler": "load_accounts_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -510,15 +883,14 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                     ],
                 },
             )
-
-
             def load_accounts_page(context, page_id, params=None):
                 del context, page_id, params
                 return {}
-            """,
-            "hooks/create_account_from_ui.py": """
-            def handle(context, payload):
-                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+
+
+            @ui_action(name="create_account_from_ui")
+            def create_account_from_ui(context, payload):
+                rows = context.db.from_("accounts").execute()
                 next_id = len(rows) + 1
                 row = {
                     "account_id": str(next_id),
@@ -528,10 +900,11 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                 }
                 context.db.into("accounts").replace(rows + [row])
                 return {"record": row, "created": True}
-            """,
-            "hooks/update_account_from_ui.py": """
-            def handle(context, account_id, payload):
-                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+
+
+            @ui_action(name="update_account_from_ui")
+            def update_account_from_ui(context, account_id, payload):
+                rows = context.db.from_("accounts").execute()
                 updated_rows = []
                 updated = None
                 for row in rows:
@@ -547,10 +920,11 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                     updated_rows.append(current)
                 context.db.into("accounts").replace(updated_rows)
                 return {"record": updated, "created": False}
-            """,
-            "hooks/delete_account_from_ui.py": """
-            def handle(context, account_id):
-                rows = context.db.from_("accounts").limit(1000).offset(0).execute()
+
+
+            @ui_action(name="delete_account_from_ui")
+            def delete_account_from_ui(context, account_id):
+                rows = context.db.from_("accounts").execute()
                 remaining = [row for row in rows if str(row.get("account_id")) != str(account_id)]
                 deleted = next((row for row in rows if str(row.get("account_id")) == str(account_id)), None)
                 context.db.into("accounts").replace(remaining)
@@ -576,7 +950,6 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
             }
         ],
         "views": [],
-        "queries": [],
         "seeds": [],
     }
     service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
@@ -600,18 +973,21 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
 
     try:
         _sync_managed_dataset(module_dir, module_name=module_name, resource_id="accounts")
-        assert store.replace_resource_records(
-            module_name,
-            "accounts",
-            [
-                {
-                    "account_id": "1",
-                    "name": "alpha",
-                    "secret": "secret-alpha",
-                    "status": "active",
-                }
-            ],
-        ) is True
+        assert (
+            store.replace_resource_records(
+                module_name,
+                "accounts",
+                [
+                    {
+                        "account_id": "1",
+                        "name": "alpha",
+                        "secret": "secret-alpha",
+                        "status": "active",
+                    }
+                ],
+            )
+            is True
+        )
 
         page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
         qtbot.addWidget(page)
@@ -646,9 +1022,7 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
         qtbot.waitUntil(lambda: any(table.item(row, 0).text() == "alpha-updated" for row in range(table.rowCount())))
 
         beta_row_index = next(
-            index
-            for index, row in enumerate(table.displayed_rows())
-            if str(row.get("name") or "") == "beta"
+            index for index, row in enumerate(table.displayed_rows()) if str(row.get("name") or "") == "beta"
         )
         delete_button = next(
             button
@@ -665,7 +1039,7 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
                 "secret": str(row.get("secret") or ""),
                 "status": str(row.get("status") or ""),
             }
-            for row in store.list_records(module_name, "accounts", limit=1000, offset=0)
+            for row in store.query_resource_records(module_name, "accounts", select=["*"])
         ] == [
             {
                 "account_id": "1",
@@ -685,16 +1059,15 @@ def test_managed_page_renderer_localizes_and_styles_crud_dialog(qtbot, tmp_path,
         module_name,
         files={
             "pages/accounts.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="accounts",
+            @page(
+                name="accounts",
                 label="账号管理",
                 icon="📋",
                 schema={
                     "type": "Page",
                     "title": "账号管理",
-                    "load_handler": "load_accounts_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -718,8 +1091,6 @@ def test_managed_page_renderer_localizes_and_styles_crud_dialog(qtbot, tmp_path,
                     ],
                 },
             )
-
-
             def load_accounts_page(context, page_id, params=None):
                 del context, page_id, params
                 return {}
@@ -762,14 +1133,13 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec, TaskContext
+            from crawler4j_contracts import HostedDataTableQuery, HostedDataTableQueryResult, TaskContext, page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {"type": "Text", "style": "body", "binding": "load_tools"},
                         {"type": "Text", "style": "body", "binding": "load_write_error"},
@@ -779,15 +1149,13 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
                             "title": "统计明细",
                             "data_source": {"type": "query_handler", "handler": "query_stats_table"},
                             "columns": [
-                                {"key": "metric", "label": "指标"},
+                                {"key": "metric", "label": "指标", "searchable": True},
                                 {"key": "value", "label": "值"},
                             ],
                         },
                     ],
                 },
             )
-
-
             def load_dashboard_page(context: TaskContext, page_id: str, params=None):
                 del page_id, params
                 load_tools = ",".join(spec.name for spec in context.tools.list_tools())
@@ -801,22 +1169,24 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
                 }
 
 
-            def query_stats_table(context: TaskContext, table_id: str, query, params=None):
-                del table_id, query, params
+            def query_stats_table(context: TaskContext, query: HostedDataTableQuery):
                 query_tools = ",".join(spec.name for spec in context.tools.list_tools())
                 try:
                     context.db.into("hosted_ui_query").replace([])
                 except Exception as exc:
                     query_write_error = type(exc).__name__
-                return {
-                    "rows": [
+                return HostedDataTableQueryResult(
+                    rows=[
                         {"metric": "query_tools", "value": query_tools},
                         {"metric": "query_write_error", "value": query_write_error},
+                        {"metric": "query_type", "value": type(query).__name__},
+                        {"metric": "query_search_fields", "value": ",".join(query.search_fields)},
+                        {"metric": "query_sort", "value": ",".join(item.field for item in query.sort)},
                     ],
-                    "total": 2,
-                    "page": 1,
-                    "page_size": 20,
-                }
+                    total=5,
+                    page=query.page,
+                    page_size=query.page_size,
+                )
             """,
         },
     )
@@ -838,6 +1208,31 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
         assert table.item(0, 1).text() == readonly_tools
         assert table.item(1, 0).text() == "query_write_error"
         assert table.item(1, 1).text() == "RuntimeError"
+        assert table.item(2, 0).text() == "query_type"
+        assert table.item(2, 1).text() == "HostedDataTableQuery"
+        assert table.item(3, 0).text() == "query_search_fields"
+        assert table.item(3, 1).text() == "metric"
+        assert table.item(4, 0).text() == "query_sort"
+        assert table.item(4, 1).text() == ""
+
+        component = page._schema["children"][2]
+        assert (
+            page._normalize_table_query_for_handler(
+                component,
+                {"sort": [{"field": "metric", "direction": "asc"}]},
+            )["sort"]
+            == []
+        )
+
+        sortable_component = dict(component)
+        sortable_component["columns"] = [
+            {**dict(component["columns"][0]), "sortable": True},
+            dict(component["columns"][1]),
+        ]
+        assert page._normalize_table_query_for_handler(
+            sortable_component,
+            {"sort": [{"field": "metric", "direction": "asc"}]},
+        )["sort"] == [{"field": "metric", "direction": "asc"}]
     finally:
         restore_module(service, original_registry, module_name)
 
@@ -849,14 +1244,13 @@ def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -878,8 +1272,6 @@ def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_
                     ],
                 },
             )
-
-
             def load_dashboard_page(context, page_id, params=None):
                 del context, page_id, params
                 return {
@@ -890,19 +1282,16 @@ def test_managed_page_renderer_row_action_opens_page_with_row_params(qtbot, tmp_
                 }
             """,
             "pages/details.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="details",
+            @page(
+                name="details",
                 label="Details",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_details_page",
                     "children": [{"type": "Text", "binding": "title"}],
                 },
             )
-
-
             def load_details_page(context, page_id, params=None):
                 del context, page_id, params
                 return {"title": "详情"}
@@ -935,14 +1324,13 @@ def test_managed_page_renderer_row_action_without_params_does_not_forward_row_pa
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {
                             "type": "DataTable",
@@ -961,8 +1349,6 @@ def test_managed_page_renderer_row_action_without_params_does_not_forward_row_pa
                     ],
                 },
             )
-
-
             def load_dashboard_page(context, page_id, params=None):
                 del context, page_id, params
                 return {
@@ -973,19 +1359,16 @@ def test_managed_page_renderer_row_action_without_params_does_not_forward_row_pa
                 }
             """,
             "pages/details.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="details",
+            @page(
+                name="details",
                 label="Details",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_details_page",
                     "children": [{"type": "Text", "binding": "title"}],
                 },
             )
-
-
             def load_details_page(context, page_id, params=None):
                 del context, page_id, params
                 return {"title": "详情"}
@@ -1018,14 +1401,13 @@ def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtb
         module_name,
         files={
             "pages/dashboard.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="dashboard",
+            @page(
+                name="dashboard",
                 label="Dashboard",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_dashboard_page",
                     "children": [
                         {"type": "Text", "style": "body", "binding": "selected_phone"},
                         {
@@ -1043,8 +1425,6 @@ def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtb
                     ],
                 },
             )
-
-
             def load_dashboard_page(context, page_id, params=None):
                 del context, page_id
                 selected_phone = "none"
@@ -1057,19 +1437,16 @@ def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtb
                 }
             """,
             "pages/account_details.py": """
-            from crawler4j_contracts import PageSpec
+            from crawler4j_contracts import page
 
-            PAGE = PageSpec(
-                id="account_details",
+            @page(
+                name="account_details",
                 label="Account Details",
                 schema={
                     "type": "Page",
-                    "load_handler": "load_account_details_page",
                     "children": [{"type": "Text", "binding": "title"}],
                 },
             )
-
-
             def load_account_details_page(context, page_id, params=None):
                 del context, page_id, params
                 return {"title": "详情页"}
@@ -1090,10 +1467,7 @@ def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtb
         )
         qtbot.addWidget(page)
 
-        assert any(
-            label.text() == "params:dict|selected:13800138000"
-            for label in page.findChildren(QLabel)
-        )
+        assert any(label.text() == "params:dict|selected:13800138000" for label in page.findChildren(QLabel))
 
         open_button = next(button for button in page.findChildren(QPushButton) if button.text() == "打开详情页")
         open_button.click()
