@@ -32,12 +32,12 @@
     "sdk_build": {
       "command": "uv build --package crawler4j-sdk --out-dir /tmp/crawler4j-sdk-build-check",
       "result": "passed",
-      "details": "uv run build regenerated crawler4j-sdk 0.4.0 wheel/sdist under packages/crawler4j-sdk/dist on 2026-05-01; publish evidence is still pending"
+      "details": "uv run build regenerated crawler4j-sdk 0.4.0 wheel/sdist under packages/crawler4j-sdk/dist on 2026-05-18; publish is paused because crawler4j-contracts 0.4.0 cannot be re-uploaded to PyPI after prior filename deletion"
     },
     "contracts_build": {
       "command": "uv build --package crawler4j-contracts --out-dir /tmp/crawler4j-contracts-build-check",
       "result": "passed",
-      "details": "uv run build regenerated crawler4j-contracts 0.4.0 wheel/sdist under packages/crawler4j-contracts/dist on 2026-05-01; publish evidence is still pending"
+      "details": "uv run build regenerated crawler4j-contracts 0.4.0 wheel/sdist under packages/crawler4j-contracts/dist on 2026-05-18; PyPI rejected re-upload of crawler4j_contracts-0.4.0-py3-none-any.whl because the filename was previously used and deleted"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",
@@ -97,7 +97,7 @@
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
-    "crawler4j-sdk 0.4.0 and crawler4j-contracts 0.4.0 still need publish evidence if they are to be released externally."
+    "crawler4j-contracts 0.4.0 cannot be re-uploaded to PyPI because its wheel filename was previously used and deleted; crawler4j-sdk 0.4.0 publish is paused until a new compatible version is cut or the PyPI deletion blocker is resolved."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",
