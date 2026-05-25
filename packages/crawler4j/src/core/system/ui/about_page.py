@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from src.core.system.config_center import get_config_center
@@ -13,6 +13,31 @@ from src.ui.components.button import StyledButton
 from src.ui.components.check_box import ToggleSwitch
 
 
+class UpdateFlowThread(QThread):
+    """Run the packaged-app update flow away from the Qt UI thread."""
+
+    completed = pyqtSignal(bool, str)
+    failed = pyqtSignal(str)
+
+    def run(self) -> None:
+        try:
+            service = get_update_service()
+            started = bool(service.check_for_updates())
+            if started:
+                message = str(getattr(service, "last_action_message", "") or "已开始检查更新。")
+            else:
+                message = str(
+                    getattr(service, "last_action_message", "")
+                    or getattr(service, "availability_reason", "")
+                    or "当前无法检查更新。"
+                )
+        except Exception as exc:
+            self.failed.emit(str(exc) or "更新检查失败。")
+            return
+
+        self.completed.emit(started, message)
+
+
 class AboutPage(QWidget):
     """First-level about page shown in the main sidebar."""
 
@@ -21,6 +46,7 @@ class AboutPage(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._config = get_config_center()
+        self._update_worker: UpdateFlowThread | None = None
         self._setup_ui()
         self.load_data()
         self._config.config_changed.connect(self._on_config_changed)
@@ -284,16 +310,32 @@ class AboutPage(QWidget):
         self._trigger_update_flow()
 
     def _trigger_update_flow(self) -> None:
-        service = get_update_service()
-        if service.check_for_updates():
-            message = getattr(service, "last_action_message", "") or "已开始检查更新。"
-            self._show_update_status(message, tone="success")
+        if self._is_update_flow_running():
+            self._show_update_status("更新检查正在进行中，请稍候。", tone="muted")
             return
 
-        message = getattr(service, "last_action_message", "") or service.availability_reason or "当前无法检查更新。"
-        self._show_update_status(message, tone="error")
+        service = get_update_service()
+        if not bool(getattr(service, "is_supported", False)):
+            message = getattr(service, "availability_reason", "") or "当前无法检查更新。"
+            self._show_update_status(message, tone="error")
+            return
+
+        self._set_update_controls_busy(True)
+        self._show_update_status("正在检查并下载更新，请不要关闭客户端。", tone="muted")
+
+        worker = UpdateFlowThread()
+        worker.completed.connect(self._on_update_flow_completed)
+        worker.failed.connect(self._on_update_flow_failed)
+        worker.finished.connect(self._on_update_worker_finished)
+        worker.finished.connect(worker.deleteLater)
+        self._update_worker = worker
+        worker.start()
 
     def _refresh_update_controls(self) -> None:
+        if self._is_update_flow_running():
+            self._set_update_controls_busy(True)
+            return
+
         service = get_update_service()
         supported = bool(getattr(service, "is_supported", False))
         reason = str(getattr(service, "availability_reason", "") or "").strip()
@@ -304,6 +346,35 @@ class AboutPage(QWidget):
             self._show_update_status("打包版将使用宿主内置更新器处理检查与升级。", tone="muted")
             return
         self._show_update_status(reason or "当前更新器不可用。", tone="muted")
+
+    def _is_update_flow_running(self) -> bool:
+        return self._update_worker is not None and self._update_worker.isRunning()
+
+    def _set_update_controls_busy(self, busy: bool) -> None:
+        if busy:
+            for button in (self.check_update_btn, self.upgrade_btn):
+                button.setEnabled(False)
+            return
+
+        service = get_update_service()
+        supported = bool(getattr(service, "is_supported", False))
+        reason = str(getattr(service, "availability_reason", "") or "").strip()
+        for button in (self.check_update_btn, self.upgrade_btn):
+            button.setEnabled(supported)
+            button.setToolTip("" if supported else reason)
+
+    def _on_update_flow_completed(self, started: bool, message: str) -> None:
+        self._set_update_controls_busy(False)
+        self._show_update_status(message, tone="success" if started else "error")
+
+    def _on_update_flow_failed(self, message: str) -> None:
+        self._set_update_controls_busy(False)
+        self._show_update_status(message or "更新检查失败。", tone="error")
+
+    def _on_update_worker_finished(self) -> None:
+        worker = self.sender()
+        if worker is self._update_worker:
+            self._update_worker = None
 
     def _show_update_status(self, message: str, *, tone: str) -> None:
         color = {

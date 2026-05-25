@@ -220,6 +220,8 @@ descriptor = ctx.db.describe("accounts")
 }
 ```
 
+`custom_table` 查询会把 `columns` 与 `system_fields` 作为同一份可读字段集合。`ctx.db.from_("...").execute()` 和 `select("*")` 会返回业务字段以及 `created_at` / `updated_at`；显式 `select(["created_at"])`、`where(["created_at", ">=", ts])`、`order_by("updated_at")` 也可以直接使用这些只读系统字段。系统字段仍然不可写。
+
 `managed_dataset` 的业务字段仍在 `columns` 中；宿主快照字段在 `system_fields` 中。只有 `run_status` / `record_status` 是可写系统字段，`record_index`、`record_key`、`created_at`、`updated_at` 仍只读。
 
 例如 `accounts` 是托管快照表时：

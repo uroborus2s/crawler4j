@@ -411,7 +411,7 @@ def test_runtime_ctx_db_supports_upsert_update_delete_and_batch(temp_data_dir):
 
     assert results[0] is True
     assert isinstance(results[1], str)
-    assert caps.db.from_("accounts").order_by("id").execute() == [
+    assert caps.db.from_("accounts").select(["id", "status"]).order_by("id").execute() == [
         {"id": "u1", "status": "ready"},
         {"id": "u3", "status": "ready"},
     ]
@@ -460,7 +460,9 @@ def test_runtime_ctx_db_update_delete_accept_query_builder_callable_where(temp_d
         )
         == 2
     )
-    assert caps.db.from_("accounts").order_by("id").execute() == [{"id": "u1", "status": "ready"}]
+    assert caps.db.from_("accounts").select(["id", "status"]).order_by("id").execute() == [
+        {"id": "u1", "status": "ready"}
+    ]
 
 
 def test_runtime_ctx_db_delete_where_accepts_custom_table_record_key_value(temp_data_dir):
@@ -477,7 +479,40 @@ def test_runtime_ctx_db_delete_where_accepts_custom_table_record_key_value(temp_
         is True
     )
     assert caps.db.into("accounts").delete_where(where="u2") == 1
-    assert caps.db.from_("accounts").order_by("id").execute() == [{"id": "u1", "status": "ready"}]
+    assert caps.db.from_("accounts").select(["id", "status"]).order_by("id").execute() == [
+        {"id": "u1", "status": "ready"}
+    ]
+
+
+def test_runtime_ctx_db_custom_table_can_read_system_fields(temp_data_dir):
+    _sync_custom_accounts(temp_data_dir, module_name="demo_module")
+    caps = build_runtime_capabilities("demo_module")
+
+    assert (
+        caps.db.into("accounts").upsert(
+            [
+                {"id": "u1", "status": "ready"},
+                {"id": "u2", "status": "blocked"},
+            ]
+        )
+        is True
+    )
+
+    rows = (
+        caps.db.from_("accounts")
+        .select(["id", "created_at", "updated_at"])
+        .where(["created_at", ">=", 0])
+        .order_by("updated_at", "asc")
+        .execute()
+    )
+
+    assert [row["id"] for row in rows] == ["u1", "u2"]
+    assert all(isinstance(row["created_at"], int) for row in rows)
+    assert all(isinstance(row["updated_at"], int) for row in rows)
+
+    wildcard_rows = caps.db.from_("accounts").select("*").order_by("id").execute()
+
+    assert {"created_at", "updated_at"} <= set(wildcard_rows[0])
 
 
 def test_runtime_ctx_db_add_supports_custom_table_auto_increment_ids(temp_data_dir):
@@ -487,7 +522,7 @@ def test_runtime_ctx_db_add_supports_custom_table_auto_increment_ids(temp_data_d
     inserted_ids = caps.db.into("accounts").add([{"status": "new"}, {"status": "ready"}])
 
     assert inserted_ids == [1, 2]
-    assert caps.db.from_("accounts").order_by("id").execute() == [
+    assert caps.db.from_("accounts").select(["id", "status"]).order_by("id").execute() == [
         {"id": 1, "status": "new"},
         {"id": 2, "status": "ready"},
     ]

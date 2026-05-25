@@ -19,12 +19,12 @@
 
 ## 2. 当前仓库相对正式发布的状态
 
-- 当前工作区根应用版本：`0.4.1`
-- 当前运行时版本：`0.4.1`
+- 当前工作区根应用版本：`0.4.2`
+- 当前运行时版本：`0.4.2`
 - 最近正式发布 tag：`v0.2.0`
 - SDK 当前版本：`0.4.1`
 - Contracts 当前版本：`0.4.1`
-- 当前工作区已切到 `0.4.1` 源码版本线，准备作为 `0.4.0` 分支并入 `main` 前的正式发布候选
+- 当前工作区根应用已切到 `0.4.2` 源码版本线，用于承接 Windows 客户端升级卡死修复；SDK / Contracts 仍保持 `0.4.1`
 - `crawler4j-sdk 0.4.1` 与 `crawler4j-contracts 0.4.1` 已按 `contracts -> sdk` 依赖顺序完成 PyPI 发布
 - SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
 - 当前 0.4.x 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult`，workflow/component 可选实现 `setup(ctx, workflow)` 和 `cleanup(ctx, outcome)`，环境回收由宿主收口
@@ -33,26 +33,26 @@
 
 | 项目 | 结果 |
 |---|---|
-| 版本相关单测（`test_version_service.py`、`test_vscode.py`） | 历史通过（2026-04-17 `5 passed`）；本轮未重跑 |
-| Root wheel/sdist build | 通过（2026-05-18 `uv run build` 产出 `crawler4j 0.4.1` wheel/sdist） |
+| 版本相关单测（`test_version_service.py`） | 通过（2026-05-18 `3 passed`） |
+| Root wheel/sdist build | 待按 `crawler4j 0.4.2` 重新构建 |
 | SDK wheel/sdist build | 通过（2026-05-18 `uv run build` 产出 `crawler4j-sdk 0.4.1` wheel/sdist） |
 | SDK publish | 通过（2026-05-18 `uv run publish crawler4j-sdk` 上传 0.4.1 到 PyPI） |
 | Contracts wheel/sdist build | 通过（2026-05-18 `uv run build` 产出 `crawler4j-contracts 0.4.1` wheel/sdist） |
 | Contracts publish | 通过（2026-05-18 `uv run publish crawler4j-contracts` 上传 0.4.1 到 PyPI） |
 | Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-05-18 `uv run deploy-macos-internal-release` 产出 `Crawler4j.app`、`Crawler4j-0.4.1.dmg`、`appcast.xml` 并上传 macOS 更新目录） |
-| Full test / lint / smoke | 通过（2026-05-18 `991 passed`，`ruff check .`、`uv lock --check`、`git diff --check` 通过） |
+| Full test / lint / smoke | 通过（2026-05-18 `992 passed`，`ruff check .`、`uv lock --check`、`jq empty .factory/project.json`、`git diff --check` 通过） |
 | Docs markdown tree | 历史通过（`docs-stratego source validate --repo-path .`）；本轮未重跑 |
 
 ## 4. 当前不建议直接发布的原因
 
-- `0.4.1` 对应的 Git tag、正式 release notes 与交付批次仍未完成
+- `0.4.2` 对应的 Git tag、正式 release notes 与交付批次仍未完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 - macOS 内部升级包已完成，本轮仍缺 Windows 真机签名、安装和自更新留证
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 复验 `0.4.1` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.4.2` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -73,3 +73,4 @@
 | 2026-04-29 | 将当前根应用 / 运行时版本提升到 `0.3.2`，并把 Root build 证据切回“需按新版本重跑”的发布口径 | Codex |
 | 2026-05-01 | 0.4.0 全面审查后同步发布证据：三包 wheel/sdist 构建、全量测试、lint、SDK CLI help、UI smoke 与 macOS `package-desktop` 均通过；正式发布仍因 `ctrip` 真站 E2E、Windows 真机证据、publish 与交付批次未闭环保持 No-Go | Codex |
 | 2026-05-18 | 将正式发布候选版本提升到 `0.4.1`，绕开 PyPI 0.4.0 删除文件名不可复用阻塞；已完成 SDK / Contracts PyPI 发布与 macOS 客户端升级包发布 | Codex |
+| 2026-05-18 | 仅将根应用 / 运行时版本提升到 `0.4.2`，用于后续 Windows 客户端修复版升级包；SDK / Contracts 继续保持 `0.4.1` | Codex |
