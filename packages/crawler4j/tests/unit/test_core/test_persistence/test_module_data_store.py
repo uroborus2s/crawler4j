@@ -432,6 +432,45 @@ def test_module_data_store_describes_custom_table_manual_key_as_required_writabl
     assert descriptor["read_only_fields"] == ["created_at", "updated_at"]
 
 
+def test_module_data_store_custom_table_query_can_read_system_fields(temp_data_dir):
+    from src.core.persistence.module_data_store import ModuleDataStore
+
+    store = ModuleDataStore()
+    _declare_custom_accounts(store, temp_data_dir)
+    assert (
+        store.upsert_resource_records(
+            "demo_module",
+            "accounts",
+            [
+                {"id": "u1", "status": "ready"},
+                {"id": "u2", "status": "blocked"},
+            ],
+        )
+        is True
+    )
+
+    rows = store.query_resource_records(
+        "demo_module",
+        "accounts",
+        select=["id", "created_at", "updated_at"],
+        where=["created_at", ">=", 0],
+        order_by=[{"field": "updated_at", "direction": "asc"}],
+    )
+
+    assert [row["id"] for row in rows] == ["u1", "u2"]
+    assert all(isinstance(row["created_at"], int) for row in rows)
+    assert all(isinstance(row["updated_at"], int) for row in rows)
+
+    wildcard_rows = store.query_resource_records(
+        "demo_module",
+        "accounts",
+        select=["*"],
+        order_by=[{"field": "id", "direction": "asc"}],
+    )
+
+    assert {"created_at", "updated_at"} <= set(wildcard_rows[0])
+
+
 def test_module_data_store_executes_managed_dataset_query_plan(temp_data_dir):
     from src.core.persistence.module_data_store import ModuleDataStore
 

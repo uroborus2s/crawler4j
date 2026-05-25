@@ -320,6 +320,20 @@ def _with_data_source_write_contract(descriptor: dict[str, Any]) -> dict[str, An
     return descriptor
 
 
+def _queryable_data_source_fields(descriptor: dict[str, Any]) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in [*descriptor.get("columns", []), *descriptor.get("system_fields", [])]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        if not name or name in seen:
+            continue
+        fields.append(dict(item))
+        seen.add(name)
+    return fields
+
+
 def _db_view_name(module_name: str, view_id: str) -> str:
     _validate_snake_case_identifier(module_name)
     _validate_snake_case_identifier(view_id)
@@ -3017,12 +3031,13 @@ class ModuleDataStore:
         join_sources: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         join_sources = list(join_sources or [])
+        base_query_fields = _queryable_data_source_fields(descriptor)
+        join_query_fields = {
+            join["alias"]: _queryable_data_source_fields(join["descriptor"]) for join in join_sources
+        }
         source_columns = {
-            "base": {column["name"]: column for column in descriptor["columns"]},
-            **{
-                join["alias"]: {column["name"]: column for column in join["descriptor"]["columns"]}
-                for join in join_sources
-            },
+            "base": {column["name"]: column for column in base_query_fields},
+            **{alias: {column["name"]: column for column in columns} for alias, columns in join_query_fields.items()},
         }
 
         def resolve_field(field: str) -> str:
@@ -3049,15 +3064,15 @@ class ModuleDataStore:
         if not select_items and not group_by:
             select_sql = [
                 f"base.{_quote_identifier(column['name'])} AS {_quote_identifier(column['name'])}"
-                for column in descriptor["columns"]
+                for column in base_query_fields
             ]
-            selected_aliases.update(column["name"] for column in descriptor["columns"])
+            selected_aliases.update(column["name"] for column in base_query_fields)
         for item in select_items:
             kind = str(item.get("kind") or "column")
             if kind == "column":
                 raw_field = str(item.get("field") or "")
                 if raw_field == "*":
-                    for column in descriptor["columns"]:
+                    for column in base_query_fields:
                         field = column["name"]
                         if field not in selected_aliases:
                             select_sql.append(f"{resolve_field(field)} AS {_quote_identifier(field)}")

@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-05-25 `custom_table` 查询层已补齐宿主 `system_fields` 可读能力。Core relation 查询现在将业务 `columns` 与只读系统字段合并为可查询字段集合，默认 `ctx.db.from_(...).execute()`、`select("*")`、显式 `select(["created_at", "updated_at"])`、按 `created_at` 过滤和按 `updated_at` 排序均可返回/使用宿主自动维护的日期字段；写入侧仍保持只读约束。根应用版本事实源保持 `crawler4j 0.4.2`，未提升 SDK / Contracts。
 - 发布计划：2026-05-18 根应用 / 运行时版本已单独提升到 `0.4.2`，用于后续 Windows 客户端修复版升级包；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。验证已通过 `uv lock --check`、版本服务单测、全量测试、lint、JSON 与 diff 检查。本次按用户要求只提交到 `0.4.0` 分支，暂不创建 PR、不合并 `main`。
 - 最新修复：2026-05-18 Windows 客户端点击 `关于 -> 检查更新/升级` 后长时间“未响应”的问题已定位为 UI 主线程同步执行 Velopack `check_for_updates/download_updates/apply_updates_and_restart`。当前已改为后台 `QThread` 执行宿主自更新流程，执行期间按钮禁用并显示下载提示，完成后恢复按钮和结果文案；新增回归锁定更新流程不得在 UI 线程运行。
 - 历史发布计划：2026-05-18 发布候选曾从 `0.4.0` 提升到 `0.4.1`，用于绕开 PyPI 0.4.0 删除文件名不可复用阻塞；SDK / Contracts 已按 `0.4.1` 发布到 PyPI，macOS 0.4.1 客户端升级包已生成上传。根应用现已进一步单独提升到 `0.4.2`。
