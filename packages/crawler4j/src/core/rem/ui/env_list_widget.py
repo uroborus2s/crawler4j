@@ -650,7 +650,7 @@ class EnvListWidget(QWidget):
 
         self.refresh_btn = StyledButton("刷新", variant="primary", min_height=36)
         self.refresh_btn.setMinimumWidth(64)
-        self.refresh_btn.clicked.connect(lambda: self.load_data(run_gc=True, reload_from_db=True))
+        self.refresh_btn.clicked.connect(lambda: self.load_data(run_gc=False, reload_from_db=True))
         header.addWidget(self.refresh_btn)
         
         layout.addLayout(header)

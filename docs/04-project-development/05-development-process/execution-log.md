@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `API-010`, `BUG-013`
-**最后更新：** 2026-05-11
+**最后更新：** 2026-05-26
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-05-26 | 将根应用 / 运行时版本提升到 `0.4.3` 并发布 macOS 客户端更新包：`uv run build crawler4j` 产出 `crawler4j-0.4.3` wheel/sdist，`uv run deploy-macos-internal-release` 产出 `Crawler4j-0.4.3.dmg` 与 `appcast.xml` 并上传远程 macOS 更新目录；Windows 更新包仍需在 Windows 构建机补齐 | Codex |
+| 2026-05-26 | 修复 REM 环境列表刷新误触发 GC：刷新按钮改为只从数据库重载环境池并刷新列表，不再执行 `run_gc`，避免外部 provider `exists()` 判定失败时把 READY 环境误删；环境删除继续只通过“清理环境”或显式销毁入口发生。定向回归 `test_env_list_widget.py` 为 `23 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-05-11 | 收口 Hosted UI 内联 `DataTable` 查询契约：Contracts 新增固定 `HostedDataTableQuery` / 泛型 `HostedDataTableQueryResult[RowT]` / `HostedDataTableSortSpec`；runtime bridge 按 `(context, query)` 调用 query handler，不再传 `table_id`；renderer 只从显式 `searchable=True` 的 `DataTable.columns` 推导搜索字段并过滤非法排序字段，未声明列默认不可搜索；要求返回 `HostedDataTableQueryResult`，普通 dict 返回值 fail-fast，结果不再回传 `sort`；同步 SDK 校验、开发者指南、设计文档和 `.factory/memory/`；定向回归 `65 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
 | 2026-05-11 | 收口 `TaskContext` 边界：Contracts 删除 `screenshot()`、`run_subtask()` 和 `_subtask_executor`，保留 Core MMS 实际注入的 `run_page_action()`；核查 Core 未发现真实截图工具实现，REM 能力示例注释不再列 screenshot；同步开发者指南、设计说明和 `.factory/memory/`；定向回归 `31 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
 | 2026-05-11 | 修正 `ctx.db.from_(...).execute()` 默认分页语义：Contracts 仅在显式调用 `.limit(...)` / `.offset(...)` 后写入分页值，Core SQL 渲染缺省分页时不再追加 `LIMIT/OFFSET`，默认读取满足条件的全部行；新增 managed_dataset/custom_table 超过 100 行默认全量读取回归，开发者指南和 `.factory/memory/` 已同步；定向回归 `121 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |

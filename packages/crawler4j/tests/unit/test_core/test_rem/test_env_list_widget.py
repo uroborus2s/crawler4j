@@ -461,7 +461,7 @@ def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypat
     widget.load_data.assert_called_once_with()
 
 
-def test_env_list_widget_refresh_requests_pool_reload(qtbot, monkeypatch):
+def test_env_list_widget_refresh_only_reloads_pool_from_db(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
     _ControlledLoaderThread.instances.clear()
     monkeypatch.setattr(env_list_widget, "DataLoaderThread", _ControlledLoaderThread)
@@ -480,7 +480,7 @@ def test_env_list_widget_refresh_requests_pool_reload(qtbot, monkeypatch):
     widget.refresh_btn.click()
 
     assert len(_ControlledLoaderThread.instances) == 1
-    assert _ControlledLoaderThread.instances[0]._run_gc is True
+    assert _ControlledLoaderThread.instances[0]._run_gc is False
     assert _ControlledLoaderThread.instances[0]._reload_from_db is True
 
 
