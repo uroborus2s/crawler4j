@@ -241,7 +241,7 @@ async def test_ensure_provider_runtime_for_virtualbrowser(manager):
         await manager.ensure_provider_runtime("virtualbrowser")
 
     app_service.ensure_running.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER, timeout=30)
-    app_service.wait_until_ready.assert_awaited_once_with(ExternalApp.VIRTUALBROWSER, timeout=30)
+    app_service.wait_until_ready.assert_not_awaited()
 
 
 @pytest.mark.asyncio

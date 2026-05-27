@@ -76,6 +76,12 @@ class _DummyHttpClient:
         return _DummyResponse({}, response_data=self._response_data)
 
 
+def test_virtualbrowser_client_uses_loopback_base_url():
+    client = VirtualBrowserClient(port=9002, api_key="")
+
+    assert client.base_url == "http://127.0.0.1:9002"
+
+
 @pytest.mark.asyncio
 async def test_add_browser_defaults_to_no_proxy_when_proxy_not_provided():
     client = VirtualBrowserClient(port=9002, api_key="")
@@ -205,9 +211,61 @@ async def test_add_browser_surfaces_http_failure_response_body(monkeypatch):
             },
         )
 
-    assert error_messages == [
-        '[VirtualBrowser] addBrowser failed: status=500 body={"success":false,"error":"ERR_PROXY_AUTHENTICATION_FAILED"}'
-    ]
+    assert len(error_messages) == 1
+    assert "endpoint=http://127.0.0.1:9002" in error_messages[0]
+    assert 'status=500 body={"success":false,"error":"ERR_PROXY_AUTHENTICATION_FAILED"}' in error_messages[0]
+    assert "bad-user" in error_messages[0]
+    assert "bad-pass" not in error_messages[0]
+    assert '"pass": "***"' in error_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_add_browser_retries_relay_failure_before_success(monkeypatch):
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(
+        responses=[
+            {
+                "success": False,
+                "status_code": 500,
+                "error_message": "Relay failed to localhost:9000",
+            },
+            {
+                "response_data": {"id": 202},
+            },
+        ]
+    )
+    warning_messages: list[str] = []
+    sleep_delays: list[float] = []
+
+    async def _fake_get_client():
+        return dummy
+
+    async def _fake_sleep(delay):
+        sleep_delays.append(delay)
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+    monkeypatch.setattr(provider_module.asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(provider_module.logger, "warning", lambda message: warning_messages.append(str(message)))
+
+    browser_id = await client.add_browser(
+        name="env-retry",
+        group_ids=[],
+        proxy={
+            "protocol": "socks5",
+            "host": "127.0.0.1",
+            "port": 1080,
+            "user": "u",
+            "pass": "secret",
+        },
+    )
+
+    assert browser_id == 202
+    assert [path for path, _ in dummy.calls] == ["/api/addBrowser", "/api/addBrowser"]
+    assert sleep_delays == [provider_module.VIRTUALBROWSER_ADD_BROWSER_RETRY_DELAY_SECONDS]
+    assert len(warning_messages) == 1
+    assert "Relay failed to localhost:9000" in warning_messages[0]
+    assert "secret" not in warning_messages[0]
+    assert '"pass": "***"' in warning_messages[0]
 
 
 @pytest.mark.asyncio
