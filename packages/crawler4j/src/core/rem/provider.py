@@ -18,6 +18,49 @@ from src.core.rem.virtualbrowser_fingerprint import materialize_virtualbrowser_f
 
 VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS = tuple(range(146, 138, -1))
 VIRTUALBROWSER_DEFAULT_CHROME_VERSION = 145
+VIRTUALBROWSER_ADD_BROWSER_MAX_ATTEMPTS = 10
+VIRTUALBROWSER_ADD_BROWSER_RETRY_DELAY_SECONDS = 1.0
+_SENSITIVE_PAYLOAD_KEYS = {
+    "api",
+    "api-key",
+    "apikey",
+    "pass",
+    "password",
+    "proxy_password",
+    "proxypassword",
+}
+
+
+def _mask_url_credentials(value: str) -> str:
+    if "://" not in value or "@" not in value:
+        return value
+    scheme, rest = value.split("://", 1)
+    _, suffix = rest.rsplit("@", 1)
+    return f"{scheme}://***@{suffix}"
+
+
+def _sanitize_payload_for_log(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[Any, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).lower().replace("-", "_")
+            if normalized_key in _SENSITIVE_PAYLOAD_KEYS and item:
+                sanitized[key] = "***"
+            else:
+                sanitized[key] = _sanitize_payload_for_log(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_payload_for_log(item) for item in value]
+    if isinstance(value, str):
+        return _mask_url_credentials(value)
+    return value
+
+
+def _payload_for_log(payload: dict[str, Any]) -> str:
+    try:
+        return json.dumps(_sanitize_payload_for_log(payload), ensure_ascii=False)
+    except TypeError:
+        return str(_sanitize_payload_for_log(payload))
 
 
 def _normalize_cdp_endpoint(value: Any) -> str | None:
@@ -1047,15 +1090,44 @@ class VirtualBrowserClient:
     """Virtual Browser Management API 客户端。"""
     
     def __init__(self, port: int, api_key: str = ""):
-        self.base_url = f"http://localhost:{port}"
+        self.base_url = f"http://127.0.0.1:{port}"
         self.headers = {"api-key": api_key} if api_key else {}
         self.client = None
 
     async def _get_client(self):
         import httpx
         if not self.client:
-            self.client = httpx.AsyncClient(base_url=self.base_url, headers=self.headers, timeout=30.0)
+            self.client = httpx.AsyncClient(
+                base_url=self.base_url,
+                headers=self.headers,
+                timeout=30.0,
+                trust_env=False,
+            )
         return self.client
+
+    @staticmethod
+    def _response_body(resp: Any, data: Any) -> str:
+        body = (getattr(resp, "text", "") or "").strip()
+        if not body and data is not None:
+            try:
+                body = json.dumps(data, ensure_ascii=False)
+            except TypeError:
+                body = str(data)
+        return body
+
+    @staticmethod
+    def _build_add_browser_detail(resp: Any, body: str) -> str:
+        detail = f"status={getattr(resp, 'status_code', 'unknown')}"
+        if body:
+            detail = f"{detail} body={body}"
+        return detail
+
+    @staticmethod
+    def _is_retryable_add_browser_failure(resp: Any, body: str) -> bool:
+        status_code = getattr(resp, "status_code", 0)
+        if status_code not in {500, 502, 503, 504}:
+            return False
+        return "relay failed" in body.lower()
 
     async def add_browser(
         self,
@@ -1122,41 +1194,41 @@ class VirtualBrowserClient:
         for key, value in fingerprint_payload.items():
             payload[key] = value
 
-        resp = await client.post("/api/addBrowser", json=payload)
-        try:
-            data = resp.json()
-        except Exception:
-            data = None
+        safe_payload = _payload_for_log(payload)
+        max_attempts = VIRTUALBROWSER_ADD_BROWSER_MAX_ATTEMPTS
 
-        body = (resp.text or "").strip()
-        if not body and data is not None:
+        for attempt in range(1, max_attempts + 1):
+            logger.debug(
+                f"[VirtualBrowser] addBrowser request: endpoint={self.base_url} "
+                f"attempt={attempt}/{max_attempts} payload={safe_payload}"
+            )
+            resp = await client.post("/api/addBrowser", json=payload)
             try:
-                body = json.dumps(data, ensure_ascii=False)
-            except TypeError:
-                body = str(data)
+                data = resp.json()
+            except Exception:
+                data = None
 
-        if not resp.is_success:
-            detail = f"status={resp.status_code}"
-            if body:
-                detail = f"{detail} body={body}"
-            logger.error(f"[VirtualBrowser] addBrowser failed: {detail}")
+            body = self._response_body(resp, data)
+            if resp.is_success and isinstance(data, dict) and data.get("success"):
+                return data["data"]["id"]
+
+            detail = self._build_add_browser_detail(resp, body)
+            if attempt < max_attempts and self._is_retryable_add_browser_failure(resp, body):
+                logger.warning(
+                    f"[VirtualBrowser] addBrowser transient failure, retrying: "
+                    f"endpoint={self.base_url} attempt={attempt}/{max_attempts} "
+                    f"detail={detail} payload={safe_payload}"
+                )
+                await asyncio.sleep(VIRTUALBROWSER_ADD_BROWSER_RETRY_DELAY_SECONDS)
+                continue
+
+            logger.error(
+                f"[VirtualBrowser] addBrowser failed: endpoint={self.base_url} "
+                f"attempts={attempt}/{max_attempts} detail={detail} payload={safe_payload}"
+            )
             raise RuntimeError(f"VirtualBrowser addBrowser 失败: {detail}")
 
-        if not isinstance(data, dict):
-            detail = f"status={resp.status_code}"
-            if body:
-                detail = f"{detail} body={body}"
-            logger.error(f"[VirtualBrowser] addBrowser failed: {detail}")
-            raise RuntimeError(f"VirtualBrowser addBrowser 失败: {detail}")
-
-        if not data.get("success"):
-            detail = f"status={resp.status_code}"
-            if body:
-                detail = f"{detail} body={body}"
-            logger.error(f"[VirtualBrowser] addBrowser failed: {detail}")
-            raise RuntimeError(f"VirtualBrowser addBrowser 失败: {detail}")
-        
-        return data["data"]["id"]
+        raise RuntimeError("VirtualBrowser addBrowser 失败: retry loop exhausted")
 
     async def randomize_fingerprint(self, browser_id: int, config: dict | None = None) -> bool:
         """更新/随机化指纹。
