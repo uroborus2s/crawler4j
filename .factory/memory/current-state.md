@@ -18,8 +18,9 @@
 ## 最近条目
 
 - 最新修复：2026-05-30 已修复开发模块源码目录扫描对 `.venv/` symlink 的误报。Core manifest lock 校验和 SDK 打包文件收集现在先跳过 `.venv/`、`dist/`、`build/`、`.git/`、缓存目录与 `*.egg-info/`，再对真实模块文件执行 symlink 拒绝和路径越界检查；DevLink/源码预检不再因为 `.venv/bin/python3` 报“模块文件不能是符号链接”，非忽略目录 symlink 与 ZIP 内 symlink/路径穿越仍保持拒绝。定向回归覆盖源码预检与 SDK `_archive_members()`。
+- 最新修复：2026-05-27 VirtualBrowser 启动就绪与 `addBrowser` 诊断已增强。ExternalApp 对 VirtualBrowser 不再只用根路径端口探测判定 API 就绪，而是调用 `/api/getBrowserList` 并要求返回 `success=true`；VirtualBrowser 本地管理 API 请求统一使用 `127.0.0.1` 且不读取系统代理；`addBrowser` 对启动期 `Relay failed` 5xx 做短重试，并在失败日志中输出 endpoint、attempt、响应正文和脱敏 payload。根应用版本事实源提升到 `crawler4j 0.4.4`，SDK / Contracts 继续保持 `0.4.1`。
 - 最新修复：2026-05-26 REM 环境列表刷新误删环境已修复。刷新按钮现在只从数据库重载环境池并刷新列表，不再执行 `run_gc`，避免 VirtualBrowser `exists()` 外部判定不稳时误删 READY 环境；“清理环境”和显式销毁仍保留删除入口。根应用版本事实源提升到 `crawler4j 0.4.3`，SDK / Contracts 继续保持 `0.4.1`。
-- 发布计划：2026-05-26 根应用 / 运行时版本已单独提升到 `0.4.3`，用于 REM 环境列表刷新误删环境的客户端修复版；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。macOS Sparkle 更新包已生成并上传远程更新目录；当前还需推远端、创建 PR 合并到 `main`，Windows 更新包需在 Windows 构建机补齐。
+- 发布计划：2026-05-27 根应用 / 运行时版本已单独提升到 `0.4.4`，用于 VirtualBrowser 启动就绪竞态和 `addBrowser` relay 500 诊断修复版；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前需推远端、创建 PR 合并到 `main`，Windows 更新包需在 Windows 构建机补齐。
 - 最新修复：2026-05-18 Windows 客户端点击 `关于 -> 检查更新/升级` 后长时间“未响应”的问题已定位为 UI 主线程同步执行 Velopack `check_for_updates/download_updates/apply_updates_and_restart`。当前已改为后台 `QThread` 执行宿主自更新流程，执行期间按钮禁用并显示下载提示，完成后恢复按钮和结果文案；新增回归锁定更新流程不得在 UI 线程运行。
 - 历史发布计划：2026-05-18 发布候选曾从 `0.4.0` 提升到 `0.4.1`，用于绕开 PyPI 0.4.0 删除文件名不可复用阻塞；SDK / Contracts 已按 `0.4.1` 发布到 PyPI，macOS 0.4.1 客户端升级包已生成上传。根应用后续曾单独提升到 `0.4.2`，当前已进一步提升到 `0.4.3`。
 - 发布阻塞：2026-05-18 已重建 `crawler4j-contracts 0.4.0` / `crawler4j-sdk 0.4.0` wheel 与 sdist，并尝试按依赖顺序执行 `uv run publish crawler4j-contracts`。PyPI 返回 `400 This filename was previously used by a file that has since been deleted`，说明 `crawler4j_contracts-0.4.0-py3-none-any.whl` 曾上传后删除，PyPI 不允许复用同一文件名；因此 `crawler4j-contracts 0.4.0` 不能重发，`crawler4j-sdk 0.4.0` 暂不发布以避免依赖 `crawler4j-contracts>=0.4.0,<0.5.0` 无法解析。后续外部发布需改发新版本号或通过 PyPI 项目管理侧处理历史删除记录。

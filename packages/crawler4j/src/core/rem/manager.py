@@ -995,15 +995,6 @@ class EnvironmentManager:
                 stage="CREATE",
                 hint="请检查外部浏览器路径、端口和启动状态",
             )
-
-        # 防止“进程存在但 API 尚未可用”导致 create 阶段出现 502。
-        ready = await app_service.wait_until_ready(app, timeout=timeout)
-        if not ready:
-            raise EnvUnavailableError(
-                f"{app.value} API 未就绪",
-                stage="CREATE",
-                hint="请检查外部浏览器启动日志并确认 API 端口可访问",
-            )
     
     
     # === 原有私有方法 ===

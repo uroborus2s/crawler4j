@@ -160,7 +160,7 @@ class ExternalAppService:
         
         start_time = asyncio.get_event_loop().time()
         while (asyncio.get_event_loop().time() - start_time) < timeout:
-            if await self._check_port_available(port):
+            if await self._check_app_api_ready(app_enum, port):
                 logger.info(f"[ExternalApp] {app_enum.value} API 已就绪")
                 return True
             await asyncio.sleep(1)
@@ -191,7 +191,15 @@ class ExternalAppService:
         # 1. 检测是否已运行
         if await self.is_running(app_enum):
             logger.info(f"[ExternalApp] {display_name} 已在运行")
-            return AppLaunchResult(success=True)
+            if await self.wait_until_ready(app_enum, timeout=timeout):
+                return AppLaunchResult(success=True)
+            msg = f"{display_name} API 等待超时 ({timeout}秒)，请手动检查应用是否正常运行"
+            logger.error(f"[ExternalApp] {msg}")
+            return AppLaunchResult(
+                success=False,
+                error_code="TIMEOUT",
+                error_message=msg
+            )
         
         # 2. 获取并验证应用路径
         app_path = self._get_app_path(app_enum)
@@ -271,6 +279,44 @@ class ExternalAppService:
         
         config = APP_CONFIG[app]
         return int(get_config_center().get(config["config_key_port"]))
+
+    async def _check_app_api_ready(self, app: ExternalApp, port: int) -> bool:
+        """检查应用管理 API 是否达到可执行业务接口的就绪状态。"""
+        if app == ExternalApp.VIRTUALBROWSER:
+            return await self._check_virtualbrowser_api_ready(port)
+        return await self._check_port_available(port)
+
+    async def _check_virtualbrowser_api_ready(self, port: int) -> bool:
+        """通过 VirtualBrowser 管理接口判断真实就绪，避免端口刚监听就创建环境。"""
+        import httpx
+
+        from src.core.system.config_center import get_config_center
+
+        api_key = str(get_config_center().get("browser.virtualbrowser.apikey") or "").strip()
+        headers = {"api-key": api_key} if api_key else {}
+        url = f"http://127.0.0.1:{port}/api/getBrowserList"
+
+        try:
+            async with httpx.AsyncClient(timeout=2.0, headers=headers, trust_env=False) as client:
+                resp = await client.get(url)
+            body = (resp.text or "").strip()
+            try:
+                data = resp.json()
+            except Exception:
+                data = None
+            if resp.is_success and isinstance(data, dict) and data.get("success") is True:
+                return True
+            logger.debug(
+                f"[ExternalApp] virtualbrowser API 未就绪: status={resp.status_code} body={body[:300]}"
+            )
+            return False
+        except httpx.ConnectError:
+            return False
+        except httpx.ReadTimeout:
+            return False
+        except Exception as e:
+            logger.debug(f"[ExternalApp] virtualbrowser API 就绪检测失败: {e}")
+            return False
     
     async def _check_port_available(self, port: int) -> bool:
         """检查端口是否有目标服务响应。
@@ -283,7 +329,7 @@ class ExternalAppService:
         import httpx
         
         try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
+            async with httpx.AsyncClient(timeout=2.0, trust_env=False) as client:
                 resp = await client.get(f"http://127.0.0.1:{port}/")
                 return resp.status_code < 500
         except httpx.ConnectError:
