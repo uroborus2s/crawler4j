@@ -7,7 +7,7 @@
 **上游输入：** `version-governance.md` | `release-notes.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** `delivery-package.md` | 发布决策 | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-003`, `REL-004`, `TASK-017`, `REQ-009`, `REQ-0401`, `NFR-003`
-**最后更新：** 2026-05-18
+**最后更新：** 2026-05-30
 
 ## 1. 使用范围
 
@@ -17,7 +17,7 @@
 
 | 类别 | 检查项 | 证据 | 当前基线状态 |
 |---|---|---|---|
-| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 已具备（当前根应用源码线为 `0.4.4`，最近正式 tag 仍为 `v0.2.0`，本轮 VirtualBrowser 修复范围定向回归已覆盖） |
+| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 已具备（当前根应用源码线为 `0.4.5`，最近正式 tag 仍为 `v0.2.0`，本轮开发模块忽略目录 symlink 修复范围定向回归已覆盖） |
 | 版本 | 当前工作区版本、最近正式 tag、SDK/Contracts 版本口径清楚 | `release-notes.md` | 已具备 |
 | 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备（2026-05-18 复验为 `992 passed`） |
 | 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备（2026-05-18 复验通过） |
@@ -40,7 +40,7 @@
 ## 4. 当前阻塞项
 
 1. `ctrip` 真实站点 E2E 仍未按 `ctrip-real-site-e2e-closeout.md` 完成本轮 DevLink + ZIP 双链回放并留证；当前只复验了 DevLink 活跃状态、fresh ZIP 预检和历史真实登录日志。
-2. 当前 `0.4.4` 对应的 Git tag / GitHub release 资产与本次交付批次未在本轮复核闭环；SDK / Contracts PyPI publish 与 macOS 0.4.3 客户端升级包已完成。
+2. 当前 `0.4.5` 对应的 Git tag / GitHub release 资产与本次交付批次未在本轮复核闭环；SDK / Contracts PyPI publish 与 macOS 0.4.3 客户端升级包已完成。
 3. 当前虽已具备 Windows `PyInstaller onedir + Velopack` 发布链，但本轮仍缺 Windows 真机签名、安装、升级留证与正式下载地址，不能声称“Windows 交付包已放行”。
 
 ## 5. 变更记录
@@ -53,6 +53,7 @@
 | 2026-05-18 | 根应用版本提升到 `0.4.2`，用于后续 Windows 修复版客户端升级包；Root build 和 Windows 真机升级证据仍需按新版本补齐 | Codex |
 | 2026-05-26 | 根应用版本提升到 `0.4.3`，用于 REM 环境列表刷新误删环境修复；Root build 与 macOS Sparkle 更新包已补齐，Windows 真机升级证据仍需在 Windows 构建机补齐 | Codex |
 | 2026-05-27 | 根应用版本提升到 `0.4.4`，用于 VirtualBrowser 启动就绪竞态、`addBrowser` relay 500 重试与脱敏诊断日志修复；正式 tag / release 资产仍需后续补齐 | Codex |
+| 2026-05-30 | 根应用版本提升到 `0.4.5`，用于开发模块源码目录保留 `.venv/` 时跳过忽略目录 symlink 的客户端修复；正式 tag / release 资产仍需后续补齐 | Codex |
 | 2026-04-30 | 增补 docs-stratego 文档主版本 gate：发布前必须确认主入口指向当前已发布版本，历史版本保留，开发中版本不得成为默认主文档 | Codex |
 | 2026-04-30 | 将 `REQ-009` 发布 gate 从固定资源池队列改为环境候选队列：候选纯函数、模块环境授权、FIFO 补位与等待超时收口是当前正式验证项 | Codex |
 | 2026-04-22 | 追加 Windows 发布链现状：`package-windows-release` 与 Velopack 宿主更新入口已落地，但正式 gate 仍缺 Windows 真机签名、安装、升级证据，因此结论继续保持 `No-Go` | Codex |

@@ -26,8 +26,8 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.4.4` | 当前仓库 HEAD 已切到 0.4.4 客户端修复版本 |
-| 根应用运行时版本 | `0.4.4` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.4.5` | 当前仓库 HEAD 已切到 0.4.5 客户端修复版本 |
+| 根应用运行时版本 | `0.4.5` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
 | SDK | `0.4.1` | 当前工作区 SDK 版本；CLI 命令树、脚手架与开发者文档已同步到 0.4.x，并已按 0.4.1 发布到 PyPI |
 | Contracts | `0.4.1` | 当前工作区 Contracts 版本；共享契约与 SDK / Core README、发布文档口径已同步收口，并已按 0.4.1 发布到 PyPI |
@@ -36,19 +36,19 @@
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前根应用已经切到 `0.4.4`，但 Git tag 仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为 `0.4.4` 已正式打 tag 并发布。
+- 当前根应用已经切到 `0.4.5`，但 Git tag 仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为 `0.4.5` 已正式打 tag 并发布。
 - 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.4`
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.5`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.4.4` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.4.5` Git tag 与正式 release 资产
 7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
@@ -68,3 +68,4 @@
 | 2026-05-18 | 仅将根应用 / 运行时版本提升到 `0.4.2`，用于承接 Windows 客户端升级卡死修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
 | 2026-05-26 | 仅将根应用 / 运行时版本提升到 `0.4.3`，用于承接 REM 环境列表刷新误触发 GC 的客户端修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
 | 2026-05-27 | 仅将根应用 / 运行时版本提升到 `0.4.4`，用于承接 VirtualBrowser 启动就绪竞态、`addBrowser` relay 500 重试与脱敏诊断日志修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
+| 2026-05-30 | 仅将根应用 / 运行时版本提升到 `0.4.5`，用于承接开发模块源码扫描跳过 `.venv/` 等忽略目录内 symlink 的客户端修复；SDK / Contracts 继续保持 `0.4.1` | Codex |

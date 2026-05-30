@@ -289,21 +289,42 @@ def test_install_rejects_stale_manifest_lock_file_hashes(temp_data_dir):
         registry.install(archive)
 
 
-def test_install_rejects_symlink_even_inside_ignored_directory(temp_data_dir):
+def test_validate_source_skips_symlink_inside_ignored_directory(temp_data_dir):
     package_root = _build_module_dir(
         temp_data_dir,
         package_dir_name="demo_module_pkg",
         module_name="demo_module",
     )
-    ignored_dir = package_root / "dist"
-    ignored_dir.mkdir(exist_ok=True)
-    (ignored_dir / "outside_link").symlink_to(temp_data_dir)
+    ignored_dir = package_root / ".venv" / "bin"
+    ignored_dir.mkdir(parents=True)
+    (ignored_dir / "python3").symlink_to("python")
+    _write_manifest_lock(package_root, module_name="demo_module", version="1.0.0")
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+
+    manifest, warnings = registry.validate_source(package_root)
+
+    assert manifest.name == "demo_module"
+    assert warnings == []
+
+
+def test_validate_source_rejects_symlinked_module_file(temp_data_dir):
+    package_root = _build_module_dir(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+    )
+    link_path = package_root / "data" / "linked_external_task.py"
+    try:
+        link_path.symlink_to(package_root / "tasks" / "external_task.py")
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
     _write_manifest_lock(package_root, module_name="demo_module", version="1.0.0")
 
     registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
 
     with pytest.raises(ModuleInstallError, match="符号链接"):
-        registry.install(package_root)
+        registry.validate_source(package_root)
 
 
 def test_install_rejects_zip_path_traversal(temp_data_dir):

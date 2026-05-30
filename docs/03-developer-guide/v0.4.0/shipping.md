@@ -34,6 +34,8 @@ uv run crawler4j check release
 
 `package build` 会先执行 full gate 再刷新 lock；因为 full gate 要求已有 lock 且未过期，发布前必须先运行 `manifest lock`。
 
+源码目录里的 `.venv/`、`dist/`、`build/`、`.git/`、缓存目录和 `*.egg-info/` 不进入 manifest lock 或 ZIP 文件集合。这些忽略目录内的 symlink 不会阻断打包；模块源码、数据、页面、工作流等实际交付文件里的 symlink 仍会被拒绝。`package verify` 对正式 ZIP 包的安全策略不变：ZIP 内 symlink 和路径穿越仍然失败。
+
 ## 构建 ZIP
 
 ```bash

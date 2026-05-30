@@ -10,11 +10,12 @@
 - 活跃工作项：21
 - 阻塞项：0
 - 开放风险：1
-- 当前源码版本基线：`crawler4j 0.4.4`、`crawler4j-sdk 0.4.1`、`crawler4j-contracts 0.4.1`；最近正式 Git tag：`v0.2.0`
-- 当前 PyPI 发布状态：`crawler4j-contracts 0.4.0` 重发曾被 PyPI 拒绝，因为对应 wheel 文件名曾上传后删除且不可复用；SDK / Contracts 发布候选已提升到 `0.4.1`，并已按 `contracts -> sdk` 顺序发布到 PyPI；根应用单独提升到 `0.4.4` 用于 VirtualBrowser 启动就绪竞态、`addBrowser` relay 500 重试与脱敏诊断日志修复版。
+- 当前源码版本基线：`crawler4j 0.4.5`、`crawler4j-sdk 0.4.1`、`crawler4j-contracts 0.4.1`；最近正式 Git tag：`v0.2.0`
+- 当前 PyPI 发布状态：`crawler4j-contracts 0.4.0` 重发曾被 PyPI 拒绝，因为对应 wheel 文件名曾上传后删除且不可复用；SDK / Contracts 发布候选已提升到 `0.4.1`，并已按 `contracts -> sdk` 顺序发布到 PyPI；根应用单独提升到 `0.4.5` 用于开发模块源码目录跳过 `.venv/` 等忽略目录内 symlink 的客户端修复版。
 - 当前 0.4.x 边界：本分支只支持 Core 0.4.0 / `core-native-v2`，SDK 与 Contracts 已破坏性升级；0.3.x SDK / Contracts / 旧开发方式在 0.3.x 分支维护，不在当前分支兼容。
 - 当前 0.4.x SDK 初始化入口：新手优先使用 `uvx --from crawler4j-sdk crawler4j module init` 交互式输入模块名与 `owner/repo`，非必填项走默认值；脚本化/资深开发者仍可完整传参执行。
 - 当前 0.4.x 模块根目录固定入口：`module.yaml` 只放静态清单，`.crawler4j/manifest.lock.json` 是 SDK 生成扫描快照；`interfaces/` 放 `@interface`，`objects/` 放 `@component`，`workflows/` 放 `@workflow`，`tasks/` 放 `@page_action` 浏览器页面操作，`data/` 放 `@data_table/@data_view`，`pages/` 放 `@page` 与 `@ui_action` Hosted UI 用户操作，`candidates/` 放 `@env_candidates`，`cleanups/` 放 `@env_cleanup_candidates`。详细目录说明维护在 `docs/03-developer-guide/v0.4.0/module-structure.md`，DDD 与代码边界规则维护在 `docs/03-developer-guide/v0.4.0/architecture-rules.md`。
+- 当前 0.4.x 源码目录扫描：manifest lock、DevLink/源码预检和 SDK 打包文件收集先跳过 `.venv/`、`dist/`、`build/`、`.git/`、缓存目录与 `*.egg-info/`，再对真实模块文件执行 symlink 拒绝；ZIP 包内 symlink 和路径穿越仍保持拒绝。
 - 当前 0.4.x 对象装配入口：`@component/@workflow` 的 `inject` 与 component 对象参数可继续写在装饰器参数里，也可通过类属性或 `__init__` 参数上的 `Annotated[..., object_inject(...)]` / `Annotated[..., object_param(...)]` 声明；Contracts、SDK scanner、Core descriptor 已统一归一到 `InjectSpec` / `ParameterSpec`。`object_param` 参数类型覆盖 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`，结构化参数通过 `schema` / `item_schema` 描述。ATM 运行模板 UI 使用公共 `ObjectGraphTree`，以 `workflow -> interface 绑定行 -> 子 interface/参数` 树形展示对象图；绑定行左侧显示 interface 中文 `label(name)`，右侧下拉框显示 component 中文 `label(name)`，interface 选择写入 `object_bindings`，component 创建参数写入 `object_params`。
 - 当前 0.4.x 数据表/视图入口：`module.yaml.data` 不是正式事实源，模块数据表和只读视图只由 `@data_table` / `@data_view` 进入 manifest lock 后同步；`ctx.db.describe(source)` 以逻辑数据源名读取宿主归一化契约，返回 `columns/system_fields/writable_fields/required_fields/read_only_fields` 等字段；`ctx.db.from_(...).execute()` 没有隐式分页上限，未调用 `limit/offset` 时读取满足条件的全部行；`@data_table` 默认 `custom_table`，主键由 `record_key_field` 指向 schema 字段，integer 主键可声明 `auto_increment=True` 并通过 `ctx.db.into(...).add(...)` 省略 id 新增；旧快照表语义必须显式写 `storage_mode="managed_dataset"` 并继续落到 `data.db.module_datasets`，支持单源 `where` 后 `count(*)` 统计；`@data_view` 只允许引用 `custom_table` 并由宿主创建只读 SQLite view。
 - 最近交接包：无

@@ -79,10 +79,29 @@ LEGACY_HOSTED_UI_PATHS: tuple[tuple[str, str], ...] = (
 REQUIRED_RUNTIME_API = CORE_NATIVE_V2_RUNTIME_API
 MAX_ZIP_ENTRIES = 10_000
 MAX_ZIP_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+IGNORED_MODULE_DIRS = frozenset(
+    {
+        ".git",
+        ".idea",
+        ".venv",
+        ".vscode",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "__pycache__",
+        "build",
+        "dist",
+    }
+)
+IGNORED_MODULE_FILES = frozenset({".DS_Store"})
 
 
 class CLIError(RuntimeError):
     """Raised when a CLI action cannot be completed safely."""
+
+
+def _is_ignored_module_path(relative: Path, ignored_dirs: frozenset[str] = IGNORED_MODULE_DIRS) -> bool:
+    return any(part in ignored_dirs or part.endswith(".egg-info") for part in relative.parts)
 
 
 class _UniqueKeySafeLoader(yaml.SafeLoader):
@@ -373,31 +392,18 @@ def _v2_declaration_names(module_root: Path, manifest: dict[str, Any], kind: str
 
 
 def _iter_manifest_lock_files(module_root: Path) -> list[Path]:
-    ignored_dirs = {
-        ".git",
-        ".idea",
-        ".venv",
-        ".vscode",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "__pycache__",
-        "build",
-        "dist",
-    }
-    ignored_files = {".DS_Store", ".crawler4j/manifest.lock.json"}
     root = module_root.resolve()
     files: list[Path] = []
     for path in module_root.rglob("*"):
         relative = path.relative_to(module_root)
         relative_posix = relative.as_posix()
-        if any(part in ignored_dirs or part.endswith(".egg-info") for part in relative.parts):
+        if _is_ignored_module_path(relative):
             continue
         if path.is_symlink():
             raise CLIError(f"模块文件不能是符号链接: {relative_posix}")
         if path.is_dir():
             continue
-        if path.name in ignored_files or relative_posix in ignored_files:
+        if path.name in IGNORED_MODULE_FILES or relative_posix == ".crawler4j/manifest.lock.json":
             continue
         if path.suffix in {".pyc", ".pyo"}:
             continue
@@ -1009,32 +1015,17 @@ def _run_check(level: str, module_root: Path) -> int:
 
 
 def _archive_members(module_root: Path, archive_root: str) -> list[tuple[Path, str]]:
-    ignored_dirs = {
-        ".git",
-        ".idea",
-        ".venv",
-        ".vscode",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "__pycache__",
-        "build",
-        "dist",
-    }
-    ignored_files = {".DS_Store"}
     root = module_root.resolve()
     members: list[tuple[Path, str]] = []
     for path in module_root.rglob("*"):
         relative = path.relative_to(module_root)
+        if _is_ignored_module_path(relative):
+            continue
         if path.is_symlink():
             raise CLIError(f"模块文件不能是符号链接: {relative.as_posix()}")
-        if any(part in ignored_dirs for part in relative.parts):
-            continue
-        if any(part.endswith(".egg-info") for part in relative.parts):
-            continue
         if path.is_dir():
             continue
-        if path.name in ignored_files:
+        if path.name in IGNORED_MODULE_FILES:
             continue
         if path.suffix in {".pyc", ".pyo"}:
             continue

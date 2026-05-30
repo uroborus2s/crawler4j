@@ -614,6 +614,22 @@ def test_archive_members_rejects_symlinked_module_files(tmp_path: Path):
         commands._archive_members(module_root, "demo_model")
 
 
+def test_archive_members_skips_symlink_inside_ignored_directory(tmp_path: Path):
+    module_root = _init_module(tmp_path)
+    ignored_dir = module_root / ".venv" / "bin"
+    ignored_dir.mkdir(parents=True)
+    link_path = ignored_dir / "python3"
+    try:
+        link_path.symlink_to("python")
+    except OSError:
+        pytest.skip("filesystem does not support symlinks")
+
+    members = commands._archive_members(module_root, "demo_model")
+    archived_paths = {arcname for _, arcname in members}
+
+    assert "demo_model/.venv/bin/python3" not in archived_paths
+
+
 def test_package_verify_rejects_zip_path_traversal(tmp_path: Path, capsys):
     archive_path = tmp_path / "evil.zip"
     with zipfile.ZipFile(archive_path, "w") as zf:
