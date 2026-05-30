@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 发布计划：2026-05-30 根应用 / 运行时版本已单独提升到 `0.4.5`，用于开发模块源码目录保留 `.venv/` 时跳过忽略目录 symlink 的客户端修复版；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前需推远端、创建 PR 合并到 `main`，Windows/macOS 更新包需在构建机补齐。
 - 最新修复：2026-05-30 已修复开发模块源码目录扫描对 `.venv/` symlink 的误报。Core manifest lock 校验和 SDK 打包文件收集现在先跳过 `.venv/`、`dist/`、`build/`、`.git/`、缓存目录与 `*.egg-info/`，再对真实模块文件执行 symlink 拒绝和路径越界检查；DevLink/源码预检不再因为 `.venv/bin/python3` 报“模块文件不能是符号链接”，非忽略目录 symlink 与 ZIP 内 symlink/路径穿越仍保持拒绝。定向回归覆盖源码预检与 SDK `_archive_members()`。
 - 最新修复：2026-05-27 VirtualBrowser 启动就绪与 `addBrowser` 诊断已增强。ExternalApp 对 VirtualBrowser 不再只用根路径端口探测判定 API 就绪，而是调用 `/api/getBrowserList` 并要求返回 `success=true`；VirtualBrowser 本地管理 API 请求统一使用 `127.0.0.1` 且不读取系统代理；`addBrowser` 对启动期 `Relay failed` 5xx 做短重试，并在失败日志中输出 endpoint、attempt、响应正文和脱敏 payload。根应用版本事实源提升到 `crawler4j 0.4.4`，SDK / Contracts 继续保持 `0.4.1`。
 - 最新修复：2026-05-26 REM 环境列表刷新误删环境已修复。刷新按钮现在只从数据库重载环境池并刷新列表，不再执行 `run_gc`，避免 VirtualBrowser `exists()` 外部判定不稳时误删 READY 环境；“清理环境”和显式销毁仍保留删除入口。根应用版本事实源提升到 `crawler4j 0.4.3`，SDK / Contracts 继续保持 `0.4.1`。
