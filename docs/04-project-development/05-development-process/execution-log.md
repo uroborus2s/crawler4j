@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `API-010`, `BUG-013`
-**最后更新：** 2026-05-26
+**最后更新：** 2026-05-30
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-05-30 | 修复开发模块源码目录扫描对 `.venv/` symlink 的误报：Core manifest lock 校验和 SDK 打包文件收集先跳过 `.venv/`、`dist/`、`build/`、缓存目录与 `*.egg-info/`，再对真实模块文件执行 symlink 拒绝；ZIP 内 symlink 与路径穿越安全策略不变。新增 DevLink/源码预检与 SDK `_archive_members()` 回归，定向用例 `4 passed` | Codex |
 | 2026-05-26 | 将根应用 / 运行时版本提升到 `0.4.3` 并发布 macOS 客户端更新包：`uv run build crawler4j` 产出 `crawler4j-0.4.3` wheel/sdist，`uv run deploy-macos-internal-release` 产出 `Crawler4j-0.4.3.dmg` 与 `appcast.xml` 并上传远程 macOS 更新目录；Windows 更新包仍需在 Windows 构建机补齐 | Codex |
 | 2026-05-26 | 修复 REM 环境列表刷新误触发 GC：刷新按钮改为只从数据库重载环境池并刷新列表，不再执行 `run_gc`，避免外部 provider `exists()` 判定失败时把 READY 环境误删；环境删除继续只通过“清理环境”或显式销毁入口发生。定向回归 `test_env_list_widget.py` 为 `23 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-05-11 | 收口 Hosted UI 内联 `DataTable` 查询契约：Contracts 新增固定 `HostedDataTableQuery` / 泛型 `HostedDataTableQueryResult[RowT]` / `HostedDataTableSortSpec`；runtime bridge 按 `(context, query)` 调用 query handler，不再传 `table_id`；renderer 只从显式 `searchable=True` 的 `DataTable.columns` 推导搜索字段并过滤非法排序字段，未声明列默认不可搜索；要求返回 `HostedDataTableQueryResult`，普通 dict 返回值 fail-fast，结果不再回传 `sort`；同步 SDK 校验、开发者指南、设计文档和 `.factory/memory/`；定向回归 `65 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |

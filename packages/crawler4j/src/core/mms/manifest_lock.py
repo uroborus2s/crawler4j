@@ -10,10 +10,8 @@ from typing import Any
 from src.core.mms.models import ModuleInstallError, ModuleManifest
 
 CORE_NATIVE_V2_RUNTIME_API = "core-native-v2"
-
-
-def _iter_manifest_lock_files(module_root: Path) -> list[Path]:
-    ignored_dirs = {
+IGNORED_MODULE_DIRS = frozenset(
+    {
         ".git",
         ".idea",
         ".venv",
@@ -25,19 +23,27 @@ def _iter_manifest_lock_files(module_root: Path) -> list[Path]:
         "build",
         "dist",
     }
-    ignored_files = {".DS_Store", ".crawler4j/manifest.lock.json"}
+)
+IGNORED_MODULE_FILES = frozenset({".DS_Store", ".crawler4j/manifest.lock.json"})
+
+
+def _is_ignored_module_path(relative: Path, ignored_dirs: frozenset[str] = IGNORED_MODULE_DIRS) -> bool:
+    return any(part in ignored_dirs or part.endswith(".egg-info") for part in relative.parts)
+
+
+def _iter_manifest_lock_files(module_root: Path) -> list[Path]:
     root = module_root.resolve()
     files: list[Path] = []
     for path in module_root.rglob("*"):
         relative = path.relative_to(module_root)
         relative_posix = relative.as_posix()
+        if _is_ignored_module_path(relative):
+            continue
         if path.is_symlink():
             raise ModuleInstallError(f"模块文件不能是符号链接: {relative_posix}")
-        if any(part in ignored_dirs or part.endswith(".egg-info") for part in relative.parts):
-            continue
         if path.is_dir():
             continue
-        if path.name in ignored_files or relative_posix in ignored_files:
+        if path.name in IGNORED_MODULE_FILES or relative_posix in IGNORED_MODULE_FILES:
             continue
         if path.suffix in {".pyc", ".pyo"}:
             continue

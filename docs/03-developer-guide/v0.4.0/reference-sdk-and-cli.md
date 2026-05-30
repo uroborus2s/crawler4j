@@ -106,6 +106,8 @@ uv run crawler4j manifest lock
 
 生成前会复用 full gate 的装饰器、对象图和运行时代码诊断，但不要求已有 lock。阻断错误存在时不会写 lock。正常顺序是 `check structure` -> `manifest lock` -> `check full`。
 
+manifest lock 的文件完整性列表会先跳过 `.git/`、`.venv/`、`.pytest_cache/`、`.ruff_cache/`、`build/`、`dist/`、`*.egg-info/` 等本地开发和构建目录。忽略目录里的解释器 symlink 不会阻断 DevLink 或 lock 生成；未被忽略、会进入模块文件集合的 symlink 仍会被拒绝。
+
 ## 模块打开阶段诊断
 
 SDK 在这些入口必须执行同一套诊断：
@@ -117,6 +119,8 @@ SDK 在这些入口必须执行同一套诊断：
 - `crawler4j package build`
 
 保留字段冲突必须在开发阶段阻断，不能等到运行时失败。
+
+源码目录扫描和打包文件收集使用同一套忽略路径判断：先排除不会进入 manifest/ZIP 的本地目录，再对真实模块文件执行 symlink 拒绝和路径越界检查。ZIP 包验证仍然拒绝 ZIP 内 symlink 和路径穿越。
 
 ## 迁移边界
 
