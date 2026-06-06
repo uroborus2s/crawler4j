@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-06-06 已针对 VirtualBrowser 多并发启动导致客户端假死的问题收口宿主侧启动链。`VirtualBrowserProvider` 现在对创建环境 `addBrowser`、打开窗口 `launchBrowser` 和 Playwright/CDP `connect` 使用同一生命周期锁串行执行，避免 3 个以上任务同时冲击 VirtualBrowser 本地管理 API 与 CDP 连接阶段；新增并发 `open()` 回归锁定 `launchBrowser` 不会并发进入。定向验证：`uv run pytest packages/crawler4j/tests/unit/test_core/test_rem/test_provider.py -q` => `10 passed`；`uv run pytest packages/crawler4j/tests/unit/test_core/test_rem/test_provider.py packages/crawler4j/tests/unit/test_core/test_rem/test_virtualbrowser_client.py -q` => `25 passed`；目标文件 `uv run ruff check ...` 通过。尚未完成 Windows 真机客户端 smoke 与真实 VirtualBrowser 多并发留证。
 - 发布计划：2026-05-30 根应用 / 运行时版本已单独提升到 `0.4.5`，用于开发模块源码目录保留 `.venv/` 时跳过忽略目录 symlink 的客户端修复版；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前需推远端、创建 PR 合并到 `main`，Windows/macOS 更新包需在构建机补齐。
 - 最新修复：2026-05-30 已修复开发模块源码目录扫描对 `.venv/` symlink 的误报。Core manifest lock 校验和 SDK 打包文件收集现在先跳过 `.venv/`、`dist/`、`build/`、`.git/`、缓存目录与 `*.egg-info/`，再对真实模块文件执行 symlink 拒绝和路径越界检查；DevLink/源码预检不再因为 `.venv/bin/python3` 报“模块文件不能是符号链接”，非忽略目录 symlink 与 ZIP 内 symlink/路径穿越仍保持拒绝。定向回归覆盖源码预检与 SDK `_archive_members()`。
 - 最新修复：2026-05-27 VirtualBrowser 启动就绪与 `addBrowser` 诊断已增强。ExternalApp 对 VirtualBrowser 不再只用根路径端口探测判定 API 就绪，而是调用 `/api/getBrowserList` 并要求返回 `success=true`；VirtualBrowser 本地管理 API 请求统一使用 `127.0.0.1` 且不读取系统代理；`addBrowser` 对启动期 `Relay failed` 5xx 做短重试，并在失败日志中输出 endpoint、attempt、响应正文和脱敏 payload。根应用版本事实源提升到 `crawler4j 0.4.4`，SDK / Contracts 继续保持 `0.4.1`。

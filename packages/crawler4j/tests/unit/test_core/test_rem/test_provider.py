@@ -1,5 +1,6 @@
 """Provider 注册测试。"""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import patch
@@ -77,6 +78,52 @@ async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
         match="VirtualBrowser launchBrowser 失败: Launch Error: DevTools port not detected",
     ):
         await provider.open(env)
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_open_serializes_launch_operations(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env_a = Environment(
+        id=101,
+        name="vb-env-a",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="101"),
+    )
+    env_b = Environment(
+        id=102,
+        name="vb-env-b",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="102"),
+    )
+    active_launches = 0
+    max_active_launches = 0
+    launch_order: list[int] = []
+
+    async def launch_browser(browser_id: int) -> str:
+        nonlocal active_launches, max_active_launches
+        active_launches += 1
+        max_active_launches = max(max_active_launches, active_launches)
+        launch_order.append(browser_id)
+        await asyncio.sleep(0)
+        active_launches -= 1
+        return f"http://localhost:{browser_id}"
+
+    client = SimpleNamespace(launch_browser=AsyncMock(side_effect=launch_browser))
+
+    monkeypatch.setattr(provider, "is_window_open", AsyncMock(return_value=False))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await asyncio.gather(provider.open(env_a), provider.open(env_b)) == [True, True]
+    assert max_active_launches == 1
+    assert launch_order == [101, 102]
+    assert env_a.handle is not None
+    assert env_b.handle is not None
+    assert env_a.handle.ws_url == "http://localhost:101"
+    assert env_b.handle.ws_url == "http://localhost:102"
 
 
 @pytest.mark.asyncio

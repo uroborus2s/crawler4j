@@ -1500,6 +1500,12 @@ class VirtualBrowserProvider(BaseProvider):
     
     _client_cache: VirtualBrowserClient | None = None
     _client_config: tuple[int, str] | None = None  # (port, api_key)
+    _lifecycle_lock: asyncio.Lock | None = None
+
+    def _get_lifecycle_lock(self) -> asyncio.Lock:
+        if self._lifecycle_lock is None:
+            self._lifecycle_lock = asyncio.Lock()
+        return self._lifecycle_lock
 
     def _get_api_client(self) -> VirtualBrowserClient:
         from src.core.system.config_center import get_config_center
@@ -1567,8 +1573,9 @@ class VirtualBrowserProvider(BaseProvider):
         
         logger.info(f"[VirtualBrowser] Creating env '{name}'...")
         
-        # 调用 API 创建
-        browser_id = await client.add_browser(name, groups, proxy, fingerprint)
+        # VirtualBrowser 的本地管理 API 对并发创建/启动不稳定，串行化避免拖死宿主 UI 事件循环。
+        async with self._get_lifecycle_lock():
+            browser_id = await client.add_browser(name, groups, proxy, fingerprint)
         
         if config.get("launch", True):
              # launch parameter is now ignored in create
@@ -1737,24 +1744,25 @@ class VirtualBrowserProvider(BaseProvider):
             logger.error("[VirtualBrowser] No browser_id found for open operation")
             return False
         
-        # 安全检查：窗口是否已打开
-        if await self.is_window_open(env):
-            logger.info(f"[VirtualBrowser] 窗口已打开，跳过重复打开: id={browser_id}")
-            return True
-        
-        try:
-            browser_id_int = int(browser_id)
-            client = self._get_api_client()
-            ws_url = await client.launch_browser(browser_id_int)
-            logger.info(f"[VirtualBrowser] Opened browser {browser_id}")
-            
-            # 存储 ws_url 到 BrowserHandle
-            handle.ws_url = ws_url
-            return True
-        except Exception as e:
-            message = f"VirtualBrowser launchBrowser 失败: {e}"
-            logger.error(f"[VirtualBrowser] Failed to open browser {browser_id}: {e}")
-            raise RuntimeError(message) from e
+        async with self._get_lifecycle_lock():
+            # 安全检查：窗口是否已打开
+            if await self.is_window_open(env):
+                logger.info(f"[VirtualBrowser] 窗口已打开，跳过重复打开: id={browser_id}")
+                return True
+
+            try:
+                browser_id_int = int(browser_id)
+                client = self._get_api_client()
+                ws_url = await client.launch_browser(browser_id_int)
+                logger.info(f"[VirtualBrowser] Opened browser {browser_id}")
+
+                # 存储 ws_url 到 BrowserHandle
+                handle.ws_url = ws_url
+                return True
+            except Exception as e:
+                message = f"VirtualBrowser launchBrowser 失败: {e}"
+                logger.error(f"[VirtualBrowser] Failed to open browser {browser_id}: {e}")
+                raise RuntimeError(message) from e
 
     async def _hydrate_ws_url(self, handle: BrowserHandle) -> str | None:
         """尽量从 VirtualBrowser 详情中恢复可连接的 ws_url。"""
@@ -1804,19 +1812,20 @@ class VirtualBrowserProvider(BaseProvider):
             logger.error("[VirtualBrowser] Cannot connect: No handle")
             return False
 
-        if not handle.ws_url:
-            if not await self._hydrate_ws_url(handle):
-                logger.error(
-                    f"[VirtualBrowser] Cannot connect: Missing ws_url and cannot resolve browser detail "
-                    f"for browser {handle.browser_id}"
-                )
-                return False
-        
-        # 使用 BrowserHandle 的 safe_connect 方法
-        result = await handle.safe_connect()
-        if result:
-            logger.info(f"[VirtualBrowser] Connected Playwright to browser {handle.browser_id}")
-        return result
+        async with self._get_lifecycle_lock():
+            if not handle.ws_url:
+                if not await self._hydrate_ws_url(handle):
+                    logger.error(
+                        f"[VirtualBrowser] Cannot connect: Missing ws_url and cannot resolve browser detail "
+                        f"for browser {handle.browser_id}"
+                    )
+                    return False
+
+            # 使用 BrowserHandle 的 safe_connect 方法
+            result = await handle.safe_connect()
+            if result:
+                logger.info(f"[VirtualBrowser] Connected Playwright to browser {handle.browser_id}")
+            return result
         
     async def close(self, env: Environment) -> bool:
         """关闭 VirtualBrowser 窗口（不删除配置）。"""
