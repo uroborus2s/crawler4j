@@ -126,6 +126,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-06 | 补充指纹浏览器生命周期并发串行化回归：`test_provider.py` / `test_bitbrowser_provider.py` 新增并发 `close()` / `destroy()` / `reset()` 用例，锁定同一 provider 的外部管理 API 不会并发冲击本地服务，并覆盖 handle 缺失但 `external_id` 存在时仍删除真实外部环境；provider / client / manager 入口组合回归为 `53 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-06-06 | 补充 VirtualBrowser 并发启动串行化回归：`test_provider.py` 新增并发 `open()` 用例，锁定同一 `VirtualBrowserProvider` 在多个环境同时启动时不会并发调用 `launchBrowser`；组合回归 `test_provider.py` + `test_virtualbrowser_client.py` 为 `25 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-05-18 | 发布候选提升到 `0.4.1` 后完成 fresh gate：`uv lock --check`、全量 `991 passed`、`ruff check .`、三包 `uv run build`、SDK/Contracts PyPI publish 与 macOS Sparkle 客户端升级包发布均通过；正式发布仍缺 `ctrip` 真站 E2E、Windows 真机证据与 Git tag / GitHub release 资产 | Codex |
 | 2026-04-27 | 历史记录：当时仅同步文档/记忆/版本事实，未新增全量测试、包构建、PyInstaller 打包或发布证据；该缺口已在 2026-05-01 对 0.4.0 build 与 macOS package-desktop 补证，publish 仍待补 | Codex |
