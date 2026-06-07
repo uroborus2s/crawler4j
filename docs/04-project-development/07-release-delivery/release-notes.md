@@ -7,7 +7,7 @@
 **上游输入：** Git tag | `docs/04-project-development/02-discovery/current-state-analysis.md` | 本地构建结果  
 **下游输出：** 后续正式 release notes | `delivery-package.md`（待需要时补齐）  
 **关联 ID：** `REL-001`, `REL-002`, `BUG-001`, `CR-001`  
-**最后更新：** 2026-05-27
+**最后更新：** 2026-06-07
 
 ## 1. 最新已知正式发布
 
@@ -19,12 +19,12 @@
 
 ## 2. 当前仓库相对正式发布的状态
 
-- 当前工作区根应用版本：`0.4.4`
-- 当前运行时版本：`0.4.4`
+- 当前工作区根应用版本：`0.4.6`
+- 当前运行时版本：`0.4.6`
 - 最近正式发布 tag：`v0.2.0`
 - SDK 当前版本：`0.4.1`
 - Contracts 当前版本：`0.4.1`
-- 当前工作区根应用已切到 `0.4.4` 源码版本线，用于承接 VirtualBrowser 启动就绪竞态、`addBrowser` relay 500 重试与脱敏诊断日志修复；SDK / Contracts 仍保持 `0.4.1`
+- 当前工作区根应用已切到 `0.4.6` 源码版本线，用于承接指纹浏览器生命周期串行化修复，降低多并发创建、启动、关闭、销毁和重置环境时拖死外部浏览器管理 API 与宿主事件循环的风险；SDK / Contracts 仍保持 `0.4.1`
 - `crawler4j-sdk 0.4.1` 与 `crawler4j-contracts 0.4.1` 已按 `contracts -> sdk` 依赖顺序完成 PyPI 发布
 - SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
 - 当前 0.4.x 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult`，workflow/component 可选实现 `setup(ctx, workflow)` 和 `cleanup(ctx, outcome)`，环境回收由宿主收口
@@ -33,26 +33,26 @@
 
 | 项目 | 结果 |
 |---|---|
-| 版本相关单测（`test_version_service.py`） | 通过（2026-05-18 `3 passed`） |
-| Root wheel/sdist build | 通过（2026-05-26 `uv run build crawler4j` 产出 `crawler4j 0.4.3` wheel/sdist） |
+| 版本相关单测（`test_version_service.py`） | 通过（2026-06-07 `3 passed`） |
+| Root wheel/sdist build | 历史通过（2026-05-26 `uv run build crawler4j` 产出 `crawler4j 0.4.3` wheel/sdist；当前 0.4.6 尚未刷新 root build） |
 | SDK wheel/sdist build | 通过（2026-05-18 `uv run build` 产出 `crawler4j-sdk 0.4.1` wheel/sdist） |
 | SDK publish | 通过（2026-05-18 `uv run publish crawler4j-sdk` 上传 0.4.1 到 PyPI） |
 | Contracts wheel/sdist build | 通过（2026-05-18 `uv run build` 产出 `crawler4j-contracts 0.4.1` wheel/sdist） |
 | Contracts publish | 通过（2026-05-18 `uv run publish crawler4j-contracts` 上传 0.4.1 到 PyPI） |
 | Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-05-26 `uv run deploy-macos-internal-release` 产出 `Crawler4j.app`、`Crawler4j-0.4.3.dmg`、`appcast.xml` 并上传 macOS 更新目录） |
-| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；本轮 0.4.4 修复范围通过 VirtualBrowser readiness / REM runtime / 版本服务定向回归 `34 passed`、目标 `ruff check`、`uv lock --check`、`jq empty .factory/project.json` 与 `git diff --check` |
+| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；本轮 0.4.6 版本修正与指纹浏览器生命周期范围通过版本服务 + REM lifecycle 定向回归 `56 passed`、目标 `ruff check` 与 `uv lock --check` |
 | Docs markdown tree | 历史通过（`docs-stratego source validate --repo-path .`）；本轮未重跑 |
 
 ## 4. 当前不建议直接发布的原因
 
-- `0.4.4` 对应的 Git tag、正式 GitHub release 与交付批次仍未完成
+- `0.4.6` 对应的 Git tag、正式 GitHub release 与交付批次仍未完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 - macOS 内部升级包已完成，本轮仍缺 Windows 真机签名、安装和自更新留证
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 复验 `0.4.4` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.4.6` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -77,3 +77,5 @@
 | 2026-05-26 | 仅将根应用 / 运行时版本提升到 `0.4.3`，用于发布 REM 环境列表刷新不触发 GC 的客户端修复版；SDK / Contracts 继续保持 `0.4.1` | Codex |
 | 2026-05-26 | 完成 `crawler4j 0.4.3` root wheel/sdist 构建与 macOS Sparkle 更新包发布：生成 `Crawler4j-0.4.3.dmg` / `appcast.xml` 并上传远程 macOS 更新目录；Windows 更新包仍需在 Windows 构建机补齐 | Codex |
 | 2026-05-27 | 仅将根应用 / 运行时版本提升到 `0.4.4`，用于发布 VirtualBrowser 启动就绪竞态与 `addBrowser` relay 500 诊断修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
+| 2026-05-30 | 仅将根应用 / 运行时版本提升到 `0.4.5`，用于发布开发模块源码扫描跳过忽略目录内 symlink 的客户端修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
+| 2026-06-07 | 仅将根应用 / 运行时版本修正提升到 `0.4.6`，用于发布指纹浏览器生命周期串行化修复；SDK / Contracts 继续保持 `0.4.1` | Codex |

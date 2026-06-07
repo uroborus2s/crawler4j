@@ -2,22 +2,22 @@
 
 - Latest formal release tag: `v0.2.0` on 2026-04-20
 - Current workspace root version: `0.0.0`
-- Current app package version: `0.4.5`
-- Runtime package version: `0.4.5`
+- Current app package version: `0.4.6`
+- Runtime package version: `0.4.6`
 - SDK version: `0.4.1`
 - Contracts version: `0.4.1`
 
 Evidence status:
 
-- Root build: latest recorded artifact passed on 2026-05-26 for `crawler4j 0.4.3`; current `crawler4j 0.4.5` package build is not yet refreshed
-- Desktop PyInstaller / macOS Sparkle bundle: latest recorded artifact passed on 2026-05-26 for `crawler4j 0.4.3`; current `crawler4j 0.4.5` desktop bundle is not yet refreshed
+- Root build: latest recorded artifact passed on 2026-05-26 for `crawler4j 0.4.3`; current `crawler4j 0.4.6` package build is not yet refreshed
+- Desktop PyInstaller / macOS Sparkle bundle: latest recorded artifact passed on 2026-05-26 for `crawler4j 0.4.3`; current `crawler4j 0.4.6` desktop bundle is not yet refreshed
 - SDK build/publish: passed on 2026-05-18 for current `crawler4j-sdk 0.4.1`; wheel/sdist uploaded to PyPI
 - Contracts build/publish: passed on 2026-05-18 for current `crawler4j-contracts 0.4.1`; wheel/sdist uploaded to PyPI
-- Full test/lint gate: historical full gate passed on 2026-05-18 for the 0.4.2 root version bump; current 0.4.5 bugfix scope passed version service + DevLink ignored symlink / SDK archive members tests `42 passed`, target `ruff check`, `uv lock --check`, `jq empty .factory/project.json`, and `git diff --check`
+- Full test/lint gate: historical full gate passed on 2026-05-18 for the 0.4.2 root version bump; current 0.4.6 version correction and fingerprint browser lifecycle scope passed version service + REM lifecycle tests `56 passed`, target `ruff check`, and `uv lock --check`
 - UI / CLI smoke: passed on 2026-05-01; `uv run python scripts/smoke_test_ui.py` and `uv run python -m crawler4j_sdk.cli.commands --help` passed
 - Docs validate: not rerun in this documentation-memory sync turn
 
 Release decision:
 
-- Local code quality gate: PASS for the 0.4.5 DevLink ignored-directory symlink targeted regression scope
+- Local code quality gate: PASS for the 0.4.6 version correction and fingerprint browser lifecycle targeted regression scope
 - Production release gate: partial for 0.4.x macOS internal update history; No-Go for full cross-platform production until `ctrip` real-site DevLink + ZIP E2E evidence, Windows real-machine signing/install/self-update evidence, Git tag / GitHub release assets, and formal delivery batch are closed
