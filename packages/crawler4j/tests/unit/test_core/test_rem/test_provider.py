@@ -1,5 +1,6 @@
 """Provider 注册测试。"""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import patch
@@ -80,6 +81,52 @@ async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_virtualbrowser_open_serializes_launch_operations(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env_a = Environment(
+        id=101,
+        name="vb-env-a",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="101"),
+    )
+    env_b = Environment(
+        id=102,
+        name="vb-env-b",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="102"),
+    )
+    active_launches = 0
+    max_active_launches = 0
+    launch_order: list[int] = []
+
+    async def launch_browser(browser_id: int) -> str:
+        nonlocal active_launches, max_active_launches
+        active_launches += 1
+        max_active_launches = max(max_active_launches, active_launches)
+        launch_order.append(browser_id)
+        await asyncio.sleep(0)
+        active_launches -= 1
+        return f"http://localhost:{browser_id}"
+
+    client = SimpleNamespace(launch_browser=AsyncMock(side_effect=launch_browser))
+
+    monkeypatch.setattr(provider, "is_window_open", AsyncMock(return_value=False))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await asyncio.gather(provider.open(env_a), provider.open(env_b)) == [True, True]
+    assert max_active_launches == 1
+    assert launch_order == [101, 102]
+    assert env_a.handle is not None
+    assert env_b.handle is not None
+    assert env_a.handle.ws_url == "http://localhost:101"
+    assert env_b.handle.ws_url == "http://localhost:102"
+
+
+@pytest.mark.asyncio
 async def test_virtualbrowser_connect_recovers_missing_ws_url_from_browser_detail(monkeypatch):
     provider = VirtualBrowserProvider()
     env = Environment(
@@ -157,21 +204,13 @@ async def test_virtualbrowser_destroy_waits_for_async_external_delete(monkeypatc
     assert env.handle is not None
 
     client = SimpleNamespace(
+        get_browser_detail=AsyncMock(side_effect=[{"id": 101}, {"id": 101}, None]),
+        is_browser_running=AsyncMock(side_effect=[True, True, False]),
         stop_browser=AsyncMock(),
         delete_browser=AsyncMock(return_value=True),
     )
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
     monkeypatch.setattr(env.handle, "safe_close", AsyncMock())
-    monkeypatch.setattr(
-        provider,
-        "is_window_open",
-        AsyncMock(side_effect=[True, True, False]),
-    )
-    monkeypatch.setattr(
-        provider,
-        "exists",
-        AsyncMock(side_effect=[True, True, False]),
-    )
     monkeypatch.setattr("src.core.rem.provider.asyncio.sleep", AsyncMock())
 
     success = await provider.destroy(env)
@@ -180,5 +219,178 @@ async def test_virtualbrowser_destroy_waits_for_async_external_delete(monkeypatc
     env.handle.safe_close.assert_awaited_once()
     client.stop_browser.assert_awaited_once_with(101)
     client.delete_browser.assert_awaited_once_with(101)
-    assert provider.is_window_open.await_count == 3
-    assert provider.exists.await_count == 3
+    assert client.is_browser_running.await_count == 3
+    assert client.get_browser_detail.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_close_serializes_stop_operations(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env_a = Environment(
+        id=101,
+        name="vb-env-a",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.BUSY,
+        handle=BrowserHandle(browser_id="101"),
+    )
+    env_b = Environment(
+        id=102,
+        name="vb-env-b",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.BUSY,
+        handle=BrowserHandle(browser_id="102"),
+    )
+    assert env_a.handle is not None
+    assert env_b.handle is not None
+    monkeypatch.setattr(env_a.handle, "safe_close", AsyncMock())
+    monkeypatch.setattr(env_b.handle, "safe_close", AsyncMock())
+
+    active_stops = 0
+    max_active_stops = 0
+    stop_order: list[int] = []
+
+    async def stop_browser(browser_id: int) -> None:
+        nonlocal active_stops, max_active_stops
+        active_stops += 1
+        max_active_stops = max(max_active_stops, active_stops)
+        stop_order.append(browser_id)
+        await asyncio.sleep(0)
+        active_stops -= 1
+
+    client = SimpleNamespace(stop_browser=AsyncMock(side_effect=stop_browser))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await asyncio.gather(provider.close(env_a), provider.close(env_b)) == [True, True]
+    assert max_active_stops == 1
+    assert stop_order == [101, 102]
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_destroy_serializes_delete_operations(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env_a = Environment(
+        id=101,
+        name="vb-env-a",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="101"),
+    )
+    env_b = Environment(
+        id=102,
+        name="vb-env-b",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="102"),
+    )
+    assert env_a.handle is not None
+    assert env_b.handle is not None
+    monkeypatch.setattr(env_a.handle, "safe_close", AsyncMock())
+    monkeypatch.setattr(env_b.handle, "safe_close", AsyncMock())
+
+    existing_ids = {101, 102}
+    active_deletes = 0
+    max_active_deletes = 0
+
+    async def get_browser_detail(browser_id: int) -> dict | None:
+        return {"id": browser_id} if browser_id in existing_ids else None
+
+    async def delete_browser(browser_id: int) -> bool:
+        nonlocal active_deletes, max_active_deletes
+        active_deletes += 1
+        max_active_deletes = max(max_active_deletes, active_deletes)
+        await asyncio.sleep(0)
+        existing_ids.discard(browser_id)
+        active_deletes -= 1
+        return True
+
+    client = SimpleNamespace(
+        get_browser_detail=AsyncMock(side_effect=get_browser_detail),
+        is_browser_running=AsyncMock(return_value=False),
+        stop_browser=AsyncMock(),
+        delete_browser=AsyncMock(side_effect=delete_browser),
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await asyncio.gather(provider.destroy(env_a), provider.destroy(env_b)) == [True, True]
+    assert max_active_deletes == 1
+    assert sorted(existing_ids) == []
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_destroy_uses_external_id_when_handle_missing(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        external_id="101",
+        handle=None,
+    )
+    existing_ids = {101}
+
+    async def get_browser_detail(browser_id: int) -> dict | None:
+        return {"id": browser_id} if browser_id in existing_ids else None
+
+    async def delete_browser(browser_id: int) -> bool:
+        existing_ids.discard(browser_id)
+        return True
+
+    client = SimpleNamespace(
+        get_browser_detail=AsyncMock(side_effect=get_browser_detail),
+        is_browser_running=AsyncMock(return_value=False),
+        stop_browser=AsyncMock(),
+        delete_browser=AsyncMock(side_effect=delete_browser),
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await provider.destroy(env) is True
+    assert env.handle is not None
+    assert env.handle.browser_id == "101"
+    client.delete_browser.assert_awaited_once_with(101)
+    assert sorted(existing_ids) == []
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_reset_serializes_data_delete_operations(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env_a = Environment(
+        id=101,
+        name="vb-env-a",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="101"),
+    )
+    env_b = Environment(
+        id=102,
+        name="vb-env-b",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="102"),
+    )
+    active_deletes = 0
+    max_active_deletes = 0
+    delete_order: list[int] = []
+
+    async def delete_browser_data(browser_id: int) -> bool:
+        nonlocal active_deletes, max_active_deletes
+        active_deletes += 1
+        max_active_deletes = max(max_active_deletes, active_deletes)
+        delete_order.append(browser_id)
+        await asyncio.sleep(0)
+        active_deletes -= 1
+        return True
+
+    client = SimpleNamespace(delete_browser_data=AsyncMock(side_effect=delete_browser_data))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await asyncio.gather(provider.reset(env_a), provider.reset(env_b)) == [True, True]
+    assert max_active_deletes == 1
+    assert delete_order == [101, 102]
