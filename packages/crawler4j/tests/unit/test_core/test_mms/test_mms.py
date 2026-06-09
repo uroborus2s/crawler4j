@@ -377,6 +377,49 @@ async def test_run_v2_workflow_runs_cleanup_after_setup_error_without_run(monkey
     assert cleanup_outcome.workflow == setup_workflow
 
 
+@pytest.mark.asyncio
+async def test_run_v2_workflow_does_not_limit_object_cleanup_timeout(monkeypatch):
+    cleanup_timeout = "not-called"
+
+    class Workflow:
+        def run(self, ctx: TaskContext):
+            return TaskResult.ok(message="ok")
+
+    class FakeContainer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def build_workflow(self):
+            return Workflow()
+
+        async def setup(self, _context, _workflow, *, timeout_seconds=None):
+            pass
+
+        async def cleanup(self, _context, _outcome, *, timeout_seconds=None):
+            nonlocal cleanup_timeout
+            cleanup_timeout = timeout_seconds
+
+    monkeypatch.setattr("src.core.mms.service.ObjectContainerV2", FakeContainer)
+    descriptor = ModuleRuntimeDescriptorV2(
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="workflow", name="default"),
+                target=Workflow,
+                module_name="demo_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            )
+        }
+    )
+
+    await ModuleService()._run_v2_workflow(
+        descriptor,
+        TaskContext(env_id=1, task_name="demo_module", runtime={"workflow": "default"}),
+    )
+
+    assert cleanup_timeout is None
+
+
 class TestModuleScanner:
     """测试 ModuleScanner。"""
     

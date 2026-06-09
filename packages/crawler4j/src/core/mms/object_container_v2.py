@@ -172,8 +172,6 @@ class ObjectContainerV2:
         self,
         context: TaskContext,
         outcome: TaskOutcome,
-        *,
-        timeout_seconds: float | None = None,
     ) -> None:
         """Run workflow/component cleanup methods owned by this task/env graph."""
         if self._closed:
@@ -187,7 +185,7 @@ class ObjectContainerV2:
             finalizers.append((f"workflow {self.workflow_name}", self._workflow_instance))
 
         for label, instance in finalizers:
-            await self._cleanup_instance(label, instance, context, outcome, timeout_seconds=timeout_seconds)
+            await self._cleanup_instance(label, instance, context, outcome)
 
     async def _cleanup_instance(
         self,
@@ -195,23 +193,12 @@ class ObjectContainerV2:
         instance: Any,
         context: TaskContext,
         outcome: TaskOutcome,
-        *,
-        timeout_seconds: float | None,
     ) -> None:
         cleanup = getattr(instance, "cleanup", None)
         if not callable(cleanup):
             return
         try:
-            operation = _invoke_cleanup(cleanup, context, outcome)
-            if timeout_seconds is not None and timeout_seconds > 0:
-                await asyncio.wait_for(operation, timeout=float(timeout_seconds))
-            else:
-                await operation
-        except asyncio.TimeoutError:
-            logger.error(
-                f"[MMS] Timed out cleaning v2 object: {label} "
-                f"method=cleanup timeout={timeout_seconds:.1f}s"
-            )
+            await _invoke_cleanup(cleanup, context, outcome)
         except Exception as exc:
             logger.error(
                 f"[MMS] Failed to clean v2 object: {label} "

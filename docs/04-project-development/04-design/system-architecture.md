@@ -59,7 +59,7 @@ Maintainer
 - `packages/crawler4j-sdk` 与 `packages/crawler4j-contracts` 已经具备独立包形态
 - `TaskContext` 的数据库能力已收敛到唯一入口 `ctx.db`；非数据库类宿主能力仍通过 `ctx.tools.call("<namespace>.<action>", **kwargs)` 调用
 - 0.4.0 当前运行时不提供模块级生命周期 hooks；模块流程控制只通过 workflow 主体返回 `TaskResult` 表达，任务结束、失败、超时或被用户停止后的环境统一由宿主回收
-- Core 为每个 task/env 创建独立对象图，在 `workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`，并在终态按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`；对象 cleanup 失败只记日志，不阻断终态和环境回收
+- Core 为每个 task/env 创建独立对象图，在 `workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`，并在终态按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`；对象 cleanup 不设置宿主固定执行超时，失败只记日志，不阻断终态和环境回收
 - 外部模块运行时已收敛到 MMS 宿主扫描生成的 runtime descriptor，不再保留 `ModuleAssembler` 或 `src.automation.*` 旧兼容包
 - 宿主源码已不再承载业务辅助逻辑或业务模型；酒店匹配、短信平台与本地验证码回退逻辑以模块自带实现为准
 - 当前事实以当前代码和验证结果为准，不再保留并行的旧设计正文

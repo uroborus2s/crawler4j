@@ -151,7 +151,7 @@ class ApiLabor:
 
 如果 workflow 或 component 需要运行前准备，可选实现 `setup(ctx, workflow)`；`workflow` 是 `WorkflowLifecycleInfo`，包含当前模块名、workflow 名称、标签、描述和代码符号。Core 会在对象图构造完成后按 component 组合顺序再到 workflow 调用 setup，任何 setup 失败都会阻止 `workflow.run(ctx)`，并进入终态 cleanup。
 
-如果 workflow 或 component 需要释放资源、打印终态日志或写审计事件，可选实现 `cleanup(ctx, outcome)`。Core 会在 workflow 返回成功、返回失败、抛错、超时、用户停止或 setup 失败后统一收尾：先按 component 依赖构造的反向顺序清理 component，再清理 workflow 实例；某个对象清理失败只记录日志，不阻断任务终态和环境回收。`outcome.workflow` 保存当前 workflow 信息，`outcome.status` 只可能是 `succeeded`、`failed`、`timed_out` 或 `cancelled`。旧 `aclose()` / `close()` 不再是 0.4.0 对象生命周期契约。
+如果 workflow 或 component 需要释放资源、打印终态日志或写审计事件，可选实现 `cleanup(ctx, outcome)`。Core 会在 workflow 返回成功、返回失败、抛错、超时、用户停止或 setup 失败后统一收尾：先按 component 依赖构造的反向顺序清理 component，再清理 workflow 实例；对象 cleanup 不设置宿主固定执行超时，允许模块完成必要业务收尾；某个对象清理失败只记录日志，不阻断任务终态和环境回收。`outcome.workflow` 保存当前 workflow 信息，`outcome.status` 只可能是 `succeeded`、`failed`、`timed_out` 或 `cancelled`。旧 `aclose()` / `close()` 不再是 0.4.0 对象生命周期契约。
 
 ```python
 from crawler4j_contracts import TaskContext, TaskOutcome, WorkflowLifecycleInfo

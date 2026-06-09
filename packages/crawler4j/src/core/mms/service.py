@@ -20,7 +20,6 @@ from src.core.mms.runtime_descriptor import (
 
 ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
 OBJECT_SETUP_TIMEOUT_SECONDS = 30.0
-OBJECT_CLEANUP_TIMEOUT_SECONDS = 30.0
 
 
 class ModuleService:
@@ -321,7 +320,6 @@ class ModuleService:
                     started_at=started_at,
                     workflow=workflow_info,
                 ),
-                timeout_seconds=OBJECT_CLEANUP_TIMEOUT_SECONDS,
             )
 
     @staticmethod
