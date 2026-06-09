@@ -114,7 +114,7 @@ SDK scanner 同时支持两类对象装配声明：
 
 `object_param(...)` 当前支持 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`。SDK 静态扫描可从 `str/int/float/bool`、`Literal[...]`、`list[T]`、`dict[str, T]`、`Optional[T]` / `T | None`、`datetime.date/datetime/time`、`pathlib.Path` 推断类型，并会把 `schema` / `item_schema` 写入 manifest lock。
 
-workflow 和 component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 释放资源、打印终态日志或写审计事件。Core 会在对象图构造完成后按 component 组合顺序再到 workflow 调用 `setup`，然后调用 `workflow.run(ctx)`；终态时按 component 依赖反向顺序再到 workflow 调用 `cleanup`。`workflow` 是当前 workflow 元信息，`outcome.workflow` 保存同一份信息，`outcome.status` 只可能是 `succeeded`、`failed`、`timed_out` 或 `cancelled`。旧 `aclose()` / `close()` 不再是对象生命周期契约，`check full` 会阻断这两个旧方法名。
+workflow 和 component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 释放资源、打印终态日志或写审计事件。Core 会在对象图构造完成后按 component 组合顺序再到 workflow 调用 `setup`，然后调用 `workflow.run(ctx)`；终态时按 component 依赖反向顺序再到 workflow 调用 `cleanup`，且不为对象 cleanup 设置宿主固定执行超时。`workflow` 是当前 workflow 元信息，`outcome.workflow` 保存同一份信息，`outcome.status` 只可能是 `succeeded`、`failed`、`timed_out` 或 `cancelled`。旧 `aclose()` / `close()` 不再是对象生命周期契约，`check full` 会阻断这两个旧方法名。
 
 ## 运行期依赖
 

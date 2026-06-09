@@ -170,7 +170,7 @@ Hosted UI 的页面读取、渲染和 action 调用属于宿主 UI surface，不
 
 0.4.0 不再把 `hooks/`、`env_selectors/` 或 `EnvSelectorSpec` 作为 SDK / Contracts 主路径。生命周期和资源等待由 Core 0.4.0 的运行模板、对象容器和宿主调度负责；模块侧只声明 `@workflow`、`@component`、`@page_action`、`@ui_action`、`@data_table`、`@data_view`、`@env_candidates` 与 `@env_cleanup_candidates`。
 
-对象生命周期归宿主所有。Core 会在每个 task/env 内创建独立对象图，并在 `workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`；`workflow` 为 `WorkflowLifecycleInfo`，包含当前 workflow 名称、标签、描述和代码符号。终态时按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`，`outcome.workflow` 保存同一份 workflow 信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。setup 失败会阻止 `workflow.run(ctx)` 并进入 cleanup；cleanup 异常只写日志，不覆盖任务终态或环境回收结果；旧 `aclose()` / `close()` 不再会被宿主调用。
+对象生命周期归宿主所有。Core 会在每个 task/env 内创建独立对象图，并在 `workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`；`workflow` 为 `WorkflowLifecycleInfo`，包含当前 workflow 名称、标签、描述和代码符号。终态时按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`，`outcome.workflow` 保存同一份 workflow 信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。setup 失败会阻止 `workflow.run(ctx)` 并进入 cleanup；cleanup 不设置宿主固定执行超时，异常只写日志，不覆盖任务终态或环境回收结果；旧 `aclose()` / `close()` 不再会被宿主调用。
 
 环境选择写在 `candidates/*.py` 中，使用 `@env_candidates` 装饰同步纯函数。函数可以直接返回 env id 列表，也可以返回 `EnvCandidates.from_table(...).filter(...).order_by(...).limit(...)` 这样的链式查询。账号注册时间、会员等级、黑号状态等模块业务过滤应存放在模块数据表中，并在候选纯函数里实时查询，不需要同步资源池。运行模板的选择环境模式会保存候选函数名和可选 `candidate_params` 字典，UI 中可通过“候选参数”配置窗口填写 YAML 对象。
 
