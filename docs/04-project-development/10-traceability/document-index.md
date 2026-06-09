@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-06-09：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.7`，用于承接 workflow/component 对象 cleanup 固定超时移除；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-07：根应用 / 运行时版本事实源已修正提升到 `crawler4j 0.4.6`，用于承接指纹浏览器生命周期串行化修复版；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-06：指纹浏览器生命周期并发串行化已从 VirtualBrowser 启动链路扩展到 VirtualBrowser / BitBrowser 的关闭、销毁、重置、状态检查、来源列表和配置更新。`packages/crawler4j/src/core/rem/provider.py` 现统一使用 provider 生命周期锁保护外部管理 API 与 Playwright/CDP 生命周期入口，并通过内部 unlocked helper 避免锁内递归；`docs/02-user-guide/exception-cases.md` 与 `docs/04-project-development/06-testing-verification/test-plan.md` 已同步新的现场排障口径和回归证据。
 - 2026-05-12：0.4.0 开发者指南审阅意见已并入正式正文。`docs/03-developer-guide/v0.4.0/` 现统一校正阅读路径、quickstart 的 DevLink + ZIP install 闭环、`check structure -> manifest lock -> check full` 校验顺序、candidate/cleanup CLI 入口、manifest lock 当前结构、UI Action 与 Page Action 边界、DataTable total/count 示例、ZIP 标准目录和手工迁移边界；`v0.4.0/version.yaml` 已标为当前主线，`v0.3.0/version.yaml` 已标为历史维护。

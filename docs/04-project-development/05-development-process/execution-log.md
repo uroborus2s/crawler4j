@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-09 | 将根应用 / 运行时版本提升到 `0.4.7`，用于 workflow/component 对象 cleanup 固定超时移除后的客户端修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
 | 2026-05-30 | 将根应用 / 运行时版本提升到 `0.4.5`，用于开发模块源码目录保留 `.venv/` 时跳过忽略目录 symlink 的客户端修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
 | 2026-05-30 | 修复开发模块源码目录扫描对 `.venv/` symlink 的误报：Core manifest lock 校验和 SDK 打包文件收集先跳过 `.venv/`、`dist/`、`build/`、缓存目录与 `*.egg-info/`，再对真实模块文件执行 symlink 拒绝；ZIP 内 symlink 与路径穿越安全策略不变。新增 DevLink/源码预检与 SDK `_archive_members()` 回归，定向用例 `4 passed` | Codex |
 | 2026-05-26 | 将根应用 / 运行时版本提升到 `0.4.3` 并发布 macOS 客户端更新包：`uv run build crawler4j` 产出 `crawler4j-0.4.3` wheel/sdist，`uv run deploy-macos-internal-release` 产出 `Crawler4j-0.4.3.dmg` 与 `appcast.xml` 并上传远程 macOS 更新目录；Windows 更新包仍需在 Windows 构建机补齐 | Codex |
