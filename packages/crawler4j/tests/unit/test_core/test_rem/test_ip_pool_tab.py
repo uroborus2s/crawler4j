@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from src.core.rem.ip_pool import IPEntry, IPPool, IPStrategy
 from src.core.rem.proxy_probe import ProxyProbeResult
 from src.ui.components.button import StyledButton
@@ -13,6 +15,7 @@ def _build_pool() -> IPPool:
             port=8080,
             bound_count=2,
             safety_score=95,
+            last_used_at=1_746_000_000,
         )
     ]
     return pool
@@ -37,6 +40,7 @@ def test_ip_pool_tab_pool_row_click_populates_entry_table(qtbot, monkeypatch):
     assert pool_row["name"] == "主池"
     assert widget.entry_title.text() == "IP 条目 - 主池"
     assert entry_row["address"] == "1.1.1.1"
+    assert entry_row["last_used_at"]["text"] == datetime.fromtimestamp(1_746_000_000).strftime("%Y-%m-%d %H:%M")
     assert [action["id"] for action in entry_row["actions"]] == ["test_entry", "edit_entry", "delete_entry"]
 
 

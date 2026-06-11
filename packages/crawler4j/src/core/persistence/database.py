@@ -349,6 +349,25 @@ def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_ip_entries_time_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(ip_entries)").fetchall()
+    }
+    if "updated_at" not in existing_columns:
+        conn.execute("ALTER TABLE ip_entries ADD COLUMN updated_at INTEGER")
+        conn.execute(
+            """
+            UPDATE ip_entries
+            SET updated_at = COALESCE(updated_at, created_at, strftime('%s', 'now'))
+            """
+        )
+    if "last_used_at" not in existing_columns:
+        conn.execute("ALTER TABLE ip_entries ADD COLUMN last_used_at INTEGER")
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ip_last_used ON ip_entries(pool_id, last_used_at)")
+
+
 def _init_config_db() -> None:
     """初始化配置数据库。"""
     with get_connection(CONFIG_DB) as conn:
@@ -499,7 +518,7 @@ def _init_state_db() -> None:
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 provider TEXT NOT NULL,
-                strategy TEXT DEFAULT 'least_bound',
+                strategy TEXT DEFAULT 'least_recently_used',
                 config_json TEXT,
                 created_at INTEGER DEFAULT (strftime('%s', 'now')),
                 updated_at INTEGER DEFAULT (strftime('%s', 'now'))
@@ -517,7 +536,9 @@ def _init_state_db() -> None:
                 bound_count INTEGER DEFAULT 0,
                 safety_score INTEGER DEFAULT 100,
                 expires_at INTEGER,
-                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                last_used_at INTEGER
             );
             
             CREATE INDEX IF NOT EXISTS idx_ip_pool ON ip_entries(pool_id);
@@ -540,6 +561,7 @@ def _init_state_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_meta_env ON env_metadata(env_id);
             CREATE INDEX IF NOT EXISTS idx_meta_ns_key ON env_metadata(namespace, key);
         """)
+        _ensure_ip_entries_time_columns(conn)
         existing_columns = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(environments)").fetchall()

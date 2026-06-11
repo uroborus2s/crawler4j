@@ -129,6 +129,7 @@ class IPPoolTab(QWidget):
             {"key": "address", "label": "IP地址", "type": "text", "width": 180},
             {"key": "port", "label": "端口", "type": "number", "width": 120, "align": "right"},
             {"key": "bound_count", "label": "绑定数", "type": "number", "width": 100, "align": "right"},
+            {"key": "last_used_at", "label": "最近使用", "type": "text", "width": 180, "sortable": True},
             {"key": "safety_score", "label": "安全度", "type": "number", "width": 100, "align": "right"},
             {"key": "expires", "label": "过期时间", "type": "text", "width": 220, "sortable": True},
             {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
@@ -144,6 +145,7 @@ class IPPoolTab(QWidget):
     }
     
     STRATEGY_NAMES = {
+        IPStrategy.LEAST_RECENTLY_USED: "最久未使用",
         IPStrategy.LEAST_BOUND: "最少绑定",
         IPStrategy.HIGHEST_SAFETY: "最高安全",
         IPStrategy.LONGEST_TTL: "最长有效",
@@ -291,12 +293,20 @@ class IPPoolTab(QWidget):
             expire_text = expire_dt.strftime("%Y-%m-%d %H:%M")
         else:
             expire_text = "永久"
+        if entry.last_used_at:
+            last_used_dt = datetime.fromtimestamp(entry.last_used_at)
+            last_used_text = last_used_dt.strftime("%Y-%m-%d %H:%M")
+            last_used_sort_value = entry.last_used_at
+        else:
+            last_used_text = "从未使用"
+            last_used_sort_value = 0
         return {
             "entry": entry,
             "entry_id": entry.id,
             "address": entry.address,
             "port": {"text": str(entry.port), "sort_value": int(entry.port)},
             "bound_count": {"text": str(entry.bound_count), "sort_value": int(entry.bound_count)},
+            "last_used_at": {"text": last_used_text, "sort_value": last_used_sort_value},
             "safety_score": {"text": str(entry.safety_score), "sort_value": float(entry.safety_score)},
             "expires": {
                 "text": expire_text,

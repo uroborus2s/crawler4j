@@ -1434,6 +1434,7 @@ class RunProfileDialog(QDialog):
         self.create_form.addRow("IP 池:", self.ip_pool_combo)
 
         self.ip_pool_strategy_combo = QComboBox()
+        self.ip_pool_strategy_combo.addItem("最久未使用", "least_recently_used")
         self.ip_pool_strategy_combo.addItem("最少绑定数", "least_bound")
         self.ip_pool_strategy_combo.addItem("最高安全度", "highest_safety")
         self.ip_pool_strategy_combo.addItem("最长有效期", "longest_ttl")

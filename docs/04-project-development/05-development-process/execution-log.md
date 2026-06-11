@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `API-010`, `BUG-013`
-**最后更新：** 2026-05-30
+**最后更新：** 2026-06-11
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-11 | 调整 IP 池默认分配策略：新增 `least_recently_used`，新建 IP 池、默认池和运行模板默认优先使用“最久未使用”策略；`ip_entries` 新增 `updated_at` / `last_used_at` 并带旧库补列迁移，绑定成功后写入最近使用时间；IP 池页面展示“最近使用”。定向回归 `50 passed`，扩展回归 REM `147 passed`、persistence `82 passed` | Codex |
 | 2026-06-09 | 将根应用 / 运行时版本提升到 `0.4.7`，用于 workflow/component 对象 cleanup 固定超时移除后的客户端修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
 | 2026-05-30 | 将根应用 / 运行时版本提升到 `0.4.5`，用于开发模块源码目录保留 `.venv/` 时跳过忽略目录 symlink 的客户端修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
 | 2026-05-30 | 修复开发模块源码目录扫描对 `.venv/` symlink 的误报：Core manifest lock 校验和 SDK 打包文件收集先跳过 `.venv/`、`dist/`、`build/`、缓存目录与 `*.egg-info/`，再对真实模块文件执行 symlink 拒绝；ZIP 内 symlink 与路径穿越安全策略不变。新增 DevLink/源码预检与 SDK `_archive_members()` 回归，定向用例 `4 passed` | Codex |

@@ -11,6 +11,15 @@ def test_add_pool_dialog_uses_styled_combo_box(qtbot):
     assert "QComboBox {" not in dialog.styleSheet()
 
 
+def test_add_pool_dialog_exposes_least_recently_used_strategy(qtbot):
+    dialog = AddPoolDialog()
+    qtbot.addWidget(dialog)
+
+    labels = [dialog.strategy_combo.itemText(index) for index in range(dialog.strategy_combo.count())]
+
+    assert "最久未使用" in labels
+
+
 def test_add_ip_dialog_uses_styled_combo_box(qtbot):
     dialog = AddIPDialog(pool_id="pool-1")
     qtbot.addWidget(dialog)

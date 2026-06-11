@@ -25,6 +25,7 @@ class IPStrategy(StrEnum):
     
     设计文档 5.2.3: IP 分配策略
     """
+    LEAST_RECENTLY_USED = "least_recently_used"  # 最久未使用（LRU）
     LEAST_BOUND = "least_bound"       # 最少绑定数量（负载均衡）
     HIGHEST_SAFETY = "highest_safety"  # 最高安全度评分
     LONGEST_TTL = "longest_ttl"        # 最长有效期
@@ -48,6 +49,8 @@ class IPEntry:
         safety_score: 安全度评分 (0-100)
         expires_at: 过期时间戳
         created_at: 创建时间戳
+        updated_at: 更新时间戳
+        last_used_at: 最近一次绑定使用时间戳
     """
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     pool_id: str = ""
@@ -60,6 +63,8 @@ class IPEntry:
     safety_score: int = 100
     expires_at: int | None = None
     created_at: int = field(default_factory=lambda: int(time.time()))
+    updated_at: int = field(default_factory=lambda: int(time.time()))
+    last_used_at: int | None = None
     
     def to_proxy_string(self) -> str:
         """转换为代理字符串格式。"""
@@ -88,6 +93,8 @@ class IPEntry:
             "safety_score": self.safety_score,
             "expires_at": self.expires_at,
             "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "last_used_at": self.last_used_at,
         }
     
     @classmethod
@@ -105,6 +112,8 @@ class IPEntry:
             safety_score=data.get("safety_score", 100),
             expires_at=data.get("expires_at"),
             created_at=data.get("created_at", int(time.time())),
+            updated_at=data.get("updated_at", data.get("created_at", int(time.time()))),
+            last_used_at=data.get("last_used_at"),
         )
 
 
@@ -125,7 +134,7 @@ class IPPool:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
     provider: str = "local"
-    strategy: IPStrategy = IPStrategy.LEAST_BOUND
+    strategy: IPStrategy = IPStrategy.LEAST_RECENTLY_USED
     entries: list[IPEntry] = field(default_factory=list)
     config: dict[str, Any] = field(default_factory=dict)
     created_at: int = field(default_factory=lambda: int(time.time()))
@@ -161,6 +170,18 @@ class IPPool:
                 logger.warning(f"[IPPool] 未知的 IP 绑定策略，回退到池默认策略: {strategy}")
 
         match selected_strategy:
+            case IPStrategy.LEAST_RECENTLY_USED:
+                return min(
+                    candidates,
+                    key=lambda ip: (
+                        ip.last_used_at is not None,
+                        ip.last_used_at or 0,
+                        ip.bound_count,
+                        ip.created_at,
+                        ip.id,
+                    ),
+                )
+
             case IPStrategy.LEAST_BOUND:
                 return min(candidates, key=lambda ip: ip.bound_count)
             
@@ -232,7 +253,7 @@ class IPPoolManager:
         default_pool = IPPool(
             name="默认池",
             provider="local",
-            strategy=IPStrategy.LEAST_BOUND,
+            strategy=IPStrategy.LEAST_RECENTLY_USED,
         )
         self.add_pool(default_pool)
         logger.info("[IPPool] 已创建默认 IP 池")
@@ -288,7 +309,10 @@ class IPPoolManager:
             return None
         
         # 更新绑定
+        now = int(time.time())
         ip.bound_count += 1
+        ip.last_used_at = now
+        ip.updated_at = now
         self._env_bindings[int(env_id)] = ip.id
         self._persist_entry(ip)
         
@@ -375,11 +399,15 @@ class IPPoolManager:
     
     def _persist_entry(self, entry: IPEntry) -> None:
         """持久化 IP 条目。"""
+        entry.updated_at = int(time.time())
         with get_connection(STATE_DB) as conn:
             conn.execute(
                 """
-                INSERT INTO ip_entries (id, pool_id, address, protocol, port, username, password, bound_count, safety_score, expires_at, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO ip_entries (
+                    id, pool_id, address, protocol, port, username, password,
+                    bound_count, safety_score, expires_at, created_at, updated_at, last_used_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     pool_id = excluded.pool_id,
                     address = excluded.address,
@@ -389,7 +417,9 @@ class IPPoolManager:
                     password = excluded.password,
                     bound_count = excluded.bound_count,
                     safety_score = excluded.safety_score,
-                    expires_at = excluded.expires_at
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at,
+                    last_used_at = excluded.last_used_at
                 """,
                 (
                     entry.id,
@@ -403,6 +433,8 @@ class IPPoolManager:
                     entry.safety_score,
                     entry.expires_at,
                     entry.created_at,
+                    entry.updated_at,
+                    entry.last_used_at,
                 )
             )
     
@@ -438,6 +470,8 @@ class IPPoolManager:
                     safety_score=row["safety_score"] if row["safety_score"] is not None else 100,
                     expires_at=row["expires_at"],
                     created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                    last_used_at=row["last_used_at"],
                 )
                 pool = self._pools.get(entry.pool_id)
                 if pool:

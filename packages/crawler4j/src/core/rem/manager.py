@@ -1054,7 +1054,7 @@ class EnvironmentManager:
                     proxy_config.bind_strategy,
                 )
                 if ip:
-                    proxy_config.bind_strategy = proxy_config.bind_strategy or "least_bound"
+                    proxy_config.bind_strategy = proxy_config.bind_strategy or "least_recently_used"
                     proxy_config.current_ip = ip.address
                     # 生成静态代理字符串供 Provider 使用
                     auth = f"{ip.username}:{ip.password}@" if ip.username else ""
