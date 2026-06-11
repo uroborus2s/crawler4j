@@ -1,5 +1,6 @@
 # 变更摘要
 
+- 2026-06-11 根应用 / 运行时版本提升到 `0.4.8`：用于承接 IP 池最久未使用默认分配策略、最近使用时间记录与旧库迁移的客户端修复版；SDK / Contracts 继续保持 `0.4.1`。版本事实源已同步 `packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档和 `.factory/memory/`；验证已通过 `uv lock --check`、版本服务 + REM IP 池 / 运行模板定向回归 `53 passed`、目标 `ruff check`、`.factory/project.json` JSON 校验与 `git diff --check`，正式客户端包、tag / release 与真机升级证据仍需后续补齐 | 状态：DONE | 关联：`packages/crawler4j/pyproject.toml`、`uv.lock`、`README.md`、`packages/crawler4j/README.md`、`docs/04-project-development/07-release-delivery/`、`.factory/project.json`、`.factory/memory/`
 - 2026-06-11 IP 池默认分配策略改为最久未使用：新增 `least_recently_used` 并作为新建默认池、IP 池新建弹窗和运行模板默认绑定策略；`least_bound` 保留为显式可选策略。`ip_entries` 新增 `updated_at` / `last_used_at` 并支持旧库补列迁移，绑定成功后写入最近使用时间，IP 池页面展示“最近使用”。定向回归 `50 passed`，扩展回归 REM `147 passed`、persistence `82 passed` | 状态：DONE | 关联：`packages/crawler4j/src/core/rem/ip_pool.py`、`packages/crawler4j/src/core/persistence/database.py`、`packages/crawler4j/src/core/rem/ui/ip_pool_tab.py`、`packages/crawler4j/src/core/atm/ui/run_profile_dialog.py`、`docs/02-user-guide/usage.md`
 
 ## 测试与验收
