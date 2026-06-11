@@ -103,6 +103,18 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
     )
 
 
+def test_run_profile_dialog_defaults_ip_pool_strategy_to_least_recently_used(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.ip_pool_strategy_combo.currentData() == "least_recently_used"
+    assert dialog.ip_pool_strategy_combo.currentText() == "最久未使用"
+
+
 def _object_assembly_descriptor():
     def inject(name: str, inject_type: str, target: str):
         return SimpleNamespace(name=name, type=inject_type, target=target)

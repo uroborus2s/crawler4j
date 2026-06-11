@@ -33,6 +33,7 @@ class AddPoolDialog(QDialog):
     """新建 IP 池对话框。"""
     
     STRATEGY_OPTIONS = [
+        ("最久未使用", IPStrategy.LEAST_RECENTLY_USED),
         ("最少绑定数量", IPStrategy.LEAST_BOUND),
         ("最高安全度", IPStrategy.HIGHEST_SAFETY),
         ("最长有效期", IPStrategy.LONGEST_TTL),

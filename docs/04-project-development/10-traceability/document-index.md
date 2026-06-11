@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-05-12
+**最后更新：** 2026-06-11
 
 ## 1. 当前正式文档结构
 
@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-06-11：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.8`，用于承接 IP 池最久未使用默认分配策略、最近使用时间记录与旧库迁移；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-09：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.7`，用于承接 workflow/component 对象 cleanup 固定超时移除；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-07：根应用 / 运行时版本事实源已修正提升到 `crawler4j 0.4.6`，用于承接指纹浏览器生命周期串行化修复版；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-06：指纹浏览器生命周期并发串行化已从 VirtualBrowser 启动链路扩展到 VirtualBrowser / BitBrowser 的关闭、销毁、重置、状态检查、来源列表和配置更新。`packages/crawler4j/src/core/rem/provider.py` 现统一使用 provider 生命周期锁保护外部管理 API 与 Playwright/CDP 生命周期入口，并通过内部 unlocked helper 避免锁内递归；`docs/02-user-guide/exception-cases.md` 与 `docs/04-project-development/06-testing-verification/test-plan.md` 已同步新的现场排障口径和回归证据。
@@ -85,6 +86,7 @@
 - 2026-05-08：0.4.0 模块根目录结构说明已细化。`docs/03-developer-guide/v0.4.0/module-structure.md` 现在按根目录固定文件和固定文件夹分别说明 `module.yaml`、`.crawler4j/manifest.lock.json`、`interfaces/`、`objects/`、`workflows/`、`tasks/`、`data/`、`pages/`、`candidates/`、`cleanups/` 的含义、扫描入口和维护边界；`.factory/memory/runtime-brief.md` 已补记压缩事实。
 - 2026-05-02：运行模板对象装配 UI 已同步为公共树形对象图。`packages/crawler4j/src/ui/components/object_graph_tree.py` 提供公共 `ObjectGraphTree`，`packages/crawler4j/src/core/atm/ui/run_profile_dialog.py` 现在按 `workflow -> interface 绑定行 -> 子 interface/参数` 展示对象装配，绑定行左侧显示 interface 中文 `label(name)`，右侧下拉框显示 component 中文 `label(name)`，interface 选择继续保存到 `object_bindings`，component 创建参数继续保存到 `object_params`；`docs/03-developer-guide/v0.4.0/decorators-and-object-assembly.md` 与 `docs/04-project-development/04-design/{0.4.0-decorator-object-assembly-architecture,module-config-runtime-data-contract}.md` 已补记该 UI 口径。
 - 2026-05-02：宿主 `browser.*` 页面交互协议已同步到脚手架、开发者指南、设计契约和项目记忆。`packages/crawler4j-sdk/src/cli/templates.py` 生成的 page action 现在直接调用 `ctx.tools.call("browser.goto", ...)`；`docs/03-developer-guide/v0.4.0/{index,quickstart,build-modules,decorators-and-object-assembly,reference-core-capabilities,ui-and-data-table,migration-from-v0.3.0}.md` 与 `docs/04-project-development/04-design/{api-design,module-config-runtime-data-contract,0.4.0-decorator-object-assembly-architecture}.md` 已统一明确“标准页面交互走宿主 `browser.*` tool，`ctx.page` 主要保留给读取与宿主未覆盖能力”。后续拟人化评分优化已补记到 `reference-core-capabilities.md` 与 `module-config-runtime-data-contract.md`：分段停顿、导航扫描、目标尺寸感知轨迹、mouse/key dwell、自然输入纠错概率、敏感输入保护和惯性滚动由宿主统一治理。
+- 2026-06-11：`docs/02-user-guide/usage.md` 与 `execution-log.md` 已同步补记 IP 池默认分配策略调整：新增“最久未使用”策略并作为新建 IP 池、默认池和运行模板默认值，IP 条目记录并展示最近使用时间，旧库通过 `ip_entries.updated_at` / `last_used_at` 补列迁移兼容。
 - 2026-05-01：0.4.0 全面审查后同步文档入口和发布证据。`docs/03-developer-guide/index.md` 与根 `docs/index.md` 已把 0.4.0 标为当前主线、0.3.x 标为历史维护；发布与测试记忆登记本轮 `886 passed`、ruff、三包构建、SDK CLI help、UI smoke 与 macOS `package-desktop` 通过。正式发布裁决仍为 No-Go，阻塞项为 `ctrip` 真实站点 DevLink + ZIP 双链 E2E、Windows 真机签名/安装/自更新和正式交付批次。
 - 2026-05-01：`ctx.db` 写入并发底座第一阶段已同步到开发者指南和设计契约。`docs/03-developer-guide/v0.4.0/reference-core-capabilities.md` 与 `docs/04-project-development/04-design/module-config-runtime-data-contract.md` 现明确模块开发者不管理锁、事务或提交/回滚；宿主负责短事务、busy timeout、写协调器排队与重试；`custom_table` 新增 `upsert/update_where/delete_where` 和 `batch()` 写入语义，`replace()` 保留全量覆盖语义。
 - 2026-04-30：开发者指南已按版本分流并补齐 0.4.0 开发版正文。`docs/03-developer-guide/index.md` 只保留版本选择；0.3.0 稳定指南冻结到 `docs/03-developer-guide/v0.3.0/`；0.4.0 开发者指南新增到 `docs/03-developer-guide/v0.4.0/`，主线为 `core-native-v2` 装饰器对象装配、manifest lock、`ctx.db` 数据契约和保留字段诊断，并已明确 0.4.x SDK / Contracts 只服务 Core 0.4.0，不兼容 0.3.x 命令、模板或开发模式；根 `docs/index.md` 已更新开发者指南导航。
