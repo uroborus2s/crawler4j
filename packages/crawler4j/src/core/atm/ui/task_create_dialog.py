@@ -273,7 +273,7 @@ class TaskCreateDialog(QDialog):
             lines.append(f"Provider: {run_profile.resource.acquisition.provider}")
             lines.append(f"环境: {run_profile.resource.acquisition.env_type.value}")
         elif run_profile.resource.acquisition.env_id:
-            lines.append(f"环境: {run_profile.resource.acquisition.env_id}")
+            lines.append(f"指定环境: {run_profile.resource.acquisition.env_id}")
         else:
             lines.append(f"候选函数: {run_profile.resource.acquisition.candidates or '-'}")
         if run_profile.execution:

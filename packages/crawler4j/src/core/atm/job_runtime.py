@@ -22,8 +22,11 @@ def describe_job_runtime(
         detail = f"Provider: {acquisition.provider}"
     else:
         mode_text = "选择环境"
-        candidates_text = acquisition.candidates or "-"
-        detail = f"候选查询: {candidates_text}"
+        if acquisition.env_id is not None:
+            detail = f"指定环境: {acquisition.env_id}"
+        else:
+            candidates_text = acquisition.candidates or "-"
+            detail = f"候选查询: {candidates_text}"
     return ("运行模板", f"{module_name}/{workflow_name} | {mode_text} | {detail}")
 
 

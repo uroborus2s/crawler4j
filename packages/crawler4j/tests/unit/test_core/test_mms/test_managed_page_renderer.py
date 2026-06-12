@@ -1233,6 +1233,25 @@ def test_managed_page_renderer_scopes_load_and_query_handlers_to_readonly_tools(
             sortable_component,
             {"sort": [{"field": "metric", "direction": "asc"}]},
         )["sort"] == [{"field": "metric", "direction": "asc"}]
+
+        page.set_navigation_params(
+            {
+                "account_id": "acct-001",
+                "record_status": "from_navigation",
+            },
+            auto_refresh=False,
+        )
+        normalized_query = page._normalize_table_query_for_handler(
+            sortable_component,
+            {
+                "params": {"record_status": "黑号"},
+                "sort": [{"field": "metric", "direction": "asc"}],
+            },
+        )
+        assert normalized_query["params"] == {
+            "account_id": "acct-001",
+            "record_status": "黑号",
+        }
     finally:
         restore_module(service, original_registry, module_name)
 

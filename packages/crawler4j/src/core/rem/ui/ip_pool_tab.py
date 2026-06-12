@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.foundation.logging import logger
-from src.core.rem.ip_pool import IPPool, IPStrategy, get_ip_pool_manager
+from src.core.rem.ip_pool import IPEntryStatus, IPPool, IPStrategy, get_ip_pool_manager
 from src.core.rem.proxy_probe import ProxyProbeResult, probe_ip_entry
 from src.core.rem.ui.ip_pool_dialogs import AddIPDialog, AddPoolDialog, BatchImportDialog
 from src.ui.components.button import StyledButton
@@ -95,6 +95,11 @@ class IPPoolWorkerThread(QThread):
             elif self._action == "test_entry":
                 entry = self._kwargs["entry"]
                 self.finished.emit(probe_ip_entry(entry))
+            elif self._action == "set_entry_status":
+                entry_id = self._kwargs["entry_id"]
+                status = self._kwargs["status"]
+                success = manager.set_entry_status(entry_id, status)
+                self.finished.emit(success)
             else:
                 self.error.emit(f"未知操作: {self._action}")
                 
@@ -129,6 +134,7 @@ class IPPoolTab(QWidget):
             {"key": "address", "label": "IP地址", "type": "text", "width": 180},
             {"key": "port", "label": "端口", "type": "number", "width": 120, "align": "right"},
             {"key": "bound_count", "label": "绑定数", "type": "number", "width": 100, "align": "right"},
+            {"key": "status", "label": "状态", "type": "text", "width": 110, "sortable": True},
             {"key": "last_used_at", "label": "最近使用", "type": "text", "width": 180, "sortable": True},
             {"key": "safety_score", "label": "安全度", "type": "number", "width": 100, "align": "right"},
             {"key": "expires", "label": "过期时间", "type": "text", "width": 220, "sortable": True},
@@ -151,6 +157,10 @@ class IPPoolTab(QWidget):
         IPStrategy.LONGEST_TTL: "最长有效",
         IPStrategy.SYSTEM_PROXY: "系统代理",
         IPStrategy.NONE: "无代理",
+    }
+    ENTRY_STATUS_NAMES = {
+        IPEntryStatus.AVAILABLE: "可用",
+        IPEntryStatus.DISABLED: "不可用",
     }
     
     def __init__(self, parent=None):
@@ -300,12 +310,20 @@ class IPPoolTab(QWidget):
         else:
             last_used_text = "从未使用"
             last_used_sort_value = 0
+        status = IPEntryStatus(entry.status)
+        status_text = self.ENTRY_STATUS_NAMES.get(status, str(status))
+        status_action = (
+            {"id": "enable_entry", "label": "启用", "variant": "success"}
+            if status == IPEntryStatus.DISABLED
+            else {"id": "disable_entry", "label": "停用", "variant": "warning"}
+        )
         return {
             "entry": entry,
             "entry_id": entry.id,
             "address": entry.address,
             "port": {"text": str(entry.port), "sort_value": int(entry.port)},
             "bound_count": {"text": str(entry.bound_count), "sort_value": int(entry.bound_count)},
+            "status": {"text": status_text, "sort_value": status.value},
             "last_used_at": {"text": last_used_text, "sort_value": last_used_sort_value},
             "safety_score": {"text": str(entry.safety_score), "sort_value": float(entry.safety_score)},
             "expires": {
@@ -314,6 +332,7 @@ class IPPoolTab(QWidget):
             },
             "actions": [
                 {"id": "test_entry", "label": "测试", "variant": "secondary"},
+                status_action,
                 {"id": "edit_entry", "label": "编辑", "variant": "primary"},
                 {"id": "delete_entry", "label": "删除", "variant": "danger"},
             ],
@@ -367,6 +386,10 @@ class IPPoolTab(QWidget):
             return
         if action_id == "test_entry":
             self._test_entry(entry_id)
+        elif action_id == "disable_entry":
+            self._set_entry_status(entry_id, IPEntryStatus.DISABLED)
+        elif action_id == "enable_entry":
+            self._set_entry_status(entry_id, IPEntryStatus.AVAILABLE)
         elif action_id == "edit_entry":
             self._edit_entry(entry_id)
         elif action_id == "delete_entry":
@@ -495,6 +518,18 @@ class IPPoolTab(QWidget):
             parent=self,
         )
         dialog.exec()
+
+    def _set_entry_status(self, entry_id: str, status: IPEntryStatus) -> None:
+        self._worker = IPPoolWorkerThread("set_entry_status", entry_id=entry_id, status=status)
+        self._worker.finished.connect(lambda success: self._on_entry_status_updated(bool(success)))
+        self._worker.error.connect(self._on_error)
+        self._worker.start()
+
+    def _on_entry_status_updated(self, success: bool) -> None:
+        if not success:
+            MessageDialog.warning(self, "错误", "未找到该 IP 条目")
+            return
+        self._refresh_current_pool()
     
     def _edit_entry(self, entry_id: str) -> None:
         """编辑 IP 条目。"""

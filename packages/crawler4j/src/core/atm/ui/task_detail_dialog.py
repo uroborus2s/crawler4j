@@ -281,7 +281,7 @@ class JobDetailDialog(QDialog):
                 resource_text = f"Provider: {run_profile.resource.acquisition.provider}"
             else:
                 if run_profile.resource.acquisition.env_id:
-                    resource_text = f"环境: {run_profile.resource.acquisition.env_id}"
+                    resource_text = f"指定环境: {run_profile.resource.acquisition.env_id}"
                 else:
                     resource_text = f"候选函数: {run_profile.resource.acquisition.candidates or '-'}"
         except Exception:

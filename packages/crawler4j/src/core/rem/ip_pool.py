@@ -33,6 +33,23 @@ class IPStrategy(StrEnum):
     NONE = "none"                      # 不使用代理
 
 
+class IPEntryStatus(StrEnum):
+    """IP 条目人工状态。"""
+
+    AVAILABLE = "available"  # 可用于后续绑定
+    DISABLED = "disabled"    # 停用，仅保留已有绑定，不再参与后续绑定
+
+
+def _normalize_entry_status(status: IPEntryStatus | str | None) -> IPEntryStatus:
+    if isinstance(status, IPEntryStatus):
+        return status
+    try:
+        return IPEntryStatus(status or IPEntryStatus.AVAILABLE.value)
+    except ValueError:
+        logger.warning(f"[IPPool] 未知 IP 条目状态，回退为可用: {status}")
+        return IPEntryStatus.AVAILABLE
+
+
 @dataclass
 class IPEntry:
     """IP 条目。
@@ -51,6 +68,7 @@ class IPEntry:
         created_at: 创建时间戳
         updated_at: 更新时间戳
         last_used_at: 最近一次绑定使用时间戳
+        status: 人工状态，可用或不可用
     """
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     pool_id: str = ""
@@ -65,6 +83,7 @@ class IPEntry:
     created_at: int = field(default_factory=lambda: int(time.time()))
     updated_at: int = field(default_factory=lambda: int(time.time()))
     last_used_at: int | None = None
+    status: IPEntryStatus = IPEntryStatus.AVAILABLE
     
     def to_proxy_string(self) -> str:
         """转换为代理字符串格式。"""
@@ -78,6 +97,10 @@ class IPEntry:
         if self.expires_at is None:
             return False
         return int(time.time()) > self.expires_at
+
+    def is_available(self) -> bool:
+        """检查是否允许参与后续绑定。"""
+        return _normalize_entry_status(self.status) == IPEntryStatus.AVAILABLE
     
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典。"""
@@ -95,6 +118,7 @@ class IPEntry:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "last_used_at": self.last_used_at,
+            "status": _normalize_entry_status(self.status).value,
         }
     
     @classmethod
@@ -114,6 +138,7 @@ class IPEntry:
             created_at=data.get("created_at", int(time.time())),
             updated_at=data.get("updated_at", data.get("created_at", int(time.time()))),
             last_used_at=data.get("last_used_at"),
+            status=_normalize_entry_status(data.get("status")),
         )
 
 
@@ -156,7 +181,7 @@ class IPPool:
         exclude = exclude_ids or set()
         candidates = [
             ip for ip in self.entries 
-            if ip.id not in exclude and not ip.is_expired()
+            if ip.id not in exclude and ip.is_available() and not ip.is_expired()
         ]
         
         if not candidates:
@@ -294,9 +319,6 @@ class IPPoolManager:
         Returns:
             绑定的 IP 条目，若无可用则返回 None
         """
-        # 安全性: 先尝试解绑旧 IP，防止计数器泄漏
-        await self.unbind_ip(env_id)
-
         pool = self._pools.get(pool_id)
         if not pool:
             logger.warning(f"[IPPool] 池不存在: {pool_id}")
@@ -308,7 +330,9 @@ class IPPoolManager:
             logger.warning(f"[IPPool] 无可用 IP: pool={pool_id}")
             return None
         
-        # 更新绑定
+        # 只有选到新 IP 后才替换旧绑定；停用只影响后续候选，不自动解绑已有环境。
+        await self.unbind_ip(env_id)
+
         now = int(time.time())
         ip.bound_count += 1
         ip.last_used_at = now
@@ -318,6 +342,21 @@ class IPPoolManager:
         
         logger.info(f"[IPPool] 绑定 IP成功: env={env_id} ip={ip.address} (new_count={ip.bound_count})")
         return ip
+
+    def set_entry_status(self, entry_id: str, status: IPEntryStatus | str) -> bool:
+        """设置 IP 条目的人工状态，不影响已有环境绑定。"""
+        next_status = _normalize_entry_status(status)
+        for pool in self._pools.values():
+            entry = pool.get_entry(entry_id)
+            if entry is None:
+                continue
+            entry.status = next_status
+            entry.updated_at = int(time.time())
+            self._persist_entry(entry)
+            logger.info(f"[IPPool] IP 状态已更新: id={entry_id} status={next_status.value}")
+            return True
+        logger.warning(f"[IPPool] 更新 IP 状态时未找到条目: id={entry_id}")
+        return False
     
     async def unbind_ip(self, env_id: int) -> bool:
         """解绑环境的 IP。
@@ -405,9 +444,9 @@ class IPPoolManager:
                 """
                 INSERT INTO ip_entries (
                     id, pool_id, address, protocol, port, username, password,
-                    bound_count, safety_score, expires_at, created_at, updated_at, last_used_at
+                    bound_count, safety_score, expires_at, created_at, updated_at, last_used_at, status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     pool_id = excluded.pool_id,
                     address = excluded.address,
@@ -419,7 +458,8 @@ class IPPoolManager:
                     safety_score = excluded.safety_score,
                     expires_at = excluded.expires_at,
                     updated_at = excluded.updated_at,
-                    last_used_at = excluded.last_used_at
+                    last_used_at = excluded.last_used_at,
+                    status = excluded.status
                 """,
                 (
                     entry.id,
@@ -435,6 +475,7 @@ class IPPoolManager:
                     entry.created_at,
                     entry.updated_at,
                     entry.last_used_at,
+                    _normalize_entry_status(entry.status).value,
                 )
             )
     
@@ -472,6 +513,7 @@ class IPPoolManager:
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],
                     last_used_at=row["last_used_at"],
+                    status=_normalize_entry_status(row["status"]),
                 )
                 pool = self._pools.get(entry.pool_id)
                 if pool:

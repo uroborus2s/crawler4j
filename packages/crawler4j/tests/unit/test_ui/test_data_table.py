@@ -93,6 +93,96 @@ def test_sky_data_table_sort_requires_explicit_sortable_column(qtbot):
     assert queries[-1][1]["sort"] == [{"field": "status", "direction": "asc"}]
 
 
+def test_sky_data_table_renders_select_column_filter_and_emits_params(qtbot):
+    table = SkyDataTable(
+        {
+            "columns": [
+                {
+                    "key": "record_status",
+                    "label": "账号状态",
+                    "type": "select",
+                    "options": ["不限", "正常", "黑号"],
+                    "searchable": True,
+                },
+                {"key": "phone", "label": "手机号", "searchable": True},
+            ],
+            "features": {"pagination": {"enabled": False}},
+        }
+    )
+    qtbot.addWidget(table)
+
+    queries: list[dict] = []
+    table.query_requested.connect(lambda _request_id, query: queries.append(dict(query)))
+
+    combo = table._filter_combos["record_status"]
+    assert [combo.itemText(index) for index in range(combo.count())] == ["不限", "正常", "黑号"]
+
+    combo.setCurrentText("黑号")
+    assert queries[-1]["page"] == 1
+    assert queries[-1]["params"] == {"record_status": "黑号"}
+
+    combo.setCurrentText("不限")
+    assert queries[-1]["page"] == 1
+    assert queries[-1]["params"] == {}
+
+
+def test_sky_data_table_renders_visible_sort_controls_and_emits_sort(qtbot):
+    table = SkyDataTable(
+        {
+            "columns": [
+                {"key": "created_at", "label": "创建时间", "sortable": True},
+                {"key": "updated_at", "label": "更新时间", "sortable": True},
+            ],
+            "features": {"sort": {"enabled": True}, "pagination": {"enabled": False}},
+        }
+    )
+    qtbot.addWidget(table)
+
+    queries: list[dict] = []
+    table.query_requested.connect(lambda _request_id, query: queries.append(dict(query)))
+
+    assert table.sort_field_combo.isHidden() is False
+    assert table.sort_field_combo.findData("created_at") >= 0
+    assert table.sort_field_combo.findData("updated_at") >= 0
+
+    table.sort_direction_combo.setCurrentIndex(table.sort_direction_combo.findData("desc"))
+    table.sort_field_combo.setCurrentIndex(table.sort_field_combo.findData("updated_at"))
+    assert queries[-1]["sort"] == [{"field": "updated_at", "direction": "desc"}]
+
+    table.sort_field_combo.setCurrentIndex(table.sort_field_combo.findData(""))
+    assert queries[-1]["sort"] == []
+
+
+def test_sky_data_table_header_sort_syncs_visible_sort_controls(qtbot):
+    table = SkyDataTable(
+        {
+            "columns": [
+                {"key": "created_at", "label": "创建时间", "sortable": True},
+                {"key": "updated_at", "label": "更新时间", "sortable": True},
+            ],
+            "features": {"sort": {"enabled": True}, "pagination": {"enabled": False}},
+        }
+    )
+    qtbot.addWidget(table)
+
+    queries: list[dict] = []
+    table.query_requested.connect(lambda _request_id, query: queries.append(dict(query)))
+
+    table.table.horizontalHeader().sectionClicked.emit(1)
+    assert queries[-1]["sort"] == [{"field": "updated_at", "direction": "asc"}]
+    assert table.sort_field_combo.currentData() == "updated_at"
+    assert table.sort_direction_combo.currentData() == "asc"
+
+    table.table.horizontalHeader().sectionClicked.emit(1)
+    assert queries[-1]["sort"] == [{"field": "updated_at", "direction": "desc"}]
+    assert table.sort_field_combo.currentData() == "updated_at"
+    assert table.sort_direction_combo.currentData() == "desc"
+
+    table.table.horizontalHeader().sectionClicked.emit(1)
+    assert queries[-1]["sort"] == []
+    assert table.sort_field_combo.currentData() == ""
+
+
 def test_resolve_local_data_table_search_requires_explicit_searchable_column():
     result = resolve_local_data_table_result(
         [

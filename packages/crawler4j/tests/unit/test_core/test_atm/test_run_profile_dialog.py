@@ -14,6 +14,8 @@ from src.core.atm.run_profile import (
     ResourceConfig,
     RunProfile,
 )
+from src.core.rem.env_claims import ENV_CLAIM_NAMESPACE, ENV_CLAIM_OWNER_MODULE
+from src.core.rem.models import EnvKind, EnvStatus
 from src.ui.components.button import StyledButton
 from src.ui.components.check_box import StyledCheckBox, ToggleSwitch
 from src.ui.components.combo_box import StyledComboBox
@@ -32,7 +34,26 @@ def _candidate_descriptor(*entries: tuple[str, str]):
     )
 
 
-def _patch_dialog_dependencies(monkeypatch):
+def _make_env(
+    env_id: int,
+    *,
+    name: str = "",
+    provider: str = "virtualbrowser",
+    kind: EnvKind = EnvKind.BROWSER,
+    status: EnvStatus = EnvStatus.READY,
+    lease_id: str | None = None,
+):
+    return SimpleNamespace(
+        id=env_id,
+        name=name or f"env-{env_id}",
+        provider=provider,
+        kind=kind,
+        status=status,
+        lease_id=lease_id,
+    )
+
+
+def _patch_dialog_dependencies(monkeypatch, *, envs=None, env_metadata=None):
     import src.core.atm.ui.run_profile_dialog as dialog_module
 
     workflows = [
@@ -67,8 +88,28 @@ def _patch_dialog_dependencies(monkeypatch):
         lambda: SimpleNamespace(list_pools=lambda: [pool]),
     )
 
+    env_map = {int(env.id): env for env in (envs or [])}
+    metadata_by_env = {int(env_id): dict(metadata) for env_id, metadata in (env_metadata or {}).items()}
 
-def _patch_ctrip_dialog_dependencies(monkeypatch):
+    def list_metadata(env_id, namespace=None):
+        metadata = metadata_by_env.get(int(env_id), {})
+        if namespace:
+            return dict(metadata.get(namespace, {}))
+        return dict(metadata)
+
+    monkeypatch.setattr(
+        dialog_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(
+            pool=SimpleNamespace(
+                _environments=env_map,
+                list_metadata=list_metadata,
+            )
+        ),
+    )
+
+
+def _patch_ctrip_dialog_dependencies(monkeypatch, *, envs=None, env_metadata=None):
     import src.core.atm.ui.run_profile_dialog as dialog_module
 
     workflows = [
@@ -100,6 +141,26 @@ def _patch_ctrip_dialog_dependencies(monkeypatch):
         dialog_module,
         "get_ip_pool_manager",
         lambda: SimpleNamespace(list_pools=lambda: [pool]),
+    )
+
+    env_map = {int(env.id): env for env in (envs or [])}
+    metadata_by_env = {int(env_id): dict(metadata) for env_id, metadata in (env_metadata or {}).items()}
+
+    def list_metadata(env_id, namespace=None):
+        metadata = metadata_by_env.get(int(env_id), {})
+        if namespace:
+            return dict(metadata.get(namespace, {}))
+        return dict(metadata)
+
+    monkeypatch.setattr(
+        dialog_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(
+            pool=SimpleNamespace(
+                _environments=env_map,
+                list_metadata=list_metadata,
+            )
+        ),
     )
 
 
@@ -467,6 +528,7 @@ def test_run_profile_dialog_builds_select_mode_profile(qtbot, monkeypatch):
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.select_strategy_combo.setCurrentIndex(dialog.select_strategy_combo.findData("candidates"))
     dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("bound_account_ready"))
 
     profile = dialog._build_run_profile_from_form()
@@ -476,6 +538,74 @@ def test_run_profile_dialog_builds_select_mode_profile(qtbot, monkeypatch):
     assert "selector_name" not in profile.resource.acquisition.model_dump()
     assert profile.resource.acquisition.provider == ""
     assert profile.resource.acquisition.wait_timeout == 60
+
+
+def test_run_profile_dialog_lists_only_current_module_available_fixed_envs(qtbot, monkeypatch):
+    envs = [
+        _make_env(1, name="fresh-env", provider="virtualbrowser"),
+        _make_env(2, name="claimed-demo", provider="virtualbrowser"),
+        _make_env(3, name="claimed-other", provider="virtualbrowser"),
+        _make_env(4, name="busy-demo", provider="virtualbrowser", status=EnvStatus.BUSY),
+        _make_env(5, name="http-env", provider="virtualbrowser", kind=EnvKind.HTTP),
+        _make_env(6, name="leased-demo", provider="virtualbrowser", lease_id="lease-6"),
+    ]
+    _patch_dialog_dependencies(
+        monkeypatch,
+        envs=envs,
+        env_metadata={
+            2: {ENV_CLAIM_NAMESPACE: {ENV_CLAIM_OWNER_MODULE: "demo_module"}},
+            3: {ENV_CLAIM_NAMESPACE: {ENV_CLAIM_OWNER_MODULE: "other_module"}},
+            4: {ENV_CLAIM_NAMESPACE: {ENV_CLAIM_OWNER_MODULE: "demo_module"}},
+            6: {ENV_CLAIM_NAMESPACE: {ENV_CLAIM_OWNER_MODULE: "demo_module"}},
+        },
+    )
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("demo_module", "collect")
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+
+    visible_env_ids = [
+        dialog.fixed_env_combo.itemData(index)
+        for index in range(dialog.fixed_env_combo.count())
+    ]
+
+    assert visible_env_ids == [1, 2]
+    assert dialog.fixed_env_combo.isEnabled() is True
+    assert "fresh-env" in dialog.fixed_env_combo.itemText(0)
+    assert "未归属" in dialog.fixed_env_combo.itemText(0)
+    assert "当前模块" in dialog.fixed_env_combo.itemText(1)
+
+
+def test_run_profile_dialog_builds_fixed_env_select_profile(qtbot, monkeypatch):
+    _patch_dialog_dependencies(
+        monkeypatch,
+        envs=[
+            _make_env(21, name="module-env", provider="virtualbrowser"),
+        ],
+    )
+
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.script_selector.set_value("demo_module", "collect")
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.select_strategy_combo.setCurrentIndex(dialog.select_strategy_combo.findData("fixed"))
+    dialog.fixed_env_combo.setCurrentIndex(dialog.fixed_env_combo.findData(21))
+
+    profile = dialog._build_run_profile_from_form()
+
+    assert profile.resource.acquisition.mode == AcquisitionMode.SELECT
+    assert profile.resource.acquisition.env_id == 21
+    assert profile.resource.acquisition.candidates == ""
+    assert profile.resource.acquisition.candidate_params == {}
+    assert profile.resource.acquisition.provider == "virtualbrowser"
+    assert profile.resource.acquisition.env_type == EnvType.VIRTUAL_BROWSER
 
 
 def test_run_profile_dialog_preserves_loaded_candidate_params(qtbot, monkeypatch):
@@ -550,6 +680,7 @@ def test_run_profile_dialog_separates_execution_timeout_from_wait_timeout(qtbot,
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.select_strategy_combo.setCurrentIndex(dialog.select_strategy_combo.findData("candidates"))
     dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("bound_account_ready"))
     dialog.wait_timeout_spin.setValue(30)
     dialog.execution_timeout_spin.setValue(0)
@@ -570,6 +701,7 @@ def test_run_profile_dialog_builds_candidate_select_profile_without_selector(qtb
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.select_strategy_combo.setCurrentIndex(dialog.select_strategy_combo.findData("candidates"))
     dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("bound_account_ready"))
 
     profile = dialog._build_run_profile_from_form()
@@ -620,6 +752,7 @@ def test_run_profile_dialog_selects_declared_candidate_without_legacy_selector(q
 
     dialog.script_selector.set_value("ctrip_crawler", "web_quiz_workflow")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.select_strategy_combo.setCurrentIndex(dialog.select_strategy_combo.findData("candidates"))
 
     profile = dialog._build_run_profile_from_form()
 
@@ -637,6 +770,7 @@ def test_run_profile_dialog_rejects_undeclared_env_candidates(qtbot, monkeypatch
 
     dialog.script_selector.set_value("demo_module", "collect")
     dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.SELECT))
+    dialog.select_strategy_combo.setCurrentIndex(dialog.select_strategy_combo.findData("candidates"))
     dialog.candidates_combo.addItem("missing_candidates", "missing_candidates")
     dialog.candidates_combo.setCurrentIndex(dialog.candidates_combo.findData("missing_candidates"))
 

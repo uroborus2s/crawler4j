@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from src.core.rem.ip_pool import IPEntry, IPPool, IPStrategy
+from src.core.rem.ip_pool import IPEntry, IPEntryStatus, IPPool, IPStrategy
 from src.core.rem.proxy_probe import ProxyProbeResult
 from src.ui.components.button import StyledButton
 
@@ -16,6 +16,7 @@ def _build_pool() -> IPPool:
             bound_count=2,
             safety_score=95,
             last_used_at=1_746_000_000,
+            status=IPEntryStatus.AVAILABLE,
         )
     ]
     return pool
@@ -40,8 +41,36 @@ def test_ip_pool_tab_pool_row_click_populates_entry_table(qtbot, monkeypatch):
     assert pool_row["name"] == "主池"
     assert widget.entry_title.text() == "IP 条目 - 主池"
     assert entry_row["address"] == "1.1.1.1"
+    assert entry_row["status"]["text"] == "可用"
     assert entry_row["last_used_at"]["text"] == datetime.fromtimestamp(1_746_000_000).strftime("%Y-%m-%d %H:%M")
-    assert [action["id"] for action in entry_row["actions"]] == ["test_entry", "edit_entry", "delete_entry"]
+    assert [action["id"] for action in entry_row["actions"]] == [
+        "test_entry",
+        "disable_entry",
+        "edit_entry",
+        "delete_entry",
+    ]
+
+
+def test_ip_pool_tab_disabled_entry_row_shows_enable_action(qtbot, monkeypatch):
+    import src.core.rem.ui.ip_pool_tab as ip_pool_tab
+
+    monkeypatch.setattr(ip_pool_tab.IPPoolTab, "load_data", lambda self: None)
+
+    widget = ip_pool_tab.IPPoolTab()
+    qtbot.addWidget(widget)
+    pool = _build_pool()
+    pool.entries[0].status = IPEntryStatus.DISABLED
+
+    widget._apply_current_pool(pool)
+    entry_row = widget.entry_table.displayed_rows()[0]
+
+    assert entry_row["status"]["text"] == "不可用"
+    assert [action["id"] for action in entry_row["actions"]] == [
+        "test_entry",
+        "enable_entry",
+        "edit_entry",
+        "delete_entry",
+    ]
 
 
 def test_ip_pool_tab_pool_action_routes_delete(qtbot, monkeypatch):
@@ -72,6 +101,25 @@ def test_ip_pool_tab_entry_action_routes_probe(qtbot, monkeypatch):
     widget._on_entry_action_requested("test_entry", {"entry_id": "entry-1"})
 
     assert tested == ["entry-1"]
+
+
+def test_ip_pool_tab_entry_action_routes_status_toggle(qtbot, monkeypatch):
+    import src.core.rem.ui.ip_pool_tab as ip_pool_tab
+
+    monkeypatch.setattr(ip_pool_tab.IPPoolTab, "load_data", lambda self: None)
+
+    widget = ip_pool_tab.IPPoolTab()
+    qtbot.addWidget(widget)
+    toggled: list[tuple[str, IPEntryStatus]] = []
+    monkeypatch.setattr(widget, "_set_entry_status", lambda entry_id, status: toggled.append((entry_id, status)))
+
+    widget._on_entry_action_requested("disable_entry", {"entry_id": "entry-1"})
+    widget._on_entry_action_requested("enable_entry", {"entry_id": "entry-2"})
+
+    assert toggled == [
+        ("entry-1", IPEntryStatus.DISABLED),
+        ("entry-2", IPEntryStatus.AVAILABLE),
+    ]
 
 
 def test_ip_pool_tab_uses_public_toolbar_buttons(qtbot, monkeypatch):

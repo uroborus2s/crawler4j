@@ -71,6 +71,45 @@ async def test_job_detail_dialog_shows_candidate_binding(qtbot, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_job_detail_dialog_shows_fixed_env_binding(qtbot, monkeypatch):
+    import src.core.atm.ui.task_detail_dialog as dialog_module
+
+    job = Job(
+        id="job-1",
+        name="Demo Job",
+        run_profile=RunProfile(
+            resource=ResourceConfig(
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.SELECT,
+                    env_id=21,
+                    wait_timeout=60,
+                ),
+            ),
+            execution=ExecutionContext(module="demo_module", workflow="repair"),
+        ),
+    )
+    service = SimpleNamespace(
+        get_job=AsyncMock(return_value=job),
+        list_tasks=AsyncMock(return_value=[]),
+    )
+
+    monkeypatch.setattr(dialog_module, "get_task_service", lambda: service)
+    monkeypatch.setattr(
+        dialog_module.asyncio,
+        "create_task",
+        lambda coro: (coro.close(), SimpleNamespace())[1],
+    )
+
+    dialog = dialog_module.JobDetailDialog("job-1")
+    qtbot.addWidget(dialog)
+
+    await dialog._load_data_async()
+
+    assert "指定环境: 21" in dialog.config_text.toPlainText()
+    assert "候选函数" not in dialog.config_text.toPlainText()
+
+
+@pytest.mark.asyncio
 async def test_job_detail_dialog_shows_timeout_reason_instead_of_waiting_message(qtbot, monkeypatch):
     import src.core.atm.ui.task_detail_dialog as dialog_module
 

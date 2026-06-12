@@ -335,7 +335,9 @@ class ManagedPageRenderer(QWidget):
         query: dict[str, Any],
     ) -> dict[str, Any]:
         normalized = dict(query or {})
-        normalized["params"] = dict(self._navigation_params)
+        navigation_params = dict(self._navigation_params)
+        table_params = dict(normalized.get("params") or {})
+        normalized["params"] = {**navigation_params, **table_params}
         normalized["search_fields"] = self._table_search_fields(component)
 
         sort_fields = self._table_sort_fields(component)
