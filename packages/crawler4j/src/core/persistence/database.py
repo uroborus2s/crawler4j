@@ -349,7 +349,7 @@ def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def _ensure_ip_entries_time_columns(conn: sqlite3.Connection) -> None:
+def _ensure_ip_entries_columns(conn: sqlite3.Connection) -> None:
     existing_columns = {
         row["name"]
         for row in conn.execute("PRAGMA table_info(ip_entries)").fetchall()
@@ -364,8 +364,18 @@ def _ensure_ip_entries_time_columns(conn: sqlite3.Connection) -> None:
         )
     if "last_used_at" not in existing_columns:
         conn.execute("ALTER TABLE ip_entries ADD COLUMN last_used_at INTEGER")
+    if "status" not in existing_columns:
+        conn.execute("ALTER TABLE ip_entries ADD COLUMN status TEXT NOT NULL DEFAULT 'available'")
+    conn.execute(
+        """
+        UPDATE ip_entries
+        SET status = 'available'
+        WHERE status IS NULL OR status = ''
+        """
+    )
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ip_last_used ON ip_entries(pool_id, last_used_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ip_status ON ip_entries(pool_id, status)")
 
 
 def _init_config_db() -> None:
@@ -538,7 +548,8 @@ def _init_state_db() -> None:
                 expires_at INTEGER,
                 created_at INTEGER DEFAULT (strftime('%s', 'now')),
                 updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-                last_used_at INTEGER
+                last_used_at INTEGER,
+                status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'disabled'))
             );
             
             CREATE INDEX IF NOT EXISTS idx_ip_pool ON ip_entries(pool_id);
@@ -561,7 +572,7 @@ def _init_state_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_meta_env ON env_metadata(env_id);
             CREATE INDEX IF NOT EXISTS idx_meta_ns_key ON env_metadata(namespace, key);
         """)
-        _ensure_ip_entries_time_columns(conn)
+        _ensure_ip_entries_columns(conn)
         existing_columns = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(environments)").fetchall()

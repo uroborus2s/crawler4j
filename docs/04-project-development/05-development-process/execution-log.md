@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `API-010`, `BUG-013`
-**最后更新：** 2026-06-11
+**最后更新：** 2026-06-12
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,9 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-12 | ATM 运行模板选择环境阶段 1：选择已有环境时新增 `指定环境 / 候选函数` 切换，默认固定选择 `env_id`，固定环境下拉只列当前模块可用的 `READY + BROWSER + 无租约` 环境；候选函数保留给动态业务筛选与 Service 等待队列。运行模板、作业预览、任务详情和运行摘要均区分固定环境与候选函数。定向回归 `92 passed`，目标 `ruff check` 通过 | Codex |
+| 2026-06-12 | Core Hosted UI DataTable 补齐可见筛选与排序入口：select 列快速筛选写入 `HostedDataTableQuery.params`，sortable 列提供可见排序字段/方向控件并与表头点击排序同步；Renderer 合并导航参数与表格 params，表格筛选同名优先。DataTable + ManagedPageRenderer 定向回归 `29 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
+| 2026-06-12 | IP 池条目新增人工 `可用 / 不可用` 状态：不可用条目不参与后续环境绑定，停用或无可用候选时不自动解绑已有环境；`ip_entries.status` 支持旧库补列默认可用，IP 池页面新增状态列和 `停用 / 启用` 操作。IP 池聚焦回归 `23 passed`，REM 目录回归 `153 passed`，状态库迁移 + runtime capabilities 回归 `41 passed` | Codex |
 | 2026-06-11 | 将根应用 / 运行时版本提升到 `0.4.8`，用于 IP 池最久未使用默认分配策略、最近使用时间记录与旧库迁移的客户端修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
 | 2026-06-11 | 调整 IP 池默认分配策略：新增 `least_recently_used`，新建 IP 池、默认池和运行模板默认优先使用“最久未使用”策略；`ip_entries` 新增 `updated_at` / `last_used_at` 并带旧库补列迁移，绑定成功后写入最近使用时间；IP 池页面展示“最近使用”。定向回归 `50 passed`，扩展回归 REM `147 passed`、persistence `82 passed` | Codex |
 | 2026-06-09 | 将根应用 / 运行时版本提升到 `0.4.7`，用于 workflow/component 对象 cleanup 固定超时移除后的客户端修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |

@@ -195,6 +195,8 @@ def ready_accounts(params: dict | None = None) -> EnvCandidates:
 
 模块数据表如果代表账号、登录态或其他环境绑定业务实体，必须在 `@data_table(..., env_binding_field="env_id")` 中声明绑定字段；字段必须存在于 schema 且为 integer。宿主只通过这些声明扫描“模块是否已经认领环境”。
 
+运行模板选择已有环境时，可直接指定固定 `env_id`，也可引用模块 `@env_candidates` 做动态筛选。宿主客户端的固定环境下拉只展示 `READY`、浏览器类型、无租约，且未归属或已归属当前模块的环境。
+
 固定选择环境运行时，宿主会先临时标记该环境归属当前模块；任务终态后仍会按 `env_binding_field` 重新扫描业务表。如果没有任何业务数据绑定该环境，claim 会转为 abandoned，避免固定环境长期卡在“已归属但未认领”的中间态；已有业务绑定的环境继续保持 claimed。
 
 批量环境清理写在 `cleanups/*.py` 中，使用 `@env_cleanup_candidates` 装饰同步纯函数。函数返回待清理 env id 列表或同一个 `EnvCandidates` 链式查询对象；这个入口只表达“模块认为已绑定且业务上可丢弃的候选集合”。宿主客户端触发清理时会同时扫描孤岛环境、任务创建后未被模块数据表认领的环境、owner 模块已不存在的环境，以及模块清理候选；展示预览后再二次校验 `READY/PAUSED`、无租约、无关联任务、无活跃 task 引用、未被运行模板固定引用，最后由 REM 调用 `destroy_env()` 删除。清理候选运行面只有只读 `ctx.db`，不暴露 `ctx.tools`。

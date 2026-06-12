@@ -24,7 +24,10 @@ from PyQt6.QtWidgets import (
 
 from src.core.mms import get_module_registry
 from src.core.mms.service import get_module_service
+from src.core.rem.env_claims import ENV_CLAIM_NAMESPACE, ENV_CLAIM_OWNER_MODULE
 from src.core.rem.ip_pool import get_ip_pool_manager
+from src.core.rem.manager import get_environment_manager
+from src.core.rem.models import EnvKind, EnvStatus
 from src.core.rem.provider import (
     VIRTUALBROWSER_DEFAULT_CHROME_VERSION,
     VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS,
@@ -1461,12 +1464,23 @@ class RunProfileDialog(QDialog):
         select_form_widget = QWidget()
         self.select_form = self._create_form_layout(select_form_widget)
 
+        self.select_strategy_combo = QComboBox()
+        self.select_strategy_combo.addItem("指定环境", "fixed")
+        self.select_strategy_combo.addItem("候选函数", "candidates")
+        self.select_strategy_combo.currentIndexChanged.connect(self._on_select_strategy_changed)
+        self.select_form.addRow("选择方式:", self.select_strategy_combo)
+
+        self.fixed_env_combo = QComboBox()
+        self.fixed_env_combo.setPlaceholderText("选择当前模块可用环境")
+        self._fixed_env_by_id: dict[int, object] = {}
+        self.select_form.addRow("指定环境:", self.fixed_env_combo)
+
         self.candidates_combo = QComboBox()
         self.candidates_combo.setPlaceholderText("选择候选函数")
         self.select_form.addRow("候选函数:", self.candidates_combo)
 
-        candidate_params_widget = QWidget()
-        candidate_params_layout = QHBoxLayout(candidate_params_widget)
+        self.candidate_params_widget = QWidget()
+        candidate_params_layout = QHBoxLayout(self.candidate_params_widget)
         candidate_params_layout.setContentsMargins(0, 0, 0, 0)
         candidate_params_layout.setSpacing(8)
         self.candidate_params_summary = QLabel("未配置")
@@ -1482,7 +1496,7 @@ class RunProfileDialog(QDialog):
         )
         self.candidate_params_btn.clicked.connect(self._open_candidate_params_dialog)
         candidate_params_layout.addWidget(self.candidate_params_btn)
-        self.select_form.addRow("候选参数:", candidate_params_widget)
+        self.select_form.addRow("候选参数:", self.candidate_params_widget)
 
         self.select_form.addRow(
             "等待超时:",
@@ -1490,10 +1504,10 @@ class RunProfileDialog(QDialog):
         )
         select_layout.addWidget(select_form_widget)
 
-        select_desc = QLabel("选择模式使用 candidates/ 下的 @env_candidates 纯函数，由宿主实时求值后分配就绪环境。")
-        select_desc.setWordWrap(True)
-        select_desc.setStyleSheet("color: rgba(255, 255, 255, 0.72);")
-        select_layout.addWidget(select_desc)
+        self.select_desc = QLabel()
+        self.select_desc.setWordWrap(True)
+        self.select_desc.setStyleSheet("color: rgba(255, 255, 255, 0.72);")
+        select_layout.addWidget(self.select_desc)
         select_layout.addStretch()
 
         self.resource_mode_stack.addWidget(select_widget)
@@ -1509,7 +1523,9 @@ class RunProfileDialog(QDialog):
         self._load_provider_options("virtualbrowser")
         self.script_selector.module_combo.currentTextChanged.connect(self._on_script_module_changed)
         self.script_selector.workflow_combo.currentIndexChanged.connect(self._on_workflow_selection_changed)
+        self._sync_fixed_env_options()
         self._sync_candidates_options()
+        self._on_select_strategy_changed(self.select_strategy_combo.currentIndex())
         self._sync_object_assembly_form()
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
@@ -1952,6 +1968,9 @@ class RunProfileDialog(QDialog):
     def _on_script_module_changed(self, _module_name: str) -> None:
         previous_candidates = self.candidates_combo.currentData()
         preferred = previous_candidates if isinstance(previous_candidates, str) else None
+        current_env_id = self.fixed_env_combo.currentData()
+        preferred_env_id = int(current_env_id) if isinstance(current_env_id, int) else None
+        self._sync_fixed_env_options(preferred=preferred_env_id)
         self._sync_candidates_options(preferred=preferred)
         self._sync_object_assembly_form()
 
@@ -2407,6 +2426,116 @@ class RunProfileDialog(QDialog):
         self._candidate_params = dialog.get_params()
         self._sync_candidate_params_summary()
 
+    @staticmethod
+    def _enum_value(value: object) -> str:
+        return str(getattr(value, "value", value) or "")
+
+    def _env_claim_owner(self, env: object) -> str:
+        try:
+            pool = get_environment_manager().pool
+            list_metadata = getattr(pool, "list_metadata", None)
+            if not callable(list_metadata):
+                return ""
+            metadata = list_metadata(int(getattr(env, "id")), ENV_CLAIM_NAMESPACE)
+        except Exception as exc:
+            logger.warning(f"[ATM] 读取环境归属失败: env_id={getattr(env, 'id', '')} error={exc}")
+            return ""
+        if not isinstance(metadata, dict):
+            return ""
+        return str(metadata.get(ENV_CLAIM_OWNER_MODULE) or "").strip()
+
+    def _is_fixed_env_available_for_module(self, env: object, module_name: str) -> bool:
+        if not module_name:
+            return False
+        if self._enum_value(getattr(env, "kind", "")) != EnvKind.BROWSER.value:
+            return False
+        if self._enum_value(getattr(env, "status", "")) != EnvStatus.READY.value:
+            return False
+        if getattr(env, "lease_id", None):
+            return False
+        owner = self._env_claim_owner(env)
+        return not owner or owner == module_name
+
+    def _list_fixed_env_options(self, module_name: str) -> list[object]:
+        if not module_name:
+            return []
+        try:
+            pool = get_environment_manager().pool
+            raw_envs = getattr(pool, "_environments", {})
+            envs = list(raw_envs.values()) if isinstance(raw_envs, dict) else list(raw_envs or [])
+        except Exception as exc:
+            logger.warning(f"[ATM] 加载可选环境失败: module={module_name} error={exc}")
+            return []
+        available = [
+            env
+            for env in envs
+            if self._is_fixed_env_available_for_module(env, module_name)
+        ]
+        return sorted(available, key=lambda env: int(getattr(env, "id", 0) or 0))
+
+    def _fixed_env_label(self, env: object, module_name: str) -> str:
+        env_id = int(getattr(env, "id", 0) or 0)
+        name = str(getattr(env, "name", "") or "-")
+        provider = str(getattr(env, "provider", "") or "-")
+        owner = self._env_claim_owner(env)
+        owner_label = "当前模块" if owner == module_name else "未归属"
+        return f"#{env_id} {name} | {provider} | {owner_label}"
+
+    def _sync_fixed_env_options(self, preferred: int | None = None) -> None:
+        if not hasattr(self, "fixed_env_combo"):
+            return
+        module_name = self._current_script_module_name()
+        current_data = self.fixed_env_combo.currentData()
+        current = preferred if preferred is not None else current_data if isinstance(current_data, int) else None
+        envs = self._list_fixed_env_options(module_name)
+
+        self.fixed_env_combo.blockSignals(True)
+        self.fixed_env_combo.clear()
+        self._fixed_env_by_id = {}
+        if not envs:
+            self.fixed_env_combo.addItem("当前模块没有可用环境", None)
+            self.fixed_env_combo.setEnabled(False)
+            self.fixed_env_combo.blockSignals(False)
+            return
+
+        self.fixed_env_combo.setEnabled(True)
+        for env in envs:
+            env_id = int(getattr(env, "id"))
+            self._fixed_env_by_id[env_id] = env
+            self.fixed_env_combo.addItem(self._fixed_env_label(env, module_name), env_id)
+
+        index = self.fixed_env_combo.findData(current)
+        self.fixed_env_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.fixed_env_combo.blockSignals(False)
+
+    def _set_fixed_env_value(self, env_id: int | None) -> None:
+        if env_id is None:
+            return
+        index = self.fixed_env_combo.findData(int(env_id))
+        if index >= 0:
+            self.fixed_env_combo.setCurrentIndex(index)
+
+    def _set_select_strategy_value(self, value: str) -> None:
+        index = self.select_strategy_combo.findData(value)
+        if index >= 0:
+            self.select_strategy_combo.setCurrentIndex(index)
+
+    def _on_select_strategy_changed(self, _index: int) -> None:
+        if not hasattr(self, "select_strategy_combo"):
+            return
+        fixed_mode = self.select_strategy_combo.currentData() == "fixed"
+        self._set_row_visible(self.fixed_env_combo, fixed_mode)
+        self._set_row_visible(self.candidates_combo, not fixed_mode)
+        self._set_row_visible(self.candidate_params_widget, not fixed_mode)
+        if fixed_mode:
+            self.select_desc.setText(
+                "指定环境只展示当前模块可用的 READY 浏览器环境：未归属环境或已归属当前模块的环境。"
+            )
+        else:
+            self.select_desc.setText(
+                "候选函数使用 candidates/ 下的 @env_candidates 纯函数，由宿主实时求值后分配就绪环境。"
+            )
+
     def _declared_env_candidate_options(self) -> list[tuple[str, str]]:
         module_name = self._current_script_module_name()
         if not module_name:
@@ -2557,11 +2686,20 @@ class RunProfileDialog(QDialog):
             if s.execution
             else None
         )
+        self._sync_fixed_env_options(acquisition.env_id)
         self._sync_candidates_options(acquisition.candidates or "")
         self.wait_timeout_spin.setValue(acquisition.wait_timeout)
+        if acquisition.env_id is not None:
+            self._set_select_strategy_value("fixed")
+        elif acquisition.candidates:
+            self._set_select_strategy_value("candidates")
+        else:
+            self._set_select_strategy_value("fixed")
+        self._set_fixed_env_value(acquisition.env_id)
         self._set_candidates_value(acquisition.candidates or "")
         self._candidate_params = dict(acquisition.candidate_params or {})
         self._sync_candidate_params_summary()
+        self._on_select_strategy_changed(self.select_strategy_combo.currentIndex())
 
         self._on_resource_mode_changed(self.resource_mode_combo.currentIndex())
 
@@ -2572,6 +2710,7 @@ class RunProfileDialog(QDialog):
         env_type = self._provider_to_env_type(provider)
         creation_params: dict = {}
         candidates_name = ""
+        fixed_env_id: int | None = None
 
         if acquisition_mode == AcquisitionMode.CREATE and env_type in {EnvType.BIT_BROWSER, EnvType.VIRTUAL_BROWSER}:
             provider_params = self._build_virtualbrowser_params() if provider == "virtualbrowser" else {}
@@ -2586,26 +2725,41 @@ class RunProfileDialog(QDialog):
                 creation_params["proxy"] = proxy_config
 
         if acquisition_mode == AcquisitionMode.SELECT:
-            candidates_data = self.candidates_combo.currentData()
-            candidates_name = candidates_data.strip() if isinstance(candidates_data, str) else ""
-            if not candidates_name:
-                raise ValueError("请选择环境候选函数")
-            declared_candidates = self._declared_env_candidate_names()
-            if candidates_name:
-                if not declared_candidates:
-                    raise ValueError("当前模块未声明 @env_candidates 候选函数")
-                if candidates_name not in declared_candidates:
-                    raise ValueError(f"环境候选函数未声明: {candidates_name}")
-            provider = ""
-            env_type = EnvType.VIRTUAL_BROWSER
+            select_strategy = self.select_strategy_combo.currentData()
+            if select_strategy == "fixed":
+                fixed_data = self.fixed_env_combo.currentData()
+                if not isinstance(fixed_data, int):
+                    raise ValueError("请选择可用环境")
+                fixed_env_id = int(fixed_data)
+                selected_env = self._fixed_env_by_id.get(fixed_env_id)
+                provider = str(getattr(selected_env, "provider", "") or "") if selected_env else ""
+                env_type = self._provider_to_env_type(provider)
+            else:
+                candidates_data = self.candidates_combo.currentData()
+                candidates_name = candidates_data.strip() if isinstance(candidates_data, str) else ""
+                if not candidates_name:
+                    raise ValueError("请选择环境候选函数")
+                declared_candidates = self._declared_env_candidate_names()
+                if candidates_name:
+                    if not declared_candidates:
+                        raise ValueError("当前模块未声明 @env_candidates 候选函数")
+                    if candidates_name not in declared_candidates:
+                        raise ValueError(f"环境候选函数未声明: {candidates_name}")
+                provider = ""
+                env_type = EnvType.VIRTUAL_BROWSER
 
         resource = ResourceConfig(
             acquisition=AcquisitionConfig(
                 mode=acquisition_mode,
                 provider=provider,
                 env_type=env_type,
+                env_id=fixed_env_id,
                 candidates=candidates_name,
-                candidate_params=dict(self._candidate_params) if acquisition_mode == AcquisitionMode.SELECT else {},
+                candidate_params=(
+                    dict(self._candidate_params)
+                    if acquisition_mode == AcquisitionMode.SELECT and candidates_name
+                    else {}
+                ),
                 wait_timeout=self.wait_timeout_spin.value(),
                 creation=CreationConfig(
                     lifecycle=CreationLifecycle.PERSISTENT,

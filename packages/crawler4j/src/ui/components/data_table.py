@@ -48,6 +48,9 @@ class SkyDataTable(QWidget):
         self._pending_request_id = 0
         self._loading = False
         self._error_message = ""
+        self._filter_combos: dict[str, StyledComboBox] = {}
+        self._filter_widgets: list[QWidget] = []
+        self._syncing_controls = False
 
         self._setup_ui()
         self.set_schema(schema or {})
@@ -73,6 +76,19 @@ class SkyDataTable(QWidget):
         self.search_input.textChanged.connect(self._on_search_changed)
         toolbar.addWidget(self.search_input)
         toolbar.addStretch()
+
+        self._sort_label = QLabel("排序")
+        self._sort_label.setStyleSheet("color: rgba(255,255,255,0.64); font-size: 12px;")
+        self.sort_field_combo = StyledComboBox()
+        self.sort_field_combo.setMinimumWidth(136)
+        self.sort_field_combo.currentIndexChanged.connect(self._on_sort_control_changed)
+        self.sort_direction_combo = StyledComboBox()
+        self.sort_direction_combo.setMinimumWidth(92)
+        self.sort_direction_combo.currentIndexChanged.connect(self._on_sort_control_changed)
+        for widget in (self._sort_label, self.sort_field_combo, self.sort_direction_combo):
+            widget.hide()
+            toolbar.addWidget(widget)
+
         self._toolbar = toolbar
         layout.addLayout(toolbar)
 
@@ -252,6 +268,9 @@ class SkyDataTable(QWidget):
                     "width": int(column["width"]) if column.get("width") is not None else None,
                     "stretch": bool(column.get("stretch", False)),
                     "align": str(column.get("align") or "left").strip().lower(),
+                    "options": [str(option) for option in column.get("options") or []]
+                    if column_type == "select"
+                    else [],
                 }
             )
 
@@ -329,6 +348,8 @@ class SkyDataTable(QWidget):
         pagination = self._schema["features"]["pagination"]
         self.search_input.setVisible(bool(search_feature["enabled"]))
         self.search_input.setPlaceholderText(str(search_feature["placeholder"]))
+        self._configure_filter_controls()
+        self._configure_sort_controls()
 
         options = list(dict.fromkeys(pagination["page_size_options"]))
         if int(pagination["page_size"]) not in options:
@@ -348,6 +369,79 @@ class SkyDataTable(QWidget):
         self.next_btn.setVisible(pagination_visible)
         self.page_label.setVisible(pagination_visible)
         self.loading_bar.setVisible(bool(self._loading and self._schema["features"]["loading"]["inline"]))
+
+    def _configure_filter_controls(self) -> None:
+        self._clear_filter_controls()
+        for column in self._select_filter_columns():
+            label = QLabel(str(column["label"]))
+            label.setStyleSheet("color: rgba(255,255,255,0.64); font-size: 12px;")
+            combo = StyledComboBox()
+            combo.setMinimumWidth(120)
+            options = list(column.get("options") or [])
+            if not any(self._is_all_filter_value(option) for option in options):
+                combo.addItem("全部", None)
+            for option in options:
+                combo.addItem(str(option), option)
+            combo.currentIndexChanged.connect(self._on_filter_changed)
+            self._insert_filter_widget(label)
+            self._insert_filter_widget(combo)
+            self._filter_combos[str(column["key"])] = combo
+
+    def _clear_filter_controls(self) -> None:
+        for widget in self._filter_widgets:
+            self._toolbar.removeWidget(widget)
+            widget.deleteLater()
+        self._filter_widgets = []
+        self._filter_combos = {}
+
+    def _insert_filter_widget(self, widget: QWidget) -> None:
+        insert_at = self._toolbar.count()
+        for index in range(self._toolbar.count()):
+            item = self._toolbar.itemAt(index)
+            if item is not None and item.spacerItem() is not None:
+                insert_at = index
+                break
+        self._toolbar.insertWidget(insert_at, widget)
+        self._filter_widgets.append(widget)
+
+    def _select_filter_columns(self) -> list[dict[str, Any]]:
+        return [
+            column
+            for column in self._columns
+            if column.get("type") == "select" and column.get("searchable") is True and column.get("options")
+        ]
+
+    def _configure_sort_controls(self) -> None:
+        sortable_columns = self._sortable_columns()
+        visible = bool(self._schema["features"]["sort"]["enabled"] and sortable_columns)
+        for widget in (self._sort_label, self.sort_field_combo, self.sort_direction_combo):
+            widget.setVisible(visible)
+
+        self._syncing_controls = True
+        self.sort_field_combo.blockSignals(True)
+        self.sort_direction_combo.blockSignals(True)
+        try:
+            self.sort_field_combo.clear()
+            self.sort_field_combo.addItem("默认排序", "")
+            for column in sortable_columns:
+                self.sort_field_combo.addItem(str(column["label"]), str(column["key"]))
+
+            self.sort_direction_combo.clear()
+            self.sort_direction_combo.addItem("升序", "asc")
+            self.sort_direction_combo.addItem("降序", "desc")
+        finally:
+            self.sort_direction_combo.blockSignals(False)
+            self.sort_field_combo.blockSignals(False)
+            self._syncing_controls = False
+
+        self._sync_sort_controls()
+
+    def _sortable_columns(self) -> list[dict[str, Any]]:
+        return [
+            column
+            for column in self._columns
+            if column.get("type") != "actions" and column.get("sortable") is True
+        ]
 
     def _configure_columns(self) -> None:
         self.table.setColumnCount(len(self._columns))
@@ -404,6 +498,8 @@ class SkyDataTable(QWidget):
             self.page_size_combo.setCurrentIndex(index)
             self.page_size_combo.blockSignals(False)
 
+        self._sync_filter_controls()
+        self._sync_sort_controls()
         self._update_header_labels()
         self._update_pagination_labels()
 
@@ -581,6 +677,52 @@ class SkyDataTable(QWidget):
         )
         self.request_refresh()
 
+    def _on_filter_changed(self) -> None:
+        if self._syncing_controls:
+            return
+        params = dict(self._query.get("params") or {})
+        for field in self._filter_combos:
+            params.pop(field, None)
+        for field, combo in self._filter_combos.items():
+            value = combo.currentData()
+            if value is None:
+                value = combo.currentText().strip()
+            if self._is_all_filter_value(value):
+                continue
+            params[field] = value
+
+        self.set_query(
+            {
+                "search_text": self._query.get("search_text", ""),
+                "sort": self._query.get("sort", []),
+                "page": 1,
+                "page_size": self._query.get("page_size", 20),
+                "params": params,
+            }
+        )
+        self.request_refresh()
+
+    def _on_sort_control_changed(self) -> None:
+        if self._syncing_controls:
+            return
+        field = str(self.sort_field_combo.currentData() or "").strip()
+        if not field and self.sender() is self.sort_direction_combo:
+            return
+        direction = str(self.sort_direction_combo.currentData() or "asc").strip().lower()
+        if direction not in {"asc", "desc"}:
+            direction = "asc"
+        next_sort = [{"field": field, "direction": direction}] if field else []
+        self.set_query(
+            {
+                "search_text": self._query.get("search_text", ""),
+                "sort": next_sort,
+                "page": 1,
+                "page_size": self._query.get("page_size", 20),
+                "params": self._query.get("params", {}),
+            }
+        )
+        self.request_refresh()
+
     def _on_page_size_changed(self) -> None:
         page_size = self.page_size_combo.currentData()
         if page_size is None:
@@ -667,6 +809,68 @@ class SkyDataTable(QWidget):
         if not field or direction not in {"asc", "desc"}:
             return None
         return {"field": field, "direction": direction}
+
+    def _sync_filter_controls(self) -> None:
+        if not self._filter_combos:
+            return
+        params = dict(self._query.get("params") or {})
+        self._syncing_controls = True
+        try:
+            for field, combo in self._filter_combos.items():
+                value = params.get(field)
+                index = self._find_filter_combo_index(combo, value)
+                combo.blockSignals(True)
+                try:
+                    if index < 0 and value is not None:
+                        combo.addItem(str(value), value)
+                        index = combo.findData(value)
+                    combo.setCurrentIndex(max(0, index))
+                finally:
+                    combo.blockSignals(False)
+        finally:
+            self._syncing_controls = False
+
+    def _sync_sort_controls(self) -> None:
+        self._syncing_controls = True
+        self.sort_field_combo.blockSignals(True)
+        self.sort_direction_combo.blockSignals(True)
+        try:
+            current_sort = self._current_sort()
+            field = str(current_sort.get("field") if current_sort else "")
+            direction = str(current_sort.get("direction") if current_sort else "asc")
+
+            field_index = self.sort_field_combo.findData(field)
+            self.sort_field_combo.setCurrentIndex(field_index if field_index >= 0 else 0)
+
+            direction_index = self.sort_direction_combo.findData(direction)
+            self.sort_direction_combo.setCurrentIndex(direction_index if direction_index >= 0 else 0)
+        finally:
+            self.sort_direction_combo.blockSignals(False)
+            self.sort_field_combo.blockSignals(False)
+            self._syncing_controls = False
+
+    def _find_filter_combo_index(self, combo: StyledComboBox, value: Any) -> int:
+        if self._is_all_filter_value(value):
+            for index in range(combo.count()):
+                if self._is_all_filter_value(combo.itemData(index)):
+                    return index
+                if self._is_all_filter_value(combo.itemText(index)):
+                    return index
+            return 0
+        index = combo.findData(value)
+        if index >= 0:
+            return index
+        value_text = str(value)
+        for index in range(combo.count()):
+            if combo.itemText(index) == value_text:
+                return index
+        return -1
+
+    @staticmethod
+    def _is_all_filter_value(value: Any) -> bool:
+        if value is None:
+            return True
+        return str(value).strip().lower() in {"", "不限", "全部", "all", "__all__"}
 
     def _update_pagination_labels(self) -> None:
         total_pages = self._total_pages()

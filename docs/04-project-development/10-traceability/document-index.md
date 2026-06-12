@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-06-12：`docs/02-user-guide/usage.md`、`execution-log.md` 与 `.factory/memory/` 已同步补记 IP 池条目人工 `可用 / 不可用` 状态；不可用条目只影响后续绑定候选，不自动解绑已有环境。
 - 2026-06-11：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.8`，用于承接 IP 池最久未使用默认分配策略、最近使用时间记录与旧库迁移；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-09：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.7`，用于承接 workflow/component 对象 cleanup 固定超时移除；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-07：根应用 / 运行时版本事实源已修正提升到 `crawler4j 0.4.6`，用于承接指纹浏览器生命周期串行化修复版；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。

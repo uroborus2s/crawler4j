@@ -100,6 +100,8 @@ def create_account_from_ui(ctx: TaskContext, account_id: str):
 
 `DataTable.columns` 中 `searchable` 与 `sortable` 都是显式 opt-in：未写 `searchable=True` 的列不会参与搜索，未写 `sortable=True` 的列不会响应表头排序，也不会进入 `query.sort`。
 
+当列声明为 `type="select"`、提供非空 `options`，并显式写 `searchable=True` 时，宿主会在表格工具栏渲染该列的快速筛选下拉。选择非全量项会写入 `HostedDataTableQuery.params[column.key]`；选择 `不限`、`全部`、`all`、`__all__` 或空值会清除该筛选。启用排序且存在 `sortable=True` 列时，宿主除了保留表头点击排序，也会提供可见的排序字段和升降序控件，两种入口共享同一份 `query.sort` 状态。
+
 ```python
 def load_accounts_page(context: TaskContext, page_id: str, params: dict | None = None) -> dict:
     del page_id, params
@@ -164,7 +166,7 @@ def query_accounts_table(
 - `params`
 - 计算属性 `limit`、`offset`
 
-`search_fields` 由当前 `DataTable.columns` 中显式设置 `searchable=True` 且不是 `actions` 类型的列 `key` 生成；未写 `searchable` 的列默认不可搜索。模块 handler 应只在这些字段上处理 `search_text`。`sort` 来自当前表格列点击或 `features.sort.default`，字段值同样是列 `key`；未显式设置 `sortable=True` 的列默认不可排序，宿主会过滤掉不可排序列和非法方向。`params` 承载页面导航参数，例如主表打开详情表时传入的账号 ID。
+`search_fields` 由当前 `DataTable.columns` 中显式设置 `searchable=True` 且不是 `actions` 类型的列 `key` 生成；未写 `searchable` 的列默认不可搜索。模块 handler 应只在这些字段上处理 `search_text`。`sort` 来自当前表格列点击、工具栏排序控件或 `features.sort.default`，字段值同样是列 `key`；未显式设置 `sortable=True` 的列默认不可排序，宿主会过滤掉不可排序列和非法方向。`params` 同时承载页面导航参数和表格工具栏筛选参数，例如主表打开详情表时传入的账号 ID，或 select 快速筛选写入的状态值。宿主会先合并导航参数，再合并表格参数；同名冲突时，以用户在当前表格上显式选择的筛选值为准。
 
 返回值必须是 `HostedDataTableQueryResult[RowT]`，`RowT` 是一行数据的泛型 mapping 类型；结果字段固定为 `rows`、`total`、`page`、`page_size`。结果不再回传 `sort`，排序状态由发起查询时的 `HostedDataTableQuery.sort` 表达；宿主渲染层不再接受普通 `dict` 作为 query handler 返回值。
 

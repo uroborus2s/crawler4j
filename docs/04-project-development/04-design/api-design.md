@@ -29,7 +29,7 @@
 | 必需入口 | `runtime_api: core-native-v2` + 装饰器扫描声明 |
 | 标准运行时文件 | 无 `module_runtime.py` 主路径 |
 | 可选 hooks | 0.4.0 不提供旧 hook 兼容路径 |
-| 环境选择器 | 0.4.0 已移除 `selector_name/env_selector/resource_pool`；运行模板只能显式选择 `env_id` 或引用 `candidates/` 下的 `@env_candidates` |
+| 环境选择器 | 0.4.0 已移除 `selector_name/env_selector/resource_pool`；运行模板只能显式选择 `env_id` 或引用 `candidates/` 下的 `@env_candidates`；ATM UI 默认提供固定环境选择，只展示当前模块可用的 `READY + BROWSER + 无租约` 环境 |
 | 当前实现 | Core 通过 `ModuleRuntimeDescriptorV2` 扫描 `@interface/@component/@workflow/@page/@page_action/@ui_action/@data_table/@data_view/@env_candidates`，不依赖模块自有 assembler |
 | Core 扩展入口 | `context.tools.call("<namespace>.<action>", **kwargs)` |
 | 生命周期规则 | workflow 是 0.4.0 运行入口；旧 `on_success/on_failure/on_timeout/on_cleanup` hook 不再是模块契约。对象图由 Core 在 `workflow.run(ctx)` 前统一执行可选 `setup(ctx, workflow)`，并在终态统一执行可选 `cleanup(ctx, outcome)`；任务结束、失败、超时或用户中止后的环境统一由宿主回收，环境删除只走环境管理页清理链路 |
@@ -53,7 +53,7 @@
 | 页面路由 | `open_page.page_id` 可以打开任意已注册 `@page`，包括 `menu=False` 的详情页或二级页 |
 | 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Button`、`DataTable` |
 | `Card` V1 范围 | 纯容器卡片；支持 `title`、`title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 与子组件布局 |
-| `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；`query_handler` 不接收 `table_id`，必须返回 `HostedDataTableQueryResult`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
+| `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；`query_handler` 不接收 `table_id`，必须返回 `HostedDataTableQueryResult`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；`select` 列可由宿主渲染为工具栏快速筛选，sortable 列可通过表头点击或可见排序控件写入 `query.sort`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
 | 宿主动作范围 | `Button.action` 正式开放 `reload`、`open_page` 和指向 `@ui_action` 的 `ui_action`；Hosted UI schema 不再接受 `page_action` |
 | 明确删除 | `micro_app`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_page`、`ui.declare_data_table`、`PageSpec` |
 | 设计输入 | `module-hosted-ui-framework.md` |
@@ -184,6 +184,7 @@
 | 适用场景 | 模块需要按业务账号、状态、等级、注册时间等实时筛选可用环境，并让 Service Job 在候选暂时不可用时等待 |
 | 目标语义 | `运行中 + 等待中 = 目标并发`；资源不足属于正常等待，不属于失败 |
 | 进入队列前提 | 只有 `JobType.SERVICE + AcquisitionConfig.mode=select + candidates 非空` 时才进入候选等待语义；固定 `env_id` 直接派发，不排队 |
+| 固定环境 UI | 运行模板选择已有环境时默认保存固定 `env_id`；候选列表只包含未归属或归属当前模块的 `READY + BROWSER + 无租约` 环境，不展示其他模块环境或非浏览器环境 |
 | 候选声明 | 模块在 `candidates/*.py` 中声明 `@env_candidates(name=...)` 同步纯函数，运行模板的 `AcquisitionConfig.candidates` 只能引用已声明函数 |
 | 模块开发者职责 | 在候选纯函数中实时读取模块数据，返回 env id 列表或 `EnvCandidates` 链式查询；账号黑名单、注册时间、会员等级等过滤都写在这个函数里 |
 | 唯一开发路径 | 不提供 `module.yaml.resource_pools[]`、资源池资格卡片、资源池同步任务或 `env.*resource_pool*` 工具；0.4.0 不兼容 `selector_name/env_selector/resource_pool` |

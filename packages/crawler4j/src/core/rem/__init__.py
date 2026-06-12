@@ -17,6 +17,7 @@ _EXPORT_MODULES = {
     "ExistingEnvImportJobService": "src.core.rem.import_job_service",
     "get_existing_env_import_job_service": "src.core.rem.import_job_service",
     "IPEntry": "src.core.rem.ip_pool",
+    "IPEntryStatus": "src.core.rem.ip_pool",
     "IPPool": "src.core.rem.ip_pool",
     "IPPoolManager": "src.core.rem.ip_pool",
     "IPStrategy": "src.core.rem.ip_pool",
