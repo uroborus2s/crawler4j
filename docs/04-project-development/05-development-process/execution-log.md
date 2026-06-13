@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-13 | 将根应用 / 运行时版本提升到 `0.4.11`，用于 Hosted UI DataTable 自定义行按钮分发到同名 `@ui_action` 的客户端修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
 | 2026-06-13 | 将根应用 / 运行时版本提升到 `0.4.10`，用于任务监控暂停后对象 cleanup 链路 `asyncio.CancelledError` 截断修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
 | 2026-06-12 | ATM 运行模板选择环境阶段 1：选择已有环境时新增 `指定环境 / 候选函数` 切换，默认固定选择 `env_id`，固定环境下拉只列当前模块可用的 `READY + BROWSER + 无租约` 环境；候选函数保留给动态业务筛选与 Service 等待队列。运行模板、作业预览、任务详情和运行摘要均区分固定环境与候选函数。定向回归 `92 passed`，目标 `ruff check` 通过 | Codex |
 | 2026-06-12 | Core Hosted UI DataTable 补齐可见筛选与排序入口：select 列快速筛选写入 `HostedDataTableQuery.params`，sortable 列提供可见排序字段/方向控件并与表头点击排序同步；Renderer 合并导航参数与表格 params，表格筛选同名优先。DataTable + ManagedPageRenderer 定向回归 `29 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
