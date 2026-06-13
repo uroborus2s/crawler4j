@@ -26,7 +26,7 @@
 - Keep fingerprint-browser lifecycle operations serialized at the provider boundary: VirtualBrowser and BitBrowser management calls, Playwright/CDP `connect`, status probes, source listing and config updates should not run concurrently for the same provider instance, because external management APIs and CDP warm-up paths can otherwise stall the shared desktop qasync loop during multi-env startup, recycle or cleanup
 - Keep Hosted UI page registration and menu configuration inside `@page(...)`: `pages/` owns routable pages, and `@page(menu=True)` is the only left-menu source
 - Keep Hosted UI user commands behind `@ui_action` and browser automation behind workflow/component-called `@page_action`; do not use nested `page_action -> page_action` calls as a decomposition mechanism
-- Keep Hosted UI DataTable `actions` columns host-adapted in `ManagedPageRenderer`: `SkyDataTable` should only emit `row_action_requested`, CRUD built-ins stay renderer-owned, and custom row action ids should dispatch to same-named `@ui_action` with the current row's `crud.primary_key` value.
+- Keep Hosted UI DataTable `actions` columns host-adapted in `ManagedPageRenderer`: `SkyDataTable` should only emit `row_action_requested`, CRUD built-ins stay renderer-owned, custom row actions should dispatch to the action spec `name` or action id as a same-named `@ui_action`, explicit action `params` should bind against the current row first, and `crud.primary_key` is only the no-params fallback.
 
 ## What To Improve First
 

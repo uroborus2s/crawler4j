@@ -1152,6 +1152,87 @@ def test_managed_page_renderer_dispatches_custom_row_action_to_ui_action(qtbot, 
         restore_module(service, original_registry, module_name)
 
 
+def test_managed_page_renderer_dispatches_non_crud_row_action_params_to_ui_action(qtbot, tmp_path):
+    module_name = "hosted_page_non_crud_release_action_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import page, ui_action
+
+            CALLS = []
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {
+                                "type": "rows",
+                                "rows": [
+                                    {
+                                        "phone": "13800138000",
+                                        "run_status": "占用中",
+                                        "actions": [
+                                            {
+                                                "id": "release_account",
+                                                "label": "释放",
+                                                "params": {"phone": {"binding": "phone"}},
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                            "columns": [
+                                {"key": "phone", "label": "手机号"},
+                                {"key": "run_status", "label": "占用状态"},
+                                {"key": "actions", "label": "操作", "type": "actions"},
+                            ],
+                        },
+                    ],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+
+
+            @ui_action(name="release_account")
+            def release_account(context, phone):
+                del context
+                CALLS.append({"phone": phone})
+                return {"ok": True}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    try:
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        table = page._data_table_widgets["accounts"]
+        qtbot.waitUntil(lambda: table.rowCount() == 1)
+        action_cell = table.cellWidget(0, 2)
+        assert action_cell is not None
+        release_button = next(button for button in action_cell.findChildren(QPushButton) if button.text() == "释放")
+        release_button.click()
+
+        import importlib
+
+        actions_module = importlib.import_module(f"{module_name}.pages.accounts")
+        assert actions_module.CALLS == [{"phone": "13800138000"}]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
 def test_managed_page_renderer_localizes_and_styles_crud_dialog(qtbot, tmp_path, monkeypatch):
     module_name = "hosted_page_crud_dialog_style_module"
     module_dir = write_module_tree(
