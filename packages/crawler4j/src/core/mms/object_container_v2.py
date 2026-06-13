@@ -199,6 +199,14 @@ class ObjectContainerV2:
             return
         try:
             await _invoke_cleanup(cleanup, context, outcome)
+        except asyncio.CancelledError as exc:
+            if context.should_stop() or outcome.status in {"cancelled", "timed_out"}:
+                logger.error(
+                    f"[MMS] Cancelled while cleaning v2 object: {label} "
+                    f"method=cleanup status={outcome.status} error={exc.__class__.__name__}: {exc}"
+                )
+                return
+            raise
         except Exception as exc:
             logger.error(
                 f"[MMS] Failed to clean v2 object: {label} "

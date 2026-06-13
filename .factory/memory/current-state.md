@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-06-13 已修复任务监控暂停后 `core-native-v2` 对象 cleanup 链可能被 `asyncio.CancelledError` 截断的问题。暂停按钮仍走 `TaskService.pause_job()` -> `JobController.request_job_stop()` -> `TaskDispatcher.request_stop_for_job()` -> `TaskContext.request_stop()`，ATM 会 cancel 正在运行的模块协程并等待 MMS `finally` 中的 cleanup 完成后再回收环境；本次补齐 `ObjectContainerV2._cleanup_instance()` 在用户停止或超时收尾场景下把单个对象 cleanup 抛出的 `CancelledError` 记录为该对象清理失败，并继续清理后续 component/workflow，避免前序组件清理被停止信号打断后阻止账号运行态和审计写回。新增回归覆盖 stop cleanup 抛 `CancelledError` 后继续清理后续对象，以及 ExecutionRunner 在释放环境前等待模块取消收尾完成。
 - 最新修正：2026-06-12 根应用 / 运行时版本已单独提升到 `0.4.9`，用于承接运行模板指定环境选择、Core Hosted UI DataTable 可见筛选排序、IP 池条目人工可用状态等客户端改动；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前仍需补 `0.4.9` Windows/macOS 客户端包、正式 tag / release 和真机升级证据。
 - 最新开发：2026-06-12 ATM 运行模板选择已有环境阶段 1 已落地。UI 新增 `指定环境 / 候选函数` 切换，默认保存固定 `env_id`；固定环境下拉只列当前模块可用的 `READY + BROWSER + 无租约` 环境，且环境未归属或已归属当前模块，不列出其他模块环境、非浏览器环境、非就绪环境或已租约环境。候选函数保留给账号状态、黑号、等级等业务动态筛选和 Service Job 等待队列。作业预览、任务详情与运行摘要已同步显示“指定环境”或“候选查询”。
 - 最新修复：2026-06-12 已补齐 Core Hosted UI DataTable 的可见筛选与排序入口。`SkyDataTable` 现在保留 select 列 `options`，对 `type="select"`、`searchable=True` 的列渲染工具栏快速筛选下拉，并把非全量选项写入 `HostedDataTableQuery.params`；启用排序且存在 `sortable=True` 列时，工具栏会显示排序字段与升/降序控件，并与原表头点击排序状态同步。`ManagedPageRenderer._normalize_table_query_for_handler()` 改为合并页面导航参数与表格 params，表格显式筛选同名优先，避免携游账号管理页 `record_status` 筛选在调用 query handler 前丢失。开发者指南、设计契约和压缩运行卡已同步。

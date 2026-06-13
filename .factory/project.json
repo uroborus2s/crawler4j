@@ -74,6 +74,11 @@
       "result": "passed",
       "details": "4 passed on 2026-03-26 covering module/workflow settings export, removed legacy KV ignore semantics, persisted module status, and uninstall cleanup policy"
     },
+    "mms_object_cleanup_stop_cancel_tests": {
+      "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_object_container_v2.py::test_object_container_continues_cleanup_when_stop_cleanup_raises_cancelled_error packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py::test_execution_runner_waits_for_cancelled_module_cleanup_before_releasing_environment -q",
+      "result": "passed",
+      "details": "2 passed on 2026-06-13 covering task-monitor stop cleanup cancellation continuation and env release after module cancellation cleanup"
+    },
     "mms_custom_ui_tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py packages/crawler4j/tests/acceptance/test_sdk_cli_scaffold_package_acceptance.py",
       "result": "passed",

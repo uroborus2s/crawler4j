@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, time
 from pathlib import Path
 from textwrap import dedent
@@ -330,6 +331,96 @@ async def test_object_container_continues_cleanup_when_one_cleanup_fails():
     await container.cleanup(context, outcome)
 
     assert events == ["labor.cleanup:failed", "workflow.cleanup:failed"]
+
+
+@pytest.mark.asyncio
+async def test_object_container_continues_cleanup_when_stop_cleanup_raises_cancelled_error():
+    events: list[str] = []
+
+    class Ctrip:
+        def cleanup(self, ctx, outcome):
+            events.append(f"ctrip.cleanup:{outcome.status}")
+
+    class Labor:
+        async def cleanup(self, ctx, outcome):
+            events.append(f"labor.cleanup:{outcome.status}")
+            raise asyncio.CancelledError("Task stop requested")
+
+    class Workflow:
+        def __init__(self, ctrip, labor):
+            self.ctrip = ctrip
+            self.labor = labor
+
+        def cleanup(self, ctx, outcome):
+            events.append(f"workflow.cleanup:{outcome.status}")
+
+    descriptor = ModuleRuntimeDescriptorV2(
+        interfaces={
+            "ctrip": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="interface", name="ctrip"),
+                target=object,
+                module_name="cleanup_cancel_module.interfaces.ctrip",
+                attr_name="Ctrip",
+                owner="interfaces/ctrip.py",
+            ),
+            "labor": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="interface", name="labor"),
+                target=object,
+                module_name="cleanup_cancel_module.interfaces.labor",
+                attr_name="Labor",
+                owner="interfaces/labor.py",
+            ),
+        },
+        components={
+            "ctrip_impl": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="component", name="ctrip_impl", implements="ctrip"),
+                target=Ctrip,
+                module_name="cleanup_cancel_module.objects.ctrip",
+                attr_name="Ctrip",
+                owner="objects/ctrip.py",
+            ),
+            "labor_impl": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="component", name="labor_impl", implements="labor"),
+                target=Labor,
+                module_name="cleanup_cancel_module.objects.labor",
+                attr_name="Labor",
+                owner="objects/labor.py",
+            ),
+        },
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(
+                    kind="workflow",
+                    name="default",
+                    inject=(
+                        InjectSpec(name="ctrip", type="interface", target="ctrip"),
+                        InjectSpec(name="labor", type="interface", target="labor"),
+                    ),
+                ),
+                target=Workflow,
+                module_name="cleanup_cancel_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            ),
+        },
+        implementations={
+            "ctrip": ("ctrip_impl",),
+            "labor": ("labor_impl",),
+        },
+    )
+    container = ObjectContainerV2(descriptor, "default")
+    context = TaskContext(env_id=1, task_name="cleanup_cancel_module")
+    context.request_stop()
+    outcome = TaskOutcome(status="cancelled")
+
+    container.build_workflow()
+    await container.cleanup(context, outcome)
+
+    assert events == [
+        "labor.cleanup:cancelled",
+        "ctrip.cleanup:cancelled",
+        "workflow.cleanup:cancelled",
+    ]
 
 
 def test_object_container_builds_workflow_from_annotation_declared_metadata(tmp_path: Path):
