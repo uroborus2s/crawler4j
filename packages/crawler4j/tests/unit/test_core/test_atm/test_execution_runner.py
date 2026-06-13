@@ -8,9 +8,11 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from crawler4j_contracts import TaskResult
+from crawler4j_contracts.database import DatabaseClient
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
+from src.core.atm.runtime_capabilities import RuntimeCapabilities
 from src.core.foundation.logging import logger as app_logger
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
 from src.core.rem.models import ProxyMode
@@ -95,6 +97,59 @@ def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[Ex
         destroy_env=AsyncMock(return_value=True),
     )
     return ExecutionRunner(rem=rem, mms=module_service), rem
+
+
+class _DataStoreExecutor:
+    def __init__(self, store, module_name: str):
+        self._store = store
+        self._module_name = module_name
+
+    def describe_source(self, source: str) -> dict:
+        return self._store.describe_data_source(self._module_name, source)
+
+    def execute_plan(self, plan: dict):
+        kind = str(plan.get("kind") or "select")
+        if kind == "select":
+            return self._store.execute_query_plan(
+                self._module_name,
+                plan,
+                describe_source=self.describe_source,
+            )
+        if kind == "update_records":
+            return self._store.update_resource_records(
+                self._module_name,
+                str(plan.get("resource") or ""),
+                dict(plan.get("fields") or {}),
+                where=plan.get("where"),
+            )
+        raise AssertionError(f"unexpected db plan kind: {kind}")
+
+
+def _sync_bound_accounts_resource(store, module_name: str, module_root: Path) -> None:
+    from src.core.mms.data_contract import normalize_manifest_data
+
+    manifest_data = normalize_manifest_data(
+        {
+            "resources": [
+                {
+                    "id": "accounts",
+                    "storage_mode": "managed_dataset",
+                    "record_key_field": "id",
+                    "schema": {
+                        "version": 1,
+                        "columns": [
+                            {"name": "id", "type": "text", "required": True},
+                            {"name": "phone", "type": "text"},
+                            {"name": "env_id", "type": "int"},
+                        ],
+                    },
+                }
+            ],
+            "views": [],
+            "seeds": [],
+        }
+    )
+    store.sync_manifest_data(module_name, module_root, manifest_data)
 
 
 def test_execution_runner_uses_configured_default_timeout_budgets():
@@ -554,6 +609,83 @@ async def test_execution_runner_interrupts_running_module_when_stop_requested():
     rem.release.assert_awaited_once_with(lease)
     rem.release_keep_alive.assert_not_awaited()
     rem.destroy_env.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_releases_bound_record_run_status_when_stop_requested(tmp_path):
+    from src.core.persistence import get_module_data_store
+
+    module_name = "bound_release_module"
+    store = get_module_data_store()
+    _sync_bound_accounts_resource(store, module_name, tmp_path)
+    store.replace_resource_records(
+        module_name,
+        "accounts",
+        [
+            {
+                "id": "acct-1",
+                "phone": "13800138000",
+                "env_id": 21,
+                "run_status": "占用中",
+            },
+            {
+                "id": "acct-2",
+                "phone": "13900139000",
+                "env_id": 22,
+                "run_status": "占用中",
+            },
+        ],
+    )
+
+    request = _build_request()
+    request.module_name = module_name
+    request.runtime_capabilities = RuntimeCapabilities(
+        tools=SimpleNamespace(bind_task_context=lambda _context: None),
+        db=DatabaseClient(_DataStoreExecutor(store, module_name)),
+    )
+    env, lease = _build_env()
+    module_started = asyncio.Event()
+    stop_requested = False
+
+    async def blocking_run(_module_name, _context):
+        module_started.set()
+        await asyncio.Event().wait()
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(side_effect=blocking_run),
+        get_runtime_descriptor_v2=Mock(
+            return_value=SimpleNamespace(
+                data_tables={
+                    "accounts": SimpleNamespace(meta=SimpleNamespace(env_binding_field="env_id")),
+                }
+            )
+        ),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+
+    run_task = asyncio.create_task(
+        runner.run(
+            request,
+            is_stop_requested=lambda: stop_requested,
+        )
+    )
+
+    await module_started.wait()
+    stop_requested = True
+    await asyncio.wait_for(run_task, timeout=0.5)
+
+    assert request.task.status == TaskStatus.CANCELLED
+    rem.release.assert_awaited_once_with(lease)
+    rows = store.query_resource_records(
+        module_name,
+        "accounts",
+        select=["id", "env_id", "run_status"],
+        order_by=[{"field": "id", "direction": "asc"}],
+    )
+    assert rows == [
+        {"id": "acct-1", "env_id": 21, "run_status": "不占用"},
+        {"id": "acct-2", "env_id": 22, "run_status": "占用中"},
+    ]
 
 
 @pytest.mark.asyncio

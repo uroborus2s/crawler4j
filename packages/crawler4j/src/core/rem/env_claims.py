@@ -26,6 +26,8 @@ CLAIM_PENDING = "pending"
 CLAIM_CLAIMED = "claimed"
 CLAIM_ABANDONED = "abandoned"
 CLAIM_STATES = frozenset({CLAIM_PENDING, CLAIM_CLAIMED, CLAIM_ABANDONED})
+RUN_STATUS_OCCUPIED = "占用中"
+RUN_STATUS_AVAILABLE = "不占用"
 
 ACTIVE_TASK_STATUSES = frozenset({TaskStatus.PENDING, TaskStatus.RUNNING})
 
@@ -217,6 +219,47 @@ async def refresh_env_claim_after_task(
     else:
         await set_abandoned_env_claim(rem, env_id, owner_module=module_name, task_id=task_id)
     return await get_env_claim(rem, env_id)
+
+
+def release_bound_run_status_after_task(
+    module_name: str,
+    env_id: int | str,
+    *,
+    context: TaskContext,
+    module_service: ModuleService | Any | None = None,
+) -> int:
+    service = module_service or get_module_service()
+    entries = _binding_field_entries(service, module_name, context)
+    if not entries:
+        return 0
+
+    released = 0
+    for table_name, field_name in entries:
+        try:
+            descriptor = context.db.describe(table_name)
+            writable_fields = {str(item) for item in descriptor.get("writable_fields") or []}
+            if "run_status" not in writable_fields:
+                continue
+            affected = context.db.into(table_name).update_where(
+                {"run_status": RUN_STATUS_AVAILABLE},
+                where=[
+                    "and",
+                    [field_name, "=", int(env_id)],
+                    ["run_status", "=", RUN_STATUS_OCCUPIED],
+                ],
+            )
+            if isinstance(affected, int):
+                released += affected
+        except Exception as exc:
+            logger.warning(
+                "[REM] release bound run_status failed: module=%s table=%s field=%s env_id=%s error=%s",
+                module_name,
+                table_name,
+                field_name,
+                env_id,
+                exc,
+            )
+    return released
 
 
 async def recover_pending_env_claims(

@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-06-11
+**最后更新：** 2026-06-13
 
 ## 1. 当前正式文档结构
 
@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-06-13：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.12`，用于承接 Hosted UI DataTable 行按钮显式 params 分发和任务暂停后绑定业务行 `run_status` 释放修复；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-13：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.11`，用于承接 Hosted UI DataTable 自定义行按钮分发到同名 `@ui_action` 的客户端修复；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-13：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.10`，用于承接任务监控暂停后对象 cleanup 链路 `asyncio.CancelledError` 截断修复；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-12：`docs/02-user-guide/usage.md`、`execution-log.md` 与 `.factory/memory/` 已同步补记 IP 池条目人工 `可用 / 不可用` 状态；不可用条目只影响后续绑定候选，不自动解绑已有环境。

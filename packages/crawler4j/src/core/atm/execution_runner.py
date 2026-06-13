@@ -23,6 +23,7 @@ from src.core.rem.env_claims import (
     CLAIM_CLAIMED,
     get_env_claim,
     is_env_bound_by_module,
+    release_bound_run_status_after_task,
     refresh_env_claim_after_task,
     set_claimed_env_claim,
     set_pending_env_claim,
@@ -445,6 +446,13 @@ class ExecutionRunner:
             )
             if task_context:
                 task_context.runtime["env_recycle"] = recycle_info
+
+        if task_context and task.env_id:
+            self._release_bound_run_status_after_task(
+                env_id=int(task.env_id),
+                module_name=module_name,
+                context=task_context,
+            )
 
         if env_claim_refresh_required and task.env_id:
             await self._refresh_env_claim_after_task(
@@ -876,3 +884,22 @@ class ExecutionRunner:
             f"[ATM] Env claim refreshed after task: env_id={env_id} "
             f"module={module_name} state={claim.state}"
         )
+
+    def _release_bound_run_status_after_task(
+        self,
+        *,
+        env_id: int,
+        module_name: str,
+        context: TaskContext,
+    ) -> None:
+        released = release_bound_run_status_after_task(
+            module_name,
+            env_id,
+            context=context,
+            module_service=self.mms,
+        )
+        if released:
+            logger.info(
+                f"[ATM] Released bound run_status after task: "
+                f"env_id={env_id} module={module_name} records={released}"
+            )

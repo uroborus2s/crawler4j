@@ -529,7 +529,10 @@ class ManagedPageRenderer(QWidget):
         action_name = str(action_id or "").strip()
         if not action_name:
             return
-        params = self._row_action_primary_key_params(component, row, error_title="操作失败")
+        action_spec = self._row_action_spec(row, action_name)
+        if action_spec:
+            action_name = str(action_spec.get("name") or action_name).strip()
+        params = self._row_action_params(component, row, action_spec, error_title="操作失败")
         if params is None:
             return
         self._invoke_ui_action(
@@ -538,6 +541,33 @@ class ManagedPageRenderer(QWidget):
             error_title="操作失败",
             on_success=table.request_refresh,
         )
+
+    @staticmethod
+    def _row_action_spec(row: dict[str, Any], action_id: str) -> dict[str, Any]:
+        normalized_action_id = str(action_id or "").strip()
+        if not normalized_action_id or not isinstance(row, dict):
+            return {}
+        for value in row.values():
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("id") or "").strip() == normalized_action_id:
+                    return dict(item)
+        return {}
+
+    def _row_action_params(
+        self,
+        component: dict[str, Any],
+        row: dict[str, Any],
+        action_spec: dict[str, Any],
+        *,
+        error_title: str,
+    ) -> dict[str, Any] | None:
+        if "params" in action_spec:
+            return self._resolve_action_params(action_spec, row)
+        return self._row_action_primary_key_params(component, row, error_title=error_title)
 
     def _row_action_primary_key_params(
         self,
