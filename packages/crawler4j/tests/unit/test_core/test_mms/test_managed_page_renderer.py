@@ -1052,6 +1052,106 @@ def test_managed_page_renderer_supports_row_action_crud_tables(qtbot, tmp_path, 
         restore_module(service, original_registry, module_name)
 
 
+def test_managed_page_renderer_dispatches_custom_row_action_to_ui_action(qtbot, tmp_path):
+    module_name = "hosted_page_custom_row_action_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import page, ui_action
+
+            CALLS = []
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {
+                                "type": "rows",
+                                "rows": [
+                                    {
+                                        "phone": "13800138000",
+                                        "name": "alpha",
+                                        "actions": [
+                                            {"id": "verify_phone", "label": "验证"},
+                                        ],
+                                    },
+                                ],
+                            },
+                            "crud": {
+                                "mode": "handlers",
+                                "render": "row_actions",
+                                "primary_key": "phone",
+                                "form": {"update_columns": ["name"]},
+                                "update_handler": "update_account_from_ui",
+                                "delete_handler": "delete_account_from_ui",
+                            },
+                            "columns": [
+                                {"key": "phone", "label": "手机号"},
+                                {"key": "name", "label": "账号名"},
+                                {"key": "actions", "label": "操作", "type": "actions"},
+                            ],
+                        },
+                    ],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+
+
+            @ui_action(name="verify_phone")
+            def verify_phone(context, phone):
+                del context
+                CALLS.append({"phone": phone})
+                return {"ok": True}
+
+
+            @ui_action(name="update_account_from_ui")
+            def update_account_from_ui(context, phone, payload):
+                del context, phone, payload
+                return {"ok": True}
+
+
+            @ui_action(name="delete_account_from_ui")
+            def delete_account_from_ui(context, phone):
+                del context, phone
+                return {"ok": True}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    try:
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+
+        table = page._data_table_widgets["accounts"]
+        qtbot.waitUntil(lambda: table.rowCount() == 1)
+        action_cell = table.cellWidget(0, 2)
+        assert action_cell is not None
+        action_texts = [button.text() for button in action_cell.findChildren(QPushButton)]
+        assert action_texts == ["验证", "编辑", "删除"]
+
+        verify_button = next(button for button in action_cell.findChildren(QPushButton) if button.text() == "验证")
+        verify_button.click()
+
+        import importlib
+
+        actions_module = importlib.import_module(f"{module_name}.pages.accounts")
+        assert actions_module.CALLS == [{"phone": "13800138000"}]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
 def test_managed_page_renderer_localizes_and_styles_crud_dialog(qtbot, tmp_path, monkeypatch):
     module_name = "hosted_page_crud_dialog_style_module"
     module_dir = write_module_tree(

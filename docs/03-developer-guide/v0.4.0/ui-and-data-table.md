@@ -315,6 +315,8 @@ CRUD 参数来源固定：
 - `update_handler`：调用 `update_account(ctx, account_id=row_key, payload=form_payload)`；`account_id` 这个参数名来自 `crud.primary_key`，`row_key` 来自当前选中行的 `selected_row[primary_key]`。
 - `delete_handler`：调用 `delete_account(ctx, account_id=row_key)`；参数名同样来自 `crud.primary_key`。
 
+`actions` 列可以在同一行里追加自定义按钮。点击 `__crud_update__` / `__crud_delete__` 仍走内置编辑和删除流程；点击其他 action id 时，宿主会调用同名 `@ui_action`，并按 `crud.primary_key` 从当前行组装单个命名参数，例如 `crud.primary_key="phone"` 且当前行 `phone="13800138000"` 时调用 `verify_phone(ctx, phone="13800138000")`。
+
 CRUD handler 签名必须写成确定参数，不允许用 `**kwargs` 或 `Mapping[str, Any]` 模糊接收输入：
 
 - `create_handler`：`(context, payload)`，`payload` 建议使用模块自定义 `TypedDict`，字段应覆盖 `crud.form.create_columns`。

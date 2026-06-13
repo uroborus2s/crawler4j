@@ -53,7 +53,7 @@
 | 页面路由 | `open_page.page_id` 可以打开任意已注册 `@page`，包括 `menu=False` 的详情页或二级页 |
 | 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Button`、`DataTable` |
 | `Card` V1 范围 | 纯容器卡片；支持 `title`、`title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 与子组件布局 |
-| `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；`query_handler` 不接收 `table_id`，必须返回 `HostedDataTableQueryResult`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；`select` 列可由宿主渲染为工具栏快速筛选，sortable 列可通过表头点击或可见排序控件写入 `query.sort`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部 |
+| `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；`query_handler` 不接收 `table_id`，必须返回 `HostedDataTableQueryResult`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；`select` 列可由宿主渲染为工具栏快速筛选，sortable 列可通过表头点击或可见排序控件写入 `query.sort`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部；`actions` 列中非 `__crud_update__` / `__crud_delete__` 的 action id 由 renderer 调用同名 `@ui_action`，参数按 `crud.primary_key` 从当前行取值 |
 | 宿主动作范围 | `Button.action` 正式开放 `reload`、`open_page` 和指向 `@ui_action` 的 `ui_action`；Hosted UI schema 不再接受 `page_action` |
 | 明确删除 | `micro_app`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_page`、`ui.declare_data_table`、`PageSpec` |
 | 设计输入 | `module-hosted-ui-framework.md` |
