@@ -557,6 +557,49 @@ async def test_execution_runner_interrupts_running_module_when_stop_requested():
 
 
 @pytest.mark.asyncio
+async def test_execution_runner_waits_for_cancelled_module_cleanup_before_releasing_environment():
+    request = _build_request()
+    env, lease = _build_env()
+    events: list[str] = []
+    module_started = asyncio.Event()
+    stop_requested = False
+
+    async def blocking_run(module_name, context):
+        module_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            events.append("module.cleanup_started")
+            await asyncio.sleep(0)
+            events.append("module.cleanup_finished")
+
+    async def release_after_cleanup(released_lease):
+        events.append("env.release")
+        return True
+
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(side_effect=blocking_run),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+    rem.release = AsyncMock(side_effect=release_after_cleanup)
+
+    run_task = asyncio.create_task(
+        runner.run(
+            request,
+            is_stop_requested=lambda: stop_requested,
+        )
+    )
+
+    await module_started.wait()
+    stop_requested = True
+    await asyncio.wait_for(run_task, timeout=0.5)
+
+    assert request.task.status == TaskStatus.CANCELLED
+    assert events == ["module.cleanup_started", "module.cleanup_finished", "env.release"]
+    rem.release.assert_awaited_once_with(lease)
+
+
+@pytest.mark.asyncio
 async def test_execution_runner_recycles_env_during_acquisition_cleanup():
     request = _build_request()
     env, lease = _build_env()

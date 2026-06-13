@@ -27,7 +27,7 @@
     "root_build": {
       "command": "uv run build",
       "result": "passed",
-      "details": "crawler4j root package version is now 0.4.9; latest recorded root build artifact remains crawler4j 0.4.3 from 2026-05-26 until the 0.4.9 package build is refreshed"
+      "details": "crawler4j root package version is now 0.4.10; latest recorded root build artifact remains crawler4j 0.4.3 from 2026-05-26 until the 0.4.10 package build is refreshed"
     },
     "sdk_build": {
       "command": "uv run publish crawler4j-sdk",
@@ -57,7 +57,7 @@
     "pyinstaller_bundle": {
       "command": "uv run deploy-macos-internal-release",
       "result": "passed",
-      "details": "macOS PyInstaller app, Crawler4j-0.4.3.dmg, and appcast.xml generated and uploaded through the configured Sparkle update target on 2026-05-26; 0.4.9 desktop bundle is not yet built"
+      "details": "macOS PyInstaller app, Crawler4j-0.4.3.dmg, and appcast.xml generated and uploaded through the configured Sparkle update target on 2026-05-26; 0.4.10 desktop bundle is not yet built"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -74,6 +74,11 @@
       "result": "passed",
       "details": "4 passed on 2026-03-26 covering module/workflow settings export, removed legacy KV ignore semantics, persisted module status, and uninstall cleanup policy"
     },
+    "mms_object_cleanup_stop_cancel_tests": {
+      "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_system/test_version_service.py packages/crawler4j/tests/unit/test_core/test_mms/test_object_container_v2.py::test_object_container_continues_cleanup_when_stop_cleanup_raises_cancelled_error packages/crawler4j/tests/unit/test_core/test_mms/test_object_container_v2.py::test_object_container_continues_cleanup_when_one_cleanup_fails packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py::test_execution_runner_waits_for_cancelled_module_cleanup_before_releasing_environment packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py::test_execution_runner_interrupts_running_module_when_stop_requested packages/crawler4j/tests/unit/test_core/test_atm/test_dispatcher_lifecycle.py::test_dispatcher_request_stop_for_job_interrupts_running_module -q",
+      "result": "passed",
+      "details": "8 passed on 2026-06-13 covering 0.4.10 version service, task-monitor stop cleanup cancellation continuation, existing cleanup failure continuation, env release after module cancellation cleanup, and dispatcher stop propagation"
+    },
     "mms_custom_ui_tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_mms/test_module_detail_page.py packages/crawler4j/tests/unit/test_core/test_mms/test_mms.py packages/crawler4j/tests/unit/test_core/test_atm/test_runtime_capabilities.py packages/crawler4j/tests/unit/test_core/test_persistence/test_module_data_store.py packages/crawler4j/tests/unit/test_sdk/test_cli_scaffold.py packages/crawler4j/tests/integration/test_sdk_cli_module_mode.py packages/crawler4j/tests/acceptance/test_sdk_cli_scaffold_package_acceptance.py",
       "result": "passed",
@@ -82,8 +87,8 @@
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.4.9",
-    "runtime": "0.4.9",
+    "app_package_pyproject": "0.4.10",
+    "runtime": "0.4.10",
     "git_tag_latest": "v0.2.0",
     "sdk": "0.4.1",
     "contracts": "0.4.1"
@@ -97,7 +102,7 @@
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
-    "0.4.9 client changes need refreshed Windows/macOS package evidence before client rollout."
+    "0.4.10 client changes need refreshed Windows/macOS package evidence before client rollout."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",
