@@ -5,7 +5,7 @@
 - 活跃任务：1
 - 活跃变更：1
 - 活跃缺陷：0
-- 活跃 PR：0
+- 活跃 PR：1
 
 - 角色目录总数：9
 - 当前阶段主要角色：项目协调者、后端工程师、前端工程师、测试工程师、文档与记忆管理员
@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修正：2026-06-13 根应用 / 运行时版本已单独提升到 `0.4.10`，用于承接任务监控暂停后对象 cleanup 链路 `asyncio.CancelledError` 截断修复；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前仍需补 `0.4.10` Windows/macOS 客户端包、正式 tag / release 和真机升级证据。
 - 最新修复：2026-06-13 已修复任务监控暂停后 `core-native-v2` 对象 cleanup 链可能被 `asyncio.CancelledError` 截断的问题。暂停按钮仍走 `TaskService.pause_job()` -> `JobController.request_job_stop()` -> `TaskDispatcher.request_stop_for_job()` -> `TaskContext.request_stop()`，ATM 会 cancel 正在运行的模块协程并等待 MMS `finally` 中的 cleanup 完成后再回收环境；本次补齐 `ObjectContainerV2._cleanup_instance()` 在用户停止或超时收尾场景下把单个对象 cleanup 抛出的 `CancelledError` 记录为该对象清理失败，并继续清理后续 component/workflow，避免前序组件清理被停止信号打断后阻止账号运行态和审计写回。新增回归覆盖 stop cleanup 抛 `CancelledError` 后继续清理后续对象，以及 ExecutionRunner 在释放环境前等待模块取消收尾完成。
 - 最新修正：2026-06-12 根应用 / 运行时版本已单独提升到 `0.4.9`，用于承接运行模板指定环境选择、Core Hosted UI DataTable 可见筛选排序、IP 池条目人工可用状态等客户端改动；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前仍需补 `0.4.9` Windows/macOS 客户端包、正式 tag / release 和真机升级证据。
 - 最新开发：2026-06-12 ATM 运行模板选择已有环境阶段 1 已落地。UI 新增 `指定环境 / 候选函数` 切换，默认保存固定 `env_id`；固定环境下拉只列当前模块可用的 `READY + BROWSER + 无租约` 环境，且环境未归属或已归属当前模块，不列出其他模块环境、非浏览器环境、非就绪环境或已租约环境。候选函数保留给账号状态、黑号、等级等业务动态筛选和 Service Job 等待队列。作业预览、任务详情与运行摘要已同步显示“指定环境”或“候选查询”。
@@ -28,7 +29,7 @@
 - 最新修复：2026-06-09 已移除 `core-native-v2` workflow/component 对象生命周期 `cleanup(ctx, outcome)` 的宿主固定执行超时。Core 仍会在成功、失败、异常、主体超时、用户停止或 setup 失败后按 component 依赖反向顺序再到 workflow 调用 cleanup，但不再传入 30 秒预算，也不再在 `ObjectContainerV2.cleanup()` 内对对象 cleanup 包 `asyncio.wait_for`，避免业务收尾被短超时截断；cleanup 异常仍只记录日志，不覆盖任务终态，环境回收超时仍由 `atm.env_recycle_timeout_seconds` 单独控制。新增回归锁定 `ModuleService._run_v2_workflow()` 不再限制对象 cleanup 超时。
 - 最新修正：2026-06-07 已将根应用 / 运行时版本事实源从 `0.4.5` 修正提升到 `0.4.6`，用于承接指纹浏览器生命周期串行化修复版；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。验证：`uv run pytest packages/crawler4j/tests/unit/test_core/test_system/test_version_service.py packages/crawler4j/tests/unit/test_core/test_rem/test_provider.py packages/crawler4j/tests/unit/test_core/test_rem/test_bitbrowser_provider.py packages/crawler4j/tests/unit/test_core/test_rem/test_virtualbrowser_client.py packages/crawler4j/tests/unit/test_core/test_rem/test_destroy_env.py packages/crawler4j/tests/unit/test_core/test_rem/test_post_create_actions.py -q` => `56 passed`；目标 `ruff check` 与 `uv lock --check` 通过。当前仍需补 `0.4.6` Windows/macOS 客户端包、正式 tag / release 和真机升级证据。
 - 最新修复：2026-06-06 已针对 VirtualBrowser 多并发启动导致客户端假死的问题收口宿主侧启动链。`VirtualBrowserProvider` 现在对创建环境 `addBrowser`、打开窗口 `launchBrowser` 和 Playwright/CDP `connect` 使用同一生命周期锁串行执行，避免 3 个以上任务同时冲击 VirtualBrowser 本地管理 API 与 CDP 连接阶段；新增并发 `open()` 回归锁定 `launchBrowser` 不会并发进入。定向验证：`uv run pytest packages/crawler4j/tests/unit/test_core/test_rem/test_provider.py -q` => `10 passed`；`uv run pytest packages/crawler4j/tests/unit/test_core/test_rem/test_provider.py packages/crawler4j/tests/unit/test_core/test_rem/test_virtualbrowser_client.py -q` => `25 passed`；目标文件 `uv run ruff check ...` 通过。尚未完成 Windows 真机客户端 smoke 与真实 VirtualBrowser 多并发留证。
-- 发布计划：2026-06-12 根应用 / 运行时版本已单独提升到 `0.4.9`，用于本轮客户端修复和增强；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前需推远端、创建 PR 合并到 `main`，Windows/macOS 更新包需在构建机补齐。
+- 发布计划：2026-06-13 根应用 / 运行时版本已单独提升到 `0.4.10`，用于本轮任务监控暂停 cleanup 截断修复；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前需通过 PR 合并到 `main`，Windows/macOS 更新包需在构建机补齐。
 - 最新修复：2026-05-30 已修复开发模块源码目录扫描对 `.venv/` symlink 的误报。Core manifest lock 校验和 SDK 打包文件收集现在先跳过 `.venv/`、`dist/`、`build/`、`.git/`、缓存目录与 `*.egg-info/`，再对真实模块文件执行 symlink 拒绝和路径越界检查；DevLink/源码预检不再因为 `.venv/bin/python3` 报“模块文件不能是符号链接”，非忽略目录 symlink 与 ZIP 内 symlink/路径穿越仍保持拒绝。定向回归覆盖源码预检与 SDK `_archive_members()`。
 - 最新修复：2026-05-27 VirtualBrowser 启动就绪与 `addBrowser` 诊断已增强。ExternalApp 对 VirtualBrowser 不再只用根路径端口探测判定 API 就绪，而是调用 `/api/getBrowserList` 并要求返回 `success=true`；VirtualBrowser 本地管理 API 请求统一使用 `127.0.0.1` 且不读取系统代理；`addBrowser` 对启动期 `Relay failed` 5xx 做短重试，并在失败日志中输出 endpoint、attempt、响应正文和脱敏 payload。根应用版本事实源提升到 `crawler4j 0.4.4`，SDK / Contracts 继续保持 `0.4.1`。
 - 最新修复：2026-05-26 REM 环境列表刷新误删环境已修复。刷新按钮现在只从数据库重载环境池并刷新列表，不再执行 `run_gc`，避免 VirtualBrowser `exists()` 外部判定不稳时误删 READY 环境；“清理环境”和显式销毁仍保留删除入口。根应用版本事实源提升到 `crawler4j 0.4.3`，SDK / Contracts 继续保持 `0.4.1`。

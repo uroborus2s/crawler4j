@@ -7,7 +7,7 @@
 **上游输入：** `acceptance-checklist.md` | `release-notes.md` | `version-governance.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** 交付签收 | `docs/02-user-guide/admin-guide.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-005`, `REL-006`, `TASK-017`, `REQ-004`
-**最后更新：** 2026-06-11
+**最后更新：** 2026-06-13
 
 ## 1. 用途
 
@@ -31,10 +31,10 @@
 | 发布说明基线 | 已具备 | 已能区分当前工作区和最近正式发布 |
 | 验收清单模板 | 已具备 | 可直接用于下一次正式发布 Gate |
 | 部署与运行文档 | 已具备 | 部署说明、运行手册、管理员指南已补齐 |
-| macOS 桌面包 | 最新记录为 0.4.3，当前 0.4.9 待重建 | 2026-05-26 `uv run deploy-macos-internal-release` 已重新生成 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`；`0.4.9` 客户端包尚未刷新 |
-| macOS 内部 Sparkle 更新包 | 最新记录为 0.4.3，当前 0.4.9 待重建 | 2026-05-26 `uv run deploy-macos-internal-release` 已生成 `packages/crawler4j/dist/updates/macos/Crawler4j-0.4.3.dmg` 与 `appcast.xml`，并上传到配置的 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`；`0.4.9` 更新包尚未刷新 |
+| macOS 桌面包 | 最新记录为 0.4.3，当前 0.4.10 待重建 | 2026-05-26 `uv run deploy-macos-internal-release` 已重新生成 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`；`0.4.10` 客户端包尚未刷新 |
+| macOS 内部 Sparkle 更新包 | 最新记录为 0.4.3，当前 0.4.10 待重建 | 2026-05-26 `uv run deploy-macos-internal-release` 已生成 `packages/crawler4j/dist/updates/macos/Crawler4j-0.4.3.dmg` 与 `appcast.xml`，并上传到配置的 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`；`0.4.10` 更新包尚未刷新 |
 | Windows 桌面包 | 已具备发布脚手架，待正式批次补齐证据 | 仓库已具备 `PyInstaller onedir + Velopack` 发布链，`uv run package-windows-release` 可生成 `Setup.exe` / `.nupkg` / `releases.<channel>.json`，`uv run deploy-windows-release` 可继续通过 OpenSSH `sftp` 把 `packages/crawler4j/dist/updates/windows/` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`；但当前批次仍缺 Windows 真机签名、安装、升级留证与正式下载地址 |
-| 正式交付产物 | 部分补齐 | SDK / Contracts PyPI 已完成；根应用已提升到 0.4.9，macOS 0.4.3 内部更新包已生成并上传，0.4.9 客户端包、Git tag / GitHub release、Windows 真机安装/升级证据和正式交付签收仍需补齐 |
+| 正式交付产物 | 部分补齐 | SDK / Contracts PyPI 已完成；根应用已提升到 0.4.10，macOS 0.4.3 内部更新包已生成并上传，0.4.10 客户端包、Git tag / GitHub release、Windows 真机安装/升级证据和正式交付签收仍需补齐 |
 
 ## 4. 使用规则
 
@@ -57,6 +57,7 @@
 | 2026-06-09 | 根应用版本提升到 `0.4.7`，用于对象 cleanup 固定超时移除修复；0.4.7 客户端包、正式 tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-11 | 根应用版本提升到 `0.4.8`，用于 IP 池最久未使用默认分配策略、最近使用时间记录与旧库迁移修复；0.4.8 客户端包、正式 tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-12 | 根应用版本提升到 `0.4.9`，用于运行模板指定环境选择、DataTable 可见筛选排序和 IP 池条目人工状态等客户端改动；0.4.9 客户端包、正式 tag / release 与真机升级证据仍需后续补齐 | Codex |
+| 2026-06-13 | 根应用版本提升到 `0.4.10`，用于任务监控暂停后对象 cleanup 链路 `asyncio.CancelledError` 截断修复；0.4.10 客户端包、正式 tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-04-22 | 补记 Windows 发布能力边界：当前仓库已具备 `package-windows-release` 与 Velopack 更新目录脚手架，但仍未形成带真机留证的正式 Windows 下载包 | Codex |
 | 2026-04-21 | 补记 macOS 内部 Sparkle 更新包：当前仓库已具备 DMG / `appcast.xml` 生成脚手架，但仍依赖本机提供 Sparkle 分发目录与 EdDSA 发布配置 | Codex |
 | 2026-04-20 | 补记当前交付能力边界：macOS PyInstaller bundle 已完成本地复验，Windows 桌面包仍缺打包链与正式产物 | Codex |
