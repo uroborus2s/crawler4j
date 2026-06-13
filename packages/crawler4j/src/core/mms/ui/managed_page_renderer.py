@@ -284,15 +284,14 @@ class ManagedPageRenderer(QWidget):
         row_action = component.get("row_action")
         if isinstance(row_action, dict):
             table.row_clicked.connect(lambda row, action=dict(row_action): self._handle_row_action(action, row))
-        if self._build_crud_row_actions(component):
-            table.row_action_requested.connect(
-                lambda action_id, row, table_widget=table, spec=dict(component): self._handle_crud_row_action(
-                    spec,
-                    table_widget,
-                    action_id,
-                    row,
-                )
+        table.row_action_requested.connect(
+            lambda action_id, row, table_widget=table, spec=dict(component): self._handle_table_row_action(
+                spec,
+                table_widget,
+                action_id,
+                row,
             )
+        )
 
         self._build_crud_toolbar(component, table)
         if title:
@@ -514,20 +513,52 @@ class ManagedPageRenderer(QWidget):
         _sync_buttons(table.selected_rows())
         return True
 
-    def _handle_crud_row_action(
+    def _handle_table_row_action(
         self,
         component: dict[str, Any],
         table: SkyDataTable,
         action_id: str,
         row: dict[str, Any],
     ) -> None:
-        del row
         if action_id == CRUD_ROW_ACTION_EDIT:
             self._handle_update_action(component, table)
             return
         if action_id == CRUD_ROW_ACTION_DELETE:
             self._handle_delete_action(component, table)
             return
+        action_name = str(action_id or "").strip()
+        if not action_name:
+            return
+        params = self._row_action_primary_key_params(component, row, error_title="操作失败")
+        if params is None:
+            return
+        self._invoke_ui_action(
+            action_name,
+            params,
+            error_title="操作失败",
+            on_success=table.request_refresh,
+        )
+
+    def _row_action_primary_key_params(
+        self,
+        component: dict[str, Any],
+        row: dict[str, Any],
+        *,
+        error_title: str,
+    ) -> dict[str, Any] | None:
+        crud = self._crud_config(component)
+        primary_key = str(crud.get("primary_key") or "").strip()
+        if not primary_key:
+            self._show_warning(error_title, "当前表格未声明 crud.primary_key，无法调用行动作")
+            return None
+        if not isinstance(row, dict):
+            self._show_warning(error_title, "当前行动作缺少行数据")
+            return None
+        row_key = row.get(primary_key)
+        if row_key in (None, ""):
+            self._show_warning(error_title, f"当前记录缺少主键字段: {primary_key}")
+            return None
+        return {primary_key: row_key}
 
     def _handle_create_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
         loop = self._running_loop()

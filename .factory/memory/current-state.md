@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修复：2026-06-13 已修复 Hosted UI DataTable `actions` 列自定义行按钮未分发到模块 `@ui_action` 的问题。`ManagedPageRenderer` 现在统一接收 `SkyDataTable.row_action_requested`，`__crud_update__` / `__crud_delete__` 继续走内置编辑和删除流程，其他 action id 调用同名 `@ui_action`，并用 `crud.primary_key` 从当前行组装单个命名参数，例如 `{phone: row.phone}`；新增回归覆盖自定义行按钮与 CRUD 行动作共存时的分发行为。
 - 最新修正：2026-06-13 根应用 / 运行时版本已单独提升到 `0.4.10`，用于承接任务监控暂停后对象 cleanup 链路 `asyncio.CancelledError` 截断修复；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前仍需补 `0.4.10` Windows/macOS 客户端包、正式 tag / release 和真机升级证据。
 - 最新修复：2026-06-13 已修复任务监控暂停后 `core-native-v2` 对象 cleanup 链可能被 `asyncio.CancelledError` 截断的问题。暂停按钮仍走 `TaskService.pause_job()` -> `JobController.request_job_stop()` -> `TaskDispatcher.request_stop_for_job()` -> `TaskContext.request_stop()`，ATM 会 cancel 正在运行的模块协程并等待 MMS `finally` 中的 cleanup 完成后再回收环境；本次补齐 `ObjectContainerV2._cleanup_instance()` 在用户停止或超时收尾场景下把单个对象 cleanup 抛出的 `CancelledError` 记录为该对象清理失败，并继续清理后续 component/workflow，避免前序组件清理被停止信号打断后阻止账号运行态和审计写回。新增回归覆盖 stop cleanup 抛 `CancelledError` 后继续清理后续对象，以及 ExecutionRunner 在释放环境前等待模块取消收尾完成。
 - 最新修正：2026-06-12 根应用 / 运行时版本已单独提升到 `0.4.9`，用于承接运行模板指定环境选择、Core Hosted UI DataTable 可见筛选排序、IP 池条目人工可用状态等客户端改动；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前仍需补 `0.4.9` Windows/macOS 客户端包、正式 tag / release 和真机升级证据。
