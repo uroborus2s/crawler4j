@@ -19,12 +19,12 @@
 
 ## 2. 当前仓库相对正式发布的状态
 
-- 当前工作区根应用版本：`0.4.13`
-- 当前运行时版本：`0.4.13`
+- 当前工作区根应用版本：`0.4.14`
+- 当前运行时版本：`0.4.14`
 - 最近正式发布 tag：`v0.2.0`
 - SDK 当前版本：`0.4.2`
 - Contracts 当前版本：`0.4.2`
-- 当前工作区根应用已切到 `0.4.13` 源码版本线，用于承接已有环境导入 workflow 契约、`env.get_proxy` 当前代理读取和多环境导入批次元数据；SDK / Contracts 同步提升到 `0.4.2`
+- 当前工作区根应用已切到 `0.4.14` 源码版本线，用于在环境管理列表展示环境绑定的代理 IP；SDK / Contracts 保持 `0.4.2`
 - `crawler4j-sdk 0.4.2` 与 `crawler4j-contracts 0.4.2` 已在本轮按 `contracts -> sdk` 依赖顺序完成 PyPI 发布
 - SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
 - 当前 0.4.x 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult`，workflow/component 可选实现 `setup(ctx, workflow)` 和 `cleanup(ctx, outcome)`，环境回收由宿主收口
@@ -34,25 +34,25 @@
 | 项目 | 结果 |
 |---|---|
 | 版本相关单测（`test_version_service.py`） | 通过（2026-06-15 随打包配置回归覆盖） |
-| Root wheel/sdist build | 历史通过（2026-05-26 `uv run build crawler4j` 产出 `crawler4j 0.4.3` wheel/sdist；当前 0.4.13 尚未刷新 root build） |
+| Root wheel/sdist build | 历史通过（2026-05-26 `uv run build crawler4j` 产出 `crawler4j 0.4.3` wheel/sdist；当前 0.4.14 尚未刷新 root build） |
 | SDK wheel/sdist build | 通过（2026-06-15 `uv run build crawler4j-contracts crawler4j-sdk` 产出 `crawler4j-sdk 0.4.2` wheel/sdist） |
 | SDK publish | 通过（2026-06-15 `uv run publish crawler4j-sdk` 上传 0.4.2 到 PyPI） |
 | Contracts wheel/sdist build | 通过（2026-06-15 `uv run build crawler4j-contracts crawler4j-sdk` 产出 `crawler4j-contracts 0.4.2` wheel/sdist） |
 | Contracts publish | 通过（2026-06-15 `uv run publish crawler4j-contracts` 上传 0.4.2 到 PyPI） |
 | Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-05-26 `uv run deploy-macos-internal-release` 产出 `Crawler4j.app`、`Crawler4j-0.4.3.dmg`、`appcast.xml` 并上传 macOS 更新目录） |
-| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；本轮 0.4.13 / SDK 0.4.2 / Contracts 0.4.2 版本提升通过打包配置 + 版本服务回归 `65 passed`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` |
+| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；本轮 0.4.14 环境列表绑定 IP 展示通过 REM UI + 版本服务定向回归 `27 passed`、目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` |
 | Docs markdown tree | 历史通过（`docs-stratego source validate --repo-path .`）；本轮未重跑 |
 
 ## 4. 当前不建议直接发布的原因
 
-- `0.4.13` 对应的 Git tag、正式 GitHub release 与交付批次仍未完成
+- `0.4.14` 对应的 Git tag、正式 GitHub release 与交付批次仍未完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 - macOS 内部升级包已完成，本轮仍缺 Windows 真机签名、安装和自更新留证
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 复验 `0.4.13` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.4.14` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -86,3 +86,4 @@
 | 2026-06-13 | 仅将根应用 / 运行时版本提升到 `0.4.11`，用于发布 Hosted UI DataTable 自定义行按钮分发到同名 `@ui_action` 的客户端修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
 | 2026-06-13 | 仅将根应用 / 运行时版本提升到 `0.4.12`，用于发布 Hosted UI DataTable 行按钮显式 params 分发和任务暂停后绑定业务行 `run_status` 释放修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
 | 2026-06-15 | 将 SDK / Contracts 提升到 `0.4.2` 并发布到 PyPI，用于对外提供 `@workflow(host_scenarios=["existing_env_import"])` 与 SDK CLI 导入 workflow 脚手架；根应用 / 运行时同步提升到 `0.4.13` | Codex |
+| 2026-06-15 | 仅将根应用 / 运行时版本提升到 `0.4.14`，用于在环境管理列表展示环境绑定的代理 IP；SDK / Contracts 继续保持 `0.4.2` | Codex |

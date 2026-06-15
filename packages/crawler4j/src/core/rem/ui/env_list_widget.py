@@ -7,6 +7,7 @@ import asyncio
 import textwrap
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -557,6 +558,143 @@ class EnvDisplayItem:
     display_status_text: str
     env_metadata: dict[str, Any]
 
+
+def _format_bound_ip_cell(proxy_config: Any) -> dict[str, Any]:
+    """Build the environment table cell for the currently bound proxy IP."""
+    mode = _proxy_mode_value(proxy_config)
+    if not proxy_config or mode == "none":
+        return {
+            "text": "-",
+            "search_text": "",
+            "sort_value": "",
+            "tooltip": "未绑定代理 IP",
+            "tone": "neutral",
+        }
+    if mode == "system":
+        return {
+            "text": "系统代理",
+            "search_text": "系统代理 system",
+            "sort_value": "系统代理",
+            "tooltip": "代理模式: 系统代理",
+            "tone": "neutral",
+        }
+
+    static_value = str(getattr(proxy_config, "static_value", "") or "").strip()
+    current_ip = str(getattr(proxy_config, "current_ip", "") or "").strip()
+    parsed = _parse_proxy_value(static_value)
+    host = parsed["host"] or current_ip
+    port = parsed["port"]
+    display_text = _build_bound_ip_text(host, port)
+    if not display_text:
+        display_text = "-"
+
+    tooltip_lines = [f"代理模式: {_proxy_mode_label(mode)}"]
+    if display_text != "-":
+        tooltip_lines.append(f"绑定 IP: {display_text}")
+    if parsed["protocol"]:
+        tooltip_lines.append(f"协议: {parsed['protocol']}")
+    if parsed["username"]:
+        tooltip_lines.append(f"用户名: {parsed['username']}")
+    ip_entry_id = str(getattr(proxy_config, "ip_entry_id", "") or "").strip()
+    if ip_entry_id:
+        tooltip_lines.append(f"IP 条目: {ip_entry_id}")
+    pool_id = str(getattr(proxy_config, "pool_id", "") or "").strip()
+    if pool_id:
+        tooltip_lines.append(f"IP 池: {pool_id}")
+    sanitized_proxy = _sanitize_proxy_value(static_value)
+    if sanitized_proxy:
+        tooltip_lines.append(f"代理地址: {sanitized_proxy}")
+
+    search_parts = [
+        mode,
+        _proxy_mode_label(mode),
+        host,
+        str(port or ""),
+        parsed["protocol"],
+        parsed["username"],
+        ip_entry_id,
+        pool_id,
+        sanitized_proxy,
+    ]
+    return {
+        "text": display_text,
+        "search_text": " ".join(part for part in search_parts if part),
+        "sort_value": display_text if display_text != "-" else "",
+        "tooltip": "\n".join(tooltip_lines),
+        "tone": "info" if display_text != "-" else "neutral",
+    }
+
+
+def _proxy_mode_value(proxy_config: Any) -> str:
+    if proxy_config is None:
+        return "none"
+    mode = getattr(proxy_config, "mode", "")
+    return str(getattr(mode, "value", mode) or "").strip().lower()
+
+
+def _proxy_mode_label(mode: str) -> str:
+    return {
+        "pool": "IP 池",
+        "static": "静态代理",
+        "system": "系统代理",
+        "none": "无代理",
+    }.get(mode, mode or "未知")
+
+
+def _parse_proxy_value(value: str) -> dict[str, Any]:
+    if not value:
+        return {"protocol": "", "host": "", "port": 0, "username": ""}
+    if "://" in value:
+        parsed = urlsplit(value)
+        try:
+            port = int(parsed.port or 0)
+        except ValueError:
+            port = 0
+        return {
+            "protocol": str(parsed.scheme or "").lower(),
+            "host": str(parsed.hostname or ""),
+            "port": port,
+            "username": str(parsed.username or ""),
+        }
+
+    host_port = value.rsplit("@", 1)[-1]
+    if ":" not in host_port:
+        return {"protocol": "", "host": host_port.strip(), "port": 0, "username": ""}
+    host, port_text = host_port.rsplit(":", 1)
+    try:
+        port = int(port_text)
+    except ValueError:
+        port = 0
+    return {"protocol": "", "host": host.strip(), "port": port, "username": ""}
+
+
+def _build_bound_ip_text(host: str, port: int) -> str:
+    host = str(host or "").strip()
+    if not host:
+        return ""
+    return f"{host}:{port}" if port else host
+
+
+def _sanitize_proxy_value(value: str) -> str:
+    if not value:
+        return ""
+    if "://" not in value:
+        return value.rsplit("@", 1)[-1]
+    parsed = urlsplit(value)
+    protocol = str(parsed.scheme or "").lower()
+    host = str(parsed.hostname or "")
+    if not protocol or not host:
+        return value.rsplit("@", 1)[-1]
+    try:
+        parsed_port = int(parsed.port or 0)
+    except ValueError:
+        parsed_port = 0
+    port = f":{parsed_port}" if parsed_port else ""
+    username = str(parsed.username or "")
+    auth = f"{username}:***@" if username else ""
+    return f"{protocol}://{auth}{host}{port}"
+
+
 class EnvListWidget(QWidget):
     """环境列表组件。"""
     
@@ -567,12 +705,13 @@ class EnvListWidget(QWidget):
             {"key": "name", "label": "名称", "type": "text", "width": 160, "sortable": True},
             {"key": "kind", "label": "类型", "type": "text", "width": 100},
             {"key": "provider", "label": "节点类型", "type": "text", "width": 110},
+            {"key": "bound_ip", "label": "绑定 IP", "type": "text", "width": 180, "sortable": True, "searchable": True},
             {"key": "status", "label": "状态", "type": "text", "width": 90},
             {"key": "task", "label": "任务", "type": "text", "width": 160},
             {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
         ],
         "features": {
-            "search": {"enabled": True, "placeholder": "搜索环境、Provider 或任务"},
+            "search": {"enabled": True, "placeholder": "搜索环境、Provider、绑定 IP 或任务"},
             "sort": {
                 "enabled": True,
                 "default": [{"field": "name", "direction": "asc"}],
@@ -581,7 +720,7 @@ class EnvListWidget(QWidget):
         },
     }
     
-    COLUMNS = ["ID", "名称", "类型", "Provider", "状态", "任务", "操作"]
+    COLUMNS = ["ID", "名称", "类型", "Provider", "绑定 IP", "状态", "任务", "操作"]
     STATUS_COLORS = {
         EnvStatus.READY: "#4ade80",
         EnvStatus.BUSY: "#facc15",
@@ -732,6 +871,7 @@ class EnvListWidget(QWidget):
             "name": env.name if env.name else "-",
             "kind": env.kind.value,
             "provider": env.provider,
+            "bound_ip": _format_bound_ip_cell(getattr(env, "proxy_config", None)),
             "status": {
                 "text": item.display_status_text,
                 "tone": self._status_tone(env.status),

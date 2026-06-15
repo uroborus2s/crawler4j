@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修正：2026-06-15 根应用 / 运行时版本已单独提升到 `0.4.14`，用于在环境管理列表展示环境绑定的代理 IP；SDK / Contracts 继续保持 `0.4.2`。运行环境表格新增“绑定 IP”列，优先从 `Environment.proxy_config.static_value/current_ip/ip_entry_id` 生成 `host:port` 展示，tooltip 展示代理模式、协议、用户名、IP 条目和 IP 池，密码不在列表中展示；旧环境只有 `current_ip` 时也能展示。验证：REM 环境列表 + 版本服务回归 `27 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过。
 - 最新修正：2026-06-15 已将三包版本事实源提升到 `crawler4j 0.4.13`、`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2`。SDK / Contracts 0.4.2 用于对外发布已有环境导入 workflow 场景契约、SDK CLI `--host-scenario existing_env_import` 脚手架和扫描元数据；根应用 0.4.13 承接 `env.get_proxy` 当前环境代理读取与多环境导入批次元数据。`packages/*/pyproject.toml`、`uv.lock`、README、发布文档和 memory 已同步，SDK / Contracts wheel/sdist 已构建并按 `contracts -> sdk` 顺序上传 PyPI；版本/打包配置回归 `65 passed`，`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过。
 - 最新重构：2026-06-15 已按 0.4.0 分支方案开始收口“已有环境导入 + 环境代理读取”契约。`@workflow` 新增 `host_scenarios=["existing_env_import"]`，Contracts、SDK scanner、Core MMS descriptor 和 SDK CLI 脚手架已贯通；宿主导入对话框和导入服务只允许选择声明该场景的 workflow，避免误选普通 workflow。多环境导入会为同一批次生成 `import_group_id` 并写入 `ctx.runtime["creation_params"]` 与导入状态元数据。`ProxyConfig` 新增 `ip_entry_id`；新 IP 池绑定会直接持久化条目 ID，旧环境在模块调用 `ctx.tools.call("env.get_proxy")` 时按池和地址信息懒回填。开发者指南、设计契约和聚焦单测已同步。
 - 最新修正：2026-06-13 根应用 / 运行时版本已单独提升到 `0.4.12`，用于承接 Hosted UI DataTable 行按钮显式 params 分发和任务暂停后绑定业务行 `run_status` 释放修复；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前仍需补 `0.4.12` Windows/macOS 客户端包、正式 tag / release 和真机升级证据。

@@ -27,7 +27,7 @@
     "root_build": {
       "command": "uv run build",
       "result": "passed",
-      "details": "crawler4j root package version is now 0.4.13; latest recorded root build artifact remains crawler4j 0.4.3 from 2026-05-26 until the 0.4.13 package build is refreshed"
+      "details": "crawler4j root package version is now 0.4.14; latest recorded root build artifact remains crawler4j 0.4.3 from 2026-05-26 until the 0.4.14 package build is refreshed"
     },
     "sdk_build": {
       "command": "uv run publish crawler4j-sdk",
@@ -57,7 +57,7 @@
     "pyinstaller_bundle": {
       "command": "uv run deploy-macos-internal-release",
       "result": "passed",
-      "details": "macOS PyInstaller app, Crawler4j-0.4.3.dmg, and appcast.xml generated and uploaded through the configured Sparkle update target on 2026-05-26; 0.4.13 desktop bundle is not yet built"
+      "details": "macOS PyInstaller app, Crawler4j-0.4.3.dmg, and appcast.xml generated and uploaded through the configured Sparkle update target on 2026-05-26; 0.4.14 desktop bundle is not yet built"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -88,12 +88,17 @@
       "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_system/test_version_service.py packages/crawler4j/tests/unit/test_core/test_mms/test_managed_page_renderer.py packages/crawler4j/tests/unit/test_core/test_atm/test_execution_runner.py packages/crawler4j/tests/unit/test_core/test_mms/test_object_container_v2.py -q",
       "result": "passed",
       "details": "67 passed on 2026-06-13 covering 0.4.12 version service, Hosted UI row action explicit params dispatch, task pause bound run_status release, and object cleanup regressions"
+    },
+    "rem_env_bound_ip_display_tests": {
+      "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_rem/test_env_list_widget.py packages/crawler4j/tests/unit/test_core/test_system/test_version_service.py -q",
+      "result": "passed",
+      "details": "27 passed on 2026-06-15 covering REM environment list bound IP display, proxy tooltip metadata, password redaction, and root 0.4.14 version service"
     }
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.4.13",
-    "runtime": "0.4.13",
+    "app_package_pyproject": "0.4.14",
+    "runtime": "0.4.14",
     "git_tag_latest": "v0.2.0",
     "sdk": "0.4.2",
     "contracts": "0.4.2"
@@ -107,7 +112,7 @@
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
-    "0.4.13 client changes need refreshed Windows/macOS package evidence before client rollout."
+    "0.4.14 client changes need refreshed Windows/macOS package evidence before client rollout."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",

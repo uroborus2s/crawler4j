@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-06-15：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.14`，用于在环境管理列表展示环境绑定的代理 IP；SDK / Contracts 保持 `0.4.2`。`packages/*/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径。
 - 2026-06-15：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.13`，SDK / Contracts 提升到 `0.4.2`，用于发布已有环境导入 workflow 场景契约、`env.get_proxy` 当前代理读取和多环境导入批次元数据；`packages/*/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径。
 - 2026-06-13：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.12`，用于承接 Hosted UI DataTable 行按钮显式 params 分发和任务暂停后绑定业务行 `run_status` 释放修复；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
 - 2026-06-13：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.11`，用于承接 Hosted UI DataTable 自定义行按钮分发到同名 `@ui_action` 的客户端修复；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径，SDK / Contracts 继续保持 `0.4.1`。
