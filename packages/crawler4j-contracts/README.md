@@ -1,6 +1,6 @@
 # crawler4j-contracts
 
-`crawler4j-contracts` 是 Core、SDK 与外部模块共享的稳定运行时契约包，当前源码版本基线为 `0.4.1`。
+`crawler4j-contracts` 是 Core、SDK 与外部模块共享的稳定运行时契约包，当前源码版本基线为 `0.4.2`。
 
 ## 包含内容
 

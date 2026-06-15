@@ -123,12 +123,12 @@ workflow 和 component 可选实现 `setup(ctx, workflow)` 做运行前准备，
 ```toml
 [project]
 dependencies = [
-  "crawler4j-contracts>=0.4.1,<0.5.0",
+  "crawler4j-contracts>=0.4.2,<0.5.0",
 ]
 
 [dependency-groups]
 dev = [
-  "crawler4j-sdk>=0.4.1,<0.5.0",
+  "crawler4j-sdk>=0.4.2,<0.5.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
 ]

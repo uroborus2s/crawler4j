@@ -4,17 +4,17 @@
 
 ## Release Baseline
 
-当前源码版本线已收敛为 `crawler4j 0.4.12`、`crawler4j-sdk 0.4.1`、`crawler4j-contracts 0.4.1`，最近一次正式 Git tag 为 `v0.2.0`。发布前请同时区分“当前源码版本”和“最近正式发布”：
+当前源码版本线已收敛为 `crawler4j 0.4.13`、`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2`，最近一次正式 Git tag 为 `v0.2.0`。发布前请同时区分“当前源码版本”和“最近正式发布”：
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
 | `crawler4j-workspace` | `0.0.0` | workspace 开发元包，不作为正式发布物 |
-| `crawler4j` | `0.4.12` | 桌面宿主与 Core 运行时包 |
-| `crawler4j-sdk` | `0.4.1` | 模块开发 SDK 与 CLI |
-| `crawler4j-contracts` | `0.4.1` | Core / SDK / 模块共享契约 |
+| `crawler4j` | `0.4.13` | 桌面宿主与 Core 运行时包 |
+| `crawler4j-sdk` | `0.4.2` | 模块开发 SDK 与 CLI |
+| `crawler4j-contracts` | `0.4.2` | Core / SDK / 模块共享契约 |
 | 最近正式 Git tag | `v0.2.0` | 仓库中最新已知正式 tag |
 
-当前版本线不等于已经完成正式 tag / GitHub release。`crawler4j 0.4.12` 推进桌面宿主与 Core 运行时包版本，用于承接 Hosted UI DataTable 行按钮显式参数分发和任务暂停后绑定账号占用态释放的客户端修复；`crawler4j-sdk 0.4.1`、`crawler4j-contracts 0.4.1` 的 PyPI 发布已在 2026-05-18 补齐，当前最新已记录 macOS Sparkle 客户端升级包仍为 2026-05-26 生成并上传的 `0.4.3`；`0.4.12` 客户端包、`ctrip` 真实站点 E2E、Windows 真机安装/升级证据、Git tag / GitHub release 与正式交付批次仍需继续收口。
+当前版本线不等于已经完成正式 tag / GitHub release。`crawler4j 0.4.13` 推进桌面宿主与 Core 运行时包版本，用于承接已有环境导入 workflow 契约、`env.get_proxy` 当前代理读取和多环境导入批次元数据；`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2` 用于对外发布这批 SDK/Contracts 契约。当前最新已记录 macOS Sparkle 客户端升级包仍为 2026-05-26 生成并上传的 `0.4.3`；`0.4.13` 客户端包、`ctrip` 真实站点 E2E、Windows 真机安装/升级证据、Git tag / GitHub release 与正式交付批次仍需继续收口。
 
 ## Workspace Layout
 
