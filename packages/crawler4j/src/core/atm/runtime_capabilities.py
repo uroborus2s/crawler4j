@@ -5,12 +5,14 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from crawler4j_contracts.context import (
     BBox,
@@ -73,6 +75,7 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
     RUNTIME_SURFACE_FULL: frozenset(
         {
             "ip_pool.pick_proxy",
+            "env.get_proxy",
             "env.set_proxy",
             "captcha.match_slider",
             "captcha.match_click_targets",
@@ -454,6 +457,12 @@ class CoreIPPoolTools:
 class CoreEnvTools:
     """Core 侧环境操作工具实现。"""
 
+    def __init__(self) -> None:
+        self._task_context: Any | None = None
+
+    def bind_task_context(self, context: Any) -> None:
+        self._task_context = context
+
     async def set_proxy(
         self,
         env_id: int,
@@ -469,6 +478,173 @@ class CoreEnvTools:
             proxy_value=proxy_value or None,
             proxy_pool_id=proxy_pool_id or None,
         )
+
+    async def get_proxy(self) -> dict[str, Any]:
+        from src.core.rem.manager import get_environment_manager
+
+        env_id = int(getattr(self._task_context, "env_id", 0) or 0)
+        if env_id <= 0:
+            raise RuntimeError("env.get_proxy 需要当前运行上下文绑定有效 env_id")
+
+        manager = get_environment_manager()
+        env = await manager.get_env(env_id)
+        if not env:
+            raise RuntimeError(f"当前环境不存在: {env_id}")
+
+        proxy_config = getattr(env, "proxy_config", None)
+        if proxy_config is None:
+            return {
+                "mode": "none",
+                "source": "",
+                "ip_entry_id": "",
+                "pool_id": "",
+                "protocol": "",
+                "type": "",
+                "host": "",
+                "port": 0,
+                "username": "",
+                "password": "",
+                "proxy_url": "",
+                "resolved": False,
+                "fallback": False,
+            }
+
+        ip_manager = _get_ip_pool_manager()
+        entry = self._find_ip_entry(ip_manager, proxy_config)
+        if entry is not None:
+            if not getattr(proxy_config, "ip_entry_id", None):
+                proxy_config.ip_entry_id = entry.id
+                await self._persist_env(manager, env)
+            return self._ip_entry_payload(entry, proxy_config)
+        return self._proxy_config_fallback_payload(proxy_config)
+
+    @staticmethod
+    async def _persist_env(manager: Any, env: Any) -> None:
+        add = getattr(getattr(manager, "pool", None), "add", None)
+        if not callable(add):
+            return
+        result = add(env)
+        if inspect.isawaitable(result):
+            await result
+
+    def _find_ip_entry(self, ip_manager: Any, proxy_config: Any) -> Any | None:
+        entry_id = str(getattr(proxy_config, "ip_entry_id", "") or "").strip()
+        if entry_id:
+            return self._find_ip_entry_by_id(ip_manager, proxy_config, entry_id)
+        return self._find_legacy_ip_entry(ip_manager, proxy_config)
+
+    def _find_ip_entry_by_id(self, ip_manager: Any, proxy_config: Any, entry_id: str) -> Any | None:
+        pool_id = str(getattr(proxy_config, "pool_id", "") or "").strip()
+        for pool in self._iter_proxy_pools(ip_manager, pool_id):
+            get_entry = getattr(pool, "get_entry", None)
+            if callable(get_entry):
+                entry = get_entry(entry_id)
+                if entry is not None:
+                    return entry
+            for entry in getattr(pool, "entries", []) or []:
+                if str(getattr(entry, "id", "") or "") == entry_id:
+                    return entry
+        return None
+
+    def _find_legacy_ip_entry(self, ip_manager: Any, proxy_config: Any) -> Any | None:
+        pool_id = str(getattr(proxy_config, "pool_id", "") or "").strip()
+        current_ip = str(getattr(proxy_config, "current_ip", "") or "").strip()
+        parts = self._parse_proxy_url(str(getattr(proxy_config, "static_value", "") or ""))
+        host = parts["host"] or current_ip
+
+        matches = []
+        for pool in self._iter_proxy_pools(ip_manager, pool_id):
+            for entry in getattr(pool, "entries", []) or []:
+                if host and str(getattr(entry, "address", "") or "") != host:
+                    continue
+                if current_ip and str(getattr(entry, "address", "") or "") != current_ip:
+                    continue
+                if parts["port"] and int(getattr(entry, "port", 0) or 0) != int(parts["port"]):
+                    continue
+                if parts["protocol"] and str(getattr(entry, "protocol", "") or "").lower() != parts["protocol"]:
+                    continue
+                if parts["username"] and str(getattr(entry, "username", "") or "") != parts["username"]:
+                    continue
+                if parts["password"] and str(getattr(entry, "password", "") or "") != parts["password"]:
+                    continue
+                matches.append(entry)
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    @staticmethod
+    def _iter_proxy_pools(ip_manager: Any, pool_id: str) -> list[Any]:
+        if pool_id:
+            get_pool = getattr(ip_manager, "get_pool", None)
+            pool = get_pool(pool_id) if callable(get_pool) else None
+            return [pool] if pool is not None else []
+        list_pools = getattr(ip_manager, "list_pools", None)
+        if callable(list_pools):
+            return list(list_pools())
+        return []
+
+    @staticmethod
+    def _ip_entry_payload(entry: Any, proxy_config: Any) -> dict[str, Any]:
+        protocol = str(getattr(entry, "protocol", "") or "")
+        username = str(getattr(entry, "username", "") or "")
+        password = str(getattr(entry, "password", "") or "")
+        auth = f"{username}:{password}@" if username and password else ""
+        host = str(getattr(entry, "address", "") or "")
+        port = int(getattr(entry, "port", 0) or 0)
+        return {
+            "mode": _proxy_mode_value(proxy_config),
+            "source": "ip_pool",
+            "ip_entry_id": str(getattr(entry, "id", "") or ""),
+            "pool_id": str(getattr(entry, "pool_id", "") or getattr(proxy_config, "pool_id", "") or ""),
+            "protocol": protocol,
+            "type": protocol,
+            "host": host,
+            "port": port,
+            "username": username,
+            "password": password,
+            "proxy_url": f"{protocol}://{auth}{host}:{port}" if protocol and host and port else "",
+            "resolved": True,
+            "fallback": False,
+        }
+
+    def _proxy_config_fallback_payload(self, proxy_config: Any) -> dict[str, Any]:
+        static_value = str(getattr(proxy_config, "static_value", "") or "")
+        parts = self._parse_proxy_url(static_value)
+        protocol = parts["protocol"]
+        host = parts["host"] or str(getattr(proxy_config, "current_ip", "") or "")
+        return {
+            "mode": _proxy_mode_value(proxy_config),
+            "source": "proxy_config",
+            "ip_entry_id": str(getattr(proxy_config, "ip_entry_id", "") or ""),
+            "pool_id": str(getattr(proxy_config, "pool_id", "") or ""),
+            "protocol": protocol,
+            "type": protocol,
+            "host": host,
+            "port": int(parts["port"] or 0),
+            "username": parts["username"],
+            "password": parts["password"],
+            "proxy_url": static_value,
+            "resolved": False,
+            "fallback": True,
+        }
+
+    @staticmethod
+    def _parse_proxy_url(value: str) -> dict[str, Any]:
+        if "://" not in value:
+            return {"protocol": "", "host": "", "port": 0, "username": "", "password": ""}
+        parts = urlsplit(value)
+        return {
+            "protocol": str(parts.scheme or "").lower(),
+            "host": str(parts.hostname or ""),
+            "port": int(parts.port or 0),
+            "username": str(parts.username or ""),
+            "password": str(parts.password or ""),
+        }
+
+
+def _proxy_mode_value(proxy_config: Any) -> str:
+    mode = getattr(proxy_config, "mode", "")
+    return str(getattr(mode, "value", mode) or "")
 
 
 class CoreUITools:
@@ -648,7 +824,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         self._browser_tools = CoreBrowserTools()
 
         ip_pool_tools = CoreIPPoolTools()
-        env_tools = CoreEnvTools()
+        self._env_tools = CoreEnvTools()
         ui_tools = CoreUITools(
             module_name,
             declaration_buffer=ui_declaration_buffer,
@@ -658,7 +834,8 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         captcha_tools = CoreCaptchaTools()
 
         self._register("ip_pool.pick_proxy", "按条件挑选可用代理", ip_pool_tools.pick_proxy)
-        self._register("env.set_proxy", "为当前环境设置代理", env_tools.set_proxy, is_async=True)
+        self._register("env.get_proxy", "读取当前环境绑定代理", self._env_tools.get_proxy, is_async=True)
+        self._register("env.set_proxy", "为当前环境设置代理", self._env_tools.set_proxy, is_async=True)
 
         self._register("ui.declare_page", "声明宿主页 schema", ui_tools.declare_page)
         self._register("ui.get_page", "读取宿主页 schema", ui_tools.get_page)
@@ -679,6 +856,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
     def bind_task_context(self, context: Any) -> None:
         self._task_context = context
+        self._env_tools.bind_task_context(context)
         self._browser_tools.bind_task_context(context)
 
     def _register(self, name: str, description: str, handler: Callable[..., Any], *, is_async: bool = False) -> None:

@@ -16,6 +16,8 @@ from src.ui.components.data_table_query import resolve_local_data_table_result
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.notice_panel import NoticePanel
 
+EXISTING_ENV_IMPORT_SCENARIO = "existing_env_import"
+
 
 class ImportExistingEnvDialog(QDialog):
     """配置“从已有环境导入”并关联已有任务执行。"""
@@ -157,6 +159,8 @@ class ImportExistingEnvDialog(QDialog):
     def _load_jobs(self) -> None:
         self.job_combo.clear()
         for job in self._jobs:
+            if not self._job_supports_existing_env_import(job):
+                continue
             self.job_combo.addItem(self._job_label(job), job.id)
 
     def _selected_provider(self) -> str:
@@ -170,19 +174,29 @@ class ImportExistingEnvDialog(QDialog):
     def _selected_job(self):
         return self._jobs_by_id.get(self._selected_job_id())
 
-    def _selected_workflow(self):
-        module_name, workflow_name = self._selected_job_module_workflow()
+    def _workflow_for_job(self, job):
+        module_name, workflow_name = self._job_module_workflow(job)
         workflows = list(get_module_registry().get_workflows(module_name))
         if not workflows:
             module = self._modules_by_name.get(module_name)
             workflows = list(getattr(module.manifest, "workflows", []) or []) if module else []
+        if not workflow_name and len(workflows) == 1:
+            return workflows[0]
+        if not workflow_name:
+            for workflow in workflows:
+                if workflow.name == "main_workflow":
+                    return workflow
         for workflow in workflows:
             if workflow.name == workflow_name:
                 return workflow
         return None
 
-    def _selected_job_module_workflow(self) -> tuple[str, str]:
-        job = self._selected_job()
+    def _selected_workflow(self):
+        return self._workflow_for_job(self._selected_job())
+
+    def _job_module_workflow(self, job) -> tuple[str, str]:
+        if not job:
+            return "", ""
         run_profile = getattr(job, "run_profile", None)
         execution = getattr(run_profile, "execution", None)
         if not execution:
@@ -191,6 +205,9 @@ class ImportExistingEnvDialog(QDialog):
             str(getattr(execution, "module", "") or "").strip(),
             str(getattr(execution, "workflow", "") or "").strip(),
         )
+
+    def _selected_job_module_workflow(self) -> tuple[str, str]:
+        return self._job_module_workflow(self._selected_job())
 
     def _job_label(self, job: Any) -> str:
         module_name = workflow_name = ""
@@ -232,10 +249,17 @@ class ImportExistingEnvDialog(QDialog):
 
     def _workflow_supports_existing_env_import(self) -> bool:
         workflow = self._selected_workflow()
+        return self._workflow_declares_existing_env_import(workflow)
+
+    def _job_supports_existing_env_import(self, job) -> bool:
+        return self._workflow_declares_existing_env_import(self._workflow_for_job(job))
+
+    @staticmethod
+    def _workflow_declares_existing_env_import(workflow) -> bool:
         if not workflow:
             return False
         scenarios = getattr(workflow, "host_scenarios", []) or []
-        return "existing_env_import" in {str(item).strip() for item in scenarios}
+        return EXISTING_ENV_IMPORT_SCENARIO in {str(item).strip() for item in scenarios}
 
     def _update_warning(self) -> None:
         if self._workflow_supports_existing_env_import():

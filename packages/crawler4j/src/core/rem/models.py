@@ -70,12 +70,14 @@ class ProxyConfig:
         pool_id: IP 池 ID（当 mode=POOL 时使用）
         static_value: 固定代理地址（当 mode=STATIC 时使用）
         current_ip: 当前使用的 IP 地址
+        ip_entry_id: 当前绑定的 IP 池条目 ID
     """
     mode: ProxyMode = ProxyMode.NONE
     pool_id: str | None = None
     bind_strategy: str | None = None
     static_value: str | None = None
     current_ip: str | None = None
+    ip_entry_id: str | None = None
     
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典。"""
@@ -85,6 +87,7 @@ class ProxyConfig:
             "bind_strategy": self.bind_strategy,
             "static_value": self.static_value,
             "current_ip": self.current_ip,
+            "ip_entry_id": self.ip_entry_id,
         }
     
     @classmethod
@@ -96,6 +99,7 @@ class ProxyConfig:
             bind_strategy=data.get("bind_strategy"),
             static_value=data.get("static_value"),
             current_ip=data.get("current_ip"),
+            ip_entry_id=data.get("ip_entry_id"),
         )
 
 

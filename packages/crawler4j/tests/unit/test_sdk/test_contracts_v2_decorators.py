@@ -58,6 +58,7 @@ def test_v2_decorators_attach_metadata_without_instantiating_business_objects():
     @workflow(
         name="quiz_workflow",
         label="Quiz workflow",
+        host_scenarios=["existing_env_import"],
         inject=[{"name": "labor", "type": "interface", "target": "labor"}],
     )
     class QuizWorkflow:
@@ -102,6 +103,7 @@ def test_v2_decorators_attach_metadata_without_instantiating_business_objects():
         kind="workflow",
         name="quiz_workflow",
         label="Quiz workflow",
+        host_scenarios=("existing_env_import",),
         inject=(InjectSpec(name="labor", type="interface", target="labor"),),
     )
     assert getattr(open_login_page, CRAWLER4J_META_ATTR).kind == "page_action"

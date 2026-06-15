@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from crawler4j_contracts import TaskContext
 import src.core.atm.runtime_capabilities as runtime_capabilities
 from src.core.atm.runtime_capabilities import (
     ClickCaptchaMatchResult,
@@ -19,6 +20,7 @@ from src.core.atm.runtime_capabilities import (
     build_runtime_capabilities,
 )
 from src.core.rem.ip_pool import IPEntry, IPPool
+from src.core.rem.models import ProxyConfig, ProxyMode
 
 
 @pytest.fixture(autouse=True)
@@ -667,6 +669,113 @@ async def test_env_tool_delegates_to_environment_manager(monkeypatch):
 
     assert ok is True
     assert calls == [(12, "http://1.1.1.1:8001", None)]
+
+
+@pytest.mark.asyncio
+async def test_env_tool_get_proxy_returns_current_bound_ip_entry(monkeypatch):
+    pool = IPPool(id="pool-1", name="Pool 1")
+    entry = IPEntry(
+        id="ip-1",
+        pool_id="pool-1",
+        address="10.0.0.8",
+        protocol="socks5",
+        port=1080,
+        username="alice",
+        password="secret",
+    )
+    pool.entries = [entry]
+    env = SimpleNamespace(
+        id=12,
+        proxy_config=ProxyConfig(
+            mode=ProxyMode.POOL,
+            pool_id="pool-1",
+            current_ip="10.0.0.8",
+            ip_entry_id="ip-1",
+        ),
+    )
+
+    async def _get_env(env_id: int):
+        assert env_id == 12
+        return env
+
+    fake_manager = SimpleNamespace(get_env=_get_env, pool=SimpleNamespace(add=pytest.fail))
+    fake_ip_manager = SimpleNamespace(
+        get_pool=lambda pool_id: pool if pool_id == "pool-1" else None,
+        list_pools=lambda: [pool],
+    )
+    monkeypatch.setattr("src.core.rem.manager.get_environment_manager", lambda: fake_manager)
+    monkeypatch.setattr("src.core.atm.runtime_capabilities._get_ip_pool_manager", lambda: fake_ip_manager)
+
+    caps = build_runtime_capabilities("demo_module")
+    TaskContext(env_id=12, task_name="demo_module", tools=caps.tools)
+    payload = await caps.tools.call("env.get_proxy")
+
+    assert payload == {
+        "mode": "pool",
+        "source": "ip_pool",
+        "ip_entry_id": "ip-1",
+        "pool_id": "pool-1",
+        "protocol": "socks5",
+        "type": "socks5",
+        "host": "10.0.0.8",
+        "port": 1080,
+        "username": "alice",
+        "password": "secret",
+        "proxy_url": "socks5://alice:secret@10.0.0.8:1080",
+        "resolved": True,
+        "fallback": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_env_tool_get_proxy_lazily_backfills_legacy_proxy_config(monkeypatch):
+    persisted = []
+    pool = IPPool(id="pool-1", name="Pool 1")
+    pool.entries = [
+        IPEntry(
+            id="ip-legacy",
+            pool_id="pool-1",
+            address="10.0.0.9",
+            protocol="http",
+            port=8080,
+            username="bob",
+            password="secret",
+        )
+    ]
+    env = SimpleNamespace(
+        id=15,
+        proxy_config=ProxyConfig(
+            mode=ProxyMode.POOL,
+            pool_id="pool-1",
+            current_ip="10.0.0.9",
+            static_value="http://bob:secret@10.0.0.9:8080",
+        ),
+    )
+
+    async def _get_env(env_id: int):
+        assert env_id == 15
+        return env
+
+    async def _persist_env(updated_env):
+        persisted.append(updated_env)
+
+    fake_manager = SimpleNamespace(get_env=_get_env, pool=SimpleNamespace(add=_persist_env))
+    fake_ip_manager = SimpleNamespace(
+        get_pool=lambda pool_id: pool if pool_id == "pool-1" else None,
+        list_pools=lambda: [pool],
+    )
+    monkeypatch.setattr("src.core.rem.manager.get_environment_manager", lambda: fake_manager)
+    monkeypatch.setattr("src.core.atm.runtime_capabilities._get_ip_pool_manager", lambda: fake_ip_manager)
+
+    caps = build_runtime_capabilities("demo_module")
+    TaskContext(env_id=15, task_name="demo_module", tools=caps.tools)
+    payload = await caps.tools.call("env.get_proxy")
+
+    assert payload["ip_entry_id"] == "ip-legacy"
+    assert payload["resolved"] is True
+    assert payload["fallback"] is False
+    assert env.proxy_config.ip_entry_id == "ip-legacy"
+    assert persisted == [env]
 
 
 @pytest.mark.parametrize(

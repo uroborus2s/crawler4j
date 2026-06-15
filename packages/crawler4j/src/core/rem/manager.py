@@ -371,6 +371,7 @@ class EnvironmentManager:
         task_id: str = "",
         error: str = "",
         message: str = "",
+        import_group_id: str = "",
     ) -> None:
         """记录已有环境导入执行状态。"""
         payload = {
@@ -380,6 +381,7 @@ class EnvironmentManager:
             "task_id": task_id,
             "error": error,
             "message": message,
+            "import_group_id": import_group_id,
             "updated_at": int(time.time()),
         }
         await self.set_metadata(
@@ -964,6 +966,7 @@ class EnvironmentManager:
             env.proxy_config.pool_id = pool_id
             env.proxy_config.bind_strategy = bind_strategy
             env.proxy_config.current_ip = ip.address
+            env.proxy_config.ip_entry_id = ip.id
             logger.info(f"[REM] IP 已绑定: id={env.id} ip={ip.address}")
             return True
         
@@ -1056,6 +1059,7 @@ class EnvironmentManager:
                 if ip:
                     proxy_config.bind_strategy = proxy_config.bind_strategy or "least_recently_used"
                     proxy_config.current_ip = ip.address
+                    proxy_config.ip_entry_id = ip.id
                     # 生成静态代理字符串供 Provider 使用
                     auth = f"{ip.username}:{ip.password}@" if ip.username else ""
                     protocol = ip.protocol or "socks5"

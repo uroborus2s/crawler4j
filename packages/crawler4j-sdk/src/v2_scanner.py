@@ -595,6 +595,7 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, node: ast.ClassDef) -> Crawl
         menu=meta.menu,
         order=meta.order,
         page_schema=meta.page_schema,
+        host_scenarios=meta.host_scenarios,
     )
 
 

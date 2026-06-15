@@ -89,14 +89,17 @@ class TestProxyConfig:
             bind_strategy="least_bound",
             static_value="socks5://1.2.3.4:1080",
             current_ip="1.2.3.4",
+            ip_entry_id="ip-1",
         )
 
         data = proxy.to_dict()
         restored = ProxyConfig.from_dict(data)
 
         assert data["bind_strategy"] == "least_bound"
+        assert data["ip_entry_id"] == "ip-1"
         assert restored.bind_strategy == "least_bound"
         assert restored.pool_id == "pool-1"
+        assert restored.ip_entry_id == "ip-1"
 
 
 class TestEnvLease:

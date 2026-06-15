@@ -346,7 +346,7 @@ class ApiLabor:
         self.timeout = timeout
 
 
-@workflow(name="main_workflow")
+@workflow(name="main_workflow", host_scenarios=["existing_env_import"])
 class MainWorkflow:
     def __init__(self, labor: Annotated[Labor, object_inject(type="interface", target="labor")]):
         self.labor = labor
@@ -365,6 +365,7 @@ class MainWorkflow:
         ("timeout", "integer", False, 30),
     ]
     assert [item.name for item in workflow_meta.inject] == ["labor"]
+    assert workflow_meta.host_scenarios == ("existing_env_import",)
 
 
 def test_scan_v2_module_infers_extended_object_param_annotation_types(tmp_path: Path):

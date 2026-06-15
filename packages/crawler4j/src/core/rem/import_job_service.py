@@ -28,6 +28,7 @@ from src.core.rem.manager import EnvironmentManager, get_environment_manager
 from src.core.rem.models import Environment
 
 
+EXISTING_ENV_IMPORT_SCENARIO = "existing_env_import"
 _LOGIN_REQUIRED_ERRORS = {"not_logged_in", "login_required", "requires_login"}
 
 
@@ -38,6 +39,7 @@ class ExistingEnvImportRunResult:
     env: Environment
     job_id: str
     task_id: str
+    import_group_id: str
     envs: list[Environment] = field(default_factory=list)
     task_ids: list[str] = field(default_factory=list)
 
@@ -72,12 +74,11 @@ class ExistingEnvImportJobService:
         if not module or module.status != ModuleStatus.ENABLED:
             raise ValueError(f"目标模块不可用: {module_name}")
 
-        workflow_names = {workflow.name for workflow in self.registry.get_workflows(module_name)}
-        if workflow_name not in workflow_names:
-            raise ValueError(f"目标 workflow 不存在: {module_name}/{workflow_name}")
+        workflow_name, _workflow = self._resolve_existing_env_import_workflow(module_name, workflow_name)
+        import_group_id = _new_import_group_id()
 
         env = await self.rem.import_existing_env(provider_name, env_name)
-        creation_params = _build_existing_env_creation_params(env)
+        creation_params = _build_existing_env_creation_params(env, import_group_id=import_group_id)
 
         job = Job(
             id=f"existing-env-import-{uuid.uuid4().hex[:12]}",
@@ -117,6 +118,7 @@ class ExistingEnvImportJobService:
                 workflow_name=workflow_name,
                 error=str(exc),
                 message="后台导入执行任务启动失败",
+                import_group_id=import_group_id,
             )
             raise
 
@@ -127,6 +129,7 @@ class ExistingEnvImportJobService:
             workflow_name=workflow_name,
             task_id=task_id,
             message="后台导入执行任务已启动",
+            import_group_id=import_group_id,
         )
 
         self._track_watch_task(
@@ -136,10 +139,18 @@ class ExistingEnvImportJobService:
                 task_id=task_id,
                 module_name=module_name,
                 workflow_name=workflow_name,
+                import_group_id=import_group_id,
                 update_job_state=True,
             )
         )
-        return ExistingEnvImportRunResult(env=env, job_id=job.id, task_id=task_id, envs=[env], task_ids=[task_id])
+        return ExistingEnvImportRunResult(
+            env=env,
+            job_id=job.id,
+            task_id=task_id,
+            import_group_id=import_group_id,
+            envs=[env],
+            task_ids=[task_id],
+        )
 
     async def import_and_run_with_job(
         self,
@@ -157,17 +168,20 @@ class ExistingEnvImportJobService:
         if not job:
             raise ValueError(f"目标任务不存在: {job_id}")
         self._validate_manual_import_job(job)
+        import_group_id = _new_import_group_id()
 
         envs = [
             await self.rem.import_existing_env(provider_name, env_name)
             for env_name in normalized_env_names
         ]
-        task_ids = await self._dispatch_available_import_envs(job, envs)
+        task_ids = await self._dispatch_available_import_envs(job, envs, import_group_id=import_group_id)
         dispatched_count = len(task_ids)
         remaining = envs[dispatched_count:]
         if remaining:
             self._publish_import_queue_progress(job, queued_count=len(remaining))
-            self._track_watch_task(self._schedule_remaining_import_envs(job.id, remaining))
+            self._track_watch_task(
+                self._schedule_remaining_import_envs(job.id, remaining, import_group_id=import_group_id)
+            )
         else:
             self._publish_import_queue_progress(job, queued_count=0)
 
@@ -175,6 +189,7 @@ class ExistingEnvImportJobService:
             env=envs[0],
             job_id=job.id,
             task_id=task_ids[0] if task_ids else "",
+            import_group_id=import_group_id,
             envs=envs,
             task_ids=task_ids,
         )
@@ -192,22 +207,38 @@ class ExistingEnvImportJobService:
         module = self.registry.get_module(module_name)
         if not module or module.status != ModuleStatus.ENABLED:
             raise ValueError(f"目标模块不可用: {module_name}")
-        workflow_names = {workflow.name for workflow in self.registry.get_workflows(module_name)}
-        if not workflow_name and len(workflow_names) == 1:
-            workflow_name = next(iter(workflow_names))
-        if not workflow_name and "main_workflow" in workflow_names:
-            workflow_name = "main_workflow"
-        if workflow_name not in workflow_names:
-            target = workflow_name or "<auto>"
-            raise ValueError(f"目标 workflow 不存在: {module_name}/{target}")
+        self._resolve_existing_env_import_workflow(module_name, workflow_name)
 
-    async def _dispatch_available_import_envs(self, job: Job, envs: list[Environment]) -> list[str]:
+    def _resolve_existing_env_import_workflow(self, module_name: str, workflow_name: str) -> tuple[str, object]:
+        workflows = list(self.registry.get_workflows(module_name))
+        workflows_by_name = {str(workflow.name): workflow for workflow in workflows}
+        resolved_name = str(workflow_name or "").strip()
+        if not resolved_name and len(workflows_by_name) == 1:
+            resolved_name = next(iter(workflows_by_name))
+        if not resolved_name and "main_workflow" in workflows_by_name:
+            resolved_name = "main_workflow"
+        workflow = workflows_by_name.get(resolved_name)
+        if workflow is None:
+            target = resolved_name or "<auto>"
+            raise ValueError(f"目标 workflow 不存在: {module_name}/{target}")
+        scenarios = {str(item).strip() for item in (getattr(workflow, "host_scenarios", []) or [])}
+        if EXISTING_ENV_IMPORT_SCENARIO not in scenarios:
+            raise ValueError(f"目标 workflow 未声明支持已有环境导入: {module_name}/{resolved_name}")
+        return resolved_name, workflow
+
+    async def _dispatch_available_import_envs(
+        self,
+        job: Job,
+        envs: list[Environment],
+        *,
+        import_group_id: str,
+    ) -> list[str]:
         if not envs:
             return []
         slots = await self._available_import_slots(job)
         task_ids: list[str] = []
         for env in envs[:slots]:
-            task_ids.append(await self._dispatch_import_env(job, env))
+            task_ids.append(await self._dispatch_import_env(job, env, import_group_id=import_group_id))
         return task_ids
 
     async def _available_import_slots(self, job: Job) -> int:
@@ -215,7 +246,13 @@ class ExistingEnvImportJobService:
         active_count = await self.repo.count_active_tasks(job.id)
         return max(0, target - int(active_count))
 
-    async def _schedule_remaining_import_envs(self, job_id: str, envs: list[Environment]) -> None:
+    async def _schedule_remaining_import_envs(
+        self,
+        job_id: str,
+        envs: list[Environment],
+        *,
+        import_group_id: str,
+    ) -> None:
         pending = list(envs)
         while pending:
             job = await self.repo.get_job(job_id)
@@ -239,13 +276,13 @@ class ExistingEnvImportJobService:
             pending = pending[slots:]
             for env in batch:
                 try:
-                    await self._dispatch_import_env(job, env)
+                    await self._dispatch_import_env(job, env, import_group_id=import_group_id)
                 except Exception as exc:
                     logger.warning(f"[REM] 导入执行队列跳过失败环境: job={job_id} env={env.id} error={exc}")
             self._publish_import_queue_progress(job, queued_count=len(pending))
 
-    async def _dispatch_import_env(self, job: Job, env: Environment) -> str:
-        fixed_env_job = self._build_fixed_env_job(job, env)
+    async def _dispatch_import_env(self, job: Job, env: Environment, *, import_group_id: str) -> str:
+        fixed_env_job = self._build_fixed_env_job(job, env, import_group_id=import_group_id)
         module_name, workflow_name = self._job_module_workflow(fixed_env_job)
         try:
             task_id = await self.dispatcher.dispatch(fixed_env_job)
@@ -257,6 +294,7 @@ class ExistingEnvImportJobService:
                 workflow_name=workflow_name,
                 error=str(exc),
                 message="关联任务启动失败",
+                import_group_id=import_group_id,
             )
             raise
 
@@ -267,6 +305,7 @@ class ExistingEnvImportJobService:
             workflow_name=workflow_name,
             task_id=task_id,
             message="已关联任务并启动执行",
+            import_group_id=import_group_id,
         )
         self._track_watch_task(
             self._watch_task_terminal_state(
@@ -275,13 +314,18 @@ class ExistingEnvImportJobService:
                 task_id=task_id,
                 module_name=module_name,
                 workflow_name=workflow_name,
+                import_group_id=import_group_id,
                 update_job_state=False,
             )
         )
         return task_id
 
-    def _build_fixed_env_job(self, job: Job, env: Environment) -> Job:
+    def _build_fixed_env_job(self, job: Job, env: Environment, *, import_group_id: str = "") -> Job:
         run_profile = job.run_profile.model_copy(deep=True) if job.run_profile else RunProfile()
+        module_name, workflow_name = self._job_module_workflow(job)
+        if module_name:
+            resolved_workflow_name, _workflow = self._resolve_existing_env_import_workflow(module_name, workflow_name)
+            run_profile.execution.workflow = resolved_workflow_name
         run_profile.resource.acquisition = AcquisitionConfig(
             mode=AcquisitionMode.SELECT,
             provider=env.provider,
@@ -290,7 +334,7 @@ class ExistingEnvImportJobService:
             wait_timeout=run_profile.resource.acquisition.wait_timeout,
             creation=CreationConfig(
                 lifecycle=CreationLifecycle.PERSISTENT,
-                params=_build_existing_env_creation_params(env),
+                params=_build_existing_env_creation_params(env, import_group_id=import_group_id),
             ),
         )
         return Job(
@@ -355,6 +399,7 @@ class ExistingEnvImportJobService:
         task_id: str,
         module_name: str,
         workflow_name: str,
+        import_group_id: str,
         update_job_state: bool,
     ) -> None:
         while True:
@@ -370,6 +415,7 @@ class ExistingEnvImportJobService:
                     task=task,
                     module_name=module_name,
                     workflow_name=workflow_name,
+                    import_group_id=import_group_id,
                     update_job_state=update_job_state,
                 )
                 return
@@ -383,6 +429,7 @@ class ExistingEnvImportJobService:
         task,
         module_name: str,
         workflow_name: str,
+        import_group_id: str,
         update_job_state: bool,
     ) -> None:
         if task.status == TaskStatus.SUCCEEDED:
@@ -393,6 +440,7 @@ class ExistingEnvImportJobService:
                 workflow_name=workflow_name,
                 task_id=task.id,
                 message=task.message or "已有环境导入执行成功",
+                import_group_id=import_group_id,
             )
             if update_job_state:
                 await self._update_job_state(job_id, JobState.COMPLETED)
@@ -407,6 +455,7 @@ class ExistingEnvImportJobService:
                 task_id=task.id,
                 error=task.error,
                 message=task.message or "已有环境导入执行已取消",
+                import_group_id=import_group_id,
             )
             if update_job_state:
                 await self._update_job_state(job_id, JobState.PAUSED)
@@ -421,6 +470,7 @@ class ExistingEnvImportJobService:
             task_id=task.id,
             error=task.error,
             message=task.message or "已有环境导入执行失败",
+            import_group_id=import_group_id,
         )
         if update_job_state:
             await self._update_job_state(job_id, JobState.ERROR)
@@ -444,14 +494,21 @@ def _resolve_env_type(provider_name: str) -> EnvType:
     return EnvType.CHROME
 
 
-def _build_existing_env_creation_params(env: Environment) -> dict[str, str]:
-    return {
+def _new_import_group_id() -> str:
+    return f"existing-env-import-{uuid.uuid4().hex[:12]}"
+
+
+def _build_existing_env_creation_params(env: Environment, *, import_group_id: str = "") -> dict[str, str]:
+    params = {
         "provider": str(env.provider or ""),
         "name": str(env.name or ""),
         "provider_env_id": str(env.external_id or ""),
         "provider_env_name": str(env.name or ""),
         "import_mode": "existing_env",
     }
+    if import_group_id:
+        params["import_group_id"] = import_group_id
+    return params
 
 
 def _is_not_logged_in(error: str | None, message: str | None) -> bool:

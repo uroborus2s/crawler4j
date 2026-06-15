@@ -104,6 +104,7 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
                 @workflow(
                     name="quiz_workflow",
                     label="Quiz",
+                    host_scenarios=["existing_env_import"],
                     inject=[{"name": "orchestrator", "type": "interface", "target": "orchestrator"}],
                 )
                 class QuizWorkflow:
@@ -180,6 +181,7 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
             InjectSpec(name="labor", type="interface", target="labor"),
         )
         assert descriptor.workflows["quiz_workflow"].target.__name__ == "QuizWorkflow"
+        assert descriptor.workflows["quiz_workflow"].meta.host_scenarios == ("existing_env_import",)
         assert descriptor.pages["dashboard"].spec.label == "Dashboard"
         assert descriptor.pages["dashboard"].spec.menu is True
         assert descriptor.page_actions["open_login_page"].target.__name__ == "open_login_page"

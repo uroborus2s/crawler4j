@@ -24,6 +24,7 @@ NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 DATA_TABLE_STORAGE_MODES = frozenset({"managed_dataset", "custom_table"})
 DATA_TABLE_CLEANUP_POLICIES = frozenset({"delete_rows", "drop_table", "keep"})
 DATA_VIEW_CLEANUP_POLICIES = frozenset({"drop_view", "keep"})
+WORKFLOW_HOST_SCENARIOS = frozenset({"existing_env_import"})
 TargetT = TypeVar("TargetT")
 _MISSING = object()
 
@@ -180,6 +181,7 @@ class Crawler4jMeta:
     menu: bool = False
     order: int = 0
     page_schema: dict[str, Any] = field(default_factory=dict)
+    host_scenarios: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         kind = str(self.kind or "").strip()
@@ -272,6 +274,14 @@ class Crawler4jMeta:
         for source_name in sources:
             if not _is_valid_name(source_name):
                 raise ValueError(f"{kind} source must be snake_case: {source_name or '<empty>'}")
+        host_scenarios = tuple(
+            dict.fromkeys(str(item or "").strip() for item in _as_tuple(self.host_scenarios) if str(item or "").strip())
+        )
+        if host_scenarios and kind != "workflow":
+            raise ValueError("host_scenarios is only supported by workflow decorators")
+        for scenario in host_scenarios:
+            if scenario not in WORKFLOW_HOST_SCENARIOS:
+                raise ValueError(f"workflow host_scenarios contains unsupported scenario: {scenario}")
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "label", str(self.label or "").strip())
@@ -292,6 +302,7 @@ class Crawler4jMeta:
         object.__setattr__(self, "menu", bool(self.menu))
         object.__setattr__(self, "order", int(self.order or 0))
         object.__setattr__(self, "page_schema", page_schema)
+        object.__setattr__(self, "host_scenarios", host_scenarios)
         if kind == "component" and not _is_valid_name(implements):
             raise ValueError("component implements must reference an interface")
         if kind == "page" and not page_schema:
@@ -386,6 +397,7 @@ def workflow(
     description: str = "",
     inject: Iterable[InjectSpec | Mapping[str, Any]] | None = None,
     parameters: Iterable[ParameterSpec | Mapping[str, Any]] | None = None,
+    host_scenarios: Iterable[str] | None = None,
 ) -> Callable[[TargetT], TargetT]:
     """Declare a workflow object assembled by Core."""
     if parameters:
@@ -397,6 +409,7 @@ def workflow(
             label=label,
             description=description,
             inject=tuple(_as_tuple(inject)),
+            host_scenarios=tuple(_as_tuple(host_scenarios)),
         )
     )
 
@@ -580,6 +593,7 @@ def _merge_annotation_metadata(meta: Crawler4jMeta, target: TargetT) -> Crawler4
         menu=meta.menu,
         order=meta.order,
         page_schema=meta.page_schema,
+        host_scenarios=meta.host_scenarios,
     )
 
 

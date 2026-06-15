@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新重构：2026-06-15 已按 0.4.0 分支方案开始收口“已有环境导入 + 环境代理读取”契约。`@workflow` 新增 `host_scenarios=["existing_env_import"]`，Contracts、SDK scanner、Core MMS descriptor 和 SDK CLI 脚手架已贯通；宿主导入对话框和导入服务只允许选择声明该场景的 workflow，避免误选普通 workflow。多环境导入会为同一批次生成 `import_group_id` 并写入 `ctx.runtime["creation_params"]` 与导入状态元数据。`ProxyConfig` 新增 `ip_entry_id`；新 IP 池绑定会直接持久化条目 ID，旧环境在模块调用 `ctx.tools.call("env.get_proxy")` 时按池和地址信息懒回填。开发者指南、设计契约和聚焦单测已同步。
 - 最新修正：2026-06-13 根应用 / 运行时版本已单独提升到 `0.4.12`，用于承接 Hosted UI DataTable 行按钮显式 params 分发和任务暂停后绑定业务行 `run_status` 释放修复；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前仍需补 `0.4.12` Windows/macOS 客户端包、正式 tag / release 和真机升级证据。
 - 最新修复：2026-06-13 已修复“释放”按钮仍无法触发和暂停任务后账号仍显示 `占用中` 的回归。`ManagedPageRenderer` 现在从当前行的 action spec 中查找匹配 action id，优先使用 action spec 的 `name` 调用同名 `@ui_action`，并按显式 `params` binding/value 从当前行组装参数，例如 `{phone: row.phone}`；未声明 params 时才退回 `crud.primary_key`。`ExecutionRunner` 在任务终态释放环境 lease 后会按模块 `env_binding_field` 扫描可写 `run_status` 的业务表，把当前 env id 且仍为 `占用中` 的行兜底更新为 `不占用`，避免暂停后业务账号占用态残留。
 - 最新修正：2026-06-13 根应用 / 运行时版本已单独提升到 `0.4.11`，用于承接 Hosted UI DataTable 自定义行按钮分发到同名 `@ui_action` 的客户端修复；SDK / Contracts 继续保持 `0.4.1`，不随本次根应用升版。当前仍需补 `0.4.11` Windows/macOS 客户端包、正式 tag / release 和真机升级证据。

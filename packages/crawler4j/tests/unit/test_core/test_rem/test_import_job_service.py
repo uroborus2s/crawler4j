@@ -25,7 +25,9 @@ async def test_import_job_service_builds_fixed_env_run_profile():
                 workflows=[SimpleNamespace(name="main_flow")],
             ),
         ),
-        get_workflows=lambda module_name: [SimpleNamespace(name="main_flow")],
+        get_workflows=lambda module_name: [
+            SimpleNamespace(name="main_flow", host_scenarios=["existing_env_import"])
+        ],
     )
     repo = SimpleNamespace(
         save_job=AsyncMock(),
@@ -55,16 +57,28 @@ async def test_import_job_service_builds_fixed_env_run_profile():
     assert saved_job.run_profile.resource.acquisition.mode == AcquisitionMode.SELECT
     assert saved_job.run_profile.resource.acquisition.env_id == 21
     assert saved_job.run_profile.resource.acquisition.env_type == EnvType.VIRTUAL_BROWSER
-    assert saved_job.run_profile.resource.acquisition.creation.params == {
+    creation_params = saved_job.run_profile.resource.acquisition.creation.params
+    assert creation_params == {
         "provider": "virtualbrowser",
         "name": "VB Imported",
         "provider_env_id": "301",
         "provider_env_name": "VB Imported",
         "import_mode": "existing_env",
+        "import_group_id": result.import_group_id,
     }
+    assert result.import_group_id.startswith("existing-env-import-")
     dispatcher.dispatch.assert_awaited_once_with(saved_job)
     assert result.env is env
     assert result.task_id == "task-21"
+    rem.mark_existing_env_import_state.assert_any_await(
+        21,
+        status="import_running",
+        module_name="demo_module",
+        workflow_name="main_flow",
+        task_id="task-21",
+        message="后台导入执行任务已启动",
+        import_group_id=result.import_group_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -107,7 +121,9 @@ async def test_import_job_service_reuses_manual_job_and_respects_concurrency(mon
                 workflows=[SimpleNamespace(name="import_flow")],
             ),
         ),
-        get_workflows=lambda module_name: [SimpleNamespace(name="import_flow")],
+        get_workflows=lambda module_name: [
+            SimpleNamespace(name="import_flow", host_scenarios=["existing_env_import"])
+        ],
     )
     repo = SimpleNamespace(
         get_job=AsyncMock(return_value=job),
@@ -140,16 +156,28 @@ async def test_import_job_service_reuses_manual_job_and_respects_concurrency(mon
     assert dispatched_job.id == "job-import"
     assert dispatched_job.run_profile.resource.acquisition.mode == AcquisitionMode.SELECT
     assert dispatched_job.run_profile.resource.acquisition.env_id == 101
-    assert dispatched_job.run_profile.resource.acquisition.creation.params == {
+    creation_params = dispatched_job.run_profile.resource.acquisition.creation.params
+    assert creation_params == {
         "provider": "virtualbrowser",
         "name": "VB Env 101",
         "provider_env_id": "vb-101",
         "provider_env_name": "VB Env 101",
         "import_mode": "existing_env",
+        "import_group_id": result.import_group_id,
     }
+    assert result.import_group_id.startswith("existing-env-import-")
     assert [env.id for env in result.envs] == [101, 102]
     assert result.job_id == "job-import"
     assert result.task_ids == ["task-101"]
+    rem.mark_existing_env_import_state.assert_awaited_once_with(
+        101,
+        status="import_running",
+        module_name="demo_module",
+        workflow_name="import_flow",
+        task_id="task-101",
+        message="已关联任务并启动执行",
+        import_group_id=result.import_group_id,
+    )
     assert published
     assert published[0].data["phase"] == "queued"
     assert published[0].data["job_id"] == "job-import"
@@ -174,7 +202,9 @@ async def test_import_job_service_allows_blank_workflow_when_single_v2_workflow_
             name=module_name,
             status=ModuleStatus.ENABLED,
         ),
-        get_workflows=lambda module_name: [SimpleNamespace(name="import_flow")],
+        get_workflows=lambda module_name: [
+            SimpleNamespace(name="import_flow", host_scenarios=["existing_env_import"])
+        ],
     )
     service = ExistingEnvImportJobService(
         registry=registry,
@@ -184,3 +214,33 @@ async def test_import_job_service_allows_blank_workflow_when_single_v2_workflow_
     )
 
     service._validate_manual_import_job(job)
+
+
+@pytest.mark.asyncio
+async def test_import_job_service_rejects_workflow_without_existing_env_import_scenario():
+    job = Job(
+        id="job-import",
+        name="Import Ctrip Env",
+        type=JobType.BATCH,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+        run_profile=RunProfile(
+            resource=ResourceConfig(),
+            execution=ExecutionContext(module="demo_module", workflow="normal_flow"),
+        ),
+    )
+    registry = SimpleNamespace(
+        get_module=lambda module_name: SimpleNamespace(
+            name=module_name,
+            status=ModuleStatus.ENABLED,
+        ),
+        get_workflows=lambda module_name: [SimpleNamespace(name="normal_flow", host_scenarios=[])],
+    )
+    service = ExistingEnvImportJobService(
+        registry=registry,
+        repo=SimpleNamespace(),
+        dispatcher=SimpleNamespace(),
+        rem=SimpleNamespace(),
+    )
+
+    with pytest.raises(ValueError, match="未声明支持已有环境导入"):
+        service._validate_manual_import_job(job)

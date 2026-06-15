@@ -409,7 +409,9 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
         == 0
     )
     assert (
-        commands.cmd_workflow_create(Namespace(name="sync_accounts", display_name=None, description=None, force=False))
+        commands.cmd_workflow_create(
+            Namespace(name="sync_accounts", display_name=None, description=None, host_scenario=[], force=False)
+        )
         == 0
     )
     assert commands.cmd_task_create(Namespace(name="open_home_page", force=False)) == 0
@@ -460,6 +462,28 @@ def test_cli_creates_v2_declarations_and_refreshes_manifest_lock(
     assert ("data_view", "order_overview") in _lock_declaration_keys(module_root)
     assert ("env_candidates", "gold_accounts") in _lock_declaration_keys(module_root)
     assert commands.collect_full_errors(module_root, _read_manifest(module_root), require_manifest_lock=True) == []
+
+
+def test_workflow_create_can_mark_existing_env_import_scenario(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+
+    assert (
+        commands.cmd_workflow_create(
+            Namespace(
+                name="import_existing_env",
+                display_name=None,
+                description=None,
+                host_scenario=["existing_env_import"],
+                force=False,
+            )
+        )
+        == 0
+    )
+
+    workflow_text = (module_root / "workflows" / "import_existing_env.py").read_text(encoding="utf-8")
+    assert 'host_scenarios=["existing_env_import"]' in workflow_text
+    assert commands.collect_full_errors(module_root, _read_manifest(module_root)) == []
 
 
 def test_component_and_view_create_require_declared_targets(tmp_path: Path, monkeypatch, capsys):
