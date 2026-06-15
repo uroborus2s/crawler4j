@@ -17,7 +17,7 @@ from src.core.rem.cleanup_service import (
     EnvCleanupSource,
 )
 from src.core.rem import EnvKind, EnvStatus
-from src.core.rem.models import ProxyMode
+from src.core.rem.models import ProxyConfig, ProxyMode
 from src.ui.components.combo_box import StyledComboBox
 
 
@@ -43,7 +43,7 @@ def _patch_dialog_dependencies(monkeypatch, suggested_name: str):
     return env_list_widget
 
 
-def _make_env(env_id: str, status: EnvStatus = EnvStatus.READY):
+def _make_env(env_id: str, status: EnvStatus = EnvStatus.READY, proxy_config=None):
     return SimpleNamespace(
         id=env_id,
         name=f"{env_id}-name",
@@ -51,6 +51,7 @@ def _make_env(env_id: str, status: EnvStatus = EnvStatus.READY):
         provider="virtualbrowser",
         status=status,
         task_run_id="",
+        proxy_config=proxy_config,
     )
 
 
@@ -509,6 +510,38 @@ def test_env_list_widget_rows_expose_actions_and_row_click_signal(qtbot, monkeyp
     widget._on_table_row_clicked(row)
 
     assert selected == ["env-1"]
+
+
+def test_env_list_widget_rows_show_bound_ip_without_password(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    proxy_config = ProxyConfig(
+        mode=ProxyMode.POOL,
+        pool_id="pool-1",
+        static_value="socks5://crawler:secret@1.2.3.4:1080",
+        current_ip="1.2.3.4",
+        ip_entry_id="ip-1",
+    )
+
+    widget._on_data_loaded([_make_env("env-1", EnvStatus.READY, proxy_config=proxy_config)])
+    row = widget.table.displayed_rows()[0]
+
+    assert row["bound_ip"]["text"] == "1.2.3.4:1080"
+    assert "IP 条目: ip-1" in row["bound_ip"]["tooltip"]
+    assert "socks5://crawler:***@1.2.3.4:1080" in row["bound_ip"]["tooltip"]
+    assert "secret" not in row["bound_ip"]["tooltip"]
+    assert widget.table.table.item(0, 4).text() == "1.2.3.4:1080"
+    assert "secret" not in widget.table.table.item(0, 4).toolTip()
 
 
 def test_env_list_widget_preserves_env_metadata_without_resource_pool_availability(qtbot, monkeypatch):

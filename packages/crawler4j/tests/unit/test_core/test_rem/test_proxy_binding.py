@@ -123,3 +123,4 @@ async def test_create_env_with_pool_proxy(mock_pool, mock_ip_manager):
         # 3. Environment object updated
         assert env.proxy_config.current_ip == "1.2.3.4"
         assert env.proxy_config.static_value == expected_url
+        assert env.proxy_config.ip_entry_id == "ip_1"

@@ -73,6 +73,23 @@ uvx --from crawler4j-sdk crawler4j module init demo_module \
 - `crawler4j data seed create`
 - `crawler4j module set default-workflow`
 
+## `workflow create`
+
+普通 workflow：
+
+```bash
+uv run crawler4j workflow create booking_sync
+```
+
+已有环境导入 workflow：
+
+```bash
+uv run crawler4j workflow create import_existing_env \
+  --host-scenario existing_env_import
+```
+
+`--host-scenario existing_env_import` 会在生成的装饰器上写入 `host_scenarios=["existing_env_import"]`。宿主“从已有环境导入”对话框和导入服务只识别这个显式声明；未声明的普通 workflow 不会作为导入入口。
+
 ## `check full`
 
 0.4.0 会校验：

@@ -62,8 +62,10 @@ def test_import_existing_env_dialog_updates_warning_and_returns_selection(qtbot)
     dialog.resize(1200, 800)
     dialog.show()
 
+    assert dialog.job_combo.count() == 1
+    assert dialog.job_combo.currentData() == "job-safe"
     qtbot.waitUntil(lambda: len(dialog.table.displayed_rows()) == 1, timeout=500)
-    assert dialog.warning_label.text() == dialog.RISK_WARNING_TEXT
+    assert dialog.warning_label.text() == dialog.RISK_SAFE_TEXT
     margins = dialog.warning_card.layout().contentsMargins()
     assert margins.top() == 10
     assert margins.bottom() == 10
@@ -81,9 +83,6 @@ def test_import_existing_env_dialog_updates_warning_and_returns_selection(qtbot)
     )
     assert dialog.submit_btn.isEnabled() is False
 
-    dialog.job_combo.setCurrentIndex(1)
-    assert dialog.warning_label.text() == dialog.RISK_SAFE_TEXT
-
     qtbot.waitUntil(lambda: len(dialog.table.displayed_rows()) == 1, timeout=500)
     row = dialog.table.displayed_rows()[0]
     dialog._on_table_row_clicked(row)
@@ -95,6 +94,24 @@ def test_import_existing_env_dialog_updates_warning_and_returns_selection(qtbot)
         "names": ["VB Env 101"],
     }
     assert dialog.submit_btn.isEnabled() is True
+
+
+def test_import_existing_env_dialog_filters_out_non_import_workflow_jobs(qtbot):
+    dialog = ImportExistingEnvDialog(
+        sources=[{"provider": "virtualbrowser", "label": "Virtual Browser"}],
+        modules=[_make_module()],
+        jobs=[_make_job("job-unsafe", "unsafe_flow")],
+        env_options_by_source={"virtualbrowser": [_make_provider_env()]},
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.job_combo.count() == 0
+    qtbot.waitUntil(lambda: len(dialog.table.displayed_rows()) == 1, timeout=500)
+    row = dialog.table.displayed_rows()[0]
+    dialog._on_table_row_clicked(row)
+
+    assert dialog.get_values()["job_id"] == ""
+    assert dialog.submit_btn.isEnabled() is False
 
 
 def test_import_existing_env_dialog_row_click_preserves_multi_selection(qtbot, monkeypatch):

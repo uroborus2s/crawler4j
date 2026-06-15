@@ -61,6 +61,7 @@ DEFAULT_PYTHON_VERSION = "3.12"
 DEFAULT_MODULE_VERSION = "0.1.0"
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 DATA_TABLE_STORAGE_MODES = {"managed_dataset", "custom_table"}
+WORKFLOW_HOST_SCENARIOS = {"existing_env_import"}
 SEMVER_RE = re.compile(
     r"^v?"
     r"(?P<major>0|[1-9]\d*)\."
@@ -135,6 +136,22 @@ def to_display_name(name: str) -> str:
 def to_class_name(name: str) -> str:
     """Convert a snake_case identifier to PascalCase."""
     return "".join(part.capitalize() for part in re.split(r"[_-]+", str(name or "")) if part)
+
+
+def _workflow_host_scenarios_arg(scenarios: list[str] | tuple[str, ...] | None) -> str:
+    normalized: list[str] = []
+    for scenario in scenarios or []:
+        value = str(scenario or "").strip()
+        if not value:
+            continue
+        if value not in WORKFLOW_HOST_SCENARIOS:
+            raise CLIError(f"不支持的 workflow host scenario: {value}")
+        if value not in normalized:
+            normalized.append(value)
+    if not normalized:
+        return ""
+    rendered = ", ".join(f'"{item}"' for item in normalized)
+    return f", host_scenarios=[{rendered}]"
 
 
 def is_valid_name(name: str) -> bool:
@@ -1409,6 +1426,7 @@ def cmd_module_init(args: argparse.Namespace) -> int:
                 class_name=to_class_name(args.workflow_name),
                 display_name=workflow_display_name,
                 description=workflow_description,
+                host_scenarios_arg="",
             ),
             force=args.force,
         )
@@ -1694,6 +1712,7 @@ def cmd_workflow_create(args: argparse.Namespace) -> int:
                 class_name=to_class_name(name),
                 display_name=args.display_name or to_display_name(name),
                 description=args.description or f"{to_display_name(name)} 工作流",
+                host_scenarios_arg=_workflow_host_scenarios_arg(getattr(args, "host_scenario", [])),
             ),
             force=args.force,
         )
@@ -2555,6 +2574,13 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_create.add_argument("name", help="工作流名，snake_case")
     workflow_create.add_argument("--display-name", help="工作流显示名")
     workflow_create.add_argument("--description", help="工作流说明")
+    workflow_create.add_argument(
+        "--host-scenario",
+        action="append",
+        choices=sorted(WORKFLOW_HOST_SCENARIOS),
+        default=[],
+        help="声明宿主运行场景，可选 existing_env_import",
+    )
     workflow_create.add_argument("--force", action="store_true", help="允许覆盖已有文件")
     workflow_create.set_defaults(func=cmd_workflow_create)
     workflow_list = workflow_sub.add_parser("list", help="列出 @workflow 声明")

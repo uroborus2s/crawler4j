@@ -62,12 +62,14 @@ class WorkflowInfo:
     name: str
     display_name: str = ""
     description: str = ""
+    host_scenarios: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "display_name": self.display_name,
             "description": self.description,
+            "host_scenarios": list(self.host_scenarios),
         }
 
 

@@ -29,6 +29,7 @@ uv run crawler4j component create api_booking_labor --implements booking_labor
 uv run crawler4j interface create booking_orchestrator
 uv run crawler4j component create booking_orchestrator_impl --implements booking_orchestrator
 uv run crawler4j workflow create booking_sync
+uv run crawler4j workflow create import_existing_env --host-scenario existing_env_import
 uv run crawler4j page-action create open_booking_page
 uv run crawler4j data table create booking_accounts
 uv run crawler4j data table create booking_snapshots --storage-mode managed_dataset
@@ -105,6 +106,20 @@ class BookingSyncWorkflow:
 ```
 
 workflow 不接收普通参数。运行模板只保存对象实现选择和对象参数。
+
+如果 workflow 专门用于宿主“从已有环境导入”，必须声明宿主场景，避免导入时误选普通 workflow：
+
+```python
+@workflow(name="import_existing_env", host_scenarios=["existing_env_import"])
+class ImportExistingEnvWorkflow:
+    async def run(self, ctx):
+        params = ctx.runtime.get("creation_params", {})
+        import_group_id = params.get("import_group_id")
+        proxy = await ctx.tools.call("env.get_proxy")
+        ...
+```
+
+这类 workflow 运行时可从 `ctx.runtime["creation_params"]` 读取 `provider`、`name`、`provider_env_id`、`provider_env_name`、`import_mode="existing_env"` 和 `import_group_id`。当前环境绑定代理通过 `env.get_proxy` 读取，返回 IP 池条目 ID、host、port、username、password 和 proxy URL 等只读信息。
 
 ## 5. 写 page action
 

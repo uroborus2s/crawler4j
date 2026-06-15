@@ -267,7 +267,7 @@ WORKFLOW_TEMPLATE = '''"""工作流: {display_name}
 from crawler4j_contracts import TaskContext, workflow
 
 
-@workflow(name="{name}", label="{display_name}", description="{description}")
+@workflow(name="{name}", label="{display_name}", description="{description}"{host_scenarios_arg})
 class {class_name}:
     """{display_name} 工作流。"""
 

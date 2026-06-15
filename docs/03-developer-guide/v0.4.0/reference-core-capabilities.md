@@ -66,6 +66,19 @@ async def run(self, ctx):
 
 workflow 不接收 parameters。
 
+已有环境导入 workflow 必须显式声明宿主场景：
+
+```python
+@workflow(name="import_existing_env", host_scenarios=["existing_env_import"])
+class ImportExistingEnvWorkflow:
+    async def run(self, ctx):
+        params = ctx.runtime.get("creation_params", {})
+        assert params.get("import_mode") == "existing_env"
+        ...
+```
+
+宿主“从已有环境导入”对话框和导入服务只允许选择这类 workflow。普通 workflow 未声明 `existing_env_import` 时不会被误选，也不会被服务端作为导入任务调度。
+
 ## Page Action 调用
 
 page action 必须是函数：
@@ -152,10 +165,23 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
 | 类别 | 示例 |
 |---|---|
 | 浏览器交互 | `browser.goto`、`browser.click`、`browser.hover`、`browser.type`、`browser.press`、`browser.drag`、`browser.scroll`、`browser.pause` |
-| 环境与代理 | `env.set_proxy`、`ip_pool.pick_proxy` |
+| 环境与代理 | `env.get_proxy`、`env.set_proxy`、`ip_pool.pick_proxy` |
 | 验证码 | `captcha.match_slider`、`captcha.match_click_targets` |
 
 `ctx.tools` 不注册 `db.*`。数据库能力全部走 `ctx.db`。
+
+读取当前环境绑定代理时使用：
+
+```python
+proxy = await ctx.tools.call("env.get_proxy")
+if proxy.get("resolved"):
+    host = proxy["host"]
+    port = proxy["port"]
+    username = proxy.get("username")
+    password = proxy.get("password")
+```
+
+`env.get_proxy` 只返回当前 task 绑定环境的只读代理快照。新 IP 池绑定会返回 `ip_entry_id`；旧环境如果只有历史 `ProxyConfig`，首次读取时宿主会按池和地址信息懒回填 `ip_entry_id`，解析不到时返回 `resolved=False`。
 
 Hosted UI 的页面读取、渲染和 action 调用属于宿主 UI surface，不作为 workflow/page action 的普通 `TaskContext.tools` 能力示例。
 

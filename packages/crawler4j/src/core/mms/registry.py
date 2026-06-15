@@ -705,6 +705,7 @@ class ModuleRegistry:
                         name=entry.meta.name,
                         display_name=entry.meta.label or entry.meta.name,
                         description=entry.meta.description,
+                        host_scenarios=tuple(entry.meta.host_scenarios),
                     )
                     for entry in descriptor.workflows.values()
                 ]

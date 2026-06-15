@@ -7,7 +7,7 @@
 **上游输入：** `packages/crawler4j/pyproject.toml` | Git tag | 子包 `pyproject.toml` | docs-stratego 源仓导航
 **下游输出：** `release-notes.md` | `deployment-guide.md` | `docs/index.md` | `.factory/project.json`
 **关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `REQ-0401`, `NFR-002`
-**最后更新：** 2026-06-13
+**最后更新：** 2026-06-15
 
 ## 1. 规则
 
@@ -26,29 +26,29 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.4.12` | 当前仓库 HEAD 已切到 0.4.12 客户端修复版本 |
-| 根应用运行时版本 | `0.4.12` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.4.13` | 当前仓库 HEAD 已切到 0.4.13 版本，用于承接已有环境导入与代理读取契约，并在环境管理列表展示环境绑定的代理 IP |
+| 根应用运行时版本 | `0.4.13` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
-| SDK | `0.4.1` | 当前工作区 SDK 版本；CLI 命令树、脚手架与开发者文档已同步到 0.4.x，并已按 0.4.1 发布到 PyPI |
-| Contracts | `0.4.1` | 当前工作区 Contracts 版本；共享契约与 SDK / Core README、发布文档口径已同步收口，并已按 0.4.1 发布到 PyPI |
+| SDK | `0.4.2` | 当前工作区 SDK 版本；包含导入 workflow 场景脚手架与扫描契约，并已按 0.4.2 发布到 PyPI |
+| Contracts | `0.4.2` | 当前工作区 Contracts 版本；包含 `@workflow(host_scenarios=...)` 契约，并已按 0.4.2 发布到 PyPI |
 | docs-stratego 主文档版本 | 待正式发布前确认 | 当前源码文档入口已把 0.4.x 作为当前主线、0.3.x 作为历史维护；发布站点切换仍需随正式发布动作确认 |
 
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前根应用已经切到 `0.4.12`，但 Git tag 仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为 `0.4.12` 已正式打 tag 并发布。
+- 当前根应用已经切到 `0.4.13`，但 Git tag 仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为 `0.4.13` 已正式打 tag 并发布。
 - 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.12`
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.13`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.4.12` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.4.13` Git tag 与正式 release 资产
 7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
@@ -76,3 +76,4 @@
 | 2026-06-13 | 仅将根应用 / 运行时版本提升到 `0.4.10`，用于承接任务监控暂停后对象 cleanup 链路 `asyncio.CancelledError` 截断修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
 | 2026-06-13 | 仅将根应用 / 运行时版本提升到 `0.4.11`，用于承接 Hosted UI DataTable 自定义行按钮分发到同名 `@ui_action` 的客户端修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
 | 2026-06-13 | 仅将根应用 / 运行时版本提升到 `0.4.12`，用于承接 Hosted UI DataTable 行按钮显式 params 分发和任务暂停后绑定业务行 `run_status` 释放修复；SDK / Contracts 继续保持 `0.4.1` | Codex |
+| 2026-06-15 | 将 SDK / Contracts 提升到 `0.4.2` 并发布到 PyPI，用于发布已有环境导入 workflow 场景契约与 SDK CLI 脚手架；根应用 / 运行时保持 `0.4.13` 并补充环境列表绑定 IP 展示 | Codex |
