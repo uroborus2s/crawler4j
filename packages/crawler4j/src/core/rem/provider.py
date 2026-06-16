@@ -136,23 +136,25 @@ def _source_proxy_config_from_payload(proxy: Any) -> ProxyConfig | None:
     if not isinstance(proxy, dict):
         return None
 
-    value = _first_proxy_text(proxy, "value", "proxy", "proxy_url", "proxyUrl", "url")
     protocol = _first_proxy_text(proxy, "protocol", "type", "proxyType", "scheme")
-    if value:
-        return _proxy_config_from_value(value, fallback_protocol=protocol)
-
-    protocol = _normalize_proxy_protocol(protocol)
     host = _first_proxy_text(proxy, "host", "address", "ip", "server")
     port = _safe_proxy_port(_first_proxy_text(proxy, "port", "proxyPort"))
     username = _first_proxy_text(proxy, "user", "username", "proxyUserName", "proxy_username")
     password = _first_proxy_text(proxy, "pass", "password", "proxyPassword", "proxy_password")
-    return _build_proxy_config(
-        protocol=protocol,
+    structured_proxy = _build_proxy_config(
+        protocol=_normalize_proxy_protocol(protocol),
         host=host,
         port=port,
         username=username,
         password=password,
     )
+    if structured_proxy is not None:
+        return structured_proxy
+
+    value = _first_proxy_text(proxy, "value", "proxy", "proxy_url", "proxyUrl", "url")
+    if value:
+        return _proxy_config_from_value(value, fallback_protocol=protocol)
+    return None
 
 
 def _proxy_config_summary(proxy_config: ProxyConfig | None) -> str:
