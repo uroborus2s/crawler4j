@@ -517,7 +517,7 @@ class SourceProxySyncPreviewDialog(QDialog):
 
     ACTION_LABELS = {
         "bind_ip_entry": "绑定 IP 条目",
-        "save_static_proxy": "保存静态代理",
+        "clear_ip_binding": "清除本地绑定",
         "skip": "跳过",
     }
 
@@ -720,10 +720,19 @@ def _format_bound_ip_cell(proxy_config: Any) -> dict[str, Any]:
         }
     if mode == "system":
         return {
-            "text": "系统代理",
-            "search_text": "系统代理 system",
-            "sort_value": "系统代理",
-            "tooltip": "代理模式: 系统代理",
+            "text": "-",
+            "search_text": "",
+            "sort_value": "",
+            "tooltip": "系统代理未关联 IP 表条目",
+            "tone": "neutral",
+        }
+    ip_entry_id = str(getattr(proxy_config, "ip_entry_id", "") or "").strip()
+    if not ip_entry_id:
+        return {
+            "text": "-",
+            "search_text": "",
+            "sort_value": "",
+            "tooltip": "未绑定 IP 表条目",
             "tone": "neutral",
         }
 
@@ -743,9 +752,7 @@ def _format_bound_ip_cell(proxy_config: Any) -> dict[str, Any]:
         tooltip_lines.append(f"协议: {parsed['protocol']}")
     if parsed["username"]:
         tooltip_lines.append(f"用户名: {parsed['username']}")
-    ip_entry_id = str(getattr(proxy_config, "ip_entry_id", "") or "").strip()
-    if ip_entry_id:
-        tooltip_lines.append(f"IP 条目: {ip_entry_id}")
+    tooltip_lines.append(f"IP 条目: {ip_entry_id}")
     pool_id = str(getattr(proxy_config, "pool_id", "") or "").strip()
     if pool_id:
         tooltip_lines.append(f"IP 池: {pool_id}")
@@ -1293,7 +1300,7 @@ class EnvListWidget(QWidget):
 
         message = (
             f"来源代理同步完成：更新 {result.updated_count} 个，"
-            f"绑定 IP 条目 {result.bound_count} 个，仅保存静态代理 {result.static_only_count} 个，"
+            f"绑定 IP 条目 {result.bound_count} 个，清除本地绑定 {getattr(result, 'cleared_count', 0)} 个，"
             f"跳过 {result.skipped_count} 个，失败 {result.failed_count} 个。"
         )
         if getattr(result, "errors", None):

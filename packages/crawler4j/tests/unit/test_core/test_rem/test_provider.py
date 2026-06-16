@@ -391,6 +391,38 @@ async def test_virtualbrowser_list_existing_envs_preserves_source_proxy_config(m
 
 
 @pytest.mark.asyncio
+async def test_virtualbrowser_source_proxy_prefers_structured_host_over_local_forward_url(monkeypatch):
+    provider = VirtualBrowserProvider()
+    client = SimpleNamespace(
+        list_browsers=AsyncMock(
+            return_value=[
+                {
+                    "id": 102,
+                    "name": "vb-local-forward",
+                    "proxy": {
+                        "protocol": "HTTP",
+                        "host": "124.225.43.95",
+                        "port": "6789",
+                        "url": "http://127.0.0.1:23080",
+                    },
+                }
+            ]
+        ),
+        get_browser_full_parameters=AsyncMock(return_value=[]),
+        list_running_browsers=AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    items = await provider.list_existing_envs()
+
+    assert len(items) == 1
+    assert items[0].proxy_summary == "http 124.225.43.95:6789"
+    assert items[0].proxy_config is not None
+    assert items[0].proxy_config.static_value == "http://124.225.43.95:6789"
+    assert items[0].proxy_config.current_ip == "124.225.43.95"
+
+
+@pytest.mark.asyncio
 async def test_virtualbrowser_build_imported_environment_keeps_source_proxy_config():
     provider = VirtualBrowserProvider()
     source_proxy = ProxyConfig(

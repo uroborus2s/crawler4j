@@ -211,7 +211,72 @@ async def test_sync_source_proxies_matches_imported_env_proxy_to_ip_entry(monkey
 
 
 @pytest.mark.asyncio
-async def test_sync_source_proxies_saves_static_proxy_when_ip_entry_not_found(monkeypatch):
+async def test_sync_source_proxies_repairs_local_forward_proxy_binding(monkeypatch):
+    manager = EnvironmentManager()
+    await manager.pool.add(
+        Environment(
+            name="vb-imported",
+            kind=EnvKind.BROWSER,
+            provider="virtualbrowser",
+            status=EnvStatus.READY,
+            external_id="301",
+            proxy_config=ProxyConfig(
+                mode=ProxyMode.STATIC,
+                static_value="http://127.0.0.1:23080",
+                current_ip="127.0.0.1",
+                ip_entry_id="ip-local",
+                pool_id="pool-local",
+            ),
+        )
+    )
+    source_proxy = ProxyConfig(
+        mode=ProxyMode.STATIC,
+        static_value="http://124.225.43.95:6789",
+        current_ip="124.225.43.95",
+    )
+    provider = SimpleNamespace(
+        supports_existing_env_import=lambda: True,
+        get_imported_env_info=AsyncMock(
+            return_value=ProviderEnvInfo(
+                provider="virtualbrowser",
+                provider_label="Virtual Browser",
+                external_id="301",
+                name="vb-imported",
+                proxy_config=source_proxy,
+            )
+        ),
+    )
+    pool = IPPool(id="pool-real", name="Real Pool")
+    pool.entries = [
+        IPEntry(
+            id="ip-real",
+            pool_id="pool-real",
+            address="124.225.43.95",
+            protocol="http",
+            port=6789,
+        )
+    ]
+
+    monkeypatch.setattr("src.core.rem.manager.get_provider", lambda name: provider if name == "virtualbrowser" else None)
+    monkeypatch.setattr(
+        "src.core.rem.manager.get_ip_pool_manager",
+        lambda: SimpleNamespace(list_pools=lambda: [pool]),
+    )
+
+    result = await manager.sync_source_proxies()
+
+    assert result.updated_count == 1
+    assert result.bound_count == 1
+    reloaded = (await manager.list_envs())[0]
+    assert reloaded.proxy_config is not None
+    assert reloaded.proxy_config.static_value == "http://124.225.43.95:6789"
+    assert reloaded.proxy_config.current_ip == "124.225.43.95"
+    assert reloaded.proxy_config.ip_entry_id == "ip-real"
+    assert reloaded.proxy_config.pool_id == "pool-real"
+
+
+@pytest.mark.asyncio
+async def test_sync_source_proxies_skips_when_ip_entry_not_found(monkeypatch):
     manager = EnvironmentManager()
     await manager.pool.add(
         Environment(
@@ -249,13 +314,63 @@ async def test_sync_source_proxies_saves_static_proxy_when_ip_entry_not_found(mo
 
     result = await manager.sync_source_proxies()
 
-    assert result.updated_count == 1
+    assert result.updated_count == 0
     assert result.bound_count == 0
-    assert result.static_only_count == 1
-    assert result.items[0].action == "save_static_proxy"
+    assert result.cleared_count == 0
+    assert result.items[0].action == "skip"
     reloaded = await manager.get_env(env.id)
     assert reloaded is not None
-    assert reloaded.proxy_config is not None
-    assert reloaded.proxy_config.static_value == "http://bob:secret@10.0.0.9:8080"
-    assert reloaded.proxy_config.current_ip == "10.0.0.9"
-    assert reloaded.proxy_config.ip_entry_id is None
+    assert reloaded.proxy_config is None
+
+
+@pytest.mark.asyncio
+async def test_sync_source_proxies_clears_existing_binding_when_source_not_in_ip_table(monkeypatch):
+    manager = EnvironmentManager()
+    await manager.pool.add(
+        Environment(
+            name="vb-stale",
+            kind=EnvKind.BROWSER,
+            provider="virtualbrowser",
+            status=EnvStatus.READY,
+            external_id="303",
+            proxy_config=ProxyConfig(
+                mode=ProxyMode.STATIC,
+                static_value="http://127.0.0.1:23080",
+                current_ip="127.0.0.1",
+                ip_entry_id="ip-stale",
+                pool_id="pool-stale",
+            ),
+        )
+    )
+    source_proxy = ProxyConfig(
+        mode=ProxyMode.STATIC,
+        static_value="http://bob:secret@10.0.0.9:8080",
+        current_ip="10.0.0.9",
+    )
+    provider = SimpleNamespace(
+        supports_existing_env_import=lambda: True,
+        get_imported_env_info=AsyncMock(
+            return_value=ProviderEnvInfo(
+                provider="virtualbrowser",
+                provider_label="Virtual Browser",
+                external_id="303",
+                name="vb-stale",
+                proxy_config=source_proxy,
+            )
+        ),
+    )
+
+    monkeypatch.setattr("src.core.rem.manager.get_provider", lambda name: provider if name == "virtualbrowser" else None)
+    monkeypatch.setattr(
+        "src.core.rem.manager.get_ip_pool_manager",
+        lambda: SimpleNamespace(list_pools=lambda: []),
+    )
+
+    result = await manager.sync_source_proxies()
+
+    assert result.updated_count == 1
+    assert result.bound_count == 0
+    assert result.cleared_count == 1
+    assert result.items[0].action == "clear_ip_binding"
+    reloaded = (await manager.list_envs())[0]
+    assert reloaded.proxy_config is None
