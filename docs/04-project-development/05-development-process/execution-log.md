@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `API-009`, `API-010`, `BUG-013`
-**最后更新：** 2026-06-13
+**最后更新：** 2026-06-16
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-16 | 将根应用 / 运行时版本提升到 `0.4.14`，并补齐已导入指纹浏览器环境的来源代理同步：Provider 来源列表保留代理配置，导入链路自动匹配 IP 表唯一条目，环境管理页新增“同步来源代理”预览确认入口，用于批量修复历史已导入环境的本地代理绑定。定向回归 `49 passed`，目标 `ruff check` 通过；正式客户端包、tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-13 | 将根应用 / 运行时版本提升到 `0.4.12`，用于 Hosted UI DataTable 行按钮显式 params 分发和任务暂停后绑定业务行 `run_status` 释放修复；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
 | 2026-06-13 | 将根应用 / 运行时版本提升到 `0.4.11`，用于 Hosted UI DataTable 自定义行按钮分发到同名 `@ui_action` 的客户端修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
 | 2026-06-13 | 将根应用 / 运行时版本提升到 `0.4.10`，用于任务监控暂停后对象 cleanup 链路 `asyncio.CancelledError` 截断修复版；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |

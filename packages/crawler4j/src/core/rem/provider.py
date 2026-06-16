@@ -10,10 +10,11 @@ import json
 
 from abc import ABC, abstractmethod
 from typing import Any
+from urllib.parse import urlsplit
 
 from src.core.foundation.logging import logger
 from src.core.rem.handle import BrowserHandle
-from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo
+from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo, ProxyConfig, ProxyMode
 from src.core.rem.virtualbrowser_fingerprint import materialize_virtualbrowser_fingerprint
 
 VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS = tuple(range(146, 138, -1))
@@ -61,6 +62,112 @@ def _payload_for_log(payload: dict[str, Any]) -> str:
         return json.dumps(_sanitize_payload_for_log(payload), ensure_ascii=False)
     except TypeError:
         return str(_sanitize_payload_for_log(payload))
+
+
+def _first_proxy_text(proxy: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = proxy.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _normalize_proxy_protocol(value: object) -> str:
+    protocol = str(value or "").strip().lower()
+    aliases = {
+        "no": "",
+        "none": "",
+        "noproxy": "",
+        "direct": "",
+        "socks": "socks5",
+    }
+    return aliases.get(protocol, protocol)
+
+
+def _safe_proxy_port(value: object) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def _build_proxy_config(
+    *,
+    protocol: str,
+    host: str,
+    port: int,
+    username: str = "",
+    password: str = "",
+) -> ProxyConfig | None:
+    normalized_protocol = _normalize_proxy_protocol(protocol) or "socks5"
+    host = str(host or "").strip()
+    if not host or port <= 0:
+        return None
+    auth = f"{username}:{password}@" if username and password else ""
+    return ProxyConfig(
+        mode=ProxyMode.STATIC,
+        static_value=f"{normalized_protocol}://{auth}{host}:{port}",
+        current_ip=host,
+    )
+
+
+def _proxy_config_from_value(value: str, *, fallback_protocol: str = "") -> ProxyConfig | None:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return None
+    value_for_parse = raw_value
+    if "://" not in value_for_parse:
+        protocol = _normalize_proxy_protocol(fallback_protocol) or "socks5"
+        value_for_parse = f"{protocol}://{value_for_parse}"
+    parts = urlsplit(value_for_parse)
+    return _build_proxy_config(
+        protocol=parts.scheme,
+        host=str(parts.hostname or ""),
+        port=int(parts.port or 0),
+        username=str(parts.username or ""),
+        password=str(parts.password or ""),
+    )
+
+
+def _source_proxy_config_from_payload(proxy: Any) -> ProxyConfig | None:
+    if not isinstance(proxy, dict):
+        return None
+
+    value = _first_proxy_text(proxy, "value", "proxy", "proxy_url", "proxyUrl", "url")
+    protocol = _first_proxy_text(proxy, "protocol", "type", "proxyType", "scheme")
+    if value:
+        return _proxy_config_from_value(value, fallback_protocol=protocol)
+
+    protocol = _normalize_proxy_protocol(protocol)
+    host = _first_proxy_text(proxy, "host", "address", "ip", "server")
+    port = _safe_proxy_port(_first_proxy_text(proxy, "port", "proxyPort"))
+    username = _first_proxy_text(proxy, "user", "username", "proxyUserName", "proxy_username")
+    password = _first_proxy_text(proxy, "pass", "password", "proxyPassword", "proxy_password")
+    return _build_proxy_config(
+        protocol=protocol,
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+    )
+
+
+def _proxy_config_summary(proxy_config: ProxyConfig | None) -> str:
+    if proxy_config is None:
+        return "-"
+    value = str(proxy_config.static_value or "").strip()
+    if "://" in value:
+        parts = urlsplit(value)
+        protocol = str(parts.scheme or "").lower()
+        host = str(parts.hostname or "")
+        port = int(parts.port or 0)
+        if host and port:
+            return " ".join(part for part in (protocol, f"{host}:{port}") if part)
+    host = str(proxy_config.current_ip or "").strip()
+    return host or "-"
 
 
 def _normalize_cdp_endpoint(value: Any) -> str | None:
@@ -341,6 +448,17 @@ class BaseProvider(ABC):
         del name
         return None
 
+    async def get_imported_env_info(self, env: Environment) -> ProviderEnvInfo | None:
+        """按已导入环境回查来源系统环境摘要。"""
+        external_id = str(env.external_id or "").strip()
+        env_name = str(env.name or "").strip()
+        for item in await self.list_existing_envs():
+            if external_id and str(item.external_id or "").strip() == external_id:
+                return item
+            if env_name and str(item.name or "").strip() == env_name:
+                return item
+        return None
+
     async def build_imported_environment(self, info: ProviderEnvInfo) -> Environment:
         """把来源系统环境信息映射为宿主环境记录。"""
         return Environment(
@@ -350,6 +468,7 @@ class BaseProvider(ABC):
             status=EnvStatus.READY,
             external_id=info.external_id,
             handle=BrowserHandle(browser_id=str(info.external_id)),
+            proxy_config=info.proxy_config,
         )
 
 # Provider 注册表
@@ -1991,13 +2110,8 @@ class VirtualBrowserProvider(BaseProvider):
             merged = dict(entry)
             merged.update(full_map.get(external_id, {}))
             proxy = merged.get("proxy") if isinstance(merged.get("proxy"), dict) else None
-            proxy_summary = "-"
-            if isinstance(proxy, dict):
-                protocol = str(proxy.get("protocol") or "").strip()
-                host = str(proxy.get("host") or "").strip()
-                port = str(proxy.get("port") or "").strip()
-                if host and port:
-                    proxy_summary = " ".join(part for part in (protocol, f"{host}:{port}") if part)
+            proxy_config = _source_proxy_config_from_payload(proxy)
+            proxy_summary = _proxy_config_summary(proxy_config)
             timestamp = merged.get("timestamp")
             last_used_at = None
             if timestamp is not None:
@@ -2013,6 +2127,7 @@ class VirtualBrowserProvider(BaseProvider):
                     external_id=external_id,
                     name=str(merged.get("name") or external_id),
                     proxy_summary=proxy_summary,
+                    proxy_config=proxy_config,
                     remark=str(merged.get("remark") or ""),
                     is_running=is_running,
                     running_status="运行中" if is_running else "未运行",

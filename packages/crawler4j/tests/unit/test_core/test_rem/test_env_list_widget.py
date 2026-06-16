@@ -318,6 +318,7 @@ def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
     assert widget._begin_operation() is True
     assert widget.create_btn.isEnabled() is False
     assert widget.import_existing_btn.isEnabled() is False
+    assert widget.sync_proxy_btn.isEnabled() is False
     assert widget.refresh_btn.isEnabled() is False
     assert widget.table.isEnabled() is False
     assert widget._progress_dialog is not None
@@ -328,6 +329,7 @@ def test_env_list_widget_busy_state_disables_controls(qtbot, monkeypatch):
 
     assert widget.create_btn.isEnabled() is True
     assert widget.import_existing_btn.isEnabled() is True
+    assert widget.sync_proxy_btn.isEnabled() is True
     assert widget.cleanup_btn.isEnabled() is True
     assert widget.refresh_btn.isEnabled() is True
     assert widget.table.isEnabled() is True
@@ -436,6 +438,63 @@ async def test_env_list_widget_cleanup_skips_without_safe_candidates(qtbot, monk
         "当前候选环境均不满足清理安全条件。",
         kind="warning",
     )
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_sync_source_proxy_confirms_executes_and_refreshes(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    preview = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                env_id=1,
+                env_name="vb-imported",
+                provider="virtualbrowser",
+                source_proxy_url="socks5://alice:***@10.0.0.8:1080",
+                action="bind_ip_entry",
+                reason="命中 IP 条目 ip-1",
+                ip_entry_id="ip-1",
+                pool_id="pool-1",
+                eligible=True,
+            )
+        ],
+        errors=[],
+        actionable_count=1,
+    )
+    result = SimpleNamespace(
+        updated_count=1,
+        bound_count=1,
+        static_only_count=0,
+        skipped_count=0,
+        failed_count=0,
+        errors=[],
+        items=[],
+    )
+    manager = SimpleNamespace(
+        pool=SimpleNamespace(),
+        preview_source_proxy_sync=AsyncMock(return_value=preview),
+        sync_source_proxies=AsyncMock(return_value=result),
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+    _patch_cleanup_service(monkeypatch, _FakeCleanupService(EnvCleanupPreview()))
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget._show_loading = MagicMock()
+    widget._confirm_source_proxy_sync_plan_async = AsyncMock(return_value=True)
+    widget._show_message_async = AsyncMock()
+    widget.load_data = MagicMock()
+
+    await widget._sync_source_proxies_async()
+    await _drain_widget_tasks(widget)
+
+    manager.preview_source_proxy_sync.assert_awaited_once()
+    widget._confirm_source_proxy_sync_plan_async.assert_awaited_once_with(preview)
+    manager.sync_source_proxies.assert_awaited_once_with(preview)
+    widget._show_message_async.assert_awaited_once()
+    widget.load_data.assert_called_once_with(run_gc=False, reload_from_db=True)
 
 
 def test_env_list_widget_async_action_refreshes_without_threads(qtbot, monkeypatch):

@@ -3,8 +3,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from src.core.rem.ip_pool import IPEntry, IPPool
 from src.core.rem.manager import EnvironmentManager
-from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo
+from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo, ProxyConfig, ProxyMode
 
 
 @pytest.fixture(autouse=True)
@@ -139,3 +140,122 @@ async def test_import_existing_env_persists_only_provider_name_and_external_id(m
     assert not hasattr(reloaded, "provider_proxy")
     assert not hasattr(reloaded, "provider_raw_meta")
     assert not hasattr(reloaded, "imported_at")
+
+
+@pytest.mark.asyncio
+async def test_sync_source_proxies_matches_imported_env_proxy_to_ip_entry(monkeypatch):
+    manager = EnvironmentManager()
+    await manager.pool.add(
+        Environment(
+            name="vb-imported",
+            kind=EnvKind.BROWSER,
+            provider="virtualbrowser",
+            status=EnvStatus.READY,
+            external_id="301",
+        )
+    )
+    env = (await manager.list_envs())[0]
+    source_proxy = ProxyConfig(
+        mode=ProxyMode.STATIC,
+        static_value="socks5://alice:secret@10.0.0.8:1080",
+        current_ip="10.0.0.8",
+    )
+    provider_env = ProviderEnvInfo(
+        provider="virtualbrowser",
+        provider_label="Virtual Browser",
+        external_id="301",
+        name="vb-imported",
+        proxy_config=source_proxy,
+    )
+    provider = SimpleNamespace(
+        supports_existing_env_import=lambda: True,
+        get_imported_env_info=AsyncMock(return_value=provider_env),
+    )
+    pool = IPPool(id="pool-1", name="Pool 1")
+    pool.entries = [
+        IPEntry(
+            id="ip-1",
+            pool_id="pool-1",
+            address="10.0.0.8",
+            protocol="socks5",
+            port=1080,
+            username="alice",
+            password="secret",
+        )
+    ]
+
+    monkeypatch.setattr("src.core.rem.manager.get_provider", lambda name: provider if name == "virtualbrowser" else None)
+    monkeypatch.setattr(
+        "src.core.rem.manager.get_ip_pool_manager",
+        lambda: SimpleNamespace(list_pools=lambda: [pool]),
+    )
+
+    preview = await manager.preview_source_proxy_sync()
+    assert len(preview.items) == 1
+    assert preview.items[0].env_id == env.id
+    assert preview.items[0].action == "bind_ip_entry"
+    assert preview.items[0].ip_entry_id == "ip-1"
+    assert preview.items[0].pool_id == "pool-1"
+
+    result = await manager.sync_source_proxies(preview)
+
+    assert result.updated_count == 1
+    assert result.bound_count == 1
+    reloaded = await manager.get_env(env.id)
+    assert reloaded is not None
+    assert reloaded.proxy_config is not None
+    assert reloaded.proxy_config.static_value == "socks5://alice:secret@10.0.0.8:1080"
+    assert reloaded.proxy_config.current_ip == "10.0.0.8"
+    assert reloaded.proxy_config.ip_entry_id == "ip-1"
+    assert reloaded.proxy_config.pool_id == "pool-1"
+
+
+@pytest.mark.asyncio
+async def test_sync_source_proxies_saves_static_proxy_when_ip_entry_not_found(monkeypatch):
+    manager = EnvironmentManager()
+    await manager.pool.add(
+        Environment(
+            name="vb-unmatched",
+            kind=EnvKind.BROWSER,
+            provider="virtualbrowser",
+            status=EnvStatus.READY,
+            external_id="302",
+        )
+    )
+    env = (await manager.list_envs())[0]
+    source_proxy = ProxyConfig(
+        mode=ProxyMode.STATIC,
+        static_value="http://bob:secret@10.0.0.9:8080",
+        current_ip="10.0.0.9",
+    )
+    provider = SimpleNamespace(
+        supports_existing_env_import=lambda: True,
+        get_imported_env_info=AsyncMock(
+            return_value=ProviderEnvInfo(
+                provider="virtualbrowser",
+                provider_label="Virtual Browser",
+                external_id="302",
+                name="vb-unmatched",
+                proxy_config=source_proxy,
+            )
+        ),
+    )
+
+    monkeypatch.setattr("src.core.rem.manager.get_provider", lambda name: provider if name == "virtualbrowser" else None)
+    monkeypatch.setattr(
+        "src.core.rem.manager.get_ip_pool_manager",
+        lambda: SimpleNamespace(list_pools=lambda: []),
+    )
+
+    result = await manager.sync_source_proxies()
+
+    assert result.updated_count == 1
+    assert result.bound_count == 0
+    assert result.static_only_count == 1
+    assert result.items[0].action == "save_static_proxy"
+    reloaded = await manager.get_env(env.id)
+    assert reloaded is not None
+    assert reloaded.proxy_config is not None
+    assert reloaded.proxy_config.static_value == "http://bob:secret@10.0.0.9:8080"
+    assert reloaded.proxy_config.current_ip == "10.0.0.9"
+    assert reloaded.proxy_config.ip_entry_id is None

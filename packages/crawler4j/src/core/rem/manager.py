@@ -11,11 +11,14 @@ EnvironmentManager 是 REM 的统一入口，提供：
 import asyncio
 import json
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from src.core.foundation.logging import logger
 from src.core.persistence.database import STATE_DB, get_connection
+from src.core.rem.ip_pool import IPEntry
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.models import (
     Environment,
@@ -23,6 +26,7 @@ from src.core.rem.models import (
     EnvRequirement,
     EnvStatus,
     EnvUnavailableError,
+    ProxyConfig,
 )
 from src.core.rem.pool import EnvPool, LeaseManager
 from src.core.rem.provider import BaseProvider, get_provider, list_providers
@@ -86,6 +90,62 @@ def is_gc_reapable_status(status: EnvStatus) -> bool:
 
 def _normalize_env_name(name: object) -> str:
     return str(name or "").strip()
+
+
+@dataclass(frozen=True)
+class SourceProxySyncItem:
+    """来源代理同步预览项。"""
+
+    env_id: int
+    env_name: str
+    provider: str
+    source_proxy: ProxyConfig | None
+    source_proxy_url: str
+    action: str
+    reason: str
+    eligible: bool = False
+    ip_entry_id: str = ""
+    pool_id: str = ""
+
+
+@dataclass(frozen=True)
+class SourceProxySyncPreview:
+    """来源代理同步预览。"""
+
+    items: tuple[SourceProxySyncItem, ...] = ()
+    errors: tuple[str, ...] = ()
+
+    @property
+    def actionable_count(self) -> int:
+        return sum(1 for item in self.items if item.eligible)
+
+
+@dataclass(frozen=True)
+class SourceProxySyncResult:
+    """来源代理同步执行结果。"""
+
+    items: tuple[SourceProxySyncItem, ...] = ()
+    errors: tuple[str, ...] = ()
+
+    @property
+    def updated_count(self) -> int:
+        return sum(1 for item in self.items if item.eligible)
+
+    @property
+    def bound_count(self) -> int:
+        return sum(1 for item in self.items if item.eligible and item.action == "bind_ip_entry")
+
+    @property
+    def static_only_count(self) -> int:
+        return sum(1 for item in self.items if item.eligible and item.action == "save_static_proxy")
+
+    @property
+    def skipped_count(self) -> int:
+        return sum(1 for item in self.items if not item.eligible)
+
+    @property
+    def failed_count(self) -> int:
+        return len(self.errors)
 
 
 class EnvironmentManager:
@@ -357,9 +417,233 @@ class EnvironmentManager:
         env.external_id = str(info.external_id or "")
         env.status = EnvStatus.READY
         env.name = env.name or source_name
+        if env.proxy_config is not None:
+            self._attach_matching_ip_entry(env.proxy_config)
 
         await self.pool.add(env)
         return env
+
+    async def preview_source_proxy_sync(
+        self,
+        env_ids: list[int | str] | None = None,
+    ) -> SourceProxySyncPreview:
+        """预览把来源指纹浏览器代理同步到本地环境记录的计划。"""
+        selected_ids = {int(env_id) for env_id in env_ids or [] if str(env_id).strip()}
+        items: list[SourceProxySyncItem] = []
+        errors: list[str] = []
+
+        for env in await self.list_envs():
+            if selected_ids and int(env.id) not in selected_ids:
+                continue
+            if str(env.provider or "") not in FINGERPRINT_BROWSER_PROVIDERS:
+                continue
+            item = await self._preview_source_proxy_sync_item(env)
+            items.append(item)
+
+        return SourceProxySyncPreview(items=tuple(items), errors=tuple(errors))
+
+    async def sync_source_proxies(
+        self,
+        preview: SourceProxySyncPreview | None = None,
+    ) -> SourceProxySyncResult:
+        """按预览计划同步来源代理到本地环境记录。"""
+        plan = preview or await self.preview_source_proxy_sync()
+        applied_items: list[SourceProxySyncItem] = []
+        errors: list[str] = list(plan.errors)
+
+        for item in plan.items:
+            if not item.eligible:
+                applied_items.append(item)
+                continue
+            env = await self.get_env(item.env_id)
+            if env is None:
+                errors.append(f"环境不存在: {item.env_id}")
+                continue
+            if item.source_proxy is None:
+                applied_items.append(
+                    SourceProxySyncItem(
+                        env_id=item.env_id,
+                        env_name=item.env_name,
+                        provider=item.provider,
+                        source_proxy=None,
+                        source_proxy_url=item.source_proxy_url,
+                        action="skip",
+                        reason="来源代理为空，已跳过",
+                        eligible=False,
+                    )
+                )
+                continue
+
+            next_proxy = self._copy_proxy_config(item.source_proxy)
+            if item.action == "bind_ip_entry":
+                next_proxy.ip_entry_id = item.ip_entry_id
+                next_proxy.pool_id = item.pool_id
+            env.proxy_config = next_proxy
+            await self.pool.add(env)
+            applied_items.append(item)
+
+        return SourceProxySyncResult(items=tuple(applied_items), errors=tuple(errors))
+
+    async def _preview_source_proxy_sync_item(self, env: Environment) -> SourceProxySyncItem:
+        provider_name = str(env.provider or "").strip()
+        base_item = {
+            "env_id": int(env.id),
+            "env_name": str(env.name or ""),
+            "provider": provider_name,
+            "source_proxy": None,
+            "source_proxy_url": "-",
+        }
+        if not str(env.external_id or "").strip():
+            return SourceProxySyncItem(**base_item, action="skip", reason="环境缺少来源 external_id，无法回查")
+
+        provider = get_provider(provider_name)
+        if not provider or not provider.supports_existing_env_import():
+            return SourceProxySyncItem(**base_item, action="skip", reason="Provider 不支持来源环境回查")
+
+        try:
+            info = await provider.get_imported_env_info(env)
+        except Exception as exc:
+            return SourceProxySyncItem(**base_item, action="skip", reason=f"来源环境回查失败: {exc}")
+        if info is None:
+            return SourceProxySyncItem(**base_item, action="skip", reason="来源环境不存在或已改名")
+
+        source_proxy = info.proxy_config
+        source_proxy_url = self._display_proxy_url(source_proxy)
+        base_item["source_proxy"] = source_proxy
+        base_item["source_proxy_url"] = source_proxy_url
+        if source_proxy is None:
+            return SourceProxySyncItem(**base_item, action="skip", reason="来源环境未配置代理")
+
+        entry, duplicate_count = self._find_unique_ip_entry_for_proxy(source_proxy)
+        if entry is None and duplicate_count > 1:
+            return SourceProxySyncItem(
+                **base_item,
+                action="skip",
+                reason=f"匹配到 {duplicate_count} 个 IP 条目，请先收敛 IP 表后再同步",
+            )
+
+        if entry is not None:
+            if self._local_proxy_already_synced(env.proxy_config, source_proxy, entry):
+                return SourceProxySyncItem(
+                    **base_item,
+                    action="skip",
+                    reason=f"已绑定 IP 条目 {entry.id}",
+                    ip_entry_id=str(entry.id or ""),
+                    pool_id=str(entry.pool_id or ""),
+                )
+            return SourceProxySyncItem(
+                **base_item,
+                action="bind_ip_entry",
+                reason=f"唯一命中 IP 条目 {entry.id}",
+                eligible=True,
+                ip_entry_id=str(entry.id or ""),
+                pool_id=str(entry.pool_id or ""),
+            )
+
+        if self._local_static_proxy_already_synced(env.proxy_config, source_proxy):
+            return SourceProxySyncItem(**base_item, action="skip", reason="本地静态代理已同步")
+
+        return SourceProxySyncItem(
+            **base_item,
+            action="save_static_proxy",
+            reason="来源代理未命中 IP 表，将仅保存静态代理",
+            eligible=True,
+        )
+
+    @staticmethod
+    def _copy_proxy_config(proxy_config: ProxyConfig) -> ProxyConfig:
+        return ProxyConfig.from_dict(proxy_config.to_dict())
+
+    def _attach_matching_ip_entry(self, proxy_config: ProxyConfig) -> None:
+        entry, duplicate_count = self._find_unique_ip_entry_for_proxy(proxy_config)
+        if entry is None:
+            if duplicate_count > 1:
+                logger.warning(f"[REM] 来源代理匹配到多个 IP 条目，跳过自动绑定: proxy={proxy_config.current_ip}")
+            return
+        proxy_config.pool_id = str(entry.pool_id or "")
+        proxy_config.ip_entry_id = str(entry.id or "")
+
+    def _find_unique_ip_entry_for_proxy(self, proxy_config: ProxyConfig) -> tuple[IPEntry | None, int]:
+        parts = self._proxy_parts(proxy_config)
+        host = parts["host"]
+        port = parts["port"]
+        if not host or port <= 0:
+            return None, 0
+
+        matches: list[IPEntry] = []
+        for pool in get_ip_pool_manager().list_pools():
+            for entry in getattr(pool, "entries", []) or []:
+                if str(getattr(entry, "address", "") or "").strip() != host:
+                    continue
+                if int(getattr(entry, "port", 0) or 0) != port:
+                    continue
+                if str(getattr(entry, "protocol", "") or "").strip().lower() != parts["protocol"]:
+                    continue
+                if str(getattr(entry, "username", "") or "").strip() != parts["username"]:
+                    continue
+                if str(getattr(entry, "password", "") or "").strip() != parts["password"]:
+                    continue
+                matches.append(entry)
+
+        if len(matches) == 1:
+            return matches[0], 1
+        return None, len(matches)
+
+    @staticmethod
+    def _proxy_parts(proxy_config: ProxyConfig) -> dict[str, Any]:
+        value = str(proxy_config.static_value or "").strip()
+        if "://" in value:
+            parsed = urlsplit(value)
+            return {
+                "protocol": str(parsed.scheme or "").strip().lower(),
+                "host": str(parsed.hostname or "").strip(),
+                "port": int(parsed.port or 0),
+                "username": str(parsed.username or "").strip(),
+                "password": str(parsed.password or "").strip(),
+            }
+        return {
+            "protocol": "",
+            "host": str(proxy_config.current_ip or "").strip(),
+            "port": 0,
+            "username": "",
+            "password": "",
+        }
+
+    @classmethod
+    def _display_proxy_url(cls, proxy_config: ProxyConfig | None) -> str:
+        if proxy_config is None:
+            return "-"
+        value = str(proxy_config.static_value or "").strip()
+        if not value:
+            return str(proxy_config.current_ip or "").strip() or "-"
+        if "://" not in value or "@" not in value:
+            return value
+        scheme, rest = value.split("://", 1)
+        credentials, suffix = rest.rsplit("@", 1)
+        username = credentials.split(":", 1)[0]
+        masked = f"{username}:***" if username else "***"
+        return f"{scheme}://{masked}@{suffix}"
+
+    @classmethod
+    def _local_static_proxy_already_synced(
+        cls,
+        local_proxy: ProxyConfig | None,
+        source_proxy: ProxyConfig,
+    ) -> bool:
+        if local_proxy is None:
+            return False
+        return cls._proxy_parts(local_proxy) == cls._proxy_parts(source_proxy)
+
+    @classmethod
+    def _local_proxy_already_synced(
+        cls,
+        local_proxy: ProxyConfig | None,
+        source_proxy: ProxyConfig,
+        entry: IPEntry,
+    ) -> bool:
+        if not cls._local_static_proxy_already_synced(local_proxy, source_proxy):
+            return False
+        return str(getattr(local_proxy, "ip_entry_id", "") or "") == str(entry.id or "")
 
     async def mark_existing_env_import_state(
         self,
