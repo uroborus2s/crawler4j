@@ -463,7 +463,7 @@ async def test_env_list_widget_sync_source_proxy_confirms_executes_and_refreshes
     result = SimpleNamespace(
         updated_count=1,
         bound_count=1,
-        static_only_count=0,
+        cleared_count=0,
         skipped_count=0,
         failed_count=0,
         errors=[],
@@ -601,6 +601,33 @@ def test_env_list_widget_rows_show_bound_ip_without_password(qtbot, monkeypatch)
     assert "secret" not in row["bound_ip"]["tooltip"]
     assert widget.table.table.item(0, 4).text() == "1.2.3.4:1080"
     assert "secret" not in widget.table.table.item(0, 4).toolTip()
+
+
+def test_env_list_widget_rows_hide_unmatched_static_proxy_from_bound_ip(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    proxy_config = ProxyConfig(
+        mode=ProxyMode.STATIC,
+        static_value="http://127.0.0.1:23080",
+        current_ip="127.0.0.1",
+    )
+
+    widget._on_data_loaded([_make_env("env-1", EnvStatus.READY, proxy_config=proxy_config)])
+    row = widget.table.displayed_rows()[0]
+
+    assert row["bound_ip"]["text"] == "-"
+    assert row["bound_ip"]["tooltip"] == "未绑定 IP 表条目"
+    assert widget.table.table.item(0, 4).text() == "-"
 
 
 def test_env_list_widget_preserves_env_metadata_without_resource_pool_availability(qtbot, monkeypatch):

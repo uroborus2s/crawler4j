@@ -13,7 +13,7 @@ Evidence status:
 - Desktop PyInstaller / macOS Sparkle bundle: latest recorded artifact passed on 2026-05-26 for `crawler4j 0.4.3`; current `crawler4j 0.4.15` desktop bundle is not yet refreshed
 - SDK build/publish: passed on 2026-06-15 for current `crawler4j-sdk 0.4.2`; wheel/sdist uploaded to PyPI
 - Contracts build/publish: passed on 2026-06-15 for current `crawler4j-contracts 0.4.2`; wheel/sdist uploaded to PyPI
-- Full test/lint gate: historical full gate passed on 2026-05-18 for the 0.4.2 root version bump; current 0.4.15 VirtualBrowser source proxy parsing repair scope passed REM source proxy / environment list / version regression `51 passed`, target `ruff check`, `uv lock --check`, `.factory/project.json` JSON validation, and `git diff --check`
+- Full test/lint gate: historical full gate passed on 2026-05-18 for the 0.4.2 root version bump; current 0.4.15 VirtualBrowser source proxy parsing repair scope passed REM source proxy / environment list / version regression `53 passed`, target `ruff check`, `uv lock --check`, `.factory/project.json` JSON validation, and `git diff --check`
 - UI / CLI smoke: passed on 2026-05-01; `uv run python scripts/smoke_test_ui.py` and `uv run python -m crawler4j_sdk.cli.commands --help` passed
 - Docs validate: not rerun in this documentation-memory sync turn
 

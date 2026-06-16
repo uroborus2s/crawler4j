@@ -35,7 +35,7 @@
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | 2026-05-01 headless UI smoke 复验通过，覆盖 Shell 导航/页面数量与 Dashboard 异步刷新 |
 | `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
-| `TC-0440` REM 来源代理同步与 IP 表绑定 | 通过 | 2026-06-16 追加覆盖：VirtualBrowser 来源代理解析优先使用结构化 `host/port/protocol/user/pass`，避免 `proxy.url=http://127.0.0.1:本地端口` 被保存为绑定 IP；历史错误保存的本地转发代理可通过“同步来源代理”覆盖修复。本轮定向回归 `51 passed`，目标文件 `ruff check` 通过 |
+| `TC-0440` REM 来源代理同步与 IP 表绑定 | 通过 | 2026-06-16 追加覆盖：VirtualBrowser 来源代理解析优先使用结构化 `host/port/protocol/user/pass`，避免 `proxy.url=http://127.0.0.1:本地端口` 被保存为绑定 IP；只有唯一命中 IP 表条目时才写入绑定，未命中 IP 表时跳过或清除本地错误绑定。定向回归 `53 passed`，目标文件 `ruff check` 通过 |
 | `TC-059` 开发模块忽略目录 symlink 回归 | 通过 | 2026-05-30 新增定向覆盖：DevLink/源码预检的 manifest lock 校验会跳过 `.venv/` 内 symlink，非忽略目录 symlink 仍拒绝；SDK `_archive_members()` 会跳过 `.venv/` 内 symlink 且不打入 ZIP |
 | `TC-0400-release-review-final` 0.4.0 全面审查回归 | 通过 | 2026-05-01 复验：Full runtime surface 负向拒绝旧 Hosted UI 工具、空 workflow 自动解析、dispatcher env claim/binding 失败路径、UI smoke 与 PyInstaller spec 清理；全量 `886 passed`，打包配置 `62 passed` |
 | `TC-010` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py -q` | 通过 | 2026-04-20 口径已收敛到当前仍存在的正式回归文件，覆盖 `declare_ui` 刷新、`create_handler` / `update_handler` 路由、DevLink 页面上下文与真实模块 UI 链路 |
@@ -127,7 +127,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-06-16 | 追加 REM 来源代理解析修复回归：`test_provider.py` 锁定 VirtualBrowser 同时返回结构化代理和本地转发 URL 时优先采用真实 `host/port`；`test_import_existing_env.py` 锁定已保存为 `127.0.0.1:本地端口` 的历史环境可通过同步来源代理覆盖修复并重新绑定正确 IP 条目；组合回归 `51 passed`，目标文件 `ruff check` 通过 | Codex |
+| 2026-06-16 | 追加 REM 来源代理解析修复回归：`test_provider.py` 锁定 VirtualBrowser 同时返回结构化代理和本地转发 URL 时优先采用真实 `host/port`；`test_import_existing_env.py` 锁定已保存为 `127.0.0.1:本地端口` 的历史环境可通过同步来源代理覆盖修复并重新绑定正确 IP 条目，来源代理未命中 IP 表时不会保存为绑定 IP，且会清除本地错误绑定；`test_env_list_widget.py` 锁定“绑定 IP”列只展示存在 `ip_entry_id` 的 IP 表绑定；组合回归 `53 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-06-16 | 新增 REM 来源代理同步与 IP 表绑定回归：`test_import_existing_env.py` 锁定导入时保存来源代理并自动唯一匹配 IP 条目；`test_provider.py` 锁定 VirtualBrowser 来源环境列表保留代理配置；`test_env_list_widget.py` 锁定环境列表“同步来源代理”预览确认与刷新链路；组合回归 `49 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-06-06 | 补充指纹浏览器生命周期并发串行化回归：`test_provider.py` / `test_bitbrowser_provider.py` 新增并发 `close()` / `destroy()` / `reset()` 用例，锁定同一 provider 的外部管理 API 不会并发冲击本地服务，并覆盖 handle 缺失但 `external_id` 存在时仍删除真实外部环境；provider / client / manager 入口组合回归为 `53 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-06-06 | 补充 VirtualBrowser 并发启动串行化回归：`test_provider.py` 新增并发 `open()` 用例，锁定同一 `VirtualBrowserProvider` 在多个环境同时启动时不会并发调用 `launchBrowser`；组合回归 `test_provider.py` + `test_virtualbrowser_client.py` 为 `25 passed`，目标文件 `ruff check` 通过 | Codex |

@@ -40,7 +40,7 @@
 | Contracts wheel/sdist build | 通过（2026-06-15 `uv run build crawler4j-contracts crawler4j-sdk` 产出 `crawler4j-contracts 0.4.2` wheel/sdist） |
 | Contracts publish | 通过（2026-06-15 `uv run publish crawler4j-contracts` 上传 0.4.2 到 PyPI） |
 | Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-05-26 `uv run deploy-macos-internal-release` 产出 `Crawler4j.app`、`Crawler4j-0.4.3.dmg`、`appcast.xml` 并上传 macOS 更新目录） |
-| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；本轮 0.4.15 VirtualBrowser 来源代理解析修复、环境列表和版本服务定向回归 `51 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
+| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；本轮 0.4.15 VirtualBrowser 来源代理解析修复、环境列表和版本服务定向回归 `53 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
 | Docs markdown tree | 历史通过（`docs-stratego source validate --repo-path .`）；本轮未重跑 |
 
 ## 4. 当前不建议直接发布的原因

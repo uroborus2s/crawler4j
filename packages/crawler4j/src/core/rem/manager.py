@@ -136,8 +136,8 @@ class SourceProxySyncResult:
         return sum(1 for item in self.items if item.eligible and item.action == "bind_ip_entry")
 
     @property
-    def static_only_count(self) -> int:
-        return sum(1 for item in self.items if item.eligible and item.action == "save_static_proxy")
+    def cleared_count(self) -> int:
+        return sum(1 for item in self.items if item.eligible and item.action == "clear_ip_binding")
 
     @property
     def skipped_count(self) -> int:
@@ -417,8 +417,8 @@ class EnvironmentManager:
         env.external_id = str(info.external_id or "")
         env.status = EnvStatus.READY
         env.name = env.name or source_name
-        if env.proxy_config is not None:
-            self._attach_matching_ip_entry(env.proxy_config)
+        if env.proxy_config is not None and not self._attach_matching_ip_entry(env.proxy_config):
+            env.proxy_config = None
 
         await self.pool.add(env)
         return env
@@ -478,7 +478,12 @@ class EnvironmentManager:
             if item.action == "bind_ip_entry":
                 next_proxy.ip_entry_id = item.ip_entry_id
                 next_proxy.pool_id = item.pool_id
-            env.proxy_config = next_proxy
+                env.proxy_config = next_proxy
+            elif item.action == "clear_ip_binding":
+                env.proxy_config = None
+            else:
+                applied_items.append(item)
+                continue
             await self.pool.add(env)
             applied_items.append(item)
 
@@ -540,28 +545,33 @@ class EnvironmentManager:
                 pool_id=str(entry.pool_id or ""),
             )
 
-        if self._local_static_proxy_already_synced(env.proxy_config, source_proxy):
-            return SourceProxySyncItem(**base_item, action="skip", reason="本地静态代理已同步")
+        if env.proxy_config is not None:
+            return SourceProxySyncItem(
+                **base_item,
+                action="clear_ip_binding",
+                reason="来源代理未命中 IP 表，清除本地代理绑定",
+                eligible=True,
+            )
 
         return SourceProxySyncItem(
             **base_item,
-            action="save_static_proxy",
-            reason="来源代理未命中 IP 表，将仅保存静态代理",
-            eligible=True,
+            action="skip",
+            reason="来源代理未命中 IP 表，未建立绑定",
         )
 
     @staticmethod
     def _copy_proxy_config(proxy_config: ProxyConfig) -> ProxyConfig:
         return ProxyConfig.from_dict(proxy_config.to_dict())
 
-    def _attach_matching_ip_entry(self, proxy_config: ProxyConfig) -> None:
+    def _attach_matching_ip_entry(self, proxy_config: ProxyConfig) -> bool:
         entry, duplicate_count = self._find_unique_ip_entry_for_proxy(proxy_config)
         if entry is None:
             if duplicate_count > 1:
                 logger.warning(f"[REM] 来源代理匹配到多个 IP 条目，跳过自动绑定: proxy={proxy_config.current_ip}")
-            return
+            return False
         proxy_config.pool_id = str(entry.pool_id or "")
         proxy_config.ip_entry_id = str(entry.id or "")
+        return True
 
     def _find_unique_ip_entry_for_proxy(self, proxy_config: ProxyConfig) -> tuple[IPEntry | None, int]:
         parts = self._proxy_parts(proxy_config)

@@ -97,7 +97,7 @@
     "rem_source_proxy_sync_tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_rem/test_import_existing_env.py packages/crawler4j/tests/unit/test_core/test_rem/test_provider.py packages/crawler4j/tests/unit/test_core/test_rem/test_env_list_widget.py packages/crawler4j/tests/unit/test_core/test_system/test_version_service.py -q",
       "result": "passed",
-      "details": "51 passed on 2026-06-16 covering imported fingerprint-browser source proxy parsing, VirtualBrowser local-forward URL repair, source proxy to IP table unique binding, environment list source proxy sync preview/action, and root 0.4.15 version service"
+      "details": "53 passed on 2026-06-16 covering imported fingerprint-browser source proxy parsing, VirtualBrowser local-forward URL repair, source proxy to IP table unique binding, unmatched source proxy skip/clear behavior, environment list bound IP display limited to ip_entry_id bindings, and root 0.4.15 version service"
     }
   },
   "versions": {

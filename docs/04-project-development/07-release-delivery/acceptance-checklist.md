@@ -17,7 +17,7 @@
 
 | 类别 | 检查项 | 证据 | 当前基线状态 |
 |---|---|---|---|
-| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 已具备（当前根应用源码线为 `0.4.15`，最近正式 tag 仍为 `v0.2.0`；本轮 VirtualBrowser 来源代理解析修复 / 环境列表 / 版本服务定向回归 `51 passed`） |
+| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 已具备（当前根应用源码线为 `0.4.15`，最近正式 tag 仍为 `v0.2.0`；本轮 VirtualBrowser 来源代理解析修复 / 环境列表 / 版本服务定向回归 `53 passed`） |
 | 版本 | 当前工作区版本、最近正式 tag、SDK/Contracts 版本口径清楚 | `release-notes.md` | 已具备 |
 | 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备（2026-05-18 复验为 `992 passed`） |
 | 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备（2026-05-18 复验通过） |
