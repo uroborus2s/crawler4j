@@ -161,6 +161,7 @@ class ProviderEnvInfo:
     external_id: str
     name: str
     proxy_summary: str = ""
+    proxy_config: ProxyConfig | None = None
     remark: str = ""
     is_running: bool = False
     running_status: str = ""

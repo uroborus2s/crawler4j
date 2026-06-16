@@ -492,6 +492,154 @@ class CleanupPreviewDialog(QDialog):
         return labels.get(provider, provider or "-")
 
 
+class SourceProxySyncPreviewDialog(QDialog):
+    """来源代理同步确认弹窗。"""
+
+    TABLE_SCHEMA = {
+        "columns": [
+            {"key": "__index__", "label": "#", "type": "int", "width": 56, "align": "center"},
+            {"key": "env_id", "label": "环境ID", "type": "int", "width": 84, "align": "center", "sortable": True},
+            {"key": "env_name", "label": "环境名", "type": "text", "width": 180, "sortable": True},
+            {"key": "provider", "label": "Provider", "type": "text", "width": 130},
+            {"key": "source_proxy", "label": "来源代理", "type": "text", "width": 240, "searchable": True},
+            {"key": "action", "label": "动作", "type": "text", "width": 120, "searchable": True},
+            {"key": "reason", "label": "说明", "type": "text", "stretch": True, "searchable": True},
+        ],
+        "row_height": 72,
+        "selection_mode": "none",
+        "features": {
+            "search": {"enabled": True, "placeholder": "搜索环境、来源代理或动作…"},
+            "sort": {"enabled": True, "default": [{"field": "env_id", "direction": "asc"}]},
+            "pagination": {"enabled": True, "page_size": 10, "page_size_options": [10, 20, 50]},
+            "loading": {"inline": False, "disable_interaction": False},
+        },
+    }
+
+    ACTION_LABELS = {
+        "bind_ip_entry": "绑定 IP 条目",
+        "save_static_proxy": "保存静态代理",
+        "skip": "跳过",
+    }
+
+    def __init__(self, plan: Any, parent=None) -> None:
+        super().__init__(parent)
+        self._plan = plan
+        self.setWindowTitle("确认同步来源代理")
+        self.setModal(True)
+        self.setMinimumSize(1100, 560)
+        configure_titled_dialog(self)
+        self.setStyleSheet(self._build_stylesheet())
+        self._setup_ui()
+
+    @staticmethod
+    def _build_stylesheet() -> str:
+        return """
+            QDialog {
+                background-color: #1e1e2e;
+            }
+            QLabel {
+                background-color: transparent;
+            }
+            QLabel#sourceProxySyncTitle {
+                color: #f7f7fb;
+                font-size: 18px;
+                font-weight: 800;
+            }
+            QLabel#sourceProxySyncSummary {
+                color: rgba(255, 255, 255, 0.78);
+                font-size: 14px;
+                line-height: 1.45;
+            }
+            QLabel#sourceProxySyncHint {
+                color: rgba(255, 255, 255, 0.56);
+                font-size: 12px;
+                line-height: 1.5;
+            }
+        """
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        title_label = QLabel("确认同步来源代理")
+        title_label.setObjectName("sourceProxySyncTitle")
+        layout.addWidget(title_label)
+
+        summary_label = QLabel(self._build_summary_text())
+        summary_label.setObjectName("sourceProxySyncSummary")
+        summary_label.setWordWrap(True)
+        layout.addWidget(summary_label)
+
+        hint_label = QLabel("只会更新本地环境记录，不会修改外部指纹浏览器的代理配置。")
+        hint_label.setObjectName("sourceProxySyncHint")
+        hint_label.setWordWrap(True)
+        layout.addWidget(hint_label)
+
+        self.preview_table = SkyDataTable(schema=self.TABLE_SCHEMA)
+        self.preview_table.set_query(
+            {
+                "search_text": "",
+                "sort": [{"field": "env_id", "direction": "asc"}],
+                "page": 1,
+                "page_size": 10,
+                "params": {},
+            }
+        )
+        rows = self._build_rows()
+        result = resolve_local_data_table_result(
+            rows,
+            columns=list(self.TABLE_SCHEMA["columns"]),
+            query=dict(self.preview_table._query),
+        )
+        self.preview_table.apply_result(0, result)
+        self.preview_table.table.resizeRowsToContents()
+        layout.addWidget(self.preview_table)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(12)
+        buttons.addStretch()
+
+        cancel_btn = StyledButton("取消", variant="secondary", min_height=40, min_width=96, horizontal_padding=20)
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(cancel_btn)
+
+        confirm_btn = StyledButton("同步", variant="success", min_height=40, min_width=96, horizontal_padding=20)
+        confirm_btn.clicked.connect(self.accept)
+        buttons.addWidget(confirm_btn)
+        layout.addLayout(buttons)
+
+    def _build_summary_text(self) -> str:
+        items = list(getattr(self._plan, "items", []) or [])
+        actionable = int(getattr(self._plan, "actionable_count", 0) or 0)
+        skipped = max(0, len(items) - actionable)
+        errors = len(getattr(self._plan, "errors", []) or [])
+        summary = f"将同步 {actionable} 个环境，跳过 {skipped} 个环境。"
+        if errors:
+            summary = f"{summary} 扫描失败 {errors} 个。"
+        return summary
+
+    def _build_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for index, item in enumerate(getattr(self._plan, "items", []) or [], start=1):
+            action = str(getattr(item, "action", "") or "skip")
+            rows.append(
+                {
+                    "__index__": index,
+                    "env_id": int(getattr(item, "env_id", 0) or 0),
+                    "env_name": str(getattr(item, "env_name", "") or "-"),
+                    "provider": str(getattr(item, "provider", "") or "-"),
+                    "source_proxy": str(getattr(item, "source_proxy_url", "") or "-"),
+                    "action": {
+                        "text": self.ACTION_LABELS.get(action, action),
+                        "tone": "info" if bool(getattr(item, "eligible", False)) else "neutral",
+                    },
+                    "reason": str(getattr(item, "reason", "") or "-"),
+                }
+            )
+        return rows
+
+
 class DataLoaderThread(QThread):
     """数据加载线程。"""
     
@@ -783,6 +931,10 @@ class EnvListWidget(QWidget):
         self.import_existing_btn.clicked.connect(self._import_existing_env)
         header.addWidget(self.import_existing_btn)
 
+        self.sync_proxy_btn = StyledButton("同步来源代理", variant="primary", min_height=36)
+        self.sync_proxy_btn.clicked.connect(self._sync_source_proxies)
+        header.addWidget(self.sync_proxy_btn)
+
         self.cleanup_btn = StyledButton("清理环境", variant="danger", min_height=36)
         self.cleanup_btn.clicked.connect(self._cleanup_envs)
         header.addWidget(self.cleanup_btn)
@@ -1019,10 +1171,15 @@ class EnvListWidget(QWidget):
         )
         return await self._exec_dialog_async(dialog) == int(QDialog.DialogCode.Accepted)
 
+    async def _confirm_source_proxy_sync_plan_async(self, plan: Any) -> bool:
+        dialog = SourceProxySyncPreviewDialog(plan, parent=self)
+        return await self._exec_dialog_async(dialog) == int(QDialog.DialogCode.Accepted)
+
     def _apply_busy_state(self):
         """同步按钮和表格的忙碌状态。"""
         self.create_btn.setEnabled(not self._operation_in_progress)
         self.import_existing_btn.setEnabled(not self._operation_in_progress)
+        self.sync_proxy_btn.setEnabled(not self._operation_in_progress)
         self.cleanup_btn.setEnabled(not self._operation_in_progress)
         self.refresh_btn.setEnabled(not self._load_in_progress and not self._operation_in_progress)
         self.table.set_loading(self._load_in_progress)
@@ -1127,6 +1284,28 @@ class EnvListWidget(QWidget):
         await self._show_message_async("批量清理", message, kind="info" if result.failed_count == 0 else "warning")
         self.load_data(run_gc=False, reload_from_db=True)
 
+    async def _async_sync_source_proxies(self, plan: Any):
+        try:
+            result = await self._manager.sync_source_proxies(plan)
+        except Exception as exc:
+            await self._show_operation_error(str(exc))
+            return
+
+        message = (
+            f"来源代理同步完成：更新 {result.updated_count} 个，"
+            f"绑定 IP 条目 {result.bound_count} 个，仅保存静态代理 {result.static_only_count} 个，"
+            f"跳过 {result.skipped_count} 个，失败 {result.failed_count} 个。"
+        )
+        if getattr(result, "errors", None):
+            details = "\n".join(f"- {error}" for error in list(result.errors)[:8])
+            message = f"{message}\n{details}"
+        await self._show_message_async(
+            "同步来源代理",
+            message,
+            kind="info" if result.failed_count == 0 else "warning",
+        )
+        self.load_data(run_gc=False, reload_from_db=True)
+
     async def _async_env_operation(self, env_id: str, action: str):
         operation = getattr(self._manager, f"{action}_env")
         try:
@@ -1167,6 +1346,10 @@ class EnvListWidget(QWidget):
         """清理宿主扫描出的孤岛、未认领和模块声明可清理环境。"""
         self._track_task(self._cleanup_envs_async())
 
+    def _sync_source_proxies(self):
+        """同步外部指纹浏览器来源代理到本地环境记录。"""
+        self._track_task(self._sync_source_proxies_async())
+
     async def _cleanup_envs_async(self) -> None:
         if not self._begin_operation("正在扫描可清理环境..."):
             return
@@ -1196,6 +1379,36 @@ class EnvListWidget(QWidget):
         self._schedule_operation(
             self._async_cleanup_envs(),
             message=self._operation_message("cleanup"),
+        )
+
+    async def _sync_source_proxies_async(self) -> None:
+        if not self._begin_operation(self._operation_message("sync_source_proxy_scan")):
+            return
+        try:
+            plan = await self._manager.preview_source_proxy_sync()
+        except Exception as exc:
+            self._end_operation()
+            await self._show_operation_error(str(exc))
+            return
+        self._end_operation()
+
+        if not getattr(plan, "items", None):
+            message = "暂无可同步的指纹浏览器环境。"
+            if getattr(plan, "errors", None):
+                message = f"{message}\n扫描失败：{len(plan.errors)} 个"
+            await self._show_message_async("同步来源代理", message, kind="warning")
+            return
+
+        if int(getattr(plan, "actionable_count", 0) or 0) <= 0:
+            await self._show_message_async("同步来源代理", "当前没有需要更新的来源代理。", kind="info")
+            return
+
+        if not await self._confirm_source_proxy_sync_plan_async(plan):
+            return
+
+        self._schedule_operation(
+            self._async_sync_source_proxies(plan),
+            message=self._operation_message("sync_source_proxy"),
         )
 
     async def _import_existing_env_async(self) -> None:
@@ -1400,6 +1613,8 @@ class EnvListWidget(QWidget):
             "import": "导入",
             "cleanup": "批量清理",
             "list_sources": "读取来源",
+            "sync_source_proxy": "同步来源代理",
+            "sync_source_proxy_scan": "扫描来源代理",
         }.get(action, "处理")
         env_text = f" {env_id}" if env_id else ""
         provider_label = {
@@ -1411,6 +1626,10 @@ class EnvListWidget(QWidget):
             return f"正在检查 {provider_label} API 并{action_text}环境{env_text}，最长约 30 秒..."
         if action == "list_sources":
             return "正在读取来源环境列表..."
+        if action == "sync_source_proxy_scan":
+            return "正在读取指纹浏览器来源代理..."
+        if action == "sync_source_proxy":
+            return "正在同步来源代理到本地环境记录..."
         return f"正在{action_text}环境{env_text}..."
 
     def _show_loading(self, show: bool, message: str = ""):

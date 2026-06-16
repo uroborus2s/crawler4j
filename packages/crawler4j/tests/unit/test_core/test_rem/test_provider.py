@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from src.core.rem.handle import BrowserHandle
-from src.core.rem.models import Environment, EnvKind, EnvStatus
+from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo, ProxyConfig, ProxyMode
 from src.core.rem.provider import (
     VirtualBrowserProvider,
     get_provider,
@@ -354,6 +354,62 @@ async def test_virtualbrowser_destroy_uses_external_id_when_handle_missing(monke
     assert env.handle.browser_id == "101"
     client.delete_browser.assert_awaited_once_with(101)
     assert sorted(existing_ids) == []
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_list_existing_envs_preserves_source_proxy_config(monkeypatch):
+    provider = VirtualBrowserProvider()
+    client = SimpleNamespace(
+        list_browsers=AsyncMock(
+            return_value=[
+                {
+                    "id": 101,
+                    "name": "vb-imported",
+                    "proxy": {
+                        "mode": 2,
+                        "protocol": "SOCKS5",
+                        "host": "10.0.0.8",
+                        "port": "1080",
+                        "user": "alice",
+                        "pass": "secret",
+                    },
+                }
+            ]
+        ),
+        get_browser_full_parameters=AsyncMock(return_value=[]),
+        list_running_browsers=AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    items = await provider.list_existing_envs()
+
+    assert len(items) == 1
+    assert items[0].proxy_summary == "socks5 10.0.0.8:1080"
+    assert items[0].proxy_config is not None
+    assert items[0].proxy_config.static_value == "socks5://alice:secret@10.0.0.8:1080"
+    assert items[0].proxy_config.current_ip == "10.0.0.8"
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_build_imported_environment_keeps_source_proxy_config():
+    provider = VirtualBrowserProvider()
+    source_proxy = ProxyConfig(
+        mode=ProxyMode.STATIC,
+        static_value="socks5://alice:secret@10.0.0.8:1080",
+        current_ip="10.0.0.8",
+    )
+
+    env = await provider.build_imported_environment(
+        ProviderEnvInfo(
+            provider="virtualbrowser",
+            provider_label="Virtual Browser",
+            external_id="101",
+            name="vb-imported",
+            proxy_config=source_proxy,
+        )
+    )
+
+    assert env.proxy_config is source_proxy
 
 
 @pytest.mark.asyncio

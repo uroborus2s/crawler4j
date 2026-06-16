@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
 **关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `API-008`, `API-009`, `API-010`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `NFR-003`
-**最后更新：** 2026-05-30
+**最后更新：** 2026-06-16
 
 ## 1. 测试目标
 
@@ -35,6 +35,7 @@
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | 2026-05-01 headless UI smoke 复验通过，覆盖 Shell 导航/页面数量与 Dashboard 异步刷新 |
 | `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
+| `TC-0440` REM 来源代理同步与 IP 表绑定 | 通过 | 2026-06-16 新增覆盖：已导入指纹浏览器环境可回查来源代理；来源代理唯一命中 IP 表条目时写回 `pool_id/ip_entry_id`，未命中时保存静态代理；环境列表“同步来源代理”按钮提供预览确认。本轮定向回归 `49 passed`，目标文件 `ruff check` 通过 |
 | `TC-059` 开发模块忽略目录 symlink 回归 | 通过 | 2026-05-30 新增定向覆盖：DevLink/源码预检的 manifest lock 校验会跳过 `.venv/` 内 symlink，非忽略目录 symlink 仍拒绝；SDK `_archive_members()` 会跳过 `.venv/` 内 symlink 且不打入 ZIP |
 | `TC-0400-release-review-final` 0.4.0 全面审查回归 | 通过 | 2026-05-01 复验：Full runtime surface 负向拒绝旧 Hosted UI 工具、空 workflow 自动解析、dispatcher env claim/binding 失败路径、UI smoke 与 PyInstaller spec 清理；全量 `886 passed`，打包配置 `62 passed` |
 | `TC-010` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py -q` | 通过 | 2026-04-20 口径已收敛到当前仍存在的正式回归文件，覆盖 `declare_ui` 刷新、`create_handler` / `update_handler` 路由、DevLink 页面上下文与真实模块 UI 链路 |
@@ -126,6 +127,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-16 | 新增 REM 来源代理同步与 IP 表绑定回归：`test_import_existing_env.py` 锁定导入时保存来源代理并自动唯一匹配 IP 条目；`test_provider.py` 锁定 VirtualBrowser 来源环境列表保留代理配置；`test_env_list_widget.py` 锁定环境列表“同步来源代理”预览确认与刷新链路；组合回归 `49 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-06-06 | 补充指纹浏览器生命周期并发串行化回归：`test_provider.py` / `test_bitbrowser_provider.py` 新增并发 `close()` / `destroy()` / `reset()` 用例，锁定同一 provider 的外部管理 API 不会并发冲击本地服务，并覆盖 handle 缺失但 `external_id` 存在时仍删除真实外部环境；provider / client / manager 入口组合回归为 `53 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-06-06 | 补充 VirtualBrowser 并发启动串行化回归：`test_provider.py` 新增并发 `open()` 用例，锁定同一 `VirtualBrowserProvider` 在多个环境同时启动时不会并发调用 `launchBrowser`；组合回归 `test_provider.py` + `test_virtualbrowser_client.py` 为 `25 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-05-18 | 发布候选提升到 `0.4.1` 后完成 fresh gate：`uv lock --check`、全量 `991 passed`、`ruff check .`、三包 `uv run build`、SDK/Contracts PyPI publish 与 macOS Sparkle 客户端升级包发布均通过；正式发布仍缺 `ctrip` 真站 E2E、Windows 真机证据与 Git tag / GitHub release 资产 | Codex |
