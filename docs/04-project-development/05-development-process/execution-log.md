@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-18 | 将根应用 / 运行时版本提升到 `0.4.16`，修复来源代理同步匹配规则：来源代理回查仍优先采用真实结构化 `host/port`，但绑定 IP 表时只要求 `host + port` 唯一命中，不再比较协议、用户名或密码。定向回归 `54 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式客户端包、tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-16 | 将根应用 / 运行时版本提升到 `0.4.15`，修复 VirtualBrowser 来源代理解析优先级并收紧绑定语义：来源代理同步优先采用真实结构化代理，只有唯一命中 IP 表条目时才写入 `pool_id/ip_entry_id` 绑定；未命中 IP 表时跳过或清除本地错误绑定，不再把本地转发地址或非 IP 表代理保存为绑定 IP。定向回归 `53 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式客户端包、tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-16 | 将根应用 / 运行时版本提升到 `0.4.14`，并补齐已导入指纹浏览器环境的来源代理同步：Provider 来源列表保留代理配置，导入链路自动匹配 IP 表唯一条目，环境管理页新增“同步来源代理”预览确认入口，用于批量修复历史已导入环境的本地代理绑定。定向回归 `49 passed`，目标 `ruff check` 通过；正式客户端包、tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-13 | 将根应用 / 运行时版本提升到 `0.4.12`，用于 Hosted UI DataTable 行按钮显式 params 分发和任务暂停后绑定业务行 `run_status` 释放修复；SDK / Contracts 继续保持 `0.4.1`。本轮只修改客户端版本事实源，正式安装包与更新包仍需后续构建补齐 | Codex |
