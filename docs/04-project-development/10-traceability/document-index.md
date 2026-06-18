@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-06-18：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.16`，用于修复来源代理同步匹配规则：只按 `host + port` 唯一命中 IP 表，不再比较协议、用户名或密码；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、用户指南、测试计划、发布文档与 `.factory/memory/` 已同步到同一口径。
 - 2026-06-16：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.15`，用于修复 VirtualBrowser 来源代理解析优先级，避免把 `proxy.url` 中的 `127.0.0.1:本地端口` 转发地址保存为绑定 IP；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、用户指南、测试计划、发布文档与 `.factory/memory/` 已同步到同一口径。
 - 2026-06-16：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.14`，用于发布已导入指纹浏览器环境的来源代理同步、IP 表唯一匹配绑定和环境管理页批量同步入口；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、用户指南、测试计划、发布文档与 `.factory/memory/` 已同步到同一口径。
 - 2026-06-15：根应用 / 运行时版本事实源保持 `crawler4j 0.4.13`，SDK / Contracts 提升到 `0.4.2`，用于发布已有环境导入 workflow 场景契约、`env.get_proxy` 当前代理读取、多环境导入批次元数据和环境列表绑定 IP 展示；`packages/*/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径。

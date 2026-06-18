@@ -26,8 +26,8 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.4.15` | 当前仓库 HEAD 已切到 0.4.15 版本，用于修复 VirtualBrowser 来源代理解析优先级，避免本地转发 URL 被保存为绑定 IP |
-| 根应用运行时版本 | `0.4.15` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.4.16` | 当前仓库 HEAD 已切到 0.4.16 版本，用于修复来源代理同步匹配规则，只按 `host + port` 唯一命中 IP 表 |
+| 根应用运行时版本 | `0.4.16` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
 | SDK | `0.4.2` | 当前工作区 SDK 版本；包含导入 workflow 场景脚手架与扫描契约，并已按 0.4.2 发布到 PyPI |
 | Contracts | `0.4.2` | 当前工作区 Contracts 版本；包含 `@workflow(host_scenarios=...)` 契约，并已按 0.4.2 发布到 PyPI |
@@ -36,19 +36,19 @@
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前根应用已经切到 `0.4.15`，但 Git tag 仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为 `0.4.15` 已正式打 tag 并发布。
+- 当前根应用已经切到 `0.4.16`，但 Git tag 仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为 `0.4.16` 已正式打 tag 并发布。
 - 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.15`
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.16`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.4.15` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.4.16` Git tag 与正式 release 资产
 7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
@@ -79,3 +79,4 @@
 | 2026-06-15 | 将 SDK / Contracts 提升到 `0.4.2` 并发布到 PyPI，用于发布已有环境导入 workflow 场景契约与 SDK CLI 脚手架；根应用 / 运行时保持 `0.4.13` 并补充环境列表绑定 IP 展示 | Codex |
 | 2026-06-16 | 仅将根应用 / 运行时版本提升到 `0.4.14`，用于承接已导入指纹浏览器环境的来源代理同步、IP 表唯一匹配绑定和环境管理页批量同步入口；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-06-16 | 仅将根应用 / 运行时版本提升到 `0.4.15`，用于修复 VirtualBrowser 来源代理解析优先级，来源代理同步优先使用结构化代理地址而不是 `proxy.url` 中的本地转发 URL；SDK / Contracts 继续保持 `0.4.2` | Codex |
+| 2026-06-18 | 仅将根应用 / 运行时版本提升到 `0.4.16`，用于修复来源代理同步匹配规则，绑定 IP 表时只按 `host + port` 唯一命中，不再比较协议、用户名或密码；SDK / Contracts 继续保持 `0.4.2` | Codex |
