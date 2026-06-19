@@ -4,8 +4,8 @@
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
-**关联 ID：** `API-005`, `API-006`, `API-008`, `API-009`, `API-010`
-**最后更新：** 2026-04-30
+**关联 ID：** `API-005`, `API-006`, `API-008`, `API-009`, `API-010`, `API-019`
+**最后更新：** 2026-06-19
 
 ## 1. 设计目标
 
@@ -30,6 +30,7 @@
 | 单次运行内共享内存 | `ctx.state` | `ctx.state[...]` | 允许 | 只在当前一次任务 / 工作流执行期间有效 |
 | 页面 schema | `pages/*.py` / `pages/<group>/*.py` 中的 `@page(...)` 与页面 handler | 宿主通过 v2 runtime descriptor 读取 | 禁止在运行时代码里动态声明 | 宿主管理页面 schema；模块只声明 Hosted UI 页面，不再声明独立数据表页；正式 Hosted UI 刷新链路不再依赖 `data.db.module_pages` |
 | UI 操作 | `pages/*.py` / `pages/<group>/*.py` 中的 `@ui_action(...)` | 宿主通过 v2 runtime descriptor 读取 | 不执行浏览器自动化，不调用 `ctx.run_page_action(...)` | Hosted UI 按钮、CRUD、刷新、导出等用户命令入口；可通过 `ctx.db` 读写模块数据 |
+| Hosted UI 导入 payload | 宿主导入弹窗解析 Excel/CSV/剪贴板后生成 | `@ui_action(import_payload=...)` 或 workflow `ctx.runtime["import_payload"]` | 模块可把 payload 校验后写入自己的 `@data_table` 暂存表 | 宿主只传结构化行数据，不传本地路径、文件句柄或原始二进制内容 |
 | 页面动作 | `tasks/*.py` 中的 `@page_action(...)` | workflow/component 通过 `ctx.run_page_action(...)` 调用 | 不作为 Hosted UI 用户入口，不嵌套调用另一个 `@page_action` | 浏览器页面自动化步骤；公共步骤应抽到 helper、browser adapter 或 use case |
 | 模块数据资源 | `@data_table` + `data.db.module_data_resources` + `data.db.module_datasets` / 模块自定义物理表 | `ctx.db.from_("resource_id")` | `ctx.db.into("resource_id").replace/upsert/update_where/delete_where(...)` 或 `ctx.db.batch().execute()` | `managed_dataset` 适合低频稳定快照，`custom_table` 适合并发更新、计算或明细表 |
 | 模块审计事件 | `data.db.module_audit_events` | `ctx.db.audit("dataset").query(...)` | `ctx.db.audit("dataset").append(...)` | append-only 历史事件，不进入 `module_datasets` |
@@ -201,6 +202,34 @@ proxy = await ctx.tools.call("env.get_proxy")
 - `query_handler` 是正式查询链路，负责把过滤、排序、分页路由到 `ctx.db` fluent API
 - `binding` / `rows` 只用于页面内静态或局部数据，不构成另一条宿主页注册链路
 - 表格交互由宿主统一处理，但数据查询和写回策略由模块自行决定
+
+### 5.4 Hosted UI 导入 payload
+
+批量导入是 Hosted UI 的宿主复合动作，不属于页面数据查询链路。宿主负责读取 `.xlsx/.csv`、剪贴板或可选手工输入，并生成 JSON-compatible import payload：
+
+```json
+{
+  "source_type": "file",
+  "source_name": "accounts.xlsx",
+  "target_type": "ctrip_account",
+  "rows": [
+    {
+      "source_row_no": 2,
+      "business_key": "13800000000",
+      "payload": {"phone": "13800000000"},
+      "raw_payload": {"手机号": "13800000000"}
+    }
+  ]
+}
+```
+
+分发规则：
+
+- `@ui_action` 提交时，宿主默认以 `import_payload` 参数传入；schema 可通过 `submit.payload_param` 指定参数名。
+- workflow 提交时，宿主通过 ATM 调度 workflow，并把 payload 写入 `ctx.runtime["import_payload"]`。
+- workflow 仍不声明 parameters；导入 payload 是宿主运行态元数据，不进入 `module.yaml`。
+- 模块不得读取本地文件，也不得依赖 `source_name` 反推出本地路径。
+- 模块应通过 `@data_table` + `ctx.db` 实现导入批次、明细暂存和后续业务表导入状态。
 
 ## 6. 模块数据与只读数据库视图契约
 

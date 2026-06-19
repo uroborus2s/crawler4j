@@ -4,8 +4,8 @@
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | Core 开发 | SDK 开发 | QA | 模块开发者  
-**关联 ID：** `API-002`, `API-008`  
-**最后更新：** 2026-05-08
+**关联 ID：** `API-002`, `API-008`, `API-019`
+**最后更新：** 2026-06-19
 
 ## 1. 结论
 
@@ -18,6 +18,7 @@
 - 页面 schema 只允许使用宿主提供的 `Page`、`Section`、`Text`、`Button`、`DataTable`
 - 页面数据全部由 `load_handler` 或 `DataTable.query_handler` 返回结构化对象
 - 页面业务按钮和 CRUD handler 通过 `@ui_action` 声明的函数执行，参数按 kwargs 绑定；CRUD 的主键参数名来自 `crud.primary_key`，SDK 扫描期校验 create/update/delete handler 的确定签名和输入类型注解
+- 页面级和 `DataTable` 工具栏可声明自定义按钮；批量导入这类宿主复合动作由 `API-019` 定义，宿主负责读取 Excel/CSV/剪贴板并只把结构化 payload 交给模块
 - `@page_action` 只服务 workflow/component 驱动的浏览器页面操作，Hosted UI schema 不接受 `page_action`
 - 宿主只负责 schema 校验、路由、渲染和通用交互，不再负责模块业务数据语义
 
@@ -164,6 +165,19 @@ def load_dashboard_page(
 - `open_page`
 
 `open_page` 的目标统一为 `page_id`，不再允许 `entry`。
+
+### 4.6 Toolbar 与批量导入入口
+
+页面和 `DataTable` 可声明 `toolbar.actions[]`，用于放置页面级或表格级自定义按钮。普通用户命令继续优先走 `@ui_action`；需要启动长耗时流程时，可由宿主调度 workflow；需要导入本地文件或剪贴板数据时，必须通过宿主导入弹窗。
+
+批量导入入口遵守以下边界：
+
+- 模块 schema 只声明按钮、`target_type` 和提交动作，不读取本地文件。
+- 宿主导入弹窗读取 `.xlsx/.csv`、剪贴板或可选手工输入，并转换为标准 import payload。
+- 宿主只把 `source_type/source_name/target_type/rows[]` 结构化数据交给模块，不传本地路径、文件句柄或二进制内容。
+- `@page_action` 不参与 Hosted UI 批量导入；浏览器页面动作仍只由 workflow/component 通过 `ctx.run_page_action(...)` 调用。
+
+详细协议见 [Hosted UI 批量导入方案](hosted-ui-batch-import-design.md)。
 
 ## 5. 责任边界
 
