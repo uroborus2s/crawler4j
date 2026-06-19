@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -135,6 +136,7 @@ class ModuleDetailPage(QWidget):
         layout.setSpacing(0)
         
         self.menu_list = QListWidget()
+        self.menu_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.menu_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.menu_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.menu_list.setStyleSheet("""
@@ -156,8 +158,7 @@ class ModuleDetailPage(QWidget):
         """)
         self.menu_list.currentRowChanged.connect(self._on_menu_changed)
         
-        layout.addWidget(self.menu_list)
-        layout.addStretch()
+        layout.addWidget(self.menu_list, 1)
         
         return sidebar
     
