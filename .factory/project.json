@@ -57,7 +57,7 @@
     "pyinstaller_bundle": {
       "command": "uv run deploy-macos-internal-release",
       "result": "passed",
-      "details": "macOS PyInstaller app, Crawler4j-0.4.3.dmg, and appcast.xml generated and uploaded through the configured Sparkle update target on 2026-05-26; 0.4.16 desktop bundle is not yet built"
+      "details": "macOS PyInstaller app, Crawler4j-0.4.16.dmg, and appcast.xml regenerated on 2026-06-19 after deleting the old remote 0.4.16 DMG; uploaded through the configured Sparkle update target, public DMG HEAD returned 200, SHA256 8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -117,7 +117,7 @@
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
-    "0.4.16 client changes need refreshed Windows/macOS package evidence before client rollout."
+    "0.4.16 Windows client package evidence remains open before cross-platform client rollout."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",

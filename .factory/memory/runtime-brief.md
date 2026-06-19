@@ -12,6 +12,7 @@
 - 开放风险：1
 - 当前源码版本基线：`crawler4j 0.4.16`、`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2`；最近正式 Git tag：`v0.2.0`
 - 当前 PyPI 发布状态：`crawler4j-contracts 0.4.0` 重发曾被 PyPI 拒绝，因为对应 wheel 文件名曾上传后删除且不可复用；SDK / Contracts 已提升到 `0.4.2`，并已按 `contracts -> sdk` 顺序发布到 PyPI；根应用提升到 `0.4.16`，用于修复来源代理同步匹配规则，绑定 IP 表时只按 `host + port` 唯一命中，不再比较协议、用户名或密码。
+- 当前 macOS 客户端下载版本：2026-06-19 已删除远端旧 `Crawler4j-0.4.16.dmg`，本地重新生成 `Crawler4j-0.4.16.dmg` / `appcast.xml` 并上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`；公网 DMG `HEAD 200`，`content-length=149018284`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243`。
 - 当前 0.4.x 边界：本分支只支持 Core 0.4.0 / `core-native-v2`，SDK 与 Contracts 已破坏性升级；0.3.x SDK / Contracts / 旧开发方式在 0.3.x 分支维护，不在当前分支兼容。
 - 当前 0.4.x SDK 初始化入口：新手优先使用 `uvx --from crawler4j-sdk crawler4j module init` 交互式输入模块名与 `owner/repo`，非必填项走默认值；脚本化/资深开发者仍可完整传参执行。
 - 当前 0.4.x 模块根目录固定入口：`module.yaml` 只放静态清单，`.crawler4j/manifest.lock.json` 是 SDK 生成扫描快照；`interfaces/` 放 `@interface`，`objects/` 放 `@component`，`workflows/` 放 `@workflow`，`tasks/` 放 `@page_action` 浏览器页面操作，`data/` 放 `@data_table/@data_view`，`pages/` 放 `@page` 与 `@ui_action` Hosted UI 用户操作，`candidates/` 放 `@env_candidates`，`cleanups/` 放 `@env_cleanup_candidates`。详细目录说明维护在 `docs/03-developer-guide/v0.4.0/module-structure.md`，DDD 与代码边界规则维护在 `docs/03-developer-guide/v0.4.0/architecture-rules.md`。
