@@ -6,8 +6,8 @@
 **主要读者：** 开发 | QA | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/02-discovery/input.md` | `docs/04-project-development/02-discovery/current-state-analysis.md` | `docs/04-project-development/01-governance/project-charter.md`  
 **下游输出：** `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/` | `docs/04-project-development/06-testing-verification/test-plan.md`  
-**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`
-**最后更新：** 2026-04-30
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`, `NFR-010`
+**最后更新：** 2026-06-19
 
 ## 1. 背景与目标
 
@@ -33,6 +33,7 @@
 | 模块关键流程可恢复 | 达成 | `TASK-003` 完成后复验 |
 | 模块根入口维护成本降低 | 达成 | 新脚手架生成的模块无需手工维护根 `__init__.py` |
 | 环境候选服务不再因候选容量不足形成假失败风暴 | 本地达成 | `REQ-009` 已完成候选纯函数、等待队列、FIFO 补位、模块环境授权与等待席位自动超时收口的本地回归 |
+| Hosted UI 批量导入入口一致且安全 | 本地达成 | `REQ-010` 已完成 toolbar 按钮、宿主导入弹窗、标准 payload、批次结果和敏感字段脱敏验证；真实业务模块 E2E 与发布证据仍待后续收口 |
 
 ## 2. 用户与场景
 
@@ -40,6 +41,7 @@
 |---|---|---|
 | 最终使用者 | 启动桌面应用并执行自动化任务 | 应用能启动，模块可运行 |
 | 模块开发者 | 使用 SDK CLI 创建和维护模块 | SDK/Contracts/CLI 可用、契约清晰、根入口不需要反复手改 |
+| 运营 / 现场支持 | 在 Hosted UI 中批量导入账号、Cookie 或其它业务数据 | 能用 Excel/CSV/剪贴板快速导入，并能看到批次结果和逐条失败原因 |
 | 维护者 | 构建、验证、发布项目 | 版本、入口、文档、工作项一致 |
 
 ## 3. 功能需求
@@ -180,6 +182,36 @@
 - 0.4.0 当前实现已切到 `candidates/` + `@env_candidates` 纯函数候选方案，资源池同步快照和宿主资源池工具已移除。
 - `UAT-028` 当前实现的错误文案为 `等待环境候选超时: <candidates> (<seconds>s)`，语义已从“环境选择返回 none”收敛为等待超时类错误。
 
+### `REQ-010` Hosted UI 必须支持宿主托管的批量导入能力
+
+- 优先级：P1
+- 描述：宿主必须为 Hosted UI 页面和表格提供可声明的自定义 toolbar 按钮，并提供宿主导入弹窗读取 Excel/CSV 文件、剪贴板文本和可选手工录入内容。模块只能接收宿主解析后的结构化 import payload，不直接读取本地文件。
+- 用户故事：作为运营或现场支持人员，我希望在模块 Hosted UI 的账号表、Cookie 表或其它业务表中直接批量导入数据，以便不用逐条手工录入，并能看到每个批次和每一行的成功 / 失败状态。
+- 前置条件：模块已通过 `@page(...)` 声明 Hosted UI 页面，并通过 `@ui_action` 或 workflow 实现导入处理逻辑；宿主已加载模块 v2 runtime descriptor。
+- 业务规则：
+  - 页面级和 `DataTable` 工具栏都可以声明自定义按钮。
+  - 工具栏按钮可以调用模块 `@ui_action`、调度 workflow，或打开宿主导入弹窗。
+  - 宿主导入弹窗必须支持 `.xlsx` / `.csv` 文件上传和剪贴板批量粘贴；手工 JSON / 表格行录入为可选增强。
+  - 宿主负责读取文件、解析表头和行数据、限制文件大小与最大行数、处理解析错误和日志脱敏。
+  - 模块不得接收本地文件路径、文件句柄或原始二进制内容。
+  - 宿主传给模块的 import payload 固定包含 `source_type`、`source_name`、`target_type` 和 `rows[]`，每行包含 `source_row_no`、`business_key`、`payload`、`raw_payload`。
+  - 模块返回批次汇总后，宿主必须展示 `batch_id`、总行数、成功写入暂存表行数和失败行数，并可跳转到 `import_data_records` 页面查看该批次。
+  - 从暂存表导入业务表的后续动作必须能展示逐条成功 / 失败状态。
+- 依赖项：`packages/crawler4j-contracts/src/crawler4j_contracts/hosted_ui.py`, `packages/crawler4j-sdk/src/v2_scanner.py`, `packages/crawler4j/src/core/mms/ui/managed_page_renderer.py`, `packages/crawler4j/src/core/mms/ui/module_ui_runtime.py`, `packages/crawler4j/src/ui/components/data_table.py`, `docs/04-project-development/04-design/hosted-ui-batch-import-design.md`
+- 排除范围：V1 不支持任意文件类型、不让模块读取本地文件、不实现通用业务去重规则、不强制宿主提供统一业务暂存物理表。
+
+验收标准：
+
+- [x] `UAT-029` 给定模块页面 schema 声明页面级 toolbar 导入按钮，当宿主渲染页面，则页面工具栏出现对应按钮并保留声明的 `target_type` 和提交动作。
+- [x] `UAT-030` 给定模块 `DataTable` 声明表格 toolbar 导入按钮，当宿主渲染表格，则表格工具栏出现对应按钮，并可按 schema 触发 `@ui_action`、workflow 或宿主导入弹窗。
+- [x] `UAT-031` 给定用户上传 `.xlsx` 或 `.csv` 文件，当文件类型、大小和行数都在限制内，则宿主解析为行数据；当超出限制或文件类型不允许，则提交前阻断并显示原因。
+- [x] `UAT-032` 给定用户从剪贴板粘贴批量表格文本，当文本可按表头和行解析，则宿主生成与文件导入一致的 import payload。
+- [x] `UAT-033` 给定宿主打开导入弹窗并完成解析，当用户提交，则模块收到只包含结构化 JSON-compatible 数据的 payload，不包含本地文件路径、文件句柄或原始二进制内容。
+- [x] `UAT-034` 给定 payload 行中包含手机号、邮箱、账号名等去重键，当 schema 或模块约定提供映射，则每行 `business_key` 可被填充并用于模块侧去重。
+- [x] `UAT-035` 给定模块返回 `batch_id/total_rows/staged_rows/failed_rows`，当宿主收到结果，则展示导入汇总并提供跳转 `import_data_records` 批次明细页的入口。
+- [x] `UAT-036` 给定用户在暂存批次页执行“从暂存表导入业务表”，当处理完成，则宿主页面可展示每条记录的成功、失败、跳过重复或校验失败状态。
+- [x] `UAT-037` 给定导入字段包含 `token/cookie/password/secret/authorization/credential/passwd` 等敏感名称，当宿主记录日志、错误摘要或任务消息，则对应值不得明文输出。
+
 ### `REQ-004` 项目必须具备可追溯的发布与文档链路
 
 - 优先级：P0
@@ -236,12 +268,19 @@
 - 约束：正式事实源必须落在 `docs/` 与 `.factory/`
 - 验证方式：阶段文档与 workitems 完整存在
 
+### `NFR-010` 批量导入安全与容量限制
+
+- 指标：默认单文件不超过 10 MB，默认单次不超过 5000 行；敏感字段在宿主日志中 100% 脱敏。
+- 约束：宿主只允许 `.xlsx` / `.csv` 文件导入；模块只能接收解析后的结构化 payload；不得把 token、cookie、密码类字段明文写入宿主日志。
+- 验证方式：导入弹窗限制单测、解析边界单测、日志脱敏单测、Hosted UI 分发回归。
+
 ## 5. 关键流程
 
 1. 维护者通过 `uv` 同步环境并运行测试、文档、build 验证
 2. Core 通过 UI 或模块服务加载模块并执行工作流
 3. 发布前通过版本、入口、文档与构建结果进行闭环校验
 4. 后续迭代通过 `BUG` / `CR` / `TASK` 驱动进入实现阶段
+5. Hosted UI 批量导入由宿主读取来源数据并生成 import payload，模块只处理结构化行数据和业务落库
 
 ## 6. 风险、假设与待确认问题
 
@@ -251,6 +290,7 @@
 - `ctrip` 真实站点完整业务 E2E 尚未回放
 - 现有 lint 失败表明代码与脚本质量边界没有稳定定义
 - 模块根入口切换为单一新模板后，旧模块升级需要一次性重初始化和业务文件迁移
+- 批量导入若缺少宿主统一限制和脱敏，可能把大文件、错误文件类型或 token/cookie/password 明文带入日志与运行链路
 
 ### 假设
 
@@ -258,6 +298,7 @@
 - 首批迭代优先处理发布入口、关键工作流和版本治理，而非新增业务功能
 - 模块级通用分发逻辑可以集中沉淀到 SDK，而不需要每个模块重复维护一份
 - 旧模块作者可以接受“按最新模板重新初始化”作为唯一升级路径
+- 模块作者可以接受“宿主读取文件、模块只收结构化 payload”的安全边界
 
 ### 待确认
 
@@ -273,3 +314,5 @@
 | v1.1 | 2026-03-31 | 新增 `REQ-006`，登记模块根入口自动托管的最小改造需求 |  |
 | v1.2 | 2026-04-16 | 新增 `REQ-007`，登记信号驱动的结构化确认面板与客户端确认闭环 | `CR-004` |
 | v1.3 | 2026-04-18 | 新增 `REQ-008`，登记模块快照数据与审计事件分层存储契约 | `CR-008` |
+| v1.4 | 2026-06-19 | 新增 `REQ-010` / `NFR-010`，登记 Hosted UI 宿主托管批量导入能力 | `CR-016` |
+| v1.5 | 2026-06-19 | 完成 `REQ-010` / `NFR-010` 本地实现与 `TC-060` 验证，Hosted UI 批量导入进入回归维护和真实业务模块接入阶段 | `CR-016` |

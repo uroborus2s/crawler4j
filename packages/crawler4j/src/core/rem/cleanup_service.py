@@ -204,7 +204,7 @@ class EnvCleanupService:
             try:
                 success = await self._environment_manager.destroy_env(fresh.env_id)
             except Exception as exc:
-                logger.warning("[REM] 批量清理环境失败: env_id=%s error=%s", fresh.env_id, exc)
+                logger.warning(f"[REM] 批量清理环境失败: env_id={fresh.env_id} error={exc}")
                 results.append(
                     self._execution_item_from_preview(
                         fresh,
@@ -328,7 +328,7 @@ class EnvCleanupService:
             try:
                 cache[module_name] = module_bound_env_ids(module_name, module_service=self._module_service)
             except Exception as exc:
-                logger.warning("[REM] 环境清理读取模块绑定表失败: module=%s error=%s", module_name, exc)
+                logger.warning(f"[REM] 环境清理读取模块绑定表失败: module={module_name} error={exc}")
                 cache[module_name] = set()
         return cache[module_name]
 

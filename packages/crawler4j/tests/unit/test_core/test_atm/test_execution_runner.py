@@ -63,6 +63,27 @@ def _build_request(
     )
 
 
+def test_execution_runner_hoists_hosted_import_payload_from_creation_params():
+    env, lease = _build_env()
+    runner, _rem = _build_runner(env, lease, SimpleNamespace())
+    request = _build_request()
+    import_payload = {
+        "source_type": "clipboard",
+        "source_name": "clipboard",
+        "target_type": "ctrip_account",
+        "rows": [],
+    }
+    request.creation_params = {
+        "groups": ["default"],
+        "import_payload": import_payload,
+    }
+
+    runtime = runner._build_runtime_payload(request)
+
+    assert runtime["creation_params"]["import_payload"] == import_payload
+    assert runtime["import_payload"] == import_payload
+
+
 def _build_runner(env: Environment, lease: EnvLease, module_service) -> tuple[ExecutionRunner, SimpleNamespace]:
     if not hasattr(module_service, "get_runtime_descriptor_v2"):
         module_service.get_runtime_descriptor_v2 = Mock(return_value=SimpleNamespace(data_tables={}))

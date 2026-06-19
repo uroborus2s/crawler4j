@@ -21,6 +21,7 @@ ALLOWED_INLINE_TABLE_SCHEMA_KEYS = {
     "row_action",
     "empty_text",
     "crud",
+    "toolbar",
 }
 ALLOWED_TABLE_COLUMN_KEYS = {
     "key",
@@ -48,7 +49,7 @@ ALLOWED_DATA_RESOURCE_KEYS = {
     "cleanup_policy",
 }
 ALLOWED_PAGE_LAYOUT_KEYS = {"direction", "kind", "columns", "gap"}
-ALLOWED_PAGE_SCHEMA_KEYS = {"type", "title", "load_handler", "children", "layout", "scroll"}
+ALLOWED_PAGE_SCHEMA_KEYS = {"type", "title", "load_handler", "children", "layout", "scroll", "toolbar"}
 ALLOWED_PAGE_SCROLL_KEYS = {"vertical"}
 ALLOWED_PAGE_SCROLL_VERTICAL_VALUES = {"auto", "hidden"}
 ALLOWED_SECTION_SCHEMA_KEYS = {"type", "title", "children", "variant", "layout"}
@@ -68,6 +69,21 @@ ALLOWED_BUTTON_SCHEMA_KEYS = {"type", "label", "icon", "aria_label", "size", "va
 ALLOWED_BUTTON_SIZES = {"md", "sm", "icon"}
 ALLOWED_BUTTON_VARIANTS = {"primary", "secondary", "ghost"}
 ALLOWED_BUTTON_ACTION_KEYS = {"type", "page_id", "name", "params"}
+ALLOWED_TOOLBAR_KEYS = {"actions"}
+ALLOWED_TOOLBAR_ACTION_KEYS = {"id", "label", "icon", "variant", "action", "tooltip"}
+ALLOWED_TOOLBAR_ACTION_TYPES = {"ui_action", "workflow", "open_import_dialog"}
+ALLOWED_IMPORT_SUBMIT_KEYS = {"type", "name", "payload_param"}
+ALLOWED_IMPORT_DIALOG_ACTION_KEYS = {
+    "type",
+    "target_type",
+    "source_types",
+    "business_key_field",
+    "field_mapping",
+    "limits",
+    "submit",
+}
+ALLOWED_IMPORT_DIALOG_LIMIT_KEYS = {"max_file_size_bytes", "max_rows"}
+ALLOWED_IMPORT_SOURCE_TYPES = {"file", "clipboard", "manual", "api"}
 ALLOWED_ACTION_PARAM_SPEC_KEYS = {"binding", "value"}
 ALLOWED_FEATURES_KEYS = {"search", "sort", "pagination"}
 ALLOWED_SEARCH_FEATURE_KEYS = {"enabled", "placeholder"}
@@ -144,8 +160,40 @@ class UiActionSchema(TypedDict):
     params: NotRequired[ActionParamsSchema]
 
 
+class WorkflowActionSchema(TypedDict):
+    type: Literal["workflow"]
+    name: str
+    params: NotRequired[ActionParamsSchema]
+
+
+class ImportDialogLimitsSchema(TypedDict, total=False):
+    max_file_size_bytes: int
+    max_rows: int
+
+
+class ImportDialogSubmitSchema(TypedDict, total=False):
+    type: Required[Literal["ui_action", "workflow"]]
+    name: Required[str]
+    payload_param: str
+
+
+class OpenImportDialogActionSchema(TypedDict, total=False):
+    type: Required[Literal["open_import_dialog"]]
+    target_type: Required[str]
+    source_types: Sequence[Literal["file", "clipboard", "manual", "api"]]
+    business_key_field: str
+    field_mapping: Mapping[str, str]
+    limits: ImportDialogLimitsSchema
+    submit: Required[ImportDialogSubmitSchema]
+
+
 ButtonActionSchema: TypeAlias = ReloadActionSchema | OpenPageActionSchema | UiActionSchema
 RowActionSchema: TypeAlias = OpenPageActionSchema
+ToolbarActionSchema: TypeAlias = UiActionSchema | WorkflowActionSchema | OpenImportDialogActionSchema
+
+
+class ToolbarSchema(TypedDict, total=False):
+    actions: Sequence[Mapping[str, Any]]
 
 
 class PageLayoutSchema(TypedDict, total=False):
@@ -311,6 +359,7 @@ class DataTableSchema(TypedDict, total=False):
     row_action: RowActionSchema
     empty_text: str
     crud: DataTableCrudSchema
+    toolbar: ToolbarSchema
 
 
 PageComponentSchema: TypeAlias = SectionSchema | CardSchema | TextSchema | ButtonSchema | DataTableSchema
@@ -323,6 +372,30 @@ class PageSchema(TypedDict, total=False):
     children: Sequence[PageComponentSchema]
     layout: PageLayoutSchema
     scroll: PageScrollSchema
+    toolbar: ToolbarSchema
+
+
+class HostedImportPayloadRow(TypedDict, total=False):
+    source_row_no: Required[int]
+    business_key: str
+    payload: Required[Mapping[str, Any]]
+    raw_payload: Required[Mapping[str, Any]]
+
+
+class HostedImportPayload(TypedDict):
+    source_type: Literal["file", "clipboard", "manual", "api"]
+    source_name: str
+    target_type: str
+    rows: Sequence[HostedImportPayloadRow]
+
+
+class HostedImportResult(TypedDict, total=False):
+    batch_id: str
+    total_rows: int
+    staged_rows: int
+    failed_rows: int
+    target_type: str
+    records_page_id: str
 
 
 @dataclass(frozen=True)
@@ -792,6 +865,181 @@ def _normalize_button_action(raw: Any, *, field_name: str) -> dict[str, Any]:
     return action
 
 
+def _normalize_import_source_types(raw: Any, *, field_name: str) -> list[str]:
+    if raw is None:
+        return ["file", "clipboard"]
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{field_name} 必须是非空数组")
+    source_types: list[str] = []
+    for index, item in enumerate(raw):
+        source_type = str(item or "").strip().lower()
+        if source_type not in ALLOWED_IMPORT_SOURCE_TYPES:
+            raise ValueError(f"{field_name}[{index}] 不受支持: {source_type}")
+        source_types.append(source_type)
+    return list(dict.fromkeys(source_types))
+
+
+def _normalize_import_dialog_limits(raw: Any, *, field_name: str) -> dict[str, int]:
+    limits = raw or {}
+    if not isinstance(limits, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+    unknown_keys = sorted(set(limits) - ALLOWED_IMPORT_DIALOG_LIMIT_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+
+    normalized: dict[str, int] = {}
+    if limits.get("max_file_size_bytes") is not None:
+        max_file_size_bytes = int(limits.get("max_file_size_bytes"))
+        if max_file_size_bytes < 1:
+            raise ValueError(f"{field_name}.max_file_size_bytes 必须 >= 1")
+        normalized["max_file_size_bytes"] = max_file_size_bytes
+    if limits.get("max_rows") is not None:
+        max_rows = int(limits.get("max_rows"))
+        if max_rows < 1:
+            raise ValueError(f"{field_name}.max_rows 必须 >= 1")
+        normalized["max_rows"] = max_rows
+    return normalized
+
+
+def _normalize_field_mapping(raw: Any, *, field_name: str) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+    normalized: dict[str, str] = {}
+    for source, target in raw.items():
+        source_name = str(source or "").strip()
+        target_name = _validate_managed_identifier(str(target or ""), field_name=f"{field_name}.{source_name}")
+        if not source_name:
+            raise ValueError(f"{field_name} 的来源列名不能为空")
+        normalized[source_name] = target_name
+    return normalized
+
+
+def _normalize_import_submit(raw: Any, *, field_name: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+    unknown_keys = sorted(set(raw) - ALLOWED_IMPORT_SUBMIT_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+    submit_type = str(raw.get("type") or "").strip().lower()
+    if submit_type not in {"ui_action", "workflow"}:
+        raise ValueError(f"{field_name}.type 只支持 ui_action/workflow")
+    normalized = {
+        "type": submit_type,
+        "name": _validate_managed_identifier(str(raw.get("name") or ""), field_name=f"{field_name}.name"),
+    }
+    if raw.get("payload_param") is not None:
+        normalized["payload_param"] = _validate_managed_identifier(
+            str(raw.get("payload_param") or ""),
+            field_name=f"{field_name}.payload_param",
+        )
+    return normalized
+
+
+def _normalize_toolbar_action_action(raw: Any, *, field_name: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+    action_type = str(raw.get("type") or "").strip().lower()
+    if action_type not in ALLOWED_TOOLBAR_ACTION_TYPES:
+        raise ValueError(f"{field_name}.type 只支持 ui_action/workflow/open_import_dialog")
+
+    if action_type == "ui_action":
+        unknown_keys = sorted(set(raw) - ALLOWED_BUTTON_ACTION_KEYS)
+        if unknown_keys:
+            raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+        return _normalize_button_action(raw, field_name=field_name)
+
+    if action_type == "workflow":
+        unknown_keys = sorted(set(raw) - ALLOWED_BUTTON_ACTION_KEYS)
+        if unknown_keys:
+            raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+        action = {
+            "type": "workflow",
+            "name": _validate_managed_identifier(str(raw.get("name") or ""), field_name=f"{field_name}.name"),
+        }
+        params = _normalize_action_params(raw.get("params"), field_name=f"{field_name}.params")
+        if params:
+            action["params"] = params
+        if raw.get("page_id") is not None:
+            raise ValueError(f"{field_name}.type=workflow 时不能再传 page_id")
+        return action
+
+    unknown_keys = sorted(set(raw) - ALLOWED_IMPORT_DIALOG_ACTION_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+    target_type = _validate_managed_identifier(str(raw.get("target_type") or ""), field_name=f"{field_name}.target_type")
+    action = {
+        "type": "open_import_dialog",
+        "target_type": target_type,
+        "source_types": _normalize_import_source_types(
+            raw.get("source_types"),
+            field_name=f"{field_name}.source_types",
+        ),
+        "submit": _normalize_import_submit(raw.get("submit"), field_name=f"{field_name}.submit"),
+    }
+    if raw.get("business_key_field") is not None:
+        action["business_key_field"] = _validate_managed_identifier(
+            str(raw.get("business_key_field") or ""),
+            field_name=f"{field_name}.business_key_field",
+        )
+    field_mapping = _normalize_field_mapping(raw.get("field_mapping"), field_name=f"{field_name}.field_mapping")
+    if field_mapping:
+        action["field_mapping"] = field_mapping
+    limits = _normalize_import_dialog_limits(raw.get("limits"), field_name=f"{field_name}.limits")
+    if limits:
+        action["limits"] = limits
+    return action
+
+
+def _normalize_toolbar(raw: Any, *, field_name: str) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+    unknown_keys = sorted(set(raw) - ALLOWED_TOOLBAR_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+    actions = raw.get("actions") or []
+    if not isinstance(actions, list):
+        raise ValueError(f"{field_name}.actions 必须是数组")
+
+    normalized_actions: list[dict[str, Any]] = []
+    for index, item in enumerate(actions):
+        if not isinstance(item, dict):
+            raise ValueError(f"{field_name}.actions[{index}] 必须是对象")
+        unknown_action_keys = sorted(set(item) - ALLOWED_TOOLBAR_ACTION_KEYS)
+        if unknown_action_keys:
+            raise ValueError(f"{field_name}.actions[{index}] 包含不支持的字段: {', '.join(unknown_action_keys)}")
+        action_id = _validate_managed_identifier(
+            str(item.get("id") or ""),
+            field_name=f"{field_name}.actions[{index}].id",
+        )
+        label = str(item.get("label") or action_id).strip()
+        if not label:
+            raise ValueError(f"{field_name}.actions[{index}].label 不能为空")
+        normalized_item: dict[str, Any] = {
+            "id": action_id,
+            "label": label,
+            "variant": "secondary",
+            "action": _normalize_toolbar_action_action(
+                item.get("action"),
+                field_name=f"{field_name}.actions[{index}].action",
+            ),
+        }
+        if item.get("icon") is not None:
+            normalized_item["icon"] = str(item.get("icon") or "").strip()
+        if item.get("variant") is not None:
+            variant = str(item.get("variant") or "").strip().lower()
+            if variant not in ALLOWED_BUTTON_VARIANTS:
+                raise ValueError(f"{field_name}.actions[{index}].variant 不受支持: {variant}")
+            normalized_item["variant"] = variant
+        if item.get("tooltip") is not None:
+            normalized_item["tooltip"] = str(item.get("tooltip") or "").strip()
+        normalized_actions.append(normalized_item)
+    return {"actions": normalized_actions}
+
+
 def _normalize_row_action(raw: Any, *, field_name: str) -> dict[str, Any]:
     action = _normalize_button_action(raw, field_name=field_name)
     if action.get("type") != "open_page":
@@ -1129,6 +1377,9 @@ def _normalize_inline_table_schema(raw: Any, *, field_name: str) -> dict[str, An
             raw.get("crud"),
             field_name=f"{field_name}.crud",
         )
+    toolbar = _normalize_toolbar(raw.get("toolbar"), field_name=f"{field_name}.toolbar")
+    if toolbar is not None:
+        normalized["toolbar"] = toolbar
     return normalized
 
 
@@ -1332,6 +1583,9 @@ def normalize_page_schema(page_id: str, schema: Any) -> dict[str, Any]:
     scroll = _normalize_page_scroll(schema.get("scroll"), field_name="scroll")
     if scroll:
         normalized["scroll"] = scroll
+    toolbar = _normalize_toolbar(schema.get("toolbar"), field_name="toolbar")
+    if toolbar is not None:
+        normalized["toolbar"] = toolbar
     return normalized
 
 
@@ -1361,7 +1615,13 @@ __all__ = [
     "HostedDataTableQuery",
     "HostedDataTableQueryResult",
     "HostedDataTableSortSpec",
+    "HostedImportPayload",
+    "HostedImportPayloadRow",
+    "HostedImportResult",
+    "ImportDialogLimitsSchema",
+    "ImportDialogSubmitSchema",
     "ManagedResourceDataSourceSchema",
+    "OpenImportDialogActionSchema",
     "OpenPageActionSchema",
     "PageComponentSchema",
     "PageLayoutSchema",
@@ -1374,7 +1634,10 @@ __all__ = [
     "RowsDataSourceSchema",
     "SectionSchema",
     "TextSchema",
+    "ToolbarActionSchema",
+    "ToolbarSchema",
     "UiActionSchema",
+    "WorkflowActionSchema",
     "normalize_data_resource",
     "normalize_db_view_schema",
     "normalize_page_schema",

@@ -18,6 +18,8 @@
   Constraint: module-authored history is now modeled as registered resources and accessed through `ctx.db`; old append/query event tools are no longer module developer interfaces.
 - `REQ-009`: Fixed-pool Service jobs must wait for eligible module pool capacity instead of failing immediately | Priority: P1 | Status: VERIFIED
   Constraint: host-owned waiting seats, FIFO refill, pool eligibility cards, and queued waiting-timeout closeout are implemented locally.
+- `REQ-010`: Hosted UI must support host-managed batch import | Priority: P1 | Status: DESIGNED
+  Constraint: page/table toolbar buttons may open a host import dialog or call module `@ui_action` / workflow; the host reads `.xlsx/.csv` files or clipboard text, enforces file/row limits and redacts sensitive fields, and modules only receive structured import payload rows.
 - `REQ-0400`: 0.4.0 module runtime must switch to decorator-first object assembly | Priority: P0 | Status: DESIGNED
   Constraint: workflow cannot own parameters; decorators are the runtime capability source of truth, object parameters belong to components, Core assembles one object graph per task/env, SDK/Contracts provide decorators, scanning, validation, migration, manifest lock, and opening-phase reserved host DB field diagnostics.
 - `REQ-0401`: User and developer guides must be versioned for docs-stratego | Priority: P0 | Status: DESIGNED

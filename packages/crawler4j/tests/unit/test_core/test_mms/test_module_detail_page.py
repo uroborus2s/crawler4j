@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.Qsci import QsciScintilla
-from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QScrollArea
+from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QScrollArea, QSizePolicy
 
 from src.core.mms.github_credentials import get_github_credential_store
 from src.core.mms.models import ModuleInfo, ModuleSource
@@ -211,6 +211,47 @@ def test_module_detail_page_hides_navigation_and_workflow_scrollbars(qtbot, tmp_
     assert scroll_area is not None
     assert scroll_area.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     assert scroll_area.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+
+def test_module_detail_page_menu_list_uses_full_sidebar_height(qtbot, tmp_path):
+    files = {}
+    for index in range(8):
+        page_id = f"extra_page_{index}"
+        files[f"pages/{page_id}.py"] = f"""
+        from crawler4j_contracts import page
+
+        @page(
+            name={page_id!r},
+            label={("页面" + str(index))!r},
+            icon="📄",
+            menu=True,
+            order={100 + index},
+            schema={{"type": "Page", "children": [{{"type": "Text", "binding": "title"}}]}},
+        )
+        def load_page(context, page_id, params=None):
+            del context, page_id, params
+            return {{"title": page_id}}
+        """
+    module = _make_module(tmp_path, files=files)
+    service, original_registry = _activate_runtime(module)
+    page = ModuleDetailPage()
+    qtbot.addWidget(page)
+
+    try:
+        page.set_module(module)
+
+        hosted_ids = [
+            page.menu_list.item(index).data(Qt.ItemDataRole.UserRole)
+            for index in range(page.menu_list.count())
+            if str(page.menu_list.item(index).data(Qt.ItemDataRole.UserRole)).startswith("extra_page_")
+        ]
+        assert hosted_ids == [f"extra_page_{index}" for index in range(8)]
+        assert page.menu_list.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+        sidebar_layout = page.menu_list.parentWidget().layout()
+        assert sidebar_layout is not None
+        assert sidebar_layout.stretch(sidebar_layout.indexOf(page.menu_list)) == 1
+    finally:
+        restore_module(service, original_registry, module.name)
 
 
 def test_module_detail_page_uses_public_header_and_repo_controls(qtbot, tmp_path):

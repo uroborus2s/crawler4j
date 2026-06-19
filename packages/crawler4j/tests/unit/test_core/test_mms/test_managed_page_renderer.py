@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import builtins
 from contextlib import ExitStack
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QSizePolicy
@@ -193,6 +193,217 @@ def test_managed_page_renderer_handles_ui_action_button(qtbot, tmp_path):
 
         action_module = importlib.import_module(f"{module_name}.pages.actions")
         assert action_module.CALLS == [{"account_id": "acct-001"}]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_managed_page_renderer_dispatches_table_toolbar_import_to_ui_action(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_table_toolbar_import_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import page, ui_action
+
+            CALLS = []
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "title": "账号管理",
+                            "data_source": {"type": "rows", "rows": []},
+                            "columns": [
+                                {"key": "phone", "label": "手机号"},
+                                {"key": "name", "label": "姓名"},
+                            ],
+                            "toolbar": {
+                                "actions": [
+                                    {
+                                        "id": "import_accounts",
+                                        "label": "导入账号",
+                                        "icon": "upload",
+                                        "action": {
+                                            "type": "open_import_dialog",
+                                            "target_type": "ctrip_account",
+                                            "business_key_field": "phone",
+                                            "submit": {"type": "ui_action", "name": "import_accounts"},
+                                        },
+                                    }
+                                ]
+                            },
+                        },
+                    ],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+
+
+            @ui_action(name="import_accounts")
+            async def import_accounts(context, import_payload: dict):
+                del context
+                CALLS.append(import_payload)
+                return {
+                    "batch_id": "imp-001",
+                    "total_rows": len(import_payload["rows"]),
+                    "staged_rows": 1,
+                    "failed_rows": 0,
+                    "target_type": "ctrip_account",
+                    "records_page_id": "import_data_records",
+                }
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    opened_pages: list[tuple[str, dict[str, object] | None]] = []
+    import_payload = {
+        "source_type": "clipboard",
+        "source_name": "clipboard",
+        "target_type": "ctrip_account",
+        "rows": [
+            {
+                "source_row_no": 2,
+                "business_key": "13800000000",
+                "payload": {"phone": "13800000000", "name": "Alice"},
+                "raw_payload": {"phone": "13800000000", "name": "Alice"},
+            }
+        ],
+    }
+
+    monkeypatch.setattr(
+        ManagedPageRenderer,
+        "_prompt_import_payload",
+        lambda self, action: import_payload,
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.managed_page_renderer.ChoiceDialog.choose",
+        lambda *_args, **_kwargs: "records",
+    )
+
+    try:
+        page = ManagedPageRenderer(
+            module_name,
+            "accounts",
+            module_info=module_info,
+            open_page_callback=lambda page_id, params=None: opened_pages.append((page_id, params)),
+        )
+        qtbot.addWidget(page)
+
+        import_button = next(button for button in page.findChildren(QPushButton) if "导入账号" in button.text())
+        import_button.click()
+
+        import importlib
+
+        actions_module = importlib.import_module(f"{module_name}.pages.accounts")
+        assert actions_module.CALLS == [import_payload]
+        assert opened_pages == [
+            (
+                "import_data_records",
+                {"batch_id": "imp-001", "target_type": "ctrip_account"},
+            )
+        ]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+@pytest.mark.asyncio
+async def test_managed_page_renderer_dispatches_import_payload_to_workflow_job(qtbot, tmp_path, monkeypatch):
+    module_name = "hosted_toolbar_workflow_import_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "workflows/import_accounts.py": """
+            from crawler4j_contracts import workflow
+
+            @workflow(name="import_accounts")
+            class ImportAccounts:
+                pass
+            """,
+            "pages/accounts.py": """
+            from crawler4j_contracts import page
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "toolbar": {
+                        "actions": [
+                            {
+                                "id": "import_accounts",
+                                "label": "后台导入",
+                                "action": {
+                                    "type": "open_import_dialog",
+                                    "target_type": "ctrip_account",
+                                    "submit": {"type": "workflow", "name": "import_accounts"},
+                                },
+                            }
+                        ]
+                    },
+                    "children": [],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    import_payload = {
+        "source_type": "clipboard",
+        "source_name": "clipboard",
+        "target_type": "ctrip_account",
+        "rows": [],
+    }
+    task_service = type(
+        "FakeTaskService",
+        (),
+        {
+            "create_job": AsyncMock(return_value="job-import"),
+            "start_job": AsyncMock(return_value=True),
+        },
+    )()
+    messages: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        ManagedPageRenderer,
+        "_prompt_import_payload_async",
+        AsyncMock(return_value=import_payload),
+    )
+    monkeypatch.setattr("src.core.mms.ui.managed_page_renderer.get_task_service", lambda: task_service)
+    monkeypatch.setattr(
+        "src.core.mms.ui.managed_page_renderer.MessageDialog.information_async",
+        AsyncMock(side_effect=lambda _parent, title, message, **_kwargs: messages.append((title, message)) or 0),
+    )
+
+    try:
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+        toolbar_action = page._schema["toolbar"]["actions"][0]
+
+        await page._handle_toolbar_action_async(toolbar_action)
+
+        task_service.create_job.assert_awaited_once()
+        kwargs = task_service.create_job.await_args.kwargs
+        assert kwargs["name"] == "Hosted UI 导入/hosted_toolbar_workflow_import_module/import_accounts"
+        run_profile = kwargs["run_profile"]
+        assert run_profile.execution.module == module_name
+        assert run_profile.execution.workflow == "import_accounts"
+        assert run_profile.resource.acquisition.creation.params["import_payload"] == import_payload
+        task_service.start_job.assert_awaited_once_with("job-import")
+        assert messages == [("后台导入已启动", "已创建并启动导入任务: job-import")]
     finally:
         restore_module(service, original_registry, module_name)
 

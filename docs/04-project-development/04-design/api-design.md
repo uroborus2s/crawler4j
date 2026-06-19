@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-0400`, `TASK-0401`
-**最后更新：** 2026-05-08
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `API-019`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `CR-016`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-0400`, `TASK-0401`
+**最后更新：** 2026-06-19
 
 ## `API-001` Root App Entry Contract
 
@@ -54,12 +54,33 @@
 | 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Button`、`DataTable` |
 | `Card` V1 范围 | 纯容器卡片；支持 `title`、`title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 与子组件布局 |
 | `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；`query_handler` 不接收 `table_id`，必须返回 `HostedDataTableQueryResult`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；`select` 列可由宿主渲染为工具栏快速筛选，sortable 列可通过表头点击或可见排序控件写入 `query.sort`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部；`actions` 列中非 `__crud_update__` / `__crud_delete__` 的 action id 由 renderer 调用同名 `@ui_action`，参数按 `crud.primary_key` 从当前行取值 |
-| 宿主动作范围 | `Button.action` 正式开放 `reload`、`open_page` 和指向 `@ui_action` 的 `ui_action`；Hosted UI schema 不再接受 `page_action` |
+| 宿主动作范围 | `Button.action` 正式开放 `reload`、`open_page` 和指向 `@ui_action` 的 `ui_action`；Hosted UI schema 不再接受 `page_action`。页面 / 表格 toolbar 批量导入动作由 `API-019` 单独定义 |
 | 明确删除 | `micro_app`、代码型页面脚手架、trust gate / allowlist / `trusted`、`entry`、`core:data_table`、`ui.declare_page`、`ui.declare_data_table`、`PageSpec` |
 | 设计输入 | `module-hosted-ui-framework.md` |
 | 当前验证基线 | Core / SDK / integration / acceptance 已跑通 `@page` 注解模式定向回归；模块详情页、CLI 和 schema gate 已统一到 `pages/` 页面注册 + `@page(menu=True)` 菜单配置的新契约 |
 | 当前状态 | 已本地实现并通过定向验证；真实业务模块接入验证待继续推进 |
 | 关联项 | `CR-011`, `TASK-025` |
+
+## `API-019` Hosted UI Batch Import Contract
+
+| 项目 | 内容 |
+|---|---|
+| 目标 | 为 Hosted UI 页面和表格提供宿主托管批量导入能力 |
+| schema 入口 | `Page.toolbar.actions[]` 与 `DataTable.toolbar.actions[]` |
+| 动作类型 | `ui_action`、`workflow`、`open_import_dialog` |
+| 导入来源 | 宿主导入弹窗支持 `.xlsx` / `.csv` 文件和剪贴板批量粘贴；手工 JSON / 表格行录入为可选增强 |
+| 宿主职责 | 读取本地文件或剪贴板、解析表头和行数据、预览、限制文件类型 / 大小 / 最大行数、生成 import payload、脱敏敏感字段日志、展示导入结果 |
+| 模块职责 | 接收结构化 payload，执行业务校验、去重、暂存、导入业务表和逐条状态记录 |
+| 文件边界 | 模块不得接收本地文件路径、文件句柄或原始二进制内容；宿主传递的 `source_name` 只允许是文件名或来源名称 |
+| Payload | `source_type`、`source_name`、`target_type`、`rows[]`；每行包含 `source_row_no`、`business_key`、`payload`、`raw_payload` |
+| `@ui_action` 分发 | 宿主把 import payload 作为 `import_payload` 参数传入模块 `@ui_action`；schema 可通过 `submit.payload_param` 改名 |
+| workflow 分发 | 宿主通过 ATM 调度 workflow，并把 payload 写入 `ctx.runtime["import_payload"]`；workflow 不声明 parameters，也不能在 renderer 内被直接调用 |
+| 结果契约 | 模块返回 `batch_id`、`total_rows`、`staged_rows`、`failed_rows`、`target_type`、可选 `records_page_id` |
+| 结果展示 | 宿主展示批次汇总，并可带 `batch_id/target_type` 跳转 `import_data_records` 页面 |
+| 安全限制 | 仅允许 `.xlsx/.csv`；默认单文件 10 MB、单次 5000 行；`token/cookie/password/secret/authorization/credential/passwd` 等字段不得写入宿主日志明文 |
+| 关联文档 | `hosted-ui-batch-import-design.md` |
+| 当前状态 | 已本地实现并通过 `TC-060`：Contracts / SDK / Core / UI / ATM 分发链路已落地；对外发布版本与真实业务模块 E2E 仍待后续补齐 |
+| 关联项 | `REQ-010`, `NFR-010`, `CR-016`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034` |
 
 ## `API-009` Module Entity Table View Contract
 
@@ -221,6 +242,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-19 | 将 `API-019` 更新为已本地实现，记录 Hosted UI toolbar 导入契约、宿主解析弹窗、payload 分发、结果展示和 `TC-060` 验证状态 | Codex |
+| 2026-06-19 | 新增 `API-019`，登记 Hosted UI 批量导入的 toolbar schema、宿主导入弹窗、标准 import payload、结果展示和敏感字段脱敏契约 | Codex |
 | 2026-05-01 | 收口环境处置为宿主边界：模块运行时代码不再导入或发送 `TaskSignal` / `EnvAction`，任务终态后环境统一回收，环境删除只由环境管理页清理链路执行，并通过 `host.env_claim` + `env_binding_field` 区分孤岛、未认领和模块业务清理候选 | Codex |
 | 2026-04-30 | 清理旧生命周期 hook 运行链，`RunProfile.execution.hooks_module`、`ModuleService.call_hook()` 与 `prepare_env/init_env/before_run/on_*` 不再属于 0.4.0 契约 | Codex |
 | 2026-04-30 | 新增 `API-016`，提供 `cleanups/` + `@env_cleanup_candidates` 批量环境清理候选契约，复用 `EnvCandidates` DSL 但隔离运行候选和删除语义 | Codex |

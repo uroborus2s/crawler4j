@@ -587,12 +587,6 @@ class EnvironmentManager:
                     continue
                 if int(getattr(entry, "port", 0) or 0) != port:
                     continue
-                if str(getattr(entry, "protocol", "") or "").strip().lower() != parts["protocol"]:
-                    continue
-                if str(getattr(entry, "username", "") or "").strip() != parts["username"]:
-                    continue
-                if str(getattr(entry, "password", "") or "").strip() != parts["password"]:
-                    continue
                 matches.append(entry)
 
         if len(matches) == 1:

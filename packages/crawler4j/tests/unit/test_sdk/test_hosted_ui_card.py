@@ -518,6 +518,116 @@ def test_normalize_page_schema_supports_ui_action_button():
     }
 
 
+def test_normalize_page_schema_supports_page_and_table_toolbar_import_actions():
+    schema = normalize_page_schema(
+        "accounts",
+        {
+            "type": "Page",
+            "load_handler": "load_accounts_page",
+            "toolbar": {
+                "actions": [
+                    {
+                        "id": "sync_accounts",
+                        "label": "同步账号",
+                        "icon": "refresh",
+                        "action": {
+                            "type": "workflow",
+                            "name": "sync_accounts",
+                            "params": {"source": {"value": "toolbar"}},
+                        },
+                    }
+                ]
+            },
+            "children": [
+                {
+                    "type": "DataTable",
+                    "table_id": "accounts",
+                    "columns": ["phone", "name"],
+                    "data_source": {"type": "rows", "rows": []},
+                    "toolbar": {
+                        "actions": [
+                            {
+                                "id": "import_accounts",
+                                "label": "导入账号",
+                                "icon": "upload",
+                                "variant": "primary",
+                                "action": {
+                                    "type": "open_import_dialog",
+                                    "target_type": "ctrip_account",
+                                    "source_types": ["file", "clipboard"],
+                                    "business_key_field": "phone",
+                                    "field_mapping": {"手机号": "phone", "姓名": "name"},
+                                    "limits": {"max_file_size_bytes": 1024, "max_rows": 200},
+                                    "submit": {
+                                        "type": "ui_action",
+                                        "name": "import_accounts",
+                                        "payload_param": "rows_payload",
+                                    },
+                                },
+                            }
+                        ]
+                    },
+                },
+            ],
+        },
+    )
+
+    assert schema["toolbar"]["actions"][0] == {
+        "id": "sync_accounts",
+        "label": "同步账号",
+        "icon": "refresh",
+        "variant": "secondary",
+        "action": {
+            "type": "workflow",
+            "name": "sync_accounts",
+            "params": {"source": {"value": "toolbar"}},
+        },
+    }
+    assert schema["children"][0]["toolbar"]["actions"][0] == {
+        "id": "import_accounts",
+        "label": "导入账号",
+        "icon": "upload",
+        "variant": "primary",
+        "action": {
+            "type": "open_import_dialog",
+            "target_type": "ctrip_account",
+            "source_types": ["file", "clipboard"],
+            "business_key_field": "phone",
+            "field_mapping": {"手机号": "phone", "姓名": "name"},
+            "limits": {"max_file_size_bytes": 1024, "max_rows": 200},
+            "submit": {
+                "type": "ui_action",
+                "name": "import_accounts",
+                "payload_param": "rows_payload",
+            },
+        },
+    }
+
+
+def test_normalize_page_schema_rejects_invalid_import_toolbar_action():
+    with pytest.raises(ValueError, match="target_type"):
+        normalize_page_schema(
+            "accounts",
+            {
+                "type": "Page",
+                "load_handler": "load_accounts_page",
+                "toolbar": {
+                    "actions": [
+                        {
+                            "id": "import_accounts",
+                            "label": "导入账号",
+                            "action": {
+                                "type": "open_import_dialog",
+                                "submit": {"type": "ui_action", "name": "import_accounts"},
+                            },
+                        }
+                    ]
+                },
+                "children": [],
+            },
+        )
+
+
 def test_page_schema_type_documents_crud_ui_action_fields():
     schema: PageSchema = {
         "type": "Page",

@@ -80,6 +80,98 @@ def create_account_from_ui(ctx: TaskContext, account_id: str):
 
 `@page_action` 内部不要再调用另一个 `@page_action` 拆公共步骤。公共页面动作应抽成普通函数、browser adapter 或 use case；多个可观测页面动作的顺序由 workflow/component 编排。
 
+## Toolbar 与批量导入
+
+页面和 `DataTable` 都可以声明 `toolbar.actions[]`。toolbar 普通动作可调用 `@ui_action`，长耗时动作可调度 workflow；需要读取本地文件或剪贴板时，必须使用宿主复合动作 `open_import_dialog`。模块代码不会拿到本地文件路径、文件句柄或二进制内容，只会收到宿主解析后的 JSON-compatible `import_payload`。
+
+页面级导入按钮：
+
+```python
+@page(
+    name="accounts",
+    label="账号管理",
+    schema={
+        "type": "Page",
+        "toolbar": {
+            "actions": [
+                {
+                    "id": "import_accounts",
+                    "label": "导入账号",
+                    "icon": "upload",
+                    "action": {
+                        "type": "open_import_dialog",
+                        "target_type": "ctrip_account",
+                        "business_key_field": "phone",
+                        "source_types": ["file", "clipboard", "manual"],
+                        "field_mapping": {"手机号": "phone", "姓名": "name"},
+                        "limits": {
+                            "max_file_size_bytes": 10485760,
+                            "max_rows": 5000,
+                        },
+                        "submit": {"type": "ui_action", "name": "import_accounts"},
+                    },
+                }
+            ]
+        },
+        "children": [],
+    },
+)
+def load_accounts_page(context: TaskContext, page_id: str, params: dict | None = None) -> dict:
+    del context, page_id, params
+    return {}
+```
+
+表格级 toolbar 写在 `DataTable` 组件上，动作语义相同：
+
+```python
+{
+    "type": "DataTable",
+    "table_id": "accounts",
+    "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+    "columns": [{"key": "phone", "label": "手机号"}],
+    "toolbar": {
+        "actions": [
+            {
+                "id": "import_accounts",
+                "label": "导入",
+                "action": {
+                    "type": "open_import_dialog",
+                    "target_type": "ctrip_account",
+                    "submit": {"type": "ui_action", "name": "import_accounts"},
+                },
+            }
+        ]
+    },
+}
+```
+
+`@ui_action` 默认必须接收 `import_payload` 参数；如 schema 写了 `submit.payload_param`，函数参数名也要一致：
+
+```python
+@ui_action(name="import_accounts")
+async def import_accounts(context: TaskContext, import_payload: dict):
+    rows = import_payload["rows"]
+    # 模块在这里做业务校验、暂存、去重和落库。
+    return {
+        "batch_id": "imp-001",
+        "total_rows": len(rows),
+        "staged_rows": len(rows),
+        "failed_rows": 0,
+        "target_type": import_payload["target_type"],
+        "records_page_id": "import_data_records",
+    }
+```
+
+返回 `records_page_id="import_data_records"` 时，宿主会带 `batch_id` 和 `target_type` 打开该页面。该页面和暂存明细表由模块用 `@page` / `DataTable` / `@data_table` / `ctx.db` 自行实现；宿主不提供统一业务暂存物理表。建议逐条状态使用 `pending`、`staged`、`validation_failed`、`imported`、`import_failed`、`skipped_duplicate`。
+
+如果提交给 workflow：
+
+```python
+"submit": {"type": "workflow", "name": "import_accounts"}
+```
+
+宿主会创建 batch/manual job，并把 payload 写入 `ctx.runtime["import_payload"]`。workflow 不应读取本地文件，也不应把完整 `rows`、`raw_payload`、token、cookie、密码等敏感字段写进日志。
+
 ## DataTable 数据源
 
 ### binding

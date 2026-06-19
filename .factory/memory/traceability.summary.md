@@ -9,9 +9,11 @@
 - `REQ-007` -> `TASK-021` -> structured confirmation panel and signal persistence verified locally.
 - `REQ-008` -> `TASK-022` -> module audit-event storage and runtime tools verified locally.
 - `REQ-009` -> `TASK-023` -> fixed-pool service queue and pool helper contract implemented locally and validated by ATM / SDK unit tests.
+- `REQ-010` -> `TASK-030`~`TASK-034` -> Hosted UI batch import implemented locally and validated by `TC-060`; release evidence and real business module E2E remain pending.
 - `REQ-0400` -> `TASK-0400` -> decorator-first object assembly runtime V2 designed; implementation pending.
 - `REQ-0401` -> `TASK-0401` -> docs-stratego user/developer guide versioning designed; directory migration pending.
 
 Open risks:
 
 - `RISK-002`: `ctrip` real-site E2E pending.
+- `RISK-010`: Hosted UI batch import still needs release versioning, package evidence, and real business module E2E after local implementation.

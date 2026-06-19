@@ -1158,6 +1158,14 @@ def _validate_pages(
             )
         diagnostics.extend(_validate_page_query_handlers(declaration, query_handler_schema, module_functions))
         diagnostics.extend(_validate_page_crud_handlers(declaration, query_handler_schema, ui_action_signatures))
+        diagnostics.extend(
+            _validate_page_toolbar_actions(
+                declaration,
+                query_handler_schema,
+                ui_action_signatures,
+                {item.name for item in declarations if item.kind == "workflow"},
+            )
+        )
     return diagnostics
 
 
@@ -1291,6 +1299,84 @@ def _validate_page_crud_handlers(
     return diagnostics
 
 
+def _validate_page_toolbar_actions(
+    declaration: V2Declaration,
+    page_schema: dict[str, Any],
+    ui_action_signatures: dict[str, V2FunctionSignature],
+    workflow_names: set[str],
+) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    for action_item, action_path in _iter_page_toolbar_actions(page_schema):
+        action = action_item.get("action")
+        if not isinstance(action, dict):
+            continue
+        action_type = str(action.get("type") or "").strip().lower()
+        if action_type == "ui_action":
+            action_name = str(action.get("name") or "").strip()
+            if action_name and action_name not in ui_action_signatures:
+                diagnostics.append(
+                    V2Diagnostic(
+                        code="V2_PAGE_TOOLBAR_UI_ACTION_MISSING",
+                        location=f"{declaration.symbol}.{action_path}.action.name",
+                        message=f"toolbar action must reference a @ui_action function: {action_name}",
+                    )
+                )
+            continue
+        if action_type == "workflow":
+            workflow_name = str(action.get("name") or "").strip()
+            if workflow_name and workflow_name not in workflow_names:
+                diagnostics.append(
+                    V2Diagnostic(
+                        code="V2_PAGE_TOOLBAR_WORKFLOW_MISSING",
+                        location=f"{declaration.symbol}.{action_path}.action.name",
+                        message=f"toolbar action must reference a @workflow: {workflow_name}",
+                    )
+                )
+            continue
+        if action_type != "open_import_dialog":
+            continue
+        submit = action.get("submit")
+        if not isinstance(submit, dict):
+            continue
+        submit_type = str(submit.get("type") or "").strip().lower()
+        submit_name = str(submit.get("name") or "").strip()
+        if submit_type == "workflow":
+            if submit_name and submit_name not in workflow_names:
+                diagnostics.append(
+                    V2Diagnostic(
+                        code="V2_PAGE_TOOLBAR_WORKFLOW_MISSING",
+                        location=f"{declaration.symbol}.{action_path}.action.submit.name",
+                        message=f"toolbar import submit must reference a @workflow: {submit_name}",
+                    )
+                )
+            continue
+        if submit_type != "ui_action":
+            continue
+        handler = ui_action_signatures.get(submit_name)
+        if handler is None:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_TOOLBAR_UI_ACTION_MISSING",
+                    location=f"{declaration.symbol}.{action_path}.action.submit.name",
+                    message=f"toolbar import submit must reference a @ui_action function: {submit_name}",
+                )
+            )
+            continue
+        payload_param = str(submit.get("payload_param") or "import_payload").strip()
+        if not _function_accepts_exact_import_keyword_call(handler, payload_param):
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_TOOLBAR_UI_ACTION_SIGNATURE_INVALID",
+                    location=f"{declaration.symbol}.{action_path}.action.submit.name",
+                    message=(
+                        f"toolbar import submit {submit_name} signature must accept "
+                        f"(context, {payload_param})"
+                    ),
+                )
+            )
+    return diagnostics
+
+
 def _function_accepts_exact_crud_keyword_call(
     signature: V2FunctionSignature,
     expected_params_after_context: tuple[str, ...],
@@ -1303,6 +1389,17 @@ def _function_accepts_exact_crud_keyword_call(
         and signature.positional_default_count == 0
         and len(signature.positional_args) == expected_count
         and tuple(signature.positional_args[1:]) == expected_params_after_context
+    )
+
+
+def _function_accepts_exact_import_keyword_call(signature: V2FunctionSignature, payload_param: str) -> bool:
+    return (
+        not signature.has_varargs
+        and not signature.has_varkw
+        and not signature.kwonly_args
+        and signature.positional_default_count == 0
+        and len(signature.positional_args) == 2
+        and tuple(signature.positional_args[1:]) == (payload_param,)
     )
 
 
@@ -1398,6 +1495,29 @@ def _iter_page_data_tables(children: Any, path: str) -> list[tuple[dict[str, Any
         if isinstance(nested, list):
             tables.extend(_iter_page_data_tables(nested, f"{child_path}.children"))
     return tables
+
+
+def _iter_page_toolbar_actions(page_schema: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
+    actions: list[tuple[dict[str, Any], str]] = []
+    page_toolbar = page_schema.get("toolbar")
+    if isinstance(page_toolbar, dict):
+        actions.extend(_iter_toolbar_actions(page_toolbar, "schema.toolbar"))
+    for table_schema, table_path in _iter_page_data_tables(page_schema.get("children"), "schema.children"):
+        toolbar = table_schema.get("toolbar")
+        if isinstance(toolbar, dict):
+            actions.extend(_iter_toolbar_actions(toolbar, f"{table_path}.toolbar"))
+    return actions
+
+
+def _iter_toolbar_actions(toolbar: dict[str, Any], path: str) -> list[tuple[dict[str, Any], str]]:
+    raw_actions = toolbar.get("actions")
+    if not isinstance(raw_actions, list):
+        return []
+    return [
+        (dict(item), f"{path}.actions[{index}]")
+        for index, item in enumerate(raw_actions)
+        if isinstance(item, dict)
+    ]
 
 
 def _function_accepts_runtime_positional_call(signature: V2FunctionSignature, positional_count: int) -> bool:

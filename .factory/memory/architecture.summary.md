@@ -29,6 +29,7 @@ Current UI architecture:
 - `packages/crawler4j/src/core/mms/ui/managed_page_renderer.py` is the Hosted UI renderer.
 - Page schemas now come from `pages/*.py` or grouped `pages/<group>/*.py` functions decorated with `@page(...)`, normalized by `crawler4j_contracts.hosted_ui`; `@page(menu=True)` is the only source for left-menu entries.
 - `DataTable` remains a page-scoped component. Data comes from page `load_handler` / `query_handler`; query handlers receive `HostedDataTableQuery` with `search_fields` derived only from columns explicitly marked `searchable=True` and must return generic `HostedDataTableQueryResult[RowT]`. `table_id` is UI-only and is not passed as a business query argument.
+- Hosted UI batch import is now designed as a host-owned UI capability: page/table `toolbar.actions[]` can open a host import dialog, call `@ui_action`, or schedule a workflow. The host reads `.xlsx/.csv` files or clipboard text, enforces size/row limits and redacts sensitive fields, then passes only structured import payload rows to modules.
 
 Current env/data architecture:
 
