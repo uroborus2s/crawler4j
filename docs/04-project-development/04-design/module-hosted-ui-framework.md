@@ -163,8 +163,9 @@ def load_dashboard_page(
 
 - `reload`
 - `open_page`
+- `ui_action`
 
-`open_page` 的目标统一为 `page_id`，不再允许 `entry`。
+普通 `Button.action` 的页面跳转目标统一为 `page_id`，不再允许 `entry`。页面 / `DataTable` toolbar 额外支持 `workflow` 和 `open_import_dialog`，用于后台任务和批量导入这类宿主复合动作。
 
 ### 4.6 Toolbar 与批量导入入口
 

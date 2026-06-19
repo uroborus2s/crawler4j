@@ -123,7 +123,7 @@ class ExecutionRunner:
             return float(self._config.registry.get_item(key).default)
 
     def _build_runtime_payload(self, request: ExecutionRequest) -> dict[str, Any]:
-        return {
+        runtime_payload = {
             "module_name": request.module_name,
             "workflow": str(request.workflow_name or "").strip(),
             "devel_mode": bool(request.devel_mode),
@@ -139,6 +139,9 @@ class ExecutionRunner:
             "creation_params": deepcopy(request.creation_params),
             "execution_timeout": request.execution_timeout,
         }
+        if "import_payload" in request.creation_params:
+            runtime_payload["import_payload"] = deepcopy(request.creation_params["import_payload"])
+        return runtime_payload
 
     async def run(
         self,

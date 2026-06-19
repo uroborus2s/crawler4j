@@ -79,7 +79,7 @@
 | 结果展示 | 宿主展示批次汇总，并可带 `batch_id/target_type` 跳转 `import_data_records` 页面 |
 | 安全限制 | 仅允许 `.xlsx/.csv`；默认单文件 10 MB、单次 5000 行；`token/cookie/password/secret/authorization/credential/passwd` 等字段不得写入宿主日志明文 |
 | 关联文档 | `hosted-ui-batch-import-design.md` |
-| 当前状态 | 方案已形成，Contracts / SDK / Core / UI 实现待启动 |
+| 当前状态 | 已本地实现并通过 `TC-060`：Contracts / SDK / Core / UI / ATM 分发链路已落地；对外发布版本与真实业务模块 E2E 仍待后续补齐 |
 | 关联项 | `REQ-010`, `NFR-010`, `CR-016`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034` |
 
 ## `API-009` Module Entity Table View Contract
@@ -242,6 +242,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-19 | 将 `API-019` 更新为已本地实现，记录 Hosted UI toolbar 导入契约、宿主解析弹窗、payload 分发、结果展示和 `TC-060` 验证状态 | Codex |
 | 2026-06-19 | 新增 `API-019`，登记 Hosted UI 批量导入的 toolbar schema、宿主导入弹窗、标准 import payload、结果展示和敏感字段脱敏契约 | Codex |
 | 2026-05-01 | 收口环境处置为宿主边界：模块运行时代码不再导入或发送 `TaskSignal` / `EnvAction`，任务终态后环境统一回收，环境删除只由环境管理页清理链路执行，并通过 `host.env_claim` + `env_binding_field` 区分孤岛、未认领和模块业务清理候选 | Codex |
 | 2026-04-30 | 清理旧生命周期 hook 运行链，`RunProfile.execution.hooks_module`、`ModuleService.call_hook()` 与 `prepare_env/init_env/before_run/on_*` 不再属于 0.4.0 契约 | Codex |

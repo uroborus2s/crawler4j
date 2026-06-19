@@ -20,7 +20,7 @@
 | `REQ-007` | 宿主生命周期与环境处置边界 | 已替代旧信号方案 | 0.4.0 当前实现已删除模块 `TaskSignal` / `EnvAction` 入口；workflow 只返回 `TaskResult`，对象可选实现 `setup(ctx, workflow)` 与 `cleanup(ctx, outcome)`，任务终态环境统一回收 |
 | `REQ-008` | 模块审计事件独立存储 | 本次完成 | 宿主已新增 `module_audit_events` 与 `ctx.db.audit(...).append/query`，快照 dataset 继续保留原语义 |
 | `REQ-009` | 环境候选 Service Job 等待队列 | 本次完成 | 当前宿主已实现 `@env_candidates` 候选纯函数实时求值、`PENDING` 等待、FIFO 补位、模块环境授权、租约后复核和等待席位自动超时收口；资源池同步方案已退出正式契约 |
-| `REQ-010` | Hosted UI 宿主托管批量导入 | 待实现 | 已形成 `API-019` 方案和 `TASK-030` 到 `TASK-034` 拆分；当前尚未修改 Contracts / SDK / Core / UI 代码 |
+| `REQ-010` | Hosted UI 宿主托管批量导入 | 已实现 | 已完成 `API-019` / `TASK-030` 到 `TASK-034`：Contracts / SDK 支持 toolbar 导入契约，Core 宿主解析 `.xlsx/.csv`、剪贴板和手工 JSON，Hosted UI 可分发给 `@ui_action` 或 workflow 并展示批次结果 |
 | `REQ-004` | 发布与文档链路可追溯 | 满足 | 根应用工作区版本、运行时版本服务、最近正式 tag 与 release 文档口径已明确分层 |
 | `REQ-005` | 软件工厂治理基线存在 | 本次建立 | `AGENTS.md`、`GEMINI.md`、`.factory/`、编号文档已新增 |
 
@@ -113,11 +113,12 @@
 4. 将 `REQ-007` / `TASK-021` 与 `REQ-008` / `TASK-022` 视为已闭环能力，后续只做回归维护与边界补充
 5. 将 `REQ-009` / `TASK-023` 视为已完成本地实现：当前下一步是 PR 收口、真实业务模块接入与更高层验证
 6. 将 `UAT-028` 视为当前已落地事实，后续只补真实业务模块接入与更高层验证
-7. 将 `REQ-010` / `CR-016` 视为新的 Hosted UI 能力变更：先按 `API-019` 和 `TASK-030` 到 `TASK-034` 推进契约、弹窗、分发、暂存状态页与测试文档
+7. 将 `REQ-010` / `CR-016` 视为已完成本地实现：后续只做真实业务模块接入、对外发布版本提升和更高层 E2E 验证
 8. 然后再处理真实站点 E2E 与发布收口阶段
 
 ## 5. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-19 | 将 `REQ-010` 更新为已实现，记录 Hosted UI 批量导入的 Contracts / SDK / Core / UI 本地实现和 `TC-060` 验证结果 | Codex |
 | 2026-06-19 | 新增 `REQ-010` 需求分析，明确 Hosted UI 批量导入由宿主读取和解析来源，模块只接收结构化 payload 并负责业务暂存 / 落库 | Codex |

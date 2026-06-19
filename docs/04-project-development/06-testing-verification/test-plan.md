@@ -36,7 +36,7 @@
 | `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
 | `TC-0440` REM 来源代理同步与 IP 表绑定 | 通过 | 2026-06-18 追加覆盖：来源代理同步按 `host + port` 唯一命中 IP 表，不再比较协议、用户名或密码；仍优先使用 VirtualBrowser 结构化真实 `host/port`，避免 `proxy.url=http://127.0.0.1:本地端口` 被保存为绑定 IP。组合回归 `54 passed`，目标文件 `ruff check` 通过 |
-| `TC-060` Hosted UI 批量导入 | 待实现 | 计划覆盖 toolbar schema、Excel/CSV/剪贴板解析、文件大小与最大行数限制、敏感字段脱敏、`@ui_action` / workflow 分发、导入结果展示和 `import_data_records` 跳转 |
+| `TC-060` Hosted UI 批量导入 | 通过 | 2026-06-19 已实现并验证：toolbar schema、CSV/XLSX/剪贴板/手工 JSON 解析、文件大小与最大行数限制、敏感字段脱敏、`@ui_action` / workflow 分发、导入结果展示和 `import_data_records` 跳转；全量 unit `1031 passed` |
 | `TC-059` 开发模块忽略目录 symlink 回归 | 通过 | 2026-05-30 新增定向覆盖：DevLink/源码预检的 manifest lock 校验会跳过 `.venv/` 内 symlink，非忽略目录 symlink 仍拒绝；SDK `_archive_members()` 会跳过 `.venv/` 内 symlink 且不打入 ZIP |
 | `TC-0400-release-review-final` 0.4.0 全面审查回归 | 通过 | 2026-05-01 复验：Full runtime surface 负向拒绝旧 Hosted UI 工具、空 workflow 自动解析、dispatcher env claim/binding 失败路径、UI smoke 与 PyInstaller spec 清理；全量 `886 passed`，打包配置 `62 passed` |
 | `TC-010` `uv run pytest packages/crawler4j/tests/unit/test_core/test_mms/test_module_data_table_page.py -q` | 通过 | 2026-04-20 口径已收敛到当前仍存在的正式回归文件，覆盖 `declare_ui` 刷新、`create_handler` / `update_handler` 路由、DevLink 页面上下文与真实模块 UI 链路 |
@@ -96,17 +96,17 @@
 
 | 测试 ID | 目标 | 计划验证方式 |
 |---|---|---|
-| `TC-060` | Hosted UI 页面和 `DataTable` toolbar actions：schema 规范化、非法动作拒绝、`open_import_dialog` 必填项和 `@ui_action` 引用校验 | Contracts / SDK scanner / Core schema 单测 |
-| `TC-060` | 宿主导入弹窗解析：`.xlsx/.csv` 文件、剪贴板 TSV/CSV 文本、文件类型、文件大小、最大行数、重复表头和解析错误 | UI 组件单测 + parser 单测 |
-| `TC-060` | 安全脱敏：`token/cookie/password/secret/authorization/credential/passwd` 字段不进入宿主日志明文 | 日志脱敏单测 + 错误摘要单测 |
-| `TC-060` | payload 分发：`@ui_action` 接收 `import_payload`，workflow 通过 `ctx.runtime["import_payload"]` 接收数据 | MMS renderer / runtime bridge / ATM 调度单测 |
-| `TC-060` | 结果展示：模块返回 `batch_id/total_rows/staged_rows/failed_rows` 后宿主显示汇总，并可跳转 `import_data_records` 页面 | ManagedPageRenderer 单测 + 模块夹具集成/验收 |
+| `TC-060` | Hosted UI 页面和 `DataTable` toolbar actions：schema 规范化、非法动作拒绝、`open_import_dialog` 必填项和 `@ui_action` / `@workflow` 引用校验 | 已实现：`test_hosted_ui_card.py`、`test_contracts_exports.py`、`test_v2_scanner_diagnostics.py` |
+| `TC-060` | 宿主导入弹窗解析：`.xlsx/.csv` 文件、剪贴板 TSV/CSV 文本、手工 JSON、文件类型、文件大小、最大行数、重复表头和解析错误 | 已实现：`test_hosted_import.py` |
+| `TC-060` | 安全脱敏：`token/cookie/password/secret/authorization/credential/passwd` 字段不进入宿主日志明文 | 已实现：`test_hosted_import.py::test_redact_import_payload_masks_sensitive_fields_without_mutating_original` |
+| `TC-060` | payload 分发：`@ui_action` 接收 `import_payload`，workflow 通过 `ctx.runtime["import_payload"]` 接收数据 | 已实现：`test_managed_page_renderer.py`、`test_execution_runner.py` |
+| `TC-060` | 结果展示：模块返回 `batch_id/total_rows/staged_rows/failed_rows` 后宿主显示汇总，并可跳转 `import_data_records` 页面 | 已实现：`test_managed_page_renderer_dispatches_table_toolbar_import_to_ui_action` |
 
 ## 6. 当前测试缺口
 
 - 没有覆盖 `ctrip labor_workflow` 真实站点 E2E 验证
 - `REQ-009` 当前已完成实现级单测与 SDK 契约回归，但仍缺真实业务模块接入和更高层集成验证
-- `REQ-010` 当前只有方案、任务和测试计划，尚未实现 `TC-060` 代码级验证
+- `REQ-010` 已完成本地代码实现与 `TC-060` 单元级验证；后续对外发布仍需另行补齐版本提升、包构建、发布资产和真实业务模块 E2E 证据
 - `CR-010` 当前只完成本地脚本/单元级验证，仍缺 Windows 真机打包、安装、升级与签名验证
 - QScintilla 已进入桌面依赖线，macOS PyInstaller 打包态证据已在 2026-05-01 补齐；Windows 打包态仍需真机验证
 - `crawler4j-sdk 0.4.1` 与 `crawler4j-contracts 0.4.1` 已记录当前版本 build / publish 证据；后续仍需补齐正式 Git tag / GitHub release 资产
@@ -140,6 +140,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-19 | 完成 `TC-060` 代码级验证：新增 Contracts / SDK / parser / renderer / ATM 单测，并通过全量 unit `1031 passed`、目标 `ruff check`、`git diff --check` | Codex |
 | 2026-06-19 | 新增 `TC-060`，为 Hosted UI 批量导入建立 toolbar schema、来源解析、限制脱敏、payload 分发、结果展示和明细页跳转的测试计划 | Codex |
 | 2026-06-18 | 调整 REM 来源代理同步匹配规则：`test_import_existing_env.py` 新增同一 `host + port` 但协议、用户名、密码不同仍绑定 IP 表唯一条目的回归；组合回归 `54 passed`，目标文件 `ruff check` 通过 | Codex |
 | 2026-06-16 | 追加 REM 来源代理解析修复回归：`test_provider.py` 锁定 VirtualBrowser 同时返回结构化代理和本地转发 URL 时优先采用真实 `host/port`；`test_import_existing_env.py` 锁定已保存为 `127.0.0.1:本地端口` 的历史环境可通过同步来源代理覆盖修复并重新绑定正确 IP 条目，来源代理未命中 IP 表时不会保存为绑定 IP，且会清除本地错误绑定；`test_env_list_widget.py` 锁定“绑定 IP”列只展示存在 `ip_entry_id` 的 IP 表绑定；组合回归 `53 passed`，目标文件 `ruff check` 通过 | Codex |

@@ -1,7 +1,7 @@
 # Hosted UI 批量导入方案
 
 **项目名称：** 蛛行演略（crawler4j）  
-**文档状态：** 方案待实现  
+**文档状态：** 已实现
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | Core 开发 | SDK 开发 | QA | 模块开发者  
 **上游输入：** `REQ-010` | `API-008` | `module-hosted-ui-framework.md` | `module-config-runtime-data-contract.md`  
@@ -22,6 +22,13 @@ V1 范围固定为：
 - 宿主把数据统一转换成 import payload 后交给模块
 - 模块返回批次结果，宿主展示汇总并可跳转到 `import_data_records` 页面查看批次明细
 - 安全限制由宿主统一执行：文件类型、文件大小、最大行数、敏感字段日志脱敏
+
+实现状态：
+
+- Contracts / SDK：已支持 `Page.toolbar.actions[]`、`DataTable.toolbar.actions[]`、`ui_action`、`workflow` 和 `open_import_dialog` schema 规范化与扫描诊断。
+- Core 宿主：已新增 `HostedImportDialog` 与解析 helper，支持 `.csv/.xlsx`、剪贴板 CSV/TSV 和手工 JSON 对象数组。
+- Renderer：已支持页面 / 表格 toolbar 分发、`@ui_action` import payload 提交、workflow batch job 调度、导入结果弹窗和 `import_data_records` 跳转。
+- ATM：`ExecutionRunner` 已把 `creation_params.import_payload` 提升到 `ctx.runtime["import_payload"]`。
 
 ## 2. 背景
 
@@ -269,25 +276,26 @@ workflow 调度必须使用宿主任务进度和日志链路展示状态。workf
 
 | 任务 | 范围 | 产物 |
 |---|---|---|
-| `TASK-030` | Contracts / SDK schema 契约 | `toolbar.actions`、`open_import_dialog`、payload/result helper、扫描校验 |
-| `TASK-031` | 宿主导入弹窗与解析 | Excel/CSV/剪贴板解析、预览、限制、脱敏 |
-| `TASK-032` | Hosted UI 分发与结果展示 | renderer 分发 `ui_action` / workflow、结果弹窗、页面跳转 |
-| `TASK-033` | 暂存明细页面约定 | `import_data_records` 页面参数、逐条状态展示、从暂存导入业务表的结果口径 |
-| `TASK-034` | 测试与文档收口 | 单测、集成/验收、开发者指南、测试计划、memory |
+| `TASK-030` | Contracts / SDK schema 契约 | 已完成：`toolbar.actions`、`open_import_dialog`、payload/result helper、扫描校验 |
+| `TASK-031` | 宿主导入弹窗与解析 | 已完成：CSV/XLSX/剪贴板/手工 JSON 解析、限制、脱敏 |
+| `TASK-032` | Hosted UI 分发与结果展示 | 已完成：renderer 分发 `ui_action` / workflow、结果弹窗、页面跳转 |
+| `TASK-033` | 暂存明细页面约定 | 已完成：`import_data_records` 页面参数、逐条状态展示口径 |
+| `TASK-034` | 测试与文档收口 | 已完成：单测、测试计划、traceability、memory |
 
-## 12. 待实现验证
+## 12. 已验证
 
 - toolbar 自定义按钮 schema 规范化和非法动作拒绝
 - 文件类型、文件大小、最大行数限制
-- Excel / CSV / 剪贴板解析
+- Excel / CSV / 剪贴板 / 手工 JSON 解析
 - 敏感字段日志脱敏
 - `@ui_action` 收到标准 import payload
 - workflow 收到 `ctx.runtime["import_payload"]`
 - 模块返回结果后，宿主展示汇总并跳转 `import_data_records`
-- 从暂存表导入业务表后，逐条成功 / 失败状态可见
+- 从暂存表导入业务表后，逐条成功 / 失败状态口径已固定为模块页面约定
 
 ## 13. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-19 | 完成 Hosted UI 批量导入实现，补记 Contracts / SDK / Core / UI / ATM 落地点和 `TC-060` 验证状态 | Codex |
 | 2026-06-19 | 新增 Hosted UI 批量导入方案，登记 toolbar 自定义按钮、宿主导入弹窗、标准 payload、结果展示、安全限制和任务拆分 | Codex |

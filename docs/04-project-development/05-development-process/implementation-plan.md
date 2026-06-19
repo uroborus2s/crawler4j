@@ -41,7 +41,7 @@
 | Wave 17 | `TASK-027` | `CR-013`、`API-008`、`module-hosted-ui-framework.md`、当前 Hosted UI V1 路由链 | Hosted UI 主从表行导航：`row_action`、`open_page.params`、缓存页参数替换、详情表 `navigation_filters` | 已完成：主表点击可打开关联详情页/详情表，目标页收到 params，目标 `core:data_table` 可按参数过滤关联记录 |
 | Wave 18 | `TASK-028` | `CR-014`、`API-009`、`module-entity-table-view-design.md`、`CR-012` 已落地的实体表资源模式 | 模块实体表视图与分析查询：`module_db_views`、`db.declare_db_view`、`db.query_view`、只读统计表 | 已完成：V1 已交付 `sql_view + query_view + readonly hosted table`，并补齐卸载提示与定向回归 |
 | Wave 19 | `TASK-029` | `CR-015`、`API-010`、`shared-sky-data-table-design.md`、现有宿主表格/Hosted UI 表格分裂现状 | 共享表格基座重构：唯一正式 `SkyDataTable`、宿主/模块统一查询契约、删除旧 `SkyTableWidget`/旧 schema | 进行中：先重写共享组件并迁移正式表格，再切 Hosted UI 新契约 |
-| Wave 20 | `TASK-030` ~ `TASK-034` | `REQ-010`、`CR-016`、`API-019`、`hosted-ui-batch-import-design.md`、当前 Hosted UI DataTable / `@ui_action` / workflow 调度链 | Hosted UI 批量导入：toolbar 自定义按钮、宿主导入弹窗、import payload 分发、批次结果和逐条状态展示 | 待启动：先落 Contracts / SDK schema，再落宿主解析弹窗和 renderer 分发，最后补暂存状态页约定、测试与文档 |
+| Wave 20 | `TASK-030` ~ `TASK-034` | `REQ-010`、`CR-016`、`API-019`、`hosted-ui-batch-import-design.md`、当前 Hosted UI DataTable / `@ui_action` / workflow 调度链 | Hosted UI 批量导入：toolbar 自定义按钮、宿主导入弹窗、import payload 分发、批次结果和逐条状态展示 | 已完成：Contracts / SDK schema、宿主解析弹窗、renderer 分发、workflow runtime 注入、结果展示、`import_data_records` 跳转约定和 `TC-060` 单测已落地 |
 
 ## 3. 风险与应对
 
@@ -88,23 +88,24 @@
 | `TASK-027` | 为 Hosted UI 补主从表行导航与关联详情表能力 | `row_action`、`open_page.params`、`navigation_filters`、模块详情页路由参数复用 | 点击主表记录可打开关联详情页/详情表，目标页参数不残留旧值，定向回归通过 | P0 | 已完成 |
 | `TASK-028` | 为模块实体表补数据库视图与分析查询能力 | `module_db_views`、`db.declare_db_view`、`db.query_view`、`core:data_table` 只读统计表模式 | 统计视图能以受控 SQL 模板方式登记、创建、查询和卸载清理，客户端可按过滤/排序/分页展示只读统计表 | P0 | 已完成 |
 | `TASK-029` | 重构共享表格组件 SkyDataTable 并统一宿主/模块表格边界 | 新 `SkyDataTable`、宿主正式表格迁移、Hosted UI DataTable 新 schema/adapter、旧表格 API 删除 | 所有正式表格统一使用 `SkyDataTable`，组件只负责 UI，查询由外部 provider 完成，旧组件和旧 schema 删除 | P0 | 进行中 |
-| `TASK-030` | 建立 Hosted UI toolbar 批量导入契约 | Contracts schema helper、SDK scanner / manifest lock、toolbar action 校验、import payload / result 类型约定 | 页面和 DataTable 可声明 toolbar actions；`open_import_dialog`、`ui_action`、`workflow` 动作被规范化并能在非法配置时被 SDK/Core 阻断 | P1 | 待启动 |
-| `TASK-031` | 实现宿主导入弹窗与来源解析 | Excel/CSV 文件选择、剪贴板粘贴、可选手工录入、预览、列映射、限制与脱敏 | 宿主能解析 `.xlsx/.csv` 和剪贴板文本，限制文件类型/大小/最大行数，解析错误可见，敏感字段不进日志明文 | P1 | 待启动 |
-| `TASK-032` | 贯通 Hosted UI 导入分发与结果展示 | `ManagedPageRenderer` toolbar 分发、`@ui_action` payload 参数、workflow 运行态注入、导入结果弹窗和页面跳转 | 导入 payload 能提交给模块 `@ui_action` 或 workflow；模块返回批次汇总后宿主展示结果并可跳转 `import_data_records` | P1 | 待启动 |
-| `TASK-033` | 约定导入暂存明细与逐条状态展示 | `import_data_records` 页面参数、批次明细表约定、从暂存表导入业务表的逐条状态口径 | 页面能按 `batch_id/target_type` 展示导入明细；后续业务表导入可展示 `imported/import_failed/skipped_duplicate/validation_failed` 等状态 | P1 | 待启动 |
-| `TASK-034` | 完成批量导入测试、开发者说明和记忆收口 | 单元/集成/验收测试、开发者指南、测试计划、release/traceability/memory 同步 | `TC-060` 覆盖 toolbar schema、解析限制、脱敏、分发、结果展示和明细页跳转；正式文档与 `.factory/memory/` 同步 | P1 | 待启动 |
+| `TASK-030` | 建立 Hosted UI toolbar 批量导入契约 | Contracts schema helper、SDK scanner / manifest lock、toolbar action 校验、import payload / result 类型约定 | 页面和 DataTable 可声明 toolbar actions；`open_import_dialog`、`ui_action`、`workflow` 动作被规范化并能在非法配置时被 SDK/Core 阻断 | P1 | 已完成 |
+| `TASK-031` | 实现宿主导入弹窗与来源解析 | Excel/CSV 文件选择、剪贴板粘贴、可选手工录入、预览、列映射、限制与脱敏 | 宿主能解析 `.xlsx/.csv` 和剪贴板文本，限制文件类型/大小/最大行数，解析错误可见，敏感字段不进日志明文 | P1 | 已完成 |
+| `TASK-032` | 贯通 Hosted UI 导入分发与结果展示 | `ManagedPageRenderer` toolbar 分发、`@ui_action` payload 参数、workflow 运行态注入、导入结果弹窗和页面跳转 | 导入 payload 能提交给模块 `@ui_action` 或 workflow；模块返回批次汇总后宿主展示结果并可跳转 `import_data_records` | P1 | 已完成 |
+| `TASK-033` | 约定导入暂存明细与逐条状态展示 | `import_data_records` 页面参数、批次明细表约定、从暂存表导入业务表的逐条状态口径 | 页面能按 `batch_id/target_type` 展示导入明细；后续业务表导入可展示 `imported/import_failed/skipped_duplicate/validation_failed` 等状态 | P1 | 已完成 |
+| `TASK-034` | 完成批量导入测试、开发者说明和记忆收口 | 单元/集成/验收测试、开发者指南、测试计划、release/traceability/memory 同步 | `TC-060` 覆盖 toolbar schema、解析限制、脱敏、分发、结果展示和明细页跳转；正式文档与 `.factory/memory/` 同步 | P1 | 已完成 |
 
 ## 6. 阶段建议
 
 - 当前登记阶段：`IMPLEMENTATION`
-- 当前活动波次：Wave 19 `TASK-029` 共享表格基座重构进行中；Wave 18 `TASK-028` 已完成
+- 当前活动波次：Wave 19 `TASK-029` 共享表格基座重构进行中；Wave 20 `TASK-030` ~ `TASK-034` 已完成
 - 当前首项：继续完成 `SkyDataTable` 共享组件重构与宿主/模块统一接入，避免旧兼容表格壳继续扩散
-- 后续波次：Wave 20 `TASK-030` ~ `TASK-034` 承接 Hosted UI 批量导入能力，需按契约 -> 弹窗解析 -> 分发结果 -> 暂存状态页 -> 测试文档顺序推进
+- 后续波次：Hosted UI 批量导入已完成本地实现与 `TC-060` 单测，后续如需对外发布需另行完成 SDK / Contracts / 根应用版本提升、构建与发布证据
 
 ## 7. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-19 | 完成 Wave 20 / `TASK-030` ~ `TASK-034`：落地 Hosted UI toolbar 批量导入契约、宿主解析弹窗、payload 分发、workflow runtime 注入、结果展示和 `TC-060` 验证 | Codex |
 | 2026-06-19 | 新增 Wave 20 / `TASK-030` ~ `TASK-034`，为 Hosted UI 批量导入拆分 toolbar 契约、宿主导入弹窗、payload 分发、暂存状态页和测试文档收口 | Codex |
 | 2026-04-24 | 为共享 `Card` / Hosted UI `Card` 补齐布局参数：标题对齐、内容水平/垂直对齐、最小高度与 padding | Codex |
 | 2026-04-24 | 修正共享 `Card` 样式作用域，避免通配 `QFrame` 误命中 `QLabel` 导致标题/副标题显示成“文字外套边框” | Codex |

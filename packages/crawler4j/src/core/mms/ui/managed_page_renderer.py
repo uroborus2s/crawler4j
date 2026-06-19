@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any, Callable
 
 from crawler4j_contracts import HostedDataTableQueryResult
@@ -20,11 +21,24 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.core.atm.run_profile import (
+    AcquisitionConfig,
+    AcquisitionMode,
+    CreationConfig,
+    CreationLifecycle,
+    EnvType,
+    ExecutionContext,
+    ResourceConfig,
+    RunProfile,
+)
+from src.core.atm.service import get_task_service
 from src.core.persistence import get_module_data_store
 from src.core.mms.models import ModuleInfo
+from src.core.mms.ui.hosted_import import HostedImportDialog
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
 from src.ui.components.button import StyledButton, create_action_button, normalize_button_variant
 from src.ui.components.card import Card
+from src.ui.components.choice_dialog import ChoiceDialog, DialogChoice
 from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.data_table import SkyDataTable
@@ -43,6 +57,17 @@ def _runtime_surface_hosted_ui_action():
     from src.core.atm.runtime_capabilities import RUNTIME_SURFACE_HOSTED_UI_ACTION
 
     return RUNTIME_SURFACE_HOSTED_UI_ACTION
+
+
+def _schedule_awaitable(value: Any) -> None:
+    if not inspect.isawaitable(value):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(value)
+        return
+    loop.create_task(value)
 
 
 class ManagedPageRenderer(QWidget):
@@ -248,6 +273,63 @@ class ManagedPageRenderer(QWidget):
             )
         return button
 
+    def _build_toolbar_widget(self, toolbar: dict[str, Any] | None) -> QWidget | None:
+        if not isinstance(toolbar, dict):
+            return None
+        actions = [dict(item) for item in list(toolbar.get("actions") or []) if isinstance(item, dict)]
+        if not actions:
+            return None
+
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addStretch()
+        for action_item in actions:
+            layout.addWidget(self._build_toolbar_action_button(action_item))
+        return widget
+
+    def _build_table_toolbar(self, component: dict[str, Any], table: SkyDataTable) -> bool:
+        toolbar_spec = component.get("toolbar")
+        if not isinstance(toolbar_spec, dict):
+            return False
+        actions = [dict(item) for item in list(toolbar_spec.get("actions") or []) if isinstance(item, dict)]
+        if not actions:
+            return False
+        toolbar = getattr(table, "_toolbar", None)
+        if not isinstance(toolbar, QHBoxLayout):
+            return False
+        for action_item in actions:
+            toolbar.addWidget(self._build_toolbar_action_button(action_item, table=table))
+        return True
+
+    def _build_toolbar_action_button(
+        self,
+        action_item: dict[str, Any],
+        *,
+        table: SkyDataTable | None = None,
+    ) -> StyledButton:
+        label = str(action_item.get("label") or "").strip()
+        icon = str(action_item.get("icon") or "").strip()
+        text = f"{icon} {label}".strip() if label else icon or "操作"
+        button = create_action_button(
+            text,
+            variant=str(action_item.get("variant") or "secondary"),
+            min_height=34,
+            min_width=88 if label else None,
+            horizontal_padding=12,
+        )
+        tooltip = str(action_item.get("tooltip") or action_item.get("aria_label") or label or icon or "").strip()
+        if tooltip:
+            button.setToolTip(tooltip)
+        button.clicked.connect(
+            lambda _checked=False, item=dict(action_item), current_table=table: self._handle_toolbar_action(
+                item,
+                table=current_table,
+            )
+        )
+        return button
+
     def _build_data_table(self, component: dict[str, Any]) -> QWidget:
         component = self._prepare_table_component(component)
         wrapper = QWidget()
@@ -293,6 +375,7 @@ class ManagedPageRenderer(QWidget):
             )
         )
 
+        self._build_table_toolbar(component, table)
         self._build_crud_toolbar(component, table)
         if title:
             layout.addLayout(header)
@@ -1148,19 +1231,331 @@ class ManagedPageRenderer(QWidget):
         params = self._resolve_action_params(action, self._payload)
         self._invoke_ui_action(action_name, params, error_title="操作失败")
 
+    def _handle_toolbar_action(
+        self,
+        action_item: dict[str, Any],
+        *,
+        table: SkyDataTable | None = None,
+    ) -> None:
+        loop = self._running_loop()
+        if loop is not None:
+            loop.create_task(self._handle_toolbar_action_async(action_item, table=table))
+            return
+        self._handle_toolbar_action_sync(action_item, table=table)
+
+    def _handle_toolbar_action_sync(
+        self,
+        action_item: dict[str, Any],
+        *,
+        table: SkyDataTable | None = None,
+    ) -> None:
+        action = self._toolbar_nested_action(action_item)
+        action_type = str(action.get("type") or "").strip().lower()
+        if action_type == "ui_action":
+            self._submit_toolbar_ui_action(action, table=table)
+            return
+        if action_type == "workflow":
+            asyncio.run(self._dispatch_workflow_action_async(action))
+            return
+        if action_type == "open_import_dialog":
+            import_payload = self._prompt_import_payload(action)
+            if import_payload is None:
+                return
+            self._submit_import_payload(action, import_payload, table=table)
+            return
+        self._show_warning("操作失败", f"不支持的 toolbar action 类型: {action_type or '<empty>'}")
+
+    async def _handle_toolbar_action_async(
+        self,
+        action_item: dict[str, Any],
+        *,
+        table: SkyDataTable | None = None,
+    ) -> None:
+        action = self._toolbar_nested_action(action_item)
+        action_type = str(action.get("type") or "").strip().lower()
+        if action_type == "ui_action":
+            await self._submit_toolbar_ui_action_async(action, table=table)
+            return
+        if action_type == "workflow":
+            await self._dispatch_workflow_action_async(action)
+            return
+        if action_type == "open_import_dialog":
+            import_payload = await self._prompt_import_payload_async(action)
+            if import_payload is None:
+                return
+            await self._submit_import_payload_async(action, import_payload, table=table)
+            return
+        await self._show_warning_async("操作失败", f"不支持的 toolbar action 类型: {action_type or '<empty>'}")
+
+    @staticmethod
+    def _toolbar_nested_action(action_item: dict[str, Any]) -> dict[str, Any]:
+        action = action_item.get("action") if isinstance(action_item, dict) else {}
+        return dict(action) if isinstance(action, dict) else {}
+
+    def _submit_toolbar_ui_action(self, action: dict[str, Any], *, table: SkyDataTable | None = None) -> bool:
+        action_name = str(action.get("name") or "").strip()
+        if not action_name:
+            return False
+        params = self._resolve_action_params(action, self._payload)
+        return self._invoke_ui_action(
+            action_name,
+            params,
+            error_title="操作失败",
+            on_success=table.request_refresh if table is not None else None,
+        )
+
+    async def _submit_toolbar_ui_action_async(
+        self,
+        action: dict[str, Any],
+        *,
+        table: SkyDataTable | None = None,
+    ) -> bool:
+        action_name = str(action.get("name") or "").strip()
+        if not action_name:
+            return False
+        params = self._resolve_action_params(action, self._payload)
+        return await self._invoke_ui_action_async(
+            action_name,
+            params,
+            error_title="操作失败",
+            on_success=table.request_refresh if table is not None else None,
+        )
+
+    def _prompt_import_payload(self, action: dict[str, Any]) -> dict[str, Any] | None:
+        dialog = HostedImportDialog(action, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return dialog.import_payload()
+
+    async def _prompt_import_payload_async(self, action: dict[str, Any]) -> dict[str, Any] | None:
+        dialog = HostedImportDialog(action, parent=self)
+        if await open_dialog_async(dialog) != int(QDialog.DialogCode.Accepted):
+            return None
+        return dialog.import_payload()
+
+    def _submit_import_payload(
+        self,
+        action: dict[str, Any],
+        import_payload: dict[str, Any],
+        *,
+        table: SkyDataTable | None = None,
+    ) -> bool:
+        submit = dict(action.get("submit") or {}) if isinstance(action.get("submit"), dict) else {}
+        submit_type = str(submit.get("type") or "").strip().lower()
+        submit_name = str(submit.get("name") or "").strip()
+        if not submit_name:
+            self._show_warning("导入失败", "导入动作缺少 submit.name")
+            return False
+        if submit_type == "workflow":
+            asyncio.run(self._dispatch_workflow_action_async(submit, import_payload=import_payload))
+            return True
+        if submit_type != "ui_action":
+            self._show_warning("导入失败", f"不支持的导入提交类型: {submit_type or '<empty>'}")
+            return False
+        payload_param = str(submit.get("payload_param") or "import_payload").strip() or "import_payload"
+        return self._invoke_ui_action(
+            submit_name,
+            {payload_param: import_payload},
+            error_title="导入失败",
+            on_success=lambda result: self._handle_import_result(result, table=table),
+        )
+
+    async def _submit_import_payload_async(
+        self,
+        action: dict[str, Any],
+        import_payload: dict[str, Any],
+        *,
+        table: SkyDataTable | None = None,
+    ) -> bool:
+        submit = dict(action.get("submit") or {}) if isinstance(action.get("submit"), dict) else {}
+        submit_type = str(submit.get("type") or "").strip().lower()
+        submit_name = str(submit.get("name") or "").strip()
+        if not submit_name:
+            await self._show_warning_async("导入失败", "导入动作缺少 submit.name")
+            return False
+        if submit_type == "workflow":
+            await self._dispatch_workflow_action_async(submit, import_payload=import_payload)
+            return True
+        if submit_type != "ui_action":
+            await self._show_warning_async("导入失败", f"不支持的导入提交类型: {submit_type or '<empty>'}")
+            return False
+        payload_param = str(submit.get("payload_param") or "import_payload").strip() or "import_payload"
+        return await self._invoke_ui_action_async(
+            submit_name,
+            {payload_param: import_payload},
+            error_title="导入失败",
+            on_success=lambda result: self._handle_import_result_async(result, table=table),
+        )
+
+    async def _dispatch_workflow_action_async(
+        self,
+        action: dict[str, Any],
+        *,
+        import_payload: dict[str, Any] | None = None,
+    ) -> str | None:
+        workflow_name = str(action.get("name") or "").strip()
+        if not workflow_name:
+            await self._show_warning_async("后台任务启动失败", "workflow action 缺少 name")
+            return None
+        creation_params = self._resolve_action_params(action, self._payload)
+        if import_payload is not None:
+            creation_params["import_payload"] = import_payload
+        run_profile = RunProfile(
+            resource=ResourceConfig(
+                acquisition=AcquisitionConfig(
+                    mode=AcquisitionMode.CREATE,
+                    provider="virtualbrowser",
+                    env_type=EnvType.VIRTUAL_BROWSER,
+                    creation=CreationConfig(
+                        lifecycle=CreationLifecycle.PERSISTENT,
+                        params=creation_params,
+                    ),
+                )
+            ),
+            execution=ExecutionContext(module=self._module_name, workflow=workflow_name),
+        )
+        job_name_prefix = "Hosted UI 导入" if import_payload is not None else "Hosted UI"
+        task_service = get_task_service()
+        job_id = await task_service.create_job(
+            name=f"{job_name_prefix}/{self._module_name}/{workflow_name}",
+            job_type="batch",
+            trigger_config={"type": "manual"},
+            run_profile=run_profile,
+            concurrency=1,
+        )
+        if not await task_service.start_job(job_id):
+            await self._show_warning_async("后台任务启动失败", f"已创建但未能启动导入任务: {job_id}")
+            return job_id
+        message_title = "后台导入已启动" if import_payload is not None else "后台任务已启动"
+        message = f"已创建并启动导入任务: {job_id}" if import_payload is not None else f"已创建并启动任务: {job_id}"
+        await MessageDialog.information_async(self, message_title, message)
+        return job_id
+
+    def _handle_import_result(self, result: Any, *, table: SkyDataTable | None = None) -> None:
+        if table is not None:
+            table.request_refresh()
+        if not isinstance(result, dict) or not result.get("batch_id"):
+            return
+        records_page_id = str(result.get("records_page_id") or "").strip()
+        message = self._format_import_result_message(result)
+        if not records_page_id:
+            MessageDialog.information(self, "导入完成", message)
+            return
+        choice = ChoiceDialog.choose(
+            self,
+            "导入完成",
+            message,
+            choices=[DialogChoice("records", "查看明细", "primary")],
+            cancel_text="关闭",
+        )
+        if choice == "records":
+            self._open_page(
+                records_page_id,
+                {
+                    "batch_id": str(result.get("batch_id") or ""),
+                    "target_type": str(result.get("target_type") or ""),
+                },
+            )
+
+    async def _handle_import_result_async(self, result: Any, *, table: SkyDataTable | None = None) -> None:
+        if table is not None:
+            table.request_refresh()
+        if not isinstance(result, dict) or not result.get("batch_id"):
+            return
+        records_page_id = str(result.get("records_page_id") or "").strip()
+        message = self._format_import_result_message(result)
+        if not records_page_id:
+            await MessageDialog.information_async(self, "导入完成", message)
+            return
+        choice = await ChoiceDialog.choose_async(
+            self,
+            "导入完成",
+            message,
+            choices=[DialogChoice("records", "查看明细", "primary")],
+            cancel_text="关闭",
+        )
+        if choice == "records":
+            self._open_page(
+                records_page_id,
+                {
+                    "batch_id": str(result.get("batch_id") or ""),
+                    "target_type": str(result.get("target_type") or ""),
+                },
+            )
+
+    @staticmethod
+    def _format_import_result_message(result: dict[str, Any]) -> str:
+        return (
+            f"批次 {result.get('batch_id')} 已完成接收；"
+            f"总行数 {result.get('total_rows', 0)}，"
+            f"成功写入暂存表 {result.get('staged_rows', 0)}，"
+            f"失败 {result.get('failed_rows', 0)}。"
+        )
+
+    @staticmethod
+    def _notify_success(callback: Callable[..., None] | None, result: Any) -> None:
+        if callback is None:
+            return
+        callback_result: Any
+        try:
+            signature = inspect.signature(callback)
+        except (TypeError, ValueError):
+            callback_result = callback(result)
+            _schedule_awaitable(callback_result)
+            return
+        positional_params = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind
+            in {
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.VAR_POSITIONAL,
+            }
+            ]
+        if positional_params:
+            callback_result = callback(result)
+            _schedule_awaitable(callback_result)
+            return
+        callback_result = callback()
+        _schedule_awaitable(callback_result)
+
+    @staticmethod
+    async def _notify_success_async(callback: Callable[..., Any] | None, result: Any) -> None:
+        if callback is None:
+            return
+        try:
+            signature = inspect.signature(callback)
+        except (TypeError, ValueError):
+            callback_result = callback(result)
+        else:
+            positional_params = [
+                parameter
+                for parameter in signature.parameters.values()
+                if parameter.kind
+                in {
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.VAR_POSITIONAL,
+                }
+            ]
+            callback_result = callback(result) if positional_params else callback()
+        if inspect.isawaitable(callback_result):
+            await callback_result
+
     def _invoke_ui_action(
         self,
         action_name: str,
         params: dict[str, Any],
         *,
         error_title: str,
-        on_success: Callable[[], None] | None = None,
+        on_success: Callable[..., None] | None = None,
     ) -> bool:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             try:
-                self._bridge.call_ui_action(
+                result = self._bridge.call_ui_action(
                     action_name,
                     params,
                     capability_surface=_runtime_surface_hosted_ui_action(),
@@ -1168,8 +1563,7 @@ class ManagedPageRenderer(QWidget):
             except Exception as exc:
                 self._show_warning(error_title, str(exc))
                 return False
-            if on_success is not None:
-                on_success()
+            self._notify_success(on_success, result)
             return True
 
         task = loop.create_task(
@@ -1194,10 +1588,10 @@ class ManagedPageRenderer(QWidget):
         params: dict[str, Any],
         *,
         error_title: str,
-        on_success: Callable[[], None] | None = None,
+        on_success: Callable[..., None] | None = None,
     ) -> bool:
         try:
-            await self._bridge.call_ui_action_async(
+            result = await self._bridge.call_ui_action_async(
                 action_name,
                 params,
                 capability_surface=_runtime_surface_hosted_ui_action(),
@@ -1205,8 +1599,7 @@ class ManagedPageRenderer(QWidget):
         except Exception as exc:
             await self._show_warning_async(error_title, str(exc))
             return False
-        if on_success is not None:
-            on_success()
+        await self._notify_success_async(on_success, result)
         return True
 
     def _handle_action_task_result(
@@ -1214,15 +1607,14 @@ class ManagedPageRenderer(QWidget):
         task: Any,
         *,
         error_title: str,
-        on_success: Callable[[], None] | None = None,
+        on_success: Callable[..., None] | None = None,
     ) -> None:
         try:
-            task.result()
+            result = task.result()
         except Exception as exc:
             self._show_warning(error_title, str(exc))
             return
-        if on_success is not None:
-            on_success()
+        self._notify_success(on_success, result)
 
     def _handle_row_action(self, action: dict[str, Any], row: dict[str, Any]) -> None:
         page_id = str(action.get("page_id") or "").strip()
@@ -1261,6 +1653,9 @@ class ManagedPageRenderer(QWidget):
 
         self._apply_scroll_policy(self._schema)
         self._clear_content()
+        page_toolbar = self._build_toolbar_widget(self._schema.get("toolbar"))
+        if page_toolbar is not None:
+            self._content_layout.addWidget(page_toolbar)
         self._content_layout.addWidget(
             self._build_layout_widget(self._schema.get("children", []), self._schema.get("layout", {}))
         )

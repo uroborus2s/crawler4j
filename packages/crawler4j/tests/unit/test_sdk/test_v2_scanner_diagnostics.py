@@ -875,6 +875,174 @@ def delete_account(context, account_id: str):
     assert not [diagnostic for diagnostic in result.diagnostics if diagnostic.code.startswith("V2_PAGE_CRUD_HANDLER_")]
 
 
+def test_scan_v2_module_validates_toolbar_import_submit_contract(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import workflow
+
+
+@workflow(name="import_workflow")
+class ImportWorkflow:
+    pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "pages" / "dashboard.py").write_text(
+        """
+from crawler4j_contracts import page, ui_action
+
+
+@page(
+    name="dashboard",
+    schema={
+        "type": "Page",
+        "title": "Dashboard",
+        "toolbar": {
+            "actions": [
+                {
+                    "id": "missing_import",
+                    "label": "导入",
+                    "action": {
+                        "type": "open_import_dialog",
+                        "target_type": "ctrip_account",
+                        "submit": {"type": "ui_action", "name": "missing_import"},
+                    },
+                },
+                {
+                    "id": "workflow_import",
+                    "label": "后台导入",
+                    "action": {
+                        "type": "open_import_dialog",
+                        "target_type": "ctrip_account",
+                        "submit": {"type": "workflow", "name": "missing_workflow"},
+                    },
+                },
+            ]
+        },
+        "children": [
+            {
+                "type": "DataTable",
+                "table_id": "accounts",
+                "columns": ["phone"],
+                "data_source": {"type": "rows", "rows": []},
+                "toolbar": {
+                    "actions": [
+                        {
+                            "id": "bad_signature",
+                            "label": "导入账号",
+                            "action": {
+                                "type": "open_import_dialog",
+                                "target_type": "ctrip_account",
+                                "submit": {
+                                    "type": "ui_action",
+                                    "name": "bad_import",
+                                    "payload_param": "rows_payload",
+                                },
+                            },
+                        }
+                    ]
+                },
+            }
+        ],
+    },
+)
+def load_dashboard(context, page_id, params=None):
+    return {}
+
+
+@ui_action(name="bad_import")
+def bad_import(context, import_payload):
+    return {"ok": True}
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    diagnostics = [
+        diagnostic for diagnostic in result.diagnostics if diagnostic.code.startswith("V2_PAGE_TOOLBAR_")
+    ]
+    assert [(diagnostic.code, diagnostic.message) for diagnostic in diagnostics] == [
+        (
+            "V2_PAGE_TOOLBAR_UI_ACTION_MISSING",
+            "toolbar import submit must reference a @ui_action function: missing_import",
+        ),
+        (
+            "V2_PAGE_TOOLBAR_WORKFLOW_MISSING",
+            "toolbar import submit must reference a @workflow: missing_workflow",
+        ),
+        (
+            "V2_PAGE_TOOLBAR_UI_ACTION_SIGNATURE_INVALID",
+            "toolbar import submit bad_import signature must accept (context, rows_payload)",
+        ),
+    ]
+
+
+def test_scan_v2_module_accepts_toolbar_import_submit_handlers(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import workflow
+
+
+@workflow(name="import_workflow")
+class ImportWorkflow:
+    pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "pages" / "dashboard.py").write_text(
+        """
+from crawler4j_contracts import page, ui_action
+
+
+@page(
+    name="dashboard",
+    schema={
+        "type": "Page",
+        "title": "Dashboard",
+        "toolbar": {
+            "actions": [
+                {
+                    "id": "import_accounts",
+                    "label": "导入账号",
+                    "action": {
+                        "type": "open_import_dialog",
+                        "target_type": "ctrip_account",
+                        "submit": {"type": "ui_action", "name": "import_accounts"},
+                    },
+                },
+                {
+                    "id": "import_by_workflow",
+                    "label": "后台导入",
+                    "action": {
+                        "type": "open_import_dialog",
+                        "target_type": "ctrip_account",
+                        "submit": {"type": "workflow", "name": "import_workflow"},
+                    },
+                },
+            ]
+        },
+        "children": [],
+    },
+)
+def load_dashboard(context, page_id, params=None):
+    return {}
+
+
+@ui_action(name="import_accounts")
+async def import_accounts(context, import_payload: dict):
+    return {"batch_id": "imp-001", "total_rows": len(import_payload["rows"])}
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    assert not [diagnostic for diagnostic in result.diagnostics if diagnostic.code.startswith("V2_PAGE_TOOLBAR_")]
+
+
 def test_scan_v2_module_accepts_sync_page_query_handler(tmp_path: Path):
     module_root = _init_v2_module(tmp_path)
     (module_root / "workflows" / "main.py").write_text(

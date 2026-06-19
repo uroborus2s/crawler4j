@@ -45,15 +45,15 @@
 - `TASK-029-rebuild-shared-sky-data-table` TASK-029 重构共享表格组件 SkyDataTable
   状态：IN_PROGRESS | 负责人：Codex | 预估：4.0 人/天 | 关联：`TASK-029`, `CR-015`, `API-010`
 - `TASK-030-hosted-ui-import-toolbar-contract` TASK-030 建立 Hosted UI toolbar 批量导入契约
-  状态：PLANNED | 负责人：Codex | 预估：1.5 人/天 | 关联：`TASK-030`, `CR-016`, `REQ-010`, `API-019`, `TC-060`
+  状态：DONE | 负责人：Codex | 预估：1.5 人/天 | 关联：`TASK-030`, `CR-016`, `REQ-010`, `API-019`, `TC-060`
 - `TASK-031-host-import-dialog-parser` TASK-031 实现宿主导入弹窗与来源解析
-  状态：PLANNED | 负责人：Codex | 预估：2.0 人/天 | 关联：`TASK-031`, `CR-016`, `REQ-010`, `NFR-010`, `API-019`, `TC-060`
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`TASK-031`, `CR-016`, `REQ-010`, `NFR-010`, `API-019`, `TC-060`
 - `TASK-032-hosted-ui-import-dispatch-result` TASK-032 贯通 Hosted UI 导入分发与结果展示
-  状态：PLANNED | 负责人：Codex | 预估：2.0 人/天 | 关联：`TASK-032`, `CR-016`, `REQ-010`, `API-019`, `TC-060`
+  状态：DONE | 负责人：Codex | 预估：2.0 人/天 | 关联：`TASK-032`, `CR-016`, `REQ-010`, `API-019`, `TC-060`
 - `TASK-033-import-data-records-status-page-contract` TASK-033 约定导入暂存明细与逐条状态展示
-  状态：PLANNED | 负责人：Codex | 预估：1.0 人/天 | 关联：`TASK-033`, `CR-016`, `REQ-010`, `API-019`, `TC-060`
+  状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`TASK-033`, `CR-016`, `REQ-010`, `API-019`, `TC-060`
 - `TASK-034-hosted-ui-batch-import-tests-docs` TASK-034 完成批量导入测试、开发者说明和记忆收口
-  状态：PLANNED | 负责人：Codex | 预估：1.5 人/天 | 关联：`TASK-034`, `CR-016`, `REQ-010`, `NFR-010`, `API-019`, `TC-060`
+  状态：DONE | 负责人：Codex | 预估：1.5 人/天 | 关联：`TASK-034`, `CR-016`, `REQ-010`, `NFR-010`, `API-019`, `TC-060`
 - `TASK-0400-design-decorator-object-assembly-runtime` TASK-0400 形成 0.4.0 装饰器对象装配运行时方案
   状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0400`, `API-012`
 - `TASK-0401-design-versioned-user-developer-guides` TASK-0401 形成 docs-stratego 使用者/开发者指南版本分流方案

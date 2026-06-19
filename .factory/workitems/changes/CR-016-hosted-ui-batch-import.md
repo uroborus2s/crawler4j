@@ -1,6 +1,6 @@
 # CR-016 Hosted UI 宿主托管批量导入
 
-- 状态：PLANNED
+- 状态：DONE
 - 类型：CR
 - 优先级：P1
 - 估算：8.0 人/天
@@ -39,3 +39,12 @@
 - 宿主能展示 `batch_id/total_rows/staged_rows/failed_rows` 汇总并跳转批次明细页。
 - 敏感字段不在宿主日志、错误摘要或任务消息中明文输出。
 - `TC-060` 和相关定向回归通过。
+
+## 实现记录
+
+- 2026-06-19 已完成 Contracts / SDK / Core / UI 实现：
+  - `Page.toolbar.actions[]` 与 `DataTable.toolbar.actions[]` 支持 `ui_action`、`workflow`、`open_import_dialog`。
+  - 宿主新增 `hosted_import.py`，统一解析 `.csv/.xlsx` 文件、剪贴板 TSV/CSV 和手工 JSON，并执行文件类型、文件大小、最大行数、重复表头和敏感字段脱敏约束。
+  - `ManagedPageRenderer` 已渲染页面 / 表格 toolbar，导入 payload 可提交给模块 `@ui_action` 或 ATM workflow；workflow payload 会写入 `creation.params.import_payload` 并由 `ExecutionRunner` 提升到 `ctx.runtime["import_payload"]`。
+  - 模块返回批次汇总后，宿主展示导入结果，并可携带 `batch_id/target_type` 跳转 `import_data_records` 页面。
+- 验证：`uv run pytest packages/crawler4j/tests/unit -q` 通过 `1031 passed`；目标 `ruff check`、`git diff --check` 和 `.factory/project.json` JSON 校验通过。

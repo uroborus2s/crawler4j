@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-19 | 完成 Hosted UI 宿主托管批量导入实现：Contracts / SDK 支持页面和 `DataTable` toolbar actions，宿主新增 `.csv/.xlsx` / 剪贴板 / 手工 JSON 解析与敏感字段脱敏，`ManagedPageRenderer` 支持导入弹窗、`@ui_action` / workflow 分发、批次结果展示和 `import_data_records` 跳转，`ExecutionRunner` 将 `creation_params.import_payload` 提升到 `ctx.runtime["import_payload"]`。同时修复 REM 异常日志分支使用项目 logger 时的多参数调用问题。验证：全量 unit `1031 passed`，相关宽测试 `664 passed`，目标 `ruff check`、`git diff --check`、`.factory/project.json` JSON 校验通过 | Codex |
 | 2026-06-19 | 为 Hosted UI 宿主托管批量导入能力完成方案和任务登记：新增 `hosted-ui-batch-import-design.md`，同步 `REQ-010` / `NFR-010`、`API-019`、`CR-016`、`TASK-030` ~ `TASK-034` 和 `TC-060` 到需求、实施计划、测试计划、追踪矩阵、接口矩阵、文档索引和 `.factory/memory/`。当前仅为方案 / 文档阶段，代码实现和自动化验证待后续任务推进 | Codex |
 | 2026-06-18 | 将根应用 / 运行时版本提升到 `0.4.16`，修复来源代理同步匹配规则：来源代理回查仍优先采用真实结构化 `host/port`，但绑定 IP 表时只要求 `host + port` 唯一命中，不再比较协议、用户名或密码。定向回归 `54 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式客户端包、tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-16 | 将根应用 / 运行时版本提升到 `0.4.15`，修复 VirtualBrowser 来源代理解析优先级并收紧绑定语义：来源代理同步优先采用真实结构化代理，只有唯一命中 IP 表条目时才写入 `pool_id/ip_entry_id` 绑定；未命中 IP 表时跳过或清除本地错误绑定，不再把本地转发地址或非 IP 表代理保存为绑定 IP。定向回归 `53 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式客户端包、tag / release 与真机升级证据仍需后续补齐 | Codex |

@@ -252,12 +252,8 @@ def release_bound_run_status_after_task(
                 released += affected
         except Exception as exc:
             logger.warning(
-                "[REM] release bound run_status failed: module=%s table=%s field=%s env_id=%s error=%s",
-                module_name,
-                table_name,
-                field_name,
-                env_id,
-                exc,
+                "[REM] release bound run_status failed: "
+                f"module={module_name} table={table_name} field={field_name} env_id={env_id} error={exc}"
             )
     return released
 
