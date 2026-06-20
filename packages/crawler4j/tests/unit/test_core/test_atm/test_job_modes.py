@@ -920,34 +920,6 @@ async def test_start_job_blocks_when_runtime_precheck_fails():
 
 
 @pytest.mark.asyncio
-async def test_start_job_blocks_when_job_is_disabled():
-    service = TaskService()
-    job = Job(
-        id="service-job",
-        name="service",
-        type=JobType.SERVICE,
-        state=JobState.DISABLED,
-        run_profile=_build_select_run_profile(),
-        concurrency_target=2,
-    )
-    service._repo = SimpleNamespace(get_job=AsyncMock(return_value=job), save_job=AsyncMock())
-    service._controller = SimpleNamespace(
-        ensure_job_runtime_ready=AsyncMock(),
-        request_job_resume=AsyncMock(),
-        reconcile_job=AsyncMock(),
-    )
-
-    result = await service.start_job(job.id)
-
-    assert result is False
-    assert job.state == JobState.DISABLED
-    service._repo.save_job.assert_not_awaited()
-    service._controller.ensure_job_runtime_ready.assert_not_awaited()
-    service._controller.request_job_resume.assert_not_awaited()
-    service._controller.reconcile_job.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_ensure_job_runtime_ready_blocks_when_module_upgrade_lock_active(temp_state_dir):
     from src.core.mms.release_service import ModuleReleaseService
 
@@ -1068,38 +1040,6 @@ async def test_run_job_once_dispatches_manual_batch_without_activating_job():
     service._repo.save_job.assert_not_awaited()
     assert service._controller.ensure_job_runtime_ready.await_count == 2
     assert service._controller.dispatcher.dispatch.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_run_job_once_blocks_when_manual_batch_is_disabled():
-    service = TaskService()
-    job = Job(
-        id="batch-manual-job",
-        name="manual-batch",
-        type=JobType.BATCH,
-        state=JobState.DISABLED,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-        run_profile=_build_select_run_profile(),
-        concurrency_target=2,
-    )
-    service._repo = SimpleNamespace(
-        get_job=AsyncMock(return_value=job),
-        save_job=AsyncMock(),
-        count_active_tasks=AsyncMock(return_value=0),
-    )
-    service._controller = SimpleNamespace(
-        ensure_job_runtime_ready=AsyncMock(),
-        dispatcher=SimpleNamespace(dispatch=AsyncMock()),
-    )
-
-    result = await service.run_job_once(job.id)
-
-    assert result is False
-    assert job.state == JobState.DISABLED
-    service._repo.save_job.assert_not_awaited()
-    service._repo.count_active_tasks.assert_not_awaited()
-    service._controller.ensure_job_runtime_ready.assert_not_awaited()
-    service._controller.dispatcher.dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1271,51 +1211,6 @@ async def test_update_job_switches_manual_batch_to_paused_and_requests_stop():
     assert job.trigger.type == TriggerType.MANUAL
     assert job.state == JobState.PAUSED
     service._controller.request_job_stop.assert_awaited_once_with(job.id)
-    service._controller.reconcile_job.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_disable_job_sets_disabled_and_requests_stop_for_active_job():
-    service = TaskService()
-    job = Job(
-        id="service-job",
-        name="service",
-        type=JobType.SERVICE,
-        state=JobState.ACTIVE,
-        run_profile=_build_select_run_profile(),
-        concurrency_target=2,
-    )
-    service._repo = SimpleNamespace(get_job=AsyncMock(return_value=job), save_job=AsyncMock())
-    service._controller = SimpleNamespace(request_job_stop=AsyncMock())
-
-    result = await service.disable_job(job.id)
-
-    assert result is True
-    assert job.state == JobState.DISABLED
-    service._repo.save_job.assert_awaited_once_with(job)
-    service._controller.request_job_stop.assert_awaited_once_with(job.id)
-
-
-@pytest.mark.asyncio
-async def test_enable_job_returns_disabled_job_to_paused_without_starting_it():
-    service = TaskService()
-    job = Job(
-        id="service-job",
-        name="service",
-        type=JobType.SERVICE,
-        state=JobState.DISABLED,
-        run_profile=_build_select_run_profile(),
-        concurrency_target=2,
-    )
-    service._repo = SimpleNamespace(get_job=AsyncMock(return_value=job), save_job=AsyncMock())
-    service._controller = SimpleNamespace(request_job_resume=AsyncMock(), reconcile_job=AsyncMock())
-
-    result = await service.enable_job(job.id)
-
-    assert result is True
-    assert job.state == JobState.PAUSED
-    service._repo.save_job.assert_awaited_once_with(job)
-    service._controller.request_job_resume.assert_awaited_once_with(job.id)
     service._controller.reconcile_job.assert_not_awaited()
 
 

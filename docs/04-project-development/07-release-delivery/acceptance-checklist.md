@@ -7,7 +7,7 @@
 **上游输入：** `version-governance.md` | `release-notes.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** `delivery-package.md` | 发布决策 | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-003`, `REL-004`, `TASK-017`, `REQ-009`, `REQ-0401`, `NFR-003`
-**最后更新：** 2026-06-19
+**最后更新：** 2026-06-16
 
 ## 1. 使用范围
 
@@ -23,7 +23,7 @@
 | 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备（2026-05-18 复验通过） |
 | 运行 | `uv run python scripts/smoke_test_ui.py` 通过 | `test-plan.md` | 已具备（2026-05-01 复验通过；当前 smoke 覆盖 Shell 导航/页面数量与 Dashboard 异步刷新） |
 | 构建 | Root / SDK / Contracts build 通过 | `test-plan.md` | 部分具备（2026-05-26 已产出 Root 0.4.3 wheel/sdist；当前 root 0.4.16 尚未刷新，本轮 SDK / Contracts 0.4.2 wheel/sdist 已构建并发布） |
-| 构建 | 桌面客户端下载包（macOS / Windows）齐备 | `delivery-package.md` | 部分具备（2026-06-19 已重新生成并上传 macOS `Crawler4j-0.4.16.dmg` / `appcast.xml`；Windows `PyInstaller onedir + Velopack` 发布链已落地，但当前批次仍缺 Windows 真机签名、安装、升级证据与正式下载地址） |
+| 构建 | 桌面客户端下载包（macOS / Windows）齐备 | `delivery-package.md` | 部分具备（2026-05-18 macOS Sparkle DMG / appcast 已生成并上传；Windows `PyInstaller onedir + Velopack` 发布链已落地，但当前批次仍缺 Windows 真机签名、安装、升级证据与正式下载地址） |
 | 业务 | `ctrip` 真实站点 E2E 完成并记录结果 | `ctrip-real-site-e2e-closeout.md` + 真实环境验证记录 | 阻塞（当前只补齐了 DevLink 活跃事实、fresh ZIP 预检与历史登录日志，仍未完成本轮 DevLink + ZIP 双链真实站点闭环） |
 | 业务 | 若本次批次包含环境候选 Service Job 队列能力，则已验证“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、候选纯函数实时过滤、模块环境授权和等待超时收口 | `test-plan.md` + 对应测试记录 | 已具备（当前 HEAD 已纳入 `TASK-023` / `REQ-009` 变更，`TC-026` / `TC-027` 本地回归已完成；正式切版时仍需把这组证据绑定到发布批次） |
 | 文档 | 根导航、文档索引、memory 映射同步完成 | `docs/index.md`、`document-index.md`、`.factory/memory/doc-map.md` | 已具备 |
@@ -40,7 +40,7 @@
 ## 4. 当前阻塞项
 
 1. `ctrip` 真实站点 E2E 仍未按 `ctrip-real-site-e2e-closeout.md` 完成本轮 DevLink + ZIP 双链回放并留证；当前只复验了 DevLink 活跃状态、fresh ZIP 预检和历史真实登录日志。
-2. 当前 `0.4.16` 对应的 Git tag / GitHub release 资产与本次交付批次未在本轮复核闭环；SDK / Contracts 0.4.2 PyPI publish 已完成，macOS 0.4.16 客户端升级包已重新生成并上传。
+2. 当前 `0.4.16` 对应的 Git tag / GitHub release 资产与本次交付批次未在本轮复核闭环；SDK / Contracts 0.4.2 PyPI publish 已完成，macOS 0.4.3 客户端升级包已完成。
 3. 当前虽已具备 Windows `PyInstaller onedir + Velopack` 发布链，但本轮仍缺 Windows 真机签名、安装、升级留证与正式下载地址，不能声称“Windows 交付包已放行”。
 
 ## 5. 变更记录
@@ -64,8 +64,7 @@
 | 2026-06-15 | SDK / Contracts 版本提升到 `0.4.2`，根应用版本保持 `0.4.13`，用于发布已有环境导入 workflow 场景契约、代理读取能力和环境列表绑定 IP 展示；SDK / Contracts PyPI 发布与本轮验证证据已补齐 | Codex |
 | 2026-06-16 | 根应用版本提升到 `0.4.14`，用于发布已导入指纹浏览器环境的来源代理同步与 IP 表唯一匹配绑定能力；正式 tag / release、0.4.14 客户端包与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-16 | 根应用版本提升到 `0.4.15`，用于修复 VirtualBrowser 来源代理解析优先级，避免本地转发 URL 被保存为绑定 IP；正式 tag / release、0.4.15 客户端包与真机升级证据仍需后续补齐 | Codex |
-| 2026-06-18 | 根应用版本提升到 `0.4.16`，用于修复来源代理同步匹配规则，按 `host + port` 唯一命中 IP 表；macOS 客户端包后续已于 2026-06-19 补齐，正式 tag / release 与 Windows 真机升级证据仍需后续补齐 | Codex |
-| 2026-06-19 | 重新发布 macOS `0.4.16` 客户端升级包：删除远端旧 DMG 后重新生成并上传 `Crawler4j-0.4.16.dmg` 与 `appcast.xml`，公网下载 URL 已返回 `200` | Codex |
+| 2026-06-18 | 根应用版本提升到 `0.4.16`，用于修复来源代理同步匹配规则，按 `host + port` 唯一命中 IP 表；正式 tag / release、0.4.16 客户端包与真机升级证据仍需后续补齐 | Codex |
 | 2026-04-30 | 增补 docs-stratego 文档主版本 gate：发布前必须确认主入口指向当前已发布版本，历史版本保留，开发中版本不得成为默认主文档 | Codex |
 | 2026-04-30 | 将 `REQ-009` 发布 gate 从固定资源池队列改为环境候选队列：候选纯函数、模块环境授权、FIFO 补位与等待超时收口是当前正式验证项 | Codex |
 | 2026-04-22 | 追加 Windows 发布链现状：`package-windows-release` 与 Velopack 宿主更新入口已落地，但正式 gate 仍缺 Windows 真机签名、安装、升级证据，因此结论继续保持 `No-Go` | Codex |

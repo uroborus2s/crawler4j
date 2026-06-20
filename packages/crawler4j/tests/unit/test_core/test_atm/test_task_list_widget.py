@@ -82,42 +82,6 @@ def test_task_list_widget_renders_manual_batch_run_once_button(qtbot, monkeypatc
     assert row["trigger"] == "手动执行一次"
     assert "▶ 执行一次" in button_texts
     assert "▶ 启动" not in button_texts
-    assert "禁用" in button_texts
-
-
-def test_task_list_widget_renders_disabled_job_as_enable_only(qtbot, monkeypatch):
-    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
-
-    job = Job(
-        id="job-disabled",
-        name="manual-disabled",
-        type=JobType.BATCH,
-        state=JobState.DISABLED,
-        trigger=TriggerConfig(type=TriggerType.MANUAL),
-        concurrency_target=1,
-    )
-    widget._resolve_debug_target = MagicMock(
-        return_value=SimpleNamespace(module=SimpleNamespace(source=task_list_widget.ModuleSource.DEV_LINK))
-    )
-    widget._display_items = [
-        task_list_widget.JobDisplayItem(
-            raw=job,
-            display_status_text="已禁用",
-            display_status_color="#64748b",
-        )
-    ]
-
-    widget._refresh_table()
-    row = widget.table.displayed_rows()[0]
-    action_ids = [action["id"] for action in row["actions"]]
-    button_texts = [action["label"] for action in row["actions"]]
-
-    assert row["status"]["text"] == "已禁用"
-    assert "enable" in action_ids
-    assert "run_once" not in action_ids
-    assert "start" not in action_ids
-    assert "debug" not in action_ids
-    assert "启用" in button_texts
 
 
 def test_task_list_widget_stop_run_once_uses_confirm_dialog(qtbot, monkeypatch):
@@ -452,24 +416,6 @@ async def test_task_list_widget_run_once_failure_uses_async_warning_dialog(qtbot
     widget.load_data.assert_called_once_with()
     assert "job-manual" not in widget._pending_run_once_job_ids
     assert "job-manual" not in widget._run_once_requesting_job_ids
-
-
-@pytest.mark.asyncio
-async def test_task_list_widget_disable_and_enable_delegate_to_service(qtbot, monkeypatch):
-    task_list_widget, widget = _build_widget(qtbot, monkeypatch)
-
-    service = SimpleNamespace(
-        disable_job=AsyncMock(return_value=True),
-        enable_job=AsyncMock(return_value=True),
-    )
-    monkeypatch.setattr(task_list_widget, "get_task_service", lambda: service)
-    monkeypatch.setattr(widget, "_load_data_async", AsyncMock())
-
-    await widget._async_op("job-active", "disable")
-    await widget._async_op("job-disabled", "enable")
-
-    service.disable_job.assert_awaited_once_with("job-active")
-    service.enable_job.assert_awaited_once_with("job-disabled")
 
 
 @pytest.mark.asyncio

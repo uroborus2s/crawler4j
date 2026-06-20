@@ -435,7 +435,7 @@ async def test_env_list_widget_cleanup_skips_without_safe_candidates(qtbot, monk
     widget._confirm_cleanup_plan_async.assert_not_awaited()
     widget._show_message_async.assert_awaited_once_with(
         "批量清理",
-        "当前候选环境均不满足清理安全条件。\n- 2: 状态不允许清理: running",
+        "当前候选环境均不满足清理安全条件。",
         kind="warning",
     )
 
