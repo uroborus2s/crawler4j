@@ -24,6 +24,7 @@ from src.core.debug.repository import (
     get_debug_session_repository,
 )
 from src.core.debug.resolver import resolve_job_debug_target
+from src.core.atm.models import JobState
 from src.core.mms.models import ModuleSource
 from src.core.mms.registry import ModuleRegistry, get_module_registry
 from src.core.atm.service import TaskService, get_task_service
@@ -64,6 +65,8 @@ class DebugService:
         job = await job_result if inspect.isawaitable(job_result) else job_result
         if not job:
             raise ValueError(f"Job not found: {request.job_id}")
+        if job.state == JobState.DISABLED:
+            raise ValueError(f"作业已禁用，不能调试: {job.name or job.id}")
 
         target = resolve_job_debug_target(
             job,

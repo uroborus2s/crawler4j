@@ -28,6 +28,7 @@ class JobState(str, enum.Enum):
     """作业生命周期状态。"""
     ACTIVE = "active"     # 启用中 (Controller 会调度)
     PAUSED = "paused"     # 已暂停 (Controller 忽略)
+    DISABLED = "disabled" # 已禁用 (用户显式锁定，禁止启动/执行/调试)
     COMPLETED = "completed" # 已完成 (仅 Batch)
     ERROR = "error"       # 异常停止
 
