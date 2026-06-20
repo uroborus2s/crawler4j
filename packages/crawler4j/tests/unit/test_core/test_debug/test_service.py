@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.core.atm.models import Job
+from src.core.atm.models import Job, JobState
 from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
@@ -114,6 +114,23 @@ def _make_job() -> Job:
         run_profile=_make_run_profile(),
         params={"city": "Shanghai"},
     )
+
+
+@pytest.mark.asyncio
+async def test_debug_service_rejects_disabled_job(temp_data_dir):
+    from src.core.debug.models import DebugSessionRequest
+    from src.core.debug.service import DebugService
+
+    job = _make_job()
+    job.state = JobState.DISABLED
+    service = DebugService(
+        registry=_make_registry(temp_data_dir / "demo_module"),
+        task_service=SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None),
+        stop_timeout=0.01,
+    )
+
+    with pytest.raises(ValueError, match="已禁用"):
+        await service.create_session(DebugSessionRequest(job_id=job.id))
 
 
 def _make_inline_job() -> Job:

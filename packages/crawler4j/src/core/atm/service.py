@@ -68,6 +68,10 @@ class TaskService:
             return
         raise ValueError("作业必须配置运行模板")
 
+    @staticmethod
+    def _is_disabled(job: Job) -> bool:
+        return job.state == JobState.DISABLED
+
     async def start(self):
         """启动 ATM 服务 (Controller)。"""
         if self._started:
@@ -143,7 +147,11 @@ class TaskService:
 
         job.trigger = self._normalize_trigger(job.type, job.trigger)
         self._validate_runtime_source(job.run_profile)
-        if job.type == JobType.BATCH and job.trigger.type == TriggerType.MANUAL:
+        if (
+            job.type == JobType.BATCH
+            and job.trigger.type == TriggerType.MANUAL
+            and job.state != JobState.DISABLED
+        ):
             job.state = JobState.PAUSED
 
         job.updated_at = int(time.time())
@@ -175,6 +183,9 @@ class TaskService:
         """立即执行一次手动批次作业，不改变作业的长期调度状态。"""
         job = await self._repo.get_job(job_id)
         if not job:
+            return False
+        if self._is_disabled(job):
+            logger.info(f"[ATM] Job run once blocked because job is disabled: {job.id}")
             return False
         if job.type != JobType.BATCH or job.trigger.type != TriggerType.MANUAL:
             raise ValueError("只有“执行一次”模式的批次任务支持手动执行。")
@@ -226,6 +237,9 @@ class TaskService:
         job = await self._repo.get_job(job_id)
         if not job:
             return False
+        if self._is_disabled(job):
+            logger.info(f"[ATM] Job start blocked because job is disabled: {job.id}")
+            return False
         if job.type == JobType.BATCH and job.trigger.type == TriggerType.MANUAL:
             return await self.run_job_once(job_id)
 
@@ -254,6 +268,43 @@ class TaskService:
         await self._repo.save_job(job)
         await self._controller.request_job_stop(job.id)
         logger.info(f"[ATM] Job paused: {job.id}")
+        return True
+
+    async def disable_job(self, job_id: str) -> bool:
+        """禁用作业，阻断后续执行/启动/调试入口。"""
+        job = await self._repo.get_job(job_id)
+        if not job:
+            return False
+
+        already_disabled = job.state == JobState.DISABLED
+        was_active = job.state == JobState.ACTIVE
+        has_active_tasks = False
+        if not was_active:
+            has_active_tasks = await self._repo.count_active_tasks(job.id) > 0
+        if not already_disabled:
+            job.state = JobState.DISABLED
+            job.updated_at = int(time.time())
+            await self._repo.save_job(job)
+
+        if was_active or has_active_tasks:
+            await self._controller.request_job_stop(job.id)
+
+        logger.info(f"[ATM] Job disabled: {job.id}")
+        return True
+
+    async def enable_job(self, job_id: str) -> bool:
+        """启用作业；只解除禁用锁，不自动启动。"""
+        job = await self._repo.get_job(job_id)
+        if not job:
+            return False
+        if job.state != JobState.DISABLED:
+            return True
+
+        job.state = JobState.PAUSED
+        job.updated_at = int(time.time())
+        await self._repo.save_job(job)
+        await self._controller.request_job_resume(job.id)
+        logger.info(f"[ATM] Job enabled: {job.id}")
         return True
 
     async def _wait_for_job_active_tasks_to_finish(self, job_id: str) -> bool:
