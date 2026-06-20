@@ -78,6 +78,7 @@ class TaskListWidget(QWidget):
     STATUS_COLORS = {
         JobState.ACTIVE: "#facc15",    # Yellow
         JobState.PAUSED: "#9ca3af",    # Grey
+        JobState.DISABLED: "#64748b",  # Slate
         JobState.COMPLETED: "#4ade80", # Green
         JobState.ERROR: "#f87171",     # Red
     }
@@ -85,6 +86,7 @@ class TaskListWidget(QWidget):
     STATUS_TEXT = {
         JobState.ACTIVE: "运行中",
         JobState.PAUSED: "已暂停",
+        JobState.DISABLED: "已禁用",
         JobState.COMPLETED: "已完成",
         JobState.ERROR: "异常",
     }
@@ -327,7 +329,16 @@ class TaskListWidget(QWidget):
             item.active_task_count,
         )
         state = self._normalize_state(job.state)
-        if is_manual_batch:
+        if state == JobState.DISABLED:
+            actions.append(
+                {
+                    "id": "enable",
+                    "label": "启用",
+                    "tooltip": "解除禁用后，作业才能执行、启动或调试。",
+                    "variant": "success",
+                }
+            )
+        elif is_manual_batch:
             is_starting = item.run_once_phase == "starting"
             is_running = item.run_once_phase == "running"
             is_stopping = item.run_once_phase == "stopping"
@@ -356,9 +367,21 @@ class TaskListWidget(QWidget):
         else:
             actions.append({"id": "start", "label": "▶ 启动", "variant": "primary"})
 
-        debug_target = self._resolve_debug_target(job)
+        if state != JobState.DISABLED:
+            debug_target = self._resolve_debug_target(job)
+        else:
+            debug_target = None
         if debug_target and debug_target.module.source == ModuleSource.DEV_LINK:
             actions.append({"id": "debug", "label": "🐞 调试", "variant": "warning"})
+        if state != JobState.DISABLED:
+            actions.append(
+                {
+                    "id": "disable",
+                    "label": "禁用",
+                    "tooltip": "禁用后，该作业不能执行、启动或调试。",
+                    "variant": "secondary",
+                }
+            )
         actions.append({"id": "edit", "label": "✏️", "variant": "secondary"})
         actions.append({"id": "delete", "label": "🗑", "variant": "secondary"})
         return actions
@@ -374,6 +397,7 @@ class TaskListWidget(QWidget):
         return {
             JobState.ACTIVE: "warning",
             JobState.PAUSED: "neutral",
+            JobState.DISABLED: "neutral",
             JobState.COMPLETED: "success",
             JobState.ERROR: "danger",
         }.get(state, "neutral")
@@ -408,6 +432,10 @@ class TaskListWidget(QWidget):
             self._pause_job(job_id)
         elif action_id == "start":
             self._start_job(job_id)
+        elif action_id == "disable":
+            self._disable_job(job_id)
+        elif action_id == "enable":
+            self._enable_job(job_id)
         elif action_id == "debug":
             self._open_debug_dialog(job_id)
         elif action_id == "edit":
@@ -420,6 +448,12 @@ class TaskListWidget(QWidget):
 
     def _pause_job(self, job_id: str):
         asyncio.create_task(self._async_op(job_id, "pause"))
+
+    def _disable_job(self, job_id: str):
+        asyncio.create_task(self._async_op(job_id, "disable"))
+
+    def _enable_job(self, job_id: str):
+        asyncio.create_task(self._async_op(job_id, "enable"))
 
     def _run_job_once(self, job_id: str):
         if job_id in self._pending_run_once_job_ids:
@@ -487,6 +521,10 @@ class TaskListWidget(QWidget):
                 success = await service.pause_job(job_id)
             elif op == "run_once":
                 success = await service.run_job_once(job_id)
+            elif op == "disable":
+                success = await service.disable_job(job_id)
+            elif op == "enable":
+                success = await service.enable_job(job_id)
             elif op == "delete":
                 success = await service.delete_job(job_id)
 
@@ -495,6 +533,8 @@ class TaskListWidget(QWidget):
                     "start": "启动失败，请检查运行模板和当前任务状态。",
                     "pause": "暂停失败，请稍后重试。",
                     "run_once": "执行失败，请确认当前没有未结束的批次任务且运行模板可用。",
+                    "disable": "禁用失败，请稍后重试。",
+                    "enable": "启用失败，请稍后重试。",
                     "delete": "删除失败，请稍后重试。",
                 }.get(op, "操作失败")
                 raise RuntimeError(action_text)

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from PyQt6.QtWidgets import QApplication, QScrollArea
 
-from src.core.atm.models import Job
+from src.core.atm.models import Job, JobState
 from src.core.atm.run_profile import (
     AcquisitionConfig,
     AcquisitionMode,
@@ -103,6 +103,23 @@ def test_job_debug_dialog_builds_request_from_form(qtbot, tmp_path):
     assert request.timeout == 240
     assert request.wait_for_attach is False
     assert request.stop_on_entry is True
+
+
+def test_job_debug_dialog_disables_start_controls_for_disabled_job(qtbot, tmp_path):
+    from src.core.atm.ui.task_debug_dialog import JobDebugDialog
+
+    job = _make_job()
+    job.state = JobState.DISABLED
+    page = JobDebugDialog(
+        job,
+        _make_run_profile(),
+        _make_module(tmp_path),
+        debug_service=SimpleNamespace(),
+    )
+    qtbot.addWidget(page)
+
+    assert page.start_btn.isEnabled() is False
+    assert page.restart_btn.isEnabled() is False
 
 
 def test_job_debug_dialog_copies_attach_address(qtbot, tmp_path):

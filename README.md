@@ -14,7 +14,7 @@
 | `crawler4j-contracts` | `0.4.2` | Core / SDK / 模块共享契约 |
 | 最近正式 Git tag | `v0.2.0` | 仓库中最新已知正式 tag |
 
-当前版本线不等于已经完成正式 tag / GitHub release。`crawler4j 0.4.16` 推进桌面宿主与 Core 运行时包版本，用于承接来源代理同步匹配规则修复：同步来源代理时仍优先使用外部环境的结构化真实代理端点，并在 IP 表中按 `host + port` 唯一命中后写入 `pool_id/ip_entry_id` 绑定，不再要求协议、用户名或密码一致；`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2` 继续用于对外发布已有环境导入 workflow 场景契约。当前最新已记录 macOS Sparkle 客户端升级包仍为 2026-05-26 生成并上传的 `0.4.3`；`0.4.16` 客户端包、`ctrip` 真实站点 E2E、Windows 真机安装/升级证据、Git tag / GitHub release 与正式交付批次仍需继续收口。
+当前版本线不等于已经完成正式 tag / GitHub release。`crawler4j 0.4.16` 推进桌面宿主与 Core 运行时包版本，用于承接来源代理同步匹配规则修复：同步来源代理时仍优先使用外部环境的结构化真实代理端点，并在 IP 表中按 `host + port` 唯一命中后写入 `pool_id/ip_entry_id` 绑定，不再要求协议、用户名或密码一致；`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2` 继续用于对外发布已有环境导入 workflow 场景契约。当前最新已记录 macOS Sparkle 客户端升级包为 2026-06-19 重新生成并上传的 `Crawler4j-0.4.16.dmg` / `appcast.xml`；`ctrip` 真实站点 E2E、Windows 真机安装/升级证据、Git tag / GitHub release 与正式交付批次仍需继续收口。
 
 ## Workspace Layout
 

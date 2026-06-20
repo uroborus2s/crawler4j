@@ -1377,7 +1377,15 @@ class EnvListWidget(QWidget):
 
         eligible_items = [item for item in plan.items if item.eligible]
         if not eligible_items:
-            await self._show_message_async("批量清理", "当前候选环境均不满足清理安全条件。", kind="warning")
+            reason_lines = [
+                f"- {item.env_id}: {item.reason}"
+                for item in plan.items[:8]
+                if str(getattr(item, "reason", "") or "").strip()
+            ]
+            message = "当前候选环境均不满足清理安全条件。"
+            if reason_lines:
+                message = f"{message}\n" + "\n".join(reason_lines)
+            await self._show_message_async("批量清理", message, kind="warning")
             return
 
         if not await self._confirm_cleanup_plan_async(plan):

@@ -7,7 +7,7 @@
 **上游输入：** Git tag | `docs/04-project-development/02-discovery/current-state-analysis.md` | 本地构建结果  
 **下游输出：** 后续正式 release notes | `delivery-package.md`（待需要时补齐）  
 **关联 ID：** `REL-001`, `REL-002`, `BUG-001`, `CR-001`  
-**最后更新：** 2026-06-16
+**最后更新：** 2026-06-19
 
 ## 1. 最新已知正式发布
 
@@ -39,15 +39,14 @@
 | SDK publish | 通过（2026-06-15 `uv run publish crawler4j-sdk` 上传 0.4.2 到 PyPI） |
 | Contracts wheel/sdist build | 通过（2026-06-15 `uv run build crawler4j-contracts crawler4j-sdk` 产出 `crawler4j-contracts 0.4.2` wheel/sdist） |
 | Contracts publish | 通过（2026-06-15 `uv run publish crawler4j-contracts` 上传 0.4.2 到 PyPI） |
-| Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-05-26 `uv run deploy-macos-internal-release` 产出 `Crawler4j.app`、`Crawler4j-0.4.3.dmg`、`appcast.xml` 并上传 macOS 更新目录） |
-| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；本轮 0.4.16 来源代理匹配规则修复、环境列表和版本服务定向回归 `54 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
+| Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-06-19 删除远端旧 `Crawler4j-0.4.16.dmg` 后，`uv run package-macos-internal-release` 重新生成 `Crawler4j.app`、`Crawler4j-0.4.16.dmg`、`appcast.xml` 并上传 macOS 更新目录；公网 DMG `HEAD 200`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243`） |
+| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；本轮 0.4.16 来源代理匹配规则修复、环境列表和版本服务定向回归 `54 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；2026-06-19 版本/打包配置回归 `65 passed`，`uv lock --check` 通过 |
 | Docs markdown tree | 历史通过（`docs-stratego source validate --repo-path .`）；本轮未重跑 |
 
 ## 4. 当前不建议直接发布的原因
 
 - `0.4.16` 对应的 Git tag、正式 GitHub release 与交付批次仍未完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
-- macOS 内部升级包已完成，本轮仍缺 Windows 真机签名、安装和自更新留证
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
@@ -89,3 +88,4 @@
 | 2026-06-16 | 仅将根应用 / 运行时版本提升到 `0.4.14`，用于发布已导入指纹浏览器环境的来源代理同步与 IP 表唯一匹配绑定能力；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-06-16 | 仅将根应用 / 运行时版本提升到 `0.4.15`，用于发布 VirtualBrowser 来源代理解析修复：优先使用结构化来源代理，避免把本地转发 URL 当作绑定 IP；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-06-18 | 仅将根应用 / 运行时版本提升到 `0.4.16`，用于发布来源代理同步匹配规则修复：按 `host + port` 唯一命中 IP 表，不再比较协议、用户名或密码；SDK / Contracts 继续保持 `0.4.2` | Codex |
+| 2026-06-19 | 删除远端旧 macOS `0.4.16` DMG，重新生成并上传 `Crawler4j-0.4.16.dmg` 与 `appcast.xml`，公网下载 URL 已返回 `200` | Codex |
