@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.atm.job_runtime import describe_job_runtime
-from src.core.atm.models import Job
+from src.core.atm.models import Job, JobState
 from src.core.atm.run_profile import AcquisitionMode
 from src.core.debug.models import DebugSession, DebugSessionRequest, DebugSessionState
 from src.core.debug.resolver import JobDebugTarget
@@ -387,14 +387,15 @@ class JobDebugDialog(QDialog):
 
     def _update_action_states(self, session: DebugSession | None = None) -> None:
         state = session.state if session else None
+        disabled = self._job.state == JobState.DISABLED
         running = state in {
             DebugSessionState.STARTING,
             DebugSessionState.WAITING_FOR_ATTACH,
             DebugSessionState.RUNNING,
             DebugSessionState.STOPPING,
         }
-        self.start_btn.setEnabled(not running)
-        self.restart_btn.setEnabled(self._current_session_id is not None)
+        self.start_btn.setEnabled(not running and not disabled)
+        self.restart_btn.setEnabled(self._current_session_id is not None and not disabled)
         self.stop_btn.setEnabled(running)
         self.copy_attach_btn.setEnabled(bool(session and session.attach_port))
 
