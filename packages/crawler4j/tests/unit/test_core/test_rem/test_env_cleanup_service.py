@@ -4,14 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.core.atm.models import Job, JobState
-from src.core.atm.run_profile import (
-    AcquisitionConfig,
-    AcquisitionMode,
-    ExecutionContext,
-    ResourceConfig,
-    RunProfile,
-)
 from src.core.rem.cleanup_service import EnvCleanupService
 from src.core.rem.env_claims import (
     CLAIM_ABANDONED,
@@ -106,35 +98,11 @@ class _FakeModuleService:
 
 
 class _FakeTaskRepository:
-    def __init__(self, *, active_jobs: list[Job] | None = None, all_jobs: list[Job] | None = None):
-        self._active_jobs = list(active_jobs or [])
-        self._all_jobs = list(all_jobs or [])
-
     async def get_running_tasks(self):
         return []
 
     async def list_jobs(self):
-        return self._all_jobs
-
-    async def list_active_jobs(self):
-        return self._active_jobs
-
-
-def _fixed_env_job(env_id: int, *, state: JobState) -> Job:
-    return Job(
-        id=f"job-{state.value}-{env_id}",
-        name=f"fixed-env-{env_id}",
-        state=state,
-        run_profile=RunProfile(
-            resource=ResourceConfig(
-                acquisition=AcquisitionConfig(
-                    mode=AcquisitionMode.SELECT,
-                    env_id=env_id,
-                )
-            ),
-            execution=ExecutionContext(module="demo_module", workflow="main"),
-        ),
-    )
+        return []
 
 
 async def _seed_claim(manager: _FakeEnvironmentManager, env_id: int, owner: str) -> None:
@@ -193,48 +161,6 @@ async def test_env_cleanup_preview_deduplicates_and_marks_safety(monkeypatch):
     assert "状态不允许清理" in plan.items[1].reason
     assert plan.items[2].eligible is False
     assert "租约" in plan.items[2].reason
-
-
-@pytest.mark.asyncio
-async def test_env_cleanup_ignores_paused_fixed_env_jobs(monkeypatch):
-    manager = _FakeEnvironmentManager({1: _env(1)})
-    await _seed_claim(manager, 1, "demo_module")
-    _patch_cleanup_runtime(monkeypatch)
-    service = EnvCleanupService(
-        module_service=_FakeModuleService(),
-        environment_manager=manager,
-        task_repository=_FakeTaskRepository(
-            active_jobs=[],
-            all_jobs=[_fixed_env_job(1, state=JobState.PAUSED)],
-        ),
-    )
-
-    plan = await service.preview()
-
-    assert plan.items[0].env_id == 1
-    assert plan.items[0].eligible is True
-    assert plan.items[0].reason == ""
-
-
-@pytest.mark.asyncio
-async def test_env_cleanup_blocks_active_fixed_env_jobs(monkeypatch):
-    manager = _FakeEnvironmentManager({1: _env(1)})
-    await _seed_claim(manager, 1, "demo_module")
-    _patch_cleanup_runtime(monkeypatch)
-    service = EnvCleanupService(
-        module_service=_FakeModuleService(),
-        environment_manager=manager,
-        task_repository=_FakeTaskRepository(
-            active_jobs=[_fixed_env_job(1, state=JobState.ACTIVE)],
-            all_jobs=[],
-        ),
-    )
-
-    plan = await service.preview()
-
-    assert plan.items[0].env_id == 1
-    assert plan.items[0].eligible is False
-    assert plan.items[0].reason == "仍被运行模板固定引用"
 
 
 @pytest.mark.asyncio

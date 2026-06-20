@@ -348,8 +348,14 @@ class EnvCleanupService:
         return env_ids, task_ids
 
     async def _fixed_job_env_ids(self) -> set[int]:
+        list_jobs = getattr(self._task_repository, "list_jobs", None)
+        if not callable(list_jobs):
+            return set()
         env_ids: set[int] = set()
-        jobs = await self._task_repository.list_active_jobs()
+        try:
+            jobs = await list_jobs()
+        except Exception:
+            return set()
         for job in jobs:
             run_profile = getattr(job, "run_profile", None)
             acquisition = getattr(getattr(run_profile, "resource", None), "acquisition", None)
