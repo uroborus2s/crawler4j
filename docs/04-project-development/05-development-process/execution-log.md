@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `CR-016`, `API-009`, `API-010`, `API-019`, `BUG-013`
-**最后更新：** 2026-06-19
+**最后更新：** 2026-06-22
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,8 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-22 | 将根应用 / 运行时版本提升到 `0.4.18`，用于承接 VirtualBrowser 随机指纹创建期不再下发具体指纹字段，并在随机指纹模式下把 `chrome_version` 每次随机为 `139..145`；SDK / Contracts 继续保持 `0.4.2`。验证：VirtualBrowser 指纹展开、addBrowser payload、运行模板 UI 与版本服务定向回归 `56 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.18 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
+| 2026-06-22 | 收紧 VirtualBrowser 随机指纹创建期展开：Core 在 `__randomize_fingerprint__` 场景下不再生成或下发 `ua`、设备名、MAC、字体、Canvas、WebGL 等具体指纹字段；调用 `addBrowser` 前剥离内部标记，并将 `chrome_version` 每次随机为 `139..145`，完整指纹交由 VirtualBrowser 自身生成。验证：VirtualBrowser 指纹展开、addBrowser payload 与运行模板 UI 定向回归 `53 passed` | Codex |
 | 2026-06-20 | 将根应用 / 运行时版本提升到 `0.4.17`，用于承接任务监控作业禁用状态、REM 批量环境清理固定运行模板安全门和来源代理同步匹配规则修复；SDK / Contracts 继续保持 `0.4.2`。正式 tag / GitHub release、0.4.17 客户端包与 Windows 真机升级证据仍需后续补齐 | Codex |
 | 2026-06-19 | 重新发布 macOS `0.4.16` 客户端下载版本：删除远端 `/var/www/crawler4j/mac/Crawler4j-0.4.16.dmg`，本地执行 `uv run package-macos-internal-release` 重新生成 `Crawler4j-0.4.16.dmg` 与 `appcast.xml`，并通过 `rsync` 上传到 `sso.whzhsc:/var/www/crawler4j/mac/`。验证：版本/打包配置回归 `65 passed`，`uv lock --check` 通过，公网 DMG `HEAD 200` 且 `content-length=149018284`，远端 DMG SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243` | Codex |
 | 2026-06-19 | 完成 Hosted UI 宿主托管批量导入实现：Contracts / SDK 支持页面和 `DataTable` toolbar actions，宿主新增 `.csv/.xlsx` / 剪贴板 / 手工 JSON 解析与敏感字段脱敏，`ManagedPageRenderer` 支持导入弹窗、`@ui_action` / workflow 分发、批次结果展示和 `import_data_records` 跳转，`ExecutionRunner` 将 `creation_params.import_payload` 提升到 `ctx.runtime["import_payload"]`。同时修复 REM 异常日志分支使用项目 logger 时的多参数调用问题。验证：全量 unit `1031 passed`，相关宽测试 `664 passed`，目标 `ruff check`、`git diff --check`、`.factory/project.json` JSON 校验通过 | Codex |

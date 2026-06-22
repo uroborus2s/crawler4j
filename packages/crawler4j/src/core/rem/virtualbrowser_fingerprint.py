@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY = "__randomize_fingerprint__"
+VIRTUALBROWSER_RANDOM_CHROME_VERSIONS = tuple(range(139, 146))
 VIRTUALBROWSER_RANDOM_MODE_KEYS = (
     "fonts",
     "canvas",
@@ -83,8 +84,7 @@ def materialize_virtualbrowser_fingerprint(
     )
 
     if should_randomize:
-        payload["ua"] = {"mode": 1, "value": generate_random_user_agent(chrome_version)}
-        payload["device-name"] = {"mode": 1, "value": generate_device_name()}
-        payload["mac"] = {"mode": 1, "value": generate_mac_address()}
+        # ponytail: VirtualBrowser owns random fingerprint fields and keeps them mutually consistent.
+        return secrets.choice(VIRTUALBROWSER_RANDOM_CHROME_VERSIONS), {}
 
     return chrome_version, payload

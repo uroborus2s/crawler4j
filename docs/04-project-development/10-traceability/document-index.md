@@ -7,7 +7,7 @@
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
 **关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-06-16
+**最后更新：** 2026-06-22
 
 ## 1. 当前正式文档结构
 
@@ -72,6 +72,8 @@
 
 ## 5. 最近同步
 
+- 2026-06-22：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.18`，用于 VirtualBrowser 随机指纹创建期不下发具体指纹字段和 `chrome_version=139..145` 随机化；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径。
+- 2026-06-22：VirtualBrowser 随机指纹创建期展开已改为不再由 Core 注入 `ua`、设备名、MAC、字体、Canvas、WebGL 等具体指纹字段；调用 `addBrowser` 前剥离内部标记，并将 `chrome_version` 每次随机为 `139..145`，完整指纹由 VirtualBrowser 自身生成；同步执行记录、定向回归证据和 `.factory/memory/`。
 - 2026-06-19：完成 Hosted UI 批量导入代码实现与 `TC-060` 验证，并同步 `hosted-ui-batch-import-design.md`、`api-design.md`、`module-hosted-ui-framework.md`、`implementation-plan.md`、`execution-log.md`、`test-plan.md`、需求文档、追踪矩阵、接口矩阵、`.factory/workitems/` 和 `.factory/memory/`。
 - 2026-06-19：重新发布 macOS `0.4.16` 客户端下载版本，删除远端旧 `Crawler4j-0.4.16.dmg` 后重新生成并上传 `Crawler4j-0.4.16.dmg` 与 `appcast.xml`，并同步 README、发布文档、执行记录和 `.factory/memory/`。
 - 2026-06-19：新增 Hosted UI 批量导入方案文档 `docs/04-project-development/04-design/hosted-ui-batch-import-design.md`，并同步 `REQ-010` / `NFR-010`、`API-019`、`CR-016`、`TASK-030` ~ `TASK-034`、`TC-060` 到 PRD、需求分析、校验、实施计划、测试计划、追踪矩阵、接口矩阵、根导航和 `.factory/memory/`。

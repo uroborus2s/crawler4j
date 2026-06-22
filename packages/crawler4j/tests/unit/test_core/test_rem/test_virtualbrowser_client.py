@@ -282,12 +282,7 @@ async def test_add_browser_materializes_randomize_fingerprint_template(monkeypat
         "materialize_virtualbrowser_fingerprint",
         lambda fingerprint, *, default_chrome_version: (
             144,
-            {
-                "ua": {"mode": 1, "value": "Mozilla/5.0 Random"},
-                "device-name": {"mode": 1, "value": "Q7M2P9X4K3A1B5C6D"},
-                "mac": {"mode": 1, "value": "02-76-66-51-39-C9"},
-                "fonts": {"mode": 1},
-            },
+            {},
         ),
     )
 
@@ -317,10 +312,6 @@ async def test_add_browser_materializes_randomize_fingerprint_template(monkeypat
                     "pass": "",
                     "API": "",
                 },
-                "ua": {"mode": 1, "value": "Mozilla/5.0 Random"},
-                "device-name": {"mode": 1, "value": "Q7M2P9X4K3A1B5C6D"},
-                "mac": {"mode": 1, "value": "02-76-66-51-39-C9"},
-                "fonts": {"mode": 1},
             },
         )
     ]
