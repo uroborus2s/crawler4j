@@ -1595,7 +1595,11 @@ class RunProfileDialog(QDialog):
             "chrome_version": self._current_browser_version(),
         }
 
-        if not randomize_fingerprint and getattr(self, "_ua_mode", "default") == "custom":
+        if randomize_fingerprint:
+            params[VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY] = True
+            return params
+
+        if getattr(self, "_ua_mode", "default") == "custom":
             ua_value = self.ua_value_edit.toPlainText().strip()
             if ua_value:
                 params["ua"] = {"mode": 1, "value": ua_value}
@@ -1683,12 +1687,12 @@ class RunProfileDialog(QDialog):
         if self.memory_value_spin.value() != 64:
             params["memory"] = {"mode": 1, "value": self.memory_value_spin.value()}
 
-        if not randomize_fingerprint and self.device_name_mode_combo.currentData() == "custom":
+        if self.device_name_mode_combo.currentData() == "custom":
             device_name = self.device_name_edit.text().strip()
             if device_name:
                 params["device-name"] = {"mode": 1, "value": device_name}
 
-        if not randomize_fingerprint and self.mac_mode_combo.currentData() == "custom":
+        if self.mac_mode_combo.currentData() == "custom":
             mac_value = self.mac_value_edit.text().strip()
             if mac_value:
                 params["mac"] = {"mode": 1, "value": mac_value}
@@ -1714,9 +1718,6 @@ class RunProfileDialog(QDialog):
             launch_args = self.launch_args_edit.toPlainText().strip()
             if launch_args:
                 params["launchArgs"] = {"mode": 1, "value": launch_args}
-
-        if randomize_fingerprint:
-            params[VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY] = True
 
         return params
 

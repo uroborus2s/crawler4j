@@ -406,39 +406,9 @@ def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
     assert profile.resource.acquisition.env_type == EnvType.VIRTUAL_BROWSER
     assert profile.resource.acquisition.creation.lifecycle == CreationLifecycle.PERSISTENT
     virtualbrowser = profile.resource.acquisition.creation.params["virtualbrowser"]
-    assert virtualbrowser["chrome_version"] == 144
-    assert virtualbrowser["__randomize_fingerprint__"] is True
-    assert virtualbrowser["fonts"] == {"mode": 1}
-    assert virtualbrowser["canvas"] == {"mode": 1}
-    assert virtualbrowser["webgl-img"] == {"mode": 1}
-    assert "ua" not in virtualbrowser
-    assert "device-name" not in virtualbrowser
-    assert "mac" not in virtualbrowser
-    assert virtualbrowser["sec-ch-ua"]["value"] == '"Chromium";v="144", "Not=A?Brand";v="99"'
-    assert virtualbrowser["webgl"] == {
-        "mode": 1,
-        "vendor": "Google Inc. (Intel Inc.)",
-        "render": "ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics OpenGL Engine (1x6x8 (fused) LP, OpenGL 4.1)",
-    }
-
-    assert virtualbrowser["media"] == {"mode": 1}
-    assert virtualbrowser["ua-language"] == {
-        "mode": 1,
-        "language": "en-US",
-        "value": "en-US,en",
-    }
-    assert virtualbrowser["time-zone"] == {
-        "mode": 1,
-        "zone": "(UTC+08:00) Asia/Hong_Kong",
-        "utc": "Asia/Hong_Kong",
-        "locale": "en-US",
-        "value": 8,
-    }
-    assert virtualbrowser["screen"] == {
-        "mode": 1,
-        "width": 1920,
-        "height": 1080,
-        "_value": "1920 x 1080",
+    assert virtualbrowser == {
+        "chrome_version": 144,
+        "__randomize_fingerprint__": True,
     }
     assert profile.resource.acquisition.creation.params["proxy"] == {
         "mode": "pool",
@@ -903,23 +873,10 @@ def test_run_profile_dialog_defaults_new_create_mode_to_random_fingerprint(qtbot
     dialog.script_selector.set_value("demo_module", "repair")
     profile = dialog._build_run_profile_from_form()
     virtualbrowser = profile.resource.acquisition.creation.params["virtualbrowser"]
-    assert virtualbrowser["__randomize_fingerprint__"] is True
-    assert virtualbrowser["fonts"] == {"mode": 1}
-    assert virtualbrowser["canvas"] == {"mode": 1}
-    assert virtualbrowser["webgl-img"] == {"mode": 1}
-    assert virtualbrowser["audio-context"] == {"mode": 1}
-    assert virtualbrowser["client-rects"] == {"mode": 1}
-    assert virtualbrowser["speech_voices"] == {"mode": 1}
-    assert virtualbrowser["memory"] == {"mode": 1, "value": 8}
-    assert "ua" not in virtualbrowser
-    assert "device-name" not in virtualbrowser
-    assert "mac" not in virtualbrowser
-    assert "__randomize_after_create__" not in virtualbrowser
-    assert "dnt" not in virtualbrowser
-    assert "ssl" not in virtualbrowser
-    assert "port-scan" not in virtualbrowser
-    assert "gpu" not in virtualbrowser
-    assert "launchArgs" not in virtualbrowser
+    assert virtualbrowser == {
+        "chrome_version": 145,
+        "__randomize_fingerprint__": True,
+    }
 
 
 def test_run_profile_dialog_loads_virtualbrowser_dropdown_values(qtbot, monkeypatch):

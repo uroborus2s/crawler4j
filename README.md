@@ -4,17 +4,17 @@
 
 ## Release Baseline
 
-当前源码版本线已收敛为 `crawler4j 0.4.17`、`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2`，最近一次正式 Git tag 为 `v0.2.0`。发布前请同时区分“当前源码版本”和“最近正式发布”：
+当前源码版本线已收敛为 `crawler4j 0.4.18`、`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2`，最近一次正式 Git tag 为 `v0.2.0`。发布前请同时区分“当前源码版本”和“最近正式发布”：
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
 | `crawler4j-workspace` | `0.0.0` | workspace 开发元包，不作为正式发布物 |
-| `crawler4j` | `0.4.17` | 桌面宿主与 Core 运行时包 |
+| `crawler4j` | `0.4.18` | 桌面宿主与 Core 运行时包 |
 | `crawler4j-sdk` | `0.4.2` | 模块开发 SDK 与 CLI |
 | `crawler4j-contracts` | `0.4.2` | Core / SDK / 模块共享契约 |
 | 最近正式 Git tag | `v0.2.0` | 仓库中最新已知正式 tag |
 
-当前版本线不等于已经完成正式 tag / GitHub release。`crawler4j 0.4.17` 推进桌面宿主与 Core 运行时包版本，用于承接任务监控作业禁用状态、环境清理固定运行模板安全门和来源代理同步匹配规则修复；只有启用作业才能执行一次、启动或调试，禁用作业会在服务层阻断误触发。`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2` 继续用于对外发布已有环境导入 workflow 场景契约。当前最新已记录 macOS Sparkle 客户端升级包为 2026-06-19 重新生成并上传的历史 `0.4.16` 包；`0.4.17` 客户端包、`ctrip` 真实站点 E2E、Windows 真机安装/升级证据、Git tag / GitHub release 与正式交付批次仍需继续收口。
+当前版本线不等于已经完成正式 tag / GitHub release。`crawler4j 0.4.18` 推进桌面宿主与 Core 运行时包版本，用于承接 VirtualBrowser 随机指纹创建期不再下发具体指纹字段，并在随机指纹模式下把 `chrome_version` 每次随机为 `139..145`。`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2` 继续用于对外发布已有环境导入 workflow 场景契约。当前最新已记录 macOS Sparkle 客户端升级包为 2026-06-19 重新生成并上传的历史 `0.4.16` 包；`0.4.18` 客户端包、`ctrip` 真实站点 E2E、Windows 真机安装/升级证据、Git tag / GitHub release 与正式交付批次仍需继续收口。
 
 ## Workspace Layout
 
