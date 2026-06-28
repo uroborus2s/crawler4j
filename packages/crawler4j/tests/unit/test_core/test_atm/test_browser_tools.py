@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -139,6 +140,27 @@ class CapturedSleep:
         self.delays.append(delay)
 
 
+def _drag_samples(trace: dict) -> list[dict[str, float]]:
+    return [sample for phase in trace["phases"] for sample in phase["samples"]]
+
+
+def _drag_speeds(trace: dict, samples: list[dict[str, float]]) -> list[float]:
+    prev_x, prev_y = trace["start"]
+    speeds: list[float] = []
+    for sample in samples:
+        dx = sample["x"] - prev_x
+        dy = sample["y"] - prev_y
+        speeds.append(math.hypot(dx, dy) / sample["dt"])
+        prev_x, prev_y = sample["x"], sample["y"]
+    return speeds
+
+
+def _variation_ratio(values: list[float]) -> float:
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return math.sqrt(variance) / mean
+
+
 def test_browser_tools_are_hidden_until_task_context_has_page():
     caps = build_runtime_capabilities("demo_module")
 
@@ -151,6 +173,26 @@ def test_browser_tools_are_hidden_until_task_context_has_page():
     assert context.tools.has_tool("browser.click") is False
     with pytest.raises(RuntimeError, match="需要当前运行上下文绑定可用的浏览器 Page"):
         context.tools.call("browser.click", selector=".submit")
+
+
+def test_browser_tools_mix_runtime_entropy_even_with_fixed_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    salts = iter([101, 202])
+    monkeypatch.setattr("src.core.atm.browser_tools.secrets.randbits", lambda _bits: next(salts))
+
+    first = CoreBrowserTools(seed=7)
+    second = CoreBrowserTools(seed=7)
+
+    assert first._session_metadata()["seed"] != second._session_metadata()["seed"]
+
+
+def test_browser_tools_can_opt_into_deterministic_seed() -> None:
+    config = BrowserToolConfig(deterministic_seed=True)
+
+    first = CoreBrowserTools(seed=7, config=config)
+    second = CoreBrowserTools(seed=7, config=config)
+
+    assert first._session_metadata()["seed"] == 7
+    assert second._session_metadata()["seed"] == 7
 
 
 @pytest.mark.asyncio
@@ -356,6 +398,61 @@ async def test_natural_drag_uses_continuous_samples_with_timing(
     assert len({round(sample["dt"], 4) for sample in samples}) > 1
     assert samples[-1]["x"] == pytest.approx(trace["target"][0])
     assert samples[-1]["y"] == pytest.approx(trace["target"][1])
+
+
+@pytest.mark.asyncio
+async def test_natural_drag_targets_down_up_duration_and_60hz_samples(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.core.atm.browser_tools.asyncio.sleep", CapturedSleep(delays=[]))
+
+    for seed, delta_x in [(5, 120.0), (13, 180.0), (29, 260.0), (37, 360.0)]:
+        page = FakePage({".slider": FakeLocator(bbox={"x": 100.0, "y": 180.0, "width": 40.0, "height": 40.0})})
+        tools = CoreBrowserTools(seed=seed)
+        tools.bind_task_context(TaskContext(env_id=1, task_name="demo_module", page=page, tools=None))
+
+        trace = (await tools.drag(selector=".slider", delta_x=delta_x, mode="natural"))["trace"]
+        samples = [sample for phase in trace["phases"] for sample in phase["samples"]]
+        move_duration = sum(sample["dt"] for sample in samples)
+        down_up_duration = trace["down_dwell"] + move_duration
+
+        assert 0.9 <= down_up_duration <= 2.8
+        assert 48.0 <= len(samples) / move_duration <= 72.0
+
+
+@pytest.mark.asyncio
+async def test_natural_drag_passes_self_check_motion_quality(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.core.atm.browser_tools.asyncio.sleep", CapturedSleep(delays=[]))
+
+    signatures: set[tuple[str, int, float, float, float]] = set()
+    for seed in [3, 5, 11, 17, 23, 29]:
+        page = FakePage({".slider": FakeLocator(bbox={"x": 100.0, "y": 180.0, "width": 40.0, "height": 40.0})})
+        tools = CoreBrowserTools(seed=seed)
+        tools.bind_task_context(TaskContext(env_id=1, task_name="demo_module", page=page, tools=None))
+
+        trace = (await tools.drag(selector=".slider", delta_x=220.0, mode="natural"))["trace"]
+        samples = _drag_samples(trace)
+        speeds = _drag_speeds(trace, samples)
+        dts = [sample["dt"] for sample in samples]
+        y_values = [sample["y"] for sample in samples]
+        move_duration = sum(dts)
+
+        assert 0.9 <= trace["down_dwell"] + move_duration <= 2.8
+        assert 48.0 <= len(samples) / move_duration <= 72.0
+        assert max(dts) / min(dts) > 1.25
+        assert _variation_ratio(speeds) > 0.25
+        assert max(y_values) - min(y_values) > 0.5
+        assert samples[-1]["x"] == pytest.approx(trace["target"][0])
+        assert samples[-1]["y"] == pytest.approx(trace["target"][1])
+        signatures.add(
+            (
+                trace["continuous_profile"],
+                len(samples),
+                round(move_duration, 2),
+                round(max(y_values) - min(y_values), 2),
+                round(max(dts) / min(dts), 2),
+            )
+        )
+
+    assert len(signatures) >= 5
 
 
 @pytest.mark.asyncio

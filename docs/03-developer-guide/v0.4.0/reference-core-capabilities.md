@@ -190,7 +190,7 @@ Hosted UI 的页面读取、渲染和 action 调用属于宿主 UI surface，不
 - 标准页面交互优先走 `ctx.tools.call("browser.*", ...)`
 - `ctx.page` 继续保留给读取标题、HTML、locator 状态、执行 `evaluate()`，以及宿主还没抽象成正式 tool 的浏览器能力
 - `ctx.tools.has_tool(name)` 只接受精确工具名，不支持 `browser.*` 这类通配
-- `browser.*` 由宿主统一执行拟人化节奏：停顿会分段并可带轻微 idle 漂移；点击使用元素内随机落点、鼠标 down/up dwell 和距离/目标尺寸驱动轨迹；输入支持自然分块、可控纠错概率和敏感文本默认不纠错；滚动使用惯性分段和轻微回调修正。`browser.drag` 的返回 trace 只用于模块或测试自检，会包含 `down_position`、`up_position`、`phase_names`、`phases[].samples`、`samples[].dt` 和 `sample_count`，便于验证事件完整性与两种拖拽模式的差异；`natural` 模式使用连续轨迹生成，并通过 profile、节奏权重、侧向扰动和末段修正提供变化性，越过目标和回拉不是必经步骤。该能力用于稳定标准页面交互，不承诺绕过站点风控。
+- `browser.*` 由宿主统一执行拟人化节奏：停顿会分段并可带轻微 idle 漂移；点击使用元素内随机落点、鼠标 down/up dwell 和距离/目标尺寸驱动轨迹；输入支持自然分块、可控纠错概率和敏感文本默认不纠错；滚动使用惯性分段和轻微回调修正。`browser.drag` 的返回 trace 只用于模块或测试自检，会包含 `pre_pause`、`down_position`、`up_position`、`phase_names`、`phases[].samples`、`samples[].dt` 和 `sample_count`，便于验证事件完整性与两种拖拽模式的差异；`natural` 模式使用连续轨迹生成，并通过 profile、节奏权重、侧向扰动和末段修正提供变化性，`down -> up` 体感时长默认控制在 `0.9~2.8s`，移动点数按约 `54~66Hz` 采样生成，固定 `seed` 默认也会混入运行时随机盐，只有显式 `deterministic_seed=True` 才复现同一随机序列；回归自检覆盖采样率、`dt` 变化、速度变化、纵向微动和跨 seed 差异，越过目标和回拉不是必经步骤。该能力用于稳定标准页面交互，不承诺绕过站点风控。
 
 ## 生命周期与环境
 
