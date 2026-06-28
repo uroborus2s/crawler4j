@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修正：2026-06-28 Core `browser.drag` 已增强框架自检 trace。`natural` 和 `precise` 均保留真实 `move/down/move/up` 事件链；返回 trace 新增 `down_position`、`up_position`、`phase_names`、`phases[].samples` 和 `sample_count`，用于测试验证物理事件完整性与两种模式的阶段差异；`precise` 现在有不越过目标的 `micro_adjust` 阶段，区别于 `natural` 的 `overshoot/recover`。验证：新增聚焦用例 `2 passed`，`test_browser_tools.py` 整文件 `15 passed`，目标 `ruff check` 通过。
 - 最新版本：2026-06-22 根应用 / 运行时版本已提升到 `0.4.18`，用于承接 VirtualBrowser 随机指纹创建期不再由 Core 下发具体指纹字段，并在随机指纹模式下把 `chrome_version` 每次随机为 `139..145`；SDK / Contracts 继续保持 `0.4.2`。验证：VirtualBrowser 指纹展开、addBrowser payload、运行模板 UI 与版本服务定向回归 `56 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过。当前最新已记录 macOS 客户端下载版本仍为 2026-06-19 的 `0.4.16`，`0.4.18` 客户端包、正式 tag / GitHub release 与 Windows 真机证据仍需后续补齐。
 - 最新修正：2026-06-22 VirtualBrowser 随机指纹创建期展开已调整为不再由 Core 生成或下发 `ua`、设备名、MAC、字体、Canvas、WebGL 等具体指纹字段；运行模板只保存模板版本与内部随机指纹标记，调用 `addBrowser` 前剥离标记并把 `chrome_version` 每次随机为 `139..145`，完整指纹交给 VirtualBrowser 自身生成。验证：VirtualBrowser 指纹展开、addBrowser payload 与运行模板 UI 定向回归 `53 passed`。
 - 历史版本：2026-06-20 根应用 / 运行时版本已提升到 `0.4.17`，用于承接任务监控作业禁用状态、REM 批量环境清理固定运行模板安全门和来源代理同步匹配规则修复；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务 / ATM / Debug / REM 聚焦回归 `115 passed`，目标文件 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过。当前最新已记录 macOS 客户端下载版本仍为 2026-06-19 的 `0.4.16`，`0.4.17` 客户端包、正式 tag / GitHub release 与 Windows 真机证据仍需后续补齐。

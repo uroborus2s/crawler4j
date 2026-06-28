@@ -120,6 +120,11 @@ class DragTrace:
     steps: tuple[int, int, int, int]
     down_dwell: float
     release_pause: float
+    down_position: tuple[float, float]
+    up_position: tuple[float, float]
+    phase_names: list[str]
+    phases: list[dict[str, Any]]
+    sample_count: int
 
 
 @dataclass(slots=True)
@@ -151,6 +156,7 @@ class CoreBrowserTools:
         self._current_position: tuple[float, float] | None = None
         self._has_moved = False
         self._last_move_trace: MoveTrace | None = None
+        self._last_move_samples: list[tuple[float, float]] = []
 
     def bind_task_context(self, context: Any) -> None:
         self._task_context = context
@@ -160,6 +166,7 @@ class CoreBrowserTools:
         self._bound_page = page
         self._current_position = self._random_entry_point()
         self._has_moved = False
+        self._last_move_samples = []
 
     def is_available(self) -> bool:
         return self._page_or_none() is not None
@@ -752,21 +759,28 @@ class CoreBrowserTools:
         approach_steps = max(4, int(total_steps * 0.34))
         overshoot_steps = max(3, int(total_steps * 0.34))
         recover_steps = max(3, int(total_steps * 0.2))
+        phases: list[dict[str, Any] | None] = []
         try:
             await self._move_to(probe_x, probe_y, steps=probe_steps)
+            phases.append(self._drag_phase_trace("probe"))
             await asyncio.sleep(self._rand_float(0.03, 0.08))
             await self._move_to(approach_x, approach_y, steps=approach_steps)
+            phases.append(self._drag_phase_trace("approach"))
             await asyncio.sleep(self._rand_float(0.03, 0.08))
             await self._move_to(overshoot_x, overshoot_y, steps=overshoot_steps)
+            phases.append(self._drag_phase_trace("overshoot"))
             await asyncio.sleep(self._rand_float(0.03, 0.08))
             await self._move_to(recover_x, recover_y, steps=recover_steps)
+            phases.append(self._drag_phase_trace("recover"))
             await asyncio.sleep(self._rand_float(0.02, 0.06))
             await self._move_to(target_x, target_y, steps=max(2, recover_steps // 2))
+            phases.append(self._drag_phase_trace("target"))
         finally:
             await self._page().mouse.up()
         if release_pause:
             release_pause_delay = self._rand_float(0.1, 0.22)
             await asyncio.sleep(release_pause_delay)
+        phase_traces = [phase for phase in phases if phase is not None]
         trace = DragTrace(
             start=(start_x, start_y),
             probe=(probe_x, probe_y),
@@ -777,6 +791,11 @@ class CoreBrowserTools:
             steps=(probe_steps, approach_steps, overshoot_steps, recover_steps),
             down_dwell=down_dwell,
             release_pause=release_pause_delay,
+            down_position=(start_x, start_y),
+            up_position=(target_x, target_y),
+            phase_names=[phase["name"] for phase in phase_traces],
+            phases=phase_traces,
+            sample_count=sum(len(phase["samples"]) for phase in phase_traces),
         )
         self._current_position = (target_x, target_y)
         return (target_x, target_y), trace
@@ -809,6 +828,11 @@ class CoreBrowserTools:
         if abs(dx) > 3.0:
             pre_target_x = self._clamp_segment_point(target_x - direction_x * settle_offset, start_x, target_x)
         pre_target_y = target_y + self._rand_float(-0.3, 0.3)
+        micro_offset = min(settle_offset, self._rand_float(0.35, 1.25))
+        micro_x = target_x
+        if abs(dx) > 3.0:
+            micro_x = self._clamp_segment_point(target_x - direction_x * micro_offset, start_x, target_x)
+        micro_y = target_y + self._rand_float(-0.18, 0.18)
         await self._move_to(start_x, start_y)
         await asyncio.sleep(self._rand_float(*self._session_profile.drag_pre_pause_range))
         await self._page().mouse.down()
@@ -820,19 +844,29 @@ class CoreBrowserTools:
         approach_steps = max(4, int(total_steps * 0.44))
         settle_steps = max(3, int(total_steps * 0.26))
         final_steps = max(2, int(total_steps * 0.14))
+        micro_steps = max(2, int(total_steps * 0.08))
+        phases: list[dict[str, Any] | None] = []
         try:
             await self._move_to_precise(probe_x, probe_y, steps=probe_steps)
+            phases.append(self._drag_phase_trace("probe"))
             await asyncio.sleep(self._rand_float(0.02, 0.06))
             await self._move_to_precise(approach_x, approach_y, steps=approach_steps)
+            phases.append(self._drag_phase_trace("approach"))
             await asyncio.sleep(self._rand_float(0.02, 0.05))
             await self._move_to_precise(pre_target_x, pre_target_y, steps=settle_steps)
+            phases.append(self._drag_phase_trace("pre_target"))
             await asyncio.sleep(self._rand_float(0.015, 0.04))
+            await self._move_to_precise(micro_x, micro_y, steps=micro_steps)
+            phases.append(self._drag_phase_trace("micro_adjust"))
+            await asyncio.sleep(self._rand_float(0.01, 0.03))
             await self._move_to_precise(target_x, target_y, steps=final_steps)
+            phases.append(self._drag_phase_trace("target"))
         finally:
             await self._page().mouse.up()
         if release_pause:
             release_pause_delay = self._rand_float(0.09, 0.18)
             await asyncio.sleep(release_pause_delay)
+        phase_traces = [phase for phase in phases if phase is not None]
         trace = DragTrace(
             start=(start_x, start_y),
             probe=(probe_x, probe_y),
@@ -843,6 +877,11 @@ class CoreBrowserTools:
             steps=(probe_steps, approach_steps, settle_steps, final_steps),
             down_dwell=down_dwell,
             release_pause=release_pause_delay,
+            down_position=(start_x, start_y),
+            up_position=(target_x, target_y),
+            phase_names=[phase["name"] for phase in phase_traces],
+            phases=phase_traces,
+            sample_count=sum(len(phase["samples"]) for phase in phase_traces),
         )
         self._current_position = (target_x, target_y)
         return (target_x, target_y), trace
@@ -970,6 +1009,7 @@ class CoreBrowserTools:
         )
         control_2_x, control_2_y = self._curve_control_point(x, y, start_x, start_y, 0.12, 0.52)
         duration = 0.0
+        samples: list[tuple[float, float]] = []
         for index in range(1, step_count + 1):
             t = index / step_count
             px = self._cubic_bezier(start_x, control_1_x, control_2_x, x, t)
@@ -978,10 +1018,12 @@ class CoreBrowserTools:
             px += wobble * self._session_profile.scroll_wobble_ratio
             py += wobble * self._session_profile.scroll_wobble_ratio
             await self._page().mouse.move(px, py)
+            samples.append((px, py))
             pause = max(0.003, (planned_duration / step_count) * self._rand_float(0.72, 1.28))
             duration += pause
             await asyncio.sleep(pause)
         self._current_position = (x, y)
+        self._last_move_samples = samples
         self._last_move_trace = MoveTrace(
             start=(start_x, start_y),
             target=(x, y),
@@ -1018,6 +1060,7 @@ class CoreBrowserTools:
         min_y = min(start_y, y) - 0.8
         max_y = max(start_y, y) + 0.8
         duration = 0.0
+        samples: list[tuple[float, float]] = []
         for index in range(1, step_count + 1):
             t = index / step_count
             eased = 1.0 - ((1.0 - t) ** 2)
@@ -1028,10 +1071,12 @@ class CoreBrowserTools:
             px = self._clamp_between(px, min_x, max_x)
             py = self._clamp_between(py, min_y, max_y)
             await self._page().mouse.move(px, py)
+            samples.append((px, py))
             pause = max(0.003, (planned_duration / step_count) * self._rand_float(0.78, 1.18))
             duration += pause
             await asyncio.sleep(pause)
         self._current_position = (x, y)
+        self._last_move_samples = samples
         self._last_move_trace = MoveTrace(
             start=(start_x, start_y),
             target=(x, y),
@@ -1188,6 +1233,21 @@ class CoreBrowserTools:
         if self._last_move_trace is None:
             return None
         return asdict(self._last_move_trace)
+
+    def _drag_phase_trace(self, name: str) -> dict[str, Any] | None:
+        if self._last_move_trace is None:
+            return None
+        trace = asdict(self._last_move_trace)
+        return {
+            "name": name,
+            "start": trace["start"],
+            "target": trace["target"],
+            "requested_target": trace["requested_target"],
+            "distance": trace["distance"],
+            "steps": trace["steps"],
+            "duration": trace["duration"],
+            "samples": [{"x": x, "y": y} for x, y in self._last_move_samples],
+        }
 
     def _point_within_box(
         self,

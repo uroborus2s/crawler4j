@@ -260,6 +260,51 @@ async def test_browser_tools_support_goto_click_type_drag_scroll(monkeypatch: py
 
 
 @pytest.mark.asyncio
+async def test_drag_reports_physical_event_trace_for_self_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.core.atm.browser_tools.asyncio.sleep", CapturedSleep(delays=[]))
+
+    page = FakePage({".slider": FakeLocator(bbox={"x": 100.0, "y": 180.0, "width": 40.0, "height": 40.0})})
+    tools = CoreBrowserTools(seed=13)
+    tools.bind_task_context(TaskContext(env_id=1, task_name="demo_module", page=page, tools=None))
+
+    result = await tools.drag(selector=".slider", delta_x=180.0, mode="natural", steps=12)
+    trace = result["trace"]
+
+    down_index = page.mouse.events.index("down:left")
+    up_index = page.mouse.events.index("up:left")
+    assert down_index < up_index
+    assert all(event == "move" for event in page.mouse.events[down_index + 1 : up_index])
+    assert trace["down_position"] == trace["start"]
+    assert trace["up_position"] == trace["target"]
+    assert trace["phase_names"] == ["probe", "approach", "overshoot", "recover", "target"]
+    assert trace["sample_count"] == sum(len(phase["samples"]) for phase in trace["phases"])
+    assert trace["sample_count"] >= sum(trace["steps"])
+
+
+@pytest.mark.asyncio
+async def test_drag_modes_expose_distinct_phase_shapes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.core.atm.browser_tools.asyncio.sleep", CapturedSleep(delays=[]))
+
+    natural_page = FakePage({".slider": FakeLocator(bbox={"x": 100.0, "y": 180.0, "width": 40.0, "height": 40.0})})
+    natural_tools = CoreBrowserTools(seed=17)
+    natural_tools.bind_task_context(TaskContext(env_id=1, task_name="demo_module", page=natural_page, tools=None))
+    natural = await natural_tools.drag(selector=".slider", delta_x=180.0, mode="natural", steps=16)
+
+    precise_page = FakePage({".slider": FakeLocator(bbox={"x": 100.0, "y": 180.0, "width": 40.0, "height": 40.0})})
+    precise_tools = CoreBrowserTools(seed=17)
+    precise_tools.bind_task_context(TaskContext(env_id=1, task_name="demo_module", page=precise_page, tools=None))
+    precise = await precise_tools.drag(selector=".slider", delta_x=180.0, mode="precise", steps=16)
+
+    assert natural["trace"]["phase_names"] == ["probe", "approach", "overshoot", "recover", "target"]
+    assert precise["trace"]["phase_names"] == ["probe", "approach", "pre_target", "micro_adjust", "target"]
+    assert natural["trace"]["overshoot"] is not None
+    assert precise["trace"]["overshoot"] is None
+    assert natural["trace"]["phase_names"] != precise["trace"]["phase_names"]
+    assert natural["trace"]["sample_count"] > 0
+    assert precise["trace"]["sample_count"] > 0
+
+
+@pytest.mark.asyncio
 async def test_press_fallback_releases_pressed_modifier(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("src.core.atm.browser_tools.asyncio.sleep", CapturedSleep(delays=[]))
 

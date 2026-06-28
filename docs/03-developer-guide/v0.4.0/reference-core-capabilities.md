@@ -190,7 +190,7 @@ Hosted UI 的页面读取、渲染和 action 调用属于宿主 UI surface，不
 - 标准页面交互优先走 `ctx.tools.call("browser.*", ...)`
 - `ctx.page` 继续保留给读取标题、HTML、locator 状态、执行 `evaluate()`，以及宿主还没抽象成正式 tool 的浏览器能力
 - `ctx.tools.has_tool(name)` 只接受精确工具名，不支持 `browser.*` 这类通配
-- `browser.*` 由宿主统一执行拟人化节奏：停顿会分段并可带轻微 idle 漂移；点击使用元素内随机落点、鼠标 down/up dwell 和距离/目标尺寸驱动轨迹；输入支持自然分块、可控纠错概率和敏感文本默认不纠错；滚动使用惯性分段和轻微回调修正。该能力用于稳定标准页面交互，不承诺绕过站点风控。
+- `browser.*` 由宿主统一执行拟人化节奏：停顿会分段并可带轻微 idle 漂移；点击使用元素内随机落点、鼠标 down/up dwell 和距离/目标尺寸驱动轨迹；输入支持自然分块、可控纠错概率和敏感文本默认不纠错；滚动使用惯性分段和轻微回调修正。`browser.drag` 的返回 trace 会包含 `down_position`、`up_position`、`phase_names`、`phases[].samples` 和 `sample_count`，便于模块或测试自检事件完整性与两种拖拽模式的阶段差异。该能力用于稳定标准页面交互，不承诺绕过站点风控。
 
 ## 生命周期与环境
 
