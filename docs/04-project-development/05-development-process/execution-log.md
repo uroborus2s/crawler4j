@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `CR-016`, `API-009`, `API-010`, `API-019`, `BUG-013`
-**最后更新：** 2026-06-22
+**最后更新：** 2026-06-28
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-28 | 将根应用 / 运行时版本提升到 `0.4.19`，用于承接 `browser.drag` 连续轨迹生成与框架自检 trace 能力；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.19 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-06-22 | 将根应用 / 运行时版本提升到 `0.4.18`，用于承接 VirtualBrowser 随机指纹创建期不再下发具体指纹字段，并在随机指纹模式下把 `chrome_version` 每次随机为 `139..145`；SDK / Contracts 继续保持 `0.4.2`。验证：VirtualBrowser 指纹展开、addBrowser payload、运行模板 UI 与版本服务定向回归 `56 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.18 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-06-22 | 收紧 VirtualBrowser 随机指纹创建期展开：Core 在 `__randomize_fingerprint__` 场景下不再生成或下发 `ua`、设备名、MAC、字体、Canvas、WebGL 等具体指纹字段；调用 `addBrowser` 前剥离内部标记，并将 `chrome_version` 每次随机为 `139..145`，完整指纹交由 VirtualBrowser 自身生成。验证：VirtualBrowser 指纹展开、addBrowser payload 与运行模板 UI 定向回归 `53 passed` | Codex |
 | 2026-06-20 | 将根应用 / 运行时版本提升到 `0.4.17`，用于承接任务监控作业禁用状态、REM 批量环境清理固定运行模板安全门和来源代理同步匹配规则修复；SDK / Contracts 继续保持 `0.4.2`。正式 tag / GitHub release、0.4.17 客户端包与 Windows 真机升级证据仍需后续补齐 | Codex |
