@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修正：2026-06-28 Core `browser.drag natural` 已把体感总时长调整为默认 `1.2~2.8s`。`natural_drag_total_duration_range` 现在按 `pre_pause + down_dwell + move samples dt + release_pause` 计算目标窗口，trace 新增 `pre_pause` 便于自检；`precise` 轨迹不改变，只同步暴露同名 trace 字段。验证：`test_browser_tools.py` 整文件 `18 passed`，目标 `ruff check` 通过。
 - 最新修正：2026-06-28 Core `browser.drag natural` 已从阶段模板拼接改为连续轨迹生成。trace 明确仅作为模块/测试自检输出，`phases[].samples[]` 新增 `dt` 记录相对下一步等待时间；`natural` 在一个连续循环里按 profile、节奏权重、侧向扰动和末段修正生成按住后的移动点，最终仍在目标点 `up`，越过目标和回拉只是可选现象。验证：相关聚焦用例 `4 passed`，`test_browser_tools.py` 整文件 `17 passed`，目标 `ruff check` 通过。
 - 最新修正：2026-06-28 Core `browser.drag natural` 已改为随机阶段模板。鼠标按住后继续通过真实 `mouse.move(x, y)` 发送拖动事件，轨迹可含 y 变化且最终仍在目标点 `up`；`natural` 不再固定五段，而是在越过回拉、越过后直接收束、直接贴近、微修正等模板中随机选择，越过目标和回拉不再每次发生；顶层 `steps` 现与 `phase_names` 对齐。验证：新增/相关聚焦用例 `3 passed`，`test_browser_tools.py` 整文件 `16 passed`，目标 `ruff check` 通过。
 - 最新修正：2026-06-28 Core `browser.drag` 已增强框架自检 trace。`natural` 和 `precise` 均保留真实 `move/down/move/up` 事件链；返回 trace 新增 `down_position`、`up_position`、`phase_names`、`phases[].samples` 和 `sample_count`，用于测试验证物理事件完整性与两种模式的阶段差异；`precise` 现在有不越过目标的 `micro_adjust` 阶段，区别于 `natural` 的 `overshoot/recover`。验证：新增聚焦用例 `2 passed`，`test_browser_tools.py` 整文件 `15 passed`，目标 `ruff check` 通过。

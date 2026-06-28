@@ -20,6 +20,7 @@ class BrowserToolConfig:
     typing_correction_pause_range: tuple[float, float] = (0.05, 0.14)
     move_steps_range: tuple[int, int] = (12, 22)
     drag_steps_range: tuple[int, int] = (26, 42)
+    natural_drag_total_duration_range: tuple[float, float] = (1.2, 2.8)
     scroll_chunks_range: tuple[int, int] = (2, 6)
     scroll_chunk_pause_range: tuple[float, float] = (0.03, 0.11)
     mouse_down_dwell_range: tuple[float, float] = (0.045, 0.135)
@@ -118,6 +119,7 @@ class DragTrace:
     settle: tuple[float, float] | None
     target: tuple[float, float]
     steps: list[int]
+    pre_pause: float
     down_dwell: float
     release_pause: float
     strategy: str
@@ -744,14 +746,23 @@ class CoreBrowserTools:
             k=1,
         )[0]
         await self._move_to(start_x, start_y)
-        await asyncio.sleep(self._rand_float(*self._session_profile.drag_pre_pause_range))
+        pre_pause_delay = self._rand_float(*self._session_profile.drag_pre_pause_range)
+        await asyncio.sleep(pre_pause_delay)
         await self._page().mouse.down()
         down_dwell = self._rand_float(0.05, 0.13)
-        release_pause_delay = 0.0
+        release_pause_delay = self._rand_float(0.1, 0.22) if release_pause else 0.0
         await asyncio.sleep(down_dwell)
         total_steps = steps if steps is not None else self._rand_int(*self._session_profile.drag_steps_range)
         point_count = max(8, int(total_steps * self._rand_float(1.0, 1.45)))
-        planned_duration = self._planned_move_duration(start_x, start_y, target_x, target_y, target_size=None)
+        planned_duration = self._planned_natural_drag_move_duration(
+            start_x,
+            start_y,
+            target_x,
+            target_y,
+            pre_pause=pre_pause_delay,
+            down_dwell=down_dwell,
+            release_pause=release_pause_delay,
+        )
         curve_power = self._rand_float(1.55, 2.45)
         side_phase = self._rand_float(0.0, math.tau)
         side_frequency = self._rand_float(0.75, 1.65)
@@ -827,8 +838,7 @@ class CoreBrowserTools:
             viewport=viewport,
         )
         phases.append(self._drag_phase_trace("continuous"))
-        if release_pause:
-            release_pause_delay = self._rand_float(0.1, 0.22)
+        if release_pause_delay > 0:
             await asyncio.sleep(release_pause_delay)
         phase_traces = [phase for phase in phases if phase is not None]
         probe_point = samples[min(len(samples) - 1, max(0, int(len(samples) * 0.15)))] if samples else (start_x, start_y, 0.0)
@@ -841,6 +851,7 @@ class CoreBrowserTools:
             settle=settle,
             target=(target_x, target_y),
             steps=[phase["steps"] for phase in phase_traces],
+            pre_pause=pre_pause_delay,
             down_dwell=down_dwell,
             release_pause=release_pause_delay,
             strategy="continuous",
@@ -887,7 +898,8 @@ class CoreBrowserTools:
             micro_x = self._clamp_segment_point(target_x - direction_x * micro_offset, start_x, target_x)
         micro_y = target_y + self._rand_float(-0.18, 0.18)
         await self._move_to(start_x, start_y)
-        await asyncio.sleep(self._rand_float(*self._session_profile.drag_pre_pause_range))
+        pre_pause_delay = self._rand_float(*self._session_profile.drag_pre_pause_range)
+        await asyncio.sleep(pre_pause_delay)
         await self._page().mouse.down()
         down_dwell = self._rand_float(0.05, 0.12)
         release_pause_delay = 0.0
@@ -928,6 +940,7 @@ class CoreBrowserTools:
             settle=(pre_target_x, pre_target_y),
             target=(target_x, target_y),
             steps=[phase["steps"] for phase in phase_traces],
+            pre_pause=pre_pause_delay,
             down_dwell=down_dwell,
             release_pause=release_pause_delay,
             strategy="segmented",
@@ -1375,6 +1388,23 @@ class CoreBrowserTools:
         if precise:
             precision_cost *= 1.18
         return max(0.035, (base + precision_cost) / self._session_profile.motion_speed)
+
+    def _planned_natural_drag_move_duration(
+        self,
+        start_x: float,
+        start_y: float,
+        target_x: float,
+        target_y: float,
+        *,
+        pre_pause: float,
+        down_dwell: float,
+        release_pause: float,
+    ) -> float:
+        base = self._planned_move_duration(start_x, start_y, target_x, target_y, target_size=None)
+        planned = base * self._rand_float(3.8, 6.4)
+        minimum, maximum = self._config.natural_drag_total_duration_range
+        fixed = pre_pause + down_dwell + release_pause
+        return self._clamp_between(planned, max(0.08, minimum - fixed), max(0.08, maximum - fixed))
 
     def _target_acquisition_index(
         self,
