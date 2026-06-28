@@ -20,7 +20,8 @@ class BrowserToolConfig:
     typing_correction_pause_range: tuple[float, float] = (0.05, 0.14)
     move_steps_range: tuple[int, int] = (12, 22)
     drag_steps_range: tuple[int, int] = (26, 42)
-    natural_drag_total_duration_range: tuple[float, float] = (1.2, 2.8)
+    natural_drag_down_up_duration_range: tuple[float, float] = (0.9, 2.8)
+    natural_drag_sample_rate_range: tuple[float, float] = (54.0, 66.0)
     scroll_chunks_range: tuple[int, int] = (2, 6)
     scroll_chunk_pause_range: tuple[float, float] = (0.03, 0.11)
     mouse_down_dwell_range: tuple[float, float] = (0.045, 0.135)
@@ -753,16 +754,14 @@ class CoreBrowserTools:
         release_pause_delay = self._rand_float(0.1, 0.22) if release_pause else 0.0
         await asyncio.sleep(down_dwell)
         total_steps = steps if steps is not None else self._rand_int(*self._session_profile.drag_steps_range)
-        point_count = max(8, int(total_steps * self._rand_float(1.0, 1.45)))
         planned_duration = self._planned_natural_drag_move_duration(
             start_x,
             start_y,
             target_x,
             target_y,
-            pre_pause=pre_pause_delay,
             down_dwell=down_dwell,
-            release_pause=release_pause_delay,
         )
+        point_count = self._planned_natural_drag_point_count(planned_duration, minimum=total_steps)
         curve_power = self._rand_float(1.55, 2.45)
         side_phase = self._rand_float(0.0, math.tau)
         side_frequency = self._rand_float(0.75, 1.65)
@@ -1396,15 +1395,16 @@ class CoreBrowserTools:
         target_x: float,
         target_y: float,
         *,
-        pre_pause: float,
         down_dwell: float,
-        release_pause: float,
     ) -> float:
         base = self._planned_move_duration(start_x, start_y, target_x, target_y, target_size=None)
         planned = base * self._rand_float(3.8, 6.4)
-        minimum, maximum = self._config.natural_drag_total_duration_range
-        fixed = pre_pause + down_dwell + release_pause
-        return self._clamp_between(planned, max(0.08, minimum - fixed), max(0.08, maximum - fixed))
+        minimum, maximum = self._config.natural_drag_down_up_duration_range
+        return self._clamp_between(planned, max(0.08, minimum - down_dwell), max(0.08, maximum - down_dwell))
+
+    def _planned_natural_drag_point_count(self, planned_duration: float, *, minimum: int) -> int:
+        sample_rate = self._rand_float(*self._config.natural_drag_sample_rate_range)
+        return max(8, minimum, int(round(planned_duration * sample_rate)))
 
     def _target_acquisition_index(
         self,

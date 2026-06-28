@@ -359,7 +359,7 @@ async def test_natural_drag_uses_continuous_samples_with_timing(
 
 
 @pytest.mark.asyncio
-async def test_natural_drag_targets_tactile_duration(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_natural_drag_targets_down_up_duration_and_60hz_samples(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("src.core.atm.browser_tools.asyncio.sleep", CapturedSleep(delays=[]))
 
     for seed, delta_x in [(5, 120.0), (13, 180.0), (29, 260.0), (37, 360.0)]:
@@ -368,10 +368,12 @@ async def test_natural_drag_targets_tactile_duration(monkeypatch: pytest.MonkeyP
         tools.bind_task_context(TaskContext(env_id=1, task_name="demo_module", page=page, tools=None))
 
         trace = (await tools.drag(selector=".slider", delta_x=delta_x, mode="natural"))["trace"]
-        move_duration = sum(sample["dt"] for phase in trace["phases"] for sample in phase["samples"])
-        tactile_duration = trace["pre_pause"] + trace["down_dwell"] + move_duration + trace["release_pause"]
+        samples = [sample for phase in trace["phases"] for sample in phase["samples"]]
+        move_duration = sum(sample["dt"] for sample in samples)
+        down_up_duration = trace["down_dwell"] + move_duration
 
-        assert 1.2 <= tactile_duration <= 2.8
+        assert 0.9 <= down_up_duration <= 2.8
+        assert 48.0 <= len(samples) / move_duration <= 72.0
 
 
 @pytest.mark.asyncio
