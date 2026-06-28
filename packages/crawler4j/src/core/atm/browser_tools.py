@@ -22,6 +22,7 @@ class BrowserToolConfig:
     drag_steps_range: tuple[int, int] = (26, 42)
     natural_drag_down_up_duration_range: tuple[float, float] = (0.9, 2.8)
     natural_drag_sample_rate_range: tuple[float, float] = (54.0, 66.0)
+    deterministic_seed: bool = False
     scroll_chunks_range: tuple[int, int] = (2, 6)
     scroll_chunk_pause_range: tuple[float, float] = (0.03, 0.11)
     mouse_down_dwell_range: tuple[float, float] = (0.045, 0.135)
@@ -153,7 +154,8 @@ class CoreBrowserTools:
         config: BrowserToolConfig | None = None,
     ) -> None:
         self._config = config or BrowserToolConfig()
-        self._seed = seed if seed is not None else secrets.randbits(64)
+        base_seed = seed if seed is not None else secrets.randbits(64)
+        self._seed = base_seed if self._config.deterministic_seed else base_seed ^ secrets.randbits(64)
         self._rng = random.Random(self._seed)
         self._session_profile = self._build_session_profile()
         self._task_context: Any | None = None
