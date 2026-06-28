@@ -276,7 +276,9 @@ async def test_drag_reports_physical_event_trace_for_self_check(monkeypatch: pyt
     assert all(event == "move" for event in page.mouse.events[down_index + 1 : up_index])
     assert trace["down_position"] == trace["start"]
     assert trace["up_position"] == trace["target"]
-    assert trace["phase_names"] == ["probe", "approach", "overshoot", "recover", "target"]
+    assert trace["phase_names"][0] == "probe"
+    assert trace["phase_names"][-1] == "target"
+    assert "approach" in trace["phase_names"]
     assert trace["sample_count"] == sum(len(phase["samples"]) for phase in trace["phases"])
     assert trace["sample_count"] >= sum(trace["steps"])
 
@@ -295,13 +297,44 @@ async def test_drag_modes_expose_distinct_phase_shapes(monkeypatch: pytest.Monke
     precise_tools.bind_task_context(TaskContext(env_id=1, task_name="demo_module", page=precise_page, tools=None))
     precise = await precise_tools.drag(selector=".slider", delta_x=180.0, mode="precise", steps=16)
 
-    assert natural["trace"]["phase_names"] == ["probe", "approach", "overshoot", "recover", "target"]
+    assert natural["trace"]["phase_names"][0] == "probe"
+    assert natural["trace"]["phase_names"][-1] == "target"
+    assert "approach" in natural["trace"]["phase_names"]
     assert precise["trace"]["phase_names"] == ["probe", "approach", "pre_target", "micro_adjust", "target"]
-    assert natural["trace"]["overshoot"] is not None
     assert precise["trace"]["overshoot"] is None
     assert natural["trace"]["phase_names"] != precise["trace"]["phase_names"]
     assert natural["trace"]["sample_count"] > 0
     assert precise["trace"]["sample_count"] > 0
+
+
+@pytest.mark.asyncio
+async def test_natural_drag_randomizes_phase_templates_and_vertical_motion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("src.core.atm.browser_tools.asyncio.sleep", CapturedSleep(delays=[]))
+
+    phase_templates: set[tuple[str, ...]] = set()
+    saw_without_overshoot = False
+    saw_without_recover = False
+    saw_vertical_motion = False
+    for seed in range(1, 24):
+        page = FakePage({".slider": FakeLocator(bbox={"x": 100.0, "y": 180.0, "width": 40.0, "height": 40.0})})
+        tools = CoreBrowserTools(seed=seed)
+        tools.bind_task_context(TaskContext(env_id=1, task_name="demo_module", page=page, tools=None))
+
+        trace = (await tools.drag(selector=".slider", delta_x=180.0, mode="natural", steps=18))["trace"]
+        phase_names = tuple(trace["phase_names"])
+        y_values = [sample["y"] for phase in trace["phases"] for sample in phase["samples"]]
+
+        phase_templates.add(phase_names)
+        saw_without_overshoot = saw_without_overshoot or "overshoot" not in phase_names
+        saw_without_recover = saw_without_recover or "recover" not in phase_names
+        saw_vertical_motion = saw_vertical_motion or (max(y_values) - min(y_values) > 0.5)
+
+    assert len(phase_templates) >= 3
+    assert saw_without_overshoot is True
+    assert saw_without_recover is True
+    assert saw_vertical_motion is True
 
 
 @pytest.mark.asyncio

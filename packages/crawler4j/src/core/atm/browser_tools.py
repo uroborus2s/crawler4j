@@ -117,7 +117,7 @@ class DragTrace:
     overshoot: tuple[float, float] | None
     settle: tuple[float, float] | None
     target: tuple[float, float]
-    steps: tuple[int, int, int, int]
+    steps: list[int]
     down_dwell: float
     release_pause: float
     down_position: tuple[float, float]
@@ -738,16 +738,15 @@ class CoreBrowserTools:
         direction_x = 1.0 if dx >= 0 else -1.0
         direction_y = 1.0 if dy >= 0 else -1.0
         probe_ratio = self._rand_float(*self._session_profile.drag_probe_ratio)
-        overshoot_ratio = self._rand_float(*self._session_profile.drag_overshoot_ratio)
-        recover_ratio = self._rand_float(*self._session_profile.drag_recover_ratio)
         probe_x = start_x + dx * probe_ratio + direction_x * self._rand_float(1.5, 4.5)
         probe_y = start_y + dy * probe_ratio + direction_y * self._rand_float(-1.5, 1.5)
-        approach_x = start_x + dx * self._rand_float(0.42, 0.74)
-        approach_y = start_y + dy * self._rand_float(0.42, 0.74)
-        overshoot_x = target_x + direction_x * max(5.0, abs(dx) * overshoot_ratio)
-        overshoot_y = target_y + direction_y * max(1.5, abs(dy) * overshoot_ratio + self._rand_float(-1.0, 1.0))
-        recover_x = target_x + (start_x - target_x) * recover_ratio
-        recover_y = target_y + (start_y - target_y) * recover_ratio
+        approach_x = start_x + dx * self._rand_float(0.38, 0.72)
+        approach_y = start_y + dy * self._rand_float(0.38, 0.72) + self._rand_float(-1.2, 1.2)
+        template = self._rng.choices(
+            ["overshoot_recover", "overshoot_target", "settle_direct", "micro_correction"],
+            weights=[3.0, 1.4, 3.2, 2.4],
+            k=1,
+        )[0]
         await self._move_to(start_x, start_y)
         await asyncio.sleep(self._rand_float(*self._session_profile.drag_pre_pause_range))
         await self._page().mouse.down()
@@ -755,26 +754,94 @@ class CoreBrowserTools:
         release_pause_delay = 0.0
         await asyncio.sleep(down_dwell)
         total_steps = steps if steps is not None else self._rand_int(*self._session_profile.drag_steps_range)
-        probe_steps = max(2, int(total_steps * 0.12))
-        approach_steps = max(4, int(total_steps * 0.34))
-        overshoot_steps = max(3, int(total_steps * 0.34))
-        recover_steps = max(3, int(total_steps * 0.2))
+        probe_steps = max(2, int(total_steps * self._rand_float(0.1, 0.18)))
+        approach_steps = max(4, int(total_steps * self._rand_float(0.26, 0.44)))
+        final_steps = max(2, int(total_steps * self._rand_float(0.1, 0.2)))
+        segments: list[tuple[str, float, float, int]] = [
+            ("probe", probe_x, probe_y, probe_steps),
+            ("approach", approach_x, approach_y, approach_steps),
+        ]
+        overshoot: tuple[float, float] | None = None
+        settle: tuple[float, float] | None = None
+        if template in {"overshoot_recover", "overshoot_target"}:
+            overshoot_ratio = self._rand_float(*self._session_profile.drag_overshoot_ratio)
+            overshoot_x = target_x + direction_x * max(5.0, abs(dx) * overshoot_ratio)
+            overshoot_y = target_y + direction_y * max(1.5, abs(dy) * overshoot_ratio + self._rand_float(-1.0, 1.0))
+            overshoot = (overshoot_x, overshoot_y)
+            segments.append(
+                (
+                    "overshoot",
+                    overshoot_x,
+                    overshoot_y,
+                    max(3, int(total_steps * self._rand_float(0.18, 0.34))),
+                )
+            )
+        if template == "overshoot_recover":
+            recover_ratio = self._rand_float(*self._session_profile.drag_recover_ratio)
+            recover_x = target_x + (start_x - target_x) * recover_ratio
+            recover_y = target_y + (start_y - target_y) * recover_ratio + self._rand_float(-0.8, 0.8)
+            settle = (recover_x, recover_y)
+            segments.append(
+                (
+                    "recover",
+                    recover_x,
+                    recover_y,
+                    max(3, int(total_steps * self._rand_float(0.12, 0.24))),
+                )
+            )
+        elif template == "settle_direct":
+            settle_offset = max(2.0, abs(dx) * self._rand_float(0.025, 0.08))
+            settle_x = target_x
+            if abs(dx) > 3.0:
+                settle_x = self._clamp_segment_point(target_x - direction_x * settle_offset, start_x, target_x)
+            settle_y = target_y + self._rand_float(-1.6, 1.6)
+            settle = (settle_x, settle_y)
+            segments.append(
+                (
+                    "settle",
+                    settle_x,
+                    settle_y,
+                    max(3, int(total_steps * self._rand_float(0.18, 0.32))),
+                )
+            )
+        elif template == "micro_correction":
+            near_offset = max(1.0, abs(dx) * self._rand_float(0.012, 0.04))
+            near_x = target_x
+            micro_x = target_x
+            if abs(dx) > 3.0:
+                near_x = self._clamp_segment_point(target_x - direction_x * near_offset, start_x, target_x)
+                micro_x = self._clamp_segment_point(
+                    target_x - direction_x * self._rand_float(0.35, 1.25),
+                    start_x,
+                    target_x,
+                )
+            near_y = target_y + self._rand_float(-0.9, 0.9)
+            micro_y = target_y + self._rand_float(-0.35, 0.35)
+            settle = (micro_x, micro_y)
+            segments.extend(
+                [
+                    (
+                        "near_target",
+                        near_x,
+                        near_y,
+                        max(3, int(total_steps * self._rand_float(0.18, 0.3))),
+                    ),
+                    (
+                        "micro_adjust",
+                        micro_x,
+                        micro_y,
+                        max(2, int(total_steps * self._rand_float(0.06, 0.12))),
+                    ),
+                ]
+            )
+        segments.append(("target", target_x, target_y, final_steps))
         phases: list[dict[str, Any] | None] = []
         try:
-            await self._move_to(probe_x, probe_y, steps=probe_steps)
-            phases.append(self._drag_phase_trace("probe"))
-            await asyncio.sleep(self._rand_float(0.03, 0.08))
-            await self._move_to(approach_x, approach_y, steps=approach_steps)
-            phases.append(self._drag_phase_trace("approach"))
-            await asyncio.sleep(self._rand_float(0.03, 0.08))
-            await self._move_to(overshoot_x, overshoot_y, steps=overshoot_steps)
-            phases.append(self._drag_phase_trace("overshoot"))
-            await asyncio.sleep(self._rand_float(0.03, 0.08))
-            await self._move_to(recover_x, recover_y, steps=recover_steps)
-            phases.append(self._drag_phase_trace("recover"))
-            await asyncio.sleep(self._rand_float(0.02, 0.06))
-            await self._move_to(target_x, target_y, steps=max(2, recover_steps // 2))
-            phases.append(self._drag_phase_trace("target"))
+            for index, (name, x, y, phase_steps) in enumerate(segments):
+                await self._move_to(x, y, steps=phase_steps)
+                phases.append(self._drag_phase_trace(name))
+                if index < len(segments) - 1:
+                    await asyncio.sleep(self._rand_float(0.018, 0.085))
         finally:
             await self._page().mouse.up()
         if release_pause:
@@ -785,10 +852,10 @@ class CoreBrowserTools:
             start=(start_x, start_y),
             probe=(probe_x, probe_y),
             approach=(approach_x, approach_y),
-            overshoot=(overshoot_x, overshoot_y),
-            settle=(recover_x, recover_y),
+            overshoot=overshoot,
+            settle=settle,
             target=(target_x, target_y),
-            steps=(probe_steps, approach_steps, overshoot_steps, recover_steps),
+            steps=[phase["steps"] for phase in phase_traces],
             down_dwell=down_dwell,
             release_pause=release_pause_delay,
             down_position=(start_x, start_y),
@@ -874,7 +941,7 @@ class CoreBrowserTools:
             overshoot=None,
             settle=(pre_target_x, pre_target_y),
             target=(target_x, target_y),
-            steps=(probe_steps, approach_steps, settle_steps, final_steps),
+            steps=[phase["steps"] for phase in phase_traces],
             down_dwell=down_dwell,
             release_pause=release_pause_delay,
             down_position=(start_x, start_y),
