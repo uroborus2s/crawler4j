@@ -117,9 +117,16 @@ class DragTrace:
     overshoot: tuple[float, float] | None
     settle: tuple[float, float] | None
     target: tuple[float, float]
-    steps: tuple[int, int, int, int]
+    steps: list[int]
     down_dwell: float
     release_pause: float
+    strategy: str
+    continuous_profile: str | None
+    down_position: tuple[float, float]
+    up_position: tuple[float, float]
+    phase_names: list[str]
+    phases: list[dict[str, Any]]
+    sample_count: int
 
 
 @dataclass(slots=True)
@@ -151,6 +158,7 @@ class CoreBrowserTools:
         self._current_position: tuple[float, float] | None = None
         self._has_moved = False
         self._last_move_trace: MoveTrace | None = None
+        self._last_move_samples: list[tuple[float, float, float]] = []
 
     def bind_task_context(self, context: Any) -> None:
         self._task_context = context
@@ -160,6 +168,7 @@ class CoreBrowserTools:
         self._bound_page = page
         self._current_position = self._random_entry_point()
         self._has_moved = False
+        self._last_move_samples = []
 
     def is_available(self) -> bool:
         return self._page_or_none() is not None
@@ -729,18 +738,11 @@ class CoreBrowserTools:
         dx = target_x - start_x
         dy = target_y - start_y
         direction_x = 1.0 if dx >= 0 else -1.0
-        direction_y = 1.0 if dy >= 0 else -1.0
-        probe_ratio = self._rand_float(*self._session_profile.drag_probe_ratio)
-        overshoot_ratio = self._rand_float(*self._session_profile.drag_overshoot_ratio)
-        recover_ratio = self._rand_float(*self._session_profile.drag_recover_ratio)
-        probe_x = start_x + dx * probe_ratio + direction_x * self._rand_float(1.5, 4.5)
-        probe_y = start_y + dy * probe_ratio + direction_y * self._rand_float(-1.5, 1.5)
-        approach_x = start_x + dx * self._rand_float(0.42, 0.74)
-        approach_y = start_y + dy * self._rand_float(0.42, 0.74)
-        overshoot_x = target_x + direction_x * max(5.0, abs(dx) * overshoot_ratio)
-        overshoot_y = target_y + direction_y * max(1.5, abs(dy) * overshoot_ratio + self._rand_float(-1.0, 1.0))
-        recover_x = target_x + (start_x - target_x) * recover_ratio
-        recover_y = target_y + (start_y - target_y) * recover_ratio
+        profile = self._rng.choices(
+            ["direct", "soft_overshoot", "late_correction", "hesitant"],
+            weights=[3.0, 2.0, 2.8, 2.2],
+            k=1,
+        )[0]
         await self._move_to(start_x, start_y)
         await asyncio.sleep(self._rand_float(*self._session_profile.drag_pre_pause_range))
         await self._page().mouse.down()
@@ -748,37 +750,107 @@ class CoreBrowserTools:
         release_pause_delay = 0.0
         await asyncio.sleep(down_dwell)
         total_steps = steps if steps is not None else self._rand_int(*self._session_profile.drag_steps_range)
-        probe_steps = max(2, int(total_steps * 0.12))
-        approach_steps = max(4, int(total_steps * 0.34))
-        overshoot_steps = max(3, int(total_steps * 0.34))
-        recover_steps = max(3, int(total_steps * 0.2))
+        point_count = max(8, int(total_steps * self._rand_float(1.0, 1.45)))
+        planned_duration = self._planned_move_duration(start_x, start_y, target_x, target_y, target_size=None)
+        curve_power = self._rand_float(1.55, 2.45)
+        side_phase = self._rand_float(0.0, math.tau)
+        side_frequency = self._rand_float(0.75, 1.65)
+        side_amplitude = self._clamp_between(abs(dx) * self._rand_float(0.006, 0.022), 0.8, 5.2)
+        overshoot_strength = self._rand_float(0.025, 0.075) if profile == "soft_overshoot" else 0.0
+        correction_strength = self._rand_float(0.006, 0.025) if profile in {"late_correction", "hesitant"} else 0.0
+        weights: list[float] = []
+        for index in range(1, point_count + 1):
+            t = index / point_count
+            weight = self._rand_float(0.7, 1.35)
+            if profile == "hesitant" and 0.58 <= t <= 0.78:
+                weight *= self._rand_float(1.45, 2.35)
+            if profile == "late_correction" and t >= 0.86:
+                weight *= self._rand_float(1.2, 1.8)
+            weights.append(weight)
+        weight_total = sum(weights)
+        overshoot: tuple[float, float] | None = None
+        settle: tuple[float, float] | None = None
+        phases: list[dict[str, Any] | None] = []
+        samples: list[tuple[float, float, float]] = []
+        duration = 0.0
+        viewport = self._viewport_size()
         try:
-            await self._move_to(probe_x, probe_y, steps=probe_steps)
-            await asyncio.sleep(self._rand_float(0.03, 0.08))
-            await self._move_to(approach_x, approach_y, steps=approach_steps)
-            await asyncio.sleep(self._rand_float(0.03, 0.08))
-            await self._move_to(overshoot_x, overshoot_y, steps=overshoot_steps)
-            await asyncio.sleep(self._rand_float(0.03, 0.08))
-            await self._move_to(recover_x, recover_y, steps=recover_steps)
-            await asyncio.sleep(self._rand_float(0.02, 0.06))
-            await self._move_to(target_x, target_y, steps=max(2, recover_steps // 2))
+            for index, weight in enumerate(weights, start=1):
+                t = index / point_count
+                base = 1.0 - ((1.0 - t) ** curve_power)
+                progress = base
+                if profile == "soft_overshoot":
+                    progress += overshoot_strength * (math.sin(math.pi * t) ** 0.7)
+                elif profile == "late_correction" and t >= 0.78:
+                    progress -= correction_strength * (math.sin(math.pi * min(1.0, (t - 0.78) / 0.22)) ** 2)
+                elif profile == "hesitant" and 0.55 <= t <= 0.76:
+                    progress -= correction_strength * self._rand_float(0.35, 0.85)
+                if index == point_count:
+                    progress = 1.0
+                envelope = math.sin(math.pi * t) ** 0.75
+                lateral = math.sin((math.pi * side_frequency * t) + side_phase) * side_amplitude * envelope
+                lateral += self._rand_float(-0.35, 0.35) * envelope
+                px = start_x + dx * progress
+                py = start_y + dy * progress + lateral
+                if index == point_count:
+                    px, py = target_x, target_y
+                px, py = self._clamp_to_viewport(px, py, viewport=viewport)
+                pause = max(0.003, planned_duration * (weight / weight_total))
+                await self._page().mouse.move(px, py)
+                samples.append((px, py, pause))
+                duration += pause
+                await asyncio.sleep(pause)
         finally:
             await self._page().mouse.up()
+        if samples:
+            beyond_target = [
+                sample
+                for sample in samples
+                if (direction_x >= 0 and sample[0] > target_x) or (direction_x < 0 and sample[0] < target_x)
+            ]
+            if beyond_target:
+                overshoot_sample = max(beyond_target, key=lambda sample: abs(sample[0] - target_x))
+                overshoot = (overshoot_sample[0], overshoot_sample[1])
+            if profile in {"late_correction", "hesitant"} and len(samples) >= 2:
+                settle = (samples[-2][0], samples[-2][1])
+        self._current_position = (target_x, target_y)
+        self._last_move_samples = samples
+        self._last_move_trace = MoveTrace(
+            start=(start_x, start_y),
+            target=(target_x, target_y),
+            requested_target=(target_x, target_y),
+            distance=self._distance(start_x, start_y, target_x, target_y),
+            steps=point_count,
+            duration=duration,
+            target_size=None,
+            acquisition_index=self._target_acquisition_index(start_x, start_y, target_x, target_y, target_size=None),
+            viewport=viewport,
+        )
+        phases.append(self._drag_phase_trace("continuous"))
         if release_pause:
             release_pause_delay = self._rand_float(0.1, 0.22)
             await asyncio.sleep(release_pause_delay)
+        phase_traces = [phase for phase in phases if phase is not None]
+        probe_point = samples[min(len(samples) - 1, max(0, int(len(samples) * 0.15)))] if samples else (start_x, start_y, 0.0)
+        approach_point = samples[min(len(samples) - 1, max(0, int(len(samples) * 0.62)))] if samples else (target_x, target_y, 0.0)
         trace = DragTrace(
             start=(start_x, start_y),
-            probe=(probe_x, probe_y),
-            approach=(approach_x, approach_y),
-            overshoot=(overshoot_x, overshoot_y),
-            settle=(recover_x, recover_y),
+            probe=(probe_point[0], probe_point[1]),
+            approach=(approach_point[0], approach_point[1]),
+            overshoot=overshoot,
+            settle=settle,
             target=(target_x, target_y),
-            steps=(probe_steps, approach_steps, overshoot_steps, recover_steps),
+            steps=[phase["steps"] for phase in phase_traces],
             down_dwell=down_dwell,
             release_pause=release_pause_delay,
+            strategy="continuous",
+            continuous_profile=profile,
+            down_position=(start_x, start_y),
+            up_position=(target_x, target_y),
+            phase_names=[phase["name"] for phase in phase_traces],
+            phases=phase_traces,
+            sample_count=sum(len(phase["samples"]) for phase in phase_traces),
         )
-        self._current_position = (target_x, target_y)
         return (target_x, target_y), trace
 
     async def _drag_to_precise(
@@ -809,6 +881,11 @@ class CoreBrowserTools:
         if abs(dx) > 3.0:
             pre_target_x = self._clamp_segment_point(target_x - direction_x * settle_offset, start_x, target_x)
         pre_target_y = target_y + self._rand_float(-0.3, 0.3)
+        micro_offset = min(settle_offset, self._rand_float(0.35, 1.25))
+        micro_x = target_x
+        if abs(dx) > 3.0:
+            micro_x = self._clamp_segment_point(target_x - direction_x * micro_offset, start_x, target_x)
+        micro_y = target_y + self._rand_float(-0.18, 0.18)
         await self._move_to(start_x, start_y)
         await asyncio.sleep(self._rand_float(*self._session_profile.drag_pre_pause_range))
         await self._page().mouse.down()
@@ -820,19 +897,29 @@ class CoreBrowserTools:
         approach_steps = max(4, int(total_steps * 0.44))
         settle_steps = max(3, int(total_steps * 0.26))
         final_steps = max(2, int(total_steps * 0.14))
+        micro_steps = max(2, int(total_steps * 0.08))
+        phases: list[dict[str, Any] | None] = []
         try:
             await self._move_to_precise(probe_x, probe_y, steps=probe_steps)
+            phases.append(self._drag_phase_trace("probe"))
             await asyncio.sleep(self._rand_float(0.02, 0.06))
             await self._move_to_precise(approach_x, approach_y, steps=approach_steps)
+            phases.append(self._drag_phase_trace("approach"))
             await asyncio.sleep(self._rand_float(0.02, 0.05))
             await self._move_to_precise(pre_target_x, pre_target_y, steps=settle_steps)
+            phases.append(self._drag_phase_trace("pre_target"))
             await asyncio.sleep(self._rand_float(0.015, 0.04))
+            await self._move_to_precise(micro_x, micro_y, steps=micro_steps)
+            phases.append(self._drag_phase_trace("micro_adjust"))
+            await asyncio.sleep(self._rand_float(0.01, 0.03))
             await self._move_to_precise(target_x, target_y, steps=final_steps)
+            phases.append(self._drag_phase_trace("target"))
         finally:
             await self._page().mouse.up()
         if release_pause:
             release_pause_delay = self._rand_float(0.09, 0.18)
             await asyncio.sleep(release_pause_delay)
+        phase_traces = [phase for phase in phases if phase is not None]
         trace = DragTrace(
             start=(start_x, start_y),
             probe=(probe_x, probe_y),
@@ -840,9 +927,16 @@ class CoreBrowserTools:
             overshoot=None,
             settle=(pre_target_x, pre_target_y),
             target=(target_x, target_y),
-            steps=(probe_steps, approach_steps, settle_steps, final_steps),
+            steps=[phase["steps"] for phase in phase_traces],
             down_dwell=down_dwell,
             release_pause=release_pause_delay,
+            strategy="segmented",
+            continuous_profile=None,
+            down_position=(start_x, start_y),
+            up_position=(target_x, target_y),
+            phase_names=[phase["name"] for phase in phase_traces],
+            phases=phase_traces,
+            sample_count=sum(len(phase["samples"]) for phase in phase_traces),
         )
         self._current_position = (target_x, target_y)
         return (target_x, target_y), trace
@@ -970,6 +1064,7 @@ class CoreBrowserTools:
         )
         control_2_x, control_2_y = self._curve_control_point(x, y, start_x, start_y, 0.12, 0.52)
         duration = 0.0
+        samples: list[tuple[float, float, float]] = []
         for index in range(1, step_count + 1):
             t = index / step_count
             px = self._cubic_bezier(start_x, control_1_x, control_2_x, x, t)
@@ -979,9 +1074,11 @@ class CoreBrowserTools:
             py += wobble * self._session_profile.scroll_wobble_ratio
             await self._page().mouse.move(px, py)
             pause = max(0.003, (planned_duration / step_count) * self._rand_float(0.72, 1.28))
+            samples.append((px, py, pause))
             duration += pause
             await asyncio.sleep(pause)
         self._current_position = (x, y)
+        self._last_move_samples = samples
         self._last_move_trace = MoveTrace(
             start=(start_x, start_y),
             target=(x, y),
@@ -1018,6 +1115,7 @@ class CoreBrowserTools:
         min_y = min(start_y, y) - 0.8
         max_y = max(start_y, y) + 0.8
         duration = 0.0
+        samples: list[tuple[float, float, float]] = []
         for index in range(1, step_count + 1):
             t = index / step_count
             eased = 1.0 - ((1.0 - t) ** 2)
@@ -1029,9 +1127,11 @@ class CoreBrowserTools:
             py = self._clamp_between(py, min_y, max_y)
             await self._page().mouse.move(px, py)
             pause = max(0.003, (planned_duration / step_count) * self._rand_float(0.78, 1.18))
+            samples.append((px, py, pause))
             duration += pause
             await asyncio.sleep(pause)
         self._current_position = (x, y)
+        self._last_move_samples = samples
         self._last_move_trace = MoveTrace(
             start=(start_x, start_y),
             target=(x, y),
@@ -1188,6 +1288,21 @@ class CoreBrowserTools:
         if self._last_move_trace is None:
             return None
         return asdict(self._last_move_trace)
+
+    def _drag_phase_trace(self, name: str) -> dict[str, Any] | None:
+        if self._last_move_trace is None:
+            return None
+        trace = asdict(self._last_move_trace)
+        return {
+            "name": name,
+            "start": trace["start"],
+            "target": trace["target"],
+            "requested_target": trace["requested_target"],
+            "distance": trace["distance"],
+            "steps": trace["steps"],
+            "duration": trace["duration"],
+            "samples": [{"x": x, "y": y, "dt": dt} for x, y, dt in self._last_move_samples],
+        }
 
     def _point_within_box(
         self,
