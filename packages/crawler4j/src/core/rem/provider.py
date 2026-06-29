@@ -14,8 +14,14 @@ from urllib.parse import urlsplit
 
 from src.core.foundation.logging import logger
 from src.core.rem.handle import BrowserHandle
+from src.core.rem.ip_pool import IPEntry
 from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo, ProxyConfig, ProxyMode
-from src.core.rem.virtualbrowser_fingerprint import materialize_virtualbrowser_fingerprint
+from src.core.rem.proxy_probe import ProxyProbeResult, probe_ip_entry_geo
+from src.core.rem.virtualbrowser_fingerprint import (
+    VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
+    build_virtualbrowser_geo_fingerprint_overrides,
+    materialize_virtualbrowser_fingerprint,
+)
 
 VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS = tuple(range(146, 138, -1))
 VIRTUALBROWSER_DEFAULT_CHROME_VERSION = 145
@@ -155,6 +161,90 @@ def _source_proxy_config_from_payload(proxy: Any) -> ProxyConfig | None:
     if value:
         return _proxy_config_from_value(value, fallback_protocol=protocol)
     return None
+
+
+def _ip_entry_from_proxy_config(proxy_config: ProxyConfig | None) -> IPEntry | None:
+    if proxy_config is None:
+        return None
+    raw_value = str(proxy_config.static_value or "").strip()
+    if not raw_value:
+        return None
+    value_for_parse = raw_value if "://" in raw_value else f"socks5://{raw_value}"
+    parts = urlsplit(value_for_parse)
+    host = str(parts.hostname or "").strip()
+    port = int(parts.port or 0)
+    if not host or port <= 0:
+        return None
+    return IPEntry(
+        address=host,
+        port=port,
+        protocol=_normalize_proxy_protocol(parts.scheme) or "http",
+        username=str(parts.username or "") or None,
+        password=str(parts.password or "") or None,
+    )
+
+
+def _ip_entry_from_virtualbrowser_proxy(proxy: Any) -> IPEntry | None:
+    if not isinstance(proxy, dict):
+        return None
+    return _ip_entry_from_proxy_config(_source_proxy_config_from_payload(proxy))
+
+
+def _is_random_virtualbrowser_fingerprint(fingerprint: Any) -> bool:
+    return isinstance(fingerprint, dict) and bool(fingerprint.get(VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY))
+
+
+def _geo_from_proxy_probe_result(result: ProxyProbeResult) -> dict[str, Any] | None:
+    if not result.ok:
+        return None
+    return {
+        "exit_ip": result.exit_ip,
+        "country_code": result.country_code,
+        "country": result.country,
+        "region": result.region,
+        "city": result.city,
+        "timezone": result.timezone,
+        "asn": result.asn,
+        "isp": result.isp,
+    }
+
+
+def _browser_full_parameters_entry(payload: Any, browser_id: int) -> dict[str, Any] | None:
+    return VirtualBrowserClient._find_browser_entry(payload, browser_id)
+
+
+def _created_parameter_warnings(
+    payload: Any,
+    *,
+    browser_id: int,
+    geo: dict[str, Any] | None,
+) -> list[str]:
+    entry = _browser_full_parameters_entry(payload, browser_id)
+    if not isinstance(entry, dict):
+        return ["getBrowserFullParameters 未返回目标环境"]
+
+    warnings: list[str] = []
+    expected = build_virtualbrowser_geo_fingerprint_overrides(geo)
+    expected_time_zone = expected.get("time-zone")
+    actual_time_zone = entry.get("time-zone")
+    if isinstance(expected_time_zone, dict) and isinstance(actual_time_zone, dict):
+        expected_utc = str(expected_time_zone.get("utc") or "").strip()
+        actual_utc = str(actual_time_zone.get("utc") or "").strip()
+        if expected_utc and actual_utc and expected_utc != actual_utc:
+            warnings.append(f"time-zone.utc={actual_utc!r}，预期 {expected_utc!r}")
+
+    expected_language = expected.get("ua-language")
+    actual_language = entry.get("ua-language")
+    if isinstance(expected_language, dict) and isinstance(actual_language, dict):
+        expected_locale = str(expected_language.get("language") or "").strip()
+        actual_locale = str(actual_language.get("language") or "").strip()
+        if expected_locale and actual_locale and expected_locale != actual_locale:
+            warnings.append(f"ua-language.language={actual_locale!r}，预期 {expected_locale!r}")
+
+    webrtc = entry.get("webrtc")
+    if isinstance(webrtc, dict) and webrtc.get("mode") not in (0, "0", None):
+        warnings.append(f"webrtc.mode={webrtc.get('mode')!r}，预期替换模式 0")
+    return warnings
 
 
 def _proxy_config_summary(proxy_config: ProxyConfig | None) -> str:
@@ -436,6 +526,11 @@ class BaseProvider(ABC):
             - 普通浏览器 Provider 可返回 False 表示不支持
         """
         return False
+
+    async def validate_fingerprint_environment(self, env: Environment) -> list[str]:
+        """Return fingerprint validation warnings for manual risk rechecks."""
+        del env
+        return []
 
     def supports_existing_env_import(self) -> bool:
         """是否支持从来源系统导入已有环境。"""
@@ -1289,6 +1384,7 @@ class VirtualBrowserClient:
         group_ids: list[str],
         proxy: dict | None = None,
         fingerprint: dict | None = None,
+        geo: dict[str, Any] | None = None,
     ) -> int:
         """创建浏览器环境，返回ID。
         
@@ -1332,9 +1428,14 @@ class VirtualBrowserClient:
             )
             default_proxy["mode"] = 2 if has_custom_proxy else 1
         
+        materialize_kwargs: dict[str, Any] = {
+            "default_chrome_version": VIRTUALBROWSER_DEFAULT_CHROME_VERSION,
+        }
+        if geo:
+            materialize_kwargs["geo"] = geo
         chrome_version, fingerprint_payload = materialize_virtualbrowser_fingerprint(
             fingerprint,
-            default_chrome_version=VIRTUALBROWSER_DEFAULT_CHROME_VERSION,
+            **materialize_kwargs,
         )
 
         # 构造请求参数
@@ -1741,12 +1842,14 @@ class VirtualBrowserProvider(BaseProvider):
             creation_params.get("virtualbrowser")
             or creation_params.get("fingerprint")
         )
+        geo = await self._probe_creation_proxy_geo(proxy, fingerprint)
         
         logger.info(f"[VirtualBrowser] Creating env '{name}'...")
         
         # VirtualBrowser 的本地管理 API 对并发创建/启动不稳定，串行化避免拖死宿主 UI 事件循环。
         async with self._get_lifecycle_lock():
-            browser_id = await client.add_browser(name, groups, proxy, fingerprint)
+            browser_id = await client.add_browser(name, groups, proxy, fingerprint, geo=geo)
+            validation_warnings = await self._log_created_parameter_validation(client, int(browser_id), geo)
         
         if config.get("launch", True):
              # launch parameter is now ignored in create
@@ -1762,7 +1865,7 @@ class VirtualBrowserProvider(BaseProvider):
         
         from src.core.rem.handle import BrowserHandle
         
-        return Environment(
+        env = Environment(
             # id 使用默认值 0，由 Manager 覆盖为数据库自增 ID
             name=name,
             kind=EnvKind.BROWSER,
@@ -1773,6 +1876,72 @@ class VirtualBrowserProvider(BaseProvider):
             proxy_config=final_proxy_config,
             handle=BrowserHandle(browser_id=str(browser_id)),
         )
+        env.fingerprint_validation_warnings = validation_warnings
+        return env
+
+    async def _probe_creation_proxy_geo(
+        self,
+        proxy: Any,
+        fingerprint: Any,
+    ) -> dict[str, Any] | None:
+        if not _is_random_virtualbrowser_fingerprint(fingerprint):
+            return None
+        entry = _ip_entry_from_virtualbrowser_proxy(proxy)
+        if entry is None:
+            return None
+        result = await asyncio.to_thread(probe_ip_entry_geo, entry)
+        if not result.ok:
+            logger.warning(
+                "[VirtualBrowser] proxy geo probe failed; using default fingerprint geo: "
+                f"proxy={result.masked_proxy_url} stage={result.stage} detail={result.detail}"
+            )
+            return None
+        logger.info(
+            "[VirtualBrowser] proxy geo probe succeeded: "
+            f"exit_ip={result.exit_ip} country={result.country_code or '-'} "
+            f"city={result.city or '-'} timezone={result.timezone or '-'} asn={result.asn or '-'}"
+        )
+        return _geo_from_proxy_probe_result(result)
+
+    async def _log_created_parameter_validation(
+        self,
+        client: VirtualBrowserClient,
+        browser_id: int,
+        geo: dict[str, Any] | None,
+    ) -> list[str]:
+        try:
+            payload = await client.get_browser_full_parameters(browser_id)
+        except Exception as exc:
+            logger.warning(f"[VirtualBrowser] getBrowserFullParameters 验收失败: id={browser_id} error={exc}")
+            return [f"getBrowserFullParameters 验收失败: {exc}"]
+        warnings = _created_parameter_warnings(payload, browser_id=browser_id, geo=geo)
+        if warnings:
+            logger.warning(
+                "[VirtualBrowser] created parameter validation warning: "
+                f"id={browser_id} issues={'; '.join(warnings)}"
+            )
+        else:
+            logger.info(f"[VirtualBrowser] created parameter validation passed: id={browser_id}")
+        return warnings
+
+    async def validate_fingerprint_environment(self, env: Environment) -> list[str]:
+        """Validate persisted VirtualBrowser parameters without changing the environment."""
+        browser_id = self._browser_id_from_env(env)
+        if not browser_id:
+            return ["缺少 VirtualBrowser 环境 ID"]
+        try:
+            browser_id_int = int(browser_id)
+        except (TypeError, ValueError):
+            return [f"VirtualBrowser 环境 ID 无效: {browser_id!r}"]
+
+        async with self._get_lifecycle_lock():
+            client = self._get_api_client()
+            try:
+                payload = await client.get_browser_full_parameters(browser_id_int)
+            except Exception as exc:
+                return [f"getBrowserFullParameters 验收失败: {exc}"]
+
+        return _created_parameter_warnings(payload, browser_id=browser_id_int, geo=None)
 
     async def reset(self, env: Environment) -> bool:
         """重置环境状态：清除数据 + 导航到空白页。"""

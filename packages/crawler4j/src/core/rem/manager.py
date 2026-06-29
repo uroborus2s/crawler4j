@@ -17,6 +17,18 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from src.core.foundation.logging import logger
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_DETAIL,
+    FINGERPRINT_VALIDATION_LAST_CHECKED_AT,
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    FINGERPRINT_VALIDATION_PASSED,
+    FINGERPRINT_VALIDATION_REASON,
+    FINGERPRINT_VALIDATION_RISK,
+    FINGERPRINT_VALIDATION_STATUS,
+    FingerprintValidationSummary,
+    fingerprint_validation_from_metadata,
+    is_fingerprint_validation_risk,
+)
 from src.core.persistence.database import STATE_DB, get_connection
 from src.core.rem.ip_pool import IPEntry
 from src.core.rem.ip_pool import get_ip_pool_manager
@@ -850,6 +862,8 @@ class EnvironmentManager:
         env = await self.pool.get(env_id)
         if not env:
             return False
+        if await self.is_fingerprint_validation_risk(env.id):
+            raise RuntimeError(f"环境 {env.id} 指纹风险待复检")
         provider = get_provider(env.provider)
         if not provider:
             return False
@@ -969,6 +983,115 @@ class EnvironmentManager:
             元数据字典
         """
         return self.pool.list_metadata(env_id, namespace)
+
+    async def mark_fingerprint_validation_risk(
+        self,
+        env_id: int | str,
+        *,
+        reason: str,
+        detail: str = "",
+    ) -> FingerprintValidationSummary:
+        """Mark an environment as fingerprint-risk without changing its configuration."""
+        checked_at = int(time.time())
+        await self.set_metadata(
+            env_id,
+            FINGERPRINT_VALIDATION_NAMESPACE,
+            FINGERPRINT_VALIDATION_STATUS,
+            FINGERPRINT_VALIDATION_RISK,
+            "string",
+        )
+        await self.set_metadata(
+            env_id,
+            FINGERPRINT_VALIDATION_NAMESPACE,
+            FINGERPRINT_VALIDATION_REASON,
+            str(reason or "fingerprint_validation_failed"),
+            "string",
+        )
+        await self.set_metadata(
+            env_id,
+            FINGERPRINT_VALIDATION_NAMESPACE,
+            FINGERPRINT_VALIDATION_DETAIL,
+            str(detail or ""),
+            "string",
+        )
+        await self.set_metadata(
+            env_id,
+            FINGERPRINT_VALIDATION_NAMESPACE,
+            FINGERPRINT_VALIDATION_LAST_CHECKED_AT,
+            checked_at,
+            "int",
+        )
+        return fingerprint_validation_from_metadata(
+            await self.list_metadata(env_id, FINGERPRINT_VALIDATION_NAMESPACE)
+        )
+
+    async def clear_fingerprint_validation_risk(
+        self,
+        env_id: int | str,
+        *,
+        detail: str = "手动重新检测通过",
+    ) -> FingerprintValidationSummary:
+        """Clear fingerprint-risk metadata after a successful manual recheck."""
+        checked_at = int(time.time())
+        await self.set_metadata(
+            env_id,
+            FINGERPRINT_VALIDATION_NAMESPACE,
+            FINGERPRINT_VALIDATION_STATUS,
+            FINGERPRINT_VALIDATION_PASSED,
+            "string",
+        )
+        await self.set_metadata(
+            env_id,
+            FINGERPRINT_VALIDATION_NAMESPACE,
+            FINGERPRINT_VALIDATION_REASON,
+            "",
+            "string",
+        )
+        await self.set_metadata(
+            env_id,
+            FINGERPRINT_VALIDATION_NAMESPACE,
+            FINGERPRINT_VALIDATION_DETAIL,
+            detail,
+            "string",
+        )
+        await self.set_metadata(
+            env_id,
+            FINGERPRINT_VALIDATION_NAMESPACE,
+            FINGERPRINT_VALIDATION_LAST_CHECKED_AT,
+            checked_at,
+            "int",
+        )
+        return fingerprint_validation_from_metadata(
+            await self.list_metadata(env_id, FINGERPRINT_VALIDATION_NAMESPACE)
+        )
+
+    async def is_fingerprint_validation_risk(self, env_id: int | str) -> bool:
+        """Whether an environment is currently marked as fingerprint-risk."""
+        metadata = await self.list_metadata(env_id, FINGERPRINT_VALIDATION_NAMESPACE)
+        return is_fingerprint_validation_risk(metadata)
+
+    async def recheck_env_fingerprint_validation(
+        self,
+        env_id: int | str,
+    ) -> FingerprintValidationSummary:
+        """Manually recheck fingerprint risk and update only validation metadata."""
+        env = await self.get_env(env_id)
+        if not env:
+            raise RuntimeError(f"环境不存在: {env_id}")
+        provider = get_provider(env.provider)
+        if not provider:
+            raise RuntimeError(f"Provider 未注册: {env.provider}")
+
+        validator = getattr(provider, "validate_fingerprint_environment", None)
+        warnings = await validator(env) if callable(validator) else []
+        warnings = [str(item).strip() for item in warnings if str(item).strip()]
+        if warnings:
+            return await self.mark_fingerprint_validation_risk(
+                env_id,
+                reason=warnings[0],
+                detail="; ".join(warnings),
+            )
+        return await self.clear_fingerprint_validation_risk(env_id)
 
     async def delete_metadata(
         self,
@@ -1381,6 +1504,7 @@ class EnvironmentManager:
             
             # 先保存到数据库以确保 ID 存在
             await self.pool.add(env) # update because add was called with skeleton
+            await self._persist_created_fingerprint_validation(env)
             
             logger.info(f"[REM] 环境创建成功: id={env_id} external_id={env.external_id}")
 
@@ -1413,6 +1537,27 @@ class EnvironmentManager:
                 runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
             )
             raise
+
+    async def _persist_created_fingerprint_validation(self, env: Environment) -> None:
+        warnings = getattr(env, "fingerprint_validation_warnings", None)
+        if warnings is None:
+            return
+        warnings = [str(item).strip() for item in warnings if str(item).strip()]
+        if warnings:
+            await self.mark_fingerprint_validation_risk(
+                env.id,
+                reason=warnings[0],
+                detail="; ".join(warnings),
+            )
+        else:
+            await self.clear_fingerprint_validation_risk(
+                env.id,
+                detail="创建后轻量验收通过",
+            )
+        try:
+            delattr(env, "fingerprint_validation_warnings")
+        except AttributeError:
+            pass
 
     async def _reserve_env_placeholder(
         self, 

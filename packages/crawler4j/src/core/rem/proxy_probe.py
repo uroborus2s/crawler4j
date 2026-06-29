@@ -28,6 +28,11 @@ DEFAULT_PROXY_PROBE_TARGET: Final[ProxyProbeTarget] = ProxyProbeTarget(
     port=80,
     path="/",
 )
+DEFAULT_PROXY_GEO_PROBE_TARGET: Final[ProxyProbeTarget] = ProxyProbeTarget(
+    host="ip-api.com",
+    port=80,
+    path="/json/?fields=status,message,query,country,countryCode,regionName,city,timezone,as,asname,isp",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +53,13 @@ class ProxyProbeResult:
     http_status: int | None
     detail: str
     error_type: str | None
+    country_code: str | None = None
+    country: str | None = None
+    region: str | None = None
+    city: str | None = None
+    timezone: str | None = None
+    asn: str | None = None
+    isp: str | None = None
 
     @property
     def title(self) -> str:
@@ -61,6 +73,20 @@ class ProxyProbeResult:
         ]
         if self.ok:
             lines.insert(0, f"出口 IP: {self.exit_ip or '-'}")
+            if self.country_code or self.city or self.timezone:
+                lines.append(
+                    "出口位置: "
+                    + " / ".join(
+                        item
+                        for item in (
+                            self.country_code,
+                            self.region,
+                            self.city,
+                            self.timezone,
+                        )
+                        if item
+                    )
+                )
         else:
             lines.insert(0, f"失败阶段: {self.stage}")
             lines.append(f"原因: {self.detail}")
@@ -77,6 +103,13 @@ class ProxyProbeResult:
             f"masked_proxy_url: {self.masked_proxy_url}",
             f"latency_ms: {self.latency_ms}",
             f"exit_ip: {self.exit_ip or '-'}",
+            f"country_code: {self.country_code or '-'}",
+            f"country: {self.country or '-'}",
+            f"region: {self.region or '-'}",
+            f"city: {self.city or '-'}",
+            f"timezone: {self.timezone or '-'}",
+            f"asn: {self.asn or '-'}",
+            f"isp: {self.isp or '-'}",
             f"http_status: {self.http_status if self.http_status is not None else '-'}",
             f"error_type: {self.error_type or '-'}",
             f"detail: {self.detail}",
@@ -96,6 +129,38 @@ def probe_ip_entry(
     timeout_s: float = DEFAULT_PROXY_PROBE_TIMEOUT_S,
     target: ProxyProbeTarget = DEFAULT_PROXY_PROBE_TARGET,
 ) -> ProxyProbeResult:
+    return _probe_ip_entry(
+        entry,
+        timeout_s=timeout_s,
+        target=target,
+        parse_body=_extract_exit_ip_fields,
+        success_detail="探针服务返回公网出口 IP",
+    )
+
+
+def probe_ip_entry_geo(
+    entry: IPEntry,
+    *,
+    timeout_s: float = DEFAULT_PROXY_PROBE_TIMEOUT_S,
+    target: ProxyProbeTarget = DEFAULT_PROXY_GEO_PROBE_TARGET,
+) -> ProxyProbeResult:
+    return _probe_ip_entry(
+        entry,
+        timeout_s=timeout_s,
+        target=target,
+        parse_body=_extract_geo_probe_fields,
+        success_detail="探针服务返回公网出口 IP 与地理信息",
+    )
+
+
+def _probe_ip_entry(
+    entry: IPEntry,
+    *,
+    timeout_s: float,
+    target: ProxyProbeTarget,
+    parse_body,
+    success_detail: str,
+) -> ProxyProbeResult:
     start = time.perf_counter()
     protocol = _normalize_protocol(entry.protocol)
     masked_proxy_url = _mask_proxy_url(entry, protocol)
@@ -111,7 +176,7 @@ def probe_ip_entry(
                 "probe",
                 f"探针服务返回 HTTP {response.status_code} {response.reason}: {preview}",
             )
-        exit_ip = _extract_exit_ip(response.body)
+        parsed = parse_body(response.body)
         latency_ms = _elapsed_ms(start)
         return ProxyProbeResult(
             ok=True,
@@ -119,10 +184,17 @@ def probe_ip_entry(
             protocol=protocol,
             masked_proxy_url=masked_proxy_url,
             latency_ms=latency_ms,
-            exit_ip=exit_ip,
+            exit_ip=parsed.get("exit_ip"),
             http_status=http_status,
-            detail="探针服务返回公网出口 IP",
+            detail=success_detail,
             error_type=None,
+            country_code=parsed.get("country_code"),
+            country=parsed.get("country"),
+            region=parsed.get("region"),
+            city=parsed.get("city"),
+            timezone=parsed.get("timezone"),
+            asn=parsed.get("asn"),
+            isp=parsed.get("isp"),
         )
     except ProxyProbeError as exc:
         latency_ms = _elapsed_ms(start)
@@ -470,6 +542,49 @@ def _extract_exit_ip(body: str) -> str:
             f"探针服务返回了非 IP 内容: {_preview_text(body)}",
         ) from exc
     return text
+
+
+def _extract_exit_ip_fields(body: str) -> dict[str, str | None]:
+    return {"exit_ip": _extract_exit_ip(body)}
+
+
+def _extract_geo_probe_fields(body: str) -> dict[str, str | None]:
+    text = body.strip()
+    if not text:
+        raise ProxyProbeError("parse_geo", "探针服务没有返回出口地理信息")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ProxyProbeError("parse_geo", f"探针 JSON 解析失败: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ProxyProbeError("parse_geo", "探针 JSON 不是对象")
+    status = _clean_probe_text(payload.get("status")).lower()
+    if status == "fail":
+        message = _clean_probe_text(payload.get("message")) or "探针服务返回失败"
+        raise ProxyProbeError("parse_geo", message)
+    exit_ip = _clean_probe_text(payload.get("query")) or _clean_probe_text(payload.get("ip"))
+    try:
+        ipaddress.ip_address(exit_ip)
+    except ValueError as exc:
+        raise ProxyProbeError(
+            "parse_geo",
+            f"探针服务返回了非 IP 内容: {_preview_text(body)}",
+        ) from exc
+    country_code = _clean_probe_text(payload.get("countryCode")).upper() or None
+    return {
+        "exit_ip": exit_ip,
+        "country_code": country_code,
+        "country": _clean_probe_text(payload.get("country")) or None,
+        "region": _clean_probe_text(payload.get("regionName")) or None,
+        "city": _clean_probe_text(payload.get("city")) or None,
+        "timezone": _clean_probe_text(payload.get("timezone")) or None,
+        "asn": _clean_probe_text(payload.get("as")) or _clean_probe_text(payload.get("asname")) or None,
+        "isp": _clean_probe_text(payload.get("isp")) or None,
+    }
+
+
+def _clean_probe_text(value: object) -> str:
+    return str(value or "").strip()
 
 
 def _mask_proxy_url(entry: IPEntry, protocol: str) -> str:

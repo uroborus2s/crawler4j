@@ -25,6 +25,10 @@ from PyQt6.QtWidgets import (
 from src.core.mms import get_module_registry
 from src.core.mms.service import get_module_service
 from src.core.rem.env_claims import ENV_CLAIM_NAMESPACE, ENV_CLAIM_OWNER_MODULE
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    is_fingerprint_validation_risk,
+)
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.manager import get_environment_manager
 from src.core.rem.models import EnvKind, EnvStatus
@@ -865,6 +869,7 @@ class RunProfileDialog(QDialog):
             self.mac_value_edit.setText(self._generate_mac_address())
 
     def _apply_randomize_fingerprint_defaults(self, *, force_regenerate: bool) -> None:
+        del force_regenerate
         for control in (
             self.fonts_mode_combo,
             self.canvas_mode_combo,
@@ -874,13 +879,22 @@ class RunProfileDialog(QDialog):
             self.speech_voices_mode_combo,
         ):
             self._set_combo_value(control, "random")
-        self._refresh_randomized_identity_preview(force_regenerate=force_regenerate)
+        self._set_ua_mode("default")
+        self._set_sec_ch_ua_mode("default")
+        self.language_follow_ip_check.setChecked(True)
+        self.timezone_follow_ip_check.setChecked(True)
+        self.location_follow_ip_check.setChecked(True)
+        self._set_combo_value(self.screen_mode_combo, "default")
+        self._set_combo_value(self.webgl_mode_combo, "default")
+        self._set_combo_value(self.webgpu_mode_combo, "default")
+        self._set_combo_value(self.device_name_mode_combo, "default")
+        self._set_combo_value(self.mac_mode_combo, "default")
         self._sync_virtualbrowser_field_visibility()
 
     def _on_randomize_fingerprint_toggled(self, checked: bool) -> None:
-        if not checked:
-            return
-        self._apply_randomize_fingerprint_defaults(force_regenerate=True)
+        if checked:
+            self._apply_randomize_fingerprint_defaults(force_regenerate=True)
+        self._sync_create_fields()
 
     def _apply_new_virtualbrowser_defaults(self) -> None:
         if not self._is_new:
@@ -1871,7 +1885,7 @@ class RunProfileDialog(QDialog):
         self.launch_args_edit.setPlainText(str(launch_args.get("value", "")))
 
         if randomize_fingerprint:
-            self._refresh_randomized_identity_preview(force_regenerate=False)
+            self._apply_randomize_fingerprint_defaults(force_regenerate=False)
         self._sync_virtualbrowser_field_visibility()
 
     def _load_provider_options(self, preferred: str | None = None):
@@ -1934,7 +1948,9 @@ class RunProfileDialog(QDialog):
         self._set_row_visible(self.browser_version_combo, is_virtualbrowser)
         self._set_row_visible(self.kernel_version_combo, is_virtualbrowser)
         self._set_row_visible(self.randomize_fingerprint_check, is_virtualbrowser)
-        self.virtualbrowser_group.setVisible(is_virtualbrowser)
+        self.virtualbrowser_group.setVisible(
+            is_virtualbrowser and not self.randomize_fingerprint_check.isChecked()
+        )
 
         if not is_fingerprint:
             self._set_row_visible(self.ip_pool_combo, False)
@@ -2454,8 +2470,22 @@ class RunProfileDialog(QDialog):
             return False
         if getattr(env, "lease_id", None):
             return False
+        if self._env_fingerprint_validation_risk(env):
+            return False
         owner = self._env_claim_owner(env)
         return not owner or owner == module_name
+
+    def _env_fingerprint_validation_risk(self, env: object) -> bool:
+        try:
+            pool = get_environment_manager().pool
+            list_metadata = getattr(pool, "list_metadata", None)
+            if not callable(list_metadata):
+                return False
+            metadata = list_metadata(int(getattr(env, "id")), FINGERPRINT_VALIDATION_NAMESPACE)
+        except Exception as exc:
+            logger.warning(f"[ATM] 读取环境指纹风险失败: env_id={getattr(env, 'id', '')} error={exc}")
+            return False
+        return is_fingerprint_validation_risk(metadata)
 
     def _list_fixed_env_options(self, module_name: str) -> list[object]:
         if not module_name:

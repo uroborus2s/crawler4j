@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+import src.core.rem.provider as provider_module
 from src.core.rem.handle import BrowserHandle
 from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo, ProxyConfig, ProxyMode
 from src.core.rem.provider import (
@@ -53,6 +54,77 @@ class TestProviderRegistry:
         provider = get_provider("unknown_provider")
         
         assert provider is None
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_create_uses_proxy_geo_and_validates_full_parameters(monkeypatch):
+    provider = VirtualBrowserProvider()
+    client = SimpleNamespace(
+        add_browser=AsyncMock(return_value=303),
+        get_browser_full_parameters=AsyncMock(
+            return_value={
+                "id": 303,
+                "name": "env-geo",
+                "time-zone": {"utc": "Asia/Tokyo"},
+                "ua-language": {"language": "ja-JP"},
+                "webrtc": {"mode": 0},
+            }
+        ),
+    )
+    probe_entries = []
+
+    def _probe_geo(entry):
+        probe_entries.append(entry)
+        return provider_module.ProxyProbeResult(
+            ok=True,
+            stage="probe",
+            protocol="http",
+            masked_proxy_url="http://alice:***@10.0.0.8:8080",
+            latency_ms=12,
+            exit_ip="203.0.113.8",
+            http_status=200,
+            detail="ok",
+            error_type=None,
+            country_code="JP",
+            country="Japan",
+            region="Tokyo",
+            city="Tokyo",
+            timezone="Asia/Tokyo",
+            asn="AS64500 TEST-NET",
+            isp="Example ISP",
+        )
+
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(provider_module, "probe_ip_entry_geo", _probe_geo)
+
+    env = await provider.create(
+        {
+            "env_name": "env-geo",
+            "creation_params": {
+                "virtualbrowser": {
+                    "chrome_version": 145,
+                    "__randomize_fingerprint__": True,
+                },
+                "proxy": {
+                    "protocol": "http",
+                    "host": "10.0.0.8",
+                    "port": 8080,
+                    "user": "alice",
+                    "pass": "secret",
+                },
+            },
+        }
+    )
+
+    assert env.external_id == "303"
+    assert probe_entries[0].address == "10.0.0.8"
+    assert probe_entries[0].port == 8080
+    assert probe_entries[0].username == "alice"
+    client.add_browser.assert_awaited_once()
+    _, kwargs = client.add_browser.await_args
+    assert kwargs["geo"]["country_code"] == "JP"
+    assert kwargs["geo"]["timezone"] == "Asia/Tokyo"
+    client.get_browser_full_parameters.assert_awaited_once_with(303)
 
 
 @pytest.mark.asyncio

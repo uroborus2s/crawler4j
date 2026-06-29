@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `CR-016`, `API-009`, `API-010`, `API-019`, `BUG-013`
-**最后更新：** 2026-06-28
+**最后更新：** 2026-06-29
 
 ## 1. 用途与记录规则
 
@@ -38,6 +38,9 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-29 | 将根应用 / 运行时版本提升到 `0.4.21`，用于承接 VirtualBrowser 随机指纹代理出口 geo 校准、创建后轻量验收、风险环境标记与默认调度跳过；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务、VirtualBrowser 指纹和风险环境调度聚焦回归 `85 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.21 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
+| 2026-06-29 | 增加指纹风险环境的手动复检与调度跳过：环境风险状态写入 `fingerprint.validation` metadata，创建期轻量验收 warning 会落为风险；环境列表新增“风险”列和行内重新检测入口；风险环境不会被普通租约、固定环境选择、候选环境调度和 Service 容量计算默认使用，也不会被自动删除。手动复检当前复用 VirtualBrowser `getBrowserFullParameters` 轻量验收，只更新 validation metadata，不修改代理、指纹或 WebRTC 配置。验证：REM / UI / ATM 相关文件整组回归 `78 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
+| 2026-06-29 | 修正 VirtualBrowser 随机指纹创建期展开：`__randomize_fingerprint__` 不再只下发随机 `chrome_version`，而是补齐 `zh-CN` / `Asia/Shanghai` 默认画像、常见屏幕 `mode=1`、常见 CPU/内存组合和 fonts/canvas/WebGL image/audio/client-rects/speech voices 随机模式，同时继续剥离手工 UA、Sec-CH-UA、设备名和 MAC；运行模板 UI 在随机指纹开启时隐藏高级指纹参数，取消随机化时仍保留手工高级配置。验证：VirtualBrowser 指纹展开、addBrowser payload 与运行模板 UI 定向回归 `53 passed` | Codex |
 | 2026-06-28 | 将根应用 / 运行时版本提升到 `0.4.20`，用于承接 Core `browser.drag natural` 体感时长、约 60Hz 采样与固定 seed 默认混入运行随机盐的框架自检能力；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务与 `browser.drag` 自检回归 `24 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.20 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-06-28 | 调整 Core `browser.drag natural` 体感时长、采样点数与 seed 随机性：新增默认 `natural_drag_down_up_duration_range=(0.9, 2.8)` 与 `natural_drag_sample_rate_range=(54.0, 66.0)`，按 `down_dwell + move samples dt` 控制 `down -> up` 窗口，并按约 `60Hz` 生成移动点；固定 `seed` 默认也会混入运行时随机盐，只有 `deterministic_seed=True` 才复现；回归自检新增采样率、`dt` 变化、速度变化、纵向微动、跨 seed 差异和固定 seed 非复现指标。验证：`test_browser_tools.py` 整文件 `21 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
 | 2026-06-28 | 将根应用 / 运行时版本提升到 `0.4.19`，用于承接 `browser.drag` 连续轨迹生成与框架自检 trace 能力；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.19 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
