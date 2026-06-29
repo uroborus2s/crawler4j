@@ -27,6 +27,10 @@ from src.core.mms.release_service import assert_module_upgrade_unlocked
 from src.core.mms.settings_store import get_module_settings_store
 from src.core.mms.service import get_module_service
 from src.core.rem.env_claims import CLAIM_CLAIMED, get_env_claim, is_env_bound_by_module, recover_pending_env_claims
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    is_fingerprint_validation_risk,
+)
 from src.core.rem.manager import RECOVERY_PROVIDER_RUNTIME_TIMEOUT, get_environment_manager
 
 CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
@@ -524,10 +528,23 @@ class JobController:
                 continue
             if getattr(env, "lease_id", None):
                 continue
+            if await self._is_env_fingerprint_validation_risk(int(env.id)):
+                continue
             if not await self._is_env_candidate_authorized(int(env.id), module_name):
                 continue
             capacity += 1
         return capacity
+
+    async def _is_env_fingerprint_validation_risk(self, env_id: int) -> bool:
+        list_metadata = getattr(self.rem, "list_metadata", None)
+        if not callable(list_metadata):
+            return False
+        try:
+            metadata = await list_metadata(int(env_id), FINGERPRINT_VALIDATION_NAMESPACE)
+        except Exception as exc:
+            logger.warning(f"[ATM] 环境指纹风险读取失败: env_id={env_id} error={exc}")
+            return False
+        return is_fingerprint_validation_risk(metadata)
 
     def _build_candidate_context(
         self,

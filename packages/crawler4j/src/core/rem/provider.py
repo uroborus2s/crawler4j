@@ -527,6 +527,11 @@ class BaseProvider(ABC):
         """
         return False
 
+    async def validate_fingerprint_environment(self, env: Environment) -> list[str]:
+        """Return fingerprint validation warnings for manual risk rechecks."""
+        del env
+        return []
+
     def supports_existing_env_import(self) -> bool:
         """是否支持从来源系统导入已有环境。"""
         return False
@@ -1844,7 +1849,7 @@ class VirtualBrowserProvider(BaseProvider):
         # VirtualBrowser 的本地管理 API 对并发创建/启动不稳定，串行化避免拖死宿主 UI 事件循环。
         async with self._get_lifecycle_lock():
             browser_id = await client.add_browser(name, groups, proxy, fingerprint, geo=geo)
-            await self._log_created_parameter_validation(client, int(browser_id), geo)
+            validation_warnings = await self._log_created_parameter_validation(client, int(browser_id), geo)
         
         if config.get("launch", True):
              # launch parameter is now ignored in create
@@ -1860,7 +1865,7 @@ class VirtualBrowserProvider(BaseProvider):
         
         from src.core.rem.handle import BrowserHandle
         
-        return Environment(
+        env = Environment(
             # id 使用默认值 0，由 Manager 覆盖为数据库自增 ID
             name=name,
             kind=EnvKind.BROWSER,
@@ -1871,6 +1876,8 @@ class VirtualBrowserProvider(BaseProvider):
             proxy_config=final_proxy_config,
             handle=BrowserHandle(browser_id=str(browser_id)),
         )
+        env.fingerprint_validation_warnings = validation_warnings
+        return env
 
     async def _probe_creation_proxy_geo(
         self,
@@ -1901,12 +1908,12 @@ class VirtualBrowserProvider(BaseProvider):
         client: VirtualBrowserClient,
         browser_id: int,
         geo: dict[str, Any] | None,
-    ) -> None:
+    ) -> list[str]:
         try:
             payload = await client.get_browser_full_parameters(browser_id)
         except Exception as exc:
             logger.warning(f"[VirtualBrowser] getBrowserFullParameters 验收失败: id={browser_id} error={exc}")
-            return
+            return [f"getBrowserFullParameters 验收失败: {exc}"]
         warnings = _created_parameter_warnings(payload, browser_id=browser_id, geo=geo)
         if warnings:
             logger.warning(
@@ -1915,6 +1922,26 @@ class VirtualBrowserProvider(BaseProvider):
             )
         else:
             logger.info(f"[VirtualBrowser] created parameter validation passed: id={browser_id}")
+        return warnings
+
+    async def validate_fingerprint_environment(self, env: Environment) -> list[str]:
+        """Validate persisted VirtualBrowser parameters without changing the environment."""
+        browser_id = self._browser_id_from_env(env)
+        if not browser_id:
+            return ["缺少 VirtualBrowser 环境 ID"]
+        try:
+            browser_id_int = int(browser_id)
+        except (TypeError, ValueError):
+            return [f"VirtualBrowser 环境 ID 无效: {browser_id!r}"]
+
+        async with self._get_lifecycle_lock():
+            client = self._get_api_client()
+            try:
+                payload = await client.get_browser_full_parameters(browser_id_int)
+            except Exception as exc:
+                return [f"getBrowserFullParameters 验收失败: {exc}"]
+
+        return _created_parameter_warnings(payload, browser_id=browser_id_int, geo=None)
 
     async def reset(self, env: Environment) -> bool:
         """重置环境状态：清除数据 + 导航到空白页。"""

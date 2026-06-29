@@ -29,6 +29,10 @@ from src.core.rem.env_claims import (
     set_pending_env_claim,
 )
 from src.core.rem.manager import EnvironmentManager, get_environment_manager
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    is_fingerprint_validation_risk,
+)
 from src.core.rem.models import (
     Environment,
     EnvKind,
@@ -188,6 +192,8 @@ class ExecutionRunner:
                     env = await self.rem.get_env(selected_env_id)
                     if not env:
                         raise RuntimeError(f"指定环境不存在: {selected_env_id}")
+                    if await self._is_env_fingerprint_validation_risk(selected_env_id):
+                        raise RuntimeError(f"环境 {selected_env_id} 指纹风险待复检")
                     await self._assert_env_claimable_by_module(selected_env_id, request.module_name)
                     if env.status == EnvStatus.RUNNING and env.lease_id is None:
                         env_lease = await self.rem.lease_manager.claim_created_env(
@@ -516,6 +522,8 @@ class ExecutionRunner:
                 continue
             if getattr(env, "lease_id", None):
                 continue
+            if await self._is_env_fingerprint_validation_risk(env.id):
+                continue
             if not await self._is_env_candidate_authorized(env.id, module_name):
                 logger.warning(
                     f"[ATM] Candidate env {env.id} ignored because it is not bound to module {module_name}"
@@ -571,7 +579,20 @@ class ExecutionRunner:
         )
         if int(env_id) not in {int(candidate_id) for candidate_id in candidate_env_ids}:
             return False
+        if await self._is_env_fingerprint_validation_risk(int(env_id)):
+            return False
         return await self._is_env_candidate_authorized(int(env_id), module_name)
+
+    async def _is_env_fingerprint_validation_risk(self, env_id: int) -> bool:
+        list_metadata = getattr(self.rem, "list_metadata", None)
+        if not callable(list_metadata):
+            return False
+        try:
+            metadata = await list_metadata(int(env_id), FINGERPRINT_VALIDATION_NAMESPACE)
+        except Exception as exc:
+            logger.warning(f"[ATM] 环境指纹风险读取失败: env_id={env_id} error={exc}")
+            return False
+        return is_fingerprint_validation_risk(metadata)
 
     async def _get_env_owner_module(self, env_id: int) -> str:
         claim = await get_env_claim(self.rem, int(env_id))

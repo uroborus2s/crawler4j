@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修正：2026-06-29 指纹风险环境已接入手动重新检测与默认调度跳过。风险状态写入 `fingerprint.validation` metadata，创建期轻量验收 warning 会落为风险；环境列表新增“风险”列并展示原因；普通租约、原子租约、ATM 固定环境选择、候选环境调度和 Service 容量计算默认跳过风险环境，不自动删除。手动复检当前复用 VirtualBrowser `getBrowserFullParameters` 轻量验收，只会把 validation metadata 更新为 `passed` 或继续写入 `risk/reason/detail/last_checked_at`，不会修改代理、重新随机指纹、改 WebRTC 配置或清空登录态。验证：REM / UI / ATM 相关文件整组回归 `78 passed`，目标 `ruff check` 与 `git diff --check` 通过。
 - 最新修正：2026-06-29 VirtualBrowser 随机指纹创建期已接入代理出口 geo 探测：随机指纹且创建参数带代理时，Core 复用代理探测链路获取出口 IP、国家、城市、ASN、时区，并用国家/时区覆盖 `ua-language` 与 `time-zone`；探测失败回退默认画像。创建成功后调用 `getBrowserFullParameters(id)` 做轻量验收并记录时区、语言与 WebRTC 模式不一致项，不自动删除环境。验证：代理探测、指纹展开、addBrowser payload 与 provider 创建流程回归 `42 passed`，目标 `ruff check` 与 `git diff --check` 通过。
 - 最新修正：2026-06-29 VirtualBrowser 随机指纹创建期已改为托管默认画像：`__randomize_fingerprint__` 仍随机 `chrome_version=139..145`，但创建前会补齐 `zh-CN` / `Asia/Shanghai`、常见屏幕 `mode=1`、常见 CPU/内存组合和 fonts/canvas/WebGL image/audio/client-rects/speech voices 随机模式；手工 UA、Sec-CH-UA、设备名和 MAC 继续剥离，避免与真实内核或外部浏览器生成结果冲突。运行模板 UI 在随机指纹开启时隐藏高级指纹参数，只保留浏览器版本、随机指纹开关和 IP 策略等必要入口。验证：VirtualBrowser 指纹展开、addBrowser payload 与运行模板 UI 定向回归 `53 passed`。
 - 最新版本：2026-06-28 根应用 / 运行时版本已提升到 `0.4.20`，用于承接 Core `browser.drag natural` 体感时长、约 60Hz 采样与固定 seed 默认混入运行随机盐的框架自检能力；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务与 `browser.drag` 自检回归 `24 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过。当前最新已记录 macOS 客户端下载版本仍为 2026-06-19 的 `0.4.16`，`0.4.20` 客户端包、正式 tag / GitHub release 与 Windows 真机证据仍需后续补齐。

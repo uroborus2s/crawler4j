@@ -6,8 +6,8 @@
 **主要读者：** QA | 开发 | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
-**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `TC-060`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `API-008`, `API-009`, `API-010`, `API-019`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `CR-016`, `NFR-003`, `NFR-010`
-**最后更新：** 2026-06-19
+**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `TC-060`, `TC-061`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `API-008`, `API-009`, `API-010`, `API-019`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `CR-016`, `NFR-003`, `NFR-010`
+**最后更新：** 2026-06-29
 
 ## 1. 测试目标
 
@@ -36,6 +36,7 @@
 | `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
 | `TC-0440` REM 来源代理同步与 IP 表绑定 | 通过 | 2026-06-18 追加覆盖：来源代理同步按 `host + port` 唯一命中 IP 表，不再比较协议、用户名或密码；仍优先使用 VirtualBrowser 结构化真实 `host/port`，避免 `proxy.url=http://127.0.0.1:本地端口` 被保存为绑定 IP。组合回归 `54 passed`，目标文件 `ruff check` 通过 |
+| `TC-061` 指纹风险环境手动复检与调度跳过 | 通过 | 2026-06-29 新增覆盖：`fingerprint.validation` 风险 metadata 会让 REM 池、普通租约、原子租约、ATM 候选调度和固定环境下拉跳过该环境；创建期轻量验收 warning 会落为风险；环境列表展示风险原因并提供行内重新检测；复检通过只更新 validation metadata。REM / UI / ATM 相关文件整组回归 `78 passed`，目标文件 `ruff check` 与 `git diff --check` 通过 |
 | `TC-060` Hosted UI 批量导入 | 通过 | 2026-06-19 已实现并验证：toolbar schema、CSV/XLSX/剪贴板/手工 JSON 解析、文件大小与最大行数限制、敏感字段脱敏、`@ui_action` / workflow 分发、导入结果展示和 `import_data_records` 跳转；全量 unit `1031 passed` |
 | `TC-059` 开发模块忽略目录 symlink 回归 | 通过 | 2026-05-30 新增定向覆盖：DevLink/源码预检的 manifest lock 校验会跳过 `.venv/` 内 symlink，非忽略目录 symlink 仍拒绝；SDK `_archive_members()` 会跳过 `.venv/` 内 symlink 且不打入 ZIP |
 | `TC-0400-release-review-final` 0.4.0 全面审查回归 | 通过 | 2026-05-01 复验：Full runtime surface 负向拒绝旧 Hosted UI 工具、空 workflow 自动解析、dispatcher env claim/binding 失败路径、UI smoke 与 PyInstaller spec 清理；全量 `886 passed`，打包配置 `62 passed` |
@@ -62,6 +63,7 @@
 | `REQ-007` / ATM 人工复核闭环 | 等待确认信号持久化、结构化确认面板、确认服务回调 | ATM 单测 + Qt 对话框单测 |
 | `REQ-008` / `CR-008` | 模块数据资源与模块自管历史统一通过 `ctx.db` 建模 | 持久层单测 + runtime capability 单测 + SDK fluent API 契约单测 |
 | `REQ-009` / `CR-009` | 环境候选 Service Job 的等待队列、候选纯函数、模块环境授权和租约后复核 | ATM 单测/集成测试 + MMS/SDK 候选扫描回归 + 运行模板/UI 单测 |
+| `REQ-009` / 指纹风险环境 | 风险 metadata 展示、手动复检、普通租约/固定环境/候选调度跳过风险环境 | REM 单测 + ATM 单测 + Qt 环境列表/运行模板单测 |
 | `CR-003` / 模块 UI 调试回归 | hosted page 页面声明刷新、页面内联 `DataTable` CRUD hook 与 DevLink 调试重载 | MMS 单测（`test_module_data_table_page.py`） |
 | `CR-003` / 模块配置编辑回归 | 模块详情页配置编辑器、YAML 语法校验、顶层映射约束、重复键拒绝与保存后规范化 | MMS 单测（`test_config_yaml_validation.py`、`test_module_detail_page.py`、`test_settings_store.py`） |
 | `BUG-013` / `CR-005` | 发现错误可见、DevLink 普通执行热更新 | SDK 单测 + ATM/MMS 单测 |

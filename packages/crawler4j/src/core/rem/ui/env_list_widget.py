@@ -20,6 +20,11 @@ from PyQt6.QtWidgets import (
 )
 
 from src.core.foundation.logging import logger
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    FINGERPRINT_VALIDATION_PASSED,
+    fingerprint_validation_from_metadata,
+)
 from src.core.rem.import_job_service import get_existing_env_import_job_service
 from src.core.rem import EnvKind, EnvStatus
 from src.core.rem.ip_pool import get_ip_pool_manager
@@ -780,6 +785,41 @@ def _format_bound_ip_cell(proxy_config: Any) -> dict[str, Any]:
     }
 
 
+def _format_fingerprint_validation_cell(env_metadata: dict[str, Any]) -> dict[str, Any]:
+    metadata = env_metadata.get(FINGERPRINT_VALIDATION_NAMESPACE, {})
+    summary = fingerprint_validation_from_metadata(metadata)
+    if summary.is_risk:
+        reason = summary.reason or "指纹风险"
+        tooltip = summary.detail or reason
+        if summary.last_checked_at:
+            tooltip = f"{tooltip}\n检测时间: {summary.last_checked_at}"
+        return {
+            "text": f"风险: {reason}",
+            "search_text": f"风险 {reason} {summary.detail}",
+            "sort_value": f"risk:{reason}",
+            "tooltip": tooltip,
+            "tone": "danger",
+        }
+    if summary.status == FINGERPRINT_VALIDATION_PASSED:
+        tooltip = summary.detail or "最近一次指纹风险重新检测通过"
+        if summary.last_checked_at:
+            tooltip = f"{tooltip}\n检测时间: {summary.last_checked_at}"
+        return {
+            "text": "通过",
+            "search_text": "通过",
+            "sort_value": "passed",
+            "tooltip": tooltip,
+            "tone": "success",
+        }
+    return {
+        "text": "-",
+        "search_text": "",
+        "sort_value": "",
+        "tooltip": "未进行风险检测",
+        "tone": "neutral",
+    }
+
+
 def _proxy_mode_value(proxy_config: Any) -> str:
     if proxy_config is None:
         return "none"
@@ -861,6 +901,7 @@ class EnvListWidget(QWidget):
             {"key": "kind", "label": "类型", "type": "text", "width": 100},
             {"key": "provider", "label": "节点类型", "type": "text", "width": 110},
             {"key": "bound_ip", "label": "绑定 IP", "type": "text", "width": 180, "sortable": True, "searchable": True},
+            {"key": "fingerprint_validation", "label": "风险", "type": "text", "width": 180, "searchable": True},
             {"key": "status", "label": "状态", "type": "text", "width": 90},
             {"key": "task", "label": "任务", "type": "text", "width": 160},
             {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
@@ -875,7 +916,7 @@ class EnvListWidget(QWidget):
         },
     }
     
-    COLUMNS = ["ID", "名称", "类型", "Provider", "绑定 IP", "状态", "任务", "操作"]
+    COLUMNS = ["ID", "名称", "类型", "Provider", "绑定 IP", "风险", "状态", "任务", "操作"]
     STATUS_COLORS = {
         EnvStatus.READY: "#4ade80",
         EnvStatus.BUSY: "#facc15",
@@ -1031,12 +1072,13 @@ class EnvListWidget(QWidget):
             "kind": env.kind.value,
             "provider": env.provider,
             "bound_ip": _format_bound_ip_cell(getattr(env, "proxy_config", None)),
+            "fingerprint_validation": _format_fingerprint_validation_cell(item.env_metadata),
             "status": {
                 "text": item.display_status_text,
                 "tone": self._status_tone(env.status),
             },
             "task": task_text,
-            "actions": self._build_row_actions(env),
+            "actions": self._build_row_actions(env, item.env_metadata),
         }
 
     def _unpack_loaded_env(self, loaded: Any) -> tuple[Any, dict[str, Any]]:
@@ -1057,22 +1099,40 @@ class EnvListWidget(QWidget):
             return {}
         return metadata if isinstance(metadata, dict) else {}
 
-    def _build_row_actions(self, env) -> list[dict[str, Any]]:
+    def _build_row_actions(self, env, env_metadata: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        validation = fingerprint_validation_from_metadata(
+            (env_metadata or {}).get(FINGERPRINT_VALIDATION_NAMESPACE, {})
+        )
+        recheck_action = {
+            "id": "recheck_fingerprint",
+            "label": "↻",
+            "tooltip": "重新检测指纹风险",
+            "variant": "warning",
+        }
         if env.status == EnvStatus.READY:
-            return [
-                {"id": "start", "label": "▶", "tooltip": "运行", "variant": "success"},
+            actions = []
+            if validation.is_risk:
+                actions.append(recheck_action)
+            else:
+                actions.append({"id": "start", "label": "▶", "tooltip": "运行", "variant": "success"})
+            actions.extend([
                 {"id": "pause", "label": "⏸", "tooltip": "暂停", "variant": "warning"},
                 {"id": "edit", "label": "✏", "tooltip": "编辑", "variant": "primary"},
                 {"id": "destroy", "label": "🗑", "tooltip": "销毁", "variant": "danger"},
-            ]
+            ])
+            return actions
         if env.status in (EnvStatus.RUNNING, EnvStatus.BUSY):
             return [{"id": "stop", "label": "⏹ 停止", "variant": "danger"}]
         if env.status == EnvStatus.PAUSED:
-            return [
+            actions = []
+            if validation.is_risk:
+                actions.append(recheck_action)
+            actions.extend([
                 {"id": "resume", "label": "▶", "tooltip": "启动", "variant": "success"},
                 {"id": "edit", "label": "✏", "tooltip": "编辑", "variant": "primary"},
                 {"id": "destroy", "label": "🗑", "tooltip": "销毁", "variant": "danger"},
-            ]
+            ])
+            return actions
         return []
 
     def _status_tone(self, status: EnvStatus) -> str:
@@ -1116,6 +1176,8 @@ class EnvListWidget(QWidget):
             self._stop_env(env_id)
         elif action_id == "resume":
             self._resume_env(env_id)
+        elif action_id == "recheck_fingerprint":
+            self._recheck_fingerprint_validation(env_id)
     
     def _on_load_error(self, error: str):
         """加载出错。"""
@@ -1311,6 +1373,19 @@ class EnvListWidget(QWidget):
             message,
             kind="info" if result.failed_count == 0 else "warning",
         )
+        self.load_data(run_gc=False, reload_from_db=True)
+
+    async def _async_recheck_fingerprint_validation(self, env_id: str) -> None:
+        try:
+            summary = await self._manager.recheck_env_fingerprint_validation(env_id)
+        except Exception as exc:
+            await self._show_operation_error(str(exc))
+            return
+        if summary.is_risk:
+            message = summary.detail or summary.reason or "重新检测后仍存在风险。"
+            await self._show_message_async("重新检测", f"环境仍为风险状态。\n{message}", kind="warning")
+        else:
+            await self._show_message_async("重新检测", "环境指纹风险检测通过。", kind="info")
         self.load_data(run_gc=False, reload_from_db=True)
 
     async def _async_env_operation(self, env_id: str, action: str):
@@ -1574,6 +1649,13 @@ class EnvListWidget(QWidget):
             self._async_env_operation(env_id, "resume"),
             message=self._operation_message("resume", env_id=env_id),
         )
+
+    def _recheck_fingerprint_validation(self, env_id: str) -> None:
+        """手动重新检测风险环境。"""
+        self._schedule_operation(
+            self._async_recheck_fingerprint_validation(env_id),
+            message=self._operation_message("recheck_fingerprint", env_id=env_id),
+        )
     
     def _edit_env(self, env_id: str):
         """编辑环境（弹出对话框）。"""
@@ -1630,6 +1712,7 @@ class EnvListWidget(QWidget):
             "list_sources": "读取来源",
             "sync_source_proxy": "同步来源代理",
             "sync_source_proxy_scan": "扫描来源代理",
+            "recheck_fingerprint": "重新检测指纹风险",
         }.get(action, "处理")
         env_text = f" {env_id}" if env_id else ""
         provider_label = {
@@ -1645,6 +1728,8 @@ class EnvListWidget(QWidget):
             return "正在读取指纹浏览器来源代理..."
         if action == "sync_source_proxy":
             return "正在同步来源代理到本地环境记录..."
+        if action == "recheck_fingerprint":
+            return f"正在重新检测环境{env_text}的指纹风险..."
         return f"正在{action_text}环境{env_text}..."
 
     def _show_loading(self, show: bool, message: str = ""):

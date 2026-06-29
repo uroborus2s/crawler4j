@@ -14,6 +14,12 @@ from typing import Any
 
 from src.core.foundation.logging import logger
 from src.core.persistence.database import STATE_DB, get_connection
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    FINGERPRINT_VALIDATION_RISK,
+    FINGERPRINT_VALIDATION_STATUS,
+    is_fingerprint_validation_risk,
+)
 from src.core.rem.handle import BrowserHandle
 from src.core.rem.models import (
     Environment,
@@ -124,6 +130,8 @@ class EnvPool:
         """
         async with self._lock:
             for env in self._environments.values():
+                if self.is_fingerprint_validation_risk(env.id):
+                    continue
                 if env.status == EnvStatus.READY and requirement.matches(env):
                     return env
             return None
@@ -371,6 +379,15 @@ class EnvPool:
                         result[ns] = {}
                     result[ns][row["key"]] = self._decode_value(row["value"], row["value_type"])
             return result
+
+    def fingerprint_validation_metadata(self, env_id: int | str) -> dict[str, Any]:
+        """Return fingerprint validation metadata for an environment."""
+        metadata = self.list_metadata(env_id, FINGERPRINT_VALIDATION_NAMESPACE)
+        return metadata if isinstance(metadata, dict) else {}
+
+    def is_fingerprint_validation_risk(self, env_id: int | str) -> bool:
+        """Whether an environment is marked as fingerprint-risk."""
+        return is_fingerprint_validation_risk(self.fingerprint_validation_metadata(env_id))
     
     def delete_metadata(self, env_id: int | str, namespace: str, key: str | None = None) -> int:
         """删除元数据，返回删除条数。"""
@@ -452,6 +469,12 @@ class LeaseManager:
                     f"环境 {env.id} 已被占用 (status={env.status.value})",
                     stage="LEASE",
                     hint="请等待环境释放或选择其他环境",
+                )
+            if self.pool.is_fingerprint_validation_risk(env.id):
+                raise EnvUnavailableError(
+                    f"环境 {env.id} 指纹风险待复检",
+                    stage="LEASE",
+                    hint="请先重新检测风险环境或选择其他环境",
                 )
             
             now = int(time.time())
@@ -554,6 +577,21 @@ class LeaseManager:
                     )
                     row = None
                     for candidate in cursor.fetchall():
+                        risk_row = conn.execute(
+                            """
+                            SELECT value, value_type
+                            FROM env_metadata
+                            WHERE env_id = ? AND namespace = ? AND key = ?
+                            """,
+                            (
+                                candidate["id"],
+                                FINGERPRINT_VALIDATION_NAMESPACE,
+                                FINGERPRINT_VALIDATION_STATUS,
+                            ),
+                        ).fetchone()
+                        if risk_row and self.pool._decode_value(risk_row["value"], risk_row["value_type"]) == FINGERPRINT_VALIDATION_RISK:
+                            continue
+
                         proxy_config = None
                         if candidate["proxy_config_json"]:
                             proxy_config = ProxyConfig.from_dict(json.loads(candidate["proxy_config_json"]))

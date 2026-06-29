@@ -14,6 +14,11 @@ from src.core.atm.run_profile import (
     RunProfile,
 )
 from src.core.rem.env_claims import ENV_CLAIM_NAMESPACE, ENV_CLAIM_OWNER_MODULE
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    FINGERPRINT_VALIDATION_RISK,
+    FINGERPRINT_VALIDATION_STATUS,
+)
 from src.core.rem.models import EnvKind, EnvStatus
 from src.ui.components.button import StyledButton
 from src.ui.components.check_box import StyledCheckBox, ToggleSwitch
@@ -517,6 +522,7 @@ def test_run_profile_dialog_lists_only_current_module_available_fixed_envs(qtbot
         _make_env(4, name="busy-demo", provider="virtualbrowser", status=EnvStatus.BUSY),
         _make_env(5, name="http-env", provider="virtualbrowser", kind=EnvKind.HTTP),
         _make_env(6, name="leased-demo", provider="virtualbrowser", lease_id="lease-6"),
+        _make_env(7, name="risk-demo", provider="virtualbrowser"),
     ]
     _patch_dialog_dependencies(
         monkeypatch,
@@ -526,6 +532,11 @@ def test_run_profile_dialog_lists_only_current_module_available_fixed_envs(qtbot
             3: {ENV_CLAIM_NAMESPACE: {ENV_CLAIM_OWNER_MODULE: "other_module"}},
             4: {ENV_CLAIM_NAMESPACE: {ENV_CLAIM_OWNER_MODULE: "demo_module"}},
             6: {ENV_CLAIM_NAMESPACE: {ENV_CLAIM_OWNER_MODULE: "demo_module"}},
+            7: {
+                FINGERPRINT_VALIDATION_NAMESPACE: {
+                    FINGERPRINT_VALIDATION_STATUS: FINGERPRINT_VALIDATION_RISK,
+                }
+            },
         },
     )
 

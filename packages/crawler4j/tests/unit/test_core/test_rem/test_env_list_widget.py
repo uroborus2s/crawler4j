@@ -16,6 +16,14 @@ from src.core.rem.cleanup_service import (
     EnvCleanupPreviewItem,
     EnvCleanupSource,
 )
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_DETAIL,
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    FINGERPRINT_VALIDATION_REASON,
+    FINGERPRINT_VALIDATION_RISK,
+    FINGERPRINT_VALIDATION_STATUS,
+    FingerprintValidationSummary,
+)
 from src.core.rem import EnvKind, EnvStatus
 from src.core.rem.models import ProxyConfig, ProxyMode
 from src.ui.components.combo_box import StyledComboBox
@@ -665,6 +673,80 @@ def test_env_list_widget_preserves_env_metadata_without_resource_pool_availabili
     assert rows[0]["env_metadata"] == metadata_by_env[101]
     assert "availability" not in rows[0]
     assert rows[1]["env_metadata"] == {}
+
+
+def test_env_list_widget_rows_show_fingerprint_risk(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    metadata_by_env = {
+        101: {
+            FINGERPRINT_VALIDATION_NAMESPACE: {
+                FINGERPRINT_VALIDATION_STATUS: FINGERPRINT_VALIDATION_RISK,
+                FINGERPRINT_VALIDATION_REASON: "WebRTC 泄漏",
+                FINGERPRINT_VALIDATION_DETAIL: "candidate=1.2.3.4",
+            },
+        },
+    }
+    pool = SimpleNamespace(
+        list_metadata=MagicMock(side_effect=lambda env_id: metadata_by_env.get(env_id, {}))
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=pool),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    widget._on_data_loaded([_make_env(101, EnvStatus.READY)])
+    row = widget.table.displayed_rows()[0]
+
+    assert row["fingerprint_validation"]["text"] == "风险: WebRTC 泄漏"
+    assert row["fingerprint_validation"]["tooltip"] == "candidate=1.2.3.4"
+    assert [action["id"] for action in row["actions"]] == [
+        "recheck_fingerprint",
+        "pause",
+        "edit",
+        "destroy",
+    ]
+    assert widget.table.table.item(0, 5).text() == "风险: WebRTC 泄漏"
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_recheck_fingerprint_refreshes_metadata(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    manager = SimpleNamespace(
+        pool=SimpleNamespace(),
+        recheck_env_fingerprint_validation=AsyncMock(
+            return_value=FingerprintValidationSummary(
+                status="passed",
+                reason="",
+                detail="手动重新检测通过",
+            )
+        ),
+    )
+    messages: list[tuple[str, str, str]] = []
+
+    async def fake_show(_parent, title: str, text: str, *, kind: str = "info"):
+        messages.append((title, text, kind))
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+    monkeypatch.setattr(env_list_widget.MessageDialog, "show_async", staticmethod(fake_show))
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget.load_data = MagicMock()
+
+    await widget._async_recheck_fingerprint_validation("101")
+
+    manager.recheck_env_fingerprint_validation.assert_awaited_once_with("101")
+    assert messages == [("重新检测", "环境指纹风险检测通过。", "info")]
+    widget.load_data.assert_called_once_with(run_gc=False, reload_from_db=True)
 
 
 @pytest.mark.asyncio

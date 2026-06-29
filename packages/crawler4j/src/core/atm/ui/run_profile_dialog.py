@@ -25,6 +25,10 @@ from PyQt6.QtWidgets import (
 from src.core.mms import get_module_registry
 from src.core.mms.service import get_module_service
 from src.core.rem.env_claims import ENV_CLAIM_NAMESPACE, ENV_CLAIM_OWNER_MODULE
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    is_fingerprint_validation_risk,
+)
 from src.core.rem.ip_pool import get_ip_pool_manager
 from src.core.rem.manager import get_environment_manager
 from src.core.rem.models import EnvKind, EnvStatus
@@ -2466,8 +2470,22 @@ class RunProfileDialog(QDialog):
             return False
         if getattr(env, "lease_id", None):
             return False
+        if self._env_fingerprint_validation_risk(env):
+            return False
         owner = self._env_claim_owner(env)
         return not owner or owner == module_name
+
+    def _env_fingerprint_validation_risk(self, env: object) -> bool:
+        try:
+            pool = get_environment_manager().pool
+            list_metadata = getattr(pool, "list_metadata", None)
+            if not callable(list_metadata):
+                return False
+            metadata = list_metadata(int(getattr(env, "id")), FINGERPRINT_VALIDATION_NAMESPACE)
+        except Exception as exc:
+            logger.warning(f"[ATM] 读取环境指纹风险失败: env_id={getattr(env, 'id', '')} error={exc}")
+            return False
+        return is_fingerprint_validation_risk(metadata)
 
     def _list_fixed_env_options(self, module_name: str) -> list[object]:
         if not module_name:

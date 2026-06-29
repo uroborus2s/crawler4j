@@ -13,6 +13,11 @@ from src.core.rem.env_claims import (
     ENV_CLAIM_OWNER_MODULE,
     ENV_CLAIM_STATE,
 )
+from src.core.rem.fingerprint_validation import (
+    FINGERPRINT_VALIDATION_NAMESPACE,
+    FINGERPRINT_VALIDATION_RISK,
+    FINGERPRINT_VALIDATION_STATUS,
+)
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus, EnvUnavailableError
 
 
@@ -197,6 +202,35 @@ async def test_execution_runner_ignores_candidate_env_bound_to_another_module():
     rem.lease_manager.acquire.assert_not_awaited()
     module_service.run_module.assert_not_awaited()
     assert request.task.status == TaskStatus.PENDING
+    assert request.task.message == "等待环境候选可用: bound_account_ready"
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_ignores_fingerprint_risk_candidate_env(monkeypatch):
+    import src.core.atm.execution_runner as execution_runner
+
+    request = _build_request()
+    env, lease = _build_env()
+
+    module_service = _candidate_service([21])
+    runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
+    await _seed_claim(rem, 21, "demo.module")
+    await rem.set_metadata(
+        21,
+        FINGERPRINT_VALIDATION_NAMESPACE,
+        FINGERPRINT_VALIDATION_STATUS,
+        FINGERPRINT_VALIDATION_RISK,
+        "string",
+    )
+    monkeypatch.setattr(execution_runner, "is_env_bound_by_module", lambda *_args, **_kwargs: True)
+
+    await runner.run(request)
+
+    rem.list_envs.assert_awaited_once()
+    rem.lease_manager.acquire.assert_not_awaited()
+    module_service.run_module.assert_not_awaited()
+    assert request.task.status == TaskStatus.PENDING
+    assert request.task.error == ""
     assert request.task.message == "等待环境候选可用: bound_account_ready"
 
 

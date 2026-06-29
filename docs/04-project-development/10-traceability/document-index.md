@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-06-29：指纹风险环境已接入手动重新检测与默认调度跳过。风险状态写入 `fingerprint.validation` metadata，环境列表展示“风险”状态和原因；普通租约、固定环境选择、候选调度和 Service 容量计算默认跳过风险环境，不自动删除。手动复检只更新 validation metadata，不修改代理、指纹或 WebRTC 配置。同步用户说明、执行记录、测试计划和 `.factory/memory/`。
 - 2026-06-29：VirtualBrowser 随机指纹创建期已接入代理出口 geo 探测，随机指纹且带代理时用真实出口国家/时区覆盖 `ua-language` 与 `time-zone`，并在 `addBrowser` 后调用 `getBrowserFullParameters(id)` 做轻量验收；探测失败回退默认画像，不自动删除环境。同步执行记录、测试计划和 `.factory/memory/`。
 - 2026-06-29：VirtualBrowser 随机指纹创建期展开已改为下发最小自洽默认画像，补齐 `zh-CN` / `Asia/Shanghai`、常见屏幕 `mode=1`、常见 CPU/内存和随机扰动项，同时继续剥离手工 UA、Sec-CH-UA、设备名和 MAC；运行模板 UI 在随机指纹开启时隐藏高级指纹参数。同步执行记录、测试计划和 `.factory/memory/`。
 - 2026-06-28：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.20`，用于 `browser.drag natural` 体感时长、约 60Hz 采样与固定 seed 默认混入运行随机盐的框架自检能力；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径。
