@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-06-29：VirtualBrowser 随机指纹创建期展开已改为下发最小自洽默认画像，补齐 `zh-CN` / `Asia/Shanghai`、常见屏幕 `mode=1`、常见 CPU/内存和随机扰动项，同时继续剥离手工 UA、Sec-CH-UA、设备名和 MAC；运行模板 UI 在随机指纹开启时隐藏高级指纹参数。同步执行记录、测试计划和 `.factory/memory/`。
 - 2026-06-28：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.20`，用于 `browser.drag natural` 体感时长、约 60Hz 采样与固定 seed 默认混入运行随机盐的框架自检能力；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径。
 - 2026-06-28：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.19`，用于 `browser.drag` 连续轨迹生成与框架自检 trace 能力；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径。
 - 2026-06-22：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.18`，用于 VirtualBrowser 随机指纹创建期不下发具体指纹字段和 `chrome_version=139..145` 随机化；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径。

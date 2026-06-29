@@ -17,6 +17,35 @@ VIRTUALBROWSER_RANDOM_MODE_KEYS = (
     "client-rects",
     "speech_voices",
 )
+VIRTUALBROWSER_RANDOM_IDENTITY_KEYS = (
+    "ua",
+    "ua-full-version",
+    "sec-ch-ua",
+    "device-name",
+    "mac",
+)
+VIRTUALBROWSER_CN_LANGUAGE = {"mode": 1, "language": "zh-CN", "value": "zh-CN,zh"}
+VIRTUALBROWSER_CN_TIME_ZONE = {
+    "mode": 1,
+    "zone": "(UTC+08:00) Asia/Shanghai",
+    "utc": "Asia/Shanghai",
+    "locale": "zh-CN",
+    "value": 8,
+}
+VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS = (
+    (1366, 768),
+    (1600, 900),
+    (1680, 1050),
+    (1920, 1080),
+    (2560, 1440),
+)
+VIRTUALBROWSER_COMMON_HARDWARE_PROFILES = (
+    (4, 8),
+    (6, 16),
+    (8, 16),
+    (8, 32),
+    (12, 32),
+)
 VIRTUALBROWSER_UA_TEMPLATES = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/{version}.0.0.0 Safari/537.36",
@@ -66,6 +95,32 @@ def generate_mac_address() -> str:
     return "-".join(f"{octet:02X}" for octet in octets)
 
 
+def build_virtualbrowser_random_fingerprint_defaults() -> dict[str, Any]:
+    """生成随机指纹托管模式的最小自洽默认值。"""
+    width, height = secrets.choice(VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS)
+    cpu, memory = secrets.choice(VIRTUALBROWSER_COMMON_HARDWARE_PROFILES)
+    return {
+        "ua-language": dict(VIRTUALBROWSER_CN_LANGUAGE),
+        "time-zone": dict(VIRTUALBROWSER_CN_TIME_ZONE),
+        "screen": {
+            "mode": 1,
+            "width": width,
+            "height": height,
+            "_value": f"{width} x {height}",
+        },
+        "fonts": {"mode": 1},
+        "canvas": {"mode": 1},
+        "webgl-img": {"mode": 1},
+        "audio-context": {"mode": 1},
+        "client-rects": {"mode": 1},
+        "speech_voices": {"mode": 1},
+        "webrtc": {"mode": 0},
+        "location": {"mode": 2, "enable": 0},
+        "cpu": {"mode": 1, "value": cpu},
+        "memory": {"mode": 1, "value": memory},
+    }
+
+
 def materialize_virtualbrowser_fingerprint(
     fingerprint: dict[str, Any] | None,
     *,
@@ -84,7 +139,10 @@ def materialize_virtualbrowser_fingerprint(
     )
 
     if should_randomize:
-        # ponytail: VirtualBrowser owns random fingerprint fields and keeps them mutually consistent.
-        return secrets.choice(VIRTUALBROWSER_RANDOM_CHROME_VERSIONS), {}
+        for key in VIRTUALBROWSER_RANDOM_IDENTITY_KEYS:
+            payload.pop(key, None)
+        defaults = build_virtualbrowser_random_fingerprint_defaults()
+        defaults.update(payload)
+        return secrets.choice(VIRTUALBROWSER_RANDOM_CHROME_VERSIONS), defaults
 
     return chrome_version, payload

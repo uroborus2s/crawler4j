@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修正：2026-06-29 VirtualBrowser 随机指纹创建期已改为托管默认画像：`__randomize_fingerprint__` 仍随机 `chrome_version=139..145`，但创建前会补齐 `zh-CN` / `Asia/Shanghai`、常见屏幕 `mode=1`、常见 CPU/内存组合和 fonts/canvas/WebGL image/audio/client-rects/speech voices 随机模式；手工 UA、Sec-CH-UA、设备名和 MAC 继续剥离，避免与真实内核或外部浏览器生成结果冲突。运行模板 UI 在随机指纹开启时隐藏高级指纹参数，只保留浏览器版本、随机指纹开关和 IP 策略等必要入口。验证：VirtualBrowser 指纹展开、addBrowser payload 与运行模板 UI 定向回归 `53 passed`。
 - 最新版本：2026-06-28 根应用 / 运行时版本已提升到 `0.4.20`，用于承接 Core `browser.drag natural` 体感时长、约 60Hz 采样与固定 seed 默认混入运行随机盐的框架自检能力；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务与 `browser.drag` 自检回归 `24 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过。当前最新已记录 macOS 客户端下载版本仍为 2026-06-19 的 `0.4.16`，`0.4.20` 客户端包、正式 tag / GitHub release 与 Windows 真机证据仍需后续补齐。
 - 最新修正：2026-06-28 Core `browser.drag natural` 已把 `down -> up` 体感时长调整为默认 `0.9~2.8s`，并按约 `54~66Hz` 生成移动点。`natural_drag_down_up_duration_range` 现在按 `down_dwell + move samples dt` 计算目标窗口，trace 新增 `pre_pause` 便于自检；固定 `seed` 默认也会混入运行时随机盐，只有 `deterministic_seed=True` 才复现。回归自检新增采样率、`dt` 变化、速度变化、纵向微动、跨 seed 差异和固定 seed 非复现指标；验证：`test_browser_tools.py` 整文件 `21 passed`，目标 `ruff check` 与 `git diff --check` 通过。
 - 最新修正：2026-06-28 Core `browser.drag natural` 已从阶段模板拼接改为连续轨迹生成。trace 明确仅作为模块/测试自检输出，`phases[].samples[]` 新增 `dt` 记录相对下一步等待时间；`natural` 在一个连续循环里按 profile、节奏权重、侧向扰动和末段修正生成按住后的移动点，最终仍在目标点 `up`，越过目标和回拉只是可选现象。验证：相关聚焦用例 `4 passed`，`test_browser_tools.py` 整文件 `17 passed`，目标 `ruff check` 通过。

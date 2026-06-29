@@ -1,4 +1,3 @@
-import re
 from types import SimpleNamespace
 
 import pytest
@@ -845,23 +844,19 @@ def test_run_profile_dialog_defaults_new_create_mode_to_random_fingerprint(qtbot
     qtbot.wait(50)
 
     assert dialog.randomize_fingerprint_check.isChecked() is True
-    assert dialog.ua_custom_btn.isChecked() is True
-    assert dialog.ua_value_edit.height() >= 156
-    assert "Chrome/145.0.0.0" in dialog.ua_value_edit.toPlainText()
+    assert dialog.virtualbrowser_group.isHidden()
+    assert dialog.ua_default_btn.isChecked() is True
     assert dialog.audio_context_mode_combo.currentData() == "random"
     assert dialog.client_rects_mode_combo.currentData() == "random"
     assert dialog.speech_voices_mode_combo.currentData() == "random"
     assert dialog.fonts_mode_combo.currentData() == "random"
     assert dialog.canvas_mode_combo.currentData() == "random"
     assert dialog.webgl_image_mode_combo.currentData() == "random"
-    assert dialog.cpu_value_spin.value() == 4
-    assert dialog.memory_value_spin.value() == 8
-    assert dialog.device_name_mode_combo.currentData() == "custom"
-    assert re.fullmatch(r"[A-Z0-9]{18}", dialog.device_name_edit.text())
-    assert not dialog.device_name_input_widget.isHidden()
-    assert dialog.mac_mode_combo.currentData() == "custom"
-    assert dialog.mac_value_edit.text()
-    assert not dialog.mac_input_widget.isHidden()
+    assert dialog.language_follow_ip_check.isChecked() is True
+    assert dialog.timezone_follow_ip_check.isChecked() is True
+    assert dialog.location_follow_ip_check.isChecked() is True
+    assert dialog.device_name_mode_combo.currentData() == "default"
+    assert dialog.mac_mode_combo.currentData() == "default"
     assert dialog.dnt_check.isChecked() is False
     assert dialog.ssl_mode_combo.currentData() == "disabled"
     assert dialog.port_scan_protect_mode_combo.currentData() == "disabled"
@@ -950,39 +945,23 @@ def test_run_profile_dialog_loads_virtualbrowser_dropdown_values(qtbot, monkeypa
     dialog = RunProfileDialog(run_profile=run_profile)
     qtbot.addWidget(dialog)
 
-    assert dialog.sec_ch_ua_custom_btn.isChecked()
-    assert len(dialog._sec_ch_ua_rows) == 2
-    assert dialog._sec_ch_ua_rows[0].brand_edit.text() == "Chromium"
-    assert dialog._sec_ch_ua_rows[0].version_edit.text() == "145"
-    assert dialog.language_follow_ip_check.isChecked() is False
-    assert dialog.timezone_follow_ip_check.isChecked() is False
-    assert dialog.language_combo.currentData()["language"] == "en-US"
-    assert dialog.timezone_combo.currentData()["utc"] == "Asia/Hong_Kong"
-    assert dialog.screen_mode_combo.currentData() == "custom"
-    assert dialog.screen_resolution_combo.currentData() == (1920, 1080)
-    assert dialog.webgl_mode_combo.currentData() == "custom"
-    assert dialog.webgl_vendor_combo.currentText() == "Google Inc. (Intel Inc.)"
-    assert dialog.webgl_renderer_combo.currentText() == "ANGLE (Intel Inc., Intel(R) UHD Graphics 630, OpenGL 4.1)"
-    assert dialog.webgpu_mode_combo.currentData() == "based_on_webgl"
+    assert dialog.randomize_fingerprint_check.isChecked() is True
+    assert dialog.virtualbrowser_group.isHidden()
+    assert dialog.sec_ch_ua_default_btn.isChecked()
+    assert dialog.language_follow_ip_check.isChecked() is True
+    assert dialog.timezone_follow_ip_check.isChecked() is True
+    assert dialog.screen_mode_combo.currentData() == "default"
+    assert dialog.webgl_mode_combo.currentData() == "default"
+    assert dialog.webgpu_mode_combo.currentData() == "default"
     assert dialog.fonts_mode_combo.currentData() == "random"
     assert dialog.canvas_mode_combo.currentData() == "random"
     assert dialog.webgl_image_mode_combo.currentData() == "random"
     assert dialog.audio_context_mode_combo.currentData() == "random"
     assert dialog.client_rects_mode_combo.currentData() == "random"
     assert dialog.speech_voices_mode_combo.currentData() == "random"
-    assert dialog.memory_value_spin.value() == 8
-    assert dialog.randomize_fingerprint_check.isChecked() is True
-    assert dialog.device_name_mode_combo.currentData() == "custom"
-    assert dialog.device_name_edit.text() == "A1B2C3D4E55F7A9C2"
-    assert dialog.mac_mode_combo.currentData() == "custom"
-    assert dialog.mac_value_edit.text() == "26-F6-CD-8F-DE-93"
+    assert dialog.device_name_mode_combo.currentData() == "default"
+    assert dialog.mac_mode_combo.currentData() == "default"
     assert dialog.dnt_check.isChecked() is True
-    assert dialog.ssl_mode_combo.currentData() == "enabled"
-    assert dialog.port_scan_protect_mode_combo.currentData() == "enabled"
-    assert dialog.port_scan_whitelist_edit.text() == "22,443"
-    assert dialog.hardware_accel_check.isChecked() is False
-    assert dialog.launch_args_mode_combo.currentData() == "custom"
-    assert dialog.launch_args_edit.toPlainText() == "--disable-gpu"
 
 
 def test_run_profile_dialog_shows_webgl_vendor_and_renderer_only_in_custom_mode(qtbot, monkeypatch):
