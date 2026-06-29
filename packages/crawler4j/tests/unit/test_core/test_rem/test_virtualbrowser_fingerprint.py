@@ -3,6 +3,8 @@ from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS,
     VIRTUALBROWSER_CN_LANGUAGE,
     VIRTUALBROWSER_CN_TIME_ZONE,
+    VIRTUALBROWSER_FALLBACK_LANGUAGE,
+    VIRTUALBROWSER_LANGUAGE_BY_COUNTRY,
     VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
     materialize_virtualbrowser_fingerprint,
 )
@@ -103,7 +105,7 @@ def test_materialize_virtualbrowser_fingerprint_uses_proxy_geo(monkeypatch):
         geo={"country_code": "JP", "timezone": "Asia/Tokyo"},
     )
 
-    assert payload["ua-language"] == {"mode": 1, "language": "ja-JP", "value": "ja-JP,ja"}
+    assert payload["ua-language"] == {"mode": 1, "language": "ja-JP", "value": "ja"}
     assert payload["time-zone"] == {
         "mode": 1,
         "zone": "(UTC+09:00) Asia/Tokyo",
@@ -125,3 +127,17 @@ def test_materialize_virtualbrowser_fingerprint_ignores_legacy_post_create_marke
 
     assert chrome_version == 144
     assert payload == {"fonts": {"mode": 1}}
+
+
+def test_virtualbrowser_language_value_does_not_duplicate_primary_language():
+    profiles = [
+        VIRTUALBROWSER_CN_LANGUAGE,
+        VIRTUALBROWSER_FALLBACK_LANGUAGE,
+        *VIRTUALBROWSER_LANGUAGE_BY_COUNTRY.values(),
+    ]
+
+    for profile in profiles:
+        language = profile["language"]
+        value_parts = [part.strip() for part in str(profile["value"]).split(",") if part.strip()]
+
+        assert language not in value_parts

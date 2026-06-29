@@ -26,7 +26,13 @@ VIRTUALBROWSER_RANDOM_IDENTITY_KEYS = (
     "device-name",
     "mac",
 )
-VIRTUALBROWSER_CN_LANGUAGE = {"mode": 1, "language": "zh-CN", "value": "zh-CN,zh"}
+
+
+def _language_profile(locale: str) -> dict[str, Any]:
+    return {"mode": 1, "language": locale, "value": locale.split("-", 1)[0]}
+
+
+VIRTUALBROWSER_CN_LANGUAGE = _language_profile("zh-CN")
 VIRTUALBROWSER_CN_TIME_ZONE = {
     "mode": 1,
     "zone": "(UTC+08:00) Asia/Shanghai",
@@ -35,31 +41,31 @@ VIRTUALBROWSER_CN_TIME_ZONE = {
     "value": 8,
 }
 VIRTUALBROWSER_LANGUAGE_BY_COUNTRY = {
-    "AU": {"mode": 1, "language": "en-AU", "value": "en-AU,en"},
-    "BR": {"mode": 1, "language": "pt-BR", "value": "pt-BR,pt"},
-    "CA": {"mode": 1, "language": "en-CA", "value": "en-CA,en"},
+    "AU": _language_profile("en-AU"),
+    "BR": _language_profile("pt-BR"),
+    "CA": _language_profile("en-CA"),
     "CN": VIRTUALBROWSER_CN_LANGUAGE,
-    "DE": {"mode": 1, "language": "de-DE", "value": "de-DE,de"},
-    "ES": {"mode": 1, "language": "es-ES", "value": "es-ES,es"},
-    "FR": {"mode": 1, "language": "fr-FR", "value": "fr-FR,fr"},
-    "GB": {"mode": 1, "language": "en-GB", "value": "en-GB,en"},
-    "HK": {"mode": 1, "language": "zh-HK", "value": "zh-HK,zh"},
-    "ID": {"mode": 1, "language": "id-ID", "value": "id-ID,id"},
-    "IN": {"mode": 1, "language": "en-IN", "value": "en-IN,en"},
-    "IT": {"mode": 1, "language": "it-IT", "value": "it-IT,it"},
-    "JP": {"mode": 1, "language": "ja-JP", "value": "ja-JP,ja"},
-    "KR": {"mode": 1, "language": "ko-KR", "value": "ko-KR,ko"},
-    "MY": {"mode": 1, "language": "en-MY", "value": "en-MY,en"},
-    "NL": {"mode": 1, "language": "nl-NL", "value": "nl-NL,nl"},
-    "PH": {"mode": 1, "language": "en-PH", "value": "en-PH,en"},
-    "RU": {"mode": 1, "language": "ru-RU", "value": "ru-RU,ru"},
-    "SG": {"mode": 1, "language": "en-SG", "value": "en-SG,en"},
-    "TH": {"mode": 1, "language": "th-TH", "value": "th-TH,th"},
-    "TW": {"mode": 1, "language": "zh-TW", "value": "zh-TW,zh"},
-    "US": {"mode": 1, "language": "en-US", "value": "en-US,en"},
-    "VN": {"mode": 1, "language": "vi-VN", "value": "vi-VN,vi"},
+    "DE": _language_profile("de-DE"),
+    "ES": _language_profile("es-ES"),
+    "FR": _language_profile("fr-FR"),
+    "GB": _language_profile("en-GB"),
+    "HK": _language_profile("zh-HK"),
+    "ID": _language_profile("id-ID"),
+    "IN": _language_profile("en-IN"),
+    "IT": _language_profile("it-IT"),
+    "JP": _language_profile("ja-JP"),
+    "KR": _language_profile("ko-KR"),
+    "MY": _language_profile("en-MY"),
+    "NL": _language_profile("nl-NL"),
+    "PH": _language_profile("en-PH"),
+    "RU": _language_profile("ru-RU"),
+    "SG": _language_profile("en-SG"),
+    "TH": _language_profile("th-TH"),
+    "TW": _language_profile("zh-TW"),
+    "US": _language_profile("en-US"),
+    "VN": _language_profile("vi-VN"),
 }
-VIRTUALBROWSER_FALLBACK_LANGUAGE = {"mode": 1, "language": "en-US", "value": "en-US,en"}
+VIRTUALBROWSER_FALLBACK_LANGUAGE = _language_profile("en-US")
 VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS = (
     (1366, 768),
     (1600, 900),

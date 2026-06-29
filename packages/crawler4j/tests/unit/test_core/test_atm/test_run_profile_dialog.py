@@ -57,6 +57,16 @@ def _make_env(
     )
 
 
+def test_virtualbrowser_language_options_do_not_duplicate_primary_language():
+    from src.core.atm.ui.run_profile_dialog import VIRTUALBROWSER_LANGUAGE_OPTIONS
+
+    for option in VIRTUALBROWSER_LANGUAGE_OPTIONS:
+        language = option["language"]
+        value_parts = [part.strip() for part in str(option["value"]).split(",") if part.strip()]
+
+        assert language not in value_parts
+
+
 def _patch_dialog_dependencies(monkeypatch, *, envs=None, env_metadata=None):
     import src.core.atm.ui.run_profile_dialog as dialog_module
 
@@ -909,7 +919,7 @@ def test_run_profile_dialog_loads_virtualbrowser_dropdown_values(qtbot, monkeypa
                             "ua-language": {
                                 "mode": 1,
                                 "language": "en-US",
-                                "value": "en-US,en",
+                                "value": "en",
                             },
                             "time-zone": {
                                 "mode": 1,
