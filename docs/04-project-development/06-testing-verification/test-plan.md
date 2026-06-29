@@ -6,7 +6,7 @@
 **主要读者：** QA | 开发 | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
-**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `TC-060`, `TC-061`, `TC-062`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `API-008`, `API-009`, `API-010`, `API-019`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `CR-016`, `NFR-003`, `NFR-010`
+**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `TC-060`, `TC-061`, `TC-062`, `TC-063`, `TC-064`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `API-008`, `API-009`, `API-010`, `API-019`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `CR-016`, `NFR-003`, `NFR-010`
 **最后更新：** 2026-06-29
 
 ## 1. 测试目标
@@ -35,6 +35,8 @@
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | 2026-05-01 headless UI smoke 复验通过，覆盖 Shell 导航/页面数量与 Dashboard 异步刷新 |
 | `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
+| `TC-064` 根应用 `0.4.22` 版本提升 | 通过 | 2026-06-29 覆盖版本服务读取 `0.4.22`，并组合复验 VirtualBrowser 指纹语言去重和运行模板 UI 语言预设；聚焦回归 `44 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
+| `TC-063` VirtualBrowser 随机指纹语言去重 | 通过 | 2026-06-29 覆盖创建期语言画像和运行模板 UI 语言预设的 `ua-language.value` 不再重复包含主语言，避免运行时 `navigator.languages` 出现重复；聚焦回归 `41 passed`，目标文件 `ruff check` 通过 |
 | `TC-0440` REM 来源代理同步与 IP 表绑定 | 通过 | 2026-06-18 追加覆盖：来源代理同步按 `host + port` 唯一命中 IP 表，不再比较协议、用户名或密码；仍优先使用 VirtualBrowser 结构化真实 `host/port`，避免 `proxy.url=http://127.0.0.1:本地端口` 被保存为绑定 IP。组合回归 `54 passed`，目标文件 `ruff check` 通过 |
 | `TC-062` 根应用 `0.4.21` 版本提升 | 通过 | 2026-06-29 覆盖版本服务读取 `0.4.21`，并组合复验 VirtualBrowser 指纹默认画像、指纹验收 metadata、环境列表风险展示、调度跳过和运行模板 UI 序列化；聚焦回归 `85 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
 | `TC-061` 指纹风险环境手动复检与调度跳过 | 通过 | 2026-06-29 新增覆盖：`fingerprint.validation` 风险 metadata 会让 REM 池、普通租约、原子租约、ATM 候选调度和固定环境下拉跳过该环境；创建期轻量验收 warning 会落为风险；环境列表展示风险原因并提供行内重新检测；复检通过只更新 validation metadata。REM / UI / ATM 相关文件整组回归 `78 passed`，目标文件 `ruff check` 与 `git diff --check` 通过 |
@@ -144,6 +146,7 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-06-29 | 补充 `TC-062` 根应用 `0.4.21` 版本提升验证：版本服务、VirtualBrowser 指纹默认画像、指纹验收 metadata、风险环境展示与调度跳过组合回归 `85 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |
+| 2026-06-29 | 补充 `TC-064` 根应用 `0.4.22` 版本提升验证：版本服务、VirtualBrowser 指纹语言去重和运行模板 UI 语言预设组合回归 `44 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |
 | 2026-06-29 | 补充 VirtualBrowser 随机指纹代理 geo 与创建后验收回归：`test_proxy_probe.py` 锁定代理出口 IP、国家、城市、ASN、时区解析；`test_virtualbrowser_fingerprint.py` 锁定出口国家/时区覆盖语言与时区；`test_virtualbrowser_client.py` / `test_provider.py` 锁定 geo 传入 `addBrowser` 和创建后 `getBrowserFullParameters(id)` 轻验收；组合回归 `42 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
 | 2026-06-29 | 补充 VirtualBrowser 随机指纹托管模式回归：`test_virtualbrowser_fingerprint.py` 锁定随机创建期会补齐 `zh-CN` / `Asia/Shanghai`、常见屏幕 `mode=1`、常见 CPU/内存和随机扰动项，并剥离手工 UA / Sec-CH-UA / 设备名 / MAC；`test_run_profile_dialog.py` 锁定随机指纹默认隐藏高级指纹参数；组合回归 `53 passed` | Codex |
 | 2026-06-19 | 完成 `TC-060` 代码级验证：新增 Contracts / SDK / parser / renderer / ATM 单测，并通过全量 unit `1031 passed`、目标 `ruff check`、`git diff --check` | Codex |
