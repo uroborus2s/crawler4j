@@ -361,6 +361,37 @@ async def test_add_browser_strips_legacy_randomize_marker_without_compat_behavio
 
 
 @pytest.mark.asyncio
+async def test_add_browser_passes_proxy_geo_to_fingerprint_materializer(monkeypatch):
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient()
+    seen_geo = None
+
+    async def _fake_get_client():
+        return dummy
+
+    def _fake_materialize(fingerprint, *, default_chrome_version, geo):  # noqa: ARG001
+        nonlocal seen_geo
+        seen_geo = geo
+        return 145, {"time-zone": {"utc": geo["timezone"]}}
+
+    client._get_client = _fake_get_client  # type: ignore[method-assign]
+    monkeypatch.setattr(provider_module, "materialize_virtualbrowser_fingerprint", _fake_materialize)
+
+    await client.add_browser(
+        name="env-geo",
+        group_ids=[],
+        fingerprint={
+            "chrome_version": 145,
+            "__randomize_fingerprint__": True,
+        },
+        geo={"country_code": "JP", "timezone": "Asia/Tokyo"},
+    )
+
+    assert seen_geo == {"country_code": "JP", "timezone": "Asia/Tokyo"}
+    assert dummy.last_payload["time-zone"] == {"utc": "Asia/Tokyo"}
+
+
+@pytest.mark.asyncio
 async def test_launch_browser_uses_ws_field_when_available():
     client = VirtualBrowserClient(port=9002, api_key="")
     dummy = _DummyHttpClient(response_data={"ws": "ws://127.0.0.1:9222/devtools/browser/abc"})

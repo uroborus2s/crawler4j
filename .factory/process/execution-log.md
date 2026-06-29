@@ -2,6 +2,7 @@
 
 | Date | Action | Result |
 |---|---|---|
+| 2026-06-29 | 接入 VirtualBrowser 随机指纹创建期代理出口 geo 探测与创建后 `getBrowserFullParameters` 轻验收 | Completed |
 | 2026-03-26 | Audited repo structure, docs, versions, tags, dist artifacts | Completed |
 | 2026-03-26 | Verified tests, docs build, root/sdk/contracts builds, CLI help | Completed |
 | 2026-03-26 | Verified root script failure and legacy import failures | Completed |

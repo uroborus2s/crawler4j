@@ -79,6 +79,40 @@ def test_materialize_virtualbrowser_fingerprint_omits_randomized_identity_fields
     assert payload["screen"]["mode"] == 1
 
 
+def test_materialize_virtualbrowser_fingerprint_uses_proxy_geo(monkeypatch):
+    def pick_random_value(options):
+        if options == tuple(range(139, 146)):
+            return 142
+        if options == VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS:
+            return (1920, 1080)
+        if options == VIRTUALBROWSER_COMMON_HARDWARE_PROFILES:
+            return (6, 16)
+        raise AssertionError(f"unexpected options: {options!r}")
+
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.secrets.choice",
+        pick_random_value,
+    )
+
+    _, payload = materialize_virtualbrowser_fingerprint(
+        {
+            "chrome_version": 145,
+            VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY: True,
+        },
+        default_chrome_version=145,
+        geo={"country_code": "JP", "timezone": "Asia/Tokyo"},
+    )
+
+    assert payload["ua-language"] == {"mode": 1, "language": "ja-JP", "value": "ja-JP,ja"}
+    assert payload["time-zone"] == {
+        "mode": 1,
+        "zone": "(UTC+09:00) Asia/Tokyo",
+        "utc": "Asia/Tokyo",
+        "locale": "ja-JP",
+        "value": 9,
+    }
+
+
 def test_materialize_virtualbrowser_fingerprint_ignores_legacy_post_create_marker():
     chrome_version, payload = materialize_virtualbrowser_fingerprint(
         {

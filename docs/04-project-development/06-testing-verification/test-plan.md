@@ -140,6 +140,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-29 | 补充 VirtualBrowser 随机指纹代理 geo 与创建后验收回归：`test_proxy_probe.py` 锁定代理出口 IP、国家、城市、ASN、时区解析；`test_virtualbrowser_fingerprint.py` 锁定出口国家/时区覆盖语言与时区；`test_virtualbrowser_client.py` / `test_provider.py` 锁定 geo 传入 `addBrowser` 和创建后 `getBrowserFullParameters(id)` 轻验收；组合回归 `42 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
 | 2026-06-29 | 补充 VirtualBrowser 随机指纹托管模式回归：`test_virtualbrowser_fingerprint.py` 锁定随机创建期会补齐 `zh-CN` / `Asia/Shanghai`、常见屏幕 `mode=1`、常见 CPU/内存和随机扰动项，并剥离手工 UA / Sec-CH-UA / 设备名 / MAC；`test_run_profile_dialog.py` 锁定随机指纹默认隐藏高级指纹参数；组合回归 `53 passed` | Codex |
 | 2026-06-19 | 完成 `TC-060` 代码级验证：新增 Contracts / SDK / parser / renderer / ATM 单测，并通过全量 unit `1031 passed`、目标 `ruff check`、`git diff --check` | Codex |
 | 2026-06-19 | 新增 `TC-060`，为 Hosted UI 批量导入建立 toolbar schema、来源解析、限制脱敏、payload 分发、结果展示和明细页跳转的测试计划 | Codex |

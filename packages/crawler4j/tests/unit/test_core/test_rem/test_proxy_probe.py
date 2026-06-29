@@ -1,5 +1,10 @@
 from src.core.rem.ip_pool import IPEntry
-from src.core.rem.proxy_probe import ProxyProbeError, ProxyProbeHttpResponse, probe_ip_entry
+from src.core.rem.proxy_probe import (
+    ProxyProbeError,
+    ProxyProbeHttpResponse,
+    probe_ip_entry,
+    probe_ip_entry_geo,
+)
 
 
 def test_probe_ip_entry_returns_success_result_with_exit_ip_and_latency(monkeypatch):
@@ -58,3 +63,64 @@ def test_probe_ip_entry_returns_failure_result_when_proxy_probe_errors(monkeypat
     assert result.error_type == "ProxyProbeError"
     assert "SOCKS5 认证失败" in result.summary_text
     assert "stage: proxy_handshake" in result.detail_text
+
+
+def test_probe_ip_entry_geo_returns_exit_location_and_asn(monkeypatch):
+    entry = IPEntry(
+        address="10.0.0.10",
+        port=8080,
+        protocol="http",
+    )
+
+    monkeypatch.setattr("src.core.rem.proxy_probe.time.perf_counter", lambda: 10.0)
+    monkeypatch.setattr(
+        "src.core.rem.proxy_probe._probe_via_proxy",
+        lambda entry, timeout_s, target: ProxyProbeHttpResponse(  # noqa: ARG005
+            status_code=200,
+            reason="OK",
+            body=(
+                '{"status":"success","query":"124.225.43.95","country":"China",'
+                '"countryCode":"CN","regionName":"Hainan","city":"Haikou",'
+                '"timezone":"Asia/Shanghai","as":"AS4134 CHINANET-BACKBONE",'
+                '"isp":"China Telecom"}'
+            ),
+        ),
+    )
+
+    result = probe_ip_entry_geo(entry)
+
+    assert result.ok is True
+    assert result.exit_ip == "124.225.43.95"
+    assert result.country_code == "CN"
+    assert result.country == "China"
+    assert result.region == "Hainan"
+    assert result.city == "Haikou"
+    assert result.timezone == "Asia/Shanghai"
+    assert result.asn == "AS4134 CHINANET-BACKBONE"
+    assert result.isp == "China Telecom"
+    assert "出口位置: CN / Hainan / Haikou / Asia/Shanghai" in result.summary_text
+
+
+def test_probe_ip_entry_geo_returns_failure_when_probe_service_fails(monkeypatch):
+    entry = IPEntry(
+        address="10.0.0.11",
+        port=8080,
+        protocol="http",
+    )
+
+    monkeypatch.setattr("src.core.rem.proxy_probe.time.perf_counter", lambda: 10.0)
+    monkeypatch.setattr(
+        "src.core.rem.proxy_probe._probe_via_proxy",
+        lambda entry, timeout_s, target: ProxyProbeHttpResponse(  # noqa: ARG005
+            status_code=200,
+            reason="OK",
+            body='{"status":"fail","message":"reserved range"}',
+        ),
+    )
+
+    result = probe_ip_entry_geo(entry)
+
+    assert result.ok is False
+    assert result.stage == "parse_geo"
+    assert result.exit_ip is None
+    assert result.detail == "reserved range"
