@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-29 | 将根应用 / 运行时版本提升到 `0.4.21`，用于承接 VirtualBrowser 随机指纹代理出口 geo 校准、创建后轻量验收、风险环境标记与默认调度跳过；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务、VirtualBrowser 指纹和风险环境调度聚焦回归 `85 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.21 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-06-29 | 增加指纹风险环境的手动复检与调度跳过：环境风险状态写入 `fingerprint.validation` metadata，创建期轻量验收 warning 会落为风险；环境列表新增“风险”列和行内重新检测入口；风险环境不会被普通租约、固定环境选择、候选环境调度和 Service 容量计算默认使用，也不会被自动删除。手动复检当前复用 VirtualBrowser `getBrowserFullParameters` 轻量验收，只更新 validation metadata，不修改代理、指纹或 WebRTC 配置。验证：REM / UI / ATM 相关文件整组回归 `78 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
 | 2026-06-29 | 修正 VirtualBrowser 随机指纹创建期展开：`__randomize_fingerprint__` 不再只下发随机 `chrome_version`，而是补齐 `zh-CN` / `Asia/Shanghai` 默认画像、常见屏幕 `mode=1`、常见 CPU/内存组合和 fonts/canvas/WebGL image/audio/client-rects/speech voices 随机模式，同时继续剥离手工 UA、Sec-CH-UA、设备名和 MAC；运行模板 UI 在随机指纹开启时隐藏高级指纹参数，取消随机化时仍保留手工高级配置。验证：VirtualBrowser 指纹展开、addBrowser payload 与运行模板 UI 定向回归 `53 passed` | Codex |
 | 2026-06-28 | 将根应用 / 运行时版本提升到 `0.4.20`，用于承接 Core `browser.drag natural` 体感时长、约 60Hz 采样与固定 seed 默认混入运行随机盐的框架自检能力；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务与 `browser.drag` 自检回归 `24 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.20 客户端包与 Windows 真机证据仍需后续补齐 | Codex |

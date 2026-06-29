@@ -10,8 +10,8 @@
 - 活跃工作项：21
 - 阻塞项：0
 - 开放风险：1
-- 当前源码版本基线：`crawler4j 0.4.20`、`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2`；最近正式 Git tag：`v0.2.0`
-- 当前 PyPI 发布状态：`crawler4j-contracts 0.4.0` 重发曾被 PyPI 拒绝，因为对应 wheel 文件名曾上传后删除且不可复用；SDK / Contracts 已提升到 `0.4.2`，并已按 `contracts -> sdk` 顺序发布到 PyPI；根应用提升到 `0.4.20`，用于承接 `browser.drag natural` 体感时长、约 60Hz 采样与固定 seed 默认混入运行随机盐的框架自检能力。
+- 当前源码版本基线：`crawler4j 0.4.21`、`crawler4j-sdk 0.4.2`、`crawler4j-contracts 0.4.2`；最近正式 Git tag：`v0.2.0`
+- 当前 PyPI 发布状态：`crawler4j-contracts 0.4.0` 重发曾被 PyPI 拒绝，因为对应 wheel 文件名曾上传后删除且不可复用；SDK / Contracts 已提升到 `0.4.2`，并已按 `contracts -> sdk` 顺序发布到 PyPI；根应用提升到 `0.4.21`，用于承接 VirtualBrowser 随机指纹代理出口 geo 校准、创建后轻量验收、风险环境标记与默认调度跳过。
 - 当前 macOS 客户端下载版本：2026-06-19 已删除远端旧 `Crawler4j-0.4.16.dmg`，本地重新生成 `Crawler4j-0.4.16.dmg` / `appcast.xml` 并上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`；公网 DMG `HEAD 200`，`content-length=149018284`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243`。
 - 当前 0.4.x 边界：本分支只支持 Core 0.4.0 / `core-native-v2`，SDK 与 Contracts 已破坏性升级；0.3.x SDK / Contracts / 旧开发方式在 0.3.x 分支维护，不在当前分支兼容。
 - 当前 0.4.x SDK 初始化入口：新手优先使用 `uvx --from crawler4j-sdk crawler4j module init` 交互式输入模块名与 `owner/repo`，非必填项走默认值；脚本化/资深开发者仍可完整传参执行。
