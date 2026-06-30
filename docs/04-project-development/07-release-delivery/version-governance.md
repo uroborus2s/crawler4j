@@ -7,7 +7,7 @@
 **上游输入：** `packages/crawler4j/pyproject.toml` | Git tag | 子包 `pyproject.toml` | docs-stratego 源仓导航
 **下游输出：** `release-notes.md` | `deployment-guide.md` | `docs/index.md` | `.factory/project.json`
 **关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `REQ-0401`, `NFR-002`
-**最后更新：** 2026-06-29
+**最后更新：** 2026-06-30
 
 ## 1. 规则
 
@@ -26,8 +26,8 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.4.22` | 当前仓库 HEAD 已切到 0.4.22 版本，用于承接 VirtualBrowser 随机指纹语言参数去重 |
-| 根应用运行时版本 | `0.4.22` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.4.23` | 当前仓库 HEAD 已切到 0.4.23 版本，用于本轮 GitHub release 收口 |
+| 根应用运行时版本 | `0.4.23` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
 | SDK | `0.4.2` | 当前工作区 SDK 版本；包含导入 workflow 场景脚手架与扫描契约，并已按 0.4.2 发布到 PyPI |
 | Contracts | `0.4.2` | 当前工作区 Contracts 版本；包含 `@workflow(host_scenarios=...)` 契约，并已按 0.4.2 发布到 PyPI |
@@ -36,19 +36,19 @@
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前根应用已经切到 `0.4.22`，但 Git tag 仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为 `0.4.22` 已正式打 tag 并发布。
+- 当前根应用已经切到 `0.4.23`，但 Git tag 在本次发布前仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为当前源码版本已完成正式发布。
 - 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.22`
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.23`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.4.22` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.4.23` Git tag 与正式 release 资产
 7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
@@ -86,3 +86,4 @@
 | 2026-06-28 | 仅将根应用 / 运行时版本提升到 `0.4.20`，用于承接 `browser.drag natural` 体感时长、约 60Hz 采样与固定 seed 默认混入运行随机盐的框架自检能力；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-06-29 | 仅将根应用 / 运行时版本提升到 `0.4.21`，用于承接 VirtualBrowser 随机指纹代理出口 geo 校准、创建后轻量验收、风险环境标记与默认调度跳过；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-06-29 | 仅将根应用 / 运行时版本提升到 `0.4.22`，用于承接 VirtualBrowser 随机指纹语言参数去重；SDK / Contracts 继续保持 `0.4.2` | Codex |
+| 2026-06-30 | 仅将根应用 / 运行时版本提升到 `0.4.23`，用于本轮 GitHub release 收口；SDK / Contracts 继续保持 `0.4.2` | Codex |

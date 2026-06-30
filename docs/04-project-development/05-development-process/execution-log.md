@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `CR-016`, `API-009`, `API-010`, `API-019`, `BUG-013`
-**最后更新：** 2026-06-29
+**最后更新：** 2026-06-30
 
 ## 1. 用途与记录规则
 
@@ -39,6 +39,7 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-06-30 | 调整 VirtualBrowser 随机指纹创建期屏幕分辨率池：从 5 个等概率分辨率改为 10 槽位现代加权池，`1920x1080` 和 `1536x864` 提高出现权重，`1366x768`、`1680x1050` 等小众/旧分辨率保留但降权。验证：`test_virtualbrowser_fingerprint.py` 聚焦回归 `6 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
+| 2026-06-30 | 将根应用 / 运行时版本提升到 `0.4.23`，用于本轮 GitHub release 收口；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、`git diff --check` 与 `ruff check` 通过；正式 tag / GitHub release 将在 PR 合并到 `main` 后创建 | Codex |
 | 2026-06-29 | 将根应用 / 运行时版本提升到 `0.4.22`，用于承接 VirtualBrowser 随机指纹语言参数去重，避免创建后 `navigator.languages` 出现重复；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务、VirtualBrowser 指纹和运行模板 UI 聚焦回归 `44 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.22 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-06-29 | 修正 VirtualBrowser 随机指纹语言参数重复：创建期和运行模板 UI 预设的 `ua-language.value` 不再重复包含主语言，避免官方 API 合并 `language` 与 `value` 后产生 `navigator.languages=["zh-CN","zh","zh-CN","zh"]`；验证：VirtualBrowser 指纹与运行模板 UI 聚焦回归 `41 passed`，目标 `ruff check` 通过 | Codex |
 | 2026-06-29 | 将根应用 / 运行时版本提升到 `0.4.21`，用于承接 VirtualBrowser 随机指纹代理出口 geo 校准、创建后轻量验收、风险环境标记与默认调度跳过；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务、VirtualBrowser 指纹和风险环境调度聚焦回归 `85 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.21 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
