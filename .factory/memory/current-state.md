@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新文档：2026-06-30 根 `README.md` 已进一步收窄开源说明口径，只保留测试辅助、重复性功能自动化、模块化执行和贡献边界，移除容易产生引导性的业务场景字眼；本次未改代码逻辑。
 - 最新文档：2026-06-30 根 `README.md` 已重写为开源入口说明，定位收敛为本地自动化脚本宿主与模块开发工具集，补充适用边界、合规使用、MIT 许可和贡献注意事项；本次未改代码逻辑。
 - 最新修正：2026-06-30 VirtualBrowser 随机指纹创建期 `screen` 分辨率池已改为 10 槽位现代加权池：`1920x1080` 3 槽、`1536x864` 2 槽，`2560x1440`、`1920x1200`、`1440x900`、`1680x1050`、`1366x768` 各 1 槽；保留低占比老分辨率但避免等概率放大。验证：`test_virtualbrowser_fingerprint.py` 聚焦回归 `6 passed`，目标 `ruff check` 与 `git diff --check` 通过。
 - 最新版本：2026-06-29 根应用 / 运行时版本已提升到 `0.4.22`，用于承接 VirtualBrowser 随机指纹语言参数去重，避免创建后 `navigator.languages` 出现重复；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务、VirtualBrowser 指纹和运行模板 UI 聚焦回归 `44 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过。当前最新已记录 macOS 客户端下载版本仍为 2026-06-19 的 `0.4.16`，`0.4.22` 客户端包、正式 tag / GitHub release 与 Windows 真机证据仍需后续补齐。
