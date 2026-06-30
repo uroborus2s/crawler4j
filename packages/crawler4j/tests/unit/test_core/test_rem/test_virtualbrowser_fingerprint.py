@@ -10,6 +10,21 @@ from src.core.rem.virtualbrowser_fingerprint import (
 )
 
 
+def test_virtualbrowser_common_screen_resolutions_use_modern_weighted_pool():
+    assert VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS == (
+        (1920, 1080),
+        (1920, 1080),
+        (1920, 1080),
+        (1536, 864),
+        (1536, 864),
+        (2560, 1440),
+        (1920, 1200),
+        (1440, 900),
+        (1680, 1050),
+        (1366, 768),
+    )
+
+
 def test_materialize_virtualbrowser_fingerprint_randomizes_chrome_version(monkeypatch):
     def pick_random_value(options):
         if options == tuple(range(139, 146)):

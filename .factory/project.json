@@ -27,7 +27,7 @@
     "root_build": {
       "command": "uv run build",
       "result": "passed",
-      "details": "crawler4j root package version is now 0.4.22; latest recorded root build artifact remains crawler4j 0.4.3 from 2026-05-26 until the 0.4.22 package build is refreshed"
+      "details": "crawler4j root package version is now 0.4.23; latest recorded root build artifact remains crawler4j 0.4.3 from 2026-05-26 until the 0.4.23 package build is refreshed"
     },
     "sdk_build": {
       "command": "uv run publish crawler4j-sdk",
@@ -128,12 +128,17 @@
       "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_system/test_version_service.py packages/crawler4j/tests/unit/test_core/test_rem/test_virtualbrowser_fingerprint.py packages/crawler4j/tests/unit/test_core/test_atm/test_run_profile_dialog.py -q",
       "result": "passed",
       "details": "44 passed on 2026-06-29 covering root 0.4.22 version service and VirtualBrowser language de-duplication in creation defaults and run profile UI presets; target ruff, uv lock --check, .factory/project.json JSON validation, and git diff --check passed"
+    },
+    "root_0_4_23_release_tests": {
+      "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_system/test_version_service.py -q",
+      "result": "passed",
+      "details": "3 passed on 2026-06-30 covering root 0.4.23 version service; uv lock --check, .factory/project.json JSON validation, git diff --check, and ruff check passed"
     }
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.4.22",
-    "runtime": "0.4.22",
+    "app_package_pyproject": "0.4.23",
+    "runtime": "0.4.23",
     "git_tag_latest": "v0.2.0",
     "sdk": "0.4.2",
     "contracts": "0.4.2"
@@ -147,7 +152,7 @@
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
-    "0.4.22 client package evidence remains open before cross-platform client rollout; latest recorded macOS package evidence remains 0.4.16 from 2026-06-19."
+    "0.4.23 client package evidence remains open before cross-platform client rollout; latest recorded macOS package evidence remains 0.4.16 from 2026-06-19."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",

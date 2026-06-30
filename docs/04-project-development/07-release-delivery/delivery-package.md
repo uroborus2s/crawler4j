@@ -7,7 +7,7 @@
 **上游输入：** `acceptance-checklist.md` | `release-notes.md` | `version-governance.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** 交付签收 | `docs/02-user-guide/admin-guide.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-005`, `REL-006`, `TASK-017`, `REQ-004`
-**最后更新：** 2026-06-29
+**最后更新：** 2026-06-30
 
 ## 1. 用途
 
@@ -34,7 +34,7 @@
 | macOS 桌面包 | 已补齐 0.4.16 内部包 | 2026-06-19 `uv run package-macos-internal-release` 已重新生成 `packages/crawler4j/dist/desktop/macos/Crawler4j.app` |
 | macOS 内部 Sparkle 更新包 | 已补齐 0.4.16 内部更新包 | 2026-06-19 已删除远端旧 `Crawler4j-0.4.16.dmg`，重新生成并上传 `packages/crawler4j/dist/updates/macos/Crawler4j-0.4.16.dmg` 与 `appcast.xml` 到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`；公网 DMG `HEAD 200`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243` |
 | Windows 桌面包 | 已具备发布脚手架，待正式批次补齐证据 | 仓库已具备 `PyInstaller onedir + Velopack` 发布链，`uv run package-windows-release` 可生成 `Setup.exe` / `.nupkg` / `releases.<channel>.json`，`uv run deploy-windows-release` 可继续通过 OpenSSH `sftp` 把 `packages/crawler4j/dist/updates/windows/` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`；但当前批次仍缺 Windows 真机签名、安装、升级留证与正式下载地址 |
-| 正式交付产物 | 部分补齐 | SDK / Contracts PyPI 已完成；根应用已提升到 0.4.22，最新已记录 macOS 0.4.16 内部更新包已重新生成并上传，Git tag / GitHub release、0.4.22 客户端包、Windows 真机安装/升级证据和正式交付签收仍需补齐 |
+| 正式交付产物 | 部分补齐 | SDK / Contracts PyPI 已完成；根应用已提升到 0.4.23，最新已记录 macOS 0.4.16 内部更新包已重新生成并上传，Git tag / GitHub release 将随本轮 PR 合并后创建，0.4.23 客户端包、Windows 真机安装/升级证据和正式交付签收仍需补齐 |
 
 ## 4. 使用规则
 
@@ -67,6 +67,7 @@
 | 2026-06-28 | 根应用版本提升到 `0.4.20`，用于 `browser.drag natural` 体感时长、约 60Hz 采样与固定 seed 默认混入运行随机盐的框架自检能力；0.4.20 客户端包、正式 tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-29 | 根应用版本提升到 `0.4.21`，用于 VirtualBrowser 随机指纹代理出口 geo 校准、创建后轻量验收、风险环境标记与默认调度跳过；0.4.21 客户端包、正式 tag / release 与真机升级证据仍需后续补齐 | Codex |
 | 2026-06-29 | 根应用版本提升到 `0.4.22`，用于 VirtualBrowser 随机指纹语言参数去重；0.4.22 客户端包、正式 tag / release 与真机升级证据仍需后续补齐 | Codex |
+| 2026-06-30 | 根应用版本提升到 `0.4.23`，用于本轮 GitHub release 收口；0.4.23 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-04-22 | 补记 Windows 发布能力边界：当前仓库已具备 `package-windows-release` 与 Velopack 更新目录脚手架，但仍未形成带真机留证的正式 Windows 下载包 | Codex |
 | 2026-04-21 | 补记 macOS 内部 Sparkle 更新包：当前仓库已具备 DMG / `appcast.xml` 生成脚手架，但仍依赖本机提供 Sparkle 分发目录与 EdDSA 发布配置 | Codex |
 | 2026-04-20 | 补记当前交付能力边界：macOS PyInstaller bundle 已完成本地复验，Windows 桌面包仍缺打包链与正式产物 | Codex |
