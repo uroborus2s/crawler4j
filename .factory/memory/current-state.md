@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修正：2026-06-30 VirtualBrowser 随机指纹创建期 `screen` 分辨率池已改为 10 槽位现代加权池：`1920x1080` 3 槽、`1536x864` 2 槽，`2560x1440`、`1920x1200`、`1440x900`、`1680x1050`、`1366x768` 各 1 槽；保留低占比老分辨率但避免等概率放大。验证：`test_virtualbrowser_fingerprint.py` 聚焦回归 `6 passed`，目标 `ruff check` 与 `git diff --check` 通过。
 - 最新版本：2026-06-29 根应用 / 运行时版本已提升到 `0.4.22`，用于承接 VirtualBrowser 随机指纹语言参数去重，避免创建后 `navigator.languages` 出现重复；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务、VirtualBrowser 指纹和运行模板 UI 聚焦回归 `44 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过。当前最新已记录 macOS 客户端下载版本仍为 2026-06-19 的 `0.4.16`，`0.4.22` 客户端包、正式 tag / GitHub release 与 Windows 真机证据仍需后续补齐。
 - 最新修正：2026-06-29 VirtualBrowser 随机指纹创建期和运行模板 UI 语言预设的 `ua-language.value` 已不再重复包含主语言，避免官方 API 将 `language=zh-CN` 与 `value=zh-CN,zh` 合并成运行时 `navigator.languages=["zh-CN","zh","zh-CN","zh"]`。现在下发形态为主语言放在 `language`，备用语言放在 `value`，例如 `zh-CN + zh`。验证：VirtualBrowser 指纹与运行模板 UI 聚焦回归 `41 passed`，目标 `ruff check` 通过。
 - 历史版本：2026-06-29 根应用 / 运行时版本已提升到 `0.4.21`，用于承接 VirtualBrowser 随机指纹代理出口 geo 校准、创建后轻量验收、风险环境标记与默认调度跳过；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务、VirtualBrowser 指纹和风险环境调度聚焦回归 `85 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过。当前最新已记录 macOS 客户端下载版本仍为 2026-06-19 的 `0.4.16`，`0.4.21` 客户端包、正式 tag / GitHub release 与 Windows 真机证据仍需后续补齐。

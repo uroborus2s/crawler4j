@@ -35,6 +35,7 @@
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | 2026-05-01 headless UI smoke 复验通过，覆盖 Shell 导航/页面数量与 Dashboard 异步刷新 |
 | `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
+| `TC-065` VirtualBrowser 现代屏幕分辨率池 | 通过 | 2026-06-30 覆盖随机指纹创建期屏幕分辨率池改为 10 槽位现代加权池，`1920x1080` 与 `1536x864` 提高权重，小众/旧分辨率保留但降权；聚焦回归 `6 passed`，目标 `ruff check` 与 `git diff --check` 通过 |
 | `TC-064` 根应用 `0.4.22` 版本提升 | 通过 | 2026-06-29 覆盖版本服务读取 `0.4.22`，并组合复验 VirtualBrowser 指纹语言去重和运行模板 UI 语言预设；聚焦回归 `44 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
 | `TC-063` VirtualBrowser 随机指纹语言去重 | 通过 | 2026-06-29 覆盖创建期语言画像和运行模板 UI 语言预设的 `ua-language.value` 不再重复包含主语言，避免运行时 `navigator.languages` 出现重复；聚焦回归 `41 passed`，目标文件 `ruff check` 通过 |
 | `TC-0440` REM 来源代理同步与 IP 表绑定 | 通过 | 2026-06-18 追加覆盖：来源代理同步按 `host + port` 唯一命中 IP 表，不再比较协议、用户名或密码；仍优先使用 VirtualBrowser 结构化真实 `host/port`，避免 `proxy.url=http://127.0.0.1:本地端口` 被保存为绑定 IP。组合回归 `54 passed`，目标文件 `ruff check` 通过 |

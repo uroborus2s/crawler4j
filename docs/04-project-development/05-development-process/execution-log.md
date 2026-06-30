@@ -38,6 +38,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-06-30 | 调整 VirtualBrowser 随机指纹创建期屏幕分辨率池：从 5 个等概率分辨率改为 10 槽位现代加权池，`1920x1080` 和 `1536x864` 提高出现权重，`1366x768`、`1680x1050` 等小众/旧分辨率保留但降权。验证：`test_virtualbrowser_fingerprint.py` 聚焦回归 `6 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |
 | 2026-06-29 | 将根应用 / 运行时版本提升到 `0.4.22`，用于承接 VirtualBrowser 随机指纹语言参数去重，避免创建后 `navigator.languages` 出现重复；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务、VirtualBrowser 指纹和运行模板 UI 聚焦回归 `44 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.22 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-06-29 | 修正 VirtualBrowser 随机指纹语言参数重复：创建期和运行模板 UI 预设的 `ua-language.value` 不再重复包含主语言，避免官方 API 合并 `language` 与 `value` 后产生 `navigator.languages=["zh-CN","zh","zh-CN","zh"]`；验证：VirtualBrowser 指纹与运行模板 UI 聚焦回归 `41 passed`，目标 `ruff check` 通过 | Codex |
 | 2026-06-29 | 将根应用 / 运行时版本提升到 `0.4.21`，用于承接 VirtualBrowser 随机指纹代理出口 geo 校准、创建后轻量验收、风险环境标记与默认调度跳过；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务、VirtualBrowser 指纹和风险环境调度聚焦回归 `85 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式 tag / release、0.4.21 客户端包与 Windows 真机证据仍需后续补齐 | Codex |
