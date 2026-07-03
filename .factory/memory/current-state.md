@@ -17,6 +17,7 @@
 
 ## 最近条目
 
+- 最新修正：2026-07-03 VirtualBrowser 随机指纹创建期 location 已改回指纹浏览器默认配置：Core 不再下发 `location` 字段，也不配置定位开关或经纬度；代理出口 geo 仍只用于覆盖语言和时区。验证：代理探针、VirtualBrowser 指纹展开、Provider geo 传递和 addBrowser geo 传参聚焦回归 `12 passed`，目标 `ruff check` 与 `git diff --check` 通过。
 - 最新版本：2026-06-30 根应用 / 运行时版本已提升到 `0.4.23`，用于本轮 GitHub release 收口；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、`git diff --check` 与 `ruff check` 通过；正式 tag / GitHub release 将在 PR 合并到 `main` 后创建。
 - 最新文档：2026-06-30 根 `README.md` 已进一步收窄开源说明口径，只保留测试辅助、重复性功能自动化、模块化执行和贡献边界，移除容易产生引导性的业务场景字眼；本次未改代码逻辑。
 - 最新文档：2026-06-30 根 `README.md` 已重写为开源入口说明，定位收敛为本地自动化脚本宿主与模块开发工具集，补充适用边界、合规使用、MIT 许可和贡献注意事项；本次未改代码逻辑。

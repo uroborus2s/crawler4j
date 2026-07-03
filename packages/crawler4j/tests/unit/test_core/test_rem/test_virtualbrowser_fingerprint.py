@@ -63,7 +63,6 @@ def test_materialize_virtualbrowser_fingerprint_randomizes_chrome_version(monkey
         "client-rects": {"mode": 1},
         "speech_voices": {"mode": 1},
         "webrtc": {"mode": 0},
-        "location": {"mode": 2, "enable": 0},
         "cpu": {"mode": 1, "value": 6},
         "memory": {"mode": 1, "value": 16},
     }
@@ -128,6 +127,7 @@ def test_materialize_virtualbrowser_fingerprint_uses_proxy_geo(monkeypatch):
         "locale": "ja-JP",
         "value": 9,
     }
+    assert "location" not in payload
 
 
 def test_materialize_virtualbrowser_fingerprint_ignores_legacy_post_create_marker():

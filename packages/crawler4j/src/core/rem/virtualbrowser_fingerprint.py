@@ -156,7 +156,6 @@ def build_virtualbrowser_random_fingerprint_defaults(
         "client-rects": {"mode": 1},
         "speech_voices": {"mode": 1},
         "webrtc": {"mode": 0},
-        "location": {"mode": 2, "enable": 0},
         "cpu": {"mode": 1, "value": cpu},
         "memory": {"mode": 1, "value": memory},
     }
