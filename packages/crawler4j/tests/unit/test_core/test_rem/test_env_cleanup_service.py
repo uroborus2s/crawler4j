@@ -12,6 +12,9 @@ from src.core.atm.run_profile import (
     ResourceConfig,
     RunProfile,
 )
+from src.core.mms.models import ModuleInfo, ModuleManifest, ModuleSource, UpgradeSourceInfo
+from src.core.mms.module_loader import purge_module_namespace
+from src.core.mms.service import ModuleService
 from src.core.rem.cleanup_service import EnvCleanupService
 from src.core.rem.env_claims import (
     CLAIM_ABANDONED,
@@ -40,6 +43,62 @@ def _env(
         lease_id=lease_id,
         task_run_id=task_run_id,
     )
+
+
+def _manifest(module_name: str) -> ModuleManifest:
+    return ModuleManifest(
+        name=module_name,
+        runtime_api="core-native-v2",
+        upgrade_source=UpgradeSourceInfo(repo=f"example/{module_name}"),
+    )
+
+
+def _write_v2_cleanup_module(module_dir, *, include_cleanup: bool) -> None:
+    for package_dir in (
+        module_dir,
+        module_dir / "data",
+        module_dir / "cleanups",
+    ):
+        package_dir.mkdir(parents=True, exist_ok=True)
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    (module_dir / "data" / "accounts.py").write_text(
+        """
+from crawler4j_contracts import data_table
+
+
+@data_table(
+    name="accounts",
+    storage_mode="managed_dataset",
+    record_key_field="phone",
+    env_binding_field="bound_env_id",
+    schema=[
+        {"name": "phone", "type": "string", "required": True},
+        {"name": "bound_env_id", "type": "integer"},
+        {"name": "record_status", "type": "string"},
+        {"name": "run_status", "type": "string"},
+    ],
+)
+class Accounts:
+    pass
+""",
+        encoding="utf-8",
+    )
+    cleanup_file = module_dir / "cleanups" / "discarded_bound_accounts.py"
+    if include_cleanup:
+        cleanup_file.write_text(
+            """
+from crawler4j_contracts import env_cleanup_candidates
+
+
+@env_cleanup_candidates(name="discarded_bound_accounts", label="黑号绑定环境")
+def discarded_bound_accounts(ctx, params=None):
+    return [791, 811]
+""",
+            encoding="utf-8",
+        )
+    elif cleanup_file.exists():
+        cleanup_file.unlink()
 
 
 class _FakePool:
@@ -84,7 +143,7 @@ class _FakeModuleService:
             ]
         )
 
-    def get_runtime_descriptor_v2(self, module_name: str):
+    def get_runtime_descriptor_v2(self, module_name: str, context=None):
         assert module_name == "demo_module"
         return SimpleNamespace(
             env_cleanup_candidates={
@@ -118,6 +177,24 @@ class _FakeTaskRepository:
 
     async def list_active_jobs(self):
         return self._active_jobs
+
+
+class _BindingRows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def select(self, field_name):
+        assert field_name == "bound_env_id"
+        return self
+
+    def execute(self):
+        return list(self._rows)
+
+
+class _BindingDb:
+    def from_(self, table_name):
+        assert table_name == "accounts"
+        return _BindingRows([{"bound_env_id": 791}, {"bound_env_id": "811"}])
 
 
 def _fixed_env_job(env_id: int, *, state: JobState) -> Job:
@@ -163,6 +240,61 @@ def _patch_cleanup_runtime(monkeypatch):
         "module_bound_env_ids",
         lambda module_name, module_service=None: {1, 2, 3} if module_name == "demo_module" else set(),
     )
+
+
+@pytest.mark.asyncio
+async def test_env_cleanup_preview_refreshes_devlink_descriptor_before_scanning_cleanup_candidates(
+    tmp_path, monkeypatch
+):
+    module_name = "ctrip_crawler"
+    module_dir = tmp_path / module_name
+    _write_v2_cleanup_module(module_dir, include_cleanup=False)
+    module_info = ModuleInfo(
+        name=module_name,
+        manifest=_manifest(module_name),
+        source=ModuleSource.DEV_LINK,
+        path=module_dir,
+    )
+    module_service = ModuleService()
+    module_service.registry = SimpleNamespace(
+        get_module=lambda name: module_info if name == module_name else None,
+        get_enabled_modules=lambda: [module_info],
+        list_modules=lambda: [module_info],
+    )
+
+    try:
+        assert module_service.get_runtime_descriptor_v2(module_name).env_cleanup_candidates == {}
+        _write_v2_cleanup_module(module_dir, include_cleanup=True)
+
+        manager = _FakeEnvironmentManager({791: _env(791), 811: _env(811)})
+        await _seed_claim(manager, 791, module_name)
+        await _seed_claim(manager, 811, module_name)
+
+        import src.core.atm.runtime_capabilities as runtime_capabilities
+        import src.core.rem.cleanup_service as cleanup_service
+        import src.core.rem.env_claims as env_claims
+
+        caps = SimpleNamespace(
+            tools=SimpleNamespace(list_tools=lambda: []),
+            db=_BindingDb(),
+        )
+        monkeypatch.setattr(runtime_capabilities, "build_runtime_capabilities", lambda *_args, **_kwargs: caps)
+        monkeypatch.setattr(cleanup_service, "build_runtime_capabilities", lambda *_args, **_kwargs: caps)
+        monkeypatch.setattr(env_claims, "build_runtime_capabilities", lambda *_args, **_kwargs: caps)
+
+        service = EnvCleanupService(
+            module_service=module_service,
+            environment_manager=manager,
+            task_repository=_FakeTaskRepository(),
+        )
+
+        plan = await service.preview()
+
+        assert [item.env_id for item in plan.items] == [791, 811]
+        assert all(item.eligible for item in plan.items)
+        assert plan.errors == ()
+    finally:
+        purge_module_namespace(module_name)
 
 
 @pytest.mark.asyncio

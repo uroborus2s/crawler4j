@@ -135,7 +135,8 @@ class EnvCleanupService:
 
         for module in self._enabled_modules():
             try:
-                descriptor = self._module_service.get_runtime_descriptor_v2(module.name)
+                context = self._build_context(module)
+                descriptor = self._module_service.get_runtime_descriptor_v2(module.name, context)
             except Exception as exc:
                 errors.append(EnvCleanupScanError(module.name, "", str(exc) or exc.__class__.__name__))
                 continue
@@ -148,7 +149,6 @@ class EnvCleanupService:
                     description=entry.meta.description,
                 )
                 try:
-                    context = self._build_context(module)
                     ids = await self._module_service.resolve_env_cleanup_candidates_async(
                         module.name,
                         context,
