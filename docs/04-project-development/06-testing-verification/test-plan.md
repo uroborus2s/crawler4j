@@ -7,7 +7,7 @@
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
 **关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `TC-060`, `TC-061`, `TC-062`, `TC-063`, `TC-064`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `API-008`, `API-009`, `API-010`, `API-019`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `CR-016`, `NFR-003`, `NFR-010`
-**最后更新：** 2026-06-30
+**最后更新：** 2026-07-05
 
 ## 1. 测试目标
 
@@ -35,6 +35,7 @@
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | 2026-05-01 headless UI smoke 复验通过，覆盖 Shell 导航/页面数量与 Dashboard 异步刷新 |
 | `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
+| `TC-067` 根应用 `0.4.24` 版本提升 | 通过 | 2026-07-05 覆盖版本服务读取 `0.4.24`，并组合复验 REM cleanup existing-env scope；版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
 | `TC-066` 根应用 `0.4.23` 版本提升 | 通过 | 2026-06-30 覆盖版本服务读取 `0.4.23`；版本服务回归 `3 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、`git diff --check` 与 `ruff check` 通过 |
 | `TC-065` VirtualBrowser 现代屏幕分辨率池 | 通过 | 2026-06-30 覆盖随机指纹创建期屏幕分辨率池改为 10 槽位现代加权池，`1920x1080` 与 `1536x864` 提高权重，小众/旧分辨率保留但降权；聚焦回归 `6 passed`，目标 `ruff check` 与 `git diff --check` 通过 |
 | `TC-064` 根应用 `0.4.22` 版本提升 | 通过 | 2026-06-29 覆盖版本服务读取 `0.4.22`，并组合复验 VirtualBrowser 指纹语言去重和运行模板 UI 语言预设；聚焦回归 `44 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
@@ -147,6 +148,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-05 | 补充 `TC-067` 根应用 `0.4.24` 版本提升验证：版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |
 | 2026-06-29 | 补充 `TC-062` 根应用 `0.4.21` 版本提升验证：版本服务、VirtualBrowser 指纹默认画像、指纹验收 metadata、风险环境展示与调度跳过组合回归 `85 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |
 | 2026-06-30 | 补充 `TC-066` 根应用 `0.4.23` 版本提升验证：版本服务回归 `3 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、`git diff --check` 与 `ruff check` 通过 | Codex |
 | 2026-06-29 | 补充 `TC-064` 根应用 `0.4.22` 版本提升验证：版本服务、VirtualBrowser 指纹语言去重和运行模板 UI 语言预设组合回归 `44 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |

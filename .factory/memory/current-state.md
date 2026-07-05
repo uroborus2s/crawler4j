@@ -17,6 +17,9 @@
 
 ## 最近条目
 
+- 最新版本：2026-07-05 根应用 / 运行时版本已提升到 `0.4.24`，用于承接 REM 批量环境清理预览的模块候选 scope 修复；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、`ruff check` 与 `git diff --check` 通过；正式客户端包、tag / GitHub release 与 Windows 真机证据仍需后续补齐。
+- 最新修正：2026-07-05 REM 批量环境清理预览已修复模块候选被已删除环境挤出分页的问题。现场 `ctrip_crawler` accounts 中有 110 条黑号绑定记录，模块 cleanup 默认只取前 100 条，而前 100 个 env_id 在 `state.environments` 已不存在，真正存在且 ready/claimed 的 791、811 分别排在第 108、110 位，导致宿主安全过滤前就拿不到它们。模块返回 `EnvCandidates` 时，宿主现在会把当前仍存在的环境 id 作为内部 scope 注入查询运行时，使业务表查询先限定到现存环境，再执行模块声明的排序和 limit。验证：REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，目标 `ruff check` 与 `git diff --check` 通过。
+- 最新修正：2026-07-05 REM 批量环境清理预览已修复 DevLink descriptor 旧缓存导致的模块 cleanup 候选丢失。`EnvCleanupService.preview()` 现在在枚举 `@env_cleanup_candidates` 前用同一个开发态 `TaskContext` 刷新 runtime descriptor，避免旧缓存中没有 `cleanups/` 入口时直接显示“暂无可清理环境”。模块返回的已存在候选若被 owner、claim 或 `env_binding_field` 绑定门拒绝，会留在预览中显示跳过原因，不再静默吞掉。新增回归覆盖 ctrip_crawler 形态：descriptor cleanup 返回 `[791, 811]`、accounts `env_binding_field=bound_env_id` 可读到绑定、claim 为 claimed、环境 ready/no lease/no task/no active jobs，预览必须返回 791/811 且 eligible。验证：REM 清理服务聚焦回归 `7 passed`。
 - 最新修正：2026-07-03 VirtualBrowser 随机指纹创建期 location 已改回指纹浏览器默认配置：Core 不再下发 `location` 字段，也不配置定位开关或经纬度；代理出口 geo 仍只用于覆盖语言和时区。验证：代理探针、VirtualBrowser 指纹展开、Provider geo 传递和 addBrowser geo 传参聚焦回归 `12 passed`，目标 `ruff check` 与 `git diff --check` 通过。
 - 最新版本：2026-06-30 根应用 / 运行时版本已提升到 `0.4.23`，用于本轮 GitHub release 收口；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、`git diff --check` 与 `ruff check` 通过；正式 tag / GitHub release 将在 PR 合并到 `main` 后创建。
 - 最新文档：2026-06-30 根 `README.md` 已进一步收窄开源说明口径，只保留测试辅助、重复性功能自动化、模块化执行和贡献边界，移除容易产生引导性的业务场景字眼；本次未改代码逻辑。

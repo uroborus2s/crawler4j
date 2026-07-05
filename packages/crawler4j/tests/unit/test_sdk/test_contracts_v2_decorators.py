@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Literal
 
 import pytest
@@ -325,6 +326,79 @@ def test_env_cleanup_candidates_metadata_reuses_env_candidates_query_chain():
         "order_by": [{"field": "last_used_at", "direction": "asc"}],
         "limit": 10,
     }
+
+
+class _CandidateRows:
+    def __init__(self, rows):
+        self._rows = list(rows)
+        self._selected = ""
+        self._where = []
+        self._order_by = []
+        self._limit = None
+
+    def select(self, field):
+        self._selected = field
+        return self
+
+    def where(self, condition):
+        self._where.append(condition)
+        return self
+
+    def order_by(self, field, direction="asc"):
+        self._order_by.append((field, direction))
+        return self
+
+    def limit(self, value):
+        self._limit = int(value)
+        return self
+
+    def execute(self):
+        rows = list(self._rows)
+        for field, op, value in self._where:
+            if op == "eq":
+                rows = [row for row in rows if row.get(field) == value]
+            elif op == "in":
+                values = set(value)
+                rows = [row for row in rows if row.get(field) in values]
+            else:  # pragma: no cover
+                raise AssertionError(op)
+        for field, direction in reversed(self._order_by):
+            rows.sort(key=lambda row: row.get(field), reverse=direction == "desc")
+        if self._limit is not None:
+            rows = rows[: self._limit]
+        return [{self._selected: row[self._selected]} for row in rows]
+
+
+class _CandidateDb:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def from_(self, source):
+        assert source == "accounts"
+        return _CandidateRows(self._rows)
+
+
+def test_env_candidates_runtime_scope_filters_before_order_and_limit():
+    rows = [
+        {"bound_env_id": 1001, "record_status": "黑号", "bound_at": 1},
+        {"bound_env_id": 1002, "record_status": "黑号", "bound_at": 2},
+        {"bound_env_id": 1, "record_status": "黑号", "bound_at": 3},
+        {"bound_env_id": 2, "record_status": "黑号", "bound_at": 4},
+    ]
+    ctx = SimpleNamespace(
+        db=_CandidateDb(rows),
+        runtime={"_env_candidate_scope_ids": [1, 2]},
+    )
+
+    ids = (
+        EnvCandidates.from_table("accounts", env_field="bound_env_id")
+        .filter(record_status="黑号")
+        .order_by("bound_at")
+        .limit(2)
+        .list(ctx)
+    )
+
+    assert ids == [1, 2]
 
 
 def test_parameter_and_inject_specs_normalize_supported_shapes():

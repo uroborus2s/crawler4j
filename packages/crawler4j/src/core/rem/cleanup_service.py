@@ -28,6 +28,7 @@ from src.core.rem.models import EnvStatus, Environment
 SAFE_CLEANUP_STATUSES = frozenset({EnvStatus.READY, EnvStatus.PAUSED})
 ACTIVE_TASK_STATUSES = frozenset({TaskStatus.PENDING, TaskStatus.RUNNING})
 HOST_CLEANUP_MODULE = "host"
+ENV_CANDIDATE_SCOPE_RUNTIME_KEY = "_env_candidate_scope_ids"
 
 
 @dataclass(frozen=True)
@@ -119,15 +120,19 @@ class EnvCleanupService:
         """Collect and safety-check all host and module cleanup candidate env ids."""
 
         env_sources: dict[int, list[EnvCleanupSource]] = {}
+        blocked_reasons: dict[int, str] = {}
         errors: list[EnvCleanupScanError] = []
         params_by_cleanup = dict(params_by_cleanup or {})
         installed_modules = self._installed_module_names()
         active_task_env_ids, active_task_ids = await self._active_task_refs()
         fixed_job_env_ids = await self._fixed_job_env_ids()
         module_bound_cache: dict[str, set[int]] = {}
+        envs = await self._environment_manager.list_envs()
+        existing_env_ids = {int(env.id) for env in envs}
 
         await self._collect_host_candidates(
             env_sources,
+            envs=envs,
             installed_modules=installed_modules,
             active_task_ids=active_task_ids,
             module_bound_cache=module_bound_cache,
@@ -135,7 +140,8 @@ class EnvCleanupService:
 
         for module in self._enabled_modules():
             try:
-                descriptor = self._module_service.get_runtime_descriptor_v2(module.name)
+                context = self._build_context(module)
+                descriptor = self._module_service.get_runtime_descriptor_v2(module.name, context)
             except Exception as exc:
                 errors.append(EnvCleanupScanError(module.name, "", str(exc) or exc.__class__.__name__))
                 continue
@@ -148,10 +154,9 @@ class EnvCleanupService:
                     description=entry.meta.description,
                 )
                 try:
-                    context = self._build_context(module)
                     ids = await self._module_service.resolve_env_cleanup_candidates_async(
                         module.name,
-                        context,
+                        self._scoped_context(context, existing_env_ids),
                         cleanup_name,
                         params_by_cleanup.get(f"{module.name}.{cleanup_name}", {}),
                     )
@@ -163,12 +168,27 @@ class EnvCleanupService:
 
                 for env_id in ids:
                     normalized_env_id = int(env_id)
-                    if not await self._module_cleanup_candidate_allowed(
-                        normalized_env_id,
-                        module.name,
-                        module_bound_cache=module_bound_cache,
-                    ):
+                    try:
+                        allowed, reason = await self._module_cleanup_candidate_allowed(
+                            normalized_env_id,
+                            module.name,
+                            module_bound_cache=module_bound_cache,
+                        )
+                    except Exception as exc:
+                        errors.append(
+                            EnvCleanupScanError(module.name, cleanup_name, str(exc) or exc.__class__.__name__)
+                        )
+                        break
+                    if not allowed:
+                        if await self._environment_manager.pool.get(normalized_env_id) is None:
+                            continue
+                        if normalized_env_id not in env_sources:
+                            blocked_reasons.setdefault(normalized_env_id, reason)
+                            sources = env_sources.setdefault(normalized_env_id, [])
+                            if source not in sources:
+                                sources.append(source)
                         continue
+                    blocked_reasons.pop(normalized_env_id, None)
                     sources = env_sources.setdefault(normalized_env_id, [])
                     if source not in sources:
                         sources.append(source)
@@ -179,6 +199,7 @@ class EnvCleanupService:
                 tuple(sources),
                 active_task_env_ids=active_task_env_ids,
                 fixed_job_env_ids=fixed_job_env_ids,
+                blocked_reason=blocked_reasons.get(env_id, ""),
             )
             for env_id, sources in sorted(env_sources.items(), key=lambda item: item[0])
         ]
@@ -190,6 +211,9 @@ class EnvCleanupService:
         plan = await self.preview(params_by_cleanup)
         results: list[EnvCleanupExecutionItem] = []
         for item in plan.items:
+            if not item.eligible:
+                results.append(self._execution_item_from_preview(item, outcome="skipped", reason=item.reason))
+                continue
             active_task_env_ids, _active_task_ids = await self._active_task_refs()
             fixed_job_env_ids = await self._fixed_job_env_ids()
             fresh = await self._build_preview_item(
@@ -267,15 +291,33 @@ class EnvCleanupService:
             runtime=runtime,
         )
 
+    @staticmethod
+    def _scoped_context(context: TaskContext, env_ids: set[int]) -> TaskContext:
+        scoped = TaskContext(
+            env_id=context.env_id,
+            task_name=context.task_name,
+            config=context.config,
+            page=context.page,
+            context=context.context,
+            logger=context.logger,
+            http=context.http,
+            tools=context.tools,
+            db=context.db,
+            state=context.state,
+            runtime=dict(context.runtime),
+        )
+        scoped.runtime[ENV_CANDIDATE_SCOPE_RUNTIME_KEY] = sorted(env_ids)
+        return scoped
+
     async def _collect_host_candidates(
         self,
         env_sources: dict[int, list[EnvCleanupSource]],
         *,
+        envs: list[Environment],
         installed_modules: set[str],
         active_task_ids: set[str],
         module_bound_cache: dict[str, set[int]],
     ) -> None:
-        envs = await self._environment_manager.list_envs()
         for env in envs:
             env_id = int(env.id)
             claim = await get_env_claim(self._environment_manager, env_id)
@@ -317,17 +359,23 @@ class EnvCleanupService:
         module_name: str,
         *,
         module_bound_cache: dict[str, set[int]],
-    ) -> bool:
+    ) -> tuple[bool, str]:
         claim = await get_env_claim(self._environment_manager, int(env_id))
-        if claim.owner_module != module_name or claim.state != CLAIM_CLAIMED:
-            return False
-        return int(env_id) in self._module_bound_env_ids(module_name, module_bound_cache)
+        if claim.owner_module != module_name:
+            return False, f"环境归属不匹配: {claim.owner_module or '未归属'}"
+        if claim.state != CLAIM_CLAIMED:
+            return False, f"环境未被模块认领: {claim.state or '无状态'}"
+        if int(env_id) not in self._module_bound_env_ids(module_name, module_bound_cache, strict=True):
+            return False, "模块业务表未绑定该环境"
+        return True, ""
 
-    def _module_bound_env_ids(self, module_name: str, cache: dict[str, set[int]]) -> set[int]:
+    def _module_bound_env_ids(self, module_name: str, cache: dict[str, set[int]], *, strict: bool = False) -> set[int]:
         if module_name not in cache:
             try:
                 cache[module_name] = module_bound_env_ids(module_name, module_service=self._module_service)
             except Exception as exc:
+                if strict:
+                    raise
                 logger.warning(f"[REM] 环境清理读取模块绑定表失败: module={module_name} error={exc}")
                 cache[module_name] = set()
         return cache[module_name]
@@ -369,6 +417,7 @@ class EnvCleanupService:
         *,
         active_task_env_ids: set[int] | None = None,
         fixed_job_env_ids: set[int] | None = None,
+        blocked_reason: str = "",
     ) -> EnvCleanupPreviewItem:
         env = await self._environment_manager.pool.get(env_id)
         if env is None:
@@ -377,6 +426,16 @@ class EnvCleanupService:
                 sources=sources,
                 eligible=False,
                 reason="环境不存在或已清理",
+            )
+        if blocked_reason:
+            return EnvCleanupPreviewItem(
+                env_id=env_id,
+                sources=sources,
+                env_name=env.name,
+                provider=env.provider,
+                status=env.status.value,
+                eligible=False,
+                reason=blocked_reason,
             )
         eligible, reason = self._eligibility(
             env,

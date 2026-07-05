@@ -8,6 +8,7 @@ from typing import Any
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _FILTER_OPS = {"eq", "in", "gt", "gte", "lt", "lte", "between", "like", "is_null"}
+_SCOPE_RUNTIME_KEY = "_env_candidate_scope_ids"
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,9 @@ class EnvCandidates:
     def _eval_ids(self, ctx: Any) -> list[int]:
         if self.op == "select":
             query = ctx.db.from_(self.source).select(self.env_field)
+            scope_ids = _scoped_env_ids(ctx)
+            if scope_ids is not None:
+                query = query.where([self.env_field, "in", scope_ids])
             for item in self.where:
                 query = _apply_condition(query, item)
             for item in self.order_by_items:
@@ -209,6 +213,13 @@ def _ids_from_rows(rows: Any, env_field: str) -> list[int]:
             continue
         ids.append(int(row[env_field]))
     return ids
+
+
+def _scoped_env_ids(ctx: Any) -> list[int] | None:
+    runtime = getattr(ctx, "runtime", None)
+    if not isinstance(runtime, dict) or _SCOPE_RUNTIME_KEY not in runtime:
+        return None
+    return sorted({int(env_id) for env_id in runtime.get(_SCOPE_RUNTIME_KEY) or []})
 
 
 def _normalize_name(value: str, field_name: str) -> str:
