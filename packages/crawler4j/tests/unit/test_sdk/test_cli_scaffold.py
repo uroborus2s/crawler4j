@@ -197,6 +197,7 @@ def test_module_init_creates_core_native_v2_project(tmp_path: Path):
     assert (module_root / ".gitignore").exists()
     assert (module_root / ".python-version").exists()
     assert (module_root / ".crawler4j" / "manifest.lock.json").exists()
+    assert "files" not in _read_lock(module_root)
     for dirname in ("interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates", "tests"):
         assert (module_root / dirname / "__init__.py").exists()
 
@@ -558,6 +559,23 @@ def test_manifest_lock_stale_state_blocks_check_and_package_until_refreshed(
     assert commands.cmd_check_full(Namespace()) == 0
     assert commands.cmd_package_build(Namespace(output=None)) == 0
     assert ("data_table", "new_accounts") in _lock_declaration_keys(module_root)
+    assert "files" not in _read_lock(module_root)
+
+
+def test_manifest_lock_ignores_untracked_local_files(tmp_path: Path, monkeypatch):
+    module_root = _init_module(tmp_path)
+    monkeypatch.chdir(module_root)
+    (module_root / ".env").write_text("TOKEN=local\n", encoding="utf-8")
+    audit_dir = module_root / ".tmp" / "ctrip_page_audit"
+    audit_dir.mkdir(parents=True)
+    (audit_dir / "snapshot.json").write_text("{}\n", encoding="utf-8")
+    docs_dir = module_root / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "hema-sms-manual.html").write_text("<html></html>\n", encoding="utf-8")
+
+    assert commands.collect_full_errors(module_root, _read_manifest(module_root), require_manifest_lock=True) == []
+    assert commands.cmd_check_full(Namespace()) == 0
+    assert "files" not in _read_lock(module_root)
 
 
 def test_build_parser_registers_v2_commands():

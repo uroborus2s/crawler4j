@@ -277,7 +277,7 @@ wheels = [
 
 [[package]]
 name = "crawler4j"
-version = "0.4.24"
+version = "0.4.25"
 source = { editable = "packages/crawler4j" }
 dependencies = [
     { name = "aiohttp" },
@@ -351,7 +351,7 @@ source = { editable = "packages/crawler4j-contracts" }
 
 [[package]]
 name = "crawler4j-sdk"
-version = "0.4.2"
+version = "0.4.3"
 source = { editable = "packages/crawler4j-sdk" }
 dependencies = [
     { name = "aiohttp" },
