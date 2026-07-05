@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import zipfile
 from contextlib import ExitStack
@@ -95,45 +94,11 @@ WORKFLOW_FILE = (
 )
 
 
-def _hash_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _iter_lock_files(package_root: Path) -> list[Path]:
-    ignored_dirs = {
-        ".git",
-        ".idea",
-        ".venv",
-        ".vscode",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "__pycache__",
-        "build",
-        "dist",
-    }
-    files: list[Path] = []
-    for path in package_root.rglob("*"):
-        relative = path.relative_to(package_root)
-        relative_posix = relative.as_posix()
-        if any(part in ignored_dirs or part.endswith(".egg-info") for part in relative.parts):
-            continue
-        if path.is_dir() or path.suffix in {".pyc", ".pyo"}:
-            continue
-        if relative_posix == ".crawler4j/manifest.lock.json" or path.name == ".DS_Store":
-            continue
-        files.append(path)
-    return sorted(files, key=lambda item: item.relative_to(package_root).as_posix())
-
-
 def _write_manifest_lock(package_root: Path, *, module_name: str, version: str) -> None:
     lock_dir = package_root / ".crawler4j"
     lock_dir.mkdir(parents=True, exist_ok=True)
     payload = {
+        "schema_version": 1,
         "runtime_api": "core-native-v2",
         "module": module_name,
         "version": version,
@@ -145,14 +110,6 @@ def _write_manifest_lock(package_root: Path, *, module_name: str, version: str) 
                 "source_path": "workflows/default.py",
                 "metadata": {"name": "default"},
             }
-        ],
-        "files": [
-            {
-                "path": path.relative_to(package_root).as_posix(),
-                "size": path.stat().st_size,
-                "sha256": _hash_file(path),
-            }
-            for path in _iter_lock_files(package_root)
         ],
     }
     (lock_dir / "manifest.lock.json").write_text(
@@ -274,18 +231,21 @@ def test_install_rejects_missing_manifest_lock(temp_data_dir):
         registry.install(archive)
 
 
-def test_install_rejects_stale_manifest_lock_file_hashes(temp_data_dir):
+def test_install_rejects_obsolete_manifest_lock_files_field(temp_data_dir):
     package_root = _build_module_dir(
         temp_data_dir,
         package_dir_name="demo_module_pkg",
         module_name="demo_module",
     )
-    (package_root / "tasks" / "tampered.py").write_text("# unlocked file\n", encoding="utf-8")
+    lock_path = package_root / ".crawler4j" / "manifest.lock.json"
+    payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    payload["files"] = []
+    lock_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     archive = _archive_package(temp_data_dir, package_root, "demo_module_pkg-1.0.0.zip")
 
     registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
 
-    with pytest.raises(ModuleInstallError, match="文件完整性校验失败"):
+    with pytest.raises(ModuleInstallError, match="已废弃字段"):
         registry.install(archive)
 
 
@@ -495,7 +455,7 @@ def account_overview():
     assert capabilities.db.from_("account_overview").select(["account_id"]).execute() == [{"account_id": "acct-001"}]
 
 
-def test_registry_marks_installed_module_invalid_when_manifest_lock_drifts_on_reload(temp_data_dir):
+def test_registry_keeps_installed_module_valid_when_files_change_without_lock_change(temp_data_dir):
     archive = _build_module_archive(
         temp_data_dir,
         package_dir_name="demo_module_pkg",
@@ -511,8 +471,31 @@ def test_registry_marks_installed_module_invalid_when_manifest_lock_drifts_on_re
 
     current = reloaded.get_module("demo_module")
     assert current is not None
+    assert current.status.value == "enabled"
+    assert not current.error
+
+
+def test_registry_marks_installed_module_invalid_when_manifest_lock_metadata_drifts_on_reload(temp_data_dir):
+    archive = _build_module_archive(
+        temp_data_dir,
+        package_dir_name="demo_module_pkg",
+        module_name="demo_module",
+    )
+
+    registry = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    module = registry.install(archive)
+    lock_path = module.path / ".crawler4j" / "manifest.lock.json"
+    payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    payload["version"] = "9.9.9"
+    lock_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    reloaded = ModuleRegistry(dev_link_store=_FakeDevLinkStore())
+    reloaded.load(force=True)
+
+    current = reloaded.get_module("demo_module")
+    assert current is not None
     assert current.status.value == "invalid"
-    assert "文件完整性校验失败" in (current.error or "")
+    assert "version 不匹配" in (current.error or "")
 
 
 def test_registry_marks_installed_module_invalid_when_install_dir_is_symlink_escape(temp_data_dir):

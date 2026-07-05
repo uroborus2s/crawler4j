@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import ast
 import asyncio
-import hashlib
 import json
 import os
 import re
@@ -408,49 +407,6 @@ def _v2_declaration_names(module_root: Path, manifest: dict[str, Any], kind: str
     return sorted(declaration.name for declaration in result.declarations if declaration.kind == kind)
 
 
-def _iter_manifest_lock_files(module_root: Path) -> list[Path]:
-    root = module_root.resolve()
-    files: list[Path] = []
-    for path in module_root.rglob("*"):
-        relative = path.relative_to(module_root)
-        relative_posix = relative.as_posix()
-        if _is_ignored_module_path(relative):
-            continue
-        if path.is_symlink():
-            raise CLIError(f"模块文件不能是符号链接: {relative_posix}")
-        if path.is_dir():
-            continue
-        if path.name in IGNORED_MODULE_FILES or relative_posix == ".crawler4j/manifest.lock.json":
-            continue
-        if path.suffix in {".pyc", ".pyo"}:
-            continue
-        try:
-            path.resolve().relative_to(root)
-        except ValueError as exc:
-            raise CLIError(f"模块文件路径越界: {relative_posix}") from exc
-        files.append(path)
-    return sorted(files, key=lambda item: item.relative_to(module_root).as_posix())
-
-
-def _hash_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _manifest_lock_files(module_root: Path) -> list[dict[str, Any]]:
-    return [
-        {
-            "path": path.relative_to(module_root).as_posix(),
-            "size": path.stat().st_size,
-            "sha256": _hash_file(path),
-        }
-        for path in _iter_manifest_lock_files(module_root)
-    ]
-
-
 def _manifest_lock_payload(module_root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     result = _v2_scan(module_root, manifest)
     declarations = [
@@ -472,7 +428,6 @@ def _manifest_lock_payload(module_root: Path, manifest: dict[str, Any]) -> dict[
         "module": str(manifest.get("name", "") or module_root.name).strip(),
         "version": str(manifest.get("version", "") or "").strip(),
         "declarations": declarations,
-        "files": _manifest_lock_files(module_root),
     }
 
 
