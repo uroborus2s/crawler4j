@@ -225,7 +225,7 @@ def ready_accounts(params: dict | None = None) -> EnvCandidates:
 
 固定选择环境运行时，宿主会先临时标记该环境归属当前模块；任务终态后仍会按 `env_binding_field` 重新扫描业务表。如果没有任何业务数据绑定该环境，claim 会转为 abandoned，避免固定环境长期卡在“已归属但未认领”的中间态；已有业务绑定的环境继续保持 claimed。
 
-批量环境清理写在 `cleanups/*.py` 中，使用 `@env_cleanup_candidates` 装饰同步纯函数。函数返回待清理 env id 列表或同一个 `EnvCandidates` 链式查询对象；这个入口只表达“模块认为已绑定且业务上可丢弃的候选集合”。宿主客户端触发清理时会同时扫描孤岛环境、任务创建后未被模块数据表认领的环境、owner 模块已不存在的环境，以及模块清理候选；DevLink 模块会先按开发态刷新 descriptor，再枚举 `cleanups/` 入口。宿主未收到显式参数时会给模块清理候选传入 `limit=10000` 作为扫描上限，避免模块默认小页大小先截断出一批已不存在的旧 env id，导致后续安全过滤前就丢掉真正可清理的环境。已存在但未通过 owner、claim 或 `env_binding_field` 绑定门的模块候选会留在预览中显示跳过原因。展示预览后再二次校验 `READY/PAUSED`、无租约、无关联任务、无活跃 task 引用、未被当前 `ACTIVE` 运行模板固定引用，最后由 REM 调用 `destroy_env()` 删除。历史、暂停、已完成、异常或手动执行一次后无活跃任务的模板不会单独阻断清理。清理候选运行面只有只读 `ctx.db`，不暴露 `ctx.tools`。
+批量环境清理写在 `cleanups/*.py` 中，使用 `@env_cleanup_candidates` 装饰同步纯函数。函数返回待清理 env id 列表或同一个 `EnvCandidates` 链式查询对象；这个入口只表达“模块认为已绑定且业务上可丢弃的候选集合”。宿主客户端触发清理时会同时扫描孤岛环境、任务创建后未被模块数据表认领的环境、owner 模块已不存在的环境，以及模块清理候选；DevLink 模块会先按开发态刷新 descriptor，再枚举 `cleanups/` 入口。模块返回 `EnvCandidates` 时，宿主会把当前仍存在的环境 id 作为内部 scope 注入查询运行时，使业务表查询先限定到现存环境，再执行模块声明的排序和 limit，避免已删除环境占掉模块分页名额。已存在但未通过 owner、claim 或 `env_binding_field` 绑定门的模块候选会留在预览中显示跳过原因。展示预览后再二次校验 `READY/PAUSED`、无租约、无关联任务、无活跃 task 引用、未被当前 `ACTIVE` 运行模板固定引用，最后由 REM 调用 `destroy_env()` 删除。历史、暂停、已完成、异常或手动执行一次后无活跃任务的模板不会单独阻断清理。清理候选运行面只有只读 `ctx.db`，不暴露 `ctx.tools`。
 
 ```python
 from crawler4j_contracts import env_cleanup_candidates

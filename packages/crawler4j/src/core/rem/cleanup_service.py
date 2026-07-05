@@ -28,7 +28,7 @@ from src.core.rem.models import EnvStatus, Environment
 SAFE_CLEANUP_STATUSES = frozenset({EnvStatus.READY, EnvStatus.PAUSED})
 ACTIVE_TASK_STATUSES = frozenset({TaskStatus.PENDING, TaskStatus.RUNNING})
 HOST_CLEANUP_MODULE = "host"
-DEFAULT_MODULE_CLEANUP_SCAN_LIMIT = 10_000
+ENV_CANDIDATE_SCOPE_RUNTIME_KEY = "_env_candidate_scope_ids"
 
 
 @dataclass(frozen=True)
@@ -127,9 +127,12 @@ class EnvCleanupService:
         active_task_env_ids, active_task_ids = await self._active_task_refs()
         fixed_job_env_ids = await self._fixed_job_env_ids()
         module_bound_cache: dict[str, set[int]] = {}
+        envs = await self._environment_manager.list_envs()
+        existing_env_ids = {int(env.id) for env in envs}
 
         await self._collect_host_candidates(
             env_sources,
+            envs=envs,
             installed_modules=installed_modules,
             active_task_ids=active_task_ids,
             module_bound_cache=module_bound_cache,
@@ -151,13 +154,11 @@ class EnvCleanupService:
                     description=entry.meta.description,
                 )
                 try:
-                    cleanup_params = dict(params_by_cleanup.get(f"{module.name}.{cleanup_name}", {}))
-                    cleanup_params.setdefault("limit", DEFAULT_MODULE_CLEANUP_SCAN_LIMIT)
                     ids = await self._module_service.resolve_env_cleanup_candidates_async(
                         module.name,
-                        context,
+                        self._scoped_context(context, existing_env_ids),
                         cleanup_name,
-                        cleanup_params,
+                        params_by_cleanup.get(f"{module.name}.{cleanup_name}", {}),
                     )
                 except Exception as exc:
                     errors.append(
@@ -290,15 +291,33 @@ class EnvCleanupService:
             runtime=runtime,
         )
 
+    @staticmethod
+    def _scoped_context(context: TaskContext, env_ids: set[int]) -> TaskContext:
+        scoped = TaskContext(
+            env_id=context.env_id,
+            task_name=context.task_name,
+            config=context.config,
+            page=context.page,
+            context=context.context,
+            logger=context.logger,
+            http=context.http,
+            tools=context.tools,
+            db=context.db,
+            state=context.state,
+            runtime=dict(context.runtime),
+        )
+        scoped.runtime[ENV_CANDIDATE_SCOPE_RUNTIME_KEY] = sorted(env_ids)
+        return scoped
+
     async def _collect_host_candidates(
         self,
         env_sources: dict[int, list[EnvCleanupSource]],
         *,
+        envs: list[Environment],
         installed_modules: set[str],
         active_task_ids: set[str],
         module_bound_cache: dict[str, set[int]],
     ) -> None:
-        envs = await self._environment_manager.list_envs()
         for env in envs:
             env_id = int(env.id)
             claim = await get_env_claim(self._environment_manager, env_id)

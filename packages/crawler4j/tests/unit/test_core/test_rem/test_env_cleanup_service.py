@@ -350,25 +350,21 @@ async def test_env_cleanup_preview_keeps_module_candidates_filtered_by_binding_v
 
 
 @pytest.mark.asyncio
-async def test_env_cleanup_preview_overfetches_before_host_filtering(monkeypatch):
-    class _LimitAwareModuleService(_FakeModuleService):
+async def test_env_cleanup_preview_passes_existing_env_scope_to_module_candidates(monkeypatch):
+    class _ScopeAwareModuleService(_FakeModuleService):
         def __init__(self):
             super().__init__()
-            self.seen_params: list[dict[str, object]] = []
+            self.seen_scope: list[list[int]] = []
 
         async def resolve_env_cleanup_candidates_async(self, module_name, context, cleanup_name, params=None):
-            self.seen_params.append(dict(params or {}))
-            limit = int((params or {}).get("limit", 100))
-            stale_missing_envs = list(range(1001, 1101))
-            if limit <= 100:
-                return stale_missing_envs
-            return [*stale_missing_envs, 1, 2]
+            self.seen_scope.append(list(context.runtime["_env_candidate_scope_ids"]))
+            return [1001, 1002, 1, 2]
 
     manager = _FakeEnvironmentManager({1: _env(1), 2: _env(2)})
     await _seed_claim(manager, 1, "demo_module")
     await _seed_claim(manager, 2, "demo_module")
     _patch_cleanup_runtime(monkeypatch, bound_ids={1, 2})
-    module_service = _LimitAwareModuleService()
+    module_service = _ScopeAwareModuleService()
     service = EnvCleanupService(
         module_service=module_service,
         environment_manager=manager,
@@ -377,7 +373,7 @@ async def test_env_cleanup_preview_overfetches_before_host_filtering(monkeypatch
 
     plan = await service.preview()
 
-    assert module_service.seen_params == [{"limit": 10_000}]
+    assert module_service.seen_scope == [[1, 2]]
     assert [(item.env_id, item.eligible) for item in plan.items] == [(1, True), (2, True)]
 
 
