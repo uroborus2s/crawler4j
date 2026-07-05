@@ -28,6 +28,7 @@ from src.core.rem.models import EnvStatus, Environment
 SAFE_CLEANUP_STATUSES = frozenset({EnvStatus.READY, EnvStatus.PAUSED})
 ACTIVE_TASK_STATUSES = frozenset({TaskStatus.PENDING, TaskStatus.RUNNING})
 HOST_CLEANUP_MODULE = "host"
+DEFAULT_MODULE_CLEANUP_SCAN_LIMIT = 10_000
 
 
 @dataclass(frozen=True)
@@ -150,11 +151,13 @@ class EnvCleanupService:
                     description=entry.meta.description,
                 )
                 try:
+                    cleanup_params = dict(params_by_cleanup.get(f"{module.name}.{cleanup_name}", {}))
+                    cleanup_params.setdefault("limit", DEFAULT_MODULE_CLEANUP_SCAN_LIMIT)
                     ids = await self._module_service.resolve_env_cleanup_candidates_async(
                         module.name,
                         context,
                         cleanup_name,
-                        params_by_cleanup.get(f"{module.name}.{cleanup_name}", {}),
+                        cleanup_params,
                     )
                 except Exception as exc:
                     errors.append(
