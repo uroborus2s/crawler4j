@@ -224,7 +224,7 @@ async def _seed_claim_state(manager: _FakeEnvironmentManager, env_id: int, owner
     await manager.set_metadata(env_id, ENV_CLAIM_NAMESPACE, ENV_CLAIM_STATE, state, "string")
 
 
-def _patch_cleanup_runtime(monkeypatch):
+def _patch_cleanup_runtime(monkeypatch, *, bound_ids: set[int] | None = None):
     import src.core.rem.cleanup_service as cleanup_service
 
     monkeypatch.setattr(
@@ -238,7 +238,7 @@ def _patch_cleanup_runtime(monkeypatch):
     monkeypatch.setattr(
         cleanup_service,
         "module_bound_env_ids",
-        lambda module_name, module_service=None: {1, 2, 3} if module_name == "demo_module" else set(),
+        lambda module_name, module_service=None: (bound_ids or {1, 2, 3}) if module_name == "demo_module" else set(),
     )
 
 
@@ -325,6 +325,28 @@ async def test_env_cleanup_preview_deduplicates_and_marks_safety(monkeypatch):
     assert "状态不允许清理" in plan.items[1].reason
     assert plan.items[2].eligible is False
     assert "租约" in plan.items[2].reason
+
+
+@pytest.mark.asyncio
+async def test_env_cleanup_preview_keeps_module_candidates_filtered_by_binding_visible(monkeypatch):
+    manager = _FakeEnvironmentManager({1: _env(1), 2: _env(2), 3: _env(3)})
+    await _seed_claim(manager, 1, "demo_module")
+    await _seed_claim(manager, 2, "demo_module")
+    await _seed_claim(manager, 3, "demo_module")
+    _patch_cleanup_runtime(monkeypatch, bound_ids={1})
+    service = EnvCleanupService(
+        module_service=_FakeModuleService(),
+        environment_manager=manager,
+        task_repository=_FakeTaskRepository(),
+    )
+
+    plan = await service.preview()
+
+    assert [(item.env_id, item.eligible, item.reason) for item in plan.items[:3]] == [
+        (1, True, ""),
+        (2, False, "模块业务表未绑定该环境"),
+        (3, False, "模块业务表未绑定该环境"),
+    ]
 
 
 @pytest.mark.asyncio
