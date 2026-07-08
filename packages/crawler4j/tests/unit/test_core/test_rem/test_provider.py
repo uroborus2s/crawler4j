@@ -19,41 +19,95 @@ from src.core.rem.provider import (
 
 class TestProviderRegistry:
     """测试 Provider 自动注册。"""
-    
+
     def test_providers_registered(self):
         """测试所有内置 Provider 自动注册。"""
         registered = list_providers()
-        
+
         assert "playwright_local" in registered
         assert "bitbrowser" in registered
         assert "virtualbrowser" in registered
-    
+
     def test_get_playwright_provider(self):
         """测试获取 Playwright Provider。"""
         provider = get_provider("playwright_local")
-        
+
         assert provider is not None
         assert provider.name == "playwright_local"
-    
+
     def test_get_bitbrowser_provider(self):
         """测试获取 BitBrowser Provider。"""
         provider = get_provider("bitbrowser")
-        
+
         assert provider is not None
         assert provider.name == "bitbrowser"
-    
+
     def test_get_virtualbrowser_provider(self):
         """测试获取 VirtualBrowser Provider。"""
         provider = get_provider("virtualbrowser")
-        
+
         assert provider is not None
         assert provider.name == "virtualbrowser"
-    
+
     def test_get_unknown_provider(self):
         """测试获取未注册的 Provider。"""
         provider = get_provider("unknown_provider")
-        
+
         assert provider is None
+
+
+def test_created_parameter_warnings_flag_inconsistent_fingerprint_values():
+    warnings = provider_module._created_parameter_warnings(
+        {
+            "id": 55,
+            "ua": {
+                "mode": 0,
+                "value": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/143.0.0.0",
+            },
+            "location": {"mode": 2, "enable": 1, "longitude": "0", "latitude": "0"},
+            "cpu": {"mode": 1, "value": 2},
+            "memory": {"mode": 1, "value": 64},
+            "proxy": {
+                "host": "27.18.13.203",
+                "url": "socks5://user:pass@27.18.13.103:2019",
+            },
+            "fonts": {"mode": 1},
+            "canvas": {"mode": 1},
+            "webgl-img": {"mode": 1},
+            "audio-context": {"mode": 1},
+            "client-rects": {"mode": 1},
+            "speech_voices": {"mode": 1},
+        },
+        browser_id=55,
+        geo=None,
+    )
+
+    rendered = "\n".join(warnings)
+    assert "WOW64" in rendered
+    assert "location 为 0,0" in rendered
+    assert "cpu/memory=2/64" in rendered
+    assert "proxy.host='27.18.13.203'" in rendered
+    assert "fonts.mode=1" in rendered
+    assert "speech_voices.mode=1" in rendered
+    assert "canvas.mode=1" in rendered
+    assert "webgl-img.mode=1" in rendered
+    assert "audio-context.mode=1" in rendered
+    assert "client-rects.mode=1" in rendered
+
+
+def test_created_parameter_warnings_allow_local_forward_proxy_url():
+    warnings = provider_module._created_parameter_warnings(
+        {
+            "id": 9,
+            "cpu": {"mode": 1, "value": 8},
+            "memory": {"mode": 1, "value": 16},
+            "proxy": {"host": "116.140.217.185", "url": "http://127.0.0.1:48065"},
+        },
+        browser_id=9,
+        geo=None,
+    )
+
+    assert all("proxy.host" not in warning for warning in warnings)
 
 
 @pytest.mark.asyncio

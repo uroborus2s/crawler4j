@@ -174,6 +174,7 @@ class ExecutionRunner:
         )
 
         env_lease = None
+        env: Environment | None = None
         env_id = None
         env_created = False
         env_claim_refresh_required = False
@@ -403,6 +404,7 @@ class ExecutionRunner:
 
                 result = self._normalize_task_result(raw_result)
                 if result.success:
+                    self._mark_bound_ip_used(env)
                     task.message = result.message or str(result.data or raw_result)
                     task.error = ""
                     task.status = TaskStatus.SUCCEEDED
@@ -501,6 +503,18 @@ class ExecutionRunner:
             static_value=raw_proxy.get("static_value"),
             current_ip=raw_proxy.get("current_ip"),
         )
+
+    def _mark_bound_ip_used(self, env: Environment | None) -> None:
+        proxy_config = getattr(env, "proxy_config", None)
+        entry_id = str(getattr(proxy_config, "ip_entry_id", "") or "").strip()
+        if not entry_id:
+            return
+        try:
+            from src.core.rem.ip_pool import get_ip_pool_manager
+
+            get_ip_pool_manager().mark_entry_used(entry_id)
+        except Exception as exc:
+            logger.warning(f"[ATM] Failed to refresh IP usage time: env_id={getattr(env, 'id', '')} error={exc}")
 
     async def _list_ready_env_candidates(
         self,

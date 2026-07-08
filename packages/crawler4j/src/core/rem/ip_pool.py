@@ -67,7 +67,7 @@ class IPEntry:
         expires_at: 过期时间戳
         created_at: 创建时间戳
         updated_at: 更新时间戳
-        last_used_at: 最近一次绑定使用时间戳
+        last_used_at: 最近使用时间戳
         status: 人工状态，可用或不可用
     """
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -342,6 +342,25 @@ class IPPoolManager:
         
         logger.info(f"[IPPool] 绑定 IP成功: env={env_id} ip={ip.address} (new_count={ip.bound_count})")
         return ip
+
+    def mark_entry_used(self, entry_id: str) -> bool:
+        """刷新 IP 条目的最近使用时间。"""
+        normalized_entry_id = str(entry_id or "").strip()
+        if not normalized_entry_id:
+            return False
+
+        now = int(time.time())
+        for pool in self._pools.values():
+            entry = pool.get_entry(normalized_entry_id)
+            if entry is None:
+                continue
+            entry.last_used_at = now
+            entry.updated_at = now
+            self._persist_entry(entry)
+            logger.info(f"[IPPool] IP 使用时间已刷新: id={normalized_entry_id}")
+            return True
+        logger.warning(f"[IPPool] 刷新 IP 使用时间时未找到条目: id={normalized_entry_id}")
+        return False
 
     def set_entry_status(self, entry_id: str, status: IPEntryStatus | str) -> bool:
         """设置 IP 条目的人工状态，不影响已有环境绑定。"""

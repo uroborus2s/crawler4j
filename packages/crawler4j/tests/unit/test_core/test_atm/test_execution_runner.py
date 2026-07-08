@@ -14,7 +14,7 @@ from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 from src.core.atm.runtime_capabilities import RuntimeCapabilities
 from src.core.foundation.logging import logger as app_logger
-from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus
+from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus, ProxyConfig
 from src.core.rem.models import ProxyMode
 
 
@@ -524,6 +524,23 @@ async def test_execution_runner_marks_task_failed_for_taskresult_fail():
     rem.release.assert_awaited_once_with(lease)
     rem.release_keep_alive.assert_not_awaited()
     rem.destroy_env.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_refreshes_bound_ip_usage_after_success(monkeypatch):
+    request = _build_request()
+    env, lease = _build_env()
+    env.proxy_config = ProxyConfig(mode=ProxyMode.POOL, pool_id="pool-1", ip_entry_id="ip-1")
+    ip_manager = SimpleNamespace(mark_entry_used=Mock(return_value=True))
+    monkeypatch.setattr("src.core.rem.ip_pool.get_ip_pool_manager", lambda: ip_manager)
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(return_value=TaskResult.ok(message="ok")),
+    )
+    runner, _rem = _build_runner(env, lease, module_service)
+
+    await runner.run(request)
+
+    ip_manager.mark_entry_used.assert_called_once_with("ip-1")
 
 
 @pytest.mark.asyncio

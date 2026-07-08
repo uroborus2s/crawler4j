@@ -7,7 +7,7 @@
 **上游输入：** `packages/crawler4j/pyproject.toml` | Git tag | 子包 `pyproject.toml` | docs-stratego 源仓导航
 **下游输出：** `release-notes.md` | `deployment-guide.md` | `docs/index.md` | `.factory/project.json`
 **关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `REQ-0401`, `NFR-002`
-**最后更新：** 2026-07-05
+**最后更新：** 2026-07-08
 
 ## 1. 规则
 
@@ -26,8 +26,8 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.4.24` | 当前仓库 HEAD 已切到 0.4.24 版本，用于承接 REM 批量环境清理预览的模块候选 scope 修复 |
-| 根应用运行时版本 | `0.4.24` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.4.26` | 当前仓库 HEAD 已切到 0.4.26 版本，用于承接 VirtualBrowser 创建环境指纹自洽与稳定性优化 |
+| 根应用运行时版本 | `0.4.26` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
 | SDK | `0.4.2` | 当前工作区 SDK 版本；包含导入 workflow 场景脚手架与扫描契约，并已按 0.4.2 发布到 PyPI |
 | Contracts | `0.4.2` | 当前工作区 Contracts 版本；包含 `@workflow(host_scenarios=...)` 契约，并已按 0.4.2 发布到 PyPI |
@@ -36,25 +36,26 @@
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前根应用已经切到 `0.4.24`，但 Git tag 在本次发布前仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为当前源码版本已完成正式发布。
+- 当前根应用已经切到 `0.4.26`，但 Git tag 在本次发布前仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为当前源码版本已完成正式发布。
 - 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.24`
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.26`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.4.24` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.4.26` Git tag 与正式 release 资产
 7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-08 | 仅将根应用 / 运行时版本提升到 `0.4.26`，用于承接 VirtualBrowser 创建期随机指纹自洽与稳定性优化；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-07-05 | 仅将根应用 / 运行时版本提升到 `0.4.24`，用于承接 REM 批量环境清理预览的模块候选 scope 修复；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-03-26 | 建立根应用 / 运行时 / tag / SDK / Contracts 的统一版本治理规则 | Codex |
 | 2026-04-17 | 将根应用 / SDK / Contracts 当前源码版本与 README、release 文档统一收敛到 `0.2.0` 发布基线，并明确最近正式 tag 仍为 `v0.1.1` | Codex |

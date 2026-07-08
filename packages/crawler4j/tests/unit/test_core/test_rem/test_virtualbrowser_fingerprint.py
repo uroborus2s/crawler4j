@@ -6,6 +6,7 @@ from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_FALLBACK_LANGUAGE,
     VIRTUALBROWSER_LANGUAGE_BY_COUNTRY,
     VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
+    VIRTUALBROWSER_UA_TEMPLATES,
     materialize_virtualbrowser_fingerprint,
 )
 
@@ -26,6 +27,11 @@ def test_virtualbrowser_common_screen_resolutions_use_modern_weighted_pool():
 
 
 def test_materialize_virtualbrowser_fingerprint_randomizes_chrome_version(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Windows",
+    )
+
     def pick_random_value(options):
         if options == tuple(range(139, 146)):
             return 142
@@ -52,20 +58,59 @@ def test_materialize_virtualbrowser_fingerprint_randomizes_chrome_version(monkey
     )
 
     assert chrome_version == 142
-    assert payload == {
-        "ua-language": VIRTUALBROWSER_CN_LANGUAGE,
-        "time-zone": VIRTUALBROWSER_CN_TIME_ZONE,
-        "screen": {"mode": 1, "width": 1920, "height": 1080, "_value": "1920 x 1080"},
-        "fonts": {"mode": 1},
-        "canvas": {"mode": 1},
-        "webgl-img": {"mode": 1},
-        "audio-context": {"mode": 1},
-        "client-rects": {"mode": 1},
-        "speech_voices": {"mode": 1},
-        "webrtc": {"mode": 0},
-        "cpu": {"mode": 1, "value": 6},
-        "memory": {"mode": 1, "value": 16},
-    }
+    assert payload["os"] == "Win 11"
+    assert "WOW64" not in payload["ua"]["value"]
+    assert "Win64; x64" in payload["ua"]["value"]
+    assert payload["ua-full-version"] == {"mode": 1, "value": "142.0.0.0"}
+    assert payload["sec-ch-ua"]["value"][0] == {"brand": "Chromium", "version": 142}
+    assert payload["ua-language"] == VIRTUALBROWSER_CN_LANGUAGE
+    assert payload["time-zone"] == VIRTUALBROWSER_CN_TIME_ZONE
+    assert payload["screen"] == {"mode": 1, "width": 1920, "height": 1080, "_value": "1920 x 1080"}
+    assert payload["fonts"]["value"]
+    assert set(("r", "g", "b", "a")).issubset(payload["canvas"])
+    assert set(("r", "g", "b", "a")).issubset(payload["webgl-img"])
+    assert set(("channel", "analyer")).issubset(payload["audio-context"])
+    assert set(("width", "height")).issubset(payload["client-rects"])
+    assert payload["speech_voices"]["value"]
+    assert payload["device-name"]["value"].startswith("DESKTOP-")
+    assert payload["mac"]["value"].count("-") == 5
+    assert payload["webrtc"] == {"mode": 0}
+    assert payload["cpu"] == {"mode": 1, "value": 6}
+    assert payload["memory"] == {"mode": 1, "value": 16}
+    assert "location" not in payload
+
+
+def test_virtualbrowser_random_user_agent_templates_match_supported_host_systems():
+    assert "WOW64" not in VIRTUALBROWSER_UA_TEMPLATES["Windows"]
+    assert "Win64; x64" in VIRTUALBROWSER_UA_TEMPLATES["Windows"]
+    assert "Macintosh; Intel Mac OS X" in VIRTUALBROWSER_UA_TEMPLATES["Darwin"]
+    assert "X11; Linux x86_64" in VIRTUALBROWSER_UA_TEMPLATES["Linux"]
+
+
+def test_materialize_virtualbrowser_fingerprint_uses_host_system_profile(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Darwin",
+    )
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.secrets.choice",
+        lambda options: options[0],
+    )
+
+    _, payload = materialize_virtualbrowser_fingerprint(
+        {
+            "chrome_version": 145,
+            VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY: True,
+        },
+        default_chrome_version=145,
+    )
+
+    assert payload["os"] == "Mac OS"
+    assert "Macintosh; Intel Mac OS X" in payload["ua"]["value"]
+    assert "Win64; x64" not in payload["ua"]["value"]
+    assert "PingFang SC" in payload["fonts"]["value"]
+    assert payload["speech_voices"]["value"][0]["name"] == "Ting-Ting"
+    assert payload["device-name"]["value"].startswith("MacBook-Pro-")
 
 
 def test_materialize_virtualbrowser_fingerprint_omits_randomized_identity_fields(monkeypatch):
@@ -86,13 +131,16 @@ def test_materialize_virtualbrowser_fingerprint_omits_randomized_identity_fields
         default_chrome_version=145,
     )
 
-    assert "ua" not in payload
-    assert "sec-ch-ua" not in payload
-    assert "device-name" not in payload
-    assert "mac" not in payload
+    assert payload["ua"]["value"] != "Mozilla/5.0 Test"
+    assert payload["sec-ch-ua"]["value"] != '"Chromium";v="145"'
+    assert payload["device-name"]["value"] != "Q7M2P9X4K3A1B5C6D"
+    assert payload["mac"]["value"] != "02-76-66-51-39-C9"
     assert payload["ua-language"] == VIRTUALBROWSER_CN_LANGUAGE
     assert payload["time-zone"] == VIRTUALBROWSER_CN_TIME_ZONE
     assert payload["screen"]["mode"] == 1
+    assert payload["fonts"]["value"]
+    assert "r" in payload["canvas"]
+    assert "value" in payload["speech_voices"]
 
 
 def test_materialize_virtualbrowser_fingerprint_uses_proxy_geo(monkeypatch):

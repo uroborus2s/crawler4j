@@ -186,6 +186,47 @@ async def test_bind_ip_marks_last_used_and_updated_at(monkeypatch, tmp_path):
     }
 
 
+def test_mark_entry_used_refreshes_last_used_without_changing_bound_count(monkeypatch, tmp_path):
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    init_database()
+
+    now = 1_800_000_123
+    monkeypatch.setattr("src.core.rem.ip_pool.time.time", lambda: now)
+
+    manager = IPPoolManager()
+    pool = IPPool(id="pool-1", name="主池", strategy=IPStrategy.LEAST_RECENTLY_USED)
+    manager.add_pool(pool)
+    entry = IPEntry(
+        id="entry-1",
+        pool_id=pool.id,
+        address="1.1.1.1",
+        protocol="http",
+        port=8080,
+        bound_count=2,
+        created_at=1_700_000_000,
+        updated_at=1_700_000_000,
+        last_used_at=1_700_000_000,
+    )
+    pool.add_entry(entry)
+    manager._persist_entry(entry)
+
+    assert manager.mark_entry_used(entry.id) is True
+
+    assert entry.bound_count == 2
+    assert entry.last_used_at == now
+    assert entry.updated_at == now
+    with get_connection(STATE_DB) as conn:
+        stored = conn.execute(
+            "SELECT bound_count, last_used_at, updated_at FROM ip_entries WHERE id = ?",
+            (entry.id,),
+        ).fetchone()
+    assert dict(stored) == {
+        "bound_count": 2,
+        "last_used_at": now,
+        "updated_at": now,
+    }
+
+
 def test_init_database_migrates_legacy_ip_entries_time_columns(monkeypatch, tmp_path):
     monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
     with get_connection(STATE_DB) as conn:
