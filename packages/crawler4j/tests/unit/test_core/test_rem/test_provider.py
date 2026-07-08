@@ -186,6 +186,61 @@ async def test_virtualbrowser_create_uses_proxy_geo_and_validates_full_parameter
 
 
 @pytest.mark.asyncio
+async def test_virtualbrowser_repair_fingerprint_location_updates_only_location(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        external_id="303",
+        proxy_config=ProxyConfig(
+            mode=ProxyMode.STATIC,
+            static_value="http://alice:secret@10.0.0.8:8080",
+            current_ip="10.0.0.8",
+        ),
+        handle=BrowserHandle(browser_id="303"),
+    )
+    client = SimpleNamespace(update_browser=AsyncMock(return_value=True))
+
+    def _probe_geo(entry):
+        assert entry.address == "10.0.0.8"
+        assert entry.port == 8080
+        assert entry.username == "alice"
+        return provider_module.ProxyProbeResult(
+            ok=True,
+            stage="probe",
+            protocol="http",
+            masked_proxy_url="http://alice:***@10.0.0.8:8080",
+            latency_ms=12,
+            exit_ip="203.0.113.8",
+            http_status=200,
+            detail="ok",
+            error_type=None,
+            country_code="CN",
+            country="China",
+            region="Beijing",
+            city="Jinrongjie",
+            timezone="Asia/Shanghai",
+            asn="AS4837 CHINA UNICOM China169 Backbone",
+            isp="China Unicom",
+            latitude=39.9072,
+            longitude=116.357,
+        )
+
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(provider_module, "probe_ip_entry_geo", _probe_geo)
+
+    location = await provider.repair_fingerprint_location(env)
+
+    assert location["longitude"] == "116.357"
+    assert location["latitude"] == "39.9072"
+    assert 1600 <= location["precision"] <= 5600
+    client.update_browser.assert_awaited_once_with(303, {"location": location})
+
+
+@pytest.mark.asyncio
 async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
     provider = VirtualBrowserProvider()
     env = Environment(

@@ -118,6 +118,36 @@ async def test_manual_recheck_updates_only_validation_metadata(temp_data_dir, mo
 
 
 @pytest.mark.asyncio
+async def test_repair_env_fingerprint_location_updates_and_rechecks(temp_data_dir, monkeypatch):
+    manager = EnvironmentManager()
+    env = await _add_ready_env(manager.pool, "risk-env")
+    calls: list[str] = []
+
+    class FakeProvider:
+        async def repair_fingerprint_location(self, checked_env):
+            calls.append(f"repair:{checked_env.id}")
+
+        async def validate_fingerprint_environment(self, checked_env):
+            calls.append(f"validate:{checked_env.id}")
+            return []
+
+    monkeypatch.setattr("src.core.rem.manager.get_provider", lambda provider: FakeProvider())
+
+    await manager.mark_fingerprint_validation_risk(
+        env.id,
+        reason="location 为 0,0",
+        detail="location 为 0,0，占位定位不能作为稳定环境参数",
+    )
+
+    summary = await manager.repair_env_fingerprint_location(env.id)
+
+    metadata = manager.pool.list_metadata(env.id, FINGERPRINT_VALIDATION_NAMESPACE)
+    assert calls == [f"repair:{env.id}", f"validate:{env.id}"]
+    assert summary.status == FINGERPRINT_VALIDATION_PASSED
+    assert metadata[FINGERPRINT_VALIDATION_STATUS] == FINGERPRINT_VALIDATION_PASSED
+
+
+@pytest.mark.asyncio
 async def test_created_validation_warnings_mark_env_risk_metadata(temp_data_dir):
     manager = EnvironmentManager()
     env = await _add_ready_env(manager.pool, "created-risk-env")

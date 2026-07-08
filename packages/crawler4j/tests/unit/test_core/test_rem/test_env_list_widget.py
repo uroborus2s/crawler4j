@@ -715,6 +715,44 @@ def test_env_list_widget_rows_show_fingerprint_risk(qtbot, monkeypatch):
     assert widget.table.table.item(0, 5).text() == "风险: WebRTC 泄漏"
 
 
+def test_env_list_widget_shows_repair_location_action_for_location_risk(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    metadata_by_env = {
+        101: {
+            FINGERPRINT_VALIDATION_NAMESPACE: {
+                FINGERPRINT_VALIDATION_STATUS: FINGERPRINT_VALIDATION_RISK,
+                FINGERPRINT_VALIDATION_REASON: "location 为 0,0",
+                FINGERPRINT_VALIDATION_DETAIL: "location 为 0,0，占位定位不能作为稳定环境参数",
+            },
+        },
+    }
+    pool = SimpleNamespace(
+        list_metadata=MagicMock(side_effect=lambda env_id: metadata_by_env.get(env_id, {}))
+    )
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=pool),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    widget._on_data_loaded([_make_env(101, EnvStatus.READY)])
+    row = widget.table.displayed_rows()[0]
+
+    assert [action["id"] for action in row["actions"]] == [
+        "repair_location",
+        "recheck_fingerprint",
+        "pause",
+        "edit",
+        "destroy",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_env_list_widget_recheck_fingerprint_refreshes_metadata(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
@@ -746,6 +784,40 @@ async def test_env_list_widget_recheck_fingerprint_refreshes_metadata(qtbot, mon
 
     manager.recheck_env_fingerprint_validation.assert_awaited_once_with("101")
     assert messages == [("重新检测", "环境指纹风险检测通过。", "info")]
+    widget.load_data.assert_called_once_with(run_gc=False, reload_from_db=True)
+
+
+@pytest.mark.asyncio
+async def test_env_list_widget_repair_location_refreshes_metadata(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    manager = SimpleNamespace(
+        pool=SimpleNamespace(),
+        repair_env_fingerprint_location=AsyncMock(
+            return_value=FingerprintValidationSummary(
+                status="passed",
+                reason="",
+                detail="手动重新检测通过",
+            )
+        ),
+    )
+    messages: list[tuple[str, str, str]] = []
+
+    async def fake_show(_parent, title: str, text: str, *, kind: str = "info"):
+        messages.append((title, text, kind))
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
+    monkeypatch.setattr(env_list_widget.MessageDialog, "show_async", staticmethod(fake_show))
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget.load_data = MagicMock()
+
+    await widget._async_repair_fingerprint_location("101")
+
+    manager.repair_env_fingerprint_location.assert_awaited_once_with("101")
+    assert messages == [("修复位置", "location 已按 ip-api 更新，风险检测通过。", "info")]
     widget.load_data.assert_called_once_with(run_gc=False, reload_from_db=True)
 
 
