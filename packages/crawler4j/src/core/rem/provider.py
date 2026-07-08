@@ -204,6 +204,8 @@ def _geo_from_proxy_probe_result(result: ProxyProbeResult) -> dict[str, Any] | N
         "country": result.country,
         "region": result.region,
         "city": result.city,
+        "latitude": result.latitude,
+        "longitude": result.longitude,
         "timezone": result.timezone,
         "asn": result.asn,
         "isp": result.isp,

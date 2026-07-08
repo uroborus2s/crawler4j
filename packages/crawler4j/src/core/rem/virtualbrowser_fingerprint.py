@@ -85,6 +85,8 @@ VIRTUALBROWSER_COMMON_HARDWARE_PROFILES = (
     (8, 32),
     (12, 32),
 )
+VIRTUALBROWSER_LOCATION_PRECISION_MIN_M = 1600
+VIRTUALBROWSER_LOCATION_PRECISION_MAX_M = 5600
 VIRTUALBROWSER_UA_TEMPLATES = {
     "Windows": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -285,6 +287,9 @@ def build_virtualbrowser_geo_fingerprint_overrides(
         time_zone = _build_time_zone_profile(timezone, locale=locale)
         if time_zone:
             overrides["time-zone"] = time_zone
+    location = _build_location_profile(geo)
+    if location:
+        overrides["location"] = location
     return overrides
 
 
@@ -309,6 +314,38 @@ def _build_time_zone_profile(timezone: str, *, locale: str) -> dict[str, Any] | 
         "locale": locale,
         "value": value,
     }
+
+
+def _build_location_profile(geo: dict[str, Any]) -> dict[str, Any] | None:
+    latitude = _safe_float(geo.get("latitude"))
+    longitude = _safe_float(geo.get("longitude"))
+    if latitude is None or longitude is None:
+        return None
+    if latitude == 0 and longitude == 0:
+        return None
+    return {
+        "mode": 2,
+        "enable": 1,
+        "longitude": _format_geo_coord(longitude),
+        "latitude": _format_geo_coord(latitude),
+        "precision": _random_location_precision(),
+    }
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_geo_coord(value: float) -> str:
+    return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def _random_location_precision() -> int:
+    width = VIRTUALBROWSER_LOCATION_PRECISION_MAX_M - VIRTUALBROWSER_LOCATION_PRECISION_MIN_M + 1
+    return VIRTUALBROWSER_LOCATION_PRECISION_MIN_M + secrets.randbelow(width)
 
 
 def _format_utc_offset(offset_hours: float) -> str:

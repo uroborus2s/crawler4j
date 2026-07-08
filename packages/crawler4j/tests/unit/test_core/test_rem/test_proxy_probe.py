@@ -81,6 +81,7 @@ def test_probe_ip_entry_geo_returns_exit_location_and_asn(monkeypatch):
             body=(
                 '{"status":"success","query":"124.225.43.95","country":"China",'
                 '"countryCode":"CN","regionName":"Hainan","city":"Haikou",'
+                '"lat":20.0442,"lon":110.1999,'
                 '"timezone":"Asia/Shanghai","as":"AS4134 CHINANET-BACKBONE",'
                 '"isp":"China Telecom"}'
             ),
@@ -95,6 +96,8 @@ def test_probe_ip_entry_geo_returns_exit_location_and_asn(monkeypatch):
     assert result.country == "China"
     assert result.region == "Hainan"
     assert result.city == "Haikou"
+    assert result.latitude == 20.0442
+    assert result.longitude == 110.1999
     assert result.timezone == "Asia/Shanghai"
     assert result.asn == "AS4134 CHINANET-BACKBONE"
     assert result.isp == "China Telecom"

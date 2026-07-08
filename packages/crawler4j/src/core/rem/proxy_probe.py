@@ -7,7 +7,7 @@ import socket
 import ssl
 import time
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 from src.core.foundation.logging import logger
 from src.core.rem.ip_pool import IPEntry
@@ -31,7 +31,7 @@ DEFAULT_PROXY_PROBE_TARGET: Final[ProxyProbeTarget] = ProxyProbeTarget(
 DEFAULT_PROXY_GEO_PROBE_TARGET: Final[ProxyProbeTarget] = ProxyProbeTarget(
     host="ip-api.com",
     port=80,
-    path="/json/?fields=status,message,query,country,countryCode,regionName,city,timezone,as,asname,isp",
+    path="/json/?fields=status,message,query,country,countryCode,regionName,city,lat,lon,timezone,as,asname,isp",
 )
 
 
@@ -60,6 +60,8 @@ class ProxyProbeResult:
     timezone: str | None = None
     asn: str | None = None
     isp: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
     @property
     def title(self) -> str:
@@ -107,6 +109,8 @@ class ProxyProbeResult:
             f"country: {self.country or '-'}",
             f"region: {self.region or '-'}",
             f"city: {self.city or '-'}",
+            f"latitude: {self.latitude if self.latitude is not None else '-'}",
+            f"longitude: {self.longitude if self.longitude is not None else '-'}",
             f"timezone: {self.timezone or '-'}",
             f"asn: {self.asn or '-'}",
             f"isp: {self.isp or '-'}",
@@ -195,6 +199,8 @@ def _probe_ip_entry(
             timezone=parsed.get("timezone"),
             asn=parsed.get("asn"),
             isp=parsed.get("isp"),
+            latitude=parsed.get("latitude"),
+            longitude=parsed.get("longitude"),
         )
     except ProxyProbeError as exc:
         latency_ms = _elapsed_ms(start)
@@ -548,7 +554,7 @@ def _extract_exit_ip_fields(body: str) -> dict[str, str | None]:
     return {"exit_ip": _extract_exit_ip(body)}
 
 
-def _extract_geo_probe_fields(body: str) -> dict[str, str | None]:
+def _extract_geo_probe_fields(body: str) -> dict[str, Any]:
     text = body.strip()
     if not text:
         raise ProxyProbeError("parse_geo", "探针服务没有返回出口地理信息")
@@ -577,6 +583,8 @@ def _extract_geo_probe_fields(body: str) -> dict[str, str | None]:
         "country": _clean_probe_text(payload.get("country")) or None,
         "region": _clean_probe_text(payload.get("regionName")) or None,
         "city": _clean_probe_text(payload.get("city")) or None,
+        "latitude": _clean_probe_float(payload.get("lat")),
+        "longitude": _clean_probe_float(payload.get("lon")),
         "timezone": _clean_probe_text(payload.get("timezone")) or None,
         "asn": _clean_probe_text(payload.get("as")) or _clean_probe_text(payload.get("asname")) or None,
         "isp": _clean_probe_text(payload.get("isp")) or None,
@@ -585,6 +593,13 @@ def _extract_geo_probe_fields(body: str) -> dict[str, str | None]:
 
 def _clean_probe_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _clean_probe_float(value: object) -> float | None:
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def _mask_proxy_url(entry: IPEntry, protocol: str) -> str:

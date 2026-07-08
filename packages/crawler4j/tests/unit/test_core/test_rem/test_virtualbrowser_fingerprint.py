@@ -164,7 +164,12 @@ def test_materialize_virtualbrowser_fingerprint_uses_proxy_geo(monkeypatch):
             VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY: True,
         },
         default_chrome_version=145,
-        geo={"country_code": "JP", "timezone": "Asia/Tokyo"},
+        geo={
+            "country_code": "JP",
+            "timezone": "Asia/Tokyo",
+            "latitude": 35.6895,
+            "longitude": 139.6917,
+        },
     )
 
     assert payload["ua-language"] == {"mode": 1, "language": "ja-JP", "value": "ja"}
@@ -175,7 +180,14 @@ def test_materialize_virtualbrowser_fingerprint_uses_proxy_geo(monkeypatch):
         "locale": "ja-JP",
         "value": 9,
     }
-    assert "location" not in payload
+    assert payload["location"] | {"precision": 0} == {
+        "mode": 2,
+        "enable": 1,
+        "longitude": "139.6917",
+        "latitude": "35.6895",
+        "precision": 0,
+    }
+    assert 1600 <= payload["location"]["precision"] <= 5600
 
 
 def test_materialize_virtualbrowser_fingerprint_ignores_legacy_post_create_marker():

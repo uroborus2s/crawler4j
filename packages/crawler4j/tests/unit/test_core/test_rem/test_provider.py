@@ -146,6 +146,8 @@ async def test_virtualbrowser_create_uses_proxy_geo_and_validates_full_parameter
             timezone="Asia/Tokyo",
             asn="AS64500 TEST-NET",
             isp="Example ISP",
+            latitude=35.6895,
+            longitude=139.6917,
         )
 
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
@@ -178,6 +180,8 @@ async def test_virtualbrowser_create_uses_proxy_geo_and_validates_full_parameter
     _, kwargs = client.add_browser.await_args
     assert kwargs["geo"]["country_code"] == "JP"
     assert kwargs["geo"]["timezone"] == "Asia/Tokyo"
+    assert kwargs["geo"]["latitude"] == 35.6895
+    assert kwargs["geo"]["longitude"] == 139.6917
     client.get_browser_full_parameters.assert_awaited_once_with(303)
 
 
