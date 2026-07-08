@@ -2030,6 +2030,34 @@ class VirtualBrowserProvider(BaseProvider):
 
         return _created_parameter_warnings(payload, browser_id=browser_id_int, geo=None)
 
+    async def repair_fingerprint_location(self, env: Environment) -> dict[str, Any]:
+        """Repair only VirtualBrowser location from the current proxy geo."""
+        browser_id = self._browser_id_from_env(env)
+        if not browser_id:
+            raise RuntimeError("缺少 VirtualBrowser 环境 ID")
+        try:
+            browser_id_int = int(browser_id)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"VirtualBrowser 环境 ID 无效: {browser_id!r}") from exc
+
+        entry = _ip_entry_from_proxy_config(env.proxy_config)
+        if entry is None:
+            raise RuntimeError("当前环境没有可探测的代理，无法按 ip-api 修复 location")
+
+        result = await asyncio.to_thread(probe_ip_entry_geo, entry)
+        geo = _geo_from_proxy_probe_result(result)
+        location = build_virtualbrowser_geo_fingerprint_overrides(geo).get("location") if geo else None
+        if not isinstance(location, dict):
+            raise RuntimeError("ip-api 未返回有效经纬度，无法修复 location")
+
+        async with self._get_lifecycle_lock():
+            client = self._get_api_client()
+            success = await client.update_browser(browser_id_int, {"location": location})
+        if not success:
+            raise RuntimeError("VirtualBrowser updateBrowser 修复 location 失败")
+        logger.info(f"[VirtualBrowser] location repaired from ip-api: id={browser_id} location={location}")
+        return location
+
     async def reset(self, env: Environment) -> bool:
         """重置环境状态：清除数据 + 导航到空白页。"""
         async with self._get_lifecycle_lock():

@@ -820,6 +820,11 @@ def _format_fingerprint_validation_cell(env_metadata: dict[str, Any]) -> dict[st
     }
 
 
+def _is_location_fingerprint_risk(validation: Any) -> bool:
+    text = f"{getattr(validation, 'reason', '')} {getattr(validation, 'detail', '')}".lower()
+    return "location" in text
+
+
 def _proxy_mode_value(proxy_config: Any) -> str:
     if proxy_config is None:
         return "none"
@@ -1109,9 +1114,17 @@ class EnvListWidget(QWidget):
             "tooltip": "重新检测指纹风险",
             "variant": "warning",
         }
+        repair_location_action = {
+            "id": "repair_location",
+            "label": "📍",
+            "tooltip": "按 ip-api 原地修复 location",
+            "variant": "primary",
+        }
         if env.status == EnvStatus.READY:
             actions = []
             if validation.is_risk:
+                if env.provider == "virtualbrowser" and _is_location_fingerprint_risk(validation):
+                    actions.append(repair_location_action)
                 actions.append(recheck_action)
             else:
                 actions.append({"id": "start", "label": "▶", "tooltip": "运行", "variant": "success"})
@@ -1126,6 +1139,8 @@ class EnvListWidget(QWidget):
         if env.status == EnvStatus.PAUSED:
             actions = []
             if validation.is_risk:
+                if env.provider == "virtualbrowser" and _is_location_fingerprint_risk(validation):
+                    actions.append(repair_location_action)
                 actions.append(recheck_action)
             actions.extend([
                 {"id": "resume", "label": "▶", "tooltip": "启动", "variant": "success"},
@@ -1176,6 +1191,8 @@ class EnvListWidget(QWidget):
             self._stop_env(env_id)
         elif action_id == "resume":
             self._resume_env(env_id)
+        elif action_id == "repair_location":
+            self._repair_fingerprint_location(env_id)
         elif action_id == "recheck_fingerprint":
             self._recheck_fingerprint_validation(env_id)
     
@@ -1386,6 +1403,19 @@ class EnvListWidget(QWidget):
             await self._show_message_async("重新检测", f"环境仍为风险状态。\n{message}", kind="warning")
         else:
             await self._show_message_async("重新检测", "环境指纹风险检测通过。", kind="info")
+        self.load_data(run_gc=False, reload_from_db=True)
+
+    async def _async_repair_fingerprint_location(self, env_id: str) -> None:
+        try:
+            summary = await self._manager.repair_env_fingerprint_location(env_id)
+        except Exception as exc:
+            await self._show_operation_error(str(exc))
+            return
+        if summary.is_risk:
+            message = summary.detail or summary.reason or "修复后仍存在风险。"
+            await self._show_message_async("修复位置", f"location 已更新，但环境仍为风险状态。\n{message}", kind="warning")
+        else:
+            await self._show_message_async("修复位置", "location 已按 ip-api 更新，风险检测通过。", kind="info")
         self.load_data(run_gc=False, reload_from_db=True)
 
     async def _async_env_operation(self, env_id: str, action: str):
@@ -1656,6 +1686,13 @@ class EnvListWidget(QWidget):
             self._async_recheck_fingerprint_validation(env_id),
             message=self._operation_message("recheck_fingerprint", env_id=env_id),
         )
+
+    def _repair_fingerprint_location(self, env_id: str) -> None:
+        """原地修复 VirtualBrowser location 风险。"""
+        self._schedule_operation(
+            self._async_repair_fingerprint_location(env_id),
+            message=self._operation_message("repair_location", env_id=env_id),
+        )
     
     def _edit_env(self, env_id: str):
         """编辑环境（弹出对话框）。"""
@@ -1712,6 +1749,7 @@ class EnvListWidget(QWidget):
             "list_sources": "读取来源",
             "sync_source_proxy": "同步来源代理",
             "sync_source_proxy_scan": "扫描来源代理",
+            "repair_location": "修复 location",
             "recheck_fingerprint": "重新检测指纹风险",
         }.get(action, "处理")
         env_text = f" {env_id}" if env_id else ""
@@ -1730,6 +1768,8 @@ class EnvListWidget(QWidget):
             return "正在同步来源代理到本地环境记录..."
         if action == "recheck_fingerprint":
             return f"正在重新检测环境{env_text}的指纹风险..."
+        if action == "repair_location":
+            return f"正在按 ip-api 原地修复环境{env_text}的 location..."
         return f"正在{action_text}环境{env_text}..."
 
     def _show_loading(self, show: bool, message: str = ""):

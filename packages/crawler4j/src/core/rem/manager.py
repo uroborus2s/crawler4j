@@ -1093,6 +1093,25 @@ class EnvironmentManager:
             )
         return await self.clear_fingerprint_validation_risk(env_id)
 
+    async def repair_env_fingerprint_location(
+        self,
+        env_id: int | str,
+    ) -> FingerprintValidationSummary:
+        """Repair location fingerprint in-place, then recheck risk metadata."""
+        env = await self.get_env(env_id)
+        if not env:
+            raise RuntimeError(f"环境不存在: {env_id}")
+        provider = get_provider(env.provider)
+        if not provider:
+            raise RuntimeError(f"Provider 未注册: {env.provider}")
+
+        repairer = getattr(provider, "repair_fingerprint_location", None)
+        if not callable(repairer):
+            raise RuntimeError(f"{env.provider} 不支持原地修复 location")
+
+        await repairer(env)
+        return await self.recheck_env_fingerprint_validation(env_id)
+
     async def delete_metadata(
         self,
         env_id: int | str,
