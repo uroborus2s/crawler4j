@@ -18,6 +18,7 @@ from src.core.rem.ip_pool import IPEntry
 from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo, ProxyConfig, ProxyMode
 from src.core.rem.proxy_probe import ProxyProbeResult, probe_ip_entry_geo
 from src.core.rem.virtualbrowser_fingerprint import (
+    VIRTUALBROWSER_COMMON_HARDWARE_PROFILES,
     VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
     build_virtualbrowser_geo_fingerprint_overrides,
     materialize_virtualbrowser_fingerprint,
@@ -213,6 +214,44 @@ def _browser_full_parameters_entry(payload: Any, browser_id: int) -> dict[str, A
     return VirtualBrowserClient._find_browser_entry(payload, browser_id)
 
 
+def _mode_value(section: Any) -> Any:
+    if isinstance(section, dict):
+        return section.get("value")
+    return section
+
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_loopback_host(host: str) -> bool:
+    return host.lower() in {"127.0.0.1", "localhost", "::1"}
+
+
+def _url_host(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed = urlsplit(text if "://" in text else f"http://{text}")
+    return str(parsed.hostname or "").strip()
+
+
+def _mode_one_dict(section: Any) -> dict[str, Any] | None:
+    if isinstance(section, dict) and section.get("mode") in (1, "1"):
+        return section
+    return None
+
+
+def _missing_keys(section: Any, keys: tuple[str, ...]) -> list[str]:
+    mapping = _mode_one_dict(section)
+    if mapping is None:
+        return []
+    return [key for key in keys if key not in mapping]
+
+
 def _created_parameter_warnings(
     payload: Any,
     *,
@@ -244,6 +283,52 @@ def _created_parameter_warnings(
     webrtc = entry.get("webrtc")
     if isinstance(webrtc, dict) and webrtc.get("mode") not in (0, "0", None):
         warnings.append(f"webrtc.mode={webrtc.get('mode')!r}，预期替换模式 0")
+
+    ua_value = str(_mode_value(entry.get("ua")) or "")
+    if "WOW64" in ua_value:
+        warnings.append("ua.value 包含 WOW64，预期 Win64; x64")
+
+    location = entry.get("location")
+    if isinstance(location, dict):
+        longitude = str(location.get("longitude") or "").strip()
+        latitude = str(location.get("latitude") or "").strip()
+        if longitude in {"0", "0.0"} and latitude in {"0", "0.0"}:
+            warnings.append("location 为 0,0，占位定位不能作为稳定环境参数")
+
+    cpu = _safe_int(_mode_value(entry.get("cpu")))
+    memory = _safe_int(_mode_value(entry.get("memory")))
+    if cpu is not None and memory is not None:
+        if (cpu, memory) not in VIRTUALBROWSER_COMMON_HARDWARE_PROFILES:
+            warnings.append(f"cpu/memory={cpu}/{memory} 不在常见硬件组合池")
+
+    proxy = entry.get("proxy")
+    if isinstance(proxy, dict):
+        proxy_host = str(proxy.get("host") or "").strip()
+        proxy_url_host = _url_host(str(proxy.get("url") or ""))
+        if (
+            proxy_host
+            and proxy_url_host
+            and not _is_loopback_host(proxy_url_host)
+            and proxy_host != proxy_url_host
+        ):
+            warnings.append(f"proxy.host={proxy_host!r} 与 proxy.url host={proxy_url_host!r} 不一致")
+
+    fonts = _mode_one_dict(entry.get("fonts"))
+    if fonts is not None and not fonts.get("value"):
+        warnings.append("fonts.mode=1 但缺少 value 字体列表")
+    voices = _mode_one_dict(entry.get("speech_voices"))
+    if voices is not None and not voices.get("value"):
+        warnings.append("speech_voices.mode=1 但缺少 value 语音列表")
+
+    for key, required in (
+        ("canvas", ("r", "g", "b", "a")),
+        ("webgl-img", ("r", "g", "b", "a")),
+        ("audio-context", ("channel", "analyer")),
+        ("client-rects", ("width", "height")),
+    ):
+        missing = _missing_keys(entry.get(key), required)
+        if missing:
+            warnings.append(f"{key}.mode=1 但缺少 {','.join(missing)}")
     return warnings
 
 

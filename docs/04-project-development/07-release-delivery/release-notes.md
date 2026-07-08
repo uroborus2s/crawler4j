@@ -7,7 +7,7 @@
 **上游输入：** Git tag | `docs/04-project-development/02-discovery/current-state-analysis.md` | 本地构建结果  
 **下游输出：** 后续正式 release notes | `delivery-package.md`（待需要时补齐）  
 **关联 ID：** `REL-001`, `REL-002`, `BUG-001`, `CR-001`  
-**最后更新：** 2026-07-05
+**最后更新：** 2026-07-08
 
 ## 1. 最新已知正式发布
 
@@ -19,12 +19,12 @@
 
 ## 2. 当前仓库相对正式发布的状态
 
-- 当前工作区根应用版本：`0.4.24`
-- 当前运行时版本：`0.4.24`
+- 当前工作区根应用版本：`0.4.26`
+- 当前运行时版本：`0.4.26`
 - 最近正式发布 tag：`v0.2.0`
 - SDK 当前版本：`0.4.2`
 - Contracts 当前版本：`0.4.2`
-- 当前工作区根应用已切到 `0.4.24` 源码版本线，用于 REM 批量环境清理预览的模块候选 scope 修复；SDK / Contracts 保持 `0.4.2`
+- 当前工作区根应用已切到 `0.4.26` 源码版本线，用于 VirtualBrowser 创建环境指纹自洽与稳定性优化；SDK / Contracts 保持 `0.4.2`
 - `crawler4j-sdk 0.4.2` 与 `crawler4j-contracts 0.4.2` 已在本轮按 `contracts -> sdk` 依赖顺序完成 PyPI 发布
 - SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
 - 当前 0.4.x 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult`，workflow/component 可选实现 `setup(ctx, workflow)` 和 `cleanup(ctx, outcome)`，环境回收由宿主收口
@@ -33,25 +33,25 @@
 
 | 项目 | 结果 |
 |---|---|
-| 版本相关单测（`test_version_service.py`） | 通过（2026-07-05 随 0.4.24 版本提升回归覆盖，`3 passed`） |
-| Root wheel/sdist build | 历史通过（2026-05-26 `uv run build crawler4j` 产出 `crawler4j 0.4.3` wheel/sdist；当前 0.4.24 尚未刷新 root build） |
+| 版本相关单测（`test_version_service.py`） | 通过（2026-07-08 随 0.4.26 版本提升回归覆盖，`3 passed`） |
+| Root wheel/sdist build | 历史通过（2026-05-26 `uv run build crawler4j` 产出 `crawler4j 0.4.3` wheel/sdist；当前 0.4.26 尚未刷新 root build） |
 | SDK wheel/sdist build | 通过（2026-06-15 `uv run build crawler4j-contracts crawler4j-sdk` 产出 `crawler4j-sdk 0.4.2` wheel/sdist） |
 | SDK publish | 通过（2026-06-15 `uv run publish crawler4j-sdk` 上传 0.4.2 到 PyPI） |
 | Contracts wheel/sdist build | 通过（2026-06-15 `uv run build crawler4j-contracts crawler4j-sdk` 产出 `crawler4j-contracts 0.4.2` wheel/sdist） |
 | Contracts publish | 通过（2026-06-15 `uv run publish crawler4j-contracts` 上传 0.4.2 到 PyPI） |
 | Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-06-19 删除远端旧 `Crawler4j-0.4.16.dmg` 后，`uv run package-macos-internal-release` 重新生成 `Crawler4j.app`、`Crawler4j-0.4.16.dmg`、`appcast.xml` 并上传 macOS 更新目录；公网 DMG `HEAD 200`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243`） |
-| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；0.4.17 任务禁用 / REM 固定运行模板安全门聚焦回归 `115 passed`；0.4.18 VirtualBrowser 随机指纹与版本服务聚焦回归 `56 passed`；0.4.20 版本服务与 `browser.drag` 自检回归 `24 passed`；0.4.21 版本服务、VirtualBrowser 指纹与风险环境调度聚焦回归 `85 passed`；0.4.22 版本服务、VirtualBrowser 指纹与运行模板 UI 聚焦回归 `44 passed`；0.4.23 版本服务回归 `3 passed`；当前 0.4.24 版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，`ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
+| Full test / lint / smoke | 历史全量通过（2026-05-18 `992 passed`）；0.4.17 任务禁用 / REM 固定运行模板安全门聚焦回归 `115 passed`；0.4.18 VirtualBrowser 随机指纹与版本服务聚焦回归 `56 passed`；0.4.20 版本服务与 `browser.drag` 自检回归 `24 passed`；0.4.21 版本服务、VirtualBrowser 指纹与风险环境调度聚焦回归 `85 passed`；0.4.22 版本服务、VirtualBrowser 指纹与运行模板 UI 聚焦回归 `44 passed`；0.4.23 版本服务回归 `3 passed`；0.4.24 版本服务与 REM cleanup scope 回归 `51 passed`；当前 0.4.26 版本服务、VirtualBrowser 创建环境指纹和运行模板 UI 聚焦回归 `83 passed`，`ruff check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
 | Docs markdown tree | 历史通过（`docs-stratego source validate --repo-path .`）；本轮未重跑 |
 
 ## 4. 当前不建议直接发布的原因
 
-- `0.4.24` 对应的 Git tag、正式 GitHub release 与交付批次将在本轮合并后完成
+- `0.4.26` 对应的 Git tag、正式 GitHub release 与交付批次将在本轮合并后完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 复验 `0.4.24` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.4.26` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -97,3 +97,4 @@
 | 2026-06-29 | 仅将根应用 / 运行时版本提升到 `0.4.22`，用于发布 VirtualBrowser 随机指纹语言参数去重；SDK / Contracts 继续保持 `0.4.2`，0.4.22 客户端包仍需后续补齐 | Codex |
 | 2026-06-30 | 仅将根应用 / 运行时版本提升到 `0.4.23`，用于本轮 GitHub release 收口；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-07-05 | 仅将根应用 / 运行时版本提升到 `0.4.24`，用于 REM 批量环境清理预览的模块候选 scope 修复；SDK / Contracts 继续保持 `0.4.2` | Codex |
+| 2026-07-08 | 仅将根应用 / 运行时版本提升到 `0.4.26`，用于 VirtualBrowser 创建环境指纹自洽与稳定性优化；SDK / Contracts 继续保持 `0.4.2` | Codex |

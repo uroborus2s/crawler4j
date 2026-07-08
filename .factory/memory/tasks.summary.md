@@ -54,6 +54,8 @@
   状态：DONE | 负责人：Codex | 预估：1.0 人/天 | 关联：`TASK-033`, `CR-016`, `REQ-010`, `API-019`, `TC-060`
 - `TASK-034-hosted-ui-batch-import-tests-docs` TASK-034 完成批量导入测试、开发者说明和记忆收口
   状态：DONE | 负责人：Codex | 预估：1.5 人/天 | 关联：`TASK-034`, `CR-016`, `REQ-010`, `NFR-010`, `API-019`, `TC-060`
+- `TASK-035-virtualbrowser-env-creation-fingerprint-analysis` TASK-035 分析并优化 VirtualBrowser 创建环境指纹逻辑
+  状态：READY_FOR_REVIEW | 负责人：Codex | 预估：2.0 人/天 | 关联：`TASK-035`, `CR-017`, `REQ-011`, `NFR-011`, `TC-068` | 验证：目标回归 44 passed，运行模板 UI 回归 36 passed，ruff check 与 diff check 通过
 - `TASK-0400-design-decorator-object-assembly-runtime` TASK-0400 形成 0.4.0 装饰器对象装配运行时方案
   状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0400`, `API-012`
 - `TASK-0401-design-versioned-user-developer-guides` TASK-0401 形成 docs-stratego 使用者/开发者指南版本分流方案

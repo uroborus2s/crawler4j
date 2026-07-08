@@ -15,11 +15,7 @@ class _DummyResponse:
         self._success = success
         self.status_code = status_code
         self._error_message = error_message
-        self.text = (
-            '{"success":true}'
-            if success
-            else f'{{"success":false,"error":"{error_message}"}}'
-        )
+        self.text = '{"success":true}' if success else f'{{"success":false,"error":"{error_message}"}}'
 
     @property
     def is_success(self):
@@ -282,7 +278,7 @@ async def test_add_browser_materializes_randomize_fingerprint_template(monkeypat
         "materialize_virtualbrowser_fingerprint",
         lambda fingerprint, *, default_chrome_version: (
             144,
-            {},
+            {"canvas": {"mode": 1, "r": 1, "g": 2, "b": 3, "a": 4}},
         ),
     )
 
@@ -312,6 +308,7 @@ async def test_add_browser_materializes_randomize_fingerprint_template(monkeypat
                     "pass": "",
                     "API": "",
                 },
+                "canvas": {"mode": 1, "r": 1, "g": 2, "b": 3, "a": 4},
             },
         )
     ]
