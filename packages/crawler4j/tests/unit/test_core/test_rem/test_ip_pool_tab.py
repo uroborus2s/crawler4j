@@ -17,6 +17,8 @@ def _build_pool() -> IPPool:
             safety_score=95,
             last_used_at=1_746_000_000,
             status=IPEntryStatus.AVAILABLE,
+            manual_latitude=39.9072,
+            manual_longitude=116.357,
         )
     ]
     return pool
@@ -41,6 +43,8 @@ def test_ip_pool_tab_pool_row_click_populates_entry_table(qtbot, monkeypatch):
     assert pool_row["name"] == "主池"
     assert widget.entry_title.text() == "IP 条目 - 主池"
     assert entry_row["address"] == "1.1.1.1"
+    assert entry_row["manual_latitude"] == "39.9072"
+    assert entry_row["manual_longitude"] == "116.357"
     assert entry_row["status"]["text"] == "可用"
     assert entry_row["last_used_at"]["text"] == datetime.fromtimestamp(1_746_000_000).strftime("%Y-%m-%d %H:%M")
     assert [action["id"] for action in entry_row["actions"]] == [

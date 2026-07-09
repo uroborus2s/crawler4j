@@ -227,6 +227,56 @@ def test_mark_entry_used_refreshes_last_used_without_changing_bound_count(monkey
     }
 
 
+@pytest.mark.asyncio
+async def test_persist_entry_round_trips_manual_location(monkeypatch, tmp_path):
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    init_database()
+
+    manager = IPPoolManager()
+    pool = IPPool(id="pool-1", name="主池", strategy=IPStrategy.LEAST_BOUND)
+    manager.add_pool(pool)
+
+    entry = IPEntry(
+        id="entry-1",
+        pool_id=pool.id,
+        address="1.1.1.1",
+        protocol="http",
+        port=8080,
+        manual_latitude=39.9072,
+        manual_longitude=116.357,
+    )
+    pool.add_entry(entry)
+    manager._persist_entry(entry)
+
+    reloaded = IPPoolManager()
+    await reloaded.startup()
+
+    loaded_pool = reloaded.get_pool(pool.id)
+    assert loaded_pool is not None
+    loaded_entry = loaded_pool.get_entry(entry.id)
+    assert loaded_entry is not None
+    assert loaded_entry.manual_latitude == 39.9072
+    assert loaded_entry.manual_longitude == 116.357
+
+
+def test_ip_entry_randomizes_manual_geo_within_one_kilometer(monkeypatch):
+    import math
+
+    entry = IPEntry(
+        manual_latitude=39.9072,
+        manual_longitude=116.357,
+    )
+    values = iter([250_000, 250_000])
+    monkeypatch.setattr("src.core.rem.ip_pool.secrets.randbelow", lambda _upper: next(values))
+
+    geo = entry.random_manual_geo()
+
+    assert geo is not None
+    delta_lat_m = (geo["latitude"] - 39.9072) * 111_320
+    delta_lon_m = (geo["longitude"] - 116.357) * 111_320 * math.cos(math.radians(39.9072))
+    assert 0 < math.hypot(delta_lat_m, delta_lon_m) <= 1000
+
+
 def test_init_database_migrates_legacy_ip_entries_time_columns(monkeypatch, tmp_path):
     monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
     with get_connection(STATE_DB) as conn:
@@ -318,6 +368,34 @@ async def test_ip_binding_updates_bound_count_without_binding_table(monkeypatch,
             (entry.id,),
         ).fetchone()["bound_count"]
     assert stored_count == 0
+
+
+@pytest.mark.asyncio
+async def test_bind_ip_entry_switches_from_persisted_old_entry(monkeypatch, tmp_path):
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    init_database()
+
+    manager = IPPoolManager()
+    pool = IPPool(id="pool-1", name="主池", strategy=IPStrategy.LEAST_BOUND)
+    manager.add_pool(pool)
+    old = IPEntry(id="entry-old", pool_id=pool.id, address="1.1.1.1", protocol="http", port=8080, bound_count=1)
+    new = IPEntry(id="entry-new", pool_id=pool.id, address="2.2.2.2", protocol="socks5", port=1080)
+    pool.add_entry(old)
+    pool.add_entry(new)
+    manager._persist_entry(old)
+    manager._persist_entry(new)
+
+    bound = await manager.bind_ip_entry(101, new.id, old_entry_id=old.id)
+
+    assert bound is new
+    assert old.bound_count == 0
+    assert new.bound_count == 1
+    assert manager.get_bound_ip(101) is new
+    with get_connection(STATE_DB) as conn:
+        rows = {
+            row["id"]: row["bound_count"] for row in conn.execute("SELECT id, bound_count FROM ip_entries").fetchall()
+        }
+    assert rows == {"entry-old": 0, "entry-new": 1}
 
 
 @pytest.mark.asyncio

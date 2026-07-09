@@ -11,6 +11,7 @@ import src.core.rem.provider as provider_module
 from src.core.rem.handle import BrowserHandle
 from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo, ProxyConfig, ProxyMode
 from src.core.rem.provider import (
+    BitBrowserProvider,
     VirtualBrowserProvider,
     get_provider,
     list_providers,
@@ -111,7 +112,77 @@ def test_created_parameter_warnings_allow_local_forward_proxy_url():
 
 
 @pytest.mark.asyncio
-async def test_virtualbrowser_create_uses_proxy_geo_and_validates_full_parameters(monkeypatch):
+async def test_bitbrowser_update_translates_proxy_config(monkeypatch):
+    provider = BitBrowserProvider()
+    client = SimpleNamespace(update_browser=AsyncMock(return_value=True))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    env = Environment(
+        name="env",
+        kind=EnvKind.BROWSER,
+        provider=provider.name,
+        status=EnvStatus.READY,
+        external_id="bb-1",
+        handle=BrowserHandle(browser_id="bb-1"),
+    )
+    proxy = ProxyConfig(
+        mode=ProxyMode.POOL,
+        static_value="socks5://user:pass@10.0.0.8:1080",
+        current_ip="10.0.0.8",
+        ip_entry_id="ip-1",
+    )
+
+    assert await provider.update(env, {"proxy": proxy.to_dict()}) is True
+
+    client.update_browser.assert_awaited_once()
+    assert client.update_browser.await_args.args[0] == "bb-1"
+    assert client.update_browser.await_args.args[1] == {
+        "proxyMethod": 2,
+        "proxyType": "socks5",
+        "host": "10.0.0.8",
+        "port": 1080,
+        "proxyUserName": "user",
+        "proxyPassword": "pass",
+    }
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_update_translates_proxy_config(monkeypatch):
+    provider = VirtualBrowserProvider()
+    client = SimpleNamespace(update_browser=AsyncMock(return_value=True))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    env = Environment(
+        name="env",
+        kind=EnvKind.BROWSER,
+        provider=provider.name,
+        status=EnvStatus.READY,
+        external_id="303",
+        handle=BrowserHandle(browser_id="303"),
+    )
+    proxy = ProxyConfig(
+        mode=ProxyMode.POOL,
+        static_value="socks5://user:pass@10.0.0.8:1080",
+        current_ip="10.0.0.8",
+        ip_entry_id="ip-1",
+    )
+
+    assert await provider.update(env, {"proxy": proxy.to_dict()}) is True
+
+    client.update_browser.assert_awaited_once()
+    assert client.update_browser.await_args.args[0] == 303
+    assert client.update_browser.await_args.args[1]["proxy"] == {
+        "mode": 2,
+        "value": "socks5://user:pass@10.0.0.8:1080",
+        "protocol": "SOCKS5",
+        "host": "10.0.0.8",
+        "port": "1080",
+        "user": "user",
+        "pass": "pass",
+        "API": "",
+    }
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_create_probes_proxy_geo_without_random_fingerprint(monkeypatch):
     provider = VirtualBrowserProvider()
     client = SimpleNamespace(
         add_browser=AsyncMock(return_value=303),
@@ -159,7 +230,6 @@ async def test_virtualbrowser_create_uses_proxy_geo_and_validates_full_parameter
             "creation_params": {
                 "virtualbrowser": {
                     "chrome_version": 145,
-                    "__randomize_fingerprint__": True,
                 },
                 "proxy": {
                     "protocol": "http",
@@ -183,6 +253,39 @@ async def test_virtualbrowser_create_uses_proxy_geo_and_validates_full_parameter
     assert kwargs["geo"]["latitude"] == 35.6895
     assert kwargs["geo"]["longitude"] == 139.6917
     client.get_browser_full_parameters.assert_awaited_once_with(303)
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_create_prefers_manual_geo_over_proxy_probe(monkeypatch):
+    provider = VirtualBrowserProvider()
+    client = SimpleNamespace(
+        add_browser=AsyncMock(return_value=303),
+        get_browser_full_parameters=AsyncMock(return_value={"id": 303}),
+    )
+
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(
+        provider_module,
+        "probe_ip_entry_geo",
+        lambda _entry: (_ for _ in ()).throw(AssertionError("should not probe when manual geo exists")),
+    )
+
+    await provider.create(
+        {
+            "env_name": "env-manual-geo",
+            "geo": {"latitude": 39.9, "longitude": 116.36},
+            "creation_params": {
+                "proxy": {
+                    "protocol": "http",
+                    "host": "10.0.0.8",
+                    "port": 8080,
+                },
+            },
+        }
+    )
+
+    _, kwargs = client.add_browser.await_args
+    assert kwargs["geo"] == {"latitude": 39.9, "longitude": 116.36}
 
 
 @pytest.mark.asyncio

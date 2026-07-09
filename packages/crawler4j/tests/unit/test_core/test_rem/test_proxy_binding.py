@@ -2,7 +2,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src.core.persistence.database import STATE_DB, get_connection, init_database
 from src.core.rem.ip_pool import IPEntry
+from src.core.rem.ip_pool import IPPool
+from src.core.rem.ip_pool import IPPoolManager
 from src.core.rem.manager import EnvironmentManager
 from src.core.rem.models import Environment, EnvKind, EnvStatus, ProxyConfig, ProxyMode
 from src.core.rem.provider import BaseProvider, register_provider
@@ -60,6 +63,7 @@ class MockProvider(BaseProvider):
         pass
         
     async def update(self, env: Environment, config: dict) -> bool:
+        self.last_update = config
         return True
 
 @pytest.fixture
@@ -124,3 +128,76 @@ async def test_create_env_with_pool_proxy(mock_pool, mock_ip_manager):
         assert env.proxy_config.current_ip == "1.2.3.4"
         assert env.proxy_config.static_value == expected_url
         assert env.proxy_config.ip_entry_id == "ip_1"
+
+
+@pytest.mark.asyncio
+async def test_update_env_with_selected_pool_ip_updates_provider_and_binding(monkeypatch, tmp_path):
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    init_database()
+
+    provider = MockProvider()
+    register_provider(provider)
+
+    ip_manager = IPPoolManager()
+    pool = IPPool(id="pool-1", name="主池")
+    ip_manager.add_pool(pool)
+    old = IPEntry(
+        id="ip-old",
+        pool_id=pool.id,
+        address="1.1.1.1",
+        protocol="http",
+        port=8080,
+        bound_count=1,
+    )
+    new = IPEntry(
+        id="ip-new",
+        pool_id=pool.id,
+        address="2.2.2.2",
+        protocol="socks5",
+        port=1080,
+        username="user",
+        password="pass",
+    )
+    pool.add_entry(old)
+    pool.add_entry(new)
+    ip_manager._persist_entry(old)
+    ip_manager._persist_entry(new)
+
+    env = Environment(
+        id=7,
+        name="env",
+        kind=EnvKind.BROWSER,
+        provider=provider.name,
+        status=EnvStatus.READY,
+        external_id="remote-7",
+        proxy_config=ProxyConfig(
+            mode=ProxyMode.POOL,
+            pool_id=pool.id,
+            current_ip=old.address,
+            ip_entry_id=old.id,
+            static_value=old.to_proxy_string(),
+        ),
+    )
+    manager = EnvironmentManager()
+    manager.pool = mock_pool = AsyncMock()
+    mock_pool.get = AsyncMock(return_value=env)
+    mock_pool.add = AsyncMock()
+
+    monkeypatch.setattr("src.core.rem.manager.get_ip_pool_manager", lambda: ip_manager)
+
+    assert await manager.update_env(env.id, proxy_entry_id=new.id) is True
+
+    expected_proxy = "socks5://user:pass@2.2.2.2:1080"
+    assert provider.last_update["proxy"]["static_value"] == expected_proxy
+    assert env.proxy_config.current_ip == "2.2.2.2"
+    assert env.proxy_config.static_value == expected_proxy
+    assert env.proxy_config.ip_entry_id == new.id
+    assert old.bound_count == 0
+    assert new.bound_count == 1
+    mock_pool.add.assert_awaited_once_with(env)
+    with get_connection(STATE_DB) as conn:
+        counts = {
+            row["id"]: row["bound_count"]
+            for row in conn.execute("SELECT id, bound_count FROM ip_entries").fetchall()
+        }
+    assert counts == {"ip-old": 0, "ip-new": 1}

@@ -74,10 +74,10 @@ _MODULE_DB_VIEW_REQUIRED_COLUMNS = {
 
 def get_db_path(db_name: str) -> Path:
     """获取数据库文件路径。
-    
+
     Args:
         db_name: 数据库文件名（config.db/state.db/data.db）。
-    
+
     Returns:
         数据库文件绝对路径。
     """
@@ -89,22 +89,22 @@ def get_db_path(db_name: str) -> Path:
 @contextmanager
 def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, None, None]:
     """获取数据库连接的上下文管理器。
-    
+
     使用线程本地存储复用连接，确保事务正确提交或回滚。
-    
+
     Args:
         db_name: 数据库文件名。
-    
+
     Yields:
         sqlite3.Connection 对象。
-    
+
     Example:
         >>> with get_connection(CONFIG_DB) as conn:
         ...     cursor = conn.execute("SELECT * FROM config_entries")
         ...     rows = cursor.fetchall()
     """
     db_path = get_db_path(db_name)
-    
+
     # 获取或创建线程本地连接
     conn_key = f"conn_{db_name}"
     conn_path_key = f"{conn_key}_path"
@@ -117,7 +117,7 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
         except Exception:
             pass
         conn = None
-    
+
     if conn is None:
         conn = sqlite3.connect(str(db_path), timeout=DB_BUSY_TIMEOUT_SECONDS, check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -126,7 +126,7 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
         conn.execute("PRAGMA foreign_keys=ON")
         setattr(_thread_local, conn_key, conn)
         setattr(_thread_local, conn_path_key, str(db_path))
-    
+
     try:
         yield conn
         conn.commit()
@@ -137,7 +137,7 @@ def get_connection(db_name: str = CONFIG_DB) -> Generator[sqlite3.Connection, No
 
 def init_database() -> None:
     """初始化所有数据库表结构。
-    
+
     在应用启动时调用，创建所需的表。
     """
     _init_config_db()
@@ -252,11 +252,7 @@ def _module_datasets_matches_current_schema(table_info_rows: list[sqlite3.Row]) 
     if existing_columns != _MODULE_DATASET_REQUIRED_COLUMNS:
         return False
 
-    primary_key = {
-        row["name"]: row["pk"]
-        for row in table_info_rows
-        if row["pk"]
-    }
+    primary_key = {row["name"]: row["pk"] for row in table_info_rows if row["pk"]}
     return primary_key == _MODULE_DATASET_PRIMARY_KEY
 
 
@@ -300,8 +296,7 @@ def _ensure_module_db_views_table(conn: sqlite3.Connection) -> None:
     existing_columns = {row["name"] for row in table_info_rows}
     if existing_columns != _MODULE_DB_VIEW_REQUIRED_COLUMNS:
         raise RuntimeError(
-            "Only crawler4j 0.4.0 module_db_views schema is supported: "
-            f"existing_columns={sorted(existing_columns)}"
+            f"Only crawler4j 0.4.0 module_db_views schema is supported: existing_columns={sorted(existing_columns)}"
         )
 
     row = conn.execute(
@@ -338,11 +333,7 @@ def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
         _create_module_datasets_indexes(conn)
         return
 
-    primary_key = {
-        row["name"]: row["pk"]
-        for row in table_info_rows
-        if row["pk"]
-    }
+    primary_key = {row["name"]: row["pk"] for row in table_info_rows if row["pk"]}
     raise RuntimeError(
         "Only crawler4j 0.4.0 module_datasets schema is supported: "
         f"columns={sorted(existing_columns)}, primary_key={primary_key}"
@@ -350,10 +341,7 @@ def _ensure_module_datasets_table(conn: sqlite3.Connection) -> None:
 
 
 def _ensure_ip_entries_columns(conn: sqlite3.Connection) -> None:
-    existing_columns = {
-        row["name"]
-        for row in conn.execute("PRAGMA table_info(ip_entries)").fetchall()
-    }
+    existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(ip_entries)").fetchall()}
     if "updated_at" not in existing_columns:
         conn.execute("ALTER TABLE ip_entries ADD COLUMN updated_at INTEGER")
         conn.execute(
@@ -366,6 +354,10 @@ def _ensure_ip_entries_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE ip_entries ADD COLUMN last_used_at INTEGER")
     if "status" not in existing_columns:
         conn.execute("ALTER TABLE ip_entries ADD COLUMN status TEXT NOT NULL DEFAULT 'available'")
+    if "manual_latitude" not in existing_columns:
+        conn.execute("ALTER TABLE ip_entries ADD COLUMN manual_latitude REAL")
+    if "manual_longitude" not in existing_columns:
+        conn.execute("ALTER TABLE ip_entries ADD COLUMN manual_longitude REAL")
     conn.execute(
         """
         UPDATE ip_entries
@@ -444,9 +436,7 @@ def _infer_legacy_setting_type(value_json: str) -> str:
 
 
 def _migrate_legacy_settings_to_config_entries(conn: sqlite3.Connection) -> None:
-    legacy_table = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
-    ).fetchone()
+    legacy_table = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'").fetchone()
     if legacy_table is None:
         return
     rows = conn.execute("SELECT key, value, updated_at FROM settings").fetchall()
@@ -549,7 +539,9 @@ def _init_state_db() -> None:
                 created_at INTEGER DEFAULT (strftime('%s', 'now')),
                 updated_at INTEGER DEFAULT (strftime('%s', 'now')),
                 last_used_at INTEGER,
-                status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'disabled'))
+                status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'disabled')),
+                manual_latitude REAL,
+                manual_longitude REAL
             );
             
             CREATE INDEX IF NOT EXISTS idx_ip_pool ON ip_entries(pool_id);
@@ -573,10 +565,7 @@ def _init_state_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_meta_ns_key ON env_metadata(namespace, key);
         """)
         _ensure_ip_entries_columns(conn)
-        existing_columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(environments)").fetchall()
-        }
+        existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(environments)").fetchall()}
         obsolete_env_columns = {
             "provider_env_id",
             "provider_env_name",

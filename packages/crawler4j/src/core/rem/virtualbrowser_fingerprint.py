@@ -97,8 +97,7 @@ VIRTUALBROWSER_UA_TEMPLATES = {
         "(KHTML, like Gecko) Chrome/{version}.0.0.0 Safari/537.36"
     ),
     "Linux": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/{version}.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version}.0.0.0 Safari/537.36"
     ),
 }
 VIRTUALBROWSER_OS_BY_SYSTEM = {
@@ -387,4 +386,6 @@ def materialize_virtualbrowser_fingerprint(
         defaults.update(payload)
         return chrome_version, defaults
 
+    if geo:
+        payload.update(build_virtualbrowser_geo_fingerprint_overrides(geo))
     return chrome_version, payload

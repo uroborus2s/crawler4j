@@ -42,23 +42,24 @@ class ProxyProbeDialogPayload:
 
 class IPPoolWorkerThread(QThread):
     """IP 池操作工作线程。"""
-    
+
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
-    
+
     def __init__(self, action: str, **kwargs):
         super().__init__()
         self._action = action
         self._kwargs = kwargs
-    
+
     def run(self):
         import asyncio
+
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
             manager = get_ip_pool_manager()
-            
+
             if self._action == "load":
                 # 应用启动时已调用 manager.startup()，无需重复调用
                 pools = manager.list_pools()
@@ -102,7 +103,7 @@ class IPPoolWorkerThread(QThread):
                 self.finished.emit(success)
             else:
                 self.error.emit(f"未知操作: {self._action}")
-                
+
             loop.close()
         except Exception as e:
             logger.error(f"[IPPoolUI] 操作失败: {e}")
@@ -111,7 +112,7 @@ class IPPoolWorkerThread(QThread):
 
 class IPPoolTab(QWidget):
     """IP 池管理主页面。"""
-    
+
     POOL_TABLE_SCHEMA = {
         "columns": [
             {"key": "name", "label": "名称", "type": "text", "width": 220, "sortable": True},
@@ -134,6 +135,8 @@ class IPPoolTab(QWidget):
             {"key": "address", "label": "IP地址", "type": "text", "width": 180},
             {"key": "port", "label": "端口", "type": "number", "width": 120, "align": "right"},
             {"key": "bound_count", "label": "绑定数", "type": "number", "width": 100, "align": "right"},
+            {"key": "manual_latitude", "label": "纬度", "type": "text", "width": 120},
+            {"key": "manual_longitude", "label": "经度", "type": "text", "width": 120},
             {"key": "status", "label": "状态", "type": "text", "width": 110, "sortable": True},
             {"key": "last_used_at", "label": "最近使用", "type": "text", "width": 180, "sortable": True},
             {"key": "safety_score", "label": "安全度", "type": "number", "width": 100, "align": "right"},
@@ -149,7 +152,7 @@ class IPPoolTab(QWidget):
             "pagination": {"enabled": True, "page_size": 10, "page_size_options": [10, 20, 50]},
         },
     }
-    
+
     STRATEGY_NAMES = {
         IPStrategy.LEAST_RECENTLY_USED: "最久未使用",
         IPStrategy.LEAST_BOUND: "最少绑定",
@@ -162,7 +165,7 @@ class IPPoolTab(QWidget):
         IPEntryStatus.AVAILABLE: "可用",
         IPEntryStatus.DISABLED: "不可用",
     }
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_pool: IPPool | None = None
@@ -173,11 +176,11 @@ class IPPoolTab(QWidget):
         self._progress_dialog: ProgressDialog | None = None
         self._setup_ui()
         self.load_data()
-    
+
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
-        
+
         # 应用深色主题样式（按钮和 Splitter）
         self.setStyleSheet("""
             QLabel {
@@ -189,72 +192,72 @@ class IPPoolTab(QWidget):
                 height: 2px;
             }
         """)
-        
+
         # 使用 Splitter 分割上下区域
         splitter = QSplitter(Qt.Orientation.Vertical)
-        
+
         # ===== 上半部分：IP 池列表 =====
         pool_widget = QWidget()
         pool_layout = QVBoxLayout(pool_widget)
         pool_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # 池列表工具栏
         pool_toolbar = QHBoxLayout()
         pool_toolbar.addWidget(QLabel("IP 池列表"))
         pool_toolbar.addStretch()
-        
+
         add_pool_btn = StyledButton("+ 新建池", variant="success", min_height=36)
         add_pool_btn.clicked.connect(self._add_pool)
         pool_toolbar.addWidget(add_pool_btn)
-        
+
         refresh_btn = StyledButton("刷新", variant="primary", min_height=36)
         refresh_btn.clicked.connect(self.load_data)
         pool_toolbar.addWidget(refresh_btn)
-        
+
         pool_layout.addLayout(pool_toolbar)
-        
+
         # 池列表表格
         self.pool_table = SkyDataTable(schema=self.POOL_TABLE_SCHEMA)
         self.pool_table.query_requested.connect(self._on_pool_query_requested)
         self.pool_table.row_clicked.connect(self._on_pool_selected)
         self.pool_table.row_action_requested.connect(self._on_pool_action_requested)
         pool_layout.addWidget(self.pool_table)
-        
+
         splitter.addWidget(pool_widget)
-        
+
         # ===== 下半部分：IP 条目列表 =====
         entry_widget = QWidget()
         entry_layout = QVBoxLayout(entry_widget)
         entry_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # 条目列表工具栏
         entry_toolbar = QHBoxLayout()
         self.entry_title = QLabel("选中池的 IP 条目")
         entry_toolbar.addWidget(self.entry_title)
         entry_toolbar.addStretch()
-        
+
         self.add_ip_btn = StyledButton("+ 添加 IP", variant="success", min_height=36)
         self.add_ip_btn.clicked.connect(self._add_ip)
         self.add_ip_btn.setEnabled(False)
         entry_toolbar.addWidget(self.add_ip_btn)
-        
+
         self.batch_import_btn = StyledButton("批量导入", variant="warning", min_height=36)
         self.batch_import_btn.clicked.connect(self._batch_import)
         self.batch_import_btn.setEnabled(False)
         entry_toolbar.addWidget(self.batch_import_btn)
-        
+
         entry_layout.addLayout(entry_toolbar)
-        
+
         # 条目列表表格
         self.entry_table = SkyDataTable(schema=self.ENTRY_TABLE_SCHEMA)
         self.entry_table.query_requested.connect(self._on_entry_query_requested)
         self.entry_table.row_action_requested.connect(self._on_entry_action_requested)
         entry_layout.addWidget(self.entry_table)
-        
+
         splitter.addWidget(entry_widget)
-        
+
         layout.addWidget(splitter)
-    
+
     def load_data(self) -> None:
         """加载 IP 池数据。"""
         self.pool_table.set_loading(True)
@@ -262,7 +265,7 @@ class IPPoolTab(QWidget):
         self._worker.finished.connect(self._on_pools_loaded)
         self._worker.error.connect(self._on_error)
         self._worker.start()
-    
+
     def _on_pools_loaded(self, pools: list[IPPool]) -> None:
         """池列表加载完成。"""
         self._pools = pools
@@ -323,6 +326,8 @@ class IPPoolTab(QWidget):
             "address": entry.address,
             "port": {"text": str(entry.port), "sort_value": int(entry.port)},
             "bound_count": {"text": str(entry.bound_count), "sort_value": int(entry.bound_count)},
+            "manual_latitude": _format_optional_coord(entry.manual_latitude),
+            "manual_longitude": _format_optional_coord(entry.manual_longitude),
             "status": {"text": status_text, "sort_value": status.value},
             "last_used_at": {"text": last_used_text, "sort_value": last_used_sort_value},
             "safety_score": {"text": str(entry.safety_score), "sort_value": float(entry.safety_score)},
@@ -394,7 +399,7 @@ class IPPoolTab(QWidget):
             self._edit_entry(entry_id)
         elif action_id == "delete_entry":
             self._delete_entry(entry_id)
-    
+
     def _add_pool(self) -> None:
         """添加 IP 池。"""
         dialog = AddPoolDialog(self)
@@ -404,7 +409,7 @@ class IPPoolTab(QWidget):
             self._worker.finished.connect(lambda _: self.load_data())
             self._worker.error.connect(self._on_error)
             self._worker.start()
-    
+
     def _delete_pool(self, pool_id: str) -> None:
         """删除 IP 池。"""
         confirmed = ConfirmDialog.confirm(
@@ -419,12 +424,12 @@ class IPPoolTab(QWidget):
             self._worker.finished.connect(lambda _: self.load_data())
             self._worker.error.connect(self._on_error)
             self._worker.start()
-    
+
     def _add_ip(self) -> None:
         """添加单个 IP。"""
         if not self._current_pool:
             return
-        
+
         dialog = AddIPDialog(self._current_pool.id, self)
         if dialog.exec():
             entry = dialog.get_values()
@@ -432,12 +437,12 @@ class IPPoolTab(QWidget):
             self._worker.finished.connect(lambda _: self._refresh_current_pool())
             self._worker.error.connect(self._on_error)
             self._worker.start()
-    
+
     def _batch_import(self) -> None:
         """批量导入 IP。"""
         if not self._current_pool:
             return
-        
+
         dialog = BatchImportDialog(self._current_pool.id, self)
         if dialog.exec():
             entries = dialog.get_values()
@@ -446,12 +451,12 @@ class IPPoolTab(QWidget):
                 self._worker.finished.connect(lambda count: self._on_batch_import_done(count))
                 self._worker.error.connect(self._on_error)
                 self._worker.start()
-    
+
     def _on_batch_import_done(self, count: int) -> None:
         """批量导入完成。"""
         MessageDialog.information(self, "导入完成", f"成功导入 {count} 条 IP")
         self._refresh_current_pool()
-    
+
     def _refresh_current_pool(self) -> None:
         """刷新当前池的条目。"""
         if self._current_pool:
@@ -459,7 +464,7 @@ class IPPoolTab(QWidget):
             pool = manager.get_pool(self._current_pool.id)
             if pool:
                 self._apply_current_pool(pool)
-    
+
     def _on_error(self, error: str) -> None:
         """错误处理。"""
         self._close_progress_dialog()
@@ -530,18 +535,18 @@ class IPPoolTab(QWidget):
             MessageDialog.warning(self, "错误", "未找到该 IP 条目")
             return
         self._refresh_current_pool()
-    
+
     def _edit_entry(self, entry_id: str) -> None:
         """编辑 IP 条目。"""
         if not self._current_pool:
             return
-        
+
         # 查找 entry
         entry = self._current_pool.get_entry(entry_id)
         if not entry:
             MessageDialog.warning(self, "错误", "未找到该 IP 条目")
             return
-        
+
         # 弹出编辑对话框（复用添加对话框）
         dialog = AddIPDialog(self._current_pool.id, self)
         dialog.setWindowTitle("编辑 IP")
@@ -553,7 +558,11 @@ class IPPoolTab(QWidget):
             dialog.username_input.setText(entry.username)
         if entry.password:
             dialog.password_input.setText(entry.password)
-        
+        if entry.manual_latitude is not None:
+            dialog.latitude_input.setText(_format_optional_coord(entry.manual_latitude))
+        if entry.manual_longitude is not None:
+            dialog.longitude_input.setText(_format_optional_coord(entry.manual_longitude))
+
         if dialog.exec():
             # 更新 entry
             new_entry = dialog.get_values()
@@ -563,17 +572,19 @@ class IPPoolTab(QWidget):
             entry.username = new_entry.username
             entry.password = new_entry.password
             entry.expires_at = new_entry.expires_at
-            
+            entry.manual_latitude = new_entry.manual_latitude
+            entry.manual_longitude = new_entry.manual_longitude
+
             # 持久化
             manager = get_ip_pool_manager()
             manager._persist_entry(entry)
             self._refresh_current_pool()
-    
+
     def _delete_entry(self, entry_id: str) -> None:
         """删除 IP 条目。"""
         if not self._current_pool:
             return
-        
+
         confirmed = ConfirmDialog.confirm(
             self,
             "确认删除",
@@ -584,10 +595,17 @@ class IPPoolTab(QWidget):
         if confirmed:
             # 从池中移除
             self._current_pool.remove_entry(entry_id)
-            
+
             # 从数据库删除
             from src.core.persistence.database import STATE_DB, get_connection
+
             with get_connection(STATE_DB) as conn:
                 conn.execute("DELETE FROM ip_entries WHERE id = ?", (entry_id,))
-            
+
             self._refresh_current_pool()
+
+
+def _format_optional_coord(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{float(value):.6f}".rstrip("0").rstrip(".")
