@@ -321,6 +321,35 @@ async def test_ip_binding_updates_bound_count_without_binding_table(monkeypatch,
 
 
 @pytest.mark.asyncio
+async def test_bind_ip_entry_switches_from_persisted_old_entry(monkeypatch, tmp_path):
+    monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
+    init_database()
+
+    manager = IPPoolManager()
+    pool = IPPool(id="pool-1", name="主池", strategy=IPStrategy.LEAST_BOUND)
+    manager.add_pool(pool)
+    old = IPEntry(id="entry-old", pool_id=pool.id, address="1.1.1.1", protocol="http", port=8080, bound_count=1)
+    new = IPEntry(id="entry-new", pool_id=pool.id, address="2.2.2.2", protocol="socks5", port=1080)
+    pool.add_entry(old)
+    pool.add_entry(new)
+    manager._persist_entry(old)
+    manager._persist_entry(new)
+
+    bound = await manager.bind_ip_entry(101, new.id, old_entry_id=old.id)
+
+    assert bound is new
+    assert old.bound_count == 0
+    assert new.bound_count == 1
+    assert manager.get_bound_ip(101) is new
+    with get_connection(STATE_DB) as conn:
+        rows = {
+            row["id"]: row["bound_count"]
+            for row in conn.execute("SELECT id, bound_count FROM ip_entries").fetchall()
+        }
+    assert rows == {"entry-old": 0, "entry-new": 1}
+
+
+@pytest.mark.asyncio
 async def test_bind_ip_keeps_existing_binding_when_no_available_candidate(monkeypatch, tmp_path):
     monkeypatch.setattr("src.utils.paths.get_app_data_dir", lambda: tmp_path)
     init_database()

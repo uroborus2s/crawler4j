@@ -185,6 +185,61 @@ def _ip_entry_from_proxy_config(proxy_config: ProxyConfig | None) -> IPEntry | N
     )
 
 
+def _proxy_config_from_update_data(proxy: Any) -> ProxyConfig | None:
+    if not isinstance(proxy, dict):
+        return None
+    try:
+        return ProxyConfig.from_dict(proxy)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bitbrowser_proxy_update_payload(proxy: Any) -> dict[str, Any]:
+    entry = _ip_entry_from_proxy_config(_proxy_config_from_update_data(proxy))
+    if entry is None:
+        return {
+            "proxyMethod": 2,
+            "proxyType": "noproxy",
+            "host": "",
+            "port": 0,
+            "proxyUserName": "",
+            "proxyPassword": "",
+        }
+    return {
+        "proxyMethod": 2,
+        "proxyType": entry.protocol,
+        "host": entry.address,
+        "port": entry.port,
+        "proxyUserName": entry.username or "",
+        "proxyPassword": entry.password or "",
+    }
+
+
+def _virtualbrowser_proxy_update_payload(proxy: Any) -> dict[str, Any]:
+    entry = _ip_entry_from_proxy_config(_proxy_config_from_update_data(proxy))
+    if entry is None:
+        return {
+            "mode": 1,
+            "value": "",
+            "protocol": "",
+            "host": "",
+            "port": "",
+            "user": "",
+            "pass": "",
+            "API": "",
+        }
+    return {
+        "mode": 2,
+        "value": entry.to_proxy_string(),
+        "protocol": entry.protocol.upper(),
+        "host": entry.address,
+        "port": str(entry.port),
+        "user": entry.username or "",
+        "pass": entry.password or "",
+        "API": "",
+    }
+
+
 def _ip_entry_from_virtualbrowser_proxy(proxy: Any) -> IPEntry | None:
     if not isinstance(proxy, dict):
         return None
@@ -1347,6 +1402,8 @@ class BitBrowserProvider(BaseProvider):
             
             # 处理刷新指纹的特殊情况
             api_config = dict(config)
+            if "proxy" in api_config:
+                api_config.update(_bitbrowser_proxy_update_payload(api_config.pop("proxy")))
             if api_config.pop("randomize_fingerprint", False):
                 api_config["refreshFingerprint"] = True
             
@@ -2455,6 +2512,8 @@ class VirtualBrowserProvider(BaseProvider):
             
             # 处理刷新指纹的特殊情况
             api_config = dict(config)
+            if "proxy" in api_config:
+                api_config["proxy"] = _virtualbrowser_proxy_update_payload(api_config["proxy"])
             should_randomize = api_config.pop("randomize_fingerprint", False)
             
             # 如果有其他配置项，先更新

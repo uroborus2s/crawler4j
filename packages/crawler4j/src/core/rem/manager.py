@@ -1139,6 +1139,7 @@ class EnvironmentManager:
         name: str | None = None,
         proxy_value: str | None = None,
         proxy_pool_id: str | None = None,
+        proxy_entry_id: str | None = None,
         randomize_fingerprint: bool = False,
     ) -> bool:
         """统一更新环境配置。
@@ -1148,6 +1149,7 @@ class EnvironmentManager:
             name: 新名称（可选）
             proxy_value: 静态代理地址（可选）
             proxy_pool_id: 从 IP 池绑定（可选）
+            proxy_entry_id: 绑定指定 IP 条目（可选）
             randomize_fingerprint: 是否刷新指纹
         
         Returns:
@@ -1163,6 +1165,7 @@ class EnvironmentManager:
             name=name,
             proxy_value=proxy_value,
             proxy_pool_id=proxy_pool_id,
+            proxy_entry_id=proxy_entry_id,
             randomize_fingerprint=randomize_fingerprint,
         )
     
@@ -1173,6 +1176,7 @@ class EnvironmentManager:
         name: str | None = None,
         proxy_value: str | None = None,
         proxy_pool_id: str | None = None,
+        proxy_entry_id: str | None = None,
         randomize_fingerprint: bool = False,
     ) -> bool:
         """统一更新编排。
@@ -1198,6 +1202,32 @@ class EnvironmentManager:
             env.proxy_config.current_ip = proxy_value.split("@")[-1] if "@" in proxy_value else proxy_value
             updated = True
             logger.info(f"[REM] 代理已更新: id={env.id} value={proxy_value[:20]}...")
+
+        if proxy_entry_id:
+            pool_manager = get_ip_pool_manager()
+            ip = pool_manager.get_entry(proxy_entry_id)
+            if ip is None or not ip.is_available() or ip.is_expired():
+                logger.warning(f"[REM] 更新代理失败: IP 不可用 id={proxy_entry_id}")
+                return False
+
+            next_proxy = self._copy_proxy_config(env.proxy_config) if env.proxy_config else ProxyConfig(mode=ProxyMode.POOL)
+            next_proxy.mode = ProxyMode.POOL
+            next_proxy.pool_id = ip.pool_id
+            next_proxy.current_ip = ip.address
+            next_proxy.ip_entry_id = ip.id
+            next_proxy.static_value = ip.to_proxy_string()
+
+            if provider and not await provider.update(env, {"proxy": next_proxy.to_dict()}):
+                logger.warning(f"[REM] 更新外部代理失败: id={env.id} ip={ip.address}")
+                return False
+
+            old_entry_id = env.proxy_config.ip_entry_id if env.proxy_config else None
+            if await pool_manager.bind_ip_entry(env.id, ip.id, old_entry_id=old_entry_id):
+                env.proxy_config = next_proxy
+                updated = True
+                logger.info(f"[REM] 代理 IP 已更新: id={env.id} ip={ip.address}")
+            else:
+                return False
         
         # 3. 从 IP 池绑定
         if proxy_pool_id:
@@ -1397,6 +1427,7 @@ class EnvironmentManager:
             env.proxy_config.bind_strategy = bind_strategy
             env.proxy_config.current_ip = ip.address
             env.proxy_config.ip_entry_id = ip.id
+            env.proxy_config.static_value = ip.to_proxy_string()
             logger.info(f"[REM] IP 已绑定: id={env.id} ip={ip.address}")
             return True
         

@@ -9,6 +9,7 @@ import asyncio
 
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -34,12 +35,14 @@ class EditEnvWorker(QThread):
         action: str,
         proxy_value: str | None = None,
         proxy_pool_id: str | None = None,
+        proxy_entry_id: str | None = None,
     ):
         super().__init__()
         self._env_id = env_id
         self._action = action
         self._proxy_value = proxy_value
         self._proxy_pool_id = proxy_pool_id
+        self._proxy_entry_id = proxy_entry_id
 
     def _build_update_request(self) -> tuple[dict[str, object], str, str]:
         if self._action == "update_proxy":
@@ -51,6 +54,11 @@ class EditEnvWorker(QThread):
             if not self._proxy_pool_id:
                 raise ValueError("当前环境未绑定 IP 池，无法刷新代理")
             return {"proxy_pool_id": self._proxy_pool_id}, "IP 已刷新", "刷新失败（无可用 IP 池）"
+
+        if self._action == "update_proxy_entry":
+            if not self._proxy_entry_id:
+                raise ValueError("请选择要绑定的 IP")
+            return {"proxy_entry_id": self._proxy_entry_id}, "IP 已更新", "更新失败"
 
         if self._action == "refresh_fingerprint":
             return {"randomize_fingerprint": True}, "指纹已刷新", "刷新失败"
@@ -133,6 +141,10 @@ class EditEnvDialog(QDialog):
         
         self.proxy_current_label = QLabel()
         proxy_form.addRow("当前 IP:", self.proxy_current_label)
+
+        self.proxy_entry_combo = QComboBox()
+        self.proxy_entry_combo.setEnabled(False)
+        proxy_form.addRow("选择 IP:", self.proxy_entry_combo)
         
         # 代理输入 + 刷新按钮
         proxy_row = QHBoxLayout()
@@ -211,6 +223,7 @@ class EditEnvDialog(QDialog):
             elif proxy.mode == ProxyMode.POOL:
                 self.proxy_input.setEnabled(False)
                 self.proxy_input.setPlaceholderText("由 IP 池自动分配")
+                self._load_pool_entries(proxy.pool_id, proxy.ip_entry_id)
             else:
                 self.proxy_input.setEnabled(False)
                 self.refresh_ip_btn.setEnabled(False)
@@ -219,6 +232,23 @@ class EditEnvDialog(QDialog):
             self.proxy_current_label.setText("-")
             self.proxy_input.setEnabled(False)
             self.refresh_ip_btn.setEnabled(False)
+
+    def _load_pool_entries(self, pool_id: str | None, current_entry_id: str | None):
+        """加载当前 IP 池条目。"""
+        from src.core.rem.ip_pool import get_ip_pool_manager
+
+        self.proxy_entry_combo.clear()
+        pool = get_ip_pool_manager().get_pool(str(pool_id or ""))
+        if pool is None:
+            return
+        for entry in pool.entries:
+            if not entry.is_available() or entry.is_expired():
+                continue
+            self.proxy_entry_combo.addItem(f"{entry.address}:{entry.port} ({entry.protocol})", entry.id)
+        index = self.proxy_entry_combo.findData(current_entry_id)
+        if index >= 0:
+            self.proxy_entry_combo.setCurrentIndex(index)
+        self.proxy_entry_combo.setEnabled(self.proxy_entry_combo.count() > 0)
     
     def _save(self):
         """保存代理配置。"""
@@ -228,6 +258,12 @@ class EditEnvDialog(QDialog):
             new_value = self.proxy_input.text().strip()
             if new_value and new_value != proxy.static_value:
                 self._run_action("update_proxy", proxy_value=new_value)
+                return
+
+        if proxy and proxy.mode == ProxyMode.POOL:
+            entry_id = str(self.proxy_entry_combo.currentData() or "")
+            if entry_id and entry_id != (proxy.ip_entry_id or ""):
+                self._run_action("update_proxy_entry", proxy_entry_id=entry_id)
                 return
         
         self.accept()
@@ -247,6 +283,7 @@ class EditEnvDialog(QDialog):
         action: str,
         proxy_value: str | None = None,
         proxy_pool_id: str | None = None,
+        proxy_entry_id: str | None = None,
     ):
         """执行异步操作。"""
         self._set_buttons_enabled(False)
@@ -256,6 +293,7 @@ class EditEnvDialog(QDialog):
             action,
             proxy_value=proxy_value,
             proxy_pool_id=proxy_pool_id,
+            proxy_entry_id=proxy_entry_id,
         )
         self._worker.finished.connect(self._on_action_finished)
         self._worker.start()

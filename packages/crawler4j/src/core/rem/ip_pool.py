@@ -303,6 +303,54 @@ class IPPoolManager:
     def list_pools(self) -> list[IPPool]:
         """列出所有 IP 池。"""
         return list(self._pools.values())
+
+    def get_entry(self, entry_id: str) -> IPEntry | None:
+        """按条目 ID 获取 IP。"""
+        normalized_entry_id = str(entry_id or "").strip()
+        if not normalized_entry_id:
+            return None
+        for pool in self._pools.values():
+            entry = pool.get_entry(normalized_entry_id)
+            if entry is not None:
+                return entry
+        return None
+
+    async def bind_ip_entry(
+        self,
+        env_id: int,
+        entry_id: str,
+        *,
+        old_entry_id: str | None = None,
+    ) -> IPEntry | None:
+        """为环境绑定指定 IP 条目。"""
+        try:
+            eid = int(env_id)
+        except (ValueError, TypeError):
+            return None
+
+        entry = self.get_entry(entry_id)
+        if entry is None or not entry.is_available() or entry.is_expired():
+            logger.warning(f"[IPPool] 指定 IP 不可用: entry={entry_id}")
+            return None
+
+        current_id = self._env_bindings.get(eid) or str(old_entry_id or "").strip()
+        if current_id == entry.id:
+            self._env_bindings[eid] = entry.id
+            return entry
+
+        old_entry = self.get_entry(current_id)
+        if old_entry is not None:
+            old_entry.bound_count = max(0, old_entry.bound_count - 1)
+            self._persist_entry(old_entry)
+
+        now = int(time.time())
+        entry.bound_count += 1
+        entry.last_used_at = now
+        entry.updated_at = now
+        self._env_bindings[eid] = entry.id
+        self._persist_entry(entry)
+        logger.info(f"[IPPool] 绑定指定 IP 成功: env={env_id} ip={entry.address} (new_count={entry.bound_count})")
+        return entry
     
     async def bind_ip(
         self,
