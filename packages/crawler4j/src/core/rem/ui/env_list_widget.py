@@ -906,9 +906,9 @@ class EnvListWidget(QWidget):
             {"key": "kind", "label": "类型", "type": "text", "width": 100},
             {"key": "provider", "label": "节点类型", "type": "text", "width": 110},
             {"key": "bound_ip", "label": "绑定 IP", "type": "text", "width": 180, "sortable": True, "searchable": True},
-            {"key": "fingerprint_validation", "label": "风险", "type": "text", "width": 180, "searchable": True},
+            {"key": "fingerprint_validation", "label": "风险", "type": "text", "width": 100, "searchable": True},
             {"key": "status", "label": "状态", "type": "text", "width": 90},
-            {"key": "task", "label": "任务", "type": "text", "width": 160},
+            {"key": "task", "label": "任务", "type": "text", "width": 90},
             {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
         ],
         "features": {

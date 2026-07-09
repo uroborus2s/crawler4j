@@ -138,6 +138,15 @@ def _patch_cleanup_service(monkeypatch, service: _FakeCleanupService) -> None:
     monkeypatch.setattr(cleanup_module, "get_env_cleanup_service", lambda: service)
 
 
+def test_env_list_table_keeps_risk_and_task_columns_compact():
+    from src.core.rem.ui.env_list_widget import EnvListWidget
+
+    columns = {column["key"]: column for column in EnvListWidget.TABLE_SCHEMA["columns"]}
+
+    assert columns["fingerprint_validation"]["width"] == 100
+    assert columns["task"]["width"] == 90
+
+
 def test_create_env_dialog_prefills_suggested_name_without_submitting_override(qtbot, monkeypatch):
     env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
 
