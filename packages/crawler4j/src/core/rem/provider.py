@@ -19,7 +19,6 @@ from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo
 from src.core.rem.proxy_probe import ProxyProbeResult, probe_ip_entry_geo
 from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_COMMON_HARDWARE_PROFILES,
-    VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
     build_virtualbrowser_geo_fingerprint_overrides,
     materialize_virtualbrowser_fingerprint,
 )
@@ -244,10 +243,6 @@ def _ip_entry_from_virtualbrowser_proxy(proxy: Any) -> IPEntry | None:
     if not isinstance(proxy, dict):
         return None
     return _ip_entry_from_proxy_config(_source_proxy_config_from_payload(proxy))
-
-
-def _is_random_virtualbrowser_fingerprint(fingerprint: Any) -> bool:
-    return isinstance(fingerprint, dict) and bool(fingerprint.get(VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY))
 
 
 def _geo_from_proxy_probe_result(result: ProxyProbeResult) -> dict[str, Any] | None:
@@ -2008,8 +2003,7 @@ class VirtualBrowserProvider(BaseProvider):
         proxy: Any,
         fingerprint: Any,
     ) -> dict[str, Any] | None:
-        if not _is_random_virtualbrowser_fingerprint(fingerprint):
-            return None
+        del fingerprint
         entry = _ip_entry_from_virtualbrowser_proxy(proxy)
         if entry is None:
             return None
