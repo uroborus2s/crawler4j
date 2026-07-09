@@ -227,24 +227,29 @@ class EditEnvDialog(QDialog):
             else:
                 self.proxy_input.setEnabled(False)
                 self.refresh_ip_btn.setEnabled(False)
+                self._load_pool_entries(None, proxy.ip_entry_id)
         else:
             self.proxy_mode_label.setText("无")
             self.proxy_current_label.setText("-")
             self.proxy_input.setEnabled(False)
             self.refresh_ip_btn.setEnabled(False)
+            self._load_pool_entries(None, None)
 
     def _load_pool_entries(self, pool_id: str | None, current_entry_id: str | None):
         """加载当前 IP 池条目。"""
         from src.core.rem.ip_pool import get_ip_pool_manager
 
         self.proxy_entry_combo.clear()
-        pool = get_ip_pool_manager().get_pool(str(pool_id or ""))
-        if pool is None:
-            return
-        for entry in pool.entries:
-            if not entry.is_available() or entry.is_expired():
-                continue
-            self.proxy_entry_combo.addItem(f"{entry.address}:{entry.port} ({entry.protocol})", entry.id)
+        manager = get_ip_pool_manager()
+        if pool_id:
+            pools = [pool] if (pool := manager.get_pool(str(pool_id))) is not None else []
+        else:
+            pools = manager.list_pools()
+        for pool in pools:
+            for entry in pool.entries:
+                if not entry.is_available() or entry.is_expired():
+                    continue
+                self.proxy_entry_combo.addItem(f"{entry.address}:{entry.port} ({entry.protocol})", entry.id)
         index = self.proxy_entry_combo.findData(current_entry_id)
         if index >= 0:
             self.proxy_entry_combo.setCurrentIndex(index)
@@ -260,9 +265,10 @@ class EditEnvDialog(QDialog):
                 self._run_action("update_proxy", proxy_value=new_value)
                 return
 
-        if proxy and proxy.mode == ProxyMode.POOL:
+        if self.proxy_entry_combo.isEnabled():
             entry_id = str(self.proxy_entry_combo.currentData() or "")
-            if entry_id and entry_id != (proxy.ip_entry_id or ""):
+            current_entry_id = str(proxy.ip_entry_id or "") if proxy else ""
+            if entry_id and entry_id != current_entry_id:
                 self._run_action("update_proxy_entry", proxy_entry_id=entry_id)
                 return
         
