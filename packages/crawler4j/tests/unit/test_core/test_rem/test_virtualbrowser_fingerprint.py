@@ -190,6 +190,26 @@ def test_materialize_virtualbrowser_fingerprint_uses_proxy_geo(monkeypatch):
     assert 1600 <= payload["location"]["precision"] <= 5600
 
 
+def test_materialize_virtualbrowser_fingerprint_applies_geo_without_randomize():
+    _, payload = materialize_virtualbrowser_fingerprint(
+        {"fonts": {"mode": 1}},
+        default_chrome_version=145,
+        geo={
+            "latitude": 39.9072,
+            "longitude": 116.357,
+        },
+    )
+
+    assert payload["fonts"] == {"mode": 1}
+    assert payload["location"] | {"precision": 0} == {
+        "mode": 2,
+        "enable": 1,
+        "longitude": "116.357",
+        "latitude": "39.9072",
+        "precision": 0,
+    }
+
+
 def test_materialize_virtualbrowser_fingerprint_ignores_legacy_post_create_marker():
     chrome_version, payload = materialize_virtualbrowser_fingerprint(
         {

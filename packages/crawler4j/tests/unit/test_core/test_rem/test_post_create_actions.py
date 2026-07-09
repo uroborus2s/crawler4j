@@ -4,7 +4,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.rem.manager import EnvironmentManager, RECOVERY_PROVIDER_RUNTIME_TIMEOUT
-from src.core.rem.models import Environment, EnvKind, EnvRequirement, EnvStatus, EnvUnavailableError
+from src.core.rem.models import (
+    Environment,
+    EnvKind,
+    EnvRequirement,
+    EnvStatus,
+    EnvUnavailableError,
+    ProxyConfig,
+    ProxyMode,
+)
 from src.core.rem.provider import BaseProvider, register_provider
 from src.core.system.external_app_service import AppLaunchResult, ExternalApp
 
@@ -12,7 +20,7 @@ from src.core.system.external_app_service import AppLaunchResult, ExternalApp
 class MockProvider(BaseProvider):
     name = "mock_provider"
     kind = EnvKind.BROWSER
-    
+
     def __init__(self):
         self.create_called = False
         self.open_called = False
@@ -22,16 +30,16 @@ class MockProvider(BaseProvider):
 
     async def is_running(self, env: Environment) -> bool:
         return True
-        
+
     async def is_window_open(self, env: Environment) -> bool:
         return False
-        
+
     async def get_window_title(self, env: Environment) -> str | None:
         return "Mock Window"
 
     async def exists(self, env: Environment) -> bool:
         return True
-        
+
     async def create(self, config: dict | None = None) -> Environment:
         self.create_called = True
         self.last_config = config or {}
@@ -41,9 +49,9 @@ class MockProvider(BaseProvider):
             kind=self.kind,
             provider=self.name,
             status=EnvStatus.READY,
-            external_id="mock_ext_id"
+            external_id="mock_ext_id",
         )
-        
+
     async def open(self, env: Environment) -> bool:
         self.open_called = True
         return True
@@ -61,13 +69,13 @@ class MockProvider(BaseProvider):
 
     async def reset(self, env: Environment) -> bool:
         return True
-    
+
     async def health_check(self, env: Environment) -> bool:
         return True
-        
+
     async def destroy(self, env: Environment) -> None:
         pass
-        
+
     async def update(self, env: Environment, config: dict) -> bool:
         return True
 
@@ -94,23 +102,25 @@ def mock_pool():
     pool.remove = AsyncMock()
     return pool
 
+
 @pytest.fixture
 def manager(mock_pool):
     with patch("src.core.rem.ip_pool.get_ip_pool_manager") as mock_get_pool:
         mock_ip_manager = AsyncMock()
         mock_get_pool.return_value = mock_ip_manager
-        
+
         mgr = EnvironmentManager()
         mgr.pool = mock_pool
         return mgr
+
 
 @pytest.mark.asyncio
 async def test_create_env_keeps_connected_environment_running(manager):
     provider = MockProvider()
     register_provider(provider)
-    
+
     env = await manager._create_env(provider=provider)
-    
+
     assert env.status == EnvStatus.RUNNING
     assert provider.create_called
     assert provider.open_called
@@ -139,6 +149,37 @@ async def test_create_env_does_not_mutate_input_config(manager):
     assert provider.last_config["env_name"] == "custom-env"
     assert provider.last_config["labels"] == ["demo"]
     assert "env_id" not in config
+
+
+@pytest.mark.asyncio
+async def test_create_env_passes_manual_ip_geo_to_provider(manager, monkeypatch):
+    from src.core.rem.ip_pool import IPEntry
+
+    provider = MockProvider()
+    register_provider(provider)
+    entry = IPEntry(
+        id="ip-1",
+        pool_id="pool-1",
+        address="10.0.0.8",
+        protocol="http",
+        port=8080,
+        manual_latitude=39.9072,
+        manual_longitude=116.357,
+    )
+    monkeypatch.setattr(entry, "random_manual_geo", lambda: {"latitude": 39.9, "longitude": 116.36})
+
+    class FakeIPManager:
+        async def bind_ip(self, *_args):
+            return entry
+
+    monkeypatch.setattr("src.core.rem.ip_pool.get_ip_pool_manager", lambda: FakeIPManager())
+
+    await manager._create_env(
+        provider=provider,
+        proxy_config=ProxyConfig(mode=ProxyMode.POOL, pool_id="pool-1"),
+    )
+
+    assert provider.last_config["geo"] == {"latitude": 39.9, "longitude": 116.36}
 
 
 def test_release_signature_removes_dirty_placeholder_argument():
@@ -181,6 +222,7 @@ async def test_startup_can_skip_crash_recovery(mock_pool):
     manager.pool.load_from_db.assert_awaited_once()
     mock_ip_manager.startup.assert_awaited_once()
     manager._recover_crashed.assert_not_awaited()
+
 
 @pytest.mark.asyncio
 async def test_create_env_connect_failure_closes_env_and_raises(manager):
@@ -225,7 +267,6 @@ async def test_stop_env_closes_running_environment_and_returns_ready(manager, mo
     assert success is True
     assert provider.close_called
     mock_pool.update_status.assert_awaited_with(env.id, EnvStatus.READY)
-
 
 
 @pytest.mark.asyncio
