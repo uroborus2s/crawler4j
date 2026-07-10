@@ -22,10 +22,10 @@
 - 当前工作区根应用版本：`0.4.29`（本轮不升级、不发布客户端）
 - 当前运行时版本：`0.4.29`
 - 最近正式发布 tag：`v0.2.0`
-- SDK 发布候选：`0.4.4`
-- Contracts 发布候选：`0.4.3`
+- SDK 当前已发布版本：`0.4.4`
+- Contracts 当前已发布版本：`0.4.3`
 - 本轮只发布 Contracts / SDK：Contracts 增加 Hosted UI DataTable 多选和批量更新 schema，SDK 增加批量 handler 固定签名与具体类型校验；根应用保持现有 `0.4.29`
-- 发布顺序固定为 `crawler4j-contracts 0.4.3 -> crawler4j-sdk 0.4.4`，构建与 PyPI 结果在完成后回写
+- 已按 `crawler4j-contracts 0.4.3 -> crawler4j-sdk 0.4.4` 顺序完成 PyPI 发布，并核对在线文件哈希与隔离安装结果
 - SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
 - 当前 0.4.x 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult`，workflow/component 可选实现 `setup(ctx, workflow)` 和 `cleanup(ctx, outcome)`，环境回收由宿主收口
 
@@ -34,24 +34,24 @@
 | 项目 | 结果 |
 |---|---|
 | 版本相关单测（`test_version_service.py`） | 通过（2026-07-08 随 0.4.26 版本提升回归覆盖，`3 passed`） |
-| Root wheel/sdist build | 历史通过（2026-05-26 `uv run build crawler4j` 产出 `crawler4j 0.4.3` wheel/sdist；当前 0.4.26 尚未刷新 root build） |
+| Root wheel/sdist build | 历史通过（2026-05-26 `uv run build crawler4j` 产出 `crawler4j 0.4.3` wheel/sdist；当前 0.4.29 尚未刷新 root build） |
 | SDK wheel/sdist build | 通过（2026-07-10 产出 `crawler4j-sdk 0.4.4` wheel/sdist，元数据依赖 Contracts `>=0.4.3,<0.5.0`） |
-| SDK publish | 待执行（publish dry-run 已通过；必须等待 Contracts 0.4.3 在线可见） |
+| SDK publish | 通过（2026-07-10 在 Contracts 在线可见后上传 0.4.4；PyPI wheel/sdist 哈希和隔离安装通过） |
 | Contracts wheel/sdist build | 通过（2026-07-10 产出 `crawler4j-contracts 0.4.3` wheel/sdist） |
-| Contracts publish | 待执行（publish dry-run 已通过；本批次先发布） |
+| Contracts publish | 通过（2026-07-10 先上传 0.4.3；PyPI wheel/sdist 哈希与本地一致） |
 | Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-06-19 删除远端旧 `Crawler4j-0.4.16.dmg` 后，`uv run package-macos-internal-release` 重新生成 `Crawler4j.app`、`Crawler4j-0.4.16.dmg`、`appcast.xml` 并上传 macOS 更新目录；公网 DMG `HEAD 200`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243`） |
 | Full test / lint / smoke | 本批次全量 unit `1134 passed`；目标 Ruff、`uv lock --check`、project JSON 与 `git diff --check` 通过；客户端 smoke 不属于本批次 |
 | Docs markdown tree | 通过（`docs-stratego source validate --repo-path .`，`pages=86 contracts=0`） |
 
 ## 4. 当前不建议直接发布的原因
 
-- `0.4.26` 对应的 Git tag、正式 GitHub release 与交付批次将在本轮合并后完成
+- `0.4.29` 对应的 Git tag、正式 GitHub release 与交付批次仍待后续完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 复验 `0.4.26` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.4.29` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -60,7 +60,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-07-10 | 建立 Contracts 0.4.3 / SDK 0.4.4 发布候选，用于对外提供 Hosted UI DataTable 当前页多选批量编辑 schema 与 scanner 校验；根应用 / 客户端保持现有 0.4.29 | Codex |
+| 2026-07-10 | 发布 Contracts 0.4.3 / SDK 0.4.4，用于对外提供 Hosted UI DataTable 当前页多选批量编辑 schema 与 scanner 校验；两包均完成 PyPI 哈希和隔离安装验证，根应用 / 客户端保持现有 0.4.29 | Codex |
 | 2026-03-26 | 建立基线 release notes | Codex |
 | 2026-03-26 | 按统一版本规则区分当前工作区版本与最近正式发布 | Codex |
 | 2026-04-17 | 将根应用 / SDK / Contracts 当前源码版本与 README、release 文档统一收敛到 `0.2.0` 发布基线，并明确最近正式 tag 仍为 `v0.1.1` | Codex |

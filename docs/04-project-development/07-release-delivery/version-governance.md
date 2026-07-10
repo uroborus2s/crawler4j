@@ -29,8 +29,8 @@
 | 根应用包版本 | `0.4.29` | 当前仓库源码事实；本轮不升级、不发布客户端 |
 | 根应用运行时版本 | `0.4.29` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
-| SDK | `0.4.4` | 发布候选；包含 Hosted UI DataTable 批量 handler 静态校验，依赖 `crawler4j-contracts>=0.4.3,<0.5.0` |
-| Contracts | `0.4.3` | 发布候选；包含 Hosted UI DataTable 多选与批量更新 schema |
+| SDK | `0.4.4` | 已发布到 PyPI；包含 Hosted UI DataTable 批量 handler 静态校验，依赖 `crawler4j-contracts>=0.4.3,<0.5.0` |
+| Contracts | `0.4.3` | 已发布到 PyPI；包含 Hosted UI DataTable 多选与批量更新 schema |
 | docs-stratego 主文档版本 | 待正式发布前确认 | 当前源码文档入口已把 0.4.x 作为当前主线、0.3.x 作为历史维护；发布站点切换仍需随正式发布动作确认 |
 
 ## 3. 为什么这样定义
@@ -48,14 +48,14 @@
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.4.26` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.4.29` Git tag 与正式 release 资产
 7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-07-10 | 将 Contracts 提升到 `0.4.3`、SDK 提升到 `0.4.4`，用于发布 Hosted UI DataTable 当前页多选批量编辑契约与 scanner 校验；根应用保持现有 `0.4.29`，客户端不在本轮升级或发布 | Codex |
+| 2026-07-10 | 将 Contracts 提升并发布到 `0.4.3`、SDK 提升并发布到 `0.4.4`，用于提供 Hosted UI DataTable 当前页多选批量编辑契约与 scanner 校验；根应用保持现有 `0.4.29`，客户端未在本轮升级或发布 | Codex |
 | 2026-07-08 | 仅将根应用 / 运行时版本提升到 `0.4.26`，用于承接 VirtualBrowser 创建期随机指纹自洽与稳定性优化；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-07-05 | 仅将根应用 / 运行时版本提升到 `0.4.24`，用于承接 REM 批量环境清理预览的模块候选 scope 修复；SDK / Contracts 继续保持 `0.4.2` | Codex |
 | 2026-03-26 | 建立根应用 / 运行时 / tag / SDK / Contracts 的统一版本治理规则 | Codex |

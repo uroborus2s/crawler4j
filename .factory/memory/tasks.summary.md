@@ -57,7 +57,9 @@
 - `TASK-035-virtualbrowser-env-creation-fingerprint-analysis` TASK-035 分析并优化 VirtualBrowser 创建环境指纹逻辑
   状态：READY_FOR_REVIEW | 负责人：Codex | 预估：2.0 人/天 | 关联：`TASK-035`, `CR-017`, `REQ-011`, `NFR-011`, `TC-068` | 验证：目标回归 44 passed，运行模板 UI 回归 36 passed，ruff check 与 diff check 通过
 - `TASK-036-managed-dataset-bulk-field-update` TASK-036 实现 Hosted UI managed_dataset 批量字段修改
-  状态：HUMAN_APPROVED / READY_FOR_COMMIT | 负责人：Codex + subagents | 预估：2.5 人/天 | 关联：`TASK-036`, `CR-018`, `REQ-012`, `NFR-012`, `API-021`, `TC-069` | task 1 / 2 独立评审通过（82 passed / 38 passed；100/98）；整体 review 99/100 approved；目标集 120 passed，Ruff/diff/JSON/docs 结构通过；全量 unit 1132 passed、2 个范围外版本 README 漂移失败；用户已确认进入提交与 Contracts / SDK 发布流程
+  状态：CORE_PACKAGES_RELEASED | 负责人：Codex + subagents | 预估：2.5 人/天 | 关联：`TASK-036`, `CR-018`, `REQ-012`, `NFR-012`, `API-021`, `TC-069` | 通用实现整体 review 99/100 approved；Contracts 0.4.3 / SDK 0.4.4 已发布；业务模块接线与 E2E 另行完成
+- `TASK-037-release-contracts-0.4.3-sdk-0.4.4` TASK-037 发布 Contracts 0.4.3 与 SDK 0.4.4
+  状态：DONE | 负责人：Codex | 关联：`TASK-037`, `CR-018`, `TASK-036`, `TC-070` | 全量 unit 1134 passed，wheel/sdist、dry-run、正式发布、PyPI 哈希与隔离安装验证全部通过
 - `TASK-0400-design-decorator-object-assembly-runtime` TASK-0400 形成 0.4.0 装饰器对象装配运行时方案
   状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0400`, `API-012`
 - `TASK-0401-design-versioned-user-developer-guides` TASK-0401 形成 docs-stratego 使用者/开发者指南版本分流方案

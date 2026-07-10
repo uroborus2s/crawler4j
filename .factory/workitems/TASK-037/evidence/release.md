@@ -1,7 +1,7 @@
 # TASK-037 Contracts 0.4.3 / SDK 0.4.4 发布证据
 
 - 日期：2026-07-10（Asia/Shanghai）
-- 状态：READY_TO_PUBLISH
+- 状态：DONE
 - 范围：仅 `crawler4j-contracts` 与 `crawler4j-sdk`；客户端保持现有 `0.4.29`
 
 ## PyPI 发布前检查
@@ -31,7 +31,15 @@
 - wheel 元数据确认 Contracts `Version: 0.4.3`；SDK `Version: 0.4.4` 且 `Requires-Dist: crawler4j-contracts<0.5.0,>=0.4.3`。
 - Contracts / SDK `uv publish --dry-run` 均成功检查 wheel 与 sdist。
 
-## 待补证据
+## 发布与在线验证
 
-- 按 Contracts -> SDK 顺序执行正式 `uv publish`。
-- 每个包发布后通过 PyPI JSON API 验证版本和文件列表。
+1. `uv run publish crawler4j-contracts`：exit code `0`，先上传 Contracts wheel/sdist。
+2. PyPI `crawler4j-contracts/0.4.3/json`：HTTP 200，`urls` 数量为 2；wheel/sdist SHA256 与本地构建完全一致。
+3. `uv run publish crawler4j-sdk`：exit code `0`，在 Contracts 在线可见后上传 SDK wheel/sdist。
+4. PyPI `crawler4j-sdk/0.4.4/json`：HTTP 200，`urls` 数量为 2；wheel/sdist SHA256 与本地构建完全一致，在线 `requires_dist` 包含 `crawler4j-contracts<0.5.0,>=0.4.3`。
+5. PyPI 隔离实装：`uv run --isolated --no-project --with crawler4j-sdk==0.4.4 ...`，成功安装 13 个包并输出 `sdk=0.4.4`、`contracts=0.4.3`，两个包均可导入。
+
+PyPI 页面：
+
+- `https://pypi.org/project/crawler4j-contracts/0.4.3/`
+- `https://pypi.org/project/crawler4j-sdk/0.4.4/`

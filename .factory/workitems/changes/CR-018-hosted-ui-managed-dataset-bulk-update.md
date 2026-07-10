@@ -1,6 +1,6 @@
 # CR-018 Hosted UI managed_dataset 批量字段修改
 
-- 状态：HUMAN_APPROVED / READY_FOR_COMMIT（独立整体 review 99/100；保留范围外版本文档漂移 concern）
+- 状态：CORE_PACKAGES_RELEASED（Contracts 0.4.3 / SDK 0.4.4；业务模块接线另行完成）
 - 类型：CR
 - 优先级：P1
 - 估算：2.5 人/天
@@ -41,4 +41,4 @@
 - Task 2 Core / UI 已通过独立 Spec + Quality Review：`38 passed`，Quality `98/100`。
 - Task 3 合并目标集 `120 passed`，目标 Ruff、`git diff --check`、project JSON 与 docs-stratego 结构校验通过。
 - 全量 unit 为 `1132 passed, 2 failed`；失败来自当前 HEAD 的 SDK / 应用版本与 README 漂移，不涉及 `CR-018` 目标文件，且本任务禁止修改版本。完整证据见 `.factory/workitems/CR-018/evidence/verification.md`。
-- 独立整体 review 已 `approved`（99/100），用户已于 2026-07-10 明确确认进入 Contracts / SDK 版本升级和 PyPI 发布流程；当前通用实现可提交，但尚未发布，且未接入具体业务模块 E2E。
+- 独立整体 review 已 `approved`（99/100），通用实现已提交，Contracts 0.4.3 / SDK 0.4.4 已按依赖顺序发布并完成隔离安装验证；具体业务模块接线和真实 UI E2E 仍是独立工作。

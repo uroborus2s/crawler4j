@@ -1,12 +1,12 @@
 # Hosted UI DataTable 当前页批量编辑设计
 
 **项目名称：** 蛛行演略（crawler4j）
-**文档状态：** 评审中
+**文档状态：** 已批准
 **负责人：** 当前仓库维护者
 **主要读者：** 架构 | Core 开发 | SDK 开发 | QA | 模块开发者
 **上游输入：** `REQ-012` | `NFR-012` | `API-006` | `API-008` | 已批准的 `CR-018` / `TASK-036` 任务简报
 **下游输出：** `api-design.md` | `implementation-plan.md` | `test-plan.md` | Contracts / SDK / Core 实现
-**关联 ID：** `REQ-012`, `NFR-012`, `API-021`, `CR-018`, `TASK-036`, `TC-069`
+**关联 ID：** `REQ-012`, `NFR-012`, `API-021`, `CR-018`, `TASK-036`, `TASK-037`, `TC-069`, `TC-070`
 **最后更新：** 2026-07-10
 
 ## 版本信息
@@ -16,7 +16,7 @@
 | 文档编号 | `API-021-DESIGN` |
 | 文档类型 | 技术设计 |
 | 当前版本 | `0.1.0` |
-| 当前状态 | `pending_human_confirmation`（独立整体 review 99/100；保留范围外版本文档 concern） |
+| 当前状态 | `core_packages_released`（Contracts 0.4.3 / SDK 0.4.4 已发布；业务模块接线另行完成） |
 | 最近更新 | 2026-07-10 |
 
 ## 1. 结论
@@ -201,7 +201,7 @@ Core 防御规则：
 - 刷新、搜索、筛选、排序和分页清选择；
 - 未声明新字段的既有 CRUD 回归。
 
-Task 1 Contracts / SDK 已通过独立 Spec + Quality Review，定向结果为 `82 passed`；Task 2 Core / UI 已通过独立 Spec + Quality Review，定向结果为 `38 passed`。Task 3 新鲜合并目标集为 `120 passed`，目标 Ruff、`git diff --check`、`.factory/project.json` JSON 校验与 docs-stratego 结构校验通过。全量 unit 为 `1132 passed, 2 failed`；两个失败均来自当前 HEAD 已存在的版本 / README 文档漂移（SDK `0.4.3` 与 README `0.4.2`、应用 `0.4.29` 与根 README 旧版本），不在 `CR-018` 允许修改范围。独立整体 review 已 `approved`（99/100），当前状态为带该 concern 的 `pending_human_confirmation`，不代表验证全绿、人工确认、发布或业务模块 E2E 完成。
+Task 1 Contracts / SDK 已通过独立 Spec + Quality Review，定向结果为 `82 passed`；Task 2 Core / UI 已通过独立 Spec + Quality Review，定向结果为 `38 passed`。Task 3 合并目标集为 `120 passed`，目标 Ruff、`git diff --check`、`.factory/project.json` JSON 校验与 docs-stratego 结构校验通过。最初全量 unit 的两个版本 / README 漂移失败已在 `TASK-037` 发布一致性收口中修正，最终全量 unit 为 `1134 passed`。独立整体 review 已 `approved`（99/100）并获人工确认；Contracts 0.4.3 / SDK 0.4.4 已发布并通过 PyPI 哈希与隔离安装验证。该结论仍不代表具体业务模块 handler 或 E2E 已完成。
 
 ## 版本历史
 

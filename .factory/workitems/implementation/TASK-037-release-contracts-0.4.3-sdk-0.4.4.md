@@ -1,6 +1,6 @@
 # TASK-037 发布 Contracts 0.4.3 与 SDK 0.4.4
 
-- 状态：READY_TO_PUBLISH
+- 状态：DONE
 - 负责人：Codex
 - 优先级：P0
 - 关联 ID：`TASK-037`, `CR-018`, `TASK-036`, `REQ-012`, `API-021`, `TC-069`
@@ -27,4 +27,5 @@
 
 - 全量 unit `1134 passed`，Ruff、lock、project JSON、docs 与 diff gate 通过。
 - 两个包的 wheel/sdist 已构建，版本和 SDK 依赖元数据符合预期。
-- 两个包的 `uv publish --dry-run` 已通过；下一步提交发布候选并正式发布 Contracts。
+- 两个包的 `uv publish --dry-run` 与正式发布均通过；PyPI wheel/sdist 哈希与本地一致。
+- 隔离环境从 PyPI 安装 SDK 0.4.4，自动解析 Contracts 0.4.3 且两个包均可导入。

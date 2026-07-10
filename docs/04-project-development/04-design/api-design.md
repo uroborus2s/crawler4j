@@ -98,8 +98,8 @@
 | 当前范围 | 只支持当前页；不含跨页选择、批量删除、任意 toolbar 表单或具体业务分组规则 |
 | 设计文档 | `hosted-ui-datatable-bulk-update-design.md` |
 | 验证 | `TC-069`；Task 1 Contracts / SDK `82 passed`，Task 2 Core / UI `38 passed`，两项均通过独立 Spec + Quality Review；Task 3 合并目标集 `120 passed`，Ruff / diff / JSON / docs 结构通过；全量 unit 有 2 个不相关版本文档漂移失败 |
-| 当前状态 | 独立整体 review 已 `approved`（99/100），当前为带全量 unit 基线 concern 的 `pending_human_confirmation`；不等于验证全绿或人工确认。真实业务模块接线、E2E 和发布不在本工作项完成事实内 |
-| 关联项 | `REQ-012`, `NFR-012`, `CR-018`, `TASK-036` |
+| 当前状态 | 通用实现已完成整体 review、人工确认和 Contracts 0.4.3 / SDK 0.4.4 发布；全量 unit `1134 passed`，PyPI 哈希与隔离安装验证通过。真实业务模块接线和 E2E 仍为独立工作 |
+| 关联项 | `REQ-012`, `NFR-012`, `CR-018`, `TASK-036`, `TASK-037`, `TC-070` |
 
 ## `API-009` Module Entity Table View Contract
 

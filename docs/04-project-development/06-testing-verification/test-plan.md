@@ -35,7 +35,7 @@
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | 2026-05-01 headless UI smoke 复验通过，覆盖 Shell 导航/页面数量与 Dashboard 异步刷新 |
 | `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
-| `TC-069` Hosted UI DataTable 当前页多选批量编辑 | 目标集通过；整体 verification partial | Task 1 / 2 独立评审：`82 passed` / `38 passed`；Task 3 合并目标集 `120 passed`，目标 Ruff、diff、JSON 与 docs 结构通过。全量 unit `1132 passed, 2 failed`，失败为当前 HEAD 的 SDK / 应用版本与 README 漂移；真实业务模块接线 / E2E 不属于本用例已通过声明 |
+| `TC-069` Hosted UI DataTable 当前页多选批量编辑 | 通用能力通过并发布 | Task 1 / 2 独立评审：`82 passed` / `38 passed`；合并目标集 `120 passed`。`TASK-037` 收口发布一致性后全量 unit `1134 passed`，Contracts 0.4.3 / SDK 0.4.4 已发布；真实业务模块接线 / E2E 不属于本用例已通过声明 |
 | `TC-068` 根应用 `0.4.26` 版本提升与 VirtualBrowser 创建环境指纹稳定 | 通过 | 2026-07-08 覆盖版本服务读取 `0.4.26`，并组合复验 VirtualBrowser 创建期 OS / UA / 字体 / 语音 / 扰动 / 硬件组合、创建后 warning 和运行模板 UI；版本服务回归 `3 passed`，VirtualBrowser REM 回归 `44 passed`，运行模板 UI 回归 `36 passed`，目标 `ruff check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
 | `TC-067` 根应用 `0.4.24` 版本提升 | 通过 | 2026-07-05 覆盖版本服务读取 `0.4.24`，并组合复验 REM cleanup existing-env scope；版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
 | `TC-066` 根应用 `0.4.23` 版本提升 | 通过 | 2026-06-30 覆盖版本服务读取 `0.4.23`；版本服务回归 `3 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、`git diff --check` 与 `ruff check` 通过 |
@@ -121,7 +121,7 @@
 | `TC-069` | SDK：handler 引用、精确 `(context, primary_keys, payload)` 签名、具体 `list[T]` 与具体 payload 类型；拒绝 TypeVar、Any、Mapping 和裸容器 | `test_v2_scanner_diagnostics.py` |
 | `TC-069` | Core / UI：0/1/多行按钮状态、行内点击行、保序类型敏感去重、缺主键阻断、空值、同步 / 异步成功与失败 | `test_managed_page_renderer.py` |
 | `TC-069` | 选择生命周期：刷新、搜索、筛选、排序、翻页和页大小变化清选择；旧 schema 保持单选 | `test_data_table.py`、renderer 既有 CRUD 回归 |
-| `TC-069` | 整体回归 | 合并目标集 `120 passed`；全量 unit `1132 passed, 2 failed`，两个失败均为版本 / README 漂移；目标 Ruff、`git diff --check`、project JSON 与 docs-stratego 结构校验通过。完整结果见 `.factory/workitems/CR-018/evidence/verification.md` |
+| `TC-069` | 整体回归 | 合并目标集 `120 passed`；发布一致性收口后全量 unit `1134 passed`；目标 Ruff、`git diff --check`、project JSON 与 docs-stratego 结构校验通过。实现证据见 `.factory/workitems/CR-018/evidence/verification.md`，发布证据见 `.factory/workitems/TASK-037/evidence/release.md` |
 
 ## 6. 当前测试缺口
 

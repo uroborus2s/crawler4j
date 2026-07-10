@@ -10,9 +10,9 @@
   "recommended_next_stage": "IMPLEMENTATION",
   "validated_commands": {
     "tests": {
-      "command": "uv run pytest -q -p no:cacheprovider",
+      "command": "uv run pytest packages/crawler4j/tests/unit -q -p no:cacheprovider",
       "result": "passed",
-      "details": "992 passed on 2026-05-18 for the 0.4.2 root version bump"
+      "details": "1134 passed on 2026-07-10 for the Contracts 0.4.3 / SDK 0.4.4 release"
     },
     "docs": {
       "command": "Review docs/ markdown tree",
@@ -30,14 +30,14 @@
       "details": "crawler4j root package version is now 0.4.29; latest recorded root build artifact remains crawler4j 0.4.3 from 2026-05-26 until the 0.4.29 package build is refreshed"
     },
     "sdk_build": {
-      "command": "uv run build crawler4j-sdk",
-      "result": "ready_to_publish",
-      "details": "crawler4j-sdk 0.4.4 wheel/sdist built and publish dry-run passed on 2026-07-10; PyPI publish pending"
+      "command": "uv run publish crawler4j-sdk",
+      "result": "passed",
+      "details": "crawler4j-sdk 0.4.4 wheel/sdist uploaded to PyPI on 2026-07-10 after contracts 0.4.3; JSON API and isolated install verification passed"
     },
     "contracts_build": {
-      "command": "uv run build crawler4j-contracts",
-      "result": "ready_to_publish",
-      "details": "crawler4j-contracts 0.4.3 wheel/sdist built and publish dry-run passed on 2026-07-10; PyPI publish pending"
+      "command": "uv run publish crawler4j-contracts",
+      "result": "passed",
+      "details": "crawler4j-contracts 0.4.3 wheel/sdist uploaded to PyPI on 2026-07-10; JSON API returned both files with matching hashes"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",

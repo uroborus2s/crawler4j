@@ -105,3 +105,9 @@ uvx --from docs-stratego docs-stratego source validate --repo-path .
 - `git diff --check`：exit code `0`。
 - `.factory/project.json`：`python -m json.tool` exit code `0`。
 - 正式文档结构：`docs-stratego source validate` exit code `0`，`pages=86 contracts=0`。
+
+## 发布后补充
+
+- `TASK-037` 已修正当时保留的两个版本 / README 漂移失败，最终全量 unit 为 `1134 passed`。
+- Contracts 0.4.3 / SDK 0.4.4 已按依赖顺序发布，并通过 PyPI 文件哈希与隔离安装验证。
+- 发布证据：`.factory/workitems/TASK-037/evidence/release.md`。

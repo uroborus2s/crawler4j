@@ -33,12 +33,13 @@
 |---|---|---|
 | `ctrip` 真实站点 E2E | 未完成 | 回到实现/验证主线继续推进 |
 | 根应用正式发布收口 | 未完成 | 在下一次正式发布前执行验收检查清单和交付包清单 |
-| `CR-018` / `TASK-036` 整体 Gate | `HUMAN_APPROVED / READY_FOR_COMMIT`，整体 review 99/100 approved，verification 有范围外 concern | 提交已评审变更并进入 Contracts 0.4.3 / SDK 0.4.4 发布流程；业务模块 E2E 另行完成 |
+| `CR-018` / `TASK-036` 整体 Gate | `CORE_PACKAGES_RELEASED`，整体 review 99/100 approved，Contracts 0.4.3 / SDK 0.4.4 已发布 | 业务模块接线与 E2E 另行完成 |
 
 ## 4. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-10 | `TASK-037` 完成 Contracts 0.4.3 / SDK 0.4.4 发布：全量 unit `1134 passed`，两包 wheel/sdist、dry-run、正式 PyPI 上传、JSON API 文件哈希和隔离安装验证通过；客户端保持 0.4.29 未发布 | Codex |
 | 2026-07-10 | 用户明确确认 `CR-018` / `TASK-036` 通用实现进入提交与发布流程，并要求先升级 Contracts 0.4.3、SDK 0.4.4 后发布到 PyPI；具体业务模块接线与真实 UI E2E 仍为独立工作 | Codex |
 | 2026-07-10 | `CR-018` / `TASK-036` 完成 Contracts / SDK 与 Core / UI 两个实现子任务和 Task 3 文档 / evidence / memory 收口：Task 1 独立评审 `82 passed` / `100`，Task 2 独立评审 `38 passed` / `98`；Task 3 合并目标集 `120 passed`，目标 Ruff、diff、JSON 与 docs 结构校验通过。全量 unit 为 `1132 passed, 2 failed`，失败来自当前 HEAD 的 SDK / 应用版本与 README 漂移，未修改范围外版本文档。状态为带 concern 的 `READY_FOR_REVIEW`；不包含具体业务模块接线或真实站点 E2E | Codex |
 | 2026-07-10 | `CR-018` / `TASK-036` 独立整体 review 初审发现 `API-019/API-021` 章节边界错误；修复并通过 docs gate 后复审为 `approved`（99/100），全量 unit 两个范围外版本 README 漂移被接受为 non-blocking concern，当前进入人工确认门 | Codex |

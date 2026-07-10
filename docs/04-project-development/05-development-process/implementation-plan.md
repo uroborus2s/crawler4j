@@ -43,7 +43,8 @@
 | Wave 18 | `TASK-028` | `CR-014`、`API-009`、`module-entity-table-view-design.md`、`CR-012` 已落地的实体表资源模式 | 模块实体表视图与分析查询：`module_db_views`、`db.declare_db_view`、`db.query_view`、只读统计表 | 已完成：V1 已交付 `sql_view + query_view + readonly hosted table`，并补齐卸载提示与定向回归 |
 | Wave 19 | `TASK-029` | `CR-015`、`API-010`、`shared-sky-data-table-design.md`、现有宿主表格/Hosted UI 表格分裂现状 | 共享表格基座重构：唯一正式 `SkyDataTable`、宿主/模块统一查询契约、删除旧 `SkyTableWidget`/旧 schema | 进行中：先重写共享组件并迁移正式表格，再切 Hosted UI 新契约 |
 | Wave 20 | `TASK-030` ~ `TASK-034` | `REQ-010`、`CR-016`、`API-019`、`hosted-ui-batch-import-design.md`、当前 Hosted UI DataTable / `@ui_action` / workflow 调度链 | Hosted UI 批量导入：toolbar 自定义按钮、宿主导入弹窗、import payload 分发、批次结果和逐条状态展示 | 已完成：Contracts / SDK schema、宿主解析弹窗、renderer 分发、workflow runtime 注入、结果展示、`import_data_records` 跳转约定和 `TC-060` 单测已落地 |
-| Wave 21 | `TASK-036` | `REQ-012`、`NFR-012`、`CR-018`、`API-021`、现有 DataTable / CRUD / `@ui_action` 链 | Hosted UI DataTable 当前页多选批量编辑：schema、SDK scanner、Core renderer、共享表格选择生命周期、测试 / 文档 / memory 收口 | `HUMAN_APPROVED / READY_FOR_COMMIT`：整体 review 99/100 approved；目标集 `120 passed`，Ruff / diff / JSON / docs 结构通过；全量 unit `1132 passed, 2 failed` 为范围外版本 README 漂移 concern |
+| Wave 21 | `TASK-036` | `REQ-012`、`NFR-012`、`CR-018`、`API-021`、现有 DataTable / CRUD / `@ui_action` 链 | Hosted UI DataTable 当前页多选批量编辑：schema、SDK scanner、Core renderer、共享表格选择生命周期、测试 / 文档 / memory 收口 | `CORE_PACKAGES_RELEASED`：整体 review 99/100 approved；Contracts 0.4.3 / SDK 0.4.4 已发布；业务模块接线与 E2E 另行完成 |
+| Wave 22 | `TASK-037` | `CR-018`、`TASK-036`、`TC-070`、PyPI 发布链 | Contracts 0.4.3 / SDK 0.4.4 版本、依赖、构建、发布和在线验证 | 已完成：全量 unit `1134 passed`；两包 wheel/sdist、publish dry-run、正式发布、PyPI 哈希与隔离安装验证通过 |
 
 ## 3. 风险与应对
 
@@ -96,19 +97,21 @@
 | `TASK-032` | 贯通 Hosted UI 导入分发与结果展示 | `ManagedPageRenderer` toolbar 分发、`@ui_action` payload 参数、workflow 运行态注入、导入结果弹窗和页面跳转 | 导入 payload 能提交给模块 `@ui_action` 或 workflow；模块返回批次汇总后宿主展示结果并可跳转 `import_data_records` | P1 | 已完成 |
 | `TASK-033` | 约定导入暂存明细与逐条状态展示 | `import_data_records` 页面参数、批次明细表约定、从暂存表导入业务表的逐条状态口径 | 页面能按 `batch_id/target_type` 展示导入明细；后续业务表导入可展示 `imported/import_failed/skipped_duplicate/validation_failed` 等状态 | P1 | 已完成 |
 | `TASK-034` | 完成批量导入测试、开发者说明和记忆收口 | 单元/集成/验收测试、开发者指南、测试计划、release/traceability/memory 同步 | `TC-060` 覆盖 toolbar schema、解析限制、脱敏、分发、结果展示和明细页跳转；正式文档与 `.factory/memory/` 同步 | P1 | 已完成 |
-| `TASK-036` | 实现 Hosted UI `managed_dataset` 当前页批量字段修改通用能力 | Contracts `selection_mode` / CRUD bulk schema、SDK scanner、Core renderer、`SkyDataTable` 选择清理、`TC-069`、正式设计与 memory | Core 只传保序去重 `primary_keys + payload`；模块负责 `ctx.db` 写入；兼容旧单选 CRUD；同步 / 异步与选择生命周期回归通过 | P1 | `HUMAN_APPROVED / READY_FOR_COMMIT`；整体 review 99/100 approved；全量 unit 基线有 2 个范围外版本文档漂移 concern |
+| `TASK-036` | 实现 Hosted UI `managed_dataset` 当前页批量字段修改通用能力 | Contracts `selection_mode` / CRUD bulk schema、SDK scanner、Core renderer、`SkyDataTable` 选择清理、`TC-069`、正式设计与 memory | Core 只传保序去重 `primary_keys + payload`；模块负责 `ctx.db` 写入；兼容旧单选 CRUD；同步 / 异步与选择生命周期回归通过 | P1 | `CORE_PACKAGES_RELEASED`；Contracts 0.4.3 / SDK 0.4.4 已发布；业务模块接线另行完成 |
+| `TASK-037` | 发布 Contracts 0.4.3 与 SDK 0.4.4 | 版本/依赖/锁文件、wheel/sdist、PyPI 发布与在线证据 | Contracts 先发布并在线可见；SDK 依赖下限为 Contracts 0.4.3；两包哈希与隔离安装验证通过 | P0 | 已完成 |
 
 ## 6. 阶段建议
 
 - 当前登记阶段：`IMPLEMENTATION`
-- 当前活动波次：Wave 21 `TASK-036` 已完成实现、Task 3 收口、独立整体 review 与人工确认，进入提交和 Contracts / SDK 发布流程；Wave 19 `TASK-029` 的历史状态仍为进行中
-- 当前首项：提交 `CR-018` 已评审变更并升级、发布 Contracts 0.4.3 与 SDK 0.4.4；业务模块接线和 E2E 仍为独立 gate
+- 当前活动波次：Wave 22 `TASK-037` 已完成 Contracts 0.4.3 / SDK 0.4.4 发布；Wave 19 `TASK-029` 的历史状态仍为进行中
+- 当前首项：`CR-018` Core / Contracts / SDK 通用能力已发布；业务模块接线和 E2E 仍为独立 gate
 - 后续波次：Hosted UI 批量导入已完成本地实现与 `TC-060` 单测，后续如需对外发布需另行完成 SDK / Contracts / 根应用版本提升、构建与发布证据
 
 ## 7. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-10 | 完成 Wave 22 / `TASK-037`：发布 Contracts 0.4.3 与 SDK 0.4.4，并完成全量测试、产物哈希、PyPI JSON API 与隔离安装验证 | Codex |
 | 2026-07-10 | 新增 Wave 21 / `TASK-036`，登记 Hosted UI DataTable 当前页多选批量编辑的 Contracts / SDK / Core / UI 实现、`TC-069` 和 Task 3 收口状态 | Codex |
 | 2026-06-19 | 完成 Wave 20 / `TASK-030` ~ `TASK-034`：落地 Hosted UI toolbar 批量导入契约、宿主解析弹窗、payload 分发、workflow runtime 注入、结果展示和 `TC-060` 验证 | Codex |
 | 2026-06-19 | 新增 Wave 20 / `TASK-030` ~ `TASK-034`，为 Hosted UI 批量导入拆分 toolbar 契约、宿主导入弹窗、payload 分发、暂存状态页和测试文档收口 | Codex |

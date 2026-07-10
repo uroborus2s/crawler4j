@@ -31,7 +31,7 @@
 | `API-004` | 正式发布尚未切版，交付包仍需绑定实际发布批次 | 未闭环 |
 | `API-008` | hosted page 已收口为 `@page(...)` 装饰器入口，但真实业务模块接入验证仍待继续推进 | 已本地验证，真实模块 E2E 待闭环 |
 | `API-019` | Hosted UI 批量导入已完成 Contracts / SDK / Core / UI 本地实现和 `TC-060` 单测；对外发布版本、真实业务模块 E2E 与安装包证据仍待后续补齐 | 已本地验证 |
-| `API-021` | 通用当前页批量编辑已完成本地实现、Task 3 收口与独立整体 review（99/100 approved）；全量 unit 仍有 2 个范围外版本 README 漂移失败，具体业务模块 handler 与 E2E 未接线 | 带 concern 的 `pending_human_confirmation`，不等于验证全绿、人工确认或发布 |
+| `API-021` | 通用当前页批量编辑已完成整体 review、人工确认和 Contracts 0.4.3 / SDK 0.4.4 发布；最终全量 unit `1134 passed`，PyPI 哈希与隔离安装验证通过 | `core_packages_released`；具体业务模块 handler 与 E2E 未接线 |
 | `API-012` | core-native-v2 已实现；发布前仍需真实业务模块 E2E 与打包链路验证 | 已实现，发布验证待闭环 |
 | `API-013` | 使用者指南和开发者指南已按版本分流；发布前需确认 docs-stratego 站点主入口切到 0.4.0 | 已实现，站点发布验证待闭环 |
 

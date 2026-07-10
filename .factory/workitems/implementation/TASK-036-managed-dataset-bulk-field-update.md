@@ -1,6 +1,6 @@
 # TASK-036 实现 managed_dataset 批量字段修改
 
-- 状态：HUMAN_APPROVED / READY_FOR_COMMIT（overall review approved；verification 保留范围外 concern）
+- 状态：CORE_PACKAGES_RELEASED（overall review approved；业务模块接线另行完成）
 - 负责人：Codex
 - 优先级：P1
 - 估算：2.5 人/天
@@ -36,4 +36,4 @@
 - Contracts / SDK 与 Core / UI 两个实现子任务均已通过独立 Spec + Quality Review。
 - 正式设计、`API-021`、`TC-069`、实施 / 执行 / 追踪文档、work item evidence / report / review input 与相关 `.factory/memory/` 已同步。
 - 合并目标集 `120 passed`，目标 Ruff / diff / JSON / docs 结构校验通过；全量 unit 有 2 个与本任务无关的版本 README 漂移失败。
-- 独立整体 review 已 `approved`（99/100），用户已明确确认进入提交与 Contracts / SDK 发布流程；当前不声明已发布或具体业务模块 E2E 完成。
+- 独立整体 review 已 `approved`（99/100），通用实现已提交并由 Contracts 0.4.3 / SDK 0.4.4 对外发布；不声明具体业务模块 E2E 完成。

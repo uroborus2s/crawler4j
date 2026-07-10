@@ -21,7 +21,7 @@
 | `REQ-008` | 宿主必须为模块提供独立的审计事件持久化能力 | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/module-config-runtime-data-contract.md` | `MOD-003`, `MOD-005` | `API-005`, `API-006` | `TASK-022` | `TC-024` | Verified locally |
 | `REQ-009` | ATM 必须支持环境候选 Service Job 的等待队列与模块候选分配 | `docs/04-project-development/04-design/system-architecture.md`, `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/atm-resource-pool-queue-design.md` | `MOD-003`, `MOD-005` | `API-007` | `TASK-023` | `TC-026`, `TC-027` | Implemented and unit-tested locally; PR pending |
 | `REQ-010` | Hosted UI 必须支持宿主托管的批量导入能力 | `docs/04-project-development/04-design/hosted-ui-batch-import-design.md`, `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/module-hosted-ui-framework.md`, `docs/04-project-development/04-design/module-config-runtime-data-contract.md` | `MOD-003`, `MOD-004`, `MOD-005` | `API-019` | `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034` | `TC-060` | Implemented and unit-tested locally; release evidence pending |
-| `REQ-012` | Hosted UI `DataTable` 必须支持当前页多选批量编辑，同时保持模块数据 owner 与旧 CRUD 兼容 | `docs/04-project-development/04-design/hosted-ui-datatable-bulk-update-design.md`, `docs/04-project-development/04-design/api-design.md` | `MOD-003`, `MOD-004`, `MOD-005` | `API-021` | `TASK-036` | `TC-069` | `PENDING_HUMAN_CONFIRMATION` after independent overall review 99/100; unrelated full-unit version-doc drift concern retained; business module E2E not included |
+| `REQ-012` | Hosted UI `DataTable` 必须支持当前页多选批量编辑，同时保持模块数据 owner 与旧 CRUD 兼容 | `docs/04-project-development/04-design/hosted-ui-datatable-bulk-update-design.md`, `docs/04-project-development/04-design/api-design.md` | `MOD-003`, `MOD-004`, `MOD-005` | `API-021` | `TASK-036`, `TASK-037` | `TC-069`, `TC-070` | Core / Contracts / SDK 通用能力已通过整体 review、人工确认并发布；业务模块 E2E 不包含在通用能力完成事实内 |
 | `REQ-0400` | 0.4.0 模块运行时必须切到装饰器对象装配，workflow 只接收宿主注入对象，参数归属 component 创建，SDK 打开阶段阻断宿主保留数据库字段冲突 | `docs/04-project-development/03-requirements/0.4.0-decorator-object-assembly-requirements.md`, `docs/04-project-development/04-design/0.4.0-decorator-object-assembly-architecture.md` | `MOD-003`, `MOD-004`, `MOD-005` | `API-012` | `TASK-0400` | `TC-0400` | Designed; implementation pending |
 | `REQ-0401` | 使用者指南和开发者指南必须按版本分流，docs-stratego 主文档指向当前已发布版本，历史版本保留 | `docs/04-project-development/03-requirements/0.4.0-guide-versioning-requirements.md`, `docs/04-project-development/04-design/0.4.0-guide-versioning-architecture.md` | `MOD-005` | `API-013` | `TASK-0401` | `TC-0401` | Designed; implementation pending |
 | `REQ-004` | 发布与文档链路可追溯 | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/07-release-delivery/version-governance.md` | `MOD-005` | `API-004` | `TASK-004` | build + metadata checks | Version governance aligned locally |
@@ -59,7 +59,7 @@
 |---|---|---|---|---|
 | `RISK-002` | `ctrip` 真实站点 E2E 尚未回放 | 线上行为验证 | 待分配 | 后续验证波次 |
 | `RISK-010` | Hosted UI 批量导入缺少真实业务模块 E2E 与对外发布证据 | 真实模块接入、SDK / Contracts / 根应用版本提升、包构建与发布资产 | 待分配 | 后续发布 / 验证波次 |
-| `CR-018` | 通用批量编辑已本地实现并通过独立整体 review，但不能据此声明具体业务模块 handler、数据库规则或真实站点 E2E 已接线 | 业务模块实现与模块级 E2E；人工确认仍待后续 gate | 模块维护者 / 项目维护者 | 后续模块接入与人工确认 |
+| `CR-018` | 通用批量编辑已通过独立整体 review、人工确认，并由 Contracts 0.4.3 / SDK 0.4.4 对外发布；不能据此声明具体业务模块 handler、数据库规则或真实站点 E2E 已接线 | 业务模块实现与模块级 E2E | 模块维护者 / 项目维护者 | 后续模块接入与验证 |
 
 ## 5. 已关闭治理项
 
