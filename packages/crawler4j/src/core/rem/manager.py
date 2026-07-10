@@ -1064,7 +1064,12 @@ class EnvironmentManager:
         if not provider:
             raise RuntimeError(f"Provider 未注册: {env.provider}")
 
-        validator = getattr(provider, "validate_fingerprint_environment", None)
+        runtime_validator = getattr(provider, "validate_runtime_fingerprint_environment", None)
+        validator = (
+            runtime_validator
+            if env.status == EnvStatus.RUNNING and callable(runtime_validator)
+            else getattr(provider, "validate_fingerprint_environment", None)
+        )
         warnings = await validator(env) if callable(validator) else []
         warnings = [str(item).strip() for item in warnings if str(item).strip()]
         if warnings:
@@ -1560,6 +1565,9 @@ class EnvironmentManager:
                     hint="请检查浏览器调试入口和 Playwright 连接状态",
                 )
 
+            if env.provider == "virtualbrowser":
+                await self._persist_runtime_fingerprint_validation(env, provider)
+
             return env
 
         except Exception:
@@ -1591,6 +1599,23 @@ class EnvironmentManager:
             delattr(env, "fingerprint_validation_warnings")
         except AttributeError:
             pass
+
+    async def _persist_runtime_fingerprint_validation(self, env: Environment, provider: BaseProvider) -> None:
+        """Persist a non-blocking page-visible fingerprint validation result."""
+        validator = getattr(provider, "validate_runtime_fingerprint_environment", None)
+        warnings = await validator(env) if callable(validator) else []
+        warnings = [str(item).strip() for item in warnings if str(item).strip()]
+        if warnings:
+            await self.mark_fingerprint_validation_risk(
+                env.id,
+                reason=warnings[0],
+                detail="; ".join(warnings),
+            )
+        else:
+            await self.clear_fingerprint_validation_risk(
+                env.id,
+                detail="创建后页面运行时指纹自检通过",
+            )
 
     async def _reserve_env_placeholder(
         self,

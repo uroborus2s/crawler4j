@@ -19,6 +19,7 @@ from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo
 from src.core.rem.proxy_probe import ProxyProbeResult, probe_ip_entry_geo
 from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_COMMON_HARDWARE_PROFILES,
+    VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
     build_virtualbrowser_geo_fingerprint_overrides,
     materialize_virtualbrowser_fingerprint,
 )
@@ -27,6 +28,70 @@ VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS = tuple(range(146, 138, -1))
 VIRTUALBROWSER_DEFAULT_CHROME_VERSION = 145
 VIRTUALBROWSER_ADD_BROWSER_MAX_ATTEMPTS = 10
 VIRTUALBROWSER_ADD_BROWSER_RETRY_DELAY_SECONDS = 1.0
+VIRTUALBROWSER_RUNTIME_FINGERPRINT_PROBE = r"""
+async () => {
+  const voices = await new Promise((resolve) => {
+    if (!globalThis.speechSynthesis) return resolve([]);
+    const available = speechSynthesis.getVoices();
+    if (available.length) return resolve(available);
+    const timer = setTimeout(() => resolve(speechSynthesis.getVoices()), 750);
+    speechSynthesis.addEventListener("voiceschanged", () => {
+      clearTimeout(timer);
+      resolve(speechSynthesis.getVoices());
+    }, { once: true });
+  });
+  const webrtc = await new Promise(async (resolve) => {
+    if (!globalThis.RTCPeerConnection) {
+      return resolve({ supported: false, hasRawPrivateAddress: false, candidateTypes: [] });
+    }
+    const peer = new RTCPeerConnection({ iceServers: [] });
+    const candidateTypes = new Set();
+    let hasRawPrivateAddress = false;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      peer.close();
+      resolve({
+        supported: true,
+        hasRawPrivateAddress,
+        candidateTypes: [...candidateTypes].sort(),
+      });
+    };
+    const timer = setTimeout(finish, 1000);
+    peer.onicecandidate = (event) => {
+      if (!event.candidate) return finish();
+      const parts = event.candidate.candidate.split(/\s+/);
+      const typeIndex = parts.indexOf("typ");
+      if (typeIndex >= 0 && parts[typeIndex + 1]) candidateTypes.add(parts[typeIndex + 1]);
+      const address = parts[4] || "";
+      if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(address)) {
+        hasRawPrivateAddress = true;
+      }
+    };
+    peer.createDataChannel("runtime-fingerprint-check");
+    try {
+      await peer.setLocalDescription(await peer.createOffer());
+    } catch (_) {
+      finish();
+    }
+  });
+  const uaCh = navigator.userAgentData
+    ? await navigator.userAgentData.getHighEntropyValues(["fullVersionList"])
+    : null;
+  return {
+    ua: navigator.userAgent,
+    uaCh,
+    language: navigator.language,
+    languages: [...navigator.languages],
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    screen: { width: screen.width, height: screen.height },
+    voices: voices.map((voice) => ({ name: voice.name, lang: voice.lang })),
+    webrtc,
+  };
+}
+"""
 _SENSITIVE_PAYLOAD_KEYS = {
     "api",
     "api-key",
@@ -332,13 +397,13 @@ def _created_parameter_warnings(
         if expected_locale and actual_locale and expected_locale != actual_locale:
             warnings.append(f"ua-language.language={actual_locale!r}，预期 {expected_locale!r}")
 
-    webrtc = entry.get("webrtc")
-    if isinstance(webrtc, dict) and webrtc.get("mode") not in (0, "0", None):
-        warnings.append(f"webrtc.mode={webrtc.get('mode')!r}，预期替换模式 0")
-
     ua_value = str(_mode_value(entry.get("ua")) or "")
     if "WOW64" in ua_value:
         warnings.append("ua.value 包含 WOW64，预期 Win64; x64")
+    chrome_version = _safe_int(entry.get("chrome_version"))
+    ua_full_version = str(_mode_value(entry.get("ua-full-version")) or "").strip()
+    if chrome_version is not None and ua_full_version == f"{chrome_version}.0.0.0":
+        warnings.append(f"ua-full-version={ua_full_version!r} 为缩减版本，缺少实际 build")
 
     location = entry.get("location")
     if isinstance(location, dict):
@@ -376,6 +441,83 @@ def _created_parameter_warnings(
         missing = _missing_keys(entry.get(key), required)
         if missing:
             warnings.append(f"{key}.mode=1 但缺少 {','.join(missing)}")
+    return warnings
+
+
+def _runtime_fingerprint_warnings(entry: dict[str, Any], runtime: Any) -> list[str]:
+    if not isinstance(runtime, dict):
+        return ["页面自检未返回可用的 JavaScript 指纹数据"]
+
+    warnings: list[str] = []
+    expected_ua = str(_mode_value(entry.get("ua")) or "").strip()
+    actual_ua = str(runtime.get("ua") or "").strip()
+    if expected_ua and actual_ua != expected_ua:
+        warnings.append("navigator.userAgent 与环境配置不一致")
+
+    expected_full_version = str(_mode_value(entry.get("ua-full-version")) or "").strip()
+    ua_ch = runtime.get("uaCh")
+    full_version_list = ua_ch.get("fullVersionList") if isinstance(ua_ch, dict) else None
+    actual_full_versions = {
+        str(item.get("version") or "").strip()
+        for item in full_version_list or []
+        if isinstance(item, dict) and str(item.get("brand") or "") in {"Chromium", "Google Chrome"}
+    }
+    if expected_full_version and expected_full_version not in actual_full_versions:
+        warnings.append("navigator.userAgentData.fullVersionList 与 ua-full-version 不一致")
+
+    expected_language_section = entry.get("ua-language")
+    expected_language = (
+        str(expected_language_section.get("language") or "").strip()
+        if isinstance(expected_language_section, dict)
+        else ""
+    )
+    actual_language = str(runtime.get("language") or "").strip()
+    if expected_language and actual_language != expected_language:
+        warnings.append("navigator.language 与环境配置不一致")
+
+    expected_timezone_section = entry.get("time-zone")
+    expected_timezone = (
+        str(expected_timezone_section.get("utc") or "").strip()
+        if isinstance(expected_timezone_section, dict)
+        else ""
+    )
+    actual_timezone = str(runtime.get("timezone") or "").strip()
+    if expected_timezone and actual_timezone != expected_timezone:
+        warnings.append("time-zone / Intl 时区与环境配置不一致")
+
+    expected_screen = entry.get("screen")
+    actual_screen = runtime.get("screen")
+    if isinstance(expected_screen, dict) and isinstance(actual_screen, dict):
+        expected_width = _safe_int(expected_screen.get("width"))
+        expected_height = _safe_int(expected_screen.get("height"))
+        actual_width = _safe_int(actual_screen.get("width"))
+        actual_height = _safe_int(actual_screen.get("height"))
+        if (
+            expected_width is not None
+            and expected_height is not None
+            and (actual_width, actual_height) != (expected_width, expected_height)
+        ):
+            warnings.append("screen 尺寸与环境配置不一致")
+
+    expected_voices_section = _mode_one_dict(entry.get("speech_voices"))
+    expected_voice_names = {
+        str(voice.get("name") or "").strip()
+        for voice in (expected_voices_section or {}).get("value") or []
+        if isinstance(voice, dict) and str(voice.get("name") or "").strip()
+    }
+    actual_voice_names = {
+        str(voice.get("name") or "").strip()
+        for voice in runtime.get("voices") or []
+        if isinstance(voice, dict) and str(voice.get("name") or "").strip()
+    }
+    if expected_voice_names and not expected_voice_names.issubset(actual_voice_names):
+        warnings.append("speechSynthesis.getVoices 与环境配置不一致")
+
+    webrtc = runtime.get("webrtc")
+    if not isinstance(webrtc, dict) or webrtc.get("supported") is False:
+        warnings.append("WebRTC API 不可用，无法完成页面自检")
+    elif webrtc.get("hasRawPrivateAddress") is True:
+        warnings.append("WebRTC ICE candidate 暴露原始局域网地址")
     return warnings
 
 
@@ -661,6 +803,11 @@ class BaseProvider(ABC):
 
     async def validate_fingerprint_environment(self, env: Environment) -> list[str]:
         """Return fingerprint validation warnings for manual risk rechecks."""
+        del env
+        return []
+
+    async def validate_runtime_fingerprint_environment(self, env: Environment) -> list[str]:
+        """Return page-visible fingerprint validation warnings for a running environment."""
         del env
         return []
 
@@ -1954,11 +2101,17 @@ class VirtualBrowserProvider(BaseProvider):
                     "port": parsed.port,
                     "user": parsed.username or "",
                     "pass": parsed.password or "",
+                    "value": raw_val,
                 }
             except Exception as e:
                 logger.warning(f"[VirtualBrowser] Failed to parse proxy '{raw_val}': {e}")
 
         fingerprint = creation_params.get("virtualbrowser") or creation_params.get("fingerprint")
+        if fingerprint is None:
+            fingerprint = {VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY: True}
+        should_randomize_fingerprint = isinstance(fingerprint, dict) and bool(
+            fingerprint.get(VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY)
+        )
         manual_geo = config.get("geo")
         geo = manual_geo if isinstance(manual_geo, dict) else await self._probe_creation_proxy_geo(proxy, fingerprint)
 
@@ -1966,7 +2119,19 @@ class VirtualBrowserProvider(BaseProvider):
 
         # VirtualBrowser 的本地管理 API 对并发创建/启动不稳定，串行化避免拖死宿主 UI 事件循环。
         async with self._get_lifecycle_lock():
-            browser_id = await client.add_browser(name, groups, proxy, fingerprint, geo=geo)
+            browser_id = await client.add_browser(
+                name,
+                groups,
+                proxy,
+                fingerprint,
+                geo=None if should_randomize_fingerprint else geo,
+            )
+            if should_randomize_fingerprint:
+                if not await client.randomize_fingerprint(int(browser_id)):
+                    raise RuntimeError("VirtualBrowser randomizeFingerprint 失败")
+                geo_overrides = build_virtualbrowser_geo_fingerprint_overrides(geo)
+                if geo_overrides and not await client.update_browser(int(browser_id), geo_overrides):
+                    raise RuntimeError("VirtualBrowser updateBrowser 回写代理地理指纹失败")
             validation_warnings = await self._log_created_parameter_validation(client, int(browser_id), geo)
 
         if config.get("launch", True):
@@ -2059,6 +2224,37 @@ class VirtualBrowserProvider(BaseProvider):
                 return [f"getBrowserFullParameters 验收失败: {exc}"]
 
         return _created_parameter_warnings(payload, browser_id=browser_id_int, geo=None)
+
+    async def validate_runtime_fingerprint_environment(self, env: Environment) -> list[str]:
+        """Validate values visible to JavaScript after the VirtualBrowser CDP connection succeeds."""
+        browser_id = self._browser_id_from_env(env)
+        if not browser_id:
+            return ["缺少 VirtualBrowser 环境 ID"]
+        try:
+            browser_id_int = int(browser_id)
+        except (TypeError, ValueError):
+            return [f"VirtualBrowser 环境 ID 无效: {browser_id!r}"]
+
+        page = env.handle.page if env.handle else None
+        if page is None:
+            return ["页面自检失败：Playwright 页面尚未连接"]
+
+        async with self._get_lifecycle_lock():
+            client = self._get_api_client()
+            try:
+                payload = await client.get_browser_full_parameters(browser_id_int)
+            except Exception as exc:
+                return [f"getBrowserFullParameters 验收失败: {exc}"]
+
+        entry = _browser_full_parameters_entry(payload, browser_id_int)
+        if not isinstance(entry, dict):
+            return ["getBrowserFullParameters 未返回目标环境"]
+
+        try:
+            runtime = await page.evaluate(VIRTUALBROWSER_RUNTIME_FINGERPRINT_PROBE)
+        except Exception as exc:
+            return [f"页面 JavaScript 指纹自检失败: {exc}"]
+        return _runtime_fingerprint_warnings(entry, runtime)
 
     async def repair_fingerprint_location(self, env: Environment) -> dict[str, Any]:
         """Repair only VirtualBrowser location from the current proxy geo."""

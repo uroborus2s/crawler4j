@@ -295,8 +295,14 @@ class CreateEnvDialog(QDialog):
                     }
             
             config["proxy"] = proxy_conf
-            
-            # 2. 指纹配置 (去除输入，默认为随机或由Provider处理)
+
+            # 2. VirtualBrowser 在创建时下发完整随机指纹，避免落到厂商的精简默认模板。
+            if provider == "virtualbrowser":
+                from src.core.rem.virtualbrowser_fingerprint import VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY
+
+                config["creation_params"] = {
+                    "virtualbrowser": {VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY: True}
+                }
         
         return (
             self.kind_combo.currentData(),

@@ -65,6 +65,8 @@ def test_created_parameter_warnings_flag_inconsistent_fingerprint_values():
                 "mode": 0,
                 "value": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/143.0.0.0",
             },
+            "chrome_version": 143,
+            "ua-full-version": {"mode": 1, "value": "143.0.0.0"},
             "location": {"mode": 2, "enable": 1, "longitude": "0", "latitude": "0"},
             "cpu": {"mode": 1, "value": 2},
             "memory": {"mode": 1, "value": 64},
@@ -85,6 +87,7 @@ def test_created_parameter_warnings_flag_inconsistent_fingerprint_values():
 
     rendered = "\n".join(warnings)
     assert "WOW64" in rendered
+    assert "ua-full-version" in rendered
     assert "location 为 0,0" in rendered
     assert "cpu/memory=2/64" in rendered
     assert "proxy.host='27.18.13.203'" in rendered
@@ -260,6 +263,8 @@ async def test_virtualbrowser_create_prefers_manual_geo_over_proxy_probe(monkeyp
     provider = VirtualBrowserProvider()
     client = SimpleNamespace(
         add_browser=AsyncMock(return_value=303),
+        randomize_fingerprint=AsyncMock(return_value=True),
+        update_browser=AsyncMock(return_value=True),
         get_browser_full_parameters=AsyncMock(return_value={"id": 303}),
     )
 
@@ -285,7 +290,212 @@ async def test_virtualbrowser_create_prefers_manual_geo_over_proxy_probe(monkeyp
     )
 
     _, kwargs = client.add_browser.await_args
-    assert kwargs["geo"] == {"latitude": 39.9, "longitude": 116.36}
+    assert kwargs["geo"] is None
+    client.randomize_fingerprint.assert_awaited_once_with(303)
+    update_args = client.update_browser.await_args
+    assert update_args.args[0] == 303
+    assert update_args.args[1]["location"] | {"precision": 0} == {
+        "mode": 2,
+        "enable": 1,
+        "longitude": "116.36",
+        "latitude": "39.9",
+        "precision": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_create_preserves_full_static_proxy_value(monkeypatch):
+    provider = VirtualBrowserProvider()
+    client = SimpleNamespace(
+        add_browser=AsyncMock(return_value=303),
+        randomize_fingerprint=AsyncMock(return_value=True),
+        get_browser_full_parameters=AsyncMock(return_value={"id": 303}),
+    )
+    raw_proxy = "http://alice:secret@10.0.0.8:8080"
+
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(provider, "_probe_creation_proxy_geo", AsyncMock(return_value=None))
+
+    await provider.create(
+        {
+            "env_name": "env-static-proxy",
+            "proxy": {
+                "mode": ProxyMode.STATIC,
+                "static_value": raw_proxy,
+            },
+        }
+    )
+
+    args, kwargs = client.add_browser.await_args
+    assert args[2] == {
+        "protocol": "http",
+        "host": "10.0.0.8",
+        "port": 8080,
+        "user": "alice",
+        "pass": "secret",
+        "value": raw_proxy,
+    }
+    assert args[3] == {"__randomize_fingerprint__": True}
+    client.randomize_fingerprint.assert_awaited_once_with(303)
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_create_randomizes_vendor_fingerprint_before_applying_proxy_geo(monkeypatch):
+    provider = VirtualBrowserProvider()
+    client = SimpleNamespace(
+        add_browser=AsyncMock(return_value=303),
+        randomize_fingerprint=AsyncMock(return_value=True),
+        update_browser=AsyncMock(return_value=True),
+        get_browser_full_parameters=AsyncMock(return_value={"id": 303}),
+    )
+    geo = {
+        "country_code": "JP",
+        "timezone": "Asia/Tokyo",
+        "latitude": 35.6895,
+        "longitude": 139.6917,
+    }
+
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(provider, "_probe_creation_proxy_geo", AsyncMock(return_value=geo))
+
+    await provider.create(
+        {
+            "env_name": "env-vendor-random",
+            "creation_params": {"virtualbrowser": {"__randomize_fingerprint__": True}},
+        }
+    )
+
+    args, kwargs = client.add_browser.await_args
+    assert args[3] == {"__randomize_fingerprint__": True}
+    assert kwargs["geo"] is None
+    client.randomize_fingerprint.assert_awaited_once_with(303)
+    client.update_browser.assert_awaited_once_with(
+        303,
+        {
+            "ua-language": {"mode": 1, "language": "ja-JP", "value": "ja"},
+            "time-zone": {
+                "mode": 1,
+                "zone": "(UTC+09:00) Asia/Tokyo",
+                "utc": "Asia/Tokyo",
+                "locale": "ja-JP",
+                "value": 9,
+            },
+            "location": {
+                "mode": 2,
+                "enable": 1,
+                "longitude": "139.6917",
+                "latitude": "35.6895",
+                "precision": pytest.approx(1500, abs=500),
+            },
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_runtime_fingerprint_check_uses_page_visible_values(monkeypatch):
+    provider = VirtualBrowserProvider()
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0"
+    full_version = "145.0.7632.116"
+    page = SimpleNamespace(
+        evaluate=AsyncMock(
+            return_value={
+                "ua": ua,
+                "uaCh": {"fullVersionList": [{"brand": "Chromium", "version": full_version}]},
+                "language": "ja-JP",
+                "languages": ["ja-JP", "ja"],
+                "timezone": "Asia/Tokyo",
+                "screen": {"width": 1920, "height": 1080},
+                "voices": [{"name": "Google 日本語", "lang": "ja-JP"}],
+                "webrtc": {"hasRawPrivateAddress": False, "candidateTypes": ["host"]},
+            }
+        )
+    )
+    handle = BrowserHandle(browser_id="303")
+    handle._page = page
+    env = Environment(
+        id=101,
+        name="vb-env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.RUNNING,
+        external_id="303",
+        handle=handle,
+    )
+    client = SimpleNamespace(
+        get_browser_full_parameters=AsyncMock(
+            return_value={
+                "id": 303,
+                "chrome_version": 145,
+                "ua": {"mode": 0, "value": ua},
+                "ua-full-version": {"mode": 1, "value": full_version},
+                "ua-language": {"mode": 1, "language": "ja-JP", "value": "ja"},
+                "time-zone": {"mode": 1, "utc": "Asia/Tokyo"},
+                "screen": {"mode": 1, "width": 1920, "height": 1080},
+                "speech_voices": {"mode": 1, "value": [{"name": "Google 日本語"}]},
+            }
+        )
+    )
+
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await provider.validate_runtime_fingerprint_environment(env) == []
+    page.evaluate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_runtime_fingerprint_check_flags_page_visible_mismatches(monkeypatch):
+    provider = VirtualBrowserProvider()
+    page = SimpleNamespace(
+        evaluate=AsyncMock(
+            return_value={
+                "ua": "Mozilla/5.0 Chrome/144.0.0.0",
+                "uaCh": {"fullVersionList": [{"brand": "Chromium", "version": "144.0.7559.177"}]},
+                "language": "en-US",
+                "languages": ["en-US"],
+                "timezone": "America/New_York",
+                "screen": {"width": 1366, "height": 768},
+                "voices": [],
+                "webrtc": {"hasRawPrivateAddress": True, "candidateTypes": ["host"]},
+            }
+        )
+    )
+    handle = BrowserHandle(browser_id="304")
+    handle._page = page
+    env = Environment(
+        id=102,
+        name="vb-env-mismatch",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.RUNNING,
+        external_id="304",
+        handle=handle,
+    )
+    client = SimpleNamespace(
+        get_browser_full_parameters=AsyncMock(
+            return_value={
+                "id": 304,
+                "chrome_version": 145,
+                "ua": {"mode": 0, "value": "Mozilla/5.0 Chrome/145.0.0.0"},
+                "ua-full-version": {"mode": 1, "value": "145.0.7632.116"},
+                "ua-language": {"mode": 1, "language": "ja-JP", "value": "ja"},
+                "time-zone": {"mode": 1, "utc": "Asia/Tokyo"},
+                "screen": {"mode": 1, "width": 1920, "height": 1080},
+                "speech_voices": {"mode": 1, "value": [{"name": "Google 日本語"}]},
+            }
+        )
+    )
+
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    warnings = await provider.validate_runtime_fingerprint_environment(env)
+
+    assert any("navigator.userAgent" in warning for warning in warnings)
+    assert any("ua-full-version" in warning for warning in warnings)
+    assert any("navigator.language" in warning for warning in warnings)
+    assert any("time-zone" in warning for warning in warnings)
+    assert any("screen" in warning for warning in warnings)
+    assert any("speechSynthesis" in warning for warning in warnings)
+    assert any("WebRTC" in warning for warning in warnings)
 
 
 @pytest.mark.asyncio
@@ -339,7 +549,7 @@ async def test_virtualbrowser_repair_fingerprint_location_updates_only_location(
 
     assert location["longitude"] == "116.357"
     assert location["latitude"] == "39.9072"
-    assert 1600 <= location["precision"] <= 5600
+    assert 1000 <= location["precision"] <= 2000
     client.update_browser.assert_awaited_once_with(303, {"location": location})
 
 

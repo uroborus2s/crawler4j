@@ -129,6 +129,18 @@ async def test_create_env_keeps_connected_environment_running(manager):
 
 
 @pytest.mark.asyncio
+async def test_create_env_runs_runtime_fingerprint_check_after_connect(manager):
+    provider = MockProvider()
+    provider.name = "virtualbrowser"
+    register_provider(provider)
+    manager._persist_runtime_fingerprint_validation = AsyncMock()  # type: ignore[attr-defined]
+
+    env = await manager._create_env(provider=provider)
+
+    manager._persist_runtime_fingerprint_validation.assert_awaited_once_with(env, provider)
+
+
+@pytest.mark.asyncio
 async def test_create_env_does_not_mutate_input_config(manager):
     provider = MockProvider()
     register_provider(provider)

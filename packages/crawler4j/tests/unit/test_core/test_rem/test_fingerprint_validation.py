@@ -118,6 +118,31 @@ async def test_manual_recheck_updates_only_validation_metadata(temp_data_dir, mo
 
 
 @pytest.mark.asyncio
+async def test_running_recheck_uses_page_runtime_validation(temp_data_dir, monkeypatch):
+    manager = EnvironmentManager()
+    env = await _add_ready_env(manager.pool, "running-env")
+    await manager.pool.update_status(env.id, EnvStatus.RUNNING)
+    calls: list[str] = []
+
+    class FakeProvider:
+        async def validate_fingerprint_environment(self, checked_env):
+            calls.append(f"config:{checked_env.id}")
+            return []
+
+        async def validate_runtime_fingerprint_environment(self, checked_env):
+            calls.append(f"runtime:{checked_env.id}")
+            return ["WebRTC ICE candidate 暴露原始局域网地址"]
+
+    monkeypatch.setattr("src.core.rem.manager.get_provider", lambda provider: FakeProvider())
+
+    summary = await manager.recheck_env_fingerprint_validation(env.id)
+
+    assert calls == [f"runtime:{env.id}"]
+    assert summary.status == FINGERPRINT_VALIDATION_RISK
+    assert summary.reason == "WebRTC ICE candidate 暴露原始局域网地址"
+
+
+@pytest.mark.asyncio
 async def test_repair_env_fingerprint_location_updates_and_rechecks(temp_data_dir, monkeypatch):
     manager = EnvironmentManager()
     env = await _add_ready_env(manager.pool, "risk-env")
@@ -160,3 +185,20 @@ async def test_created_validation_warnings_mark_env_risk_metadata(temp_data_dir)
     assert metadata[FINGERPRINT_VALIDATION_REASON] == "WebRTC mode mismatch"
     assert metadata[FINGERPRINT_VALIDATION_DETAIL] == "WebRTC mode mismatch; timezone mismatch"
     assert not hasattr(env, "fingerprint_validation_warnings")
+
+
+@pytest.mark.asyncio
+async def test_runtime_validation_warnings_mark_env_risk_metadata(temp_data_dir):
+    manager = EnvironmentManager()
+    env = await _add_ready_env(manager.pool, "runtime-risk-env")
+
+    class FakeProvider:
+        async def validate_runtime_fingerprint_environment(self, checked_env):
+            assert checked_env.id == env.id
+            return ["navigator.userAgent 与环境配置不一致"]
+
+    await manager._persist_runtime_fingerprint_validation(env, FakeProvider())
+
+    metadata = manager.pool.list_metadata(env.id, FINGERPRINT_VALIDATION_NAMESPACE)
+    assert metadata[FINGERPRINT_VALIDATION_STATUS] == FINGERPRINT_VALIDATION_RISK
+    assert metadata[FINGERPRINT_VALIDATION_REASON] == "navigator.userAgent 与环境配置不一致"
