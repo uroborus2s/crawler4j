@@ -297,11 +297,9 @@ class ExecutionRunner:
                 proxy_config = self._extract_proxy_config(merged_creation_params)
                 create_params = {
                     "creation_params": merged_creation_params,
-                    "env_name": f"task-{task.id}-{int(time.time())}",
                 }
                 env = await self.rem.create_env(
                     provider_name=request.provider_name,
-                    env_name=create_params["env_name"],
                     config=create_params,
                     requirement=EnvRequirement(proxy_config=proxy_config) if proxy_config else None,
                     ensure_runtime=False,

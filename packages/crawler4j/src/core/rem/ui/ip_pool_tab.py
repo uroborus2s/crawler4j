@@ -132,16 +132,16 @@ class IPPoolTab(QWidget):
     }
     ENTRY_TABLE_SCHEMA = {
         "columns": [
-            {"key": "address", "label": "IP地址", "type": "text", "width": 180},
-            {"key": "port", "label": "端口", "type": "number", "width": 120, "align": "right"},
-            {"key": "bound_count", "label": "绑定数", "type": "number", "width": 100, "align": "right"},
-            {"key": "manual_latitude", "label": "纬度", "type": "text", "width": 120},
-            {"key": "manual_longitude", "label": "经度", "type": "text", "width": 120},
-            {"key": "status", "label": "状态", "type": "text", "width": 110, "sortable": True},
-            {"key": "last_used_at", "label": "最近使用", "type": "text", "width": 180, "sortable": True},
-            {"key": "safety_score", "label": "安全度", "type": "number", "width": 100, "align": "right"},
-            {"key": "expires", "label": "过期时间", "type": "text", "width": 220, "sortable": True},
-            {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
+            {"key": "address", "label": "IP地址", "type": "text", "width": 150},
+            {"key": "port", "label": "端口", "type": "number", "width": 80, "align": "right"},
+            {"key": "bound_count", "label": "绑定数", "type": "number", "width": 80, "align": "right"},
+            {"key": "manual_latitude", "label": "纬度", "type": "text", "width": 100},
+            {"key": "manual_longitude", "label": "经度", "type": "text", "width": 100},
+            {"key": "status", "label": "状态", "type": "text", "width": 90, "sortable": True},
+            {"key": "last_used_at", "label": "最近使用", "type": "text", "width": 150, "sortable": True},
+            {"key": "safety_score", "label": "安全度", "type": "number", "width": 80, "align": "right"},
+            {"key": "expires", "label": "过期时间", "type": "text", "width": 150, "sortable": True},
+            {"key": "actions", "label": "操作", "type": "actions", "width": 250},
         ],
         "features": {
             "search": {"enabled": True, "placeholder": "搜索 IP 地址或过期时间"},
@@ -250,6 +250,7 @@ class IPPoolTab(QWidget):
 
         # 条目列表表格
         self.entry_table = SkyDataTable(schema=self.ENTRY_TABLE_SCHEMA)
+        self.entry_table.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.entry_table.query_requested.connect(self._on_entry_query_requested)
         self.entry_table.row_action_requested.connect(self._on_entry_action_requested)
         entry_layout.addWidget(self.entry_table)

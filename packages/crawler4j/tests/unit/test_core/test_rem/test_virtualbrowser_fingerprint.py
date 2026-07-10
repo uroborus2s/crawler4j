@@ -100,7 +100,7 @@ def test_materialize_virtualbrowser_fingerprint_uses_proxy_geo(monkeypatch):
         "value": 9,
     }
     assert payload["location"] | {"precision": 0} == {
-        "mode": 2,
+        "mode": 1,
         "enable": 1,
         "longitude": "139.6917",
         "latitude": "35.6895",
@@ -121,7 +121,7 @@ def test_materialize_virtualbrowser_fingerprint_applies_geo_without_randomize():
 
     assert payload["fonts"] == {"mode": 1}
     assert payload["location"] | {"precision": 0} == {
-        "mode": 2,
+        "mode": 1,
         "enable": 1,
         "longitude": "116.357",
         "latitude": "39.9072",

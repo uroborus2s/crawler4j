@@ -342,7 +342,9 @@ async def test_execution_runner_runs_module_and_recycles_environment():
 
     rem.create_env.assert_awaited_once()
     assert rem.create_env.await_args.kwargs["ensure_runtime"] is False
+    assert "env_name" not in rem.create_env.await_args.kwargs
     create_config = rem.create_env.await_args.kwargs["config"]
+    assert "env_name" not in create_config
     assert create_config["creation_params"]["groups"] == ["default"]
     assert "fingerprint" not in create_config["creation_params"]
     rem.lease_manager.claim_created_env.assert_awaited_once_with(env, request.task.id)

@@ -156,11 +156,15 @@ async def test_add_browser_uses_canonical_proxy_keys_and_enables_custom_mode():
         name="env-b",
         group_ids=["g1"],
         proxy={
+            "value": "",
             "protocol": "socks5",
             "host": "127.0.0.1",
             "port": "1080",
             "user": "u",
             "pass": "p",
+            "url": "socks5://u:p@127.0.0.1:1080",
+            "country": "CN",
+            "checkFailed": False,
         },
     )
 
@@ -169,6 +173,9 @@ async def test_add_browser_uses_canonical_proxy_keys_and_enables_custom_mode():
     assert proxy["protocol"] == "SOCKS5"
     assert proxy["user"] == "u"
     assert proxy["pass"] == "p"
+    assert proxy["url"] == "socks5://u:p@127.0.0.1:1080"
+    assert proxy["country"] == "CN"
+    assert proxy["checkFailed"] is False
 
 
 @pytest.mark.asyncio

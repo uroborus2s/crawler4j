@@ -26,8 +26,8 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.4.31` | 当前仓库源码事实；承接 VirtualBrowser 指纹随机化、代理地理回写与创建后页面运行时自检 |
-| 根应用运行时版本 | `0.4.31` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.4.32` | 当前仓库源码事实；承接 VirtualBrowser 代理启动后完整状态回写、固定地区语言指纹与环境命名收敛 |
+| 根应用运行时版本 | `0.4.32` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
 | SDK | `0.4.4` | 已发布到 PyPI；包含 Hosted UI DataTable 批量 handler 静态校验，依赖 `crawler4j-contracts>=0.4.3,<0.5.0` |
 | Contracts | `0.4.3` | 已发布到 PyPI；包含 Hosted UI DataTable 多选与批量更新 schema |
@@ -36,25 +36,26 @@
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前根应用源码为 `0.4.31`，但 Git tag 在本次发布前仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为当前源码版本已完成正式发布。
+- 当前根应用源码为 `0.4.32`，但 Git tag 在本次发布前仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为当前源码版本已完成正式发布。
 - 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.31`
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.32`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.4.31` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.4.32` Git tag 与正式 release 资产
 7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-10 | 将根应用 / 运行时源码版本提升到 `0.4.32`，承接 VirtualBrowser 代理启动后完整状态回写、固定地区语言指纹与环境命名收敛；SDK 0.4.4 / Contracts 0.4.3 保持不变，本轮不构建桌面安装包 | Codex |
 | 2026-07-10 | 将根应用 / 运行时源码版本提升到 `0.4.31`，承接 VirtualBrowser 厂商随机指纹、代理地理回写与创建后页面运行时自检；SDK 0.4.4 / Contracts 0.4.3 保持不变，本轮不构建桌面安装包 | Codex |
 | 2026-07-10 | 将根应用 / 运行时源码版本提升到 `0.4.30`，承接 Hosted UI DataTable 批量编辑与行按钮页面导航；SDK 0.4.4 / Contracts 0.4.3 保持不变，本轮不构建桌面安装包 | Codex |
 | 2026-07-10 | 将 Contracts 提升并发布到 `0.4.3`、SDK 提升并发布到 `0.4.4`，用于提供 Hosted UI DataTable 当前页多选批量编辑契约与 scanner 校验；根应用保持现有 `0.4.29`，客户端未在本轮升级或发布 | Codex |

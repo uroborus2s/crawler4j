@@ -257,6 +257,14 @@ async def test_persist_entry_round_trips_manual_location(monkeypatch, tmp_path):
     assert loaded_entry is not None
     assert loaded_entry.manual_latitude == 39.9072
     assert loaded_entry.manual_longitude == 116.357
+    assert not hasattr(loaded_entry, "country")
+    assert loaded_entry.fingerprint_geo() == {
+        "country": "CN",
+        "timezone": "Asia/Shanghai",
+        "language": "zh-CN,zh,en-US,en",
+        "latitude": 39.9072,
+        "longitude": 116.357,
+    }
 
 
 def test_ip_entry_randomizes_manual_geo_within_one_kilometer(monkeypatch):

@@ -10,7 +10,7 @@ import json
 
 from abc import ABC, abstractmethod
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from src.core.foundation.logging import logger
 from src.core.rem.handle import BrowserHandle
@@ -21,6 +21,8 @@ from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_COMMON_HARDWARE_PROFILES,
     VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
     build_virtualbrowser_geo_fingerprint_overrides,
+    build_virtualbrowser_ip_auto_fingerprint_overrides,
+    build_virtualbrowser_speech_voices_override,
     materialize_virtualbrowser_fingerprint,
 )
 
@@ -279,7 +281,31 @@ def _bitbrowser_proxy_update_payload(proxy: Any) -> dict[str, Any]:
     }
 
 
-def _virtualbrowser_proxy_update_payload(proxy: Any) -> dict[str, Any]:
+def _virtualbrowser_external_proxy_url(entry: IPEntry) -> str:
+    """按 IP 表的协议、认证、主机和端口构造外部代理 URL。"""
+    username = quote(str(entry.username or ""), safe="")
+    password = quote(str(entry.password or ""), safe="")
+    auth = f"{username}:{password}@" if username or password else ""
+    return f"{str(entry.protocol or 'http').lower()}://{auth}{entry.address}:{entry.port}"
+
+
+def _virtualbrowser_proxy_payload(entry: IPEntry, *, country: str = "") -> dict[str, Any]:
+    return {
+        "mode": 2,
+        "value": "",
+        "protocol": entry.protocol.upper(),
+        "host": entry.address,
+        "port": str(entry.port),
+        "user": entry.username or "",
+        "pass": entry.password or "",
+        "API": "",
+        "url": _virtualbrowser_external_proxy_url(entry),
+        "country": str(country or "").strip().upper(),
+        "checkFailed": False,
+    }
+
+
+def _virtualbrowser_proxy_update_payload(proxy: Any, *, country: str = "") -> dict[str, Any]:
     entry = _ip_entry_from_proxy_config(_proxy_config_from_update_data(proxy))
     if entry is None:
         return {
@@ -292,16 +318,7 @@ def _virtualbrowser_proxy_update_payload(proxy: Any) -> dict[str, Any]:
             "pass": "",
             "API": "",
         }
-    return {
-        "mode": 2,
-        "value": entry.to_proxy_string(),
-        "protocol": entry.protocol.upper(),
-        "host": entry.address,
-        "port": str(entry.port),
-        "user": entry.username or "",
-        "pass": entry.password or "",
-        "API": "",
-    }
+    return _virtualbrowser_proxy_payload(entry, country=country)
 
 
 def _ip_entry_from_virtualbrowser_proxy(proxy: Any) -> IPEntry | None:
@@ -383,19 +400,34 @@ def _created_parameter_warnings(
     expected = build_virtualbrowser_geo_fingerprint_overrides(geo)
     expected_time_zone = expected.get("time-zone")
     actual_time_zone = entry.get("time-zone")
-    if isinstance(expected_time_zone, dict) and isinstance(actual_time_zone, dict):
+    if isinstance(expected_time_zone, dict):
         expected_utc = str(expected_time_zone.get("utc") or "").strip()
-        actual_utc = str(actual_time_zone.get("utc") or "").strip()
-        if expected_utc and actual_utc and expected_utc != actual_utc:
+        actual_utc = str(actual_time_zone.get("utc") or "").strip() if isinstance(actual_time_zone, dict) else ""
+        if expected_utc and actual_utc != expected_utc:
             warnings.append(f"time-zone.utc={actual_utc!r}，预期 {expected_utc!r}")
 
     expected_language = expected.get("ua-language")
     actual_language = entry.get("ua-language")
-    if isinstance(expected_language, dict) and isinstance(actual_language, dict):
+    if isinstance(expected_language, dict):
         expected_locale = str(expected_language.get("language") or "").strip()
-        actual_locale = str(actual_language.get("language") or "").strip()
-        if expected_locale and actual_locale and expected_locale != actual_locale:
+        actual_locale = str(actual_language.get("language") or "").strip() if isinstance(actual_language, dict) else ""
+        if expected_locale and actual_locale != expected_locale:
             warnings.append(f"ua-language.language={actual_locale!r}，预期 {expected_locale!r}")
+
+    expected_location = expected.get("location")
+    actual_location = entry.get("location")
+    if isinstance(expected_location, dict):
+        if not isinstance(actual_location, dict):
+            warnings.append("location 缺失，未持久化 IP 表坐标")
+        else:
+            for key in ("mode", "longitude", "latitude"):
+                expected_value = str(expected_location.get(key) or "").strip()
+                actual_value = str(actual_location.get(key) or "").strip()
+                if expected_value and actual_value != expected_value:
+                    warnings.append(f"location.{key}={actual_value!r}，预期 {expected_value!r}")
+            precision = _safe_int(actual_location.get("precision"))
+            if precision is None or not 1000 <= precision <= 2000:
+                warnings.append(f"location.precision={actual_location.get('precision')!r}，预期 1000-2000")
 
     ua_value = str(_mode_value(entry.get("ua")) or "")
     if "WOW64" in ua_value:
@@ -422,8 +454,14 @@ def _created_parameter_warnings(
     if isinstance(proxy, dict):
         proxy_host = str(proxy.get("host") or "").strip()
         proxy_url_host = _url_host(str(proxy.get("url") or ""))
-        if proxy_host and proxy_url_host and not _is_loopback_host(proxy_url_host) and proxy_host != proxy_url_host:
+        if proxy_host and not proxy_url_host:
+            warnings.append("proxy.url 缺失外部代理主机")
+        elif proxy_host and proxy_host != proxy_url_host:
             warnings.append(f"proxy.host={proxy_host!r} 与 proxy.url host={proxy_url_host!r} 不一致")
+        expected_country = str((geo or {}).get("country") or "").strip().upper()
+        actual_country = str(proxy.get("country") or "").strip().upper()
+        if expected_country and actual_country != expected_country:
+            warnings.append(f"proxy.country={actual_country!r}，预期 {expected_country!r}")
 
     fonts = _mode_one_dict(entry.get("fonts"))
     if fonts is not None and not fonts.get("value"):
@@ -2096,12 +2134,13 @@ class VirtualBrowserProvider(BaseProvider):
                     raw_val = "socks5://" + raw_val
                 parsed = urlparse(raw_val)
                 proxy = {
+                    "value": "",
                     "protocol": parsed.scheme,
                     "host": parsed.hostname,
                     "port": parsed.port,
                     "user": parsed.username or "",
                     "pass": parsed.password or "",
-                    "value": raw_val,
+                    "url": raw_val,
                 }
             except Exception as e:
                 logger.warning(f"[VirtualBrowser] Failed to parse proxy '{raw_val}': {e}")
@@ -2112,8 +2151,20 @@ class VirtualBrowserProvider(BaseProvider):
         should_randomize_fingerprint = isinstance(fingerprint, dict) and bool(
             fingerprint.get(VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY)
         )
-        manual_geo = config.get("geo")
-        geo = manual_geo if isinstance(manual_geo, dict) else await self._probe_creation_proxy_geo(proxy, fingerprint)
+        manual_geo = self._manual_ip_table_geo(config.get("geo"))
+        source_proxy_entry = _ip_entry_from_virtualbrowser_proxy(proxy)
+        if source_proxy_entry is not None:
+            proxy = _virtualbrowser_proxy_payload(
+                source_proxy_entry,
+                country=manual_geo["country"] if manual_geo else "",
+            )
+        if proxy:
+            await self._verify_creation_proxy(proxy)
+
+        if not should_randomize_fingerprint:
+            fingerprint = dict(fingerprint or {})
+            fingerprint.update(build_virtualbrowser_ip_auto_fingerprint_overrides())
+            fingerprint["speech_voices"] = build_virtualbrowser_speech_voices_override()
 
         logger.info(f"[VirtualBrowser] Creating env '{name}'...")
 
@@ -2124,15 +2175,20 @@ class VirtualBrowserProvider(BaseProvider):
                 groups,
                 proxy,
                 fingerprint,
-                geo=None if should_randomize_fingerprint else geo,
+                geo=None if should_randomize_fingerprint else manual_geo,
             )
             if should_randomize_fingerprint:
                 if not await client.randomize_fingerprint(int(browser_id)):
                     raise RuntimeError("VirtualBrowser randomizeFingerprint 失败")
-                geo_overrides = build_virtualbrowser_geo_fingerprint_overrides(geo)
-                if geo_overrides and not await client.update_browser(int(browser_id), geo_overrides):
+                if proxy and not await client.update_browser(int(browser_id), {"proxy": proxy}):
+                    raise RuntimeError("VirtualBrowser updateBrowser 回写完整外部代理失败")
+                fingerprint_overrides = build_virtualbrowser_ip_auto_fingerprint_overrides()
+                if manual_geo:
+                    fingerprint_overrides.update(build_virtualbrowser_geo_fingerprint_overrides(manual_geo))
+                fingerprint_overrides["speech_voices"] = build_virtualbrowser_speech_voices_override()
+                if not await client.update_browser(int(browser_id), fingerprint_overrides):
                     raise RuntimeError("VirtualBrowser updateBrowser 回写代理地理指纹失败")
-            validation_warnings = await self._log_created_parameter_validation(client, int(browser_id), geo)
+            validation_warnings = await self._log_created_parameter_validation(client, int(browser_id), manual_geo)
 
         if config.get("launch", True):
             # launch parameter is now ignored in create
@@ -2163,28 +2219,47 @@ class VirtualBrowserProvider(BaseProvider):
         env.fingerprint_validation_warnings = validation_warnings
         return env
 
-    async def _probe_creation_proxy_geo(
-        self,
-        proxy: Any,
-        fingerprint: Any,
-    ) -> dict[str, Any] | None:
-        del fingerprint
+    @staticmethod
+    def _manual_ip_table_geo(value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("IP 表指纹配置必须是对象")
+        geo = {
+            "country": str(value.get("country") or "").strip().upper(),
+            "timezone": str(value.get("timezone") or "").strip(),
+            "language": str(value.get("language") or "").strip(),
+            "latitude": value.get("latitude"),
+            "longitude": value.get("longitude"),
+        }
+        missing = [key for key in ("country", "timezone", "language") if geo[key] in (None, "")]
+        if missing:
+            raise ValueError(f"IP 表缺少创建所需指纹字段: {', '.join(missing)}")
+        if (geo["latitude"] is None) != (geo["longitude"] is None):
+            raise ValueError("IP 表经纬度必须同时填写")
+        overrides = build_virtualbrowser_geo_fingerprint_overrides(geo)
+        expected_overrides = {"ua-language", "time-zone"}
+        if geo["latitude"] is not None:
+            expected_overrides.add("location")
+        if set(overrides) != expected_overrides:
+            raise ValueError("IP 表固定指纹或经纬度无效，无法生成完整指纹")
+        return geo
+
+    async def _verify_creation_proxy(self, proxy: Any) -> None:
         entry = _ip_entry_from_virtualbrowser_proxy(proxy)
         if entry is None:
-            return None
+            return
         result = await asyncio.to_thread(probe_ip_entry_geo, entry)
         if not result.ok:
-            logger.warning(
-                "[VirtualBrowser] proxy geo probe failed; using default fingerprint geo: "
+            raise RuntimeError(
+                "VirtualBrowser 代理验证失败: "
                 f"proxy={result.masked_proxy_url} stage={result.stage} detail={result.detail}"
             )
-            return None
         logger.info(
-            "[VirtualBrowser] proxy geo probe succeeded: "
+            "[VirtualBrowser] proxy verification succeeded: "
             f"exit_ip={result.exit_ip} country={result.country_code or '-'} "
             f"city={result.city or '-'} timezone={result.timezone or '-'} asn={result.asn or '-'}"
         )
-        return _geo_from_proxy_probe_result(result)
 
     async def _log_created_parameter_validation(
         self,
@@ -2431,7 +2506,12 @@ class VirtualBrowserProvider(BaseProvider):
             try:
                 browser_id_int = int(browser_id)
                 client = self._get_api_client()
+                browser_snapshot = await client.get_browser_detail(browser_id_int)
+                if not isinstance(browser_snapshot, dict):
+                    raise RuntimeError("启动前未获取到完整环境配置")
                 ws_url = await client.launch_browser(browser_id_int)
+                if not await client.update_browser(browser_id_int, browser_snapshot):
+                    raise RuntimeError("启动后回写完整环境配置失败")
                 logger.info(f"[VirtualBrowser] Opened browser {browser_id}")
 
                 # 存储 ws_url 到 BrowserHandle

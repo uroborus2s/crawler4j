@@ -59,9 +59,9 @@ GC_REAPABLE_STATUSES = frozenset(
 
 
 def _get_env_name_prefix(now: datetime | None = None) -> str:
-    """构造当天环境名称前缀。"""
+    """构造按分钟分组的默认环境名称前缀。"""
     current = now or datetime.now()
-    return f"env-{current.strftime('%Y%m%d')}-"
+    return f"t_{current.strftime('%m%d%H%M')}_"
 
 
 def _get_next_env_name(existing_names: list[str], now: datetime | None = None) -> str:
@@ -80,7 +80,7 @@ def _get_next_env_name(existing_names: list[str], now: datetime | None = None) -
         if seq > max_seq:
             max_seq = seq
 
-    return f"{prefix}{max_seq + 1}"
+    return f"{prefix}{max_seq + 1:04d}"
 
 
 def peek_next_env_name(now: datetime | None = None) -> str:
@@ -1510,7 +1510,7 @@ class EnvironmentManager:
                     auth = f"{ip.username}:{ip.password}@" if ip.username else ""
                     protocol = ip.protocol or "socks5"
                     proxy_config.static_value = f"{protocol}://{auth}{ip.address}:{ip.port}"
-                    manual_geo = ip.random_manual_geo()
+                    manual_geo = ip.fingerprint_geo()
                     logger.info(f"[REM] 环境绑定 IP: id={env_id} ip={ip.address}")
                 else:
                     logger.warning(f"[REM] 环境绑定 IP 失败: id={env_id} pool={proxy_config.pool_id}")
@@ -1625,7 +1625,7 @@ class EnvironmentManager:
     ) -> Environment:
         """原子化保留环境名称占位符（Max+1 策略）。
 
-        1. 查询当天所有前缀匹配的名称
+        1. 查询当前分钟所有前缀匹配的名称
         2. 计算最大序列号 + 1
         3. 立即插入 CREATING 状态的占位记录
 
