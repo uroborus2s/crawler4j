@@ -12,7 +12,7 @@
     "tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit -q -p no:cacheprovider",
       "result": "passed",
-      "details": "1134 passed on 2026-07-10 for the Contracts 0.4.3 / SDK 0.4.4 release"
+      "details": "1135 passed on 2026-07-10 for the crawler4j 0.4.30 client source version bump"
     },
     "docs": {
       "command": "Review docs/ markdown tree",
@@ -22,12 +22,12 @@
     "lint": {
       "command": "uv run ruff check .",
       "result": "passed",
-      "details": "uv run ruff check . passed on 2026-05-18 for the 0.4.2 root version bump; historical manual/debug/verify/analyze scripts are explicitly excluded from the default lint gate"
+      "details": "uv run ruff check . passed on 2026-07-10 for the crawler4j 0.4.30 client source version bump; historical manual/debug/verify/analyze scripts remain excluded from the default lint gate"
     },
     "root_build": {
-      "command": "uv run build",
+      "command": "uv run build crawler4j",
       "result": "passed",
-      "details": "crawler4j root package version is now 0.4.29; latest recorded root build artifact remains crawler4j 0.4.3 from 2026-05-26 until the 0.4.29 package build is refreshed"
+      "details": "crawler4j 0.4.30 wheel/sdist built on 2026-07-10; wheel METADATA and embedded package README both report 0.4.30"
     },
     "sdk_build": {
       "command": "uv run publish crawler4j-sdk",
@@ -52,7 +52,7 @@
     "ui_smoke": {
       "command": "uv run python scripts/smoke_test_ui.py",
       "result": "passed",
-      "details": "Smoke passed on 2026-05-01; Shell navigation/content stack and Dashboard async refresh verified"
+      "details": "Smoke passed on 2026-07-10 for crawler4j 0.4.30; Shell structure and Dashboard async refresh verified"
     },
     "pyinstaller_bundle": {
       "command": "uv run deploy-macos-internal-release",
@@ -143,12 +143,17 @@
       "command": "uv run pytest packages/crawler4j/tests/unit/test_core/test_system/test_version_service.py -q && uv run pytest packages/crawler4j/tests/unit/test_core/test_rem/test_virtualbrowser_fingerprint.py packages/crawler4j/tests/unit/test_core/test_rem/test_virtualbrowser_client.py packages/crawler4j/tests/unit/test_core/test_rem/test_provider.py -q && uv run pytest packages/crawler4j/tests/unit/test_core/test_atm/test_run_profile_dialog.py -q",
       "result": "passed",
       "details": "3 passed on 2026-07-08 covering root 0.4.26 version service; 44 passed covering VirtualBrowser creation fingerprint materialization, addBrowser payload, and post-create warnings; 36 passed covering run profile UI serialization; target ruff, .factory/project.json JSON validation, and git diff --check passed"
+    },
+    "root_0_4_30_client_source_release_tests": {
+      "command": "uv run pytest packages/crawler4j/tests/unit -q -p no:cacheprovider",
+      "result": "passed",
+      "details": "1135 passed on 2026-07-10; version and packaging focused regression 65 passed, full ruff, lock, JSON, docs, UI smoke, root build, METADATA, and diff checks passed"
     }
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.4.29",
-    "runtime": "0.4.29",
+    "app_package_pyproject": "0.4.30",
+    "runtime": "0.4.30",
     "git_tag_latest": "v0.2.0",
     "sdk": "0.4.4",
     "contracts": "0.4.3"
@@ -162,7 +167,7 @@
     "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
-    "0.4.29 client package evidence remains open before cross-platform client rollout; latest recorded macOS package evidence remains 0.4.16 from 2026-06-19."
+    "0.4.30 client package evidence remains open before cross-platform client rollout; latest recorded macOS package evidence remains 0.4.16 from 2026-06-19."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",

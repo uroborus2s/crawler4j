@@ -10,8 +10,8 @@
 - 活跃工作项：21
 - 阻塞项：0
 - 开放风险：1
-- 当前源码版本基线：`crawler4j 0.4.29`、`crawler4j-sdk 0.4.4`、`crawler4j-contracts 0.4.3`；最近正式 Git tag：`v0.2.0`
-- 当前 PyPI 发布状态：`crawler4j-contracts 0.4.3` 与 `crawler4j-sdk 0.4.4` 已按 `contracts -> sdk` 顺序发布；PyPI JSON API 返回各自 wheel/sdist 且哈希与本地一致，隔离环境安装 SDK 0.4.4 自动解析 Contracts 0.4.3 并成功导入。根应用保持现有 `0.4.29`，客户端未在本轮升级或发布。
+- 当前源码版本基线：`crawler4j 0.4.30`、`crawler4j-sdk 0.4.4`、`crawler4j-contracts 0.4.3`；最近正式 Git tag：`v0.2.0`
+- 当前 PyPI 发布状态：`crawler4j-contracts 0.4.3` 与 `crawler4j-sdk 0.4.4` 已按 `contracts -> sdk` 顺序发布；PyPI JSON API 返回各自 wheel/sdist 且哈希与本地一致，隔离环境安装 SDK 0.4.4 自动解析 Contracts 0.4.3 并成功导入。根应用源码版本已提升到 `0.4.30`，本轮只提交并推送版本事实，不构建或上传桌面安装包。
 - 当前 macOS 客户端下载版本：2026-06-19 已删除远端旧 `Crawler4j-0.4.16.dmg`，本地重新生成 `Crawler4j-0.4.16.dmg` / `appcast.xml` 并上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`；公网 DMG `HEAD 200`，`content-length=149018284`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243`。
 - 当前 0.4.x 边界：本分支只支持 Core 0.4.0 / `core-native-v2`，SDK 与 Contracts 已破坏性升级；0.3.x SDK / Contracts / 旧开发方式在 0.3.x 分支维护，不在当前分支兼容。
 - 当前 0.4.x SDK 初始化入口：新手优先使用 `uvx --from crawler4j-sdk crawler4j module init` 交互式输入模块名与 `owner/repo`，非必填项走默认值；脚本化/资深开发者仍可完整传参执行。

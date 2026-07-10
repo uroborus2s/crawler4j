@@ -60,6 +60,8 @@
   状态：CORE_PACKAGES_RELEASED | 负责人：Codex + subagents | 预估：2.5 人/天 | 关联：`TASK-036`, `CR-018`, `REQ-012`, `NFR-012`, `API-021`, `TC-069` | 通用实现整体 review 99/100 approved；Contracts 0.4.3 / SDK 0.4.4 已发布；业务模块接线与 E2E 另行完成
 - `TASK-037-release-contracts-0.4.3-sdk-0.4.4` TASK-037 发布 Contracts 0.4.3 与 SDK 0.4.4
   状态：DONE | 负责人：Codex | 关联：`TASK-037`, `CR-018`, `TASK-036`, `TC-070` | 全量 unit 1134 passed，wheel/sdist、dry-run、正式发布、PyPI 哈希与隔离安装验证全部通过
+- `TASK-039-bump-client-0.4.30-and-push` TASK-039 升级客户端 0.4.30 并推送
+  状态：VERIFICATION_PASSED / READY_TO_PUSH | 负责人：Codex | 关联：`TASK-039`, `TASK-004`, `CR-018`, `CR-019`, `TC-071` | 聚焦回归 65 passed，全量 unit 1135 passed，Ruff / lock / JSON / docs / UI smoke / root build / METADATA 通过；桌面安装包不在本轮范围
 - `TASK-0400-design-decorator-object-assembly-runtime` TASK-0400 形成 0.4.0 装饰器对象装配运行时方案
   状态：DESIGNED | 负责人：Codex | 预估：待拆分 | 关联：`REQ-0400`, `API-012`
 - `TASK-0401-design-versioned-user-developer-guides` TASK-0401 形成 docs-stratego 使用者/开发者指南版本分流方案
