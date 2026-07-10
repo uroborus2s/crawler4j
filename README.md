@@ -106,9 +106,19 @@ demo_module/
 
 当前 workspace 包：
 
-- `crawler4j`: 桌面宿主与 Core 运行时
-- `crawler4j-sdk`: 模块开发 SDK 与 CLI
-- `crawler4j-contracts`: Core、SDK 和模块共享契约
+| 包 | 当前源码版本 | 职责 |
+|---|---:|---|
+| `crawler4j` | `0.4.29` | 桌面宿主与 Core 运行时 |
+| `crawler4j-sdk` | `0.4.4` | 模块开发 SDK 与 CLI |
+| `crawler4j-contracts` | `0.4.3` | Core、SDK 和模块共享契约 |
+
+构建与发布共享包时必须按依赖顺序执行：
+
+```bash
+uv run build crawler4j-contracts crawler4j-sdk
+uv run publish crawler4j-contracts
+uv run publish crawler4j-sdk
+```
 
 ## 文档
 

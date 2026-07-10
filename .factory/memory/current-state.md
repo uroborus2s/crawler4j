@@ -17,7 +17,7 @@
 
 ## 最近条目
 
-- 最新实现：2026-07-10 `CR-018` / `TASK-036` 已完成 Hosted UI DataTable 当前页多选批量编辑的 Contracts / SDK / Core / UI 实现和 Task 3 文档 / evidence / memory 收口。顶层 `selection_mode` 支持 `none/single/multi` 且省略默认 `single`；Core 只传保序、类型敏感去重的 `primary_keys` 与表单 `payload`，业务模块负责校验和 `ctx.db` 写入。Task 1 / 2 独立评审为 `82 passed` / `38 passed`；整体 review `99/100 approved`；目标集 `120 passed`，Ruff/diff/JSON/docs 结构通过。全量 unit 为 `1132 passed, 2 failed`，失败是当前 HEAD 的版本 README 漂移。用户已人工确认进入提交与 Contracts 0.4.3 / SDK 0.4.4 发布流程；具体业务模块接线和 E2E 未完成。
+- 最新实现：2026-07-10 `CR-018` / `TASK-036` 已完成 Hosted UI DataTable 当前页多选批量编辑的 Contracts / SDK / Core / UI 实现和 Task 3 文档 / evidence / memory 收口。顶层 `selection_mode` 支持 `none/single/multi` 且省略默认 `single`；Core 只传保序、类型敏感去重的 `primary_keys` 与表单 `payload`，业务模块负责校验和 `ctx.db` 写入。Task 1 / 2 独立评审为 `82 passed` / `38 passed`；整体 review `99/100 approved`；目标集 `120 passed`，Ruff/diff/JSON/docs 结构通过。用户已人工确认，Contracts 0.4.3 / SDK 0.4.4 发布候选已建立；具体业务模块接线和 E2E 未完成。
 - 最新修正：2026-07-08 VirtualBrowser 创建期随机指纹已按宿主系统生成 OS / UA / 字体 / 语音 / 设备名；Windows 使用 `Win64; x64`，macOS 使用 Macintosh，Linux 使用 `Linux x86_64`。同一个环境仍只在创建时生成一次，后续启动不重新随机。
 - 最新版本：2026-07-08 根应用 / 运行时版本已提升到 `0.4.26`，用于承接 VirtualBrowser 创建环境指纹自洽与稳定性优化；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，VirtualBrowser REM 回归 `44 passed`，运行模板 UI 回归 `36 passed`，目标 `ruff check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式客户端包、tag / GitHub release 与 Windows 真机证据仍需后续补齐。
 - 最新版本：2026-07-05 根应用 / 运行时版本已提升到 `0.4.24`，用于承接 REM 批量环境清理预览的模块候选 scope 修复；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、`ruff check` 与 `git diff --check` 通过；正式客户端包、tag / GitHub release 与 Windows 真机证据仍需后续补齐。
