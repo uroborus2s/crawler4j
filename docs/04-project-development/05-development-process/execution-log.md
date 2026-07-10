@@ -6,8 +6,8 @@
 **主要读者：** Tech Lead | 开发 | QA | 发布负责人
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
-**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `CR-016`, `API-009`, `API-010`, `API-019`, `BUG-013`
-**最后更新：** 2026-07-08
+**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `CR-016`, `CR-018`, `API-009`, `API-010`, `API-019`, `API-021`, `TC-069`, `BUG-013`
+**最后更新：** 2026-07-10
 
 ## 1. 用途与记录规则
 
@@ -33,11 +33,15 @@
 |---|---|---|
 | `ctrip` 真实站点 E2E | 未完成 | 回到实现/验证主线继续推进 |
 | 根应用正式发布收口 | 未完成 | 在下一次正式发布前执行验收检查清单和交付包清单 |
+| `CR-018` / `TASK-036` 整体 Gate | `HUMAN_APPROVED / READY_FOR_COMMIT`，整体 review 99/100 approved，verification 有范围外 concern | 提交已评审变更并进入 Contracts 0.4.3 / SDK 0.4.4 发布流程；业务模块 E2E 另行完成 |
 
 ## 4. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-10 | 用户明确确认 `CR-018` / `TASK-036` 通用实现进入提交与发布流程，并要求先升级 Contracts 0.4.3、SDK 0.4.4 后发布到 PyPI；具体业务模块接线与真实 UI E2E 仍为独立工作 | Codex |
+| 2026-07-10 | `CR-018` / `TASK-036` 完成 Contracts / SDK 与 Core / UI 两个实现子任务和 Task 3 文档 / evidence / memory 收口：Task 1 独立评审 `82 passed` / `100`，Task 2 独立评审 `38 passed` / `98`；Task 3 合并目标集 `120 passed`，目标 Ruff、diff、JSON 与 docs 结构校验通过。全量 unit 为 `1132 passed, 2 failed`，失败来自当前 HEAD 的 SDK / 应用版本与 README 漂移，未修改范围外版本文档。状态为带 concern 的 `READY_FOR_REVIEW`；不包含具体业务模块接线或真实站点 E2E | Codex |
+| 2026-07-10 | `CR-018` / `TASK-036` 独立整体 review 初审发现 `API-019/API-021` 章节边界错误；修复并通过 docs gate 后复审为 `approved`（99/100），全量 unit 两个范围外版本 README 漂移被接受为 non-blocking concern，当前进入人工确认门 | Codex |
 | 2026-07-08 | 将根应用 / 运行时版本提升到 `0.4.26`，用于承接 VirtualBrowser 创建环境指纹自洽与稳定性优化；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，VirtualBrowser REM 回归 `44 passed`，运行模板 UI 回归 `36 passed`，目标 `ruff check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过；正式客户端包、tag / GitHub release 与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-07-05 | 将根应用 / 运行时版本提升到 `0.4.24`，用于承接 REM 批量环境清理预览的模块候选 scope 修复；SDK / Contracts 继续保持 `0.4.2`。验证：版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、目标 `ruff check` 与 `git diff --check` 通过；正式客户端包、tag / GitHub release 与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-06-30 | 调整 VirtualBrowser 随机指纹创建期屏幕分辨率池：从 5 个等概率分辨率改为 10 槽位现代加权池，`1920x1080` 和 `1536x864` 提高出现权重，`1366x768`、`1680x1050` 等小众/旧分辨率保留但降权。验证：`test_virtualbrowser_fingerprint.py` 聚焦回归 `6 passed`，目标 `ruff check` 与 `git diff --check` 通过 | Codex |

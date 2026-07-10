@@ -30,6 +30,7 @@ Current UI architecture:
 - Page schemas now come from `pages/*.py` or grouped `pages/<group>/*.py` functions decorated with `@page(...)`, normalized by `crawler4j_contracts.hosted_ui`; `@page(menu=True)` is the only source for left-menu entries.
 - `DataTable` remains a page-scoped component. Data comes from page `load_handler` / `query_handler`; query handlers receive `HostedDataTableQuery` with `search_fields` derived only from columns explicitly marked `searchable=True` and must return generic `HostedDataTableQueryResult[RowT]`. `table_id` is UI-only and is not passed as a business query argument.
 - Hosted UI batch import is now designed as a host-owned UI capability: page/table `toolbar.actions[]` can open a host import dialog, call `@ui_action`, or schedule a workflow. The host reads `.xlsx/.csv` files or clipboard text, enforces size/row limits and redacts sensitive fields, then passes only structured import payload rows to modules.
+- Hosted UI `DataTable` current-page bulk update is split across Contracts / SDK / Core without moving data ownership into the host: schema declares top-level selection mode and CRUD bulk handler, scanner fixes the concrete `(context, primary_keys, payload)` boundary, `SkyDataTable` owns selection lifecycle, renderer owns toolbar/form/action dispatch, and the module remains the only owner of business validation and `ctx.db` writes.
 
 Current env/data architecture:
 

@@ -6,8 +6,8 @@
 **主要读者：** 新维护者 | 模块开发者 | Tech Lead | QA | 发布负责人 | 运维
 **上游输入：** `docs/index.md` | 当前正式文档树 | 文档治理整改结果
 **下游输出：** `docs/01-getting-started/index.md` | `.factory/memory/doc-map.md` | 角色阅读路径
-**关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`
-**最后更新：** 2026-07-05
+**关联 ID：** `DOC-106`, `TASK-014`, `TASK-019`, `TASK-020`, `TASK-036`, `CR-018`, `API-021`
+**最后更新：** 2026-07-10
 
 ## 1. 当前正式文档结构
 
@@ -72,6 +72,7 @@
 
 ## 5. 最近同步
 
+- 2026-07-10：新增正式设计 `docs/04-project-development/04-design/hosted-ui-datatable-bulk-update-design.md`，并同步 `REQ-012` / `NFR-012`、`API-021`、`CR-018`、`TASK-036`、`TC-069` 到 PRD、API、实施 / 执行、测试、追踪矩阵、work item 和 `.factory/memory/`。文档只描述 crawler4j 通用 Contracts / SDK / Core 能力，不登记具体业务模块接线或 E2E 已通过。
 - 2026-07-05：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.24`，用于 REM 批量环境清理预览的模块候选 scope 修复；`packages/crawler4j/pyproject.toml`、`uv.lock`、发布文档与 `.factory/memory/` 已同步到同一口径。
 - 2026-06-30：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.23`，用于本轮 GitHub release 收口；`packages/crawler4j/pyproject.toml`、`uv.lock`、发布文档与 `.factory/memory/` 已同步到同一口径。
 - 2026-06-29：根应用 / 运行时版本事实源已提升到 `crawler4j 0.4.22`，用于 VirtualBrowser 随机指纹语言参数去重；`packages/crawler4j/pyproject.toml`、`uv.lock`、README、发布文档与 `.factory/memory/` 已同步到同一口径。

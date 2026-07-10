@@ -5,6 +5,7 @@ from __future__ import annotations
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
 import yaml
 
 from crawler4j_sdk import v2_scanner
@@ -47,6 +48,57 @@ def _init_v2_module(tmp_path: Path, *, module_name: str = "demo_v2") -> Path:
         },
     )
     return module_root
+
+
+def _write_bulk_update_page(module_root: Path, handler_signature: str) -> None:
+    (module_root / "pages" / "dashboard.py").write_text(
+        f'''\
+from typing import Any, List, Mapping, TypedDict, TypeVar
+
+from crawler4j_contracts import page, ui_action
+
+
+T = TypeVar("T")
+
+
+class AccountId(str):
+    pass
+
+
+class AccountUpdatePayload(TypedDict, total=False):
+    name: str
+
+
+@page(
+    name="dashboard",
+    schema={{
+        "type": "Page",
+        "children": [
+            {{
+                "type": "DataTable",
+                "columns": ["account_id", "name"],
+                "selection_mode": "multi",
+                "data_source": {{"type": "managed_resource", "resource_id": "accounts"}},
+                "crud": {{
+                    "mode": "handlers",
+                    "primary_key": "account_id",
+                    "form": {{"update_columns": ["name"]}},
+                    "bulk_update_handler": "bulk_update_accounts",
+                }},
+            }},
+        ],
+    }},
+)
+def load_dashboard(context, page_id, params=None):
+    return {{}}
+
+
+@ui_action(name="bulk_update_accounts")
+def bulk_update_accounts{handler_signature}:
+    return {{"ok": True}}
+''',
+        encoding="utf-8",
+    )
 
 
 def _diagnostic_codes(result: v2_scanner.V2ScanResult) -> list[str]:
@@ -873,6 +925,206 @@ def delete_account(context, account_id: str):
     result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
 
     assert not [diagnostic for diagnostic in result.diagnostics if diagnostic.code.startswith("V2_PAGE_CRUD_HANDLER_")]
+
+
+def test_scan_v2_module_validates_bulk_update_handler_configuration(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "pages" / "dashboard.py").write_text(
+        '''
+from typing import TypedDict
+
+from crawler4j_contracts import page, ui_action
+
+
+class AccountUpdatePayload(TypedDict, total=False):
+    name: str
+
+
+@page(
+    name="dashboard",
+    schema={
+        "type": "Page",
+        "children": [
+            {
+                "type": "DataTable",
+                "columns": ["account_id", "name"],
+                "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                "crud": {
+                    "primary_key": "account_id",
+                    "toolbar": {"bulk_update": True},
+                    "form": {"update_columns": ["name"]},
+                },
+            },
+            {
+                "type": "DataTable",
+                "columns": ["account_id", "name"],
+                "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                "crud": {
+                    "form": {"update_columns": ["name"]},
+                    "bulk_update_handler": "bulk_update_accounts",
+                },
+            },
+            {
+                "type": "DataTable",
+                "columns": ["account_id", "name"],
+                "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                "crud": {
+                    "primary_key": "account_id",
+                    "bulk_update_handler": "bulk_update_accounts",
+                },
+            },
+            {
+                "type": "DataTable",
+                "columns": ["account_id", "name"],
+                "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                "crud": {
+                    "primary_key": "account_id",
+                    "form": {"update_columns": ["name"]},
+                    "bulk_update_handler": "missing_bulk_update",
+                },
+            },
+        ],
+    },
+)
+def load_dashboard(context, page_id, params=None):
+    return {}
+
+
+@ui_action(name="bulk_update_accounts")
+def bulk_update_accounts(context, primary_keys: list[str], payload: AccountUpdatePayload):
+    return {"ok": True}
+''',
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    diagnostics = [
+        diagnostic for diagnostic in result.diagnostics if diagnostic.code.startswith("V2_PAGE_CRUD_HANDLER_")
+    ]
+    assert [(diagnostic.code, diagnostic.location, diagnostic.message) for diagnostic in diagnostics] == [
+        (
+            "V2_PAGE_CRUD_HANDLER_MISSING",
+            "pages.dashboard.load_dashboard.schema.children[0].crud.toolbar.bulk_update",
+            "DataTable toolbar.bulk_update requires bulk_update_handler",
+        ),
+        (
+            "V2_PAGE_CRUD_HANDLER_CONFIG_INVALID",
+            "pages.dashboard.load_dashboard.schema.children[1].crud.primary_key",
+            "DataTable bulk_update_handler requires a non-empty primary_key: bulk_update_accounts",
+        ),
+        (
+            "V2_PAGE_CRUD_HANDLER_CONFIG_INVALID",
+            "pages.dashboard.load_dashboard.schema.children[2].crud.form.update_columns",
+            "DataTable bulk_update_handler requires non-empty form.update_columns: bulk_update_accounts",
+        ),
+        (
+            "V2_PAGE_CRUD_HANDLER_MISSING",
+            "pages.dashboard.load_dashboard.schema.children[3].crud.bulk_update_handler",
+            "DataTable bulk_update_handler must reference a @ui_action function: missing_bulk_update",
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "handler_signature",
+    [
+        "(ctx, primary_keys: list[str], payload: AccountUpdatePayload)",
+        "(context, payload: AccountUpdatePayload, primary_keys: list[str])",
+        "(context, primary_keys: list[str], payload: AccountUpdatePayload | None = None)",
+        "(context, *, primary_keys: list[str], payload: AccountUpdatePayload)",
+        "(context, primary_keys: list[str], payload: AccountUpdatePayload, *args)",
+        "(context, primary_keys: list[str], payload: AccountUpdatePayload, **kwargs)",
+    ],
+)
+def test_scan_v2_module_rejects_non_exact_bulk_update_handler_signatures(
+    tmp_path: Path, handler_signature: str
+):
+    module_root = _init_v2_module(tmp_path)
+    _write_bulk_update_page(module_root, handler_signature)
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    diagnostics = [
+        diagnostic
+        for diagnostic in result.diagnostics
+        if diagnostic.code == "V2_PAGE_CRUD_HANDLER_SIGNATURE_INVALID"
+    ]
+    assert [diagnostic.message for diagnostic in diagnostics] == [
+        "DataTable bulk_update_handler signature must accept "
+        "(context, primary_keys, payload): bulk_update_accounts"
+    ]
+
+
+@pytest.mark.parametrize(
+    "primary_keys_annotation",
+    ["list[str]", "list[int]", "List[str]", "List[int]", "list[AccountId]"],
+)
+def test_scan_v2_module_accepts_concrete_bulk_update_primary_key_lists(
+    tmp_path: Path, primary_keys_annotation: str
+):
+    module_root = _init_v2_module(tmp_path)
+    _write_bulk_update_page(
+        module_root,
+        f"(context, primary_keys: {primary_keys_annotation}, payload: AccountUpdatePayload)",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    assert not [diagnostic for diagnostic in result.diagnostics if diagnostic.code.startswith("V2_PAGE_CRUD_HANDLER_")]
+
+
+@pytest.mark.parametrize(
+    "primary_keys_annotation",
+    [
+        None,
+        "list",
+        "list[Any]",
+        "Any",
+        "Mapping[str, str]",
+        "List[T]",
+        "list[str, int]",
+        "List[str, int]",
+    ],
+)
+def test_scan_v2_module_rejects_loose_bulk_update_primary_key_types(
+    tmp_path: Path, primary_keys_annotation: str | None
+):
+    module_root = _init_v2_module(tmp_path)
+    annotation = f": {primary_keys_annotation}" if primary_keys_annotation else ""
+    _write_bulk_update_page(
+        module_root,
+        f"(context, primary_keys{annotation}, payload: AccountUpdatePayload)",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    diagnostics = [
+        diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_PAGE_CRUD_HANDLER_TYPE_INVALID"
+    ]
+    assert [diagnostic.message for diagnostic in diagnostics] == [
+        "DataTable bulk_update_handler primary_keys must use list[T]/List[T] with a concrete element type, "
+        "not bare list/Any/Mapping: bulk_update_accounts.primary_keys"
+    ]
+
+
+@pytest.mark.parametrize("payload_annotation", ["dict", "Mapping[str, str]", "Any"])
+def test_scan_v2_module_rejects_loose_bulk_update_payload_types(tmp_path: Path, payload_annotation: str):
+    module_root = _init_v2_module(tmp_path)
+    _write_bulk_update_page(
+        module_root,
+        f"(context, primary_keys: list[str], payload: {payload_annotation})",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    diagnostics = [
+        diagnostic for diagnostic in result.diagnostics if diagnostic.code == "V2_PAGE_CRUD_HANDLER_TYPE_INVALID"
+    ]
+    assert [diagnostic.message for diagnostic in diagnostics] == [
+        "DataTable bulk_update_handler payload must use a concrete TypedDict/dataclass-style payload type, "
+        "not dict/Mapping/Any: bulk_update_accounts.payload"
+    ]
 
 
 def test_scan_v2_module_validates_toolbar_import_submit_contract(tmp_path: Path):

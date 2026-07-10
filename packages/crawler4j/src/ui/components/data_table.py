@@ -504,6 +504,7 @@ class SkyDataTable(QWidget):
         self._update_pagination_labels()
 
     def request_refresh(self) -> None:
+        self.table.clearSelection()
         self._latest_request_id += 1
         self._pending_request_id = self._latest_request_id
         self.set_loading(True)

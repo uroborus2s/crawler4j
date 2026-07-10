@@ -20,6 +20,7 @@ ALLOWED_INLINE_TABLE_SCHEMA_KEYS = {
     "data_source",
     "row_action",
     "empty_text",
+    "selection_mode",
     "crud",
     "toolbar",
 }
@@ -101,10 +102,12 @@ ALLOWED_TABLE_CRUD_KEYS = {
     "create_handler",
     "update_handler",
     "delete_handler",
+    "bulk_update_handler",
 }
 ALLOWED_TABLE_CRUD_FORM_KEYS = {"create_columns", "update_columns"}
 ALLOWED_TABLE_CRUD_RENDER_MODES = {"toolbar", "row_actions"}
-ALLOWED_TABLE_CRUD_TOOLBAR_KEYS = {"create", "update", "delete"}
+ALLOWED_TABLE_SELECTION_MODES = {"none", "single", "multi"}
+ALLOWED_TABLE_CRUD_TOOLBAR_KEYS = {"create", "update", "delete", "bulk_update"}
 ALLOWED_LAYOUT_DIRECTIONS = {"column", "row"}
 ALLOWED_LAYOUT_KINDS = {"grid"}
 ALLOWED_TEXT_STYLES = {"title", "subtitle", "body", "meta"}
@@ -316,6 +319,7 @@ class DataTableCrudToolbarSchema(TypedDict, total=False):
     create: bool
     update: bool
     delete: bool
+    bulk_update: bool
 
 
 class DataTableCrudFormSchema(TypedDict, total=False):
@@ -347,6 +351,7 @@ class DataTableCrudSchema(TypedDict, total=False):
     create_handler: str
     update_handler: str
     delete_handler: str
+    bulk_update_handler: str
 
 
 class DataTableSchema(TypedDict, total=False):
@@ -358,6 +363,7 @@ class DataTableSchema(TypedDict, total=False):
     data_source: Required[DataTableDataSourceSchema]
     row_action: RowActionSchema
     empty_text: str
+    selection_mode: Literal["none", "single", "multi"]
     crud: DataTableCrudSchema
     toolbar: ToolbarSchema
 
@@ -1214,7 +1220,7 @@ def _normalize_table_crud_toolbar(raw: Any, *, field_name: str) -> dict[str, boo
     unknown_keys = sorted(set(raw) - ALLOWED_TABLE_CRUD_TOOLBAR_KEYS)
     if unknown_keys:
         raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
-    return {key: bool(raw.get(key)) for key in ("create", "update", "delete") if key in raw}
+    return {key: bool(raw.get(key)) for key in ("create", "update", "delete", "bulk_update") if key in raw}
 
 
 def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
@@ -1231,6 +1237,8 @@ def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
     render = str(raw.get("render") or "toolbar").strip().lower()
     if render not in ALLOWED_TABLE_CRUD_RENDER_MODES:
         raise ValueError(f"{field_name}.render 不受支持: {render}")
+    if raw.get("bulk_update_handler") is not None and not str(raw.get("primary_key") or "").strip():
+        raise ValueError(f"{field_name}.bulk_update_handler 要求声明 primary_key")
 
     form = raw.get("form") or {}
     if not isinstance(form, dict):
@@ -1261,12 +1269,16 @@ def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
             ),
         },
     }
-    for handler_key in ("create_handler", "update_handler", "delete_handler"):
+    for handler_key in ("create_handler", "update_handler", "delete_handler", "bulk_update_handler"):
         if raw.get(handler_key) is not None:
             normalized[handler_key] = _validate_managed_identifier(
                 str(raw.get(handler_key) or ""),
                 field_name=f"{field_name}.{handler_key}",
             )
+    if normalized["toolbar"].get("bulk_update") and not normalized.get("bulk_update_handler"):
+        raise ValueError(f"{field_name}.toolbar.bulk_update=True 时必须声明 bulk_update_handler")
+    if normalized.get("bulk_update_handler") and not normalized["form"]["update_columns"]:
+        raise ValueError(f"{field_name}.bulk_update_handler 要求 form.update_columns 非空")
     return normalized
 
 
@@ -1347,10 +1359,17 @@ def _normalize_inline_table_schema(raw: Any, *, field_name: str) -> dict[str, An
     data_source_raw = raw.get("data_source")
     if data_source_raw is None:
         raise ValueError(f"{field_name} 必须提供 data_source")
+    raw_selection_mode = raw.get("selection_mode", "single")
+    if not isinstance(raw_selection_mode, str):
+        raise ValueError(f"{field_name}.selection_mode 必须是字符串")
+    selection_mode = raw_selection_mode.strip().lower()
+    if selection_mode not in ALLOWED_TABLE_SELECTION_MODES:
+        raise ValueError(f"{field_name}.selection_mode 不受支持: {selection_mode}")
 
     normalized: dict[str, Any] = {
         "type": "DataTable",
         "table_id": _validate_managed_identifier(table_id_raw, field_name=f"{field_name}.table_id"),
+        "selection_mode": selection_mode,
         "columns": [
             _normalize_table_column({"key": str(column), "label": str(column)})
             if isinstance(column, str)

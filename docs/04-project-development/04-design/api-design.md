@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `API-019`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `CR-016`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-0400`, `TASK-0401`
-**最后更新：** 2026-06-19
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `API-019`, `API-021`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `CR-016`, `CR-018`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `TASK-0400`, `TASK-0401`
+**最后更新：** 2026-07-10
 
 ## `API-001` Root App Entry Contract
 
@@ -81,6 +81,25 @@
 | 关联文档 | `hosted-ui-batch-import-design.md` |
 | 当前状态 | 已本地实现并通过 `TC-060`：Contracts / SDK / Core / UI / ATM 分发链路已落地；对外发布版本与真实业务模块 E2E 仍待后续补齐 |
 | 关联项 | `REQ-010`, `NFR-010`, `CR-016`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034` |
+
+## `API-021` Hosted UI DataTable Current-page Bulk Update Contract
+
+| 项目 | 内容 |
+|---|---|
+| 目标 | 让 Hosted UI `DataTable` 在当前已加载页内声明多选并复用 CRUD update 表单批量提交相同字段 |
+| 选择模式 | 顶层 `selection_mode=none|single|multi`；省略时为 `single`；刷新、搜索、筛选、排序、翻页和页大小变化清选择 |
+| CRUD 声明 | `crud.bulk_update_handler` + `crud.toolbar.bulk_update`；复用 `crud.primary_key` 与非空 `crud.form.update_columns` |
+| Handler | `handler(context, primary_keys: list[T], payload: ConcretePayload)`；`T` 必须是具体类型，payload 必须是具体 TypedDict / dataclass 风格类型 |
+| Core 参数边界 | 只传保序、类型敏感去重后的 `primary_keys` 和表单 `payload`；不传整行，不访问模块数据库 |
+| UI 状态 | 0 行禁用批量编辑；1 行及以上启用；toolbar 单条编辑 / 删除仅 1 行启用；行内动作只处理点击行 |
+| 成功 / 失败 | 成功清选择并刷新一次；主键缺失或模块失败时不刷新、保留选择并展示明确错误 |
+| 异步要求 | 已有 event loop 时只走 `open_dialog_async()` 和 async UI action，不调用阻塞式 `exec()` |
+| 数据 owner | 模块 `@ui_action` 负责业务校验、授权和 `ctx.db` 写入；Core 不实现 `managed_dataset` 批量更新 API |
+| 当前范围 | 只支持当前页；不含跨页选择、批量删除、任意 toolbar 表单或具体业务分组规则 |
+| 设计文档 | `hosted-ui-datatable-bulk-update-design.md` |
+| 验证 | `TC-069`；Task 1 Contracts / SDK `82 passed`，Task 2 Core / UI `38 passed`，两项均通过独立 Spec + Quality Review；Task 3 合并目标集 `120 passed`，Ruff / diff / JSON / docs 结构通过；全量 unit 有 2 个不相关版本文档漂移失败 |
+| 当前状态 | 独立整体 review 已 `approved`（99/100），当前为带全量 unit 基线 concern 的 `pending_human_confirmation`；不等于验证全绿或人工确认。真实业务模块接线、E2E 和发布不在本工作项完成事实内 |
+| 关联项 | `REQ-012`, `NFR-012`, `CR-018`, `TASK-036` |
 
 ## `API-009` Module Entity Table View Contract
 
@@ -242,6 +261,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-10 | 新增 `API-021`，登记 Hosted UI DataTable 当前页选择、CRUD 批量 handler、SDK 类型 gate、Core 调用边界与模块数据 owner | Codex |
 | 2026-06-19 | 将 `API-019` 更新为已本地实现，记录 Hosted UI toolbar 导入契约、宿主解析弹窗、payload 分发、结果展示和 `TC-060` 验证状态 | Codex |
 | 2026-06-19 | 新增 `API-019`，登记 Hosted UI 批量导入的 toolbar schema、宿主导入弹窗、标准 import payload、结果展示和敏感字段脱敏契约 | Codex |
 | 2026-05-01 | 收口环境处置为宿主边界：模块运行时代码不再导入或发送 `TaskSignal` / `EnvAction`，任务终态后环境统一回收，环境删除只由环境管理页清理链路执行，并通过 `host.env_claim` + `env_binding_field` 区分孤岛、未认领和模块业务清理候选 | Codex |

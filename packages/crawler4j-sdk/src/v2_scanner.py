@@ -114,6 +114,7 @@ class V2FunctionSignature:
     has_varargs: bool = False
     has_varkw: bool = False
     parameter_annotations: dict[str, str] | None = None
+    type_var_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -475,6 +476,7 @@ def _collect_module_function_signatures(
     functions_by_path: dict[str, dict[str, V2FunctionSignature]] = {}
     for relative, module in parsed_modules:
         module_functions: dict[str, V2FunctionSignature] = {}
+        type_var_names = _module_type_var_names(module)
         for node in module.body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -498,9 +500,22 @@ def _collect_module_function_signatures(
                 parameter_annotations={
                     arg.arg: _annotation_to_source(arg.annotation) for arg in all_args if arg.annotation is not None
                 },
+                type_var_names=type_var_names,
             )
         functions_by_path[relative.as_posix()] = module_functions
     return functions_by_path
+
+
+def _module_type_var_names(module: ast.Module) -> tuple[str, ...]:
+    names: set[str] = set()
+    for node in module.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(node.value, ast.Call):
+            continue
+        if _decorator_name(node.value.func) != "TypeVar":
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+        names.update(target.id for target in targets if isinstance(target, ast.Name))
+    return tuple(sorted(names))
 
 
 def _metadata_from_decorators(decorators: list[ast.expr]) -> Crawler4jMeta | None:
@@ -1256,10 +1271,45 @@ def _validate_page_crud_handlers(
         if not isinstance(crud, dict):
             continue
         primary_key = str(crud.get("primary_key") or "").strip()
+        bulk_update_handler = str(crud.get("bulk_update_handler") or "").strip()
+        toolbar = crud.get("toolbar")
+        if isinstance(toolbar, dict) and bool(toolbar.get("bulk_update")) and not bulk_update_handler:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_CRUD_HANDLER_MISSING",
+                    location=f"{declaration.symbol}.{table_path}.crud.toolbar.bulk_update",
+                    message="DataTable toolbar.bulk_update requires bulk_update_handler",
+                )
+            )
+        if bulk_update_handler and not primary_key:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_CRUD_HANDLER_CONFIG_INVALID",
+                    location=f"{declaration.symbol}.{table_path}.crud.primary_key",
+                    message=(
+                        "DataTable bulk_update_handler requires a non-empty primary_key: "
+                        f"{bulk_update_handler}"
+                    ),
+                )
+            )
+        form = crud.get("form")
+        update_columns = form.get("update_columns") if isinstance(form, dict) else None
+        if bulk_update_handler and not update_columns:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_CRUD_HANDLER_CONFIG_INVALID",
+                    location=f"{declaration.symbol}.{table_path}.crud.form.update_columns",
+                    message=(
+                        "DataTable bulk_update_handler requires non-empty form.update_columns: "
+                        f"{bulk_update_handler}"
+                    ),
+                )
+            )
         handler_specs = (
             ("create_handler", ("payload",), ("payload",)),
             ("update_handler", (primary_key, "payload"), (primary_key, "payload")),
             ("delete_handler", (primary_key,), (primary_key,)),
+            ("bulk_update_handler", ("primary_keys", "payload"), ("primary_keys", "payload")),
         )
         for handler_key, expected_params, type_checked_params in handler_specs:
             handler_name = str(crud.get(handler_key) or "").strip()
@@ -1276,7 +1326,10 @@ def _validate_page_crud_handlers(
                     )
                 )
                 continue
-            if not _function_accepts_exact_crud_keyword_call(handler, expected_params):
+            signature_valid = _function_accepts_exact_crud_keyword_call(handler, expected_params)
+            if handler_key == "bulk_update_handler":
+                signature_valid = signature_valid and handler.positional_args[0] == "context"
+            if not signature_valid:
                 diagnostics.append(
                     V2Diagnostic(
                         code="V2_PAGE_CRUD_HANDLER_SIGNATURE_INVALID",
@@ -1414,6 +1467,20 @@ def _crud_handler_type_diagnostics(
     annotations = signature.parameter_annotations or {}
     for parameter_name in parameter_names:
         annotation = str(annotations.get(parameter_name) or "").strip()
+        if parameter_name == "primary_keys":
+            if _is_loose_bulk_primary_keys_annotation(annotation, type_var_names=signature.type_var_names):
+                diagnostics.append(
+                    V2Diagnostic(
+                        code="V2_PAGE_CRUD_HANDLER_TYPE_INVALID",
+                        location=f"{location}.{parameter_name}",
+                        message=(
+                            f"DataTable {handler_key} primary_keys must use list[T]/List[T] with a concrete "
+                            "element type, not bare list/Any/Mapping: "
+                            f"{signature.name}.{parameter_name}"
+                        ),
+                    )
+                )
+            continue
         if parameter_name == "payload":
             if _is_loose_crud_payload_annotation(annotation):
                 diagnostics.append(
@@ -1466,6 +1533,26 @@ def _is_loose_crud_scalar_annotation(annotation: str) -> bool:
         "set",
         "Set",
     }
+
+
+def _is_loose_bulk_primary_keys_annotation(annotation: str, *, type_var_names: tuple[str, ...]) -> bool:
+    if not annotation:
+        return True
+    try:
+        expression = ast.parse(annotation, mode="eval").body
+    except SyntaxError:
+        return True
+    if not isinstance(expression, ast.Subscript) or _annotation_root(ast.unparse(expression.value)) not in {
+        "list",
+        "List",
+    }:
+        return True
+    element_type = expression.slice
+    if isinstance(element_type, ast.Tuple):
+        return True
+    if any(isinstance(node, ast.Name) and node.id in type_var_names for node in ast.walk(element_type)):
+        return True
+    return _is_loose_crud_scalar_annotation(ast.unparse(element_type))
 
 
 def _annotation_root(annotation: str) -> str:

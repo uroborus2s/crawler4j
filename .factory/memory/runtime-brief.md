@@ -25,6 +25,7 @@
 - 当前 0.4.x 对象装配入口：`@component/@workflow` 的 `inject` 与 component 对象参数可继续写在装饰器参数里，也可通过类属性或 `__init__` 参数上的 `Annotated[..., object_inject(...)]` / `Annotated[..., object_param(...)]` 声明；Contracts、SDK scanner、Core descriptor 已统一归一到 `InjectSpec` / `ParameterSpec`。`object_param` 参数类型覆盖 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`，结构化参数通过 `schema` / `item_schema` 描述。ATM 运行模板 UI 使用公共 `ObjectGraphTree`，以 `workflow -> interface 绑定行 -> 子 interface/参数` 树形展示对象图；绑定行左侧显示 interface 中文 `label(name)`，右侧下拉框显示 component 中文 `label(name)`，interface 选择写入 `object_bindings`，component 创建参数写入 `object_params`。
 - 当前 0.4.x 数据表/视图入口：`module.yaml.data` 不是正式事实源，模块数据表和只读视图只由 `@data_table` / `@data_view` 进入 manifest lock 后同步；`ctx.db.describe(source)` 以逻辑数据源名读取宿主归一化契约，返回 `columns/system_fields/writable_fields/required_fields/read_only_fields` 等字段；`ctx.db.from_(...).execute()` 没有隐式分页上限，未调用 `limit/offset` 时读取满足条件的全部行；`@data_table` 默认 `custom_table`，主键由 `record_key_field` 指向 schema 字段，integer 主键可声明 `auto_increment=True` 并通过 `ctx.db.into(...).add(...)` 省略 id 新增；旧快照表语义必须显式写 `storage_mode="managed_dataset"` 并继续落到 `data.db.module_datasets`，支持单源 `where` 后 `count(*)` 统计；`@data_view` 只允许引用 `custom_table` 并由宿主创建只读 SQLite view。
 - 当前 0.4.x Hosted UI DataTable 交互：`type="select"`、带 `options` 且 `searchable=True` 的列由 Core `SkyDataTable` 渲染为工具栏快速筛选，下拉值写入 `HostedDataTableQuery.params[column.key]`；`不限`、`全部`、`all`、`__all__` 和空值会清除对应筛选。启用排序且存在 `sortable=True` 列时，Core 同时保留表头点击排序，并提供可见排序字段/方向控件，两者同步同一份 `query.sort`。Renderer 调用 query handler 前会合并页面导航参数和表格 params，表格显式筛选同名优先。`actions` 列点击后由 renderer 处理：`__crud_update__` / `__crud_delete__` 保持 CRUD 内置流程；其他 action id 会先读取行内 action spec，若有 `name` 则调用该同名 `@ui_action`，若有 `params` 则按 binding/value 解析当前行生成参数；没有显式 `params` 时才按 `crud.primary_key` 从当前行生成单个命名参数。
+- 当前 0.4.x Hosted UI DataTable 批量编辑：`CR-018` / `TASK-036` 已完成通用实现和 Task 3 收口，独立整体 review 为 `approved`（99/100）且已获人工确认，当前进入提交与 Contracts 0.4.3 / SDK 0.4.4 发布流程。表格顶层 `selection_mode` 支持 `none/single/multi`，省略为 `single`；CRUD 通过 `bulk_update_handler` 与 `toolbar.bulk_update` 复用 `form.update_columns`。SDK 固定 handler 为 `(context, primary_keys: list[T], payload: ConcretePayload)`，Core 只传保序、类型敏感去重的主键数组与 payload；刷新、搜索、筛选、排序和分页清选择；模块仍独占业务校验与 `ctx.db` 写入。具体业务模块接线仍是独立 gate。
 - 当前 0.4.x Hosted UI 批量导入：`REQ-010` / `API-019` / `CR-016` 和 `TASK-030` ~ `TASK-034` 已完成本地实现并通过 `TC-060`。页面 / `DataTable` toolbar 可声明导入按钮，宿主读取 `.xlsx/.csv` 文件、剪贴板 CSV/TSV 或手工 JSON 并解析为 import payload，模块只接收结构化行数据；宿主限制文件类型、大小和最大行数，并对 token/cookie/password 等敏感字段脱敏。`@ui_action` 默认接收 `import_payload`，workflow 通过 `ctx.runtime["import_payload"]` 接收，模块返回批次汇总后宿主可跳转 `import_data_records`。对外发布版本与真实业务模块 E2E 仍待后续收口。
 - 最近交接包：无
 - 最近快照：无
@@ -66,8 +67,8 @@
 
 ## 当前前 5 个活跃工作项
 
+- `TASK-036-managed-dataset-bulk-field-update` Hosted UI DataTable 当前页批量编辑 | 状态：HUMAN_APPROVED_READY_FOR_COMMIT_WITH_CONCERN | 负责人：Codex + subagents | 下一动作：提交已评审变更并发布 Contracts / SDK
 - `TASK-028-implement-module-entity-table-view-query-capability` TASK-028 实现模块实体表视图与分析查询能力 | 状态：DONE | 负责人：Codex
 - `TASK-027-implement-hosted-ui-master-detail-row-navigation` TASK-027 Hosted UI 主从表导航 | 状态：DONE | 负责人：Codex
 - `TASK-026-implement-module-data-resource-storage-modes` TASK-026 模块数据资源统一登记与存储模式 | 状态：DONE | 负责人：Codex
 - `TASK-025-implement-hosted-module-ui-framework` TASK-025 实现模块宿主管理页框架 V1 | 状态：DONE | 负责人：Codex
-- `TASK-013-stabilize-module-root-entry-shim-and-sdk-assembler` TASK-013 旧模块入口托管方案历史任务；现已被 `core-native-v1` 宿主扫描协议取代 | 状态：DONE | 负责人：Gemini
