@@ -624,6 +624,9 @@ class ManagedPageRenderer(QWidget):
         if not action_name:
             return
         action_spec = self._row_action_spec(row, action_name)
+        if str(action_spec.get("type") or "").strip().lower() == "open_page":
+            self._handle_row_action(action_spec, row)
+            return
         if action_spec:
             action_name = str(action_spec.get("name") or action_name).strip()
         params = self._row_action_params(component, row, action_spec, error_title="操作失败")

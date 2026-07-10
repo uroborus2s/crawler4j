@@ -1711,6 +1711,125 @@ def test_managed_page_renderer_dispatches_custom_row_action_to_ui_action(qtbot, 
         restore_module(service, original_registry, module_name)
 
 
+def test_managed_page_renderer_row_button_opens_page_with_clicked_row_params(qtbot, tmp_path):
+    module_name = "hosted_page_row_button_navigation_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import page, ui_action
+
+            CALLS = []
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "data_source": {
+                                "type": "rows",
+                                "rows": [
+                                    {
+                                        "account_id": "acct-001",
+                                        "actions": [
+                                            {
+                                                "id": "open_details",
+                                                "label": "详情",
+                                                "type": "open_page",
+                                                "page_id": "details",
+                                                "params": {
+                                                    "account_id": {"binding": "account_id"},
+                                                },
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        "account_id": "acct-002",
+                                        "actions": [
+                                            {
+                                                "id": "open_details",
+                                                "label": "详情",
+                                                "type": "open_page",
+                                                "page_id": "details",
+                                                "params": {
+                                                    "account_id": {"binding": "account_id"},
+                                                },
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                            "columns": [
+                                {"key": "account_id", "label": "账号"},
+                                {"key": "actions", "label": "操作", "type": "actions"},
+                            ],
+                        },
+                    ],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+
+
+            @ui_action(name="open_details")
+            def open_details(context, account_id):
+                del context
+                CALLS.append({"account_id": account_id})
+                return {"ok": True}
+            """,
+            "pages/details.py": """
+            from crawler4j_contracts import page
+
+            @page(
+                name="details",
+                label="详情",
+                schema={"type": "Page", "children": []},
+            )
+            def load_details_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts"), make_page_info("details")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    opened_pages: list[tuple[str, dict[str, object] | None]] = []
+
+    try:
+        page = ManagedPageRenderer(
+            module_name,
+            "accounts",
+            module_info=module_info,
+            open_page_callback=lambda page_id, params=None: opened_pages.append((page_id, params)),
+        )
+        qtbot.addWidget(page)
+
+        table = page._data_table_widgets["accounts"]
+        qtbot.waitUntil(lambda: table.rowCount() == 2)
+        refresh_requests: list[dict[str, object]] = []
+        table.query_requested.connect(lambda _request_id, query: refresh_requests.append(dict(query)))
+
+        action_cell = table.cellWidget(1, 1)
+        assert action_cell is not None
+        details_button = next(button for button in action_cell.findChildren(QPushButton) if button.text() == "详情")
+        details_button.click()
+
+        import importlib
+
+        actions_module = importlib.import_module(f"{module_name}.pages.accounts")
+        assert opened_pages == [("details", {"account_id": "acct-002"})]
+        assert actions_module.CALLS == []
+        assert refresh_requests == []
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
 def test_managed_page_renderer_dispatches_non_crud_row_action_params_to_ui_action(qtbot, tmp_path):
     module_name = "hosted_page_non_crud_release_action_module"
     module_dir = write_module_tree(

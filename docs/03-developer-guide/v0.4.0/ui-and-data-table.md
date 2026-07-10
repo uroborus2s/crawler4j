@@ -407,7 +407,28 @@ CRUD 参数来源固定：
 - `update_handler`：调用 `update_account(ctx, account_id=row_key, payload=form_payload)`；`account_id` 这个参数名来自 `crud.primary_key`，`row_key` 来自当前选中行的 `selected_row[primary_key]`。
 - `delete_handler`：调用 `delete_account(ctx, account_id=row_key)`；参数名同样来自 `crud.primary_key`。
 
-`actions` 列可以在同一行里追加自定义按钮。点击 `__crud_update__` / `__crud_delete__` 仍走内置编辑和删除流程；点击其他 action id 时，宿主会调用同名 `@ui_action`，并按 `crud.primary_key` 从当前行组装单个命名参数，例如 `crud.primary_key="phone"` 且当前行 `phone="13800138000"` 时调用 `verify_phone(ctx, phone="13800138000")`。
+`actions` 列可以在同一行里追加自定义按钮。点击 `__crud_update__` / `__crud_delete__` 仍走内置编辑和删除流程；未声明 `type` 的其他 action id 默认调用同名 `@ui_action`，并按 `crud.primary_key` 从当前行组装单个命名参数，例如 `crud.primary_key="phone"` 且当前行 `phone="13800138000"` 时调用 `verify_phone(ctx, phone="13800138000")`。
+
+行按钮也可以显式声明 `type="open_page"`，用当前行字段打开详情页：
+
+```python
+{
+    "account_id": "acct-001",
+    "actions": [
+        {
+            "id": "open_details",
+            "label": "详情",
+            "type": "open_page",
+            "page_id": "account_details",
+            "params": {
+                "account_id": {"binding": "account_id"},
+            },
+        },
+    ],
+}
+```
+
+`open_page` 行按钮只解析显式 `params`，不使用 `crud.primary_key` 兜底；未声明 `params` 时目标页收到 `None`。导航不会调用同 ID 的 `@ui_action`，也不会刷新源表。多选表格需要同时保留整行选择时，优先使用这种显式详情按钮；顶层 `row_action` 仍表示整行单击导航。
 
 CRUD handler 签名必须写成确定参数，不允许用 `**kwargs` 或 `Mapping[str, Any]` 模糊接收输入：
 
