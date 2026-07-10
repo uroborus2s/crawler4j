@@ -159,7 +159,10 @@ def test_create_env_dialog_prefills_suggested_name_without_submitting_override(q
 
     assert kind == EnvKind.BROWSER
     assert provider == "virtualbrowser"
-    assert config == {"proxy": {"mode": ProxyMode.NONE}}
+    assert config == {
+        "proxy": {"mode": ProxyMode.NONE},
+        "creation_params": {"virtualbrowser": {"__randomize_fingerprint__": True}},
+    }
 
 
 def test_create_env_dialog_keeps_native_title_bar(qtbot, monkeypatch):

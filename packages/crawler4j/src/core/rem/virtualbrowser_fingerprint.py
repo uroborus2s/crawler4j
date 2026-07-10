@@ -10,7 +10,6 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY = "__randomize_fingerprint__"
-VIRTUALBROWSER_RANDOM_CHROME_VERSIONS = tuple(range(139, 146))
 VIRTUALBROWSER_RANDOM_MODE_KEYS = (
     "fonts",
     "canvas",
@@ -85,8 +84,8 @@ VIRTUALBROWSER_COMMON_HARDWARE_PROFILES = (
     (8, 32),
     (12, 32),
 )
-VIRTUALBROWSER_LOCATION_PRECISION_MIN_M = 1600
-VIRTUALBROWSER_LOCATION_PRECISION_MAX_M = 5600
+VIRTUALBROWSER_LOCATION_PRECISION_MIN_M = 1000
+VIRTUALBROWSER_LOCATION_PRECISION_MAX_M = 2000
 VIRTUALBROWSER_UA_TEMPLATES = {
     "Windows": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -227,46 +226,9 @@ def build_virtualbrowser_random_fingerprint_defaults(
     *,
     chrome_version: int = 145,
 ) -> dict[str, Any]:
-    """生成随机指纹托管模式的一次性稳定默认值。"""
-    width, height = secrets.choice(VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS)
-    cpu, memory = secrets.choice(VIRTUALBROWSER_COMMON_HARDWARE_PROFILES)
-    current_system = _fingerprint_system()
-    defaults = {
-        "os": VIRTUALBROWSER_OS_BY_SYSTEM[current_system],
-        "ua": {"mode": 0, "value": generate_random_user_agent(chrome_version, system=current_system)},
-        "ua-full-version": {"mode": 1, "value": f"{chrome_version}.0.0.0"},
-        "sec-ch-ua": {
-            "mode": 0,
-            "value": [
-                {"brand": "Chromium", "version": chrome_version},
-                {"brand": "Not=A?Brand", "version": "99"},
-            ],
-        },
-        "ua-language": dict(VIRTUALBROWSER_CN_LANGUAGE),
-        "time-zone": dict(VIRTUALBROWSER_CN_TIME_ZONE),
-        "screen": {
-            "mode": 1,
-            "width": width,
-            "height": height,
-            "_value": f"{width} x {height}",
-        },
-        "fonts": {"mode": 1, "value": list(VIRTUALBROWSER_FONTS_BY_SYSTEM[current_system])},
-        "canvas": {"mode": 1, **_rgba_noise()},
-        "webgl-img": {"mode": 1, **_rgba_noise()},
-        "audio-context": {"mode": 1, "channel": _unit_noise(), "analyer": _unit_noise()},
-        "client-rects": {"mode": 1, "width": _unit_noise(), "height": _unit_noise()},
-        "speech_voices": {
-            "mode": 1,
-            "value": [dict(voice) for voice in VIRTUALBROWSER_SPEECH_VOICES_BY_SYSTEM[current_system]],
-        },
-        "device-name": {"mode": 1, "value": generate_device_name(current_system)},
-        "mac": {"mode": 1, "value": generate_mac_address()},
-        "webrtc": {"mode": 0},
-        "cpu": {"mode": 1, "value": cpu},
-        "memory": {"mode": 1, "value": memory},
-    }
-    defaults.update(build_virtualbrowser_geo_fingerprint_overrides(geo))
-    return defaults
+    """保留兼容入口；随机字段由 VirtualBrowser 的 randomizeFingerprint 生成。"""
+    del chrome_version
+    return build_virtualbrowser_geo_fingerprint_overrides(geo)
 
 
 def build_virtualbrowser_geo_fingerprint_overrides(
@@ -378,13 +340,11 @@ def materialize_virtualbrowser_fingerprint(
         for key in VIRTUALBROWSER_RANDOM_MODE_KEYS:
             if _random_mode_placeholder(payload.get(key)):
                 payload.pop(key, None)
-        chrome_version = secrets.choice(VIRTUALBROWSER_RANDOM_CHROME_VERSIONS)
-        defaults = build_virtualbrowser_random_fingerprint_defaults(
-            geo,
-            chrome_version=chrome_version,
-        )
-        defaults.update(payload)
-        return chrome_version, defaults
+        # 不在 Core 中伪造 UA、字体、AudioContext 或 Speech Voices；创建完成后由
+        # VirtualBrowser randomizeFingerprint 生成，再读取完整参数验收。
+        if geo:
+            payload.update(build_virtualbrowser_geo_fingerprint_overrides(geo))
+        return chrome_version, payload
 
     if geo:
         payload.update(build_virtualbrowser_geo_fingerprint_overrides(geo))

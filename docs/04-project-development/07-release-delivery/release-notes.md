@@ -19,12 +19,12 @@
 
 ## 2. 当前仓库相对正式发布的状态
 
-- 当前工作区根应用版本：`0.4.30`
-- 当前运行时版本：`0.4.30`
+- 当前工作区根应用版本：`0.4.31`
+- 当前运行时版本：`0.4.31`
 - 最近正式发布 tag：`v0.2.0`
 - SDK 当前已发布版本：`0.4.4`
 - Contracts 当前已发布版本：`0.4.3`
-- 根应用 0.4.30 承接 Hosted UI DataTable 当前页批量编辑和行按钮 `open_page` 页面导航；SDK 0.4.4 / Contracts 0.4.3 保持不变
+- 根应用 0.4.31 承接 VirtualBrowser 厂商随机指纹、代理地理回写与创建后页面运行时自检；SDK 0.4.4 / Contracts 0.4.3 保持不变
 - 已按 `crawler4j-contracts 0.4.3 -> crawler4j-sdk 0.4.4` 顺序完成 PyPI 发布，并核对在线文件哈希与隔离安装结果
 - SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
 - 当前 0.4.x 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult`，workflow/component 可选实现 `setup(ctx, workflow)` 和 `cleanup(ctx, outcome)`，环境回收由宿主收口
@@ -33,25 +33,25 @@
 
 | 项目 | 结果 |
 |---|---|
-| 版本相关单测与打包配置 | 通过（2026-07-10 聚焦回归 `65 passed`） |
-| Root wheel/sdist build | 通过（2026-07-10 产出 `crawler4j 0.4.30` wheel/sdist，METADATA 与内嵌 README 版本一致） |
+| 版本相关单测与打包配置 | 通过（2026-07-10 客户端 0.4.31 全量 `1177 passed`，`uv lock --check` 通过） |
+| Root wheel/sdist build | 上一轮通过（2026-07-10 产出 `crawler4j 0.4.30` wheel/sdist；0.4.31 尚未构建） |
 | SDK wheel/sdist build | 通过（2026-07-10 产出 `crawler4j-sdk 0.4.4` wheel/sdist，元数据依赖 Contracts `>=0.4.3,<0.5.0`） |
 | SDK publish | 通过（2026-07-10 在 Contracts 在线可见后上传 0.4.4；PyPI wheel/sdist 哈希和隔离安装通过） |
 | Contracts wheel/sdist build | 通过（2026-07-10 产出 `crawler4j-contracts 0.4.3` wheel/sdist） |
 | Contracts publish | 通过（2026-07-10 先上传 0.4.3；PyPI wheel/sdist 哈希与本地一致） |
 | Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-06-19 删除远端旧 `Crawler4j-0.4.16.dmg` 后，`uv run package-macos-internal-release` 重新生成 `Crawler4j.app`、`Crawler4j-0.4.16.dmg`、`appcast.xml` 并上传 macOS 更新目录；公网 DMG `HEAD 200`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243`） |
-| Full test / lint / smoke | 客户端 0.4.30 全量 unit `1135 passed`；全仓 Ruff、`uv lock --check`、project JSON、`git diff --check` 与 UI smoke 通过 |
+| Full test / lint / smoke | 客户端 0.4.31 全量 `1177 passed`；全仓 Ruff、`uv lock --check`、`git diff --check` 与 UI smoke 通过 |
 | Docs markdown tree | 通过（`docs-stratego source validate --repo-path .`，`pages=86 contracts=0`） |
 
 ## 4. 当前不建议直接发布的原因
 
-- `0.4.30` 对应的桌面安装包、Git tag、正式 GitHub release 与交付批次仍待后续完成
+- `0.4.31` 对应的桌面安装包、Git tag、正式 GitHub release 与交付批次仍待后续完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 复验 `0.4.30` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.4.31` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -60,6 +60,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-10 | 将根应用 / 运行时源码版本提升到 0.4.31，承接 VirtualBrowser 厂商随机指纹、代理地理回写与创建后页面运行时自检；本轮只提交推送源码版本，不构建桌面安装包 | Codex |
 | 2026-07-10 | 将根应用 / 运行时源码版本提升到 0.4.30，承接 Hosted UI DataTable 当前页批量编辑与行按钮页面导航；本轮只提交推送源码版本，不构建桌面安装包 | Codex |
 | 2026-07-10 | 发布 Contracts 0.4.3 / SDK 0.4.4，用于对外提供 Hosted UI DataTable 当前页多选批量编辑 schema 与 scanner 校验；两包均完成 PyPI 哈希和隔离安装验证，根应用 / 客户端保持现有 0.4.29 | Codex |
 | 2026-03-26 | 建立基线 release notes | Codex |
