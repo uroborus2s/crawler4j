@@ -7,7 +7,7 @@
 **上游输入：** `version-governance.md` | `release-notes.md` | `docs/04-project-development/06-testing-verification/test-plan.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** `delivery-package.md` | 发布决策 | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-003`, `REL-004`, `TASK-017`, `REQ-009`, `REQ-0401`, `NFR-003`
-**最后更新：** 2026-07-08
+**最后更新：** 2026-07-10
 
 ## 1. 使用范围
 
@@ -17,12 +17,12 @@
 
 | 类别 | 检查项 | 证据 | 当前基线状态 |
 |---|---|---|---|
-| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 已具备（当前根应用源码线为 `0.4.26`，最近正式 tag 在本轮发布前仍为 `v0.2.0`；本轮版本服务回归 `3 passed`） |
+| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 已具备（当前根应用源码线 `0.4.30`，版本与打包配置聚焦回归 `65 passed`；最近正式 tag 仍为 `v0.2.0`） |
 | 版本 | 当前工作区版本、最近正式 tag、SDK/Contracts 版本口径清楚 | `release-notes.md` | 已具备 |
-| 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备（2026-05-18 复验为 `992 passed`） |
-| 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备（2026-05-18 复验通过） |
-| 运行 | `uv run python scripts/smoke_test_ui.py` 通过 | `test-plan.md` | 已具备（2026-05-01 复验通过；当前 smoke 覆盖 Shell 导航/页面数量与 Dashboard 异步刷新） |
-| 构建 | Root / SDK / Contracts build 通过 | `test-plan.md` | 部分具备（2026-05-26 已产出 Root 0.4.3 wheel/sdist；当前 root 0.4.26 尚未刷新，SDK / Contracts 0.4.2 wheel/sdist 已构建并发布） |
+| 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备（2026-07-10 客户端 0.4.30 全量 unit `1135 passed`） |
+| 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备（2026-07-10 全仓复验通过） |
+| 运行 | `uv run python scripts/smoke_test_ui.py` 通过 | `test-plan.md` | 已具备（2026-07-10 复验通过；覆盖 Shell 结构与 Dashboard 异步刷新） |
+| 构建 | Root / SDK / Contracts build 通过 | `test-plan.md` | 已具备源码包证据（root 0.4.30、SDK 0.4.4、Contracts 0.4.3 wheel/sdist 均已构建；桌面安装包仍为独立 gate） |
 | 构建 | 桌面客户端下载包（macOS / Windows）齐备 | `delivery-package.md` | 部分具备（2026-06-19 已重新生成并上传 macOS `Crawler4j-0.4.16.dmg` / `appcast.xml`；Windows `PyInstaller onedir + Velopack` 发布链已落地，但当前批次仍缺 Windows 真机签名、安装、升级证据与正式下载地址） |
 | 业务 | `ctrip` 真实站点 E2E 完成并记录结果 | `ctrip-real-site-e2e-closeout.md` + 真实环境验证记录 | 阻塞（当前只补齐了 DevLink 活跃事实、fresh ZIP 预检与历史登录日志，仍未完成本轮 DevLink + ZIP 双链真实站点闭环） |
 | 业务 | 若本次批次包含环境候选 Service Job 队列能力，则已验证“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、候选纯函数实时过滤、模块环境授权和等待超时收口 | `test-plan.md` + 对应测试记录 | 已具备（当前 HEAD 已纳入 `TASK-023` / `REQ-009` 变更，`TC-026` / `TC-027` 本地回归已完成；正式切版时仍需把这组证据绑定到发布批次） |
@@ -40,13 +40,14 @@
 ## 4. 当前阻塞项
 
 1. `ctrip` 真实站点 E2E 仍未按 `ctrip-real-site-e2e-closeout.md` 完成本轮 DevLink + ZIP 双链回放并留证；当前只复验了 DevLink 活跃状态、fresh ZIP 预检和历史真实登录日志。
-2. 当前 `0.4.26` 对应的 Git tag / GitHub release 资产将在本轮 PR 合并后创建；SDK / Contracts 0.4.2 PyPI publish 已完成，最新已记录 macOS 0.4.16 客户端升级包已重新生成并上传。
+2. 当前 `0.4.30` 对应的桌面安装包、Git tag / GitHub release 资产仍待后续创建；SDK 0.4.4 / Contracts 0.4.3 PyPI publish 已完成，最新已记录 macOS 0.4.16 客户端升级包已重新生成并上传。
 3. 当前虽已具备 Windows `PyInstaller onedir + Velopack` 发布链，但本轮仍缺 Windows 真机签名、安装、升级留证与正式下载地址，不能声称“Windows 交付包已放行”。
 
 ## 5. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-10 | SDK 0.4.4 / Contracts 0.4.3 已按依赖顺序完成构建、PyPI 发布、在线哈希与隔离安装验证；本轮不升级或发布客户端，完整生产交付 Gate 仍受根应用资产、真实站点 E2E 和 Windows 真机证据约束 | Codex |
 | 2026-05-18 | 复验 0.4.1 fresh gate：全量测试、lint、三包 build、SDK/Contracts PyPI publish 与 macOS Sparkle 客户端升级包已完成；正式发布仍因 `ctrip` 真站 E2E、Windows 真机证据和 GitHub release / 交付批次未闭环保持 `No-Go` | Codex |
 | 2026-05-01 | 追加 0.4.0 全面审查后的最新 gate：`886 passed`、lint、UI smoke、三包构建、SDK CLI help 与 macOS `package-desktop` 已复验；正式发布仍因 `ctrip` 真站 E2E、Windows 真机证据、publish 和交付批次未闭环保持 `No-Go` | Codex |
 | 2026-05-18 | 发布候选版本提升到 `0.4.1`；版本、构建、publish 与客户端升级包已按新版本重跑留证 | Codex |

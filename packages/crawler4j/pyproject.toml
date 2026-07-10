@@ -1,11 +1,11 @@
 [project]
 name = "crawler4j"
-version = "0.4.29"
+version = "0.4.30"
 description = "Crawler4j desktop host app and Core runtime for module-based automation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "crawler4j-contracts>=0.4.2,<0.5.0",
+    "crawler4j-contracts>=0.4.3,<0.5.0",
     "pandas>=2.3.3",
     "playwright>=1.57.0",
     "pyqt6>=6.10.1",

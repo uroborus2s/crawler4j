@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import pytest
 from typing import TypedDict
+
+import pytest
 
 from crawler4j_contracts.hosted_ui import (
     QueryCallback,
@@ -29,6 +30,28 @@ class _FakeDbExecutor:
     def execute_plan(self, plan: dict):
         self.plans.append(plan)
         return []
+
+
+def _normalize_table(**overrides: object) -> dict[str, object]:
+    table = {
+        "type": "DataTable",
+        "columns": ["account_id", "name"],
+        "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+        **overrides,
+    }
+    schema = normalize_page_schema(
+        "accounts",
+        {
+            "type": "Page",
+            "load_handler": "load_accounts_page",
+            "children": [table],
+        },
+    )
+    return schema["children"][0]
+
+
+def _normalize_crud(crud: dict[str, object]) -> dict[str, object]:
+    return _normalize_table(crud=crud)["crud"]
 
 
 def test_normalize_page_schema_supports_card_component():
@@ -636,11 +659,13 @@ def test_page_schema_type_documents_crud_ui_action_fields():
             {
                 "type": "DataTable",
                 "table_id": "accounts",
+                "selection_mode": "multi",
                 "data_source": {"type": "managed_resource", "resource_id": "accounts"},
                 "columns": [{"key": "account_id"}, {"key": "name", "sortable": True}],
                 "crud": {
                     "mode": "handlers",
                     "render": "row_actions",
+                    "toolbar": {"bulk_update": False},
                     "primary_key": "account_id",
                     "form": {
                         "create_columns": ["name"],
@@ -649,6 +674,7 @@ def test_page_schema_type_documents_crud_ui_action_fields():
                     "create_handler": "create_account",
                     "update_handler": "update_account",
                     "delete_handler": "delete_account",
+                    "bulk_update_handler": "bulk_update_accounts",
                 },
             }
         ],
@@ -656,10 +682,11 @@ def test_page_schema_type_documents_crud_ui_action_fields():
 
     normalized = normalize_page_schema("accounts", schema)
 
+    assert normalized["children"][0]["selection_mode"] == "multi"
     assert normalized["children"][0]["crud"] == {
         "mode": "handlers",
         "render": "row_actions",
-        "toolbar": {},
+        "toolbar": {"bulk_update": False},
         "primary_key": "account_id",
         "form": {
             "create_columns": ["name"],
@@ -668,7 +695,77 @@ def test_page_schema_type_documents_crud_ui_action_fields():
         "create_handler": "create_account",
         "update_handler": "update_account",
         "delete_handler": "delete_account",
+        "bulk_update_handler": "bulk_update_accounts",
     }
+
+
+@pytest.mark.parametrize("selection_mode", ["none", "single", "multi"])
+def test_normalize_page_schema_accepts_data_table_selection_modes(selection_mode: str):
+    assert _normalize_table(selection_mode=selection_mode)["selection_mode"] == selection_mode
+
+
+def test_normalize_page_schema_defaults_data_table_without_crud_to_single_selection():
+    assert _normalize_table()["selection_mode"] == "single"
+
+
+@pytest.mark.parametrize("selection_mode", ["many", ""])
+def test_normalize_page_schema_rejects_invalid_data_table_selection_mode(selection_mode: str):
+    with pytest.raises(ValueError, match="selection_mode"):
+        _normalize_table(selection_mode=selection_mode)
+
+
+def test_normalize_page_schema_rejects_selection_mode_nested_under_crud():
+    with pytest.raises(ValueError, match="selection_mode"):
+        _normalize_crud({"primary_key": "account_id", "selection_mode": "multi"})
+
+
+def test_normalize_page_schema_preserves_bulk_update_toolbar_default_and_false():
+    crud = {
+        "primary_key": "account_id",
+        "form": {"update_columns": ["name"]},
+        "bulk_update_handler": "bulk_update_accounts",
+    }
+
+    normalized = _normalize_crud(crud)
+    disabled = _normalize_crud({**crud, "toolbar": {"bulk_update": False}})
+
+    assert normalized["bulk_update_handler"] == "bulk_update_accounts"
+    assert normalized["toolbar"] == {}
+    assert disabled["toolbar"] == {"bulk_update": False}
+
+
+@pytest.mark.parametrize(
+    ("crud", "error_path"),
+    [
+        (
+            {
+                "primary_key": "account_id",
+                "form": {"update_columns": ["name"]},
+                "toolbar": {"bulk_update": True},
+            },
+            "bulk_update_handler",
+        ),
+        (
+            {
+                "form": {"update_columns": ["name"]},
+                "bulk_update_handler": "bulk_update_accounts",
+            },
+            "primary_key",
+        ),
+        (
+            {
+                "primary_key": "account_id",
+                "bulk_update_handler": "bulk_update_accounts",
+            },
+            "update_columns",
+        ),
+    ],
+)
+def test_normalize_page_schema_rejects_invalid_bulk_update_configuration(
+    crud: dict[str, object], error_path: str
+):
+    with pytest.raises(ValueError, match=error_path):
+        _normalize_crud(crud)
 
 
 def test_normalize_page_schema_requires_accessible_label_for_icon_button():

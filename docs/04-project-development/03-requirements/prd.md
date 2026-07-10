@@ -6,8 +6,8 @@
 **主要读者：** 开发 | QA | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/02-discovery/input.md` | `docs/04-project-development/02-discovery/current-state-analysis.md` | `docs/04-project-development/01-governance/project-charter.md`  
 **下游输出：** `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/` | `docs/04-project-development/06-testing-verification/test-plan.md`  
-**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`, `NFR-010`
-**最后更新：** 2026-06-19
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`, `NFR-010`, `NFR-012`
+**最后更新：** 2026-07-10
 
 ## 1. 背景与目标
 
@@ -34,6 +34,7 @@
 | 模块根入口维护成本降低 | 达成 | 新脚手架生成的模块无需手工维护根 `__init__.py` |
 | 环境候选服务不再因候选容量不足形成假失败风暴 | 本地达成 | `REQ-009` 已完成候选纯函数、等待队列、FIFO 补位、模块环境授权与等待席位自动超时收口的本地回归 |
 | Hosted UI 批量导入入口一致且安全 | 本地达成 | `REQ-010` 已完成 toolbar 按钮、宿主导入弹窗、标准 payload、批次结果和敏感字段脱敏验证；真实业务模块 E2E 与发布证据仍待后续收口 |
+| Hosted UI 当前页批量编辑可声明且兼容旧模块 | 通用能力已发布 | `REQ-012` 已完成 DataTable 多选、CRUD 批量编辑 handler、同步 / 异步 renderer 与兼容性回归，并由 Contracts 0.4.3 / SDK 0.4.4 发布；真实业务模块接线和 E2E 另行完成 |
 
 ## 2. 用户与场景
 
@@ -42,6 +43,7 @@
 | 最终使用者 | 启动桌面应用并执行自动化任务 | 应用能启动，模块可运行 |
 | 模块开发者 | 使用 SDK CLI 创建和维护模块 | SDK/Contracts/CLI 可用、契约清晰、根入口不需要反复手改 |
 | 运营 / 现场支持 | 在 Hosted UI 中批量导入账号、Cookie 或其它业务数据 | 能用 Excel/CSV/剪贴板快速导入，并能看到批次结果和逐条失败原因 |
+| 运营 / 现场支持 | 在 Hosted UI `managed_dataset` 表中批量修改字段 | 能在当前页多选记录并一次提交相同字段值，且不误操作其它记录 |
 | 维护者 | 构建、验证、发布项目 | 版本、入口、文档、工作项一致 |
 
 ## 3. 功能需求
@@ -212,6 +214,31 @@
 - [x] `UAT-036` 给定用户在暂存批次页执行“从暂存表导入业务表”，当处理完成，则宿主页面可展示每条记录的成功、失败、跳过重复或校验失败状态。
 - [x] `UAT-037` 给定导入字段包含 `token/cookie/password/secret/authorization/credential/passwd` 等敏感名称，当宿主记录日志、错误摘要或任务消息，则对应值不得明文输出。
 
+### `REQ-012` Hosted UI DataTable 必须支持当前页多选批量编辑
+
+- 优先级：P1
+- 描述：Hosted UI `DataTable` 必须公开 `none/single/multi` 选择模式，并在 CRUD 中提供通用批量编辑 handler。Core 只负责选择、表单和动作调用，模块负责业务校验与 `managed_dataset` 批量写入。
+- 用户故事：作为运营人员，我希望勾选当前页一条或多条记录并一次修改相同字段，以便减少重复编辑；作为模块开发者，我希望只接收主键数组和 payload，以便数据库与业务规则继续留在模块内。
+- 前置条件：模块声明 `crud.primary_key`、`form.update_columns` 与 `bulk_update_handler`，并通过 `@ui_action` 实现处理器。
+- 业务规则：
+  - `selection_mode` 只接受 `none/single/multi`，省略时为 `single`。
+  - 批量编辑复用 `form.update_columns`，表单不使用首条选中记录预填。
+  - handler 固定接收 `(context, primary_keys, payload)`；Core 只传主键，不传整行。
+  - 主键按当前选择顺序去重；任一行缺少主键时不调用 handler。
+  - 单条 toolbar 编辑 / 删除只在恰好选中一行时启用；行内动作只作用于点击行。
+  - 成功后清选择并刷新，失败时保留页面与选择并展示业务错误。
+- 依赖项：`API-008`, `API-021`, `SkyDataTable`, `@ui_action`, `ctx.db`。
+- 排除范围：跨分页选择、批量删除、Core 直接写模块数据库、任意 toolbar 表单和业务分组规则。
+
+验收标准：
+
+- [x] `UAT-038` `selection_mode=multi` 生成多选表格；省略时保持单选，非法值被 Contracts 拒绝。
+- [x] `UAT-039` 未选行时批量按钮禁用，选中一条或多条时启用；单条编辑 / 删除只在一条时启用。
+- [x] `UAT-040` 处理器收到保序去重的 `primary_keys` 和表单 `payload`，空白可空文本为 `None`。
+- [x] `UAT-041` 选中行缺少主键时显示明确错误且不调用 handler。
+- [x] `UAT-042` 同步 / 异步成功后清选择并刷新，失败时保留选择并展示原始业务错误。
+- [x] `UAT-043` SDK 对缺失 handler、错误签名和宽泛参数类型给出明确诊断，既有 CRUD 回归继续通过。
+
 ### `REQ-004` 项目必须具备可追溯的发布与文档链路
 
 - 优先级：P0
@@ -274,6 +301,12 @@
 - 约束：宿主只允许 `.xlsx` / `.csv` 文件导入；模块只能接收解析后的结构化 payload；不得把 token、cookie、密码类字段明文写入宿主日志。
 - 验证方式：导入弹窗限制单测、解析边界单测、日志脱敏单测、Hosted UI 分发回归。
 
+### `NFR-012` 批量编辑兼容性与非阻塞
+
+- 指标：未声明新字段的 Hosted UI 页面保持 100% 既有单选与 CRUD 行为；已有 event loop 时批量编辑路径不调用阻塞式 `exec()`；所有新增分支由 `TC-069` 自动化覆盖。
+- 约束：不改变 `managed_dataset` 物理结构和 `ctx.db` API，不新增跨分页状态。
+- 验证方式：Contracts、SDK scanner、Renderer 同步 / 异步和旧 CRUD 回归。
+
 ## 5. 关键流程
 
 1. 维护者通过 `uv` 同步环境并运行测试、文档、build 验证
@@ -281,6 +314,7 @@
 3. 发布前通过版本、入口、文档与构建结果进行闭环校验
 4. 后续迭代通过 `BUG` / `CR` / `TASK` 驱动进入实现阶段
 5. Hosted UI 批量导入由宿主读取来源数据并生成 import payload，模块只处理结构化行数据和业务落库
+6. Hosted UI 批量编辑由宿主读取当前页选择并生成主键数组与表单 payload，模块负责业务校验和批量写入
 
 ## 6. 风险、假设与待确认问题
 
@@ -291,6 +325,7 @@
 - 现有 lint 失败表明代码与脚本质量边界没有稳定定义
 - 模块根入口切换为单一新模板后，旧模块升级需要一次性重初始化和业务文件迁移
 - 批量导入若缺少宿主统一限制和脱敏，可能把大文件、错误文件类型或 token/cookie/password 明文带入日志与运行链路
+- 多选模式若沿用单条 `selected_row()` 语义，可能误把第一条记录作为单条编辑 / 删除目标
 
 ### 假设
 
@@ -299,6 +334,7 @@
 - 模块级通用分发逻辑可以集中沉淀到 SDK，而不需要每个模块重复维护一份
 - 旧模块作者可以接受“按最新模板重新初始化”作为唯一升级路径
 - 模块作者可以接受“宿主读取文件、模块只收结构化 payload”的安全边界
+- 模块作者可以接受“Core 只传主键数组与 payload，批量数据库更新由模块负责”的边界
 
 ### 待确认
 
@@ -316,3 +352,6 @@
 | v1.3 | 2026-04-18 | 新增 `REQ-008`，登记模块快照数据与审计事件分层存储契约 | `CR-008` |
 | v1.4 | 2026-06-19 | 新增 `REQ-010` / `NFR-010`，登记 Hosted UI 宿主托管批量导入能力 | `CR-016` |
 | v1.5 | 2026-06-19 | 完成 `REQ-010` / `NFR-010` 本地实现与 `TC-060` 验证，Hosted UI 批量导入进入回归维护和真实业务模块接入阶段 | `CR-016` |
+| v1.6 | 2026-07-10 | 新增 `REQ-012` / `NFR-012`，登记 Hosted UI DataTable 当前页多选批量编辑能力 | `CR-018` |
+| v1.7 | 2026-07-10 | 将 `REQ-012` / `NFR-012` 更新为本地实现和自动化验收已满足，保留整体评审与真实业务模块接线边界 | `CR-018`, `TC-069` |
+| v1.8 | 2026-07-10 | `REQ-012` 通用能力完成整体评审、人工确认和 Contracts 0.4.3 / SDK 0.4.4 发布；业务模块接线仍为独立 gate | `CR-018`, `TASK-037`, `TC-070` |

@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QItemSelectionModel, Qt
 from PyQt6.QtWidgets import QAbstractItemView
 
 from src.ui.components.button import StyledButton
@@ -268,6 +268,55 @@ def test_sky_data_table_supports_multi_selection_schema(qtbot):
     qtbot.addWidget(table)
 
     assert table.table.selectionMode() == QAbstractItemView.SelectionMode.ExtendedSelection
+
+
+def test_sky_data_table_clears_selection_on_refresh_and_page_change(qtbot):
+    table = SkyDataTable(
+        {
+            "selection_mode": "multi",
+            "columns": [{"key": "name", "label": "名称"}],
+            "features": {"pagination": {"enabled": True, "page_size": 1, "page_size_options": [1]}},
+        }
+    )
+    qtbot.addWidget(table)
+    table.apply_result(
+        0,
+        {
+            "rows": [{"name": "alpha"}],
+            "total": 2,
+            "page": 1,
+            "page_size": 1,
+        },
+    )
+    selection_model = table.table.selectionModel()
+    select_row = QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+    selection_model.select(table.table.model().index(0, 0), select_row)
+    assert table.selected_rows() == [{"name": "alpha"}]
+
+    queries: list[dict] = []
+    selections: list[list[dict]] = []
+    table.query_requested.connect(lambda _request_id, query: queries.append(dict(query)))
+    table.selection_changed.connect(lambda rows: selections.append(list(rows)))
+
+    table.request_refresh()
+    assert table.selected_rows() == []
+    assert selections[-1] == []
+
+    table.apply_result(
+        1,
+        {
+            "rows": [{"name": "alpha"}],
+            "total": 2,
+            "page": 1,
+            "page_size": 1,
+        },
+    )
+    selection_model.select(table.table.model().index(0, 0), select_row)
+    table.next_btn.click()
+
+    assert queries[-1]["page"] == 2
+    assert table.selected_rows() == []
+    assert selections[-1] == []
 
 
 def test_sky_data_table_ignores_stale_results_and_keeps_latest_rows(qtbot):

@@ -352,7 +352,7 @@ class ManagedPageRenderer(QWidget):
                 "columns": self._visible_table_columns(component),
                 "features": dict(component.get("features") or {}),
                 "empty_text": str(component.get("empty_text") or "暂无数据"),
-                "selection_mode": "single",
+                "selection_mode": component.get("selection_mode", "single"),
             }
         )
         table.query_requested.connect(
@@ -464,13 +464,15 @@ class ManagedPageRenderer(QWidget):
             "create": bool(str(crud.get("create_handler") or "").strip()),
             "update": bool(str(crud.get("update_handler") or "").strip()),
             "delete": bool(str(crud.get("delete_handler") or "").strip()),
+            "bulk_update": bool(str(crud.get("bulk_update_handler") or "").strip()),
         }
         actions = {
             "create": handlers["create"],
             "update": handlers["update"] and render != "row_actions",
             "delete": handlers["delete"] and render != "row_actions",
+            "bulk_update": handlers["bulk_update"],
         }
-        for action_name in ("create", "update", "delete"):
+        for action_name in ("create", "update", "delete", "bulk_update"):
             if action_name in toolbar:
                 actions[action_name] = handlers[action_name] and bool(toolbar[action_name])
         return actions
@@ -567,6 +569,7 @@ class ManagedPageRenderer(QWidget):
 
         edit_button: StyledButton | None = None
         delete_button: StyledButton | None = None
+        bulk_update_button: StyledButton | None = None
 
         if toolbar_actions["create"]:
             create_button = create_action_button("新增", variant="primary", min_height=34)
@@ -580,17 +583,25 @@ class ManagedPageRenderer(QWidget):
             delete_button = create_action_button("删除", variant="danger", min_height=34)
             delete_button.clicked.connect(lambda _checked=False: self._handle_delete_action(component, table))
             toolbar.addWidget(delete_button)
+        if toolbar_actions["bulk_update"]:
+            bulk_update_button = create_action_button("批量编辑", variant="secondary", min_height=34)
+            bulk_update_button.clicked.connect(
+                lambda _checked=False: self._handle_bulk_update_action(component, table)
+            )
+            toolbar.addWidget(bulk_update_button)
 
-        for button in (edit_button, delete_button):
+        for button in (edit_button, delete_button, bulk_update_button):
             if button is not None:
                 button.setEnabled(False)
 
         def _sync_buttons(rows: list[dict[str, Any]]) -> None:
-            enabled = bool(rows)
+            single_enabled = len(rows) == 1
             if edit_button is not None:
-                edit_button.setEnabled(enabled)
+                edit_button.setEnabled(single_enabled)
             if delete_button is not None:
-                delete_button.setEnabled(enabled)
+                delete_button.setEnabled(single_enabled)
+            if bulk_update_button is not None:
+                bulk_update_button.setEnabled(bool(rows))
 
         table.selection_changed.connect(_sync_buttons)
         _sync_buttons(table.selected_rows())
@@ -604,15 +615,18 @@ class ManagedPageRenderer(QWidget):
         row: dict[str, Any],
     ) -> None:
         if action_id == CRUD_ROW_ACTION_EDIT:
-            self._handle_update_action(component, table)
+            self._handle_update_action(component, table, row=row)
             return
         if action_id == CRUD_ROW_ACTION_DELETE:
-            self._handle_delete_action(component, table)
+            self._handle_delete_action(component, table, row=row)
             return
         action_name = str(action_id or "").strip()
         if not action_name:
             return
         action_spec = self._row_action_spec(row, action_name)
+        if str(action_spec.get("type") or "").strip().lower() == "open_page":
+            self._handle_row_action(action_spec, row)
+            return
         if action_spec:
             action_name = str(action_spec.get("name") or action_name).strip()
         params = self._row_action_params(component, row, action_spec, error_title="操作失败")
@@ -708,16 +722,32 @@ class ManagedPageRenderer(QWidget):
             on_success=table.request_refresh,
         )
 
-    def _handle_update_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
+    @staticmethod
+    def _single_action_row(
+        table: SkyDataTable,
+        row: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if row is not None:
+            return row if isinstance(row, dict) else None
+        selected_rows = table.selected_rows()
+        return selected_rows[0] if len(selected_rows) == 1 else None
+
+    def _handle_update_action(
+        self,
+        component: dict[str, Any],
+        table: SkyDataTable,
+        *,
+        row: dict[str, Any] | None = None,
+    ) -> None:
         loop = self._running_loop()
         if loop is not None:
-            loop.create_task(self._handle_update_action_async(component, table))
+            loop.create_task(self._handle_update_action_async(component, table, row=row))
             return
 
         crud = dict(component.get("crud") or {})
         handler_name = str(crud.get("update_handler") or "").strip()
         primary_key = str(crud.get("primary_key") or "").strip()
-        selected_row = table.selected_row()
+        selected_row = self._single_action_row(table, row)
         if not handler_name or not primary_key or not isinstance(selected_row, dict):
             return
         row_key = selected_row.get(primary_key)
@@ -737,11 +767,17 @@ class ManagedPageRenderer(QWidget):
             on_success=table.request_refresh,
         )
 
-    async def _handle_update_action_async(self, component: dict[str, Any], table: SkyDataTable) -> None:
+    async def _handle_update_action_async(
+        self,
+        component: dict[str, Any],
+        table: SkyDataTable,
+        *,
+        row: dict[str, Any] | None = None,
+    ) -> None:
         crud = dict(component.get("crud") or {})
         handler_name = str(crud.get("update_handler") or "").strip()
         primary_key = str(crud.get("primary_key") or "").strip()
-        selected_row = table.selected_row()
+        selected_row = self._single_action_row(table, row)
         if not handler_name or not primary_key or not isinstance(selected_row, dict):
             return
         row_key = selected_row.get(primary_key)
@@ -761,16 +797,95 @@ class ManagedPageRenderer(QWidget):
             on_success=table.request_refresh,
         )
 
-    def _handle_delete_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
+    @staticmethod
+    def _bulk_primary_keys(
+        rows: list[dict[str, Any]],
+        primary_key: str,
+    ) -> list[Any] | None:
+        primary_keys: list[Any] = []
+        for row in rows:
+            row_key = row.get(primary_key)
+            if row_key in (None, ""):
+                return None
+            if not any(type(existing) is type(row_key) and existing == row_key for existing in primary_keys):
+                primary_keys.append(row_key)
+        return primary_keys
+
+    def _handle_bulk_update_action(self, component: dict[str, Any], table: SkyDataTable) -> None:
         loop = self._running_loop()
         if loop is not None:
-            loop.create_task(self._handle_delete_action_async(component, table))
+            loop.create_task(self._handle_bulk_update_action_async(component, table))
+            return
+
+        crud = dict(component.get("crud") or {})
+        handler_name = str(crud.get("bulk_update_handler") or "").strip()
+        primary_key = str(crud.get("primary_key") or "").strip()
+        if not handler_name:
+            return
+        if not primary_key:
+            self._show_warning("批量编辑失败", "当前表格未声明 crud.primary_key，无法批量编辑")
+            return
+        primary_keys = self._bulk_primary_keys(table.selected_rows(), primary_key)
+        if primary_keys is None:
+            self._show_warning("批量编辑失败", f"当前记录缺少主键字段: {primary_key}")
+            return
+        if not primary_keys:
+            return
+        payload = self._prompt_crud_form_payload(component, mode="update", row=None)
+        if payload is None:
+            return
+        self._invoke_ui_action(
+            handler_name,
+            {"primary_keys": primary_keys, "payload": payload},
+            error_title="批量编辑失败",
+            on_success=table.request_refresh,
+        )
+
+    async def _handle_bulk_update_action_async(
+        self,
+        component: dict[str, Any],
+        table: SkyDataTable,
+    ) -> None:
+        crud = dict(component.get("crud") or {})
+        handler_name = str(crud.get("bulk_update_handler") or "").strip()
+        primary_key = str(crud.get("primary_key") or "").strip()
+        if not handler_name:
+            return
+        if not primary_key:
+            await self._show_warning_async("批量编辑失败", "当前表格未声明 crud.primary_key，无法批量编辑")
+            return
+        primary_keys = self._bulk_primary_keys(table.selected_rows(), primary_key)
+        if primary_keys is None:
+            await self._show_warning_async("批量编辑失败", f"当前记录缺少主键字段: {primary_key}")
+            return
+        if not primary_keys:
+            return
+        payload = await self._prompt_crud_form_payload_async(component, mode="update", row=None)
+        if payload is None:
+            return
+        await self._invoke_ui_action_async(
+            handler_name,
+            {"primary_keys": primary_keys, "payload": payload},
+            error_title="批量编辑失败",
+            on_success=table.request_refresh,
+        )
+
+    def _handle_delete_action(
+        self,
+        component: dict[str, Any],
+        table: SkyDataTable,
+        *,
+        row: dict[str, Any] | None = None,
+    ) -> None:
+        loop = self._running_loop()
+        if loop is not None:
+            loop.create_task(self._handle_delete_action_async(component, table, row=row))
             return
 
         crud = dict(component.get("crud") or {})
         handler_name = str(crud.get("delete_handler") or "").strip()
         primary_key = str(crud.get("primary_key") or "").strip()
-        selected_row = table.selected_row()
+        selected_row = self._single_action_row(table, row)
         if not handler_name or not primary_key or not isinstance(selected_row, dict):
             return
         row_key = selected_row.get(primary_key)
@@ -789,11 +904,17 @@ class ManagedPageRenderer(QWidget):
             on_success=table.request_refresh,
         )
 
-    async def _handle_delete_action_async(self, component: dict[str, Any], table: SkyDataTable) -> None:
+    async def _handle_delete_action_async(
+        self,
+        component: dict[str, Any],
+        table: SkyDataTable,
+        *,
+        row: dict[str, Any] | None = None,
+    ) -> None:
         crud = dict(component.get("crud") or {})
         handler_name = str(crud.get("delete_handler") or "").strip()
         primary_key = str(crud.get("primary_key") or "").strip()
-        selected_row = table.selected_row()
+        selected_row = self._single_action_row(table, row)
         if not handler_name or not primary_key or not isinstance(selected_row, dict):
             return
         row_key = selected_row.get(primary_key)

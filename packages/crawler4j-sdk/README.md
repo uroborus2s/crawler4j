@@ -105,6 +105,8 @@ uv run crawler4j package build
 
 `check full` 会拒绝运行时代码 import `crawler4j-sdk`、旧 `ctx.tools.call("db.*")`、`ctx.captured_data`、旧 manifest 区段，以及 v2 装饰器扫描中的重复名、缺失注入目标、循环依赖和数据契约错误。
 
+Hosted UI `DataTable` 批量编辑使用顶层 `selection_mode="multi"`，并在 `crud` 内声明 `bulk_update_handler` 与 `toolbar.bulk_update`。SDK scanner 要求批量 handler 使用 `(context, primary_keys: list[T], payload: ConcretePayload)` 固定签名，并拒绝 `Any`、`Mapping`、裸 `list` / `dict` 等不具体类型。
+
 SDK scanner 同时支持两类对象装配声明：
 
 - 传统装饰器参数：`@component(inject=[...], parameters=[...])`、`@workflow(inject=[...])`
@@ -123,12 +125,12 @@ workflow 和 component 可选实现 `setup(ctx, workflow)` 做运行前准备，
 ```toml
 [project]
 dependencies = [
-  "crawler4j-contracts>=0.4.2,<0.5.0",
+  "crawler4j-contracts>=0.4.3,<0.5.0",
 ]
 
 [dependency-groups]
 dev = [
-  "crawler4j-sdk>=0.4.2,<0.5.0",
+  "crawler4j-sdk>=0.4.4,<0.5.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
 ]

@@ -6,9 +6,14 @@ from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QSizePolicy
+from PyQt6.QtCore import QItemSelectionModel
+from PyQt6.QtWidgets import QAbstractItemView, QDialog, QLabel, QPushButton, QSizePolicy
 
-from src.core.mms.ui.managed_page_renderer import ManagedPageRenderer
+from src.core.mms.ui.managed_page_renderer import (
+    CRUD_ROW_ACTION_DELETE,
+    CRUD_ROW_ACTION_EDIT,
+    ManagedPageRenderer,
+)
 from src.core.persistence import get_module_data_store
 from src.ui.components.button import StyledButton
 from src.ui.components.line_edit import StyledLineEdit
@@ -24,6 +29,349 @@ def temp_data_dir(tmp_path):
 
         init_database()
         yield tmp_path
+
+
+@pytest.fixture
+def bulk_update_page(qtbot, tmp_path):
+    module_name = "hosted_page_bulk_update_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import page, ui_action
+
+            ROWS = [
+                {"account_id": 7, "name": "alpha", "note": "first"},
+                {"account_id": "7", "name": "beta", "note": "second"},
+                {"account_id": 7, "name": "duplicate", "note": "third"},
+                {"name": "missing", "note": "fourth"},
+            ]
+            COLUMNS = [
+                {"key": "account_id", "label": "ID"},
+                {"key": "name", "label": "名称"},
+                {"key": "note", "label": "备注"},
+            ]
+            CRUD = {
+                "mode": "handlers",
+                "primary_key": "account_id",
+                "form": {"update_columns": ["name", "note"]},
+                "update_handler": "update_account_from_ui",
+                "delete_handler": "delete_account_from_ui",
+                "bulk_update_handler": "bulk_update_accounts_from_ui",
+            }
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "selection_mode": "multi",
+                            "data_source": {"type": "rows", "rows": ROWS},
+                            "crud": CRUD,
+                            "columns": COLUMNS,
+                        },
+                        {
+                            "type": "DataTable",
+                            "table_id": "row_accounts",
+                            "selection_mode": "multi",
+                            "data_source": {"type": "rows", "rows": ROWS},
+                            "crud": {**CRUD, "render": "row_actions"},
+                            "columns": COLUMNS,
+                        },
+                        {
+                            "type": "DataTable",
+                            "table_id": "hidden_bulk_accounts",
+                            "selection_mode": "multi",
+                            "data_source": {"type": "rows", "rows": ROWS},
+                            "crud": {**CRUD, "toolbar": {"bulk_update": False}},
+                            "columns": COLUMNS,
+                        },
+                        {
+                            "type": "DataTable",
+                            "table_id": "default_selection",
+                            "data_source": {"type": "rows", "rows": ROWS[:1]},
+                            "columns": COLUMNS,
+                        },
+                    ],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+
+
+            @ui_action(name="bulk_update_accounts_from_ui")
+            def bulk_update_accounts_from_ui(context, primary_keys, payload):
+                del context, primary_keys, payload
+                return {"ok": True}
+
+
+            @ui_action(name="update_account_from_ui")
+            def update_account_from_ui(context, account_id, payload):
+                del context, account_id, payload
+                return {"ok": True}
+
+
+            @ui_action(name="delete_account_from_ui")
+            def delete_account_from_ui(context, account_id):
+                del context, account_id
+                return {"ok": True}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts", label="账号管理")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+
+    try:
+        page = ManagedPageRenderer(module_name, "accounts", module_info=module_info)
+        qtbot.addWidget(page)
+        for table in page._data_table_widgets.values():
+            qtbot.waitUntil(lambda current=table: current.rowCount() > 0)
+
+        yield page
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def _select_rows(table, *row_indexes: int) -> None:
+    selection_model = table.table.selectionModel()
+    selection_model.clearSelection()
+    flags = QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+    for row_index in row_indexes:
+        selection_model.select(table.table.model().index(row_index, 0), flags)
+
+
+def _toolbar_buttons(table) -> dict[str, QPushButton]:
+    buttons: dict[str, QPushButton] = {}
+    for index in range(table._toolbar.count()):
+        item = table._toolbar.itemAt(index)
+        widget = item.widget() if item is not None else None
+        if isinstance(widget, QPushButton):
+            buttons[widget.text()] = widget
+    return buttons
+
+
+def test_managed_page_renderer_bulk_toolbar_and_selection_rules(bulk_update_page):
+    page = bulk_update_page
+    table = page._data_table_widgets["accounts"]
+    row_table = page._data_table_widgets["row_accounts"]
+    hidden_table = page._data_table_widgets["hidden_bulk_accounts"]
+    default_table = page._data_table_widgets["default_selection"]
+
+    assert table.table.selectionMode() == QAbstractItemView.SelectionMode.ExtendedSelection
+    assert row_table.table.selectionMode() == QAbstractItemView.SelectionMode.ExtendedSelection
+    assert default_table.table.selectionMode() == QAbstractItemView.SelectionMode.SingleSelection
+
+    buttons = _toolbar_buttons(table)
+    assert set(buttons) == {"编辑", "删除", "批量编辑"}
+    assert set(_toolbar_buttons(row_table)) == {"批量编辑"}
+    assert "批量编辑" not in _toolbar_buttons(hidden_table)
+
+    assert buttons["编辑"].isEnabled() is False
+    assert buttons["删除"].isEnabled() is False
+    assert buttons["批量编辑"].isEnabled() is False
+
+    _select_rows(table, 0)
+    assert buttons["编辑"].isEnabled() is True
+    assert buttons["删除"].isEnabled() is True
+    assert buttons["批量编辑"].isEnabled() is True
+
+    _select_rows(table, 0, 1)
+    assert buttons["编辑"].isEnabled() is False
+    assert buttons["删除"].isEnabled() is False
+    assert buttons["批量编辑"].isEnabled() is True
+
+    _select_rows(table)
+    assert all(button.isEnabled() is False for button in buttons.values())
+
+
+def test_managed_page_renderer_single_crud_guards_multi_select_and_row_actions_use_clicked_row(
+    bulk_update_page,
+    monkeypatch,
+):
+    page = bulk_update_page
+    table = page._data_table_widgets["accounts"]
+    row_table = page._data_table_widgets["row_accounts"]
+    components = {component["table_id"]: component for component in page._schema["children"]}
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        page._bridge,
+        "call_ui_action",
+        lambda action_name, params, **_kwargs: calls.append((action_name, dict(params))) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        page,
+        "_prompt_crud_form_payload",
+        lambda component, *, mode, row=None: {"name": "changed", "note": None},
+    )
+    monkeypatch.setattr(
+        "src.core.mms.ui.managed_page_renderer.ConfirmDialog.delete_confirm",
+        lambda parent, item_name: True,
+    )
+
+    _select_rows(table, 0, 1)
+    page._handle_update_action(components["accounts"], table)
+    page._handle_delete_action(components["accounts"], table)
+    assert calls == []
+
+    _select_rows(row_table, 0, 1)
+    clicked_row = row_table.displayed_rows()[1]
+    page._handle_table_row_action(
+        components["row_accounts"],
+        row_table,
+        CRUD_ROW_ACTION_EDIT,
+        clicked_row,
+    )
+    page._handle_table_row_action(
+        components["row_accounts"],
+        row_table,
+        CRUD_ROW_ACTION_DELETE,
+        clicked_row,
+    )
+
+    assert calls == [
+        (
+            "update_account_from_ui",
+            {"account_id": "7", "payload": {"name": "changed", "note": None}},
+        ),
+        ("delete_account_from_ui", {"account_id": "7"}),
+    ]
+
+
+def test_managed_page_renderer_bulk_update_sync_payload_refresh_and_failures(
+    bulk_update_page,
+    qtbot,
+    monkeypatch,
+):
+    page = bulk_update_page
+    table = page._data_table_widgets["accounts"]
+    component = next(component for component in page._schema["children"] if component["table_id"] == "accounts")
+
+    dialog, widgets = page._build_crud_form_dialog(component, mode="update", row=None)
+    qtbot.addWidget(dialog)
+    assert [widget.text() for widget, _column in widgets.values() if isinstance(widget, StyledLineEdit)] == ["", ""]
+    blank_payload, error = page._collect_crud_form_payload(widgets)
+    assert error is None
+    assert blank_payload == {"name": None, "note": None}
+
+    prompts = [blank_payload, {"name": "explode", "note": None}]
+    monkeypatch.setattr(
+        page,
+        "_prompt_crud_form_payload",
+        lambda component, *, mode, row=None: dict(prompts.pop(0)),
+    )
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(page, "_show_warning", lambda title, message: warnings.append((title, message)))
+    calls: list[tuple[str, dict]] = []
+
+    def call_ui_action(action_name, params, **_kwargs):
+        calls.append((action_name, dict(params)))
+        if params["payload"].get("name") == "explode":
+            raise RuntimeError("bulk exploded")
+        return {"ok": True}
+
+    monkeypatch.setattr(page._bridge, "call_ui_action", call_ui_action)
+    refreshes: list[dict] = []
+    table.query_requested.connect(lambda _request_id, query: refreshes.append(dict(query)))
+
+    _select_rows(table, 0, 1, 2)
+    page._handle_bulk_update_action(component, table)
+
+    assert warnings == []
+    assert calls == [
+        (
+            "bulk_update_accounts_from_ui",
+            {"primary_keys": [7, "7"], "payload": {"name": None, "note": None}},
+        )
+    ]
+    assert table.selected_rows() == []
+    assert len(refreshes) == 1
+
+    _select_rows(table, 0, 3)
+    page._handle_bulk_update_action(component, table)
+    assert len(calls) == 1
+    assert len(refreshes) == 1
+    assert table.selected_rows() == [table.displayed_rows()[0], table.displayed_rows()[3]]
+    assert warnings == [("批量编辑失败", "当前记录缺少主键字段: account_id")]
+
+    _select_rows(table, 0)
+    page._handle_bulk_update_action(component, table)
+    assert calls[-1] == (
+        "bulk_update_accounts_from_ui",
+        {"primary_keys": [7], "payload": {"name": "explode", "note": None}},
+    )
+    assert table.selected_rows() == [table.displayed_rows()[0]]
+    assert len(refreshes) == 1
+    assert warnings[-1] == ("批量编辑失败", "bulk exploded")
+
+
+@pytest.mark.asyncio
+async def test_managed_page_renderer_bulk_update_async_uses_non_blocking_dialog_and_matches_failures(
+    bulk_update_page,
+    qtbot,
+    monkeypatch,
+):
+    page = bulk_update_page
+    table = page._data_table_widgets["accounts"]
+    component = next(component for component in page._schema["children"] if component["table_id"] == "accounts")
+    values = iter(["async value", "explode"])
+
+    def fail_exec(self):
+        raise AssertionError("blocking exec should not be used in async bulk update flow")
+
+    def fake_show(dialog: QDialog):
+        qtbot.addWidget(dialog)
+        edits = dialog.findChildren(StyledLineEdit)
+        assert len(edits) == 2
+        edits[0].setText(next(values))
+        edits[1].clear()
+        asyncio.get_running_loop().call_soon(lambda: dialog.done(int(QDialog.DialogCode.Accepted)))
+
+    monkeypatch.setattr(QDialog, "exec", fail_exec)
+    monkeypatch.setattr(QDialog, "show", fake_show)
+    warning = AsyncMock()
+    monkeypatch.setattr(page, "_show_warning_async", warning)
+    calls: list[tuple[str, dict]] = []
+
+    async def call_ui_action_async(action_name, params, **_kwargs):
+        calls.append((action_name, dict(params)))
+        if params["payload"].get("name") == "explode":
+            raise RuntimeError("bulk exploded")
+        return {"ok": True}
+
+    monkeypatch.setattr(page._bridge, "call_ui_action_async", call_ui_action_async)
+    refreshes: list[dict] = []
+    table.query_requested.connect(lambda _request_id, query: refreshes.append(dict(query)))
+
+    _select_rows(table, 0, 1)
+    page._handle_bulk_update_action(component, table)
+    for _ in range(50):
+        if calls and refreshes:
+            break
+        await asyncio.sleep(0.01)
+    assert calls == [
+        (
+            "bulk_update_accounts_from_ui",
+            {"primary_keys": [7, "7"], "payload": {"name": "async value", "note": None}},
+        )
+    ]
+    assert table.selected_rows() == []
+    assert len(refreshes) == 1
+
+    _select_rows(table, 0)
+    await page._handle_bulk_update_action_async(component, table)
+    assert calls[-1] == (
+        "bulk_update_accounts_from_ui",
+        {"primary_keys": [7], "payload": {"name": "explode", "note": None}},
+    )
+    assert table.selected_rows() == [table.displayed_rows()[0]]
+    assert len(refreshes) == 1
+    warning.assert_awaited_once_with("批量编辑失败", "bulk exploded")
 
 
 def test_managed_page_renderer_requires_fixed_query_result_contract():
@@ -1359,6 +1707,125 @@ def test_managed_page_renderer_dispatches_custom_row_action_to_ui_action(qtbot, 
 
         actions_module = importlib.import_module(f"{module_name}.pages.accounts")
         assert actions_module.CALLS == [{"phone": "13800138000"}]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_managed_page_renderer_row_button_opens_page_with_clicked_row_params(qtbot, tmp_path):
+    module_name = "hosted_page_row_button_navigation_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/accounts.py": """
+            from crawler4j_contracts import page, ui_action
+
+            CALLS = []
+
+            @page(
+                name="accounts",
+                label="账号管理",
+                schema={
+                    "type": "Page",
+                    "children": [
+                        {
+                            "type": "DataTable",
+                            "table_id": "accounts",
+                            "data_source": {
+                                "type": "rows",
+                                "rows": [
+                                    {
+                                        "account_id": "acct-001",
+                                        "actions": [
+                                            {
+                                                "id": "open_details",
+                                                "label": "详情",
+                                                "type": "open_page",
+                                                "page_id": "details",
+                                                "params": {
+                                                    "account_id": {"binding": "account_id"},
+                                                },
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        "account_id": "acct-002",
+                                        "actions": [
+                                            {
+                                                "id": "open_details",
+                                                "label": "详情",
+                                                "type": "open_page",
+                                                "page_id": "details",
+                                                "params": {
+                                                    "account_id": {"binding": "account_id"},
+                                                },
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                            "columns": [
+                                {"key": "account_id", "label": "账号"},
+                                {"key": "actions", "label": "操作", "type": "actions"},
+                            ],
+                        },
+                    ],
+                },
+            )
+            def load_accounts_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+
+
+            @ui_action(name="open_details")
+            def open_details(context, account_id):
+                del context
+                CALLS.append({"account_id": account_id})
+                return {"ok": True}
+            """,
+            "pages/details.py": """
+            from crawler4j_contracts import page
+
+            @page(
+                name="details",
+                label="详情",
+                schema={"type": "Page", "children": []},
+            )
+            def load_details_page(context, page_id, params=None):
+                del context, page_id, params
+                return {}
+            """,
+        },
+    )
+    manifest = make_manifest(module_name, pages=[make_page_info("accounts"), make_page_info("details")])
+    service, original_registry, module_info = register_module(module_name, module_dir, manifest=manifest)
+    opened_pages: list[tuple[str, dict[str, object] | None]] = []
+
+    try:
+        page = ManagedPageRenderer(
+            module_name,
+            "accounts",
+            module_info=module_info,
+            open_page_callback=lambda page_id, params=None: opened_pages.append((page_id, params)),
+        )
+        qtbot.addWidget(page)
+
+        table = page._data_table_widgets["accounts"]
+        qtbot.waitUntil(lambda: table.rowCount() == 2)
+        refresh_requests: list[dict[str, object]] = []
+        table.query_requested.connect(lambda _request_id, query: refresh_requests.append(dict(query)))
+
+        action_cell = table.cellWidget(1, 1)
+        assert action_cell is not None
+        details_button = next(button for button in action_cell.findChildren(QPushButton) if button.text() == "详情")
+        details_button.click()
+
+        import importlib
+
+        actions_module = importlib.import_module(f"{module_name}.pages.accounts")
+        assert opened_pages == [("details", {"account_id": "acct-002"})]
+        assert actions_module.CALLS == []
+        assert refresh_requests == []
     finally:
         restore_module(service, original_registry, module_name)
 

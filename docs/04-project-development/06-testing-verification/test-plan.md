@@ -6,8 +6,8 @@
 **主要读者：** QA | 开发 | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
-**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `TC-060`, `TC-061`, `TC-062`, `TC-063`, `TC-064`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `API-008`, `API-009`, `API-010`, `API-019`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `CR-016`, `NFR-003`, `NFR-010`
-**最后更新：** 2026-07-08
+**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `TC-060`, `TC-061`, `TC-062`, `TC-063`, `TC-064`, `TC-069`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `API-008`, `API-009`, `API-010`, `API-019`, `API-021`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `CR-016`, `CR-018`, `NFR-003`, `NFR-010`, `NFR-012`
+**最后更新：** 2026-07-10
 
 ## 1. 测试目标
 
@@ -35,6 +35,7 @@
 | `TC-004` `uv run python scripts/smoke_test_ui.py` | 通过 | 2026-05-01 headless UI smoke 复验通过，覆盖 Shell 导航/页面数量与 Dashboard 异步刷新 |
 | `TC-005` PyInstaller / macOS Sparkle build | 通过 | 2026-05-18 `uv run deploy-macos-internal-release` 产出 `packages/crawler4j/dist/desktop/macos/Crawler4j.app`、`packages/crawler4j/dist/updates/macos/Crawler4j-0.4.1.dmg` 与 `appcast.xml`，并上传 macOS 更新目录 |
 | `TC-006` `uv run ruff check .` | 通过 | 2026-05-18 复验通过，已明确排除历史 `manual/debug/verify/analyze` 脚本 |
+| `TC-069` Hosted UI DataTable 当前页多选批量编辑 | 通用能力通过并发布 | Task 1 / 2 独立评审：`82 passed` / `38 passed`；合并目标集 `120 passed`。`TASK-037` 收口发布一致性后全量 unit `1134 passed`，Contracts 0.4.3 / SDK 0.4.4 已发布；真实业务模块接线 / E2E 不属于本用例已通过声明 |
 | `TC-068` 根应用 `0.4.26` 版本提升与 VirtualBrowser 创建环境指纹稳定 | 通过 | 2026-07-08 覆盖版本服务读取 `0.4.26`，并组合复验 VirtualBrowser 创建期 OS / UA / 字体 / 语音 / 扰动 / 硬件组合、创建后 warning 和运行模板 UI；版本服务回归 `3 passed`，VirtualBrowser REM 回归 `44 passed`，运行模板 UI 回归 `36 passed`，目标 `ruff check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
 | `TC-067` 根应用 `0.4.24` 版本提升 | 通过 | 2026-07-05 覆盖版本服务读取 `0.4.24`，并组合复验 REM cleanup existing-env scope；版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 |
 | `TC-066` 根应用 `0.4.23` 版本提升 | 通过 | 2026-06-30 覆盖版本服务读取 `0.4.23`；版本服务回归 `3 passed`，`uv lock --check`、`.factory/project.json` JSON 校验、`git diff --check` 与 `ruff check` 通过 |
@@ -80,6 +81,7 @@
 | `API-008` / `CR-013` | Hosted UI 主从表行导航、`open_page.params`、缓存页参数替换与详情表 `navigation_filters` | Core/SDK unit 定向回归 + CLI Hosted UI 契约回归 |
 | `API-009` / `CR-014` | 模块实体表视图、受控 SQL 模板、`ctx.db` fluent 查询 | 持久层单测 + runtime capability 单测 + Hosted UI 只读查询回归 |
 | `API-019` / `CR-016` | Hosted UI 批量导入 toolbar、宿主导入弹窗、标准 payload、结果展示与敏感字段脱敏 | Contracts/SDK schema 单测 + Core renderer 单测 + UI 解析单测 + 模块夹具集成/验收回归 |
+| `API-021` / `CR-018` | 当前页多选、bulk handler 参数边界、单条 / 行内动作语义、选择生命周期和 async 非阻塞 | Contracts / SDK scanner 单测 + Core renderer / `SkyDataTable` Qt 单测 + 全量 unit 回归 |
 | `NFR-003` | lint 质量门清晰 | `uv run ruff check .` 达成约定范围 |
 | `REQ-003` / `REQ-006` | SDK CLI 与宿主安装链的正式验收夹具 | `packages/crawler4j/tests/acceptance/` + 现有 CLI / host 集成测试 |
 
@@ -111,11 +113,22 @@
 | `TC-060` | payload 分发：`@ui_action` 接收 `import_payload`，workflow 通过 `ctx.runtime["import_payload"]` 接收数据 | 已实现：`test_managed_page_renderer.py`、`test_execution_runner.py` |
 | `TC-060` | 结果展示：模块返回 `batch_id/total_rows/staged_rows/failed_rows` 后宿主显示汇总，并可跳转 `import_data_records` 页面 | 已实现：`test_managed_page_renderer_dispatches_table_toolbar_import_to_ui_action` |
 
+## 5.3 `API-021` 测试覆盖
+
+| 测试 ID | 目标 | 当前验证方式 |
+|---|---|---|
+| `TC-069` | Contracts：顶层 `selection_mode=none/single/multi`、省略默认 `single`、非法值 / 错误嵌套和 bulk CRUD 配置拒绝 | `test_hosted_ui_card.py` |
+| `TC-069` | SDK：handler 引用、精确 `(context, primary_keys, payload)` 签名、具体 `list[T]` 与具体 payload 类型；拒绝 TypeVar、Any、Mapping 和裸容器 | `test_v2_scanner_diagnostics.py` |
+| `TC-069` | Core / UI：0/1/多行按钮状态、行内点击行、保序类型敏感去重、缺主键阻断、空值、同步 / 异步成功与失败 | `test_managed_page_renderer.py` |
+| `TC-069` | 选择生命周期：刷新、搜索、筛选、排序、翻页和页大小变化清选择；旧 schema 保持单选 | `test_data_table.py`、renderer 既有 CRUD 回归 |
+| `TC-069` | 整体回归 | 合并目标集 `120 passed`；发布一致性收口后全量 unit `1134 passed`；目标 Ruff、`git diff --check`、project JSON 与 docs-stratego 结构校验通过。实现证据见 `.factory/workitems/CR-018/evidence/verification.md`，发布证据见 `.factory/workitems/TASK-037/evidence/release.md` |
+
 ## 6. 当前测试缺口
 
 - 没有覆盖 `ctrip labor_workflow` 真实站点 E2E 验证
 - `REQ-009` 当前已完成实现级单测与 SDK 契约回归，但仍缺真实业务模块接入和更高层集成验证
 - `REQ-010` 已完成本地代码实现与 `TC-060` 单元级验证；后续对外发布仍需另行补齐版本提升、包构建、发布资产和真实业务模块 E2E 证据
+- `REQ-012` 已完成通用 Contracts / SDK / Core / UI 单元级覆盖；具体业务模块的 handler、业务规则、`ctx.db` 写入与真实模块 E2E 仍需由后续模块工作项接入和验证，不能从 `TC-069` 推断为已完成
 - `CR-010` 当前只完成本地脚本/单元级验证，仍缺 Windows 真机打包、安装、升级与签名验证
 - QScintilla 已进入桌面依赖线，macOS PyInstaller 打包态证据已在 2026-05-01 补齐；Windows 打包态仍需真机验证
 - `crawler4j-sdk 0.4.1` 与 `crawler4j-contracts 0.4.1` 已记录当前版本 build / publish 证据；后续仍需补齐正式 Git tag / GitHub release 资产
@@ -149,6 +162,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-10 | 新增 `TC-069`，登记 Hosted UI DataTable 当前页多选批量编辑的 Contracts / SDK scanner / Core renderer / `SkyDataTable` 覆盖和整体新鲜验证入口 | Codex |
 | 2026-07-08 | 补充 `TC-068` 根应用 `0.4.26` 版本提升与 VirtualBrowser 创建环境指纹稳定验证：版本服务回归 `3 passed`，VirtualBrowser REM 回归 `44 passed`，运行模板 UI 回归 `36 passed`，目标 `ruff check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |
 | 2026-07-05 | 补充 `TC-067` 根应用 `0.4.24` 版本提升验证：版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |
 | 2026-06-29 | 补充 `TC-062` 根应用 `0.4.21` 版本提升验证：版本服务、VirtualBrowser 指纹默认画像、指纹验收 metadata、风险环境展示与调度跳过组合回归 `85 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |
