@@ -28,17 +28,27 @@ def test_add_ip_dialog_uses_styled_combo_box(qtbot):
     assert "QComboBox {" not in dialog.styleSheet()
 
 
-def test_add_ip_dialog_returns_manual_location(qtbot):
+def test_add_ip_dialog_returns_manual_location_with_fixed_fingerprint_geo(qtbot):
     dialog = AddIPDialog(pool_id="pool-1")
     qtbot.addWidget(dialog)
     dialog.address_input.setText("10.0.0.8")
     dialog.latitude_input.setText("39.9072")
     dialog.longitude_input.setText("116.357")
+    assert not hasattr(dialog, "country_input")
+    assert not hasattr(dialog, "timezone_input")
+    assert not hasattr(dialog, "language_input")
 
     entry = dialog.get_values()
 
     assert entry.manual_latitude == 39.9072
     assert entry.manual_longitude == 116.357
+    assert entry.fingerprint_geo() == {
+        "country": "CN",
+        "timezone": "Asia/Shanghai",
+        "language": "zh-CN,zh,en-US,en",
+        "latitude": 39.9072,
+        "longitude": 116.357,
+    }
 
 
 def test_batch_import_dialog_uses_public_plain_text_edit(qtbot):

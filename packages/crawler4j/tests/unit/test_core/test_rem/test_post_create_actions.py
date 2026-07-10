@@ -178,7 +178,6 @@ async def test_create_env_passes_manual_ip_geo_to_provider(manager, monkeypatch)
         manual_latitude=39.9072,
         manual_longitude=116.357,
     )
-    monkeypatch.setattr(entry, "random_manual_geo", lambda: {"latitude": 39.9, "longitude": 116.36})
 
     class FakeIPManager:
         async def bind_ip(self, *_args):
@@ -191,7 +190,13 @@ async def test_create_env_passes_manual_ip_geo_to_provider(manager, monkeypatch)
         proxy_config=ProxyConfig(mode=ProxyMode.POOL, pool_id="pool-1"),
     )
 
-    assert provider.last_config["geo"] == {"latitude": 39.9, "longitude": 116.36}
+    assert provider.last_config["geo"] == {
+        "country": "CN",
+        "timezone": "Asia/Shanghai",
+        "language": "zh-CN,zh,en-US,en",
+        "latitude": 39.9072,
+        "longitude": 116.357,
+    }
 
 
 def test_release_signature_removes_dirty_placeholder_argument():

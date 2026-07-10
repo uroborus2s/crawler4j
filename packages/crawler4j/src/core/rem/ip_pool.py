@@ -23,6 +23,9 @@ from src.core.persistence.database import STATE_DB, get_connection
 
 MANUAL_LOCATION_RANDOM_RADIUS_M = 1000
 EARTH_RADIUS_M = 6_371_008.8
+IP_TABLE_FINGERPRINT_COUNTRY = "CN"
+IP_TABLE_FINGERPRINT_TIMEZONE = "Asia/Shanghai"
+IP_TABLE_FINGERPRINT_LANGUAGE = "zh-CN,zh,en-US,en"
 
 
 class IPStrategy(StrEnum):
@@ -128,6 +131,10 @@ class IPEntry:
     manual_latitude: float | None = None
     manual_longitude: float | None = None
 
+    def __post_init__(self) -> None:
+        self.manual_latitude = _safe_coordinate(self.manual_latitude, lower=-90, upper=90)
+        self.manual_longitude = _safe_coordinate(self.manual_longitude, lower=-180, upper=180)
+
     def to_proxy_string(self) -> str:
         """转换为代理字符串格式。"""
         auth = ""
@@ -155,6 +162,16 @@ class IPEntry:
         return {
             "latitude": randomized_latitude,
             "longitude": randomized_longitude,
+        }
+
+    def fingerprint_geo(self) -> dict[str, Any]:
+        """返回 IP 表统一使用的创建期地理和区域指纹。"""
+        return {
+            "country": IP_TABLE_FINGERPRINT_COUNTRY,
+            "timezone": IP_TABLE_FINGERPRINT_TIMEZONE,
+            "language": IP_TABLE_FINGERPRINT_LANGUAGE,
+            "latitude": _safe_coordinate(self.manual_latitude, lower=-90, upper=90),
+            "longitude": _safe_coordinate(self.manual_longitude, lower=-180, upper=180),
         }
 
     def to_dict(self) -> dict[str, Any]:

@@ -99,7 +99,23 @@ def test_created_parameter_warnings_flag_inconsistent_fingerprint_values():
     assert "client-rects.mode=1" in rendered
 
 
-def test_created_parameter_warnings_allow_local_forward_proxy_url():
+def test_virtualbrowser_manual_ip_table_geo_allows_fixed_defaults_without_location():
+    assert VirtualBrowserProvider._manual_ip_table_geo(
+        {
+            "country": "CN",
+            "timezone": "Asia/Shanghai",
+            "language": "zh-CN,zh,en-US,en",
+        }
+    ) == {
+        "country": "CN",
+        "timezone": "Asia/Shanghai",
+        "language": "zh-CN,zh,en-US,en",
+        "latitude": None,
+        "longitude": None,
+    }
+
+
+def test_created_parameter_warnings_rejects_local_forward_proxy_url():
     warnings = provider_module._created_parameter_warnings(
         {
             "id": 9,
@@ -111,7 +127,7 @@ def test_created_parameter_warnings_allow_local_forward_proxy_url():
         geo=None,
     )
 
-    assert all("proxy.host" not in warning for warning in warnings)
+    assert any("proxy.host" in warning for warning in warnings)
 
 
 @pytest.mark.asyncio
@@ -174,18 +190,21 @@ async def test_virtualbrowser_update_translates_proxy_config(monkeypatch):
     assert client.update_browser.await_args.args[0] == 303
     assert client.update_browser.await_args.args[1]["proxy"] == {
         "mode": 2,
-        "value": "socks5://user:pass@10.0.0.8:1080",
+        "value": "",
         "protocol": "SOCKS5",
         "host": "10.0.0.8",
         "port": "1080",
         "user": "user",
         "pass": "pass",
         "API": "",
+        "url": "socks5://user:pass@10.0.0.8:1080",
+        "country": "",
+        "checkFailed": False,
     }
 
 
 @pytest.mark.asyncio
-async def test_virtualbrowser_create_probes_proxy_geo_without_random_fingerprint(monkeypatch):
+async def test_virtualbrowser_create_only_verifies_proxy_without_ip_table_fingerprint(monkeypatch):
     provider = VirtualBrowserProvider()
     client = SimpleNamespace(
         add_browser=AsyncMock(return_value=303),
@@ -193,8 +212,6 @@ async def test_virtualbrowser_create_probes_proxy_geo_without_random_fingerprint
             return_value={
                 "id": 303,
                 "name": "env-geo",
-                "time-zone": {"utc": "Asia/Tokyo"},
-                "ua-language": {"language": "ja-JP"},
                 "webrtc": {"mode": 0},
             }
         ),
@@ -250,16 +267,19 @@ async def test_virtualbrowser_create_probes_proxy_geo_without_random_fingerprint
     assert probe_entries[0].port == 8080
     assert probe_entries[0].username == "alice"
     client.add_browser.assert_awaited_once()
-    _, kwargs = client.add_browser.await_args
-    assert kwargs["geo"]["country_code"] == "JP"
-    assert kwargs["geo"]["timezone"] == "Asia/Tokyo"
-    assert kwargs["geo"]["latitude"] == 35.6895
-    assert kwargs["geo"]["longitude"] == 139.6917
+    args, kwargs = client.add_browser.await_args
+    assert kwargs["geo"] is None
+    assert args[2]["checkFailed"] is False
+    assert args[3]["ua-language"] == {"mode": 2}
+    assert args[3]["time-zone"] == {"mode": 2}
+    assert args[3]["location"] == {"mode": 2, "enable": 1}
+    assert args[3]["speech_voices"]["mode"] == 1
+    assert len(args[3]["speech_voices"]["value"]) == 5
     client.get_browser_full_parameters.assert_awaited_once_with(303)
 
 
 @pytest.mark.asyncio
-async def test_virtualbrowser_create_prefers_manual_geo_over_proxy_probe(monkeypatch):
+async def test_virtualbrowser_create_uses_ip_table_fingerprint_values_and_only_verifies_proxy(monkeypatch):
     provider = VirtualBrowserProvider()
     client = SimpleNamespace(
         add_browser=AsyncMock(return_value=303),
@@ -269,16 +289,34 @@ async def test_virtualbrowser_create_prefers_manual_geo_over_proxy_probe(monkeyp
     )
 
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
-    monkeypatch.setattr(
-        provider_module,
-        "probe_ip_entry_geo",
-        lambda _entry: (_ for _ in ()).throw(AssertionError("should not probe when manual geo exists")),
-    )
+    probe_entries = []
+
+    def _probe_geo(entry):
+        probe_entries.append(entry)
+        return provider_module.ProxyProbeResult(
+            ok=True,
+            stage="probe",
+            protocol="http",
+            masked_proxy_url="http://10.0.0.8:8080",
+            latency_ms=12,
+            exit_ip="203.0.113.8",
+            http_status=200,
+            detail="ok",
+            error_type=None,
+        )
+
+    monkeypatch.setattr(provider_module, "probe_ip_entry_geo", _probe_geo)
 
     await provider.create(
         {
             "env_name": "env-manual-geo",
-            "geo": {"latitude": 39.9, "longitude": 116.36},
+            "geo": {
+                "country": "CN",
+                "timezone": "Asia/Shanghai",
+                "language": "zh-CN,zh,en-US,en",
+                "latitude": 39.9,
+                "longitude": 116.36,
+            },
             "creation_params": {
                 "proxy": {
                     "protocol": "http",
@@ -291,11 +329,42 @@ async def test_virtualbrowser_create_prefers_manual_geo_over_proxy_probe(monkeyp
 
     _, kwargs = client.add_browser.await_args
     assert kwargs["geo"] is None
+    assert probe_entries[0].address == "10.0.0.8"
     client.randomize_fingerprint.assert_awaited_once_with(303)
+    assert client.update_browser.await_args_list[0].args == (
+        303,
+        {
+            "proxy": {
+                "mode": 2,
+                "value": "",
+                "protocol": "HTTP",
+                "host": "10.0.0.8",
+                "port": "8080",
+                "user": "",
+                "pass": "",
+                "API": "",
+                "url": "http://10.0.0.8:8080",
+                "country": "CN",
+                "checkFailed": False,
+            }
+        },
+    )
     update_args = client.update_browser.await_args
     assert update_args.args[0] == 303
+    assert update_args.args[1]["ua-language"] == {
+        "mode": 1,
+        "language": "zh-CN",
+        "value": "zh-CN,zh,en-US,en",
+    }
+    assert update_args.args[1]["time-zone"] == {
+        "mode": 1,
+        "zone": "(UTC+08:00) Asia/Shanghai",
+        "utc": "Asia/Shanghai",
+        "locale": "zh-CN",
+        "value": 8,
+    }
     assert update_args.args[1]["location"] | {"precision": 0} == {
-        "mode": 2,
+        "mode": 1,
         "enable": 1,
         "longitude": "116.36",
         "latitude": "39.9",
@@ -304,17 +373,39 @@ async def test_virtualbrowser_create_prefers_manual_geo_over_proxy_probe(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_virtualbrowser_create_preserves_full_static_proxy_value(monkeypatch):
+async def test_virtualbrowser_create_uses_structured_static_proxy_with_empty_value(monkeypatch):
     provider = VirtualBrowserProvider()
     client = SimpleNamespace(
         add_browser=AsyncMock(return_value=303),
         randomize_fingerprint=AsyncMock(return_value=True),
+        update_browser=AsyncMock(return_value=True),
         get_browser_full_parameters=AsyncMock(return_value={"id": 303}),
     )
     raw_proxy = "http://alice:secret@10.0.0.8:8080"
+    geo = {
+        "country": "CN",
+        "timezone": "Asia/Shanghai",
+        "language": "zh-CN,zh,en-US,en",
+        "latitude": 31.2304,
+        "longitude": 121.4737,
+    }
 
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
-    monkeypatch.setattr(provider, "_probe_creation_proxy_geo", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        provider_module,
+        "probe_ip_entry_geo",
+        lambda _entry: provider_module.ProxyProbeResult(
+            ok=True,
+            stage="probe",
+            protocol="http",
+            masked_proxy_url="http://alice:***@10.0.0.8:8080",
+            latency_ms=12,
+            exit_ip="203.0.113.8",
+            http_status=200,
+            detail="ok",
+            error_type=None,
+        ),
+    )
 
     await provider.create(
         {
@@ -323,20 +414,27 @@ async def test_virtualbrowser_create_preserves_full_static_proxy_value(monkeypat
                 "mode": ProxyMode.STATIC,
                 "static_value": raw_proxy,
             },
+            "geo": geo,
         }
     )
 
     args, kwargs = client.add_browser.await_args
     assert args[2] == {
-        "protocol": "http",
+        "mode": 2,
+        "value": "",
+        "protocol": "HTTP",
         "host": "10.0.0.8",
-        "port": 8080,
+        "port": "8080",
         "user": "alice",
         "pass": "secret",
-        "value": raw_proxy,
+        "API": "",
+        "url": raw_proxy,
+        "country": "CN",
+        "checkFailed": False,
     }
     assert args[3] == {"__randomize_fingerprint__": True}
     client.randomize_fingerprint.assert_awaited_once_with(303)
+    assert client.update_browser.await_args_list[0].args == (303, {"proxy": args[2]})
 
 
 @pytest.mark.asyncio
@@ -349,18 +447,19 @@ async def test_virtualbrowser_create_randomizes_vendor_fingerprint_before_applyi
         get_browser_full_parameters=AsyncMock(return_value={"id": 303}),
     )
     geo = {
-        "country_code": "JP",
+        "country": "JP",
         "timezone": "Asia/Tokyo",
+        "language": "ja-JP,ja",
         "latitude": 35.6895,
         "longitude": 139.6917,
     }
 
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
-    monkeypatch.setattr(provider, "_probe_creation_proxy_geo", AsyncMock(return_value=geo))
 
     await provider.create(
         {
             "env_name": "env-vendor-random",
+            "geo": geo,
             "creation_params": {"virtualbrowser": {"__randomize_fingerprint__": True}},
         }
     )
@@ -369,10 +468,10 @@ async def test_virtualbrowser_create_randomizes_vendor_fingerprint_before_applyi
     assert args[3] == {"__randomize_fingerprint__": True}
     assert kwargs["geo"] is None
     client.randomize_fingerprint.assert_awaited_once_with(303)
-    client.update_browser.assert_awaited_once_with(
+    assert client.update_browser.await_args_list[0].args == (
         303,
         {
-            "ua-language": {"mode": 1, "language": "ja-JP", "value": "ja"},
+            "ua-language": {"mode": 1, "language": "ja-JP", "value": "ja-JP,ja"},
             "time-zone": {
                 "mode": 1,
                 "zone": "(UTC+09:00) Asia/Tokyo",
@@ -381,12 +480,13 @@ async def test_virtualbrowser_create_randomizes_vendor_fingerprint_before_applyi
                 "value": 9,
             },
             "location": {
-                "mode": 2,
+                "mode": 1,
                 "enable": 1,
                 "longitude": "139.6917",
                 "latitude": "35.6895",
                 "precision": pytest.approx(1500, abs=500),
             },
+            "speech_voices": provider_module.build_virtualbrowser_speech_voices_override(),
         },
     )
 
@@ -565,6 +665,7 @@ async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
         handle=BrowserHandle(browser_id="101"),
     )
     client = SimpleNamespace(
+        get_browser_detail=AsyncMock(return_value={"id": 101}),
         launch_browser=AsyncMock(side_effect=RuntimeError("Launch Error: DevTools port not detected"))
     )
 
@@ -576,6 +677,66 @@ async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
         match="VirtualBrowser launchBrowser 失败: Launch Error: DevTools port not detected",
     ):
         await provider.open(env)
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_open_restores_full_ui_snapshot_after_launch(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        handle=BrowserHandle(browser_id="101"),
+    )
+    snapshot = {
+        "id": 101,
+        "name": "vb-env",
+        "proxy": {
+            "mode": 2,
+            "value": "",
+            "protocol": "HTTP",
+            "host": "10.0.0.8",
+            "port": "8080",
+            "user": "alice",
+            "pass": "secret",
+            "url": "http://alice:secret@10.0.0.8:8080",
+            "country": "CN",
+            "checkFailed": False,
+        },
+    }
+    sequence: list[str] = []
+
+    async def get_browser_detail(browser_id: int):
+        assert browser_id == 101
+        sequence.append("snapshot")
+        return snapshot
+
+    async def launch_browser(browser_id: int):
+        assert browser_id == 101
+        sequence.append("launch")
+        return "ws://127.0.0.1:9222/devtools/browser/abc"
+
+    async def update_browser(browser_id: int, config: dict):
+        assert browser_id == 101
+        assert config == snapshot
+        sequence.append("restore")
+        return True
+
+    client = SimpleNamespace(
+        get_browser_detail=AsyncMock(side_effect=get_browser_detail),
+        launch_browser=AsyncMock(side_effect=launch_browser),
+        update_browser=AsyncMock(side_effect=update_browser),
+    )
+    monkeypatch.setattr(provider, "is_window_open", AsyncMock(return_value=False))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await provider.open(env) is True
+
+    assert sequence == ["snapshot", "launch", "restore"]
+    assert env.handle is not None
+    assert env.handle.ws_url == "ws://127.0.0.1:9222/devtools/browser/abc"
 
 
 @pytest.mark.asyncio
@@ -610,7 +771,11 @@ async def test_virtualbrowser_open_serializes_launch_operations(monkeypatch):
         active_launches -= 1
         return f"http://localhost:{browser_id}"
 
-    client = SimpleNamespace(launch_browser=AsyncMock(side_effect=launch_browser))
+    client = SimpleNamespace(
+        get_browser_detail=AsyncMock(side_effect=lambda browser_id: {"id": browser_id}),
+        launch_browser=AsyncMock(side_effect=launch_browser),
+        update_browser=AsyncMock(return_value=True),
+    )
 
     monkeypatch.setattr(provider, "is_window_open", AsyncMock(return_value=False))
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)

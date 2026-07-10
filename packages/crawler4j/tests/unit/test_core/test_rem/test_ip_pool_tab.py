@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from PyQt6.QtCore import Qt
+
 from src.core.rem.ip_pool import IPEntry, IPEntryStatus, IPPool, IPStrategy
 from src.core.rem.proxy_probe import ProxyProbeResult
 from src.ui.components.button import StyledButton
@@ -53,6 +55,35 @@ def test_ip_pool_tab_pool_row_click_populates_entry_table(qtbot, monkeypatch):
         "edit_entry",
         "delete_entry",
     ]
+
+
+def test_ip_pool_tab_hides_fixed_fingerprint_columns_and_keeps_actions_reachable(qtbot, monkeypatch):
+    import src.core.rem.ui.ip_pool_tab as ip_pool_tab
+
+    monkeypatch.setattr(ip_pool_tab.IPPoolTab, "load_data", lambda self: None)
+
+    widget = ip_pool_tab.IPPoolTab()
+    qtbot.addWidget(widget)
+    widget.resize(1500, 900)
+    widget.show()
+    widget._apply_current_pool(_build_pool())
+
+    column_keys = [column["key"] for column in widget.ENTRY_TABLE_SCHEMA["columns"]]
+    assert not {"country", "timezone", "language"}.intersection(column_keys)
+    assert widget.ENTRY_TABLE_SCHEMA["columns"][-1] == {
+        "key": "actions",
+        "label": "操作",
+        "type": "actions",
+        "width": 250,
+    }
+    assert widget.entry_table.table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    assert not {"country", "timezone", "language"}.intersection(widget.entry_table.displayed_rows()[0])
+
+    table = widget.entry_table.table
+    action_index = column_keys.index("actions")
+    qtbot.waitUntil(lambda: table.viewport().width() > 0)
+    assert table.columnViewportPosition(action_index) + table.columnWidth(action_index) <= table.viewport().width()
+    assert table.cellWidget(0, action_index).sizeHint().width() <= table.columnWidth(action_index)
 
 
 def test_ip_pool_tab_disabled_entry_row_shows_enable_action(qtbot, monkeypatch):

@@ -167,6 +167,43 @@ VIRTUALBROWSER_SPEECH_VOICES_BY_SYSTEM = {
     "Linux": VIRTUALBROWSER_LINUX_SPEECH_VOICES,
 }
 VIRTUALBROWSER_CN_SPEECH_VOICES = VIRTUALBROWSER_WINDOWS_SPEECH_VOICES
+VIRTUALBROWSER_STANDARD_SPEECH_VOICES = (
+    {
+        "default": False,
+        "lang": "en-GB",
+        "localService": False,
+        "name": "Google UK English Male",
+        "voiceURI": "Google UK English Male",
+    },
+    {
+        "default": False,
+        "lang": "pl-PL",
+        "localService": False,
+        "name": "Google polski",
+        "voiceURI": "Google polski",
+    },
+    {
+        "default": False,
+        "lang": "it-IT",
+        "localService": False,
+        "name": "Google italiano",
+        "voiceURI": "Google italiano",
+    },
+    {
+        "default": False,
+        "lang": "fr-FR",
+        "localService": False,
+        "name": "Google français",
+        "voiceURI": "Google français",
+    },
+    {
+        "default": False,
+        "lang": "id-ID",
+        "localService": False,
+        "name": "Google Bahasa Indonesia",
+        "voiceURI": "Google Bahasa Indonesia",
+    },
+)
 
 
 def normalize_chrome_version(value: Any, *, default: int) -> int:
@@ -231,16 +268,32 @@ def build_virtualbrowser_random_fingerprint_defaults(
     return build_virtualbrowser_geo_fingerprint_overrides(geo)
 
 
+def build_virtualbrowser_ip_auto_fingerprint_overrides() -> dict[str, Any]:
+    """使用官方文档定义的「跟随 IP」模式。"""
+    return {
+        "ua-language": {"mode": 2},
+        "time-zone": {"mode": 2},
+        "location": {"mode": 2, "enable": 1},
+    }
+
+
+def build_virtualbrowser_speech_voices_override() -> dict[str, Any]:
+    """生成完整的 Speech Voices 数组，不能传空对象。"""
+    return {"mode": 1, "value": [dict(voice) for voice in VIRTUALBROWSER_STANDARD_SPEECH_VOICES]}
+
+
 def build_virtualbrowser_geo_fingerprint_overrides(
     geo: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """按出口地理信息生成语言和时区覆盖值。"""
     if not isinstance(geo, dict):
         return {}
-    country_code = str(geo.get("country_code") or "").strip().upper()
+    country_code = str(geo.get("country") or geo.get("country_code") or "").strip().upper()
     timezone = str(geo.get("timezone") or "").strip()
     overrides: dict[str, Any] = {}
-    language = _language_for_country(country_code) if country_code else None
+    language = _language_profile_from_ip_table(geo.get("language")) or (
+        _language_for_country(country_code) if country_code else None
+    )
     if language:
         overrides["ua-language"] = dict(language)
     if timezone:
@@ -256,6 +309,16 @@ def build_virtualbrowser_geo_fingerprint_overrides(
 
 def _language_for_country(country_code: str) -> dict[str, Any]:
     return VIRTUALBROWSER_LANGUAGE_BY_COUNTRY.get(country_code, VIRTUALBROWSER_FALLBACK_LANGUAGE)
+
+
+def _language_profile_from_ip_table(value: Any) -> dict[str, Any] | None:
+    language_list = str(value or "").strip()
+    if not language_list:
+        return None
+    primary = language_list.split(",", 1)[0].strip()
+    if not primary:
+        return None
+    return {"mode": 1, "language": primary, "value": language_list}
 
 
 def _build_time_zone_profile(timezone: str, *, locale: str) -> dict[str, Any] | None:
@@ -285,7 +348,7 @@ def _build_location_profile(geo: dict[str, Any]) -> dict[str, Any] | None:
     if latitude == 0 and longitude == 0:
         return None
     return {
-        "mode": 2,
+        "mode": 1,
         "enable": 1,
         "longitude": _format_geo_coord(longitude),
         "latitude": _format_geo_coord(latitude),
