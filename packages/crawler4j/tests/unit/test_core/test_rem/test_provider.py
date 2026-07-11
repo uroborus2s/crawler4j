@@ -680,7 +680,7 @@ async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_virtualbrowser_open_replays_supported_proxy_fields_after_launch(monkeypatch):
+async def test_virtualbrowser_open_replays_complete_proxy_after_launch(monkeypatch):
     provider = VirtualBrowserProvider()
     env = Environment(
         id=101,
@@ -723,6 +723,13 @@ async def test_virtualbrowser_open_replays_supported_proxy_fields_after_launch(m
         assert config == {
             "proxy": {
                 "mode": 2,
+                "value": "",
+                "protocol": "HTTP",
+                "host": "10.0.0.8",
+                "port": "8080",
+                "user": "alice",
+                "pass": "secret",
+                "API": "",
                 "url": "http://alice:secret@10.0.0.8:8080",
                 "country": "CN",
                 "checkFailed": False,
