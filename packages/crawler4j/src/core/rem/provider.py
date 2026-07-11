@@ -7,6 +7,7 @@ Provider 层面向具体技术栈，负责实际 spawn/keepalive/kill/healthchec
 
 import asyncio
 import json
+import secrets
 
 from abc import ABC, abstractmethod
 from typing import Any
@@ -28,6 +29,7 @@ from src.core.rem.virtualbrowser_fingerprint import (
 
 VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS = tuple(range(146, 138, -1))
 VIRTUALBROWSER_DEFAULT_CHROME_VERSION = 145
+VIRTUALBROWSER_RANDOM_CHROME_VERSIONS = (138, 140, 142, 143, 145, 146)
 VIRTUALBROWSER_ADD_BROWSER_MAX_ATTEMPTS = 10
 VIRTUALBROWSER_ADD_BROWSER_RETRY_DELAY_SECONDS = 1.0
 VIRTUALBROWSER_RUNTIME_FINGERPRINT_PROBE = r"""
@@ -103,6 +105,11 @@ _SENSITIVE_PAYLOAD_KEYS = {
     "proxy_password",
     "proxypassword",
 }
+
+
+def select_virtualbrowser_chrome_version() -> int:
+    """随机选择业务允许的 Chrome 主版本，由客户端自动匹配实际内核。"""
+    return secrets.choice(VIRTUALBROWSER_RANDOM_CHROME_VERSIONS)
 
 
 def _mask_url_credentials(value: str) -> str:
@@ -1738,20 +1745,28 @@ class VirtualBrowserClient:
             default_proxy["mode"] = 2 if has_custom_proxy else 1
 
         materialize_kwargs: dict[str, Any] = {
-            "default_chrome_version": VIRTUALBROWSER_DEFAULT_CHROME_VERSION,
+            "default_chrome_version": select_virtualbrowser_chrome_version(),
         }
         if geo:
             materialize_kwargs["geo"] = geo
+        fingerprint_for_create = fingerprint
+        if isinstance(fingerprint, dict) and fingerprint.get(VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY):
+            # 兼容旧运行模板：随机指纹此前仍会保存 UI 默认的 145；随机模式必须由
+            # Provider 重新选择主版本，不能让历史值钉死随机池。
+            fingerprint_for_create = dict(fingerprint)
+            fingerprint_for_create.pop("chrome_version", None)
         chrome_version, fingerprint_payload = materialize_virtualbrowser_fingerprint(
-            fingerprint,
+            fingerprint_for_create,
             **materialize_kwargs,
         )
+        core_version = fingerprint_payload.pop("core_version", "auto")
 
         # 构造请求参数
         payload = {
             "name": name,
             "group": group_ids or [],
             "chrome_version": chrome_version,
+            "core_version": core_version,
             "proxy": default_proxy,
         }
 
@@ -2510,8 +2525,16 @@ class VirtualBrowserProvider(BaseProvider):
                 if not isinstance(browser_snapshot, dict):
                     raise RuntimeError("启动前未获取到完整环境配置")
                 ws_url = await client.launch_browser(browser_id_int)
-                if not await client.update_browser(browser_id_int, browser_snapshot):
-                    raise RuntimeError("启动后回写完整环境配置失败")
+                proxy = browser_snapshot.get("proxy")
+                if isinstance(proxy, dict):
+                    proxy_update = {
+                        "mode": proxy.get("mode", 1),
+                        "url": proxy.get("url", ""),
+                        "country": proxy.get("country", ""),
+                        "checkFailed": proxy.get("checkFailed", False),
+                    }
+                    if not await client.update_browser(browser_id_int, {"proxy": proxy_update}):
+                        raise RuntimeError("启动后回写代理配置失败")
                 logger.info(f"[VirtualBrowser] Opened browser {browser_id}")
 
                 # 存储 ws_url 到 BrowserHandle

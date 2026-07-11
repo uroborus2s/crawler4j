@@ -421,7 +421,6 @@ def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
     assert profile.resource.acquisition.creation.lifecycle == CreationLifecycle.PERSISTENT
     virtualbrowser = profile.resource.acquisition.creation.params["virtualbrowser"]
     assert virtualbrowser == {
-        "chrome_version": 144,
         "__randomize_fingerprint__": True,
     }
     assert profile.resource.acquisition.creation.params["proxy"] == {
@@ -890,7 +889,6 @@ def test_run_profile_dialog_defaults_new_create_mode_to_random_fingerprint(qtbot
     profile = dialog._build_run_profile_from_form()
     virtualbrowser = profile.resource.acquisition.creation.params["virtualbrowser"]
     assert virtualbrowser == {
-        "chrome_version": 145,
         "__randomize_fingerprint__": True,
     }
 

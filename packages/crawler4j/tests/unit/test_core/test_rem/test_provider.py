@@ -680,7 +680,7 @@ async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_virtualbrowser_open_restores_full_ui_snapshot_after_launch(monkeypatch):
+async def test_virtualbrowser_open_replays_supported_proxy_fields_after_launch(monkeypatch):
     provider = VirtualBrowserProvider()
     env = Environment(
         id=101,
@@ -720,7 +720,14 @@ async def test_virtualbrowser_open_restores_full_ui_snapshot_after_launch(monkey
 
     async def update_browser(browser_id: int, config: dict):
         assert browser_id == 101
-        assert config == snapshot
+        assert config == {
+            "proxy": {
+                "mode": 2,
+                "url": "http://alice:secret@10.0.0.8:8080",
+                "country": "CN",
+                "checkFailed": False,
+            }
+        }
         sequence.append("restore")
         return True
 
@@ -783,6 +790,7 @@ async def test_virtualbrowser_open_serializes_launch_operations(monkeypatch):
     assert await asyncio.gather(provider.open(env_a), provider.open(env_b)) == [True, True]
     assert max_active_launches == 1
     assert launch_order == [101, 102]
+    client.update_browser.assert_not_awaited()
     assert env_a.handle is not None
     assert env_b.handle is not None
     assert env_a.handle.ws_url == "http://localhost:101"
