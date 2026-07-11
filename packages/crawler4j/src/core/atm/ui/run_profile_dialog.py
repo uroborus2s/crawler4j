@@ -1605,13 +1605,13 @@ class RunProfileDialog(QDialog):
 
     def _build_virtualbrowser_params(self) -> dict:
         randomize_fingerprint = self.randomize_fingerprint_check.isChecked()
+
+        if randomize_fingerprint:
+            return {VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY: True}
+
         params: dict[str, object] = {
             "chrome_version": self._current_browser_version(),
         }
-
-        if randomize_fingerprint:
-            params[VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY] = True
-            return params
 
         if getattr(self, "_ua_mode", "default") == "custom":
             ua_value = self.ua_value_edit.toPlainText().strip()

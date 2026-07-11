@@ -72,6 +72,47 @@ class _DummyHttpClient:
         return _DummyResponse({}, response_data=self._response_data)
 
 
+@pytest.mark.asyncio
+async def test_add_browser_randomly_selects_configured_chrome_version_with_auto_core(monkeypatch):
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient()
+    selected_from: tuple[int, ...] | None = None
+
+    def _choose(values):
+        nonlocal selected_from
+        selected_from = tuple(values)
+        return 143
+
+    monkeypatch.setattr(provider_module.secrets, "choice", _choose)
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+
+    await client.add_browser(name="env-random-core", group_ids=[])
+
+    assert selected_from == (138, 140, 142, 143, 145, 146)
+    assert dummy.last_payload["chrome_version"] == 143
+    assert dummy.last_payload["core_version"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_add_browser_randomizes_chrome_version_for_legacy_random_profile(monkeypatch):
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient()
+    monkeypatch.setattr(provider_module.secrets, "choice", lambda values: 140)
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+
+    await client.add_browser(
+        name="env-legacy-random-core",
+        group_ids=[],
+        fingerprint={
+            "chrome_version": 145,
+            "__randomize_fingerprint__": True,
+        },
+    )
+
+    assert dummy.last_payload["chrome_version"] == 140
+    assert dummy.last_payload["core_version"] == "auto"
+
+
 def test_virtualbrowser_client_uses_loopback_base_url():
     client = VirtualBrowserClient(port=9002, api_key="")
 
@@ -305,6 +346,7 @@ async def test_add_browser_materializes_randomize_fingerprint_template(monkeypat
                 "name": "env-c",
                 "group": ["g1"],
                 "chrome_version": 144,
+                "core_version": "auto",
                 "proxy": {
                     "mode": 1,
                     "value": "",
@@ -348,6 +390,7 @@ async def test_add_browser_strips_legacy_randomize_marker_without_compat_behavio
                 "name": "env-d",
                 "group": ["g1"],
                 "chrome_version": 145,
+                "core_version": "auto",
                 "proxy": {
                     "mode": 1,
                     "value": "",
