@@ -5,6 +5,7 @@ from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_LANGUAGE_BY_COUNTRY,
     VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
     VIRTUALBROWSER_UA_TEMPLATES,
+    build_virtualbrowser_randomize_constraints,
     materialize_virtualbrowser_fingerprint,
 )
 
@@ -38,6 +39,26 @@ def test_materialize_virtualbrowser_fingerprint_defers_random_fields_to_virtualb
 
     assert chrome_version == 145
     assert payload == {}
+
+
+def test_randomize_constraints_control_hardware_screen_and_ua(monkeypatch):
+    choices = iter(((8, 16), (1920, 1080)))
+    monkeypatch.setattr("src.core.rem.virtualbrowser_fingerprint.secrets.choice", lambda _items: next(choices))
+
+    overrides = build_virtualbrowser_randomize_constraints(145, system="Windows")
+
+    assert overrides == {
+        "ua": {
+            "mode": 1,
+            "value": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            ),
+        },
+        "cpu": {"mode": 1, "value": 8},
+        "memory": {"mode": 1, "value": 16},
+        "screen": {"mode": 1, "width": 1920, "height": 1080, "_value": "1920 x 1080"},
+    }
 
 
 def test_virtualbrowser_random_user_agent_templates_match_supported_host_systems():

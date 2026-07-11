@@ -242,6 +242,22 @@ def generate_mac_address() -> str:
     return "-".join(f"{octet:02X}" for octet in octets)
 
 
+def build_virtualbrowser_randomize_constraints(
+    chrome_version: int,
+    *,
+    system: str | None = None,
+) -> dict[str, Any]:
+    """生成交给 VirtualBrowser 随机接口的最小受控参数。"""
+    cpu, memory = secrets.choice(VIRTUALBROWSER_COMMON_HARDWARE_PROFILES)
+    width, height = secrets.choice(VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS)
+    return {
+        "ua": {"mode": 1, "value": generate_random_user_agent(chrome_version, system=system)},
+        "cpu": {"mode": 1, "value": cpu},
+        "memory": {"mode": 1, "value": memory},
+        "screen": {"mode": 1, "width": width, "height": height, "_value": f"{width} x {height}"},
+    }
+
+
 def _channel_delta(max_abs: int = 10) -> int:
     return secrets.randbelow(max_abs * 2 + 1) - max_abs
 
@@ -403,8 +419,8 @@ def materialize_virtualbrowser_fingerprint(
         for key in VIRTUALBROWSER_RANDOM_MODE_KEYS:
             if _random_mode_placeholder(payload.get(key)):
                 payload.pop(key, None)
-        # 不在 Core 中伪造 UA、字体、AudioContext 或 Speech Voices；创建完成后由
-        # VirtualBrowser randomizeFingerprint 生成，再读取完整参数验收。
+        # 具体随机字段由 VirtualBrowser 生成；Core 只在调用 randomizeFingerprint
+        # 时提供 UA、硬件、屏幕和代理地理等最小约束。
         if geo:
             payload.update(build_virtualbrowser_geo_fingerprint_overrides(geo))
         return chrome_version, payload

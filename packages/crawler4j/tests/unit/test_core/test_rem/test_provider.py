@@ -99,6 +99,22 @@ def test_created_parameter_warnings_flag_inconsistent_fingerprint_values():
     assert "client-rects.mode=1" in rendered
 
 
+def test_created_parameter_warnings_require_automatic_controlled_fields():
+    warnings = provider_module._created_parameter_warnings(
+        {"id": 55},
+        browser_id=55,
+        geo=None,
+        require_controlled=True,
+    )
+
+    assert warnings == [
+        "ua.value 缺失",
+        "ua-full-version.value 缺失",
+        "cpu/memory 缺失",
+        "screen 尺寸缺失",
+    ]
+
+
 def test_virtualbrowser_manual_ip_table_geo_allows_fixed_defaults_without_location():
     assert VirtualBrowserProvider._manual_ip_table_geo(
         {
@@ -330,7 +346,15 @@ async def test_virtualbrowser_create_uses_ip_table_fingerprint_values_and_only_v
     _, kwargs = client.add_browser.await_args
     assert kwargs["geo"] is None
     assert probe_entries[0].address == "10.0.0.8"
-    client.randomize_fingerprint.assert_awaited_once_with(303)
+    randomize_args = client.randomize_fingerprint.await_args.args
+    assert randomize_args[0] == 303
+    controlled = randomize_args[1]
+    assert (controlled["cpu"]["value"], controlled["memory"]["value"]) in (
+        provider_module.VIRTUALBROWSER_COMMON_HARDWARE_PROFILES
+    )
+    assert (controlled["screen"]["width"], controlled["screen"]["height"]) in (
+        provider_module.VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS
+    )
     assert client.update_browser.await_args_list[0].args == (
         303,
         {
@@ -349,21 +373,19 @@ async def test_virtualbrowser_create_uses_ip_table_fingerprint_values_and_only_v
             }
         },
     )
-    update_args = client.update_browser.await_args
-    assert update_args.args[0] == 303
-    assert update_args.args[1]["ua-language"] == {
+    assert controlled["ua-language"] == {
         "mode": 1,
         "language": "zh-CN",
         "value": "zh-CN,zh,en-US,en",
     }
-    assert update_args.args[1]["time-zone"] == {
+    assert controlled["time-zone"] == {
         "mode": 1,
         "zone": "(UTC+08:00) Asia/Shanghai",
         "utc": "Asia/Shanghai",
         "locale": "zh-CN",
         "value": 8,
     }
-    assert update_args.args[1]["location"] | {"precision": 0} == {
+    assert controlled["location"] | {"precision": 0} == {
         "mode": 1,
         "enable": 1,
         "longitude": "116.36",
@@ -432,19 +454,41 @@ async def test_virtualbrowser_create_uses_structured_static_proxy_with_empty_val
         "country": "CN",
         "checkFailed": False,
     }
-    assert args[3] == {"__randomize_fingerprint__": True}
-    client.randomize_fingerprint.assert_awaited_once_with(303)
+    assert args[3]["__randomize_fingerprint__"] is True
+    assert args[3]["chrome_version"] in provider_module.VIRTUALBROWSER_RANDOM_CHROME_VERSIONS
+    assert client.randomize_fingerprint.await_args.args[0] == 303
     assert client.update_browser.await_args_list[0].args == (303, {"proxy": args[2]})
 
 
 @pytest.mark.asyncio
-async def test_virtualbrowser_create_randomizes_vendor_fingerprint_before_applying_proxy_geo(monkeypatch):
+async def test_virtualbrowser_create_randomizes_once_with_controlled_constraints(monkeypatch):
     provider = VirtualBrowserProvider()
+    final_parameters = {
+        "id": 303,
+        "chrome_version": 145,
+        "ua": {
+            "mode": 1,
+            "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0 Safari/537.36",
+        },
+        "ua-full-version": {"mode": 1, "value": "145.0.7632.12"},
+        "ua-language": {"mode": 1, "language": "ja-JP", "value": "ja-JP,ja"},
+        "time-zone": {"mode": 1, "utc": "Asia/Tokyo"},
+        "location": {
+            "mode": 1,
+            "enable": 1,
+            "longitude": "139.6917",
+            "latitude": "35.6895",
+            "precision": 1500,
+        },
+        "cpu": {"mode": 1, "value": 8},
+        "memory": {"mode": 1, "value": 16},
+        "screen": {"mode": 1, "width": 1920, "height": 1080},
+    }
     client = SimpleNamespace(
         add_browser=AsyncMock(return_value=303),
         randomize_fingerprint=AsyncMock(return_value=True),
         update_browser=AsyncMock(return_value=True),
-        get_browser_full_parameters=AsyncMock(return_value={"id": 303}),
+        get_browser_full_parameters=AsyncMock(return_value=final_parameters),
     )
     geo = {
         "country": "JP",
@@ -455,6 +499,13 @@ async def test_virtualbrowser_create_randomizes_vendor_fingerprint_before_applyi
     }
 
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(provider_module, "select_virtualbrowser_chrome_version", lambda: 145)
+    monkeypatch.setattr("src.core.rem.virtualbrowser_fingerprint.platform.system", lambda: "Windows")
+    choices = iter(((8, 16), (1920, 1080)))
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.secrets.choice",
+        lambda _items: next(choices),
+    )
 
     await provider.create(
         {
@@ -465,30 +516,48 @@ async def test_virtualbrowser_create_randomizes_vendor_fingerprint_before_applyi
     )
 
     args, kwargs = client.add_browser.await_args
-    assert args[3] == {"__randomize_fingerprint__": True}
+    assert args[3] == {"__randomize_fingerprint__": True, "chrome_version": 145}
     assert kwargs["geo"] is None
-    client.randomize_fingerprint.assert_awaited_once_with(303)
-    assert client.update_browser.await_args_list[0].args == (
-        303,
-        {
-            "ua-language": {"mode": 1, "language": "ja-JP", "value": "ja-JP,ja"},
-            "time-zone": {
-                "mode": 1,
-                "zone": "(UTC+09:00) Asia/Tokyo",
-                "utc": "Asia/Tokyo",
-                "locale": "ja-JP",
-                "value": 9,
-            },
-            "location": {
-                "mode": 1,
-                "enable": 1,
-                "longitude": "139.6917",
-                "latitude": "35.6895",
-                "precision": pytest.approx(1500, abs=500),
-            },
-            "speech_voices": provider_module.build_virtualbrowser_speech_voices_override(),
-        },
+    randomize_args = client.randomize_fingerprint.await_args.args
+    assert randomize_args[0] == 303
+    assert randomize_args[1]["cpu"] == {"mode": 1, "value": 8}
+    assert randomize_args[1]["memory"] == {"mode": 1, "value": 16}
+    assert randomize_args[1]["screen"] == {
+        "mode": 1,
+        "width": 1920,
+        "height": 1080,
+        "_value": "1920 x 1080",
+    }
+    assert "Win64; x64" in randomize_args[1]["ua"]["value"]
+    assert randomize_args[1]["ua-language"] == {"mode": 1, "language": "ja-JP", "value": "ja-JP,ja"}
+    assert randomize_args[1]["time-zone"]["utc"] == "Asia/Tokyo"
+    assert randomize_args[1]["location"]["longitude"] == "139.6917"
+    assert randomize_args[1]["speech_voices"] == provider_module.build_virtualbrowser_speech_voices_override()
+    client.update_browser.assert_not_awaited()
+    client.get_browser_full_parameters.assert_awaited_once_with(303)
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_create_deletes_external_env_when_randomize_fails(monkeypatch):
+    provider = VirtualBrowserProvider()
+    client = SimpleNamespace(
+        add_browser=AsyncMock(return_value=303),
+        randomize_fingerprint=AsyncMock(return_value=False),
+        update_browser=AsyncMock(return_value=True),
+        get_browser_full_parameters=AsyncMock(
+            return_value={
+                "id": 303,
+                "ua": {"mode": 0, "value": "Mozilla/5.0 Chrome/145.0.7632.12"},
+            }
+        ),
+        delete_browser=AsyncMock(return_value=True),
     )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    with pytest.raises(RuntimeError, match="randomizeFingerprint 失败"):
+        await provider.create({"env_name": "env-controlled-write-failure"})
+
+    client.delete_browser.assert_awaited_once_with(303)
 
 
 @pytest.mark.asyncio
@@ -554,6 +623,7 @@ async def test_virtualbrowser_runtime_fingerprint_check_flags_page_visible_misma
                 "languages": ["en-US"],
                 "timezone": "America/New_York",
                 "screen": {"width": 1366, "height": 768},
+                "devicePixelRatio": 1.25,
                 "voices": [],
                 "webrtc": {"hasRawPrivateAddress": True, "candidateTypes": ["host"]},
             }
@@ -593,7 +663,7 @@ async def test_virtualbrowser_runtime_fingerprint_check_flags_page_visible_misma
     assert any("ua-full-version" in warning for warning in warnings)
     assert any("navigator.language" in warning for warning in warnings)
     assert any("time-zone" in warning for warning in warnings)
-    assert any("screen" in warning for warning in warnings)
+    assert "screen 配置=1920x1080，页面=1366x768，devicePixelRatio=1.25" in warnings
     assert any("speechSynthesis" in warning for warning in warnings)
     assert any("WebRTC" in warning for warning in warnings)
 

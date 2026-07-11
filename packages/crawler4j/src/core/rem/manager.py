@@ -1538,13 +1538,18 @@ class EnvironmentManager:
                     env.proxy_config.current_ip = proxy_config.current_ip
 
             # 5. 更新环境记录 (此时有了 external_id)
-            env.status = EnvStatus.READY
+            env.status = EnvStatus.CREATING
 
             # 先保存到数据库以确保 ID 存在
             await self.pool.add(env)  # update because add was called with skeleton
-            await self._persist_created_fingerprint_validation(env)
-
-            logger.info(f"[REM] 环境创建成功: id={env_id} external_id={env.external_id}")
+            created_warnings = await self._persist_created_fingerprint_validation(env)
+            enforce_fingerprint_gate = bool(getattr(env, "enforce_fingerprint_creation_gate", False))
+            if enforce_fingerprint_gate and created_warnings:
+                raise EnvUnavailableError(
+                    f"创建后指纹参数验收失败: {'; '.join(created_warnings)}",
+                    stage="CREATE",
+                    hint="自动创建环境未通过受控指纹门禁",
+                )
 
             if not await self._provider_operation(env, "open"):
                 raise EnvUnavailableError(
@@ -1566,7 +1571,15 @@ class EnvironmentManager:
                 )
 
             if env.provider == "virtualbrowser":
-                await self._persist_runtime_fingerprint_validation(env, provider)
+                runtime_warnings = await self._persist_runtime_fingerprint_validation(env, provider)
+                if enforce_fingerprint_gate and runtime_warnings:
+                    raise EnvUnavailableError(
+                        f"页面运行时指纹验收失败: {'; '.join(runtime_warnings)}",
+                        stage="CREATE",
+                        hint="自动创建环境的页面可见指纹与持久化配置不一致",
+                    )
+
+            logger.info(f"[REM] 环境创建成功: id={env_id} external_id={env.external_id}")
 
             return env
 
@@ -1579,10 +1592,10 @@ class EnvironmentManager:
             )
             raise
 
-    async def _persist_created_fingerprint_validation(self, env: Environment) -> None:
+    async def _persist_created_fingerprint_validation(self, env: Environment) -> list[str]:
         warnings = getattr(env, "fingerprint_validation_warnings", None)
         if warnings is None:
-            return
+            return []
         warnings = [str(item).strip() for item in warnings if str(item).strip()]
         if warnings:
             await self.mark_fingerprint_validation_risk(
@@ -1599,9 +1612,14 @@ class EnvironmentManager:
             delattr(env, "fingerprint_validation_warnings")
         except AttributeError:
             pass
+        return warnings
 
-    async def _persist_runtime_fingerprint_validation(self, env: Environment, provider: BaseProvider) -> None:
-        """Persist a non-blocking page-visible fingerprint validation result."""
+    async def _persist_runtime_fingerprint_validation(
+        self,
+        env: Environment,
+        provider: BaseProvider,
+    ) -> list[str]:
+        """Persist page-visible fingerprint warnings for the caller's creation gate."""
         validator = getattr(provider, "validate_runtime_fingerprint_environment", None)
         warnings = await validator(env) if callable(validator) else []
         warnings = [str(item).strip() for item in warnings if str(item).strip()]
@@ -1616,6 +1634,7 @@ class EnvironmentManager:
                 env.id,
                 detail="创建后页面运行时指纹自检通过",
             )
+        return warnings
 
     async def _reserve_env_placeholder(
         self,
