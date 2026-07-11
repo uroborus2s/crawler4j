@@ -2529,6 +2529,13 @@ class VirtualBrowserProvider(BaseProvider):
                 if isinstance(proxy, dict):
                     proxy_update = {
                         "mode": proxy.get("mode", 1),
+                        "value": proxy.get("value", ""),
+                        "protocol": proxy.get("protocol", ""),
+                        "host": proxy.get("host", ""),
+                        "port": proxy.get("port", ""),
+                        "user": proxy.get("user", ""),
+                        "pass": proxy.get("pass", ""),
+                        "API": proxy.get("API", ""),
                         "url": proxy.get("url", ""),
                         "country": proxy.get("country", ""),
                         "checkFailed": proxy.get("checkFailed", False),
