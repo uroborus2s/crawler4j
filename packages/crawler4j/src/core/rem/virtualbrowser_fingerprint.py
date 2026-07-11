@@ -242,6 +242,60 @@ def generate_mac_address() -> str:
     return "-".join(f"{octet:02X}" for octet in octets)
 
 
+def _fingerprint_int(section: Any, key: str = "value") -> int | None:
+    try:
+        return int(section.get(key)) if isinstance(section, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _contains_expected(actual: Any, expected: Any) -> bool:
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(actual.get(key) == value for key, value in expected.items())
+    return actual == expected
+
+
+def build_virtualbrowser_randomized_fingerprint_patch(
+    entry: dict[str, Any],
+    expected: dict[str, Any],
+) -> dict[str, Any]:
+    """随机完成后只修正不合格或业务必须固定的字段。"""
+    patch: dict[str, Any] = {}
+    ua = entry.get("ua")
+    ua_value = str(ua.get("value") or "") if isinstance(ua, dict) else ""
+    if "WOW64" in ua_value:
+        patch["ua"] = {"mode": 1, "value": ua_value.replace("WOW64", "Win64; x64")}
+
+    cpu = _fingerprint_int(entry.get("cpu"))
+    memory = _fingerprint_int(entry.get("memory"))
+    if (cpu, memory) not in VIRTUALBROWSER_COMMON_HARDWARE_PROFILES:
+        cpu, memory = secrets.choice(VIRTUALBROWSER_COMMON_HARDWARE_PROFILES)
+        patch["cpu"] = {"mode": 1, "value": cpu}
+        patch["memory"] = {"mode": 1, "value": memory}
+
+    screen = entry.get("screen")
+    width = _fingerprint_int(screen, "width")
+    height = _fingerprint_int(screen, "height")
+    if (
+        not isinstance(screen, dict)
+        or screen.get("mode") not in (1, "1")
+        or (width, height) not in VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS
+    ):
+        if (width, height) not in VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS:
+            width, height = secrets.choice(VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS)
+        patch["screen"] = {
+            "mode": 1,
+            "width": width,
+            "height": height,
+            "_value": f"{width} x {height}",
+        }
+
+    for key, value in expected.items():
+        if not _contains_expected(entry.get(key), value):
+            patch[key] = value
+    return patch
+
+
 def _channel_delta(max_abs: int = 10) -> int:
     return secrets.randbelow(max_abs * 2 + 1) - max_abs
 
@@ -403,8 +457,8 @@ def materialize_virtualbrowser_fingerprint(
         for key in VIRTUALBROWSER_RANDOM_MODE_KEYS:
             if _random_mode_placeholder(payload.get(key)):
                 payload.pop(key, None)
-        # 不在 Core 中伪造 UA、字体、AudioContext 或 Speech Voices；创建完成后由
-        # VirtualBrowser randomizeFingerprint 生成，再读取完整参数验收。
+        # 具体随机字段由 VirtualBrowser 生成；Core 在随机后读取完整参数，
+        # 再通过 updateBrowser 修正不合格字段。
         if geo:
             payload.update(build_virtualbrowser_geo_fingerprint_overrides(geo))
         return chrome_version, payload

@@ -5,6 +5,7 @@ from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_LANGUAGE_BY_COUNTRY,
     VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
     VIRTUALBROWSER_UA_TEMPLATES,
+    build_virtualbrowser_randomized_fingerprint_patch,
     materialize_virtualbrowser_fingerprint,
 )
 
@@ -38,6 +39,53 @@ def test_materialize_virtualbrowser_fingerprint_defers_random_fields_to_virtualb
 
     assert chrome_version == 145
     assert payload == {}
+
+
+def test_randomized_fingerprint_patch_only_repairs_invalid_or_required_fields(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.secrets.choice",
+        lambda _items: (8, 16),
+    )
+    expected = {
+        "ua-language": {"mode": 1, "language": "zh-CN", "value": "zh-CN,zh"},
+        "time-zone": {"mode": 1, "utc": "Asia/Shanghai", "value": 8},
+        "location": {
+            "mode": 1,
+            "enable": 1,
+            "longitude": "121.6489",
+            "latitude": "42.0117",
+            "precision": 1500,
+        },
+        "speech_voices": {"mode": 1, "value": [{"name": "Google UK English Male"}]},
+    }
+
+    patch = build_virtualbrowser_randomized_fingerprint_patch(
+        {
+            "ua": {
+                "mode": 0,
+                "value": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/145.0.0.0",
+            },
+            "ua-full-version": {"mode": 1, "value": "145.0.7632.109"},
+            "sec-ch-ua": {"mode": 0, "value": [{"brand": "Chromium", "version": 145}]},
+            "cpu": {"mode": 1, "value": 2},
+            "memory": {"mode": 1, "value": 8},
+            "screen": {"mode": 0, "width": 1920, "height": 1080, "_value": "1920 x 1080"},
+        },
+        expected,
+    )
+
+    assert patch == {
+        "ua": {
+            "mode": 1,
+            "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0",
+        },
+        "cpu": {"mode": 1, "value": 8},
+        "memory": {"mode": 1, "value": 16},
+        "screen": {"mode": 1, "width": 1920, "height": 1080, "_value": "1920 x 1080"},
+        **expected,
+    }
+    assert "ua-full-version" not in patch
+    assert "sec-ch-ua" not in patch
 
 
 def test_virtualbrowser_random_user_agent_templates_match_supported_host_systems():

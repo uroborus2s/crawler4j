@@ -94,10 +94,9 @@ async def test_add_browser_randomly_selects_configured_chrome_version_with_auto_
 
 
 @pytest.mark.asyncio
-async def test_add_browser_randomizes_chrome_version_for_legacy_random_profile(monkeypatch):
+async def test_add_browser_respects_controlled_chrome_version_for_random_profile(monkeypatch):
     client = VirtualBrowserClient(port=9002, api_key="")
     dummy = _DummyHttpClient()
-    monkeypatch.setattr(provider_module.secrets, "choice", lambda values: 140)
     client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
 
     await client.add_browser(
@@ -109,8 +108,18 @@ async def test_add_browser_randomizes_chrome_version_for_legacy_random_profile(m
         },
     )
 
-    assert dummy.last_payload["chrome_version"] == 140
+    assert dummy.last_payload["chrome_version"] == 145
     assert dummy.last_payload["core_version"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_randomize_fingerprint_sends_only_browser_id():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient()
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+    assert await client.randomize_fingerprint(303) is True
+    assert dummy.last_path == "/api/randomizeFingerprint"
+    assert dummy.last_payload == {"id": 303}
 
 
 def test_virtualbrowser_client_uses_loopback_base_url():
