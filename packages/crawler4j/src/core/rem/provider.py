@@ -22,9 +22,9 @@ from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_COMMON_HARDWARE_PROFILES,
     VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS,
     VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
-    build_virtualbrowser_randomize_constraints,
     build_virtualbrowser_geo_fingerprint_overrides,
     build_virtualbrowser_ip_auto_fingerprint_overrides,
+    build_virtualbrowser_randomized_fingerprint_patch,
     build_virtualbrowser_speech_voices_override,
     materialize_virtualbrowser_fingerprint,
 )
@@ -472,6 +472,8 @@ def _created_parameter_warnings(
     screen_height = _safe_int(screen.get("height")) if isinstance(screen, dict) else None
     if require_controlled and (screen_width is None or screen_height is None):
         warnings.append("screen 尺寸缺失")
+    elif require_controlled and isinstance(screen, dict) and screen.get("mode") not in (1, "1"):
+        warnings.append(f"screen.mode={screen.get('mode')!r}，预期自定义模式 1")
     elif (
         require_controlled
         and screen_width is not None
@@ -1830,19 +1832,17 @@ class VirtualBrowserClient:
 
         raise RuntimeError("VirtualBrowser addBrowser 失败: retry loop exhausted")
 
-    async def randomize_fingerprint(self, browser_id: int, config: dict | None = None) -> bool:
+    async def randomize_fingerprint(self, browser_id: int) -> bool:
         """更新/随机化指纹。
 
         Args:
             browser_id: 浏览器 ID
-            config: 随机时必须固定的 UA、时区、位置、屏幕和硬件等参数
 
         Returns:
             是否成功
         """
         client = await self._get_client()
-        payload = dict(config or {})
-        payload["id"] = browser_id
+        payload = {"id": browser_id}
 
         try:
             resp = await client.post("/api/randomizeFingerprint", json=payload)
@@ -2188,11 +2188,9 @@ class VirtualBrowserProvider(BaseProvider):
         should_randomize_fingerprint = isinstance(fingerprint, dict) and bool(
             fingerprint.get(VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY)
         )
-        controlled_chrome_version: int | None = None
         if should_randomize_fingerprint:
-            controlled_chrome_version = select_virtualbrowser_chrome_version()
             fingerprint = dict(fingerprint)
-            fingerprint["chrome_version"] = controlled_chrome_version
+            fingerprint["chrome_version"] = select_virtualbrowser_chrome_version()
         manual_geo = self._manual_ip_table_geo(config.get("geo"))
         source_proxy_entry = _ip_entry_from_virtualbrowser_proxy(proxy)
         if source_proxy_entry is not None:
@@ -2222,17 +2220,19 @@ class VirtualBrowserProvider(BaseProvider):
                     geo=None if should_randomize_fingerprint else manual_geo,
                 )
                 if should_randomize_fingerprint:
-                    if controlled_chrome_version is None:
-                        raise RuntimeError("VirtualBrowser 自动创建缺少受控 Chrome 版本")
-                    constraints = build_virtualbrowser_randomize_constraints(controlled_chrome_version)
-                    constraints.update(build_virtualbrowser_ip_auto_fingerprint_overrides())
-                    if manual_geo:
-                        constraints.update(build_virtualbrowser_geo_fingerprint_overrides(manual_geo))
-                    constraints["speech_voices"] = build_virtualbrowser_speech_voices_override()
-                    if not await client.randomize_fingerprint(browser_id, constraints):
+                    if not await client.randomize_fingerprint(browser_id):
                         raise RuntimeError("VirtualBrowser randomizeFingerprint 失败")
-                    if proxy and not await client.update_browser(browser_id, {"proxy": proxy}):
-                        raise RuntimeError("VirtualBrowser updateBrowser 回写完整外部代理失败")
+                    randomized_payload = await client.get_browser_full_parameters(browser_id)
+                    randomized_entry = _browser_full_parameters_entry(randomized_payload, browser_id)
+                    if not isinstance(randomized_entry, dict):
+                        raise RuntimeError("VirtualBrowser 随机指纹未返回目标环境参数")
+                    expected = build_virtualbrowser_ip_auto_fingerprint_overrides()
+                    if manual_geo:
+                        expected.update(build_virtualbrowser_geo_fingerprint_overrides(manual_geo))
+                    expected["speech_voices"] = build_virtualbrowser_speech_voices_override()
+                    patch = build_virtualbrowser_randomized_fingerprint_patch(randomized_entry, expected)
+                    if patch and not await client.update_browser(browser_id, patch):
+                        raise RuntimeError("VirtualBrowser updateBrowser 修正随机指纹失败")
                 validation_warnings = await self._log_created_parameter_validation(
                     client,
                     browser_id,
@@ -2854,7 +2854,7 @@ class VirtualBrowserProvider(BaseProvider):
 
             # 如果需要刷新指纹
             if should_randomize:
-                await client.randomize_fingerprint(browser_id_int, {})
+                await client.randomize_fingerprint(browser_id_int)
                 logger.info(f"[VirtualBrowser] 指纹已刷新: id={browser_id}")
 
             logger.info(f"[VirtualBrowser] 更新环境成功: id={browser_id}")

@@ -113,21 +113,13 @@ async def test_add_browser_respects_controlled_chrome_version_for_random_profile
 
 
 @pytest.mark.asyncio
-async def test_randomize_fingerprint_sends_supported_constraints():
+async def test_randomize_fingerprint_sends_only_browser_id():
     client = VirtualBrowserClient(port=9002, api_key="")
     dummy = _DummyHttpClient()
     client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
-    constraints = {
-        "screen": {"mode": 1, "width": 1920, "height": 1080},
-        "cpu": {"mode": 1, "value": 8},
-        "memory": {"mode": 1, "value": 16},
-        "time-zone": {"mode": 2},
-        "location": {"mode": 2, "enable": 1},
-    }
-
-    assert await client.randomize_fingerprint(303, constraints) is True
+    assert await client.randomize_fingerprint(303) is True
     assert dummy.last_path == "/api/randomizeFingerprint"
-    assert dummy.last_payload == {"id": 303, **constraints}
+    assert dummy.last_payload == {"id": 303}
 
 
 def test_virtualbrowser_client_uses_loopback_base_url():
