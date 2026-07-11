@@ -39,6 +39,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-11 | 根应用 / 运行时版本提升到 `0.4.35`：VirtualBrowser 自动创建改为厂商随机后读取完整参数，仅修正 WOW64、异常硬件/屏幕和代理地理必需字段，最终二次读取验收；全量 `1189 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
 | 2026-07-11 | 根应用 / 运行时版本提升到 `0.4.34`：VirtualBrowser 打开后只回写完整代理对象（`mode/value/protocol/host/port/user/pass/API/url/country/checkFailed`），避免遗漏字段被 Windows 服务覆盖；全量 `1182 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待后续构建 | Codex |
 | 2026-07-11 | 根应用 / 运行时版本提升到 `0.4.33`：VirtualBrowser 随机指纹创建时随机选择允许的 Chrome 主版本并使用自动内核，启动后只回写 Windows 实测接受的代理 `mode/url/country/checkFailed` 字段；全量 `1182 passed`、全仓 Ruff、`uv lock --check` 与 `git diff --check` 通过，未构建桌面安装包 | Codex |
 | 2026-07-10 | `TASK-037` 完成 Contracts 0.4.3 / SDK 0.4.4 发布：全量 unit `1134 passed`，两包 wheel/sdist、dry-run、正式 PyPI 上传、JSON API 文件哈希和隔离安装验证通过；客户端保持 0.4.29 未发布 | Codex |
