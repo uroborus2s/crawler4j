@@ -141,6 +141,59 @@ async def test_create_env_runs_runtime_fingerprint_check_after_connect(manager):
 
 
 @pytest.mark.asyncio
+async def test_auto_created_fingerprint_static_risk_never_opens_environment(manager, mock_pool):
+    provider = MockProvider()
+    provider.name = "virtualbrowser"
+    register_provider(provider)
+    original_create = provider.create
+
+    async def create_with_gate(config=None):
+        env = await original_create(config)
+        env.enforce_fingerprint_creation_gate = True
+        return env
+
+    provider.create = create_with_gate
+    manager._persist_created_fingerprint_validation = AsyncMock(return_value=["bad fingerprint"])
+    manager.destroy_env = AsyncMock(return_value=True)
+
+    with pytest.raises(EnvUnavailableError, match="创建后指纹参数验收失败"):
+        await manager._create_env(provider=provider)
+
+    env = next(iter(mock_pool.add.await_args_list[-1].args))
+    assert env.status == EnvStatus.CREATING
+    assert not provider.open_called
+    manager.destroy_env.assert_awaited_once_with(
+        env.id,
+        runtime_timeout=RECOVERY_PROVIDER_RUNTIME_TIMEOUT,
+    )
+
+
+@pytest.mark.asyncio
+async def test_auto_created_fingerprint_runtime_risk_destroys_environment(manager):
+    provider = MockProvider()
+    provider.name = "virtualbrowser"
+    register_provider(provider)
+    original_create = provider.create
+
+    async def create_with_gate(config=None):
+        env = await original_create(config)
+        env.enforce_fingerprint_creation_gate = True
+        return env
+
+    provider.create = create_with_gate
+    manager._persist_created_fingerprint_validation = AsyncMock(return_value=[])
+    manager._persist_runtime_fingerprint_validation = AsyncMock(return_value=["screen mismatch"])
+    manager.destroy_env = AsyncMock(return_value=True)
+
+    with pytest.raises(EnvUnavailableError, match="页面运行时指纹验收失败"):
+        await manager._create_env(provider=provider)
+
+    assert provider.open_called
+    assert provider.connect_called
+    manager.destroy_env.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_create_env_does_not_mutate_input_config(manager):
     provider = MockProvider()
     register_provider(provider)
