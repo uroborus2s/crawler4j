@@ -48,20 +48,24 @@ class EditEnvWorker(QThread):
         if self._action == "update_proxy":
             if not self._proxy_value:
                 raise ValueError("缺少代理地址，无法保存代理配置")
-            return {"proxy_value": self._proxy_value}, "代理已更新", "更新失败"
+            return {"proxy_value": self._proxy_value}, "代理地址更新成功", "代理地址更新失败"
 
         if self._action == "refresh_proxy":
             if not self._proxy_pool_id:
                 raise ValueError("当前环境未绑定 IP 池，无法刷新代理")
-            return {"proxy_pool_id": self._proxy_pool_id}, "IP 已刷新", "刷新失败（无可用 IP 池）"
+            return (
+                {"proxy_pool_id": self._proxy_pool_id},
+                "已从 IP 池随机分配并应用新代理",
+                "随机更换代理失败（当前 IP 池可能没有其他可用 IP）",
+            )
 
         if self._action == "update_proxy_entry":
             if not self._proxy_entry_id:
                 raise ValueError("请选择要绑定的 IP")
-            return {"proxy_entry_id": self._proxy_entry_id}, "IP 已更新", "更新失败"
+            return {"proxy_entry_id": self._proxy_entry_id}, "所选 IP 已应用到环境", "应用所选 IP 失败"
 
         if self._action == "refresh_fingerprint":
-            return {"randomize_fingerprint": True}, "指纹已刷新", "刷新失败"
+            return {"randomize_fingerprint": True}, "环境指纹刷新成功", "环境指纹刷新失败"
 
         raise ValueError(f"不支持的操作: {self._action}")
     
@@ -142,22 +146,38 @@ class EditEnvDialog(QDialog):
         self.proxy_current_label = QLabel()
         proxy_form.addRow("当前 IP:", self.proxy_current_label)
 
+        proxy_entry_row = QHBoxLayout()
         self.proxy_entry_combo = QComboBox()
         self.proxy_entry_combo.setEnabled(False)
-        proxy_form.addRow("选择 IP:", self.proxy_entry_combo)
+        proxy_entry_row.addWidget(self.proxy_entry_combo)
+
+        self.apply_proxy_btn = StyledButton(
+            "应用所选 IP",
+            variant="primary",
+            min_height=40,
+            min_width=120,
+        )
+        self.apply_proxy_btn.setEnabled(False)
+        self.apply_proxy_btn.clicked.connect(self._apply_selected_proxy)
+        proxy_entry_row.addWidget(self.apply_proxy_btn)
+        proxy_form.addRow("可用 IP:", proxy_entry_row)
         
-        # 代理输入 + 刷新按钮
-        proxy_row = QHBoxLayout()
+        # 手工代理只对静态代理模式显示。
         self.proxy_input = QLineEdit()
         self.proxy_input.setPlaceholderText("socks5://user:pass@host:port")
-        proxy_row.addWidget(self.proxy_input)
+        proxy_form.addRow("代理地址:", self.proxy_input)
         
-        self.refresh_ip_btn = StyledButton("刷新", variant="secondary", min_height=40, min_width=80)
-        self.refresh_ip_btn.setToolTip("从 IP 池重新分配")
+        self.refresh_ip_btn = StyledButton(
+            "随机更换 IP",
+            variant="secondary",
+            min_height=40,
+            min_width=120,
+        )
+        self.refresh_ip_btn.setToolTip("忽略上方选择，从当前 IP 池随机分配并应用另一个可用 IP")
         self.refresh_ip_btn.clicked.connect(self._refresh_proxy)
-        proxy_row.addWidget(self.refresh_ip_btn)
-        
-        proxy_form.addRow("新代理:", proxy_row)
+        proxy_form.addRow("IP 池操作:", self.refresh_ip_btn)
+
+        self._proxy_form = proxy_form
         
         layout.addLayout(proxy_form)
         
@@ -213,26 +233,23 @@ class EditEnvDialog(QDialog):
         self.status_label.setText(self._env.status.value)
         
         proxy = self._env.proxy_config
+        is_static = bool(proxy and proxy.mode == ProxyMode.STATIC)
+        has_pool = bool(proxy and proxy.mode == ProxyMode.POOL and proxy.pool_id)
+        self._proxy_form.setRowVisible(self.proxy_input, is_static)
+        self._proxy_form.setRowVisible(self.refresh_ip_btn, has_pool)
         if proxy:
             self.proxy_mode_label.setText(proxy.mode.value)
             self.proxy_current_label.setText(proxy.current_ip or "-")
             
             if proxy.mode == ProxyMode.STATIC:
                 self.proxy_input.setText(proxy.static_value or "")
-                self.refresh_ip_btn.setEnabled(False)
             elif proxy.mode == ProxyMode.POOL:
-                self.proxy_input.setEnabled(False)
-                self.proxy_input.setPlaceholderText("由 IP 池自动分配")
                 self._load_pool_entries(proxy.pool_id, proxy.ip_entry_id)
             else:
-                self.proxy_input.setEnabled(False)
-                self.refresh_ip_btn.setEnabled(False)
                 self._load_pool_entries(None, proxy.ip_entry_id)
         else:
             self.proxy_mode_label.setText("无")
             self.proxy_current_label.setText("-")
-            self.proxy_input.setEnabled(False)
-            self.refresh_ip_btn.setEnabled(False)
             self._load_pool_entries(None, None)
 
     def _load_pool_entries(self, pool_id: str | None, current_entry_id: str | None):
@@ -253,7 +270,22 @@ class EditEnvDialog(QDialog):
         index = self.proxy_entry_combo.findData(current_entry_id)
         if index >= 0:
             self.proxy_entry_combo.setCurrentIndex(index)
-        self.proxy_entry_combo.setEnabled(self.proxy_entry_combo.count() > 0)
+        has_entries = self.proxy_entry_combo.count() > 0
+        self.proxy_entry_combo.setEnabled(has_entries)
+        self.apply_proxy_btn.setEnabled(has_entries)
+
+    def _apply_selected_proxy(self):
+        """应用下拉框中明确选择的 IP。"""
+        entry_id = str(self.proxy_entry_combo.currentData() or "")
+        if not entry_id:
+            MessageDialog.warning(self, "无法应用", "请先选择一个可用 IP")
+            return
+        proxy = self._env.proxy_config
+        current_entry_id = str(proxy.ip_entry_id or "") if proxy else ""
+        if entry_id == current_entry_id:
+            MessageDialog.information(self, "无需更新", "当前环境已经使用所选 IP")
+            return
+        self._run_action("update_proxy_entry", proxy_entry_id=entry_id)
     
     def _save(self):
         """保存代理配置。"""
@@ -316,5 +348,10 @@ class EditEnvDialog(QDialog):
     
     def _set_buttons_enabled(self, enabled: bool):
         """设置按钮启用状态。"""
-        self.refresh_ip_btn.setEnabled(enabled)
+        proxy = self._env.proxy_config
+        has_pool = bool(proxy and proxy.mode == ProxyMode.POOL and proxy.pool_id)
+        has_entries = self.proxy_entry_combo.count() > 0
+        self.proxy_entry_combo.setEnabled(enabled and has_entries)
+        self.apply_proxy_btn.setEnabled(enabled and has_entries)
+        self.refresh_ip_btn.setEnabled(enabled and has_pool)
         self.refresh_fp_btn.setEnabled(enabled)

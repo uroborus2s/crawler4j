@@ -6,6 +6,7 @@
 import asyncio
 import textwrap
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -909,8 +910,8 @@ class EnvListWidget(QWidget):
         "columns": [
             {"key": "id", "label": "ID", "type": "text", "width": 120},
             {"key": "name", "label": "名称", "type": "text", "width": 160, "sortable": True},
-            {"key": "kind", "label": "类型", "type": "text", "width": 100},
             {"key": "provider", "label": "节点类型", "type": "text", "width": 110},
+            {"key": "created_at", "label": "创建时间", "type": "text", "width": 150, "sortable": True},
             {"key": "bound_ip", "label": "绑定 IP", "type": "text", "width": 180, "sortable": True, "searchable": True},
             {"key": "fingerprint_validation", "label": "风险", "type": "text", "width": 100, "searchable": True},
             {"key": "status", "label": "状态", "type": "text", "width": 90},
@@ -927,7 +928,7 @@ class EnvListWidget(QWidget):
         },
     }
     
-    COLUMNS = ["ID", "名称", "类型", "Provider", "绑定 IP", "风险", "状态", "任务", "操作"]
+    COLUMNS = ["ID", "名称", "节点类型", "创建时间", "绑定 IP", "风险", "状态", "任务", "操作"]
     STATUS_COLORS = {
         EnvStatus.READY: "#4ade80",
         EnvStatus.BUSY: "#facc15",
@@ -1080,8 +1081,8 @@ class EnvListWidget(QWidget):
             "env_id": str(env.id),
             "id": str(env.id),
             "name": env.name if env.name else "-",
-            "kind": env.kind.value,
             "provider": env.provider,
+            "created_at": datetime.fromtimestamp(int(env.created_at)).strftime("%Y-%m-%d %H:%M"),
             "bound_ip": _format_bound_ip_cell(getattr(env, "proxy_config", None)),
             "fingerprint_validation": _format_fingerprint_validation_cell(item.env_metadata),
             "status": {

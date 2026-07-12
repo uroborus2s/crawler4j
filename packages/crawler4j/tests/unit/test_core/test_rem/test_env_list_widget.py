@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -51,7 +52,13 @@ def _patch_dialog_dependencies(monkeypatch, suggested_name: str):
     return env_list_widget
 
 
-def _make_env(env_id: str, status: EnvStatus = EnvStatus.READY, proxy_config=None):
+def _make_env(
+    env_id: str,
+    status: EnvStatus = EnvStatus.READY,
+    proxy_config=None,
+    *,
+    created_at: int = 1_700_000_000,
+):
     return SimpleNamespace(
         id=env_id,
         name=f"{env_id}-name",
@@ -60,6 +67,7 @@ def _make_env(env_id: str, status: EnvStatus = EnvStatus.READY, proxy_config=Non
         status=status,
         task_run_id="",
         proxy_config=proxy_config,
+        created_at=created_at,
     )
 
 
@@ -138,13 +146,37 @@ def _patch_cleanup_service(monkeypatch, service: _FakeCleanupService) -> None:
     monkeypatch.setattr(cleanup_module, "get_env_cleanup_service", lambda: service)
 
 
-def test_env_list_table_keeps_risk_and_task_columns_compact():
+def test_env_list_table_replaces_kind_with_created_at_and_keeps_compact_columns():
     from src.core.rem.ui.env_list_widget import EnvListWidget
 
     columns = {column["key"]: column for column in EnvListWidget.TABLE_SCHEMA["columns"]}
 
+    assert "kind" not in columns
+    assert columns["created_at"]["label"] == "创建时间"
     assert columns["fingerprint_validation"]["width"] == 100
     assert columns["task"]["width"] == 90
+
+
+def test_env_list_widget_rows_show_created_at(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    created_at = 1_700_000_000
+
+    widget._on_data_loaded([_make_env("env-1", created_at=created_at)])
+    row = widget.table.displayed_rows()[0]
+
+    assert row["created_at"] == datetime.fromtimestamp(created_at).strftime("%Y-%m-%d %H:%M")
+    assert widget.table.table.item(0, 3).text() == row["created_at"]
 
 
 def test_create_env_dialog_prefills_suggested_name_without_submitting_override(qtbot, monkeypatch):
