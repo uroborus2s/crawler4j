@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.rem.models import Environment, ProxyMode
 from src.ui.components.button import StyledButton
+from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
 from src.ui.components.message_dialog import MessageDialog
@@ -289,7 +290,23 @@ class EditEnvDialog(QDialog):
         if entry_id == current_entry_id:
             MessageDialog.information(self, "无需更新", "当前环境已经使用所选 IP")
             return
+        if not self._confirm_high_risk(
+            "确认修改代理 IP",
+            f"确定将环境代理切换为 {self.proxy_entry_combo.currentText()} 吗？\n"
+            "修改代理可能影响当前登录状态和账号风控结果。",
+            "确认修改",
+        ):
+            return
         self._run_action("update_proxy_entry", proxy_entry_id=entry_id)
+
+    def _confirm_high_risk(self, title: str, message: str, confirm_text: str) -> bool:
+        return ConfirmDialog.confirm(
+            self,
+            title,
+            message,
+            confirm_text=confirm_text,
+            danger=True,
+        )
     
     def _save(self):
         """保存代理配置。"""
@@ -298,6 +315,12 @@ class EditEnvDialog(QDialog):
         if proxy and proxy.mode == ProxyMode.STATIC:
             new_value = self.proxy_input.text().strip()
             if new_value and new_value != proxy.static_value:
+                if not self._confirm_high_risk(
+                    "确认修改代理地址",
+                    "确定将环境切换为输入的新代理地址吗？\n修改代理可能影响当前登录状态和账号风控结果。",
+                    "确认修改",
+                ):
+                    return
                 self._run_action("update_proxy", proxy_value=new_value)
                 return
 
@@ -305,6 +328,13 @@ class EditEnvDialog(QDialog):
             entry_id = str(self.proxy_entry_combo.currentData() or "")
             current_entry_id = str(proxy.ip_entry_id or "") if proxy else ""
             if entry_id and entry_id != current_entry_id:
+                if not self._confirm_high_risk(
+                    "确认修改代理 IP",
+                    f"确定将环境代理切换为 {self.proxy_entry_combo.currentText()} 吗？\n"
+                    "修改代理可能影响当前登录状态和账号风控结果。",
+                    "确认修改",
+                ):
+                    return
                 self._run_action("update_proxy_entry", proxy_entry_id=entry_id)
                 return
         
@@ -314,10 +344,24 @@ class EditEnvDialog(QDialog):
         """刷新代理 IP。"""
         proxy = self._env.proxy_config
         pool_id = proxy.pool_id if proxy else None
+        if not self._confirm_high_risk(
+            "确认随机更换代理 IP",
+            "系统将从当前 IP 池随机分配并立即应用新代理。\n"
+            "修改代理可能影响当前登录状态和账号风控结果。",
+            "确认更换",
+        ):
+            return
         self._run_action("refresh_proxy", proxy_pool_id=pool_id)
     
     def _refresh_fingerprint(self):
         """刷新指纹。"""
+        if not self._confirm_high_risk(
+            "确认刷新环境指纹",
+            "系统将随机化指纹、修正不合格参数并重新检测。\n"
+            "刷新指纹可能影响当前登录状态和账号风控结果。",
+            "确认刷新",
+        ):
+            return
         self._run_action("refresh_fingerprint")
     
     def _run_action(

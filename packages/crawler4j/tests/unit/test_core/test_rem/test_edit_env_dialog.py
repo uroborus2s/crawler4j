@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 def test_edit_env_dialog_allows_selecting_ip_when_env_has_no_proxy(qtbot, monkeypatch):
@@ -30,6 +30,7 @@ def test_edit_env_dialog_saves_selected_ip_when_env_has_no_proxy(qtbot, monkeypa
     from src.core.rem.ip_pool import IPEntry, IPPool
     from src.core.rem.models import Environment, EnvKind, EnvStatus
     from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+    from src.ui.components.confirm_dialog import ConfirmDialog
 
     pool = IPPool(id="pool-1", name="主池")
     pool.add_entry(IPEntry(id="ip-1", address="10.0.0.8", protocol="socks5", port=1080))
@@ -47,6 +48,7 @@ def test_edit_env_dialog_saves_selected_ip_when_env_has_no_proxy(qtbot, monkeypa
         "_run_action",
         lambda action, **kwargs: captured.update({"action": action, **kwargs}),
     )
+    monkeypatch.setattr(ConfirmDialog, "confirm", lambda *args, **kwargs: True)
 
     dialog._save()
 
@@ -58,6 +60,7 @@ def test_edit_env_dialog_applies_selected_ip_with_explicit_button(qtbot, monkeyp
     from src.core.rem.ip_pool import IPEntry, IPPool
     from src.core.rem.models import Environment, EnvKind, EnvStatus, ProxyConfig, ProxyMode
     from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+    from src.ui.components.confirm_dialog import ConfirmDialog
 
     pool = IPPool(id="pool-1", name="主池")
     pool.add_entry(IPEntry(id="ip-1", address="10.0.0.8", protocol="socks5", port=1080))
@@ -83,6 +86,7 @@ def test_edit_env_dialog_applies_selected_ip_with_explicit_button(qtbot, monkeyp
         "_run_action",
         lambda action, **kwargs: captured.update({"action": action, **kwargs}),
     )
+    monkeypatch.setattr(ConfirmDialog, "confirm", lambda *args, **kwargs: True)
     dialog.proxy_entry_combo.setCurrentIndex(dialog.proxy_entry_combo.findData("ip-2"))
 
     dialog.apply_proxy_btn.click()
@@ -97,6 +101,7 @@ def test_edit_env_dialog_refresh_fingerprint_button_runs_refresh_action(qtbot, m
     import src.core.rem.ip_pool as ip_pool_module
     from src.core.rem.models import Environment, EnvKind, EnvStatus
     from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+    from src.ui.components.confirm_dialog import ConfirmDialog
 
     monkeypatch.setattr(
         ip_pool_module,
@@ -108,10 +113,83 @@ def test_edit_env_dialog_refresh_fingerprint_button_runs_refresh_action(qtbot, m
     qtbot.addWidget(dialog)
     actions: list[str] = []
     monkeypatch.setattr(dialog, "_run_action", lambda action, **kwargs: actions.append(action))
+    monkeypatch.setattr(ConfirmDialog, "confirm", lambda *args, **kwargs: True)
 
     dialog.refresh_fp_btn.click()
 
     assert actions == ["refresh_fingerprint"]
+
+
+def test_edit_env_dialog_requires_confirmation_for_pool_proxy_and_fingerprint_actions(qtbot, monkeypatch):
+    import src.core.rem.ip_pool as ip_pool_module
+    from src.core.rem.ip_pool import IPEntry, IPPool
+    from src.core.rem.models import Environment, EnvKind, EnvStatus, ProxyConfig, ProxyMode
+    from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+    from src.ui.components.confirm_dialog import ConfirmDialog
+
+    pool = IPPool(id="pool-1", name="主池")
+    pool.add_entry(IPEntry(id="ip-1", address="10.0.0.8", protocol="socks5", port=1080))
+    pool.add_entry(IPEntry(id="ip-2", address="10.0.0.9", protocol="http", port=8080))
+    monkeypatch.setattr(
+        ip_pool_module,
+        "get_ip_pool_manager",
+        lambda: SimpleNamespace(get_pool=lambda pool_id: pool, list_pools=lambda: [pool]),
+    )
+    env = Environment(
+        id=621,
+        name="env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        proxy_config=ProxyConfig(mode=ProxyMode.POOL, pool_id="pool-1", ip_entry_id="ip-1"),
+    )
+    dialog = EditEnvDialog(env)
+    qtbot.addWidget(dialog)
+    dialog.proxy_entry_combo.setCurrentIndex(dialog.proxy_entry_combo.findData("ip-2"))
+    dialog._run_action = MagicMock()
+    confirm = MagicMock(return_value=False)
+    monkeypatch.setattr(ConfirmDialog, "confirm", confirm)
+
+    dialog._apply_selected_proxy()
+    dialog._refresh_proxy()
+    dialog._refresh_fingerprint()
+
+    dialog._run_action.assert_not_called()
+    assert confirm.call_count == 3
+    assert all(call.kwargs["danger"] is True for call in confirm.call_args_list)
+
+
+def test_edit_env_dialog_requires_confirmation_for_static_proxy_change(qtbot, monkeypatch):
+    import src.core.rem.ip_pool as ip_pool_module
+    from src.core.rem.models import Environment, EnvKind, EnvStatus, ProxyConfig, ProxyMode
+    from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+    from src.ui.components.confirm_dialog import ConfirmDialog
+
+    monkeypatch.setattr(
+        ip_pool_module,
+        "get_ip_pool_manager",
+        lambda: SimpleNamespace(get_pool=lambda pool_id: None, list_pools=lambda: []),
+    )
+    env = Environment(
+        id=621,
+        name="env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        proxy_config=ProxyConfig(mode=ProxyMode.STATIC, static_value="http://10.0.0.8:8080"),
+    )
+    dialog = EditEnvDialog(env)
+    qtbot.addWidget(dialog)
+    dialog.proxy_input.setText("http://10.0.0.9:8080")
+    dialog._run_action = MagicMock()
+    confirm = MagicMock(return_value=False)
+    monkeypatch.setattr(ConfirmDialog, "confirm", confirm)
+
+    dialog._save()
+
+    dialog._run_action.assert_not_called()
+    assert confirm.call_count == 1
+    assert confirm.call_args.kwargs["danger"] is True
 
 
 def test_edit_env_worker_passes_proxy_value_to_manager(monkeypatch):
