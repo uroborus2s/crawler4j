@@ -1,6 +1,6 @@
 # crawler4j
 
-`crawler4j` 是 monorepo 中的桌面宿主与 Core 运行时包，当前源码版本基线为 `0.4.35`。
+`crawler4j` 是 monorepo 中的桌面宿主与 Core 运行时包，当前源码版本基线为 `0.4.36`。
 
 它负责承载桌面 Shell、ATM / REM / MMS 等运行时能力，以及版本读取、调试桥接和 PyInstaller 打包。
 

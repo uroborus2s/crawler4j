@@ -17,12 +17,12 @@
 
 | 类别 | 检查项 | 证据 | 当前基线状态 |
 |---|---|---|---|
-| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 已具备（当前根应用源码线 `0.4.35`，全量回归 `1189 passed`；最近正式 tag 仍为 `v0.2.0`） |
+| 版本 | `packages/crawler4j/pyproject.toml` 与发布目标版本一致，运行时版本服务可正确读取 | `version-governance.md` | 已具备（当前根应用源码线 `0.4.36`，全量回归 `1190 passed`；最近正式 tag 仍为 `v0.2.0`） |
 | 版本 | 当前工作区版本、最近正式 tag、SDK/Contracts 版本口径清楚 | `release-notes.md` | 已具备 |
-| 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备（2026-07-11 客户端 0.4.35 全量 `1189 passed`） |
+| 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备（2026-07-12 客户端 0.4.36 全量 `1190 passed`） |
 | 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备（2026-07-11 全仓复验通过） |
 | 运行 | `uv run python scripts/smoke_test_ui.py` 通过 | `test-plan.md` | 已具备（2026-07-11 复验通过；覆盖 Shell 结构与 Dashboard 异步刷新） |
-| 构建 | Root / SDK / Contracts build 通过 | `test-plan.md` | 上一轮已具备源码包证据（root 0.4.30、SDK 0.4.4、Contracts 0.4.3 wheel/sdist 均已构建；0.4.35 与桌面安装包仍为独立 gate） |
+| 构建 | Root / SDK / Contracts build 通过 | `test-plan.md` | 上一轮已具备源码包证据（root 0.4.30、SDK 0.4.4、Contracts 0.4.3 wheel/sdist 均已构建；0.4.36 与桌面安装包仍为独立 gate） |
 | 构建 | 桌面客户端下载包（macOS / Windows）齐备 | `delivery-package.md` | 部分具备（2026-06-19 已重新生成并上传 macOS `Crawler4j-0.4.16.dmg` / `appcast.xml`；Windows `PyInstaller onedir + Velopack` 发布链已落地，但当前批次仍缺 Windows 真机签名、安装、升级证据与正式下载地址） |
 | 业务 | `ctrip` 真实站点 E2E 完成并记录结果 | `ctrip-real-site-e2e-closeout.md` + 真实环境验证记录 | 阻塞（当前只补齐了 DevLink 活跃事实、fresh ZIP 预检与历史登录日志，仍未完成本轮 DevLink + ZIP 双链真实站点闭环） |
 | 业务 | 若本次批次包含环境候选 Service Job 队列能力，则已验证“运行中 / 等待中”口径、FIFO 补位、容量扩张补位、候选纯函数实时过滤、模块环境授权和等待超时收口 | `test-plan.md` + 对应测试记录 | 已具备（当前 HEAD 已纳入 `TASK-023` / `REQ-009` 变更，`TC-026` / `TC-027` 本地回归已完成；正式切版时仍需把这组证据绑定到发布批次） |
@@ -40,13 +40,14 @@
 ## 4. 当前阻塞项
 
 1. `ctrip` 真实站点 E2E 仍未按 `ctrip-real-site-e2e-closeout.md` 完成本轮 DevLink + ZIP 双链回放并留证；当前只复验了 DevLink 活跃状态、fresh ZIP 预检和历史真实登录日志。
-2. 当前 `0.4.35` 对应的桌面安装包、Git tag / GitHub release 资产仍待后续创建；SDK 0.4.4 / Contracts 0.4.3 PyPI publish 已完成，最新已记录 macOS 0.4.16 客户端升级包已重新生成并上传。
+2. 当前 `0.4.36` 对应的桌面安装包、Git tag / GitHub release 资产仍待后续创建；SDK 0.4.4 / Contracts 0.4.3 PyPI publish 已完成，最新已记录 macOS 0.4.16 客户端升级包已重新生成并上传。
 3. 当前虽已具备 Windows `PyInstaller onedir + Velopack` 发布链，但本轮仍缺 Windows 真机签名、安装、升级留证与正式下载地址，不能声称“Windows 交付包已放行”。
 
 ## 5. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-12 | 根应用版本提升到 `0.4.36`，用于 DevLink 模块并发强制重载序列化；全量 `1190 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包与 Windows 真机测试仍待补齐 | Codex |
 | 2026-07-11 | 根应用版本提升到 `0.4.35`，用于 VirtualBrowser 随机后最小指纹修正与创建验收；全量 `1189 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包与 Windows 真机测试仍待补齐 | Codex |
 | 2026-07-11 | 根应用版本提升到 `0.4.34`，用于 VirtualBrowser 启动后完整代理状态回写；全量 `1182 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包与正式发布 Gate 待补齐 | Codex |
 | 2026-07-11 | 根应用版本提升到 `0.4.33`，已完成全量 `1182 passed`、全仓 Ruff、`uv lock --check` 与 diff 检查；正式发布 Gate 仍受桌面安装包、真实站点 E2E 和 Windows 真机证据约束 | Codex |

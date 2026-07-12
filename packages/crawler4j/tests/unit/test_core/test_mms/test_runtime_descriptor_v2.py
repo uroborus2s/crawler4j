@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 from textwrap import dedent
+from types import ModuleType
 
 import pytest
 
 from crawler4j_contracts import Crawler4jMeta, InjectSpec
+from src.core.mms import module_loader
 from src.core.mms.models import ModuleManifest, UpgradeSourceInfo
 from src.core.mms.module_loader import purge_module_namespace
 from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptorV2, load_runtime_descriptor_v2
@@ -318,4 +321,102 @@ def test_load_runtime_descriptor_v2_rejects_dependency_cycles(tmp_path):
         with pytest.raises(RuntimeError, match="循环依赖.*a_component.*b_component.*a_component"):
             load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name))
     finally:
+        purge_module_namespace(module_name)
+
+
+def test_load_runtime_descriptor_v2_serializes_concurrent_force_reloads(tmp_path, monkeypatch):
+    module_name = "concurrent_reload_module"
+    hook_module_name = "_concurrent_reload_hooks"
+    entered_domain_import = threading.Event()
+    release_domain_import = threading.Event()
+    allow_second_purge_to_continue = threading.Event()
+    second_loader_entered = threading.Event()
+    hooks = ModuleType(hook_module_name)
+    hooks.entered_domain_import = entered_domain_import
+    hooks.release_domain_import = release_domain_import
+    monkeypatch.setitem(sys.modules, hook_module_name, hooks)
+    purge_count = 0
+    purge_count_lock = threading.Lock()
+    second_purge_completed = threading.Event()
+    original_purge = module_loader.purge_module_namespace
+
+    def observe_purge(module: str) -> None:
+        nonlocal purge_count
+        original_purge(module)
+        if module != module_name:
+            return
+        with purge_count_lock:
+            purge_count += 1
+            is_second_purge = purge_count == 2
+        if is_second_purge:
+            second_purge_completed.set()
+            allow_second_purge_to_continue.wait(timeout=2)
+
+    monkeypatch.setattr(module_loader, "purge_module_namespace", observe_purge)
+
+    module_dir = _write_v2_module(
+        tmp_path,
+        module_name,
+        {
+            "objects/quiz/__init__.py": "",
+            "objects/quiz/domain.py": f"""
+                from {hook_module_name} import entered_domain_import, release_domain_import
+
+                entered_domain_import.set()
+                release_domain_import.wait(timeout=2)
+
+                class QuizDomain:
+                    pass
+            """,
+            "interfaces/ctrip_answerer.py": """
+                from crawler4j_contracts import interface
+                from ..objects.quiz.domain import QuizDomain
+
+                @interface(name="ctrip_answerer")
+                class CtripAnswerer(QuizDomain):
+                    pass
+            """,
+        },
+    )
+    descriptors: list[ModuleRuntimeDescriptorV2] = []
+    errors: list[BaseException] = []
+
+    def load_descriptor(started: threading.Event | None = None) -> None:
+        if started is not None:
+            started.set()
+        try:
+            descriptors.append(
+                load_runtime_descriptor_v2(module_name, module_dir, _manifest(module_name), force_reload=True)
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    first_loader = threading.Thread(target=load_descriptor)
+    second_loader = threading.Thread(target=load_descriptor, args=(second_loader_entered,))
+
+    try:
+        first_loader.start()
+        assert entered_domain_import.wait(timeout=2)
+        second_loader.start()
+        assert second_loader_entered.wait(timeout=2)
+
+        second_purge_completed_before_release = second_purge_completed.wait(timeout=1)
+        release_domain_import.set()
+        first_loader.join(timeout=2)
+        allow_second_purge_to_continue.set()
+        second_loader.join(timeout=2)
+
+        assert not first_loader.is_alive()
+        assert not second_loader.is_alive()
+        assert errors == []
+        assert not second_purge_completed_before_release
+        assert [sorted(descriptor.interfaces) for descriptor in descriptors] == [
+            ["ctrip_answerer"],
+            ["ctrip_answerer"],
+        ]
+    finally:
+        release_domain_import.set()
+        allow_second_purge_to_continue.set()
+        first_loader.join(timeout=2)
+        second_loader.join(timeout=2)
         purge_module_namespace(module_name)
