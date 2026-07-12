@@ -39,6 +39,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-13 | 根应用 / 运行时版本提升到 `0.4.37`：环境列表以创建时间替换类型列，代理更新拆分为明确应用所选 IP 与随机更换，手动刷新指纹复用创建期随机校准与验收，高风险代理和指纹操作增加确认门；全量 `1198 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
 | 2026-07-12 | 根应用 / 运行时版本提升到 `0.4.36`：DevLink 模块描述符的并发强制重载按模块串行化，避免扫描期间清空 `sys.modules` 导致间歇性导入失败；全量 `1190 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
 | 2026-07-11 | 根应用 / 运行时版本提升到 `0.4.35`：VirtualBrowser 自动创建改为厂商随机后读取完整参数，仅修正 WOW64、异常硬件/屏幕和代理地理必需字段，最终二次读取验收；全量 `1189 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
 | 2026-07-11 | 根应用 / 运行时版本提升到 `0.4.34`：VirtualBrowser 打开后只回写完整代理对象（`mode/value/protocol/host/port/user/pass/API/url/country/checkFailed`），避免遗漏字段被 Windows 服务覆盖；全量 `1182 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待后续构建 | Codex |
