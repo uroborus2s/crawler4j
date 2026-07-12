@@ -149,7 +149,7 @@ def test_edit_env_worker_passes_randomize_fingerprint_flag(monkeypatch):
     worker.run()
 
     manager.update_env.assert_awaited_once_with(9, randomize_fingerprint=True)
-    assert results == [(True, "环境指纹刷新成功")]
+    assert results == [(True, "环境指纹已刷新并完成检测")]
 
 
 def test_edit_env_worker_passes_selected_proxy_entry_to_manager(monkeypatch):

@@ -556,6 +556,61 @@ async def test_virtualbrowser_create_randomizes_then_applies_minimal_patch(monke
 
 
 @pytest.mark.asyncio
+async def test_virtualbrowser_update_randomizes_then_applies_minimal_patch(monkeypatch):
+    provider = VirtualBrowserProvider()
+    randomized_parameters = {
+        "id": 303,
+        "ua": {"mode": 0, "value": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/145.0.0.0"},
+        "cpu": {"mode": 1, "value": 2},
+        "memory": {"mode": 1, "value": 64},
+        "screen": {"mode": 0, "width": 1920, "height": 1080},
+        "speech_voices": {"mode": 1, "value": {}},
+    }
+    final_parameters = {
+        "id": 303,
+        "chrome_version": 145,
+        "ua": {"mode": 1, "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0"},
+        "ua-full-version": {"mode": 1, "value": "145.0.7632.12"},
+        "ua-language": {"mode": 2},
+        "time-zone": {"mode": 2},
+        "location": {"mode": 2, "enable": 1},
+        "cpu": {"mode": 1, "value": 8},
+        "memory": {"mode": 1, "value": 16},
+        "screen": {"mode": 1, "width": 1920, "height": 1080},
+        "speech_voices": provider_module.build_virtualbrowser_speech_voices_override(),
+    }
+    client = SimpleNamespace(
+        randomize_fingerprint=AsyncMock(return_value=True),
+        update_browser=AsyncMock(return_value=True),
+        get_browser_full_parameters=AsyncMock(side_effect=[randomized_parameters, final_parameters]),
+    )
+    env = Environment(
+        name="env",
+        kind=EnvKind.BROWSER,
+        provider=provider.name,
+        status=EnvStatus.READY,
+        external_id="303",
+        handle=BrowserHandle(browser_id="303"),
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr("src.core.rem.virtualbrowser_fingerprint.secrets.choice", lambda _items: (8, 16))
+
+    assert await provider.update(env, {"randomize_fingerprint": True}) is True
+
+    client.randomize_fingerprint.assert_awaited_once_with(303)
+    patch = client.update_browser.await_args.args[1]
+    assert patch["cpu"] == {"mode": 1, "value": 8}
+    assert patch["memory"] == {"mode": 1, "value": 16}
+    assert patch["screen"]["mode"] == 1
+    assert patch["ua-language"] == {"mode": 2}
+    assert patch["time-zone"] == {"mode": 2}
+    assert patch["location"] == {"mode": 2, "enable": 1}
+    assert "proxy" not in patch
+    assert client.get_browser_full_parameters.await_count == 2
+    assert env.fingerprint_validation_warnings == []
+
+
+@pytest.mark.asyncio
 async def test_virtualbrowser_create_deletes_external_env_when_randomize_fails(monkeypatch):
     provider = VirtualBrowserProvider()
     client = SimpleNamespace(

@@ -2140,6 +2140,35 @@ class VirtualBrowserProvider(BaseProvider):
             self._client_config = current_config
         return self._client_cache
 
+    async def _randomize_and_reconcile_fingerprint(
+        self,
+        client: Any,
+        browser_id: int,
+        manual_geo: dict[str, Any] | None,
+    ) -> list[str]:
+        """随机指纹后复用创建期规则回读、修正并验收。"""
+        if not await client.randomize_fingerprint(browser_id):
+            raise RuntimeError("VirtualBrowser randomizeFingerprint 失败")
+        randomized_payload = await client.get_browser_full_parameters(browser_id)
+        randomized_entry = _browser_full_parameters_entry(randomized_payload, browser_id)
+        if not isinstance(randomized_entry, dict):
+            raise RuntimeError("VirtualBrowser 随机指纹未返回目标环境参数")
+
+        expected = build_virtualbrowser_ip_auto_fingerprint_overrides()
+        if manual_geo:
+            expected.update(build_virtualbrowser_geo_fingerprint_overrides(manual_geo))
+        expected["speech_voices"] = build_virtualbrowser_speech_voices_override()
+        patch = build_virtualbrowser_randomized_fingerprint_patch(randomized_entry, expected)
+        if patch and not await client.update_browser(browser_id, patch):
+            raise RuntimeError("VirtualBrowser updateBrowser 修正随机指纹失败")
+
+        return await self._log_created_parameter_validation(
+            client,
+            browser_id,
+            manual_geo,
+            require_controlled=True,
+        )
+
     async def create(self, config: dict[str, Any] | None = None) -> Environment:
         """创建 VirtualBrowser 环境。"""
         import uuid
@@ -2226,25 +2255,17 @@ class VirtualBrowserProvider(BaseProvider):
                     geo=None if should_randomize_fingerprint else manual_geo,
                 )
                 if should_randomize_fingerprint:
-                    if not await client.randomize_fingerprint(browser_id):
-                        raise RuntimeError("VirtualBrowser randomizeFingerprint 失败")
-                    randomized_payload = await client.get_browser_full_parameters(browser_id)
-                    randomized_entry = _browser_full_parameters_entry(randomized_payload, browser_id)
-                    if not isinstance(randomized_entry, dict):
-                        raise RuntimeError("VirtualBrowser 随机指纹未返回目标环境参数")
-                    expected = build_virtualbrowser_ip_auto_fingerprint_overrides()
-                    if manual_geo:
-                        expected.update(build_virtualbrowser_geo_fingerprint_overrides(manual_geo))
-                    expected["speech_voices"] = build_virtualbrowser_speech_voices_override()
-                    patch = build_virtualbrowser_randomized_fingerprint_patch(randomized_entry, expected)
-                    if patch and not await client.update_browser(browser_id, patch):
-                        raise RuntimeError("VirtualBrowser updateBrowser 修正随机指纹失败")
-                validation_warnings = await self._log_created_parameter_validation(
-                    client,
-                    browser_id,
-                    manual_geo,
-                    require_controlled=should_randomize_fingerprint,
-                )
+                    validation_warnings = await self._randomize_and_reconcile_fingerprint(
+                        client,
+                        browser_id,
+                        manual_geo,
+                    )
+                else:
+                    validation_warnings = await self._log_created_parameter_validation(
+                        client,
+                        browser_id,
+                        manual_geo,
+                    )
             except Exception:
                 if browser_id is not None:
                     try:
@@ -2311,6 +2332,16 @@ class VirtualBrowserProvider(BaseProvider):
         if set(overrides) != expected_overrides:
             raise ValueError("IP 表固定指纹或经纬度无效，无法生成完整指纹")
         return geo
+
+    def _manual_geo_for_env(self, env: Environment) -> dict[str, Any] | None:
+        proxy = env.proxy_config
+        entry_id = str(getattr(proxy, "ip_entry_id", "") or "").strip()
+        if not entry_id:
+            return None
+        from src.core.rem.ip_pool import get_ip_pool_manager
+
+        entry = get_ip_pool_manager().get_entry(entry_id)
+        return self._manual_ip_table_geo(entry.fingerprint_geo()) if entry else None
 
     async def _verify_creation_proxy(self, proxy: Any) -> None:
         entry = _ip_entry_from_virtualbrowser_proxy(proxy)
@@ -2860,8 +2891,12 @@ class VirtualBrowserProvider(BaseProvider):
 
             # 如果需要刷新指纹
             if should_randomize:
-                await client.randomize_fingerprint(browser_id_int)
-                logger.info(f"[VirtualBrowser] 指纹已刷新: id={browser_id}")
+                env.fingerprint_validation_warnings = await self._randomize_and_reconcile_fingerprint(
+                    client,
+                    browser_id_int,
+                    self._manual_geo_for_env(env),
+                )
+                logger.info(f"[VirtualBrowser] 指纹已刷新并完成校准: id={browser_id}")
 
             logger.info(f"[VirtualBrowser] 更新环境成功: id={browser_id}")
             return True

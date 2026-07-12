@@ -65,7 +65,11 @@ class EditEnvWorker(QThread):
             return {"proxy_entry_id": self._proxy_entry_id}, "所选 IP 已应用到环境", "应用所选 IP 失败"
 
         if self._action == "refresh_fingerprint":
-            return {"randomize_fingerprint": True}, "环境指纹刷新成功", "环境指纹刷新失败"
+            return (
+                {"randomize_fingerprint": True},
+                "环境指纹已刷新并完成检测",
+                "环境指纹刷新或检测失败",
+            )
 
         raise ValueError(f"不支持的操作: {self._action}")
     

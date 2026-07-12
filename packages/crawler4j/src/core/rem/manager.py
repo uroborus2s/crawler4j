@@ -1229,6 +1229,11 @@ class EnvironmentManager:
             try:
                 success = await provider.update(env, {"randomize_fingerprint": True})
                 if success:
+                    if hasattr(env, "fingerprint_validation_warnings"):
+                        await self._persist_created_fingerprint_validation(
+                            env,
+                            passed_detail="手动刷新指纹后轻量验收通过",
+                        )
                     logger.info(f"[REM] 指纹已刷新: id={env.id}")
                     updated = True
             except Exception as e:
@@ -1592,7 +1597,12 @@ class EnvironmentManager:
             )
             raise
 
-    async def _persist_created_fingerprint_validation(self, env: Environment) -> list[str]:
+    async def _persist_created_fingerprint_validation(
+        self,
+        env: Environment,
+        *,
+        passed_detail: str = "创建后轻量验收通过",
+    ) -> list[str]:
         warnings = getattr(env, "fingerprint_validation_warnings", None)
         if warnings is None:
             return []
@@ -1606,7 +1616,7 @@ class EnvironmentManager:
         else:
             await self.clear_fingerprint_validation_risk(
                 env.id,
-                detail="创建后轻量验收通过",
+                detail=passed_detail,
             )
         try:
             delattr(env, "fingerprint_validation_warnings")
