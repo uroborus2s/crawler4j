@@ -7,7 +7,22 @@ import importlib.util
 import shutil
 import sys
 from pathlib import Path
+from threading import RLock
 from types import ModuleType
+
+
+_module_load_locks_guard = RLock()
+_module_load_locks: dict[str, RLock] = {}
+
+
+def get_module_load_lock(module_name: str) -> RLock:
+    module_root = module_name.split(".", 1)[0]
+    with _module_load_locks_guard:
+        lock = _module_load_locks.get(module_root)
+        if lock is None:
+            lock = RLock()
+            _module_load_locks[module_root] = lock
+        return lock
 
 
 def purge_module_namespace(module_name: str) -> None:

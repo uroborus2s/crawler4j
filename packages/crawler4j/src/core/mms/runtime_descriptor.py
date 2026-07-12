@@ -17,7 +17,7 @@ from crawler4j_contracts import (
 from crawler4j_contracts.hosted_ui import normalize_page_schema
 
 from src.core.mms.models import ModuleManifest
-from src.core.mms.module_loader import load_root_module_from_path
+from src.core.mms.module_loader import get_module_load_lock, load_root_module_from_path
 
 V2_RUNTIME_API = "core-native-v2"
 V2_SCAN_DIRECTORIES = ("interfaces", "objects", "workflows", "tasks", "data", "pages", "candidates", "cleanups")
@@ -318,5 +318,6 @@ def load_runtime_descriptor_v2(
     if runtime_api != V2_RUNTIME_API:
         raise RuntimeError(f"module.yaml.runtime_api 必须是 {V2_RUNTIME_API}: {runtime_api}")
 
-    load_root_module_from_path(module_name, package_root, force_reload=force_reload)
-    return _build_v2_descriptor(_collect_v2_entries(module_name, package_root))
+    with get_module_load_lock(module_name):
+        load_root_module_from_path(module_name, package_root, force_reload=force_reload)
+        return _build_v2_descriptor(_collect_v2_entries(module_name, package_root))
