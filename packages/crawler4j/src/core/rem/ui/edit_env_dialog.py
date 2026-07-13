@@ -9,7 +9,6 @@ import asyncio
 
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
-    QComboBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -19,6 +18,7 @@ from PyQt6.QtWidgets import (
 
 from src.core.rem.models import Environment, ProxyMode
 from src.ui.components.button import StyledButton
+from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.confirm_dialog import ConfirmDialog
 from src.ui.components.dialog_window import configure_titled_dialog
 from src.ui.components.line_edit import StyledLineEdit as QLineEdit
@@ -35,14 +35,12 @@ class EditEnvWorker(QThread):
         env_id: int,
         action: str,
         proxy_value: str | None = None,
-        proxy_pool_id: str | None = None,
         proxy_entry_id: str | None = None,
     ):
         super().__init__()
         self._env_id = env_id
         self._action = action
         self._proxy_value = proxy_value
-        self._proxy_pool_id = proxy_pool_id
         self._proxy_entry_id = proxy_entry_id
 
     def _build_update_request(self) -> tuple[dict[str, object], str, str]:
@@ -50,15 +48,6 @@ class EditEnvWorker(QThread):
             if not self._proxy_value:
                 raise ValueError("缺少代理地址，无法保存代理配置")
             return {"proxy_value": self._proxy_value}, "代理地址更新成功", "代理地址更新失败"
-
-        if self._action == "refresh_proxy":
-            if not self._proxy_pool_id:
-                raise ValueError("当前环境未绑定 IP 池，无法刷新代理")
-            return (
-                {"proxy_pool_id": self._proxy_pool_id},
-                "已从 IP 池随机分配并应用新代理",
-                "随机更换代理失败（当前 IP 池可能没有其他可用 IP）",
-            )
 
         if self._action == "update_proxy_entry":
             if not self._proxy_entry_id:
@@ -81,6 +70,10 @@ class EditEnvWorker(QThread):
         try:
             asyncio.set_event_loop(loop)
             manager = get_environment_manager()
+            if self._action == "clear_cache":
+                success = loop.run_until_complete(manager.clear_env_cache(self._env_id))
+                self.finished.emit(success, "环境缓存已清理" if success else "环境缓存清理失败")
+                return
             kwargs, success_msg, failure_msg = self._build_update_request()
             success = loop.run_until_complete(manager.update_env(self._env_id, **kwargs))
             self.finished.emit(success, success_msg if success else failure_msg)
@@ -152,7 +145,7 @@ class EditEnvDialog(QDialog):
         proxy_form.addRow("当前 IP:", self.proxy_current_label)
 
         proxy_entry_row = QHBoxLayout()
-        self.proxy_entry_combo = QComboBox()
+        self.proxy_entry_combo = StyledComboBox(min_height=40)
         self.proxy_entry_combo.setEnabled(False)
         proxy_entry_row.addWidget(self.proxy_entry_combo)
 
@@ -172,16 +165,6 @@ class EditEnvDialog(QDialog):
         self.proxy_input.setPlaceholderText("socks5://user:pass@host:port")
         proxy_form.addRow("代理地址:", self.proxy_input)
         
-        self.refresh_ip_btn = StyledButton(
-            "随机更换 IP",
-            variant="secondary",
-            min_height=40,
-            min_width=120,
-        )
-        self.refresh_ip_btn.setToolTip("忽略上方选择，从当前 IP 池随机分配并应用另一个可用 IP")
-        self.refresh_ip_btn.clicked.connect(self._refresh_proxy)
-        proxy_form.addRow("IP 池操作:", self.refresh_ip_btn)
-
         self._proxy_form = proxy_form
         
         layout.addLayout(proxy_form)
@@ -200,6 +183,21 @@ class EditEnvDialog(QDialog):
         fp_row.addWidget(self.refresh_fp_btn)
         
         layout.addLayout(fp_row)
+
+        # 缓存管理（仅 VirtualBrowser 支持）。
+        self.cache_section_label = QLabel("缓存管理")
+        self.cache_section_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
+        layout.addWidget(self.cache_section_label)
+
+        cache_row = QHBoxLayout()
+        self.cache_hint_label = QLabel("仅清理 Cache 与 Code Cache，不删除 Cookie")
+        cache_row.addWidget(self.cache_hint_label)
+        cache_row.addStretch()
+
+        self.clear_cache_btn = StyledButton("清理缓存", variant="secondary", min_height=40, min_width=92)
+        self.clear_cache_btn.clicked.connect(self._clear_cache)
+        cache_row.addWidget(self.clear_cache_btn)
+        layout.addLayout(cache_row)
         
         # 按钮区
         layout.addStretch()
@@ -239,9 +237,11 @@ class EditEnvDialog(QDialog):
         
         proxy = self._env.proxy_config
         is_static = bool(proxy and proxy.mode == ProxyMode.STATIC)
-        has_pool = bool(proxy and proxy.mode == ProxyMode.POOL and proxy.pool_id)
         self._proxy_form.setRowVisible(self.proxy_input, is_static)
-        self._proxy_form.setRowVisible(self.refresh_ip_btn, has_pool)
+        supports_cache_clear = self._env.provider == "virtualbrowser"
+        self.cache_section_label.setVisible(supports_cache_clear)
+        self.cache_hint_label.setVisible(supports_cache_clear)
+        self.clear_cache_btn.setVisible(supports_cache_clear)
         if proxy:
             self.proxy_mode_label.setText(proxy.mode.value)
             self.proxy_current_label.setText(proxy.current_ip or "-")
@@ -340,18 +340,18 @@ class EditEnvDialog(QDialog):
         
         self.accept()
     
-    def _refresh_proxy(self):
-        """刷新代理 IP。"""
-        proxy = self._env.proxy_config
-        pool_id = proxy.pool_id if proxy else None
-        if not self._confirm_high_risk(
-            "确认随机更换代理 IP",
-            "系统将从当前 IP 池随机分配并立即应用新代理。\n"
-            "修改代理可能影响当前登录状态和账号风控结果。",
-            "确认更换",
+    def _clear_cache(self):
+        """清理 VirtualBrowser 的 Cache 与 Code Cache。"""
+        if not ConfirmDialog.confirm(
+            self,
+            "确认清理缓存",
+            "将清理该环境的 Cache 与 Code Cache，不会删除 Cookie。\n"
+            "如果环境正在运行，VirtualBrowser 可能拒绝本次操作。",
+            confirm_text="确认清理",
+            danger=False,
         ):
             return
-        self._run_action("refresh_proxy", proxy_pool_id=pool_id)
+        self._run_action("clear_cache")
     
     def _refresh_fingerprint(self):
         """刷新指纹。"""
@@ -368,7 +368,6 @@ class EditEnvDialog(QDialog):
         self,
         action: str,
         proxy_value: str | None = None,
-        proxy_pool_id: str | None = None,
         proxy_entry_id: str | None = None,
     ):
         """执行异步操作。"""
@@ -378,7 +377,6 @@ class EditEnvDialog(QDialog):
             self._env.id, 
             action,
             proxy_value=proxy_value,
-            proxy_pool_id=proxy_pool_id,
             proxy_entry_id=proxy_entry_id,
         )
         self._worker.finished.connect(self._on_action_finished)
@@ -396,10 +394,8 @@ class EditEnvDialog(QDialog):
     
     def _set_buttons_enabled(self, enabled: bool):
         """设置按钮启用状态。"""
-        proxy = self._env.proxy_config
-        has_pool = bool(proxy and proxy.mode == ProxyMode.POOL and proxy.pool_id)
         has_entries = self.proxy_entry_combo.count() > 0
         self.proxy_entry_combo.setEnabled(enabled and has_entries)
         self.apply_proxy_btn.setEnabled(enabled and has_entries)
-        self.refresh_ip_btn.setEnabled(enabled and has_pool)
         self.refresh_fp_btn.setEnabled(enabled)
+        self.clear_cache_btn.setEnabled(enabled and self._env.provider == "virtualbrowser")

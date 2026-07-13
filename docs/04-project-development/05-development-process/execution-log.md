@@ -7,7 +7,7 @@
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
 **关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `CR-016`, `CR-018`, `API-009`, `API-010`, `API-019`, `API-021`, `TC-069`, `BUG-013`
-**最后更新：** 2026-07-11
+**最后更新：** 2026-07-14
 
 ## 1. 用途与记录规则
 
@@ -39,6 +39,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-14 | 根应用 / 运行时版本提升到 `0.4.38`：`env.cookie.ensure` 在持久化读取、全量替换和复核失败时输出脱敏的 stage、env_id、provider、browser_id、异常类型和异常消息；全量 `1201 passed`、全仓 Ruff、`uv lock --check`、Root wheel/sdist build 与 diff 检查通过 | Codex |
 | 2026-07-13 | 根应用 / 运行时版本提升到 `0.4.37`：环境列表以创建时间替换类型列，代理更新拆分为明确应用所选 IP 与随机更换，手动刷新指纹复用创建期随机校准与验收，高风险代理和指纹操作增加确认门；全量 `1198 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
 | 2026-07-12 | 根应用 / 运行时版本提升到 `0.4.36`：DevLink 模块描述符的并发强制重载按模块串行化，避免扫描期间清空 `sys.modules` 导致间歇性导入失败；全量 `1190 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
 | 2026-07-11 | 根应用 / 运行时版本提升到 `0.4.35`：VirtualBrowser 自动创建改为厂商随机后读取完整参数，仅修正 WOW64、异常硬件/屏幕和代理地理必需字段，最终二次读取验收；全量 `1189 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |

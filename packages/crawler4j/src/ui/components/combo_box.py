@@ -105,6 +105,7 @@ class StyledComboBox(QComboBox):
         self._min_height = min_height
         self._setup_view()
         self._setup_style()
+        self.setMinimumHeight(min_height)
 
     def _setup_view(self):
         """配置视图以支持 CSS 样式。"""
@@ -114,70 +115,69 @@ class StyledComboBox(QComboBox):
 
     def _setup_style(self):
         """应用统一的 CSS 样式。"""
-        self.setStyleSheet(f"""
-            QComboBox {{
+        self.setStyleSheet("""
+            QComboBox {
                 background: rgba(255, 255, 255, 0.1);
                 color: white;
                 border: 1px solid rgba(255, 255, 255, 0.1);
                 border-radius: 4px;
                 padding: 0px 10px;
-                min-height: {self._min_height}px;
                 min-width: 120px;
-            }}
-            QComboBox:hover {{
+            }
+            QComboBox:hover {
                 border-color: rgba(99, 102, 241, 0.5);
                 background: rgba(255, 255, 255, 0.15);
-            }}
-            QComboBox:focus {{
+            }
+            QComboBox:focus {
                 border-color: #6366f1;
                 background: rgba(50, 50, 60, 1);
-            }}
+            }
             
             /* 下拉列表视图 */
-            QComboBox QAbstractItemView {{
+            QComboBox QAbstractItemView {
                 background-color: #2d2d38;
                 border: 2px solid 2d2d38;
                 border-radius: 4px;
                 outline: none;
                 selection-background-color: transparent; /* 取消默认选中背景，使用 item 样式控制 */
-            }}
+            }
             
             /* 下拉列表项 */
-            QComboBox QAbstractItemView::item {{
+            QComboBox QAbstractItemView::item {
                 color: white;
                 min-height: 32px; /* 增加行间距 */
                 padding: 2px 24px;
                 border-radius: 4px;
-            }}
+            }
             
             /* 悬停状态 */
-            QComboBox QAbstractItemView::item:hover {{
+            QComboBox QAbstractItemView::item:hover {
                 background-color: rgba(255, 255, 255, 0.1);
-            }}
+            }
             
             /* 选中状态 */
-            QComboBox QAbstractItemView::item:selected {{
+            QComboBox QAbstractItemView::item:selected {
                 background-color: #6366f1;
                 color: white;
                 font-weight: bold;
-            }}
+            }
             
             /* 下拉箭头 */
-            QComboBox::drop-down {{
+            QComboBox::drop-down {
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width: 24px;
                 border-left-width: 0px;
                 border-top-right-radius: 4px;
                 border-bottom-right-radius: 4px;
-            }}
-            QComboBox::down-arrow {{
+            }
+            QComboBox::down-arrow {
                 image: none;
                 border: none;
                 width: 0px;
                 height: 0px;
                 background: transparent;
-            }}
+            }
         """)
 
     def paintEvent(self, event):

@@ -60,6 +60,7 @@ def test_edit_env_dialog_applies_selected_ip_with_explicit_button(qtbot, monkeyp
     from src.core.rem.ip_pool import IPEntry, IPPool
     from src.core.rem.models import Environment, EnvKind, EnvStatus, ProxyConfig, ProxyMode
     from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+    from src.ui.components.combo_box import StyledComboBox
     from src.ui.components.confirm_dialog import ConfirmDialog
 
     pool = IPPool(id="pool-1", name="主池")
@@ -93,7 +94,9 @@ def test_edit_env_dialog_applies_selected_ip_with_explicit_button(qtbot, monkeyp
 
     assert captured == {"action": "update_proxy_entry", "proxy_entry_id": "ip-2"}
     assert dialog.apply_proxy_btn.text() == "应用所选 IP"
-    assert dialog.refresh_ip_btn.text() == "随机更换 IP"
+    assert isinstance(dialog.proxy_entry_combo, StyledComboBox)
+    assert dialog.proxy_entry_combo.minimumHeight() == dialog.apply_proxy_btn.minimumHeight() == 40
+    assert not hasattr(dialog, "refresh_ip_btn")
     assert dialog.proxy_input.isHidden()
 
 
@@ -151,12 +154,63 @@ def test_edit_env_dialog_requires_confirmation_for_pool_proxy_and_fingerprint_ac
     monkeypatch.setattr(ConfirmDialog, "confirm", confirm)
 
     dialog._apply_selected_proxy()
-    dialog._refresh_proxy()
     dialog._refresh_fingerprint()
 
     dialog._run_action.assert_not_called()
-    assert confirm.call_count == 3
+    assert confirm.call_count == 2
     assert all(call.kwargs["danger"] is True for call in confirm.call_args_list)
+
+
+def test_edit_env_dialog_clear_cache_button_runs_virtualbrowser_action(qtbot, monkeypatch):
+    import src.core.rem.ip_pool as ip_pool_module
+    from src.core.rem.models import Environment, EnvKind, EnvStatus
+    from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+    from src.ui.components.confirm_dialog import ConfirmDialog
+
+    monkeypatch.setattr(
+        ip_pool_module,
+        "get_ip_pool_manager",
+        lambda: SimpleNamespace(get_pool=lambda pool_id: None, list_pools=lambda: []),
+    )
+    env = Environment(id=185, name="env", kind=EnvKind.BROWSER, provider="virtualbrowser", status=EnvStatus.READY)
+    dialog = EditEnvDialog(env)
+    qtbot.addWidget(dialog)
+    actions: list[str] = []
+    monkeypatch.setattr(dialog, "_run_action", lambda action, **kwargs: actions.append(action))
+    confirm = MagicMock(return_value=True)
+    monkeypatch.setattr(ConfirmDialog, "confirm", confirm)
+
+    dialog.clear_cache_btn.click()
+
+    assert actions == ["clear_cache"]
+    assert confirm.call_args.kwargs["danger"] is False
+    assert dialog.clear_cache_btn.minimumHeight() == 40
+
+
+def test_edit_env_dialog_hides_clear_cache_for_unsupported_provider(qtbot, monkeypatch):
+    import src.core.rem.ip_pool as ip_pool_module
+    from src.core.rem.models import Environment, EnvKind, EnvStatus
+    from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+
+    monkeypatch.setattr(
+        ip_pool_module,
+        "get_ip_pool_manager",
+        lambda: SimpleNamespace(get_pool=lambda pool_id: None, list_pools=lambda: []),
+    )
+    env = Environment(
+        id=186,
+        name="env",
+        kind=EnvKind.BROWSER,
+        provider="playwright_local",
+        status=EnvStatus.READY,
+    )
+
+    dialog = EditEnvDialog(env)
+    qtbot.addWidget(dialog)
+
+    assert dialog.cache_section_label.isHidden()
+    assert dialog.cache_hint_label.isHidden()
+    assert dialog.clear_cache_btn.isHidden()
 
 
 def test_edit_env_dialog_requires_confirmation_for_static_proxy_change(qtbot, monkeypatch):
@@ -247,18 +301,18 @@ def test_edit_env_worker_passes_selected_proxy_entry_to_manager(monkeypatch):
     assert results == [(True, "所选 IP 已应用到环境")]
 
 
-def test_edit_env_worker_reports_random_pool_proxy_success(monkeypatch):
+def test_edit_env_worker_clears_environment_cache(monkeypatch):
     import src.core.rem.manager as manager_module
     from src.core.rem.ui.edit_env_dialog import EditEnvWorker
 
-    manager = SimpleNamespace(update_env=AsyncMock(return_value=True))
+    manager = SimpleNamespace(clear_env_cache=AsyncMock(return_value=True))
     monkeypatch.setattr(manager_module, "get_environment_manager", lambda: manager)
 
     results: list[tuple[bool, str]] = []
-    worker = EditEnvWorker(env_id=7, action="refresh_proxy", proxy_pool_id="pool-1")
+    worker = EditEnvWorker(env_id=185, action="clear_cache")
     worker.finished.connect(lambda success, message: results.append((success, message)))
 
     worker.run()
 
-    manager.update_env.assert_awaited_once_with(7, proxy_pool_id="pool-1")
-    assert results == [(True, "已从 IP 池随机分配并应用新代理")]
+    manager.clear_env_cache.assert_awaited_once_with(185)
+    assert results == [(True, "环境缓存已清理")]

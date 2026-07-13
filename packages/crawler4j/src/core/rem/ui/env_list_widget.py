@@ -909,6 +909,14 @@ class EnvListWidget(QWidget):
     TABLE_SCHEMA = {
         "columns": [
             {"key": "id", "label": "ID", "type": "text", "width": 120},
+            {
+                "key": "external_id",
+                "label": "指纹浏览器 ID",
+                "type": "text",
+                "width": 130,
+                "sortable": True,
+                "searchable": True,
+            },
             {"key": "name", "label": "名称", "type": "text", "width": 160, "sortable": True},
             {"key": "provider", "label": "节点类型", "type": "text", "width": 110},
             {"key": "created_at", "label": "创建时间", "type": "text", "width": 150, "sortable": True},
@@ -919,7 +927,7 @@ class EnvListWidget(QWidget):
             {"key": "actions", "label": "操作", "type": "actions", "stretch": True},
         ],
         "features": {
-            "search": {"enabled": True, "placeholder": "搜索环境、Provider、绑定 IP 或任务"},
+            "search": {"enabled": True, "placeholder": "搜索环境、指纹浏览器 ID、Provider、绑定 IP 或任务"},
             "sort": {
                 "enabled": True,
                 "default": [{"field": "name", "direction": "asc"}],
@@ -928,7 +936,7 @@ class EnvListWidget(QWidget):
         },
     }
     
-    COLUMNS = ["ID", "名称", "节点类型", "创建时间", "绑定 IP", "风险", "状态", "任务", "操作"]
+    COLUMNS = ["ID", "指纹浏览器 ID", "名称", "节点类型", "创建时间", "绑定 IP", "风险", "状态", "任务", "操作"]
     STATUS_COLORS = {
         EnvStatus.READY: "#4ade80",
         EnvStatus.BUSY: "#facc15",
@@ -1080,6 +1088,7 @@ class EnvListWidget(QWidget):
             "env_metadata": item.env_metadata,
             "env_id": str(env.id),
             "id": str(env.id),
+            "external_id": str(getattr(env, "external_id", None) or "-"),
             "name": env.name if env.name else "-",
             "provider": env.provider,
             "created_at": datetime.fromtimestamp(int(env.created_at)).strftime("%Y-%m-%d %H:%M"),

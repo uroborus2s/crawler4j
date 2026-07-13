@@ -47,6 +47,8 @@ def test_styled_combo_box_uses_css_triangle_arrow(qtbot):
 
     style = combo.styleSheet()
 
+    assert "QComboBox {" in style
+    assert "QComboBox {{" not in style
     assert "QComboBox::down-arrow" in style
     assert "image: none;" in style
     assert "border: none;" in style
