@@ -39,6 +39,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-14 | 发布 Windows 客户端 `v0.4.38`：GitHub Actions run `29269789146` 成功生成并发布 Setup、Portable、nupkg 与 feed；tag 指向 `f274852d63af3029e77acbe865b865a484665b4b`，公网更新 feed 已返回 0.4.38，nupkg `HEAD 200` 且大小与发布元数据一致 | Codex |
 | 2026-07-14 | 根应用 / 运行时版本提升到 `0.4.38`：`env.cookie.ensure` 在持久化读取、全量替换和复核失败时输出脱敏的 stage、env_id、provider、browser_id、异常类型和异常消息；全量 `1201 passed`、全仓 Ruff、`uv lock --check`、Root wheel/sdist build 与 diff 检查通过 | Codex |
 | 2026-07-13 | 根应用 / 运行时版本提升到 `0.4.37`：环境列表以创建时间替换类型列，代理更新拆分为明确应用所选 IP 与随机更换，手动刷新指纹复用创建期随机校准与验收，高风险代理和指纹操作增加确认门；全量 `1198 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
 | 2026-07-12 | 根应用 / 运行时版本提升到 `0.4.36`：DevLink 模块描述符的并发强制重载按模块串行化，避免扫描期间清空 `sys.modules` 导致间歇性导入失败；全量 `1190 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
