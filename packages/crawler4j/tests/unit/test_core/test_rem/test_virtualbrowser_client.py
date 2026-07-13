@@ -260,6 +260,27 @@ async def test_randomize_fingerprint_sends_only_browser_id():
     assert dummy.last_payload == {"id": 303}
 
 
+@pytest.mark.asyncio
+async def test_clear_cache_sends_only_browser_id():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient()
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+
+    assert await client.clear_cache(185) is True
+    assert dummy.last_path == "/api/clearCache"
+    assert dummy.last_payload == {"id": 185}
+
+
+@pytest.mark.asyncio
+async def test_clear_cache_propagates_virtualbrowser_failure():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(responses=[{"success": False, "error_message": "browser is running"}])
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="browser is running"):
+        await client.clear_cache(185)
+
+
 def test_virtualbrowser_client_uses_loopback_base_url():
     client = VirtualBrowserClient(port=9002, api_key="")
 

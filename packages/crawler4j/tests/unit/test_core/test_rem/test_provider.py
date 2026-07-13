@@ -1397,3 +1397,21 @@ async def test_virtualbrowser_reset_serializes_data_delete_operations(monkeypatc
     assert await asyncio.gather(provider.reset(env_a), provider.reset(env_b)) == [True, True]
     assert max_active_deletes == 1
     assert delete_order == [101, 102]
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_clear_cache_uses_external_browser_id(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=185,
+        name="vb-env",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.READY,
+        external_id="903",
+    )
+    client = SimpleNamespace(clear_cache=AsyncMock(return_value=True))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await provider.clear_cache(env) is True
+    client.clear_cache.assert_awaited_once_with(903)

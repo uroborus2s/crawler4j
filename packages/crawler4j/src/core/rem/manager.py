@@ -1182,6 +1182,21 @@ class EnvironmentManager:
 
     # === 统一更新方法 ===
 
+    async def clear_env_cache(self, env_id: int | str) -> bool:
+        """调用环境所属 Provider 清理缓存，不改变环境或 Cookie 数据。"""
+        async with self.get_env_lifecycle_lock(env_id):
+            env = await self.pool.get(env_id)
+            if not env:
+                logger.warning(f"[REM] 清理缓存失败: 环境不存在 id={env_id}")
+                return False
+
+            provider = get_provider(env.provider)
+            if not provider:
+                logger.warning(f"[REM] 清理缓存失败: Provider 未注册 name={env.provider}")
+                return False
+
+            return await provider.clear_cache(env)
+
     async def update_env(
         self,
         env_id: int | str,

@@ -1,9 +1,10 @@
 # 任务摘要
 
-更新时间：2026-07-13。只保留活跃、最近关闭和有后续动作的任务。
+更新时间：2026-07-14。只保留活跃、最近关闭和有后续动作的任务。
 
 ## 需要后续动作
 
+- `CR-021`：公共下拉、移除随机 IP、VirtualBrowser 清缓存和指纹浏览器 ID 列已实现；修复两项独立评审反馈后以 `94/100` 通过复评，待本地中文提交。
 - `TASK-036-managed-dataset-bulk-field-update`：`CORE_PACKAGES_RELEASED`；接入真实业务模块并补 E2E。
 - `TASK-039-bump-client-0.4.30-and-push`：`verification_passed`；ledger 下一动作为 `none`，桌面包和跨平台发布另行处理。
 - 0.4.x 发布收口：补齐 `ctrip` 真实站点 E2E、Windows 真机证据、Git tag / GitHub release 资产和正式交付批次。

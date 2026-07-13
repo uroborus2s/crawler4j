@@ -66,6 +66,10 @@ class MockProvider(BaseProvider):
         self.last_update = config
         return True
 
+    async def clear_cache(self, env: Environment) -> bool:
+        self.last_cache_env = env
+        return True
+
 @pytest.fixture
 def mock_pool():
     pool = AsyncMock()
@@ -201,3 +205,23 @@ async def test_update_env_with_selected_pool_ip_updates_provider_and_binding(mon
             for row in conn.execute("SELECT id, bound_count FROM ip_entries").fetchall()
         }
     assert counts == {"ip-old": 0, "ip-new": 1}
+
+
+@pytest.mark.asyncio
+async def test_clear_env_cache_delegates_to_environment_provider():
+    provider = MockProvider()
+    register_provider(provider)
+    env = Environment(
+        id=185,
+        name="env",
+        kind=EnvKind.BROWSER,
+        provider=provider.name,
+        status=EnvStatus.READY,
+        external_id="903",
+    )
+    manager = EnvironmentManager()
+    manager.pool = AsyncMock()
+    manager.pool.get = AsyncMock(return_value=env)
+
+    assert await manager.clear_env_cache(env.id) is True
+    assert provider.last_cache_env is env

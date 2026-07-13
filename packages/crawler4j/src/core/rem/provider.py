@@ -738,6 +738,10 @@ class BaseProvider(ABC):
         """
         pass
 
+    async def clear_cache(self, env: Environment) -> bool:
+        """清理环境缓存；不支持该能力的 Provider 应抛出明确错误。"""
+        raise RuntimeError(f"{self.name} 不支持清理缓存")
+
     @abstractmethod
     async def health_check(self, env: Environment) -> bool:
         """健康检查。
@@ -2036,6 +2040,23 @@ class VirtualBrowserClient:
         data = resp.json()
         return data.get("success", False)
 
+    async def clear_cache(self, browser_id: int) -> bool:
+        """仅清理 Chromium Cache 与 Code Cache。"""
+        client = await self._get_client()
+        resp = await client.post("/api/clearCache", json={"id": browser_id})
+        try:
+            data = resp.json()
+        except Exception:
+            data = None
+
+        if not resp.is_success or not isinstance(data, dict) or not data.get("success"):
+            body = self._response_body(resp, data)
+            detail = f"status={getattr(resp, 'status_code', 'unknown')}"
+            if body:
+                detail = f"{detail} body={body}"
+            raise RuntimeError(f"VirtualBrowser clearCache 失败: {detail}")
+        return True
+
     async def is_browser_running(self, browser_id: int) -> bool:
         """查询指定浏览器是否正在运行。
 
@@ -2249,6 +2270,23 @@ class VirtualBrowserProvider(BaseProvider):
         if not browser_id:
             raise RuntimeError("VirtualBrowser 环境缺少 browser_id")
         await self._get_api_client().replace_cookies(int(browser_id), cookies)
+
+    async def clear_cache(self, env: Environment) -> bool:
+        """通过 VirtualBrowser API 清理环境缓存，不删除 Cookie。"""
+        browser_id = self._browser_id_from_env(env)
+        if not browser_id:
+            raise RuntimeError("VirtualBrowser 环境缺少 browser_id")
+        try:
+            browser_id_int = int(browser_id)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"VirtualBrowser 环境 ID 无效: {browser_id!r}") from exc
+
+        async with self._get_lifecycle_lock():
+            success = await self._get_api_client().clear_cache(browser_id_int)
+        if not success:
+            raise RuntimeError("VirtualBrowser clearCache 失败")
+        logger.info(f"[VirtualBrowser] 环境缓存已清理: id={browser_id}")
+        return True
 
     async def _randomize_and_reconcile_fingerprint(
         self,

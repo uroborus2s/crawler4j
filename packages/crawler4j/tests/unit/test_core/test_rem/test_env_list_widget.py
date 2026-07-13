@@ -58,6 +58,7 @@ def _make_env(
     proxy_config=None,
     *,
     created_at: int = 1_700_000_000,
+    external_id: str | None = None,
 ):
     return SimpleNamespace(
         id=env_id,
@@ -68,6 +69,7 @@ def _make_env(
         task_run_id="",
         proxy_config=proxy_config,
         created_at=created_at,
+        external_id=external_id,
     )
 
 
@@ -152,6 +154,7 @@ def test_env_list_table_replaces_kind_with_created_at_and_keeps_compact_columns(
     columns = {column["key"]: column for column in EnvListWidget.TABLE_SCHEMA["columns"]}
 
     assert "kind" not in columns
+    assert columns["external_id"]["label"] == "指纹浏览器 ID"
     assert columns["created_at"]["label"] == "创建时间"
     assert columns["fingerprint_validation"]["width"] == 100
     assert columns["task"]["width"] == 90
@@ -176,7 +179,27 @@ def test_env_list_widget_rows_show_created_at(qtbot, monkeypatch):
     row = widget.table.displayed_rows()[0]
 
     assert row["created_at"] == datetime.fromtimestamp(created_at).strftime("%Y-%m-%d %H:%M")
-    assert widget.table.table.item(0, 3).text() == row["created_at"]
+    assert widget.table.table.item(0, 4).text() == row["created_at"]
+
+
+def test_env_list_widget_rows_show_fingerprint_browser_id(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+
+    import src.core.rem.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "get_environment_manager",
+        lambda: SimpleNamespace(pool=SimpleNamespace()),
+    )
+
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+    widget._on_data_loaded([_make_env("185", external_id="903")])
+    row = widget.table.displayed_rows()[0]
+
+    assert row["external_id"] == "903"
+    assert widget.table.table.item(0, 1).text() == "903"
 
 
 def test_create_env_dialog_prefills_suggested_name_without_submitting_override(qtbot, monkeypatch):
@@ -651,8 +674,8 @@ def test_env_list_widget_rows_show_bound_ip_without_password(qtbot, monkeypatch)
     assert "IP 条目: ip-1" in row["bound_ip"]["tooltip"]
     assert "socks5://crawler:***@1.2.3.4:1080" in row["bound_ip"]["tooltip"]
     assert "secret" not in row["bound_ip"]["tooltip"]
-    assert widget.table.table.item(0, 4).text() == "1.2.3.4:1080"
-    assert "secret" not in widget.table.table.item(0, 4).toolTip()
+    assert widget.table.table.item(0, 5).text() == "1.2.3.4:1080"
+    assert "secret" not in widget.table.table.item(0, 5).toolTip()
 
 
 def test_env_list_widget_rows_hide_unmatched_static_proxy_from_bound_ip(qtbot, monkeypatch):
@@ -679,7 +702,7 @@ def test_env_list_widget_rows_hide_unmatched_static_proxy_from_bound_ip(qtbot, m
 
     assert row["bound_ip"]["text"] == "-"
     assert row["bound_ip"]["tooltip"] == "未绑定 IP 表条目"
-    assert widget.table.table.item(0, 4).text() == "-"
+    assert widget.table.table.item(0, 5).text() == "-"
 
 
 def test_env_list_widget_preserves_env_metadata_without_resource_pool_availability(qtbot, monkeypatch):
@@ -756,7 +779,7 @@ def test_env_list_widget_rows_show_fingerprint_risk(qtbot, monkeypatch):
         "edit",
         "destroy",
     ]
-    assert widget.table.table.item(0, 5).text() == "风险: WebRTC 泄漏"
+    assert widget.table.table.item(0, 6).text() == "风险: WebRTC 泄漏"
 
 
 def test_env_list_widget_shows_repair_location_action_for_location_risk(qtbot, monkeypatch):
