@@ -12,6 +12,7 @@ EnvironmentManager 是 REM 的统一入口，提供：
 import asyncio
 import json
 import time
+import weakref
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -190,6 +191,8 @@ class EnvironmentManager:
         self.pool = EnvPool(max_instances=max_instances)
         self.lease_manager = LeaseManager(self.pool)
         self._reservation_lock = asyncio.Lock()
+        self._env_lifecycle_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        self._cookie_service: Any | None = None
         self.last_destroy_error = ""
 
     async def startup(self, *, recover_crashed: bool = True) -> None:
@@ -287,7 +290,10 @@ class EnvironmentManager:
 
     async def recycle_env(self, env: Environment) -> bool:
         """关闭窗口并回收到 READY，不清理浏览器持久数据。"""
+        async with self.get_env_lifecycle_lock(env.id):
+            return await self._recycle_env_unlocked(env)
 
+    async def _recycle_env_unlocked(self, env: Environment) -> bool:
         provider = get_provider(env.provider)
         # 关闭窗口
         if provider:
@@ -340,6 +346,38 @@ class EnvironmentManager:
     async def get_env(self, env_id: int | str) -> Environment | None:
         """获取环境实例。"""
         return await self.pool.get(env_id)
+
+    async def ensure_cookies(
+        self,
+        env_id: int,
+        cookies: list[dict[str, Any]],
+        *,
+        reload: str,
+        verify: str,
+        on_ready: Any | None = None,
+    ) -> dict[str, bool]:
+        """原子确保当前环境的完整 Cookie 集合已持久化并进入运行态。"""
+        if self._cookie_service is None:
+            from src.core.rem.cookie_service import EnvCookieService
+
+            self._cookie_service = EnvCookieService(self)
+        result = await self._cookie_service.ensure(
+            env_id,
+            cookies,
+            reload=reload,
+            verify=verify,
+            on_ready=on_ready,
+        )
+        return result.as_dict()
+
+    def get_env_lifecycle_lock(self, env_id: int | str) -> asyncio.Lock:
+        """返回 Manager 共享的按环境生命周期锁。"""
+        key = str(env_id)
+        lock = self._env_lifecycle_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._env_lifecycle_locks[key] = lock
+        return lock
 
     async def list_envs(self) -> list[Environment]:
         """列出所有环境。"""
@@ -791,6 +829,15 @@ class EnvironmentManager:
         Returns:
             是否销毁成功
         """
+        async with self.get_env_lifecycle_lock(env_id):
+            return await self._destroy_env_unlocked(env_id, runtime_timeout=runtime_timeout)
+
+    async def _destroy_env_unlocked(
+        self,
+        env_id: int | str,
+        *,
+        runtime_timeout: int,
+    ) -> bool:
         env = await self.pool.get(env_id)
         if not env:
             self.last_destroy_error = f"环境不存在: {env_id}"
@@ -850,6 +897,10 @@ class EnvironmentManager:
         Returns:
             是否启动成功
         """
+        async with self.get_env_lifecycle_lock(env_id):
+            return await self._start_env_unlocked(env_id)
+
+    async def _start_env_unlocked(self, env_id: int | str) -> bool:
         env = await self.pool.get(env_id)
         if not env:
             return False
@@ -884,6 +935,10 @@ class EnvironmentManager:
         Returns:
             是否停止成功
         """
+        async with self.get_env_lifecycle_lock(env_id):
+            return await self._stop_env_unlocked(env_id)
+
+    async def _stop_env_unlocked(self, env_id: int | str) -> bool:
         env = await self.pool.get(env_id)
         if not env:
             return False
@@ -898,6 +953,10 @@ class EnvironmentManager:
         Returns:
             是否暂停成功
         """
+        async with self.get_env_lifecycle_lock(env_id):
+            return await self._pause_env_unlocked(env_id)
+
+    async def _pause_env_unlocked(self, env_id: int | str) -> bool:
         env = await self.pool.get(env_id)
         if not env:
             return False
@@ -912,6 +971,10 @@ class EnvironmentManager:
         Returns:
             是否恢复成功
         """
+        async with self.get_env_lifecycle_lock(env_id):
+            return await self._resume_env_unlocked(env_id)
+
+    async def _resume_env_unlocked(self, env_id: int | str) -> bool:
         env = await self.pool.get(env_id)
         if not env:
             return False
@@ -1229,6 +1292,11 @@ class EnvironmentManager:
             try:
                 success = await provider.update(env, {"randomize_fingerprint": True})
                 if success:
+                    if hasattr(env, "fingerprint_validation_warnings"):
+                        await self._persist_created_fingerprint_validation(
+                            env,
+                            passed_detail="手动刷新指纹后轻量验收通过",
+                        )
                     logger.info(f"[REM] 指纹已刷新: id={env.id}")
                     updated = True
             except Exception as e:
@@ -1592,7 +1660,12 @@ class EnvironmentManager:
             )
             raise
 
-    async def _persist_created_fingerprint_validation(self, env: Environment) -> list[str]:
+    async def _persist_created_fingerprint_validation(
+        self,
+        env: Environment,
+        *,
+        passed_detail: str = "创建后轻量验收通过",
+    ) -> list[str]:
         warnings = getattr(env, "fingerprint_validation_warnings", None)
         if warnings is None:
             return []
@@ -1606,7 +1679,7 @@ class EnvironmentManager:
         else:
             await self.clear_fingerprint_validation_risk(
                 env.id,
-                detail="创建后轻量验收通过",
+                detail=passed_detail,
             )
         try:
             delattr(env, "fingerprint_validation_warnings")

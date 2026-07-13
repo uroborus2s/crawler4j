@@ -165,7 +165,7 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
 | 类别 | 示例 |
 |---|---|
 | 浏览器交互 | `browser.goto`、`browser.click`、`browser.hover`、`browser.type`、`browser.press`、`browser.drag`、`browser.scroll`、`browser.pause` |
-| 环境与代理 | `env.get_proxy`、`env.set_proxy`、`ip_pool.pick_proxy` |
+| 环境与代理 | `env.get_proxy`、`env.set_proxy`、`env.cookie.ensure`、`ip_pool.pick_proxy` |
 | 验证码 | `captcha.match_slider`、`captcha.match_click_targets` |
 
 `ctx.tools` 不注册 `db.*`。数据库能力全部走 `ctx.db`。
@@ -182,6 +182,33 @@ if proxy.get("resolved"):
 ```
 
 `env.get_proxy` 只返回当前 task 绑定环境的只读代理快照。新 IP 池绑定会返回 `ip_entry_id`；旧环境如果只有历史 `ProxyConfig`，首次读取时宿主会按池和地址信息懒回填 `ip_entry_id`，解析不到时返回 `resolved=False`。
+
+更新当前环境的完整 Cookie 集合时使用：
+
+```python
+result = await ctx.tools.call(
+    "env.cookie.ensure",
+    env_id=ctx.env_id,
+    cookies=[
+        {
+            "name": "cticket",
+            "value": cticket,
+            "domain": ".ctrip.com",
+            "path": "/",
+            "expires": expires_at,
+            "secure": True,
+            "httpOnly": True,
+        }
+    ],
+    reload="restart_if_changed",
+    verify="runtime",
+)
+assert result["runtime_matched"] is True
+```
+
+`cookies` 是替换后的**完整集合**，不是增量 patch：模块未传入的既有 Cookie 会被删除，空列表会清空全部 Cookie。Core 按当前 `env_id` 串行执行持久化比较、VirtualBrowser 全量写入与回读；名称、值、域名、路径、有效期和安全属性必须匹配，其中有效期按 float Unix seconds 严格比较。集合变化或运行态不一致时，Core 完整停止浏览器并等待旧进程与 CDP 端口关闭，再启动、连接并从新 BrowserContext 验证完整集合。成功结果至少包含 `persisted/restarted/browser_ready/runtime_matched` 四个 bool，且 `runtime_matched=True`；任一步失败直接抛异常。
+
+同环境的普通 start/stop、Cookie ensure 和回绑共享 Manager 生命周期锁。发生 stop/start 后，Core 会在释放锁前把新 BrowserHandle 的 `page/context` 回绑当前 `TaskContext` 并重新绑定 tools。模块只能在 `env.cookie.ensure` 成功后继续领题或导航，并应继续使用 `ctx.page` / `ctx.tools`，不能保存或复用调用前的旧 Page。该工具只存在于 full runtime surface，不向模块暴露 `getCookie/updateCookie/stopBrowser/launchBrowser`，模块可见异常、日志和返回值也不包含 API Key、完整 Cookie value 或 Provider endpoint 名称。
 
 Hosted UI 的页面读取、渲染和 action 调用属于宿主 UI surface，不作为 workflow/page action 的普通 `TaskContext.tools` 能力示例。
 

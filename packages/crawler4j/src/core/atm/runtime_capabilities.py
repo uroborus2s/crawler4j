@@ -77,6 +77,7 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
             "ip_pool.pick_proxy",
             "env.get_proxy",
             "env.set_proxy",
+            "env.cookie.ensure",
             "captcha.match_slider",
             "captcha.match_click_targets",
         }
@@ -479,6 +480,50 @@ class CoreEnvTools:
             proxy_pool_id=proxy_pool_id or None,
         )
 
+    async def ensure_cookie(
+        self,
+        env_id: int,
+        cookies: list[dict[str, Any]],
+        *,
+        reload: str,
+        verify: str,
+    ) -> dict[str, bool]:
+        from src.core.rem.manager import get_environment_manager
+
+        context = self._task_context
+        current_env_id = int(getattr(context, "env_id", 0) or 0)
+        if current_env_id <= 0:
+            raise RuntimeError("env.cookie.ensure 需要当前运行上下文绑定有效 env_id")
+        if isinstance(env_id, bool) or not isinstance(env_id, int) or env_id != current_env_id:
+            raise RuntimeError("env.cookie.ensure 只能更新当前运行环境")
+
+        manager = get_environment_manager()
+
+        def _rebind_ready(env: Any, ensure_result: Any) -> None:
+            if getattr(ensure_result, "runtime_matched", False) is not True:
+                raise RuntimeError("env.cookie.ensure 运行态校验未通过")
+            handle = getattr(env, "handle", None)
+            page = getattr(handle, "page", None)
+            browser_context = getattr(handle, "context", None)
+            if page is None or browser_context is None:
+                raise RuntimeError("env.cookie.ensure 未获得新的 Browser Page/Context")
+            context.page = page
+            context.context = browser_context
+            binder = getattr(getattr(context, "tools", None), "bind_task_context", None)
+            if callable(binder):
+                binder(context)
+
+        result = await manager.ensure_cookies(
+            env_id,
+            cookies,
+            reload=reload,
+            verify=verify,
+            on_ready=_rebind_ready,
+        )
+        if result.get("runtime_matched") is not True:
+            raise RuntimeError("env.cookie.ensure 运行态校验未通过")
+        return dict(result)
+
     async def get_proxy(self) -> dict[str, Any]:
         from src.core.rem.manager import get_environment_manager
 
@@ -836,6 +881,9 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         self._register("ip_pool.pick_proxy", "按条件挑选可用代理", ip_pool_tools.pick_proxy)
         self._register("env.get_proxy", "读取当前环境绑定代理", self._env_tools.get_proxy, is_async=True)
         self._register("env.set_proxy", "为当前环境设置代理", self._env_tools.set_proxy, is_async=True)
+        self._register(
+            "env.cookie.ensure", "全量替换并验证当前环境 Cookie", self._env_tools.ensure_cookie, is_async=True
+        )
 
         self._register("ui.declare_page", "声明宿主页 schema", ui_tools.declare_page)
         self._register("ui.get_page", "读取宿主页 schema", ui_tools.get_page)

@@ -188,6 +188,27 @@ async def test_created_validation_warnings_mark_env_risk_metadata(temp_data_dir)
 
 
 @pytest.mark.asyncio
+async def test_manual_fingerprint_refresh_persists_validation_result(temp_data_dir, monkeypatch):
+    manager = EnvironmentManager()
+    env = await _add_ready_env(manager.pool, "manual-refresh-env")
+
+    class FakeProvider:
+        async def update(self, checked_env, config):
+            assert config == {"randomize_fingerprint": True}
+            checked_env.fingerprint_validation_warnings = []
+            return True
+
+    monkeypatch.setattr("src.core.rem.manager.get_provider", lambda provider: FakeProvider())
+    await manager.mark_fingerprint_validation_risk(env.id, reason="旧指纹风险", detail="旧检测结果")
+
+    assert await manager.update_env(env.id, randomize_fingerprint=True) is True
+
+    metadata = manager.pool.list_metadata(env.id, FINGERPRINT_VALIDATION_NAMESPACE)
+    assert metadata[FINGERPRINT_VALIDATION_STATUS] == FINGERPRINT_VALIDATION_PASSED
+    assert metadata[FINGERPRINT_VALIDATION_DETAIL] == "手动刷新指纹后轻量验收通过"
+
+
+@pytest.mark.asyncio
 async def test_runtime_validation_warnings_mark_env_risk_metadata(temp_data_dir):
     manager = EnvironmentManager()
     env = await _add_ready_env(manager.pool, "runtime-risk-env")
