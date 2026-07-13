@@ -7,9 +7,13 @@ on:
         description: Git ref to package
         required: true
         default: main
+      release_tag:
+        description: Optional vX.Y.Z GitHub release tag
+        required: false
+        default: ""
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -48,6 +52,27 @@ jobs:
         env:
           CRAWLER4J_VELOPACK_FEED_URL: https://updates.whzhsc.cn/win
         run: uv run package-windows-release
+
+      - name: Publish GitHub release assets
+        if: ${{ inputs.release_tag != '' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ inputs.release_tag }}"
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "release_tag must match vX.Y.Z"
+          }
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --target "${{ inputs.ref }}" --title $tag --notes "Windows client release $tag"
+            if ($LASTEXITCODE -ne 0) { throw "failed to create release $tag" }
+          }
+
+          $assets = Get-ChildItem packages/crawler4j/dist/updates/windows -File | ForEach-Object FullName
+          gh release upload $tag @assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw "failed to upload release assets for $tag" }
 
       - name: Upload Windows release artifacts
         uses: actions/upload-artifact@v7
