@@ -2,7 +2,7 @@ import sys
 from types import SimpleNamespace
 from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -119,6 +119,7 @@ def test_runtime_tools_register_expected_surface():
 
     assert caps.tools.has_tool("ip_pool.pick_proxy") is True
     assert caps.tools.has_tool("env.set_proxy") is True
+    assert caps.tools.has_tool("env.cookie.ensure") is True
     assert caps.tools.has_tool("env.bind_resource_pool") is False
     assert caps.tools.has_tool("env.mark_resource_pool_eligible") is False
     assert caps.tools.has_tool("env.mark_resource_pool_ineligible") is False
@@ -136,6 +137,81 @@ def test_runtime_tools_register_expected_surface():
     assert tool_names == sorted(tool_names)
     assert not any(name.startswith("db.") for name in tool_names)
     assert {spec.name: spec.is_async for spec in specs}["env.set_proxy"] is True
+    assert {spec.name: spec.is_async for spec in specs}["env.cookie.ensure"] is True
+
+
+@pytest.mark.asyncio
+async def test_env_cookie_ensure_rebinds_new_page_context_and_tools(monkeypatch):
+    old_page = SimpleNamespace(url="https://old.invalid")
+    old_context = object()
+    new_page = SimpleNamespace(url="about:blank")
+    new_context = object()
+    new_handle = SimpleNamespace(page=new_page, context=new_context)
+    env = SimpleNamespace(id=12, handle=new_handle)
+    result_payload = {
+        "persisted": True,
+        "restarted": True,
+        "browser_ready": True,
+        "runtime_matched": True,
+    }
+
+    async def ensure_cookies(*_args, on_ready, **_kwargs):
+        on_ready(env, SimpleNamespace(runtime_matched=True))
+        return result_payload
+
+    manager = SimpleNamespace(ensure_cookies=AsyncMock(side_effect=ensure_cookies))
+    monkeypatch.setattr("src.core.rem.manager.get_environment_manager", lambda: manager)
+    caps = build_runtime_capabilities("demo_module")
+    ctx = TaskContext(
+        env_id=12,
+        task_name="demo_module",
+        page=old_page,
+        context=old_context,
+        tools=caps.tools,
+    )
+
+    result = await caps.tools.call(
+        "env.cookie.ensure",
+        env_id=12,
+        cookies=[
+            {
+                "name": "cticket",
+                "value": "test-value",
+                "domain": ".ctrip.com",
+                "path": "/",
+                "expires": 1_893_456_000.5,
+                "secure": True,
+                "httpOnly": True,
+            }
+        ],
+        reload="restart_if_changed",
+        verify="runtime",
+    )
+
+    assert result["runtime_matched"] is True
+    assert ctx.page is new_page
+    assert ctx.context is new_context
+    assert caps.tools._browser_tools._bound_page is new_page
+    manager.ensure_cookies.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_env_cookie_ensure_rejects_other_environment_before_manager_call(monkeypatch):
+    manager = SimpleNamespace(ensure_cookies=AsyncMock())
+    monkeypatch.setattr("src.core.rem.manager.get_environment_manager", lambda: manager)
+    caps = build_runtime_capabilities("demo_module")
+    TaskContext(env_id=12, task_name="demo_module", tools=caps.tools)
+
+    with pytest.raises(RuntimeError, match="只能更新当前运行环境"):
+        await caps.tools.call(
+            "env.cookie.ensure",
+            env_id=13,
+            cookies=[],
+            reload="restart_if_changed",
+            verify="runtime",
+        )
+
+    manager.ensure_cookies.assert_not_awaited()
 
 
 def test_runtime_tools_register_hosted_ui_declare_surface():
@@ -342,7 +418,9 @@ def test_runtime_ctx_db_managed_dataset_count_returns_filtered_row_total(temp_da
     )
 
     rows = caps.db.from_("accounts").where(["tier", "=", "standard"]).count(alias="total").execute()
-    occupied_rows = caps.db.from_("accounts").where(["run_status", "=", "占用中"]).count(alias="occupied_total").execute()
+    occupied_rows = (
+        caps.db.from_("accounts").where(["run_status", "=", "占用中"]).count(alias="occupied_total").execute()
+    )
 
     assert rows == [{"total": 2}]
     assert occupied_rows == [{"occupied_total": 2}]
@@ -351,10 +429,7 @@ def test_runtime_ctx_db_managed_dataset_count_returns_filtered_row_total(temp_da
 def test_runtime_ctx_db_reads_all_managed_dataset_rows_when_pagination_is_absent(temp_data_dir):
     _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
     caps = build_runtime_capabilities("demo_module")
-    records = [
-        {"id": f"u{index:03}", "phone": f"13800138{index:03}", "tier": "standard"}
-        for index in range(125)
-    ]
+    records = [{"id": f"u{index:03}", "phone": f"13800138{index:03}", "tier": "standard"} for index in range(125)]
 
     assert caps.db.into("accounts").replace(records) is True
 

@@ -809,7 +809,7 @@ async def test_virtualbrowser_open_surfaces_launch_error(monkeypatch):
     )
     client = SimpleNamespace(
         get_browser_detail=AsyncMock(return_value={"id": 101}),
-        launch_browser=AsyncMock(side_effect=RuntimeError("Launch Error: DevTools port not detected"))
+        launch_browser=AsyncMock(side_effect=RuntimeError("Launch Error: DevTools port not detected")),
     )
 
     monkeypatch.setattr(provider, "is_window_open", AsyncMock(return_value=False))
@@ -1080,12 +1080,106 @@ async def test_virtualbrowser_close_serializes_stop_operations(monkeypatch):
         await asyncio.sleep(0)
         active_stops -= 1
 
-    client = SimpleNamespace(stop_browser=AsyncMock(side_effect=stop_browser))
+    client = SimpleNamespace(
+        stop_browser=AsyncMock(side_effect=stop_browser),
+        is_browser_running=AsyncMock(return_value=False),
+    )
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
 
     assert await asyncio.gather(provider.close(env_a), provider.close(env_b)) == [True, True]
     assert max_active_stops == 1
     assert stop_order == [101, 102]
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_close_waits_for_process_and_old_cdp_port(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-cookie-restart",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.RUNNING,
+        handle=BrowserHandle(browser_id="101", ws_url="ws://127.0.0.1:57204/devtools/browser/test"),
+    )
+    old_handle = env.handle
+    assert old_handle is not None
+    monkeypatch.setattr(old_handle, "safe_close", AsyncMock())
+    client = SimpleNamespace(
+        stop_browser=AsyncMock(),
+        is_browser_running=AsyncMock(side_effect=[False, False]),
+    )
+    cdp_reachable = AsyncMock(side_effect=[True, False])
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(provider, "_is_cdp_endpoint_reachable", cdp_reachable)
+    monkeypatch.setattr(provider_module.asyncio, "sleep", AsyncMock())
+
+    assert await provider.close(env) is True
+
+    old_handle.safe_close.assert_awaited_once()
+    client.stop_browser.assert_awaited_once_with(101)
+    assert client.is_browser_running.await_count == 2
+    assert cdp_reachable.await_count == 2
+    assert env.handle is not old_handle
+    assert env.handle is not None
+    assert env.handle.browser_id == "101"
+    assert env.handle.ws_url == ""
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_close_fails_when_running_state_cannot_be_confirmed(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-cookie-query-failure",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.RUNNING,
+        handle=BrowserHandle(browser_id="101", ws_url="ws://127.0.0.1:57204/devtools/browser/test"),
+    )
+    old_handle = env.handle
+    assert old_handle is not None
+    monkeypatch.setattr(old_handle, "safe_close", AsyncMock())
+    client = SimpleNamespace(
+        stop_browser=AsyncMock(),
+        is_browser_running=AsyncMock(side_effect=RuntimeError("management unavailable")),
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(provider, "_is_cdp_endpoint_reachable", AsyncMock(return_value=False))
+
+    with pytest.raises(RuntimeError, match="management unavailable"):
+        await provider.close(env)
+
+    assert env.handle is old_handle
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_close_fails_when_old_cdp_port_never_closes(monkeypatch):
+    provider = VirtualBrowserProvider()
+    env = Environment(
+        id=101,
+        name="vb-cookie-cdp-exhausted",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.RUNNING,
+        handle=BrowserHandle(browser_id="101", ws_url="ws://127.0.0.1:57204/devtools/browser/test"),
+    )
+    old_handle = env.handle
+    assert old_handle is not None
+    monkeypatch.setattr(old_handle, "safe_close", AsyncMock())
+    client = SimpleNamespace(
+        stop_browser=AsyncMock(),
+        is_browser_running=AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(provider, "_is_cdp_endpoint_reachable", AsyncMock(return_value=True))
+    monkeypatch.setattr(provider_module.asyncio, "sleep", AsyncMock())
+
+    with pytest.raises(RuntimeError, match="CDP 端口未关闭"):
+        await provider.close(env)
+
+    assert env.handle is old_handle
+    assert client.is_browser_running.await_count == 20
 
 
 @pytest.mark.asyncio

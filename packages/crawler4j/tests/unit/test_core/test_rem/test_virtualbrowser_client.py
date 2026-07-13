@@ -60,9 +60,9 @@ class _DummyHttpClient:
             return _DummyResponse(json, **response)
         return _DummyResponse(json, response_data=self._response_data)
 
-    async def get(self, path):
+    async def get(self, path, params=None):
         self.last_get_path = path
-        self.last_get_payload = {}
+        self.last_get_payload = params or {}
         self.get_calls.append(path)
         if self._get_responses:
             response = self._get_responses.pop(0)
@@ -70,6 +70,143 @@ class _DummyHttpClient:
                 return response
             return _DummyResponse({}, **response)
         return _DummyResponse({}, response_data=self._response_data)
+
+
+@pytest.mark.asyncio
+async def test_get_cookies_uses_observed_data_list_response_and_normalizes_fields():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(
+        response_data=[
+            {
+                "name": "cticket",
+                "value": "test-value",
+                "domain": ".ctrip.com",
+                "path": "/",
+                "expirationDate": 1_893_456_000.5,
+                "secure": True,
+                "httpOnly": True,
+                "sameSite": "lax",
+            }
+        ]
+    )
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+
+    cookies = await client.get_cookies(101)
+
+    assert dummy.last_get_path == "/api/getCookie"
+    assert dummy.last_get_payload == {"id": 101}
+    assert cookies == [
+        {
+            "name": "cticket",
+            "value": "test-value",
+            "domain": ".ctrip.com",
+            "path": "/",
+            "expires": 1_893_456_000.5,
+            "secure": True,
+            "httpOnly": True,
+            "sameSite": "lax",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_replace_cookies_sends_complete_observed_payload_and_maps_expires():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(response_data={})
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+
+    await client.replace_cookies(
+        101,
+        [
+            {
+                "name": "cticket",
+                "value": "test-value",
+                "domain": ".ctrip.com",
+                "path": "/",
+                "expires": 1_893_456_000.5,
+                "secure": True,
+                "httpOnly": True,
+            }
+        ],
+    )
+
+    assert dummy.last_path == "/api/updateCookie"
+    assert dummy.last_payload == {
+        "id": 101,
+        "cookies": [
+            {
+                "name": "cticket",
+                "value": "test-value",
+                "domain": ".ctrip.com",
+                "path": "/",
+                "expirationDate": 1_893_456_000.5,
+                "secure": True,
+                "httpOnly": True,
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_replace_cookies_failure_does_not_expose_cookie_value(monkeypatch):
+    client = VirtualBrowserClient(port=9002, api_key="api-key-secret")
+    dummy = _DummyHttpClient(
+        responses=[
+            {
+                "success": False,
+                "status_code": 500,
+                "error_message": "failed for cookie do-not-expose",
+            }
+        ]
+    )
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+    logged: list[str] = []
+    monkeypatch.setattr(provider_module.logger, "error", lambda message: logged.append(str(message)))
+    monkeypatch.setattr(provider_module.logger, "warning", lambda message: logged.append(str(message)))
+
+    with pytest.raises(RuntimeError, match="updateCookie 失败") as exc_info:
+        await client.replace_cookies(
+            101,
+            [
+                {
+                    "name": "cticket",
+                    "value": "do-not-expose",
+                    "domain": ".ctrip.com",
+                    "path": "/",
+                    "expires": 1_893_456_000.5,
+                    "secure": True,
+                    "httpOnly": True,
+                }
+            ],
+        )
+
+    assert "do-not-expose" not in str(exc_info.value)
+    assert "api-key-secret" not in str(exc_info.value)
+    assert logged == []
+
+
+@pytest.mark.asyncio
+async def test_is_browser_running_rejects_unsuccessful_management_response():
+    client = VirtualBrowserClient(port=9002, api_key="")
+    dummy = _DummyHttpClient(get_responses=[{"success": False, "error_message": "management query failed"}])
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="运行列表查询失败"):
+        await client.is_browser_running(101)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response_data", [None, {}, "invalid"])
+async def test_is_browser_running_rejects_unverifiable_management_data(response_data):
+    client = VirtualBrowserClient(port=9002, api_key="")
+    response = _DummyResponse({}, response_data=response_data)
+    if response_data is None:
+        response._response_data = None
+    dummy = _DummyHttpClient(get_responses=[response])
+    client._get_client = AsyncMock(return_value=dummy)  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="运行列表返回结构无效"):
+        await client.is_browser_running(101)
 
 
 @pytest.mark.asyncio

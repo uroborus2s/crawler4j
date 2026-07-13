@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `API-019`, `API-021`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `CR-016`, `CR-018`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `TASK-0400`, `TASK-0401`
-**最后更新：** 2026-07-10
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `API-019`, `API-021`, `API-022`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `CR-016`, `CR-018`, `CR-020`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `TASK-040`, `TASK-0400`, `TASK-0401`
+**最后更新：** 2026-07-13
 
 ## `API-001` Root App Entry Contract
 
@@ -100,6 +100,26 @@
 | 验证 | `TC-069`；Task 1 Contracts / SDK `82 passed`，Task 2 Core / UI `38 passed`，两项均通过独立 Spec + Quality Review；Task 3 合并目标集 `120 passed`，Ruff / diff / JSON / docs 结构通过；全量 unit 有 2 个不相关版本文档漂移失败 |
 | 当前状态 | 通用实现已完成整体 review、人工确认和 Contracts 0.4.3 / SDK 0.4.4 发布；全量 unit `1134 passed`，PyPI 哈希与隔离安装验证通过。真实业务模块接线和 E2E 仍为独立工作 |
 | 关联项 | `REQ-012`, `NFR-012`, `CR-018`, `TASK-036`, `TASK-037`, `TC-070` |
+
+## `API-022` Environment Cookie Ensure Contract
+
+| 项目 | 内容 |
+|---|---|
+| 目标 | 模块只表达当前环境的完整 Cookie 目标状态，由 Core 原子完成持久化、必要重启、CDP 重连和运行态验证 |
+| 公开入口 | `await ctx.tools.call("env.cookie.ensure", env_id=<int>, cookies=[...], reload="restart_if_changed", verify="runtime")` |
+| Surface | 只注册到 workflow/page action 使用的 full runtime surface；Hosted UI、环境候选和清理候选 surface 不注册 |
+| 输入语义 | `cookies` 是替换后的完整集合，不是 patch；未传 Cookie 必须删除，空列表清空全部 Cookie |
+| Cookie 字段 | 必需 `name/value/domain/path/expires/secure/httpOnly`；可选 `sameSite`；`expires` 为 Unix seconds float |
+| 并发 | Manager 按宿主 `env_id` 提供共享生命周期锁，覆盖 ensure、普通 start/stop、read/write/stop/start/verify 和 TaskContext 回绑；异常或取消后释放 |
+| Provider 边界 | REM 暴露供应商无关的持久化读取/全量替换能力；VirtualBrowser adapter 使用实测 `GET /api/getCookie?id=... -> data[]` 与 `POST /api/updateCookie {id,cookies}`，并执行 `expires ↔ expirationDate` |
+| 匹配 | 完整集合、Cookie 标识、value、float Unix seconds 有效期和安全属性严格匹配；额外 Cookie 或任何有效期差异均触发替换 |
+| 重启 | 集合变化或运行态不一致时停止浏览器；运行列表查询异常、轮询耗尽或旧 CDP 端口仍可达均失败，不得把未知状态视为已关闭；确认关闭后再启动并连接新 Browser/Context |
+| 上下文换代 | stop/start 后，ATM 将新 BrowserHandle 的 page/context 回绑当前 TaskContext 并重新 bind tools；模块不得复用旧 Page |
+| 返回 | Mapping 至少包含 `persisted/restarted/browser_ready/runtime_matched` 四个 bool；成功固定 `runtime_matched=True` |
+| 失败 | 参数、Provider、写入、回读、停止、端口释放、启动、连接或运行态验证任一步失败均抛异常，不返回部分成功 |
+| 安全 | API Key、完整 Cookie value 和 Provider endpoint 名称不进入模块可见异常、日志或返回值；模块不接触 VirtualBrowser provider API |
+| 实测证据 | `.factory/workitems/CR-020/evidence/virtualbrowser-cookie-api-probe.md`；一次性环境验证了全量替换、字段映射和空列表清空，环境已删除 |
+| 关联项 | `CR-020`, `TASK-040` |
 
 ## `API-009` Module Entity Table View Contract
 
@@ -261,6 +281,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-13 | 新增 `API-022`，登记 `env.cookie.ensure` 完整集合全量替换、Provider 实测协议、严格重启、TaskContext 回绑和敏感信息边界 | Codex |
 | 2026-07-10 | 新增 `API-021`，登记 Hosted UI DataTable 当前页选择、CRUD 批量 handler、SDK 类型 gate、Core 调用边界与模块数据 owner | Codex |
 | 2026-06-19 | 将 `API-019` 更新为已本地实现，记录 Hosted UI toolbar 导入契约、宿主解析弹窗、payload 分发、结果展示和 `TC-060` 验证状态 | Codex |
 | 2026-06-19 | 新增 `API-019`，登记 Hosted UI 批量导入的 toolbar schema、宿主导入弹窗、标准 import payload、结果展示和敏感字段脱敏契约 | Codex |

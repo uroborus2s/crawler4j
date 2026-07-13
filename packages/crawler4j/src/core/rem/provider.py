@@ -547,9 +547,7 @@ def _runtime_fingerprint_warnings(entry: dict[str, Any], runtime: Any) -> list[s
 
     expected_timezone_section = entry.get("time-zone")
     expected_timezone = (
-        str(expected_timezone_section.get("utc") or "").strip()
-        if isinstance(expected_timezone_section, dict)
-        else ""
+        str(expected_timezone_section.get("utc") or "").strip() if isinstance(expected_timezone_section, dict) else ""
     )
     actual_timezone = str(runtime.get("timezone") or "").strip()
     if expected_timezone and actual_timezone != expected_timezone:
@@ -874,6 +872,20 @@ class BaseProvider(ABC):
             - 普通浏览器 Provider 可返回 False 表示不支持
         """
         return False
+
+    async def get_persisted_cookies(self, env: Environment) -> list[dict[str, Any]]:
+        """读取环境持久化 Cookie；不支持的 Provider 必须显式失败。"""
+        del env
+        raise RuntimeError(f"Provider 不支持持久化 Cookie: {self.name}")
+
+    async def replace_persisted_cookies(
+        self,
+        env: Environment,
+        cookies: list[dict[str, Any]],
+    ) -> None:
+        """用完整目标集合替换环境持久化 Cookie。"""
+        del env, cookies
+        raise RuntimeError(f"Provider 不支持持久化 Cookie: {self.name}")
 
     async def validate_fingerprint_environment(self, env: Environment) -> list[str]:
         """Return fingerprint validation warnings for manual risk rechecks."""
@@ -1916,7 +1928,85 @@ class VirtualBrowserClient:
     async def stop_browser(self, browser_id: int):
         client = await self._get_client()
         payload = {"id": browser_id}
-        await client.post("/api/stopBrowser", json=payload)
+        resp = await client.post("/api/stopBrowser", json=payload)
+        if not resp.is_success:
+            raise RuntimeError(f"VirtualBrowser stopBrowser 失败: status={resp.status_code}")
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError("VirtualBrowser stopBrowser 失败")
+
+    async def get_cookies(self, browser_id: int) -> list[dict[str, Any]]:
+        """按本机实测协议读取并转换为 Core Cookie 字段。"""
+        client = await self._get_client()
+        resp = await client.get("/api/getCookie", params={"id": browser_id})
+        if not resp.is_success:
+            raise RuntimeError(f"VirtualBrowser getCookie 失败: status={resp.status_code}")
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError("VirtualBrowser getCookie 失败")
+
+        raw_cookies: Any = data.get("data")
+        if isinstance(raw_cookies, dict):
+            cookie_config = raw_cookies.get("cookie")
+            if isinstance(cookie_config, dict):
+                raw_cookies = cookie_config.get("jsonStr")
+            elif isinstance(raw_cookies.get("cookies"), list):
+                raw_cookies = raw_cookies["cookies"]
+        if isinstance(raw_cookies, str):
+            try:
+                raw_cookies = json.loads(raw_cookies)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("VirtualBrowser getCookie 返回无效 JSON") from exc
+        if raw_cookies in (None, ""):
+            return []
+        if not isinstance(raw_cookies, list):
+            raise RuntimeError("VirtualBrowser getCookie 返回结构无效")
+
+        normalized: list[dict[str, Any]] = []
+        for item in raw_cookies:
+            if not isinstance(item, dict):
+                raise RuntimeError("VirtualBrowser getCookie 返回 Cookie 结构无效")
+            cookie = {
+                "name": item.get("name"),
+                "value": item.get("value"),
+                "domain": item.get("domain"),
+                "path": item.get("path", "/"),
+                "expires": item.get("expirationDate", item.get("expires")),
+                "secure": item.get("secure", False),
+                "httpOnly": item.get("httpOnly", False),
+            }
+            if "sameSite" in item:
+                cookie["sameSite"] = item.get("sameSite")
+            normalized.append(cookie)
+        return normalized
+
+    async def replace_cookies(self, browser_id: int, cookies: list[dict[str, Any]]) -> None:
+        """按本机实测协议全量替换 Cookie，不记录请求或响应正文。"""
+        wire_cookies: list[dict[str, Any]] = []
+        for cookie in cookies:
+            wire_cookie = {
+                "name": cookie["name"],
+                "value": cookie["value"],
+                "domain": cookie["domain"],
+                "path": cookie["path"],
+                "expirationDate": cookie["expires"],
+                "secure": cookie["secure"],
+                "httpOnly": cookie["httpOnly"],
+            }
+            if "sameSite" in cookie:
+                wire_cookie["sameSite"] = cookie["sameSite"]
+            wire_cookies.append(wire_cookie)
+
+        client = await self._get_client()
+        resp = await client.post(
+            "/api/updateCookie",
+            json={"id": browser_id, "cookies": wire_cookies},
+        )
+        if not resp.is_success:
+            raise RuntimeError(f"VirtualBrowser updateCookie 失败: status={resp.status_code}")
+        data = resp.json()
+        if not data.get("success"):
+            raise RuntimeError("VirtualBrowser updateCookie 失败")
 
     async def delete_browser(self, browser_id: int) -> bool:
         client = await self._get_client()
@@ -1955,13 +2045,17 @@ class VirtualBrowserClient:
         resp = await client.get("/api/getBrowserRunningList")
         resp.raise_for_status()
         data = resp.json()
-        if not data.get("success"):
-            return False
+        if not isinstance(data, dict) or not data.get("success"):
+            raise RuntimeError("VirtualBrowser 运行列表查询失败")
 
         # data.data 是运行中的 对象列表，例如 [{"id": 1, "name": "1"}]
-        running_envs = data.get("data", [])
+        running_envs = data.get("data")
+        if not isinstance(running_envs, list) or any(
+            not isinstance(env_info, dict) or "id" not in env_info for env_info in running_envs
+        ):
+            raise RuntimeError("VirtualBrowser 运行列表返回结构无效")
         for env_info in running_envs:
-            if isinstance(env_info, dict) and env_info.get("id") == browser_id:
+            if env_info.get("id") == browser_id:
                 return True
         return False
 
@@ -2140,6 +2234,22 @@ class VirtualBrowserProvider(BaseProvider):
             self._client_config = current_config
         return self._client_cache
 
+    async def get_persisted_cookies(self, env: Environment) -> list[dict[str, Any]]:
+        browser_id = self._browser_id_from_env(env)
+        if not browser_id:
+            raise RuntimeError("VirtualBrowser 环境缺少 browser_id")
+        return await self._get_api_client().get_cookies(int(browser_id))
+
+    async def replace_persisted_cookies(
+        self,
+        env: Environment,
+        cookies: list[dict[str, Any]],
+    ) -> None:
+        browser_id = self._browser_id_from_env(env)
+        if not browser_id:
+            raise RuntimeError("VirtualBrowser 环境缺少 browser_id")
+        await self._get_api_client().replace_cookies(int(browser_id), cookies)
+
     async def _randomize_and_reconcile_fingerprint(
         self,
         client: Any,
@@ -2272,8 +2382,7 @@ class VirtualBrowserProvider(BaseProvider):
                         await client.delete_browser(browser_id)
                     except Exception as cleanup_error:
                         logger.warning(
-                            f"[VirtualBrowser] 创建失败后删除外部环境失败: "
-                            f"id={browser_id} error={cleanup_error}"
+                            f"[VirtualBrowser] 创建失败后删除外部环境失败: id={browser_id} error={cleanup_error}"
                         )
                 raise
 
@@ -2526,15 +2635,42 @@ class VirtualBrowserProvider(BaseProvider):
         self,
         env: Environment,
         *,
-        attempts: int = 5,
-        delay: float = 0.3,
+        cdp_endpoint: str = "",
+        attempts: int = 20,
+        delay: float = 0.25,
     ) -> bool:
         for attempt in range(attempts):
-            if not await self._is_window_open_unlocked(env):
+            window_open = await self._is_window_open_strict_unlocked(env)
+            cdp_open = bool(cdp_endpoint) and await self._is_cdp_endpoint_reachable(cdp_endpoint)
+            if not window_open and not cdp_open:
                 return True
             if attempt < attempts - 1:
                 await asyncio.sleep(delay)
         return False
+
+    async def _is_window_open_strict_unlocked(self, env: Environment) -> bool:
+        browser_id = self._browser_id_from_env(env)
+        if not browser_id:
+            return False
+        return await self._get_api_client().is_browser_running(int(browser_id))
+
+    @staticmethod
+    async def _is_cdp_endpoint_reachable(endpoint: str, *, timeout: float = 0.2) -> bool:
+        parts = urlsplit(endpoint)
+        host = parts.hostname
+        port = parts.port
+        if not host or port is None:
+            return False
+        try:
+            _reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        except (OSError, TimeoutError):
+            return False
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except OSError:
+            pass
+        return True
 
     async def _wait_until_missing(
         self,
@@ -2719,16 +2855,14 @@ class VirtualBrowserProvider(BaseProvider):
             return True
         handle = self._ensure_browser_handle(env, browser_id)
 
-        # 关闭浏览器窗口
-        try:
-            # 使用 safe_close 关闭 Playwright 连接
-            await handle.safe_close()
-            browser_id_int = int(browser_id)
-            client = self._get_api_client()
-            await client.stop_browser(browser_id_int)
-            logger.info(f"[VirtualBrowser] Closed window {browser_id}")
-        except Exception as e:
-            logger.warning(f"[VirtualBrowser] Failed to close window {browser_id}: {e}")
+        cdp_endpoint = handle.ws_url
+        await handle.safe_close()
+        browser_id_int = int(browser_id)
+        client = self._get_api_client()
+        await client.stop_browser(browser_id_int)
+        if not await self._wait_until_window_closed(env, cdp_endpoint=cdp_endpoint):
+            raise RuntimeError(f"VirtualBrowser 浏览器进程或 CDP 端口未关闭: id={browser_id}")
+        logger.info(f"[VirtualBrowser] Closed window {browser_id}")
 
         # 重置 handle，保留 browser_id
         env.handle = BrowserHandle(browser_id=browser_id)
