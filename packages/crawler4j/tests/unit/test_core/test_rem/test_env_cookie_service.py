@@ -1,10 +1,11 @@
 import asyncio
 import weakref
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+import src.core.rem.cookie_service as cookie_service_module
 from src.core.rem.cookie_service import EnvCookieService, cookie_sets_match, normalize_expected_cookies
 from src.core.rem.handle import BrowserHandle
 from src.core.rem.manager import EnvironmentManager
@@ -48,12 +49,15 @@ class _FakeProvider:
         self.active_reads = 0
         self.max_active_reads = 0
         self.get_error: Exception | None = None
+        self.get_error_after = 1
+        self.get_calls = 0
         self.replace_error: Exception | None = None
 
     async def get_persisted_cookies(self, env: Environment) -> list[dict]:
         del env
         self.calls.append("get_persisted")
-        if self.get_error is not None:
+        self.get_calls += 1
+        if self.get_error is not None and self.get_calls >= self.get_error_after:
             raise self.get_error
         self.active_reads += 1
         self.max_active_reads = max(self.max_active_reads, self.active_reads)
@@ -360,6 +364,49 @@ async def test_ensure_hides_provider_api_and_sensitive_error_details(operation):
     assert "updateCookie" not in message
     assert "api-key-secret" not in message
     assert "cookie-value-secret" not in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "expected_stage"),
+    [
+        ("get", "read_persisted"),
+        ("replace", "replace_persisted"),
+        ("verify", "verify_persisted"),
+    ],
+)
+async def test_ensure_logs_redacted_provider_failure_diagnostics(monkeypatch, operation, expected_stage):
+    service, provider, _manager, _calls = _service(
+        persisted=[EXTRA_COOKIE],
+        runtime=[EXTRA_COOKIE],
+    )
+    provider_error = RuntimeError(
+        'HTTP request failed api-key=api-key-secret payload={"value":"cookie-value-secret"}'
+    )
+    if operation == "get":
+        provider.get_error = provider_error
+    elif operation == "replace":
+        provider.replace_error = provider_error
+    else:
+        provider.get_error = provider_error
+        provider.get_error_after = 2
+    log_error = Mock()
+    monkeypatch.setattr(cookie_service_module.logger, "error", log_error)
+
+    with pytest.raises(RuntimeError):
+        await service.ensure(7, [EXPECTED_COOKIE], reload="restart_if_changed", verify="runtime")
+
+    log_error.assert_called_once()
+    diagnostic = log_error.call_args.args[0]
+    assert "[CookieEnsure]" in diagnostic
+    assert f"stage={expected_stage}" in diagnostic
+    assert "env_id=7" in diagnostic
+    assert "provider=virtualbrowser" in diagnostic
+    assert "browser_id=101" in diagnostic
+    assert "error_type=RuntimeError" in diagnostic
+    assert "api-key-secret" not in diagnostic
+    assert "cookie-value-secret" not in diagnostic
+    assert "<redacted>" in diagnostic
 
 
 @pytest.mark.asyncio

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import inspect
 import math
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from src.core.foundation.logging import logger
 from src.core.rem.models import EnvStatus
 from src.core.rem.provider import get_provider
 
@@ -22,6 +24,14 @@ _REQUIRED_COOKIE_FIELDS = {
 }
 _OPTIONAL_COOKIE_FIELDS = {"sameSite"}
 _ALLOWED_COOKIE_FIELDS = _REQUIRED_COOKIE_FIELDS | _OPTIONAL_COOKIE_FIELDS
+_SENSITIVE_HEADER_PATTERN = re.compile(
+    r"(?i)\b(api[-_ ]?key|authorization|proxy-authorization|cookie|set-cookie)\b"
+    r"(\s*[:=]\s*)(?:b?['\"][^'\"]*['\"]|[^\s,;]+)"
+)
+_JSON_COOKIE_VALUE_PATTERN = re.compile(r'''(?i)(["']value["']\s*:\s*["'])[^"']*(["'])''')
+_URL_CREDENTIALS_PATTERN = re.compile(r"(?i)(https?://)[^\s/@]+@")
+_LONG_TOKEN_PATTERN = re.compile(r"(?<![\w.-])[A-Za-z0-9+/=_-]{24,}(?![\w.-])")
+_MAX_DIAGNOSTIC_MESSAGE_LENGTH = 500
 
 
 @dataclass(frozen=True)
@@ -38,6 +48,31 @@ class CookieEnsureResult:
             "browser_ready": self.browser_ready,
             "runtime_matched": self.runtime_matched,
         }
+
+
+def _redact_provider_error(error: Exception, cookies: list[dict[str, Any]]) -> str:
+    """保留可定位信息，同时移除 API Key、Cookie 值和高熵令牌。"""
+    message = " ".join(str(error).split())
+    for cookie in cookies:
+        value = cookie.get("value")
+        if isinstance(value, str) and value:
+            message = message.replace(value, "<redacted>")
+    message = _SENSITIVE_HEADER_PATTERN.sub(lambda match: f"{match.group(1)}{match.group(2)}<redacted>", message)
+    message = _JSON_COOKIE_VALUE_PATTERN.sub(lambda match: f"{match.group(1)}<redacted>{match.group(2)}", message)
+    message = _URL_CREDENTIALS_PATTERN.sub(r"\1<redacted>@", message)
+    message = _LONG_TOKEN_PATTERN.sub("<redacted>", message)
+    if not message:
+        return "<empty>"
+    if len(message) > _MAX_DIAGNOSTIC_MESSAGE_LENGTH:
+        return f"{message[:_MAX_DIAGNOSTIC_MESSAGE_LENGTH]}..."
+    return message
+
+
+def _environment_browser_id(env: Any) -> str:
+    handle = getattr(env, "handle", None)
+    browser_id = getattr(handle, "browser_id", None) or getattr(env, "external_id", None)
+    text = str(browser_id or "").strip()
+    return text[:128] if text else "<missing>"
 
 
 def _cookie_identity(cookie: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -178,6 +213,25 @@ class EnvCookieService:
             handle and getattr(handle, "page", None) is not None and getattr(handle, "context", None) is not None
         )
 
+    @staticmethod
+    def _log_provider_failure(
+        *,
+        stage: str,
+        env_id: int,
+        env: Any,
+        provider: Any,
+        error: Exception,
+        cookies: list[dict[str, Any]],
+    ) -> None:
+        provider_name = str(getattr(provider, "name", None) or type(provider).__name__)
+        logger.error(
+            "[CookieEnsure] "
+            f"stage={stage} env_id={env_id} provider={provider_name} "
+            f"browser_id={_environment_browser_id(env)} error_type={type(error).__name__} "
+            f"error_message={_redact_provider_error(error, cookies)}",
+            environment_id=env_id,
+        )
+
     async def ensure(
         self,
         env_id: int,
@@ -208,7 +262,15 @@ class EnvCookieService:
 
             try:
                 persisted_before = await get_persisted(env)
-            except Exception:
+            except Exception as exc:
+                self._log_provider_failure(
+                    stage="read_persisted",
+                    env_id=env_id,
+                    env=env,
+                    provider=provider,
+                    error=exc,
+                    cookies=expected,
+                )
                 raise RuntimeError("读取环境持久化 Cookie 失败") from None
             persisted_matched = cookie_sets_match(expected, persisted_before)
             runtime_before = await self._runtime_cookies(env)
@@ -217,11 +279,27 @@ class EnvCookieService:
             if not persisted_matched:
                 try:
                     await replace_persisted(env, expected)
-                except Exception:
+                except Exception as exc:
+                    self._log_provider_failure(
+                        stage="replace_persisted",
+                        env_id=env_id,
+                        env=env,
+                        provider=provider,
+                        error=exc,
+                        cookies=expected,
+                    )
                     raise RuntimeError("全量替换环境持久化 Cookie 失败") from None
                 try:
                     persisted_after = await get_persisted(env)
-                except Exception:
+                except Exception as exc:
+                    self._log_provider_failure(
+                        stage="verify_persisted",
+                        env_id=env_id,
+                        env=env,
+                        provider=provider,
+                        error=exc,
+                        cookies=expected,
+                    )
                     raise RuntimeError("复核环境持久化 Cookie 失败") from None
                 if not cookie_sets_match(expected, persisted_after):
                     raise RuntimeError("Cookie 持久化校验失败")
