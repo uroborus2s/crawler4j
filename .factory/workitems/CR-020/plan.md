@@ -12,7 +12,7 @@
 
 **任务：** `TASK-040`
 
-**状态：** `human_approved`
+**状态：** `completed`
 
 ---
 
@@ -173,7 +173,7 @@ git diff --check
 - 计划评审：`completed`
 - 任务评审：`approved (99/100)`
 - 验证：`passed`
-- 提交：`human_approved`
+- 提交：`completed (afae0136)`
 - 记忆同步：`completed`
 
 ## 计划自审
