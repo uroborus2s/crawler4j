@@ -829,7 +829,7 @@ async def test_virtualbrowser_runtime_fingerprint_check_accepts_native_macos_voi
 
 
 @pytest.mark.asyncio
-async def test_virtualbrowser_runtime_fingerprint_check_rejects_empty_native_macos_voices(monkeypatch):
+async def test_virtualbrowser_runtime_fingerprint_check_accepts_unavailable_macos_voices(monkeypatch):
     monkeypatch.setattr(
         "src.core.rem.virtualbrowser_fingerprint.platform.system",
         lambda: "Darwin",
@@ -857,9 +857,7 @@ async def test_virtualbrowser_runtime_fingerprint_check_rejects_empty_native_mac
     client = SimpleNamespace(get_browser_full_parameters=AsyncMock(return_value={"id": 306}))
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
 
-    assert await provider.validate_runtime_fingerprint_environment(env) == [
-        "speechSynthesis.getVoices 未返回 macOS 原生语音列表"
-    ]
+    assert await provider.validate_runtime_fingerprint_environment(env) == []
 
 
 @pytest.mark.asyncio

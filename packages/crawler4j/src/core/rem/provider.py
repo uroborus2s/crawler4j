@@ -586,8 +586,6 @@ def _runtime_fingerprint_warnings(entry: dict[str, Any], runtime: Any) -> list[s
     if should_enforce_virtualbrowser_speech_voices():
         if expected_voice_names and not expected_voice_names.issubset(actual_voice_names):
             warnings.append("speechSynthesis.getVoices 与环境配置不一致")
-    elif not actual_voice_names:
-        warnings.append("speechSynthesis.getVoices 未返回 macOS 原生语音列表")
 
     webrtc = runtime.get("webrtc")
     if not isinstance(webrtc, dict) or webrtc.get("supported") is False:
