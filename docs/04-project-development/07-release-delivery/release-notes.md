@@ -11,17 +11,17 @@
 
 ## 1. 最新已知正式发布
 
-### `REL-002` `v0.4.38`
+### `REL-001` `v0.2.0`
 
-- Tag 时间：2026-07-14
-- Release 标题：`v0.4.38`
-- 关联提交：`f274852d63af3029e77acbe865b865a484665b4b`
+- Tag 时间：2026-04-20
+- Tag 标题：`release: v0.2.0`
+- 关联提交：`2d914f48566647304e6a14053063dadb5b305ef1`
 
 ## 2. 当前仓库相对正式发布的状态
 
 - 当前工作区根应用版本：`0.4.38`
 - 当前运行时版本：`0.4.38`
-- 最近正式发布 tag：`v0.4.38`
+- 最近正式发布 tag：`v0.2.0`
 - SDK 当前已发布版本：`0.4.4`
 - Contracts 当前已发布版本：`0.4.3`
 - 根应用 0.4.38 为 `env.cookie.ensure` 增加脱敏分阶段错误诊断，并承接 0.4.37 的环境管理改进；SDK 0.4.4 / Contracts 0.4.3 保持不变
@@ -40,18 +40,18 @@
 | Contracts wheel/sdist build | 通过（2026-07-10 产出 `crawler4j-contracts 0.4.3` wheel/sdist） |
 | Contracts publish | 通过（2026-07-10 先上传 0.4.3；PyPI wheel/sdist 哈希与本地一致） |
 | Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-06-19 删除远端旧 `Crawler4j-0.4.16.dmg` 后，`uv run package-macos-internal-release` 重新生成 `Crawler4j.app`、`Crawler4j-0.4.16.dmg`、`appcast.xml` 并上传 macOS 更新目录；公网 DMG `HEAD 200`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243`） |
-| Windows PyInstaller / Velopack bundle | 通过（2026-07-14 GitHub Actions run `29269789146` 成功生成并发布 Setup、Portable、nupkg 与 feed；公网更新 feed 已切换到 0.4.38，nupkg `HEAD 200`、大小 `157352154`、SHA256 `a57fc71f689f9f22e506435cc4ec998a1b799109f8a7df6ed307877597b1dccb`） |
 | Full test / lint / smoke | 客户端 0.4.38 全量 `1201 passed`；全仓 Ruff、`uv lock --check` 与 `git diff --check` 通过；UI smoke 沿用 0.4.37 基线 |
 | Docs markdown tree | 通过（`docs-stratego source validate --repo-path .`，`pages=86 contracts=0`） |
 
-## 4. 完整生产交付仍受以下约束
+## 4. 当前不建议直接发布的原因
 
+- `0.4.38` 对应的桌面安装包、Git tag、正式 GitHub release 与交付批次仍待后续完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 确定下一目标版本，并确保 README / 包描述 / release 文档不混用版本口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.4.38` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -60,7 +60,6 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-07-14 | 发布 `v0.4.38`：Windows runner 构建并上传 Setup、Portable、nupkg 与 feed，GitHub Release 和公网 Windows 更新 feed 均已生效 | Codex |
 | 2026-07-14 | 将根应用 / 运行时源码版本提升到 0.4.38，为 `env.cookie.ensure` 增加不泄露 API Key 和 Cookie 值的分阶段错误诊断；SDK / Contracts 版本保持不变 | Codex |
 | 2026-07-13 | 将根应用 / 运行时源码版本提升到 0.4.37，承接环境管理代理与指纹手动更新交互收口；本轮只提交推送源码版本，不构建桌面安装包 | Codex |
 | 2026-07-12 | 将根应用 / 运行时源码版本提升到 0.4.36，承接 DevLink 模块并发强制重载序列化；本轮只提交推送源码版本，不构建桌面安装包 | Codex |
