@@ -240,6 +240,10 @@ async def test_virtualbrowser_update_translates_proxy_config(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_virtualbrowser_create_only_verifies_proxy_without_ip_table_fingerprint(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Windows",
+    )
     provider = VirtualBrowserProvider()
     client = SimpleNamespace(
         add_browser=AsyncMock(return_value=303),
@@ -311,6 +315,30 @@ async def test_virtualbrowser_create_only_verifies_proxy_without_ip_table_finger
     assert args[3]["speech_voices"]["mode"] == 1
     assert len(args[3]["speech_voices"]["value"]) == 5
     client.get_browser_full_parameters.assert_awaited_once_with(303)
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_create_uses_native_speech_voices_on_macos(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Darwin",
+    )
+    provider = VirtualBrowserProvider()
+    client = SimpleNamespace(
+        add_browser=AsyncMock(return_value=303),
+        get_browser_full_parameters=AsyncMock(return_value={"id": 303}),
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    await provider.create(
+        {
+            "env_name": "env-macos-native-voices",
+            "creation_params": {"virtualbrowser": {"chrome_version": 145}},
+        }
+    )
+
+    fingerprint = client.add_browser.await_args.args[3]
+    assert "speech_voices" not in fingerprint
 
 
 @pytest.mark.asyncio
@@ -463,6 +491,10 @@ async def test_virtualbrowser_create_uses_structured_static_proxy_with_empty_val
 
 @pytest.mark.asyncio
 async def test_virtualbrowser_create_randomizes_then_applies_minimal_patch(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Windows",
+    )
     provider = VirtualBrowserProvider()
     randomized_parameters = {
         "id": 303,
@@ -557,6 +589,10 @@ async def test_virtualbrowser_create_randomizes_then_applies_minimal_patch(monke
 
 @pytest.mark.asyncio
 async def test_virtualbrowser_update_randomizes_then_applies_minimal_patch(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Windows",
+    )
     provider = VirtualBrowserProvider()
     randomized_parameters = {
         "id": 303,
@@ -686,6 +722,10 @@ async def test_virtualbrowser_runtime_fingerprint_check_uses_page_visible_values
 
 @pytest.mark.asyncio
 async def test_virtualbrowser_runtime_fingerprint_check_flags_page_visible_mismatches(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Windows",
+    )
     provider = VirtualBrowserProvider()
     page = SimpleNamespace(
         evaluate=AsyncMock(
@@ -739,6 +779,82 @@ async def test_virtualbrowser_runtime_fingerprint_check_flags_page_visible_misma
     assert "screen 配置=1920x1080，页面=1366x768，devicePixelRatio=1.25" in warnings
     assert any("speechSynthesis" in warning for warning in warnings)
     assert any("WebRTC" in warning for warning in warnings)
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_runtime_fingerprint_check_accepts_native_macos_voices(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Darwin",
+    )
+    provider = VirtualBrowserProvider()
+    page = SimpleNamespace(
+        evaluate=AsyncMock(
+            return_value={
+                "voices": [{"name": "Ting-Ting", "lang": "zh-CN"}],
+                "webrtc": {"supported": True, "hasRawPrivateAddress": False, "candidateTypes": []},
+            }
+        )
+    )
+    handle = BrowserHandle(browser_id="305")
+    handle._page = page
+    env = Environment(
+        id=103,
+        name="vb-env-macos-voices",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.RUNNING,
+        external_id="305",
+        handle=handle,
+    )
+    client = SimpleNamespace(
+        get_browser_full_parameters=AsyncMock(
+            return_value={
+                "id": 305,
+                "speech_voices": {
+                    "mode": 1,
+                    "value": [{"name": "Google UK English Male"}],
+                },
+            }
+        )
+    )
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await provider.validate_runtime_fingerprint_environment(env) == []
+
+
+@pytest.mark.asyncio
+async def test_virtualbrowser_runtime_fingerprint_check_rejects_empty_native_macos_voices(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Darwin",
+    )
+    provider = VirtualBrowserProvider()
+    page = SimpleNamespace(
+        evaluate=AsyncMock(
+            return_value={
+                "voices": [],
+                "webrtc": {"supported": True, "hasRawPrivateAddress": False, "candidateTypes": []},
+            }
+        )
+    )
+    handle = BrowserHandle(browser_id="306")
+    handle._page = page
+    env = Environment(
+        id=104,
+        name="vb-env-macos-empty-voices",
+        kind=EnvKind.BROWSER,
+        provider="virtualbrowser",
+        status=EnvStatus.RUNNING,
+        external_id="306",
+        handle=handle,
+    )
+    client = SimpleNamespace(get_browser_full_parameters=AsyncMock(return_value={"id": 306}))
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+
+    assert await provider.validate_runtime_fingerprint_environment(env) == [
+        "speechSynthesis.getVoices 未返回 macOS 原生语音列表"
+    ]
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,7 @@ from src.core.rem.virtualbrowser_fingerprint import (
     build_virtualbrowser_randomized_fingerprint_patch,
     build_virtualbrowser_speech_voices_override,
     materialize_virtualbrowser_fingerprint,
+    should_enforce_virtualbrowser_speech_voices,
 )
 
 VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS = tuple(range(146, 138, -1))
@@ -582,8 +583,11 @@ def _runtime_fingerprint_warnings(entry: dict[str, Any], runtime: Any) -> list[s
         for voice in runtime.get("voices") or []
         if isinstance(voice, dict) and str(voice.get("name") or "").strip()
     }
-    if expected_voice_names and not expected_voice_names.issubset(actual_voice_names):
-        warnings.append("speechSynthesis.getVoices 与环境配置不一致")
+    if should_enforce_virtualbrowser_speech_voices():
+        if expected_voice_names and not expected_voice_names.issubset(actual_voice_names):
+            warnings.append("speechSynthesis.getVoices 与环境配置不一致")
+    elif not actual_voice_names:
+        warnings.append("speechSynthesis.getVoices 未返回 macOS 原生语音列表")
 
     webrtc = runtime.get("webrtc")
     if not isinstance(webrtc, dict) or webrtc.get("supported") is False:
@@ -2305,7 +2309,9 @@ class VirtualBrowserProvider(BaseProvider):
         expected = build_virtualbrowser_ip_auto_fingerprint_overrides()
         if manual_geo:
             expected.update(build_virtualbrowser_geo_fingerprint_overrides(manual_geo))
-        expected["speech_voices"] = build_virtualbrowser_speech_voices_override()
+        speech_voices = build_virtualbrowser_speech_voices_override()
+        if speech_voices is not None:
+            expected["speech_voices"] = speech_voices
         patch = build_virtualbrowser_randomized_fingerprint_patch(randomized_entry, expected)
         if patch and not await client.update_browser(browser_id, patch):
             raise RuntimeError("VirtualBrowser updateBrowser 修正随机指纹失败")
@@ -2387,7 +2393,9 @@ class VirtualBrowserProvider(BaseProvider):
         if not should_randomize_fingerprint:
             fingerprint = dict(fingerprint or {})
             fingerprint.update(build_virtualbrowser_ip_auto_fingerprint_overrides())
-            fingerprint["speech_voices"] = build_virtualbrowser_speech_voices_override()
+            speech_voices = build_virtualbrowser_speech_voices_override()
+            if speech_voices is not None:
+                fingerprint["speech_voices"] = speech_voices
 
         logger.info(f"[VirtualBrowser] Creating env '{name}'...")
 
