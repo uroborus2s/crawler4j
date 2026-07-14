@@ -500,7 +500,7 @@ def _created_parameter_warnings(
     if fonts is not None and not fonts.get("value"):
         warnings.append("fonts.mode=1 但缺少 value 字体列表")
     voices = _mode_one_dict(entry.get("speech_voices"))
-    if voices is not None and not voices.get("value"):
+    if should_enforce_virtualbrowser_speech_voices() and voices is not None and not voices.get("value"):
         warnings.append("speech_voices.mode=1 但缺少 value 语音列表")
 
     for key, required in (

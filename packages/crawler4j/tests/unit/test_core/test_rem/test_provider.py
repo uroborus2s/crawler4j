@@ -57,7 +57,11 @@ class TestProviderRegistry:
         assert provider is None
 
 
-def test_created_parameter_warnings_flag_inconsistent_fingerprint_values():
+def test_created_parameter_warnings_flag_inconsistent_fingerprint_values(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.rem.virtualbrowser_fingerprint.platform.system",
+        lambda: "Windows",
+    )
     warnings = provider_module._created_parameter_warnings(
         {
             "id": 55,
@@ -326,11 +330,11 @@ async def test_virtualbrowser_create_uses_native_speech_voices_on_macos(monkeypa
     provider = VirtualBrowserProvider()
     client = SimpleNamespace(
         add_browser=AsyncMock(return_value=303),
-        get_browser_full_parameters=AsyncMock(return_value={"id": 303}),
+        get_browser_full_parameters=AsyncMock(return_value={"id": 303, "speech_voices": {"mode": 1}}),
     )
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
 
-    await provider.create(
+    env = await provider.create(
         {
             "env_name": "env-macos-native-voices",
             "creation_params": {"virtualbrowser": {"chrome_version": 145}},
@@ -339,6 +343,7 @@ async def test_virtualbrowser_create_uses_native_speech_voices_on_macos(monkeypa
 
     fingerprint = client.add_browser.await_args.args[3]
     assert "speech_voices" not in fingerprint
+    assert env.fingerprint_validation_warnings == []
 
 
 @pytest.mark.asyncio
