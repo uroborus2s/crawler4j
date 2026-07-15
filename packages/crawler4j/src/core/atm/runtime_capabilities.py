@@ -95,6 +95,7 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
     ),
     RUNTIME_SURFACE_HOSTED_UI_ACTION: frozenset(
         {
+            "ui.form.reset",
             "ui.get_page",
         }
     ),
@@ -861,6 +862,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
         allowed_tool_names: frozenset[str] | None = None,
         declared_page_schemas: dict[str, dict[str, Any]] | None = None,
         allow_persisted_pages: bool = True,
+        hosted_form_tools: Any | None = None,
     ):
         self._bindings: dict[str, _ToolBinding] = {}
         self._allowed_tool_names = allowed_tool_names
@@ -877,6 +879,10 @@ class CoreToolsCapabilityImpl(ToolsCapability):
             allow_persisted_pages=allow_persisted_pages,
         )
         captcha_tools = CoreCaptchaTools()
+        if hosted_form_tools is None:
+            from src.core.mms.ui.hosted_form import HostedFormUnavailableTools
+
+            hosted_form_tools = HostedFormUnavailableTools()
 
         self._register("ip_pool.pick_proxy", "按条件挑选可用代理", ip_pool_tools.pick_proxy)
         self._register("env.get_proxy", "读取当前环境绑定代理", self._env_tools.get_proxy, is_async=True)
@@ -887,6 +893,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
         self._register("ui.declare_page", "声明宿主页 schema", ui_tools.declare_page)
         self._register("ui.get_page", "读取宿主页 schema", ui_tools.get_page)
+        self._register("ui.form.reset", "重置当前 Hosted UI 表单", hosted_form_tools.reset)
 
         self._register("captcha.match_slider", "识别滑块验证码缺口位置", captcha_tools.match_slider)
         self._register("captcha.match_click_targets", "识别点选验证码目标位置", captcha_tools.match_click_targets)
@@ -962,6 +969,7 @@ def build_runtime_capabilities(
     ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
     surface: str = RUNTIME_SURFACE_FULL,
     declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+    hosted_form_tools: Any | None = None,
 ) -> RuntimeCapabilities:
     module_name = (task_name or "").split(".")[0] or "default"
     db_enabled = surface != RUNTIME_SURFACE_HOSTED_UI_DECLARE
@@ -977,6 +985,7 @@ def build_runtime_capabilities(
             allowed_tool_names=_resolve_runtime_surface_tools(surface),
             declared_page_schemas=declared_page_schemas,
             allow_persisted_pages=False,
+            hosted_form_tools=hosted_form_tools,
         ),
         db=DatabaseClient(CoreDatabaseTools(module_name, enabled=db_enabled, read_only=db_read_only)),
     )

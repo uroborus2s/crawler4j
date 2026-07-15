@@ -4,8 +4,8 @@
 **文档状态：** 已批准  
 **负责人：** 当前仓库维护者  
 **主要读者：** 架构 | Core 开发 | SDK 开发 | QA | 模块开发者  
-**关联 ID：** `API-002`, `API-008`, `API-019`
-**最后更新：** 2026-06-19
+**关联 ID：** `API-002`, `API-008`, `API-019`, `API-023`
+**最后更新：** 2026-07-15
 
 ## 1. 结论
 
@@ -15,7 +15,7 @@
 
 - `pages/*.py` 或 `pages/<group>/*.py` 使用 `@page(...)` 装饰页面 load handler，作为唯一页面注册表
 - `@page(menu=True)` 声明左侧导航菜单入口；`menu=False` 只注册可路由页面
-- 页面 schema 只允许使用宿主提供的 `Page`、`Section`、`Text`、`Button`、`DataTable`
+- 页面 schema 只允许使用宿主提供的 `Page`、`Card`、`Section`、`Text`、`Input`、`Select`、`Button`、`DataTable`
 - 页面数据全部由 `load_handler` 或 `DataTable.query_handler` 返回结构化对象
 - 页面业务按钮和 CRUD handler 通过 `@ui_action` 声明的函数执行，参数按 kwargs 绑定；CRUD 的主键参数名来自 `crud.primary_key`，SDK 扫描期校验 create/update/delete handler 的确定签名和输入类型注解
 - 页面级和 `DataTable` 工具栏可声明自定义按钮；批量导入这类宿主复合动作由 `API-019` 定义，宿主负责读取 Excel/CSV/剪贴板并只把结构化 payload 交给模块
@@ -135,6 +135,8 @@ def load_dashboard_page(
 - `Section`
 - `Text`
 - `Button`
+- `Input`
+- `Select`
 - `DataTable`
 
 其中：
@@ -223,12 +225,17 @@ def load_dashboard_page(
 保留：
 
 - `ui.get_page`
+- `ui.form.reset`，仅在 Hosted UI action surface 注册；只有绑定当前 Form change 事件的 handle 可执行
+
+DataTable CRUD Form 可选使用 `crud.form.layout={"columns": 1|2|3, "gap": <非负整数>}` 声明通用多列网格；省略时保持一列。renderer 按字段顺序逐行填充，并根据屏幕可用宽度降列，滚动内容与固定操作区的职责不变。
 
 删除：
 
 - `ui.declare_page`
 - `ui.declare_data_table`
 - `ui.get_data_table`
+
+公共字段事件、Form scope、安全 handle 与 reset 的完整协议见 [Hosted UI 公共字段事件与 Form Reset 设计](hosted-ui-form-field-events.md)。
 
 ### 6.3 模块详情页
 

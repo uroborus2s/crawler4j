@@ -60,6 +60,7 @@ class ModuleUIRuntimeBridge:
         ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
         capability_surface: str = RUNTIME_SURFACE_FULL,
         declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+        hosted_form_tools: Any | None = None,
     ) -> TaskContext:
         config = get_module_settings_store().read_module_settings(self._module_name)
         runtime: dict[str, Any] = {}
@@ -73,6 +74,7 @@ class ModuleUIRuntimeBridge:
             ui_declaration_buffer=ui_declaration_buffer,
             surface=capability_surface,
             declared_page_schemas=declared_page_schemas,
+            hosted_form_tools=hosted_form_tools,
         )
         return TaskContext(
             env_id=0,
@@ -91,11 +93,13 @@ class ModuleUIRuntimeBridge:
         ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
         capability_surface: str = RUNTIME_SURFACE_FULL,
         declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+        hosted_form_tools: Any | None = None,
     ) -> _HostedUISession:
         context = self.build_task_context(
             ui_declaration_buffer=ui_declaration_buffer,
             capability_surface=capability_surface,
             declared_page_schemas=declared_page_schemas,
+            hosted_form_tools=hosted_form_tools,
         )
         descriptor = self._mms.get_runtime_descriptor_v2(
             self._module_name,
@@ -111,12 +115,14 @@ class ModuleUIRuntimeBridge:
         ui_declaration_buffer: HostedUIDeclarationBuffer | None = None,
         capability_surface: str = RUNTIME_SURFACE_FULL,
         declared_page_schemas: dict[str, dict[str, Any]] | None = None,
+        hosted_form_tools: Any | None = None,
     ) -> None:
         capabilities = build_runtime_capabilities(
             self._module_name,
             ui_declaration_buffer=ui_declaration_buffer,
             surface=capability_surface,
             declared_page_schemas=declared_page_schemas,
+            hosted_form_tools=hosted_form_tools,
         )
         context.tools = capabilities.tools
         context.db = capabilities.db
@@ -177,21 +183,25 @@ class ModuleUIRuntimeBridge:
         *args: Any,
         runtime_extra: dict[str, Any] | None = None,
         capability_surface: str | None = None,
+        hosted_form_tools: Any | None = None,
     ) -> Any:
         if capability_surface is None:
             capability_surface = RUNTIME_SURFACE_HOSTED_UI_ACTION
-        session = self._active_session
+        isolated_session = hosted_form_tools is not None
+        session = None if isolated_session else self._active_session
         if session is None:
             session = self._create_session(
                 force_reload=self._is_dev_link(),
                 capability_surface=capability_surface,
                 declared_page_schemas=self._declared_page_schemas or None,
+                hosted_form_tools=hosted_form_tools,
             )
         else:
             self._set_context_tools(
                 session.context,
                 capability_surface=capability_surface,
                 declared_page_schemas=self._declared_page_schemas or None,
+                hosted_form_tools=hosted_form_tools,
             )
         try:
             descriptor = self._mms.get_runtime_descriptor_v2(self._module_name, session.context)
@@ -214,23 +224,27 @@ class ModuleUIRuntimeBridge:
         *,
         runtime_extra: dict[str, Any] | None = None,
         capability_surface: str = RUNTIME_SURFACE_HOSTED_UI_ACTION,
+        hosted_form_tools: Any | None = None,
     ) -> Any:
         normalized_action = str(action_name or "").strip()
         if not normalized_action:
             raise RuntimeError("ui_action 名称不能为空")
         normalized_params = dict(params or {}) if isinstance(params, dict) else {}
-        session = self._active_session
+        isolated_session = hosted_form_tools is not None
+        session = None if isolated_session else self._active_session
         if session is None:
             session = self._create_session(
                 force_reload=self._is_dev_link(),
                 capability_surface=capability_surface,
                 declared_page_schemas=self._declared_page_schemas or None,
+                hosted_form_tools=hosted_form_tools,
             )
         else:
             self._set_context_tools(
                 session.context,
                 capability_surface=capability_surface,
                 declared_page_schemas=self._declared_page_schemas or None,
+                hosted_form_tools=hosted_form_tools,
             )
         try:
             descriptor = self._mms.get_runtime_descriptor_v2(self._module_name, session.context)
@@ -250,12 +264,14 @@ class ModuleUIRuntimeBridge:
         *,
         runtime_extra: dict[str, Any] | None = None,
         capability_surface: str = RUNTIME_SURFACE_HOSTED_UI_ACTION,
+        hosted_form_tools: Any | None = None,
     ) -> Any:
         coroutine = self.call_ui_action_async(
             action_name,
             params,
             runtime_extra=runtime_extra,
             capability_surface=capability_surface,
+            hosted_form_tools=hosted_form_tools,
         )
         try:
             asyncio.get_running_loop()

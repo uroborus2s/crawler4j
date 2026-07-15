@@ -1670,3 +1670,104 @@ def old_helper(ctx):
     )
 
     assert commands.collect_full_errors(module_root, _read_manifest(module_root)) == []
+
+
+def test_scan_v2_module_validates_common_field_change_handlers(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "workflows" / "main.py").write_text(
+        """
+from crawler4j_contracts import workflow
+
+
+@workflow(name="main_workflow")
+class MainWorkflow:
+    pass
+""",
+        encoding="utf-8",
+    )
+    (module_root / "pages" / "dashboard.py").write_text(
+        """
+from crawler4j_contracts import HostedFieldChangeEvent, page, ui_action
+
+
+@page(
+    name="dashboard",
+    schema={
+        "type": "Page",
+        "children": [
+            {
+                "type": "Select",
+                "id": "missing",
+                "options": ["one"],
+                "on_change": {"type": "ui_action", "name": "missing_change"},
+            },
+            {
+                "type": "Input",
+                "id": "invalid_signature",
+                "on_change": {"type": "ui_action", "name": "bad_signature"},
+            },
+            {
+                "type": "DataTable",
+                "table_id": "accounts",
+                "columns": [
+                    {
+                        "key": "tier",
+                        "type": "select",
+                        "options": ["one"],
+                        "on_change": {"type": "ui_action", "name": "loose_event"},
+                    },
+                    {
+                        "key": "status",
+                        "on_change": {"type": "ui_action", "name": "good_change"},
+                    },
+                ],
+                "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+            },
+        ],
+    },
+)
+def load_dashboard(context, page_id, params=None):
+    return {}
+
+
+@ui_action(name="bad_signature")
+def bad_signature(context, payload, event: HostedFieldChangeEvent):
+    return None
+
+
+@ui_action(name="loose_event")
+def loose_event(context, event: dict):
+    return None
+
+
+@ui_action(name="good_change")
+def good_change(context, event: HostedFieldChangeEvent):
+    return None
+""",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    diagnostics = [
+        diagnostic
+        for diagnostic in result.diagnostics
+        if diagnostic.code.startswith("V2_PAGE_FIELD_CHANGE_HANDLER_")
+    ]
+    assert [(diagnostic.code, diagnostic.location, diagnostic.message) for diagnostic in diagnostics] == [
+        (
+            "V2_PAGE_FIELD_CHANGE_HANDLER_MISSING",
+            "pages.dashboard.load_dashboard.schema.children[0].on_change.name",
+            "field on_change must reference a @ui_action function: missing_change",
+        ),
+        (
+            "V2_PAGE_FIELD_CHANGE_HANDLER_SIGNATURE_INVALID",
+            "pages.dashboard.load_dashboard.schema.children[1].on_change.name",
+            "field on_change handler signature must accept (context, event): bad_signature",
+        ),
+        (
+            "V2_PAGE_FIELD_CHANGE_HANDLER_TYPE_INVALID",
+            "pages.dashboard.load_dashboard.schema.children[2].columns[0].on_change.name",
+            "field on_change handler event must be annotated as HostedFieldChangeEvent: loose_event.event",
+        ),
+    ]

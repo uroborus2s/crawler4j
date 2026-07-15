@@ -1,9 +1,10 @@
 # 任务摘要
 
-更新时间：2026-07-14。只保留活跃、最近关闭和有后续动作的任务。
+更新时间：2026-07-15。只保留活跃、最近关闭和有后续动作的任务。
 
 ## 需要后续动作
 
+- `CR-022`：Hosted UI 公共字段 `on_change`、安全 Form Handle、`ui.form.reset`、create default、长表单滚动与 1–3 列响应式布局已实现；独立 review `approved`（98/100），双方目标集均 `199 passed`，相关套件 `583 passed`，全量 13 项范围外环境基线已登记；待用户授权的本地提交。
 - `CR-021`：公共下拉、移除随机 IP、VirtualBrowser 清缓存和指纹浏览器 ID 列已实现；修复两项独立评审反馈后以 `94/100` 通过复评，待本地中文提交。
 - `TASK-036-managed-dataset-bulk-field-update`：`CORE_PACKAGES_RELEASED`；接入真实业务模块并补 E2E。
 - `TASK-039-bump-client-0.4.30-and-push`：`verification_passed`；ledger 下一动作为 `none`，桌面包和跨平台发布另行处理。

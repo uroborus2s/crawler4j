@@ -438,6 +438,71 @@ CRUD handler 签名必须写成确定参数，不允许用 `**kwargs` 或 `Mappi
 
 `@page(schema=...)` 的类型提示由 `crawler4j_contracts.PageSchema` 提供；`DataTable.crud.primary_key`、`create_handler`、`update_handler`、`delete_handler` 和 `form.create_columns/update_columns` 都在这个 schema 类型里声明。
 
+### 字段 change 与 Form reset
+
+独立 `Input` / `Select` 和 CRUD Form 字段可以声明同一个公共事件：
+
+```python
+{
+    "key": "preset",
+    "label": "方案",
+    "type": "select",
+    "options": ["basic", "advanced"],
+    "default": "basic",
+    "on_change": {"type": "ui_action", "name": "handle_field_change"},
+}
+```
+
+`on_change` handler 固定接收 `HostedFieldChangeEvent`：
+
+```python
+from crawler4j_contracts import HostedFieldChangeEvent, TaskContext, ui_action
+
+
+@ui_action(name="handle_field_change")
+def handle_field_change(context: TaskContext, event: HostedFieldChangeEvent) -> None:
+    scope = event["scope"]
+    if scope["kind"] != "form":
+        return
+    context.tools.call(
+        "ui.form.reset",
+        form_id=scope["form_id"],
+        initial_values={
+            **scope["values"],
+            "priority": 0,
+            "enabled": False,
+            "note": "",
+            "marker": "undefined",
+        },
+    )
+```
+
+Form 事件包含组件/字段标识、`value`、`previous_value` 和 `scope.kind/form_id/mode/values`；Form 外事件的 scope 只有 `{"kind":"standalone"}`。模块只有在 Form 事件中才能使用 handle。reset 会用模块传入的整张 `initial_values` 同时替换当前值和初始值，并清理 dirty/validation；它不会提交，也不会调用 create/update handler。
+
+create Form 用 column `default` 初始化，update Form 优先使用当前 row 实际值；两者都按键存在性保留 `0`、`False`、`""` 和字面量 `"undefined"`。字段很多时表单内容区域可滚动，确认/取消按钮保持可见。
+
+CRUD Form 需要多列时，可在原有 `crud.form` 中声明：
+
+```python
+"form": {
+    "create_columns": ["field_a", "field_b", "field_c"],
+    "update_columns": ["field_a", "field_b", "field_c"],
+    "layout": {"columns": 3, "gap": 12},
+}
+```
+
+`columns` 只接受整数 `1`、`2`、`3`，`gap` 可省略或使用非负整数。未声明 `layout` 时仍为一列。字段按声明顺序逐行排列；窄屏会自动降低列数，对话框不会超过 renderer 所在屏幕的可用区域，超大 gap 也会收敛到该屏幕可展示范围，按钮区始终位于滚动区外。布局只影响展示，不改变 create default、update row、change 事件、reset 或最终提交值。
+
+字段事件只允许 `type="ui_action"` 和 `name`，SDK 会校验 handler 的 `(context, event: HostedFieldChangeEvent)` 签名。快速连续 change 使用 latest-wins reset 语义；旧 handler 不能覆盖新选择。未声明 `on_change` 的字段保持既有行为。
+
+当前源码联调仍使用 Contracts `0.4.3` / SDK `0.4.4`，本轮没有发布新包。外部模块可临时安装本地 editable 源码：
+
+```bash
+uv pip install --python .venv/bin/python \
+  --editable /Users/uroborus/PythonProject/crawler4j/packages/crawler4j-contracts \
+  --editable /Users/uroborus/PythonProject/crawler4j/packages/crawler4j-sdk
+```
+
 ## 页面滚动
 
 页面级滚动配置：

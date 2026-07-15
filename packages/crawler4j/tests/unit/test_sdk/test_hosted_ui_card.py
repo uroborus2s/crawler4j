@@ -670,6 +670,7 @@ def test_page_schema_type_documents_crud_ui_action_fields():
                     "form": {
                         "create_columns": ["name"],
                         "update_columns": ["name"],
+                        "layout": {"columns": 3, "gap": 8},
                     },
                     "create_handler": "create_account",
                     "update_handler": "update_account",
@@ -691,12 +692,72 @@ def test_page_schema_type_documents_crud_ui_action_fields():
         "form": {
             "create_columns": ["name"],
             "update_columns": ["name"],
+            "layout": {"columns": 3, "gap": 8},
         },
         "create_handler": "create_account",
         "update_handler": "update_account",
         "delete_handler": "delete_account",
         "bulk_update_handler": "bulk_update_accounts",
     }
+
+
+@pytest.mark.parametrize("columns", [2, 3])
+def test_normalize_page_schema_accepts_multi_column_crud_form_layout(columns: int):
+    normalized = _normalize_crud(
+        {
+            "primary_key": "account_id",
+            "form": {
+                "create_columns": ["name"],
+                "layout": {"columns": columns, "gap": 0},
+            },
+            "create_handler": "create_account",
+        }
+    )
+
+    assert normalized["form"]["layout"] == {"columns": columns, "gap": 0}
+
+
+def test_normalize_page_schema_preserves_large_nonnegative_crud_form_gap():
+    normalized = _normalize_crud(
+        {
+            "primary_key": "account_id",
+            "form": {
+                "create_columns": ["name"],
+                "layout": {"columns": 3, "gap": 2**31},
+            },
+            "create_handler": "create_account",
+        }
+    )
+
+    assert normalized["form"]["layout"] == {"columns": 3, "gap": 2**31}
+
+
+@pytest.mark.parametrize("columns", [0, 4, True, 1.5, "3"])
+def test_normalize_page_schema_rejects_invalid_crud_form_layout_columns(columns: object):
+    with pytest.raises(ValueError, match="form.layout.columns"):
+        _normalize_crud(
+            {
+                "form": {
+                    "create_columns": ["name"],
+                    "layout": {"columns": columns},
+                },
+                "create_handler": "create_account",
+            }
+        )
+
+
+@pytest.mark.parametrize("gap", [-1, True, 1.5, "8"])
+def test_normalize_page_schema_rejects_invalid_crud_form_layout_gap(gap: object):
+    with pytest.raises(ValueError, match="form.layout.gap"):
+        _normalize_crud(
+            {
+                "form": {
+                    "create_columns": ["name"],
+                    "layout": {"columns": 2, "gap": gap},
+                },
+                "create_handler": "create_account",
+            }
+        )
 
 
 @pytest.mark.parametrize("selection_mode", ["none", "single", "multi"])
@@ -781,6 +842,97 @@ def test_normalize_page_schema_requires_accessible_label_for_icon_button():
                         "icon": "←",
                         "size": "icon",
                         "action": {"type": "open_page", "page_id": "accounts"},
+                    }
+                ],
+            },
+        )
+
+
+def test_normalize_page_schema_supports_common_field_change_actions():
+    schema = normalize_page_schema(
+        "accounts",
+        {
+            "type": "Page",
+            "load_handler": "load_accounts_page",
+            "children": [
+                {
+                    "type": "Select",
+                    "id": "preset",
+                    "label": "Preset",
+                    "options": ["basic", "advanced"],
+                    "value": "basic",
+                    "on_change": {"type": "ui_action", "name": "handle_preset_change"},
+                },
+                {
+                    "type": "Input",
+                    "id": "name",
+                    "label": "Name",
+                    "value": "",
+                    "placeholder": "Account name",
+                    "on_change": {"type": "ui_action", "name": "handle_name_change"},
+                },
+                {
+                    "type": "DataTable",
+                    "table_id": "account_table",
+                    "columns": [
+                        {"key": "account_id", "label": "ID"},
+                        {
+                            "key": "tier",
+                            "label": "Tier",
+                            "type": "select",
+                            "options": ["standard", "premium"],
+                            "on_change": {"type": "ui_action", "name": "handle_tier_change"},
+                        },
+                    ],
+                    "data_source": {"type": "managed_resource", "resource_id": "accounts"},
+                },
+            ],
+        },
+    )
+
+    assert schema["children"][0] == {
+        "type": "Select",
+        "id": "preset",
+        "label": "Preset",
+        "options": ["basic", "advanced"],
+        "value": "basic",
+        "on_change": {"type": "ui_action", "name": "handle_preset_change"},
+    }
+    assert schema["children"][1] == {
+        "type": "Input",
+        "id": "name",
+        "label": "Name",
+        "value": "",
+        "placeholder": "Account name",
+        "on_change": {"type": "ui_action", "name": "handle_name_change"},
+    }
+    assert schema["children"][2]["columns"][1]["on_change"] == {
+        "type": "ui_action",
+        "name": "handle_tier_change",
+    }
+
+
+@pytest.mark.parametrize(
+    "on_change",
+    [
+        "handle_change",
+        {"type": "workflow", "name": "handle_change"},
+        {"type": "ui_action", "name": "handle_change", "params": {}},
+    ],
+)
+def test_normalize_page_schema_rejects_invalid_common_field_change_action(on_change: object):
+    with pytest.raises(ValueError, match="on_change"):
+        normalize_page_schema(
+            "accounts",
+            {
+                "type": "Page",
+                "load_handler": "load_accounts_page",
+                "children": [
+                    {
+                        "type": "Select",
+                        "id": "preset",
+                        "options": ["basic"],
+                        "on_change": on_change,
                     }
                 ],
             },
