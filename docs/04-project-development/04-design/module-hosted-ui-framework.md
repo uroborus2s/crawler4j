@@ -227,7 +227,7 @@ def load_dashboard_page(
 - `ui.get_page`
 - `ui.form.reset`，仅在 Hosted UI action surface 注册；只有绑定当前 Form change 事件的 handle 可执行
 
-DataTable CRUD Form 可选使用 `crud.form.layout={"columns": 1|2|3, "gap": <非负整数>}` 声明通用多列网格；省略时保持一列。renderer 按字段顺序逐行填充，并根据屏幕可用宽度降列，滚动内容与固定操作区的职责不变。
+DataTable CRUD Form 可选使用 `crud.form.layout={"columns": 1|2|3, "gap": <非负整数>}` 声明通用多列网格；省略时保持一列。renderer 按字段顺序逐行填充，每个逻辑列以共享 label/input 物理列形成稳定右/左对齐线，并根据屏幕可用宽度降列；滚动内容与固定操作区的职责不变。
 
 删除：
 

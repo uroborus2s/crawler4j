@@ -1092,10 +1092,12 @@ class ManagedPageRenderer(QWidget):
         form_container = QWidget()
         form_layout = QGridLayout(form_container)
         form_layout.setContentsMargins(0, 0, 0, 0)
-        form_layout.setHorizontalSpacing(form_gap)
+        form_layout.setHorizontalSpacing(0)
         form_layout.setVerticalSpacing(form_gap)
+        label_input_spacing = 6
         for column_index in range(form_columns):
-            form_layout.setColumnStretch(column_index, 1)
+            form_layout.setColumnStretch(column_index * 2, 0)
+            form_layout.setColumnStretch(column_index * 2 + 1, 1)
         widgets: dict[str, tuple[QWidget, dict[str, Any]]] = {}
         initial_values: dict[str, Any] = {}
 
@@ -1109,16 +1111,27 @@ class ManagedPageRenderer(QWidget):
             widget = self._build_crud_input_widget(column, value=initial_value)
             widgets[str(field_name)] = (widget, column)
             initial_values[str(field_name)] = initial_value
-            field_container = QWidget()
-            field_layout = QFormLayout(field_container)
-            field_layout.setContentsMargins(0, 0, 0, 0)
-            field_layout.setSpacing(6)
-            field_layout.addRow(f"{label}：", widget)
-            form_layout.addWidget(
-                field_container,
-                field_index // form_columns,
-                field_index % form_columns,
+            logical_column = field_index % form_columns
+            label_column = logical_column * 2
+            input_column = label_column + 1
+            label_widget = QLabel(f"{label}：")
+            label_widget.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            label_widget.setContentsMargins(
+                form_gap if logical_column else 0,
+                0,
+                label_input_spacing,
+                0,
             )
+            input_size_policy = widget.sizePolicy()
+            input_size_policy.setHorizontalPolicy(QSizePolicy.Policy.Expanding)
+            widget.setSizePolicy(input_size_policy)
+            form_layout.addWidget(
+                label_widget,
+                field_index // form_columns,
+                label_column,
+                alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
+            form_layout.addWidget(widget, field_index // form_columns, input_column)
 
         form_scroll = QScrollArea()
         form_scroll.setObjectName("managedCrudFormScrollArea")

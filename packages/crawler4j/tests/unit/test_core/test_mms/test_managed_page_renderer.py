@@ -6,8 +6,17 @@ from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from PyQt6.QtCore import QItemSelectionModel
-from PyQt6.QtWidgets import QAbstractItemView, QDialog, QGridLayout, QLabel, QPushButton, QScrollArea, QSizePolicy
+from PyQt6.QtCore import QItemSelectionModel, QPoint, Qt
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QFormLayout,
+    QGridLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+)
 
 from src.core.mms.ui.managed_page_renderer import (
     CRUD_ROW_ACTION_DELETE,
@@ -2468,7 +2477,66 @@ def test_crud_form_without_layout_stays_single_column(bulk_update_page, qtbot):
     assert isinstance(grid, QGridLayout)
     assert dialog._hosted_form_layout_columns == 1
     assert len(widgets) == 6
-    assert [grid.getItemPosition(index)[1] for index in range(grid.count())] == [0] * 6
+    assert grid.count() == 12
+    assert [grid.getItemPosition(index)[1] for index in range(grid.count())] == [0, 1] * 6
+
+
+def test_crud_form_grid_uses_shared_label_and_input_physical_columns(bulk_update_page, qtbot):
+    page = bulk_update_page
+    component = _field_change_component()
+
+    dialog, widgets = page._build_crud_form_dialog(component, mode="create")
+    qtbot.addWidget(dialog)
+    scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
+    grid = scroll.widget().layout()
+
+    assert isinstance(grid, QGridLayout)
+    assert grid.count() == len(widgets) * 2
+    assert not any(
+        isinstance(grid.itemAt(index).widget().layout(), QFormLayout)
+        for index in range(grid.count())
+    )
+
+    field_names = list(component["crud"]["form"]["create_columns"])
+    for field_index, field_name in enumerate(field_names):
+        row = field_index // 3
+        label_column = (field_index % 3) * 2
+        input_column = label_column + 1
+        label_widget = grid.itemAtPosition(row, label_column).widget()
+        input_widget = grid.itemAtPosition(row, input_column).widget()
+
+        assert isinstance(label_widget, QLabel)
+        assert label_widget.text().endswith("：")
+        assert label_widget.alignment() & Qt.AlignmentFlag.AlignRight
+        assert label_widget.alignment() & Qt.AlignmentFlag.AlignVCenter
+        assert input_widget is widgets[field_name][0]
+        assert input_widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+
+    assert [grid.columnStretch(index) for index in range(6)] == [0, 1, 0, 1, 0, 1]
+
+
+def test_crud_form_shared_columns_align_labels_and_inputs_across_rows(bulk_update_page, qtbot):
+    page = bulk_update_page
+    dialog, _widgets = page._build_crud_form_dialog(
+        _field_change_component(),
+        mode="create",
+    )
+    qtbot.addWidget(dialog)
+    dialog.resize(dialog.minimumWidth(), min(520, dialog.maximumHeight()))
+    dialog.show()
+    qtbot.wait(20)
+
+    scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
+    grid = scroll.widget().layout()
+
+    for label_column, input_column in ((0, 1), (2, 3), (4, 5)):
+        first_label = grid.itemAtPosition(0, label_column).widget()
+        second_label = grid.itemAtPosition(1, label_column).widget()
+        first_input = grid.itemAtPosition(0, input_column).widget()
+        second_input = grid.itemAtPosition(1, input_column).widget()
+
+        assert first_label.geometry().right() == second_label.geometry().right()
+        assert first_input.geometry().left() == second_input.geometry().left()
 
 
 def test_crud_form_many_fields_are_scrollable_with_visible_action_row(bulk_update_page, qtbot):
@@ -2504,7 +2572,8 @@ def test_crud_form_many_fields_are_scrollable_with_visible_action_row(bulk_updat
     assert isinstance(grid, QGridLayout)
     assert dialog._hosted_form_layout_columns == 3
     assert dialog._hosted_form_layout_rows == 12
-    assert max(grid.getItemPosition(index)[1] for index in range(grid.count())) == 2
+    assert grid.count() == 70
+    assert max(grid.getItemPosition(index)[1] for index in range(grid.count())) == 5
     assert dialog.maximumHeight() <= 720
     screen = dialog.screen().availableGeometry()
     assert dialog.maximumWidth() <= screen.width()
@@ -2576,18 +2645,86 @@ def test_crud_form_layout_clamps_large_valid_gap_to_screen_geometry(
     component = _field_change_component()
     component["crud"]["form"]["layout"]["gap"] = 2**31
 
-    dialog, _widgets = bulk_update_page._build_crud_form_dialog(
+    dialog, widgets = bulk_update_page._build_crud_form_dialog(
         component,
         mode="create",
     )
     qtbot.addWidget(dialog)
+    dialog.resize(dialog.maximumWidth(), min(520, dialog.maximumHeight()))
+    dialog.show()
+    qtbot.wait(20)
     scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
     grid = scroll.widget().layout()
+    first_input = widgets["preset"][0]
+    input_left = first_input.mapTo(scroll.viewport(), QPoint(0, 0)).x()
+    input_right = first_input.mapTo(
+        scroll.viewport(),
+        QPoint(first_input.width() - 1, 0),
+    ).x()
 
     assert isinstance(grid, QGridLayout)
     assert 0 <= grid.horizontalSpacing() <= dialog.maximumWidth()
     assert 0 <= grid.verticalSpacing() <= dialog.maximumHeight()
     assert dialog._hosted_form_layout_columns == 1
+    assert 0 <= input_left <= input_right < scroll.viewport().width()
+
+
+def test_crud_form_preserves_declared_gap_between_logical_columns(
+    bulk_update_page,
+    qtbot,
+    monkeypatch,
+):
+    class WideGeometry:
+        @staticmethod
+        def width() -> int:
+            return 1920
+
+        @staticmethod
+        def height() -> int:
+            return 1080
+
+    class WideScreen:
+        @staticmethod
+        def availableGeometry() -> WideGeometry:
+            return WideGeometry()
+
+    monkeypatch.setattr(bulk_update_page, "screen", lambda: WideScreen())
+    component = _field_change_component()
+    component["crud"]["form"]["layout"]["gap"] = 100
+
+    dialog, _widgets = bulk_update_page._build_crud_form_dialog(
+        component,
+        mode="create",
+    )
+    qtbot.addWidget(dialog)
+    dialog.resize(dialog.minimumWidth(), min(520, dialog.maximumHeight()))
+    dialog.show()
+    qtbot.wait(20)
+    scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
+    form_container = scroll.widget()
+    grid = form_container.layout()
+
+    assert isinstance(grid, QGridLayout)
+    assert dialog._hosted_form_layout_columns == 3
+    assert grid.horizontalSpacing() == 0
+    for label_column in (0, 2, 4):
+        label_widget = grid.itemAtPosition(0, label_column).widget()
+        input_widget = grid.itemAtPosition(0, label_column + 1).widget()
+        margins = label_widget.contentsMargins()
+        assert margins.left() == (0 if label_column == 0 else 100)
+        assert margins.right() == 6
+        label_content_right = label_widget.mapTo(
+            form_container,
+            label_widget.contentsRect().topRight(),
+        ).x()
+        assert input_widget.geometry().left() - label_content_right - 1 == 6
+        if label_column:
+            previous_input = grid.itemAtPosition(0, label_column - 1).widget()
+            label_content_left = label_widget.mapTo(
+                form_container,
+                label_widget.contentsRect().topLeft(),
+            ).x()
+            assert label_content_left - previous_input.geometry().right() - 1 >= 100
 
 
 def test_form_select_change_event_can_reset_entire_form_and_handle_closes(

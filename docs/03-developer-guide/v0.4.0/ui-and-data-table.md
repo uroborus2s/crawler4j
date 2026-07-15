@@ -491,7 +491,7 @@ CRUD Form 需要多列时，可在原有 `crud.form` 中声明：
 }
 ```
 
-`columns` 只接受整数 `1`、`2`、`3`，`gap` 可省略或使用非负整数。未声明 `layout` 时仍为一列。字段按声明顺序逐行排列；窄屏会自动降低列数，对话框不会超过 renderer 所在屏幕的可用区域，超大 gap 也会收敛到该屏幕可展示范围，按钮区始终位于滚动区外。布局只影响展示，不改变 create default、update row、change 事件、reset 或最终提交值。
+`columns` 只接受整数 `1`、`2`、`3`，`gap` 可省略或使用非负整数。未声明 `layout` 时仍为一列。字段按声明顺序逐行排列；同一逻辑列的标签共享右对齐列（含全角冒号），输入框共享统一左边缘并横向扩展。label/input 内部沿用固定紧凑间距，声明 gap 只分隔不同逻辑列并继续控制行间距。窄屏会自动降低列数，对话框不会超过 renderer 所在屏幕的可用区域；超大 gap 按屏幕几何降列后不会把单列输入框推出可访问 viewport。按钮区始终位于滚动区外。布局只影响展示，不改变 create default、update row、change 事件、reset 或最终提交值。
 
 字段事件只允许 `type="ui_action"` 和 `name`，SDK 会校验 handler 的 `(context, event: HostedFieldChangeEvent)` 签名。快速连续 change 使用 latest-wins reset 语义；旧 handler 不能覆盖新选择。未声明 `on_change` 的字段保持既有行为。
 

@@ -2,10 +2,10 @@
 
 - 项目：crawler4j
 - Work item：`CR-022`
-- 状态：`review_approved_validation_complete`
+- 状态：`validation_complete`
 - 来源：用户明确实现指令
 - 场景：`add_requirement`
-- 文档版本：`0.3.0`
+- 文档版本：`0.4.0`
 - 日期：2026-07-15
 - 目标协议：Core `0.4.0` / `core-native-v2`
 
@@ -16,6 +16,7 @@
 | `0.1.0` | 初版：公共字段 change 事件、Form 上下文、安全 handle 与主动 reset 命令 | 2026-07-15 | Codex | 待独立评审 | 用户已明确要求实现 |
 | `0.2.0` | 增补 create default、update row 优先级和长表单滚动可访问性 | 2026-07-15 | Codex | 待独立评审 | 用户在消费侧联调后明确补充 |
 | `0.3.0` | 增补模块声明的 1–3 列通用 Form 布局、窄屏降列和窗口屏幕边界 | 2026-07-15 | Codex | 待独立评审 | 用户基于长表单真实界面明确补充 |
+| `0.4.0` | 增补同逻辑列共享 label/input 物理列、标签右对齐和输入框统一左边缘 | 2026-07-15 | Codex | 待独立评审 | 用户基于三列真实宿主截图明确补充并要求 TDD |
 
 ## 目标
 
@@ -75,6 +76,14 @@
 - 屏幕宽度不足时 renderer 自动降低有效列数，并保证对话框宽高不超过屏幕可用区域；操作按钮保持在滚动区外。
 - 布局不得改变 create default、update row、change/reset 与提交契约。
 
+### REQ-022-007：Form 字段标签与输入框列对齐
+
+- 优先级：P0
+- 同一逻辑列的所有字段必须共享一个 label 物理列和一个 input 物理列，不得由每个字段各自计算 label 宽度。
+- 标签文本以全角冒号结尾，按 `AlignRight | AlignVCenter` 右对齐；输入控件从共享 input 列的统一左边缘开始，并可横向扩展。
+- 三个逻辑列对应六个物理列，字段仍按声明顺序逐行填充；单列对应两个物理列。
+- 该视觉修正不得改变 schema、字段身份、create/update/default、on_change/reset、滚动或按钮区语义。
+
 ## 验收标准
 
 - `AC-022-001`：Form 内 Select 的 `on_change` 调用模块 handler，事件包含准确字段标识、新旧值、form scope/handle/mode/values。
@@ -91,6 +100,10 @@
 - `AC-022-012`：Contracts 接受 1–3 列与可选非负 gap，拒绝 0、4、bool、非整数和负 gap。
 - `AC-022-013`：未声明 layout 保持一列；35 字段 columns=3 时逐行生成 3 列、12 行，按钮不在滚动区且窗口不超过屏幕。
 - `AC-022-014`：窄屏自动降列，多列布局下 create default、update row、on_change/reset 与提交行为不变。
+- `AC-022-015`：三列 Form 的 grid 使用六个共享物理列；label 位于 0/2/4，input 位于 1/3/5。
+- `AC-022-016`：所有 label 以全角冒号结尾并包含 `AlignRight`；input 物理列具有 stretch。
+- `AC-022-017`：同一逻辑列跨行 label 右边缘一致、input 左边缘一致，字段顺序保持 row-major。
+- `AC-022-018`：单列、create/update/default、on_change/reset、滚动与按钮相关回归不变。
 
 ## 非功能需求
 
@@ -99,6 +112,7 @@
 - `NFR-022-PRIV`：日志不得输出完整 form values；验证为代码审查与敏感词/日志断言。
 - `NFR-022-COMPAT`：未声明 `on_change` 的 schema 归一化结果与运行行为不变；验证为既有测试及新增兼容回归。
 - `NFR-022-RESP`：Form 列数必须适配屏幕可用宽度，不允许窗口超出可用区域；验证为窄屏 renderer 测试。
+- `NFR-022-VIS`：同一逻辑列标签和输入框必须具有稳定共享对齐线；验证为 grid 结构与 widget geometry 断言。
 
 ## 领域模块映射与接口边界
 
@@ -114,7 +128,7 @@
 - 领域：不新增领域；扩展现有 Contracts / SDK / Core MMS / renderer 职责。
 - 架构：在现有 Hosted UI `@ui_action` 与 runtime tools 边界内加入安全 Form Handle；不改变 Core runtime owner。
 - API：新增可选 schema 字段、change 事件 payload 和 `ui.form.reset` 工具命令，均为向后兼容扩展。
-- UI：扩展公共字段事件和 Form 状态控制，不改变视觉 baseline。
+- UI：扩展公共字段事件、Form 状态控制和通用多列 Form 对齐 baseline；不引入字段级或消费模块布局特化。
 - 数据库：无影响。
 - baseline 变更建议：更新现有 Hosted UI 设计/开发者文档即可，不另建领域或数据库 baseline work item。
 

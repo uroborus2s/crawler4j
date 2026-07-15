@@ -12,7 +12,7 @@
 
 **任务：** `TASK-041`
 
-**状态：** `review_approved_validation_complete`（独立 review 已批准；最终验证完成并区分范围外基线失败；待执行用户授权的本地提交）
+**状态：** `validation_complete`（首轮能力已由提交 `86a01b1a` 落地；renderer-only 共享 label/input 对齐增量已完成 TDD、独立复评与最终 gate）
 
 ## 输入
 
@@ -33,6 +33,7 @@
 - 未声明 `on_change` 的页面、DataTable、CRUD 和字段保持旧行为。
 - create Form 使用字段 `default`，update Form 使用 row 实际值；长 Form 内容区滚动且操作按钮固定可见。
 - CRUD Form 可选 `layout={"columns": 1|2|3, "gap": <可选非负整数>}`；默认一列，逐行填充，窄屏降列且窗口受屏幕边界约束。
+- 每个逻辑列使用共享 label/input 物理列；label 右对齐、input 统一左边缘并横向扩展，不改变 schema 或表单事件/状态协议。
 
 ### 非目标
 
@@ -192,6 +193,22 @@ result = context.tools.call(
 - [x] GREEN：实现 controller/registry/tool binding、独立字段渲染、CRUD 字段事件、create/update 初始化、长表单滚动、多列响应式布局和 latest-wins。
 - [x] 定向验证：七个目标文件 `199 passed`。
 
+## 任务 2A：Renderer 共享 label/input 物理列视觉修正
+
+**任务切片：**
+
+- 根因：当前外层 grid 的每个 item 是包含独立 `QFormLayout` 的 field container，各 container 分别计算 label 宽度，无法形成同逻辑列共享对齐线。
+- 最小实现：外层 `QGridLayout` 为每个逻辑列分配 `label/input` 两个物理列；直接添加 `QLabel` 与输入 widget，删除字段级 `QFormLayout` container。
+- 对齐：label 使用 `AlignRight | AlignVCenter` 且文本以全角冒号结尾；input 列设置 stretch，widget 使用横向 expanding policy。
+- TDD：先证明旧结构只有逻辑列 item 且包含独立 container；再断言三列六物理列、label/input 列位置、alignment/stretch、跨行 geometry、单列与 row-major 回归。
+- 回归：复跑 renderer 全文件和 CR-022 七文件目标集，确认 create/update/default/on_change/reset/滚动/按钮不变。
+
+- [x] RED：4 项测试失败；旧 grid 仅 6/35 个 field container item，缺少共享 input 列。
+- [x] GREEN：以直接 label/input grid placement 完成最小 renderer 修正。
+- [x] 定向验证：共享列 4 passed、renderer 35 passed、CR-022 七文件 201 passed、目标 Ruff 通过。
+- [x] 独立 review RED：超大合法 gap 下 input geometry 超出无横向滚动的 viewport。
+- [x] review fix GREEN：内部 `6px` 与声明式逻辑列 gap 分离；超大 gap 可访问性和宽屏 `gap=100` 保留测试分别转绿。
+
 ## 任务 3：正式文档、证据与收口
 
 **任务切片：**
@@ -230,14 +247,14 @@ result = context.tools.call(
 ## 评审门
 
 - 计划评审：`covered_by_user_approved_scope`
-- 任务评审：`approved`（独立 reviewer `98/100`）
-- 验证：`complete_with_13_unrelated_baseline_failures`
-- 本地提交：`pending`
+- 任务评审：首轮 `approved`（独立 reviewer `98/100`）；共享列增量 `approved`（独立 reviewer `100/100`）
+- 验证：renderer 36 passed、七文件 202 passed、邻近 586 passed；全量 13 项范围外环境基线已登记；Ruff/lock/docs/diff/scope gate 通过
+- 本地提交：`authorized_by_project_agents`
 - 记忆同步：`complete`
 
 ## 计划自审
 
-- 规格覆盖：AC-022-001..014 全部映射到任务 1/2/3。
+- 规格覆盖：AC-022-001..018 全部映射到任务 1/2/2A/3。
 - 占位符扫描：无未定义 placeholder。
 - 发现占位语则失败：通过。
 - 缺测试设计则失败：通过。
