@@ -6,16 +6,27 @@ from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from PyQt6.QtCore import QItemSelectionModel
-from PyQt6.QtWidgets import QAbstractItemView, QDialog, QLabel, QPushButton, QSizePolicy
+from PyQt6.QtCore import QItemSelectionModel, QPoint, QRect, Qt
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QFormLayout,
+    QGridLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+)
 
 from src.core.mms.ui.managed_page_renderer import (
     CRUD_ROW_ACTION_DELETE,
     CRUD_ROW_ACTION_EDIT,
     ManagedPageRenderer,
 )
+from src.core.mms.ui.hosted_form import FORM_EVENT_STALE, FORM_HANDLE_REJECTED, FORM_SCOPE_UNAVAILABLE
 from src.core.persistence import get_module_data_store
 from src.ui.components.button import StyledButton
+from src.ui.components.combo_box import StyledComboBox
 from src.ui.components.line_edit import StyledLineEdit
 
 from ._core_native_v1 import make_manifest, make_page_info, register_module, restore_module, write_module_tree
@@ -154,6 +165,56 @@ def _toolbar_buttons(table) -> dict[str, QPushButton]:
         if isinstance(widget, QPushButton):
             buttons[widget.text()] = widget
     return buttons
+
+
+def _field_change_component() -> dict:
+    return {
+        "type": "DataTable",
+        "table_id": "accounts",
+        "title": "账号",
+        "columns": [
+            {
+                "key": "preset",
+                "label": "模板",
+                "type": "select",
+                "required": True,
+                "options": ["basic", "advanced", "final"],
+                "on_change": {"type": "ui_action", "name": "handle_field_change"},
+            },
+            {"key": "priority", "label": "优先级", "type": "int"},
+            {"key": "enabled", "label": "启用", "type": "bool"},
+            {"key": "note", "label": "备注", "type": "text"},
+            {"key": "marker", "label": "标记", "type": "text"},
+            {
+                "key": "untouched",
+                "label": "无事件字段",
+                "type": "select",
+                "options": ["one", "two"],
+            },
+        ],
+        "crud": {
+            "primary_key": "id",
+            "form": {
+                "create_columns": ["preset", "priority", "enabled", "note", "marker", "untouched"],
+                "update_columns": ["preset", "priority", "enabled", "note", "marker", "untouched"],
+                "layout": {"columns": 3, "gap": 12},
+            },
+            "create_handler": "create_account",
+            "update_handler": "update_account",
+        },
+    }
+
+
+def _field_change_row() -> dict:
+    return {
+        "id": "a1",
+        "preset": "basic",
+        "priority": 1,
+        "enabled": True,
+        "note": "old",
+        "marker": "value",
+        "untouched": "one",
+    }
 
 
 def test_managed_page_renderer_bulk_toolbar_and_selection_rules(bulk_update_page):
@@ -2353,3 +2414,519 @@ def test_managed_page_renderer_supports_navigation_params_and_button_actions(qtb
         assert opened_pages == [("account_details", {"phone": "13800138000", "source": "dashboard"})]
     finally:
         restore_module(service, original_registry, module_name)
+
+
+def test_crud_form_create_uses_exact_defaults_and_update_prefers_row(bulk_update_page, qtbot):
+    page = bulk_update_page
+    component = _field_change_component()
+    defaults = {
+        "preset": "final",
+        "priority": 0,
+        "enabled": False,
+        "note": "",
+        "marker": "undefined",
+        "untouched": "two",
+    }
+    for column in component["columns"]:
+        column["default"] = defaults[column["key"]]
+
+    create_dialog, create_widgets = page._build_crud_form_dialog(component, mode="create")
+    qtbot.addWidget(create_dialog)
+    create_controller = create_dialog._hosted_form_controller
+    assert create_controller.values == defaults
+    assert create_widgets["preset"][0].currentData() == "final"
+    assert create_widgets["priority"][0].text() == "0"
+    assert create_widgets["enabled"][0].currentData() is False
+    assert create_widgets["note"][0].text() == ""
+    assert create_widgets["marker"][0].text() == "undefined"
+    create_payload, create_error = page._collect_crud_form_payload(create_widgets)
+    assert create_error is None
+    assert create_payload == defaults
+
+    update_row = {
+        "id": "a1",
+        "preset": "basic",
+        "priority": 9,
+        "enabled": True,
+        "note": "row",
+        "marker": "row-marker",
+        "untouched": "one",
+    }
+    update_dialog, update_widgets = page._build_crud_form_dialog(component, mode="update", row=update_row)
+    qtbot.addWidget(update_dialog)
+    assert update_dialog._hosted_form_controller.values == {
+        field: update_row[field] for field in defaults
+    }
+    assert update_widgets["preset"][0].currentData() == "basic"
+    assert update_widgets["priority"][0].text() == "9"
+    assert update_widgets["enabled"][0].currentData() is True
+    assert update_widgets["note"][0].text() == "row"
+    assert update_widgets["marker"][0].text() == "row-marker"
+
+
+def test_crud_form_without_layout_stays_single_column(bulk_update_page, qtbot):
+    page = bulk_update_page
+    component = _field_change_component()
+    component["crud"]["form"].pop("layout")
+
+    dialog, widgets = page._build_crud_form_dialog(component, mode="create")
+    qtbot.addWidget(dialog)
+    scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
+    grid = scroll.widget().layout()
+
+    assert isinstance(grid, QGridLayout)
+    assert dialog._hosted_form_layout_columns == 1
+    assert len(widgets) == 6
+    assert grid.count() == 12
+    assert [grid.getItemPosition(index)[1] for index in range(grid.count())] == [0, 1] * 6
+
+
+def test_crud_form_grid_uses_shared_label_and_input_physical_columns(bulk_update_page, qtbot):
+    page = bulk_update_page
+    component = _field_change_component()
+
+    dialog, widgets = page._build_crud_form_dialog(component, mode="create")
+    qtbot.addWidget(dialog)
+    scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
+    grid = scroll.widget().layout()
+
+    assert isinstance(grid, QGridLayout)
+    assert grid.count() == len(widgets) * 2
+    assert not any(
+        isinstance(grid.itemAt(index).widget().layout(), QFormLayout)
+        for index in range(grid.count())
+    )
+
+    field_names = list(component["crud"]["form"]["create_columns"])
+    for field_index, field_name in enumerate(field_names):
+        row = field_index // 3
+        label_column = (field_index % 3) * 2
+        input_column = label_column + 1
+        label_widget = grid.itemAtPosition(row, label_column).widget()
+        input_widget = grid.itemAtPosition(row, input_column).widget()
+
+        assert isinstance(label_widget, QLabel)
+        assert label_widget.text().endswith("：")
+        assert label_widget.alignment() & Qt.AlignmentFlag.AlignRight
+        assert label_widget.alignment() & Qt.AlignmentFlag.AlignVCenter
+        assert input_widget is widgets[field_name][0]
+        assert input_widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+
+    assert [grid.columnStretch(index) for index in range(6)] == [0, 1, 0, 1, 0, 1]
+
+
+def test_crud_form_shared_columns_align_labels_and_inputs_across_rows(bulk_update_page, qtbot):
+    page = bulk_update_page
+    dialog, _widgets = page._build_crud_form_dialog(
+        _field_change_component(),
+        mode="create",
+    )
+    qtbot.addWidget(dialog)
+    dialog.resize(dialog.minimumWidth(), min(520, dialog.maximumHeight()))
+    dialog.show()
+    qtbot.wait(20)
+
+    scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
+    grid = scroll.widget().layout()
+
+    for label_column, input_column in ((0, 1), (2, 3), (4, 5)):
+        first_label = grid.itemAtPosition(0, label_column).widget()
+        second_label = grid.itemAtPosition(1, label_column).widget()
+        first_input = grid.itemAtPosition(0, input_column).widget()
+        second_input = grid.itemAtPosition(1, input_column).widget()
+
+        assert first_label.geometry().right() == second_label.geometry().right()
+        assert first_input.geometry().left() == second_input.geometry().left()
+
+
+def test_crud_form_many_fields_are_scrollable_with_hidden_scrollbars_and_visible_action_row(
+    bulk_update_page,
+    qtbot,
+):
+    page = bulk_update_page
+    columns = [
+        {"key": f"field_{index}", "label": f"字段 {index}", "type": "text", "default": f"value-{index}"}
+        for index in range(35)
+    ]
+    component = {
+        "type": "DataTable",
+        "table_id": "long_form",
+        "title": "长表单",
+        "columns": columns,
+        "crud": {
+            "form": {
+                "create_columns": [column["key"] for column in columns],
+                "layout": {"columns": 3, "gap": 10},
+            },
+            "create_handler": "create_item",
+        },
+    }
+
+    dialog, widgets = page._build_crud_form_dialog(component, mode="create")
+    qtbot.addWidget(dialog)
+    scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
+    confirm = dialog.findChild(StyledButton, "managedCrudConfirmButton")
+    cancel = dialog.findChild(StyledButton, "managedCrudCancelButton")
+
+    assert len(widgets) == 35
+    assert scroll is not None
+    assert scroll.widgetResizable() is True
+    assert (
+        scroll.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
+    assert scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    grid = scroll.widget().layout()
+    assert isinstance(grid, QGridLayout)
+    assert dialog._hosted_form_layout_columns == 3
+    assert dialog._hosted_form_layout_rows == 12
+    assert grid.count() == 70
+    assert max(grid.getItemPosition(index)[1] for index in range(grid.count())) == 5
+    assert dialog.maximumHeight() <= 720
+    screen = dialog.screen().availableGeometry()
+    assert dialog.maximumWidth() <= screen.width()
+    assert dialog.maximumHeight() <= screen.height()
+    assert confirm is not None and cancel is not None
+    assert not scroll.isAncestorOf(confirm)
+    assert not scroll.isAncestorOf(cancel)
+
+    dialog.resize(dialog.maximumWidth(), 420)
+    dialog.show()
+    vertical_scrollbar = scroll.verticalScrollBar()
+    qtbot.waitUntil(lambda: vertical_scrollbar.maximum() > 0)
+    scroll.setFocus()
+    qtbot.keyClick(scroll, Qt.Key.Key_PageDown)
+    assert vertical_scrollbar.value() > 0
+    vertical_scrollbar.setValue(0)
+    vertical_scrollbar.setValue(1)
+    assert vertical_scrollbar.value() == 1
+
+
+def test_crud_form_layout_downgrades_columns_on_narrow_screen(
+    bulk_update_page,
+    qtbot,
+    monkeypatch,
+):
+    class NarrowGeometry:
+        @staticmethod
+        def width() -> int:
+            return 420
+
+        @staticmethod
+        def height() -> int:
+            return 640
+
+    class NarrowScreen:
+        @staticmethod
+        def availableGeometry() -> NarrowGeometry:
+            return NarrowGeometry()
+
+    class WideGeometry:
+        @staticmethod
+        def width() -> int:
+            return 1920
+
+        @staticmethod
+        def height() -> int:
+            return 1080
+
+    class WideScreen:
+        @staticmethod
+        def availableGeometry() -> WideGeometry:
+            return WideGeometry()
+
+    class WidePrimaryApplication:
+        @staticmethod
+        def primaryScreen() -> WideScreen:
+            return WideScreen()
+
+    monkeypatch.setattr(
+        "src.core.mms.ui.managed_page_renderer.QApplication",
+        WidePrimaryApplication,
+    )
+    monkeypatch.setattr(bulk_update_page, "screen", lambda: NarrowScreen())
+
+    dialog, _widgets = bulk_update_page._build_crud_form_dialog(
+        _field_change_component(),
+        mode="create",
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog._hosted_form_layout_columns == 1
+    assert dialog.maximumWidth() == 340
+    assert dialog.maximumHeight() == 560
+
+
+def test_crud_form_layout_clamps_large_valid_gap_to_screen_geometry(
+    bulk_update_page,
+    qtbot,
+    monkeypatch,
+):
+    class FixedScreen:
+        @staticmethod
+        def availableGeometry() -> QRect:
+            return QRect(0, 0, 800, 800)
+
+    monkeypatch.setattr(bulk_update_page, "screen", lambda: FixedScreen())
+    component = _field_change_component()
+    component["crud"]["form"]["layout"]["gap"] = 2**31
+
+    dialog, widgets = bulk_update_page._build_crud_form_dialog(
+        component,
+        mode="create",
+    )
+    qtbot.addWidget(dialog)
+    dialog.resize(dialog.maximumWidth(), min(520, dialog.maximumHeight()))
+    dialog.show()
+    qtbot.wait(20)
+    scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
+    grid = scroll.widget().layout()
+    first_input = widgets["preset"][0]
+    input_left = first_input.mapTo(scroll.viewport(), QPoint(0, 0)).x()
+    input_right = first_input.mapTo(
+        scroll.viewport(),
+        QPoint(first_input.width() - 1, 0),
+    ).x()
+
+    assert isinstance(grid, QGridLayout)
+    assert 0 <= grid.horizontalSpacing() <= dialog.maximumWidth()
+    assert 0 <= grid.verticalSpacing() <= dialog.maximumHeight()
+    assert dialog._hosted_form_layout_columns == 1
+    assert 0 <= input_left <= input_right < scroll.viewport().width()
+
+
+def test_crud_form_preserves_declared_gap_between_logical_columns(
+    bulk_update_page,
+    qtbot,
+    monkeypatch,
+):
+    class WideGeometry:
+        @staticmethod
+        def width() -> int:
+            return 1920
+
+        @staticmethod
+        def height() -> int:
+            return 1080
+
+    class WideScreen:
+        @staticmethod
+        def availableGeometry() -> WideGeometry:
+            return WideGeometry()
+
+    monkeypatch.setattr(bulk_update_page, "screen", lambda: WideScreen())
+    component = _field_change_component()
+    component["crud"]["form"]["layout"]["gap"] = 100
+
+    dialog, _widgets = bulk_update_page._build_crud_form_dialog(
+        component,
+        mode="create",
+    )
+    qtbot.addWidget(dialog)
+    dialog.resize(dialog.minimumWidth(), min(520, dialog.maximumHeight()))
+    dialog.show()
+    qtbot.wait(20)
+    scroll = dialog.findChild(QScrollArea, "managedCrudFormScrollArea")
+    form_container = scroll.widget()
+    grid = form_container.layout()
+
+    assert isinstance(grid, QGridLayout)
+    assert dialog._hosted_form_layout_columns == 3
+    assert grid.horizontalSpacing() == 0
+    for label_column in (0, 2, 4):
+        label_widget = grid.itemAtPosition(0, label_column).widget()
+        input_widget = grid.itemAtPosition(0, label_column + 1).widget()
+        margins = label_widget.contentsMargins()
+        assert margins.left() == (0 if label_column == 0 else 100)
+        assert margins.right() == 6
+        label_content_right = label_widget.mapTo(
+            form_container,
+            label_widget.contentsRect().topRight(),
+        ).x()
+        assert input_widget.geometry().left() - label_content_right - 1 == 6
+        if label_column:
+            previous_input = grid.itemAtPosition(0, label_column - 1).widget()
+            label_content_left = label_widget.mapTo(
+                form_container,
+                label_widget.contentsRect().topLeft(),
+            ).x()
+            assert label_content_left - previous_input.geometry().right() - 1 >= 100
+
+
+def test_form_select_change_event_can_reset_entire_form_and_handle_closes(
+    bulk_update_page,
+    qtbot,
+    monkeypatch,
+):
+    page = bulk_update_page
+    dialog, widgets = page._build_crud_form_dialog(
+        _field_change_component(),
+        mode="update",
+        row=_field_change_row(),
+    )
+    qtbot.addWidget(dialog)
+    controller = dialog._hosted_form_controller
+    controller.set_validation_error("note", "invalid")
+    captured: list[dict] = []
+    bound_tools = []
+    reset_values = {
+        "preset": "advanced",
+        "priority": 0,
+        "enabled": False,
+        "note": "",
+        "marker": "undefined",
+        "untouched": "two",
+    }
+
+    def call_ui_action(action_name, params, **kwargs):
+        assert action_name == "handle_field_change"
+        captured.append(params["event"])
+        tools = kwargs["hosted_form_tools"]
+        bound_tools.append(tools)
+        return tools.reset(
+            form_id=params["event"]["scope"]["form_id"],
+            initial_values=reset_values,
+        )
+
+    monkeypatch.setattr(page._bridge, "call_ui_action", call_ui_action)
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(page, "_show_warning", lambda title, message: warnings.append((title, message)))
+
+    preset = widgets["preset"][0]
+    assert isinstance(preset, StyledComboBox)
+    preset.setCurrentIndex(preset.findData("advanced"))
+
+    event_values = {key: value for key, value in _field_change_row().items() if key != "id"}
+    event_values["preset"] = "advanced"
+    assert captured == [
+        {
+            "component": {"id": "accounts", "type": "Select"},
+            "field": "preset",
+            "event": "change",
+            "value": "advanced",
+            "previous_value": "basic",
+            "scope": {
+                "kind": "form",
+                "form_id": dialog._hosted_form_id,
+                "mode": "update",
+                "values": event_values,
+            },
+        }
+    ]
+    assert controller.values == reset_values
+    assert controller.initial_values == reset_values
+    assert controller.dirty is False
+    assert controller.validation_errors == {}
+    assert widgets["priority"][0].text() == "0"
+    assert widgets["enabled"][0].currentData() is False
+    assert widgets["note"][0].text() == ""
+    assert widgets["marker"][0].text() == "undefined"
+    payload, error = page._collect_crud_form_payload(widgets)
+    assert error is None
+    assert payload == reset_values
+    assert warnings == []
+
+    untouched = widgets["untouched"][0]
+    untouched.setCurrentIndex(untouched.findData("one"))
+    assert len(captured) == 1
+
+    dialog.reject()
+    with pytest.raises(RuntimeError, match=FORM_HANDLE_REJECTED):
+        bound_tools[0].reset(form_id=dialog._hosted_form_id, initial_values=reset_values)
+
+
+def test_standalone_select_change_has_no_form_handle(bulk_update_page, monkeypatch):
+    page = bulk_update_page
+    captured: list[dict] = []
+    reset_errors: list[str] = []
+
+    def call_ui_action(action_name, params, **kwargs):
+        assert action_name == "handle_field_change"
+        captured.append(params["event"])
+        with pytest.raises(RuntimeError, match=FORM_SCOPE_UNAVAILABLE) as exc_info:
+            kwargs["hosted_form_tools"].reset(form_id="forged", initial_values={})
+        reset_errors.append(str(exc_info.value))
+        return {"ok": True}
+
+    monkeypatch.setattr(page._bridge, "call_ui_action", call_ui_action)
+    widget = page._build_component(
+        {
+            "type": "Select",
+            "id": "preset",
+            "label": "模板",
+            "value": "basic",
+            "options": ["basic", "advanced"],
+            "on_change": {"type": "ui_action", "name": "handle_field_change"},
+        }
+    )
+    combo = page._standalone_field_widgets["preset"]
+    combo.setCurrentIndex(combo.findData("advanced"))
+
+    assert widget is not combo
+    assert captured == [
+        {
+            "component": {"id": "preset", "type": "Select"},
+            "field": "preset",
+            "event": "change",
+            "value": "advanced",
+            "previous_value": "basic",
+            "scope": {"kind": "standalone"},
+        }
+    ]
+    assert "form_id" not in captured[0]["scope"]
+    assert reset_errors == [f"ui.form.reset rejected: {FORM_SCOPE_UNAVAILABLE}"]
+
+
+def test_form_change_handler_failure_keeps_current_form(bulk_update_page, qtbot, monkeypatch):
+    page = bulk_update_page
+    dialog, widgets = page._build_crud_form_dialog(
+        _field_change_component(),
+        mode="update",
+        row=_field_change_row(),
+    )
+    qtbot.addWidget(dialog)
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(page._bridge, "call_ui_action", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(page, "_show_warning", lambda title, message: warnings.append((title, message)))
+
+    preset = widgets["preset"][0]
+    preset.setCurrentIndex(preset.findData("advanced"))
+
+    assert dialog._hosted_form_controller.values["preset"] == "advanced"
+    assert dialog._hosted_form_controller.initial_values["preset"] == "basic"
+    assert dialog._hosted_form_controller.dirty is True
+    assert warnings == [("字段更新失败", "boom")]
+
+
+@pytest.mark.asyncio
+async def test_rapid_form_changes_reject_stale_reset(bulk_update_page, qtbot, monkeypatch):
+    page = bulk_update_page
+    dialog, widgets = page._build_crud_form_dialog(
+        _field_change_component(),
+        mode="update",
+        row=_field_change_row(),
+    )
+    qtbot.addWidget(dialog)
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(page, "_show_warning", lambda title, message: warnings.append((title, message)))
+
+    async def call_ui_action_async(_action_name, params, **kwargs):
+        value = params["event"]["value"]
+        await asyncio.sleep(0.04 if value == "advanced" else 0.01)
+        marker = "old-result" if value == "advanced" else "new-result"
+        values = {**params["event"]["scope"]["values"], "marker": marker}
+        return kwargs["hosted_form_tools"].reset(
+            form_id=params["event"]["scope"]["form_id"],
+            initial_values=values,
+        )
+
+    monkeypatch.setattr(page._bridge, "call_ui_action_async", call_ui_action_async)
+    preset = widgets["preset"][0]
+    preset.setCurrentIndex(preset.findData("advanced"))
+    preset.setCurrentIndex(preset.findData("final"))
+    await asyncio.sleep(0.08)
+
+    assert dialog._hosted_form_controller.values["preset"] == "final"
+    assert dialog._hosted_form_controller.values["marker"] == "new-result"
+    assert warnings == []
+    assert FORM_EVENT_STALE == "FORM_EVENT_STALE"

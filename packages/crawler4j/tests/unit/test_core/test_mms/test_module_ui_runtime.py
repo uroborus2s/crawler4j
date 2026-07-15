@@ -561,7 +561,50 @@ def test_module_ui_runtime_bridge_scopes_ui_actions_to_action_surface(tmp_path):
         _sync_managed_dataset(module_name, module_dir, "metrics")
         payload = bridge.call_ui_action("create_metric", {"id": "m1"})
 
-        assert payload["tools"] == ["ui.get_page"]
+        assert payload["tools"] == ["ui.form.reset", "ui.get_page"]
         assert [row["id"] for row in payload["rows"]] == ["m1"]
+    finally:
+        restore_module(service, original_registry, module_name)
+
+
+def test_module_ui_runtime_bridge_binds_form_reset_to_ui_action(tmp_path):
+    module_name = "form_reset_ui_action_bridge_module"
+    module_dir = write_module_tree(
+        tmp_path,
+        module_name,
+        files={
+            "pages/actions.py": """
+            from crawler4j_contracts import TaskContext, ui_action
+
+
+            @ui_action(name="reset_form")
+            def reset_form(context: TaskContext, event: dict):
+                return context.tools.call(
+                    "ui.form.reset",
+                    form_id=event["scope"]["form_id"],
+                    initial_values={"priority": 0, "enabled": False, "note": "", "marker": "undefined"},
+                )
+            """,
+        },
+    )
+    service, original_registry, _ = register_module(module_name, module_dir, manifest=make_manifest(module_name))
+    bridge = ModuleUIRuntimeBridge(module_name)
+    calls: list[dict[str, object]] = []
+    form_tools = SimpleNamespace(
+        reset=lambda *, form_id, initial_values: calls.append(
+            {"form_id": form_id, "initial_values": dict(initial_values)}
+        )
+        or {"ok": True}
+    )
+
+    try:
+        event = {"scope": {"kind": "form", "form_id": "opaque"}}
+        assert bridge.call_ui_action_sync("reset_form", event, hosted_form_tools=form_tools) == {"ok": True}
+        assert calls == [
+            {
+                "form_id": "opaque",
+                "initial_values": {"priority": 0, "enabled": False, "note": "", "marker": "undefined"},
+            }
+        ]
     finally:
         restore_module(service, original_registry, module_name)

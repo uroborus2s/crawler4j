@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `API-019`, `API-021`, `API-022`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `CR-016`, `CR-018`, `CR-020`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `TASK-040`, `TASK-0400`, `TASK-0401`
-**最后更新：** 2026-07-13
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `API-019`, `API-021`, `API-022`, `API-023`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `CR-016`, `CR-018`, `CR-020`, `CR-022`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `TASK-040`, `TASK-041`, `TASK-0400`, `TASK-0401`
+**最后更新：** 2026-07-15
 
 ## `API-001` Root App Entry Contract
 
@@ -51,7 +51,7 @@
 | Manifest 形态 | `module.yaml` 不声明 UI；`ui_extension` 是已移除字段 |
 | 模块 UI 声明入口 | `pages/*.py` 或 `pages/<group>/*.py` 使用 `@page(...)` 装饰页面 load handler |
 | 页面路由 | `open_page.page_id` 可以打开任意已注册 `@page`，包括 `menu=False` 的详情页或二级页 |
-| 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Button`、`DataTable` |
+| 宿主公开控件 | `Page`、`Card`、`Section`、`Text`、`Input`、`Select`、`Button`、`DataTable` |
 | `Card` V1 范围 | 纯容器卡片；支持 `title`、`title_align`、`content_align`、`content_vertical_align`、`min_height`、`padding` 与子组件布局 |
 | `DataTable` V1 范围 | 页面内复合组件；数据源支持 `binding`、`rows`、`query_handler`；`query_handler` 不接收 `table_id`，必须返回 `HostedDataTableQueryResult`；字段类型支持 `text`、`number`、`int`、`bool`、`select`、`badge`、`actions`；`select` 列可由宿主渲染为工具栏快速筛选，sortable 列可通过表头点击或可见排序控件写入 `query.sort`；CRUD 语义仍由宿主 renderer 适配，不进入共享表格组件内部；`actions` 列中非 `__crud_update__` / `__crud_delete__` 的 action id 由 renderer 调用同名 `@ui_action`，参数按 `crud.primary_key` 从当前行取值 |
 | 宿主动作范围 | `Button.action` 正式开放 `reload`、`open_page` 和指向 `@ui_action` 的 `ui_action`；Hosted UI schema 不再接受 `page_action`。页面 / 表格 toolbar 批量导入动作由 `API-019` 单独定义 |
@@ -120,6 +120,26 @@
 | 安全 | API Key、完整 Cookie value 和 Provider endpoint 名称不进入模块可见异常、日志或返回值；模块不接触 VirtualBrowser provider API |
 | 实测证据 | `.factory/workitems/CR-020/evidence/virtualbrowser-cookie-api-probe.md`；一次性环境验证了全量替换、字段映射和空列表清空，环境已删除 |
 | 关联项 | `CR-020`, `TASK-040` |
+
+## `API-023` Hosted UI Field Change and Form Reset Contract
+
+| 项目 | 内容 |
+|---|---|
+| 目标 | 公共 `Input` / `Select` 与 CRUD Form 字段用同一可选 `on_change` 事件触发模块 `@ui_action` |
+| Schema | `on_change={"type":"ui_action","name":"<handler>"}`；不接受字符串简写、其它 action type、`params` 或 effect |
+| Handler | 固定 `(context, event: HostedFieldChangeEvent)`；SDK scanner 校验引用、签名和事件注解 |
+| Form scope | `kind/form_id/mode/values`；`form_id` 是 Core 生成的 opaque handle，不包含真实 UI 对象 |
+| Standalone scope | 固定 `{"kind":"standalone"}`，不含可用 Form Handle |
+| Reset | `context.tools.call("ui.form.reset", form_id=..., initial_values=...)`；成功返回 `{"ok": True}` |
+| Reset 语义 | 重建整张 Form 的 current/initial values，清 dirty/validation；不提交、不调用 CRUD handler、不做业务判断；精确保留假值 |
+| 初始化 | create 读取字段 `default`，update 优先读取 row 实际值；长 Form 内部滚动且按钮区保持可见 |
+| Form 布局 | `crud.form.layout={"columns":1|2|3,"gap":<可选非负整数>}`；默认一列、逐行填充，窄屏自动降列且对话框不超过屏幕 |
+| 安全 | handle 绑定 module/page/renderer-session/form/TTL；非法、过期、关闭或越权统一 `FORM_HANDLE_REJECTED` |
+| 并发 | change 绑定 Form revision，旧 reset 返回 `FORM_EVENT_STALE` 并被 renderer 丢弃；action 使用隔离 session |
+| 错误 | 非 Form reset 返回 `FORM_SCOPE_UNAVAILABLE`；handler 失败保留当前 Form 并走现有错误展示路径 |
+| 版本 | Contracts `0.4.4`、SDK `0.4.5` 对外发布；SDK 依赖 `crawler4j-contracts>=0.4.4,<0.5.0` |
+| 设计文档 | `hosted-ui-form-field-events.md` |
+| 关联项 | `CR-022`, `TASK-041` |
 
 ## `API-009` Module Entity Table View Contract
 

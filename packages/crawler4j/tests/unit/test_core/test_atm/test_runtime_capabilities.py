@@ -15,6 +15,7 @@ from src.core.atm.runtime_capabilities import (
     RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES,
     RUNTIME_SURFACE_ENV_CANDIDATES,
     RUNTIME_SURFACE_HOSTED_UI_DECLARE,
+    RUNTIME_SURFACE_HOSTED_UI_ACTION,
     RUNTIME_SURFACE_HOSTED_UI_READONLY,
     SliderCaptchaMatchResult,
     build_runtime_capabilities,
@@ -880,6 +881,40 @@ def test_full_surface_rejects_legacy_hosted_ui_tools():
         caps.tools.call("ui.declare_page", page_id="dashboard", schema={"type": "Page", "children": []})
     with pytest.raises(KeyError, match=r"Unknown core tool: ui.get_page"):
         caps.tools.call("ui.get_page", page_id="dashboard")
+
+
+def test_hosted_ui_action_surface_registers_bound_form_reset_tool():
+    calls: list[dict[str, object]] = []
+    form_tools = SimpleNamespace(
+        reset=lambda *, form_id, initial_values: calls.append(
+            {"form_id": form_id, "initial_values": dict(initial_values)}
+        )
+        or {"ok": True}
+    )
+    caps = build_runtime_capabilities(
+        "demo_module",
+        surface=RUNTIME_SURFACE_HOSTED_UI_ACTION,
+        hosted_form_tools=form_tools,
+    )
+
+    assert caps.tools.has_tool("ui.form.reset") is True
+    assert caps.tools.call(
+        "ui.form.reset",
+        form_id="opaque",
+        initial_values={"priority": 0, "enabled": False, "note": "", "marker": "undefined"},
+    ) == {"ok": True}
+    assert calls == [
+        {
+            "form_id": "opaque",
+            "initial_values": {"priority": 0, "enabled": False, "note": "", "marker": "undefined"},
+        }
+    ]
+
+
+def test_hosted_ui_non_action_surfaces_do_not_expose_form_reset():
+    for surface in (RUNTIME_SURFACE_HOSTED_UI_DECLARE, RUNTIME_SURFACE_HOSTED_UI_READONLY):
+        caps = build_runtime_capabilities("demo_module", surface=surface)
+        assert caps.tools.has_tool("ui.form.reset") is False
 
 
 def test_ui_tools_stage_page_meta_in_declare_buffer(monkeypatch):

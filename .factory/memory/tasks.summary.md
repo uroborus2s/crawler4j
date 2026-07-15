@@ -1,12 +1,14 @@
 # 任务摘要
 
-更新时间：2026-07-14。只保留活跃、最近关闭和有后续动作的任务。
+更新时间：2026-07-15。只保留活跃、最近关闭和有后续动作的任务。
 
 ## 需要后续动作
 
+- `TASK-042`：Contracts 0.4.4 / SDK 0.4.5 已发布并通过在线哈希、依赖元数据和隔离安装验证；客户端 0.4.39 已构建；待最终 evidence commit 和 `origin/0.4.0` 推送。
+- `CR-022`：Hosted UI Form 能力、共享 label/input 网格和隐藏式滚动条已完成实现、TDD、独立 review 与本地提交；由 `TASK-042` 负责包发布。
 - `CR-021`：公共下拉、移除随机 IP、VirtualBrowser 清缓存和指纹浏览器 ID 列已实现；修复两项独立评审反馈后以 `94/100` 通过复评，待本地中文提交。
 - `TASK-036-managed-dataset-bulk-field-update`：`CORE_PACKAGES_RELEASED`；接入真实业务模块并补 E2E。
-- `TASK-039-bump-client-0.4.30-and-push`：`verification_passed`；ledger 下一动作为 `none`，桌面包和跨平台发布另行处理。
+- `TASK-039-bump-client-0.4.30-and-push`：历史 `verification_passed`；当前客户端版本由 `TASK-042` 推进到 0.4.39，桌面包和跨平台发布仍另行处理。
 - 0.4.x 发布收口：补齐 `ctrip` 真实站点 E2E、Windows 真机证据、Git tag / GitHub release 资产和正式交付批次。
 
 ## 最近已关闭

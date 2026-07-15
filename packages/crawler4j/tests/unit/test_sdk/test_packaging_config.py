@@ -8,8 +8,11 @@ import importlib.util
 import plistlib
 import re
 import shutil
+import tarfile
 import tomllib
 from pathlib import Path
+
+import pytest
 
 
 APP_ROOT = Path(__file__).resolve().parents[3]
@@ -56,6 +59,12 @@ def _load_literal_module_version(package_root: Path) -> str | None:
                 return None
 
     return None
+
+
+def _write_test_sdist(path: Path, member_names: list[str]) -> None:
+    with tarfile.open(path, "w:gz") as archive:
+        for member_name in member_names:
+            archive.addfile(tarfile.TarInfo(member_name))
 
 
 def _build_compatible_requirement(distribution_name: str, version: str) -> str:
@@ -403,9 +412,11 @@ def test_workspace_build_script_preserves_desktop_subdir_for_root_package(tmp_pa
         assert command == script.build_command(target)
         assert cwd == script.WORKSPACE_ROOT
         assert check is True
+        assert list(tmp_path.iterdir()) == [dist_dir]
         shutil.rmtree(dist_dir)
         dist_dir.mkdir(parents=True)
         (dist_dir / "crawler4j-test.whl").write_text("wheel", encoding="utf-8")
+        _write_test_sdist(dist_dir / "crawler4j-test.tar.gz", ["crawler4j-test/README.md"])
 
     monkeypatch.setattr(script.subprocess, "run", fake_run)
 
@@ -413,6 +424,27 @@ def test_workspace_build_script_preserves_desktop_subdir_for_root_package(tmp_pa
 
     assert (dist_dir / "crawler4j-test.whl").read_text(encoding="utf-8") == "wheel"
     assert kept_marker.read_text(encoding="utf-8") == "desktop artifact"
+
+
+def test_workspace_build_script_rejects_preserved_desktop_content_in_root_sdist(tmp_path, monkeypatch):
+    script = _load_script_module("build_workspace_packages.py")
+    dist_dir = tmp_path / "crawler4j-dist"
+    target = script.BuildTarget("crawler4j", dist_dir)
+
+    def fake_run(command, *, cwd, check):
+        assert command == script.build_command(target)
+        assert cwd == script.WORKSPACE_ROOT
+        assert check is True
+        dist_dir.mkdir(parents=True)
+        _write_test_sdist(
+            dist_dir / "crawler4j-test.tar.gz",
+            ["crawler4j-test/tmp-build-preserve/desktop/macos/Crawler4j.app/Contents/MacOS/Crawler4j"],
+        )
+
+    monkeypatch.setattr(script.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="preserved desktop content"):
+        script.run_build(target)
 
 
 def test_workspace_build_script_parse_args_defaults_to_build_mode():

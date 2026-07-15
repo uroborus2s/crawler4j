@@ -331,8 +331,23 @@ def build_virtualbrowser_ip_auto_fingerprint_overrides() -> dict[str, Any]:
     }
 
 
-def build_virtualbrowser_speech_voices_override() -> dict[str, Any]:
-    """生成完整的 Speech Voices 数组，不能传空对象。"""
+def should_enforce_virtualbrowser_speech_voices(system: str | None = None) -> bool:
+    """Return whether the host can reliably apply the configured voice names.
+
+    VirtualBrowser for macOS exposes the host's native voices at page runtime,
+    even when its management API accepts a custom ``speech_voices`` payload.
+    Treating that payload as a page-visible contract therefore rejects every
+    newly-created macOS environment.
+    """
+    return _fingerprint_system(system) != "Darwin"
+
+
+def build_virtualbrowser_speech_voices_override(
+    system: str | None = None,
+) -> dict[str, Any] | None:
+    """Generate a controlled Speech Voices payload when the host supports it."""
+    if not should_enforce_virtualbrowser_speech_voices(system):
+        return None
     return {"mode": 1, "value": [dict(voice) for voice in VIRTUALBROWSER_STANDARD_SPEECH_VOICES]}
 
 

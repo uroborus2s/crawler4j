@@ -107,6 +107,8 @@ uv run crawler4j package build
 
 Hosted UI `DataTable` 批量编辑使用顶层 `selection_mode="multi"`，并在 `crud` 内声明 `bulk_update_handler` 与 `toolbar.bulk_update`。SDK scanner 要求批量 handler 使用 `(context, primary_keys: list[T], payload: ConcretePayload)` 固定签名，并拒绝 `Any`、`Mapping`、裸 `list` / `dict` 等不具体类型。
 
+Hosted UI `Input` / `Select` 与 CRUD Form 字段可声明 `on_change={"type":"ui_action","name":...}`。SDK scanner 要求 handler 使用 `(context, event: HostedFieldChangeEvent)` 固定签名；Form 内事件提供安全的 `form_id/mode/values` scope，Form 外事件使用 standalone scope。模块需要重建 Form 时主动调用 `ui.form.reset(form_id, initial_values)`。
+
 SDK scanner 同时支持两类对象装配声明：
 
 - 传统装饰器参数：`@component(inject=[...], parameters=[...])`、`@workflow(inject=[...])`
@@ -125,12 +127,12 @@ workflow 和 component 可选实现 `setup(ctx, workflow)` 做运行前准备，
 ```toml
 [project]
 dependencies = [
-  "crawler4j-contracts>=0.4.3,<0.5.0",
+  "crawler4j-contracts>=0.4.4,<0.5.0",
 ]
 
 [dependency-groups]
 dev = [
-  "crawler4j-sdk>=0.4.4,<0.5.0",
+  "crawler4j-sdk>=0.4.5,<0.5.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
 ]

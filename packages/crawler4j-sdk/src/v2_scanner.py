@@ -1174,6 +1174,9 @@ def _validate_pages(
         diagnostics.extend(_validate_page_query_handlers(declaration, query_handler_schema, module_functions))
         diagnostics.extend(_validate_page_crud_handlers(declaration, query_handler_schema, ui_action_signatures))
         diagnostics.extend(
+            _validate_page_field_change_handlers(declaration, query_handler_schema, ui_action_signatures)
+        )
+        diagnostics.extend(
             _validate_page_toolbar_actions(
                 declaration,
                 query_handler_schema,
@@ -1430,6 +1433,52 @@ def _validate_page_toolbar_actions(
     return diagnostics
 
 
+def _validate_page_field_change_handlers(
+    declaration: V2Declaration,
+    page_schema: dict[str, Any],
+    ui_action_signatures: dict[str, V2FunctionSignature],
+) -> list[V2Diagnostic]:
+    diagnostics: list[V2Diagnostic] = []
+    for on_change, field_path in _iter_page_field_change_actions(page_schema.get("children"), "schema.children"):
+        handler_name = str(on_change.get("name") or "").strip()
+        location = f"{declaration.symbol}.{field_path}.on_change.name"
+        handler = ui_action_signatures.get(handler_name)
+        if handler is None:
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_FIELD_CHANGE_HANDLER_MISSING",
+                    location=location,
+                    message=f"field on_change must reference a @ui_action function: {handler_name}",
+                )
+            )
+            continue
+        if not (
+            handler.positional_args[:1] == ("context",)
+            and _function_accepts_exact_crud_keyword_call(handler, ("event",))
+        ):
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_FIELD_CHANGE_HANDLER_SIGNATURE_INVALID",
+                    location=location,
+                    message=f"field on_change handler signature must accept (context, event): {handler_name}",
+                )
+            )
+            continue
+        event_annotation = str((handler.parameter_annotations or {}).get("event") or "").strip()
+        if _annotation_root(event_annotation) != "HostedFieldChangeEvent":
+            diagnostics.append(
+                V2Diagnostic(
+                    code="V2_PAGE_FIELD_CHANGE_HANDLER_TYPE_INVALID",
+                    location=location,
+                    message=(
+                        "field on_change handler event must be annotated as HostedFieldChangeEvent: "
+                        f"{handler_name}.event"
+                    ),
+                )
+            )
+    return diagnostics
+
+
 def _function_accepts_exact_crud_keyword_call(
     signature: V2FunctionSignature,
     expected_params_after_context: tuple[str, ...],
@@ -1582,6 +1631,31 @@ def _iter_page_data_tables(children: Any, path: str) -> list[tuple[dict[str, Any
         if isinstance(nested, list):
             tables.extend(_iter_page_data_tables(nested, f"{child_path}.children"))
     return tables
+
+
+def _iter_page_field_change_actions(children: Any, path: str) -> list[tuple[dict[str, Any], str]]:
+    if not isinstance(children, list):
+        return []
+
+    actions: list[tuple[dict[str, Any], str]] = []
+    for index, child in enumerate(children):
+        child_path = f"{path}[{index}]"
+        if not isinstance(child, dict):
+            continue
+        on_change = child.get("on_change")
+        if isinstance(on_change, dict):
+            actions.append((dict(on_change), child_path))
+        if str(child.get("type") or "") == "DataTable":
+            columns = child.get("columns")
+            if isinstance(columns, list):
+                for column_index, column in enumerate(columns):
+                    column_on_change = column.get("on_change") if isinstance(column, dict) else None
+                    if isinstance(column_on_change, dict):
+                        actions.append((dict(column_on_change), f"{child_path}.columns[{column_index}]"))
+        nested = child.get("children")
+        if isinstance(nested, list):
+            actions.extend(_iter_page_field_change_actions(nested, f"{child_path}.children"))
+    return actions
 
 
 def _iter_page_toolbar_actions(page_schema: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:

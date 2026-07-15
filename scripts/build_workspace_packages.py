@@ -7,9 +7,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Sequence
 
 
@@ -67,6 +68,25 @@ def run_build(target: BuildTarget) -> None:
     print(f"[cmd]   {shlex.join(command)}")
     with _preserve_dist_subdirs(target):
         subprocess.run(command, cwd=WORKSPACE_ROOT, check=True)
+    validate_build_output(target)
+
+
+def validate_build_output(target: BuildTarget) -> None:
+    preserved_names = PRESERVED_DIST_SUBDIRS.get(target.package, ())
+    if not preserved_names:
+        return
+
+    sdists = sorted(target.dist_dir.glob("*.tar.gz"))
+    if len(sdists) != 1:
+        raise RuntimeError(f"expected one sdist for {target.package}, found {len(sdists)}")
+
+    with tarfile.open(sdists[0], "r:gz") as archive:
+        for member in archive.getmembers():
+            parts = PurePosixPath(member.name).parts
+            if any(name in parts for name in preserved_names):
+                raise RuntimeError(
+                    f"{target.package} sdist contains preserved desktop content: {member.name}"
+                )
 
 
 @contextlib.contextmanager
@@ -77,7 +97,10 @@ def _preserve_dist_subdirs(target: BuildTarget):
         return
 
     preserved: list[tuple[Path, Path]] = []
-    with tempfile.TemporaryDirectory(dir=target.dist_dir.parent) as temp_dir:
+    # Keep preserved desktop bundles outside the package root. Hatch includes live
+    # project-root temporary directories in sdists, even when they only exist for
+    # the duration of the build.
+    with tempfile.TemporaryDirectory(dir=WORKSPACE_ROOT) as temp_dir:
         temp_root = Path(temp_dir)
         for name in names:
             source = target.dist_dir / name

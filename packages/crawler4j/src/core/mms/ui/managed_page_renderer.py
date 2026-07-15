@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import secrets
+import weakref
 from typing import Any, Callable
 
 from crawler4j_contracts import HostedDataTableQueryResult
+from PyQt6 import sip
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFrame,
+    QApplication,
     QDialog,
     QFormLayout,
     QGridLayout,
@@ -34,6 +38,13 @@ from src.core.atm.run_profile import (
 from src.core.atm.service import get_task_service
 from src.core.persistence import get_module_data_store
 from src.core.mms.models import ModuleInfo
+from src.core.mms.ui.hosted_form import (
+    FORM_EVENT_STALE,
+    HostedFormController,
+    HostedFormOwnerScope,
+    HostedFormRegistry,
+    HostedFormUnavailableTools,
+)
 from src.core.mms.ui.hosted_import import HostedImportDialog
 from src.core.mms.ui.module_ui_runtime import ModuleUIRuntimeBridge
 from src.ui.components.button import StyledButton, create_action_button, normalize_button_variant
@@ -92,6 +103,14 @@ class ManagedPageRenderer(QWidget):
         self._schema: dict[str, Any] = {}
         self._payload: dict[str, Any] = {}
         self._data_table_widgets: dict[str, SkyDataTable] = {}
+        self._standalone_field_widgets: dict[str, QWidget] = {}
+        self._standalone_field_values: dict[str, Any] = {}
+        self._form_registry = HostedFormRegistry()
+        self._form_owner = HostedFormOwnerScope(
+            module_name=module_name,
+            page_id=page_id,
+            session_id=secrets.token_urlsafe(24),
+        )
         self._navigation_params = self._normalize_navigation_params(initial_params)
 
         self._setup_ui()
@@ -244,6 +263,71 @@ class ManagedPageRenderer(QWidget):
         }
         label.setStyleSheet(styles.get(str(component.get("style") or "body"), styles["body"]))
         return label
+
+    def _build_standalone_field(self, component: dict[str, Any]) -> QWidget:
+        component_type = str(component.get("type") or "").strip()
+        field_id = str(component.get("id") or "").strip()
+        value = component["value"] if "value" in component else None
+        column = dict(component)
+        column["key"] = field_id
+        column["type"] = "select" if component_type == "Select" else "text"
+        widget = self._build_crud_input_widget(column, value=value)
+
+        if isinstance(widget, StyledLineEdit):
+            widget.setPlaceholderText(str(component.get("placeholder") or ""))
+            widget.setReadOnly(bool(component.get("readonly")))
+            current_value: Any = widget.text()
+        elif isinstance(widget, StyledComboBox):
+            widget.setEnabled(not bool(component.get("readonly")))
+            current_value = widget.currentData()
+        else:
+            current_value = None
+
+        self._standalone_field_widgets[field_id] = widget
+        self._standalone_field_values[field_id] = current_value
+        on_change = component.get("on_change")
+        if isinstance(on_change, dict):
+            if isinstance(widget, StyledComboBox):
+                widget.currentIndexChanged.connect(
+                    lambda _index, spec=dict(component), current_widget=widget: self._on_standalone_field_changed(
+                        spec,
+                        current_widget,
+                    )
+                )
+            elif isinstance(widget, StyledLineEdit):
+                widget.textChanged.connect(
+                    lambda _text, spec=dict(component), current_widget=widget: self._on_standalone_field_changed(
+                        spec,
+                        current_widget,
+                    )
+                )
+
+        container = QWidget()
+        layout = QFormLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        label = str(component.get("label") or field_id)
+        layout.addRow(f"{label}：", widget)
+        return container
+
+    def _on_standalone_field_changed(self, component: dict[str, Any], widget: QWidget) -> None:
+        field_id = str(component.get("id") or "").strip()
+        previous_value = self._standalone_field_values.get(field_id)
+        value = widget.currentData() if isinstance(widget, StyledComboBox) else widget.text()
+        self._standalone_field_values[field_id] = value
+        event = {
+            "component": {"id": field_id, "type": str(component.get("type") or "Input")},
+            "field": field_id,
+            "event": "change",
+            "value": value,
+            "previous_value": previous_value,
+            "scope": {"kind": "standalone"},
+        }
+        self._dispatch_field_change(
+            dict(component.get("on_change") or {}),
+            event,
+            hosted_form_tools=HostedFormUnavailableTools(),
+        )
 
     def _build_button(self, component: dict[str, Any]) -> StyledButton:
         label = str(component.get("label") or "").strip()
@@ -957,7 +1041,37 @@ class ManagedPageRenderer(QWidget):
         dialog.setWindowTitle(f"{'新增' if mode == 'create' else '编辑'}{title}")
         configure_titled_dialog(dialog)
         dialog.setModal(True)
-        dialog.setMinimumWidth(460)
+        layout_spec = dict(form.get("layout") or {})
+        requested_columns = int(layout_spec.get("columns", 1))
+        declared_gap = int(layout_spec.get("gap", 10))
+        screen = self.screen() or QApplication.primaryScreen()
+        available_geometry = screen.availableGeometry() if screen is not None else None
+        available_width = available_geometry.width() if available_geometry is not None else 1280
+        available_height = available_geometry.height() if available_geometry is not None else 800
+        maximum_width = max(1, min(available_width, max(240, available_width - 80)))
+        maximum_height = max(
+            1,
+            min(720, available_height, max(240, available_height - 80)),
+        )
+        form_gap = min(declared_gap, maximum_width, maximum_height)
+        minimum_column_width = 220
+        width_capacity = max(
+            1,
+            (maximum_width + form_gap) // (minimum_column_width + form_gap),
+        )
+        form_columns = min(requested_columns, width_capacity)
+        desired_width = min(
+            maximum_width,
+            max(
+                320,
+                form_columns * minimum_column_width + (form_columns - 1) * form_gap + 48,
+            ),
+        )
+        dialog.setMinimumWidth(desired_width)
+        dialog.setMaximumWidth(maximum_width)
+        dialog.setMaximumHeight(maximum_height)
+        dialog._hosted_form_layout_columns = form_columns
+        dialog._hosted_form_layout_rows = (len(field_names) + form_columns - 1) // form_columns
         dialog.setStyleSheet(
             """
             QDialog {
@@ -975,19 +1089,96 @@ class ManagedPageRenderer(QWidget):
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
-        form_layout = QFormLayout()
+        form_container = QWidget()
+        form_layout = QGridLayout(form_container)
         form_layout.setContentsMargins(0, 0, 0, 0)
-        form_layout.setSpacing(10)
+        form_layout.setHorizontalSpacing(0)
+        form_layout.setVerticalSpacing(form_gap)
+        label_input_spacing = 6
+        for column_index in range(form_columns):
+            form_layout.setColumnStretch(column_index * 2, 0)
+            form_layout.setColumnStretch(column_index * 2 + 1, 1)
         widgets: dict[str, tuple[QWidget, dict[str, Any]]] = {}
+        initial_values: dict[str, Any] = {}
 
-        for field_name in field_names:
+        for field_index, field_name in enumerate(field_names):
             column = dict(columns_by_key.get(str(field_name), {"key": str(field_name), "label": str(field_name)}))
             label = str(column.get("label") or field_name)
-            widget = self._build_crud_input_widget(column, value=(row or {}).get(field_name))
+            if mode == "create":
+                initial_value = column["default"] if "default" in column else None
+            else:
+                initial_value = row[field_name] if isinstance(row, dict) and field_name in row else None
+            widget = self._build_crud_input_widget(column, value=initial_value)
             widgets[str(field_name)] = (widget, column)
-            form_layout.addRow(f"{label}：", widget)
+            initial_values[str(field_name)] = initial_value
+            logical_column = field_index % form_columns
+            label_column = logical_column * 2
+            input_column = label_column + 1
+            label_widget = QLabel(f"{label}：")
+            label_widget.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            label_widget.setContentsMargins(
+                form_gap if logical_column else 0,
+                0,
+                label_input_spacing,
+                0,
+            )
+            input_size_policy = widget.sizePolicy()
+            input_size_policy.setHorizontalPolicy(QSizePolicy.Policy.Expanding)
+            widget.setSizePolicy(input_size_policy)
+            form_layout.addWidget(
+                label_widget,
+                field_index // form_columns,
+                label_column,
+                alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
+            form_layout.addWidget(widget, field_index // form_columns, input_column)
 
-        layout.addLayout(form_layout)
+        form_scroll = QScrollArea()
+        form_scroll.setObjectName("managedCrudFormScrollArea")
+        form_scroll.setWidgetResizable(True)
+        form_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        form_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        form_scroll.setWidget(form_container)
+        layout.addWidget(form_scroll, 1)
+
+        controller = HostedFormController(
+            mode=mode,
+            field_names=tuple(widgets),
+            initial_values=initial_values,
+            apply_values=lambda values: self._apply_form_values(widgets, values),
+        )
+        dialog_ref = weakref.ref(dialog)
+
+        def is_form_open() -> bool:
+            current_dialog = dialog_ref()
+            return current_dialog is not None and not sip.isdeleted(current_dialog)
+
+        form_id = self._form_registry.open_form(
+            self._form_owner,
+            controller,
+            is_open=is_form_open,
+        )
+        dialog._hosted_form_controller = controller
+        dialog._hosted_form_id = form_id
+        for field_name, (widget, column) in widgets.items():
+            widget._hosted_form_controller = controller
+            self._connect_form_widget_change(
+                widget,
+                component=component,
+                column=column,
+                field_name=field_name,
+                controller=controller,
+                form_id=form_id,
+            )
+        form_registry = self._form_registry
+
+        def close_form(*_args: Any) -> None:
+            form_registry.close_form(form_id)
+
+        dialog._hosted_form_close = close_form
+        dialog.finished.connect(close_form)
+
         button_row = QHBoxLayout()
         button_row.setSpacing(12)
         button_row.addStretch()
@@ -1005,6 +1196,167 @@ class ManagedPageRenderer(QWidget):
         layout.addLayout(button_row)
         return dialog, widgets
 
+    @staticmethod
+    def _find_combo_data_exact(combo: StyledComboBox, value: Any) -> int:
+        for index in range(combo.count()):
+            candidate = combo.itemData(index)
+            if type(candidate) is type(value) and candidate == value:
+                return index
+        return -1
+
+    def _apply_form_values(
+        self,
+        widgets: dict[str, tuple[QWidget, dict[str, Any]]],
+        values: Any,
+    ) -> None:
+        for field_name, (widget, _column) in widgets.items():
+            value = values[field_name]
+            previous_blocked = widget.blockSignals(True)
+            try:
+                if isinstance(widget, StyledComboBox):
+                    index = self._find_combo_data_exact(widget, value)
+                    if index < 0 and value is not None:
+                        widget.addItem(str(value), value)
+                        index = widget.count() - 1
+                    widget.setCurrentIndex(index)
+                elif isinstance(widget, StyledLineEdit):
+                    widget._hosted_preserve_empty = value == ""
+                    widget.setText("" if value is None else str(value))
+            finally:
+                widget.blockSignals(previous_blocked)
+
+    def _connect_form_widget_change(
+        self,
+        widget: QWidget,
+        *,
+        component: dict[str, Any],
+        column: dict[str, Any],
+        field_name: str,
+        controller: HostedFormController,
+        form_id: str,
+    ) -> None:
+        def callback() -> None:
+            self._on_form_widget_changed(
+                component=component,
+                column=column,
+                field_name=field_name,
+                widget=widget,
+                controller=controller,
+                form_id=form_id,
+            )
+
+        if isinstance(widget, StyledComboBox):
+            widget.currentIndexChanged.connect(lambda _index: callback())
+        elif isinstance(widget, StyledLineEdit):
+            widget.textChanged.connect(lambda _text: callback())
+
+    @staticmethod
+    def _read_form_event_value(widget: QWidget, column: dict[str, Any]) -> Any:
+        if isinstance(widget, StyledComboBox):
+            return widget.currentData()
+        if not isinstance(widget, StyledLineEdit):
+            return None
+        text = widget.text()
+        column_type = str(column.get("type") or "text").strip().lower()
+        if column_type == "int" and text.strip():
+            try:
+                return int(text.strip())
+            except ValueError:
+                return text
+        if column_type == "number" and text.strip():
+            try:
+                return float(text.strip())
+            except ValueError:
+                return text
+        return text
+
+    @staticmethod
+    def _form_field_component_type(column: dict[str, Any]) -> str:
+        return "Select" if str(column.get("type") or "").strip().lower() in {"select", "bool"} else "Input"
+
+    def _on_form_widget_changed(
+        self,
+        *,
+        component: dict[str, Any],
+        column: dict[str, Any],
+        field_name: str,
+        widget: QWidget,
+        controller: HostedFormController,
+        form_id: str,
+    ) -> None:
+        if isinstance(widget, StyledLineEdit):
+            widget._hosted_preserve_empty = False
+        value = self._read_form_event_value(widget, column)
+        change = controller.change(field_name, value)
+        on_change = column.get("on_change")
+        if not isinstance(on_change, dict):
+            return
+        event = {
+            "component": {
+                "id": str(component.get("table_id") or field_name),
+                "type": self._form_field_component_type(column),
+            },
+            "field": field_name,
+            "event": "change",
+            "value": change.value,
+            "previous_value": change.previous_value,
+            "scope": {
+                "kind": "form",
+                "form_id": form_id,
+                "mode": controller.mode,
+                "values": change.values,
+            },
+        }
+        self._dispatch_field_change(
+            dict(on_change),
+            event,
+            hosted_form_tools=self._form_registry.bind_tools(
+                self._form_owner,
+                form_id=form_id,
+                revision=change.revision,
+            ),
+        )
+
+    def _dispatch_field_change(
+        self,
+        action: dict[str, Any],
+        event: dict[str, Any],
+        *,
+        hosted_form_tools: Any,
+    ) -> None:
+        action_name = str(action.get("name") or "").strip()
+        if action.get("type") != "ui_action" or not action_name:
+            return
+        loop = self._running_loop()
+        if loop is None:
+            try:
+                self._bridge.call_ui_action(
+                    action_name,
+                    {"event": event},
+                    capability_surface=_runtime_surface_hosted_ui_action(),
+                    hosted_form_tools=hosted_form_tools,
+                )
+            except Exception as exc:
+                if FORM_EVENT_STALE not in str(exc):
+                    self._show_warning("字段更新失败", str(exc))
+            return
+        task = loop.create_task(
+            self._bridge.call_ui_action_async(
+                action_name,
+                {"event": event},
+                capability_surface=_runtime_surface_hosted_ui_action(),
+                hosted_form_tools=hosted_form_tools,
+            )
+        )
+        task.add_done_callback(self._handle_field_change_task_result)
+
+    def _handle_field_change_task_result(self, task: Any) -> None:
+        try:
+            task.result()
+        except Exception as exc:
+            if FORM_EVENT_STALE not in str(exc):
+                self._show_warning("字段更新失败", str(exc))
+
     def _collect_crud_form_payload(
         self,
         widgets: dict[str, tuple[QWidget, dict[str, Any]]],
@@ -1013,6 +1365,9 @@ class ManagedPageRenderer(QWidget):
         for field_name, (widget, column) in widgets.items():
             value = self._read_crud_input_value(widget, column)
             if column.get("required") and value in (None, ""):
+                controller = getattr(widget, "_hosted_form_controller", None)
+                if isinstance(controller, HostedFormController):
+                    controller.set_validation_error(field_name, "required")
                 return None, ("表单不完整", f"{column.get('label') or field_name} 不能为空")
             payload[field_name] = value
         return payload, None
@@ -1085,6 +1440,7 @@ class ManagedPageRenderer(QWidget):
             return combo
 
         line_edit = StyledLineEdit()
+        line_edit._hosted_preserve_empty = value == ""
         if value not in (None, ""):
             line_edit.setText(str(value))
         key = str(column.get("key") or "").strip().lower()
@@ -1104,7 +1460,7 @@ class ManagedPageRenderer(QWidget):
             return None
         text = widget.text().strip()
         if not text:
-            return None
+            return "" if getattr(widget, "_hosted_preserve_empty", False) else None
         if column_type == "int":
             return int(text)
         if column_type == "number":
@@ -1310,6 +1666,8 @@ class ManagedPageRenderer(QWidget):
 
     def _build_component(self, component: dict[str, Any]) -> QWidget:
         component_type = str(component.get("type") or "").strip()
+        if component_type in {"Input", "Select"}:
+            return self._build_standalone_field(component)
         if component_type == "Text":
             return self._build_text(component)
         if component_type == "Button":
@@ -1754,6 +2112,8 @@ class ManagedPageRenderer(QWidget):
     def refresh(self) -> None:
         self._status_label.setText("")
         self._data_table_widgets = {}
+        self._standalone_field_widgets = {}
+        self._standalone_field_values = {}
         try:
             self._bridge.declare_ui(
                 page_id=self._page_id,

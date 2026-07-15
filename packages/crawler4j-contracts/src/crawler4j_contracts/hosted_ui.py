@@ -38,6 +38,7 @@ ALLOWED_TABLE_COLUMN_KEYS = {
     "width",
     "stretch",
     "align",
+    "on_change",
 }
 ALLOWED_TABLE_COLUMN_TYPES = {"text", "number", "int", "bool", "select", "badge", "actions"}
 ALLOWED_DATA_STORAGE_MODES = {"managed_dataset", "custom_table"}
@@ -66,6 +67,9 @@ ALLOWED_CARD_SCHEMA_KEYS = {
     "padding",
 }
 ALLOWED_TEXT_SCHEMA_KEYS = {"type", "text", "binding", "style"}
+ALLOWED_INPUT_SCHEMA_KEYS = {"type", "id", "label", "value", "placeholder", "required", "readonly", "on_change"}
+ALLOWED_SELECT_SCHEMA_KEYS = {"type", "id", "label", "value", "options", "required", "readonly", "on_change"}
+ALLOWED_FIELD_CHANGE_ACTION_KEYS = {"type", "name"}
 ALLOWED_BUTTON_SCHEMA_KEYS = {"type", "label", "icon", "aria_label", "size", "variant", "action"}
 ALLOWED_BUTTON_SIZES = {"md", "sm", "icon"}
 ALLOWED_BUTTON_VARIANTS = {"primary", "secondary", "ghost"}
@@ -104,7 +108,8 @@ ALLOWED_TABLE_CRUD_KEYS = {
     "delete_handler",
     "bulk_update_handler",
 }
-ALLOWED_TABLE_CRUD_FORM_KEYS = {"create_columns", "update_columns"}
+ALLOWED_TABLE_CRUD_FORM_KEYS = {"create_columns", "update_columns", "layout"}
+ALLOWED_TABLE_CRUD_FORM_LAYOUT_KEYS = {"columns", "gap"}
 ALLOWED_TABLE_CRUD_RENDER_MODES = {"toolbar", "row_actions"}
 ALLOWED_TABLE_SELECTION_MODES = {"none", "single", "multi"}
 ALLOWED_TABLE_CRUD_TOOLBAR_KEYS = {"create", "update", "delete", "bulk_update"}
@@ -247,7 +252,65 @@ class CardSchema(TypedDict, total=False):
     padding: int
 
 
-class DataTableColumnSchema(TypedDict, total=False):
+class HostedFieldChangeActionSchema(TypedDict):
+    type: Literal["ui_action"]
+    name: str
+
+
+class HostedFieldEventSchema(TypedDict, total=False):
+    on_change: HostedFieldChangeActionSchema
+
+
+class HostedFieldComponentRef(TypedDict):
+    id: str
+    type: Literal["Input", "Select"]
+
+
+class HostedFormScope(TypedDict):
+    kind: Literal["form"]
+    form_id: str
+    mode: Literal["create", "update"]
+    values: Mapping[str, Any]
+
+
+class HostedStandaloneScope(TypedDict):
+    kind: Literal["standalone"]
+
+
+class HostedFieldChangeEvent(TypedDict):
+    component: HostedFieldComponentRef
+    field: str
+    event: Literal["change"]
+    value: Any
+    previous_value: Any
+    scope: HostedFormScope | HostedStandaloneScope
+
+
+class HostedFormResetResult(TypedDict):
+    ok: Literal[True]
+
+
+class InputSchema(HostedFieldEventSchema, total=False):
+    type: Required[Literal["Input"]]
+    id: Required[str]
+    label: str
+    value: Any
+    placeholder: str
+    required: bool
+    readonly: bool
+
+
+class SelectSchema(HostedFieldEventSchema, total=False):
+    type: Required[Literal["Select"]]
+    id: Required[str]
+    label: str
+    value: Any
+    options: Required[Sequence[str]]
+    required: bool
+    readonly: bool
+
+
+class DataTableColumnSchema(HostedFieldEventSchema, total=False):
     key: Required[str]
     label: str
     visible: bool
@@ -322,9 +385,15 @@ class DataTableCrudToolbarSchema(TypedDict, total=False):
     bulk_update: bool
 
 
+class DataTableCrudFormLayoutSchema(TypedDict, total=False):
+    columns: Required[Literal[1, 2, 3]]
+    gap: int
+
+
 class DataTableCrudFormSchema(TypedDict, total=False):
     create_columns: Sequence[str]
     update_columns: Sequence[str]
+    layout: DataTableCrudFormLayoutSchema
 
 
 class DataTableCrudCreatePayload(TypedDict, total=False):
@@ -368,7 +437,9 @@ class DataTableSchema(TypedDict, total=False):
     toolbar: ToolbarSchema
 
 
-PageComponentSchema: TypeAlias = SectionSchema | CardSchema | TextSchema | ButtonSchema | DataTableSchema
+PageComponentSchema: TypeAlias = (
+    SectionSchema | CardSchema | TextSchema | InputSchema | SelectSchema | ButtonSchema | DataTableSchema
+)
 
 
 class PageSchema(TypedDict, total=False):
@@ -1053,6 +1124,24 @@ def _normalize_row_action(raw: Any, *, field_name: str) -> dict[str, Any]:
     return action
 
 
+def _normalize_field_change_action(raw: Any, *, field_name: str) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+    unknown_keys = sorted(set(raw) - ALLOWED_FIELD_CHANGE_ACTION_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+    action_type = str(raw.get("type") or "").strip().lower()
+    if action_type != "ui_action":
+        raise ValueError(f"{field_name}.type 只支持 ui_action")
+    return {
+        "type": "ui_action",
+        "name": _validate_managed_identifier(
+            str(raw.get("name") or ""),
+            field_name=f"{field_name}.name",
+        ),
+    }
+
+
 def _normalize_table_column(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("数据表 columns 中的每一项都必须是对象")
@@ -1097,6 +1186,11 @@ def _normalize_table_column(raw: Any) -> dict[str, Any]:
         column["options"] = [str(option) for option in options]
     elif raw.get("options") is not None:
         raise ValueError("只有 select 列允许配置 options")
+    if raw.get("on_change") is not None:
+        column["on_change"] = _normalize_field_change_action(
+            raw.get("on_change"),
+            field_name=f"column.{key}.on_change",
+        )
 
     return column
 
@@ -1212,6 +1306,25 @@ def _normalize_crud_form_columns(raw: Any, *, field_name: str) -> list[str]:
     ]
 
 
+def _normalize_crud_form_layout(raw: Any, *, field_name: str) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} 必须是对象")
+    unknown_keys = sorted(set(raw) - ALLOWED_TABLE_CRUD_FORM_LAYOUT_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+
+    columns = raw.get("columns")
+    if type(columns) is not int or columns not in {1, 2, 3}:
+        raise ValueError(f"{field_name}.columns 只支持整数 1/2/3")
+    normalized = {"columns": columns}
+    if "gap" in raw:
+        gap = raw["gap"]
+        if type(gap) is not int or gap < 0:
+            raise ValueError(f"{field_name}.gap 必须是非负整数")
+        normalized["gap"] = gap
+    return normalized
+
+
 def _normalize_table_crud_toolbar(raw: Any, *, field_name: str) -> dict[str, bool]:
     if raw is None:
         return {}
@@ -1247,6 +1360,22 @@ def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
     if unknown_form_keys:
         raise ValueError(f"{field_name}.form 包含不支持的字段: {', '.join(unknown_form_keys)}")
 
+    normalized_form = {
+        "create_columns": _normalize_crud_form_columns(
+            form.get("create_columns"),
+            field_name=f"{field_name}.form.create_columns",
+        ),
+        "update_columns": _normalize_crud_form_columns(
+            form.get("update_columns"),
+            field_name=f"{field_name}.form.update_columns",
+        ),
+    }
+    if "layout" in form:
+        normalized_form["layout"] = _normalize_crud_form_layout(
+            form["layout"],
+            field_name=f"{field_name}.form.layout",
+        )
+
     normalized = {
         "mode": mode,
         "render": render,
@@ -1258,16 +1387,7 @@ def _normalize_table_crud(raw: Any, *, field_name: str) -> dict[str, Any]:
             str(raw.get("primary_key") or ""),
             field_name=f"{field_name}.primary_key",
         ),
-        "form": {
-            "create_columns": _normalize_crud_form_columns(
-                form.get("create_columns"),
-                field_name=f"{field_name}.form.create_columns",
-            ),
-            "update_columns": _normalize_crud_form_columns(
-                form.get("update_columns"),
-                field_name=f"{field_name}.form.update_columns",
-            ),
-        },
+        "form": normalized_form,
     }
     for handler_key in ("create_handler", "update_handler", "delete_handler", "bulk_update_handler"):
         if raw.get(handler_key) is not None:
@@ -1534,6 +1654,39 @@ def _normalize_page_component(raw: Any, *, field_name: str) -> dict[str, Any]:
             item["style"] = style
         return item
 
+    if component_type in {"Input", "Select"}:
+        allowed_keys = ALLOWED_INPUT_SCHEMA_KEYS if component_type == "Input" else ALLOWED_SELECT_SCHEMA_KEYS
+        unknown_keys = sorted(set(raw) - allowed_keys)
+        if unknown_keys:
+            raise ValueError(f"{field_name} 包含不支持的字段: {', '.join(unknown_keys)}")
+        component_id = _validate_managed_identifier(
+            str(raw.get("id") or ""),
+            field_name=f"{field_name}.id",
+        )
+        item = {"type": component_type, "id": component_id}
+        if raw.get("label") is not None:
+            item["label"] = str(raw.get("label") or "").strip()
+        if "value" in raw:
+            item["value"] = raw.get("value")
+        if raw.get("required") is not None:
+            item["required"] = bool(raw.get("required"))
+        if raw.get("readonly") is not None:
+            item["readonly"] = bool(raw.get("readonly"))
+        if component_type == "Input":
+            if raw.get("placeholder") is not None:
+                item["placeholder"] = str(raw.get("placeholder") or "")
+        else:
+            options = raw.get("options")
+            if not isinstance(options, list) or not options:
+                raise ValueError(f"{field_name}.options 必须是非空数组")
+            item["options"] = [str(option) for option in options]
+        if raw.get("on_change") is not None:
+            item["on_change"] = _normalize_field_change_action(
+                raw.get("on_change"),
+                field_name=f"{field_name}.on_change",
+            )
+        return item
+
     if component_type == "Button":
         unknown_keys = sorted(set(raw) - ALLOWED_BUTTON_SCHEMA_KEYS)
         if unknown_keys:
@@ -1619,6 +1772,7 @@ __all__ = [
     "CardSchema",
     "DataTableColumnSchema",
     "DataTableCrudCreatePayload",
+    "DataTableCrudFormLayoutSchema",
     "DataTableCrudFormSchema",
     "DataTableCrudResult",
     "DataTableCrudSchema",
@@ -1634,11 +1788,19 @@ __all__ = [
     "HostedDataTableQuery",
     "HostedDataTableQueryResult",
     "HostedDataTableSortSpec",
+    "HostedFieldChangeActionSchema",
+    "HostedFieldChangeEvent",
+    "HostedFieldComponentRef",
+    "HostedFieldEventSchema",
+    "HostedFormResetResult",
+    "HostedFormScope",
     "HostedImportPayload",
     "HostedImportPayloadRow",
     "HostedImportResult",
+    "HostedStandaloneScope",
     "ImportDialogLimitsSchema",
     "ImportDialogSubmitSchema",
+    "InputSchema",
     "ManagedResourceDataSourceSchema",
     "OpenImportDialogActionSchema",
     "OpenPageActionSchema",
@@ -1651,6 +1813,7 @@ __all__ = [
     "ReloadActionSchema",
     "RowActionSchema",
     "RowsDataSourceSchema",
+    "SelectSchema",
     "SectionSchema",
     "TextSchema",
     "ToolbarActionSchema",

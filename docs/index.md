@@ -191,6 +191,9 @@ mkdocs:
             - title: 模块宿主管理页与最小化 UI 框架设计
               path: 04-project-development/04-design/module-hosted-ui-framework.md
               access: private
+            - title: Hosted UI 公共字段事件与 Form Reset 设计
+              path: 04-project-development/04-design/hosted-ui-form-field-events.md
+              access: private
             - title: Hosted UI 批量导入方案
               path: 04-project-development/04-design/hosted-ui-batch-import-design.md
               access: private

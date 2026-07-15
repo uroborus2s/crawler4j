@@ -108,9 +108,9 @@ demo_module/
 
 | 包 | 当前源码版本 | 职责 |
 |---|---:|---|
-| `crawler4j` | `0.4.38` | 桌面宿主与 Core 运行时 |
-| `crawler4j-sdk` | `0.4.4` | 模块开发 SDK 与 CLI |
-| `crawler4j-contracts` | `0.4.3` | Core、SDK 和模块共享契约 |
+| `crawler4j` | `0.4.39` | 桌面宿主与 Core 运行时 |
+| `crawler4j-sdk` | `0.4.5` | 模块开发 SDK 与 CLI |
+| `crawler4j-contracts` | `0.4.4` | Core、SDK 和模块共享契约 |
 
 构建与发布共享包时必须按依赖顺序执行：
 

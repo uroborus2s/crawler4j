@@ -6,6 +6,7 @@ from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
     VIRTUALBROWSER_UA_TEMPLATES,
     build_virtualbrowser_randomized_fingerprint_patch,
+    build_virtualbrowser_speech_voices_override,
     materialize_virtualbrowser_fingerprint,
 )
 
@@ -93,6 +94,16 @@ def test_virtualbrowser_random_user_agent_templates_match_supported_host_systems
     assert "Win64; x64" in VIRTUALBROWSER_UA_TEMPLATES["Windows"]
     assert "Macintosh; Intel Mac OS X" in VIRTUALBROWSER_UA_TEMPLATES["Darwin"]
     assert "X11; Linux x86_64" in VIRTUALBROWSER_UA_TEMPLATES["Linux"]
+
+
+def test_virtualbrowser_speech_voices_override_uses_native_macos_voices():
+    """macOS VirtualBrowser 不支持注入 Windows/Google 语音列表。"""
+    assert build_virtualbrowser_speech_voices_override(system="Darwin") is None
+
+    windows_override = build_virtualbrowser_speech_voices_override(system="Windows")
+    assert windows_override is not None
+    assert windows_override["mode"] == 1
+    assert windows_override["value"]
 
 
 def test_materialize_virtualbrowser_fingerprint_strips_manual_random_identity_fields():

@@ -45,6 +45,7 @@
 | Wave 20 | `TASK-030` ~ `TASK-034` | `REQ-010`、`CR-016`、`API-019`、`hosted-ui-batch-import-design.md`、当前 Hosted UI DataTable / `@ui_action` / workflow 调度链 | Hosted UI 批量导入：toolbar 自定义按钮、宿主导入弹窗、import payload 分发、批次结果和逐条状态展示 | 已完成：Contracts / SDK schema、宿主解析弹窗、renderer 分发、workflow runtime 注入、结果展示、`import_data_records` 跳转约定和 `TC-060` 单测已落地 |
 | Wave 21 | `TASK-036` | `REQ-012`、`NFR-012`、`CR-018`、`API-021`、现有 DataTable / CRUD / `@ui_action` 链 | Hosted UI DataTable 当前页多选批量编辑：schema、SDK scanner、Core renderer、共享表格选择生命周期、测试 / 文档 / memory 收口 | `CORE_PACKAGES_RELEASED`：整体 review 99/100 approved；Contracts 0.4.3 / SDK 0.4.4 已发布；业务模块接线与 E2E 另行完成 |
 | Wave 22 | `TASK-037` | `CR-018`、`TASK-036`、`TC-070`、PyPI 发布链 | Contracts 0.4.3 / SDK 0.4.4 版本、依赖、构建、发布和在线验证 | 已完成：全量 unit `1134 passed`；两包 wheel/sdist、publish dry-run、正式发布、PyPI 哈希与隔离安装验证通过 |
+| Wave 23 | `TASK-042` | `CR-022`、`API-023`、PyPI 发布链 | Contracts 0.4.4 / SDK 0.4.5 发布与客户端源码 0.4.39 升级、构建、验证和远端推送 | 进行中：PyPI 发布、在线验证与隔离安装已完成，待最终 evidence commit 和远端推送 |
 
 ## 3. 风险与应对
 
@@ -99,11 +100,12 @@
 | `TASK-034` | 完成批量导入测试、开发者说明和记忆收口 | 单元/集成/验收测试、开发者指南、测试计划、release/traceability/memory 同步 | `TC-060` 覆盖 toolbar schema、解析限制、脱敏、分发、结果展示和明细页跳转；正式文档与 `.factory/memory/` 同步 | P1 | 已完成 |
 | `TASK-036` | 实现 Hosted UI `managed_dataset` 当前页批量字段修改通用能力 | Contracts `selection_mode` / CRUD bulk schema、SDK scanner、Core renderer、`SkyDataTable` 选择清理、`TC-069`、正式设计与 memory | Core 只传保序去重 `primary_keys + payload`；模块负责 `ctx.db` 写入；兼容旧单选 CRUD；同步 / 异步与选择生命周期回归通过 | P1 | `CORE_PACKAGES_RELEASED`；Contracts 0.4.3 / SDK 0.4.4 已发布；业务模块接线另行完成 |
 | `TASK-037` | 发布 Contracts 0.4.3 与 SDK 0.4.4 | 版本/依赖/锁文件、wheel/sdist、PyPI 发布与在线证据 | Contracts 先发布并在线可见；SDK 依赖下限为 Contracts 0.4.3；两包哈希与隔离安装验证通过 | P0 | 已完成 |
+| `TASK-042` | 发布 CR-022 Contracts 0.4.4 / SDK 0.4.5 并升级客户端 0.4.39 | 版本/依赖/锁文件、三包 wheel/sdist、PyPI 发布与在线证据、远端分支同步 | Contracts 先发布并在线可见；SDK 依赖下限为 Contracts 0.4.4；两包在线哈希与隔离安装通过；`origin/0.4.0` 同步 | P0 | PyPI 已完成，待远端推送 |
 
 ## 6. 阶段建议
 
 - 当前登记阶段：`IMPLEMENTATION`
-- 当前活动波次：Wave 22 `TASK-037` 已完成 Contracts 0.4.3 / SDK 0.4.4 发布；Wave 19 `TASK-029` 的历史状态仍为进行中
+- 当前活动波次：Wave 23 `TASK-042` 正在发布 Contracts 0.4.4 / SDK 0.4.5 并升级客户端 0.4.39；Wave 19 `TASK-029` 的历史状态仍为进行中
 - 当前首项：`CR-018` Core / Contracts / SDK 通用能力已发布；业务模块接线和 E2E 仍为独立 gate
 - 后续波次：Hosted UI 批量导入已完成本地实现与 `TC-060` 单测，后续如需对外发布需另行完成 SDK / Contracts / 根应用版本提升、构建与发布证据
 
@@ -111,6 +113,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-15 | 新增 Wave 23 / `TASK-042`：发布 CR-022 Contracts 0.4.4 / SDK 0.4.5，升级客户端源码 0.4.39，并同步远端分支 | Codex |
 | 2026-07-10 | 完成 Wave 22 / `TASK-037`：发布 Contracts 0.4.3 与 SDK 0.4.4，并完成全量测试、产物哈希、PyPI JSON API 与隔离安装验证 | Codex |
 | 2026-07-10 | 新增 Wave 21 / `TASK-036`，登记 Hosted UI DataTable 当前页多选批量编辑的 Contracts / SDK / Core / UI 实现、`TC-069` 和 Task 3 收口状态 | Codex |
 | 2026-06-19 | 完成 Wave 20 / `TASK-030` ~ `TASK-034`：落地 Hosted UI toolbar 批量导入契约、宿主解析弹窗、payload 分发、workflow runtime 注入、结果展示和 `TC-060` 验证 | Codex |
