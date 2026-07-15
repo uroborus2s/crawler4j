@@ -7,7 +7,7 @@
 **上游输入：** `packages/crawler4j/pyproject.toml` | Git tag | 子包 `pyproject.toml` | docs-stratego 源仓导航
 **下游输出：** `release-notes.md` | `deployment-guide.md` | `docs/index.md` | `.factory/project.json`
 **关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `REQ-0401`, `NFR-002`
-**最后更新：** 2026-07-11
+**最后更新：** 2026-07-15
 
 ## 1. 规则
 
@@ -26,35 +26,36 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.4.38` | 当前仓库源码事实；为环境 Cookie 原子能力补充分阶段脱敏诊断 |
-| 根应用运行时版本 | `0.4.38` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.4.39` | 当前仓库源码事实；承接 CR-022 Hosted UI 通用 Form 能力 |
+| 根应用运行时版本 | `0.4.39` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
-| SDK | `0.4.4` | 已发布到 PyPI；包含 Hosted UI DataTable 批量 handler 静态校验，依赖 `crawler4j-contracts>=0.4.3,<0.5.0` |
-| Contracts | `0.4.3` | 已发布到 PyPI；包含 Hosted UI DataTable 多选与批量更新 schema |
+| SDK | `0.4.5` | 发布候选；增加 Hosted Field change handler 扫描与 `HostedFieldChangeEvent`，依赖 `crawler4j-contracts>=0.4.4,<0.5.0` |
+| Contracts | `0.4.4` | 发布候选；增加公共字段 `on_change`、安全 Form scope/reset 与多列 Form layout 契约 |
 | docs-stratego 主文档版本 | 待正式发布前确认 | 当前源码文档入口已把 0.4.x 作为当前主线、0.3.x 作为历史维护；发布站点切换仍需随正式发布动作确认 |
 
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前根应用源码为 `0.4.38`，但 Git tag 在本次发布前仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为当前源码版本已完成正式发布。
+- 当前根应用源码为 `0.4.39`，但 Git tag 在本次发布前仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为当前源码版本已完成正式发布。
 - 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.38`
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.39`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.4.38` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.4.39` Git tag 与正式 release 资产
 7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-15 | 将根应用 / 运行时源码版本提升到 `0.4.39`，Contracts 提升到 `0.4.4`、SDK 提升到 `0.4.5`，用于发布 CR-022 Hosted UI 通用 Form 契约与 SDK 支持 | Codex |
 | 2026-07-14 | 将根应用 / 运行时源码版本提升到 `0.4.38`，为 `env.cookie.ensure` 增加分阶段脱敏错误诊断；SDK 0.4.4 / Contracts 0.4.3 保持不变 | Codex |
 | 2026-07-13 | 将根应用 / 运行时源码版本提升到 `0.4.37`，承接环境列表创建时间展示、代理更新交互优化、手动指纹刷新校准和高风险操作确认；SDK 0.4.4 / Contracts 0.4.3 保持不变，本轮不构建桌面安装包 | Codex |
 | 2026-07-12 | 将根应用 / 运行时源码版本提升到 `0.4.36`，承接 DevLink 模块并发强制重载序列化；SDK 0.4.4 / Contracts 0.4.3 保持不变，本轮不构建桌面安装包 | Codex |

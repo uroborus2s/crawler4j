@@ -126,11 +126,17 @@ CRUD Form 可选声明通用多列布局：
 - 每次字段事件使用隔离的 UI action session，避免并发 handler 改写共享 `TaskContext.tools`。
 - handler 失败时保留当前 Form 和用户已选值，并走现有 Hosted UI 错误展示路径。
 
-## 6. 版本与本地联调
+## 6. 版本与联调
 
-本变更不发布包，也不修改版本号：Contracts 保持 `0.4.3`，SDK 保持 `0.4.4`。crawler4j workspace 的 `[tool.uv.sources]` 已直接使用本地 workspace 包。
+本契约由 Contracts `0.4.4` 与 SDK `0.4.5` 对外提供；SDK 依赖 `crawler4j-contracts>=0.4.4,<0.5.0`。crawler4j workspace 的 `[tool.uv.sources]` 继续直接使用本地 workspace 包。
 
-外部模块在正式包发布前可把虚拟环境临时指向本仓源码：
+外部模块可直接安装发布版本：
+
+```bash
+uv add 'crawler4j-contracts>=0.4.4,<0.5.0' 'crawler4j-sdk>=0.4.5,<0.5.0'
+```
+
+需要联调未发布源码时，可把虚拟环境临时指向本仓源码：
 
 ```bash
 uv pip install --python .venv/bin/python \

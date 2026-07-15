@@ -7,7 +7,7 @@
 **上游输入：** `acceptance-checklist.md` | `release-notes.md` | `version-governance.md` | `docs/04-project-development/08-operations-maintenance/deployment-guide.md`
 **下游输出：** 交付签收 | `docs/02-user-guide/admin-guide.md` | `docs/04-project-development/08-operations-maintenance/operations-runbook.md`
 **关联 ID：** `REL-005`, `REL-006`, `TASK-017`, `REQ-004`
-**最后更新：** 2026-07-11
+**最后更新：** 2026-07-15
 
 ## 1. 用途
 
@@ -34,7 +34,7 @@
 | macOS 桌面包 | 已补齐 0.4.16 内部包 | 2026-06-19 `uv run package-macos-internal-release` 已重新生成 `packages/crawler4j/dist/desktop/macos/Crawler4j.app` |
 | macOS 内部 Sparkle 更新包 | 已补齐 0.4.16 内部更新包 | 2026-06-19 已删除远端旧 `Crawler4j-0.4.16.dmg`，重新生成并上传 `packages/crawler4j/dist/updates/macos/Crawler4j-0.4.16.dmg` 与 `appcast.xml` 到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`；公网 DMG `HEAD 200`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243` |
 | Windows 桌面包 | 已具备发布脚手架，待正式批次补齐证据 | 仓库已具备 `PyInstaller onedir + Velopack` 发布链，`uv run package-windows-release` 可生成 `Setup.exe` / `.nupkg` / `releases.<channel>.json`，`uv run deploy-windows-release` 可继续通过 OpenSSH `sftp` 把 `packages/crawler4j/dist/updates/windows/` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`；但当前批次仍缺 Windows 真机签名、安装、升级留证与正式下载地址 |
-| 正式交付产物 | 部分补齐 | SDK 0.4.4 / Contracts 0.4.3 PyPI 已完成；根应用源码已提升到 0.4.38，最新已记录 macOS 0.4.16 内部更新包已重新生成并上传；0.4.38 客户端包、Git tag / GitHub release、Windows 真机安装/升级证据和正式交付签收仍需补齐 |
+| 正式交付产物 | 部分补齐 | SDK 0.4.5 / Contracts 0.4.4 wheel/sdist 已构建并通过 publish dry-run；根应用源码与 root wheel/sdist 已提升到 0.4.39；0.4.39 桌面客户端包、Git tag / GitHub release、Windows 真机安装/升级证据和正式交付签收仍需补齐 |
 
 ## 4. 使用规则
 
@@ -46,6 +46,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-15 | 根应用 / 运行时源码提升到 `0.4.39`，Contracts `0.4.4` / SDK `0.4.5` 发布候选完成构建、哈希、元数据和 publish dry-run 验证 | Codex |
 | 2026-07-14 | 根应用版本提升到 `0.4.38`，用于发布 `env.cookie.ensure` 分阶段脱敏错误诊断；SDK / Contracts 不升级 | Codex |
 | 2026-07-13 | 根应用版本提升到 `0.4.37`，用于环境管理代理与指纹手动更新交互收口；客户端包与 Windows 真机证据仍需后续补齐 | Codex |
 | 2026-07-12 | 根应用版本提升到 `0.4.36`，用于 DevLink 模块并发强制重载序列化；客户端包与 Windows 真机证据仍需后续补齐 | Codex |

@@ -495,12 +495,11 @@ CRUD Form 需要多列时，可在原有 `crud.form` 中声明：
 
 字段事件只允许 `type="ui_action"` 和 `name`，SDK 会校验 handler 的 `(context, event: HostedFieldChangeEvent)` 签名。快速连续 change 使用 latest-wins reset 语义；旧 handler 不能覆盖新选择。未声明 `on_change` 的字段保持既有行为。
 
-当前源码联调仍使用 Contracts `0.4.3` / SDK `0.4.4`，本轮没有发布新包。外部模块可临时安装本地 editable 源码：
+该能力从 Contracts `0.4.4` / SDK `0.4.5` 起正式发布。外部模块可直接安装兼容版本：
 
 ```bash
-uv pip install --python .venv/bin/python \
-  --editable /Users/uroborus/PythonProject/crawler4j/packages/crawler4j-contracts \
-  --editable /Users/uroborus/PythonProject/crawler4j/packages/crawler4j-sdk
+uv add 'crawler4j-contracts>=0.4.4,<0.5.0'
+uv add --dev 'crawler4j-sdk>=0.4.5,<0.5.0'
 ```
 
 ## 页面滚动

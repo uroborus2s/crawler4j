@@ -7,7 +7,7 @@
 **上游输入：** Git tag | `docs/04-project-development/02-discovery/current-state-analysis.md` | 本地构建结果  
 **下游输出：** 后续正式 release notes | `delivery-package.md`（待需要时补齐）  
 **关联 ID：** `REL-001`, `REL-002`, `BUG-001`, `CR-001`  
-**最后更新：** 2026-07-14
+**最后更新：** 2026-07-15
 
 ## 1. 最新已知正式发布
 
@@ -19,13 +19,13 @@
 
 ## 2. 当前仓库相对正式发布的状态
 
-- 当前工作区根应用版本：`0.4.38`
-- 当前运行时版本：`0.4.38`
+- 当前工作区根应用版本：`0.4.39`
+- 当前运行时版本：`0.4.39`
 - 最近正式发布 tag：`v0.2.0`
-- SDK 当前已发布版本：`0.4.4`
-- Contracts 当前已发布版本：`0.4.3`
-- 根应用 0.4.38 为 `env.cookie.ensure` 增加脱敏分阶段错误诊断，并承接 0.4.37 的环境管理改进；SDK 0.4.4 / Contracts 0.4.3 保持不变
-- 已按 `crawler4j-contracts 0.4.3 -> crawler4j-sdk 0.4.4` 顺序完成 PyPI 发布，并核对在线文件哈希与隔离安装结果
+- SDK 当前发布候选版本：`0.4.5`
+- Contracts 当前发布候选版本：`0.4.4`
+- 根应用 0.4.39 承接 CR-022 Hosted UI 公共字段 change、安全 Form Handle、通用 `ui.form.reset`、精确 create/update 初始化、长表单隐藏式滚动与 1–3 列响应式布局
+- 本轮按 `crawler4j-contracts 0.4.4 -> crawler4j-sdk 0.4.5` 顺序发布；正式上传前已完成两包 publish dry-run
 - SDK 当前口径已收敛为“数据库唯一入口 `ctx.db`，非数据库宿主能力继续通过 `ctx.tools.call(...)` 调用”；模块侧不再使用专用 `ctx.captcha` 字段
 - 当前 0.4.x 工作区已移除 `hooks/*.py` 生命周期运行链；模块流程控制通过 workflow 主体返回 `TaskResult`，workflow/component 可选实现 `setup(ctx, workflow)` 和 `cleanup(ctx, outcome)`，环境回收由宿主收口
 
@@ -33,25 +33,25 @@
 
 | 项目 | 结果 |
 |---|---|
-| 版本相关单测与打包配置 | 通过（2026-07-14 客户端 0.4.38 全量 `1201 passed`，`uv lock --check` 通过） |
-| Root wheel/sdist build | 通过（2026-07-14 产出 `crawler4j 0.4.38` wheel/sdist） |
-| SDK wheel/sdist build | 通过（2026-07-10 产出 `crawler4j-sdk 0.4.4` wheel/sdist，元数据依赖 Contracts `>=0.4.3,<0.5.0`） |
-| SDK publish | 通过（2026-07-10 在 Contracts 在线可见后上传 0.4.4；PyPI wheel/sdist 哈希和隔离安装通过） |
-| Contracts wheel/sdist build | 通过（2026-07-10 产出 `crawler4j-contracts 0.4.3` wheel/sdist） |
-| Contracts publish | 通过（2026-07-10 先上传 0.4.3；PyPI wheel/sdist 哈希与本地一致） |
+| 版本相关单测与打包配置 | 通过（2026-07-15 可复现聚焦回归 `175 passed`，`uv lock --check` 通过） |
+| Root wheel/sdist build | 通过（2026-07-15 产出 `crawler4j 0.4.39` wheel/sdist） |
+| SDK wheel/sdist build | 通过（2026-07-15 产出 `crawler4j-sdk 0.4.5` wheel/sdist，元数据依赖 Contracts `>=0.4.4,<0.5.0`） |
+| SDK publish | 待正式上传；publish dry-run 通过 |
+| Contracts wheel/sdist build | 通过（2026-07-15 产出 `crawler4j-contracts 0.4.4` wheel/sdist） |
+| Contracts publish | 待正式上传；publish dry-run 通过 |
 | Desktop PyInstaller / macOS Sparkle bundle | 通过（2026-06-19 删除远端旧 `Crawler4j-0.4.16.dmg` 后，`uv run package-macos-internal-release` 重新生成 `Crawler4j.app`、`Crawler4j-0.4.16.dmg`、`appcast.xml` 并上传 macOS 更新目录；公网 DMG `HEAD 200`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243`） |
-| Full test / lint / smoke | 客户端 0.4.38 全量 `1201 passed`；全仓 Ruff、`uv lock --check` 与 `git diff --check` 通过；UI smoke 沿用 0.4.37 基线 |
-| Docs markdown tree | 通过（`docs-stratego source validate --repo-path .`，`pages=86 contracts=0`） |
+| Full test / lint / smoke | 全量 unit `1235 passed`，另有 13 项既有沙箱/只读数据库环境基线；全仓 Ruff、`uv lock --check`、UI smoke 与 `git diff --check` 通过 |
+| Docs markdown tree | 通过（`docs-stratego source validate --repo-path .`，`pages=87 contracts=0`） |
 
 ## 4. 当前不建议直接发布的原因
 
-- `0.4.38` 对应的桌面安装包、Git tag、正式 GitHub release 与交付批次仍待后续完成
+- `0.4.39` 对应的桌面安装包、Git tag、正式 GitHub release 与交付批次仍待后续完成
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 复验 `0.4.38` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.4.39` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -60,6 +60,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-15 | 将 Contracts 提升到 0.4.4、SDK 提升到 0.4.5、根应用提升到 0.4.39；三包构建、产物元数据/哈希、publish dry-run 与发布前质量门通过，等待正式 PyPI 上传 | Codex |
 | 2026-07-15 | 完成 CR-022 Hosted UI 公共字段 change、Form scope、安全 handle、`ui.form.reset`、create default、长表单滚动、1–3 列响应式 Form 布局及共享 label/input 对齐线；Contracts 0.4.3 / SDK 0.4.4 版本保持不变，未发布 | Codex |
 | 2026-07-14 | 将根应用 / 运行时源码版本提升到 0.4.38，为 `env.cookie.ensure` 增加不泄露 API Key 和 Cookie 值的分阶段错误诊断；SDK / Contracts 版本保持不变 | Codex |
 | 2026-07-13 | 将根应用 / 运行时源码版本提升到 0.4.37，承接环境管理代理与指纹手动更新交互收口；本轮只提交推送源码版本，不构建桌面安装包 | Codex |

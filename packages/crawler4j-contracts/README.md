@@ -1,6 +1,6 @@
 # crawler4j-contracts
 
-`crawler4j-contracts` 是 Core、SDK 与外部模块共享的稳定运行时契约包，当前源码版本基线为 `0.4.3`。
+`crawler4j-contracts` 是 Core、SDK 与外部模块共享的稳定运行时契约包，当前源码版本基线为 `0.4.4`。
 
 ## 包含内容
 
@@ -9,6 +9,7 @@
 - 提供 `DatabaseClient`，模块数据唯一正式入口为 `TaskContext.db`
 - 提供 Hosted UI 页面 schema 类型 `PageSchema` 及组件/action/CRUD TypedDict，并提供表格查询契约 `HostedDataTableQuery`、泛型 `HostedDataTableQueryResult[RowT]`、`HostedDataTableSortSpec` 与 `QueryCallback`，`HostedDataTableQuery.to_query(...)` 可通过单字段 `search_transform/sort_transform/filter_transform` 把搜索、排序、分页和导航参数转换为 rows/count 查询回调，`HostedDataTableQuery.to_result(...)` 与 `HostedDataTableQueryResult.from_query(...)` 可把仓储记录归一化为 UI 表格结果；`query_handler` 不接收 `table_id`，返回值不使用普通 `dict`
 - Hosted UI `DataTable` 支持顶层 `selection_mode="multi"` 与 CRUD `bulk_update_handler` / `toolbar.bulk_update`，批量 handler 接收保序去重的主键数组和表单 payload；业务校验与数据库写入仍由模块负责
+- Hosted UI `Input` / `Select` 与 CRUD Form 字段支持可选 `on_change={"type":"ui_action","name":...}`；handler 接收 `HostedFieldChangeEvent`，Form scope 暴露短生命周期 opaque `form_id`，模块可主动调用 `ui.form.reset(form_id, initial_values)`
 - 提供 `core-native-v2` 装饰器：`@interface`、`@component`、`@workflow`、`@page`、`@page_action`、`@ui_action`、`@data_table`、`@data_view`、`@env_candidates`、`@env_cleanup_candidates`
 - 提供 `EnvCandidates` 链式环境候选查询 DSL，支持 `filter()`、`exclude()`、`intersect()`、`union()`、`minus()`、`order()`、`limit()` 与 `list(ctx)`
 - 提供对象装配注解 helper：`object_param(...)`、`object_inject(...)`。它们可用于 component 类属性或 `__init__` 参数注解，最终归一为 `ParameterSpec` / `InjectSpec`

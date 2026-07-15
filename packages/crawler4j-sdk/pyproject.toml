@@ -1,11 +1,11 @@
 [project]
 name = "crawler4j-sdk"
-version = "0.4.4"
+version = "0.4.5"
 description = "Crawler4j module SDK and CLI for building standard crawler4j modules"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "crawler4j-contracts>=0.4.3,<0.5.0",
+    "crawler4j-contracts>=0.4.4,<0.5.0",
     "aiohttp>=3.13.0",
     "pyyaml>=6.0.3",
 ]

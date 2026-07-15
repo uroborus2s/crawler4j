@@ -4,10 +4,11 @@
 
 ## 需要后续动作
 
-- `CR-022`：首轮 Hosted UI Form 能力已提交为 `86a01b1a`，共享 label/input 视觉增量已提交为 `3e918abf`；renderer-only 隐藏式长 Form 滚动条增量已完成 TDD、独立 review `approved`（100/100）和最终 gate（renderer 36、目标集 202、邻近 586 passed；全量 13 项范围外环境基线已登记），按项目 AGENTS 进入本地提交。
+- `TASK-042`：Contracts 0.4.4 / SDK 0.4.5 / 客户端 0.4.39 发布候选已通过构建、dry-run 和发布前 gate；待 PyPI 正式上传、在线哈希/隔离安装验证、最终提交和 `origin/0.4.0` 推送。
+- `CR-022`：Hosted UI Form 能力、共享 label/input 网格和隐藏式滚动条已完成实现、TDD、独立 review 与本地提交；由 `TASK-042` 负责包发布。
 - `CR-021`：公共下拉、移除随机 IP、VirtualBrowser 清缓存和指纹浏览器 ID 列已实现；修复两项独立评审反馈后以 `94/100` 通过复评，待本地中文提交。
 - `TASK-036-managed-dataset-bulk-field-update`：`CORE_PACKAGES_RELEASED`；接入真实业务模块并补 E2E。
-- `TASK-039-bump-client-0.4.30-and-push`：`verification_passed`；ledger 下一动作为 `none`，桌面包和跨平台发布另行处理。
+- `TASK-039-bump-client-0.4.30-and-push`：历史 `verification_passed`；当前客户端版本由 `TASK-042` 推进到 0.4.39，桌面包和跨平台发布仍另行处理。
 - 0.4.x 发布收口：补齐 `ctrip` 真实站点 E2E、Windows 真机证据、Git tag / GitHub release 资产和正式交付批次。
 
 ## 最近已关闭

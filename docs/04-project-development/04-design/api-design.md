@@ -137,7 +137,7 @@
 | 安全 | handle 绑定 module/page/renderer-session/form/TTL；非法、过期、关闭或越权统一 `FORM_HANDLE_REJECTED` |
 | 并发 | change 绑定 Form revision，旧 reset 返回 `FORM_EVENT_STALE` 并被 renderer 丢弃；action 使用隔离 session |
 | 错误 | 非 Form reset 返回 `FORM_SCOPE_UNAVAILABLE`；handler 失败保留当前 Form 并走现有错误展示路径 |
-| 版本 | Contracts `0.4.3`、SDK `0.4.4` 本轮不变且不发布；本地 workspace 使用 editable source |
+| 版本 | Contracts `0.4.4`、SDK `0.4.5` 对外发布；SDK 依赖 `crawler4j-contracts>=0.4.4,<0.5.0` |
 | 设计文档 | `hosted-ui-form-field-events.md` |
 | 关联项 | `CR-022`, `TASK-041` |
 
