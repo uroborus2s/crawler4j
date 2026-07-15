@@ -30,14 +30,14 @@
       "details": "crawler4j 0.4.39 wheel/sdist built on 2026-07-15; preservation now stays outside the Hatch package root, the post-build manifest gate passed, and the clean sdist contains 529 entries with no preserved desktop subtree"
     },
     "sdk_build": {
-      "command": "uv run build crawler4j-sdk && uv run publish crawler4j-sdk --dry-run",
-      "result": "release_candidate_passed",
-      "details": "crawler4j-sdk 0.4.5 wheel/sdist built on 2026-07-15; METADATA requires crawler4j-contracts>=0.4.4,<0.5.0 and publish dry-run passed; formal upload pending"
+      "command": "uv run publish crawler4j-sdk",
+      "result": "passed",
+      "details": "crawler4j-sdk 0.4.5 published to PyPI on 2026-07-15 after Contracts 0.4.4; online hashes, dependency metadata and isolated PyPI installation passed"
     },
     "contracts_build": {
-      "command": "uv run build crawler4j-contracts && uv run publish crawler4j-contracts --dry-run",
-      "result": "release_candidate_passed",
-      "details": "crawler4j-contracts 0.4.4 wheel/sdist built on 2026-07-15 and publish dry-run passed; formal upload pending"
+      "command": "uv run publish crawler4j-contracts",
+      "result": "passed",
+      "details": "crawler4j-contracts 0.4.4 published to PyPI on 2026-07-15; JSON API returned both files with matching hashes and isolated installation passed"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",

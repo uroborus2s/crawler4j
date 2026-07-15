@@ -40,7 +40,7 @@
 ## 4. 当前阻塞项
 
 1. `ctrip` 真实站点 E2E 仍未按 `ctrip-real-site-e2e-closeout.md` 完成本轮 DevLink + ZIP 双链回放并留证；当前只复验了 DevLink 活跃状态、fresh ZIP 预检和历史真实登录日志。
-2. 当前 `0.4.39` 对应的桌面安装包、Git tag / GitHub release 资产仍待后续创建；SDK 0.4.5 / Contracts 0.4.4 正在执行独立 PyPI 发布 gate，最新已记录 macOS 0.4.16 客户端升级包已重新生成并上传。
+2. 当前 `0.4.39` 对应的桌面安装包、Git tag / GitHub release 资产仍待后续创建；SDK 0.4.5 / Contracts 0.4.4 已完成 PyPI 发布、在线哈希与隔离安装验证，最新已记录 macOS 0.4.16 客户端升级包已重新生成并上传。
 3. 当前虽已具备 Windows `PyInstaller onedir + Velopack` 发布链，但本轮仍缺 Windows 真机签名、安装、升级留证与正式下载地址，不能声称“Windows 交付包已放行”。
 
 ## 5. 变更记录

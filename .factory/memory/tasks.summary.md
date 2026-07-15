@@ -4,7 +4,7 @@
 
 ## 需要后续动作
 
-- `TASK-042`：Contracts 0.4.4 / SDK 0.4.5 / 客户端 0.4.39 发布候选已通过构建、dry-run 和发布前 gate；待 PyPI 正式上传、在线哈希/隔离安装验证、最终提交和 `origin/0.4.0` 推送。
+- `TASK-042`：Contracts 0.4.4 / SDK 0.4.5 已发布并通过在线哈希、依赖元数据和隔离安装验证；客户端 0.4.39 已构建；待最终 evidence commit 和 `origin/0.4.0` 推送。
 - `CR-022`：Hosted UI Form 能力、共享 label/input 网格和隐藏式滚动条已完成实现、TDD、独立 review 与本地提交；由 `TASK-042` 负责包发布。
 - `CR-021`：公共下拉、移除随机 IP、VirtualBrowser 清缓存和指纹浏览器 ID 列已实现；修复两项独立评审反馈后以 `94/100` 通过复评，待本地中文提交。
 - `TASK-036-managed-dataset-bulk-field-update`：`CORE_PACKAGES_RELEASED`；接入真实业务模块并补 E2E。

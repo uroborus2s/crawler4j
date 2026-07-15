@@ -1,7 +1,7 @@
 # TASK-042 Contracts 0.4.4 / SDK 0.4.5 / Client 0.4.39 发布证据
 
 - 日期：2026-07-15（Asia/Shanghai）
-- 状态：READY_TO_PUBLISH
+- 状态：PYPI_PUBLISHED_PENDING_REMOTE_PUSH
 - 范围：Contracts / SDK 发布到 PyPI；客户端源码版本升级与 root build；Git 分支推送
 
 ## PyPI 发布前检查
@@ -50,7 +50,21 @@ Contracts 与 SDK 的 `uv run publish <package> --dry-run` 均成功，每个发
 - root sdist 污染修复：TDD RED/GREEN、打包回归 `63 passed`；重建 sdist 为 37,279,993 bytes / 529 entries，不含 `desktop` 或临时目录。证据：`root-sdist-contamination-fix-tdd.md`。
 - `uv run ruff check .`、`uv lock --check`、`.factory/project.json` JSON、UI smoke、docs-stratego（`pages=87 contracts=0`）与 `git diff --check` 通过。
 
+## PyPI 正式发布与在线验证
+
+发布顺序严格为 Contracts -> SDK：
+
+1. `uv run publish crawler4j-contracts` exit `0`，上传 0.4.4 wheel/sdist。
+2. PyPI JSON API 返回 Contracts 0.4.4；两个在线 SHA256 与本地产物完全一致。
+3. `uv run publish crawler4j-sdk` exit `0`，上传 0.4.5 wheel/sdist。
+4. PyPI JSON API 返回 SDK 0.4.5；两个在线 SHA256 与本地产物完全一致；`Requires-Dist` 为 `crawler4j-contracts<0.5.0,>=0.4.4`。
+5. 从 `/private/tmp` 执行隔离 PyPI 安装，输出 Contracts `0.4.4`、SDK `0.4.5`，且导入路径位于隔离 uv archive 的 `site-packages`，不是 workspace editable source。
+
+PyPI 页面：
+
+- `https://pypi.org/project/crawler4j-contracts/0.4.4/`
+- `https://pypi.org/project/crawler4j-sdk/0.4.5/`
+
 ## 待补证据
 
-- Contracts -> SDK 正式发布、PyPI 在线哈希与隔离安装。
-- release commit 与 `origin/0.4.0` 推送结果。
+- 最终 release evidence commit 与 `origin/0.4.0` 推送结果。

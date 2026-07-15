@@ -39,7 +39,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
-| 2026-07-15 | `TASK-042` 发布准备：Contracts 0.4.4、SDK 0.4.5、根应用 0.4.39 版本与依赖锁定；修复 root sdist 临时 desktop bundle 污染并增加 manifest gate；三包 wheel/sdist、元数据/哈希、两包 publish dry-run、聚焦 `175 passed`、全仓 Ruff/lock/UI smoke/docs/diff gate 通过；全量 `1235 passed`，另有 13 项既有沙箱/只读数据库环境基线 | Codex |
+| 2026-07-15 | `TASK-042`：Contracts 0.4.4、SDK 0.4.5、根应用 0.4.39 版本与依赖锁定；修复 root sdist 临时 desktop bundle 污染并增加 manifest gate；两包按依赖顺序发布到 PyPI，在线哈希、SDK 依赖元数据和隔离安装通过；聚焦 `175 passed`，全量 `1235 passed` 加 13 项既有环境基线，静态与文档 gate 通过 | Codex |
 | 2026-07-14 | 根应用 / 运行时版本提升到 `0.4.38`：`env.cookie.ensure` 在持久化读取、全量替换和复核失败时输出脱敏的 stage、env_id、provider、browser_id、异常类型和异常消息；全量 `1201 passed`、全仓 Ruff、`uv lock --check`、Root wheel/sdist build 与 diff 检查通过 | Codex |
 | 2026-07-13 | 根应用 / 运行时版本提升到 `0.4.37`：环境列表以创建时间替换类型列，代理更新拆分为明确应用所选 IP 与随机更换，手动刷新指纹复用创建期随机校准与验收，高风险代理和指纹操作增加确认门；全量 `1198 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
 | 2026-07-12 | 根应用 / 运行时版本提升到 `0.4.36`：DevLink 模块描述符的并发强制重载按模块串行化，避免扫描期间清空 `sys.modules` 导致间歇性导入失败；全量 `1190 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |

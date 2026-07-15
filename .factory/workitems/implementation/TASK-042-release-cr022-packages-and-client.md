@@ -1,6 +1,6 @@
 # TASK-042 发布 CR-022 Contracts / SDK 并升级客户端
 
-- 状态：IN_PROGRESS
+- 状态：PYPI_PUBLISHED_PENDING_REMOTE_PUSH
 - 负责人：Codex
 - 优先级：P0
 - 关联 ID：`TASK-042`, `CR-022`, `REQ-013`, `API-023`

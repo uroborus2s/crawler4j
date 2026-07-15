@@ -14,7 +14,7 @@
 - 版本/打包聚焦回归：`65 passed`。
 - 静态与工程门：Ruff、`uv lock --check`、`.factory/project.json` JSON、docs 校验、`git diff --check` -> passed。
 - 运行与产物门：UI smoke、root build、wheel METADATA 版本核对 -> passed。
-- SDK / Contracts：0.4.4 / 0.4.5 构建与 publish dry-run通过；正式 PyPI 上传、JSON API 哈希核对和隔离安装待完成。
+- SDK / Contracts：0.4.4 / 0.4.5 构建、publish dry-run、正式 PyPI 上传、JSON API 哈希/依赖元数据核对和隔离安装通过。
 
 ## 未闭环项
 

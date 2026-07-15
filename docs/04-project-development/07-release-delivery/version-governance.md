@@ -29,8 +29,8 @@
 | 根应用包版本 | `0.4.39` | 当前仓库源码事实；承接 CR-022 Hosted UI 通用 Form 能力 |
 | 根应用运行时版本 | `0.4.39` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
-| SDK | `0.4.5` | 发布候选；增加 Hosted Field change handler 扫描与 `HostedFieldChangeEvent`，依赖 `crawler4j-contracts>=0.4.4,<0.5.0` |
-| Contracts | `0.4.4` | 发布候选；增加公共字段 `on_change`、安全 Form scope/reset 与多列 Form layout 契约 |
+| SDK | `0.4.5` | 已发布到 PyPI；增加 Hosted Field change handler 扫描与 `HostedFieldChangeEvent`，依赖 `crawler4j-contracts>=0.4.4,<0.5.0` |
+| Contracts | `0.4.4` | 已发布到 PyPI；增加公共字段 `on_change`、安全 Form scope/reset 与多列 Form layout 契约 |
 | docs-stratego 主文档版本 | 待正式发布前确认 | 当前源码文档入口已把 0.4.x 作为当前主线、0.3.x 作为历史维护；发布站点切换仍需随正式发布动作确认 |
 
 ## 3. 为什么这样定义
