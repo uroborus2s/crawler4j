@@ -479,7 +479,7 @@ def handle_field_change(context: TaskContext, event: HostedFieldChangeEvent) -> 
 
 Form 事件包含组件/字段标识、`value`、`previous_value` 和 `scope.kind/form_id/mode/values`；Form 外事件的 scope 只有 `{"kind":"standalone"}`。模块只有在 Form 事件中才能使用 handle。reset 会用模块传入的整张 `initial_values` 同时替换当前值和初始值，并清理 dirty/validation；它不会提交，也不会调用 create/update handler。
 
-create Form 用 column `default` 初始化，update Form 优先使用当前 row 实际值；两者都按键存在性保留 `0`、`False`、`""` 和字面量 `"undefined"`。字段很多时表单内容区域可滚动，确认/取消按钮保持可见。
+create Form 用 column `default` 初始化，update Form 优先使用当前 row 实际值；两者都按键存在性保留 `0`、`False`、`""` 和字面量 `"undefined"`。字段很多时表单内容区域可滚动但不显示滚动槽，仍支持滚轮、触控板和键盘滚动；确认/取消按钮保持可见。
 
 CRUD Form 需要多列时，可在原有 `crud.form` 中声明：
 

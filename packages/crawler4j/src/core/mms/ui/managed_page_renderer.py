@@ -1138,7 +1138,7 @@ class ManagedPageRenderer(QWidget):
         form_scroll.setWidgetResizable(True)
         form_scroll.setFrameShape(QFrame.Shape.NoFrame)
         form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        form_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        form_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         form_scroll.setWidget(form_container)
         layout.addWidget(form_scroll, 1)
 

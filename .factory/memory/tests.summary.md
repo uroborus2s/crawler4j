@@ -5,6 +5,7 @@
 ## 最近验证
 
 - CR-022 renderer 视觉增量：共享 label/input 物理列 TDD RED `4 failed`，GREEN `4 passed`；独立 review 补充超大 gap geometry 与合法中等 gap 保留两组 RED/GREEN；最终 renderer `36 passed`，七文件 `202 passed`，SDK/MMS/UI `586 passed`，全仓 Ruff/lock/docs/diff/scope 通过；全量 `1234 passed`，另有 13 项既有沙箱/只读 DB 环境基线。证据：`.factory/workitems/CR-022/evidence/shared-form-columns-final-verification.md`。
+- CR-022 隐藏式滚动增量：TDD RED `1 failed`、GREEN `1 passed`；renderer `36 passed`、七文件 `202 passed`、SDK/MMS/UI `586 passed`，Ruff/lock/docs/diff 通过；全量 `1234 passed`，另有相同 13 项既有沙箱/只读 DB 环境基线。证据：`.factory/workitems/CR-022/evidence/hidden-form-scrollbar-final-verification.md`。
 - CR-022 Hosted UI Form：目标集双方 `199 passed`；SDK/MMS/UI 相关套件 `583 passed`；全量 unit `1231 passed`、另有 13 项稳定的范围外沙箱/只读 DB 基线失败；全仓 Ruff、lock、docs、diff gate 通过。独立 review `approved`（98/100）。
 - CR-020 目标测试：`122 passed`；REM/ATM 相邻回归：`517 passed`。
 - 全量 unit：`uv run pytest packages/crawler4j/tests/unit -q -p no:cacheprovider` -> `1191 passed`。

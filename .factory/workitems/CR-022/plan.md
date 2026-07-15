@@ -209,6 +209,18 @@ result = context.tools.call(
 - [x] 独立 review RED：超大合法 gap 下 input geometry 超出无横向滚动的 viewport。
 - [x] review fix GREEN：内部 `6px` 与声明式逻辑列 gap 分离；超大 gap 可访问性和宽屏 `gap=100` 保留测试分别转绿。
 
+## 任务 2B：Renderer 长 Form 隐藏式滚动条
+
+**任务切片：**
+
+- 根因：CRUD Form 的垂直 `QScrollArea` 使用 `ScrollBarAsNeeded`，长表单会显示平台原生滚动槽和箭头。
+- 最小实现：水平与垂直策略统一为 `ScrollBarAlwaysOff`；保留同一个 `QScrollArea`、内容尺寸和滚动范围。
+- TDD：35 字段 Form 先断言双向滚动条隐藏而失败，再断言垂直范围非零且可改变滚动位置。
+- 回归：按钮继续位于滚动区外，create/update/default/on_change/reset、多列布局与字段提交不变。
+
+- [x] RED：垂直策略实际为 `ScrollBarAsNeeded`，隐藏式滚动断言失败。
+- [x] GREEN：垂直策略改为 `ScrollBarAlwaysOff`，长表单仍保留有效滚动范围。
+
 ## 任务 3：正式文档、证据与收口
 
 **任务切片：**

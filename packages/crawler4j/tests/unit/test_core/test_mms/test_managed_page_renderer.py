@@ -6,7 +6,7 @@ from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from PyQt6.QtCore import QItemSelectionModel, QPoint, Qt
+from PyQt6.QtCore import QItemSelectionModel, QPoint, QRect, Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -2539,7 +2539,10 @@ def test_crud_form_shared_columns_align_labels_and_inputs_across_rows(bulk_updat
         assert first_input.geometry().left() == second_input.geometry().left()
 
 
-def test_crud_form_many_fields_are_scrollable_with_visible_action_row(bulk_update_page, qtbot):
+def test_crud_form_many_fields_are_scrollable_with_hidden_scrollbars_and_visible_action_row(
+    bulk_update_page,
+    qtbot,
+):
     page = bulk_update_page
     columns = [
         {"key": f"field_{index}", "label": f"字段 {index}", "type": "text", "default": f"value-{index}"}
@@ -2568,6 +2571,11 @@ def test_crud_form_many_fields_are_scrollable_with_visible_action_row(bulk_updat
     assert len(widgets) == 35
     assert scroll is not None
     assert scroll.widgetResizable() is True
+    assert (
+        scroll.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
+    assert scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     grid = scroll.widget().layout()
     assert isinstance(grid, QGridLayout)
     assert dialog._hosted_form_layout_columns == 3
@@ -2581,6 +2589,17 @@ def test_crud_form_many_fields_are_scrollable_with_visible_action_row(bulk_updat
     assert confirm is not None and cancel is not None
     assert not scroll.isAncestorOf(confirm)
     assert not scroll.isAncestorOf(cancel)
+
+    dialog.resize(dialog.maximumWidth(), 420)
+    dialog.show()
+    vertical_scrollbar = scroll.verticalScrollBar()
+    qtbot.waitUntil(lambda: vertical_scrollbar.maximum() > 0)
+    scroll.setFocus()
+    qtbot.keyClick(scroll, Qt.Key.Key_PageDown)
+    assert vertical_scrollbar.value() > 0
+    vertical_scrollbar.setValue(0)
+    vertical_scrollbar.setValue(1)
+    assert vertical_scrollbar.value() == 1
 
 
 def test_crud_form_layout_downgrades_columns_on_narrow_screen(
@@ -2641,7 +2660,14 @@ def test_crud_form_layout_downgrades_columns_on_narrow_screen(
 def test_crud_form_layout_clamps_large_valid_gap_to_screen_geometry(
     bulk_update_page,
     qtbot,
+    monkeypatch,
 ):
+    class FixedScreen:
+        @staticmethod
+        def availableGeometry() -> QRect:
+            return QRect(0, 0, 800, 800)
+
+    monkeypatch.setattr(bulk_update_page, "screen", lambda: FixedScreen())
     component = _field_change_component()
     component["crud"]["form"]["layout"]["gap"] = 2**31
 

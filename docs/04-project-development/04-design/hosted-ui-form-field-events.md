@@ -103,7 +103,7 @@ context.tools.call(
 
 成功返回 `{"ok": True}`。`initial_values` 是整张 Form 的新初始映射：Core 用它同时重建当前值和初始值，清除 dirty 与 validation 状态，但不提交，不调用 CRUD handler，也不计算默认值。`0`、`False`、`""` 和字面量 `"undefined"` 按原值保留。未知字段以 `FORM_INITIAL_VALUES_INVALID` 拒绝，不做模糊忽略。
 
-Form 初次打开时，create 模式读取 DataTable column 的 `default`；update 模式优先读取当前 row 的实际字段值。长 Form 使用内部滚动容器，操作按钮保持在滚动区外。
+Form 初次打开时，create 模式读取 DataTable column 的 `default`；update 模式优先读取当前 row 的实际字段值。长 Form 使用隐藏水平/垂直滚动槽的内部滚动容器，滚轮、触控板、键盘和程序化滚动仍有效；操作按钮保持在滚动区外。
 
 CRUD Form 可选声明通用多列布局：
 

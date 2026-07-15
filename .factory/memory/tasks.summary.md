@@ -4,7 +4,7 @@
 
 ## 需要后续动作
 
-- `CR-022`：首轮 Hosted UI Form 能力已提交为 `86a01b1a`；renderer-only 共享 label/input 物理列视觉增量已完成 TDD、独立 review `approved`（100/100）和最终 gate（renderer 36、目标集 202、邻近 586 passed；全量 13 项范围外环境基线已登记），按项目 AGENTS 进入本地提交。
+- `CR-022`：首轮 Hosted UI Form 能力已提交为 `86a01b1a`，共享 label/input 视觉增量已提交为 `3e918abf`；renderer-only 隐藏式长 Form 滚动条增量已完成 TDD、独立 review `approved`（100/100）和最终 gate（renderer 36、目标集 202、邻近 586 passed；全量 13 项范围外环境基线已登记），按项目 AGENTS 进入本地提交。
 - `CR-021`：公共下拉、移除随机 IP、VirtualBrowser 清缓存和指纹浏览器 ID 列已实现；修复两项独立评审反馈后以 `94/100` 通过复评，待本地中文提交。
 - `TASK-036-managed-dataset-bulk-field-update`：`CORE_PACKAGES_RELEASED`；接入真实业务模块并补 E2E。
 - `TASK-039-bump-client-0.4.30-and-push`：`verification_passed`；ledger 下一动作为 `none`，桌面包和跨平台发布另行处理。
