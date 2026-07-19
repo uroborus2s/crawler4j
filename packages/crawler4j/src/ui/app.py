@@ -1,6 +1,7 @@
 """UI 应用入口。"""
 
 import asyncio
+import json
 import runpy
 import sys
 from collections.abc import Sequence
@@ -17,6 +18,7 @@ from src.utils.paths import get_app_data_dir
 
 EMBEDDED_DEBUG_WORKER_FLAG = "--crawler4j-debug-worker"
 EMBEDDED_DEBUGPY_ADAPTER_FLAG = "--crawler4j-debugpy-adapter"
+HOST_HTTP_RUNTIME_CHECK_FLAG = "--crawler4j-verify-http-runtime"
 DEFAULT_WORKER_MODULE = "src.core.debug.worker_entry"
 
 
@@ -202,9 +204,23 @@ def _run_embedded_debugpy_adapter_if_requested(argv: Sequence[str]) -> int | Non
     return _run_embedded_debugpy_adapter(adapter_args, executable=argv[0])
 
 
+def _run_host_http_runtime_check_if_requested(argv: Sequence[str]) -> int | None:
+    if len(argv) < 2 or argv[1] != HOST_HTTP_RUNTIME_CHECK_FLAG:
+        return None
+
+    from src.core.system.http_runtime import verify_host_http_runtime
+
+    result = verify_host_http_runtime()
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """启动应用。"""
     argv_list = list(sys.argv if argv is None else argv)
+    http_runtime_exit_code = _run_host_http_runtime_check_if_requested(argv_list)
+    if http_runtime_exit_code is not None:
+        return http_runtime_exit_code
     embedded_worker_exit_code = _run_embedded_debug_worker_if_requested(argv_list)
     if embedded_worker_exit_code is not None:
         return embedded_worker_exit_code

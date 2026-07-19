@@ -8,7 +8,7 @@
 2. 通过 `ctx.db` 使用唯一数据库入口
 3. 通过 `ctx.tools` 调用非数据库宿主能力
 
-模块不直接 import Core 内部实现，也不依赖 `crawler4j-sdk` 参与运行。
+模块不直接 import Core 内部实现或宿主第三方实现包，也不依赖 `crawler4j-sdk` 参与运行。
 
 ## 装饰器扫描
 
@@ -166,9 +166,29 @@ ctx.db.batch().upsert("accounts", [{"account_id": "A001", "status": "ready"}]).a
 |---|---|
 | 浏览器交互 | `browser.goto`、`browser.click`、`browser.hover`、`browser.type`、`browser.press`、`browser.drag`、`browser.scroll`、`browser.pause` |
 | 环境与代理 | `env.get_proxy`、`env.set_proxy`、`env.cookie.ensure`、`ip_pool.pick_proxy` |
+| HTTP 请求 | `http.request` |
 | 验证码 | `captcha.match_slider`、`captcha.match_click_targets` |
 
 `ctx.tools` 不注册 `db.*`。数据库能力全部走 `ctx.db`。
+
+必须使用 HTTP/2 的请求由宿主统一发送：
+
+```python
+response = await ctx.tools.call(
+    "http.request",
+    method="POST",
+    url=url,
+    headers=header_items,
+    content=body_bytes,
+    proxy_url=proxy_url,
+    http2=True,
+    require_http2=True,
+    follow_redirects=False,
+    timeout=30.0,
+)
+```
+
+`http.request` 只在 full runtime surface 可用。`headers` 接受 mapping 或保序二元组序列；返回 mapping 包含 `status_code`、保留重复项的 `headers`、已解码 `content` bytes 和 `http_version`。模块负责检查业务状态码及解析 content。`require_http2=True` 会拒绝 HTTP/1.1 降级；宿主固定不读取进程代理。模块不得直接 import 或安装 `httpx/h2/brotli`。
 
 读取当前环境绑定代理时使用：
 

@@ -6,8 +6,8 @@
 **主要读者：** 发布负责人 | Tech Lead | Dev | QA  
 **上游输入：** `packages/crawler4j/pyproject.toml` | Git tag | 子包 `pyproject.toml` | docs-stratego 源仓导航
 **下游输出：** `release-notes.md` | `deployment-guide.md` | `docs/index.md` | `.factory/project.json`
-**关联 ID：** `CR-001`, `TASK-004`, `REQ-004`, `REQ-0401`, `NFR-002`
-**最后更新：** 2026-07-15
+**关联 ID：** `CR-001`, `CR-023`, `TASK-004`, `TASK-043`, `REQ-004`, `REQ-014`, `REQ-0401`, `NFR-002`
+**最后更新：** 2026-07-19
 
 ## 1. 规则
 
@@ -26,8 +26,8 @@
 
 | 对象 | 当前值 | 说明 |
 |---|---|---|
-| 根应用包版本 | `0.4.39` | 当前仓库源码事实；承接 CR-022 Hosted UI 通用 Form 能力 |
-| 根应用运行时版本 | `0.4.39` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
+| 根应用包版本 | `0.4.40` | 当前仓库源码事实；承接 CR-023 宿主统一 HTTP/2/Brotli 能力 |
+| 根应用运行时版本 | `0.4.40` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
 | SDK | `0.4.5` | 已发布到 PyPI；增加 Hosted Field change handler 扫描与 `HostedFieldChangeEvent`，依赖 `crawler4j-contracts>=0.4.4,<0.5.0` |
 | Contracts | `0.4.4` | 已发布到 PyPI；增加公共字段 `on_change`、安全 Form scope/reset 与多列 Form layout 契约 |
@@ -36,25 +36,26 @@
 ## 3. 为什么这样定义
 
 - 过去的问题不是“版本号多少”，而是同一份仓库里同时存在根包版本、运行时版本和 tag 口径漂移。
-- 当前根应用源码为 `0.4.39`，但 Git tag 在本次发布前仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为当前源码版本已完成正式发布。
+- 当前根应用源码为 `0.4.40`，但 Git tag 在本次发布前仍停留在 `v0.2.0`；如果不显式分层，维护者会误以为当前源码版本已完成正式发布。
 - 版本治理文档的职责不是制造第二事实源，而是明确“当前源码版本”和“最近正式发布”之间的关系。
 
 ## 4. 发布前动作
 
 在下一次正式发布根应用前，至少完成：
 
-1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.39`
+1. 确认 `packages/crawler4j/pyproject.toml`、运行时版本显示和 README 仍统一指向目标正式版本 `0.4.40`
 2. 更新 `docs/04-project-development/07-release-delivery/release-notes.md`
 3. 复验 `uv run pytest -q`
 4. 复验 `uv run python scripts/smoke_test_ui.py`
 5. 复验 Root / SDK / Contracts build
-6. 为根应用补打对应 `0.4.39` Git tag 与正式 release 资产
+6. 为根应用补打对应 `0.4.40` Git tag 与正式 release 资产，并在每个目标平台执行 `--crawler4j-verify-http-runtime`
 7. 若发布会切换文档主版本，则同步更新 `docs/index.md`、对应 `version.yaml` 和 docs-stratego 历史版本入口
 
 ## 5. 变更记录
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-19 | 将根应用 / 运行时源码版本提升到 `0.4.40`，新增 `API-024 http.request`，宿主内部纳入 HTTP/2/Brotli 依赖，并完成 wheel 隔离安装与 macOS PyInstaller 运行时检查 | Codex |
 | 2026-07-15 | 将根应用 / 运行时源码版本提升到 `0.4.39`，Contracts 提升到 `0.4.4`、SDK 提升到 `0.4.5`，用于发布 CR-022 Hosted UI 通用 Form 契约与 SDK 支持 | Codex |
 | 2026-07-14 | 将根应用 / 运行时源码版本提升到 `0.4.38`，为 `env.cookie.ensure` 增加分阶段脱敏错误诊断；SDK 0.4.4 / Contracts 0.4.3 保持不变 | Codex |
 | 2026-07-13 | 将根应用 / 运行时源码版本提升到 `0.4.37`，承接环境列表创建时间展示、代理更新交互优化、手动指纹刷新校准和高风险操作确认；SDK 0.4.4 / Contracts 0.4.3 保持不变，本轮不构建桌面安装包 | Codex |

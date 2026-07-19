@@ -11,23 +11,23 @@
   "validated_commands": {
     "tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit -q -p no:cacheprovider",
-      "result": "partial",
-      "details": "1235 passed on 2026-07-15 for crawler4j 0.4.39 after the root sdist contamination regression was added; 13 known sandbox/read-only database environment-baseline failures were reproduced, while CR-022 and version/packaging focused tests passed"
+      "result": "passed",
+      "details": "1265 passed on 2026-07-19 for crawler4j 0.4.40, including API-024 host HTTP tool, runtime dependency, packaging and existing module installation regressions"
     },
     "docs": {
       "command": "uvx --from docs-stratego docs-stratego source validate --repo-path .",
       "result": "passed",
-      "details": "passed on 2026-07-15 with pages=87 contracts=0"
+      "details": "passed on 2026-07-19 with pages=87 contracts=0"
     },
     "lint": {
       "command": "uv run ruff check .",
       "result": "passed",
-      "details": "uv run ruff check . passed on 2026-07-15 for the crawler4j 0.4.39 / Contracts 0.4.4 / SDK 0.4.5 release candidate; historical manual/debug/verify/analyze scripts remain excluded from the default lint gate"
+      "details": "uv run ruff check . passed on 2026-07-19 for crawler4j 0.4.40 / Contracts 0.4.4 / SDK 0.4.5; historical manual/debug/verify/analyze scripts remain excluded from the default lint gate"
     },
     "root_build": {
       "command": "uv run build crawler4j",
       "result": "passed",
-      "details": "crawler4j 0.4.39 wheel/sdist built on 2026-07-15; preservation now stays outside the Hatch package root, the post-build manifest gate passed, and the clean sdist contains 529 entries with no preserved desktop subtree"
+      "details": "crawler4j 0.4.40 wheel/sdist built on 2026-07-19; wheel METADATA contains httpx[brotli,http2]>=0.28.1 and an isolated Python 3.12 install automatically installed h2/hpack/hyperframe/brotli"
     },
     "sdk_build": {
       "command": "uv run publish crawler4j-sdk",
@@ -55,9 +55,14 @@
       "details": "Smoke passed on 2026-07-15 for crawler4j 0.4.39; Shell structure and Dashboard async refresh verified"
     },
     "pyinstaller_bundle": {
-      "command": "uv run deploy-macos-internal-release",
+      "command": "uv run package-desktop",
       "result": "passed",
-      "details": "macOS PyInstaller app, Crawler4j-0.4.16.dmg, and appcast.xml regenerated on 2026-06-19 after deleting the old remote 0.4.16 DMG; uploaded through the configured Sparkle update target, public DMG HEAD returned 200, SHA256 8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243"
+      "details": "macOS arm64 crawler4j 0.4.40 validation app built on 2026-07-19; first frozen runtime probe found missing httpx distribution metadata, PyInstaller copy_metadata was fixed, and the rebuilt app returned http2_client=ok. No signed DMG or upload was produced"
+    },
+    "host_http_runtime": {
+      "command": "source/wheel/frozen --crawler4j-verify-http-runtime plus API-024 focused pytest",
+      "result": "passed",
+      "details": "152 focused tests passed; source, isolated wheel and macOS frozen app imported httpx/h2/hpack/hyperframe/brotli and constructed an HTTP/2 client; full runtime exposes async http.request and rejects protocol downgrade"
     },
     "external_packaged_module_smoke": {
       "command": "Package external ctrip zip and install it through ModuleRegistry in an isolated app-data dir",
@@ -152,8 +157,8 @@
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.4.39",
-    "runtime": "0.4.39",
+    "app_package_pyproject": "0.4.40",
+    "runtime": "0.4.40",
     "git_tag_latest": "v0.2.0",
     "sdk": "0.4.5",
     "contracts": "0.4.4"
@@ -164,10 +169,10 @@
     "sdk_cli_entry": "uv run python -m crawler4j_sdk.cli.commands --help"
   },
   "known_risks": [
-    "ctrip real-site E2E is still open for both DevLink and ZIP installation paths, so release gate remains No-Go.",
+    "ctrip_crawler 0.3.9 still directly imports httpx; it must migrate to host API-024 http.request before DevLink and ZIP real-site room-list E2E can close.",
     "Windows PyInstaller onedir + Velopack pipeline is now in repo, but the latest batch still lacks real Windows signing, install, and self-update records.",
     "The formal delivery batch still needs refreshed evidence binding after the Windows release pipeline landed.",
-    "0.4.39 desktop client package evidence remains open before cross-platform client rollout; latest recorded macOS package evidence remains 0.4.16 from 2026-06-19."
+    "0.4.40 has isolated wheel and macOS frozen runtime evidence, but Windows runtime smoke, signed desktop update assets, Git tag/GitHub release and the formal cross-platform delivery batch remain open."
   ],
   "compressed_entry_docs": [
     "/Users/uroborus/PythonProject/crawler4j/.factory/memory/runtime-brief.md",
@@ -198,7 +203,7 @@
     "rules": [
       "创建或补齐模块骨架时优先使用 `crawler4j module init`、`crawler4j interface create`、`crawler4j component create`、`crawler4j workflow create`、`crawler4j page-action create`、`crawler4j page create`、`crawler4j data table/query create`，不要先手写脚手架。",
       "模块运行契约以 `module.yaml` 和模块根 `__init__.py` 为准，不把 wheel 元数据当成 Core 加载依据。",
-      "新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。",
+      "第三方运行能力由宿主统一封装并同步 pyproject/lock/wheel/PyInstaller；模块 ZIP 不安装依赖，也不直接 import 宿主实现包。",
       "调试与验收优先走 DevLink / ATM 调试与 zip 安装 smoke，避免依赖旧版临时调试脚本。",
       "改动 SDK CLI、模板、模块契约或 Core 集成行为时，同时更新模块开发文档与回归测试。"
     ],

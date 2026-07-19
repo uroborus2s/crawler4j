@@ -150,3 +150,22 @@ uv run crawler4j package verify dist/<module>-<version>.zip
 ```text
 ~/Library/Application Support/Crawler4j/logs/crawler4j.log
 ```
+
+## `Using http2=True, but the 'h2' package is not installed`
+
+这个错误发生在旧模块直接构造 `httpx.Client(http2=True)` 的初始化阶段，请求尚未发出。模块 ZIP 的 `pyproject.toml` 不会由宿主安装器执行，因此不要在 ZIP 中补装或内嵌 `h2`，也不要把请求降级成 HTTP/1.1。
+
+先确认当前运行的是包含共享 HTTP 能力的新宿主：
+
+```bash
+# 源码/开发环境
+uv sync --all-packages
+uv run python -m src.ui.app --crawler4j-verify-http-runtime
+
+# macOS PyInstaller 发布物
+Crawler4j.app/Contents/MacOS/Crawler4j --crawler4j-verify-http-runtime
+```
+
+成功输出应包含 `"http2_client": "ok"`。模块运行代码还必须改为 `await ctx.tools.call("http.request", ..., http2=True, require_http2=True)`，不能继续直接 import `httpx`。如果源码检查通过而桌面发布物失败，必须在目标平台重新构建 PyInstaller 发布物；只更新源码虚拟环境不会改变已安装的冻结应用。
+
+模块导入预检通过不代表这个能力一定存在：根 `__init__.py` 通常不会执行延迟请求路径。当前模块可以在 `setup` 或首次调用前通过 `ctx.tools.has_tool("http.request")` 给出明确的宿主升级错误；通用机器可读能力声明/版本协商仍是后续架构项。

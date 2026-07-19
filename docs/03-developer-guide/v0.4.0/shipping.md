@@ -79,7 +79,7 @@ hotel_demo/
 - `candidates/` 存在；它是结构校验要求目录
 - `cleanups/` 存在；它是标准扫描目录，建议随模块骨架保留
 - `module.yaml.upgrade_source.repo` 是合法 `owner/repo`
-- 运行时代码只依赖 `crawler4j-contracts`
+- 运行时代码只依赖 `crawler4j-contracts`；网络等第三方能力通过宿主公开的 `ctx.tools` 方法使用
 
 ## 宿主安装与升级
 
@@ -117,7 +117,28 @@ GitHub Release 只负责分发 ZIP，不负责安装。
 
 ## 运行时依赖
 
-运行时代码只依赖 `crawler4j-contracts`。
+模块与宿主运行在同一 Python 进程，但第三方库仍由宿主统一拥有和封装。模块 ZIP 不安装第三方依赖，也不能把宿主 `site-packages` 当成公共 API 直接 import。
+
+需要原始 HTTP/2 请求时，使用 full runtime surface 提供的宿主方法：
+
+```python
+response = await ctx.tools.call(
+    "http.request",
+    method="POST",
+    url=url,
+    headers=header_items,
+    content=body_bytes,
+    proxy_url=proxy_url,
+    http2=True,
+    require_http2=True,
+    follow_redirects=False,
+    timeout=30.0,
+)
+```
+
+返回值是宿主中立的 mapping，包含 `status_code`、保留重复项的 `headers`、已解码的 `content` bytes 和 `http_version`。模块负责检查业务状态码和解析业务 payload；`require_http2=True` 时宿主拒绝 HTTP/1.1 协议降级。该工具不在 Hosted UI 声明/只读面或环境候选面开放。
+
+`httpx[http2,brotli]`、`h2/hpack/hyperframe/brotli` 都是宿主内部实现依赖，不是模块公共依赖。`crawler4j-contracts` 是模块与 Core 的唯一公共契约包：
 
 允许：
 
@@ -133,6 +154,28 @@ from crawler4j_sdk import ...
 
 `crawler4j-sdk` 可以出现在开发依赖中，不能成为模块运行条件。
 
+模块自己的 `pyproject.toml` 用于 DevLink、单测和开发环境复现。ZIP 安装器不会执行它，也不会现场安装 `h2` 或其他第三方包。生产模块只能通过已定义的 Core/Contracts 公共能力访问第三方能力；`ctrip_crawler` 的生产依赖应移除 `httpx`，开发测试可以使用 mock/fake 验证宿主调用参数。
+
+安装或升级新的宿主后，可执行：
+
+```bash
+# 1. crawler4j 开发 workspace / 源码环境
+uv sync --all-packages
+uv run python -m src.ui.app --crawler4j-verify-http-runtime
+
+# 2. wheel 安装环境：先安装/升级新构建的宿主 wheel，再从该解释器运行
+uv pip install --upgrade /absolute/path/to/crawler4j-0.4.40-py3-none-any.whl
+python -m src.ui.app --crawler4j-verify-http-runtime
+
+# 3. PyInstaller 桌面发布物（macOS 示例）：必须安装新构建的整包
+Crawler4j.app/Contents/MacOS/Crawler4j --crawler4j-verify-http-runtime
+
+# Windows onedir/Velopack 发布物在 Windows 构建机复验
+Crawler4j.exe --crawler4j-verify-http-runtime
+```
+
+检查成功会输出 `httpx/h2/hpack/hyperframe/brotli` 版本和 `"http2_client": "ok"`。开发 workspace 要更新 lock/venv；wheel 用户要升级宿主 wheel；桌面用户要升级整个目标平台发布包，不能只修改源码虚拟环境。模块 ZIP 在三种情况下都不安装 `h2`。失败不得改成 HTTP/1.1 重试。
+
 ## 验收口径
 
 完成交付至少看到这些事实：
@@ -146,3 +189,4 @@ from crawler4j_sdk import ...
 7. 运行模板能展示对象装配树
 8. 任务执行时每个 task/env 都创建独立对象实例
 9. 数据表和只读视图通过 `ctx.db` 可访问
+10. 模块使用 `http.request` 时不直接 import `httpx/h2/brotli`，且目标宿主 release 已通过 HTTP 运行时检查

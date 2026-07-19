@@ -30,6 +30,7 @@ from crawler4j_contracts.hosted_ui import (
     normalize_page_schema as sdk_normalize_page_schema,
 )
 from src.core.atm.browser_tools import CoreBrowserTools
+from src.core.atm.http_tools import CoreHttpTools
 from src.core.persistence import get_module_data_store
 from src.utils.paths import get_resource_path
 
@@ -80,6 +81,7 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
             "env.cookie.ensure",
             "captcha.match_slider",
             "captcha.match_click_targets",
+            "http.request",
         }
         | BROWSER_TOOL_NAMES
     ),
@@ -879,6 +881,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
             allow_persisted_pages=allow_persisted_pages,
         )
         captcha_tools = CoreCaptchaTools()
+        http_tools = CoreHttpTools()
         if hosted_form_tools is None:
             from src.core.mms.ui.hosted_form import HostedFormUnavailableTools
 
@@ -897,6 +900,7 @@ class CoreToolsCapabilityImpl(ToolsCapability):
 
         self._register("captcha.match_slider", "识别滑块验证码缺口位置", captcha_tools.match_slider)
         self._register("captcha.match_click_targets", "识别点选验证码目标位置", captcha_tools.match_click_targets)
+        self._register("http.request", "通过宿主管理的 HTTP transport 发送请求", http_tools.request, is_async=True)
         self._register("browser.pause", "执行拟人化停顿", self._browser_tools.pause, is_async=True)
         self._register("browser.goto", "以拟人化节奏导航到目标页面", self._browser_tools.goto, is_async=True)
         self._register("browser.move", "以拟人化轨迹移动鼠标", self._browser_tools.move, is_async=True)

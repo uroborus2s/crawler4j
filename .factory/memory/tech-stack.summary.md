@@ -3,7 +3,7 @@
 - 当前画像：Crawler4j Model 项目画像
 - 预设：crawler4j-model
 - 技术栈：python + crawler4j core + crawler4j-contracts + crawler4j-sdk CLI
-- 最近更新时间：2026-05-08 23:59:00
+- 最近更新时间：2026-07-19
 
 ## 摘要
 
@@ -15,6 +15,7 @@
 - macOS 内部发布固定为 `PyInstaller.app + Sparkle`。
 - Windows 正式发布固定为 `PyInstaller onedir + Velopack`。
 - 宿主可变运行数据继续落在应用数据目录，不回写安装目录。
+- 宿主 HTTP 实现固定为 `httpx[http2,brotli]>=0.28.1` + `h2/hpack/hyperframe/brotli`；模块只消费 `ctx.tools.call("http.request")`。
 
 ## 项目范围
 
@@ -38,7 +39,7 @@
 - 正式模块协议是 `module.yaml(runtime_api=core-native-v2)` + v2 装饰器扫描 + `.crawler4j/manifest.lock.json`，不依赖根包运行入口或 0.3.x 顶层 spec 导出。
 - 对象依赖和 component 对象参数可写在装饰器参数、类属性注解或 `__init__` 参数注解上；SDK scanner 与 Core descriptor 必须归一到同一份元数据。对象参数类型覆盖标量、enum、array、object、json、date/datetime/time、url、path、secret，结构化约束写入 `ParameterSpec.schema/item_schema`。
 - 模块运行时代码只 import `crawler4j-contracts`；`crawler4j-sdk` 仅限开发期使用。
-- 新增运行时依赖时，同时确认宿主 `crawler4j` 环境可用；不要只改模块项目 `pyproject.toml`。
+- 新增第三方运行能力时由宿主封装公共工具、声明依赖并同步 lock/wheel/PyInstaller；模块 ZIP 不安装依赖，也不直接 import 宿主实现包。
 - 调试与验收优先走 DevLink / ATM 调试与 ZIP 安装 smoke。
 - 改动 SDK CLI、模板、模块契约或 Core 集成行为时，同时更新模块开发文档与回归测试。
 

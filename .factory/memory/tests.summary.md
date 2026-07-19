@@ -1,9 +1,10 @@
 # Tests Summary
 
-更新时间：2026-07-15。只保留最近验证门，不复制完整测试历史。
+更新时间：2026-07-19。只保留最近验证门，不复制完整测试历史。
 
 ## 最近验证
 
+- CR-023 / TC-071：首轮 runtime RED 为 collection error；统一 HTTP tool 架构 RED `3 failed, 2 passed`；工具/能力 GREEN `50 passed`，独立 review 后严格布尔校验 RED `3 failed, 8 passed`、最终工具集 GREEN `12 passed`；最终定向回归 `152 passed`、全量 unit `1265 passed`。root 0.4.40 wheel/sdist 构建、全新 venv 安装、HTTP2 client check 和 `http.request` surface 通过。macOS PyInstaller 首轮因缺 httpx metadata 失败，补充 `copy_metadata` RED/GREEN 后复建并输出 `http2_client=ok`。
 - TASK-042 发布候选：root sdist 污染修复两组 TDD RED/GREEN、打包文件 `63 passed`、版本/打包聚焦 `175 passed`；全量 unit `1235 passed`，另有 13 项既有沙箱/只读数据库环境基线；全仓 Ruff、lock、JSON、docs、UI smoke、三包 build、METADATA/SHA256、两包 publish dry-run、diff gate 通过。证据：`.factory/workitems/TASK-042/evidence/release.md`、`root-sdist-contamination-fix-tdd.md`。
 - CR-022 renderer 视觉增量：共享 label/input 物理列 TDD RED `4 failed`，GREEN `4 passed`；独立 review 补充超大 gap geometry 与合法中等 gap 保留两组 RED/GREEN；最终 renderer `36 passed`，七文件 `202 passed`，SDK/MMS/UI `586 passed`，全仓 Ruff/lock/docs/diff/scope 通过；全量 `1234 passed`，另有 13 项既有沙箱/只读 DB 环境基线。证据：`.factory/workitems/CR-022/evidence/shared-form-columns-final-verification.md`。
 - CR-022 隐藏式滚动增量：TDD RED `1 failed`、GREEN `1 passed`；renderer `36 passed`、七文件 `202 passed`、SDK/MMS/UI `586 passed`，Ruff/lock/docs/diff 通过；全量 `1234 passed`，另有相同 13 项既有沙箱/只读 DB 环境基线。证据：`.factory/workitems/CR-022/evidence/hidden-form-scrollbar-final-verification.md`。
@@ -20,7 +21,8 @@
 
 - `ctrip` 真实站点 DevLink / ZIP E2E。
 - Windows 真机签名、安装、自更新。
-- 0.4.39 桌面安装包和完整跨平台交付批次。
+- ctrip 外部模块改接宿主 `http.request` 与真实站点 E2E。
+- 0.4.40 Windows runtime smoke、签名桌面升级包和完整跨平台交付批次。
 
 ## 证据索引
 
@@ -30,6 +32,7 @@
 - 行按钮：`.factory/workitems/CR-019/evidence/`
 - 环境 Cookie 原子能力：`.factory/workitems/CR-020/evidence/`
 - Hosted UI 字段 change / Form reset / 多列布局：`.factory/workitems/CR-022/evidence/`
+- 宿主 HTTP2/Brotli：`.factory/workitems/CR-023/evidence/`
 - 正式测试事实源：`docs/04-project-development/06-testing-verification/`
 
 历史测试命令和逐项结果默认不读；需要时按 work item evidence 精确回源。

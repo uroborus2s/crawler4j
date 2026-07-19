@@ -25,6 +25,12 @@
 - `REQ-013`: Hosted UI common form fields must support optional module-owned change handling and secure form reset | Priority: P0 | Status: IMPLEMENTED
   Constraint: Form-scoped events carry an opaque short-lived handle and current values; standalone events never receive a usable form handle; modules actively call generic `ui.form.reset`; create forms honor exact column defaults, update forms prefer row values, long forms scroll with visible actions, optional `crud.form.layout` supports strict 1–3 column row-major responsive layout, and Core/renderer enforce scope, lifecycle, exact falsy-value preservation and latest-wins concurrency without business-specific effects.
   Visual constraint: each logical Form column uses shared label/input physical columns; labels end with a full-width colon and align right, while inputs share one left edge and expand horizontally. This is renderer-only and does not alter Contracts.
+- `REQ-014`: Host must provide HTTP/2/Brotli through a unified method | Priority: P0 | Status: IMPLEMENTED_PENDING_FINAL_REVIEW
+  Constraint: modules call full-surface `ctx.tools.call("http.request")` with standard types; Core owns httpx/h2/brotli, preserves request inputs and rejects HTTP/1.1 downgrade.
+- `REQ-015`: Host HTTP runtime must have an executable source/wheel/frozen diagnostic | Priority: P0 | Status: MACOS_AND_WHEEL_VERIFIED
+  Constraint: missing imports or client initialization fail; no fallback. Windows target-platform smoke remains open.
+- `REQ-016`: ZIP install must not execute module dependencies and capability limits must be explicit | Priority: P1 | Status: VERIFIED_WITH_FOLLOWUP
+  Constraint: module can probe `ctx.tools.has_tool("http.request")`; machine-readable manifest capability negotiation remains a separate architecture item.
 - `REQ-0400`: 0.4.0 module runtime must switch to decorator-first object assembly | Priority: P0 | Status: DESIGNED
   Constraint: workflow cannot own parameters; decorators are the runtime capability source of truth, object parameters belong to components, Core assembles one object graph per task/env, SDK/Contracts provide decorators, scanning, validation, migration, manifest lock, and opening-phase reserved host DB field diagnostics.
 - `REQ-0401`: User and developer guides must be versioned for docs-stratego | Priority: P0 | Status: DESIGNED

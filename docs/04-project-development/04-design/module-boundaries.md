@@ -7,7 +7,7 @@
 **上游输入：** `system-architecture.md` | 当前代码布局  
 **下游输出：** `api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`
 **关联 ID：** `MOD-001`, `MOD-002`, `MOD-003`, `MOD-004`, `MOD-005`  
-**最后更新：** 2026-04-27
+**最后更新：** 2026-07-19
 
 ## `MOD-001` Root Desktop App
 
@@ -36,7 +36,7 @@
 | 目录 | `packages/crawler4j/modules/README.md`（仓内占位）、`<app-data>/modules`（正式安装）、DevLink 源码目录（开发调试） |
 | 职责 | 定义模块根目录、`module.yaml`（含只读 `config_defaults` 初始化模板）、根 `__init__.py`、装饰器声明与宿主管理 UI 声明的运行边界 |
 | 对外接口 | `interfaces/*.py` / `objects/*.py` / `workflows/*.py` / `tasks/*.py` / `data/*.py` / `pages/*.py` 的 v2 装饰器声明 |
-| 依赖 | `crawler4j_contracts`, Core runtime |
+| 依赖 | `crawler4j_contracts`、Core runtime 公共能力 |
 | 不负责 | Core 基础设施、SDK 公共契约、宿主内部 `PyQt6` 组件实现 |
 
 当前边界事实：
@@ -44,6 +44,10 @@
 - 仓库不再保留 builtin business modules，`packages/crawler4j/modules/` 仅保留占位说明。
 - 正式安装模块位于应用数据目录，开发调试模块通过 DevLink 指向源码目录。
 - 模块项目自己的 `pyproject.toml` 不会被宿主应用自动安装到运行时环境中。
+- 模块与宿主虽然运行在同一 Python 进程，但模块不得直接 import 宿主第三方实现包。HTTP/2/Brotli 能力由 Core 的 full runtime surface 通过 `ctx.tools.call("http.request", ...)` 统一提供。
+- `httpx[http2,brotli]` 及其 `h2/hpack/hyperframe/brotli` 是 Core/Release 内部依赖；模块输入输出只使用字符串、bytes、bool、数字、tuple/list 和 mapping。
+- 模块 `pyproject.toml` 仍可声明开发/测试工具，但该声明不等于生产 ZIP 安装动作，也不能成为生产运行条件。
+- 根包导入预检只验证导入期路径，无法证明延迟使用的宿主工具可用；模块可用 `ctx.tools.has_tool` 做显式升级提示，通用机器可读宿主能力声明与安装/激活协商属于后续架构项。
 
 当前最小演进边界：
 
@@ -84,6 +88,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-19 | 明确第三方网络栈由宿主统一拥有；登记 `http.request`、HTTP/2/Brotli 内部依赖与 ZIP 不安装依赖边界 | Codex |
 | 2026-04-27 | 刷新 SDK / Contracts 边界：运行时代码只依赖 contracts，SDK 不再承载 `TaskScript` / `TaskFlow`、ModuleAssembler 或资源池 helper | Codex |
 | 2026-04-30 | 补记 v2 对象装配注解 helper：对象依赖和 component 参数可从类属性 / `__init__` 参数注解归一到运行时元数据 | Codex |
 | 2026-04-22 | 补记模块 UI 边界：模块不再直接导出 `PyQt6` 页面，只能声明宿主管理页与宿主数据表 | Codex |
