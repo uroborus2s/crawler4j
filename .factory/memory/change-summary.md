@@ -1,7 +1,8 @@
 # 变更摘要
 
-更新时间：2026-07-15。这里只保留最近可影响后续工作的变更，不再保存逐条历史日志。
+更新时间：2026-07-19。这里只保留最近可影响后续工作的变更，不再保存逐条历史日志。
 
+- 2026-07-19：CR-023 按用户架构裁决新增 full runtime `API-024 http.request`，模块不直接 import/install 第三方 HTTP 栈；客户端/Core 提升到 0.4.40，宿主 extras/lock/wheel/PyInstaller 与运行诊断同步。定向 `152 passed`、全量 `1265 passed`，wheel 隔离安装、macOS 冻结 runtime 与 `100/100` 独立复评通过，宿主切片已中文本地提交；外部 ctrip 接线与 Windows 仍待完成。证据：`.factory/workitems/CR-023/`。
 - 2026-07-15：CR-022 完成 Hosted UI 公共字段 change、安全 Form Handle、通用 `ui.form.reset`、精确 create/update 初始化、长表单滚动和 1–3 列响应式布局；Contracts 0.4.4 / SDK 0.4.5 发布候选已完成构建与 dry-run，消费侧本地 editable 联调通过。证据：`.factory/workitems/CR-022/`、`.factory/workitems/TASK-042/`。
 - 2026-07-15：客户端 / Core 源码提升到 0.4.39，SDK 对 Contracts 的依赖下限同步到 0.4.4；三包 wheel/sdist 与发布前 gate 通过。
 - 2026-07-15：修复 root build 暂存 desktop bundle 时污染 Hatch sdist 的问题；暂存目录移出 package root，并增加拒绝 sdist 含 preserved desktop content 的发布 gate。

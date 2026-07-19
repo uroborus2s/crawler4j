@@ -6,8 +6,8 @@
 **主要读者：** 开发 | QA | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/02-discovery/input.md` | `docs/04-project-development/02-discovery/current-state-analysis.md` | `docs/04-project-development/01-governance/project-charter.md`  
 **下游输出：** `docs/04-project-development/04-design/` | `docs/04-project-development/05-development-process/` | `docs/04-project-development/06-testing-verification/test-plan.md`  
-**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`, `NFR-010`, `NFR-012`
-**最后更新：** 2026-07-10
+**关联 ID：** `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-005`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `REQ-014`, `REQ-015`, `REQ-016`, `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`, `NFR-010`, `NFR-012`, `NFR-014`
+**最后更新：** 2026-07-19
 
 ## 1. 背景与目标
 
@@ -239,6 +239,42 @@
 - [x] `UAT-042` 同步 / 异步成功后清选择并刷新，失败时保留选择并展示原始业务错误。
 - [x] `UAT-043` SDK 对缺失 handler、错误签名和宽泛参数类型给出明确诊断，既有 CRUD 回归继续通过。
 
+### `REQ-014` 宿主必须通过统一方法提供 HTTP/2 与 Brotli 运行时能力
+
+- 优先级：P0
+- 描述：第三方网络栈由宿主统一拥有。当前宿主必须在 full runtime surface 提供 `await ctx.tools.call("http.request", ...)`，并在内部通过 `httpx[http2,brotli]>=0.28.1` 提供 HTTP/2 传输和 Brotli 解码能力。
+- 用户故事：作为模块开发者，我希望把方法、URL、有序请求头、原始 body、代理和 HTTP/2 要求交给宿主方法，以便执行必须使用 HTTP/2 的业务请求，而不直接 import 或安装宿主第三方库。
+- 前置条件：开发/源码环境完成 `uv sync --all-packages`，安装用户升级到包含该依赖契约的新 crawler4j wheel 或桌面发布包。
+- 业务规则：
+  - 模块不得直接 import `httpx/h2/brotli`；HTTP 请求只通过 `ctx.tools.call("http.request", ...)`。
+  - 工具输入/输出只包含 Python 标准类型，不向模块泄漏 `httpx` Request/Response/异常类型。
+  - `require_http2=True` 必须同时要求 `http2=True`，实际响应不是 HTTP/2 时明确失败。
+  - 宿主按调用方给出的有序 headers 与 content 构造一次请求，不自动回退或重试 HTTP/1.1。
+  - 宿主 lock、wheel METADATA 与 PyInstaller 收集配置必须同步。
+  - 缺少能力时必须失败，不得自动降级 HTTP/1.1。
+- 依赖项：`packages/crawler4j/pyproject.toml`、`uv.lock`、`packages/crawler4j/crawler4j.spec`。
+- 排除范围：任意模块依赖解析/安装、模块私有虚拟环境、通用模块能力声明 schema。
+
+验收标准：
+
+- [x] `UAT-044` full runtime surface 注册异步 `http.request`；它保留有序请求头与原始 body、使用宿主管理的 HTTP/2 client、返回中立结构并拒绝协议降级。
+- [x] `UAT-045` 新 crawler4j wheel 隔离安装后通过同一宿主能力检查。
+- [x] `UAT-046` 当前 macOS arm64 PyInstaller 发布物执行宿主 HTTP 能力检查参数并返回 0。
+- [x] `UAT-047` 宿主源码解释器可导入 `h2/hpack/hyperframe/brotli` 并成功构造、关闭 `httpx.Client(http2=True)`。
+- [ ] `UAT-048` Windows 目标平台冻结发布物重建并执行同一检查；macOS 结果不得替代。
+
+### `REQ-015` 宿主 HTTP 运行能力必须可执行诊断
+
+- 优先级：P0
+- 描述：源码入口与冻结桌面入口必须在 GUI、更新器和数据库初始化前提供同一 HTTP 能力检查，以便发布门直接证明最终运行时而非模块开发虚拟环境可用。
+- 验收标准：诊断输出包含 `httpx/h2/hpack/hyperframe/brotli/http2_client`，任一导入或 client 初始化失败均返回失败状态。
+
+### `REQ-016` 模块安装预检必须保持安全边界并明确能力限制
+
+- 优先级：P1
+- 描述：模块 ZIP 安装仍只做安全解压、manifest/lock 校验、模块导入预检与激活，不执行模块 `pyproject.toml`；导入预检不能证明延迟运行路径需要的宿主工具存在。
+- 验收标准：文档明确模块开发依赖、宿主工具和 ZIP 安装边界；模块可通过 `ctx.tools.has_tool("http.request")` 显式检查当前能力，通用机器可读能力声明/协商登记为后续架构项。
+
 ### `REQ-004` 项目必须具备可追溯的发布与文档链路
 
 - 优先级：P0
@@ -307,6 +343,12 @@
 - 约束：不改变 `managed_dataset` 物理结构和 `ctx.db` API，不新增跨分页状态。
 - 验证方式：Contracts、SDK scanner、Renderer 同步 / 异步和旧 CRUD 回归。
 
+### `NFR-014` 宿主共享运行时发布一致性
+
+- 指标：依赖声明、lock、wheel METADATA、PyInstaller hidden imports 和实际运行时检查五项一致；`TC-071` 任一层失败即不通过。
+- 约束：开发环境、源码安装、wheel 安装与桌面发布物必须各自通过对应更新/验证步骤；平台绑定的冻结物不能用其他平台结果替代。
+- 验证方式：聚焦单测、wheel 隔离安装 smoke、目标平台 PyInstaller 运行时 smoke。
+
 ## 5. 关键流程
 
 1. 维护者通过 `uv` 同步环境并运行测试、文档、build 验证
@@ -326,6 +368,7 @@
 - 模块根入口切换为单一新模板后，旧模块升级需要一次性重初始化和业务文件迁移
 - 批量导入若缺少宿主统一限制和脱敏，可能把大文件、错误文件类型或 token/cookie/password 明文带入日志与运行链路
 - 多选模式若沿用单条 `selected_row()` 语义，可能误把第一条记录作为单条编辑 / 删除目标
+- 模块 ZIP 不安装自身 `pyproject.toml`；若模块绕过 `ctx.tools` 直接导入第三方包，导入预检可能通过而延迟运行路径仍失败
 
 ### 假设
 
@@ -355,3 +398,4 @@
 | v1.6 | 2026-07-10 | 新增 `REQ-012` / `NFR-012`，登记 Hosted UI DataTable 当前页多选批量编辑能力 | `CR-018` |
 | v1.7 | 2026-07-10 | 将 `REQ-012` / `NFR-012` 更新为本地实现和自动化验收已满足，保留整体评审与真实业务模块接线边界 | `CR-018`, `TC-069` |
 | v1.8 | 2026-07-10 | `REQ-012` 通用能力完成整体评审、人工确认和 Contracts 0.4.3 / SDK 0.4.4 发布；业务模块接线仍为独立 gate | `CR-018`, `TASK-037`, `TC-070` |
+| v1.9 | 2026-07-19 | 新增 `REQ-014`~`REQ-016` / `NFR-014`，登记宿主统一 `http.request`、HTTP/2/Brotli 内部运行时、可执行诊断和 ZIP 依赖边界 | `CR-023`, `TASK-043`, `TC-071`, `API-024` |

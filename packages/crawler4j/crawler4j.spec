@@ -38,6 +38,8 @@ WORKSPACE_RUNTIME_DISTS = {
     "crawler4j_sdk": "crawler4j-sdk",
 }
 SINGLE_FILE_MODULE_RESOURCE_DISTS = ("sinanz",)
+HOST_HTTP_RUNTIME_PACKAGES = ("h2", "hpack", "hyperframe", "brotli")
+HOST_HTTP_RUNTIME_DISTS = ("httpx", "h2", "hpack", "hyperframe", "Brotli")
 WORKSPACE_RUNTIME_SOURCES = {
     "crawler4j_contracts": WORKSPACE_ROOT / "packages" / "crawler4j-contracts" / "src",
     "crawler4j_sdk": WORKSPACE_ROOT / "packages" / "crawler4j-sdk" / "src",
@@ -80,6 +82,8 @@ def _build_datas() -> list[tuple[str, str]]:
     datas.extend(collect_data_files("debugpy", include_py_files=True))
     for dist_name in WORKSPACE_RUNTIME_DISTS.values():
         datas.extend(copy_metadata(dist_name))
+    for dist_name in HOST_HTTP_RUNTIME_DISTS:
+        datas.extend(copy_metadata(dist_name))
     return datas
 
 
@@ -94,6 +98,8 @@ def _build_hiddenimports() -> list[str]:
     ]
     hiddenimports.extend(collect_submodules("debugpy"))
     hiddenimports.extend(_build_debugpy_vendored_hiddenimports())
+    for package_name in HOST_HTTP_RUNTIME_PACKAGES:
+        hiddenimports.extend(collect_submodules(package_name))
     for package_name in WORKSPACE_RUNTIME_DISTS:
         hiddenimports.extend(collect_submodules(package_name))
     return hiddenimports

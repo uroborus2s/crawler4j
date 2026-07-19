@@ -6,8 +6,8 @@
 **主要读者：** 架构 | 开发 | QA | 模块开发者  
 **上游输入：** `system-architecture.md` | `module-boundaries.md` | 现有 SDK / Contracts / module manifests  
 **下游输出：** `docs/04-project-development/05-development-process/implementation-plan.md` | `docs/04-project-development/06-testing-verification/test-plan.md`
-**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `API-019`, `API-021`, `API-022`, `API-023`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `CR-016`, `CR-018`, `CR-020`, `CR-022`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `TASK-040`, `TASK-041`, `TASK-0400`, `TASK-0401`
-**最后更新：** 2026-07-15
+**关联 ID：** `API-001`, `API-002`, `API-003`, `API-004`, `API-005`, `API-006`, `API-007`, `API-008`, `API-009`, `API-012`, `API-013`, `API-019`, `API-021`, `API-022`, `API-023`, `API-024`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `REQ-014`, `REQ-015`, `REQ-016`, `REQ-0400`, `REQ-0401`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-012`, `CR-014`, `CR-016`, `CR-018`, `CR-020`, `CR-022`, `CR-023`, `TASK-024`, `TASK-026`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `TASK-040`, `TASK-041`, `TASK-043`, `TASK-0400`, `TASK-0401`
+**最后更新：** 2026-07-19
 
 ## `API-001` Root App Entry Contract
 
@@ -140,6 +140,25 @@
 | 版本 | Contracts `0.4.4`、SDK `0.4.5` 对外发布；SDK 依赖 `crawler4j-contracts>=0.4.4,<0.5.0` |
 | 设计文档 | `hosted-ui-form-field-events.md` |
 | 关联项 | `CR-022`, `TASK-041` |
+
+## `API-024` Host-managed HTTP Request Contract
+
+| 项目 | 内容 |
+|---|---|
+| 目标 | 模块通过统一宿主方法执行 HTTP 请求，不直接 import、安装或持有 `httpx/h2/brotli` 等第三方实现 |
+| 公开入口 | `await ctx.tools.call("http.request", **kwargs)` |
+| Surface | 只注册到 workflow/page action 使用的 full runtime surface；Hosted UI declare/readonly/action、环境候选和清理候选 surface 不注册 |
+| 输入 | 必需 `method/url`；可选有序 `headers` mapping 或二元组序列、`content: bytes\|str`、`proxy_url`、`http2`、`require_http2`、`follow_redirects`、正数 `timeout` |
+| URL / 代理 | `url` 与 `proxy_url` 只接受带 hostname 的 HTTP/HTTPS URL；宿主固定 `trust_env=False`，不隐式读取进程代理 |
+| 请求保真 | Core 以 `httpx.Request` 在宿主内部构造一次请求，再由 `AsyncClient.send` 发送；调用方显式提供的 header 顺序、重复项、Content-Length 与原始 body 保持可验证 |
+| HTTP/2 | `require_http2=True` 必须同时传 `http2=True`；响应协议不是 `HTTP/2` 时抛 `HOST_HTTP2_NOT_NEGOTIATED`，不得回退或重试 HTTP/1.1 |
+| 返回 | 只返回标准类型 mapping：`status_code: int`、`headers: list[tuple[str,str]]`、已解码 `content: bytes`、`http_version: str`；不返回 `httpx.Response` |
+| 状态码 | 宿主不替模块解释业务状态码；模块依据 `status_code` 决定失败语义，再解析 `content` |
+| 错误 | 参数错误抛 `ValueError`；网络层 `httpx.HTTPError` 转为不含 URL、代理和 body 的 `HOST_HTTP_REQUEST_FAILED:<kind>`；缺少 HTTP/2 依赖的初始化错误保持失败并由宿主发布门发现 |
+| 实现依赖 | crawler4j 宿主声明 `httpx[http2,brotli]>=0.28.1`，lock 与 PyInstaller 显式包含 `h2/hpack/hyperframe/brotli`；这些包不是模块 API |
+| 能力探测 | 当前模块可用 `ctx.tools.has_tool("http.request")` 做升级提示；通用 manifest 能力声明/版本协商是后续 work item |
+| 验证 | `TC-071`：工具注册面、请求保真、协议降级、参数错误、源码解释器、wheel 隔离安装与冻结发布物 smoke |
+| 关联项 | `REQ-014`, `REQ-015`, `REQ-016`, `CR-023`, `TASK-043` |
 
 ## `API-009` Module Entity Table View Contract
 
@@ -301,6 +320,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-19 | 新增 `API-024`，登记 full runtime `http.request`、请求保真、HTTP/2 强制语义、第三方实现隔离和发布依赖门 | Codex |
 | 2026-07-13 | 新增 `API-022`，登记 `env.cookie.ensure` 完整集合全量替换、Provider 实测协议、严格重启、TaskContext 回绑和敏感信息边界 | Codex |
 | 2026-07-10 | 新增 `API-021`，登记 Hosted UI DataTable 当前页选择、CRUD 批量 handler、SDK 类型 gate、Core 调用边界与模块数据 owner | Codex |
 | 2026-06-19 | 将 `API-019` 更新为已本地实现，记录 Hosted UI toolbar 导入契约、宿主解析弹窗、payload 分发、结果展示和 `TC-060` 验证状态 | Codex |

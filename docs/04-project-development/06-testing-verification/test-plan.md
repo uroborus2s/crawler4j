@@ -6,8 +6,8 @@
 **主要读者：** QA | 开发 | 架构 | 发布负责人  
 **上游输入：** `docs/04-project-development/03-requirements/prd.md` | `docs/04-project-development/04-design/api-design.md` | `docs/04-project-development/05-development-process/implementation-plan.md`  
 **下游输出：** `.factory/process/quality-check-report.md` | 后续测试报告  
-**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `TC-060`, `TC-061`, `TC-062`, `TC-063`, `TC-064`, `TC-069`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `API-008`, `API-009`, `API-010`, `API-019`, `API-021`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `CR-016`, `CR-018`, `NFR-003`, `NFR-010`, `NFR-012`
-**最后更新：** 2026-07-10
+**关联 ID：** `TC-001`, `TC-002`, `TC-003`, `TC-004`, `TC-007`, `TC-008`, `TC-009`, `TC-010`, `TC-011`, `TC-012`, `TC-024`, `TC-025`, `TC-026`, `TC-027`, `TC-044`, `TC-045`, `TC-049`, `TC-050`, `TC-052`, `TC-053`, `TC-054`, `TC-055`, `TC-057`, `TC-059`, `TC-060`, `TC-061`, `TC-062`, `TC-063`, `TC-064`, `TC-069`, `TC-071`, `REQ-001`, `REQ-002`, `REQ-003`, `REQ-004`, `REQ-006`, `REQ-007`, `REQ-008`, `REQ-009`, `REQ-010`, `REQ-012`, `REQ-014`, `REQ-015`, `REQ-016`, `API-008`, `API-009`, `API-010`, `API-019`, `API-021`, `BUG-013`, `CR-005`, `CR-008`, `CR-009`, `CR-010`, `CR-011`, `CR-013`, `CR-014`, `CR-015`, `CR-016`, `CR-018`, `CR-023`, `NFR-003`, `NFR-010`, `NFR-012`, `NFR-014`
+**最后更新：** 2026-07-19
 
 ## 1. 测试目标
 
@@ -29,6 +29,7 @@
 
 | 测试项 | 结果 | 备注 |
 |---|---|---|
+| `TC-071` 宿主统一 HTTP/2/Brotli 运行时 | 当前平台通过 | 首轮 runtime RED 为 collection error，架构修订 RED 为 `3 failed`，冻结 metadata RED 复现；综合定向 `152 passed`、全量 `1265 passed`，源码/隔离 wheel/macOS arm64 PyInstaller 均输出 `http2_client=ok`；Windows 目标平台仍需复验 |
 | `TC-001` `uv run pytest -q` | 通过 | 2026-05-18 复验为 `991 passed`，覆盖 0.4.1 发布候选工作区 |
 | `TC-002` 根包 / SDK / Contracts build | 通过 | 2026-05-18 `uv run build` 已生成 `crawler4j 0.4.1`、`crawler4j-sdk 0.4.1`、`crawler4j-contracts 0.4.1` wheel/sdist |
 | `TC-003` `uv sync --all-packages` + `uv run python -m src.ui.app` | 通过 | workspace 根可直接启动应用包里的真实入口 |
@@ -84,6 +85,7 @@
 | `API-021` / `CR-018` | 当前页多选、bulk handler 参数边界、单条 / 行内动作语义、选择生命周期和 async 非阻塞 | Contracts / SDK scanner 单测 + Core renderer / `SkyDataTable` Qt 单测 + 全量 unit 回归 |
 | `NFR-003` | lint 质量门清晰 | `uv run ruff check .` 达成约定范围 |
 | `REQ-003` / `REQ-006` | SDK CLI 与宿主安装链的正式验收夹具 | `packages/crawler4j/tests/acceptance/` + 现有 CLI / host 集成测试 |
+| `REQ-014`~`REQ-016` / `API-024` / `CR-023` | full surface `http.request` 契约、宿主 extras、client 构造、wheel 元数据/隔离安装、PyInstaller 收集和冻结入口检查 | HTTP tool/system/UI/packaging 单测 + wheel 隔离 smoke + 目标平台桌面发布物执行 |
 
 ## 5. `REQ-009` 当前实现级覆盖
 
@@ -162,6 +164,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-19 | 新增 `TC-071`，覆盖宿主统一 `http.request`、HTTP/2/Brotli 内部依赖、源码解释器、wheel 与 PyInstaller 冻结运行时验证链 | Codex |
 | 2026-07-10 | 新增 `TC-069`，登记 Hosted UI DataTable 当前页多选批量编辑的 Contracts / SDK scanner / Core renderer / `SkyDataTable` 覆盖和整体新鲜验证入口 | Codex |
 | 2026-07-08 | 补充 `TC-068` 根应用 `0.4.26` 版本提升与 VirtualBrowser 创建环境指纹稳定验证：版本服务回归 `3 passed`，VirtualBrowser REM 回归 `44 passed`，运行模板 UI 回归 `36 passed`，目标 `ruff check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |
 | 2026-07-05 | 补充 `TC-067` 根应用 `0.4.24` 版本提升验证：版本服务回归 `3 passed`，REM 清理服务、环境列表与 Contracts 候选 DSL 聚焦回归 `48 passed`，目标 `ruff check`、`uv lock --check`、`.factory/project.json` JSON 校验与 `git diff --check` 通过 | Codex |

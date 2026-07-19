@@ -23,6 +23,7 @@ Current module runtime architecture:
 - `core-native-v2` is decorator-first object assembly: module runtime capabilities come from decorators, workflow receives injected objects only, component parameters are used during object construction, page actions replace stateful task scripts, UI actions handle Hosted UI user commands, Core owns per-task/env object graph assembly, and SDK owns module-open/check/build diagnostics. Object injection and component parameters can be declared either in decorator arguments or as `Annotated[..., object_inject/object_param]` class / `__init__` annotations; both paths normalize to the same descriptor metadata.
 - `ObjectContainerV2` validates `object_bindings` against reachable injection paths before object graph construction, so misspelled paths cannot silently fall back to the single implementation.
 - Old modules are not a compatibility target. The host rejects missing or mismatched `runtime_api` instead of bridging.
+- Non-database third-party capabilities remain host-owned. Full runtime exposes `API-024 http.request`; modules pass standard Python values and never import/install `httpx/h2/brotli`. Core ATM builds the request, enforces required HTTP/2, and returns a neutral response mapping. Hosted UI/candidate/cleanup surfaces do not receive this tool.
 
 Current UI architecture:
 

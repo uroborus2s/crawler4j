@@ -21,6 +21,27 @@ def test_importing_app_keeps_debug_launcher_and_shell_lazy():
     assert "src.ui.shell" not in sys.modules
 
 
+def test_main_dispatches_host_http_runtime_check_before_starting_host(monkeypatch):
+    from src.ui import app
+
+    observed: list[list[str]] = []
+
+    def fake_run_http_runtime_check(argv: list[str]) -> int:
+        observed.append(list(argv))
+        return 0
+
+    def fail_host_startup() -> None:
+        raise AssertionError("host startup should not run for the HTTP runtime check")
+
+    monkeypatch.setattr(app, "_run_host_http_runtime_check_if_requested", fake_run_http_runtime_check)
+    monkeypatch.setattr(app, "bootstrap_host_updater", fail_host_startup)
+
+    exit_code = app.main(["Crawler4j", "--crawler4j-verify-http-runtime"])
+
+    assert exit_code == 0
+    assert observed == [["Crawler4j", "--crawler4j-verify-http-runtime"]]
+
+
 def test_main_dispatches_embedded_debug_worker_before_starting_gui(monkeypatch):
     from src.ui import app
 

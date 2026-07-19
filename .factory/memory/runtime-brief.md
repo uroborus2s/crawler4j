@@ -1,16 +1,17 @@
 # 项目压缩运行卡
 
-- 更新时间：2026-07-15
+- 更新时间：2026-07-19
 - 项目：crawler4j
 - 当前阶段：IMPLEMENTATION
 - 当前模式：Default
 - 技术栈：Python + uv + crawler4j Core + Contracts + SDK CLI
 - 记忆入口：`.factory/memory/memory-index.md`
-- 当前版本：根应用 / runtime `0.4.39`；SDK `0.4.5` 已发布；Contracts `0.4.4` 已发布
+- 当前版本：根应用 / runtime `0.4.40`；SDK `0.4.5` 已发布；Contracts `0.4.4` 已发布
 - 当前正式 Git tag：`v0.2.0`
 
 ## 当前工作状态
 
+- `CR-023` / `TASK-043`：按用户架构裁决新增宿主统一 `API-024 http.request`，模块不得直接 import/install `httpx/h2/brotli`；root wheel 隔离安装和 macOS PyInstaller HTTP runtime smoke 已通过，全量门禁与 `100/100` 独立复评通过，宿主切片已完成中文本地提交。
 - `TASK-042`：Contracts 0.4.4 / SDK 0.4.5 已按依赖顺序发布并完成在线哈希、依赖元数据和隔离安装验证；客户端 0.4.39 已构建，下一动作是最终 evidence commit 和远端推送。
 - `CR-022`：Hosted UI 公共字段 change、安全 Form Handle、通用 `ui.form.reset`、create/update 初始化、隐藏式滚动与 1–3 列 Form 布局已实现并验证。
 - `TASK-039`：客户端 `0.4.30` 版本事实已完成验证，ledger 的下一动作为 `none`；桌面安装包、Git tag / GitHub release 和 Windows 真机证据不在本轮范围。
@@ -22,23 +23,25 @@
 
 - 当前分支只支持 Core `0.4.0` / `core-native-v2`；不要恢复 0.3.x 或旧 v1 运行时兼容面。
 - 模块运行时代码依赖 `crawler4j-contracts`；SDK 负责 CLI、脚手架、扫描、校验和 manifest lock。
+- 第三方 HTTP 栈归宿主所有；模块通过 full runtime `ctx.tools.call("http.request")` 传标准类型，ZIP 不安装第三方依赖。
 - Hosted UI 使用 `@page` / `@ui_action`；浏览器页面操作使用 `@page_action`；数据资源使用 `@data_table` / `@data_view`。
 - 正式事实优先级：docs 与 work item ledger/evidence 高于 memory summary；不要把计划写成完成。
 - 代码任务必须保留验证、独立 review、人工确认和 memory sync 证据。
 
 ## 最新验证与发布事实
 
+- 2026-07-19：`API-024` + system/UI/packaging/模块安装定向回归 `152 passed`，全量 unit `1265 passed`；root 0.4.40 wheel/sdist 构建、wheel 隔离安装和 macOS arm64 PyInstaller 诊断均输出 `http2_client=ok`。首轮冻结 smoke 发现缺 httpx distribution metadata，TDD 补齐后复建通过。
 - 2026-07-15：版本/打包聚焦 `175 passed`；全量 unit `1235 passed`，另有 13 项既有沙箱/只读数据库环境基线；root sdist 临时 desktop bundle 污染已完成 TDD 修复和内容 gate。
 - 2026-07-15：全仓 Ruff、lock、JSON、docs、UI smoke、三包 build、METADATA/哈希、两包 publish dry-run 和 diff check 通过。
 - 2026-07-10：unit `1135 passed`；聚焦版本/打包回归 `65 passed`。
 - 2026-07-10：Ruff、`uv lock --check`、项目 JSON、docs 校验、UI smoke、root build、wheel METADATA 和 `git diff --check` 通过。
-- Contracts `0.4.4` / SDK `0.4.5` PyPI 发布和隔离安装通过；客户端源码版本已到 `0.4.39`，不等于桌面安装包已发布。
+- Contracts `0.4.4` / SDK `0.4.5` PyPI 发布和隔离安装通过；客户端源码版本已到 `0.4.40`，本机验证 app 不等于签名升级包已发布。
 
 ## 开放风险
 
-- `ctrip` 真实站点 DevLink / ZIP E2E 仍未闭环。
+- `ctrip_crawler` 外部仓库仍需把直接 `httpx` transport 改接宿主 `http.request`，再完成真实站点 DevLink / ZIP E2E。
 - Windows 签名、安装、自更新真机证据仍缺。
-- 0.4.39 客户端桌面包、Git tag / GitHub release 资产和正式交付批次仍需单独收口。
+- 0.4.40 签名桌面升级包、Windows runtime smoke、Git tag / GitHub release 资产和正式交付批次仍需单独收口。
 
 ## 最小读取顺序
 

@@ -261,6 +261,13 @@ def test_root_app_package_does_not_reexport_sdk_cli_command():
     )
 
 
+def test_root_app_declares_http2_and_brotli_as_host_runtime_capabilities():
+    pyproject = _load_pyproject(APP_ROOT / "pyproject.toml")
+
+    assert "httpx[http2,brotli]>=0.28.1" in pyproject["project"]["dependencies"]
+    assert "httpx>=0.28.1" not in pyproject["project"]["dependencies"]
+
+
 def test_workspace_root_declares_packages_workspace_members():
     pyproject = _load_pyproject(WORKSPACE_ROOT / "pyproject.toml")
 
@@ -367,6 +374,17 @@ def test_pyinstaller_spec_collects_workspace_runtime_packages_for_desktop_bundle
     assert "datas.extend(copy_metadata(dist_name))" in spec_text
     assert "hiddenimports=_build_hiddenimports()," in spec_text
     assert "str(DEBUGPY_VENDORED_PYDEVD_ROOT)," in spec_text
+
+
+def test_pyinstaller_spec_collects_optional_host_http_runtime_packages():
+    spec_text = (APP_ROOT / "crawler4j.spec").read_text(encoding="utf-8")
+
+    assert 'HOST_HTTP_RUNTIME_PACKAGES = ("h2", "hpack", "hyperframe", "brotli")' in spec_text
+    assert 'HOST_HTTP_RUNTIME_DISTS = ("httpx", "h2", "hpack", "hyperframe", "Brotli")' in spec_text
+    assert "for package_name in HOST_HTTP_RUNTIME_PACKAGES:" in spec_text
+    assert "hiddenimports.extend(collect_submodules(package_name))" in spec_text
+    assert "for dist_name in HOST_HTTP_RUNTIME_DISTS:" in spec_text
+    assert "datas.extend(copy_metadata(dist_name))" in spec_text
 
 
 def test_workspace_build_script_targets_publishable_packages_and_dist_dirs():

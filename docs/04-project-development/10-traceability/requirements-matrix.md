@@ -22,6 +22,9 @@
 | `REQ-009` | ATM 必须支持环境候选 Service Job 的等待队列与模块候选分配 | `docs/04-project-development/04-design/system-architecture.md`, `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/atm-resource-pool-queue-design.md` | `MOD-003`, `MOD-005` | `API-007` | `TASK-023` | `TC-026`, `TC-027` | Implemented and unit-tested locally; PR pending |
 | `REQ-010` | Hosted UI 必须支持宿主托管的批量导入能力 | `docs/04-project-development/04-design/hosted-ui-batch-import-design.md`, `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/module-hosted-ui-framework.md`, `docs/04-project-development/04-design/module-config-runtime-data-contract.md` | `MOD-003`, `MOD-004`, `MOD-005` | `API-019` | `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034` | `TC-060` | Implemented and unit-tested locally; release evidence pending |
 | `REQ-012` | Hosted UI `DataTable` 必须支持当前页多选批量编辑，同时保持模块数据 owner 与旧 CRUD 兼容 | `docs/04-project-development/04-design/hosted-ui-datatable-bulk-update-design.md`, `docs/04-project-development/04-design/api-design.md` | `MOD-003`, `MOD-004`, `MOD-005` | `API-021` | `TASK-036`, `TASK-037` | `TC-069`, `TC-070` | Core / Contracts / SDK 通用能力已通过整体 review、人工确认并发布；业务模块 E2E 不包含在通用能力完成事实内 |
+| `REQ-014` | 宿主必须通过统一工具向模块提供 HTTP/2/Brotli 能力，模块不得直接使用第三方实现包 | `docs/04-project-development/04-design/module-boundaries.md`, `docs/03-developer-guide/v0.4.0/shipping.md` | `MOD-001`, `MOD-003`, `MOD-005` | `API-024` | `CR-023`, `TASK-043` | `TC-071` | Core、隔离 wheel 与 macOS 冻结 runtime 通过；ctrip 模块接线和 Windows 验证为后续 gate |
+| `REQ-015` | 源码与冻结宿主必须提供 GUI/数据库初始化前的共享 HTTP 能力诊断 | `docs/04-project-development/04-design/module-boundaries.md` | `MOD-001`, `MOD-005` | 宿主内部诊断入口 | `CR-023`, `TASK-043` | `TC-071` | 源码、隔离 wheel 与 macOS arm64 发布物检查通过；Windows 待目标平台构建验证 |
+| `REQ-016` | ZIP 安装不执行模块依赖，导入预检限制与后续能力协商边界必须明确 | `docs/04-project-development/04-design/module-boundaries.md`, `docs/03-developer-guide/v0.4.0/shipping.md`, `docs/03-developer-guide/v0.4.0/troubleshooting.md` | `MOD-003`, `MOD-005` | N/A | `CR-023`, `TASK-043` | `TC-071`、外部模块安装回归 | 当前缺陷不扩展为任意依赖安装；机器可读能力协商为后续项 |
 | `REQ-0400` | 0.4.0 模块运行时必须切到装饰器对象装配，workflow 只接收宿主注入对象，参数归属 component 创建，SDK 打开阶段阻断宿主保留数据库字段冲突 | `docs/04-project-development/03-requirements/0.4.0-decorator-object-assembly-requirements.md`, `docs/04-project-development/04-design/0.4.0-decorator-object-assembly-architecture.md` | `MOD-003`, `MOD-004`, `MOD-005` | `API-012` | `TASK-0400` | `TC-0400` | Designed; implementation pending |
 | `REQ-0401` | 使用者指南和开发者指南必须按版本分流，docs-stratego 主文档指向当前已发布版本，历史版本保留 | `docs/04-project-development/03-requirements/0.4.0-guide-versioning-requirements.md`, `docs/04-project-development/04-design/0.4.0-guide-versioning-architecture.md` | `MOD-005` | `API-013` | `TASK-0401` | `TC-0401` | Designed; implementation pending |
 | `REQ-004` | 发布与文档链路可追溯 | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/07-release-delivery/version-governance.md` | `MOD-005` | `API-004` | `TASK-004` | build + metadata checks | Version governance aligned locally |
@@ -36,6 +39,7 @@
 | `NFR-003` | 稳定质量门 | `test-plan.md` | pytest / smoke / ruff / build | 维护者 |
 | `NFR-004` | 可维护性 | `project-charter.md`, `.factory/memory/` | 交接与文档检查 | 维护者 |
 | `NFR-012` | 旧页面保持单选与 CRUD 兼容；已有 event loop 不使用阻塞式批量表单；不新增跨页状态 | `hosted-ui-datatable-bulk-update-design.md` | `TC-069` Contracts / SDK / Core / UI 单测 + 全量 unit | Core / SDK / Contracts 维护者 |
+| `NFR-014` | 依赖、lock、wheel METADATA、PyInstaller 收集与实际运行时检查一致 | `module-boundaries.md`, `version-governance.md` | `TC-071` 聚焦、隔离 wheel 与目标平台冻结运行时 smoke | Core / Release 维护者 |
 
 ## 3. 接口责任矩阵
 
@@ -50,6 +54,7 @@
 | `API-008` | Hosted module UI V1 | 模块开发者 / 模块详情页 / QA | `docs/04-project-development/04-design/api-design.md`, `docs/04-project-development/04-design/module-hosted-ui-framework.md` | hosted page renderer、CLI scaffold、`check full` gate 与 acceptance 回归 | 维护者 |
 | `API-019` | Hosted UI batch import | 模块开发者 / 模块详情页 / QA / 运营支持 | `docs/04-project-development/04-design/hosted-ui-batch-import-design.md`, `docs/04-project-development/04-design/api-design.md` | toolbar schema、Excel/CSV/剪贴板解析、payload 分发、结果展示、敏感字段脱敏 | Core / SDK / Contracts 维护者 |
 | `API-021` | Hosted UI DataTable current-page bulk update | 模块开发者 / 模块详情页 / QA / 运营支持 | `docs/04-project-development/04-design/hosted-ui-datatable-bulk-update-design.md`, `docs/04-project-development/04-design/api-design.md` | 选择模式、handler scanner、按钮状态、主键提取、同步 / 异步、选择生命周期 | Core / SDK / Contracts 维护者；业务写入由模块维护者负责 |
+| `API-024` | Host-managed HTTP request | `core-native-v2` full runtime 模块 | `docs/04-project-development/04-design/api-design.md`, `docs/03-developer-guide/v0.4.0/shipping.md` | surface、输入校验、请求保真、HTTP/2 强制、标准类型响应、目标运行时依赖 | Core / Release 维护者；模块维护者负责业务状态码和 payload |
 | `API-012` | Decorator-first object assembly runtime V2 | 模块开发者 / Core / SDK / Contracts | `docs/04-project-development/04-design/0.4.0-decorator-object-assembly-architecture.md` | 装饰器扫描、对象图装配、运行模板对象配置、每 task/env 实例隔离、保留字段诊断、manifest lock | 维护者 |
 | `API-013` | Versioned user/developer guide contract | 使用者 / 模块开发者 / docs-stratego | `docs/04-project-development/04-design/0.4.0-guide-versioning-architecture.md` | 主文档版本、历史版本入口、开发版入口、版本元数据、跨版本链接校验 | 维护者 |
 
@@ -60,6 +65,7 @@
 | `RISK-002` | `ctrip` 真实站点 E2E 尚未回放 | 线上行为验证 | 待分配 | 后续验证波次 |
 | `RISK-010` | Hosted UI 批量导入缺少真实业务模块 E2E 与对外发布证据 | 真实模块接入、SDK / Contracts / 根应用版本提升、包构建与发布资产 | 待分配 | 后续发布 / 验证波次 |
 | `CR-018` | 通用批量编辑已通过独立整体 review、人工确认，并由 Contracts 0.4.3 / SDK 0.4.4 对外发布；不能据此声明具体业务模块 handler、数据库规则或真实站点 E2E 已接线 | 业务模块实现与模块级 E2E | 模块维护者 / 项目维护者 | 后续模块接入与验证 |
+| `CR-023-FOLLOWUP` | 模块尚无机器可读的宿主第三方能力声明与安装/激活协商 | 能力 schema、SDK 检查、DevLink/ZIP/升级统一 gate | Core / SDK / Contracts 维护者 | 后续架构 work item |
 
 ## 5. 已关闭治理项
 
@@ -73,6 +79,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-19 | 新增 `REQ-014`~`REQ-016` / `NFR-014` / `API-024` / `CR-023` / `TASK-043` / `TC-071` 的宿主统一 HTTP/2/Brotli 工具追踪与能力协商后续项 | Codex |
 | 2026-07-10 | 新增 `REQ-012` / `NFR-012` / `API-021` / `TASK-036` / `TC-069` 的 Hosted UI DataTable 当前页多选批量编辑追踪关系，并明确业务模块接线不属于当前完成事实 | Codex |
 | 2026-06-19 | 将 `REQ-010` / `RISK-010` 更新为已本地实现并通过 `TC-060`，剩余风险收敛到真实业务模块 E2E 和发布证据 | Codex |
 | 2026-06-19 | 新增 `REQ-010` / `API-019` / `TASK-030` ~ `TASK-034` / `TC-060` 的 Hosted UI 批量导入追踪关系 | Codex |

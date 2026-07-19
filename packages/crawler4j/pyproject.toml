@@ -1,6 +1,6 @@
 [project]
 name = "crawler4j"
-version = "0.4.39"
+version = "0.4.40"
 description = "Crawler4j desktop host app and Core runtime for module-based automation"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,7 +12,7 @@ dependencies = [
     "requests>=2.32.5",
     "sinanz>=0.0.1.dev0",
     "qasync>=0.28.0",
-    "httpx>=0.28.1",
+    "httpx[http2,brotli]>=0.28.1",
     "aiohttp>=3.13.2",
     "watchdog>=4.0.0",
     "sqlalchemy>=2.0.45",

@@ -6,8 +6,8 @@
 **主要读者：** Tech Lead | 开发 | QA | 发布负责人
 **上游输入：** `implementation-plan.md` | 当前任务结论 | 验证结果
 **下游输出：** `docs/04-project-development/06-testing-verification/` | `docs/04-project-development/07-release-delivery/` | `.factory/memory/`
-**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `CR-016`, `CR-018`, `API-009`, `API-010`, `API-019`, `API-021`, `TC-069`, `BUG-013`
-**最后更新：** 2026-07-15
+**关联 ID：** `TASK-014`, `TASK-015`, `TASK-016`, `TASK-017`, `TASK-018`, `TASK-019`, `TASK-020`, `TASK-021`, `TASK-022`, `TASK-026`, `TASK-027`, `TASK-028`, `TASK-030`, `TASK-031`, `TASK-032`, `TASK-033`, `TASK-034`, `TASK-036`, `TASK-043`, `CR-004`, `CR-005`, `CR-008`, `CR-012`, `CR-013`, `CR-014`, `CR-016`, `CR-018`, `CR-023`, `API-009`, `API-010`, `API-019`, `API-021`, `API-024`, `TC-069`, `TC-071`, `BUG-013`
+**最后更新：** 2026-07-19
 
 ## 1. 用途与记录规则
 
@@ -31,7 +31,8 @@
 
 | 事项 | 当前状态 | 下一步 |
 |---|---|---|
-| `ctrip` 真实站点 E2E | 未完成 | 回到实现/验证主线继续推进 |
+| `ctrip` 真实站点 E2E | 未完成 | 外部模块先把直接 httpx transport 改接宿主 `http.request`，再回放 DevLink + ZIP |
+| `CR-023` / `TASK-043` | 宿主实现、全量回归、wheel 隔离安装、macOS 冻结 runtime、`100/100` 独立复评、人工确认和中文本地提交已完成 | 外部 ctrip 改接与 Windows runtime 后续 |
 | 根应用正式发布收口 | 未完成 | 在下一次正式发布前执行验收检查清单和交付包清单 |
 | `CR-018` / `TASK-036` 整体 Gate | `CORE_PACKAGES_RELEASED`，整体 review 99/100 approved，Contracts 0.4.3 / SDK 0.4.4 已发布 | 业务模块接线与 E2E 另行完成 |
 
@@ -39,6 +40,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-07-19 | `TASK-043`：用户裁决第三方 HTTP 栈必须由宿主统一封装；新增 full surface `API-024 http.request`，依赖/lock/wheel/PyInstaller 同步到 HTTP/2+Brotli。定向 `152 passed`、全量 `1265 passed`；wheel 隔离安装与 macOS frozen runtime 通过；首轮冻结 metadata 缺失已 TDD 修复，独立评审的重复请求头、Brotli 解码回归和严格布尔校验建议也已补齐 | Codex |
 | 2026-07-15 | `TASK-042`：Contracts 0.4.4、SDK 0.4.5、根应用 0.4.39 版本与依赖锁定；修复 root sdist 临时 desktop bundle 污染并增加 manifest gate；两包按依赖顺序发布到 PyPI，在线哈希、SDK 依赖元数据和隔离安装通过；聚焦 `175 passed`，全量 `1235 passed` 加 13 项既有环境基线，静态与文档 gate 通过 | Codex |
 | 2026-07-14 | 根应用 / 运行时版本提升到 `0.4.38`：`env.cookie.ensure` 在持久化读取、全量替换和复核失败时输出脱敏的 stage、env_id、provider、browser_id、异常类型和异常消息；全量 `1201 passed`、全仓 Ruff、`uv lock --check`、Root wheel/sdist build 与 diff 检查通过 | Codex |
 | 2026-07-13 | 根应用 / 运行时版本提升到 `0.4.37`：环境列表以创建时间替换类型列，代理更新拆分为明确应用所选 IP 与随机更换，手动刷新指纹复用创建期随机校准与验收，高风险代理和指纹操作增加确认门；全量 `1198 passed`、全仓 Ruff、`uv lock --check`、UI smoke 与 diff 检查通过，桌面安装包待 Windows 真机测试 | Codex |
