@@ -1,0 +1,12 @@
+name: cheese_automation
+runtime_api: core-native-v2
+version: 0.1.0
+display_name: Cheese 自动化示例
+description: 携带 Cheese Android 设置页冒烟脚本的标准模块
+author: crawler4j
+upgrade_source:
+  type: github_release
+  repo: example/cheese_automation
+  allow_prerelease: false
+config_defaults:
+  module: {}

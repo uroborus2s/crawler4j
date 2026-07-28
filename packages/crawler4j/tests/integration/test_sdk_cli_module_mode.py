@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -13,6 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from crawler4j_contracts import TaskContext
 from crawler4j_sdk._version import (
     get_compatible_contracts_dependency_spec,
     get_compatible_sdk_dependency_spec,
@@ -146,6 +149,41 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     assert "demo_model/tasks/extra_task.py" in members
     assert "demo_model/workflows/repair_orders.py" in members
     assert "demo_model/module_runtime.py" not in members
+
+
+@pytest.mark.asyncio
+async def test_cheese_automation_example_packages_official_api_smoke_script(tmp_path: Path):
+    source = WORKSPACE_ROOT / "examples" / "cheese_automation"
+    target = tmp_path / "cheese_automation"
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns(".venv", "dist"))
+
+    check_result = _run_cli("check", "full", cwd=target)
+    assert check_result.returncode == 0, check_result.stdout + check_result.stderr
+
+    package_result = _run_cli("package", "build", cwd=target)
+    assert package_result.returncode == 0, package_result.stdout + package_result.stderr
+    archive = target / "dist" / "cheese_automation-0.1.0.zip"
+
+    verify_result = _run_cli("package", "verify", str(archive), cwd=target)
+    assert verify_result.returncode == 0, verify_result.stdout + verify_result.stderr
+
+    script = (target / "cheese" / "settings_smoke.js").read_text(encoding="utf-8")
+    assert "require('cheese-js')" in script
+    assert "device.getScreenWidth()" in script
+    assert "device.getScreenHeight()" in script
+    assert 'app.openApp("com.android.settings")' in script
+    assert "app.getForegroundPkg()" in script
+    assert "throw new Error" in script
+
+    workflow_module = runpy.run_path(str(target / "workflows" / "cheese_settings_smoke.py"))
+    result = await workflow_module["CheeseSettingsSmokeWorkflow"]().run(
+        TaskContext(env_id=0, task_name="cheese_settings_smoke")
+    )
+    assert result.success is True
+    assert Path(result.data["script_path"]).samefile(target / "cheese" / "settings_smoke.js")
+
+    with zipfile.ZipFile(archive) as zf:
+        assert "cheese_automation/cheese/settings_smoke.js" in zf.namelist()
 
 
 def test_cli_rejects_removed_commands(tmp_path: Path):
