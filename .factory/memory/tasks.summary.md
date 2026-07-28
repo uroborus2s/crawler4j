@@ -4,7 +4,7 @@
 
 ## 需要后续动作
 
-- `CR-024` / `TASK-044`：Cheese `core-native-v2` 示例模块、Android 设置页冒烟脚本和 ZIP 资源回归已实现；定向 `1 passed`、SDK 模块端到端 `12 passed`，full/package verify、Node 语法和 Ruff 通过；独立评审 `100/100`，待本地中文提交。
+- `CR-024` / `TASK-044`：Cheese `core-native-v2` 示例模块、Android 设置页冒烟脚本和 ZIP 资源回归已实现；定向 `1 passed`、SDK 模块端到端 `12 passed`，full/package verify、Node 语法和 Ruff 通过；独立评审 `100/100`，已提交 `f17b73b9`。
 - `CR-023` / `TASK-043`：root 0.4.40 已实现 `API-024 http.request` 与宿主 HTTP2/Brotli 依赖；定向 `152 passed`、全量 `1265 passed`，wheel 隔离安装和 macOS PyInstaller runtime smoke 通过；独立复评 `100/100`，宿主切片已中文本地提交。外部 ctrip 模块接线/真实 E2E、Windows smoke 为后续 gate。
 - `TASK-042`：Contracts 0.4.4 / SDK 0.4.5 已发布并通过在线哈希、依赖元数据和隔离安装验证；客户端 0.4.39 已构建；待最终 evidence commit 和 `origin/0.4.0` 推送。
 - `CR-022`：Hosted UI Form 能力、共享 label/input 网格和隐藏式滚动条已完成实现、TDD、独立 review 与本地提交；由 `TASK-042` 负责包发布。

@@ -4,7 +4,7 @@
 
 - 工作项：`CR-024`
 - 任务：`TASK-044`
-- 状态：`verification_passed`
+- 状态：`committed`
 - 类型：`implementation`
 - 流水账：`.factory/workitems/CR-024/ledger.jsonl`
 
@@ -31,4 +31,4 @@
 
 ## 当前 Gate
 
-`local_commit`
+`done`

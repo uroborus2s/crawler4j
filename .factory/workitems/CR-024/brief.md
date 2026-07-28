@@ -87,7 +87,7 @@
 
 - `work_item_id`：`CR-024`
 - `task_card_id`：`TASK-044`
-- `current_gate`：`local_commit`
+- `current_gate`：`done`
 - `write_policy`：`project_fact_write`
 - `allowed_paths`：
   - `.factory/workitems/CR-024/**`

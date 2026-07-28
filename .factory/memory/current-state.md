@@ -9,7 +9,7 @@
 
 | ID | 状态 | 下一动作 |
 | --- | --- | --- |
-| `CR-024` / `TASK-044` | `human_approved` | 本地中文提交 |
+| `CR-024` / `TASK-044` | `committed` | none |
 | `CR-023` / `TASK-043` | `host_slice_committed` | 外部 ctrip 改接与 Windows 发布门 |
 | `TASK-042` | `pypi_published_pending_remote_push` | 最终 evidence commit 并推送 `origin/0.4.0` |
 | `CR-022` | `core_packages_released` | none |
