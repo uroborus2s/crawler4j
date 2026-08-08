@@ -9,7 +9,7 @@
 
 | ID | 状态 | 下一动作 |
 | --- | --- | --- |
-| `CR-025` / `TASK-045` | `human_approved_pending_commit` | 使用 gitcommitzh 提交全部 CR-025 变更并推送 `origin/0.4.0` |
+| `CR-025` / `TASK-045` | `committed_pending_push` | 提交 `f3d2aceb` 已创建；推送 `origin/0.4.0` |
 | `CR-024` / `TASK-044` | `committed` | none |
 | `CR-023` / `TASK-043` | `host_slice_committed` | 外部 ctrip 改接与 Windows 发布门 |
 | `TASK-042` | `pypi_published_pending_remote_push` | 最终 evidence commit 并推送 `origin/0.4.0` |
