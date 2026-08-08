@@ -1,7 +1,7 @@
 # TASK-045 实现报告
 
 - Work item：`CR-025`
-- 状态：`committed_pending_push`
+- 状态：`remote_push_done`
 - 版本策略：客户端/Core `0.4.41`、Contracts `0.4.5`、SDK `0.4.6`；本轮不发布
 
 ## 实现
