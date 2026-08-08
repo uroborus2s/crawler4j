@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from crawler4j_contracts import EnvCandidateResult
 from src.core.atm.controller import JobController
 from src.core.atm.dispatcher import TaskDispatcher
 from src.core.atm.models import Job, JobState, JobType, Task, TaskStatus, TriggerConfig, TriggerType
@@ -425,7 +426,7 @@ async def test_count_candidate_capacity_uses_run_profile_context(monkeypatch):
         observed["config"] = context.config
         observed["runtime"] = dict(context.runtime)
         observed["params"] = dict(params or {})
-        return [1]
+        return EnvCandidateResult(candidates=[1], context={"city": "上海"})
 
     monkeypatch.setattr(
         controller_module,

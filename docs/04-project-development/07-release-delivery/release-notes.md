@@ -6,8 +6,8 @@
 **主要读者：** 发布负责人 | QA | 维护者  
 **上游输入：** Git tag | `docs/04-project-development/02-discovery/current-state-analysis.md` | 本地构建结果  
 **下游输出：** 后续正式 release notes | `delivery-package.md`（待需要时补齐）  
-**关联 ID：** `REL-001`, `REL-002`, `BUG-001`, `CR-001`, `CR-023`, `API-024`, `TC-071`
-**最后更新：** 2026-07-19
+**关联 ID：** `REL-001`, `REL-002`, `BUG-001`, `CR-001`, `CR-023`, `CR-025`, `API-007`, `API-024`, `TC-071`
+**最后更新：** 2026-08-08
 
 ## 1. 最新已知正式发布
 
@@ -19,11 +19,13 @@
 
 ## 2. 当前仓库相对正式发布的状态
 
-- 当前工作区根应用版本：`0.4.40`
-- 当前运行时版本：`0.4.40`
+- 当前工作区根应用版本：`0.4.41`
+- 当前运行时版本：`0.4.41`
 - 最近正式发布 tag：`v0.2.0`
 - SDK 当前已发布版本：`0.4.5`
 - Contracts 当前已发布版本：`0.4.4`
+- 根应用 0.4.41 支持同步/异步 `@env_candidates`、结构化 `EnvCandidateResult`，并把同次 JSON-safe context 注入 workflow
+- SDK / Contracts 待发布源码版本分别为 `0.4.6` / `0.4.5`
 - 根应用 0.4.40 新增 full runtime `ctx.tools.call("http.request")`，由 Core 统一实现 HTTP/2/Brotli 请求，模块不再直接 import 或安装 `httpx/h2/brotli`
 - 宿主依赖提升为 `httpx[http2,brotli]>=0.28.1`；uv lock、wheel METADATA、PyInstaller hidden imports 与 distribution metadata 已同步
 - 已按 `crawler4j-contracts 0.4.4 -> crawler4j-sdk 0.4.5` 顺序完成 PyPI 发布；在线文件哈希、SDK 依赖元数据和隔离安装均验证通过
@@ -34,27 +36,27 @@
 
 | 项目 | 结果 |
 |---|---|
-| 版本相关单测与打包配置 | 通过（2026-07-19 `API-024`、system/UI/packaging 与模块安装定向回归 `152 passed`，`uv lock --check` 通过） |
-| Root wheel/sdist build | 通过（2026-07-19 产出 `crawler4j 0.4.40` wheel/sdist；METADATA 含 `httpx[brotli,http2]>=0.28.1`） |
-| Root wheel 隔离安装 | 通过（全新 Python 3.12 venv 自动安装 `h2/hpack/hyperframe/brotli`，宿主诊断输出 `http2_client=ok`，full surface 存在 `http.request`） |
-| SDK wheel/sdist build | 通过（2026-07-15 产出 `crawler4j-sdk 0.4.5` wheel/sdist，元数据依赖 Contracts `>=0.4.4,<0.5.0`） |
+| 版本相关单测与打包配置 | 通过（2026-08-08 CR-025 功能与版本/打包定向 `320 passed`，`uv lock --check` 解析 85 个包） |
+| Root wheel/sdist build | 通过（2026-08-08 产出 `crawler4j 0.4.41` wheel/sdist；METADATA 依赖 Contracts `>=0.4.5,<0.5.0`） |
+| Root wheel 隔离安装 | 历史 `0.4.40` 通过（全新 Python 3.12 venv 自动安装 `h2/hpack/hyperframe/brotli`，宿主诊断输出 `http2_client=ok`，full surface 存在 `http.request`）；`0.4.41` 未执行完整隔离安装 |
+| SDK wheel/sdist build | 通过（2026-08-08 产出 `crawler4j-sdk 0.4.6` wheel/sdist，元数据依赖 Contracts `>=0.4.5,<0.5.0`）；PyPI 仍为 0.4.5 |
 | SDK publish | 通过（Contracts 0.4.4 在线可见且哈希一致后上传 0.4.5；在线哈希、依赖元数据和隔离安装通过） |
-| Contracts wheel/sdist build | 通过（2026-07-15 产出 `crawler4j-contracts 0.4.4` wheel/sdist） |
+| Contracts wheel/sdist build | 通过（2026-08-08 产出 `crawler4j-contracts 0.4.5` wheel/sdist）；PyPI 仍为 0.4.4 |
 | Contracts publish | 通过（先上传 0.4.4；在线 wheel/sdist 哈希与本地一致） |
 | Desktop PyInstaller / macOS | 通过（2026-07-19 本机 arm64 `Crawler4j.app` 重建；首轮冻结诊断暴露缺 httpx metadata，补齐五个 distribution metadata 后复建成功，输出 `http2_client=ok`） |
-| Full test / lint / smoke | 2026-07-19 全量 unit `1265 passed`；全仓 Ruff、`uv lock --check`、docs-stratego、JSON 与 `git diff --check` 通过 |
+| Full test / lint / smoke | 2026-08-08 全量 unit `1287 passed`、integration/acceptance `32 passed`；全仓 Ruff、`uv lock --check`、docs-stratego、JSON 与 `git diff --check` 通过；UI smoke 保留 2026-07-15 历史证据 |
 | Docs markdown tree | 通过（`docs-stratego source validate --repo-path .`，`pages=87 contracts=0`） |
 
 ## 4. 当前不建议直接发布的原因
 
-- `0.4.40` 已有本机 macOS PyInstaller app 证据，但签名 DMG/更新源、Windows 包、Git tag、正式 GitHub release 与交付批次仍待后续完成
+- `0.4.41` 已有 root wheel/sdist，但尚无桌面发布资产；`0.4.40` 的本机 macOS PyInstaller 证据不替代新版本签名 DMG/更新源、Windows 包、Git tag、正式 GitHub release 与交付批次
 - `ctrip_crawler` 外部仓库仍需把同步直连 `httpx` 的 transport 改接异步宿主 `http.request`；完成前不能声明真实房型请求 E2E 已修复
 - `ctrip` 真实站点 E2E 与正式 release closeout 仍未完成
 - Windows 真机签名、安装和自更新留证仍未完成
 
 ## 5. 下一版发布前必须满足
 
-- 按 [版本治理规则](version-governance.md) 复验 `0.4.40` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
+- 按 [版本治理规则](version-governance.md) 复验 `0.4.41` 仍是目标正式版本，且 README / 包描述 / release 文档不再混用旧口径
 - 更新 Git tag、正式 release notes 与交付批次说明
 - 决定真实站点 E2E 与 release closeout 的先后顺序，并完成至少一轮闭环
 - 至少复验 `uv run pytest -q`、根应用 smoke、Root / SDK / Contracts build
@@ -63,6 +65,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-08-08 | 根应用 / 运行时源码提升到 0.4.41，新增异步环境候选与同次候选 context；Contracts / SDK 源码提升到 0.4.5 / 0.4.6，三包本轮不发布 | Codex |
 | 2026-07-19 | 根应用提升到 0.4.40，新增宿主统一 `API-024 http.request` 与 HTTP/2/Brotli 发布门；wheel 隔离安装和 macOS PyInstaller 诊断通过，外部 ctrip 模块接线与 Windows 验证待完成 | Codex |
 | 2026-07-15 | 将 Contracts 提升并发布到 0.4.4、SDK 提升并发布到 0.4.5、根应用提升到 0.4.39；三包构建、产物元数据/哈希、PyPI 在线验证、隔离安装与质量门通过 | Codex |
 | 2026-07-15 | 完成 CR-022 Hosted UI 公共字段 change、Form scope、安全 handle、`ui.form.reset`、create default、长表单滚动、1–3 列响应式 Form 布局及共享 label/input 对齐线；Contracts 0.4.3 / SDK 0.4.4 版本保持不变，未发布 | Codex |

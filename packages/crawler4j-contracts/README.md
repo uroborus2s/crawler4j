@@ -1,6 +1,6 @@
 # crawler4j-contracts
 
-`crawler4j-contracts` 是 Core、SDK 与外部模块共享的稳定运行时契约包，当前源码版本基线为 `0.4.4`。
+`crawler4j-contracts` 是 Core、SDK 与外部模块共享的稳定运行时契约包，当前源码版本基线为 `0.4.5`。
 
 ## 包含内容
 
@@ -12,6 +12,7 @@
 - Hosted UI `Input` / `Select` 与 CRUD Form 字段支持可选 `on_change={"type":"ui_action","name":...}`；handler 接收 `HostedFieldChangeEvent`，Form scope 暴露短生命周期 opaque `form_id`，模块可主动调用 `ui.form.reset(form_id, initial_values)`
 - 提供 `core-native-v2` 装饰器：`@interface`、`@component`、`@workflow`、`@page`、`@page_action`、`@ui_action`、`@data_table`、`@data_view`、`@env_candidates`、`@env_cleanup_candidates`
 - 提供 `EnvCandidates` 链式环境候选查询 DSL，支持 `filter()`、`exclude()`、`intersect()`、`union()`、`minus()`、`order()`、`limit()` 与 `list(ctx)`
+- 提供 `EnvCandidateResult`，让同步或异步候选函数把候选集合与最多 64 KiB 的 JSON-safe context 作为一次结果返回；选中环境后 workflow 从 `TaskContext.candidate_context` 读取该 context
 - 提供对象装配注解 helper：`object_param(...)`、`object_inject(...)`。它们可用于 component 类属性或 `__init__` 参数注解，最终归一为 `ParameterSpec` / `InjectSpec`
 - `object_param(...)` 支持 `string/text/integer/number/boolean/enum/array/object/json/date/datetime/time/url/path/secret`，并可通过 `schema` / `item_schema` 描述 `object` 与 `array` 的结构；`Literal[...]`、`list[T]`、`dict[str, T]`、`Optional[T]`、`datetime` 类型和 `pathlib.Path` 可被运行时注解推断
 - `TaskSpec` / `WorkflowSpec` / `EnvSelectorSpec` / `PageSpec` 已从 contracts 包移除；0.4.x 模块只能使用 v2 装饰器声明运行能力和页面
@@ -25,4 +26,4 @@
 
 Hosted UI 用户按钮、CRUD handler 和表单提交使用 `@ui_action`；Hosted UI schema 不接受 `Button.action.type="page_action"`。DataTable CRUD handler 的 create/update/delete 入参必须是确定签名，`payload` 应使用模块自定义 `TypedDict` / dataclass 风格输入类型，不要用 `Mapping[str, Any]` 或裸 `dict`。浏览器页面自动化使用 `@page_action`，并由 workflow/component 通过 `ctx.run_page_action(...)` 调用。`@page_action` 不是内部拆分单元，不能在另一个 `@page_action` 中嵌套调用。
 
-非数据库类宿主能力继续通过 `TaskContext.tools` 调用。环境选择统一声明为 `candidates/*.py` 中的 `@env_candidates` 同步纯函数，账号状态、黑号、注册时间和会员等级等过滤由候选函数实时读取模块数据表完成，不使用资源池同步快照。需要被宿主识别为“已认领环境”的业务表必须通过 `@data_table(..., env_binding_field="env_id")` 声明绑定字段。批量环境清理候选统一声明为 `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数，复用 `EnvCandidates` 查询 DSL，但只表达已绑定且业务上可丢弃的 env id，实际删除由宿主环境管理页预览确认和安全校验后执行；模块 workflow 不能通过运行结果指定环境处置。workflow/component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 做终态收尾；`workflow` 为当前 workflow 元信息，`outcome.workflow` 保存同一份信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。
+非数据库类宿主能力继续通过 `TaskContext.tools` 调用。环境选择统一声明为 `candidates/*.py` 中的 `@env_candidates` 同步或异步只读函数；它可返回 env id 列表、`EnvCandidates` 或 `EnvCandidateResult`。候选 surface 只提供只读模块数据和宿主管理的异步 `http.request`，不提供浏览器或环境写入工具。结构化 context 经 JSON-safe/64 KiB 校验后，只在成功选中环境时注入 `TaskContext.candidate_context`；旧返回值、固定环境和创建环境路径为 `None`，空候选不启动 workflow。账号状态、黑号、注册时间和会员等级等过滤由候选函数实时读取模块数据表完成，不使用资源池同步快照。需要被宿主识别为“已认领环境”的业务表必须通过 `@data_table(..., env_binding_field="env_id")` 声明绑定字段。批量环境清理候选统一声明为 `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数，复用 `EnvCandidates` 查询 DSL，但只表达已绑定且业务上可丢弃的 env id，实际删除由宿主环境管理页预览确认和安全校验后执行；模块 workflow 不能通过运行结果指定环境处置。workflow/component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 做终态收尾；`workflow` 为当前 workflow 元信息，`outcome.workflow` 保存同一份信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。

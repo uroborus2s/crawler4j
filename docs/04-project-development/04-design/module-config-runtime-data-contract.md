@@ -53,10 +53,10 @@
 - 选择已有环境的运行模板支持两种方式：固定 `AcquisitionConfig.env_id`，或引用模块 `candidates/*.py` 中声明的 `@env_candidates`。
 - 固定 `env_id` 是默认交互，用于用户明确指定某个环境执行；执行链不会进入候选等待队列。
 - 宿主客户端的固定环境下拉只展示当前模块可用环境：`READY`、浏览器类型、无租约，且 `host.env_claim.owner_module` 为空或等于当前模块。
-- 环境候选必须在 `candidates/*.py` 中声明，入口是 `@env_candidates(name=...)` 同步纯函数。
+- 环境候选必须在 `candidates/*.py` 中声明，入口是同步或异步 `@env_candidates(name=...)` 只读函数。
 - `AcquisitionConfig.candidates` 只能引用当前模块已经声明过的候选函数。
-- 候选函数可以直接返回 env id 列表，也可以返回 `EnvCandidates` 链式查询对象。
-- 模块内账号状态、黑号状态、注册时间、会员等级等过滤条件必须写在候选纯函数或它组合调用的本模块纯函数中，通过 `ctx.db` 实时读取模块业务表。
+- 候选函数可以返回 env id 列表、`EnvCandidates` 链式查询，或携带 JSON-safe context 的 `EnvCandidateResult`；候选 surface 只提供只读 `ctx.db` 与 `http.request`。
+- 模块内账号状态、黑号状态、注册时间、会员等级等过滤条件必须写在候选只读函数或它组合调用的本模块函数中，通过 `ctx.db` 实时读取模块业务表。
 - `module.yaml.resource_pools[]`、`AcquisitionConfig.resource_pool`、资源池资格卡片和资源池同步工作流不再是 0.4.0 正式契约。
 
 ### 3.1.1 环境清理候选声明

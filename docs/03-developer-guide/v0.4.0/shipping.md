@@ -136,7 +136,7 @@ response = await ctx.tools.call(
 )
 ```
 
-返回值是宿主中立的 mapping，包含 `status_code`、保留重复项的 `headers`、已解码的 `content` bytes 和 `http_version`。模块负责检查业务状态码和解析业务 payload；`require_http2=True` 时宿主拒绝 HTTP/1.1 协议降级。该工具不在 Hosted UI 声明/只读面或环境候选面开放。
+返回值是宿主中立的 mapping，包含 `status_code`、保留重复项的 `headers`、已解码的 `content` bytes 和 `http_version`。模块负责检查业务状态码和解析业务 payload；`require_http2=True` 时宿主拒绝 HTTP/1.1 协议降级。该工具可用于 full runtime 和 `@env_candidates` 只读候选面，不在 Hosted UI 声明/只读面开放。
 
 `httpx[http2,brotli]`、`h2/hpack/hyperframe/brotli` 都是宿主内部实现依赖，不是模块公共依赖。`crawler4j-contracts` 是模块与 Core 的唯一公共契约包：
 
@@ -164,7 +164,7 @@ uv sync --all-packages
 uv run python -m src.ui.app --crawler4j-verify-http-runtime
 
 # 2. wheel 安装环境：先安装/升级新构建的宿主 wheel，再从该解释器运行
-uv pip install --upgrade /absolute/path/to/crawler4j-0.4.40-py3-none-any.whl
+uv pip install --upgrade /absolute/path/to/crawler4j-0.4.41-py3-none-any.whl
 python -m src.ui.app --crawler4j-verify-http-runtime
 
 # 3. PyInstaller 桌面发布物（macOS 示例）：必须安装新构建的整包

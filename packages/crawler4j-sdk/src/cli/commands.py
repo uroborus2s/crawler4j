@@ -1689,7 +1689,7 @@ def cmd_workflow_list(args: argparse.Namespace) -> int:
 
 
 def cmd_candidate_create(args: argparse.Namespace) -> int:
-    """Create a pure env candidate function under candidates/."""
+    """Create an env candidate function under candidates/."""
     module_root = require_module_root()
     name = str(args.name or "").strip()
     if not is_valid_name(name):
@@ -1713,7 +1713,7 @@ def cmd_candidate_create(args: argparse.Namespace) -> int:
 
 
 def cmd_candidate_list(args: argparse.Namespace) -> int:
-    """List pure env candidate functions in the current module."""
+    """List env candidate functions in the current module."""
     del args
     module_root = require_module_root()
     manifest = load_manifest(module_root)
@@ -2548,7 +2548,7 @@ def build_parser() -> argparse.ArgumentParser:
     candidate_sub = candidate_parser.add_subparsers(dest="action")
     candidate_create = candidate_sub.add_parser(
         "create",
-        help="创建 @env_candidates 同步纯函数",
+        help="创建 @env_candidates 候选函数（可改为 async）",
     )
     candidate_create.add_argument("name", help="候选函数名，snake_case")
     candidate_create.add_argument("--display-name", help="显示名")

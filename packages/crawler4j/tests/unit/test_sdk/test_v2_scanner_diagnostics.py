@@ -170,7 +170,7 @@ from crawler4j_contracts import env_candidates
 
 
 @env_candidates(name="ctrip_gold_old_account", label="携程高等级老账号")
-def ctrip_gold_old_account(params):
+async def ctrip_gold_old_account(params):
     return None
 """,
         encoding="utf-8",
@@ -204,6 +204,35 @@ def unused_accounts(ctx, params=None):
     }
     accounts = next(item for item in result.declarations if item.kind == "data_table")
     assert accounts.meta.storage_mode == "custom_table"
+    candidates = next(item for item in result.declarations if item.kind == "env_candidates")
+    assert candidates.target_kind == "async_function"
+
+
+def test_scan_v2_module_still_rejects_async_env_cleanup_candidates(tmp_path: Path):
+    module_root = _init_v2_module(tmp_path)
+    (module_root / "workflows" / "main.py").write_text(
+        "from crawler4j_contracts import workflow\n\n"
+        "@workflow(name='main_workflow')\n"
+        "class MainWorkflow:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    (module_root / "cleanups").mkdir(exist_ok=True)
+    (module_root / "cleanups" / "unused.py").write_text(
+        "from crawler4j_contracts import env_cleanup_candidates\n\n"
+        "@env_cleanup_candidates(name='unused')\n"
+        "async def unused():\n"
+        "    return []\n",
+        encoding="utf-8",
+    )
+
+    result = v2_scanner.scan_v2_module(module_root, _read_manifest(module_root))
+
+    assert [
+        diagnostic.code
+        for diagnostic in result.diagnostics
+        if diagnostic.code.startswith("V2_ENV_CLEANUP_CANDIDATES")
+    ] == ["V2_ENV_CLEANUP_CANDIDATES_INVALID_TARGET"]
 
 
 def test_scan_v2_module_rejects_module_flow_control_imports(tmp_path: Path):

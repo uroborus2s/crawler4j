@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, TypeAlias
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _FILTER_OPS = {"eq", "in", "gt", "gte", "lt", "lte", "between", "like", "is_null"}
 _SCOPE_RUNTIME_KEY = "_env_candidate_scope_ids"
+
+JSONValue: TypeAlias = None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
 
 
 @dataclass(frozen=True)
@@ -167,6 +169,14 @@ class EnvCandidates:
         for item in self.order_by_items:
             query = query.order_by(item["field"], item["direction"])
         return _ids_from_rows(query.execute(), self.env_field)
+
+
+@dataclass(frozen=True)
+class EnvCandidateResult:
+    """Environment candidates plus context for the selected workflow run."""
+
+    candidates: EnvCandidates | list[int] | tuple[int, ...] | set[int]
+    context: JSONValue = field(default=None, repr=False)
 
 
 def _conditions_from_kwargs(conditions: dict[str, Any]) -> tuple[dict[str, Any], ...]:

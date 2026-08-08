@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from crawler4j_contracts import EnvCandidate, TaskContext, TaskResult
+from crawler4j_contracts import EnvCandidate, EnvCandidateResult, JSONValue, TaskContext, TaskResult
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode, CreationLifecycle
 from src.core.atm.runtime_capabilities import (
@@ -181,6 +181,7 @@ class ExecutionRunner:
         task_context = None
         result: TaskResult | None = None
         effective_creation_params = deepcopy(request.creation_params)
+        candidate_context: JSONValue = None
 
         try:
             self._ensure_not_stopped(is_stop_requested)
@@ -210,7 +211,7 @@ class ExecutionRunner:
                     task.lease_id = env_lease.id
                     logger.info(f"[ATM] Task {task.id} selected fixed env {env_id}")
                 else:
-                    candidate_env_ids = await self._resolve_candidate_env_ids(
+                    candidate_env_ids, candidate_context = await self._resolve_candidate_env_result(
                         module_name=request.module_name,
                         context=acquisition_context,
                         candidates_name=request.candidates_name,
@@ -272,9 +273,6 @@ class ExecutionRunner:
                         still_allocatable = await self._is_candidate_env_allocatable(
                             env_id=selected_env_id,
                             module_name=request.module_name,
-                            context=acquisition_context,
-                            candidates_name=request.candidates_name,
-                            candidate_params=request.candidate_params,
                         )
                         if not still_allocatable:
                             logger.debug(
@@ -378,6 +376,7 @@ class ExecutionRunner:
                 db=runtime_caps.db,
                 state=dict(request.state),
                 runtime=self._build_runtime_payload(request),
+                candidate_context=deepcopy(candidate_context),
             )
             task_context.runtime.update(
                 {
@@ -544,14 +543,14 @@ class ExecutionRunner:
             candidates.append(self._to_env_candidate(env))
         return candidates
 
-    async def _resolve_candidate_env_ids(
+    async def _resolve_candidate_env_result(
         self,
         *,
         module_name: str,
         context: TaskContext,
         candidates_name: str,
         candidate_params: dict[str, Any],
-    ) -> list[int]:
+    ) -> tuple[list[int], JSONValue]:
         candidate_caps = build_runtime_capabilities(module_name, surface=RUNTIME_SURFACE_ENV_CANDIDATES)
         candidate_context = TaskContext(
             env_id=0,
@@ -565,32 +564,30 @@ class ExecutionRunner:
         )
         resolver = getattr(self.mms, "resolve_env_candidates_async", None)
         if callable(resolver):
-            return await resolver(
+            result = await resolver(
                 module_name,
                 candidate_context,
                 candidates_name,
                 candidate_params,
                 timeout=CANDIDATE_EVALUATION_TIMEOUT_SECONDS,
             )
-        return self.mms.resolve_env_candidates(module_name, candidate_context, candidates_name, candidate_params)
+        else:
+            result = self.mms.resolve_env_candidates(
+                module_name,
+                candidate_context,
+                candidates_name,
+                candidate_params,
+            )
+        if isinstance(result, EnvCandidateResult):
+            return [int(env_id) for env_id in result.candidates], result.context
+        return [int(env_id) for env_id in result], None
 
     async def _is_candidate_env_allocatable(
         self,
         *,
         env_id: int,
         module_name: str,
-        context: TaskContext,
-        candidates_name: str,
-        candidate_params: dict[str, Any],
     ) -> bool:
-        candidate_env_ids = await self._resolve_candidate_env_ids(
-            module_name=module_name,
-            context=context,
-            candidates_name=candidates_name,
-            candidate_params=candidate_params,
-        )
-        if int(env_id) not in {int(candidate_id) for candidate_id in candidate_env_ids}:
-            return False
         if await self._is_env_fingerprint_validation_risk(int(env_id)):
             return False
         return await self._is_env_candidate_authorized(int(env_id), module_name)

@@ -25,6 +25,7 @@
 - `env_candidates`
 - `env_cleanup_candidates`
 - `EnvCandidates`
+- `EnvCandidateResult`
 - `crawler4j_contracts.hosted_ui` 中的 Hosted UI schema/helper
 
 `TaskSignal`、`TaskSignalAction`、`EnvAction` 已退出模块运行时代码入口；SDK scanner 会阻断模块导入这些名字。`crawler4j-sdk` 不导出运行时 owner、`TaskScript`、`TaskFlow`、`ModuleAssembler`、旧环境选择器或资源池 helper。
@@ -127,12 +128,12 @@ workflow 和 component 可选实现 `setup(ctx, workflow)` 做运行前准备，
 ```toml
 [project]
 dependencies = [
-  "crawler4j-contracts>=0.4.4,<0.5.0",
+  "crawler4j-contracts>=0.4.5,<0.5.0",
 ]
 
 [dependency-groups]
 dev = [
-  "crawler4j-sdk>=0.4.5,<0.5.0",
+  "crawler4j-sdk>=0.4.6,<0.5.0",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
 ]
@@ -142,4 +143,8 @@ CLI 脚手架生成的 `pyproject.toml` 会默认写入同样的兼容范围。
 
 ## 开发辅助
 
-SDK 仍保留 `crawler4j_sdk.context.DefaultHttpClient` 作为本地开发辅助。模块运行时代码不得依赖 `crawler4j-sdk`；数据库唯一入口为 `ctx.db`。标准页面交互走 `ctx.tools.call("browser.*", ...)`，例如 `browser.goto`、`browser.click`、`browser.type`、`browser.drag`、`browser.scroll`；`ctx.page` 主要保留给读取标题、HTML、locator 状态或宿主尚未抽象的浏览器能力。环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，可以直接返回 env id 列表，也可以返回 `EnvCandidates` 链式查询；不要维护资源池同步快照。模块账号或业务表若要认领环境，必须在 `@data_table(..., env_binding_field="env_id")` 中声明绑定字段。批量环境清理候选写在 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数中，复用同一个 `EnvCandidates` DSL，但不复用运行候选入口；模块只声明已绑定且业务上可丢弃的 env id，宿主负责预览、确认、二次校验和删除。单次 workflow 结束、失败、超时或被用户中止后的环境统一由宿主回收，模块不得发送环境处置指令。
+SDK 仍保留 `crawler4j_sdk.context.DefaultHttpClient` 作为本地开发辅助。模块运行时代码不得依赖 `crawler4j-sdk`；数据库唯一入口为 `ctx.db`。标准页面交互走 `ctx.tools.call("browser.*", ...)`，例如 `browser.goto`、`browser.click`、`browser.type`、`browser.drag`、`browser.scroll`；`ctx.page` 主要保留给读取标题、HTML、locator 状态或宿主尚未抽象的浏览器能力。
+
+环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步或异步只读函数。它可返回 env id 列表、`EnvCandidates`，或 `EnvCandidateResult(candidates=..., context=...)`；异步候选可 await `ctx.tools.call("http.request", ...)`，但没有浏览器或环境写入工具。结构化 `context` 必须是最多 64 KiB 的 JSON-safe 数据；Core 只执行一次本次候选计算，并在成功选定环境后通过 `TaskContext.candidate_context` 把同一 context 交给 workflow 的 `setup` / `run`。旧返回值、固定 `env_id` 和创建环境路径的 `candidate_context` 为 `None`；候选为空时不运行 workflow。不要维护资源池同步快照。模块账号或业务表若要认领环境，必须在 `@data_table(..., env_binding_field="env_id")` 中声明绑定字段。
+
+批量环境清理候选写在 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数中，复用同一个 `EnvCandidates` DSL，但不复用运行候选入口；模块只声明已绑定且业务上可丢弃的 env id，宿主负责预览、确认、二次校验和删除。单次 workflow 结束、失败、超时或被用户中止后的环境统一由宿主回收，模块不得发送环境处置指令。

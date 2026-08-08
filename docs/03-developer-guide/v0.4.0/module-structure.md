@@ -56,14 +56,14 @@ hotel_demo/
 | `tasks/` | `@page_action` | 页面操作目录。v2 里的 `tasks/` 只承载 workflow/component 通过 `ctx.run_page_action(...)` 调用的浏览器页面动作，例如打开页面、点击按钮、读取 DOM 或抓包。它不再表示 v1 `TaskSpec` 任务，也不再承载 Hosted UI 按钮/CRUD 用户操作。 |
 | `data/` | `@data_table`、`@data_view` | 数据契约目录。这里声明模块实体表、托管快照表和只读视图。`@data_table` 默认是 `custom_table`，旧快照语义必须显式写 `storage_mode="managed_dataset"`；`@data_view` 只允许引用 `custom_table` 并由宿主创建只读 SQLite view；运行时代码通过 `ctx.db` 读写表或读取视图，不能把数据契约再写回 `module.yaml.data`、`data/sql` 或 `data/seeds`。 |
 | `pages/` | `@page`、`@ui_action` | Hosted UI 页面目录。这里声明仪表盘、列表页、详情页等宿主页 schema、菜单状态、load/query handler 和 UI 用户操作。可平铺为 `pages/*.py`，也可用一层业务分组 `pages/<group>/*.py`；是否出现在左侧菜单只由 `@page(menu=True)` 决定。 |
-| `candidates/` | `@env_candidates` | 环境候选目录。这里放同步纯函数，返回可用于运行的 env id 列表或 `EnvCandidates` 链式查询。Core 每次调度实时求值，模块不维护资源池同步快照，也不直接处置环境生命周期。 |
+| `candidates/` | `@env_candidates` | 环境候选目录。这里放同步或异步只读函数，返回 env id 列表、`EnvCandidates`，或携带 JSON-safe context 的 `EnvCandidateResult`。Core 每次选择只调用一次，模块不维护资源池同步快照，也不直接处置环境生命周期。 |
 | `cleanups/` | `@env_cleanup_candidates` | 环境清理候选目录。这里放同步纯函数，只表达“模块认为已绑定且业务上可丢弃”的环境候选。真正删除由宿主环境管理页预览、确认和二次安全校验后执行，模块函数不直接删除环境。 |
 
 这些固定目录是 SDK 扫描、manifest lock、DevLink、打包和宿主安装共同依赖的入口。目录内部可以按业务拆成多个 `.py` 文件；除 `pages/<group>/*.py` 支持一层页面分组外，其他能力建议保持直接、可扫读的文件组织。
 
 0.4.x SDK 不生成 `hooks/`、`env_selectors/`、`data/sql` 或 `data/seeds` 作为运行能力事实源。当前分支只支持 0.4.0 的 `core-native-v2` 主路径，旧目录需要在 0.3.x 分支维护。
 
-环境选择统一写在 `candidates/` 下。模块开发者只实现 `@env_candidates` 同步纯函数，函数可以直接返回 env id 列表，也可以返回 `EnvCandidates` 链式查询。Core 每次调度都会实时求值，不要求模块同步或物化资源池。
+环境选择统一写在 `candidates/` 下。`@env_candidates` 可以是同步或异步只读函数，返回 env id 列表、`EnvCandidates`，或 `EnvCandidateResult(candidates=..., context=...)`。异步函数可调用候选 surface 的宿主 `http.request`；其余浏览器和环境写入工具不可用。context 必须是 compact UTF-8 JSON 不超过 64 KiB；选中环境后，Core 把同一次结果注入 `TaskContext.candidate_context`。固定环境、创建环境、旧返回值和空候选均不产生 workflow candidate context。
 
 批量环境清理统一写在 `cleanups/` 下。模块开发者只实现 `@env_cleanup_candidates` 同步纯函数，函数同样可以返回 env id 列表或 `EnvCandidates` 链式查询。宿主环境管理页点击 `清理环境` 后会统一收集孤岛环境、模块未认领环境、owner 模块缺失环境和模块清理候选，生成预览清单、提示确认，并只删除当前仍满足安全条件的环境。
 

@@ -28,7 +28,7 @@
 | `REQ-008` | `ctx.db` 是否暴露独立审计事件 API | 通过 | `test_runtime_tools_register_expected_surface`、`test_runtime_ctx_db_audit_uses_independent_audit_table`、`test_task_context_db_supports_audit_event_plan` |
 | `REQ-008` | 模块清理时是否同时清理快照数据、审计事件和数据表 schema | 通过 | `test_module_data_store_clear_module_data_removes_data_db_rows_only` |
 | `REQ-009` | 是否已存在正式的需求、设计与工作项挂接 | 通过 | `prd.md`、`atm-resource-pool-queue-design.md`、`implementation-plan.md`、`TASK-023` |
-| `REQ-009` | 环境候选 Service Job 是否已具备“运行中 + 等待中 = 目标并发”的正式行为 | 通过 | 当前已由本地单测验证 `@env_candidates` 候选纯函数、等待语义、FIFO 补位、模块环境授权、租约后复核、等待席位自动超时收口与旧 `resource_pool/selector_name/env_selector` 字段拒绝 |
+| `REQ-009` | 环境候选 Service Job 是否已具备“运行中 + 等待中 = 目标并发”的正式行为 | 通过 | 当前已由本地单测验证同步/异步 `@env_candidates`、结构化 context、等待语义、FIFO 补位、模块环境授权、租约后宿主复核、等待席位自动超时收口与旧 `resource_pool/selector_name/env_selector` 字段拒绝 |
 | `REQ-010` | 是否已存在 Hosted UI 批量导入的正式需求、设计和任务拆分 | 通过 | `prd.md`、`hosted-ui-batch-import-design.md`、`implementation-plan.md`、`.factory/workitems/changes/CR-016-hosted-ui-batch-import.md` |
 | `REQ-010` | 宿主 toolbar、自定义导入按钮、导入弹窗、payload 分发和结果展示是否已有代码实现证据 | 通过 | 已实现 Contracts / SDK / Core / UI 代码，并由 `TC-060` 覆盖 toolbar schema、解析、分发、结果展示和明细页跳转 |
 | `NFR-010` | 文件类型 / 大小 / 最大行数限制和敏感字段脱敏是否已有自动化测试 | 通过 | `test_hosted_import.py` 已覆盖 `.xlsx/.csv`、剪贴板、文件类型、文件大小、最大行数、重复表头和敏感字段脱敏 |

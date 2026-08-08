@@ -232,10 +232,12 @@ async def test_execution_runner_preserves_blank_workflow_for_v2_descriptor_resol
     )
     runner, _ = _build_runner(env, lease, module_service)
 
-    await runner.run(request)
+    execution_result = await runner.run(request)
 
     assert request.task.status == TaskStatus.SUCCEEDED
     assert contexts[0].runtime["workflow"] == ""
+    assert execution_result.task_context is not None
+    assert execution_result.task_context.candidate_context is None
 
 
 def _write_runtime_module_fixture(base_dir: Path, module_name: str) -> Path:
@@ -476,7 +478,7 @@ async def test_execution_runner_selects_first_ready_env_without_module_selector(
     async def on_task_update(task: Task):
         updates.append((task.status, task.message))
 
-    await runner.run(request, on_task_update=on_task_update)
+    execution_result = await runner.run(request, on_task_update=on_task_update)
 
     rem.list_envs.assert_awaited_once()
     rem.lease_manager.acquire.assert_awaited_once_with(env, request.task.id, timeout=60)
@@ -486,6 +488,8 @@ async def test_execution_runner_selects_first_ready_env_without_module_selector(
     rem.release.assert_awaited_once_with(lease)
     rem.destroy_env.assert_not_awaited()
     assert request.task.status == TaskStatus.SUCCEEDED
+    assert execution_result.task_context is not None
+    assert execution_result.task_context.candidate_context is None
     assert updates[:2] == [(TaskStatus.PENDING, "环境启动中"), (TaskStatus.RUNNING, "")]
 
 
@@ -500,7 +504,7 @@ async def test_execution_runner_selects_fixed_env_without_module_selector():
     )
     runner, rem = _build_runner(env, lease, module_service)
 
-    await runner.run(request)
+    execution_result = await runner.run(request)
 
     rem.get_env.assert_any_await(env.id)
     assert rem.get_env.await_count == 2
@@ -508,6 +512,8 @@ async def test_execution_runner_selects_fixed_env_without_module_selector():
     rem.lease_manager.acquire.assert_awaited_once_with(env, request.task.id, timeout=60)
     module_service.run_module.assert_awaited_once()
     assert request.task.status == TaskStatus.SUCCEEDED
+    assert execution_result.task_context is not None
+    assert execution_result.task_context.candidate_context is None
 
 
 @pytest.mark.asyncio

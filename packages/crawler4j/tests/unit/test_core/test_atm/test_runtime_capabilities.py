@@ -268,12 +268,13 @@ def test_runtime_tools_register_hosted_ui_readonly_surface():
         caps.tools.call("ui.unknown", key="cursor", value=1)
 
 
-def test_runtime_tools_register_env_candidates_surface_as_readonly_toolless(temp_data_dir):
+def test_runtime_tools_register_env_candidates_surface_with_readonly_http(temp_data_dir):
     _sync_managed_dataset(temp_data_dir, module_name="demo_module", resource_id="accounts")
 
     caps = build_runtime_capabilities("demo_module", surface=RUNTIME_SURFACE_ENV_CANDIDATES)
 
-    assert caps.tools.list_tools() == []
+    specs = caps.tools.list_tools()
+    assert [(spec.name, spec.is_async) for spec in specs] == [("http.request", True)]
     assert caps.db.from_("accounts").limit(10).execute() == []
     with pytest.raises(RuntimeError, match="不允许写入"):
         caps.db.into("accounts").replace([])

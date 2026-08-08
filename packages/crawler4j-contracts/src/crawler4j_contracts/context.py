@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
+from crawler4j_contracts.candidate_query import JSONValue
 from crawler4j_contracts.database import DatabaseClient
 from crawler4j_contracts.result import TaskResult
 
@@ -214,6 +215,7 @@ class TaskContext:
 
     state: dict[str, Any] = field(default_factory=dict)
     runtime: dict[str, Any] = field(default_factory=dict)
+    candidate_context: JSONValue = field(default=None, repr=False)
 
     _stop_requested: bool = field(default=False, repr=False)
     _page_action_executor: Callable[..., Any] | None = field(default=None, repr=False)

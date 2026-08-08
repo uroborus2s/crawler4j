@@ -168,8 +168,8 @@ def _build_v2_descriptor(entries: list[V2RuntimeEntry]) -> ModuleRuntimeDescript
         elif kind == "data_view":
             _add_v2_entry(data_views, entry, label="data_view")
         elif kind == "env_candidates":
-            if not inspect.isfunction(entry.target) or inspect.iscoroutinefunction(entry.target):
-                raise RuntimeError(f"{entry.owner} 的 env_candidates {entry.meta.name} 必须是同步纯函数")
+            if not inspect.isfunction(entry.target):
+                raise RuntimeError(f"{entry.owner} 的 env_candidates {entry.meta.name} 必须是同步或异步函数")
             _add_v2_entry(env_candidates, entry, label="env_candidates")
         elif kind == "env_cleanup_candidates":
             if not inspect.isfunction(entry.target) or inspect.iscoroutinefunction(entry.target):

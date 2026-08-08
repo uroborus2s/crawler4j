@@ -12,32 +12,32 @@
     "tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit -q -p no:cacheprovider",
       "result": "passed",
-      "details": "1265 passed on 2026-07-19 for crawler4j 0.4.40, including API-024 host HTTP tool, runtime dependency, packaging and existing module installation regressions"
+      "details": "1287 passed on 2026-08-08 for crawler4j 0.4.41 / Contracts 0.4.5 / SDK 0.4.6; CR-025 focused functionality and packaging tests passed 320 tests, with related integration and acceptance passing 32 tests"
     },
     "docs": {
       "command": "uvx --from docs-stratego docs-stratego source validate --repo-path .",
       "result": "passed",
-      "details": "passed on 2026-07-19 with pages=87 contracts=0"
+      "details": "passed on 2026-08-08 with pages=87 contracts=0"
     },
     "lint": {
       "command": "uv run ruff check .",
       "result": "passed",
-      "details": "uv run ruff check . passed on 2026-07-19 for crawler4j 0.4.40 / Contracts 0.4.4 / SDK 0.4.5; historical manual/debug/verify/analyze scripts remain excluded from the default lint gate"
+      "details": "uv run ruff check . passed on 2026-08-08 for crawler4j 0.4.41 / Contracts 0.4.5 / SDK 0.4.6; historical manual/debug/verify/analyze scripts remain excluded from the default lint gate"
     },
     "root_build": {
-      "command": "uv run build crawler4j",
+      "command": "uv build --package crawler4j --out-dir /tmp/cr025-root-build",
       "result": "passed",
-      "details": "crawler4j 0.4.40 wheel/sdist built on 2026-07-19; wheel METADATA contains httpx[brotli,http2]>=0.28.1 and an isolated Python 3.12 install automatically installed h2/hpack/hyperframe/brotli"
+      "details": "crawler4j 0.4.41 wheel/sdist built on 2026-08-08; wheel METADATA requires crawler4j-contracts>=0.4.5,<0.5.0. Isolated root installation and desktop packaging remain historical 0.4.40 evidence"
     },
     "sdk_build": {
-      "command": "uv run publish crawler4j-sdk",
+      "command": "uv build --package crawler4j-sdk --out-dir /tmp/cr025-sdk-build",
       "result": "passed",
-      "details": "crawler4j-sdk 0.4.5 published to PyPI on 2026-07-15 after Contracts 0.4.4; online hashes, dependency metadata and isolated PyPI installation passed"
+      "details": "crawler4j-sdk 0.4.6 wheel/sdist built locally on 2026-08-08; METADATA requires Contracts >=0.4.5,<0.5.0. Published PyPI version remains 0.4.5"
     },
     "contracts_build": {
-      "command": "uv run publish crawler4j-contracts",
+      "command": "uv build --package crawler4j-contracts --out-dir /tmp/cr025-contracts-build",
       "result": "passed",
-      "details": "crawler4j-contracts 0.4.4 published to PyPI on 2026-07-15; JSON API returned both files with matching hashes and isolated installation passed"
+      "details": "crawler4j-contracts 0.4.5 wheel/sdist built locally on 2026-08-08 and its isolated public API smoke passed. Published PyPI version remains 0.4.4"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",
@@ -157,11 +157,11 @@
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.4.40",
-    "runtime": "0.4.40",
+    "app_package_pyproject": "0.4.41",
+    "runtime": "0.4.41",
     "git_tag_latest": "v0.2.0",
-    "sdk": "0.4.5",
-    "contracts": "0.4.4"
+    "sdk": "0.4.6",
+    "contracts": "0.4.5"
   },
   "entrypoints": {
     "actual_ui_entry": "uv run python -m src.ui.app",

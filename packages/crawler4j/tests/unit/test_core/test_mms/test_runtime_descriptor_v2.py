@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sys
 import threading
 from pathlib import Path
@@ -172,6 +173,17 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
                 def unused_accounts(ctx, params=None):
                     return []
             """,
+            "candidates/ready_accounts.py": """
+                from crawler4j_contracts import EnvCandidateResult, env_candidates
+
+                calls = 0
+
+                @env_candidates(name="ready_accounts", label="可用账号")
+                async def ready_accounts(ctx, params=None):
+                    global calls
+                    calls += 1
+                    return EnvCandidateResult(candidates=[21], context={"city": "上海"})
+            """,
         },
     )
 
@@ -192,6 +204,7 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
         assert descriptor.data_tables["accounts"].meta.kind == "data_table"
         assert descriptor.data_views["account_overview"].meta.sources == ("accounts",)
         assert descriptor.env_cleanup_candidates["unused_accounts"].meta.kind == "env_cleanup_candidates"
+        assert inspect.iscoroutinefunction(descriptor.env_candidates["ready_accounts"].target)
         assert descriptor.implementations == {
             "labor": ("api_labor",),
             "orchestrator": ("quiz_orchestrator",),
@@ -203,6 +216,7 @@ def test_load_runtime_descriptor_v2_scans_decorators_without_instantiating(tmp_p
         assert sys.modules[f"{module_name}.objects.api_labor"].created == 0
         assert sys.modules[f"{module_name}.objects.quiz_orchestrator"].created == 0
         assert sys.modules[f"{module_name}.workflows.quiz"].created == 0
+        assert sys.modules[f"{module_name}.candidates.ready_accounts"].calls == 0
     finally:
         purge_module_namespace(module_name)
 

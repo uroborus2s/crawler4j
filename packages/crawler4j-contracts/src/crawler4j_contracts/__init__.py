@@ -19,7 +19,7 @@ from crawler4j_contracts.context import (
     ToolSpec,
     ToolsCapability,
 )
-from crawler4j_contracts.candidate_query import EnvCandidates
+from crawler4j_contracts.candidate_query import EnvCandidateResult, EnvCandidates, JSONValue
 from crawler4j_contracts.database import DatabaseClient, DatabaseExecutor
 from crawler4j_contracts.decorators import (
     CRAWLER4J_META_ATTR,
@@ -182,6 +182,7 @@ __all__ = [
     "data_view",
     "env_cleanup_candidates",
     "env_candidates",
+    "EnvCandidateResult",
     "EnvCandidates",
     "interface",
     "object_inject",
@@ -197,6 +198,7 @@ __all__ = [
     "WorkflowLifecycleInfo",
     "HttpClient",
     "ImageInput",
+    "JSONValue",
     "BBox",
     "Point",
     "ToolSpec",
