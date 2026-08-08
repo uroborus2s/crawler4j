@@ -34,7 +34,7 @@
 | macOS 桌面包 | 已补齐 0.4.40 本机验证包 | 2026-07-19 `uv run package-desktop` 已重新生成 `packages/crawler4j/dist/desktop/macos/Crawler4j.app` 并通过 HTTP/2/Brotli 运行时诊断；尚未生成 0.4.40 签名 DMG/更新源资产 |
 | macOS 内部 Sparkle 更新包 | 已补齐 0.4.16 内部更新包 | 2026-06-19 已删除远端旧 `Crawler4j-0.4.16.dmg`，重新生成并上传 `packages/crawler4j/dist/updates/macos/Crawler4j-0.4.16.dmg` 与 `appcast.xml` 到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/mac/`；公网 DMG `HEAD 200`，SHA256 为 `8463f4982ea4948a2151a7061449fc8a3fd9152848b37197a35504efb1f04243` |
 | Windows 桌面包 | 已具备发布脚手架，待正式批次补齐证据 | 仓库已具备 `PyInstaller onedir + Velopack` 发布链，`uv run package-windows-release` 可生成 `Setup.exe` / `.nupkg` / `releases.<channel>.json`，`uv run deploy-windows-release` 可继续通过 OpenSSH `sftp` 把 `packages/crawler4j/dist/updates/windows/` 上传到 `CRAWLER4J_UPDATE_UPLOAD_TARGET/win/`；但当前批次仍缺 Windows 真机签名、安装、升级留证与正式下载地址 |
-| 正式交付产物 | 部分补齐 | 根应用源码与 root wheel/sdist 已提升到 0.4.41，SDK 0.4.6 / Contracts 0.4.5 已本地构建但未发布；PyPI 仍为 SDK 0.4.5 / Contracts 0.4.4，wheel 隔离安装和 macOS arm64 PyInstaller HTTP 运行时仍是 0.4.40 历史证据；签名桌面升级包、Git tag / GitHub release、Windows 真机安装/升级证据和正式交付签收仍需补齐 |
+| 正式交付产物 | 部分补齐 | 根应用源码与 root wheel/sdist 已提升到 0.4.41；SDK 0.4.6 / Contracts 0.4.5 已发布到 PyPI 并通过隔离安装。wheel 隔离安装和 macOS arm64 PyInstaller HTTP 运行时仍是 0.4.40 历史证据；签名桌面升级包、Git tag / GitHub release、Windows 真机安装/升级证据和正式交付签收仍需补齐 |
 
 ## 4. 使用规则
 

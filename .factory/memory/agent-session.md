@@ -5,16 +5,16 @@
 - 阶段：IMPLEMENTATION
 - Work item：`CR-025`
 - Task：`TASK-045`
-- 状态：`remote_push_done`
+- 状态：`release_records_pending_commit`
 
 ## 项目位置
 
 - 项目整体进度：当前任务已完成实现与预评审验证；项目仍处于 IMPLEMENTATION
 - 当前任务：环境候选异步与候选 context 通用能力
 - 已完成：功能实现与复评、客户端版本 RED/GREEN、三包源码版本和本地构建
-- 正在执行：无；CR-025 已提交并推送
-- 停止原因：任务完成
-- 唯一下一动作：无；包和桌面资产发布需后续单独授权
+- 正在执行：发布记录回写
+- 停止原因：无
+- 唯一下一动作：提交发布记录并合并到 `main`
 
 ## 已读取上下文
 

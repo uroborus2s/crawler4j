@@ -23,6 +23,10 @@
 | 客户端版本 GREEN | `uv run pytest packages/crawler4j/tests/unit/test_sdk/test_packaging_config.py -q -p no:cacheprovider` | `65 passed` |
 | Root build | `uv build --package crawler4j --out-dir /tmp/cr025-root-build` | `crawler4j-0.4.41` wheel/sdist 构建成功；METADATA 依赖 Contracts `>=0.4.5,<0.5.0` |
 | 客户端版本独立复评 | `/root/cr025_plan_review` 只读增量复评 | `99/100`，Critical/Important 为 0；唯一日期 Minor 已修 |
+| PR | GitHub PR #58（`0.4.0` → `main`） | 已合并，merge commit `c5e0788f` |
+| Contracts 发布 | `uv publish` 后查询 PyPI JSON | `0.4.5` wheel/sdist SHA-256 与本地构建一致 |
+| SDK 发布 | Contracts 上线后 `uv publish` 并查询 PyPI JSON | `0.4.6` 依赖 Contracts `>=0.4.5,<0.5.0`，wheel/sdist SHA-256 与本地构建一致 |
+| PyPI 隔离安装 | 新 venv 安装 `crawler4j-sdk==0.4.6` | 自动解析 Contracts `0.4.5`；公开 API smoke 通过 |
 
 全量首轮的单一失败来自既有 `test_http_tools.py` 仍断言 candidate surface 不得含 HTTP；这是本次公共契约变化的相邻测试，更新后相邻与全量均通过。
 
